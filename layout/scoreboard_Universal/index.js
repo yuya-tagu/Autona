@@ -13,6 +13,7 @@ LoadEverything().then(() => {
   const scores = { p1Score, p2Score };
 
   Start = async () => {
+    gsap.set("body", { opacity: 0 });
     startingAnimation.restart();
   };
 
@@ -28,11 +29,8 @@ LoadEverything().then(() => {
 
       if (!isTeams) {
         await renderPlayerInfo(t, team, player);
-        document.querySelector(`.p${side}.bg`).classList.add("unhidden");
         adaptColorsForTheme(t);
       } else {
-        document.querySelector(`.p${side}.bg`).classList.remove("unhidden");
-        document.querySelector(`.p${side}.light`)?.classList.remove("unhidden");
         await renderTeamInfo(t, team);
         adaptColorsForTheme(t);
       }

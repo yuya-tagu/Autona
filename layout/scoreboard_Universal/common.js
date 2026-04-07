@@ -217,7 +217,6 @@ function adaptColorsForTheme(t) {
   setRule(stylesheet, `.p${side} .score`, "text-shadow", shadow);
   setRule(stylesheet, `.p${side}.container`, "filter", filter);
   setRule(stylesheet, `.p${side}.score_container`, "filter", filter);
-  setRule(stylesheet, `.p${side}.under_chips`, "filter", filter);
 
   if (lightEl) {
     lightEl.classList.toggle("unhidden", showLight);
@@ -247,13 +246,15 @@ async function displayMatchPhase() {
   const sb = data.score[window.scoreboardNumber];
   const phase = sb.phase || "";
   const match = sb.match || "";
-  const hasInfo = phase || match;
+  const tournamentName = data.tournamentInfo?.tournamentName || "";
+  const hasInfo = phase || match || tournamentName;
 
+  document.querySelector(".tournament_name").textContent = tournamentName;
   document.querySelector(".phase_label").textContent = phase;
   document.querySelector(".match_label").textContent = match;
   document.querySelector(".round_separator").textContent = (phase && match) ? "|" : "";
 
-  gsap.to(".round_info", { duration: 0.5, opacity: hasInfo ? 1 : 0 });
+  gsap.to(".round_info", { duration: 0.5, autoAlpha: hasInfo ? 1 : 0 });
 }
 
 async function renderPlayerInfo(t, team, player) {
@@ -322,19 +323,5 @@ async function renderTeamInfo(t, team) {
 
 function buildStartingAnimation() {
   return gsap.timeline({ paused: true })
-    .from([".fade"], { duration: 0.2, autoAlpha: 0, ease: "power2.out" }, 0)
-    .from(
-      [".p1.under_chips .fade_stagger_reverse:not(.text_empty)",
-       ".p1.chips .fade_stagger_reverse:not(.text_empty)"],
-      { autoAlpha: 0, stagger: { each: 0.05, from: "start" }, duration: 0.2 }, 0
-    )
-    .from(
-      [".p2.under_chips .fade_stagger_reverse:not(.text_empty)",
-       ".p2.chips .fade_stagger_reverse:not(.text_empty)"],
-      { autoAlpha: 0, stagger: { each: 0.05, from: "start" }, duration: 0.2 }, 0
-    )
-    .from([".fade_down"], { duration: 0.2, y: "-20px", ease: "power2.out", autoAlpha: 0 }, 0)
-    .from([".fade_right"], { duration: 0.2, x: "-20px", ease: "power2.out", autoAlpha: 0 }, 0)
-    .from([".fade_left"], { duration: 0.2, x: "+20px", ease: "power2.out", autoAlpha: 0 }, 0)
-    .from([".fade_up"], { duration: 0.2, y: "+20px", ease: "power2.out", autoAlpha: 0 }, 0);
+    .to("body", { duration: 0.5, opacity: 1, ease: "power2.out" }, 0);
 }

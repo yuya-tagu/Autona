@@ -45,8 +45,8 @@
  * Keep in sync with: src/TSHScoreboardWidget.py, stage_strike_app/src/themes.js
  */
 :root {
-  --font: "RobotoCondensed";
-  --font-jp: "NotoSans";
+  --font: "LINE Seed JP", sans-serif;
+  --font-jp: "LINE Seed JP", sans-serif;
   --border-radius: 16px;
   --text-color: #ffffff;
   --bg-color: #121212;
