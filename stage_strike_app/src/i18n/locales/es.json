@@ -1,0 +1,22 @@
+{
+    "title": "Stage Strike",
+    "initial_explanation": "Juega piedra, papel o tijera elegir quien inicia el Stage Strike, o usa el botón de sorteo.",
+    "player_won": "{{player}} ganó",
+    "randomize": "Sorteo",
+    "confirm": "confirmar",
+    "report_results": "Informar Resultados",
+    "rock_paper_scissors": "Piedra, Papel o Tijera",
+    "p1": "Jugador 1",
+    "p2": "Jugador 2",
+    "select_a_stage_prompt": "{{player}}, selecciona un stage",
+    "ban_prompt": "{{player}}, elimina {{val}} stage(s)",
+    "no_ruleset_error": "Reglas no seleccionadas. Notificar a producción o organizadores para seleccionar las reglas.",
+    "game": "Partido {{value}}",
+    "best_of": "Mejor de {{value}}",
+    "restart_all": "Restabelecer todo",
+    "gentlemans": "Acuerdo",
+    "gentlemans_pick": "Elegir en acuerdo",
+    "gentlemans_prompt": "{{gentlemans_pick}}: selecciona un stage",
+    "undo": "Deshacer",
+    "redo": "Rehacer"
+}

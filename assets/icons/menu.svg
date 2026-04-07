@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   height="24px"
+   viewBox="0 0 24 24"
+   width="24px"
+   fill="#FFFFFF"
+   version="1.1"
+   id="svg6"
+   sodipodi:docname="menu.svg"
+   inkscape:version="1.1.2 (76b9e6a115, 2022-02-25)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs10" />
+  <sodipodi:namedview
+     id="namedview8"
+     pagecolor="#505050"
+     bordercolor="#eeeeee"
+     borderopacity="1"
+     inkscape:pageshadow="0"
+     inkscape:pageopacity="0"
+     inkscape:pagecheckerboard="0"
+     showgrid="false"
+     inkscape:snap-global="false"
+     inkscape:zoom="20.75"
+     inkscape:cx="12"
+     inkscape:cy="12"
+     inkscape:window-width="1850"
+     inkscape:window-height="1016"
+     inkscape:window-x="70"
+     inkscape:window-y="27"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg6" />
+  <path
+     id="path4-3"
+     sodipodi:type="inkscape:offset"
+     inkscape:radius="1.1962111"
+     inkscape:original="M 3 6 L 3 8 L 21 8 L 21 6 L 3 6 z M 3 11 L 3 13 L 21 13 L 21 11 L 3 11 z M 3 16 L 3 18 L 21 18 L 21 16 L 3 16 z "
+     d="M 3,4.8046875 A 1.1963307,1.1963307 0 0 0 1.8046875,6 V 8 A 1.1963307,1.1963307 0 0 0 3,9.1953125 H 21 A 1.1963307,1.1963307 0 0 0 22.195312,8 V 6 A 1.1963307,1.1963307 0 0 0 21,4.8046875 Z m 0,5 A 1.1963307,1.1963307 0 0 0 1.8046875,11 v 2 A 1.1963307,1.1963307 0 0 0 3,14.195312 H 21 A 1.1963307,1.1963307 0 0 0 22.195312,13 V 11 A 1.1963307,1.1963307 0 0 0 21,9.8046875 Z M 3,14.804688 A 1.1963307,1.1963307 0 0 0 1.8046875,16 v 2 A 1.1963307,1.1963307 0 0 0 3,19.195312 H 21 A 1.1963307,1.1963307 0 0 0 22.195312,18 V 16 A 1.1963307,1.1963307 0 0 0 21,14.804688 Z"
+     style="fill:#000000;fill-opacity:1"
+     transform="matrix(1.0684599,0,0,1.0684599,-0.82151899,-0.82151899)" />
+  <path
+     d="M0 0h24v24H0V0z"
+     fill="none"
+     id="path2" />
+  <path
+     d="M 2.3838608,18.41076 H 21.616139 V 16.27384 H 2.3838608 Z m 0,-5.3423 H 21.616139 V 10.93154 H 2.3838608 Z m 0,-7.4792195 V 7.7261603 H 21.616139 V 5.5892405 Z"
+     id="path4"
+     style="stroke-width:1.06846" />
+</svg>
