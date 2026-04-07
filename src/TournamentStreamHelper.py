@@ -8,6 +8,7 @@ import faulthandler
 import shutil
 import zipfile
 import qdarktheme
+from . import ui_constants as UI
 import requests
 import json
 import orjson
@@ -103,7 +104,7 @@ logger.add(
 
 try:
     # Setting the icon for individual windows doesn't work on mac (and perhaps linux? unknown)
-    App.setWindowIcon(QIcon("assets/icons/icon.png"))
+    App.setWindowIcon(QIcon(UI.icon_path("icon.png")))
 except:
     logger.opt(exception=True).warning("Could not set window icon for QApplication.")
 
@@ -336,7 +337,7 @@ class Window(QMainWindow):
         self.savedProgramState = {}
         self.programStateDiff = {}
 
-        self.setWindowIcon(QIcon('assets/icons/icon.png'))
+        self.setWindowIcon(QIcon(UI.icon_path('icon.png')))
 
         if not os.path.exists("out/"):
             os.mkdir("out/")
@@ -347,8 +348,14 @@ class Window(QMainWindow):
         if os.path.exists("./TSH_old.exe"):
             os.remove("./TSH_old.exe")
 
-        self.font_small = QFont(
-            "./assets/font/RobotoCondensed.ttf", pointSize=8)
+        for weight in ('Regular', 'Medium', 'Bold'):
+            QFontDatabase.addApplicationFont(
+                f'./assets/font/NotoSansJP/NotoSansJP-{weight}.ttf')
+        app_font = QFont(UI.FONT_FAMILY, UI.FONT_SM)
+        QApplication.instance().setFont(app_font)
+
+        self.font_small = QFont(UI.FONT_FAMILY_CONDENSED, UI.FONT_XS)
+        QFontDatabase.addApplicationFont('./assets/font/RobotoCondensed.ttf')
 
         self.threadpool = QThreadPool()
         self.saveMutex = QMutex()
@@ -401,7 +408,7 @@ class Window(QMainWindow):
             self.dockWidgets.append(thumbnailSetting)
 
         bracket = TSHBracketWidget()
-        bracket.setWindowIcon(QIcon('assets/icons/info.svg'))
+        bracket.setWindowIcon(QIcon(UI.icon_path('info.svg')))
         bracket.setObjectName(
             QApplication.translate("app", "Bracket"))
         self.addDockWidget(
@@ -409,7 +416,7 @@ class Window(QMainWindow):
         self.dockWidgets.append(bracket)
 
         tournamentInfo = TSHTournamentInfoWidget()
-        tournamentInfo.setWindowIcon(QIcon('assets/icons/info.svg'))
+        tournamentInfo.setWindowIcon(QIcon(UI.icon_path('info.svg')))
         tournamentInfo.setObjectName(
             QApplication.translate("app", "Tournament Info"))
         self.addDockWidget(
@@ -417,7 +424,7 @@ class Window(QMainWindow):
         self.dockWidgets.append(tournamentInfo)
 
         # teamBattle = TSHTeamBattleWidget()
-        # teamBattle.setWindowIcon(QIcon('assets/icons/info.svg'))
+        # teamBattle.setWindowIcon(QIcon(UI.icon_path('info.svg')))
         # teamBattle.setObjectName(
         #     QApplication.translate("app", "Crew/Team Battle"))
         # self.addDockWidget(
@@ -425,7 +432,7 @@ class Window(QMainWindow):
         # self.dockWidgets.append(teamBattle)
 
         self.scoreboard = TSHScoreboardManager.instance
-        self.scoreboard.setWindowIcon(QIcon('assets/icons/list.svg'))
+        self.scoreboard.setWindowIcon(QIcon(UI.icon_path('list.svg')))
         self.scoreboard.setObjectName(
             QApplication.translate("app", "Scoreboard Manager"))
         self.addDockWidget(
@@ -442,7 +449,7 @@ class Window(QMainWindow):
         self.dockWidgets.append(self.stageWidget)
 
         commentary = TSHCommentaryWidget()
-        commentary.setWindowIcon(QIcon('assets/icons/mic.svg'))
+        commentary.setWindowIcon(QIcon(UI.icon_path('mic.svg')))
         commentary.setObjectName(QApplication.translate("app", "Commentary"))
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, commentary)
         self.dockWidgets.append(commentary)
@@ -455,7 +462,7 @@ class Window(QMainWindow):
         self.stageWidget.stageStrikeLogic.signals.state_updated.connect(self.webserver.ws_ruleset)
 
         playerList = TSHPlayerListWidget()
-        playerList.setWindowIcon(QIcon('assets/icons/list.svg'))
+        playerList.setWindowIcon(QIcon(UI.icon_path('list.svg')))
         playerList.setObjectName(QApplication.translate("app", "Player List"))
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, playerList)
         self.dockWidgets.append(playerList)
@@ -475,6 +482,17 @@ class Window(QMainWindow):
         self.tabifyDockWidget(self.scoreboard, bracket)
         self.tabifyDockWidget(self.scoreboard, notes)
         self.scoreboard.raise_()
+
+        for dw in self.dockWidgets:
+            dw.setMinimumWidth(0)
+            # Call via class to avoid shadowing by instance attrs (e.g. TSHCommentaryWidget.widget)
+            inner = QDockWidget.widget(dw)
+            if inner:
+                inner.setMinimumWidth(0)
+                inner.setSizePolicy(
+                    QSizePolicy.Ignored, inner.sizePolicy().verticalPolicy())
+
+        self.setMinimumWidth(480)
 
         # Game
         base_layout = QHBoxLayout()
@@ -498,7 +516,7 @@ class Window(QMainWindow):
         self.unsetTournamentBt = QPushButton()
         self.unsetTournamentBt.setSizePolicy(
             QSizePolicy.Maximum, QSizePolicy.Maximum)
-        self.unsetTournamentBt.setIcon(QIcon("./assets/icons/cancel.svg"))
+        self.unsetTournamentBt.setIcon(QIcon(UI.icon_path('cancel.svg')))
         self.unsetTournamentBt.clicked.connect(lambda: [
             TSHTournamentDataProvider.instance.SetTournament(None)
         ])
@@ -511,9 +529,9 @@ class Window(QMainWindow):
 
             self.btLoadPlayerSet = QPushButton(
                 QApplication.translate("app", "Load tournament and sets from StartGG user"))
-            self.btLoadPlayerSet.setIcon(QIcon("./assets/icons/startgg.svg"))
+            self.btLoadPlayerSet.setIcon(QIcon(UI.icon_path('startgg.svg')))
             self.btLoadPlayerSet.clicked.connect(self.LoadUserSetClicked)
-            self.btLoadPlayerSet.setIcon(QIcon("./assets/icons/startgg.svg"))
+            self.btLoadPlayerSet.setIcon(QIcon(UI.icon_path('startgg.svg')))
             hbox.addWidget(self.btLoadPlayerSet)
 
             TSHTournamentDataProvider.instance.signals.user_updated.connect(
@@ -525,7 +543,7 @@ class Window(QMainWindow):
             self.btLoadPlayerSetOptions.setSizePolicy(
                 QSizePolicy.Maximum, QSizePolicy.Maximum)
             self.btLoadPlayerSetOptions.setIcon(
-                QIcon("./assets/icons/settings.svg"))
+                QIcon(UI.icon_path('settings.svg')))
             self.btLoadPlayerSetOptions.clicked.connect(
                 self.LoadUserSetOptionsClicked)
             hbox.addWidget(self.btLoadPlayerSetOptions)
@@ -537,7 +555,7 @@ class Window(QMainWindow):
         group_box.layout().addLayout(hbox)
         self.btPullCompletedSets = QPushButton(
             QApplication.translate("app", "Pull Latest Completed Sets from StartGG"))
-        self.btPullCompletedSets.setIcon(QIcon("./assets/icons/startgg.svg"))
+        self.btPullCompletedSets.setIcon(QIcon(UI.icon_path('startgg.svg')))
         self.btPullCompletedSets.clicked.connect(TSHTournamentDataProvider.instance.GetCompletedSets)
         hbox.addWidget(self.btPullCompletedSets)
         # label_margin = " "*18
@@ -553,7 +571,7 @@ class Window(QMainWindow):
         # self.btStopSetsPull = QPushButton()
         # self.btStopSetsPull.setSizePolicy(
         #     QSizePolicy.Maximum, QSizePolicy.Maximum)
-        # self.btStopSetsPull.setIcon(QIcon("./assets/icons/cancel.svg"))
+        # self.btStopSetsPull.setIcon(QIcon(UI.icon_path('cancel.svg')))
         # hbox.addWidget(self.btStopSetsPull)
 
         TSHTournamentDataProvider.instance.signals.tournament_changed.connect(
@@ -567,15 +585,15 @@ class Window(QMainWindow):
         # Settings
         menu_margin = " "*6
         self.optionsBt = QToolButton()
-        self.optionsBt.setIcon(QIcon('assets/icons/menu.svg'))
+        self.optionsBt.setIcon(QIcon(UI.icon_path('menu.svg')))
         self.optionsBt.setToolButtonStyle(
             Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.optionsBt.setPopupMode(QToolButton.InstantPopup)
         base_layout.addWidget(self.optionsBt)
         self.optionsBt.setSizePolicy(
             QSizePolicy.Maximum, QSizePolicy.Maximum)
-        self.optionsBt.setFixedSize(QSize(32, 32))
-        self.optionsBt.setIconSize(QSize(32, 32))
+        self.optionsBt.setFixedSize(QSize(UI.ICON_MD, UI.ICON_MD))
+        self.optionsBt.setIconSize(QSize(UI.ICON_MD, UI.ICON_MD))
         menu = QMenu()
         self.optionsBt.setMenu(menu)
         action = menu.addAction(
@@ -585,11 +603,11 @@ class Window(QMainWindow):
         action = self.optionsBt.menu().addAction(
             QApplication.translate("app", "Check for updates"))
         self.updateAction = action
-        action.setIcon(QIcon('assets/icons/undo.svg'))
+        action.setIcon(QIcon(UI.icon_path('undo.svg')))
         action.triggered.connect(self.CheckForUpdates)
         action = self.optionsBt.menu().addAction(
             QApplication.translate("app", "Download assets"))
-        action.setIcon(QIcon('assets/icons/download.svg'))
+        action.setIcon(QIcon(UI.icon_path('download.svg')))
         action.triggered.connect(lambda: TSHAssetDownloader.instance.DownloadAssets(self))
         self.downloadAssetsAction = action
 
@@ -619,7 +637,7 @@ class Window(QMainWindow):
 
         # action = self.optionsBt.menu().addAction(
         #     QApplication.translate("LayoutOptions", "Layout Options"))
-        # action.setIcon(QIcon('assets/icons/settings.svg'))
+        # action.setIcon(QIcon(UI.icon_path('settings.svg')))
         # action.triggered.connect(lambda: self.layoutOptions.show())
 
         action = self.optionsBt.menu().addAction(
@@ -781,13 +799,13 @@ class Window(QMainWindow):
 
         action = self.optionsBt.menu().addAction(
             QApplication.translate("Settings", "Settings"))
-        action.setIcon(QIcon('assets/icons/settings.svg'))
+        action.setIcon(QIcon(UI.icon_path('settings.svg')))
         action.triggered.connect(lambda: self.settingsWindow.show())
 
         self.aboutWidget = TSHAboutWidget()
         action = self.optionsBt.menu().addAction(
             QApplication.translate("About", "About"))
-        action.setIcon(QIcon('assets/icons/info.svg'))
+        action.setIcon(QIcon(UI.icon_path('info.svg')))
         action.triggered.connect(lambda: self.aboutWidget.show())
 
         # Game Select and Scoreboard Count
@@ -1163,17 +1181,18 @@ class Window(QMainWindow):
 
     def ToggleLightMode(self, checked):
         if checked:
-            qdarktheme.setup_theme("light")
+            qdarktheme.setup_theme("light", additional_qss=UI.GLOBAL_QSS)
         else:
-            qdarktheme.setup_theme()
+            qdarktheme.setup_theme(additional_qss=UI.GLOBAL_QSS)
 
         SettingsManager.Set("light_mode", checked)
+        UI.notify_theme_change()
 
     def LoadTheme(self):
         if SettingsManager.Get("light_mode", False):
-            qdarktheme.setup_theme("light")
+            qdarktheme.setup_theme("light", additional_qss=UI.GLOBAL_QSS)
         else:
-            qdarktheme.setup_theme()
+            qdarktheme.setup_theme(additional_qss=UI.GLOBAL_QSS)
 
     def ToggleTopOption(self):
         if not SettingsManager.Get("general.hide_track_player", False):

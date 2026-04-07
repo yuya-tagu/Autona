@@ -1,18 +1,4 @@
-/* ─── Theme Configuration ─────────────────────────────────────
-   --theme-color    : tournament branding base
-   --accent-color   : highlights (team name, round label)
-   --bevel-light    : top/left highlight (auto from theme)
-   --bevel-dark     : bottom/right shadow  (auto from theme)
-   Game boxes use --p1/p2-score-bg-color (team colors).
-   ───────────────────────────────────────────────────────────── */
-:root {
-  --theme-color: #3b4252;
-  --accent-color: #f0a500;
-  --bevel-light: color-mix(in srgb, var(--theme-color), white 35%);
-  --bevel-dark:  color-mix(in srgb, var(--theme-color), black 25%);
-  --tile-radius: 6px;
-  --tile-gap: 5px;
-}
+/* Theme variables inherited from ../main.css */
 
 /* ─── Base ──────────────────────────────────────────────────── */
 body {
@@ -132,7 +118,6 @@ body {
   text-align: center;
   width: 100%;
   font-size: 48px;
-  text-shadow: 0em 0em 0.2em #000;
 }
 
 .p1.score_container { left: 829px; color: var(--p1-score-color); }
@@ -153,8 +138,8 @@ body {
 }
 
 /* Tile width = container(421) − flag area(55) − gap(5) = 361 */
-.p1.chips, .p1.under_chips { left: 444px; width: 320px; padding-left: 10px; }
-.p2.chips, .p2.under_chips { right: 444px; width: 320px; flex-direction: row-reverse; padding-right: 10px; }
+.p1.chips, .p1.under_chips { left: 444px; width: 320px; padding: 0 10px; }
+.p2.chips, .p2.under_chips { right: 444px; width: 320px; flex-direction: row-reverse; padding: 0 10px; }
 
 /* under_chips: semi-transparent tile background */
 .under_chips {
@@ -186,23 +171,6 @@ body {
 
 .under_chips .text { color: transparent !important; text-shadow: none !important; }
 .under_chips .chip .text:not(.text_empty) { color: transparent; background: transparent; }
-
-/* Groove separators between chips */
-.chips .chip + .chip::before {
-  content: "";
-  display: inline-block;
-  width: 2px;
-  height: 18px;
-  margin-right: 4px;
-  vertical-align: middle;
-  background: linear-gradient(
-    to bottom,
-    transparent,
-    var(--bevel-dark) 20%,
-    var(--bevel-light) 80%,
-    transparent
-  );
-}
 
 /* Hide flagcountry from chip flow — positioned separately */
 .chips .flagcountry.chip,

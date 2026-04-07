@@ -13,7 +13,12 @@
       LoadEverything().then(() => {
         gsap.config({ nullTargetWarn: false, trialWarn: false });
         Start = async () => {};
-        Update = async (event) => {};
+        Update = async (event) => {
+          const ti = event.data.tournamentInfo || {};
+          if (ti.themeColor) {
+            document.documentElement.style.setProperty("--theme-color", ti.themeColor);
+          }
+        };
       });
     </script>
   </body>

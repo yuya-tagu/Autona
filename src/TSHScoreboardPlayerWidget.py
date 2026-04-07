@@ -10,13 +10,21 @@ from .Helpers.TSHCountryHelper import TSHCountryHelper
 from .Helpers.TSHSponsorHelper import TSHSponsorHelper
 from .StateManager import StateManager
 from .TSHGameAssetManager import TSHGameAssetManager
-from .Helpers.TSHControllerHelper import TSHControllerHelper
 from .TSHPlayerDB import TSHPlayerDB
 from .Helpers.TSHDirHelper import TSHResolve
+from . import ui_constants as UI
 from .Workers import Worker
 import threading
 from .Helpers.TSHBadWordFilter import TSHBadWordFilter
 from loguru import logger
+
+
+class NoIconProxyModel(QSortFilterProxyModel):
+    """Proxy model that strips icons (DecorationRole) from the source model."""
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if role == Qt.ItemDataRole.DecorationRole:
+            return None
+        return super().data(index, role)
 
 
 class TSHScoreboardPlayerWidgetSignals(QObject):
@@ -25,6 +33,7 @@ class TSHScoreboardPlayerWidgetSignals(QObject):
     player2Id_changed = Signal()
     player_seed_changed = Signal()
     dataChanged = Signal()
+
 
 
 class TSHScoreboardPlayerWidget(QGroupBox):
@@ -49,15 +58,65 @@ class TSHScoreboardPlayerWidget(QGroupBox):
         self.losers = False
 
         uic.loadUi(TSHResolve("src/layout/TSHScoreboardPlayer.ui"), self)
-        
-        self.LoadControllers()
 
+        # Apply grid spacing from UI constants
+        grid = self.layout()
+        grid.setContentsMargins(UI.SPACE_SM, UI.SPACE_SM, UI.SPACE_SM, UI.SPACE_SM)
+        grid.setHorizontalSpacing(UI.SPACE_SM)
+        grid.setVerticalSpacing(UI.SPACE_SM)
+        for i in range(grid.count()):
+            item = grid.itemAt(i)
+            if not item:
+                continue
+            if not item.layout():
+                continue
+            item.layout().setContentsMargins(0, 0, 0, 0)
+            item.layout().setSpacing(UI.SPACE_SM)
+
+        # Theme-aware styles
+        readonly_style = UI.readonly_style()
+        disabled_style = UI.disabled_style()
+
+        seed = self.findChild(QSpinBox, "seed")
+        seed.setReadOnly(True)
+        seed.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        seed.setStyleSheet(readonly_style)
+
+        pronoun = self.findChild(QLineEdit, "pronoun")
+        pronoun.setReadOnly(True)
+        pronoun.setStyleSheet(readonly_style)
+
+        twitter = self.findChild(QLineEdit, "twitter")
+        twitter.setReadOnly(True)
+        twitter.setStyleSheet(readonly_style)
+        twitter.setPlaceholderText("@")
+
+        # Hide unused UI elements
+        self.findChild(QLabel, "twitterLabel").setVisible(False)
+        self.findChild(QCheckBox, "birthday").setVisible(False)
+        seedRow = self.findChild(QHBoxLayout, "horizontalLayout")
+        twitter.setParent(None)
+        seedRow.addWidget(twitter)
+
+        country = self.findChild(QComboBox, "country")
+        country.setEnabled(False)
+        country.setStyleSheet(disabled_style)
+        state = self.findChild(QComboBox, "state")
+        state.setEnabled(False)
+        state.setStyleSheet(disabled_style)
+
+        # Keep track of themed widgets for refresh_theme_styles
+        self._themed_readonly = [seed, pronoun, twitter]
+        self._themed_disabled = [country, state]
+
+        # Custom textbox
         custom_textbox_layout = QHBoxLayout()
+        custom_textbox_layout.setContentsMargins(0, 0, 0, 0)
         self.custom_textbox = QPlainTextEdit()
         custom_textbox_layout.addWidget(self.custom_textbox)
         self.layout().addLayout(custom_textbox_layout, 98, 2, 1, 1)
         self.custom_textbox.setObjectName("custom_textbox")
-        self.custom_textbox.setMaximumHeight(100)
+        self.custom_textbox.setFixedHeight(36)
         self.custom_textbox.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         self.custom_textbox.setPlaceholderText(QApplication.translate("app", "Additional information"))
         self.custom_textbox.textChanged.connect(
@@ -81,9 +140,7 @@ class TSHScoreboardPlayerWidget(QGroupBox):
 
         self.save_bt = QPushButton(
             QApplication.translate("app", "Save new player"))
-        self.save_bt.setFont(QFont(self.save_bt.font().family(), 9))
-        # self.save_bt.setFont(self.parent.font_small)
-        self.save_bt.setIcon(QIcon('assets/icons/save.svg'))
+        self.save_bt.setIcon(QIcon(UI.icon_path("save.svg")))
         bottom_buttons_layout.addWidget(self.save_bt)
         self.save_bt.clicked.connect(self.SavePlayerToDB)
         self.findChild(QLineEdit, "name").editingFinished.connect(
@@ -94,36 +151,34 @@ class TSHScoreboardPlayerWidget(QGroupBox):
 
         self.delete_bt = QPushButton(
             QApplication.translate("app", "Delete player entry"))
-        # self.delete_bt.setFont(self.parent.font_small)
-        self.delete_bt.setIcon(QIcon('assets/icons/cancel.svg'))
-        bottom_buttons_layout.addWidget(self.delete_bt)
-        self.delete_bt.setFont(QFont(self.delete_bt.font().family(), 9))
+        self.delete_bt.setIcon(QIcon(UI.icon_path("cancel.svg")))
         self.delete_bt.setEnabled(False)
-        self.findChild(QLineEdit, "name").editingFinished.connect(
-            self.ManageDeletePlayerFromDBActive)
-        self.findChild(QLineEdit, "team").editingFinished.connect(
-            self.ManageDeletePlayerFromDBActive)
         self.delete_bt.clicked.connect(self.DeletePlayerFromDB)
         self.delete_bt.setMinimumWidth(1)
+        if self.path.startswith("score."):
+            self.delete_bt.hide()
+        else:
+            bottom_buttons_layout.addWidget(self.delete_bt)
+            self.findChild(QLineEdit, "name").editingFinished.connect(
+                self.ManageDeletePlayerFromDBActive)
+            self.findChild(QLineEdit, "team").editingFinished.connect(
+                self.ManageDeletePlayerFromDBActive)
 
         self.clear_bt = QPushButton(QApplication.translate("app", "Clear"))
-        self.clear_bt.setFont(QFont(self.clear_bt.font().family(), 9))
-        # self.clear_bt.setFont(self.parent.font_small)
-        self.clear_bt.setIcon(QIcon('assets/icons/undo.svg'))
+        self.clear_bt.setIcon(QIcon(UI.icon_path("undo.svg")))
         bottom_buttons_layout.addWidget(self.clear_bt)
         self.clear_bt.clicked.connect(self.Clear)
         self.clear_bt.setMinimumWidth(1)
 
         # Move up/down
         titleContainer = self.findChild(QHBoxLayout, "titleContainer")
-        titleContainer.setSpacing(4)
         self.btMoveUp = QPushButton()
-        self.btMoveUp.setFixedSize(24, 24)
-        self.btMoveUp.setIcon(QIcon("./assets/icons/arrow_up.svg"))
+        self.btMoveUp.setFixedSize(UI.BTN_SM, UI.BTN_SM)
+        self.btMoveUp.setIcon(QIcon(UI.icon_path("arrow_up.svg")))
         titleContainer.addWidget(self.btMoveUp)
         self.btMoveDown = QPushButton()
-        self.btMoveDown.setFixedSize(24, 24)
-        self.btMoveDown.setIcon(QIcon("./assets/icons/arrow_down.svg"))
+        self.btMoveDown.setFixedSize(UI.BTN_SM, UI.BTN_SM)
+        self.btMoveDown.setIcon(QIcon(UI.icon_path("arrow_down.svg")))
         titleContainer.addWidget(self.btMoveDown)
 
         self.SetIndex(index, teamNumber)
@@ -142,15 +197,14 @@ class TSHScoreboardPlayerWidget(QGroupBox):
                         f"{self.path}.{element.objectName() if element.objectName() != 'qt_spinbox_lineedit' else element.parent().objectName()}", element.text()),
                     self.instanceSignals.dataChanged.emit()
                 ])
-        
-        seed = self.findChild(QSpinBox, "seed")
+
         seed.valueChanged.connect(
             lambda value: StateManager.Set(f"{self.path}.seed", value)
         )
         seed.valueChanged.connect(
             lambda value: self.instanceSignals.player_seed_changed.emit()
         )
-        
+
         seed.setValue(0)
         seed.valueChanged.emit(seed.value())
 
@@ -182,7 +236,7 @@ class TSHScoreboardPlayerWidget(QGroupBox):
         self.findChild(QLineEdit, "pronoun").setCompleter(
             self.pronoun_completer)
         self.pronoun_list = []
-        for file in ['./user_data/pronouns_list.txt']:
+        for file in ('./user_data/pronouns_list.txt',):
             try:
                 with open(file, 'r') as f:
                     for l in f.readlines():
@@ -201,6 +255,13 @@ class TSHScoreboardPlayerWidget(QGroupBox):
     def deleteLater(self):
         self._deleted = True
         super().deleteLater()
+
+    def refresh_theme_styles(self):
+        """Re-apply theme-aware styles after light/dark mode toggle."""
+        for w in self._themed_readonly:
+            w.setStyleSheet(UI.readonly_style())
+        for w in self._themed_disabled:
+            w.setStyleSheet(UI.disabled_style())
 
     def ComboBoxIndexChanged(self, element: QComboBox):
         StateManager.Set(
@@ -309,13 +370,14 @@ class TSHScoreboardPlayerWidget(QGroupBox):
                 f"{self.path}.online_avatar", onlineAvatar)
 
             # Local avatar
-            if os.path.exists(f"./user_data/player_avatar/{merged}.png"):
+            localPath = f"./user_data/player_avatar/{merged}.png"
+            if os.path.exists(localPath):
                 StateManager.Set(
-                    f"{self.path}.avatar", f"./user_data/player_avatar/{merged}.png")
+                    f"{self.path}.avatar", localPath)
             else:
                 StateManager.Set(
                     f"{self.path}.avatar", None)
-            
+
             TSHSponsorHelper.ExportValidSponsors(team, self.path)
 
     def ExportPlayerId(self, id=None):
@@ -410,45 +472,37 @@ class TSHScoreboardPlayerWidget(QGroupBox):
             player_character.view().setMinimumWidth(60)
             player_character.completer().setCompletionMode(QCompleter.PopupCompletion)
             player_character.completer().popup().setMinimumWidth(250)
-            player_character.setModel(
-                TSHGameAssetManager.instance.characterModel)
-            player_character.setIconSize(QSize(24, 24))
+            proxy = NoIconProxyModel(player_character)
+            proxy.setSourceModel(TSHGameAssetManager.instance.characterModel)
+            player_character.setModel(proxy)
+            player_character.setIconSize(QSize(0, 0))
             player_character.setFixedHeight(32)
-            player_character.setFont(
-                QFont(player_character.font().family(), 9))
-            player_character.lineEdit().setFont(QFont(player_character.font().family(), 9))
 
             player_character_color = QComboBox()
             character_element.layout().addWidget(player_character_color)
-            player_character_color.setIconSize(QSize(48, 48))
+            player_character_color.setIconSize(QSize(16, 16))
             player_character_color.setFixedHeight(32)
-            player_character_color.setMinimumWidth(64)
-            player_character_color.setMaximumWidth(120)
-            player_character_color.setFont(
-                QFont(player_character_color.font().family(), 9))
+            player_character_color.setMinimumWidth(48)
+            player_character_color.setMaximumWidth(80)
             view = QListView()
-            view.setIconSize(QSize(128, 128))
+            view.setIconSize(QSize(24, 24))
             player_character_color.setView(view)
             player_character_color.setEditable(True)
             player_character_color.completer().setFilterMode(Qt.MatchFlag.MatchContains)
             player_character_color.completer().setCompletionMode(QCompleter.PopupCompletion)
-            # self.player_character_color.activated.connect(self.CharacterChanged)
-            # self.CharacterChanged()
 
             # Add variant
             player_variant = QComboBox()
             player_variant.setObjectName("variants")
             character_element.layout().addWidget(player_variant)
-            player_variant.setIconSize(QSize(24, 24))
+            player_variant.setIconSize(QSize(UI.ICON_SM, UI.ICON_SM))
             player_variant.setFixedHeight(32)
             player_variant.setMinimumWidth(60)
             player_variant.setMaximumWidth(120)
-            player_variant.setFont(
-                QFont(player_variant.font().family(), 9))
             player_variant.setModel(
                 TSHGameAssetManager.instance.variantModel)
             view = QListView()
-            view.setIconSize(QSize(24, 24))
+            view.setIconSize(QSize(UI.ICON_SM, UI.ICON_SM))
             player_variant.setView(view)
             player_variant.setEditable(True)
             player_variant.completer().setFilterMode(Qt.MatchFlag.MatchContains)
@@ -459,17 +513,21 @@ class TSHScoreboardPlayerWidget(QGroupBox):
 
             # Move up/down
             btMoveUp = QPushButton()
-            btMoveUp.setFixedSize(24, 24)
-            btMoveUp.setIcon(QIcon("./assets/icons/arrow_up.svg"))
+            btMoveUp.setFixedSize(UI.BTN_SM, UI.BTN_SM)
+            btMoveUp.setIcon(QIcon(UI.icon_path("arrow_up.svg")))
             character_element.layout().addWidget(btMoveUp)
             btMoveUp.clicked.connect(lambda x=None, index=len(
                 self.character_elements): self.SwapCharacters(index, index-1))
             btMoveDown = QPushButton()
-            btMoveDown.setFixedSize(24, 24)
-            btMoveDown.setIcon(QIcon("./assets/icons/arrow_down.svg"))
+            btMoveDown.setFixedSize(UI.BTN_SM, UI.BTN_SM)
+            btMoveDown.setIcon(QIcon(UI.icon_path("arrow_down.svg")))
             character_element.layout().addWidget(btMoveDown)
             btMoveDown.clicked.connect(lambda x=None, index=len(
                 self.character_elements): self.SwapCharacters(index, index+1))
+
+            if self.path.startswith("score."):
+                btMoveUp.hide()
+                btMoveDown.hide()
 
             # Add line to characters
             self.character_container.layout().addWidget(character_element)
@@ -489,7 +547,7 @@ class TSHScoreboardPlayerWidget(QGroupBox):
                     self.CharactersChanged()
                 ]
             )
-            
+
             player_variant.currentIndexChanged.connect(
                 lambda index, element=player_character: [
                     self.CharactersChanged()
@@ -504,13 +562,11 @@ class TSHScoreboardPlayerWidget(QGroupBox):
                 f"character_{len(self.character_elements)}")
             player_character_color.setObjectName(
                 f"character_color_{len(self.character_elements)}")
-            # player_variant.setObjectName(
-            #     f"variant_{len(self.character_elements)}")
 
         while len(self.character_elements) > number:
             self.character_elements[-1][0].setParent(None)
             self.character_elements.pop()
-        
+
         if self.character_container.findChild(QComboBox, "variants") is not None:
             if len(TSHGameAssetManager.instance.variants) <= 0:
                 for container in self.findChildren(QComboBox, "variants"):
@@ -565,47 +621,6 @@ class TSHScoreboardPlayerWidget(QGroupBox):
 
         StateManager.ReleaseSaving()
 
-    def LoadControllers(self):
-        try:
-            if TSHControllerHelper.instance.controllerModel == None:
-                TSHControllerHelper.BuildControllerTree()
-                TSHControllerHelper.UpdateControllerModel()
-            
-            controller_layout = QHBoxLayout()
-
-            controller_label = QLabel()
-            controller_layout.addWidget(controller_label)
-            controller_label.setText(QApplication.translate("app", "Controller").upper())
-            controller_label.setStyleSheet("QLabel{font-weight: bold; font-size: 8pt;}")
-            controller_label.setObjectName("controllerLabel")
-            controller_label.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
-
-            self.controller = QComboBox()
-
-            controller_layout.addWidget(self.controller)
-            self.layout().addLayout(controller_layout, 97, 2, 1, 1)
-
-            self.controller.setObjectName("controller")
-            self.controller.setEditable(True)
-            self.controller.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-            self.controller.completer().setCompletionMode(QCompleter.PopupCompletion)
-            self.controller.completer().popup().setMinimumWidth(250)
-            self.controller.setIconSize(QSize(24, 24))
-            self.controller.setFixedHeight(32)
-            self.controller.setMinimumWidth(60)
-            # self.controller.setMaximumWidth(120)
-            self.controller.setFont(
-                QFont(self.controller.font().family(), 9))
-            self.controller.setModel(
-                TSHControllerHelper.instance.controllerModel)
-            view = QListView()
-            view.setIconSize(QSize(24, 24))
-            self.controller.setView(view)
-
-        except Exception as e:
-            logger.error(traceback.format_exc())
-            exit()
-
     def LoadCountries(self):
         try:
             if TSHCountryHelper.countryModel == None:
@@ -623,8 +638,6 @@ class TSHScoreboardPlayerWidget(QGroupBox):
             country.completer().setCompletionMode(QCompleter.PopupCompletion)
             country.completer().popup().setMinimumWidth(300)
             country.setModel(TSHCountryHelper.countryModel)
-            country.setFont(QFont(country.font().family(), 9))
-            country.lineEdit().setFont(QFont(country.font().family(), 9))
 
             country.currentIndexChanged.connect(self.LoadStates)
 
@@ -635,8 +648,6 @@ class TSHScoreboardPlayerWidget(QGroupBox):
             state.view().setMinimumWidth(60)
             state.completer().setCompletionMode(QCompleter.PopupCompletion)
             state.completer().popup().setMinimumWidth(300)
-            state.setFont(QFont(state.font().family(), 9))
-            state.lineEdit().setFont(QFont(state.font().family(), 9))
 
         except Exception as e:
             logger.error(traceback.format_exc())
@@ -696,16 +707,18 @@ class TSHScoreboardPlayerWidget(QGroupBox):
                 container.setVisible(False)
             for container in self.findChildren(QComboBox):
                 if "character_color_" in container.objectName():
-                    container.setMaximumWidth(210)
+                    container.setMaximumWidth(80)
         else:
             for container in self.findChildren(QComboBox, "variants"):
                 container.setVisible(True)
             for container in self.findChildren(QComboBox):
                 if "character_color_" in container.objectName():
-                    container.setMaximumWidth(120)
+                    container.setMaximumWidth(80)
         for c in self.character_elements:
-            c[1].setModel(TSHGameAssetManager.instance.characterModel)
-            c[1].setIconSize(QSize(24, 24))
+            proxy = NoIconProxyModel(c[1])
+            proxy.setSourceModel(TSHGameAssetManager.instance.characterModel)
+            c[1].setModel(proxy)
+            c[1].setIconSize(QSize(0, 0))
             c[1].setFixedHeight(32)
             c[3].setModel(TSHGameAssetManager.instance.variantModel)
 
@@ -832,19 +845,6 @@ class TSHScoreboardPlayerWidget(QGroupBox):
                 if stateElement.currentIndex() != stateIndex:
                     stateElement.setCurrentIndex(stateIndex)
 
-            if data.get("controller"):
-                controllerElement: QComboBox = self.findChild(
-                    QComboBox, "controller")
-                controllerIndex = 0
-                for i in range(controllerElement.model().rowCount()):
-                    item = controllerElement.model().item(i).data(Qt.ItemDataRole.UserRole)
-                    if item:
-                        if data.get("controller") == item.get("codename"):
-                            controllerIndex = i
-                            break
-                if controllerElement.currentIndex() != controllerIndex:
-                    controllerElement.setCurrentIndex(controllerIndex)
-
             if data.get("mains") and no_mains != True:
                 if type(data.get("mains")) == list:
                     for element in self.character_elements:
@@ -964,10 +964,6 @@ class TSHScoreboardPlayerWidget(QGroupBox):
         if self.findChild(QComboBox, "state").currentData(Qt.ItemDataRole.UserRole):
             playerData["state_code"] = self.findChild(
                 QComboBox, "state").currentData(Qt.ItemDataRole.UserRole).get("code")
-        
-        if self.findChild(QComboBox, "controller").currentData(Qt.ItemDataRole.UserRole):
-            playerData["controller"] = self.findChild(
-                QComboBox, "controller").currentData(Qt.ItemDataRole.UserRole).get("codename")
 
         TSHPlayerDB.AddPlayers([playerData], overwrite=True)
 
@@ -1030,4 +1026,5 @@ class TSHScoreboardPlayerWidget(QGroupBox):
                         continue  # only executed if the inner loop DID break
                 else:
                     c.setCurrentIndex(0)
+
         StateManager.ReleaseSaving()

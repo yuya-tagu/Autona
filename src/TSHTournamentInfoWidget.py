@@ -8,10 +8,14 @@ from .TSHTournamentDataProvider import TSHTournamentDataProvider
 from .SettingsManager import SettingsManager
 from .Helpers.TSHLocaleHelper import TSHLocaleHelper
 from .Helpers.TSHDirHelper import TSHResolve
+from .TSHColorButton import TSHColorButton
 import traceback
 import shutil
 from loguru import logger
 import requests
+
+DEFAULT_THEME_COLOR = "#1D1B18"
+DEFAULT_ACCENT_COLOR = "#f0a500"
 
 
 class TSHTournamentInfoWidget(QDockWidget):
@@ -80,6 +84,36 @@ class TSHTournamentInfoWidget(QDockWidget):
         self.iconView: QLabel = self.findChild(QLabel, "iconView")
 
         self.UpdateIcon()
+
+        # Theme color button
+        saved_theme = SettingsManager.Get("general.theme_color", DEFAULT_THEME_COLOR)
+        placeholder = self.findChild(QToolButton, "btThemeColor")
+        self.btThemeColor = TSHColorButton(color=saved_theme)
+        self.btThemeColor.setMinimumSize(32, 32)
+        placeholder.parentWidget().layout().replaceWidget(placeholder, self.btThemeColor)
+        placeholder.deleteLater()
+        self.btThemeColor.colorChanged.connect(self._onThemeColorChanged)
+        StateManager.Set("tournamentInfo.themeColor", saved_theme)
+
+        # Accent color button
+        saved_accent = SettingsManager.Get("general.accent_color", DEFAULT_ACCENT_COLOR)
+        placeholder2 = self.findChild(QToolButton, "btAccentColor")
+        self.btAccentColor = TSHColorButton(color=saved_accent)
+        self.btAccentColor.setMinimumSize(32, 32)
+        placeholder2.parentWidget().layout().replaceWidget(placeholder2, self.btAccentColor)
+        placeholder2.deleteLater()
+        self.btAccentColor.colorChanged.connect(self._onAccentColorChanged)
+        StateManager.Set("tournamentInfo.accentColor", saved_accent)
+
+    def _onThemeColorChanged(self, color):
+        if color:
+            SettingsManager.Set("general.theme_color", color)
+            StateManager.Set("tournamentInfo.themeColor", color)
+
+    def _onAccentColorChanged(self, color):
+        if color:
+            SettingsManager.Set("general.accent_color", color)
+            StateManager.Set("tournamentInfo.accentColor", color)
 
     def UpdateIcon(self):
         try:

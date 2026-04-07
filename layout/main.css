@@ -58,6 +58,13 @@
   --p2-score-bg-color: #2e89ff;
   --p2-sponsor-color: #29b6f6;
   --p2-score-color: #ffffff;
+
+  --theme-color: #1D1B18;
+  --accent-color: #f0a500;
+  --bevel-light: color-mix(in srgb, var(--theme-color), white 35%);
+  --bevel-dark:  color-mix(in srgb, var(--theme-color), black 25%);
+  --tile-radius: 6px;
+  --tile-gap: 5px;
 }
 
 /* Common P1/P2 losers badge defaults */

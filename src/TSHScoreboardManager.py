@@ -26,6 +26,8 @@ class TSHScoreboardManager(QDockWidget):
         self.setFloating(True)
         self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.widget = QWidget()
+        self.widget.setMinimumWidth(0)
+        self.widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.setWidget(self.widget)
         self.widget.setLayout(QVBoxLayout())
 

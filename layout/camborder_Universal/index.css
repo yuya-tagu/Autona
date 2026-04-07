@@ -1,9 +1,4 @@
-:root {
-  --theme-color: #3b4252;
-  --bevel-light: color-mix(in srgb, var(--theme-color), white 35%);
-  --bevel-dark:  color-mix(in srgb, var(--theme-color), black 25%);
-  --tile-radius: 6px;
-}
+/* Theme variables inherited from ../main.css */
 
 body {
   margin: 0;

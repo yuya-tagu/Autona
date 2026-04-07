@@ -8,6 +8,7 @@ from .TSHPlayerDB import TSHPlayerDB
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 from .TSHGameAssetManager import TSHGameAssetManager
+from . import ui_constants as UI
 
 
 class TSHCommentaryWidget(QDockWidget):
@@ -20,6 +21,8 @@ class TSHCommentaryWidget(QDockWidget):
         self.setFloating(True)
         self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.widget = QWidget()
+        self.widget.setMinimumWidth(0)
+        self.widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.setWidget(self.widget)
         self.widget.setLayout(QVBoxLayout())
 
@@ -28,7 +31,7 @@ class TSHCommentaryWidget(QDockWidget):
 
         topOptions = QWidget()
         topOptions.setLayout(QHBoxLayout())
-        topOptions.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
+        topOptions.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Maximum)
 
         self.widget.layout().addWidget(topOptions)
         
@@ -56,7 +59,7 @@ class TSHCommentaryWidget(QDockWidget):
         self.characterNumber.valueChanged.connect(self.SetCharacterNumber)
         
         self.eyeBt = QToolButton()
-        self.eyeBt.setIcon(QIcon('assets/icons/eye.svg'))
+        self.eyeBt.setIcon(QIcon(UI.icon_path('eye.svg')))
         self.eyeBt.setSizePolicy(
             QSizePolicy.Maximum, QSizePolicy.Fixed)
         col.layout().addWidget(self.eyeBt, Qt.AlignmentFlag.AlignRight)
@@ -68,13 +71,11 @@ class TSHCommentaryWidget(QDockWidget):
 
         self.elements = [
             [QApplication.translate("app", "Real Name"),              ["real_name"],                         "show_name"],
-            [QApplication.translate("app", "Twitter"),                ["twitter", "twitterLabel"],           "show_social"],
+            [QApplication.translate("app", "Twitter"),                ["twitter"],                           "show_social"],
             [QApplication.translate("app", "Seed"),                   ["seed", "seedLabel"],                 "show_seed"],
-            [QApplication.translate("app", "Birthday"),               ["birthday"],                          "show_birthday"],
             [QApplication.translate("app", "Location"),               ["locationLabel", "state", "country"], "show_location"],
             [QApplication.translate("app", "Characters"),             ["characters"],                        "show_characters"],
             [QApplication.translate("app", "Pronouns"),               ["pronoun"],                           "show_pronouns"],
-            [QApplication.translate("app", "Controller"),             ["controller", "controllerLabel"],     "show_controller"],
             [QApplication.translate("app", "Additional information"), ["custom_textbox"],                    "show_additional"],
         ]
         for element in self.elements:

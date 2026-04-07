@@ -191,21 +191,23 @@ function adaptColorsForTheme(t) {
   const darkShadow = "0em 0em 0.2em #000";
   const noFilter = "none";
   const glowFilter = "drop-shadow(0 0px 2px rgba(255, 255, 255, 0.85))";
+  const noStroke = "unset";
+  const thinStroke = "0.5px rgb(24, 24, 27)";
 
-  let textColor, iconVariant, shadow, filter, showLight;
+  let textColor, iconVariant, shadow, filter, showLight, stroke;
 
   if (intensity > 142) {
-    // Bright theme: dark text
+    // Bright theme: dark text, slight stroke to compensate thin appearance
     textColor = "rgb(24, 24, 27)";
-    iconVariant = "black"; shadow = noShadow; filter = noFilter; showLight = false;
+    iconVariant = "black"; shadow = noShadow; filter = noFilter; showLight = false; stroke = thinStroke;
   } else if (intensity > 75) {
     // Medium theme: white text
     textColor = "white";
-    iconVariant = "white"; shadow = darkShadow; filter = noFilter; showLight = false;
+    iconVariant = "white"; shadow = darkShadow; filter = noFilter; showLight = false; stroke = noStroke;
   } else {
     // Dark theme: white text, glow
     textColor = "white";
-    iconVariant = "white"; shadow = darkShadow; filter = glowFilter; showLight = true;
+    iconVariant = "white"; shadow = darkShadow; filter = glowFilter; showLight = true; stroke = noStroke;
   }
 
   scoreEl.style.color = textColor;
@@ -214,9 +216,11 @@ function adaptColorsForTheme(t) {
   setRule(stylesheet, `.p${side} .twitter_logo`, "background-image", `url(./x_twitter_${iconVariant}.png)`);
   setRule(stylesheet, `.p${side} .location_logo`, "background-image", `url(./map_pin_${iconVariant}.png)`);
   setRule(stylesheet, `.p${side} .chip .text:not(.text_empty)`, "text-shadow", shadow);
-  setRule(stylesheet, `.p${side} .score`, "text-shadow", shadow);
   setRule(stylesheet, `.p${side}.container`, "filter", filter);
   setRule(stylesheet, `.p${side}.score_container`, "filter", filter);
+  setRule(stylesheet, `.p${side}.container .name`, "-webkit-text-stroke", stroke);
+  setRule(stylesheet, `.p${side} .score`, "-webkit-text-stroke", stroke);
+  setRule(stylesheet, `.p${side} .chip .text:not(.text_empty)`, "-webkit-text-stroke", stroke);
 
   if (lightEl) {
     lightEl.classList.toggle("unhidden", showLight);

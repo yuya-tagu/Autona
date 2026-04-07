@@ -22,6 +22,15 @@ LoadEverything().then(() => {
     const teams = [sb.team["1"], sb.team["2"]];
     const isTeams = Object.keys(teams[0].player).length > 1;
 
+    // Apply theme/accent colors BEFORE adaptColorsForTheme
+    const ti = event.data.tournamentInfo || {};
+    if (ti.themeColor) {
+      document.documentElement.style.setProperty("--theme-color", ti.themeColor);
+    }
+    if (ti.accentColor) {
+      document.documentElement.style.setProperty("--accent-color", ti.accentColor);
+    }
+
     for (const [t, team] of teams.entries()) {
       const player = team.player["1"];
       if (!player) continue;
