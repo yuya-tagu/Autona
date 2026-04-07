@@ -19,20 +19,12 @@ import {useSelector} from "react-redux";
 import {Grid} from "@mui/system";
 
 export default function CurrentSet({scoreboardNumber}) {
-    /**
-     * @typedef CurrentSetState
-     * @prop {?TSHScoreInfo} score
-     * @prop {boolean} expanded
-     */
-
-    /** @type {CurrentSetState} */
     const [expanded, setExpanded] = React.useState(true);
 
     const tshState = useSelector(state => state.tshState.tshState);
     const tshChars = useSelector(state => state.tshPlayers.players);
     const theme = useTheme();
     const isSmall = useMediaQuery(theme.breakpoints.down('lg'));
-
 
     /** @type {TSHScoreInfo} */
     const score = tshState?.score[scoreboardNumber];
@@ -49,8 +41,8 @@ export default function CurrentSet({scoreboardNumber}) {
         ]).catch((e) => console.log("Error submitting data: ", e.text()));
     }
 
-    const clearScoreboard = () => {
-        fetch(`http://${window.location.hostname}:${BACKEND_PORT}/scoreboard${scoreboardNumber}-clear-all`)
+    const resetScores = () => {
+        fetch(`http://${window.location.hostname}:${BACKEND_PORT}/scoreboard${scoreboardNumber}-reset-scores`)
             .catch(console.error);
     }
 
@@ -58,6 +50,49 @@ export default function CurrentSet({scoreboardNumber}) {
         fetch(`http://${window.location.hostname}:${BACKEND_PORT}/scoreboard${scoreboardNumber}-swap-teams`)
             .catch(console.error)
     }
+
+    const postToX = () => {
+        const tournamentName = tshState?.tournamentInfo?.tournamentName || "";
+        const phase = score?.phase || "";
+        const match = score?.match || "";
+        const streamUrl = score?.stream_url || "";
+
+        const getTeamLine = (teamKey) => {
+            const team = score?.team?.[teamKey];
+            if (!team?.player) return "???";
+            const players = Object.keys(team.player).sort().map(k => {
+                const p = team.player[k];
+                const name = (p.name || "").trim();
+                if (!name) return null;
+                const chars = p.character ? Object.keys(p.character).sort().map(ck =>
+                    p.character[ck]?.name
+                ).filter(Boolean) : [];
+                let entry = name;
+                if (chars.length > 0) entry += `(${chars.join("/")})`;
+                if (p.seed) entry += ` [Seed:${p.seed}]`;
+                return entry;
+            }).filter(Boolean);
+            return players.length > 0 ? players.join(" / ") : "???";
+        };
+
+        const teamKeys = Object.keys(score?.team || {}).sort();
+        const parts = [];
+        if (tournamentName) parts.push(tournamentName);
+        const roundParts = [];
+        if (phase) roundParts.push(`[${phase}]`);
+        if (match) roundParts.push(match);
+        if (roundParts.length > 0) parts.push(roundParts.join(" - "));
+        parts.push("");
+        parts.push(getTeamLine(teamKeys[0]));
+        parts.push("vs");
+        parts.push(getTeamLine(teamKeys[1]));
+        parts.push("");
+        if (streamUrl) parts.push(`\u{1F534}STREAM: ${streamUrl}`);
+
+        const text = parts.join("\n");
+        const url = "https://twitter.com/intent/tweet?text=" + encodeURIComponent(text);
+        window.open(url, "_blank");
+    };
 
     const hasSuitableTeamCount =
         !!score
@@ -91,18 +126,18 @@ export default function CurrentSet({scoreboardNumber}) {
             </span>
         <Card>
             <Collapse in={expanded} timeout={"auto"}>
-                <CardContent>
+                <CardContent sx={{padding: 1, '&:last-child': {paddingBottom: 1}}}>
                     {
                         hasSuitableTeamCount && (
                             <Grid
                                 container
                                 direction={"row"}
-                                spacing={2}
+                                spacing={1}
                                 alignItems={"stretch"}
                                 justifyContent={"space-evenly"}
                             >
                                 <Grid
-                                    size={isSmall ? 12 : 4.5}
+                                    size={isSmall ? 12 : 4}
                                 >
                                     <Container disableGutters maxWidth={'sm'}>
                                         <Team
@@ -117,10 +152,20 @@ export default function CurrentSet({scoreboardNumber}) {
                                 </Grid>
 
 
-                                <Grid size={isSmall ? 12 : 3}>
+                                <Grid size={isSmall ? 12 : 4}>
                                     <Container disableGutters maxWidth={'xs'}>
-                                        <Stack gap={4}>
-                                            <Paper sx={{padding:2}} elevation={3}>
+                                        <Stack gap={1}>
+                                            <Button
+                                                variant={"outlined"}
+                                                fullWidth
+                                                onClick={swapTeams}
+                                                size="small"
+                                            >
+                                                {i18n.t("swap_teams")}
+                                            </Button>
+
+                                            {/* Set info (phase, match, best_of, score) */}
+                                            <Paper sx={{padding: 1.5}} elevation={3}>
                                                 <SetScore
                                                     key={score.set_id + "score"}
                                                     leftTeam={teams[0]}
@@ -132,16 +177,23 @@ export default function CurrentSet({scoreboardNumber}) {
                                                 />
                                             </Paper>
 
-                                            <Stack gap={2}>
-                                                <Button variant={"outlined"} onClick={submitChanges}>Submit Changes</Button>
-                                                <Button variant={"outlined"} onClick={clearScoreboard}>Clear Scoreboard</Button>
-                                                <Button variant={"outlined"} onClick={swapTeams}>Swap Teams</Button>
+                                            {/* Action buttons */}
+                                            <Stack gap={1}>
+                                                <Button variant={"outlined"} onClick={submitChanges}>
+                                                    {i18n.t("submit_changes")}
+                                                </Button>
+                                                <Button variant={"outlined"} onClick={resetScores} color="warning">
+                                                    {i18n.t("reset_scores")}
+                                                </Button>
+                                                <Button variant={"outlined"} onClick={postToX}>
+                                                    {i18n.t("post_to_x")}
+                                                </Button>
                                             </Stack>
                                         </Stack>
                                     </Container>
                                 </Grid>
 
-                                    <Grid size={isSmall ? 12 : 4.5}>
+                                    <Grid size={isSmall ? 12 : 4}>
                                         <Container disableGutters maxWidth={'sm'}>
                                             <Team key={`s-${scoreboardNumber}-t-${teamKeys[1]}`}
                                                   teamId={`s-${scoreboardNumber}-t-${teamKeys[1]}`}

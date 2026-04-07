@@ -145,6 +145,7 @@ from .TSHScoreboardManager import TSHScoreboardManager
 from src.TSHAssetDownloader import TSHAssetDownloader
 from src.TSHAboutWidget import TSHAboutWidget
 from .TSHScoreboardStageWidget import TSHScoreboardStageWidget
+from .TSHStatsWidget import TSHStatsWidget
 from src.TSHWebServer import WebServer
 # autopep8: on
 
@@ -311,6 +312,8 @@ class WindowSignals(QObject):
 
 
 class Window(QMainWindow):
+    # Bump this when dock widget layout changes (e.g. adding/removing tabs)
+    STATE_VERSION = 1
     signals = WindowSignals()
 
     def __init__(self, loop=None):
@@ -472,6 +475,11 @@ class Window(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, notes)
         self.dockWidgets.append(notes)
 
+        self.statsWidget = TSHStatsWidget()
+        self.statsWidget.setObjectName(QApplication.translate("app", "Statistics"))
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.statsWidget)
+        self.dockWidgets.append(self.statsWidget)
+
         self.tabifyDockWidget(self.scoreboard, self.stageWidget)
         self.tabifyDockWidget(self.scoreboard, commentary)
         self.tabifyDockWidget(self.scoreboard, tournamentInfo)
@@ -481,6 +489,7 @@ class Window(QMainWindow):
         self.tabifyDockWidget(self.scoreboard, playerList)
         self.tabifyDockWidget(self.scoreboard, bracket)
         self.tabifyDockWidget(self.scoreboard, notes)
+        self.tabifyDockWidget(self.scoreboard, self.statsWidget)
         self.scoreboard.raise_()
 
         for dw in self.dockWidgets:
@@ -911,8 +920,9 @@ class Window(QMainWindow):
         if self.qtSettings.value("geometry"):
             self.restoreGeometry(self.qtSettings.value("geometry"))
 
-        if self.qtSettings.value("windowState"):
-            self.restoreState(self.qtSettings.value("windowState"))
+        stateKey = f"windowState_v{self.STATE_VERSION}"
+        if self.qtSettings.value(stateKey):
+            self.restoreState(self.qtSettings.value(stateKey))
 
         splash.finish(self)
         self.show()
@@ -985,7 +995,7 @@ class Window(QMainWindow):
     def closeEvent(self, event):
         logger.info("Shutting down...")
         self.qtSettings.setValue("geometry", self.saveGeometry())
-        self.qtSettings.setValue("windowState", self.saveState())
+        self.qtSettings.setValue(f"windowState_v{self.STATE_VERSION}", self.saveState())
 
         tmpDir = TSHResolve("tmp")
         if os.path.isdir(tmpDir):

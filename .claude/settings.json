@@ -1,0 +1,20 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "type": "prompt",
+        "prompt": "The user is about to run a git commit. Check: does the command contain 'git commit'? If yes, remind the user to verify that 'npm run build' in stage_strike_app/ passes before committing. If the command is not a git commit, respond with just 'proceed'.",
+        "description": "コミット前にWeb UIビルド確認をリマインド"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "type": "prompt",
+        "prompt": "A file was just edited. If the edited file is a Python file under src/ and contains a class inheriting from QDockWidget, check that setWindowTitle() is called in __init__. If missing, warn: 'QDockWidget に setWindowTitle() が設定されていません。タブが表示されなくなります。' Otherwise respond 'ok'.",
+        "description": "QDockWidget の setWindowTitle 漏れ検知"
+      }
+    ]
+  }
+}

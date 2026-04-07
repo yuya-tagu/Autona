@@ -7,7 +7,7 @@ import {
     tshStateSlice,
     websocketInfoSlice
 } from './tshState';
-import {selectedScoreboardSlice} from "./uiState";
+import {selectedScoreboardSlice, visibilitySlice} from "./uiState";
 import {produce} from "immer";
 
 export const tshStore = configureStore({
@@ -19,6 +19,7 @@ export const tshStore = configureStore({
         tshCountries: tshCountriesSlice.reducer,
         websocketInfo: websocketInfoSlice.reducer,
         selectedScoreboard: selectedScoreboardSlice.reducer,
+        visibility: visibilitySlice.reducer,
     }),
     devTools: {
         // Helps keep the devtools crispy.

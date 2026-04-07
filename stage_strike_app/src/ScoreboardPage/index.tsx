@@ -2,6 +2,7 @@ import "../App.css";
 import {darkTheme} from "../themes";
 import i18n from "../i18n/config";
 import {
+    Button,
     Paper, Stack,
     Tab,
     Tabs
@@ -19,6 +20,7 @@ import websocketInit from "./websocketInit";
 import websocketConnection from "../websocketConnection";
 import {selectedScoreboardSlice} from "../redux/uiState";
 import {TSHState} from "../backendDataTypes";
+import {BACKEND_PORT} from "../env";
 
 /**
  * Main page for the scoreboard. This whole contraption is powered by TSH's python-side
@@ -76,11 +78,11 @@ export default function ScoreboardPage(props: any) {
             <>
                 <Header onSelectedGameChange={onSelectedGameChanged}/>
                 <Box
-                    paddingX={2}
-                    paddingTop={1}
-                    paddingBottom={2}
+                    paddingX={1}
+                    paddingTop={0.5}
+                    paddingBottom={1}
                 >
-                    <Stack gap={4} marginBottom={24}>
+                    <Stack gap={2} marginBottom={12}>
                         <Box>
                             <Box sx={{borderBottom: 1, borderColor: 'divider'}}>
                                 <Tabs
@@ -106,6 +108,18 @@ export default function ScoreboardPage(props: any) {
                             </div>
                         </Box>
                         <UpcomingSets onSelectedSetChanged={onSelectedSetChanged} scoreboardNumber={selectedScoreboard}/>
+                        <Box display="flex" justifyContent="center" mt={4}>
+                            <Button
+                                variant={"outlined"}
+                                color="error"
+                                onClick={() => {
+                                    fetch(`http://${window.location.hostname}:${BACKEND_PORT}/scoreboard${selectedScoreboard}-clear-all`)
+                                        .catch(console.error);
+                                }}
+                            >
+                                {i18n.t("clear_all")}
+                            </Button>
+                        </Box>
                     </Stack>
                 </Box>
             </>
@@ -118,7 +132,7 @@ export default function ScoreboardPage(props: any) {
                 display: "flex",
                 flexDirection: "column",
                 height: "100vh",
-                gap: darkTheme.spacing(2),
+                gap: darkTheme.spacing(1),
             }}
             sx={{overflow: "auto !important"}}
         >
