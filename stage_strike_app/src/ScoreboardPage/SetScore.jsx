@@ -99,7 +99,7 @@ export default class SetScore extends React.Component {
     render = () => {
         const formFieldWidth = 195;
         return (
-            <Stack gap={4} direction={"column"} alignItems={"center"}>
+            <Stack gap={1.5} direction={"column"} alignItems={"center"}>
                 <TextField
                     label={i18n.t("phase")}
                     value={this.state.phase}

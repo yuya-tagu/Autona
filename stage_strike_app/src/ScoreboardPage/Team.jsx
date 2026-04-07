@@ -127,7 +127,7 @@ export default React.forwardRef(
             </FormGroup>
         </Box>
 
-        <Stack gap={2} padding={1}>
+        <Stack gap={1} padding={0.5}>
             {playerWidgets}
         </Stack>
     </Paper>

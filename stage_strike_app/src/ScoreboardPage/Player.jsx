@@ -37,6 +37,7 @@ import {CountryStateSelector} from "../CountryStateSelector";
  *     _realName: string,
  *     _twitter: string,
  *     _pronoun: string,
+ *     _seed: string,
  *     _characterSelections: CharacterSelections
  *
  *     countryCode?: string,
@@ -46,6 +47,7 @@ import {CountryStateSelector} from "../CountryStateSelector";
  *     realName: string,
  *     twitter: string,
  *     pronoun: string,
+ *     seed: string,
  *     characterSelections: CharacterSelections
  *     expanded: boolean
  * }} PlayerState
@@ -102,6 +104,7 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
         _realName: player.real_name,
         _twitter: player.twitter,
         _pronoun: player.pronoun,
+        _seed: player.seed ?? "",
         _charSelections: charsFromTsh(player.character),
 
         countryCode: player.country?.code,
@@ -111,6 +114,7 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
         realName: player.real_name,
         twitter: player.twitter,
         pronoun: player.pronoun,
+        seed: player.seed ?? "",
         charSelections: charsFromTsh(player.character),
         expanded: true
     });
@@ -121,6 +125,7 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
     const tshState = useSelector((s) => s.tshState.tshState);
     const gameCodename = tshState?.game?.codename;
     /** @type TSHPlayerDb */ const playerDb = useSelector(state => state.tshPlayers.players);
+    const visibility = useSelector(state => state.visibility);
 
     React.useEffect(() => {
         const newProps = {
@@ -131,6 +136,7 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
             realName: player.real_name,
             twitter: player.twitter,
             pronoun: player.pronoun,
+            seed: player.seed ?? "",
             charSelections: charsFromTsh(player.character),
         }
 
@@ -319,7 +325,7 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
             />
             <Collapse in={state.expanded} timeout={"auto"}>
                 <CardContent>
-                    <Stack spacing={4}>
+                    <Stack spacing={2}>
                         <Stack {...rowProps}>
                             <TextField label={i18n.t("sponsor")}
                                        key={idBase + "sponsor"}
@@ -354,43 +360,56 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
                                    onChange={changeHandlerFor('realName')}
                         />
 
-                        <Stack {...rowProps} alignItems={"stretch"}>
-                            <TextField label={i18n.t("twitter")}
-                                       sx={{width: '50%', maxWidth: '50%'}}
-                                       key={idBase + "twitter"}
-                                       id={idBase + "twitter"}
-                                       value={state.twitter ?? ''}
-                                       onChange={changeHandlerFor('twitter')}
-                            />
+                        {visibility.twitter && (
+                            <Stack {...rowProps} alignItems={"stretch"}>
+                                <TextField label={i18n.t("twitter")}
+                                           sx={{width: '100%'}}
+                                           key={idBase + "twitter"}
+                                           id={idBase + "twitter"}
+                                           value={state.twitter ?? ''}
+                                           onChange={changeHandlerFor('twitter')}
+                                />
+                            </Stack>
+                        )}
+
+                        {visibility.pronouns && (
                             <TextField label={i18n.t("pronouns")}
-                                       sx={{width: '50%', maxWidth: '50%'}}
                                        key={idBase + "pronoun"}
                                        id={idBase + "pronoun"}
                                        value={state.pronoun ?? ''}
                                        onChange={changeHandlerFor('pronoun')}
                             />
-                        </Stack>
+                        )}
 
-                        <Stack {...rowProps}>
-
-                            <CountrySelector
-                                sx={{width: '50%', maxWidth: '50%'}}
-                                label={i18n.t("country")}
-                                value={state.countryCode ?? ''}
-                                onChange={changeHandlerFor('countryCode')}
+                        {visibility.seed && (
+                            <TextField label={i18n.t("seed")}
+                                       key={idBase + "seed"}
+                                       id={idBase + "seed"}
+                                       value={state.seed ?? ''}
+                                       onChange={changeHandlerFor('seed')}
                             />
+                        )}
 
-                            <CountryStateSelector
-                                countryCode={state.countryCode}
-                                sx={{width: '50%', maxWidth: '50%'}}
-                                label={i18n.t("state")}
-                                value={state.stateCode ?? ''}
-                                onChange={changeHandlerFor('stateCode')}
-                            />
-                        </Stack>
+                        {visibility.location && (
+                            <Stack {...rowProps}>
+                                <CountrySelector
+                                    sx={{width: '50%', maxWidth: '50%'}}
+                                    label={i18n.t("country")}
+                                    value={state.countryCode ?? ''}
+                                    onChange={changeHandlerFor('countryCode')}
+                                />
 
+                                <CountryStateSelector
+                                    countryCode={state.countryCode}
+                                    sx={{width: '50%', maxWidth: '50%'}}
+                                    label={i18n.t("state")}
+                                    value={state.stateCode ?? ''}
+                                    onChange={changeHandlerFor('stateCode')}
+                                />
+                            </Stack>
+                        )}
 
-                        {
+                        {visibility.characters && (
                             Object.values(state.charSelections).map( (cs) =>
                                 <CharSelector
                                     key={`${playerId}-cs-${cs.charIdx}`}
@@ -402,7 +421,7 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
                                     stackProps={rowProps}
                                 />
                             )
-                        }
+                        )}
                     </Stack>
                 </CardContent>
             </Collapse>
@@ -427,4 +446,3 @@ function charsFromTsh(tshChars) {
     }
     return res;
 }
-

@@ -14,8 +14,9 @@ class TSHStatsWidget(QDockWidget):
     def __init__(self, *args):
         super().__init__(*args)
 
+        self.setWindowTitle(QApplication.translate("app", "Statistics"))
         self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
-        self.setFloating(True)
+        self.setFloating(False)
 
         container = QWidget()
         container.setMinimumWidth(0)

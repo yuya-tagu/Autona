@@ -175,6 +175,12 @@ class TSHScoreboardWidget(QWidget):
 
         self.innerWidget.layout().addWidget(topOptions)
 
+        self.webScoreboardUrl = f"http://{self.GetIP()}:{SettingsManager.Get('general.webserver_port', 5000)}/scoreboard"
+        self.btOpenWebScoreboard = QPushButton("ブラウザ版はこちら ")
+        self.btOpenWebScoreboard.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.btOpenWebScoreboard.clicked.connect(lambda: webbrowser.open(self.webScoreboardUrl))
+        topOptions.layout().addWidget(self.btOpenWebScoreboard)
+
         topOptions.layout().addStretch()
 
         if not SettingsManager.Get("general.disable_thumbnail_widget", False):
@@ -334,15 +340,6 @@ class TSHScoreboardWidget(QWidget):
         self.playerNumber.valueChanged.connect(self.SetPlayersPerTeam)
 
         bottomOptions.layout().addLayout(settingsRow)
-
-        self.remoteScoreboardLabel = QApplication.translate(
-                "app", "Open {0} in a browser to edit the scoreboard remotely."
-            ).format(f"<a href='http://{self.GetIP()}:{SettingsManager.Get('general.webserver_port', 5000)}/scoreboard'>http://{self.GetIP()}:{SettingsManager.Get('general.webserver_port', 5000)}/scoreboard</a>")
-        self.remoteScoreboardLabel = add_beta_label(self.remoteScoreboardLabel, "web_score")
-        self.remoteScoreboardLabel = QLabel(self.remoteScoreboardLabel)
-
-        self.remoteScoreboardLabel.setOpenExternalLinks(True)
-        bottomOptions.layout().addWidget(self.remoteScoreboardLabel)
 
         TSHTournamentDataProvider.instance.signals.tournament_changed.connect(
             self.UpdateBottomButtons)
