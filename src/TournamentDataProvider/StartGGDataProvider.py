@@ -577,51 +577,157 @@ class StartGGDataProvider(TournamentDataProvider):
 
         return name
 
+    def _build_set_metadata(self, _set, p1, p2):
+        """Extract set-level metadata from a new API response."""
+        phase_name = deep_get(_set, "phaseGroup.phase.name")
+        round_name = StartGGDataProvider.TranslateRoundName(_set.get("fullRoundText"))
+
+        if deep_get(_set, "phaseGroup.phase.bracketType") == "MATCHMAKING":
+            round_name = ""
+
+        bracket_type = deep_get(_set, "phaseGroup.phase.bracketType", "")
+
+        isPools = deep_get(_set, "phaseGroup.phase.groupCount", 0) > 1
+        if isPools:
+            phase_name += " - " + TSHLocaleHelper.phaseNames.get(
+                "group").format(deep_get(_set, "phaseGroup.displayIdentifier"))
+
+        streamUrl = deep_get(_set, "stream.streamName")
+        streamSource = deep_get(_set, "stream.streamSource")
+
+        if streamSource == "TWITCH":
+            streamUrl = "https://twitch.tv/" + streamUrl
+        if streamSource == "YOUTUBE":
+            streamUrl = "https://youtube.com/" + streamUrl
+
+        return {
+            "id": _set.get("id"),
+            "team1score": _set.get("entrant1Score", 0),
+            "team2score": _set.get("entrant2Score", 0),
+            "round_name": round_name,
+            "tournament_phase": phase_name,
+            "bracket_type": bracket_type,
+            "p1_name": p1.get("entrant", {}).get("name", "") if p1 and p1.get("entrant") != None else "",
+            "p2_name": p2.get("entrant", {}).get("name", "") if p2 and p2.get("entrant") != None else "",
+            "p1_seed": p1.get("entrant", {}).get("initialSeedNum", None) if p1 and p1.get("entrant") else None,
+            "p2_seed": p2.get("entrant", {}).get("initialSeedNum", None) if p2 and p2.get("entrant") else None,
+            "stream": streamUrl,
+            "station": _set.get("station", {}).get("number", "") if _set.get("station", {}) != None else "",
+            "isOnline": deep_get(_set, "event.isOnline"),
+            "isPools": isPools,
+            "round": _set.get("round")
+        }
+
+    def _parse_participant_new_api(self, entrant, teamIndex, setData):
+        """Parse a single participant from a new API entrant dict."""
+        player = entrant.get("player")
+        user = entrant.get("user")
+
+        playerData = {}
+
+        if player:
+            playerData["prefix"] = player.get("prefix")
+            playerData["gamerTag"] = player.get("gamerTag")
+            playerData["name"] = player.get("name")
+
+            # Main character
+            playerSelections = Counter()
+
+            sets = deep_get(player, "sets.nodes", [])
+            playerId = player.get("id")
+            if len(sets) > 0:
+                games = sets[0].get("games", [])
+                if games and len(games) > 0:
+                    for game in games:
+                        selections = game.get("selections", [])
+                        if selections:
+                            for selection in selections:
+                                participants = selection.get(
+                                    "entrant", {}).get("participants", [])
+                                if len(participants) > 0:
+                                    participantId = participants[0].get(
+                                        "player", {}).get("id", None)
+                                    if participantId and participantId == playerId:
+                                        playerSelections[selection.get(
+                                            "selectionValue")] += 1
+
+            main = playerSelections.most_common(1)
+
+            if len(main) > 0:
+                playerData["startggMain"] = main[0][0]
+
+        if user:
+            if user.get("authorizations"):
+                if len(user.get("authorizations", [])) > 0:
+                    playerData["twitter"] = user.get("authorizations", [])[
+                        0].get("externalUsername")
+
+            if user.get("genderPronoun"):
+                playerData["pronoun"] = user.get(
+                    "genderPronoun")
+
+            if user.get("images") and len(user.get("images")) > 0:
+                playerData["avatar"] = user.get("images")[
+                    0].get("url")
+
+            if user.get("id"):
+                playerData["id"] = [
+                    player.get("id"),
+                    user.get("id")
+                ]
+
+            if user.get("location"):
+                # Country to country code
+                if user.get("location").get("country"):
+                    for country in TSHCountryHelper.countries.values():
+                        if user.get("location").get("country") == country.get("en_name"):
+                            playerData["country_code"] = country.get(
+                                "code")
+                            break
+
+                # State -- direct
+                if user.get("location").get("state"):
+                    stateCode = user.get(
+                        "location").get("state")
+                    if stateCode:
+                        playerData["state_code"] = user.get(
+                            "location").get("state")
+                # State -- from city
+                elif user.get("location").get("city") and playerData.get("country_code"):
+                    stateCode = TSHCountryHelper.FindState(
+                        playerData["country_code"], user.get("location").get("city"))
+                    if stateCode:
+                        playerData["state_code"] = stateCode
+                if user.get("location").get("city"): playerData["city"] = user.get("location").get("city")
+
+            if playerData.get("startggMain"):
+                main = TSHGameAssetManager.instance.GetCharacterFromStartGGId(
+                    playerData.get("startggMain"))
+                if main:
+                    playerData["mains"] = main[0]
+
+        if "id" not in playerData:
+            playerData["id"] = [
+                player.get("id"),
+                0
+            ]
+        if playerData.get("id") and len(playerData.get("id")) > 0:
+            if playerData["id"][0] is not None:
+                playerData["seed"] = self.player_seeds.get(
+                    playerData["id"][0])
+
+        if setData.get(f"p{teamIndex+1}_seed"):
+            playerData["seed"] = setData.get(f"p{teamIndex+1}_seed")
+
+        return playerData
+
     def ParseMatchDataNewApi(self, _set):
         try:
             slots = deep_get(_set, "slots", [])
             p1 = slots[0] if len(slots) > 0 else {}
             p2 = slots[1] if len(slots) > 1 else {}
 
-            # Add Pool identifier if phase has multiple Pools
-            phase_name = deep_get(_set, "phaseGroup.phase.name")
-            round_name = StartGGDataProvider.TranslateRoundName(_set.get("fullRoundText"))
-
-            if deep_get(_set, "phaseGroup.phase.bracketType") == "MATCHMAKING":
-                round_name = ""
-
-            bracket_type = deep_get(_set, "phaseGroup.phase.bracketType", "")
-
-            isPools = deep_get(_set, "phaseGroup.phase.groupCount", 0) > 1
-            if isPools:
-                phase_name += " - " + TSHLocaleHelper.phaseNames.get(
-                    "group").format(deep_get(_set, "phaseGroup.displayIdentifier"))
-            
-            streamUrl = deep_get(_set, "stream.streamName")
-            streamSource = deep_get(_set, "stream.streamSource")
-
-            if streamSource == "TWITCH":
-                streamUrl = "https://twitch.tv/" + streamUrl
-            if streamSource == "YOUTUBE":
-                streamUrl = "https://youtube.com/" + streamUrl
-
-            setData = {
-                "id": _set.get("id"),
-                "team1score": _set.get("entrant1Score", 0),
-                "team2score": _set.get("entrant2Score", 0),
-                "round_name": round_name,
-                "tournament_phase": phase_name,
-                "bracket_type": bracket_type,
-                "p1_name": p1.get("entrant", {}).get("name", "") if p1 and p1.get("entrant") != None else "",
-                "p2_name": p2.get("entrant", {}).get("name", "") if p2 and p2.get("entrant") != None else "",
-                "p1_seed": p1.get("entrant", {}).get("initialSeedNum", None) if p1 and p1.get("entrant") else None,
-                "p2_seed": p2.get("entrant", {}).get("initialSeedNum", None) if p2 and p2.get("entrant") else None,
-                "stream": streamUrl,
-                "station": _set.get("station", {}).get("number", "") if _set.get("station", {}) != None else "",
-                "isOnline": deep_get(_set, "event.isOnline"),
-                "isPools": isPools,
-                "round": _set.get("round")
-            }
+            setData = self._build_set_metadata(_set, p1, p2)
 
             players = [[], []]
 
@@ -636,105 +742,7 @@ class StartGGDataProvider(TournamentDataProvider):
 
             for i, team in enumerate(entrants):
                 for j, entrant in enumerate(team):
-                    player = entrant.get("player")
-                    user = entrant.get("user")
-
-                    playerData = {}
-
-                    if player:
-                        playerData["prefix"] = player.get("prefix")
-                        playerData["gamerTag"] = player.get("gamerTag")
-                        playerData["name"] = player.get("name")
-
-                        # Main character
-                        playerSelections = Counter()
-
-                        sets = deep_get(player, "sets.nodes", [])
-                        playerId = player.get("id")
-                        if len(sets) > 0:
-                            games = sets[0].get("games", [])
-                            if games and len(games) > 0:
-                                for game in games:
-                                    selections = game.get("selections", [])
-                                    if selections:
-                                        for selection in selections:
-                                            participants = selection.get(
-                                                "entrant", {}).get("participants", [])
-                                            if len(participants) > 0:
-                                                participantId = participants[0].get(
-                                                    "player", {}).get("id", None)
-                                                if participantId and participantId == playerId:
-                                                    playerSelections[selection.get(
-                                                        "selectionValue")] += 1
-
-                        main = playerSelections.most_common(1)
-
-                        if len(main) > 0:
-                            playerData["startggMain"] = main[0][0]
-
-                    if user:
-                        if user.get("authorizations"):
-                            if len(user.get("authorizations", [])) > 0:
-                                playerData["twitter"] = user.get("authorizations", [])[
-                                    0].get("externalUsername")
-
-                        if user.get("genderPronoun"):
-                            playerData["pronoun"] = user.get(
-                                "genderPronoun")
-
-                        if user.get("images") and len(user.get("images")) > 0:
-                            playerData["avatar"] = user.get("images")[
-                                0].get("url")
-
-                        if user.get("id"):
-                            playerData["id"] = [
-                                player.get("id"),
-                                user.get("id")
-                            ]
-
-                        if user.get("location"):
-                            # Country to country code
-                            if user.get("location").get("country"):
-                                for country in TSHCountryHelper.countries.values():
-                                    if user.get("location").get("country") == country.get("en_name"):
-                                        playerData["country_code"] = country.get(
-                                            "code")
-                                        break
-
-                            # State -- direct
-                            if user.get("location").get("state"):
-                                stateCode = user.get(
-                                    "location").get("state")
-                                if stateCode:
-                                    playerData["state_code"] = user.get(
-                                        "location").get("state")
-                            # State -- from city
-                            elif user.get("location").get("city") and playerData.get("country_code"):
-                                stateCode = TSHCountryHelper.FindState(
-                                    playerData["country_code"], user.get("location").get("city"))
-                                if stateCode:
-                                    playerData["state_code"] = stateCode
-                            if user.get("location").get("city"): playerData["city"] = user.get("location").get("city")
-
-                        if playerData.get("startggMain"):
-                            main = TSHGameAssetManager.instance.GetCharacterFromStartGGId(
-                                playerData.get("startggMain"))
-                            if main:
-                                playerData["mains"] = main[0]
-
-                    if "id" not in playerData:
-                        playerData["id"] = [
-                            player.get("id"),
-                            0
-                        ]
-                    if playerData.get("id") and len(playerData.get("id")) > 0:
-                        if playerData["id"][0] is not None:
-                            playerData["seed"] = self.player_seeds.get(
-                                playerData["id"][0])
-
-                    if setData.get(f"p{i+1}_seed"):
-                        playerData["seed"] = setData.get(f"p{i+1}_seed")
-
+                    playerData = self._parse_participant_new_api(entrant, i, setData)
                     players[i].append(playerData)
 
             setData["entrants"] = players
@@ -744,14 +752,13 @@ class StartGGDataProvider(TournamentDataProvider):
             logger.error(traceback.format_exc())
             return {}
 
-    def ParseMatchDataOldApi(self, respTasks):
-        entities = respTasks.get("entities", {})
-        sets = entities.get("sets", {})
-        tasks = entities.get("setTask", [])
+    @staticmethod
+    def _extract_char_selections(tasks, entrant1Id, entrant2Id):
+        """Extract character selections from set tasks (old API format).
 
+        Returns selectedChars as [[p1_chars], [p2_chars]].
+        """
         selectedCharMap = {}
-        entrant1Id = str(sets.get("entrant1Id"))
-        entrant2Id = str(sets.get("entrant2Id"))
 
         for task in reversed(tasks):
             if task.get("action") in ["setup_character", "setup_strike", "setup_ban"]:
@@ -780,20 +787,28 @@ class StartGGDataProvider(TournamentDataProvider):
             if str(char[0]) == entrant2Id:
                 selectedChars[1] = char[1]
 
-        latestWinner = None
+        return selectedChars
 
+    @staticmethod
+    def _find_latest_winner(tasks):
+        """Find the latest winner ID from set tasks (old API format)."""
         for task in reversed(tasks):
             if len(task.get("metadata", [])) == 0:
                 continue
             if task.get("active"):
                 continue
             if task.get("metadata", {}).get("report", {}).get("winnerId", None) is not None:
-                latestWinner = int(task.get("metadata", {}).get(
+                return int(task.get("metadata", {}).get(
                     "report", {}).get("winnerId"))
-                break
+        return None
 
+    @staticmethod
+    def _parse_stage_strike(tasks, entrant1Id, entrant2Id, latestWinner, scores):
+        """Parse stage strike state from set tasks (old API format).
+
+        Returns (stageStrikeState, rulesetState, strikedBy, currPlayer, lastWinnerSlot).
+        """
         lastWinnerSlot = None
-
         if latestWinner:
             if str(latestWinner) == entrant1Id:
                 lastWinnerSlot = 0
@@ -804,10 +819,10 @@ class StartGGDataProvider(TournamentDataProvider):
         strikedStages = None
         strikedBy = [[], []]
         selectedStage = None
-        dsrStages = None
         currPlayer = 0
         dsr = False
         mdsr = False
+        stageWins = [[], []]
 
         for task in reversed(tasks):
             if task.get("action") in ["setup_strike", "setup_stage", "setup_character", "setup_ban", "report"]:
@@ -835,9 +850,8 @@ class StartGGDataProvider(TournamentDataProvider):
                     selectedStage = base.get("stageId")
 
                 # Stages previously won in
-                stageWins = [[], []]
                 if base.get("stageWins"):
-
+                    stageWins = [[], []]
                     for entrantId, stageCodes in base.get("stageWins").items():
                         stages = []
 
@@ -939,7 +953,7 @@ class StartGGDataProvider(TournamentDataProvider):
                 "selectedStage": selected,
                 "currPlayer": currPlayer,
                 "lastWinner": lastWinnerSlot,
-                "currGame": sets.get("entrant1Score", 0) + sets.get("entrant2Score", 0)
+                "currGame": scores[0] + scores[1]
             }
 
             rulesetState = {
@@ -949,15 +963,16 @@ class StartGGDataProvider(TournamentDataProvider):
             }
         except:
             logger.info("No Stage Strike Info Found")
-            allStages = None
-            strikedStages = None
             strikedBy = [[], []]
-            selectedStage = None
-            dsrStages = None
             currPlayer = 0
             stageStrikeState = {}
             rulesetState = {}
 
+        return stageStrikeState, rulesetState, strikedBy, currPlayer, lastWinnerSlot
+
+    @staticmethod
+    def _build_entrants_old_api(selectedChars, sets):
+        """Build entrant character data from old API char selections."""
         entrants = [[], []]
 
         for i, entrantChars in enumerate(selectedChars):
@@ -979,6 +994,25 @@ class StartGGDataProvider(TournamentDataProvider):
                         }]
                     except:
                         logger.error(traceback.format_exc())
+
+        return entrants
+
+    def ParseMatchDataOldApi(self, respTasks):
+        entities = respTasks.get("entities", {})
+        sets = entities.get("sets", {})
+        tasks = entities.get("setTask", [])
+
+        entrant1Id = str(sets.get("entrant1Id"))
+        entrant2Id = str(sets.get("entrant2Id"))
+
+        selectedChars = self._extract_char_selections(tasks, entrant1Id, entrant2Id)
+        latestWinner = self._find_latest_winner(tasks)
+
+        scores = (sets.get("entrant1Score", 0), sets.get("entrant2Score", 0))
+        stageStrikeState, rulesetState, strikedBy, currPlayer, lastWinnerSlot = \
+            self._parse_stage_strike(tasks, entrant1Id, entrant2Id, latestWinner, scores)
+
+        entrants = self._build_entrants_old_api(selectedChars, sets)
 
         team1losers = False
         team2losers = False

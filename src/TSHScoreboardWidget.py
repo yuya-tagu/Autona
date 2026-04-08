@@ -176,7 +176,7 @@ class TSHScoreboardWidget(QWidget):
         self.innerWidget.layout().addWidget(topOptions)
 
         self.webScoreboardUrl = f"http://{self.GetIP()}:{SettingsManager.Get('general.webserver_port', 5000)}/scoreboard"
-        self.btOpenWebScoreboard = QPushButton("ブラウザ版はこちら ")
+        self.btOpenWebScoreboard = QPushButton("ブラウザ版を開く")
         self.btOpenWebScoreboard.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         self.btOpenWebScoreboard.clicked.connect(lambda: webbrowser.open(self.webScoreboardUrl))
         topOptions.layout().addWidget(self.btOpenWebScoreboard)
@@ -232,17 +232,22 @@ class TSHScoreboardWidget(QWidget):
 
         self.columns = QWidget()
         self.columns.setLayout(QHBoxLayout())
+        self.columns.layout().setContentsMargins(0, 0, 0, 0)
+        self.columns.layout().setSpacing(UI.SPACE_SM)
         self.innerWidget.layout().addWidget(self.columns)
 
         bottomOptions = QWidget()
         bottomOptions.setLayout(QVBoxLayout())
         bottomOptions.layout().setContentsMargins(0, 0, 0, 0)
+        bottomOptions.layout().setSpacing(UI.SPACE_SM)
         bottomOptions.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
 
         self.innerWidget.layout().addWidget(bottomOptions)
 
         if SettingsManager.Get("bsky_account.enable_bluesky", True):
             self.streamUrl = QHBoxLayout()
+            self.streamUrl.setContentsMargins(0, 0, 0, 0)
+            self.streamUrl.setSpacing(UI.SPACE_SM)
             self.streamUrlLabel = QLabel(QApplication.translate("app", "Stream URL") + " ")
             self.streamUrl.layout().addWidget(self.streamUrlLabel)
             self.streamUrlTextBox = QLineEdit()
@@ -289,6 +294,8 @@ class TSHScoreboardWidget(QWidget):
         UI.on_theme_change(self._refresh_theme_styles)
 
         hbox = QHBoxLayout()
+        hbox.setContentsMargins(0, 0, 0, 0)
+        hbox.setSpacing(UI.SPACE_SM)
         bottomOptions.layout().addLayout(hbox)
 
         self.btLoadStationSet = QPushButton(
@@ -297,31 +304,6 @@ class TSHScoreboardWidget(QWidget):
         hbox.addWidget(self.btLoadStationSet)
         self.btLoadStationSet.clicked.connect(
             self.signals.StationSelection.emit)
-
-        hbox = QHBoxLayout()
-        bottomOptions.layout().addLayout(hbox)
-
-        if self.scoreboardNumber <= 1 and not SettingsManager.Get("general.hide_track_player", False):
-            self.btLoadPlayerSet = QPushButton("Load player set")
-            self.btLoadPlayerSet.setIcon(
-                QIcon(UI.icon_path("person_search.svg")))
-            self.btLoadPlayerSet.setEnabled(False)
-            self.btLoadPlayerSet.clicked.connect(
-                self.signals.UserSetSelection.emit)
-            hbox.addWidget(self.btLoadPlayerSet)
-            TSHTournamentDataProvider.instance.signals.user_updated.connect(
-                self.UpdateUserSetButton)
-            TSHTournamentDataProvider.instance.signals.tournament_changed.connect(
-                self.UpdateUserSetButton)
-
-            self.btLoadPlayerSetOptions = QPushButton()
-            self.btLoadPlayerSetOptions.setSizePolicy(
-                QSizePolicy.Maximum, QSizePolicy.Maximum)
-            self.btLoadPlayerSetOptions.setIcon(
-                QIcon(UI.icon_path("settings.svg")))
-            self.btLoadPlayerSetOptions.clicked.connect(
-                self.LoadUserSetOptionsClicked)
-            hbox.addWidget(self.btLoadPlayerSetOptions)
 
         settingsRow = QHBoxLayout()
         settingsRow.setContentsMargins(0, 0, 0, 0)
@@ -351,6 +333,7 @@ class TSHScoreboardWidget(QWidget):
         self.timerLayout = QWidget()
         self.timerLayout.setLayout(QHBoxLayout())
         self.timerLayout.layout().setContentsMargins(0, 0, 0, 0)
+        self.timerLayout.layout().setSpacing(UI.SPACE_SM)
         self.timerLayout.setSizePolicy(
             QSizePolicy.Minimum, QSizePolicy.Maximum)
         self.timerLayout.layout().setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -375,6 +358,8 @@ class TSHScoreboardWidget(QWidget):
 
         colorGroup1 = QWidget()
         colorGroup1.setLayout(QHBoxLayout())
+        colorGroup1.layout().setContentsMargins(0, 0, 0, 0)
+        colorGroup1.layout().setSpacing(UI.SPACE_SM)
         colorGroup1.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
 
         DEFAULT_TEAM1_COLOR = SettingsManager.Get("general.team_1_default_color", "#fe3636")
@@ -388,24 +373,7 @@ class TSHScoreboardWidget(QWidget):
             ])
         self.CommandTeamColor(0, DEFAULT_TEAM1_COLOR)
 
-        self.colorMenu1 = QComboBox()
-        self.colorMenu1.setVisible(False)
-        self.colorMenu1.setModel(TSHGameAssetManager.instance.colorModel)
-        self.colorMenu1.setEditable(True)
-        self.colorMenu1.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-        self.colorMenu1.completer().setCompletionMode(QCompleter.PopupCompletion)
-        self.colorMenu1.setMaximumWidth(200)
-        self.colorMenu1.setIconSize(QSize(24, 24))
-
         colorGroup1.layout().addWidget(self.colorButton1)
-        colorGroup1.layout().addWidget(self.colorMenu1)
-
-        self.colorMenu1.currentIndexChanged.connect(
-                lambda element=self.colorMenu1: [
-                    self.CommandTeamColor(0, element),
-                    self.CommandTeamColor(1, element, force_opponent=True)
-                ]
-            )
 
         self.team1column.findChild(QHBoxLayout, "horizontalLayout_2").layout().insertWidget(0, colorGroup1)
         self.team1column.findChild(QScrollArea).setWidget(QWidget())
@@ -432,6 +400,8 @@ class TSHScoreboardWidget(QWidget):
 
         colorGroup2 = QWidget()
         colorGroup2.setLayout(QHBoxLayout())
+        colorGroup2.layout().setContentsMargins(0, 0, 0, 0)
+        colorGroup2.layout().setSpacing(UI.SPACE_SM)
         colorGroup2.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
 
         self.team2column = uic.loadUi(TSHResolve("src/layout/TSHScoreboardTeam.ui"))
@@ -451,24 +421,7 @@ class TSHScoreboardWidget(QWidget):
         # self.colorButton2.setText(QApplication.translate("app", "COLOR"))
         self.CommandTeamColor(1, DEFAULT_TEAM2_COLOR)
 
-        self.colorMenu2 = QComboBox()
-        self.colorMenu2.setVisible(False)
-        self.colorMenu2.setModel(TSHGameAssetManager.instance.colorModel)
-        self.colorMenu2.setEditable(True)
-        self.colorMenu2.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-        self.colorMenu2.completer().setCompletionMode(QCompleter.PopupCompletion)
-        self.colorMenu2.setMaximumWidth(200)
-        self.colorMenu2.setIconSize(QSize(24, 24))
-
         colorGroup2.layout().addWidget(self.colorButton2)
-        colorGroup2.layout().addWidget(self.colorMenu2)
-
-        self.colorMenu2.currentIndexChanged.connect(
-            lambda element=self.colorMenu2: [
-                self.CommandTeamColor(1, element),
-                self.CommandTeamColor(0, element, force_opponent=True)
-            ]
-        )
 
         self.team2column.findChild(QHBoxLayout, "horizontalLayout_2").layout().insertWidget(0, colorGroup2)
 
@@ -770,10 +723,6 @@ class TSHScoreboardWidget(QWidget):
             lambda: [
                 self.SetDefaultsFromAssets(),
                 self.bestOfSpin.valueChanged.emit(self.bestOfSpin.value()),
-                self.colorMenu1.setModel(TSHGameAssetManager.instance.colorModel),
-                self.colorMenu2.setModel(TSHGameAssetManager.instance.colorModel),
-                self.colorMenu1.setVisible(StateManager.Get(f"game.has_colors", False)),
-                self.colorMenu2.setVisible(StateManager.Get(f"game.has_colors", False))
             ]
         )
 
@@ -869,6 +818,13 @@ class TSHScoreboardWidget(QWidget):
     
     def PostToX(self):
         try:
+            # Generate thumbnail and copy to clipboard
+            thumbnailPath = self.GenerateThumbnail(quiet_mode=True, disable_msgbox=True)
+            if thumbnailPath:
+                image = QImage(thumbnailPath)
+                if not image.isNull():
+                    QApplication.clipboard().setImage(image)
+
             n = self.scoreboardNumber
 
             tournament_name = StateManager.Get("tournamentInfo.tournamentName", "") or ""
@@ -946,8 +902,6 @@ class TSHScoreboardWidget(QWidget):
             self.btSelectSet.setText(
                 QApplication.translate("app", "Load set from {0}").format(providerName))
             self.btSelectSet.setEnabled(True)
-            if self.scoreboardNumber <= 1 and not SettingsManager.Get("general.hide_track_player", False):
-                self.btLoadPlayerSet.setEnabled(True)
         else:
             self.btSelectSet.setText(
                 QApplication.translate("app", "Load set"))

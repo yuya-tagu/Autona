@@ -14,7 +14,7 @@ class TSHStatsWidget(QDockWidget):
     def __init__(self, *args):
         super().__init__(*args)
 
-        self.setWindowTitle(QApplication.translate("app", "Statistics"))
+        self.setWindowTitle(QApplication.translate("app", "統計情報"))
         self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.setFloating(False)
 
@@ -28,7 +28,7 @@ class TSHStatsWidget(QDockWidget):
 
         # Top bar
         topBar = QHBoxLayout()
-        refreshBtn = QPushButton(QApplication.translate("app", "Refresh Statistics"))
+        refreshBtn = QPushButton(QApplication.translate("app", "統計情報を取得する"))
         refreshBtn.clicked.connect(self._refresh)
         topBar.addWidget(refreshBtn)
         self.upsetLabel = QLabel()

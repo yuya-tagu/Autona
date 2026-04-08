@@ -177,7 +177,7 @@ class TSHStatsUtil:
                 StateManager.Set(f"score.{self.scoreboardNumber}.upset_factor",
                                     abs(p1_upset - p2_upset))
         else:
-            StateManager.Set(f"score.upset_factor", 0)
+            StateManager.Set(f"score.{self.scoreboardNumber}.upset_factor", 0)
 
     def _setWithDifferentKey(source, sKey, target, tKey):
         value = source.deep_get(sKey)

@@ -17,7 +17,7 @@ FONT_MD = 11
 FONT_LG = 13
 FONT_XL = 16
 
-FONT_FAMILY = "Noto Sans JP"
+FONT_FAMILY = "LINE Seed JP"
 FONT_FAMILY_CONDENSED = "Roboto Condensed"
 
 # ─── Spacing ─────────────────────────────────────────────────────

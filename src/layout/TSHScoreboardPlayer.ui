@@ -340,7 +340,14 @@
      <property name="title">
       <string>CHARACTERS</string>
      </property>
-     <layout class="QVBoxLayout" name="verticalLayout"/>
+     <layout class="QVBoxLayout" name="verticalLayout">
+      <property name="topMargin">
+       <number>20</number>
+      </property>
+      <property name="spacing">
+       <number>2</number>
+      </property>
+     </layout>
     </widget>
    </item>
   </layout>

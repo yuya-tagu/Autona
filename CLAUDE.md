@@ -49,6 +49,69 @@ python main.py
 
 ---
 
+## アーキテクチャ概要
+
+### デスクトップアプリ (`src/`)
+
+Python / PyQt6 のドックウィジェットベース。主要コンポーネント:
+
+| コンポーネント | ファイル | 役割 |
+|--------------|---------|------|
+| **Window** | `TournamentStreamHelper.py` | QMainWindow。全ドックウィジェットの管理、STATE_VERSION によるレイアウト復元 |
+| **StateManager** | `StateManager.py` | グローバル状態（nested dict）。deepdiff でデルタ算出、ファイル出力 + WebSocket 配信 |
+| **SettingsManager** | `SettingsManager.py` | ユーザー設定の永続化（JSON） |
+| **TSHScoreboardManager** | `TSHScoreboardManager.py` | シングルトン。複数スコアボードのタブ管理 |
+| **TSHScoreboardWidget** | `TSHScoreboardWidget.py` | 個別スコアボード。チーム/選手/スコア/セット情報 |
+| **TSHTournamentDataProvider** | `TSHTournamentDataProvider.py` | シングルトン。Start.gg 等からデータ取得のオーケストレーション |
+| **TSHGameAssetManager** | `TSHGameAssetManager.py` | シングルトン。ゲーム別キャラ/ステージ/アイコン管理 |
+| **TSHPlayerDB** | `TSHPlayerDB.py` | ローカル選手DB（static クラス、`user_data/local_players.json`） |
+| **TSHWebServer** | `TSHWebServer.py` | QThread。Flask + SocketIO で Web UI にリアルタイム配信 |
+| **TSHHotkeys** | `TSHHotkeys.py` | シングルトン。pynput によるグローバルホットキー |
+
+**重要なパターン:**
+- **シングルトン**: `*.instance` パターン（ScoreboardManager, GameAssetManager, TournamentDataProvider, Hotkeys, AlertNotification）
+- **スレッドセーフ**: StateManager は `threading.RLock`、PlayerDB は `multiprocessing.Lock`
+- **Qt Signal/Slot**: 各コンポーネントに `*Signals(QObject)` クラスが対応
+- **Context Manager**: `StateManager.SaveBlock()` で一括更新時のファイル書き込み抑制
+- **Worker スレッド**: `Workers.py` の `Worker(QRunnable)` でバックグラウンド処理
+
+### Web UI (`stage_strike_app/src/`)
+
+React 19 / TypeScript / Redux Toolkit / MUI 7。フォルダ名は上流由来の歴史的経緯。
+
+| ページ | パス | 主要コンポーネント |
+|--------|------|-------------------|
+| **ScoreboardPage** | `/scoreboard` | Header, CurrentSet, Team, Player, SetScore, CharSelector, UpcomingSets |
+| **StageStrikePage** | `/stage-strike-app` | StageCard, RpsDialog, FooterControls, PlayerWonButton |
+
+**データフロー:**
+1. Socket.IO 接続 → `program_state` で全状態受信 → Redux `overwrite()`
+2. 差分更新 → `program_state_update` でデルタ受信 → Redux `addDeltas()`
+3. 1000ms 間隔で `applySavedDeltas()` により Immer でパッチ適用
+4. ユーザー操作 → REST API (POST) → デスクトップアプリ → 状態変更 → WebSocket で全クライアントに配信
+
+**Redux Slices:** `tshState`（トーナメント状態）、`tshPlayers`（選手DB）、`tshCharacters`（キャラDB）、`tshGames`（ゲーム一覧）、`tshCountries`（国一覧）、`websocketInfo`（接続状態）、`selectedScoreboard`（選択中タブ）、`visibility`（表示切替）
+
+### 状態キーパス（StateManager）
+
+```
+root
+├── score.{N}              # スコアボード N 番
+│   ├── team.{1|2}         # チーム
+│   │   ├── player.{N}     # 選手（gamerTag, name, seed, country_code, mains...）
+│   │   └── score, color   # スコア・チームカラー
+│   ├── best_of, match, phase
+│   ├── stage_strike        # ステージストライク状態
+│   └── last_sets, history_sets, recent_sets
+├── game                    # 選択中ゲーム（characters, stages, variants）
+├── bracket                 # ブラケット情報
+├── commentary.{N}          # 実況者情報
+├── tournamentInfo          # 大会メタデータ
+└── streamQueue             # 配信キュー
+```
+
+---
+
 ## `.claude/` 構成と運用ルール
 
 技術的な詳細ルール・自動化は `.claude/` 配下に分離している。
@@ -62,6 +125,9 @@ python main.py
 | `rules/*.md` | パス別の技術ルール | 対象ファイル固有の作法・制約 | プロジェクト全体の方針 |
 | `commands/*.md` | スラッシュコマンド | 手順・フォーマット定義 | 実行結果の記録 |
 | `settings.json` | Hooks・権限設定 | 自動検証の定義 | ルールの説明（rules に書く） |
+| `plans/*.md` | フェーズ単位の作業計画 | 目的・原則・Step一覧・成果物・完了条件 | 1セッション分の具体指示（prompts に書く） |
+| `prompts/*.md` | 1セッション分の指示書 | 対象範囲・手順・制約・報告フォーマット | フェーズ全体のロードマップ（plans に書く） |
+| `architecture/*.md` | コードベース調査の成果物 | import 関係、状態キーパス、依存グラフ等の事実情報 | リファクタ方針・TODO（known-smells.md に書く） |
 
 ### Rules（パス別自動ルール）
 
@@ -70,6 +136,8 @@ python main.py
 | `rules/python-widgets.md` | `src/**/*.py` | PyQt6 ウィジェットの作法 |
 | `rules/react-web-ui.md` | `stage_strike_app/src/**` | React/Redux の規約 |
 | `rules/build-and-release.md` | `dependencies/**`, `scripts/**` | ビルド・リリース手順 |
+| `rules/state-and-webserver.md` | `src/StateManager.py`, `src/TSHWebServer*.py`, `src/Helpers/**` | 状態管理・Web サーバー・ヘルパーの作法 |
+| `rules/agent-pitfalls.md` | `src/**/*.py`, `tests/**/*.py` | エージェントが踏みやすい地雷の回避ルール |
 
 ### Hooks（自動検証）
 
@@ -87,3 +155,34 @@ python main.py
 | `/create-test-checklist` | テストチェックリスト生成 |
 | `/review-pr` | 設計・保守性レビュー |
 | `/build-all` | Web UI + exe 一括ビルド |
+| `/verify` | テスト + ビルド + 起動確認の一括検証 |
+
+### Plans（フェーズ単位の作業計画）
+
+| ファイル | 概要 |
+|---------|------|
+| `plans/refactor-phase1.md` | Python 読解と安全網フェーズの計画 |
+
+### Prompts（セッション指示書）
+
+| ファイル | 用途 |
+|---------|------|
+| `prompts/step1.md` | Python import 関係 + シングルトン初期化順の調査 |
+
+### Architecture（調査成果物）
+
+| ファイル | 内容 |
+|---------|------|
+| `architecture/python-imports.md` | src/ の import 関係マップ |
+| `architecture/singleton-init-order.md` | シングルトン初期化順と依存グラフ |
+| `architecture/state-keys.md` | StateManager キーパスの read/write マップ |
+| `architecture/python-hotspots.md` | 巨大ファイル・関数・コード重複の特定 |
+
+※ 本ディレクトリのファイルは調査の事実情報のみを記録する。リファクタ方針や TODO は `.claude/known-smells.md` に分離する。
+
+### その他
+
+| ファイル | 役割 |
+|---------|------|
+| `.claude/known-smells.md` | リファクタ候補リスト。architecture/ の調査結果を元に作成し、フェーズ2の夜間タスク配布の燃料として使う |
+| `.claude/manual-test-checklist.md` | 自動テストで守れない動作確認手順。朝の PR レビュー時になぞる |
