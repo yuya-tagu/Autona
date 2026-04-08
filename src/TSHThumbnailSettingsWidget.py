@@ -838,17 +838,46 @@ class TSHThumbnailSettingsWidget(QDockWidget):
 
     def SetTypeFont(self, index, cbFont, cbType):
         logger.info(f'set type font {cbFont.currentData()}')
-        types = ["Regular", "Bold", "Italic", "Bold Italic"]
-        types_localised = ["Regular", "Bold", "Italic", "Bold Italic"]
-        types_localised[0] = QApplication.translate("app", "Regular")
-        types_localised[1] = QApplication.translate("app", "Bold")
-        types_localised[2] = QApplication.translate("app", "Italic")
-        types_localised[3] = QApplication.translate("app", "Bold Italic")
 
         cbType.clear()
 
-        for i in range(len(types)):
-            cbType.addItem(types_localised[i], types[i])
+        family = cbFont.currentText()
+        font_paths = cbFont.currentData() or []
+
+        # Get available styles from QFontDatabase
+        available_styles = QFontDatabase.styles(family)
+
+        if available_styles:
+            for style in available_styles:
+                # Find matching font path by style keywords
+                matched_path = ""
+                style_lower = style.lower()
+                for path in font_paths:
+                    path_lower = path.lower()
+                    if "bold" in style_lower and "bold" in path_lower:
+                        matched_path = path
+                        break
+                    elif "italic" in style_lower and "italic" in path_lower:
+                        matched_path = path
+                        break
+                    elif style_lower in ("regular", "normal") and "bold" not in path_lower and "italic" not in path_lower:
+                        matched_path = path
+                        break
+                if not matched_path and font_paths:
+                    matched_path = font_paths[0]
+                cbType.addItem(style, matched_path)
+        else:
+            # Fallback: derive styles from file paths
+            fallback_types = ["Regular", "Bold", "Italic", "Bold Italic"]
+            for t in fallback_types:
+                matched_path = ""
+                for path in font_paths:
+                    if t.lower().replace(" ", "") in path.lower().replace(" ", ""):
+                        matched_path = path
+                        break
+                if not matched_path and font_paths:
+                    matched_path = font_paths[0]
+                cbType.addItem(t, matched_path)
 
     def getFontPaths(self):
         font_paths = QStandardPaths.standardLocations(
