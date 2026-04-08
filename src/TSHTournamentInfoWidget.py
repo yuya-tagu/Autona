@@ -11,11 +11,14 @@ from .Helpers.TSHDirHelper import TSHResolve
 from .TSHColorButton import TSHColorButton
 import traceback
 import shutil
+from pathlib import Path
 from loguru import logger
 import requests
 
 DEFAULT_THEME_COLOR = "#1D1B18"
 DEFAULT_ACCENT_COLOR = "#f0a500"
+DEFAULT_BANNER_PATH = "./assets/thumbnail_base/default_banner.png"
+BANNER_PATH = "./user_data/tournament_banner.png"
 
 
 class TSHTournamentInfoWidget(QDockWidget):
@@ -84,6 +87,23 @@ class TSHTournamentInfoWidget(QDockWidget):
         self.iconView: QLabel = self.findChild(QLabel, "iconView")
 
         self.UpdateIcon()
+
+        # Banner UI
+        self.btLoadBannerFile: QPushButton = self.findChild(
+            QPushButton, "btLoadBannerFile")
+        self.btLoadBannerFile.clicked.connect(self.LoadBannerFile)
+
+        self.btDownloadBanner: QPushButton = self.findChild(
+            QPushButton, "btDownloadBanner")
+        self.btDownloadBanner.clicked.connect(self.DownloadBanner)
+
+        self.btClearBanner: QPushButton = self.findChild(
+            QPushButton, "btClearBanner")
+        self.btClearBanner.clicked.connect(self.SetDefaultBanner)
+
+        self.bannerView: QLabel = self.findChild(QLabel, "bannerView")
+
+        self.UpdateBanner()
 
         # Theme color button
         saved_theme = SettingsManager.Get("general.theme_color", DEFAULT_THEME_COLOR)
@@ -166,6 +186,77 @@ class TSHTournamentInfoWidget(QDockWidget):
             logger.error(traceback.format_exc())
 
         self.UpdateIcon()
+
+        # Also download tournament banner for thumbnail background
+        self.DownloadBanner()
+
+    def UpdateBanner(self):
+        bg_path = SettingsManager.Get("thumbnail_config.background_path", DEFAULT_BANNER_PATH)
+        try:
+            pix = QPixmap(bg_path)
+            if pix.isNull():
+                pix = QPixmap(DEFAULT_BANNER_PATH)
+            banner = pix.scaledToWidth(178, Qt.TransformationMode.SmoothTransformation)
+        except:
+            banner = QPixmap(DEFAULT_BANNER_PATH).scaledToWidth(178, Qt.TransformationMode.SmoothTransformation)
+        self.bannerView.setPixmap(banner)
+
+    def LoadBannerFile(self):
+        try:
+            fileName = QFileDialog.getOpenFileName(
+                self,
+                QApplication.translate("app", "Open Image"),
+                ".",
+                QApplication.translate("app", "Image Files") + " (*.png *.jpg *.bmp)"
+            )[0]
+
+            if fileName:
+                Path("./user_data").mkdir(parents=True, exist_ok=True)
+                pix = QPixmap(fileName)
+                pix.save(BANNER_PATH)
+                SettingsManager.Set("thumbnail_config.background_path", BANNER_PATH)
+        except Exception as e:
+            logger.error(traceback.format_exc())
+
+        self.UpdateBanner()
+
+    def DownloadBanner(self):
+        try:
+            url = TSHTournamentDataProvider.instance.provider.GetBannerURL()
+            if not url:
+                logger.info("No tournament banner available")
+                return
+
+            logger.info(f"Banner URL: {url}")
+
+            headers = {
+                "client-version": "20",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36"
+            }
+
+            response = requests.get(url, headers=headers)
+
+            Path("./user_data").mkdir(parents=True, exist_ok=True)
+
+            pix = QPixmap()
+            pix.loadFromData(response.content)
+            pix.save(BANNER_PATH)
+
+            SettingsManager.Set("thumbnail_config.background_path", BANNER_PATH)
+            logger.info(f"Tournament banner saved and set as thumbnail background")
+        except Exception as e:
+            logger.error(traceback.format_exc())
+
+        self.UpdateBanner()
+
+    def SetDefaultBanner(self):
+        try:
+            SettingsManager.Set("thumbnail_config.background_path", DEFAULT_BANNER_PATH)
+        except:
+            logger.error(traceback.format_exc())
+
+        self.UpdateBanner()
 
     def SetDefaultIcon(self):
         try:

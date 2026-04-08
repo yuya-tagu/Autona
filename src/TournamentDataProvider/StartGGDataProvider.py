@@ -154,6 +154,42 @@ class StartGGDataProvider(TournamentDataProvider):
 
         return url
 
+    def GetBannerURL(self):
+        url = None
+
+        try:
+            data = self.QueryRequests(
+                "https://www.start.gg/api/-/gql",
+                type=requests.post,
+                jsonParams={
+                    "operationName": "TournamentBannerQuery",
+                    "variables": {
+                        "eventSlug": self.url.split("start.gg/")[1]
+                    },
+                    "query": '''
+                        query TournamentBannerQuery($eventSlug: String!) {
+                            event(slug: $eventSlug) {
+                                tournament{
+                                    images(type: "banner") {
+                                        type
+                                        url
+                                    }
+                                }
+                            }
+                        }
+                    '''
+                }
+            )
+
+            images = deep_get(data, "data.event.tournament.images", [])
+
+            if len(images) > 0:
+                url = images[0]["url"]
+        except:
+            logger.error(traceback.format_exc())
+
+        return url
+
     def GetTournamentPhases(self, progress_callback=None, cancel_event=None):
         phases = []
 

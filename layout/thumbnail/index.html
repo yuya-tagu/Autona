@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="./index.css" />
+  <script src="../include/jquery-3.7.1.min.js"></script>
+  <script src="../include/lodash.min.js"></script>
+  <script src="./thumbnail_assets.js"></script>
+</head>
+<body>
+  <div class="thumbnail" id="thumbnail">
+    <!-- Background -->
+    <div class="layer background"></div>
+
+    <!-- Character images -->
+    <div class="layer characters">
+      <div class="team team-1" id="team1"></div>
+      <div class="team team-2" id="team2"></div>
+    </div>
+
+    <!-- Separator lines -->
+    <div class="layer separators" id="separators"></div>
+
+    <!-- Foreground overlay (CSS frame) -->
+    <div class="layer foreground">
+      <div class="fg-top-bar"></div>
+      <div class="fg-bottom-bar"></div>
+    </div>
+
+    <!-- Player names -->
+    <div class="layer player-names">
+      <div class="player-name p1" id="p1name"><span class="text"></span></div>
+      <div class="player-name p2" id="p2name"><span class="text"></span></div>
+    </div>
+
+    <!-- Phase / match info -->
+    <div class="layer info-text">
+      <div class="info-text-container" id="infoText">
+        <div class="phase"><span class="text"></span></div>
+        <div class="match"><span class="text"></span></div>
+      </div>
+    </div>
+
+    <!-- Icons -->
+    <div class="layer icons">
+      <div class="icon main-icon" id="mainIcon"></div>
+      <div class="icon side-icon side-left" id="sideLeft"></div>
+      <div class="icon side-icon side-right" id="sideRight"></div>
+    </div>
+  </div>
+
+  <script src="./index.js"></script>
+</body>
+</html>
