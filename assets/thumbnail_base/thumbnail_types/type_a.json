@@ -1,6 +1,5 @@
 {
     "name": "Standard",
-    "default_foreground": "./assets/thumbnail_base/thumbnail_types/type_a/foreground.svg",
     "default_background": "./assets/thumbnail_base/thumbnail_types/type_a/background.svg",
     "base_ratio": {
         "x": 1920,
@@ -42,8 +41,8 @@
         "y_offset": 20,
         "main": {
             "dimensions": {
-                "x": 340,
-                "y": 320
+                "x": 160,
+                "y": 150
             }
         },
         "side": {
@@ -54,6 +53,6 @@
             }
         }
     },
-    "initial_font_size": 200,
+    "initial_font_size": 80,
     "lower_text_stretch_limit": 80
 }

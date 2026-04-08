@@ -39,13 +39,19 @@ TournamentStreamHelper (TSH) のカスタムフォーク。
 cd stage_strike_app && npm run build
 
 # exe
-python -m PyInstaller dependencies/tsh.spec --distpath . --workpath build -y
+pyinstaller dependencies/tsh.spec --noconfirm
+
+# ビルド後のコピー
+cp dist/TSH.exe ./TSH.exe
 
 # 開発時の実行
 python main.py
 ```
 
 - `TSH.exe` はプロジェクト直下のものを使う（`dist/` ではない）
+- **TSH.exe が起動中の場合は `taskkill /IM TSH.exe /F` で終了してからコピーしてよい**
+- フォント: LINE Seed JP（`assets/font/LINESeedJP/`、Google Fonts gstatic CDN から取得）
+- 翻訳コンパイル: `pyside6-lrelease src/i18n/TSH_ja.ts -qm src/i18n/TSH_ja.qm`（※ PySide6 は PyInstaller ビルド前にアンインストールすること。PyQt6 と共存不可）
 
 ---
 
@@ -57,7 +63,7 @@ Python / PyQt6 のドックウィジェットベース。主要コンポーネ�
 
 | コンポーネント | ファイル | 役割 |
 |--------------|---------|------|
-| **Window** | `TournamentStreamHelper.py` | QMainWindow。全ドックウィジェットの管理、STATE_VERSION によるレイアウト復元 |
+| **Window** | `TournamentStreamHelper.py` | QMainWindow。QMenuBar（編集・Startgg・タイトル・スコアボード）+ 中央「大会を選ぶ」ボタン + 全ドックウィジェット管理。STATE_VERSION=2 によるレイアウト復元 |
 | **StateManager** | `StateManager.py` | グローバル状態（nested dict）。deepdiff でデルタ算出、ファイル出力 + WebSocket 配信 |
 | **SettingsManager** | `SettingsManager.py` | ユーザー設定の永続化（JSON） |
 | **TSHScoreboardManager** | `TSHScoreboardManager.py` | シングルトン。複数スコアボードのタブ管理 |
@@ -77,7 +83,7 @@ Python / PyQt6 のドックウィジェットベース。主要コンポーネ�
 
 ### Web UI (`stage_strike_app/src/`)
 
-React 19 / TypeScript / Redux Toolkit / MUI 7。フォルダ名は上流由来の歴史的経緯。
+React 19 / Redux Toolkit / MUI。フォルダ名は上流由来の歴史的経緯。入力欄は全て `size="small"` で統一。
 
 | ページ | パス | 主要コンポーネント |
 |--------|------|-------------------|

@@ -22,6 +22,9 @@ class TournamentDataProvider(QObject):
     def GetIconURL(self):
         pass
 
+    def GetBannerURL(self):
+        pass
+
     def GetEntrants(self):
         pass
 

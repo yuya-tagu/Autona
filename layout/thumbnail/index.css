@@ -1,0 +1,263 @@
+/* Thumbnail layout CSS */
+/* Template values are injected as CSS custom properties by index.js */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  position: relative;
+  background: transparent;
+}
+
+/* --- Layers --- */
+
+.layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* --- Background --- */
+
+.background {
+  z-index: 0;
+}
+
+.background img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* --- Character images --- */
+
+.characters {
+  z-index: 1;
+  left: var(--char-x, 0px);
+  top: var(--char-y, 150px);
+  width: var(--char-w, 1920px);
+  height: var(--char-h, 790px);
+  display: flex;
+  flex-direction: row;
+}
+
+.team {
+  width: 50%;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+}
+
+/* Character grid when using separators */
+.team.grid-mode {
+  display: grid;
+  grid-auto-flow: var(--grid-flow, column);
+}
+
+/* Individual character slot */
+.char-slot {
+  position: relative;
+  overflow: hidden;
+  flex: 1;
+}
+
+.char-slot > div {
+  width: 100%;
+  height: 100%;
+}
+
+.char-slot.flipped > div {
+  transform: scaleX(-1);
+}
+
+/* --- Separators --- */
+
+.separators {
+  z-index: 2;
+  left: var(--char-x, 0px);
+  top: var(--char-y, 150px);
+  width: var(--char-w, 1920px);
+  height: var(--char-h, 790px);
+}
+
+.separator-line {
+  position: absolute;
+  background: #2a2a2a;
+}
+
+.separator-line.vertical {
+  width: 5px;
+  height: 100%;
+  top: 0;
+}
+
+.separator-line.horizontal {
+  height: 5px;
+  width: 100%;
+  left: 0;
+}
+
+/* --- Foreground (CSS frame) --- */
+
+.foreground {
+  z-index: 3;
+}
+
+.fg-top-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: var(--char-y, 150px);
+  background: var(--fg-bar-color, #2a2a2a);
+}
+
+.fg-bottom-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: calc(1080px - var(--char-y, 150px) - var(--char-h, 790px));
+  background: var(--fg-bar-color, #2a2a2a);
+}
+
+/* --- Player names --- */
+
+.player-names {
+  z-index: 4;
+}
+
+.player-name {
+  position: absolute;
+  height: var(--player-text-h, 150px);
+  top: var(--player-text-top, 0px);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  font-family: var(--player-font, sans-serif);
+  font-size: var(--initial-font-size, 100px);
+  font-weight: bold;
+  color: var(--player-color, #ffffff);
+}
+
+.player-name.p1 {
+  left: 0;
+  width: 50%;
+  justify-content: center;
+}
+
+.player-name.p2 {
+  left: 50%;
+  width: 50%;
+  justify-content: center;
+}
+
+.player-name .text {
+  white-space: nowrap;
+  display: inline-block;
+  transform-origin: center;
+}
+
+.player-name.p2 .text {
+  transform-origin: center;
+}
+
+.player-name .sponsor {
+  color: var(--sponsor-color-1, #ff7a6d);
+}
+
+.player-name.p2 .sponsor {
+  color: var(--sponsor-color-2, #29b6f6);
+}
+
+/* Text outline via text-shadow */
+.player-name.has-outline .text {
+  text-shadow:
+    calc(-1 * var(--outline-w, 2px)) calc(-1 * var(--outline-w, 2px)) 0 var(--player-outline-color, #000),
+    var(--outline-w, 2px) calc(-1 * var(--outline-w, 2px)) 0 var(--player-outline-color, #000),
+    calc(-1 * var(--outline-w, 2px)) var(--outline-w, 2px) 0 var(--player-outline-color, #000),
+    var(--outline-w, 2px) var(--outline-w, 2px) 0 var(--player-outline-color, #000),
+    0 calc(-1 * var(--outline-w, 2px)) 0 var(--player-outline-color, #000),
+    0 var(--outline-w, 2px) 0 var(--player-outline-color, #000),
+    calc(-1 * var(--outline-w, 2px)) 0 0 var(--player-outline-color, #000),
+    var(--outline-w, 2px) 0 0 var(--player-outline-color, #000);
+}
+
+/* --- Info text (phase / match) --- */
+
+.info-text {
+  z-index: 5;
+}
+
+.info-text-container {
+  position: absolute;
+  height: var(--info-text-h, 150px);
+  top: var(--info-text-top, 1001px);
+  left: var(--info-text-x, 0px);
+  width: var(--info-text-w, 1920px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  overflow: hidden;
+  font-family: var(--phase-font, sans-serif);
+  font-size: var(--initial-font-size, 100px);
+  font-weight: bold;
+  color: var(--phase-color, #ffffff);
+}
+
+.info-text-container.has-outline .text {
+  text-shadow:
+    calc(-1 * var(--outline-w, 2px)) calc(-1 * var(--outline-w, 2px)) 0 var(--phase-outline-color, #000),
+    var(--outline-w, 2px) calc(-1 * var(--outline-w, 2px)) 0 var(--phase-outline-color, #000),
+    calc(-1 * var(--outline-w, 2px)) var(--outline-w, 2px) 0 var(--phase-outline-color, #000),
+    var(--outline-w, 2px) var(--outline-w, 2px) 0 var(--phase-outline-color, #000),
+    0 calc(-1 * var(--outline-w, 2px)) 0 var(--phase-outline-color, #000),
+    0 var(--outline-w, 2px) 0 var(--phase-outline-color, #000),
+    calc(-1 * var(--outline-w, 2px)) 0 0 var(--phase-outline-color, #000),
+    var(--outline-w, 2px) 0 0 var(--phase-outline-color, #000);
+}
+
+.info-text-container .phase,
+.info-text-container .match {
+  white-space: nowrap;
+}
+
+.info-text-container .phase .text,
+.info-text-container .match .text {
+  white-space: nowrap;
+  display: inline-block;
+}
+
+/* --- Icons --- */
+
+.icons {
+  z-index: 6;
+}
+
+.icon {
+  position: absolute;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.main-icon {
+  width: var(--main-icon-w, 340px);
+  height: var(--main-icon-h, 320px);
+}
+
+.side-icon {
+  width: var(--side-icon-w, 240px);
+  height: var(--side-icon-h, 240px);
+}

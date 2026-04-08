@@ -664,7 +664,8 @@ class TSHScoreboardPlayerWidget(TSHBasePlayerWidget):
                         character_element = element[1]
                         characterIndex = 0
                         for i in range(character_element.model().rowCount()):
-                            item = character_element.model().item(i).data(Qt.ItemDataRole.UserRole)
+                            item = character_element.model().data(
+                                character_element.model().index(i, 0), Qt.ItemDataRole.UserRole)
                             if item:
                                 if item.get("en_name") == data.get("mains")[0]:
                                     characterIndex = i
@@ -681,7 +682,8 @@ class TSHScoreboardPlayerWidget(TSHBasePlayerWidget):
                             variant_element = self.character_elements[i][3]
                             characterIndex = 0
                             for i in range(character_element.model().rowCount()):
-                                item = character_element.model().item(i).data(Qt.ItemDataRole.UserRole)
+                                item = character_element.model().data(
+                                    character_element.model().index(i, 0), Qt.ItemDataRole.UserRole)
                                 if item:
                                     if item.get("en_name") == main[0]:
                                         characterIndex = i
@@ -699,7 +701,8 @@ class TSHScoreboardPlayerWidget(TSHBasePlayerWidget):
                             variantIndex = 0
                             if variant_element:
                                 for i in range(variant_element.model().rowCount()):
-                                    item = variant_element.model().item(i).data(Qt.ItemDataRole.UserRole)
+                                    item = variant_element.model().data(
+                                        variant_element.model().index(i, 0), Qt.ItemDataRole.UserRole)
                                     if item:
                                         if len(main) >= 3 :
                                             if item.get("en_name") == main[2]:
