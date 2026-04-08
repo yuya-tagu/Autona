@@ -1,0 +1,67 @@
+---
+description: フェーズ1調査で発見した、エージェントが踏みやすい地雷
+globs:
+  - "src/**/*.py"
+  - "tests/**/*.py"
+---
+
+# エージェント向け地雷回避ルール
+
+## 1. src/ の import は全起動を引き起こす
+
+`from src.XXX import ...` や `from .XXX import ...` は `src/__init__.py` → `TournamentStreamHelper.py` → QApplication + 全シングルトン生成を連鎖的にトリガーする。
+
+- テストで `src` パッケージ経由の import を使わない
+- テストでは `tests/conftest.py` の `direct_import()` を使う
+- `from . import ui_constants` は特に危険（3ファイルで使用中）
+
+## 2. シングルトン初期化順序を壊さない
+
+`TournamentStreamHelper.py` の import 順序がシングルトンの生成順序を決定する。
+
+**絶対に守る**: `TSHGameAssetManager` の import は `TSHTournamentDataProvider` より前。
+理由: TSHTournamentDataProvider.__init__ が `TSHGameAssetManager.instance.signals` に connect する。
+
+詳細: `.claude/architecture/singleton-init-order.md`
+
+## 3. StateManager のキーパスはドット区切り文字列
+
+- `StateManager.Set("score.1.team.1.player.1.name", value)` — 正しい
+- `StateManager.Set("score/1/team/1", value)` — **間違い**
+- 数値も文字列: `"1"` であって `1` ではない
+
+## 4. `element.objectName()` をキーパスに使う既存パターン
+
+`TSHScoreboardWidget`, `TSHTournamentInfoWidget` 等で Qt の `objectName()` がそのまま StateManager のキーに使われる。
+
+- `.ui` ファイルの objectName を変更すると保存データとの互換性が壊れる
+- 新しいウィジェットを追加する際も、objectName = StateManager キー であることを意識する
+
+## 5. TSHScoreboardPlayerWidget と TSHTeamPlayerWidget は別クラス
+
+見た目も構造もほぼ同じだが、**基底クラスを共有していない**。
+
+- 片方を修正したら、もう片方にも同じ修正が必要か確認する
+- 共通メソッド 19 個（SetData, SetCharactersPerPlayer, SwapWith 等）
+- 詳細: `.claude/architecture/python-hotspots.md`
+
+## 6. SaveBlock の対称性
+
+`StateManager.BlockSaving()` と `StateManager.ReleaseSaving()` は必ずペアで呼ぶ。ブロック数がマイナスになると SaveState が暴走する。
+
+- `with StateManager.SaveBlock():` を使うのが安全
+- try/finally で囲む既存パターンもあるが、例外時に ReleaseSaving を漏らすリスクがある
+
+## 7. `self.path` の動的構築
+
+`TSHScoreboardPlayerWidget.path` は呼び出し元によって異なる:
+- スコアボード: `score.{N}.team.{T}.player.{M}`
+- 実況者: `commentary.{N}`
+- 選手リスト: `{base}.slot.{I}.player.{M}`
+
+`self.path` を前提としたリファクタでは、全3パターンでの動作を確認すること。
+
+## 8. TSH.exe はプロジェクト直下
+
+ビルド後の実行ファイルは `TSH.exe`（プロジェクトルート直下）。`dist/TSH.exe` ではない。
+PyInstaller の `--distpath .` オプションで直下に出力している。

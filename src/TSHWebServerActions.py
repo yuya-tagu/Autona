@@ -38,7 +38,7 @@ class WebServerActions(QThread):
         self.threadPool = QThreadPool()
 
     def program_state(self):
-        return {'state': StateManager.state, 'delta_index': StateManager.deltaIndex}
+        return StateManager.GetFullState()
 
     @gui_thread_sync
     def ruleset(self):

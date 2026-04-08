@@ -1,6 +1,5 @@
 import React from 'react';
-import TextField from "./TextField";
-import {Stack} from "@mui/material";
+import {Stack, Typography} from "@mui/material";
 import i18n from "i18next";
 import {BACKEND_PORT} from "../env";
 import {NumberInput} from "../NumberInput";
@@ -100,20 +99,23 @@ export default class SetScore extends React.Component {
         const formFieldWidth = 195;
         return (
             <Stack gap={1.5} direction={"column"} alignItems={"center"}>
-                <TextField
-                    label={i18n.t("phase")}
-                    value={this.state.phase}
-                    variant={"outlined"}
-                    onChange={(e) => {this.setState({...this.state, phase: e.target.value})}}
-                    sx={{width: formFieldWidth}}
-                />
-                <TextField
-                    label={i18n.t("match")}
-                    value={this.state.match}
-                    variant={"outlined"}
-                    onChange={(e) => {this.setState({...this.state, match: e.target.value})}}
-                    sx={{width: formFieldWidth}}
-                />
+                {(this.state.phase || this.state.match) && (
+                    <Stack direction="row" spacing={1} alignItems="center">
+                        {this.state.phase && (
+                            <Typography variant="body2" color="text.secondary">
+                                {this.state.phase}
+                            </Typography>
+                        )}
+                        {this.state.phase && this.state.match && (
+                            <Typography variant="body2" color="text.secondary">-</Typography>
+                        )}
+                        {this.state.match && (
+                            <Typography variant="body2" color="text.secondary">
+                                {this.state.match}
+                            </Typography>
+                        )}
+                    </Stack>
+                )}
                 <NumberInput
                     type={"number"}
                     label={i18n.t("best_of", {value: ""})}

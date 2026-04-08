@@ -30,7 +30,7 @@ class StateManager:
     deltaIndex = 0
 
     lock = threading.RLock()
-    threads = []
+    _export_thread = None
     loop = None
 
     @contextlib.contextmanager
@@ -56,23 +56,9 @@ class StateManager:
     def SaveState():
         if StateManager.saveBlocked == 0:
             with StateManager.lock:
-                StateManager.threads = []
-
-                def ExportAll(ref_diff):
-                    with open("./out/program_state.json", 'wb', buffering=8192) as file:
-                        # logger.info("SaveState")
-                        StateManager.state.update({"timestamp": time.time()})
-                        file.write(orjson.dumps(
-                            StateManager.state, option=orjson.OPT_NON_STR_KEYS | orjson.OPT_INDENT_2))
-                        StateManager.state.pop("timestamp")
-
-                    if not SettingsManager.Get("general.disable_export", False):
-                        StateManager.ExportText(
-                            StateManager.lastSavedState, ref_diff)
-                    StateManager.lastSavedState = deep_clone(
-                        StateManager.state)
-
-                # logger.debug(StateManager.changedKeys)
+                # Wait for any previous export before computing new diff
+                if StateManager._export_thread is not None and StateManager._export_thread.is_alive():
+                    StateManager._export_thread.join()
 
                 diff = DeepDiff(
                     StateManager.lastSavedState,
@@ -82,7 +68,6 @@ class StateManager:
                     verbose_level=2, # Necessary to see values of added items.
                 )
                 delta = Delta(diff).to_flat_dicts()
-                # logger.debug(f"State diff length: {diff_count}")
                 if len(delta) > 100:
                     StateManager.deltaIndex += 1
                     StateManager.signals.state_big_change.emit()
@@ -99,13 +84,28 @@ class StateManager:
                 StateManager.changedKeys = []
 
                 if len(diff) > 0:
-                    exportThread = threading.Thread(
-                        target=partial(ExportAll, ref_diff=diff))
-                    StateManager.threads.append(exportThread)
-                    exportThread.start()
+                    # Snapshot state for thread-safe file I/O;
+                    # update lastSavedState now so the next diff is correct
+                    state_snapshot = deep_clone(StateManager.state)
+                    old_state = StateManager.lastSavedState
+                    StateManager.lastSavedState = state_snapshot
 
-                    for t in StateManager.threads:
-                        t.join()
+                    def _export(state_snap, old_snap, ref_diff):
+                        with open("./out/program_state.json", 'wb', buffering=8192) as file:
+                            state_snap["timestamp"] = time.time()
+                            file.write(orjson.dumps(
+                                state_snap, option=orjson.OPT_NON_STR_KEYS | orjson.OPT_INDENT_2))
+
+                        if not SettingsManager.Get("general.disable_export", False):
+                            StateManager.ExportText(
+                                old_snap, ref_diff, state_snap)
+
+                    StateManager._export_thread = threading.Thread(
+                        target=partial(_export,
+                                       state_snap=state_snapshot,
+                                       old_snap=old_state,
+                                       ref_diff=diff))
+                    StateManager._export_thread.start()
 
     def LoadState():
         try:
@@ -162,7 +162,19 @@ class StateManager:
     def Get(key: str, default=None):
         return deep_get(StateManager.state, key, default)
 
-    def ExportText(oldState, diff):
+    def GetFullState():
+        """Return a snapshot of the full state dict with the current delta index.
+
+        Thread-safe: acquires lock and returns a clone so callers cannot
+        mutate the live state.
+        """
+        with StateManager.lock:
+            return {
+                'state': deep_clone(StateManager.state),
+                'delta_index': StateManager.deltaIndex
+            }
+
+    def ExportText(oldState, diff, stateSnapshot=None):
         # logger.info("ExportState")
         # logger.info(diff)
 
@@ -202,7 +214,7 @@ class StateManager:
 
         for key in addedKeys:
             try:
-                item = extract(StateManager.state, key)
+                item = extract(stateSnapshot if stateSnapshot is not None else StateManager.state, key)
 
                 # Remove "root[" from start and separate keys
                 path = "/".join(key[5:].replace(
@@ -276,7 +288,6 @@ class StateManager:
                             f"./out/{path}" + "." + di.rsplit(".", 1)[-1]
                         ]
                     )
-                    StateManager.threads.append(t)
                     t.start()
                 except Exception as e:
                     logger.error(traceback.format_exc())

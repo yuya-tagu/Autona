@@ -137,6 +137,7 @@ root
 | `rules/react-web-ui.md` | `stage_strike_app/src/**` | React/Redux の規約 |
 | `rules/build-and-release.md` | `dependencies/**`, `scripts/**` | ビルド・リリース手順 |
 | `rules/state-and-webserver.md` | `src/StateManager.py`, `src/TSHWebServer*.py`, `src/Helpers/**` | 状態管理・Web サーバー・ヘルパーの作法 |
+| `rules/agent-pitfalls.md` | `src/**/*.py`, `tests/**/*.py` | エージェントが踏みやすい地雷の回避ルール |
 
 ### Hooks（自動検証）
 
@@ -154,6 +155,7 @@ root
 | `/create-test-checklist` | テストチェックリスト生成 |
 | `/review-pr` | 設計・保守性レビュー |
 | `/build-all` | Web UI + exe 一括ビルド |
+| `/verify` | テスト + ビルド + 起動確認の一括検証 |
 
 ### Plans（フェーズ単位の作業計画）
 
@@ -173,6 +175,8 @@ root
 |---------|------|
 | `architecture/python-imports.md` | src/ の import 関係マップ |
 | `architecture/singleton-init-order.md` | シングルトン初期化順と依存グラフ |
+| `architecture/state-keys.md` | StateManager キーパスの read/write マップ |
+| `architecture/python-hotspots.md` | 巨大ファイル・関数・コード重複の特定 |
 
 ※ 本ディレクトリのファイルは調査の事実情報のみを記録する。リファクタ方針や TODO は `.claude/known-smells.md` に分離する。
 

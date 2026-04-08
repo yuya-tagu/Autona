@@ -1,1 +1,1 @@
-from .TournamentStreamHelper import *
+from .TournamentStreamHelper import Window, App

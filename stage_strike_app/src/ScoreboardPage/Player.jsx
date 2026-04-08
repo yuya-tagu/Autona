@@ -308,20 +308,19 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
     return (
         <Card raised={true}>
             <CardHeader
+                sx={{padding: 1, '& .MuiCardHeader-avatar': {marginRight: 1}}}
                 avatar={<Avatar
                     src={player?.online_avatar}
-                    width={96}
-                    height={96}
-                    sx={{objectFit: "contain"}}
+                    sx={{width: 32, height: 32, objectFit: "contain"}}
                     alt={i18n.t("avatar_for", {player: state.name})}
                 >{state.name?.at(0) ?? "?"}</Avatar>}
-                action={<IconButton onClick={() => setState({...state, expanded: !state.expanded})}>
+                action={<IconButton size="small" onClick={() => setState({...state, expanded: !state.expanded})}>
                     <ExpandMore sx={{
                         transform: state.expanded ? 'rotate(0deg)' : 'rotate(270deg)'
                     }}/>
                 </IconButton>}
                 title={state.name}
-                height={96}
+                titleTypographyProps={{variant: 'body2'}}
             />
             <Collapse in={state.expanded} timeout={"auto"}>
                 <CardContent>
@@ -337,6 +336,7 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
                             <Autocomplete
                                 key={idBase + "tag"}
                                 id={idBase + "tag"}
+                                size="small"
                                 options={Object.values(playerDb)}
                                 value={state.name ?? ''}
                                 getOptionLabel={(/** TSHPlayerDbEntry|string */ player) => {
@@ -353,22 +353,26 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
                             />
                         </Stack>
 
-                        <TextField label={i18n.t("real_name")}
-                                   key={idBase + "realName"}
-                                   id={idBase + "realName"}
-                                   value={state.realName ?? ''}
-                                   onChange={changeHandlerFor('realName')}
-                        />
-
-                        {visibility.twitter && (
-                            <Stack {...rowProps} alignItems={"stretch"}>
-                                <TextField label={i18n.t("twitter")}
-                                           sx={{width: '100%'}}
-                                           key={idBase + "twitter"}
-                                           id={idBase + "twitter"}
-                                           value={state.twitter ?? ''}
-                                           onChange={changeHandlerFor('twitter')}
-                                />
+                        {(visibility.twitter || visibility.seed) && (
+                            <Stack {...rowProps}>
+                                {visibility.seed && (
+                                    <TextField label={i18n.t("seed")}
+                                               key={idBase + "seed"}
+                                               id={idBase + "seed"}
+                                               value={state.seed ?? ''}
+                                               onChange={changeHandlerFor('seed')}
+                                               sx={{width: '30%'}}
+                                    />
+                                )}
+                                {visibility.twitter && (
+                                    <TextField label={i18n.t("twitter")}
+                                               key={idBase + "twitter"}
+                                               id={idBase + "twitter"}
+                                               value={state.twitter ?? ''}
+                                               onChange={changeHandlerFor('twitter')}
+                                               sx={{width: '70%'}}
+                                    />
+                                )}
                             </Stack>
                         )}
 
@@ -378,15 +382,6 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
                                        id={idBase + "pronoun"}
                                        value={state.pronoun ?? ''}
                                        onChange={changeHandlerFor('pronoun')}
-                            />
-                        )}
-
-                        {visibility.seed && (
-                            <TextField label={i18n.t("seed")}
-                                       key={idBase + "seed"}
-                                       id={idBase + "seed"}
-                                       value={state.seed ?? ''}
-                                       onChange={changeHandlerFor('seed')}
                             />
                         )}
 
