@@ -642,7 +642,7 @@ def paste_characters(thumbnail, data, all_eyesight, used_assets, flip_p1=False, 
                         uncropped_edge_list.append(uncropped_edges)
                         rescaling_list.append(rescale_factor)
                 except KeyError:
-                    None
+                    logger.warning(f"Missing asset data for character key in player {player_key}")
             if character_list:
                 # For team 1, characters must come from the center
                 # so we have to reverse the array
@@ -904,9 +904,12 @@ def paste_player_text(thumbnail, data, use_team_names=False, use_sponsors=True, 
 
             player_name = " / ".join(player_list)
 
-            final_color_mask = color_mask[0]
+            if not color_mask:
+                final_color_mask = [player_text_color["font_color"]] * len(player_name)
+            else:
+                final_color_mask = color_mask[0]
 
-            if len(color_mask) > 0:
+            if len(color_mask) > 1:
                 for mask in color_mask[1:]:
                     final_color_mask += [player_text_color["font_color"]] * 3
                     final_color_mask += mask
@@ -1280,7 +1283,8 @@ def generate(settingsManager, isPreview=False, gameAssetManager=None, scoreboard
         with open(settings.get("thumbnail_type"), 'rt') as template_data_file:
             template_data = template_data_file.read()
             template_data = json.loads(template_data)
-    except:
+    except Exception as e:
+        logger.error(f"Failed to load thumbnail type: {e}")
         if isPreview:
             return
         raise Exception(f"Thumbnail type could not be loaded")
@@ -1379,8 +1383,9 @@ def generate(settingsManager, isPreview=False, gameAssetManager=None, scoreboard
         flip_p2 = deep_get(settings, f"game.{game_codename}.flip_p2")
         smooth_scale = deep_get(settings, f"game.{game_codename}.smooth_scale")
     except Exception as e:
+        logger.warning(f"Failed to load program state, falling back: {e}")
         if isPreview:
-            game_codename = data.get("game").get("codename")
+            game_codename = data.get("game", {}).get("codename", "test")
             data = createFalseData(gameAssetManager, deep_get(
                 settings, f"game.{game_codename}.asset_pack"))
             used_assets = "full"
@@ -1396,7 +1401,8 @@ def generate(settingsManager, isPreview=False, gameAssetManager=None, scoreboard
     try:
         with open(asset_data_path, 'rt', encoding='utf-8') as f:
             all_eyesight = json.loads(f.read()).get("eyesights", {})
-    except:
+    except Exception as e:
+        logger.warning(f"Failed to load eyesight data from {asset_data_path}: {e}")
         all_eyesight = {}
 
     Path(tmp_path).mkdir(parents=True, exist_ok=True)

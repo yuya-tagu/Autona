@@ -1,5 +1,5 @@
 from email.policy import default
-from multiprocessing import Lock
+from threading import Lock
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
