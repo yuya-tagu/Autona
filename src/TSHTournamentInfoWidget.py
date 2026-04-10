@@ -157,6 +157,12 @@ class TSHTournamentInfoWidget(QDockWidget):
 
             if fileName != None:
                 pix = QPixmap(fileName)
+                max_dim = 512
+                if pix.width() > max_dim or pix.height() > max_dim:
+                    pix = pix.scaled(
+                        max_dim, max_dim,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation)
                 pix.save("./layout/logo.png")
         except Exception as e:
             logger.error(traceback.format_exc())
@@ -180,6 +186,15 @@ class TSHTournamentInfoWidget(QDockWidget):
 
             pix = QPixmap()
             pix.loadFromData(data)
+
+            # Scale down large icons to prevent rendering issues
+            # in the off-screen QWebEngineView (thumbnail generator).
+            max_dim = 512
+            if pix.width() > max_dim or pix.height() > max_dim:
+                pix = pix.scaled(
+                    max_dim, max_dim,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation)
 
             pix.save("./layout/logo.png")
         except Exception as e:
