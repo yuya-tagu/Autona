@@ -246,10 +246,9 @@ def save_result(pixmap, data, settings, scoreboardNumber=1, isPreview=False):
     Path(out_path).mkdir(parents=True, exist_ok=True)
 
     if not isPreview:
-        tag_player1 = find(
-            f"score.{scoreboardNumber}.team.1.player.1.name", data)
-        tag_player2 = find(
-            f"score.{scoreboardNumber}.team.2.player.1.name", data)
+        # deep_get uses (dict, key) order; fallback to "" to avoid passing None to remove_special_chars
+        tag_player1 = deep_get(data, f"score.{scoreboardNumber}.team.1.player.1.name", "") or ""
+        tag_player2 = deep_get(data, f"score.{scoreboardNumber}.team.2.player.1.name", "") or ""
         thumbnail_filename = f"{remove_special_chars(tag_player1)}-vs-{remove_special_chars(tag_player2)}-{datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d-%H-%M-%S')}"
 
         pixmap.save(f"{out_path}/{thumbnail_filename}.png")
