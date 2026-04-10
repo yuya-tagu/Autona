@@ -1116,7 +1116,9 @@ class Window(QMainWindow):
         if checked:
             qdarktheme.setup_theme("light", additional_qss=UI.GLOBAL_QSS)
         else:
-            qdarktheme.setup_theme(additional_qss=UI.GLOBAL_QSS)
+            qdarktheme.setup_theme(
+                custom_colors=UI.DARK_CUSTOM_COLORS,
+                additional_qss=UI.GLOBAL_QSS)
 
         SettingsManager.Set("light_mode", checked)
         UI.notify_theme_change()
@@ -1125,7 +1127,9 @@ class Window(QMainWindow):
         if SettingsManager.Get("light_mode", False):
             qdarktheme.setup_theme("light", additional_qss=UI.GLOBAL_QSS)
         else:
-            qdarktheme.setup_theme(additional_qss=UI.GLOBAL_QSS)
+            qdarktheme.setup_theme(
+                custom_colors=UI.DARK_CUSTOM_COLORS,
+                additional_qss=UI.GLOBAL_QSS)
 
     def ToggleTopOption(self):
         if not hasattr(self, 'loadPlayerSetAction'):

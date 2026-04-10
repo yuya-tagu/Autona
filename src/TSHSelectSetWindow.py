@@ -60,11 +60,19 @@ class TSHSelectSetWindow(QDialog):
         ).setSectionResizeMode(QHeaderView.Stretch)
         self.startggSetSelectionItemList.resizeColumnsToContents()
 
+        bottomRow = QHBoxLayout()
+        layout.addLayout(bottomRow)
+
         btOk = QPushButton("OK")
-        layout.addWidget(btOk)
+        bottomRow.addWidget(btOk)
         btOk.clicked.connect(
             lambda x: self.LoadSelectedSet()
         )
+
+        self.btTrackStation = QPushButton(
+            QApplication.translate("app", "Track sets from a stream or station"))
+        bottomRow.addWidget(self.btTrackStation)
+        self.btTrackStation.clicked.connect(self._openStationSelection)
 
         self.labelStatus = QLabel()
         layout.addWidget(self.labelStatus)
@@ -180,3 +188,7 @@ class TSHSelectSetWindow(QDialog):
             TSHTournamentDataProvider.instance.setLoadingWorker.cancel()
             TSHTournamentDataProvider.instance.setLoadingWorker.signals.blockSignals(
                 True)
+
+    def _openStationSelection(self):
+        self.close()
+        self.parent().signals.StationSelection.emit()
