@@ -106,49 +106,17 @@ class TSHThumbnailSettingsWidget(QDockWidget):
             self.GeneratePreview()
         ])
 
-        self.mainIcon = self.settings.findChild(QPushButton, "customMainIcon")
-        self.mainIconReset = self.settings.findChild(
-            QPushButton, "customMainIconReset")
-        self.mainIconReset.setIcon(QIcon('assets/icons/undo.svg'))
-        self.mainIconReset.clicked.connect(lambda: [
-            SettingsManager.Unset("thumbnail_config.main_icon_path"),
-            self.GeneratePreview()
-        ])
-
-        self.topLeftIcon = self.settings.findChild(
-            QPushButton, "customTopLeftIcon")
-        self.topLeftIconReset = self.settings.findChild(
-            QPushButton, "customTopLeftIconReset")
-        self.topLeftIconReset.setIcon(QIcon('assets/icons/undo.svg'))
-        self.topLeftIconReset.clicked.connect(lambda: [
-            SettingsManager.Unset("thumbnail_config.side_icon_list.L"),
-            self.GeneratePreview()
-        ])
-
-        self.topRightIcon = self.settings.findChild(
-            QPushButton, "customTopRightIcon")
-        self.topRightIconReset = self.settings.findChild(
-            QPushButton, "customTopRightIconReset")
-        self.topRightIconReset.setIcon(QIcon('assets/icons/undo.svg'))
-        self.topRightIconReset.clicked.connect(lambda: [
-            SettingsManager.Unset("thumbnail_config.side_icon_list.R"),
-            self.GeneratePreview()
-        ])
+        # Hide the Custom Icon section — icons are managed via
+        # tournament info (DownloadIcon) and not user-customizable.
+        for name in ["label_2", "customMainIcon", "customMainIconReset",
+                      "customTopLeftIcon", "customTopLeftIconReset",
+                      "customTopRightIcon", "customTopRightIconReset"]:
+            w = self.settings.findChild(QWidget, name)
+            if w:
+                w.hide()
 
         self.background.clicked.connect(
             lambda: self.SaveImage("background_path"))
-
-        self.mainIcon.clicked.connect(lambda: self.SaveImage("main_icon_path"))
-
-        if not self.GetSetting("side_icon_list.L", None):
-            self.SaveSettings("side_icon_list.L", "")
-        self.topLeftIcon.clicked.connect(
-            lambda: self.SaveIcons("side_icon_list", "L"))
-
-        if not self.GetSetting("side_icon_list.R", None):
-            self.SaveSettings("side_icon_list.R", "")
-        self.topRightIcon.clicked.connect(
-            lambda: self.SaveIcons("side_icon_list", "R"))
 
         # Template selector (type_a / type_b)
         # NOTE: must use `is not None` — empty QComboBox is falsy via __len__

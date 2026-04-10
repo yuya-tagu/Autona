@@ -115,24 +115,38 @@ def icon_path(name: str) -> str:
     return f"assets/icons/{name}"
 
 
+# ─── Blue-tinted Dark Theme Colors ──────────────────────────────
+
+DARK_CUSTOM_COLORS = {
+    "background": "#1b1e2b",
+    "foreground": "#dce0e8",
+    "primary": "#7eaaed",
+    "border": "#333852",
+    "input.background": "#252a3a",
+    "statusBar.background": "#161926",
+    "toolbar.background": "#212538",
+    "scrollbar.background": "#ffffff08",
+}
+
+# ─── Uniform Widget Height ──────────────────────────────────────
+
+_WIDGET_H = 28   # px — standard height for interactive controls
+
 # ─── Global QSS ─────────────────────────────────────────────────
 
-GLOBAL_QSS = """
-/* Noto Sans JP has asymmetric ascent:descent (14:3), causing text to appear
-   shifted downward in fixed-height widgets. Adjust padding to visually center. */
-QPushButton, QToolButton {
-    padding: 3px 8px 4px 8px;
-}
-QComboBox, QSpinBox, QLineEdit {
-    padding: 2px 4px 3px 4px;
-}
-QLabel {
-    padding-top: -1px;
-    padding-bottom: 1px;
-}
-QTabBar::tab {
-    padding: 3px 8px 4px 8px;
-}
+GLOBAL_QSS = f"""
+/* Uniform height for all interactive controls */
+QPushButton, QToolButton {{
+    min-height: {_WIDGET_H}px;
+    padding: 0px 8px;
+}}
+QComboBox, QSpinBox, QLineEdit {{
+    min-height: {_WIDGET_H}px;
+    padding: 0px 4px;
+}}
+QTabBar::tab {{
+    padding: 4px 8px;
+}}
 """
 
 # ─── Theme Change Listeners ─────────────────────────────────────

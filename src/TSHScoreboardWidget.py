@@ -236,13 +236,12 @@ class TSHScoreboardWidget(QWidget):
         self.columns.layout().setSpacing(UI.SPACE_SM)
         self.innerWidget.layout().addWidget(self.columns)
 
-        bottomOptions = QWidget()
-        bottomOptions.setLayout(QVBoxLayout())
-        bottomOptions.layout().setContentsMargins(0, 0, 0, 0)
-        bottomOptions.layout().setSpacing(UI.SPACE_SM)
-        bottomOptions.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
-
-        self.innerWidget.layout().addWidget(bottomOptions)
+        # --- Stream / set loading section (above phase/match) ---
+        self.streamSection = QWidget()
+        self.streamSection.setLayout(QVBoxLayout())
+        self.streamSection.layout().setContentsMargins(0, 0, 0, 0)
+        self.streamSection.layout().setSpacing(UI.SPACE_SM)
+        self.streamSection.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
 
         if SettingsManager.Get("bsky_account.enable_bluesky", True):
             self.streamUrl = QHBoxLayout()
@@ -271,12 +270,12 @@ class TSHScoreboardWidget(QWidget):
             StateManager.Set(
                 f"score.{self.scoreboardNumber}.stream_url",
                 self.streamUrlCombo.currentData() or self.streamUrlCombo.currentText())
-            bottomOptions.layout().addLayout(self.streamUrl)
+            self.streamSection.layout().addLayout(self.streamUrl)
 
         loadSetRow = QHBoxLayout()
         loadSetRow.setContentsMargins(0, 0, 0, 0)
         loadSetRow.setSpacing(UI.SPACE_SM)
-        bottomOptions.layout().addLayout(loadSetRow)
+        self.streamSection.layout().addLayout(loadSetRow)
 
         self.btSelectSet = QPushButton(
             QApplication.translate("app", "Load set"))
@@ -308,17 +307,19 @@ class TSHScoreboardWidget(QWidget):
 
         UI.on_theme_change(self._refresh_theme_styles)
 
-        hbox = QHBoxLayout()
-        hbox.setContentsMargins(0, 0, 0, 0)
-        hbox.setSpacing(UI.SPACE_SM)
-        bottomOptions.layout().addLayout(hbox)
+        # --- Separator (inserted into layout later via insertWidget) ---
+        self.streamScoreSeparator = QFrame()
+        self.streamScoreSeparator.setFrameShape(QFrame.Shape.HLine)
+        self.streamScoreSeparator.setFrameShadow(QFrame.Shadow.Sunken)
 
-        self.btLoadStationSet = QPushButton(
-            QApplication.translate("app", "Track sets from a stream or station"))
-        self.btLoadStationSet.setIcon(QIcon(UI.icon_path("station.svg")))
-        hbox.addWidget(self.btLoadStationSet)
-        self.btLoadStationSet.clicked.connect(
-            self.signals.StationSelection.emit)
+        # --- Bottom options (settings, timer) below team columns ---
+        bottomOptions = QWidget()
+        bottomOptions.setLayout(QVBoxLayout())
+        bottomOptions.layout().setContentsMargins(0, 0, 0, 0)
+        bottomOptions.layout().setSpacing(UI.SPACE_SM)
+        bottomOptions.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
+
+        self.innerWidget.layout().addWidget(bottomOptions)
 
         settingsRow = QHBoxLayout()
         settingsRow.setContentsMargins(0, 0, 0, 0)
@@ -352,7 +353,7 @@ class TSHScoreboardWidget(QWidget):
         self.timerLayout.setSizePolicy(
             QSizePolicy.Minimum, QSizePolicy.Maximum)
         self.timerLayout.layout().setAlignment(Qt.AlignmentFlag.AlignCenter)
-        bottomOptions.layout().addWidget(self.timerLayout)
+        self.streamSection.layout().addWidget(self.timerLayout)
         self.labelAutoUpdate = QLabel("Auto update")
         self.timerLayout.layout().addWidget(self.labelAutoUpdate)
         self.timerTime = QLabel("0")
@@ -530,7 +531,10 @@ class TSHScoreboardWidget(QWidget):
         self.scoreBar.layout().addWidget(bestOfGroup, 1)
 
         columnsIndex = self.innerWidget.layout().indexOf(self.columns)
+        # Insert order: streamSection, separator, scoreBar, then columns
         self.innerWidget.layout().insertWidget(columnsIndex, self.scoreBar)
+        self.innerWidget.layout().insertWidget(columnsIndex, self.streamScoreSeparator)
+        self.innerWidget.layout().insertWidget(columnsIndex, self.streamSection)
         self.scoreColumn.hide()
 
         # Score widget: buttons + displays built in Python
