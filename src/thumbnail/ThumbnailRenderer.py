@@ -28,11 +28,19 @@ class ThumbnailRenderer(QObject):
     """Renders thumbnail HTML templates to images using QWebEngineView.
 
     Architecture (modeled after scoreboard layout):
-    - HTML page is loaded ONCE at init time
-    - Each render injects new data via JS (no page reload)
+    - HTML page for the active template is loaded once
+    - Each render injects new data via JS (no page reload) until the
+      template id changes — then the new template's HTML is loaded
     - Async by default: result emitted via renderComplete signal
     - Sync wrapper available for final thumbnail generation
     """
+
+    # Maps template id -> HTML file inside layout/thumbnail/
+    TEMPLATE_HTML_FILES = {
+        "type_a": "index.html",
+        "type_b": "type_b.html",
+    }
+    DEFAULT_TEMPLATE_ID = "type_a"
 
     renderComplete = pyqtSignal(QPixmap)
 
@@ -63,6 +71,7 @@ class ThumbnailRenderer(QObject):
         # Transparent background
         self._view.page().setBackgroundColor(Qt.GlobalColor.transparent)
 
+        self._template_id = None       # Currently loaded template id
         self._page_loaded = False
         self._pending_payload = None   # Payload waiting for initial page load
         self._rendering = False
@@ -74,11 +83,27 @@ class ThumbnailRenderer(QObject):
         self._view.loadFinished.connect(self._on_load_finished)
         self._view.page().titleChanged.connect(self._on_title_changed)
 
-        # Load page once at init
+        # Load default template at init
+        self._load_template(self.DEFAULT_TEMPLATE_ID)
+
+    def _resolve_template_id(self, template: dict) -> str:
+        tid = (template or {}).get("template_id")
+        if tid not in self.TEMPLATE_HTML_FILES:
+            return self.DEFAULT_TEMPLATE_ID
+        return tid
+
+    def _load_template(self, template_id: str):
+        """Load (or reload) the HTML for the given template id."""
+        html_file = self.TEMPLATE_HTML_FILES.get(
+            template_id, self.TEMPLATE_HTML_FILES[self.DEFAULT_TEMPLATE_ID])
         html_path = os.path.abspath(
-            os.path.join(os.getcwd(), "layout", "thumbnail", "index.html"))
+            os.path.join(os.getcwd(), "layout", "thumbnail", html_file))
         url = QUrl.fromLocalFile(html_path)
-        logger.info(f"Loading thumbnail template (one-time): {url.toString()}")
+        logger.info(
+            f"Loading thumbnail template '{template_id}': {url.toString()}")
+        self._template_id = template_id
+        self._page_loaded = False
+        self._rendering = False
         self._view.load(url)
 
     def render(self, data: dict, config: dict, template: dict):
@@ -88,6 +113,13 @@ class ThumbnailRenderer(QObject):
         the queued one — only the latest data is rendered.
         """
         payload = {"data": data, "config": config, "template": template}
+        template_id = self._resolve_template_id(template)
+
+        if template_id != self._template_id:
+            # Switch template — queue the payload and reload HTML
+            self._pending_payload = payload
+            self._load_template(template_id)
+            return
 
         if not self._page_loaded:
             self._pending_payload = payload
@@ -107,7 +139,11 @@ class ThumbnailRenderer(QObject):
         Page is already loaded so this blocks for ~50-100ms, not seconds.
         """
         payload = {"data": data, "config": config, "template": template}
+        template_id = self._resolve_template_id(template)
         self._sync_result = None
+
+        if template_id != self._template_id:
+            self._load_template(template_id)
 
         if not self._page_loaded:
             loop = QEventLoop()

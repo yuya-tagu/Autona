@@ -821,14 +821,10 @@ p, li { white-space: pre-wrap; }
         <translation>大会情報</translation>
     </message>
     <message>
-        <location filename="../TournamentStreamHelper.py" line="430"/>
-        <location filename="../TournamentStreamHelper.py" line="435"/>
-        <source>Scoreboard Manager</source>
-        <translation>スコアボードを管理</translation>
-    </message>
-    <message>
         <location filename="../TSHScoreboardManager.py" line="59"/>
         <location filename="../TSHScoreboardManager.py" line="89"/>
+        <location filename="../TournamentStreamHelper.py" line="454"/>
+        <location filename="../TournamentStreamHelper.py" line="459"/>
         <source>Scoreboard</source>
         <translation>スコアボード</translation>
     </message>

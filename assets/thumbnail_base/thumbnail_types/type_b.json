@@ -1,0 +1,72 @@
+{
+    "name": "Center Panel",
+    "default_background": "./assets/thumbnail_base/type_b_default_bg.png",
+    "base_ratio": {
+        "x": 1920,
+        "y": 1080
+    },
+    "team_areas": {
+        "team_1": {
+            "x": 0,
+            "y": 0,
+            "width": 738,
+            "height": 1080
+        },
+        "team_2": {
+            "x": 1182,
+            "y": 0,
+            "width": 738,
+            "height": 1080
+        }
+    },
+    "center_panel": {
+        "x": 738,
+        "y": 0,
+        "width": 444,
+        "height": 1080,
+        "background_color": "#1D1B18",
+        "border_color": "rgba(255, 255, 255, 0.22)",
+        "accent_color": "#FF6E20"
+    },
+    "tournament_name": {
+        "y": 40,
+        "height": 280,
+        "font_size": 56,
+        "color": "#cfd3da"
+    },
+    "main_icon": {
+        "y": 390,
+        "width": 280,
+        "height": 300
+    },
+    "phase_match": {
+        "y": 750,
+        "height": 220,
+        "phase_font_size": 44,
+        "match_font_size": 128,
+        "color": "#ffffff",
+        "background_color": "rgba(0, 0, 0, 0)"
+    },
+    "venue_info": {
+        "y": 970,
+        "height": 80,
+        "font_size": 28,
+        "color": "#cfd3da",
+        "opacity": 0.78
+    },
+    "player_names": {
+        "height": 360,
+        "bottom_offset": 0,
+        "padding_bottom": 80,
+        "font_size": 120,
+        "sponsor_font_size": 88,
+        "color": "#ffffff",
+        "sponsor_color_1": "#ff7a6d",
+        "sponsor_color_2": "#29b6f6"
+    },
+    "background": {
+        "brightness": 0.7,
+        "blur": 4
+    },
+    "initial_font_size": 80
+}

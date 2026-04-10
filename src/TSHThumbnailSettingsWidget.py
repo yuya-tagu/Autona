@@ -138,13 +138,26 @@ class TSHThumbnailSettingsWidget(QDockWidget):
         self.topRightIcon.clicked.connect(
             lambda: self.SaveIcons("side_icon_list", "R"))
 
-        # Hide template selector (type_a only)
-        templateSelect = self.settings.findChild(QComboBox, "templateSelect")
-        if templateSelect:
-            templateSelect.hide()
-            label = self.settings.findChild(QLabel, "label_template")
-            if label:
-                label.hide()
+        # Template selector (type_a / type_b)
+        # NOTE: must use `is not None` — empty QComboBox is falsy via __len__
+        self.templateSelect = self.settings.findChild(QComboBox, "templateSelect")
+        if self.templateSelect is not None:
+            self._template_options = [
+                ("type_a", QApplication.translate("app", "Standard")),
+                ("type_b", QApplication.translate("app", "Center Panel")),
+            ]
+            self.templateSelect.blockSignals(True)
+            self.templateSelect.clear()
+            for tid, label in self._template_options:
+                self.templateSelect.addItem(label, tid)
+            self.templateSelect.blockSignals(False)
+            self.templateSelect.currentIndexChanged.connect(
+                lambda: self.SaveSettings(
+                    key="template_id",
+                    val=self.templateSelect.currentData(),
+                    generatePreview=True,
+                )
+            )
 
         # CHECKBOX
         self.phase_name = self.settings.findChild(QCheckBox, "phaseNameCheck")
@@ -292,6 +305,15 @@ class TSHThumbnailSettingsWidget(QDockWidget):
             'codename')
 
         self.GetSetting("main_icon_path", "./layout/logo.png")
+
+        # Template selector — see note above re: `is not None`
+        if getattr(self, "templateSelect", None) is not None:
+            current_tid = self.GetSetting("template_id", "type_a")
+            idx = self.templateSelect.findData(current_tid)
+            if idx >= 0:
+                self.templateSelect.blockSignals(True)
+                self.templateSelect.setCurrentIndex(idx)
+                self.templateSelect.blockSignals(False)
 
         # Upper checkboxes
         self.phase_name.blockSignals(True)

@@ -1,0 +1,441 @@
+/* type_b: Center Panel layout (NFL-style) */
+/* Template values are injected as CSS custom properties by type_b.js */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  /* Material-design surface tokens (mirrors layout/main.css) */
+  --bevel-light: rgba(255, 255, 255, 0.22);
+  --bevel-dark: rgba(0, 0, 0, 0.55);
+}
+
+body {
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  position: relative;
+  background: transparent;
+  font-family: "LINE Seed JP", sans-serif;
+  letter-spacing: -0.3px;
+}
+
+.layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* --- Background --- */
+
+.background {
+  z-index: 0;
+  /* Confine the tint blend so it only affects the bg image, not other layers */
+  isolation: isolate;
+  /* Knock back the whole background stack (image + colored tint) so the
+     characters and player names keep visual priority. Applied on the
+     container, so it processes the already-composited image + ::after. */
+  filter: saturate(0.7) brightness(0.85);
+}
+
+.background img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  /* Slight overflow to hide blur edges */
+  transform: scale(1.05);
+  transform-origin: center;
+  /* Force grayscale (defensive — bg image should already be monochrome),
+     then a touch of contrast so the duotone tint stays punchy. */
+  filter:
+    grayscale(100%)
+    contrast(1.1)
+    brightness(var(--bg-brightness, 0.75))
+    blur(var(--bg-blur, 4px));
+}
+
+/* 1P/2P tint overlay — horizontal split that mirrors the layout's 5:3:5 grid
+   (team1 0–738, center panel 738–1182, team2 1182–1920).
+   mix-blend-mode: color preserves the image's luminosity and only swaps in
+   hue + saturation — the cleanest way to colorize a grayscale image without
+   producing muddy midtones (multiply) or washed highlights (screen).
+   Transition points (38% / 62%) align with the center panel edges so each
+   side of the image is tinted with its player's color and the panel area
+   blends between the two. */
+.background::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(
+    to right,
+    var(--p1-color, #ff7a6d) 0%,
+    var(--p1-color, #ff7a6d) 38%,
+    var(--p2-color, #29b6f6) 62%,
+    var(--p2-color, #29b6f6) 100%
+  );
+  mix-blend-mode: color;
+  pointer-events: none;
+}
+
+/* --- Character areas (left/right of center panel) --- */
+
+.characters {
+  z-index: 1;
+}
+
+.team {
+  position: absolute;
+  top: var(--team-y, 0px);
+  height: var(--team-h, 1080px);
+  width: var(--team-w, 760px);
+  overflow: hidden;
+  display: flex;
+  /* Confine the key-light blend mode to each team's own stacking context
+     so it only affects that team's characters, not the background or panel. */
+  isolation: isolate;
+}
+
+.team-1 {
+  left: var(--team1-x, 0px);
+}
+
+.team-2 {
+  left: var(--team2-x, 1160px);
+}
+
+.char-slot {
+  position: relative;
+  overflow: hidden;
+  flex: 1;
+}
+
+.char-slot > div {
+  width: 100%;
+  height: 100%;
+}
+
+.char-slot.flipped > div {
+  transform: scaleX(-1);
+}
+
+/* Cinematic base grade for character art: deepen contrast, boost saturation,
+   and slightly reduce brightness so the colored key light has dark midtones
+   to paint on top of. drop-shadow adds a soft colored rim/backlight around
+   the silhouette — PNG transparency makes this read as stage lighting. */
+.team-1 .char-slot > div {
+  filter:
+    contrast(1.12) saturate(1.18) brightness(0.9)
+    drop-shadow(0 0 30px color-mix(in srgb, var(--p1-color, #ff7a6d) 60%, transparent))
+    drop-shadow(0 0 6px color-mix(in srgb, var(--p1-color, #ff7a6d) 75%, transparent));
+}
+
+.team-2 .char-slot > div {
+  filter:
+    contrast(1.12) saturate(1.18) brightness(0.9)
+    drop-shadow(0 0 30px color-mix(in srgb, var(--p2-color, #29b6f6) 60%, transparent))
+    drop-shadow(0 0 6px color-mix(in srgb, var(--p2-color, #29b6f6) 75%, transparent));
+}
+
+/* Colored key light cast across each side.
+   mix-blend-mode: overlay brightens highlights toward the team color and
+   darkens shadows — the same math a gel-covered stage lamp does, and the
+   cleanest way to "paint" light onto an image without flattening it.
+   Gradient runs from the outer edge (strongest, where the lamp sits) toward
+   the center panel (softer falloff). */
+.team::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: overlay;
+}
+
+.team-1::after {
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--p1-color, #ff7a6d) 60%, transparent) 0%,
+    color-mix(in srgb, var(--p1-color, #ff7a6d) 30%, transparent) 55%,
+    color-mix(in srgb, var(--p1-color, #ff7a6d) 12%, transparent) 100%
+  );
+}
+
+.team-2::after {
+  background: linear-gradient(
+    to left,
+    color-mix(in srgb, var(--p2-color, #29b6f6) 60%, transparent) 0%,
+    color-mix(in srgb, var(--p2-color, #29b6f6) 30%, transparent) 55%,
+    color-mix(in srgb, var(--p2-color, #29b6f6) 12%, transparent) 100%
+  );
+}
+
+/* --- Center panel --- */
+
+.center-panel {
+  z-index: 2;
+}
+
+/* Material-design surface tile (mirrors scoreboard_Universal/.tile pattern) */
+.panel-bg {
+  position: absolute;
+  left: var(--panel-x, 738px);
+  top: var(--panel-y, 0px);
+  width: var(--panel-w, 444px);
+  height: var(--panel-h, 1080px);
+  background-color: var(--panel-bg-color, #1D1B18);
+  background-image:
+    /* Subtle vertical fade for depth */
+    linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.04) 0%,
+      transparent 40%,
+      rgba(0, 0, 0, 0.25) 100%
+    ),
+    /* Fractal noise grain (data URI — same SVG as scoreboard_Universal) */
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.08'/%3E%3C/svg%3E"),
+    /* 45° hairlines */
+    repeating-linear-gradient(
+      45deg,
+      transparent,
+      transparent 1px,
+      rgba(255, 255, 255, 0.035) 1px,
+      rgba(255, 255, 255, 0.035) 2px
+    );
+  border-left: 2px solid var(--bevel-light);
+  border-right: 2px solid var(--bevel-dark);
+  box-shadow:
+    -10px 0 28px rgba(0, 0, 0, 0.55),
+    10px 0 28px rgba(0, 0, 0, 0.55),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.tournament-name {
+  position: absolute;
+  left: var(--panel-x, 738px);
+  top: var(--tournament-y, 60px);
+  width: var(--panel-w, 444px);
+  height: var(--tournament-h, 200px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-family: var(--phase-font, "LINE Seed JP", sans-serif);
+  font-size: var(--tournament-font-size, 56px);
+  font-weight: 700;
+  color: var(--tournament-color, #f4f1ec);
+  padding: 0 20px;
+  letter-spacing: 0.5px;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+}
+
+.tournament-name .text {
+  display: inline-block;
+  white-space: pre-wrap;
+  line-height: 1.1;
+}
+
+.center-main-icon {
+  position: absolute;
+  left: var(--main-icon-x, 780px);
+  top: var(--main-icon-y, 290px);
+  width: var(--main-icon-w, 360px);
+  height: var(--main-icon-h, 380px);
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+/* Phase / match — text-only, no background (sits on panel-bg directly) */
+.phase-match {
+  position: absolute;
+  left: var(--panel-x, 738px);
+  top: var(--phase-y, 620px);
+  width: var(--panel-w, 444px);
+  height: var(--phase-h, 160px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-family: var(--phase-font, "LINE Seed JP", sans-serif);
+  font-size: var(--phase-font-size, 64px);
+  font-weight: 700;
+  color: var(--phase-color, #ffffff);
+  padding: 0 10px;
+  overflow: hidden;
+  letter-spacing: 1px;
+}
+
+.phase-match .text {
+  display: inline-block;
+  line-height: 1.0;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.phase-match .phase-text {
+  display: block;
+  font-size: var(--phase-name-font-size, 44px);
+  font-weight: 700;
+  opacity: 0.9;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+  line-height: 1.0;
+  white-space: nowrap;
+  /* Match the player-name thickening technique */
+  -webkit-text-stroke: 1px currentColor;
+  paint-order: stroke fill;
+}
+
+.phase-match .match-text {
+  display: block;
+  font-size: var(--match-font-size, 128px);
+  font-weight: 700;
+  line-height: 1.0;
+  white-space: nowrap;
+}
+
+/* Venue info — subtle date + location line at the bottom of the panel */
+.venue-info {
+  position: absolute;
+  left: var(--panel-x, 738px);
+  top: var(--venue-y, 970px);
+  width: var(--panel-w, 444px);
+  height: var(--venue-h, 80px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--phase-font, "LINE Seed JP", sans-serif);
+  font-size: var(--venue-font-size, 28px);
+  font-weight: 400;
+  color: var(--venue-color, #cfd3da);
+  opacity: var(--venue-opacity, 0.78);
+  letter-spacing: 1.5px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  padding: 0 16px;
+  text-align: center;
+}
+
+.venue-info .text {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.venue-info:empty,
+.venue-info .text:empty {
+  display: none;
+}
+
+/* --- Player names (bottom strips, overlay on character areas) --- */
+
+.player-names {
+  z-index: 3;
+}
+
+.player-name {
+  position: absolute;
+  bottom: var(--name-bottom, 0px);
+  height: var(--name-h, 360px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  font-family: var(--player-font, "LINE Seed JP", sans-serif);
+  font-size: var(--name-font-size, 60px);
+  font-weight: 700;
+  color: var(--name-color, #ffffff);
+  /* Background is set per-side below (.p1 / .p2) using --p1-color / --p2-color */
+  padding: 0 24px var(--name-padding-bottom, 80px) 24px;
+  overflow: hidden;
+}
+
+/* Per-side strip backgrounds: a dark base (anchors legibility — white text
+   needs darker pixels beneath it to pop) with a very subtle team-color tint
+   layered on top. Keeping the color hint under ~25% opacity ensures we only
+   shift the hue slightly — never raise the overall brightness, and never
+   wash toward white, even when the team color is a bright saturated tone. */
+.player-name.p1 {
+  left: var(--team1-x, 0px);
+  width: var(--team-w, 760px);
+  background:
+    linear-gradient(
+      to top,
+      color-mix(in srgb, var(--p1-color, #ff7a6d) 22%, transparent) 0%,
+      color-mix(in srgb, var(--p1-color, #ff7a6d) 10%, transparent) 35%,
+      transparent 70%
+    ),
+    linear-gradient(
+      to top,
+      rgba(0, 0, 0, 0.55) 0%,
+      rgba(0, 0, 0, 0.3) 40%,
+      rgba(0, 0, 0, 0.1) 70%,
+      transparent 100%
+    );
+}
+
+.player-name.p2 {
+  left: var(--team2-x, 1160px);
+  width: var(--team-w, 760px);
+  background:
+    linear-gradient(
+      to top,
+      color-mix(in srgb, var(--p2-color, #29b6f6) 22%, transparent) 0%,
+      color-mix(in srgb, var(--p2-color, #29b6f6) 10%, transparent) 35%,
+      transparent 70%
+    ),
+    linear-gradient(
+      to top,
+      rgba(0, 0, 0, 0.55) 0%,
+      rgba(0, 0, 0, 0.3) 40%,
+      rgba(0, 0, 0, 0.1) 70%,
+      transparent 100%
+    );
+}
+
+.player-name .text {
+  display: inline-block;
+  white-space: nowrap;
+  text-align: center;
+  line-height: 1.05;
+  /* Slight slant — LINE Seed JP has no italic face, so use synthesized oblique */
+  font-style: oblique 8deg;
+  font-weight: 700;
+  /* Thicken glyphs beyond Bold by stroking with the fill color
+     (LINE Seed JP has no Black/ExtraBold face) */
+  -webkit-text-stroke: 2.5px currentColor;
+  paint-order: stroke fill;
+  transform-origin: center bottom;
+  /* Soft drop shadow only — outline removed per design */
+  text-shadow: 0 4px 14px rgba(0, 0, 0, 0.85);
+}
+
+.player-name .sponsor {
+  display: block;
+  font-size: var(--sponsor-font-size, 44px);
+  color: var(--sponsor-color-1, #ff7a6d);
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+
+.player-name.p2 .sponsor {
+  color: var(--sponsor-color-2, #29b6f6);
+}
+
+.player-name .name-line {
+  display: block;
+}
+
+/* Multi-player fallback: sponsor shown inline with the name on the same line */
+.player-name .sponsor-inline {
+  font-size: var(--sponsor-font-size, 44px);
+  color: var(--sponsor-color-1, #ff7a6d);
+  margin-right: 8px;
+}
+
+.player-name.p2 .sponsor-inline {
+  color: var(--sponsor-color-2, #29b6f6);
+}

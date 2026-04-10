@@ -52,6 +52,7 @@ python main.py
 - **TSH.exe が起動中の場合は `taskkill /IM TSH.exe /F` で終了してからコピーしてよい**
 - フォント: LINE Seed JP（`assets/font/LINESeedJP/`、Google Fonts gstatic CDN から取得）
 - 翻訳コンパイル: `pyside6-lrelease src/i18n/TSH_ja.ts -qm src/i18n/TSH_ja.qm`（※ PySide6 は PyInstaller ビルド前にアンインストールすること。PyQt6 と共存不可）
+- **WebEngine 依存**: サムネイル生成（[src/thumbnail/ThumbnailRenderer.py](src/thumbnail/ThumbnailRenderer.py)）が `PyQt6-WebEngine` を使用。`dependencies/requirements.txt` に含まれており、`pip install -r` で自動インストールされる。Qt6WebEngineCore.dll が約 196 MB あるため、TSH.exe が 245 MB 前後になるのは正常
 
 ---
 

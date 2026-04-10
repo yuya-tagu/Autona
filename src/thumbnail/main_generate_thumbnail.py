@@ -72,9 +72,13 @@ def createFalseData(gameAssetManager: TSHGameAssetManager = None, used_assets: s
         # No game selected — return empty template (background/foreground/icons only)
         return {
             "game": {"codename": "test", "name": "Test", "smashgg_id": 0},
+            "tournamentInfo": {
+                "tournamentName": QApplication.translate("app", "Sample Tournament"),
+                "themeColor": "#2a2a2a",
+            },
             "score": {
                 "1": {
-                    "best_of": 0, "match": "", "phase": "",
+                    "best_of": 3, "match": "", "phase": "",
                     "team": {
                         "1": {"losers": False, "player": {"1": {"character": {}, "country": {}, "mergedName": "", "name": "", "state": {}, "team": ""}}, "score": 0, "teamName": ""},
                         "2": {"losers": False, "player": {"1": {"character": {}, "country": {}, "mergedName": "", "name": "", "state": {}, "team": ""}}, "score": 0, "teamName": ""}
@@ -89,9 +93,13 @@ def createFalseData(gameAssetManager: TSHGameAssetManager = None, used_assets: s
             "name": gameAssetManager.instance.selectedGame.get("name", "Test"),
             "smashgg_id": 0
         },
+        "tournamentInfo": {
+            "tournamentName": QApplication.translate("app", "Sample Tournament"),
+            "themeColor": "#2a2a2a",
+        },
         "score": {
             "1": {
-                "best_of": 0,
+                "best_of": 3,
                 "match": TSHLocaleHelper.matchNames.get("winners_final"),
                 "phase": TSHLocaleHelper.phaseNames.get("group").format("A"),
                 "team": {
@@ -154,6 +162,17 @@ def remove_special_chars(input_str: str):
     return input_str
 
 
+SUPPORTED_TEMPLATE_IDS = ("type_a", "type_b")
+DEFAULT_TEMPLATE_ID = "type_a"
+
+
+def _resolve_template_id(settings):
+    tid = (settings or {}).get("template_id", DEFAULT_TEMPLATE_ID)
+    if tid not in SUPPORTED_TEMPLATE_IDS:
+        return DEFAULT_TEMPLATE_ID
+    return tid
+
+
 def prepare_data(settingsManager, isPreview=False, gameAssetManager=None, scoreboardNumber=1):
     """Prepare data, config, and template for thumbnail rendering.
 
@@ -164,10 +183,13 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None, scoreb
     if not settings:
         settings = {}
 
-    # Load template JSON
-    template_path = "./assets/thumbnail_base/thumbnail_types/type_a.json"
+    # Load template JSON based on selected template id
+    template_id = _resolve_template_id(settings)
+    template_path = f"./assets/thumbnail_base/thumbnail_types/{template_id}.json"
     with open(template_path, 'rt') as f:
         template_data = json.load(f)
+    # Stamp id so the renderer can switch HTML when needed
+    template_data["template_id"] = template_id
 
     # Read from in-memory state first (always up-to-date),
     # fall back to file for non-preview (final) generation

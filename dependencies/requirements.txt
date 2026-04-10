@@ -12,6 +12,7 @@ asyncio
 python-dateutil==2.9.0
 pynput==1.7.7
 PyQt6
+PyQt6-WebEngine
 loguru==0.7.3
 flask-socketio
 simple_websocket
