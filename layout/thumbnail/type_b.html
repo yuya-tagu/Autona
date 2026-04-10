@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="./type_b.css" />
+  <script src="../include/jquery-3.7.1.min.js"></script>
+  <script src="../include/lodash.min.js"></script>
+  <script src="./thumbnail_assets.js"></script>
+</head>
+<body>
+  <div class="thumbnail" id="thumbnail">
+    <!-- Background -->
+    <div class="layer background"></div>
+
+    <!-- Character images (left and right of center panel) -->
+    <div class="layer characters">
+      <div class="team team-1" id="team1"></div>
+      <div class="team team-2" id="team2"></div>
+    </div>
+
+    <!-- Center panel: tournament info -->
+    <div class="layer center-panel">
+      <div class="panel-bg"></div>
+      <div class="tournament-name" id="tournamentName"><span class="text"></span></div>
+      <div class="center-main-icon" id="mainIcon"></div>
+      <div class="phase-match" id="phaseMatch"><span class="text"></span></div>
+      <div class="venue-info" id="venueInfo"><span class="text"></span></div>
+    </div>
+
+    <!-- Player name strips at the bottom of each side -->
+    <div class="layer player-names">
+      <div class="player-name p1" id="p1name"><span class="text"></span></div>
+      <div class="player-name p2" id="p2name"><span class="text"></span></div>
+    </div>
+  </div>
+
+  <script src="./type_b.js"></script>
+</body>
+</html>

@@ -162,7 +162,11 @@ function setBackground(config, template) {
   let bgPath = config.background_path || template.default_background;
   if (bgPath) {
     bgPath = resolveAssetPath(bgPath);
-    $(".background").html(`<img src="${bgPath}" />`);
+    // Cache buster: QWebEngine caches by URL, so identical paths between
+    // renders return the previous image even after the underlying file or
+    // user setting changed. Append a timestamp to force re-fetch.
+    const cb = `${bgPath.includes("?") ? "&" : "?"}_t=${Date.now()}`;
+    $(".background").html(`<img src="${bgPath}${cb}" />`);
   }
 }
 
@@ -367,10 +371,12 @@ function setIcons(config, template) {
 
   const mainPath = resolveAssetPath(config.main_icon_path || "./layout/logo.png");
   if (mainPath) {
+    // Cache buster: see setBackground for rationale.
+    const cb = `${mainPath.includes("?") ? "&" : "?"}_t=${Date.now()}`;
     $("#mainIcon").css({
       left: `${mainX}px`,
       top: `${mainY}px`,
-      "background-image": `url("${mainPath}")`,
+      "background-image": `url("${mainPath}${cb}")`,
     });
   }
 

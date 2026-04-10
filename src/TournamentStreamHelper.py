@@ -451,12 +451,12 @@ class Window(QMainWindow):
         self.scoreboard = TSHScoreboardManager.instance
         self.scoreboard.setWindowIcon(QIcon(UI.icon_path('list.svg')))
         self.scoreboard.setObjectName(
-            QApplication.translate("app", "Scoreboard Manager"))
+            QApplication.translate("app", "Scoreboard"))
         self.addDockWidget(
             Qt.DockWidgetArea.BottomDockWidgetArea, self.scoreboard)
         self.dockWidgets.append(self.scoreboard)
         TSHScoreboardManager.instance.setWindowTitle(
-            QApplication.translate("app", "Scoreboard Manager"))
+            QApplication.translate("app", "Scoreboard"))
 
         self.stageWidget = TSHScoreboardStageWidget()
         self.stageWidget.setObjectName(
