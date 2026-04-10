@@ -250,12 +250,27 @@ class TSHScoreboardWidget(QWidget):
             self.streamUrl.setSpacing(UI.SPACE_SM)
             self.streamUrlLabel = QLabel(QApplication.translate("app", "Stream URL") + " ")
             self.streamUrl.layout().addWidget(self.streamUrlLabel)
-            self.streamUrlTextBox = QLineEdit()
-            self.streamUrl.layout().addWidget(self.streamUrlTextBox)
-            self.streamUrlTextBox.editingFinished.connect(
-                lambda element=self.streamUrlTextBox: StateManager.Set(
-                    f"score.{self.scoreboardNumber}.stream_url", element.text()))
-            self.streamUrlTextBox.editingFinished.emit()
+            self.streamUrlCombo = QComboBox()
+            self.streamUrlCombo.setEditable(True)
+            self.streamUrlCombo.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            self._loadStreamChannels()
+            self.streamUrlCombo.currentIndexChanged.connect(self._onStreamChannelChanged)
+            self.streamUrlCombo.lineEdit().editingFinished.connect(
+                lambda: StateManager.Set(
+                    f"score.{self.scoreboardNumber}.stream_url",
+                    self.streamUrlCombo.currentData() or self.streamUrlCombo.currentText()))
+            self.streamUrl.layout().addWidget(self.streamUrlCombo)
+            self.addStreamChannelBtn = QPushButton("+")
+            self.addStreamChannelBtn.setFixedWidth(28)
+            self.addStreamChannelBtn.setToolTip(
+                QApplication.translate("app", "Add stream channel"))
+            self.addStreamChannelBtn.clicked.connect(self._addStreamChannel)
+            self.streamUrl.layout().addWidget(self.addStreamChannelBtn)
+            # Export initial value
+            StateManager.Set(
+                f"score.{self.scoreboardNumber}.stream_url",
+                self.streamUrlCombo.currentData() or self.streamUrlCombo.currentText())
             bottomOptions.layout().addLayout(self.streamUrl)
 
         loadSetRow = QHBoxLayout()
@@ -797,6 +812,53 @@ class TSHScoreboardWidget(QWidget):
             else:
                 raise e
     
+    # --- Stream channel management ---
+
+    def _loadStreamChannels(self):
+        """Populate the stream URL combo from saved channels."""
+        self.streamUrlCombo.blockSignals(True)
+        self.streamUrlCombo.clear()
+        self.streamUrlCombo.addItem("", "")  # empty default
+        channels = SettingsManager.Get("stream_channels", [])
+        for ch in channels:
+            self.streamUrlCombo.addItem(ch.get("name", ""), ch.get("url", ""))
+        self.streamUrlCombo.blockSignals(False)
+
+    def _onStreamChannelChanged(self, index):
+        url = self.streamUrlCombo.currentData() or self.streamUrlCombo.currentText()
+        StateManager.Set(f"score.{self.scoreboardNumber}.stream_url", url)
+
+    def _addStreamChannel(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle(QApplication.translate("app", "Add stream channel"))
+        dialog.setMinimumWidth(350)
+        layout = QFormLayout(dialog)
+
+        nameEdit = QLineEdit()
+        nameEdit.setPlaceholderText("BST Stream")
+        layout.addRow(QApplication.translate("app", "Channel name"), nameEdit)
+
+        urlEdit = QLineEdit()
+        urlEdit.setPlaceholderText("https://www.youtube.com/@B_ST_Stream/live")
+        layout.addRow("URL", urlEdit)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            name = nameEdit.text().strip()
+            url = urlEdit.text().strip()
+            if name and url:
+                channels = SettingsManager.Get("stream_channels", [])
+                channels.append({"name": name, "url": url})
+                SettingsManager.Set("stream_channels", channels)
+                self._loadStreamChannels()
+                # Select the newly added channel
+                self.streamUrlCombo.setCurrentIndex(self.streamUrlCombo.count() - 1)
+
     def PostToBsky(self):
         thumbnailPath = self.GenerateThumbnail(quiet_mode=True)
         if thumbnailPath:
@@ -1371,9 +1433,8 @@ class TSHScoreboardWidget(QWidget):
             if self.teamsSwapped:
                 losersContainers.reverse()
 
-            if SettingsManager.Get("bsky_account.enable_bluesky", True) and data.get("stream"):
-                self.streamUrlTextBox.setText(data.get("stream"))
-                self.streamUrlTextBox.editingFinished.emit()
+            # Stream URL is user-managed via the dropdown; do not overwrite
+            # it when loading a set from StartGG.
 
             if data.get("team1losers") is not None:
                 losersContainers[0].setChecked(data.get("team1losers"))
@@ -1409,13 +1470,18 @@ class TSHScoreboardWidget(QWidget):
 
                         for p, player in enumerate(team):
                             if data.get("overwrite"):
+                                # Overwrite path already applies mains via the full
+                                # player dict; the old code followed this with a
+                                # redundant mains-only SetData that doubled the
+                                # per-player cost on set load. Using elif so the
+                                # mains-only path only runs in the non-overwrite case.
                                 teamInstance[p].SetData(player, False, True, data.get(
                                     "no_mains") if data.get("no_mains") != None else False)
-                            if data.get("has_selection_data") and data.get("no_mains") != True:
-                                player = {
+                            elif data.get("has_selection_data") and data.get("no_mains") != True:
+                                player_mains_only = {
                                     "mains": player.get("mains")
                                 }
-                                teamInstance[p].SetData(player, True, False)
+                                teamInstance[p].SetData(player_mains_only, True, False)
                 except Exception as e:
                     logger.error(f"Error while setting entrants: {e}")
                 finally:

@@ -628,14 +628,6 @@ class StartGGDataProvider(TournamentDataProvider):
             phase_name += " - " + TSHLocaleHelper.phaseNames.get(
                 "group").format(deep_get(_set, "phaseGroup.displayIdentifier"))
 
-        streamUrl = deep_get(_set, "stream.streamName")
-        streamSource = deep_get(_set, "stream.streamSource")
-
-        if streamSource == "TWITCH":
-            streamUrl = "https://twitch.tv/" + streamUrl
-        if streamSource == "YOUTUBE":
-            streamUrl = "https://youtube.com/" + streamUrl
-
         return {
             "id": _set.get("id"),
             "team1score": _set.get("entrant1Score", 0),
@@ -647,7 +639,7 @@ class StartGGDataProvider(TournamentDataProvider):
             "p2_name": p2.get("entrant", {}).get("name", "") if p2 and p2.get("entrant") != None else "",
             "p1_seed": p1.get("entrant", {}).get("initialSeedNum", None) if p1 and p1.get("entrant") else None,
             "p2_seed": p2.get("entrant", {}).get("initialSeedNum", None) if p2 and p2.get("entrant") else None,
-            "stream": streamUrl,
+            "stream": deep_get(_set, "stream.streamName") or "",
             "station": _set.get("station", {}).get("number", "") if _set.get("station", {}) != None else "",
             "isOnline": deep_get(_set, "event.isOnline"),
             "isPools": isPools,
