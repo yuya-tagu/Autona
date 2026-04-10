@@ -1,6 +1,6 @@
 {
     "name": "Center Panel",
-    "default_background": "./assets/thumbnail_base/type_b_default_bg.png",
+    "default_background": "./assets/thumbnail_base/type_b_default_bg.jpg",
     "base_ratio": {
         "x": 1920,
         "y": 1080
