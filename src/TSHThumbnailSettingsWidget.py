@@ -19,17 +19,28 @@ class PreviewWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.setSizePolicy(
-            QSizePolicy.Ignored,
-            QSizePolicy.Ignored
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
         )
+        self.setMinimumSize(1, 1)
         self._pixmap: QPixmap = None
 
     def setPixmap(self, pixmap):
         self._pixmap = pixmap
+        self._updateMaxHeight()
         self.repaint()
 
     def resizeEvent(self, QResizeEvent):
+        self._updateMaxHeight()
         self.repaint()
+
+    def _updateMaxHeight(self):
+        # Clamp widget height to the pixmap aspect ratio so excess vertical
+        # space is returned to neighbouring widgets instead of padding the pixmap.
+        if self._pixmap and self._pixmap.width() > 0 and self.width() > 0:
+            desired = int(self.width() * self._pixmap.height() / self._pixmap.width())
+            if self.maximumHeight() != desired:
+                self.setMaximumHeight(desired)
 
     def paintEvent(self, e):
         qp = QPainter()
@@ -39,19 +50,20 @@ class PreviewWidget(QWidget):
 
     def drawWidget(self, qp: QPainter):
         if self._pixmap:
-            scaled = self._pixmap.scaled(
-                self.width()-64,
-                self.height()-64,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation
+            pw = self._pixmap.width()
+            ph = self._pixmap.height()
+            if pw <= 0 or ph <= 0:
+                return
+            # Use target-rect drawing so the DIP coordinate system is honoured
+            # regardless of the source pixmap's devicePixelRatio.
+            target_w = self.width()
+            target_h = int(target_w * ph / pw)
+            qp.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            qp.drawPixmap(
+                QRectF(0, 0, target_w, target_h),
+                self._pixmap,
+                QRectF(0, 0, pw, ph),
             )
-            qp.drawPixmap(int((self.width()-scaled.width())/2),
-                          int((self.height()-scaled.height())/2), scaled)
-
-            if scaled.width() > 512:
-                mini = self._pixmap.scaledToWidth(256)
-                qp.drawPixmap(self.width()-mini.width(),
-                              self.height()-mini.height(), mini)
 
 
 class TSHThumbnailSettingsWidget(QDockWidget):
@@ -259,6 +271,8 @@ class TSHThumbnailSettingsWidget(QDockWidget):
 
         # PREVIEW
         previewContainer = self.settings.findChild(QWidget, "thumbnailPreview")
+        # Remove default layout margins so the pixmap reaches the container edges
+        previewContainer.layout().setContentsMargins(0, 0, 0, 0)
         self.preview = PreviewWidget()
         previewContainer.layout().addWidget(self.preview)
 

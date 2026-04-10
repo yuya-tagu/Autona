@@ -179,12 +179,12 @@ function setBackground(data, config, template) {
 
   // type_b uses a fixed template-defined background — the per-tournament
   // banner image (config.background_path) is intentionally ignored here.
+  // No cache buster: the asset is immutable and re-decoding a multi-MB image
+  // on every render was the main cause of UI stalls during preview updates.
   const bgPath = template.default_background;
   if (!bgPath) return;
   const resolved = resolveAssetPath(bgPath);
-  // Cache buster: QWebEngine caches by URL.
-  const cb = `${resolved.includes("?") ? "&" : "?"}_t=${Date.now()}`;
-  $(".background").html(`<img src="${resolved}${cb}" />`);
+  $(".background").html(`<img src="${resolved}" />`);
 }
 
 // --- Character placement ---

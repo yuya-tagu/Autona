@@ -785,6 +785,10 @@ class TSHScoreboardWidget(QWidget):
             else:
                 return(thumbnailPath)
         except Exception as e:
+            # Log the full traceback so silent failures (e.g. template
+            # prepare_data errors, renderer timeouts) can be diagnosed
+            # without reproducing the UI flow.
+            logger.exception("GenerateThumbnail failed")
             if not disable_msgbox:
                 msgBox.setText(QApplication.translate("app", "Warning"))
                 msgBox.setInformativeText(str(e))
