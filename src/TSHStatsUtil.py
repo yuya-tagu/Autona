@@ -153,7 +153,6 @@ class TSHStatsUtil:
                 "placement": set.get("placement"),
                 "event_name": set.get("event_name"),
                 "tournament_name": set.get("tournament_name"),
-                "tournament_picture": set.get("tournament_picture"),
                 "entrants": set.get("entrants"),
                 "event_date_month": datetime.fromtimestamp(set.get("event_date")).strftime("%B"),
                 "event_date_day": datetime.fromtimestamp(set.get("event_date")).strftime("%d"),

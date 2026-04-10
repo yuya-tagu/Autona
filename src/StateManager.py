@@ -32,6 +32,7 @@ class StateManager:
     lock = threading.RLock()
     _export_thread = None
     loop = None
+    _download_semaphore = threading.Semaphore(3)
 
     @contextlib.contextmanager
     def SaveBlock():
@@ -266,6 +267,7 @@ class StateManager:
                             logger.error(traceback.format_exc())
 
                     def downloadImage(url, dlpath):
+                        StateManager._download_semaphore.acquire()
                         try:
                             r = requests.get(url, stream=True)
                             if r.status_code == 200:
@@ -280,6 +282,8 @@ class StateManager:
                                 os.remove(dlpath)
                         except Exception as e:
                             logger.error(traceback.format_exc())
+                        finally:
+                            StateManager._download_semaphore.release()
 
                     t = threading.Thread(
                         target=downloadImage,

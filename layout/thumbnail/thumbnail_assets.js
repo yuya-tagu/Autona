@@ -176,6 +176,7 @@ async function CenterImageDo(element) {
       function loadImage() {
         return new Promise((resolve) => {
           const img = new Image();
+          img.onerror = () => resolve(); // Prevent infinite hang on missing assets
           img.src = "../../" + assetData.asset;
           img.onload = async () => {
             let eyesight = assetData.eyesight;

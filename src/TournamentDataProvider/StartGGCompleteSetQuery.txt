@@ -155,7 +155,6 @@ query EventMatchListQuery($eventSlug: String!, $page: Int = 1, $filters: SetFilt
 					id
 					streamName
 					streamSource
-					streamUrl(streamUrlType: PAGE)
 					enabled
 					isOnline
 					__typename

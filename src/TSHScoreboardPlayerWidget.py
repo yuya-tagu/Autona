@@ -565,7 +565,22 @@ class TSHScoreboardPlayerWidget(TSHBasePlayerWidget):
 
         try:
             if clear:
-                self.Clear(no_mains=no_mains)
+                # Block country signals during Clear: Clear() calls
+                # setCurrentIndex(0) on every QComboBox, which would trigger
+                # a LoadStates rebuild for the empty-country state. That
+                # rebuild is immediately discarded by the subsequent
+                # country_code assignment, so suppressing it saves one
+                # LoadStates pass per SetData.
+                country_element = self.findChild(QComboBox, "country")
+                country_was_blocked = False
+                if country_element is not None:
+                    country_was_blocked = country_element.signalsBlocked()
+                    country_element.blockSignals(True)
+                try:
+                    self.Clear(no_mains=no_mains)
+                finally:
+                    if country_element is not None:
+                        country_element.blockSignals(country_was_blocked)
 
             # Load player data from DB; will be overwriten by incoming data
             if not dontLoadFromDB:

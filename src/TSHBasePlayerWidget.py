@@ -175,10 +175,22 @@ class TSHBasePlayerWidget(QGroupBox):
     def LoadStates(self, index):
         country: QComboBox = self.findChild(QComboBox, "country")
 
-        countryData = None
+        new_code = None
         if country.currentData(Qt.ItemDataRole.UserRole) != None:
-            countryData = TSHCountryHelper.countries.get(country.currentData(
-                Qt.ItemDataRole.UserRole).get("code"), {})
+            new_code = country.currentData(
+                Qt.ItemDataRole.UserRole).get("code")
+
+        # Skip rebuild if the country code hasn't changed — the existing state
+        # comboBox model is still valid and rebuilding is expensive (QIcon
+        # decoding for every state flag). This matters during set loads where
+        # the country often stays the same across successive SetData calls.
+        if hasattr(self, "_loadedStatesCountryCode") and self._loadedStatesCountryCode == new_code:
+            return
+        self._loadedStatesCountryCode = new_code
+
+        countryData = {}
+        if new_code is not None:
+            countryData = TSHCountryHelper.countries.get(new_code, {})
 
         stateModel = QStandardItemModel()
 

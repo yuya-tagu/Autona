@@ -199,6 +199,15 @@ class ThumbnailRenderer(QObject):
         if title != "RENDER_READY":
             return
 
+        # Delay grab() so the off-screen QWebEngineView compositor
+        # finishes painting the new frame.  Without this delay the
+        # very first grab() after a content change often captures the
+        # previous frame, requiring a second click to see the update.
+        # _rendering stays True during the wait so concurrent render()
+        # calls queue their payloads instead of starting immediately.
+        QTimer.singleShot(100, self._finalize_render)
+
+    def _finalize_render(self):
         self._rendering = False
 
         pixmap = self._view.grab()
