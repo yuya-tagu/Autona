@@ -248,6 +248,14 @@ class TSHThumbnailSettingsWidget(QDockWidget):
             QPushButton, "btUpdatePreview")
         self.updatePreview.clicked.connect(lambda: self.GeneratePreview(True))
 
+        self.copyToClipboard = self.settings.findChild(
+            QPushButton, "btCopyToClipboard")
+        self.copyToClipboard.clicked.connect(self._copyThumbnailToClipboard)
+
+        self.saveThumbnail = self.settings.findChild(
+            QPushButton, "btSaveThumbnail")
+        self.saveThumbnail.clicked.connect(self._saveThumbnail)
+
         self.generateThumbnail = self.settings.findChild(
             QPushButton, "btGenerate")
         self.generateThumbnail.setHidden(True)
@@ -469,4 +477,44 @@ class TSHThumbnailSettingsWidget(QDockWidget):
         tmp_file = f"{out_path}/template.png"
         pixmap.save(tmp_file)
         self.preview.setPixmap(pixmap)
+
+    def _copyThumbnailToClipboard(self):
+        """Generate thumbnail and copy to clipboard."""
+        try:
+            thumbnailPath = thumbnail.generate(
+                settingsManager=SettingsManager)
+            if thumbnailPath:
+                image = QImage(thumbnailPath)
+                if not image.isNull():
+                    QApplication.clipboard().setImage(image)
+                    logger.info("Thumbnail copied to clipboard")
+        except Exception as e:
+            logger.exception("Failed to copy thumbnail to clipboard")
+            msgBox = QMessageBox()
+            msgBox.setText(QApplication.translate("app", "Warning"))
+            msgBox.setInformativeText(str(e))
+            msgBox.setIcon(QMessageBox.Warning)
+            msgBox.exec()
+
+    def _saveThumbnail(self):
+        """Generate thumbnail and save to out/thumbnails/."""
+        try:
+            thumbnailPath = thumbnail.generate(
+                settingsManager=SettingsManager)
+            if thumbnailPath:
+                msgBox = QMessageBox()
+                msgBox.setWindowIcon(QIcon(TSHResolve('src/layout/icon.png')))
+                msgBox.setWindowTitle(QApplication.translate(
+                    "thumb_app", "TSH - Thumbnail"))
+                msgBox.setText(QApplication.translate(
+                    "thumb_app", "The thumbnail has been generated here:") + " " + thumbnailPath)
+                msgBox.setIcon(QMessageBox.NoIcon)
+                msgBox.exec()
+        except Exception as e:
+            logger.exception("Failed to save thumbnail")
+            msgBox = QMessageBox()
+            msgBox.setText(QApplication.translate("app", "Warning"))
+            msgBox.setInformativeText(str(e))
+            msgBox.setIcon(QMessageBox.Warning)
+            msgBox.exec()
 

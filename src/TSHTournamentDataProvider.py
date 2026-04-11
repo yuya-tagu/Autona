@@ -207,12 +207,17 @@ class TSHTournamentDataProvider(QObject):
 
     def GetTournamentData(self, initialLoading=False):
         worker = Worker(self.provider.GetTournamentData)
-        worker.signals.result.connect(lambda tournamentData: [
-            tournamentData.update({"initial_load": initialLoading}),
-            TSHTournamentDataProvider.instance.signals.tournament_data_updated.emit(
-                tournamentData)
-        ])
+        worker.signals.result.connect(lambda tournamentData: self._onTournamentDataResult(tournamentData, initialLoading))
         self.threadPool.start(worker)
+
+    def _onTournamentDataResult(self, tournamentData, initialLoading):
+        """Handle tournament data on the main thread."""
+        # Emit game_changed here (main thread) instead of from worker thread
+        videogame = tournamentData.pop("_videogame", None)
+        if videogame:
+            self.signals.game_changed.emit(videogame)
+        tournamentData["initial_load"] = initialLoading
+        self.signals.tournament_data_updated.emit(tournamentData)
 
     def GetTournamentPhases(self):
         worker = Worker(self.provider.GetTournamentPhases)

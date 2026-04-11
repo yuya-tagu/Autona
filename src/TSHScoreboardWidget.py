@@ -190,6 +190,7 @@ class TSHScoreboardWidget(QWidget):
             self.thumbnailBtn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
             topOptions.layout().addWidget(self.thumbnailBtn)
             self.thumbnailBtn.clicked.connect(self.GenerateThumbnail)
+            self.thumbnailBtn.setVisible(False)
 
         self.xpostBtn = QPushButton(
             QApplication.translate("app", "Post to X") + " ")

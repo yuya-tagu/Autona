@@ -313,7 +313,7 @@ class WindowSignals(QObject):
 
 class Window(QMainWindow):
     # Bump this when dock widget layout changes (e.g. adding/removing tabs)
-    STATE_VERSION = 2
+    STATE_VERSION = 3
     signals = WindowSignals()
 
     def __init__(self, loop=None):
@@ -424,6 +424,14 @@ class Window(QMainWindow):
                 Qt.DockWidgetArea.BottomDockWidgetArea, thumbnailSetting)
             self.dockWidgets.append(thumbnailSetting)
 
+        from .TSHResultSettingsWidget import TSHResultSettingsWidget
+        resultSetting = TSHResultSettingsWidget()
+        resultSetting.setObjectName(
+            QApplication.translate("app", "Result Settings"))
+        self.addDockWidget(
+            Qt.DockWidgetArea.BottomDockWidgetArea, resultSetting)
+        self.dockWidgets.append(resultSetting)
+
         bracket = TSHBracketWidget()
         bracket.setWindowIcon(QIcon(UI.icon_path('info.svg')))
         bracket.setObjectName(
@@ -494,13 +502,13 @@ class Window(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.statsWidget)
         self.dockWidgets.append(self.statsWidget)
 
-        # Tab order: 大会情報, スコアボード, 統計情報, サムネイル, プレイヤーリスト, 解説, ルール, トーナメント表, メモ
+        # Tab order: 大会情報, スコアボード, 統計情報, サムネイル, リザルト, プレイヤーリスト, 解説, ルール, トーナメント表, メモ
         self.tabifyDockWidget(tournamentInfo, self.scoreboard)
         self.tabifyDockWidget(self.scoreboard, self.statsWidget)
         if not SettingsManager.Get("general.disable_thumbnail_widget", False):
             self.tabifyDockWidget(self.statsWidget, thumbnailSetting)
-            thumbnailSetting.setVisible(False)
-        self.tabifyDockWidget(self.statsWidget, playerList)
+        self.tabifyDockWidget(self.statsWidget, resultSetting)
+        self.tabifyDockWidget(resultSetting, playerList)
         self.tabifyDockWidget(playerList, commentary)
         self.tabifyDockWidget(commentary, self.stageWidget)
         self.tabifyDockWidget(self.stageWidget, bracket)
@@ -564,6 +572,7 @@ class Window(QMainWindow):
         toggleWidgets.addAction(commentary.toggleViewAction())
         if not SettingsManager.Get("general.disable_thumbnail_widget", False):
             toggleWidgets.addAction(thumbnailSetting.toggleViewAction())
+        toggleWidgets.addAction(resultSetting.toggleViewAction())
         toggleWidgets.addAction(tournamentInfo.toggleViewAction())
         toggleWidgets.addAction(playerList.toggleViewAction())
         toggleWidgets.addAction(bracket.toggleViewAction())
