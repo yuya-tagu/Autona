@@ -93,7 +93,9 @@ class StartGGDataProvider(TournamentDataProvider):
             videogame = deep_get(data, "data.event.videogame.id", None)
             if videogame:
                 self.videogame = videogame
-                self.tshTdp.signals.game_changed.emit(videogame)
+                # Store videogame in return data so caller can emit
+                # game_changed on the main thread (not from worker thread)
+                finalData["_videogame"] = videogame
 
             finalData["tournamentName"] = deep_get(
                 data, "data.event.tournament.name", "")
@@ -1921,6 +1923,8 @@ class StartGGDataProvider(TournamentDataProvider):
 
             for standing in standings:
                 team = {}
+
+                team["placement"] = deep_get(standing, "placement", None)
 
                 participants = deep_get(standing, "entrant.participants")
 
