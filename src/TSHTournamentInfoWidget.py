@@ -27,6 +27,15 @@ class TSHTournamentInfoWidget(QDockWidget):
 
         uic.loadUi(TSHResolve("src/layout/TSHTournamentInfo.ui"), self)
 
+        # Wrap the dock contents in a QScrollArea so the tab doesn't
+        # force the whole window to grow vertically.
+        contents = self.widget()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(contents)
+        self.setWidget(scroll)
+
         TSHTournamentDataProvider.instance.signals.tournament_data_updated.connect(
             self.UpdateData)
 
