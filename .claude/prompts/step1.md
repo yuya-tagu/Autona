@@ -27,8 +27,8 @@ src/ 配下の全 .py ファイルの import 関係を機械的に抽出し、Ma
 - 内部: (なし or src/Helpers/XXX)
 - 外部: deepdiff, threading
 
-### src/TSHScoreboardWidget.py
-- 内部: src/StateManager, src/TSHGameAssetManager, ...
+### src/AutonaScoreboardWidget.py
+- 内部: src/StateManager, src/AutonaGameAssetManager, ...
 - 外部: PyQt6.QtWidgets
 
 (以下全ファイル分)
@@ -45,11 +45,11 @@ src/ 配下の全 .py ファイルの import 関係を機械的に抽出し、Ma
 CLAUDE.md に記載のシングルトン群の初期化順を `main.py` から追跡する。
 
 対象シングルトン:
-- TSHScoreboardManager
-- TSHGameAssetManager
-- TSHTournamentDataProvider
-- TSHHotkeys
-- TSHAlertNotification
+- AutonaScoreboardManager
+- AutonaGameAssetManager
+- AutonaTournamentDataProvider
+- AutonaHotkeys
+- AutonaAlertNotification
 - (他に `.instance` パターンのものがあれば追加)
 
 **手順**:
@@ -68,7 +68,7 @@ CLAUDE.md に記載のシングルトン群の初期化順を `main.py` から�
 ...
 
 ## シングルトン間依存グラフ
-- TSHScoreboardManager → TSHGameAssetManager (理由: __init__ で .instance 参照)
+- AutonaScoreboardManager → AutonaGameAssetManager (理由: __init__ で .instance 参照)
 - ...
 
 ## 暗黙の初期化順序リスク

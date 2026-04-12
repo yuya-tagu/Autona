@@ -1,5 +1,5 @@
 from qtpy.QtWidgets import *
-from ..TSHColorButton import TSHColorButton
+from ..AutonaColorButton import AutonaColorButton
 from ..SettingsManager import SettingsManager
 import textwrap
 
@@ -88,7 +88,7 @@ class SettingsWidget(QWidget):
                 ]
             )
         elif type == "color":
-            settingWidget = TSHColorButton(color=SettingsManager.Get(self.settingsBase+"."+setting, defaultValue), disable_right_click=True)
+            settingWidget = AutonaColorButton(color=SettingsManager.Get(self.settingsBase+"."+setting, defaultValue), disable_right_click=True)
             settingWidget.colorChanged.connect(
                 lambda val=None: SettingsManager.Set(self.settingsBase+"."+setting, settingWidget.color()))
             resetButton.clicked.connect(

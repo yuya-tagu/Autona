@@ -1,1 +1,1 @@
-from .TournamentStreamHelper import Window, App
+from .Autona import Window, App

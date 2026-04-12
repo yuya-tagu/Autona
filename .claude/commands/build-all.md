@@ -14,10 +14,10 @@ Web UI と exe を順番にビルドし、結果を報告してください。
 
 2. exe ビルド
    ```bash
-   cd .. && python -m PyInstaller dependencies/tsh.spec --distpath . --workpath build -y
+   cd .. && python -m PyInstaller dependencies/autona.spec --distpath . --workpath build -y
    ```
    - ビルド成功を確認
-   - `TSH.exe` が生成されたことを確認
+   - `Autona.exe` が生成されたことを確認
 
 3. 結果を簡潔に報告:
    - Web UI: 成功/失敗（ファイルサイズ）

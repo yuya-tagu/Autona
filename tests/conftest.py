@@ -1,8 +1,8 @@
 """
-Test infrastructure for TSH.
+Test infrastructure for Autona.
 
 NOTE: src/ modules import chain triggers QApplication + all singletons via
-src/__init__.py -> TournamentStreamHelper.py. To avoid this in unit tests,
+src/__init__.py -> Autona.py. To avoid this in unit tests,
 use direct_import() to load individual modules by file path.
 
 See: .claude/architecture/singleton-init-order.md
@@ -19,7 +19,7 @@ def direct_import(module_name: str, file_path: str):
     """Import a single .py file without triggering the src package chain.
 
     Usage:
-        mod = direct_import("TSHDictHelper", "src/Helpers/TSHDictHelper.py")
+        mod = direct_import("AutonaDictHelper", "src/Helpers/AutonaDictHelper.py")
         deep_get = mod.deep_get
     """
     abs_path = PROJECT_ROOT / file_path

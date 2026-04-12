@@ -26,7 +26,7 @@ languages = [
     "zh-TW"
 ]
 
-output = [f'src/i18n/TSH_{lang}.ts' for lang in languages]
+output = [f'src/i18n/Autona_{lang}.ts' for lang in languages]
 
 os.system(
     f"pyside6-lupdate {' '.join(file_list)} -ts {' '.join(output)}")

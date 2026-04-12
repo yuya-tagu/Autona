@@ -1,0 +1,1234 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+from .Helpers import AutonaQtHelper
+from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+from .Helpers.AutonaDirHelper import AutonaResolve
+import faulthandler
+import shutil
+import qdarktheme
+from . import ui_constants as UI
+import requests
+import json
+import orjson
+import traceback
+import time
+import os
+import unicodedata
+import socket
+import sys
+import atexit
+import time
+import qtpy
+from qtpy.QtGui import *
+from qtpy.QtWidgets import *
+from qtpy.QtCore import *
+from packaging.version import parse
+from loguru import logger
+from pathlib import Path
+
+crashpath = Path('./logs/tsh-crash.log').resolve()
+Path.mkdir(crashpath.parent, exist_ok=True)
+crashlog = crashpath.open(mode='w')
+faulthandler.enable(crashlog)
+
+QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+
+if parse(qtpy.QT_VERSION).major == 6:
+    QImageReader.setAllocationLimit(0)
+
+App = QApplication(sys.argv)
+AutonaQtHelper.init_gui_executor()  # guaranteed to be the main thread.
+
+fmt = ("<green>{time:YYYY-MM-DD HH:mm:ss}</green> " +
+       "| <level>{level}</level> | " +
+       "<yellow>{file}</yellow>:<blue>{function}</blue>:<cyan>{line}</cyan> " +
+       "- <level>{message}</level>")
+
+if sys.stdout != None:
+    config = {
+        "handlers": [
+            {"sink": sys.stdout, "format": fmt, "level": "DEBUG"},
+        ],
+    }
+    logger.configure(**config)
+else:
+    # Handle all uncaught exceptions and forward to loguru
+    def handle_exception(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc_value, exc_traceback)
+            return
+
+        logger.critical("Uncaught exception", exc_info=(
+            exc_type, exc_value, exc_traceback))
+
+    sys.excepthook = handle_exception
+
+    class LoggerWriter(object):
+        def __init__(self, writer):
+            self._writer = writer
+            self._msg = ''
+
+        def write(self, message):
+            self._msg = self._msg + message
+            while '\n' in self._msg:
+                pos = self._msg.find('\n')
+                self._writer(self._msg[:pos])
+                self._msg = self._msg[pos+1:]
+
+        def flush(self):
+            if self._msg != '':
+                self._writer(self._msg)
+                self._msg = ''
+
+    sys.stdout = LoggerWriter(logger.info)
+    sys.stderr = LoggerWriter(logger.error)
+
+logger.add(
+    "./logs/autona.log",
+    format="[{time:YYYY-MM-DD HH:mm:ss}] - {level} - {file}:{function}:{line} | {message}",
+    encoding="utf-8",
+    level="INFO",
+    rotation="20 MB"
+)
+
+logger.add(
+    "./logs/tsh-error.log",
+    format="[{time:YYYY-MM-DD HH:mm:ss}] - {level} - {file}:{function}:{line} | {message}",
+    encoding="utf-8",
+    level="ERROR",
+    rotation="20 MB"
+)
+
+try:
+    # Setting the icon for individual windows doesn't work on mac (and perhaps linux? unknown)
+    App.setWindowIcon(QIcon(UI.icon_path("icon.png")))
+except:
+    logger.opt(exception=True).warning("Could not set window icon for QApplication.")
+
+
+logger.critical("=== Autona IS STARTING ===")
+
+logger.info("QApplication successfully initialized")
+
+from contextlib import contextmanager
+@contextmanager
+def catchtime(msg = ''):
+    from time import perf_counter
+    start = perf_counter()
+    yield lambda: perf_counter() - start
+    logger.info(f'{msg} Time: {perf_counter() - start:.3f} seconds')
+
+# autopep8: off
+from .Settings.AutonaSettingsWindow import AutonaSettingsWindow
+from .LayoutOptions.AutonaLayoutOptionsWindow import AutonaLayoutOptionsWindow
+from .AutonaHotkeys import AutonaHotkeys
+from .AutonaPlayerListWidget import AutonaPlayerListWidget
+from .AutonaNotesWidget import AutonaNotesWidget
+from .AutonaCommentaryWidget import AutonaCommentaryWidget
+# from .AutonaTeamBattleWidget import AutonaTeamBattleWidget
+from .AutonaGameAssetManager import AutonaGameAssetManager
+from .AutonaBracketWidget import AutonaBracketWidget
+from .AutonaTournamentInfoWidget import AutonaTournamentInfoWidget
+from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
+from .TournamentDataProvider.StartGGDataProvider import StartGGDataProvider
+from .AutonaAlertNotification import AutonaAlertNotification
+from .AutonaPlayerDB import AutonaPlayerDB
+from .Workers import *
+from .StateManager import StateManager
+from .SettingsManager import SettingsManager
+from .Helpers.AutonaCountryHelper import AutonaCountryHelper
+from .Helpers.AutonaControllerHelper import AutonaControllerHelper
+from .AutonaScoreboardManager import AutonaScoreboardManager
+from src.AutonaAboutWidget import AutonaAboutWidget
+from .AutonaScoreboardStageWidget import AutonaScoreboardStageWidget
+from .AutonaStatsWidget import AutonaStatsWidget
+from src.AutonaWebServer import WebServer
+# autopep8: on
+
+def generate_restart_messagebox(main_txt):
+    messagebox = QMessageBox()
+    messagebox.setWindowTitle(QApplication.translate("app", "Warning"))
+    messagebox.setText(
+        main_txt + "\n" + QApplication.translate("app", "The program will now close."))
+    messagebox.finished.connect(QApplication.exit)
+    return (messagebox)
+
+
+def UpdateProcedure():
+    """
+        Update Procedure -- backup layouts, register extraction on program close
+    """
+
+    try:
+        # Backup layouts
+        os.rename(
+            "./layout", f"./layout_backup_{str(time.time())}")
+
+        # Register update extraction on program close
+        atexit.register(ExtractUpdate)
+
+        messagebox = generate_restart_messagebox(
+            QApplication.translate(
+                "app", "Update download complete. The program will extract the update upon closing.")
+            + "\n\n"
+            + QApplication.translate(
+                "app", "Please ensure the layout folder or its contents aren't open in another application before closing this window.")
+            + "\n"
+        )
+
+        messagebox.exec()
+    except Exception as e:
+        # Layout folder backups failed
+        logger.error(traceback.format_exc())
+
+        buttonReply = QDialog()
+        buttonReply.setWindowTitle(
+            QApplication.translate("app", "Warning"))
+        vbox = QVBoxLayout()
+        buttonReply.setLayout(vbox)
+
+        buttonReply.layout().addWidget(
+            QLabel(QApplication.translate(
+                "updater",
+                "Error while backing up the layout folder:")
+            )
+        )
+        buttonReply.layout().addWidget(QLabel(str(e)))
+
+        hbox = QHBoxLayout()
+        vbox.addLayout(hbox)
+
+        btRetry = QPushButton(
+            QApplication.translate("updater", "Retry"))
+        hbox.addWidget(btRetry)
+        btCancel = QPushButton(
+            QApplication.translate("updater", "Cancel"))
+        hbox.addWidget(btCancel)
+
+        btRetry.clicked.connect(lambda: [
+            buttonReply.close(),
+            UpdateProcedure()
+        ])
+
+        btCancel.clicked.connect(
+            lambda: buttonReply.close()
+        )
+
+        buttonReply.exec()
+
+
+def ExtractUpdate():
+    try:
+        updateLog = []
+        with zipfile.ZipFile("update.zip", "r") as z:
+            # backup exe
+            os.rename("./Autona.exe", "./Autona_old.exe")
+
+            for filename in z.namelist():
+                if "/" in filename:
+                    fullname = filename.split("/", 1)[1]
+                    if fullname.endswith("/"):
+                        updateLog.append(f"Create directory {fullname}")
+                        try:
+                            os.makedirs(os.path.dirname(fullname), exist_ok=True)
+                        except Exception:
+                            updateLog.append(f"Failed to create {filename} - {traceback.format_exc()}")
+                    else:
+                        updateLog.append(f"Extract {filename} -> {fullname}")
+                        try:
+                            z.extract(filename, path=os.path.dirname(fullname))
+                        except Exception:
+                            updateLog.append(f"Failed to extract {filename} - {traceback.format_exc()}")
+
+            try:
+                with open("assets/update_log.txt", "w") as f:
+                    f.writelines(updateLog)
+            except:
+                logger.error(traceback.format_exc())
+
+        os.remove("update.zip")
+    except Exception as e:
+        logger.error(traceback.format_exc())
+
+
+def remove_accents_lower(input_str):
+    nfkd_form = unicodedata.normalize('NFKD', input_str)
+    return u"".join([c for c in nfkd_form if not unicodedata.combining(c)]).lower()
+
+
+class WindowSignals(QObject):
+    StopTimer = Signal()
+    ExportStageStrike = Signal(object)
+    DetectGame = Signal(int)
+    SetupAutocomplete = Signal()
+    UiMounted = Signal()
+    GameChanged = Signal()
+
+
+class Window(QMainWindow):
+    # Bump this when dock widget layout changes (e.g. adding/removing tabs)
+    STATE_VERSION = 3
+    signals = WindowSignals()
+
+    def __init__(self, loop=None):
+        super().__init__()
+
+        StateManager.loop = loop
+        StateManager.BlockSaving()
+
+        AutonaLocaleHelper.LoadLocale()
+        AutonaLocaleHelper.LoadRoundNames()
+        self.LoadTheme()
+
+        self.signals = WindowSignals()
+
+        splash = QSplashScreen(
+            QPixmap('assets/icons/icon.png').scaled(128, 128))
+        splash.show()
+
+        time.sleep(0.1)
+
+        App.processEvents()
+
+        self.programState = {}
+        self.savedProgramState = {}
+        self.programStateDiff = {}
+
+        self.setWindowIcon(QIcon(UI.icon_path('icon.png')))
+
+        if not os.path.exists("out/"):
+            os.mkdir("out/")
+
+        if not os.path.exists("./user_data/games"):
+            os.makedirs("./user_data/games")
+
+        if os.path.exists("./Autona_old.exe"):
+            os.remove("./Autona_old.exe")
+
+        for weight in ('Regular', 'Bold', 'Thin'):
+            QFontDatabase.addApplicationFont(
+                f'./assets/font/LINESeedJP/LINESeedJP-{weight}.ttf')
+        app_font = QFont(UI.FONT_FAMILY, UI.FONT_SM)
+        QApplication.instance().setFont(app_font)
+
+        self.font_small = QFont(UI.FONT_FAMILY_CONDENSED, UI.FONT_XS)
+        QFontDatabase.addApplicationFont('./assets/font/RobotoCondensed.ttf')
+
+        self.threadpool = QThreadPool()
+        self.saveMutex = QMutex()
+
+        self.player_layouts = []
+
+        self.allplayers = None
+        self.local_players = None
+
+        AutonaControllerHelper.instance.init()
+        AutonaCountryHelper.instance.init()
+
+        try:
+            version = json.load(
+                open(AutonaResolve('./assets/versions.json'), encoding='utf-8')).get("program", "?")
+        except Exception as e:
+            version = "?"
+
+        self.setGeometry(300, 300, 800, 100)
+        self.setWindowTitle("Autona v"+version)
+
+        self.setDockOptions(
+            QMainWindow.DockOption.AllowTabbedDocks)
+
+        self.setTabPosition(
+            Qt.DockWidgetArea.AllDockWidgetAreas, QTabWidget.TabPosition.North)
+
+        # Layout base com status no topo
+        central_widget = QWidget()
+        pre_base_layout = QVBoxLayout()
+        pre_base_layout.setContentsMargins(0, 0, 0, 0)
+        central_widget.setLayout(pre_base_layout)
+        self.setCentralWidget(central_widget)
+        central_widget.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+
+        # Central "Set tournament" button
+        self.setTournamentBt = QPushButton(
+            QApplication.translate("app", "Set tournament"))
+        self.setTournamentBt.setIcon(QIcon(UI.icon_path('startgg.svg')))
+        self.setTournamentBt.setIconSize(QSize(20, 20))
+        self.setTournamentBt.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setTournamentBt.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.setTournamentBt.setStyleSheet("padding: 6px 16px; font-size: 11pt;")
+        self.setTournamentBt.clicked.connect(
+            lambda: AutonaTournamentDataProvider.instance.SetStartggEventSlug(self))
+        pre_base_layout.setContentsMargins(0, 8, 0, 8)
+        pre_base_layout.addWidget(self.setTournamentBt, 0, Qt.AlignmentFlag.AlignCenter)
+
+        self.dockWidgets = []
+
+        if not SettingsManager.Get("general.disable_thumbnail_widget", False):
+            from .AutonaThumbnailSettingsWidget import AutonaThumbnailSettingsWidget
+            thumbnailSetting = AutonaThumbnailSettingsWidget()
+            thumbnailSetting.setObjectName(
+                QApplication.translate("app", "Thumbnail Settings"))
+            self.addDockWidget(
+                Qt.DockWidgetArea.BottomDockWidgetArea, thumbnailSetting)
+            self.dockWidgets.append(thumbnailSetting)
+
+        from .AutonaResultSettingsWidget import AutonaResultSettingsWidget
+        resultSetting = AutonaResultSettingsWidget()
+        resultSetting.setObjectName(
+            QApplication.translate("app", "Result Settings"))
+        self.addDockWidget(
+            Qt.DockWidgetArea.BottomDockWidgetArea, resultSetting)
+        self.dockWidgets.append(resultSetting)
+
+        bracket = AutonaBracketWidget()
+        bracket.setWindowIcon(QIcon(UI.icon_path('info.svg')))
+        bracket.setObjectName(
+            QApplication.translate("app", "Bracket"))
+        self.addDockWidget(
+            Qt.DockWidgetArea.BottomDockWidgetArea, bracket)
+        self.dockWidgets.append(bracket)
+
+        tournamentInfo = AutonaTournamentInfoWidget()
+        tournamentInfo.setWindowIcon(QIcon(UI.icon_path('info.svg')))
+        tournamentInfo.setObjectName(
+            QApplication.translate("app", "Tournament Info"))
+        self.addDockWidget(
+            Qt.DockWidgetArea.BottomDockWidgetArea, tournamentInfo)
+        self.dockWidgets.append(tournamentInfo)
+
+        # teamBattle = AutonaTeamBattleWidget()
+        # teamBattle.setWindowIcon(QIcon(UI.icon_path('info.svg')))
+        # teamBattle.setObjectName(
+        #     QApplication.translate("app", "Crew/Team Battle"))
+        # self.addDockWidget(
+        #     Qt.DockWidgetArea.BottomDockWidgetArea, teamBattle)
+        # self.dockWidgets.append(teamBattle)
+
+        self.scoreboard = AutonaScoreboardManager.instance
+        self.scoreboard.setWindowIcon(QIcon(UI.icon_path('list.svg')))
+        self.scoreboard.setObjectName(
+            QApplication.translate("app", "Scoreboard"))
+        self.addDockWidget(
+            Qt.DockWidgetArea.BottomDockWidgetArea, self.scoreboard)
+        self.dockWidgets.append(self.scoreboard)
+        AutonaScoreboardManager.instance.setWindowTitle(
+            QApplication.translate("app", "Scoreboard"))
+
+        self.stageWidget = AutonaScoreboardStageWidget()
+        self.stageWidget.setObjectName(
+            QApplication.translate("app", "Stage"))
+        self.addDockWidget(
+            Qt.DockWidgetArea.BottomDockWidgetArea, self.stageWidget)
+        self.dockWidgets.append(self.stageWidget)
+
+        commentary = AutonaCommentaryWidget()
+        commentary.setWindowIcon(QIcon(UI.icon_path('mic.svg')))
+        commentary.setObjectName(QApplication.translate("app", "Commentary"))
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, commentary)
+        self.dockWidgets.append(commentary)
+
+        self.webserver = WebServer(
+            parent=self, stageWidget=self.stageWidget, commentaryWidget=commentary)
+        self.webserver.start()
+        self.signals.GameChanged.connect(self.webserver.ws_program_state)
+        self.signals.GameChanged.connect(self.webserver.ws_get_characters)
+        self.stageWidget.stageStrikeLogic.signals.state_updated.connect(self.webserver.ws_ruleset)
+
+        playerList = AutonaPlayerListWidget()
+        playerList.setWindowIcon(QIcon(UI.icon_path('list.svg')))
+        playerList.setObjectName(QApplication.translate("app", "Player List"))
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, playerList)
+        self.dockWidgets.append(playerList)
+        
+        notes = AutonaNotesWidget()
+        notes.setObjectName(QApplication.translate("app", "Additional Notes"))
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, notes)
+        self.dockWidgets.append(notes)
+
+        self.statsWidget = AutonaStatsWidget()
+        self.statsWidget.setObjectName(QApplication.translate("app", "Statistics"))
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.statsWidget)
+        self.dockWidgets.append(self.statsWidget)
+
+        # Tab order: 大会情報, スコアボード, 統計情報, サムネイル, リザルト, プレイヤーリスト, 解説, ルール, トーナメント表, メモ
+        self.tabifyDockWidget(tournamentInfo, self.scoreboard)
+        self.tabifyDockWidget(self.scoreboard, self.statsWidget)
+        if not SettingsManager.Get("general.disable_thumbnail_widget", False):
+            self.tabifyDockWidget(self.statsWidget, thumbnailSetting)
+        self.tabifyDockWidget(self.statsWidget, resultSetting)
+        self.tabifyDockWidget(resultSetting, playerList)
+        self.tabifyDockWidget(playerList, commentary)
+        self.tabifyDockWidget(commentary, self.stageWidget)
+        self.tabifyDockWidget(self.stageWidget, bracket)
+        self.tabifyDockWidget(bracket, notes)
+
+        # Initial visibility
+        playerList.setVisible(False)
+        commentary.setVisible(False)
+        self.stageWidget.setVisible(False)
+        bracket.setVisible(False)
+        notes.setVisible(False)
+
+        tournamentInfo.raise_()
+
+        for dw in self.dockWidgets:
+            dw.setMinimumWidth(0)
+            # Call via class to avoid shadowing by instance attrs (e.g. AutonaCommentaryWidget.widget)
+            inner = QDockWidget.widget(dw)
+            if inner:
+                inner.setMinimumWidth(0)
+                inner.setSizePolicy(
+                    QSizePolicy.Ignored, inner.sizePolicy().verticalPolicy())
+
+        self.setMinimumWidth(480)
+
+        # ── Menu Bar ──────────────────────────────────────────────
+        mb = self.menuBar()
+
+        # ── Edit menu (former hamburger menu) ──
+        editMenu = mb.addMenu("Edit")
+
+        action = editMenu.addAction(
+            QApplication.translate("app", "Always on top"))
+        action.setCheckable(True)
+        action.toggled.connect(self.ToggleAlwaysOnTop)
+
+        action = editMenu.addAction(
+            QApplication.translate("app", "Light mode"))
+        action.setCheckable(True)
+        action.setChecked(SettingsManager.Get("light_mode", False))
+        action.toggled.connect(self.ToggleLightMode)
+
+        editMenu.addSeparator()
+
+        toggleWidgets = editMenu.addMenu(
+            QApplication.translate("app", "Toggle widgets"))
+        toggleWidgets.addAction(self.scoreboard.toggleViewAction())
+        toggleWidgets.addAction(self.stageWidget.toggleViewAction())
+        toggleWidgets.addAction(commentary.toggleViewAction())
+        if not SettingsManager.Get("general.disable_thumbnail_widget", False):
+            toggleWidgets.addAction(thumbnailSetting.toggleViewAction())
+        toggleWidgets.addAction(resultSetting.toggleViewAction())
+        toggleWidgets.addAction(tournamentInfo.toggleViewAction())
+        toggleWidgets.addAction(playerList.toggleViewAction())
+        toggleWidgets.addAction(bracket.toggleViewAction())
+        toggleWidgets.addAction(notes.toggleViewAction())
+        toggleWidgets.addAction(self.statsWidget.toggleViewAction())
+
+        action = editMenu.addAction(
+            QApplication.translate("app", "Migrate Layout"))
+        action.triggered.connect(self.MigrateWindow)
+
+        editMenu.addSeparator()
+
+        # Language sub-menus
+        program_language_messagebox = generate_restart_messagebox(
+            QApplication.translate("app", "Program language changed successfully."))
+        languageSelect = editMenu.addMenu(
+            QApplication.translate("app", "Program Language"))
+        languageSelectGroup = QActionGroup(languageSelect)
+        languageSelectGroup.setExclusive(True)
+        action = languageSelect.addAction(
+            QApplication.translate("app", "System language"))
+        languageSelectGroup.addAction(action)
+        action.setCheckable(True)
+        action.setChecked(True)
+        action.triggered.connect(lambda x=None: [
+            SettingsManager.Set("program_language", "default"),
+            program_language_messagebox.exec()
+        ])
+        for code, language in AutonaLocaleHelper.languages.items():
+            action = languageSelect.addAction(f"{language[0]} / {language[1]}")
+            action.setCheckable(True)
+            languageSelectGroup.addAction(action)
+            action.triggered.connect(lambda x=None, c=code: [
+                SettingsManager.Set("program_language", c),
+                program_language_messagebox.exec()
+            ])
+            if SettingsManager.Get("program_language") == code:
+                action.setChecked(True)
+
+        game_asset_language_messagebox = generate_restart_messagebox(
+            QApplication.translate("app", "Game Asset Language changed successfully."))
+        languageSelect = editMenu.addMenu(
+            QApplication.translate("app", "Game Asset Language"))
+        languageSelectGroup = QActionGroup(languageSelect)
+        languageSelectGroup.setExclusive(True)
+        action = languageSelect.addAction(
+            QApplication.translate("app", "Same as program language"))
+        languageSelectGroup.addAction(action)
+        action.setCheckable(True)
+        action.setChecked(True)
+        action.triggered.connect(lambda x=None: [
+            SettingsManager.Set("game_asset_language", "default"),
+            game_asset_language_messagebox.exec()
+        ])
+        for code, language in AutonaLocaleHelper.languages.items():
+            action = languageSelect.addAction(f"{language[0]} / {language[1]}")
+            action.setCheckable(True)
+            languageSelectGroup.addAction(action)
+            action.triggered.connect(lambda x=None, c=code: [
+                SettingsManager.Set("game_asset_language", c),
+                game_asset_language_messagebox.exec()
+            ])
+            if SettingsManager.Get("game_asset_language") == code:
+                action.setChecked(True)
+
+        fg_language_messagebox = generate_restart_messagebox(
+            QApplication.translate("app", "Tournament term language changed successfully."))
+        languageSelect = editMenu.addMenu(
+            QApplication.translate("app", "Tournament term language"))
+        languageSelectGroup = QActionGroup(languageSelect)
+        languageSelectGroup.setExclusive(True)
+        action = languageSelect.addAction(
+            QApplication.translate("app", "Same as program language"))
+        languageSelectGroup.addAction(action)
+        action.setCheckable(True)
+        action.setChecked(True)
+        action.triggered.connect(lambda x=None: [
+            SettingsManager.Set("fg_term_language", "default"),
+            fg_language_messagebox.exec()
+        ])
+        for code, language in AutonaLocaleHelper.languages.items():
+            action = languageSelect.addAction(f"{language[0]} / {language[1]}")
+            action.setCheckable(True)
+            languageSelectGroup.addAction(action)
+            action.triggered.connect(lambda x=None, c=code: [
+                SettingsManager.Set("fg_term_language", c),
+                fg_language_messagebox.exec()
+            ])
+            if SettingsManager.Get("fg_term_language") == code:
+                action.setChecked(True)
+
+        editMenu.addSeparator()
+
+        # Help sub-menu
+        help_messagebox = QMessageBox()
+        help_messagebox.setWindowTitle(
+            QApplication.translate("app", "Warning"))
+        help_messagebox.setText(QApplication.translate(
+            "app", "A new window has been opened in your default webbrowser."))
+        helpMenu = editMenu.addMenu(
+            QApplication.translate("app", "Help"))
+        action = helpMenu.addAction(
+            QApplication.translate("app", "Open the Wiki"))
+        wiki_url = "https://github.com/joaorb64/Autona/wiki"
+        action.triggered.connect(lambda x=None: [
+            QDesktopServices.openUrl(QUrl(wiki_url)),
+            help_messagebox.exec()
+        ])
+        action = helpMenu.addAction(
+            QApplication.translate("app", "Look for Help on the forum"))
+        help_url = "https://github.com/joaorb64/Autona/discussions/categories/q-a"
+        action.triggered.connect(lambda x=None: [
+            QDesktopServices.openUrl(QUrl(help_url)),
+            help_messagebox.exec()
+        ])
+        action = helpMenu.addAction(
+            QApplication.translate("app", "Report a bug"))
+        issues_url = "https://github.com/joaorb64/Autona/issues"
+        action.triggered.connect(lambda x=None: [
+            QDesktopServices.openUrl(QUrl(issues_url)),
+            help_messagebox.exec()
+        ])
+        action = helpMenu.addAction(
+            QApplication.translate("app", "Ask for Help on Discord"))
+        discord_url = "https://discord.gg/X9Sp2FkcHF"
+        action.triggered.connect(lambda x=None: [
+            QDesktopServices.openUrl(QUrl(discord_url)),
+            help_messagebox.exec()
+        ])
+        helpMenu.addSeparator()
+        action = helpMenu.addAction(
+            QApplication.translate("app", "Contribute to the Asset Database"))
+        asset_url = "https://github.com/joaorb64/StreamHelperAssets/"
+        action.triggered.connect(lambda x=None: [
+            QDesktopServices.openUrl(QUrl(asset_url)),
+            help_messagebox.exec()
+        ])
+
+        editMenu.addSeparator()
+
+        self.settingsWindow = AutonaSettingsWindow(self)
+        action = editMenu.addAction(
+            QApplication.translate("Settings", "Settings"))
+        action.setIcon(QIcon(UI.icon_path('settings.svg')))
+        action.triggered.connect(lambda: self.settingsWindow.show())
+
+        self.aboutWidget = AutonaAboutWidget()
+        action = editMenu.addAction(
+            QApplication.translate("About", "About"))
+        action.setIcon(QIcon(UI.icon_path('info.svg')))
+        action.triggered.connect(lambda: self.aboutWidget.show())
+
+        # ── Startgg menu ──
+        startggMenu = mb.addMenu("Startgg")
+
+        self.setTournamentAction = startggMenu.addAction(
+            QApplication.translate("app", "Set tournament"))
+        self.setTournamentAction.triggered.connect(
+            lambda: AutonaTournamentDataProvider.instance.SetStartggEventSlug(self))
+
+        startggMenu.addAction(
+            QApplication.translate("app", "Unset tournament")).triggered.connect(
+            lambda: AutonaTournamentDataProvider.instance.SetTournament(None))
+
+        startggMenu.addSeparator()
+
+        if not SettingsManager.Get("general.hide_track_player", False):
+            self.loadPlayerSetAction = startggMenu.addAction(
+                QApplication.translate("app", "Load tournament and sets from StartGG user"))
+            self.loadPlayerSetAction.setIcon(QIcon(UI.icon_path('startgg.svg')))
+            self.loadPlayerSetAction.triggered.connect(self.LoadUserSetClicked)
+
+            startggMenu.addAction(
+                QApplication.translate("app", "Set StartGG user account")).triggered.connect(
+                self.LoadUserSetOptionsClicked)
+
+            AutonaTournamentDataProvider.instance.signals.user_updated.connect(
+                self.UpdateUserSetButton)
+            AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
+                self.UpdateUserSetButton)
+            self.UpdateUserSetButton()
+
+            startggMenu.addSeparator()
+
+        self.pullCompletedSetsAction = startggMenu.addAction(
+            QApplication.translate("app", "Pull Latest Completed Sets from StartGG"))
+        self.pullCompletedSetsAction.setIcon(QIcon(UI.icon_path('startgg.svg')))
+        self.pullCompletedSetsAction.triggered.connect(
+            AutonaTournamentDataProvider.instance.GetCompletedSets)
+
+        AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
+            self.UpdateLastSetsButton)
+        AutonaTournamentDataProvider.instance.signals.completed_sets_updated.connect(
+            self.LoadCompletedSetsClicked)
+        self.UpdateLastSetsButton()
+
+        # ── Title menu (game select) ──
+        titleMenu = mb.addMenu("Title")
+
+        self.gameSelect = QComboBox()
+        self.gameSelect.setEditable(True)
+        self.gameSelect.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        self.gameSelect.completer().setCompletionMode(QCompleter.PopupCompletion)
+        proxyModel = QSortFilterProxyModel()
+        proxyModel.setSortCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        proxyModel.setSourceModel(self.gameSelect.model())
+        self.gameSelect.model().setParent(proxyModel)
+        self.gameSelect.setModel(proxyModel)
+        self.gameSelect.setFont(self.font_small)
+        self.gameSelect.activated.connect(
+            lambda x: AutonaGameAssetManager.instance.LoadGameAssets(self.gameSelect.currentData()))
+        AutonaGameAssetManager.instance.signals.onLoad.connect(self.SetGame)
+        AutonaGameAssetManager.instance.signals.onLoadAssets.connect(self.ReloadGames)
+        AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(self.SetGame)
+        AutonaTournamentDataProvider.instance.signals.tournament_url_update.connect(
+            self.Signal_GameChange)
+
+        gameSelectAction = QWidgetAction(titleMenu)
+        gameSelectAction.setDefaultWidget(self.gameSelect)
+        titleMenu.addAction(gameSelectAction)
+
+        # Modded content
+        self.moddedContentCheck = QCheckBox(
+            QApplication.translate("app", "Modded content"))
+        self.moddedContentCheck.setVisible(False)
+        self.moddedContentCheck.setChecked(False)
+        self.moddedContentAction = QWidgetAction(titleMenu)
+        self.moddedContentAction.setDefaultWidget(self.moddedContentCheck)
+        self.moddedContentAction.setVisible(False)
+        titleMenu.addAction(self.moddedContentAction)
+
+        AutonaGameAssetManager.instance.signals.onLoad.connect(lambda x=None: [
+            self.moddedContentAction.setVisible(AutonaGameAssetManager.instance.has_modded_content),
+            self.moddedContentCheck.setChecked(StateManager.Get("game").get("mods_active", False))
+        ])
+        self.moddedContentCheck.stateChanged.connect(lambda x=None: [
+            AutonaGameAssetManager.instance.LoadGameAssets(
+                self.gameSelect.currentData(),
+                mods_active=self.moddedContentCheck.isChecked(),
+                mods_reload_mode=True)
+        ])
+        self.gameSelect.activated.connect(
+            lambda x=None: self.moddedContentCheck.setChecked(False))
+        AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
+            lambda x=None: self.moddedContentCheck.setChecked(False))
+
+        # ── Scoreboards menu ──
+        scoreboardsMenu = mb.addMenu("Scoreboards")
+
+        scoreboardsMenu.addAction(
+            QApplication.translate("app", "スコアボードを新規作成")
+        ).triggered.connect(self.CreateScoreboardPrompt)
+
+        scoreboardsMenu.addAction(
+            QApplication.translate("app", "スコアボードを編集")
+        ).triggered.connect(self.OpenScoreboardEditDialog)
+
+        AutonaScoreboardManager.instance.signals.EditRequested.connect(
+            self.OpenScoreboardEditDialog)
+
+        AutonaScoreboardManager.instance.CreateScoreboard(singlePlayer=True)
+
+        self.ReloadGames()
+
+        self.qtSettings = QSettings("HiveeWorks", "Autona")
+
+        if self.qtSettings.value("geometry"):
+            self.restoreGeometry(self.qtSettings.value("geometry"))
+
+        stateKey = f"windowState_v{self.STATE_VERSION}"
+        if self.qtSettings.value(stateKey):
+            self.restoreState(self.qtSettings.value(stateKey))
+
+        splash.finish(self)
+        self.show()
+
+        # Prevent tab labels from being elided ("…") — show full text so the
+        # tab bar uses horizontal scrolling if it overflows.
+        from qtpy.QtWidgets import QTabBar
+        for bar in self.findChildren(QTabBar):
+            bar.setElideMode(Qt.TextElideMode.ElideNone)
+            bar.setUsesScrollButtons(True)
+
+        AutonaCountryHelper.LoadCountries()
+        self.settingsWindow.UiMounted()
+        # self.layoutOptions.UiMounted()
+        AutonaTournamentDataProvider.instance.UiMounted()
+        AutonaGameAssetManager.instance.UiMounted()
+        AutonaAlertNotification.instance.UiMounted()
+        AutonaHotkeys.instance.UiMounted(self)
+        AutonaPlayerDB.signals.db_updated.connect(
+            self.webserver.ws_playerdb
+        )
+        AutonaPlayerDB.LoadDB()
+
+        StateManager.ReleaseSaving()
+
+        AutonaScoreboardManager.instance.signals.ScoreboardAmountChanged.connect(
+            self.ToggleTopOption)
+        StateManager.Unset("completed_sets")
+
+    def SetGame(self, mods_active = False):
+        index = next((i for i in range(self.gameSelect.model().rowCount()) if self.gameSelect.itemText(i) == AutonaGameAssetManager.instance.selectedGame.get(
+            "name") or self.gameSelect.itemText(i) == AutonaGameAssetManager.instance.selectedGame.get("codename")), None)
+        if index is not None:
+            self.gameSelect.setCurrentIndex(index)
+            self.signals.GameChanged.emit()
+
+    def Signal_GameChange(self, url):
+        if url == "":
+            self.gameSelect.setCurrentIndex(0)
+            AutonaGameAssetManager.instance.selectedGame = {}
+
+    def UpdateUserSetButton(self):
+        if not hasattr(self, 'loadPlayerSetAction'):
+            return
+        if SettingsManager.Get("StartGG_user"):
+            self.loadPlayerSetAction.setText(
+                QApplication.translate("app", "Load tournament and sets from StartGG user")+" "+QApplication.translate("punctuation", "(")+f"{SettingsManager.Get('StartGG_user')}"+QApplication.translate("punctuation", ")"))
+            self.loadPlayerSetAction.setEnabled(True)
+        else:
+            self.loadPlayerSetAction.setText(
+                QApplication.translate("app", "Load tournament and sets from StartGG user"))
+            self.loadPlayerSetAction.setEnabled(False)
+    
+    def UpdateLastSetsButton(self):
+        if AutonaTournamentDataProvider.instance and AutonaTournamentDataProvider.instance.provider and AutonaTournamentDataProvider.instance.provider.name == "StartGG":
+            self.pullCompletedSetsAction.setEnabled(True)
+        else:
+            self.pullCompletedSetsAction.setEnabled(False)
+
+    def LoadUserSetClicked(self):
+        self.scoreboard.lastSetSelected = None
+        if SettingsManager.Get("StartGG_user"):
+            AutonaTournamentDataProvider.instance.provider = StartGGDataProvider(
+                "start.gg/",
+                AutonaTournamentDataProvider.instance.threadPool,
+                AutonaTournamentDataProvider.instance
+            )
+            AutonaTournamentDataProvider.instance.LoadUserSet(
+                self.scoreboard.GetScoreboard(1), SettingsManager.Get("StartGG_user"))
+    
+    def LoadCompletedSetsClicked(self, data):
+        StateManager.Set("completed_sets", {index+1: set for index, set in enumerate(data)})
+
+    def LoadUserSetOptionsClicked(self):
+        AutonaTournamentDataProvider.instance.SetUserAccount(
+            self.scoreboard, startgg=True)
+
+    def closeEvent(self, event):
+        logger.info("Shutting down...")
+        self.qtSettings.setValue("geometry", self.saveGeometry())
+        self.qtSettings.setValue(f"windowState_v{self.STATE_VERSION}", self.saveState())
+
+        tmpDir = AutonaResolve("tmp")
+        if os.path.isdir(tmpDir):
+            shutil.rmtree(tmpDir)
+
+        try:
+            crashlog.close()
+            if crashpath.stat().st_size == 0:
+                crashpath.unlink()
+        except:
+            pass
+
+        # For whatever reason, the webserver thread won't respond to the quit() signal nicely.
+        # This is usually unsafe, but there's no easy way to terminate the flask server,
+        # so we hard-kill its thread as we're shutting down to prevent exit-crashes.
+        #
+        # Given that this webserver is local in scope, it's reasonable to not do any
+        # connection-draining process.
+        try:
+            web_socket_fd = os.environ.get('WERKZEUG_SOCKET_FD', None)
+            if web_socket_fd:
+                sock = socket.socket(fileno=int(web_socket_fd))
+                sock.close()
+        except Exception as e:
+            logger.warning("Error closing web socket on shutdown", exc_info=True)
+
+        self.webserver.terminate()
+        self.webserver.wait(10000)  # 10 seconds grace period.
+
+        for window in QApplication.allWindows():
+            if window != self:
+                window.close()
+
+        super().closeEvent(event)
+
+    def ReloadGames(self):
+        logger.info("Reload games")
+        with StateManager.SaveBlock():
+            self.gameSelect.setModel(QStandardItemModel())
+            self.gameSelect.addItem("", 0)
+            for i, game in enumerate(AutonaGameAssetManager.instance.games.items()):
+                logo_path = game[1].get("logo_path")
+                if logo_path:
+                    icon = QIcon(QPixmap(
+                        QImage(logo_path).scaled(
+                            64, 64,
+                            Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation
+                        )
+                    ))
+                else:
+                    icon = QIcon()
+                if game[1].get("name"):
+                    self.gameSelect.addItem(icon, game[1].get("name"), i+1)
+                else:
+                    self.gameSelect.addItem(icon, game[0], i+1)
+            self.gameSelect.setIconSize(QSize(64, 64))
+            self.gameSelect.setFixedHeight(32)
+            view = QListView()
+            view.setIconSize(QSize(64, 64))
+            view.setStyleSheet("QListView::item { height: 32px; }")
+            self.gameSelect.setView(view)
+            self.gameSelect.model().sort(0)
+            self.SetGame()
+
+    def DetectGameFromId(self, id):
+        def detect_smashgg_id_match(games, game, id):
+            result = str(games[game].get("smashgg_game_id", "")) == str(id)
+            if not result:
+                alternates = games[game].get("alternate_versions")
+                alternates_ids = []
+                for alternate in alternates:
+                    if alternate.get("smashgg_game_id"):
+                        alternates_ids.append(str(alternate.get("smashgg_game_id")))
+                result = str(id) in alternates_ids
+            return(result)
+
+        game = next(
+            (i+1 for i, game in enumerate(self.games)
+             if detect_smashgg_id_match(self.games,game,id)),
+            None
+        )
+
+        if game is not None and self.gameSelect.currentIndex() != game:
+            self.gameSelect.setCurrentIndex(game)
+            self.LoadGameAssets(game)
+
+    def ToggleAlwaysOnTop(self, checked):
+        if checked:
+            self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+        else:
+            self.setWindowFlag(Qt.WindowStaysOnTopHint, False)
+        self.show()
+
+    def ToggleLightMode(self, checked):
+        SettingsManager.Set("light_mode", checked)
+        UI.notify_theme_change()
+        self.LoadTheme()
+
+    def LoadTheme(self):
+        if SettingsManager.Get("light_mode", False):
+            qdarktheme.setup_theme(
+                "light",
+                custom_colors=UI.LIGHT_CUSTOM_COLORS,
+                additional_qss=UI.global_qss())
+        else:
+            qdarktheme.setup_theme(
+                "dark",
+                custom_colors=UI.DARK_CUSTOM_COLORS,
+                additional_qss=UI.global_qss())
+
+    def ToggleTopOption(self):
+        if not hasattr(self, 'loadPlayerSetAction'):
+            return
+        if not SettingsManager.Get("general.hide_track_player", False):
+            if AutonaScoreboardManager.instance.GetTabAmount() > 1:
+                self.loadPlayerSetAction.setVisible(False)
+            else:
+                self.loadPlayerSetAction.setVisible(True)
+
+    def CreateScoreboardPrompt(self):
+        # Two-step separated from any spinbox event loop to avoid the
+        # nested-modal crash path. Always safe to call from a menu action.
+        manager = AutonaScoreboardManager.instance
+        if manager.GetTabAmount() >= manager.MAX_SCOREBOARDS:
+            QMessageBox.information(
+                self,
+                QApplication.translate("app", "スコアボードを新規作成"),
+                QApplication.translate(
+                    "app", "スコアボードの最大数に達しています。"))
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(QApplication.translate("app", "スコアボードを新規作成"))
+        dialog.setMinimumWidth(360)
+        vbox = QVBoxLayout()
+        dialog.setLayout(vbox)
+
+        vbox.addWidget(QLabel(
+            QApplication.translate("app", "使用するスコアボードUIを選択してください。")))
+
+        modeGroup = QWidget()
+        modeLayout = QVBoxLayout()
+        modeLayout.setContentsMargins(0, 0, 0, 0)
+        modeGroup.setLayout(modeLayout)
+        singleRadio = QRadioButton(
+            QApplication.translate("app", "1プレイヤー（1v1）"))
+        teamRadio = QRadioButton(
+            QApplication.translate("app", "チーム"))
+        singleRadio.setChecked(True)
+        modeLayout.addWidget(singleRadio)
+        modeLayout.addWidget(teamRadio)
+        vbox.addWidget(modeGroup)
+
+        btnRow = QHBoxLayout()
+        btnRow.addStretch()
+        cancelBtn = QPushButton(QApplication.translate("app", "キャンセル"))
+        okBtn = QPushButton(QApplication.translate("app", "作成"))
+        okBtn.setDefault(True)
+        btnRow.addWidget(cancelBtn)
+        btnRow.addWidget(okBtn)
+        vbox.addLayout(btnRow)
+
+        cancelBtn.clicked.connect(dialog.reject)
+        okBtn.clicked.connect(dialog.accept)
+
+        if dialog.exec() == QDialog.Accepted:
+            manager.CreateScoreboard(singlePlayer=singleRadio.isChecked())
+
+    def OpenScoreboardEditDialog(self):
+        manager = AutonaScoreboardManager.instance
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(QApplication.translate("app", "スコアボードを編集"))
+        dialog.setMinimumWidth(480)
+        vbox = QVBoxLayout()
+        dialog.setLayout(vbox)
+
+        vbox.addWidget(QLabel(
+            QApplication.translate("app", "編集するスコアボードを選択してください。")))
+
+        listWidget = QListWidget()
+        for i in range(1, manager.GetTabAmount() + 1):
+            listWidget.addItem(f"{i}. {manager.GetTabName(i)}")
+        if listWidget.count() > 0:
+            listWidget.setCurrentRow(0)
+        vbox.addWidget(listWidget)
+
+        renameRow = QHBoxLayout()
+        renameRow.addWidget(QLabel(
+            QApplication.translate("app", "タブ名")))
+        nameEdit = QLineEdit()
+        renameRow.addWidget(nameEdit)
+        renameBtn = QPushButton(QApplication.translate("app", "名前を変更"))
+        renameRow.addWidget(renameBtn)
+        vbox.addLayout(renameRow)
+
+        modeRow = QHBoxLayout()
+        modeRow.addWidget(QLabel(
+            QApplication.translate("app", "UIモード")))
+        singleRadio = QRadioButton(
+            QApplication.translate("app", "1プレイヤー（1v1）"))
+        teamRadio = QRadioButton(
+            QApplication.translate("app", "チーム"))
+        modeRow.addWidget(singleRadio)
+        modeRow.addWidget(teamRadio)
+        modeRow.addStretch()
+        vbox.addLayout(modeRow)
+
+        deleteBtn = QPushButton(QApplication.translate("app", "このスコアボードを削除"))
+        deleteBtn.setStyleSheet("color: #e55;")
+        vbox.addWidget(deleteBtn)
+
+        closeRow = QHBoxLayout()
+        closeRow.addStretch()
+        closeBtn = QPushButton(QApplication.translate("app", "閉じる"))
+        closeRow.addWidget(closeBtn)
+        vbox.addLayout(closeRow)
+
+        def selectedIndex() -> int:
+            row = listWidget.currentRow()
+            return row + 1 if row >= 0 else 0
+
+        def refreshList():
+            listWidget.clear()
+            for i in range(1, manager.GetTabAmount() + 1):
+                listWidget.addItem(f"{i}. {manager.GetTabName(i)}")
+
+        def onSelectionChanged():
+            idx = selectedIndex()
+            if idx == 0:
+                nameEdit.clear()
+                deleteBtn.setEnabled(False)
+                singleRadio.setEnabled(False)
+                teamRadio.setEnabled(False)
+                return
+            # Strip the "N. " prefix so the field shows the actual tab name.
+            name = manager.GetTabName(idx)
+            defaultName = QApplication.translate(
+                "app", "Scoreboard") + " " + str(idx)
+            nameEdit.setText("" if name == defaultName else name)
+            # Scoreboard 1 is the anchor — removing it would break indexing.
+            deleteBtn.setEnabled(idx > 1)
+            sb = manager.GetScoreboard(idx)
+            singleRadio.setEnabled(True)
+            teamRadio.setEnabled(True)
+            # Block to avoid firing toggled while syncing from state.
+            singleRadio.blockSignals(True)
+            teamRadio.blockSignals(True)
+            singleRadio.setChecked(bool(getattr(sb, "singlePlayer", True)))
+            teamRadio.setChecked(not singleRadio.isChecked())
+            singleRadio.blockSignals(False)
+            teamRadio.blockSignals(False)
+
+        def onModeChanged():
+            idx = selectedIndex()
+            if idx == 0:
+                return
+            sb = manager.GetScoreboard(idx)
+            sb._applyScoreboardMode(singleRadio.isChecked())
+
+        def onRename():
+            idx = selectedIndex()
+            if idx == 0:
+                return
+            manager.SetTabName(idx, nameEdit.text())
+            refreshList()
+            listWidget.setCurrentRow(idx - 1)
+
+        def onDelete():
+            idx = selectedIndex()
+            if idx <= 1:
+                return
+            confirm = QMessageBox.question(
+                dialog,
+                QApplication.translate("app", "削除の確認"),
+                QApplication.translate(
+                    "app", "スコアボード {0} を削除しますか？").format(idx),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No)
+            if confirm != QMessageBox.Yes:
+                return
+            manager.RemoveScoreboard(idx)
+            refreshList()
+            if listWidget.count() > 0:
+                listWidget.setCurrentRow(min(idx - 1, listWidget.count() - 1))
+
+        listWidget.currentRowChanged.connect(lambda _: onSelectionChanged())
+        renameBtn.clicked.connect(onRename)
+        deleteBtn.clicked.connect(onDelete)
+        singleRadio.toggled.connect(lambda _: onModeChanged())
+        closeBtn.clicked.connect(dialog.accept)
+
+        onSelectionChanged()
+        dialog.exec()
+
+    def MigrateWindow(self):
+        migrateWindow = QDialog(self)
+        migrateWindow.setWindowTitle(
+            QApplication.translate("app", "Migrate Scoreboard Layout"))
+        migrateWindow.setMinimumWidth(800)
+        vbox = QVBoxLayout()
+        migrateWindow.setLayout(vbox)
+        hbox = QHBoxLayout()
+        label = QLabel(QApplication.translate("app", "File Path"))
+        filePath = QLineEdit()
+        fileExplorer = QPushButton(
+            text=QApplication.translate("app", "Find File..."))
+        hbox.addWidget(label)
+        hbox.addWidget(filePath)
+        hbox.addWidget(fileExplorer)
+        vbox.addLayout(hbox)
+
+        migrate = QPushButton(
+            text=QApplication.translate("app", "Migrate Layout"))
+
+        def open_dialog():
+            fname, _ok = QFileDialog.getOpenFileName(
+                migrateWindow,
+                QApplication.translate("app", "Open Layout Javascript File"),
+                os.getcwd(),
+                QApplication.translate("app", "Javascript File") + "  (*.js)",
+            )
+            if fname:
+                filePath.setText(str(fname))
+
+        fileExplorer.clicked.connect(open_dialog)
+
+        def MigrateLayout():
+            data = None
+            with open(filePath.text(), 'r') as file:
+                data = file.read()
+
+                data = data.replace("data.score.", "data.score[1].")
+                data = data.replace("oldData.score.", "oldData.score[1].")
+                data = data.replace(
+                    "_.get(data, \"score.stage_strike.", "_.get(data, \"score.1.stage_strike.")
+                data = data.replace(
+                    "_.get(oldData, \"score.stage_strike.", "_.get(oldData, \"score.1.stage_strike.")
+                data = data.replace(
+                    "source: `score.team.${t + 1}`", "source: `score.1.team.${t + 1}`")
+                data = data.replace(
+                    "data.score[1].ruleset", "data.score.ruleset")
+
+            with open(filePath.text(), 'w') as file:
+                file.write(data)
+
+            logger.info("Completed Layout Migration at: " + filePath.text())
+
+            completeDialog = QDialog(migrateWindow)
+            completeDialog.setWindowTitle(
+                QApplication.translate("app", "Migration Complete"))
+            completeDialog.setMinimumWidth(500)
+            vbox2 = QVBoxLayout()
+            completeDialog.setLayout(vbox2)
+            completeText = QLabel(QApplication.translate(
+                "app", "Layout Migration has completed!"))
+            completeText.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            closeButton = QPushButton(
+                text=QApplication.translate("app", "Close Window"))
+            vbox2.addWidget(completeText)
+            vbox2.addWidget(closeButton)
+            closeButton.clicked.connect(completeDialog.close)
+            completeDialog.show()
+
+        migrate.clicked.connect(MigrateLayout)
+
+        vbox.addWidget(migrate)
+
+        migrateWindow.show()

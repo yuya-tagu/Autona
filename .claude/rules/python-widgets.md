@@ -9,10 +9,10 @@ paths:
 
 - `QDockWidget` を新規作成する場合、`__init__` 内で必ず `self.setWindowTitle()` を呼ぶこと
   - これがないとタブのテキストが空になり、ユーザーからタブが見えない
-- `setObjectName()` は `TournamentStreamHelper.py` 側で設定する（ウィジェット自身では設定しない）
+- `setObjectName()` は `Autona.py` 側で設定する（ウィジェット自身では設定しない）
 - `objectName` は一度設定したら変更しない（`restoreState` がこの名前でウィジェットを識別する）
 
-## ウィジェット登録（TournamentStreamHelper.py）
+## ウィジェット登録（Autona.py）
 
 新しいドックウィジェットを追加する場合、以下を全て行う:
 

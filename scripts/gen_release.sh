@@ -2,27 +2,27 @@
 
 pushd .. > /dev/null
 
-# Create TSH dir and its stage_strike_app folders
-mkdir -p TournamentStreamHelper/stage_strike_app/build
+# Create Autona dir and its stage_strike_app folders
+mkdir -p Autona/stage_strike_app/build
 
 cp -R assets \
 	layout \
 	user_data \
 	LICENSE \
-	TSH.exe \
-	TournamentStreamHelper/
+	Autona.exe \
+	Autona/
 
 cp -R stage_strike_app/build \
-	TournamentStreamHelper/stage_strike_app/
+	Autona/stage_strike_app/
 
 rm -rf \
-	TournamentStreamHelper/assets/versions.json \
-	TournamentStreamHelper/assets/contributors.txt \
-	TournamentStreamHelper/layout/game_images \
-	TournamentStreamHelper/layout/game_screenshots
+	Autona/assets/versions.json \
+	Autona/assets/contributors.txt \
+	Autona/layout/game_images \
+	Autona/layout/game_screenshots
 
-zip -rv release-windows.zip TournamentStreamHelper
+zip -rv release-windows.zip Autona
 
-rm -rf TournamentStreamHelper
+rm -rf Autona
 
 popd > /dev/null

@@ -17,12 +17,12 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# 1. Load TSHDictHelper (no Qt dependency) for the real deep_get
+# 1. Load AutonaDictHelper (no Qt dependency) for the real deep_get
 # ---------------------------------------------------------------------------
 from tests.conftest import direct_import, PROJECT_ROOT
 
 _dict_helper = direct_import(
-    "TSHDictHelper_test", "src/Helpers/TSHDictHelper.py"
+    "AutonaDictHelper_test", "src/Helpers/AutonaDictHelper.py"
 )
 deep_get = _dict_helper.deep_get
 
@@ -43,8 +43,8 @@ def _make_mock_module(name, attrs=None, is_package=False):
     return mod
 
 
-# --- TSHCountryHelper ---
-class _MockTSHCountryHelper:
+# --- AutonaCountryHelper ---
+class _MockAutonaCountryHelper:
     countries = {
         "JP": {"code": "JP", "en_name": "Japan"},
         "US": {"code": "US", "en_name": "United States"},
@@ -57,8 +57,8 @@ class _MockTSHCountryHelper:
         return None
 
 
-# --- TSHLocaleHelper ---
-class _MockTSHLocaleHelper:
+# --- AutonaLocaleHelper ---
+class _MockAutonaLocaleHelper:
     phaseNames = {"group": "Pool {}"}
     matchNames = {
         "grand_final_reset": "Grand Final Reset",
@@ -75,7 +75,7 @@ class _MockTSHLocaleHelper:
     }
 
 
-# --- TSHGameAssetManager ---
+# --- AutonaGameAssetManager ---
 class _MockGameAssetManagerInstance:
     selectedGame = {"codename": "ssbu"}
 
@@ -100,7 +100,7 @@ class _MockGameAssetManagerInstance:
         return stage_map.get(stage_id)
 
 
-class _MockTSHGameAssetManager:
+class _MockAutonaGameAssetManager:
     instance = _MockGameAssetManagerInstance()
 
 
@@ -131,36 +131,36 @@ def _setup_mock_modules():
     mocks = {
         "src": _make_mock_module("src", is_package=True),
         "src.Helpers": _make_mock_module("src.Helpers", is_package=True),
-        "src.Helpers.TSHCountryHelper": _make_mock_module(
-            "src.Helpers.TSHCountryHelper",
-            {"TSHCountryHelper": _MockTSHCountryHelper},
+        "src.Helpers.AutonaCountryHelper": _make_mock_module(
+            "src.Helpers.AutonaCountryHelper",
+            {"AutonaCountryHelper": _MockAutonaCountryHelper},
         ),
-        "src.Helpers.TSHDictHelper": _make_mock_module(
-            "src.Helpers.TSHDictHelper",
+        "src.Helpers.AutonaDictHelper": _make_mock_module(
+            "src.Helpers.AutonaDictHelper",
             {"deep_get": deep_get},
         ),
-        "src.Helpers.TSHDirHelper": _make_mock_module(
-            "src.Helpers.TSHDirHelper",
-            {"TSHResolve": lambda x: x},
+        "src.Helpers.AutonaDirHelper": _make_mock_module(
+            "src.Helpers.AutonaDirHelper",
+            {"AutonaResolve": lambda x: x},
         ),
-        "src.Helpers.TSHQtHelper": _make_mock_module(
-            "src.Helpers.TSHQtHelper",
+        "src.Helpers.AutonaQtHelper": _make_mock_module(
+            "src.Helpers.AutonaQtHelper",
             {"invokeSlot": MagicMock(), "gui_thread_sync": MagicMock()},
         ),
-        "src.Helpers.TSHLocaleHelper": _make_mock_module(
-            "src.Helpers.TSHLocaleHelper",
-            {"TSHLocaleHelper": _MockTSHLocaleHelper},
+        "src.Helpers.AutonaLocaleHelper": _make_mock_module(
+            "src.Helpers.AutonaLocaleHelper",
+            {"AutonaLocaleHelper": _MockAutonaLocaleHelper},
         ),
-        "src.TSHGameAssetManager": _make_mock_module(
-            "src.TSHGameAssetManager",
-            {"TSHGameAssetManager": _MockTSHGameAssetManager},
+        "src.AutonaGameAssetManager": _make_mock_module(
+            "src.AutonaGameAssetManager",
+            {"AutonaGameAssetManager": _MockAutonaGameAssetManager},
         ),
-        "src.TSHPlayerDB": _make_mock_module(
-            "src.TSHPlayerDB",
-            {"TSHPlayerDB": MagicMock()},
+        "src.AutonaPlayerDB": _make_mock_module(
+            "src.AutonaPlayerDB",
+            {"AutonaPlayerDB": MagicMock()},
         ),
-        "src.TSHBracket": _make_mock_module(
-            "src.TSHBracket",
+        "src.AutonaBracket": _make_mock_module(
+            "src.AutonaBracket",
             {"is_power_of_two": lambda x: x & (x - 1) == 0 and x > 0},
         ),
         "src.Workers": _make_mock_module(
@@ -531,7 +531,7 @@ class TestParseMatchDataNewApi:
         assert result["round"] == 3
 
     def test_round_name_translation(self):
-        """fullRoundText should be translated via TSHLocaleHelper."""
+        """fullRoundText should be translated via AutonaLocaleHelper."""
         provider = _make_provider()
         result = provider.ParseMatchDataNewApi(_new_api_set_basic())
         assert result["round_name"] == "Winners Final"
@@ -614,7 +614,7 @@ class TestParseMatchDataNewApi:
         assert p1["id"] == [1001, 2001]
 
     def test_entrant_country_lookup(self):
-        """Country name -> code lookup from TSHCountryHelper."""
+        """Country name -> code lookup from AutonaCountryHelper."""
         provider = _make_provider()
         result = provider.ParseMatchDataNewApi(_new_api_set_basic())
         p2 = result["entrants"][1][0]

@@ -10,11 +10,11 @@ from qtpy.QtWidgets import QApplication
 from loguru import logger
 
 from src.StateManager import StateManager
-from src.TSHGameAssetManager import TSHGameAssetManager
+from src.AutonaGameAssetManager import AutonaGameAssetManager
 from src.SettingsManager import SettingsManager
-from src.Helpers.TSHDictHelper import deep_get
-from src.Helpers.TSHLocaleHelper import TSHLocaleHelper
-from src.Helpers.TSHDirHelper import TSHResolve
+from src.Helpers.AutonaDictHelper import deep_get
+from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+from src.Helpers.AutonaDirHelper import AutonaResolve
 
 
 def _remove_special_chars(s):
@@ -121,7 +121,7 @@ def _create_preview_data(gameAssetManager=None):
 
             name = key
             if character.get("locale"):
-                locale = TSHLocaleHelper.programLocale
+                locale = AutonaLocaleHelper.programLocale
                 if locale.replace("-", "_") in character["locale"]:
                     name = character["locale"][locale.replace("-", "_")]
                 elif re.split("-|_", locale)[0] in character["locale"]:
@@ -183,7 +183,7 @@ def generate(settingsManager, isPreview=False, gameAssetManager=None,
         raise Exception("Result rendering failed")
 
     if isPreview:
-        out_path = TSHResolve("tmp/result")
+        out_path = AutonaResolve("tmp/result")
         Path(out_path).mkdir(parents=True, exist_ok=True)
         tmp_file = f"{out_path}/preview.png"
         pixmap.save(tmp_file)

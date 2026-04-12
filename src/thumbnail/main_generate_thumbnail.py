@@ -13,15 +13,15 @@ from loguru import logger
 
 from qtpy.QtWidgets import QApplication
 
-from src.TSHGameAssetManager import TSHGameAssetManager
+from src.AutonaGameAssetManager import AutonaGameAssetManager
 from src.StateManager import StateManager
-from src.Helpers.TSHLocaleHelper import TSHLocaleHelper
-from src.Helpers.TSHDictHelper import *
-from src.Helpers.TSHAltTextHelper import generate_youtube
-from src.Helpers.TSHDirHelper import TSHResolve
+from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+from src.Helpers.AutonaDictHelper import *
+from src.Helpers.AutonaAltTextHelper import generate_youtube
+from src.Helpers.AutonaDirHelper import AutonaResolve
 
 
-def createFalseData(gameAssetManager: TSHGameAssetManager = None, used_assets: str = None):
+def createFalseData(gameAssetManager: AutonaGameAssetManager = None, used_assets: str = None):
     """Generate mock data for preview mode."""
     chars = []
 
@@ -50,7 +50,7 @@ def createFalseData(gameAssetManager: TSHGameAssetManager = None, used_assets: s
 
             name = key
             if character.get("locale"):
-                locale = TSHLocaleHelper.programLocale
+                locale = AutonaLocaleHelper.programLocale
                 if locale.replace("-", "_") in character["locale"]:
                     name = character["locale"][locale.replace("-", "_")]
                 elif re.split("-|_", locale)[0] in character["locale"]:
@@ -100,8 +100,8 @@ def createFalseData(gameAssetManager: TSHGameAssetManager = None, used_assets: s
         "score": {
             "1": {
                 "best_of": 3,
-                "match": TSHLocaleHelper.matchNames.get("winners_final"),
-                "phase": TSHLocaleHelper.phaseNames.get("group").format("A"),
+                "match": AutonaLocaleHelper.matchNames.get("winners_final"),
+                "phase": AutonaLocaleHelper.phaseNames.get("group").format("A"),
                 "team": {
                     "1": {
                         "losers": False,
@@ -242,7 +242,7 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None, scoreb
 def save_result(pixmap, data, settings, scoreboardNumber=1, isPreview=False):
     """Save rendered pixmap to disk. Returns output file path."""
     display_phase = deep_get(settings, "display_phase", True)
-    out_path = "./out/thumbnails" if not isPreview else TSHResolve("tmp/thumbnail")
+    out_path = "./out/thumbnails" if not isPreview else AutonaResolve("tmp/thumbnail")
     Path(out_path).mkdir(parents=True, exist_ok=True)
 
     if not isPreview:

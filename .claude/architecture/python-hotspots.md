@@ -11,18 +11,18 @@
 | # | ファイル | 行数 | 関数数 | クラス数 | 主な役割 |
 |---|---------|------|--------|---------|---------|
 | 1 | `TournamentDataProvider/StartGGDataProvider.py` | 1,979 | 34 | 1 | Start.gg API クライアント |
-| 2 | `TSHGameAssetManager.py` | 1,602 | 28 | 6 | ゲーム別アセット管理 |
-| 3 | `TSHScoreboardWidget.py` | 1,562 | 38 | 3 | スコアボード UI |
+| 2 | `AutonaGameAssetManager.py` | 1,602 | 28 | 6 | ゲーム別アセット管理 |
+| 3 | `AutonaScoreboardWidget.py` | 1,562 | 38 | 3 | スコアボード UI |
 | 4 | `thumbnail/main_generate_thumbnail.py` | 1,534 | 17 | 0 | サムネイル画像生成 |
-| 5 | `TournamentStreamHelper.py` | 1,321 | 35 | 4 | メインウィンドウ |
-| 6 | `TSHScoreboardPlayerWidget.py` | 1,030 | 28 | 3 | 選手ウィジェット（スコアボード用） |
-| 7 | `TSHThumbnailSettingsWidget.py` | 1,001 | 20 | 3 | サムネイル設定 UI |
-| 8 | `TSHTeamPlayerWidget.py` | 951 | 36 | 2 | 選手ウィジェット（チームバトル用） |
-| 9 | `TSHBracketView.py` | 737 | 14 | 2 | ブラケット描画 |
-| 10 | `TSHWebServer.py` | 713 | 112 | 2 | Flask + SocketIO サーバー |
-| 11 | `TSHScoreboardStageWidget.py` | 573 | 21 | 4 | ステージ選択 UI |
-| 12 | `TSHWebServerActions.py` | 543 | 52 | 1 | REST API ハンドラ |
-| 13 | `TSHAssetDownloader.py` | 537 | 19 | 4 | アセットダウンローダー |
+| 5 | `Autona.py` | 1,321 | 35 | 4 | メインウィンドウ |
+| 6 | `AutonaScoreboardPlayerWidget.py` | 1,030 | 28 | 3 | 選手ウィジェット（スコアボード用） |
+| 7 | `AutonaThumbnailSettingsWidget.py` | 1,001 | 20 | 3 | サムネイル設定 UI |
+| 8 | `AutonaTeamPlayerWidget.py` | 951 | 36 | 2 | 選手ウィジェット（チームバトル用） |
+| 9 | `AutonaBracketView.py` | 737 | 14 | 2 | ブラケット描画 |
+| 10 | `AutonaWebServer.py` | 713 | 112 | 2 | Flask + SocketIO サーバー |
+| 11 | `AutonaScoreboardStageWidget.py` | 573 | 21 | 4 | ステージ選択 UI |
+| 12 | `AutonaWebServerActions.py` | 543 | 52 | 1 | REST API ハンドラ |
+| 13 | `AutonaAssetDownloader.py` | 537 | 19 | 4 | アセットダウンローダー |
 
 ---
 
@@ -30,25 +30,25 @@
 
 | # | ファイル | 関数 | 行数 | 開始行 | 問題の種類 |
 |---|---------|------|------|--------|-----------|
-| 1 | `TSHScoreboardWidget.py` | `__init__` | 688 | L93 | God __init__ |
-| 2 | `TSHGameAssetManager.py` | `LoadGameAssets` | 678 | L212 | 内部クラス2つ含む |
-| 3 | `TournamentStreamHelper.py` | `__init__` | 629 | L319 | God __init__ |
-| 4 | `TSHThumbnailSettingsWidget.py` | `__init__` | 473 | L66 | God __init__ |
+| 1 | `AutonaScoreboardWidget.py` | `__init__` | 688 | L93 | God __init__ |
+| 2 | `AutonaGameAssetManager.py` | `LoadGameAssets` | 678 | L212 | 内部クラス2つ含む |
+| 3 | `Autona.py` | `__init__` | 629 | L319 | God __init__ |
+| 4 | `AutonaThumbnailSettingsWidget.py` | `__init__` | 473 | L66 | God __init__ |
 | 5 | `thumbnail/main_generate_thumbnail.py` | `paste_image_matrix` | 323 | L242 | 座標計算の塊 |
-| 6 | `TSHGameAssetManager.py` | `AssetsLoaderThread.run` | 327 | L221 | LoadGameAssets 内部クラス |
-| 7 | `TSHGameAssetManager.py` | `AssetsLoader.run` | 312 | L554 | 同上（同期版） |
+| 6 | `AutonaGameAssetManager.py` | `AssetsLoaderThread.run` | 327 | L221 | LoadGameAssets 内部クラス |
+| 7 | `AutonaGameAssetManager.py` | `AssetsLoader.run` | 312 | L554 | 同上（同期版） |
 | 8 | `StartGGDataProvider.py` | `ParseMatchDataOldApi` | 265 | L747 | レスポンスパース |
 | 9 | `thumbnail/main_generate_thumbnail.py` | `generate` | 261 | L1274 | エントリーポイント |
-| 10 | `TSHThumbnailSettingsWidget.py` | `updateFromSettings` | 243 | L550 | 設定反映 |
-| 11 | `TSHScoreboardPlayerWidget.py` | `__init__` | 207 | L47 | God __init__ |
-| 12 | `TSHScoreboardPlayerWidget.py` | `SetData` | 174 | L740 | データ設定 |
-| 13 | `TSHTeamPlayerWidget.py` | `SetData` | 174 | L742 | データ設定（↑と酷似） |
+| 10 | `AutonaThumbnailSettingsWidget.py` | `updateFromSettings` | 243 | L550 | 設定反映 |
+| 11 | `AutonaScoreboardPlayerWidget.py` | `__init__` | 207 | L47 | God __init__ |
+| 12 | `AutonaScoreboardPlayerWidget.py` | `SetData` | 174 | L740 | データ設定 |
+| 13 | `AutonaTeamPlayerWidget.py` | `SetData` | 174 | L742 | データ設定（↑と酷似） |
 | 14 | `StartGGDataProvider.py` | `ParseMatchDataNewApi` | 166 | L580 | レスポンスパース |
-| 15 | `TSHGameAssetManager.py` | `GetCharacterAssets` | 166 | L1414 | アセットパス解決 |
+| 15 | `AutonaGameAssetManager.py` | `GetCharacterAssets` | 166 | L1414 | アセットパス解決 |
 
 ---
 
-## コード重複: TSHScoreboardPlayerWidget ↔ TSHTeamPlayerWidget
+## コード重複: AutonaScoreboardPlayerWidget ↔ AutonaTeamPlayerWidget
 
 **最大の重複ホットスポット**。2ファイル合計 1,981行、19個の共通メソッド名を持つ。
 
@@ -87,7 +87,7 @@
 
 ---
 
-## TSHWebServer.py のルート肥大化
+## AutonaWebServer.py のルート肥大化
 
 - 101個の Flask/SocketIO ルートハンドラを1ファイルに集約
 - 各ルートは 2-10行程度と短いが、ファイル全体が 713行
@@ -102,9 +102,9 @@
 
 | ファイル | __init__ 行数 | 内容 |
 |---------|-------------|------|
-| `TSHScoreboardWidget.py` | 688行 | UI構築 + シグナル接続 + メニュー構築 + タイマー設定 |
-| `TournamentStreamHelper.py` | 629行 | 全ドックウィジェット生成 + メニューバー構築 + レイアウト復元 |
-| `TSHThumbnailSettingsWidget.py` | 473行 | 設定フォーム全体の構築 |
+| `AutonaScoreboardWidget.py` | 688行 | UI構築 + シグナル接続 + メニュー構築 + タイマー設定 |
+| `Autona.py` | 629行 | 全ドックウィジェット生成 + メニューバー構築 + レイアウト復元 |
+| `AutonaThumbnailSettingsWidget.py` | 473行 | 設定フォーム全体の構築 |
 
 ---
 
@@ -114,9 +114,9 @@
 
 | 優先度 | 対象 | 理由 |
 |--------|------|------|
-| **高** | TSHScoreboardPlayerWidget ↔ TSHTeamPlayerWidget の重複 | ~700行の重複削除可能。バグ修正が2箇所に必要な状態 |
+| **高** | AutonaScoreboardPlayerWidget ↔ AutonaTeamPlayerWidget の重複 | ~700行の重複削除可能。バグ修正が2箇所に必要な状態 |
 | **高** | StartGGDataProvider の巨大パース関数 | ParseMatchDataOldApi/NewApi が各 166-265行。テスト不能 |
 | **中** | God __init__ 3ファイル | 可読性低下。ただし動作に問題なく段階的対応可 |
-| **中** | TSHGameAssetManager.LoadGameAssets の内部クラス | 非同期/同期の2版が各 300行超。ロジック重複 |
+| **中** | AutonaGameAssetManager.LoadGameAssets の内部クラス | 非同期/同期の2版が各 300行超。ロジック重複 |
 | **中** | thumbnail/main_generate_thumbnail.py | 関数型で書かれたモジュール。テスト追加の余地大 |
-| **低** | TSHWebServer.py のルート肥大化 | 各ハンドラは小さい。Blueprint分割で改善可能だが緊急性低 |
+| **低** | AutonaWebServer.py のルート肥大化 | 各ハンドラは小さい。Blueprint分割で改善可能だが緊急性低 |

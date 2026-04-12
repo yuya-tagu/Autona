@@ -15,7 +15,7 @@
 
 ---
 
-## S-01: TSHScoreboardPlayerWidget ↔ TSHTeamPlayerWidget の重複 [P1/D2/S2]
+## S-01: AutonaScoreboardPlayerWidget ↔ AutonaTeamPlayerWidget の重複 [P1/D2/S2]
 
 **根拠**: python-hotspots.md「コード重複」セクション
 
@@ -24,33 +24,33 @@
 - 合計 ~700行の重複。バグ修正が常に2箇所必要
 
 **対策案**:
-基底クラス `TSHBasePlayerWidget(QGroupBox)` を抽出し、共通ロジックを移動。各サブクラスは差分のみ保持。
+基底クラス `AutonaBasePlayerWidget(QGroupBox)` を抽出し、共通ロジックを移動。各サブクラスは差分のみ保持。
 - Scoreboard版固有: `ExportPlayerId`, `SetLosers`, `SavePlayerToDB`, DB関連, `refresh_theme_styles`
 - TeamBattle版固有: stock/active/dead 管理, `SpinnerHandling`, `SetBattleMode`
 
-**影響範囲**: `TSHScoreboardPlayerWidget.py`, `TSHTeamPlayerWidget.py`, それぞれの import 元（5ファイル）
+**影響範囲**: `AutonaScoreboardPlayerWidget.py`, `AutonaTeamPlayerWidget.py`, それぞれの import 元（5ファイル）
 
 **リスク**: `self.path` 経由の StateManager 操作パターンが微妙に異なる箇所がある。抽出時に差分を見落とすと実行時エラー。
 
 ---
 
-## S-02: God __init__ — TSHScoreboardWidget (688行) [P2/D2/S2]
+## S-02: God __init__ — AutonaScoreboardWidget (688行) [P2/D2/S2]
 
 **根拠**: python-hotspots.md「God __init__」セクション
 
 **現状**:
-`TSHScoreboardWidget.__init__` が688行。UI構築・シグナル接続・メニュー構築・タイマー設定が1メソッドに詰まっている。
+`AutonaScoreboardWidget.__init__` が688行。UI構築・シグナル接続・メニュー構築・タイマー設定が1メソッドに詰まっている。
 
 **対策案**:
 `_build_team_columns()`, `_build_score_column()`, `_build_bottom_options()`, `_connect_signals()` 等のプライベートメソッドに分割。クラスの責務自体は変えない。
 
-**影響範囲**: `TSHScoreboardWidget.py` のみ
+**影響範囲**: `AutonaScoreboardWidget.py` のみ
 
 **リスク**: ローカル変数をインスタンス変数に昇格する際の漏れ。分割後の初期化順序の誤り。
 
 ---
 
-## S-03: God __init__ — TournamentStreamHelper.Window (629行) [P2/D3/S3]
+## S-03: God __init__ — Autona.Window (629行) [P2/D3/S3]
 
 **根拠**: python-hotspots.md「God __init__」セクション
 
@@ -60,13 +60,13 @@
 **対策案**:
 `_create_dock_widgets()`, `_build_menu_bar()`, `_restore_layout()`, `_mount_ui()` 等に分割。
 
-**影響範囲**: `TournamentStreamHelper.py` のみ。ただし全シングルトンの初期化順序に影響しうる。
+**影響範囲**: `Autona.py` のみ。ただし全シングルトンの初期化順序に影響しうる。
 
-**リスク**: singleton-init-order.md で特定した初期化順序依存（TSHGameAssetManager → TSHTournamentDataProvider）を壊す可能性。分割後も import 順序は変えないこと。
+**リスク**: singleton-init-order.md で特定した初期化順序依存（AutonaGameAssetManager → AutonaTournamentDataProvider）を壊す可能性。分割後も import 順序は変えないこと。
 
 ---
 
-## S-04: TSHGameAssetManager.LoadGameAssets の内部クラス重複 (678行) [P2/D2/S2]
+## S-04: AutonaGameAssetManager.LoadGameAssets の内部クラス重複 (678行) [P2/D2/S2]
 
 **根拠**: python-hotspots.md「巨大関数 TOP 15」
 
@@ -76,7 +76,7 @@
 **対策案**:
 共通ロジックを `_load_assets_core(mods_active, mods_reload_mode)` に抽出し、Thread版/同期版はそれを呼ぶだけにする。
 
-**影響範囲**: `TSHGameAssetManager.py` 内部のみ
+**影響範囲**: `AutonaGameAssetManager.py` 内部のみ
 
 **リスク**: Thread版は `self.parent()` (QThread の parent)、同期版は `self.parent` (通常属性) でアクセスしているため、統合時に参照先の違いに注意。
 
@@ -101,7 +101,7 @@
 
 ---
 
-## S-06: TSHThumbnailSettingsWidget.__init__ (473行) + updateFromSettings (243行) [P3/D2/S2]
+## S-06: AutonaThumbnailSettingsWidget.__init__ (473行) + updateFromSettings (243行) [P3/D2/S2]
 
 **根拠**: python-hotspots.md「God __init__」
 
@@ -111,7 +111,7 @@
 **対策案**:
 S-02 と同様のプライベートメソッド分割。設定項目のグループごとにメソッドを分ける。
 
-**影響範囲**: `TSHThumbnailSettingsWidget.py` のみ
+**影響範囲**: `AutonaThumbnailSettingsWidget.py` のみ
 
 ---
 
@@ -129,7 +129,7 @@ S-02 と同様のプライベートメソッド分割。設定項目のグルー
 **対策案**:
 座標計算・画像操作・テキスト描画を別モジュールに分離。純粋関数が多いのでテスト追加しやすい。
 
-**影響範囲**: `thumbnail/` 配下、`TSHThumbnailSettingsWidget.py`
+**影響範囲**: `thumbnail/` 配下、`AutonaThumbnailSettingsWidget.py`
 
 ---
 
@@ -138,14 +138,14 @@ S-02 と同様のプライベートメソッド分割。設定項目のグルー
 **根拠**: state-keys.md「要注意事項 #1」
 
 **現状**:
-`TSHStatsUtil.py:180` で `StateManager.Set(f"score.upset_factor", 0)` — スコアボード番号なし。
-`TSHStatsUtil.py:177` で `StateManager.Set(f"score.{self.scoreboardNumber}.upset_factor", ...)` — 番号あり。
+`AutonaStatsUtil.py:180` で `StateManager.Set(f"score.upset_factor", 0)` — スコアボード番号なし。
+`AutonaStatsUtil.py:177` で `StateManager.Set(f"score.{self.scoreboardNumber}.upset_factor", ...)` — 番号あり。
 番号なしキーは意図的かバグか不明。
 
 **対策案**:
 コンテキストを確認し、番号なしが不要なら削除。必要なら `score.{N}.upset_factor` に統一。
 
-**影響範囲**: `TSHStatsUtil.py`, Web UI 側で `score.upset_factor` を参照している箇所
+**影響範囲**: `AutonaStatsUtil.py`, Web UI 側で `score.upset_factor` を参照している箇所
 
 ---
 
@@ -154,12 +154,12 @@ S-02 と同様のプライベートメソッド分割。設定項目のグルー
 **根拠**: state-keys.md「要注意事項 #3」
 
 **現状**:
-`TSHWebServerActions.py:41` で `StateManager.state` を直接辞書として返却。`StateManager.lock` を取得していない。SaveState のスレッドとのレースコンディション可能性。
+`AutonaWebServerActions.py:41` で `StateManager.state` を直接辞書として返却。`StateManager.lock` を取得していない。SaveState のスレッドとのレースコンディション可能性。
 
 **対策案**:
 `StateManager.GetFullState()` のような static メソッドを追加し、ロック内で `deep_clone` して返す。
 
-**影響範囲**: `TSHWebServerActions.py`, `StateManager.py`
+**影響範囲**: `AutonaWebServerActions.py`, `StateManager.py`
 
 ---
 
@@ -184,7 +184,7 @@ S-02 と同様のプライベートメソッド分割。設定項目のグルー
 **根拠**: python-imports.md「間接循環」、singleton-init-order.md「リスク #3」
 
 **現状**:
-`TSHCommentaryWidget.py`, `TSHScoreboardPlayerWidget.py`, `TSHScoreboardWidget.py` が `from . import ui_constants as UI` で import。`src/__init__.py` → `from .TournamentStreamHelper import *` を経由するため、TournamentStreamHelper.py のトップレベルが全て実行される。
+`AutonaCommentaryWidget.py`, `AutonaScoreboardPlayerWidget.py`, `AutonaScoreboardWidget.py` が `from . import ui_constants as UI` で import。`src/__init__.py` → `from .Autona import *` を経由するため、Autona.py のトップレベルが全て実行される。
 
 **対策案**:
 `from .ui_constants import ...` に変更（直接 import）。ただし `ui_constants.py` 自体が `from .SettingsManager import SettingsManager` を持つので完全には切れない。最小限の対応として `from . import ui_constants` → `from .ui_constants import icon_path, ...` に変更。
@@ -198,18 +198,18 @@ S-02 と同様のプライベートメソッド分割。設定項目のグルー
 **根拠**: state-keys.md「要注意事項 #4」
 
 **現状**:
-`TSHCommentaryWidget.RemoveExtraCommentators` で `commentary.{k}` を Unset するが、残った実況者のインデックスを詰め直さない。1, 3 のように欠番が生じうる。
+`AutonaCommentaryWidget.RemoveExtraCommentators` で `commentary.{k}` を Unset するが、残った実況者のインデックスを詰め直さない。1, 3 のように欠番が生じうる。
 
 **対策案**:
 削除後にインデックスを再割り当てするか、Web UI 側で欠番を許容するか判断が必要。
 
-**影響範囲**: `TSHCommentaryWidget.py`, `stage_strike_app/` の commentary 参照箇所
+**影響範囲**: `AutonaCommentaryWidget.py`, `stage_strike_app/` の commentary 参照箇所
 
 ---
 
-## S-13: TSHWebServer.py のルート肥大化 [P3/D2/S1]
+## S-13: AutonaWebServer.py のルート肥大化 [P3/D2/S1]
 
-**根拠**: python-hotspots.md「TSHWebServer.py のルート肥大化」
+**根拠**: python-hotspots.md「AutonaWebServer.py のルート肥大化」
 
 **現状**:
 101個の Flask/SocketIO ルートハンドラが1ファイルに集約。各ハンドラは短いが、追加のたびに膨張。REST と WebSocket が混在。
@@ -217,7 +217,7 @@ S-02 と同様のプライベートメソッド分割。設定項目のグルー
 **対策案**:
 Flask Blueprint を使ってドメイン別に分割（scoreboard, stage_strike, commentary, bracket 等）。
 
-**影響範囲**: `TSHWebServer.py`, `TSHWebServerActions.py`
+**影響範囲**: `AutonaWebServer.py`, `AutonaWebServerActions.py`
 
 ---
 
@@ -226,7 +226,7 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, stage_strike,
 **根拠**: state-keys.md「要注意事項 #2」
 
 **現状**:
-`TSHScoreboardWidget`, `TSHTournamentInfoWidget` 等で `element.objectName()` をキーパスに使用。`.ui` ファイルの変更でキーパスが壊れ、既存の保存データとの互換性が失われる。
+`AutonaScoreboardWidget`, `AutonaTournamentInfoWidget` 等で `element.objectName()` をキーパスに使用。`.ui` ファイルの変更でキーパスが壊れ、既存の保存データとの互換性が失われる。
 
 **対策案**:
 objectName → 明示的なキー名マッピングを導入。ただし既存の .ui ファイルとの整合性維持が必要で工数大。

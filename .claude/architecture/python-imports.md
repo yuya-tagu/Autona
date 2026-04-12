@@ -9,27 +9,27 @@
 ## ファイル別 import 一覧
 
 ### src/__init__.py
-- 内部: `.TournamentStreamHelper`
+- 内部: `.Autona`
 - 外部: (なし)
 
 ### src/main.py
-- 内部: (なし) — `import TournamentStreamHelper` (パッケージ外参照、上流残存)
+- 内部: (なし) — `import Autona` (パッケージ外参照、上流残存)
 - 外部: (なし)
 
-### src/TournamentStreamHelper.py
-- 内部: `.Helpers.TSHQtHelper`, `.Helpers.TSHDownloadHelper`, `.Helpers.TSHLocaleHelper`, `.Helpers.TSHDirHelper`, `.Helpers.TSHCountryHelper`, `.Helpers.TSHControllerHelper`, `.Settings.TSHSettingsWindow`, `.LayoutOptions.TSHLayoutOptionsWindow`, `.TSHHotkeys`, `.TSHPlayerListWidget`, `.TSHNotesWidget`, `.TSHCommentaryWidget`, `.TSHGameAssetManager`, `.TSHBracketWidget`, `.TSHTournamentInfoWidget`, `.TSHTournamentDataProvider`, `.TournamentDataProvider.StartGGDataProvider`, `.TSHAlertNotification`, `.TSHPlayerDB`, `.Workers`, `.StateManager`, `.SettingsManager`, `.TSHScoreboardManager`, `.TSHScoreboardStageWidget`, `.TSHStatsWidget`, `src.TSHAssetDownloader`, `src.TSHAboutWidget`, `src.TSHWebServer`, `. (ui_constants)`
+### src/Autona.py
+- 内部: `.Helpers.AutonaQtHelper`, `.Helpers.AutonaDownloadHelper`, `.Helpers.AutonaLocaleHelper`, `.Helpers.AutonaDirHelper`, `.Helpers.AutonaCountryHelper`, `.Helpers.AutonaControllerHelper`, `.Settings.AutonaSettingsWindow`, `.LayoutOptions.AutonaLayoutOptionsWindow`, `.AutonaHotkeys`, `.AutonaPlayerListWidget`, `.AutonaNotesWidget`, `.AutonaCommentaryWidget`, `.AutonaGameAssetManager`, `.AutonaBracketWidget`, `.AutonaTournamentInfoWidget`, `.AutonaTournamentDataProvider`, `.TournamentDataProvider.StartGGDataProvider`, `.AutonaAlertNotification`, `.AutonaPlayerDB`, `.Workers`, `.StateManager`, `.SettingsManager`, `.AutonaScoreboardManager`, `.AutonaScoreboardStageWidget`, `.AutonaStatsWidget`, `src.AutonaAssetDownloader`, `src.AutonaAboutWidget`, `src.AutonaWebServer`, `. (ui_constants)`
 - 外部: loguru, orjson, packaging.version, qdarktheme
 
 ### src/StateManager.py
-- 内部: `.Helpers.TSHDictHelper`, `.SettingsManager`
+- 内部: `.Helpers.AutonaDictHelper`, `.SettingsManager`
 - 外部: deepdiff, deepdiff.helper, loguru, orjson, PIL, requests
 
 ### src/SettingsManager.py
-- 内部: `.Helpers.TSHDictHelper`
+- 内部: `.Helpers.AutonaDictHelper`
 - 外部: orjson
 
 ### src/LayoutOptionsManager.py
-- 内部: `.Helpers.TSHDictHelper`
+- 内部: `.Helpers.AutonaDictHelper`
 - 外部: orjson
 
 ### src/ui_constants.py
@@ -42,206 +42,206 @@
 
 ---
 
-### src/Helpers/TSHAltTextHelper.py
+### src/Helpers/AutonaAltTextHelper.py
 - 内部: (なし)
 - 外部: atproto
 
-### src/Helpers/TSHBadWordFilter.py
-- 内部: `..SettingsManager`, `.TSHLocaleHelper`
+### src/Helpers/AutonaBadWordFilter.py
+- 内部: `..SettingsManager`, `.AutonaLocaleHelper`
 - 外部: loguru
 
-### src/Helpers/TSHBskyHelper.py
-- 内部: `.TSHAltTextHelper`, `.TSHLocaleHelper`, `src.SettingsManager`
+### src/Helpers/AutonaBskyHelper.py
+- 内部: `.AutonaAltTextHelper`, `.AutonaLocaleHelper`, `src.SettingsManager`
 - 外部: atproto, atproto_client
 
-### src/Helpers/TSHControllerHelper.py
-- 内部: `..SettingsManager`, `.TSHDownloadHelper`
+### src/Helpers/AutonaControllerHelper.py
+- 内部: `..SettingsManager`, `.AutonaDownloadHelper`
 - 外部: loguru, requests
 
-### src/Helpers/TSHCountryHelper.py
-- 内部: `..SettingsManager`, `..TournamentDataProvider`, `.TSHDictHelper`, `.TSHDirHelper`, `.TSHDownloadHelper`, `.TSHLocaleHelper`
+### src/Helpers/AutonaCountryHelper.py
+- 内部: `..SettingsManager`, `..TournamentDataProvider`, `.AutonaDictHelper`, `.AutonaDirHelper`, `.AutonaDownloadHelper`, `.AutonaLocaleHelper`
 - 外部: countryflag, loguru, orjson, requests, tqdm
 
-### src/Helpers/TSHDictHelper.py
+### src/Helpers/AutonaDictHelper.py
 - 内部: (なし)
 - 外部: msgpack
 
-### src/Helpers/TSHDirHelper.py
+### src/Helpers/AutonaDirHelper.py
 - 内部: (なし)
 - 外部: loguru
 
-### src/Helpers/TSHDownloadHelper.py
+### src/Helpers/AutonaDownloadHelper.py
 - 内部: `..Workers`
 - 外部: loguru, requests, tqdm
 
-### src/Helpers/TSHLocaleHelper.py
-- 内部: `.TSHDictHelper`, `.TSHDirHelper`, `src.SettingsManager`, `src.StateManager`
+### src/Helpers/AutonaLocaleHelper.py
+- 内部: `.AutonaDictHelper`, `.AutonaDirHelper`, `src.SettingsManager`, `src.StateManager`
 - 外部: loguru
 
-### src/Helpers/TSHQtHelper.py
+### src/Helpers/AutonaQtHelper.py
 - 内部: (なし)
 - 外部: loguru
 
-### src/Helpers/TSHSponsorHelper.py
+### src/Helpers/AutonaSponsorHelper.py
 - 内部: `..StateManager`
 - 外部: (なし)
 
-### src/Helpers/TSHVersionHelper.py
-- 内部: `.TSHDirHelper`
+### src/Helpers/AutonaVersionHelper.py
+- 内部: `.AutonaDirHelper`
 - 外部: loguru
 
 ---
 
 ### src/Settings/SettingsWidget.py
-- 内部: `..SettingsManager`, `..TSHColorButton`
+- 内部: `..SettingsManager`, `..AutonaColorButton`
 - 外部: (なし)
 
-### src/Settings/TSHSettingsWindow.py
-- 内部: `.SettingsWidget`, `..TSHHotkeys`, `..Helpers.TSHVersionHelper`
+### src/Settings/AutonaSettingsWindow.py
+- 内部: `.SettingsWidget`, `..AutonaHotkeys`, `..Helpers.AutonaVersionHelper`
 - 外部: (なし)
 
 ---
 
 ### src/LayoutOptions/LayoutOptionsWidget.py
-- 内部: `..LayoutOptionsManager`, `..StateManager`, `..TSHColorButton`
+- 内部: `..LayoutOptionsManager`, `..StateManager`, `..AutonaColorButton`
 - 外部: loguru
 
-### src/LayoutOptions/TSHLayoutOptionsWindow.py
+### src/LayoutOptions/AutonaLayoutOptionsWindow.py
 - 内部: `.LayoutOptionsWidget`
 - 外部: (なし)
 
 ---
 
-### src/TSHAboutWidget.py
-- 内部: `.Helpers.TSHDirHelper`
+### src/AutonaAboutWidget.py
+- 内部: `.Helpers.AutonaDirHelper`
 - 外部: (なし)
 
-### src/TSHAlertNotification.py
+### src/AutonaAlertNotification.py
 - 内部: (なし)
 - 外部: loguru, requests
 
-### src/TSHAssetDownloader.py
-- 内部: `src.Helpers.TSHQtHelper`, `src.TSHGameAssetManager`, `src.Workers`
+### src/AutonaAssetDownloader.py
+- 内部: `src.Helpers.AutonaQtHelper`, `src.AutonaGameAssetManager`, `src.Workers`
 - 外部: loguru, orjson, py7zr, requests
 
-### src/TSHBracket.py
-- 内部: `.Helpers.TSHLocaleHelper`
+### src/AutonaBracket.py
+- 内部: `.Helpers.AutonaLocaleHelper`
 - 外部: loguru
 
-### src/TSHBracketView.py
-- 内部: `.TSHBracket`, `.TSHPlayerList`
+### src/AutonaBracketView.py
+- 内部: `.AutonaBracket`, `.AutonaPlayerList`
 - 外部: loguru
 
-### src/TSHBracketWidget.py
-- 内部: `.Helpers.TSHCountryHelper`, `.Helpers.TSHDirHelper`, `.StateManager`, `.TSHGameAssetManager`, `.TSHPlayerDB`, `.TSHTournamentDataProvider`, `.TSHPlayerListSlotWidget`, `.TSHBracketView`, `.TSHPlayerList`, `.TSHBracket`, `.TSHHotkeys`
+### src/AutonaBracketWidget.py
+- 内部: `.Helpers.AutonaCountryHelper`, `.Helpers.AutonaDirHelper`, `.StateManager`, `.AutonaGameAssetManager`, `.AutonaPlayerDB`, `.AutonaTournamentDataProvider`, `.AutonaPlayerListSlotWidget`, `.AutonaBracketView`, `.AutonaPlayerList`, `.AutonaBracket`, `.AutonaHotkeys`
 - 外部: loguru
 
-### src/TSHColorButton.py
+### src/AutonaColorButton.py
 - 内部: (なし)
 - 外部: (なし)
 
-### src/TSHCommentaryWidget.py
-- 内部: `.TSHScoreboardPlayerWidget`, `.TSHPlayerDB`, `.SettingsManager`, `.StateManager`, `.TSHGameAssetManager`, `. (ui_constants)`
+### src/AutonaCommentaryWidget.py
+- 内部: `.AutonaScoreboardPlayerWidget`, `.AutonaPlayerDB`, `.SettingsManager`, `.StateManager`, `.AutonaGameAssetManager`, `. (ui_constants)`
 - 外部: loguru
 
-### src/TSHGameAssetManager.py
-- 内部: `.StateManager`, `.Helpers.TSHLocaleHelper`, `.Workers`
+### src/AutonaGameAssetManager.py
+- 内部: `.StateManager`, `.Helpers.AutonaLocaleHelper`, `.Workers`
 - 外部: loguru, orjson, PIL, requests
 
-### src/TSHHotkeys.py
-- 内部: `.SettingsManager`, `.Helpers.TSHLocaleHelper`, `.Helpers.TSHDictHelper`
+### src/AutonaHotkeys.py
+- 内部: `.SettingsManager`, `.Helpers.AutonaLocaleHelper`, `.Helpers.AutonaDictHelper`
 - 外部: loguru, pynput
 
-### src/TSHIndividualGameTracker.py
-- 内部: `.TSHGameAssetManager`, `.Helpers.TSHQtHelper`, `.Helpers.TSHVersionHelper`, `.SettingsManager`, `.StateManager`
+### src/AutonaIndividualGameTracker.py
+- 内部: `.AutonaGameAssetManager`, `.Helpers.AutonaQtHelper`, `.Helpers.AutonaVersionHelper`, `.SettingsManager`, `.StateManager`
 - 外部: loguru
 
-### src/TSHNotesWidget.py
+### src/AutonaNotesWidget.py
 - 内部: `.StateManager`
 - 外部: loguru
 
-### src/TSHPlayerDB.py
-- 内部: `.Helpers.TSHDictHelper`, `.Helpers.TSHQtHelper`, `.TSHGameAssetManager`, `.SettingsManager`
+### src/AutonaPlayerDB.py
+- 内部: `.Helpers.AutonaDictHelper`, `.Helpers.AutonaQtHelper`, `.AutonaGameAssetManager`, `.SettingsManager`
 - 外部: loguru, orjson
 
-### src/TSHPlayerList.py
-- 内部: `.StateManager`, `.TSHPlayerListSlotWidget`, `.TSHTournamentDataProvider`
+### src/AutonaPlayerList.py
+- 内部: `.StateManager`, `.AutonaPlayerListSlotWidget`, `.AutonaTournamentDataProvider`
 - 外部: loguru
 
-### src/TSHPlayerListSlotWidget.py
-- 内部: `.TSHScoreboardPlayerWidget`, `.StateManager`
+### src/AutonaPlayerListSlotWidget.py
+- 内部: `.AutonaScoreboardPlayerWidget`, `.StateManager`
 - 外部: loguru
 
-### src/TSHPlayerListWidget.py
-- 内部: `.Helpers.TSHCountryHelper`, `.StateManager`, `.TSHGameAssetManager`, `.TSHPlayerDB`, `.TSHPlayerList`, `.TSHPlayerListSlotWidget`, `.TSHScoreboardPlayerWidget`, `.TSHTournamentDataProvider`, `src.Helpers.TSHAltTextHelper`
+### src/AutonaPlayerListWidget.py
+- 内部: `.Helpers.AutonaCountryHelper`, `.StateManager`, `.AutonaGameAssetManager`, `.AutonaPlayerDB`, `.AutonaPlayerList`, `.AutonaPlayerListSlotWidget`, `.AutonaScoreboardPlayerWidget`, `.AutonaTournamentDataProvider`, `src.Helpers.AutonaAltTextHelper`
 - 外部: loguru
 
-### src/TSHScoreboardManager.py
-- 内部: `.TSHScoreboardWidget`, `.SettingsManager`, `.StateManager`
+### src/AutonaScoreboardManager.py
+- 内部: `.AutonaScoreboardWidget`, `.SettingsManager`, `.StateManager`
 - 外部: loguru
 
-### src/TSHScoreboardPlayerWidget.py
-- 内部: `.Helpers.TSHCountryHelper`, `.Helpers.TSHSponsorHelper`, `.Helpers.TSHDirHelper`, `.Helpers.TSHBadWordFilter`, `.StateManager`, `.TSHGameAssetManager`, `.TSHPlayerDB`, `.Workers`, `. (ui_constants)`
+### src/AutonaScoreboardPlayerWidget.py
+- 内部: `.Helpers.AutonaCountryHelper`, `.Helpers.AutonaSponsorHelper`, `.Helpers.AutonaDirHelper`, `.Helpers.AutonaBadWordFilter`, `.StateManager`, `.AutonaGameAssetManager`, `.AutonaPlayerDB`, `.Workers`, `. (ui_constants)`
 - 外部: loguru
 
-### src/TSHScoreboardStageWidget.py
-- 内部: `.Helpers.TSHDictHelper`, `.Helpers.TSHDirHelper`, `.Helpers.TSHLocaleHelper` (src直指定), `.SettingsManager`, `.StateManager`, `.TSHGameAssetManager`, `src.TSHStageStrikeLogic`
+### src/AutonaScoreboardStageWidget.py
+- 内部: `.Helpers.AutonaDictHelper`, `.Helpers.AutonaDirHelper`, `.Helpers.AutonaLocaleHelper` (src直指定), `.SettingsManager`, `.StateManager`, `.AutonaGameAssetManager`, `src.AutonaStageStrikeLogic`
 - 外部: loguru, orjson, requests
 
-### src/TSHScoreboardWidget.py
-- 内部: `.Helpers.TSHDirHelper`, `.Helpers.TSHVersionHelper`, `.Helpers.TSHBskyHelper`, `.SettingsManager`, `.StateManager`, `.TSHHotkeys`, `.TSHIndividualGameTracker`, `.TSHPlayerDB`, `.TSHScoreboardPlayerWidget`, `.TSHSelectSetWindow`, `.TSHSelectStationWindow`, `.TSHStatsUtil`, `.TSHThumbnailSettingsWidget`, `.TSHTournamentDataProvider`, `.thumbnail.main_generate_thumbnail`, `src.TSHColorButton`, `. (ui_constants)`
+### src/AutonaScoreboardWidget.py
+- 内部: `.Helpers.AutonaDirHelper`, `.Helpers.AutonaVersionHelper`, `.Helpers.AutonaBskyHelper`, `.SettingsManager`, `.StateManager`, `.AutonaHotkeys`, `.AutonaIndividualGameTracker`, `.AutonaPlayerDB`, `.AutonaScoreboardPlayerWidget`, `.AutonaSelectSetWindow`, `.AutonaSelectStationWindow`, `.AutonaStatsUtil`, `.AutonaThumbnailSettingsWidget`, `.AutonaTournamentDataProvider`, `.thumbnail.main_generate_thumbnail`, `src.AutonaColorButton`, `. (ui_constants)`
 - 外部: (なし — 標準ライブラリのみ)
 
-### src/TSHSelectSetWindow.py
-- 内部: `src.TSHTournamentDataProvider`
+### src/AutonaSelectSetWindow.py
+- 内部: `src.AutonaTournamentDataProvider`
 - 外部: loguru
 
-### src/TSHSelectStationWindow.py
-- 内部: `src.TSHTournamentDataProvider`
+### src/AutonaSelectStationWindow.py
+- 内部: `src.AutonaTournamentDataProvider`
 - 外部: loguru
 
-### src/TSHStageStrikeLogic.py
+### src/AutonaStageStrikeLogic.py
 - 内部: `.StateManager`
 - 外部: loguru
 
-### src/TSHStatsUtil.py
-- 内部: `.StateManager`, `.SettingsManager`, `.TSHTournamentDataProvider`
+### src/AutonaStatsUtil.py
+- 内部: `.StateManager`, `.SettingsManager`, `.AutonaTournamentDataProvider`
 - 外部: loguru, orjson
 
-### src/TSHStatsWidget.py
+### src/AutonaStatsWidget.py
 - 内部: `.StateManager`
 - 外部: loguru
 
-### src/TSHTeamBattleModeEnum.py
+### src/AutonaTeamBattleModeEnum.py
 - 内部: (なし)
 - 外部: (なし)
 
-### src/TSHTeamBattleWidget.py
-- 内部: `.Helpers.TSHDirHelper`, `.Helpers.TSHSponsorHelper`, `.Helpers.TSHLocaleHelper`, `.StateManager`, `.TSHTeamBattleModeEnum`, `.TSHTeamPlayerWidget`
+### src/AutonaTeamBattleWidget.py
+- 内部: `.Helpers.AutonaDirHelper`, `.Helpers.AutonaSponsorHelper`, `.Helpers.AutonaLocaleHelper`, `.StateManager`, `.AutonaTeamBattleModeEnum`, `.AutonaTeamPlayerWidget`
 - 外部: loguru
 
-### src/TSHTeamPlayerWidget.py
-- 内部: `.Helpers.TSHCountryHelper`, `.Helpers.TSHSponsorHelper`, `.Helpers.TSHDirHelper`, `.Helpers.TSHBadWordFilter`, `.StateManager`, `.TSHGameAssetManager`, `.TSHPlayerDB`, `.TSHTeamBattleModeEnum`
+### src/AutonaTeamPlayerWidget.py
+- 内部: `.Helpers.AutonaCountryHelper`, `.Helpers.AutonaSponsorHelper`, `.Helpers.AutonaDirHelper`, `.Helpers.AutonaBadWordFilter`, `.StateManager`, `.AutonaGameAssetManager`, `.AutonaPlayerDB`, `.AutonaTeamBattleModeEnum`
 - 外部: loguru
 
-### src/TSHThumbnailSettingsWidget.py
-- 内部: `.Helpers.TSHDictHelper`, `.Helpers.TSHDirHelper`, `.SettingsManager`, `.TSHGameAssetManager`, `.Workers`, `.thumbnail.main_generate_thumbnail`
+### src/AutonaThumbnailSettingsWidget.py
+- 内部: `.Helpers.AutonaDictHelper`, `.Helpers.AutonaDirHelper`, `.SettingsManager`, `.AutonaGameAssetManager`, `.Workers`, `.thumbnail.main_generate_thumbnail`
 - 外部: loguru
 
-### src/TSHTournamentDataProvider.py
-- 内部: `.SettingsManager`, `.StateManager`, `.TSHGameAssetManager`, `.TournamentDataProvider.TournamentDataProvider`, `.TournamentDataProvider.StartGGDataProvider`, `.Helpers.TSHVersionHelper`, `.Workers`
+### src/AutonaTournamentDataProvider.py
+- 内部: `.SettingsManager`, `.StateManager`, `.AutonaGameAssetManager`, `.TournamentDataProvider.TournamentDataProvider`, `.TournamentDataProvider.StartGGDataProvider`, `.Helpers.AutonaVersionHelper`, `.Workers`
 - 外部: loguru
 
-### src/TSHTournamentInfoWidget.py
-- 内部: `.StateManager`, `.TSHTournamentDataProvider`, `.SettingsManager`, `.Helpers.TSHLocaleHelper`, `.Helpers.TSHDirHelper`, `.TSHColorButton`
+### src/AutonaTournamentInfoWidget.py
+- 内部: `.StateManager`, `.AutonaTournamentDataProvider`, `.SettingsManager`, `.Helpers.AutonaLocaleHelper`, `.Helpers.AutonaDirHelper`, `.AutonaColorButton`
 - 外部: loguru, requests
 
-### src/TSHWebServer.py
-- 内部: `.StateManager`, `.TSHWebServerActions`, `.TSHScoreboardManager`, `.TSHCommentaryWidget`, `.SettingsManager`
+### src/AutonaWebServer.py
+- 内部: `.StateManager`, `.AutonaWebServerActions`, `.AutonaScoreboardManager`, `.AutonaCommentaryWidget`, `.SettingsManager`
 - 外部: flask, flask_cors, flask_socketio, loguru, orjson
 
-### src/TSHWebServerActions.py
-- 内部: `.Helpers.TSHCountryHelper`, `.Helpers.TSHQtHelper`, `.Helpers.TSHControllerHelper`, `.Helpers.TSHLocaleHelper`, `.StateManager`, `.TSHStatsUtil`, `.SettingsManager`, `.TSHGameAssetManager`, `.TSHBracketView`, `.TSHBracketWidget`, `.TSHPlayerDB`, `.TSHScoreboardWidget`, `.TSHTournamentDataProvider`, `.TSHCommentaryWidget`, `.Workers`
+### src/AutonaWebServerActions.py
+- 内部: `.Helpers.AutonaCountryHelper`, `.Helpers.AutonaQtHelper`, `.Helpers.AutonaControllerHelper`, `.Helpers.AutonaLocaleHelper`, `.StateManager`, `.AutonaStatsUtil`, `.SettingsManager`, `.AutonaGameAssetManager`, `.AutonaBracketView`, `.AutonaBracketWidget`, `.AutonaPlayerDB`, `.AutonaScoreboardWidget`, `.AutonaTournamentDataProvider`, `.AutonaCommentaryWidget`, `.Workers`
 - 外部: flask, loguru, orjson
 
 ---
@@ -251,13 +251,13 @@
 - 外部: loguru, orjson, requests
 
 ### src/TournamentDataProvider/StartGGDataProvider.py
-- 内部: `..Helpers.TSHCountryHelper`, `..Helpers.TSHDictHelper`, `..Helpers.TSHDirHelper`, `..Helpers.TSHLocaleHelper`, `..Helpers.TSHQtHelper`, `..TSHBracket`, `..TSHGameAssetManager`, `..TSHPlayerDB`, `..Workers`, `.TournamentDataProvider`
+- 内部: `..Helpers.AutonaCountryHelper`, `..Helpers.AutonaDictHelper`, `..Helpers.AutonaDirHelper`, `..Helpers.AutonaLocaleHelper`, `..Helpers.AutonaQtHelper`, `..AutonaBracket`, `..AutonaGameAssetManager`, `..AutonaPlayerDB`, `..Workers`, `.TournamentDataProvider`
 - 外部: loguru, orjson, requests
 
 ---
 
 ### src/thumbnail/main_generate_thumbnail.py
-- 内部: `src.TSHGameAssetManager`, `src.Helpers.TSHLocaleHelper`, `src.Helpers.TSHDictHelper`, `src.Helpers.TSHAltTextHelper`, `src.Helpers.TSHDirHelper`
+- 内部: `src.AutonaGameAssetManager`, `src.Helpers.AutonaLocaleHelper`, `src.Helpers.AutonaDictHelper`, `src.Helpers.AutonaAltTextHelper`, `src.Helpers.AutonaDirHelper`
 - 外部: loguru
 
 ---
@@ -287,16 +287,16 @@
 
 ### 間接循環（`from . import *` → `__init__.py` → 全モジュール再 export 経由）
 
-以下4ファイルが `from . import ui_constants as UI` や `from . import *` でパッケージルート (`src`) を import している。`src/__init__.py` が `from .TournamentStreamHelper import *` を実行するため、import 時に TournamentStreamHelper.py のトップレベルコードが走り、全ドックウィジェットが連鎖的にロードされる。
+以下4ファイルが `from . import ui_constants as UI` や `from . import *` でパッケージルート (`src`) を import している。`src/__init__.py` が `from .Autona import *` を実行するため、import 時に Autona.py のトップレベルコードが走り、全ドックウィジェットが連鎖的にロードされる。
 
 | ファイル | import 文 |
 |---------|----------|
-| `src/TSHCommentaryWidget.py` | `from . import ui_constants as UI` |
-| `src/TSHScoreboardPlayerWidget.py` | `from . import ui_constants as UI` |
-| `src/TSHScoreboardWidget.py` | `from . import ui_constants as UI` |
-| `src/TournamentStreamHelper.py` | `from . import ui_constants as UI` |
+| `src/AutonaCommentaryWidget.py` | `from . import ui_constants as UI` |
+| `src/AutonaScoreboardPlayerWidget.py` | `from . import ui_constants as UI` |
+| `src/AutonaScoreboardWidget.py` | `from . import ui_constants as UI` |
+| `src/Autona.py` | `from . import ui_constants as UI` |
 
-**リスク**: `from . import ui_constants` は `src/__init__.py` を経由する。`__init__.py` の `from .TournamentStreamHelper import *` が先に実行されるため、TournamentStreamHelper.py 内の import 群が全て走る。実際の動作では Python のモジュールキャッシュにより無限ループにはならないが、import 順序に暗黙の依存が生まれている。
+**リスク**: `from . import ui_constants` は `src/__init__.py` を経由する。`__init__.py` の `from .Autona import *` が先に実行されるため、Autona.py 内の import 群が全て走る。実際の動作では Python のモジュールキャッシュにより無限ループにはならないが、import 順序に暗黙の依存が生まれている。
 
 ---
 
@@ -310,4 +310,4 @@
 | `src/i18n/gen_translation_files.py` | CI 専用 | `.github/workflows/build_app.yml` からのみ参照 |
 | `src/i18n/gen_translation_binaries.py` | CI 専用 | 同上 |
 | `src/i18n/gen_round_names_files.py` | CI 専用 | 同上 |
-| `src/main.py` | 上流残存 | `import TournamentStreamHelper` — プロジェクトルートの `main.py` が実際のエントリーポイント |
+| `src/main.py` | 上流残存 | `import Autona` — プロジェクトルートの `main.py` が実際のエントリーポイント |

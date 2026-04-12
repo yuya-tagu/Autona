@@ -1,6 +1,6 @@
 import os
 import orjson
-from .Helpers.TSHDictHelper import *
+from .Helpers.AutonaDictHelper import *
 
 
 class LayoutOptionsManager:

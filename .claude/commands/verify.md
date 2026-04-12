@@ -21,9 +21,9 @@ description: テスト + ビルド + 起動確認を一括で実行し、結果�
 
 3. **exe ビルド**
    ```bash
-   cd .. && python -m PyInstaller dependencies/tsh.spec --distpath . --workpath build -y
+   cd .. && python -m PyInstaller dependencies/autona.spec --distpath . --workpath build -y
    ```
-   - `TSH.exe` が生成されたことを確認
+   - `Autona.exe` が生成されたことを確認
 
 4. **起動確認**（手動テスト必要な場合のみ）
    ```bash
@@ -38,7 +38,7 @@ description: テスト + ビルド + 起動確認を一括で実行し、結果�
    ## verify 結果
    - pytest: ✓ {N} passed / ✗ {N} failed
    - Web UI build: ✓ / ✗
-   - exe build: ✓ / ✗ ({TSH.exe サイズ})
+   - exe build: ✓ / ✗ ({Autona.exe サイズ})
    - 起動確認: ✓ / ✗ / スキップ
    ```
 

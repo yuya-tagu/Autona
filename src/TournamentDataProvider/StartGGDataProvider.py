@@ -4,16 +4,16 @@ import requests
 import os
 import traceback
 from loguru import logger
-from ..Helpers.TSHCountryHelper import TSHCountryHelper
-from ..Helpers.TSHDictHelper import deep_get
-from ..Helpers.TSHDirHelper import TSHResolve
-from ..Helpers.TSHQtHelper import invokeSlot, gui_thread_sync
-from ..TSHGameAssetManager import TSHGameAssetManager
-from ..TSHPlayerDB import TSHPlayerDB
+from ..Helpers.AutonaCountryHelper import AutonaCountryHelper
+from ..Helpers.AutonaDictHelper import deep_get
+from ..Helpers.AutonaDirHelper import AutonaResolve
+from ..Helpers.AutonaQtHelper import invokeSlot, gui_thread_sync
+from ..AutonaGameAssetManager import AutonaGameAssetManager
+from ..AutonaPlayerDB import AutonaPlayerDB
 from .TournamentDataProvider import TournamentDataProvider
 import orjson
-from ..Helpers.TSHLocaleHelper import TSHLocaleHelper
-from ..TSHBracket import is_power_of_two
+from ..Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+from ..AutonaBracket import is_power_of_two
 
 from ..Workers import Worker
 
@@ -220,7 +220,7 @@ class StartGGDataProvider(TournamentDataProvider):
                 for phaseGroup in deep_get(phase, "phaseGroups.nodes", []):
                     phaseObj["groups"].append({
                         "id": phaseGroup.get("id"),
-                        "name": TSHLocaleHelper.phaseNames.get("group").format(phaseGroup.get('displayIdentifier')),
+                        "name": AutonaLocaleHelper.phaseNames.get("group").format(phaseGroup.get('displayIdentifier')),
                         "bracketType": phaseGroup.get("bracketType")
                     })
 
@@ -241,7 +241,7 @@ class StartGGDataProvider(TournamentDataProvider):
                     "operationName": "TournamentPhaseGroupQuery",
                     "variables": {
                         "id": id,
-                        "videogameId": TSHGameAssetManager.instance.selectedGame.get("smashgg_game_id")
+                        "videogameId": AutonaGameAssetManager.instance.selectedGame.get("smashgg_game_id")
                     },
                     "query": StartGGDataProvider.TournamentPhaseGroupQuery
                 }
@@ -405,11 +405,11 @@ class StartGGDataProvider(TournamentDataProvider):
                 if int(finalResult.get("round") or 0) < 0:
                     indicator = "qualifier_losers_indicator"
 
-                indicator = TSHLocaleHelper.matchNames.get(indicator)
+                indicator = AutonaLocaleHelper.matchNames.get(indicator)
 
                 winnerProgression = re.sub(
                     r"\s*[\(\{\[].*?[\)\}\]]", "", winnerProgression).strip()
-                finalResult["round_name"] = TSHLocaleHelper.matchNames.get(
+                finalResult["round_name"] = AutonaLocaleHelper.matchNames.get(
                     "qualifier").format(winnerProgression, indicator)
 
             if result.get("new", {}).get("isOnline") == False:
@@ -599,17 +599,17 @@ class StartGGDataProvider(TournamentDataProvider):
         }
 
         if name in roundMapping:
-            return TSHLocaleHelper.matchNames.get(roundMapping.get(name))
+            return AutonaLocaleHelper.matchNames.get(roundMapping.get(name))
 
         try:
             roundNumber = name.rsplit(" ")[-1]
 
             if "Winners" in name:
-                return TSHLocaleHelper.matchNames.get("winners_round").format(roundNumber)
+                return AutonaLocaleHelper.matchNames.get("winners_round").format(roundNumber)
             elif "Losers" in name:
-                return TSHLocaleHelper.matchNames.get("losers_round").format(roundNumber)
+                return AutonaLocaleHelper.matchNames.get("losers_round").format(roundNumber)
             elif name.startswith("Round "):
-                return TSHLocaleHelper.matchNames.get("round").format(roundNumber)
+                return AutonaLocaleHelper.matchNames.get("round").format(roundNumber)
         except:
             logger.error(traceback.format_exc())
 
@@ -627,7 +627,7 @@ class StartGGDataProvider(TournamentDataProvider):
 
         isPools = deep_get(_set, "phaseGroup.phase.groupCount", 0) > 1
         if isPools:
-            phase_name += " - " + TSHLocaleHelper.phaseNames.get(
+            phase_name += " - " + AutonaLocaleHelper.phaseNames.get(
                 "group").format(deep_get(_set, "phaseGroup.displayIdentifier"))
 
         return {
@@ -709,7 +709,7 @@ class StartGGDataProvider(TournamentDataProvider):
             if user.get("location"):
                 # Country to country code
                 if user.get("location").get("country"):
-                    for country in TSHCountryHelper.countries.values():
+                    for country in AutonaCountryHelper.countries.values():
                         if user.get("location").get("country") == country.get("en_name"):
                             playerData["country_code"] = country.get(
                                 "code")
@@ -724,14 +724,14 @@ class StartGGDataProvider(TournamentDataProvider):
                             "location").get("state")
                 # State -- from city
                 elif user.get("location").get("city") and playerData.get("country_code"):
-                    stateCode = TSHCountryHelper.FindState(
+                    stateCode = AutonaCountryHelper.FindState(
                         playerData["country_code"], user.get("location").get("city"))
                     if stateCode:
                         playerData["state_code"] = stateCode
                 if user.get("location").get("city"): playerData["city"] = user.get("location").get("city")
 
             if playerData.get("startggMain"):
-                main = TSHGameAssetManager.instance.GetCharacterFromStartGGId(
+                main = AutonaGameAssetManager.instance.GetCharacterFromStartGGId(
                     playerData.get("startggMain"))
                 if main:
                     playerData["mains"] = main[0]
@@ -886,7 +886,7 @@ class StartGGDataProvider(TournamentDataProvider):
                         stages = []
 
                         for stageCode in stageCodes:
-                            stages.append(TSHGameAssetManager.instance.GetStageFromStartGGId(
+                            stages.append(AutonaGameAssetManager.instance.GetStageFromStartGGId(
                                 int(stageCode))[1].get("codename"))
 
                         if str(entrantId) == entrant1Id:
@@ -901,7 +901,7 @@ class StartGGDataProvider(TournamentDataProvider):
 
                 if base.get("strikeList"):
                     for stage_code, entrant in base.get("strikeList").items():
-                        stage = TSHGameAssetManager.instance.GetStageFromStartGGId(
+                        stage = AutonaGameAssetManager.instance.GetStageFromStartGGId(
                             int(stage_code))
 
                         if stage:
@@ -923,7 +923,7 @@ class StartGGDataProvider(TournamentDataProvider):
                         for stage_code in base.get("banList"):
                             if stage_code == None:
                                 continue
-                            stage = TSHGameAssetManager.instance.GetStageFromStartGGId(
+                            stage = AutonaGameAssetManager.instance.GetStageFromStartGGId(
                                 int(stage_code))
                             if stage:
                                 codename = stage[1].get("codename")
@@ -956,7 +956,7 @@ class StartGGDataProvider(TournamentDataProvider):
         try:
             allStagesFinal = []
             for st in allStages:
-                stage = TSHGameAssetManager.instance.GetStageFromStartGGId(
+                stage = AutonaGameAssetManager.instance.GetStageFromStartGGId(
                     st)
                 if stage:
                     allStagesFinal.append(stage[1])
@@ -964,14 +964,14 @@ class StartGGDataProvider(TournamentDataProvider):
             striked = []
             if strikedStages is not None:
                 for stage in strikedStages:
-                    stage = TSHGameAssetManager.instance.GetStageFromStartGGId(
+                    stage = AutonaGameAssetManager.instance.GetStageFromStartGGId(
                         stage)
                     if stage:
                         striked.append(stage[1].get("codename"))
 
             selected = ""
             if selectedStage is not None:
-                selectedStage = TSHGameAssetManager.instance.GetStageFromStartGGId(
+                selectedStage = AutonaGameAssetManager.instance.GetStageFromStartGGId(
                     int(selectedStage))
                 if selectedStage:
                     selected = selectedStage[1].get("codename")
@@ -1008,7 +1008,7 @@ class StartGGDataProvider(TournamentDataProvider):
         for i, entrantChars in enumerate(selectedChars):
             for char in entrantChars:
                 entrants[i].append({
-                    "mains": [TSHGameAssetManager.instance.GetCharacterFromStartGGId(char)[0], 0]
+                    "mains": [AutonaGameAssetManager.instance.GetCharacterFromStartGGId(char)[0], 0]
                 })
 
         # If we don't have mains from the selection data, fallback to the characterIds attribute
@@ -1020,7 +1020,7 @@ class StartGGDataProvider(TournamentDataProvider):
                 for char in characterIds:
                     try:
                         entrants[i] = [{
-                            "mains": [TSHGameAssetManager.instance.GetCharacterFromStartGGId(char)[0], 0]
+                            "mains": [AutonaGameAssetManager.instance.GetCharacterFromStartGGId(char)[0], 0]
                         }]
                     except:
                         logger.error(traceback.format_exc())
@@ -1077,7 +1077,7 @@ class StartGGDataProvider(TournamentDataProvider):
     def ProcessFutureSet(self, _set, eventSlug):
         phase_name = deep_get(_set, "phaseGroup.phase.name")
         if deep_get(_set, "phaseGroup.phase.groupCount") > 1:
-            phase_name += " - " + TSHLocaleHelper.phaseNames.get(
+            phase_name += " - " + AutonaLocaleHelper.phaseNames.get(
                 "group").format(deep_get(_set, "phaseGroup.displayIdentifier"))
 
         frt = _set.get("fullRoundText", "")
@@ -1089,7 +1089,7 @@ class StartGGDataProvider(TournamentDataProvider):
             "match": StartGGDataProvider.TranslateRoundName(frt),
             "phase": phase_name,
             "best_of": total_games,
-            "best_of_text": TSHLocaleHelper.matchNames.get("best_of").format(total_games) if total_games > 0 else "",
+            "best_of_text": AutonaLocaleHelper.matchNames.get("best_of").format(total_games) if total_games > 0 else "",
             "state": _set.get("state"),
             "team": {},
             "station": deep_get(_set, "station.number", -1),
@@ -1124,7 +1124,7 @@ class StartGGDataProvider(TournamentDataProvider):
                     countryCode = playerData.get(
                         "country_code", "")
                     stateCode = playerData.get("state_code", "")
-                    countryData = TSHCountryHelper.countries.get(
+                    countryData = AutonaCountryHelper.countries.get(
                         countryCode)
                     stateData = {}
                     if countryData:
@@ -1141,7 +1141,7 @@ class StartGGDataProvider(TournamentDataProvider):
                             })
 
                     playerData = {
-                        "country": TSHCountryHelper.GetBasicCountryInfo(countryCode),
+                        "country": AutonaCountryHelper.GetBasicCountryInfo(countryCode),
                         "state": stateData,
                         "name": playerName,
                         "team": team,
@@ -1362,7 +1362,7 @@ class StartGGDataProvider(TournamentDataProvider):
 
     def GetEntrants(self):
         worker = Worker(self.GetEntrantsWorker, **{
-            "gameId": TSHGameAssetManager.instance.selectedGame.get("smashgg_game_id"),
+            "gameId": AutonaGameAssetManager.instance.selectedGame.get("smashgg_game_id"),
             "eventSlug": self.url.split("start.gg/")[1]
         })
         self.threadpool.start(worker)
@@ -1781,7 +1781,7 @@ class StartGGDataProvider(TournamentDataProvider):
                                           [0]] = playerData["seed"]
                         players.append(playerData)
 
-                TSHPlayerDB.AddPlayers(players)
+                AutonaPlayerDB.AddPlayers(players)
                 players = []
 
                 page += 1
@@ -1855,7 +1855,7 @@ class StartGGDataProvider(TournamentDataProvider):
             if user.get("location"):
                 # Country to country code
                 if user.get("location").get("country"):
-                    for country in TSHCountryHelper.countries.values():
+                    for country in AutonaCountryHelper.countries.values():
                         if user.get("location").get("country") == country.get("en_name"):
                             playerData["country_code"] = country.get(
                                 "code")
@@ -1870,20 +1870,20 @@ class StartGGDataProvider(TournamentDataProvider):
                             "location").get("state")
                 # State -- from city
                 elif user.get("location").get("city"):
-                    stateCode = TSHCountryHelper.FindState(
+                    stateCode = AutonaCountryHelper.FindState(
                         playerData.get("country_code", None), user.get("location", {}).get("city", None))
                     if stateCode:
                         playerData["state_code"] = stateCode
 
             if playerData.get("startggMains"):
-                if TSHGameAssetManager.instance.selectedGame:
-                    gameCodename = TSHGameAssetManager.instance.selectedGame.get(
+                if AutonaGameAssetManager.instance.selectedGame:
+                    gameCodename = AutonaGameAssetManager.instance.selectedGame.get(
                         "codename")
 
                     mains = []
 
                     for sggmain in playerData.get("startggMains"):
-                        main = TSHGameAssetManager.instance.GetCharacterFromStartGGId(
+                        main = AutonaGameAssetManager.instance.GetCharacterFromStartGGId(
                             sggmain[0])
                         if main:
                             mains.append([main[0]])
@@ -2019,7 +2019,7 @@ class StartGGDataProvider(TournamentDataProvider):
         self.url = url
         return url
 
-sggTdpDir = TSHResolve('src/TournamentDataProvider')
+sggTdpDir = AutonaResolve('src/TournamentDataProvider')
 
 def readQueryFile(tdpdir, filename):
     with open(f"{tdpdir}/StartGG{filename}Query.txt", "r") as f:

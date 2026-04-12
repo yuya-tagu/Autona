@@ -1,12 +1,12 @@
 Push-Location ..
 
-New-Item -Path "TournamentStreamHelper" -ItemType Directory
+New-Item -Path "Autona" -ItemType Directory
 
-Copy-Item -Recurse -Force "assets" "TournamentStreamHelper\assets"
+Copy-Item -Recurse -Force "assets" "Autona\assets"
 
 # Already embedded inside release exe
-Remove-Item -Path "TournamentStreamHelper\assets\versions.json" -Force
-Remove-Item -Path "TournamentStreamHelper\assets\contributors.txt" -Force
+Remove-Item -Path "Autona\assets\versions.json" -Force
+Remove-Item -Path "Autona\assets\contributors.txt" -Force
 
 # Copy layout excluding game_images and symlinks
 Get-ChildItem -Path "layout" -Recurse | Where-Object {
@@ -14,7 +14,7 @@ Get-ChildItem -Path "layout" -Recurse | Where-Object {
     $_.FullName -notmatch "layout\\game_screenshots" -and 
     -not $_.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)
 } | ForEach-Object {
-    $destination = $_.FullName.Replace("layout", "TournamentStreamHelper\layout")
+    $destination = $_.FullName.Replace("layout", "Autona\layout")
     if ($_.PSIsContainer) {
         New-Item -ItemType Directory -Path $destination -Force
     } else {
@@ -22,11 +22,11 @@ Get-ChildItem -Path "layout" -Recurse | Where-Object {
     }
 }
 
-Copy-Item -Recurse -Force "user_data" "TournamentStreamHelper\user_data"
-Copy-Item -Recurse -Force "stage_strike_app\build" "TournamentStreamHelper\stage_strike_app\build"
-Copy-Item -Force "LICENSE" "TournamentStreamHelper\LICENSE"
-Copy-Item -Force "TSH.exe" "TournamentStreamHelper\TSH.exe"
+Copy-Item -Recurse -Force "user_data" "Autona\user_data"
+Copy-Item -Recurse -Force "stage_strike_app\build" "Autona\stage_strike_app\build"
+Copy-Item -Force "LICENSE" "Autona\LICENSE"
+Copy-Item -Force "Autona.exe" "Autona\Autona.exe"
 
-Compress-Archive -Path "TournamentStreamHelper" -DestinationPath "release-windows.zip" -Update
+Compress-Archive -Path "Autona" -DestinationPath "release-windows.zip" -Update
 
 Pop-Location

@@ -228,7 +228,7 @@ body {
   top: 12px;
   left: 12px;
   z-index: 2;
-  font-size: 36px;
+  font-size: 40px;
   font-weight: 700;
   color: #ffffff;
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
@@ -236,9 +236,9 @@ body {
 }
 
 /* Badge size by slot position */
-.player-slot.slot-1 .rank-badge { font-size: 56px; }
-.player-slot.slot-2 .rank-badge { font-size: 44px; }
-.player-slot.slot-3 .rank-badge { font-size: 44px; }
+.player-slot.slot-1 .rank-badge { font-size: 60px; }
+.player-slot.slot-2 .rank-badge { font-size: 48px; }
+.player-slot.slot-3 .rank-badge { font-size: 48px; }
 
 /* Gold / Silver / Bronze badge colors */
 .player-slot.rank-1 .rank-badge { color: #ffd700; }
@@ -271,7 +271,7 @@ body {
 }
 
 .player-slot .player-name {
-  font-size: 36px;
+  font-size: 40px;
   font-weight: 700;
   color: #ffffff;
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
@@ -283,10 +283,10 @@ body {
 }
 
 /* Larger text for top row slots */
-.player-slot.slot-1 .player-name { font-size: 52px; }
+.player-slot.slot-1 .player-name { font-size: 56px; }
 .player-slot.slot-1 .player-sponsor { font-size: 28px; }
-.player-slot.slot-2 .player-name { font-size: 40px; }
-.player-slot.slot-3 .player-name { font-size: 40px; }
+.player-slot.slot-2 .player-name { font-size: 44px; }
+.player-slot.slot-3 .player-name { font-size: 44px; }
 
 /* Accent bar at top of each slot */
 .player-slot .accent-bar {
