@@ -1,4 +1,4 @@
-"""Characterization tests for TSHDictHelper (deep_get / deep_set / deep_unset / deep_clone).
+"""Characterization tests for AutonaDictHelper (deep_get / deep_set / deep_unset / deep_clone).
 
 Target: known-smells S-01, S-09 — StateManager relies on these primitives.
 Refactoring PlayerWidget or StateManager without breaking these is critical.
@@ -6,7 +6,7 @@ Refactoring PlayerWidget or StateManager without breaking these is critical.
 import pytest
 from tests.conftest import direct_import
 
-_mod = direct_import("TSHDictHelper", "src/Helpers/TSHDictHelper.py")
+_mod = direct_import("AutonaDictHelper", "src/Helpers/AutonaDictHelper.py")
 deep_get = _mod.deep_get
 deep_set = _mod.deep_set
 deep_unset = _mod.deep_unset
@@ -158,7 +158,7 @@ class TestSetGetUnsetCycle:
 
     def test_full_cycle(self):
         state = {}
-        # Initialize scoreboard (TSHScoreboardWidget.__init__)
+        # Initialize scoreboard (AutonaScoreboardWidget.__init__)
         deep_set(state, "score.1", {})
         deep_set(state, "score.1.last_sets.1", {})
         deep_set(state, "score.1.last_sets.2", {})
@@ -176,7 +176,7 @@ class TestSetGetUnsetCycle:
         deep_set(state, "score.1.team.1.score", 2)
         deep_set(state, "score.1.team.2.score", 1)
 
-        # Clear player (TSHScoreboardWidget.CommandClearAll)
+        # Clear player (AutonaScoreboardWidget.CommandClearAll)
         deep_unset(state, "score.1.team.1.player")
         assert deep_get(state, "score.1.team.1.player") is None
         # Score should remain
@@ -184,7 +184,7 @@ class TestSetGetUnsetCycle:
 
     def test_game_state_cycle(self):
         state = {}
-        # TSHGameAssetManager sets game
+        # AutonaGameAssetManager sets game
         deep_set(state, "game", {
             "name": "Super Smash Bros. Ultimate",
             "codename": "ssbu",

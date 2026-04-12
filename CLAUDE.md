@@ -1,25 +1,48 @@
-# TournamentStreamHelper (BST Scoreboard)
+# Autona (BST Scoreboard)
+
+## プロジェクト体制
+
+個人開発プロジェクト。役割は以下の 2 名体制。
+
+| 役割 | 担当 | 責任範囲 |
+|------|------|---------|
+| **PdM 兼 経営者** | ユーザー（田口） | プロダクト方針・優先順位・UX 意思決定・リリース判断 |
+| **エンジニアリード** | Claude | 設計・実装・検証・コード品質に対する最終責任 |
+
+**Claude の責務:**
+- コードの最終責任はエンジニアリードにある。PdM の指示を鵜呑みにせず、設計上の懸念があれば必ず提起する
+- 実装前に不明点は質問し、実装後は検証まで完了させる（動かないコードを「できました」と報告しない）
+- 既存パターンから逸脱する判断は、理由を明示した上で実行する
+- リファクタ・削除は影響範囲を調査してから行う。参照元にないコード＝不要ではない
+
+**PdM からの依頼の受け方:**
+- 曖昧な要件は具体化して確認してから着手する
+- 複数案がある場合は最大 2 案を比較提示する（ルール: `c:/Users/ayuyt/Work/CLAUDE.md`）
+- 「OK」「ビルドして」等の短い指示は、直前の文脈で確定した方針の実行として解釈する
+
+---
 
 ## プロジェクト概要
 
-TournamentStreamHelper (TSH) のカスタムフォーク。
+Autona のカスタムフォーク。
 格闘ゲーム大会の配信支援ツール（スコアボード管理、ステージストライク、統計情報表示など）。
 
 - **リポジトリ**: `yuya-tagu/BST-scoreboard`
 - **メインブランチ**: `main`
 - **デスクトップアプリ**: Python (PyQt6) — `src/`
 - **Web UI**: React (MUI) — `stage_strike_app/src/`
-  - ※ フォルダ名は上流由来の歴史的経緯。実態はスコアボード等の汎用 Web UI。リネームは影響範囲が広いため保留
-- **ビルド**: PyInstaller → `TSH.exe`
+  - ※ フォルダ名は上流由来の歴史的経緯（元々は TournamentStreamHelper のフォーク）。実態はスコアボード等の汎用 Web UI。リネームは影響範囲が広いため保留
+- **ビルド**: PyInstaller → `Autona.exe`（プロジェクト直下、約 236 MB）
 
 ---
 
 ## 開発原則
 
 1. **既存パターンに従う** — 独自の抽象化やフレームワークを持ち込まない
-2. **変更したら検証する** — ビルド・起動・ログ確認を毎回行う
+2. **変更したら検証する** — 構文チェック・ビルド・起動・ログ確認を段階的に行う
 3. **壊れたものは根本原因を直す** — 表面的な回避策ではなく原因を特定する
 4. **不要なコードは残さない** — 削除した機能の関数・import は一緒に消す
+5. **モーダル入れ子禁止** — QSpinBox.valueChanged 等のシグナル内から QMessageBox.exec() を呼ばない（過去に C++ クラッシュの事例あり）
 
 ---
 
@@ -39,20 +62,21 @@ TournamentStreamHelper (TSH) のカスタムフォーク。
 cd stage_strike_app && npm run build
 
 # exe
-pyinstaller dependencies/tsh.spec --noconfirm
+pyinstaller dependencies/autona.spec --noconfirm
 
 # ビルド後のコピー
-cp dist/TSH.exe ./TSH.exe
+cp dist/Autona.exe ./Autona.exe
 
 # 開発時の実行
 python main.py
 ```
 
-- `TSH.exe` はプロジェクト直下のものを使う（`dist/` ではない）
-- **TSH.exe が起動中の場合は `taskkill /IM TSH.exe /F` で終了してからコピーしてよい**
+- `Autona.exe` はプロジェクト直下のものを使う（`dist/` ではない）
+- **Autona.exe が起動中の場合は `taskkill /IM Autona.exe /F` で終了してからコピーしてよい**
 - フォント: LINE Seed JP（`assets/font/LINESeedJP/`、Google Fonts gstatic CDN から取得）
-- 翻訳コンパイル: `pyside6-lrelease src/i18n/TSH_ja.ts -qm src/i18n/TSH_ja.qm`（※ PySide6 は PyInstaller ビルド前にアンインストールすること。PyQt6 と共存不可）
-- **WebEngine 依存**: サムネイル生成（[src/thumbnail/ThumbnailRenderer.py](src/thumbnail/ThumbnailRenderer.py)）が `PyQt6-WebEngine` を使用。`dependencies/requirements.txt` に含まれており、`pip install -r` で自動インストールされる。Qt6WebEngineCore.dll が約 196 MB あるため、TSH.exe が 245 MB 前後になるのは正常
+- 翻訳コンパイル: `pyside6-lrelease src/i18n/Auto_ja.ts -qm src/i18n/Auto_ja.qm`（※ PySide6 は PyInstaller ビルド前にアンインストールすること。PyQt6 と共存不可）
+- **WebEngine 依存**: サムネイル生成（[src/thumbnail/ThumbnailRenderer.py](src/thumbnail/ThumbnailRenderer.py)）が `PyQt6-WebEngine` を使用。`dependencies/requirements.txt` に含まれており、`pip install -r` で自動インストールされる。Qt6WebEngineCore.dll が約 196 MB あるため、Autona.exe が 230〜245 MB 程度になるのは正常
+- **上流成果物の扱い**: `TSH.exe` / `TSH/` は上流 TournamentStreamHelper のビルド成果物。Autona 側では使用しないため残さない
 
 ---
 
@@ -64,16 +88,16 @@ Python / PyQt6 のドックウィジェットベース。主要コンポーネ�
 
 | コンポーネント | ファイル | 役割 |
 |--------------|---------|------|
-| **Window** | `TournamentStreamHelper.py` | QMainWindow。QMenuBar（編集・Startgg・タイトル・スコアボード）+ 中央「大会を選ぶ」ボタン + 全ドックウィジェット管理。STATE_VERSION=2 によるレイアウト復元 |
+| **Window** | `Autona.py` | QMainWindow。QMenuBar（編集・Startgg・タイトル・スコアボード）+ 中央「大会を選ぶ」ボタン + 全ドックウィジェット管理。STATE_VERSION=2 によるレイアウト復元 |
 | **StateManager** | `StateManager.py` | グローバル状態（nested dict）。deepdiff でデルタ算出、ファイル出力 + WebSocket 配信 |
 | **SettingsManager** | `SettingsManager.py` | ユーザー設定の永続化（JSON） |
-| **TSHScoreboardManager** | `TSHScoreboardManager.py` | シングルトン。複数スコアボードのタブ管理 |
-| **TSHScoreboardWidget** | `TSHScoreboardWidget.py` | 個別スコアボード。チーム/選手/スコア/セット情報 |
-| **TSHTournamentDataProvider** | `TSHTournamentDataProvider.py` | シングルトン。Start.gg 等からデータ取得のオーケストレーション |
-| **TSHGameAssetManager** | `TSHGameAssetManager.py` | シングルトン。ゲーム別キャラ/ステージ/アイコン管理 |
-| **TSHPlayerDB** | `TSHPlayerDB.py` | ローカル選手DB（static クラス、`user_data/local_players.json`） |
-| **TSHWebServer** | `TSHWebServer.py` | QThread。Flask + SocketIO で Web UI にリアルタイム配信 |
-| **TSHHotkeys** | `TSHHotkeys.py` | シングルトン。pynput によるグローバルホットキー |
+| **AutonaScoreboardManager** | `AutonaScoreboardManager.py` | シングルトン。複数スコアボードのタブ管理（最大 10）。`ScoreboardAmountChanged`/`EditRequested` シグナル |
+| **AutonaScoreboardWidget** | `AutonaScoreboardWidget.py` | 個別スコアボード。チーム/選手/スコア/セット情報。`_applyScoreboardMode(singlePlayer)` で 1v1 ⇄ チーム UI を可逆切替 |
+| **AutonaTournamentDataProvider** | `AutonaTournamentDataProvider.py` | シングルトン。Start.gg 等からデータ取得のオーケストレーション |
+| **AutonaGameAssetManager** | `AutonaGameAssetManager.py` | シングルトン。ゲーム別キャラ/ステージ/アイコン管理 |
+| **AutonaPlayerDB** | `AutonaPlayerDB.py` | ローカル選手DB（static クラス、`user_data/local_players.json`） |
+| **AutonaWebServer** | `AutonaWebServer.py` | QThread。Flask + SocketIO で Web UI にリアルタイム配信 |
+| **AutonaHotkeys** | `AutonaHotkeys.py` | シングルトン。pynput によるグローバルホットキー |
 
 **重要なパターン:**
 - **シングルトン**: `*.instance` パターン（ScoreboardManager, GameAssetManager, TournamentDataProvider, Hotkeys, AlertNotification）
@@ -143,7 +167,7 @@ root
 | `rules/python-widgets.md` | `src/**/*.py` | PyQt6 ウィジェットの作法 |
 | `rules/react-web-ui.md` | `stage_strike_app/src/**` | React/Redux の規約 |
 | `rules/build-and-release.md` | `dependencies/**`, `scripts/**` | ビルド・リリース手順 |
-| `rules/state-and-webserver.md` | `src/StateManager.py`, `src/TSHWebServer*.py`, `src/Helpers/**` | 状態管理・Web サーバー・ヘルパーの作法 |
+| `rules/state-and-webserver.md` | `src/StateManager.py`, `src/AutonaWebServer*.py`, `src/Helpers/**` | 状態管理・Web サーバー・ヘルパーの作法 |
 | `rules/agent-pitfalls.md` | `src/**/*.py`, `tests/**/*.py` | エージェントが踏みやすい地雷の回避ルール |
 
 ### Hooks（自動検証）

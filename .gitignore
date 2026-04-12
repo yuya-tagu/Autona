@@ -65,6 +65,7 @@ assets/*_tmp
 layout_*
 
 # Build artifacts
+Autona.exe
 TSH.exe
 TSH/
 build/

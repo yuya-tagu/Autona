@@ -9,8 +9,8 @@ paths:
 
 ## PyInstaller
 
-- spec ファイル: `dependencies/tsh.spec`
-- `--distpath .` で実行し、`TSH.exe` をプロジェクト直下に生成する
+- spec ファイル: `dependencies/autona.spec`
+- `--distpath .` で実行し、`Autona.exe` をプロジェクト直下に生成する
 - `dist/` フォルダの exe は使わない
 - アイコン: `assets/icons/icon.ico`（`icon.png` から PIL で生成）
 

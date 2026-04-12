@@ -9,7 +9,7 @@ globs:
 
 ## 1. src/ の import は全起動を引き起こす
 
-`from src.XXX import ...` や `from .XXX import ...` は `src/__init__.py` → `TournamentStreamHelper.py` → QApplication + 全シングルトン生成を連鎖的にトリガーする。
+`from src.XXX import ...` や `from .XXX import ...` は `src/__init__.py` → `Autona.py` → QApplication + 全シングルトン生成を連鎖的にトリガーする。
 
 - テストで `src` パッケージ経由の import を使わない
 - テストでは `tests/conftest.py` の `direct_import()` を使う
@@ -17,10 +17,10 @@ globs:
 
 ## 2. シングルトン初期化順序を壊さない
 
-`TournamentStreamHelper.py` の import 順序がシングルトンの生成順序を決定する。
+`Autona.py` の import 順序がシングルトンの生成順序を決定する。
 
-**絶対に守る**: `TSHGameAssetManager` の import は `TSHTournamentDataProvider` より前。
-理由: TSHTournamentDataProvider.__init__ が `TSHGameAssetManager.instance.signals` に connect する。
+**絶対に守る**: `AutonaGameAssetManager` の import は `AutonaTournamentDataProvider` より前。
+理由: AutonaTournamentDataProvider.__init__ が `AutonaGameAssetManager.instance.signals` に connect する。
 
 詳細: `.claude/architecture/singleton-init-order.md`
 
@@ -32,12 +32,12 @@ globs:
 
 ## 4. `element.objectName()` をキーパスに使う既存パターン
 
-`TSHScoreboardWidget`, `TSHTournamentInfoWidget` 等で Qt の `objectName()` がそのまま StateManager のキーに使われる。
+`AutonaScoreboardWidget`, `AutonaTournamentInfoWidget` 等で Qt の `objectName()` がそのまま StateManager のキーに使われる。
 
 - `.ui` ファイルの objectName を変更すると保存データとの互換性が壊れる
 - 新しいウィジェットを追加する際も、objectName = StateManager キー であることを意識する
 
-## 5. TSHScoreboardPlayerWidget と TSHTeamPlayerWidget は別クラス
+## 5. AutonaScoreboardPlayerWidget と AutonaTeamPlayerWidget は別クラス
 
 見た目も構造もほぼ同じだが、**基底クラスを共有していない**。
 
@@ -54,14 +54,14 @@ globs:
 
 ## 7. `self.path` の動的構築
 
-`TSHScoreboardPlayerWidget.path` は呼び出し元によって異なる:
+`AutonaScoreboardPlayerWidget.path` は呼び出し元によって異なる:
 - スコアボード: `score.{N}.team.{T}.player.{M}`
 - 実況者: `commentary.{N}`
 - 選手リスト: `{base}.slot.{I}.player.{M}`
 
 `self.path` を前提としたリファクタでは、全3パターンでの動作を確認すること。
 
-## 8. TSH.exe はプロジェクト直下
+## 8. Autona.exe はプロジェクト直下
 
-ビルド後の実行ファイルは `TSH.exe`（プロジェクトルート直下）。`dist/TSH.exe` ではない。
+ビルド後の実行ファイルは `Autona.exe`（プロジェクトルート直下）。`dist/Autona.exe` ではない。
 PyInstaller の `--distpath .` オプションで直下に出力している。

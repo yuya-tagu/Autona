@@ -1,6 +1,6 @@
 {
-  "short_name": "Stage Strike",
-  "name": "TournamentStreamHelper Stage Strike App",
+  "short_name": "Autona",
+  "name": "Autona",
   "icons": [
     {
       "src": "favicon.ico",
@@ -20,6 +20,6 @@
   ],
   "start_url": "../../",
   "display": "standalone",
-  "theme_color": "#000000",
-  "background_color": "#ffffff"
+  "theme_color": "#F5A545",
+  "background_color": "#0A0A0A"
 }

@@ -1,4 +1,4 @@
-# TournamentStreamHelper (BST Scoreboard)
+# Autona (BST Scoreboard)
 
 格闘ゲーム大会の配信支援デスクトップアプリケーション。[TournamentStreamHelper](https://github.com/joaorb64/TournamentStreamHelper) のカスタムフォーク。
 
@@ -54,10 +54,10 @@ cd stage_strike_app && npm install
 python main.py
 
 # Windows バッチ
-TSH_bat.bat
+Autona_bat.bat
 
 # Linux/Mac
-./TSH.sh
+./Autona.sh
 ```
 
 ### ビルド
@@ -67,10 +67,10 @@ TSH_bat.bat
 cd stage_strike_app && npm run build
 
 # 2. exe をビルド
-python -m PyInstaller dependencies/tsh.spec --distpath . --workpath build -y
+python -m PyInstaller dependencies/autona.spec --distpath . --workpath build -y
 ```
 
-- `TSH.exe` はプロジェクト直下に生成される（`dist/` ではない）
+- `Autona.exe` はプロジェクト直下に生成される（`dist/` ではない）
 - Web UI のビルドを先に行わないと、exe に古い Web UI が同梱される
 
 ### リリース
@@ -80,7 +80,7 @@ python -m PyInstaller dependencies/tsh.spec --distpath . --workpath build -y
 scripts/gen_release.ps1
 ```
 
-`release-windows.zip` に `TSH.exe`、`assets/`、`layout/`、`user_data/`、`stage_strike_app/build/` が含まれる。
+`release-windows.zip` に `Autona.exe`、`assets/`、`layout/`、`user_data/`、`stage_strike_app/build/` が含まれる。
 
 ## アーキテクチャ
 
@@ -139,11 +139,11 @@ scripts/gen_release.ps1
 ## プロジェクト構造
 
 ```
-TournamentStreamHelper/
+Autona/
 ├── main.py                  # エントリーポイント
-├── TSH.exe                  # ビルド済み実行ファイル
-├── TSH_bat.bat              # Windows 起動スクリプト
-├── TSH.sh                   # Linux/Mac 起動スクリプト
+├── Autona.exe                  # ビルド済み実行ファイル
+├── Autona_bat.bat              # Windows 起動スクリプト
+├── Autona.sh                   # Linux/Mac 起動スクリプト
 ├── Pipfile                  # Python 依存定義
 │
 ├── src/                     # Python ソースコード

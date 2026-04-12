@@ -1,5 +1,5 @@
 from qtpy.QtWidgets import *
-from ..TSHColorButton import TSHColorButton
+from ..AutonaColorButton import AutonaColorButton
 from ..LayoutOptionsManager import LayoutOptionsManager
 import textwrap
 from ..StateManager import StateManager
@@ -61,7 +61,7 @@ class LayoutOptionsWidget(QWidget):
                 ]
             )
         elif type == "color":
-            settingWidget = TSHColorButton(color="#000000", disable_right_click=True, enable_alpha_selection=True, ignore_same_color=False)
+            settingWidget = AutonaColorButton(color="#000000", disable_right_click=True, enable_alpha_selection=True, ignore_same_color=False)
             settingWidget.colorChanged.connect(
                 lambda val=None: [
                     LayoutOptionsManager.Set(self.settingsBase+"."+setting, settingWidget.color()),

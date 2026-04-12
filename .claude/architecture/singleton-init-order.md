@@ -9,16 +9,16 @@
 
 | クラス | ファイル | 初期化行 | パターン |
 |--------|---------|---------|---------|
-| TSHHotkeys | `src/TSHHotkeys.py:116` | `TSHHotkeys.instance = TSHHotkeys()` | モジュール末尾 |
-| TSHGameAssetManager | `src/TSHGameAssetManager.py:1601-1602` | `if ... == None: TSHGameAssetManager.instance = TSHGameAssetManager()` | 条件付きモジュール末尾 |
-| TSHTournamentDataProvider | `src/TSHTournamentDataProvider.py:398` | `TSHTournamentDataProvider.instance = TSHTournamentDataProvider()` | モジュール末尾 |
-| TSHAlertNotification | `src/TSHAlertNotification.py:115` | `TSHAlertNotification.instance = TSHAlertNotification()` | モジュール末尾 |
-| TSHScoreboardManager | `src/TSHScoreboardManager.py:101` | `TSHScoreboardManager.instance = TSHScoreboardManager()` | モジュール末尾 |
-| TSHAssetDownloader | `src/TSHAssetDownloader.py:537` | `TSHAssetDownloader.instance = TSHAssetDownloader()` | モジュール末尾 |
-| TSHCountryHelper | `src/Helpers/TSHCountryHelper.py:295` | `TSHCountryHelper.instance = TSHCountryHelper()` | モジュール末尾 |
-| TSHControllerHelper | `src/Helpers/TSHControllerHelper.py:210` | `TSHControllerHelper.instance = TSHControllerHelper()` | モジュール末尾 |
+| AutonaHotkeys | `src/AutonaHotkeys.py:116` | `AutonaHotkeys.instance = AutonaHotkeys()` | モジュール末尾 |
+| AutonaGameAssetManager | `src/AutonaGameAssetManager.py:1601-1602` | `if ... == None: AutonaGameAssetManager.instance = AutonaGameAssetManager()` | 条件付きモジュール末尾 |
+| AutonaTournamentDataProvider | `src/AutonaTournamentDataProvider.py:398` | `AutonaTournamentDataProvider.instance = AutonaTournamentDataProvider()` | モジュール末尾 |
+| AutonaAlertNotification | `src/AutonaAlertNotification.py:115` | `AutonaAlertNotification.instance = AutonaAlertNotification()` | モジュール末尾 |
+| AutonaScoreboardManager | `src/AutonaScoreboardManager.py:101` | `AutonaScoreboardManager.instance = AutonaScoreboardManager()` | モジュール末尾 |
+| AutonaAssetDownloader | `src/AutonaAssetDownloader.py:537` | `AutonaAssetDownloader.instance = AutonaAssetDownloader()` | モジュール末尾 |
+| AutonaCountryHelper | `src/Helpers/AutonaCountryHelper.py:295` | `AutonaCountryHelper.instance = AutonaCountryHelper()` | モジュール末尾 |
+| AutonaControllerHelper | `src/Helpers/AutonaControllerHelper.py:210` | `AutonaControllerHelper.instance = AutonaControllerHelper()` | モジュール末尾 |
 
-※ StateManager, SettingsManager, TSHPlayerDB は static クラス（インスタンス化しない）のためシングルトンに含めない
+※ StateManager, SettingsManager, AutonaPlayerDB は static クラス（インスタンス化しない）のためシングルトンに含めない
 
 ---
 
@@ -29,40 +29,40 @@
 ```
 main.py (プロジェクトルート)
   → import src                           # src/__init__.py
-    → from .TournamentStreamHelper import *  # src/TournamentStreamHelper.py のトップレベル実行開始
+    → from .Autona import *  # src/Autona.py のトップレベル実行開始
 ```
 
-### Phase 1: TournamentStreamHelper.py のトップレベル（import 時に実行）
+### Phase 1: Autona.py のトップレベル（import 時に実行）
 
-`src/TournamentStreamHelper.py` の import 文が上から順に処理される。各 import 先モジュールの末尾でシングルトンが生成される。
+`src/Autona.py` の import 文が上から順に処理される。各 import 先モジュールの末尾でシングルトンが生成される。
 
 ```
 line 42:  App = QApplication(sys.argv)       # QApplication 生成
-line 43:  TSHQtHelper.init_gui_executor()    # GUI スレッドヘルパー初期化
+line 43:  AutonaQtHelper.init_gui_executor()    # GUI スレッドヘルパー初期化
 
-line 127: from .TSHHotkeys import TSHHotkeys
-          → TSHHotkeys.instance = TSHHotkeys()                    [1] 依存: SettingsManager (static)
+line 127: from .AutonaHotkeys import AutonaHotkeys
+          → AutonaHotkeys.instance = AutonaHotkeys()                    [1] 依存: SettingsManager (static)
 
-line 132: from .TSHGameAssetManager import TSHGameAssetManager
-          → TSHGameAssetManager.instance = TSHGameAssetManager()  [2] 依存: StateManager (static)
+line 132: from .AutonaGameAssetManager import AutonaGameAssetManager
+          → AutonaGameAssetManager.instance = AutonaGameAssetManager()  [2] 依存: StateManager (static)
 
-line 135: from .TSHTournamentDataProvider import TSHTournamentDataProvider
-          → TSHTournamentDataProvider.instance = TSHTournamentDataProvider()  [3] 依存: TSHGameAssetManager.instance ★
+line 135: from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
+          → AutonaTournamentDataProvider.instance = AutonaTournamentDataProvider()  [3] 依存: AutonaGameAssetManager.instance ★
 
-line 137: from .TSHAlertNotification import TSHAlertNotification
-          → TSHAlertNotification.instance = TSHAlertNotification()  [4] 依存: なし
+line 137: from .AutonaAlertNotification import AutonaAlertNotification
+          → AutonaAlertNotification.instance = AutonaAlertNotification()  [4] 依存: なし
 
-line 142: from .Helpers.TSHCountryHelper import TSHCountryHelper
-          → TSHCountryHelper.instance = TSHCountryHelper()          [5] 依存: なし
+line 142: from .Helpers.AutonaCountryHelper import AutonaCountryHelper
+          → AutonaCountryHelper.instance = AutonaCountryHelper()          [5] 依存: なし
 
-line 143: from .Helpers.TSHControllerHelper import TSHControllerHelper
-          → TSHControllerHelper.instance = TSHControllerHelper()    [6] 依存: なし
+line 143: from .Helpers.AutonaControllerHelper import AutonaControllerHelper
+          → AutonaControllerHelper.instance = AutonaControllerHelper()    [6] 依存: なし
 
-line 144: from .TSHScoreboardManager import TSHScoreboardManager
-          → TSHScoreboardManager.instance = TSHScoreboardManager()  [7] 依存: StateManager (static)
+line 144: from .AutonaScoreboardManager import AutonaScoreboardManager
+          → AutonaScoreboardManager.instance = AutonaScoreboardManager()  [7] 依存: StateManager (static)
 
-line 145: from src.TSHAssetDownloader import TSHAssetDownloader
-          → TSHAssetDownloader.instance = TSHAssetDownloader()      [8] 依存: なし
+line 145: from src.AutonaAssetDownloader import AutonaAssetDownloader
+          → AutonaAssetDownloader.instance = AutonaAssetDownloader()      [8] 依存: なし
 ```
 
 ### Phase 2: Window.__init__（main.py の `src.Window(event_loop)` で実行）
@@ -70,10 +70,10 @@ line 145: from src.TSHAssetDownloader import TSHAssetDownloader
 ```
 line 322: StateManager.loop = loop
 line 323: StateManager.BlockSaving()
-line 325: TSHLocaleHelper.LoadLocale()
-line 375: TSHControllerHelper.instance.init()         # コントローラーDB更新
-line 376: TSHCountryHelper.instance.UpdateCountriesFile()  # 国データ更新
-line 437: self.scoreboard = TSHScoreboardManager.instance  # ドックに組み込み
+line 325: AutonaLocaleHelper.LoadLocale()
+line 375: AutonaControllerHelper.instance.init()         # コントローラーDB更新
+line 376: AutonaCountryHelper.instance.UpdateCountriesFile()  # 国データ更新
+line 437: self.scoreboard = AutonaScoreboardManager.instance  # ドックに組み込み
 line 460: self.webserver = WebServer(...)              # Flask+SocketIO サーバー起動
 ```
 
@@ -81,11 +81,11 @@ line 460: self.webserver = WebServer(...)              # Flask+SocketIO サー�
 
 ```
 line 931: self.settingsWindow.UiMounted()
-line 933: TSHTournamentDataProvider.instance.UiMounted()  # SetTournament 復元等
-line 934: TSHGameAssetManager.instance.UiMounted()        # ゲームデータ読み込み開始
-line 935: TSHAlertNotification.instance.UiMounted()       # アラートチェック
-line 936: TSHAssetDownloader.instance.UiMounted()         # アイコン初期化
-line 937: TSHHotkeys.instance.UiMounted(self)             # pynput リスナー起動
+line 933: AutonaTournamentDataProvider.instance.UiMounted()  # SetTournament 復元等
+line 934: AutonaGameAssetManager.instance.UiMounted()        # ゲームデータ読み込み開始
+line 935: AutonaAlertNotification.instance.UiMounted()       # アラートチェック
+line 936: AutonaAssetDownloader.instance.UiMounted()         # アイコン初期化
+line 937: AutonaHotkeys.instance.UiMounted(self)             # pynput リスナー起動
 ```
 
 ---
@@ -93,35 +93,35 @@ line 937: TSHHotkeys.instance.UiMounted(self)             # pynput リスナー�
 ## シングルトン間依存グラフ
 
 ```
-TSHHotkeys [1]
+AutonaHotkeys [1]
   └── SettingsManager (static) — LoadUserHotkeys で読み取り
 
-TSHGameAssetManager [2]
+AutonaGameAssetManager [2]
   └── StateManager (static) — __init__ で StateManager.Set("game", {})
 
-TSHTournamentDataProvider [3]  ★ 重要
+AutonaTournamentDataProvider [3]  ★ 重要
   ├── StateManager (static)
   ├── SettingsManager (static)
-  └── TSHGameAssetManager.instance ★ — __init__ L47 で .signals.onLoadAssets.connect()
+  └── AutonaGameAssetManager.instance ★ — __init__ L47 で .signals.onLoadAssets.connect()
 
-TSHAlertNotification [4]
+AutonaAlertNotification [4]
   └── (依存なし)
 
-TSHCountryHelper [5]
+AutonaCountryHelper [5]
   └── (依存なし。__init__ は空。実質的な初期化は UpdateCountriesFile で行われる)
 
-TSHControllerHelper [6]
+AutonaControllerHelper [6]
   └── (依存なし。__init__ は空。実質的な初期化は .init() で行われる)
 
-TSHScoreboardManager [7]
+AutonaScoreboardManager [7]
   └── StateManager (static) — __init__ で StateManager.Unset("score")
 
-TSHAssetDownloader [8]
+AutonaAssetDownloader [8]
   └── (依存なし)
 ```
 
 **依存関係の要点:**
-- `TSHTournamentDataProvider` → `TSHGameAssetManager.instance` が唯一のシングルトン間依存
+- `AutonaTournamentDataProvider` → `AutonaGameAssetManager.instance` が唯一のシングルトン間依存
 - この依存は import 順で保証されている（line 132 → line 135）
 - それ以外の依存は全て static クラス（StateManager, SettingsManager）への参照のみ
 
@@ -129,13 +129,13 @@ TSHAssetDownloader [8]
 
 ## 暗黙の初期化順序リスク
 
-### 1. `TSHTournamentDataProvider` ← `TSHGameAssetManager.instance` 依存 ⚠️
+### 1. `AutonaTournamentDataProvider` ← `AutonaGameAssetManager.instance` 依存 ⚠️
 
-**箇所**: `src/TSHTournamentDataProvider.py:47`
+**箇所**: `src/AutonaTournamentDataProvider.py:47`
 ```python
-TSHGameAssetManager.instance.signals.onLoadAssets.connect(self.SetGameFromProvider)
+AutonaGameAssetManager.instance.signals.onLoadAssets.connect(self.SetGameFromProvider)
 ```
-**リスク**: TSHGameAssetManager の import (line 132) を TSHTournamentDataProvider の import (line 135) より後に移動すると、`TSHGameAssetManager.instance` が None で AttributeError。
+**リスク**: AutonaGameAssetManager の import (line 132) を AutonaTournamentDataProvider の import (line 135) より後に移動すると、`AutonaGameAssetManager.instance` が None で AttributeError。
 **重大度**: 中（import 順を変えた場合のみ発火）
 
 ### 2. モジュールトップレベルでのシングルトン生成 ⚠️ 要確認
@@ -146,18 +146,18 @@ TSHGameAssetManager.instance.signals.onLoadAssets.connect(self.SetGameFromProvid
 
 ### 3. `from . import ui_constants as UI` のパッケージ経由 import ⚠️ 要確認
 
-**箇所**: `src/TSHCommentaryWidget.py`, `src/TSHScoreboardPlayerWidget.py`, `src/TSHScoreboardWidget.py`
-**リスク**: `from .` が `src/__init__.py` を経由し、`from .TournamentStreamHelper import *` が実行される。TournamentStreamHelper.py のトップレベルで QApplication の生成（line 42）等が走るため、import 順によっては二重初期化の可能性がある。実際には Python のモジュールキャッシュにより問題にならないが、テスト環境では要注意。
+**箇所**: `src/AutonaCommentaryWidget.py`, `src/AutonaScoreboardPlayerWidget.py`, `src/AutonaScoreboardWidget.py`
+**リスク**: `from .` が `src/__init__.py` を経由し、`from .Autona import *` が実行される。Autona.py のトップレベルで QApplication の生成（line 42）等が走るため、import 順によっては二重初期化の可能性がある。実際には Python のモジュールキャッシュにより問題にならないが、テスト環境では要注意。
 **重大度**: 低（Python のモジュールキャッシュが保護）
 
-### 4. TSHGameAssetManager の条件付き初期化 ⚠️ 要確認
+### 4. AutonaGameAssetManager の条件付き初期化 ⚠️ 要確認
 
-**箇所**: `src/TSHGameAssetManager.py:1601-1602`
+**箇所**: `src/AutonaGameAssetManager.py:1601-1602`
 ```python
-if TSHGameAssetManager.instance == None:
-    TSHGameAssetManager.instance = TSHGameAssetManager()
+if AutonaGameAssetManager.instance == None:
+    AutonaGameAssetManager.instance = AutonaGameAssetManager()
 ```
-**リスク**: 他のシングルトンは無条件で初期化されるが、TSHGameAssetManager だけ `== None` チェック付き。これは `from . import *` による二重 import を防ぐためと推測されるが、明確なコメントがない。
+**リスク**: 他のシングルトンは無条件で初期化されるが、AutonaGameAssetManager だけ `== None` チェック付き。これは `from . import *` による二重 import を防ぐためと推測されるが、明確なコメントがない。
 **重大度**: 低（防御的コードとして機能している）
 
 ---
@@ -169,5 +169,5 @@ if TSHGameAssetManager.instance == None:
 | StateManager | `src/StateManager.py` | クラス変数で状態保持。`import` 時にクラス定義が評価される |
 | SettingsManager | `src/SettingsManager.py` | 同上 |
 | LayoutOptionsManager | `src/LayoutOptionsManager.py` | 同上 |
-| TSHPlayerDB | `src/TSHPlayerDB.py` | クラス変数 + static メソッド。`import` 時にクラス定義が評価される |
-| TSHLocaleHelper | `src/Helpers/TSHLocaleHelper.py` | 同上 |
+| AutonaPlayerDB | `src/AutonaPlayerDB.py` | クラス変数 + static メソッド。`import` 時にクラス定義が評価される |
+| AutonaLocaleHelper | `src/Helpers/AutonaLocaleHelper.py` | 同上 |

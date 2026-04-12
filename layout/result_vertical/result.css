@@ -108,10 +108,10 @@ body {
 }
 
 /* --- Players grid --- */
-/* 12 cols, 3 rows:
-   Row 1: 1st (full width, 400px)
-   Row 2: 2nd, 3rd, 4th (4 cols each, 300px)
-   Row 3: 5th, 6th, 7th, 8th (3 cols each, 260px)
+/* 12 cols, 3 rows — row heights use a 4:3:2 ratio (total 960px):
+   Row 1: 1st (full width)              ~426.67px
+   Row 2: 2nd, 3rd, 4th (4 cols each)   ~320px
+   Row 3: 5th–8th (3 cols each)         ~213.33px
 */
 
 .players {
@@ -123,7 +123,7 @@ body {
   height: 960px;
   display: grid;
   grid-template-columns: repeat(12, 1fr);
-  grid-template-rows: 400px 300px 260px;
+  grid-template-rows: 4fr 3fr 2fr;
   gap: 0;
 }
 
@@ -229,7 +229,7 @@ body {
   top: 8px;
   left: 8px;
   z-index: 2;
-  font-size: 28px;
+  font-size: 32px;
   font-weight: 700;
   color: #ffffff;
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
@@ -237,10 +237,10 @@ body {
 }
 
 /* Badge size by slot */
-.player-slot.slot-1 .rank-badge { font-size: 44px; }
-.player-slot.slot-2 .rank-badge { font-size: 36px; }
-.player-slot.slot-3 .rank-badge { font-size: 36px; }
-.player-slot.slot-4 .rank-badge { font-size: 36px; }
+.player-slot.slot-1 .rank-badge { font-size: 48px; }
+.player-slot.slot-2 .rank-badge { font-size: 40px; }
+.player-slot.slot-3 .rank-badge { font-size: 40px; }
+.player-slot.slot-4 .rank-badge { font-size: 40px; }
 
 /* Badge colors by rank */
 .player-slot.rank-1 .rank-badge { color: #ffd700; }
@@ -273,7 +273,7 @@ body {
 }
 
 .player-slot .player-name {
-  font-size: 26px;
+  font-size: 30px;
   font-weight: 700;
   color: #ffffff;
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
@@ -285,11 +285,11 @@ body {
 }
 
 /* Larger text for top slots */
-.player-slot.slot-1 .player-name { font-size: 40px; }
+.player-slot.slot-1 .player-name { font-size: 44px; }
 .player-slot.slot-1 .player-sponsor { font-size: 22px; }
-.player-slot.slot-2 .player-name { font-size: 32px; }
-.player-slot.slot-3 .player-name { font-size: 32px; }
-.player-slot.slot-4 .player-name { font-size: 32px; }
+.player-slot.slot-2 .player-name { font-size: 36px; }
+.player-slot.slot-3 .player-name { font-size: 36px; }
+.player-slot.slot-4 .player-name { font-size: 36px; }
 
 /* Accent bar */
 .player-slot .accent-bar {
