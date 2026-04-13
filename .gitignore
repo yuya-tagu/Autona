@@ -1,9 +1,15 @@
-user_data/*
-user_data/player_avatar/
+# user_data: personal data is ignored, shared game assets are tracked
+user_data/settings.json
+user_data/local_players.json
+user_data/layout_options.json
+user_data/tournament_banner.png
+user_data/badword_blacklist.txt
+user_data/badword_whitelist.txt
+user_data/player_avatar/*
 !user_data/player_avatar/*.txt
-user_data/sponsor_logo/
+user_data/sponsor_logo/*
 !user_data/sponsor_logo/*.txt
-user_data/team_logo/
+user_data/team_logo/*
 !user_data/team_logo/*.txt
 out/
 update.tar.gz

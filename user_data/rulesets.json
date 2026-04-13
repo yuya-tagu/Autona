@@ -1,0 +1,27 @@
+[
+    {
+        "banByMaxGames": {},
+        "banCount": 2,
+        "counterpickStages": [
+            "Smashville",
+            "Town and City"
+        ],
+        "errors": [],
+        "name": "\u7bdd\u706b\u30eb\u30fc\u30eb",
+        "neutralStages": [
+            "Hollow Bastion",
+            "Pok\u00e9mon Stadium 2",
+            "Small Battlefield",
+            "Battlefield",
+            "Final Destination"
+        ],
+        "strikeOrder": [
+            1,
+            2,
+            1
+        ],
+        "useDSR": false,
+        "useMDSR": false,
+        "videogame": "ssbu"
+    }
+]
