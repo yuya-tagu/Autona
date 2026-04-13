@@ -1,0 +1,434 @@
+/* result_top16: Top 16 result image layout (1920x1080, Horizontal style)
+ *
+ * Layout:
+ *   Left 80% (1536px): TOP8 in 2 rows — same proportions as Horizontal layout
+ *     Row 1 (520px): slot-1 (40%) / slot-2 (28%) / slot-3 (32%)
+ *     Row 2 (400px): slot-4 ~ slot-8 (5 players ~20% each)
+ *   Right 20% (384px): slot-9 ~ slot-16 stacked in a single column
+ *     8 rows (130px × 4 + 100px × 4 = 920px)
+ *
+ * Grid: 40 columns × 8 rows
+ *   Each col = 48px, rows 1-4 = 130px, rows 5-8 = 100px
+ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  position: relative;
+  background: transparent;
+  font-family: "LINE Seed JP", sans-serif;
+  letter-spacing: -0.3px;
+}
+
+.layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* --- Background --- */
+
+.background {
+  z-index: 0;
+}
+
+.background img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: brightness(0.25) blur(6px);
+  transform: scale(1.05);
+  transform-origin: center;
+}
+
+/* --- Header --- */
+
+.header {
+  z-index: 2;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 40px;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.7) 0%,
+    rgba(0, 0, 0, 0.3) 80%,
+    transparent 100%
+  );
+}
+
+.header-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.header-icon {
+  position: absolute;
+  top: 20px;
+  right: 40px;
+  width: 100px;
+  height: 100px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  flex-shrink: 0;
+}
+
+.tournament-name {
+  font-size: 48px;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+  text-align: center;
+}
+
+.tournament-name .text {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.event-info {
+  font-size: 26px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.8);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  text-align: center;
+}
+
+.event-info .text {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+/* --- Players grid ---
+ * 40 cols × 8 rows
+ * Left (cols 1-32 = 80%): TOP8 spanning all 8 rows via row-span
+ * Right (cols 33-40 = 20%): slots 9-16, one slot per row
+ */
+
+.players {
+  z-index: 1;
+  position: absolute;
+  top: 160px;
+  left: 0;
+  width: 100%;
+  height: 920px;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: repeat(40, 1fr);
+  grid-template-rows: 130px 130px 130px 130px 100px 100px 100px 100px;
+  gap: 0;
+}
+
+/* === Left: TOP8 (cols 1-32, same proportions as Horizontal) === */
+
+/* Row 1 (slots 1-3): spans rows 1-4 = 520px
+ * Widths: 13/32 ≈ 41%, 9/32 ≈ 28%, 10/32 ≈ 31% */
+.player-slot.slot-1 { grid-column: 1  / 14; grid-row: 1 / 5; }
+.player-slot.slot-2 { grid-column: 14 / 23; grid-row: 1 / 5; }
+.player-slot.slot-3 { grid-column: 23 / 33; grid-row: 1 / 5; }
+
+/* Row 2 (slots 4-8): spans rows 5-8 = 400px
+ * 5 players in 32 cols: 7-6-7-6-6 = 32 */
+.player-slot.slot-4 { grid-column: 1  / 8;  grid-row: 5 / 9; }
+.player-slot.slot-5 { grid-column: 8  / 14; grid-row: 5 / 9; }
+.player-slot.slot-6 { grid-column: 14 / 21; grid-row: 5 / 9; }
+.player-slot.slot-7 { grid-column: 21 / 27; grid-row: 5 / 9; }
+.player-slot.slot-8 { grid-column: 27 / 33; grid-row: 5 / 9; }
+
+/* === Right: slots 9-16 (cols 33-40 = 20%), one per row === */
+.player-slot.slot-9  { grid-column: 33 / 41; grid-row: 1; }
+.player-slot.slot-10 { grid-column: 33 / 41; grid-row: 2; }
+.player-slot.slot-11 { grid-column: 33 / 41; grid-row: 3; }
+.player-slot.slot-12 { grid-column: 33 / 41; grid-row: 4; }
+.player-slot.slot-13 { grid-column: 33 / 41; grid-row: 5; }
+.player-slot.slot-14 { grid-column: 33 / 41; grid-row: 6; }
+.player-slot.slot-15 { grid-column: 33 / 41; grid-row: 7; }
+.player-slot.slot-16 { grid-column: 33 / 41; grid-row: 8; }
+
+/* Subtle left border to visually separate right column from TOP8 */
+.player-slot.slot-9,
+.player-slot.slot-10,
+.player-slot.slot-11,
+.player-slot.slot-12,
+.player-slot.slot-13,
+.player-slot.slot-14,
+.player-slot.slot-15,
+.player-slot.slot-16 {
+  border-left: 2px solid rgba(255, 255, 255, 0.18);
+}
+
+/* --- Individual player slot --- */
+
+.player-slot {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Character image container */
+.player-slot .char-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* --- Cinematic lighting overlay --- */
+.player-slot .lighting {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  mix-blend-mode: soft-light;
+  opacity: 0.6;
+}
+
+/* Gold spotlight for 1st */
+.player-slot.rank-1 .lighting {
+  background: radial-gradient(ellipse at 50% 30%,
+    rgba(255, 215, 0, 0.7) 0%,
+    rgba(255, 180, 0, 0.3) 40%,
+    transparent 70%);
+  opacity: 0.7;
+}
+
+/* Silver spotlight for 2nd */
+.player-slot.rank-2 .lighting {
+  background: radial-gradient(ellipse at 50% 30%,
+    rgba(200, 210, 230, 0.6) 0%,
+    rgba(180, 190, 210, 0.25) 40%,
+    transparent 70%);
+}
+
+/* Bronze spotlight for 3rd */
+.player-slot.rank-3 .lighting {
+  background: radial-gradient(ellipse at 50% 30%,
+    rgba(205, 127, 50, 0.6) 0%,
+    rgba(180, 110, 40, 0.25) 40%,
+    transparent 70%);
+}
+
+/* Cool ambient for 4th-16th */
+.player-slot.rank-4 .lighting,
+.player-slot.rank-5 .lighting,
+.player-slot.rank-6 .lighting,
+.player-slot.rank-7 .lighting,
+.player-slot.rank-8 .lighting,
+.player-slot.rank-9 .lighting,
+.player-slot.rank-10 .lighting,
+.player-slot.rank-11 .lighting,
+.player-slot.rank-12 .lighting,
+.player-slot.rank-13 .lighting,
+.player-slot.rank-14 .lighting,
+.player-slot.rank-15 .lighting,
+.player-slot.rank-16 .lighting {
+  background: radial-gradient(ellipse at 50% 40%,
+    rgba(100, 140, 200, 0.3) 0%,
+    transparent 60%);
+  opacity: 0.5;
+}
+
+/* Vignette on each slot for depth */
+.player-slot .vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center,
+    transparent 40%,
+    rgba(0, 0, 0, 0.5) 100%);
+}
+
+/* Bottom gradient overlay for text legibility */
+.player-slot .overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 50%;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.85) 0%,
+    rgba(0, 0, 0, 0.4) 50%,
+    transparent 100%
+  );
+  z-index: 1;
+}
+
+/* Taller overlay for compact right column slots */
+.player-slot.slot-9  .overlay,
+.player-slot.slot-10 .overlay,
+.player-slot.slot-11 .overlay,
+.player-slot.slot-12 .overlay,
+.player-slot.slot-13 .overlay,
+.player-slot.slot-14 .overlay,
+.player-slot.slot-15 .overlay,
+.player-slot.slot-16 .overlay {
+  height: 80%;
+}
+
+/* --- Placement badge --- */
+.player-slot .rank-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 2;
+  font-size: 40px;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
+  line-height: 1;
+}
+
+/* Badge size by slot */
+.player-slot.slot-1 .rank-badge { font-size: 60px; }
+.player-slot.slot-2 .rank-badge { font-size: 48px; }
+.player-slot.slot-3 .rank-badge { font-size: 48px; }
+
+/* Compact badge for right column */
+.player-slot.slot-9  .rank-badge,
+.player-slot.slot-10 .rank-badge,
+.player-slot.slot-11 .rank-badge,
+.player-slot.slot-12 .rank-badge,
+.player-slot.slot-13 .rank-badge,
+.player-slot.slot-14 .rank-badge,
+.player-slot.slot-15 .rank-badge,
+.player-slot.slot-16 .rank-badge {
+  font-size: 18px;
+  top: 6px;
+  left: 8px;
+}
+
+/* Gold / Silver / Bronze badge colors */
+.player-slot.rank-1 .rank-badge { color: #ffd700; }
+.player-slot.rank-2 .rank-badge { color: #c0c0c0; }
+.player-slot.rank-3 .rank-badge { color: #cd7f32; }
+
+/* --- Player info at bottom --- */
+.player-slot .player-info {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  z-index: 2;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.player-slot .player-sponsor {
+  font-size: 20px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.7);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.player-slot .player-name {
+  font-size: 40px;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  line-height: 1.1;
+}
+
+/* Larger text for top row (same as Horizontal) */
+.player-slot.slot-1 .player-name    { font-size: 56px; }
+.player-slot.slot-1 .player-sponsor { font-size: 28px; }
+.player-slot.slot-2 .player-name    { font-size: 44px; }
+.player-slot.slot-3 .player-name    { font-size: 44px; }
+
+/* Compact text for right column */
+.player-slot.slot-9  .player-info,
+.player-slot.slot-10 .player-info,
+.player-slot.slot-11 .player-info,
+.player-slot.slot-12 .player-info,
+.player-slot.slot-13 .player-info,
+.player-slot.slot-14 .player-info,
+.player-slot.slot-15 .player-info,
+.player-slot.slot-16 .player-info {
+  padding: 5px 8px;
+  gap: 0;
+}
+
+.player-slot.slot-9  .player-name,
+.player-slot.slot-10 .player-name,
+.player-slot.slot-11 .player-name,
+.player-slot.slot-12 .player-name,
+.player-slot.slot-13 .player-name,
+.player-slot.slot-14 .player-name,
+.player-slot.slot-15 .player-name,
+.player-slot.slot-16 .player-name {
+  font-size: 20px;
+}
+
+.player-slot.slot-9  .player-sponsor,
+.player-slot.slot-10 .player-sponsor,
+.player-slot.slot-11 .player-sponsor,
+.player-slot.slot-12 .player-sponsor,
+.player-slot.slot-13 .player-sponsor,
+.player-slot.slot-14 .player-sponsor,
+.player-slot.slot-15 .player-sponsor,
+.player-slot.slot-16 .player-sponsor {
+  font-size: 13px;
+}
+
+/* --- Accent bar at top of each slot --- */
+.player-slot .accent-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 4px;
+  z-index: 2;
+}
+
+.player-slot.slot-1 .accent-bar { height: 6px; }
+
+/* Accent bar color by rank */
+.player-slot.rank-1 .accent-bar { background: #ffd700; }
+.player-slot.rank-2 .accent-bar { background: #c0c0c0; }
+.player-slot.rank-3 .accent-bar { background: #cd7f32; }
+.player-slot.rank-4  .accent-bar,
+.player-slot.rank-5  .accent-bar,
+.player-slot.rank-6  .accent-bar,
+.player-slot.rank-7  .accent-bar,
+.player-slot.rank-8  .accent-bar,
+.player-slot.rank-9  .accent-bar,
+.player-slot.rank-10 .accent-bar,
+.player-slot.rank-11 .accent-bar,
+.player-slot.rank-12 .accent-bar,
+.player-slot.rank-13 .accent-bar,
+.player-slot.rank-14 .accent-bar,
+.player-slot.rank-15 .accent-bar,
+.player-slot.rank-16 .accent-bar {
+  background: var(--accent-color, #f0a500);
+}
