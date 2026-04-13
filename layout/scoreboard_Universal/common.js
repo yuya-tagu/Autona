@@ -213,6 +213,15 @@ function adaptColorsForTheme(t) {
   scoreEl.style.color = textColor;
   nameEl.style.color = textColor;
 
+  // Round info is shared/centered — update once on the p1 pass (t===0)
+  if (t === 0) {
+    const roundInfo = document.querySelector(".round_info");
+    if (roundInfo) roundInfo.style.color = textColor;
+    setRule(stylesheet, ".tournament_name", "-webkit-text-stroke", stroke);
+    setRule(stylesheet, ".phase_label",     "-webkit-text-stroke", stroke);
+    setRule(stylesheet, ".match_label",     "-webkit-text-stroke", stroke);
+  }
+
   setRule(stylesheet, `.p${side} .twitter_logo`, "background-image", `url(./x_twitter_${iconVariant}.png)`);
   setRule(stylesheet, `.p${side} .location_logo`, "background-image", `url(./map_pin_${iconVariant}.png)`);
   setRule(stylesheet, `.p${side} .chip .text:not(.text_empty)`, "text-shadow", shadow);
