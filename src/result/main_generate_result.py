@@ -1,4 +1,4 @@
-"""Prepare data and generate result images (Top 8)."""
+"""Prepare data and generate result images (Top 8 / Top 16)."""
 
 import datetime
 import os
@@ -21,7 +21,13 @@ def _remove_special_chars(s):
     return re.sub(r'[\\/*?:"<>|]', "", s)
 
 
-def prepare_data(settingsManager, isPreview=False, gameAssetManager=None):
+def _max_players_for_layout(layout):
+    """Return the player count for a given layout key."""
+    return 16 if layout == "horizontal_16" else 8
+
+
+def prepare_data(settingsManager, isPreview=False, gameAssetManager=None,
+                 max_players=8):
     """Prepare result data from StateManager or generate preview mock data.
 
     Returns (data, config) tuple.
@@ -78,7 +84,7 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None):
     result_players = StateManager.Get("result_players") or {}
     has_data = False
 
-    for i in range(1, 9):
+    for i in range(1, max_players + 1):
         key = str(i)
         p = result_players.get(key, {})
         name = p.get("name", "")
@@ -93,23 +99,23 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None):
         })
 
     if isPreview and not has_data:
-        data = _create_preview_data(gameAssetManager)
+        data = _create_preview_data(gameAssetManager, max_players=max_players)
 
     return data, config
 
 
-def _create_preview_data(gameAssetManager=None):
-    """Generate mock top-8 data for preview."""
+def _create_preview_data(gameAssetManager=None, max_players=8):
+    """Generate mock preview data for a given player count."""
     data = {
         "tournamentName": QApplication.translate("app", "Sample Tournament"),
-        "eventName": "Top 8",
+        "eventName": f"Top {max_players}",
         "players": [],
     }
 
     chars = []
     if gameAssetManager and len(gameAssetManager.instance.characters.keys()) > 0:
         keys = list(gameAssetManager.instance.characters.keys())
-        for i in range(8):
+        for i in range(max_players):
             key = keys[random.randint(0, len(keys) - 1)]
             character = gameAssetManager.instance.characters[key]
             skin = random.randint(
@@ -138,7 +144,7 @@ def _create_preview_data(gameAssetManager=None):
                 },
             })
 
-    for i in range(8):
+    for i in range(max_players):
         entry = {
             "rank": i + 1,
             "name": chars[i]["name"] if i < len(chars) else f"Player {i+1}",
@@ -158,7 +164,8 @@ def save_result(pixmap, data):
     tournament = _remove_special_chars(data.get("tournamentName", "result"))
     timestamp = datetime.datetime.now(
         datetime.timezone.utc).strftime("%Y-%m-%d-%H-%M-%S")
-    filename = f"{tournament}-top8-{timestamp}"
+    num_players = len(data.get("players", [])) or 8
+    filename = f"{tournament}-top{num_players}-{timestamp}"
 
     pixmap.save(f"{out_path}/{filename}.png")
     pixmap.save(f"{out_path}/{filename}.jpg")
@@ -171,7 +178,9 @@ def generate(settingsManager, isPreview=False, gameAssetManager=None,
     """Generate result image synchronously. Returns file path."""
     from src.result.ResultRenderer import ResultRenderer
 
-    data, config = prepare_data(settingsManager, isPreview, gameAssetManager)
+    max_players = _max_players_for_layout(layout)
+    data, config = prepare_data(settingsManager, isPreview, gameAssetManager,
+                                max_players=max_players)
 
     renderer = ResultRenderer.instance()
     pixmap = renderer.renderSync(data=data, config=config, layout=layout)

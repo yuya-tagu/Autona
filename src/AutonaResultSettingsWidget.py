@@ -95,7 +95,7 @@ class AutonaResultSettingsWidget(QDockWidget):
         grid = self.settings.findChild(QGridLayout, "gridPlayers")
         grid.setVerticalSpacing(2)
 
-        for i in range(8):
+        for i in range(16):
             idx = i
             base = i * 2  # 2 grid rows per player
             row1 = base      # name row
@@ -171,6 +171,7 @@ class AutonaResultSettingsWidget(QDockWidget):
         groupLayout.addWidget(self.btLoadFromStartgg)
         self.btLoadFromStartgg.clicked.connect(self._loadFromStartgg)
 
+
         # --- Load tournament info ---
         self.btLoadTournamentInfo = QPushButton(
             QApplication.translate("app", "Load tournament info"))
@@ -183,9 +184,9 @@ class AutonaResultSettingsWidget(QDockWidget):
             QApplication.translate("app", "Layout:")))
         self.layoutCombo = QComboBox()
         self.layoutCombo.addItem("Horizontal (1920x1080)", "horizontal")
+        self.layoutCombo.addItem("Horizontal TOP16 (1920x1080)", "horizontal_16")
         self.layoutCombo.addItem("Vertical (960x1080)", "vertical")
-        self.layoutCombo.currentIndexChanged.connect(
-            lambda: self.GeneratePreview(True))
+        self.layoutCombo.currentIndexChanged.connect(self._onLayoutChanged)
         layoutRow.addWidget(self.layoutCombo)
         groupLayout.addLayout(layoutRow)
 
@@ -223,7 +224,8 @@ class AutonaResultSettingsWidget(QDockWidget):
         AutonaGameAssetManager.instance.signals.onLoad.connect(
             self._onGameChanged)
 
-        self.GeneratePreview()
+        # Apply initial row visibility and generate preview (slots 9-16 hidden by default)
+        self._onLayoutChanged()
 
     def _onGameChanged(self):
         """Re-bind character models when game changes (model object is replaced)."""
@@ -276,7 +278,7 @@ class AutonaResultSettingsWidget(QDockWidget):
         StateManager.Set("result_players", players)
 
     def _loadFromStartgg(self):
-        """Fetch top 8 standings from Start.gg."""
+        """Fetch standings from Start.gg (count depends on selected layout)."""
         if not AutonaTournamentDataProvider.instance.provider:
             logger.warning("No tournament provider set")
             return
@@ -284,13 +286,14 @@ class AutonaResultSettingsWidget(QDockWidget):
         self.btLoadFromStartgg.setText(
             QApplication.translate("app", "Loading..."))
         AutonaTournamentDataProvider.instance.GetStandings(
-            8, self._standingsSignals.StandingsLoaded)
+            self._maxPlayersForLayout(), self._standingsSignals.StandingsLoaded)
 
     def _onStandingsLoaded(self, data):
         """Callback when standings data arrives from Start.gg."""
         self.btLoadFromStartgg.setEnabled(True)
+        n = self._maxPlayersForLayout()
         self.btLoadFromStartgg.setText(
-            QApplication.translate("app", "Load top 8 from StartGG"))
+            QApplication.translate("app", f"Load top {n} from StartGG"))
 
         if not data:
             logger.warning("No standings data received")
@@ -465,6 +468,26 @@ class AutonaResultSettingsWidget(QDockWidget):
     def _selectedLayout(self):
         return self.layoutCombo.currentData() or "horizontal"
 
+    def _maxPlayersForLayout(self):
+        return 16 if self._selectedLayout() == "horizontal_16" else 8
+
+    def _onLayoutChanged(self):
+        """Update Start.gg button label and show/hide player rows to match layout."""
+        n = self._maxPlayersForLayout()
+        label = QApplication.translate("app", f"Load top {n} from StartGG")
+        self.btLoadFromStartgg.setText(label)
+
+        for i, (rank_label, name_edit, sponsor_edit, char_combo, color_combo) in enumerate(
+                self.playerInputs):
+            visible = i < n
+            rank_label.setVisible(visible)
+            name_edit.setVisible(visible)
+            sponsor_edit.setVisible(visible)
+            char_combo.setVisible(visible)
+            color_combo.setVisible(visible)
+
+        self.GeneratePreview(True)
+
     def GeneratePreview(self, manual=False):
         if manual:
             self._syncPlayersToState()
@@ -477,7 +500,8 @@ class AutonaResultSettingsWidget(QDockWidget):
             data, config = result_gen.prepare_data(
                 settingsManager=SettingsManager,
                 isPreview=True,
-                gameAssetManager=AutonaGameAssetManager)
+                gameAssetManager=AutonaGameAssetManager,
+                max_players=self._maxPlayersForLayout())
 
             self._renderer.render(
                 data=data, config=config, layout=self._selectedLayout())

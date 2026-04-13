@@ -82,6 +82,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         seed.setReadOnly(True)
         seed.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
         seed.setStyleSheet(readonly_style)
+        seed.setMaximumWidth(seed.sizeHint().width() // 2)
 
         pronoun = self.findChild(QLineEdit, "pronoun")
         pronoun.setReadOnly(True)

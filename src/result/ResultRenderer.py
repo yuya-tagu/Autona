@@ -16,6 +16,7 @@ import os
 # Layout definitions: name -> (html_subdir, width, height)
 LAYOUTS = {
     "horizontal": ("result", 1920, 1080),
+    "horizontal_16": ("result_top16", 1920, 1080),
     "vertical": ("result_vertical", 960, 1080),
 }
 
