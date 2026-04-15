@@ -653,22 +653,34 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../layout/AutonaBattleTeam.ui" line="87"/>
         <source>SPONSORS?</source>
-        <translation type="unfinished"></translation>
+        <translation>スポンサー？</translation>
     </message>
     <message>
         <location filename="../layout/AutonaTeamPlayer.ui" line="247"/>
         <source>ACTIVE</source>
-        <translation type="unfinished"></translation>
+        <translation>稼働中</translation>
     </message>
     <message>
         <location filename="../layout/AutonaTeamPlayer.ui" line="260"/>
         <source>DEAD?</source>
-        <translation type="unfinished"></translation>
+        <translation>停止？</translation>
     </message>
     <message>
         <location filename="../layout/AutonaTeamPlayer.ui" line="285"/>
         <source>STOCKS/LIVES</source>
-        <translation type="unfinished"></translation>
+        <translation>ストック／ライフ</translation>
+    </message>
+    <message>
+        <source>Copy to Clipboard</source>
+        <translation>クリップボードにコピー</translation>
+    </message>
+    <message>
+        <source>Save Result Image</source>
+        <translation>リザルト画像を保存</translation>
+    </message>
+    <message>
+        <source>Top 8 Players</source>
+        <translation>TOP8 プレイヤー</translation>
     </message>
 </context>
 <context>
@@ -765,12 +777,12 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Helpers/AutonaAltTextHelper.py" line="26"/>
         <source>LIVE NOW</source>
-        <translation type="unfinished"></translation>
+        <translation>配信中</translation>
     </message>
     <message>
         <location filename="../Helpers/AutonaAltTextHelper.py" line="28"/>
         <source>Click here to watch</source>
-        <translation type="unfinished"></translation>
+        <translation>クリックして視聴</translation>
     </message>
     <message>
         <location filename="../Helpers/AutonaAltTextHelper.py" line="64"/>
@@ -794,7 +806,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Helpers/AutonaAltTextHelper.py" line="151"/>
         <source>Stream powered by Autona:</source>
-        <translation type="unfinished"></translation>
+        <translation>配信支援: Autona</translation>
     </message>
     <message>
         <location filename="../Helpers/AutonaAltTextHelper.py" line="205"/>
@@ -804,7 +816,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Helpers/AutonaAltTextHelper.py" line="276"/>
         <source>Stream powered by Autona</source>
-        <translation type="unfinished"></translation>
+        <translation>配信支援: Autona</translation>
     </message>
 </context>
 <context>
@@ -892,12 +904,12 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Autona.py" line="215"/>
         <source>Update download complete. The program will extract the update upon closing.</source>
-        <translation type="unfinished"></translation>
+        <translation>アップデートのダウンロードが完了しました。アプリ終了時に更新を展開します。</translation>
     </message>
     <message>
         <location filename="../Autona.py" line="218"/>
         <source>Please ensure the layout folder or its contents aren&apos;t open in another application before closing this window.</source>
-        <translation type="unfinished"></translation>
+        <translation>このウィンドウを閉じる前に、レイアウトフォルダやその中身が他のアプリで開かれていないことを確認してください。</translation>
     </message>
     <message>
         <source>Export Language</source>
@@ -985,7 +997,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Autona.py" line="1098"/>
         <source>NOTE: This will open a new tab in your browser and close Autona.</source>
-        <translation type="unfinished"></translation>
+        <translation>注意: ブラウザに新しいタブを開き、Autona を終了します。</translation>
     </message>
     <message>
         <location filename="../Autona.py" line="1104"/>
@@ -1094,37 +1106,37 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Autona.py" line="1222"/>
         <source>Migrate Scoreboard Layout</source>
-        <translation type="unfinished"></translation>
+        <translation>スコアボードレイアウトを移行</translation>
     </message>
     <message>
         <location filename="../Autona.py" line="1227"/>
         <source>File Path</source>
-        <translation type="unfinished"></translation>
+        <translation>ファイルパス</translation>
     </message>
     <message>
         <location filename="../Autona.py" line="1230"/>
         <source>Find File...</source>
-        <translation type="unfinished"></translation>
+        <translation>ファイルを探す...</translation>
     </message>
     <message>
         <location filename="../Autona.py" line="1242"/>
         <source>Open Layout Javascript File</source>
-        <translation type="unfinished"></translation>
+        <translation>レイアウトの JavaScript ファイルを開く</translation>
     </message>
     <message>
         <location filename="../Autona.py" line="1244"/>
         <source>Javascript File</source>
-        <translation type="unfinished"></translation>
+        <translation>JavaScript ファイル</translation>
     </message>
     <message>
         <location filename="../Autona.py" line="1274"/>
         <source>Migration Complete</source>
-        <translation type="unfinished"></translation>
+        <translation>移行完了</translation>
     </message>
     <message>
         <location filename="../Autona.py" line="1278"/>
         <source>Layout Migration has completed!</source>
-        <translation type="unfinished"></translation>
+        <translation>レイアウトの移行が完了しました！</translation>
     </message>
     <message>
         <location filename="../Autona.py" line="1282"/>
@@ -1222,7 +1234,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../AutonaAssetDownloader.py" line="434"/>
         <source>Extracting... ({0}/{1})</source>
-        <translation type="unfinished"></translation>
+        <translation>展開中... ({0}/{1})</translation>
     </message>
     <message>
         <source>Downloading {0}...</source>
@@ -1427,28 +1439,28 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../AutonaTeamBattleWidget.py" line="65"/>
         <source>Crew/Team Battle</source>
-        <translation type="unfinished"></translation>
+        <translation>クルーバトル／チーム戦</translation>
     </message>
     <message>
         <location filename="../AutonaTeamBattleWidget.py" line="82"/>
         <source>Number of Players</source>
-        <translation type="unfinished"></translation>
+        <translation>プレイヤー人数</translation>
     </message>
     <message>
         <location filename="../AutonaTeamBattleWidget.py" line="92"/>
         <source>Characters per Player</source>
-        <translation type="unfinished"></translation>
+        <translation>プレイヤーごとの使用キャラ数</translation>
     </message>
     <message>
         <location filename="../AutonaTeamBattleWidget.py" line="103"/>
         <location filename="../AutonaTeamBattleWidget.py" line="245"/>
         <source>Lives/Stocks per Player</source>
-        <translation type="unfinished"></translation>
+        <translation>プレイヤーごとのストック数</translation>
     </message>
     <message>
         <location filename="../AutonaTeamBattleWidget.py" line="113"/>
         <source>Battle Mode</source>
-        <translation type="unfinished"></translation>
+        <translation>バトルモード</translation>
     </message>
     <message>
         <location filename="../AutonaTeamBattleWidget.py" line="129"/>
@@ -1465,17 +1477,17 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../AutonaTeamBattleWidget.py" line="187"/>
         <source>Reset Player Mode Values</source>
-        <translation type="unfinished"></translation>
+        <translation>プレイヤーモードの設定をリセット</translation>
     </message>
     <message>
         <location filename="../AutonaTeamBattleWidget.py" line="189"/>
         <source>Reset Battle Mode</source>
-        <translation type="unfinished"></translation>
+        <translation>バトルモードをリセット</translation>
     </message>
     <message>
         <location filename="../AutonaTeamBattleWidget.py" line="251"/>
         <source>First To Amount</source>
-        <translation type="unfinished"></translation>
+        <translation>先取スコア</translation>
     </message>
     <message>
         <location filename="../AutonaSelectSetWindow.py" line="15"/>
@@ -1578,13 +1590,13 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../AutonaIndividualGameTracker.py" line="56"/>
         <source>Game {0}</source>
-        <translation type="unfinished"></translation>
+        <translation>ゲーム {0}</translation>
     </message>
     <message>
         <location filename="../AutonaIndividualGameTracker.py" line="68"/>
         <location filename="../AutonaIndividualGameTracker.py" line="73"/>
         <source>T{0}</source>
-        <translation type="unfinished"></translation>
+        <translation>T{0}</translation>
     </message>
     <message>
         <location filename="../AutonaIndividualGameTracker.py" line="78"/>
@@ -1624,7 +1636,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../AutonaScoreboardWidget.py" line="202"/>
         <source>Post to Bluesky</source>
-        <translation type="unfinished"></translation>
+        <translation>Bluesky に投稿</translation>
     </message>
     <message>
         <location filename="../AutonaScoreboardWidget.py" line="234"/>
@@ -1641,22 +1653,22 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../AutonaScoreboardWidget.py" line="316"/>
         <source>Open {0} in a browser to edit the scoreboard remotely.</source>
-        <translation type="unfinished"></translation>
+        <translation>ブラウザで {0} を開くと、スコアボードをリモート編集できます。</translation>
     </message>
     <message>
         <location filename="../Helpers/AutonaVersionHelper.py" line="20"/>
         <source>beta</source>
-        <translation type="unfinished"></translation>
+        <translation>ベータ</translation>
     </message>
     <message>
         <location filename="../AutonaScoreboardWidget.py" line="710"/>
         <source>Autona - Bluesky</source>
-        <translation type="unfinished"></translation>
+        <translation>Autona - Bluesky</translation>
     </message>
     <message>
         <location filename="../AutonaScoreboardWidget.py" line="716"/>
         <source>The post has successfully been sent to account {0}</source>
-        <translation type="unfinished"></translation>
+        <translation>アカウント {0} に投稿を送信しました</translation>
     </message>
     <message>
         <location filename="../AutonaScoreboardWidget.py" line="934"/>
@@ -1666,12 +1678,12 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../AutonaScoreboardWidget.py" line="938"/>
         <source>Auto update (Stream [{0}])</source>
-        <translation type="unfinished"></translation>
+        <translation>自動更新（配信 [{0}]）</translation>
     </message>
     <message>
         <location filename="../AutonaScoreboardWidget.py" line="942"/>
         <source>Auto update (Station [{0}])</source>
-        <translation type="unfinished"></translation>
+        <translation>自動更新（ステーション [{0}]）</translation>
     </message>
     <message>
         <location filename="../AutonaScoreboardWidget.py" line="945"/>
@@ -1730,12 +1742,12 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../AutonaTournamentInfoWidget.py" line="98"/>
         <source>Open Image</source>
-        <translation type="unfinished"></translation>
+        <translation>画像を開く</translation>
     </message>
     <message>
         <location filename="../AutonaTournamentInfoWidget.py" line="100"/>
         <source>Image Files</source>
-        <translation type="unfinished"></translation>
+        <translation>画像ファイル</translation>
     </message>
     <message>
         <location filename="../AutonaTournamentInfoWidget.py" line="147"/>
@@ -1746,12 +1758,12 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../AutonaTournamentInfoWidget.py" line="202"/>
         <source>The tournament URL could not be loaded.</source>
-        <translation type="unfinished"></translation>
+        <translation>大会 URL を読み込めませんでした。</translation>
     </message>
     <message>
         <location filename="../AutonaTournamentInfoWidget.py" line="202"/>
         <source>Make sure that your tournament URL is correctly formatted and points to an existing event, and try again.</source>
-        <translation type="unfinished"></translation>
+        <translation>大会 URL の形式が正しく、存在するイベントを指しているか確認してから再試行してください。</translation>
     </message>
     <message>
         <location filename="../Helpers/AutonaCountryHelper.py" line="210"/>
@@ -1766,42 +1778,106 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../AutonaSelectStationWindow.py" line="82"/>
         <source>Type</source>
-        <translation type="unfinished"></translation>
+        <translation>種別</translation>
     </message>
     <message>
         <location filename="../AutonaSelectStationWindow.py" line="83"/>
         <source>Id</source>
-        <translation type="unfinished"></translation>
+        <translation>ID</translation>
     </message>
     <message>
         <location filename="../AutonaSelectStationWindow.py" line="85"/>
         <source>Identifier</source>
-        <translation type="unfinished"></translation>
+        <translation>識別子</translation>
     </message>
     <message>
         <location filename="../Helpers/AutonaBskyHelper.py" line="17"/>
         <source>Bluesky account not correctly set</source>
-        <translation type="unfinished"></translation>
+        <translation>Bluesky アカウントが正しく設定されていません</translation>
     </message>
     <message>
         <location filename="../AutonaTeamPlayerWidget.py" line="176"/>
         <source>STOCKS/LIVES</source>
-        <translation type="unfinished"></translation>
+        <translation>ストック／ライフ</translation>
     </message>
     <message>
         <location filename="../AutonaTeamPlayerWidget.py" line="178"/>
         <source>GAMES WON</source>
-        <translation type="unfinished"></translation>
+        <translation>勝利ゲーム数</translation>
     </message>
     <message>
         <location filename="../AutonaTeamBattleModeEnum.py" line="11"/>
         <source>Stock Pool (Smash)</source>
-        <translation type="unfinished"></translation>
+        <translation>ストックプール（スマブラ）</translation>
     </message>
     <message>
         <location filename="../AutonaTeamBattleModeEnum.py" line="18"/>
         <source>First To (First To X Team Individuals)</source>
-        <translation type="unfinished"></translation>
+        <translation>先取ポイント（チーム個別 X 先取）</translation>
+    </message>
+    <message>
+        <source>Finished</source>
+        <translation>完了</translation>
+    </message>
+    <message>
+        <source>Swap Teams</source>
+        <translation>チーム入れ替え</translation>
+    </message>
+    <message>
+        <source>Score Reset</source>
+        <translation>スコアリセット</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation>閉じる</translation>
+    </message>
+    <message>
+        <source>Autona - Result</source>
+        <translation>Autona - リザルト</translation>
+    </message>
+    <message>
+        <source>Delete</source>
+        <translation>削除</translation>
+    </message>
+    <message>
+        <source>Result Settings</source>
+        <translation>リザルト設定</translation>
+    </message>
+    <message>
+        <source>Player Name</source>
+        <translation>プレイヤー名</translation>
+    </message>
+    <message>
+        <source>Load top {0} from StartGG</source>
+        <translation>StartGG から TOP{0} を読み込む</translation>
+    </message>
+    <message>
+        <source>Load tournament info</source>
+        <translation>大会情報を読み込む</translation>
+    </message>
+    <message>
+        <source>Layout:</source>
+        <translation>レイアウト:</translation>
+    </message>
+    <message>
+        <source>Loading...</source>
+        <translation>読み込み中...</translation>
+    </message>
+    <message>
+        <source>Horizontal (1920x1080)</source>
+        <translation>横向き (1920x1080)</translation>
+    </message>
+    <message>
+        <source>Horizontal TOP16 (1920x1080)</source>
+        <translation>横向き TOP16 (1920x1080)</translation>
+    </message>
+    <message>
+        <source>Vertical (960x1080)</source>
+        <translation>縦向き (960x1080)</translation>
+    </message>
+    <message>
+        <source>The result image has been saved here:</source>
+        <translation>リザルト画像をここに保存しました:</translation>
     </message>
 </context>
 <context>
@@ -1809,17 +1885,17 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="150"/>
         <source>Chip Options</source>
-        <translation type="unfinished"></translation>
+        <translation>チップ設定</translation>
     </message>
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="247"/>
         <source>Bracket Options</source>
-        <translation type="unfinished"></translation>
+        <translation>トーナメント表設定</translation>
     </message>
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="261"/>
         <source>Versus Options</source>
-        <translation type="unfinished"></translation>
+        <translation>対戦画面設定</translation>
     </message>
 </context>
 <context>
@@ -1827,12 +1903,12 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="158"/>
         <source>Display Player Avatar</source>
-        <translation type="unfinished"></translation>
+        <translation>プレイヤーアバターを表示</translation>
     </message>
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="165"/>
         <source>Display Player Character</source>
-        <translation type="unfinished"></translation>
+        <translation>プレイヤーキャラクターを表示</translation>
     </message>
 </context>
 <context>
@@ -1840,7 +1916,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="172"/>
         <source>Display Player Country Flag</source>
-        <translation type="unfinished"></translation>
+        <translation>プレイヤーの国旗を表示</translation>
     </message>
 </context>
 <context>
@@ -1848,7 +1924,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="241"/>
         <source>Color for Bracket Lines</source>
-        <translation type="unfinished"></translation>
+        <translation>トーナメント線の色</translation>
     </message>
 </context>
 <context>
@@ -1856,7 +1932,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="186"/>
         <source>Primary Color for Player Score</source>
-        <translation type="unfinished"></translation>
+        <translation>プレイヤースコアのメインカラー</translation>
     </message>
 </context>
 <context>
@@ -1864,7 +1940,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="193"/>
         <source>Make Score Color a Linear Gradient</source>
-        <translation type="unfinished"></translation>
+        <translation>スコアの色を線形グラデーションにする</translation>
     </message>
 </context>
 <context>
@@ -1872,7 +1948,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="200"/>
         <source>Background Gradient Direction for Score</source>
-        <translation type="unfinished"></translation>
+        <translation>スコア背景のグラデーション方向</translation>
     </message>
 </context>
 <context>
@@ -1880,7 +1956,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="207"/>
         <source>Secondary Color for Player Score</source>
-        <translation type="unfinished"></translation>
+        <translation>プレイヤースコアのサブカラー</translation>
     </message>
 </context>
 <context>
@@ -1888,7 +1964,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="213"/>
         <source>Primary Color for Player Sponsor</source>
-        <translation type="unfinished"></translation>
+        <translation>プレイヤースポンサーのメインカラー</translation>
     </message>
 </context>
 <context>
@@ -1896,7 +1972,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="220"/>
         <source>Make Sponsor Color a Linear Gradient</source>
-        <translation type="unfinished"></translation>
+        <translation>スポンサーの色を線形グラデーションにする</translation>
     </message>
 </context>
 <context>
@@ -1904,7 +1980,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="227"/>
         <source>Background Gradient Direction for Sponsor</source>
-        <translation type="unfinished"></translation>
+        <translation>スポンサー背景のグラデーション方向</translation>
     </message>
 </context>
 <context>
@@ -1912,7 +1988,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="234"/>
         <source>Secondary Color for Player Sponsor</source>
-        <translation type="unfinished"></translation>
+        <translation>プレイヤースポンサーのサブカラー</translation>
     </message>
 </context>
 <context>
@@ -1920,7 +1996,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="179"/>
         <source>Display Player State Flag</source>
-        <translation type="unfinished"></translation>
+        <translation>プレイヤーの地域旗を表示</translation>
     </message>
 </context>
 <context>
@@ -1928,7 +2004,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="123"/>
         <source>Primary Color for Chips</source>
-        <translation type="unfinished"></translation>
+        <translation>チップのメインカラー</translation>
     </message>
 </context>
 <context>
@@ -1936,7 +2012,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="130"/>
         <source>Make Chips Background Color a Linear Gradient</source>
-        <translation type="unfinished"></translation>
+        <translation>チップ背景の色を線形グラデーションにする</translation>
     </message>
 </context>
 <context>
@@ -1944,7 +2020,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="144"/>
         <source>Background Gradient Direction for Chips</source>
-        <translation type="unfinished"></translation>
+        <translation>チップ背景のグラデーション方向</translation>
     </message>
 </context>
 <context>
@@ -1952,7 +2028,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="137"/>
         <source>Secondary Color for Chips</source>
-        <translation type="unfinished"></translation>
+        <translation>チップのサブカラー</translation>
     </message>
 </context>
 <context>
@@ -1960,7 +2036,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="102"/>
         <source>Display Player Country Flag</source>
-        <translation type="unfinished"></translation>
+        <translation>プレイヤーの国旗を表示</translation>
     </message>
 </context>
 <context>
@@ -1968,7 +2044,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="81"/>
         <source>Display Player Pronouns</source>
-        <translation type="unfinished"></translation>
+        <translation>プレイヤーの代名詞を表示</translation>
     </message>
 </context>
 <context>
@@ -1976,7 +2052,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="88"/>
         <source>Display Player Seed Number</source>
-        <translation type="unfinished"></translation>
+        <translation>プレイヤーのシード番号を表示</translation>
     </message>
 </context>
 <context>
@@ -1984,7 +2060,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="95"/>
         <source>Display Player Social Media</source>
-        <translation type="unfinished"></translation>
+        <translation>プレイヤーの SNS を表示</translation>
     </message>
 </context>
 <context>
@@ -1992,7 +2068,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="109"/>
         <source>Display Player State Flag</source>
-        <translation type="unfinished"></translation>
+        <translation>プレイヤーの地域旗を表示</translation>
     </message>
 </context>
 <context>
@@ -2000,7 +2076,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="116"/>
         <source>Text Color for Chips</source>
-        <translation type="unfinished"></translation>
+        <translation>チップの文字色</translation>
     </message>
 </context>
 <context>
@@ -2008,7 +2084,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="44"/>
         <source>Preset Name</source>
-        <translation type="unfinished"></translation>
+        <translation>プリセット名</translation>
     </message>
 </context>
 <context>
@@ -2016,7 +2092,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../LayoutOptions/AutonaLayoutOptionsWindow.py" line="255"/>
         <source>Color for Team 1 Sponsor Color</source>
-        <translation type="unfinished"></translation>
+        <translation>チーム 1 スポンサーの色</translation>
     </message>
 </context>
 <context>
@@ -2024,7 +2100,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../AutonaNotesWidget.py" line="17"/>
         <source>Title</source>
-        <translation type="unfinished"></translation>
+        <translation>タイトル</translation>
     </message>
 </context>
 <context>
@@ -2072,7 +2148,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="307"/>
         <source>Bluesky</source>
-        <translation type="unfinished"></translation>
+        <translation>Bluesky</translation>
     </message>
     <message>
         <location filename="../LayoutOptions/LayoutOptionsWidget.py" line="31"/>
@@ -2086,37 +2162,37 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="272"/>
         <source>Enable Bluesky Features</source>
-        <translation type="unfinished"></translation>
+        <translation>Bluesky 機能を有効化</translation>
     </message>
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="279"/>
         <source>Host server</source>
-        <translation type="unfinished"></translation>
+        <translation>ホストサーバー</translation>
     </message>
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="286"/>
         <source>Bluesky Handle</source>
-        <translation type="unfinished"></translation>
+        <translation>Bluesky ハンドル</translation>
     </message>
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="293"/>
         <source>Application Password</source>
-        <translation type="unfinished"></translation>
+        <translation>アプリパスワード</translation>
     </message>
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="299"/>
         <source>You can get an app password by going into your Bluesky settings -&gt; Privacy &amp; Security</source>
-        <translation type="unfinished"></translation>
+        <translation>Bluesky の設定 → プライバシーとセキュリティ からアプリパスワードを取得できます</translation>
     </message>
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="301"/>
         <source>Please note that said app password will be stored in plain text on your computer</source>
-        <translation type="unfinished"></translation>
+        <translation>このアプリパスワードは平文でコンピュータに保存される点にご注意ください</translation>
     </message>
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="303"/>
         <source>Do not use your regular account password!</source>
-        <translation type="unfinished"></translation>
+        <translation>通常のアカウントパスワードは使用しないでください！</translation>
     </message>
 </context>
 <context>
@@ -2124,7 +2200,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="58"/>
         <source>Enable score control from the stage striking app</source>
-        <translation type="unfinished"></translation>
+        <translation>ステージストライクアプリからのスコア操作を有効化</translation>
     </message>
 </context>
 <context>
@@ -2132,7 +2208,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="74"/>
         <source>Disable automatic set updating for the scoreboard</source>
-        <translation type="unfinished"></translation>
+        <translation>スコアボードのセット自動更新を無効化</translation>
     </message>
 </context>
 <context>
@@ -2140,7 +2216,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="122"/>
         <source>Disables attempting to download the controllers file (takes effect on next restart)</source>
-        <translation type="unfinished"></translation>
+        <translation>コントローラーファイルのダウンロードを無効化（再起動後に反映）</translation>
     </message>
 </context>
 <context>
@@ -2148,7 +2224,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="114"/>
         <source>Disables attempting to download the country and states file (takes effect on next restart)</source>
-        <translation type="unfinished"></translation>
+        <translation>国・地域ファイルのダウンロードを無効化（再起動後に反映）</translation>
     </message>
 </context>
 <context>
@@ -2156,7 +2232,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="90"/>
         <source>Disable Autona file exporting</source>
-        <translation type="unfinished"></translation>
+        <translation>Autona のファイル出力を無効化</translation>
     </message>
 </context>
 <context>
@@ -2164,7 +2240,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="131"/>
         <source>Disables the individual game tracker (takes effect on next restart)</source>
-        <translation type="unfinished"></translation>
+        <translation>個別ゲームトラッカーを無効化（再起動後に反映）</translation>
     </message>
 </context>
 <context>
@@ -2172,7 +2248,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="98"/>
         <source>Do not override existing values in the local player database (takes effect on next restart)</source>
-        <translation type="unfinished"></translation>
+        <translation>ローカル選手 DB の既存値を上書きしない（再起動後に反映）</translation>
     </message>
 </context>
 <context>
@@ -2180,7 +2256,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="82"/>
         <source>Disable automatic score updating for the scoreboard</source>
-        <translation type="unfinished"></translation>
+        <translation>スコアボードのスコア自動更新を無効化</translation>
     </message>
 </context>
 <context>
@@ -2188,7 +2264,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="66"/>
         <source>Disables the Thumbnail Widget from starting (takes effect on next restart)</source>
-        <translation type="unfinished"></translation>
+        <translation>サムネイルウィジェットの起動を無効化（再起動後に反映）</translation>
     </message>
 </context>
 <context>
@@ -2201,7 +2277,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="50"/>
         <source>Enable profanity filter</source>
-        <translation type="unfinished"></translation>
+        <translation>不適切語フィルタを有効化</translation>
     </message>
 </context>
 <context>
@@ -2209,7 +2285,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="106"/>
         <source>Hide the StartGG player tracking functionality from Autona (takes effect on next restart)</source>
-        <translation type="unfinished"></translation>
+        <translation>Autona 上で Start.gg の選手追跡機能を非表示にする（再起動後に反映）</translation>
     </message>
 </context>
 <context>
@@ -2252,12 +2328,12 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="175"/>
         <source>Refresh bracket phase groups</source>
-        <translation type="unfinished"></translation>
+        <translation>フェーズグループを再読み込み</translation>
     </message>
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="176"/>
         <source>Toggle bracket limit export</source>
-        <translation type="unfinished"></translation>
+        <translation>ブラケット出力制限を切替</translation>
     </message>
     <message>
         <location filename="../Settings/AutonaSettingsWindow.py" line="161"/>
@@ -2379,7 +2455,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../AutonaScoreboardWidget.py" line="673"/>
         <source>The video title and description have also been generated.</source>
-        <translation type="unfinished"></translation>
+        <translation>動画のタイトルと概要欄も生成しました。</translation>
     </message>
 </context>
 <context>
@@ -2387,7 +2463,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Helpers/AutonaAltTextHelper.py" line="10"/>
         <source>Descriptive text (also known as Alt text) describes images for blind and low-vision users, and helps give context around images to everyone. As such, we highly recommend adding it to your image uploads on your websites and social media posts.</source>
-        <translation type="unfinished"></translation>
+        <translation>記述テキスト（Alt テキスト）は、視覚に障害のあるユーザー向けに画像の内容を説明するもので、すべての人に画像の文脈を伝える助けになります。ウェブサイトや SNS に画像を投稿する際は付与することを強く推奨します。</translation>
     </message>
 </context>
 <context>
@@ -2395,7 +2471,7 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../Autona.py" line="235"/>
         <source>Error while backing up the layout folder:</source>
-        <translation type="unfinished"></translation>
+        <translation>レイアウトフォルダのバックアップ中にエラーが発生しました:</translation>
     </message>
     <message>
         <location filename="../Autona.py" line="246"/>

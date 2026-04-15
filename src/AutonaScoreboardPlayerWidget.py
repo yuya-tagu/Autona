@@ -74,23 +74,12 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             item.layout().setContentsMargins(0, 0, 0, 0)
             item.layout().setSpacing(UI.SPACE_SM)
 
-        # Theme-aware styles
-        readonly_style = UI.readonly_style()
-        disabled_style = UI.disabled_style()
-
         seed = self.findChild(QSpinBox, "seed")
-        seed.setReadOnly(True)
-        seed.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
-        seed.setStyleSheet(readonly_style)
         seed.setMaximumWidth(seed.sizeHint().width() // 2)
 
         pronoun = self.findChild(QLineEdit, "pronoun")
-        pronoun.setReadOnly(True)
-        pronoun.setStyleSheet(readonly_style)
 
         twitter = self.findChild(QLineEdit, "twitter")
-        twitter.setReadOnly(True)
-        twitter.setStyleSheet(readonly_style)
         twitter.setPlaceholderText("@")
 
         # Hide unused UI elements
@@ -101,15 +90,11 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         seedRow.addWidget(twitter)
 
         country = self.findChild(QComboBox, "country")
-        country.setEnabled(False)
-        country.setStyleSheet(disabled_style)
         state = self.findChild(QComboBox, "state")
-        state.setEnabled(False)
-        state.setStyleSheet(disabled_style)
 
-        # Keep track of themed widgets for refresh_theme_styles
-        self._themed_readonly = [seed, pronoun, twitter]
-        self._themed_disabled = [country, state]
+        # Theme-aware style tracking (fields are now editable, no readonly/disabled styles)
+        self._themed_readonly = []
+        self._themed_disabled = []
 
         # Custom textbox
         custom_textbox_layout = QHBoxLayout()

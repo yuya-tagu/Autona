@@ -35,12 +35,12 @@ class PreviewWidget(QWidget):
         self.repaint()
 
     def _updateMaxHeight(self):
-        # Clamp widget height to the pixmap aspect ratio so excess vertical
-        # space is returned to neighbouring widgets instead of padding the pixmap.
+        # Fix widget height to the pixmap aspect ratio so the wrapping scroll
+        # area scrolls when the viewport is shorter than the preview.
         if self._pixmap and self._pixmap.width() > 0 and self.width() > 0:
             desired = int(self.width() * self._pixmap.height() / self._pixmap.width())
-            if self.maximumHeight() != desired:
-                self.setMaximumHeight(desired)
+            if self.minimumHeight() != desired or self.maximumHeight() != desired:
+                self.setFixedHeight(desired)
 
     def paintEvent(self, e):
         qp = QPainter()

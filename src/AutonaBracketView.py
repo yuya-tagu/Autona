@@ -60,7 +60,7 @@ class BracketSetWidget(QWidget):
             score.valueChanged.connect(
                 lambda newVal, i=i: self.SetScore(i, newVal))
 
-        self.finished = QCheckBox("Finished")
+        self.finished = QCheckBox(QApplication.translate("app", "Finished"))
         self.layout().addWidget(self.finished)
         self.finished.toggled.connect(lambda newVal: self.SetFinished(newVal))
 
