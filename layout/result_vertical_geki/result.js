@@ -27,6 +27,8 @@ async function initResult(payload) {
     await document.fonts.ready;
     await new Promise((r) => setTimeout(r, 100));
 
+    fitLongText();
+
     document.title = "RENDER_READY";
   } catch (e) {
     console.error("initResult error:", e);
@@ -222,4 +224,54 @@ function escapeHtml(text) {
   const div = document.createElement("div");
   div.textContent = text;
   return div.innerHTML;
+}
+
+/**
+ * Compress text horizontally (scaleX) when it would overflow its container,
+ * so names/titles stay on a single line without truncation.
+ */
+function fitLongText() {
+  // Tournament name: centered — shrink toward center. Use the header's
+  // content area (header width minus its side paddings) as the max.
+  const header = document.querySelector(".header");
+  const tname = document.querySelector(".tournament-name .text");
+  if (header && tname) {
+    const s = getComputedStyle(header);
+    const padL = parseFloat(s.paddingLeft) || 0;
+    const padR = parseFloat(s.paddingRight) || 0;
+    const max = header.clientWidth - padL - padR - 8;
+    tname.style.transform = "";
+    tname.style.display = "inline-block";
+    tname.style.transformOrigin = "center";
+    const actual = tname.scrollWidth;
+    if (actual > max && actual > 0) {
+      const scale = Math.max(0.5, max / actual);
+      tname.style.transform = `scaleX(${scale})`;
+    }
+  }
+
+  // Player names: shrink from left so they stay aligned
+  document.querySelectorAll(".player-slot").forEach((slot) => {
+    const info = slot.querySelector(".player-info");
+    if (!info) return;
+    // clientWidth includes padding; subtract padding so content area is correct.
+    const style = getComputedStyle(info);
+    const padL = parseFloat(style.paddingLeft) || 0;
+    const padR = parseFloat(style.paddingRight) || 0;
+    const maxWidth = info.clientWidth - padL - padR - 4;
+    slot.querySelectorAll(".player-name, .player-sponsor").forEach((el) => {
+      fitToWidth(el, maxWidth, "left");
+    });
+  });
+}
+
+function fitToWidth(el, maxWidth, origin) {
+  if (!el || !maxWidth) return;
+  el.style.transform = "";
+  const actual = el.scrollWidth;
+  if (actual > maxWidth && actual > 0) {
+    const scale = Math.max(0.5, maxWidth / actual);
+    el.style.transformOrigin = origin;
+    el.style.transform = `scaleX(${scale})`;
+  }
 }
