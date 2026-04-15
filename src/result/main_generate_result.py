@@ -96,6 +96,7 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None,
             "name": name,
             "sponsor": p.get("sponsor", ""),
             "character": char_data,
+            "characters": p.get("characters", [char_data] if char_data else []),
         })
 
     if isPreview and not has_data:

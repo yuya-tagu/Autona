@@ -1802,6 +1802,30 @@ p, li { white-space: pre-wrap; }
         <source>The result image has been saved here:</source>
         <translation>The result image has been saved here:</translation>
     </message>
+    <message>
+        <source>Vertical Dark Gold 激 (960x1080)</source>
+        <translation>Vertical Dark Gold 激 (960x1080)</translation>
+    </message>
+    <message>
+        <source>Post to X</source>
+        <translation>Post to X</translation>
+    </message>
+    <message>
+        <source>Team 1 player name</source>
+        <translation>Team 1 player name</translation>
+    </message>
+    <message>
+        <source>Team 2 player name</source>
+        <translation>Team 2 player name</translation>
+    </message>
+    <message>
+        <source>Round name</source>
+        <translation>Round name</translation>
+    </message>
+    <message>
+        <source>Cannot post to X: the following fields are empty.</source>
+        <translation>Cannot post to X: the following fields are empty.</translation>
+    </message>
 </context>
 <context>
     <name>layout_options</name>

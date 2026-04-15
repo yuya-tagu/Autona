@@ -35,10 +35,10 @@ class ThumbnailRenderer(QObject):
     - Sync wrapper available for final thumbnail generation
     """
 
-    # Maps template id -> HTML file inside layout/thumbnail/
-    TEMPLATE_HTML_FILES = {
-        "type_a": "index.html",
-        "type_b": "type_b.html",
+    # Maps template id -> subdirectory under layout/ (each contains thumbnail.html)
+    TEMPLATE_SUBDIRS = {
+        "type_a": "thumbnail",
+        "type_b": "thumbnail_type_b",
     }
     DEFAULT_TEMPLATE_ID = "type_a"
 
@@ -88,16 +88,16 @@ class ThumbnailRenderer(QObject):
 
     def _resolve_template_id(self, template: dict) -> str:
         tid = (template or {}).get("template_id")
-        if tid not in self.TEMPLATE_HTML_FILES:
+        if tid not in self.TEMPLATE_SUBDIRS:
             return self.DEFAULT_TEMPLATE_ID
         return tid
 
     def _load_template(self, template_id: str):
         """Load (or reload) the HTML for the given template id."""
-        html_file = self.TEMPLATE_HTML_FILES.get(
-            template_id, self.TEMPLATE_HTML_FILES[self.DEFAULT_TEMPLATE_ID])
+        subdir = self.TEMPLATE_SUBDIRS.get(
+            template_id, self.TEMPLATE_SUBDIRS[self.DEFAULT_TEMPLATE_ID])
         html_path = os.path.abspath(
-            os.path.join(os.getcwd(), "layout", "thumbnail", html_file))
+            os.path.join(os.getcwd(), "layout", subdir, "thumbnail.html"))
         url = QUrl.fromLocalFile(html_path)
         logger.info(
             f"Loading thumbnail template '{template_id}': {url.toString()}")

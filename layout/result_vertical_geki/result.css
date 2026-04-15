@@ -1,0 +1,523 @@
+/* result_vertical_geki: Top 8 result layout (960x1080)
+ * Theme: dark grey + gold, Tamanegi Kaisho Geki font
+ * 1st place: full character art | 2nd+: character icon in top-right
+ */
+
+:root {
+  /* Refined gold palette — warm amber gold with bronze depth (richer than pure yellow) */
+  --gold-bright:  #e8c15a;
+  --gold-mid:     #b88a2c;
+  --gold-dark:    #5c3f0b;
+  --gold-glow:    rgba(184, 138, 44, 0.32);
+  --silver:       #c0c0c0;
+  --bronze:       #cd7f32;
+  --bg-base:      #0c0c0c;
+  --slot-bg:      #161616;
+  --slot-bg-alt:  #111111;
+  --border-gold:  rgba(201, 162, 39, 0.3);
+  --border-gold-strong: rgba(201, 162, 39, 0.6);
+  --text-primary: #ffffff;
+  --text-dim:     rgba(255, 255, 255, 0.65);
+  --font-main:    "Tamanegi Kaisho Geki", "LINE Seed JP", sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 960px;
+  height: 1080px;
+  overflow: hidden;
+  position: relative;
+  /* Industrial concrete: fractal noise + tonal gradient (layered with ::before for details) */
+  background-color: #5a5a5a;
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='480' height='480'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch' seed='7'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.55 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1000' height='1000'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.009' numOctaves='3' stitchTiles='stitch' seed='3'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.4 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  background-blend-mode: overlay, overlay;
+  font-family: var(--font-main);
+  letter-spacing: 0.02em;
+}
+
+/* Industrial details overlay: bolts, slits, cracks */
+body::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='960' height='1080' viewBox='0 0 960 1080'><defs><radialGradient id='bolt' cx='35%25' cy='35%25'><stop offset='0%25' stop-color='%23707070'/><stop offset='50%25' stop-color='%23303030'/><stop offset='100%25' stop-color='%23101010'/></radialGradient><radialGradient id='boltHi' cx='30%25' cy='30%25'><stop offset='0%25' stop-color='%23a0a0a0' stop-opacity='0.7'/><stop offset='100%25' stop-color='%23a0a0a0' stop-opacity='0'/></radialGradient></defs><g opacity='0.85'><rect x='40' y='40' width='880' height='1000' fill='none' stroke='%23151515' stroke-width='2' stroke-dasharray='12 6'/></g><g opacity='0.55'><rect x='0' y='368' width='960' height='3' fill='%231a1a1a'/><rect x='478' y='0' width='3' height='1080' fill='%231a1a1a'/><rect x='0' y='720' width='960' height='2' fill='%231a1a1a' opacity='0.7'/></g><g><circle cx='60' cy='60' r='8' fill='url(%23bolt)'/><circle cx='60' cy='60' r='4' fill='url(%23boltHi)'/><circle cx='900' cy='60' r='8' fill='url(%23bolt)'/><circle cx='900' cy='60' r='4' fill='url(%23boltHi)'/><circle cx='60' cy='1020' r='8' fill='url(%23bolt)'/><circle cx='60' cy='1020' r='4' fill='url(%23boltHi)'/><circle cx='900' cy='1020' r='8' fill='url(%23bolt)'/><circle cx='900' cy='1020' r='4' fill='url(%23boltHi)'/><circle cx='60' cy='370' r='7' fill='url(%23bolt)'/><circle cx='900' cy='370' r='7' fill='url(%23bolt)'/><circle cx='60' cy='720' r='7' fill='url(%23bolt)'/><circle cx='900' cy='720' r='7' fill='url(%23bolt)'/><circle cx='480' cy='60' r='7' fill='url(%23bolt)'/><circle cx='480' cy='1020' r='7' fill='url(%23bolt)'/></g><g fill='none' stroke='%23141414' stroke-width='1.4' opacity='0.75'><path d='M180 80 L195 140 L188 210 L205 270 L196 330'/><path d='M760 120 L745 180 L755 240 L742 300'/><path d='M120 540 L140 600 L128 660 L150 720 L138 780 L152 840'/><path d='M820 480 L805 540 L815 600 L800 660 L815 720'/><path d='M350 900 L365 940 L355 980 L372 1020'/><path d='M620 940 L635 980 L625 1020'/></g><g fill='none' stroke='%23242424' stroke-width='0.8' opacity='0.6'><path d='M240 200 L255 230 L245 255'/><path d='M660 300 L675 330 L670 360'/><path d='M440 500 L460 540 L450 580'/><path d='M280 680 L300 720 L288 760'/><path d='M720 820 L740 850 L730 880'/></g></svg>");
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  mix-blend-mode: multiply;
+  opacity: 0.6;
+}
+
+.layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* --- Background ---
+   body already renders the concrete texture; hide per-render image layer. */
+
+.background {
+  display: none;
+}
+
+/* --- Header --- */
+
+.header {
+  z-index: 10;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 168px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 150px 0 24px;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.4) 0%,
+    rgba(0, 0, 0, 0.2) 70%,
+    transparent 100%
+  );
+  border-bottom: 1px solid var(--border-gold);
+}
+
+.header-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.header-icon {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  right: 24px;
+  width: 150px;
+  height: 150px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  flex-shrink: 0;
+}
+
+.tournament-name {
+  font-size: 56px;
+  font-weight: 400;
+  /* Metallic gold gradient */
+  background: linear-gradient(180deg,
+    #f5d77c 0%,
+    #e8c15a 35%,
+    #b88a2c 60%,
+    #8a6618 85%,
+    #d9b04c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-align: center;
+  letter-spacing: 0.04em;
+}
+
+.tournament-name .text {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.event-info {
+  font-size: 22px;
+  font-weight: 400;
+  color: rgba(201, 162, 39, 0.85);
+  text-align: center;
+  letter-spacing: 0.08em;
+}
+
+.event-info .text {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+/* --- Players grid ---
+ * 12 cols, 3 rows — row heights 4:3:2 (total 968px)
+ *   Row 1: 1st place (full width)            ~430px
+ *   Row 2: 2nd–4th (4 cols each)             ~323px
+ *   Row 3: 5th–8th (3 cols each)             ~215px
+ */
+
+.players {
+  z-index: 1;
+  position: absolute;
+  top: 168px;
+  left: 0;
+  width: 100%;
+  height: 912px;
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  /* Row heights: top 3fr, middle 2fr, bottom 3fr (4 sub-rows of 0.75fr for text rows) */
+  grid-template-rows: 12fr 8fr 3fr 3fr 3fr 3fr;
+  gap: 0;
+}
+
+/* --- Individual player slot --- */
+
+.player-slot {
+  position: relative;
+  overflow: hidden;
+  /* Transparent so body's concrete texture shows through gaps in char art */
+  background: transparent;
+}
+
+/* Grid positions: 1st spans top 2 rows (left) / 2-3 right column / 4 portrait + 5-8 text rows */
+.player-slot.slot-1 { grid-column: 1 / 7;  grid-row: 1 / 3; }
+.player-slot.slot-2 { grid-column: 7 / 13; grid-row: 1; }
+.player-slot.slot-3 { grid-column: 7 / 13; grid-row: 2; }
+.player-slot.slot-4 { grid-column: 1 / 5;  grid-row: 3 / 7; }
+.player-slot.slot-5 { grid-column: 5 / 13; grid-row: 3; }
+.player-slot.slot-6 { grid-column: 5 / 13; grid-row: 4; }
+.player-slot.slot-7 { grid-column: 5 / 13; grid-row: 5; }
+.player-slot.slot-8 { grid-column: 5 / 13; grid-row: 6; }
+
+/* ================================================================
+   ALL SLOTS — full character art (main character fills the slot)
+   ================================================================ */
+
+.player-slot .char-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Slots 5-8: crop the left 30% and fade the left edge into transparency */
+.player-slot.slot-5 .char-image,
+.player-slot.slot-6 .char-image,
+.player-slot.slot-7 .char-image,
+.player-slot.slot-8 .char-image {
+  left: 30%;
+  width: 70%;
+  -webkit-mask-image: linear-gradient(to right,
+    transparent 0%,
+    rgba(0, 0, 0, 0.35) 12%,
+    #000 30%);
+  mask-image: linear-gradient(to right,
+    transparent 0%,
+    rgba(0, 0, 0, 0.35) 12%,
+    #000 30%);
+}
+
+/* Cinematic lighting — silver across all ranks */
+.player-slot .lighting {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  mix-blend-mode: soft-light;
+}
+
+.player-slot.rank-1 .lighting,
+.player-slot.rank-2 .lighting,
+.player-slot.rank-3 .lighting,
+.player-slot.rank-4 .lighting,
+.player-slot.rank-5 .lighting,
+.player-slot.rank-6 .lighting,
+.player-slot.rank-7 .lighting,
+.player-slot.rank-8 .lighting {
+  background: radial-gradient(ellipse at 50% 25%,
+    rgba(200, 210, 230, 0.4) 0%,
+    transparent 65%);
+  opacity: 0.6;
+}
+
+/* Vignette disabled (was causing darkened edges around each slot) */
+.player-slot .vignette {
+  display: none;
+}
+
+/* Overlay disabled (was darkening slot bottoms) */
+.player-slot .overlay {
+  display: none;
+}
+
+/* ================================================================
+   Secondary character icons — stacked in top-right corner
+   ================================================================ */
+
+.secondary-icons {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  /* z-index above accent-bar (6) so CenterImage's z-index:0 on parent doesn't bury it */
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-end;
+  /* isolation prevents mix-blend-mode from bleeding into icon rendering */
+  isolation: isolate;
+}
+
+.secondary-icon {
+  /* Square container for stock icons — no border */
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.secondary-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+
+/* Slot 1 (1st place): larger icons */
+.player-slot.slot-1 .secondary-icon {
+  width: 64px;
+  height: 64px;
+}
+
+/* Row-3 slots (5–8): smaller icons */
+.player-slot.slot-5 .secondary-icon,
+.player-slot.slot-6 .secondary-icon,
+.player-slot.slot-7 .secondary-icon,
+.player-slot.slot-8 .secondary-icon {
+  width: 34px;
+  height: 34px;
+}
+
+.player-slot.slot-5 .secondary-icons,
+.player-slot.slot-6 .secondary-icons,
+.player-slot.slot-7 .secondary-icons,
+.player-slot.slot-8 .secondary-icons {
+  top: 8px;
+  right: 8px;
+  gap: 2px;
+}
+
+/* ================================================================
+   Accent bar (top edge)
+   ================================================================ */
+
+.player-slot .accent-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  z-index: 6;
+}
+
+.player-slot.slot-1 .accent-bar { height: 6px; }
+.player-slot.slot-2 .accent-bar,
+.player-slot.slot-3 .accent-bar,
+.player-slot.slot-4 .accent-bar { height: 4px; }
+.player-slot.slot-5 .accent-bar,
+.player-slot.slot-6 .accent-bar,
+.player-slot.slot-7 .accent-bar,
+.player-slot.slot-8 .accent-bar { height: 3px; }
+
+.player-slot.rank-1 .accent-bar {
+  background: linear-gradient(to right, var(--gold-dark), var(--gold-bright), var(--gold-mid));
+}
+.player-slot.rank-2 .accent-bar {
+  background: linear-gradient(to right, #5d626c, #f2f4f8, #8a8f9a);
+}
+.player-slot.rank-3 .accent-bar {
+  background: linear-gradient(to right, #5a330a, #e5a874, #8a5318);
+}
+.player-slot.rank-4 .accent-bar,
+.player-slot.rank-5 .accent-bar,
+.player-slot.rank-6 .accent-bar,
+.player-slot.rank-7 .accent-bar,
+.player-slot.rank-8 .accent-bar {
+  background: linear-gradient(to right, rgba(220, 225, 235, 0.75), rgba(220, 225, 235, 0.35));
+}
+
+/* ================================================================
+   Rank badge
+   ================================================================ */
+
+.player-slot .rank-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 4;
+  line-height: 1;
+  font-family: var(--font-main);
+}
+
+/* Slot 1 badge — metallic gold */
+.player-slot.slot-1 .rank-badge {
+  font-size: 64px;
+  background: linear-gradient(180deg,
+    #f5d77c 0%,
+    #e8c15a 35%,
+    #b88a2c 60%,
+    #8a6618 85%,
+    #d9b04c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter:
+    drop-shadow(0 0 4px rgba(184, 138, 44, 0.18))
+    drop-shadow(0 0 0 transparent);
+}
+
+/* Row 2 badges */
+.player-slot.slot-2 .rank-badge,
+.player-slot.slot-3 .rank-badge,
+.player-slot.slot-4 .rank-badge {
+  font-size: 44px;
+}
+
+/* Row 3 badges */
+.player-slot.slot-5 .rank-badge,
+.player-slot.slot-6 .rank-badge,
+.player-slot.slot-7 .rank-badge,
+.player-slot.slot-8 .rank-badge {
+  font-size: 26px;
+}
+
+/* Badge colors by rank */
+.player-slot.rank-1 .rank-badge {
+  background: linear-gradient(180deg,
+    #f5d77c 0%,
+    #e8c15a 35%,
+    #b88a2c 60%,
+    #8a6618 85%,
+    #d9b04c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter:
+    drop-shadow(0 0 4px rgba(184, 138, 44, 0.18))
+    drop-shadow(0 0 0 transparent);
+}
+.player-slot.rank-2 .rank-badge {
+  /* Metallic silver gradient */
+  background: linear-gradient(180deg,
+    #f2f4f8 0%,
+    #d5d9e2 35%,
+    #8a8f9a 60%,
+    #5d626c 85%,
+    #c0c5ce 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter:
+    drop-shadow(0 0 4px rgba(192, 197, 206, 0.18))
+    drop-shadow(0 0 0 transparent);
+}
+.player-slot.rank-3 .rank-badge {
+  /* Metallic bronze/copper gradient */
+  background: linear-gradient(180deg,
+    #e5a874 0%,
+    #cd7f32 35%,
+    #8a5318 60%,
+    #5a330a 85%,
+    #bf8248 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter:
+    drop-shadow(0 0 4px rgba(205, 127, 50, 0.18))
+    drop-shadow(0 0 0 transparent);
+}
+.player-slot.rank-4 .rank-badge,
+.player-slot.rank-5 .rank-badge,
+.player-slot.rank-6 .rank-badge,
+.player-slot.rank-7 .rank-badge,
+.player-slot.rank-8 .rank-badge {
+  color: rgba(220, 225, 235, 0.9);
+}
+
+/* ================================================================
+   Player info (name + sponsor)
+   ================================================================ */
+
+.player-slot .player-info {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  z-index: 4;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.player-slot .player-sponsor {
+  color: rgba(201, 162, 39, 0.75);
+  white-space: nowrap;
+  overflow: visible;
+  font-family: var(--font-main);
+  letter-spacing: 0.04em;
+  transform-origin: left center;
+}
+
+.player-slot .player-name {
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: visible;
+  line-height: 1.1;
+  font-family: var(--font-main);
+  letter-spacing: 0.03em;
+  transform-origin: left center;
+}
+
+/* Slot 1 */
+.player-slot.slot-1 .player-name    { font-size: 52px; }
+.player-slot.slot-1 .player-sponsor { font-size: 24px; }
+
+/* Row 2 */
+.player-slot.slot-2 .player-name,
+.player-slot.slot-3 .player-name,
+.player-slot.slot-4 .player-name    { font-size: 32px; }
+.player-slot.slot-2 .player-sponsor,
+.player-slot.slot-3 .player-sponsor,
+.player-slot.slot-4 .player-sponsor { font-size: 15px; }
+
+/* Row 3 */
+.player-slot.slot-5 .player-name,
+.player-slot.slot-6 .player-name,
+.player-slot.slot-7 .player-name,
+.player-slot.slot-8 .player-name    { font-size: 22px; }
+.player-slot.slot-5 .player-sponsor,
+.player-slot.slot-6 .player-sponsor,
+.player-slot.slot-7 .player-sponsor,
+.player-slot.slot-8 .player-sponsor { font-size: 16px; }
+
+/* Slots 5-8: single-line info anchored to bottom-left */
+.player-slot.slot-5 .player-info,
+.player-slot.slot-6 .player-info,
+.player-slot.slot-7 .player-info,
+.player-slot.slot-8 .player-info {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 12px 6px;
+}
+
+/* Slot 1 name — solid white */
+.player-slot.rank-1 .player-name {
+  color: #ffffff;
+}
+

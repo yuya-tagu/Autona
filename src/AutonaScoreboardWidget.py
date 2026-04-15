@@ -926,13 +926,6 @@ class AutonaScoreboardWidget(QWidget):
     
     def PostToX(self):
         try:
-            # Generate thumbnail and copy to clipboard
-            thumbnailPath = self.GenerateThumbnail(quiet_mode=True, disable_msgbox=True)
-            if thumbnailPath:
-                image = QImage(thumbnailPath)
-                if not image.isNull():
-                    QApplication.clipboard().setImage(image)
-
             n = self.scoreboardNumber
 
             tournament_name = StateManager.Get("tournamentInfo.tournamentName", "") or ""
@@ -940,6 +933,42 @@ class AutonaScoreboardWidget(QWidget):
             top_n = StateManager.Get(f"score.{n}.top_n", "") or ""
             match = StateManager.Get(f"score.{n}.match", "") or ""
             stream_url = StateManager.Get(f"score.{n}.stream_url", "") or ""
+
+            # Validate required fields: player names (both teams) and round name.
+            def _team_has_name(team_n):
+                team_state = StateManager.Get(f"score.{n}.team.{team_n}.player") or {}
+                for k in team_state.keys():
+                    name = (StateManager.Get(f"score.{n}.team.{team_n}.player.{k}.name") or "").strip()
+                    if name:
+                        return True
+                return False
+
+            missing = []
+            if not _team_has_name(1):
+                missing.append(QApplication.translate("app", "Team 1 player name"))
+            if not _team_has_name(2):
+                missing.append(QApplication.translate("app", "Team 2 player name"))
+            if not (phase.strip() or top_n.strip() or match.strip()):
+                missing.append(QApplication.translate("app", "Round name"))
+
+            if missing:
+                msgBox = QMessageBox()
+                msgBox.setWindowIcon(QIcon(UI.icon_path('icon.png')))
+                msgBox.setWindowTitle(QApplication.translate("app", "Post to X"))
+                msgBox.setText(QApplication.translate(
+                    "app",
+                    "Cannot post to X: the following fields are empty."))
+                msgBox.setInformativeText("\n".join(f"- {m}" for m in missing))
+                msgBox.setIcon(QMessageBox.Warning)
+                msgBox.exec()
+                return
+
+            # Generate thumbnail and copy to clipboard
+            thumbnailPath = self.GenerateThumbnail(quiet_mode=True, disable_msgbox=True)
+            if thumbnailPath:
+                image = QImage(thumbnailPath)
+                if not image.isNull():
+                    QApplication.clipboard().setImage(image)
 
             def get_team_line(team_n):
                 players = []

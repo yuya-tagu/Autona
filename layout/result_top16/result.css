@@ -343,9 +343,8 @@ body {
   color: rgba(255, 255, 255, 0.7);
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
+  overflow: visible;
+  transform-origin: left center;
 }
 
 .player-slot .player-name {
@@ -354,10 +353,9 @@ body {
   color: #ffffff;
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
+  overflow: visible;
   line-height: 1.1;
+  transform-origin: left center;
 }
 
 /* Larger text for top row (same as Horizontal) */
@@ -431,4 +429,44 @@ body {
 .player-slot.rank-15 .accent-bar,
 .player-slot.rank-16 .accent-bar {
   background: var(--accent-color, #f0a500);
+}
+
+/* ================================================================
+   Secondary character icons (characters[1+])
+   ================================================================ */
+
+.secondary-icons {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-end;
+  isolation: isolate;
+}
+
+.secondary-icon {
+  width: 28px;
+  height: 28px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.secondary-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+
+.player-slot.slot-1 .secondary-icon,
+.player-slot.slot-2 .secondary-icon,
+.player-slot.slot-3 .secondary-icon {
+  width: 34px;
+  height: 34px;
 }

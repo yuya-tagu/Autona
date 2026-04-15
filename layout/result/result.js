@@ -24,6 +24,8 @@ async function initResult(payload) {
     await document.fonts.ready;
     await new Promise((r) => setTimeout(r, 100));
 
+    fitLongText();
+
     document.title = "RENDER_READY";
   } catch (e) {
     console.error("initResult error:", e);
@@ -131,6 +133,28 @@ async function placePlayers(data, config) {
     // Dark overlay for text
     slot.append(`<div class="overlay"></div>`);
 
+    // Secondary character icons (characters[1+]) — top-right stack
+    const characters = p.characters && p.characters.length > 0
+      ? p.characters
+      : (p.character ? [p.character] : []);
+    const secondaries = characters.slice(1);
+    if (secondaries.length > 0) {
+      const iconsDiv = $(`<div class="secondary-icons"></div>`);
+      secondaries.forEach((char) => {
+        if (!char || !char.assets) return;
+        const assetObj = char.assets["base_files/icon"]
+          || char.assets["full"]
+          || GetBiggestAsset(char);
+        if (!assetObj) return;
+        const assetPath = typeof assetObj === "string" ? assetObj : assetObj.asset;
+        if (!assetPath) return;
+        const resolvedPath = resolveAssetPath(assetPath);
+        if (!resolvedPath) return;
+        iconsDiv.append(`<div class="secondary-icon"><img src="${resolvedPath}" /></div>`);
+      });
+      slot.append(iconsDiv);
+    }
+
     // Rank badge
     slot.append(`<div class="rank-badge">${escapeHtml(rankLabel)}</div>`);
 
@@ -147,9 +171,10 @@ async function placePlayers(data, config) {
 
     container.append(slot);
 
-    // Place character image
-    if (p.character && p.character.assets) {
-      const asset = p.character.assets["full"] || GetBiggestAsset(p.character);
+    // Place character image (main = characters[0], fallback to p.character)
+    const mainChar = characters[0] || p.character;
+    if (mainChar && mainChar.assets) {
+      const asset = mainChar.assets["full"] || GetBiggestAsset(mainChar);
       if (asset) {
         loads.push(
           CenterImage(charDiv.get(0), asset, {
@@ -188,4 +213,50 @@ function escapeHtml(text) {
   const div = document.createElement("div");
   div.textContent = text;
   return div.innerHTML;
+}
+
+/**
+ * Compress text horizontally (scaleX) when it would overflow its container,
+ * so names/titles stay on a single line without truncation.
+ */
+function fitLongText() {
+  const header = document.querySelector(".header");
+  const tname = document.querySelector(".tournament-name .text");
+  if (header && tname) {
+    const s = getComputedStyle(header);
+    const padL = parseFloat(s.paddingLeft) || 0;
+    const padR = parseFloat(s.paddingRight) || 0;
+    const max = header.clientWidth - padL - padR - 8;
+    tname.style.transform = "";
+    tname.style.display = "inline-block";
+    tname.style.transformOrigin = "center";
+    const actual = tname.scrollWidth;
+    if (actual > max && actual > 0) {
+      const scale = Math.max(0.5, max / actual);
+      tname.style.transform = `scaleX(${scale})`;
+    }
+  }
+
+  document.querySelectorAll(".player-slot").forEach((slot) => {
+    const info = slot.querySelector(".player-info");
+    if (!info) return;
+    const style = getComputedStyle(info);
+    const padL = parseFloat(style.paddingLeft) || 0;
+    const padR = parseFloat(style.paddingRight) || 0;
+    const maxWidth = info.clientWidth - padL - padR - 4;
+    slot.querySelectorAll(".player-name, .player-sponsor").forEach((el) => {
+      fitToWidth(el, maxWidth, "left");
+    });
+  });
+}
+
+function fitToWidth(el, maxWidth, origin) {
+  if (!el || !maxWidth) return;
+  el.style.transform = "";
+  const actual = el.scrollWidth;
+  if (actual > maxWidth && actual > 0) {
+    const scale = Math.max(0.5, maxWidth / actual);
+    el.style.transformOrigin = origin;
+    el.style.transform = `scaleX(${scale})`;
+  }
 }
