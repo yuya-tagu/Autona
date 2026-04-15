@@ -27,7 +27,7 @@ class AutonaSelectSetWindow(QDialog):
             self.proxyModel.setFilterFixedString(text)
 
         searchBar = QLineEdit()
-        searchBar.setPlaceholderText("Filter...")
+        searchBar.setPlaceholderText(QApplication.translate("app", "Filter..."))
         layout.addWidget(searchBar)
         searchBar.textEdited.connect(filterList)
 

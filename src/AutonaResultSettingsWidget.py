@@ -50,8 +50,10 @@ class ResultPreviewWidget(QWidget):
         if self._pixmap and self._pixmap.width() > 0 and self.width() > 0:
             desired = int(
                 self.width() * self._pixmap.height() / self._pixmap.width())
-            if self.maximumHeight() != desired:
-                self.setMaximumHeight(desired)
+            # Fix height to aspect ratio so the wrapping scroll area scrolls
+            # when the viewport is shorter than the preview.
+            if self.minimumHeight() != desired or self.maximumHeight() != desired:
+                self.setFixedHeight(desired)
 
     def paintEvent(self, event):
         if not self._pixmap:
@@ -163,19 +165,21 @@ class AutonaResultSettingsWidget(QDockWidget):
         self._standingsSignals = AutonaResultSettingsWidgetSignals()
         self._standingsSignals.StandingsLoaded.connect(self._onStandingsLoaded)
 
-        groupLayout = self.settings.findChild(
-            QVBoxLayout, "verticalLayout_group")
+        # Place load / layout controls above the Top 8 Players group box.
+        leftLayout = self.settings.findChild(QVBoxLayout, "verticalLayout_left")
+        insertIdx = 0
 
         self.btLoadFromStartgg = QPushButton(
             QApplication.translate("app", "Load top 8 from StartGG"))
-        groupLayout.addWidget(self.btLoadFromStartgg)
+        leftLayout.insertWidget(insertIdx, self.btLoadFromStartgg)
+        insertIdx += 1
         self.btLoadFromStartgg.clicked.connect(self._loadFromStartgg)
-
 
         # --- Load tournament info ---
         self.btLoadTournamentInfo = QPushButton(
             QApplication.translate("app", "Load tournament info"))
-        groupLayout.addWidget(self.btLoadTournamentInfo)
+        leftLayout.insertWidget(insertIdx, self.btLoadTournamentInfo)
+        insertIdx += 1
         self.btLoadTournamentInfo.clicked.connect(self._loadTournamentInfo)
 
         # --- Layout selector ---
@@ -183,12 +187,15 @@ class AutonaResultSettingsWidget(QDockWidget):
         layoutRow.addWidget(QLabel(
             QApplication.translate("app", "Layout:")))
         self.layoutCombo = QComboBox()
-        self.layoutCombo.addItem("Horizontal (1920x1080)", "horizontal")
-        self.layoutCombo.addItem("Horizontal TOP16 (1920x1080)", "horizontal_16")
-        self.layoutCombo.addItem("Vertical (960x1080)", "vertical")
+        self.layoutCombo.addItem(
+            QApplication.translate("app", "Horizontal (1920x1080)"), "horizontal")
+        self.layoutCombo.addItem(
+            QApplication.translate("app", "Horizontal TOP16 (1920x1080)"), "horizontal_16")
+        self.layoutCombo.addItem(
+            QApplication.translate("app", "Vertical (960x1080)"), "vertical")
         self.layoutCombo.currentIndexChanged.connect(self._onLayoutChanged)
         layoutRow.addWidget(self.layoutCombo)
-        groupLayout.addLayout(layoutRow)
+        leftLayout.insertLayout(insertIdx, layoutRow)
 
         # --- Preview ---
         previewContainer = self.settings.findChild(QWidget, "resultPreview")
@@ -293,7 +300,7 @@ class AutonaResultSettingsWidget(QDockWidget):
         self.btLoadFromStartgg.setEnabled(True)
         n = self._maxPlayersForLayout()
         self.btLoadFromStartgg.setText(
-            QApplication.translate("app", f"Load top {n} from StartGG"))
+            QApplication.translate("app", "Load top {0} from StartGG").format(n))
 
         if not data:
             logger.warning("No standings data received")
@@ -474,7 +481,7 @@ class AutonaResultSettingsWidget(QDockWidget):
     def _onLayoutChanged(self):
         """Update Start.gg button label and show/hide player rows to match layout."""
         n = self._maxPlayersForLayout()
-        label = QApplication.translate("app", f"Load top {n} from StartGG")
+        label = QApplication.translate("app", "Load top {0} from StartGG").format(n)
         self.btLoadFromStartgg.setText(label)
 
         for i, (rank_label, name_edit, sponsor_edit, char_combo, color_combo) in enumerate(
@@ -546,11 +553,11 @@ class AutonaResultSettingsWidget(QDockWidget):
                 msgBox = QMessageBox()
                 msgBox.setWindowIcon(
                     QIcon(AutonaResolve("src/layout/icon.png")))
-                msgBox.setWindowTitle("Autona - Result")
+                msgBox.setWindowTitle(QApplication.translate("app", "Autona - Result"))
                 msgBox.setText(
                     QApplication.translate(
-                        "thumb_app",
-                        "The thumbnail has been generated here:")
+                        "app",
+                        "The result image has been saved here:")
                     + " " + path)
                 msgBox.setIcon(QMessageBox.NoIcon)
                 msgBox.exec()

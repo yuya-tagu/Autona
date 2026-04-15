@@ -42,40 +42,53 @@
     </widget>
    </item>
    <item>
-    <layout class="QVBoxLayout" name="verticalLayout_right">
-     <item>
-      <widget class="QWidget" name="resultPreview" native="true">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <layout class="QVBoxLayout" name="verticalLayout_preview"/>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="btUpdatePreview">
-       <property name="text">
-        <string>Update Preview</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="btCopyToClipboard">
-       <property name="text">
-        <string>Copy to Clipboard</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="btSaveResult">
-       <property name="text">
-        <string>Save Result Image</string>
-       </property>
-      </widget>
-     </item>
-    </layout>
+    <widget class="QScrollArea" name="scrollArea_right">
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="widgetResizable">
+      <bool>true</bool>
+     </property>
+     <widget class="QWidget" name="scrollAreaRightContents">
+      <layout class="QVBoxLayout" name="verticalLayout_right">
+       <item>
+        <widget class="QPushButton" name="btUpdatePreview">
+         <property name="text">
+          <string>Update Preview</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btCopyToClipboard">
+         <property name="text">
+          <string>Copy to Clipboard</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="btSaveResult">
+         <property name="text">
+          <string>Save Result Image</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QWidget" name="resultPreview" native="true">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_preview"/>
+        </widget>
+       </item>
+      </layout>
+     </widget>
+    </widget>
    </item>
   </layout>
  </widget>

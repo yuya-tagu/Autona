@@ -56,7 +56,7 @@ class AutonaLayoutOptionsWindow(QDialog):
         save_options.addWidget(self.saveBtn)
         self.deleteBtn = QPushButton()
         self.deleteBtn.setIcon(QIcon('assets/icons/cancel.svg'))
-        self.deleteBtn.setText("Delete")
+        self.deleteBtn.setText(QApplication.translate("app", "Delete"))
         save_options.addWidget(self.deleteBtn)
 
 
