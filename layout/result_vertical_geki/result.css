@@ -1,0 +1,494 @@
+/* result_vertical_geki: Top 8 result layout (960x1080)
+ * Theme: dark grey + gold, Tamanegi Kaisho Geki font
+ * 1st place: full character art | 2nd+: character icon in top-right
+ */
+
+:root {
+  --gold-bright:  #ffd700;
+  --gold-mid:     #c9a227;
+  --gold-dark:    #7a5910;
+  --gold-glow:    rgba(201, 162, 39, 0.35);
+  --silver:       #c0c0c0;
+  --bronze:       #cd7f32;
+  --bg-base:      #0c0c0c;
+  --slot-bg:      #161616;
+  --slot-bg-alt:  #111111;
+  --border-gold:  rgba(201, 162, 39, 0.3);
+  --border-gold-strong: rgba(201, 162, 39, 0.6);
+  --text-primary: #ffffff;
+  --text-dim:     rgba(255, 255, 255, 0.65);
+  --font-main:    "Tamanegi Kaisho Geki", "LINE Seed JP", sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  width: 960px;
+  height: 1080px;
+  overflow: hidden;
+  position: relative;
+  background: var(--bg-base);
+  font-family: var(--font-main);
+  letter-spacing: 0.02em;
+}
+
+.layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* --- Background --- */
+
+.background {
+  z-index: 0;
+}
+
+.background img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: brightness(0.12) blur(8px) saturate(0.5);
+  transform: scale(1.05);
+  transform-origin: center;
+}
+
+/* Dark overlay on top of background to ensure readability */
+.background::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+/* --- Header --- */
+
+.header {
+  z-index: 10;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 112px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 100px 0 24px;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.85) 0%,
+    rgba(0, 0, 0, 0.6) 70%,
+    transparent 100%
+  );
+  border-bottom: 1px solid var(--border-gold);
+}
+
+.header-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.header-icon {
+  position: absolute;
+  top: 14px;
+  right: 20px;
+  width: 76px;
+  height: 76px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  flex-shrink: 0;
+}
+
+.tournament-name {
+  font-size: 38px;
+  font-weight: 400;
+  color: var(--gold-bright);
+  text-shadow:
+    0 0 20px rgba(255, 215, 0, 0.5),
+    0 2px 8px rgba(0, 0, 0, 0.9);
+  text-align: center;
+  letter-spacing: 0.04em;
+}
+
+.tournament-name .text {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.event-info {
+  font-size: 16px;
+  font-weight: 400;
+  color: rgba(201, 162, 39, 0.8);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  text-align: center;
+  letter-spacing: 0.08em;
+}
+
+.event-info .text {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+/* --- Players grid ---
+ * 12 cols, 3 rows — row heights 4:3:2 (total 968px)
+ *   Row 1: 1st place (full width)            ~430px
+ *   Row 2: 2nd–4th (4 cols each)             ~323px
+ *   Row 3: 5th–8th (3 cols each)             ~215px
+ */
+
+.players {
+  z-index: 1;
+  position: absolute;
+  top: 112px;
+  left: 0;
+  width: 100%;
+  height: 968px;
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  grid-template-rows: 4fr 3fr 2fr;
+  gap: 2px;
+  background: var(--gold-dark);  /* gap color = dark gold line */
+}
+
+/* --- Individual player slot --- */
+
+.player-slot {
+  position: relative;
+  overflow: hidden;
+  background: var(--slot-bg);
+}
+
+/* Grid positions */
+.player-slot.slot-1 { grid-column: 1 / 13; grid-row: 1; }
+.player-slot.slot-2 { grid-column: 1 / 5;  grid-row: 2; }
+.player-slot.slot-3 { grid-column: 5 / 9;  grid-row: 2; }
+.player-slot.slot-4 { grid-column: 9 / 13; grid-row: 2; }
+.player-slot.slot-5 { grid-column: 1 / 4;  grid-row: 3; }
+.player-slot.slot-6 { grid-column: 4 / 7;  grid-row: 3; }
+.player-slot.slot-7 { grid-column: 7 / 10; grid-row: 3; }
+.player-slot.slot-8 { grid-column: 10 / 13; grid-row: 3; }
+
+/* ================================================================
+   ALL SLOTS — full character art (main character fills the slot)
+   ================================================================ */
+
+.player-slot .char-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* Cinematic lighting — gold for 1st, ambient for others */
+.player-slot .lighting {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  mix-blend-mode: soft-light;
+}
+
+.player-slot.rank-1 .lighting {
+  background: radial-gradient(ellipse at 50% 25%,
+    rgba(255, 215, 0, 0.55) 0%,
+    rgba(201, 162, 39, 0.2) 40%,
+    transparent 70%);
+  opacity: 0.75;
+}
+.player-slot.rank-2 .lighting {
+  background: radial-gradient(ellipse at 50% 25%,
+    rgba(200, 210, 230, 0.4) 0%,
+    transparent 65%);
+  opacity: 0.6;
+}
+.player-slot.rank-3 .lighting {
+  background: radial-gradient(ellipse at 50% 25%,
+    rgba(205, 127, 50, 0.4) 0%,
+    transparent 65%);
+  opacity: 0.6;
+}
+.player-slot.rank-4 .lighting,
+.player-slot.rank-5 .lighting,
+.player-slot.rank-6 .lighting,
+.player-slot.rank-7 .lighting,
+.player-slot.rank-8 .lighting {
+  background: radial-gradient(ellipse at 50% 30%,
+    rgba(100, 130, 180, 0.25) 0%,
+    transparent 60%);
+  opacity: 0.5;
+}
+
+/* Vignette */
+.player-slot .vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center,
+    transparent 35%,
+    rgba(0, 0, 0, 0.65) 100%);
+}
+
+/* Bottom gradient */
+.player-slot .overlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 55%;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.88) 0%,
+    rgba(0, 0, 0, 0.4) 50%,
+    transparent 100%
+  );
+  z-index: 2;
+}
+
+/* ================================================================
+   Secondary character icons — stacked in top-right corner
+   ================================================================ */
+
+.secondary-icons {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  /* z-index above accent-bar (6) so CenterImage's z-index:0 on parent doesn't bury it */
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-end;
+  /* isolation prevents mix-blend-mode from bleeding into icon rendering */
+  isolation: isolate;
+}
+
+.secondary-icon {
+  /* Square container for stock icons — no border */
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: transparent;
+  flex-shrink: 0;
+}
+
+.secondary-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+}
+
+/* Slot 1 (1st place): larger icons */
+.player-slot.slot-1 .secondary-icon {
+  width: 64px;
+  height: 64px;
+}
+
+/* Row-3 slots (5–8): smaller icons */
+.player-slot.slot-5 .secondary-icon,
+.player-slot.slot-6 .secondary-icon,
+.player-slot.slot-7 .secondary-icon,
+.player-slot.slot-8 .secondary-icon {
+  width: 34px;
+  height: 34px;
+}
+
+.player-slot.slot-5 .secondary-icons,
+.player-slot.slot-6 .secondary-icons,
+.player-slot.slot-7 .secondary-icons,
+.player-slot.slot-8 .secondary-icons {
+  top: 8px;
+  right: 8px;
+  gap: 2px;
+}
+
+/* ================================================================
+   Accent bar (top edge)
+   ================================================================ */
+
+.player-slot .accent-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  z-index: 6;
+}
+
+.player-slot.slot-1 .accent-bar { height: 6px; }
+.player-slot.slot-2 .accent-bar,
+.player-slot.slot-3 .accent-bar,
+.player-slot.slot-4 .accent-bar { height: 4px; }
+.player-slot.slot-5 .accent-bar,
+.player-slot.slot-6 .accent-bar,
+.player-slot.slot-7 .accent-bar,
+.player-slot.slot-8 .accent-bar { height: 3px; }
+
+.player-slot.rank-1 .accent-bar {
+  background: linear-gradient(to right, var(--gold-dark), var(--gold-bright), var(--gold-mid));
+}
+.player-slot.rank-2 .accent-bar { background: var(--silver); }
+.player-slot.rank-3 .accent-bar { background: var(--bronze); }
+.player-slot.rank-4 .accent-bar,
+.player-slot.rank-5 .accent-bar,
+.player-slot.rank-6 .accent-bar,
+.player-slot.rank-7 .accent-bar,
+.player-slot.rank-8 .accent-bar {
+  background: linear-gradient(to right, var(--gold-dark), rgba(201, 162, 39, 0.4));
+}
+
+/* ================================================================
+   Rank badge
+   ================================================================ */
+
+.player-slot .rank-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 4;
+  line-height: 1;
+  font-family: var(--font-main);
+}
+
+/* Slot 1 badge */
+.player-slot.slot-1 .rank-badge {
+  font-size: 64px;
+  color: var(--gold-bright);
+  text-shadow:
+    0 0 24px rgba(255, 215, 0, 0.7),
+    0 0 8px rgba(255, 215, 0, 0.4),
+    2px 2px 0 rgba(0,0,0,0.8);
+}
+
+/* Row 2 badges */
+.player-slot.slot-2 .rank-badge,
+.player-slot.slot-3 .rank-badge,
+.player-slot.slot-4 .rank-badge {
+  font-size: 44px;
+}
+
+/* Row 3 badges */
+.player-slot.slot-5 .rank-badge,
+.player-slot.slot-6 .rank-badge,
+.player-slot.slot-7 .rank-badge,
+.player-slot.slot-8 .rank-badge {
+  font-size: 34px;
+}
+
+/* Badge colors by rank */
+.player-slot.rank-1 .rank-badge {
+  color: var(--gold-bright);
+  text-shadow:
+    0 0 24px rgba(255, 215, 0, 0.7),
+    0 0 8px rgba(255, 215, 0, 0.4),
+    2px 2px 0 rgba(0,0,0,0.8);
+}
+.player-slot.rank-2 .rank-badge {
+  color: var(--silver);
+  text-shadow: 0 2px 6px rgba(0,0,0,0.8);
+}
+.player-slot.rank-3 .rank-badge {
+  color: var(--bronze);
+  text-shadow: 0 2px 6px rgba(0,0,0,0.8);
+}
+.player-slot.rank-4 .rank-badge,
+.player-slot.rank-5 .rank-badge,
+.player-slot.rank-6 .rank-badge,
+.player-slot.rank-7 .rank-badge,
+.player-slot.rank-8 .rank-badge {
+  color: rgba(201, 162, 39, 0.85);
+  text-shadow: 0 2px 6px rgba(0,0,0,0.8);
+}
+
+/* ================================================================
+   Player info (name + sponsor)
+   ================================================================ */
+
+.player-slot .player-info {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  z-index: 4;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.player-slot .player-sponsor {
+  color: rgba(201, 162, 39, 0.75);
+  text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  font-family: var(--font-main);
+  letter-spacing: 0.04em;
+}
+
+.player-slot .player-name {
+  color: var(--text-primary);
+  text-shadow: 0 2px 8px rgba(0,0,0,0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  line-height: 1.1;
+  font-family: var(--font-main);
+  letter-spacing: 0.03em;
+}
+
+/* Slot 1 */
+.player-slot.slot-1 .player-name    { font-size: 52px; }
+.player-slot.slot-1 .player-sponsor { font-size: 24px; }
+
+/* Row 2 */
+.player-slot.slot-2 .player-name,
+.player-slot.slot-3 .player-name,
+.player-slot.slot-4 .player-name    { font-size: 32px; }
+.player-slot.slot-2 .player-sponsor,
+.player-slot.slot-3 .player-sponsor,
+.player-slot.slot-4 .player-sponsor { font-size: 15px; }
+
+/* Row 3 */
+.player-slot.slot-5 .player-name,
+.player-slot.slot-6 .player-name,
+.player-slot.slot-7 .player-name,
+.player-slot.slot-8 .player-name    { font-size: 24px; }
+.player-slot.slot-5 .player-sponsor,
+.player-slot.slot-6 .player-sponsor,
+.player-slot.slot-7 .player-sponsor,
+.player-slot.slot-8 .player-sponsor { font-size: 12px; }
+
+/* Slot 1 name gets gold tint */
+.player-slot.rank-1 .player-name {
+  color: #fff9e6;
+  text-shadow:
+    0 0 16px rgba(255, 215, 0, 0.3),
+    0 2px 8px rgba(0,0,0,0.9);
+}
+
+/* Bottom separator line above player info for card slots */
+.player-slot:not(.slot-1) .player-info::before {
+  content: "";
+  display: block;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(to right, var(--border-gold-strong), transparent);
+  margin-bottom: 6px;
+}

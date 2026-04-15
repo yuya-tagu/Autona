@@ -89,19 +89,27 @@ class AutonaResultSettingsWidget(QDockWidget):
             AutonaResolve("src/layout/AutonaResultSettings.ui"))
         self.widget_container.layout().addWidget(self.settings)
 
-        # --- Player input rows (2 rows per player) ---
-        # Row 1: rank, name, sponsor
-        # Row 2: (empty), character, color
-        # Each entry: (rank_label, name_edit, sponsor_edit, char_combo, color_combo)
+        # --- Player input rows (4 rows per player) ---
+        # Row 1: rank(col 0, spans 4), name(col 1), sponsor(col 2)
+        # Row 2: main char combo, main color combo
+        # Row 3: secondary char combo, secondary color combo
+        # Row 4: tertiary char combo, tertiary color combo
+        # playerInputs entry:
+        #   (rank_label, name_edit, sponsor_edit,
+        #    char1_combo, color1_combo,
+        #    char2_combo, color2_combo,
+        #    char3_combo, color3_combo)
         self.playerInputs = []
         grid = self.settings.findChild(QGridLayout, "gridPlayers")
         grid.setVerticalSpacing(2)
 
         for i in range(16):
             idx = i
-            base = i * 2  # 2 grid rows per player
-            row1 = base      # name row
-            row2 = base + 1  # character row
+            base = i * 4  # 4 grid rows per player
+            row1 = base
+            row2 = base + 1
+            row3 = base + 2
+            row4 = base + 3
 
             rank_label = QLabel(f"{i + 1}")
             rank_label.setFixedWidth(30)
@@ -117,49 +125,43 @@ class AutonaResultSettingsWidget(QDockWidget):
                 QApplication.translate("app", "Sponsor"))
             sponsor_edit.setFixedWidth(80)
 
-            # Character selection combo
-            char_combo = QComboBox()
-            char_combo.setEditable(True)
-            char_combo.setMinimumWidth(100)
-            char_combo.completer().setFilterMode(
-                Qt.MatchFlag.MatchContains)
-            char_combo.completer().setCompletionMode(
-                QCompleter.CompletionMode.PopupCompletion)
-            proxy = NoIconProxyModel(char_combo)
-            proxy.setSourceModel(
-                AutonaGameAssetManager.instance.characterModel)
-            char_combo.setModel(proxy)
-            char_combo.setIconSize(QSize(0, 0))
-            char_combo.setFixedHeight(28)
-            char_combo.setCurrentIndex(-1)
+            char1_combo  = self._makeCharCombo()
+            color1_combo = self._makeColorCombo()
+            char2_combo  = self._makeCharCombo(sub=True)
+            color2_combo = self._makeColorCombo()
+            char3_combo  = self._makeCharCombo(sub=True)
+            color3_combo = self._makeColorCombo()
 
-            # Color/skin selection combo
-            color_combo = QComboBox()
-            color_combo.setIconSize(QSize(16, 16))
-            color_combo.setFixedHeight(28)
-            color_combo.setMinimumWidth(48)
-            color_combo.setMaximumWidth(80)
-            view = QListView()
-            view.setIconSize(QSize(24, 24))
-            color_combo.setView(view)
-
-            # Row 1: rank spans 2 rows, name + sponsor
-            grid.addWidget(rank_label, row1, 0, 2, 1)
-            grid.addWidget(name_edit, row1, 1)
+            # Row 1: rank spans all 4 rows, name + sponsor
+            grid.addWidget(rank_label,  row1, 0, 4, 1)
+            grid.addWidget(name_edit,   row1, 1)
             grid.addWidget(sponsor_edit, row1, 2)
-            # Row 2: character + color
-            grid.addWidget(char_combo, row2, 1)
-            grid.addWidget(color_combo, row2, 2)
+            # Row 2–4: char + color per slot
+            grid.addWidget(char1_combo,  row2, 1)
+            grid.addWidget(color1_combo, row2, 2)
+            grid.addWidget(char2_combo,  row3, 1)
+            grid.addWidget(color2_combo, row3, 2)
+            grid.addWidget(char3_combo,  row4, 1)
+            grid.addWidget(color3_combo, row4, 2)
 
-            # Update state on edit
+            # Connect signals
             name_edit.editingFinished.connect(self._syncPlayersToState)
             sponsor_edit.editingFinished.connect(self._syncPlayersToState)
-            char_combo.currentIndexChanged.connect(
-                lambda _, i=idx: self._onCharacterChanged(i))
-            color_combo.currentIndexChanged.connect(self._syncPlayersToState)
+            char1_combo.currentIndexChanged.connect(
+                lambda _, i=idx: self._onAnyCharChanged(i, 0))
+            char2_combo.currentIndexChanged.connect(
+                lambda _, i=idx: self._onAnyCharChanged(i, 1))
+            char3_combo.currentIndexChanged.connect(
+                lambda _, i=idx: self._onAnyCharChanged(i, 2))
+            color1_combo.currentIndexChanged.connect(self._syncPlayersToState)
+            color2_combo.currentIndexChanged.connect(self._syncPlayersToState)
+            color3_combo.currentIndexChanged.connect(self._syncPlayersToState)
 
             self.playerInputs.append(
-                (rank_label, name_edit, sponsor_edit, char_combo, color_combo))
+                (rank_label, name_edit, sponsor_edit,
+                 char1_combo, color1_combo,
+                 char2_combo, color2_combo,
+                 char3_combo, color3_combo))
 
         # --- Load from Start.gg ---
         self._standingsSignals = AutonaResultSettingsWidgetSignals()
@@ -193,6 +195,8 @@ class AutonaResultSettingsWidget(QDockWidget):
             QApplication.translate("app", "Horizontal TOP16 (1920x1080)"), "horizontal_16")
         self.layoutCombo.addItem(
             QApplication.translate("app", "Vertical (960x1080)"), "vertical")
+        self.layoutCombo.addItem(
+            QApplication.translate("app", "Vertical Dark Gold 激 (960x1080)"), "vertical_geki")
         self.layoutCombo.currentIndexChanged.connect(self._onLayoutChanged)
         layoutRow.addWidget(self.layoutCombo)
         leftLayout.insertLayout(insertIdx, layoutRow)
@@ -234,52 +238,97 @@ class AutonaResultSettingsWidget(QDockWidget):
         # Apply initial row visibility and generate preview (slots 9-16 hidden by default)
         self._onLayoutChanged()
 
+    def _makeCharCombo(self, sub=False):
+        """Create a character selection combo box."""
+        combo = QComboBox()
+        combo.setEditable(True)
+        combo.setMinimumWidth(100)
+        combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        combo.completer().setCompletionMode(
+            QCompleter.CompletionMode.PopupCompletion)
+        proxy = NoIconProxyModel(combo)
+        proxy.setSourceModel(AutonaGameAssetManager.instance.characterModel)
+        combo.setModel(proxy)
+        combo.setIconSize(QSize(0, 0))
+        combo.setFixedHeight(22 if sub else 28)
+        combo.setCurrentIndex(-1)
+        if sub:
+            combo.lineEdit().setPlaceholderText(
+                QApplication.translate("app", "Sub character"))
+        return combo
+
+    def _makeColorCombo(self):
+        """Create a color/skin selection combo box."""
+        combo = QComboBox()
+        combo.setIconSize(QSize(16, 16))
+        combo.setFixedHeight(22)
+        combo.setMinimumWidth(48)
+        combo.setMaximumWidth(80)
+        view = QListView()
+        view.setIconSize(QSize(24, 24))
+        combo.setView(view)
+        return combo
+
     def _onGameChanged(self):
         """Re-bind character models when game changes (model object is replaced)."""
-        for _, _, _, char_combo, color_combo in self.playerInputs:
-            char_combo.blockSignals(True)
-            proxy = NoIconProxyModel(char_combo)
-            proxy.setSourceModel(
-                AutonaGameAssetManager.instance.characterModel)
-            char_combo.setModel(proxy)
-            char_combo.setIconSize(QSize(0, 0))
-            char_combo.setCurrentIndex(-1)
-            char_combo.blockSignals(False)
-            color_combo.setModel(QStandardItemModel())
+        for entry in self.playerInputs:
+            # char combos are at indices 3, 5, 7
+            for char_idx in (3, 5, 7):
+                combo = entry[char_idx]
+                combo.blockSignals(True)
+                proxy = NoIconProxyModel(combo)
+                proxy.setSourceModel(
+                    AutonaGameAssetManager.instance.characterModel)
+                combo.setModel(proxy)
+                combo.setIconSize(QSize(0, 0))
+                combo.setCurrentIndex(-1)
+                combo.blockSignals(False)
+            # color combos are at indices 4, 6, 8
+            for color_idx in (4, 6, 8):
+                entry[color_idx].setModel(QStandardItemModel())
         self.GeneratePreview()
+
+    def _resolveCharData(self, char_combo, color_combo, player_name=""):
+        """Resolve character data from combo widgets, with scoreboard fallback."""
+        skin_data = color_combo.currentData(Qt.ItemDataRole.UserRole)
+        if skin_data and skin_data.get("assets"):
+            return skin_data
+        char_combo_data = char_combo.currentData(Qt.ItemDataRole.UserRole)
+        if char_combo_data:
+            return char_combo_data
+        if player_name:
+            return self._findCharacterForPlayer(player_name)
+        return {}
 
     def _syncPlayersToState(self):
         """Write player inputs to StateManager so prepare_data can read them."""
         players = {}
-        for i, (rank_label, name_edit, sponsor_edit, char_combo, color_combo) in enumerate(
-                self.playerInputs):
-            # Read rank from label (may be set by Start.gg placement)
+        for i, entry in enumerate(self.playerInputs):
+            rank_label, name_edit, sponsor_edit = entry[0], entry[1], entry[2]
+            char1_combo, color1_combo = entry[3], entry[4]
+            char2_combo, color2_combo = entry[5], entry[6]
+            char3_combo, color3_combo = entry[7], entry[8]
+
             try:
                 rank = int(rank_label.text())
             except ValueError:
                 rank = i + 1
-            name = name_edit.text().strip()
+            name    = name_edit.text().strip()
             sponsor = sponsor_edit.text().strip()
 
-            # Use color combo's asset data if available
-            char_data = {}
-            skin_data = color_combo.currentData(Qt.ItemDataRole.UserRole)
-            if skin_data and skin_data.get("assets"):
-                char_data = skin_data
-            else:
-                # Fall back to character combo data
-                char_combo_data = char_combo.currentData(
-                    Qt.ItemDataRole.UserRole)
-                if char_combo_data:
-                    char_data = char_combo_data
-                else:
-                    char_data = self._findCharacterForPlayer(name)
+            char1 = self._resolveCharData(char1_combo, color1_combo, name)
+            char2 = self._resolveCharData(char2_combo, color2_combo)
+            char3 = self._resolveCharData(char3_combo, color3_combo)
+
+            # characters list: non-empty entries only, in order
+            characters = [c for c in [char1, char2, char3] if c]
 
             players[str(i + 1)] = {
                 "rank": rank,
                 "name": name,
                 "sponsor": sponsor,
-                "character": char_data,
+                "character": char1,
+                "characters": characters,
             }
 
         StateManager.Set("result_players", players)
@@ -306,8 +355,12 @@ class AutonaResultSettingsWidget(QDockWidget):
             logger.warning("No standings data received")
             return
 
-        for i, (rank_label, name_edit, sponsor_edit, char_combo, color_combo) in enumerate(
-                self.playerInputs):
+        for i, entry in enumerate(self.playerInputs):
+            rank_label, name_edit, sponsor_edit = entry[0], entry[1], entry[2]
+            char1_combo, color1_combo = entry[3], entry[4]
+            char2_combo, color2_combo = entry[5], entry[6]
+            char3_combo, color3_combo = entry[7], entry[8]
+
             if i < len(data):
                 team = data[i]
                 placement = team.get("placement", i + 1)
@@ -318,84 +371,80 @@ class AutonaResultSettingsWidget(QDockWidget):
                     player = players[0]
                     name_edit.setText(player.get("gamerTag", ""))
                     sponsor_edit.setText(player.get("prefix", "") or "")
-
-                    # Resolve character and populate combos
                     self._setCharacterFromMains(i, player)
                 else:
                     name_edit.setText("")
                     sponsor_edit.setText("")
-                    char_combo.setCurrentIndex(-1)
-                    color_combo.setModel(QStandardItemModel())
+                    for cc, cv in [(char1_combo, color1_combo),
+                                   (char2_combo, color2_combo),
+                                   (char3_combo, color3_combo)]:
+                        cc.setCurrentIndex(-1)
+                        cv.setModel(QStandardItemModel())
             else:
                 rank_label.setText(str(i + 1))
                 name_edit.setText("")
                 sponsor_edit.setText("")
-                char_combo.setCurrentIndex(-1)
-                color_combo.setModel(QStandardItemModel())
+                for cc, cv in [(char1_combo, color1_combo),
+                               (char2_combo, color2_combo),
+                               (char3_combo, color3_combo)]:
+                    cc.setCurrentIndex(-1)
+                    cv.setModel(QStandardItemModel())
 
         self._syncPlayersToState()
         self.GeneratePreview(True)
 
     def _setCharacterFromMains(self, index, playerData):
-        """Set character and color combos from Start.gg mains data."""
-        char_combo = self.playerInputs[index][3]
-        color_combo = self.playerInputs[index][4]
+        """Set char/color combos (1st–3rd) from Start.gg mains data."""
         mains = playerData.get("mains", {})
-
         game = AutonaGameAssetManager.instance.selectedGame
+        # Combo pairs: (char_combo_idx, color_combo_idx) in playerInputs tuple
+        slot_pairs = [(3, 4), (5, 6), (7, 8)]
+
         if not game or not mains:
-            char_combo.setCurrentIndex(-1)
-            color_combo.setModel(QStandardItemModel())
+            for ci, vi in slot_pairs:
+                self.playerInputs[index][ci].setCurrentIndex(-1)
+                self.playerInputs[index][vi].setModel(QStandardItemModel())
             return
 
         codename = game.get("codename", "")
         game_mains = mains.get(codename, [])
-        if not game_mains or len(game_mains) == 0:
-            char_combo.setCurrentIndex(-1)
-            color_combo.setModel(QStandardItemModel())
-            return
 
-        # Take the most-used character (first in list)
-        char_codename = game_mains[0][0] if game_mains[0] else None
-        if not char_codename:
-            char_combo.setCurrentIndex(-1)
-            color_combo.setModel(QStandardItemModel())
-            return
+        for slot, (ci, vi) in enumerate(slot_pairs):
+            char_combo  = self.playerInputs[index][ci]
+            color_combo = self.playerInputs[index][vi]
+            if slot < len(game_mains) and game_mains[slot]:
+                char_codename = game_mains[slot][0]
+                self._selectCharInCombo(char_combo, char_codename)
+                self._loadSkinModelInto(color_combo, char_codename)
+            else:
+                char_combo.setCurrentIndex(-1)
+                color_combo.setModel(QStandardItemModel())
 
-        # Set character combo selection
-        self._selectCharacterInCombo(index, char_codename)
-        self._loadSkinModel(index, char_codename)
-
-    def _loadSkinModel(self, index, char_codename):
-        """Load skin model into the color combo for a given character."""
-        color_combo = self.playerInputs[index][4]
+    def _loadSkinModelInto(self, color_combo, char_codename):
+        """Load skin model into a color combo for the given character codename."""
         color_combo.blockSignals(True)
-
-        # Find the character's en_name to look up the skin model
         char_entry = AutonaGameAssetManager.instance.characters.get(char_codename)
         if not char_entry:
-            # Try matching by codename
-            for key, val in AutonaGameAssetManager.instance.characters.items():
+            for val in AutonaGameAssetManager.instance.characters.values():
                 if val.get("codename") == char_codename:
                     char_entry = val
                     break
-
         en_name = char_entry.get("en_name", char_codename) if char_entry else char_codename
         skin_model = AutonaGameAssetManager.instance.skinModels.get(en_name)
-
         if skin_model:
             color_combo.setModel(skin_model)
             color_combo.setCurrentIndex(0)
         else:
             color_combo.setModel(QStandardItemModel())
-
         color_combo.blockSignals(False)
 
-    def _onCharacterChanged(self, index):
-        """Called when character combo selection changes for a player row."""
-        char_combo = self.playerInputs[index][3]
-        color_combo = self.playerInputs[index][4]
-
+    def _onAnyCharChanged(self, player_index, slot):
+        """Called when any character combo (0=main, 1=2nd, 2=3rd) changes."""
+        # slot maps to tuple indices: 0→(3,4), 1→(5,6), 2→(7,8)
+        ci = 3 + slot * 2
+        vi = 4 + slot * 2
+        char_combo  = self.playerInputs[player_index][ci]
+        color_combo = self.playerInputs[player_index][vi]
         char_data = char_combo.currentData(Qt.ItemDataRole.UserRole)
         if char_data and char_data.get("en_name"):
             skin_model = AutonaGameAssetManager.instance.skinModels.get(
@@ -407,30 +456,24 @@ class AutonaResultSettingsWidget(QDockWidget):
                 color_combo.setModel(QStandardItemModel())
         else:
             color_combo.setModel(QStandardItemModel())
-
         self._syncPlayersToState()
 
-    def _selectCharacterInCombo(self, index, char_codename):
-        """Select a character in the combo by codename."""
-        char_combo = self.playerInputs[index][3]
+    def _selectCharInCombo(self, char_combo, char_codename):
+        """Select a character in a combo box by codename."""
         char_combo.blockSignals(True)
-
         model = char_combo.model()
         for row in range(model.rowCount()):
-            data = model.data(
-                model.index(row, 0), Qt.ItemDataRole.UserRole)
+            data = model.data(model.index(row, 0), Qt.ItemDataRole.UserRole)
             if data and data.get("codename") == char_codename:
                 char_combo.setCurrentIndex(row)
                 char_combo.blockSignals(False)
                 return
-
-        # Fallback: try matching by en_name or key
+        # Fallback: match by en_name
         char_entry = AutonaGameAssetManager.instance.characters.get(char_codename)
         if char_entry:
             en_name = char_entry.get("en_name", "")
             for row in range(model.rowCount()):
-                data = model.data(
-                    model.index(row, 0), Qt.ItemDataRole.UserRole)
+                data = model.data(model.index(row, 0), Qt.ItemDataRole.UserRole)
                 if data and data.get("en_name") == en_name:
                     char_combo.setCurrentIndex(row)
                     break
@@ -449,11 +492,15 @@ class AutonaResultSettingsWidget(QDockWidget):
             logger.warning(f"Failed to load tournament info: {e}")
 
     def _findCharacterForPlayer(self, player_name):
-        """Search scoreboard state for a player's character data."""
+        """Search scoreboard state for a player's first character data."""
+        chars = self._findAllCharactersForPlayer(player_name)
+        return chars[0] if chars else {}
+
+    def _findAllCharactersForPlayer(self, player_name):
+        """Search scoreboard state for all characters of a player (ordered list)."""
         if not player_name:
-            return {}
+            return []
         try:
-            # Search across all scoreboards for the player name
             scores = StateManager.Get("score") or {}
             for sb_key, sb in scores.items():
                 for team_key in ["1", "2"]:
@@ -464,13 +511,11 @@ class AutonaResultSettingsWidget(QDockWidget):
                                 == player_name.lower()):
                             char = p_data.get("character", {})
                             if char:
-                                # Return first character
-                                first_key = next(iter(char), None)
-                                if first_key:
-                                    return char[first_key]
+                                return [char[k] for k in sorted(char.keys())
+                                        if char.get(k)]
         except Exception as e:
             logger.debug(f"Character lookup failed: {e}")
-        return {}
+        return []
 
     def _selectedLayout(self):
         return self.layoutCombo.currentData() or "horizontal"
@@ -484,14 +529,10 @@ class AutonaResultSettingsWidget(QDockWidget):
         label = QApplication.translate("app", "Load top {0} from StartGG").format(n)
         self.btLoadFromStartgg.setText(label)
 
-        for i, (rank_label, name_edit, sponsor_edit, char_combo, color_combo) in enumerate(
-                self.playerInputs):
+        for i, entry in enumerate(self.playerInputs):
             visible = i < n
-            rank_label.setVisible(visible)
-            name_edit.setVisible(visible)
-            sponsor_edit.setVisible(visible)
-            char_combo.setVisible(visible)
-            color_combo.setVisible(visible)
+            for widget in entry:
+                widget.setVisible(visible)
 
         self.GeneratePreview(True)
 

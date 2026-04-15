@@ -1802,6 +1802,10 @@ p, li { white-space: pre-wrap; }
         <source>The result image has been saved here:</source>
         <translation>The result image has been saved here:</translation>
     </message>
+    <message>
+        <source>Vertical Dark Gold 激 (960x1080)</source>
+        <translation>Vertical Dark Gold 激 (960x1080)</translation>
+    </message>
 </context>
 <context>
     <name>layout_options</name>

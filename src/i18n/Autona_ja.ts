@@ -1879,6 +1879,10 @@ p, li { white-space: pre-wrap; }
         <source>The result image has been saved here:</source>
         <translation>リザルト画像をここに保存しました:</translation>
     </message>
+    <message>
+        <source>Vertical Dark Gold 激 (960x1080)</source>
+        <translation>縦向き Dark Gold 激 (960x1080)</translation>
+    </message>
 </context>
 <context>
     <name>layout_options</name>
