@@ -27,7 +27,7 @@
 Autona のカスタムフォーク。
 格闘ゲーム大会の配信支援ツール（スコアボード管理、ステージストライク、統計情報表示など）。
 
-- **リポジトリ**: `yuya-tagu/BST-scoreboard`
+- **リポジトリ**: `yuya-tagu/Autona`
 - **メインブランチ**: `main`
 - **デスクトップアプリ**: Python (PyQt6) — `src/`
 - **Web UI**: React (MUI) — `stage_strike_app/src/`
