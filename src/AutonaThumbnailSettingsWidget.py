@@ -9,10 +9,17 @@ import traceback
 import json
 
 from .thumbnail import main_generate_thumbnail as thumbnail
+from .StateManager import StateManager
 from .SettingsManager import *
 from .AutonaGameAssetManager import *
+from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaDictHelper import deep_get, deep_set
 from .Helpers.AutonaDirHelper import AutonaResolve
+
+
+# Video title format:
+#   「{tournament_name} {round_name_en} | 1P({fighter1}) vs 2P({fighter2}) | {game_name}」
+VIDEO_TITLE_TEMPLATE = "{tournament} {round} | 1P({fighter1}) vs 2P({fighter2}) | {game}"
 
 
 class PreviewWidget(QWidget):
@@ -85,6 +92,26 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
 
         self.settings = uic.loadUi(AutonaResolve("src/layout/AutonaThumbnailSettings.ui"))
         self.widget.layout().addWidget(self.settings)
+
+        # ── Video title (YouTube upload) ─────────────────────────────
+        self.videoTitleEdit: QLineEdit = self.settings.findChild(
+            QLineEdit, "videoTitleEdit")
+        self.videoTitleStatus: QLabel = self.settings.findChild(
+            QLabel, "videoTitleStatus")
+        self.btCopyVideoTitle: QPushButton = self.settings.findChild(
+            QPushButton, "btCopyVideoTitle")
+        self.btCopyVideoTitle.clicked.connect(self.CopyVideoTitle)
+        # Tracks the last auto-generated title so user edits aren't
+        # clobbered on refresh.
+        self._lastAutoVideoTitle = ""
+        # Auto-refresh whenever any input to the title could have changed.
+        AutonaTournamentDataProvider.instance.signals.tournament_data_updated.connect(
+            lambda _data: self._RefreshVideoTitle())
+        AutonaGameAssetManager.instance.signals.onLoad.connect(
+            self._RefreshVideoTitle)
+        StateManager.signals.state_big_change.connect(
+            self._RefreshVideoTitle)
+        self._RefreshVideoTitle()
 
         # SET DEFAULTS
         self.setDefaultsButton = self.settings.findChild(
@@ -246,7 +273,10 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
 
         self.updatePreview = self.settings.findChild(
             QPushButton, "btUpdatePreview")
-        self.updatePreview.clicked.connect(lambda: self.GeneratePreview(True))
+        self.updatePreview.clicked.connect(lambda: [
+            self.GeneratePreview(True),
+            self._RefreshVideoTitle(force=True),
+        ])
 
         self.copyToClipboard = self.settings.findChild(
             QPushButton, "btCopyToClipboard")
@@ -279,6 +309,113 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
 
         self.updateFromSettings()
         self.GeneratePreview()
+
+    # ── Video title (YouTube) ──────────────────────────────────────
+
+    # Fallback map from smashgg game id → English abbreviation, used when
+    # the per-game config.json does not provide one (e.g. games not
+    # installed under user_data/games/).
+    _GAME_ABBREVIATION_FALLBACK = {
+        1386: "SSBU",   # Super Smash Bros. Ultimate
+        43868: "SF6",   # Street Fighter 6
+    }
+
+    def _BuildVideoTitle(self, scoreboard_id: int = 1) -> str:
+        tournament = StateManager.Get(
+            "tournamentInfo.tournamentName", "") or ""
+        round_en = StateManager.Get(
+            f"score.{scoreboard_id}.match_en", "") or ""
+        game = StateManager.Get("game", {}) or {}
+        game_abbrev = game.get("abbreviation")
+        if not game_abbrev:
+            try:
+                game_abbrev = self._GAME_ABBREVIATION_FALLBACK.get(
+                    int(game.get("smashgg_id")))
+            except (TypeError, ValueError):
+                game_abbrev = None
+        game_abbrev = game_abbrev or ""
+
+        side1 = self._PlayerWithCharacter(scoreboard_id, team=1)
+        side2 = self._PlayerWithCharacter(scoreboard_id, team=2)
+
+        # Build, stripping segments that resolved to empty so we don't emit
+        # stray separators like "|  vs  |".
+        parts_left = " ".join(p for p in (tournament, round_en) if p)
+        if side1 or side2:
+            vs_part = f"{side1} vs {side2}".strip()
+        else:
+            vs_part = ""
+        segments = [s for s in (parts_left, vs_part, game_abbrev) if s]
+        return " | ".join(segments)
+
+    @classmethod
+    def _PlayerWithCharacter(cls, scoreboard_id: int, team: int) -> str:
+        """Return `"{player_name}({character_name})"` for team {team}'s
+        first player. Drops the parenthesised character when no main
+        character is set, and returns an empty string when the player
+        itself is not set either."""
+        player = cls._PlayerDisplayName(scoreboard_id, team)
+        character = cls._MainCharacterName(scoreboard_id, team)
+        if player and character:
+            return f"{player}({character})"
+        return player or character
+
+    @staticmethod
+    def _PlayerDisplayName(scoreboard_id: int, team: int) -> str:
+        """Return team {team}'s first player's display name ("prefix |
+        gamerTag" when a sponsor prefix exists, else just gamerTag).
+        Empty string if no player data is set yet."""
+        base = f"score.{scoreboard_id}.team.{team}.player.1"
+        merged = StateManager.Get(f"{base}.mergedName", "") or ""
+        if merged:
+            # Strip the "[L]" losers-bracket indicator sometimes appended
+            # by the scoreboard so titles stay clean.
+            return merged.replace(" [L]", "")
+        return StateManager.Get(f"{base}.gamerTag", "") or ""
+
+    @staticmethod
+    def _MainCharacterName(scoreboard_id: int, team: int) -> str:
+        """Return the first (primary) character's name for team {team}'s
+        first player, or empty string. Looks at the scoreboard's current
+        `character` dict first, then falls back to the player's saved
+        `mains`. The dict is keyed by **integer** slot numbers (1, 2, ...)
+        because AutonaBasePlayerWidget stores them that way, so
+        StateManager's dot-path lookup can't reach them directly — we
+        fetch the whole dict and pick the smallest key."""
+        base = f"score.{scoreboard_id}.team.{team}.player.1"
+        for subkey in ("character", "mains"):
+            chars = StateManager.Get(f"{base}.{subkey}")
+            if not isinstance(chars, dict) or not chars:
+                continue
+            try:
+                first_key = sorted(chars.keys(), key=lambda k: int(k))[0]
+            except (TypeError, ValueError):
+                first_key = next(iter(chars))
+            entry = chars.get(first_key) or {}
+            name = entry.get("name") or ""
+            if name:
+                return name
+        return ""
+
+    def _RefreshVideoTitle(self, force: bool = False):
+        """Regenerate the auto title. When `force` is True (e.g. the
+        preview button was pressed), overwrite any manual edits the user
+        may have made. Otherwise preserve them."""
+        new_title = self._BuildVideoTitle()
+        current = self.videoTitleEdit.text()
+        if force or current == self._lastAutoVideoTitle or not current:
+            self.videoTitleEdit.setText(new_title)
+        self._lastAutoVideoTitle = new_title
+
+    def CopyVideoTitle(self):
+        title = self.videoTitleEdit.text().strip()
+        if not title:
+            self.videoTitleStatus.setText(
+                QApplication.translate("app", "Nothing to copy."))
+            return
+        QApplication.clipboard().setText(title)
+        self.videoTitleStatus.setText(
+            QApplication.translate("app", "Copied to clipboard."))
 
     def GetSetting(self, key, default=0):
         setting = SettingsManager.Get(

@@ -16,9 +16,64 @@
   <property name="locale">
    <locale language="English" country="UnitedStates"/>
   </property>
-  <layout class="QHBoxLayout" name="horizontalLayout_8">
+  <layout class="QVBoxLayout" name="outerLayout">
    <item>
-    <widget class="QScrollArea" name="scrollArea">
+    <widget class="QGroupBox" name="groupBoxVideoTitle">
+     <property name="title">
+      <string>Video Title</string>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayoutVideoTitle">
+      <item>
+       <widget class="QLineEdit" name="videoTitleEdit">
+        <property name="placeholderText">
+         <string>Title is auto-generated from tournament info, round and characters</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="horizontalLayoutVideoTitleActions">
+        <item>
+         <widget class="QPushButton" name="btCopyVideoTitle">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Maximum" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="text">
+           <string>Copy Video Title</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="videoTitleStatus">
+          <property name="text">
+           <string/>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <spacer name="videoTitleActionSpacer">
+          <property name="orientation">
+           <enum>Qt::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+       </layout>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="horizontalLayout_8">
+     <item>
+      <widget class="QScrollArea" name="scrollArea">
      <property name="sizePolicy">
       <sizepolicy hsizetype="Minimum" vsizetype="Expanding">
        <horstretch>0</horstretch>
@@ -615,6 +670,8 @@
       </layout>
      </widget>
     </widget>
+   </item>
+    </layout>
    </item>
   </layout>
  </widget>

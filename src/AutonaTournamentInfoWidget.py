@@ -3,8 +3,11 @@ from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from qtpy import uic
 import time
+import datetime
+from io import BytesIO
 from .StateManager import StateManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
+from .AutonaGameAssetManager import AutonaGameAssetManager
 from .SettingsManager import SettingsManager
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaDirHelper import AutonaResolve
@@ -14,11 +17,20 @@ import shutil
 from pathlib import Path
 from loguru import logger
 import requests
+from PIL import Image, ImageFilter, ImageEnhance
 
 DEFAULT_THEME_COLOR = "#1D1B18"
 DEFAULT_ACCENT_COLOR = "#f0a500"
 DEFAULT_BANNER_PATH = "./assets/thumbnail_base/default_banner.png"
 BANNER_PATH = "./user_data/tournament_banner.png"
+STREAM_OUTPUT_DIR = "./out/stream"
+STREAM_TITLE_MAX_LENGTH = 100
+# Fallback abbreviation by smashgg_game_id when the per-game config.json
+# does not specify one (games not installed in user_data/games/)
+GAME_ABBREVIATION_FALLBACK = {
+    1386: "SSBU",   # Super Smash Bros. Ultimate
+    43868: "SF6",   # Street Fighter 6
+}
 
 
 class AutonaTournamentInfoWidget(QDockWidget):
@@ -29,11 +41,11 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         # Wrap the dock contents in a QScrollArea so the tab doesn't
         # force the whole window to grow vertically.
-        contents = self.widget()
+        self._contents = self.widget()
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setWidget(contents)
+        scroll.setWidget(self._contents)
         self.setWidget(scroll)
 
         AutonaTournamentDataProvider.instance.signals.tournament_data_updated.connect(
@@ -133,6 +145,54 @@ class AutonaTournamentInfoWidget(QDockWidget):
         placeholder2.deleteLater()
         self.btAccentColor.colorChanged.connect(self._onAccentColorChanged)
         StateManager.Set("tournamentInfo.accentColor", saved_accent)
+
+        # Stream settings
+        self.streamTitleEdit: QLineEdit = self.findChild(
+            QLineEdit, "streamTitleEdit")
+        self.streamTitleStatus: QLabel = self.findChild(
+            QLabel, "streamTitleStatus")
+
+        self.btCopyStreamTitle: QPushButton = self.findChild(
+            QPushButton, "btCopyStreamTitle")
+        self.btCopyStreamTitle.clicked.connect(self.CopyStreamTitle)
+
+        self.rbStreamThumbCenter: QRadioButton = self.findChild(
+            QRadioButton, "rbStreamThumbCenter")
+        self.rbStreamThumbNetflix: QRadioButton = self.findChild(
+            QRadioButton, "rbStreamThumbNetflix")
+
+        self.btGenerateStreamThumbnail: QPushButton = self.findChild(
+            QPushButton, "btGenerateStreamThumbnail")
+        self.btGenerateStreamThumbnail.clicked.connect(
+            self.GenerateStreamThumbnail)
+
+        self.streamThumbPreview: QLabel = self.findChild(
+            QLabel, "streamThumbPreview")
+        self.streamThumbPath: QLabel = self.findChild(
+            QLabel, "streamThumbPath")
+
+        # Tracks the last auto-generated title; used to detect whether the
+        # user has manually edited the field so auto-refreshes don't clobber
+        # their edits.
+        self._lastAutoStreamTitle = ""
+
+        # Auto-refresh the title whenever tournament info, entrants, or game
+        # assets change.
+        AutonaTournamentDataProvider.instance.signals.tournament_data_updated.connect(
+            lambda _data: self._RefreshStreamTitle())
+        AutonaTournamentDataProvider.instance.signals.entrants_updated.connect(
+            self._RefreshStreamTitle)
+        AutonaGameAssetManager.instance.signals.onLoad.connect(
+            self._RefreshStreamTitle)
+
+        self._RefreshStreamTitle()
+
+    def InsertHeaderWidget(self, widget: QWidget) -> None:
+        """Insert an arbitrary widget at the very top of this tab's
+        scrollable contents (above the Tournament Info group box)."""
+        layout = self._contents.layout()
+        if layout is not None:
+            layout.insertWidget(0, widget)
 
     def _onThemeColorChanged(self, color):
         if color:
@@ -289,6 +349,175 @@ class AutonaTournamentInfoWidget(QDockWidget):
             logger.error(traceback.format_exc())
 
         self.UpdateIcon()
+
+    # ---- Stream title / thumbnail ----
+
+    def _GetGameAbbreviation(self):
+        game = StateManager.Get("game", {}) or {}
+        abbrev = game.get("abbreviation")
+        if abbrev:
+            return abbrev
+        smashgg_id = game.get("smashgg_id")
+        try:
+            return GAME_ABBREVIATION_FALLBACK.get(int(smashgg_id))
+        except (TypeError, ValueError):
+            return None
+
+    def _GenerateStreamTitle(self, top_entrants):
+        tournament_name = StateManager.Get("tournamentInfo.tournamentName", "") or ""
+        abbrev = self._GetGameAbbreviation()
+        suffix = f" - {abbrev}" if abbrev else ""
+
+        names = [e["gamerTag"] for e in top_entrants if e.get("gamerTag")]
+
+        # Reduce the number of player names from the tail until the title fits
+        # within STREAM_TITLE_MAX_LENGTH. Keep "ft. ... and more!" framing
+        # while any names remain.
+        while names:
+            candidate = f"{tournament_name} ft. " + \
+                " ".join(names) + " ... and more!" + suffix
+            if len(candidate) <= STREAM_TITLE_MAX_LENGTH:
+                return candidate
+            names.pop()
+
+        # No names fit; drop the ft. framing entirely
+        return f"{tournament_name}{suffix}".strip()
+
+    def _RefreshStreamTitle(self):
+        """Recompute the auto-generated stream title and apply it unless the
+        user has manually edited the field."""
+        provider = AutonaTournamentDataProvider.instance.provider
+        top_entrants = getattr(provider, "top_entrants", []) if provider else []
+        top_entrants = top_entrants or []
+
+        has_valid_seed = any(
+            e.get("seed", 999999) < 999999 for e in top_entrants)
+
+        if top_entrants and has_valid_seed:
+            new_title = self._GenerateStreamTitle(top_entrants)
+            status = ""
+        else:
+            # Fallback title when entrants or seeds aren't ready yet
+            name = StateManager.Get("tournamentInfo.tournamentName", "") or ""
+            abbrev = self._GetGameAbbreviation()
+            suffix = f" - {abbrev}" if abbrev else ""
+            new_title = f"{name}{suffix}".strip()
+            if provider is None:
+                status = ""
+            elif not top_entrants:
+                status = QApplication.translate(
+                    "app", "Waiting for entrants from Start.gg...")
+            else:
+                status = QApplication.translate(
+                    "app",
+                    "Seeds are not finalized. Set and publish seeds on "
+                    "Start.gg, then reload the tournament.")
+
+        # Preserve user's manual edits: only overwrite when the field still
+        # matches the last auto-generated value (or is empty).
+        current = self.streamTitleEdit.text()
+        if current == self._lastAutoStreamTitle or not current:
+            self.streamTitleEdit.setText(new_title)
+        self._lastAutoStreamTitle = new_title
+        self.streamTitleStatus.setText(status)
+
+    def CopyStreamTitle(self):
+        title = self.streamTitleEdit.text().strip()
+        if not title:
+            self.streamTitleStatus.setText(QApplication.translate(
+                "app", "Nothing to copy."))
+            return
+        QApplication.clipboard().setText(title)
+        self.streamTitleStatus.setText(
+            QApplication.translate("app", "Copied to clipboard."))
+
+    def GenerateStreamThumbnail(self):
+        provider = AutonaTournamentDataProvider.instance.provider
+        if provider is None:
+            self.streamThumbPath.setText(QApplication.translate(
+                "app", "Load a tournament first."))
+            return
+
+        try:
+            url = provider.GetBannerURL()
+        except Exception:
+            logger.error(traceback.format_exc())
+            url = None
+
+        if not url:
+            self.streamThumbPath.setText(QApplication.translate(
+                "app", "No tournament banner available."))
+            return
+
+        try:
+            headers = {
+                "client-version": "20",
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36"
+            }
+            response = requests.get(url, headers=headers, timeout=20)
+            response.raise_for_status()
+            banner = Image.open(BytesIO(response.content)).convert("RGB")
+
+            if self.rbStreamThumbNetflix.isChecked():
+                out_img = self._MakeNetflixStyleThumbnail(banner)
+                style_tag = "netflix"
+            else:
+                out_img = self._MakeCenterCropThumbnail(banner)
+                style_tag = "center"
+
+            out_dir = Path(STREAM_OUTPUT_DIR)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"thumbnail_{style_tag}_{timestamp}.jpg"
+            out_path = out_dir / filename
+            out_img.save(out_path, "JPEG", quality=90)
+
+            # Show a scaled preview in the UI
+            pix = QPixmap(str(out_path))
+            if not pix.isNull():
+                label_size = self.streamThumbPreview.size()
+                self.streamThumbPreview.setPixmap(pix.scaled(
+                    label_size,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                ))
+
+            self.streamThumbPath.setText(
+                QApplication.translate("app", "Saved: ") + str(out_path))
+        except Exception as e:
+            logger.error(traceback.format_exc())
+            self.streamThumbPath.setText(
+                QApplication.translate("app", "Error: ") + str(e))
+
+    def _MakeCenterCropThumbnail(self, img):
+        # Crop center to 16:9, then resize to 1920x1080
+        w, h = img.size
+        target_ratio = 16 / 9
+        current_ratio = w / h
+        if current_ratio > target_ratio:
+            new_w = int(h * target_ratio)
+            left = (w - new_w) // 2
+            img = img.crop((left, 0, left + new_w, h))
+        else:
+            new_h = int(w / target_ratio)
+            top = (h - new_h) // 2
+            img = img.crop((0, top, w, top + new_h))
+        return img.resize((1920, 1080), Image.LANCZOS)
+
+    def _MakeNetflixStyleThumbnail(self, img):
+        # Blurred, darkened, center-cropped banner as background
+        bg = self._MakeCenterCropThumbnail(img.copy())
+        bg = bg.filter(ImageFilter.GaussianBlur(radius=30))
+        bg = ImageEnhance.Brightness(bg).enhance(0.6)
+
+        # Foreground: original banner scaled to fit within 1920x1080
+        w, h = img.size
+        scale = min(1920 / w, 1080 / h)
+        fw, fh = int(w * scale), int(h * scale)
+        fg = img.resize((fw, fh), Image.LANCZOS)
+        bg.paste(fg, ((1920 - fw) // 2, (1080 - fh) // 2))
+        return bg
 
     def DisplayErrorMessage(self, message):
         msgBox = QMessageBox()
