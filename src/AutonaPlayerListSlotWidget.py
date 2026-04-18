@@ -23,17 +23,29 @@ class AutonaPlayerListSlotWidget(QGroupBox):
         self.signals = AutonaPlayerListSlotWidgetSignals()
 
         self.setLayout(QVBoxLayout())
-        slotNameWidget = QWidget()
-        slotNameWidget.setLayout(QHBoxLayout())
+
+        # Rank/slot header label — mirrors the scoreboard's teamLabel pattern
+        # ("1P"/"TEAM 1"). Always visible; text flips with player-per-team mode.
+        self.slotHeaderLabel = QLabel()
+        self.slotHeaderLabel.setObjectName("slotHeaderLabel")
+        self.layout().addWidget(self.slotHeaderLabel)
+
+        self.slotNameWidget = QWidget()
+        self.slotNameWidget.setLayout(QHBoxLayout())
 
         self.slotName = QLineEdit()
         slotNameLabel = QLabel()
         slotNameLabel.setText(QApplication.translate("Form", "Team Name"))
         slotNameLabel.setMaximumWidth(150)
         slotNameLabel.setMinimumWidth(slotNameLabel.maximumWidth())
-        slotNameWidget.layout().addWidget(slotNameLabel)
-        slotNameWidget.layout().addWidget(self.slotName)
-        self.layout().addWidget(slotNameWidget)
+        self.slotNameWidget.layout().addWidget(slotNameLabel)
+        self.slotNameWidget.layout().addWidget(self.slotName)
+        self.layout().addWidget(self.slotNameWidget)
+        # Default to single-player presentation until SetPlayersPerTeam runs.
+        # Child widgets referenced by _UpdateSlotHeader (compactRankLabel) are
+        # created later; SetPlayersPerTeam will apply the real mode once they
+        # exist.
+        self.slotNameWidget.setVisible(False)
 
         self.scoreWidget = QWidget()
         self.scoreWidget.setLayout(QHBoxLayout())
@@ -67,6 +79,16 @@ class AutonaPlayerListSlotWidget(QGroupBox):
 
         self.list = QWidget()
         self.list.setLayout(QHBoxLayout())
+        self.list.layout().setContentsMargins(0, 0, 0, 0)
+        # Compact inline rank label — shown only in single-player mode so the
+        # slot can collapse into a single row without losing rank context.
+        self.compactRankLabel = QLabel()
+        self.compactRankLabel.setObjectName("compactRankLabel")
+        self.compactRankLabel.setMinimumWidth(28)
+        self.compactRankLabel.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.list.layout().addWidget(self.compactRankLabel)
+        self.compactRankLabel.setVisible(False)
         self.layout().addWidget(self.list)
 
 
@@ -81,6 +103,10 @@ class AutonaPlayerListSlotWidget(QGroupBox):
                     index=len(self.playerWidgets)+1, teamNumber=1, path=f'{self.base}.slot.{self.index}.player.{len(self.playerWidgets)+1}')
                 self.playerWidgets.append(p)
                 self.list.layout().addWidget(p)
+
+                # PlayerList-specific compaction (does not affect Scoreboard,
+                # which uses the same .ui but instantiates widgets elsewhere).
+                self._ApplyPlayerListCompaction(p)
 
                 p.SetCharactersPerPlayer(self.playerList.charactersPerPlayer)
 
@@ -103,14 +129,64 @@ class AutonaPlayerListSlotWidget(QGroupBox):
 
             StateManager.ReleaseSaving()
 
-        # if number > 1:
-        #     self.team1column.findChild(QLineEdit, "teamName").setVisible(True)
-        #     self.team2column.findChild(QLineEdit, "teamName").setVisible(True)
-        # else:
-        #     self.team1column.findChild(QLineEdit, "teamName").setVisible(False)
-        #     self.team1column.findChild(QLineEdit, "teamName").setText("")
-        #     self.team2column.findChild(QLineEdit, "teamName").setVisible(False)
-        #     self.team2column.findChild(QLineEdit, "teamName").setText("")
+        # Apply the team/single-player presentation: hide the team-name row
+        # when each slot holds exactly one player, mirroring the scoreboard's
+        # 1v1 mode layout.
+        single_player = number == 1
+        self.slotNameWidget.setVisible(not single_player)
+        if single_player and self.slotName.text():
+            # Team name is meaningless for single-player slots; clear any
+            # leftover value so it doesn't leak into StateManager.
+            self.slotName.clear()
+            self.slotName.editingFinished.emit()
+        self._UpdateSlotHeader(single_player=single_player)
+
+    def _ApplyPlayerListCompaction(self, playerWidget):
+        """Compact the shared AutonaScoreboardPlayer.ui for PlayerList use:
+        - Collapse the CHARACTERS group-box inner top/bottom margins so the
+          label sits tight against the first character row.
+        - Merge the LOCATION row into the SEED row to save one grid row.
+        """
+        try:
+            characters = playerWidget.findChild(QGroupBox, "characters")
+            if characters is not None and characters.layout() is not None:
+                m = characters.layout().contentsMargins()
+                characters.layout().setContentsMargins(
+                    m.left(), 0, m.right(), 0)
+
+            seed_row = playerWidget.findChild(QHBoxLayout, "horizontalLayout")
+            location_row = playerWidget.findChild(
+                QHBoxLayout, "horizontalLayout_2")
+            if seed_row is not None and location_row is not None:
+                while location_row.count() > 0:
+                    item = location_row.takeAt(0)
+                    if item is None:
+                        continue
+                    w = item.widget()
+                    if w is not None:
+                        seed_row.addWidget(w)
+        except Exception:
+            logger.error(traceback.format_exc())
+
+    def _UpdateSlotHeader(self, single_player: bool):
+        if single_player:
+            # Hide the full-width header label; use the compact inline rank
+            # indicator instead so the slot collapses into a single row.
+            self.slotHeaderLabel.setVisible(False)
+            self.compactRankLabel.setText(f"#{self.index}")
+            self.compactRankLabel.setVisible(True)
+            self.setProperty("compact", True)
+        else:
+            self.slotHeaderLabel.setText(QApplication.translate(
+                "app", "Slot {0} - Team").format(self.index))
+            self.slotHeaderLabel.setVisible(True)
+            self.compactRankLabel.setVisible(False)
+            self.setProperty("compact", False)
+
+        # Qt doesn't re-evaluate property selectors unless we bounce the style
+        style = self.style()
+        style.unpolish(self)
+        style.polish(self)
 
     def ChildDataChangedEmit(self):
         if not self.childDataChangedLock:

@@ -219,12 +219,12 @@ QLabel {{
     padding: 0;
 }}
 
-/* === Interactive controls: uniform dense height === */
+/* === Interactive controls: uniform dense height, subtle elevation === */
 QPushButton, QToolButton {{
     min-height: {_WIDGET_H}px;
-    padding: 0px 10px;
+    padding: 0px 12px;
     border: 1px solid {p['border_default']};
-    border-radius: {RADIUS_SM}px;
+    border-radius: {RADIUS_MD}px;
     background-color: {p['bg_tertiary']};
     color: {p['text_primary']};
     font-weight: 600;
@@ -235,6 +235,7 @@ QPushButton:hover, QToolButton:hover {{
 }}
 QPushButton:pressed, QToolButton:pressed {{
     background-color: {p['bg_secondary']};
+    padding-top: 1px;
 }}
 QPushButton:disabled, QToolButton:disabled {{
     color: {p['text_disabled']};
@@ -287,45 +288,64 @@ QTextEdit, QPlainTextEdit {{
     selection-background-color: {p['accent_subtle']};
 }}
 
-/* === Tabs (accent-orange selection) === */
+/* === Tabs (accent-orange selection, clear separators) === */
 QTabWidget::pane {{
-    border: 1px solid {p['border_subtle']};
+    border: 1px solid {p['border_default']};
     background-color: {p['bg_primary']};
     top: -1px;
 }}
 QTabBar {{
-    background-color: {p['bg_secondary']};
+    background-color: {p['bg_primary']};
     qproperty-drawBase: 0;
 }}
 QTabBar::tab {{
-    padding: 5px 8px;
-    margin: 0;
-    background-color: transparent;
+    padding: 7px 14px;
+    margin-right: 2px;
+    background-color: {p['bg_primary']};
     color: {p['text_muted']};
-    border-bottom: 2px solid transparent;
+    border: 1px solid transparent;
+    border-bottom: 3px solid transparent;
     font-weight: 700;
     font-size: {FONT_XS}pt;
 }}
 QTabBar::tab:hover {{
     color: {p['text_secondary']};
+    background-color: {p['bg_tertiary']};
 }}
 QTabBar::tab:selected {{
     color: {p['accent']};
-    background-color: {p['bg_quaternary']};
-    border-bottom: 2px solid {p['accent']};
+    background-color: {p['bg_secondary']};
+    border: 1px solid {p['border_default']};
+    border-bottom: 3px solid {p['accent']};
 }}
 
-/* === Dock widgets === */
+/* The main-window dock tab bar (objectName="autonaDockTabBar") paints
+   itself via AutonaDockTabPainter (installEventFilter), so no QSS rules
+   are applied to it here — QSS for QTabBar::tab would be intercepted by
+   QStyleSheetStyle before the custom paint runs. */
+
+/* === Main window dock separators (make them visible) === */
+QMainWindow::separator {{
+    background-color: {p['border_default']};
+    width: 3px;
+    height: 3px;
+}}
+QMainWindow::separator:hover {{
+    background-color: {p['accent']};
+}}
+
+/* === Dock widgets: card-like with accent title strip === */
 QDockWidget {{
     color: {p['text_primary']};
     titlebar-close-icon: none;
     titlebar-normal-icon: none;
+    border: 1px solid {p['border_default']};
 }}
 QDockWidget::title {{
-    background-color: {p['bg_secondary']};
-    color: {p['text_label']};
-    padding: 5px 10px;
-    border-bottom: 1px solid {p['border_subtle']};
+    background-color: {p['bg_tertiary']};
+    color: {p['text_primary']};
+    padding: 6px 12px;
+    border-bottom: 2px solid {p['accent_subtle']};
     text-align: left;
     font-size: {FONT_SM}pt;
     font-weight: 700;
@@ -432,24 +452,66 @@ QStatusBar::item {{
     border: none;
 }}
 
-/* === Group boxes & separators === */
+/* === Group boxes as elevated cards === */
+/* Title sits as a plain label inside the top-left of the card, not as a
+   chip on the border. */
 QGroupBox {{
-    border: 1px solid {p['border_subtle']};
-    border-radius: {RADIUS_SM}px;
-    margin-top: 10px;
-    padding-top: 8px;
+    border: 1px solid {p['border_default']};
+    border-radius: {RADIUS_MD}px;
+    background-color: {p['bg_secondary']};
+    margin-top: 4px;
+    padding: 28px 10px 10px 10px;
     color: {p['text_primary']};
 }}
 QGroupBox::title {{
-    subcontrol-origin: margin;
-    left: 8px;
-    padding: 0 4px;
+    subcontrol-origin: padding;
+    subcontrol-position: top left;
+    padding: 6px 10px 4px 10px;
+    background: transparent;
+    border: none;
     color: {p['text_label']};
     font-size: {FONT_SM}pt;
     font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }}
+/* Compact variant: list rows that don't need the card framing. Applied via
+   setProperty("compact", True). Flat, minimal padding, subtle divider. */
+QGroupBox[compact="true"] {{
+    border: none;
+    border-bottom: 1px solid {p['border_subtle']};
+    border-radius: 0;
+    background: transparent;
+    margin-top: 0;
+    padding: 4px 6px;
+}}
+QGroupBox[compact="true"]::title {{
+    padding: 0;
+    font-size: 0pt;
+}}
+QLabel#compactRankLabel {{
+    color: {p['text_muted']};
+    font-family: "{FONT_FAMILY_MONO}", monospace;
+    font-weight: 700;
+    font-size: {FONT_MD}pt;
+    padding-right: 6px;
+}}
+
+/* Horizontal and vertical rules: visible separators */
 QFrame[frameShape="4"], QFrame[frameShape="5"] {{
-    color: {p['border_subtle']};
+    color: {p['border_default']};
+    background-color: {p['border_default']};
+    max-height: 1px;
+    max-width: 1px;
+    border: none;
+    margin: 4px 0;
+}}
+QFrame[frameShape="4"] {{
+    max-width: none;
+}}
+QFrame[frameShape="5"] {{
+    max-height: none;
+    margin: 0 4px;
 }}
 
 /* === Checkboxes / radios === */

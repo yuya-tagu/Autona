@@ -110,6 +110,15 @@ logger.critical("=== Autona IS STARTING ===")
 
 logger.info("QApplication successfully initialized")
 
+# Install the ClickUp-style dock tab bar theme at the application level so
+# it catches every dock tab bar Qt creates, including any that appear after
+# dock widgets are rearranged at runtime.
+from .AutonaDockTabTheme import install_dock_tab_theme
+install_dock_tab_theme()
+
+
+from .AutonaSplash import LoadingOverlay, create_splash, pick_splash_messages
+
 from contextlib import contextmanager
 @contextmanager
 def catchtime(msg = ''):
@@ -267,7 +276,7 @@ class WindowSignals(QObject):
 
 class Window(QMainWindow):
     # Bump this when dock widget layout changes (e.g. adding/removing tabs)
-    STATE_VERSION = 3
+    STATE_VERSION = 5
     signals = WindowSignals()
 
     def __init__(self, loop=None):
@@ -282,13 +291,9 @@ class Window(QMainWindow):
 
         self.signals = WindowSignals()
 
-        splash = QSplashScreen(
-            QPixmap('assets/icons/icon.png').scaled(128, 128))
-        splash.show()
-
-        time.sleep(0.1)
-
-        App.processEvents()
+        splash = create_splash()
+        splash_msgs = pick_splash_messages()
+        splash.set_message(splash_msgs[0], progress=0.05)
 
         self.programState = {}
         self.savedProgramState = {}
@@ -322,6 +327,7 @@ class Window(QMainWindow):
         self.allplayers = None
         self.local_players = None
 
+        splash.set_message(splash_msgs[1], progress=0.25)
         AutonaControllerHelper.instance.init()
         AutonaCountryHelper.instance.init()
 
@@ -337,35 +343,40 @@ class Window(QMainWindow):
         self.setDockOptions(
             QMainWindow.DockOption.AllowTabbedDocks)
 
+        # Dock tabs are drawn as a ClickUp-style bar at the top of the
+        # dock area (see AutonaDockTabTheme for the paint path).
         self.setTabPosition(
             Qt.DockWidgetArea.AllDockWidgetAreas, QTabWidget.TabPosition.North)
 
-        # Layout base com status no topo
-        central_widget = QWidget()
-        pre_base_layout = QVBoxLayout()
-        pre_base_layout.setContentsMargins(0, 0, 0, 0)
-        central_widget.setLayout(pre_base_layout)
-        self.setCentralWidget(central_widget)
-        central_widget.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        # Empty central widget — collapsed to 0×0 so the dock area fills
+        # the window directly below the menu bar. The former "大会を選ぶ"
+        # button that used to live here has moved to the top of the
+        # Tournament Info (EVENT) tab below.
+        central = QWidget()
+        central.setFixedSize(0, 0)
+        self.setCentralWidget(central)
 
-        # Central "Set tournament" button
+        # "Set tournament" button. Parented/placed into the Tournament Info
+        # tab after it's created below.
         self.setTournamentBt = QPushButton(
             QApplication.translate("app", "Set tournament"))
         self.setTournamentBt.setIcon(QIcon(UI.icon_path('startgg.svg')))
         self.setTournamentBt.setIconSize(QSize(20, 20))
         self.setTournamentBt.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setTournamentBt.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
+        self.setTournamentBt.setSizePolicy(
+            QSizePolicy.Preferred, QSizePolicy.Maximum)
         self.setTournamentBt.setStyleSheet("padding: 6px 16px; font-size: 11pt;")
         self.setTournamentBt.clicked.connect(
             lambda: AutonaTournamentDataProvider.instance.SetStartggEventSlug(self))
-        pre_base_layout.setContentsMargins(0, 8, 0, 8)
-        pre_base_layout.addWidget(self.setTournamentBt, 0, Qt.AlignmentFlag.AlignCenter)
+
+        splash.set_message(splash_msgs[2], progress=0.45)
 
         self.dockWidgets = []
 
         if not SettingsManager.Get("general.disable_thumbnail_widget", False):
             from .AutonaThumbnailSettingsWidget import AutonaThumbnailSettingsWidget
             thumbnailSetting = AutonaThumbnailSettingsWidget()
+            thumbnailSetting.setWindowIcon(QIcon(UI.icon_path('thumbnail.svg')))
             thumbnailSetting.setObjectName(
                 QApplication.translate("app", "Thumbnail Settings"))
             self.addDockWidget(
@@ -374,6 +385,7 @@ class Window(QMainWindow):
 
         from .AutonaResultSettingsWidget import AutonaResultSettingsWidget
         resultSetting = AutonaResultSettingsWidget()
+        resultSetting.setWindowIcon(QIcon(UI.icon_path('result.svg')))
         resultSetting.setObjectName(
             QApplication.translate("app", "Result Settings"))
         self.addDockWidget(
@@ -381,7 +393,7 @@ class Window(QMainWindow):
         self.dockWidgets.append(resultSetting)
 
         bracket = AutonaBracketWidget()
-        bracket.setWindowIcon(QIcon(UI.icon_path('info.svg')))
+        bracket.setWindowIcon(QIcon(UI.icon_path('bracket.svg')))
         bracket.setObjectName(
             QApplication.translate("app", "Bracket"))
         self.addDockWidget(
@@ -389,9 +401,11 @@ class Window(QMainWindow):
         self.dockWidgets.append(bracket)
 
         tournamentInfo = AutonaTournamentInfoWidget()
-        tournamentInfo.setWindowIcon(QIcon(UI.icon_path('info.svg')))
+        tournamentInfo.setWindowIcon(QIcon(UI.icon_path('tournament.svg')))
         tournamentInfo.setObjectName(
             QApplication.translate("app", "Tournament Info"))
+        # Place the "Set tournament" button at the very top of this tab.
+        tournamentInfo.InsertHeaderWidget(self.setTournamentBt)
         self.addDockWidget(
             Qt.DockWidgetArea.BottomDockWidgetArea, tournamentInfo)
         self.dockWidgets.append(tournamentInfo)
@@ -405,7 +419,7 @@ class Window(QMainWindow):
         # self.dockWidgets.append(teamBattle)
 
         self.scoreboard = AutonaScoreboardManager.instance
-        self.scoreboard.setWindowIcon(QIcon(UI.icon_path('list.svg')))
+        self.scoreboard.setWindowIcon(QIcon(UI.icon_path('scoreboard.svg')))
         self.scoreboard.setObjectName(
             QApplication.translate("app", "Scoreboard"))
         self.addDockWidget(
@@ -415,6 +429,7 @@ class Window(QMainWindow):
             QApplication.translate("app", "Scoreboard"))
 
         self.stageWidget = AutonaScoreboardStageWidget()
+        self.stageWidget.setWindowIcon(QIcon(UI.icon_path('stage.svg')))
         self.stageWidget.setObjectName(
             QApplication.translate("app", "Stage"))
         self.addDockWidget(
@@ -422,7 +437,7 @@ class Window(QMainWindow):
         self.dockWidgets.append(self.stageWidget)
 
         commentary = AutonaCommentaryWidget()
-        commentary.setWindowIcon(QIcon(UI.icon_path('mic.svg')))
+        commentary.setWindowIcon(QIcon(UI.icon_path('commentary.svg')))
         commentary.setObjectName(QApplication.translate("app", "Commentary"))
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, commentary)
         self.dockWidgets.append(commentary)
@@ -435,39 +450,46 @@ class Window(QMainWindow):
         self.stageWidget.stageStrikeLogic.signals.state_updated.connect(self.webserver.ws_ruleset)
 
         playerList = AutonaPlayerListWidget()
-        playerList.setWindowIcon(QIcon(UI.icon_path('list.svg')))
+        playerList.setWindowIcon(QIcon(UI.icon_path('players.svg')))
         playerList.setObjectName(QApplication.translate("app", "Player List"))
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, playerList)
         self.dockWidgets.append(playerList)
-        
+
         notes = AutonaNotesWidget()
+        notes.setWindowIcon(QIcon(UI.icon_path('notes.svg')))
         notes.setObjectName(QApplication.translate("app", "Additional Notes"))
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, notes)
         self.dockWidgets.append(notes)
 
         self.statsWidget = AutonaStatsWidget()
+        self.statsWidget.setWindowIcon(QIcon(UI.icon_path('stats.svg')))
         self.statsWidget.setObjectName(QApplication.translate("app", "Statistics"))
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.statsWidget)
         self.dockWidgets.append(self.statsWidget)
 
-        # Tab order: 大会情報, スコアボード, 統計情報, サムネイル, リザルト, プレイヤーリスト, 解説, ルール, トーナメント表, メモ
-        self.tabifyDockWidget(tournamentInfo, self.scoreboard)
-        self.tabifyDockWidget(self.scoreboard, self.statsWidget)
-        if not SettingsManager.Get("general.disable_thumbnail_widget", False):
-            self.tabifyDockWidget(self.statsWidget, thumbnailSetting)
-        self.tabifyDockWidget(self.statsWidget, resultSetting)
-        self.tabifyDockWidget(resultSetting, playerList)
-        self.tabifyDockWidget(playerList, commentary)
-        self.tabifyDockWidget(commentary, self.stageWidget)
-        self.tabifyDockWidget(self.stageWidget, bracket)
-        self.tabifyDockWidget(bracket, notes)
+        splash.set_message(splash_msgs[3], progress=0.75)
+        # Tab order: EVENT, SCORE, THUMB, STATS, PLAYERS, COMMS, RESULT,
+        # BRACKET, NOTES, RULES (RULES hidden by default).
+        previous = tournamentInfo
+        for nxt in (
+            self.scoreboard,
+            thumbnailSetting if not SettingsManager.Get(
+                "general.disable_thumbnail_widget", False) else None,
+            self.statsWidget,
+            playerList,
+            commentary,
+            resultSetting,
+            bracket,
+            notes,
+            self.stageWidget,
+        ):
+            if nxt is None:
+                continue
+            self.tabifyDockWidget(previous, nxt)
+            previous = nxt
 
-        # Initial visibility
-        playerList.setVisible(False)
-        commentary.setVisible(False)
+        # Only the RULES tab is hidden by default; others stay visible.
         self.stageWidget.setVisible(False)
-        bracket.setVisible(False)
-        notes.setVisible(False)
 
         tournamentInfo.raise_()
 
@@ -782,8 +804,17 @@ class Window(QMainWindow):
         if self.qtSettings.value(stateKey):
             self.restoreState(self.qtSettings.value(stateKey))
 
+        splash.set_message(splash_msgs[4], progress=1.0)
         splash.finish(self)
         self.show()
+
+        # Cover the main window with a spinner until Qt finishes its
+        # first-pass layout + paint, so the user doesn't see half-drawn
+        # widgets jump into place. The overlay dismisses itself after a
+        # short delay — long enough for one or two event-loop passes.
+        self._loading_overlay = LoadingOverlay(self)
+        self._loading_overlay.start()
+        QTimer.singleShot(1100, self._loading_overlay.finish)
 
         # Prevent tab labels from being elided ("…") — show full text so the
         # tab bar uses horizontal scrolling if it overflows.

@@ -520,6 +520,7 @@ class AutonaGameAssetManager(QObject):
                     with StateManager.SaveBlock():
                         StateManager.Set(f"game", {
                             "name": self.parent().selectedGame.get("name"),
+                            "abbreviation": self.parent().selectedGame.get("abbreviation"),
                             "smashgg_id": self.parent().selectedGame.get("smashgg_game_id"),
                             "codename": self.parent().selectedGame.get("codename"),
                             "logo": self.parent().selectedGame.get("path", "")+"/base_files/logo.png",
@@ -841,6 +842,7 @@ class AutonaGameAssetManager(QObject):
 
                     StateManager.Set(f"game", {
                         "name": self.parent.selectedGame.get("name"),
+                        "abbreviation": self.parent.selectedGame.get("abbreviation"),
                         "smashgg_id": self.parent.selectedGame.get("smashgg_game_id"),
                         "codename": self.parent.selectedGame.get("codename"),
                         "logo": self.parent.selectedGame.get("path", "")+"/base_files/logo.png",

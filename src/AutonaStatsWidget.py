@@ -14,7 +14,7 @@ class AutonaStatsWidget(QDockWidget):
     def __init__(self, *args):
         super().__init__(*args)
 
-        self.setWindowTitle(QApplication.translate("app", "統計情報"))
+        self.setWindowTitle(QApplication.translate("app", "Statistics"))
         self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.setFloating(False)
 

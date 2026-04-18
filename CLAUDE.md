@@ -53,21 +53,44 @@ Autona のカスタムフォーク。
 - コミットメッセージ・PR 説明文は日本語
 - コミット・プッシュは明示的に依頼されたときのみ
 
+### 作業ディレクトリ（worktree 禁止）
+
+- **Claude Code の worktree 機能（`.claude/worktrees/*`）は使わない**
+- 作業は常に `C:\Users\ayuyt\Work\30_Products\Autona` 直下で行う
+- 理由:
+  - 個人開発かつブランチ履歴は GitHub に集約しているため、ローカルの worktree で分岐する必然性がない
+  - worktree を使うと `node_modules` や `Autona.exe` が worktree 側に生成され、ユーザーの実運用ディレクトリと乖離する
+  - 増えた worktree の管理コストのほうが、並行作業の利点を上回る
+- 既に worktree に居る場合は、本体ディレクトリにファイルを転送してから続行する
+
 ---
 
 ## ビルド
+
+### 開発サイクル中は `python main.py` を使う
+
+**反復開発中の動作確認は必ず `python main.py` で行う**。PyInstaller による exe ビルドは 3〜5 分かかり、反復速度を著しく損なう。`python main.py` と exe は同じコードを実行するので、ほぼ全ての確認事項（UI・シグナル・StateManager・API 呼び出し等）は main.py で十分。
+
+exe ビルドが本当に必要なケース:
+- 配布前の最終確認
+- PyInstaller 固有の挙動検証（hook 不足、モジュール収集漏れ、データファイル同梱等）
+- 凍結後の挙動を疑う特定のバグ調査
+
+ユーザーから明示的に「ビルドして」「exe で確認」と言われた時のみ PyInstaller を実行する。
+
+### コマンド
 
 ```bash
 # Web UI（先に実行）
 cd stage_strike_app && npm run build
 
-# exe
+# exe（配布前のみ）
 pyinstaller dependencies/autona.spec --noconfirm
 
 # ビルド後のコピー
 cp dist/Autona.exe ./Autona.exe
 
-# 開発時の実行
+# 開発時の実行（基本これ）
 python main.py
 ```
 

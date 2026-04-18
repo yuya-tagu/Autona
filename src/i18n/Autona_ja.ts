@@ -99,6 +99,70 @@ p, li { white-space: pre-wrap; }
         <translation>参加人数</translation>
     </message>
     <message>
+        <source>Tournament Banner</source>
+        <translation>大会バナー</translation>
+    </message>
+    <message>
+        <source>Download tournament banner</source>
+        <translation>大会バナーをダウンロード</translation>
+    </message>
+    <message>
+        <source>Theme Colors</source>
+        <translation>テーマカラー</translation>
+    </message>
+    <message>
+        <source>Theme Color</source>
+        <translation>テーマ色</translation>
+    </message>
+    <message>
+        <source>Accent Color</source>
+        <translation>アクセント色</translation>
+    </message>
+    <message>
+        <source>Stream Settings</source>
+        <translation>配信設定</translation>
+    </message>
+    <message>
+        <source>Video Title</source>
+        <translation>動画タイトル</translation>
+    </message>
+    <message>
+        <source>Copy Video Title</source>
+        <translation>動画タイトルをコピー</translation>
+    </message>
+    <message>
+        <source>Title is auto-generated from tournament info, round and characters</source>
+        <translation>タイトルは大会情報・ラウンド・使用キャラから自動生成されます</translation>
+    </message>
+    <message>
+        <source>Stream Title</source>
+        <translation>配信タイトル</translation>
+    </message>
+    <message>
+        <source>Title is auto-generated from tournament info and seeds</source>
+        <translation>タイトルは大会情報とシード順から自動生成されます</translation>
+    </message>
+    <message>
+        <source>Copy Stream Title</source>
+        <translation>配信タイトルをコピー</translation>
+    </message>
+    <message>
+        <source>Thumbnail Style</source>
+        <translation>サムネイル形式</translation>
+    </message>
+    <message>
+        <source>Center Crop</source>
+        <translation>中央クロップ</translation>
+    </message>
+    <message>
+        <source>Netflix Style</source>
+        <translation>Netflix スタイル</translation>
+    </message>
+    <message>
+        <source>Generate Stream Thumbnail</source>
+        <translation>配信サムネイルを生成</translation>
+    </message>
+    <message>
         <location filename="../layout/AutonaBracket.ui" line="17"/>
         <source>Bracket</source>
         <translation>トーナメント表</translation>
@@ -1902,6 +1966,50 @@ p, li { white-space: pre-wrap; }
     <message>
         <source>Cannot post to X: the following fields are empty.</source>
         <translation>X に投稿できません。以下の項目が未入力です:</translation>
+    </message>
+    <message>
+        <source>Waiting for entrants from Start.gg...</source>
+        <translation>Start.gg から参加者情報を取得中...</translation>
+    </message>
+    <message>
+        <source>Seeds are not finalized. Set and publish seeds on Start.gg, then reload the tournament.</source>
+        <translation>シードが未確定です。Start.gg 上でシードを設定、公開後に再度大会を読み込んでください。</translation>
+    </message>
+    <message>
+        <source>Copied to clipboard.</source>
+        <translation>クリップボードにコピーしました。</translation>
+    </message>
+    <message>
+        <source>Nothing to copy.</source>
+        <translation>コピーする内容がありません。</translation>
+    </message>
+    <message>
+        <source>Load a tournament first.</source>
+        <translation>先に大会を読み込んでください。</translation>
+    </message>
+    <message>
+        <source>No tournament banner available.</source>
+        <translation>大会バナーを取得できません。</translation>
+    </message>
+    <message>
+        <source>Saved: </source>
+        <translation>保存しました: </translation>
+    </message>
+    <message>
+        <source>Error: </source>
+        <translation>エラー: </translation>
+    </message>
+    <message>
+        <source>Slot {0} - Player</source>
+        <translation>スロット {0} - プレイヤー</translation>
+    </message>
+    <message>
+        <source>Slot {0} - Team</source>
+        <translation>スロット {0} - チーム</translation>
+    </message>
+    <message>
+        <source>Statistics</source>
+        <translation>統計情報</translation>
     </message>
 </context>
 <context>

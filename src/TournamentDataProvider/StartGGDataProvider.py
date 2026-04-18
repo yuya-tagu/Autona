@@ -44,6 +44,9 @@ class StartGGDataProvider(TournamentDataProvider):
     def __init__(self, url, threadpool, tshTdp) -> None:
         super().__init__(url, threadpool, tshTdp)
         self.name = "StartGG"
+        # In-memory cache of entrants sorted by initialSeedNum for the current
+        # event, populated by GetEntrantsWorker. Each item: {"seed": int, "gamerTag": str}.
+        self.top_entrants = []
 
     # Queries the provided URL until a proper 200 status code has been provided back
     #
@@ -635,6 +638,7 @@ class StartGGDataProvider(TournamentDataProvider):
             "team1score": _set.get("entrant1Score", 0),
             "team2score": _set.get("entrant2Score", 0),
             "round_name": round_name,
+            "round_name_en": _set.get("fullRoundText") or "",
             "tournament_phase": phase_name,
             "bracket_type": bracket_type,
             "p1_name": p1.get("entrant", {}).get("name", "") if p1 and p1.get("entrant") != None else "",
@@ -1749,6 +1753,8 @@ class StartGGDataProvider(TournamentDataProvider):
             totalPages = 1
             # final_data = QStandardItemModel()
             players = []
+            # Reset top_entrants cache at the start of a fresh fetch
+            self.top_entrants = []
 
             while page <= totalPages:
                 logger.info(str(page) + "/" + str(totalPages))
@@ -1773,18 +1779,38 @@ class StartGGDataProvider(TournamentDataProvider):
                 logger.info("Entrants: " + str(len(entrants)))
 
                 for i, team in enumerate(entrants):
-                    for j, entrant in enumerate(team.get("participants", [])):
+                    seed = team.get("initialSeedNum", 0)
+                    participants = team.get("participants", [])
+                    for j, entrant in enumerate(participants):
                         playerData = StartGGDataProvider.ProcessEntrantData(
                             entrant)
-                        playerData["seed"] = team.get("initialSeedNum", 0)
+                        playerData["seed"] = seed
                         self.player_seeds[playerData["id"]
                                           [0]] = playerData["seed"]
                         players.append(playerData)
+                    # Capture entry-level info for stream title generation
+                    # (one record per team/entrant, using first participant's
+                    # gamerTag without sponsor prefix)
+                    if participants:
+                        first = StartGGDataProvider.ProcessEntrantData(participants[0])
+                        gamerTag = first.get("gamerTag") or first.get("name") or ""
+                        self.top_entrants.append({
+                            "seed": seed if seed else 999999,
+                            "gamerTag": gamerTag
+                        })
 
                 AutonaPlayerDB.AddPlayers(players)
                 players = []
 
                 page += 1
+
+            # Sort by seed (ascending); unseeded entries fall to the bottom
+            self.top_entrants.sort(key=lambda e: e["seed"])
+
+            try:
+                self.tshTdp.signals.entrants_updated.emit()
+            except Exception:
+                logger.error(traceback.format_exc())
         except Exception as e:
             logger.error(traceback.format_exc())
 

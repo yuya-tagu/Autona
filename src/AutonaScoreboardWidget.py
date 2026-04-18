@@ -1460,6 +1460,13 @@ class AutonaScoreboardWidget(QWidget):
                 self.matchCombo.setCurrentText(round_name)
                 self.matchCombo.lineEdit().editingFinished.emit()
                 StateManager.Set(f"score.{self.scoreboardNumber}.match", round_name)
+            # Also persist the raw English long-form round text (e.g.
+            # "Winners Final"); used for English-only outputs like the
+            # YouTube video title generator.
+            StateManager.Set(
+                f"score.{self.scoreboardNumber}.match_en",
+                data.get("round_name_en") or "",
+            )
 
             tournament_phase = data.get("tournament_phase")
             if tournament_phase:
