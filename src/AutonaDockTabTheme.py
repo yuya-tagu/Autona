@@ -149,6 +149,16 @@ class AutonaDockTabPainter(QObject):
         app.installEventFilter(self)
         logger.info("[DockTab] Application-wide event filter installed")
 
+    def prime(self, window: QMainWindow) -> None:
+        """Eagerly configure every dock QTabBar already alive under
+        `window`. Intended to be called right before the window's first
+        `show()` — waiting for Qt's Show event leaves a window where the
+        first Paint still uses Qt's default geometry, and the tab bar
+        visibly flashes its unstyled look before settling."""
+        for tab_bar in window.findChildren(QTabBar):
+            if self._is_dock_tab_bar(tab_bar):
+                self._configure_tab_bar(tab_bar)
+
     # ── Qt event filter hook ───────────────────────────────
 
     def eventFilter(self, obj: QObject, event: QEvent) -> bool:  # noqa: N802
@@ -214,6 +224,15 @@ class AutonaDockTabPainter(QObject):
             else:
                 tab_bar.setFixedHeight(SIDEBAR_TAB_HEIGHT)
             tab_bar.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+            # Force the stylesheet / size-hint to be applied synchronously
+            # so that the first Paint uses the correct geometry. Without
+            # this, setStyleSheet's effect arrives asynchronously and the
+            # first frame renders with Qt's default tab sizes.
+            tab_bar.ensurePolished()
+            tab_bar.updateGeometry()
+            parent = tab_bar.parentWidget()
+            if parent is not None and parent.layout() is not None:
+                parent.layout().activate()
         # Replace each tab's text with its short English label every time
         # (new tabs may have been tabified since last Show).
         self._shorten_tab_texts(tab_bar)

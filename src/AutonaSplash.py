@@ -20,8 +20,6 @@ from __future__ import annotations
 
 import random
 
-import time
-
 from qtpy.QtCore import (
     QPoint,
     QRect,
@@ -87,9 +85,11 @@ PROGRESS_BAR_RADIUS = 3
 COLOR_PROGRESS_TRACK = QColor("#2A2014")
 COLOR_PROGRESS_FILL_A = QColor("#C41232")
 COLOR_PROGRESS_FILL_B = QColor("#F0C45A")
-# Smoothly tween between discrete progress checkpoints instead of snapping.
-PROGRESS_TWEEN_MS = 350
-PROGRESS_TICK_MS = 16  # ~60fps
+# Progress bar: set_message() snaps to the new value and returns
+# immediately. We deliberately do not animate between checkpoints — the
+# splash exists to mask a long startup, so blocking init to run a tween
+# would be counterproductive. The caller fires many small checkpoints
+# during init and the bar advances in short visible hops.
 
 
 # ──────────────────────────────────────────────────────────
@@ -100,41 +100,31 @@ SPLASH_MESSAGE_PATTERNS: list[list[str]] = [
     # 大会運営スタッフ
     [
         "スタッフたちを起こしています...",
-        "運営道具をあつめています...",
         "設営中...",
-        "ミスが無いよう指差し確認...",
         "GO LIVE!",
     ],
     # 配信クルー
     [
         "配信クルーを招集中...",
-        "ケーブルとマイクを接続中...",
         "カメラの位置調整中...",
-        "音量チェック、問題なし...",
         "オンエア!",
     ],
     # 試合前プレイヤー
     [
         "選手入場前、控室で待機...",
-        "コントローラーを握りしめる...",
         "スパーリングで指慣らし...",
-        "深呼吸、気合い入れ直し...",
         "READY... FIGHT!",
     ],
     # 裏方演出家
     [
         "幕開け前、楽屋をのぞきに...",
-        "小道具を舞台袖へ運搬中...",
         "照明と音響のリハ...",
-        "開演 5 分前、立ち位置確認...",
         "開幕!!",
     ],
     # 冒険者ギルド
     [
         "ギルドの扉を開けます...",
-        "装備品を整えています...",
         "作戦会議を開始...",
-        "出発前、仲間と顔を見合わせ...",
         "いざ、出陣!",
     ],
 ]
@@ -150,8 +140,9 @@ def pick_splash_messages() -> list[str]:
 
 
 class AutonaSplashScreen(QSplashScreen):
-    """Splash with a painted RPG-style background and an animated
-    trailing-dots indicator on messages that end in '...'."""
+    """Splash with a painted RPG-style background and a discrete progress
+    bar. Each set_message() snaps the bar to its new value and returns
+    immediately — no animation runs between checkpoints."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         self._base_pixmap = _render_base_pixmap()
@@ -160,55 +151,21 @@ class AutonaSplashScreen(QSplashScreen):
 
         self._message_base = ""
         self._progress = 0.0
-        self._progress_start = 0.0
-        self._progress_target = 0.0
-        self._progress_tween_start = 0.0
-        self._progress_timer = QTimer(self)
-        self._progress_timer.setInterval(PROGRESS_TICK_MS)
-        self._progress_timer.timeout.connect(self._tween_progress)
 
     # ── Public API ─────────────────────────────────────────
 
     def set_message(self, text: str, progress: float | None = None) -> None:
-        """Display `text`, optionally advancing the progress bar to
-        `progress` (0.0–1.0) via a smooth tween. Returns immediately —
-        does not block the caller's thread."""
-        if progress is not None:
-            self._start_progress_tween(float(progress))
+        """Snap the bar to `progress` (0.0–1.0) and display `text`.
+        Returns immediately; one short processEvents pass paints the
+        new frame without blocking init."""
         self._message_base = text
+        if progress is not None:
+            self._progress = max(0.0, min(1.0, float(progress)))
         self._render_message()
         QApplication.processEvents()
 
     def finish(self, main_window: QWidget) -> None:  # type: ignore[override]
-        self._progress_timer.stop()
         super().finish(main_window)
-
-    # ── Internals ──────────────────────────────────────────
-
-    def _start_progress_tween(self, target: float) -> None:
-        """Begin a smooth tween of the progress bar from its current
-        value to `target`. Driven by _progress_timer (QTimer); ticks
-        whenever the Qt event loop processes events during init."""
-        target = max(0.0, min(1.0, target))
-        self._progress_start = self._progress
-        self._progress_target = target
-        self._progress_tween_start = time.monotonic()
-        if not self._progress_timer.isActive():
-            self._progress_timer.start()
-
-    def _tween_progress(self) -> None:
-        elapsed_ms = (time.monotonic() - self._progress_tween_start) * 1000
-        t = min(1.0, elapsed_ms / PROGRESS_TWEEN_MS)
-        # Ease-out cubic for a gentle settle near the target.
-        e = 1.0 - (1.0 - t) ** 3
-        self._progress = (
-            self._progress_start
-            + (self._progress_target - self._progress_start) * e
-        )
-        self._render_message()
-        if t >= 1.0:
-            self._progress = self._progress_target
-            self._progress_timer.stop()
 
     # ── Internals ──────────────────────────────────────────
 

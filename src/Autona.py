@@ -327,9 +327,9 @@ class Window(QMainWindow):
         self.allplayers = None
         self.local_players = None
 
-        splash.set_message(splash_msgs[1], progress=0.25)
         AutonaControllerHelper.instance.init()
         AutonaCountryHelper.instance.init()
+        splash.set_message(splash_msgs[0], progress=0.15)
 
         try:
             version = json.load(
@@ -369,7 +369,7 @@ class Window(QMainWindow):
         self.setTournamentBt.clicked.connect(
             lambda: AutonaTournamentDataProvider.instance.SetStartggEventSlug(self))
 
-        splash.set_message(splash_msgs[2], progress=0.45)
+        splash.set_message(splash_msgs[1], progress=0.25)
 
         self.dockWidgets = []
 
@@ -399,6 +399,7 @@ class Window(QMainWindow):
         self.addDockWidget(
             Qt.DockWidgetArea.BottomDockWidgetArea, bracket)
         self.dockWidgets.append(bracket)
+        splash.set_message(splash_msgs[1], progress=0.40)
 
         tournamentInfo = AutonaTournamentInfoWidget()
         tournamentInfo.setWindowIcon(QIcon(UI.icon_path('tournament.svg')))
@@ -427,6 +428,7 @@ class Window(QMainWindow):
         self.dockWidgets.append(self.scoreboard)
         AutonaScoreboardManager.instance.setWindowTitle(
             QApplication.translate("app", "Scoreboard"))
+        splash.set_message(splash_msgs[1], progress=0.55)
 
         self.stageWidget = AutonaScoreboardStageWidget()
         self.stageWidget.setWindowIcon(QIcon(UI.icon_path('stage.svg')))
@@ -448,6 +450,7 @@ class Window(QMainWindow):
         self.signals.GameChanged.connect(self.webserver.ws_program_state)
         self.signals.GameChanged.connect(self.webserver.ws_get_characters)
         self.stageWidget.stageStrikeLogic.signals.state_updated.connect(self.webserver.ws_ruleset)
+        splash.set_message(splash_msgs[1], progress=0.70)
 
         playerList = AutonaPlayerListWidget()
         playerList.setWindowIcon(QIcon(UI.icon_path('players.svg')))
@@ -467,7 +470,8 @@ class Window(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.statsWidget)
         self.dockWidgets.append(self.statsWidget)
 
-        splash.set_message(splash_msgs[3], progress=0.75)
+        splash.set_message(splash_msgs[1], progress=0.85)
+
         # Tab order: EVENT, SCORE, THUMB, STATS, PLAYERS, COMMS, RESULT,
         # BRACKET, NOTES, RULES (RULES hidden by default).
         previous = tournamentInfo
@@ -804,7 +808,11 @@ class Window(QMainWindow):
         if self.qtSettings.value(stateKey):
             self.restoreState(self.qtSettings.value(stateKey))
 
-        splash.set_message(splash_msgs[4], progress=1.0)
+        splash.set_message(splash_msgs[2], progress=1.0)
+        # Pre-configure dock tab bars so the first paint uses our styled
+        # geometry instead of flashing Qt's default tab visuals.
+        from .AutonaDockTabTheme import install_dock_tab_theme
+        install_dock_tab_theme().prime(self)
         splash.finish(self)
         self.show()
 
