@@ -100,12 +100,12 @@ LABEL_GAP = 3
 BG_RADIUS = 8
 BG_EDGE_MARGIN = 6   # gap between tab bar edge and the gradient rectangle
 
-# Amount by which painted tab cells (pill + icon + label) are shifted along
-# the stack axis so the first tab sits INSIDE the gradient with visible
-# breathing room between the gradient edge and the first pill. Qt's
-# hit-testing uses the original (unshifted) rects, so normal clicks on
-# the visible pill still land in the correct cell.
-TAB_STACK_OFFSET = 12
+# Breathing room painted above the first tab (or left of it, for
+# horizontal bars). Implemented the same way as inter-tab spacing: the
+# first tab's pill/icon/label are painted shifted inward by this amount,
+# while Qt's tab rect — and therefore hit-testing — still spans the full
+# cell, so clicks on the blank area still select the first tab.
+FIRST_TAB_LEADING_PAD = 12
 
 # Inset + radius for the rounded "pill" highlighting the selected/hover tab.
 TAB_INNER_MARGIN_X = 4
@@ -171,6 +171,16 @@ class AutonaDockTabPainter(QObject):
         elif etype == QEvent.Type.Paint:
             self._paint(obj)
             return True
+        # Repaint on hover movement so HOVER_OVERLAY tracks the cursor.
+        # WA_Hover is set during configure, but Qt won't request a paint
+        # on its own for our custom hover highlight.
+        elif etype in (
+            QEvent.Type.HoverEnter,
+            QEvent.Type.HoverMove,
+            QEvent.Type.HoverLeave,
+            QEvent.Type.Leave,
+        ):
+            obj.update()
         return False
 
     # ── Helpers ────────────────────────────────────────────
@@ -208,16 +218,31 @@ class AutonaDockTabPainter(QObject):
             # Force a uniform tab cell size via widget-local QSS. Our
             # Paint-event override bypasses QSS drawing, so these rules
             # only affect Qt's geometry calculation, not rendering.
-            # (QSS `padding-left` on QTabBar does not reliably shift the
-            # internal tab cells in QMainWindow's private dock tab bar, so
-            # we shift visually in paint via TAB_STACK_OFFSET instead.)
+            # `:first` enlarges the leading cell along the stack axis
+            # (height for vertical bars, width for horizontal) so the
+            # first tab can host a 12px blank region AND a full-size
+            # pill. The cross axis must be left unchanged, otherwise the
+            # first tab's cell breaks alignment with the rest.
+            if self._is_vertical(tab_bar):
+                first_rule = (
+                    f"QTabBar::tab:first {{ "
+                    f"min-height: {SIDEBAR_TAB_HEIGHT + FIRST_TAB_LEADING_PAD}px; "
+                    f"max-height: {SIDEBAR_TAB_HEIGHT + FIRST_TAB_LEADING_PAD}px; }}"
+                )
+            else:
+                first_rule = (
+                    f"QTabBar::tab:first {{ "
+                    f"min-width: {SIDEBAR_WIDTH + FIRST_TAB_LEADING_PAD}px; "
+                    f"max-width: {SIDEBAR_WIDTH + FIRST_TAB_LEADING_PAD}px; }}"
+                )
             tab_bar.setStyleSheet(
                 f"QTabBar::tab {{ "
                 f"min-height: {SIDEBAR_TAB_HEIGHT}px; "
                 f"max-height: {SIDEBAR_TAB_HEIGHT}px; "
                 f"min-width: {SIDEBAR_WIDTH}px; "
                 f"max-width: {SIDEBAR_WIDTH}px; "
-                f"padding: 0; margin: 0; }}"
+                f"padding: 0; margin: 0; }} "
+                + first_rule
             )
             if self._is_vertical(tab_bar):
                 tab_bar.setFixedWidth(SIDEBAR_WIDTH)
@@ -368,14 +393,17 @@ class AutonaDockTabPainter(QObject):
         raw = tab_bar.tabRect(index)
         if not raw.isValid():
             return
-        # Shift every tab along the stack axis so the first tab doesn't
-        # sit flush against the tab bar edge. Qt's click hit-testing uses
-        # the original (unshifted) rects; normal clicks on the visible
-        # pill still land inside the correct cell.
-        if self._is_vertical(tab_bar):
-            tab_rect = raw.translated(0, TAB_STACK_OFFSET)
+        # Shrink the first tab's paint rect inward along the stack axis
+        # so its pill doesn't sit flush against the gradient edge. The
+        # underlying cell (hit-test) is unchanged, so clicks on the blank
+        # area still select this tab.
+        if index == 0 and FIRST_TAB_LEADING_PAD > 0:
+            if self._is_vertical(tab_bar):
+                tab_rect = raw.adjusted(0, FIRST_TAB_LEADING_PAD, 0, 0)
+            else:
+                tab_rect = raw.adjusted(FIRST_TAB_LEADING_PAD, 0, 0, 0)
         else:
-            tab_rect = raw.translated(TAB_STACK_OFFSET, 0)
+            tab_rect = raw
         selected = index == current
         is_hover = index == hovered and not selected
 
