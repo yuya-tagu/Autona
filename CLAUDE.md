@@ -53,15 +53,23 @@ Autona のカスタムフォーク。
 - コミットメッセージ・PR 説明文は日本語
 - コミット・プッシュは明示的に依頼されたときのみ
 
-### 作業ディレクトリ（worktree 禁止）
+### 作業ディレクトリ（worktree 運用）
 
-- **Claude Code の worktree 機能（`.claude/worktrees/*`）は使わない**
-- 作業は常に `C:\Users\ayuyt\Work\30_Products\Autona` 直下で行う
+- **Claude Code の worktree 機能（`.claude/worktrees/*`）を使う**
+- ルートリポジトリ `C:\Users\ayuyt\Work\30_Products\Autona` は常に `main`
+  に揃えておく（作業用ブランチはチェックアウトしない）
+- 新しい機能ブランチは worktree 側で作成・編集し、PR マージ後に worktree を
+  破棄する
 - 理由:
-  - 個人開発かつブランチ履歴は GitHub に集約しているため、ローカルの worktree で分岐する必然性がない
-  - worktree を使うと `node_modules` や `Autona.exe` が worktree 側に生成され、ユーザーの実運用ディレクトリと乖離する
-  - 増えた worktree の管理コストのほうが、並行作業の利点を上回る
-- 既に worktree に居る場合は、本体ディレクトリにファイルを転送してから続行する
+  - ルートを `main` 固定にすることで、ユーザーがデバッグ（`python main.py` や
+    exe の実行）する際に必ず「リリース済みの最新コード」を触れる
+  - Claude の並行作業による意図しないファイル変更がルートへ波及しない
+  - PR 作業中でもルート側で既存機能を検証できる
+- ビルド成果物（`Autona.exe`、`stage_strike_app/build/`、`dist/` 等）は
+  ルート側で運用する。worktree 内のビルド成果物は参考程度に留める
+- 既に worktree に居る場合は、その worktree 内で作業を継続して差し支えない
+  （PR マージ後にルート側で `git pull` し、不要な worktree は `git worktree
+  remove` で片付ける）
 
 ---
 
