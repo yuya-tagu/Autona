@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+# Disable .pyc generation before any package imports so a stale
+# __pycache__ can never shadow freshly-edited source files. Was a
+# common debugging footgun: Edit tool would rewrite a .py without
+# updating its mtime, Python would reuse the cached bytecode, and
+# the running app would execute code that no longer matched disk.
+import sys
+sys.dont_write_bytecode = True
+
 import src
 import multiprocessing
 import signal
-import sys
 import os
 import asyncio
 from qasync import run, QEventLoop

@@ -65,3 +65,56 @@ globs:
 
 ビルド後の実行ファイルは `Autona.exe`（プロジェクトルート直下）。`dist/Autona.exe` ではない。
 PyInstaller の `--distpath .` オプションで直下に出力している。
+
+## 9. Qt シグナルハンドラ内で `processEvents()` を呼ばない
+
+`QGuiApplication.processEvents()` はイベントループを同期で再入させるため、
+シグナルハンドラ内で呼ぶと同じシグナルが再度 dispatch されたり、
+構築途中のウィジェットに対して paint イベントが走ったりして C++ レベルの
+access violation を起こす。
+
+- widget レイアウト解決後に何かしたいときは `QTimer.singleShot(0, fn)` で defer
+- `UpdatePhaseGroup` のような長時間走るハンドラには再入ガードを置く:
+  ```python
+  if self._updatingPhaseGroup:
+      logger.warning("re-entrant call, skipping")
+      return
+  self._updatingPhaseGroup = True
+  try:
+      ...
+  finally:
+      self._updatingPhaseGroup = False
+  ```
+- QSpinBox.valueChanged 等のシグナル内からモーダル (`QMessageBox.exec()`) を
+  呼ばない（CLAUDE.md の「モーダル入れ子禁止」と同根）
+
+## 10. `QGraphicsScene.clear()` を連続で呼ばない
+
+scene に `QGraphicsProxyWidget` で大量ウィジェット (100+) が乗っているとき、
+短時間に `clear()` → 再構築 → `clear()` → 再構築を繰り返すと、proxy の
+非同期破棄と新規 widget 生成が競合して access violation を起こす。
+
+- loading 状態を表示したいときは **scene 外の QLabel オーバーレイ**
+  (parent=QGraphicsView 本体) を使い、scene は触らない
+- 参考実装: `AutonaBracketView.loadingOverlay` と `ShowLoading()`
+
+## 11. Start.gg GQL クエリの 20 秒タイムアウト
+
+`StartGGDataProvider._request_timeout_secs = 20`。重いクエリ
+（`TournamentPhaseGroupQuery` の seeds + sets 全取得など）に新フィールドを
+追加するとすぐ timeout する。追加時は以下を意識:
+
+- `user.images`, `authorizations`, `player.sets.games.selections` のような
+  **ネスト深いフィールド**は bracket 表示に必須でなければ削る
+- レスポンス 1MB を超えると危険域
+- `QueryRequests` には指数バックオフ (1/2/4/8s) 組込済。5 回失敗で `{}`
+  が返るので、呼び出し側は空データでも壊れないように null-safe に書く
+
+## 12. Edit/Write ツール後は `__pycache__` が古い可能性
+
+Claude Code の Edit/Write が Windows 上でソース mtime を更新しない場合があり、
+Python が古い .pyc を使い続けて修正が反映されない。
+
+- `main.py` 冒頭で `sys.dont_write_bytecode = True` を設定済み（根本対策）
+- それでも疑わしい挙動があれば
+  `find src -name "*.pyc" -delete` で .pyc を全消しして再実行

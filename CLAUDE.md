@@ -68,8 +68,29 @@ Autona のカスタムフォーク。
 - ビルド成果物（`Autona.exe`、`stage_strike_app/build/`、`dist/` 等）は
   ルート側で運用する。worktree 内のビルド成果物は参考程度に留める
 - 既に worktree に居る場合は、その worktree 内で作業を継続して差し支えない
-  （PR マージ後にルート側で `git pull` し、不要な worktree は `git worktree
-  remove` で片付ける）
+
+#### 命名規則
+
+- **作成時**: ブランチ名を `claude/YYYYMMDDHHmmss` 形式にする
+  （例: `claude/20260420041530`）。ディレクトリ名も同じ timestamp を使う
+  - 作成時点では機能内容が固まっていないことが多いので、作成時刻のみで識別
+- **PR 作成時**: ブランチを `feature/YYYYMMDDHHmmss-<機能概要>` にリネーム
+  （例: `feature/20260420041530-bracket-flexible-de`）
+  - `git branch -m <new-name>` → `git push origin -u <new-name>` →
+    リモートの古いブランチ (`git push origin --delete <old-name>`) を削除
+  - 機能概要は英語ケバブケースで短く（PR タイトルそのものでなくて良い）
+- この運用により、worktree が増えても「いつ・何を」のログが残り、
+  並行作業が時系列で俯瞰できる
+
+#### 掃除ルール
+
+- **PR マージ直後** に以下を実行:
+  - ルート側で `git fetch --prune` → `git checkout main` → `git pull`
+  - `git worktree remove <worktree-path>` で不要 worktree を削除
+  - マージ済みローカルブランチを `git branch -d <branch>` で削除
+- **気が向いたら**:
+  - `git worktree list` で残存確認
+  - `git worktree prune` で既に消えたディレクトリの参照をクリーンアップ
 
 ---
 
