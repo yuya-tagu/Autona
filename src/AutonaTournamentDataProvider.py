@@ -206,6 +206,9 @@ class AutonaTournamentDataProvider(QObject):
             AutonaTournamentDataProvider.instance.signals.user_updated.emit()
 
     def GetTournamentData(self, initialLoading=False):
+        if self.provider is None:
+            logger.warning("GetTournamentData called with no provider set")
+            return
         worker = Worker(self.provider.GetTournamentData)
         worker.signals.result.connect(lambda tournamentData: self._onTournamentDataResult(tournamentData, initialLoading))
         self.threadPool.start(worker)
@@ -220,6 +223,8 @@ class AutonaTournamentDataProvider(QObject):
         self.signals.tournament_data_updated.emit(tournamentData)
 
     def GetTournamentPhases(self):
+        if self.provider is None:
+            return
         worker = Worker(self.provider.GetTournamentPhases)
         worker.signals.result.connect(lambda tournamentPhases: [
             AutonaTournamentDataProvider.instance.signals.tournament_phases_updated.emit(
@@ -228,6 +233,8 @@ class AutonaTournamentDataProvider(QObject):
         self.threadPool.start(worker)
 
     def GetTournamentPhaseGroup(self, id):
+        if self.provider is None:
+            return
         worker = Worker(self.provider.GetTournamentPhaseGroup, **{"id": id})
         worker.signals.result.connect(lambda phaseGroupData: [
             AutonaTournamentDataProvider.instance.signals.tournament_phasegroup_updated.emit(
@@ -236,6 +243,8 @@ class AutonaTournamentDataProvider(QObject):
         self.threadPool.start(worker)
 
     def LoadSets(self, showFinished):
+        if self.provider is None:
+            return
         if self.setLoadingWorker:
             # If there was a previous set loading worker,
             # block its signals
@@ -265,6 +274,8 @@ class AutonaTournamentDataProvider(QObject):
         self.threadPool.start(worker)
 
     def LoadStations(self):
+        if self.provider is None:
+            return
         worker = Worker(self.provider.GetStations)
         worker.signals.result.connect(lambda data: [
             logger.info(data),
@@ -281,6 +292,8 @@ class AutonaTournamentDataProvider(QObject):
             self.threadPool.start(worker)
 
     def LoadStationSetsDo(self, mainWindow, progress_callback=None, cancel_event=None):
+        if AutonaTournamentDataProvider.instance.provider is None:
+            return
         stationSet = None
 
         if mainWindow.lastStationSelected.get("type") == "stream":
@@ -312,6 +325,8 @@ class AutonaTournamentDataProvider(QObject):
         mainWindow.signals.NewSetSelected.emit(stationSet)
 
     def LoadUserSet(self, mainWindow, user):
+        if AutonaTournamentDataProvider.instance.provider is None:
+            return
         _set = AutonaTournamentDataProvider.instance.provider.GetUserMatchId(user)
 
         if not _set:
@@ -322,6 +337,8 @@ class AutonaTournamentDataProvider(QObject):
 
     # omits the first one (loaded through NewSetSelected)
     def GetStationMatches(self, matchesId, mainWindow):
+        if self.provider is None:
+            return
         matchesId = matchesId[1:]
 
         worker = Worker(self.provider.GetFutureMatchesList, **{
@@ -333,6 +350,8 @@ class AutonaTournamentDataProvider(QObject):
         self.threadPool.start(worker)
 
     def GetMatch(self, mainWindow, setId, overwrite=True, no_mains=False):
+        if self.provider is None:
+            return
         worker = Worker(self.provider.GetMatch, **
                         {"setId": setId})
         worker.signals.result.connect(lambda data: [
@@ -342,12 +361,16 @@ class AutonaTournamentDataProvider(QObject):
         self.threadPool.start(worker)
 
     def GetRecentSets(self, callback, id1, id2, videogame):
+        if self.provider is None:
+            return
         worker = Worker(self.provider.GetRecentSets, **{
             "id1": id1, "id2": id2, "callback": callback, "requestTime": time.time_ns(), "videogame": videogame
         })
         self.threadPool.start(worker)
 
     def GetStandings(self, playerNumber, callback):
+        if self.provider is None:
+            return
         worker = Worker(self.provider.GetStandings, **{
             "playerNumber": playerNumber
         })
@@ -357,6 +380,8 @@ class AutonaTournamentDataProvider(QObject):
         self.threadPool.start(worker)
 
     def GetLastSets(self, callback, playerId, playerNumber):
+        if self.provider is None:
+            return
         worker = Worker(self.provider.GetLastSets, **{
             "playerID": playerId[0],
             "playerNumber": playerNumber,
@@ -365,6 +390,8 @@ class AutonaTournamentDataProvider(QObject):
         self.threadPool.start(worker)
 
     def GetPlayerHistoryStandings(self, callback, playerId, playerNumber, gameType):
+        if self.provider is None:
+            return
         worker = Worker(self.provider.GetPlayerHistoryStandings, **{
             "playerID": playerId[0],
             "playerNumber": playerNumber,
@@ -374,6 +401,8 @@ class AutonaTournamentDataProvider(QObject):
         self.threadPool.start(worker)
 
     def GetCompletedSets(self):
+        if self.provider is None:
+            return
         worker = Worker(self.provider.GetCompletedSets)
         worker.signals.result.connect(lambda completedSets: [
             AutonaTournamentDataProvider.instance.signals.completed_sets_updated.emit(
@@ -382,6 +411,8 @@ class AutonaTournamentDataProvider(QObject):
         self.threadPool.start(worker)
 
     def GetStreamQueue(self):
+        if self.provider is None:
+            return
         worker = Worker(self.provider.GetStreamQueue)
         worker.signals.result.connect(lambda streamQueue: [
             AutonaTournamentDataProvider.instance.signals.stream_queue_loaded.emit(
