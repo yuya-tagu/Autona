@@ -1,4 +1,3 @@
-import math
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from loguru import logger
 import traceback
@@ -9,334 +8,309 @@ class BracketSet():
     PENDING = -2
 
     def __init__(self, bracket: "Bracket", pos) -> None:
-        self.bracket: Bracket = bracket
+        self.bracket: "Bracket" = bracket
         self.playerIds = [BracketSet.BYE, BracketSet.BYE]
         self.score = [0, 0]
         self.winNext: "BracketSet" = None
         self.winNextSlot: int = 0
         self.loseNext: "BracketSet" = None
         self.loseNextSlot: int = 0
-        self.pos = pos
+        self.pos = pos  # [roundNum:int, indexInRound:int]
         self.finished = False
-
-# Bracket always has a power of 2 number of players
-# if there are less than that, we round up and add
-# 'bye's as the lower seeded players
-
-
-def next_power_of_2(x):
-    return 1 if x == 0 else 2**math.ceil(math.log2(x))
-
-# Seeding order logic
-
-
-def seeding(numPlayers):
-    rounds = math.log(numPlayers)/math.log(2)-1
-    pls = [1, 2]
-    for i in range(int(rounds)):
-        pls = nextLayer(pls)
-    return pls
-
-# Checks if a number is power of 2
-
-
-def is_power_of_two(n):
-    return (n != 0) and (n & (n-1) == 0)
-
-
-def nextLayer(pls):
-    out = []
-    length = len(pls)*2+1
-
-    for d in pls:
-        out.append(d)
-        out.append(length-d)
-    return out
+        self.setId = None
+        self.identifier = None
+        self.fullRoundText = None
+        # If any slot is prereqType == "bye", the set is a pre-resolved bye
+        # that should not be rendered.
+        self.isByeSet = False
 
 
 class Bracket():
-    def __init__(self, playerNumber, progressionsIn, seedMap=None, winnersOnlyProgressions=False, customSeeding=False, progressionsOut=0) -> None:
-        self.originalPlayerNumber = playerNumber
-        self.playerNumber = next_power_of_2(playerNumber)
+    """Start.gg driven bracket.
 
-        self.progressionsIn = progressionsIn
-        self.progressionsOut = progressionsOut
+    Unlike the old implementation, this class does not pre-build a power-of-two
+    tournament topology. It consumes the rounds/slots structure returned by
+    Start.gg verbatim:
 
-        if seedMap:
-            if len(seedMap) < self.playerNumber:
-                for i in range(len(seedMap)+1, self.playerNumber+1):
-                    seedMap.append(-1)
-            seeds = seedMap
-        else:
-            seeds = seeding(self.playerNumber)
+        sets = {
+            "1":  [ {id, slots:[{prereqType, prereqId, prereqPlacement, seedNum, entrantId}, ...], score, finished, ...}, ... ],
+            "2":  [ ... ],
+            ...
+            "-1": [ ... ],
+            ...
+        }
 
-        self.seedMap = seeds
+    Round keys follow Start.gg's convention: positive = winners, negative =
+    losers, max(positive) = grand final, max(positive)+1 = GF reset.
+    """
 
-        self.winnersOnlyProgressions = winnersOnlyProgressions
+    def __init__(self, phaseGroupData=None):
+        self.rounds = {}  # roundKey(str) -> list[BracketSet]
+        self.setsById = {}  # Start.gg set id -> BracketSet
+        self.entrantCount = 0
+        self.originalPlayerNumber = 0
 
-        self.customSeeding = customSeeding
+        # Progression flags are no longer auto-applied to bracket topology.
+        # They are kept as attributes for downstream state compatibility only.
+        self.progressionsIn = 0
+        self.progressionsOut = 0
+        self.winnersOnlyProgressions = True
+        self.customSeeding = False
 
-        if progressionsIn > 0 and -1 in self.seedMap:
-            self.winnersOnlyProgressions = True
+        if phaseGroupData is not None:
+            self.LoadFromStartGg(phaseGroupData)
 
+    def LoadFromStartGg(self, phaseGroupData: dict):
         self.rounds = {}
+        self.setsById = {}
 
-        for i in range(len(seeds)):
-            if seeds[i] > self.originalPlayerNumber:
-                seeds[i] = -1
+        entrants = phaseGroupData.get("entrants") or []
+        self.entrantCount = len(entrants)
+        self.originalPlayerNumber = self.entrantCount
 
-        # Create winners
-        self.rounds["1"] = []
-        for i in range(self.playerNumber):
-            if i % 2 == 0:
-                _set = BracketSet(self, [1, len(self.rounds["1"])])
-                _set.playerIds[0] = seeds[i]
-                _set.playerIds[1] = seeds[i+1]
-                self.rounds["1"].append(_set)
+        setsByRound = phaseGroupData.get("sets") or {}
 
-        # Create losers
-        self.rounds["-1"] = []
-        self.rounds["-2"] = []
-        for i in range(int(self.playerNumber/2)):
-            self.rounds["-1"].append(BracketSet(self,
-                                     [-1, int(len(self.rounds["-1"])/2)]))
-            self.rounds["-2"].append(BracketSet(self,
-                                     [-1, int(len(self.rounds["-2"])/2)]))
+        # Pass 1: create BracketSet instances preserving Start.gg's set order
+        # within each round. pos[1] is the display row; sets earlier in the
+        # list sit higher on screen.
+        for roundKey, rawSets in setsByRound.items():
+            try:
+                roundNum = int(roundKey)
+            except (TypeError, ValueError):
+                logger.warning(f"Bracket: skipping non-numeric round key {roundKey!r}")
+                continue
 
-        # Fill with -1
-        for round in ["-1", "-2"]:
-            for _set in self.rounds[round]:
-                _set.score = [-1, -1]
-                _set.finished = True
+            bracketSets = []
+            for idx, raw in enumerate(rawSets):
+                bs = BracketSet(self, [roundNum, idx])
+                # Normalize to string so prereqId lookups don't fail on
+                # int-vs-string mismatches (preview sets use "preview_..." IDs
+                # while live sets use int IDs).
+                rawId = raw.get("id")
+                bs.setId = str(rawId) if rawId is not None else None
+                bs.identifier = raw.get("identifier")
+                bs.fullRoundText = raw.get("fullRoundText")
 
-        # Expand winners
-        subBracket = []
-        i = self.playerNumber/2
+                score = raw.get("score") or [0, 0]
+                bs.score = [
+                    score[0] if score[0] is not None else 0,
+                    score[1] if score[1] is not None else 0,
+                ]
+                bs.finished = bool(raw.get("finished"))
 
-        while i > 1:
-            i = math.floor(i/2)
-            round = [BracketSet(self, [2+len(subBracket), i])
-                     for i in range(int(i))]
-            subBracket.append(round)
-        subBracket.append([BracketSet(self, [2+len(subBracket), 0])])
-        subBracket.append([BracketSet(self, [2+len(subBracket), 0])])
-
-        for r, round in enumerate(subBracket):
-            self.rounds[str(2+r)] = round
-
-        # Expand losers
-        subBracket = []
-        i = self.playerNumber/2
-
-        while i > 1:
-            i = math.floor(i/2)
-            for j in range(2):
-                round = [BracketSet(self, [-1-len(subBracket), i])
-                         for i in range(math.floor(i))]
-                subBracket.append(round)
-
-        for r, round in enumerate(subBracket):
-            self.rounds[str(-3-r)] = round
-
-        # Connect sets
-        for k, round in self.rounds.items():
-            roundNum = int(k)
-
-            if roundNum > 0:
-                for j, _set in enumerate(round):
-                    try:
-                        _set.winNext = self.rounds[str(
-                            roundNum+1)][math.floor(j/2)]
-                        targetIdW = j % 2
-                        if int(k) < 0 and abs(int(k)) % 2 == 1:
-                            targetIdW = 1
-                        _set.winNextSlot = targetIdW
-                    except KeyError as e:
-                        logger.warning(f"Bracket KeyError: {e}")
-                    except:
-                        logger.error(traceback.format_exc())
-                    try:
-                        if abs(roundNum) % 4 == 0:
-                            _set.loseNext = self.rounds[str(-int(2*(roundNum)))][(
-                                int(len(round)/2)+j) % len(round)]
-                        elif abs(roundNum) % 4 == 1:
-                            _set.loseNext = self.rounds[str(
-                                -int(2*(roundNum)))][j]
-                        elif abs(roundNum) % 4 == 2:
-                            _set.loseNext = self.rounds[str(
-                                -int(2*(roundNum)))][(-1-j) % len(round)]
-                        elif abs(roundNum) % 4 == 3:
-                            _set.loseNext = self.rounds[str(-int(2*(roundNum)))][(
-                                int(len(round)/2)-1-j) % len(round)]
-
-                        targetIdL = 0
-
-                        if roundNum == 1:
-                            targetIdL = j % 2
-
-                        _set.loseNextSlot = targetIdL
-                    except KeyError as e:
-                        logger.warning(f"Bracket KeyError: {e}")
-                    except:
-                        logger.error(traceback.format_exc())
-            else:
-                for j, _set in enumerate(round):
-                    try:
-                        if abs(roundNum) % 2 == 0:
-                            _set.winNext = self.rounds[str(
-                                roundNum-1)][math.floor(j/2)]
-                        else:
-                            _set.winNext = self.rounds[str(roundNum-1)][j]
-                        targetIdW = j % 2
-                        if int(k) < 0 and abs(int(k)) % 2 == 1:
-                            targetIdW = 1
-                        _set.winNextSlot = targetIdW
-                    except KeyError as e:
-                        logger.warning(f"Bracket KeyError: {e}")
-                    except Exception as e:
-                        logger.error(e)
-
-        # Connect losers to winners for grand finals
-        lastLosers = min([int(r) for r in self.rounds.keys()])
-        gfsRound = max([int(r) for r in self.rounds.keys()]) - 1
-        self.rounds[str(lastLosers)][0].winNext = self.rounds[str(gfsRound)][0]
-
-        # Connect grand finals to reset
-        gfsResetRound = max([int(r) for r in self.rounds.keys()])
-        gfsRound = gfsResetRound - 1
-        self.rounds[str(gfsRound)][0].winNext = self.rounds[str(
-            gfsResetRound)][0]
-        self.rounds[str(gfsRound)][0].loseNext = self.rounds[str(
-            gfsResetRound)][0]
-
-    def IsBye(self, playerId):
-        if playerId == -1 or playerId > self.originalPlayerNumber:
-            return True
-        return False
-
-    def UpdateBracket(self):
-        for roundKey, round in sorted(self.rounds.items(), key=lambda x: (int(x[0]) < 0, abs(int(x[0])))):
-            for j, _set in enumerate(round):
-                targetIdW = j % 2
-                targetIdL = 0
-                if int(roundKey) < 0 and abs(int(roundKey)) % 2 == 1:
-                    targetIdW = 1
-
-                lastLosers = min([int(r) for r in self.rounds.keys()])
-                if roundKey == str(lastLosers):
-                    targetIdW = 1
-
-                gfsRound = max([int(r) for r in self.rounds.keys()]) - 1
-                if roundKey == str(gfsRound):
-                    targetIdW = 0
-                    targetIdL = 1
-
-                # When we have progressions in, force first (hidden) sets to double DQs
-                # If we have a non-power of 2 number of progressions, we do it for 2 rounds
-                if self.progressionsIn > 0 and not self.winnersOnlyProgressions:
-                    if int(roundKey) == 1:
-                        _set.score = [-1, -1]
-                        _set.finished = True
-
-                    if int(roundKey) == 2 and not is_power_of_two(self.progressionsIn) and not self.customSeeding:
-                        _set.score = [-1, -1]
-                        _set.finished = True
-
-                if _set.winNext:
-                    # Both slots are bye OR slot 2 is bye, auto win for p1
-                    if (self.IsBye(_set.playerIds[0]) and self.IsBye(_set.playerIds[1])) or \
-                            (not self.IsBye(_set.playerIds[0]) and self.IsBye(_set.playerIds[1])):
-                        won = 0
-                        lost = 1
-                        _set.winNext.playerIds[targetIdW] = _set.playerIds[won]
-                        if _set.loseNext:
-                            _set.loseNext.playerIds[targetIdL] = _set.playerIds[lost]
-                    # Slot 1 is bye, auto win
-                    elif self.IsBye(_set.playerIds[0]) and not self.IsBye(_set.playerIds[1]):
-                        won = 1
-                        lost = 0
-                        _set.winNext.playerIds[targetIdW] = _set.playerIds[won]
-                        if _set.loseNext:
-                            _set.loseNext.playerIds[targetIdL] = _set.playerIds[lost]
-                    # -1,-1 draw; advance higher seed
-                    elif _set.score[0] == -1 and _set.score[1] == -1:
-                        # Advance higher seed
-                        won = 0 if _set.playerIds[0] < _set.playerIds[1] else 1
-                        lost = 0 if won == 1 else 1
-                        _set.winNext.playerIds[targetIdW] = _set.playerIds[won]
-                        if _set.loseNext:
-                            _set.loseNext.playerIds[targetIdL] = _set.playerIds[lost]
-                    # Set not finished, pass pending state
-                    elif not _set.finished:
-                        _set.winNext.playerIds[targetIdW] = -2
-                        if _set.loseNext:
-                            _set.loseNext.playerIds[targetIdL] = -2
-                    # Real match results
+                slots = raw.get("slots") or []
+                hasBye = False
+                for i in range(min(2, len(slots))):
+                    slot = slots[i] or {}
+                    prereqType = slot.get("prereqType")
+                    seedNum = slot.get("seedNum")
+                    if prereqType == "bye":
+                        hasBye = True
+                        bs.playerIds[i] = BracketSet.BYE
+                    elif seedNum is not None:
+                        bs.playerIds[i] = int(seedNum)
                     else:
-                        # P1 wins
-                        if _set.score[0] > _set.score[1]:
-                            _set.winNext.playerIds[targetIdW] = _set.playerIds[0]
-                            if _set.loseNext:
-                                _set.loseNext.playerIds[targetIdL] = _set.playerIds[1]
-                        # P2 wins
-                        elif _set.score[0] < _set.score[1]:
-                            _set.winNext.playerIds[targetIdW] = _set.playerIds[1]
-                            if _set.loseNext:
-                                _set.loseNext.playerIds[targetIdL] = _set.playerIds[0]
-                        # Draw
-                        else:
-                            _set.winNext.playerIds[targetIdW] = -2
-                            if _set.loseNext:
-                                _set.loseNext.playerIds[targetIdL] = -2
+                        # Unresolved — will be filled by UpdateBracket()
+                        bs.playerIds[i] = BracketSet.PENDING
 
-        # Clear scores when no players in set
-        # for k, round in sorted(self.rounds.items(), key=lambda x: (int(x[0]) < 0, abs(int(x[0])))):
-        #     for j, _set in enumerate(round):
-        #         if _set.playerIds[0] == -2 or _set.playerIds[1] == -2:
-        #             _set.score[0] = 0
-        #             _set.score[1] = 0
+                bs.isByeSet = hasBye
 
-    # Get round names
-    def GetRoundName(self, round: str, winnersCutout=[0, 0], losersCutout=[0, 0]):
-        roundNumber = int(round)
+                bracketSets.append(bs)
+                if bs.setId is not None:
+                    self.setsById[bs.setId] = bs
 
-        gfsRound = max([int(r) for r in self.rounds.keys()]) - 1
-        lastLosers = min([int(r) for r in self.rounds.keys()])
+            self.rounds[roundKey] = bracketSets
 
-        if self.progressionsOut <= 0:
-            if roundNumber > 0:
-                if roundNumber == gfsRound:
-                    return AutonaLocaleHelper.matchNames.get("grand_final")
-                if roundNumber == gfsRound + 1:
-                    return AutonaLocaleHelper.matchNames.get("grand_final_reset")
-                if roundNumber == gfsRound - 1:
-                    return AutonaLocaleHelper.matchNames.get("winners_final")
-                if roundNumber == gfsRound - 2:
-                    return AutonaLocaleHelper.matchNames.get("winners_semi_final")
-                if roundNumber == gfsRound - 3:
-                    return AutonaLocaleHelper.matchNames.get("winners_quarter_final")
-            else:
-                if roundNumber == lastLosers:
-                    return AutonaLocaleHelper.matchNames.get("losers_final")
-                if roundNumber == lastLosers + 1:
-                    return AutonaLocaleHelper.matchNames.get("losers_semi_final")
-                if roundNumber == lastLosers + 2:
-                    return AutonaLocaleHelper.matchNames.get("losers_quarter_final")
-                if roundNumber == lastLosers + 3:
-                    return AutonaLocaleHelper.matchNames.get("losers_top8")
+        # Pass 2: wire winNext / loseNext using slot prereq references.
+        # For each set S, each of its slots may declare: "the winner (or loser)
+        # of prereq set P goes here". So we walk S's slots and set P.winNext/P.loseNext = S.
+        wiredWin = 0
+        wiredLose = 0
+        for roundKey, bracketSets in self.rounds.items():
+            for bs in bracketSets:
+                raw = self._findRawSet(setsByRound, roundKey, bs.pos[1])
+                if raw is None:
+                    continue
+                slots = raw.get("slots") or []
+                for slotIdx, slot in enumerate(slots[:2]):
+                    slot = slot or {}
+                    if slot.get("prereqType") != "set":
+                        continue
+                    prereqId = slot.get("prereqId")
+                    prereqPlacement = slot.get("prereqPlacement")
+                    if prereqId is None:
+                        continue
+                    prereqSet = self.setsById.get(str(prereqId))
+                    if prereqSet is None:
+                        continue
+                    if prereqPlacement == 1:
+                        prereqSet.winNext = bs
+                        prereqSet.winNextSlot = slotIdx
+                        wiredWin += 1
+                    elif prereqPlacement == 2:
+                        prereqSet.loseNext = bs
+                        prereqSet.loseNextSlot = slotIdx
+                        wiredLose += 1
 
-        if roundNumber > 0:
-            roundNumber -= winnersCutout[0]
-            return AutonaLocaleHelper.matchNames.get("winners_round").format(abs(roundNumber))
-        if roundNumber < 0:
-            roundNumber += losersCutout[0]
-            return AutonaLocaleHelper.matchNames.get("losers_round").format(abs(roundNumber))
+        logger.info(
+            f"Bracket wired: entrants={self.entrantCount}, "
+            f"rounds={len(self.rounds)}, sets={sum(len(r) for r in self.rounds.values())}, "
+            f"winNext={wiredWin}, loseNext={wiredLose}"
+        )
+
+        # Resolve pre-bye auto-advances so WR1 players who faced a bye show
+        # up in WR2 etc.
+        self.UpdateBracket()
+
+        # Post-propagation diagnostic: report how many player slots resolved
+        # in each round so losers-side gaps are obvious from the log.
+        for rk in sorted(self.rounds.keys(), key=lambda k: (int(k) < 0, abs(int(k)))):
+            sets = self.rounds[rk]
+            resolved = sum(1 for s in sets for p in s.playerIds if p > 0)
+            total = len(sets) * 2
+            logger.info(f"  round {rk}: {len(sets)} sets, resolved={resolved}/{total}")
 
     @staticmethod
-    def GetTopN(round_number: int, bracket_size: int):
-        print("Input:", round_number, bracket_size)
+    def _findRawSet(setsByRound, roundKey, idx):
+        rawList = setsByRound.get(roundKey)
+        if not rawList or idx >= len(rawList):
+            return None
+        return rawList[idx]
 
-        if round_number >= 0:
-            return bracket_size // (2 ** (round_number-1))
+    def IsBye(self, playerId):
+        return playerId == BracketSet.BYE
+
+    def UpdateBracket(self):
+        """Propagate resolved player IDs forward through winNext/loseNext.
+
+        Processes rounds in ascending distance from the seeds: WR1, WR2, ...
+        then LR1, LR2, ... Grand final and reset are positive rounds so they
+        fall naturally into the winners pass.
+        """
+        orderedKeys = sorted(
+            self.rounds.keys(),
+            key=lambda k: (int(k) < 0, abs(int(k)))
+        )
+
+        for roundKey in orderedKeys:
+            for bs in self.rounds[roundKey]:
+                self._propagate(bs)
+
+    def _propagate(self, bs: BracketSet):
+        if bs.winNext is None and bs.loseNext is None:
+            return
+
+        p0, p1 = bs.playerIds
+
+        bye0 = self.IsBye(p0)
+        bye1 = self.IsBye(p1)
+
+        # Bye cases — advance the non-bye side; bye propagates as bye.
+        if bye0 and bye1:
+            return
+        if bye1 and not bye0:
+            self._assignNext(bs.winNext, bs.winNextSlot, p0)
+            if bs.loseNext is not None:
+                self._assignNext(bs.loseNext, bs.loseNextSlot, BracketSet.BYE)
+            return
+        if bye0 and not bye1:
+            self._assignNext(bs.winNext, bs.winNextSlot, p1)
+            if bs.loseNext is not None:
+                self._assignNext(bs.loseNext, bs.loseNextSlot, BracketSet.BYE)
+            return
+
+        # No byes — use score if finished, else forward pending.
+        if bs.finished and (bs.score[0] != bs.score[1]):
+            won, lost = (0, 1) if bs.score[0] > bs.score[1] else (1, 0)
+            self._assignNext(bs.winNext, bs.winNextSlot, bs.playerIds[won])
+            if bs.loseNext is not None:
+                self._assignNext(bs.loseNext, bs.loseNextSlot, bs.playerIds[lost])
         else:
-            return math.ceil(bracket_size / (2 ** (abs(round_number-1)/2)))
+            self._assignNext(bs.winNext, bs.winNextSlot, BracketSet.PENDING)
+            if bs.loseNext is not None:
+                self._assignNext(bs.loseNext, bs.loseNextSlot, BracketSet.PENDING)
+
+    @staticmethod
+    def _assignNext(target: BracketSet, slot: int, value: int):
+        if target is None:
+            return
+        # Don't overwrite an already-resolved seed/entrant slot with PENDING.
+        current = target.playerIds[slot]
+        if value == BracketSet.PENDING and current != BracketSet.PENDING and current != BracketSet.BYE:
+            return
+        target.playerIds[slot] = value
+
+    def GetRoundName(self, round: str, winnersCutout=[0, 0], losersCutout=[0, 0], displayIdx=None):
+        """Derive a localized round name from the round key.
+
+        Grand final / final naming only applies when the bracket ends with the
+        classic single-set rounds (GF + optional Reset). Pools that feed into
+        another phase never have those rounds, so we fall back to plain
+        "Winners Round N" / "Losers Round N" labels.
+
+        When `displayIdx` is provided, the numeric label uses it instead of
+        the raw round number. This keeps round labels contiguous from 1 even
+        when Start.gg returns non-contiguous round keys (e.g. a progression
+        bracket whose first losers rounds are omitted).
+        """
+        try:
+            roundNumber = int(round)
+        except (TypeError, ValueError):
+            return ""
+
+        # Prefer the authoritative label from Start.gg when we have one
+        bracketSets = self.rounds.get(str(roundNumber)) or []
+        for bs in bracketSets:
+            if bs.fullRoundText:
+                return bs.fullRoundText
+
+        positiveRounds = sorted(
+            int(r) for r in self.rounds.keys() if int(r) > 0)
+        negativeRounds = sorted(
+            (int(r) for r in self.rounds.keys() if int(r) < 0), reverse=True)
+
+        if not positiveRounds and not negativeRounds:
+            return ""
+
+        def setCount(r):
+            return len(self.rounds.get(str(r)) or [])
+
+        maxPos = positiveRounds[-1] if positiveRounds else 0
+        # GF Reset is present when the two highest positive rounds both have
+        # exactly one set. If only the highest has one set, that one is GF.
+        hasGfReset = (
+            len(positiveRounds) >= 2
+            and setCount(maxPos) == 1
+            and setCount(maxPos - 1) == 1
+        )
+        hasGf = setCount(maxPos) == 1 if positiveRounds else False
+
+        # Winners "final" meaningful only when there's a real GF above it
+        gfsRound = (maxPos - 1) if hasGfReset else (maxPos if hasGf else None)
+
+        lastLosers = negativeRounds[0] if negativeRounds else 0
+        # Losers final meaningful only when its winner feeds into GF
+        hasLosersFinal = gfsRound is not None and setCount(lastLosers) == 1
+
+        if roundNumber > 0:
+            if hasGfReset and roundNumber == maxPos:
+                return AutonaLocaleHelper.matchNames.get("grand_final_reset")
+            if gfsRound is not None and roundNumber == gfsRound:
+                return AutonaLocaleHelper.matchNames.get("grand_final")
+            if gfsRound is not None and roundNumber == gfsRound - 1:
+                return AutonaLocaleHelper.matchNames.get("winners_final")
+            if gfsRound is not None and roundNumber == gfsRound - 2:
+                return AutonaLocaleHelper.matchNames.get("winners_semi_final")
+            if gfsRound is not None and roundNumber == gfsRound - 3:
+                return AutonaLocaleHelper.matchNames.get("winners_quarter_final")
+            num = displayIdx if displayIdx is not None else roundNumber
+            return AutonaLocaleHelper.matchNames.get("winners_round").format(num)
+
+        if hasLosersFinal and roundNumber == lastLosers:
+            return AutonaLocaleHelper.matchNames.get("losers_final")
+        if hasLosersFinal and roundNumber == lastLosers + 1:
+            return AutonaLocaleHelper.matchNames.get("losers_semi_final")
+        if hasLosersFinal and roundNumber == lastLosers + 2:
+            return AutonaLocaleHelper.matchNames.get("losers_quarter_final")
+        num = displayIdx if displayIdx is not None else abs(roundNumber)
+        return AutonaLocaleHelper.matchNames.get("losers_round").format(num)
