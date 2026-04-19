@@ -58,8 +58,6 @@ Autona のカスタムフォーク。
 - **Claude Code の worktree 機能（`.claude/worktrees/*`）を使う**
 - ルートリポジトリ `C:\Users\ayuyt\Work\30_Products\Autona` は常に `main`
   に揃えておく（作業用ブランチはチェックアウトしない）
-- 新しい機能ブランチは worktree 側で作成・編集し、PR マージ後に worktree を
-  破棄する
 - 理由:
   - ルートを `main` 固定にすることで、ユーザーがデバッグ（`python main.py` や
     exe の実行）する際に必ず「リリース済みの最新コード」を触れる
@@ -67,30 +65,34 @@ Autona のカスタムフォーク。
   - PR 作業中でもルート側で既存機能を検証できる
 - ビルド成果物（`Autona.exe`、`stage_strike_app/build/`、`dist/` 等）は
   ルート側で運用する。worktree 内のビルド成果物は参考程度に留める
-- 既に worktree に居る場合は、その worktree 内で作業を継続して差し支えない
 
-#### 命名規則
+#### 王道フロー（Claude Code 標準機能に任せる）
 
-- **作成時**: ブランチ名を `claude/YYYYMMDDHHmmss` 形式にする
-  （例: `claude/20260420041530`）。ディレクトリ名も同じ timestamp を使う
-  - 作成時点では機能内容が固まっていないことが多いので、作成時刻のみで識別
-- **PR 作成時**: ブランチを `feature/YYYYMMDDHHmmss-<機能概要>` にリネーム
-  （例: `feature/20260420041530-bracket-flexible-de`）
-  - `git branch -m <new-name>` → `git push origin -u <new-name>` →
-    リモートの古いブランチ (`git push origin --delete <old-name>`) を削除
-  - 機能概要は英語ケバブケースで短く（PR タイトルそのものでなくて良い）
-- この運用により、worktree が増えても「いつ・何を」のログが残り、
-  並行作業が時系列で俯瞰できる
+1. **作成**: ルートから `claude --worktree <name>` で起動する。
+   - `.claude/worktrees/<name>/` が作成され、ブランチ
+     `worktree-<name>` が `origin/HEAD` から切られる
+   - `<name>` は内容を表す短い英語（例: `bracket-fix`, `thumbnail-perf`）。
+     timestamp や連番は不要（`git log --all` / `gh pr list` で時系列は追える）
+2. **作業**: 通常通り編集・コミット・push する。ブランチ名はそのまま
+   `worktree-<name>` で良い（PR 作成時にリネームしない）
+3. **PR**: `gh pr create` でタイトルと本文を日本語で付ける。
+   ブランチ名は検索のノイズにならないよう適度に短ければ何でも OK
+4. **マージ後の掃除**: セッションを終了すれば Claude が自動判定する
+   - 変更が全て push/マージ済 → worktree・ローカルブランチを自動削除
+   - 未コミット変更や未 push コミットあり → 保持／削除を対話で選択
+5. **手動 cleanup は原則不要**。`git worktree remove` / `git branch -D` は
+   Claude が自動 cleanup できない特殊ケース（別プロセスが worktree 内の
+   ファイルを掴んでいる等）にだけ使う
 
-#### 掃除ルール
+#### 特殊ケース
 
-- **PR マージ直後** に以下を実行:
-  - ルート側で `git fetch --prune` → `git checkout main` → `git pull`
-  - `git worktree remove <worktree-path>` で不要 worktree を削除
-  - マージ済みローカルブランチを `git branch -d <branch>` で削除
-- **気が向いたら**:
-  - `git worktree list` で残存確認
-  - `git worktree prune` で既に消えたディレクトリの参照をクリーンアップ
+- **ブランチ名を変えたい**: PR 作成前であれば `git branch -m` で自由に
+  変えて良い。ただし変えた瞬間から Claude の自動 cleanup 対象から外れる
+  （マージ済みかどうかを Claude が追跡できなくなるため）ので、
+  変えたら `git worktree remove` / `git branch -D` を自分で叩く前提で
+- **既に worktree 内にいる**: その worktree 内で作業を継続して差し支えない
+- **orphan worktree の掃除**: 何かの事故で worktree/ブランチが残った場合は
+  ルートで `git worktree prune` → `git fetch --prune` → `git branch -D` の順
 
 ---
 
