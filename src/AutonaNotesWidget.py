@@ -32,14 +32,10 @@ class AutonaNotesWidget(QDockWidget):
         
         super().__init__(*args)
         self.setWindowTitle(QApplication.translate("app", "Additional Notes"))
-        self.setFloating(True)
         self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.widget = QWidget()
         self.setWidget(self.widget)
         self.widget.setLayout(QVBoxLayout())
-
-        self.setFloating(True)
-        self.setWindowFlags(Qt.WindowType.Window)
 
         for i in range(4):
             self.widget.layout().addWidget(create_individual_notes_widget(i))

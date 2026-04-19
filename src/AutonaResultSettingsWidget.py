@@ -79,7 +79,6 @@ class AutonaResultSettingsWidget(QDockWidget):
 
         self.setWindowTitle(
             QApplication.translate("app", "Result Settings"))
-        self.setFloating(True)
         self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.widget_container = QWidget()
         self.setWidget(self.widget_container)

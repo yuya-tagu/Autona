@@ -17,7 +17,10 @@ def is_power_of_two(n):
 
 class BracketSetWidget(QWidget):
     def __init__(self, bracketSet: BracketSet = None, bracketView: "AutonaBracketView" = None, *args) -> None:
-        super().__init__(*args)
+        # Pass bracketView as parent — without it, this widget becomes a
+        # top-level window and flashes on screen at startup while brackets
+        # are rebuilt (~15 cells per bracket rebuild).
+        super().__init__(bracketView, *args)
         self.setLayout(QVBoxLayout())
 
         self.playerId: list(QLabel) = []

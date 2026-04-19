@@ -107,42 +107,27 @@ class AutonaControllerHelper(QObject):
                     "short_name": self.controller_list[c].get("short_name"),
                     "manufacturer": self.controller_list[c].get("manufacturer"),
                     "type": self.controller_list[c].get("type"),
-                    "codename": c
+                    "codename": c,
+                    "icon_path": self.controller_list[c].get("icon_path"),
+                    "simple_icon_path": self.controller_list[c].get(
+                        "simple_icon_path"),
+                    "category_icon_path": self.controller_list[c].get(
+                        "category_icon_path"),
                 }
 
-                
-                data["icon_path"] = self.controller_list[c].get("icon_path")
-                data["simple_icon_path"] = self.controller_list[c].get("simple_icon_path")
-                data["category_icon_path"] = self.controller_list[c].get("category_icon_path")
-                if data["icon_path"]:
-                    item.setIcon(QIcon(QPixmap.fromImage(QImage(data["icon_path"])))
-                    )
-                    width, height = QImage(data["icon_path"]).width(), QImage(data["icon_path"]).height()
-                    data["icon_dimensions"] = {
-                        "x": int(width),
-                        "y": int(height)
-                    }
-                else:
-                    item.setIcon(QIcon(QPixmap.fromImage(QImage('./assets/icons/cancel.svg')))
-                    )
-                
-                if data["simple_icon_path"]:
-                    width, height = QImage(data["simple_icon_path"]).width(), QImage(data["simple_icon_path"]).height()
-                    data["simple_icon_dimensions"] = {
-                        "x": int(width),
-                        "y": int(height)
-                    }
-
-                if data["category_icon_path"]:
-                    width, height = QImage(data["category_icon_path"]).width(), QImage(data["category_icon_path"]).height()
-                    data["category_icon_dimensions"] = {
-                        "x": int(width),
-                        "y": int(height)
-                    }
+                # Use QIcon(path) directly: it stores the path and defers
+                # decoding to first paint, unlike `QIcon(QPixmap.fromImage(
+                # QImage(path)))` which eagerly decoded the PNG at startup.
+                # Previously that, combined with three extra QImage loads
+                # per controller just to compute unused dimension dicts,
+                # burned ~4 seconds across 38 controllers.
+                icon_path = data["icon_path"] or "./assets/icons/cancel.svg"
+                item.setIcon(QIcon(icon_path))
 
                 if self.controller_list[c].get("name") != c:
                     item.setData(
-                        f'{self.controller_list[c].get("name")}', Qt.ItemDataRole.EditRole)
+                        f'{self.controller_list[c].get("name")}',
+                        Qt.ItemDataRole.EditRole)
 
                 item.setData(data, Qt.ItemDataRole.UserRole)
                 self.controllerModel.appendRow(item)

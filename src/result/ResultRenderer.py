@@ -5,7 +5,7 @@ Supports multiple layouts (e.g. 1920x1080 horizontal, 960x1080 vertical).
 
 from qtpy.QtCore import QObject, Signal, QTimer, QUrl, QEventLoop, Qt
 from qtpy.QtGui import QPixmap
-from qtpy.QtWidgets import QApplication
+from qtpy.QtWidgets import QApplication, QWidget
 from qtpy.QtWebEngineWidgets import QWebEngineView
 from qtpy.QtWebEngineCore import QWebEnginePage
 from loguru import logger
@@ -62,11 +62,17 @@ class ResultRenderer(QObject):
         super().__init__()
 
         self._page = _ResultPage()
-        self._view = QWebEngineView()
-        self._view.setPage(self._page)
-        self._view.setAttribute(
+        # Parent the view to a hidden host widget. Without a parent, the
+        # view is a top-level window; even with WA_DontShowOnScreen the
+        # OpenGL init can flash a native window on screen at startup.
+        self._host = QWidget()
+        self._host.setAttribute(
             Qt.WidgetAttribute.WA_DontShowOnScreen, True)
-        self._view.show()
+        self._host.resize(1920, 1080)
+        self._view = QWebEngineView(self._host)
+        self._view.setPage(self._page)
+        self._view.resize(1920, 1080)
+        self._host.show()
 
         self._current_layout = None
         self._page_loaded = False

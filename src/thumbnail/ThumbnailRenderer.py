@@ -3,7 +3,7 @@ import json
 
 from PyQt6.QtCore import QObject, QUrl, QEventLoop, QTimer, pyqtSignal, Qt
 from PyQt6.QtGui import QPixmap
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QWidget
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineSettings, QWebEnginePage
 from loguru import logger
@@ -55,11 +55,16 @@ class ThumbnailRenderer(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._page = _ThumbnailPage()
-        self._view = QWebEngineView()
+        # Parent the view to a hidden host widget. Without a parent, the
+        # view is a top-level window; even with WA_DontShowOnScreen the
+        # OpenGL init can flash a native window on screen at startup.
+        self._host = QWidget()
+        self._host.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+        self._host.resize(1920, 1080)
+        self._view = QWebEngineView(self._host)
         self._view.setPage(self._page)
-        self._view.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
         self._view.resize(1920, 1080)
-        self._view.show()
+        self._host.show()
 
         # Enable local file access
         settings = self._view.settings()

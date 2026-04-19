@@ -84,7 +84,6 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
 
         self.setWindowTitle(QApplication.translate(
             "app", "Thumbnail Settings"))
-        self.setFloating(True)
         self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.widget = QWidget()
         self.setWidget(self.widget)

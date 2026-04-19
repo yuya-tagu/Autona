@@ -42,10 +42,7 @@ class AutonaScoreboardStageWidget(QDockWidget):
         super().__init__(*args)
 
         self.setWindowTitle(QApplication.translate("app", "Ruleset"))
-        self.setFloating(True)
         self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
-        self.setFloating(True)
-        self.setWindowFlags(Qt.WindowType.Window)
 
         self.innerWidget = QWidget()
         self.setWidget(self.innerWidget)

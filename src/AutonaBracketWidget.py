@@ -47,18 +47,13 @@ class AutonaBracketWidget(QDockWidget):
 
         self.bracket = Bracket(8, 0)
 
-        self.setFloating(True)
         self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
 
         self.mainLayout = self.findChild(QWidget, "bracket")
         self.mainLayout.setLayout(QVBoxLayout())
 
-        self.setFloating(True)
-        self.setWindowFlags(Qt.WindowType.Window)
-
         outerLayout: QWidget = self.findChild(QWidget, "bracket")
         self.playerList = AutonaPlayerList(base="bracket.players")
-
         list: QWidget = self.findChild(QWidget, "listContainer")
 
         # Add player list settings on the top
@@ -99,9 +94,20 @@ class AutonaBracketWidget(QDockWidget):
 
         list.layout().addWidget(self.playerList)
 
-        self.bracketView = AutonaBracketView(self.bracket, self.playerList, self)
-        outerLayout.layout().addWidget(self.bracketView)
+        # Heavy initialisation (BracketView creation + player-list slot
+        # population, ~2.5s) is deferred until the user first opens this
+        # tab. We insert a placeholder label now so the tab has *some*
+        # visible content in case Qt paints before showEvent fires.
+        self._outerLayout = outerLayout
+        self._bracketReady = False
+        self.bracketView = None
 
+        self._bracketPlaceholder = QLabel(
+            QApplication.translate("app", "Loading bracket..."))
+        self._bracketPlaceholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._bracketPlaceholder.setStyleSheet(
+            "color: #B5ADA0; font-size: 11pt; padding: 40px;")
+        outerLayout.layout().addWidget(self._bracketPlaceholder)
         self.phaseSelection: QComboBox = self.findChild(
             QComboBox, "phaseSelection")
         self.phaseSelection.currentIndexChanged.connect(self.UpdatePhaseGroups)
@@ -113,16 +119,14 @@ class AutonaBracketWidget(QDockWidget):
 
         self.btRefreshPhase: QPushButton = self.findChild(
             QPushButton, "btRefreshPhase")
-        updateIcon = QImage("./assets/icons/undo.svg").scaled(24, 24)
-        self.btRefreshPhase.setIcon(QIcon(QPixmap.fromImage(updateIcon)))
+        self.btRefreshPhase.setIcon(QIcon("./assets/icons/undo.svg"))
         self.btRefreshPhase.clicked.connect(lambda: [
             AutonaTournamentDataProvider.instance.GetTournamentPhases()
         ])
 
         self.btRefreshPhaseGroup: QPushButton = self.findChild(
             QPushButton, "btRefreshPhaseGroup")
-        updateIcon = QImage("./assets/icons/undo.svg").scaled(24, 24)
-        self.btRefreshPhaseGroup.setIcon(QIcon(QPixmap.fromImage(updateIcon)))
+        self.btRefreshPhaseGroup.setIcon(QIcon("./assets/icons/undo.svg"))
         self.btRefreshPhaseGroup.clicked.connect(self.PhaseGroupChanged)
         AutonaHotkeys.signals.refresh_phase_group.connect(self.PhaseGroupChanged)
 
@@ -193,24 +197,60 @@ class AutonaBracketWidget(QDockWidget):
             self.bracketView.Update()
         ])
 
-        self.playerList.signals.DataChanged.connect(self.bracketView.Update)
-
-        self.slotNumber.setValue(8)
-        self.playerPerTeam.setValue(1)
-        self.charNumber.setValue(1)
+        # Store the initial populate values; applied during lazy init.
+        self._initialSlotCount = 8
+        self._initialPlayersPerTeam = 1
+        self._initialCharactersPerPlayer = 1
+        for sb, val in (
+            (self.slotNumber, self._initialSlotCount),
+            (self.playerPerTeam, self._initialPlayersPerTeam),
+            (self.charNumber, self._initialCharactersPerPlayer),
+        ):
+            sb.blockSignals(True)
+            sb.setValue(val)
+            sb.blockSignals(False)
 
         self.splitter = self.findChild(QSplitter, "splitter")
         self.splitter.setSizes([1, 1])
-
-        self.bracketView.Update()
 
         AutonaGameAssetManager.instance.signals.onLoad.connect(
             self.SetDefaultsFromAssets
         )
 
         StateManager.ReleaseSaving()
-        
+
         AutonaBracketWidget.instance = self
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # On first show, defer the heavy BracketView + slot population
+        # one event-loop turn so the placeholder label paints first and
+        # the tab-switch feels instant. Subsequent shows are no-ops.
+        if not self._bracketReady:
+            self._bracketReady = True
+            QTimer.singleShot(0, self._buildBracketView)
+
+    def _buildBracketView(self):
+        """Heavy construction: AutonaBracketView (~1.3s) + PlayerList
+        slot/player widgets (~1.1s). Runs once on first tab show."""
+        try:
+            self.bracketView = AutonaBracketView(
+                self.bracket, self.playerList, self)
+            # Replace the placeholder with the real view
+            self._bracketPlaceholder.hide()
+            self._outerLayout.layout().removeWidget(self._bracketPlaceholder)
+            self._bracketPlaceholder.deleteLater()
+            self._outerLayout.layout().addWidget(self.bracketView)
+
+            self.playerList.signals.DataChanged.connect(
+                self.bracketView.Update)
+            self.playerList.SetSlotNumber(self._initialSlotCount)
+            self.playerList.SetPlayersPerTeam(self._initialPlayersPerTeam)
+            self.playerList.SetCharactersPerPlayer(
+                self._initialCharactersPerPlayer)
+            self.bracketView.Update()
+        except Exception:
+            logger.error(traceback.format_exc())
 
     def UpdatePhases(self, phases):
         logger.info("Phases: " + str(phases))
@@ -262,13 +302,17 @@ class AutonaBracketWidget(QDockWidget):
         self.bracket = Bracket(playerNumber, self.progressionsIn.value(
         ), seedMap, self.winnersOnly.isChecked(), progressionsOut=self.progressionsOut.value())
 
-        self.bracketView.SetBracket(
-            self.bracket,
-            progressionsIn=self.progressionsIn.value(),
-            progressionsOut=self.progressionsOut.value(),
-            winnersOnlyProgressions=self.winnersOnly.isChecked(),
-            customSeeding=customSeeding
-        )
+        # bracketView may still be None if the Bracket tab hasn't been
+        # opened yet (lazy init). The new bracket model is saved on
+        # self.bracket; _buildBracketView() will pick it up on first show.
+        if self.bracketView is not None:
+            self.bracketView.SetBracket(
+                self.bracket,
+                progressionsIn=self.progressionsIn.value(),
+                progressionsOut=self.progressionsOut.value(),
+                winnersOnlyProgressions=self.winnersOnly.isChecked(),
+                customSeeding=customSeeding
+            )
 
         if self.progressionsIn.value() > 0:
             for _set in self.bracket.rounds["1"]:
@@ -345,13 +389,15 @@ class AutonaBracketWidget(QDockWidget):
 
             QGuiApplication.processEvents()
             self.bracket.UpdateBracket()
-            self.bracketView.Update()
+            if self.bracketView is not None:
+                self.bracketView.Update()
         except:
             logger.error(traceback.format_exc())
         finally:
             StateManager.ReleaseSaving()
-            self.playerList.signals.DataChanged.connect(
-                self.bracketView.Update)
+            if self.bracketView is not None:
+                self.playerList.signals.DataChanged.connect(
+                    self.bracketView.Update)
 
     def SetDefaultsFromAssets(self):
         if StateManager.Get(f'game.defaults'):
