@@ -92,7 +92,7 @@ SIDEBAR_WIDTH = 52
 SIDEBAR_TAB_HEIGHT = 48
 
 LABEL_FONT_PT = 6
-LABEL_GAP = 1
+LABEL_GAP = 3
 
 # Corner radius on the gradient area. The gradient spans the full tab
 # bar extent along the main axis (window-width dependent, not tab-count
@@ -364,8 +364,13 @@ class AutonaDockTabPainter(QObject):
         if icon_size.isNull() or icon_size.width() < 1:
             icon_size = ICON_SIZE
         label_font = self._label_font(tab_bar)
-        label_height = painter.fontMetrics().boundingRect("M").height()
-        label_height = max(label_height, QFontMetrics(label_font).height())
+        # Use the label font's *visible* cap height — the actual painted
+        # glyph height — rather than the painter's default font metrics
+        # (a bug that inflated the label box and drifted the whole block
+        # upward). All labels are uppercase with no descenders, so the
+        # tight bounding rect of "EVENT" is representative.
+        cap_rect = QFontMetrics(label_font).tightBoundingRect("EVENT")
+        label_height = cap_rect.height()
 
         # Vertically center the (icon + gap + label) block within tab_rect
         content_h = icon_size.height() + LABEL_GAP + label_height

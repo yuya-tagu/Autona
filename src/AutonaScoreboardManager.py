@@ -26,7 +26,6 @@ class AutonaScoreboardManager(QDockWidget):
         self.signals: AutonaScoreboardManagerSignals = AutonaScoreboardManagerSignals()
         logger.info("Scoreboard Manager - Initializing")
 
-        self.setFloating(True)
         self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.widget = QWidget()
         self.widget.setMinimumWidth(0)

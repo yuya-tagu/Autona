@@ -73,12 +73,11 @@ FRAME_INNER_W = 1
 FRAME_OUTER_MARGIN = 4
 FRAME_INNER_MARGIN = 12
 
-DOT_ANIMATION_INTERVAL_MS = 280
-MAX_DOTS = 3
-# How long to pump the Qt event loop after setting an animated message so
-# the user actually sees the dots tick before Window.__init__ continues its
-# (synchronous) heavy work and blocks the main thread again.
-PUMP_DURATION_MS = 900
+  # (Previously the splash animated trailing "..." dots via a QTimer,
+  # which required pumping the event loop for ~900ms after each message
+  # just to let the dots visibly tick — ~3.6s of pure wait across 4
+  # checkpoints. Dot animation has been removed; messages render as-is
+  # and the progress bar tween alone provides visual motion.)
 
 # Progress bar
 PROGRESS_BAR_H = 6
@@ -88,6 +87,9 @@ PROGRESS_BAR_RADIUS = 3
 COLOR_PROGRESS_TRACK = QColor("#2A2014")
 COLOR_PROGRESS_FILL_A = QColor("#C41232")
 COLOR_PROGRESS_FILL_B = QColor("#F0C45A")
+# Smoothly tween between discrete progress checkpoints instead of snapping.
+PROGRESS_TWEEN_MS = 350
+PROGRESS_TICK_MS = 16  # ~60fps
 
 
 # ──────────────────────────────────────────────────────────
@@ -157,68 +159,58 @@ class AutonaSplashScreen(QSplashScreen):
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint)
 
         self._message_base = ""
-        self._animate = False
-        self._dot_count = 1
         self._progress = 0.0
-        self._animation_timer = QTimer(self)
-        self._animation_timer.setInterval(DOT_ANIMATION_INTERVAL_MS)
-        self._animation_timer.timeout.connect(self._advance_dots)
+        self._progress_start = 0.0
+        self._progress_target = 0.0
+        self._progress_tween_start = 0.0
+        self._progress_timer = QTimer(self)
+        self._progress_timer.setInterval(PROGRESS_TICK_MS)
+        self._progress_timer.timeout.connect(self._tween_progress)
 
     # ── Public API ─────────────────────────────────────────
 
     def set_message(self, text: str, progress: float | None = None) -> None:
-        """Display `text`, optionally updating the progress bar to
-        `progress` (0.0–1.0). If `text` ends with '...' the trailing dots
-        animate from 1 to MAX_DOTS, cycling. Briefly pumps the event loop
-        so the dots have time to visibly tick before the caller resumes
-        its synchronous work."""
+        """Display `text`, optionally advancing the progress bar to
+        `progress` (0.0–1.0) via a smooth tween. Returns immediately —
+        does not block the caller's thread."""
         if progress is not None:
-            self._progress = max(0.0, min(1.0, float(progress)))
-        if text.endswith("..."):
-            self._message_base = text[: -MAX_DOTS]
-            self._animate = True
-            self._dot_count = 1
-            if not self._animation_timer.isActive():
-                self._animation_timer.start()
-        else:
-            self._message_base = text
-            self._animate = False
-            self._animation_timer.stop()
+            self._start_progress_tween(float(progress))
+        self._message_base = text
         self._render_message()
         QApplication.processEvents()
-        if self._animate:
-            self._pump_for(PUMP_DURATION_MS)
 
     def finish(self, main_window: QWidget) -> None:  # type: ignore[override]
-        self._animation_timer.stop()
+        self._progress_timer.stop()
         super().finish(main_window)
-
-    @staticmethod
-    def _pump_for(duration_ms: int) -> None:
-        """Pump the Qt event loop for `duration_ms` so QTimer-driven dot
-        animations can tick visibly. Uses `processEvents` + a short sleep
-        instead of a nested `QEventLoop.exec()`: qasync's asyncio event
-        loop and Windows COM don't permit nested exec() from within an
-        input-synchronous call (triggers RPC_E_CANTCALLOUT_ININPUTSYNCCALL
-        0x8001010d)."""
-        end = time.monotonic() + duration_ms / 1000.0
-        while time.monotonic() < end:
-            QApplication.processEvents()
-            remaining = end - time.monotonic()
-            if remaining <= 0:
-                break
-            time.sleep(min(0.02, remaining))
 
     # ── Internals ──────────────────────────────────────────
 
-    def _advance_dots(self) -> None:
-        self._dot_count = (self._dot_count % MAX_DOTS) + 1
-        self._render_message()
+    def _start_progress_tween(self, target: float) -> None:
+        """Begin a smooth tween of the progress bar from its current
+        value to `target`. Driven by _progress_timer (QTimer); ticks
+        whenever the Qt event loop processes events during init."""
+        target = max(0.0, min(1.0, target))
+        self._progress_start = self._progress
+        self._progress_target = target
+        self._progress_tween_start = time.monotonic()
+        if not self._progress_timer.isActive():
+            self._progress_timer.start()
 
-    def _current_text(self) -> str:
-        if self._animate:
-            return self._message_base + ("." * self._dot_count)
-        return self._message_base
+    def _tween_progress(self) -> None:
+        elapsed_ms = (time.monotonic() - self._progress_tween_start) * 1000
+        t = min(1.0, elapsed_ms / PROGRESS_TWEEN_MS)
+        # Ease-out cubic for a gentle settle near the target.
+        e = 1.0 - (1.0 - t) ** 3
+        self._progress = (
+            self._progress_start
+            + (self._progress_target - self._progress_start) * e
+        )
+        self._render_message()
+        if t >= 1.0:
+            self._progress = self._progress_target
+            self._progress_timer.stop()
+
+    # ── Internals ──────────────────────────────────────────
 
     def _render_message(self) -> None:
         pix = QPixmap(self._base_pixmap)
@@ -233,7 +225,7 @@ class AutonaSplashScreen(QSplashScreen):
                 0, SPLASH_H - 84, SPLASH_W, 32,
                 Qt.AlignmentFlag.AlignHCenter
                 | Qt.AlignmentFlag.AlignVCenter,
-                f"» {self._current_text()} «",
+                f"» {self._message_base} «",
             )
             self._paint_progress_bar(painter)
         finally:

@@ -18,16 +18,12 @@ class AutonaCommentaryWidget(QDockWidget):
     def __init__(self, *args):
         super().__init__(*args)
         self.setWindowTitle(QApplication.translate("app", "Commentary"))
-        self.setFloating(True)
         self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.widget = QWidget()
         self.widget.setMinimumWidth(0)
         self.widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.setWidget(self.widget)
         self.widget.setLayout(QVBoxLayout())
-
-        self.setFloating(True)
-        self.setWindowFlags(Qt.WindowType.Window)
 
         topOptions = QWidget()
         topOptions.setLayout(QHBoxLayout())

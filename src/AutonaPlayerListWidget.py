@@ -30,14 +30,10 @@ class AutonaPlayerListWidget(QDockWidget):
         self.playerList = AutonaPlayerList(base=base)
 
         self.setWindowTitle(QApplication.translate("app", "Player List"))
-        self.setFloating(True)
         self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.widget = QWidget()
         self.setWidget(self.widget)
         self.widget.setLayout(QVBoxLayout())
-
-        self.setFloating(True)
-        self.setWindowFlags(Qt.WindowType.Window)
 
         topOptions = QWidget()
         topOptions.setLayout(QHBoxLayout())
