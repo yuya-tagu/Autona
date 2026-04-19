@@ -84,7 +84,16 @@ class AutonaPlayerDB:
             logger.error(traceback.format_exc())
 
     @staticmethod
-    def AddPlayers(players, overwrite=False):
+    def AddPlayers(players, overwrite=False, deferRefresh=False):
+        """Merge `players` into the in-memory database.
+
+        When `deferRefresh` is True, SaveDB() and SetupModel() are skipped —
+        the caller is responsible for invoking them once after the final
+        batch. This avoids re-serialising the full JSON DB and rebuilding
+        the entire QStandardItemModel on every page of a paginated fetch
+        (9 pages × full O(N) rebuild would otherwise freeze the UI on
+        large local databases).
+        """
         logger.info(f"Adding players to DB: {len(players)}")
         for player in players:
             if player is not None:
@@ -135,8 +144,9 @@ class AutonaPlayerDB:
                             logger.error(traceback.format_exc())
                     AutonaPlayerDB.database[tag] = player
 
-        AutonaPlayerDB.SaveDB()
-        AutonaPlayerDB.SetupModel()
+        if not deferRefresh:
+            AutonaPlayerDB.SaveDB()
+            AutonaPlayerDB.SetupModel()
 
     @staticmethod
     def DeletePlayer(tag):

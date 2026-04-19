@@ -2,6 +2,7 @@ from collections import Counter
 import re
 import requests
 import os
+import time
 import traceback
 from loguru import logger
 from ..Helpers.AutonaCountryHelper import AutonaCountryHelper
@@ -13,7 +14,6 @@ from ..AutonaPlayerDB import AutonaPlayerDB
 from .TournamentDataProvider import TournamentDataProvider
 import orjson
 from ..Helpers.AutonaLocaleHelper import AutonaLocaleHelper
-from ..AutonaBracket import is_power_of_two
 
 from ..Workers import Worker
 
@@ -52,30 +52,41 @@ class StartGGDataProvider(TournamentDataProvider):
     #
     # This should work fine in theory unless an API restriction is added
     def QueryRequests(self, url=None, type=None, headers={}, jsonParams=None, params=None):
-        try:
-            requestCode = 0
-            data = None
-            headers.update({
-                "client-version": "20",
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36"
-            })
-            retries = 0
-            while requestCode != 200 and retries < 5:
+        headers.update({
+            "client-version": "20",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36"
+        })
+
+        # Retry on transient failures (timeouts, connection errors, non-200)
+        # with exponential backoff. Start.gg's heavy queries (phaseGroup
+        # with seeds+sets) occasionally take longer than the per-request
+        # timeout; a short wait before retrying gives the server time to
+        # settle instead of immediately hammering it again.
+        max_attempts = 5
+        for attempt in range(max_attempts):
+            try:
                 data = type(
                     url,
                     timeout=self._request_timeout_secs,
                     headers=headers,
                     json=jsonParams,
-                    params=params
+                    params=params,
                 )
-                requestCode = data.status_code
-                retries += 1
-            data = orjson.loads(data.text)
-            return data
-        except Exception as e:
-            logger.error(traceback.format_exc())
-            return {}
+                if data.status_code == 200:
+                    return orjson.loads(data.text)
+                logger.warning(
+                    f"QueryRequests non-200 ({data.status_code}) on attempt {attempt+1}/{max_attempts}")
+            except Exception as e:
+                logger.warning(
+                    f"QueryRequests exception on attempt {attempt+1}/{max_attempts}: {e}")
+
+            if attempt < max_attempts - 1:
+                # 1s, 2s, 4s, 8s — doubles each retry
+                time.sleep(2 ** attempt)
+
+        logger.error("QueryRequests: all retries exhausted")
+        return {}
 
     def GetTournamentData(self, progress_callback=None, cancel_event=None):
         finalData = {}
@@ -244,7 +255,6 @@ class StartGGDataProvider(TournamentDataProvider):
                     "operationName": "TournamentPhaseGroupQuery",
                     "variables": {
                         "id": id,
-                        "videogameId": AutonaGameAssetManager.instance.selectedGame.get("smashgg_game_id")
                     },
                     "query": StartGGDataProvider.TournamentPhaseGroupQuery
                 }
@@ -264,9 +274,20 @@ class StartGGDataProvider(TournamentDataProvider):
                 seedMap = [s if s != "bye" else -1 for s in seedMap]
                 finalData["seedMap"] = seedMap
 
+            # Seed the team list by seedNum, padding gaps with placeholders
+            # so teams[seedNum-1] always matches that seed's data. Start.gg
+            # can return non-contiguous seed numbers (e.g. in progression
+            # pools where some seeds didn't qualify), and bracket sets
+            # reference players by seedNum — a position-based list would
+            # misalign slot.{N} data with the bracket's player IDs.
             teams = []
-
             for seed in seeds:
+                seedNum = seed.get("seedNum")
+                if seedNum is None:
+                    continue
+                while len(teams) < seedNum - 1:
+                    teams.append({})
+
                 team = {}
                 participants = deep_get(seed, "entrant.participants")
 
@@ -300,17 +321,32 @@ class StartGGDataProvider(TournamentDataProvider):
 
             finalSets = {}
 
+            # Preserve Start.gg's set structure directly. The round key is the
+            # authoritative column assignment (positive = winners, negative =
+            # losers, max = grand final, max+1 = reset). We keep the raw slot
+            # info so the new Start.gg-driven Bracket can wire winNext/loseNext
+            # from prereq references without re-deriving topology.
             for s in sets:
-                # logger.info(s)
-
                 round = int(s.get("round"))
 
                 if not str(round) in finalSets:
                     finalSets[str(round)] = []
 
+                slots = []
+                for slot in s.get("slots", []) or []:
+                    slots.append({
+                        "prereqType": slot.get("prereqType"),
+                        "prereqId": slot.get("prereqId"),
+                        "prereqPlacement": slot.get("prereqPlacement"),
+                        "seedNum": deep_get(slot, "seed.seedNum"),
+                    })
+
                 finalSets[str(round)].append({
+                    "id": s.get("id"),
+                    "identifier": s.get("identifier"),
                     "score": [s.get("entrant1Score"), s.get("entrant2Score")],
-                    "finished": s.get("state", 0) == 3
+                    "finished": s.get("state", 0) == 3,
+                    "slots": slots,
                 })
 
             finalData["sets"] = finalSets
@@ -323,49 +359,19 @@ class StartGGDataProvider(TournamentDataProvider):
                 if originPhaseId:
                     finalData["progressionsIn"].append(originPhaseId)
 
-            finalData["winnersOnlyProgressions"] = deep_get(
-                oldData, "entities.groups.hasCustomWinnerByes")
-
-            for s in sets:
-                if s.get("slots", []) and int(s.get("round")) == -2:
-                    for slot in s.get("slots", []):
-                        if slot.get("prereqType") == "seed":
-                            finalData["winnersOnlyProgressions"] = False
-
-                if finalData["winnersOnlyProgressions"] == False:
-                    break
-
-            finalData["customSeeding"] = deep_get(
-                oldData, "entities.groups.hasCustomWinnerByes")
-
-            if len(finalData["progressionsIn"]) > 0 and not finalData["winnersOnlyProgressions"]:
-                originalKeys = list(finalData["sets"].keys())
-                originalKeys.reverse()
-
-                # If we have a non-power2 number of progressions in, we shift 2 rounds
-                shift = 1 if is_power_of_two(
-                    len(finalData["progressionsIn"])) else 2
-
-                if deep_get(oldData, "entities.groups.hasCustomWinnerByes"):
-                    shift = 1
-
-                for roundKey in originalKeys:
-                    round = int(roundKey)
-
-                    # If we have progressions in, shift winners scores to the right
-                    if round > 0:
-                        finalData["sets"][str(
-                            round+shift)] = finalData["sets"].pop(roundKey)
-
             finalData["progressionsOut"] = deep_get(
                 data, "data.phaseGroup.progressionsOut")
 
-            # StartGG gives us 2 sets for GFs, we want that divided into 2 rounds
-            if finalData["progressionsOut"] == None or len(finalData["progressionsOut"]) == 0:
-                lastRound = max([int(r) for r in finalData["sets"].keys()])
-                if len(finalData["sets"][str(lastRound)]) > 1:
-                    gfsReset = finalData["sets"][str(lastRound)].pop()
-                    finalData["sets"][str(lastRound+1)] = [gfsReset]
+            # Start.gg returns the grand final reset as an extra set at the
+            # highest round key. Split it into its own round so the UI can
+            # render GF and GF Reset as separate columns.
+            if finalData["progressionsOut"] is None or len(finalData["progressionsOut"]) == 0:
+                positiveRounds = [int(r) for r in finalSets.keys() if int(r) > 0]
+                if positiveRounds:
+                    lastRound = max(positiveRounds)
+                    if len(finalSets[str(lastRound)]) > 1:
+                        gfsReset = finalSets[str(lastRound)].pop()
+                        finalSets[str(lastRound+1)] = [gfsReset]
         except:
             logger.error(traceback.format_exc())
 
@@ -719,20 +725,15 @@ class StartGGDataProvider(TournamentDataProvider):
                                 "code")
                             break
 
-                # State -- direct
+                # State — use only Start.gg's direct state field. City-based
+                # inference was removed: it ran linear scans over the country's
+                # state/city tables for every entrant, adding hundreds of ms
+                # on large pools, and the typical Japanese-user case (state
+                # null, city set to 都道府県 or 市名) didn't reliably resolve.
                 if user.get("location").get("state"):
-                    stateCode = user.get(
-                        "location").get("state")
-                    if stateCode:
-                        playerData["state_code"] = user.get(
-                            "location").get("state")
-                # State -- from city
-                elif user.get("location").get("city") and playerData.get("country_code"):
-                    stateCode = AutonaCountryHelper.FindState(
-                        playerData["country_code"], user.get("location").get("city"))
-                    if stateCode:
-                        playerData["state_code"] = stateCode
-                if user.get("location").get("city"): playerData["city"] = user.get("location").get("city")
+                    playerData["state_code"] = user.get("location").get("state")
+                if user.get("location").get("city"):
+                    playerData["city"] = user.get("location").get("city")
 
             if playerData.get("startggMain"):
                 main = AutonaGameAssetManager.instance.GetCharacterFromStartGGId(
@@ -1799,10 +1800,17 @@ class StartGGDataProvider(TournamentDataProvider):
                             "gamerTag": gamerTag
                         })
 
-                AutonaPlayerDB.AddPlayers(players)
+                # Defer SaveDB/SetupModel per page — each call is O(full DB)
+                # and rebuilds the QStandardItemModel on the GUI thread. We
+                # flush once after all pages are done below.
+                AutonaPlayerDB.AddPlayers(players, deferRefresh=True)
                 players = []
 
                 page += 1
+
+            # Persist + rebuild the model once for the whole fetch.
+            AutonaPlayerDB.SaveDB()
+            AutonaPlayerDB.SetupModel()
 
             # Sort by seed (ascending); unseeded entries fall to the bottom
             self.top_entrants.sort(key=lambda e: e["seed"])
@@ -1887,19 +1895,9 @@ class StartGGDataProvider(TournamentDataProvider):
                                 "code")
                             break
 
-                # State -- direct
+                # State — direct only (see rationale above; city fallback removed).
                 if user.get("location").get("state"):
-                    stateCode = user.get(
-                        "location").get("state")
-                    if stateCode:
-                        playerData["state_code"] = user.get(
-                            "location").get("state")
-                # State -- from city
-                elif user.get("location").get("city"):
-                    stateCode = AutonaCountryHelper.FindState(
-                        playerData.get("country_code", None), user.get("location", {}).get("city", None))
-                    if stateCode:
-                        playerData["state_code"] = stateCode
+                    playerData["state_code"] = user.get("location").get("state")
 
             if playerData.get("startggMains"):
                 if AutonaGameAssetManager.instance.selectedGame:

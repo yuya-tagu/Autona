@@ -1,31 +1,116 @@
+import math
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
-from qtpy import uic
-import json
-from .AutonaBracket import *
+from .AutonaBracket import Bracket, BracketSet
 from .AutonaPlayerList import *
+from .StateManager import StateManager
 import traceback
 from loguru import logger
 
-# Checks if a number is power of 2
+
+def _roundIndex(p: int) -> int:
+    """Double-elimination placement → expected round-of-elimination index.
+
+        r(1)=0, r(2)=1, r(3)=2, r(4)=3,
+        r(5..6)=4, r(7..8)=5, r(9..12)=6, r(13..16)=7,
+        r(17..24)=8, r(25..32)=9, r(33..48)=10, r(49..64)=11, ...
+    """
+    if p is None or p < 1:
+        return 0
+    if p == 1:
+        return 0
+    # k = ceil(log2(p)); bit_length avoids float-edge issues.
+    k = (p - 1).bit_length()
+    # Split each [2^(k-1)+1 .. 2^k] band in two: lower ≤ 3·2^(k-2), upper above.
+    if 4 * p <= 3 * (1 << k):
+        return 2 * (k - 1)
+    return 2 * (k - 1) + 1
 
 
-def is_power_of_two(n):
-    return (n != 0) and (n & (n-1) == 0)
+def _upsetFactor(winnerSeed: int, loserSeed: int) -> int:
+    """UF = r(winnerSeed) - r(loserSeed).
+
+    Positive for upsets (weaker seed won), negative for expected results.
+    The roundIndex table maps each seed to its expected exit round in a
+    double-elimination bracket, so UF measures how many elimination-rounds
+    the winner out-performed (or under-performed) their seed.
+
+    Examples:
+        1 vs 5, seed 5 wins  → +4   (r(5) - r(1) = 4 - 0)
+        1 vs 2, seed 2 wins  → +1
+        5 vs 1, seed 1 wins  → -4   (non-upset, white)
+    """
+    if winnerSeed <= 0 or loserSeed <= 0:
+        return 0
+    return _roundIndex(winnerSeed) - _roundIndex(loserSeed)
+
+
+# Fixed per-match widget height in pixels. Setting this explicitly keeps
+# bracket rounds geometrically aligned: the between-match spacing for round
+# R is derived from MATCH_UNIT_PX + GAP_PX, so if the widget's rendered
+# height deviates from this constant, later rounds drift vertically from
+# their ideal "centred between two prior matches" positions.
+MATCH_UNIT_PX = 75
+
+# Inter-match breathing room between the UF label of one match and the
+# top of the next match. Included in the scale math so that a round-R
+# match still sits vertically centred between the two prior-round matches
+# it's fed from.
+GAP_PX = 8
+
+# Full vertical "slot" occupied by one match including its gap below.
+SLOT_PX = MATCH_UNIT_PX + GAP_PX
+
+# Horizontal breathing room between round columns so the connection lines
+# have room to bend cleanly.
+ROUND_GAP_PX = 24
+
+
+def _upsetFactorStyle(uf: int) -> str:
+    """Piecewise gradient matching Autona's icon palette:
+        0 = white, 3 = gold (#FFD700), 6 = crimson (#C41232), 10 = magenta.
+    Non-upsets render as plain white; actual upsets bold up and warm toward
+    the app's signature crimson before cooling to magenta on extreme upsets.
+    """
+    def _lerp(a, b, t):
+        return int(round(a + t * (b - a)))
+
+    if uf <= 0:
+        r, g, b = 255, 255, 255
+        weight = "normal"
+    else:
+        weight = "bold"
+        if uf <= 3:
+            t = uf / 3.0
+            r = _lerp(255, 255, t)
+            g = _lerp(255, 215, t)
+            b = _lerp(255, 0, t)
+        elif uf <= 6:
+            t = (uf - 3) / 3.0
+            r = _lerp(255, 196, t)
+            g = _lerp(215, 18, t)
+            b = _lerp(0, 50, t)
+        elif uf <= 10:
+            t = (uf - 6) / 4.0
+            r = _lerp(196, 255, t)
+            g = _lerp(18, 0, t)
+            b = _lerp(50, 255, t)
+        else:
+            r, g, b = 255, 0, 255
+    return f"color: rgb({r}, {g}, {b}); font-weight: {weight}; font-size: 9pt;"
 
 
 class BracketSetWidget(QWidget):
     def __init__(self, bracketSet: BracketSet = None, bracketView: "AutonaBracketView" = None, *args) -> None:
-        # Pass bracketView as parent — without it, this widget becomes a
-        # top-level window and flashes on screen at startup while brackets
-        # are rebuilt (~15 cells per bracket rebuild).
+        # Pass bracketView as parent so these don't flash as top-level windows
+        # during bracket rebuilds.
         super().__init__(bracketView, *args)
         self.setLayout(QVBoxLayout())
 
-        self.playerId: list(QLabel) = []
-        self.name: list(QLineEdit) = []
-        self.score: list(QSpinBox) = []
+        self.playerId: list = []
+        self.name: list = []
+        self.score: list = []
 
         self.bracketSet = bracketSet
         self.bracketView = bracketView
@@ -51,37 +136,56 @@ class BracketSetWidget(QWidget):
             name.setMinimumWidth(120)
             name.setMaximumWidth(120)
             name.setDisabled(True)
+            # Override Qt's disabled palette so player names keep the
+            # Autona text colour (#F0EAE0) against the dark bracket bg
+            # — the default greyed-out disabled text is unreadable.
+            name.setStyleSheet(
+                "QLineEdit:disabled { color: #F0EAE0; "
+                "background-color: rgba(0, 0, 0, 0); }"
+            )
             self.name.append(name)
             hbox.layout().addWidget(name)
             name.sizePolicy().setRetainSizeWhenHidden(False)
 
             score = QSpinBox()
             score.setMinimum(-1)
+            # Compact score column: no spin arrows.
+            score.setButtonSymbols(QAbstractSpinBox.NoButtons)
+            score.setMaximumWidth(45)
+            score.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.score.append(score)
             hbox.layout().addWidget(score)
             score.setValue(-1)
             score.valueChanged.connect(
                 lambda newVal, i=i: self.SetScore(i, newVal))
 
-        self.finished = QCheckBox(QApplication.translate("app", "Finished"))
-        self.layout().addWidget(self.finished)
-        self.finished.toggled.connect(lambda newVal: self.SetFinished(newVal))
+        # Upset factor label — replaces the old "Finished" checkbox. Value
+        # and colour are assigned in Update() once playerIds and scores are
+        # known. Right-aligned below the second player row so it reads as
+        # an annotation of the decided match rather than a centred header.
+        self.upsetLabel = QLabel("")
+        self.upsetLabel.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
+        self.upsetLabel.setStyleSheet("font-size: 9pt;")
+        self.layout().addWidget(self.upsetLabel)
 
         self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Maximum)
         self.sizePolicy().setRetainSizeWhenHidden(True)
+        self.layout().setContentsMargins(0, 0, 0, 0)
         self.layout().setSpacing(2)
+        # Fixed height so bracket column layout math matches reality. See
+        # MATCH_UNIT_PX docstring.
+        self.setFixedHeight(MATCH_UNIT_PX)
 
-        if self.bracketSet is not None:
-            hasBye = \
-                ((self.bracketSet.playerIds[0] == -1 and not self.bracketSet.playerIds[1] == -1) or
-                 (self.bracketSet.playerIds[1] == -1 and not self.bracketSet.playerIds[0] == -1))
+        self._applyVisibility()
 
-            if self.bracketSet.pos[0] < 0 and hasBye:
-                self.hide()
-            elif self.bracketSet.pos[0] > 0 and self.bracketSet.pos[0] == 1 and hasBye:
-                self.hide()
-            else:
-                self.show()
+    def _applyVisibility(self):
+        if self.bracketSet is None:
+            return
+        if self.bracketSet.isByeSet:
+            self.hide()
+        else:
+            self.show()
 
     def SetScore(self, id, score, updateDisplay=True):
         self.bracketSet.score[id] = score
@@ -89,131 +193,95 @@ class BracketSetWidget(QWidget):
             self.bracketSet.bracket.UpdateBracket()
             self.bracketView.Update()
 
-    def SetFinished(self, finished, updateDisplay=True):
-        self.bracketSet.finished = finished
-
-        if updateDisplay:
-            self.bracketSet.bracket.UpdateBracket()
-            self.bracketView.Update()
-
     def Update(self):
-        if self.bracketSet is not None:
-            self.playerId[0].setText(str(self.bracketSet.playerIds[0]))
-            self.playerId[1].setText(str(self.bracketSet.playerIds[1]))
+        if self.bracketSet is None:
+            return
 
-            if self.playerId[0].text() == "-2":
-                self.playerId[0].setText("")
-            if self.playerId[1].text() == "-2":
-                self.playerId[1].setText("")
+        self.playerId[0].setText(str(self.bracketSet.playerIds[0]))
+        self.playerId[1].setText(str(self.bracketSet.playerIds[1]))
 
-            self.score[0].blockSignals(True)
-            self.score[1].blockSignals(True)
-            self.score[0].setValue(
-                min(self.bracketSet.score[0], self.score[0].maximum()))
-            self.score[1].setValue(
-                min(self.bracketSet.score[1], self.score[1].maximum()))
-            self.score[0].blockSignals(False)
-            self.score[1].blockSignals(False)
+        if self.playerId[0].text() == "-2":
+            self.playerId[0].setText("")
+        if self.playerId[1].text() == "-2":
+            self.playerId[1].setText("")
 
-            if self.bracketSet.score[0] > self.bracketSet.score[1]:
-                self.score[0].setStyleSheet(
-                    "background-color: rgba(0, 255, 0, 50);")
-                self.score[1].setStyleSheet(
-                    "background-color: rgba(0, 0, 0, 80);")
-            elif self.bracketSet.score[0] < self.bracketSet.score[1]:
-                self.score[1].setStyleSheet(
-                    "background-color: rgba(0, 255, 0, 50);")
-                self.score[0].setStyleSheet(
-                    "background-color: rgba(0, 0, 0, 80);")
-            else:
-                self.score[0].setStyleSheet(
-                    "background-color: rgba(0, 0, 0, 80);")
-                self.score[1].setStyleSheet(
-                    "background-color: rgba(0, 0, 0, 80);")
+        self.score[0].blockSignals(True)
+        self.score[1].blockSignals(True)
+        self.score[0].setValue(
+            min(self.bracketSet.score[0], self.score[0].maximum()))
+        self.score[1].setValue(
+            min(self.bracketSet.score[1], self.score[1].maximum()))
+        self.score[0].blockSignals(False)
+        self.score[1].blockSignals(False)
 
+        if self.bracketSet.score[0] > self.bracketSet.score[1]:
+            self.score[0].setStyleSheet("background-color: rgba(0, 255, 0, 50);")
+            self.score[1].setStyleSheet("background-color: rgba(0, 0, 0, 80);")
+        elif self.bracketSet.score[0] < self.bracketSet.score[1]:
+            self.score[1].setStyleSheet("background-color: rgba(0, 255, 0, 50);")
+            self.score[0].setStyleSheet("background-color: rgba(0, 0, 0, 80);")
+        else:
+            self.score[0].setStyleSheet("background-color: rgba(0, 0, 0, 80);")
+            self.score[1].setStyleSheet("background-color: rgba(0, 0, 0, 80);")
+
+        for i in (0, 1):
             try:
-                if (self.bracketSet.playerIds[0]-1) < len(self.bracketView.playerList.slotWidgets) and self.bracketSet.playerIds[0] > 0:
+                pid = self.bracketSet.playerIds[i]
+                if pid > 0:
                     team = StateManager.Get(
-                        f"bracket.players.slot.{self.bracketSet.playerIds[0]}", {})
+                        f"bracket.players.slot.{pid}", {}) or {}
                     if team.get("name"):
                         teamName = team.get("name")
                     else:
                         teamName = " / ".join([p.get("name", "")
-                                              for p in team.get("player", {}).values()])
-                    self.name[0].setText(teamName)
+                                              for p in (team.get("player") or {}).values()])
+                    self.name[i].setText(teamName)
                 else:
-                    self.name[0].setText("")
-            except:
+                    self.name[i].setText("")
+            except Exception:
                 logger.error(traceback.format_exc())
 
-            try:
-                if (self.bracketSet.playerIds[1]-1) < len(self.bracketView.playerList.slotWidgets) and self.bracketSet.playerIds[1] > 0:
-                    team = StateManager.Get(
-                        f"bracket.players.slot.{self.bracketSet.playerIds[1]}", {})
-                    if team.get("name"):
-                        teamName = team.get("name")
-                    else:
-                        teamName = " / ".join([p.get("name", "")
-                                              for p in team.get("player", {}).values()])
-                    self.name[1].setText(teamName)
-                else:
-                    self.name[1].setText("")
-            except:
-                logger.error(traceback.format_exc())
+        # Upset factor — winner-perspective, shown only when both players
+        # are decided and the match has a clear winner.
+        p0, p1 = self.bracketSet.playerIds
+        s0, s1 = self.bracketSet.score
+        if p0 > 0 and p1 > 0 and self.bracketSet.finished and s0 != s1:
+            winnerSeed, loserSeed = (p0, p1) if s0 > s1 else (p1, p0)
+            uf = _upsetFactor(winnerSeed, loserSeed)
+            sign = "+" if uf > 0 else ""
+            self.upsetLabel.setText(f"U{sign}{uf}")
+            self.upsetLabel.setStyleSheet(_upsetFactorStyle(uf))
+        else:
+            self.upsetLabel.setText("")
+            self.upsetLabel.setStyleSheet("font-size: 9pt;")
 
-            if self.bracketSet.finished is not None:
-                self.finished.blockSignals(True)
-                self.finished.setChecked(self.bracketSet.finished)
-                self.finished.blockSignals(False)
+        self._applyVisibility()
 
-            winnersCutout, losersCutout = self.bracketView.GetCutouts()
-            hasBye = \
-                ((self.bracketSet.playerIds[0] == -1 and not self.bracketSet.playerIds[1] == -1) or
-                 (self.bracketSet.playerIds[1] == -1 and not self.bracketSet.playerIds[0] == -1))
+        limitExportNumber, winnersOffset, losersOffset = \
+            self.bracketView.GetLimitedExportingBracketOffsets()
 
-            if self.bracketSet.pos[0] < 0 and hasBye:
-                self.hide()
-            elif self.bracketSet.pos[0] > 0 and self.bracketSet.pos[0] == 1 and hasBye:
-                self.hide()
-            else:
-                self.show()
+        if self.bracketSet.pos[0] > 0:
+            dim = (self.bracketSet.pos[0] - winnersOffset) <= 0
+        elif self.bracketSet.pos[0] < 0:
+            dim = (self.bracketSet.pos[0] + losersOffset) >= 0
+        else:
+            dim = False
 
-            limitExportNumber, winnersOffset, losersOffset = self.bracketView.GetLimitedExportingBracketOffsets()
-
-            if self.bracketSet.pos[0] > 0:
-                if self.bracketSet.pos[0] - winnersOffset <= 0:
-                    self.name[0].setStyleSheet(
-                        "background-color: rgba(0, 0, 0, 80);")
-                    self.name[1].setStyleSheet(
-                        "background-color: rgba(0, 0, 0, 80);")
-                else:
-                    self.name[0].setStyleSheet(
-                        "background-color: rgba(0, 0, 0, 0);")
-                    self.name[1].setStyleSheet(
-                        "background-color: rgba(0, 0, 0, 0);")
-            elif self.bracketSet.pos[0] < 0:
-                if self.bracketSet.pos[0] + losersOffset >= 0:
-                    self.name[0].setStyleSheet(
-                        "background-color: rgba(0, 0, 0, 80);")
-                    self.name[1].setStyleSheet(
-                        "background-color: rgba(0, 0, 0, 80);")
-                else:
-                    self.name[0].setStyleSheet(
-                        "background-color: rgba(0, 0, 0, 0);")
-                    self.name[1].setStyleSheet(
-                        "background-color: rgba(0, 0, 0, 0);")
+        bg = "rgba(0, 0, 0, 80)" if dim else "rgba(0, 0, 0, 0)"
+        ss = f"QLineEdit:disabled {{ color: #F0EAE0; background-color: {bg}; }}"
+        self.name[0].setStyleSheet(ss)
+        self.name[1].setStyleSheet(ss)
 
 
 class AutonaBracketView(QGraphicsView):
-    def __init__(self, bracket: Bracket, playerList: AutonaPlayerList = None, bracketWidget=None, *args):
+    def __init__(self, bracket: Bracket, playerList: AutonaPlayerList = None,
+                 bracketWidget=None, *args):
         super().__init__(*args)
 
         self.bracketWidget = bracketWidget
-
         self.playerList = playerList
 
         self._zoom = 0
-        self._empty = True
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
 
@@ -221,75 +289,82 @@ class AutonaBracketView(QGraphicsView):
         self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        # self.setBackgroundBrush(QBrush(QColor(30, 30, 30)))
         self.setFrameShape(QFrame.NoFrame)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
 
-        self.SetBracket(bracket)
+        # Floating loading overlay. Lives outside the scene to avoid
+        # touching QGraphicsProxyWidget lifecycle during fetch/render
+        # swaps (a prior scene-based approach caused access violations).
+        self.loadingOverlay = QLabel("取得中…\nLoading…", self)
+        self.loadingOverlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.loadingOverlay.setStyleSheet(
+            "color: #F0EAE0; font-size: 14pt; "
+            "background-color: rgba(0, 0, 0, 120);")
+        self.loadingOverlay.hide()
 
+        self.SetBracket(bracket)
         self.bracketLines = []
 
+    def _sortedRoundKeys(self, positive=True):
+        keys = [k for k in self.bracket.rounds.keys()
+                if (int(k) > 0) == positive and int(k) != 0]
+        keys.sort(key=lambda k: abs(int(k)))
+        return keys
+
     def GetCutouts(self, forExport=False):
-        winnersRounds = [r for r in self.bracket.rounds.keys() if int(r) > 0]
-        losersRounds = [r for r in self.bracket.rounds.keys() if int(r) < 0]
+        """Compute (winnersCutout, losersCutout) as [startExclusive, endExclusive]
+        round-number thresholds. With the Start.gg-driven bracket, the only
+        source of cutoffs is the limitExport toggle; otherwise every round
+        Start.gg returned is rendered.
+        """
+        winnersKeys = [int(k) for k in self._sortedRoundKeys(positive=True)]
+        losersKeys = [abs(int(k)) for k in self._sortedRoundKeys(positive=False)]
 
-        winnersCutout = [0, len(winnersRounds)+1]
-        losersCutout = [0, len(losersRounds)+1]
+        maxWinners = max(winnersKeys) if winnersKeys else 0
+        maxLosers = max(losersKeys) if losersKeys else 0
 
-        # Winners right side cutout
-        if self.progressionsOut > 0:
-            progressionsWinners = math.pow(
-                2, int(math.log2(self.progressionsOut/2)))
-            winnersCutout[1] = len(winnersRounds) - \
-                (int(math.log2(progressionsWinners)) + 1)
+        winnersCutout = [0, maxWinners + 1]
+        losersCutout = [0, maxLosers + 1]
 
-        # Winners left side cutout
-        if self.progressionsIn > 0 and not self.bracket.winnersOnlyProgressions:
-            if not is_power_of_two(self.progressionsIn) and not self.bracket.customSeeding:
-                winnersCutout[0] = 2
-            else:
-                winnersCutout[0] = 1
+        # limitExport hides early rounds so the view only shows the top N.
+        if self.bracketWidget is not None and self.bracketWidget.limitExport.isChecked():
+            target = max(1, int(self.bracketWidget.limitExportNumber.value()))
+            # Winners: show enough rounds to cover the last log2(target) matches
+            # plus grand final + reset.
+            winnersKeep = max(1, int(math.ceil(math.log2(max(target, 2))))) + 2
+            losersKeep = max(1, 2 * int(math.ceil(math.log2(max(target, 2)))))
 
-        # Losers right side cutout
-        if self.progressionsOut > 0:
-            progressionsLosers = self.progressionsOut - \
-                math.pow(2, int(math.log2(self.progressionsOut/2)))
-            losersCutout[1] = len(losersRounds) - \
-                (math.log2(progressionsLosers) * 2 - 1)
-
-        # Losers left side cutout
-        losersCutout[0] = 2
-
-        # Losers R1 skipping
-        # Losers R1 has bracket_size / 2 (half bracket is sent to losers from WR1) / 2 (2 players per set) sets
-        # If WR1 has as many sets or less, LR1 will be all [player vs bye]
-        # So this round is hidden
-        validWR1Sets = self.bracket.originalPlayerNumber - self.bracket.playerNumber/2
-
-        if not (self.bracketWidget.limitExport.isChecked() and self.bracketWidget.limitExportNumber.value() > 0):
-            if self.progressionsIn == 0 and validWR1Sets <= self.bracket.playerNumber/2/2:
-                losersCutout[0] += 1
-
-        if self.progressionsIn > 0 and not is_power_of_two(self.progressionsIn):
-            losersCutout[0] += 1
-
-        if self.progressionsOut > 0 and not is_power_of_two(self.progressionsOut):
-            losersCutout[1] += 1
+            winnersCutout[0] = max(0, maxWinners - winnersKeep)
+            losersCutout[1] = maxLosers + 1  # keep all on losers' right side
+            losersCutout[0] = max(0, maxLosers - losersKeep)
 
         return (winnersCutout, losersCutout)
 
-    def SetBracket(self, bracket, progressionsIn=0, progressionsOut=0, winnersOnlyProgressions=False, customSeeding=False):
+    def ShowLoading(self):
+        """Float a "取得中" label over the current scene while a phase-group
+        fetch is in flight. The scene itself is not touched — SetBracket
+        later rebuilds the scene and hides the overlay."""
+        self.loadingOverlay.setGeometry(self.viewport().rect())
+        self.loadingOverlay.show()
+        self.loadingOverlay.raise_()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # Keep the loading overlay covering the full viewport on resize.
+        if hasattr(self, "loadingOverlay"):
+            self.loadingOverlay.setGeometry(self.viewport().rect())
+
+    def SetBracket(self, bracket, **_legacyKwargs):
+        """Render the given bracket. Legacy kwargs (progressionsIn/Out/
+        winnersOnlyProgressions/customSeeding) are ignored — Start.gg provides
+        the round structure directly now.
+        """
         self.bracket = bracket
 
-        bracket.progressionsIn = progressionsIn
-        bracket.progressionsOut = progressionsOut
-
-        if bracket.progressionsIn > 0:
-            bracket.winnersOnlyProgressions = winnersOnlyProgressions
-        else:
-            bracket.winnersOnlyProgressions = True
-
-        bracket.customSeeding = customSeeding
+        # Loading overlay (if visible) is dismissed now that real data is
+        # about to render.
+        if hasattr(self, "loadingOverlay"):
+            self.loadingOverlay.hide()
 
         self.bracketLines = []
         self._scene.clear()
@@ -299,110 +374,162 @@ class AutonaBracketView(QGraphicsView):
 
         self.winnersBracket = QWidget()
         self.winnersBracket.setLayout(QHBoxLayout())
+        self.winnersBracket.layout().setSpacing(ROUND_GAP_PX)
         self.bracketLayout.layout().addWidget(self.winnersBracket)
 
         self.losersBracket = QWidget()
         self.losersBracket.setLayout(QHBoxLayout())
+        self.losersBracket.layout().setSpacing(ROUND_GAP_PX)
         self.bracketLayout.layout().addWidget(self.losersBracket)
-
-        self.progressionsIn = progressionsIn
-        self.progressionsOut = progressionsOut
 
         self._scene.addWidget(self.bracketLayout)
 
         self.bracketWidgets = []
         self.winnersBracketWidgets = []
         self.losersBracketWidgets = []
-
         self.roundNameLabels = {}
 
         self.bracket.UpdateBracket()
 
         winnersCutout, losersCutout = self.GetCutouts()
 
-        for roundNum, round in self.bracket.rounds.items():
-            currentBracket = self.winnersBracket
-            currentWidgets = self.winnersBracketWidgets
+        # Iterate rounds in a stable visual order: winners ascending, then
+        # losers ascending by absolute value.
+        roundOrder = self._sortedRoundKeys(positive=True) + \
+            self._sortedRoundKeys(positive=False)
 
-            if int(roundNum) < 0:
+        if not roundOrder:
+            empty = QLabel(QApplication.translate(
+                "app",
+                "トーナメント情報が未取得です。\n"
+                "フェーズグループを選択してください。"
+                "Start.ggがタイムアウトした場合は「Update bracket info」ボタンで再取得してください。\n"
+                "\n"
+                "No bracket data. "
+                "Pick a phase group, or retry if Start.gg timed out."
+            ))
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty.setStyleSheet("color: #B5ADA0; font-size: 11pt; padding: 40px;")
+            self.bracketLayout.layout().addWidget(empty)
+
+        # Pass 1: collect rendered round info so each round can size its
+        # top margin and inter-match spacing so match N sits vertically
+        # centred between the two prior-round matches that feed into it.
+        def _keep(roundNum, round):
+            if not round:
+                return False
+            # Start.gg emits pre-resolved all-bye rounds (e.g. LR1-3 of a
+            # 256-slot bracket with byes) that contain sets but render
+            # invisibly via isByeSet. Treat them as absent so they neither
+            # get a labelled column nor consume a displayIdx slot.
+            if all(getattr(s, "isByeSet", False) for s in round):
+                return False
+            if roundNum > 0:
+                return winnersCutout[0] < roundNum < winnersCutout[1]
+            return losersCutout[0] < abs(roundNum) < losersCutout[1]
+
+        winnersCounts = []
+        losersCounts = []
+        for roundKey in roundOrder:
+            roundNum = int(roundKey)
+            round = self.bracket.rounds[roundKey]
+            if not _keep(roundNum, round):
+                continue
+            (winnersCounts if roundNum > 0 else losersCounts).append(len(round))
+
+        winnersFirst = winnersCounts[0] if winnersCounts else 1
+        losersFirst = losersCounts[0] if losersCounts else 1
+
+        winnersDisplayIdx = 0
+        losersDisplayIdx = 0
+        for roundKey in roundOrder:
+            roundNum = int(roundKey)
+            round = self.bracket.rounds[roundKey]
+
+            if not _keep(roundNum, round):
+                continue
+
+            if roundNum > 0:
+                winnersDisplayIdx += 1
+                displayIdx = winnersDisplayIdx
+                scale = (winnersFirst / len(round)) if len(round) else 1
+                currentBracket = self.winnersBracket
+                currentWidgets = self.winnersBracketWidgets
+            else:
+                losersDisplayIdx += 1
+                displayIdx = losersDisplayIdx
+                scale = (losersFirst / len(round)) if len(round) else 1
                 currentBracket = self.losersBracket
                 currentWidgets = self.losersBracketWidgets
 
-            # Winners cutout
-            if int(roundNum) > 0:
-                if int(roundNum) <= winnersCutout[0]:
-                    continue
-                if int(roundNum) >= winnersCutout[1]:
-                    continue
+            # Position round-R so each match is vertically centred between
+            # its two prior-round inputs, using SLOT_PX (= widget + gap) as
+            # the unit so the baseline inter-match gap shows up even at
+            # R=1 (scale=1 → spacing = GAP_PX).
+            topOffset = int((scale - 1) * SLOT_PX / 2)
+            spacing = int(scale * SLOT_PX - MATCH_UNIT_PX)
 
-            # Losers cutout
-            if int(roundNum) < 0:
-                if abs(int(roundNum)) <= losersCutout[0]:
-                    continue
-                if abs(int(roundNum)) >= losersCutout[1]:
-                    continue
-
-            # Outer Round layout (column)
             layoutOuter = QWidget()
             currentBracket.layout().addWidget(layoutOuter)
             layoutOuter.setLayout(QVBoxLayout())
+            # Zero out the outer column's margins/spacing so they don't
+            # vary per column and contribute to vertical drift.
+            layoutOuter.layout().setContentsMargins(0, 0, 0, 0)
+            layoutOuter.layout().setSpacing(4)
 
-            # Round name
             roundNameLabel = QLineEdit()
-            roundNameLabel.setPlaceholderText(self.bracket.GetRoundName(
-                int(roundNum), winnersCutout, losersCutout))
+            roundNameLabel.setPlaceholderText(
+                self.bracket.GetRoundName(
+                    roundKey, winnersCutout, losersCutout,
+                    displayIdx=displayIdx) or "")
             layoutOuter.layout().addWidget(roundNameLabel)
-            self.roundNameLabels[roundNum] = roundNameLabel
+            self.roundNameLabels[roundKey] = roundNameLabel
 
             layoutRound = QWidget()
             layoutOuter.layout().addWidget(layoutRound)
             layoutRound.setLayout(QVBoxLayout())
+            layoutRound.layout().setContentsMargins(0, topOffset, 0, 0)
+            layoutRound.layout().setSpacing(spacing)
 
             roundWidgets = []
             for _set in round:
                 wid = BracketSetWidget(_set, self)
                 layoutRound.layout().addWidget(wid)
                 roundWidgets.append(wid)
+            # Absorb any excess column height at the bottom so the QHBoxLayout
+            # can't redistribute it as inter-match padding when this column
+            # is shorter than its siblings.
+            layoutRound.layout().addStretch(1)
             self.bracketWidgets.append(roundWidgets)
             currentWidgets.append(roundWidgets)
 
-        QGuiApplication.processEvents()
-        self.DrawLines()
-        self.fitInView()
+        # Defer line drawing + fit to the next event loop tick. Calling
+        # processEvents() synchronously inside a signal handler re-enters
+        # Qt's event dispatch, which has caused access-violation crashes
+        # while partial widget trees were being built/torn down.
+        QTimer.singleShot(0, self._postLayoutRefresh)
+
+    def _postLayoutRefresh(self):
+        try:
+            self.DrawLines()
+            self.fitInView()
+        except Exception:
+            logger.error(traceback.format_exc())
 
     def GetLimitedExportingBracketOffsets(self):
+        """Return (limitExportNumber, winnersOffset, losersOffset) used by
+        Update() to renumber exported rounds and by BracketSetWidget to dim
+        rounds that won't be exported.
+        """
         limitExportNumber = -1
-        winnersRounds = 0
-        losersRounds = 0
-
-        # Offset caused by limited exporting
         winnersOffset = 0
         losersOffset = 0
 
-        if self.bracketWidget.limitExport.isChecked():
-            limitExportNumber = self.bracketWidget.limitExportNumber.value()
-            winnersRounds = math.floor(limitExportNumber/8) + 3
-
-            try:
-                losersRounds = int(math.log2(limitExportNumber)) + \
-                    int(math.log2((limitExportNumber-1)/2)) + 2
-            except:
-                logger.error(traceback.format_exc())
-                losersRounds = 0
-
-            if self.bracketWidget.progressionsIn.value() > 0:
-                StateManager.Set("bracket.bracket.progressionsIn", 0)
-                losersRounds += 2
-                winnersRounds += 1
-
-        totalWinnersRounds = len(
-            [i for i in self.bracket.rounds.keys() if int(i) > 0])
-        totalLosersRounds = len(
-            [i for i in self.bracket.rounds.keys() if int(i) < 0])
-
-        if self.bracketWidget.limitExport.isChecked():
-            winnersOffset = (totalWinnersRounds-winnersRounds)
-            losersOffset = (totalLosersRounds-losersRounds)
+        if self.bracketWidget is not None and self.bracketWidget.limitExport.isChecked():
+            limitExportNumber = int(self.bracketWidget.limitExportNumber.value())
+            winnersCutout, losersCutout = self.GetCutouts()
+            winnersOffset = winnersCutout[0]
+            losersOffset = losersCutout[0]
 
         return (limitExportNumber, winnersOffset, losersOffset)
 
@@ -417,50 +544,41 @@ class AutonaBracketView(QGraphicsView):
                 for w in setWidget.score:
                     w.blockSignals(False)
 
-        QGuiApplication.processEvents()
-
-        self.DrawLines()
+        # DrawLines needs resolved widget geometry — schedule after the
+        # current event-loop tick instead of forcing a synchronous flush.
+        QTimer.singleShot(0, self.DrawLines)
 
         StateManager.BlockSaving()
 
-        data = {}
+        # Keep legacy keys populated so bracket_ultimate overlay's diff
+        # detection doesn't trip on undefined values.
+        StateManager.Set("bracket.bracket.progressionsIn", 0)
+        StateManager.Set("bracket.bracket.progressionsOut", 0)
+        StateManager.Set("bracket.bracket.winnersOnly", True)
+        StateManager.Set("bracket.bracket.winnersOnlyProgressions", True)
 
-        StateManager.Set("bracket.bracket.progressionsIn",
-                         self.bracket.progressionsIn)
-        StateManager.Set("bracket.bracket.progressionsOut",
-                         self.bracketWidget.progressionsOut.value())
-
-        limitExportNumber, winnersOffset, losersOffset = self.GetLimitedExportingBracketOffsets()
+        limitExportNumber, winnersOffset, losersOffset = \
+            self.GetLimitedExportingBracketOffsets()
         winnersCutout, losersCutout = self.GetCutouts(forExport=True)
 
-        winnersOffset += winnersCutout[0]
-        losersOffset += losersCutout[0]
+        StateManager.Set("bracket.bracket.limitExportNumber", limitExportNumber)
 
-        StateManager.Set("bracket.bracket.limitExportNumber",
-                         limitExportNumber)
-
-        if limitExportNumber != -1 and limitExportNumber < self.bracket.playerNumber:
-            StateManager.Set("bracket.bracket.winnersOnlyProgressions", False)
-        else:
-            StateManager.Set("bracket.bracket.winnersOnlyProgressions",
-                             self.bracket.winnersOnlyProgressions)
+        data = {}
 
         for roundKey, round in self.bracket.rounds.items():
-            # Winners cutout
-            if int(roundKey) > 0:
-                if int(roundKey) <= winnersCutout[0]:
+            roundNum = int(roundKey)
+
+            if roundNum > 0:
+                if roundNum <= winnersCutout[0]:
                     continue
-                if int(roundKey) >= winnersCutout[1]:
+                if roundNum >= winnersCutout[1]:
+                    continue
+            elif roundNum < 0:
+                if abs(roundNum) <= losersCutout[0]:
+                    continue
+                if abs(roundNum) >= losersCutout[1]:
                     continue
 
-            # Losers cutout
-            if int(roundKey) < 0:
-                if abs(int(roundKey)) <= losersCutout[0]:
-                    continue
-                if abs(int(roundKey)) >= losersCutout[1]:
-                    continue
-
-            # Get round name or placeholder name
             if self.roundNameLabels.get(roundKey):
                 roundName = self.roundNameLabels.get(roundKey).text()
                 if roundName == "":
@@ -469,83 +587,71 @@ class AutonaBracketView(QGraphicsView):
             else:
                 roundName = ""
 
-            # Limited export number cutout
-            if int(roundKey) > 0:
-                roundKey = str(int(roundKey) - winnersOffset)
-                if int(roundKey) <= 0:
+            # Remap round keys when limitExport is on so the overlay receives
+            # a contiguous 1,2,3... / -1,-2,... sequence starting from the
+            # cutoff.
+            exportRoundKey = roundKey
+            if roundNum > 0:
+                exportRoundKey = str(roundNum - winnersOffset)
+                if int(exportRoundKey) <= 0:
                     continue
-            if int(roundKey) < 0:
-                roundKey = str(int(roundKey) + losersOffset)
-                if int(roundKey) >= 0:
+            elif roundNum < 0:
+                exportRoundKey = str(roundNum + losersOffset)
+                if int(exportRoundKey) >= 0:
                     continue
 
-            data[roundKey] = {
+            data[exportRoundKey] = {
                 "name": roundName,
                 "sets": {}
             }
-            for j, bracketSet in enumerate(round):
-                nextWin = bracketSet.winNext.pos.copy() if bracketSet.winNext else None
-                nextLose = bracketSet.loseNext.pos.copy() if bracketSet.loseNext else None
 
-                # print(f"Round pos {bracketSet.pos} W→ {nextWin}")
-                # print(f"Round pos {bracketSet.pos} L→ {nextLose}")
+            for j, bs in enumerate(round):
+                nextWin = bs.winNext.pos.copy() if bs.winNext else None
+                nextLose = bs.loseNext.pos.copy() if bs.loseNext else None
 
-                # Reassign rounds based on export number
                 if nextWin:
                     if nextWin[0] > 0:
                         nextWin[0] -= winnersOffset
                     else:
-                        nextWin[0] += losersOffset - 2
+                        nextWin[0] += losersOffset
                 if nextLose:
                     if nextLose[0] < 0:
-                        nextLose[0] += losersOffset - 2
-
-                        """if self.bracket.progressionsIn <= 0:
-                            nextLose[0] -= 1
-                        else:
-                            nextLose[0] -= 2"""
-                    # For grand finals into reset, nextLose is a positive round
+                        nextLose[0] += losersOffset
                     else:
                         nextLose[0] -= winnersOffset
 
                 p1name = ""
-
-                if bracketSet.playerIds[0] > 0:
+                if bs.playerIds[0] > 0:
                     try:
                         p1tree: dict = StateManager.Get(
-                            f"bracket.players.slot.{bracketSet.playerIds[0]}.player")
+                            f"bracket.players.slot.{bs.playerIds[0]}.player")
                         p1name = " / ".join([p.get("name")
                                             for p in p1tree.values()])
-                    except:
+                    except Exception:
                         pass
 
                 p2name = ""
-
-                if bracketSet.playerIds[1] > 0:
+                if bs.playerIds[1] > 0:
                     try:
                         p2tree: dict = StateManager.Get(
-                            f"bracket.players.slot.{bracketSet.playerIds[1]}.player")
+                            f"bracket.players.slot.{bs.playerIds[1]}.player")
                         p2name = " / ".join([p.get("name")
                                             for p in p2tree.values()])
-                    except:
+                    except Exception:
                         pass
 
-                data[roundKey]["sets"][j] = {
-                    "playerId": bracketSet.playerIds,
-                    "score": bracketSet.score,
+                data[exportRoundKey]["sets"][j] = {
+                    "playerId": bs.playerIds,
+                    "score": bs.score,
                     "nextWin": nextWin,
-                    "winSlot": bracketSet.winNextSlot,
+                    "winSlot": bs.winNextSlot,
                     "nextLose": nextLose,
-                    "loseSlot": bracketSet.loseNextSlot,
-                    "playerName": [
-                        p1name,
-                        p2name
-                    ],
-                    "completed": bracketSet.finished
+                    "loseSlot": bs.loseNextSlot,
+                    "playerName": [p1name, p2name],
+                    "completed": bs.finished,
                 }
 
         StateManager.Set("bracket.bracket.rounds", data)
-
         StateManager.ReleaseSaving()
 
     def DrawLines(self):
@@ -557,157 +663,75 @@ class AutonaBracketView(QGraphicsView):
         path = QPainterPath()
         dashedPath = QPainterPath()
 
-        for i, round in enumerate(self.winnersBracketWidgets):
-            for j, setWidget in enumerate(round):
-                _set = setWidget
+        def pathBetween(setWidget, nextSetWidget):
+            start = QPointF(
+                setWidget.mapTo(self.bracketLayout, QPoint(0, 0)).x(),
+                setWidget.mapTo(self.bracketLayout, QPoint(0, 0)).y()
+            ) + QPointF(setWidget.width(), setWidget.height()/2)
+            end = QPointF(
+                nextSetWidget.mapTo(self.bracketLayout, QPoint(0, 0)).x(),
+                nextSetWidget.mapTo(self.bracketLayout, QPoint(0, 0)).y()
+            ) + QPointF(0, setWidget.height()/2)
+            midpoint1 = QPointF(
+                start.x() + (end.x() - start.x()) / 2, start.y())
+            midpoint2 = QPointF(
+                start.x() + (end.x() - start.x()) / 2, end.y())
+            path.addPolygon(QPolygonF([start, midpoint1, midpoint2, end]))
 
+        # Winners side connections — follow winNext references. They may jump
+        # to the losers side (grand final inputs don't exist here; losers
+        # final's winner goes into grand final, drawn below).
+        for columnWidgets in self.winnersBracketWidgets:
+            for setWidget in columnWidgets:
                 if setWidget.isHidden():
                     continue
-
-                if i < len(self.winnersBracketWidgets)-1:
-
-                    nxtWidget = self.winnersBracketWidgets[i +
-                                                           1][math.floor(j/2)]
-                    nxt = nxtWidget
-
-                    start = QPointF(setWidget.mapTo(self.bracketLayout, QPoint(0, 0)).x(), _set.mapTo(self.bracketLayout, QPoint(0, 0)).y()) + \
-                        QPointF(_set.width(), _set.height()/2)
-                    end = QPointF(nxtWidget.mapTo(self.bracketLayout, QPoint(0, 0)).x(), nxt.mapTo(self.bracketLayout, QPoint(0, 0)).y()) + \
-                        QPointF(0, _set.height()/2)
-
-                    midpoint1 = QPointF(
-                        start.x()+(end.x()-start.x())/2, start.y())
-                    midpoint2 = QPointF(
-                        start.x()+(end.x()-start.x())/2, end.y())
-
-                    path.addPolygon(
-                        QPolygonF([
-                            start,
-                            midpoint1,
-                            midpoint2,
-                            end
-                        ])
-                    )
-                elif self.progressionsOut > 0:
-                    start = QPointF(setWidget.mapTo(self.bracketLayout, QPoint(0, 0)).x(), _set.mapTo(self.bracketLayout, QPoint(0, 0)).y()) + \
-                        QPointF(_set.width(), _set.height()/2)
-                    end = start + QPointF(50, 0)
-
-                    notch1 = end + QPointF(-10, +10)
-                    notch2 = end + QPointF(-10, -10)
-
-                    path.addPolygon(
-                        QPolygonF([
-                            start,
-                            end
-                        ])
-                    )
-                    path.addPolygon(
-                        QPolygonF([
-                            notch1,
-                            end,
-                            notch2
-                        ])
-                    )
-
-                # Progression in
-                if self.progressionsIn > 0 and i == 0:
-                    end = QPointF(setWidget.mapTo(self.bracketLayout, QPoint(0, 0)).x(), _set.mapTo(self.bracketLayout, QPoint(0, 0)).y()) + \
-                        QPointF(0, _set.height()/2)
-                    start = end - QPointF(50, 0)
-
-                    dashedPath.addPolygon(
-                        QPolygonF([
-                            start,
-                            end
-                        ])
-                    )
-
-        for i, round in enumerate(self.losersBracketWidgets):
-            for j, setWidget in enumerate(round):
+                nextSet = setWidget.bracketSet.winNext
+                if nextSet is None:
+                    continue
+                nextWidget = self._findWidget(nextSet)
+                if nextWidget is None or nextWidget.isHidden():
+                    continue
                 try:
-                    _set = setWidget
-
-                    if setWidget.isHidden():
-                        continue
-
-                    if i < len(self.losersBracketWidgets)-1:
-                        if len(self.losersBracketWidgets[i+1]) < len(self.losersBracketWidgets[i]):
-                            nxtWidget = self.losersBracketWidgets[i +
-                                                                  1][math.floor(j/2)]
-                        else:
-                            nxtWidget = self.losersBracketWidgets[i+1][j]
-                        nxt = nxtWidget
-
-                        start = QPointF(setWidget.mapTo(self.bracketLayout, QPoint(0, 0)).x(), _set.mapTo(self.bracketLayout, QPoint(0, 0)).y()) + \
-                            QPointF(_set.width(), _set.height()/2)
-                        end = QPointF(nxtWidget.mapTo(self.bracketLayout, QPoint(0, 0)).x(), nxt.mapTo(self.bracketLayout, QPoint(0, 0)).y()) + \
-                            QPointF(0, _set.height()/2)
-
-                        midpoint1 = QPointF(
-                            start.x()+(end.x()-start.x())/2, start.y())
-                        midpoint2 = QPointF(
-                            start.x()+(end.x()-start.x())/2, end.y())
-
-                        path.addPolygon(
-                            QPolygonF([
-                                start,
-                                midpoint1,
-                                midpoint2,
-                                end
-                            ])
-                        )
-                    elif self.progressionsOut > 1:
-                        start = QPointF(setWidget.mapTo(self.bracketLayout, QPoint(0, 0)).x(), _set.mapTo(self.bracketLayout, QPoint(0, 0)).y()) + \
-                            QPointF(_set.width(), _set.height()/2)
-                        end = start + QPointF(50, 0)
-
-                        notch1 = end + QPointF(-10, +10)
-                        notch2 = end + QPointF(-10, -10)
-
-                        path.addPolygon(
-                            QPolygonF([
-                                start,
-                                end
-                            ])
-                        )
-                        path.addPolygon(
-                            QPolygonF([
-                                notch1,
-                                end,
-                                notch2
-                            ])
-                        )
-
-                    # Progression in
-                    if self.progressionsIn > 1 and i == 0 and not self.bracket.winnersOnlyProgressions:
-                        end = QPointF(setWidget.mapTo(self.bracketLayout, QPoint(0, 0)).x(), _set.mapTo(self.bracketLayout, QPoint(0, 0)).y()) + \
-                            QPointF(0, _set.height()/2)
-                        start = end - QPointF(50, 0)
-
-                        dashedPath.addPolygon(
-                            QPolygonF([
-                                start,
-                                end
-                            ])
-                        )
-                except:
+                    pathBetween(setWidget, nextWidget)
+                except Exception:
                     logger.error(traceback.format_exc())
+
+        # Losers side — both winNext and loseNext from winners can land here.
+        for columnWidgets in self.losersBracketWidgets:
+            for setWidget in columnWidgets:
+                if setWidget.isHidden():
+                    continue
+                nextSet = setWidget.bracketSet.winNext
+                if nextSet is None:
+                    continue
+                nextWidget = self._findWidget(nextSet)
+                if nextWidget is None or nextWidget.isHidden():
+                    continue
+                try:
+                    pathBetween(setWidget, nextWidget)
+                except Exception:
+                    logger.error(traceback.format_exc())
+
+        # Winners ↔ losers drop lines are intentionally not drawn. They
+        # cross over the bracket visually and add noise without informing
+        # viewers in practice.
 
         pen = QPen(Qt.gray, 4, Qt.SolidLine)
         pen2 = QPen(Qt.black, 6, Qt.SolidLine)
 
-        item = self._scene.addPath(path, pen2)
-        self.bracketLines.append(item)
+        self.bracketLines.append(self._scene.addPath(path, pen2))
+        self.bracketLines.append(self._scene.addPath(path, pen))
+        self.bracketLines.append(self._scene.addPath(dashedPath, pen2))
+        self.bracketLines.append(self._scene.addPath(dashedPath, pen))
 
-        item = self._scene.addPath(path, pen)
-        self.bracketLines.append(item)
-
-        item = self._scene.addPath(dashedPath, pen2)
-        self.bracketLines.append(item)
-
-        item = self._scene.addPath(dashedPath, pen)
-        self.bracketLines.append(item)
+    def _findWidget(self, bracketSet: BracketSet):
+        if bracketSet is None:
+            return None
+        for columnWidgets in self.bracketWidgets:
+            for w in columnWidgets:
+                if w.bracketSet is bracketSet:
+                    return w
+        return None
 
     def fitInView(self):
         rect = QRectF(self.bracketLayout.rect())

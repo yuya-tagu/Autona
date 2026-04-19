@@ -44,13 +44,9 @@ class StateManager:
 
     def BlockSaving():
         StateManager.saveBlocked += 1
-        logger.debug(
-            "Initial Block - Current Blocking Status: " + str(StateManager.saveBlocked))
 
     def ReleaseSaving():
         StateManager.saveBlocked -= 1
-        logger.debug(
-            "Release Block - Current Blocking Status: " + str(StateManager.saveBlocked))
         if StateManager.saveBlocked == 0:
             StateManager.SaveState()
 
