@@ -343,10 +343,10 @@ class Window(QMainWindow):
         self.setDockOptions(
             QMainWindow.DockOption.AllowTabbedDocks)
 
-        # Dock tabs are drawn as a ClickUp-style bar at the top of the
-        # dock area (see AutonaDockTabTheme for the paint path).
+        # Dock tabs are drawn as a ClickUp-style bar on the left side of
+        # the dock area (see AutonaDockTabTheme for the paint path).
         self.setTabPosition(
-            Qt.DockWidgetArea.AllDockWidgetAreas, QTabWidget.TabPosition.North)
+            Qt.DockWidgetArea.AllDockWidgetAreas, QTabWidget.TabPosition.West)
 
         # Empty central widget — collapsed to 0×0 so the dock area fills
         # the window directly below the menu bar. The former "大会を選ぶ"
