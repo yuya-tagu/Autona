@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24px" height="24px" fill="none">
-  <g fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round">
-    <rect x="2.5" y="5.5" width="19" height="13" rx="2"/>
-    <line x1="12" y1="6.5" x2="12" y2="17.5"/>
-    <line x1="5.5" y1="10" x2="8.5" y2="10"/>
-    <line x1="5.5" y1="14" x2="8.5" y2="14"/>
-    <line x1="15.5" y1="10" x2="18.5" y2="10"/>
-    <line x1="15.5" y1="14" x2="18.5" y2="14"/>
+  <!-- Bold, angular "VS": a two-stroke V on the left and a
+       sharp-cornered (Z-shape) S on the right. No separator glyph. -->
+  <g fill="none" stroke="#ffffff" stroke-width="2.6"
+     stroke-linejoin="miter" stroke-linecap="butt" stroke-miterlimit="10">
+    <!-- V -->
+    <polyline points="2.5,4.5 7,19.5 11.5,4.5"/>
+    <!-- S (angular, Z-shaped) -->
+    <polyline points="21.5,4.5 14,4.5 14,12 21.5,12 21.5,19.5 14,19.5"/>
   </g>
 </svg>

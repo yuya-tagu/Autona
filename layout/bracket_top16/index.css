@@ -1,0 +1,221 @@
+:root {
+  /* Tournament colors — overridden from tournamentInfo at runtime. */
+  --theme-color: #0d1220;
+  --theme-color-2: #05080f;
+  --accent-color: #ffd83d;
+  --accent-ink: #0a0a0a;
+
+  --card-bg: #0e1a33;
+  --card-border: rgba(255, 255, 255, 0.08);
+  --card-divider: rgba(255, 255, 255, 0.08);
+
+  --text-primary: #ffffff;
+  --text-muted: rgba(255, 255, 255, 0.5);
+  --text-tbd: rgba(255, 255, 255, 0.45);
+
+  /* Card sizing. Tuned for 1920x1080 and 6-column grid (TOP 16).
+     LB max column has 4 sets, so card-height × 4 + row-gap × 3 must fit
+     the lower-row budget. Font sizes are reduced accordingly. */
+  --card-width: 260px;
+  --card-height: 72px;
+  --row-gap: 12px;
+  --col-gap: 28px;
+}
+
+* { box-sizing: border-box; }
+
+html,
+body {
+  width: 1920px;
+  height: 1080px;
+  margin: 0;
+  padding: 0;
+  background: radial-gradient(
+    ellipse at center,
+    var(--theme-color) 0%,
+    var(--theme-color-2) 100%
+  );
+  color: var(--text-primary);
+  font-family: "LINE Seed JP", "Helvetica Neue", Arial, sans-serif;
+  font-weight: 800;
+  overflow: hidden;
+  letter-spacing: 0.02em;
+}
+
+.stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 60px 80px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ───── Header ───── */
+
+.stage-header {
+  text-align: center;
+  margin-bottom: 40px;
+  padding-bottom: 20px;
+  border-bottom: 2px solid var(--accent-color);
+}
+
+.event-tag {
+  display: inline-block;
+  color: var(--accent-color);
+  font-size: 20px;
+  letter-spacing: 5px;
+  margin-bottom: 10px;
+  min-height: 24px;
+}
+
+.stage-title {
+  margin: 0;
+  font-size: 58px;
+  font-weight: 800;
+  letter-spacing: 8px;
+}
+
+/* ───── Bracket grid ───── */
+
+.bracket-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(4, var(--card-width));
+  grid-template-rows: 1fr 1fr;
+  column-gap: var(--col-gap);
+  row-gap: 40px;
+  justify-content: center;
+  align-content: center;
+  max-width: 100%;
+}
+
+.slot-column {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: var(--row-gap);
+  min-width: 0;
+}
+
+.slot-label {
+  text-align: center;
+  font-size: 14px;
+  letter-spacing: 3px;
+  color: var(--text-muted);
+  padding-bottom: 5px;
+  border-bottom: 2px solid var(--accent-color);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+/* ───── Set card ───── */
+
+.bracket-set {
+  height: var(--card-height);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.bracket-set[data-empty="true"] {
+  background: transparent;
+  border: 2px dashed rgba(255, 255, 255, 0.12);
+}
+
+.bracket-set[data-empty="true"] .player {
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.bracket-set .player {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 15px;
+  letter-spacing: 0.5px;
+  min-width: 0;
+}
+
+.bracket-set .player + .player {
+  border-top: 1px solid var(--card-divider);
+}
+
+.bracket-set .seed {
+  display: inline-block;
+  min-width: 32px;
+  color: var(--text-muted);
+  font-size: 16px;
+  letter-spacing: 1px;
+}
+
+.bracket-set .sponsor {
+  color: var(--text-muted);
+  font-size: 15px;
+  margin-right: 10px;
+  letter-spacing: 1px;
+}
+
+.bracket-set .player-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 800;
+}
+
+.bracket-set .player-name.is-pending {
+  color: var(--text-tbd);
+  font-weight: 700;
+}
+
+.bracket-set .player-score {
+  min-width: 32px;
+  text-align: center;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.05);
+  margin-left: 8px;
+  padding: 0 6px;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bracket-set .player.is-winner .player-name {
+  color: var(--accent-color);
+}
+.bracket-set .player.is-winner .player-score {
+  background: var(--accent-color);
+  color: var(--accent-ink);
+}
+
+/* Reset column behaves like a placeholder when empty. */
+.slot-column[data-role="reset"] .bracket-set[data-empty="true"] .player-name {
+  letter-spacing: 3px;
+}
+
+/* ───── Status / fallback ───── */
+
+.stage-status {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 24px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 16px;
+  letter-spacing: 2px;
+}
+
+.bracket-grid.is-hidden {
+  visibility: hidden;
+}

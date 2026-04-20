@@ -68,6 +68,7 @@ TAB_SHORT_LABELS: dict[str, str] = {
     "Tournament Info": "EVENT",
     "Scoreboard": "SCORE",
     "Statistics": "STATS",
+    "Analysis": "ANLYSE",
     "Thumbnail Settings": "THUMB",
     "Result Settings": "RESULT",
     "Player List": "PLAYERS",
