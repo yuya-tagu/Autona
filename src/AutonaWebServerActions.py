@@ -51,7 +51,7 @@ class WebServerActions(QThread):
             "basedir": os.path.abspath(".")
         })
 
-        if self.scoreboard.GetTabAmount() < 1:
+        if self.scoreboard.GetScoreboard(1) is None:
             return data
 
         # Add player names

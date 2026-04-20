@@ -151,6 +151,7 @@ from .AutonaScoreboardManager import AutonaScoreboardManager
 from src.AutonaAboutWidget import AutonaAboutWidget
 from .AutonaScoreboardStageWidget import AutonaScoreboardStageWidget
 from .AutonaStatsWidget import AutonaStatsWidget
+from .AutonaAnalysisWidget import AutonaAnalysisWidget
 from src.AutonaWebServer import WebServer
 # autopep8: on
 
@@ -276,7 +277,7 @@ class WindowSignals(QObject):
 
 class Window(QMainWindow):
     # Bump this when dock widget layout changes (e.g. adding/removing tabs)
-    STATE_VERSION = 5
+    STATE_VERSION = 7
     signals = WindowSignals()
 
     def __init__(self, loop=None):
@@ -373,6 +374,19 @@ class Window(QMainWindow):
 
         self.dockWidgets = []
 
+        # The tab bar is ordered by addDockWidget() call order when widgets
+        # auto-tabify into the same area. EVENT must be first so the tab
+        # strip starts with Tournament Info.
+        tournamentInfo = AutonaTournamentInfoWidget()
+        tournamentInfo.setWindowIcon(QIcon(UI.icon_path('tournament.svg')))
+        tournamentInfo.setObjectName(
+            QApplication.translate("app", "Tournament Info"))
+        # Place the "Set tournament" button at the very top of this tab.
+        tournamentInfo.InsertHeaderWidget(self.setTournamentBt)
+        self.addDockWidget(
+            Qt.DockWidgetArea.BottomDockWidgetArea, tournamentInfo)
+        self.dockWidgets.append(tournamentInfo)
+
         if not SettingsManager.Get("general.disable_thumbnail_widget", False):
             from .AutonaThumbnailSettingsWidget import AutonaThumbnailSettingsWidget
             thumbnailSetting = AutonaThumbnailSettingsWidget()
@@ -400,16 +414,6 @@ class Window(QMainWindow):
             Qt.DockWidgetArea.BottomDockWidgetArea, bracket)
         self.dockWidgets.append(bracket)
         splash.set_message(splash_msgs[1], progress=0.40)
-
-        tournamentInfo = AutonaTournamentInfoWidget()
-        tournamentInfo.setWindowIcon(QIcon(UI.icon_path('tournament.svg')))
-        tournamentInfo.setObjectName(
-            QApplication.translate("app", "Tournament Info"))
-        # Place the "Set tournament" button at the very top of this tab.
-        tournamentInfo.InsertHeaderWidget(self.setTournamentBt)
-        self.addDockWidget(
-            Qt.DockWidgetArea.BottomDockWidgetArea, tournamentInfo)
-        self.dockWidgets.append(tournamentInfo)
 
         # teamBattle = AutonaTeamBattleWidget()
         # teamBattle.setWindowIcon(QIcon(UI.icon_path('info.svg')))
@@ -470,16 +474,23 @@ class Window(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.statsWidget)
         self.dockWidgets.append(self.statsWidget)
 
+        self.analysisWidget = AutonaAnalysisWidget()
+        self.analysisWidget.setWindowIcon(QIcon(UI.icon_path('analysis.svg')))
+        self.analysisWidget.setObjectName(QApplication.translate("app", "Analysis"))
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.analysisWidget)
+        self.dockWidgets.append(self.analysisWidget)
+
         splash.set_message(splash_msgs[1], progress=0.85)
 
-        # Tab order: EVENT, SCORE, THUMB, STATS, PLAYERS, COMMS, RESULT,
-        # BRACKET, NOTES, RULES (RULES hidden by default).
+        # Tab order: EVENT, SCORE, THUMB, STATS, ANALYSIS, PLAYERS, COMMS,
+        # RESULT, BRACKET, NOTES, RULES (RULES hidden by default).
         previous = tournamentInfo
         for nxt in (
             self.scoreboard,
             thumbnailSetting if not SettingsManager.Get(
                 "general.disable_thumbnail_widget", False) else None,
             self.statsWidget,
+            self.analysisWidget,
             playerList,
             commentary,
             resultSetting,
@@ -781,20 +792,9 @@ class Window(QMainWindow):
         AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
             lambda x=None: self.moddedContentCheck.setChecked(False))
 
-        # ── Scoreboards menu ──
-        scoreboardsMenu = mb.addMenu("Scoreboards")
-
-        scoreboardsMenu.addAction(
-            QApplication.translate("app", "スコアボードを新規作成")
-        ).triggered.connect(self.CreateScoreboardPrompt)
-
-        scoreboardsMenu.addAction(
-            QApplication.translate("app", "スコアボードを編集")
-        ).triggered.connect(self.OpenScoreboardEditDialog)
-
-        AutonaScoreboardManager.instance.signals.EditRequested.connect(
-            self.OpenScoreboardEditDialog)
-
+        # Single-scoreboard setup. Autona used to support up to 10
+        # scoreboards tabbed together; the multi-scoreboard concept was
+        # removed in favour of a single dock.
         AutonaScoreboardManager.instance.CreateScoreboard(singlePlayer=True)
 
         self.ReloadGames()
@@ -845,8 +845,6 @@ class Window(QMainWindow):
 
         StateManager.ReleaseSaving()
 
-        AutonaScoreboardManager.instance.signals.ScoreboardAmountChanged.connect(
-            self.ToggleTopOption)
         StateManager.Unset("completed_sets")
 
     def SetGame(self, mods_active = False):
@@ -1011,191 +1009,6 @@ class Window(QMainWindow):
                 "dark",
                 custom_colors=UI.DARK_CUSTOM_COLORS,
                 additional_qss=UI.global_qss())
-
-    def ToggleTopOption(self):
-        if not hasattr(self, 'loadPlayerSetAction'):
-            return
-        if not SettingsManager.Get("general.hide_track_player", False):
-            if AutonaScoreboardManager.instance.GetTabAmount() > 1:
-                self.loadPlayerSetAction.setVisible(False)
-            else:
-                self.loadPlayerSetAction.setVisible(True)
-
-    def CreateScoreboardPrompt(self):
-        # Two-step separated from any spinbox event loop to avoid the
-        # nested-modal crash path. Always safe to call from a menu action.
-        manager = AutonaScoreboardManager.instance
-        if manager.GetTabAmount() >= manager.MAX_SCOREBOARDS:
-            QMessageBox.information(
-                self,
-                QApplication.translate("app", "スコアボードを新規作成"),
-                QApplication.translate(
-                    "app", "スコアボードの最大数に達しています。"))
-            return
-
-        dialog = QDialog(self)
-        dialog.setWindowTitle(QApplication.translate("app", "スコアボードを新規作成"))
-        dialog.setMinimumWidth(360)
-        vbox = QVBoxLayout()
-        dialog.setLayout(vbox)
-
-        vbox.addWidget(QLabel(
-            QApplication.translate("app", "使用するスコアボードUIを選択してください。")))
-
-        modeGroup = QWidget()
-        modeLayout = QVBoxLayout()
-        modeLayout.setContentsMargins(0, 0, 0, 0)
-        modeGroup.setLayout(modeLayout)
-        singleRadio = QRadioButton(
-            QApplication.translate("app", "1プレイヤー（1v1）"))
-        teamRadio = QRadioButton(
-            QApplication.translate("app", "チーム"))
-        singleRadio.setChecked(True)
-        modeLayout.addWidget(singleRadio)
-        modeLayout.addWidget(teamRadio)
-        vbox.addWidget(modeGroup)
-
-        btnRow = QHBoxLayout()
-        btnRow.addStretch()
-        cancelBtn = QPushButton(QApplication.translate("app", "キャンセル"))
-        okBtn = QPushButton(QApplication.translate("app", "作成"))
-        okBtn.setDefault(True)
-        btnRow.addWidget(cancelBtn)
-        btnRow.addWidget(okBtn)
-        vbox.addLayout(btnRow)
-
-        cancelBtn.clicked.connect(dialog.reject)
-        okBtn.clicked.connect(dialog.accept)
-
-        if dialog.exec() == QDialog.Accepted:
-            manager.CreateScoreboard(singlePlayer=singleRadio.isChecked())
-
-    def OpenScoreboardEditDialog(self):
-        manager = AutonaScoreboardManager.instance
-
-        dialog = QDialog(self)
-        dialog.setWindowTitle(QApplication.translate("app", "スコアボードを編集"))
-        dialog.setMinimumWidth(480)
-        vbox = QVBoxLayout()
-        dialog.setLayout(vbox)
-
-        vbox.addWidget(QLabel(
-            QApplication.translate("app", "編集するスコアボードを選択してください。")))
-
-        listWidget = QListWidget()
-        for i in range(1, manager.GetTabAmount() + 1):
-            listWidget.addItem(f"{i}. {manager.GetTabName(i)}")
-        if listWidget.count() > 0:
-            listWidget.setCurrentRow(0)
-        vbox.addWidget(listWidget)
-
-        renameRow = QHBoxLayout()
-        renameRow.addWidget(QLabel(
-            QApplication.translate("app", "タブ名")))
-        nameEdit = QLineEdit()
-        renameRow.addWidget(nameEdit)
-        renameBtn = QPushButton(QApplication.translate("app", "名前を変更"))
-        renameRow.addWidget(renameBtn)
-        vbox.addLayout(renameRow)
-
-        modeRow = QHBoxLayout()
-        modeRow.addWidget(QLabel(
-            QApplication.translate("app", "UIモード")))
-        singleRadio = QRadioButton(
-            QApplication.translate("app", "1プレイヤー（1v1）"))
-        teamRadio = QRadioButton(
-            QApplication.translate("app", "チーム"))
-        modeRow.addWidget(singleRadio)
-        modeRow.addWidget(teamRadio)
-        modeRow.addStretch()
-        vbox.addLayout(modeRow)
-
-        deleteBtn = QPushButton(QApplication.translate("app", "このスコアボードを削除"))
-        deleteBtn.setStyleSheet("color: #e55;")
-        vbox.addWidget(deleteBtn)
-
-        closeRow = QHBoxLayout()
-        closeRow.addStretch()
-        closeBtn = QPushButton(QApplication.translate("app", "閉じる"))
-        closeRow.addWidget(closeBtn)
-        vbox.addLayout(closeRow)
-
-        def selectedIndex() -> int:
-            row = listWidget.currentRow()
-            return row + 1 if row >= 0 else 0
-
-        def refreshList():
-            listWidget.clear()
-            for i in range(1, manager.GetTabAmount() + 1):
-                listWidget.addItem(f"{i}. {manager.GetTabName(i)}")
-
-        def onSelectionChanged():
-            idx = selectedIndex()
-            if idx == 0:
-                nameEdit.clear()
-                deleteBtn.setEnabled(False)
-                singleRadio.setEnabled(False)
-                teamRadio.setEnabled(False)
-                return
-            # Strip the "N. " prefix so the field shows the actual tab name.
-            name = manager.GetTabName(idx)
-            defaultName = QApplication.translate(
-                "app", "Scoreboard") + " " + str(idx)
-            nameEdit.setText("" if name == defaultName else name)
-            # Scoreboard 1 is the anchor — removing it would break indexing.
-            deleteBtn.setEnabled(idx > 1)
-            sb = manager.GetScoreboard(idx)
-            singleRadio.setEnabled(True)
-            teamRadio.setEnabled(True)
-            # Block to avoid firing toggled while syncing from state.
-            singleRadio.blockSignals(True)
-            teamRadio.blockSignals(True)
-            singleRadio.setChecked(bool(getattr(sb, "singlePlayer", True)))
-            teamRadio.setChecked(not singleRadio.isChecked())
-            singleRadio.blockSignals(False)
-            teamRadio.blockSignals(False)
-
-        def onModeChanged():
-            idx = selectedIndex()
-            if idx == 0:
-                return
-            sb = manager.GetScoreboard(idx)
-            sb._applyScoreboardMode(singleRadio.isChecked())
-
-        def onRename():
-            idx = selectedIndex()
-            if idx == 0:
-                return
-            manager.SetTabName(idx, nameEdit.text())
-            refreshList()
-            listWidget.setCurrentRow(idx - 1)
-
-        def onDelete():
-            idx = selectedIndex()
-            if idx <= 1:
-                return
-            confirm = QMessageBox.question(
-                dialog,
-                QApplication.translate("app", "削除の確認"),
-                QApplication.translate(
-                    "app", "スコアボード {0} を削除しますか？").format(idx),
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No)
-            if confirm != QMessageBox.Yes:
-                return
-            manager.RemoveScoreboard(idx)
-            refreshList()
-            if listWidget.count() > 0:
-                listWidget.setCurrentRow(min(idx - 1, listWidget.count() - 1))
-
-        listWidget.currentRowChanged.connect(lambda _: onSelectionChanged())
-        renameBtn.clicked.connect(onRename)
-        deleteBtn.clicked.connect(onDelete)
-        singleRadio.toggled.connect(lambda _: onModeChanged())
-        closeBtn.clicked.connect(dialog.accept)
-
-        onSelectionChanged()
-        dialog.exec()
 
     def MigrateWindow(self):
         migrateWindow = QDialog(self)

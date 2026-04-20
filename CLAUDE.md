@@ -142,11 +142,11 @@ Python / PyQt6 のドックウィジェットベース。主要コンポーネ�
 
 | コンポーネント | ファイル | 役割 |
 |--------------|---------|------|
-| **Window** | `Autona.py` | QMainWindow。QMenuBar（編集・Startgg・タイトル・スコアボード）+ 中央「大会を選ぶ」ボタン + 全ドックウィジェット管理。STATE_VERSION=2 によるレイアウト復元 |
+| **Window** | `Autona.py` | QMainWindow。QMenuBar（編集・Startgg・タイトル）+ 中央「大会を選ぶ」ボタン + 全ドックウィジェット管理。STATE_VERSION によるレイアウト復元 |
 | **StateManager** | `StateManager.py` | グローバル状態（nested dict）。deepdiff でデルタ算出、ファイル出力 + WebSocket 配信 |
 | **SettingsManager** | `SettingsManager.py` | ユーザー設定の永続化（JSON） |
-| **AutonaScoreboardManager** | `AutonaScoreboardManager.py` | シングルトン。複数スコアボードのタブ管理（最大 10）。`ScoreboardAmountChanged`/`EditRequested` シグナル |
-| **AutonaScoreboardWidget** | `AutonaScoreboardWidget.py` | 個別スコアボード。チーム/選手/スコア/セット情報。`_applyScoreboardMode(singlePlayer)` で 1v1 ⇄ チーム UI を可逆切替 |
+| **AutonaScoreboardManager** | `AutonaScoreboardManager.py` | シングルトン。単一スコアボード (`scoreboardNumber = 1`) を dock に保持する薄いラッパー。`GetScoreboard(1)` で `AutonaScoreboardWidget` を取得 |
+| **AutonaScoreboardWidget** | `AutonaScoreboardWidget.py` | スコアボード本体。チーム/選手/スコア/セット情報。`_applyScoreboardMode(singlePlayer)` で 1v1 ⇄ チーム UI を可逆切替 |
 | **AutonaTournamentDataProvider** | `AutonaTournamentDataProvider.py` | シングルトン。Start.gg 等からデータ取得のオーケストレーション |
 | **AutonaGameAssetManager** | `AutonaGameAssetManager.py` | シングルトン。ゲーム別キャラ/ステージ/アイコン管理 |
 | **AutonaPlayerDB** | `AutonaPlayerDB.py` | ローカル選手DB（static クラス、`user_data/local_players.json`） |

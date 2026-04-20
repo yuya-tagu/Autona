@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Autona Desktop (Python + internal web server on 5000)",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["main.py"],
+      "port": 5000
+    },
+    {
+      "name": "Stage Strike React dev server (CRA)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["start", "--prefix", "stage_strike_app"],
+      "port": 3000
+    }
+  ]
+}

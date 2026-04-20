@@ -113,26 +113,18 @@ class AutonaScoreboardWidget(QWidget):
         self.signals.UserSetSelection.connect(self.LoadUserSetClicked)
         self.signals.ChangeSetData.connect(self.ChangeSetData)
 
-        if self.scoreboardNumber == 1:
-            AutonaHotkeys.signals.load_set.connect(self.LoadSetClicked)
-            AutonaHotkeys.signals.swap_teams.connect(self.SwapTeams)
-            AutonaHotkeys.signals.reset_scores.connect(self.ResetScore)
+        AutonaHotkeys.signals.load_set.connect(self.LoadSetClicked)
+        AutonaHotkeys.signals.swap_teams.connect(self.SwapTeams)
+        AutonaHotkeys.signals.reset_scores.connect(self.ResetScore)
 
-            AutonaHotkeys.signals.team1_score_up.connect(lambda: [
-                self.CommandScoreChange(0, 1)
-            ])
-
-            AutonaHotkeys.signals.team1_score_down.connect(lambda: [
-                self.CommandScoreChange(0, -1)
-            ])
-
-            AutonaHotkeys.signals.team2_score_up.connect(lambda: [
-                self.CommandScoreChange(1, 1)
-            ])
-
-            AutonaHotkeys.signals.team2_score_down.connect(lambda: [
-                self.CommandScoreChange(1, -1)
-            ])
+        AutonaHotkeys.signals.team1_score_up.connect(
+            lambda: self.CommandScoreChange(0, 1))
+        AutonaHotkeys.signals.team1_score_down.connect(
+            lambda: self.CommandScoreChange(0, -1))
+        AutonaHotkeys.signals.team2_score_up.connect(
+            lambda: self.CommandScoreChange(1, 1))
+        AutonaHotkeys.signals.team2_score_down.connect(
+            lambda: self.CommandScoreChange(1, -1))
 
         self.signals.CommandScoreChange.connect(self.CommandScoreChange)
         self.signals.SwapTeams.connect(self.SwapTeams)
@@ -149,13 +141,16 @@ class AutonaScoreboardWidget(QWidget):
 
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setLayout(QVBoxLayout())
-        self.layout().setContentsMargins(UI.SPACE_XS, UI.SPACE_XS, UI.SPACE_XS, UI.SPACE_XS)
+        # Narrow outer margins so the scroll viewport gets as much width
+        # as possible — the column content is dense and the vertical
+        # scrollbar already eats into the usable area.
+        self.layout().setContentsMargins(1, UI.SPACE_XS, 1, UI.SPACE_XS)
         self.layout().setSpacing(UI.SPACE_XS)
 
         self.innerWidget = QWidget()
         self.innerWidget.setLayout(QVBoxLayout())
         self.innerWidget.layout().setContentsMargins(
-            UI.SPACE_SM, UI.SPACE_SM, UI.SPACE_SM, UI.SPACE_SM)
+            UI.SPACE_XS, UI.SPACE_SM, UI.SPACE_XS, UI.SPACE_SM)
         self.innerWidget.layout().setSpacing(UI.SPACE_SM)
         self.innerWidget.setMinimumWidth(0)
         self.innerWidget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -164,6 +159,11 @@ class AutonaScoreboardWidget(QWidget):
         self.scrollArea.setWidget(self.innerWidget)
         self.scrollArea.setWidgetResizable(True)
         self.scrollArea.setFrameShape(QFrame.Shape.NoFrame)
+        # Disallow horizontal scrolling — the layout should collapse into
+        # the viewport width instead of letting team columns overflow to
+        # the right.
+        self.scrollArea.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scrollArea.setStyleSheet(
             "QTabWidget::pane { margin: 0px,0px,0px,0px }")
 
@@ -182,12 +182,6 @@ class AutonaScoreboardWidget(QWidget):
         self.btOpenWebScoreboard.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         self.btOpenWebScoreboard.clicked.connect(lambda: webbrowser.open(self.webScoreboardUrl))
         topOptions.layout().addWidget(self.btOpenWebScoreboard)
-
-        self.btEditScoreboard = QPushButton(
-            QApplication.translate("app", "スコアボードを編集"))
-        self.btEditScoreboard.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-        self.btEditScoreboard.clicked.connect(self._emitEditRequested)
-        topOptions.layout().addWidget(self.btEditScoreboard)
 
         topOptions.layout().addStretch()
 
@@ -377,6 +371,8 @@ class AutonaScoreboardWidget(QWidget):
         self.timerLayout.setVisible(False)
 
         self.team1column = uic.loadUi(AutonaResolve("src/layout/AutonaScoreboardTeam.ui"))
+        self.team1column.setMinimumWidth(0)
+        self.team1column.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.columns.layout().addWidget(self.team1column)
         self.team1column.findChild(QLabel, "teamLabel").setText(
             QApplication.translate("app", "TEAM {0}").format(1))
@@ -431,6 +427,8 @@ class AutonaScoreboardWidget(QWidget):
         colorGroup2.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
 
         self.team2column = uic.loadUi(AutonaResolve("src/layout/AutonaScoreboardTeam.ui"))
+        self.team2column.setMinimumWidth(0)
+        self.team2column.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.columns.layout().addWidget(self.team2column)
         self.team2column.findChild(QLabel, "teamLabel").setText(
             QApplication.translate("app", "TEAM {0}").format(2))
@@ -559,10 +557,10 @@ class AutonaScoreboardWidget(QWidget):
         scoreVBox.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.scoreWidget.setLayout(scoreVBox)
 
-        SZ = int(UI.BTN_LG * 1.5)
+        SZ = int(UI.BTN_LG * 1.25)
         SP = 4
-        ICON = int(UI.ICON_SM * 1.5)
-        scoreBtnStyle = UI.score_btn_style(scale=1.15)
+        ICON = int(UI.ICON_SM * 1.25)
+        scoreBtnStyle = UI.score_btn_style(scale=1.0)
 
         # Row 1: Swap
         row1 = QHBoxLayout()
@@ -773,13 +771,11 @@ class AutonaScoreboardWidget(QWidget):
         self.autoUpdateTimer.stop()
         self.timeLeftTimer.stop()
 
-    def _emitEditRequested(self):
-        from .AutonaScoreboardManager import AutonaScoreboardManager
-        AutonaScoreboardManager.instance.signals.EditRequested.emit()
-
     def _applyScoreboardMode(self, singlePlayer: bool):
         # Toggle team-centric UI. In single-player mode, collapse team naming
         # and player-count controls; in team mode, restore the defaults.
+        # Also drop the player-wrapping QGroupBox chrome so the solo player
+        # isn't double-nested inside a redundant team frame.
         self.singlePlayer = singlePlayer
         for column, side in ((self.team1column, 1), (self.team2column, 2)):
             teamLabel = column.findChild(QLabel, "teamLabel")
@@ -793,6 +789,29 @@ class AutonaScoreboardWidget(QWidget):
             teamName = column.findChild(QLineEdit, "teamName")
             if teamName is not None:
                 teamName.setVisible(not singlePlayer)
+
+            groupBox = column.findChild(QGroupBox, "groupBox")
+            if groupBox is not None:
+                if singlePlayer:
+                    # Strip both the border AND the bg_secondary fill that the
+                    # global QGroupBox QSS applies — otherwise the solo
+                    # player sits inside a redundant dark panel.
+                    groupBox.setStyleSheet(
+                        "QGroupBox { border: none; background: transparent;"
+                        " margin: 0; padding: 0; }")
+                else:
+                    groupBox.setStyleSheet(
+                        "QGroupBox { padding-top: 0px; margin-top: 0px; }")
+                scrollArea = groupBox.findChild(QScrollArea)
+                if scrollArea is not None:
+                    scrollArea.setFrameShape(
+                        QFrame.Shape.NoFrame if singlePlayer
+                        else QFrame.Shape.Panel)
+                    # Match the parent's transparency so no second fill leaks.
+                    scrollArea.setStyleSheet(
+                        "QScrollArea { background: transparent; border: none; }"
+                        " QScrollArea > QWidget > QWidget { background: transparent; }"
+                        if singlePlayer else "")
         if getattr(self, "_playerNumberLabel", None) is not None:
             self._playerNumberLabel.setVisible(not singlePlayer)
         self.playerNumber.setVisible(not singlePlayer)

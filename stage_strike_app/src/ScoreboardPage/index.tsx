@@ -4,8 +4,6 @@ import i18n from "../i18n/config";
 import {
     Button,
     Paper, Stack,
-    Tab,
-    Tabs
 } from "@mui/material";
 import React from "react";
 import {Box} from "@mui/system";
@@ -13,14 +11,17 @@ import {Box} from "@mui/system";
 import CurrentSet from "./CurrentSet";
 import UpcomingSets from "./UpcomingSets";
 import {Header} from "./Header";
-import {tshStore, ReduxState} from "../redux/store"
+import {ReduxState} from "../redux/store"
 import {shallowEqual, useDispatch, useSelector} from "react-redux";
 import {tshStateSlice} from "../redux/tshState";
 import websocketInit from "./websocketInit";
 import websocketConnection from "../websocketConnection";
-import {selectedScoreboardSlice} from "../redux/uiState";
-import {TSHState} from "../backendDataTypes";
 import {BACKEND_PORT} from "../env";
+
+// Autona runs with a single scoreboard. The backend still accepts the
+// legacy `/scoreboard<N>-*` URL shape for compatibility, but everything
+// routes to scoreboard 1.
+const SCOREBOARD_ID = 1;
 
 /**
  * Main page for the scoreboard. This whole contraption is powered by TSH's python-side
@@ -30,7 +31,7 @@ import {BACKEND_PORT} from "../env";
  */
 export default function ScoreboardPage(props: any) {
     const dispatch = useDispatch();
-    const {loading, errored, selectedScoreboard, scoreboards} = useSelector((state: ReduxState) => ({
+    const {loading, errored} = useSelector((state: ReduxState) => ({
         loading: (
             state.tshState.initializing
             || state.tshCharacters.initializing
@@ -39,8 +40,6 @@ export default function ScoreboardPage(props: any) {
             || state.tshCountries.initializing
         ),
         errored: state.websocketInfo.status === "errored",
-        scoreboards: state.tshState.tshState.score,
-        selectedScoreboard: state.selectedScoreboard.value
     }), shallowEqual);
 
     React.useEffect(() => {
@@ -83,37 +82,14 @@ export default function ScoreboardPage(props: any) {
                     paddingBottom={1}
                 >
                     <Stack gap={2} marginBottom={12}>
-                        <Box>
-                            <Box sx={{borderBottom: 1, borderColor: 'divider'}}>
-                                <Tabs
-                                    sx={{width: '100%'}}
-                                    variant={"scrollable"}
-                                    onChange={(event, newValue) => {
-                                        tshStore.dispatch(selectedScoreboardSlice.actions.setSelectedScoreboard(newValue))
-                                    }}
-                                    value={selectedScoreboard}
-                                >
-                                    {
-                                        scoreboardKeys(scoreboards).map(sbName =>
-                                            <Tab key={sbName} value={sbName} label={`Scoreboard ${sbName}`} />)
-                                    }
-                                </Tabs>
-                            </Box>
-                            <div
-                                role={"tabpanel"}
-                                id={`scoreboards-tabpanel-${selectedScoreboard}`}
-                                aria-labelledby={`scoreboards-tabpanel-${selectedScoreboard}`}
-                            >
-                                <CurrentSet scoreboardNumber={selectedScoreboard} />
-                            </div>
-                        </Box>
-                        <UpcomingSets onSelectedSetChanged={onSelectedSetChanged} scoreboardNumber={selectedScoreboard}/>
+                        <CurrentSet scoreboardNumber={SCOREBOARD_ID} />
+                        <UpcomingSets onSelectedSetChanged={onSelectedSetChanged} scoreboardNumber={SCOREBOARD_ID}/>
                         <Box display="flex" justifyContent="center" mt={4}>
                             <Button
                                 variant={"outlined"}
                                 color="error"
                                 onClick={() => {
-                                    fetch(`http://${window.location.hostname}:${BACKEND_PORT}/scoreboard${selectedScoreboard}-clear-all`)
+                                    fetch(`http://${window.location.hostname}:${BACKEND_PORT}/scoreboard${SCOREBOARD_ID}-clear-all`)
                                         .catch(console.error);
                                 }}
                             >
@@ -139,14 +115,4 @@ export default function ScoreboardPage(props: any) {
             {body}
         </Box>
     )
-}
-
-const scoreboardKeys = (scoreboards: TSHState['score']) => {
-    if (scoreboards) {
-        return Object.keys(scoreboards)
-            .filter(k => k.match(/^\d+$/))
-            .map(k => Number.parseInt(k));
-    } else {
-        return [];
-    }
 }
