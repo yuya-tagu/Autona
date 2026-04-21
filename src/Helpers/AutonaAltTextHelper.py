@@ -149,7 +149,7 @@ def generate_youtube(scoreboard_id=1, use_phase_name=True, use_characters=True, 
             "altText", "Commentators:") + " " + " / ".join(commentator_names) + "\n"
 
     description = description + QApplication.translate("altText", "Stream powered by Autona:") + \
-        " " + "https://github.com/joaorb64/Autona/releases"
+        " " + "https://github.com/yuya-tagu/Autona/releases"
     description = description.strip()
 
     for character_set in replace_characters:

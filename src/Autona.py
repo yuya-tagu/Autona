@@ -16,8 +16,6 @@ import os
 import unicodedata
 import socket
 import sys
-import atexit
-import time
 import qtpy
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
@@ -141,6 +139,7 @@ from .AutonaTournamentInfoWidget import AutonaTournamentInfoWidget
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .TournamentDataProvider.StartGGDataProvider import StartGGDataProvider
 from .AutonaAlertNotification import AutonaAlertNotification
+from .AutonaUpdater import AutonaUpdater
 from .AutonaPlayerDB import AutonaPlayerDB
 from .Workers import *
 from .StateManager import StateManager
@@ -162,103 +161,6 @@ def generate_restart_messagebox(main_txt):
         main_txt + "\n" + QApplication.translate("app", "The program will now close."))
     messagebox.finished.connect(QApplication.exit)
     return (messagebox)
-
-
-def UpdateProcedure():
-    """
-        Update Procedure -- backup layouts, register extraction on program close
-    """
-
-    try:
-        # Backup layouts
-        os.rename(
-            "./layout", f"./layout_backup_{str(time.time())}")
-
-        # Register update extraction on program close
-        atexit.register(ExtractUpdate)
-
-        messagebox = generate_restart_messagebox(
-            QApplication.translate(
-                "app", "Update download complete. The program will extract the update upon closing.")
-            + "\n\n"
-            + QApplication.translate(
-                "app", "Please ensure the layout folder or its contents aren't open in another application before closing this window.")
-            + "\n"
-        )
-
-        messagebox.exec()
-    except Exception as e:
-        # Layout folder backups failed
-        logger.error(traceback.format_exc())
-
-        buttonReply = QDialog()
-        buttonReply.setWindowTitle(
-            QApplication.translate("app", "Warning"))
-        vbox = QVBoxLayout()
-        buttonReply.setLayout(vbox)
-
-        buttonReply.layout().addWidget(
-            QLabel(QApplication.translate(
-                "updater",
-                "Error while backing up the layout folder:")
-            )
-        )
-        buttonReply.layout().addWidget(QLabel(str(e)))
-
-        hbox = QHBoxLayout()
-        vbox.addLayout(hbox)
-
-        btRetry = QPushButton(
-            QApplication.translate("updater", "Retry"))
-        hbox.addWidget(btRetry)
-        btCancel = QPushButton(
-            QApplication.translate("updater", "Cancel"))
-        hbox.addWidget(btCancel)
-
-        btRetry.clicked.connect(lambda: [
-            buttonReply.close(),
-            UpdateProcedure()
-        ])
-
-        btCancel.clicked.connect(
-            lambda: buttonReply.close()
-        )
-
-        buttonReply.exec()
-
-
-def ExtractUpdate():
-    try:
-        updateLog = []
-        with zipfile.ZipFile("update.zip", "r") as z:
-            # backup exe
-            os.rename("./Autona.exe", "./Autona_old.exe")
-
-            for filename in z.namelist():
-                if "/" in filename:
-                    fullname = filename.split("/", 1)[1]
-                    if fullname.endswith("/"):
-                        updateLog.append(f"Create directory {fullname}")
-                        try:
-                            os.makedirs(os.path.dirname(fullname), exist_ok=True)
-                        except Exception:
-                            updateLog.append(f"Failed to create {filename} - {traceback.format_exc()}")
-                    else:
-                        updateLog.append(f"Extract {filename} -> {fullname}")
-                        try:
-                            z.extract(filename, path=os.path.dirname(fullname))
-                        except Exception:
-                            updateLog.append(f"Failed to extract {filename} - {traceback.format_exc()}")
-
-            try:
-                with open("assets/update_log.txt", "w") as f:
-                    f.writelines(updateLog)
-            except:
-                logger.error(traceback.format_exc())
-
-        os.remove("update.zip")
-    except Exception as e:
-        logger.error(traceback.format_exc())
 
 
 def remove_accents_lower(input_str):
@@ -648,39 +550,29 @@ class Window(QMainWindow):
         helpMenu = editMenu.addMenu(
             QApplication.translate("app", "Help"))
         action = helpMenu.addAction(
+            QApplication.translate("app", "Check for updates"))
+        action.triggered.connect(
+            lambda x=None: AutonaUpdater.instance.CheckForUpdates(silent=False))
+        helpMenu.addSeparator()
+        action = helpMenu.addAction(
             QApplication.translate("app", "Open the Wiki"))
-        wiki_url = "https://github.com/joaorb64/Autona/wiki"
+        wiki_url = "https://github.com/yuya-tagu/Autona/wiki"
         action.triggered.connect(lambda x=None: [
             QDesktopServices.openUrl(QUrl(wiki_url)),
             help_messagebox.exec()
         ])
         action = helpMenu.addAction(
             QApplication.translate("app", "Look for Help on the forum"))
-        help_url = "https://github.com/joaorb64/Autona/discussions/categories/q-a"
+        help_url = "https://github.com/yuya-tagu/Autona/discussions/categories/q-a"
         action.triggered.connect(lambda x=None: [
             QDesktopServices.openUrl(QUrl(help_url)),
             help_messagebox.exec()
         ])
         action = helpMenu.addAction(
             QApplication.translate("app", "Report a bug"))
-        issues_url = "https://github.com/joaorb64/Autona/issues"
+        issues_url = "https://github.com/yuya-tagu/Autona/issues"
         action.triggered.connect(lambda x=None: [
             QDesktopServices.openUrl(QUrl(issues_url)),
-            help_messagebox.exec()
-        ])
-        action = helpMenu.addAction(
-            QApplication.translate("app", "Ask for Help on Discord"))
-        discord_url = "https://discord.gg/X9Sp2FkcHF"
-        action.triggered.connect(lambda x=None: [
-            QDesktopServices.openUrl(QUrl(discord_url)),
-            help_messagebox.exec()
-        ])
-        helpMenu.addSeparator()
-        action = helpMenu.addAction(
-            QApplication.translate("app", "Contribute to the Asset Database"))
-        asset_url = "https://github.com/joaorb64/StreamHelperAssets/"
-        action.triggered.connect(lambda x=None: [
-            QDesktopServices.openUrl(QUrl(asset_url)),
             help_messagebox.exec()
         ])
 
@@ -837,6 +729,11 @@ class Window(QMainWindow):
         AutonaTournamentDataProvider.instance.UiMounted()
         AutonaGameAssetManager.instance.UiMounted()
         AutonaAlertNotification.instance.UiMounted()
+        # Silent startup check runs only for the frozen distribution — in
+        # dev mode (python main.py) we can't self-install, so skip the
+        # noise of a "can't auto-install" dialog at every launch.
+        if getattr(sys, "frozen", False):
+            AutonaUpdater.instance.CheckForUpdates(silent=True)
         AutonaHotkeys.instance.UiMounted(self)
         AutonaPlayerDB.signals.db_updated.connect(
             self.webserver.ws_playerdb

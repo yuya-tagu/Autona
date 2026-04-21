@@ -2615,5 +2615,82 @@ p, li { white-space: pre-wrap; }
         <source>Cancel</source>
         <translation>キャンセル</translation>
     </message>
+    <message>
+        <location filename="../AutonaUpdater.py" line="298"/>
+        <source>A new version is available</source>
+        <translation>新しいバージョンが利用可能です</translation>
+    </message>
+    <message>
+        <location filename="../AutonaUpdater.py" line="313"/>
+        <source>A new version v{0} is available (current v{1}).</source>
+        <translation>新しいバージョン v{0} が利用可能です（現在 v{1}）。</translation>
+    </message>
+    <message>
+        <location filename="../AutonaUpdater.py" line="321"/>
+        <source>Open the release page</source>
+        <translation>リリースページを開く</translation>
+    </message>
+    <message>
+        <location filename="../AutonaUpdater.py" line="340"/>
+        <source>Download and install</source>
+        <translation>ダウンロードしてインストール</translation>
+    </message>
+    <message>
+        <location filename="../AutonaUpdater.py" line="346"/>
+        <source>Skip this version</source>
+        <translation>このバージョンをスキップ</translation>
+    </message>
+    <message>
+        <location filename="../AutonaUpdater.py" line="351"/>
+        <source>Later</source>
+        <translation>後で</translation>
+    </message>
+    <message>
+        <location filename="../AutonaUpdater.py" line="360"/>
+        <source>{0} is not attached to this release. Please download it manually from the release page.</source>
+        <translation>このリリースには {0} が添付されていません。リリースページから手動で取得してください。</translation>
+    </message>
+    <message>
+        <location filename="../AutonaUpdater.py" line="371"/>
+        <source>Auto-install is not available in dev mode (python main.py). Only the distributed exe can self-update.</source>
+        <translation>開発実行（python main.py）では自動インストールできません。配布版 exe でのみ動作します。</translation>
+    </message>
+    <message>
+        <location filename="../AutonaUpdater.py" line="384"/>
+        <source>Downloading...</source>
+        <translation>ダウンロード中…</translation>
+    </message>
+    <message>
+        <location filename="../AutonaUpdater.py" line="402"/>
+        <source>Downloading... {0:.1f} / {1:.1f} MB</source>
+        <translation>ダウンロード中… {0:.1f} / {1:.1f} MB</translation>
+    </message>
+    <message>
+        <location filename="../AutonaUpdater.py" line="411"/>
+        <source>Download complete. Preparing install...</source>
+        <translation>ダウンロード完了。インストール準備中…</translation>
+    </message>
+    <message>
+        <location filename="../AutonaUpdater.py" line="423"/>
+        <source>Download failed: {0}</source>
+        <translation>ダウンロードに失敗しました: {0}</translation>
+    </message>
+    <message>
+        <location filename="../AutonaUpdater.py" line="478"/>
+        <source>Check for updates</source>
+        <translation>更新チェック</translation>
+    </message>
+    <message>
+        <location filename="../AutonaUpdater.py" line="479"/>
+        <source>You are on the latest version.</source>
+        <translation>お使いのバージョンが最新です。</translation>
+    </message>
+    <message>
+        <location filename="../AutonaUpdater.py" line="489"/>
+        <source>Update check failed:
+{0}</source>
+        <translation>更新の確認に失敗しました:
+{0}</translation>
+    </message>
 </context>
 </TS>
