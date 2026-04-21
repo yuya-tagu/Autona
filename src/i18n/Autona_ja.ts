@@ -459,7 +459,37 @@ p, li { white-space: pre-wrap; }
     <message>
         <location filename="../layout/AutonaThumbnailSettings.ui" line="45"/>
         <source>General Settings</source>
-        <translation>一般設定</translation>
+        <translation>サムネイル設定</translation>
+    </message>
+    <message>
+        <location filename="../layout/AutonaThumbnailSettings.ui" line="23"/>
+        <source>Video Title</source>
+        <translation>動画タイトル</translation>
+    </message>
+    <message>
+        <location filename="../layout/AutonaThumbnailSettings.ui" line="44"/>
+        <source>Copy Video Title</source>
+        <translation>動画タイトルをコピー</translation>
+    </message>
+    <message>
+        <location filename="../layout/AutonaThumbnailSettings.ui" line="29"/>
+        <source>Title is auto-generated from tournament info, round and characters</source>
+        <translation>タイトルは大会情報・ラウンド・使用キャラから自動生成されます</translation>
+    </message>
+    <message>
+        <location filename="../layout/AutonaThumbnailSettings.ui" line="618"/>
+        <source>Copy Thumbnail to Clipboard</source>
+        <translation>サムネイルをクリップボードにコピー</translation>
+    </message>
+    <message>
+        <location filename="../layout/AutonaThumbnailSettings.ui" line="625"/>
+        <source>Save Thumbnail</source>
+        <translation>サムネイルを保存</translation>
+    </message>
+    <message>
+        <location filename="../layout/AutonaThumbnailSettings.ui" line="597"/>
+        <source>Preview Settings</source>
+        <translation>プレビュー設定</translation>
     </message>
     <message>
         <location filename="../layout/AutonaThumbnailSettings.ui" line="346"/>
@@ -541,8 +571,8 @@ p, li { white-space: pre-wrap; }
     </message>
     <message>
         <location filename="../layout/AutonaThumbnailSettings.ui" line="59"/>
-        <source>Template</source>
-        <translation>テンプレート</translation>
+        <source>Select Thumbnail Template</source>
+        <translation>サムネイルのテンプレートを選択</translation>
     </message>
     <message>
         <location filename="../layout/AutonaThumbnailSettings.ui" line="525"/>
@@ -889,7 +919,7 @@ p, li { white-space: pre-wrap; }
         <location filename="../AutonaThumbnailSettingsWidget.py" line="78"/>
         <location filename="../Autona.py" line="398"/>
         <source>Thumbnail Settings</source>
-        <translation>サムネイルの設定</translation>
+        <translation>対戦動画作成</translation>
     </message>
     <message>
         <location filename="../Autona.py" line="414"/>
@@ -1892,6 +1922,14 @@ p, li { white-space: pre-wrap; }
         <translation>スコアリセット</translation>
     </message>
     <message>
+        <source>Swap 1P and 2P</source>
+        <translation>1P/2P 入れ替え</translation>
+    </message>
+    <message>
+        <source>Reset Score</source>
+        <translation>スコアリセット</translation>
+    </message>
+    <message>
         <source>Close</source>
         <translation>閉じる</translation>
     </message>
@@ -1920,8 +1958,8 @@ p, li { white-space: pre-wrap; }
         <translation>大会情報を読み込む</translation>
     </message>
     <message>
-        <source>Layout:</source>
-        <translation>レイアウト:</translation>
+        <source>Select Result Layout</source>
+        <translation>リザルトのレイアウトを選択</translation>
     </message>
     <message>
         <source>Loading...</source>
