@@ -18,7 +18,7 @@ a = Analysis(
         ('../src/i18n/*.json', 'src/i18n'),
         ('../src/i18n/*.qm', 'src/i18n'),
         ('../src/layout/*', 'src/layout'),
-#       ('../stage_strike_app/build/*', 'stage_strike_app/build'),
+#       ('../web/build/*', 'web/build'),
         ('../src/TournamentDataProvider/*.txt', 'src/TournamentDataProvider')
     ],
     hookspath=[],

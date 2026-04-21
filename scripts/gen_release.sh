@@ -2,8 +2,8 @@
 
 pushd .. > /dev/null
 
-# Create Autona dir and its stage_strike_app folders
-mkdir -p Autona/stage_strike_app/build
+# Create Autona dir and its web folders
+mkdir -p Autona/web/build
 
 cp -R assets \
 	layout \
@@ -12,8 +12,8 @@ cp -R assets \
 	Autona.exe \
 	Autona/
 
-cp -R stage_strike_app/build \
-	Autona/stage_strike_app/
+cp -R web/build \
+	Autona/web/
 
 rm -rf \
 	Autona/assets/versions.json \

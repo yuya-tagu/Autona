@@ -1,8 +1,8 @@
 {
-  "name": "stage_strike_app",
+  "name": "autona-web",
   "version": "0.1.0",
   "private": true,
-  "homepage": "/stage_strike_app/build/",
+  "homepage": "/web/build/",
   "dependencies": {
     "@emotion/react": "^11.4.0",
     "@emotion/styled": "^11.14.1",

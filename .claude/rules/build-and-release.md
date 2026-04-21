@@ -16,10 +16,10 @@ paths:
 
 ## ビルド順序
 
-1. Web UI (`cd stage_strike_app && npm run build`) を先にビルド
+1. Web UI (`cd web && npm run build`) を先にビルド
 2. その後 exe をビルド（Web UI の build/ を同梱するため）
 
 ## リリース
 
 - `scripts/gen_release.ps1` でリリース ZIP を作成
-- `stage_strike_app/build/` が ZIP に含まれるため、最新の Web UI ビルドが必要
+- `web/build/` が ZIP に含まれるため、最新の Web UI ビルドが必要

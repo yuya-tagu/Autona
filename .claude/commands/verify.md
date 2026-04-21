@@ -15,7 +15,7 @@ description: テスト + ビルド + 起動確認を一括で実行し、結果�
 
 2. **Web UI ビルド**
    ```bash
-   cd stage_strike_app && npm run build
+   cd web && npm run build
    ```
    - エラー・警告を確認
 

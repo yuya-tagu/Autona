@@ -10,7 +10,7 @@
     {
       "name": "Stage Strike React dev server (CRA)",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["start", "--prefix", "stage_strike_app"],
+      "runtimeArgs": ["start", "--prefix", "web"],
       "port": 3000
     }
   ]

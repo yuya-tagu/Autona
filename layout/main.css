@@ -42,7 +42,7 @@
 
 /* Main theme -- Dark Gradient
  * Canonical values defined in assets/design-tokens.json
- * Keep in sync with: src/TSHScoreboardWidget.py, stage_strike_app/src/themes.js
+ * Keep in sync with: src/TSHScoreboardWidget.py, web/src/themes.js
  */
 :root {
   --font: "LINE Seed JP", sans-serif;

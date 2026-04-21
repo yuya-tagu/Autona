@@ -1,6 +1,6 @@
 ---
 paths:
-  - "stage_strike_app/src/**"
+  - "web/src/**"
 ---
 
 # Web UI (React) 開発ルール
@@ -20,7 +20,7 @@ paths:
 ## ビルド
 
 - コード変更後は必ず `npm run build` でビルドが通ることを確認する
-- `stage_strike_app/build/` がデスクトップアプリから配信される成果物
+- `web/build/` がデスクトップアプリから配信される成果物
 - ビルドせずにデスクトップアプリを起動すると古い Web UI が表示される
 
 ## 未使用コードの削除
