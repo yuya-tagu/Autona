@@ -80,4 +80,4 @@ build/
 venv/
 
 # Node modules
-stage_strike_app/node_modules/
+web/node_modules/

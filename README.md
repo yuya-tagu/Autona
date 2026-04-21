@@ -44,7 +44,7 @@
 python -m pipenv install -r dependencies/requirements.txt
 
 # Web UI 依存パッケージ
-cd stage_strike_app && npm install
+cd web && npm install
 ```
 
 ### 実行
@@ -64,7 +64,7 @@ Autona_bat.bat
 
 ```bash
 # 1. Web UI をビルド（先に実行）
-cd stage_strike_app && npm run build
+cd web && npm run build
 
 # 2. exe をビルド
 python -m PyInstaller dependencies/autona.spec --distpath . --workpath build -y
@@ -80,7 +80,7 @@ python -m PyInstaller dependencies/autona.spec --distpath . --workpath build -y
 scripts/gen_release.ps1
 ```
 
-`release-windows.zip` に `Autona.exe`、`assets/`、`layout/`、`user_data/`、`stage_strike_app/build/` が含まれる。
+`release-windows.zip` に `Autona.exe`、`assets/`、`layout/`、`user_data/`、`web/build/` が含まれる。
 
 ## アーキテクチャ
 
@@ -171,7 +171,7 @@ Autona/
 │   ├── TournamentDataProvider/    # データプロバイダー実装
 │   └── i18n/                      # 翻訳ファイル・生成スクリプト
 │
-├── stage_strike_app/        # Web UI (React)
+├── web/        # Web UI (React)
 │   ├── src/
 │   │   ├── index.js               # エントリーポイント
 │   │   ├── themes.js              # MUI ダークテーマ定義

@@ -678,15 +678,15 @@ class WebServer(QThread):
     @app.route('/scoreboard')
     @app.route('/stage-strike-app')
     @cross_origin()
-    def stage_strike_app():
-        return send_file(os.path.join(os.path.abspath('.'), 'stage_strike_app/build/index.html'))
+    def web_index():
+        return send_file(os.path.join(os.path.abspath('.'), 'web/build/index.html'))
 
 
     @app.route('/<path:filename>', methods=['GET', 'POST'])
     @cross_origin()
     def file_request(filename):
         try:
-            filename = filename or 'stage_strike_app/build/index.html'
+            filename = filename or 'web/build/index.html'
             mimetype = None
             if filename.endswith('.js'):
                 mimetype = "text/javascript"

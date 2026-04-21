@@ -30,7 +30,7 @@ Autona のカスタムフォーク。
 - **リポジトリ**: `yuya-tagu/Autona`
 - **メインブランチ**: `main`
 - **デスクトップアプリ**: Python (PyQt6) — `src/`
-- **Web UI**: React (MUI) — `stage_strike_app/src/`
+- **Web UI**: React (MUI) — `web/src/`
   - ※ フォルダ名は上流由来の歴史的経緯（元々は TournamentStreamHelper のフォーク）。実態はスコアボード等の汎用 Web UI。リネームは影響範囲が広いため保留
 - **ビルド**: PyInstaller → `Autona.exe`（プロジェクト直下、約 236 MB）
 
@@ -63,7 +63,7 @@ Autona のカスタムフォーク。
     exe の実行）する際に必ず「リリース済みの最新コード」を触れる
   - Claude の並行作業による意図しないファイル変更がルートへ波及しない
   - PR 作業中でもルート側で既存機能を検証できる
-- ビルド成果物（`Autona.exe`、`stage_strike_app/build/`、`dist/` 等）は
+- ビルド成果物（`Autona.exe`、`web/build/`、`dist/` 等）は
   ルート側で運用する。worktree 内のビルド成果物は参考程度に留める
 
 #### 王道フロー（Claude Code 標準機能に任せる）
@@ -113,7 +113,7 @@ exe ビルドが本当に必要なケース:
 
 ```bash
 # Web UI（先に実行）
-cd stage_strike_app && npm run build
+cd web && npm run build
 
 # exe（配布前のみ）
 pyinstaller dependencies/autona.spec --noconfirm
@@ -160,7 +160,7 @@ Python / PyQt6 のドックウィジェットベース。主要コンポーネ�
 - **Context Manager**: `StateManager.SaveBlock()` で一括更新時のファイル書き込み抑制
 - **Worker スレッド**: `Workers.py` の `Worker(QRunnable)` でバックグラウンド処理
 
-### Web UI (`stage_strike_app/src/`)
+### Web UI (`web/src/`)
 
 React 19 / Redux Toolkit / MUI。フォルダ名は上流由来の歴史的経緯。入力欄は全て `size="small"` で統一。
 
@@ -219,7 +219,7 @@ root
 | ファイル | 対象 | 概要 |
 |---------|------|------|
 | `rules/python-widgets.md` | `src/**/*.py` | PyQt6 ウィジェットの作法 |
-| `rules/react-web-ui.md` | `stage_strike_app/src/**` | React/Redux の規約 |
+| `rules/react-web-ui.md` | `web/src/**` | React/Redux の規約 |
 | `rules/build-and-release.md` | `dependencies/**`, `scripts/**` | ビルド・リリース手順 |
 | `rules/state-and-webserver.md` | `src/StateManager.py`, `src/AutonaWebServer*.py`, `src/Helpers/**` | 状態管理・Web サーバー・ヘルパーの作法 |
 | `rules/agent-pitfalls.md` | `src/**/*.py`, `tests/**/*.py` | エージェントが踏みやすい地雷の回避ルール |

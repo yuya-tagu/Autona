@@ -203,7 +203,7 @@ S-02 と同様のプライベートメソッド分割。設定項目のグルー
 **対策案**:
 削除後にインデックスを再割り当てするか、Web UI 側で欠番を許容するか判断が必要。
 
-**影響範囲**: `AutonaCommentaryWidget.py`, `stage_strike_app/` の commentary 参照箇所
+**影響範囲**: `AutonaCommentaryWidget.py`, `web/` の commentary 参照箇所
 
 ---
 

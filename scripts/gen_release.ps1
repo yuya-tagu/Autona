@@ -23,7 +23,7 @@ Get-ChildItem -Path "layout" -Recurse | Where-Object {
 }
 
 Copy-Item -Recurse -Force "user_data" "Autona\user_data"
-Copy-Item -Recurse -Force "stage_strike_app\build" "Autona\stage_strike_app\build"
+Copy-Item -Recurse -Force "web\build" "Autona\web\build"
 Copy-Item -Force "LICENSE" "Autona\LICENSE"
 Copy-Item -Force "Autona.exe" "Autona\Autona.exe"
 

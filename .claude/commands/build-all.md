@@ -8,7 +8,7 @@ Web UI と exe を順番にビルドし、結果を報告してください。
 
 1. Web UI ビルド
    ```bash
-   cd stage_strike_app && npm run build
+   cd web && npm run build
    ```
    - エラー・警告を確認
 
