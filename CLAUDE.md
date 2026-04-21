@@ -46,6 +46,34 @@ Autona のカスタムフォーク。
 
 ---
 
+## Claude Code ハーネスの挙動に関する注意
+
+### ブラウザプレビュー通知（PostToolUse:Edit/Write hook）は多くの場合無視してよい
+
+Edit / Write ツール実行後に以下のメッセージがハーネスから自動注入されることがある:
+
+> PostToolUse:Edit hook additional context: No preview server is running. Before ending your turn, if this change is observable in a browser preview...
+
+これは Claude_Preview MCP がファイル種別を判定せずに一律で出している通知で、
+**Autona では以下のファイル編集時は「ブラウザプレビュー対象外」として無視してよい**:
+
+- Python デスクトップアプリ本体（`src/**/*.py`・`main.py`）
+- Qt UI 定義（`src/layout/**/*.ui`）
+- Qt 翻訳（`src/i18n/**/*.ts`・`.qm`）
+- ビルド・依存設定（`dependencies/**`・`scripts/**`・`*.spec`）
+- ドキュメント（`*.md`・`.claude/**`）
+- PyInstaller や Python ランタイムが実行するもの全般
+
+**プレビュー検証が必要な編集**は Web UI 側だけ:
+
+- `web/src/**/*.tsx`・`web/src/**/*.ts`・`web/src/**/*.css`
+- `web/public/**`
+- この場合のみ `preview_start` → `<verification_workflow>` を実行
+
+ユーザーに「プレビューで確認して」等の明示指示があれば上記に関わらず従う。
+
+---
+
 ## Git ルール
 
 - `main` への直接 push 禁止
@@ -128,7 +156,7 @@ python main.py
 - `Autona.exe` はプロジェクト直下のものを使う（`dist/` ではない）
 - **Autona.exe が起動中の場合は `taskkill /IM Autona.exe /F` で終了してからコピーしてよい**
 - フォント: LINE Seed JP（`assets/font/LINESeedJP/`、Google Fonts gstatic CDN から取得）
-- 翻訳コンパイル: `pyside6-lrelease src/i18n/Auto_ja.ts -qm src/i18n/Auto_ja.qm`（※ PySide6 は PyInstaller ビルド前にアンインストールすること。PyQt6 と共存不可）
+- 翻訳コンパイル: `.\scripts\compile_translations.ps1 -Lang ja`（`dependencies/tools/` に `lrelease.exe` + `Qt6Core.dll` を同梱済み。PySide6 のインストール不要）
 - **WebEngine 依存**: サムネイル生成（[src/thumbnail/ThumbnailRenderer.py](src/thumbnail/ThumbnailRenderer.py)）が `PyQt6-WebEngine` を使用。`dependencies/requirements.txt` に含まれており、`pip install -r` で自動インストールされる。Qt6WebEngineCore.dll が約 196 MB あるため、Autona.exe が 230〜245 MB 程度になるのは正常
 - **上流成果物の扱い**: `TSH.exe` / `TSH/` は上流 TournamentStreamHelper のビルド成果物。Autona 側では使用しないため残さない
 

@@ -562,7 +562,15 @@ class AutonaScoreboardWidget(QWidget):
         ICON = int(UI.ICON_SM * 1.25)
         scoreBtnStyle = UI.score_btn_style(scale=1.0)
 
-        # Row 1: Swap
+        # Row 1: Swap label + button
+        self.btSwapLabel = QLabel(
+            QApplication.translate("app", "Swap 1P and 2P"))
+        _swapFont = self.btSwapLabel.font()
+        _swapFont.setPointSize(8)
+        _swapFont.setBold(True)
+        self.btSwapLabel.setFont(_swapFont)
+        self.btSwapLabel.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        scoreVBox.addWidget(self.btSwapLabel)
         row1 = QHBoxLayout()
         row1.setSpacing(SP)
         row1.setContentsMargins(0, 0, 0, 0)
@@ -629,7 +637,7 @@ class AutonaScoreboardWidget(QWidget):
         row4.addWidget(self.btScoreDown2)
         scoreVBox.addLayout(row4)
 
-        # Row 5: Score reset
+        # Row 5: Score reset button + label
         row5 = QHBoxLayout()
         row5.setSpacing(SP)
         row5.setContentsMargins(0, 0, 0, 0)
@@ -642,6 +650,14 @@ class AutonaScoreboardWidget(QWidget):
         self.btScoreReset.clicked.connect(lambda: self.ResetScore())
         row5.addWidget(self.btScoreReset)
         scoreVBox.addLayout(row5)
+        self.btScoreResetLabel = QLabel(
+            QApplication.translate("app", "Reset Score"))
+        _resetFont = self.btScoreResetLabel.font()
+        _resetFont.setPointSize(8)
+        _resetFont.setBold(True)
+        self.btScoreResetLabel.setFont(_resetFont)
+        self.btScoreResetLabel.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        scoreVBox.addWidget(self.btScoreResetLabel)
 
         self.columns.layout().insertWidget(1, self.scoreWidget)
 

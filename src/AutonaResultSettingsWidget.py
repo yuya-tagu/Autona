@@ -184,9 +184,16 @@ class AutonaResultSettingsWidget(QDockWidget):
         self.btLoadTournamentInfo.clicked.connect(self._loadTournamentInfo)
 
         # --- Layout selector ---
-        layoutRow = QHBoxLayout()
-        layoutRow.addWidget(QLabel(
-            QApplication.translate("app", "Layout:")))
+        layoutLabel = QLabel(
+            QApplication.translate("app", "Select Result Layout"))
+        _labelFont = layoutLabel.font()
+        _labelFont.setPointSize(10)
+        _labelFont.setBold(True)
+        layoutLabel.setFont(_labelFont)
+        layoutLabel.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        leftLayout.insertWidget(insertIdx, layoutLabel)
+        insertIdx += 1
         self.layoutCombo = QComboBox()
         self.layoutCombo.addItem(
             QApplication.translate("app", "Horizontal (1920x1080)"), "horizontal")
@@ -197,8 +204,7 @@ class AutonaResultSettingsWidget(QDockWidget):
         self.layoutCombo.addItem(
             QApplication.translate("app", "Vertical Dark Gold 激 (960x1080)"), "vertical_geki")
         self.layoutCombo.currentIndexChanged.connect(self._onLayoutChanged)
-        layoutRow.addWidget(self.layoutCombo)
-        leftLayout.insertLayout(insertIdx, layoutRow)
+        leftLayout.insertWidget(insertIdx, self.layoutCombo)
 
         # --- Preview ---
         previewContainer = self.settings.findChild(QWidget, "resultPreview")

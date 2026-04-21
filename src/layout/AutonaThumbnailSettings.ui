@@ -74,6 +74,9 @@
     <layout class="QHBoxLayout" name="horizontalLayout_8">
      <item>
       <widget class="QScrollArea" name="scrollArea">
+     <property name="frameShape">
+      <enum>QFrame::NoFrame</enum>
+     </property>
      <property name="sizePolicy">
       <sizepolicy hsizetype="Minimum" vsizetype="Expanding">
        <horstretch>0</horstretch>
@@ -82,36 +85,29 @@
      </property>
      <widget class="QWidget" name="scrollAreaWidgetContents">
       <layout class="QVBoxLayout" name="verticalLayout_6">
-       <property name="rightMargin">
-        <number>16</number>
-       </property>
        <item>
-        <layout class="QVBoxLayout" name="verticalLayout">
-         <item>
-          <widget class="QLabel" name="label_18">
-           <property name="font">
-            <font>
-             <pointsize>12</pointsize>
-             <weight>75</weight>
-             <bold>true</bold>
-            </font>
-           </property>
-           <property name="text">
-            <string>General Settings</string>
-           </property>
-          </widget>
-         </item>
+        <widget class="QGroupBox" name="groupBoxGeneralSettings">
+         <property name="title">
+          <string>General Settings</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout">
          <item>
           <widget class="QLabel" name="label_17">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
            <property name="font">
             <font>
              <pointsize>10</pointsize>
-             <weight>75</weight>
+             <weight>700</weight>
              <bold>true</bold>
             </font>
            </property>
            <property name="text">
-            <string>Template</string>
+            <string>Select Thumbnail Template</string>
            </property>
           </widget>
          </item>
@@ -120,20 +116,44 @@
          </item>
          <item>
           <layout class="QVBoxLayout" name="verticalLayout_15">
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
            <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
             <number>0</number>
            </property>
            <item>
             <layout class="QVBoxLayout" name="verticalLayout_8">
-             <property name="leftMargin">
-              <number>0</number>
-             </property>
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
              <item>
               <widget class="QLabel" name="label_2">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
                <property name="font">
                 <font>
                  <pointsize>10</pointsize>
-                 <weight>75</weight>
+                 <weight>700</weight>
                  <bold>true</bold>
                 </font>
                </property>
@@ -144,6 +164,18 @@
              </item>
              <item>
               <layout class="QHBoxLayout" name="horizontalLayout_4">
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
                <item>
                 <widget class="QPushButton" name="customMainIcon">
                  <property name="sizePolicy">
@@ -185,23 +217,23 @@
              </item>
              <item>
               <layout class="QHBoxLayout" name="horizontalLayout" stretch="0,0,0,0">
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
                <property name="spacing">
                 <number>5</number>
                </property>
                <property name="sizeConstraint">
                 <enum>QLayout::SetMinimumSize</enum>
-               </property>
-               <property name="leftMargin">
-                <number>0</number>
-               </property>
-               <property name="topMargin">
-                <number>0</number>
-               </property>
-               <property name="rightMargin">
-                <number>0</number>
-               </property>
-               <property name="bottomMargin">
-                <number>0</number>
                </property>
                <item>
                 <widget class="QPushButton" name="customTopLeftIcon">
@@ -271,15 +303,30 @@
            </item>
            <item>
             <layout class="QVBoxLayout" name="verticalLayout_7">
-             <property name="topMargin">
-              <number>0</number>
-             </property>
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
              <item>
               <widget class="QLabel" name="label_11">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
                <property name="font">
                 <font>
                  <pointsize>10</pointsize>
-                 <weight>75</weight>
+                 <weight>700</weight>
                  <bold>true</bold>
                 </font>
                </property>
@@ -293,6 +340,18 @@
              </item>
              <item>
               <layout class="QHBoxLayout" name="horizontalLayout_14">
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
                <item>
                 <widget class="QPushButton" name="customBackground">
                  <property name="text">
@@ -339,6 +398,18 @@
          </item>
          <item>
           <layout class="QVBoxLayout" name="verticalLayout_9">
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
            <item>
             <widget class="QLabel" name="label_13">
              <property name="sizePolicy">
@@ -350,7 +421,7 @@
              <property name="font">
               <font>
                <pointsize>10</pointsize>
-               <weight>75</weight>
+               <weight>700</weight>
                <bold>true</bold>
               </font>
              </property>
@@ -393,10 +464,16 @@
          </item>
          <item>
           <widget class="QLabel" name="label_19">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
            <property name="font">
             <font>
-             <pointsize>12</pointsize>
-             <weight>75</weight>
+             <pointsize>10</pointsize>
+             <weight>700</weight>
              <bold>true</bold>
             </font>
            </property>
@@ -434,10 +511,22 @@
          </item>
          <item>
           <layout class="QVBoxLayout" name="verticalLayout_17">
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
            <item>
             <widget class="QLabel" name="label_14">
              <property name="sizePolicy">
-              <sizepolicy hsizetype="Maximum" vsizetype="Minimum">
+              <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
                <horstretch>0</horstretch>
                <verstretch>0</verstretch>
               </sizepolicy>
@@ -445,7 +534,7 @@
              <property name="font">
               <font>
                <pointsize>10</pointsize>
-               <weight>75</weight>
+               <weight>700</weight>
                <bold>true</bold>
               </font>
              </property>
@@ -483,6 +572,18 @@
          </item>
          <item>
           <layout class="QVBoxLayout" name="verticalLayout_20">
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
            <item>
             <widget class="QCheckBox" name="proportionalScaling">
              <property name="text">
@@ -508,14 +609,44 @@
          </item>
          <item>
           <layout class="QHBoxLayout" name="horizontalLayout_12">
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
            <item>
             <layout class="QVBoxLayout" name="verticalLayout_16">
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
              <item>
               <widget class="QLabel" name="label_16">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
                <property name="font">
                 <font>
                  <pointsize>10</pointsize>
-                 <weight>75</weight>
+                 <weight>700</weight>
                  <bold>true</bold>
                 </font>
                </property>
@@ -541,12 +672,30 @@
            </item>
            <item>
             <layout class="QVBoxLayout" name="verticalLayout_13">
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
              <item>
               <widget class="QLabel" name="label_15">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
                <property name="font">
                 <font>
                  <pointsize>10</pointsize>
-                 <weight>75</weight>
+                 <weight>700</weight>
                  <bold>true</bold>
                 </font>
                </property>
@@ -587,6 +736,7 @@
           </widget>
          </item>
         </layout>
+       </widget>
        </item>
       </layout>
      </widget>
@@ -594,6 +744,9 @@
    </item>
    <item>
     <widget class="QScrollArea" name="scrollArea_right">
+     <property name="frameShape">
+      <enum>QFrame::NoFrame</enum>
+     </property>
      <property name="sizePolicy">
       <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
        <horstretch>0</horstretch>
@@ -604,9 +757,15 @@
       <bool>true</bool>
      </property>
      <widget class="QWidget" name="scrollAreaRightContents">
-      <layout class="QVBoxLayout" name="verticalLayout_10">
+      <layout class="QVBoxLayout" name="verticalLayout_rightWrapper">
        <item>
-        <widget class="QPushButton" name="btUpdatePreview">
+        <widget class="QGroupBox" name="groupBoxPreviewSettings">
+         <property name="title">
+          <string>Preview Settings</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_10">
+         <item>
+          <widget class="QPushButton" name="btUpdatePreview">
          <property name="text">
           <string>Update Preview</string>
          </property>
@@ -623,19 +782,6 @@
         <widget class="QPushButton" name="btSaveThumbnail">
          <property name="text">
           <string>Save Thumbnail</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QLabel" name="label">
-         <property name="font">
-          <font>
-           <weight>75</weight>
-           <bold>true</bold>
-          </font>
-         </property>
-         <property name="text">
-          <string>Preview</string>
          </property>
         </widget>
        </item>
@@ -668,6 +814,9 @@
         </widget>
        </item>
       </layout>
+      </widget>
+      </item>
+     </layout>
      </widget>
     </widget>
    </item>

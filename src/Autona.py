@@ -179,7 +179,7 @@ class WindowSignals(QObject):
 
 class Window(QMainWindow):
     # Bump this when dock widget layout changes (e.g. adding/removing tabs)
-    STATE_VERSION = 7
+    STATE_VERSION = 8
     signals = WindowSignals()
 
     def __init__(self, loop=None):
