@@ -47,26 +47,6 @@ class AutonaPlayerListSlotWidget(QGroupBox):
         # exist.
         self.slotNameWidget.setVisible(False)
 
-        self.scoreWidget = QWidget()
-        self.scoreWidget.setLayout(QHBoxLayout())
-        scoreLabel = QLabel()
-        scoreLabel.setText(QApplication.translate("app", "Score"))
-        score = QSpinBox()
-        score.setMaximum(999999)
-        self.scoreWidget.layout().addWidget(scoreLabel)
-        self.scoreWidget.layout().addWidget(score)
-        score.editingFinished.connect(
-            lambda: [
-                StateManager.Set(
-                    f"{self.base}.slot.{self.index}.score", score.value())
-            ]
-        )
-        self.layout().addWidget(self.scoreWidget)
-        score.editingFinished.emit()
-        self.scoreWidget.setVisible(False)
-        scoreLabel.setMaximumWidth(slotNameLabel.maximumWidth())
-        scoreLabel.setMinimumWidth(scoreLabel.maximumWidth())
-
         self.childDataChangedLock = False
 
         self.slotName.editingFinished.connect(

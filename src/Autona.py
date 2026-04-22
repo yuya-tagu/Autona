@@ -263,6 +263,7 @@ class Window(QMainWindow):
         # tab after it's created below.
         self.setTournamentBt = QPushButton(
             QApplication.translate("app", "Set tournament"))
+        self.setTournamentBt.setObjectName("primary")
         self.setTournamentBt.setIcon(QIcon(UI.icon_path('startgg.svg')))
         self.setTournamentBt.setIconSize(QSize(20, 20))
         self.setTournamentBt.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -418,6 +419,11 @@ class Window(QMainWindow):
                 inner.setMinimumWidth(0)
                 inner.setSizePolicy(
                     QSizePolicy.Ignored, inner.sizePolicy().verticalPolicy())
+            # Hide the gray title strip at the top of every dock tab.
+            # The left sidebar already identifies the active tab, so the
+            # redundant header just eats vertical space.
+            dw.setTitleBarWidget(QWidget())
+            dw.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
 
         self.setMinimumWidth(480)
 

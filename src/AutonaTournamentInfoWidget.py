@@ -77,6 +77,12 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         self.btLoadInfoFromTournament: QPushButton = self.findChild(
             QPushButton, "btLoadInfoFromTournament")
+        # Re-tag as the primary action so the accent styling kicks in.
+        self.btLoadInfoFromTournament.setObjectName("primary")
+        self.btLoadInfoFromTournament.style().unpolish(
+            self.btLoadInfoFromTournament)
+        self.btLoadInfoFromTournament.style().polish(
+            self.btLoadInfoFromTournament)
         self.btLoadInfoFromTournament.clicked.connect(lambda: [
             AutonaTournamentDataProvider.instance.GetTournamentData()
         ])

@@ -66,14 +66,16 @@ DARK = {
     "text_disabled":   "#524F4A",
     "brand":           "#DC143C",
     "brand_subtle":    "#2A1418",
-    "accent":          "#F5A545",
-    "accent_hover":    "#FFB960",
-    "accent_subtle":   "#2F2820",
+    # Accent: based on the tab-bar gradient's top stop but nudged toward
+    # brighter red for a bolder primary. Hover lifts further.
+    "accent":          "#8A1A2C",
+    "accent_hover":    "#A62238",
+    "accent_subtle":   "#33121A",
     "gold":            "#F0C45A",
     "gold_subtle":     "#2E2A1E",
     "positive":        "#6EC77A",
     "negative":        "#DC143C",
-    "on_accent":       "#121212",
+    "on_accent":       "#FFFFFF",
 }
 
 LIGHT = {
@@ -92,14 +94,14 @@ LIGHT = {
     "text_disabled":   "#B0AAA2",
     "brand":           "#C41232",
     "brand_subtle":    "#F5E0E4",
-    "accent":          "#A06314",
-    "accent_hover":    "#B57018",
-    "accent_subtle":   "#F2E8D5",
+    "accent":          "#8A1A2C",
+    "accent_hover":    "#A62238",
+    "accent_subtle":   "#F6D8DD",
     "gold":            "#8E6812",
     "gold_subtle":     "#F0E8D0",
     "positive":        "#2E8C3E",
     "negative":        "#C41232",
-    "on_accent":       "#F4F3F0",
+    "on_accent":       "#FFFFFF",
 }
 
 # ─── Theme Detection ────────────────────────────────────────────
@@ -242,15 +244,25 @@ QPushButton:disabled, QToolButton:disabled {{
     background-color: {p['bg_secondary']};
     border-color: {p['border_subtle']};
 }}
-/* Primary action buttons (opt-in via objectName="primary") */
-QPushButton#primary {{
+/* Primary action buttons (opt-in via objectName="primary") and default
+   dialog buttons (QDialogButtonBox::Ok etc.) — both render on the
+   accent colour, so the foreground must track on_accent (white) rather
+   than falling back to the standard text colour. */
+QPushButton#primary,
+QPushButton:default {{
     background-color: {p['accent']};
     border-color: {p['accent']};
     color: {p['on_accent']};
 }}
-QPushButton#primary:hover {{
+QPushButton#primary:hover,
+QPushButton:default:hover {{
     background-color: {p['accent_hover']};
     border-color: {p['accent_hover']};
+    color: {p['on_accent']};
+}}
+QPushButton#primary:pressed,
+QPushButton:default:pressed {{
+    color: {p['on_accent']};
 }}
 
 /* === Text inputs === */

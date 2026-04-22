@@ -82,12 +82,39 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         twitter = self.findChild(QLineEdit, "twitter")
         twitter.setPlaceholderText("@")
 
-        # Hide unused UI elements
-        self.findChild(QLabel, "twitterLabel").setVisible(False)
+        # Birthday flag is not surfaced anywhere downstream yet; keep it
+        # hidden unconditionally. Visibility of twitter / twitterLabel and
+        # the other per-field rows is driven by the eye-menu toggles in
+        # AutonaScoreboardWidget.
         self.findChild(QCheckBox, "birthday").setVisible(False)
-        seedRow = self.findChild(QHBoxLayout, "horizontalLayout")
-        twitter.setParent(None)
-        seedRow.addWidget(twitter)
+
+        # Seed is not user-editable from the widget anymore. The spinbox
+        # stays in the layout as a data holder (other code paths read /
+        # write its value), but both it and its label are permanently
+        # hidden. What the user sees is the seedDisplay label bolted onto
+        # the sponsor row, updated whenever the spinbox value changes.
+        self.findChild(QLabel, "seedLabel").setVisible(False)
+        seed.setVisible(False)
+        seedRowLayout = self.findChild(QHBoxLayout, "horizontalLayout")
+        for i in range(seedRowLayout.count()):
+            it = seedRowLayout.itemAt(i)
+            sp = it.spacerItem() if it is not None else None
+            if sp is not None:
+                sp.changeSize(0, 0, QSizePolicy.Minimum, QSizePolicy.Minimum)
+
+        self.seedDisplay = self.findChild(QLabel, "seedDisplay")
+
+        def _syncSeedDisplay(value):
+            try:
+                v = int(value or 0)
+            except (TypeError, ValueError):
+                v = 0
+            if v > 0:
+                self.seedDisplay.setText(f"Seed: {v}")
+            else:
+                self.seedDisplay.setText("")
+        seed.valueChanged.connect(_syncSeedDisplay)
+        _syncSeedDisplay(seed.value())
 
         country = self.findChild(QComboBox, "country")
         state = self.findChild(QComboBox, "state")
@@ -121,14 +148,21 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
         self.character_elements = []
 
-        bottom_buttons_layout = QHBoxLayout()
-        bottom_buttons_layout.setSpacing(4)
-        self.layout().addLayout(bottom_buttons_layout, 99, 0, 1, 3)
+        # Save + Delete share the first row (Delete only appears for the
+        # PlayerDB editor, not the in-match scoreboard). Clear gets its
+        # own row below so it reads as a distinct destructive action.
+        save_row_layout = QHBoxLayout()
+        save_row_layout.setSpacing(4)
+        self.layout().addLayout(save_row_layout, 99, 0, 1, 3)
+
+        clear_row_layout = QHBoxLayout()
+        clear_row_layout.setSpacing(4)
+        self.layout().addLayout(clear_row_layout, 100, 0, 1, 3)
 
         self.save_bt = QPushButton(
             QApplication.translate("app", "Save new player"))
         self.save_bt.setIcon(QIcon(UI.icon_path("save.svg")))
-        bottom_buttons_layout.addWidget(self.save_bt)
+        save_row_layout.addWidget(self.save_bt)
         self.save_bt.clicked.connect(self.SavePlayerToDB)
         self.findChild(QLineEdit, "name").editingFinished.connect(
             self.ManageSavePlayerToDBText)
@@ -145,7 +179,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         if self.path.startswith("score."):
             self.delete_bt.hide()
         else:
-            bottom_buttons_layout.addWidget(self.delete_bt)
+            save_row_layout.addWidget(self.delete_bt)
             self.findChild(QLineEdit, "name").editingFinished.connect(
                 self.ManageDeletePlayerFromDBActive)
             self.findChild(QLineEdit, "team").editingFinished.connect(
@@ -153,7 +187,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
         self.clear_bt = QPushButton(QApplication.translate("app", "Clear"))
         self.clear_bt.setIcon(QIcon(UI.icon_path("undo.svg")))
-        bottom_buttons_layout.addWidget(self.clear_bt)
+        clear_row_layout.addWidget(self.clear_bt)
         self.clear_bt.clicked.connect(self.Clear)
         self.clear_bt.setMinimumWidth(1)
 

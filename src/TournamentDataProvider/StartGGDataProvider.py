@@ -35,6 +35,7 @@ class StartGGDataProvider(TournamentDataProvider):
     TournamentDataQuery = None
     TournamentPhasesQuery = None
     TournamentPhaseGroupQuery = None
+    AnalysisPhaseGroupQuery = None
     TournamentStandingsQuery = None
     UserSetQuery = None
     _request_timeout_secs = 20.0
@@ -373,6 +374,115 @@ class StartGGDataProvider(TournamentDataProvider):
                         gfsReset = finalSets[str(lastRound)].pop()
                         finalSets[str(lastRound+1)] = [gfsReset]
         except:
+            logger.error(traceback.format_exc())
+
+        return finalData
+
+    def GetAnalysisPhaseGroup(self, id, progress_callback=None, cancel_event=None):
+        """Lightweight variant of GetTournamentPhaseGroup for the Analysis
+        dock. Strips user/authorization/image/main-character fields to keep
+        responses well under the 1 MB timeout risk and fetches only what
+        the Bracket topology + seed-table need.
+
+        Output shape is a subset of GetTournamentPhaseGroup's return value
+        so Bracket() can consume it directly:
+            {"entrants": [...], "sets": {...}, "progressionsOut": [...]}
+        """
+        finalData = {"entrants": [], "sets": {}, "progressionsOut": []}
+
+        try:
+            data = self.QueryRequests(
+                "https://www.start.gg/api/-/gql",
+                type=requests.post,
+                jsonParams={
+                    "operationName": "AnalysisPhaseGroupQuery",
+                    "variables": {"id": id},
+                    "query": StartGGDataProvider.AnalysisPhaseGroupQuery
+                }
+            )
+
+            seeds = deep_get(data, "data.phaseGroup.seeds.nodes", []) or []
+            seeds.sort(key=lambda s: s.get("seedNum") or 0)
+
+            teams = []
+            for seed in seeds:
+                seedNum = seed.get("seedNum")
+                if seedNum is None:
+                    continue
+                while len(teams) < seedNum - 1:
+                    teams.append({})
+
+                team = {}
+                participants = deep_get(seed, "entrant.participants") or []
+
+                if len(participants) > 1:
+                    team["name"] = deep_get(seed, "entrant.name")
+
+                team["players"] = []
+                for p in participants:
+                    player = (p or {}).get("player") or {}
+                    team["players"].append({
+                        "gamerTag": player.get("gamerTag"),
+                    })
+
+                teams.append(team)
+
+            finalData["entrants"] = teams
+
+            sets = deep_get(data, "data.phaseGroup.sets.nodes", []) or []
+
+            isPreview = any("preview" in str(s.get("id")) for s in sets)
+            if not isPreview:
+                sets.sort(key=lambda s: (
+                    abs(int(s.get("round") or 0)), s.get("id")))
+            else:
+                sets.sort(key=lambda s: (
+                    abs(int(s.get("round") or 0)),
+                    int(str(s.get("id")).split("_")[-1])))
+
+            finalSets = {}
+            for s in sets:
+                try:
+                    round = int(s.get("round"))
+                except (TypeError, ValueError):
+                    continue
+
+                if str(round) not in finalSets:
+                    finalSets[str(round)] = []
+
+                slots = []
+                for slot in s.get("slots", []) or []:
+                    slots.append({
+                        "prereqType": slot.get("prereqType"),
+                        "prereqId": slot.get("prereqId"),
+                        "prereqPlacement": slot.get("prereqPlacement"),
+                        "seedNum": deep_get(slot, "seed.seedNum"),
+                    })
+
+                finalSets[str(round)].append({
+                    "id": s.get("id"),
+                    "identifier": s.get("identifier"),
+                    "fullRoundText": s.get("fullRoundText"),
+                    "score": [s.get("entrant1Score"), s.get("entrant2Score")],
+                    "finished": s.get("state", 0) == 3,
+                    "slots": slots,
+                })
+
+            finalData["sets"] = finalSets
+            finalData["progressionsOut"] = deep_get(
+                data, "data.phaseGroup.progressionsOut") or []
+
+            # Mirror the GF Reset split from GetTournamentPhaseGroup: when a
+            # phase group has no progressions out, the last positive round
+            # may bundle GF + GF Reset into one round — separate them.
+            if not finalData["progressionsOut"]:
+                positiveRounds = [int(r) for r in finalSets.keys() if int(r) > 0]
+                if positiveRounds:
+                    lastRound = max(positiveRounds)
+                    if len(finalSets[str(lastRound)]) > 1:
+                        gfsReset = finalSets[str(lastRound)].pop()
+                        finalSets[str(lastRound + 1)] = [gfsReset]
+        except Exception:
             logger.error(traceback.format_exc())
 
         return finalData
@@ -2064,6 +2174,7 @@ StartGGDataProvider.StreamSetsQuery = readQueryFile(sggTdpDir, "StreamSets")
 StartGGDataProvider.TournamentDataQuery = readQueryFile(sggTdpDir, "TournamentData")
 StartGGDataProvider.TournamentPhasesQuery = readQueryFile(sggTdpDir, "TournamentPhases")
 StartGGDataProvider.TournamentPhaseGroupQuery = readQueryFile(sggTdpDir, "TournamentPhaseGroup")
+StartGGDataProvider.AnalysisPhaseGroupQuery = readQueryFile(sggTdpDir, "AnalysisPhaseGroup")
 StartGGDataProvider.TournamentStandingsQuery = readQueryFile(sggTdpDir, "TournamentStandings")
 StartGGDataProvider.UserSetQuery = readQueryFile(sggTdpDir, "UserSet")
 StartGGDataProvider.TournamentSlugQuery = readQueryFile(sggTdpDir, "TournamentSlug")
