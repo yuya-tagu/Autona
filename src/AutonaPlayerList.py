@@ -111,12 +111,6 @@ class AutonaPlayerList(QWidget):
         self.signals.DataChanged.emit()
         StateManager.ReleaseSaving()
 
-    def SetScoresVisible(self, value):
-        for s in self.slotWidgets:
-            if value == Qt.Unchecked:
-                s.scoreWidget.setVisible(False)
-            else:
-                s.scoreWidget.setVisible(True)
 
     def SetPlayersPerTeam(self, number):
         # logger.info("AutonaPlayerList#SetPlayersPerTeam")

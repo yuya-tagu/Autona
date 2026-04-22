@@ -1,0 +1,38 @@
+query AnalysisPhaseGroupQuery($id: ID!) {
+	phaseGroup(id: $id) {
+		seeds(query: {page: 1, perPage: 500}) {
+			nodes {
+				seedNum
+				entrant {
+					name
+					participants {
+						player {
+							gamerTag
+						}
+					}
+				}
+			}
+		}
+		sets(page: 1, perPage: 9999, filters: {showByes: true, hideEmpty: false}, sortType: CALL_ORDER) {
+			nodes {
+				id
+				round
+				fullRoundText
+				entrant1Score
+				entrant2Score
+				state
+				slots {
+					prereqType
+					prereqId
+					prereqPlacement
+					seed {
+						seedNum
+					}
+				}
+			}
+		}
+		progressionsOut {
+			id
+		}
+	}
+}

@@ -242,6 +242,24 @@ class AutonaTournamentDataProvider(QObject):
         ])
         self.threadPool.start(worker)
 
+    def GetAnalysisPhaseGroup(self, id, onResult):
+        """Analysis-dock-only fetch. Uses the lightweight query so Start.gg
+        responses stay well under the timeout budget, and routes the result
+        to a caller-supplied callback instead of the shared
+        tournament_phasegroup_updated signal — this keeps the Bracket dock
+        and StateManager untouched by cross-phase-group probes."""
+        if self.provider is None:
+            onResult(None)
+            return
+        if not hasattr(self.provider, "GetAnalysisPhaseGroup"):
+            logger.warning(
+                "Provider has no GetAnalysisPhaseGroup — skipping analysis fetch")
+            onResult(None)
+            return
+        worker = Worker(self.provider.GetAnalysisPhaseGroup, **{"id": id})
+        worker.signals.result.connect(onResult)
+        self.threadPool.start(worker)
+
     def LoadSets(self, showFinished):
         if self.provider is None:
             return

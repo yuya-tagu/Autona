@@ -18,13 +18,21 @@ import textwrap
 
 class AutonaPlayerListWidgetSignals(QObject):
     UpdateData = Signal(object)
+    # Emitted when the "Characters per player" spinbox changes. Consumed
+    # by the Scoreboard dock so it can propagate the value to all active
+    # player widgets without having to duplicate the control in the
+    # SCORE tab.
+    characters_per_player_changed = Signal(int)
 
 
 class AutonaPlayerListWidget(QDockWidget):
+    instance: "AutonaPlayerListWidget" = None
+
     def __init__(self, *args, base="player_list"):
         StateManager.BlockSaving()
         super().__init__(*args)
 
+        AutonaPlayerListWidget.instance = self
         self.signals = AutonaPlayerListWidgetSignals()
 
         self.playerList = AutonaPlayerList(base=base)
@@ -36,13 +44,21 @@ class AutonaPlayerListWidget(QDockWidget):
         self.widget.setLayout(QVBoxLayout())
 
         topOptions = QWidget()
-        topOptions.setLayout(QHBoxLayout())
+        # Stack the spinbox row and the action-button row vertically so
+        # the buttons ("Load tournament standings" / "Generate Descriptive
+        # Text for Results") sit on their own line below the count
+        # spinboxes instead of getting squeezed next to them.
+        topOptions.setLayout(QVBoxLayout())
+        topOptions.layout().setContentsMargins(0, 0, 0, 0)
+        topOptions.layout().setSpacing(4)
         topOptions.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
 
         self.widget.layout().addWidget(topOptions)
 
         row = QWidget()
         row.setLayout(QHBoxLayout())
+        row.layout().setContentsMargins(0, 0, 0, 0)
+        row.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
         topOptions.layout().addWidget(row)
 
         col = QWidget()
@@ -70,21 +86,15 @@ class AutonaPlayerListWidget(QDockWidget):
         col.layout().addWidget(self.charNumber)
         self.charNumber.valueChanged.connect(
             self.playerList.SetCharactersPerPlayer)
+        self.charNumber.valueChanged.connect(
+            self.signals.characters_per_player_changed.emit)
         row.layout().addWidget(col)
 
         row = QWidget()
         row.setLayout(QHBoxLayout())
+        row.layout().setContentsMargins(0, 0, 0, 0)
+        row.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
         topOptions.layout().addWidget(row)
-
-        showScoresWidget = QWidget()
-        showScoresWidget.setLayout(QVBoxLayout())
-        self.showScoresCheckbox = QCheckBox()
-        self.showScoresCheckbox.setChecked(False)
-        showScoresWidget.layout().addWidget(QLabel(QApplication.translate("app", "Show scores")))
-        showScoresWidget.layout().addWidget(self.showScoresCheckbox)
-        self.showScoresCheckbox.checkStateChanged.connect(
-            self.playerList.SetScoresVisible)
-        row.layout().addWidget(showScoresWidget)
 
         self.loadFromStandingsBt = QPushButton(
             QApplication.translate("app", "Load tournament standings"))
