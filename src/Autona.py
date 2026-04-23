@@ -146,6 +146,7 @@ from .StateManager import StateManager
 from .SettingsManager import SettingsManager
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaControllerHelper import AutonaControllerHelper
+from .Helpers.AutonaStatusManager import AutonaStatusManager
 from .AutonaScoreboardManager import AutonaScoreboardManager
 from src.AutonaAboutWidget import AutonaAboutWidget
 from .AutonaScoreboardStageWidget import AutonaScoreboardStageWidget
@@ -260,16 +261,14 @@ class Window(QMainWindow):
         self.setCentralWidget(central)
 
         # "Set tournament" button. Parented/placed into the Tournament Info
-        # tab after it's created below.
+        # tab after it's created below. Default sizing matches the other
+        # buttons in the EVENT tab (e.g. btLoadInfoFromTournament). The
+        # "primary" object name picks up the accent color from the theme.
         self.setTournamentBt = QPushButton(
             QApplication.translate("app", "Set tournament"))
         self.setTournamentBt.setObjectName("primary")
         self.setTournamentBt.setIcon(QIcon(UI.icon_path('startgg.svg')))
-        self.setTournamentBt.setIconSize(QSize(20, 20))
         self.setTournamentBt.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setTournamentBt.setSizePolicy(
-            QSizePolicy.Preferred, QSizePolicy.Maximum)
-        self.setTournamentBt.setStyleSheet("padding: 6px 16px; font-size: 11pt;")
         self.setTournamentBt.clicked.connect(
             lambda: AutonaTournamentDataProvider.instance.SetStartggEventSlug(self))
 
@@ -746,9 +745,26 @@ class Window(QMainWindow):
         )
         AutonaPlayerDB.LoadDB()
 
+        # Footer status bar — surfaces the current long-running task
+        # (Start.gg fetches, asset reloads, etc.) so the user can tell
+        # the app is busy rather than frozen.
+        self._statusBar = self.statusBar()
+        self._statusBar.setSizeGripEnabled(False)
+        self._statusLabel = QLabel("")
+        self._statusLabel.setStyleSheet(
+            "color: #888; padding: 0 8px;")
+        self._statusBar.addWidget(self._statusLabel, 1)
+        AutonaStatusManager.signals.changed.connect(
+            self._on_status_changed)
+
         StateManager.ReleaseSaving()
 
         StateManager.Unset("completed_sets")
+
+    @Slot(str)
+    def _on_status_changed(self, message: str):
+        # Runs on the GUI thread thanks to Qt's auto signal connection.
+        self._statusLabel.setText(message)
 
     def SetGame(self, mods_active = False):
         index = next((i for i in range(self.gameSelect.model().rowCount()) if self.gameSelect.itemText(i) == AutonaGameAssetManager.instance.selectedGame.get(

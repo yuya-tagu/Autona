@@ -283,6 +283,11 @@ class AutonaTeamBattleWidget(QDockWidget):
             pw.SetCharactersPerPlayer(value)
     
     def SetPlayersPerTeam(self, number):
+        # Coalesce per-widget construction Sets + cleanup Unsets into one save.
+        with StateManager.SaveBlock():
+            self._setPlayersPerTeamImpl(number)
+
+    def _setPlayersPerTeamImpl(self, number):
         while len(self.team1playerWidgets) < number:
             p = AutonaTeamPlayerWidget(
                 index=len(self.team1playerWidgets)+1,

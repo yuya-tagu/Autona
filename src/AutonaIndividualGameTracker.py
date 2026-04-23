@@ -88,9 +88,10 @@ class AutonaIndividualGameTracker(QWidget):
                 StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.tie", stageTieCheck.isChecked()),
             ]
         )
-        StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.t1_win", False)
-        StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.t2_win", False)
-        StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.tie", False)
+        with StateManager.SaveBlock():
+            StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.t1_win", False)
+            StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.t2_win", False)
+            StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.tie", False)
 
         stageTeam1Check.clicked.connect(
             lambda: [
@@ -138,14 +139,16 @@ class AutonaIndividualGameTracker(QWidget):
         self.stage_order_list_layout = QVBoxLayout()
         self.stage_order_list_widget = QWidget()
         self.stage_order_list_widget.setLayout(self.stage_order_list_layout)
-        StateManager.Set(f"score.{self.scoreboard_number}.stages", {})
-        if stage_count == 0 or SettingsManager.Get('general.disable_individual_game_tracker', True):
-            self.setVisible(False)
-        else:
-            self.setVisible(True)
-            for i in range(stage_count):
-                self.stage_widget_list.append(self.CreateStage(i))
-                self.stage_order_list_layout.addWidget(self.stage_widget_list[-1])
+        # Coalesce all per-stage Set calls into a single state save / WS broadcast.
+        with StateManager.SaveBlock():
+            StateManager.Set(f"score.{self.scoreboard_number}.stages", {})
+            if stage_count == 0 or SettingsManager.Get('general.disable_individual_game_tracker', True):
+                self.setVisible(False)
+            else:
+                self.setVisible(True)
+                for i in range(stage_count):
+                    self.stage_widget_list.append(self.CreateStage(i))
+                    self.stage_order_list_layout.addWidget(self.stage_widget_list[-1])
         self._layout.addWidget(self.stage_order_list_widget)
 
     @assert_gui_thread
@@ -251,9 +254,10 @@ class AutonaIndividualGameTracker(QWidget):
             stageTeam1Check.setChecked(False)
 
         stageTieCheck.setChecked(False)
-        StateManager.Set(f"score.{self.scoreboard_number}.stages.{current_stage+1}.t1_win", stageTeam1Check.isChecked())
-        StateManager.Set(f"score.{self.scoreboard_number}.stages.{current_stage+1}.t2_win", stageTeam2Check.isChecked())
-        StateManager.Set(f"score.{self.scoreboard_number}.stages.{current_stage+1}.tie", stageTieCheck.isChecked())
+        with StateManager.SaveBlock():
+            StateManager.Set(f"score.{self.scoreboard_number}.stages.{current_stage+1}.t1_win", stageTeam1Check.isChecked())
+            StateManager.Set(f"score.{self.scoreboard_number}.stages.{current_stage+1}.t2_win", stageTeam2Check.isChecked())
+            StateManager.Set(f"score.{self.scoreboard_number}.stages.{current_stage+1}.tie", stageTieCheck.isChecked())
 
     @assert_gui_thread
     def DecrementScore(self, team=None, original_score=None):
@@ -279,9 +283,10 @@ class AutonaIndividualGameTracker(QWidget):
         stageTeam1Check.setChecked(False)
         stageTeam2Check.setChecked(False)
         stageTieCheck.setChecked(False)
-        StateManager.Set(f"score.{self.scoreboard_number}.stages.{current_stage+1}.t1_win", stageTeam1Check.isChecked())
-        StateManager.Set(f"score.{self.scoreboard_number}.stages.{current_stage+1}.t2_win", stageTeam2Check.isChecked())
-        StateManager.Set(f"score.{self.scoreboard_number}.stages.{current_stage+1}.tie", stageTieCheck.isChecked())
+        with StateManager.SaveBlock():
+            StateManager.Set(f"score.{self.scoreboard_number}.stages.{current_stage+1}.t1_win", stageTeam1Check.isChecked())
+            StateManager.Set(f"score.{self.scoreboard_number}.stages.{current_stage+1}.t2_win", stageTeam2Check.isChecked())
+            StateManager.Set(f"score.{self.scoreboard_number}.stages.{current_stage+1}.tie", stageTieCheck.isChecked())
 
     @assert_gui_thread
     def StageResultsChanged(self):
@@ -294,20 +299,23 @@ class AutonaIndividualGameTracker(QWidget):
             if stageTeam2Check.isChecked():
                 team_2_score += 1
 
-        StateManager.Set(f"score.{self.scoreboard_number}.team.1.score", team_1_score)
-        StateManager.Set(f"score.{self.scoreboard_number}.team.2.score", team_2_score)
+        with StateManager.SaveBlock():
+            StateManager.Set(f"score.{self.scoreboard_number}.team.1.score", team_1_score)
+            StateManager.Set(f"score.{self.scoreboard_number}.team.2.score", team_2_score)
         self.signals.stageResultsUpdate.emit(team_1_score, team_2_score)
 
     @assert_gui_thread
     def SwapStageResults(self):
-        for i in range(len(self.stage_widget_list)):
-            stageTeam1Check = self.stage_widget_list[i].findChild(QPushButton, f"stageTeam1Check_{i}")
-            stageTeam2Check = self.stage_widget_list[i].findChild(QPushButton, f"stageTeam2Check_{i}")
-            stageTieCheck = self.stage_widget_list[i].findChild(QPushButton, f"stageTieCheck_{i}")
-            team_1_old_state, team_2_old_state = stageTeam1Check.isChecked(), stageTeam2Check.isChecked()
-            stageTeam1Check.setChecked(team_2_old_state)
-            stageTeam2Check.setChecked(team_1_old_state)
-            StateManager.Set(f"score.{self.scoreboard_number}.stages.{i+1}.t1_win", stageTeam1Check.isChecked()),
-            StateManager.Set(f"score.{self.scoreboard_number}.stages.{i+1}.t2_win", stageTeam2Check.isChecked()),
-            StateManager.Set(f"score.{self.scoreboard_number}.stages.{i+1}.tie", stageTieCheck.isChecked()),
+        # Coalesce all 3*N stage Sets into a single broadcast.
+        with StateManager.SaveBlock():
+            for i in range(len(self.stage_widget_list)):
+                stageTeam1Check = self.stage_widget_list[i].findChild(QPushButton, f"stageTeam1Check_{i}")
+                stageTeam2Check = self.stage_widget_list[i].findChild(QPushButton, f"stageTeam2Check_{i}")
+                stageTieCheck = self.stage_widget_list[i].findChild(QPushButton, f"stageTieCheck_{i}")
+                team_1_old_state, team_2_old_state = stageTeam1Check.isChecked(), stageTeam2Check.isChecked()
+                stageTeam1Check.setChecked(team_2_old_state)
+                stageTeam2Check.setChecked(team_1_old_state)
+                StateManager.Set(f"score.{self.scoreboard_number}.stages.{i+1}.t1_win", stageTeam1Check.isChecked())
+                StateManager.Set(f"score.{self.scoreboard_number}.stages.{i+1}.t2_win", stageTeam2Check.isChecked())
+                StateManager.Set(f"score.{self.scoreboard_number}.stages.{i+1}.tie", stageTieCheck.isChecked())
 

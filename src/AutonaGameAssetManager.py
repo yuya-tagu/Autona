@@ -7,6 +7,7 @@ from .StateManager import StateManager
 import re
 import traceback
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+from .Helpers import AutonaQtHelper
 from .Workers import Worker
 from PIL import Image
 from loguru import logger
@@ -219,6 +220,8 @@ class AutonaGameAssetManager(QObject):
                 self.mods_reload_mode = False
 
             def run(self):
+                from .Helpers.AutonaStatusManager import AutonaStatusManager
+                status_token = None
                 self.lock.lock()
                 try:
                     game = self.game
@@ -236,6 +239,8 @@ class AutonaGameAssetManager(QObject):
                         self.parent().threadpool.waitForDone()
                         return
 
+                    status_token = AutonaStatusManager.push(
+                        f"ゲームアセットを読み込み中... ({game})")
                     logger.info("Changed to game: "+game)
 
                     self.parent().CopyCSS(game)
@@ -531,12 +536,25 @@ class AutonaGameAssetManager(QObject):
                             "has_colors": bool(self.parent().selectedGame.get("preset_colors"))
                         })
 
-                        self.parent().has_modded_content = False
-                        self.parent().UpdateCharacterModel(self.mods_active)
-                        self.parent().UpdateSkinModel()
-                        self.parent().UpdateVariantModel()
-                        self.parent().UpdateColorModel()
-                        self.parent().UpdateStageModel(self.mods_active)
+                        # Model rebuilds construct QPixmap / QIcon / QImage,
+                        # which Qt requires be created on the GUI thread.
+                        # Calling them directly from this worker thread is
+                        # the cause of intermittent SIGSEGVs at boot ("ssbu
+                        # game change → Loaded stock icons → Character X has
+                        # Y skins → silent crash"). Marshal the whole
+                        # rebuild batch to the main thread synchronously so
+                        # the worker waits for it to finish before
+                        # continuing.
+                        mods_active = self.mods_active
+                        parent = self.parent()
+                        def _rebuild_models():
+                            parent.has_modded_content = False
+                            parent.UpdateCharacterModel(mods_active)
+                            parent.UpdateSkinModel()
+                            parent.UpdateVariantModel()
+                            parent.UpdateColorModel()
+                            parent.UpdateStageModel(mods_active)
+                        AutonaQtHelper.gui_executor.run_sync(_rebuild_models)
 
                         StateManager.Set(f"game.has_modded_content", self.parent().has_modded_content)
 
@@ -546,6 +564,7 @@ class AutonaGameAssetManager(QObject):
                 finally:
                     self.parent().threadpool.waitForDone()
                     self.lock.unlock()
+                    AutonaStatusManager.pop(status_token)
 
         class AssetsLoader():
             def __init__(self, parent=...) -> None:
@@ -1033,7 +1052,7 @@ class AutonaGameAssetManager(QObject):
             for c in self.characters.keys():
                 item = QStandardItem()
                 item.setData(c, Qt.ItemDataRole.EditRole)
-                logger.info(c)
+                logger.debug(c)
                 item.setIcon(
                     QIcon(QPixmap.fromImage(QImage(self.stockIcons[c][0]).scaledToWidth(
                         32, Qt.TransformationMode.FastTransformation)))
@@ -1078,7 +1097,7 @@ class AutonaGameAssetManager(QObject):
                 name = self.colors[c].get("name")
                 item = QStandardItem()
                 item.setData(name, Qt.ItemDataRole.EditRole)
-                logger.info(name)
+                logger.debug(name)
 
                 data = {
                     "name": self.colors[c].get("export_name"),
@@ -1116,7 +1135,7 @@ class AutonaGameAssetManager(QObject):
             for c in self.variants.keys():
                 item = QStandardItem()
                 item.setData(c, Qt.ItemDataRole.EditRole)
-                logger.info(c)
+                logger.debug(c)
 
                 data = {
                     "name": self.variants[c].get("export_name"),

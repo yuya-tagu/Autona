@@ -83,9 +83,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
             self.btLoadInfoFromTournament)
         self.btLoadInfoFromTournament.style().polish(
             self.btLoadInfoFromTournament)
-        self.btLoadInfoFromTournament.clicked.connect(lambda: [
-            AutonaTournamentDataProvider.instance.GetTournamentData()
-        ])
+        self.btLoadInfoFromTournament.clicked.connect(self._OnLoadFromTournament)
 
         self.btClearInfo: QPushButton = self.findChild(
             QPushButton, "btClearInfo")
@@ -155,8 +153,6 @@ class AutonaTournamentInfoWidget(QDockWidget):
         # Stream settings
         self.streamTitleEdit: QLineEdit = self.findChild(
             QLineEdit, "streamTitleEdit")
-        self.streamTitleStatus: QLabel = self.findChild(
-            QLabel, "streamTitleStatus")
 
         self.btCopyStreamTitle: QPushButton = self.findChild(
             QPushButton, "btCopyStreamTitle")
@@ -192,6 +188,118 @@ class AutonaTournamentInfoWidget(QDockWidget):
             self._RefreshStreamTitle)
 
         self._RefreshStreamTitle()
+
+    def _OnLoadFromTournament(self):
+        # Reload tournament metadata, then also pull the icon and banner
+        # so the operator doesn't have to push three buttons in sequence.
+        #
+        # The icon + banner downloads each fire two synchronous HTTP
+        # requests (GraphQL for the URL, then GET for the image). Run
+        # the whole chain on a worker so the GUI thread stays
+        # responsive, and disable the button while it's in flight so a
+        # frustrated repeat-click doesn't queue up another download
+        # cycle and freeze the app harder.
+        if getattr(self, "_loadInProgress", False):
+            return
+        provider = AutonaTournamentDataProvider.instance.provider
+        if provider is None:
+            return
+        self._loadInProgress = True
+        self.btLoadInfoFromTournament.setEnabled(False)
+
+        AutonaTournamentDataProvider.instance.GetTournamentData()
+        self._DownloadIconAndBannerAsync(
+            on_finished=self._finishLoadFromTournament)
+
+    def _finishLoadFromTournament(self):
+        self._loadInProgress = False
+        self.btLoadInfoFromTournament.setEnabled(True)
+
+    @staticmethod
+    def _imageHeaders():
+        return {
+            "client-version": "20",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36",
+        }
+
+    def _DownloadIconAndBannerAsync(self, on_finished=None):
+        from .Workers import Worker
+        from .Helpers.AutonaStatusManager import AutonaStatusManager
+
+        status_token = AutonaStatusManager.push(
+            "大会アイコン / バナーを取得中...")
+
+        def _fetch(progress_callback=None, cancel_event=None):
+            provider = AutonaTournamentDataProvider.instance.provider
+            iconBytes = bannerBytes = None
+            if provider is None:
+                return (None, None)
+            try:
+                iconUrl = provider.GetIconURL()
+                if iconUrl:
+                    iconBytes = requests.get(
+                        iconUrl, headers=self._imageHeaders(), timeout=20).content
+            except Exception:
+                logger.error(traceback.format_exc())
+            try:
+                bannerUrl = provider.GetBannerURL()
+                if bannerUrl:
+                    bannerBytes = requests.get(
+                        bannerUrl, headers=self._imageHeaders(), timeout=20).content
+            except Exception:
+                logger.error(traceback.format_exc())
+            return (iconBytes, bannerBytes)
+
+        def _apply(result):
+            try:
+                iconBytes, bannerBytes = result if result else (None, None)
+                if iconBytes:
+                    try:
+                        self._applyIconBytes(iconBytes)
+                    except Exception:
+                        logger.error(traceback.format_exc())
+                if bannerBytes:
+                    try:
+                        self._applyBannerBytes(bannerBytes)
+                    except Exception:
+                        logger.error(traceback.format_exc())
+            finally:
+                AutonaStatusManager.pop(status_token)
+                if on_finished:
+                    on_finished()
+
+        def _onError(_err):
+            AutonaStatusManager.pop(status_token)
+            if on_finished:
+                on_finished()
+
+        worker = Worker(_fetch)
+        worker.signals.result.connect(_apply)
+        worker.signals.error.connect(_onError)
+        AutonaTournamentDataProvider.instance.threadPool.start(worker)
+
+    def _applyIconBytes(self, data: bytes):
+        # GUI thread: convert bytes → QPixmap, scale, persist, refresh label.
+        pix = QPixmap()
+        pix.loadFromData(data)
+        max_dim = 512
+        if pix.width() > max_dim or pix.height() > max_dim:
+            pix = pix.scaled(
+                max_dim, max_dim,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation)
+        pix.save("./layout/logo.png")
+        self.UpdateIcon()
+
+    def _applyBannerBytes(self, data: bytes):
+        Path("./user_data").mkdir(parents=True, exist_ok=True)
+        pix = QPixmap()
+        pix.loadFromData(data)
+        pix.save(BANNER_PATH)
+        SettingsManager.Set("thumbnail_config.background_path", BANNER_PATH)
+        logger.info("Tournament banner saved and set as thumbnail background")
+        self.UpdateBanner()
 
     def InsertHeaderWidget(self, widget: QWidget) -> None:
         """Insert an arbitrary widget at the very top of this tab's
@@ -401,23 +509,15 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         if top_entrants and has_valid_seed:
             new_title = self._GenerateStreamTitle(top_entrants)
-            status = ""
         else:
-            # Fallback title when entrants or seeds aren't ready yet
+            # Fallback title when entrants or seeds aren't ready yet.
+            # The "waiting for entrants" / "seeds not finalized" hints
+            # used to render here; the footer status bar covers progress
+            # surfacing so we no longer duplicate that inline.
             name = StateManager.Get("tournamentInfo.tournamentName", "") or ""
             abbrev = self._GetGameAbbreviation()
             suffix = f" - {abbrev}" if abbrev else ""
             new_title = f"{name}{suffix}".strip()
-            if provider is None:
-                status = ""
-            elif not top_entrants:
-                status = QApplication.translate(
-                    "app", "Waiting for entrants from Start.gg...")
-            else:
-                status = QApplication.translate(
-                    "app",
-                    "Seeds are not finalized. Set and publish seeds on "
-                    "Start.gg, then reload the tournament.")
 
         # Preserve user's manual edits: only overwrite when the field still
         # matches the last auto-generated value (or is empty).
@@ -425,17 +525,12 @@ class AutonaTournamentInfoWidget(QDockWidget):
         if current == self._lastAutoStreamTitle or not current:
             self.streamTitleEdit.setText(new_title)
         self._lastAutoStreamTitle = new_title
-        self.streamTitleStatus.setText(status)
 
     def CopyStreamTitle(self):
         title = self.streamTitleEdit.text().strip()
         if not title:
-            self.streamTitleStatus.setText(QApplication.translate(
-                "app", "Nothing to copy."))
             return
         QApplication.clipboard().setText(title)
-        self.streamTitleStatus.setText(
-            QApplication.translate("app", "Copied to clipboard."))
 
     def GenerateStreamThumbnail(self):
         provider = AutonaTournamentDataProvider.instance.provider
