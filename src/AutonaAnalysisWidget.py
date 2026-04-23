@@ -211,9 +211,11 @@ class AutonaAnalysisWidget(QDockWidget):
         # ── Multi-PG fetch state ──
         self._phases = []               # from tournament_phases_updated
         self._fetchInProgress = False
-        self._fetchQueue = []           # list of (phase_name, pg_id, pg_label)
+        self._fetchQueue = []           # list of (phase_name, pg_id, pg_label) waiting to dispatch
         self._fetchTotal = 0
         self._fetchResults = {}         # pg_id -> {"phase_name","pg_label","data"}
+        self._fetchInFlight = 0         # workers currently running
+        self._fetchDone = 0             # completed (success or failure)
         # True once a multi-PG fetch has populated the table. Auto-triggered
         # state rebuilds are suppressed in that mode so the fetched
         # snapshot isn't clobbered by a single-PG refresh from the Bracket
@@ -306,22 +308,29 @@ class AutonaAnalysisWidget(QDockWidget):
         self._fetchQueue = list(pg_entries)
         self._fetchTotal = len(pg_entries)
         self._fetchResults = {}
+        self._fetchInFlight = 0
+        self._fetchDone = 0
         self.btRefresh.setEnabled(False)
-        self._fetchNext()
+        self._dispatchMore()
 
-    def _fetchNext(self):
-        if not self._fetchQueue:
-            self._onAllFetchesDone()
-            return
-        phase_name, pg_id, pg_label = self._fetchQueue[0]
-        done = self._fetchTotal - len(self._fetchQueue)
+    # Cap concurrent Start.gg requests. Each fetch hits the public GraphQL
+    # API; running too many in parallel risks rate limiting and saturates
+    # the shared Qt thread pool used elsewhere (asset loads, set fetches).
+    _PARALLEL_FETCHES = 4
+
+    def _dispatchMore(self):
+        # Fill in-flight slots up to the parallelism cap. Returns
+        # immediately when the queue is empty.
+        while self._fetchQueue and self._fetchInFlight < self._PARALLEL_FETCHES:
+            phase_name, pg_id, pg_label = self._fetchQueue.pop(0)
+            self._fetchInFlight += 1
+            AutonaTournamentDataProvider.instance.GetAnalysisPhaseGroup(
+                pg_id,
+                lambda data, pid=pg_id, pn=phase_name, pl=pg_label:
+                    self._onPgFetched(pid, pn, pl, data))
         self.summaryLabel.setText(
             QApplication.translate("app", "取得中 {0}/{1}").format(
-                done, self._fetchTotal))
-        AutonaTournamentDataProvider.instance.GetAnalysisPhaseGroup(
-            pg_id,
-            lambda data, pid=pg_id, pn=phase_name, pl=pg_label:
-                self._onPgFetched(pid, pn, pl, data))
+                self._fetchDone, self._fetchTotal))
 
     def _onPgFetched(self, pg_id, phase_name, pg_label, data):
         self._fetchResults[pg_id] = {
@@ -329,11 +338,14 @@ class AutonaAnalysisWidget(QDockWidget):
             "pg_label": pg_label,
             "data": data or {},
         }
-        if self._fetchQueue:
-            self._fetchQueue.pop(0)
-        # Schedule next on the event loop so progress paints between
-        # hops; also avoids deep call stacks on very large brackets.
-        QTimer.singleShot(0, self._fetchNext)
+        self._fetchInFlight -= 1
+        self._fetchDone += 1
+        if not self._fetchQueue and self._fetchInFlight == 0:
+            self._onAllFetchesDone()
+            return
+        # Defer next dispatch via the event loop so progress paints
+        # between hops and the call stack stays shallow.
+        QTimer.singleShot(0, self._dispatchMore)
 
     def _onAllFetchesDone(self):
         self._fetchInProgress = False

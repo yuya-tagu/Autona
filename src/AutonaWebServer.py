@@ -1,6 +1,7 @@
 import html
 import json
 import os
+import threading
 import traceback
 
 import flask
@@ -70,12 +71,14 @@ class WebServer(QThread):
     @staticmethod
     @app.before_request
     def log_request():
-        logger.info(f"[FLASK] → {request.method} {request.path} from {request.remote_addr}")
+        # Debug level: OBS / Web UI poll dozens of endpoints per second.
+        # At INFO this dominates the log file and stdout, drowning real signal.
+        logger.debug(f"[FLASK] → {request.method} {request.path} from {request.remote_addr}")
 
     @staticmethod
     @app.after_request
     def log_response(response):
-        logger.info(f"[FLASK] ← {request.method} {request.path} [{response.status_code}]")
+        logger.debug(f"[FLASK] ← {request.method} {request.path} [{response.status_code}]")
         return response
 
     @app.route('/program-state')
@@ -86,17 +89,69 @@ class WebServer(QThread):
     def ws_program_state_update(message):
         WebServer.ws_emit('program_state_update', {})
 
-    def on_program_state_update(changes):
-        if len(changes) > 0:
-            try:
-                WebServer.ws_emit('program_state_update', changes)
-            except TypeError:
-                logger.warning("Unserializable program state update")
+    # ── Delta coalescing ─────────────────────────────────────────
+    # Without throttling, every StateManager.Set outside a SaveBlock
+    # broadcasts a websocket event. Loading a set / phase group can
+    # generate dozens of small deltas in quick succession; the per-emit
+    # serialization + flush cost adds up and competes with OBS for
+    # network/CPU. Coalesce on an adaptive interval — short for small
+    # bursts (snappy UI), longer for large bursts (CPU breathing room).
+    _delta_lock = threading.Lock()
+    _delta_pending = []          # list of merged delta-flat-dicts
+    _delta_pending_index = -1    # latest delta_index in batch
+    _delta_timer = None          # threading.Timer awaiting flush
 
-                # If we can't emit a diff, fall back to emitting the whole program
-                # state. Well-behaved listeners should discard their existing state
-                # and re-sync with us that way.
-                WebServer.ws_program_state()
+    @staticmethod
+    def _adaptive_debounce_sec(pending_count: int) -> float:
+        # < 10 deltas: keep latency low for real-time feel.
+        # 10-99 deltas: medium burst (typical SetFromSet path).
+        # 100+ deltas: large burst (full reload) — let the OS catch up.
+        if pending_count < 10:
+            return 0.05
+        if pending_count < 100:
+            return 0.1
+        return 0.2
+
+    @staticmethod
+    def _flush_pending_deltas():
+        with WebServer._delta_lock:
+            if not WebServer._delta_pending:
+                WebServer._delta_timer = None
+                return
+            payload = {
+                'delta_index': WebServer._delta_pending_index,
+                'delta': WebServer._delta_pending,
+            }
+            WebServer._delta_pending = []
+            WebServer._delta_pending_index = -1
+            WebServer._delta_timer = None
+        try:
+            WebServer.ws_emit('program_state_update', payload)
+        except TypeError:
+            logger.warning("Unserializable program state update")
+            WebServer.ws_program_state()
+        except Exception:
+            logger.error(traceback.format_exc())
+
+    def on_program_state_update(changes):
+        if not changes:
+            return
+
+        delta = changes.get('delta') or []
+        idx = changes.get('delta_index', -1)
+
+        with WebServer._delta_lock:
+            WebServer._delta_pending.extend(delta)
+            if idx > WebServer._delta_pending_index:
+                WebServer._delta_pending_index = idx
+
+            if WebServer._delta_timer is None:
+                interval = WebServer._adaptive_debounce_sec(
+                    len(WebServer._delta_pending))
+                WebServer._delta_timer = threading.Timer(
+                    interval, WebServer._flush_pending_deltas)
+                WebServer._delta_timer.daemon = True
+                WebServer._delta_timer.start()
 
     @socketio.on('connect')
     def ws_connect(message):
@@ -599,7 +654,7 @@ class WebServer(QThread):
 
     @socketio.on('playerdb')
     def ws_playerdb(message):
-        logger.info("Emitting playerdb info.")
+        logger.debug("Emitting playerdb info.")
         WebServer.ws_emit('playerdb', WebServer.actions.get_playerdb())
 
 

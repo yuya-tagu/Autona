@@ -90,8 +90,12 @@ class StateManager:
                     def _export(state_snap, old_snap, ref_diff):
                         with open("./out/program_state.json", 'wb', buffering=8192) as file:
                             state_snap["timestamp"] = time.time()
+                            # Drop OPT_INDENT_2 — OBS overlays / Web UI parse
+                            # JSON regardless of whitespace, and indenting a
+                            # multi-MB tournament state inflates file size
+                            # 3-4x for nothing. Saves disk I/O bandwidth.
                             file.write(orjson.dumps(
-                                state_snap, option=orjson.OPT_NON_STR_KEYS | orjson.OPT_INDENT_2))
+                                state_snap, option=orjson.OPT_NON_STR_KEYS))
 
                         if not SettingsManager.Get("general.disable_export", False):
                             StateManager.ExportText(

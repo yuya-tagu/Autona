@@ -1297,6 +1297,12 @@ class AutonaScoreboardWidget(QWidget):
 
     def SetPlayersPerTeam(self, number):
         # logger.info(f"AutonaScoreboardWidget#SetPlayersPerTeam({number})")
+        # Wrap the whole reconfiguration so player-widget construction Sets +
+        # the cleanup Unsets coalesce into one state save / WS broadcast.
+        with StateManager.SaveBlock():
+            self._setPlayersPerTeamImpl(number)
+
+    def _setPlayersPerTeamImpl(self, number):
         while len(self.team1playerWidgets) < number:
             p = AutonaScoreboardPlayerWidget(
                 index=len(self.team1playerWidgets)+1,
@@ -1597,10 +1603,11 @@ class AutonaScoreboardWidget(QWidget):
             self.lastSetSelected = None
             self.lastStationSelected = None
 
-            StateManager.Set(
-                f'score.{self.scoreboardNumber}.auto_update', None)
-            StateManager.Set(f'score.{self.scoreboardNumber}.set_id', None)
-            StateManager.Set(f'score.{self.scoreboardNumber}.station', None)
+            with StateManager.SaveBlock():
+                StateManager.Set(
+                    f'score.{self.scoreboardNumber}.auto_update', None)
+                StateManager.Set(f'score.{self.scoreboardNumber}.set_id', None)
+                StateManager.Set(f'score.{self.scoreboardNumber}.station', None)
 
         self.timerLayout.setVisible(False)
 

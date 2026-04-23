@@ -246,7 +246,10 @@ class StartGGDataProvider(TournamentDataProvider):
         return phases
 
     def GetTournamentPhaseGroup(self, id, progress_callback=None, cancel_event=None):
+        from ..Helpers.AutonaStatusManager import AutonaStatusManager
         finalData = {}
+        status_token = AutonaStatusManager.push(
+            "Start.gg からブラケット情報を取得中...")
 
         try:
             data = self.QueryRequests(
@@ -375,6 +378,8 @@ class StartGGDataProvider(TournamentDataProvider):
                         finalSets[str(lastRound+1)] = [gfsReset]
         except:
             logger.error(traceback.format_exc())
+        finally:
+            AutonaStatusManager.pop(status_token)
 
         return finalData
 
@@ -488,7 +493,9 @@ class StartGGDataProvider(TournamentDataProvider):
         return finalData
 
     def GetMatch(self, setId, progress_callback=None, cancel_event=None):
+        from ..Helpers.AutonaStatusManager import AutonaStatusManager
         finalResult = None
+        status_token = AutonaStatusManager.push("Start.gg からセット情報を取得中...")
 
         try:
             result = {}
@@ -550,6 +557,8 @@ class StartGGDataProvider(TournamentDataProvider):
 
         except Exception as e:
             logger.error(traceback.format_exc())
+        finally:
+            AutonaStatusManager.pop(status_token)
         return finalResult
 
     def _GetMatchTasks(self, setId, progress_callback, cancel_event):
@@ -1859,6 +1868,8 @@ class StartGGDataProvider(TournamentDataProvider):
             return []
 
     def GetEntrantsWorker(self, eventSlug, gameId, progress_callback, cancel_event):
+        from ..Helpers.AutonaStatusManager import AutonaStatusManager
+        status_token = AutonaStatusManager.push("Start.gg から参加者情報を取得中...")
         try:
             page = 1
             totalPages = 1
@@ -1869,6 +1880,9 @@ class StartGGDataProvider(TournamentDataProvider):
 
             while page <= totalPages:
                 logger.info(str(page) + "/" + str(totalPages))
+                AutonaStatusManager.update(
+                    status_token,
+                    f"Start.gg から参加者情報を取得中... ({page}/{totalPages})")
                 data = self.QueryRequests(
                     "https://www.start.gg/api/-/gql",
                     type=requests.post,
@@ -1876,7 +1890,6 @@ class StartGGDataProvider(TournamentDataProvider):
                         "operationName": "EventEntrantsListQuery",
                         "variables": {
                             "eventSlug": eventSlug,
-                            "videogameId": gameId,
                             "page": page,
                         },
                         "query": StartGGDataProvider.EntrantsQuery
@@ -1931,6 +1944,8 @@ class StartGGDataProvider(TournamentDataProvider):
                 logger.error(traceback.format_exc())
         except Exception as e:
             logger.error(traceback.format_exc())
+        finally:
+            AutonaStatusManager.pop(status_token)
 
     def ProcessEntrantData(entrant, setData=[]):
         player = entrant.get("player")

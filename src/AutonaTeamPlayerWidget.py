@@ -31,7 +31,7 @@ class AutonaTeamPlayerWidget(AutonaBasePlayerWidget):
     countryModel = None
     characterModel = None
 
-    dataLock = threading.RLock()
+    # dataLock is set per-instance in _initBasePlayerWidget(); see base class.
 
     defaultSpinnerValue = 0
     battleMode: AutonaTeamBattleModeEnum = AutonaTeamBattleModeEnum.STOCK_POOL
@@ -50,6 +50,7 @@ class AutonaTeamPlayerWidget(AutonaBasePlayerWidget):
         self.losers = False
 
         uic.loadUi(AutonaResolve("src/layout/AutonaTeamPlayer.ui"), self)
+        self._initBasePlayerWidget()
 
         self.dynamicSpinner = self.findChild(QSpinBox, "dynamicSpinner")
 

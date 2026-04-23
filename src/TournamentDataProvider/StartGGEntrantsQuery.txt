@@ -1,4 +1,4 @@
-query EventEntrantsListQuery($eventSlug: String!, $videogameId: Int, $page: Int!) {
+query EventEntrantsListQuery($eventSlug: String!, $page: Int!) {
 	event(slug: $eventSlug) {
 		id
 		videogame {
@@ -23,22 +23,6 @@ query EventEntrantsListQuery($eventSlug: String!, $videogameId: Int, $page: Int!
 						gamerTag
 						prefix
 						name
-						sets(page: 1, perPage: 1, filters: { hideEmpty: true, videogameId: $videogameId, videogameIds: [$videogameId] }) {
-							nodes {
-								games {
-									selections {
-										entrant {
-											participants {
-												player {
-													id
-												}
-											}
-										}
-										selectionValue
-									}
-								}
-							}
-						}
 					}
 					user {
 						id

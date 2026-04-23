@@ -32,7 +32,35 @@ class AutonaBasePlayerWidget(QGroupBox):
     characterModel = None
     _deleted = False
 
-    dataLock = threading.RLock()
+    # NOTE: dataLock is now an *instance* attribute initialised in
+    # _initBasePlayerWidget(). Keeping it as a class attribute meant every
+    # player widget shared a single RLock — bulk SetData calls on different
+    # players serialised on the same lock for no good reason.
+
+    def _initBasePlayerWidget(self):
+        """Subclasses MUST call this from their __init__ after uic.loadUi.
+        Initialises per-instance lock + findChild cache."""
+        self.dataLock = threading.RLock()
+        # Lazy widget cache — populated by _w(); avoids O(n) findChild walks
+        # on hot paths (SetData, ExportMergedName, ExportPlayerImages...).
+        self._widget_cache = {}
+
+    def _w(self, name, klass=QWidget):
+        """Cached findChild. Same lookup name always returns the same
+        widget instance, so we can memoise by objectName regardless of
+        the requested klass (caller-side type hint only)."""
+        cache = self.__dict__.get("_widget_cache")
+        if cache is None:
+            # Subclass forgot to call _initBasePlayerWidget — fall back to
+            # uncached findChild rather than crash.
+            return self.findChild(klass, name)
+        cached = cache.get(name)
+        if cached is not None:
+            return cached
+        found = self.findChild(klass, name)
+        if found is not None:
+            cache[name] = found
+        return found
 
     def CharactersChanged(self, includeMains=False):
         if self._deleted:
@@ -80,8 +108,8 @@ class AutonaBasePlayerWidget(QGroupBox):
 
     def ExportMergedName(self):
         with self.dataLock:
-            team = self.findChild(QLineEdit, "team").text()
-            name = self.findChild(QLineEdit, "name").text()
+            team = self._w("team", QLineEdit).text()
+            name = self._w("name", QLineEdit).text()
             merged = ""
             nameOnlyMerged = ""
 
@@ -101,9 +129,9 @@ class AutonaBasePlayerWidget(QGroupBox):
                 f"{self.path}.mergedOnlyName", nameOnlyMerged)
 
     def ExportPlayerImages(self, onlineAvatar=None):
-        with self.dataLock:
-            team = self.findChild(QLineEdit, "team").text()
-            name = self.findChild(QLineEdit, "name").text()
+        with self.dataLock, StateManager.SaveBlock():
+            team = self._w("team", QLineEdit).text()
+            name = self._w("name", QLineEdit).text()
             merged = ""
 
             if team != "":
@@ -173,7 +201,7 @@ class AutonaBasePlayerWidget(QGroupBox):
         StateManager.ReleaseSaving()
 
     def LoadStates(self, index):
-        country: QComboBox = self.findChild(QComboBox, "country")
+        country: QComboBox = self._w("country", QComboBox)
 
         new_code = None
         if country.currentData(Qt.ItemDataRole.UserRole) != None:
@@ -219,7 +247,7 @@ class AutonaBasePlayerWidget(QGroupBox):
                     f'{states[state_code]["name"]} ({state_code})', Qt.ItemDataRole.EditRole)
                 stateModel.appendRow(item)
 
-        state: QComboBox = self.findChild(QComboBox, "state")
+        state: QComboBox = self._w("state", QComboBox)
         state.setModel(stateModel)
         state.setCurrentIndex(0)
 
@@ -233,8 +261,8 @@ class AutonaBasePlayerWidget(QGroupBox):
             target.setModel(QStandardItemModel())
 
     def GetCurrentPlayerTag(self):
-        gamerTag = self.findChild(QWidget, "name").text()
-        prefix = self.findChild(QWidget, "team").text()
+        gamerTag = self._w("name").text()
+        prefix = self._w("team").text()
         return prefix+" "+gamerTag if prefix else gamerTag
 
     def Clear(self, no_mains=False):

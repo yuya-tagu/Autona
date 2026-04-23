@@ -10,6 +10,7 @@ from .AutonaBracketView import AutonaBracketView
 from .AutonaPlayerList import AutonaPlayerList
 from .AutonaBracket import Bracket
 from .AutonaHotkeys import AutonaHotkeys
+from .Workers import Worker
 import traceback
 from loguru import logger
 
@@ -261,15 +262,16 @@ class AutonaBracketWidget(QDockWidget):
                     item.setEnabled(False)
 
     def PhaseGroupChanged(self):
-        try:
-            if len(self.phaseSelection.currentData().get("groups", [])) > 1:
-                selectedGroup = self.phaseGroupSelection.currentData()
-                StateManager.Set("bracket.phaseGroup",
-                                 selectedGroup.get("name"))
-            else:
+        with StateManager.SaveBlock():
+            try:
+                if len(self.phaseSelection.currentData().get("groups", [])) > 1:
+                    selectedGroup = self.phaseGroupSelection.currentData()
+                    StateManager.Set("bracket.phaseGroup",
+                                     selectedGroup.get("name"))
+                else:
+                    StateManager.Set("bracket.phaseGroup", "")
+            except Exception:
                 StateManager.Set("bracket.phaseGroup", "")
-        except Exception:
-            StateManager.Set("bracket.phaseGroup", "")
 
         if self.phaseGroupSelection.currentData() is not None:
             # Surface a "取得中" message in the bracket area while the
@@ -281,6 +283,7 @@ class AutonaBracketWidget(QDockWidget):
                 self.phaseGroupSelection.currentData().get("id"))
 
     def UpdatePhaseGroup(self, phaseGroupData):
+        from .Helpers.AutonaStatusManager import AutonaStatusManager
         # Skip if we're already inside a handler — Qt can queue multiple
         # emits of tournament_phasegroup_updated (refresh button, websocket
         # action, initial load) and re-entering this path has crashed the
@@ -291,12 +294,14 @@ class AutonaBracketWidget(QDockWidget):
             return
 
         self._updatingPhaseGroup = True
+        status_token = AutonaStatusManager.push("ブラケットを構築中...")
         StateManager.BlockSaving()
         try:
             self.playerList.signals.DataChanged.disconnect()
         except (TypeError, RuntimeError):
             pass
 
+        # GUI-thread phase: list refresh + control updates (cheap).
         try:
             entrants = phaseGroupData.get("entrants") or []
             setsByRound = phaseGroupData.get("sets") or {}
@@ -312,13 +317,33 @@ class AutonaBracketWidget(QDockWidget):
             self.playerPerTeam.blockSignals(True)
             self.playerPerTeam.setValue(self.playerList.playersPerTeam)
             self.playerPerTeam.blockSignals(False)
+        except Exception:
+            logger.error(traceback.format_exc())
+            self._finalizeBracketUpdate(None, status_token)
+            return
 
-            # Build the bracket topology from Start.gg directly.
-            self.bracket = Bracket(phaseGroupData)
+        # Worker phase: Bracket topology build is O(rounds × sets) and
+        # blocks the UI for ~hundreds of ms on large pools. Run it off-GUI
+        # so the spinner / status bar stay responsive.
+        worker = Worker(self._buildBracketAsync, phaseGroupData=phaseGroupData)
+        worker.signals.result.connect(
+            lambda bracket, t=status_token: self._finalizeBracketUpdate(bracket, t))
+        worker.signals.error.connect(
+            lambda _err, t=status_token: self._finalizeBracketUpdate(None, t))
+        AutonaTournamentDataProvider.instance.threadPool.start(worker)
 
-            if self.bracketView is not None:
-                self.bracketView.SetBracket(self.bracket)
-                self.bracketView.Update()
+    def _buildBracketAsync(self, phaseGroupData, progress_callback=None, cancel_event=None):
+        # Pure data work — no Qt widgets touched.
+        return Bracket(phaseGroupData)
+
+    def _finalizeBracketUpdate(self, bracket, status_token):
+        from .Helpers.AutonaStatusManager import AutonaStatusManager
+        try:
+            if bracket is not None:
+                self.bracket = bracket
+                if self.bracketView is not None:
+                    self.bracketView.SetBracket(self.bracket)
+                    self.bracketView.Update()
         except Exception:
             logger.error(traceback.format_exc())
         finally:
@@ -327,6 +352,7 @@ class AutonaBracketWidget(QDockWidget):
                 self.playerList.signals.DataChanged.connect(
                     self.bracketView.Update)
             self._updatingPhaseGroup = False
+            AutonaStatusManager.pop(status_token)
 
     def SetDefaultsFromAssets(self):
         if StateManager.Get('game.defaults'):

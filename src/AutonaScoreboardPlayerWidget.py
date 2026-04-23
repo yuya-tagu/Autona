@@ -43,7 +43,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
     characterModel = None
     _deleted = False
 
-    dataLock = threading.RLock()
+    # dataLock is set per-instance in _initBasePlayerWidget(); see base class.
 
     def __init__(self, index=0, teamNumber=0, path="", customName="", *args):
         super().__init__(*args)
@@ -59,6 +59,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         self.losers = False
 
         uic.loadUi(AutonaResolve("src/layout/AutonaScoreboardPlayer.ui"), self)
+        self._initBasePlayerWidget()
 
         # Apply grid spacing from UI constants
         grid = self.layout()
@@ -515,7 +516,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             countryCompleter = QCompleter(
                 AutonaCountryHelper.countryModel)
 
-            country: QComboBox = self.findChild(QComboBox, "country")
+            country: QComboBox = self._w("country", QComboBox)
             country.setCompleter(countryCompleter)
             country.completer().setFilterMode(Qt.MatchFlag.MatchContains)
             country.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
@@ -527,7 +528,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
             country.currentIndexChanged.connect(self.LoadStates)
 
-            state: QComboBox = self.findChild(QComboBox, "state")
+            state: QComboBox = self._w("state", QComboBox)
             state.completer().setFilterMode(Qt.MatchFlag.MatchContains)
             state.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
             state.completer().setFilterMode(Qt.MatchFlag.MatchContains)
@@ -562,15 +563,14 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
     def SetupAutocomplete(self):
         if AutonaPlayerDB.model:
-            self.findChild(QLineEdit, "name").setCompleter(QCompleter())
-            self.findChild(QLineEdit, "name").completer().activated[QModelIndex].connect(
+            name_edit = self._w("name", QLineEdit)
+            name_edit.setCompleter(QCompleter())
+            name_edit.completer().activated[QModelIndex].connect(
                 lambda x: self.SetData(x.data(Qt.ItemDataRole.UserRole)) if x is not None else None, Qt.QueuedConnection)
-            self.findChild(QLineEdit, "name").completer().setCaseSensitivity(
+            name_edit.completer().setCaseSensitivity(
                 Qt.CaseSensitivity.CaseInsensitive)
-            self.findChild(QLineEdit, "name").completer(
-            ).setFilterMode(Qt.MatchFlag.MatchContains)
-            self.findChild(QLineEdit, "name").completer().setModel(
-                AutonaPlayerDB.model)
+            name_edit.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+            name_edit.completer().setModel(AutonaPlayerDB.model)
 
             self.ManageSavePlayerToDBText()
             self.ManageDeletePlayerFromDBActive()
@@ -591,7 +591,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 # rebuild is immediately discarded by the subsequent
                 # country_code assignment, so suppressing it saves one
                 # LoadStates pass per SetData.
-                country_element = self.findChild(QComboBox, "country")
+                country_element = self._w("country", QComboBox)
                 country_was_blocked = False
                 if country_element is not None:
                     country_was_blocked = country_element.signalsBlocked()
@@ -612,21 +612,21 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                     self.SetData(dbPlayer, dontLoadFromDB=True,
                                  clear=False, no_mains=no_mains)
 
-            name = self.findChild(QWidget, "name")
+            name = self._w("name")
             if data.get("gamerTag") and data.get("gamerTag") != name.text():
                 data["gamerTag"] = AutonaBadWordFilter.Censor(
                     data["gamerTag"], data.get("country_code"))
                 name.setText(f'{data.get("gamerTag")}')
                 name.editingFinished.emit()
 
-            team = self.findChild(QWidget, "team")
+            team = self._w("team")
             if data.get("prefix") and data.get("prefix") != team.text():
                 data["prefix"] = AutonaBadWordFilter.Censor(
                     data["prefix"], data.get("country_code"))
                 team.setText(f'{data.get("prefix")}')
                 team.editingFinished.emit()
 
-            real_name = self.findChild(QWidget, "real_name")
+            real_name = self._w("real_name")
             if data.get("name") and data.get("name") != real_name.text():
                 data["name"] = AutonaBadWordFilter.Censor(
                     data["name"], data.get("country_code"))
@@ -642,7 +642,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             if data.get("city"):
                 self.ExportPlayerCity(data.get("city"))
 
-            twitter = self.findChild(QWidget, "twitter")
+            twitter = self._w("twitter")
             if data.get("twitter") and data.get("twitter") != twitter.text():
                 data["twitter"] = AutonaBadWordFilter.Censor(
                     data["twitter"], data.get("country_code"))
@@ -657,7 +657,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                     f'{data.get("custom_textbox")}'.replace("\\n", "\n"))
                 self.custom_textbox.textChanged.emit()
 
-            pronoun = self.findChild(QWidget, "pronoun")
+            pronoun = self._w("pronoun")
             if data.get("pronoun") and data.get("pronoun") != pronoun.text():
                 data["pronoun"] = AutonaBadWordFilter.Censor(
                     data["pronoun"], data.get("country_code"))
@@ -666,8 +666,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 pronoun.editingFinished.emit()
 
             if data.get("country_code"):
-                countryElement: QComboBox = self.findChild(
-                    QComboBox, "country")
+                countryElement: QComboBox = self._w("country", QComboBox)
                 countryIndex = 0
                 for i in range(AutonaCountryHelper.countryModel.rowCount()):
                     item = AutonaCountryHelper.countryModel.item(
@@ -680,9 +679,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                     countryElement.setCurrentIndex(countryIndex)
 
             if data.get("state_code"):
-                countryElement: QComboBox = self.findChild(
-                    QComboBox, "country")
-                stateElement: QComboBox = self.findChild(QComboBox, "state")
+                countryElement: QComboBox = self._w("country", QComboBox)
+                stateElement: QComboBox = self._w("state", QComboBox)
                 stateIndex = 0
                 for i in range(stateElement.model().rowCount()):
                     item = stateElement.model().item(i).data(Qt.ItemDataRole.UserRole)
@@ -754,9 +752,9 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             if data.get("seed") is not None:
                 if data.get("seed") > 0:
                     StateManager.Set(f"{self.path}.seed", data.get("seed"))
-                    self.findChild(QSpinBox, "seed").setValue(int(data.get("seed")))
+                    self._w("seed", QSpinBox).setValue(int(data.get("seed")))
                 else:
-                    self.findChild(QSpinBox, "seed").setValue(0)
+                    self._w("seed", QSpinBox).setValue(0)
             if data.get("city"):
                 StateManager.Set(f"{self.path}.city", data.get("city"))
         finally:
@@ -767,8 +765,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 # NameChanged here would reset the id to None.
                 self.ExportMergedName()
                 self.ExportPlayerImages()
-                team = self.findChild(QLineEdit, "team").text()
-                name = self.findChild(QLineEdit, "name").text()
+                team = self._w("team", QLineEdit).text()
+                name = self._w("name", QLineEdit).text()
                 self.lastExportedName = team + " " + name
             StateManager.ReleaseSaving()
             self.dataLock.release()
@@ -777,11 +775,11 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         tag = self.GetCurrentPlayerTag()
 
         playerData = {
-            "prefix": self.findChild(QWidget, "team").text(),
-            "gamerTag": self.findChild(QWidget, "name").text(),
-            "name": self.findChild(QWidget, "real_name").text(),
-            "twitter": self.findChild(QWidget, "twitter").text(),
-            "pronoun": self.findChild(QWidget, "pronoun").text(),
+            "prefix": self._w("team").text(),
+            "gamerTag": self._w("name").text(),
+            "name": self._w("real_name").text(),
+            "twitter": self._w("twitter").text(),
+            "pronoun": self._w("pronoun").text(),
             "custom_textbox": "\\n".join(self.custom_textbox.toPlainText().splitlines())
         }
 
@@ -813,13 +811,13 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 AutonaGameAssetManager.instance.selectedGame.get("codename"): mains
             }
 
-        if self.findChild(QComboBox, "country").currentData(Qt.ItemDataRole.UserRole):
-            playerData["country_code"] = self.findChild(
-                QComboBox, "country").currentData(Qt.ItemDataRole.UserRole).get("code")
+        if self._w("country", QComboBox).currentData(Qt.ItemDataRole.UserRole):
+            playerData["country_code"] = self._w(
+                "country", QComboBox).currentData(Qt.ItemDataRole.UserRole).get("code")
 
-        if self.findChild(QComboBox, "state").currentData(Qt.ItemDataRole.UserRole):
-            playerData["state_code"] = self.findChild(
-                QComboBox, "state").currentData(Qt.ItemDataRole.UserRole).get("code")
+        if self._w("state", QComboBox).currentData(Qt.ItemDataRole.UserRole):
+            playerData["state_code"] = self._w(
+                "state", QComboBox).currentData(Qt.ItemDataRole.UserRole).get("code")
 
         AutonaPlayerDB.AddPlayers([playerData], overwrite=True)
 
