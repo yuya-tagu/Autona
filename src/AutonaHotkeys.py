@@ -93,16 +93,18 @@ class AutonaHotkeys(QObject):
     parent: QWidget = None
     shortcuts = {}
 
+    # Use Ctrl+Shift+ prefix to avoid globally swallowing common app
+    # shortcuts (Ctrl+S=Save, Ctrl+O=Open, Ctrl+P=Print, Ctrl+R=Reload).
     keys = {
-        "load_set": "Ctrl+O",
-        "team1_score_up": "Ctrl+F1",
-        "team1_score_down": "Ctrl+F2",
-        "team2_score_up": "Ctrl+F3",
-        "team2_score_down": "Ctrl+F4",
-        "reset_scores": "Ctrl+R",
-        "swap_teams": "Ctrl+S",
-        "refresh_phase_group": "Ctrl+P",
-        "limit_export": "Ctrl+B",
+        "load_set": "Ctrl+Shift+O",
+        "team1_score_up": "Ctrl+Shift+F1",
+        "team1_score_down": "Ctrl+Shift+F2",
+        "team2_score_up": "Ctrl+Shift+F3",
+        "team2_score_down": "Ctrl+Shift+F4",
+        "reset_scores": "Ctrl+Shift+R",
+        "swap_teams": "Ctrl+Shift+S",
+        "refresh_phase_group": "Ctrl+Shift+P",
+        "limit_export": "Ctrl+Shift+B",
     }
 
     loaded_keys = {}
