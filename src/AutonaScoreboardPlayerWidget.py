@@ -693,17 +693,31 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
             if data.get("mains") and no_mains != True:
                 if type(data.get("mains")) == list:
-                    for element in self.character_elements:
-                        character_element = element[1]
+                    # Legacy old-API single-character format: ["Mario", skin].
+                    # Only slot 0 should receive it — the previous code
+                    # iterated *all* character_elements and set every slot
+                    # to mains[0], so a 3-character UI would show the same
+                    # character three times.
+                    main_list = data.get("mains")
+                    if main_list and self.character_elements:
+                        main_name = main_list[0]
+                        try:
+                            main_skin = int(main_list[1]) if len(main_list) > 1 else 0
+                        except (TypeError, ValueError):
+                            main_skin = 0
+                        character_element = self.character_elements[0][1]
+                        color_element = self.character_elements[0][2]
                         characterIndex = 0
-                        for i in range(character_element.model().rowCount()):
+                        for j in range(character_element.model().rowCount()):
                             item = character_element.model().data(
-                                character_element.model().index(i, 0), Qt.ItemDataRole.UserRole)
-                            if item:
-                                if item.get("en_name") == data.get("mains")[0]:
-                                    characterIndex = i
-                                    break
-                        character_element.setCurrentIndex(characterIndex)
+                                character_element.model().index(j, 0), Qt.ItemDataRole.UserRole)
+                            if item and item.get("en_name") == main_name:
+                                characterIndex = j
+                                break
+                        if character_element.currentIndex() != characterIndex:
+                            character_element.setCurrentIndex(characterIndex)
+                        if color_element.currentIndex() != main_skin:
+                            color_element.setCurrentIndex(main_skin)
                 elif type(data.get("mains")) == dict:
                     mains = data.get("mains").get(
                         AutonaGameAssetManager.instance.selectedGame.get("codename"), [])
