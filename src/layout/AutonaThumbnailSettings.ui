@@ -92,29 +92,6 @@
          </property>
          <layout class="QVBoxLayout" name="verticalLayout">
          <item>
-          <widget class="QLabel" name="label_17">
-           <property name="sizePolicy">
-            <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
-             <horstretch>0</horstretch>
-             <verstretch>0</verstretch>
-            </sizepolicy>
-           </property>
-           <property name="font">
-            <font>
-             <pointsize>10</pointsize>
-             <weight>700</weight>
-             <bold>true</bold>
-            </font>
-           </property>
-           <property name="text">
-            <string>Select Thumbnail Template</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QComboBox" name="templateSelect"/>
-         </item>
-         <item>
           <layout class="QVBoxLayout" name="verticalLayout_15">
            <property name="leftMargin">
             <number>0</number>
@@ -764,6 +741,29 @@
           <string>Preview Settings</string>
          </property>
          <layout class="QVBoxLayout" name="verticalLayout_10">
+         <item>
+          <widget class="QLabel" name="label_17">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Preferred" vsizetype="Maximum">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="font">
+            <font>
+             <pointsize>10</pointsize>
+             <weight>700</weight>
+             <bold>true</bold>
+            </font>
+           </property>
+           <property name="text">
+            <string>Select Thumbnail Template</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QComboBox" name="templateSelect"/>
+         </item>
          <item>
           <widget class="QPushButton" name="btUpdatePreview">
          <property name="text">
