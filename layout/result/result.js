@@ -127,9 +127,6 @@ async function placePlayers(data, config) {
     // Cinematic lighting overlay
     slot.append(`<div class="lighting"></div>`);
 
-    // Vignette for depth
-    slot.append(`<div class="vignette"></div>`);
-
     // Dark overlay for text
     slot.append(`<div class="overlay"></div>`);
 

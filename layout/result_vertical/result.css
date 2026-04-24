@@ -153,58 +153,39 @@ body {
   height: 100%;
 }
 
-/* --- Cinematic lighting overlay --- */
+/* --- White lighting overlay (uniform across ranks) --- */
 .player-slot .lighting {
   position: absolute;
   inset: 0;
   z-index: 1;
   pointer-events: none;
   mix-blend-mode: soft-light;
-  opacity: 0.6;
-}
-
-.player-slot.rank-1 .lighting {
+  opacity: 0.55;
   background: radial-gradient(ellipse at 50% 30%,
-    rgba(255, 215, 0, 0.7) 0%,
-    rgba(255, 180, 0, 0.3) 40%,
-    transparent 70%);
-  opacity: 0.7;
+    rgba(255, 255, 255, 0.55) 0%,
+    rgba(255, 255, 255, 0.2) 45%,
+    transparent 75%);
 }
 
-.player-slot.rank-2 .lighting {
-  background: radial-gradient(ellipse at 50% 30%,
-    rgba(200, 210, 230, 0.6) 0%,
-    rgba(180, 190, 210, 0.25) 40%,
-    transparent 70%);
+/* Rank aura on the slot background — shines through transparent
+   character PNG edges to replace the previous colored spotlight. */
+.player-slot.rank-1 {
+  background: radial-gradient(ellipse at 50% 45%,
+    rgba(255, 215, 0, 0.6) 0%,
+    rgba(255, 170, 0, 0.3) 45%,
+    rgba(40, 25, 0, 0.55) 100%);
 }
-
-.player-slot.rank-3 .lighting {
-  background: radial-gradient(ellipse at 50% 30%,
-    rgba(205, 127, 50, 0.6) 0%,
-    rgba(180, 110, 40, 0.25) 40%,
-    transparent 70%);
+.player-slot.rank-2 {
+  background: radial-gradient(ellipse at 50% 45%,
+    rgba(220, 230, 240, 0.55) 0%,
+    rgba(170, 185, 210, 0.28) 45%,
+    rgba(30, 35, 45, 0.55) 100%);
 }
-
-.player-slot.rank-4 .lighting,
-.player-slot.rank-5 .lighting,
-.player-slot.rank-6 .lighting,
-.player-slot.rank-7 .lighting,
-.player-slot.rank-8 .lighting {
-  background: radial-gradient(ellipse at 50% 40%,
-    rgba(100, 140, 200, 0.3) 0%,
-    transparent 60%);
-  opacity: 0.5;
-}
-
-/* Vignette */
-.player-slot .vignette {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  pointer-events: none;
-  background: radial-gradient(ellipse at center,
-    transparent 40%,
-    rgba(0, 0, 0, 0.5) 100%);
+.player-slot.rank-3 {
+  background: radial-gradient(ellipse at 50% 45%,
+    rgba(220, 140, 60, 0.55) 0%,
+    rgba(170, 100, 45, 0.28) 45%,
+    rgba(40, 22, 8, 0.55) 100%);
 }
 
 /* Bottom gradient overlay */
