@@ -183,7 +183,9 @@ class AutonaResultSettingsWidget(QDockWidget):
         insertIdx += 1
         self.btLoadTournamentInfo.clicked.connect(self._loadTournamentInfo)
 
-        # --- Layout selector ---
+        # --- Layout selector (placed above the preview, matching thumbnail UX) ---
+        rightLayout = self.settings.findChild(QVBoxLayout, "verticalLayout_right")
+        rightInsertIdx = 0
         layoutLabel = QLabel(
             QApplication.translate("app", "Select Result Layout"))
         _labelFont = layoutLabel.font()
@@ -192,8 +194,8 @@ class AutonaResultSettingsWidget(QDockWidget):
         layoutLabel.setFont(_labelFont)
         layoutLabel.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
-        leftLayout.insertWidget(insertIdx, layoutLabel)
-        insertIdx += 1
+        rightLayout.insertWidget(rightInsertIdx, layoutLabel)
+        rightInsertIdx += 1
         self.layoutCombo = QComboBox()
         self.layoutCombo.addItem(
             QApplication.translate("app", "Horizontal (1920x1080)"), "horizontal")
@@ -204,7 +206,7 @@ class AutonaResultSettingsWidget(QDockWidget):
         self.layoutCombo.addItem(
             QApplication.translate("app", "Vertical Dark Gold 激 (960x1080)"), "vertical_geki")
         self.layoutCombo.currentIndexChanged.connect(self._onLayoutChanged)
-        leftLayout.insertWidget(insertIdx, self.layoutCombo)
+        rightLayout.insertWidget(rightInsertIdx, self.layoutCombo)
 
         # --- Preview ---
         previewContainer = self.settings.findChild(QWidget, "resultPreview")
