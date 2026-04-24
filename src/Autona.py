@@ -152,7 +152,7 @@ from src.AutonaAboutWidget import AutonaAboutWidget
 from .AutonaScoreboardStageWidget import AutonaScoreboardStageWidget
 from .AutonaStatsWidget import AutonaStatsWidget
 from .AutonaAnalysisWidget import AutonaAnalysisWidget
-from src.AutonaWebServer import WebServer
+from src.AutonaWebServer import WebServer, check_webserver_port
 # autopep8: on
 
 def generate_restart_messagebox(main_txt):
@@ -352,6 +352,7 @@ class Window(QMainWindow):
 
         self.webserver = WebServer(
             parent=self, stageWidget=self.stageWidget, commentaryWidget=commentary)
+        check_webserver_port(self.webserver.port, parent=self)
         self.webserver.start()
         self.signals.GameChanged.connect(self.webserver.ws_program_state)
         self.signals.GameChanged.connect(self.webserver.ws_get_characters)

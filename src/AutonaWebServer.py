@@ -1,7 +1,10 @@
 import html
 import json
 import os
+import subprocess
+import sys
 import threading
+import time
 import traceback
 
 import flask
@@ -766,3 +769,129 @@ class WebServer(QThread):
                               debug=False, use_reloader=False, allow_unsafe_werkzeug=True)
         except Exception as e:
             logger.error(traceback.format_exc())
+
+
+# ── Port collision guard ─────────────────────────────────────────
+# On Windows, two processes can bind the same TCP port simultaneously
+# (no SO_EXCLUSIVEADDRUSE on Werkzeug's socket). Stale `python main.py`
+# runs then silently steal every other request, making the web UI
+# appear blank. Detect this at startup and offer to kill the offenders.
+
+def _netstat_listeners(port: int) -> set:
+    if sys.platform != 'win32':
+        return set()
+    own_pid = os.getpid()
+    pids = set()
+    try:
+        out = subprocess.check_output(
+            ['netstat', '-ano', '-p', 'TCP'],
+            text=True, timeout=5,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+        )
+    except Exception as e:
+        logger.warning(f"netstat failed during port-guard: {e}")
+        return set()
+    suffix = f':{port}'
+    for line in out.splitlines():
+        if 'LISTENING' not in line:
+            continue
+        parts = line.split()
+        if len(parts) < 5:
+            continue
+        if not parts[1].endswith(suffix):
+            continue
+        try:
+            pid = int(parts[-1])
+        except ValueError:
+            continue
+        if pid != own_pid:
+            pids.add(pid)
+    return pids
+
+
+def _process_name(pid: int) -> str:
+    try:
+        # Image Name is at a fixed column in non-localized default output,
+        # so pick the token before the PID to stay locale-neutral.
+        out = subprocess.check_output(
+            ['tasklist', '/FO', 'CSV', '/NH'],
+            timeout=5,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+        )
+        for raw in out.splitlines():
+            try:
+                line = raw.decode('utf-8', errors='replace')
+            except Exception:
+                line = str(raw)
+            fields = [f.strip().strip('"') for f in line.split(',')]
+            if len(fields) >= 2:
+                try:
+                    if int(fields[1]) == pid:
+                        return fields[0]
+                except ValueError:
+                    continue
+    except Exception:
+        pass
+    return '(unknown)'
+
+
+def check_webserver_port(port: int, parent=None) -> bool:
+    """Return True if the port is free (or was freed by killing stale procs).
+
+    Shows a QMessageBox when another process is already listening so the user
+    can choose to terminate it. Safe to call from the GUI thread.
+    """
+    conflicts = _netstat_listeners(port)
+    if not conflicts:
+        return True
+
+    details = ', '.join(f"{pid} ({_process_name(pid)})" for pid in sorted(conflicts))
+    logger.warning(f"Port {port} already held by PIDs: {details}")
+
+    text = (
+        QApplication.translate(
+            "portguard",
+            "Port {port} is already in use by another process:\n\n{details}\n\n"
+            "If this is a stale Autona instance, the Web UI will appear blank "
+            "because Windows randomly routes connections to whichever process answers.\n\n"
+            "Terminate the existing process(es) and continue?",
+        )
+        .replace("{port}", str(port))
+        .replace("{details}", details)
+    )
+    title = QApplication.translate("portguard", "Port conflict")
+
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle(title)
+    box.setText(text)
+    box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+    box.setDefaultButton(QMessageBox.StandardButton.Yes)
+    if box.exec() != QMessageBox.StandardButton.Yes:
+        return False
+
+    for pid in conflicts:
+        try:
+            subprocess.run(
+                ['taskkill', '/F', '/PID', str(pid)],
+                timeout=5, check=False,
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+            )
+        except Exception as e:
+            logger.error(f"taskkill {pid} failed: {e}")
+
+    # Wait up to ~2s for the OS to release the port.
+    for _ in range(10):
+        time.sleep(0.2)
+        if not _netstat_listeners(port):
+            return True
+
+    QMessageBox.critical(
+        parent,
+        title,
+        QApplication.translate(
+            "portguard",
+            "Failed to free port {port}. Please terminate the conflicting process manually.",
+        ).replace("{port}", str(port)),
+    )
+    return False
