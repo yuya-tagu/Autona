@@ -5,9 +5,19 @@ var data = {};
 // Used for comparing what changed since last update
 var oldData = {};
 
-// Global variable that tracks the max delta index that has been applied.
-// Used as a failsafe to prevent stale state-changes from being processed.
+// Global variable that tracks the max revision that has been applied.
+// Used as a failsafe to prevent stale or out-of-order state-changes from
+// being processed (Design.md §3.2.3 R-Sync-8 / §2.3 R-OBS-3a..b).
 var maxAppliedDeltaIdx = -1;
+
+// Pull the canonical revision from a payload, falling back to the legacy
+// `delta_index` so older server builds keep working.
+function getRevision(payload) {
+  if (payload == null) return -1;
+  if (typeof payload['revision'] === 'number') return payload['revision'];
+  if (typeof payload['delta_index'] === 'number') return payload['delta_index'];
+  return -1;
+}
 
 // Global variable containing settings red from settings.json
 // The settings under /layout/settings.json (global) are merged with /layout/<directory>/settings.json (local),
@@ -43,9 +53,15 @@ async function UpdateWrapper(event) {
   }
 }
 
-// Gets current program state,
-// Dispatch "tsh_update" event if data has changed
-// This function is called in a high frequency
+// Gets current program state from the on-disk JSON snapshot,
+// Dispatch "tsh_update" event if data has changed.
+//
+// This is the **degraded** transport (Design.md §2.3 R-OBS-3 / §8 T-12):
+// it only kicks in when (a) the page is opened with file:// or
+// host=='absolute' (no Socket.IO available), or (b) the Socket.IO
+// connection has failed after max retries. The full snapshot is the
+// source of truth in this mode, so we just advance maxAppliedDeltaIdx
+// from the snapshot's `revision` and don't have to validate gaps.
 async function UpdateData() {
   try {
     oldData = data;
@@ -53,6 +69,13 @@ async function UpdateData() {
 
     if(data.timestamp <= oldData.timestamp){
       return
+    }
+
+    // Track the snapshot's revision so a later switch back to Socket.IO
+    // can reason about continuity from the same baseline.
+    const snapshotRev = getRevision(data);
+    if (snapshotRev >= 0) {
+      maxAppliedDeltaIdx = Math.max(maxAppliedDeltaIdx, snapshotRev);
     }
 
     let event = new CustomEvent("tsh_update");
@@ -109,7 +132,11 @@ async function UpdateData_SocketIO() {
 
     socket.io.on('reconnect_failed', () => {
       // reconnect_failed, if max retries are reached,
-      // will fall back to file loading program_state.json
+      // will fall back to file loading program_state.json.
+      // This is the degraded transport per Design.md §2.3 R-OBS-3 /
+      // §8 T-12 — Socket.IO is the standard path; this poll keeps the
+      // overlay alive when the websocket truly cannot recover.
+      console.warn('socket.io reconnect_failed — falling back to degraded file polling (64ms)');
       setInterval(async () => {
         await UpdateData();
       }, 64);
@@ -124,8 +151,10 @@ async function UpdateData_SocketIO() {
       data = message['state'];
 
       // Fine to reset the max applied index here, since we know that we've
-      // received a complete valid state for a point in time.
-      maxAppliedDeltaIdx = message['delta_index'];
+      // received a complete valid state for a point in time. Adopt the
+      // snapshot's revision verbatim — it can move backwards across a
+      // server restart (Design.md §3.2.3 R-Sync-7 / R-Sync-9).
+      maxAppliedDeltaIdx = getRevision(message);
 
       let event = new CustomEvent("tsh_update");
       event.data = data;
@@ -835,11 +864,21 @@ class ContentResolver {
 }
 
 function HandleTSHStateUpdateMessage(message) {
-  const deltaIdx = message['delta_index'];
+  const rev = getRevision(message);
   const deltas = message['delta'];
 
-  if (deltaIdx < maxAppliedDeltaIdx) {
-    throw Error(`Received out of order delta ${deltaIdx} (applied: ${maxAppliedDeltaIdx}`);
+  // Out-of-order arrival (already applied a newer revision). Bailing out
+  // to a full snapshot is safer than skipping the delta silently
+  // (Design.md §3.2.3 R-Sync-8 / §2.3 R-OBS-3a).
+  if (rev <= maxAppliedDeltaIdx) {
+    throw Error(`Received stale/out-of-order delta ${rev} (applied: ${maxAppliedDeltaIdx})`);
+  }
+
+  // Gap detection: revision must be exactly maxApplied + 1. If it skipped
+  // ahead we missed at least one delta — request a full snapshot rather
+  // than apply on top of a stale base.
+  if (maxAppliedDeltaIdx >= 0 && rev !== maxAppliedDeltaIdx + 1) {
+    throw Error(`Detected revision gap: got ${rev}, expected ${maxAppliedDeltaIdx + 1}`);
   }
 
   let event = new CustomEvent("tsh_update")
@@ -848,7 +887,7 @@ function HandleTSHStateUpdateMessage(message) {
 
   applyDeltas(data, deltas);
   event.data = data;
-  maxAppliedDeltaIdx = Math.max(deltaIdx, maxAppliedDeltaIdx);
+  maxAppliedDeltaIdx = rev;
   console.log(data);
 
   // it's fine if this doesn't fire because we threw an exception earlier, because
