@@ -176,6 +176,10 @@ class WindowSignals(QObject):
     SetupAutocomplete = Signal()
     UiMounted = Signal()
     GameChanged = Signal()
+    # Fired after light_mode is committed via AutonaWebServerActions.
+    # Window connects this to a slot that re-applies the qdarktheme
+    # palette + UI.notify_theme_change() and syncs the menu checkbox.
+    LightModeChanged = Signal(bool)
 
 
 class Window(QMainWindow):
@@ -356,6 +360,11 @@ class Window(QMainWindow):
         self.webserver.start()
         self.signals.GameChanged.connect(self.webserver.ws_program_state)
         self.signals.GameChanged.connect(self.webserver.ws_get_characters)
+        # Apply light/dark switches that originate from
+        # AutonaWebServerActions.set_light_mode (PyQt menu or React toggle)
+        # on the GUI thread. Direct connection because emit() is already
+        # marshalled to GUI thread by the Action.
+        self.signals.LightModeChanged.connect(self._applyLightMode)
         self.stageWidget.stageStrikeLogic.signals.state_updated.connect(self.webserver.ws_ruleset)
         splash.set_message(splash_msgs[1], progress=0.70)
 
@@ -443,6 +452,9 @@ class Window(QMainWindow):
         action.setCheckable(True)
         action.setChecked(SettingsManager.Get("light_mode", False))
         action.toggled.connect(self.ToggleLightMode)
+        # Held so the Action-driven slot can sync the checkbox state when
+        # the toggle originates from React or another remote client.
+        self._lightModeAction = action
 
         editMenu.addSeparator()
 
@@ -914,9 +926,35 @@ class Window(QMainWindow):
         self.show()
 
     def ToggleLightMode(self, checked):
-        SettingsManager.Set("light_mode", checked)
-        UI.notify_theme_change()
+        # Route through the WebServer Action so PyQt and React go through
+        # the same path (Design.md §5.4.2 / §8 T-10). The Action persists
+        # via SettingsManager, mirrors into StateManager.ui.light_mode and
+        # emits LightModeChanged back to this Window so the QSS reapply
+        # happens on the GUI thread regardless of caller.
+        actions = getattr(WebServer, 'actions', None)
+        if actions is not None:
+            actions.set_light_mode(checked)
+        else:
+            # WebServer not yet initialized (very early startup) — fall
+            # back to a direct path so the menu still works.
+            SettingsManager.Set("light_mode", bool(checked))
+            self._applyLightMode(bool(checked))
+
+    def _applyLightMode(self, value):
+        # GUI-thread slot fired by AutonaWebServerActions.set_light_mode.
+        # Re-applies qdarktheme + ui_constants notify_theme_change, and
+        # syncs the menu checkbox in case the toggle originated remotely.
         self.LoadTheme()
+        UI.notify_theme_change()
+        action = getattr(self, '_lightModeAction', None)
+        if action is not None and action.isChecked() != bool(value):
+            # Signals are blocked so this doesn't loop back into
+            # ToggleLightMode and re-trigger the Action.
+            action.blockSignals(True)
+            try:
+                action.setChecked(bool(value))
+            finally:
+                action.blockSignals(False)
 
     def LoadTheme(self):
         light = bool(SettingsManager.Get("light_mode", False))

@@ -360,11 +360,34 @@ class WebServer(QThread):
                  data
             ))
 
+    # Theme toggle (Design.md §5.4.2 / §8 T-10).
+    # Accepts JSON {"value": true|false} or query ?value=true on POST.
+    @app.post('/set-light-mode')
+    def set_light_mode():
+        try:
+            data = request.get_json(silent=True) or {}
+        except Exception:
+            data = {}
+        value = data.get('value', request.args.get('value'))
+        return WebServer.actions.set_light_mode(value)
+
+    @socketio.on('set_light_mode')
+    def ws_set_light_mode(message):
+        if isinstance(message, (str, bytes)):
+            try:
+                data = orjson.loads(message)
+            except Exception:
+                data = {'value': message}
+        else:
+            data = message or {}
+        WebServer.ws_emit('set_light_mode',
+            WebServer.actions.set_light_mode(data.get('value')))
+
     @app.post('/update-commentary-<caster>')
     def set_commentary_data(caster):
         data = request.get_json()
         return WebServer.actions.set_commentary_data(caster, data)
-    
+
     @socketio.on('update_commentary')
     def ws_set_commentary_data(message):
         data = orjson.loads(message)
