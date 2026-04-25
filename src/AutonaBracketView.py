@@ -5,6 +5,7 @@ from qtpy.QtCore import *
 from .AutonaBracket import Bracket, BracketSet
 from .AutonaPlayerList import *
 from .StateManager import StateManager
+from . import ui_constants as UI
 import traceback
 from loguru import logger
 
@@ -137,11 +138,12 @@ class BracketSetWidget(QWidget):
             name.setMaximumWidth(120)
             name.setDisabled(True)
             # Override Qt's disabled palette so player names keep the
-            # Autona text colour (#F0EAE0) against the dark bracket bg
-            # — the default greyed-out disabled text is unreadable.
+            # current theme's primary text colour against the dark
+            # bracket bg — the default greyed-out disabled text is
+            # unreadable. Reads palette() so it tracks light/dark.
             name.setStyleSheet(
-                "QLineEdit:disabled { color: #F0EAE0; "
-                "background-color: rgba(0, 0, 0, 0); }"
+                f"QLineEdit:disabled {{ color: {UI.palette()['text_primary']}; "
+                "background-color: rgba(0, 0, 0, 0); }}"
             )
             self.name.append(name)
             hbox.layout().addWidget(name)
@@ -268,7 +270,10 @@ class BracketSetWidget(QWidget):
             dim = False
 
         bg = "rgba(0, 0, 0, 80)" if dim else "rgba(0, 0, 0, 0)"
-        ss = f"QLineEdit:disabled {{ color: #F0EAE0; background-color: {bg}; }}"
+        ss = (
+            f"QLineEdit:disabled {{ color: {UI.palette()['text_primary']}; "
+            f"background-color: {bg}; }}"
+        )
         self.name[0].setStyleSheet(ss)
         self.name[1].setStyleSheet(ss)
 
@@ -298,7 +303,7 @@ class AutonaBracketView(QGraphicsView):
         self.loadingOverlay = QLabel("取得中…\nLoading…", self)
         self.loadingOverlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.loadingOverlay.setStyleSheet(
-            "color: #F0EAE0; font-size: 14pt; "
+            f"color: {UI.palette()['text_primary']}; font-size: 14pt; "
             "background-color: rgba(0, 0, 0, 120);")
         self.loadingOverlay.hide()
 
@@ -409,7 +414,9 @@ class AutonaBracketView(QGraphicsView):
                 "Pick a phase group, or retry if Start.gg timed out."
             ))
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            empty.setStyleSheet("color: #B5ADA0; font-size: 11pt; padding: 40px;")
+            empty.setStyleSheet(
+                f"color: {UI.palette()['text_secondary']}; "
+                "font-size: 11pt; padding: 40px;")
             self.bracketLayout.layout().addWidget(empty)
 
         # Pass 1: collect rendered round info so each round can size its

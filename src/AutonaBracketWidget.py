@@ -11,6 +11,7 @@ from .AutonaPlayerList import AutonaPlayerList
 from .AutonaBracket import Bracket
 from .AutonaHotkeys import AutonaHotkeys
 from .Workers import Worker
+from . import ui_constants as UI
 import traceback
 from loguru import logger
 
@@ -96,7 +97,8 @@ class AutonaBracketWidget(QDockWidget):
             QApplication.translate("app", "Loading bracket..."))
         self._bracketPlaceholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._bracketPlaceholder.setStyleSheet(
-            "color: #B5ADA0; font-size: 11pt; padding: 40px;")
+            f"color: {UI.palette()['text_secondary']}; "
+            "font-size: 11pt; padding: 40px;")
         outerLayout.layout().addWidget(self._bracketPlaceholder)
 
         self.phaseSelection: QComboBox = self.findChild(
