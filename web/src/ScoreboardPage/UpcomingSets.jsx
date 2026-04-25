@@ -127,7 +127,7 @@ export default class UpcomingSets extends React.Component {
                 <CardHeader
                     title={`Upcoming Sets`}
                     action={
-                        <IconButton onClick={() => this.setState({...this.state, expanded: !this.state.expanded})}>
+                        <IconButton size="small" onClick={() => this.setState({...this.state, expanded: !this.state.expanded})}>
                             <ExpandMore sx={{
                                 transform: this.state.expanded ? 'rotate(0deg)' : 'rotate(270deg)'
                             }} />
@@ -140,6 +140,7 @@ export default class UpcomingSets extends React.Component {
                             <Stack direction={"row"} gap={2}>
                                 <Button
                                     variant={"outlined"}
+                                    size="small"
                                     onClick={() => this.FetchSets()}
                                 >
                                     {i18n.t("refresh_sets")}
@@ -147,6 +148,7 @@ export default class UpcomingSets extends React.Component {
 
                                 <Button
                                     variant={"outlined"}
+                                    size="small"
                                     onClick={() => this.SubmitNewSet()}
                                     disabled={!this.state.selectedSet}
                                 >
@@ -157,7 +159,7 @@ export default class UpcomingSets extends React.Component {
                             <FormGroup>
                                 <FormControlLabel
                                     control={
-                                        <Checkbox id={"show-finished-sets"} label="Show finished sets" onChange={this.showFinishedSetsChanged}  />
+                                        <Checkbox id={"show-finished-sets"} size="small" label="Show finished sets" onChange={this.showFinishedSetsChanged}  />
                                     }
                                     label={i18n.t("show_finished_sets")}
                                 />

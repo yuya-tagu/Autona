@@ -1,4 +1,3 @@
-import {darkTheme} from "../themes";
 import i18n from "i18next";
 import {RestartStageStrike, SetGentlemans, Undo, Redo} from "./postActions";
 import {GridLegacy as Grid, Button} from "@mui/material";
@@ -18,10 +17,7 @@ export function FooterControls({
   >
     <Grid item xs>
       <Button
-        size={
-          darkTheme.breakpoints.up("md") ? "large" : "small"
-        }
-        fontSize={darkTheme.breakpoints.up("md") ? 8 : ""}
+        size="small"
         fullWidth
         disabled={!canUndo}
         variant="outlined"
@@ -39,10 +35,7 @@ export function FooterControls({
     </Grid>
     <Grid item xs>
       <Button
-        size={
-          darkTheme.breakpoints.up("md") ? "large" : "small"
-        }
-        fontSize={darkTheme.breakpoints.up("md") ? 8 : ""}
+        size="small"
         fullWidth
         disabled={!canRedo}
         variant="outlined"
@@ -64,10 +57,7 @@ export function FooterControls({
           flexDirection: { xs: "column", lg: "unset" },
           fontSize: { xs: 10, lg: "unset" },
         }}
-        size={
-          darkTheme.breakpoints.up("md") ? "large" : "small"
-        }
-        fontSize={darkTheme.breakpoints.up("md") ? 8 : ""}
+        size="small"
         fullWidth
         variant={
           isGentlemans ? "contained" : "outlined"
@@ -82,10 +72,7 @@ export function FooterControls({
     </Grid>
     <Grid item xs>
       <Button
-        size={
-          darkTheme.breakpoints.up("md") ? "large" : "small"
-        }
-        fontSize={darkTheme.breakpoints.up("md") ? 8 : ""}
+        size="small"
         fullWidth
         variant="outlined"
         sx={{

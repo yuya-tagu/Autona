@@ -124,6 +124,7 @@ export const Header = ({onSelectedGameChange, ...rest}) => {
                 >
                     <span>Game:&nbsp;</span>
                     <Select
+                      size="small"
                       sx={{
                           '.MuiSelect-select': {
                               paddingY: 0,
@@ -163,6 +164,7 @@ export const Header = ({onSelectedGameChange, ...rest}) => {
                 {/* Visibility toggle button */}
                 <IconButton
                     color="inherit"
+                    size="small"
                     onClick={(e) => setVisMenuAnchor(e.currentTarget)}
                     title={i18n.t("visibility_settings")}
                     sx={{ml: 'auto'}}

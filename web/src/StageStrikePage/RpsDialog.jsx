@@ -1,7 +1,6 @@
 import {Button, Dialog, DialogContent, DialogTitle, GridLegacy as Grid, Typography} from "@mui/material";
 import i18n from "../i18n/config";
 import {Box} from "@mui/system";
-import {darkTheme} from "../themes";
 import {ReportRpsWin} from "./postActions";
 
 export function RpsDialog({playerNames}) {
@@ -38,10 +37,7 @@ export function RpsDialog({playerNames}) {
         >
           <Grid item xs>
             <Button
-              size={
-                darkTheme.breakpoints.up("md") ? "large" : "small"
-              }
-              fontSize={darkTheme.breakpoints.up("md") ? 8 : ""}
+              size="small"
               fullWidth
               color="p1color"
               variant="contained"
@@ -54,10 +50,7 @@ export function RpsDialog({playerNames}) {
           </Grid>
           <Grid item xs>
             <Button
-              size={
-                darkTheme.breakpoints.up("md") ? "large" : "small"
-              }
-              fontSize={darkTheme.breakpoints.up("md") ? 8 : ""}
+              size="small"
               fullWidth
               color="p2color"
               variant="contained"
@@ -76,8 +69,7 @@ export function RpsDialog({playerNames}) {
           {i18n.t("randomize")}
         </Typography>
         <Button
-          size={darkTheme.breakpoints.up("md") ? "large" : "small"}
-          fontSize={darkTheme.breakpoints.up("md") ? 8 : ""}
+          size="small"
           fullWidth
           color="success"
           variant="outlined"

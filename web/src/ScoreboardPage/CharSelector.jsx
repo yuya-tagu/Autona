@@ -67,6 +67,7 @@ export function CharSelector({
                         <TextField
                             {...params}
                             label={i18n.t("character")}
+                            size="small"
                         />
                     </div>)
             }
@@ -81,6 +82,7 @@ export function CharSelector({
             }}
             label={"Skin"}
             select
+            size="small"
             value={hasCharName ? charSkin : ''}
             disabled={!hasCharName}
             onChange={onCharSkinChanged}

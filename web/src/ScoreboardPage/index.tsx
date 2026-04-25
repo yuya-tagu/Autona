@@ -87,6 +87,7 @@ export default function ScoreboardPage(props: any) {
                         <Box display="flex" justifyContent="center" mt={4}>
                             <Button
                                 variant={"outlined"}
+                                size="small"
                                 color="error"
                                 onClick={() => {
                                     fetch(`http://${window.location.hostname}:${BACKEND_PORT}/scoreboard${SCOREBOARD_ID}-clear-all`)
