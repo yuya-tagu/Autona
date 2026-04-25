@@ -27,6 +27,13 @@ class StateManager:
     saveBlocked = 0
     signals = StateManagerSignals()
     changedKeys = []
+    # Monotonically increasing counter incremented on every state mutation
+    # broadcast (delta or big change). Clients use it to detect dropped or
+    # out-of-order events and request a full snapshot when discontinuous
+    # (Design.md §3.2.3 R-Sync-5..9 / R-OBS-3a..b).
+    revision = 0
+    # Legacy alias kept for any in-process code that still references the
+    # old name. Both attributes always carry the same value.
     deltaIndex = 0
 
     lock = threading.RLock()
@@ -66,13 +73,17 @@ class StateManager:
                 )
                 delta = Delta(diff).to_flat_dicts()
                 if len(delta) > 100:
-                    StateManager.deltaIndex += 1
+                    StateManager._bumpRevision()
                     StateManager.signals.state_big_change.emit()
                 elif len(delta) > 0:
                     try:
-                        StateManager.deltaIndex += 1
+                        StateManager._bumpRevision()
                         StateManager.signals.state_updated.emit({
-                            'delta_index': StateManager.deltaIndex,
+                            # `revision` is the canonical name (Design.md §3.2.3).
+                            # `delta_index` is kept as a legacy alias for older
+                            # OBS templates / not-yet-rebuilt clients.
+                            'revision': StateManager.revision,
+                            'delta_index': StateManager.revision,
                             'delta': Delta(diff).to_flat_dicts()
                         })
                     except TypeError:
@@ -87,9 +98,15 @@ class StateManager:
                     old_state = StateManager.lastSavedState
                     StateManager.lastSavedState = state_snapshot
 
+                    revision_at_save = StateManager.revision
+
                     def _export(state_snap, old_snap, ref_diff):
                         with open("./out/program_state.json", 'wb', buffering=8192) as file:
                             state_snap["timestamp"] = time.time()
+                            # Stamp revision so degraded poll clients (file
+                            # mode) can validate continuity (Design.md §2.3
+                            # R-OBS-3a, §8 T-12).
+                            state_snap["revision"] = revision_at_save
                             # Drop OPT_INDENT_2 — OBS overlays / Web UI parse
                             # JSON regardless of whitespace, and indenting a
                             # multi-MB tournament state inflates file size
@@ -164,16 +181,25 @@ class StateManager:
         return deep_get(StateManager.state, key, default)
 
     def GetFullState():
-        """Return a snapshot of the full state dict with the current delta index.
+        """Return a snapshot of the full state dict with the current revision.
 
         Thread-safe: acquires lock and returns a clone so callers cannot
-        mutate the live state.
+        mutate the live state. Both `revision` (canonical, Design.md §3.2.3)
+        and `delta_index` (legacy alias) are included so older clients keep
+        working.
         """
         with StateManager.lock:
             return {
                 'state': deep_clone(StateManager.state),
-                'delta_index': StateManager.deltaIndex
+                'revision': StateManager.revision,
+                'delta_index': StateManager.revision,
             }
+
+    @staticmethod
+    def _bumpRevision():
+        # Keep `deltaIndex` legacy attr in sync with `revision`.
+        StateManager.revision += 1
+        StateManager.deltaIndex = StateManager.revision
 
     def ExportText(oldState, diff, stateSnapshot=None):
         # logger.info("ExportState")

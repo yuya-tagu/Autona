@@ -101,7 +101,7 @@ class WebServer(QThread):
     # bursts (snappy UI), longer for large bursts (CPU breathing room).
     _delta_lock = threading.Lock()
     _delta_pending = []          # list of merged delta-flat-dicts
-    _delta_pending_index = -1    # latest delta_index in batch
+    _delta_pending_revision = -1 # latest revision in batch (Design.md §3.2.3 R-Sync-6)
     _delta_timer = None          # threading.Timer awaiting flush
 
     @staticmethod
@@ -121,12 +121,16 @@ class WebServer(QThread):
             if not WebServer._delta_pending:
                 WebServer._delta_timer = None
                 return
+            # Emit both `revision` (canonical) and `delta_index` (legacy
+            # alias) so old OBS templates / not-yet-rebuilt clients keep
+            # working (Design.md §3.2.3 R-Sync-6).
             payload = {
-                'delta_index': WebServer._delta_pending_index,
+                'revision': WebServer._delta_pending_revision,
+                'delta_index': WebServer._delta_pending_revision,
                 'delta': WebServer._delta_pending,
             }
             WebServer._delta_pending = []
-            WebServer._delta_pending_index = -1
+            WebServer._delta_pending_revision = -1
             WebServer._delta_timer = None
         try:
             WebServer.ws_emit('program_state_update', payload)
@@ -141,12 +145,14 @@ class WebServer(QThread):
             return
 
         delta = changes.get('delta') or []
-        idx = changes.get('delta_index', -1)
+        # Prefer `revision` (Design.md §3.2.3) and fall back to legacy
+        # `delta_index` so this stays compatible with older payloads.
+        rev = changes.get('revision', changes.get('delta_index', -1))
 
         with WebServer._delta_lock:
             WebServer._delta_pending.extend(delta)
-            if idx > WebServer._delta_pending_index:
-                WebServer._delta_pending_index = idx
+            if rev > WebServer._delta_pending_revision:
+                WebServer._delta_pending_revision = rev
 
             if WebServer._delta_timer is None:
                 interval = WebServer._adaptive_debounce_sec(
