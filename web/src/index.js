@@ -6,18 +6,18 @@ import reportWebVitals from './reportWebVitals';
 
 import {BrowserRouter, Navigate, Route, Routes} from "react-router-dom";
 import ScoreboardPage from "./ScoreboardPage";
-import {darkTheme} from "./themes";
-import {ThemeProvider} from "@mui/material/styles";
-import {CssBaseline} from "@mui/material";
 import {tshStore} from "./redux/store";
 import {Provider} from "react-redux";
+import ThemeShell from "./ThemeShell";
 
+// ThemeShell sits inside the Redux Provider so it can subscribe to
+// tshState.ui.light_mode and swap the MUI theme when the backend
+// broadcasts a change (Design.md §5.4.2 / §8 T-8).
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
-      <ThemeProvider theme={darkTheme}>
-          <CssBaseline />
-          <Provider store={tshStore}>
+      <Provider store={tshStore}>
+          <ThemeShell>
               <BrowserRouter>
                   <Routes>
                       <Route
@@ -34,8 +34,8 @@ root.render(
                       />
                   </Routes>
               </BrowserRouter>
-          </Provider>
-      </ThemeProvider>
+          </ThemeShell>
+      </Provider>
   </React.StrictMode>
 );
 
