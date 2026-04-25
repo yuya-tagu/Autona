@@ -195,7 +195,9 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None, scoreb
     # fall back to file for non-preview (final) generation
     data = None
     try:
-        state = StateManager.state
+        # Use lock-acquired snapshot rather than touching StateManager.state
+        # directly (Design.md §3.2.5).
+        state = StateManager.GetFullState().get("state", {})
         if state and state.get("game", {}).get("codename"):
             has_players = True
             for i in [1, 2]:
@@ -225,7 +227,7 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None, scoreb
             if isPreview:
                 game_codename = "test"
                 try:
-                    game_codename = StateManager.state.get("game", {}).get("codename", "test")
+                    game_codename = StateManager.GetFullState().get("state", {}).get("game", {}).get("codename", "test")
                 except Exception:
                     pass
                 data = createFalseData(gameAssetManager, deep_get(
