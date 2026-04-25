@@ -1479,18 +1479,18 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 
 ### 8.2 優先度: 中（設計負債の解消）
 
-| ID | タスク | 関連 § | 影響範囲 |
-|----|------|------|--------|
-| **T-8** | React Web UI のテーマ切替を実装。`StateManager.ui.light_mode` を購読、localStorage は仮表示キャッシュ | §5.4 | `web/src/index.js`, `web/src/themes.js`, Redux slice 追加 |
-| **T-9** | `ui.light_mode` キーを StateManager に追加し、SettingsManager 変更時に broadcast する仕組み | §3.1.2, §5.4.2 | `src/Autona.py`（`light_mode` トグル時）、`src/SettingsManager.py` |
-| **T-10** | テーマ切替時の同期: PyQt 側のテーマ切替 → SettingsManager → broadcast → React も追従 | §5.4.2 | `src/ui_constants.py:notify_theme_change`、`AutonaWebServerActions` に `set_light_mode` Action 追加 |
-| **T-11** | `BlockSaving()` / `ReleaseSaving()` の手動ペアを `with StateManager.SaveBlock():` に置き換え | §3.2.2 R-Sync-2 | 既存 PyQt Widget 全般、try/finally で囲んでいる箇所 |
+| ID | タスク | 関連 § | 影響範囲 | 状態 |
+|----|------|------|--------|------|
+| **T-8** | React Web UI のテーマ切替を実装。`StateManager.ui.light_mode` を購読、localStorage は仮表示キャッシュ | §5.4 | `web/src/index.js`, `web/src/ThemeShell.tsx`, `web/src/backendDataTypes.d.ts` | ✅ 完了（M2） |
+| **T-9** | `ui.light_mode` キーを StateManager に追加し、SettingsManager 変更時に broadcast する仕組み | §3.1.2, §5.4.2 | `src/Autona.py:LoadTheme` で `StateManager.Set("ui.light_mode", ...)` | ✅ 完了（M2） |
+| **T-10** | テーマ切替時の同期: PyQt 側のテーマ切替 → SettingsManager → broadcast → React も追従 | §5.4.2 | `src/AutonaWebServerActions.set_light_mode`, `src/AutonaWebServer` の `/set-light-mode` + `set_light_mode` socketio, `WindowSignals.LightModeChanged` | ✅ 完了（M2） |
+| **T-11** | `BlockSaving()` / `ReleaseSaving()` の手動ペアを `with StateManager.SaveBlock():` に置き換え | §3.2.2 R-Sync-2 | 既存 PyQt Widget 全般、try/finally で囲んでいる箇所 | 未着手 |
 | **T-12** | OBS HTML poll モード（`UpdateData()` 64ms ポーリング）の degraded 化と revision 検証実装 | §2.3 R-OBS-3, §3.2.3 | `layout/include/globals.js` | ✅ 完了（M1b） |
-| **T-13** | React `size="small"` を全フォーム要素に徹底（指摘事項） | §2.2 R-React-5 | `web/src/**/*.tsx` の TextField / Select / Button 等 |
-| **T-14** | ハードコード hex 色をトークン参照に置換（PyQt 12+ 箇所、React App.css 数箇所） | §5.1.6 | `src/AutonaBracketView.py` 他、`web/src/App.css` |
-| **T-15** | `AutonaAnalysisWidget` の仕様反映済み確認と回帰テスト追加 | §4.1 | `src/AutonaAnalysisWidget.py` のテスト整備 |
-| **T-16** | サムネイルメタデータ（`_title.txt` / `_desc.txt`）を `thumbnail_config.generate_metadata` の設定で制御化 | §4.4.4 | `src/thumbnail/main_generate_thumbnail.py:save_result`, `AutonaThumbnailSettingsWidget` のチェックボックス追加 |
-| **T-17** | OBS テンプレ設定ダイアログに「OBS Studio 標準ホットキーとの衝突警告」を追加 | §6.4.2 | `AutonaSettingsWindow` 関連 |
+| **T-13** | React `size="small"` を全フォーム要素に徹底（指摘事項） | §2.2 R-React-5 | `web/src/**/*.tsx` の TextField / Select / Button 等 | 未着手 |
+| **T-14** | ハードコード hex 色をトークン参照に置換（PyQt 12+ 箇所、React App.css 数箇所） | §5.1.6 | `src/AutonaBracketView.py` 他、`web/src/App.css` | 未着手 |
+| **T-15** | `AutonaAnalysisWidget` の仕様反映済み確認と回帰テスト追加 | §4.1 | `src/AutonaAnalysisWidget.py` のテスト整備 | 未着手 |
+| **T-16** | サムネイルメタデータ（`_title.txt` / `_desc.txt`）を `thumbnail_config.generate_metadata` の設定で制御化 | §4.4.4 | `src/thumbnail/main_generate_thumbnail.py:save_result`, `AutonaThumbnailSettingsWidget` のチェックボックス追加 | 未着手 |
+| **T-17** | OBS テンプレ設定ダイアログに「OBS Studio 標準ホットキーとの衝突警告」を追加 | §6.4.2 | `AutonaSettingsWindow` 関連 | 未着手 |
 
 ### 8.3 優先度: 低（長期的な構造改善）
 
