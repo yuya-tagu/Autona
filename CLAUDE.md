@@ -225,6 +225,16 @@ root
 
 ---
 
+## 正本ドキュメント
+
+- **`.claude/design/Design.md`**
+  - Autona の UI 実装方式・データモデル・画面仕様・デザインシステム・ホットキー仕様の正本。
+  - UI / StateManager / React Web UI / OBS layout / 画像生成 / ホットキーに関する実装判断では、まず本書を参照する。
+  - 実装と本書が乖離する場合は、本書を優先し、差分は `.claude/plans/ui-design-refactor.md` または Design.md §8 リファクタ移行プランにタスク化する。
+  - `.claude/architecture/phase-a-b/` 配下の Phase A/B 調査ファイル群は、本書の根拠資料として扱う（矛盾時は Design.md を優先）。
+
+---
+
 ## `.claude/` 構成と運用ルール
 
 技術的な詳細ルール・自動化は `.claude/` 配下に分離している。
@@ -241,6 +251,7 @@ root
 | `plans/*.md` | フェーズ単位の作業計画 | 目的・原則・Step一覧・成果物・完了条件 | 1セッション分の具体指示（prompts に書く） |
 | `prompts/*.md` | 1セッション分の指示書 | 対象範囲・手順・制約・報告フォーマット | フェーズ全体のロードマップ（plans に書く） |
 | `architecture/*.md` | コードベース調査の成果物 | import 関係、状態キーパス、依存グラフ等の事実情報 | リファクタ方針・TODO（known-smells.md に書く） |
+| `design/*.md` | 正本ドキュメント | あるべき姿の仕様（UI / データモデル / 画面 / テーマ / ホットキー / 拡張ガイド / 移行プラン） | 個別の調査ログ（architecture/ に書く） |
 
 ### Rules（パス別自動ルール）
 
@@ -275,6 +286,7 @@ root
 | ファイル | 概要 |
 |---------|------|
 | `plans/refactor-phase1.md` | Python 読解と安全網フェーズの計画 |
+| `plans/ui-design-refactor.md` | UI 実装方式リファクタ計画（Design.md と対応） |
 
 ### Prompts（セッション指示書）
 
@@ -286,12 +298,25 @@ root
 
 | ファイル | 内容 |
 |---------|------|
-| `architecture/python-imports.md` | src/ の import 関係マップ |
-| `architecture/singleton-init-order.md` | シングルトン初期化順と依存グラフ |
-| `architecture/state-keys.md` | StateManager キーパスの read/write マップ |
-| `architecture/python-hotspots.md` | 巨大ファイル・関数・コード重複の特定 |
+| `architecture/README.md` | 本ディレクトリの利用ルール（正本は `design/Design.md`、ここは調査ログ） |
+| `architecture/phase-a-b/python-imports.md` | src/ の import 関係マップ |
+| `architecture/phase-a-b/singleton-init-order.md` | シングルトン初期化順と依存グラフ |
+| `architecture/phase-a-b/state-keys.md` | StateManager キーパスの read/write マップ |
+| `architecture/phase-a-b/python-hotspots.md` | 巨大ファイル・関数・コード重複の特定 |
+| `architecture/phase-a-b/ui-pyqt.md` | PyQt UI レイヤー（Phase A） |
+| `architecture/phase-a-b/ui-obs-layouts.md` | OBS HTML レイアウト（Phase A） |
+| `architecture/phase-a-b/ui-image-renderers.md` | WebEngine 画像生成（Phase A） |
+| `architecture/phase-a-b/ui-web-react.md` | React Web UI（Phase A） |
+| `architecture/phase-a-b/ui-styles-theme.md` | スタイル/テーマ定義の所在（Phase A） |
+| `architecture/phase-a-b/ui-problems.md` | 重複/同期/設定/拡張範囲/テーマ統合 + OBS/ClickUp 比較（Phase B） |
 
-※ 本ディレクトリのファイルは調査の事実情報のみを記録する。リファクタ方針や TODO は `.claude/known-smells.md` に分離する。
+※ 本ディレクトリのファイルは調査の事実情報のみを記録する。正本は `.claude/design/Design.md`。矛盾時は Design.md 優先。リファクタ方針や TODO は Design.md §8 と `.claude/known-smells.md` に分離する。
+
+### Design（正本ドキュメント）
+
+| ファイル | 内容 |
+|---------|------|
+| `design/Design.md` | UI 実装方式・データモデル・画面仕様・デザインシステム・ホットキー仕様の正本 |
 
 ### その他
 
