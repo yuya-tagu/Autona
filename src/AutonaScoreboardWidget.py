@@ -1421,51 +1421,48 @@ class AutonaScoreboardWidget(QWidget):
                     w.hide()
 
     def SwapTeams(self):
-        StateManager.BlockSaving()
-
-        # Lock all player widgets
-        for p in self.playerWidgets:
-            p.dataLock.acquire()
-
-        try:
-            for i, p in enumerate(self.team1playerWidgets):
-                p.SwapWith(self.team2playerWidgets[i])
-
-            # Scores
-            scoreLeft = self.scoreDisplay1.value()
-            self.scoreDisplay1.setValue(self.scoreDisplay2.value())
-            self.scoreDisplay2.setValue(scoreLeft)
-
-            # Losers
-            losersLeft = self.team1column.findChild(
-                QCheckBox, "losers").isChecked()
-            self.team1column.findChild(QCheckBox, "losers").setChecked(
-                self.team2column.findChild(QCheckBox, "losers").isChecked())
-            self.team2column.findChild(
-                QCheckBox, "losers").setChecked(losersLeft)
-
-            # Team Names
-            teamNameLeft = self.team1column.findChild(
-                QLineEdit, "teamName").text()
-            self.team1column.findChild(QLineEdit, "teamName").setText(
-                self.team2column.findChild(QLineEdit, "teamName").text())
-            self.team2column.findChild(
-                QLineEdit, "teamName").setText(teamNameLeft)
-            self.team1column.findChild(
-                QLineEdit, "teamName").editingFinished.emit()
-            self.team2column.findChild(
-                QLineEdit, "teamName").editingFinished.emit()
-            
-            self.individualGameTracker.SwapStageResults()
-            self.teamsSwapped = not self.teamsSwapped
-        finally:
-            StateManager.Set(
-                f"score.{self.scoreboardNumber}.teamsSwapped", self.teamsSwapped)
-
+        with StateManager.SaveBlock():
+            # Lock all player widgets
             for p in self.playerWidgets:
-                p.dataLock.release()
+                p.dataLock.acquire()
 
-            StateManager.ReleaseSaving()
+            try:
+                for i, p in enumerate(self.team1playerWidgets):
+                    p.SwapWith(self.team2playerWidgets[i])
+
+                # Scores
+                scoreLeft = self.scoreDisplay1.value()
+                self.scoreDisplay1.setValue(self.scoreDisplay2.value())
+                self.scoreDisplay2.setValue(scoreLeft)
+
+                # Losers
+                losersLeft = self.team1column.findChild(
+                    QCheckBox, "losers").isChecked()
+                self.team1column.findChild(QCheckBox, "losers").setChecked(
+                    self.team2column.findChild(QCheckBox, "losers").isChecked())
+                self.team2column.findChild(
+                    QCheckBox, "losers").setChecked(losersLeft)
+
+                # Team Names
+                teamNameLeft = self.team1column.findChild(
+                    QLineEdit, "teamName").text()
+                self.team1column.findChild(QLineEdit, "teamName").setText(
+                    self.team2column.findChild(QLineEdit, "teamName").text())
+                self.team2column.findChild(
+                    QLineEdit, "teamName").setText(teamNameLeft)
+                self.team1column.findChild(
+                    QLineEdit, "teamName").editingFinished.emit()
+                self.team2column.findChild(
+                    QLineEdit, "teamName").editingFinished.emit()
+
+                self.individualGameTracker.SwapStageResults()
+                self.teamsSwapped = not self.teamsSwapped
+            finally:
+                StateManager.Set(
+                    f"score.{self.scoreboardNumber}.teamsSwapped", self.teamsSwapped)
+
+                for p in self.playerWidgets:
+                    p.dataLock.release()
 
     def ResetScore(self):
         self.scoreDisplay1.setValue(0)
@@ -1492,11 +1489,8 @@ class AutonaScoreboardWidget(QWidget):
 
         logger.info("STATION SETS LOADED -----------------------------")
         logger.info(data)
-        StateManager.BlockSaving()
-
-        StateManager.Set(f"score.{self.scoreboardNumber}.station_queue", data)
-
-        StateManager.ReleaseSaving()
+        with StateManager.SaveBlock():
+            StateManager.Set(f"score.{self.scoreboardNumber}.station_queue", data)
 
     def NewSetSelected(self, data):
         if not SettingsManager.Get("general.disable_autoupdate", False):
@@ -1699,10 +1693,9 @@ class AutonaScoreboardWidget(QWidget):
                 if team == 1:
                     self.colorButton2.setColor(value)
                 if team in (0, 1):
-                    StateManager.BlockSaving()
-                    StateManager.Set(
-                        f"score.{self.scoreboardNumber}.team.{team + 1}.color", value)
-                    StateManager.ReleaseSaving()
+                    with StateManager.SaveBlock():
+                        StateManager.Set(
+                            f"score.{self.scoreboardNumber}.team.{team + 1}.color", value)
 
 
     # Modifies the current set data. Does not check for id, so do not call this with data that may lead to another hbox incident

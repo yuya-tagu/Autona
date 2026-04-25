@@ -106,24 +106,23 @@ class AutonaStatsUtil:
                 StateManager.Set(f"score.{self.scoreboardNumber}.last_sets.2", {})
 
     def UpdateLastSets(self, data):
-        StateManager.BlockSaving()
-        i = 1
-        for set in data.get("last_sets", []):
-            StateManager.Set(f"score.{self.scoreboardNumber}.last_sets." + data.get("playerNumber") + "." + str(i), {
-                "phase_id": set.get("phase_id"),
-                "phase_name": set.get("phase_name"),
-                "round_name": set.get("round_name"),
-                "player_score": set.get("player1_score"),
-                "player_seed": set.get("player1_seed"),
-                "player_team": set.get("player1_team"),
-                "player_name": set.get("player1_name"),
-                "oponent_score": set.get("player2_score"),
-                "oponent_seed": set.get("player2_seed"),
-                "oponent_team": set.get("player2_team"),
-                "oponent_name": set.get("player2_name")
-            })
-            i += 1
-        StateManager.ReleaseSaving()
+        with StateManager.SaveBlock():
+            i = 1
+            for set in data.get("last_sets", []):
+                StateManager.Set(f"score.{self.scoreboardNumber}.last_sets." + data.get("playerNumber") + "." + str(i), {
+                    "phase_id": set.get("phase_id"),
+                    "phase_name": set.get("phase_name"),
+                    "round_name": set.get("round_name"),
+                    "player_score": set.get("player1_score"),
+                    "player_seed": set.get("player1_seed"),
+                    "player_team": set.get("player1_team"),
+                    "player_name": set.get("player1_name"),
+                    "oponent_score": set.get("player2_score"),
+                    "oponent_seed": set.get("player2_seed"),
+                    "oponent_team": set.get("player2_team"),
+                    "oponent_name": set.get("player2_name")
+                })
+                i += 1
 
     def GetPlayerHistoryStandingsP1(self):
         # Only if 1 player on each side
@@ -146,20 +145,19 @@ class AutonaStatsUtil:
                 StateManager.Set(f"score.{self.scoreboardNumber}.history_sets.2", {})
 
     def UpdateHistorySets(self, data):
-        StateManager.BlockSaving()
-        i = 1
-        for set in data.get("history_sets", []):
-            StateManager.Set(f"score.{self.scoreboardNumber}.history_sets." + data.get("playerNumber") + "." + str(i), {
-                "placement": set.get("placement"),
-                "event_name": set.get("event_name"),
-                "tournament_name": set.get("tournament_name"),
-                "entrants": set.get("entrants"),
-                "event_date_month": datetime.fromtimestamp(set.get("event_date")).strftime("%B"),
-                "event_date_day": datetime.fromtimestamp(set.get("event_date")).strftime("%d"),
-                "event_date_year": datetime.fromtimestamp(set.get("event_date")).strftime("%Y")
-            })
-            i += 1
-        StateManager.ReleaseSaving()
+        with StateManager.SaveBlock():
+            i = 1
+            for set in data.get("history_sets", []):
+                StateManager.Set(f"score.{self.scoreboardNumber}.history_sets." + data.get("playerNumber") + "." + str(i), {
+                    "placement": set.get("placement"),
+                    "event_name": set.get("event_name"),
+                    "tournament_name": set.get("tournament_name"),
+                    "entrants": set.get("entrants"),
+                    "event_date_month": datetime.fromtimestamp(set.get("event_date")).strftime("%B"),
+                    "event_date_day": datetime.fromtimestamp(set.get("event_date")).strftime("%d"),
+                    "event_date_year": datetime.fromtimestamp(set.get("event_date")).strftime("%Y")
+                })
+                i += 1
 
     def GetSetUpsetFactor(self):
         if len(self.scoreboard.team1playerWidgets) == 1:
@@ -187,13 +185,10 @@ class AutonaStatsUtil:
         pass
 
     def UpdateStreamQueue(self, data):
-        StateManager.BlockSaving()
-
-        StateManager.Set(f"streamQueue", data)
-        StateManager.Set(f"currentStream",
-                         SettingsManager.Get("twitch_username"))
-
-        StateManager.ReleaseSaving()
+        with StateManager.SaveBlock():
+            StateManager.Set(f"streamQueue", data)
+            StateManager.Set(f"currentStream",
+                             SettingsManager.Get("twitch_username"))
 
     # Calculation of Seeding/Placement to determine
     # Upset Factor or Seeding Performance Rating
