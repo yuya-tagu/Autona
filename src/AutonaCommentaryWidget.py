@@ -157,10 +157,26 @@ class AutonaCommentaryWidget(QDockWidget):
             comm.setParent(None)
             self.commentaryWidgets.remove(comm)
 
-        if StateManager.Get(f'commentary'):
-            for k in list(StateManager.Get(f'commentary').keys()):
-                if not k.isnumeric() or (k.isnumeric() and int(k) > number):
-                    StateManager.Unset(f'commentary.{k}')
+        self._compactCommentaryState(number)
+
+    def _compactCommentaryState(self, number):
+        # Drop non-numeric keys and indices outside [1, number], then
+        # renumber remaining entries so commentary.{1..N} stays
+        # contiguous (Design.md §3.1.2 / §8 T-2).
+        commentary = StateManager.Get('commentary')
+        if not commentary:
+            return
+
+        with StateManager.SaveBlock():
+            survivors = sorted(
+                ((int(k), v) for k, v in list(commentary.items())
+                 if k.isnumeric() and 1 <= int(k) <= number),
+                key=lambda kv: kv[0],
+            )
+            for k in list(commentary.keys()):
+                StateManager.Unset(f'commentary.{k}')
+            for new_idx, (_old_idx, value) in enumerate(survivors, start=1):
+                StateManager.Set(f'commentary.{new_idx}', value)
 
     def MoveUp(self, index):
         if index > 0:
