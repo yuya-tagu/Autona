@@ -70,6 +70,10 @@ export default function websocketInit() {
     socket.on("disconnect", () => {
         console.log("SocketIO disconnected.")
         tshStore.dispatch(websocketInfoSlice.actions.setStatus("disconnected"));
+        // Per Design.md §3.2.3 R-Sync-9, the server pushes a fresh
+        // `program_state` event on every (re)connect, so reconnecting is
+        // enough — the resulting overwrite() reducer adopts the new
+        // revision and drops any deltas accumulated mid-disconnect.
         socket.connect();
     });
 
