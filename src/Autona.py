@@ -919,7 +919,8 @@ class Window(QMainWindow):
         self.LoadTheme()
 
     def LoadTheme(self):
-        if SettingsManager.Get("light_mode", False):
+        light = bool(SettingsManager.Get("light_mode", False))
+        if light:
             qdarktheme.setup_theme(
                 "light",
                 custom_colors=UI.LIGHT_CUSTOM_COLORS,
@@ -929,6 +930,12 @@ class Window(QMainWindow):
                 "dark",
                 custom_colors=UI.DARK_CUSTOM_COLORS,
                 additional_qss=UI.global_qss())
+
+        # Broadcast cache for React / OBS HTML clients. Source-of-truth
+        # remains SettingsManager.light_mode (Design.md §5.4.1); this
+        # mirror exists so subscribers can react via the standard
+        # state_updated channel (Design.md §5.4.2).
+        StateManager.Set("ui.light_mode", light)
 
     def MigrateWindow(self):
         migrateWindow = QDialog(self)
