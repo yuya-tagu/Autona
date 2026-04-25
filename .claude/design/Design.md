@@ -313,7 +313,7 @@ score.{N}
 ├── last_sets.{1|2}.{I}              W R
 ├── history_sets.{1|2}.{I}           W R
 ├── recent_sets                      W R    (dict: sets, request_time)
-└── upset_factor                     W R    ※番号なし版（`score.upset_factor`）は **削除**
+└── upset_factor                     W R    ※番号なし版（`score.upset_factor`）は **削除済**（T-1 完了）
 ```
 
 ##### `game` — 選択中ゲーム情報
@@ -476,8 +476,8 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 
 | 問題 | 規約上の扱い |
 |-----|------------|
-| `score.upset_factor`（番号なし）二重定義 | 番号なし版を **削除**（リファクタタスク。§8） |
-| `commentary.{N}` インデックス欠番 | Unset 時に**インデックスを詰める**実装に変更（リファクタタスク。§8） |
+| `score.upset_factor`（番号なし）二重定義 | 番号なし版は **削除済**（§8 T-1 完了） |
+| `commentary.{N}` インデックス欠番 | Unset 時に**インデックスを詰める**実装済（§8 T-2 完了） |
 | `StateManager.state` 直接参照 | `GetFullState()` に置き換え。直接参照は禁止（§3.1.1） |
 | OBS HTML poll の順序保証なし | revision 検証で full snapshot 再取得に統一（R-Sync-8） |
 
@@ -1467,15 +1467,15 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 
 ### 8.1 優先度: 高（仕様違反の解消）
 
-| ID | タスク | 関連 § | 影響範囲 |
-|----|------|------|--------|
-| **T-1** | `score.upset_factor`（番号なし）の二重定義を削除し、`score.{N}.upset_factor` のみに統一 | §3.1.2, §3.2.5 | `src/AutonaStatsUtil.py:177-180` 周辺、参照側の修正 |
-| **T-2** | `commentary.{N}` Unset 時にインデックスを詰める実装に変更 | §3.1.2, §3.2.5 | `src/AutonaCommentaryWidget.py` の `RemoveExtraCommentators` |
-| **T-3** | `StateManager.state` 直接参照を `GetFullState()`（ロック取得版）に置き換え | §3.1.1, §3.2.5 | `src/AutonaWebServerActions.py:41` 他 |
-| **T-4** | `StateManager.SaveState` に `revision` を単調増加で付与、`program_state` / `program_state_update` イベントに含める | §3.2.3, §3.2.5 | `src/StateManager.py`, `src/AutonaWebServer.py`, OBS layout `globals.js`, React `websocketInit.ts` |
-| **T-5** | クライアント（OBS / React）に `revision` 連続性検証 + 不連続時の full snapshot 再取得を実装 | §3.2.3 | `layout/include/globals.js`, `web/src/ScoreboardPage/websocketInit.ts` |
-| **T-6** | React の `applySavedDeltas` バッチ間隔を 1000ms → **既定 100ms / 上限 200ms** に変更 | §2.2 R-React-6, §3.2.4 | `web/src/ScoreboardPage/websocketInit.ts:82-87` |
-| **T-7** | accent 色を `#F5A545`（オレンジ）→ `#8A1A2C`（クリムゾン）に統合 | §5.1 | `web/src/themes.js` の DARK/LIGHT TOKENS、関連 component override |
+| ID | タスク | 関連 § | 影響範囲 | 状態 |
+|----|------|------|--------|------|
+| **T-1** | `score.upset_factor`（番号なし）の二重定義を削除し、`score.{N}.upset_factor` のみに統一 | §3.1.2, §3.2.5 | `src/AutonaStatsUtil.py:176-179` 周辺 | ✅ 完了（M1a） |
+| **T-2** | `commentary.{N}` Unset 時にインデックスを詰める実装に変更 | §3.1.2, §3.2.5 | `src/AutonaCommentaryWidget.py` の `SetCommentatorNumber` / `_compactCommentaryState` | ✅ 完了（M1a） |
+| **T-3** | `StateManager.state` 直接参照を `GetFullState()`（ロック取得版）に置き換え | §3.1.1, §3.2.5 | `src/AutonaWebServerActions.py:41`, `src/result/main_generate_result.py`, `src/thumbnail/main_generate_thumbnail.py` | ✅ 完了（M1a） |
+| **T-4** | `StateManager.SaveState` に `revision` を単調増加で付与、`program_state` / `program_state_update` イベントに含める | §3.2.3, §3.2.5 | `src/StateManager.py`, `src/AutonaWebServer.py`, OBS layout `globals.js`, React `websocketInit.ts` | 未着手 |
+| **T-5** | クライアント（OBS / React）に `revision` 連続性検証 + 不連続時の full snapshot 再取得を実装 | §3.2.3 | `layout/include/globals.js`, `web/src/ScoreboardPage/websocketInit.ts` | 未着手 |
+| **T-6** | React の `applySavedDeltas` バッチ間隔を 1000ms → **既定 100ms / 上限 200ms** に変更 | §2.2 R-React-6, §3.2.4 | `web/src/ScoreboardPage/websocketInit.ts:82-87` | ✅ 完了（M1a） |
+| **T-7** | accent 色を `#F5A545`（オレンジ）→ `#8A1A2C`（クリムゾン）に統合 | §5.1 | `web/src/themes.js` の DARK/LIGHT TOKENS、`web/public/manifest.json`、`web/public/index.html` | ✅ 完了（M1a） |
 
 ### 8.2 優先度: 中（設計負債の解消）
 
