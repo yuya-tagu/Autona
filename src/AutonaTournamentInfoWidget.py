@@ -109,7 +109,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
         ])
 
         self.iconView: QLabel = self.findChild(QLabel, "iconView")
-        L.apply_media_preview(self.iconView, min_width=100, min_height=100)
+        L.apply_media_preview(self.iconView)
 
         self.UpdateIcon()
 
@@ -129,7 +129,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
         self.btClearBanner.clicked.connect(self.SetDefaultBanner)
 
         self.bannerView: QLabel = self.findChild(QLabel, "bannerView")
-        L.apply_media_preview(self.bannerView, min_width=178, min_height=100)
+        L.apply_media_preview(self.bannerView)
 
         self.UpdateBanner()
 
@@ -179,7 +179,10 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         self.streamThumbPreview: QLabel = self.findChild(
             QLabel, "streamThumbPreview")
-        L.apply_media_preview(self.streamThumbPreview, min_width=320, min_height=180)
+        # The .ui pins this slot to 160×90 via maximumSize — don't pass
+        # min_* here or Qt resolves min>max in favour of min and the
+        # label balloons to the requested minimum.
+        L.apply_media_preview(self.streamThumbPreview)
         self.streamThumbPath: QLabel = self.findChild(
             QLabel, "streamThumbPath")
 

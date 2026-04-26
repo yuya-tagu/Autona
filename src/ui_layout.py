@@ -195,13 +195,20 @@ MEDIA_PREVIEW_BORDER_RADIUS = UI.RADIUS_SM
 
 
 def apply_media_preview(label: QLabel,
-                        min_width: int = 178,
-                        min_height: int = 100) -> None:
+                        min_width: int | None = None,
+                        min_height: int | None = None) -> None:
     """Style a QLabel that displays an image preview with a subtle
     bordered frame so the bounds are visible even when the pixmap is
-    transparent or smaller than the slot."""
+    transparent or smaller than the slot.
+
+    Sizes are opt-in: pass min_width / min_height only when the source
+    .ui doesn't already constrain the slot. Forcing a minimum on a
+    label that .ui pinned via maximumSize would push min above max and
+    let Qt resolve the conflict in favour of min — which is what
+    happened to streamThumbPreview before this guard was added."""
     p = UI.palette()
-    label.setMinimumSize(min_width, min_height)
+    if min_width is not None or min_height is not None:
+        label.setMinimumSize(min_width or 0, min_height or 0)
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
     label.setStyleSheet(
         f"background-color: {p['bg_tertiary']};"
