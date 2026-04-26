@@ -249,6 +249,29 @@ class AutonaSettingsWindow(QDialog):
         self.add_setting_widget(QApplication.translate(
             "settings", "Default Display Options"), SettingsWidget("display_options", displaySettings))
 
+        # Add Thumbnail settings (Design.md §8 T-16). Mirrors the
+        # generate_metadata toggle in the Thumbnail Settings dock so the
+        # option is discoverable from the main settings dialog as well.
+        thumbnailSettings = []
+        thumbnailSettings.append((
+            QApplication.translate(
+                "settings.thumbnail",
+                "Generate YouTube metadata (_title.txt / _desc.txt)"),
+            "generate_metadata",
+            "checkbox",
+            True,
+            lambda: None,
+            QApplication.translate(
+                "settings.thumbnail",
+                "Off = save the rendered thumbnail image only. "
+                "On (default) = also write _title.txt / _desc.txt "
+                "alongside the image for YouTube uploads."),
+        ))
+
+        self.add_setting_widget(QApplication.translate(
+            "settings", "Thumbnail"),
+            SettingsWidget("thumbnail_config", thumbnailSettings))
+
         # Add Bluesky settings
         bskySettings = []
         bskySettings.append((
