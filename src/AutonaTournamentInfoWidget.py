@@ -12,6 +12,7 @@ from .SettingsManager import SettingsManager
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaDirHelper import AutonaResolve
 from .AutonaColorButton import AutonaColorButton
+from . import ui_layout as L
 import traceback
 import shutil
 from pathlib import Path
@@ -77,20 +78,21 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         self.btLoadInfoFromTournament: QPushButton = self.findChild(
             QPushButton, "btLoadInfoFromTournament")
-        # Re-tag as the primary action so the accent styling kicks in.
-        self.btLoadInfoFromTournament.setObjectName("primary")
-        self.btLoadInfoFromTournament.style().unpolish(
-            self.btLoadInfoFromTournament)
-        self.btLoadInfoFromTournament.style().polish(
-            self.btLoadInfoFromTournament)
+        L.tag_button(self.btLoadInfoFromTournament, L.BUTTON_PRIMARY)
         self.btLoadInfoFromTournament.clicked.connect(self._OnLoadFromTournament)
 
         self.btClearInfo: QPushButton = self.findChild(
             QPushButton, "btClearInfo")
+        L.tag_button(self.btClearInfo, L.BUTTON_DANGER)
         self.btClearInfo.clicked.connect(lambda: [
             self.UpdateData({})
         ])
 
+        # Tournament Icon / Banner are now grouped under groupBoxMedia
+        # (see AutonaTournamentInfo.ui). Five buttons sit beside the two
+        # stacked previews: 4 explicit load/download actions + 1 unified
+        # reset. The previous per-asset Default buttons (btClearIcon /
+        # btClearBanner) were folded into btResetMediaToDefault.
         self.btLoadIconFile: QPushButton = self.findChild(
             QPushButton, "btLoadIconFile")
         self.btLoadIconFile.clicked.connect(lambda: [
@@ -103,13 +105,8 @@ class AutonaTournamentInfoWidget(QDockWidget):
             self.DownloadIcon()
         ])
 
-        self.btClearIcon: QPushButton = self.findChild(
-            QPushButton, "btClearIcon")
-        self.btClearIcon.clicked.connect(lambda: [
-            self.SetDefaultIcon()
-        ])
-
         self.iconView: QLabel = self.findChild(QLabel, "iconView")
+        L.apply_media_preview(self.iconView)
 
         self.UpdateIcon()
 
@@ -122,13 +119,25 @@ class AutonaTournamentInfoWidget(QDockWidget):
             QPushButton, "btDownloadBanner")
         self.btDownloadBanner.clicked.connect(self.DownloadBanner)
 
-        self.btClearBanner: QPushButton = self.findChild(
-            QPushButton, "btClearBanner")
-        self.btClearBanner.clicked.connect(self.SetDefaultBanner)
-
         self.bannerView: QLabel = self.findChild(QLabel, "bannerView")
+        L.apply_media_preview(self.bannerView)
 
         self.UpdateBanner()
+
+        # Unified reset: restore both icon and banner to Autona defaults.
+        # Tagged danger because it discards both saved assets at once.
+        self.btResetMediaToDefault: QPushButton = self.findChild(
+            QPushButton, "btResetMediaToDefault")
+        L.tag_button(self.btResetMediaToDefault, L.BUTTON_DANGER)
+        self.btResetMediaToDefault.clicked.connect(lambda: [
+            self.SetDefaultIcon(),
+            self.SetDefaultBanner(),
+        ])
+
+        # Normalise card padding / spacing across all top-level groups so
+        # the EVENT tab reads consistently with the rest of the app.
+        for group in self.findChildren(QGroupBox):
+            L.apply_card_layout(group)
 
         # Theme color button
         saved_theme = SettingsManager.Get("general.theme_color", DEFAULT_THEME_COLOR)
@@ -165,11 +174,16 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         self.btGenerateStreamThumbnail: QPushButton = self.findChild(
             QPushButton, "btGenerateStreamThumbnail")
+        L.tag_button(self.btGenerateStreamThumbnail, L.BUTTON_PRIMARY)
         self.btGenerateStreamThumbnail.clicked.connect(
             self.GenerateStreamThumbnail)
 
         self.streamThumbPreview: QLabel = self.findChild(
             QLabel, "streamThumbPreview")
+        # The .ui pins this slot to 160×90 via maximumSize — don't pass
+        # min_* here or Qt resolves min>max in favour of min and the
+        # label balloons to the requested minimum.
+        L.apply_media_preview(self.streamThumbPreview)
         self.streamThumbPath: QLabel = self.findChild(
             QLabel, "streamThumbPath")
 
@@ -319,11 +333,14 @@ class AutonaTournamentInfoWidget(QDockWidget):
             StateManager.Set("tournamentInfo.accentColor", color)
 
     def UpdateIcon(self):
+        # iconView slot is now 60×60 (see AutonaTournamentInfo.ui).
+        # Scale the source to fit the slot while keeping aspect.
         try:
-            # Load icon
-            icon = QPixmap("./layout/logo.png").scaledToWidth(64)
+            icon = QPixmap("./layout/logo.png").scaled(
+                60, 60,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation)
         except:
-            # Something's wrong with the icon
             icon = QPixmap("./assets/icons/cancel.svg").scaledToWidth(32)
 
         self.iconView.setPixmap(icon)
@@ -389,14 +406,22 @@ class AutonaTournamentInfoWidget(QDockWidget):
         self.DownloadBanner()
 
     def UpdateBanner(self):
+        # bannerView slot is now 160×90 (see AutonaTournamentInfo.ui).
+        # Scale source to fit while keeping aspect.
         bg_path = SettingsManager.Get("thumbnail_config.background_path", DEFAULT_BANNER_PATH)
         try:
             pix = QPixmap(bg_path)
             if pix.isNull():
                 pix = QPixmap(DEFAULT_BANNER_PATH)
-            banner = pix.scaledToWidth(178, Qt.TransformationMode.SmoothTransformation)
+            banner = pix.scaled(
+                160, 90,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation)
         except:
-            banner = QPixmap(DEFAULT_BANNER_PATH).scaledToWidth(178, Qt.TransformationMode.SmoothTransformation)
+            banner = QPixmap(DEFAULT_BANNER_PATH).scaled(
+                160, 90,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation)
         self.bannerView.setPixmap(banner)
 
     def LoadBannerFile(self):

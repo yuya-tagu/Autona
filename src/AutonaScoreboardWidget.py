@@ -16,6 +16,7 @@ from .Helpers.AutonaVersionHelper import add_beta_label
 from .Helpers.AutonaBskyHelper import post_to_bsky
 
 from . import ui_constants as UI
+from . import ui_layout as L
 from .AutonaSelectSetWindow import AutonaSelectSetWindow
 from .AutonaSelectStationWindow import AutonaSelectStationWindow
 from .AutonaIndividualGameTracker import AutonaIndividualGameTracker
@@ -612,13 +613,11 @@ class AutonaScoreboardWidget(QWidget):
         self.scoreWidget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
 
         scoreVBox = QVBoxLayout()
-        scoreVBox.setContentsMargins(0, 0, 0, 0)
-        scoreVBox.setSpacing(2)
-        scoreVBox.setAlignment(Qt.AlignmentFlag.AlignTop)
+        L.apply_score_panel_layout(scoreVBox)
         self.scoreWidget.setLayout(scoreVBox)
 
         SZ = int(UI.BTN_LG * 1.25)
-        SP = 4
+        SP = L.SCORE_PANEL_BUTTON_SPACING
         ICON = int(UI.ICON_SM * 1.25)
         scoreBtnStyle = UI.score_btn_style(scale=1.0)
 
@@ -632,10 +631,7 @@ class AutonaScoreboardWidget(QWidget):
         self.btSwapLabel.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.btSwapLabel.setStyleSheet(self._smallAnnotationStyle())
         scoreVBox.addWidget(self.btSwapLabel)
-        row1 = QHBoxLayout()
-        row1.setSpacing(SP)
-        row1.setContentsMargins(0, 0, 0, 0)
-        row1.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        row1 = L.score_panel_row()
         # Slightly downsize the glyphs on the swap / reset action buttons
         # so the icon doesn't dominate the pill — the wide buttons read
         # better with a more proportionate symbol.
@@ -650,10 +646,7 @@ class AutonaScoreboardWidget(QWidget):
         scoreVBox.addLayout(row1)
 
         # Row 2: Score up
-        row2 = QHBoxLayout()
-        row2.setSpacing(SP)
-        row2.setContentsMargins(0, 0, 0, 0)
-        row2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        row2 = L.score_panel_row()
         self.btScoreUp1 = QPushButton("+1")
         self.btScoreUp1.setFixedSize(SZ, SZ)
         self.btScoreUp1.setStyleSheet(scoreBtnStyle)
@@ -667,10 +660,7 @@ class AutonaScoreboardWidget(QWidget):
         scoreVBox.addLayout(row2)
 
         # Row 3: Score displays
-        row3 = QHBoxLayout()
-        row3.setSpacing(SP)
-        row3.setContentsMargins(0, 0, 0, 0)
-        row3.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        row3 = L.score_panel_row()
         self.scoreDisplay1 = self.scoreColumn.findChild(QSpinBox, "score_left")
         self.scoreDisplay1.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.scoreDisplay1.setFixedSize(SZ, SZ)
@@ -686,10 +676,7 @@ class AutonaScoreboardWidget(QWidget):
         scoreVBox.addLayout(row3)
 
         # Row 4: Score down
-        row4 = QHBoxLayout()
-        row4.setSpacing(SP)
-        row4.setContentsMargins(0, 0, 0, 0)
-        row4.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        row4 = L.score_panel_row()
         self.btScoreDown1 = QPushButton("-1")
         self.btScoreDown1.setFixedSize(SZ, SZ)
         self.btScoreDown1.setStyleSheet(scoreBtnStyle)
@@ -703,15 +690,15 @@ class AutonaScoreboardWidget(QWidget):
         scoreVBox.addLayout(row4)
 
         # Row 5: Score reset button + label
-        row5 = QHBoxLayout()
-        row5.setSpacing(SP)
-        row5.setContentsMargins(0, 0, 0, 0)
-        row5.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        row5 = L.score_panel_row()
         self.btScoreReset = QPushButton()
         self.btScoreReset.setIcon(QIcon(UI.icon_path("cancel.svg")))
         self.btScoreReset.setIconSize(QSize(_ACTION_ICON, _ACTION_ICON))
         self.btScoreReset.setFixedSize(SZ * 2 + SP, SZ)
         self.btScoreReset.setToolTip(QApplication.translate("app", "Score Reset"))
+        # Reset clears live broadcast state — flag it as a destructive
+        # action so it stands apart from the +1/-1 score controls.
+        L.tag_button(self.btScoreReset, L.BUTTON_DANGER)
         self.btScoreReset.clicked.connect(lambda: self.ResetScore())
         row5.addWidget(self.btScoreReset)
         scoreVBox.addLayout(row5)

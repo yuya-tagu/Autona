@@ -11,6 +11,8 @@ from .StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaDirHelper import AutonaResolve
+from . import ui_constants as UI
+from . import ui_layout as L
 
 
 class NoIconProxyModel(QSortFilterProxyModel):
@@ -211,12 +213,23 @@ class AutonaResultSettingsWidget(QDockWidget):
         # --- Preview ---
         previewContainer = self.settings.findChild(QWidget, "resultPreview")
         previewContainer.layout().setContentsMargins(0, 0, 0, 0)
+        # Frame the preview slot so the empty state stays visible. Mirrors
+        # the thumbnailPreview treatment in AutonaThumbnailSettingsWidget.
+        _p = UI.palette()
+        previewContainer.setStyleSheet(
+            f"QWidget#resultPreview {{"
+            f"background-color: {_p['bg_tertiary']};"
+            f"border: 1px solid {_p['border_subtle']};"
+            f"border-radius: {UI.RADIUS_SM}px;"
+            f"}}"
+        )
         self.preview = ResultPreviewWidget()
         previewContainer.layout().addWidget(self.preview)
 
         # --- Buttons ---
         self.btUpdatePreview = self.settings.findChild(
             QPushButton, "btUpdatePreview")
+        L.tag_button(self.btUpdatePreview, L.BUTTON_PRIMARY)
         self.btUpdatePreview.clicked.connect(lambda: self.GeneratePreview(True))
 
         self.btCopyToClipboard = self.settings.findChild(
@@ -226,6 +239,10 @@ class AutonaResultSettingsWidget(QDockWidget):
         self.btSaveResult = self.settings.findChild(
             QPushButton, "btSaveResult")
         self.btSaveResult.clicked.connect(self._saveResult)
+
+        # Normalise card padding / spacing across all top-level groups.
+        for group in self.settings.findChildren(QGroupBox):
+            L.apply_card_layout(group)
 
         # --- Debounce timer ---
         self._previewTimer = QTimer()
