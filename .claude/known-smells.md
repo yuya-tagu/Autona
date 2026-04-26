@@ -133,33 +133,25 @@ S-02 と同様のプライベートメソッド分割。設定項目のグルー
 
 ---
 
-## S-08: `score.upset_factor` キーの不整合 [P1/D1/S1]
+## S-08: `score.upset_factor` キーの不整合 [P1/D1/S1] ✅ 解消済（M1a / Design.md §8 T-1）
 
 **根拠**: state-keys.md「要注意事項 #1」
 
-**現状**:
-`AutonaStatsUtil.py:180` で `StateManager.Set(f"score.upset_factor", 0)` — スコアボード番号なし。
-`AutonaStatsUtil.py:177` で `StateManager.Set(f"score.{self.scoreboardNumber}.upset_factor", ...)` — 番号あり。
-番号なしキーは意図的かバグか不明。
+**現状（解消済）**:
+`AutonaStatsUtil.py` の `GetSetUpsetFactor` は両分岐とも `score.{self.scoreboardNumber}.upset_factor` を Set する形に統一済み。番号なし版（`score.upset_factor`）は存在しない。
 
-**対策案**:
-コンテキストを確認し、番号なしが不要なら削除。必要なら `score.{N}.upset_factor` に統一。
-
-**影響範囲**: `AutonaStatsUtil.py`, Web UI 側で `score.upset_factor` を参照している箇所
+**影響範囲**: `AutonaStatsUtil.py`
 
 ---
 
-## S-09: StateManager.state の直接参照（ロックなし） [P2/D1/S2]
+## S-09: StateManager.state の直接参照（ロックなし） [P2/D1/S2] ✅ 解消済（M1a / Design.md §8 T-3）
 
 **根拠**: state-keys.md「要注意事項 #3」
 
-**現状**:
-`AutonaWebServerActions.py:41` で `StateManager.state` を直接辞書として返却。`StateManager.lock` を取得していない。SaveState のスレッドとのレースコンディション可能性。
+**現状（解消済）**:
+`StateManager.GetFullState()` がロック取得 + `deep_clone` して `{'state': ..., 'delta_index': ...}` を返す。`AutonaWebServerActions.program_state` / `src/result/main_generate_result.py` / `src/thumbnail/main_generate_thumbnail.py` はすべてこの API 経由に置き換え済み。
 
-**対策案**:
-`StateManager.GetFullState()` のような static メソッドを追加し、ロック内で `deep_clone` して返す。
-
-**影響範囲**: `AutonaWebServerActions.py`, `StateManager.py`
+**影響範囲**: `AutonaWebServerActions.py`, `StateManager.py`, `src/result/`, `src/thumbnail/`
 
 ---
 
@@ -193,17 +185,14 @@ S-02 と同様のプライベートメソッド分割。設定項目のグルー
 
 ---
 
-## S-12: commentary インデックスの欠番 [P2/D1/S2]
+## S-12: commentary インデックスの欠番 [P2/D1/S2] ✅ 解消済（M1a / Design.md §8 T-2）
 
 **根拠**: state-keys.md「要注意事項 #4」
 
-**現状**:
-`AutonaCommentaryWidget.RemoveExtraCommentators` で `commentary.{k}` を Unset するが、残った実況者のインデックスを詰め直さない。1, 3 のように欠番が生じうる。
+**現状（解消済）**:
+`AutonaCommentaryWidget.SetCommentatorNumber` 末尾で `_compactCommentaryState(number)` を呼び、`commentary.{k}` の中で 1..N の範囲外と非数値キーを除いた survivors を 1..N に詰め直す。SaveBlock で囲んで 1 デルタにまとめる。
 
-**対策案**:
-削除後にインデックスを再割り当てするか、Web UI 側で欠番を許容するか判断が必要。
-
-**影響範囲**: `AutonaCommentaryWidget.py`, `web/` の commentary 参照箇所
+**影響範囲**: `AutonaCommentaryWidget.py`
 
 ---
 
@@ -240,11 +229,11 @@ objectName → 明示的なキー名マッピングを導入。ただし既存�
 ## フェーズ2 タスク配布の推奨順序
 
 ### Wave 1（並列可能・即効性あり）
-| ID | 対象 | 理由 |
-|----|------|------|
-| S-08 | upset_factor 不整合 | D1。調査 + 1行修正。テストで確認可能 |
-| S-09 | state 直接参照 | D1。StateManager に1メソッド追加 |
-| S-11 | ui_constants import | D1。3ファイルの import 文変更 |
+| ID | 対象 | 理由 | 状態 |
+|----|------|------|------|
+| S-08 | upset_factor 不整合 | D1。調査 + 1行修正。テストで確認可能 | ✅ M1a |
+| S-09 | state 直接参照 | D1。StateManager に1メソッド追加 | ✅ M1a |
+| S-11 | ui_constants import | D1。3ファイルの import 文変更 | 未着手 |
 
 ### Wave 2（テスト先行）
 | ID | 対象 | 理由 |
@@ -253,11 +242,11 @@ objectName → 明示的なキー名マッピングを導入。ただし既存�
 | S-01 | PlayerWidget 重複統合 | 最大のリファクタ効果。テスト網が欲しい |
 
 ### Wave 3（段階的）
-| ID | 対象 | 理由 |
-|----|------|------|
-| S-02 | ScoreboardWidget __init__ | 単一ファイル内。動作確認は手動 |
-| S-04 | GameAssetManager 内部クラス | 単一ファイル内 |
-| S-12 | commentary 欠番 | Web UI 側との整合性確認が必要 |
+| ID | 対象 | 理由 | 状態 |
+|----|------|------|------|
+| S-02 | ScoreboardWidget __init__ | 単一ファイル内。動作確認は手動 | 未着手 |
+| S-04 | GameAssetManager 内部クラス | 単一ファイル内 | 未着手 |
+| S-12 | commentary 欠番 | Web UI 側との整合性確認が必要 | ✅ M1a |
 
 ### Wave 4（長期）
 | ID | 対象 | 理由 |

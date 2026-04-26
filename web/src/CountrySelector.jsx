@@ -88,6 +88,7 @@ export function CountrySelector({
                 {...params}
                 slotProps={slotProps}
                 label={i18n.t("country")}
+                size="small"
             />
         }}
 

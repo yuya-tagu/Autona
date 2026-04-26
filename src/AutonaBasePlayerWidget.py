@@ -163,42 +163,39 @@ class AutonaBasePlayerWidget(QGroupBox):
                     f"{self.path}.city", city)
 
     def SwapCharacters(self, index1: int, index2: int):
-        StateManager.BlockSaving()
+        with StateManager.SaveBlock():
+            if index2 > len(self.character_elements)-1:
+                index2 = 0
 
-        if index2 > len(self.character_elements)-1:
-            index2 = 0
+            char1 = self.character_elements[index1]
+            char2 = self.character_elements[index2]
 
-        char1 = self.character_elements[index1]
-        char2 = self.character_elements[index2]
+            # Save index1 settings
+            tmp = [char1[1].currentText(), char1[2].currentIndex()]
 
-        # Save index1 settings
-        tmp = [char1[1].currentText(), char1[2].currentIndex()]
+            # Set index1 to index2
+            # Character
+            found = char1[1].findText(char2[1].currentText())
+            if found != -1:
+                char1[1].setCurrentIndex(found)
+            else:
+                char1[1].setCurrentText(char2[1].currentText())
 
-        # Set index1 to index2
-        # Character
-        found = char1[1].findText(char2[1].currentText())
-        if found != -1:
-            char1[1].setCurrentIndex(found)
-        else:
-            char1[1].setCurrentText(char2[1].currentText())
+            # Color
+            char1[2].setCurrentIndex(char2[2].currentIndex())
 
-        # Color
-        char1[2].setCurrentIndex(char2[2].currentIndex())
+            # Set index2 to temp (index1)
+            # Character
+            found = char2[1].findText(tmp[0])
+            if found != -1:
+                char2[1].setCurrentIndex(found)
+            else:
+                char2[1].setCurrentText(tmp[0])
 
-        # Set index2 to temp (index1)
-        # Character
-        found = char2[1].findText(tmp[0])
-        if found != -1:
-            char2[1].setCurrentIndex(found)
-        else:
-            char2[1].setCurrentText(tmp[0])
+            # Color
+            char2[2].setCurrentIndex(tmp[1])
 
-        # Color
-        char2[2].setCurrentIndex(tmp[1])
-
-        self.CharactersChanged()
-
-        StateManager.ReleaseSaving()
+            self.CharactersChanged()
 
     def LoadStates(self, index):
         country: QComboBox = self._w("country", QComboBox)
@@ -266,8 +263,7 @@ class AutonaBasePlayerWidget(QGroupBox):
         return prefix+" "+gamerTag if prefix else gamerTag
 
     def Clear(self, no_mains=False):
-        StateManager.BlockSaving()
-        with self.dataLock:
+        with StateManager.SaveBlock(), self.dataLock:
             for c in self.findChildren(QLineEdit):
                 if c.objectName() != "" and c.objectName() != 'qt_spinbox_lineedit':
                     if c.text() != "":
@@ -294,5 +290,3 @@ class AutonaBasePlayerWidget(QGroupBox):
                         continue  # only executed if the inner loop DID break
                 else:
                     c.setCurrentIndex(0)
-
-        StateManager.ReleaseSaving()

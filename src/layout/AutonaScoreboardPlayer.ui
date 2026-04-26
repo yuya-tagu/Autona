@@ -128,9 +128,9 @@
        <property name="alignment">
         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
        </property>
-       <property name="styleSheet">
-        <string notr="true">color: rgba(255,255,255,0.75);</string>
-       </property>
+       <!-- styleSheet removed; AutonaScoreboardPlayerWidget applies a
+            theme-aware muted color in __init__ / refresh_theme_styles
+            (Design.md §5.4). -->
       </widget>
      </item>
     </layout>

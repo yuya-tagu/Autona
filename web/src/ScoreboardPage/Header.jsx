@@ -124,6 +124,7 @@ export const Header = ({onSelectedGameChange, ...rest}) => {
                 >
                     <span>Game:&nbsp;</span>
                     <Select
+                      size="small"
                       sx={{
                           '.MuiSelect-select': {
                               paddingY: 0,
@@ -163,6 +164,7 @@ export const Header = ({onSelectedGameChange, ...rest}) => {
                 {/* Visibility toggle button */}
                 <IconButton
                     color="inherit"
+                    size="small"
                     onClick={(e) => setVisMenuAnchor(e.currentTarget)}
                     title={i18n.t("visibility_settings")}
                     sx={{ml: 'auto'}}
@@ -210,14 +212,16 @@ export const Header = ({onSelectedGameChange, ...rest}) => {
                         value={tournamentUrl}
                         onChange={(e) => setTournamentUrl(e.target.value)}
                         onKeyDown={(e) => { if (e.key === 'Enter') loadTournament(); }}
-                        sx={{
+                        sx={(theme) => ({
                             flex: 1,
                             '& .MuiOutlinedInput-root': {
                                 color: 'inherit',
-                                '& fieldset': { borderColor: 'rgba(255,255,255,0.3)' },
+                                '& fieldset': { borderColor: theme.palette.divider },
                             },
-                            '& .MuiInputBase-input::placeholder': { color: 'rgba(255,255,255,0.5)' },
-                        }}
+                            '& .MuiInputBase-input::placeholder': {
+                                color: theme.palette.text.disabled,
+                            },
+                        })}
                         InputProps={{
                             style: { color: 'inherit', fontSize: '0.85rem' }
                         }}
@@ -253,13 +257,13 @@ export const Header = ({onSelectedGameChange, ...rest}) => {
                         type="number"
                         value={autoUpdateInterval}
                         onChange={(e) => setAutoUpdateInterval(Math.max(1, parseInt(e.target.value) || 1))}
-                        sx={{
+                        sx={(theme) => ({
                             width: 70,
                             '& .MuiOutlinedInput-root': {
                                 color: 'inherit',
-                                '& fieldset': { borderColor: 'rgba(255,255,255,0.3)' },
+                                '& fieldset': { borderColor: theme.palette.divider },
                             },
-                        }}
+                        })}
                         InputProps={{
                             style: { color: 'inherit', fontSize: '0.85rem' },
                             inputProps: { min: 1 }

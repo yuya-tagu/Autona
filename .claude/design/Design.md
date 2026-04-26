@@ -313,7 +313,7 @@ score.{N}
 ├── last_sets.{1|2}.{I}              W R
 ├── history_sets.{1|2}.{I}           W R
 ├── recent_sets                      W R    (dict: sets, request_time)
-└── upset_factor                     W R    ※番号なし版（`score.upset_factor`）は **削除**
+└── upset_factor                     W R    ※番号なし版（`score.upset_factor`）は **削除済**（T-1 完了）
 ```
 
 ##### `game` — 選択中ゲーム情報
@@ -476,8 +476,8 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 
 | 問題 | 規約上の扱い |
 |-----|------------|
-| `score.upset_factor`（番号なし）二重定義 | 番号なし版を **削除**（リファクタタスク。§8） |
-| `commentary.{N}` インデックス欠番 | Unset 時に**インデックスを詰める**実装に変更（リファクタタスク。§8） |
+| `score.upset_factor`（番号なし）二重定義 | 番号なし版は **削除済**（§8 T-1 完了） |
+| `commentary.{N}` インデックス欠番 | Unset 時に**インデックスを詰める**実装済（§8 T-2 完了） |
 | `StateManager.state` 直接参照 | `GetFullState()` に置き換え。直接参照は禁止（§3.1.1） |
 | OBS HTML poll の順序保証なし | revision 検証で full snapshot 再取得に統一（R-Sync-8） |
 
@@ -1467,30 +1467,30 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 
 ### 8.1 優先度: 高（仕様違反の解消）
 
-| ID | タスク | 関連 § | 影響範囲 |
-|----|------|------|--------|
-| **T-1** | `score.upset_factor`（番号なし）の二重定義を削除し、`score.{N}.upset_factor` のみに統一 | §3.1.2, §3.2.5 | `src/AutonaStatsUtil.py:177-180` 周辺、参照側の修正 |
-| **T-2** | `commentary.{N}` Unset 時にインデックスを詰める実装に変更 | §3.1.2, §3.2.5 | `src/AutonaCommentaryWidget.py` の `RemoveExtraCommentators` |
-| **T-3** | `StateManager.state` 直接参照を `GetFullState()`（ロック取得版）に置き換え | §3.1.1, §3.2.5 | `src/AutonaWebServerActions.py:41` 他 |
-| **T-4** | `StateManager.SaveState` に `revision` を単調増加で付与、`program_state` / `program_state_update` イベントに含める | §3.2.3, §3.2.5 | `src/StateManager.py`, `src/AutonaWebServer.py`, OBS layout `globals.js`, React `websocketInit.ts` |
-| **T-5** | クライアント（OBS / React）に `revision` 連続性検証 + 不連続時の full snapshot 再取得を実装 | §3.2.3 | `layout/include/globals.js`, `web/src/ScoreboardPage/websocketInit.ts` |
-| **T-6** | React の `applySavedDeltas` バッチ間隔を 1000ms → **既定 100ms / 上限 200ms** に変更 | §2.2 R-React-6, §3.2.4 | `web/src/ScoreboardPage/websocketInit.ts:82-87` |
-| **T-7** | accent 色を `#F5A545`（オレンジ）→ `#8A1A2C`（クリムゾン）に統合 | §5.1 | `web/src/themes.js` の DARK/LIGHT TOKENS、関連 component override |
+| ID | タスク | 関連 § | 影響範囲 | 状態 |
+|----|------|------|--------|------|
+| **T-1** | `score.upset_factor`（番号なし）の二重定義を削除し、`score.{N}.upset_factor` のみに統一 | §3.1.2, §3.2.5 | `src/AutonaStatsUtil.py:176-179` 周辺 | ✅ 完了（M1a） |
+| **T-2** | `commentary.{N}` Unset 時にインデックスを詰める実装に変更 | §3.1.2, §3.2.5 | `src/AutonaCommentaryWidget.py` の `SetCommentatorNumber` / `_compactCommentaryState` | ✅ 完了（M1a） |
+| **T-3** | `StateManager.state` 直接参照を `GetFullState()`（ロック取得版）に置き換え | §3.1.1, §3.2.5 | `src/AutonaWebServerActions.py:41`, `src/result/main_generate_result.py`, `src/thumbnail/main_generate_thumbnail.py` | ✅ 完了（M1a） |
+| **T-4** | `StateManager.SaveState` に `revision` を単調増加で付与、`program_state` / `program_state_update` イベントに含める | §3.2.3, §3.2.5 | `src/StateManager.py`, `src/AutonaWebServer.py`, `out/program_state.json` への埋め込み | ✅ 完了（M1b） |
+| **T-5** | クライアント（OBS / React）に `revision` 連続性検証 + 不連続時の full snapshot 再取得を実装 | §3.2.3 | `layout/include/globals.js`, `web/src/redux/tshState.ts`, `web/src/ScoreboardPage/websocketInit.ts` | ✅ 完了（M1b） |
+| **T-6** | React の `applySavedDeltas` バッチ間隔を 1000ms → **既定 100ms / 上限 200ms** に変更 | §2.2 R-React-6, §3.2.4 | `web/src/ScoreboardPage/websocketInit.ts:82-87` | ✅ 完了（M1a） |
+| **T-7** | accent 色を `#F5A545`（オレンジ）→ `#8A1A2C`（クリムゾン）に統合 | §5.1 | `web/src/themes.js` の DARK/LIGHT TOKENS、`web/public/manifest.json`、`web/public/index.html` | ✅ 完了（M1a） |
 
 ### 8.2 優先度: 中（設計負債の解消）
 
-| ID | タスク | 関連 § | 影響範囲 |
-|----|------|------|--------|
-| **T-8** | React Web UI のテーマ切替を実装。`StateManager.ui.light_mode` を購読、localStorage は仮表示キャッシュ | §5.4 | `web/src/index.js`, `web/src/themes.js`, Redux slice 追加 |
-| **T-9** | `ui.light_mode` キーを StateManager に追加し、SettingsManager 変更時に broadcast する仕組み | §3.1.2, §5.4.2 | `src/Autona.py`（`light_mode` トグル時）、`src/SettingsManager.py` |
-| **T-10** | テーマ切替時の同期: PyQt 側のテーマ切替 → SettingsManager → broadcast → React も追従 | §5.4.2 | `src/ui_constants.py:notify_theme_change`、`AutonaWebServerActions` に `set_light_mode` Action 追加 |
-| **T-11** | `BlockSaving()` / `ReleaseSaving()` の手動ペアを `with StateManager.SaveBlock():` に置き換え | §3.2.2 R-Sync-2 | 既存 PyQt Widget 全般、try/finally で囲んでいる箇所 |
-| **T-12** | OBS HTML poll モード（`UpdateData()` 64ms ポーリング）の degraded 化と revision 検証実装 | §2.3 R-OBS-3, §3.2.3 | `layout/include/globals.js` |
-| **T-13** | React `size="small"` を全フォーム要素に徹底（指摘事項） | §2.2 R-React-5 | `web/src/**/*.tsx` の TextField / Select / Button 等 |
-| **T-14** | ハードコード hex 色をトークン参照に置換（PyQt 12+ 箇所、React App.css 数箇所） | §5.1.6 | `src/AutonaBracketView.py` 他、`web/src/App.css` |
-| **T-15** | `AutonaAnalysisWidget` の仕様反映済み確認と回帰テスト追加 | §4.1 | `src/AutonaAnalysisWidget.py` のテスト整備 |
-| **T-16** | サムネイルメタデータ（`_title.txt` / `_desc.txt`）を `thumbnail_config.generate_metadata` の設定で制御化 | §4.4.4 | `src/thumbnail/main_generate_thumbnail.py:save_result`, `AutonaThumbnailSettingsWidget` のチェックボックス追加 |
-| **T-17** | OBS テンプレ設定ダイアログに「OBS Studio 標準ホットキーとの衝突警告」を追加 | §6.4.2 | `AutonaSettingsWindow` 関連 |
+| ID | タスク | 関連 § | 影響範囲 | 状態 |
+|----|------|------|--------|------|
+| **T-8** | React Web UI のテーマ切替を実装。`StateManager.ui.light_mode` を購読、localStorage は仮表示キャッシュ | §5.4 | `web/src/index.js`, `web/src/ThemeShell.tsx`, `web/src/backendDataTypes.d.ts` | ✅ 完了（M2） |
+| **T-9** | `ui.light_mode` キーを StateManager に追加し、SettingsManager 変更時に broadcast する仕組み | §3.1.2, §5.4.2 | `src/Autona.py:LoadTheme` で `StateManager.Set("ui.light_mode", ...)` | ✅ 完了（M2） |
+| **T-10** | テーマ切替時の同期: PyQt 側のテーマ切替 → SettingsManager → broadcast → React も追従 | §5.4.2 | `src/AutonaWebServerActions.set_light_mode`, `src/AutonaWebServer` の `/set-light-mode` + `set_light_mode` socketio, `WindowSignals.LightModeChanged` | ✅ 完了（M2） |
+| **T-11** | `BlockSaving()` / `ReleaseSaving()` の手動ペアを `with StateManager.SaveBlock():` に置き換え | §3.2.2 R-Sync-2 | `AutonaScoreboardManager` / `StatsUtil` / `BasePlayerWidget` / `PlayerListSlotWidget` / `PlayerList` / `PlayerListWidget` / `ScoreboardWidget` の小〜中規模ペア。既に try/finally で守られている長大処理と lambda タプル式 / 巨大 __init__ は意図的にスキップ | ✅ 完了（M3） |
+| **T-12** | OBS HTML poll モード（`UpdateData()` 64ms ポーリング）の degraded 化と revision 検証実装 | §2.3 R-OBS-3, §3.2.3 | `layout/include/globals.js` | ✅ 完了（M1b） |
+| **T-13** | React `size="small"` を全フォーム要素に徹底（指摘事項） | §2.2 R-React-5 | `CountrySelector` / `CountryStateSelector` / `NumberInput` / `Header` / `CurrentSet` / `CharSelector` / `UpcomingSets` / `Team` / `index.tsx` / `StageStrike` 各種 | ✅ 完了（M3） |
+| **T-14** | ハードコード hex 色をトークン参照に置換（PyQt 12+ 箇所、React App.css 数箇所） | §5.1.6 | `src/AutonaBracketView.py` / `src/AutonaBracketWidget.py` を `UI.palette()` 参照化、`web/src/index.css` 固定色を CssBaseline override に委譲、`web/src/ScoreboardPage/Header.jsx` 内 rgba を `theme.palette.divider` / `text.disabled` に | ✅ 完了（M3） |
+| **T-15** | `AutonaAnalysisWidget` の仕様反映済み確認と回帰テスト追加 | §4.1 | `src/AutonaAnalysisWidget.py` のテスト整備 | 未着手 |
+| **T-16** | サムネイルメタデータ（`_title.txt` / `_desc.txt`）を `thumbnail_config.generate_metadata` の設定で制御化 | §4.4.4 | `src/thumbnail/main_generate_thumbnail.py:save_result`, `AutonaThumbnailSettingsWidget` + `AutonaThumbnailSettings.ui` に `generateMetadataCheck` を追加（default true） | ✅ 完了（M3） |
+| **T-17** | OBS テンプレ設定ダイアログに「OBS Studio 標準ホットキーとの衝突警告」を追加 | §6.4.2 | `src/Helpers/AutonaHotkeyValidator.py` を新設し、`Settings/SettingsWidget.py` の hotkey ハンドラで Autona 内重複は error / OS・OBS 想定衝突は warning ダイアログを出す | ✅ 完了（M3） |
 
 ### 8.3 優先度: 低（長期的な構造改善）
 

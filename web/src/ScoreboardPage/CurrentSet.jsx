@@ -112,6 +112,7 @@ export default function CurrentSet({scoreboardNumber}) {
         <span style={{position: 'relative', float: 'right'}}>
                 <IconButton
                     title={i18n.t("expand_scoreboard")}
+                    size="small"
                     sx={{
                         position: 'absolute',
                         top: "-48px",
@@ -179,13 +180,13 @@ export default function CurrentSet({scoreboardNumber}) {
 
                                             {/* Action buttons */}
                                             <Stack gap={1}>
-                                                <Button variant={"outlined"} onClick={submitChanges}>
+                                                <Button variant={"outlined"} size="small" onClick={submitChanges}>
                                                     {i18n.t("submit_changes")}
                                                 </Button>
-                                                <Button variant={"outlined"} onClick={resetScores} color="warning">
+                                                <Button variant={"outlined"} size="small" onClick={resetScores} color="warning">
                                                     {i18n.t("reset_scores")}
                                                 </Button>
-                                                <Button variant={"outlined"} onClick={postToX}>
+                                                <Button variant={"outlined"} size="small" onClick={postToX}>
                                                     {i18n.t("post_to_x")}
                                                 </Button>
                                             </Stack>

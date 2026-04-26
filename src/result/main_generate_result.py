@@ -67,7 +67,9 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None,
     }
 
     try:
-        state = StateManager.state
+        # Use lock-acquired snapshot rather than touching StateManager.state
+        # directly (Design.md §3.2.5).
+        state = StateManager.GetFullState().get("state", {})
         if state:
             data["tournamentName"] = deep_get(
                 state, "tournamentInfo.tournamentName", "") or ""

@@ -630,7 +630,7 @@ class AutonaScoreboardWidget(QWidget):
         _swapFont.setBold(False)
         self.btSwapLabel.setFont(_swapFont)
         self.btSwapLabel.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        self.btSwapLabel.setStyleSheet("color: rgba(255,255,255,0.45);")
+        self.btSwapLabel.setStyleSheet(self._smallAnnotationStyle())
         scoreVBox.addWidget(self.btSwapLabel)
         row1 = QHBoxLayout()
         row1.setSpacing(SP)
@@ -722,7 +722,7 @@ class AutonaScoreboardWidget(QWidget):
         _resetFont.setBold(False)
         self.btScoreResetLabel.setFont(_resetFont)
         self.btScoreResetLabel.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        self.btScoreResetLabel.setStyleSheet("color: rgba(255,255,255,0.45);")
+        self.btScoreResetLabel.setStyleSheet(self._smallAnnotationStyle())
         scoreVBox.addWidget(self.btScoreResetLabel)
 
         self.columns.layout().insertWidget(1, self.scoreWidget)
@@ -884,11 +884,7 @@ class AutonaScoreboardWidget(QWidget):
         self.topSectionFrame.setSizePolicy(
             QSizePolicy.MinimumExpanding, QSizePolicy.Maximum)
         self.topSectionFrame.setStyleSheet(
-            "QFrame#scoreTopSection {"
-            " border: 1px solid rgba(255,255,255,0.15);"
-            " border-radius: 6px;"
-            " background: rgba(255,255,255,0.02);"
-            "}")
+            self._sectionFrameStyle("scoreTopSection"))
         topLayout = QVBoxLayout()
         topLayout.setContentsMargins(
             UI.SPACE_MD, UI.SPACE_MD, UI.SPACE_MD, UI.SPACE_MD)
@@ -899,11 +895,9 @@ class AutonaScoreboardWidget(QWidget):
         # Title sits at the left of topOptions (which already holds the
         # X-post / Web-preview buttons on the right via addStretch), so
         # label and action buttons share a single row.
-        topSectionTitle = QLabel(QApplication.translate("app", "対戦情報"))
-        topSectionTitle.setStyleSheet(
-            "font-weight: bold; font-size: 9pt;"
-            " color: rgba(255,255,255,0.75);")
-        topOptions.layout().insertWidget(0, topSectionTitle)
+        self.topSectionTitle = QLabel(QApplication.translate("app", "対戦情報"))
+        self.topSectionTitle.setStyleSheet(self._sectionTitleStyle())
+        topOptions.layout().insertWidget(0, self.topSectionTitle)
 
         topLayout.addWidget(topOptions)
         topLayout.addWidget(self.streamSection)
@@ -915,11 +909,7 @@ class AutonaScoreboardWidget(QWidget):
         self.matchSectionFrame.setSizePolicy(
             QSizePolicy.MinimumExpanding, QSizePolicy.Maximum)
         self.matchSectionFrame.setStyleSheet(
-            "QFrame#scoreMatchSection {"
-            " border: 1px solid rgba(255,255,255,0.15);"
-            " border-radius: 6px;"
-            " background: rgba(255,255,255,0.02);"
-            "}")
+            self._sectionFrameStyle("scoreMatchSection"))
         matchLayout = QVBoxLayout()
         matchLayout.setContentsMargins(
             UI.SPACE_MD, UI.SPACE_MD, UI.SPACE_MD, UI.SPACE_MD)
@@ -935,12 +925,10 @@ class AutonaScoreboardWidget(QWidget):
         titleRowLayout.setSpacing(UI.SPACE_SM)
         titleRow.setLayout(titleRowLayout)
 
-        matchSectionTitle = QLabel(
+        self.matchSectionTitle = QLabel(
             QApplication.translate("app", "スコアボード"))
-        matchSectionTitle.setStyleSheet(
-            "font-weight: bold; font-size: 9pt;"
-            " color: rgba(255,255,255,0.75);")
-        titleRowLayout.addWidget(matchSectionTitle)
+        self.matchSectionTitle.setStyleSheet(self._sectionTitleStyle())
+        titleRowLayout.addWidget(self.matchSectionTitle)
         titleRowLayout.addStretch(1)
         titleRowLayout.addWidget(self.eyeBt)
         matchLayout.addWidget(titleRow)
@@ -1421,51 +1409,48 @@ class AutonaScoreboardWidget(QWidget):
                     w.hide()
 
     def SwapTeams(self):
-        StateManager.BlockSaving()
-
-        # Lock all player widgets
-        for p in self.playerWidgets:
-            p.dataLock.acquire()
-
-        try:
-            for i, p in enumerate(self.team1playerWidgets):
-                p.SwapWith(self.team2playerWidgets[i])
-
-            # Scores
-            scoreLeft = self.scoreDisplay1.value()
-            self.scoreDisplay1.setValue(self.scoreDisplay2.value())
-            self.scoreDisplay2.setValue(scoreLeft)
-
-            # Losers
-            losersLeft = self.team1column.findChild(
-                QCheckBox, "losers").isChecked()
-            self.team1column.findChild(QCheckBox, "losers").setChecked(
-                self.team2column.findChild(QCheckBox, "losers").isChecked())
-            self.team2column.findChild(
-                QCheckBox, "losers").setChecked(losersLeft)
-
-            # Team Names
-            teamNameLeft = self.team1column.findChild(
-                QLineEdit, "teamName").text()
-            self.team1column.findChild(QLineEdit, "teamName").setText(
-                self.team2column.findChild(QLineEdit, "teamName").text())
-            self.team2column.findChild(
-                QLineEdit, "teamName").setText(teamNameLeft)
-            self.team1column.findChild(
-                QLineEdit, "teamName").editingFinished.emit()
-            self.team2column.findChild(
-                QLineEdit, "teamName").editingFinished.emit()
-            
-            self.individualGameTracker.SwapStageResults()
-            self.teamsSwapped = not self.teamsSwapped
-        finally:
-            StateManager.Set(
-                f"score.{self.scoreboardNumber}.teamsSwapped", self.teamsSwapped)
-
+        with StateManager.SaveBlock():
+            # Lock all player widgets
             for p in self.playerWidgets:
-                p.dataLock.release()
+                p.dataLock.acquire()
 
-            StateManager.ReleaseSaving()
+            try:
+                for i, p in enumerate(self.team1playerWidgets):
+                    p.SwapWith(self.team2playerWidgets[i])
+
+                # Scores
+                scoreLeft = self.scoreDisplay1.value()
+                self.scoreDisplay1.setValue(self.scoreDisplay2.value())
+                self.scoreDisplay2.setValue(scoreLeft)
+
+                # Losers
+                losersLeft = self.team1column.findChild(
+                    QCheckBox, "losers").isChecked()
+                self.team1column.findChild(QCheckBox, "losers").setChecked(
+                    self.team2column.findChild(QCheckBox, "losers").isChecked())
+                self.team2column.findChild(
+                    QCheckBox, "losers").setChecked(losersLeft)
+
+                # Team Names
+                teamNameLeft = self.team1column.findChild(
+                    QLineEdit, "teamName").text()
+                self.team1column.findChild(QLineEdit, "teamName").setText(
+                    self.team2column.findChild(QLineEdit, "teamName").text())
+                self.team2column.findChild(
+                    QLineEdit, "teamName").setText(teamNameLeft)
+                self.team1column.findChild(
+                    QLineEdit, "teamName").editingFinished.emit()
+                self.team2column.findChild(
+                    QLineEdit, "teamName").editingFinished.emit()
+
+                self.individualGameTracker.SwapStageResults()
+                self.teamsSwapped = not self.teamsSwapped
+            finally:
+                StateManager.Set(
+                    f"score.{self.scoreboardNumber}.teamsSwapped", self.teamsSwapped)
+
+                for p in self.playerWidgets:
+                    p.dataLock.release()
 
     def ResetScore(self):
         self.scoreDisplay1.setValue(0)
@@ -1479,8 +1464,47 @@ class AutonaScoreboardWidget(QWidget):
     def _refresh_theme_styles(self):
         self.scoreDisplay1.setStyleSheet(UI.score_display_style(scale=1.15))
         self.scoreDisplay2.setStyleSheet(UI.score_display_style(scale=1.15))
+        # Re-apply theme-aware section title / annotation / frame styles
+        # so the labels stay readable when the user toggles light/dark
+        # mode at runtime.
+        for label in (self.topSectionTitle, self.matchSectionTitle):
+            label.setStyleSheet(self._sectionTitleStyle())
+        for label in (self.btSwapLabel, self.btScoreResetLabel):
+            label.setStyleSheet(self._smallAnnotationStyle())
+        self.topSectionFrame.setStyleSheet(
+            self._sectionFrameStyle("scoreTopSection"))
+        self.matchSectionFrame.setStyleSheet(
+            self._sectionFrameStyle("scoreMatchSection"))
         for pw in self.playerWidgets:
             pw.refresh_theme_styles()
+
+    @staticmethod
+    def _sectionTitleStyle() -> str:
+        # Section header label ("対戦情報" / "スコアボード"). Slightly
+        # de-emphasised vs. body text, but still readable on both
+        # palettes (Design.md §5.1.6).
+        return (
+            "font-weight: bold; font-size: 9pt;"
+            f" color: {UI.palette()['text_secondary']};"
+        )
+
+    @staticmethod
+    def _smallAnnotationStyle() -> str:
+        # Tiny caption labels above the swap / reset buttons.
+        return f"color: {UI.palette()['text_muted']};"
+
+    @staticmethod
+    def _sectionFrameStyle(object_name: str) -> str:
+        # Card-like frame around a section. Border + very subtle bg so
+        # the section is visible on both dark and light canvases.
+        p = UI.palette()
+        return (
+            f"QFrame#{object_name} {{"
+            f" border: 1px solid {p['border_subtle']};"
+            " border-radius: 6px;"
+            f" background: {p['bg_secondary']};"
+            "}"
+        )
 
     def AutonaUpdate(self, data):
         AutonaTournamentDataProvider.instance.GetMatch(
@@ -1492,11 +1516,8 @@ class AutonaScoreboardWidget(QWidget):
 
         logger.info("STATION SETS LOADED -----------------------------")
         logger.info(data)
-        StateManager.BlockSaving()
-
-        StateManager.Set(f"score.{self.scoreboardNumber}.station_queue", data)
-
-        StateManager.ReleaseSaving()
+        with StateManager.SaveBlock():
+            StateManager.Set(f"score.{self.scoreboardNumber}.station_queue", data)
 
     def NewSetSelected(self, data):
         if not SettingsManager.Get("general.disable_autoupdate", False):
@@ -1699,10 +1720,9 @@ class AutonaScoreboardWidget(QWidget):
                 if team == 1:
                     self.colorButton2.setColor(value)
                 if team in (0, 1):
-                    StateManager.BlockSaving()
-                    StateManager.Set(
-                        f"score.{self.scoreboardNumber}.team.{team + 1}.color", value)
-                    StateManager.ReleaseSaving()
+                    with StateManager.SaveBlock():
+                        StateManager.Set(
+                            f"score.{self.scoreboardNumber}.team.{team + 1}.color", value)
 
 
     # Modifies the current set data. Does not check for id, so do not call this with data that may lead to another hbox incident

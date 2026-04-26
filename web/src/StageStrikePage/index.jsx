@@ -318,9 +318,7 @@ class StageStrikePage extends Component {
             <Box style={{ position: "relative", width: "100%" }}>
               {this.CanConfirm() && (
                 <Fab
-                  size={
-                    darkTheme.breakpoints.up("md") ? "large" : "small"
-                  }
+                  size="small"
                   color="success"
                   variant="extended"
                   onClick={() => ConfirmClicked()}

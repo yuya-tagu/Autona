@@ -1,8 +1,8 @@
 import {createTheme, responsiveFontSizes} from "@mui/material/styles";
 
 // Autona Admin UI System — warm-neutral palette.
-// Brand crimson is reserved for LIVE/status signals (use `error`/`secondary`).
-// Accent orange is the primary action color.
+// Brand and accent share the crimson family per Design.md §5.1
+// (accent = unified crimson #8A1A2C). Use `error`/`secondary` for live signals.
 // Keep in sync with src/ui_constants.py and 30_Products/参考資料/color-system.html
 
 const DARK_TOKENS = {
@@ -21,9 +21,9 @@ const DARK_TOKENS = {
     textDisabled:    "#524F4A",
     brand:           "#DC143C",
     brandSubtle:     "#2A1418",
-    accent:          "#F5A545",
-    accentHover:     "#FFB960",
-    accentSubtle:    "#2F2820",
+    accent:          "#8A1A2C",
+    accentHover:     "#A62238",
+    accentSubtle:    "#33121A",
     gold:            "#F0C45A",
     goldSubtle:      "#2E2A1E",
 };
@@ -44,9 +44,9 @@ const LIGHT_TOKENS = {
     textDisabled:    "#B0AAA2",
     brand:           "#C41232",
     brandSubtle:     "#F5E0E4",
-    accent:          "#A06314",
-    accentHover:     "#B57018",
-    accentSubtle:    "#F2E8D5",
+    accent:          "#8A1A2C",
+    accentHover:     "#A62238",
+    accentSubtle:    "#F6D8DD",
     gold:            "#8E6812",
     goldSubtle:      "#F0E8D0",
 };
@@ -72,7 +72,8 @@ const TYPOGRAPHY = {
 
 function buildTheme(mode) {
     const t = mode === 'light' ? LIGHT_TOKENS : DARK_TOKENS;
-    const onAccent = mode === 'light' ? '#F4F3F0' : '#121212';
+    // accent is now crimson; both modes need light text on top per Design.md §5.1
+    const onAccent = '#FFFFFF';
 
     const base = createTheme({ palette: { mode } });
 

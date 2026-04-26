@@ -29,101 +29,99 @@ class AutonaPlayerListWidget(QDockWidget):
     instance: "AutonaPlayerListWidget" = None
 
     def __init__(self, *args, base="player_list"):
-        StateManager.BlockSaving()
-        super().__init__(*args)
+        with StateManager.SaveBlock():
+            super().__init__(*args)
 
-        AutonaPlayerListWidget.instance = self
-        self.signals = AutonaPlayerListWidgetSignals()
+            AutonaPlayerListWidget.instance = self
+            self.signals = AutonaPlayerListWidgetSignals()
 
-        self.playerList = AutonaPlayerList(base=base)
+            self.playerList = AutonaPlayerList(base=base)
 
-        self.setWindowTitle(QApplication.translate("app", "Player List"))
-        self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
-        self.widget = QWidget()
-        self.setWidget(self.widget)
-        self.widget.setLayout(QVBoxLayout())
+            self.setWindowTitle(QApplication.translate("app", "Player List"))
+            self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+            self.widget = QWidget()
+            self.setWidget(self.widget)
+            self.widget.setLayout(QVBoxLayout())
 
-        topOptions = QWidget()
-        # Stack the spinbox row and the action-button row vertically so
-        # the buttons ("Load tournament standings" / "Generate Descriptive
-        # Text for Results") sit on their own line below the count
-        # spinboxes instead of getting squeezed next to them.
-        topOptions.setLayout(QVBoxLayout())
-        topOptions.layout().setContentsMargins(0, 0, 0, 0)
-        topOptions.layout().setSpacing(4)
-        topOptions.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
+            topOptions = QWidget()
+            # Stack the spinbox row and the action-button row vertically so
+            # the buttons ("Load tournament standings" / "Generate Descriptive
+            # Text for Results") sit on their own line below the count
+            # spinboxes instead of getting squeezed next to them.
+            topOptions.setLayout(QVBoxLayout())
+            topOptions.layout().setContentsMargins(0, 0, 0, 0)
+            topOptions.layout().setSpacing(4)
+            topOptions.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
 
-        self.widget.layout().addWidget(topOptions)
+            self.widget.layout().addWidget(topOptions)
 
-        row = QWidget()
-        row.setLayout(QHBoxLayout())
-        row.layout().setContentsMargins(0, 0, 0, 0)
-        row.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
-        topOptions.layout().addWidget(row)
+            row = QWidget()
+            row.setLayout(QHBoxLayout())
+            row.layout().setContentsMargins(0, 0, 0, 0)
+            row.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
+            topOptions.layout().addWidget(row)
 
-        col = QWidget()
-        col.setLayout(QVBoxLayout())
-        self.slotNumber = QSpinBox()
-        col.layout().addWidget(QLabel(QApplication.translate("app", "Number of slots")))
-        col.layout().addWidget(self.slotNumber)
-        self.slotNumber.valueChanged.connect(
-            lambda val: self.playerList.SetSlotNumber(val))
-        row.layout().addWidget(col)
+            col = QWidget()
+            col.setLayout(QVBoxLayout())
+            self.slotNumber = QSpinBox()
+            col.layout().addWidget(QLabel(QApplication.translate("app", "Number of slots")))
+            col.layout().addWidget(self.slotNumber)
+            self.slotNumber.valueChanged.connect(
+                lambda val: self.playerList.SetSlotNumber(val))
+            row.layout().addWidget(col)
 
-        col = QWidget()
-        col.setLayout(QVBoxLayout())
-        self.playerPerTeam = QSpinBox()
-        col.layout().addWidget(QLabel(QApplication.translate("app", "Players per slot")))
-        col.layout().addWidget(self.playerPerTeam)
-        self.playerPerTeam.valueChanged.connect(
-            self.playerList.SetPlayersPerTeam)
-        row.layout().addWidget(col)
+            col = QWidget()
+            col.setLayout(QVBoxLayout())
+            self.playerPerTeam = QSpinBox()
+            col.layout().addWidget(QLabel(QApplication.translate("app", "Players per slot")))
+            col.layout().addWidget(self.playerPerTeam)
+            self.playerPerTeam.valueChanged.connect(
+                self.playerList.SetPlayersPerTeam)
+            row.layout().addWidget(col)
 
-        col = QWidget()
-        col.setLayout(QVBoxLayout())
-        self.charNumber = QSpinBox()
-        col.layout().addWidget(QLabel(QApplication.translate("app", "Characters per player")))
-        col.layout().addWidget(self.charNumber)
-        self.charNumber.valueChanged.connect(
-            self.playerList.SetCharactersPerPlayer)
-        self.charNumber.valueChanged.connect(
-            self.signals.characters_per_player_changed.emit)
-        row.layout().addWidget(col)
+            col = QWidget()
+            col.setLayout(QVBoxLayout())
+            self.charNumber = QSpinBox()
+            col.layout().addWidget(QLabel(QApplication.translate("app", "Characters per player")))
+            col.layout().addWidget(self.charNumber)
+            self.charNumber.valueChanged.connect(
+                self.playerList.SetCharactersPerPlayer)
+            self.charNumber.valueChanged.connect(
+                self.signals.characters_per_player_changed.emit)
+            row.layout().addWidget(col)
 
-        row = QWidget()
-        row.setLayout(QHBoxLayout())
-        row.layout().setContentsMargins(0, 0, 0, 0)
-        row.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
-        topOptions.layout().addWidget(row)
+            row = QWidget()
+            row.setLayout(QHBoxLayout())
+            row.layout().setContentsMargins(0, 0, 0, 0)
+            row.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
+            topOptions.layout().addWidget(row)
 
-        self.loadFromStandingsBt = QPushButton(
-            QApplication.translate("app", "Load tournament standings"))
-        self.loadFromStandingsBt.clicked.connect(self.LoadFromStandingsClicked)
-        row.layout().addWidget(self.loadFromStandingsBt)
+            self.loadFromStandingsBt = QPushButton(
+                QApplication.translate("app", "Load tournament standings"))
+            self.loadFromStandingsBt.clicked.connect(self.LoadFromStandingsClicked)
+            row.layout().addWidget(self.loadFromStandingsBt)
 
-        self.generateAltTextButton = QPushButton(
-            QApplication.translate("app", "Generate Descriptive Text for Results"))
-        self.generateAltTextButton = add_alt_text_tooltip_to_button(self.generateAltTextButton)
-        self.generateAltTextButton.clicked.connect(self.AltTextWindow)
-        row.layout().addWidget(self.generateAltTextButton)
+            self.generateAltTextButton = QPushButton(
+                QApplication.translate("app", "Generate Descriptive Text for Results"))
+            self.generateAltTextButton = add_alt_text_tooltip_to_button(self.generateAltTextButton)
+            self.generateAltTextButton.clicked.connect(self.AltTextWindow)
+            row.layout().addWidget(self.generateAltTextButton)
 
-        self.widget.layout().addWidget(self.playerList)
+            self.widget.layout().addWidget(self.playerList)
 
-        self.slotWidgets = []
+            self.slotWidgets = []
 
-        StateManager.Set("player_list", {})
+            StateManager.Set("player_list", {})
 
-        self.playerPerTeam.setValue(1)
-        self.charNumber.setValue(3)
-        self.slotNumber.setValue(8)
+            self.playerPerTeam.setValue(1)
+            self.charNumber.setValue(3)
+            self.slotNumber.setValue(8)
 
-        self.signals.UpdateData.connect(self.LoadFromStandings)
-        
-        AutonaGameAssetManager.instance.signals.onLoad.connect(
-            self.SetDefaultsFromAssets
-        )
+            self.signals.UpdateData.connect(self.LoadFromStandings)
 
-        StateManager.ReleaseSaving()
+            AutonaGameAssetManager.instance.signals.onLoad.connect(
+                self.SetDefaultsFromAssets
+            )
 
     def LoadFromStandingsClicked(self):
         AutonaTournamentDataProvider.instance.GetStandings(

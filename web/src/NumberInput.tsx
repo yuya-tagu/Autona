@@ -31,6 +31,7 @@ export function NumberInput(props: NumberInputProps) {
                 <TextField
                     type={"number"}
                     variant="outlined"
+                    size="small"
                     value={props.value}
                     onChange={(e) => props.onChange(props.value, Number.parseInt(e.target.value))}
                     label={props.label}
@@ -75,6 +76,7 @@ export function NumberInput(props: NumberInputProps) {
                                 >
                                     <Button
                                         variant={"outlined"}
+                                        size="small"
                                         disabled={props.value <= min}
                                         onClick={() => props.onChange && props.onChange(props.value, Math.max(min, props.value - 1))}
                                         sx={{
@@ -102,6 +104,7 @@ export function NumberInput(props: NumberInputProps) {
                                 >
                                     <Button
                                         variant={"outlined"}
+                                        size="small"
                                         disabled={props.value >= max}
                                         onClick={() => props.onChange && props.onChange(props.value, Math.min(max, props.value + 1))}
                                         sx={{

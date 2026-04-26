@@ -195,7 +195,9 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None, scoreb
     # fall back to file for non-preview (final) generation
     data = None
     try:
-        state = StateManager.state
+        # Use lock-acquired snapshot rather than touching StateManager.state
+        # directly (Design.md §3.2.5).
+        state = StateManager.GetFullState().get("state", {})
         if state and state.get("game", {}).get("codename"):
             has_players = True
             for i in [1, 2]:
@@ -225,7 +227,7 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None, scoreb
             if isPreview:
                 game_codename = "test"
                 try:
-                    game_codename = StateManager.state.get("game", {}).get("codename", "test")
+                    game_codename = StateManager.GetFullState().get("state", {}).get("game", {}).get("codename", "test")
                 except Exception:
                     pass
                 data = createFalseData(gameAssetManager, deep_get(
@@ -256,15 +258,22 @@ def save_result(pixmap, data, settings, scoreboardNumber=1, isPreview=False):
         logger.info(
             f"Thumbnail successfully saved as {out_path}/{thumbnail_filename}.png and {out_path}/{thumbnail_filename}.jpg")
 
-        # YouTube metadata
-        yt_title, yt_description = generate_youtube(
-            scoreboardNumber, display_phase, replace_characters=[["<", "❮"], [">", "❯"]])
-        with open(f"{out_path}/{thumbnail_filename}_title.txt", "wt", encoding="utf-8") as txt_file:
-            txt_file.write(yt_title)
-        with open(f"{out_path}/{thumbnail_filename}_desc.txt", "wt", encoding="utf-8") as txt_file:
-            txt_file.write(yt_description)
-        logger.info(
-            f"YouTube data successfully saved as {out_path}/{thumbnail_filename}_title.txt and {out_path}/{thumbnail_filename}_desc.txt")
+        # YouTube metadata — gated by thumbnail_config.generate_metadata
+        # (Design.md §4.4.4 / §8 T-16). Default true preserves existing
+        # behaviour so users who never opened settings keep getting both
+        # files.
+        if deep_get(settings, "generate_metadata", True):
+            yt_title, yt_description = generate_youtube(
+                scoreboardNumber, display_phase, replace_characters=[["<", "❮"], [">", "❯"]])
+            with open(f"{out_path}/{thumbnail_filename}_title.txt", "wt", encoding="utf-8") as txt_file:
+                txt_file.write(yt_title)
+            with open(f"{out_path}/{thumbnail_filename}_desc.txt", "wt", encoding="utf-8") as txt_file:
+                txt_file.write(yt_description)
+            logger.info(
+                f"YouTube data successfully saved as {out_path}/{thumbnail_filename}_title.txt and {out_path}/{thumbnail_filename}_desc.txt")
+        else:
+            logger.info(
+                "Skipping YouTube metadata files (thumbnail_config.generate_metadata=false)")
         return f"{out_path}/{thumbnail_filename}.png"
     else:
         thumbnail_filename = "template"

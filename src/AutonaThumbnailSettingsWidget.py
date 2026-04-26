@@ -174,6 +174,8 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
         self.flip_p1 = self.settings.findChild(QCheckBox, "flipP1Check")
         self.open_explorer = self.settings.findChild(
             QCheckBox, "openExplorerCheck")
+        self.generate_metadata = self.settings.findChild(
+            QCheckBox, "generateMetadataCheck")
 
         self.zoom = self.settings.findChild(QSpinBox, "zoom")
 
@@ -199,6 +201,12 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
 
         self.open_explorer.stateChanged.connect(lambda: self.SaveSettings(
             key="open_explorer", val=self.open_explorer.isChecked(), generatePreview=True))
+
+        # Design.md §4.4.4 / §8 T-16: control YouTube metadata file output.
+        # generatePreview=False — metadata files only matter for non-preview
+        # generation, so toggling shouldn't trigger an expensive re-render.
+        self.generate_metadata.stateChanged.connect(lambda: self.SaveSettings(
+            key="generate_metadata", val=self.generate_metadata.isChecked(), generatePreview=False))
 
         self.flip_p2.stateChanged.connect(lambda: self.SaveSettings(
             key=f"game.{AutonaGameAssetManager.instance.selectedGame.get('codename')}.flip_p2", val=self.flip_p2.isChecked(), generatePreview=True))
@@ -454,6 +462,11 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
         self.open_explorer.blockSignals(True)
         self.open_explorer.setChecked(self.GetSetting("open_explorer", False))
         self.open_explorer.blockSignals(False)
+        # default True to preserve existing behaviour (Design.md §8 T-16).
+        self.generate_metadata.blockSignals(True)
+        self.generate_metadata.setChecked(
+            self.GetSetting("generate_metadata", True))
+        self.generate_metadata.blockSignals(False)
 
         # Flip player assets
         self.flip_p2.blockSignals(True)

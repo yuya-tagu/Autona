@@ -11,13 +11,26 @@ import {
 } from "../backendDataTypes";
 
 export type ReceivedDeltas = {
-    delta_index: number;
+    // Canonical name per Design.md §3.2.3 R-Sync-6.
+    revision?: number;
+    // Legacy alias kept while older payloads are still in flight.
+    delta_index?: number;
     delta: Delta[];
 };
 
 export type TSHStateMessage = {
     state: TSHState;
-    delta_index: number;
+    // Canonical name per Design.md §3.2.3 R-Sync-7.
+    revision?: number;
+    // Legacy alias.
+    delta_index?: number;
+}
+
+// Pull the revision from a payload, preferring the canonical key.
+function getRevision(p: { revision?: number; delta_index?: number }): number {
+    if (typeof p.revision === 'number') return p.revision;
+    if (typeof p.delta_index === 'number') return p.delta_index;
+    return -1;
 }
 
 export type WebsocketStatus =
@@ -56,20 +69,53 @@ export const tshStateSlice = createSlice({
     } as TshStateReduxState,
     reducers: {
         applySavedDeltas(state: WritableDraft<TshStateReduxState>, action: Action) {
-            let sortedDeltas = state.stateDeltas.toSorted((a, b) => a.delta_index - b.delta_index);
-            const staleDeltas = sortedDeltas.filter((d) => d.delta_index < state.maxAppliedDeltaIdx);
-            sortedDeltas = sortedDeltas.filter((d) => d.delta_index >= state.maxAppliedDeltaIdx);
+            // Sort by revision so out-of-order arrivals get applied in
+            // the right sequence (Design.md §3.2.3 R-Sync-6).
+            let sortedDeltas = state.stateDeltas
+                .toSorted((a, b) => getRevision(a) - getRevision(b));
+            const staleDeltas = sortedDeltas.filter(
+                (d) => getRevision(d) <= state.maxAppliedDeltaIdx);
+            sortedDeltas = sortedDeltas.filter(
+                (d) => getRevision(d) > state.maxAppliedDeltaIdx);
 
             if (staleDeltas.length > 0) {
                 console.warn("Skipping applying stale deltas...", staleDeltas);
             }
 
             if (sortedDeltas.length > 0) {
+                // Detect a gap: the surviving deltas must form a contiguous
+                // sequence starting from maxAppliedDeltaIdx + 1. If anything
+                // is missing we cannot safely apply (state would diverge),
+                // so request a full snapshot and drop the queue
+                // (Design.md §3.2.3 R-Sync-8).
+                let expected = state.maxAppliedDeltaIdx + 1;
+                let gap = false;
+                for (const d of sortedDeltas) {
+                    if (getRevision(d) !== expected) {
+                        gap = true;
+                        break;
+                    }
+                    expected += 1;
+                }
+
+                if (gap) {
+                    console.warn(
+                        "Detected revision gap in delta queue; "
+                        + "requesting full snapshot. Queue revisions:",
+                        sortedDeltas.map(getRevision),
+                        "lastApplied:", state.maxAppliedDeltaIdx,
+                    );
+                    websocketConnection.instance().emit("program_state", {});
+                    state.stateDeltas = [];
+                    state.initializing = false;
+                    return;
+                }
+
                 for (let deltaSet of sortedDeltas) {
                     console.log("Applying deltas: ", combineDeltas(deltaSet.delta));
                     applyDeltas(state.tshState, deltaSet.delta);
                 }
-                state.maxAppliedDeltaIdx = sortedDeltas[sortedDeltas.length-1].delta_index;
+                state.maxAppliedDeltaIdx = getRevision(sortedDeltas[sortedDeltas.length-1]);
             }
 
             state.initializing = false;
@@ -77,7 +123,11 @@ export const tshStateSlice = createSlice({
         },
 
         addDeltas(state: TshStateReduxState, action: PayloadAction<ReceivedDeltas>){
-            if (action.payload.delta_index < state.maxAppliedDeltaIdx) {
+            const rev = getRevision(action.payload);
+            // Strictly-less-than handles the duplicate-delta case (revision
+            // equal to maxApplied means we already applied it). The gap
+            // detection happens in applySavedDeltas.
+            if (rev >= 0 && rev < state.maxAppliedDeltaIdx) {
                 console.warn("Received out of order delta! Requesting new full state.");
                 websocketConnection.instance().emit("program_state", {});
             }
@@ -87,7 +137,10 @@ export const tshStateSlice = createSlice({
 
         overwrite(state: TshStateReduxState, action: PayloadAction<TSHStateMessage>) {
             state.tshState = action.payload.state;
-            state.maxAppliedDeltaIdx = Math.max(action.payload.delta_index, state.maxAppliedDeltaIdx);
+            const rev = getRevision(action.payload);
+            // A snapshot is the source of truth for revision, so adopt it
+            // (could be lower than maxApplied after server restart).
+            state.maxAppliedDeltaIdx = rev;
             state.stateDeltas = [];
             state.initializing = false;
         },

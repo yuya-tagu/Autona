@@ -70,6 +70,10 @@ export default function websocketInit() {
     socket.on("disconnect", () => {
         console.log("SocketIO disconnected.")
         tshStore.dispatch(websocketInfoSlice.actions.setStatus("disconnected"));
+        // Per Design.md §3.2.3 R-Sync-9, the server pushes a fresh
+        // `program_state` event on every (re)connect, so reconnecting is
+        // enough — the resulting overwrite() reducer adopts the new
+        // revision and drops any deltas accumulated mid-disconnect.
         socket.connect();
     });
 
@@ -79,12 +83,14 @@ export default function websocketInit() {
     });
 
     // This can't be set up twice because of the initialization guard at the top of the function.
+    // Design.md §2.2 R-React-6 / §3.2.4: apply pending deltas on a 100ms tick
+    // (was 1000ms — caused visible scoreboard lag).
     setInterval(() => {
         const state = tshStore.getState();
         if (state.websocketInfo.status === "connected" && state.tshState?.stateDeltas.length > 0) {
             tshStore.dispatch(tshStateSlice.actions.applySavedDeltas());
         }
-    }, 1000);
+    }, 100);
 }
 
 // Todo, maybe move this to a thunk or something.

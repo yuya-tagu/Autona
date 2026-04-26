@@ -28,6 +28,7 @@ from loguru import logger
 from .StateManager import StateManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaBracket import Bracket, BracketSet
+from . import ui_constants as UI
 
 
 COLUMNS = [
@@ -139,6 +140,10 @@ def _is_real_set(s):
 class AutonaAnalysisWidget(QDockWidget):
     instance: "AutonaAnalysisWidget" = None
 
+    @staticmethod
+    def _summaryLabelStyle() -> str:
+        return f"color: {UI.palette()['text_muted']};"
+
     def __init__(self, *args):
         super().__init__(*args)
         self.setWindowTitle(QApplication.translate("app", "Analysis"))
@@ -164,8 +169,10 @@ class AutonaAnalysisWidget(QDockWidget):
         topBar.addWidget(self.btRefresh)
 
         self.summaryLabel = QLabel("")
-        self.summaryLabel.setStyleSheet("color: rgba(255,255,255,0.55);")
+        self.summaryLabel.setStyleSheet(self._summaryLabelStyle())
         topBar.addWidget(self.summaryLabel)
+        UI.on_theme_change(
+            lambda: self.summaryLabel.setStyleSheet(self._summaryLabelStyle()))
 
         topBar.addStretch(1)
 

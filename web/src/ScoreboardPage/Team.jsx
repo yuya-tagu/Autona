@@ -114,6 +114,7 @@ export default React.forwardRef(
                     control={
                         <Checkbox
                             id={teamId + "-losers"}
+                            size="small"
                             checked={state.inLosers}
                             onChange={
                                 (e) => {

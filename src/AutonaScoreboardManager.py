@@ -34,15 +34,12 @@ class AutonaScoreboardManager(QDockWidget):
         if self.scoreboard is not None:
             return True
 
-        StateManager.BlockSaving()
-        try:
+        with StateManager.SaveBlock():
             logger.info(
                 f"Scoreboard Manager - Creating Scoreboard (single={singlePlayer})")
             self.scoreboard = AutonaScoreboardWidget(
                 scoreboardNumber=1, singlePlayer=singlePlayer)
             self.widget.layout().addWidget(self.scoreboard)
-        finally:
-            StateManager.ReleaseSaving()
         return True
 
     def GetScoreboard(self, number=1):
