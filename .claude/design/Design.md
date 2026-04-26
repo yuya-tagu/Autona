@@ -1489,8 +1489,8 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 | **T-13** | React `size="small"` を全フォーム要素に徹底（指摘事項） | §2.2 R-React-5 | `CountrySelector` / `CountryStateSelector` / `NumberInput` / `Header` / `CurrentSet` / `CharSelector` / `UpcomingSets` / `Team` / `index.tsx` / `StageStrike` 各種 | ✅ 完了（M3） |
 | **T-14** | ハードコード hex 色をトークン参照に置換（PyQt 12+ 箇所、React App.css 数箇所） | §5.1.6 | `src/AutonaBracketView.py` / `src/AutonaBracketWidget.py` を `UI.palette()` 参照化、`web/src/index.css` 固定色を CssBaseline override に委譲、`web/src/ScoreboardPage/Header.jsx` 内 rgba を `theme.palette.divider` / `text.disabled` に | ✅ 完了（M3） |
 | **T-15** | `AutonaAnalysisWidget` の仕様反映済み確認と回帰テスト追加 | §4.1 | `src/AutonaAnalysisWidget.py` のテスト整備 | 未着手 |
-| **T-16** | サムネイルメタデータ（`_title.txt` / `_desc.txt`）を `thumbnail_config.generate_metadata` の設定で制御化 | §4.4.4 | `src/thumbnail/main_generate_thumbnail.py:save_result`, `AutonaThumbnailSettingsWidget` のチェックボックス追加 | 未着手 |
-| **T-17** | OBS テンプレ設定ダイアログに「OBS Studio 標準ホットキーとの衝突警告」を追加 | §6.4.2 | `AutonaSettingsWindow` 関連 | 未着手 |
+| **T-16** | サムネイルメタデータ（`_title.txt` / `_desc.txt`）を `thumbnail_config.generate_metadata` の設定で制御化 | §4.4.4 | `src/thumbnail/main_generate_thumbnail.py:save_result`, `AutonaThumbnailSettingsWidget` + `AutonaThumbnailSettings.ui` に `generateMetadataCheck` を追加（default true） | ✅ 完了（M3） |
+| **T-17** | OBS テンプレ設定ダイアログに「OBS Studio 標準ホットキーとの衝突警告」を追加 | §6.4.2 | `src/Helpers/AutonaHotkeyValidator.py` を新設し、`Settings/SettingsWidget.py` の hotkey ハンドラで Autona 内重複は error / OS・OBS 想定衝突は warning ダイアログを出す | ✅ 完了（M3） |
 
 ### 8.3 優先度: 低（長期的な構造改善）
 
