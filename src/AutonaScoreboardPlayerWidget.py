@@ -104,6 +104,10 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 sp.changeSize(0, 0, QSizePolicy.Minimum, QSizePolicy.Minimum)
 
         self.seedDisplay = self.findChild(QLabel, "seedDisplay")
+        # The .ui used to hardcode rgba(255,255,255,0.75) which became
+        # invisible on the light palette. Drive the colour from the
+        # current theme tokens instead (Design.md §5.4 / §8 T-14).
+        self.seedDisplay.setStyleSheet(self._seedDisplayStyle())
 
         def _syncSeedDisplay(value):
             try:
@@ -284,6 +288,12 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             w.setStyleSheet(UI.readonly_style())
         for w in self._themed_disabled:
             w.setStyleSheet(UI.disabled_style())
+        if getattr(self, 'seedDisplay', None) is not None:
+            self.seedDisplay.setStyleSheet(self._seedDisplayStyle())
+
+    @staticmethod
+    def _seedDisplayStyle() -> str:
+        return f"color: {UI.palette()['text_secondary']};"
 
     def ComboBoxIndexChanged(self, element: QComboBox):
         StateManager.Set(
