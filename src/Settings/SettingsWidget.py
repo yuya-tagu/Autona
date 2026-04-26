@@ -1,6 +1,12 @@
 from qtpy.QtWidgets import *
 from ..AutonaColorButton import AutonaColorButton
 from ..SettingsManager import SettingsManager
+from ..Helpers.AutonaHotkeyValidator import (
+    collision_summary,
+    find_app_duplicates,
+    normalize_shortcut,
+    os_warning_for,
+)
 import textwrap
 
 
@@ -53,22 +59,25 @@ class SettingsWidget(QWidget):
             )
         elif type == "hotkey":
             settingWidget = QKeySequenceEdit()
+            # Trim any extra chord recorded after the first key.
             settingWidget.keySequenceChanged.connect(
                 lambda keySequence, settingWidget=settingWidget:
                 settingWidget.setKeySequence(keySequence.toString().split(",")[
                     0]) if keySequence.count() > 0 else None
             )
-            settingWidget.setKeySequence(SettingsManager.Get(
-                self.settingsBase+"."+setting, defaultValue))
+            initial = SettingsManager.Get(
+                self.settingsBase+"."+setting, defaultValue)
+            settingWidget.setKeySequence(initial)
+            # Track the last value we accepted so we can revert on
+            # validation failure (Design.md §6.4.2 / §8 T-17).
+            settingWidget._lastAcceptedSequence = initial or ""
+
             settingWidget.keySequenceChanged.connect(
-                lambda sequence=None, setting=setting: [
-                    SettingsManager.Set(
-                        self.settingsBase+"."+setting, sequence.toString()),
-                    callback()
-                ]
+                self._makeHotkeyValidator(settingWidget, setting, callback)
             )
             resetButton.clicked.connect(
-                lambda bt=None, setting=setting, settingWidget=settingWidget: [
+                lambda bt=None, setting=setting, settingWidget=settingWidget,
+                       defaultValue=defaultValue: [
                     settingWidget.setKeySequence(defaultValue),
                     callback()
                 ]
@@ -103,3 +112,69 @@ class SettingsWidget(QWidget):
 
         self.layout().addWidget(settingWidget, lastRow, 1)
         self.layout().addWidget(resetButton, lastRow, 2)
+
+    def _makeHotkeyValidator(self, settingWidget, setting, callback):
+        """Build a keySequenceChanged handler that enforces:
+        - hard error on duplicates within Autona (revert + dialog)
+        - soft warning for OS / OBS clashes (dialog, but save anyway)
+        See Design.md §6.4.2 / §8 T-17.
+        """
+        def _handler(sequence):
+            new_str = sequence.toString() if sequence is not None else ""
+            previous = getattr(settingWidget, "_lastAcceptedSequence", "") or ""
+
+            # No-op: identical to last accepted value (suppresses the
+            # echo when we revert via setKeySequence below).
+            if normalize_shortcut(new_str) == normalize_shortcut(previous):
+                return
+
+            # Build a hypothetical hotkey set with the new value applied
+            # so duplicate detection sees the user's intent, not the
+            # already-persisted value.
+            current = dict(SettingsManager.Get(self.settingsBase, {}) or {})
+            current[setting] = new_str
+            duplicates = find_app_duplicates(current)
+
+            collision_actions = None
+            for canon, actions in duplicates.items():
+                if canon == normalize_shortcut(new_str) and setting in actions:
+                    collision_actions = [a for a in actions if a != setting]
+                    break
+
+            if collision_actions:
+                QMessageBox.critical(
+                    settingWidget,
+                    QApplication.translate(
+                        "settings.hotkeys", "Hotkey conflict"),
+                    QApplication.translate(
+                        "settings.hotkeys",
+                        "'{shortcut}' is already assigned to: {others}.\n"
+                        "Choose a different combination or clear the "
+                        "conflicting assignment first."
+                    ).format(
+                        shortcut=new_str,
+                        others=collision_summary(collision_actions),
+                    ),
+                )
+                # Revert UI without re-triggering the handler.
+                settingWidget.blockSignals(True)
+                try:
+                    settingWidget.setKeySequence(previous)
+                finally:
+                    settingWidget.blockSignals(False)
+                return
+
+            warning = os_warning_for(new_str)
+            if warning:
+                QMessageBox.warning(
+                    settingWidget,
+                    QApplication.translate(
+                        "settings.hotkeys", "Possible hotkey conflict"),
+                    warning,
+                )
+
+            SettingsManager.Set(self.settingsBase+"."+setting, new_str)
+            settingWidget._lastAcceptedSequence = new_str
+            callback()
+
+        return _handler
