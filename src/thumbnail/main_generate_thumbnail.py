@@ -258,15 +258,22 @@ def save_result(pixmap, data, settings, scoreboardNumber=1, isPreview=False):
         logger.info(
             f"Thumbnail successfully saved as {out_path}/{thumbnail_filename}.png and {out_path}/{thumbnail_filename}.jpg")
 
-        # YouTube metadata
-        yt_title, yt_description = generate_youtube(
-            scoreboardNumber, display_phase, replace_characters=[["<", "❮"], [">", "❯"]])
-        with open(f"{out_path}/{thumbnail_filename}_title.txt", "wt", encoding="utf-8") as txt_file:
-            txt_file.write(yt_title)
-        with open(f"{out_path}/{thumbnail_filename}_desc.txt", "wt", encoding="utf-8") as txt_file:
-            txt_file.write(yt_description)
-        logger.info(
-            f"YouTube data successfully saved as {out_path}/{thumbnail_filename}_title.txt and {out_path}/{thumbnail_filename}_desc.txt")
+        # YouTube metadata — gated by thumbnail_config.generate_metadata
+        # (Design.md §4.4.4 / §8 T-16). Default true preserves existing
+        # behaviour so users who never opened settings keep getting both
+        # files.
+        if deep_get(settings, "generate_metadata", True):
+            yt_title, yt_description = generate_youtube(
+                scoreboardNumber, display_phase, replace_characters=[["<", "❮"], [">", "❯"]])
+            with open(f"{out_path}/{thumbnail_filename}_title.txt", "wt", encoding="utf-8") as txt_file:
+                txt_file.write(yt_title)
+            with open(f"{out_path}/{thumbnail_filename}_desc.txt", "wt", encoding="utf-8") as txt_file:
+                txt_file.write(yt_description)
+            logger.info(
+                f"YouTube data successfully saved as {out_path}/{thumbnail_filename}_title.txt and {out_path}/{thumbnail_filename}_desc.txt")
+        else:
+            logger.info(
+                "Skipping YouTube metadata files (thumbnail_config.generate_metadata=false)")
         return f"{out_path}/{thumbnail_filename}.png"
     else:
         thumbnail_filename = "template"
