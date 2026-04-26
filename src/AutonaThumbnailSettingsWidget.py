@@ -15,6 +15,8 @@ from .AutonaGameAssetManager import *
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaDictHelper import deep_get, deep_set
 from .Helpers.AutonaDirHelper import AutonaResolve
+from . import ui_constants as UI
+from . import ui_layout as L
 
 
 # Video title format:
@@ -115,6 +117,9 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
         # SET DEFAULTS
         self.setDefaultsButton = self.settings.findChild(
             QPushButton, "resetToDefault")
+        # Reset to Defaults wipes the thumbnail_config block — flag as
+        # destructive so it stands apart from the neutral preview/save row.
+        L.tag_button(self.setDefaultsButton, L.BUTTON_DANGER)
         self.setDefaultsButton.clicked.connect(lambda: [
             SettingsManager.Unset("thumbnail_config"),
             self.updateFromSettings(),
@@ -275,11 +280,25 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
         previewContainer = self.settings.findChild(QWidget, "thumbnailPreview")
         # Remove default layout margins so the pixmap reaches the container edges
         previewContainer.layout().setContentsMargins(0, 0, 0, 0)
+        # Frame the preview slot so the empty/loading state stays visible
+        # even when no pixmap has been generated yet. objectName is already
+        # "thumbnailPreview" from the .ui file — re-asserting it would risk
+        # clobbering a future rename, so we scope the QSS by walking the
+        # palette directly.
+        _p = UI.palette()
+        previewContainer.setStyleSheet(
+            f"QWidget#thumbnailPreview {{"
+            f"background-color: {_p['bg_tertiary']};"
+            f"border: 1px solid {_p['border_subtle']};"
+            f"border-radius: {UI.RADIUS_SM}px;"
+            f"}}"
+        )
         self.preview = PreviewWidget()
         previewContainer.layout().addWidget(self.preview)
 
         self.updatePreview = self.settings.findChild(
             QPushButton, "btUpdatePreview")
+        L.tag_button(self.updatePreview, L.BUTTON_PRIMARY)
         self.updatePreview.clicked.connect(lambda: [
             self.GeneratePreview(True),
             self._RefreshVideoTitle(force=True),
@@ -296,6 +315,10 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
         self.generateThumbnail = self.settings.findChild(
             QPushButton, "btGenerate")
         self.generateThumbnail.setHidden(True)
+
+        # Normalise card padding / spacing across all top-level groups.
+        for group in self.settings.findChildren(QGroupBox):
+            L.apply_card_layout(group)
 
         # Reload preview when game changes
         AutonaGameAssetManager.instance.signals.onLoad.connect(lambda: [
