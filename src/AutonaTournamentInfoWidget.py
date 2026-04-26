@@ -12,6 +12,7 @@ from .SettingsManager import SettingsManager
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaDirHelper import AutonaResolve
 from .AutonaColorButton import AutonaColorButton
+from . import ui_layout as L
 import traceback
 import shutil
 from pathlib import Path
@@ -77,16 +78,12 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         self.btLoadInfoFromTournament: QPushButton = self.findChild(
             QPushButton, "btLoadInfoFromTournament")
-        # Re-tag as the primary action so the accent styling kicks in.
-        self.btLoadInfoFromTournament.setObjectName("primary")
-        self.btLoadInfoFromTournament.style().unpolish(
-            self.btLoadInfoFromTournament)
-        self.btLoadInfoFromTournament.style().polish(
-            self.btLoadInfoFromTournament)
+        L.tag_button(self.btLoadInfoFromTournament, L.BUTTON_PRIMARY)
         self.btLoadInfoFromTournament.clicked.connect(self._OnLoadFromTournament)
 
         self.btClearInfo: QPushButton = self.findChild(
             QPushButton, "btClearInfo")
+        L.tag_button(self.btClearInfo, L.BUTTON_DANGER)
         self.btClearInfo.clicked.connect(lambda: [
             self.UpdateData({})
         ])
@@ -99,17 +96,20 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         self.btDownloadIcon: QPushButton = self.findChild(
             QPushButton, "btDownloadIcon")
+        L.tag_button(self.btDownloadIcon, L.BUTTON_PRIMARY)
         self.btDownloadIcon.clicked.connect(lambda: [
             self.DownloadIcon()
         ])
 
         self.btClearIcon: QPushButton = self.findChild(
             QPushButton, "btClearIcon")
+        L.tag_button(self.btClearIcon, L.BUTTON_DANGER)
         self.btClearIcon.clicked.connect(lambda: [
             self.SetDefaultIcon()
         ])
 
         self.iconView: QLabel = self.findChild(QLabel, "iconView")
+        L.apply_media_preview(self.iconView, min_width=100, min_height=100)
 
         self.UpdateIcon()
 
@@ -120,15 +120,23 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         self.btDownloadBanner: QPushButton = self.findChild(
             QPushButton, "btDownloadBanner")
+        L.tag_button(self.btDownloadBanner, L.BUTTON_PRIMARY)
         self.btDownloadBanner.clicked.connect(self.DownloadBanner)
 
         self.btClearBanner: QPushButton = self.findChild(
             QPushButton, "btClearBanner")
+        L.tag_button(self.btClearBanner, L.BUTTON_DANGER)
         self.btClearBanner.clicked.connect(self.SetDefaultBanner)
 
         self.bannerView: QLabel = self.findChild(QLabel, "bannerView")
+        L.apply_media_preview(self.bannerView, min_width=178, min_height=100)
 
         self.UpdateBanner()
+
+        # Normalise card padding / spacing across all top-level groups so
+        # the EVENT tab reads consistently with the rest of the app.
+        for group in self.findChildren(QGroupBox):
+            L.apply_card_layout(group)
 
         # Theme color button
         saved_theme = SettingsManager.Get("general.theme_color", DEFAULT_THEME_COLOR)
@@ -165,11 +173,13 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         self.btGenerateStreamThumbnail: QPushButton = self.findChild(
             QPushButton, "btGenerateStreamThumbnail")
+        L.tag_button(self.btGenerateStreamThumbnail, L.BUTTON_PRIMARY)
         self.btGenerateStreamThumbnail.clicked.connect(
             self.GenerateStreamThumbnail)
 
         self.streamThumbPreview: QLabel = self.findChild(
             QLabel, "streamThumbPreview")
+        L.apply_media_preview(self.streamThumbPreview, min_width=320, min_height=180)
         self.streamThumbPath: QLabel = self.findChild(
             QLabel, "streamThumbPath")
 
