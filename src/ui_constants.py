@@ -264,6 +264,29 @@ QPushButton#primary:pressed,
 QPushButton:default:pressed {{
     color: {p['on_accent']};
 }}
+/* Danger / destructive actions (objectName="danger"): opt-in red outline.
+   Used for Clear / Reset / Delete style buttons so they read distinct from
+   neutral secondary actions. Filled on hover for affordance, but stays an
+   outline by default to avoid stealing primary attention. */
+QPushButton#danger, QToolButton#danger {{
+    background-color: {p['bg_tertiary']};
+    border: 1px solid {p['negative']};
+    color: {p['negative']};
+}}
+QPushButton#danger:hover, QToolButton#danger:hover {{
+    background-color: {p['brand_subtle']};
+    border-color: {p['negative']};
+    color: {p['negative']};
+}}
+QPushButton#danger:pressed, QToolButton#danger:pressed {{
+    background-color: {p['brand_subtle']};
+    padding-top: 1px;
+}}
+QPushButton#danger:disabled, QToolButton#danger:disabled {{
+    color: {p['text_disabled']};
+    border-color: {p['border_subtle']};
+    background-color: {p['bg_secondary']};
+}}
 
 /* === Text inputs === */
 QComboBox, QSpinBox, QLineEdit, QDoubleSpinBox, QDateEdit, QTimeEdit {{
