@@ -95,12 +95,15 @@ class AutonaHotkeys(QObject):
 
     # Use Ctrl+Shift+ prefix to avoid globally swallowing common app
     # shortcuts (Ctrl+S=Save, Ctrl+O=Open, Ctrl+P=Print, Ctrl+R=Reload).
+    # Score buttons use top-row digits 1..4 — F-keys are reserved on many
+    # keyboards for OS / OBS hotkeys and operators prefer to keep them
+    # free for streaming software.
     keys = {
         "load_set": "Ctrl+Shift+O",
-        "team1_score_up": "Ctrl+Shift+F1",
-        "team1_score_down": "Ctrl+Shift+F2",
-        "team2_score_up": "Ctrl+Shift+F3",
-        "team2_score_down": "Ctrl+Shift+F4",
+        "team1_score_up": "Ctrl+Shift+1",
+        "team1_score_down": "Ctrl+Shift+2",
+        "team2_score_up": "Ctrl+Shift+3",
+        "team2_score_down": "Ctrl+Shift+4",
         "reset_scores": "Ctrl+Shift+R",
         "swap_teams": "Ctrl+Shift+S",
         "refresh_phase_group": "Ctrl+Shift+P",
