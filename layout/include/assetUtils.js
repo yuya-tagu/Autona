@@ -330,10 +330,44 @@ document.addEventListener("tsh_update", (event) => {
   });
 });
 
+// Tracks the last applied tournament logo version so we only swap the
+// CSS variable / color palette when the underlying file actually changed.
+var _appliedLogoVersion = null;
+
+// Build the cache-busting logo URL for the current tournamentInfo.logoVersion.
+// Layouts under layout/<name>/ resolve this relative to their own index.html,
+// so the value matches the legacy "../logo.png" path.
+function GetLogoUrl(version) {
+  if (version === undefined || version === null) version = 0;
+  return `../logo.png?v=${version}`;
+}
+
+// Apply the new logo URL into a :root CSS variable so all stylesheets that
+// reference --logo-url pick it up without needing a manual reload from OBS.
+// Preloads via Image() first to avoid a flash of empty background while the
+// CEF browser fetches the new asset.
+function ApplyLogoVersion(version) {
+  if (version === _appliedLogoVersion) return;
+  _appliedLogoVersion = version;
+
+  const url = GetLogoUrl(version);
+  const preload = new Image();
+  preload.onload = preload.onerror = () => {
+    document.documentElement.style.setProperty("--logo-url", `url("${url}")`);
+    if (tsh_settings && tsh_settings.automatic_theme) {
+      GetLogoColors();
+    }
+  };
+  preload.src = url;
+}
+
 // Sets colors for the css variables based on the tournament logo
 function GetLogoColors() {
   let img = new Image();
-  img.src = "../logo.png";
+  // Inherit the version from the last apply so the palette comes from the
+  // freshly fetched logo, not a stale cached copy.
+  img.crossOrigin = "anonymous";
+  img.src = GetLogoUrl(_appliedLogoVersion);
 
   img.onload = () => {
     const colorThief = new ColorThief();
@@ -354,6 +388,15 @@ function GetLogoColors() {
     });
   };
 }
+
+// Subscribe once: every program_state update, sync --logo-url to the latest
+// tournamentInfo.logoVersion published by the desktop app. The desktop side
+// only Set()s this when the logo file's mtime changes, so this is a no-op
+// for unrelated state updates (early-out via _appliedLogoVersion).
+document.addEventListener("tsh_update", (event) => {
+  const v = _.get(event.data, "tournamentInfo.logoVersion", 0);
+  ApplyLogoVersion(v);
+});
 
 // Gets contrasting color between black and white for a [r, g, b] background
 const setContrast = (rgb) =>
