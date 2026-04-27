@@ -142,7 +142,7 @@ body {
   width: 100px;
   height: 100px;
   margin: 8px;
-  background-image: url("../logo.png");
+  background-image: var(--logo-url, url("../logo.png"));
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;

@@ -107,7 +107,7 @@ iframe {
 	width: 150px;
 	height: 150px;
 	margin-left: 16px;
-	background-image: url("../logo.png");
+	background-image: var(--logo-url, url("../logo.png"));
 	background-size: contain;
 	background-repeat: no-repeat;
 	background-position: center;

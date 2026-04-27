@@ -2,6 +2,7 @@ from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from qtpy import uic
+import os
 import time
 import datetime
 from io import BytesIO
@@ -24,6 +25,7 @@ DEFAULT_THEME_COLOR = "#1D1B18"
 DEFAULT_ACCENT_COLOR = "#f0a500"
 DEFAULT_BANNER_PATH = "./assets/thumbnail_base/default_banner.png"
 BANNER_PATH = "./user_data/tournament_banner.png"
+LOGO_PATH = "./layout/logo.png"
 STREAM_OUTPUT_DIR = "./out/stream"
 STREAM_TITLE_MAX_LENGTH = 100
 # Fallback abbreviation by smashgg_game_id when the per-game config.json
@@ -303,7 +305,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
                 max_dim, max_dim,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation)
-        pix.save("./layout/logo.png")
+        pix.save(LOGO_PATH)
         self.UpdateIcon()
 
     def _applyBannerBytes(self, data: bytes):
@@ -336,7 +338,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
         # iconView slot is now 60×60 (see AutonaTournamentInfo.ui).
         # Scale the source to fit the slot while keeping aspect.
         try:
-            icon = QPixmap("./layout/logo.png").scaled(
+            icon = QPixmap(LOGO_PATH).scaled(
                 60, 60,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation)
@@ -344,6 +346,19 @@ class AutonaTournamentInfoWidget(QDockWidget):
             icon = QPixmap("./assets/icons/cancel.svg").scaledToWidth(32)
 
         self.iconView.setPixmap(icon)
+
+        # Publish the logo file's mtime as a cache-bust version so the OBS
+        # browser source and the off-screen WebEngine renderer (thumbnail /
+        # result) can append it as a query string and bypass the
+        # Cache-Control: max-age=86400 served by AutonaWebServer.
+        # Using mtime keeps the value stable across app restarts when the
+        # logo file hasn't changed (avoids re-fetching every launch).
+        try:
+            mtime = int(os.path.getmtime(LOGO_PATH) * 1000)
+        except OSError:
+            mtime = 0
+        if StateManager.Get("tournamentInfo.logoVersion", None) != mtime:
+            StateManager.Set("tournamentInfo.logoVersion", mtime)
 
     def LoadIcon(self):
         try:
@@ -363,7 +378,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
                         max_dim, max_dim,
                         Qt.AspectRatioMode.KeepAspectRatio,
                         Qt.TransformationMode.SmoothTransformation)
-                pix.save("./layout/logo.png")
+                pix.save(LOGO_PATH)
         except Exception as e:
             logger.error(traceback.format_exc())
 
@@ -396,7 +411,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation)
 
-            pix.save("./layout/logo.png")
+            pix.save(LOGO_PATH)
         except Exception as e:
             logger.error(traceback.format_exc())
 
@@ -483,7 +498,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
     def SetDefaultIcon(self):
         try:
-            shutil.copy("./assets/icons/icon.png", "./layout/logo.png")
+            shutil.copy("./assets/icons/icon.png", LOGO_PATH)
         except:
             logger.error(traceback.format_exc())
 
