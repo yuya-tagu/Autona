@@ -86,9 +86,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
         self.btClearInfo: QPushButton = self.findChild(
             QPushButton, "btClearInfo")
         L.tag_button(self.btClearInfo, L.BUTTON_DANGER)
-        self.btClearInfo.clicked.connect(lambda: [
-            self.UpdateData({})
-        ])
+        self.btClearInfo.clicked.connect(self._OnClearInfo)
 
         # Tournament Icon / Banner are now grouped under groupBoxMedia
         # (see AutonaTournamentInfo.ui). Five buttons sit beside the two
@@ -180,6 +178,14 @@ class AutonaTournamentInfoWidget(QDockWidget):
         self.btGenerateStreamThumbnail.clicked.connect(
             self.GenerateStreamThumbnail)
 
+        self.btCopyStreamThumbnail: QPushButton = self.findChild(
+            QPushButton, "btCopyStreamThumbnail")
+        self.btCopyStreamThumbnail.clicked.connect(
+            self.CopyStreamThumbnail)
+        # Tracks the most recent generated thumbnail file so the copy
+        # button can push it to the clipboard without regenerating.
+        self._lastStreamThumbPath = None
+
         self.streamThumbPreview: QLabel = self.findChild(
             QLabel, "streamThumbPreview")
         # The .ui pins this slot to 160×90 via maximumSize — don't pass
@@ -204,6 +210,23 @@ class AutonaTournamentInfoWidget(QDockWidget):
             self._RefreshStreamTitle)
 
         self._RefreshStreamTitle()
+
+    def _OnClearInfo(self):
+        reply = QMessageBox.question(
+            self,
+            QApplication.translate("app", "Confirm"),
+            QApplication.translate(
+                "app", "Start.gg との接続を解除します。よろしいですか？"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        AutonaTournamentDataProvider.instance.SetTournament(None)
+        self.UpdateData({})
+
+    def _emitMediaUpdated(self):
+        AutonaTournamentDataProvider.instance.signals.media_updated.emit()
 
     def _OnLoadFromTournament(self):
         # Reload tournament metadata, then also pull the icon and banner
@@ -316,6 +339,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
         SettingsManager.Set("thumbnail_config.background_path", BANNER_PATH)
         logger.info("Tournament banner saved and set as thumbnail background")
         self.UpdateBanner()
+        self._emitMediaUpdated()
 
     def InsertHeaderWidget(self, widget: QWidget) -> None:
         """Insert an arbitrary widget at the very top of this tab's
@@ -457,6 +481,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
             logger.error(traceback.format_exc())
 
         self.UpdateBanner()
+        self._emitMediaUpdated()
 
     def DownloadBanner(self):
         try:
@@ -487,6 +512,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
             logger.error(traceback.format_exc())
 
         self.UpdateBanner()
+        self._emitMediaUpdated()
 
     def SetDefaultBanner(self):
         try:
@@ -495,6 +521,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
             logger.error(traceback.format_exc())
 
         self.UpdateBanner()
+        self._emitMediaUpdated()
 
     def SetDefaultIcon(self):
         try:
@@ -572,34 +599,53 @@ class AutonaTournamentInfoWidget(QDockWidget):
             return
         QApplication.clipboard().setText(title)
 
-    def GenerateStreamThumbnail(self):
+    def _LoadBannerImage(self):
+        """Load the source banner as a PIL Image. Prefers the provider's
+        remote banner when a tournament is connected, otherwise falls back
+        to the locally saved banner (set via LoadBannerFile / DownloadBanner
+        / default). Returns None when nothing usable is available."""
+        # 1) Try the live tournament banner first — keeps behaviour
+        #    identical for users who already loaded a Start.gg tournament.
         provider = AutonaTournamentDataProvider.instance.provider
-        if provider is None:
-            self.streamThumbPath.setText(QApplication.translate(
-                "app", "Load a tournament first."))
-            return
+        if provider is not None:
+            try:
+                url = provider.GetBannerURL()
+            except Exception:
+                logger.error(traceback.format_exc())
+                url = None
+            if url:
+                try:
+                    headers = {
+                        "client-version": "20",
+                        "Content-Type": "application/json",
+                        "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36"
+                    }
+                    response = requests.get(url, headers=headers, timeout=20)
+                    response.raise_for_status()
+                    return Image.open(BytesIO(response.content)).convert("RGB")
+                except Exception:
+                    logger.error(traceback.format_exc())
 
-        try:
-            url = provider.GetBannerURL()
-        except Exception:
-            logger.error(traceback.format_exc())
-            url = None
+        # 2) Fall back to the locally saved banner so manual file loads
+        #    (LoadBannerFile) and offline / non-Start.gg flows still work.
+        local_path = SettingsManager.Get(
+            "thumbnail_config.background_path", BANNER_PATH)
+        for candidate in (local_path, BANNER_PATH, DEFAULT_BANNER_PATH):
+            if candidate and os.path.exists(candidate):
+                try:
+                    return Image.open(candidate).convert("RGB")
+                except Exception:
+                    logger.error(traceback.format_exc())
+        return None
 
-        if not url:
+    def GenerateStreamThumbnail(self):
+        banner = self._LoadBannerImage()
+        if banner is None:
             self.streamThumbPath.setText(QApplication.translate(
                 "app", "No tournament banner available."))
             return
 
         try:
-            headers = {
-                "client-version": "20",
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36"
-            }
-            response = requests.get(url, headers=headers, timeout=20)
-            response.raise_for_status()
-            banner = Image.open(BytesIO(response.content)).convert("RGB")
-
             if self.rbStreamThumbNetflix.isChecked():
                 out_img = self._MakeNetflixStyleThumbnail(banner)
                 style_tag = "netflix"
@@ -613,6 +659,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
             filename = f"thumbnail_{style_tag}_{timestamp}.jpg"
             out_path = out_dir / filename
             out_img.save(out_path, "JPEG", quality=90)
+            self._lastStreamThumbPath = str(out_path)
 
             # Show a scaled preview in the UI
             pix = QPixmap(str(out_path))
@@ -626,6 +673,29 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
             self.streamThumbPath.setText(
                 QApplication.translate("app", "Saved: ") + str(out_path))
+        except Exception as e:
+            logger.error(traceback.format_exc())
+            self.streamThumbPath.setText(
+                QApplication.translate("app", "Error: ") + str(e))
+
+    def CopyStreamThumbnail(self):
+        """Copy the most recently generated stream thumbnail to the
+        clipboard. Generates one on demand if none exists yet."""
+        path = self._lastStreamThumbPath
+        if not path or not os.path.exists(path):
+            self.GenerateStreamThumbnail()
+            path = self._lastStreamThumbPath
+        if not path or not os.path.exists(path):
+            return
+        try:
+            image = QImage(path)
+            if image.isNull():
+                self.streamThumbPath.setText(QApplication.translate(
+                    "app", "Failed to load thumbnail for copy."))
+                return
+            QApplication.clipboard().setImage(image)
+            self.streamThumbPath.setText(
+                QApplication.translate("app", "Copied to clipboard: ") + path)
         except Exception as e:
             logger.error(traceback.format_exc())
             self.streamThumbPath.setText(

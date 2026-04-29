@@ -326,6 +326,10 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
             self.GeneratePreview()
         ])
 
+        # Reload preview when banner is changed in EVENT tab
+        AutonaTournamentDataProvider.instance.signals.media_updated.connect(
+            self.GeneratePreview)
+
         # Debounce timer for preview generation
         self._previewTimer = QTimer()
         self._previewTimer.setSingleShot(True)

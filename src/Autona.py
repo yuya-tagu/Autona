@@ -276,7 +276,7 @@ class Window(QMainWindow):
         self.setTournamentBt.clicked.connect(
             lambda: AutonaTournamentDataProvider.instance.SetStartggEventSlug(self))
 
-        splash.set_message(splash_msgs[1], progress=0.25)
+        splash.set_message(splash_msgs[0], progress=0.25)
 
         self.dockWidgets = []
 
@@ -319,7 +319,7 @@ class Window(QMainWindow):
         self.addDockWidget(
             Qt.DockWidgetArea.BottomDockWidgetArea, bracket)
         self.dockWidgets.append(bracket)
-        splash.set_message(splash_msgs[1], progress=0.40)
+        splash.set_message(splash_msgs[0], progress=0.40)
 
         # teamBattle = AutonaTeamBattleWidget()
         # teamBattle.setWindowIcon(QIcon(UI.icon_path('info.svg')))
