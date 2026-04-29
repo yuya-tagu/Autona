@@ -64,19 +64,37 @@ class AutonaTournamentInfoWidget(QDockWidget):
             #    f"tournamentInfo.{widget.objectName()}", 0))
 
         for widget in self.findChildren(QLineEdit):
-            if widget.objectName() != "qt_spinbox_lineedit":
-                widget.editingFinished.connect(
-                    lambda element=widget: [
-                        StateManager.Set(
-                            f"tournamentInfo.{element.objectName()}", element.text())
-                    ])
-                widget.editingFinished.emit()
+            if widget.objectName() == "qt_spinbox_lineedit":
+                continue
+            if isinstance(widget.parent(), QComboBox):
+                continue
+            widget.editingFinished.connect(
+                lambda element=widget: [
+                    StateManager.Set(
+                        f"tournamentInfo.{element.objectName()}", element.text())
+                ])
+            widget.editingFinished.emit()
 
         for widget in self.findChildren(QSpinBox):
             widget.valueChanged.connect(lambda value, element=widget: [
                 StateManager.Set(
                     f"tournamentInfo.{element.objectName()}", value)
             ])
+
+        # Game title combo
+        self.gameTitleCombo: QComboBox = self.findChild(
+            QComboBox, "gameTitleCombo")
+        self.gameTitleCombo.setEditable(True)
+        self.gameTitleCombo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+        self.gameTitleCombo.completer().setCompletionMode(
+            QCompleter.CompletionMode.PopupCompletion)
+        self.gameTitleCombo.activated.connect(self._OnGameSelected)
+        AutonaGameAssetManager.instance.signals.onLoadAssets.connect(
+            self._PopulateGameCombo)
+        AutonaGameAssetManager.instance.signals.onLoad.connect(
+            self._SyncGameCombo)
+        AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
+            self._SyncGameCombo)
 
         self.btLoadInfoFromTournament: QPushButton = self.findChild(
             QPushButton, "btLoadInfoFromTournament")
@@ -210,6 +228,39 @@ class AutonaTournamentInfoWidget(QDockWidget):
             self._RefreshStreamTitle)
 
         self._RefreshStreamTitle()
+
+    def _PopulateGameCombo(self):
+        games = AutonaGameAssetManager.instance.games
+        self.gameTitleCombo.clear()
+        self.gameTitleCombo.addItem("", 0)
+        for i, (codename, game) in enumerate(games.items()):
+            logo_path = game.get("logo_path")
+            icon = QIcon(QPixmap(QImage(logo_path).scaled(
+                32, 32,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ))) if logo_path else QIcon()
+            name = game.get("name") or codename
+            self.gameTitleCombo.addItem(icon, name, i + 1)
+        self.gameTitleCombo.setIconSize(QSize(32, 32))
+        self._SyncGameCombo()
+
+    def _SyncGameCombo(self):
+        selected = AutonaGameAssetManager.instance.selectedGame
+        if not selected:
+            self.gameTitleCombo.setCurrentIndex(0)
+            return
+        name = selected.get("name") or selected.get("codename")
+        for i in range(self.gameTitleCombo.count()):
+            if self.gameTitleCombo.itemText(i) == name:
+                self.gameTitleCombo.setCurrentIndex(i)
+                return
+        self.gameTitleCombo.setCurrentIndex(0)
+
+    def _OnGameSelected(self, index):
+        data = self.gameTitleCombo.itemData(index)
+        if data:
+            AutonaGameAssetManager.instance.LoadGameAssets(data)
 
     def _OnClearInfo(self):
         reply = QMessageBox.question(
@@ -744,6 +795,8 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         if not data.get("initial_load"):
             for widget in self.findChildren(QLineEdit):
+                if isinstance(widget.parent(), QComboBox):
+                    continue
                 widget.setText("")
                 widget.editingFinished.emit()
             for widget in self.findChildren(QSpinBox):
