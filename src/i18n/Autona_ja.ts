@@ -65,8 +65,8 @@ p, li { white-space: pre-wrap; }
     </message>
     <message>
         <location filename="../layout/AutonaTournamentInfo.ui" line="140"/>
-        <source>Clear</source>
-        <translation>リセット</translation>
+        <source>Disconnect from tournament</source>
+        <translation>大会との接続を解除する</translation>
     </message>
     <message>
         <location filename="../layout/AutonaTournamentInfo.ui" line="150"/>
@@ -2036,6 +2036,14 @@ p, li { white-space: pre-wrap; }
     <message>
         <source>Error: </source>
         <translation>エラー: </translation>
+    </message>
+    <message>
+        <source>Copied to clipboard: </source>
+        <translation>クリップボードにコピーしました: </translation>
+    </message>
+    <message>
+        <source>Failed to load thumbnail for copy.</source>
+        <translation>サムネイルの読み込みに失敗しました。</translation>
     </message>
     <message>
         <source>Slot {0} - Player</source>

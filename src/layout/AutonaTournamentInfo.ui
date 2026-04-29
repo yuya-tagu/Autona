@@ -142,7 +142,7 @@
        <item>
         <widget class="QPushButton" name="btClearInfo">
          <property name="text">
-          <string>Clear</string>
+          <string>Disconnect from tournament</string>
          </property>
         </widget>
        </item>
@@ -266,6 +266,13 @@
             <widget class="QPushButton" name="btGenerateStreamThumbnail">
              <property name="text">
               <string>Generate Stream Thumbnail</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QPushButton" name="btCopyStreamThumbnail">
+             <property name="text">
+              <string>Copy Thumbnail to Clipboard</string>
              </property>
             </widget>
            </item>

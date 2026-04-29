@@ -29,6 +29,7 @@ class AutonaTournamentDataProviderSignals(QObject):
     stream_queue_loaded = Signal(dict)
     sets_data_updated = Signal(dict)
     tournament_url_update = Signal(str)
+    media_updated = Signal()
 
 
 class AutonaTournamentDataProvider(QObject):

@@ -259,6 +259,10 @@ class AutonaResultSettingsWidget(QDockWidget):
         AutonaGameAssetManager.instance.signals.onLoad.connect(
             self._onGameChanged)
 
+        # Reload preview when banner is changed in EVENT tab
+        AutonaTournamentDataProvider.instance.signals.media_updated.connect(
+            self.GeneratePreview)
+
         # Apply initial row visibility and generate preview (slots 9-16 hidden by default)
         self._onLayoutChanged()
 
