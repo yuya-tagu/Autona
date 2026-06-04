@@ -56,14 +56,6 @@ class AutonaSettingsWindow(QDialog):
 
         generalSettings.append((
             QApplication.translate(
-                "settings.control_score_from_stage_strike", "Enable score control from the stage striking app"),
-            "control_score_from_stage_strike",
-            "checkbox",
-            True
-        ))
-
-        generalSettings.append((
-            QApplication.translate(
                 "settings.disable_thumbnail_widget", "Disables the Thumbnail Widget from starting (takes effect on next restart)"),
             "disable_thumbnail_widget",
             "checkbox",

@@ -19,6 +19,7 @@ LAYOUTS = {
     "horizontal_16": ("result_top16", 1920, 1080),
     "vertical": ("result_vertical", 960, 1080),
     "vertical_geki": ("result_vertical_geki", 960, 1080),
+    "team": ("result_team", 1920, 1080),
 }
 
 DEFAULT_LAYOUT = "horizontal"

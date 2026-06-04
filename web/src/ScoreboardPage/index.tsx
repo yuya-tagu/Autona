@@ -18,10 +18,9 @@ import websocketInit from "./websocketInit";
 import websocketConnection from "../websocketConnection";
 import {BACKEND_PORT} from "../env";
 
-// Autona runs with a single scoreboard. The backend still accepts the
-// legacy `/scoreboard<N>-*` URL shape for compatibility, but everything
-// routes to scoreboard 1.
-const SCOREBOARD_ID = 1;
+// scoreboardNumber selects which board this page edits: 1 = SCORE (1v1),
+// 2 = TEAM (team mode). Routed via `/scoreboard` (default 1) and `/team`
+// (2) in index.js. Defaults to 1 for backward compatibility.
 
 /**
  * Main page for the scoreboard. This whole contraption is powered by TSH's python-side
@@ -30,6 +29,7 @@ const SCOREBOARD_ID = 1;
  * or out of order and request a full state send-over.
  */
 export default function ScoreboardPage(props: any) {
+    const SCOREBOARD_ID = props.scoreboardNumber ?? 1;
     const dispatch = useDispatch();
     const {loading, errored} = useSelector((state: ReduxState) => ({
         loading: (
@@ -75,7 +75,7 @@ export default function ScoreboardPage(props: any) {
         body = (
             // Extra margin at the bottom allows for mobile users to see the bottom of the page better.
             <>
-                <Header onSelectedGameChange={onSelectedGameChanged}/>
+                <Header onSelectedGameChange={onSelectedGameChanged} scoreboardNumber={SCOREBOARD_ID}/>
                 <Box
                     paddingX={1}
                     paddingTop={0.5}

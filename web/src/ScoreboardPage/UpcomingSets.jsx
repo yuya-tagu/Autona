@@ -69,7 +69,7 @@ export default class UpcomingSets extends React.Component {
         });
 
         fetch(
-            "http://" + window.location.hostname + `:${BACKEND_PORT}/scoreboard1-load-set?set=${this.state.selectedSet?.id}`,
+            "http://" + window.location.hostname + `:${BACKEND_PORT}/scoreboard${this.props.scoreboardNumber}-load-set?set=${this.state.selectedSet?.id}`,
         )
             .then((resp) => {resp.text()})
             .then((respText) => {

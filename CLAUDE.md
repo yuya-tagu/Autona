@@ -25,7 +25,7 @@
 ## プロジェクト概要
 
 Autona のカスタムフォーク。
-格闘ゲーム大会の配信支援ツール（スコアボード管理、ステージストライク、統計情報表示など）。
+格闘ゲーム大会の配信支援ツール（スコアボード管理、統計情報表示など）。
 
 - **リポジトリ**: `yuya-tagu/Autona`
 - **メインブランチ**: `main`
@@ -194,8 +194,9 @@ React 19 / Redux Toolkit / MUI。フォルダ名は上流由来の歴史的経�
 
 | ページ | パス | 主要コンポーネント |
 |--------|------|-------------------|
-| **ScoreboardPage** | `/scoreboard` | Header, CurrentSet, Team, Player, SetScore, CharSelector, UpcomingSets |
-| **StageStrikePage** | `/stage-strike-app` | StageCard, RpsDialog, FooterControls, PlayerWonButton |
+| **ScoreboardPage** | `/web`（既定）・`/scoreboard`（board1）・`/team`（board2） | Header, CurrentSet, Team, Player, SetScore, CharSelector, UpcomingSets |
+
+※ ステージストライク機能（旧 `StageStrikePage` / `/stage-strike-app` / RULES ドック / `ruleset`・`stage_strike` 状態）は削除済み。
 
 **データフロー:**
 1. Socket.IO 接続 → `program_state` で全状態受信 → Redux `overwrite()`
@@ -214,7 +215,6 @@ root
 │   │   ├── player.{N}     # 選手（gamerTag, name, seed, country_code, mains...）
 │   │   └── score, color   # スコア・チームカラー
 │   ├── best_of, match, phase
-│   ├── stage_strike        # ステージストライク状態
 │   └── last_sets, history_sets, recent_sets
 ├── game                    # 選択中ゲーム（characters, stages, variants）
 ├── bracket                 # ブラケット情報
