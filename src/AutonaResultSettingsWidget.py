@@ -550,11 +550,14 @@ class AutonaResultSettingsWidget(QDockWidget):
     def _selectedLayout(self):
         return self.layoutCombo.currentData() or "horizontal"
 
-    def SetBattleFormat(self, team: bool):
-        # Driven by the "対戦形式" menu. Team → switch the result layout to the
-        # team standings layout; 1v1 → leave the team layout (preserving any
-        # other manual choice the user made for individual standings).
-        if team:
+    def SetBattleFormat(self, fmt):
+        # Driven by the "Rules" menu. Team and Crewbattle both use the team
+        # standings layout (crew reuses it). 1v1 → leave the team layout
+        # (preserving any other manual choice for individual standings).
+        # Accepts a bool for backward compatibility with older callers.
+        if isinstance(fmt, bool):
+            fmt = "team" if fmt else "singles"
+        if fmt in ("team", "crew"):
             idx = self.layoutCombo.findData("team")
             if idx >= 0:
                 self.layoutCombo.setCurrentIndex(idx)

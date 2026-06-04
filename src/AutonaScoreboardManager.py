@@ -4,6 +4,7 @@ from qtpy.QtWidgets import *
 from loguru import logger
 
 from .AutonaScoreboardWidget import AutonaScoreboardWidget
+from .AutonaCrewBattleWidget import AutonaCrewBattleWidget
 from .StateManager import StateManager
 
 
@@ -28,22 +29,25 @@ class AutonaScoreboardManager(QDockWidget):
 
         self.scoreboard: AutonaScoreboardWidget | None = None
         self.teamScoreboard: AutonaScoreboardWidget | None = None
+        self.crewScoreboard: AutonaCrewBattleWidget | None = None
 
         # Registry of scoreboards keyed by number. board 1 = 1v1 (SCORE),
-        # board 2 = team (TEAM). Both live in this (SCORE) dock; the "対戦形式"
-        # menu toggles which one is visible via SetTeamMode(). Registered here
-        # so GetScoreboard() / the WebServer can reach either board by number.
-        self.scoreboards: dict[int, AutonaScoreboardWidget] = {}
+        # board 2 = team (TEAM), board 3 = crewbattle (CREW). All live in this
+        # (SCORE) dock; the "Rules" menu toggles which one is visible via
+        # SetBattleFormat(). Registered here so GetScoreboard() / the WebServer
+        # can reach any board by number.
+        self.scoreboards: dict[int, object] = {}
 
     def CreateScoreboard(self, singlePlayer: bool = True) -> bool:
-        # Idempotent: creates both the 1v1 board (1) and the team board (2),
-        # both hosted in this dock's layout. The team board starts hidden;
-        # SetTeamMode() toggles which board is shown.
+        # Idempotent: creates the 1v1 board (1), the team board (2) and the
+        # crewbattle board (3), all hosted in this dock's layout. Boards 2 and
+        # 3 start hidden; SetBattleFormat() toggles which board is shown.
         if self.scoreboard is not None:
             return True
 
         with StateManager.SaveBlock():
-            logger.info("Scoreboard Manager - Creating scoreboards (1v1 + team)")
+            logger.info(
+                "Scoreboard Manager - Creating scoreboards (1v1 + team + crew)")
             # board 1 = 1v1 (SCORE)
             self.scoreboard = AutonaScoreboardWidget(
                 scoreboardNumber=1, singlePlayer=True)
@@ -55,19 +59,24 @@ class AutonaScoreboardManager(QDockWidget):
             self.widget.layout().addWidget(self.teamScoreboard)
             self.scoreboards[2] = self.teamScoreboard
             self.teamScoreboard.setVisible(False)
+            # board 3 = crewbattle (CREW), same dock, hidden until picked
+            self.crewScoreboard = AutonaCrewBattleWidget(scoreboardNumber=3)
+            self.widget.layout().addWidget(self.crewScoreboard)
+            self.scoreboards[3] = self.crewScoreboard
+            self.crewScoreboard.setVisible(False)
         return True
 
+    def SetBattleFormat(self, fmt: str):
+        # Toggle which board the SCORE dock shows. fmt: "singles" (board 1),
+        # "team" (board 2) or "crew" (board 3). Driven by the "Rules" menu.
+        visible = {"singles": 1, "team": 2, "crew": 3}.get(fmt, 1)
+        for number, board in self.scoreboards.items():
+            board.setVisible(number == visible)
+        logger.info(f"Scoreboard Manager - Battle format: {fmt}")
+
     def SetTeamMode(self, team: bool):
-        # Toggle which board the SCORE dock shows: 1v1 (board 1) or team
-        # (board 2). Driven by the "対戦形式" menu.
-        board1 = self.scoreboards.get(1)
-        board2 = self.scoreboards.get(2)
-        if board1 is not None:
-            board1.setVisible(not team)
-        if board2 is not None:
-            board2.setVisible(team)
-        logger.info(
-            f"Scoreboard Manager - Battle format: {'Team' if team else '1v1'}")
+        # Backward-compatible shim: the format menu now uses SetBattleFormat().
+        self.SetBattleFormat("team" if team else "singles")
 
     def GetScoreboard(self, number=1):
         number = int(number)
