@@ -1698,6 +1698,36 @@ p, li { white-space: pre-wrap; }
         <translation>チーム{0}</translation>
     </message>
     <message>
+        <location filename="../AutonaCrewBattleWidget.py" line="116"/>
+        <source>Members</source>
+        <translation>メンバー数</translation>
+    </message>
+    <message>
+        <location filename="../AutonaCrewBattleWidget.py" line="201"/>
+        <source>Member {0}</source>
+        <translation>メンバー{0}</translation>
+    </message>
+    <message>
+        <location filename="../AutonaCrewBattleWidget.py" line="222"/>
+        <source>Total</source>
+        <translation>合計</translation>
+    </message>
+    <message>
+        <location filename="../AutonaCrewBattleWidget.py" line="135"/>
+        <source>Reset Stocks</source>
+        <translation>ストックリセット</translation>
+    </message>
+    <message>
+        <location filename="../AutonaCrewBattleWidget.py" line="170"/>
+        <source>Team Color</source>
+        <translation>チームカラー</translation>
+    </message>
+    <message>
+        <location filename="../AutonaCrewBattleWidget.py" line="190"/>
+        <source>Currently playing</source>
+        <translation>出場中</translation>
+    </message>
+    <message>
         <location filename="../AutonaIndividualGameTracker.py" line="56"/>
         <source>Game {0}</source>
         <translation>ゲーム {0}</translation>

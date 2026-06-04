@@ -77,6 +77,24 @@ class WebServerActions(QThread):
             self.scoreboard.GetScoreboard(scoreboard).signals.CommandTeamColor.emit(1, color)
         return "OK"
 
+    # ── Crewbattle (board 3) ──────────────────────────────────────────
+    # Crew members each hold their own remaining-stock count; the team total
+    # is auto-summed by the widget. These actions only make sense for the
+    # crew board, so they no-op gracefully on boards that lack the signals.
+    def crew_member_stock(self, scoreboard, team, member, change):
+        sb = self.scoreboard.GetScoreboard(scoreboard)
+        sig = getattr(sb, "signals", None)
+        if sig is not None and hasattr(sig, "CommandMemberStock"):
+            sig.CommandMemberStock.emit(int(team) - 1, int(member), int(change))
+        return "OK"
+
+    def crew_set_active(self, scoreboard, team, member):
+        sb = self.scoreboard.GetScoreboard(scoreboard)
+        sig = getattr(sb, "signals", None)
+        if sig is not None and hasattr(sig, "SetActiveMember"):
+            sig.SetActiveMember.emit(int(team) - 1, int(member))
+        return "OK"
+
     def get_scoreboard(self, scoreboard):
         sb_widget: AutonaScoreboardWidget = self.scoreboard.GetScoreboard(scoreboard)
         return StateManager.Get(f'score.{sb_widget.scoreboardNumber}')

@@ -228,6 +228,37 @@ class WebServer(QThread):
         WebServer.ws_emit('team_scoredown',
              WebServer.actions.team_color(info.get("scoreboardNumber", "1"), info.get("team"), "#" + info.get("color")))
 
+    # ── Crewbattle (board 3) member controls ──
+    # Bump a crew member's remaining stock up/down by 1.
+    @app.route('/scoreboard<scoreboardNumber>-crew-member<team>-<member>-stockup')
+    def crew_member_stockup(scoreboardNumber, team, member):
+        return WebServer.actions.crew_member_stock(scoreboardNumber, team, member, 1)
+
+    @app.route('/scoreboard<scoreboardNumber>-crew-member<team>-<member>-stockdown')
+    def crew_member_stockdown(scoreboardNumber, team, member):
+        return WebServer.actions.crew_member_stock(scoreboardNumber, team, member, -1)
+
+    @socketio.on('crew_member_stock')
+    def ws_crew_member_stock(message):
+        info = orjson.loads(message)
+        WebServer.ws_emit('crew_member_stock',
+             WebServer.actions.crew_member_stock(
+                 info.get("scoreboardNumber", "3"), info.get("team"),
+                 info.get("member"), info.get("change", 1)))
+
+    # Set which crew member is currently in (0 = none).
+    @app.route('/scoreboard<scoreboardNumber>-crew-active<team>-<member>')
+    def crew_set_active(scoreboardNumber, team, member):
+        return WebServer.actions.crew_set_active(scoreboardNumber, team, member)
+
+    @socketio.on('crew_set_active')
+    def ws_crew_set_active(message):
+        info = orjson.loads(message)
+        WebServer.ws_emit('crew_set_active',
+             WebServer.actions.crew_set_active(
+                 info.get("scoreboardNumber", "3"), info.get("team"),
+                 info.get("member")))
+
 
     @app.route('/scoreboard<scoreboardNumber>-get')
     def get_route(scoreboardNumber):

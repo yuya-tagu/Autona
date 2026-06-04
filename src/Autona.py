@@ -594,28 +594,36 @@ class Window(QMainWindow):
         action.setIcon(QIcon(UI.icon_path('info.svg')))
         action.triggered.connect(lambda: self.aboutWidget.show())
 
-        # ── Match format menu (1v1 / Team) ──
-        # Toggles which scoreboard the SCORE tab shows: board 1 (1v1) or
-        # board 2 (team). The choice is persisted and applied after the
-        # scoreboards are created (see CreateScoreboard call below).
+        # ── Match format menu (1v1 / Team / Crewbattle) ──
+        # Toggles which scoreboard the SCORE tab shows: board 1 (1v1),
+        # board 2 (team) or board 3 (crewbattle). The choice is persisted and
+        # applied after the scoreboards are created (see CreateScoreboard
+        # call below).
         formatMenu = mb.addMenu(QApplication.translate("app", "Rules"))
         formatGroup = QActionGroup(formatMenu)
         formatGroup.setExclusive(True)
-        teamMode = SettingsManager.Get("scoreboard.team_mode", False)
+        battleFormat = self._resolveBattleFormat()
 
         self.singlesFormatAction = formatMenu.addAction("1 vs 1")
         self.singlesFormatAction.setCheckable(True)
-        self.singlesFormatAction.setChecked(not teamMode)
+        self.singlesFormatAction.setChecked(battleFormat == "singles")
         formatGroup.addAction(self.singlesFormatAction)
         self.singlesFormatAction.triggered.connect(
-            lambda x=None: self.SetBattleFormat(False))
+            lambda x=None: self.SetBattleFormat("singles"))
 
         self.teamFormatAction = formatMenu.addAction("Team")
         self.teamFormatAction.setCheckable(True)
-        self.teamFormatAction.setChecked(teamMode)
+        self.teamFormatAction.setChecked(battleFormat == "team")
         formatGroup.addAction(self.teamFormatAction)
         self.teamFormatAction.triggered.connect(
-            lambda x=None: self.SetBattleFormat(True))
+            lambda x=None: self.SetBattleFormat("team"))
+
+        self.crewFormatAction = formatMenu.addAction("Crewbattle")
+        self.crewFormatAction.setCheckable(True)
+        self.crewFormatAction.setChecked(battleFormat == "crew")
+        formatGroup.addAction(self.crewFormatAction)
+        self.crewFormatAction.triggered.connect(
+            lambda x=None: self.SetBattleFormat("crew"))
 
         # ── Startgg menu ──
         startggMenu = mb.addMenu(QApplication.translate("app", "Startgg"))
@@ -711,13 +719,13 @@ class Window(QMainWindow):
         AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
             lambda x=None: self.moddedContentCheck.setChecked(False))
 
-        # Create both boards (1v1 + team) into the SCORE dock, then apply the
-        # persisted battle format so the right board + result layout are shown
-        # on startup. The "対戦形式" menu switches between them at runtime.
+        # Create all boards (1v1 + team + crew) into the SCORE dock, then apply
+        # the persisted battle format so the right board + result layout are
+        # shown on startup. The "Rules" menu switches between them at runtime.
         AutonaScoreboardManager.instance.CreateScoreboard(singlePlayer=True)
-        teamMode = SettingsManager.Get("scoreboard.team_mode", False)
-        AutonaScoreboardManager.instance.SetTeamMode(teamMode)
-        self.resultSetting.SetBattleFormat(teamMode)
+        battleFormat = self._resolveBattleFormat()
+        AutonaScoreboardManager.instance.SetBattleFormat(battleFormat)
+        self.resultSetting.SetBattleFormat(battleFormat)
 
         self.ReloadGames()
 
@@ -937,14 +945,32 @@ class Window(QMainWindow):
             self.setWindowFlag(Qt.WindowStaysOnTopHint, False)
         self.show()
 
-    def SetBattleFormat(self, team: bool):
-        # Persist + apply the battle format chosen from the "対戦形式" menu.
-        # Switches the SCORE tab between board 1 (1v1) and board 2 (team), and
-        # the RESULT tab to the matching standings layout.
-        SettingsManager.Set("scoreboard.team_mode", bool(team))
-        AutonaScoreboardManager.instance.SetTeamMode(bool(team))
+    @staticmethod
+    def _resolveBattleFormat() -> str:
+        # `scoreboard.battle_format` (str) is the source of truth: "singles",
+        # "team" or "crew". Fall back to the legacy `scoreboard.team_mode`
+        # bool when the new key is absent so existing settings keep working.
+        fmt = SettingsManager.Get("scoreboard.battle_format", None)
+        if fmt in ("singles", "team", "crew"):
+            return fmt
+        return "team" if SettingsManager.Get("scoreboard.team_mode", False) else "singles"
+
+    def SetBattleFormat(self, fmt):
+        # Persist + apply the battle format chosen from the "Rules" menu.
+        # Switches the SCORE tab between board 1 (1v1), board 2 (team) and
+        # board 3 (crew), and the RESULT tab to the matching standings layout.
+        # Accepts a bool for backward compatibility with older callers.
+        if isinstance(fmt, bool):
+            fmt = "team" if fmt else "singles"
+        if fmt not in ("singles", "team", "crew"):
+            fmt = "singles"
+        # battle_format is the source of truth; mirror the legacy team_mode
+        # bool so rolling back to an older build still restores 1v1/team.
+        SettingsManager.Set("scoreboard.battle_format", fmt)
+        SettingsManager.Set("scoreboard.team_mode", fmt == "team")
+        AutonaScoreboardManager.instance.SetBattleFormat(fmt)
         if getattr(self, "resultSetting", None) is not None:
-            self.resultSetting.SetBattleFormat(bool(team))
+            self.resultSetting.SetBattleFormat(fmt)
 
     def ToggleLightMode(self, checked):
         # Route through the WebServer Action so PyQt and React go through
