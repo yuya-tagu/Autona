@@ -58,13 +58,18 @@ LoadEverything().then(() => {
     const avail = containerEl.clientWidth;
     const natural = fit.scrollWidth;
     if (avail > 0 && natural > avail) {
-      // Anchor the squeeze to the text's alignment edge so the COMPRESSED
-      // text is what gets positioned — not the natural-width text positioned
-      // first and then scaled (which left it offset). Forced inline so it
-      // can't be lost in the CSS cascade.
-      const align = getComputedStyle(containerEl).textAlign;
-      const edge = align === "right" || align === "end" ? "right" : "left";
-      fit.style.transformOrigin = `${edge} center`;
+      // Always anchor the squeeze to the LEFT (start) edge. When an
+      // inline-block is wider than its container, the browser lays it out
+      // from the start edge and overflows past the END — regardless of
+      // text-align (text-align:right does NOT pull an over-wide box to the
+      // right edge). So the box's left edge is the only reliable fixed point.
+      // Scaling about it makes the compressed text fill the box exactly
+      // (rendered width === avail), which is also what we want for the
+      // right-aligned columns. Anchoring to the right edge instead pinned the
+      // scale to an off-screen point and shifted the compressed text out of
+      // view — only its head stayed visible (the bug this replaces). Assumes
+      // LTR, which holds for this tool.
+      fit.style.transformOrigin = "left center";
       fit.style.transform = `scaleX(${(avail / natural).toFixed(4)})`;
     } else {
       fit.style.transformOrigin = "";

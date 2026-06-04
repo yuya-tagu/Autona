@@ -160,23 +160,16 @@ body {
   text-align: left;
 }
 
-/* Long names squeeze horizontally (scaleX in index.js) rather than clip. */
+/* Long names squeeze horizontally (scaleX in index.js) rather than clip.
+   transform-origin is set inline by index.js fitX() — always the left/start
+   edge, because an over-wide inline-block is laid out from the start edge
+   regardless of text-align. Per-column origin rules would be dead (the inline
+   style always wins) and the "right center" variant actively contradicted the
+   fix, so they're intentionally omitted here. */
 .team-name .fit,
 .mname .fit {
   display: inline-block;
   white-space: nowrap;
-}
-.team-name-left .fit {
-  transform-origin: right center;
-}
-.team-name-right .fit {
-  transform-origin: left center;
-}
-.crew-col-left .mname .fit {
-  transform-origin: left center;
-}
-.crew-col-right .mname .fit {
-  transform-origin: right center;
 }
 #totals {
   display: flex;
