@@ -122,6 +122,42 @@ Edit / Write ツール実行後に以下のメッセージがハーネスから�
 - **orphan worktree の掃除**: 何かの事故で worktree/ブランチが残った場合は
   ルートで `git worktree prune` → `git fetch --prune` → `git branch -D` の順
 
+### コミット・push の実務（このマシン固有）
+
+#### 複数 GitHub アカウントによる push 失敗（`Repository not found`）
+
+このマシンには gh アカウントが 2 つ登録されており、アクティブが
+`yuyat-highfield`（HighField 用）になっていることがある。`yuya-tagu/Autona`
+はそのアカウントに書き込み権限がないため、アクティブのまま push すると
+`remote: Repository not found`（404）で失敗する。SSH 既定鍵・HTTPS
+credential manager のいずれも `yuyat-highfield` として認証されるのが原因。
+
+push はグローバル設定を恒久変更しない一回限りの手順で行う:
+
+```bash
+gh auth switch --user yuya-tagu
+git -c credential.helper= -c credential.helper="!gh auth git-credential" \
+  push -u origin <branch>
+gh auth switch --user yuyat-highfield   # 元のアクティブアカウントに復元
+```
+
+- `gh auth git-credential` はアクティブアカウントのトークンを返すため、
+  先に `yuya-tagu` へ switch しておく
+- 手順 2 行目の最初の `-c credential.helper=`（空）で既存ヘルパー一覧を
+  リセットし、既定の "manager"（yuyat-highfield を返す）を無効化してから
+  gh のヘルパーだけを使わせる
+- push 後は必ず `yuyat-highfield` に戻す（ユーザーの他作業のアクティブ
+  アカウントを変えたままにしない）
+- トークンの値はコマンドにも出力にも一切出さない（CLAUDE.md 機密ルール）
+
+#### 複数行コミットメッセージは bash 構文で渡す
+
+Bash ツールは PowerShell ではなく bash で動く。`@'...'@`（PowerShell
+here-string）を使うとメッセージ先頭に `@` が混入するなど壊れる。複数行は
+heredoc を使うか、メッセージをファイルに書いて `git commit -F <file>` で
+渡す（worktree の `.git` はファイルなので一時ファイルは worktree 直下に
+置き、コミット後に削除する）。
+
 ---
 
 ## ビルド
