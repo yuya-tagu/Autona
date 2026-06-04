@@ -1,7 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
-import StageStrikePage from './StageStrikePage';
 import reportWebVitals from './reportWebVitals';
 
 import {BrowserRouter, Navigate, Route, Routes} from "react-router-dom";
@@ -21,16 +20,20 @@ root.render(
               <BrowserRouter>
                   <Routes>
                       <Route
-                          path="/stage-strike-app"
-                          element={<StageStrikePage />}
+                          path="/web"
+                          element={<ScoreboardPage />}
                       />
                       <Route
                           path="/scoreboard"
                           element={<ScoreboardPage />}
                       />
                       <Route
+                          path="/team"
+                          element={<ScoreboardPage scoreboardNumber={2} />}
+                      />
+                      <Route
                           path="*"
-                          element={<Navigate to={"/stage-strike-app"} replace={true}/>}
+                          element={<Navigate to={"/web"} replace={true}/>}
                       />
                   </Routes>
               </BrowserRouter>

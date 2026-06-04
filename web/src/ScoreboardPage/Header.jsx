@@ -23,7 +23,7 @@ import {Visibility} from "@mui/icons-material";
 import {visibilitySlice} from "../redux/uiState";
 
 
-export const Header = ({onSelectedGameChange, ...rest}) => {
+export const Header = ({onSelectedGameChange, scoreboardNumber = 1, ...rest}) => {
     const {tshState, games, visibility} = useSelector(state => ({
       tshState: state.tshState.tshState,
       games: state.tshGames.value,
@@ -48,7 +48,7 @@ export const Header = ({onSelectedGameChange, ...rest}) => {
     };
 
     const pullStreamSet = () => {
-        fetch(`http://${window.location.hostname}:${BACKEND_PORT}/scoreboard1-pull-stream`)
+        fetch(`http://${window.location.hostname}:${BACKEND_PORT}/scoreboard${scoreboardNumber}-pull-stream`)
             .catch(console.error);
     };
 

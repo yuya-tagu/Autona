@@ -916,6 +916,22 @@ p, li { white-space: pre-wrap; }
 <context>
     <name>app</name>
     <message>
+        <source>Edit</source>
+        <translation>編集</translation>
+    </message>
+    <message>
+        <source>Rules</source>
+        <translation>対戦形式</translation>
+    </message>
+    <message>
+        <source>Startgg</source>
+        <translation>Startgg</translation>
+    </message>
+    <message>
+        <source>Title</source>
+        <translation>ゲームタイトル</translation>
+    </message>
+    <message>
         <location filename="../AutonaThumbnailSettingsWidget.py" line="78"/>
         <location filename="../Autona.py" line="398"/>
         <source>Thumbnail Settings</source>

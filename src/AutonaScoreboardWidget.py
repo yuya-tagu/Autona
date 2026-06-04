@@ -200,7 +200,10 @@ class AutonaScoreboardWidget(QWidget):
 
         # Browser-preview button lives directly to the right of "Post to X"
         # so all row-ending utility buttons stay grouped.
-        self.webScoreboardUrl = f"http://{self.GetIP()}:{SettingsManager.Get('general.webserver_port', 5000)}/scoreboard"
+        # board 1 (SCORE/1v1) → /scoreboard, board 2 (TEAM) → /team. Both
+        # render from the same React page parameterized by scoreboardNumber.
+        webScoreboardPath = "team" if self.scoreboardNumber == 2 else "scoreboard"
+        self.webScoreboardUrl = f"http://{self.GetIP()}:{SettingsManager.Get('general.webserver_port', 5000)}/{webScoreboardPath}"
         self.btOpenWebScoreboard = QPushButton("ブラウザ版を開く")
         self.btOpenWebScoreboard.setObjectName("primary")
         self.btOpenWebScoreboard.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
@@ -523,7 +526,6 @@ class AutonaScoreboardWidget(QWidget):
 
         StateManager.Unset(f'score.{self.scoreboardNumber}.team.1.player')
         StateManager.Unset(f'score.{self.scoreboardNumber}.team.2.player')
-        StateManager.Unset(f'score.{self.scoreboardNumber}.stage_strike')
         self.playerNumber.setValue(1)
         # Pull initial characters-per-player from the PLAYERS tab so the
         # freshly-built player widgets pick up the user's last choice
@@ -1553,10 +1555,6 @@ class AutonaScoreboardWidget(QWidget):
                 # A new set was loaded
                 self.lastSetSelected = data.get("id")
 
-                # Clear stage strike data
-                StateManager.Unset(
-                    f'score.{self.scoreboardNumber}.stage_strike')
-
                 # Add general set data to object: id, auto update type, station/stream identifier, etc
                 StateManager.Set(
                     f'score.{self.scoreboardNumber}.set_id', data.get("id"))
@@ -1852,11 +1850,6 @@ class AutonaScoreboardWidget(QWidget):
                 finally:
                     for p in self.playerWidgets:
                         p.dataLock.release()
-
-            if data.get("stage_strike"):
-                StateManager.Set(f"score.{self.scoreboardNumber}.stage_strike",
-                                 data.get("stage_strike"))
-                StateManager.Set(f"score.ruleset", data.get("ruleset"))
 
             if data.get("bracket_type"):
                 StateManager.Set(f"score.bracket_type",

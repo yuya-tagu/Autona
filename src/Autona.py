@@ -149,7 +149,6 @@ from .Helpers.AutonaControllerHelper import AutonaControllerHelper
 from .Helpers.AutonaStatusManager import AutonaStatusManager
 from .AutonaScoreboardManager import AutonaScoreboardManager
 from src.AutonaAboutWidget import AutonaAboutWidget
-from .AutonaScoreboardStageWidget import AutonaScoreboardStageWidget
 from .AutonaStatsWidget import AutonaStatsWidget
 from .AutonaAnalysisWidget import AutonaAnalysisWidget
 from src.AutonaWebServer import WebServer, check_webserver_port
@@ -171,7 +170,6 @@ def remove_accents_lower(input_str):
 
 class WindowSignals(QObject):
     StopTimer = Signal()
-    ExportStageStrike = Signal(object)
     DetectGame = Signal(int)
     SetupAutocomplete = Signal()
     UiMounted = Signal()
@@ -304,7 +302,9 @@ class Window(QMainWindow):
             self.dockWidgets.append(thumbnailSetting)
 
         from .AutonaResultSettingsWidget import AutonaResultSettingsWidget
-        resultSetting = AutonaResultSettingsWidget()
+        # Held so the "対戦形式" menu can switch the result layout to the team
+        # standings variant when team mode is selected.
+        self.resultSetting = resultSetting = AutonaResultSettingsWidget()
         resultSetting.setWindowIcon(QIcon(UI.icon_path('result.svg')))
         resultSetting.setObjectName(
             QApplication.translate("app", "Result Settings"))
@@ -340,14 +340,6 @@ class Window(QMainWindow):
             QApplication.translate("app", "Scoreboard"))
         splash.set_message(splash_msgs[1], progress=0.55)
 
-        self.stageWidget = AutonaScoreboardStageWidget()
-        self.stageWidget.setWindowIcon(QIcon(UI.icon_path('stage.svg')))
-        self.stageWidget.setObjectName(
-            QApplication.translate("app", "Stage"))
-        self.addDockWidget(
-            Qt.DockWidgetArea.BottomDockWidgetArea, self.stageWidget)
-        self.dockWidgets.append(self.stageWidget)
-
         commentary = AutonaCommentaryWidget()
         commentary.setWindowIcon(QIcon(UI.icon_path('commentary.svg')))
         commentary.setObjectName(QApplication.translate("app", "Commentary"))
@@ -355,7 +347,7 @@ class Window(QMainWindow):
         self.dockWidgets.append(commentary)
 
         self.webserver = WebServer(
-            parent=self, stageWidget=self.stageWidget, commentaryWidget=commentary)
+            parent=self, commentaryWidget=commentary)
         check_webserver_port(self.webserver.port, parent=self)
         self.webserver.start()
         self.signals.GameChanged.connect(self.webserver.ws_program_state)
@@ -365,7 +357,6 @@ class Window(QMainWindow):
         # on the GUI thread. Direct connection because emit() is already
         # marshalled to GUI thread by the Action.
         self.signals.LightModeChanged.connect(self._applyLightMode)
-        self.stageWidget.stageStrikeLogic.signals.state_updated.connect(self.webserver.ws_ruleset)
         splash.set_message(splash_msgs[1], progress=0.70)
 
         playerList = AutonaPlayerListWidget()
@@ -408,15 +399,11 @@ class Window(QMainWindow):
             resultSetting,
             bracket,
             notes,
-            self.stageWidget,
         ):
             if nxt is None:
                 continue
             self.tabifyDockWidget(previous, nxt)
             previous = nxt
-
-        # Only the RULES tab is hidden by default; others stay visible.
-        self.stageWidget.setVisible(False)
 
         tournamentInfo.raise_()
 
@@ -440,7 +427,7 @@ class Window(QMainWindow):
         mb = self.menuBar()
 
         # ── Edit menu (former hamburger menu) ──
-        editMenu = mb.addMenu("Edit")
+        editMenu = mb.addMenu(QApplication.translate("app", "Edit"))
 
         action = editMenu.addAction(
             QApplication.translate("app", "Always on top"))
@@ -461,7 +448,6 @@ class Window(QMainWindow):
         toggleWidgets = editMenu.addMenu(
             QApplication.translate("app", "Toggle widgets"))
         toggleWidgets.addAction(self.scoreboard.toggleViewAction())
-        toggleWidgets.addAction(self.stageWidget.toggleViewAction())
         toggleWidgets.addAction(commentary.toggleViewAction())
         if not SettingsManager.Get("general.disable_thumbnail_widget", False):
             toggleWidgets.addAction(thumbnailSetting.toggleViewAction())
@@ -608,8 +594,31 @@ class Window(QMainWindow):
         action.setIcon(QIcon(UI.icon_path('info.svg')))
         action.triggered.connect(lambda: self.aboutWidget.show())
 
+        # ── Match format menu (1v1 / Team) ──
+        # Toggles which scoreboard the SCORE tab shows: board 1 (1v1) or
+        # board 2 (team). The choice is persisted and applied after the
+        # scoreboards are created (see CreateScoreboard call below).
+        formatMenu = mb.addMenu(QApplication.translate("app", "Rules"))
+        formatGroup = QActionGroup(formatMenu)
+        formatGroup.setExclusive(True)
+        teamMode = SettingsManager.Get("scoreboard.team_mode", False)
+
+        self.singlesFormatAction = formatMenu.addAction("1 vs 1")
+        self.singlesFormatAction.setCheckable(True)
+        self.singlesFormatAction.setChecked(not teamMode)
+        formatGroup.addAction(self.singlesFormatAction)
+        self.singlesFormatAction.triggered.connect(
+            lambda x=None: self.SetBattleFormat(False))
+
+        self.teamFormatAction = formatMenu.addAction("Team")
+        self.teamFormatAction.setCheckable(True)
+        self.teamFormatAction.setChecked(teamMode)
+        formatGroup.addAction(self.teamFormatAction)
+        self.teamFormatAction.triggered.connect(
+            lambda x=None: self.SetBattleFormat(True))
+
         # ── Startgg menu ──
-        startggMenu = mb.addMenu("Startgg")
+        startggMenu = mb.addMenu(QApplication.translate("app", "Startgg"))
 
         self.setTournamentAction = startggMenu.addAction(
             QApplication.translate("app", "Set tournament"))
@@ -653,7 +662,7 @@ class Window(QMainWindow):
         self.UpdateLastSetsButton()
 
         # ── Title menu (game select) ──
-        titleMenu = mb.addMenu("Title")
+        titleMenu = mb.addMenu(QApplication.translate("app", "Title"))
 
         self.gameSelect = QComboBox()
         self.gameSelect.setEditable(True)
@@ -702,10 +711,13 @@ class Window(QMainWindow):
         AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
             lambda x=None: self.moddedContentCheck.setChecked(False))
 
-        # Single-scoreboard setup. Autona used to support up to 10
-        # scoreboards tabbed together; the multi-scoreboard concept was
-        # removed in favour of a single dock.
+        # Create both boards (1v1 + team) into the SCORE dock, then apply the
+        # persisted battle format so the right board + result layout are shown
+        # on startup. The "対戦形式" menu switches between them at runtime.
         AutonaScoreboardManager.instance.CreateScoreboard(singlePlayer=True)
+        teamMode = SettingsManager.Get("scoreboard.team_mode", False)
+        AutonaScoreboardManager.instance.SetTeamMode(teamMode)
+        self.resultSetting.SetBattleFormat(teamMode)
 
         self.ReloadGames()
 
@@ -924,6 +936,15 @@ class Window(QMainWindow):
         else:
             self.setWindowFlag(Qt.WindowStaysOnTopHint, False)
         self.show()
+
+    def SetBattleFormat(self, team: bool):
+        # Persist + apply the battle format chosen from the "対戦形式" menu.
+        # Switches the SCORE tab between board 1 (1v1) and board 2 (team), and
+        # the RESULT tab to the matching standings layout.
+        SettingsManager.Set("scoreboard.team_mode", bool(team))
+        AutonaScoreboardManager.instance.SetTeamMode(bool(team))
+        if getattr(self, "resultSetting", None) is not None:
+            self.resultSetting.SetBattleFormat(bool(team))
 
     def ToggleLightMode(self, checked):
         # Route through the WebServer Action so PyQt and React go through

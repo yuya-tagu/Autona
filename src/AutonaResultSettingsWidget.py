@@ -207,6 +207,8 @@ class AutonaResultSettingsWidget(QDockWidget):
             QApplication.translate("app", "Vertical (960x1080)"), "vertical")
         self.layoutCombo.addItem(
             QApplication.translate("app", "Vertical Dark Gold 激 (960x1080)"), "vertical_geki")
+        self.layoutCombo.addItem(
+            QApplication.translate("app", "Team (1920x1080)"), "team")
         self.layoutCombo.currentIndexChanged.connect(self._onLayoutChanged)
         rightLayout.insertWidget(rightInsertIdx, self.layoutCombo)
 
@@ -547,6 +549,19 @@ class AutonaResultSettingsWidget(QDockWidget):
 
     def _selectedLayout(self):
         return self.layoutCombo.currentData() or "horizontal"
+
+    def SetBattleFormat(self, team: bool):
+        # Driven by the "対戦形式" menu. Team → switch the result layout to the
+        # team standings layout; 1v1 → leave the team layout (preserving any
+        # other manual choice the user made for individual standings).
+        if team:
+            idx = self.layoutCombo.findData("team")
+            if idx >= 0:
+                self.layoutCombo.setCurrentIndex(idx)
+        elif self._selectedLayout() == "team":
+            idx = self.layoutCombo.findData("horizontal")
+            if idx >= 0:
+                self.layoutCombo.setCurrentIndex(idx)
 
     def _maxPlayersForLayout(self):
         return 16 if self._selectedLayout() == "horizontal_16" else 8

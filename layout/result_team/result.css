@@ -1,0 +1,56 @@
+/* result_team: Top 8 TEAM standings layout.
+   Reuses the base standings layout (grid, header, rank badges, accent bars)
+   and the shared ../result/result.js renderer. Teams have no single-character
+   portrait, so the character art is dropped and each slot becomes a clean
+   name plate: team name (the "name" field) as the headline with the roster
+   (the "sponsor" field) beneath it. */
+
+@import url("../result/result.css");
+
+/* Teams have no character portrait — drop the art layers and let the slot
+   read as a solid name plate. */
+.player-slot .char-image,
+.player-slot .lighting,
+.player-slot .secondary-icons,
+.secondary-icons {
+  display: none !important;
+}
+
+/* The rank auras (rank-1/2/3) supply their own background; ranks 4-8 get a
+   neutral dark plate so the team name stays legible without the portrait. */
+.player-slot {
+  background: linear-gradient(160deg, #1b1f27 0%, #0e1014 100%);
+}
+
+/* Center the name plate vertically; without a portrait, bottom-anchored text
+   would leave the slot looking empty up top. */
+.player-slot .player-info {
+  top: 0;
+  bottom: 0;
+  height: 100%;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 28px;
+}
+
+/* Team name is the headline; roster sits beneath it. (Base layout renders
+   sponsor first, name second — reorder so the team name leads.) */
+.player-slot .player-name {
+  order: 0;
+  font-size: 52px;
+}
+
+.player-slot .player-sponsor {
+  order: 1;
+  font-size: 26px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* Larger headline for the podium slots (1st-3rd). */
+.player-slot.slot-1 .player-name { font-size: 72px; }
+.player-slot.slot-1 .player-sponsor { font-size: 34px; }
+.player-slot.slot-2 .player-name,
+.player-slot.slot-3 .player-name { font-size: 56px; }
+.player-slot.slot-2 .player-sponsor,
+.player-slot.slot-3 .player-sponsor { font-size: 28px; }
