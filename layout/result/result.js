@@ -81,10 +81,13 @@ function setHeader(data, config) {
   const name = data.tournamentName || "";
   $(".tournament-name .text").text(name);
 
-  // Build info line: event name + date + entrants
+  // Build info line: event name + date + entrants. Each part is only added
+  // when it resolves to a non-empty value, so missing info leaves a clean
+  // line rather than placeholder/garbage text.
   const parts = [];
   if (data.eventName) parts.push(data.eventName);
-  if (data.startAt) parts.push(formatDate(data.startAt));
+  const dateStr = formatDate(data.startAt);
+  if (dateStr) parts.push(dateStr);
   if (data.numEntrants) parts.push(data.numEntrants + " Entrants");
   $("#eventInfo .text").text(parts.join("  |  "));
 
@@ -95,10 +98,43 @@ function setHeader(data, config) {
   }
 }
 
-function formatDate(timestamp) {
-  if (!timestamp) return "";
-  // Start.gg returns Unix timestamp in seconds
-  const d = new Date(timestamp * 1000);
+// tournamentInfo.startAt is stored as a localized short-format date STRING
+// (set from QDateEdit.dateChanged in AutonaTournamentInfoWidget), but may also
+// arrive as a Unix timestamp. Parse defensively and return "" when the value is
+// absent or unparseable so the info line stays clean (no "undefined NaN, NaN").
+function formatDate(value) {
+  if (value == null || value === "") return "";
+  const s = String(value).trim();
+  if (!s) return "";
+
+  let d = null;
+  if (/^\d+$/.test(s)) {
+    // Pure number → Unix timestamp (seconds for start.gg, ms otherwise)
+    const num = Number(s);
+    d = new Date(num > 1e12 ? num : num * 1000);
+  } else {
+    // Try direct parse first (ISO 8601, "yyyy/MM/dd", "M/d/yyyy", etc.)
+    const direct = new Date(s);
+    if (!isNaN(direct.getTime())) {
+      d = direct;
+    } else {
+      // Slash/dash/dot separated date that the engine couldn't parse directly
+      const m = s.match(/^(\d{1,4})[\/\-.](\d{1,2})[\/\-.](\d{1,4})$/);
+      if (m) {
+        const a = parseInt(m[1], 10);
+        const b = parseInt(m[2], 10);
+        const c = parseInt(m[3], 10);
+        if (a > 31) {
+          d = new Date(a, b - 1, c);            // YYYY/MM/DD
+        } else if (c > 31) {
+          // DD/MM/YYYY when first part is clearly a day, else MM/DD/YYYY
+          d = a > 12 ? new Date(c, b - 1, a) : new Date(c, a - 1, b);
+        }
+      }
+    }
+  }
+
+  if (!d || isNaN(d.getTime())) return "";
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
