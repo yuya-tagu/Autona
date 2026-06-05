@@ -41,7 +41,7 @@
     "match": "マッチ",
     "stream": "配信",
     "station": "ステーション",
-    "failed_to_connect": "TournamentStreamHelperへの接続に失敗しました",
+    "failed_to_connect": "Autonaへの接続に失敗しました",
     "expand_scoreboard": "スコアボードを展開",
     "reset_scores": "スコアリセット",
     "reset_match": "マッチリセット",

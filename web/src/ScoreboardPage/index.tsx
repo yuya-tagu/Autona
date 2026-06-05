@@ -43,7 +43,7 @@ export default function ScoreboardPage(props: any) {
     }), shallowEqual);
 
     React.useEffect(() => {
-        document.title = `TSH ${i18n.t("scoreboard")}`;
+        document.title = `Autona ${i18n.t("scoreboard")}`;
         websocketInit();
     }, []);
 

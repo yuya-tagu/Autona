@@ -110,7 +110,7 @@ export const Header = ({onSelectedGameChange, scoreboardNumber = 1, ...rest}) =>
                         mr: 2,
                     }}
                 >
-                    <img alt="TSH logo" src={`${BASE_URL}/assets/icons/icon.png`} height={48} width={48} sx={{mr: 2}} />
+                    <img alt="Autona logo" src={`${BASE_URL}/assets/icons/icon.png`} height={48} width={48} sx={{mr: 2}} />
                     Web Scoreboard
                 </Typography>
 

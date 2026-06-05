@@ -1,10 +1,21 @@
+# Builds Autona and publishes a GitHub Release to the PUBLIC distribution repo
+# (yuya-tagu/Autona-releases). The source repo is private, so the in-app
+# updater reads releases from that separate public repo.
+#
+# Setup required before this works (one-time, by a human):
+#   1. Create a PAT (fine-grained, repo = yuya-tagu/Autona-releases,
+#      Contents: Read and write).
+#   2. Add it to THIS repo's Actions secrets as RELEASE_REPO_TOKEN.
+#
+# NOTE: This full build+publish pipeline has not been validated in CI yet.
+#       Trigger it manually (workflow_dispatch) and confirm the produced
+#       release-windows.zip runs before relying on it. The reliable, supported
+#       path today is the local script scripts/publish_release.ps1.
 name: Build Release
 
 on:
-    # push:
-    #     branches:
-    #         - main
     workflow_dispatch:
+
 jobs:
     build:
         runs-on: windows-latest
@@ -12,16 +23,48 @@ jobs:
         steps:
             - name: Checkout repository
               uses: actions/checkout@v4
+              with:
+                  lfs: true
 
-            - name: Run gen_release.ps1
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.14"
+
+            - name: Set up Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+
+            - name: Install Python dependencies
+              run: pip install -r .\dependencies\requirements.txt pyinstaller
+
+            - name: Build Web UI
+              run: |
+                  cd web
+                  npm ci
+                  npm run build
+
+            - name: Build Autona.exe
+              run: |
+                  pyinstaller --noconfirm .\dependencies\autona.spec
+                  copy dist\Autona.exe Autona.exe
+
+            - name: Package release zip
               shell: pwsh
               run: |
-                cd scripts
-                .\gen_release.ps1
+                  cd scripts
+                  .\gen_release.ps1
 
-            - name: Upload build artifact
-              uses: actions/upload-artifact@v4
-              with:
-                  name: release-windows
-                  path: release-windows.zip
-                  compression-level: 0
+            - name: Publish Release to public repo
+              shell: pwsh
+              env:
+                  # PAT with Contents:write on yuya-tagu/Autona-releases.
+                  GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
+              run: |
+                  $version = (Get-Content assets/versions.json -Raw | ConvertFrom-Json).program
+                  $tag = "v$version"
+                  gh release create $tag release-windows.zip `
+                      --repo yuya-tagu/Autona-releases `
+                      --title $tag `
+                      --notes "Autona $tag"
