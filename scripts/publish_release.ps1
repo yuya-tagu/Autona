@@ -37,7 +37,10 @@ param(
     [string]$Notes = ""
 )
 
-$ErrorActionPreference = "Stop"
+# Do NOT set $ErrorActionPreference = "Stop" globally: in Windows PowerShell
+# 5.1 that turns the gh CLI's stderr writes (upload progress, "release not
+# found", etc.) into terminating errors. We check $LASTEXITCODE explicitly
+# after each native gh call instead, and `throw` by hand where needed.
 
 # This script lives in scripts/; run everything from the project root so the
 # zip and versions.json resolve regardless of the caller's CWD.
@@ -57,17 +60,14 @@ try {
         $Notes = "Autona $tag"
     }
 
-    # Refuse to clobber an existing release for this version. Use $LASTEXITCODE
-    # (not $?) because native-exe stderr handling makes $? unreliable in 5.1.
-    gh release view $tag --repo $Repo *> $null
-    if ($LASTEXITCODE -eq 0) {
-        throw "Release $tag already exists on $Repo. Bump assets/versions.json or delete the existing release first."
-    }
-
+    # gh release create fails on its own if a release with this tag already
+    # exists, so we rely on its exit code rather than a pre-check (a pre-check
+    # with `gh release view` would emit "release not found" to stderr on the
+    # normal first-publish path).
     Write-Host "Publishing release $tag to $Repo ..."
     gh release create $tag "release-windows.zip" --repo $Repo --title $tag --notes $Notes
     if ($LASTEXITCODE -ne 0) {
-        throw "gh release create failed. Ensure gh is authenticated with write access to $Repo (see CLAUDE.md)."
+        throw "gh release create failed (exit $LASTEXITCODE). Ensure gh is authenticated with write access to $Repo, and that release $tag doesn't already exist (see CLAUDE.md)."
     }
 
     Write-Host "Done. Published $tag with release-windows.zip to $Repo."
