@@ -148,7 +148,6 @@ from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaControllerHelper import AutonaControllerHelper
 from .Helpers.AutonaStatusManager import AutonaStatusManager
 from .AutonaScoreboardManager import AutonaScoreboardManager
-from src.AutonaAboutWidget import AutonaAboutWidget
 from .AutonaStatsWidget import AutonaStatsWidget
 from .AutonaAnalysisWidget import AutonaAnalysisWidget
 from src.AutonaWebServer import WebServer, check_webserver_port
@@ -545,6 +544,17 @@ class Window(QMainWindow):
 
         editMenu.addSeparator()
 
+        # Check for updates - promoted to a top-level Edit item for
+        # discoverability. The in-app updater pulls the latest release from the
+        # public distribution repo (see AutonaUpdater.GITHUB_REPO).
+        action = editMenu.addAction(
+            QApplication.translate("app", "Check for updates"))
+        action.setIcon(QIcon(UI.icon_path('update_circle.svg')))
+        action.triggered.connect(
+            lambda x=None: AutonaUpdater.instance.CheckForUpdates(silent=False))
+
+        editMenu.addSeparator()
+
         # Help sub-menu
         help_messagebox = QMessageBox()
         help_messagebox.setWindowTitle(
@@ -553,11 +563,6 @@ class Window(QMainWindow):
             "app", "A new window has been opened in your default webbrowser."))
         helpMenu = editMenu.addMenu(
             QApplication.translate("app", "Help"))
-        action = helpMenu.addAction(
-            QApplication.translate("app", "Check for updates"))
-        action.triggered.connect(
-            lambda x=None: AutonaUpdater.instance.CheckForUpdates(silent=False))
-        helpMenu.addSeparator()
         action = helpMenu.addAction(
             QApplication.translate("app", "Open the Wiki"))
         wiki_url = "https://github.com/yuya-tagu/Autona/wiki"
@@ -587,12 +592,6 @@ class Window(QMainWindow):
             QApplication.translate("Settings", "Settings"))
         action.setIcon(QIcon(UI.icon_path('settings.svg')))
         action.triggered.connect(lambda: self.settingsWindow.show())
-
-        self.aboutWidget = AutonaAboutWidget()
-        action = editMenu.addAction(
-            QApplication.translate("About", "About"))
-        action.setIcon(QIcon(UI.icon_path('info.svg')))
-        action.triggered.connect(lambda: self.aboutWidget.show())
 
         # ── Match format menu (1v1 / Team / Crewbattle) ──
         # Toggles which scoreboard the SCORE tab shows: board 1 (1v1),

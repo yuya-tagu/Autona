@@ -8,7 +8,7 @@
    version="1.1"
    id="svg5"
    sodipodi:docname="icon.svg"
-   inkscape:export-filename="/home/joao/SmashStreamHelper/assets/icons/icon.png"
+   inkscape:export-filename="icon.png"
    inkscape:export-xdpi="1536.0001"
    inkscape:export-ydpi="1536.0001"
    inkscape:version="1.1.2 (08b2f3d93c, 2022-04-05)"
@@ -101,16 +101,6 @@
        cx="2.1166666"
        cy="2.1166666"
        r="2.1166666" />
-    <text
-       xml:space="preserve"
-       transform="matrix(0.18006607,0,0,0.17571674,7.2863239,5.7078415)"
-       id="text10112"
-       style="font-style:normal;font-variant:normal;font-weight:bold;font-stretch:normal;font-size:10px;line-height:125%;font-family:'Roboto Condensed';-inkscape-font-specification:'Roboto Condensed,  Bold';letter-spacing:0px;word-spacing:0px;white-space:pre;shape-inside:url(#rect10114);fill:#ffffff;fill-opacity:1;stroke:#ffffff;stroke-width:0.297489;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers"><tspan
-         x="-37.634766"
-         y="-16.867295"
-         id="tspan857"><tspan
-           style="font-family:'Noto Sans Mono';-inkscape-font-specification:'Noto Sans Mono Bold'"
-           id="tspan855">TSH</tspan></tspan></text>
     <path
        style="color:#000000;overflow:visible;fill:none;fill-rule:evenodd;stroke:#ffffff;stroke-width:0.3175;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;paint-order:stroke fill markers;stroke-linecap:butt"
        id="path2068"

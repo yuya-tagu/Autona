@@ -17,7 +17,6 @@ cp -R web/build \
 
 rm -rf \
 	Autona/assets/versions.json \
-	Autona/assets/contributors.txt \
 	Autona/layout/game_images \
 	Autona/layout/game_screenshots
 

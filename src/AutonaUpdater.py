@@ -35,7 +35,11 @@ from .Helpers.AutonaDirHelper import AutonaResolve
 from .SettingsManager import SettingsManager
 
 
-GITHUB_REPO = "yuya-tagu/Autona"
+# Public distribution repo. The source repo (yuya-tagu/Autona) is private, so
+# the unauthenticated GitHub Releases API the updater calls below would 404 for
+# end users. Releases are published to this separate *public* repo instead, so
+# anonymous clients can read /releases/latest and download the asset.
+GITHUB_REPO = "yuya-tagu/Autona-releases"
 RELEASE_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_PAGE_URL = f"https://github.com/{GITHUB_REPO}/releases/latest"
 # Release asset produced by scripts/gen_release.ps1

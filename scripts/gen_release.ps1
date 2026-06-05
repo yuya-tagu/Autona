@@ -6,7 +6,6 @@ Copy-Item -Recurse -Force "assets" "Autona\assets"
 
 # Already embedded inside release exe
 Remove-Item -Path "Autona\assets\versions.json" -Force
-Remove-Item -Path "Autona\assets\contributors.txt" -Force
 
 # Copy layout excluding game_images and symlinks
 Get-ChildItem -Path "layout" -Recurse | Where-Object {

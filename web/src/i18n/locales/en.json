@@ -41,7 +41,7 @@
     "match": "Match",
     "stream": "Stream",
     "station": "Station",
-    "failed_to_connect": "Failed to connect to TournamentStreamHelper",
+    "failed_to_connect": "Failed to connect to Autona",
     "expand_scoreboard": "Expand the current scoreboard.",
     "reset_scores": "Reset Scores",
     "reset_match": "Reset Match",
