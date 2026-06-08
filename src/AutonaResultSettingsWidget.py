@@ -99,7 +99,7 @@ class AutonaResultSettingsWidget(QDockWidget):
         # Row 3: secondary char combo, secondary color combo
         # Row 4: tertiary char combo, tertiary color combo
         # playerInputs entry:
-        #   (rank_label, name_edit, sponsor_edit,
+        #   (rank_edit, name_edit, sponsor_edit,
         #    char1_combo, color1_combo,
         #    char2_combo, color2_combo,
         #    char3_combo, color3_combo)
@@ -115,10 +115,7 @@ class AutonaResultSettingsWidget(QDockWidget):
             row3 = base + 2
             row4 = base + 3
 
-            rank_label = QLabel(f"{i + 1}")
-            rank_label.setFixedWidth(30)
-            rank_label.setAlignment(
-                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignTop)
+            rank_edit = self._makeRankEdit(i + 1)
 
             name_edit = QLineEdit()
             name_edit.setPlaceholderText(
@@ -137,7 +134,8 @@ class AutonaResultSettingsWidget(QDockWidget):
             color3_combo = self._makeColorCombo()
 
             # Row 1: rank spans all 4 rows, name + sponsor
-            grid.addWidget(rank_label,  row1, 0, 4, 1)
+            grid.addWidget(rank_edit, row1, 0, 4, 1,
+                           Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
             grid.addWidget(name_edit,   row1, 1)
             grid.addWidget(sponsor_edit, row1, 2)
             # Row 2–4: char + color per slot
@@ -160,9 +158,10 @@ class AutonaResultSettingsWidget(QDockWidget):
             color1_combo.currentIndexChanged.connect(self._syncPlayersToState)
             color2_combo.currentIndexChanged.connect(self._syncPlayersToState)
             color3_combo.currentIndexChanged.connect(self._syncPlayersToState)
+            rank_edit.editingFinished.connect(self._syncPlayersToState)
 
             self.playerInputs.append(
-                (rank_label, name_edit, sponsor_edit,
+                (rank_edit, name_edit, sponsor_edit,
                  char1_combo, color1_combo,
                  char2_combo, color2_combo,
                  char3_combo, color3_combo))
@@ -187,19 +186,18 @@ class AutonaResultSettingsWidget(QDockWidget):
         for i in range(16):
             header_row = i * rows_per_team
 
-            rank_label = QLabel(f"{i + 1}")
-            rank_label.setFixedWidth(30)
-            rank_label.setAlignment(
-                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignTop)
+            rank_edit = self._makeRankEdit(i + 1)
 
             name_edit = QLineEdit()
             name_edit.setPlaceholderText(
                 QApplication.translate("app", "Team Name"))
 
             # rank spans the header + all member rows; team name fills cols 1-3
-            teamGrid.addWidget(rank_label, header_row, 0, rows_per_team, 1)
+            teamGrid.addWidget(rank_edit, header_row, 0, rows_per_team, 1,
+                               Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
             teamGrid.addWidget(name_edit, header_row, 1, 1, 3)
             name_edit.editingFinished.connect(self._syncTeamsToState)
+            rank_edit.editingFinished.connect(self._syncTeamsToState)
 
             members = []
             for m in range(self.MAX_TEAM_MEMBERS):
@@ -224,7 +222,7 @@ class AutonaResultSettingsWidget(QDockWidget):
                 members.append((member_name, char_combo, color_combo))
 
             self.teamInputs.append({
-                "rank_label": rank_label,
+                "rank_label": rank_edit,
                 "name_edit": name_edit,
                 "members": members,
             })
@@ -338,6 +336,20 @@ class AutonaResultSettingsWidget(QDockWidget):
 
         # Apply initial row visibility and generate preview (slots 9-16 hidden by default)
         self._onLayoutChanged()
+
+    def _makeRankEdit(self, default_rank):
+        """Create an editable rank field (small integer line edit).
+
+        The rank is read back by _syncPlayersToState / _syncTeamsToState and
+        flows through to result_players[*]['rank'], so editing it here is
+        reflected in the rendered result image. Start.gg standings overwrite
+        it via setText(), matching the previous QLabel behaviour.
+        """
+        edit = QLineEdit(str(default_rank))
+        edit.setValidator(QIntValidator(1, 999, edit))
+        edit.setFixedWidth(30)
+        edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        return edit
 
     def _makeCharCombo(self, sub=False):
         """Create a character selection combo box."""
