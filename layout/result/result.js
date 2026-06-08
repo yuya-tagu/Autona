@@ -244,17 +244,14 @@ async function placeTeams(data, config, layout) {
     const t = teams[i];
     const rank = t.rank || (i + 1);
     const slotIndex = i + 1;
-    // team_split convention: slot-4 is a tied 3rd (shares the bronze aura
-    // with slot-3); slots 5-8 share a tied 5th place. Use effectiveRank for
-    // both the rank-N CSS class (aura color) and the displayed label.
-    let effectiveRank = rank;
-    if (layout === "team_split") {
-      if (slotIndex >= 5) effectiveRank = 5;
-      else if (slotIndex === 4) effectiveRank = 3;
-    }
-    const rankLabel = getRankLabel(effectiveRank);
+    // Gold/silver/bronze auras and the badge label follow the actual rank
+    // value (editable in the app, or pulled from Start.gg standings), so
+    // ties and manual placements are honoured on every team layout —
+    // including team_split, which previously forced the aura by slot
+    // position (slot-4 → 3rd, slots 5-8 → 5th).
+    const rankLabel = getRankLabel(rank);
 
-    const slot = $(`<div class="player-slot team-slot slot-${slotIndex} rank-${effectiveRank}"></div>`);
+    const slot = $(`<div class="player-slot team-slot slot-${slotIndex} rank-${rank}"></div>`);
     slot.append(`<div class="accent-bar"></div>`);
 
     // Prefer an explicit members[] roster; fall back to the characters[] array
