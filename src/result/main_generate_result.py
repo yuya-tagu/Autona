@@ -27,7 +27,7 @@ def _max_players_for_layout(layout):
 
 
 def prepare_data(settingsManager, isPreview=False, gameAssetManager=None,
-                 max_players=8):
+                 max_players=8, layout=None):
     """Prepare result data from StateManager or generate preview mock data.
 
     Returns (data, config) tuple.
@@ -36,7 +36,9 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None,
         "eventName": str,
         "players": [
             { "rank": int, "name": str, "sponsor": str,
-              "character": { "assets": {...}, "codename": str, ... } },
+              "character": { "assets": {...}, "codename": str, ... },
+              # Team layout only: each member's main fighter + name.
+              "members": [ { "name": str, "character": {...} }, ... ] },
             ...
         ]
     }
@@ -99,16 +101,24 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None,
             "sponsor": p.get("sponsor", ""),
             "character": char_data,
             "characters": p.get("characters", [char_data] if char_data else []),
+            # Team layout: roster of {name, character} per rank.
+            "members": p.get("members", []),
         })
 
     if isPreview and not has_data:
-        data = _create_preview_data(gameAssetManager, max_players=max_players)
+        data = _create_preview_data(gameAssetManager, max_players=max_players,
+                                    layout=layout)
 
     return data, config
 
 
-def _create_preview_data(gameAssetManager=None, max_players=8):
+def _create_preview_data(gameAssetManager=None, max_players=8, layout=None):
     """Generate mock preview data for a given player count."""
+    # Dispatch any team-style layout (team, team_split, ...) to the team mock
+    # so the preview shows rosters instead of a single-character fallback.
+    if layout and layout.startswith("team"):
+        return _create_team_preview_data(gameAssetManager, max_players)
+
     data = {
         "tournamentName": QApplication.translate("app", "Sample Tournament"),
         "eventName": f"Top {max_players}",
@@ -159,6 +169,49 @@ def _create_preview_data(gameAssetManager=None, max_players=8):
     return data
 
 
+def _create_team_preview_data(gameAssetManager=None, max_players=8):
+    """Mock preview data for the team layout: each rank is a team whose
+    members (2-5) each show a single main fighter."""
+    data = {
+        "tournamentName": QApplication.translate("app", "Sample Tournament"),
+        "eventName": f"Top {max_players}",
+        "players": [],
+    }
+
+    # Build a pool of characters (full-body asset only) to draw members from.
+    char_pool = []
+    if gameAssetManager and len(gameAssetManager.instance.characters.keys()) > 0:
+        for key in gameAssetManager.instance.characters.keys():
+            character = gameAssetManager.instance.characters[key]
+            assets = gameAssetManager.instance.GetCharacterAssets(
+                character.get("codename"), 0)
+            asset = assets.get("full") or assets.get("portrait")
+            if asset:
+                char_pool.append({
+                    "assets": {"full": asset},
+                    "codename": character.get("codename"),
+                    "name": key,
+                })
+
+    for i in range(max_players):
+        # Vary 2-5 members per team so the layout adjustment is visible.
+        member_count = 2 + (i % 4)
+        members = []
+        for j in range(member_count):
+            char = {}
+            if char_pool:
+                char = char_pool[random.randint(0, len(char_pool) - 1)]
+            members.append({"name": f"P{j + 1}", "character": char})
+        data["players"].append({
+            "rank": i + 1,
+            "name": f"Team {i + 1}",
+            "sponsor": "",
+            "members": members,
+        })
+
+    return data
+
+
 def save_result(pixmap, data):
     """Save rendered pixmap to out/results/. Returns output file path."""
     out_path = "./out/results"
@@ -183,7 +236,7 @@ def generate(settingsManager, isPreview=False, gameAssetManager=None,
 
     max_players = _max_players_for_layout(layout)
     data, config = prepare_data(settingsManager, isPreview, gameAssetManager,
-                                max_players=max_players)
+                                max_players=max_players, layout=layout)
 
     renderer = ResultRenderer.instance()
     pixmap = renderer.renderSync(data=data, config=config, layout=layout)

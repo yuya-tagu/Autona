@@ -76,6 +76,9 @@ class ResultPreviewWidget(QWidget):
 
 
 class AutonaResultSettingsWidget(QDockWidget):
+    # Team layout: max members shown per rank (each = name + main fighter).
+    MAX_TEAM_MEMBERS = 5
+
     def __init__(self, *args):
         super().__init__(*args)
 
@@ -164,6 +167,71 @@ class AutonaResultSettingsWidget(QDockWidget):
                  char2_combo, color2_combo,
                  char3_combo, color3_combo))
 
+        # --- Team input rows (team layout) ---
+        # Each rank is a team: a team name plus up to MAX_TEAM_MEMBERS members,
+        # where each member is (player name, main fighter combo, color combo).
+        # This group is shown only for the "team" layout; the singles group
+        # above is shown otherwise (toggled in _onLayoutChanged).
+        self.playersGroup = self.settings.findChild(
+            QGroupBox, "groupBoxPlayers")
+        self.teamInputs = []
+        self.teamGroup = QGroupBox(
+            QApplication.translate("app", "Top 8 Teams"))
+        teamGroupLayout = QVBoxLayout()
+        self.teamGroup.setLayout(teamGroupLayout)
+        teamGrid = QGridLayout()
+        teamGrid.setVerticalSpacing(2)
+        teamGroupLayout.addLayout(teamGrid)
+
+        rows_per_team = 1 + self.MAX_TEAM_MEMBERS  # header row + member rows
+        for i in range(16):
+            header_row = i * rows_per_team
+
+            rank_label = QLabel(f"{i + 1}")
+            rank_label.setFixedWidth(30)
+            rank_label.setAlignment(
+                Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignTop)
+
+            name_edit = QLineEdit()
+            name_edit.setPlaceholderText(
+                QApplication.translate("app", "Team Name"))
+
+            # rank spans the header + all member rows; team name fills cols 1-3
+            teamGrid.addWidget(rank_label, header_row, 0, rows_per_team, 1)
+            teamGrid.addWidget(name_edit, header_row, 1, 1, 3)
+            name_edit.editingFinished.connect(self._syncTeamsToState)
+
+            members = []
+            for m in range(self.MAX_TEAM_MEMBERS):
+                row = header_row + 1 + m
+                member_name = QLineEdit()
+                member_name.setPlaceholderText(
+                    QApplication.translate("app", "Player Name"))
+                member_name.setFixedWidth(90)
+                char_combo = self._makeCharCombo(sub=(m > 0))
+                color_combo = self._makeColorCombo()
+
+                teamGrid.addWidget(member_name, row, 1)
+                teamGrid.addWidget(char_combo, row, 2)
+                teamGrid.addWidget(color_combo, row, 3)
+
+                member_name.editingFinished.connect(self._syncTeamsToState)
+                char_combo.currentIndexChanged.connect(
+                    lambda _, i=i, m=m: self._onTeamCharChanged(i, m))
+                color_combo.currentIndexChanged.connect(
+                    self._syncTeamsToState)
+
+                members.append((member_name, char_combo, color_combo))
+
+            self.teamInputs.append({
+                "rank_label": rank_label,
+                "name_edit": name_edit,
+                "members": members,
+            })
+
+        self.settings.findChild(
+            QVBoxLayout, "verticalLayout_left").addWidget(self.teamGroup)
+
         # --- Load from Start.gg ---
         self._standingsSignals = AutonaResultSettingsWidgetSignals()
         self._standingsSignals.StandingsLoaded.connect(self._onStandingsLoaded)
@@ -208,7 +276,10 @@ class AutonaResultSettingsWidget(QDockWidget):
         self.layoutCombo.addItem(
             QApplication.translate("app", "Vertical Dark Gold 激 (960x1080)"), "vertical_geki")
         self.layoutCombo.addItem(
-            QApplication.translate("app", "Team (1920x1080)"), "team")
+            QApplication.translate("app", "Team / Crew (1920x1080)"), "team")
+        self.layoutCombo.addItem(
+            QApplication.translate(
+                "app", "Team / Crew 縦並び (1920x1080)"), "team_split")
         self.layoutCombo.currentIndexChanged.connect(self._onLayoutChanged)
         rightLayout.insertWidget(rightInsertIdx, self.layoutCombo)
 
@@ -316,6 +387,20 @@ class AutonaResultSettingsWidget(QDockWidget):
             # color combos are at indices 4, 6, 8
             for color_idx in (4, 6, 8):
                 entry[color_idx].setModel(QStandardItemModel())
+
+        # Team member combos (mirror the singles re-bind above).
+        for team in getattr(self, "teamInputs", []):
+            for member_name, char_combo, color_combo in team["members"]:
+                char_combo.blockSignals(True)
+                proxy = NoIconProxyModel(char_combo)
+                proxy.setSourceModel(
+                    AutonaGameAssetManager.instance.characterModel)
+                char_combo.setModel(proxy)
+                char_combo.setIconSize(QSize(0, 0))
+                char_combo.setCurrentIndex(-1)
+                char_combo.blockSignals(False)
+                color_combo.setModel(QStandardItemModel())
+
         self.GeneratePreview()
 
     def _resolveCharData(self, char_combo, color_combo, player_name=""):
@@ -363,6 +448,112 @@ class AutonaResultSettingsWidget(QDockWidget):
 
         StateManager.Set("result_players", players)
 
+    def _syncCurrentToState(self):
+        """Sync whichever input set matches the active layout."""
+        if self._isTeamLayout():
+            self._syncTeamsToState()
+        else:
+            self._syncPlayersToState()
+
+    def _syncTeamsToState(self):
+        """Write team inputs to StateManager as members[] per rank.
+
+        Each rank entry: { rank, name (team name), members: [{name, character}] }
+        prepare_data passes members through; result.js placeTeams renders them.
+        """
+        players = {}
+        for i, team in enumerate(self.teamInputs):
+            try:
+                rank = int(team["rank_label"].text())
+            except ValueError:
+                rank = i + 1
+            team_name = team["name_edit"].text().strip()
+
+            members = []
+            for member_name, char_combo, color_combo in team["members"]:
+                nm = member_name.text().strip()
+                char = self._resolveCharData(char_combo, color_combo, nm)
+                # Keep a member only when it has a name or a resolved fighter.
+                if nm or char:
+                    members.append({"name": nm, "character": char})
+
+            players[str(i + 1)] = {
+                "rank": rank,
+                "name": team_name,
+                "sponsor": "",
+                "members": members,
+            }
+
+        StateManager.Set("result_players", players)
+
+    def _onTeamCharChanged(self, team_index, member_index):
+        """Load the skin model when a team member's fighter changes."""
+        _, char_combo, color_combo = \
+            self.teamInputs[team_index]["members"][member_index]
+        char_data = char_combo.currentData(Qt.ItemDataRole.UserRole)
+        if char_data and char_data.get("en_name"):
+            skin_model = AutonaGameAssetManager.instance.skinModels.get(
+                char_data.get("en_name"))
+            if skin_model:
+                color_combo.setModel(skin_model)
+                color_combo.setCurrentIndex(0)
+            else:
+                color_combo.setModel(QStandardItemModel())
+        else:
+            color_combo.setModel(QStandardItemModel())
+        self._syncTeamsToState()
+
+    def _populateTeamsFromStandings(self, data):
+        """Fill team inputs from Start.gg team standings.
+
+        Each standings entry is { placement, name (team name), players: [roster
+        with mains] }. Member m takes roster[m]'s gamerTag and primary main.
+        """
+        game = AutonaGameAssetManager.instance.selectedGame
+        codename = game.get("codename", "") if game else ""
+
+        for i, team in enumerate(self.teamInputs):
+            rank_label = team["rank_label"]
+            name_edit = team["name_edit"]
+
+            if i < len(data):
+                entry = data[i]
+                placement = entry.get("placement", i + 1)
+                rank_label.setText(str(placement) if placement else str(i + 1))
+                roster = entry.get("players", []) or []
+                team_name = entry.get("name") or (
+                    roster[0].get("gamerTag", "") if roster else "")
+                name_edit.setText(team_name or "")
+
+                for m, (member_name, char_combo, color_combo) in \
+                        enumerate(team["members"]):
+                    if m < len(roster):
+                        pl = roster[m]
+                        member_name.setText(pl.get("gamerTag", "") or "")
+                        game_mains = pl.get("mains", {}).get(codename, []) \
+                            if codename else []
+                        if game_mains and game_mains[0]:
+                            char_codename = game_mains[0][0]
+                            self._selectCharInCombo(char_combo, char_codename)
+                            self._loadSkinModelInto(color_combo, char_codename)
+                        else:
+                            char_combo.setCurrentIndex(-1)
+                            color_combo.setModel(QStandardItemModel())
+                    else:
+                        member_name.setText("")
+                        char_combo.setCurrentIndex(-1)
+                        color_combo.setModel(QStandardItemModel())
+            else:
+                rank_label.setText(str(i + 1))
+                name_edit.setText("")
+                for member_name, char_combo, color_combo in team["members"]:
+                    member_name.setText("")
+                    char_combo.setCurrentIndex(-1)
+                    color_combo.setModel(QStandardItemModel())
+
+        self._syncTeamsToState()
+        self.GeneratePreview(True)
+
     def _loadFromStartgg(self):
         """Fetch standings from Start.gg (count depends on selected layout)."""
         if not AutonaTournamentDataProvider.instance.provider:
@@ -383,6 +574,11 @@ class AutonaResultSettingsWidget(QDockWidget):
 
         if not data:
             logger.warning("No standings data received")
+            return
+
+        # Team layouts: standings carry full rosters → populate team inputs.
+        if self._isTeamLayout():
+            self._populateTeamsFromStandings(data)
             return
 
         for i, entry in enumerate(self.playerInputs):
@@ -550,6 +746,10 @@ class AutonaResultSettingsWidget(QDockWidget):
     def _selectedLayout(self):
         return self.layoutCombo.currentData() or "horizontal"
 
+    def _isTeamLayout(self):
+        """True for any team / Crew layout (shares the Teams input + members[])."""
+        return self._selectedLayout() in ("team", "team_split")
+
     def SetBattleFormat(self, fmt):
         # Driven by the "Rules" menu. Team and Crewbattle both use the team
         # standings layout (crew reuses it). 1v1 → leave the team layout
@@ -558,10 +758,13 @@ class AutonaResultSettingsWidget(QDockWidget):
         if isinstance(fmt, bool):
             fmt = "team" if fmt else "singles"
         if fmt in ("team", "crew"):
-            idx = self.layoutCombo.findData("team")
-            if idx >= 0:
-                self.layoutCombo.setCurrentIndex(idx)
-        elif self._selectedLayout() == "team":
+            # Only auto-switch to the default team layout when not already on a
+            # team layout, so a manual "team_split" choice is preserved.
+            if not self._isTeamLayout():
+                idx = self.layoutCombo.findData("team")
+                if idx >= 0:
+                    self.layoutCombo.setCurrentIndex(idx)
+        elif self._isTeamLayout():
             idx = self.layoutCombo.findData("horizontal")
             if idx >= 0:
                 self.layoutCombo.setCurrentIndex(idx)
@@ -570,21 +773,36 @@ class AutonaResultSettingsWidget(QDockWidget):
         return 16 if self._selectedLayout() == "horizontal_16" else 8
 
     def _onLayoutChanged(self):
-        """Update Start.gg button label and show/hide player rows to match layout."""
+        """Toggle singles/team input groups and row visibility to match layout."""
+        is_team = self._isTeamLayout()
+        self.teamGroup.setVisible(is_team)
+        self.playersGroup.setVisible(not is_team)
+
         n = self._maxPlayersForLayout()
         label = QApplication.translate("app", "Load top {0} from StartGG").format(n)
         self.btLoadFromStartgg.setText(label)
 
+        # Singles rows (hidden entirely in team mode).
         for i, entry in enumerate(self.playerInputs):
-            visible = i < n
+            visible = (not is_team) and i < n
             for widget in entry:
                 widget.setVisible(visible)
+
+        # Team rows (hidden entirely in singles mode).
+        for i, team in enumerate(self.teamInputs):
+            visible = is_team and i < n
+            team["rank_label"].setVisible(visible)
+            team["name_edit"].setVisible(visible)
+            for member_name, char_combo, color_combo in team["members"]:
+                member_name.setVisible(visible)
+                char_combo.setVisible(visible)
+                color_combo.setVisible(visible)
 
         self.GeneratePreview(True)
 
     def GeneratePreview(self, manual=False):
         if manual:
-            self._syncPlayersToState()
+            self._syncCurrentToState()
             self._doGeneratePreview()
         else:
             self._previewTimer.start()
@@ -595,7 +813,8 @@ class AutonaResultSettingsWidget(QDockWidget):
                 settingsManager=SettingsManager,
                 isPreview=True,
                 gameAssetManager=AutonaGameAssetManager,
-                max_players=self._maxPlayersForLayout())
+                max_players=self._maxPlayersForLayout(),
+                layout=self._selectedLayout())
 
             self._renderer.render(
                 data=data, config=config, layout=self._selectedLayout())
@@ -613,7 +832,7 @@ class AutonaResultSettingsWidget(QDockWidget):
 
     def _copyToClipboard(self):
         try:
-            self._syncPlayersToState()
+            self._syncCurrentToState()
             path = result_gen.generate(
                 settingsManager=SettingsManager,
                 layout=self._selectedLayout())
@@ -632,7 +851,7 @@ class AutonaResultSettingsWidget(QDockWidget):
 
     def _saveResult(self):
         try:
-            self._syncPlayersToState()
+            self._syncCurrentToState()
             path = result_gen.generate(
                 settingsManager=SettingsManager,
                 layout=self._selectedLayout())
