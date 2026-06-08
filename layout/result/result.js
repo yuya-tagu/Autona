@@ -13,13 +13,20 @@ let _fontsInjected = false;
 async function initResult(payload) {
   try {
     const { data, config } = payload;
+    const layout = payload.layout || "";
 
     clearPreviousRender();
     injectFonts();
     applyConfig(config);
     setBackground(config);
     setHeader(data, config);
-    await placePlayers(data, config);
+    // Team / Crew layouts (team, team_split, ...): each rank slot holds a
+    // roster of main fighters. Grid arrangement differs per layout (CSS).
+    if (layout.startsWith("team")) {
+      await placeTeams(data, config, layout);
+    } else {
+      await placePlayers(data, config);
+    }
 
     await document.fonts.ready;
     await new Promise((r) => setTimeout(r, 100));
@@ -222,6 +229,86 @@ async function placePlayers(data, config) {
   await Promise.allSettled(loads);
 }
 
+/**
+ * Team / Crew standings: each rank slot is a team card whose members each show
+ * a single main fighter with a name caption, anchored by the team name plate.
+ * Reuses the base Top-8 grid (slot-N classes) and rank auras from result.css;
+ * the per-member arrangement lives in result_team/result.css.
+ */
+async function placeTeams(data, config, layout) {
+  const teams = data.players || [];
+  const container = $("#players");
+  const loads = [];
+
+  for (let i = 0; i < teams.length; i++) {
+    const t = teams[i];
+    const rank = t.rank || (i + 1);
+    const slotIndex = i + 1;
+    // team_split convention: slot-4 is a tied 3rd (shares the bronze aura
+    // with slot-3); slots 5-8 share a tied 5th place. Use effectiveRank for
+    // both the rank-N CSS class (aura color) and the displayed label.
+    let effectiveRank = rank;
+    if (layout === "team_split") {
+      if (slotIndex >= 5) effectiveRank = 5;
+      else if (slotIndex === 4) effectiveRank = 3;
+    }
+    const rankLabel = getRankLabel(effectiveRank);
+
+    const slot = $(`<div class="player-slot team-slot slot-${slotIndex} rank-${effectiveRank}"></div>`);
+    slot.append(`<div class="accent-bar"></div>`);
+
+    // Prefer an explicit members[] roster; fall back to the characters[] array
+    // (no per-member names) so the slot still renders fighters if only that is
+    // present.
+    let members = (t.members && t.members.length > 0) ? t.members : null;
+    if (!members) {
+      const chars = (t.characters && t.characters.length > 0)
+        ? t.characters
+        : (t.character ? [t.character] : []);
+      members = chars.map((c) => ({ name: "", character: c }));
+    }
+
+    const count = Math.max(1, Math.min(members.length, 5));
+    const membersDiv = $(`<div class="team-members members-${count}"></div>`);
+
+    members.forEach((mem) => {
+      const cell = $(`<div class="member-cell"></div>`);
+      const portrait = $(`<div class="member-portrait"></div>`);
+      cell.append(portrait);
+      const nm = mem && mem.name ? mem.name : "";
+      cell.append(`<div class="member-name">${escapeHtml(nm)}</div>`);
+      membersDiv.append(cell);
+
+      const ch = mem ? mem.character : null;
+      if (ch && ch.assets) {
+        const asset = ch.assets["full"] || GetBiggestAsset(ch);
+        if (asset) {
+          loads.push(
+            CenterImage(portrait.get(0), asset, {
+              custom_zoom: 1,
+              custom_center: [0.5, 0.28],
+            })
+          );
+        }
+      }
+    });
+
+    slot.append(membersDiv);
+
+    // Rank badge + team name plate (anchored at the slot bottom).
+    slot.append(`<div class="rank-badge">${escapeHtml(rankLabel)}</div>`);
+    slot.append(`
+      <div class="team-info">
+        <div class="team-name">${escapeHtml(t.name || "???")}</div>
+      </div>
+    `);
+
+    container.append(slot);
+  }
+
+  await Promise.allSettled(loads);
+}
+
 function getRankLabel(rank) {
   switch (rank) {
     case 1: return "1st";
@@ -279,6 +366,28 @@ function fitLongText() {
     const maxWidth = info.clientWidth - padL - padR - 4;
     slot.querySelectorAll(".player-name, .player-sponsor").forEach((el) => {
       fitToWidth(el, maxWidth, "left");
+    });
+  });
+
+  // Team slots: fit the team name plate and each member name caption.
+  document.querySelectorAll(".team-slot").forEach((slot) => {
+    const info = slot.querySelector(".team-info");
+    if (info) {
+      const style = getComputedStyle(info);
+      const padL = parseFloat(style.paddingLeft) || 0;
+      const padR = parseFloat(style.paddingRight) || 0;
+      const maxWidth = info.clientWidth - padL - padR - 4;
+      const tn = slot.querySelector(".team-name");
+      if (tn) fitToWidth(tn, maxWidth, "left");
+    }
+    slot.querySelectorAll(".member-cell").forEach((cell) => {
+      const nameEl = cell.querySelector(".member-name");
+      if (!nameEl) return;
+      // Horizontal caption: shrink long 全角 names via scaleX to keep them on
+      // one line. The caption is left/right pinned with a small inset, so the
+      // cell width minus that inset is the usable space.
+      const maxW = cell.clientWidth - 10;
+      fitToWidth(nameEl, maxW, "center");
     });
   });
 }

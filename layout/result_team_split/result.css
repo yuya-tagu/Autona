@@ -1,0 +1,64 @@
+/* result_team_split: alternative TEAM / Crew standings.
+
+   1st and 2nd are stacked in a wide left column; 3rd-8th form a vertical stack
+   on the right. Members (players) stay arranged horizontally inside each slot.
+   Inherits all member/fighter/name/fade styling from result_team and only
+   re-defines the grid + per-slot sizing for the new arrangement. */
+
+@import url("../result_team/result.css");
+
+/* 12x12 grid: wide left column (1st over 2nd), narrow right column (3rd-8th).
+   Overrides the result_team 560/360 two-row split. */
+.players {
+  grid-template-columns: repeat(12, 1fr);
+  grid-template-rows: repeat(12, 1fr);
+}
+
+/* Left column: 1st (taller) over 2nd. */
+.player-slot.slot-1 { grid-column: 1 / 8;  grid-row: 1 / 8;  }
+.player-slot.slot-2 { grid-column: 1 / 8;  grid-row: 8 / 13; }
+
+/* Right column: 3rd-8th stacked, two grid-rows each. */
+.player-slot.slot-3 { grid-column: 8 / 13; grid-row: 1 / 3;   }
+.player-slot.slot-4 { grid-column: 8 / 13; grid-row: 3 / 5;   }
+.player-slot.slot-5 { grid-column: 8 / 13; grid-row: 5 / 7;   }
+.player-slot.slot-6 { grid-column: 8 / 13; grid-row: 7 / 9;   }
+.player-slot.slot-7 { grid-column: 8 / 13; grid-row: 9 / 11;  }
+.player-slot.slot-8 { grid-column: 8 / 13; grid-row: 11 / 13; }
+
+/* 2nd is now a large bottom-left card — give it podium-ish emphasis. */
+.team-slot.slot-2 .team-name { font-size: 46px; }
+.team-slot.slot-2 .member-name { font-size: 24px; }
+.player-slot.slot-2 .rank-badge { font-size: 52px; }
+
+/* 3rd-8th are short right-column rows. Compact the name plate, captions, and
+   rank badge so the fighters keep room; tighten the fade for the short height.
+   (slot-3 inherited large podium fonts from result_team — reset them here.) */
+.team-slot.slot-3 .team-name, .team-slot.slot-4 .team-name,
+.team-slot.slot-5 .team-name, .team-slot.slot-6 .team-name,
+.team-slot.slot-7 .team-name, .team-slot.slot-8 .team-name {
+  font-size: 22px;
+}
+.team-slot.slot-3 .team-info, .team-slot.slot-4 .team-info,
+.team-slot.slot-5 .team-info, .team-slot.slot-6 .team-info,
+.team-slot.slot-7 .team-info, .team-slot.slot-8 .team-info {
+  padding: 3px 12px 5px 12px;
+}
+.team-slot.slot-3 .member-name, .team-slot.slot-4 .member-name,
+.team-slot.slot-5 .member-name, .team-slot.slot-6 .member-name,
+.team-slot.slot-7 .member-name, .team-slot.slot-8 .member-name {
+  font-size: 15px;
+  bottom: 4px;
+}
+.player-slot.slot-3 .rank-badge, .player-slot.slot-4 .rank-badge,
+.player-slot.slot-5 .rank-badge, .player-slot.slot-6 .rank-badge,
+.player-slot.slot-7 .rank-badge, .player-slot.slot-8 .rank-badge {
+  font-size: 28px;
+  top: 6px;
+  left: 8px;
+}
+.team-slot.slot-3 .member-cell::after, .team-slot.slot-4 .member-cell::after,
+.team-slot.slot-5 .member-cell::after, .team-slot.slot-6 .member-cell::after,
+.team-slot.slot-7 .member-cell::after, .team-slot.slot-8 .member-cell::after {
+  height: 45%;
+}

@@ -20,6 +20,7 @@ LAYOUTS = {
     "vertical": ("result_vertical", 960, 1080),
     "vertical_geki": ("result_vertical_geki", 960, 1080),
     "team": ("result_team", 1920, 1080),
+    "team_split": ("result_team_split", 1920, 1080),
 }
 
 DEFAULT_LAYOUT = "horizontal"
@@ -120,7 +121,9 @@ class ResultRenderer(QObject):
     def render(self, data, config, layout=None):
         """Start async render. Emits renderComplete(QPixmap) when done."""
         layout = layout or DEFAULT_LAYOUT
-        payload = {"data": data, "config": config}
+        # layout is forwarded so initResult() can switch between the singles
+        # standings renderer and the team (per-member fighters) renderer.
+        payload = {"data": data, "config": config, "layout": layout}
 
         if layout != self._current_layout:
             self._pending_payload = payload
@@ -140,7 +143,7 @@ class ResultRenderer(QObject):
     def renderSync(self, data, config, layout=None):
         """Blocking render. Returns QPixmap."""
         layout = layout or DEFAULT_LAYOUT
-        payload = {"data": data, "config": config}
+        payload = {"data": data, "config": config, "layout": layout}
 
         if layout != self._current_layout:
             self._load_layout(layout)

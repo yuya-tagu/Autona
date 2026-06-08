@@ -25,8 +25,9 @@
     <div class="layer players" id="players"></div>
   </div>
 
-  <!-- Shares the standings renderer; team styling lives in result.css.
-       The "name" field holds the team name, "sponsor" the roster. -->
+  <!-- Shares the standings renderer (placeTeams, triggered when payload.layout
+       == "team"); team styling lives in result.css. The "name" field holds the
+       team name, "members" the roster of {name, character} shown as fighters. -->
   <script src="../result/result.js"></script>
 </body>
 </html>

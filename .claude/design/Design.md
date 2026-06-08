@@ -783,6 +783,8 @@ layout/result/                ← horizontal (デフォルト)
 layout/result_top16/          ← horizontal_16
 layout/result_vertical/       ← vertical
 layout/result_vertical_geki/  ← vertical_geki
+layout/result_team/           ← team / Crewbattle（各順位にチームの複数メンバーのメインファイターを配置）
+layout/result_team_split/     ← team_split（1位2位を縦並びで左に大きく、3-8位を右に縦並び）
 layout/result_{x}/            ← 新規追加
 ```
 
@@ -794,12 +796,21 @@ LAYOUTS = {
     "horizontal_16":  ("result_top16",        1920, 1080),
     "vertical":       ("result_vertical",      960, 1080),
     "vertical_geki":  ("result_vertical_geki", 960, 1080),
+    "team":           ("result_team",         1920, 1080),
+    "team_split":     ("result_team_split",   1920, 1080),
     # 新規追加例: "vertical_custom": ("result_vertical_custom", 960, 1080),
 }
 DEFAULT_LAYOUT = "horizontal"
 ```
 
 レイアウト名は `AutonaResultSettingsWidget` の layoutCombo の currentData に対応する（§7.3）。
+
+##### team レイアウト（チーム / Crewbattle）
+
+- 横向き Top-8 グリッド（`result/result.css`）を土台に、各順位枠を「チームカード」として描画する。`result/result.js` の `placeTeams()` が `payload.layout === "team"` のとき呼ばれ、枠ごとにチームのメンバー（2-5 人）のメインファイターを横並びに配置し、各ファイターの右下に選手名を反時計回り 90°回転（下→上読み）で重ね、枠下にチーム名プレートを置く。選手名は全角 5-10 文字を縦長に収める想定で、ファイター下部に暗いフェードを敷いて視認性を確保する。styling は `result_team/result.css`（base を `@import` してチーム枠を上書き）。
+- データは `result_players[N]` に `members: [{ name, character }, ...]` を持つ（`name` はチーム名）。`AutonaResultSettingsWidget` の Teams グループ（順位 × 最大5メンバー）で手入力でき、Start.gg のチーム standings からの自動取得にも対応する（ロスター全員 + mains）。
+- 旧 team レイアウト（チーム名 + ロスター文字列のみのテキストプレート）はファイター版に置き換え済み。
+- `team_split` は `team` のバリアント。`result_team_split/result.css` が `result_team/result.css` を `@import` して **グリッド配置のみ** 差し替える（1位2位を左カラムの縦並び、3-8位を右カラムの縦並び）。メンバー横並び・回転名・下部フェード等の演出は `team` から継承。レンダラーは `placeTeams()` を共有（`layout` が `team` で始まれば team系扱い）。
 
 ##### ファイル構成
 
@@ -830,9 +841,14 @@ async function initThumbnail({ data, config, template }) {
 ##### Result ペイロード
 
 ```javascript
-async function initResult({ data, config }) {
+async function initResult({ data, config, layout }) {
   // data:   { tournamentName, eventName, startAt, numEntrants, players: [...] }
+  //   players[N] = { rank, name, sponsor, character, characters: [...],
+  //                  members: [{ name, character }, ...] }
+  //                ※ members は team レイアウト専用（name = チーム名）
   // config: { main_icon_path, background_path, accent_color, ... }
+  // layout: 現在のレイアウト名（"horizontal" / "team" 等）。"team" のとき
+  //         placeTeams() でメンバーのファイターを配置、それ以外は placePlayers()
   // 描画完了後に document.title = "RENDER_READY"
 }
 ```

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="./result.css" />
+  <script src="../include/jquery-3.7.1.min.js"></script>
+  <script src="../include/lodash.min.js"></script>
+  <script src="../thumbnail/thumbnail_assets.js"></script>
+</head>
+<body>
+  <div class="result" id="result">
+    <!-- Background -->
+    <div class="layer background"></div>
+
+    <!-- Header: tournament name + event info -->
+    <div class="layer header">
+      <div class="header-text">
+        <div class="tournament-name" id="tournamentName"><span class="text"></span></div>
+        <div class="event-info" id="eventInfo"><span class="text"></span></div>
+      </div>
+      <div class="header-icon" id="headerIcon"></div>
+    </div>
+
+    <!-- Team slots (1st/2nd stacked left, 3rd-8th vertical right) -->
+    <div class="layer players" id="players"></div>
+  </div>
+
+  <!-- Shares the team renderer (placeTeams, triggered when payload.layout
+       starts with "team"); the split grid lives in result.css. -->
+  <script src="../result/result.js"></script>
+</body>
+</html>

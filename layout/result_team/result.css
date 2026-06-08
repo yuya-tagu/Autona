@@ -1,56 +1,149 @@
-/* result_team: Top 8 TEAM standings layout.
-   Reuses the base standings layout (grid, header, rank badges, accent bars)
-   and the shared ../result/result.js renderer. Teams have no single-character
-   portrait, so the character art is dropped and each slot becomes a clean
-   name plate: team name (the "name" field) as the headline with the roster
-   (the "sponsor" field) beneath it. */
+/* result_team: TEAM / Crew standings with per-member fighters.
+
+   Reuses the base horizontal standings layout (Top-8 grid, header, rank
+   badges, accent bars, rank auras) and the shared ../result/result.js
+   renderer (placeTeams). Each rank slot becomes a team card: the members'
+   main fighters sit side by side, each with a name caption, and the team name
+   anchors the bottom plate. Replaces the previous text-only roster layout. */
 
 @import url("../result/result.css");
 
-/* Teams have no character portrait — drop the art layers and let the slot
-   read as a solid name plate. */
-.player-slot .char-image,
-.player-slot .lighting,
-.player-slot .secondary-icons,
-.secondary-icons {
-  display: none !important;
+/* Give the podium row (1st-3rd) a bit more height, taking it from the lower
+   row (4th-8th). Scoped to the team layout — this stylesheet is only loaded by
+   result_team, so it overrides the base 520/400 split without touching the
+   singles horizontal layout. (Total stays 920px to fit below the header.) */
+.players {
+  grid-template-rows: 560px 360px;
 }
 
-/* The rank auras (rank-1/2/3) supply their own background; ranks 4-8 get a
-   neutral dark plate so the team name stays legible without the portrait. */
-.player-slot {
-  background: linear-gradient(160deg, #1b1f27 0%, #0e1014 100%);
+/* Stack the fighter row above the team-name plate. The base .player-slot is
+   position:relative/overflow:hidden; we add flex flow on top of it. */
+.player-slot.team-slot {
+  display: flex;
+  flex-direction: column;
+  /* Neutral dark plate for ranks 4-8 (podium ranks override below). */
+  background: linear-gradient(160deg, #161a21 0%, #0d0f13 100%);
 }
 
-/* Center the name plate vertically; without a portrait, bottom-anchored text
-   would leave the slot looking empty up top. */
-.player-slot .player-info {
-  top: 0;
-  bottom: 0;
-  height: 100%;
+/* Keep the gold/silver/bronze auras for the podium, layered over transparent
+   fighter PNG edges. Re-declared here (higher specificity + later) so they win
+   over the team plate above. */
+.player-slot.team-slot.rank-1 {
+  background: radial-gradient(ellipse at 50% 45%,
+    rgba(255, 215, 0, 0.6) 0%,
+    rgba(255, 170, 0, 0.3) 45%,
+    rgba(40, 25, 0, 0.55) 100%);
+}
+.player-slot.team-slot.rank-2 {
+  background: radial-gradient(ellipse at 50% 45%,
+    rgba(220, 230, 240, 0.55) 0%,
+    rgba(170, 185, 210, 0.28) 45%,
+    rgba(30, 35, 45, 0.55) 100%);
+}
+.player-slot.team-slot.rank-3 {
+  background: radial-gradient(ellipse at 50% 45%,
+    rgba(220, 140, 60, 0.55) 0%,
+    rgba(170, 100, 45, 0.28) 45%,
+    rgba(40, 22, 8, 0.55) 100%);
+}
+
+/* --- Row of member fighters --- */
+.team-slot .team-members {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
   justify-content: center;
+  gap: 2px;
+  padding: 8px 6px 0 6px;
+  z-index: 1;
+}
+
+.team-slot .member-cell {
+  flex: 1 1 0;
+  min-width: 0;
+  position: relative;   /* anchor for the portrait, fade, and overlapping name */
+  overflow: hidden;
+}
+
+/* CenterImage paints a background-image here; the portrait fills the whole
+   cell so the name can overlap its bottom-right corner. */
+.team-slot .member-portrait {
+  position: absolute;
+  inset: 0;
+}
+
+/* Dark fade over the lower part of each fighter, lifting the name's
+   legibility against busy character art. */
+.team-slot .member-cell::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 55%;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.88) 0%,
+    rgba(0, 0, 0, 0.45) 45%,
+    transparent 100%
+  );
+}
+
+/* Player name: horizontal caption pinned to the bottom of each fighter cell.
+   Sits on the dark fade for legibility. Long 全角 names are shrunk via scaleX
+   by fitLongText() in result.js so they stay on a single line. */
+.team-slot .member-name {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 8px;
+  z-index: 2;
+  text-align: center;
+  white-space: nowrap;
+  font-size: 22px;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.95);
+  line-height: 1.1;
+  transform-origin: center bottom;
+}
+
+/* --- Team name plate, anchored at the slot bottom --- */
+.team-slot .team-info {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  padding: 8px 16px 12px 16px;
+  background: linear-gradient(
+    to top,
+    rgba(0, 0, 0, 0.9) 0%,
+    rgba(0, 0, 0, 0.55) 60%,
+    transparent 100%
+  );
+  display: flex;
+  flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
-  padding: 0 28px;
 }
 
-/* Team name is the headline; roster sits beneath it. (Base layout renders
-   sponsor first, name second — reorder so the team name leads.) */
-.player-slot .player-name {
-  order: 0;
-  font-size: 52px;
+.team-slot .team-name {
+  font-size: 34px;
+  font-weight: 700;
+  color: #ffffff;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.85);
+  white-space: nowrap;
+  overflow: visible;
+  line-height: 1.1;
+  transform-origin: left center;
 }
 
-.player-slot .player-sponsor {
-  order: 1;
-  font-size: 26px;
-  color: rgba(255, 255, 255, 0.85);
-}
-
-/* Larger headline for the podium slots (1st-3rd). */
-.player-slot.slot-1 .player-name { font-size: 72px; }
-.player-slot.slot-1 .player-sponsor { font-size: 34px; }
-.player-slot.slot-2 .player-name,
-.player-slot.slot-3 .player-name { font-size: 56px; }
-.player-slot.slot-2 .player-sponsor,
-.player-slot.slot-3 .player-sponsor { font-size: 28px; }
+/* --- Podium emphasis (1st-3rd) --- */
+.team-slot.slot-1 .team-name { font-size: 50px; }
+.team-slot.slot-1 .member-name { font-size: 26px; }
+.team-slot.slot-2 .team-name,
+.team-slot.slot-3 .team-name { font-size: 40px; }
+.team-slot.slot-2 .member-name,
+.team-slot.slot-3 .member-name { font-size: 22px; }
