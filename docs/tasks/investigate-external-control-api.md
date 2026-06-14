@@ -130,16 +130,27 @@ External Control API / Companion / Stream Deck 連携の設計前提として、
 - ✅ `/api/v1/` の **I/F 仕様**（endpoint・payload・response・error コード）を正本として作成:
   [../../.claude/design/external-control-api.md](../../.claude/design/external-control-api.md)（計画/未実装・ADR-001 準拠）。
 
-### 次に作成すべき実装タスク（ADR 確定済・ベースは candidates §8）
-- `tasks/implement-external-control-api-readonly.md`:
-  `GET /api/v1/state` + `/health` + 既存 WS 差分購読の踏襲（読み取り層）。
-- `tasks/implement-external-control-api-safe-ops.md`:
-  スコア±1 / swap / score:reset / set 情報設定（安全操作・既存 Actions の薄いラッパー、構造化レスポンス D8）。
-- `tasks/implement-external-control-api-guarded-ops.md`:
-  危険操作（clear-all/reset-players/reset-match=confirm 必須、set-tournament/update-game/update-bracket=実行中フラグ 409、
-  load-set 系、set-light-mode）。**書き込み操作ログ（INFO）と Idempotency-Key 任意対応**を本チケットで実装（D7）。
+### コーディング着手前のスパイク（必須・spec §13）
+実装チケットに入る前に [../../.claude/design/external-control-api.md](../../.claude/design/external-control-api.md) §13 を実施:
+- **API 化対象 Action ごとの失敗モード棚卸し**（`"OK"`/エラー文字列/例外/null 落ちの確認 → §2.6 エラーコードへのマップ表作成）。
+  例: `get_match` は provider null 未チェック（[../../src/AutonaWebServerActions.py:429](../../src/AutonaWebServerActions.py)）。
+- scoreboardNumber `{1,2,3}` 検証と board3（別クラス）不適合操作の拒否方式。
+- 重い操作の 202 非同期受付 + 実行中フラグ（Lock）の実装方式。`revision` 取得経路の確定。
 
-### 実装フェーズで確定する残課題
-- 重い操作の多重実行ガードが**既存コードに在るか**（無ければ新 API 層で実装）。
-- `set_team_data` の payload スキーマ（必須キー）。
+### 次に作成すべき実装タスク（ADR 確定済・ベースは candidates §8 / spec）
+- `tasks/implement-external-control-api-readonly.md`:
+  `GET /api/v1/state` + `/health`（`activeBoard` 含む）+ 既存 WS 差分購読の踏襲（読み取り層）。
+- `tasks/implement-external-control-api-safe-ops.md`:
+  スコア±1 / swap / score:reset / color / set 情報設定（安全操作・既存 Actions の薄いラッパー、構造化レスポンス D8）。
+- `tasks/implement-external-control-api-guarded-ops.md`:
+  破壊的操作（clear/reset 系=confirm 必須）、重い操作（tournament/game/bracket:refresh=**202 受付 + 実行中フラグ 409**）、
+  load-set 系、theme。**書き込み操作ログ（INFO）と Idempotency-Key 任意対応**を本チケットで実装（D7）。
+
+> テストは**自動テストを作らず、`manual-test-checklist.md`「外部制御 API」節を手動で**なぞる（PdM 決定）。
+
+### 実装フェーズで確定する残課題（spec §12 と重複）
+- `revision` / `activeBoard` / `outLastWriteUnix` の取得経路。
+- 多重実行フラグ・冪等キャッシュの粒度と Lock 設計。
+- `set_team_data` の payload スキーマ（必須キー・初回スコープ外）。
 - Companion / Stream Deck が求めるプロトコル（HTTP / WS）の最終確認。
+- CORS プリフライト（PATCH / Idempotency-Key ヘッダ）が既存設定で通るか。

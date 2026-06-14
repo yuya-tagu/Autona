@@ -53,7 +53,18 @@
 - `revision`: 操作後の状態リビジョン。**操作系（書き込み）レスポンスに含める（MUST）**。
   クライアントは WS デルタ（`program_state_update` の `revision`/`delta_index`）と突合し、反映済みかを判定できる。
   → リビジョンの定義・採番は [Design.md §3.2](Design.md) に従う（既存 WS と同一ソース。実装時の取得経路は `TBD`）。
+  - ⚠️ **`revision` は `StateManager` の変更のみを追う**。`SettingsManager` のみに書く操作
+    （`POST /ui/theme`・`POST /tournament` の URL 永続化など。§2.4a）の設定値変更は `revision` に
+    反映されない場合がある。クライアントは設定系の反映確認を `revision` だけに依存しない（**SHOULD**）。
 - `data`: 読み取り系の本体。操作系では省略可。
+
+### 2.4a 状態の二重書き込み（SettingsManager 併用・許容）
+- D4 の不変条件「状態変更は `StateManager` 単一経路」は **`score.*` 等のランタイム状態**に適用される。
+- 一部の Action は **`SettingsManager` にも書く**ことを**許容する**（PdM 確認済）:
+  - `set_light_mode` → `SettingsManager.Set("light_mode")` ＋ `StateManager.Set("ui.light_mode")`（[AutonaWebServerActions.py:176](../../src/AutonaWebServerActions.py)）
+  - `load_tournament` → `SettingsManager.Set("TOURNAMENT_URL")` ＋ シグナル emit（[:447](../../src/AutonaWebServerActions.py)）
+- 本 API はこれらも**既存 Action へ委譲するだけ**（新たに Settings/State を直接書かない）。
+  「StateManager をバイパスして state を直接書かない」原則は維持される。
 
 ### 2.5 エラーレスポンス・エンベロープ
 失敗時（**MUST**）:
@@ -83,11 +94,21 @@
 - 読み取り（§5）は**記録しない**（or DEBUG）。既存 `before_request`/`after_request`（DEBUG・パスのみ）とは別建て。
 - ⚠️ 無認証のため操作主体は **IP 粒度まで**（D5 の帰結）。ボディに認証情報や PII を含めない（CLAUDE.md 機密ルール）。
 
-### 2.8 多重実行ガード（D7・B-1）
-- **重い操作**（`POST /tournament`・`POST /game`・`POST /bracket:refresh`）は**実行中フラグ**を持ち、
-  実行中に同種要求が来たら **`409 CONFLICT`** を返す（**MUST**）。
-- フラグはサーバープロセス内のスレッドセーフな状態（操作種別ごと or グローバル・`TBD`）。
-- 既存コードに同等ガードが在るかは未確認（実装フェーズで確認し、無ければ本 API 層で実装）。
+### 2.8 重い操作の非同期受付（202・D7）
+- **重い操作**（`POST /tournament`・`POST /game`・`POST /bracket:refresh`）は**同期完了を待たず
+  `202 Accepted` を返す（MUST）**。理由: 委譲先が同期ブロックしうる（例: `set_game` は
+  `@gui_thread_sync` ＋ `LoadGameAssets(async_mode=False)` で**アセット再ロード完了までブロック**、
+  [AutonaWebServerActions.py:202](../../src/AutonaWebServerActions.py)）。同期で返すと HTTP がタイムアウトする。
+- **完了確認はクライアントが WS 購読（§4）で行う**（`program_state_update` の `revision` 進行を観測）。
+  202 レスポンスは受付のみを示し、`revision` は未確定（省略可）。
+  ```json
+  HTTP/1.1 202 Accepted
+  { "ok": true, "data": { "accepted": true, "operation": "tournament.load" } }
+  ```
+- **多重起動ガード（B-1）**: 重い操作は**実行中フラグ**を持ち、実行中に同種要求が来たら
+  **`409 CONFLICT`**（**MUST**）。202 で受け付けた処理が完了/失敗するまでフラグを保持する。
+- 実行失敗（外部タイムアウト等）は 202 後に起きるため**レスポンスでは返せない**。
+  失敗はログ（§2.7）に残し、状態が進まないことで間接的に検知される（`revision` が動かない）。
 
 ### 2.9 冪等性（D7・B-1）
 - **相対操作**（`score:adjust`）は冪等でない。`Idempotency-Key` ヘッダを**任意対応（SHOULD）**:
@@ -95,9 +116,37 @@
   - キーの保持はプロセス内の短命キャッシュ（直近 N 件 / 数十秒・`TBD`）。
 - **絶対値設定**（`score:reset`・`PATCH set`・`:swap-teams`・`POST /ui/theme`）は本質的に冪等寄りのため必須ではない。
 
-### 2.10 同時操作・順序（参考）
+### 2.10 スレッド安全性（実行中フラグ・冪等キャッシュ）
+- WebServer は QThread ＋ Flask `async_mode='threading'` ＝ **複数リクエストスレッドが並行**しうる。
+- §2.8 の**実行中フラグ**と §2.9 の**冪等キャッシュ**は、本 API 層が持つ新規共有状態であり、
+  **`threading.Lock` で保護する（MUST）**。粒度（操作種別ごと / グローバル）は実装フェーズで確定（§13）。
+- これらは Qt のスレッド境界とは独立した「HTTP 受付層の状態」。`StateManager.lock`（RLock）とは別管理。
+
+### 2.11 同時操作・順序（参考）
 - UI / ホットキー / 既存 Web / 本 API はいずれも最終的に **GUI イベントループ上で直列処理**される（候補書 §9）。
   明示ロックは無く「到着順・最後勝ち」。本 API は割り込みを特別扱いしない（重い操作の多重起動だけ §2.8 で弾く）。
+
+### 2.12 scoreboardNumber（パスパラメータ `{n}`）の規約
+コード確認（[AutonaScoreboardManager.py:41-87](../../src/AutonaScoreboardManager.py)）に基づく。
+
+- **有効値は `1`/`2`/`3` のみ**。3 ボードは同一 SCORE ドックに常時生成され、**表示は 1 つだけ切替**される。
+
+  | n | 種類 | クラス | 状態キー |
+  |---|------|--------|---------|
+  | 1 | 1v1（シングルス・既定表示） | `AutonaScoreboardWidget` | `score.1` |
+  | 2 | チーム | `AutonaScoreboardWidget` | `score.2` |
+  | 3 | クルーバトル | `AutonaCrewBattleWidget`（**別クラス**） | `score.3` |
+
+- **`{n}` は API 層で `{1,2,3}` を検証し、範囲外は `400 INVALID_ARGUMENT`（MUST）**。
+  `GetScoreboard(n)` は未知番号で `None` を返すのみで、既存 Action はその後 `None.signals` で
+  AttributeError になるため、**API 層で事前検証する**（NOT_FOUND ではなく INVALID_ARGUMENT 扱い）。
+- **board 3（crew）は別クラス**。`score:adjust`（`CommandScoreChange`）等の board1/2 用操作は board3 に
+  通用しない。crew 専用操作（ストック増減・active 設定）は**初回スコープ外**（§1.1）。
+  → board1/2 用操作を board3 に投げた場合は `409 NOT_READY`（or `INVALID_ARGUMENT`）で**明示拒否**する（実装方針・§13）。
+- **非表示ボードへの操作は配信に出ない**: OBS は表示中ボードのレイアウトを参照するため、裏ボードを
+  操作しても画面は変わらない。誤対象を避けるため、`GET /api/v1/health`（§5.1）に**現在アクティブな
+  ボード番号**を載せる（`activeBoard`）。
+- 初回は **board 1（1v1）を主対象**として運用想定（board 2 も同操作で動くが、表示切替はメニュー操作前提）。
 
 ---
 
@@ -146,10 +195,12 @@
   "version": "1.00",
   "revision": 1234,
   "currentGame": "ssbu",
+  "activeBoard": 1,
   "tournamentLoaded": true,
   "outLastWriteUnix": 1718000000
 } }
 ```
+- `activeBoard`: 現在表示中のボード番号（1/2/3）。外部コントローラが「表示中ボードを操作」する判断材料（§2.12）。取得方法は `TBD`（`SetBattleFormat` の現在値をどこから読むか）。
 - `outLastWriteUnix`: `out/` 配信ファイルの最終更新時刻（OBS 出力健全性の指標）。取得方法は `TBD`。
 - `tournamentLoaded`: provider 有無。
 
@@ -212,13 +263,18 @@
   → 配信状態判定手段が入ったら ADR-001 Revisit。
 
 ### 7.3 重い操作のペイロード
+> **重い操作（tournament / game / bracket:refresh）は `202 Accepted` で受け付け、完了は WS 購読で確認する（§2.8）。**
+> 多重起動は `409 CONFLICT`。下記の `UPSTREAM_TIMEOUT`/`NOT_FOUND`/`NOT_READY` は**受付前に判定できる場合のみ**
+> 同期で返し、受付後（202 以降）の失敗はログに残す（§2.8）。
+
 - `POST /api/v1/tournament`: `{ "url": "https://www.start.gg/tournament/.../event/..." }`
   - URL 正規化は既存 `load_tournament` に委譲。`url` 空/省略で大会クリア（既存挙動）。
-  - 外部通信を伴う。`UPSTREAM_TIMEOUT` を返しうる。実行中は `409 CONFLICT`（§2.8）。
+  - 外部通信を伴う。受付は 202、ロード結果は WS で観測。実行中は `409 CONFLICT`（§2.8）。
 - `POST /api/v1/game`: `{ "codename": "ssbu", "modsActive": false }`
-  - 未知 codename は `NOT_FOUND`。アセット再ロードで重い → 実行中フラグ。
-- `POST /api/v1/bracket:refresh`: body なし。provider 不在で `NOT_READY`。実行中フラグ。
-- `POST /api/v1/ui/theme`: `{ "value": true }`（true=light）。OBS 見た目に波及するため操作ログ必須。
+  - 未知 codename は受付前に判定できれば `404 NOT_FOUND`。アセット再ロードで重い → 202 + 実行中フラグ。
+- `POST /api/v1/bracket:refresh`: body なし。provider 不在は受付前に `409 NOT_READY`。それ以外は 202 + 実行中フラグ。
+- `POST /api/v1/ui/theme`: `{ "value": true }`（true=light）。**これは重い操作ではない**ため同期 200。
+  ただし OBS 見た目に波及するため操作ログ必須。`SettingsManager` にも書く（§2.4a）。
 
 ---
 
@@ -268,14 +324,17 @@ HTTP/1.1 409 Conflict
 
 ---
 
-## 10. テスト観点（実装時 / manual-test-checklist 連携）
+## 10. テスト方針（手動・自動テストなし）
 
-- 既存 `/score`・`/scoreboard<N>-...` ルートと Web UI / OBS が従来通り動く（regression）。
-- `score:adjust` の delta 符号・冪等キー再送で二重加算しない。
-- 破壊的操作は confirm 無しで状態が変わらない。
-- 重い操作の多重起動が 409 になる。
-- 操作ログに書き込み操作が INFO で出る／読み取りは出ない。
-- provider 不在時の `NOT_READY` / 外部タイムアウト時の `UPSTREAM_TIMEOUT`。
+- **自動テストは作らない**（PdM 決定）。動作確認は**アプリ上で手動**で行う
+  （`python main.py` 起動 → curl/HTTP クライアントで `/api/v1/...` を叩く → UI / `out/` / OBS で反映確認）。
+- 手動確認項目は [../manual-test-checklist.md](../manual-test-checklist.md) の「外部制御 API」節になぞる:
+  - 既存 `/score`・`/scoreboard<N>-...` ルートと Web UI / OBS が従来通り動く（regression）。
+  - `score:adjust` の delta 符号・冪等キー再送で二重加算しない。
+  - 破壊的操作は confirm 無しで状態が変わらない。
+  - 重い操作が 202 で返り、完了が WS で観測でき、実行中の同種要求が 409 になる。
+  - 操作ログに書き込み操作が INFO で出る／読み取りは出ない。
+  - 範囲外 `{n}`（0 や 4）が 400 になる。board3 に board1/2 用操作で拒否される。
 
 ---
 
@@ -290,9 +349,25 @@ HTTP/1.1 409 Conflict
 ## 12. Open items（実装フェーズで確定）
 
 - `revision` の正確な取得経路（StateManager のどの値を返すか）→ Design.md §3.2 と突合。
+- `health.activeBoard` の取得方法（`SetBattleFormat` の現在値をどこから読むか。状態キー or Manager 属性）。
 - `health.outLastWriteUnix` の取得方法（`out/` のどのファイルを基準にするか）。
-- 多重実行フラグの粒度（操作種別ごと / グローバル）と保持実装。
+- 多重実行フラグ・冪等キャッシュの粒度（操作種別ごと / グローバル）と Lock 設計（§2.10）。
 - `Idempotency-Key` キャッシュの保持件数・TTL。
 - `set_route`（PATCH set）の `players`/`characters` 同時指定時の適用順（既存挙動の確認）。
 - `set_team_data`（選手データ更新）の payload スキーマ未確定のため**初回スコープ外**（確定後に追補）。
+
+## 13. 実装前に確認すること（pre-implementation・コーディング着手前）
+
+実装チケットに入る前に、以下を**コード追読で確定**してから API ラッパを書く（PdM 決定 ③ に対応）。
+
+1. **API 化対象 Action ごとの失敗モード棚卸し（必須）**: 各委譲先 Action が
+   「`"OK"` を返す / エラー文字列を返す / 例外を投げる / null 前提で落ちる」のどれかを一通り確認し、
+   §2.6 のエラーコードへのマップ表を作る。
+   - 既知の注意点: `get_match` は **provider の null チェックが無い**（[AutonaWebServerActions.py:429](../../src/AutonaWebServerActions.py)）→ 大会未ロードで `AttributeError`。
+     `NOT_READY` に変換するラップが要る。
+2. **scoreboardNumber の検証実装（必須）**: `{1,2,3}` 検証と board3（別クラス）への不適合操作の拒否（§2.12）。
+3. **重い操作の非同期化方式（必須）**: 202 で受け付け、実行は既存の signal emit / ワーカーに委ね、
+   実行中フラグ（Lock 保護）で多重起動を弾く（§2.8/§2.10）。`set_game` の同期ブロックを 202 受付に変える経路を確認。
+4. **`revision` 取得経路の確定**（§12）。
+5. **CORS プリフライト**: `PATCH` と `Idempotency-Key` ヘッダが既存 `CORS(app)` で通るか確認（通らなければ設定追加）。優先度低。
 </content>

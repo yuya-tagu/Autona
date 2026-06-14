@@ -54,9 +54,13 @@ Stream Deck 連携を直接実装せず、**API 経由**とする。Stream Deck 
 内部処理は**既存 `WebServerActions` を唯一の実処理として再利用**し、状態ロジックを二重化しない。
 **既存ルート（`/score`・`/scoreboard<N>-...`）は契約を一切変えず温存**（既存クライアント/OBS 互換）。
 
-### D4（論点5・不変条件）: StateManager 単一経路を厳守
+### D4（論点5・不変条件）: StateManager 単一経路を厳守（SettingsManager 併用は許容）
 外部 API も**必ず `WebServerActions` → Qt Signal → `StateManager` を通す**。
-StateManager をバイパスして状態を直接書かない。GUI スレッド直列化（`@gui_thread_sync`）を尊重する。
+StateManager をバイパスして**ランタイム状態（`score.*` 等）を直接書かない**。
+GUI スレッド直列化（`@gui_thread_sync`）を尊重する。
+- ただし一部 Action（`set_light_mode`・`load_tournament` 等）が **`SettingsManager` にも書く**ことは**許容**する
+  （PdM 確認済）。本 API はこれらも既存 Action へ委譲するだけで、Settings/State を新たに直接書かない。
+- 帰結: `SettingsManager` のみの変更は `revision`（StateManager 由来）に反映されない場合がある（spec §2.4/§2.4a）。
 
 ### D5（認証/バインド）: 現状維持（`0.0.0.0` + 認証なし + CORS 全許可）
 LAN 内運用を前提に**既存の挙動を引き継ぐ**。新 API も認証を課さない。
@@ -74,8 +78,11 @@ LAN 内運用を前提に**既存の挙動を引き継ぐ**。新 API も認証�
 - **操作ログ（A-1）**: 外部 API の**書き込み操作のみ INFO で専用ロガーに記録**（時刻・送信元 IP・操作内容）。
   読み取りはログしない（or DEBUG）。既存の `before_request`（DEBUG・パスのみ）とは別建て。
   ※ 無認証のため「誰が」は IP 粒度まで（D5 の帰結）。
-- **多重実行ガード（B-1）**: 重い操作（set-tournament / update-game / update-bracket）は
-  **実行中フラグで多重起動を 409 で弾く**。
+- **重い操作は非同期受付（202）**: set-tournament / update-game / update-bracket は同期完了を待たず
+  **`202 Accepted` を返し、完了はクライアントが WS 購読で確認**する（PdM 決定）。
+  理由: `set_game` 等は `@gui_thread_sync` + 同期アセット再ロードで HTTP をブロックしうるため。
+- **多重実行ガード（B-1）**: 上記の重い操作は**実行中フラグで多重起動を 409 で弾く**。
+  実行中フラグと冪等キャッシュは複数リクエストスレッド共有のため **`threading.Lock` で保護**する。
 - **冪等性（B-1）**: 相対操作（score:adjust ±1 等）は `Idempotency-Key` ヘッダを**任意対応**
   （送られたら重複吸収、無ければ従来通り）。絶対値設定系（score:reset / set 設定 / swap）は本来冪等寄り。
 - **破壊的操作の確認（C-2）**: clear-all / reset-players / reset-match は **`confirm=true` 必須**。
