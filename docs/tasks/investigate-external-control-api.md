@@ -77,3 +77,69 @@
 1. [../decisions/ADR-001-external-control-api-boundary.md](../decisions/ADR-001-external-control-api-boundary.md) を
    `Accepted` まで進める（責務境界の決定）
 2. 決定に基づき、実装チケット（`implement-*`）を `docs/tasks/` に切り出す
+
+---
+
+## 調査結果（2026-06-15・コード読解のみ / コード変更なし）
+
+> 出力方針: **Confirmed**（コード/既存ドキュメントで確認）/ **Inferred**（構造・命名から推測）/ **Unknown / TBD**（未確認）。
+
+### 調査の目的
+External Control API / Companion / Stream Deck 連携の設計前提として、既存の操作・制御面・状態経路を
+**コードの一次情報から確定**し、API 化候補を分類する。実装はしない。
+
+### 読んだファイル
+- [src/AutonaWebServer.py](../../src/AutonaWebServer.py)（HTTP/WS ルート全量・ポート・バインド・CORS・delta coalescing）
+- [src/AutonaWebServerActions.py](../../src/AutonaWebServerActions.py)（全 Action の実処理・状態経路）
+- [src/AutonaHotkeys.py](../../src/AutonaHotkeys.py)（9 ホットキーと接続先）
+- [src/AutonaScoreboardWidget.py](../../src/AutonaScoreboardWidget.py)（`PostToX`/`PostToBsky`/`GenerateThumbnail`・ホットキー接続）
+- [src/Autona.py](../../src/Autona.py)（シグナル配線・`UiMounted` 起動順）（抜粋 grep）
+- 既存 docs（README / current-architecture / current-features / 旧 changes・ADR・task）
+
+### 調査した既存機能
+スコア操作 / チームカラー / クルー戦ストック / 入替 / 各種リセット・全消去 / セット&大会ロード /
+ブラケット更新 / 統計再取得 / マスタ取得（ゲーム・キャラ・バリアント・コントローラ）/ サムネ生成 /
+テーマ切替 / 実況者更新 / 選手 DB / ホットキー / X・Bluesky 投稿。
+
+### 判明したこと（Confirmed）
+- HTTP 約 45 ルート＋対応 Socket.IO（**二重定義**）。全量・分類は
+  [../architecture/external-control-api-candidates.md](../architecture/external-control-api-candidates.md) §3。
+- 全ルートは `WebServerActions` に集約 → Qt Signal → widget → **StateManager 単一経路**（直接書き込みなし）。
+- 既定ポート `5000`、Web UI ルート `/`・`/scoreboard`・`/team`・`/web`。
+- 制御面は **`0.0.0.0` + 認証なし + CORS 全許可**（LAN 内から全操作可能）。
+- **X / Bluesky 投稿は UI ボタン専用**（API/ホットキー未露出）。
+- ホットキー 9 種は Web ルートと操作が重複（= 最頻操作の指標）。
+
+### 不明なこと（Unknown / TBD）
+- `set_team_data` の payload スキーマ（必須キー）。
+- scoreboardNumber の有効値・board2/3 の現行扱い。
+- 重い操作の多重実行ガードの有無。
+- 配信中/非配信中の判定手段。
+- `assets/rulesets.json`（ステージストライク残置）の用途。
+
+### PdM 判断（2026-06-15・解消済 → ADR-001 D1〜D8）
+1. 認証/バインド: **現状維持**（`0.0.0.0`+無認証+CORS 全許可、LAN 内前提）= D5
+2. 初回スコープ: **操作系も広く一括**（読み取り＋安全＋危険操作）= D6
+3. 危険操作: **confirm 必須で初回から含める** ＋ 重い操作は実行中フラグ 409 = D6/D7
+4. API 境界: **`/api/v1/` 薄いラッパー（既存 `WebServerActions` 再利用、案 B'）** = D3
+5. API の性格: **汎用 External Control API**（Companion/Stream Deck は薄いクライアント）= D1/D2
+6. 操作ログ: **書き込み操作のみ INFO・専用ロガー**（A-1）/ idempotency: **Idempotency-Key 任意対応**（B-1）= D7
+7. X / Bluesky: 初回除外（将来 Revisit）
+
+### 次に作成すべき設計ドキュメント
+- `/api/v1/` の **I/F 仕様**（endpoint・payload・response・error コード）を Design.md or 専用 spec に起こす
+  （ベースは candidates §7）。
+
+### 次に作成すべき実装タスク（ADR 確定済・ベースは candidates §8）
+- `tasks/implement-external-control-api-readonly.md`:
+  `GET /api/v1/state` + `/health` + 既存 WS 差分購読の踏襲（読み取り層）。
+- `tasks/implement-external-control-api-safe-ops.md`:
+  スコア±1 / swap / score:reset / set 情報設定（安全操作・既存 Actions の薄いラッパー、構造化レスポンス D8）。
+- `tasks/implement-external-control-api-guarded-ops.md`:
+  危険操作（clear-all/reset-players/reset-match=confirm 必須、set-tournament/update-game/update-bracket=実行中フラグ 409、
+  load-set 系、set-light-mode）。**書き込み操作ログ（INFO）と Idempotency-Key 任意対応**を本チケットで実装（D7）。
+
+### 実装フェーズで確定する残課題
+- 重い操作の多重実行ガードが**既存コードに在るか**（無ければ新 API 層で実装）。
+- `set_team_data` の payload スキーマ（必須キー）。
+- Companion / Stream Deck が求めるプロトコル（HTTP / WS）の最終確認。
