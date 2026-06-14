@@ -34,4 +34,11 @@
 
 | ファイル | 種類 | 内容 |
 |---------|------|------|
-| [investigate-external-control-api.md](investigate-external-control-api.md) | 調査 | 外部制御 API 設計前の事実確定 |
+| [investigate-external-control-api.md](investigate-external-control-api.md) | 調査 | 外部制御 API 設計前の事実確定（調査結果・スパイク済） |
+| [implement-external-control-api-readonly.md](implement-external-control-api-readonly.md) | 実装 | `/api/v1/` 共通基盤 + 読み取りエンドポイント（**最初に着手**） |
+| [implement-external-control-api-safe-ops.md](implement-external-control-api-safe-ops.md) | 実装 | 安全操作（score±1 / swap / reset / set 情報・confirm 不要） |
+| [implement-external-control-api-guarded-ops.md](implement-external-control-api-guarded-ops.md) | 実装 | 危険操作（confirm 必須 + 重い操作 202 受付） |
+
+> 外部制御 API の実装は **readonly → safe-ops → guarded-ops** の順。仕様正本は
+> [../../.claude/design/external-control-api.md](../../.claude/design/external-control-api.md)、決定は
+> [../decisions/ADR-001-external-control-api-boundary.md](../decisions/ADR-001-external-control-api-boundary.md)。
