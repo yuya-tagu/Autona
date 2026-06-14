@@ -442,6 +442,7 @@ WS 列は対応する Socket.IO イベントの有無。
 
 ## 14. 関連ドキュメント
 
+- **I/F 仕様（正本・計画）**: [../../.claude/design/external-control-api.md](../../.claude/design/external-control-api.md)
 - 影響分析: [../changes/external-control-impact-analysis.md](../changes/external-control-impact-analysis.md)
 - 設計境界 ADR: [../decisions/ADR-001-external-control-api-boundary.md](../decisions/ADR-001-external-control-api-boundary.md)
 - 調査タスク: [../tasks/investigate-external-control-api.md](../tasks/investigate-external-control-api.md)

@@ -126,9 +126,9 @@ External Control API / Companion / Stream Deck 連携の設計前提として、
 6. 操作ログ: **書き込み操作のみ INFO・専用ロガー**（A-1）/ idempotency: **Idempotency-Key 任意対応**（B-1）= D7
 7. X / Bluesky: 初回除外（将来 Revisit）
 
-### 次に作成すべき設計ドキュメント
-- `/api/v1/` の **I/F 仕様**（endpoint・payload・response・error コード）を Design.md or 専用 spec に起こす
-  （ベースは candidates §7）。
+### 設計ドキュメント（作成済・2026-06-15）
+- ✅ `/api/v1/` の **I/F 仕様**（endpoint・payload・response・error コード）を正本として作成:
+  [../../.claude/design/external-control-api.md](../../.claude/design/external-control-api.md)（計画/未実装・ADR-001 準拠）。
 
 ### 次に作成すべき実装タスク（ADR 確定済・ベースは candidates §8）
 - `tasks/implement-external-control-api-readonly.md`:
