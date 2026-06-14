@@ -1,9 +1,8 @@
 # Current Features
 
-Autona の現行機能を**プロダクト視点**で整理する。詳細な機能カタログは
-[../../FEATURES.md](../../FEATURES.md) にある（ただし後述の不整合に注意）。
-ここでは外部制御 API / Companion 連携を検討するうえで重要な「中核ワークフロー」
-「運用制約」「劣化させてはいけない機能」に絞る。
+外部制御 API / Companion 連携を**安全に足すため**のプロダクト視点メモ。
+網羅的な機能カタログは**ここでは再記述せず** [../../FEATURES.md](../../FEATURES.md)（※下記の不整合に注意）に委ね、
+本書は「中核ワークフロー」「劣化させてはいけない機能」「外部設計時の注意」に絞る。
 
 > ステータス凡例: ✅ コード確認済 / 📄 既存ドキュメント由来（未再確認） / ⚠️ 要確認 / `TBD` 未記載
 
@@ -14,11 +13,14 @@ Autona の現行機能を**プロダクト視点**で整理する。詳細な機
 までを 1 人〜少人数運営でカバーする統合ワークベンチ。
 
 - 想定ユーザー: 小〜中規模大会（参加者 32〜256 名規模）の TO 兼配信オペ 1〜2 名（📄 ROADMAP 由来）
-- 動作環境: Windows（PyInstaller 製 `Autona.exe`、約 230〜245MB）✅
+- 動作環境: Windows（PyInstaller 製 `Autona.exe`）✅
+
+機能の一覧（スコアボード / Start.gg 連携 / 統計 / X・BlueSky 投稿 / 設定等）は
+[../../FEATURES.md](../../FEATURES.md) を参照。本書では外部連携に影響する範囲のみ扱う。
 
 ## Core workflows
 
-配信オペの時系列に沿った中核フロー（📄 FEATURES + ✅ コード確認の混在）。
+配信オペの時系列に沿った中核フロー。**外部制御を足してもこの流れを壊さない**ことが前提。
 
 1. **大会ロード** — Start.gg イベント URL を設定し、参加者/ブラケット/セットを取得 ✅
 2. **セット選択 → スコアボード反映** — ブラケット or Start.gg セット選択からスコアボードへロード ✅
@@ -26,41 +28,10 @@ Autona の現行機能を**プロダクト視点**で整理する。詳細な機
 4. **配信オーバーレイ出力** — 状態を `out/` のファイル群＋ HTTP/WebSocket で OBS ブラウザソースに反映 ✅
 5. **告知・記録** — サムネイル/結果画像生成、X / BlueSky 投稿、YouTube メタデータ生成 📄
 
-## Scoreboard features
+> 各機能の HTTP/WS 制御面（`/score`・`/scoreboard<N>-*`・`stats-*` 等）と未確定ルート/ポートは
+> [../architecture/current-architecture.md](../architecture/current-architecture.md) に集約。
 
-✅ = [src/AutonaScoreboardWidget.py](../../src/AutonaScoreboardWidget.py) 等で確認。
-
-- スコア加減算（チーム別 +1 / −1）✅（HTTP/WS ルートあり）
-- Best Of 切替（Bo1/Bo3/Bo5/Bo7 等）📄
-- Match（予選/Winners/Losers/Grand Final 等）・Phase・Top N 指定 📄
-- チーム入れ替え（Swap）✅（`swap-teams` ルートあり）
-- リセット（スコア / マッチ / 選手 / 全クリア）✅（`reset-*` / `clear-all` ルートあり）
-- 1v1 ⇄ チームモード切替（`_applyScoreboardMode`）📄（CLAUDE.md）
-- チーム/クルーバトル（Stock Pool / First To、ストック追跡）✅（`crew-*` ルートあり）
-- ストリームチャンネル（配信 URL）管理 📄
-- 選手情報入力（タグ/本名/スポンサー/国/シード/キャラ/コントローラー等）📄
-
-## OBS integration features
-
-- **HTML オーバーレイテンプレート**を `layout/`（Git サブモジュール）に保持 📄
-- OBS は **ブラウザソース**で `http://localhost:{port}/...` を参照（OBS-websocket は使わない方針）📄
-- OBS テキストソース向けに `out/` 配下へ個別テキストファイルを出力 📄
-- 状態は `out/program_state.json`（全状態スナップショット）にも出力 ✅（`/program-state` ルート）
-- ⚠️ **既定ポート・ルーティングの正確な値は要確認**:
-  - 既定ポート: README/FEATURES は `5000`、CLAUDE.md は設定既定 `5000` 📄 → 実値は SettingsManager 既定を確認（`TBD`）
-  - Web UI ルート: CLAUDE.md は `/web`（既定）`/scoreboard`（board1）`/team`（board2）、
-    FEATURES/README は `/scoreboard` `/stage-strike-app`。**CLAUDE.md を正とし要再確認** ⚠️
-
-## Tournament / match operation features
-
-- Start.gg 連携（大会メタ/参加者/フェーズ/セット/ストリームキュー/ステーション/Standings 等）📄
-- ブラケット表示（QGraphicsView 樹形図、セットクリックでロード）📄
-- 選手リスト（Start.gg Standings 一括読込）📄
-- 統計（H2H / Last Sets / Tournament History / Upset Factor 等）✅（`stats-*` ルートあり）
-- 実況者パネル（人数増減・各種項目・並び替え）📄
-- 大会情報（バナー/アイコン DL、配信タイトル生成、配信サムネイル生成）📄
-
-## Stage strike features
+## Stage strike features（削除済み — 設計で叩かないこと）
 
 > ⚠️ **現行ビルドには存在しない（削除済み・コード確認済）。**
 >
@@ -73,34 +44,15 @@ Autona の現行機能を**プロダクト視点**で整理する。詳細な機
 > 外部制御 API / Companion 連携の設計時に「ステージストライクを叩く」想定を入れないこと。
 > ルート直下に `assets/rulesets.json`（未追跡）が存在するが、現行機能との関係は `TBD`。
 
-## X posting features
+## 外部設計時に効く運用制約
 
-[src/AutonaScoreboardWidget.py](../../src/AutonaScoreboardWidget.py) `PostToX` 📄。
-
-- ワンクリックでサムネ生成 → クリップボードコピー → ツイート本文組立 → `intent/tweet` を既定ブラウザで開く
-- BlueSky 自動投稿（[src/Helpers/AutonaBskyHelper.py](../../src/Helpers/AutonaBskyHelper.py)）+ alt text 自動付与
-- 投稿前バリデーション（選手名・ラウンド名の空チェック）
-
-## Settings and configuration
-
-[src/Settings/AutonaSettingsWindow.py](../../src/Settings/AutonaSettingsWindow.py) 📄。
-
-- General（Web サーバーポート、各種自動制御の ON/OFF、ベータ機能）
-- Hotkeys（再割り当て）
-- Default Display Options（選手ウィジェットの既定表示項目）
-- Bluesky（ホスト/アカウント/App Password）⚠️ **認証情報を含む** — 出力・外部送信禁止
-- 永続化: `user_data/settings.json`（📄）/ ローカル選手 DB `user_data/local_players.json`（📄）
-
-## Known operational constraints
+機能カタログには出ないが、外部連携の前提になる制約（一次情報は CLAUDE.md / agent-pitfalls）:
 
 - **Windows 専用前提**（グローバルホットキーは pynput / Windows、exe 配布）📄
-- **WebEngine 依存**でサムネイル/画像生成（Qt6WebEngineCore.dll 約 196MB）→ exe が大きい ✅（CLAUDE.md）
-- **`layout/` は Git サブモジュール**。オーバーレイは別管理 📄
 - **言語変更は再起動必須**（Program / Game Asset / Tournament term の 3 系統）📄
 - **自動アップデートは PyInstaller ビルド版のみ動作**（`python main.py` では無効）📄
-- **Start.gg GQL は 20 秒タイムアウト + 指数バックオフ**。重いクエリ追加で timeout しやすい ✅（agent-pitfalls）
-- 状態キーパスはドット区切り文字列・数値も文字列キー（`"1"`）✅（agent-pitfalls）
-- `objectName()` が StateManager キーになる箇所がある → `.ui` の objectName 変更で保存互換が壊れる ✅
+- **Bluesky 設定は認証情報（App Password）を含む** ⚠️ — 値の出力・外部送信禁止（CLAUDE.md 機密ルール）
+- 永続化: 設定 `user_data/settings.json` / ローカル選手 DB `user_data/local_players.json` 📄
 
 ## Features that must not regress
 
