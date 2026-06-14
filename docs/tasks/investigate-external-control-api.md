@@ -130,12 +130,13 @@ External Control API / Companion / Stream Deck 連携の設計前提として、
 - ✅ `/api/v1/` の **I/F 仕様**（endpoint・payload・response・error コード）を正本として作成:
   [../../.claude/design/external-control-api.md](../../.claude/design/external-control-api.md)（計画/未実装・ADR-001 準拠）。
 
-### コーディング着手前のスパイク（必須・spec §13）
-実装チケットに入る前に [../../.claude/design/external-control-api.md](../../.claude/design/external-control-api.md) §13 を実施:
-- **API 化対象 Action ごとの失敗モード棚卸し**（`"OK"`/エラー文字列/例外/null 落ちの確認 → §2.6 エラーコードへのマップ表作成）。
-  例: `get_match` は provider null 未チェック（[../../src/AutonaWebServerActions.py:429](../../src/AutonaWebServerActions.py)）。
-- scoreboardNumber `{1,2,3}` 検証と board3（別クラス）不適合操作の拒否方式。
-- 重い操作の 202 非同期受付 + 実行中フラグ（Lock）の実装方式。`revision` 取得経路の確定。
+### コーディング着手前のスパイク（✅ 実施済・2026-06-15 / 結果は spec §14）
+[../../.claude/design/external-control-api.md](../../.claude/design/external-control-api.md) §14 に記録:
+- ✅ **取得経路確定**: `revision`=`StateManager.revision`/`GetFullState()`、`activeBoard`=`SettingsManager.Get("scoreboard.battle_format")` 写像、`outLastWriteUnix`=`out/program_state.json` の mtime（§14.1）。
+- ✅ **Action 失敗モード棚卸し表**（§14.2）。横断発見: ①最頻は `GetScoreboard(n)`=None 後の AttributeError（→ {1,2,3} 検証で予防）②`int()` パース→`INVALID_ARGUMENT` ③**`get_sets`/`get_match`/`update_bracket` は同期 Start.gg 呼びで読み取りでもタイムアウトあり** ④`set_game` は未知 codename を文字列で返す＋同期ブロック ⑤`update_bracket` は null/添字ガードが弱い。
+- ✅ **202 化メモ**（§14.3）: `set_game` の `@gui_thread_sync` 同期ブロックを避ける起動経路の確定が実装時の要点。
+- ✅ **CORS**（§14.4）: `PATCH`/`Idempotency-Key` は通る見込み・実機 1 回確認のみ。
+- ⏭ 残: `revision` の非同期 emit 系でのラグ（§14.1a・WS で確認する前提）、多重実行フラグ/冪等キャッシュの粒度（実装時）。
 
 ### 次に作成すべき実装タスク（ADR 確定済・ベースは candidates §8 / spec）
 - `tasks/implement-external-control-api-readonly.md`:

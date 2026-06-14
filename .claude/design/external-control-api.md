@@ -348,10 +348,9 @@ HTTP/1.1 409 Conflict
 
 ## 12. Open items（実装フェーズで確定）
 
-- `revision` の正確な取得経路（StateManager のどの値を返すか）→ Design.md §3.2 と突合。
-- `health.activeBoard` の取得方法（`SetBattleFormat` の現在値をどこから読むか。状態キー or Manager 属性）。
-- `health.outLastWriteUnix` の取得方法（`out/` のどのファイルを基準にするか）。
-- 多重実行フラグ・冪等キャッシュの粒度（操作種別ごと / グローバル）と Lock 設計（§2.10）。
+> ✅ `revision`・`activeBoard`・`outLastWriteUnix` の取得経路は §14 スパイクで確定。
+
+- 多重実行フラグ・冪等キャッシュの粒度（操作種別ごと / グローバル）と Lock 設計（§2.10）→ §14 に方針あり、実装で確定。
 - `Idempotency-Key` キャッシュの保持件数・TTL。
 - `set_route`（PATCH set）の `players`/`characters` 同時指定時の適用順（既存挙動の確認）。
 - `set_team_data`（選手データ更新）の payload スキーマ未確定のため**初回スコープ外**（確定後に追補）。
@@ -360,14 +359,84 @@ HTTP/1.1 409 Conflict
 
 実装チケットに入る前に、以下を**コード追読で確定**してから API ラッパを書く（PdM 決定 ③ に対応）。
 
-1. **API 化対象 Action ごとの失敗モード棚卸し（必須）**: 各委譲先 Action が
-   「`"OK"` を返す / エラー文字列を返す / 例外を投げる / null 前提で落ちる」のどれかを一通り確認し、
-   §2.6 のエラーコードへのマップ表を作る。
-   - 既知の注意点: `get_match` は **provider の null チェックが無い**（[AutonaWebServerActions.py:429](../../src/AutonaWebServerActions.py)）→ 大会未ロードで `AttributeError`。
-     `NOT_READY` に変換するラップが要る。
+1. **API 化対象 Action ごとの失敗モード棚卸し（必須）**: → §14.2 で完了。
 2. **scoreboardNumber の検証実装（必須）**: `{1,2,3}` 検証と board3（別クラス）への不適合操作の拒否（§2.12）。
 3. **重い操作の非同期化方式（必須）**: 202 で受け付け、実行は既存の signal emit / ワーカーに委ね、
-   実行中フラグ（Lock 保護）で多重起動を弾く（§2.8/§2.10）。`set_game` の同期ブロックを 202 受付に変える経路を確認。
-4. **`revision` 取得経路の確定**（§12）。
-5. **CORS プリフライト**: `PATCH` と `Idempotency-Key` ヘッダが既存 `CORS(app)` で通るか確認（通らなければ設定追加）。優先度低。
+   実行中フラグ（Lock 保護）で多重起動を弾く（§2.8/§2.10）。→ §14.3 に方式メモ。
+4. **`revision` 取得経路の確定**: → §14.1 で完了。
+5. **CORS プリフライト**: `PATCH` と `Idempotency-Key` ヘッダが既存 `CORS(app)` で通るか確認。→ §14.4。
+
+---
+
+## 14. 実装前スパイク結果（2026-06-15・コード追読）
+
+### 14.1 取得経路の確定（revision / activeBoard / out）
+
+| 項目 | 確定した取得経路 | 出典 |
+|------|-----------------|------|
+| `revision` | `StateManager.revision`（単調増加カウンタ、`_bumpRevision()` で +1）。読み取りは `GetFullState()` が `{'state','revision','delta_index'}` を返す。`GET /api/v1/state` はこれをそのまま使う | [StateManager.py:34,183-202](../../src/StateManager.py) |
+| `activeBoard` | **`SettingsManager.Get("scoreboard.battle_format", "singles")`** を `{"singles":1,"team":2,"crew":3}` で写像。これが表示中ボードの真実源 | [Autona.py:952,968](../../src/Autona.py) / [AutonaScoreboardManager.py:69-75](../../src/AutonaScoreboardManager.py) |
+| `outLastWriteUnix` | `os.path.getmtime("./out/program_state.json")`（毎 SaveState でエクスポートスレッドが書く）。または同ファイル内の `timestamp`/`revision` フィールド | [StateManager.py:104-109](../../src/StateManager.py) |
+
+### 14.1a revision のタイミング（重要）
+- **`@gui_thread_sync` の Action は同期実行**されるため、戻り時点で `StateManager.revision` は当該変更を反映済み
+  → 操作レスポンスの `revision` は正確。
+- **`@gui_thread_sync` でない Action は Qt シグナルを emit して即時 return**するため、戻り時点で revision が
+  **まだ上がっていない**ことがある（下表「sync」列が ✕ のもの）。
+- 方針: 操作レスポンスの `revision` は「応答生成時点の `StateManager.revision`」を**ベストエフォート**で返す。
+  非同期 emit 系では当該操作を含まない場合がある旨を仕様（§2.4）どおり明記。**確定確認はクライアントが WS で行う**。
+
+### 14.2 Action 失敗モード棚卸し（初回スコープ）
+
+凡例: sync=`@gui_thread_sync` 有無。失敗モード→マップすべき §2.6 エラーコード。
+
+| エンドポイント | 委譲 Action | sync | 主な失敗モード（コード根拠） | マップ |
+|---------------|------------|:---:|------------------------------|--------|
+| `GET /state` | `program_state` | ✕ | なし（`GetFullState`） | — |
+| `GET /health` | （新規） | — | `out` 未生成時の getmtime → ファイル無ガード | 内部で握り潰し |
+| `GET /scoreboards/{n}` | `get_scoreboard` | ✕ | n 不正→`GetScoreboard()`=None→`None.scoreboardNumber` で **AttributeError** | `INVALID_ARGUMENT`（n 事前検証） |
+| `GET /scoreboards/{n}`(swap) | `get_swap` | ✕ | 同上（`None.teamsSwapped`） | `INVALID_ARGUMENT` |
+| `GET /games`他マスタ | `get_games`等 | 一部✓ | アセット未ロードで空。致命例外は低 | — |
+| `GET /sets` | `get_sets` | ✕ | provider null は **✓ガード済→[]**。ただし `provider.GetMatches()` は**同期 Start.gg 呼び**で例外/タイムアウト | `UPSTREAM_TIMEOUT`（要 try/except） |
+| `GET /sets/{id}` | `get_match` | ✕ | **provider null 未チェック→AttributeError**／`int(setId)` 失敗→ValueError／同期 Start.gg 呼び | `NOT_READY`/`INVALID_ARGUMENT`/`UPSTREAM_TIMEOUT` |
+| `POST .../score:adjust` | `team_scoreup/down` | ✕ | n/t 不正→`GetScoreboard()`=None→**AttributeError** | `INVALID_ARGUMENT` |
+| `POST .../teams/{t}/color` | `team_color` | ✕ | n/t 不正→None→AttributeError／色形式未検証 | `INVALID_ARGUMENT` |
+| `POST .../:swap-teams` | `swap_teams` | ✕ | n 不正→None→AttributeError | `INVALID_ARGUMENT` |
+| `POST .../score:reset` | `reset_scores` | ✓ | n 不正→None→AttributeError | `INVALID_ARGUMENT` |
+| `PATCH .../set` | `set_route` | ✓ | n 不正→None／`int(bestOf/players/characters)` 失敗→ValueError | `INVALID_ARGUMENT` |
+| `POST .../:clear` | `clear_all` | ✓ | n 不正→None→AttributeError | `INVALID_ARGUMENT`（+ confirm 検証） |
+| `POST .../:reset-players` | `reset_players` | ✓ | 同上 | `INVALID_ARGUMENT`/confirm |
+| `POST .../:reset-match` | `reset_match` | ✓ | 同上 | `INVALID_ARGUMENT`/confirm |
+| `POST .../:load-set` | `load_set` | ✓ | n 不正→None。set 非 str は `'0'` にフォールバック（既存） | `INVALID_ARGUMENT` |
+| `POST .../:pull-stream/:pull-user` | `pull_stream_set`/`pull_user_set` | ✕ | n 不正→None→AttributeError | `INVALID_ARGUMENT` |
+| `POST /tournament` | `load_tournament` | ✕ | url 検証は緩い（start.gg 以外でも Set される）／重い（非同期ロード） | 202 受付 |
+| `POST /game` | `set_game` | ✓ | 未知 codename→**文字列 `"Could not find game X"` を返す**（非構造）／**同期アセット再ロードでブロック** | `NOT_FOUND`／202 化要（§14.3） |
+| `POST /bracket:refresh` | `update_bracket` | ✓ | **`.provider` null 未チェック**／`GetTournamentPhases()[0]` **IndexError**／`.get("groups")[0]` 空で **TypeError/IndexError**／同期 Start.gg | `NOT_READY`/`UPSTREAM_TIMEOUT`（要堅牢化） |
+| `POST /ui/theme` | `set_light_mode` | ✓ | なし（値は coerce 済）。Settings+State 書き | — |
+
+**横断的な発見:**
+1. **最頻の失敗は `GetScoreboard(n)`=None 後の AttributeError**。→ `{1,2,3}` 事前検証（§2.12）で大半を予防できる。
+2. **`int()` パース**（bestOf/players/characters/setId/delta）は ValueError → API 層で型検証し `INVALID_ARGUMENT`。
+3. **`get_sets`/`get_match`/`update_bracket` は同期 Start.gg 呼び**。読み取りでも 20 秒級の遅延・例外があり得る
+   （agent-pitfalls #11）。→ 全て try/except で `UPSTREAM_TIMEOUT` に変換し、**読み取りでもタイムアウトしうる**旨を
+   クライアントに通知。将来はキャッシュ/非同期化を検討（§12）。
+4. **エラー文字列を返す Action**（`set_game`=`"Could not find game X"`、`load_player_from_tag`=`"ERROR"`、
+   `load_commentator_from_tag`=`"ERROR : ..."`）。初回スコープでは `set_game` のみ該当 → ラッパで判定し `NOT_FOUND` に。
+5. **`update_bracket` は堅牢性が低い**（複数の未ガード添字/属性アクセス）。202 化に加え、受付前の `NOT_READY` 判定と
+   全体 try/except を本 API 層で被せる。
+
+### 14.3 重い操作の 202 化メモ
+- `load_tournament`・（理想的には）`update_bracket` は内部でシグナル emit / worker 起動するため、
+  **API 層は「実行中フラグを立てて即 202」**で素直に実現できる。
+- **`set_game` は `@gui_thread_sync` で同期ブロック**するのが課題。202 にするには API 層から
+  **`@gui_thread_sync` を介さずに**起動する必要がある（例: `gui_thread_async` 系で投げっぱなしにする、
+  または `LoadGameAssets(..., async_mode=True)` 相当の非同期経路を使う）。
+  実装時に既存の非同期ロード経路（`AutonaGameAssetManager` の onLoad シグナル）を辿って確定する。
+- 実行中フラグは操作キー（`tournament`/`game`/`bracket`）ごとに持ち、`threading.Lock` で保護（§2.10）。
+
+### 14.4 CORS 判断
+- 既存は `CORS(app)`（flask_cors・全体適用）＋ `app.config['CORS_HEADERS']='Content-Type'`（[AutonaWebServer.py:47-56](../../src/AutonaWebServer.py)）。
+- flask_cors の既定は**全オリジン・全メソッド許可＋プリフライト自動処理**で、`allow_headers` も既定で要求ヘッダを反映する。
+  → **`PATCH` と `Idempotency-Key` は通る見込み**。`CORS_HEADERS` は `@cross_origin` 補助設定で制約にはならない。
+- リスク低。実機で 1 回だけ OPTIONS プリフライトを確認すれば足りる（自動テストは作らない方針）。
 </content>
