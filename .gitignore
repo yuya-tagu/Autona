@@ -81,3 +81,9 @@ venv/
 
 # Node modules
 web/node_modules/
+
+# Auto-updater download (large artifact, must never be committed)
+release-windows.zip
+
+# Vestigial data file from removed stage-strike feature (do not track)
+assets/rulesets.json
