@@ -53,6 +53,33 @@
 - [ ] セット選択 → 選手データが自動入力される
 - [ ] 自動更新が機能する（タイマー表示確認）
 
+## 外部制御 API（`/api/v1/`・実装時に確認）
+
+> 仕様: [design/external-control-api.md](design/external-control-api.md)。自動テストは作らず本節を手動でなぞる。
+> `python main.py` 起動後、curl 等で叩いて UI / `out/` / OBS / WS で反映を確認する。
+
+### リグレッション（既存を壊していないこと・最優先）
+
+- [ ] 既存 `/score`（POST）・`/scoreboard1-team1-scoreup` 等の旧ルートが従来通り動く
+- [ ] Web UI（`/scoreboard`・`/team`・`/web`）が表示され、双方向同期する
+- [ ] OBS ブラウザソース／`out/` 出力が従来通り更新される
+- [ ] デスクトップ UI・グローバルホットキーの操作が従来通り効く
+- [ ] Socket.IO の `program_state` / `program_state_update` 購読が従来通り届く
+
+### 新 API の動作
+
+- [ ] `GET /api/v1/state` がフル状態を `{"ok":true,"data":...}` で返す
+- [ ] `GET /api/v1/health` が `activeBoard` / `currentGame` / `revision` 等を返す
+- [ ] `POST /api/v1/scoreboards/1/teams/1/score:adjust {"delta":1}` でスコア +1 され、OBS/Web に反映
+- [ ] 同操作を `Idempotency-Key` 付きで再送しても二重加算しない
+- [ ] `POST /api/v1/scoreboards/1:clear`（confirm 無し）が 409 CONFIRMATION_REQUIRED で**状態を変えない**
+- [ ] `confirm:true` 付きで clear が実行される
+- [ ] 重い操作（`POST /api/v1/tournament` 等）が 202 で返り、完了が WS で観測でき、実行中の同種要求が 409
+- [ ] 範囲外 `{n}`（0 や 4）が 400 INVALID_ARGUMENT になる
+- [ ] board3 に board1/2 用操作（score:adjust 等）を投げると明示拒否される
+- [ ] 書き込み操作が操作ログ（INFO）に出る／読み取りは出ない
+- [ ] OBS 機・操作端末が**別 PC**でも LAN 内から `/api/v1/...` に到達できる（運用想定の確認）
+
 ---
 
 ## リファクタ後の追加確認

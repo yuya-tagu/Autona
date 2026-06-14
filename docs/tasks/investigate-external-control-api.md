@@ -126,20 +126,32 @@ External Control API / Companion / Stream Deck 連携の設計前提として、
 6. 操作ログ: **書き込み操作のみ INFO・専用ロガー**（A-1）/ idempotency: **Idempotency-Key 任意対応**（B-1）= D7
 7. X / Bluesky: 初回除外（将来 Revisit）
 
-### 次に作成すべき設計ドキュメント
-- `/api/v1/` の **I/F 仕様**（endpoint・payload・response・error コード）を Design.md or 専用 spec に起こす
-  （ベースは candidates §7）。
+### 設計ドキュメント（作成済・2026-06-15）
+- ✅ `/api/v1/` の **I/F 仕様**（endpoint・payload・response・error コード）を正本として作成:
+  [../../.claude/design/external-control-api.md](../../.claude/design/external-control-api.md)（計画/未実装・ADR-001 準拠）。
 
-### 次に作成すべき実装タスク（ADR 確定済・ベースは candidates §8）
+### コーディング着手前のスパイク（✅ 実施済・2026-06-15 / 結果は spec §14）
+[../../.claude/design/external-control-api.md](../../.claude/design/external-control-api.md) §14 に記録:
+- ✅ **取得経路確定**: `revision`=`StateManager.revision`/`GetFullState()`、`activeBoard`=`SettingsManager.Get("scoreboard.battle_format")` 写像、`outLastWriteUnix`=`out/program_state.json` の mtime（§14.1）。
+- ✅ **Action 失敗モード棚卸し表**（§14.2）。横断発見: ①最頻は `GetScoreboard(n)`=None 後の AttributeError（→ {1,2,3} 検証で予防）②`int()` パース→`INVALID_ARGUMENT` ③**`get_sets`/`get_match`/`update_bracket` は同期 Start.gg 呼びで読み取りでもタイムアウトあり** ④`set_game` は未知 codename を文字列で返す＋同期ブロック ⑤`update_bracket` は null/添字ガードが弱い。
+- ✅ **202 化メモ**（§14.3）: `set_game` の `@gui_thread_sync` 同期ブロックを避ける起動経路の確定が実装時の要点。
+- ✅ **CORS**（§14.4）: `PATCH`/`Idempotency-Key` は通る見込み・実機 1 回確認のみ。
+- ⏭ 残: `revision` の非同期 emit 系でのラグ（§14.1a・WS で確認する前提）、多重実行フラグ/冪等キャッシュの粒度（実装時）。
+
+### 次に作成すべき実装タスク（ADR 確定済・ベースは candidates §8 / spec）
 - `tasks/implement-external-control-api-readonly.md`:
-  `GET /api/v1/state` + `/health` + 既存 WS 差分購読の踏襲（読み取り層）。
+  `GET /api/v1/state` + `/health`（`activeBoard` 含む）+ 既存 WS 差分購読の踏襲（読み取り層）。
 - `tasks/implement-external-control-api-safe-ops.md`:
-  スコア±1 / swap / score:reset / set 情報設定（安全操作・既存 Actions の薄いラッパー、構造化レスポンス D8）。
+  スコア±1 / swap / score:reset / color / set 情報設定（安全操作・既存 Actions の薄いラッパー、構造化レスポンス D8）。
 - `tasks/implement-external-control-api-guarded-ops.md`:
-  危険操作（clear-all/reset-players/reset-match=confirm 必須、set-tournament/update-game/update-bracket=実行中フラグ 409、
-  load-set 系、set-light-mode）。**書き込み操作ログ（INFO）と Idempotency-Key 任意対応**を本チケットで実装（D7）。
+  破壊的操作（clear/reset 系=confirm 必須）、重い操作（tournament/game/bracket:refresh=**202 受付 + 実行中フラグ 409**）、
+  load-set 系、theme。**書き込み操作ログ（INFO）と Idempotency-Key 任意対応**を本チケットで実装（D7）。
 
-### 実装フェーズで確定する残課題
-- 重い操作の多重実行ガードが**既存コードに在るか**（無ければ新 API 層で実装）。
-- `set_team_data` の payload スキーマ（必須キー）。
+> テストは**自動テストを作らず、`manual-test-checklist.md`「外部制御 API」節を手動で**なぞる（PdM 決定）。
+
+### 実装フェーズで確定する残課題（spec §12 と重複）
+- `revision` / `activeBoard` / `outLastWriteUnix` の取得経路。
+- 多重実行フラグ・冪等キャッシュの粒度と Lock 設計。
+- `set_team_data` の payload スキーマ（必須キー・初回スコープ外）。
 - Companion / Stream Deck が求めるプロトコル（HTTP / WS）の最終確認。
+- CORS プリフライト（PATCH / Idempotency-Key ヘッダ）が既存設定で通るか。
