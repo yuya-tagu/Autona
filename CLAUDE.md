@@ -81,46 +81,31 @@ Edit / Write ツール実行後に以下のメッセージがハーネスから�
 - コミットメッセージ・PR 説明文は日本語
 - コミット・プッシュは明示的に依頼されたときのみ
 
-### 作業ディレクトリ（worktree 運用）
+### 作業ブランチ運用
 
-- **Claude Code の worktree 機能（`.claude/worktrees/*`）を使う**
-- ルートリポジトリ `C:\Users\ayuyt\Work\30_Products\Autona` は常に `main`
-  に揃えておく（作業用ブランチはチェックアウトしない）
-- 理由:
-  - ルートを `main` 固定にすることで、ユーザーがデバッグ（`python main.py` や
-    exe の実行）する際に必ず「リリース済みの最新コード」を触れる
-  - Claude の並行作業による意図しないファイル変更がルートへ波及しない
-  - PR 作業中でもルート側で既存機能を検証できる
-- ビルド成果物（`Autona.exe`、`web/build/`、`dist/` 等）は
-  ルート側で運用する。worktree 内のビルド成果物は参考程度に留める
+- ブランチ管理は GitHub で行う。**ローカルでは git worktree を使わない**
+- 現在の通常の作業ツリー上で作業用ブランチを切って作業する
+- `main` への直接コミット・push は禁止。必ず作業用ブランチ → PR 経由でマージ
+- ブランチ命名は内容を表す短い英語（例: `feature/bracket-fix`、`docs/operational-docs-foundation`、`fix/thumbnail-perf`）。timestamp や連番は不要（`git log --all` / `gh pr list` で時系列は追える）
+- ビルド成果物（`Autona.exe`、`web/build/`、`dist/` 等）はこの作業ツリーで運用する
 
-#### 王道フロー（Claude Code 標準機能に任せる）
+#### 王道フロー
 
-1. **作成**: ルートから `claude --worktree <name>` で起動する。
-   - `.claude/worktrees/<name>/` が作成され、ブランチ
-     `worktree-<name>` が `origin/HEAD` から切られる
-   - `<name>` は内容を表す短い英語（例: `bracket-fix`, `thumbnail-perf`）。
-     timestamp や連番は不要（`git log --all` / `gh pr list` で時系列は追える）
-2. **作業**: 通常通り編集・コミット・push する。ブランチ名はそのまま
-   `worktree-<name>` で良い（PR 作成時にリネームしない）
-3. **PR**: `gh pr create` でタイトルと本文を日本語で付ける。
-   ブランチ名は検索のノイズにならないよう適度に短ければ何でも OK
-4. **マージ後の掃除**: セッションを終了すれば Claude が自動判定する
-   - 変更が全て push/マージ済 → worktree・ローカルブランチを自動削除
-   - 未コミット変更や未 push コミットあり → 保持／削除を対話で選択
-5. **手動 cleanup は原則不要**。`git worktree remove` / `git branch -D` は
-   Claude が自動 cleanup できない特殊ケース（別プロセスが worktree 内の
-   ファイルを掴んでいる等）にだけ使う
+1. **最新化**: `git checkout main && git pull` で `main` を最新にする
+2. **作成**: `git checkout -b <branch>` で作業用ブランチを切る
+3. **作業**: 通常通り編集・コミットする（メッセージは日本語）
+4. **PR**: push → PR 作成（タイトル・本文は日本語）。コミット・push・PR は
+   明示的に依頼されたときのみ行う（PR 作成本体の実行可否はユーザー設定に従う）
+5. **マージ後の掃除**: `git checkout main && git pull` で取り込み、
+   `git branch -d <branch>` でローカルブランチを削除（必要なら `git fetch --prune`）
 
-#### 特殊ケース
+#### 注意
 
-- **ブランチ名を変えたい**: PR 作成前であれば `git branch -m` で自由に
-  変えて良い。ただし変えた瞬間から Claude の自動 cleanup 対象から外れる
-  （マージ済みかどうかを Claude が追跡できなくなるため）ので、
-  変えたら `git worktree remove` / `git branch -D` を自分で叩く前提で
-- **既に worktree 内にいる**: その worktree 内で作業を継続して差し支えない
-- **orphan worktree の掃除**: 何かの事故で worktree/ブランチが残った場合は
-  ルートで `git worktree prune` → `git fetch --prune` → `git branch -D` の順
+- 作業中は作業ツリーが作業用ブランチに切り替わっている。デバッグで
+  「リリース済みの最新コード」を触りたい場合は、別途 `main` をチェックアウトするか
+  ビルド済み `Autona.exe` を使う
+- 1 つの作業ツリーで作業するため、ブランチ切替前に未コミット変更を残さない
+  （`git status` で確認 → コミットまたは `git stash`）
 
 ### コミット・push の実務（このマシン固有）
 
@@ -154,9 +139,8 @@ gh auth switch --user yuyat-highfield   # 元のアクティブアカウント�
 
 Bash ツールは PowerShell ではなく bash で動く。`@'...'@`（PowerShell
 here-string）を使うとメッセージ先頭に `@` が混入するなど壊れる。複数行は
-heredoc を使うか、メッセージをファイルに書いて `git commit -F <file>` で
-渡す（worktree の `.git` はファイルなので一時ファイルは worktree 直下に
-置き、コミット後に削除する）。
+heredoc（`git commit -F - <<'EOF' ... EOF`）を使うか、メッセージをファイルに
+書いて `git commit -F <file>` で渡し、コミット後に一時ファイルを削除する。
 
 ---
 
@@ -268,6 +252,32 @@ root
   - UI / StateManager / React Web UI / OBS layout / 画像生成 / ホットキーに関する実装判断では、まず本書を参照する。
   - 実装と本書が乖離する場合は、本書を優先し、差分は `.claude/plans/ui-design-refactor.md` または Design.md §8 リファクタ移行プランにタスク化する。
   - `.claude/architecture/phase-a-b/` 配下の Phase A/B 調査ファイル群は、本書の根拠資料として扱う（矛盾時は Design.md を優先）。
+
+---
+
+## 運用・変更管理ドキュメント（`docs/`）
+
+`.claude/` が「開発運用・実装仕様の正本」を担うのに対し、`docs/` は
+**運用・変更管理の視点**（既存仕様・運用制約・変更影響・調査/実装タスク）を蓄積する。
+Companion / Stream Deck 連携・外部制御 API・OBS 連携拡張などの今後の変更を、
+既存運用を壊さずに進めるための情報源。調査・設計と実装を分担しても引き継げるよう、
+タスクの種類に応じて担当・実施環境を割り当てる前提で運用する。
+
+| ディレクトリ | 役割 |
+|-------------|------|
+| `docs/product/` | 既存機能・画面・ユーザー操作・利用シナリオ・リグレッション禁止リスト |
+| `docs/architecture/` | 現アーキ・主要モジュール・責務分離・データ/状態の流れ・外部連携（変更影響を判断できる粒度） |
+| `docs/operations/` | 実運用手順・起動順・障害/復旧・壊してはいけない操作 |
+| `docs/decisions/` | ADR 形式の意思決定ログ（なぜその設計/制約か・不採用案・見直し条件） |
+| `docs/changes/` | 変更提案ごとの影響範囲・互換性・移行方針・リリース注意点 |
+| `docs/tasks/` | 担当者に渡す自己完結した調査タスク・実装チケット |
+
+**`.claude/` との使い分け:**
+- 実装仕様の「あるべき姿」は `.claude/design/Design.md`（正本）。`docs/` はそれを参照し、
+  運用・変更時の注意点を書く（実装仕様を二重管理しない）。
+- 矛盾時の優先順位は **コードの実態 > `.claude/design/Design.md` > `CLAUDE.md` > その他 Markdown**。
+- 確認できない既存仕様は推測で書かず `TBD` とし、確認方法を併記する。
+- 入口は [docs/README.md](docs/README.md)。`docs/` を増減した場合はこの目次も最新化する。
 
 ---
 
