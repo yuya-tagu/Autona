@@ -128,6 +128,7 @@ def catchtime(msg = ''):
 # autopep8: off
 from .Settings.AutonaSettingsWindow import AutonaSettingsWindow
 from .AutonaApiInfoWindow import AutonaApiInfoWindow
+from .AutonaIntegrationGuideWindow import AutonaIntegrationGuideWindow
 from .LayoutOptions.AutonaLayoutOptionsWindow import AutonaLayoutOptionsWindow
 from .AutonaHotkeys import AutonaHotkeys
 from .AutonaPlayerListWidget import AutonaPlayerListWidget
@@ -728,6 +729,14 @@ class Window(QMainWindow):
             QApplication.translate("api", "Open reference & tester"))
         action.triggered.connect(lambda: self.apiInfoWindow.show())
 
+        # Connection guide for Bitfocus Companion (which also covers Stream
+        # Deck). Built lazily in UiMounted below.
+        apiMenu.addSeparator()
+        self.companionGuideWindow = AutonaIntegrationGuideWindow(self)
+        action = apiMenu.addAction(
+            QApplication.translate("api", "Companion settings"))
+        action.triggered.connect(lambda: self.companionGuideWindow.show())
+
         # Create all boards (1v1 + team + crew) into the SCORE dock, then apply
         # the persisted battle format so the right board + result layout are
         # shown on startup. The "Rules" menu switches between them at runtime.
@@ -773,6 +782,7 @@ class Window(QMainWindow):
         AutonaCountryHelper.LoadCountries()
         self.settingsWindow.UiMounted()
         self.apiInfoWindow.UiMounted()
+        self.companionGuideWindow.UiMounted()
         # self.layoutOptions.UiMounted()
         AutonaTournamentDataProvider.instance.UiMounted()
         AutonaGameAssetManager.instance.UiMounted()
