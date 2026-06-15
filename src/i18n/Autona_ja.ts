@@ -3139,5 +3139,125 @@ p, li { white-space: pre-wrap; }
         <source>Copied icon</source>
         <translation>アイコンをコピーしました</translation>
     </message>
+    <message>
+        <source>OBS / Advanced Scene Switcher</source>
+        <translation>OBS / Advanced Scene Switcher</translation>
+    </message>
+    <message>
+        <source>Set up integration between OBS Studio's Advanced Scene Switcher plugin and Autona.</source>
+        <translation>OBS Studio の Advanced Scene Switcherプラグインと Autona を連携する設定</translation>
+    </message>
+    <message>
+        <source>Output folder</source>
+        <translation>出力フォルダ</translation>
+    </message>
+    <message>
+        <source>OBS must run on this PC, or on the same LAN.</source>
+        <translation>OBS は本 PC 上、または同じ LAN 上で動作している必要があります。</translation>
+    </message>
+    <message>
+        <source>In OBS, open Tools -> Advanced Scene Switcher -> Macros and add a macro.</source>
+        <translation>OBS のツール → Advanced Scene Switcher → Macros を開き、マクロを追加します。</translation>
+    </message>
+    <message>
+        <source>Add a trigger (e.g. Hotkey, Scene, or WebSocket message).</source>
+        <translation>発火タイミングを追加します（例: Hotkey・Scene・WebSocket メッセージ）。</translation>
+    </message>
+    <message>
+        <source>Add an action -> Run: set the program to curl.exe (bundled with Windows), then paste everything after "curl" from the table below as the arguments.</source>
+        <translation>アクション → Run を追加し、プログラムに curl.exe（Windows 標準）を指定して、下表のコマンドの「curl」より後ろをすべて引数に貼り付けます。</translation>
+    </message>
+    <message>
+        <source>Use Run (not the HTTP action): the HTTP action discards the response and cannot set a Content-Type header, which a JSON API needs.</source>
+        <translation>HTTP アクションではなく Run を使用すること。HTTP アクションは応答を破棄し、JSON API に必要な Content-Type ヘッダーを設定できません。</translation>
+    </message>
+    <message>
+        <source>Save and trigger the condition to test.</source>
+        <translation>保存し、条件を発火させて動作確認します。</translation>
+    </message>
+    <message>
+        <source>Control Autona from Advanced Scene Switcher</source>
+        <translation>Advanced Scene Switcher から Autona を操作</translation>
+    </message>
+    <message>
+        <source>Command</source>
+        <translation>コマンド</translation>
+    </message>
+    <message>
+        <source>Copy command</source>
+        <translation>コマンドをコピー</translation>
+    </message>
+    <message>
+        <source>Destructive operations (clear / reset) require "confirm": true in the JSON body. See the reference window for the full catalogue.</source>
+        <translation>破壊的操作（clear / reset）は JSON ボディに "confirm": true が必要です。全一覧はリファレンス窓を参照してください。</translation>
+    </message>
+    <message>
+        <source>Add a condition -> File, then browse to one of the files below (use Copy file path to get the absolute path).</source>
+        <translation>条件 → File を追加し、下表のいずれかのファイルを指定します（「ファイルパスをコピー」で絶対パスを取得）。</translation>
+    </message>
+    <message>
+        <source>Choose the match mode: exact content / regex for a *.txt value, or "File was modified" on program_state.json to react to any change.</source>
+        <translation>マッチ方法を選びます: *.txt の値には完全一致/正規表現、program_state.json には「File was modified」を使うと任意の変更に反応します。</translation>
+    </message>
+    <message>
+        <source>Add an action -> Switch scene and pick the target scene.</source>
+        <translation>アクション → Switch scene を追加し、切り替え先のシーンを選びます。</translation>
+    </message>
+    <message>
+        <source>Keep text export enabled (Settings: general.disable_export must be off).</source>
+        <translation>テキスト書き出しを有効のままにすること（設定の general.disable_export を OFF）</translation>
+    </message>
+    <message>
+        <source>Trigger OBS from Autona state</source>
+        <translation>Autona の状態で OBS を発火</translation>
+    </message>
+    <message>
+        <source>Watch file</source>
+        <translation>監視ファイル</translation>
+    </message>
+    <message>
+        <source>Contains</source>
+        <translation>内容</translation>
+    </message>
+    <message>
+        <source>Copy file path</source>
+        <translation>ファイルパスをコピー</translation>
+    </message>
+    <message>
+        <source>*.txt files hold the raw value (easy to match). program_state.json carries revision/timestamp, so watch it for "file modified" to react to any state change.</source>
+        <translation>*.txt はそのままの値を保持します（一致判定が簡単）。program_state.json は revision/timestamp を含むため、「file modified」で監視するとあらゆる状態変化に反応できます。</translation>
+    </message>
+    <message>
+        <source>Full state (JSON, has revision/timestamp)</source>
+        <translation>全状態（JSON、revision/timestamp 付き）</translation>
+    </message>
+    <message>
+        <source>Board 1 / Team 1 score</source>
+        <translation>ボード1 / チーム1 スコア</translation>
+    </message>
+    <message>
+        <source>Board 1 / Team 2 score</source>
+        <translation>ボード1 / チーム2 スコア</translation>
+    </message>
+    <message>
+        <source>Board 1 / Team 1 / Player 1 tag</source>
+        <translation>ボード1 / チーム1 / P1 タグ</translation>
+    </message>
+    <message>
+        <source>Board 1 / Team 2 / Player 1 tag</source>
+        <translation>ボード1 / チーム2 / P1 タグ</translation>
+    </message>
+    <message>
+        <source>Match label (e.g. Winners Finals)</source>
+        <translation>マッチ名（例: Winners Finals）</translation>
+    </message>
+    <message>
+        <source>Phase label (e.g. Top 8)</source>
+        <translation>フェーズ名（例: Top 8）</translation>
+    </message>
+    <message>
+        <source>Best-of value</source>
+        <translation>Best of の値</translation>
+    </message>
 </context>
 </TS>

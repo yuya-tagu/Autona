@@ -129,6 +129,7 @@ def catchtime(msg = ''):
 from .Settings.AutonaSettingsWindow import AutonaSettingsWindow
 from .AutonaApiInfoWindow import AutonaApiInfoWindow
 from .AutonaIntegrationGuideWindow import AutonaIntegrationGuideWindow
+from .AutonaObsGuideWindow import AutonaObsGuideWindow
 from .LayoutOptions.AutonaLayoutOptionsWindow import AutonaLayoutOptionsWindow
 from .AutonaHotkeys import AutonaHotkeys
 from .AutonaPlayerListWidget import AutonaPlayerListWidget
@@ -737,6 +738,14 @@ class Window(QMainWindow):
             QApplication.translate("api", "Companion settings"))
         action.triggered.connect(lambda: self.companionGuideWindow.show())
 
+        # Connection guide for OBS Studio + Advanced Scene Switcher (ASS):
+        # (B) ASS drives /api/v1/ via curl, (D) ASS watches out/ files. Built
+        # lazily in UiMounted below.
+        self.obsGuideWindow = AutonaObsGuideWindow(self)
+        action = apiMenu.addAction(
+            QApplication.translate("api", "OBS / Advanced Scene Switcher"))
+        action.triggered.connect(lambda: self.obsGuideWindow.show())
+
         # Create all boards (1v1 + team + crew) into the SCORE dock, then apply
         # the persisted battle format so the right board + result layout are
         # shown on startup. The "Rules" menu switches between them at runtime.
@@ -783,6 +792,7 @@ class Window(QMainWindow):
         self.settingsWindow.UiMounted()
         self.apiInfoWindow.UiMounted()
         self.companionGuideWindow.UiMounted()
+        self.obsGuideWindow.UiMounted()
         # self.layoutOptions.UiMounted()
         AutonaTournamentDataProvider.instance.UiMounted()
         AutonaGameAssetManager.instance.UiMounted()
