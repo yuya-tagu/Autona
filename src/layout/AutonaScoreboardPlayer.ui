@@ -71,40 +71,41 @@
    </item>
    <item row="1" column="2">
     <layout class="QHBoxLayout" name="teamRow">
+     <!-- SPONSOR / NAME labels removed; the sponsor (team) and gamerTag
+          (name) fields now share a single row, mirroring the TEAM board's
+          AutonaTeamPlayer.ui. Sponsor is right-aligned + content-sized so
+          it hugs the gamerTag: "[Sponsor] GamerTag". seedDisplay stays at
+          the row's trailing edge. -->
      <item>
-      <widget class="QLabel" name="teamLabel">
+      <widget class="QLineEdit" name="team">
        <property name="sizePolicy">
-        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+        <sizepolicy hsizetype="Maximum" vsizetype="Fixed">
          <horstretch>0</horstretch>
          <verstretch>0</verstretch>
         </sizepolicy>
        </property>
-       <property name="maximumSize">
-        <size>
-         <width>70</width>
-         <height>16777215</height>
-        </size>
-       </property>
        <property name="font">
         <font>
-         <pointsize>8</pointsize>
-         <bold>true</bold>
+         <pointsize>9</pointsize>
         </font>
        </property>
-       <property name="text">
-        <string>SPONSOR</string>
+       <property name="alignment">
+        <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+       </property>
+       <property name="placeholderText">
+        <string>Sponsor</string>
        </property>
       </widget>
      </item>
      <item>
-      <widget class="QLineEdit" name="team">
+      <widget class="QLineEdit" name="name">
        <property name="font">
         <font>
          <pointsize>9</pointsize>
         </font>
        </property>
        <property name="placeholderText">
-        <string>Sponsor</string>
+        <string>GamerTag</string>
        </property>
       </widget>
      </item>
@@ -131,47 +132,6 @@
        <!-- styleSheet removed; AutonaScoreboardPlayerWidget applies a
             theme-aware muted color in __init__ / refresh_theme_styles
             (Design.md §5.4). -->
-      </widget>
-     </item>
-    </layout>
-   </item>
-   <item row="2" column="2">
-    <layout class="QHBoxLayout" name="nameRow">
-     <item>
-      <widget class="QLabel" name="nameLabel">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="maximumSize">
-        <size>
-         <width>70</width>
-         <height>16777215</height>
-        </size>
-       </property>
-       <property name="font">
-        <font>
-         <pointsize>8</pointsize>
-         <bold>true</bold>
-        </font>
-       </property>
-       <property name="text">
-        <string>NAME</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QLineEdit" name="name">
-       <property name="font">
-        <font>
-         <pointsize>9</pointsize>
-        </font>
-       </property>
-       <property name="placeholderText">
-        <string>GamerTag</string>
-       </property>
       </widget>
      </item>
     </layout>

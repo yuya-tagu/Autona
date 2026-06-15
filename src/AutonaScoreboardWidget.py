@@ -189,17 +189,18 @@ class AutonaScoreboardWidget(QWidget):
             self.thumbnailBtn.clicked.connect(self.GenerateThumbnail)
             self.thumbnailBtn.setVisible(False)
 
+        # X-post and browser-preview buttons are created here but placed in
+        # the scoreboard section's title row (see _groupSectionsIntoFrames)
+        # so they sit at the top-right of the scoreboard itself, not the
+        # match-info ("対戦情報") section.
         self.xpostBtn = QPushButton(
             QApplication.translate("app", "Xに投稿する") + " ")
         # Match the primary-action (accent-orange) styling used by dialog
         # OK buttons etc., so this stands out as the confirming action.
         self.xpostBtn.setObjectName("primary")
         self.xpostBtn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-        topOptions.layout().addWidget(self.xpostBtn)
         self.xpostBtn.clicked.connect(self.PostToX)
 
-        # Browser-preview button lives directly to the right of "Post to X"
-        # so all row-ending utility buttons stay grouped.
         # board 1 (SCORE/1v1) → /scoreboard, board 2 (TEAM) → /team. Both
         # render from the same React page parameterized by scoreboardNumber.
         webScoreboardPath = "team" if self.scoreboardNumber == 2 else "scoreboard"
@@ -208,7 +209,6 @@ class AutonaScoreboardWidget(QWidget):
         self.btOpenWebScoreboard.setObjectName("primary")
         self.btOpenWebScoreboard.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         self.btOpenWebScoreboard.clicked.connect(lambda: webbrowser.open(self.webScoreboardUrl))
-        topOptions.layout().addWidget(self.btOpenWebScoreboard)
 
         self.eyeBt = QToolButton()
         self.eyeBt.setIcon(QIcon(UI.icon_path('eye.svg')))
@@ -228,8 +228,8 @@ class AutonaScoreboardWidget(QWidget):
         # fresh install; the other fields stay off until the user enables
         # them from the eye menu.
         self.elements = [
-            [QApplication.translate("app", "Sponsor"),                ["team", "teamLabel"],                              "show_sponsor",    True],
-            [QApplication.translate("app", "Player Name"),            ["name", "nameLabel"],                              "show_name",       True],
+            [QApplication.translate("app", "Sponsor"),                ["team"],                                           "show_sponsor",    True],
+            [QApplication.translate("app", "Player Name"),            ["name"],                                           "show_name",       True],
             [QApplication.translate("app", "Seed"),                   ["seedDisplay"],                                    "show_seed",       True],
             [QApplication.translate("app", "Characters"),             ["characters"],                                     "show_characters", True],
             [QApplication.translate("app", "Twitter"),                ["twitter", "twitterLabel"],                        "show_social",     False],
@@ -881,9 +881,9 @@ class AutonaScoreboardWidget(QWidget):
         topLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.topSectionFrame.setLayout(topLayout)
 
-        # Title sits at the left of topOptions (which already holds the
-        # X-post / Web-preview buttons on the right via addStretch), so
-        # label and action buttons share a single row.
+        # "対戦情報" title for the match-info (Start.gg-load / stream) frame.
+        # The X-post / browser buttons that used to live in this row have
+        # moved to the scoreboard section's title row below.
         self.topSectionTitle = QLabel(QApplication.translate("app", "対戦情報"))
         self.topSectionTitle.setStyleSheet(self._sectionTitleStyle())
         topOptions.layout().insertWidget(0, self.topSectionTitle)
@@ -906,8 +906,9 @@ class AutonaScoreboardWidget(QWidget):
         matchLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.matchSectionFrame.setLayout(matchLayout)
 
-        # Title + eye-toggle share a single row at the top of the match
-        # section: title on the left, toggle button on the right.
+        # Title + action buttons + eye-toggle share a single row at the top
+        # of the scoreboard section: title on the left; X-post / browser /
+        # visibility-toggle buttons grouped at the top-right.
         titleRow = QWidget()
         titleRowLayout = QHBoxLayout()
         titleRowLayout.setContentsMargins(0, 0, 0, 0)
@@ -919,6 +920,8 @@ class AutonaScoreboardWidget(QWidget):
         self.matchSectionTitle.setStyleSheet(self._sectionTitleStyle())
         titleRowLayout.addWidget(self.matchSectionTitle)
         titleRowLayout.addStretch(1)
+        titleRowLayout.addWidget(self.xpostBtn)
+        titleRowLayout.addWidget(self.btOpenWebScoreboard)
         titleRowLayout.addWidget(self.eyeBt)
         matchLayout.addWidget(titleRow)
 
@@ -942,8 +945,9 @@ class AutonaScoreboardWidget(QWidget):
         matchLayout.addWidget(self.columns)
         matchLayout.addWidget(bottomOptions)
 
-        inner.addWidget(self.topSectionFrame)
+        # Scoreboard section on top, match-info ("対戦情報") section below it.
         inner.addWidget(self.matchSectionFrame)
+        inner.addWidget(self.topSectionFrame)
         inner.addStretch(1)
         # Match the EVENT tab's gap between group-box sections so the
         # SCORE tab's framed groups read with similar visual rhythm.
