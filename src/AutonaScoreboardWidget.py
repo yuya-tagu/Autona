@@ -1,6 +1,5 @@
 import math
 import platform
-import socket
 import subprocess
 import urllib.parse
 import webbrowser
@@ -14,6 +13,7 @@ from src.AutonaColorButton import AutonaColorButton
 from .Helpers.AutonaDirHelper import AutonaResolve
 from .Helpers.AutonaVersionHelper import add_beta_label
 from .Helpers.AutonaBskyHelper import post_to_bsky
+from .Helpers.AutonaNetworkHelper import GetLocalIP
 
 from . import ui_constants as UI
 from . import ui_layout as L
@@ -204,7 +204,7 @@ class AutonaScoreboardWidget(QWidget):
         # board 1 (SCORE/1v1) → /scoreboard, board 2 (TEAM) → /team. Both
         # render from the same React page parameterized by scoreboardNumber.
         webScoreboardPath = "team" if self.scoreboardNumber == 2 else "scoreboard"
-        self.webScoreboardUrl = f"http://{self.GetIP()}:{SettingsManager.Get('general.webserver_port', 5000)}/{webScoreboardPath}"
+        self.webScoreboardUrl = f"http://{GetLocalIP()}:{SettingsManager.Get('general.webserver_port', 5000)}/{webScoreboardPath}"
         self.btOpenWebScoreboard = QPushButton("ブラウザ版を開く")
         self.btOpenWebScoreboard.setObjectName("primary")
         self.btOpenWebScoreboard.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
@@ -1919,15 +1919,4 @@ class AutonaScoreboardWidget(QWidget):
         except Exception:
             pass
 
-    def GetIP(self):
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            # doesn't even have to be reachable
-            s.connect(('10.255.255.255', 1))
-            IP = s.getsockname()[0]
-        except Exception:
-            IP = '127.0.0.1'
-        finally:
-            s.close()
-        return IP
     pass

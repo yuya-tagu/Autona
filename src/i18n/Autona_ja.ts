@@ -932,6 +932,10 @@ p, li { white-space: pre-wrap; }
         <translation>ゲームタイトル</translation>
     </message>
     <message>
+        <source>API Settings</source>
+        <translation>API設定</translation>
+    </message>
+    <message>
         <location filename="../AutonaThumbnailSettingsWidget.py" line="78"/>
         <location filename="../Autona.py" line="398"/>
         <source>Thumbnail Settings</source>
@@ -2783,6 +2787,261 @@ p, li { white-space: pre-wrap; }
 {0}</source>
         <translation>更新の確認に失敗しました:
 {0}</translation>
+    </message>
+</context>
+<context>
+    <name>api</name>
+    <message>
+        <source>Open reference &amp; tester</source>
+        <translation>リファレンス・テスターを開く</translation>
+    </message>
+    <message>
+        <source>Reference</source>
+        <translation>リファレンス</translation>
+    </message>
+    <message>
+        <source>Tester</source>
+        <translation>テスター</translation>
+    </message>
+    <message>
+        <source>Connection</source>
+        <translation>接続情報</translation>
+    </message>
+    <message>
+        <source>Base URL</source>
+        <translation>ベースURL</translation>
+    </message>
+    <message>
+        <source>Copy</source>
+        <translation>コピー</translation>
+    </message>
+    <message>
+        <source>Refresh</source>
+        <translation>再取得</translation>
+    </message>
+    <message>
+        <source>Open settings</source>
+        <translation>設定を開く</translation>
+    </message>
+    <message>
+        <source>Port</source>
+        <translation>ポート</translation>
+    </message>
+    <message>
+        <source>No authentication. Anyone on the LAN can call every operation, including destructive ones.</source>
+        <translation>認証なし。LAN内の誰でも破壊的操作を含む全操作を実行できます。</translation>
+    </message>
+    <message>
+        <source>Method</source>
+        <translation>メソッド</translation>
+    </message>
+    <message>
+        <source>Path</source>
+        <translation>パス</translation>
+    </message>
+    <message>
+        <source>Description</source>
+        <translation>説明</translation>
+    </message>
+    <message>
+        <source>Confirm</source>
+        <translation>確認</translation>
+    </message>
+    <message>
+        <source>Logged</source>
+        <translation>ログ</translation>
+    </message>
+    <message>
+        <source>Copy curl</source>
+        <translation>curlをコピー</translation>
+    </message>
+    <message>
+        <source>Load into tester</source>
+        <translation>テスターに読み込む</translation>
+    </message>
+    <message>
+        <source>Envelope &amp; error codes</source>
+        <translation>レスポンス形式・エラーコード</translation>
+    </message>
+    <message>
+        <source>Success</source>
+        <translation>成功</translation>
+    </message>
+    <message>
+        <source>Error</source>
+        <translation>失敗</translation>
+    </message>
+    <message>
+        <source>Preset</source>
+        <translation>プリセット</translation>
+    </message>
+    <message>
+        <source>optional</source>
+        <translation>任意</translation>
+    </message>
+    <message>
+        <source>Body (JSON)</source>
+        <translation>ボディ (JSON)</translation>
+    </message>
+    <message>
+        <source>Send</source>
+        <translation>送信</translation>
+    </message>
+    <message>
+        <source>Response</source>
+        <translation>応答</translation>
+    </message>
+    <message>
+        <source>This is a destructive operation. Send it?</source>
+        <translation>破壊的な操作です。送信しますか？</translation>
+    </message>
+    <message>
+        <source>Invalid JSON body</source>
+        <translation>不正なJSONボディ</translation>
+    </message>
+    <message>
+        <source>Sending…</source>
+        <translation>送信中…</translation>
+    </message>
+    <message>
+        <source>Request failed</source>
+        <translation>リクエストに失敗しました</translation>
+    </message>
+    <message>
+        <source>Full state + revision</source>
+        <translation>全状態 + revision</translation>
+    </message>
+    <message>
+        <source>Liveness / version / activeBoard</source>
+        <translation>死活・version・activeBoard</translation>
+    </message>
+    <message>
+        <source>Scoreboard n state (incl. swapped)</source>
+        <translation>ボードnの状態（swapped含む）</translation>
+    </message>
+    <message>
+        <source>Game list</source>
+        <translation>ゲーム一覧</translation>
+    </message>
+    <message>
+        <source>Current game</source>
+        <translation>現在のゲーム</translation>
+    </message>
+    <message>
+        <source>Match / phase name candidates</source>
+        <translation>match/phase名候補</translation>
+    </message>
+    <message>
+        <source>Character list</source>
+        <translation>キャラ一覧</translation>
+    </message>
+    <message>
+        <source>Variant list</source>
+        <translation>バリアント一覧</translation>
+    </message>
+    <message>
+        <source>Controller list</source>
+        <translation>コントローラ一覧</translation>
+    </message>
+    <message>
+        <source>Set list (synchronous start.gg call)</source>
+        <translation>試合一覧（start.gg同期呼び）</translation>
+    </message>
+    <message>
+        <source>Set detail (synchronous start.gg call)</source>
+        <translation>セット詳細（start.gg同期呼び）</translation>
+    </message>
+    <message>
+        <source>Commentary state</source>
+        <translation>実況者状態</translation>
+    </message>
+    <message>
+        <source>Adjust score by delta</source>
+        <translation>スコアをdelta加算</translation>
+    </message>
+    <message>
+        <source>Reset scores</source>
+        <translation>スコアをリセット</translation>
+    </message>
+    <message>
+        <source>Swap teams</source>
+        <translation>チーム入替</translation>
+    </message>
+    <message>
+        <source>Set team color</source>
+        <translation>チームカラー設定</translation>
+    </message>
+    <message>
+        <source>Patch set info (partial)</source>
+        <translation>セット情報を部分更新</translation>
+    </message>
+    <message>
+        <source>Clear board (confirm required)</source>
+        <translation>ボードをクリア（confirm必須）</translation>
+    </message>
+    <message>
+        <source>Reset players (confirm required)</source>
+        <translation>選手をリセット（confirm必須）</translation>
+    </message>
+    <message>
+        <source>Reset match (confirm required)</source>
+        <translation>試合をリセット（confirm必須）</translation>
+    </message>
+    <message>
+        <source>Load a set onto the board</source>
+        <translation>セットを盤面にロード</translation>
+    </message>
+    <message>
+        <source>Pull current stream set</source>
+        <translation>配信中セットを取得</translation>
+    </message>
+    <message>
+        <source>Pull tracked user's set</source>
+        <translation>追跡ユーザーのセットを取得</translation>
+    </message>
+    <message>
+        <source>Load tournament (202, async)</source>
+        <translation>大会をロード（202・非同期）</translation>
+    </message>
+    <message>
+        <source>Set game (202, async)</source>
+        <translation>ゲームを設定（202・非同期）</translation>
+    </message>
+    <message>
+        <source>Refresh bracket (202, async)</source>
+        <translation>ブラケット更新（202・非同期）</translation>
+    </message>
+    <message>
+        <source>Set light/dark theme</source>
+        <translation>ライト/ダークテーマ切替</translation>
+    </message>
+    <message>
+        <source>Bad parameter</source>
+        <translation>不正なパラメータ</translation>
+    </message>
+    <message>
+        <source>Unknown resource</source>
+        <translation>存在しないリソース</translation>
+    </message>
+    <message>
+        <source>Missing confirm:true</source>
+        <translation>confirm:true が未指定</translation>
+    </message>
+    <message>
+        <source>Heavy operation already running</source>
+        <translation>重い操作が実行中</translation>
+    </message>
+    <message>
+        <source>Precondition unmet</source>
+        <translation>前提条件が未充足</translation>
+    </message>
+    <message>
+        <source>Upstream (start.gg) timed out</source>
+        <translation>外部依存（start.gg）がタイムアウト</translation>
+    </message>
+    <message>
+        <source>Unexpected internal error</source>
+        <translation>想定外の内部エラー</translation>
     </message>
 </context>
 </TS>
