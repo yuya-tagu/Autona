@@ -76,6 +76,9 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
 - **OBS-websocket は使わない方針**（ROADMAP で検討外と明記）📄
 - 連携は (1) ブラウザソースで `layout/`（Git サブモジュール）の HTML を表示、(2) `out/` のテキスト/JSON をソース参照 📄
 - 将来「シーン切替」を入れる場合も OBS 側の汎用 HTTP→scene プラグイン経由を想定（ROADMAP Tier5）📄
+- ⚠️ **2026-06-15: この方針は見直し検討中**。OBS Studio（obs-websocket v5）+ Advanced Scene Switcher を
+  操作 API として採用する調査を [obs-scene-switcher-control.md](obs-scene-switcher-control.md) に整理した。
+  採否・境界は ADR で確定する（同書 §6）。確定までは上記が現行方針。
 
 ## 外部依存（連携追加で関わるもの）
 
