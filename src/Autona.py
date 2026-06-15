@@ -127,6 +127,7 @@ def catchtime(msg = ''):
 
 # autopep8: off
 from .Settings.AutonaSettingsWindow import AutonaSettingsWindow
+from .AutonaApiInfoWindow import AutonaApiInfoWindow
 from .LayoutOptions.AutonaLayoutOptionsWindow import AutonaLayoutOptionsWindow
 from .AutonaHotkeys import AutonaHotkeys
 from .AutonaPlayerListWidget import AutonaPlayerListWidget
@@ -718,6 +719,15 @@ class Window(QMainWindow):
         AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
             lambda x=None: self.moddedContentCheck.setChecked(False))
 
+        # ── API Settings menu ──
+        # Entry point for the External Control API (/api/v1/) reference +
+        # tester window. The window itself is built lazily in UiMounted below.
+        self.apiInfoWindow = AutonaApiInfoWindow(self)
+        apiMenu = mb.addMenu(QApplication.translate("app", "API Settings"))
+        action = apiMenu.addAction(
+            QApplication.translate("api", "Open reference & tester"))
+        action.triggered.connect(lambda: self.apiInfoWindow.show())
+
         # Create all boards (1v1 + team + crew) into the SCORE dock, then apply
         # the persisted battle format so the right board + result layout are
         # shown on startup. The "Rules" menu switches between them at runtime.
@@ -762,6 +772,7 @@ class Window(QMainWindow):
 
         AutonaCountryHelper.LoadCountries()
         self.settingsWindow.UiMounted()
+        self.apiInfoWindow.UiMounted()
         # self.layoutOptions.UiMounted()
         AutonaTournamentDataProvider.instance.UiMounted()
         AutonaGameAssetManager.instance.UiMounted()

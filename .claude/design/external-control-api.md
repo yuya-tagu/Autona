@@ -1,12 +1,14 @@
 # External Control API (`/api/v1/`) I/F 仕様
 
-> **ステータス: 計画（未実装）。** 本書は ADR-001 で確定した方針に基づく**あるべき姿の I/F 仕様（正本）**。
-> 実装が始まったら、実装と本書が乖離した場合は本書を優先し、差分は本書に追従させる。
-> 既存の HTTP/WS 制御面の事実は変更しない（本 API は別名前空間として**追加**する）。
+> **ステータス: 実装済み。** 本書は ADR-001 で確定した方針に基づく**あるべき姿の I/F 仕様（正本）**であり、
+> 実装（[../../src/AutonaApiV1.py](../../src/AutonaApiV1.py)）と一致している。実装と本書が乖離した場合は本書を優先し、差分は本書に追従させる。
+> 既存の HTTP/WS 制御面の事実は変更しない（本 API は別名前空間として**追加**済み）。
+> アプリ内導線: メニューバー「API設定」→ リファレンス・テスター（[../../src/AutonaApiInfoWindow.py](../../src/AutonaApiInfoWindow.py)）。
 
 - 決定根拠: [../../docs/decisions/ADR-001-external-control-api-boundary.md](../../docs/decisions/ADR-001-external-control-api-boundary.md)（D1〜D8）
 - 操作棚卸し・分類: [../../docs/architecture/external-control-api-candidates.md](../../docs/architecture/external-control-api-candidates.md)
 - 同期/リビジョン規約の正本: [Design.md §3.2 同期経路の規約](Design.md)
+- API 実装本体: [../../src/AutonaApiV1.py](../../src/AutonaApiV1.py)
 - 既存ルート実装: [../../src/AutonaWebServer.py](../../src/AutonaWebServer.py) / [../../src/AutonaWebServerActions.py](../../src/AutonaWebServerActions.py)
 
 > 凡例: **MUST**/**SHOULD**/**MAY**（RFC2119 相当）。`TBD` は実装フェーズで確定。
