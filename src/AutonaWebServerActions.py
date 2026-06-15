@@ -347,11 +347,24 @@ class WebServerActions(QThread):
         self.scoreboard.GetScoreboard(scoreboard).ResetScore()
         return "OK"
 
+    def _reset_best_of(self, scoreboard):
+        # The best_of QSpinBox is reparented out of `scoreColumn` while the
+        # 1v1 / team board is built (AutonaScoreboardWidget moves it into the
+        # score bar), so the historical scoreColumn.findChild(...) lookup
+        # returns None there and raised AttributeError. Prefer the reference
+        # the widget already stores; fall back to findChild for any board that
+        # still nests the spinbox under scoreColumn (crew uses `_bestOfSpin`).
+        sb = self.scoreboard.GetScoreboard(scoreboard)
+        best_of = (getattr(sb, "bestOfSpin", None)
+                   or getattr(sb, "_bestOfSpin", None)
+                   or sb.scoreColumn.findChild(QSpinBox, "best_of"))
+        if best_of is not None:
+            best_of.setValue(0)
+
     @gui_thread_sync
     def reset_match(self, scoreboard):
         self.scoreboard.GetScoreboard(scoreboard).ClearScore()
-        self.scoreboard.GetScoreboard(scoreboard).scoreColumn.findChild(
-            QSpinBox, "best_of").setValue(0)
+        self._reset_best_of(scoreboard)
         return "OK"
 
     @gui_thread_sync
@@ -362,8 +375,7 @@ class WebServerActions(QThread):
     @gui_thread_sync
     def clear_all(self, scoreboard):
         self.scoreboard.GetScoreboard(scoreboard).ClearScore()
-        self.scoreboard.GetScoreboard(scoreboard).scoreColumn.findChild(
-            QSpinBox, "best_of").setValue(0)
+        self._reset_best_of(scoreboard)
         self.scoreboard.GetScoreboard(scoreboard).playerNumber.setValue(1)
         self.scoreboard.GetScoreboard(scoreboard).charNumber.setValue(1)
         self.scoreboard.GetScoreboard(scoreboard).CommandClearAll()
