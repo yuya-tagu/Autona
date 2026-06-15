@@ -67,6 +67,15 @@ class WebServer(QThread):
         StateManager.signals.state_updated.connect(WebServer.on_program_state_update)
         StateManager.signals.state_big_change.connect(WebServer.ws_program_state)
 
+        # External Control API (/api/v1/). Added as a thin Blueprint that
+        # reuses WebServer.actions; existing routes/events are untouched
+        # (ADR-001 D3 / .claude/design/external-control-api.md §9). Imported
+        # lazily here to keep singleton init order intact (agent-pitfalls #2).
+        from .AutonaApiV1 import api_v1, init_api_v1
+        if "api_v1" not in WebServer.app.blueprints:
+            WebServer.app.register_blueprint(api_v1)
+        init_api_v1(WebServer.actions)
+
         self.host_name = "0.0.0.0"
         self.port = SettingsManager.Get("general.webserver_port", 5000)
 
