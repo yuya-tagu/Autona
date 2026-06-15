@@ -3043,5 +3043,101 @@ p, li { white-space: pre-wrap; }
         <source>Unexpected internal error</source>
         <translation>想定外の内部エラー</translation>
     </message>
+    <message>
+        <source>Companion settings</source>
+        <translation>Companion の設定</translation>
+    </message>
+    <message>
+        <source>Bitfocus Companion controls Autona through the External Control API over HTTP. Map physical buttons to the operations below.</source>
+        <translation>Bitfocus Companion は External Control API（HTTP）経由で Autona を操作します。下表の操作を物理ボタンに割り当ててください。</translation>
+    </message>
+    <message>
+        <source>Launch Companion and open its web admin page (default http://127.0.0.1:8000).</source>
+        <translation>Companion を起動し、Web 管理画面（既定 http://127.0.0.1:8000）を開きます。</translation>
+    </message>
+    <message>
+        <source>In "Connections", add the "Generic HTTP" module.</source>
+        <translation>「Connections」で「Generic HTTP」モジュールを追加します。</translation>
+    </message>
+    <message>
+        <source>Select a button, then "Add action" and choose the Generic HTTP "POST" (or "GET") action.</source>
+        <translation>ボタンを選び、「Add action」から Generic HTTP の「POST」（または「GET」）アクションを選びます。</translation>
+    </message>
+    <message>
+        <source>Paste the request URL from the table below. For POST, set the body to the JSON shown and add the header Content-Type: application/json.</source>
+        <translation>下表のリクエスト URL を貼り付けます。POST の場合はボディに表示の JSON を設定し、ヘッダーに Content-Type: application/json を追加します。</translation>
+    </message>
+    <message>
+        <source>Optionally set the button text, then press the key to test.</source>
+        <translation>必要に応じてボタンのテキストを設定し、キーを押して動作確認します。</translation>
+    </message>
+    <message>
+        <source>Setup steps</source>
+        <translation>設定手順</translation>
+    </message>
+    <message>
+        <source>Example button mappings</source>
+        <translation>ボタン割り当て例</translation>
+    </message>
+    <message>
+        <source>Operation</source>
+        <translation>操作</translation>
+    </message>
+    <message>
+        <source>URL</source>
+        <translation>URL</translation>
+    </message>
+    <message>
+        <source>Body</source>
+        <translation>ボディ</translation>
+    </message>
+    <message>
+        <source>Copy URL</source>
+        <translation>URLをコピー</translation>
+    </message>
+    <message>
+        <source>Copy body</source>
+        <translation>ボディをコピー</translation>
+    </message>
+    <message>
+        <source>This device must be on the same LAN as this PC.</source>
+        <translation>この機器は本 PC と同じ LAN に接続されている必要があります。</translation>
+    </message>
+    <message>
+        <source>Player 1 score +1</source>
+        <translation>P1 スコア +1</translation>
+    </message>
+    <message>
+        <source>Player 1 score -1</source>
+        <translation>P1 スコア -1</translation>
+    </message>
+    <message>
+        <source>Player 2 score +1</source>
+        <translation>P2 スコア +1</translation>
+    </message>
+    <message>
+        <source>Player 2 score -1</source>
+        <translation>P2 スコア -1</translation>
+    </message>
+    <message>
+        <source>Refresh bracket</source>
+        <translation>ブラケットを更新</translation>
+    </message>
+    <message>
+        <source>Button icons (click to copy)</source>
+        <translation>ボタンアイコン（クリックでコピー）</translation>
+    </message>
+    <message>
+        <source>Click an icon to copy it to the clipboard, then paste it onto a Companion button.</source>
+        <translation>アイコンをクリックするとクリップボードにコピーされます。Companion のボタンに貼り付けてください。</translation>
+    </message>
+    <message>
+        <source>Copy this icon</source>
+        <translation>このアイコンをコピー</translation>
+    </message>
+    <message>
+        <source>Copied icon</source>
+        <translation>アイコンをコピーしました</translation>
+    </message>
 </context>
 </TS>
