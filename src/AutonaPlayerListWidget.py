@@ -55,57 +55,54 @@ class AutonaPlayerListWidget(QDockWidget):
 
             self.widget.layout().addWidget(topOptions)
 
-            row = QWidget()
-            row.setLayout(QHBoxLayout())
-            row.layout().setContentsMargins(0, 0, 0, 0)
-            row.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
-            topOptions.layout().addWidget(row)
+            # Row 1: three count spinboxes (label above each). Built from bare
+            # layouts — no QWidget wrappers — to keep the tree flat.
+            countRow = QHBoxLayout()
+            countRow.setContentsMargins(0, 0, 0, 0)
+            topOptions.layout().addLayout(countRow)
 
-            col = QWidget()
-            col.setLayout(QVBoxLayout())
+            def _countColumn(label_text, spinbox):
+                col = QVBoxLayout()
+                col.setContentsMargins(0, 0, 0, 0)
+                col.addWidget(QLabel(label_text))
+                col.addWidget(spinbox)
+                countRow.addLayout(col)
+
             self.slotNumber = QSpinBox()
-            col.layout().addWidget(QLabel(QApplication.translate("app", "Number of slots")))
-            col.layout().addWidget(self.slotNumber)
+            _countColumn(QApplication.translate(
+                "app", "Number of slots"), self.slotNumber)
             self.slotNumber.valueChanged.connect(
                 lambda val: self.playerList.SetSlotNumber(val))
-            row.layout().addWidget(col)
 
-            col = QWidget()
-            col.setLayout(QVBoxLayout())
             self.playerPerTeam = QSpinBox()
-            col.layout().addWidget(QLabel(QApplication.translate("app", "Players per slot")))
-            col.layout().addWidget(self.playerPerTeam)
+            _countColumn(QApplication.translate(
+                "app", "Players per slot"), self.playerPerTeam)
             self.playerPerTeam.valueChanged.connect(
                 self.playerList.SetPlayersPerTeam)
-            row.layout().addWidget(col)
 
-            col = QWidget()
-            col.setLayout(QVBoxLayout())
             self.charNumber = QSpinBox()
-            col.layout().addWidget(QLabel(QApplication.translate("app", "Characters per player")))
-            col.layout().addWidget(self.charNumber)
+            _countColumn(QApplication.translate(
+                "app", "Characters per player"), self.charNumber)
             self.charNumber.valueChanged.connect(
                 self.playerList.SetCharactersPerPlayer)
             self.charNumber.valueChanged.connect(
                 self.signals.characters_per_player_changed.emit)
-            row.layout().addWidget(col)
 
-            row = QWidget()
-            row.setLayout(QHBoxLayout())
-            row.layout().setContentsMargins(0, 0, 0, 0)
-            row.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
-            topOptions.layout().addWidget(row)
+            # Row 2: action buttons
+            buttonRow = QHBoxLayout()
+            buttonRow.setContentsMargins(0, 0, 0, 0)
+            topOptions.layout().addLayout(buttonRow)
 
             self.loadFromStandingsBt = QPushButton(
                 QApplication.translate("app", "Load tournament standings"))
             self.loadFromStandingsBt.clicked.connect(self.LoadFromStandingsClicked)
-            row.layout().addWidget(self.loadFromStandingsBt)
+            buttonRow.addWidget(self.loadFromStandingsBt)
 
             self.generateAltTextButton = QPushButton(
                 QApplication.translate("app", "Generate Descriptive Text for Results"))
             self.generateAltTextButton = add_alt_text_tooltip_to_button(self.generateAltTextButton)
             self.generateAltTextButton.clicked.connect(self.AltTextWindow)
-            row.layout().addWidget(self.generateAltTextButton)
+            buttonRow.addWidget(self.generateAltTextButton)
 
             self.widget.layout().addWidget(self.playerList)
 

@@ -256,10 +256,8 @@ class AutonaResultSettingsWidget(QDockWidget):
         rightInsertIdx = 0
         layoutLabel = QLabel(
             QApplication.translate("app", "Select Result Layout"))
-        _labelFont = layoutLabel.font()
-        _labelFont.setPointSize(10)
-        _labelFont.setBold(True)
-        layoutLabel.setFont(_labelFont)
+        # Match the VIDEO tab's template-selector heading (Design.md §5).
+        L.apply_section_title(layoutLabel)
         layoutLabel.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         rightLayout.insertWidget(rightInsertIdx, layoutLabel)
