@@ -29,11 +29,7 @@
          <property name="title">
           <string>Top 8 Players</string>
          </property>
-         <layout class="QVBoxLayout" name="verticalLayout_group">
-          <item>
-           <layout class="QGridLayout" name="gridPlayers">
-           </layout>
-          </item>
+         <layout class="QGridLayout" name="gridPlayers">
          </layout>
         </widget>
        </item>

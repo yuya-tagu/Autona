@@ -10,15 +10,6 @@
     <height>118</height>
    </rect>
   </property>
-  <property name="font">
-   <font>
-    <family>Ubuntu</family>
-    <pointsize>10</pointsize>
-    <weight>75</weight>
-    <italic>false</italic>
-    <bold>true</bold>
-   </font>
-  </property>
   <property name="windowTitle">
    <string>GroupBox</string>
   </property>
@@ -34,15 +25,6 @@
    </property>
    <item row="1" column="0">
     <widget class="QLabel" name="nameLabel">
-     <property name="font">
-      <font>
-       <family>Ubuntu</family>
-       <pointsize>8</pointsize>
-       <weight>75</weight>
-       <italic>false</italic>
-       <bold>true</bold>
-      </font>
-     </property>
      <property name="text">
       <string>TEAM/NAME</string>
      </property>
@@ -61,15 +43,6 @@
          <verstretch>0</verstretch>
         </sizepolicy>
        </property>
-       <property name="font">
-        <font>
-         <family>Ubuntu</family>
-         <pointsize>10</pointsize>
-         <weight>75</weight>
-         <italic>false</italic>
-         <bold>true</bold>
-        </font>
-       </property>
        <property name="placeholderText">
         <string>Team</string>
        </property>
@@ -77,15 +50,6 @@
      </item>
      <item>
       <widget class="QLineEdit" name="name">
-       <property name="font">
-        <font>
-         <family>Ubuntu</family>
-         <pointsize>10</pointsize>
-         <weight>75</weight>
-         <italic>false</italic>
-         <bold>true</bold>
-        </font>
-       </property>
        <property name="placeholderText">
         <string>GamerTag</string>
        </property>
@@ -95,15 +59,6 @@
    </item>
    <item row="2" column="0">
     <widget class="QLabel" name="real_nameLabel">
-     <property name="font">
-      <font>
-       <family>Ubuntu</family>
-       <pointsize>8</pointsize>
-       <weight>75</weight>
-       <italic>false</italic>
-       <bold>true</bold>
-      </font>
-     </property>
      <property name="text">
       <string>REAL NAME</string>
      </property>
@@ -111,15 +66,6 @@
    </item>
    <item row="2" column="1">
     <widget class="QLineEdit" name="real_name">
-     <property name="font">
-      <font>
-       <family>Ubuntu</family>
-       <pointsize>10</pointsize>
-       <weight>75</weight>
-       <italic>false</italic>
-       <bold>true</bold>
-      </font>
-     </property>
      <property name="placeholderText">
       <string>Real Name</string>
      </property>
@@ -127,15 +73,6 @@
    </item>
    <item row="3" column="0">
     <widget class="QLabel" name="twitterLabel">
-     <property name="font">
-      <font>
-       <family>Ubuntu</family>
-       <pointsize>8</pointsize>
-       <weight>75</weight>
-       <italic>false</italic>
-       <bold>true</bold>
-      </font>
-     </property>
      <property name="text">
       <string>TWITTER</string>
      </property>
@@ -143,15 +80,6 @@
    </item>
    <item row="3" column="1">
     <widget class="QLineEdit" name="twitter">
-     <property name="font">
-      <font>
-       <family>Ubuntu</family>
-       <pointsize>10</pointsize>
-       <weight>75</weight>
-       <italic>false</italic>
-       <bold>true</bold>
-      </font>
-     </property>
      <property name="placeholderText">
       <string>Handle Only</string>
      </property>
@@ -159,13 +87,6 @@
    </item>
    <item row="4" column="0">
     <widget class="QLabel" name="pronounLabel">
-     <property name="font">
-      <font>
-       <pointsize>8</pointsize>
-       <weight>75</weight>
-       <bold>true</bold>
-      </font>
-     </property>
      <property name="text">
       <string>PRONOUNS</string>
      </property>
@@ -173,11 +94,6 @@
    </item>
    <item row="4" column="2" colspan="2">
     <widget class="QLineEdit" name="pronoun">
-     <property name="font">
-      <font>
-       <pointsize>10</pointsize>
-      </font>
-     </property>
     </widget>
    </item>
   </layout>

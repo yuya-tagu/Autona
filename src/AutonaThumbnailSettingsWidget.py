@@ -137,15 +137,6 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
             self.GeneratePreview()
         ])
 
-        # Hide the Custom Icon section — icons are managed via
-        # tournament info (DownloadIcon) and not user-customizable.
-        for name in ["label_2", "customMainIcon", "customMainIconReset",
-                      "customTopLeftIcon", "customTopLeftIconReset",
-                      "customTopRightIcon", "customTopRightIconReset"]:
-            w = self.settings.findChild(QWidget, name)
-            if w:
-                w.hide()
-
         self.background.clicked.connect(
             lambda: self.SaveImage("background_path"))
 
@@ -319,6 +310,23 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
         # Normalise card padding / spacing across all top-level groups.
         for group in self.settings.findChildren(QGroupBox):
             L.apply_card_layout(group)
+
+        # Apply the design-system section-title style to in-card sub-headings
+        # so they read as quiet uppercase labels (Design.md §5) instead of the
+        # mismatched bold 10pt the .ui used to hard-code.
+        for name in ["label_17", "label_11", "label_13", "label_19"]:
+            lbl = self.settings.findChild(QLabel, name)
+            if lbl:
+                L.apply_section_title(lbl)
+
+        # Zoom / Horizontal Align / Vertical Align are a [label | spinbox]
+        # form grid — normalise its spacing and give the label column a fixed
+        # width so the spinboxes line up regardless of label length / locale.
+        transformGrid = self.settings.findChild(QGridLayout, "gridLayoutTransform")
+        if transformGrid is not None:
+            L.apply_form_grid(transformGrid)
+            transformGrid.setColumnMinimumWidth(0, L.FORM_LABEL_WIDTH)
+            transformGrid.setColumnStretch(1, 1)
 
         # Reload preview when game changes
         AutonaGameAssetManager.instance.signals.onLoad.connect(lambda: [
