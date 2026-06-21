@@ -49,17 +49,10 @@ function injectFonts() {
   _fontsInjected = true;
 
   const style = document.createElement("style");
-  const gekiPath    = "../../assets/font/TamanegiKaisho/TamanegiKaishoGeki.ttf";
   const boldPath    = "../../assets/font/LINESeedJP/LINESeedJP-Bold.ttf";
   const regularPath = "../../assets/font/LINESeedJP/LINESeedJP-Regular.ttf";
 
   style.textContent = `
-    @font-face {
-      font-family: "Tamanegi Kaisho Geki";
-      src: url("${gekiPath}") format("truetype");
-      font-weight: 400;
-      font-display: block;
-    }
     @font-face {
       font-family: "LINE Seed JP";
       src: url("${regularPath}") format("truetype");

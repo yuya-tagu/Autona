@@ -1154,6 +1154,134 @@ p, li { white-space: pre-wrap; }
         <translation>レイアウトを移行</translation>
     </message>
     <message>
+        <source>Add game assets</source>
+        <translation>ゲームアセットを追加</translation>
+    </message>
+    <message>
+        <source>Game assets (character / stage images) are copyrighted by their respective rights holders and are not bundled with Autona. Download them from the online source below — no TournamentStreamHelper install needed — or import a folder / ZIP you already have.</source>
+        <translation>ゲームアセット（キャラクター／ステージ画像）は各権利者に著作権があるため、Autona には同梱していません。下のオンラインソースから取得できます（TournamentStreamHelper のインストールは不要）。または手持ちのフォルダ／ZIP を取り込むこともできます。</translation>
+    </message>
+    <message>
+        <source>Download online</source>
+        <translation>オンラインから取得</translation>
+    </message>
+    <message>
+        <source>Loading game list…</source>
+        <translation>ゲーム一覧を読み込み中…</translation>
+    </message>
+    <message>
+        <source>Game</source>
+        <translation>ゲーム</translation>
+    </message>
+    <message>
+        <source>Packs</source>
+        <translation>パック</translation>
+    </message>
+    <message>
+        <source>Note: official illustration / render / promo / audio packs are not offered, per the game publisher's tournament guidelines.</source>
+        <translation>注: 公式イラスト／レンダー／プロモ／音声などのパックは、ゲームメーカーの大会ガイドラインに従い提供していません。</translation>
+    </message>
+    <message>
+        <source>Download &amp;&amp; load</source>
+        <translation>ダウンロードして読み込む</translation>
+    </message>
+    <message>
+        <source>Reload game list</source>
+        <translation>一覧を再読み込み</translation>
+    </message>
+    <message>
+        <source>Select a game, choose packs, then Download &amp; load.</source>
+        <translation>ゲームを選び、パックを選択して「ダウンロードして読み込む」を押してください。</translation>
+    </message>
+    <message>
+        <source>Could not load the game list (check your connection).</source>
+        <translation>ゲーム一覧を取得できませんでした（接続を確認してください）。</translation>
+    </message>
+    <message>
+        <source>Select at least one pack.</source>
+        <translation>パックを少なくとも1つ選択してください。</translation>
+    </message>
+    <message>
+        <source>Preparing…</source>
+        <translation>準備中…</translation>
+    </message>
+    <message>
+        <source>Download failed</source>
+        <translation>ダウンロードに失敗しました</translation>
+    </message>
+    <message>
+        <source>Could not download the assets.</source>
+        <translation>アセットをダウンロードできませんでした。</translation>
+    </message>
+    <message>
+        <source>Download cancelled.</source>
+        <translation>ダウンロードを中止しました。</translation>
+    </message>
+    <message>
+        <source>Downloaded and loaded: </source>
+        <translation>ダウンロードして読み込みました: </translation>
+    </message>
+    <message>
+        <source>Import from a folder or ZIP</source>
+        <translation>フォルダ／ZIP から取り込み</translation>
+    </message>
+    <message>
+        <source>Import from folder</source>
+        <translation>フォルダから取り込み</translation>
+    </message>
+    <message>
+        <source>Import from ZIP</source>
+        <translation>ZIP から取り込み</translation>
+    </message>
+    <message>
+        <source>Select a game folder to import</source>
+        <translation>取り込むゲームフォルダを選択</translation>
+    </message>
+    <message>
+        <source>Select a game ZIP to import</source>
+        <translation>取り込むゲーム ZIP を選択</translation>
+    </message>
+    <message>
+        <source>Import failed</source>
+        <translation>取り込みに失敗しました</translation>
+    </message>
+    <message>
+        <source>The selected file is not a valid ZIP.</source>
+        <translation>選択したファイルは有効な ZIP ではありません。</translation>
+    </message>
+    <message>
+        <source>No game found. A game folder must contain base_files/config.json.</source>
+        <translation>ゲームが見つかりません。ゲームフォルダには base_files/config.json が必要です。</translation>
+    </message>
+    <message>
+        <source>Overwrite?</source>
+        <translation>上書きしますか？</translation>
+    </message>
+    <message>
+        <source>This game already exists. Overwrite it?</source>
+        <translation>このゲームは既に存在します。上書きしますか？</translation>
+    </message>
+    <message>
+        <source>Could not copy the game files.</source>
+        <translation>ゲームファイルをコピーできませんでした。</translation>
+    </message>
+    <message>
+        <source>Nothing imported.</source>
+        <translation>取り込んだものはありません。</translation>
+    </message>
+    <message>
+        <source>Imported: </source>
+        <translation>取り込み完了: </translation>
+    </message>
+    <message>
+        <source>Open asset source (GitHub)</source>
+        <translation>アセット配布元（GitHub）を開く</translation>
+    </message>
+    <message>
+        <source>Open games folder</source>
+        <translation>ゲームフォルダを開く</translation>
+    </message>
+    <message>
         <location filename="../Autona.py" line="662"/>
         <source>Game Asset Language</source>
         <translation>ゲームアセットの言語</translation>
