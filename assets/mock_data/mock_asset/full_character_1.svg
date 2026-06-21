@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080" role="img" aria-label="Placeholder character P2">
+  <!-- Monochrome placeholder used in preview/mock rendering when no game assets are present -->
+  <g fill="#5c5c5c">
+    <circle cx="540" cy="372" r="196"/>
+    <path d="M540 612c-188 0-302 126-302 330v138h604V942c0-204-114-330-302-330z"/>
+  </g>
+  <text x="540" y="930" text-anchor="middle" font-family="sans-serif" font-size="190" font-weight="700" fill="#ffffff">P2</text>
+</svg>

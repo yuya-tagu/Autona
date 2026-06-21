@@ -1,14 +1,21 @@
-## HTML-based overlay templates for TournamentStreamHelper
+## Autona 配信オーバーレイ テンプレート
 
-Here you'll find templates for animated layouts using TournamentStreamHelper's output.
+Autona が出力する状態データ（`out/` 配下のファイル）を読み取って表示する、
+HTML/CSS/JS ベースのアニメーション付きオーバーレイテンプレート集です。
+OBS 等のブラウザソースで読み込んで使用します。
 
-In `/include/` you'll find `globals.js` which contain general functions used in most template layouts. You'll also find some of the libraries used: `gsap` and `jquery`.
+`/include/` には各テンプレート共通で使うユーティリティ（`globals.js`）と、
+利用ライブラリ（`gsap`・`jquery`）を同梱しています。
 
-Testing and debugging locally with Chrome:
-- Add the flag `--allow-file-access-from-files` when launching Chrome
-    - On Windows, you can either `"C:\PathTo\chrome.exe" --allow-file-access-from-files` or open the PowerShell and type `Start-Process "chrome.exe" "--allow-file-access-from-files"`
-- Then, you can open a layout `html` file in Chrome, press F12 for developer tools
-- Enable *Device toolbar* and set the screen size to 1920x1080
-With this, you'll have access to the console logs (and errors) and to quickly edit css rules for easier development
+### ローカルでのテスト・デバッグ（Chrome）
 
-**Link to the main program:** https://github.com/joaorb64/TournamentStreamHelper
+- Chrome 起動時に `--allow-file-access-from-files` フラグを付ける
+    - Windows: `"C:\PathTo\chrome.exe" --allow-file-access-from-files`
+      もしくは PowerShell で `Start-Process "chrome.exe" "--allow-file-access-from-files"`
+- レイアウトの `html` ファイルを Chrome で開き、F12 でデベロッパーツールを表示
+- *Device toolbar* を有効化し、画面サイズを 1920x1080 に設定
+
+これでコンソールログ（とエラー）の確認、CSS ルールの即時編集ができます。
+
+> **Note:** 現行テンプレートは前身プロジェクトのデザインを引き継いでいます。
+> 今後 Autona 版として順次リデザインを進める予定です。

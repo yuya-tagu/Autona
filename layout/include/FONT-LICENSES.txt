@@ -1,0 +1,9 @@
+Fonts bundled in this folder and their licenses:
+
+  NotoSans-Regular.ttf   - SIL Open Font License 1.1 (The Noto Project Authors)
+  Roboto-Regular.ttf     - Apache License 2.0 (Google)
+  RobotoCondensed.ttf    - Apache License 2.0 (Google)
+
+Full license texts:
+  SIL OFL 1.1       -> ../../assets/font/OFL-1.1.txt
+  Apache License 2.0 -> ../../assets/font/Apache-License-2.0.txt

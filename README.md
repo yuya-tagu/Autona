@@ -2,20 +2,19 @@
 
 格闘ゲーム大会の配信支援デスクトップアプリケーション。[TournamentStreamHelper](https://github.com/joaorb64/TournamentStreamHelper) のカスタムフォーク。
 
-スコアボード管理、ステージストライク、統計情報表示、配信オーバーレイ出力など、大会運営に必要な機能を統合的に提供する。
+スコアボード管理、統計情報表示、配信オーバーレイ出力など、大会運営に必要な機能を統合的に提供する。
 
 ## 主な機能
 
 - **スコアボード管理** — チーム/プレイヤー情報、スコア、キャラクター選択をリアルタイムで管理
-- **ステージストライク** — ルールセットに基づいたステージ Ban/Pick の進行管理
 - **配信オーバーレイ** — HTML ベースのアニメーション付きオーバーレイテンプレート（OBS 等で使用）
 - **トーナメント連携** — Start.gg からブラケット・対戦表・参加者情報を自動取得
-- **Web リモート操作** — ブラウザからスコアボードやステージストライクを操作可能
+- **Web リモート操作** — ブラウザからスコアボードをリモート操作可能
 - **統計表示** — H2H（直接対決）、Last Sets、Tournament History を表示
 - **ローカル選手DB** — 選手のタグ・国籍・メインキャラなどをローカル管理
 - **ホットキー** — グローバルキーボードショートカットでスコア操作
 - **サムネイル生成** — 大会サムネイル画像の自動生成
-- **多言語対応** — 8 言語（英語、日本語、ポルトガル語、スペイン語、フランス語、中国語簡体/繁体、イタリア語）
+- **多言語対応** — 9 言語（英語、日本語、ドイツ語、ポルトガル語、スペイン語、フランス語、中国語簡体/繁体、イタリア語）
 
 ## 技術スタック
 
@@ -109,15 +108,14 @@ scripts/gen_release.ps1
    │    │ ・PlayerList           │       │
    │    │ ・Bracket              │       │
    │    │ ・Stats / Notes        │       │
-   │    │ ・StageStrike          │       │
    │    │ ・ThumbnailSettings    │       │
    │    └────────────────────────┘       │
    │                                     │
    ▼                                     ▼
 ┌──────────────┐              ┌──────────────────┐
 │ out/ (files) │              │ Web UI (React)   │
-│ program_state│              │ /scoreboard      │
-│ .json + .txt │              │ /stage-strike-app│
+│ program_state│              │ /web /scoreboard │
+│ .json + .txt │              │ /team            │
 └──────────────┘              └──────────────────┘
 ```
 
@@ -133,8 +131,9 @@ scripts/gen_release.ps1
 
 | パス | ページ | 用途 |
 |------|--------|------|
-| `/scoreboard` | ScoreboardPage | スコアボードのリモート操作 |
-| `/stage-strike-app` | StageStrikePage | ステージストライク進行 |
+| `/web`（既定） | ScoreboardPage | スコアボード 1 のリモート操作 |
+| `/scoreboard` | ScoreboardPage | スコアボード 1 のリモート操作 |
+| `/team` | ScoreboardPage | スコアボード 2（チーム）のリモート操作 |
 
 ## プロジェクト構造
 
@@ -147,23 +146,21 @@ Autona/
 ├── Pipfile                  # Python 依存定義
 │
 ├── src/                     # Python ソースコード
-│   ├── TournamentStreamHelper.py  # メインウィンドウ (QMainWindow)
+│   ├── Autona.py                  # メインウィンドウ (QMainWindow)
 │   ├── StateManager.py            # グローバル状態管理
 │   ├── SettingsManager.py         # ユーザー設定
-│   ├── TSHScoreboardManager.py    # スコアボード管理（マルチタブ）
-│   ├── TSHScoreboardWidget.py     # スコアボード UI
-│   ├── TSHScoreboardPlayerWidget.py  # 選手情報ウィジェット
-│   ├── TSHScoreboardStageWidget.py   # ステージストライク
-│   ├── TSHCommentaryWidget.py     # 実況者パネル
-│   ├── TSHBracketWidget.py        # ブラケット表示
-│   ├── TSHPlayerListWidget.py     # 選手リスト
-│   ├── TSHStatsWidget.py          # 統計パネル
-│   ├── TSHTournamentDataProvider.py  # トーナメントデータ取得
-│   ├── TSHGameAssetManager.py     # ゲームアセット管理
-│   ├── TSHPlayerDB.py             # ローカル選手データベース
-│   ├── TSHWebServer.py            # Flask Web サーバー
-│   ├── TSHWebServerActions.py     # Web API ルートハンドラ
-│   ├── TSHHotkeys.py              # グローバルホットキー
+│   ├── AutonaScoreboardManager.py    # スコアボード管理
+│   ├── AutonaScoreboardWidget.py     # スコアボード UI
+│   ├── AutonaScoreboardPlayerWidget.py  # 選手情報ウィジェット
+│   ├── AutonaCommentaryWidget.py     # 実況者パネル
+│   ├── AutonaBracketWidget.py        # ブラケット表示
+│   ├── AutonaPlayerListWidget.py     # 選手リスト
+│   ├── AutonaStatsWidget.py          # 統計パネル
+│   ├── AutonaTournamentDataProvider.py  # トーナメントデータ取得
+│   ├── AutonaGameAssetManager.py     # ゲームアセット管理
+│   ├── AutonaPlayerDB.py             # ローカル選手データベース
+│   ├── AutonaWebServer.py            # Flask Web サーバー
+│   ├── AutonaHotkeys.py              # グローバルホットキー
 │   ├── ui_constants.py            # デザイントークン定義
 │   ├── Helpers/                   # ユーティリティモジュール
 │   ├── Settings/                  # 設定 UI
@@ -181,13 +178,12 @@ Autona/
 │   │   ├── backendDataTypes.d.ts  # TypeScript 型定義
 │   │   ├── redux/                 # Redux Store / Slices
 │   │   ├── ScoreboardPage/        # スコアボードページ
-│   │   ├── StageStrikePage/       # ステージストライクページ
-│   │   └── i18n/                  # 多言語翻訳（8言語）
+│   │   └── i18n/                  # 多言語翻訳（9言語）
 │   └── build/                     # ビルド成果物
 │
-├── layout/                  # 配信オーバーレイ（Git サブモジュール）
+├── layout/                  # 配信オーバーレイ（HTML テンプレート）
 ├── assets/                  # 国旗・アイコン等の静的アセット
-├── user_data/               # ゲーム設定・選手データ（実行時生成）
+├── user_data/               # ゲーム設定・選手データ（ゲーム画像は別途取得）
 ├── out/                     # 出力ファイル（オーバーレイ用）
 ├── dependencies/            # PyInstaller spec・requirements
 ├── scripts/                 # リリーススクリプト
@@ -199,15 +195,20 @@ Autona/
 
 ## 対応ゲーム
 
-`user_data/games/` に格闘ゲーム別のキャラクター・ステージ情報を格納:
+`user_data/games/{game}/base_files/config.json` を配置したゲームを自動認識する
+（例: Super Smash Bros. Ultimate）。設定ファイルにより他ゲームへ拡張可能。
 
-- Super Smash Bros. Ultimate (SSBU)
-- Street Fighter 6 (SF6)
-- Tekken 8
-- その他（設定ファイルで拡張可能）
+> **ゲーム画像（キャラクター／ステージ）は同梱していません。** 各権利者に著作権が
+> あるため、TournamentStreamHelper のアセットダウンローダーから取得して
+> `user_data/games/` 配下に配置してください。詳細は
+> [user_data/games/README.md](user_data/games/README.md) を参照。
 
 ## ライセンス
 
 MIT License - 詳細は [LICENSE](LICENSE) を参照。
 
+本リポジトリが利用するサードパーティ素材（フォント・国旗画像・ライブラリ等）の
+出典・ライセンスは [ATTRIBUTIONS.md](ATTRIBUTIONS.md) に記載。
+
 **Original Author**: [joaorb64](https://github.com/joaorb64/TournamentStreamHelper)
+（本プロジェクトは TournamentStreamHelper のフォークです）

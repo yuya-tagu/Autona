@@ -1,5 +1,5 @@
 /* result_vertical_geki: Top 8 result layout (960x1080)
- * Theme: dark grey + gold, Tamanegi Kaisho Geki font
+ * Theme: dark grey + gold, LINE Seed JP font
  * 1st place: full character art | 2nd+: character icon in top-right
  */
 
@@ -18,7 +18,7 @@
   --border-gold-strong: rgba(201, 162, 39, 0.6);
   --text-primary: #ffffff;
   --text-dim:     rgba(255, 255, 255, 0.65);
-  --font-main:    "Tamanegi Kaisho Geki", "LINE Seed JP", sans-serif;
+  --font-main:    "LINE Seed JP", sans-serif;
 }
 
 * {

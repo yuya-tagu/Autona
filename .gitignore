@@ -87,3 +87,9 @@ release-windows.zip
 
 # Vestigial data file from removed stage-strike feature (do not track)
 assets/rulesets.json
+
+# Game assets (character/stage images) are copyrighted by their respective
+# rights holders and are NOT distributed. Users obtain them via
+# TournamentStreamHelper's asset downloader. Only the guidance README is tracked.
+user_data/games/*
+!user_data/games/README.md
