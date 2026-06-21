@@ -130,6 +130,7 @@ from .Settings.AutonaSettingsWindow import AutonaSettingsWindow
 from .AutonaApiInfoWindow import AutonaApiInfoWindow
 from .AutonaIntegrationGuideWindow import AutonaIntegrationGuideWindow
 from .AutonaObsGuideWindow import AutonaObsGuideWindow
+from .AutonaGameAssetGuideWindow import AutonaGameAssetGuideWindow
 from .LayoutOptions.AutonaLayoutOptionsWindow import AutonaLayoutOptionsWindow
 from .AutonaHotkeys import AutonaHotkeys
 from .AutonaPlayerListWidget import AutonaPlayerListWidget
@@ -466,6 +467,15 @@ class Window(QMainWindow):
 
         editMenu.addSeparator()
 
+        # Guidance for obtaining game assets (not bundled — see A2/copyright).
+        # The window is built lazily in UiMounted below.
+        self.gameAssetGuideWindow = AutonaGameAssetGuideWindow(self)
+        action = editMenu.addAction(
+            QApplication.translate("app", "Add game assets"))
+        action.triggered.connect(lambda: self.gameAssetGuideWindow.show())
+
+        editMenu.addSeparator()
+
         # Language sub-menus
         program_language_messagebox = generate_restart_messagebox(
             QApplication.translate("app", "Program language changed successfully."))
@@ -793,6 +803,7 @@ class Window(QMainWindow):
         self.apiInfoWindow.UiMounted()
         self.companionGuideWindow.UiMounted()
         self.obsGuideWindow.UiMounted()
+        self.gameAssetGuideWindow.UiMounted()
         # self.layoutOptions.UiMounted()
         AutonaTournamentDataProvider.instance.UiMounted()
         AutonaGameAssetManager.instance.UiMounted()
