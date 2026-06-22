@@ -28,7 +28,6 @@
     "tag": "タグ",
     "real_name": "本名",
     "twitter": "Twitter",
-    "pronouns": "代名詞",
     "country": "国",
     "state": "都道府県",
     "character": "キャラクター",
@@ -59,7 +58,6 @@
     "show_seed": "シード",
     "show_location": "地域",
     "show_characters": "キャラクター",
-    "show_pronouns": "代名詞",
     "show_additional": "追加情報",
     "seed": "シード"
 }

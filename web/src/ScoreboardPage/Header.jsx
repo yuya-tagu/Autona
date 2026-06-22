@@ -75,7 +75,6 @@ export const Header = ({onSelectedGameChange, scoreboardNumber = 1, ...rest}) =>
         {key: "seed",       label: i18n.t("show_seed")},
         {key: "location",   label: i18n.t("show_location")},
         {key: "characters", label: i18n.t("show_characters")},
-        {key: "pronouns",   label: i18n.t("show_pronouns")},
         {key: "additional", label: i18n.t("show_additional")},
     ];
 

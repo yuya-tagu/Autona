@@ -24,8 +24,12 @@ FONT_FAMILY_MONO = "JetBrains Mono"
 
 # ─── Spacing ─────────────────────────────────────────────────────
 
-SPACE_XS = 2
-SPACE_SM = 4
+# Inter-element spacing scale. SPACE_SM is the default gap between adjacent
+# widgets (grid spacing, row layouts); it was bumped 4 -> 6 to loosen the
+# previously very tight density app-wide. Keep SPACE_SM < SPACE_MD so the
+# small/medium gap hierarchy is preserved.
+SPACE_XS = 4
+SPACE_SM = 8
 SPACE_MD = 8
 SPACE_LG = 12
 SPACE_XL = 16

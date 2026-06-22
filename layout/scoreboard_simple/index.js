@@ -104,8 +104,6 @@ LoadEverything().then(() => {
             `
           );
 
-          SetInnerHtml($(`.t${t + 1}.p${p + 1} .pronoun`), player.pronoun);
-
           SetInnerHtml(
             $(`.t${t + 1}.p${p + 1} .flagcountry`),
             player.country.asset

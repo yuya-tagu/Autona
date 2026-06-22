@@ -28,7 +28,6 @@ query EventEntrantsListQuery($eventSlug: String!, $page: Int!) {
 						id
 						prefix
 						name
-						genderPronoun
 						location {
 							country
 							state

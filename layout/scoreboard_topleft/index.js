@@ -76,9 +76,6 @@ LoadEverything().then(() => {
                   ${(player.team && data.display_options?.show_sponsor !== false) ? player.team : ""}
                 </span>
                 ${await Transcript(player.name)}
-                <span class="pronoun">
-                  ${player.pronoun ? player.pronoun : ""}
-                </span>
                 ${team.losers ? "<span class='losers'>L</span>" : ""}
               `
             );

@@ -36,7 +36,6 @@ import {CountryStateSelector} from "../CountryStateSelector";
  *     _name: string,
  *     _realName: string,
  *     _twitter: string,
- *     _pronoun: string,
  *     _seed: string,
  *     _characterSelections: CharacterSelections
  *
@@ -46,7 +45,6 @@ import {CountryStateSelector} from "../CountryStateSelector";
  *     name: string,
  *     realName: string,
  *     twitter: string,
- *     pronoun: string,
  *     seed: string,
  *     characterSelections: CharacterSelections
  *     expanded: boolean
@@ -103,7 +101,6 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
         _name: player.name,
         _realName: player.real_name,
         _twitter: player.twitter,
-        _pronoun: player.pronoun,
         _seed: player.seed ?? "",
         _charSelections: charsFromTsh(player.character),
 
@@ -113,7 +110,6 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
         name: player.name,
         realName: player.real_name,
         twitter: player.twitter,
-        pronoun: player.pronoun,
         seed: player.seed ?? "",
         charSelections: charsFromTsh(player.character),
         expanded: true
@@ -135,7 +131,6 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
             name: player.name,
             realName: player.real_name,
             twitter: player.twitter,
-            pronoun: player.pronoun,
             seed: player.seed ?? "",
             charSelections: charsFromTsh(player.character),
         }
@@ -194,7 +189,6 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
         rval.gamerTag = state.name
         rval.name = state.realName
         rval.twitter = state.twitter
-        rval.pronoun = state.pronoun
         rval.mains = {[gameCodename]: []}
 
         /*
@@ -246,7 +240,6 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
                 team: newPlayer.prefix ?? "",
                 realName: newPlayer.name ?? "",
                 twitter: newPlayer.twitter ?? "",
-                pronoun: newPlayer.pronoun ?? "",
                 stateCode: newPlayer.state_code ?? "",
                 charSelections: getMains(newPlayer, gameCodename, Object.keys(state._charSelections).length),
             });
@@ -376,15 +369,6 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
                                     />
                                 )}
                             </Stack>
-                        )}
-
-                        {visibility.pronouns && (
-                            <TextField label={i18n.t("pronouns")}
-                                       key={idBase + "pronoun"}
-                                       id={idBase + "pronoun"}
-                                       value={state.pronoun ?? ''}
-                                       onChange={changeHandlerFor('pronoun')}
-                            />
                         )}
 
                         {visibility.location && (

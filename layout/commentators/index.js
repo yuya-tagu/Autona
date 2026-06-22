@@ -21,7 +21,6 @@ LoadEverything().then(() => {
         html += `
               <div class="commentator_container commentator${index}">
                   <div class="name"></div>
-                  <div class="pronoun"></div>
                   ${
                     window.config.size == "normal"
                       ? `<div class="real_name"></div>`
@@ -54,7 +53,6 @@ LoadEverything().then(() => {
             ${await Transcript(commentator.name)}
           `
         );
-        SetInnerHtml($(`.commentator${index} .pronoun`), commentator.pronoun);
         SetInnerHtml(
           $(`.commentator${index} .real_name`),
           commentator.real_name

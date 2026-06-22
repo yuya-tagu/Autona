@@ -764,23 +764,11 @@ body {
   max-width: 100%;
 }
 
-.extra .pronoun {
-  width: 100%;
-}
-
 .fgc .p1 .name_twitter .twitter .text {
   justify-content: flex-end;
 }
 
 .fgc .p2 .name_twitter .twitter .text {
-  justify-content: flex-start;
-}
-
-.fgc .p1 .name_twitter .pronoun .text {
-  justify-content: flex-end;
-}
-
-.fgc .p2 .name_twitter .pronoun .text {
   justify-content: flex-start;
 }
 

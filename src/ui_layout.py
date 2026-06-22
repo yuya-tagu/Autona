@@ -244,8 +244,11 @@ def media_action_row(*buttons: QPushButton) -> QHBoxLayout:
 # QVBoxLayout so the column can later opt-in by replacing inline magic
 # numbers with these constants.
 
-SCORE_PANEL_BUTTON_SPACING = 4
-SCORE_PANEL_ROW_SPACING = 2
+# Track the global spacing scale so the score control panel widens with the
+# rest of the app. Button gap = SPACE_SM (the standard inter-element gap),
+# row gap = SPACE_XS (half-step), preserving the original 2:1 ratio.
+SCORE_PANEL_BUTTON_SPACING = UI.SPACE_SM
+SCORE_PANEL_ROW_SPACING = UI.SPACE_XS
 
 
 def apply_score_panel_layout(vbox: QVBoxLayout) -> None:

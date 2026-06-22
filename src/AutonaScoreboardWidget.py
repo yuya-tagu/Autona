@@ -194,7 +194,7 @@ class AutonaScoreboardWidget(QWidget):
         # so they sit at the top-right of the scoreboard itself, not the
         # match-info ("対戦情報") section.
         self.xpostBtn = QPushButton(
-            QApplication.translate("app", "Xに投稿する") + " ")
+            QApplication.translate("app", "Xに投稿する"))
         # Match the primary-action (accent-orange) styling used by dialog
         # OK buttons etc., so this stands out as the confirming action.
         self.xpostBtn.setObjectName("primary")
@@ -227,16 +227,17 @@ class AutonaScoreboardWidget(QWidget):
         # Defaults: only sponsor / name / seed / characters are shown on a
         # fresh install; the other fields stay off until the user enables
         # them from the eye menu.
+        # Per-field rows no longer carry inline labels (the field name lives in
+        # the placeholder), so the toggle lists reference the inputs only.
         self.elements = [
-            [QApplication.translate("app", "Sponsor"),                ["team"],                                           "show_sponsor",    True],
-            [QApplication.translate("app", "Player Name"),            ["name"],                                           "show_name",       True],
-            [QApplication.translate("app", "Seed"),                   ["seedDisplay"],                                    "show_seed",       True],
-            [QApplication.translate("app", "Characters"),             ["characters"],                                     "show_characters", True],
-            [QApplication.translate("app", "Twitter"),                ["twitter", "twitterLabel"],                        "show_social",     False],
-            [QApplication.translate("app", "Real Name"),              ["real_name", "realNameLabel"],                     "show_real_name",  False],
-            [QApplication.translate("app", "Pronouns"),               ["pronoun", "pronounLabel"],                        "show_pronouns",   False],
-            [QApplication.translate("app", "Location"),               ["locationLabel", "country", "stateLabel", "state"], "show_location",  False],
-            [QApplication.translate("app", "Additional information"), ["custom_textbox"],                                 "show_additional", False],
+            [QApplication.translate("app", "Sponsor"),                ["team"],                 "show_sponsor",    True],
+            [QApplication.translate("app", "Player Name"),            ["name"],                 "show_name",       True],
+            [QApplication.translate("app", "Seed"),                   ["seedDisplay"],          "show_seed",       True],
+            [QApplication.translate("app", "Characters"),             ["characters"],           "show_characters", False],
+            [QApplication.translate("app", "Twitter"),                ["twitter"],              "show_social",     True],
+            [QApplication.translate("app", "Real Name"),              ["real_name"],            "show_real_name",  False],
+            [QApplication.translate("app", "Location"),               ["country", "state"],     "show_location",   True],
+            [QApplication.translate("app", "Additional information"), ["custom_textbox"],       "show_additional", False],
         ]
         self._sponsorAction: QAction = None
         for element in self.elements:
@@ -326,6 +327,9 @@ class AutonaScoreboardWidget(QWidget):
 
         self.btSelectSet = QPushButton(
             QApplication.translate("app", "Load set"))
+        # Primary action: accent (red) background, white text — opt-in via the
+        # objectName the global QSS targets (ui_constants QPushButton#primary).
+        self.btSelectSet.setObjectName("primary")
         self.btSelectSet.setIcon(QIcon(UI.icon_path("list.svg")))
         self.btSelectSet.setEnabled(False)
         loadSetRow.addWidget(self.btSelectSet)
@@ -370,7 +374,7 @@ class AutonaScoreboardWidget(QWidget):
 
         settingsRow = QHBoxLayout()
         settingsRow.setContentsMargins(0, 0, 0, 0)
-        settingsRow.setSpacing(4)
+        settingsRow.setSpacing(UI.SPACE_SM)
 
         # Characters-per-player is now controlled exclusively from the
         # PLAYERS tab. We keep the QSpinBox here as an off-screen data
@@ -439,6 +443,7 @@ class AutonaScoreboardWidget(QWidget):
         self.team1column.findChild(QLabel, "teamLabel").setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Minimum)
 
         colorGroup1 = QWidget()
+        self.colorGroup1 = colorGroup1
         colorGroup1.setLayout(QHBoxLayout())
         colorGroup1.layout().setContentsMargins(0, 0, 0, 0)
         colorGroup1.layout().setSpacing(UI.SPACE_SM)
@@ -486,6 +491,7 @@ class AutonaScoreboardWidget(QWidget):
         self.scoreColumn = uic.loadUi(AutonaResolve("src/layout/AutonaScoreboardScore.ui"))
 
         colorGroup2 = QWidget()
+        self.colorGroup2 = colorGroup2
         colorGroup2.setLayout(QHBoxLayout())
         colorGroup2.layout().setContentsMargins(0, 0, 0, 0)
         colorGroup2.layout().setSpacing(UI.SPACE_SM)
@@ -579,7 +585,7 @@ class AutonaScoreboardWidget(QWidget):
         phaseGroup = QWidget()
         phaseGroup.setLayout(QHBoxLayout())
         phaseGroup.layout().setContentsMargins(0, 0, 0, 0)
-        phaseGroup.layout().setSpacing(4)
+        phaseGroup.layout().setSpacing(UI.SPACE_SM)
         phaseLabel = self.scoreColumn.findChild(QLabel, "label")
         self.phaseCombo = self.scoreColumn.findChild(QComboBox, "phase")
         phaseCombo = self.phaseCombo
@@ -591,7 +597,7 @@ class AutonaScoreboardWidget(QWidget):
         matchGroup = QWidget()
         matchGroup.setLayout(QHBoxLayout())
         matchGroup.layout().setContentsMargins(0, 0, 0, 0)
-        matchGroup.layout().setSpacing(4)
+        matchGroup.layout().setSpacing(UI.SPACE_SM)
         matchLabel = self.scoreColumn.findChild(QLabel, "label_2")
         self.matchCombo = self.scoreColumn.findChild(QComboBox, "match")
         matchCombo = self.matchCombo
@@ -603,7 +609,7 @@ class AutonaScoreboardWidget(QWidget):
         bestOfGroup = QWidget()
         bestOfGroup.setLayout(QHBoxLayout())
         bestOfGroup.layout().setContentsMargins(0, 0, 0, 0)
-        bestOfGroup.layout().setSpacing(4)
+        bestOfGroup.layout().setSpacing(UI.SPACE_SM)
         bestOfLabel = self.scoreColumn.findChild(QLabel, "label_3")
         self.bestOfSpin = self.scoreColumn.findChild(QSpinBox, "best_of")
         bestOfSpin = self.bestOfSpin
@@ -1001,6 +1007,20 @@ class AutonaScoreboardWidget(QWidget):
             if teamName is not None:
                 teamName.setVisible(not singlePlayer)
 
+            # Center the 1P/2P label over the column. The label sits between the
+            # color swatch (left) and the losers checkbox (right); since those
+            # flanks differ in width, an internally-centered label lands left of
+            # the column center. Widen the (left) color-swatch container to match
+            # the right flank so the centered label aligns with the column.
+            colorGroup = self.colorGroup1 if side == 1 else self.colorGroup2
+            losers = column.findChild(QCheckBox, "losers")
+            if colorGroup is not None and losers is not None:
+                if singlePlayer:
+                    colorGroup.setMinimumWidth(
+                        losers.sizeHint().width() + UI.SPACE_MD)
+                else:
+                    colorGroup.setMinimumWidth(0)
+
             groupBox = column.findChild(QGroupBox, "groupBox")
             if groupBox is not None:
                 if singlePlayer:
@@ -1270,7 +1290,14 @@ class AutonaScoreboardWidget(QWidget):
                 # every label objectName; silently skip missing widgets
                 # rather than crashing the toggle.
                 if w is not None:
-                    w.setVisible(visible)
+                    if element == "seedDisplay":
+                        # Reserve the trailing seed slot only when a seed is
+                        # actually present; an empty-but-visible label leaves
+                        # a gap that misaligns the GamerTag field with the
+                        # rows below.
+                        w.setVisible(visible and bool(w.text()))
+                    else:
+                        w.setVisible(visible)
 
     def _onSponsorActionToggled(self, action: QAction, elements):
         self.ToggleElements(action, elements)

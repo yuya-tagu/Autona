@@ -13,6 +13,7 @@ from .AutonaPlayerDB import AutonaPlayerDB
 from .AutonaTeamBattleModeEnum import AutonaTeamBattleModeEnum
 from .Helpers.AutonaDirHelper import AutonaResolve
 from .AutonaBasePlayerWidget import AutonaBasePlayerWidget
+from . import ui_constants as UI
 import threading
 from .Helpers.AutonaBadWordFilter import AutonaBadWordFilter
 from loguru import logger
@@ -78,7 +79,7 @@ class AutonaTeamPlayerWidget(AutonaBasePlayerWidget):
         self.character_elements = []
 
         bottom_buttons_layout = QHBoxLayout()
-        bottom_buttons_layout.setSpacing(4)
+        bottom_buttons_layout.setSpacing(UI.SPACE_SM)
         self.layout().addLayout(bottom_buttons_layout, 99, 0, 1, 3)
 
         self.clear_bt = QPushButton(QApplication.translate("app", "Clear"))
@@ -91,7 +92,7 @@ class AutonaTeamPlayerWidget(AutonaBasePlayerWidget):
 
         # Move up/down
         titleContainer = self.findChild(QHBoxLayout, "titleContainer")
-        titleContainer.setSpacing(4)
+        titleContainer.setSpacing(UI.SPACE_SM)
         self.btMoveUp = QPushButton()
         self.btMoveUp.setFixedSize(24, 24)
         self.btMoveUp.setIcon(QIcon("./assets/icons/arrow_up.svg"))
@@ -137,26 +138,6 @@ class AutonaTeamPlayerWidget(AutonaBasePlayerWidget):
 
         AutonaGameAssetManager.instance.signals.onLoad.connect(
             self.ReloadCharacters)
-
-        self.pronoun_completer = QCompleter()
-        self.findChild(QLineEdit, "pronoun").setCompleter(
-            self.pronoun_completer)
-        self.pronoun_list = []
-        for file in ['./user_data/pronouns_list.txt']:
-            try:
-                with open(file, 'r') as f:
-                    for l in f.readlines():
-                        processed_line = l.replace("\n", "").strip()
-                        if processed_line and processed_line not in self.pronoun_list:
-                            self.pronoun_list.append(processed_line)
-            except FileNotFoundError:
-                with open('./user_data/pronouns_list.txt', 'w') as f:
-                    logger.info('creating ./user_data/pronouns_list.txt')
-            except Exception as e:
-                logger.error(traceback.format_exc())
-        self.pronoun_model = QStringListModel()
-        self.pronoun_completer.setModel(self.pronoun_model)
-        self.pronoun_model.setStringList(self.pronoun_list)
 
         self.ToggleSponsorDisplay()
 
@@ -343,7 +324,7 @@ class AutonaTeamPlayerWidget(AutonaBasePlayerWidget):
         while len(self.character_elements) < number:
             character_element = QWidget()
             character_element.setLayout(QHBoxLayout())
-            character_element.layout().setSpacing(4)
+            character_element.layout().setSpacing(UI.SPACE_SM)
             character_element.layout().setContentsMargins(0, 0, 0, 0)
             player_character = QComboBox()
             player_character.setEditable(True)
@@ -387,7 +368,7 @@ class AutonaTeamPlayerWidget(AutonaBasePlayerWidget):
         while len(self.character_elements) < number:
             character_element = QWidget()
             character_element.setLayout(QHBoxLayout())
-            character_element.layout().setSpacing(4)
+            character_element.layout().setSpacing(UI.SPACE_SM)
             character_element.layout().setContentsMargins(0, 0, 0, 0)
             player_character = QComboBox()
             player_character.setEditable(True)
@@ -626,14 +607,6 @@ class AutonaTeamPlayerWidget(AutonaBasePlayerWidget):
             #     self.custom_textbox.setPlainText(
             #         f'{data.get("custom_textbox")}'.replace("\\n", "\n"))
             #     self.custom_textbox.textChanged.emit()
-
-            pronoun = self.findChild(QWidget, "pronoun")
-            if data.get("pronoun") and data.get("pronoun") != pronoun.text():
-                data["pronoun"] = AutonaBadWordFilter.Censor(
-                    data["pronoun"], data.get("country_code"))
-                pronoun.setText(
-                    f'{data.get("pronoun")}')
-                pronoun.editingFinished.emit()
 
             if data.get("country_code"):
                 countryElement: QComboBox = self.findChild(

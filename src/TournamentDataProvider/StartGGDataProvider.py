@@ -821,10 +821,6 @@ class StartGGDataProvider(TournamentDataProvider):
                     playerData["twitter"] = user.get("authorizations", [])[
                         0].get("externalUsername")
 
-            if user.get("genderPronoun"):
-                playerData["pronoun"] = user.get(
-                    "genderPronoun")
-
             if user.get("images") and len(user.get("images")) > 0:
                 playerData["avatar"] = user.get("images")[
                     0].get("url")
@@ -1270,7 +1266,6 @@ class StartGGDataProvider(TournamentDataProvider):
                         "name": playerName,
                         "team": team,
                         "mergedName": team + "|" + playerName if isinstance(team, str) and team != "" else playerName,
-                        "pronoun": playerData.get("pronoun", ""),
                         "real_name": playerData.get("name", ""),
                         "online_avatar": playerData.get("avatar", ""),
                         "twitter":  playerData.get("twitter", "")
@@ -2002,10 +1997,6 @@ class StartGGDataProvider(TournamentDataProvider):
                 if len(user.get("authorizations", [])) > 0:
                     playerData["twitter"] = user.get("authorizations", [])[
                         0].get("externalUsername")
-
-            if user.get("genderPronoun"):
-                playerData["pronoun"] = user.get(
-                    "genderPronoun")
 
             if len(user.get("images", [])) > 0:
                 playerData["avatar"] = user.get("images")[

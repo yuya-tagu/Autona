@@ -23,7 +23,6 @@ query TournamentPhaseGroupQuery($id: ID!) {
 							id
 							prefix
 							name
-							genderPronoun
 							location {
 								country
 								state

@@ -17,7 +17,6 @@ query TournamentStandingsQuery($eventSlug: String!, $playerNumber: Int!) {
 							id
 							prefix
 							name
-							genderPronoun
 							location {
 								country
 								state

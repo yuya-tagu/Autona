@@ -69,9 +69,8 @@ class AutonaCommentaryWidget(QDockWidget):
             [QApplication.translate("app", "Real Name"),              ["real_name"],                         "show_name"],
             [QApplication.translate("app", "Twitter"),                ["twitter"],                           "show_social"],
             [QApplication.translate("app", "Seed"),                   ["seed", "seedLabel"],                 "show_seed"],
-            [QApplication.translate("app", "Location"),               ["locationLabel", "state", "country"], "show_location"],
+            [QApplication.translate("app", "Location"),               ["state", "country"],                  "show_location"],
             [QApplication.translate("app", "Characters"),             ["characters"],                        "show_characters"],
-            [QApplication.translate("app", "Pronouns"),               ["pronoun"],                           "show_pronouns"],
             [QApplication.translate("app", "Additional information"), ["custom_textbox"],                    "show_additional"],
         ]
         for element in self.elements:
@@ -192,7 +191,11 @@ class AutonaCommentaryWidget(QDockWidget):
     def ToggleElements(self, action: QAction, elements):
         for pw in self.commentaryWidgets:
             for element in elements:
-                pw.findChild(QWidget, element).setVisible(action.isChecked())
+                w = pw.findChild(QWidget, element)
+                # Some objectNames (e.g. removed inline labels) may not exist
+                # on the player widget; skip rather than crash the toggle.
+                if w is not None:
+                    w.setVisible(action.isChecked())
     
     def SetCharacterNumber(self, value):
         for pw in self.commentaryWidgets:

@@ -40,7 +40,7 @@
    <property name="bottomMargin">
     <number>5</number>
    </property>
-   <item row="0" column="2">
+   <item row="0" column="0">
     <layout class="QHBoxLayout" name="titleContainer">
      <item>
       <widget class="QLabel" name="title">
@@ -69,7 +69,7 @@
      </item>
     </layout>
    </item>
-   <item row="1" column="2">
+   <item row="1" column="0">
     <layout class="QHBoxLayout" name="teamRow">
      <!-- SPONSOR / NAME labels removed; the sponsor (team) and gamerTag
           (name) fields now share a single row, mirroring the TEAM board's
@@ -136,7 +136,7 @@
      </item>
     </layout>
    </item>
-   <item row="3" column="2">
+   <item row="3" column="0">
     <layout class="QHBoxLayout" name="horizontalLayout">
      <item>
       <widget class="QLabel" name="seedLabel">
@@ -194,33 +194,8 @@
      </item>
     </layout>
    </item>
-   <item row="4" column="2">
-    <layout class="QHBoxLayout" name="realNameRow">
-     <item>
-      <widget class="QLabel" name="realNameLabel">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="maximumSize">
-        <size>
-         <width>70</width>
-         <height>16777215</height>
-        </size>
-       </property>
-       <property name="font">
-        <font>
-         <pointsize>8</pointsize>
-         <bold>true</bold>
-        </font>
-       </property>
-       <property name="text">
-        <string>REAL NAME</string>
-       </property>
-      </widget>
-     </item>
+   <item row="4" column="0">
+    <layout class="QHBoxLayout" name="identityRow">
      <item>
       <widget class="QLineEdit" name="real_name">
        <property name="sizePolicy">
@@ -239,85 +214,6 @@
        </property>
       </widget>
      </item>
-    </layout>
-   </item>
-   <item row="5" column="2">
-    <layout class="QHBoxLayout" name="pronounRow">
-     <item>
-      <widget class="QLabel" name="pronounLabel">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="maximumSize">
-        <size>
-         <width>70</width>
-         <height>16777215</height>
-        </size>
-       </property>
-       <property name="font">
-        <font>
-         <pointsize>8</pointsize>
-         <bold>true</bold>
-        </font>
-       </property>
-       <property name="text">
-        <string>PRONOUN</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QLineEdit" name="pronoun">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="font">
-        <font>
-         <pointsize>9</pointsize>
-        </font>
-       </property>
-       <property name="placeholderText">
-        <string>Pronouns</string>
-       </property>
-      </widget>
-     </item>
-    </layout>
-   </item>
-   <item row="6" column="2">
-    <layout class="QHBoxLayout" name="horizontalLayout_5">
-     <item>
-      <widget class="QLabel" name="twitterLabel">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="maximumSize">
-        <size>
-         <width>70</width>
-         <height>16777215</height>
-        </size>
-       </property>
-       <property name="font">
-        <font>
-         <pointsize>8</pointsize>
-         <bold>true</bold>
-        </font>
-       </property>
-       <property name="text">
-        <string>TWITTER</string>
-       </property>
-       <property name="margin">
-        <number>0</number>
-       </property>
-      </widget>
-     </item>
      <item>
       <widget class="QLineEdit" name="twitter">
        <property name="sizePolicy">
@@ -332,7 +228,7 @@
         </font>
        </property>
        <property name="placeholderText">
-        <string>Handle Only</string>
+        <string>Twitter</string>
        </property>
       </widget>
      </item>
@@ -351,33 +247,8 @@
      </item>
     </layout>
    </item>
-   <item row="7" column="2">
-    <layout class="QHBoxLayout" name="countryRow">
-     <item>
-      <widget class="QLabel" name="locationLabel">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="maximumSize">
-        <size>
-         <width>70</width>
-         <height>16777215</height>
-        </size>
-       </property>
-       <property name="font">
-        <font>
-         <pointsize>8</pointsize>
-         <bold>true</bold>
-        </font>
-       </property>
-       <property name="text">
-        <string>COUNTRY</string>
-       </property>
-      </widget>
-     </item>
+   <item row="5" column="0">
+    <layout class="QHBoxLayout" name="locationRow">
      <item>
       <widget class="QComboBox" name="country">
        <property name="sizePolicy">
@@ -399,35 +270,6 @@
        </property>
        <property name="placeholderText">
         <string>Country</string>
-       </property>
-      </widget>
-     </item>
-    </layout>
-   </item>
-   <item row="8" column="2">
-    <layout class="QHBoxLayout" name="stateRow">
-     <item>
-      <widget class="QLabel" name="stateLabel">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="maximumSize">
-        <size>
-         <width>70</width>
-         <height>16777215</height>
-        </size>
-       </property>
-       <property name="font">
-        <font>
-         <pointsize>8</pointsize>
-         <bold>true</bold>
-        </font>
-       </property>
-       <property name="text">
-        <string>REGION</string>
        </property>
       </widget>
      </item>
@@ -457,7 +299,7 @@
      </item>
     </layout>
    </item>
-   <item row="15" column="0" colspan="4">
+   <item row="15" column="0">
     <widget class="QGroupBox" name="characters">
      <property name="font">
       <font>

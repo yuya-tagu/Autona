@@ -66,6 +66,10 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         grid.setContentsMargins(UI.SPACE_SM, UI.SPACE_SM, UI.SPACE_SM, UI.SPACE_SM)
         grid.setHorizontalSpacing(UI.SPACE_SM)
         grid.setVerticalSpacing(UI.SPACE_SM)
+        # Single-column layout: every row lives in column 0 and stretches to
+        # the full width, so all elements share the same left/right edges.
+        # (Columns 1-3 are legacy from the upstream avatar layout and unused.)
+        grid.setColumnStretch(0, 1)
         for i in range(grid.count()):
             item = grid.itemAt(i)
             if not item:
@@ -78,10 +82,12 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         seed = self.findChild(QSpinBox, "seed")
         seed.setMaximumWidth(seed.sizeHint().width() // 2)
 
-        pronoun = self.findChild(QLineEdit, "pronoun")
-
+        # The Twitter field has no inline label anymore; carry the field name
+        # in the placeholder. "Twitter" only exists in the "app" translation
+        # context (not the .ui Form context), so set it here rather than in
+        # the .ui.
         twitter = self.findChild(QLineEdit, "twitter")
-        twitter.setPlaceholderText("@")
+        twitter.setPlaceholderText(QApplication.translate("app", "Twitter"))
 
         # Birthday flag is not surfaced anywhere downstream yet; keep it
         # hidden unconditionally. Visibility of twitter / twitterLabel and
@@ -116,8 +122,13 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 v = 0
             if v > 0:
                 self.seedDisplay.setText(f"Seed: {v}")
+                self.seedDisplay.setVisible(True)
             else:
+                # Empty seed: hide the trailing slot so it stops reserving
+                # width and the GamerTag field reaches the column's right
+                # edge, staying flush with the rows below.
                 self.seedDisplay.setText("")
+                self.seedDisplay.setVisible(False)
         seed.valueChanged.connect(_syncSeedDisplay)
         _syncSeedDisplay(seed.value())
 
@@ -133,7 +144,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         custom_textbox_layout.setContentsMargins(0, 0, 0, 0)
         self.custom_textbox = QPlainTextEdit()
         custom_textbox_layout.addWidget(self.custom_textbox)
-        self.layout().addLayout(custom_textbox_layout, 98, 2, 1, 1)
+        self.layout().addLayout(custom_textbox_layout, 98, 0, 1, 1)
         self.custom_textbox.setObjectName("custom_textbox")
         self.custom_textbox.setFixedHeight(36)
         self.custom_textbox.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
@@ -146,6 +157,22 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 ])
 
         self.character_container = self.findChild(QWidget, "characters")
+        # On the scoreboard the player block is chrome-free (the team column's
+        # wrapping group box is already flattened in single-player mode), so
+        # drop the CHARACTERS card framing and its 10px side padding too. The
+        # character rows then sit flush with the sponsor/name row and the reset
+        # button — every element shares one left/right edge. Top padding is kept
+        # for the "CHARACTERS" title.
+        if self.path.startswith("score."):
+            self.character_container.setStyleSheet(
+                "QGroupBox { border: none; background: transparent;"
+                " margin-top: 0px; padding: 24px 0px 0px 0px; }"
+                " QGroupBox::title { padding-left: 0px; }")
+            # The .ui leaves the inner layout's side margins at the style
+            # default (~9px); zero them so the character rows are flush with
+            # the column edge. Top clearance for the title comes from the
+            # group box padding above.
+            self.character_container.layout().setContentsMargins(0, 0, 0, 0)
 
         self.LoadCountries()
 
@@ -157,23 +184,28 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         # PlayerDB editor, not the in-match scoreboard). Clear gets its
         # own row below so it reads as a distinct destructive action.
         save_row_layout = QHBoxLayout()
-        save_row_layout.setSpacing(4)
-        self.layout().addLayout(save_row_layout, 99, 0, 1, 3)
+        save_row_layout.setSpacing(UI.SPACE_SM)
+        self.layout().addLayout(save_row_layout, 99, 0, 1, 1)
 
         clear_row_layout = QHBoxLayout()
-        clear_row_layout.setSpacing(4)
-        self.layout().addLayout(clear_row_layout, 100, 0, 1, 3)
+        clear_row_layout.setSpacing(UI.SPACE_SM)
+        self.layout().addLayout(clear_row_layout, 100, 0, 1, 1)
 
         self.save_bt = QPushButton(
             QApplication.translate("app", "Save new player"))
         self.save_bt.setIcon(QIcon(UI.icon_path("save.svg")))
-        save_row_layout.addWidget(self.save_bt)
         self.save_bt.clicked.connect(self.SavePlayerToDB)
-        self.findChild(QLineEdit, "name").editingFinished.connect(
-            self.ManageSavePlayerToDBText)
-        self.findChild(QLineEdit, "team").editingFinished.connect(
-            self.ManageSavePlayerToDBText)
         self.save_bt.setMinimumWidth(1)
+        # Save/Update-player-to-DB is a PlayerDB-editor action; the in-match
+        # scoreboard hides it (same policy as delete_bt below).
+        if self.path.startswith("score."):
+            self.save_bt.hide()
+        else:
+            save_row_layout.addWidget(self.save_bt)
+            self.findChild(QLineEdit, "name").editingFinished.connect(
+                self.ManageSavePlayerToDBText)
+            self.findChild(QLineEdit, "team").editingFinished.connect(
+                self.ManageSavePlayerToDBText)
 
         self.delete_bt = QPushButton(
             QApplication.translate("app", "Delete player entry"))
@@ -191,6 +223,9 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 self.ManageDeletePlayerFromDBActive)
 
         self.clear_bt = QPushButton(QApplication.translate("app", "Clear"))
+        # Destructive action: danger styling (red outline) — opt-in via the
+        # objectName the global QSS targets (ui_constants QPushButton#danger).
+        self.clear_bt.setObjectName("danger")
         self.clear_bt.setIcon(QIcon(UI.icon_path("undo.svg")))
         clear_row_layout.addWidget(self.clear_bt)
         self.clear_bt.clicked.connect(self.Clear)
@@ -257,26 +292,6 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
         AutonaGameAssetManager.instance.signals.onLoad.connect(
             self.ReloadCharacters)
-
-        self.pronoun_completer = QCompleter()
-        self.findChild(QLineEdit, "pronoun").setCompleter(
-            self.pronoun_completer)
-        self.pronoun_list = []
-        for file in ('./user_data/pronouns_list.txt',):
-            try:
-                with open(file, 'r') as f:
-                    for l in f.readlines():
-                        processed_line = l.replace("\n", "").strip()
-                        if processed_line and processed_line not in self.pronoun_list:
-                            self.pronoun_list.append(processed_line)
-            except FileNotFoundError:
-                with open('./user_data/pronouns_list.txt', 'w') as f:
-                    logger.info('creating ./user_data/pronouns_list.txt')
-            except Exception as e:
-                logger.error(traceback.format_exc())
-        self.pronoun_model = QStringListModel()
-        self.pronoun_completer.setModel(self.pronoun_model)
-        self.pronoun_model.setStringList(self.pronoun_list)
 
     def deleteLater(self):
         self._deleted = True
@@ -397,7 +412,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         while len(self.character_elements) < number:
             character_element = QWidget()
             character_element.setLayout(QHBoxLayout())
-            character_element.layout().setSpacing(4)
+            character_element.layout().setSpacing(UI.SPACE_SM)
             character_element.layout().setContentsMargins(0, 0, 0, 0)
             player_character = QComboBox()
             player_character.setEditable(True)
@@ -527,6 +542,13 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 AutonaCountryHelper.countryModel)
 
             country: QComboBox = self._w("country", QComboBox)
+            # Editable combos select the blank first model row (index 0), so the
+            # QComboBox placeholderText (shown only at index -1) never appears.
+            # Mirror it onto the line edit, which shows its placeholder whenever
+            # the text is empty. (Now the only "Country"/"Region" hint, since the
+            # inline labels were removed.)
+            if country.lineEdit() is not None:
+                country.lineEdit().setPlaceholderText(country.placeholderText())
             country.setCompleter(countryCompleter)
             country.completer().setFilterMode(Qt.MatchFlag.MatchContains)
             country.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
@@ -539,6 +561,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             country.currentIndexChanged.connect(self.LoadStates)
 
             state: QComboBox = self._w("state", QComboBox)
+            if state.lineEdit() is not None:
+                state.lineEdit().setPlaceholderText(state.placeholderText())
             state.completer().setFilterMode(Qt.MatchFlag.MatchContains)
             state.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
             state.completer().setFilterMode(Qt.MatchFlag.MatchContains)
@@ -666,14 +690,6 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 self.custom_textbox.setPlainText(
                     f'{data.get("custom_textbox")}'.replace("\\n", "\n"))
                 self.custom_textbox.textChanged.emit()
-
-            pronoun = self._w("pronoun")
-            if data.get("pronoun") and data.get("pronoun") != pronoun.text():
-                data["pronoun"] = AutonaBadWordFilter.Censor(
-                    data["pronoun"], data.get("country_code"))
-                pronoun.setText(
-                    f'{data.get("pronoun")}')
-                pronoun.editingFinished.emit()
 
             if data.get("country_code"):
                 countryElement: QComboBox = self._w("country", QComboBox)
@@ -803,7 +819,6 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             "gamerTag": self._w("name").text(),
             "name": self._w("real_name").text(),
             "twitter": self._w("twitter").text(),
-            "pronoun": self._w("pronoun").text(),
             "custom_textbox": "\\n".join(self.custom_textbox.toPlainText().splitlines())
         }
 
@@ -844,12 +859,6 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 "state", QComboBox).currentData(Qt.ItemDataRole.UserRole).get("code")
 
         AutonaPlayerDB.AddPlayers([playerData], overwrite=True)
-
-        if playerData.get("pronoun") and playerData["pronoun"] not in self.pronoun_list:
-            with open("./user_data/pronouns_list.txt", 'at') as pronouns_file:
-                pronouns_file.write(playerData["pronoun"] + "\n")
-                self.pronoun_list.append(playerData["pronoun"])
-                self.pronoun_model.setStringList(self.pronoun_list)
 
         self.CharactersChanged(includeMains=True)
 
