@@ -1157,7 +1157,8 @@ LoadEverything().then(() => {
                       player &&
                       player.team &&
                       (parseInt(roundKey) > 0 ||
-                        (!allWinners && roundKey == "-1"))
+                        (!allWinners && roundKey == "-1")) &&
+                      data.display_options?.show_sponsor !== false
                         ? player.team
                         : ""
                     }
