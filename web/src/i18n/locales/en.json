@@ -28,7 +28,6 @@
     "tag": "Tag",
     "real_name": "Real Name",
     "twitter": "Twitter",
-    "pronouns": "Pronouns",
     "country": "Country",
     "state": "State",
     "character": "Character",
@@ -59,7 +58,6 @@
     "show_seed": "Seed",
     "show_location": "Location",
     "show_characters": "Characters",
-    "show_pronouns": "Pronouns",
     "show_additional": "Additional Info",
     "seed": "Seed"
 }

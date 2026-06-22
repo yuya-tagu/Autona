@@ -216,14 +216,6 @@ class AutonaSettingsWindow(QDialog):
 
         displaySettings.append((
             QApplication.translate(
-                "settings.show_pronouns", "Show Pronouns"),
-            "show_pronouns",
-            "checkbox",
-            True
-        ))
-
-        displaySettings.append((
-            QApplication.translate(
                 "settings.show_controller", "Show Controller"),
             "show_controller",
             "checkbox",

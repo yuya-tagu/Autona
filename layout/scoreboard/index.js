@@ -236,11 +236,6 @@ LoadEverything().then(() => {
             );
 
             SetInnerHtml(
-              $(`.p${t + 1} .pronoun`),
-              player.pronoun ? player.pronoun : ""
-            );
-
-            SetInnerHtml(
               $(`.p${t + 1} .seed`),
               player.seed ? `Seed ${player.seed}` : ""
             );
@@ -254,8 +249,7 @@ LoadEverything().then(() => {
 
             if ($(".sf6.online").length > 0) {
               console.log(player.twitter);
-              console.log(player.pronoun);
-              if (!player.twitter && !player.pronoun) {
+              if (!player.twitter) {
                 gsap.to($(`.p${t + 1}.chips`), { autoAlpha: 0 });
               } else {
                 gsap.to($(`.p${t + 1}.chips`), { autoAlpha: 1 });

@@ -296,7 +296,6 @@ async function renderPlayerInfo(t, team, player) {
 
   SetInnerHtml($(`.p${side} .score`), String(team.score));
   SetInnerHtml($(`.p${side} .seed`), player.seed ? `SEED ${player.seed}` : "");
-  SetInnerHtml($(`.p${side} .pronoun`), player.pronoun || "");
   SetInnerHtml(
     $(`.p${side} .flagstate`),
     player.state.name
@@ -334,7 +333,6 @@ async function renderTeamInfo(t, team) {
   SetInnerHtml($(`.p${side} .score`), String(team.score));
   SetInnerHtml($(`.p${side} .seed`), "");
   SetInnerHtml($(`.p${side} .flagcountry`), "");
-  SetInnerHtml($(`.p${side} .pronoun`), "");
   SetInnerHtml($(`.p${side} .flagstate`), "");
   SetInnerHtml($(`.p${side} .twitter`), "");
   SetInnerHtml($(`.p${side}.container .sponsor_icon`), "");

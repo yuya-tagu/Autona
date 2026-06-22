@@ -78,13 +78,6 @@ class AutonaLayoutOptionsWindow(QDialog):
         # ================================================================
 
         self.chipOptions.append((
-            QApplication.translate("layout_options.chip_pronouns_display", "Display Player Pronouns"),
-            "chip_pronouns_display",
-            "checkbox",
-            True
-        ))
-
-        self.chipOptions.append((
             QApplication.translate("layout_options.chip_seed_display", "Display Player Seed Number"),
             "chip_seed_display",
             "checkbox",

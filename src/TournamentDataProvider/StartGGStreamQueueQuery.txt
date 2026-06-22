@@ -28,7 +28,6 @@ query StreamQueueQuery($slug: String) {
 									id
 									slug
 									name
-									genderPronoun
 									location {
 										city
 										country

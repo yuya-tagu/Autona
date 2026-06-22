@@ -15,7 +15,6 @@ export interface TSHPlayerInfo {
     mergedOnlyName: string;
     real_name: string;
     seed: number;
-    pronoun?: string;
     sponsor_logo?: string;
     team?: string;
     twitter?: string;
@@ -126,7 +125,6 @@ export interface TSHPlayerDbEntry {
     mains?: TSHMainsMap;
     name: string;
     prefix: string;
-    pronoun: string;
     twitter: string;
 }
 

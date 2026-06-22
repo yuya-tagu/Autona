@@ -318,19 +318,6 @@ body {
   font-size: 32px;
 }
 
-.pronoun {
-  font-size: 16px;
-  text-transform: uppercase;
-  margin-top: auto;
-  margin-left: 6px;
-  margin-right: 6px;
-  letter-spacing: normal;
-  padding-left: 8px;
-  padding-right: 8px;
-  border-radius: 6px;
-  color: var(--bg-color);
-}
-
 .p1 .score {
   color: var(--p1-score-color);
   background: var(--p1-score-bg-color);
@@ -344,10 +331,6 @@ body {
   color: var(--p1-sponsor-color);
 }
 
-.p1 .pronoun {
-  background-color: var(--p1-sponsor-color);
-}
-
 .p2 .score {
   color: var(--p2-score-color);
   background: var(--p2-score-bg-color);
@@ -355,10 +338,6 @@ body {
 
 .p2 .sponsor {
   color: var(--p2-sponsor-color);
-}
-
-.p2 .pronoun {
-  background-color: var(--p2-sponsor-color);
 }
 
 .losers {

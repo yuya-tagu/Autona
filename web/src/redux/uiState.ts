@@ -6,7 +6,6 @@ export interface VisibilityState {
     seed: boolean;
     location: boolean;
     characters: boolean;
-    pronouns: boolean;
     additional: boolean;
 }
 
@@ -17,7 +16,6 @@ export const visibilitySlice = createSlice({
         seed: true,
         location: false,
         characters: false,
-        pronouns: false,
         additional: true,
     } as VisibilityState,
     reducers: {

@@ -349,23 +349,3 @@ body {
   background: var(--p2-score-bg-color);
 }
 
-.pronoun {
-  position: absolute;
-  box-sizing: border-box;
-  width: 90px;
-  top: -22px;
-  left: 258px;
-  font-size: 16px;
-  text-transform: uppercase;
-  padding-left: 2px;
-  padding-right: 4px;
-  border-radius: 4px;
-  color: var(--text-color);
-}
-
-.t1 .pronoun {
-  background-color: var(--p1-score-bg-color);
-}
-.t2 .pronoun {
-  background-color: var(--p2-score-bg-color);
-}
