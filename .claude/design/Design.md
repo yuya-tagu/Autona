@@ -734,10 +734,14 @@ layout/{用途}_{variant}/
 ##### ディレクトリ命名
 
 ```
-layout/thumbnail/         ← デフォルト (template_id = "type_a")
-layout/thumbnail_type_b/  ← バリアント (template_id = "type_b")
+layout/thumbnail/         ← 「Standard」テンプレ (template_id = "type_a")
+layout/thumbnail_type_b/  ← 「Center Panel」テンプレ (template_id = "type_b")
 layout/thumbnail_type_{x}/← 新規追加（任意の識別子）
 ```
+
+`Standard` と `Center Panel` の 2 種類。両者とも Center Panel デザイン
+（左右キャラ＋中央パネル）を出発点として共有し、今後それぞれ別デザインに
+作り込んでいく。設定 UI の `templateSelect` で選択する。
 
 ##### `ThumbnailRenderer.TEMPLATE_SUBDIRS` の規約
 

@@ -1,5 +1,5 @@
 /**
- * type_b: Center Panel layout (NFL-style).
+ * Center Panel (type_b): Center Panel layout (NFL-style).
  *
  * Layout: left/right character areas flank a vertical center panel that
  * contains tournament name, main icon, phase/match text, and best-of.
@@ -33,7 +33,7 @@ async function initThumbnail(payload) {
 
     document.title = "RENDER_READY";
   } catch (e) {
-    console.error("initThumbnail (type_b) error:", e);
+    console.error("initThumbnail error:", e);
     document.title = "RENDER_READY";
   }
 }
@@ -75,7 +75,7 @@ function injectFonts() {
       font-weight: 700;
       font-display: block;
     }
-    /* Aliases used by the type_b template */
+    /* Aliases used by the Standard (Center Panel) template */
     @font-face {
       font-family: "thumbnail-player-font";
       src: url("${boldPath}") format("truetype");
@@ -109,8 +109,6 @@ function applyLayout(template) {
   root.style.setProperty("--panel-w", `${cp.width}px`);
   root.style.setProperty("--panel-h", `${cp.height}px`);
   root.style.setProperty("--panel-bg-color", cp.background_color || "#1D1B18");
-  root.style.setProperty("--panel-border-color", cp.border_color || "rgba(255,255,255,0.22)");
-  root.style.setProperty("--panel-accent-color", cp.accent_color || "#f0a500");
 
   const tn = template.tournament_name;
   root.style.setProperty("--tournament-y", `${tn.y}px`);
@@ -177,13 +175,17 @@ function setBackground(data, config, template) {
   // Tint is now driven by --p1-color / --p2-color (see applyLayout) via a
   // horizontal gradient on .background::after — no per-call setup needed here.
 
-  // type_b uses a fixed template-defined background — the per-tournament
-  // banner image (config.background_path) is intentionally ignored here.
-  // No cache buster: the asset is immutable and re-decoding a multi-MB image
-  // on every render was the main cause of UI stalls during preview updates.
-  const bgPath = template.default_background;
+  // Prefer the user-selected background (Thumbnail Settings → Background);
+  // fall back to the template's default image when none is chosen. Either way
+  // the background is forced grayscale + duotone-tinted by the CSS, so a custom
+  // image still reads as the Standard "Center Panel" style.
+  const bgPath = config.background_path || template.default_background;
   if (!bgPath) return;
   const resolved = resolveAssetPath(bgPath);
+  // No cache buster: re-decoding a multi-MB image on every render was the main
+  // cause of UI stalls during preview updates. Switching the selection changes
+  // the resolved path (hence the URL), so QWebEngine re-fetches naturally
+  // without one — only an in-place edit of the same file would be missed.
   $(".background").html(`<img src="${resolved}" />`);
 }
 

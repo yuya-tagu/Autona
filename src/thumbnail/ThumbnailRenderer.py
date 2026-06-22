@@ -35,7 +35,9 @@ class ThumbnailRenderer(QObject):
     - Sync wrapper available for final thumbnail generation
     """
 
-    # Maps template id -> subdirectory under layout/ (each contains thumbnail.html)
+    # Maps template id -> subdirectory under layout/ (each contains thumbnail.html).
+    # Both templates currently share the Center Panel design as a starting
+    # point; they are crafted into distinct designs over time.
     TEMPLATE_SUBDIRS = {
         "type_a": "thumbnail",
         "type_b": "thumbnail_type_b",

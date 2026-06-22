@@ -1,4 +1,4 @@
-/* Thumbnail layout CSS */
+/* Standard thumbnail (type_a): Center Panel layout (NFL-style) */
 /* Template values are injected as CSS custom properties by thumbnail.js */
 
 * {
@@ -13,9 +13,9 @@ body {
   overflow: hidden;
   position: relative;
   background: transparent;
+  font-family: "LINE Seed JP", sans-serif;
+  letter-spacing: -0.3px;
 }
-
-/* --- Layers --- */
 
 .layer {
   position: absolute;
@@ -30,234 +30,253 @@ body {
 
 .background {
   z-index: 0;
+  /* Knock back the background brightness so the characters and player names
+     keep visual priority. Saturation left at normal (no desaturation). */
+  filter: brightness(0.85);
 }
 
 .background img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* Slight overflow to avoid edge gaps from rounding */
+  transform: scale(1.05);
+  transform-origin: center;
+  /* Show the background image sharp at normal saturation (no grayscale/tint/
+     blur), darkened via brightness so characters and text stay dominant. */
+  filter:
+    contrast(1.1)
+    brightness(var(--bg-brightness, 0.5));
 }
 
-/* --- Character images --- */
+/* --- Character areas (left/right of center panel) --- */
 
 .characters {
   z-index: 1;
-  left: var(--char-x, 0px);
-  top: var(--char-y, 150px);
-  width: var(--char-w, 1920px);
-  height: var(--char-h, 790px);
-  display: flex;
-  flex-direction: row;
 }
 
 .team {
-  width: 50%;
-  height: 100%;
+  position: absolute;
+  top: var(--team-y, 0px);
+  height: var(--team-h, 1080px);
+  width: var(--team-w, 760px);
   overflow: hidden;
-  position: relative;
   display: flex;
 }
 
-/* Character grid when using separators */
-.team.grid-mode {
-  display: grid;
-  grid-auto-flow: var(--grid-flow, column);
+.team-1 {
+  left: var(--team1-x, 0px);
 }
 
-/* Individual character slot */
+.team-2 {
+  left: var(--team2-x, 1160px);
+}
+
 .char-slot {
   position: relative;
   overflow: hidden;
   flex: 1;
 }
 
+/* Cinematic base grade for character art: deepen contrast, boost saturation,
+   and slightly reduce brightness. No rim/backlight glow. */
 .char-slot > div {
   width: 100%;
   height: 100%;
+  filter: contrast(1.12) saturate(1.18) brightness(0.9);
 }
 
 .char-slot.flipped > div {
   transform: scaleX(-1);
 }
 
-/* --- Separators --- */
+/* --- Center panel --- */
 
-.separators {
+/* No panel background: the center content (tournament name, icon, phase/match,
+   venue) sits directly over the tinted character background. Each element
+   carries its own text-shadow for legibility. */
+.center-panel {
   z-index: 2;
-  left: var(--char-x, 0px);
-  top: var(--char-y, 150px);
-  width: var(--char-w, 1920px);
-  height: var(--char-h, 790px);
 }
 
-.separator-line {
+.center-main-icon {
   position: absolute;
-  background: #2a2a2a;
+  left: var(--main-icon-x, 780px);
+  top: var(--main-icon-y, 290px);
+  width: var(--main-icon-w, 360px);
+  height: var(--main-icon-h, 380px);
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  filter: drop-shadow(1px 1px 3px rgba(0, 0, 0, 0.6));
 }
 
-.separator-line.vertical {
-  width: 5px;
-  height: 100%;
-  top: 0;
-}
-
-.separator-line.horizontal {
-  height: 5px;
-  width: 100%;
-  left: 0;
-}
-
-/* --- Foreground (CSS frame) --- */
-
-.foreground {
-  z-index: 3;
-}
-
-.fg-top-bar {
+/* VS mark — "VS" in Gill Sans Ultra Bold, italic, centered on screen where the
+   two characters clash. Minimal (no slash), with the subtle shared shadow. */
+.vs-mark {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: var(--char-y, 150px);
-  background: var(--fg-bar-color, #2a2a2a);
+  left: var(--vs-x, 660px);
+  top: var(--vs-y, 360px);
+  width: var(--vs-w, 600px);
+  height: var(--vs-h, 360px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Gill Sans Ultra Bold", "Gill Sans MT Ultra Bold", "Arial Black", sans-serif;
+  font-weight: 700;
+  font-style: italic;
+  font-size: var(--vs-font-size, 320px);
+  line-height: 1;
+  color: #ffffff;
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.6);
 }
 
-.fg-bottom-bar {
+/* Phase / match — competition + full round name on one line at the bottom,
+   spanning the full width so the single line has room (e.g.
+   "Singles - Winners Semi-Final"). */
+.phase-match {
   position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  height: calc(1080px - var(--char-y, 150px) - var(--char-h, 790px));
-  background: var(--fg-bar-color, #2a2a2a);
+  left: 15%;
+  top: var(--phase-y, 890px);
+  width: 70%;
+  height: var(--phase-h, 100px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-family: var(--phase-font, "LINE Seed JP", sans-serif);
+  font-size: var(--phase-font-size, 64px);
+  font-weight: 700;
+  color: var(--phase-color, #ffffff);
+  padding: 0 40px;
+  overflow: hidden;
+  letter-spacing: 1px;
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.6);
 }
 
-/* --- Player names --- */
+.phase-match .text {
+  display: inline-block;
+  line-height: 1.0;
+  white-space: nowrap;
+}
+
+/* Tournament name — small line (same size/color as the date) between the
+   round line and the date. */
+.tournament-name {
+  position: absolute;
+  left: 15%;
+  top: var(--tournament-y, 950px);
+  width: 70%;
+  height: var(--tournament-h, 42px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--phase-font, "LINE Seed JP", sans-serif);
+  font-size: var(--tournament-font-size, 28px);
+  font-weight: 400;
+  color: var(--tournament-color, #cfd3da);
+  letter-spacing: 1.5px;
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.6);
+  padding: 0 40px;
+  text-align: center;
+}
+
+.tournament-name .text {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+/* Venue info — subtle date + location line at the bottom of the panel */
+.venue-info {
+  position: absolute;
+  left: 15%;
+  top: var(--venue-y, 970px);
+  width: 70%;
+  height: var(--venue-h, 80px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--phase-font, "LINE Seed JP", sans-serif);
+  font-size: var(--venue-font-size, 28px);
+  font-weight: 400;
+  color: var(--venue-color, #cfd3da);
+  opacity: var(--venue-opacity, 0.78);
+  letter-spacing: 1.5px;
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.6);
+  padding: 0 16px;
+  text-align: center;
+}
+
+.venue-info .text {
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.venue-info:empty,
+.venue-info .text:empty {
+  display: none;
+}
+
+/* --- Player names (bottom strips, overlay on character areas) --- */
 
 .player-names {
-  z-index: 4;
+  z-index: 3;
 }
 
 .player-name {
   position: absolute;
-  height: var(--player-text-h, 150px);
-  top: var(--player-text-top, 0px);
+  top: var(--name-top, 0px);
+  height: var(--name-h, 220px);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  justify-content: center;
+  font-family: var(--player-font, "LINE Seed JP", sans-serif);
+  font-size: var(--name-font-size, 60px);
+  font-weight: 700;
+  color: var(--name-color, #ffffff);
+  padding: var(--name-padding-top, 36px) 24px 0 24px;
   overflow: hidden;
-  font-family: var(--player-font, sans-serif);
-  font-size: var(--initial-font-size, 100px);
-  font-weight: bold;
-  color: var(--player-color, #ffffff);
 }
 
+/* No strip background: names rely on their own stroke + drop-shadow for
+   legibility (see .player-name .text). Per-side rules only set position. */
 .player-name.p1 {
-  left: 0;
-  width: 50%;
-  justify-content: center;
+  left: var(--team1-x, 0px);
+  width: var(--team-w, 760px);
 }
 
 .player-name.p2 {
-  left: 50%;
-  width: 50%;
-  justify-content: center;
+  left: var(--team2-x, 1160px);
+  width: var(--team-w, 760px);
 }
 
 .player-name .text {
-  white-space: nowrap;
   display: inline-block;
-  transform-origin: center;
+  white-space: nowrap;
+  text-align: center;
+  line-height: 1.05;
+  /* Slight slant — LINE Seed JP has no italic face, so use synthesized oblique */
+  font-style: oblique 8deg;
+  font-weight: 700;
+  /* Thicken glyphs beyond Bold by stroking with the fill color
+     (LINE Seed JP has no Black/ExtraBold face) */
+  -webkit-text-stroke: 2.5px currentColor;
+  paint-order: stroke fill;
+  transform-origin: center bottom;
+  text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.6);
 }
 
-.player-name.p2 .text {
-  transform-origin: center;
+.player-name .name-line {
+  display: block;
 }
 
-.player-name .sponsor {
+/* Sponsor shown inline with the name on the same line */
+.player-name .sponsor-inline {
+  font-size: var(--sponsor-font-size, 44px);
   color: var(--sponsor-color-1, #ff7a6d);
+  margin-right: 8px;
 }
 
-.player-name.p2 .sponsor {
+.player-name.p2 .sponsor-inline {
   color: var(--sponsor-color-2, #29b6f6);
-}
-
-/* Text outline via text-shadow */
-.player-name.has-outline .text {
-  text-shadow:
-    calc(-1 * var(--outline-w, 2px)) calc(-1 * var(--outline-w, 2px)) 0 var(--player-outline-color, #000),
-    var(--outline-w, 2px) calc(-1 * var(--outline-w, 2px)) 0 var(--player-outline-color, #000),
-    calc(-1 * var(--outline-w, 2px)) var(--outline-w, 2px) 0 var(--player-outline-color, #000),
-    var(--outline-w, 2px) var(--outline-w, 2px) 0 var(--player-outline-color, #000),
-    0 calc(-1 * var(--outline-w, 2px)) 0 var(--player-outline-color, #000),
-    0 var(--outline-w, 2px) 0 var(--player-outline-color, #000),
-    calc(-1 * var(--outline-w, 2px)) 0 0 var(--player-outline-color, #000),
-    var(--outline-w, 2px) 0 0 var(--player-outline-color, #000);
-}
-
-/* --- Info text (phase / match) --- */
-
-.info-text {
-  z-index: 5;
-}
-
-.info-text-container {
-  position: absolute;
-  height: var(--info-text-h, 150px);
-  top: var(--info-text-top, 1001px);
-  left: var(--info-text-x, 0px);
-  width: var(--info-text-w, 1920px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 20px;
-  overflow: hidden;
-  font-family: var(--phase-font, sans-serif);
-  font-size: var(--initial-font-size, 100px);
-  font-weight: bold;
-  color: var(--phase-color, #ffffff);
-}
-
-.info-text-container.has-outline .text {
-  text-shadow:
-    calc(-1 * var(--outline-w, 2px)) calc(-1 * var(--outline-w, 2px)) 0 var(--phase-outline-color, #000),
-    var(--outline-w, 2px) calc(-1 * var(--outline-w, 2px)) 0 var(--phase-outline-color, #000),
-    calc(-1 * var(--outline-w, 2px)) var(--outline-w, 2px) 0 var(--phase-outline-color, #000),
-    var(--outline-w, 2px) var(--outline-w, 2px) 0 var(--phase-outline-color, #000),
-    0 calc(-1 * var(--outline-w, 2px)) 0 var(--phase-outline-color, #000),
-    0 var(--outline-w, 2px) 0 var(--phase-outline-color, #000),
-    calc(-1 * var(--outline-w, 2px)) 0 0 var(--phase-outline-color, #000),
-    var(--outline-w, 2px) 0 0 var(--phase-outline-color, #000);
-}
-
-.info-text-container .phase,
-.info-text-container .match {
-  white-space: nowrap;
-}
-
-.info-text-container .phase .text,
-.info-text-container .match .text {
-  white-space: nowrap;
-  display: inline-block;
-}
-
-/* --- Icons --- */
-
-.icons {
-  z-index: 6;
-}
-
-.icon {
-  position: absolute;
-  background-size: contain;
-  background-repeat: no-repeat;
-  background-position: center;
-}
-
-.main-icon {
-  width: var(--main-icon-w, 340px);
-  height: var(--main-icon-h, 320px);
-}
-
-.side-icon {
-  width: var(--side-icon-w, 240px);
-  height: var(--side-icon-h, 240px);
 }

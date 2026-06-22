@@ -12,40 +12,26 @@
     <!-- Background -->
     <div class="layer background"></div>
 
-    <!-- Character images -->
+    <!-- Character images (left and right of center panel) -->
     <div class="layer characters">
       <div class="team team-1" id="team1"></div>
       <div class="team team-2" id="team2"></div>
     </div>
 
-    <!-- Separator lines -->
-    <div class="layer separators" id="separators"></div>
-
-    <!-- Foreground overlay (CSS frame) -->
-    <div class="layer foreground">
-      <div class="fg-top-bar"></div>
-      <div class="fg-bottom-bar"></div>
+    <!-- Center panel: tournament info (no panel background — content sits
+         directly over the tinted character background) -->
+    <div class="layer center-panel">
+      <div class="center-main-icon" id="mainIcon"></div>
+      <div class="vs-mark" id="vsMark">VS</div>
+      <div class="phase-match" id="phaseMatch"><span class="text"></span></div>
+      <div class="tournament-name" id="tournamentName"><span class="text"></span></div>
+      <div class="venue-info" id="venueInfo"><span class="text"></span></div>
     </div>
 
-    <!-- Player names -->
+    <!-- Player name strips at the bottom of each side -->
     <div class="layer player-names">
       <div class="player-name p1" id="p1name"><span class="text"></span></div>
       <div class="player-name p2" id="p2name"><span class="text"></span></div>
-    </div>
-
-    <!-- Phase / match info -->
-    <div class="layer info-text">
-      <div class="info-text-container" id="infoText">
-        <div class="phase"><span class="text"></span></div>
-        <div class="match"><span class="text"></span></div>
-      </div>
-    </div>
-
-    <!-- Icons -->
-    <div class="layer icons">
-      <div class="icon main-icon" id="mainIcon"></div>
-      <div class="icon side-icon side-left" id="sideLeft"></div>
-      <div class="icon side-icon side-right" id="sideRight"></div>
     </div>
   </div>
 

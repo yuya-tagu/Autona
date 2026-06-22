@@ -1,15 +1,12 @@
 /**
- * Thumbnail rendering entry point.
+ * Standard thumbnail (type_a): Center Panel layout (NFL-style).
+ *
+ * Layout: left/right character areas flank a vertical center panel that
+ * contains tournament name, main icon, phase/match text, and best-of.
+ * Player names are overlaid as bottom strips on each character area.
+ *
  * Called from Python via page().runJavaScript("initThumbnail(payload)").
- *
- * The HTML page is loaded ONCE; this function is called repeatedly
- * with new data (like scoreboard's Update pattern). Previous DOM
- * content is cleared at the start of each call.
- *
  * payload = { data, config, template }
- *   data: program_state content
- *   config: thumbnail_config from settings
- *   template: type_a.json content
  */
 
 let _fontsInjected = false;
@@ -18,34 +15,17 @@ async function initThumbnail(payload) {
   try {
     const { data, config, template } = payload;
 
-    // 0. Clear previous render (page persists between calls)
     clearPreviousRender();
-
-    // 1. Inject @font-face (only once per page lifetime)
     injectFonts();
-
-    // 2. Apply CSS variables from template
-    applyLayout(template, data);
-
-    // 3. Background image
-    setBackground(config, template);
-
-    // 4. Character images
+    applyLayout(template);
+    setBackground(data, config, template);
     await placeCharacters(data, config, template);
-
-    // 5. Separator lines
-    drawSeparators(data, config, template);
-
-    // 6. Player names
+    setTournamentName(data, config, template);
+    setMainIcon(config, template);
+    setPhaseMatch(data, config, template);
+    setVenueInfo(data, config, template);
     setPlayerNames(data, config, template);
 
-    // 7. Phase / match text
-    setInfoText(data, config, template);
-
-    // 8. Icons
-    setIcons(config, template);
-
-    // 9. Wait for fonts + image rasterization in off-screen view
     await document.fonts.ready;
     // setTimeout is more reliable than rAF in off-screen QWebEngineView:
     // rAF may fire before compositor finishes decoding background-image data URIs
@@ -54,7 +34,6 @@ async function initThumbnail(payload) {
     document.title = "RENDER_READY";
   } catch (e) {
     console.error("initThumbnail error:", e);
-    // Signal ready even on error so Python doesn't hang
     document.title = "RENDER_READY";
   }
 }
@@ -64,15 +43,13 @@ async function initThumbnail(payload) {
 function clearPreviousRender() {
   $(".background").html("");
   $("#team1, #team2").html("");
-  $("#separators").html("");
+  $(".tournament-name .text").text("");
+  $(".phase-match .text").text("");
+  $(".venue-info .text").text("");
   $(".player-name .text").html("");
-  $(".phase .text, .match .text").text("");
-  $("#mainIcon, #sideLeft, #sideRight").css("background-image", "none");
-  // Reset text scale transforms
-  $(".player-name .text").css("transform", "");
-  $(".info-text-container .text").css("transform", "");
-  // Ensure info text is visible (may have been hidden)
-  $("#infoText").show();
+  $("#mainIcon").css("background-image", "none");
+  $(".tournament-name .text, .phase-match .text, .player-name .text, .venue-info .text")
+    .css("transform", "");
 }
 
 // --- Font injection (once per page lifetime) ---
@@ -82,92 +59,136 @@ function injectFonts() {
   _fontsInjected = true;
 
   const style = document.createElement("style");
-  const fontPath = "../../assets/font/GenEiMGothic/GenEiMGothic2-Black.ttf";
+  const boldPath = "../../assets/font/LINESeedJP/LINESeedJP-Bold.ttf";
+  const regularPath = "../../assets/font/LINESeedJP/LINESeedJP-Regular.ttf";
 
   style.textContent = `
     @font-face {
+      font-family: "LINE Seed JP";
+      src: url("${regularPath}") format("truetype");
+      font-weight: 400;
+      font-display: block;
+    }
+    @font-face {
+      font-family: "LINE Seed JP";
+      src: url("${boldPath}") format("truetype");
+      font-weight: 700;
+      font-display: block;
+    }
+    /* Aliases used by the Standard (Center Panel) template */
+    @font-face {
       font-family: "thumbnail-player-font";
-      src: url("${fontPath}") format("truetype");
+      src: url("${boldPath}") format("truetype");
       font-display: block;
     }
     @font-face {
       font-family: "thumbnail-phase-font";
-      src: url("${fontPath}") format("truetype");
+      src: url("${boldPath}") format("truetype");
       font-display: block;
     }
   `;
   document.head.appendChild(style);
 }
 
-// --- Layout from template ---
+// --- Layout (CSS variables from template JSON) ---
 
-function applyLayout(template, payload_data) {
+function applyLayout(template) {
   const root = document.documentElement;
-  const t = template;
 
-  // Character area
-  root.style.setProperty("--char-x", `${t.character_images.position.x}px`);
-  root.style.setProperty("--char-y", `${t.character_images.position.y}px`);
-  root.style.setProperty("--char-w", `${t.character_images.dimensions.x}px`);
-  root.style.setProperty("--char-h", `${t.character_images.dimensions.y}px`);
+  const t1 = template.team_areas.team_1;
+  const t2 = template.team_areas.team_2;
+  root.style.setProperty("--team1-x", `${t1.x}px`);
+  root.style.setProperty("--team2-x", `${t2.x}px`);
+  root.style.setProperty("--team-y", `${t1.y}px`);
+  root.style.setProperty("--team-w", `${t1.width}px`);
+  root.style.setProperty("--team-h", `${t1.height}px`);
 
-  // Player text
-  const ptH = t.player_text.dimensions.y;
-  const ptTop = t.player_text.height_center - ptH / 2;
-  root.style.setProperty("--player-text-h", `${ptH}px`);
-  root.style.setProperty("--player-text-top", `${ptTop}px`);
-  root.style.setProperty("--player-text-x-offset", `${t.player_text.x_offset}px`);
-  root.style.setProperty("--initial-font-size", `${t.initial_font_size}px`);
+  // center_panel only drives content positioning (x/y/w/h). Standard has no
+  // panel background, so its background_color key is unused here.
+  const cp = template.center_panel;
+  root.style.setProperty("--panel-x", `${cp.x}px`);
+  root.style.setProperty("--panel-y", `${cp.y}px`);
+  root.style.setProperty("--panel-w", `${cp.width}px`);
+  root.style.setProperty("--panel-h", `${cp.height}px`);
 
-  // Info text
-  const itH = t.info_text.dimensions.y;
-  const itTop = t.info_text.height_center - itH / 2;
-  root.style.setProperty("--info-text-h", `${itH}px`);
-  root.style.setProperty("--info-text-top", `${itTop}px`);
-  root.style.setProperty("--info-text-x", `${t.info_text.x_position}px`);
-  root.style.setProperty("--info-text-w", `${t.info_text.dimensions.x}px`);
+  const mi = template.main_icon;
+  // Explicit x if given (e.g. bottom-left placement); otherwise center in panel
+  const mainX = mi.x != null ? mi.x : cp.x + (cp.width - mi.width) / 2;
+  root.style.setProperty("--main-icon-x", `${mainX}px`);
+  root.style.setProperty("--main-icon-y", `${mi.y}px`);
+  root.style.setProperty("--main-icon-w", `${mi.width}px`);
+  root.style.setProperty("--main-icon-h", `${mi.height}px`);
 
-  // Fonts (hardcoded)
+  // VS mark — centered horizontally in the panel (same math as main icon)
+  const vs = template.vs_mark || {};
+  const vsW = vs.width != null ? vs.width : 600;
+  root.style.setProperty("--vs-x", `${cp.x + (cp.width - vsW) / 2}px`);
+  root.style.setProperty("--vs-y", `${vs.y != null ? vs.y : 360}px`);
+  root.style.setProperty("--vs-w", `${vsW}px`);
+  root.style.setProperty("--vs-h", `${vs.height != null ? vs.height : 360}px`);
+  root.style.setProperty("--vs-font-size", `${vs.font_size != null ? vs.font_size : 320}px`);
+
+  const pm = template.phase_match;
+  root.style.setProperty("--phase-y", `${pm.y}px`);
+  root.style.setProperty("--phase-h", `${pm.height}px`);
+  root.style.setProperty("--phase-font-size", `${pm.font_size != null ? pm.font_size : 64}px`);
+  root.style.setProperty("--phase-color", pm.color || "#ffffff");
+
+  const tn = template.tournament_name || {};
+  root.style.setProperty("--tournament-y", `${tn.y != null ? tn.y : 950}px`);
+  root.style.setProperty("--tournament-h", `${tn.height != null ? tn.height : 42}px`);
+  root.style.setProperty("--tournament-font-size", `${tn.font_size != null ? tn.font_size : 28}px`);
+  root.style.setProperty("--tournament-color", tn.color || "#cfd3da");
+
+  const venue = template.venue_info || {};
+  root.style.setProperty("--venue-y", `${venue.y != null ? venue.y : 970}px`);
+  root.style.setProperty("--venue-h", `${venue.height != null ? venue.height : 80}px`);
+  root.style.setProperty("--venue-font-size", `${venue.font_size != null ? venue.font_size : 28}px`);
+  root.style.setProperty("--venue-color", venue.color || "#cfd3da");
+  root.style.setProperty("--venue-opacity", `${venue.opacity != null ? venue.opacity : 0.78}`);
+
+  const pn = template.player_names;
+  root.style.setProperty("--name-h", `${pn.height}px`);
+  root.style.setProperty("--name-top", `${pn.top_offset || 0}px`);
+  root.style.setProperty("--name-padding-top", `${pn.padding_top != null ? pn.padding_top : 36}px`);
+  root.style.setProperty("--name-font-size", `${pn.font_size}px`);
+  root.style.setProperty("--sponsor-font-size", `${pn.sponsor_font_size || Math.round(pn.font_size * 0.7)}px`);
+  root.style.setProperty("--name-color", pn.color || "#ffffff");
+  root.style.setProperty("--sponsor-color-1", pn.sponsor_color_1 || "#ff7a6d");
+  root.style.setProperty("--sponsor-color-2", pn.sponsor_color_2 || "#29b6f6");
+  // Alias sponsor colors as 1P/2P team colors — used for both the background
+  // tint (horizontal gradient over the grayscale image) and the player name
+  // strip backgrounds. Single source of truth keeps the whole layout coherent.
+  root.style.setProperty("--p1-color", pn.sponsor_color_1 || "#ff7a6d");
+  root.style.setProperty("--p2-color", pn.sponsor_color_2 || "#29b6f6");
+
+  // Background filter (brightness only — no blur)
+  const bg = template.background || {};
+  root.style.setProperty("--bg-brightness", `${bg.brightness != null ? bg.brightness : 0.5}`);
+
+  // Fonts (hardcoded family aliases — actual font face injected separately)
   root.style.setProperty("--player-font", '"thumbnail-player-font", sans-serif');
   root.style.setProperty("--phase-font", '"thumbnail-phase-font", sans-serif');
-
-  // Colors (hardcoded)
-  root.style.setProperty("--player-color", "#FFFFFF");
-  root.style.setProperty("--phase-color", "#FFFFFF");
-  root.style.setProperty("--player-outline-color", "#000000");
-  root.style.setProperty("--phase-outline-color", "#000000");
-  root.style.setProperty("--sponsor-color-1", "#ff7a6d");
-  root.style.setProperty("--sponsor-color-2", "#29b6f6");
-  root.style.setProperty("--outline-w", "3px");
-
-  // Foreground bar color from tournament theme
-  const themeColor = _.get(payload_data, "tournamentInfo.themeColor", "#2a2a2a");
-  root.style.setProperty("--fg-bar-color", themeColor);
-
-  // Icons
-  const ip = t.icons_position;
-  root.style.setProperty("--main-icon-w", `${ip.main.dimensions.x}px`);
-  root.style.setProperty("--main-icon-h", `${ip.main.dimensions.y}px`);
-  root.style.setProperty("--side-icon-w", `${ip.side.dimensions.x}px`);
-  root.style.setProperty("--side-icon-h", `${ip.side.dimensions.y}px`);
-
-  // Always enable outlines
-  $("#p1name, #p2name").addClass("has-outline");
-  $("#infoText").addClass("has-outline");
 }
 
 // --- Background ---
 
-function setBackground(config, template) {
-  let bgPath = config.background_path || template.default_background;
-  if (bgPath) {
-    bgPath = resolveAssetPath(bgPath);
-    // Cache buster: QWebEngine caches by URL, so identical paths between
-    // renders return the previous image even after the underlying file or
-    // user setting changed. Append a timestamp to force re-fetch.
-    const cb = `${bgPath.includes("?") ? "&" : "?"}_t=${Date.now()}`;
-    $(".background").html(`<img src="${bgPath}${cb}" />`);
-  }
+function setBackground(data, config, template) {
+  // Tint is now driven by --p1-color / --p2-color (see applyLayout) via a
+  // horizontal gradient on .background::after — no per-call setup needed here.
+
+  // Prefer the user-selected background (Thumbnail Settings → Background);
+  // fall back to the template's default image when none is chosen. Either way
+  // the background is forced grayscale + duotone-tinted by the CSS, so a custom
+  // image still reads as the Standard "Center Panel" style.
+  const bgPath = config.background_path || template.default_background;
+  if (!bgPath) return;
+  const resolved = resolveAssetPath(bgPath);
+  // No cache buster: re-decoding a multi-MB image on every render was the main
+  // cause of UI stalls during preview updates. Switching the selection changes
+  // the resolved path (hence the URL), so QWebEngine re-fetches naturally
+  // without one — only an in-place edit of the same file would be missed.
+  $(".background").html(`<img src="${resolved}" />`);
 }
 
 // --- Character placement ---
@@ -178,8 +199,6 @@ async function placeCharacters(data, config, template) {
   const gameConfig = _.get(config, `game.${gameCN}`, {});
   const flipP1 = gameConfig.flip_p1 || false;
   const flipP2 = gameConfig.flip_p2 || false;
-  const hideSeparators = gameConfig.hideSeparators || false;
-  const flipSeparators = gameConfig.flipSeparators || false;
   const customZoom = (gameConfig.zoom || 100) / 100;
   const horizontalAlign = (gameConfig.align?.horizontal || 50) / 100;
   const verticalAlign = (gameConfig.align?.vertical || 40) / 100;
@@ -193,114 +212,158 @@ async function placeCharacters(data, config, template) {
     const players = _.get(data, `score.${scoreboardNumber}.team.${teamNum}.player`, {});
     const flip = teamIdx === 0 ? flipP1 : flipP2;
 
-    // Collect all characters for this team
     let allChars = [];
-    for (const [pKey, player] of Object.entries(players)) {
+    for (const [, player] of Object.entries(players)) {
       const characters = _.get(player, "character", {});
-      for (const [cKey, character] of Object.entries(characters)) {
+      for (const [, character] of Object.entries(characters)) {
         if (!character.assets || Object.keys(character.assets).length === 0) continue;
-        // Prefer "full" asset, fall back to biggest
         const asset = character.assets["full"] || GetBiggestAsset(character);
         if (!asset) continue;
         allChars.push({ asset, character });
       }
     }
 
-    if (hideSeparators && allChars.length > 1) {
-      // No-separator (radial) mode
-      const positions = GenerateMulticharacterPositions(
-        allChars.length, [horizontalAlign, verticalAlign]
+    // Right team: reverse so the lead character is closest to the center panel
+    if (teamIdx === 0) {
+      allChars.reverse();
+    }
+
+    for (let i = 0; i < allChars.length; i++) {
+      const charDiv = $(`<div class="char-slot${flip ? " flipped" : ""}"><div></div></div>`);
+      teamEl.append(charDiv);
+
+      const slotW = teamEl.width() / Math.max(allChars.length, 1);
+      const zoomRec = GetRecommendedZoom(allChars[i].asset, slotW, teamEl.height());
+
+      loads.push(
+        CenterImage(charDiv.children(0).get(0), allChars[i].asset, {
+          custom_zoom: customZoom * zoomRec,
+          custom_center: [horizontalAlign, verticalAlign],
+        })
       );
-
-      for (let i = 0; i < allChars.length; i++) {
-        const charDiv = $(`<div class="char-slot${flip ? ' flipped' : ''}"><div></div></div>`);
-        charDiv.css({ position: "absolute", width: "100%", height: "100%" });
-        teamEl.append(charDiv);
-
-        const zoomRec = GetRecommendedZoom(
-          allChars[i].asset, teamEl.width(), teamEl.height()
-        );
-
-        loads.push(
-          CenterImage(charDiv.children(0).get(0), allChars[i].asset, {
-            custom_zoom: customZoom * zoomRec,
-            custom_center: positions[i],
-            use_dividers: false,
-            z_index: allChars.length - i,
-          })
-        );
-      }
-    } else {
-      // Separator (grid) mode
-      if (teamIdx === 0 && !flipSeparators) {
-        allChars.reverse();
-      }
-
-      for (let i = 0; i < allChars.length; i++) {
-        const charDiv = $(`<div class="char-slot${flip ? ' flipped' : ''}"><div></div></div>`);
-        teamEl.append(charDiv);
-
-        const zoomRec = GetRecommendedZoom(
-          allChars[i].asset, teamEl.width() / allChars.length, teamEl.height()
-        );
-
-        loads.push(
-          CenterImage(charDiv.children(0).get(0), allChars[i].asset, {
-            custom_zoom: customZoom * zoomRec,
-            custom_center: [horizontalAlign, verticalAlign],
-          })
-        );
-      }
     }
   }
 
   await Promise.allSettled(loads);
 }
 
-// --- Separators ---
+// --- Main icon (center of panel) ---
 
-function drawSeparators(data, config, template) {
-  const gameCN = _.get(data, "game.codename", "");
-  const gameConfig = _.get(config, `game.${gameCN}`, {});
-  const hideSeparators = gameConfig.hideSeparators || false;
-  if (hideSeparators) return;
+function setMainIcon(config, template) {
+  const mainPath = resolveAssetPath(config.main_icon_path || "./layout/logo.png");
+  if (!mainPath) return;
+  // Cache buster: see setBackground for rationale.
+  const cb = `${mainPath.includes("?") ? "&" : "?"}_t=${Date.now()}`;
+  $("#mainIcon").css("background-image", `url("${mainPath}${cb}")`);
+}
 
-  const sepEl = $("#separators");
+// --- Tournament name (small line near the bottom) ---
 
-  const charW = template.character_images.dimensions.x;
+function setTournamentName(data, config, template) {
+  const name = _.get(data, "tournamentInfo.tournamentName", "")
+    || _.get(data, "tournamentInfo.name", "")
+    || "";
+  const el = $(".tournament-name");
+  el.find(".text").text(name);
+  requestAnimationFrame(() => FitText(el));
+}
 
-  // Separators between characters within each team (no center line)
+// --- Phase / match text (single line at the bottom) ---
+
+function setPhaseMatch(data, config, template) {
   const scoreboardNumber = config.scoreboardNumber || 1;
-  for (let teamIdx = 0; teamIdx < 2; teamIdx++) {
-    const teamNum = teamIdx + 1;
-    const players = _.get(data, `score.${scoreboardNumber}.team.${teamNum}.player`, {});
-    let charCount = 0;
-    for (const [, player] of Object.entries(players)) {
-      const chars = _.get(player, "character", {});
-      for (const [, c] of Object.entries(chars)) {
-        if (c.assets && Object.keys(c.assets).length > 0) charCount++;
-      }
-    }
+  const displayPhase = config.display_phase !== false;
 
-    if (charCount > 1) {
-      const teamW = charW / 2;
-      const teamOffsetX = teamIdx === 0 ? 0 : charW / 2;
-      for (let i = 1; i < charCount; i++) {
-        const x = teamOffsetX + (teamW / charCount) * i;
-        const line = $('<div class="separator-line vertical"></div>');
-        line.css({ left: `${x}px` });
-        sepEl.append(line);
+  const phaseMatchEl = $(".phase-match");
+  const textEl = phaseMatchEl.find(".text");
+  textEl.empty();
+
+  if (!displayPhase) {
+    return;
+  }
+
+  // Competition name + full round name on one line, e.g.
+  // "Singles - Winners Semi-Final". No abbreviation.
+  const phase = _.get(data, `score.${scoreboardNumber}.phase`, "");
+  const match = _.get(data, `score.${scoreboardNumber}.match`, "");
+  const line = [phase, match].filter(Boolean).join(" - ");
+  if (line) {
+    textEl.text(line);
+  }
+
+  requestAnimationFrame(() => FitText(phaseMatchEl));
+}
+
+// --- Venue info (date + location, bottom of center panel) ---
+
+// Format a tournamentInfo.startAt value (unix timestamp / ISO / locale string)
+// into a compact English date like "Dec 15, 2025". Falls back to the raw
+// string if it cannot be parsed.
+function formatDateEn(value) {
+  if (value == null || value === "") return "";
+  const s = String(value).trim();
+  if (!s) return "";
+
+  let d = null;
+
+  // Pure number → unix timestamp (seconds for start.gg, fall through to ms)
+  if (/^\d+$/.test(s)) {
+    const num = Number(s);
+    d = new Date(num > 1e12 ? num : num * 1000);
+  } else {
+    // Try direct parse first (handles ISO 8601, RFC 2822, "MM/DD/YYYY", etc.)
+    const tryDirect = new Date(s);
+    if (!isNaN(tryDirect.getTime())) {
+      d = tryDirect;
+    } else {
+      // Try slash/dash separated date (e.g. "2025/12/15", "15/12/2025")
+      const m = s.match(/^(\d{1,4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,4})$/);
+      if (m) {
+        let a = parseInt(m[1], 10);
+        let b = parseInt(m[2], 10);
+        let c = parseInt(m[3], 10);
+        if (a > 31) {
+          // YYYY/MM/DD
+          d = new Date(a, b - 1, c);
+        } else if (c > 31) {
+          // DD/MM/YYYY if first part is clearly > 12, else assume MM/DD/YYYY
+          if (a > 12) {
+            d = new Date(c, b - 1, a);
+          } else {
+            d = new Date(c, a - 1, b);
+          }
+        }
       }
     }
   }
+
+  if (!d || isNaN(d.getTime())) return s;
+  try {
+    return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+  } catch (e) {
+    return s;
+  }
 }
 
-// --- Player names ---
+function setVenueInfo(data, config, template) {
+  const venueEl = $(".venue-info");
+  const textEl = venueEl.find(".text");
+  textEl.empty();
+
+  const dateRaw = _.get(data, "tournamentInfo.startAt", "");
+  const dateStr = formatDateEn(dateRaw);
+  if (!dateStr) return;
+
+  textEl.text(dateStr);
+  requestAnimationFrame(() => FitText(venueEl));
+}
+
+// --- Player names (bottom strips) ---
 
 function setPlayerNames(data, config, template) {
   const scoreboardNumber = config.scoreboardNumber || 1;
   const useTeamNames = config.use_team_names || false;
-  const useSponsors = config.use_sponsors || false;
+  const useSponsors = config.use_sponsors !== false;
 
   for (let i = 0; i < 2; i++) {
     const teamNum = i + 1;
@@ -310,94 +373,40 @@ function setPlayerNames(data, config, template) {
     if (useTeamNames) {
       const teamName = _.get(data, `score.${scoreboardNumber}.team.${teamNum}.teamName`, "");
       if (teamName) {
-        nameHtml = escapeHtml(teamName);
+        nameHtml = `<span class="name-line">${escapeHtml(teamName)}</span>`;
       }
     }
 
     if (!nameHtml) {
       const players = _.get(data, `score.${scoreboardNumber}.team.${teamNum}.player`, {});
-      const parts = [];
+      const playerEntries = Object.entries(players);
 
-      for (const [, player] of Object.entries(players)) {
+      if (playerEntries.length === 1) {
+        // Single player: sponsor inline, on the same line as the name
+        const [, player] = playerEntries[0];
         const sponsor = player.team || "";
         const name = player.name || "";
-
-        if (sponsor && useSponsors) {
-          parts.push(`<span class="sponsor">${escapeHtml(sponsor)}</span> ${escapeHtml(name)}`);
-        } else {
-          parts.push(escapeHtml(name));
-        }
+        const sponsorInline = (sponsor && useSponsors)
+          ? `<span class="sponsor-inline">${escapeHtml(sponsor)}</span> `
+          : "";
+        nameHtml = `<span class="name-line">${sponsorInline}${escapeHtml(name)}</span>`;
+      } else {
+        // Multiple players (doubles etc.): one player per line, sponsor inline
+        const lines = playerEntries.map(([, player]) => {
+          const sponsor = player.team || "";
+          const name = player.name || "";
+          if (sponsor && useSponsors) {
+            return `<span class="name-line"><span class="sponsor-inline">${escapeHtml(sponsor)}</span> ${escapeHtml(name)}</span>`;
+          }
+          return `<span class="name-line">${escapeHtml(name)}</span>`;
+        });
+        nameHtml = lines.join("");
       }
-
-      nameHtml = parts.join(" / ");
     }
 
     el.find(".text").html(nameHtml);
 
-    // Auto-scale text to fit
     requestAnimationFrame(() => FitText(el));
-  }
-}
-
-// --- Info text ---
-
-function setInfoText(data, config, template) {
-  const scoreboardNumber = config.scoreboardNumber || 1;
-  const displayPhase = config.display_phase !== false;
-
-  if (!displayPhase) {
-    $("#infoText").hide();
-    return;
-  }
-
-  const phase = _.get(data, `score.${scoreboardNumber}.phase`, "");
-  const match = _.get(data, `score.${scoreboardNumber}.match`, "");
-
-  $(".phase .text").text(phase);
-  $(".match .text").text(match);
-}
-
-// --- Icons ---
-
-function setIcons(config, template) {
-  const ip = template.icons_position;
-  const charArea = template.character_images;
-
-  // Main icon: centered on screen
-  const mainW = ip.main.dimensions.x;
-  const mainH = ip.main.dimensions.y;
-  const mainX = (1920 - mainW) / 2;
-  const mainY = (1080 - mainH) / 2;
-
-  const mainPath = resolveAssetPath(config.main_icon_path || "./layout/logo.png");
-  if (mainPath) {
-    // Cache buster: see setBackground for rationale.
-    const cb = `${mainPath.includes("?") ? "&" : "?"}_t=${Date.now()}`;
-    $("#mainIcon").css({
-      left: `${mainX}px`,
-      top: `${mainY}px`,
-      "background-image": `url("${mainPath}${cb}")`,
-    });
-  }
-
-  // Side icons
-  const sideW = ip.side.dimensions.x;
-  const sideH = ip.side.dimensions.y;
-  const sideY = mainY + (mainH - sideH) / 2;
-
-  const sideIcons = [
-    { el: "#sideLeft", path: _.get(config, "side_icon_list.L", ""), x: ip.side.x_offset },
-    { el: "#sideRight", path: _.get(config, "side_icon_list.R", ""), x: charArea.dimensions.x - sideW - ip.side.x_offset + charArea.position.x },
-  ];
-
-  for (const si of sideIcons) {
-    if (si.path) {
-      $(si.el).css({
-        left: `${si.x}px`,
-        top: `${sideY}px`,
-        "background-image": `url("${resolveAssetPath(si.path)}")`,
-      });
-    }
   }
 }
 
