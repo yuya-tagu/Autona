@@ -162,6 +162,8 @@ def remove_special_chars(input_str: str):
     return input_str
 
 
+# Two templates: "Standard" (type_a) and "Center Panel" (type_b). Both share
+# the Center Panel design as a starting point and diverge over time.
 SUPPORTED_TEMPLATE_IDS = ("type_a", "type_b")
 DEFAULT_TEMPLATE_ID = "type_a"
 

@@ -1,58 +1,73 @@
 {
     "name": "Standard",
-    "default_background": "./assets/thumbnail_base/thumbnail_types/type_a/background.svg",
+    "default_background": "./assets/thumbnail_base/standard_default_bg.png",
     "base_ratio": {
         "x": 1920,
         "y": 1080
     },
-    "character_images": {
-        "position": {
+    "team_areas": {
+        "team_1": {
             "x": 0,
-            "y": 150
+            "y": 0,
+            "width": 960,
+            "height": 1080
         },
-        "dimensions": {
-            "x": 1920,
-            "y": 790
+        "team_2": {
+            "x": 960,
+            "y": 0,
+            "width": 960,
+            "height": 1080
         }
     },
-    "player_text": {
-        "dimensions": {
-            "y": 150
-        },
-        "x_offset": 25,
-        "y_padding": 0,
-        "height_center": 75
+    "center_panel": {
+        "x": 738,
+        "y": 0,
+        "width": 444,
+        "height": 1080
     },
-    "info_text": {
-        "dimensions": {
-            "x": 1920,
-            "y": 150
-        },
-        "x_position": 0,
-        "x_offset": 100,
-        "y_padding": 0,
-        "height_center": 1001,
-        "horizontal": true,
-        "always_align_center": true
+    "main_icon": {
+        "x": 50,
+        "y": 900,
+        "width": 130,
+        "height": 130
     },
-    "icons_position": {
-        "align": "bottom",
-        "bind_to_character_images": true,
-        "y_offset": 20,
-        "main": {
-            "dimensions": {
-                "x": 160,
-                "y": 150
-            }
-        },
-        "side": {
-            "x_offset": 10,
-            "dimensions": {
-                "x": 240,
-                "y": 240
-            }
-        }
+    "vs_mark": {
+        "y": 390,
+        "width": 640,
+        "height": 300,
+        "font_size": 250
     },
-    "initial_font_size": 80,
-    "lower_text_stretch_limit": 80
+    "phase_match": {
+        "y": 850,
+        "height": 90,
+        "font_size": 64,
+        "color": "#ffffff"
+    },
+    "tournament_name": {
+        "y": 948,
+        "height": 42,
+        "font_size": 28,
+        "color": "#cfd3da"
+    },
+    "venue_info": {
+        "y": 998,
+        "height": 42,
+        "font_size": 28,
+        "color": "#cfd3da",
+        "opacity": 0.78
+    },
+    "player_names": {
+        "height": 220,
+        "top_offset": 0,
+        "padding_top": 36,
+        "font_size": 100,
+        "sponsor_font_size": 64,
+        "color": "#ffffff",
+        "sponsor_color_1": "#ff7a6d",
+        "sponsor_color_2": "#29b6f6"
+    },
+    "background": {
+        "brightness": 0.5
+    },
+    "initial_font_size": 80
 }

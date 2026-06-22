@@ -1,6 +1,6 @@
 {
     "name": "Center Panel",
-    "default_background": "./assets/thumbnail_base/type_b_default_bg.jpg",
+    "default_background": "./assets/thumbnail_base/standard_default_bg.png",
     "base_ratio": {
         "x": 1920,
         "y": 1080
@@ -24,9 +24,7 @@
         "y": 0,
         "width": 444,
         "height": 1080,
-        "background_color": "#1D1B18",
-        "border_color": "rgba(255, 255, 255, 0.22)",
-        "accent_color": "#FF6E20"
+        "background_color": "#1D1B18"
     },
     "tournament_name": {
         "y": 40,
