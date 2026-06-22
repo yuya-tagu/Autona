@@ -399,7 +399,7 @@ function setVenueInfo(data, config, template) {
 function setPlayerNames(data, config, template) {
   const scoreboardNumber = config.scoreboardNumber || 1;
   const useTeamNames = config.use_team_names || false;
-  const useSponsors = config.use_sponsors !== false;
+  const useSponsors = config.use_sponsors !== false && data.display_options?.show_sponsor !== false;
 
   for (let i = 0; i < 2; i++) {
     const teamNum = i + 1;

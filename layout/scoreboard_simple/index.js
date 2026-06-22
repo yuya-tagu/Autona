@@ -96,7 +96,7 @@ LoadEverything().then(() => {
             `
                 <span>
                     <span class='sponsor'>
-                        ${player.team ? player.team + "" : ""}
+                        ${(player.team && data.display_options?.show_sponsor !== false) ? player.team + "" : ""}
                     </span>
                     ${await Transcript(player.name)}
 										${team.losers && !isTeams ? " [L]" : ""}

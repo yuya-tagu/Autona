@@ -73,7 +73,7 @@ LoadEverything().then(() => {
               $(`.p${t + 1}.container .name`),
               `
                 <span class="sponsor">
-                  ${player.team ? player.team : ""}
+                  ${(player.team && data.display_options?.show_sponsor !== false) ? player.team : ""}
                 </span>
                 ${await Transcript(player.name)}
                 <span class="pronoun">

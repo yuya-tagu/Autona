@@ -238,12 +238,21 @@ class AutonaScoreboardWidget(QWidget):
             [QApplication.translate("app", "Location"),               ["locationLabel", "country", "stateLabel", "state"], "show_location",  False],
             [QApplication.translate("app", "Additional information"), ["custom_textbox"],                                 "show_additional", False],
         ]
+        self._sponsorAction: QAction = None
         for element in self.elements:
             action: QAction = self.eyeBt.menu().addAction(element[0])
             action.setCheckable(True)
             action.setChecked(SettingsManager.Get(f"display_options.{element[2]}", element[3]))
-            action.toggled.connect(
-                lambda toggled, action=action, element=element: self.ToggleElements(action, element[1]))
+            if element[2] == "show_sponsor":
+                self._sponsorAction = action
+                action.toggled.connect(
+                    lambda toggled, action=action, element=element: self._onSponsorActionToggled(action, element[1]))
+            else:
+                action.toggled.connect(
+                    lambda toggled, action=action, element=element: self.ToggleElements(action, element[1]))
+
+        StateManager.Set("display_options.show_sponsor",
+            SettingsManager.Get("display_options.show_sponsor", True))
 
         self.playerWidgets: List[AutonaScoreboardPlayerWidget] = []
         self.team1playerWidgets: List[AutonaScoreboardPlayerWidget] = []
@@ -927,6 +936,13 @@ class AutonaScoreboardWidget(QWidget):
 
         matchLayout.addWidget(self.scoreBar)
 
+        self.hideSponsorCheck = QCheckBox(
+            QApplication.translate("app", "スポンサー名をスコアボードに表示しない"))
+        self.hideSponsorCheck.setChecked(
+            not SettingsManager.Get("display_options.show_sponsor", True))
+        self.hideSponsorCheck.toggled.connect(self._onHideSponsorToggled)
+        matchLayout.addWidget(self.hideSponsorCheck)
+
         # Separator line below the phase/round/BEST OF row to visually
         # delimit it from the team columns beneath.
         self._scoreBarSeparator = QFrame()
@@ -1255,6 +1271,26 @@ class AutonaScoreboardWidget(QWidget):
                 # rather than crashing the toggle.
                 if w is not None:
                     w.setVisible(visible)
+
+    def _onSponsorActionToggled(self, action: QAction, elements):
+        self.ToggleElements(action, elements)
+        if hasattr(self, 'hideSponsorCheck'):
+            self.hideSponsorCheck.blockSignals(True)
+            self.hideSponsorCheck.setChecked(not action.isChecked())
+            self.hideSponsorCheck.blockSignals(False)
+        show = action.isChecked()
+        SettingsManager.Set("display_options.show_sponsor", show)
+        StateManager.Set("display_options.show_sponsor", show)
+
+    def _onHideSponsorToggled(self, hide: bool):
+        if self._sponsorAction is not None:
+            self._sponsorAction.blockSignals(True)
+            self._sponsorAction.setChecked(not hide)
+            self._sponsorAction.blockSignals(False)
+            self.ToggleElements(self._sponsorAction, ["team"])
+        show = not hide
+        SettingsManager.Set("display_options.show_sponsor", show)
+        StateManager.Set("display_options.show_sponsor", show)
 
     def UpdateBottomButtons(self):
         if AutonaTournamentDataProvider.instance.provider and AutonaTournamentDataProvider.instance.provider.url:

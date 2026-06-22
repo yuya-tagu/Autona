@@ -283,7 +283,7 @@ async function renderPlayerInfo(t, team, player) {
   SetInnerHtml(
     $(`.p${side}.container .name`),
     `<span>
-      ${player.team ? `<span class="sponsor">${player.team}</span>` : ""}${player.name ? await Transcript(player.name) : ""}${team.losers ? " (L)" : ""}
+      ${(player.team && data.display_options?.show_sponsor !== false) ? `<span class="sponsor">${player.team}</span>` : ""}${player.name ? await Transcript(player.name) : ""}${team.losers ? " (L)" : ""}
     </span>`
   );
 

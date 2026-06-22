@@ -326,12 +326,14 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
                 <CardContent>
                     <Stack spacing={2}>
                         <Stack {...rowProps}>
-                            <TextField label={i18n.t("sponsor")}
-                                       key={idBase + "sponsor"}
-                                       id={idBase + "sponsor"}
-                                       value={state.team ?? ''}
-                                       onChange={changeHandlerFor('team')}
-                            />
+                            {tshState?.display_options?.show_sponsor !== false && (
+                                <TextField label={i18n.t("sponsor")}
+                                           key={idBase + "sponsor"}
+                                           id={idBase + "sponsor"}
+                                           value={state.team ?? ''}
+                                           onChange={changeHandlerFor('team')}
+                                />
+                            )}
 
                             <Autocomplete
                                 key={idBase + "tag"}
