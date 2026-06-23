@@ -76,14 +76,35 @@ onedir のアップデーター（`ExtractUpdate`）は **「まず直接上書�
   ファイルだけ `*.autona_old` に退避 → 新ファイル書込、とする（`_stash_existing`）
 - 退避物は root と `_internal/` 内だけに収まる → 次回起動時に `CleanupUpdateLeftovers()`
   が一括削除（`Autona.py` 冒頭で呼ぶ。frozen ビルドのみ動作）
-- **既知の制約（mmap ロック）**: `_internal/PyQt6/Qt6/resources/v8_context_snapshot.bin`
-  等、WebEngine が mmap で排他保持するリソースは**上書きもリネームも不可**で置換できない。
-  **同一 Qt バージョン間の更新では中身が同一なので無害**（古いまま残っても問題なし）だが、
-  **Qt 本体を更新するリリースは自動アップデートに乗せず手動再配布**すること（恒久対策は
-  別プロセス更新ヘルパーだが未実装）
+- **既知の制約（mmap ロック）**: `_internal/PyQt6/Qt6/resources/` の WebEngine リソース
+  （`v8_context_snapshot.bin`・`*.pak`・`icudtl.dat` 等）は実行中プロセスが mmap で排他
+  保持し、**上書きもリネームも不可**で置換できない。**同一 Qt バージョン間の更新では中身が
+  同一なので無害**（古いまま残っても問題なし）。WebEngine をフル起動中（サムネイル描画）に
+  閉じるとロック対象は更に広がる
+
+#### Qt 跨ぎ更新の安全策（2段構え・実装済み）
+
+「Qt が変わると上記リソースが置換できず WebEngine がクラッシュする」リスクを、
+人間の記憶ではなく**仕組みで**防ぐ:
+
+1. **Qt をピン留め**（`requirements.txt` で `PyQt6` / `PyQt6-Qt6` /
+   `PyQt6-WebEngine` / `PyQt6-WebEngine-Qt6` を `==6.11.0`）。Qt は**意図的にピンを
+   上げた時だけ**変わる。通常リリースは自動的に「同一 Qt」＝安全
+2. **Qt フィンガープリント gate**（`AutonaUpdater._OnNewVersion`）。
+   `publish_release.ps1` が release notes に `Qt-Build: <qVersion>` を自動付与し、
+   updater は**ダウンロード前に**それと実行中の `qVersion()` を比較。**異なれば自動更新を
+   拒否し「手動で再インストールしてください」を表示**（fail-safe）。マーカーが無い古い
+   リリースは同一 Qt 扱いで許可（後方互換）
+
+→ Qt を上げたい時は **`requirements.txt` のピンを 4 つ揃えて上げて再ビルド**するだけ。
+   その release は gate により自動更新されず、ユーザーは手動再配布で受け取る。
+   恒久的な「シームレスな Qt 跨ぎ自動更新」が必要になった場合のみ、別プロセス更新
+   ヘルパー（ランチャに `--apply-update` モードを追加し、メイン終了後に全展開）を検討する
+   ＝現状は未実装でよい
+
 - **検証状況**: ローカル E2E（実 `ExtractUpdate` を起動中の onedir install に対して実行）で
-  退避が数十件に収まり残骸ゼロ・再起動成功・版数伝播を確認済み。GitHub publish 経由の実地
-  E2E（ダウンロード→更新）は本番 release で一度通すのが望ましい
+  退避が数十件に収まり残骸ゼロ・再起動成功・版数伝播を確認。GitHub publish 経由の実地 E2E
+  （0.9.0 → v1.0.0 検出 → DL → 更新 → 再起動）も完走済み
 
 ### ローカル公開（推奨・確実）
 

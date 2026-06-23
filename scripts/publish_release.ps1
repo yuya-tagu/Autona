@@ -60,6 +60,20 @@ try {
         $Notes = "Autona $tag"
     }
 
+    # Stamp the Qt build into the release notes as a machine-readable marker.
+    # The in-app updater (AutonaUpdater._OnNewVersion) reads this BEFORE
+    # downloading: if the release's Qt differs from the running app's Qt, the
+    # onedir in-place updater can't swap the mmap'd WebEngine resources, so it
+    # refuses the auto-update and tells the user to reinstall manually instead
+    # of shipping a Qt mismatch that crashes WebEngine. Derived from the runtime
+    # here, so it always matches the build published from this same machine.
+    $qtBuild = (python -c "from qtpy.QtCore import qVersion; print(qVersion())" 2>$null)
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($qtBuild)) {
+        $Notes = $Notes.TrimEnd() + "`n`nQt-Build: " + $qtBuild.Trim()
+    } else {
+        Write-Warning "Could not determine Qt version; release will ship without a Qt-Build fingerprint (updater can't gate a Qt mismatch for this release)."
+    }
+
     # gh release create fails on its own if a release with this tag already
     # exists, so we rely on its exit code rather than a pre-check (a pre-check
     # with `gh release view` would emit "release not found" to stderr on the
