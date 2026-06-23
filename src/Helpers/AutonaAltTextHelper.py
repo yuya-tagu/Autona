@@ -4,7 +4,9 @@ import textwrap
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
-from atproto import client_utils
+# NOTE: `atproto` is imported lazily inside generate_bsky_text (see below).
+# Its top-level import pulled in pandas/numpy and cost ~5s of startup time,
+# even though Bluesky text building is only needed when posting to Bluesky.
 
 def add_alt_text_tooltip_to_button(push_button: QPushButton):
     altTextTooltip = QApplication.translate(
@@ -21,6 +23,9 @@ def load_program_state():
 
 
 def generate_bsky_text(scoreboard_id=1, use_phase_name=True):
+    # Deferred import: keeps the heavy atproto dependency off the startup path.
+    from atproto import client_utils
+
     def transform_yt_into_bsky(description, data):
         text = "\n".join(description.split("\n")[:-1]).strip("\n")
         text = "🔴 " + QApplication.translate("altText", "LIVE NOW") + "\n\n" + text

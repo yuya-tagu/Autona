@@ -7,10 +7,15 @@ from qtpy.QtCore import *
 from .AutonaAltTextHelper import generate_bsky_text, generate_youtube
 from .AutonaLocaleHelper import AutonaLocaleHelper
 from src.SettingsManager import SettingsManager
-from atproto import Client
-from atproto_client.models.app.bsky.embed.defs import AspectRatio
+# NOTE: `atproto` is imported lazily inside post_to_bsky (see below). Its
+# top-level import cost ~5s of startup time (pulls in pandas/numpy), and is
+# only needed when actually posting to Bluesky.
 
 def post_to_bsky(scoreboardNumber=1, image_path=None):
+    # Deferred import: keeps the heavy atproto dependency off the startup path.
+    from atproto import Client
+    from atproto_client.models.app.bsky.embed.defs import AspectRatio
+
     locale = AutonaLocaleHelper.programLocale
     bsky_account = SettingsManager.Get("bsky_account", {})
     if not bsky_account or not bsky_account.get("username") or not bsky_account.get("host") or not bsky_account.get("app_password"):

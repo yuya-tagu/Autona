@@ -14,8 +14,10 @@ from ..TournamentDataProvider import TournamentDataProvider
 from .AutonaLocaleHelper import AutonaLocaleHelper
 import orjson
 from loguru import logger
-import countryflag
-from countryflag.core.exceptions import InvalidCountryError
+# NOTE: `countryflag` / `country_converter` were dropped here. They were only
+# used by the old getflag()-based flag lookup, which was replaced by the
+# hand-rolled _iso2_to_flag_emoji() below. country_converter eagerly imports
+# pandas, so these dead imports cost ~1.4s of startup for nothing.
 
 
 class AutonaCountryHelperSignals(QObject):

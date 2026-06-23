@@ -1,8 +1,19 @@
 import contextlib
 import os
+import sys
 
 import orjson
 import traceback
+
+# deepdiff (deephash.py) eagerly runs `try: import pandas` purely to support
+# hashing pandas Series/DataFrame objects. Autona only diffs nested dicts of
+# primitives, so that ~1.4s pandas import is pure startup dead weight. Pinning
+# the sys.modules entry to None makes deepdiff's import fall through to its
+# no-pandas path. setdefault() never clobbers a real pandas already imported
+# elsewhere, so this is a no-op if anything legitimately needs pandas first.
+# StateManager is the only deepdiff importer in src/, so this guard reliably
+# runs before deephash loads. (numpy is left alone — its import is cheap.)
+sys.modules.setdefault("pandas", None)
 
 from deepdiff.helper import DELTA_VIEW
 from qtpy.QtCore import QObject, Signal

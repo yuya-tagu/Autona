@@ -143,7 +143,7 @@ from .AutonaTournamentInfoWidget import AutonaTournamentInfoWidget
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .TournamentDataProvider.StartGGDataProvider import StartGGDataProvider
 from .AutonaAlertNotification import AutonaAlertNotification
-from .AutonaUpdater import AutonaUpdater
+from .AutonaUpdater import AutonaUpdater, CleanupUpdateLeftovers
 from .AutonaPlayerDB import AutonaPlayerDB
 from .Workers import *
 from .StateManager import StateManager
@@ -216,8 +216,10 @@ class Window(QMainWindow):
         if not os.path.exists("./user_data/games"):
             os.makedirs("./user_data/games")
 
-        if os.path.exists("./Autona_old.exe"):
-            os.remove("./Autona_old.exe")
+        # Purge leftovers from a previous in-place update: the legacy
+        # Autona_old.exe (onefile) plus the *.autona_old sidecars the onedir
+        # updater leaves under _internal/. Safe to run now — nothing holds them.
+        CleanupUpdateLeftovers()
 
         for weight in ('Regular', 'Bold', 'Thin'):
             QFontDatabase.addApplicationFont(

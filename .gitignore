@@ -72,6 +72,10 @@ layout_*
 
 # Build artifacts
 Autona.exe
+# onedir runtime folder placed next to Autona.exe at the project root
+# (PyInstaller COLLECT output: Python runtime + Qt/WebEngine binaries).
+_internal/
+Autona_old.exe
 TSH.exe
 TSH/
 build/

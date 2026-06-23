@@ -47,6 +47,13 @@ ASSET_NAME = "release-windows.zip"
 # Fixed name expected by ExtractUpdate (matches original TSH behaviour)
 UPDATE_ZIP = "./update.zip"
 
+# Suffix for files moved aside during a onedir update. The launcher and the
+# loaded _internal/*.dll runtime files cannot be overwritten in place while the
+# (exiting) process still has them mapped, but Windows maps executable images
+# with FILE_SHARE_DELETE, so renaming them out of the way succeeds. The stale
+# sidecars are purged on next launch by CleanupUpdateLeftovers().
+RENAME_SUFFIX = ".autona_old"
+
 # Guards ExtractUpdate from being registered via atexit twice when the
 # UpdateProcedure retry flow re-enters (see original TSH behaviour).
 _extract_registered = False
@@ -139,29 +146,51 @@ def UpdateProcedure():
         retry.exec()
 
 
+def _stash_existing(target: Path, update_log: list) -> None:
+    """Move an existing target file aside before writing a fresh copy.
+
+    Needed for the onedir layout: the running launcher (Autona.exe) and the
+    loaded runtime files under _internal/ (python3xx.dll, Qt6*.dll, ...) are
+    locked against in-place overwrite while the exiting process still has them
+    mapped. Windows maps executable images with FILE_SHARE_DELETE, so renaming
+    them to a .autona_old sidecar succeeds; the new copy is then written to the
+    original path. CleanupUpdateLeftovers() purges the sidecars on next launch.
+    Best-effort: a plain data file that isn't locked is simply overwritten.
+    """
+    if not target.exists():
+        return
+    sidecar = target.with_name(target.name + RENAME_SUFFIX)
+    try:
+        if sidecar.exists():
+            try:
+                sidecar.unlink()
+            except Exception:
+                pass
+        os.replace(target, sidecar)
+    except Exception:
+        # Could not stash it (e.g. sidecar still locked from a prior cycle).
+        # Leave the original in place; the direct write below will overwrite it
+        # if it happens to be unlocked, otherwise that file is skipped.
+        update_log.append(
+            f"Could not stash {target} - {traceback.format_exc()}")
+
+
 def ExtractUpdate():
     """Replace the installed files from UPDATE_ZIP on app exit.
 
     The release zip produced by gen_release.ps1 has entries like
         Autona/
         Autona/Autona.exe
+        Autona/_internal/...
         Autona/assets/...
     We strip the leading "Autona/" segment and write files relative to CWD.
+    Existing files (incl. locked _internal/ runtime DLLs) are moved aside via
+    _stash_existing before the fresh copy is written.
     """
     try:
         update_log = []
 
         with zipfile.ZipFile(UPDATE_ZIP, "r") as z:
-            # Back up the running exe; next launch cleans up Autona_old.exe.
-            if os.path.exists("./Autona.exe"):
-                try:
-                    if os.path.exists("./Autona_old.exe"):
-                        os.remove("./Autona_old.exe")
-                    os.rename("./Autona.exe", "./Autona_old.exe")
-                except Exception:
-                    update_log.append(
-                        "Failed to back up Autona.exe - " + traceback.format_exc())
-
             install_root = Path.cwd().resolve()
 
             for entry in z.namelist():
@@ -201,6 +230,10 @@ def ExtractUpdate():
                 try:
                     if target.parent and str(target.parent) not in ("", "."):
                         target.parent.mkdir(parents=True, exist_ok=True)
+                    # Move any existing (possibly locked) copy aside first so
+                    # loaded _internal/ DLLs and the running launcher can be
+                    # replaced without a sharing violation.
+                    _stash_existing(target, update_log)
                     with z.open(entry) as src, open(target, "wb") as dst:
                         while True:
                             chunk = src.read(1024 * 1024)
@@ -222,6 +255,48 @@ def ExtractUpdate():
             os.remove(UPDATE_ZIP)
         except Exception:
             pass
+    except Exception:
+        logger.error(traceback.format_exc())
+
+
+def CleanupUpdateLeftovers():
+    """Purge update sidecars left by a previous ExtractUpdate run.
+
+    Removes the legacy ./Autona_old.exe (onefile era) and every *.autona_old
+    file produced by the onedir stash-then-write path (mostly under _internal/).
+    Runs once at startup, when nothing holds those files open anymore. Scoped to
+    the install root and a couple of subtrees to keep it cheap; missing or still
+    locked files are ignored. Frozen builds only — dev mode has no sidecars.
+    """
+    if not _is_frozen():
+        return
+    try:
+        # Legacy onefile backup name.
+        if os.path.exists("./Autona_old.exe"):
+            try:
+                os.remove("./Autona_old.exe")
+            except Exception:
+                pass
+
+        # onedir sidecars: the launcher's sidecar sits at the root, the bulk
+        # live under _internal/. Walk just those to avoid scanning game assets.
+        roots = [Path("."), Path("./_internal")]
+        seen = set()
+        for root in roots:
+            if not root.exists():
+                continue
+            # Path("." ) walk would recurse into _internal twice; dedupe files.
+            pattern = "*.autona_old" if root == Path(
+                ".") else "**/*.autona_old"
+            for sidecar in root.glob(pattern):
+                rp = sidecar.resolve()
+                if rp in seen:
+                    continue
+                seen.add(rp)
+                try:
+                    sidecar.unlink()
+                except Exception:
+                    pass
     except Exception:
         logger.error(traceback.format_exc())
 
