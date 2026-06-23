@@ -882,7 +882,7 @@ async function initResult({ data, config, layout }) {
 - PyQt（`src/ui_constants.py`）と React（`web/src/themes.js`）で**同一の役割・同一の値**を持つ
 - 命名規則は言語慣例に従い、PyQt: `snake_case`、React: `camelCase`（プログラム的に変換可能）
 - DARK / LIGHT の 2 セットを両系統で保持
-- accent 色は **クリムゾン `#8A1A2C` に統合**（PdM 確定）
+- accent 色は **スカーレット（純色寄りの赤）** を採用。色相 ~2° はブランドクリムゾン（~348°）とタブバーのグラデーション橙端の中間で、グラデーションの色相レンジ内に収まりつつ brand と差別化される。旧クリムゾン `#8A1A2C` は暗背景上の選択タブ／メニュー文字でコントラストが低かったため明度を上げた（DARK `#C33732`、暗背景でコントラスト比 ~3.2。ベタ塗りの primary ボタンが暗背景で主張し過ぎないよう LIGHT より深めに設定 / LIGHT は明背景・白文字ボタン両対応のため `#CE3A33`）。brand（クリムゾン純色 `#DC143C`/`#C41232`）はライブ／ステータス信号用として据え置き
 
 #### 5.1.2 色トークン正本（DARK）
 
@@ -903,13 +903,13 @@ async function initResult({ data, config, layout }) {
 | 無効テキスト | `#524F4A` | `text_disabled` | `textDisabled` |
 | ブランド色 | `#DC143C` | `brand` | `brand` |
 | ブランド淡色 | `#2A1418` | `brand_subtle` | `brandSubtle` |
-| **アクセント色** | **`#8A1A2C`** | **`accent`** | **`accent`** |
-| アクセントホバー | `#A62238` | `accent_hover` | `accentHover` |
-| アクセント淡色 | `#33121A` | `accent_subtle` | `accentSubtle` |
+| **アクセント色（スカーレット）** | **`#C33732`** | **`accent`** | **`accent`** |
+| アクセントホバー | `#D8453E` | `accent_hover` | `accentHover` |
+| アクセント淡色 | `#3A1413` | `accent_subtle` | `accentSubtle` |
 | ゴールド | `#F0C45A` | `gold` | `gold` |
 | ゴールド淡色 | `#2E2A1E` | `gold_subtle` | `goldSubtle` |
 | ポジティブ | `#6EC77A` | `positive` | `positive` |
-| ネガティブ | `#DC143C` | `negative`（= brand） | `negative`（= brand） |
+| ネガティブ | `#F04E54` | `negative`（明るいアラート赤。danger ボタンはアウトライン式で暗背景での可読性確保のため brand から分離） | `negative` |
 | オンアクセント | `#FFFFFF` | `on_accent` | `onAccent` |
 
 #### 5.1.3 色トークン正本（LIGHT）
@@ -931,9 +931,9 @@ async function initResult({ data, config, layout }) {
 | 無効テキスト | `#B0AAA2` | `text_disabled` | `textDisabled` |
 | ブランド色 | `#C41232` | `brand` | `brand` |
 | ブランド淡色 | `#F5E0E4` | `brand_subtle` | `brandSubtle` |
-| **アクセント色** | **`#8A1A2C`** | **`accent`** | **`accent`** |
-| アクセントホバー | `#A62238` | `accent_hover` | `accentHover` |
-| アクセント淡色 | `#F6D8DD` | `accent_subtle` | `accentSubtle` |
+| **アクセント色（スカーレット）** | **`#CE3A33`** | **`accent`** | **`accent`** |
+| アクセントホバー | `#E2453F` | `accent_hover` | `accentHover` |
+| アクセント淡色 | `#F8DAD7` | `accent_subtle` | `accentSubtle` |
 | ゴールド | `#8E6812` | `gold` | `gold` |
 | ゴールド淡色 | `#F0E8D0` | `gold_subtle` | `goldSubtle` |
 | ポジティブ | `#2E8C3E` | `positive` | `positive` |

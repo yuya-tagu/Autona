@@ -1,8 +1,9 @@
 import {createTheme, responsiveFontSizes} from "@mui/material/styles";
 
 // Autona Admin UI System — warm-neutral palette.
-// Brand and accent share the crimson family per Design.md §5.1
-// (accent = unified crimson #8A1A2C). Use `error`/`secondary` for live signals.
+// Accent is a scarlet (hue ~2°) sitting between brand crimson and the dock
+// tab-bar gradient's orange end per Design.md §5.1. Brand stays crimson.
+// Use `error`/`secondary` for live signals.
 // Keep in sync with src/ui_constants.py and 30_Products/参考資料/color-system.html
 
 const DARK_TOKENS = {
@@ -21,9 +22,9 @@ const DARK_TOKENS = {
     textDisabled:    "#524F4A",
     brand:           "#DC143C",
     brandSubtle:     "#2A1418",
-    accent:          "#8A1A2C",
-    accentHover:     "#A62238",
-    accentSubtle:    "#33121A",
+    accent:          "#C33732",
+    accentHover:     "#D8453E",
+    accentSubtle:    "#3A1413",
     gold:            "#F0C45A",
     goldSubtle:      "#2E2A1E",
 };
@@ -44,9 +45,9 @@ const LIGHT_TOKENS = {
     textDisabled:    "#B0AAA2",
     brand:           "#C41232",
     brandSubtle:     "#F5E0E4",
-    accent:          "#8A1A2C",
-    accentHover:     "#A62238",
-    accentSubtle:    "#F6D8DD",
+    accent:          "#CE3A33",
+    accentHover:     "#E2453F",
+    accentSubtle:    "#F8DAD7",
     gold:            "#8E6812",
     goldSubtle:      "#F0E8D0",
 };
