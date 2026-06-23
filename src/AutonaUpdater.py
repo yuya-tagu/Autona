@@ -18,6 +18,7 @@ and the dialog explains why.
 import atexit
 import json
 import os
+import re
 import sys
 import time
 import traceback
@@ -78,6 +79,15 @@ def _is_newer(remote_tag: str, local_ver: str) -> bool:
         return parse_version(remote_tag.lstrip("v")) > parse_version(local_ver)
     except Exception:
         return remote_tag.lstrip("v") != local_ver
+
+
+def _parse_qt_build(body: str) -> str:
+    """Extract the `Qt-Build: <version>` fingerprint that
+    scripts/publish_release.ps1 stamps into the release notes. Returns "" when
+    absent (older releases / publish without the marker), in which case the
+    caller treats the update as same-Qt and allows it (backward compatible)."""
+    m = re.search(r"(?im)^\s*Qt-Build:\s*([0-9][0-9.]*)\s*$", body or "")
+    return m.group(1) if m else ""
 
 
 # ---------------------------------------------------------------------------
@@ -381,15 +391,26 @@ class _DownloadThread(QThread):
                 r.raise_for_status()
                 total = int(r.headers.get("Content-Length", 0))
                 received = 0
+                last_emit = 0.0
                 with open(tmp, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=65536):
+                    # 1 MB chunks keep per-chunk Python overhead negligible, and
+                    # the progress signal is throttled to ~10/s. Previously this
+                    # emitted a cross-thread signal every 64 KB (~6000 times for
+                    # a 384 MB release), flooding the GUI thread and noticeably
+                    # slowing the download.
+                    for chunk in r.iter_content(chunk_size=1024 * 1024):
                         if self._cancel:
                             raise RuntimeError("cancelled")
                         if not chunk:
                             continue
                         f.write(chunk)
                         received += len(chunk)
-                        self.progress.emit(received, total)
+                        now = time.monotonic()
+                        if now - last_emit >= 0.1:
+                            last_emit = now
+                            self.progress.emit(received, total)
+                # Final emit so the bar lands on 100%.
+                self.progress.emit(received, total)
             os.replace(tmp, self.dest)
             self.done.emit()
         except Exception as e:
@@ -598,8 +619,43 @@ class AutonaUpdater(QObject):
                 logger.info(f"update v{latest} skipped by user setting")
                 return
 
+        # Qt fingerprint gate: a release built against a different Qt ships
+        # incompatible WebEngine resources (v8_context_snapshot.bin, *.pak,
+        # icudtl.dat) that the onedir in-place updater can't swap while the
+        # process holds them mmap'd. Auto-applying such an update leaves a
+        # mismatched WebEngine that crashes on first use (thumbnail render), so
+        # we refuse it and point the user at a manual reinstall instead. A
+        # release without the marker (older builds) is treated as same-Qt.
+        remote_qt = _parse_qt_build(body)
+        local_qt = qVersion()
+        if remote_qt and remote_qt != local_qt:
+            logger.warning(
+                f"update v{latest} changes Qt ({local_qt} -> {remote_qt}); "
+                "auto-update blocked, manual reinstall required")
+            self._ShowManualReinstall(latest, release_url, local_qt, remote_qt)
+            return
+
         self._dialog = _UpdateDialog(current, latest, release_url, asset_url, body)
         self._dialog.show()
+
+    def _ShowManualReinstall(self, latest, release_url, local_qt, remote_qt):
+        """Tell the user a Qt-changing release must be installed by hand."""
+        mb = QMessageBox()
+        mb.setIcon(QMessageBox.Icon.Information)
+        mb.setWindowTitle(QApplication.translate("updater", "Update available"))
+        mb.setText(QApplication.translate(
+            "updater",
+            "Version {0} is available, but it updates core components "
+            "(Qt {1} → {2}) that can't be replaced automatically. Please "
+            "download it and reinstall manually."
+        ).format(latest, local_qt, remote_qt))
+        openBtn = mb.addButton(
+            QApplication.translate("updater", "Open releases page"),
+            QMessageBox.ButtonRole.AcceptRole)
+        mb.addButton(QMessageBox.StandardButton.Close)
+        mb.exec()
+        if mb.clickedButton() is openBtn:
+            QDesktopServices.openUrl(QUrl(release_url or RELEASES_PAGE_URL))
 
     def _OnNoUpdate(self):
         if self._silent:
