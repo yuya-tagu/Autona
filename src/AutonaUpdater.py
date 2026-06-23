@@ -381,15 +381,26 @@ class _DownloadThread(QThread):
                 r.raise_for_status()
                 total = int(r.headers.get("Content-Length", 0))
                 received = 0
+                last_emit = 0.0
                 with open(tmp, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=65536):
+                    # 1 MB chunks keep per-chunk Python overhead negligible, and
+                    # the progress signal is throttled to ~10/s. Previously this
+                    # emitted a cross-thread signal every 64 KB (~6000 times for
+                    # a 384 MB release), flooding the GUI thread and noticeably
+                    # slowing the download.
+                    for chunk in r.iter_content(chunk_size=1024 * 1024):
                         if self._cancel:
                             raise RuntimeError("cancelled")
                         if not chunk:
                             continue
                         f.write(chunk)
                         received += len(chunk)
-                        self.progress.emit(received, total)
+                        now = time.monotonic()
+                        if now - last_emit >= 0.1:
+                            last_emit = now
+                            self.progress.emit(received, total)
+                # Final emit so the bar lands on 100%.
+                self.progress.emit(received, total)
             os.replace(tmp, self.dest)
             self.done.emit()
         except Exception as e:
