@@ -146,19 +146,33 @@ def UpdateProcedure():
         retry.exec()
 
 
-def _stash_existing(target: Path, update_log: list) -> None:
-    """Move an existing target file aside before writing a fresh copy.
+def _write_entry(z: zipfile.ZipFile, entry: str, target: Path) -> None:
+    """Stream a zip entry to target, overwriting in place. Raises on failure
+    (e.g. PermissionError when target is a locked, loaded file)."""
+    with z.open(entry) as src, open(target, "wb") as dst:
+        while True:
+            chunk = src.read(1024 * 1024)
+            if not chunk:
+                break
+            dst.write(chunk)
 
-    Needed for the onedir layout: the running launcher (Autona.exe) and the
-    loaded runtime files under _internal/ (python3xx.dll, Qt6*.dll, ...) are
-    locked against in-place overwrite while the exiting process still has them
-    mapped. Windows maps executable images with FILE_SHARE_DELETE, so renaming
-    them to a .autona_old sidecar succeeds; the new copy is then written to the
-    original path. CleanupUpdateLeftovers() purges the sidecars on next launch.
-    Best-effort: a plain data file that isn't locked is simply overwritten.
+
+def _stash_existing(target: Path, update_log: list) -> bool:
+    """Rename a locked target aside so a fresh copy can be written.
+
+    Only needed for the few files the running process holds open: the launcher
+    (Autona.exe) and the loaded runtime files under _internal/ (python3xx.dll,
+    Qt6*.dll, ...). Windows maps executable images with FILE_SHARE_DELETE, so
+    renaming them to a .autona_old sidecar succeeds even though overwriting them
+    would fault. CleanupUpdateLeftovers() purges the sidecars on next launch.
+
+    Returns True if the original was moved aside (or there was nothing to move),
+    False if it could not be renamed — e.g. a memory-mapped resource opened
+    without delete-share (WebEngine's v8_context_snapshot.bin), which can be
+    replaced neither in place nor by rename while the process lives.
     """
     if not target.exists():
-        return
+        return True
     sidecar = target.with_name(target.name + RENAME_SUFFIX)
     try:
         if sidecar.exists():
@@ -167,12 +181,11 @@ def _stash_existing(target: Path, update_log: list) -> None:
             except Exception:
                 pass
         os.replace(target, sidecar)
+        return True
     except Exception:
-        # Could not stash it (e.g. sidecar still locked from a prior cycle).
-        # Leave the original in place; the direct write below will overwrite it
-        # if it happens to be unlocked, otherwise that file is skipped.
         update_log.append(
             f"Could not stash {target} - {traceback.format_exc()}")
+        return False
 
 
 def ExtractUpdate():
@@ -184,8 +197,10 @@ def ExtractUpdate():
         Autona/_internal/...
         Autona/assets/...
     We strip the leading "Autona/" segment and write files relative to CWD.
-    Existing files (incl. locked _internal/ runtime DLLs) are moved aside via
-    _stash_existing before the fresh copy is written.
+    Each file is overwritten in place; only the few that are locked (the running
+    launcher and loaded _internal/ DLLs) are renamed aside first via
+    _stash_existing, so sidecars are confined to the root and _internal/ — which
+    is exactly what CleanupUpdateLeftovers() scans on next launch.
     """
     try:
         update_log = []
@@ -230,16 +245,23 @@ def ExtractUpdate():
                 try:
                     if target.parent and str(target.parent) not in ("", "."):
                         target.parent.mkdir(parents=True, exist_ok=True)
-                    # Move any existing (possibly locked) copy aside first so
-                    # loaded _internal/ DLLs and the running launcher can be
-                    # replaced without a sharing violation.
-                    _stash_existing(target, update_log)
-                    with z.open(entry) as src, open(target, "wb") as dst:
-                        while True:
-                            chunk = src.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            dst.write(chunk)
+                    try:
+                        # Fast path: overwrite in place. Works for every file
+                        # that isn't currently held open — i.e. all of assets/,
+                        # layout/, web/, user_data/ and most of _internal/.
+                        _write_entry(z, entry, target)
+                    except (PermissionError, OSError):
+                        # Locked: the running launcher or a loaded _internal/
+                        # DLL. Rename the old one aside (allowed for mapped
+                        # images), then write the fresh copy. A memory-mapped
+                        # resource that also refuses rename (e.g. WebEngine's
+                        # v8_context_snapshot.bin) can't be replaced while the
+                        # process lives — left stale, harmless for same-Qt
+                        # updates; a Qt version bump needs a manual reinstall.
+                        if _stash_existing(target, update_log):
+                            _write_entry(z, entry, target)
+                        else:
+                            raise
                 except Exception:
                     update_log.append(
                         f"Failed to extract {entry} - {traceback.format_exc()}")

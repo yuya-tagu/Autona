@@ -65,18 +65,25 @@ release だけを publish し、アップデーターはそちらを参照する
 
 ### onedir でのアップデート挙動（重要）
 
-onedir 移行に伴い、アップデーター（`ExtractUpdate`）は **ロック中ファイルの
-リネーム退避方式**を使う:
+onedir のアップデーター（`ExtractUpdate`）は **「まず直接上書き、ロックされた
+ファイルだけリネーム退避」**方式:
 
-- 実行中はランチャ `Autona.exe` と `_internal/` 内のロード済み DLL
-  （python3xx.dll, Qt6*.dll 等）がロックされ、**その場上書きは共有違反で失敗**する
-- Windows は実行イメージを `FILE_SHARE_DELETE` でマップするため**リネームは可能**。
-  そこで上書き前に既存ファイルを `*.autona_old` にリネーム退避 → 新ファイル書込、とする
-  （`_stash_existing`）
-- 退避した `*.autona_old` は次回起動時に `CleanupUpdateLeftovers()` が一括削除する
-  （`Autona.py` 冒頭で呼ぶ。frozen ビルドのみ動作）
-- **未検証**: エンドツーエンドの自動アップデート（publish → 旧版から更新 → 再起動）は
-  onedir で実地検証が必要。リネーム方式の原理は健全だが、本番 release で一度通すこと
+- 大多数（`assets/`・`layout/`・`web/`・`user_data/` と `_internal/` の大半）は
+  ロックされていないので**そのまま上書き**（退避ファイルを作らない）
+- 実行中はランチャ `Autona.exe` と `_internal/` のロード済み DLL
+  （python3xx.dll, Qt6*.dll 等）がロックされ、上書きは共有違反で失敗する。Windows は
+  実行イメージを `FILE_SHARE_DELETE` でマップするため**リネームは可能**なので、失敗した
+  ファイルだけ `*.autona_old` に退避 → 新ファイル書込、とする（`_stash_existing`）
+- 退避物は root と `_internal/` 内だけに収まる → 次回起動時に `CleanupUpdateLeftovers()`
+  が一括削除（`Autona.py` 冒頭で呼ぶ。frozen ビルドのみ動作）
+- **既知の制約（mmap ロック）**: `_internal/PyQt6/Qt6/resources/v8_context_snapshot.bin`
+  等、WebEngine が mmap で排他保持するリソースは**上書きもリネームも不可**で置換できない。
+  **同一 Qt バージョン間の更新では中身が同一なので無害**（古いまま残っても問題なし）だが、
+  **Qt 本体を更新するリリースは自動アップデートに乗せず手動再配布**すること（恒久対策は
+  別プロセス更新ヘルパーだが未実装）
+- **検証状況**: ローカル E2E（実 `ExtractUpdate` を起動中の onedir install に対して実行）で
+  退避が数十件に収まり残骸ゼロ・再起動成功・版数伝播を確認済み。GitHub publish 経由の実地
+  E2E（ダウンロード→更新）は本番 release で一度通すのが望ましい
 
 ### ローカル公開（推奨・確実）
 
