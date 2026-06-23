@@ -11,8 +11,16 @@ flask-cors
 asyncio
 python-dateutil==2.9.0
 pynput==1.7.7
-PyQt6
-PyQt6-WebEngine
+# Pinned exactly: the Qt build determines the WebEngine resource files
+# (v8_context_snapshot.bin, *.pak, icudtl.dat) that the in-place onedir updater
+# cannot replace while they are mmap'd. Keeping Qt stable means auto-updates
+# stay "same-Qt" (safe). The -Qt6 packages carry the actual Qt/WebEngine
+# binaries, so they are pinned too. Bump all four together; the release Qt
+# fingerprint is derived automatically from the runtime (scripts/publish_release.ps1).
+PyQt6==6.11.0
+PyQt6-Qt6==6.11.0
+PyQt6-WebEngine==6.11.0
+PyQt6-WebEngine-Qt6==6.11.0
 loguru==0.7.3
 flask-socketio
 simple_websocket
