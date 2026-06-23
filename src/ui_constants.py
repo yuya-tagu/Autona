@@ -70,15 +70,23 @@ DARK = {
     "text_disabled":   "#524F4A",
     "brand":           "#DC143C",
     "brand_subtle":    "#2A1418",
-    # Accent: based on the tab-bar gradient's top stop but nudged toward
-    # brighter red for a bolder primary. Hover lifts further.
-    "accent":          "#8A1A2C",
-    "accent_hover":    "#A62238",
-    "accent_subtle":   "#33121A",
+    # Accent (scarlet): hue ~2deg sits between the brand crimson (~348deg) and
+    # the tab-bar gradient's orange end, inside the gradient's hue range so it
+    # harmonises while staying distinct from brand. Deepened (vs the brighter
+    # LIGHT accent) so the filled primary button reads calm on dark, not loud;
+    # still legible as selected-tab text (~3.2 contrast). Hover lifts.
+    "accent":          "#C33732",
+    "accent_hover":    "#D8453E",
+    "accent_subtle":   "#3A1413",
     "gold":            "#F0C45A",
     "gold_subtle":     "#2E2A1E",
     "positive":        "#6EC77A",
-    "negative":        "#DC143C",
+    # Negative/danger: decoupled from brand on DARK. The danger button is an
+    # outline (negative text+border on bg_tertiary), where brand crimson
+    # #DC143C only reached ~3.1 contrast and muddled against the scarlet accent.
+    # A brighter alert red reads clearly and stays distinct (brighter + outline
+    # vs the filled primary). brand #DC143C is kept for live/status signals.
+    "negative":        "#F04E54",
     "on_accent":       "#FFFFFF",
 }
 
@@ -98,9 +106,11 @@ LIGHT = {
     "text_disabled":   "#B0AAA2",
     "brand":           "#C41232",
     "brand_subtle":    "#F5E0E4",
-    "accent":          "#8A1A2C",
-    "accent_hover":    "#A62238",
-    "accent_subtle":   "#F6D8DD",
+    # Same scarlet hue, tuned slightly deeper than DARK so white-on-accent
+    # buttons and accent-as-text on the light canvas keep AA contrast.
+    "accent":          "#CE3A33",
+    "accent_hover":    "#E2453F",
+    "accent_subtle":   "#F8DAD7",
     "gold":            "#8E6812",
     "gold_subtle":     "#F0E8D0",
     "positive":        "#2E8C3E",
