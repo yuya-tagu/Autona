@@ -33,17 +33,23 @@ pyz = PYZ(
     a.zipped_data,
     cipher=block_cipher
 )
+# onedir build: the EXE is a small (~20 MB) launcher and the Python runtime +
+# Qt/WebEngine binaries live in the sibling _internal/ folder, loaded directly
+# at launch. This avoids the onefile bootloader extracting the entire ~250 MB
+# bundle to %TEMP% on every start, which cost ~8-11s of pure startup overhead
+# (measured: onefile ~17.5s -> onedir ~3.5s to interactive).
+# UPX is off — it is not installed on the build machine (upx=True was a no-op),
+# and onedir gains nothing from it.
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='Autona',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,
@@ -59,8 +65,8 @@ coll = COLLECT(
     a.binaries,
     a.zipfiles,
     a.datas,
-    strip=None,
-    upx=True,
+    strip=False,
+    upx=False,
     upx_exclude=[],
     name='Autona'
 )

@@ -40,6 +40,12 @@ Copy-Item -Force "LICENSE" "Autona\LICENSE"
 Copy-Item -Force "ATTRIBUTIONS.md" "Autona\ATTRIBUTIONS.md"
 Copy-Item -Force "Autona.exe" "Autona\Autona.exe"
 
+# onedir build: ship the PyInstaller _internal/ runtime folder next to the
+# launcher. Without it the ~20 MB Autona.exe launcher cannot start (the Python
+# / Qt / WebEngine binaries live here). This replaced the old onefile bundle
+# where everything was embedded inside a single ~250 MB Autona.exe.
+Copy-Item -Recurse -Force "_internal" "Autona\_internal"
+
 Compress-Archive -Path "Autona" -DestinationPath "release-windows.zip" -Update
 
 Pop-Location

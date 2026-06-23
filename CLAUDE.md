@@ -32,7 +32,7 @@ Autona のカスタムフォーク。
 - **デスクトップアプリ**: Python (PyQt6) — `src/`
 - **Web UI**: React (MUI) — `web/src/`
   - ※ フォルダ名は上流由来の歴史的経緯（元々は TournamentStreamHelper のフォーク）。実態はスコアボード等の汎用 Web UI。リネームは影響範囲が広いため保留
-- **ビルド**: PyInstaller → `Autona.exe`（プロジェクト直下、約 236 MB）
+- **ビルド**: PyInstaller（**onedir**）→ `dist/Autona/`（ランチャ `Autona.exe` 約 20 MB + `_internal/`）。直下に `Autona.exe` + `_internal/` を配置して運用
 
 ---
 
@@ -163,21 +163,25 @@ exe ビルドが本当に必要なケース:
 # Web UI（先に実行）
 cd web && npm run build
 
-# exe（配布前のみ）
+# exe（配布前のみ）。onedir 形式 → dist/Autona/ に出力
 pyinstaller dependencies/autona.spec --noconfirm
 
-# ビルド後のコピー
-cp dist/Autona.exe ./Autona.exe
+# ビルド後のコピー（ランチャ + _internal/ を両方）
+rm -rf ./_internal && cp -r dist/Autona/_internal ./_internal
+cp dist/Autona/Autona.exe ./Autona.exe
 
 # 開発時の実行（基本これ）
 python main.py
 ```
 
-- `Autona.exe` はプロジェクト直下のものを使う（`dist/` ではない）
+- **onedir 形式**: ビルド成果物は `dist/Autona/`（小さな `Autona.exe` ランチャ + `_internal/`）。
+  起動高速化のため onefile から移行（onefile は起動毎に約 250 MB を `%TEMP%` 展開し ~8〜11 秒の
+  オーバーヘッド。onedir で展開が消え起動 ~17.5 秒 → ~2.5 秒）。詳細は `.claude/rules/build-and-release.md`
+- `Autona.exe` と `_internal/` はプロジェクト直下のものを使う（`dist/` ではない）。**`_internal/` が無いと起動しない**
 - **Autona.exe が起動中の場合は `taskkill /IM Autona.exe /F` で終了してからコピーしてよい**
 - フォント: LINE Seed JP（`assets/font/LINESeedJP/`、Google Fonts gstatic CDN から取得）
 - 翻訳コンパイル: `.\scripts\compile_translations.ps1 -Lang ja`（`dependencies/tools/` に `lrelease.exe` + `Qt6Core.dll` を同梱済み。PySide6 のインストール不要）
-- **WebEngine 依存**: サムネイル生成（[src/thumbnail/ThumbnailRenderer.py](src/thumbnail/ThumbnailRenderer.py)）が `PyQt6-WebEngine` を使用。`dependencies/requirements.txt` に含まれており、`pip install -r` で自動インストールされる。Qt6WebEngineCore.dll が約 196 MB あるため、Autona.exe が 230〜245 MB 程度になるのは正常
+- **WebEngine 依存**: サムネイル生成（[src/thumbnail/ThumbnailRenderer.py](src/thumbnail/ThumbnailRenderer.py)）が `PyQt6-WebEngine` を使用。`dependencies/requirements.txt` に含まれており、`pip install -r` で自動インストールされる。Qt6WebEngineCore.dll が約 196 MB あるため、`_internal/` 全体が 600 MB 超になるのは正常
 - **上流成果物の扱い**: `TSH.exe` / `TSH/` は上流 TournamentStreamHelper のビルド成果物。Autona 側では使用しないため残さない
 
 ---
