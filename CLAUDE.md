@@ -76,36 +76,32 @@ Edit / Write ツール実行後に以下のメッセージがハーネスから�
 
 ## Git ルール
 
-- `main` への直接 push 禁止
-- `feature/{修正概要}` ブランチを作成し、PR 経由でマージ
+- **作業はローカル `main` 上で行う**（worktree もローカル作業ブランチも作らない）。ブランチはリモート push 時にだけ切る
+- push 時は `git push origin main:<type>/<topic>`（種別ごとに `feat` / `fix` / `docs`）でリモート側にだけブランチを作り、PR 経由でマージする
 - コミットメッセージ・PR 説明文は日本語
 - コミット・プッシュは明示的に依頼されたときのみ
 
 ### 作業ブランチ運用
 
-- ブランチ管理は GitHub で行う。**ローカルでは git worktree を使わない**
-- 現在の通常の作業ツリー上で作業用ブランチを切って作業する
-- `main` への直接コミット・push は禁止。必ず作業用ブランチ → PR 経由でマージ
-- ブランチ命名は内容を表す短い英語（例: `feature/bracket-fix`、`docs/operational-docs-foundation`、`fix/thumbnail-perf`）。timestamp や連番は不要（`git log --all` / `gh pr list` で時系列は追える）
-- ビルド成果物（`Autona.exe`、`web/build/`、`dist/` 等）はこの作業ツリーで運用する
+Hivee と同じ「ローカル `main` 上で作業し、push 時にだけリモート種別ブランチを切って PR 経由でマージ」する運用に統一する。
+
+- リモート: `origin` = `https://github.com/yuya-tagu/Autona.git`（HTTPS, GitHub アカウント `yuya-tagu`）
+- **作業はローカル `main` 上で行う**。worktree もローカル作業ブランチも作らない。ブランチはリモート push 時にだけ切る
+- push 時は `git push origin main:<type>/<topic>`（種別ごとに `feat` / `fix` / `docs`）でリモート側にだけブランチを作る。**リモート `main` への直接 push はしない**（必ず PR 経由でマージ）
+- ブランチ命名（`<topic>` 部分）は内容を表す短い英語（例: `feat/bracket-fix`、`docs/operational-docs-foundation`、`fix/thumbnail-perf`）。timestamp や連番は不要（`git log --all` / `gh pr list` で時系列は追える）
+- ビルド成果物（`Autona.exe`、`web/build/`、`dist/` 等）はこのローカル `main` 上で運用する
 
 #### 王道フロー
 
-1. **最新化**: `git checkout main && git pull` で `main` を最新にする
-2. **作成**: `git checkout -b <branch>` で作業用ブランチを切る
-3. **作業**: 通常通り編集・コミットする（メッセージは日本語）
-4. **PR**: push → PR 作成（タイトル・本文は日本語）。コミット・push・PR は
-   明示的に依頼されたときのみ行う（PR 作成本体の実行可否はユーザー設定に従う）
-5. **マージ後の掃除**: `git checkout main && git pull` で取り込み、
-   `git branch -d <branch>` でローカルブランチを削除（必要なら `git fetch --prune`）
+1. **最新化**: `git fetch origin && git reset --hard origin/main` でローカル `main` を最新にする
+2. **作業**: ローカル `main` 上で通常通り編集・コミットする（メッセージは日本語）
+3. **PR**: 「PRを出して」と依頼されたとき、Claude は コミット（ローカル `main`）→ `git push origin main:<type>/<topic>` で push → PR 文案作成 → PR 作成 URL 共有 までを実行する（`gh pr create` 本体はユーザーが手動。コミット・push は明示的に依頼されたときのみ）
+4. **マージ後の同期**: PR マージ後は `git fetch origin && git reset --hard origin/main` でローカル `main` を再同期する
 
 #### 注意
 
-- 作業中は作業ツリーが作業用ブランチに切り替わっている。デバッグで
-  「リリース済みの最新コード」を触りたい場合は、別途 `main` をチェックアウトするか
-  ビルド済み `Autona.exe` を使う
-- 1 つの作業ツリーで作業するため、ブランチ切替前に未コミット変更を残さない
-  （`git status` で確認 → コミットまたは `git stash`）
+- ローカル作業ブランチを切らないため、未 push のコミットはローカル `main` に積まれる。push（手順3）→ PR → マージ → 再同期（手順4）まで一連で回す
+- 1 つの作業ツリーで作業するため、複数トピックを並行させない。前トピックを push・PR 化してから次に着手する（未コミット変更を残さない。`git status` で確認 → コミットまたは `git stash`）
 
 ### コミット・push の実務（このマシン固有）
 
@@ -122,7 +118,7 @@ push はグローバル設定を恒久変更しない一回限りの手順で行
 ```bash
 gh auth switch --user yuya-tagu
 git -c credential.helper= -c credential.helper="!gh auth git-credential" \
-  push -u origin <branch>
+  push origin main:<type>/<topic>
 gh auth switch --user yuyat-highfield   # 元のアクティブアカウントに復元
 ```
 
