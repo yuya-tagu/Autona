@@ -97,11 +97,52 @@ Hivee と同じ「ローカル `main` 上で作業し、push 時にだけリモ�
 2. **作業**: ローカル `main` 上で通常通り編集・コミットする（メッセージは日本語）
 3. **PR**: 「PRを出して」と依頼されたとき、Claude は コミット（ローカル `main`）→ `git push origin main:<type>/<topic>` で push → PR 文案作成 → PR 作成 URL 共有 までを実行する（`gh pr create` 本体はユーザーが手動。コミット・push は明示的に依頼されたときのみ）
 4. **マージ後の同期**: PR マージ後は `git fetch origin && git reset --hard origin/main` でローカル `main` を再同期する
+5. **マージ後のブランチ削除**: GitHub 側の自動削除は無効なので、マージした種別ブランチをリモートから削除する（後述「ブランチ削除フロー」）。push と同じく `yuya-tagu` 認証が必要
 
 #### 注意
 
-- ローカル作業ブランチを切らないため、未 push のコミットはローカル `main` に積まれる。push（手順3）→ PR → マージ → 再同期（手順4）まで一連で回す
+- ローカル作業ブランチを切らないため、未 push のコミットはローカル `main` に積まれる。push（手順3）→ PR → マージ → 再同期（手順4）→ ブランチ削除（手順5）まで一連で回す
 - 1 つの作業ツリーで作業するため、複数トピックを並行させない。前トピックを push・PR 化してから次に着手する（未コミット変更を残さない。`git status` で確認 → コミットまたは `git stash`）
+
+#### ブランチ削除フロー
+
+ローカルには作業ブランチを作らないため、掃除対象はリモート（`origin`）の種別ブランチのみ。
+`origin/main` と上流フォークの `upstream/*` は**絶対に削除しない**。削除は破壊的なので
+**main にマージ済みのものだけ**を対象とし、未マージブランチは中身を確認してから個別に判断する。
+
+**単発（マージ直後）**: PR をマージしたら、そのトピックブランチを削除する。
+
+```bash
+gh auth switch --user yuya-tagu
+git -c credential.helper= -c credential.helper="!gh auth git-credential" \
+  push origin --delete <type>/<topic>
+git fetch origin --prune
+gh auth switch --user yuyat-highfield   # 元のアクティブアカウントに復元
+```
+
+**一括（定期掃除）**: マージ済みブランチがリモートに溜まったときに棚卸ししてから消す。
+
+```bash
+# 1. 分類して確認（削除はまだしない）
+git fetch origin --prune
+git branch -r --merged origin/main | sed 's/^ *//' \
+  | grep '^origin/' | grep -vE 'origin/main$|origin/HEAD'   # 安全に削除可
+git branch -r --no-merged origin/main | sed 's/^ *//' \
+  | grep '^origin/' | grep -v 'origin/HEAD'                 # 未マージ → 中身を確認
+
+# 2. マージ済みのみ一括削除（upstream/* は対象外）
+branches=$(git branch -r --merged origin/main | sed 's/^ *//' \
+  | grep '^origin/' | grep -vE 'origin/main$|origin/HEAD' | sed 's#^origin/##')
+gh auth switch --user yuya-tagu
+git -c credential.helper= -c credential.helper="!gh auth git-credential" \
+  push origin --delete $branches
+git fetch origin --prune
+gh auth switch --user yuyat-highfield
+```
+
+- 未マージブランチ（`--no-merged`）は `git log origin/main..origin/<branch>` で中身を確認し、
+  陳腐化していれば個別に削除、活きていれば残す。一括削除には混ぜない
+- 削除後は必ず `yuyat-highfield` に戻す（push 手順と同じ理由）
 
 ### コミット・push の実務（このマシン固有）
 
