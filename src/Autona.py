@@ -224,6 +224,19 @@ class Window(QMainWindow):
         if not os.path.exists("./user_data/games"):
             os.makedirs("./user_data/games")
 
+        # layout/logo.png doubles as runtime-mutable state (loading a
+        # tournament overwrites it with that tournament's logo), so it is
+        # gitignored rather than tracked. Seed it from the Autona brand icon
+        # on first run so the default tournament icon is Autona instead of a
+        # missing/placeholder image. This is the single source of the default
+        # (same asset SetDefaultIcon copies on "reset to default").
+        if not os.path.exists("layout/logo.png"):
+            try:
+                shutil.copy("assets/icons/icon.png", "layout/logo.png")
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "Could not seed default tournament logo.")
+
         # Purge leftovers from a previous in-place update: the legacy
         # Autona_old.exe (onefile) plus the *.autona_old sidecars the onedir
         # updater leaves under _internal/. Safe to run now — nothing holds them.
