@@ -13,6 +13,10 @@ user_data/team_logo/*
 !user_data/team_logo/*.txt
 out/
 update.tar.gz
+
+# Runtime-mutable tournament logo (overwritten when a tournament is loaded).
+# Seeded from assets/icons/icon.png on first run — see Window.__init__.
+layout/logo.png
 __pycache__/
 .vscode/
 dist
