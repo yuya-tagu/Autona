@@ -254,3 +254,45 @@ objectName → 明示的なキー名マッピングを導入。ただし既存�
 | S-03 | Window __init__ | 影響範囲広い。慎重に |
 | S-10 | シングルトン遅延初期化 | 全ファイルに影響。フェーズ3以降 |
 | S-14 | objectName 依存 | 後方互換性の問題。設計議論が必要 |
+
+---
+
+## S-15: git 管理ファイルが実行時に書き換わる（テスト汚染・既定逆戻りの地雷）[P2/D2/S2]
+
+**根拠**: 2026-06-24「大会デフォルト/タスクバーアイコン」調査の横展開。
+アプリの全書き込み先（`open(...,'w')`/`json.dump`/`shutil.copy`/`.save`/`os.rename`）を
+抽出し、git 管理状態・実行時に書くか読むだけかを突き合わせた結果。
+
+**問題の型**: 「出荷時の既定値（tracked）」と「実行時に書き換わる状態ファイル」を兼ねた
+ファイルがあると、テスト/利用で working tree が汚れ、うっかり `git add -A && git commit`
+すると既定値が逆戻り（または API/テストデータが混入）する。
+
+**該当ファイル**:
+
+| ファイル | tracked | 実行時書き込み | 状態 |
+|----------|---------|----------------|------|
+| `layout/logo.png` | 除外済 | 大会読込で上書き | ✅ 解消（PR #71 系: gitignore + 起動時 `assets/icons/icon.png` から seed） |
+| `assets/characters.json` | **YES** | 毎起動 `AutonaGameAssetManager.UiMounted → DownloadStartGGCharacters` が start.gg API から再DL → `os.remove`+`os.rename` で本体置換 | 🔴 **未対応**。今クリーンなのは API 内容が偶然一致しているだけ。API 更新で汚れる |
+| `user_data/alerts_red.json` | **YES** | 通知の「既読」(`MarkNotificationRed`)で書き込み。現在は `AutonaAlertNotification.UiMounted` が no-op で休眠 | 🟡 **未対応**（軽微）。状態ファイルなので tracked すべきでない |
+
+**安全と確認済み（読むだけ / dev ツールのみ書く / 既に gitignore 済）**:
+`src/i18n/mapping.json`（書くのは `gen_translation_files.py` のみ）、`user_data/rulesets.json`、
+`user_data/pronouns_list.txt`、`layout/settings.json`・`layout/*/settings.json`、
+`user_data/{settings,local_players,layout_options}.json`（gitignore 済）、`out/*`・`*.tmp`（gitignore 済）。
+
+**対策案**:
+- `assets/characters.json`: 読み取り必須（`AutonaGameAssetManager` 906行付近）でオフラインの
+  fresh clone で消えると起動失敗するため**単純な untrack は不可**。runtime DL 先を
+  `user_data/characters.json`（gitignore）に変更し、読み込みは「user_data 優先・無ければ
+  tracked の `assets/characters.json` にフォールバック」にする。tracked 版は出荷シードとして
+  読み取り専用に固定。
+- `user_data/alerts_red.json`: `.gitignore` 追加 + `git rm --cached`。無ければ自動生成される
+  ため seed 不要。
+
+**横展開の手順（再調査時）**:
+```bash
+# 書き込み先の抽出
+grep -rEn "open\([^,]+,\s*['\"](w|wb|a)|json\.dump|shutil\.copy|\.save\(|os\.rename" src/ | grep -v __pycache__
+# tracked かつ ignore されていないものを突き合わせ（git ls-files / git check-ignore）
+# 多数起動した後の `git status` が最も確実な「実行時書き込み」の実証
+```
