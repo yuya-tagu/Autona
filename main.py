@@ -9,6 +9,19 @@
 import sys
 sys.dont_write_bytecode = True
 
+# Set the Windows AppUserModelID at the EARLIEST possible point — before
+# `import src`, which constructs the QApplication and (via its many imports)
+# may lock the process/window identity Windows uses for the taskbar. Setting
+# it here ensures the taskbar groups under our identity and uses the window
+# icon (the Autona .ico) instead of the generic / host-exe icon.
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "HiveeWorks.Autona")
+    except Exception:
+        pass
+
 import src
 import multiprocessing
 import signal

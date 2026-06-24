@@ -30,6 +30,7 @@ from qtpy.QtCore import (
 from qtpy.QtGui import (
     QColor,
     QFont,
+    QIcon,
     QLinearGradient,
     QPainter,
     QPen,
@@ -148,6 +149,9 @@ class AutonaSplashScreen(QSplashScreen):
         self._base_pixmap = _render_base_pixmap()
         super().__init__(parent, self._base_pixmap)
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint)
+        # Carry the app icon on the splash too (the first window shown), so
+        # every window under our AppUserModelID has the Autona mark.
+        self.setWindowIcon(QIcon(UI.icon_path("icon.ico")))
 
         self._message_base = ""
         self._progress = 0.0

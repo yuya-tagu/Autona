@@ -34,6 +34,10 @@ QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
 if parse(qtpy.QT_VERSION).major == 6:
     QImageReader.setAllocationLimit(0)
 
+# NOTE: the Windows AppUserModelID is set at the very top of main.py
+# (before this module is imported), so the taskbar groups the app under
+# our identity rather than the host python.exe.
+
 App = QApplication(sys.argv)
 AutonaQtHelper.init_gui_executor()  # guaranteed to be the main thread.
 
@@ -99,7 +103,11 @@ logger.add(
 
 try:
     # Setting the icon for individual windows doesn't work on mac (and perhaps linux? unknown)
-    App.setWindowIcon(QIcon(UI.icon_path("icon.png")))
+    # Use the multi-resolution .ico (not .png): a single PNG renders in the
+    # title bar but Windows fails to build a taskbar-sized HICON from it and
+    # falls back to the host python.exe icon. The .ico embeds 16/32/48/256
+    # so the taskbar button picks up the Autona mark.
+    App.setWindowIcon(QIcon(UI.icon_path("icon.ico")))
 except:
     logger.opt(exception=True).warning("Could not set window icon for QApplication.")
 
@@ -208,7 +216,7 @@ class Window(QMainWindow):
         self.savedProgramState = {}
         self.programStateDiff = {}
 
-        self.setWindowIcon(QIcon(UI.icon_path('icon.png')))
+        self.setWindowIcon(QIcon(UI.icon_path('icon.ico')))
 
         if not os.path.exists("out/"):
             os.mkdir("out/")
