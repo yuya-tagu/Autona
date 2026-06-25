@@ -17,6 +17,21 @@ import shutil
 import requests
 
 
+# characters.json is shipped as a tracked seed in assets/ but is refreshed from
+# the start.gg API at every startup. Writing the runtime copy back into the
+# tracked seed dirties the working tree and risks committing API data (see
+# known-smells S-15). The runtime download now targets user_data/ (gitignored),
+# and reads prefer that copy, falling back to the tracked seed for a fresh clone.
+CHARACTERS_SEED_PATH = './assets/characters.json'
+CHARACTERS_RUNTIME_PATH = './user_data/characters.json'
+
+
+def _resolve_characters_path() -> str:
+    if os.path.exists(CHARACTERS_RUNTIME_PATH):
+        return CHARACTERS_RUNTIME_PATH
+    return CHARACTERS_SEED_PATH
+
+
 class AutonaGameAssetManagerSignals(QObject):
     onLoad = Signal()
     onLoadAssets = Signal()
@@ -59,31 +74,33 @@ class AutonaGameAssetManager(QObject):
     def DownloadStartGGCharacters(self):
         class DownloaderThread(QThread):
             def run(self):
+                tmp_path = CHARACTERS_RUNTIME_PATH + '.tmp'
                 try:
                     url = 'https://api.start.gg/characters'
                     r = requests.get(url, allow_redirects=True)
                     r_json = orjson.dumps(orjson.loads(
                         r.text), option=orjson.OPT_INDENT_2)
 
-                    open('./assets/characters.json.tmp', 'wb').write(r_json)
+                    # Write runtime copy into user_data/ (gitignored), never the
+                    # tracked seed in assets/ (known-smells S-15)
+                    os.makedirs(
+                        os.path.dirname(CHARACTERS_RUNTIME_PATH), exist_ok=True)
+                    open(tmp_path, 'wb').write(r_json)
 
                     try:
                         # Test if downloaded JSON is valid
-                        orjson.loads(open('./assets/characters.json.tmp').read())
+                        orjson.loads(open(tmp_path, 'rb').read())
 
-                        # Remove old file, overwrite with new one
-                        os.remove('./assets/characters.json')
-                        os.rename(
-                            './assets/characters.json.tmp',
-                            './assets/characters.json'
-                        )
+                        # Atomically overwrite the runtime copy (os.replace works
+                        # whether or not the target already exists)
+                        os.replace(tmp_path, CHARACTERS_RUNTIME_PATH)
 
                         logger.info("startgg characters file updated")
                     except:
                         logger.error("Characters file download failed")
                 except Exception as e:
                     logger.error(
-                        "Could not update /assets/characters.json: "+str(e))
+                        "Could not update " + CHARACTERS_RUNTIME_PATH + ": " + str(e))
         thread = DownloaderThread(self)
         thread.start()
 
@@ -901,9 +918,10 @@ class AutonaGameAssetManager(QObject):
             self.assetsLoader.game = game
             self.assetsLoader.run(mods_active=mods_active, mods_reload_mode=mods_reload_mode)
 
-        # Setup startgg character id to character name
+        # Setup startgg character id to character name (prefer runtime copy in
+        # user_data/, fall back to the tracked seed in assets/)
         sggcharacters = orjson.loads(
-            open('./assets/characters.json', 'rb').read())
+            open(_resolve_characters_path(), 'rb').read())
         self.startgg_id_to_character = {}
 
         for c in sggcharacters.get("entities", {}).get("character", []):

@@ -550,11 +550,12 @@ class TestParseMatchDataNewApi:
         assert result["p1_seed"] == 1
         assert result["p2_seed"] == 2
 
-    def test_stream_twitch(self):
-        """Twitch stream URL construction."""
+    def test_stream_name(self):
+        """stream stores the raw streamName (the https://twitch.tv/ URL
+        construction was removed; callers build the URL if needed)."""
         provider = _make_provider()
         result = provider.ParseMatchDataNewApi(_new_api_set_basic())
-        assert result["stream"] == "https://twitch.tv/btssmash"
+        assert result["stream"] == "btssmash"
 
     def test_station(self):
         provider = _make_provider()
@@ -607,7 +608,8 @@ class TestParseMatchDataNewApi:
         p1 = result["entrants"][0][0]
 
         assert p1["twitter"] == "tweaborned"
-        assert p1["pronoun"] == "He/Him"
+        # pronoun was intentionally removed from the product; the parser no
+        # longer extracts genderPronoun, so there is no "pronoun" field.
         assert p1["avatar"] == "https://example.com/tweek.png"
         assert p1["country_code"] == "US"
         assert p1["state_code"] == "NJ"
@@ -620,13 +622,16 @@ class TestParseMatchDataNewApi:
         p2 = result["entrants"][1][0]
         assert p2["country_code"] == "JP"
 
-    def test_entrant_state_from_city(self):
-        """State lookup from city when state is null."""
+    def test_entrant_city_no_state_inference(self):
+        """City-based state inference was removed (StartGGDataProvider.py
+        ~843-847: linear scans were slow on large pools and unreliable for
+        Japanese users). P2 (Japan, state null, city=Tokyo) gets no
+        state_code, but the raw city is captured."""
         provider = _make_provider()
         result = provider.ParseMatchDataNewApi(_new_api_set_basic())
         p2 = result["entrants"][1][0]
-        # P2: Japan, no state, city=Tokyo -> FindState returns "13"
-        assert p2["state_code"] == "13"
+        assert "state_code" not in p2
+        assert p2["city"] == "Tokyo"
 
     def test_character_selection_main(self):
         """Character selection from recent sets produces startggMain and mains."""
@@ -661,12 +666,12 @@ class TestParseMatchDataNewApi:
         assert p2["seed"] == 10
 
     def test_null_stream(self):
-        """When stream is None, stream field should be None."""
+        """When stream is None, stream field defaults to "" (not None)."""
         provider = _make_provider()
         data = _new_api_set_basic()
         data["stream"] = None
         result = provider.ParseMatchDataNewApi(data)
-        assert result["stream"] is None
+        assert result["stream"] == ""
 
     def test_returns_empty_dict_on_exception(self):
         """Parse errors should return {}."""
@@ -843,7 +848,9 @@ class TestProcessEntrantData:
         }
         result = StartGGDataProvider.ProcessEntrantData(entrant)
         assert result["country_code"] == "JP"
-        assert result["state_code"] == "13"
+        # City-based state inference removed; with no direct state field
+        # Start.gg gives us, state_code is not set.
+        assert "state_code" not in result
 
     def test_no_user_gives_zero_id(self):
         """When user is None/falsy, id should be [player_id, 0]."""
