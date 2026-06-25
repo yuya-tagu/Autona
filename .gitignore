@@ -5,6 +5,9 @@ user_data/layout_options.json
 user_data/tournament_banner.png
 user_data/badword_blacklist.txt
 user_data/badword_whitelist.txt
+user_data/characters.json
+user_data/characters.json.tmp
+user_data/alerts_red.json
 user_data/player_avatar/*
 !user_data/player_avatar/*.txt
 user_data/sponsor_logo/*
