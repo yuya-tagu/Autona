@@ -80,31 +80,41 @@
 
 ---
 
-## S-05: StartGGDataProvider のパース関数肥大化 [P1/D2/S1] 🔴 未着手（大幅に肥大化）
+## S-05: StartGGDataProvider のパース関数肥大化 [P1/D2/S1] ✅ 実質解消（前提は計測ミス・2026-06-27）
 
 **根拠**: python-hotspots.md「巨大関数 TOP 15」
 
-**2026-06-24 検証**: 記述から大きく変化（おそらく上流マージ等で肥大化）。現状（`src/TournamentDataProvider/StartGGDataProvider.py`）:
-- `ParseMatchDataOldApi`: 265行 → **795行**（行1150-1944）
-- `ParseMatchDataNewApi`: 166行 → **276行**（行874-1149）
-- `GetTournamentPhaseGroup`: 137行 → **626行**（行248-873）
-- `ProcessEntrantData`: 112行 → **98行**（行1945-2042、唯一縮小）
+**2026-06-27 訂正（重要）**: 「795行/626行の神関数」という前提は**計測ミス**だった。`def` から
+次の `def` までを素朴にカウントした際、間に挟まる多数の別メソッド（`ProcessFutureSet` 1197 〜
+`GetEntrantsWorker` 1865 等）を誤って合算していた。実ファイルの確定行数:
 
-**2026-06-24 追記（安全網の実態）**: Characterization Test は `tests/test_startgg_parse.py`（62ケース）として**既に存在する**（当初の「未作成」は誤り）。ただし旧実装に対して書かれており、検証時点では **5件が赤**だった。内訳はすべて意図的な挙動変更に対するテストの陳腐化:
-- stream: `https://twitch.tv/...` URL → 生の `streamName`（773行）
-- stream 既定: `None` → `""`
-- state: city→state 推論を削除（843-847行に性能・不確実性の理由コメント。`ProcessEntrantData` 2014行も同様）
-- pronoun: pronoun 機能は撤去済みのためパーサが `genderPronoun` を抽出しない（テストの pronoun アサーションは削除）
+| 関数 | 旧主張 | 実際 | 状態 |
+|------|--------|------|------|
+| `ParseMatchDataOldApi` | 795行 | **47行** | 既に `_extract_char_selections`/`_find_latest_winner`/`_parse_stage_strike`/`_build_entrants_old_api` へ委譲済み |
+| `ParseMatchDataNewApi` | 276行 | **31行** | 既に `_build_set_metadata`/`_parse_participant_new_api` へ委譲済み |
+| `GetTournamentPhaseGroup` | 626行 | **138行** | ネットワーク取得＋4変換ブロックの中規模 |
 
-→ 現行の意図挙動に合わせてテストを修復し **62件グリーン化済み**。これで S-05 の分割リファクタは安全網付きで進められる。
-また `ParseMatchDataNewApi` は `_parse_participant_new_api` への部分分割が既に入っており、S-05 は一部着手済み。
+**S-05 が本来求めた「神関数の分割」は、過去の作業で既に完了済み**。当初の対象は存在しない。
 
-**残骸メモ（任意・別件）**: pronoun 機能撤去後、i18n に `settings.show_pronouns` / `layout_options.chip_pronouns_display` のラベルが残存している（実害なし）。気になれば翻訳整理時に除去。
+**2026-06-24 安全網**: Characterization Test `tests/test_startgg_parse.py` は既存（当初の「未作成」は誤り）。
+検証時 5件が赤だったが全て意図的挙動変更へのテスト陳腐化（stream 形式/既定、state の city→state 推論削除、
+pronoun 撤去）。現行挙動に合わせ修復し **62件グリーン化済み**。
 
-**対策案**:
-既存テストをグリーンに保ったまま、`ParseMatchDataOldApi`(795行) / `GetTournamentPhaseGroup`(626行) を `TournamentDataProvider/` 配下のヘルパーモジュールに分割する。`ParseMatchDataNewApi` の `_parse_participant_new_api` 抽出が手本。
+**2026-06-27 実施（実態に残る本物の改善 3点）**:
+1. **`oldData` デッドコード除去**: `GetTournamentPhaseGroup` がレガシー REST API を毎回叩いて未使用だった
+   ブロックを削除。不要なネットワーク往復（タイムアウト時 最大 ~30秒）を解消。
+2. **`_parse_stage_strike`（実質最大の167行）を3分割**: `_scan_stage_strike_tasks`（タスク逆走査）+
+   `_build_stage_strike_dicts`（ID解決＋dict構築）+ 薄いオーケストレータ。`test_stage_strike_*` がカバー。
+3. **`GetTournamentPhaseGroup` ↔ `GetAnalysisPhaseGroup` の重複共通化**: sets→rounds 変換を
+   `_parse_sets_to_rounds(sets, include_full_round_text)`、GF Reset 分割を `_split_gf_reset()` に抽出し両者から呼ぶ。
+   純粋関数なので単体テスト11件を新規追加（計 **73件グリーン**）。seeds/teams は player 抽出差が大きく共通化せず。
 
-**影響範囲**: `StartGGDataProvider.py` 内部。安全網（62ケース）があるので分割は検証可能。優先度 P1 据え置き（肥大化進行で緊急度上昇）。
+**残骸メモ（任意・別件）**: pronoun 撤去後、i18n に `settings.show_pronouns` / `layout_options.chip_pronouns_display`
+のラベルが残存（実害なし）。翻訳整理時に除去可。
+
+**未検証（要 PdM 手動）**: `GetTournamentPhaseGroup`/`GetAnalysisPhaseGroup` はネットワーク依存で単体テスト網が
+無いため、実トーナメント読込での Bracket / Analysis ドック描画（GF/GF Reset の別カラム表示含む）の目視確認が
+最終確認として残る。共通化は strictly-safer な null 処理を採用（挙動差は壊れたエッジケースのみ）。
 
 **リスク**: Start.gg API のレスポンス構造が変わると既存テストも壊れるが、それは元々の問題。agent-pitfalls #11（GQL クエリ 20秒タイムアウト）にも留意。
 
@@ -246,7 +256,7 @@ objectName → 明示的なキー名マッピングを導入。ただし既存�
 ### Wave 2（テスト先行）
 | ID | 対象 | 理由 | 状態 |
 |----|------|------|------|
-| S-05 | StartGGDataProvider パース | Characterization Test を先に書けば安全。肥大化が進行し緊急度上昇 | 🔴 未着手 |
+| S-05 | StartGGDataProvider パース | 「795行」は計測ミス＝神関数は既に分割済み。残課題（oldData除去/stage_strike分割/Get*PhaseGroup重複）対応済 | ✅ 実質解消（2026-06-27） |
 | S-01 | PlayerWidget 重複統合 | 基底クラス抽出は完了。残り4メソッド昇格にテスト網が欲しい | 🟡 部分解消 |
 | S-15(本) | characters.json untrack | runtime DL 先を user_data/ へ。読み込みフォールバック | ✅ 解消（2026-06-24） |
 
