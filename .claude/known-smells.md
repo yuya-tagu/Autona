@@ -18,20 +18,25 @@
 
 ---
 
-## S-01: AutonaScoreboardPlayerWidget ↔ AutonaTeamPlayerWidget の重複 [P1/D2/S2] 🟡 部分解消
+## S-01: AutonaScoreboardPlayerWidget ↔ AutonaTeamPlayerWidget の重複 [P1/D2/S2] ✅ 実質解消（2026-06-27）
 
 **根拠**: python-hotspots.md「コード重複」セクション
 
-**2026-06-24 検証**: 基底クラス `AutonaBasePlayerWidget(QGroupBox)`（`src/AutonaBasePlayerWidget.py`、292行）が既に抽出済みで、`AutonaScoreboardPlayerWidget` / `AutonaTeamPlayerWidget` の両方が継承している。共通メソッドは 19個 → **9個に削減**。本対策案（基底クラス抽出）は実行済みで、構造改善は達成。
+**経緯**:
+- 基底クラス `AutonaBasePlayerWidget(QGroupBox)`（`src/AutonaBasePlayerWidget.py`）が抽出済みで、両クラスが継承。真に同一な9メソッドは抽出済みだった。
+- 2026-06-27、残4メソッドを精査。**クリーンに統合できる2つを昇格**:
+  - `SwapWith`: 本体95%同一、差は restore 末尾のみ → 基底に昇格し `_swapRestoreTail(data)` フックで吸収（Scoreboard=`ExportPlayerId`、Team=`processEvents`+`ExportPlayerImages`）。
+  - `LoadCountries`: completer 設定は同一、差は末尾スタイルのみ → 基底に昇格し `_styleCountryStateWidgets(country, state)` フックで吸収（Scoreboard=placeholder、Team=font）。
+  - 約49行の重複を削減。
 
-**残課題**:
-- `SetData`, `SetCharactersPerPlayer`, `SwapWith`, `LoadCountries` がまだ両クラスに重複（基底に未昇格）。
-- 各ファイル現状: `AutonaScoreboardPlayerWidget.py` 612行 / `AutonaTeamPlayerWidget.py` 551行。
-- `SetData` は real_name / custom_textbox フィールドの有無で微妙に差異あり。基底への昇格はこの差分の吸収（テンプレートメソッド or フック）が必要。
+**意図的に分岐のため統合しない2つ（残すのが正解）**:
+- `SetCharactersPerPlayer`: アイコンサイズ(16 vs 48)・フォント・`NoIconProxyModel` 有無・move ボタン非表示・幅調整が全面的に相違。1v1 と team battle で別設定の UI ビルダー。
+- `SetData`: real_name/custom_textbox/controller/seed フィールドの有無、`ExportPlayerId`、**mains-list 処理が別実装**（Scoreboard はバグ修正済・Team は旧挙動）、proxy vs 直接モデルアクセス。
+- これらは「重複」ではなく意図的差分。フック多数での統合は可読性を下げ、テスト網の無い中核 UI でリグレッションを招くため**統合しない**判断（PdM 承認済）。
 
-**影響範囲**: `AutonaBasePlayerWidget.py`, `AutonaScoreboardPlayerWidget.py`, `AutonaTeamPlayerWidget.py`, それぞれの import 元
+**影響範囲**: `AutonaBasePlayerWidget.py`, `AutonaScoreboardPlayerWidget.py`, `AutonaTeamPlayerWidget.py`
 
-**リスク**: `self.path` 経由の StateManager 操作パターンが微妙に異なる箇所がある（agent-pitfalls #5/#7 参照）。残り4メソッドの昇格時に差分を見落とすと実行時エラー。
+**検証**: py_compile OK、pytest 73件グリーン（widget は自動テスト対象外）、`python main.py` 起動正常（LoadCountries は選手ウィジェット __init__ で実行され、失敗時は exit() するため起動継続が動作の証左）。**SwapWith の手動スワップ確認は S2 として残る**（agent-pitfalls #5/#7 留意）。
 
 ---
 
@@ -257,7 +262,7 @@ objectName → 明示的なキー名マッピングを導入。ただし既存�
 | ID | 対象 | 理由 | 状態 |
 |----|------|------|------|
 | S-05 | StartGGDataProvider パース | 「795行」は計測ミス＝神関数は既に分割済み。残課題（oldData除去/stage_strike分割/Get*PhaseGroup重複）対応済 | ✅ 実質解消（2026-06-27） |
-| S-01 | PlayerWidget 重複統合 | 基底クラス抽出は完了。残り4メソッド昇格にテスト網が欲しい | 🟡 部分解消 |
+| S-01 | PlayerWidget 重複統合 | クリーンな2メソッド（SwapWith/LoadCountries）を昇格。残2は意図的分岐で統合せず | ✅ 実質解消（2026-06-27） |
 | S-15(本) | characters.json untrack | runtime DL 先を user_data/ へ。読み込みフォールバック | ✅ 解消（2026-06-24） |
 
 ### Wave 3（段階的）
