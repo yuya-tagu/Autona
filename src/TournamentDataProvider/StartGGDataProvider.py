@@ -245,6 +245,79 @@ class StartGGDataProvider(TournamentDataProvider):
 
         return phases
 
+    @staticmethod
+    def _parse_sets_to_rounds(sets, include_full_round_text=False):
+        """Group Start.gg sets by round key into the bracket's column structure.
+
+        Shared by GetTournamentPhaseGroup and GetAnalysisPhaseGroup. The round
+        key is the authoritative column assignment (positive = winners, negative
+        = losers, max = grand final, max+1 = reset). Raw slot prereq info is
+        preserved so the Bracket can wire winNext/loseNext without re-deriving
+        topology. include_full_round_text adds the fullRoundText field (Analysis
+        dock needs it; the scoreboard Bracket does not).
+        """
+        sets = sets or []
+
+        # Preview IDs cannot be sorted normally. They follow the format
+        # preview_2004442_1_5, where
+        # preview_2004442_1_1 < preview_2004442_1_11 < preview_2004442_1_2
+        isPreview = any("preview" in str(s.get("id")) for s in sets)
+
+        if not isPreview:
+            sets.sort(key=lambda s: (abs(int(s.get("round") or 0)), s.get("id")))
+        else:
+            sets.sort(key=lambda s: (abs(int(s.get("round") or 0)),
+                      int(str(s.get("id")).split("_")[-1])))
+
+        finalSets = {}
+        for s in sets:
+            try:
+                round = int(s.get("round"))
+            except (TypeError, ValueError):
+                continue
+
+            if str(round) not in finalSets:
+                finalSets[str(round)] = []
+
+            slots = []
+            for slot in s.get("slots", []) or []:
+                slots.append({
+                    "prereqType": slot.get("prereqType"),
+                    "prereqId": slot.get("prereqId"),
+                    "prereqPlacement": slot.get("prereqPlacement"),
+                    "seedNum": deep_get(slot, "seed.seedNum"),
+                })
+
+            entry = {
+                "id": s.get("id"),
+                "identifier": s.get("identifier"),
+                "score": [s.get("entrant1Score"), s.get("entrant2Score")],
+                "finished": s.get("state", 0) == 3,
+                "slots": slots,
+            }
+            if include_full_round_text:
+                entry["fullRoundText"] = s.get("fullRoundText")
+
+            finalSets[str(round)].append(entry)
+
+        return finalSets
+
+    @staticmethod
+    def _split_gf_reset(finalSets, progressionsOut):
+        """Split a bundled grand-final + reset into separate rounds, in-place.
+
+        Start.gg returns the grand final reset as an extra set at the highest
+        round key when a phase group has no progressions out. Separate it so the
+        UI can render GF and GF Reset as distinct columns.
+        """
+        if not progressionsOut:
+            positiveRounds = [int(r) for r in finalSets.keys() if int(r) > 0]
+            if positiveRounds:
+                lastRound = max(positiveRounds)
+                if len(finalSets[str(lastRound)]) > 1:
+                    gfsReset = finalSets[str(lastRound)].pop()
+                    finalSets[str(lastRound + 1)] = [gfsReset]
+
     def GetTournamentPhaseGroup(self, id, progress_callback=None, cancel_event=None):
         from ..Helpers.AutonaStatusManager import AutonaStatusManager
         finalData = {}
@@ -262,11 +335,6 @@ class StartGGDataProvider(TournamentDataProvider):
                     },
                     "query": StartGGDataProvider.TournamentPhaseGroupQuery
                 }
-            )
-
-            oldData = self.QueryRequests(
-                f"https://api.smash.gg/phase_group/{id}",
-                type=requests.get
             )
 
             seeds = deep_get(data, "data.phaseGroup.seeds.nodes", [])
@@ -309,51 +377,8 @@ class StartGGDataProvider(TournamentDataProvider):
 
             finalData["entrants"] = teams
 
-            sets = deep_get(data, "data.phaseGroup.sets.nodes", [])
-
-            # Preview IDs cannot be sorted normally
-            # They follow the format: preview_2004442_1_5
-            # Where ( preview_2004442_1_1 < preview_2004442_1_11 < preview_2004442_1_2 )
-            isPreview = any("preview" in str(s.get("id")) for s in sets)
-
-            if not isPreview:
-                sets.sort(key=lambda s: (
-                    abs(int(s.get("round"))), s.get("id")))
-            else:
-                sets.sort(key=lambda s: (abs(int(s.get("round"))),
-                          int(s.get("id").split("_")[-1])))
-
-            finalSets = {}
-
-            # Preserve Start.gg's set structure directly. The round key is the
-            # authoritative column assignment (positive = winners, negative =
-            # losers, max = grand final, max+1 = reset). We keep the raw slot
-            # info so the new Start.gg-driven Bracket can wire winNext/loseNext
-            # from prereq references without re-deriving topology.
-            for s in sets:
-                round = int(s.get("round"))
-
-                if not str(round) in finalSets:
-                    finalSets[str(round)] = []
-
-                slots = []
-                for slot in s.get("slots", []) or []:
-                    slots.append({
-                        "prereqType": slot.get("prereqType"),
-                        "prereqId": slot.get("prereqId"),
-                        "prereqPlacement": slot.get("prereqPlacement"),
-                        "seedNum": deep_get(slot, "seed.seedNum"),
-                    })
-
-                finalSets[str(round)].append({
-                    "id": s.get("id"),
-                    "identifier": s.get("identifier"),
-                    "score": [s.get("entrant1Score"), s.get("entrant2Score")],
-                    "finished": s.get("state", 0) == 3,
-                    "slots": slots,
-                })
-
-            finalData["sets"] = finalSets
+            finalData["sets"] = StartGGDataProvider._parse_sets_to_rounds(
+                deep_get(data, "data.phaseGroup.sets.nodes", []))
 
             finalData["progressionsIn"] = []
 
@@ -366,16 +391,8 @@ class StartGGDataProvider(TournamentDataProvider):
             finalData["progressionsOut"] = deep_get(
                 data, "data.phaseGroup.progressionsOut")
 
-            # Start.gg returns the grand final reset as an extra set at the
-            # highest round key. Split it into its own round so the UI can
-            # render GF and GF Reset as separate columns.
-            if finalData["progressionsOut"] is None or len(finalData["progressionsOut"]) == 0:
-                positiveRounds = [int(r) for r in finalSets.keys() if int(r) > 0]
-                if positiveRounds:
-                    lastRound = max(positiveRounds)
-                    if len(finalSets[str(lastRound)]) > 1:
-                        gfsReset = finalSets[str(lastRound)].pop()
-                        finalSets[str(lastRound+1)] = [gfsReset]
+            StartGGDataProvider._split_gf_reset(
+                finalData["sets"], finalData["progressionsOut"])
         except:
             logger.error(traceback.format_exc())
         finally:
@@ -434,59 +451,14 @@ class StartGGDataProvider(TournamentDataProvider):
 
             finalData["entrants"] = teams
 
-            sets = deep_get(data, "data.phaseGroup.sets.nodes", []) or []
-
-            isPreview = any("preview" in str(s.get("id")) for s in sets)
-            if not isPreview:
-                sets.sort(key=lambda s: (
-                    abs(int(s.get("round") or 0)), s.get("id")))
-            else:
-                sets.sort(key=lambda s: (
-                    abs(int(s.get("round") or 0)),
-                    int(str(s.get("id")).split("_")[-1])))
-
-            finalSets = {}
-            for s in sets:
-                try:
-                    round = int(s.get("round"))
-                except (TypeError, ValueError):
-                    continue
-
-                if str(round) not in finalSets:
-                    finalSets[str(round)] = []
-
-                slots = []
-                for slot in s.get("slots", []) or []:
-                    slots.append({
-                        "prereqType": slot.get("prereqType"),
-                        "prereqId": slot.get("prereqId"),
-                        "prereqPlacement": slot.get("prereqPlacement"),
-                        "seedNum": deep_get(slot, "seed.seedNum"),
-                    })
-
-                finalSets[str(round)].append({
-                    "id": s.get("id"),
-                    "identifier": s.get("identifier"),
-                    "fullRoundText": s.get("fullRoundText"),
-                    "score": [s.get("entrant1Score"), s.get("entrant2Score")],
-                    "finished": s.get("state", 0) == 3,
-                    "slots": slots,
-                })
-
-            finalData["sets"] = finalSets
+            finalData["sets"] = StartGGDataProvider._parse_sets_to_rounds(
+                deep_get(data, "data.phaseGroup.sets.nodes", []) or [],
+                include_full_round_text=True)
             finalData["progressionsOut"] = deep_get(
                 data, "data.phaseGroup.progressionsOut") or []
 
-            # Mirror the GF Reset split from GetTournamentPhaseGroup: when a
-            # phase group has no progressions out, the last positive round
-            # may bundle GF + GF Reset into one round — separate them.
-            if not finalData["progressionsOut"]:
-                positiveRounds = [int(r) for r in finalSets.keys() if int(r) > 0]
-                if positiveRounds:
-                    lastRound = max(positiveRounds)
-                    if len(finalSets[str(lastRound)]) > 1:
-                        gfsReset = finalSets[str(lastRound)].pop()
-                        finalSets[str(lastRound + 1)] = [gfsReset]
+            StartGGDataProvider._split_gf_reset(
+                finalData["sets"], finalData["progressionsOut"])
         except Exception:
             logger.error(traceback.format_exc())
 
@@ -956,6 +928,9 @@ class StartGGDataProvider(TournamentDataProvider):
     def _parse_stage_strike(tasks, entrant1Id, entrant2Id, latestWinner, scores):
         """Parse stage strike state from set tasks (old API format).
 
+        Thin orchestrator: compute the last-winner slot, reverse-scan the tasks
+        for raw strike state, then resolve IDs and build the result dicts.
+
         Returns (stageStrikeState, rulesetState, strikedBy, currPlayer, lastWinnerSlot).
         """
         lastWinnerSlot = None
@@ -965,6 +940,24 @@ class StartGGDataProvider(TournamentDataProvider):
             if str(latestWinner) == entrant2Id:
                 lastWinnerSlot = 1
 
+        (allStages, strikedStages, selectedStage, stageWins, dsr, mdsr,
+         strikedBy, currPlayer) = StartGGDataProvider._scan_stage_strike_tasks(
+            tasks, entrant1Id, entrant2Id, latestWinner)
+
+        stageStrikeState, rulesetState, strikedBy, currPlayer = \
+            StartGGDataProvider._build_stage_strike_dicts(
+                allStages, strikedStages, selectedStage, stageWins, dsr, mdsr,
+                strikedBy, currPlayer, lastWinnerSlot, scores)
+
+        return stageStrikeState, rulesetState, strikedBy, currPlayer, lastWinnerSlot
+
+    @staticmethod
+    def _scan_stage_strike_tasks(tasks, entrant1Id, entrant2Id, latestWinner):
+        """Reverse-scan set tasks to extract raw stage-strike state.
+
+        Returns (allStages, strikedStages, selectedStage, stageWins, dsr, mdsr,
+        strikedBy, currPlayer).
+        """
         allStages = None
         strikedStages = None
         strikedBy = [[], []]
@@ -1073,6 +1066,15 @@ class StartGGDataProvider(TournamentDataProvider):
 
                 break
 
+        return allStages, strikedStages, selectedStage, stageWins, dsr, mdsr, strikedBy, currPlayer
+
+    @staticmethod
+    def _build_stage_strike_dicts(allStages, strikedStages, selectedStage, stageWins, dsr, mdsr, strikedBy, currPlayer, lastWinnerSlot, scores):
+        """Resolve stage IDs to codenames and build the stage-strike and ruleset
+        dicts. On any resolution error, reset the strike state to empty.
+
+        Returns (stageStrikeState, rulesetState, strikedBy, currPlayer).
+        """
         try:
             allStagesFinal = []
             for st in allStages:
@@ -1118,7 +1120,7 @@ class StartGGDataProvider(TournamentDataProvider):
             stageStrikeState = {}
             rulesetState = {}
 
-        return stageStrikeState, rulesetState, strikedBy, currPlayer, lastWinnerSlot
+        return stageStrikeState, rulesetState, strikedBy, currPlayer
 
     @staticmethod
     def _build_entrants_old_api(selectedChars, sets):

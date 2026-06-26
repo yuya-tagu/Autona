@@ -901,3 +901,111 @@ class TestProcessEntrantData:
         assert result["startggMains"][0][0] == 2
         # Mains should be resolved via GameAssetManager
         assert result["mains"] == {"ssbu": [["fox"]]}
+
+
+# ===========================================================================
+# Tests: _parse_sets_to_rounds (shared by GetTournamentPhaseGroup /
+# GetAnalysisPhaseGroup — pure transform, no network)
+# ===========================================================================
+
+def _set_node(id, round, **kw):
+    return {
+        "id": id,
+        "round": round,
+        "identifier": kw.get("identifier", "A"),
+        "entrant1Score": kw.get("e1", 0),
+        "entrant2Score": kw.get("e2", 0),
+        "state": kw.get("state", 1),
+        "fullRoundText": kw.get("frt", "Round"),
+        "slots": kw.get("slots", []),
+    }
+
+
+class TestParseSetsToRounds:
+
+    def test_groups_by_round_key(self):
+        sets = [_set_node("1", 1), _set_node("2", -1), _set_node("3", 1)]
+        result = StartGGDataProvider._parse_sets_to_rounds(sets)
+        assert set(result.keys()) == {"1", "-1"}
+        assert len(result["1"]) == 2
+        assert len(result["-1"]) == 1
+
+    def test_entry_fields_and_slots(self):
+        slot = {"prereqType": "set", "prereqId": "p1",
+                "prereqPlacement": 2, "seed": {"seedNum": 5}}
+        sets = [_set_node("99", 3, e1=2, e2=1, state=3, slots=[slot])]
+        entry = StartGGDataProvider._parse_sets_to_rounds(sets)["3"][0]
+        assert entry["id"] == "99"
+        assert entry["identifier"] == "A"
+        assert entry["score"] == [2, 1]
+        assert entry["finished"] is True
+        assert entry["slots"][0] == {
+            "prereqType": "set", "prereqId": "p1",
+            "prereqPlacement": 2, "seedNum": 5,
+        }
+
+    def test_full_round_text_flag(self):
+        without = StartGGDataProvider._parse_sets_to_rounds(
+            [_set_node("1", 1, frt="Winners Final")])
+        assert "fullRoundText" not in without["1"][0]
+        with_frt = StartGGDataProvider._parse_sets_to_rounds(
+            [_set_node("1", 1, frt="Winners Final")],
+            include_full_round_text=True)
+        assert with_frt["1"][0]["fullRoundText"] == "Winners Final"
+
+    def test_not_finished(self):
+        result = StartGGDataProvider._parse_sets_to_rounds(
+            [_set_node("1", 1, state=1)])
+        assert result["1"][0]["finished"] is False
+
+    def test_preview_sort_by_trailing_segment(self):
+        # preview ids sort by the trailing numeric segment, not lexically
+        sets = [
+            _set_node("preview_1_1_2", 1),
+            _set_node("preview_1_1_11", 1),
+            _set_node("preview_1_1_1", 1),
+        ]
+        ids = [e["id"] for e in
+               StartGGDataProvider._parse_sets_to_rounds(sets)["1"]]
+        assert ids == ["preview_1_1_1", "preview_1_1_2", "preview_1_1_11"]
+
+    def test_skips_null_round(self):
+        result = StartGGDataProvider._parse_sets_to_rounds(
+            [_set_node("1", 1), _set_node("2", None)])
+        assert list(result.keys()) == ["1"]
+
+    def test_empty_and_none_input(self):
+        assert StartGGDataProvider._parse_sets_to_rounds([]) == {}
+        assert StartGGDataProvider._parse_sets_to_rounds(None) == {}
+
+
+# ===========================================================================
+# Tests: _split_gf_reset (pure, in-place grand-final reset split)
+# ===========================================================================
+
+class TestSplitGfReset:
+
+    def test_splits_when_no_progressions(self):
+        finalSets = {"1": [{"id": "a"}], "2": [{"id": "gf"}, {"id": "reset"}]}
+        StartGGDataProvider._split_gf_reset(finalSets, [])
+        assert finalSets["2"] == [{"id": "gf"}]
+        assert finalSets["3"] == [{"id": "reset"}]
+
+    def test_no_split_when_progressions_present(self):
+        finalSets = {"2": [{"id": "gf"}, {"id": "reset"}]}
+        StartGGDataProvider._split_gf_reset(finalSets, [123])
+        assert finalSets["2"] == [{"id": "gf"}, {"id": "reset"}]
+        assert "3" not in finalSets
+
+    def test_no_split_when_single_set(self):
+        finalSets = {"2": [{"id": "gf"}]}
+        StartGGDataProvider._split_gf_reset(finalSets, None)
+        assert finalSets["2"] == [{"id": "gf"}]
+        assert "3" not in finalSets
+
+    def test_ignores_negative_rounds(self):
+        # GF detection only looks at positive rounds; losers bracket untouched
+        finalSets = {"-1": [{"id": "l1"}, {"id": "l2"}], "1": [{"id": "w"}]}
+        StartGGDataProvider._split_gf_reset(finalSets, [])
+        assert "2" not in finalSets
+        assert finalSets["-1"] == [{"id": "l1"}, {"id": "l2"}]
