@@ -348,53 +348,10 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                     else:
                         self.instanceSignals.player2Id_changed.emit()
 
-    def SwapWith(self, other: "AutonaScoreboardPlayerWidget"):
-        if self == other:
-            logger.info("Swapping player with themselves")
-            return
-        try:
-            StateManager.BlockSaving()
-            with self.dataLock:
-                with other.dataLock:
-                    tmpData = []
-
-                    # Save state
-                    for w in [self, other]:
-                        data = {}
-                        for widget in w.findChildren(QWidget):
-                            if type(widget) == QLineEdit:
-                                data[widget.objectName()] = widget.text()
-                            if type(widget) == QComboBox:
-                                data[widget.objectName()] = widget.currentIndex()
-                            if type(widget) == QPlainTextEdit:
-                                data[widget.objectName()] = widget.toPlainText()
-                        data["online_avatar"] = StateManager.Get(
-                            f"{w.path}.online_avatar")
-                        data["id"] = StateManager.Get(
-                            f"{w.path}.id")
-                        data["seed"] = StateManager.Get(
-                            f"{w.path}.seed")
-                        data["city"] = StateManager.Get(
-                            f"{w.path}.city")
-                        tmpData.append(data)
-
-                    # Load state
-                    for i, w in enumerate([other, self]):
-                        for objName in tmpData[i]:
-                            widget = w.findChild(QWidget, objName)
-                            if widget:
-                                if type(widget) == QLineEdit:
-                                    widget.setText(tmpData[i][objName])
-                                    widget.editingFinished.emit()
-                                if type(widget) == QComboBox:
-                                    widget.setCurrentIndex(tmpData[i][objName])
-                                if type(widget) == QPlainTextEdit:
-                                    widget.setPlainText(tmpData[i][objName])
-                        w.ExportPlayerId(tmpData[i]["id"])
-                        StateManager.Set(f"{w.path}.seed", tmpData[i]["seed"])
-                        StateManager.Set(f"{w.path}.city", tmpData[i]["city"])
-        finally:
-            StateManager.ReleaseSaving()
+    def _swapRestoreTail(self, data):
+        # Scoreboard restores the player id directly (NameChanged would reset
+        # it to None).
+        self.ExportPlayerId(data["id"])
 
     def SetIndex(self, index: int, team: int):
         if self.customName == "":
@@ -533,46 +490,16 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
         self.CharactersChanged(includeMains=True)
 
-    def LoadCountries(self):
-        try:
-            if AutonaCountryHelper.countryModel == None:
-                AutonaCountryHelper.LoadCountries()
-
-            countryCompleter = QCompleter(
-                AutonaCountryHelper.countryModel)
-
-            country: QComboBox = self._w("country", QComboBox)
-            # Editable combos select the blank first model row (index 0), so the
-            # QComboBox placeholderText (shown only at index -1) never appears.
-            # Mirror it onto the line edit, which shows its placeholder whenever
-            # the text is empty. (Now the only "Country"/"Region" hint, since the
-            # inline labels were removed.)
-            if country.lineEdit() is not None:
-                country.lineEdit().setPlaceholderText(country.placeholderText())
-            country.setCompleter(countryCompleter)
-            country.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-            country.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-            country.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-            country.view().setMinimumWidth(60)
-            country.completer().setCompletionMode(QCompleter.PopupCompletion)
-            country.completer().popup().setMinimumWidth(300)
-            country.setModel(AutonaCountryHelper.countryModel)
-
-            country.currentIndexChanged.connect(self.LoadStates)
-
-            state: QComboBox = self._w("state", QComboBox)
-            if state.lineEdit() is not None:
-                state.lineEdit().setPlaceholderText(state.placeholderText())
-            state.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-            state.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-            state.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-            state.view().setMinimumWidth(60)
-            state.completer().setCompletionMode(QCompleter.PopupCompletion)
-            state.completer().popup().setMinimumWidth(300)
-
-        except Exception as e:
-            logger.error(traceback.format_exc())
-            exit()
+    def _styleCountryStateWidgets(self, country, state):
+        # Editable combos select the blank first model row (index 0), so the
+        # QComboBox placeholderText (shown only at index -1) never appears.
+        # Mirror it onto the line edit, which shows its placeholder whenever
+        # the text is empty. (The only "Country"/"Region" hint, since the
+        # inline labels were removed.)
+        if country.lineEdit() is not None:
+            country.lineEdit().setPlaceholderText(country.placeholderText())
+        if state.lineEdit() is not None:
+            state.lineEdit().setPlaceholderText(state.placeholderText())
 
     def ReloadCharacters(self):
         if len(AutonaGameAssetManager.instance.variants) <= 0:

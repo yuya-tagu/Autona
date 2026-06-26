@@ -7,13 +7,16 @@ Subclasses are responsible for:
 - __init__ (different .ui files, different widget setup)
 - ComboBoxIndexChanged (Scoreboard emits dataChanged, Team does not)
 - NameChanged (Scoreboard calls ExportPlayerId, Team does not)
-- SwapWith (different state restoration approach)
-- SetData, SetCharactersPerPlayer, ReloadCharacters, SetIndex
-- SetupAutocomplete, LoadCountries (minor styling differences)
+- SetData, SetCharactersPerPlayer, ReloadCharacters, SetIndex,
+  SetupAutocomplete (genuinely divergent: different .ui widgets, icon
+  sizes, fonts, proxy models, and per-mode fields — kept per-subclass)
+- _swapRestoreTail / _styleCountryStateWidgets (small hooks that customise
+  the otherwise-shared SwapWith / LoadCountries defined here)
 """
 import os
 import re
 import threading
+import traceback
 
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
@@ -290,3 +293,98 @@ class AutonaBasePlayerWidget(QGroupBox):
                         continue  # only executed if the inner loop DID break
                 else:
                     c.setCurrentIndex(0)
+
+    def SwapWith(self, other):
+        """Swap all field values + seed/city/avatar/id state between this
+        widget and another. The per-widget restore action after the fields are
+        copied differs by subclass (see _swapRestoreTail)."""
+        if self == other:
+            logger.info("Swapping player with themselves")
+            return
+        try:
+            StateManager.BlockSaving()
+            with self.dataLock:
+                with other.dataLock:
+                    tmpData = []
+
+                    # Save state
+                    for w in [self, other]:
+                        data = {}
+                        for widget in w.findChildren(QWidget):
+                            if type(widget) == QLineEdit:
+                                data[widget.objectName()] = widget.text()
+                            if type(widget) == QComboBox:
+                                data[widget.objectName()] = widget.currentIndex()
+                            if type(widget) == QPlainTextEdit:
+                                data[widget.objectName()] = widget.toPlainText()
+                        data["online_avatar"] = StateManager.Get(
+                            f"{w.path}.online_avatar")
+                        data["id"] = StateManager.Get(
+                            f"{w.path}.id")
+                        data["seed"] = StateManager.Get(
+                            f"{w.path}.seed")
+                        data["city"] = StateManager.Get(
+                            f"{w.path}.city")
+                        tmpData.append(data)
+
+                    # Load state
+                    for i, w in enumerate([other, self]):
+                        for objName in tmpData[i]:
+                            widget = w.findChild(QWidget, objName)
+                            if widget:
+                                if type(widget) == QLineEdit:
+                                    widget.setText(tmpData[i][objName])
+                                    widget.editingFinished.emit()
+                                if type(widget) == QComboBox:
+                                    widget.setCurrentIndex(tmpData[i][objName])
+                                if type(widget) == QPlainTextEdit:
+                                    widget.setPlainText(tmpData[i][objName])
+                        w._swapRestoreTail(tmpData[i])
+                        StateManager.Set(f"{w.path}.seed", tmpData[i]["seed"])
+                        StateManager.Set(f"{w.path}.city", tmpData[i]["city"])
+        finally:
+            StateManager.ReleaseSaving()
+
+    def _swapRestoreTail(self, data):
+        """Subclass hook: per-widget restore action run after fields are copied
+        and before seed/city are re-set. Default: no-op."""
+        pass
+
+    def LoadCountries(self):
+        try:
+            if AutonaCountryHelper.countryModel == None:
+                AutonaCountryHelper.LoadCountries()
+
+            countryCompleter = QCompleter(
+                AutonaCountryHelper.countryModel)
+
+            country: QComboBox = self._w("country", QComboBox)
+            country.setCompleter(countryCompleter)
+            country.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+            country.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            country.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+            country.view().setMinimumWidth(60)
+            country.completer().setCompletionMode(QCompleter.PopupCompletion)
+            country.completer().popup().setMinimumWidth(300)
+            country.setModel(AutonaCountryHelper.countryModel)
+
+            country.currentIndexChanged.connect(self.LoadStates)
+
+            state: QComboBox = self._w("state", QComboBox)
+            state.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+            state.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            state.completer().setFilterMode(Qt.MatchFlag.MatchContains)
+            state.view().setMinimumWidth(60)
+            state.completer().setCompletionMode(QCompleter.PopupCompletion)
+            state.completer().popup().setMinimumWidth(300)
+
+            self._styleCountryStateWidgets(country, state)
+
+        except Exception as e:
+            logger.error(traceback.format_exc())
+            exit()
+
+    def _styleCountryStateWidgets(self, country, state):
+        """Subclass hook: per-skin styling of the country/state combos
+        (Scoreboard mirrors placeholders, Team applies fonts). Default: no-op."""
+        pass
