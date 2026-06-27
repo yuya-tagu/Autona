@@ -163,12 +163,6 @@ export interface TSHState {
         initial_load?: boolean;
         numEntrants?: number;
     };
-    // Broadcast cache for theme. Source-of-truth lives in
-    // SettingsManager.light_mode (Design.md §5.4.1); React subscribers
-    // read this for live updates (§5.4.3 R-Theme-2).
-    ui?: {
-        light_mode?: boolean;
-    };
 }
 
 export interface TSHGamesDb {

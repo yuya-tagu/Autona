@@ -233,7 +233,7 @@ class AutonaScoreboardWidget(QWidget):
             [QApplication.translate("app", "Sponsor"),                ["team"],                 "show_sponsor",    True],
             [QApplication.translate("app", "Player Name"),            ["name"],                 "show_name",       True],
             [QApplication.translate("app", "Seed"),                   ["seedDisplay"],          "show_seed",       True],
-            [QApplication.translate("app", "Characters"),             ["characters"],           "show_characters", False],
+            [QApplication.translate("app", "Characters"),             ["characters"],           "show_characters", True],
             [QApplication.translate("app", "Twitter"),                ["twitter"],              "show_social",     True],
             [QApplication.translate("app", "Real Name"),              ["real_name"],            "show_real_name",  False],
             [QApplication.translate("app", "Location"),               ["country", "state"],     "show_location",   True],
@@ -344,8 +344,6 @@ class AutonaScoreboardWidget(QWidget):
         # destination and match-loading actions stay grouped.
         if self.streamUrl is not None:
             self.streamSection.layout().addLayout(self.streamUrl)
-
-        UI.on_theme_change(self._refresh_theme_styles)
 
         # --- Separator (inserted into layout later via insertWidget) ---
         # Wrap the line in a container with top/bottom padding so the
@@ -877,7 +875,7 @@ class AutonaScoreboardWidget(QWidget):
 
         self.topSectionFrame = QFrame()
         self.topSectionFrame.setObjectName("scoreTopSection")
-        self.topSectionFrame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.topSectionFrame.setFrameShape(QFrame.Shape.NoFrame)
         self.topSectionFrame.setFrameShadow(QFrame.Shadow.Plain)
         # QFrame defaults to (Preferred, Preferred) which lets it stretch
         # vertically inside innerWidget's QVBoxLayout. When that happens
@@ -908,7 +906,7 @@ class AutonaScoreboardWidget(QWidget):
 
         self.matchSectionFrame = QFrame()
         self.matchSectionFrame.setObjectName("scoreMatchSection")
-        self.matchSectionFrame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.matchSectionFrame.setFrameShape(QFrame.Shape.NoFrame)
         self.matchSectionFrame.setFrameShadow(QFrame.Shadow.Plain)
         self.matchSectionFrame.setSizePolicy(
             QSizePolicy.MinimumExpanding, QSizePolicy.Maximum)
@@ -1517,23 +1515,6 @@ class AutonaScoreboardWidget(QWidget):
         if not checked:
             self.StopAutonaUpdate(clear_variables=True)
 
-    def _refresh_theme_styles(self):
-        self.scoreDisplay1.setStyleSheet(UI.score_display_style(scale=1.15))
-        self.scoreDisplay2.setStyleSheet(UI.score_display_style(scale=1.15))
-        # Re-apply theme-aware section title / annotation / frame styles
-        # so the labels stay readable when the user toggles light/dark
-        # mode at runtime.
-        for label in (self.topSectionTitle, self.matchSectionTitle):
-            label.setStyleSheet(self._sectionTitleStyle())
-        for label in (self.btSwapLabel, self.btScoreResetLabel):
-            label.setStyleSheet(self._smallAnnotationStyle())
-        self.topSectionFrame.setStyleSheet(
-            self._sectionFrameStyle("scoreTopSection"))
-        self.matchSectionFrame.setStyleSheet(
-            self._sectionFrameStyle("scoreMatchSection"))
-        for pw in self.playerWidgets:
-            pw.refresh_theme_styles()
-
     @staticmethod
     def _sectionTitleStyle() -> str:
         # Section header label ("対戦情報" / "スコアボード"). Slightly
@@ -1551,16 +1532,12 @@ class AutonaScoreboardWidget(QWidget):
 
     @staticmethod
     def _sectionFrameStyle(object_name: str) -> str:
-        # Card-like frame around a section. Border + very subtle bg so
-        # the section is visible on both dark and light canvases.
-        p = UI.palette()
-        return (
-            f"QFrame#{object_name} {{"
-            f" border: 1px solid {p['border_subtle']};"
-            " border-radius: 6px;"
-            f" background: {p['bg_secondary']};"
-            "}"
-        )
+        # Flat (no fill / no border) layout container. The section already
+        # sits on the scroll area's bg_secondary panel; a second filled,
+        # bordered card here would nest a box-in-a-box. Other tabs lay
+        # content flat on the panel, so match them — grouping is carried by
+        # the section title label + separator, not a card frame.
+        return f"QFrame#{object_name} {{ background: transparent; border: none; }}"
 
     def AutonaUpdate(self, data):
         AutonaTournamentDataProvider.instance.GetMatch(

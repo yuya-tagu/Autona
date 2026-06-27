@@ -130,8 +130,7 @@
         <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
        </property>
        <!-- styleSheet removed; AutonaScoreboardPlayerWidget applies a
-            theme-aware muted color in __init__ / refresh_theme_styles
-            (Design.md §5.4). -->
+            theme-aware muted color in __init__ (Design.md §5.4). -->
       </widget>
      </item>
     </layout>

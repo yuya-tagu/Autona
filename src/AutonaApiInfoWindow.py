@@ -83,8 +83,6 @@ _ENDPOINTS = [
     ("POST", "/tournament", "Load tournament (202, async)", {"url": "https://www.start.gg/tournament/.../event/..."}, False, True, False),
     ("POST", "/game", "Set game (202, async)", {"codename": "ssbu", "modsActive": False}, False, True, False),
     ("POST", "/bracket:refresh", "Refresh bracket (202, async)", None, False, True, False),
-    # ── Settings (synchronous) ──
-    ("POST", "/ui/theme", "Set light/dark theme", {"value": True}, False, True, False),
 ]
 
 # Error-code legend (spec §2.6 / AutonaApiV1.py). (code, http, desc).

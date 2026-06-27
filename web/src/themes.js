@@ -236,4 +236,3 @@ function buildTheme(mode) {
 
 export const defaultTheme = createTheme({ palette: { mode: 'dark' } });
 export const darkTheme = buildTheme('dark');
-export const lightTheme = buildTheme('light');

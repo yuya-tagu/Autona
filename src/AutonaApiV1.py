@@ -717,16 +717,3 @@ def bracket_refresh():
         _heavy.end("bracket")
         raise
     return ok(data={"accepted": True, "operation": "bracket.refresh"}, status=202)
-
-
-# ── Settings (synchronous, spec §7.3) ──
-@api_v1.route("/ui/theme", methods=["POST"])
-@write_op("ui.theme")
-def ui_theme():
-    body = _json_body()
-    if "value" not in body:
-        raise ApiError(INVALID_ARGUMENT, "value is required", 400)
-    # set_light_mode coerces str/bool itself; it also writes SettingsManager
-    # (allowed dual write, spec §2.4a). Not a heavy op -> synchronous 200.
-    _actions_ref().set_light_mode(body.get("value"))
-    return ok(revision=current_revision())

@@ -368,13 +368,8 @@ tournamentInfo
 
 ##### `ui` — UI 表示用キャッシュ
 
-```
-ui
-└── light_mode    ※SettingsManager.light_mode を broadcast するための表示用キャッシュ。
-                    永続化の正本は SettingsManager 側（§3.3.2 / §5.4.1）。
-                    PyQt は SettingsManager から直接読んでよい。
-                    React / OBS / WebEngine は StateManager.ui.light_mode を購読する。
-```
+旧 `ui.light_mode` キャッシュはテーマ切替機能の削除に伴い廃止（§5.4、ダーク固定）。
+現在 `ui` 配下に broadcast 用キーは無い。
 
 ##### `notes` / `player_list` / `team_battle` / `layout_options` / `provider_videogame` / `completed_sets` / `streamQueue` / `currentStream` / `result_players`
 
@@ -506,7 +501,6 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | カテゴリ | 正本 | キャッシュ可能な経路 |
 |---------|-----|------------------|
 | ユーザー設定全般 | `SettingsManager` (`./user_data/settings.json`) | StateManager に展開してよい（`tournamentInfo.themeColor` 等） |
-| テーマ設定（ダーク/ライト） | `SettingsManager.Get("light_mode")` | React 側 localStorage は**初期表示のチラつき防止用キャッシュ**として可（§2.2 R-React-7） |
 | ホットキー有効値 | `AutonaHotkeys.LoadUserHotkeys()` の結果（デフォルト + 上書きをマージ） | — |
 | トーナメント URL（最後に開いた） | `SettingsManager.Get("TOURNAMENT_URL")` | メモリキャッシュ可 |
 | ウィンドウ状態 | QSettings | — |
@@ -540,7 +534,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | `result_config.*` | リザルト生成設定（layout, accent_color, logo_path 等） |
 | `bsky_account.*` | Bluesky 連携 |
 | `update.*` | アップデーター（skipped_version 等） |
-| その他トップレベル（`light_mode`, `program_language`, `TOURNAMENT_URL` 等） | 個別 |
+| その他トップレベル（`program_language`, `TOURNAMENT_URL` 等） | 個別 |
 
 新規キーは原則ネームスペース付きで作成し、トップレベルは増やさない。
 
@@ -1054,44 +1048,32 @@ React の MUI 側は `size="small"` で密度を揃える（§2.2 R-React-5）�
 | ICON_MD | 32px | ボタン内 |
 | ICON_LG | 64px | 強調・大型表示 |
 
-### 5.4 テーマ切替
+### 5.4 テーマ（ダーク固定）
 
-#### 5.4.1 正本
+**実行時のライト/ダーク切替機能は削除した（2026-06-28、ダーク固定）。**
 
-`SettingsManager.Get("light_mode", False)` が**唯一の正本**。`true` → ライトモード、`false` → ダークモード。
+理由: テーマ切替は `Autona.LoadTheme()` → `qdarktheme.setup_theme()` を呼び、これが
+QApplication 全体に `setStyleSheet` + `setPalette` を再適用して**全ウィジェットを再ポリッシュ**する。
+ブラケットビュー（`AutonaBracketView`）は全試合のウィジェットツリーを単一の
+`QGraphicsProxyWidget` に埋め込んでおり（`self._scene.addWidget(...)`）、proxy 埋め込み
+ウィジェットの再ポリッシュは病的に遅い。大規模ブラケット読込時に GUI スレッドが
+**30 秒以上フリーズ**していた。切替トリガー自体を無くすことで恒久的に解消する。
 
-#### 5.4.2 切替フロー
+#### 5.4.1 現在の仕様
 
-```
-ユーザー操作（PyQt 設定ダイアログ or React トグル）
-  ↓
-AutonaWebServerActions.set_light_mode(value)  ※新規 Action
-  ↓
-SettingsManager.Set("light_mode", value)
-  ↓
-StateManager.Set("ui.light_mode", value)         ※broadcast 用キャッシュ
-  ↓
-revision 増分 + program_state_update broadcast
-  ├─→ PyQt: ui_constants.notify_theme_change() で QSS 再適用
-  └─→ React: Redux 経由で theme provider に渡し、再レンダー
-```
+- テーマは**ダーク固定**。`ui_constants.palette()` / `global_qss()` は常に `DARK` を返す。
+- テーマ適用は**起動時の 1 回のみ**（`Window.__init__` → `LoadTheme()` → `qdarktheme.setup_theme("dark", ...)`）。実行時に再適用するパスは存在しない。
+- React Web UI も**ダーク固定**（`ThemeShell.tsx` が `darkTheme` を常用）。バックエンドは `ui.light_mode` を broadcast しない。
 
-#### 5.4.3 React 側の実装規約
+#### 5.4.2 削除済みの要素（参照用）
 
-| ルール | 内容 |
-|------|------|
-| **R-Theme-1** | 起動時、Socket.IO 接続前に **localStorage の `ui.light_mode` キャッシュを参照**して仮テーマを適用（チラつき防止専用の仮表示） |
-| **R-Theme-2** | Socket.IO / snapshot 到着後は **必ず `StateManager.ui.light_mode` を優先**。値が localStorage と不一致なら React 側で localStorage を上書きする |
-| **R-Theme-3** | localStorage は**キャッシュ専用**。書き込みの正本ではない（§3.3.2） |
-| **R-Theme-4** | `themes.js` の `buildTheme(mode)` を Redux store の `ui.light_mode` に応じて呼び分ける |
+以下は切替機能と共に削除した。再導入する場合は上記フリーズの再発防止（proxy 埋め込み
+ブラケットを一時退避する等）を設計に織り込むこと:
 
-#### 5.4.4 PyQt 側の実装規約
-
-| ルール | 内容 |
-|------|------|
-| **R-Theme-5** | テーマ切替時は `ui_constants.notify_theme_change()` で登録 listener にコールバックする |
-| **R-Theme-6** | listener は `setStyleSheet(global_qss())` で全体 QSS を再適用する |
-| **R-Theme-7** | カスタム描画ウィジェット（paintEvent）は `update()` を呼んで再描画する |
+- PyQt: `WindowSignals.LightModeChanged`、`Window.ToggleLightMode` / `_applyLightMode`、"Light mode" メニュー、`ui_constants` の `LIGHT` パレット / `_is_light_mode` / `on_theme_change` / `notify_theme_change` / `_theme_listeners`
+- Web サーバー / API: `AutonaWebServerActions.set_light_mode`、`/set-light-mode` REST + socketio、`/api/v1/ui/theme`
+- 状態 / 設定: `StateManager.ui.light_mode` broadcast キャッシュ、`SettingsManager.light_mode`（旧値が残っても無視される）
+- React: `ThemeShell` の `ui.light_mode` 購読 / localStorage キャッシュ、`themes.js` の `lightTheme` export
 
 ### 5.5 クリエイティブ領域の独立性
 
@@ -1501,9 +1483,9 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 
 | ID | タスク | 関連 § | 影響範囲 | 状態 |
 |----|------|------|--------|------|
-| **T-8** | React Web UI のテーマ切替を実装。`StateManager.ui.light_mode` を購読、localStorage は仮表示キャッシュ | §5.4 | `web/src/index.js`, `web/src/ThemeShell.tsx`, `web/src/backendDataTypes.d.ts` | ✅ 完了（M2） |
-| **T-9** | `ui.light_mode` キーを StateManager に追加し、SettingsManager 変更時に broadcast する仕組み | §3.1.2, §5.4.2 | `src/Autona.py:LoadTheme` で `StateManager.Set("ui.light_mode", ...)` | ✅ 完了（M2） |
-| **T-10** | テーマ切替時の同期: PyQt 側のテーマ切替 → SettingsManager → broadcast → React も追従 | §5.4.2 | `src/AutonaWebServerActions.set_light_mode`, `src/AutonaWebServer` の `/set-light-mode` + `set_light_mode` socketio, `WindowSignals.LightModeChanged` | ✅ 完了（M2） |
+| **T-8** | ~~React Web UI のテーマ切替~~ | §5.4 | — | ❌ 撤回（2026-06-28）。切替が 30s フリーズの原因のため機能ごと削除しダーク固定化（§5.4） |
+| **T-9** | ~~`ui.light_mode` broadcast 機構~~ | §5.4 | — | ❌ 撤回（2026-06-28、§5.4） |
+| **T-10** | ~~テーマ切替の PyQt⇄React 同期~~ | §5.4 | — | ❌ 撤回（2026-06-28、§5.4） |
 | **T-11** | `BlockSaving()` / `ReleaseSaving()` の手動ペアを `with StateManager.SaveBlock():` に置き換え | §3.2.2 R-Sync-2 | `AutonaScoreboardManager` / `StatsUtil` / `BasePlayerWidget` / `PlayerListSlotWidget` / `PlayerList` / `PlayerListWidget` / `ScoreboardWidget` の小〜中規模ペア。既に try/finally で守られている長大処理と lambda タプル式 / 巨大 __init__ は意図的にスキップ | ✅ 完了（M3） |
 | **T-12** | OBS HTML poll モード（`UpdateData()` 64ms ポーリング）の degraded 化と revision 検証実装 | §2.3 R-OBS-3, §3.2.3 | `layout/include/globals.js` | ✅ 完了（M1b） |
 | **T-13** | React `size="small"` を全フォーム要素に徹底（指摘事項） | §2.2 R-React-5 | `CountrySelector` / `CountryStateSelector` / `NumberInput` / `Header` / `CurrentSet` / `CharSelector` / `UpcomingSets` / `Team` / `index.tsx` / `StageStrike` 各種 | ✅ 完了（M3） |
@@ -1529,7 +1511,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 |------------|-----------|--------|
 | **M1a: Quick compliance fixes** | T-1, T-2, T-3, T-6, T-7 | 個別に独立 PR でマージ可能。upset_factor 統一・commentary 欠番解消・StateManager.state 直接参照置換・React batch 100ms 化・accent 色統合が完了する |
 | **M1b: Sync reliability baseline** | T-4, T-5, T-12 | StateManager / AutonaWebServer / OBS globals.js / React websocketInit にまたがる同期基盤の改修。revision 付与・連続性検証・full snapshot 再取得・degraded poll 整理がまとめて完了し、React の遅延が 300ms 以内に収まる |
-| **M2: テーマ統合（中期）** | T-8〜T-10 | React Web UI でダーク/ライト切替が動作し、PyQt と同期する |
+| **M2: テーマ統合（中期）** | T-8〜T-10 | ❌ 撤回（2026-06-28）。切替が 30s フリーズの原因のため機能削除・ダーク固定化（§5.4） |
 | **M3: 設計負債の解消（中期）** | T-11〜T-17 | ハードコード色・遅延・size 不統一が解消される |
 | **M4: 構造改革（長期）** | T-18〜T-23 | Actions 層が独立、動的キーパスが減少、命名軸が統一される。`negative`/`brand` 分離、MUI `shape.borderRadius` 統合判断 |
 

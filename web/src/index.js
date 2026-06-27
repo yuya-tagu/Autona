@@ -9,9 +9,8 @@ import {tshStore} from "./redux/store";
 import {Provider} from "react-redux";
 import ThemeShell from "./ThemeShell";
 
-// ThemeShell sits inside the Redux Provider so it can subscribe to
-// tshState.ui.light_mode and swap the MUI theme when the backend
-// broadcasts a change (Design.md §5.4.2 / §8 T-8).
+// ThemeShell applies the dark MUI theme (the app is dark-only; the
+// runtime light/dark toggle was removed).
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
