@@ -1,7 +1,7 @@
 # リファクタ候補リスト (Known Smells)
 
 作成日: 2026-04-08
-最終検証: 2026-06-24（全項目を実コードに突き合わせ、行数・件数・解消状況を更新）
+最終検証: 2026-06-28（S-04 を解消・PdM 手動確認済みでクローズ、S-14 はガード導入済みに更新）
 根拠: `.claude/architecture/` 配下の調査成果物 (python-imports.md, singleton-init-order.md, state-keys.md, python-hotspots.md)
 
 本ファイルはフェーズ2の夜間タスク配布の燃料として使う。各項目に優先度・難易度・影響範囲を付記する。
@@ -89,8 +89,7 @@
 
 **影響範囲**: `AutonaGameAssetManager.py` 内部のみ
 
-**検証**: py_compile OK、`python main.py` 起動正常（worker スレッドで `_LoadGameAssetsCore` 実行・`UpdateColorModel` が list から正常生成を確認）、pytest 73件グリーン。
-**未検証（要 PdM 手動）**: ゲーム/モード切替（同期版パス）でのキャラ/スキン/カラー/ステージ再構築と、切替が1書き込みになることの目視。
+**検証**: py_compile OK、`python main.py` 起動正常（worker スレッドで `_LoadGameAssetsCore` 実行・`UpdateColorModel` が list から正常生成を確認）、pytest 73件グリーン。**PdM 手動確認済み（2026-06-28）**: ゲーム/モード切替（同期版パス）でのキャラ/スキン/カラー/ステージ再構築と切替が1書き込みになることを目視、問題なし。本項目はクローズ。
 
 ---
 
