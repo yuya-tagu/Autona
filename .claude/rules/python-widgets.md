@@ -29,6 +29,16 @@ paths:
 - タブの追加・削除・並び順変更が該当する
 - インクリメントしないと、古い保存状態が復元されて新ウィジェットが非表示になる
 
+## 入力ウィジェットの objectName は StateManager キーパス（後方互換に直結）
+
+- `.ui` の入力ウィジェット（QLineEdit / QSpinBox / QComboBox / QCheckBox / QDateEdit 等）の
+  objectName は、`findChildren()` 経由でそのまま StateManager のキーパスに使われる
+  （例: `score.{N}.team.{T}.teamName`）。**objectName を変更/削除すると既存ユーザーの
+  `program_state.json` との互換が壊れる**（state スキーマのマイグレーション層は無い。S-14）
+- 変更が必要な場合は **先に StateManager のマイグレーション層を追加**してから、
+  `tests/test_objectname_keypath_contract.py` の `EXPECTED` を更新する
+- 保護対象 objectName ↔ キーパスの一覧は `.claude/known-smells.md` S-14 の対応表を参照
+
 ## StateManager シグナル
 
 - `StateManager.signals` への `connect` は `__init__` 内で行う

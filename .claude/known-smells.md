@@ -70,18 +70,27 @@
 
 ---
 
-## S-04: AutonaGameAssetManager.LoadGameAssets の内部クラス重複 [P2/D2/S2] 🔴 未着手
+## S-04: AutonaGameAssetManager.LoadGameAssets の内部クラス重複 [P2/D2/S2] ✅ 解消（2026-06-27）
 
 **根拠**: python-hotspots.md「巨大関数 TOP 15」
 
-**2026-06-24 検証**: `LoadGameAssets` 内に `AssetsLoaderThread(QThread)` と `AssetsLoader` の2つの内部クラスがまだ存在。`run()` はそれぞれ **346行（行222-567）/ 313行（行574-886）**（記述は 327/312 で微差）。共通ロジック抽出（`_load_assets_core`）は未実施。
+**2026-06-24 検証**: `LoadGameAssets` 内に `AssetsLoaderThread(QThread)` と `AssetsLoader` の2つの内部クラスがまだ存在。`run()` はそれぞれ **346行 / 313行**で約90%同一だが diverge していた。
 
-**対策案**:
-共通ロジックを `_load_assets_core(mods_active, mods_reload_mode)` に抽出し、Thread版/同期版はそれを呼ぶだけにする。
+**2026-06-27 実施**: 共通ロジックを `AutonaGameAssetManager._LoadGameAssetsCore(self, game, mods_active, run_models)` と
+`_ResolveTargetGame(self, game, mods_reload_mode)` の2メソッドに抽出。両 `run()` は薄い委譲に縮小。差分はフックで吸収:
+- **親アクセス**: core は `self`（manager）で統一（Thread版 `self.parent()` / 同期版 `self.parent` の差を呼び出し側で吸収）
+- **モデル再構築**: `run_models(fn)` フック。Thread版＝`gui_executor.run_sync(fn)`（GUIスレッドへ marshal、boot SIGSEGV 回避）、同期版＝`fn()` パススルー
+- **lock/status/waitForDone** は Thread 固有のため Thread版 `run()` の `try/finally` に残置
+
+**統合で解消した diverge（既存バグ）**:
+1. `preset_colors` の型不一致: 同期版が `{}` 既定＋`.keys()`（dict扱い）だったが、正本は **list**（`__init__` 既定 `[]` / `UpdateColorModel` が `range(len())`）。core で list に統一 → ゲーム切替時のカラー表示名翻訳が復活。
+2. `SaveBlock` 欠落: 同期版は2回の `StateManager.Set` が個別ファイル書き込みだった → core が常時 SaveBlock で囲み、切替を1書き込みにバッチ化（レスポンス改善）。
+3. 例外時クリーンアップの非対称: 同期版に `finally` が無くリソース/ロックリーク余地 → 構造統一で解消。
 
 **影響範囲**: `AutonaGameAssetManager.py` 内部のみ
 
-**リスク**: Thread版は `self.parent()` (QThread の parent)、同期版は `self.parent` (通常属性) でアクセスしているため、統合時に参照先の違いに注意。
+**検証**: py_compile OK、`python main.py` 起動正常（worker スレッドで `_LoadGameAssetsCore` 実行・`UpdateColorModel` が list から正常生成を確認）、pytest 73件グリーン。
+**未検証（要 PdM 手動）**: ゲーム/モード切替（同期版パス）でのキャラ/スキン/カラー/ステージ再構築と、切替が1書き込みになることの目視。
 
 ---
 
@@ -232,15 +241,36 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, b
 
 ---
 
-## S-14: Qt objectName 依存の動的 StateManager キー [P2/D3/S3] 🔴 未着手（記述正確）
+## S-14: Qt objectName 依存の動的 StateManager キー [P2/D3/S3] 🟡 ガード導入済み（フル移行は将来）
 
 **根拠**: state-keys.md「要注意事項 #2」
 
 **2026-06-24 検証**: 記述どおり現存。`element.objectName()` をキーパスに使用しているのは **6ファイル**:
-`AutonaScoreboardWidget.py`, `AutonaTournamentInfoWidget.py`, `AutonaScoreboardPlayerWidget.py`, `AutonaTeamPlayerWidget.py`, `AutonaNotesWidget.py`（`AutonaBasePlayerWidget.py` は `objectName() != ""` の検査のみでキーパス用途ではない）。明示的キー名マッピングへの移行は未実施。`.ui` ファイルの変更でキーパスが壊れ、既存の保存データとの互換性が失われるリスクは継続（agent-pitfalls #4 参照）。
+`AutonaScoreboardWidget.py`, `AutonaTournamentInfoWidget.py`, `AutonaScoreboardPlayerWidget.py`, `AutonaTeamPlayerWidget.py`, `AutonaNotesWidget.py`（`AutonaBasePlayerWidget.py` は `objectName() != ""` の検査のみでキーパス用途ではない）。`.ui` の objectName 変更でキーパスが壊れ、既存 `program_state.json` との互換が失われるリスクが継続（`STATE_VERSION` は Qt ドックレイアウト用で state スキーマのマイグレーション層は無い）。
 
-**対策案**:
-objectName → 明示的なキー名マッピングを導入。ただし既存の .ui ファイルとの整合性維持が必要で工数大。
+**2026-06-27 ガード導入（ランタイム不変・zero-risk）**: フル移行（明示キーのマッピング層＋データマイグレーション）は S3 で「低リスク」条件から外れるため見送り。代わりに**実行時の挙動を一切変えず**、契約を破る変更を検知する `tests/test_objectname_keypath_contract.py`（3テスト）を追加:
+- `.ui` の入力ウィジェット objectName 集合をスナップショット固定（リネーム/削除を検知）
+- プログラム的命名（`notes_widget_{N}` / `custom_textbox`）の存在をソースで検証
+- QSpinBox 内部 `qt_spinbox_lineedit` → 親 objectName フォールバックの存在を検証
+
+`.ui` の objectName を1つ改名すると test が fail することを確認済み（検知力検証）。
+
+**保護対象 objectName ↔ StateManager キーパス（変更は移行層が前提）**:
+
+| .ui | objectName | キーパス例 |
+|-----|-----------|-----------|
+| AutonaScoreboardTeam.ui | teamName, losers | `score.{N}.team.{T}.{name}` |
+| AutonaBattleTeam.ui | teamName, separateSponsors | team battle ボードのチームキー |
+| AutonaScoreboardScore.ui | phase, match, best_of, score_left, score_right | `score.{N}.{name}`（best_of 等）/ findChild キー |
+| AutonaScoreboardPlayer.ui | team, name, seed, real_name, twitter, birthday, country, state | `score.{N}.team.{T}.player.{M}.{name}` |
+| AutonaTeamPlayer.ui | team, name, country, state, twitter, activePlayer, dead, dynamicSpinner | `{self.path}.{name}` |
+| AutonaTournamentInfo.ui | tournamentName, eventName, gameTitleCombo, numEntrants, startAt, address, streamTitleEdit | `tournamentInfo.{name}` |
+| （プログラム的） | notes_widget_{N}, custom_textbox | `notes.{name}.{title\|contents}` / `{self.path}.custom_textbox` |
+
+**運用ルール**: 上表の objectName を変更/削除する場合は、**先に StateManager のマイグレーション層を追加**してから `tests/test_objectname_keypath_contract.py` の `EXPECTED` を更新する（= S-14 フル移行を将来やる際の入口）。
+
+**対策案（フル移行・将来）**:
+objectName → 明示的なキー名マッピング＋`program_state.json` のスキーマ版管理＋ロード時マイグレーション。工数大・後方互換要注意。
 
 **影響範囲**: 5〜6ファイル + .ui ファイル群 + 既存の保存データ
 
@@ -269,7 +299,7 @@ objectName → 明示的なキー名マッピングを導入。ただし既存�
 | ID | 対象 | 理由 | 状態 |
 |----|------|------|------|
 | S-02 | ScoreboardWidget __init__ | 単一ファイル内。動作確認は手動。884行に肥大化 | 🔴 未着手 |
-| S-04 | GameAssetManager 内部クラス | 単一ファイル内 | 🔴 未着手 |
+| S-04 | GameAssetManager 内部クラス | `_LoadGameAssetsCore`/`_ResolveTargetGame` 抽出。colors型/SaveBlock/finally の diverge 解消 | ✅ 解消（2026-06-27） |
 | S-13 | AutonaWebServer Blueprint 分割 | 91ルート。stage_strike は除外 | 🔴 未着手 |
 | ~~S-06~~ | ~~ThumbnailSettings 分割~~ | 縮小済みで優先度低下 | 🟢 縮小 |
 | ~~S-07~~ | ~~thumbnail 巨大関数~~ | WebEngine 移行で解消 | ✅ 解消 |
@@ -280,7 +310,7 @@ objectName → 明示的なキー名マッピングを導入。ただし既存�
 |----|------|------|------|
 | S-03 | Window __init__ | 影響範囲広い。慎重に | 🔴 未着手 |
 | S-10 | シングルトン遅延初期化 | 全ファイルに影響（11クラス）。フェーズ3以降 | 🔴 未着手 |
-| S-14 | objectName 依存 | 後方互換性の問題。設計議論が必要 | 🔴 未着手 |
+| S-14 | objectName 依存 | 契約テストでリネーム/削除を検知（zero-risk）。フル移行は将来 | 🟡 ガード導入済み（2026-06-27） |
 
 ---
 
