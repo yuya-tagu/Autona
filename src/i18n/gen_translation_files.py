@@ -16,14 +16,7 @@ print(file_list)
 
 languages = [
     "en",
-    "pt-BR",
-    "fr",
-    "ja",
-    "es",
-    "de",
-    "it",
-    "zh-CN",
-    "zh-TW"
+    "ja"
 ]
 
 output = [f'src/i18n/Autona_{lang}.ts' for lang in languages]
