@@ -4,9 +4,7 @@ import textwrap
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
-# NOTE: `atproto` is imported lazily inside generate_bsky_text (see below).
-# Its top-level import pulled in pandas/numpy and cost ~5s of startup time,
-# even though Bluesky text building is only needed when posting to Bluesky.
+
 
 def add_alt_text_tooltip_to_button(push_button: QPushButton):
     altTextTooltip = QApplication.translate(
@@ -20,35 +18,6 @@ def load_program_state():
     with open(data_path, "rt", encoding="utf-8") as data_file:
         data_json = json.loads(data_file.read())
     return (data_json)
-
-
-def generate_bsky_text(scoreboard_id=1, use_phase_name=True):
-    # Deferred import: keeps the heavy atproto dependency off the startup path.
-    from atproto import client_utils
-
-    def transform_yt_into_bsky(description, data):
-        text = "\n".join(description.split("\n")[:-1]).strip("\n")
-        text = "🔴 " + QApplication.translate("altText", "LIVE NOW") + "\n\n" + text
-
-        link_text = QApplication.translate("altText", "Click here to watch")
-        link_url = data.get("score").get(str(scoreboard_id)).get("stream_url")
-        if link_url:
-            text += "\n\n"
-            result = client_utils.TextBuilder().text(text).link(link_text, link_url)
-            raw_text = text + link_text
-        else:
-            result = client_utils.TextBuilder().text(text)
-            raw_text = text
-        return(raw_text, result)
-
-    post_length_limit = 300
-    data = load_program_state()
-    title, description = generate_youtube(scoreboard_id, use_phase_name)
-    raw_text, builder = transform_yt_into_bsky(description, data)
-    if len(raw_text) > post_length_limit:
-        title, description = generate_youtube(scoreboard_id, use_phase_name, use_characters=False)
-        raw_text, builder = transform_yt_into_bsky(description, data)
-    return(raw_text, builder)
 
 
 def generate_youtube(scoreboard_id=1, use_phase_name=True, use_characters=True, replace_characters=[]):
@@ -290,8 +259,6 @@ if __name__ == "__main__":
     print(colored("TEST MODE - AutonaAltTextHelper.py", "red"))
     print("====")
     title, description = generate_youtube(1)
-    raw_bsky, builder = generate_bsky_text(1)
     print(colored("YouTube title: ", "yellow") + f"{title}")
     print(colored(f"\nDescription: \n", "yellow") + f"{description}")
     print(colored(f"\nTop 8 alt text: \n", "yellow")+f"{generate_top_n_alt_text()}")
-    print(colored(f"\nBluesky post: \n", "yellow")+f"{raw_bsky}")

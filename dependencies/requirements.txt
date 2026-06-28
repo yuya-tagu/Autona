@@ -24,7 +24,6 @@ PyQt6-WebEngine-Qt6==6.11.0
 loguru==0.7.3
 flask-socketio
 simple_websocket
-atproto
 termcolor==2.5.0
 orjson
 msgpack==1.1.0
