@@ -831,18 +831,8 @@
     </message>
     <message>
         <location filename="..\Autona.py" line="585" />
-        <source>Open the Wiki</source>
-        <translation>ウィキを開く</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="592" />
-        <source>Look for Help on the forum</source>
-        <translation>フォーラムでヘルプを探す</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="599" />
-        <source>Report a bug</source>
-        <translation>バグを報告する</translation>
+        <source>Join the Discord community</source>
+        <translation>Discordコミュニティに参加する</translation>
     </message>
     <message>
         <location filename="..\Autona.py" line="619" />

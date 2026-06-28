@@ -829,18 +829,8 @@
     </message>
     <message>
         <location filename="..\Autona.py" line="585" />
-        <source>Open the Wiki</source>
-        <translation>Open the Wiki</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="592" />
-        <source>Look for Help on the forum</source>
-        <translation>Look for Help on the forum</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="599" />
-        <source>Report a bug</source>
-        <translation>Report a bug</translation>
+        <source>Join the Discord community</source>
+        <translation>Join the Discord community</translation>
     </message>
     <message>
         <location filename="..\Autona.py" line="619" />
