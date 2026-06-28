@@ -225,8 +225,13 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None, scoreb
                     raise Exception(QApplication.translate(
                         "thumb_app", "Player {0} tag missing").format(i))
         except Exception as e:
-            logger.warning(f"Failed to load program state, falling back: {e}")
             if isPreview:
+                # No live/complete program state yet (e.g. fresh startup before
+                # any tournament data is loaded) is expected for previews — fall
+                # back to placeholder data silently, matching the result
+                # generator's `_create_preview_data` path. Not a warning.
+                logger.debug(
+                    f"No live program state; rendering placeholder preview: {e}")
                 game_codename = "test"
                 try:
                     game_codename = StateManager.GetFullState().get("state", {}).get("game", {}).get("codename", "test")
@@ -235,6 +240,8 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None, scoreb
                 data = createFalseData(gameAssetManager, deep_get(
                     settings, f"game.{game_codename}.asset_pack"))
             else:
+                # Final generation with missing data is a genuine error.
+                logger.warning(f"Failed to load program state: {e}")
                 raise e
 
     config = dict(settings)
