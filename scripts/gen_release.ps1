@@ -1,4 +1,10 @@
-Push-Location ..
+# Resolve the project root from this script's location, not the caller's CWD.
+# Previously this was `Push-Location ..`, which only worked when run from
+# scripts/. Run from the project root (e.g. `.\scripts\gen_release.ps1`) it
+# resolved `..` to the PARENT of the repo, so `Remove-Item "Autona\assets\
+# versions.json"` deleted the real versions.json. $PSScriptRoot is CWD-safe
+# (mirrors publish_release.ps1).
+Push-Location (Join-Path $PSScriptRoot "..")
 
 New-Item -Path "Autona" -ItemType Directory
 
