@@ -158,87 +158,14 @@
     ]
   },
   "languages": {
-    "de-AT": [
-      "Deutsch (\u00d6sterreich)",
-      "German (Austria)"
-    ],
-    "de-CH": [
-      "Deutsch (Schweiz)",
-      "German (Switzerland)"
-    ],
-    "de-DE": [
-      "Deutsch (Deutschland)",
-      "German (Germany)"
-    ],
-    "en-GB": [
-      "English (UK)",
-      "English (UK)"
-    ],
     "en-US": [
       "English (US)",
       "English (US)"
     ],
-    "es-CL": [
-      "Espa\u00f1ol (Chile)",
-      "Spanish (Chile)"
-    ],
-    "es-ES": [
-      "Espa\u00f1ol (Espa\u00f1a)",
-      "Spanish (Spain)"
-    ],
-    "es-MX": [
-      "Espa\u00f1ol (M\u00e9xico)",
-      "Spanish (Mexico)"
-    ],
-    "fr-CA": [
-      "Fran\u00e7ais (Canada)",
-      "French (Canada)"
-    ],
-    "fr-FR": [
-      "Fran\u00e7ais (France)",
-      "French (France)"
-    ],
-    "it-IT": [
-      "Italiano (Italia)",
-      "Italian (Italy)"
-    ],
     "ja-JP": [
       "\u65e5\u672c\u8a9e",
       "Japanese"
-    ],
-    "pt-BR": [
-      "Portugu\u00eas (Brasil)",
-      "Portuguese (Brazil)"
-    ],
-    "zh-CN": [
-      "\u4e2d\u6587 (\u4e2d\u56fd\u5927\u9646)",
-      "Chinese (PRC)"
-    ],
-    "zh-TW": [
-      "\u4e2d\u6587 (\u53f0\u7063)",
-      "Chinese (Taiwan)"
     ]
   },
-  "remapping": {
-    "es_LA": [
-      "es_AR",
-      "es_BO",
-      "es_CL",
-      "es_CO",
-      "es_CR",
-      "es_DO",
-      "es_EC",
-      "es_SV",
-      "es_GT",
-      "es_HN",
-      "es_MX",
-      "es_NI",
-      "es_PA",
-      "es_PY",
-      "es_PE",
-      "es_PR",
-      "es_UY",
-      "es_VE"
-    ]
-  }
+  "remapping": {}
 }
