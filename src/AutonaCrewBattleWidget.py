@@ -1,3 +1,6 @@
+import webbrowser
+import urllib.parse
+
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
@@ -112,6 +115,15 @@ class AutonaCrewBattleWidget(QWidget):
         self.playerNumber.valueChanged.connect(self._onMemberNumChanged)
         controls.addWidget(self.playerNumber)
         controls.addStretch(1)
+
+        # X-post: same flow as the 1v1 board (AutonaScoreboardWidget) — opens
+        # X's web intent with a prefilled body. Accent-orange "primary" styling
+        # marks it as the confirming action, matching board 1.
+        self.xpostBtn = QPushButton(QApplication.translate("app", "Xに投稿する"))
+        self.xpostBtn.setObjectName("primary")
+        self.xpostBtn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.xpostBtn.clicked.connect(self.PostToX)
+        controls.addWidget(self.xpostBtn)
 
         self.btSwap = QPushButton()
         self.btSwap.setIcon(QIcon(UI.icon_path("swap.svg")))
@@ -485,6 +497,80 @@ class AutonaCrewBattleWidget(QWidget):
                 StateManager.Set(self._key("phase"), data.get("tournament_phase"))
             if data.get("bestOf") is not None:
                 StateManager.Set(self._key("best_of"), data.get("bestOf"))
+
+    # ── X (Twitter) post ───────────────────────────────────────────────
+
+    def _teamMemberNames(self, team_n: int) -> list[str]:
+        # Named members within the team's visible roster (memberNum), in order.
+        member_num = int(
+            StateManager.Get(self._key("team", team_n, "memberNum"))
+            or MAX_MEMBERS)
+        names = []
+        for m in range(1, member_num + 1):
+            name = (StateManager.Get(
+                self._key("team", team_n, "player", m, "name")) or "").strip()
+            if name:
+                names.append(name)
+        return names
+
+    def PostToX(self):
+        # Mirror AutonaScoreboardWidget.PostToX: build a tweet body from the
+        # current crew state and open X's web intent. Text-only — crew has no
+        # thumbnail generator, so (unlike board 1) no image is copied first.
+        try:
+            tournament_name = StateManager.Get(
+                "tournamentInfo.tournamentName", "") or ""
+            phase = (StateManager.Get(self._key("phase")) or "").strip()
+            match = (StateManager.Get(self._key("match")) or "").strip()
+
+            # Validate: both teams need a member name and a round name is set.
+            missing = []
+            if not self._teamMemberNames(1):
+                missing.append(QApplication.translate("app", "Team 1 player name"))
+            if not self._teamMemberNames(2):
+                missing.append(QApplication.translate("app", "Team 2 player name"))
+            if not (phase or match):
+                missing.append(QApplication.translate("app", "Round name"))
+            if missing:
+                msgBox = QMessageBox()
+                msgBox.setWindowIcon(QIcon(UI.icon_path("icon.png")))
+                msgBox.setWindowTitle(QApplication.translate("app", "Post to X"))
+                msgBox.setText(QApplication.translate(
+                    "app",
+                    "Cannot post to X: the following fields are empty."))
+                msgBox.setInformativeText("\n".join(f"- {m}" for m in missing))
+                msgBox.setIcon(QMessageBox.Warning)
+                msgBox.exec()
+                return
+
+            def team_line(team_n):
+                team_name = (StateManager.Get(
+                    self._key("team", team_n, "teamName")) or "").strip()
+                member_str = " / ".join(self._teamMemberNames(team_n))
+                if team_name and member_str:
+                    return f"{team_name} ({member_str})"
+                return team_name or member_str or "???"
+
+            round_line = f"[{phase}]" if phase else ""
+            if match:
+                round_line = f"{round_line} - {match}" if round_line else match
+
+            parts = []
+            if tournament_name:
+                parts.append(tournament_name)
+            if round_line:
+                parts.append(round_line)
+            parts.append("")
+            parts.append(team_line(1))
+            parts.append("vs")
+            parts.append(team_line(2))
+
+            text = "\n".join(parts)
+            url = "https://twitter.com/intent/tweet?text=" + \
+                urllib.parse.quote(text)
+            webbrowser.open(url)
+        except Exception as e:
+            logger.error(f"PostToX error: {e}")
 
     # ── internal ───────────────────────────────────────────────────────
 
