@@ -178,6 +178,12 @@ class AutonaTournamentInfoWidget(QDockWidget):
         StateManager.Set("tournamentInfo.accentColor", saved_accent)
 
         # Stream settings
+        # Stream destination ("配信先") — moved here from the SCORE tab so the
+        # broadcast channel is configured once at the event level. The selected
+        # URL is mirrored to every scoreboard's score.{N}.stream_url, so the
+        # per-board X-post builder keeps working unchanged.
+        self._buildStreamDestinationRow()
+
         self.streamTitleEdit: QLineEdit = self.findChild(
             QLineEdit, "streamTitleEdit")
 
@@ -649,6 +655,99 @@ class AutonaTournamentInfoWidget(QDockWidget):
         if not title:
             return
         QApplication.clipboard().setText(title)
+
+    # --- Stream destination ("配信先") ---
+    # Scoreboards whose score.{N}.stream_url is consumed by the X-post builder
+    # (board 3 = crew battle does not use it).
+    _STREAM_BOARDS = (1, 2)
+
+    def _buildStreamDestinationRow(self):
+        """Build the 配信先 (stream destination) row and insert it at the top
+        of the EVENT tab's Stream Settings group, above the stream title.
+        """
+        self.streamUrlCombo = None
+
+        streamLayout = self.findChild(QVBoxLayout, "verticalLayoutStream")
+        if streamLayout is None:
+            return
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(L.CARD_INNER_SPACING)
+
+        label = QLabel(QApplication.translate("app", "配信先"))
+        row.addWidget(label)
+
+        self.streamUrlCombo = QComboBox()
+        self.streamUrlCombo.setEditable(True)
+        self.streamUrlCombo.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._loadStreamChannels()
+        self.streamUrlCombo.currentIndexChanged.connect(self._onStreamChannelChanged)
+        self.streamUrlCombo.lineEdit().editingFinished.connect(
+            self._onStreamChannelChanged)
+        row.addWidget(self.streamUrlCombo)
+
+        self.addStreamChannelBtn = QPushButton(
+            QApplication.translate("app", "配信先を追加する"))
+        self.addStreamChannelBtn.setSizePolicy(
+            QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.addStreamChannelBtn.clicked.connect(self._addStreamChannel)
+        row.addWidget(self.addStreamChannelBtn)
+
+        # Insert above the "Stream Title" label (index 0 of the group layout).
+        streamLayout.insertLayout(0, row)
+
+        # Export the initial value to every consuming board.
+        self._onStreamChannelChanged()
+
+    def _loadStreamChannels(self):
+        """Populate the stream URL combo from saved channels."""
+        self.streamUrlCombo.blockSignals(True)
+        self.streamUrlCombo.clear()
+        self.streamUrlCombo.addItem("", "")  # empty default
+        channels = SettingsManager.Get("stream_channels", [])
+        for ch in channels:
+            self.streamUrlCombo.addItem(ch.get("name", ""), ch.get("url", ""))
+        self.streamUrlCombo.blockSignals(False)
+
+    def _onStreamChannelChanged(self, *args):
+        url = self.streamUrlCombo.currentData() or self.streamUrlCombo.currentText()
+        # Mirror to every board so the per-board post builders read it unchanged.
+        with StateManager.SaveBlock():
+            for n in self._STREAM_BOARDS:
+                StateManager.Set(f"score.{n}.stream_url", url)
+
+    def _addStreamChannel(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle(QApplication.translate("app", "Add stream channel"))
+        dialog.setMinimumWidth(350)
+        layout = QFormLayout(dialog)
+
+        nameEdit = QLineEdit()
+        nameEdit.setPlaceholderText("BST Stream")
+        layout.addRow(QApplication.translate("app", "Channel name"), nameEdit)
+
+        urlEdit = QLineEdit()
+        urlEdit.setPlaceholderText("https://www.youtube.com/@B_ST_Stream/live")
+        layout.addRow("URL", urlEdit)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addRow(buttons)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            name = nameEdit.text().strip()
+            url = urlEdit.text().strip()
+            if name and url:
+                channels = SettingsManager.Get("stream_channels", [])
+                channels.append({"name": name, "url": url})
+                SettingsManager.Set("stream_channels", channels)
+                self._loadStreamChannels()
+                # Select the newly added channel
+                self.streamUrlCombo.setCurrentIndex(self.streamUrlCombo.count() - 1)
 
     def _LoadBannerImage(self):
         """Load the source banner as a PIL Image. Prefers the provider's

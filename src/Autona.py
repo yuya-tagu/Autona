@@ -579,38 +579,6 @@ class Window(QMainWindow):
 
         editMenu.addSeparator()
 
-        # Help sub-menu
-        help_messagebox = QMessageBox()
-        help_messagebox.setWindowTitle(
-            QApplication.translate("app", "Warning"))
-        help_messagebox.setText(QApplication.translate(
-            "app", "A new window has been opened in your default webbrowser."))
-        helpMenu = editMenu.addMenu(
-            QApplication.translate("app", "Help"))
-        action = helpMenu.addAction(
-            QApplication.translate("app", "Open the Wiki"))
-        wiki_url = "https://github.com/yuya-tagu/Autona/wiki"
-        action.triggered.connect(lambda x=None: [
-            QDesktopServices.openUrl(QUrl(wiki_url)),
-            help_messagebox.exec()
-        ])
-        action = helpMenu.addAction(
-            QApplication.translate("app", "Look for Help on the forum"))
-        help_url = "https://github.com/yuya-tagu/Autona/discussions/categories/q-a"
-        action.triggered.connect(lambda x=None: [
-            QDesktopServices.openUrl(QUrl(help_url)),
-            help_messagebox.exec()
-        ])
-        action = helpMenu.addAction(
-            QApplication.translate("app", "Report a bug"))
-        issues_url = "https://github.com/yuya-tagu/Autona/issues"
-        action.triggered.connect(lambda x=None: [
-            QDesktopServices.openUrl(QUrl(issues_url)),
-            help_messagebox.exec()
-        ])
-
-        editMenu.addSeparator()
-
         self.settingsWindow = AutonaSettingsWindow(self)
         action = editMenu.addAction(
             QApplication.translate("Settings", "Settings"))
@@ -766,6 +734,14 @@ class Window(QMainWindow):
         action = apiMenu.addAction(
             QApplication.translate("api", "OBS / Advanced Scene Switcher"))
         action.triggered.connect(lambda: self.obsGuideWindow.show())
+
+        # ── Help menu ──
+        helpMenu = mb.addMenu(QApplication.translate("app", "Help"))
+        action = helpMenu.addAction(
+            QApplication.translate("app", "Join the Discord community"))
+        discord_url = "https://discord.gg/yAFAmhaUqn"
+        action.triggered.connect(
+            lambda x=None: QDesktopServices.openUrl(QUrl(discord_url)))
 
         # Create all boards (1v1 + team + crew) into the SCORE dock, then apply
         # the persisted battle format so the right board + result layout are

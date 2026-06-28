@@ -9,10 +9,8 @@ from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from qtpy import uic
 from typing import List
-from src.AutonaColorButton import AutonaColorButton
 from .Helpers.AutonaDirHelper import AutonaResolve
 from .Helpers.AutonaVersionHelper import add_beta_label
-from .Helpers.AutonaBskyHelper import post_to_bsky
 from .Helpers.AutonaNetworkHelper import GetLocalIP
 
 from . import ui_constants as UI
@@ -280,45 +278,11 @@ class AutonaScoreboardWidget(QWidget):
         self.streamSection.layout().setSpacing(UI.SPACE_SM)
         self.streamSection.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
 
-        # Stream URL row is built here but placed in `bottomOptions` later
-        # (alongside the character / player-count spinboxes) so the top
-        # of the scoreboard stays focused on match-loading actions.
-        if SettingsManager.Get("bsky_account.enable_bluesky", True):
-            self.streamUrl = QHBoxLayout()
-            self.streamUrl.setContentsMargins(0, 0, 0, 0)
-            self.streamUrl.setSpacing(UI.SPACE_SM)
-            self.streamUrlLabel = QLabel(
-                QApplication.translate("app", "配信先") + " ")
-            # Match the 8pt bold style used by the PHASE / MATCH / BEST OF
-            # labels in the score bar so the rows read consistently.
-            _streamUrlFont = self.streamUrlLabel.font()
-            _streamUrlFont.setPointSize(8)
-            _streamUrlFont.setBold(True)
-            self.streamUrlLabel.setFont(_streamUrlFont)
-            self.streamUrl.layout().addWidget(self.streamUrlLabel)
-            self.streamUrlCombo = QComboBox()
-            self.streamUrlCombo.setEditable(True)
-            self.streamUrlCombo.setSizePolicy(
-                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            self._loadStreamChannels()
-            self.streamUrlCombo.currentIndexChanged.connect(self._onStreamChannelChanged)
-            self.streamUrlCombo.lineEdit().editingFinished.connect(
-                lambda: StateManager.Set(
-                    f"score.{self.scoreboardNumber}.stream_url",
-                    self.streamUrlCombo.currentData() or self.streamUrlCombo.currentText()))
-            self.streamUrl.layout().addWidget(self.streamUrlCombo)
-            self.addStreamChannelBtn = QPushButton(
-                QApplication.translate("app", "配信先を追加する"))
-            self.addStreamChannelBtn.setSizePolicy(
-                QSizePolicy.Maximum, QSizePolicy.Fixed)
-            self.addStreamChannelBtn.clicked.connect(self._addStreamChannel)
-            self.streamUrl.layout().addWidget(self.addStreamChannelBtn)
-            # Export initial value
-            StateManager.Set(
-                f"score.{self.scoreboardNumber}.stream_url",
-                self.streamUrlCombo.currentData() or self.streamUrlCombo.currentText())
-        else:
-            self.streamUrl = None
+        # The stream-destination ("配信先") row used to live here. It moved to
+        # the EVENT tab's "Stream Settings" section so the broadcast channel is
+        # configured once at the event level (see AutonaTournamentInfoWidget).
+        # The chosen URL is still mirrored to score.{N}.stream_url, so the
+        # X-post builder below keeps reading its per-board key.
 
         loadSetRow = QHBoxLayout()
         loadSetRow.setContentsMargins(0, 0, 0, 0)
@@ -339,11 +303,6 @@ class AutonaScoreboardWidget(QWidget):
         # UI. Force-disable the setting so any stale True value from an
         # older session doesn't silently keep the timer running.
         SettingsManager.Set("general.disable_autoupdate", True)
-
-        # Stream URL row sits directly under the Load-set button so stream
-        # destination and match-loading actions stay grouped.
-        if self.streamUrl is not None:
-            self.streamSection.layout().addLayout(self.streamUrl)
 
         # --- Separator (inserted into layout later via insertWidget) ---
         # Wrap the line in a container with top/bottom padding so the
@@ -447,21 +406,12 @@ class AutonaScoreboardWidget(QWidget):
         colorGroup1.layout().setSpacing(UI.SPACE_SM)
         colorGroup1.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Minimum)
 
+        # Team color is no longer edited inline (the SCORE-tab swatch was
+        # removed). It is configured via Edit → Settings → General and applied
+        # here at build time. colorGroup1 stays as an (empty) layout spacer that
+        # keeps the 1P/TEAM label centered (see _applyScoreboardMode).
         DEFAULT_TEAM1_COLOR = SettingsManager.Get("general.team_1_default_color", "#fe3636")
-        self.colorButton1 = AutonaColorButton(color=DEFAULT_TEAM1_COLOR)
-        # Compact color swatch — the old QToolButton default made the
-        # chip taller than the 1P label, which looked off-balance.
-        self.colorButton1.setFixedSize(UI.BTN_MD, UI.BTN_MD)
-        # self.colorButton1.setText(QApplication.translate("app", "COLOR"))
-        self.colorButton1.colorChanged.connect(
-            lambda color: [
-                StateManager.BlockSaving(),
-                StateManager.Set(f"score.{self.scoreboardNumber}.team.1.color", color),
-                StateManager.ReleaseSaving()
-            ])
         self.CommandTeamColor(0, DEFAULT_TEAM1_COLOR)
-
-        colorGroup1.layout().addWidget(self.colorButton1)
 
         team1HeaderRow = self.team1column.findChild(QHBoxLayout, "horizontalLayout_2")
         team1HeaderRow.layout().insertWidget(0, colorGroup1)
@@ -503,19 +453,9 @@ class AutonaScoreboardWidget(QWidget):
             QApplication.translate("app", "TEAM {0}").format(2))
         self.team2column.findChild(QLabel, "teamLabel").setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Minimum)
 
+        # See team-1 note above: swatch removed, color comes from Settings.
         DEFAULT_TEAM2_COLOR = SettingsManager.Get("general.team_2_default_color", "#2e89ff")
-        self.colorButton2 = AutonaColorButton(color=DEFAULT_TEAM2_COLOR)
-        self.colorButton2.setFixedSize(UI.BTN_MD, UI.BTN_MD)
-        self.colorButton2.colorChanged.connect(
-            lambda color: [
-                StateManager.BlockSaving(),
-                StateManager.Set(f"score.{self.scoreboardNumber}.team.2.color", color),
-                StateManager.ReleaseSaving()
-            ])
-        # self.colorButton2.setText(QApplication.translate("app", "COLOR"))
         self.CommandTeamColor(1, DEFAULT_TEAM2_COLOR)
-
-        colorGroup2.layout().addWidget(self.colorButton2)
 
         team2HeaderRow = self.team2column.findChild(QHBoxLayout, "horizontalLayout_2")
         team2HeaderRow.layout().insertWidget(0, colorGroup2)
@@ -894,13 +834,6 @@ class AutonaScoreboardWidget(QWidget):
         topLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.topSectionFrame.setLayout(topLayout)
 
-        # "対戦情報" title for the match-info (Start.gg-load / stream) frame.
-        # The X-post / browser buttons that used to live in this row have
-        # moved to the scoreboard section's title row below.
-        self.topSectionTitle = QLabel(QApplication.translate("app", "対戦情報"))
-        self.topSectionTitle.setStyleSheet(self._sectionTitleStyle())
-        topOptions.layout().insertWidget(0, self.topSectionTitle)
-
         topLayout.addWidget(topOptions)
         topLayout.addWidget(self.streamSection)
 
@@ -1101,76 +1034,6 @@ class AutonaScoreboardWidget(QWidget):
                 msgBox.exec()
             else:
                 raise e
-    
-    # --- Stream channel management ---
-
-    def _loadStreamChannels(self):
-        """Populate the stream URL combo from saved channels."""
-        self.streamUrlCombo.blockSignals(True)
-        self.streamUrlCombo.clear()
-        self.streamUrlCombo.addItem("", "")  # empty default
-        channels = SettingsManager.Get("stream_channels", [])
-        for ch in channels:
-            self.streamUrlCombo.addItem(ch.get("name", ""), ch.get("url", ""))
-        self.streamUrlCombo.blockSignals(False)
-
-    def _onStreamChannelChanged(self, index):
-        url = self.streamUrlCombo.currentData() or self.streamUrlCombo.currentText()
-        StateManager.Set(f"score.{self.scoreboardNumber}.stream_url", url)
-
-    def _addStreamChannel(self):
-        dialog = QDialog(self)
-        dialog.setWindowTitle(QApplication.translate("app", "Add stream channel"))
-        dialog.setMinimumWidth(350)
-        layout = QFormLayout(dialog)
-
-        nameEdit = QLineEdit()
-        nameEdit.setPlaceholderText("BST Stream")
-        layout.addRow(QApplication.translate("app", "Channel name"), nameEdit)
-
-        urlEdit = QLineEdit()
-        urlEdit.setPlaceholderText("https://www.youtube.com/@B_ST_Stream/live")
-        layout.addRow("URL", urlEdit)
-
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        layout.addRow(buttons)
-
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            name = nameEdit.text().strip()
-            url = urlEdit.text().strip()
-            if name and url:
-                channels = SettingsManager.Get("stream_channels", [])
-                channels.append({"name": name, "url": url})
-                SettingsManager.Set("stream_channels", channels)
-                self._loadStreamChannels()
-                # Select the newly added channel
-                self.streamUrlCombo.setCurrentIndex(self.streamUrlCombo.count() - 1)
-
-    def PostToBsky(self):
-        thumbnailPath = self.GenerateThumbnail(quiet_mode=True)
-        if thumbnailPath:
-            msgBox = QMessageBox()
-            msgBox.setWindowIcon(QIcon(UI.icon_path('icon.png')))
-            msgBox.setWindowTitle(QApplication.translate(
-                "app", "Autona - Bluesky"))
-
-            try:
-                post_to_bsky(scoreboardNumber=self.scoreboardNumber, image_path=thumbnailPath.replace(".png", ".jpg"))
-                username = SettingsManager.Get("bsky_account", {}).get("username")
-                msgBox.setText(QApplication.translate("app", "The post has successfully been sent to account {0}").format(username))
-                msgBox.setIcon(QMessageBox.NoIcon)
-                msgBox.exec()
-            except Exception as e:
-                msgBox.setText(QApplication.translate("app", "Warning"))
-                msgBox.setInformativeText(str(e))
-                msgBox.setIcon(QMessageBox.Warning)
-                msgBox.exec()
-            for rm_path in [thumbnailPath, thumbnailPath.replace(".png", ".jpg"), thumbnailPath.replace(".png", "_desc.txt"), thumbnailPath.replace(".png", "_title.txt")]:
-                if os.path.exists(rm_path):
-                    os.remove(rm_path)
     
     def PostToX(self):
         try:
@@ -1744,10 +1607,6 @@ class AutonaScoreboardWidget(QWidget):
                     value = "#" + value
 
             if value:
-                if team == 0:
-                    self.colorButton1.setColor(value)
-                if team == 1:
-                    self.colorButton2.setColor(value)
                 if team in (0, 1):
                     with StateManager.SaveBlock():
                         StateManager.Set(
