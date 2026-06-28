@@ -29,6 +29,7 @@ import os
 import asyncio
 from qasync import run, QEventLoop
 from functools import partial
+from src.Helpers.AutonaWindowsShortcut import ensure_appid_shortcut
 os.environ["QT_API"] = "PyQt6"
 
 
@@ -60,6 +61,12 @@ async def main(event_loop):
 if __name__ == '__main__':
     # Pyinstaller fix
     multiprocessing.freeze_support()
+
+    # Register the AppID-tagged Start Menu shortcut so Win11 resolves the
+    # taskbar icon authoritatively (the window HICON alone is an unreliable
+    # fallback). Must run before any window is shown; runs only in the real
+    # main process (after freeze_support, inside __main__).
+    ensure_appid_shortcut()
 
     try:
         try:
