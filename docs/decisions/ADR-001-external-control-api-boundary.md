@@ -58,7 +58,7 @@ Stream Deck 連携を直接実装せず、**API 経由**とする。Stream Deck 
 外部 API も**必ず `WebServerActions` → Qt Signal → `StateManager` を通す**。
 StateManager をバイパスして**ランタイム状態（`score.*` 等）を直接書かない**。
 GUI スレッド直列化（`@gui_thread_sync`）を尊重する。
-- ただし一部 Action（`set_light_mode`・`load_tournament` 等）が **`SettingsManager` にも書く**ことは**許容**する
+- ただし一部 Action（`load_tournament` 等）が **`SettingsManager` にも書く**ことは**許容**する
   （PdM 確認済）。本 API はこれらも既存 Action へ委譲するだけで、Settings/State を新たに直接書かない。
 - 帰結: `SettingsManager` のみの変更は `revision`（StateManager 由来）に反映されない場合がある（spec §2.4/§2.4a）。
 

@@ -52,9 +52,7 @@
 
 ### 設定変更（同期・spec §7.3）
 
-| メソッド・パス | body | 委譲 | 備考 |
-|---------------|------|------|------|
-| `POST /api/v1/ui/theme` | `{"value": true}` | `set_light_mode` | 重くない＝同期 200。OBS 見た目に波及・ログ必須。SettingsManager にも書く（§2.4a） |
+> 旧 `POST /api/v1/ui/theme`（ライト/ダーク切替）は対象外。テーマ切替機能は削除済み（ダーク固定、[Design.md §5.4](../../.claude/design/Design.md)）。
 
 ## 実装メモ（spec §14.2/§14.3 由来・重要）
 
@@ -102,7 +100,6 @@
 - [ ] ロード中に再度 `POST /api/v1/tournament` → `409 CONFLICT`。
 - [ ] `POST /api/v1/game {"codename":"unknown"}` → `404 NOT_FOUND`。正常 codename は 202 でアセット再ロード。
 - [ ] `POST /api/v1/bracket:refresh`（大会未ロード）→ `409 NOT_READY`。
-- [ ] `POST /api/v1/ui/theme {"value":true}` でテーマ切替（OBS 含む）。
 - [ ] 全書き込み操作が操作ログ（INFO）に出る。
 - [ ] 既存ルート・Web UI・OBS・ホットキーが従来通り（regression なし）。
 

@@ -1,6 +1,5 @@
 import os
 import re
-import traceback
 from flask import abort
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
@@ -162,32 +161,6 @@ class WebServerActions(QThread):
             "player": player,
             "data": data
         })
-        return "OK"
-
-    @gui_thread_sync
-    def set_light_mode(self, value):
-        # Coerce — POST/socketio payloads can carry strings ("true") or
-        # already-parsed bools depending on the caller.
-        if isinstance(value, str):
-            normalized = value.strip().lower() in ("1", "true", "yes", "on")
-        else:
-            normalized = bool(value)
-
-        SettingsManager.Set("light_mode", normalized)
-        # Broadcast cache (Design.md §5.4.2). Source-of-truth is
-        # SettingsManager; this mirror lets React / OBS subscribers react
-        # via the standard state_updated channel.
-        StateManager.Set("ui.light_mode", normalized)
-
-        # Re-apply the PyQt theme on the GUI thread. The Window slot is
-        # responsible for qdarktheme.setup_theme + ui_constants
-        # notify_theme_change + menu checkbox sync.
-        window = self.parent()
-        if window is not None and hasattr(window, "signals"):
-            try:
-                window.signals.LightModeChanged.emit(normalized)
-            except Exception:
-                logger.error(traceback.format_exc())
         return "OK"
 
     def set_commentary_data(self, index, data):

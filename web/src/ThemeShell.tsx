@@ -1,63 +1,19 @@
-import React, {useEffect, useMemo} from "react";
+import React from "react";
 import {ThemeProvider} from "@mui/material/styles";
 import {CssBaseline} from "@mui/material";
-import {useSelector} from "react-redux";
-import {darkTheme, lightTheme} from "./themes";
-import type {TshStateReduxState} from "./redux/tshState";
-
-// localStorage cache key. Per Design.md §5.4.3 R-Theme-1..R-Theme-3,
-// this is a flicker-prevention cache only — the source-of-truth is
-// `tshState.ui.light_mode` (which mirrors SettingsManager on the
-// backend, §5.4.1).
-const LIGHT_MODE_CACHE_KEY = "ui.light_mode";
-
-function readCachedLightMode(): boolean {
-    try {
-        const raw = window.localStorage.getItem(LIGHT_MODE_CACHE_KEY);
-        if (raw === null) return false;
-        return raw === "true";
-    } catch {
-        return false;
-    }
-}
-
-function writeCachedLightMode(value: boolean) {
-    try {
-        window.localStorage.setItem(LIGHT_MODE_CACHE_KEY, value ? "true" : "false");
-    } catch {
-        // Storage may be disabled (private mode etc.) — silently ignore;
-        // we just lose flicker protection on the next reload.
-    }
-}
-
-interface RootStateShape {
-    tshState: TshStateReduxState;
-}
+import {darkTheme} from "./themes";
 
 interface Props {
     children: React.ReactNode;
 }
 
+// The app is dark-only. A runtime light/dark toggle used to exist but was
+// removed: switching themes re-applied the desktop qdarktheme app-wide and
+// froze the GUI for 30s+ re-polishing the proxy-embedded bracket. With no
+// toggle, the backend never sets ui.light_mode, so the web UI is fixed dark.
 export default function ThemeShell({children}: Props) {
-    // Tentative theme from localStorage cache (R-Theme-1) used until the
-    // first snapshot arrives. After that, Redux drives the value.
-    const cachedDefault = useMemo(readCachedLightMode, []);
-
-    const lightMode = useSelector((state: RootStateShape) => {
-        const fromState = state.tshState?.tshState?.ui?.light_mode;
-        return typeof fromState === "boolean" ? fromState : cachedDefault;
-    });
-
-    // Mirror the live value back to localStorage so the next page load
-    // can pick the right theme immediately (R-Theme-2 / R-Theme-3).
-    useEffect(() => {
-        writeCachedLightMode(!!lightMode);
-    }, [lightMode]);
-
-    const theme = lightMode ? lightTheme : darkTheme;
-
     return (
-        <ThemeProvider theme={theme}>
+        <ThemeProvider theme={darkTheme}>
             <CssBaseline />
             {children}
         </ThemeProvider>

@@ -68,7 +68,7 @@ WS 列は対応する Socket.IO イベントの有無。
 | 9 | `GET /scoreboard<N>-get` | R | — | `get_scoreboard` | スコアボード N の状態取得 |
 | 10 | `GET /scoreboard<N>-set` | W | ✅ `set` | `set_route` | best-of/phase/match/players/characters/losers をクエリで設定 |
 | 11 | `POST /scoreboard<N>-update-team-<T>-<P>` | W | ✅ `update_team` | `set_team_data` | 選手データ更新 |
-| 12 | `POST /set-light-mode` | W | ✅ `set_light_mode` | `set_light_mode` | ライト/ダークテーマ切替（**OBS 出力にも波及**） |
+| 12 | ~~`POST /set-light-mode`~~ | — | ❌ 削除済み | — | テーマ切替機能ごと削除（ダーク固定、Design.md §5.4）。30s フリーズの原因 |
 | 13 | `POST /update-commentary-<caster>` | W | ✅ `update_commentary` | `set_commentary_data` | 実況者データ更新 |
 | 14 | `POST /update-game` | W | ✅ `update_game` | `set_game` | 選択ゲーム変更（**アセット再ロード=重い**） |
 | 15 | `GET /games` | R | ✅ `games` | `get_games` | ゲーム一覧 |
@@ -240,14 +240,11 @@ WS 列は対応する Socket.IO イベントの有無。
 - **初回採否**: **除外**（読み取りで現在 URL を見せるに留める）
 - **推奨粒度**: 初回は対象外。将来も confirm + 非配信時のみ
 
-### 5.4 テーマ切替 `set-light-mode`（B）
+### 5.4 テーマ切替 `set-light-mode`（B）— ❌ 削除済み
 
-- **UI 導線**: メニュー / Web UI トグル
-- **関連コード**: `set_light_mode` → `SettingsManager.Set("light_mode")` + `StateManager.Set("ui.light_mode")` + `LightModeChanged.emit`（[AutonaWebServerActions.py:167](../../src/AutonaWebServerActions.py)）
-- **副作用**: PyQt テーマ + **OBS オーバーレイ配色**が本番中に変わる
-- **本番リスク**: 中〜高（見た目の事故）
-- **初回採否**: 除外 or 要確認
-- **推奨粒度**: 将来 `POST /api/v1/ui/theme`
+> テーマ切替機能は削除済み（ダーク固定、[Design.md §5.4](../../.claude/design/Design.md)）。
+> 切替時に `qdarktheme.setup_theme()` が proxy 埋め込みブラケットを全再ポリッシュし、
+> GUI スレッドが 30s 以上フリーズしていたため。本候補は対象外。
 
 ### 5.5 セット選択ウィンドウを開く `open-set`（D）
 

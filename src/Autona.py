@@ -185,10 +185,6 @@ class WindowSignals(QObject):
     SetupAutocomplete = Signal()
     UiMounted = Signal()
     GameChanged = Signal()
-    # Fired after light_mode is committed via AutonaWebServerActions.
-    # Window connects this to a slot that re-applies the qdarktheme
-    # palette + UI.notify_theme_change() and syncs the menu checkbox.
-    LightModeChanged = Signal(bool)
 
 
 class Window(QMainWindow):
@@ -378,11 +374,6 @@ class Window(QMainWindow):
         self.webserver.start()
         self.signals.GameChanged.connect(self.webserver.ws_program_state)
         self.signals.GameChanged.connect(self.webserver.ws_get_characters)
-        # Apply light/dark switches that originate from
-        # AutonaWebServerActions.set_light_mode (PyQt menu or React toggle)
-        # on the GUI thread. Direct connection because emit() is already
-        # marshalled to GUI thread by the Action.
-        self.signals.LightModeChanged.connect(self._applyLightMode)
         splash.set_message(splash_msgs[1], progress=0.70)
 
         playerList = AutonaPlayerListWidget()
@@ -459,15 +450,6 @@ class Window(QMainWindow):
             QApplication.translate("app", "Always on top"))
         action.setCheckable(True)
         action.toggled.connect(self.ToggleAlwaysOnTop)
-
-        action = editMenu.addAction(
-            QApplication.translate("app", "Light mode"))
-        action.setCheckable(True)
-        action.setChecked(SettingsManager.Get("light_mode", False))
-        action.toggled.connect(self.ToggleLightMode)
-        # Held so the Action-driven slot can sync the checkbox state when
-        # the toggle originates from React or another remote client.
-        self._lightModeAction = action
 
         editMenu.addSeparator()
 
@@ -1036,55 +1018,14 @@ class Window(QMainWindow):
         if getattr(self, "resultSetting", None) is not None:
             self.resultSetting.SetBattleFormat(fmt)
 
-    def ToggleLightMode(self, checked):
-        # Route through the WebServer Action so PyQt and React go through
-        # the same path (Design.md §5.4.2 / §8 T-10). The Action persists
-        # via SettingsManager, mirrors into StateManager.ui.light_mode and
-        # emits LightModeChanged back to this Window so the QSS reapply
-        # happens on the GUI thread regardless of caller.
-        actions = getattr(WebServer, 'actions', None)
-        if actions is not None:
-            actions.set_light_mode(checked)
-        else:
-            # WebServer not yet initialized (very early startup) — fall
-            # back to a direct path so the menu still works.
-            SettingsManager.Set("light_mode", bool(checked))
-            self._applyLightMode(bool(checked))
-
-    def _applyLightMode(self, value):
-        # GUI-thread slot fired by AutonaWebServerActions.set_light_mode.
-        # Re-applies qdarktheme + ui_constants notify_theme_change, and
-        # syncs the menu checkbox in case the toggle originated remotely.
-        self.LoadTheme()
-        UI.notify_theme_change()
-        action = getattr(self, '_lightModeAction', None)
-        if action is not None and action.isChecked() != bool(value):
-            # Signals are blocked so this doesn't loop back into
-            # ToggleLightMode and re-trigger the Action.
-            action.blockSignals(True)
-            try:
-                action.setChecked(bool(value))
-            finally:
-                action.blockSignals(False)
-
     def LoadTheme(self):
-        light = bool(SettingsManager.Get("light_mode", False))
-        if light:
-            qdarktheme.setup_theme(
-                "light",
-                custom_colors=UI.LIGHT_CUSTOM_COLORS,
-                additional_qss=UI.global_qss())
-        else:
-            qdarktheme.setup_theme(
-                "dark",
-                custom_colors=UI.DARK_CUSTOM_COLORS,
-                additional_qss=UI.global_qss())
-
-        # Broadcast cache for React / OBS HTML clients. Source-of-truth
-        # remains SettingsManager.light_mode (Design.md §5.4.1); this
-        # mirror exists so subscribers can react via the standard
-        # state_updated channel (Design.md §5.4.2).
-        StateManager.Set("ui.light_mode", light)
+        # The app is dark-only. Theme is applied once at startup; there is
+        # no runtime light/dark toggle (it used to re-polish the entire
+        # proxy-embedded bracket on the GUI thread and froze for 30s+).
+        qdarktheme.setup_theme(
+            "dark",
+            custom_colors=UI.DARK_CUSTOM_COLORS,
+            additional_qss=UI.global_qss())
 
     def MigrateWindow(self):
         migrateWindow = QDialog(self)

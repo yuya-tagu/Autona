@@ -56,14 +56,13 @@
   クライアントは WS デルタ（`program_state_update` の `revision`/`delta_index`）と突合し、反映済みかを判定できる。
   → リビジョンの定義・採番は [Design.md §3.2](Design.md) に従う（既存 WS と同一ソース。実装時の取得経路は `TBD`）。
   - ⚠️ **`revision` は `StateManager` の変更のみを追う**。`SettingsManager` のみに書く操作
-    （`POST /ui/theme`・`POST /tournament` の URL 永続化など。§2.4a）の設定値変更は `revision` に
+    （`POST /tournament` の URL 永続化など。§2.4a）の設定値変更は `revision` に
     反映されない場合がある。クライアントは設定系の反映確認を `revision` だけに依存しない（**SHOULD**）。
 - `data`: 読み取り系の本体。操作系では省略可。
 
 ### 2.4a 状態の二重書き込み（SettingsManager 併用・許容）
 - D4 の不変条件「状態変更は `StateManager` 単一経路」は **`score.*` 等のランタイム状態**に適用される。
 - 一部の Action は **`SettingsManager` にも書く**ことを**許容する**（PdM 確認済）:
-  - `set_light_mode` → `SettingsManager.Set("light_mode")` ＋ `StateManager.Set("ui.light_mode")`（[AutonaWebServerActions.py:176](../../src/AutonaWebServerActions.py)）
   - `load_tournament` → `SettingsManager.Set("TOURNAMENT_URL")` ＋ シグナル emit（[:447](../../src/AutonaWebServerActions.py)）
 - 本 API はこれらも**既存 Action へ委譲するだけ**（新たに Settings/State を直接書かない）。
   「StateManager をバイパスして state を直接書かない」原則は維持される。
@@ -116,7 +115,7 @@
 - **相対操作**（`score:adjust`）は冪等でない。`Idempotency-Key` ヘッダを**任意対応（SHOULD）**:
   同一キーの再送は**重複適用せず**直前結果を返す。キー無しは従来通り（毎回適用）。
   - キーの保持はプロセス内の短命キャッシュ（直近 N 件 / 数十秒・`TBD`）。
-- **絶対値設定**（`score:reset`・`PATCH set`・`:swap-teams`・`POST /ui/theme`）は本質的に冪等寄りのため必須ではない。
+- **絶対値設定**（`score:reset`・`PATCH set`・`:swap-teams`）は本質的に冪等寄りのため必須ではない。
 
 ### 2.10 スレッド安全性（実行中フラグ・冪等キャッシュ）
 - WebServer は QThread ＋ Flask `async_mode='threading'` ＝ **複数リクエストスレッドが並行**しうる。
@@ -256,7 +255,6 @@
 | `POST /api/v1/tournament` | 実行中フラグ | `load_tournament` | #44 |
 | `POST /api/v1/game` | 実行中フラグ | `set_game` | #14 |
 | `POST /api/v1/bracket:refresh` | 実行中フラグ | `update_bracket` | #41 |
-| `POST /api/v1/ui/theme` | 操作ログ | `set_light_mode` | #12 |
 
 ### 7.2 確認フラグ（C-2 / D7）
 - **破壊的操作**（`:clear`・`:reset-players`・`:reset-match`）は body に **`"confirm": true` 必須（MUST）**。
@@ -275,8 +273,8 @@
 - `POST /api/v1/game`: `{ "codename": "ssbu", "modsActive": false }`
   - 未知 codename は受付前に判定できれば `404 NOT_FOUND`。アセット再ロードで重い → 202 + 実行中フラグ。
 - `POST /api/v1/bracket:refresh`: body なし。provider 不在は受付前に `409 NOT_READY`。それ以外は 202 + 実行中フラグ。
-- `POST /api/v1/ui/theme`: `{ "value": true }`（true=light）。**これは重い操作ではない**ため同期 200。
-  ただし OBS 見た目に波及するため操作ログ必須。`SettingsManager` にも書く（§2.4a）。
+
+> **注**: 旧 `POST /api/v1/ui/theme`（ライト/ダーク切替）は廃止。テーマはダーク固定（[Design.md §5.4](Design.md)）。
 
 ---
 
@@ -414,7 +412,6 @@ HTTP/1.1 409 Conflict
 | `POST /tournament` | `load_tournament` | ✕ | url 検証は緩い（start.gg 以外でも Set される）／重い（非同期ロード） | 202 受付 |
 | `POST /game` | `set_game` | ✓ | 未知 codename→**文字列 `"Could not find game X"` を返す**（非構造）／**同期アセット再ロードでブロック** | `NOT_FOUND`／202 化要（§14.3） |
 | `POST /bracket:refresh` | `update_bracket` | ✓ | **`.provider` null 未チェック**／`GetTournamentPhases()[0]` **IndexError**／`.get("groups")[0]` 空で **TypeError/IndexError**／同期 Start.gg | `NOT_READY`/`UPSTREAM_TIMEOUT`（要堅牢化） |
-| `POST /ui/theme` | `set_light_mode` | ✓ | なし（値は coerce 済）。Settings+State 書き | — |
 
 **横断的な発見:**
 1. **最頻の失敗は `GetScoreboard(n)`=None 後の AttributeError**。→ `{1,2,3}` 事前検証（§2.12）で大半を予防できる。

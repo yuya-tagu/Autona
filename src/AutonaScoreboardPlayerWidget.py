@@ -135,10 +135,6 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         country = self.findChild(QComboBox, "country")
         state = self.findChild(QComboBox, "state")
 
-        # Theme-aware style tracking (fields are now editable, no readonly/disabled styles)
-        self._themed_readonly = []
-        self._themed_disabled = []
-
         # Custom textbox
         custom_textbox_layout = QHBoxLayout()
         custom_textbox_layout.setContentsMargins(0, 0, 0, 0)
@@ -296,15 +292,6 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
     def deleteLater(self):
         self._deleted = True
         super().deleteLater()
-
-    def refresh_theme_styles(self):
-        """Re-apply theme-aware styles after light/dark mode toggle."""
-        for w in self._themed_readonly:
-            w.setStyleSheet(UI.readonly_style())
-        for w in self._themed_disabled:
-            w.setStyleSheet(UI.disabled_style())
-        if getattr(self, 'seedDisplay', None) is not None:
-            self.seedDisplay.setStyleSheet(self._seedDisplayStyle())
 
     @staticmethod
     def _seedDisplayStyle() -> str:

@@ -8,8 +8,6 @@ OBS-style high-density UI). Keep in sync with:
   - 30_Products/参考資料/color-system.html
 """
 
-from .SettingsManager import SettingsManager
-
 # ─── Typography ──────────────────────────────────────────────────
 
 FONT_XS = 8
@@ -72,9 +70,9 @@ DARK = {
     "brand_subtle":    "#2A1418",
     # Accent (scarlet): hue ~2deg sits between the brand crimson (~348deg) and
     # the tab-bar gradient's orange end, inside the gradient's hue range so it
-    # harmonises while staying distinct from brand. Deepened (vs the brighter
-    # LIGHT accent) so the filled primary button reads calm on dark, not loud;
-    # still legible as selected-tab text (~3.2 contrast). Hover lifts.
+    # harmonises while staying distinct from brand. Deepened so the filled
+    # primary button reads calm on dark, not loud; still legible as
+    # selected-tab text (~3.2 contrast). Hover lifts.
     "accent":          "#C33732",
     "accent_hover":    "#D8453E",
     "accent_subtle":   "#3A1413",
@@ -90,42 +88,14 @@ DARK = {
     "on_accent":       "#FFFFFF",
 }
 
-LIGHT = {
-    "canvas":          "#E8E7E4",
-    "bg_primary":      "#F4F3F0",
-    "bg_secondary":    "#FFFFFF",
-    "bg_tertiary":     "#EAE8E3",
-    "bg_quaternary":   "#D8D5CE",
-    "border_subtle":   "#E0DDD6",
-    "border_default":  "#C8C4BB",
-    "border_strong":   "#9E968B",
-    "text_primary":    "#1A1917",
-    "text_secondary":  "#48433D",
-    "text_muted":      "#76706B",
-    "text_label":      "#58544E",
-    "text_disabled":   "#B0AAA2",
-    "brand":           "#C41232",
-    "brand_subtle":    "#F5E0E4",
-    # Same scarlet hue, tuned slightly deeper than DARK so white-on-accent
-    # buttons and accent-as-text on the light canvas keep AA contrast.
-    "accent":          "#CE3A33",
-    "accent_hover":    "#E2453F",
-    "accent_subtle":   "#F8DAD7",
-    "gold":            "#8E6812",
-    "gold_subtle":     "#F0E8D0",
-    "positive":        "#2E8C3E",
-    "negative":        "#C41232",
-    "on_accent":       "#FFFFFF",
-}
-
-# ─── Theme Detection ────────────────────────────────────────────
-
-def _is_light_mode() -> bool:
-    return SettingsManager.Get("light_mode", False)
-
+# ─── Theme ──────────────────────────────────────────────────────
+# The app is dark-only. A runtime light/dark toggle used to exist but
+# was removed: switching themes re-applied qdarktheme app-wide, which
+# re-polished the entire (proxy-embedded) bracket widget tree on the GUI
+# thread and froze the app for 30s+ on large brackets.
 
 def palette() -> dict:
-    return LIGHT if _is_light_mode() else DARK
+    return DARK
 
 
 def semantic_colors() -> dict:
@@ -211,7 +181,6 @@ def _custom_colors(p: dict) -> dict:
 
 
 DARK_CUSTOM_COLORS = _custom_colors(DARK)
-LIGHT_CUSTOM_COLORS = _custom_colors(LIGHT)
 
 # ─── Uniform Widget Height ──────────────────────────────────────
 
@@ -599,28 +568,9 @@ QProgressBar::chunk {{
 
 
 def global_qss() -> str:
-    return _qss_for(LIGHT if _is_light_mode() else DARK)
+    return _qss_for(DARK)
 
 
-# Back-compat: module-level GLOBAL_QSS resolves to the current theme at
-# import time. Callers that need live-updating styles should use
-# global_qss() instead.
+# Back-compat: module-level GLOBAL_QSS for callers that read it directly.
+# The app is dark-only, so this is constant.
 GLOBAL_QSS = global_qss()
-
-# ─── Theme Change Listeners ─────────────────────────────────────
-
-_theme_listeners: list = []
-
-
-def on_theme_change(callback):
-    _theme_listeners.append(callback)
-
-
-def notify_theme_change():
-    global GLOBAL_QSS
-    GLOBAL_QSS = global_qss()
-    for cb in _theme_listeners:
-        try:
-            cb()
-        except Exception:
-            pass

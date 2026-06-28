@@ -171,8 +171,6 @@ class AutonaAnalysisWidget(QDockWidget):
         self.summaryLabel = QLabel("")
         self.summaryLabel.setStyleSheet(self._summaryLabelStyle())
         topBar.addWidget(self.summaryLabel)
-        UI.on_theme_change(
-            lambda: self.summaryLabel.setStyleSheet(self._summaryLabelStyle()))
 
         topBar.addStretch(1)
 
