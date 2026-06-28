@@ -35,6 +35,15 @@ cp dist/Autona/Autona.exe ./Autona.exe
 1. Web UI (`cd web && npm run build`) を先にビルド
 2. その後 exe をビルド（Web UI の build/ を同梱するため）
 
+## 同梱物のサイズ・フォント・上流成果物
+
+- **WebEngine 依存**: サムネイル生成（[src/thumbnail/ThumbnailRenderer.py](../../src/thumbnail/ThumbnailRenderer.py)）が
+  `PyQt6-WebEngine` を使用。`dependencies/requirements.txt` に含まれ `pip install -r` で自動導入される。
+  `Qt6WebEngineCore.dll` が約 196 MB あるため、`_internal/` 全体が 600 MB 超になるのは正常
+- **フォント**: LINE Seed JP（`assets/font/LINESeedJP/`、Google Fonts gstatic CDN から取得）
+- **上流成果物の扱い**: `TSH.exe` / `TSH/` は上流 TournamentStreamHelper のビルド成果物。Autona 側では
+  使用しないため残さない
+
 ## 翻訳コンパイル (.ts → .qm)
 
 - ラッパー: `scripts\compile_translations.ps1`（引数なしで全言語、`-Lang ja` で単一言語）

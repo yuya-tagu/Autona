@@ -53,7 +53,7 @@
 
 | ドキュメント | 役割 | 正本 / 参照 |
 |-------------|------|------------|
-| [`../CLAUDE.md`](../CLAUDE.md) | 開発原則・Git 方針・アーキ概要・`.claude/` 目次 | 開発運用の正本 |
+| [`../CLAUDE.md`](../CLAUDE.md) | 開発原則・Git 方針の要点・アーキ概要・参照マップ（詳細索引は [`../.claude/README.md`](../.claude/README.md)） | 開発運用の正本 |
 | [`../.claude/design/Design.md`](../.claude/design/Design.md) | UI 実装方式・データモデル・画面仕様・デザインシステム・ホットキー | **実装仕様の正本** |
 | [`../.claude/architecture/`](../.claude/architecture/) | コードベース調査の事実情報（import 関係・状態キーパス等） | 調査ログ |
 | [`../FEATURES.md`](../FEATURES.md) | 機能一覧（リバースエンジニアリング） | 参考（※後述の注意） |

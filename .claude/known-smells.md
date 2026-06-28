@@ -1,7 +1,7 @@
 # リファクタ候補リスト (Known Smells)
 
 作成日: 2026-04-08
-最終検証: 2026-06-28（S-04 を解消・PdM 手動確認済みでクローズ、S-14 はガード導入済みに更新）
+最終検証: 2026-06-29（S-16 追加: 起動ヘルパーの GUI スレッド占有。アセット起動フリーズ修正の横展開で発見）
 根拠: `.claude/architecture/` 配下の調査成果物 (python-imports.md, singleton-init-order.md, state-keys.md, python-hotspots.md)
 
 本ファイルはフェーズ2の夜間タスク配布の燃料として使う。各項目に優先度・難易度・影響範囲を付記する。
@@ -352,3 +352,39 @@ grep -rEn "open\([^,]+,\s*['\"](w|wb|a)|json\.dump|shutil\.copy|\.save\(|os\.ren
 # tracked かつ ignore されていないものを突き合わせ（git ls-files / git check-ignore）
 # 多数起動した後の `git status` が最も確実な「実行時書き込み」の実証
 ```
+
+---
+
+## S-16: 起動ヘルパーの GUI スレッド占有（ControllerHelper / CountryHelper）[P3/D2/S3] 🔴 未着手（別 PR 候補）
+
+**根拠**: 2026-06-29「ゲームアセット起動フリーズ」修正（アセット情報の単一真実源化, PR #82）の横展開調査。
+GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src/ で洗った際に発見。
+報告症状（アセット読み込みで起動後 約10秒フリーズ）はアセット index 化で解消済みだが、
+別サブシステムの**起動時 1 回限り**のコストとして本項目が残る。
+
+**該当箇所**:
+
+| 箇所 | 欠陥 | コンテキスト |
+|------|------|------------|
+| `AutonaControllerHelper.BuildControllerTree`（[src/Helpers/AutonaControllerHelper.py:30-91](src/Helpers/AutonaControllerHelper.py)） | `glob("*/*/*/")` + コントローラ毎に manufacturer/type の config.json を再読込（共有ファイルを重複オープン）+ 複数 isfile | 起動時 GUI 同期（[src/Autona.py:258](src/Autona.py)） |
+| `AutonaCountryHelper.LoadCountries`（[src/Helpers/AutonaCountryHelper.py:77-216](src/Helpers/AutonaCountryHelper.py)） | JSON ロード/パース（slim ~2MB / full ~46MB フォールバック）+ countries dict 構築 + cities 逆引き + additional_flag listdir。※`QIcon(path)` は遅延デコードなので画像自体は軽い | 起動時 GUI 同期（[src/Autona.py:259](src/Autona.py)） |
+
+**対策案（データ準備を Worker へ、モデル構築のみ GUI へ）**:
+- CountryHelper: JSON ロード/パース・dict・cities・additional_flag listdir を Worker 側、`countryModel` の
+  QStandardItem/`QIcon(path)` 構築のみ GUI 側で実行し `countriesUpdated.emit()`。
+- ControllerHelper: `BuildControllerTree`（FS 走査）を Worker、`UpdateControllerModel` を GUI。
+  併せて manufacturer/type config の重複読込をメモ化（同期のままでも有効な低リスク改善）。
+
+**実装前確認で判明した障害（S3 たる所以・2026-06-29）**:
+1. **同期フォールバックとの二重ビルド**: [src/AutonaBasePlayerWidget.py:355-356](src/AutonaBasePlayerWidget.py)
+   が「`countryModel` が None なら自前で同期 `LoadCountries()` を実行」する。非同期化すると起動時に
+   選手ウィジェットが先行した場合 GUI スレッドで二重ビルドが起きる。回避には同期フォールバックの無効化が必要。
+2. **ControllerHelper に更新シグナルが無い**（CountryHelper の `countriesUpdated` 相当が無い）。
+   非同期化には新規シグナル + 消費側の再バインド追加が必要。
+3. **コストが症状ではない**: 一回限り・上限ありの起動コスト（Country は slim JSON で軽量）。
+
+**影響範囲**: `src/Helpers/AutonaControllerHelper.py`, `src/Helpers/AutonaCountryHelper.py`,
+`src/AutonaBasePlayerWidget.py`（同期フォールバック調整）, 選手ウィジェット（再バインド）
+
+**リスク**: モデル非同期化で「構築完了までモデルが空」の時間窓が生じる。一回限り・非症状コストに対し
+回帰リスクが見合わないため、PR #82 では見送り（PdM 判断）。将来やるなら上記障害 1〜2 の解消込みで。
