@@ -172,14 +172,11 @@ class AutonaPlayerDB:
             cancelIcon = QIcon(QPixmap.fromImage(QImage("./assets/icons/cancel.svg").scaledToWidth(
                 32, Qt.TransformationMode.SmoothTransformation)))
 
-            charIcons = {}
-
-            for char in AutonaGameAssetManager.instance.stockIcons:
-                charIcons[char] = {}
-                for skin in AutonaGameAssetManager.instance.stockIcons[char]:
-                    charIcons[char][skin] = QIcon(QPixmap.fromImage(
-                        QImage(AutonaGameAssetManager.instance.stockIcons[char][skin]).scaledToWidth(
-                            32, Qt.TransformationMode.SmoothTransformation)))
+            # Decode only the icons actually referenced by players (their
+            # primary main's character/skin), on demand, via the shared
+            # memoised provider. Previously this eagerly decoded every
+            # character x skin stock icon on the GUI thread on every DB
+            # refresh, of which only the players' primary mains were ever used.
 
             for player in AutonaPlayerDB.database.values():
                 if player is not None:
@@ -224,14 +221,12 @@ class AutonaPlayerDB:
                                     if playerMains[0][0] in AutonaGameAssetManager.instance.characters.keys():
                                         character = playerMains[0]
 
-                                        assets = charIcons
-
-                                        if assets == None:
-                                            assets = {}
-
-                                        if assets.get(character[0], {}).get(int(playerMains[0][1]), None):
-                                            item.setIcon(assets.get(character[0], {}).get(
-                                                int(playerMains[0][1]), None))
+                                        # Memoised; decodes once per (char, skin)
+                                        # and is a cache hit for repeated mains.
+                                        mainIcon = AutonaGameAssetManager.instance.GetStockIcon(
+                                            character[0], int(playerMains[0][1]))
+                                        if not mainIcon.isNull():
+                                            item.setIcon(mainIcon)
 
                         item.setData(player, Qt.ItemDataRole.UserRole)
 
