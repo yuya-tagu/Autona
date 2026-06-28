@@ -188,8 +188,10 @@ class WindowSignals(QObject):
 
 
 class Window(QMainWindow):
-    # Bump this when dock widget layout changes (e.g. adding/removing tabs)
-    STATE_VERSION = 8
+    # Bump this when dock widget layout changes (e.g. adding/removing tabs).
+    # v9: dock objectNames switched from translated strings to stable English
+    # literals; old saved layouts keyed by translated names are discarded.
+    STATE_VERSION = 9
     signals = WindowSignals()
 
     def __init__(self, loop=None):
@@ -305,7 +307,13 @@ class Window(QMainWindow):
         # strip starts with Tournament Info.
         tournamentInfo = AutonaTournamentInfoWidget()
         tournamentInfo.setWindowIcon(QIcon(UI.icon_path('tournament.svg')))
-        tournamentInfo.setObjectName(
+        # objectName is the stable identity that saveState/restoreState uses to
+        # match docks. It must NOT be translated: a translated objectName changes
+        # with the UI language, so a layout saved in one language fails to restore
+        # in another and the tab order scrambles. The visible tab label comes from
+        # windowTitle (translated) instead.
+        tournamentInfo.setObjectName("Tournament Info")
+        tournamentInfo.setWindowTitle(
             QApplication.translate("app", "Tournament Info"))
         # Place the "Set tournament" button at the very top of this tab.
         tournamentInfo.InsertHeaderWidget(self.setTournamentBt)
@@ -317,8 +325,7 @@ class Window(QMainWindow):
             from .AutonaThumbnailSettingsWidget import AutonaThumbnailSettingsWidget
             thumbnailSetting = AutonaThumbnailSettingsWidget()
             thumbnailSetting.setWindowIcon(QIcon(UI.icon_path('thumbnail.svg')))
-            thumbnailSetting.setObjectName(
-                QApplication.translate("app", "Thumbnail Settings"))
+            thumbnailSetting.setObjectName("Thumbnail Settings")
             self.addDockWidget(
                 Qt.DockWidgetArea.BottomDockWidgetArea, thumbnailSetting)
             self.dockWidgets.append(thumbnailSetting)
@@ -328,15 +335,15 @@ class Window(QMainWindow):
         # standings variant when team mode is selected.
         self.resultSetting = resultSetting = AutonaResultSettingsWidget()
         resultSetting.setWindowIcon(QIcon(UI.icon_path('result.svg')))
-        resultSetting.setObjectName(
-            QApplication.translate("app", "Result Settings"))
+        resultSetting.setObjectName("Result Settings")
         self.addDockWidget(
             Qt.DockWidgetArea.BottomDockWidgetArea, resultSetting)
         self.dockWidgets.append(resultSetting)
 
         bracket = AutonaBracketWidget()
         bracket.setWindowIcon(QIcon(UI.icon_path('bracket.svg')))
-        bracket.setObjectName(
+        bracket.setObjectName("Bracket")
+        bracket.setWindowTitle(
             QApplication.translate("app", "Bracket"))
         self.addDockWidget(
             Qt.DockWidgetArea.BottomDockWidgetArea, bracket)
@@ -353,8 +360,7 @@ class Window(QMainWindow):
 
         self.scoreboard = AutonaScoreboardManager.instance
         self.scoreboard.setWindowIcon(QIcon(UI.icon_path('scoreboard.svg')))
-        self.scoreboard.setObjectName(
-            QApplication.translate("app", "Scoreboard"))
+        self.scoreboard.setObjectName("Scoreboard")
         self.addDockWidget(
             Qt.DockWidgetArea.BottomDockWidgetArea, self.scoreboard)
         self.dockWidgets.append(self.scoreboard)
@@ -364,7 +370,7 @@ class Window(QMainWindow):
 
         commentary = AutonaCommentaryWidget()
         commentary.setWindowIcon(QIcon(UI.icon_path('commentary.svg')))
-        commentary.setObjectName(QApplication.translate("app", "Commentary"))
+        commentary.setObjectName("Commentary")
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, commentary)
         self.dockWidgets.append(commentary)
 
@@ -378,44 +384,44 @@ class Window(QMainWindow):
 
         playerList = AutonaPlayerListWidget()
         playerList.setWindowIcon(QIcon(UI.icon_path('players.svg')))
-        playerList.setObjectName(QApplication.translate("app", "Player List"))
+        playerList.setObjectName("Player List")
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, playerList)
         self.dockWidgets.append(playerList)
 
         notes = AutonaNotesWidget()
         notes.setWindowIcon(QIcon(UI.icon_path('notes.svg')))
-        notes.setObjectName(QApplication.translate("app", "Additional Notes"))
+        notes.setObjectName("Additional Notes")
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, notes)
         self.dockWidgets.append(notes)
 
         self.statsWidget = AutonaStatsWidget()
         self.statsWidget.setWindowIcon(QIcon(UI.icon_path('stats.svg')))
-        self.statsWidget.setObjectName(QApplication.translate("app", "Statistics"))
+        self.statsWidget.setObjectName("Statistics")
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.statsWidget)
         self.dockWidgets.append(self.statsWidget)
 
         self.analysisWidget = AutonaAnalysisWidget()
         self.analysisWidget.setWindowIcon(QIcon(UI.icon_path('analysis.svg')))
-        self.analysisWidget.setObjectName(QApplication.translate("app", "Analysis"))
+        self.analysisWidget.setObjectName("Analysis")
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.analysisWidget)
         self.dockWidgets.append(self.analysisWidget)
 
         splash.set_message(splash_msgs[1], progress=0.85)
 
-        # Tab order: EVENT, SCORE, THUMB, STATS, ANALYSIS, PLAYERS, COMMS,
-        # RESULT, BRACKET, NOTES, RULES (RULES hidden by default).
+        # Tab order: EVENT, SCORE, VIDEO, STATS, PLAYERS, COMMS, RESULT,
+        # BRACKET, NOTES, ANLYSE.
         previous = tournamentInfo
         for nxt in (
             self.scoreboard,
             thumbnailSetting if not SettingsManager.Get(
                 "general.disable_thumbnail_widget", False) else None,
             self.statsWidget,
-            self.analysisWidget,
             playerList,
             commentary,
             resultSetting,
             bracket,
             notes,
+            self.analysisWidget,
         ):
             if nxt is None:
                 continue
