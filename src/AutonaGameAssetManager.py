@@ -51,6 +51,18 @@ class AutonaGameAssetManager(QObject):
         self.stockIcons = {}
         self.startgg_id_to_character = {}
 
+        # Single source of truth for asset file discovery, built once per game
+        # load in _LoadGameAssetsCore and read (no filesystem access) by
+        # GetCharacterAssets / variant lookups. Prevents the per-(char,skin)
+        # os.listdir storm that froze the GUI thread on boot.
+        # characterAssetIndex: {codename: {assetKey: {skin: filename}}}
+        self.characterAssetIndex = {}
+        # variantIconIndex: {variant_codename: {"path": str, "image_size": any}}
+        self.variantIconIndex = {}
+        # Memoised 32px stock-icon QIcons, keyed by (en_name, skin). QIcon must
+        # be built on the GUI thread; all callers run there. Cleared on load.
+        self._iconCache = {}
+
         self.characterModel = QStandardItemModel()
         self.skinModels = {}
         self.variantModel = QStandardItemModel()
@@ -251,6 +263,12 @@ class AutonaGameAssetManager(QObject):
 
         self.CopyCSS(game)
 
+        # Reset per-game indices/caches so a game or mods switch rebuilds them
+        # against the new asset set.
+        self.characterAssetIndex = {}
+        self.variantIconIndex = {}
+        self._iconCache = {}
+
         gameObj = self.games.get(game, {})
         self.selectedGame = gameObj
         gameObj["codename"] = game
@@ -311,17 +329,34 @@ class AutonaGameAssetManager(QObject):
             widths = {}
             heights = {}
 
+            # List each asset pack directory once (the path depends only on the
+            # pack, not the character/skin), then index every file by its
+            # parsed skin number. This is the single scan that feeds
+            # characterAssetIndex; GetCharacterAssets reads it without touching
+            # the filesystem again.
+            packFiles = {}
+            for assetsKey in list(gameObj["assets"].keys()):
+                try:
+                    packFiles[assetsKey] = sorted(os.listdir(
+                        './user_data/games/'+game+'/'+assetsKey))
+                except OSError:
+                    packFiles[assetsKey] = []
+
             for c in self.characters.keys():
                 self.skins[c] = {}
+                codename = self.characters[c].get("codename")
                 for assetsKey in list(gameObj["assets"].keys()):
                     asset = gameObj["assets"][assetsKey]
 
-                    files = sorted(os.listdir(
-                        './user_data/games/'+game+'/'+assetsKey))
-
                     filteredFiles = \
-                        [f for f in files if f.startswith(asset.get(
-                            "prefix", "")+self.characters[c].get("codename")+asset.get("postfix", ""))]
+                        [f for f in packFiles[assetsKey] if f.startswith(asset.get(
+                            "prefix", "")+codename+asset.get("postfix", ""))]
+
+                    # Store the filtered filename list verbatim so
+                    # GetCharacterAssets parses skin numbers with its own logic
+                    # (identical behaviour, just no filesystem access).
+                    self.characterAssetIndex.setdefault(
+                        codename, {})[assetsKey] = filteredFiles
 
                     for f in filteredFiles:
                         numberStart = f.rfind(
@@ -341,6 +376,10 @@ class AutonaGameAssetManager(QObject):
                             packSkinMask[c][assetsKey] = set()
 
                         packSkinMask[c][assetsKey].add(number)
+
+                        # Single source of truth: codename -> pack -> skin -> filename
+                        self.characterAssetIndex.setdefault(
+                            codename, {}).setdefault(assetsKey, {})[number] = f
 
                 logger.info("Character "+c+" has " +
                             str(len(self.skins[c]))+" skins")
@@ -409,6 +448,46 @@ class AutonaGameAssetManager(QObject):
 
             for s in self.stages.keys():
                 self.stages[s]["name"] = s
+
+            # Build the variant icon index once: resolve each variant's icon
+            # path + image_size from a single config read and a single listdir,
+            # so UpdateVariantModel / GetVariantIconPath / GetVariantIconSize
+            # never re-open variant_icon/config.json or stat files per item.
+            self.variantIconIndex = {}
+            variant_icon_dir = './user_data/games/'+game+'/variant_icon'
+            variant_icon_config_path = variant_icon_dir+'/config.json'
+            if self.variants and os.path.isfile(variant_icon_config_path):
+                try:
+                    with open(variant_icon_config_path, "rt", encoding="utf-8") as f:
+                        variant_icon_config = orjson.loads(f.read())
+                    variant_files = set(os.listdir(variant_icon_dir))
+                    prefix = variant_icon_config.get("prefix")
+                    postfix = variant_icon_config.get("postfix")
+                    image_sizes = variant_icon_config.get("image_sizes", {})
+                    extensions = ["png", "jpg", "gif", "webp"]
+                    codenames = {self.variants[v].get(
+                        "codename") for v in self.variants}
+                    for variant_codename in codenames:
+                        if variant_codename is None:
+                            continue
+                        base = f"{prefix}{variant_codename}{postfix}"
+                        icon_path = ""
+                        for extension in extensions:
+                            if f"{base}.{extension}" in variant_files:
+                                icon_path = f"{variant_icon_dir}/{base}.{extension}"
+                                break
+                        # image_size mirrors old GetVariantIconSize: only when a
+                        # .png exists, read image_sizes[codename]["null"].
+                        image_size = None
+                        if f"{base}.png" in variant_files:
+                            image_size = image_sizes.get(
+                                variant_codename, {}).get("null")
+                        self.variantIconIndex[variant_codename] = {
+                            "path": icon_path,
+                            "image_size": image_size,
+                        }
+                except:
+                    logger.error(traceback.format_exc())
 
             # Load translations
             try:
@@ -759,6 +838,22 @@ class AutonaGameAssetManager(QObject):
             logger.error(traceback.format_exc())
             return (None)
 
+    def GetStockIcon(self, en_name, skin=0):
+        # Shared, memoised 32px stock-icon QIcon for a character/skin. QIcon /
+        # QPixmap must be built on the GUI thread; all callers
+        # (UpdateCharacterModel, AutonaPlayerDB.SetupModel) run there. The cache
+        # is cleared on game load. Returns an empty QIcon when no path exists.
+        cache_key = (en_name, skin)
+        icon = self._iconCache.get(cache_key)
+        if icon is None:
+            path = self.stockIcons.get(en_name, {}).get(skin)
+            if path is None:
+                return QIcon()
+            icon = QIcon(QPixmap.fromImage(QImage(path).scaledToWidth(
+                32, Qt.TransformationMode.SmoothTransformation)))
+            self._iconCache[cache_key] = icon
+        return icon
+
     def UpdateCharacterModel(self, mods_active = True):
         # TODO: Make modded content disabled by default
         # TODO: Add checkbox on game bar to enable / disable modded content
@@ -773,10 +868,7 @@ class AutonaGameAssetManager(QObject):
                 item = QStandardItem()
                 item.setData(c, Qt.ItemDataRole.EditRole)
                 logger.debug(c)
-                item.setIcon(
-                    QIcon(QPixmap.fromImage(QImage(self.stockIcons[c][0]).scaledToWidth(
-                        32, Qt.TransformationMode.FastTransformation)))
-                )
+                item.setIcon(self.GetStockIcon(c, 0))
 
                 data = {
                     "name": self.characters[c].get("export_name"),
@@ -886,31 +978,13 @@ class AutonaGameAssetManager(QObject):
             logger.error(traceback.format_exc())
 
     def GetVariantIconPath(self, variant_codename):
-        game_codename = self.selectedGame.get("codename")
-        icon_path, asset_root_path = "", "./user_data/games"
-        icon_config_path = f"{asset_root_path}/{game_codename}/variant_icon/config.json"
-        if os.path.isfile(icon_config_path):
-            with open(icon_config_path, "rt", encoding="utf-8") as icon_config_file:
-                icon_config = orjson.loads(icon_config_file.read())
-            extensions = ["png", "jpg", "gif", "webp"]
-            for extension in extensions:
-                icon_filename = f"{asset_root_path}/{game_codename}/variant_icon/{icon_config.get('prefix')}{variant_codename}{icon_config.get('postfix')}.{extension}"
-                if os.path.isfile(icon_filename):
-                    icon_path = icon_filename
-                    break
-        return(icon_path)
-    
+        # Read from the variant icon index built at load time (no per-item
+        # config read / isfile). See _LoadGameAssetsCore.
+        return self.variantIconIndex.get(variant_codename, {}).get("path", "")
+
     def GetVariantIconSize(self, variant_codename):
-        game_codename = self.selectedGame.get("codename")
-        icon_size, asset_root_path = None, "./user_data/games"
-        icon_config_path = f"{asset_root_path}/{game_codename}/variant_icon/config.json"
-        if os.path.isfile(icon_config_path):
-            with open(icon_config_path, "rt", encoding="utf-8") as icon_config_file:
-                icon_config = orjson.loads(icon_config_file.read())
-            icon_filename = f"{asset_root_path}/{game_codename}/variant_icon/{icon_config.get('prefix')}{variant_codename}{icon_config.get('postfix')}.png"
-            if os.path.isfile(icon_filename):
-                icon_size = icon_config.get("image_sizes", {}).get(variant_codename, {}).get("null")
-        return(icon_size)
+        # Read from the variant icon index built at load time.
+        return self.variantIconIndex.get(variant_codename, {}).get("image_size")
 
     def UpdateSkinModel(self):
         self.skinModels = {}
@@ -1179,8 +1253,17 @@ class AutonaGameAssetManager(QObject):
                     baseName = asset.get(
                         "prefix", "")+characterCodename+asset.get("postfix", "")
 
-                    skinFileList = [f for f in os.listdir(
-                        assetPath) if f.startswith(baseName)]
+                    # Read filenames from the load-time index (no filesystem
+                    # access). Falls back to a live scan only if the codename/
+                    # pack was not indexed (e.g. ad-hoc assetpack argument).
+                    skinFileList = self.characterAssetIndex.get(
+                        characterCodename, {}).get(assetKey)
+                    if skinFileList is None:
+                        try:
+                            skinFileList = [f for f in os.listdir(
+                                assetPath) if f.startswith(baseName)]
+                        except OSError:
+                            skinFileList = []
 
                     skinFiles = {}
 
