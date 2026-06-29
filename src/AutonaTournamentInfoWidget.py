@@ -12,7 +12,6 @@ from .AutonaGameAssetManager import AutonaGameAssetManager
 from .SettingsManager import SettingsManager
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaDirHelper import AutonaResolve
-from .AutonaColorButton import AutonaColorButton
 from . import ui_layout as L
 import traceback
 import shutil
@@ -21,8 +20,6 @@ from loguru import logger
 import requests
 from PIL import Image, ImageFilter, ImageEnhance
 
-DEFAULT_THEME_COLOR = "#1D1B18"
-DEFAULT_ACCENT_COLOR = "#f0a500"
 DEFAULT_BANNER_PATH = "./assets/thumbnail_base/default_banner.png"
 BANNER_PATH = "./user_data/tournament_banner.png"
 LOGO_PATH = "./layout/logo.png"
@@ -157,25 +154,9 @@ class AutonaTournamentInfoWidget(QDockWidget):
         for group in self.findChildren(QGroupBox):
             L.apply_card_layout(group)
 
-        # Theme color button
-        saved_theme = SettingsManager.Get("general.theme_color", DEFAULT_THEME_COLOR)
-        placeholder = self.findChild(QToolButton, "btThemeColor")
-        self.btThemeColor = AutonaColorButton(color=saved_theme)
-        self.btThemeColor.setMinimumSize(32, 32)
-        placeholder.parentWidget().layout().replaceWidget(placeholder, self.btThemeColor)
-        placeholder.deleteLater()
-        self.btThemeColor.colorChanged.connect(self._onThemeColorChanged)
-        StateManager.Set("tournamentInfo.themeColor", saved_theme)
-
-        # Accent color button
-        saved_accent = SettingsManager.Get("general.accent_color", DEFAULT_ACCENT_COLOR)
-        placeholder2 = self.findChild(QToolButton, "btAccentColor")
-        self.btAccentColor = AutonaColorButton(color=saved_accent)
-        self.btAccentColor.setMinimumSize(32, 32)
-        placeholder2.parentWidget().layout().replaceWidget(placeholder2, self.btAccentColor)
-        placeholder2.deleteLater()
-        self.btAccentColor.colorChanged.connect(self._onAccentColorChanged)
-        StateManager.Set("tournamentInfo.accentColor", saved_accent)
+        # Theme / accent color editing moved to the BOARD tab
+        # (AutonaBoardWidget). The SettingsManager / StateManager keys are
+        # unchanged, so overlays and out/ export are unaffected.
 
         # Stream settings
         # Stream destination ("配信先") — moved here from the SCORE tab so the
@@ -404,16 +385,6 @@ class AutonaTournamentInfoWidget(QDockWidget):
         layout = self._contents.layout()
         if layout is not None:
             layout.insertWidget(0, widget)
-
-    def _onThemeColorChanged(self, color):
-        if color:
-            SettingsManager.Set("general.theme_color", color)
-            StateManager.Set("tournamentInfo.themeColor", color)
-
-    def _onAccentColorChanged(self, color):
-        if color:
-            SettingsManager.Set("general.accent_color", color)
-            StateManager.Set("tournamentInfo.accentColor", color)
 
     def UpdateIcon(self):
         # iconView slot is now 60×60 (see AutonaTournamentInfo.ui).
