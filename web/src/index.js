@@ -8,6 +8,13 @@ import ScoreboardPage from "./ScoreboardPage";
 import {tshStore} from "./redux/store";
 import {Provider} from "react-redux";
 import ThemeShell from "./ThemeShell";
+import ScoreboardDesigner from "./ScoreboardDesigner";
+
+const WebPage = () => (
+    new URLSearchParams(window.location.search).get("view") === "designer"
+        ? <ScoreboardDesigner />
+        : <ScoreboardPage />
+);
 
 // ThemeShell applies the dark MUI theme (the app is dark-only; the
 // runtime light/dark toggle was removed).
@@ -19,8 +26,12 @@ root.render(
               <BrowserRouter>
                   <Routes>
                       <Route
+                          path="/"
+                          element={<WebPage />}
+                      />
+                      <Route
                           path="/web"
-                          element={<ScoreboardPage />}
+                          element={<WebPage />}
                       />
                       <Route
                           path="/scoreboard"

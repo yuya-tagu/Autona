@@ -93,6 +93,9 @@ venv/
 # Node modules
 web/node_modules/
 
+# Local custom files
+custom/
+
 # Auto-updater download (large artifact, must never be committed)
 release-windows.zip
 

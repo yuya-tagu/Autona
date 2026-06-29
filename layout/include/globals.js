@@ -24,6 +24,19 @@ function getRevision(payload) {
 // where the local settings have priority over global ones
 var tsh_settings = {};
 
+// Layouts normally live directly under /layout. Generated custom layouts live
+// under /layout/custom/{slug}, so they can override these roots before loading
+// globals.js without changing any built-in layout paths.
+function TSHLayoutPath(path) {
+  const root = window.tshLayoutRootPath || "..";
+  return root + "/" + path.replace(/^\/+/, "");
+}
+
+function TSHProgramPath(path) {
+  const root = window.tshProgramRootPath || "../..";
+  return root + "/" + path.replace(/^\/+/, "");
+}
+
 // This is called once after initialization. Layouts should reimplement this function.
 var Start = async () => {
   console.log("Start(): Implement me");
@@ -181,7 +194,7 @@ async function UpdateData_SocketIO() {
 // Load libraries sequentially (to respect dependencies)
 // Then call InitAll
 async function LoadEverything() {
-  let libPath = "../include/";
+  let libPath = TSHLayoutPath("include/");
   let scripts = [
     "jquery-3.7.1.min.js",
     "gsap.min.js",
@@ -278,7 +291,7 @@ async function InitAll() {
 function getData() {
   return $.ajax({
     dataType: "json",
-    url: "../../out/program_state.json",
+    url: TSHProgramPath("out/program_state.json"),
     cache: false,
   });
 }
@@ -290,7 +303,7 @@ async function LoadSettings() {
   try {
     global_settings = await $.ajax({
       dataType: "json",
-      url: "../settings.json",
+      url: TSHLayoutPath("settings.json"),
       cache: false,
     });
   } catch (e) {
@@ -352,7 +365,7 @@ async function LoadKuroshiro() {
   window.kuroshiro = new Kuroshiro.default();
   await window.kuroshiro.init(
     new KuromojiAnalyzer({
-      dictPath: "../include/kuromoji",
+      dictPath: TSHLayoutPath("include/kuromoji"),
     })
   );
 }
@@ -581,7 +594,7 @@ async function CenterVideo(element, assetData, options = {}) {
   function loadImage() {
     return new Promise((resolve) => {
       var video = $("<video />", {
-        src: "../../" + assetData.asset,
+        src: TSHProgramPath(assetData.asset),
         muted: true,
         autoplay: true,
       });
@@ -638,13 +651,13 @@ async function CenterImageDo(element) {
     }
     if (!assetData) return;
 
-    let image = 'url("../../' + assetData.asset + '")';
+    let image = 'url("' + TSHProgramPath(assetData.asset) + '")';
 
     if (image != undefined && image.includes("url(")) {
       function loadImage() {
         return new Promise((resolve) => {
           const img = new Image();
-          img.src = "../../" + assetData.asset;
+          img.src = TSHProgramPath(assetData.asset);
           img.onload = async () => {
             let eyesight = assetData.eyesight;
 
