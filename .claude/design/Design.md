@@ -987,7 +987,7 @@ P1/P2 は **テーマ色ではなく競技上の識別色**であり、DARK / LI
 | トークン | PyQt | React 推奨用法 | 用途 |
 |--------|------|------------|------|
 | FONT_XS | 8pt | `theme.typography.caption` | キャプション・補足 |
-| FONT_SM | 9pt | （MUI 既定 fontSize より小さめ） | サブテキスト |
+| FONT_SM | 10pt | （MUI 既定 fontSize より小さめ） | 本文基底・タイトルラベル・サブテキスト |
 | FONT_MD | 11pt | `theme.typography.body2` 相当 | 本文・ラベル |
 | FONT_LG | 13pt | `theme.typography.body1`、`theme.typography.fontSize: 13` | 主本文 |
 | FONT_XL | 16pt | `theme.typography.h6` 相当 | 見出し |

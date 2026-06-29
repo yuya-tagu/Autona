@@ -575,6 +575,9 @@ class AutonaScoreboardWidget(QWidget):
         self.btSwap.setIcon(QIcon(UI.icon_path("swap.svg")))
         self.btSwap.setIconSize(QSize(_ACTION_ICON, _ACTION_ICON))
         self.btSwap.setFixedSize(SZ * 2 + SP, SZ)
+        # Height must be pinned via QSS (setFixedSize's height is ignored under
+        # the global stylesheet); the neutral fill still comes from the app QSS.
+        self.btSwap.setStyleSheet(UI.score_ctrl_height_qss())
         self.btSwap.setToolTip(QApplication.translate("app", "Swap Teams"))
         self.btSwap.clicked.connect(self.SwapTeams)
         row1.addWidget(self.btSwap)
@@ -634,6 +637,9 @@ class AutonaScoreboardWidget(QWidget):
         # Reset clears live broadcast state — flag it as a destructive
         # action so it stands apart from the +1/-1 score controls.
         L.tag_button(self.btScoreReset, L.BUTTON_DANGER)
+        # Match the other score-panel controls' height (see score_ctrl_height_qss);
+        # the danger fill still comes from the QPushButton#danger global rule.
+        self.btScoreReset.setStyleSheet(UI.score_ctrl_height_qss())
         self.btScoreReset.clicked.connect(lambda: self.ResetScore())
         row5.addWidget(self.btScoreReset)
         scoreVBox.addLayout(row5)
@@ -1362,12 +1368,12 @@ class AutonaScoreboardWidget(QWidget):
 
     @staticmethod
     def _sectionTitleStyle() -> str:
-        # Section header label ("対戦情報" / "スコアボード"). Slightly
-        # de-emphasised vs. body text, but still readable on both
-        # palettes (Design.md §5.1.6).
+        # Section header label ("対戦情報" / "スコアボード"). Reads as body
+        # text — same size and colour as the content beneath it — set apart
+        # only by its bold weight (Design.md §5.2.3: 見出し=700 / 本文=400).
         return (
-            "font-weight: bold; font-size: 9pt;"
-            f" color: {UI.palette()['text_secondary']};"
+            f"font-weight: bold; font-size: {UI.FONT_SM}pt;"
+            f" color: {UI.palette()['text_primary']};"
         )
 
     @staticmethod
