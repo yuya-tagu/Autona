@@ -104,19 +104,18 @@ def apply_card_layout(group: QGroupBox) -> None:
 # than the card title so the hierarchy stays readable.
 
 def apply_section_title(label: QLabel) -> None:
-    """Style a QLabel as a section sub-title (uppercase, letter-spaced,
-    text_label color, bold). Use only inside cards; the card itself
-    already provides the top-level heading."""
+    """Style a QLabel as a section sub-title. Reads as body text (same size,
+    colour and margins as surrounding content) and is set apart only by its
+    bold weight. Use only inside cards; the card itself already provides the
+    top-level heading."""
     p = UI.palette()
     label.setStyleSheet(
-        f"color: {p['text_label']};"
+        f"color: {p['text_primary']};"
         f"font-size: {UI.FONT_SM}pt;"
         f"font-weight: 700;"
-        f"text-transform: uppercase;"
-        f"letter-spacing: 0.5px;"
         f"background: transparent;"
         f"border: none;"
-        f"padding: 4px 0 2px 0;"
+        f"padding: 0;"
     )
 
 

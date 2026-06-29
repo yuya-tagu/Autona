@@ -11,7 +11,7 @@ OBS-style high-density UI). Keep in sync with:
 # ─── Typography ──────────────────────────────────────────────────
 
 FONT_XS = 8
-FONT_SM = 9
+FONT_SM = 10
 FONT_MD = 11
 FONT_LG = 13
 FONT_XL = 16
@@ -150,12 +150,31 @@ def auto_update_toggle_style() -> str:
     )
 
 
+# Shared height for every control in the SCORE-tab score panel (the
+# +1/-1/swap/reset buttons and the two score displays). Pinned here because
+# setFixedSize() cannot govern height once a stylesheet with min-height is
+# applied: Qt's QStyleSheetStyle derives the height from the sheet and ignores
+# the fixed maximum (width has no QSS constraint, so setFixedSize still works
+# for width). Without this the buttons collapse to their ~13pt text height
+# while the displays sit taller at their ~18pt height; one shared value keeps
+# them aligned on every platform.
+SCORE_PANEL_CTRL_H = 32
+
+
+def score_ctrl_height_qss() -> str:
+    return (
+        f"min-height: {SCORE_PANEL_CTRL_H}px; "
+        f"max-height: {SCORE_PANEL_CTRL_H}px;"
+    )
+
+
 def score_btn_style(scale: float = 1.0) -> str:
     p = palette()
     size = max(1, round(FONT_LG * scale))
     return (
         f"font-family: '{FONT_FAMILY_MONO}'; "
         f"font-size: {size}pt; font-weight: bold; color: {p['text_primary']};"
+        f"{score_ctrl_height_qss()}"
     )
 
 
@@ -165,6 +184,7 @@ def score_display_style(scale: float = 1.0) -> str:
     return (
         f"font-family: '{FONT_FAMILY_MONO}'; "
         f"font-size: {size}pt; font-weight: 800; color: {p['gold']};"
+        f"{score_ctrl_height_qss()}"
     )
 
 
@@ -502,14 +522,16 @@ QGroupBox {{
 QGroupBox::title {{
     subcontrol-origin: padding;
     subcontrol-position: top left;
+    /* Left/right 10px keeps the title aligned with the card's body content
+       (the card uses 10px side padding); top/bottom position it within the
+       28px header zone. Title now reads as body text — same size/colour as
+       the content, distinguished only by weight (no upper-casing / tracking). */
     padding: 6px 10px 4px 10px;
     background: transparent;
     border: none;
-    color: {p['text_label']};
+    color: {p['text_primary']};
     font-size: {FONT_SM}pt;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
 }}
 /* Compact variant: list rows that don't need the card framing. Applied via
    setProperty("compact", True). Flat, minimal padding, subtle divider. */

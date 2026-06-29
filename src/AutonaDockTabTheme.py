@@ -78,11 +78,12 @@ TAB_SHORT_LABELS: dict[str, str] = {
     "Additional Notes": "NOTES",
 }
 
-# Warm-tone gradient sampled from the Autona app icon (crimson → orange).
+# Two-tone crimson gradient sampled from the Autona app icon (red → crimson).
+# Vertical bars paint stop 0.0 at the top and 1.0 at the bottom, so the bar
+# reads brighter red up top fading into deep crimson below.
 GRADIENT_STOPS: list[tuple[float, str]] = [
-    (0.0, "#6B1020"),
-    (0.45, "#C41232"),
-    (1.0, "#B37018"),
+    (0.0, "#C41232"),
+    (1.0, "#6B1020"),
 ]
 
 # Sidebar geometry (ClickUp-style vertical dock tab bar on the left).

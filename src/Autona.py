@@ -579,17 +579,6 @@ class Window(QMainWindow):
 
         editMenu.addSeparator()
 
-        # Check for updates - promoted to a top-level Edit item for
-        # discoverability. The in-app updater pulls the latest release from the
-        # public distribution repo (see AutonaUpdater.GITHUB_REPO).
-        action = editMenu.addAction(
-            QApplication.translate("app", "Check for updates"))
-        action.setIcon(QIcon(UI.icon_path('update_circle.svg')))
-        action.triggered.connect(
-            lambda x=None: AutonaUpdater.instance.CheckForUpdates(silent=False))
-
-        editMenu.addSeparator()
-
         self.settingsWindow = AutonaSettingsWindow(self)
         action = editMenu.addAction(
             QApplication.translate("Settings", "Settings"))
@@ -748,6 +737,17 @@ class Window(QMainWindow):
 
         # ── Help menu ──
         helpMenu = mb.addMenu(QApplication.translate("app", "Help"))
+
+        # Check for updates - the in-app updater pulls the latest release from
+        # the public distribution repo (see AutonaUpdater.GITHUB_REPO).
+        action = helpMenu.addAction(
+            QApplication.translate("app", "Check for updates"))
+        action.setIcon(QIcon(UI.icon_path('update_circle.svg')))
+        action.triggered.connect(
+            lambda x=None: AutonaUpdater.instance.CheckForUpdates(silent=False))
+
+        helpMenu.addSeparator()
+
         action = helpMenu.addAction(
             QApplication.translate("app", "Join the Discord community"))
         discord_url = "https://discord.gg/yAFAmhaUqn"
