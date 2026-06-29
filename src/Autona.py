@@ -148,6 +148,7 @@ from .AutonaCommentaryWidget import AutonaCommentaryWidget
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaBracketWidget import AutonaBracketWidget
 from .AutonaTournamentInfoWidget import AutonaTournamentInfoWidget
+from .AutonaBoardWidget import AutonaBoardWidget
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .TournamentDataProvider.StartGGDataProvider import StartGGDataProvider
 from .AutonaAlertNotification import AutonaAlertNotification
@@ -191,7 +192,7 @@ class Window(QMainWindow):
     # Bump this when dock widget layout changes (e.g. adding/removing tabs).
     # v9: dock objectNames switched from translated strings to stable English
     # literals; old saved layouts keyed by translated names are discarded.
-    STATE_VERSION = 9
+    STATE_VERSION = 11
     signals = WindowSignals()
 
     def __init__(self, loop=None):
@@ -321,6 +322,15 @@ class Window(QMainWindow):
             Qt.DockWidgetArea.BottomDockWidgetArea, tournamentInfo)
         self.dockWidgets.append(tournamentInfo)
 
+        # BOARD — pick scoreboard design, tune colors, OBS setup. Placed right
+        # after EVENT (it absorbs EVENT's color pickers).
+        board = AutonaBoardWidget()
+        board.setWindowIcon(QIcon(UI.icon_path('board.svg')))
+        board.setObjectName("Board")
+        board.setWindowTitle(QApplication.translate("app", "Board"))
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, board)
+        self.dockWidgets.append(board)
+
         if not SettingsManager.Get("general.disable_thumbnail_widget", False):
             from .AutonaThumbnailSettingsWidget import AutonaThumbnailSettingsWidget
             thumbnailSetting = AutonaThumbnailSettingsWidget()
@@ -408,11 +418,12 @@ class Window(QMainWindow):
 
         splash.set_message(splash_msgs[1], progress=0.85)
 
-        # Tab order: EVENT, SCORE, VIDEO, STATS, PLAYERS, COMMS, RESULT,
+        # Tab order: EVENT, SCORE, BOARD, VIDEO, STATS, PLAYERS, COMMS, RESULT,
         # BRACKET, NOTES, ANLYSE.
         previous = tournamentInfo
         for nxt in (
             self.scoreboard,
+            board,
             thumbnailSetting if not SettingsManager.Get(
                 "general.disable_thumbnail_widget", False) else None,
             self.statsWidget,
@@ -742,6 +753,14 @@ class Window(QMainWindow):
         discord_url = "https://discord.gg/yAFAmhaUqn"
         action.triggered.connect(
             lambda x=None: QDesktopServices.openUrl(QUrl(discord_url)))
+
+        # ── Top-level menu order ──
+        # Menus are built above in dependency order, but displayed as:
+        # Edit, API Settings, Startgg, Title, Rules, Help. insertAction moves
+        # an already-added menu action, so reorder here without touching the
+        # construction blocks (keeps all signal wiring intact).
+        mb.insertAction(startggMenu.menuAction(), apiMenu.menuAction())
+        mb.insertAction(helpMenu.menuAction(), formatMenu.menuAction())
 
         # Create all boards (1v1 + team + crew) into the SCORE dock, then apply
         # the persisted battle format so the right board + result layout are

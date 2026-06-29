@@ -66,6 +66,7 @@ from qtpy.QtWidgets import (
 # short uppercase label shown under the tab icon.
 TAB_SHORT_LABELS: dict[str, str] = {
     "Tournament Info": "EVENT",
+    "Board": "BOARD",
     "Scoreboard": "SCORE",
     "Statistics": "STATS",
     "Analysis": "ANLYSE",
