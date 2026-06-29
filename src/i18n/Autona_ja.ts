@@ -118,7 +118,7 @@
     <message>
         <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
         <source>Thumbnail Style</source>
-        <translation>サムネイル形式</translation>
+        <translation>形式</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
@@ -128,7 +128,7 @@
     <message>
         <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
         <source>Netflix Style</source>
-        <translation>Netflix スタイル</translation>
+        <translation>全体表示</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />

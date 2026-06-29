@@ -155,10 +155,11 @@ function buildTheme(mode) {
                         fontWeight: 700,
                         textTransform: 'none',
                     },
+                    // YouTube-style primary: white surface, near-black label.
                     containedPrimary: {
-                        backgroundColor: t.accent,
-                        color: onAccent,
-                        '&:hover': { backgroundColor: t.accentHover },
+                        backgroundColor: '#FFFFFF',
+                        color: '#0F0F0F',
+                        '&:hover': { backgroundColor: '#D9D9D9' },
                     },
                     outlined: {
                         borderColor: t.borderDefault,

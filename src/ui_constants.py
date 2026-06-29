@@ -79,6 +79,11 @@ DARK = {
     "gold":            "#F0C45A",
     "gold_subtle":     "#2E2A1E",
     "positive":        "#6EC77A",
+    # Neutral (secondary) button fill: a clearly-visible warm grey, well
+    # above the near-black card so the whole button surface reads as a
+    # filled grey chip rather than an outline. Hover lifts a step.
+    "btn_neutral":       "#3C3B37",
+    "btn_neutral_hover": "#4A4842",
     # Negative/danger: decoupled from brand on DARK. The danger button is an
     # outline (negative text+border on bg_tertiary), where brand crimson
     # #DC143C only reached ~3.1 contrast and muddled against the scarlet accent.
@@ -86,6 +91,12 @@ DARK = {
     # vs the filled primary). brand #DC143C is kept for live/status signals.
     "negative":        "#F04E54",
     "on_accent":       "#FFFFFF",
+    # Primary action button: near-white surface with a faint grey tint,
+    # near-black label, grey hover. Decoupled from the accent (which still
+    # drives focus rings, tabs and live signals).
+    "primary_btn_bg":     "#F2F2F2",
+    "primary_btn_text":   "#0F0F0F",
+    "primary_btn_hover":  "#DDDDDD",
 }
 
 # ─── Theme ──────────────────────────────────────────────────────
@@ -205,21 +216,29 @@ QLabel {{
 }}
 
 /* === Interactive controls: uniform dense height, subtle elevation === */
-QPushButton, QToolButton {{
+/* Neutral buttons: solid grey fill (not an outline). Border matches the
+   fill so the whole surface reads as a filled grey chip; hover lifts the
+   grey a step. Greys are clearly above the near-black card so the button
+   surface is unmistakable.
+   NOTE: qdarktheme ships `QPushButton:!window {{background:transparent}}`
+   (specificity 0,1,1). A bare `QPushButton` rule (0,0,1) loses to it, so the
+   fill must match that specificity with `:!window` to win (we are appended
+   after qdarktheme, so equal specificity resolves in our favour). */
+QPushButton:!window, QToolButton:!window {{
     min-height: {_WIDGET_H}px;
     padding: 0px 12px;
-    border: 1px solid {p['border_default']};
+    border: 1px solid {p['btn_neutral']};
     border-radius: {RADIUS_MD}px;
-    background-color: {p['bg_tertiary']};
+    background-color: {p['btn_neutral']};
     color: {p['text_primary']};
     font-weight: 600;
 }}
-QPushButton:hover, QToolButton:hover {{
-    background-color: {p['bg_quaternary']};
-    border-color: {p['border_strong']};
+QPushButton:!window:hover, QToolButton:!window:hover {{
+    background-color: {p['btn_neutral_hover']};
+    border-color: {p['btn_neutral_hover']};
 }}
-QPushButton:pressed, QToolButton:pressed {{
-    background-color: {p['bg_secondary']};
+QPushButton:!window:pressed, QToolButton:!window:pressed {{
+    background-color: {p['bg_quaternary']};
     padding-top: 1px;
 }}
 QPushButton:disabled, QToolButton:disabled {{
@@ -228,24 +247,23 @@ QPushButton:disabled, QToolButton:disabled {{
     border-color: {p['border_subtle']};
 }}
 /* Primary action buttons (opt-in via objectName="primary") and default
-   dialog buttons (QDialogButtonBox::Ok etc.) — both render on the
-   accent colour, so the foreground must track on_accent (white) rather
-   than falling back to the standard text colour. */
+   dialog buttons (QDialogButtonBox::Ok etc.) — YouTube-style white surface
+   with a near-black label, decoupled from the accent colour. */
 QPushButton#primary,
 QPushButton:default {{
-    background-color: {p['accent']};
-    border-color: {p['accent']};
-    color: {p['on_accent']};
+    background-color: {p['primary_btn_bg']};
+    border-color: {p['primary_btn_bg']};
+    color: {p['primary_btn_text']};
 }}
 QPushButton#primary:hover,
 QPushButton:default:hover {{
-    background-color: {p['accent_hover']};
-    border-color: {p['accent_hover']};
-    color: {p['on_accent']};
+    background-color: {p['primary_btn_hover']};
+    border-color: {p['primary_btn_hover']};
+    color: {p['primary_btn_text']};
 }}
 QPushButton#primary:pressed,
 QPushButton:default:pressed {{
-    color: {p['on_accent']};
+    color: {p['primary_btn_text']};
 }}
 /* Danger / destructive actions (objectName="danger"): opt-in red outline.
    Used for Clear / Reset / Delete style buttons so they read distinct from
@@ -254,12 +272,12 @@ QPushButton:default:pressed {{
 QPushButton#danger, QToolButton#danger {{
     background-color: {p['bg_tertiary']};
     border: 1px solid {p['negative']};
-    color: {p['negative']};
+    color: {p['text_primary']};
 }}
 QPushButton#danger:hover, QToolButton#danger:hover {{
     background-color: {p['brand_subtle']};
     border-color: {p['negative']};
-    color: {p['negative']};
+    color: {p['text_primary']};
 }}
 QPushButton#danger:pressed, QToolButton#danger:pressed {{
     background-color: {p['brand_subtle']};

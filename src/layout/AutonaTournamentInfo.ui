@@ -150,18 +150,22 @@
         </layout>
        </item>
        <item>
-        <widget class="QPushButton" name="btLoadInfoFromTournament">
-         <property name="text">
-          <string>Load from tournament</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QPushButton" name="btClearInfo">
-         <property name="text">
-          <string>Disconnect from tournament</string>
-         </property>
-        </widget>
+        <layout class="QHBoxLayout" name="tournamentActionRow">
+         <item>
+          <widget class="QPushButton" name="btLoadInfoFromTournament">
+           <property name="text">
+            <string>Load from tournament</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btClearInfo">
+           <property name="text">
+            <string>Disconnect from tournament</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
        </item>
       </layout>
      </widget>
