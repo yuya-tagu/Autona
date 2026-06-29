@@ -193,9 +193,7 @@ class AutonaScoreboardWidget(QWidget):
         # match-info ("対戦情報") section.
         self.xpostBtn = QPushButton(
             QApplication.translate("app", "Xに投稿する"))
-        # Match the primary-action (accent-orange) styling used by dialog
-        # OK buttons etc., so this stands out as the confirming action.
-        self.xpostBtn.setObjectName("primary")
+        # Neutral (secondary) styling — no longer a primary action.
         self.xpostBtn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         self.xpostBtn.clicked.connect(self.PostToX)
 
@@ -204,7 +202,6 @@ class AutonaScoreboardWidget(QWidget):
         webScoreboardPath = "team" if self.scoreboardNumber == 2 else "scoreboard"
         self.webScoreboardUrl = f"http://{GetLocalIP()}:{SettingsManager.Get('general.webserver_port', 5000)}/{webScoreboardPath}"
         self.btOpenWebScoreboard = QPushButton("ブラウザ版を開く")
-        self.btOpenWebScoreboard.setObjectName("primary")
         self.btOpenWebScoreboard.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         self.btOpenWebScoreboard.clicked.connect(lambda: webbrowser.open(self.webScoreboardUrl))
 
@@ -303,22 +300,6 @@ class AutonaScoreboardWidget(QWidget):
         # UI. Force-disable the setting so any stale True value from an
         # older session doesn't silently keep the timer running.
         SettingsManager.Set("general.disable_autoupdate", True)
-
-        # --- Separator (inserted into layout later via insertWidget) ---
-        # Wrap the line in a container with top/bottom padding so the
-        # divider breathes visually between the Start.gg load button
-        # above and the phase/match row below.
-        self._streamScoreSeparatorLine = QFrame()
-        self._streamScoreSeparatorLine.setFrameShape(QFrame.Shape.HLine)
-        self._streamScoreSeparatorLine.setFrameShadow(QFrame.Shadow.Sunken)
-        self.streamScoreSeparator = QWidget()
-        _sepLayout = QVBoxLayout()
-        _sepLayout.setContentsMargins(0, UI.SPACE_MD, 0, UI.SPACE_MD)
-        _sepLayout.setSpacing(0)
-        _sepLayout.addWidget(self._streamScoreSeparatorLine)
-        self.streamScoreSeparator.setLayout(_sepLayout)
-        self.streamScoreSeparator.setSizePolicy(
-            QSizePolicy.Minimum, QSizePolicy.Maximum)
 
         # --- Bottom options (settings, timer) below team columns ---
         bottomOptions = QWidget()
@@ -557,9 +538,8 @@ class AutonaScoreboardWidget(QWidget):
         self.scoreBar.layout().addWidget(bestOfGroup, 1)
 
         columnsIndex = self.innerWidget.layout().indexOf(self.columns)
-        # Insert order: streamSection, separator, scoreBar, then columns
+        # Insert order: streamSection, scoreBar, then columns
         self.innerWidget.layout().insertWidget(columnsIndex, self.scoreBar)
-        self.innerWidget.layout().insertWidget(columnsIndex, self.streamScoreSeparator)
         self.innerWidget.layout().insertWidget(columnsIndex, self.streamSection)
         self.scoreColumn.hide()
 
@@ -786,13 +766,11 @@ class AutonaScoreboardWidget(QWidget):
 
     def _groupSectionsIntoFrames(self, topOptions, bottomOptions):
         """Wrap the Start.gg-load/stream-URL area and the phase/score
-        area in two bordered frames. Replaces the horizontal separator
-        with explicit outer frames so each section reads as its own
+        area in two bordered frames so each section reads as its own
         visual group.
 
         Current innerWidget child order is:
-            topOptions, streamSection, streamScoreSeparator,
-            scoreBar, columns, bottomOptions
+            topOptions, streamSection, scoreBar, columns, bottomOptions
         """
         inner = self.innerWidget.layout()
 
@@ -801,7 +779,6 @@ class AutonaScoreboardWidget(QWidget):
         for w in (
             topOptions,
             self.streamSection,
-            self.streamScoreSeparator,
             self.scoreBar,
             self.columns,
             bottomOptions,
@@ -810,8 +787,14 @@ class AutonaScoreboardWidget(QWidget):
                 continue
             inner.removeWidget(w)
 
-        self.streamScoreSeparator.hide()
-        self.streamScoreSeparator.setParent(None)
+        # topOptions is now empty (the thumbnail button is permanently
+        # hidden; the X-post / browser buttons moved into the scoreboard
+        # title row), so it only contributed dead vertical space above the
+        # Start.gg load button. Keep it alive (it still parents the hidden
+        # thumbnail button) but out of the layout.
+        self._topOptionsHolder = topOptions
+        topOptions.hide()
+        topOptions.setParent(None)
 
         self.topSectionFrame = QFrame()
         self.topSectionFrame.setObjectName("scoreTopSection")
@@ -834,7 +817,6 @@ class AutonaScoreboardWidget(QWidget):
         topLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.topSectionFrame.setLayout(topLayout)
 
-        topLayout.addWidget(topOptions)
         topLayout.addWidget(self.streamSection)
 
         self.matchSectionFrame = QFrame()
@@ -902,9 +884,9 @@ class AutonaScoreboardWidget(QWidget):
         inner.addWidget(self.matchSectionFrame)
         inner.addWidget(self.topSectionFrame)
         inner.addStretch(1)
-        # Match the EVENT tab's gap between group-box sections so the
-        # SCORE tab's framed groups read with similar visual rhythm.
-        inner.setSpacing(UI.SPACE_LG)
+        # Tight gap between the scoreboard and Start.gg-load sections so the
+        # player "Clear" buttons and the "Load set" button read as one cluster.
+        inner.setSpacing(UI.SPACE_XS)
 
     def StageResultsToScore(self, team_1_score, team_2_score):
         with QSignalBlocker(self.scoreDisplay1):

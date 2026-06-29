@@ -117,10 +117,8 @@ class AutonaCrewBattleWidget(QWidget):
         controls.addStretch(1)
 
         # X-post: same flow as the 1v1 board (AutonaScoreboardWidget) — opens
-        # X's web intent with a prefilled body. Accent-orange "primary" styling
-        # marks it as the confirming action, matching board 1.
+        # X's web intent with a prefilled body. Neutral (secondary) styling.
         self.xpostBtn = QPushButton(QApplication.translate("app", "Xに投稿する"))
-        self.xpostBtn.setObjectName("primary")
         self.xpostBtn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         self.xpostBtn.clicked.connect(self.PostToX)
         controls.addWidget(self.xpostBtn)

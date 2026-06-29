@@ -198,7 +198,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         self.btGenerateStreamThumbnail: QPushButton = self.findChild(
             QPushButton, "btGenerateStreamThumbnail")
-        L.tag_button(self.btGenerateStreamThumbnail, L.BUTTON_PRIMARY)
+        L.tag_button(self.btGenerateStreamThumbnail, L.BUTTON_SECONDARY)
         self.btGenerateStreamThumbnail.clicked.connect(
             self.GenerateStreamThumbnail)
 
