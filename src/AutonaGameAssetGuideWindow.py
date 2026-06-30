@@ -32,6 +32,8 @@ from qtpy.QtCore import *
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 
+from . import ui_constants as UI
+
 
 # Upstream project + its public asset source (the same source TSH downloads
 # from). The index lists packs; binaries are split 7z on the latest Release.
@@ -240,7 +242,7 @@ class AutonaGameAssetGuideWindow(QDialog):
             "Note: official illustration / render / promo / audio packs are not "
             "offered, per the game publisher's tournament guidelines."))
         note.setWordWrap(True)
-        note.setStyleSheet("color: #999;")
+        note.setStyleSheet(f"color: {UI.palette()['text_label']};")
         v.addWidget(note)
 
         btnRow = QHBoxLayout()

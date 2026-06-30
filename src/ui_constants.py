@@ -1,8 +1,8 @@
 """
 Centralized UI design tokens for the Autona desktop application.
 
-Based on the Autona Admin UI System (warm-dark palette, crimson brand,
-OBS-style high-density UI). Keep in sync with:
+Based on the Autona Admin UI System (cool-gray dark palette + warm crimson
+brand, OBS-style high-density UI). Keep in sync with:
   - assets/design-tokens.json
   - layout/main.css
   - 30_Products/参考資料/color-system.html
@@ -48,24 +48,30 @@ RADIUS_SM = 3
 RADIUS_MD = 5
 RADIUS_LG = 8
 
-# ─── Palette (warm dark / warm light) ───────────────────────────
+# ─── Palette (cool-gray dark) ───────────────────────────────────
 
-# Brand (crimson) is reserved for live/status signals only.
-# Accent (warm orange) is the primary action color.
+# Neutrals share one cool hue (see DARK below). Brand (crimson) is reserved
+# for live/status signals only. Accent (warm orange) is the primary action
+# color — the warm chromatics are intentionally kept against cool grays.
 DARK = {
-    "canvas":          "#0A0A0A",
-    "bg_primary":      "#121212",
-    "bg_secondary":    "#1A1A1A",
-    "bg_tertiary":     "#252524",
-    "bg_quaternary":   "#2F2F2D",
-    "border_subtle":   "#252524",
-    "border_default":  "#393936",
-    "border_strong":   "#55534E",
-    "text_primary":    "#F0EAE0",
-    "text_secondary":  "#B5ADA0",
-    "text_muted":      "#85807A",
-    "text_label":      "#A29A90",
-    "text_disabled":   "#524F4A",
+    # Cool-gray ramp: a single hue (H~218deg, S~6-9%) across every neutral so
+    # the grayscale reads as one consistent, faintly blue/cool tone instead of
+    # the former warm-with-drift mix. Lightness matches the old values, so
+    # contrast ratios are unchanged. Chromatic tokens (brand/accent/gold/
+    # semantic) stay warm and pop against the cool neutrals.
+    "canvas":          "#0A0B0D",
+    "bg_primary":      "#111317",
+    "bg_secondary":    "#191B20",
+    "bg_tertiary":     "#23262C",
+    "bg_quaternary":   "#2D3138",
+    "border_subtle":   "#23262C",
+    "border_default":  "#383C44",
+    "border_strong":   "#53575F",
+    "text_primary":    "#E9ECF1",
+    "text_secondary":  "#AFB3BB",
+    "text_muted":      "#81858E",
+    "text_label":      "#9CA0A9",
+    "text_disabled":   "#4F525A",
     "brand":           "#DC143C",
     "brand_subtle":    "#2A1418",
     # Accent (scarlet): hue ~2deg sits between the brand crimson (~348deg) and
@@ -79,11 +85,13 @@ DARK = {
     "gold":            "#F0C45A",
     "gold_subtle":     "#2E2A1E",
     "positive":        "#6EC77A",
-    # Neutral (secondary) button fill: a clearly-visible warm grey, well
+    # Neutral (secondary) button fill: a clearly-visible cool grey, well
     # above the near-black card so the whole button surface reads as a
-    # filled grey chip rather than an outline. Hover lifts a step.
-    "btn_neutral":       "#3C3B37",
-    "btn_neutral_hover": "#4A4842",
+    # filled grey chip rather than an outline. Shares the cool ramp hue so
+    # secondary buttons no longer read warm against the cooled surfaces.
+    # Hover lifts a step.
+    "btn_neutral":       "#3B3F47",
+    "btn_neutral_hover": "#494D56",
     # Negative/danger: decoupled from brand on DARK. The danger button is an
     # outline (negative text+border on bg_tertiary), where brand crimson
     # #DC143C only reached ~3.1 contrast and muddled against the scarlet accent.
@@ -91,12 +99,13 @@ DARK = {
     # vs the filled primary). brand #DC143C is kept for live/status signals.
     "negative":        "#F04E54",
     "on_accent":       "#FFFFFF",
-    # Primary action button: near-white surface with a faint grey tint,
-    # near-black label, grey hover. Decoupled from the accent (which still
-    # drives focus rings, tabs and live signals).
-    "primary_btn_bg":     "#F2F2F2",
-    "primary_btn_text":   "#0F0F0F",
-    "primary_btn_hover":  "#DDDDDD",
+    # Primary action button: near-white surface with a faint cool tint
+    # (matches text_primary's cool off-white), near-black label, grey hover.
+    # Decoupled from the accent (which still drives focus rings, tabs and
+    # live signals).
+    "primary_btn_bg":     "#EFF1F5",
+    "primary_btn_text":   "#0E0F12",
+    "primary_btn_hover":  "#DBDDE3",
 }
 
 # ─── Theme ──────────────────────────────────────────────────────
@@ -375,27 +384,15 @@ QTabBar::tab:selected {{
     border-bottom: 3px solid {p['accent']};
 }}
 
-/* The main-window dock tab bar (objectName="autonaDockTabBar") paints
-   itself via AutonaDockTabPainter (installEventFilter), so no QSS rules
-   are applied to it here — QSS for QTabBar::tab would be intercepted by
-   QStyleSheetStyle before the custom paint runs. */
-
-/* === Main window dock separators (make them visible) === */
-QMainWindow::separator {{
-    background-color: {p['border_default']};
-    width: 3px;
-    height: 3px;
-}}
-QMainWindow::separator:hover {{
-    background-color: {p['accent']};
-}}
-
-/* === Dock widgets: card-like with accent title strip === */
+/* === Panel widgets (former docks) === */
+/* The panels are still QDockWidget subclasses, but they are no longer
+   docked: each is a page of the main-window QStackedWidget, with its title
+   bar hidden. No frame border, so pages sit flush against the sidebar. */
 QDockWidget {{
     color: {p['text_primary']};
     titlebar-close-icon: none;
     titlebar-normal-icon: none;
-    border: 1px solid {p['border_default']};
+    border: none;
 }}
 QDockWidget::title {{
     background-color: {p['bg_tertiary']};

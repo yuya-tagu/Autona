@@ -178,14 +178,13 @@ class AutonaScoreboardWidget(QWidget):
 
         topOptions.layout().addStretch()
 
-        if not SettingsManager.Get("general.disable_thumbnail_widget", False):
-            self.thumbnailBtn = QPushButton(
-                QApplication.translate("app", "Generate Thumbnail") + " ")
-            self.thumbnailBtn.setIcon(QIcon(UI.icon_path('png_file.svg')))
-            self.thumbnailBtn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-            topOptions.layout().addWidget(self.thumbnailBtn)
-            self.thumbnailBtn.clicked.connect(self.GenerateThumbnail)
-            self.thumbnailBtn.setVisible(False)
+        self.thumbnailBtn = QPushButton(
+            QApplication.translate("app", "Generate Thumbnail") + " ")
+        self.thumbnailBtn.setIcon(QIcon(UI.icon_path('png_file.svg')))
+        self.thumbnailBtn.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        topOptions.layout().addWidget(self.thumbnailBtn)
+        self.thumbnailBtn.clicked.connect(self.GenerateThumbnail)
+        self.thumbnailBtn.setVisible(False)
 
         # X-post and browser-preview buttons are created here but placed in
         # the scoreboard section's title row (see _groupSectionsIntoFrames)
@@ -1529,19 +1528,6 @@ class AutonaScoreboardWidget(QWidget):
     def LoadStationSetClicked(self):
         self.selectStationWindow.LoadStations()
         self.selectStationWindow.show()
-
-    def UpdateUserSetButton(self):
-        provider = None
-        if AutonaTournamentDataProvider.instance.provider:
-            provider = AutonaTournamentDataProvider.instance.provider.name
-        if provider and SettingsManager.Get(provider+"_user"):
-            self.btLoadPlayerSet.setText(
-                QApplication.translate("app", "Load user set ({0})").format(SettingsManager.Get(provider+'_user')))
-            self.btLoadPlayerSet.setEnabled(True)
-        else:
-            self.btLoadPlayerSet.setText(
-                QApplication.translate("app", "Load user set"))
-            self.btLoadPlayerSet.setEnabled(False)
 
     def LoadUserSetClicked(self):
         self.lastSetSelected = None

@@ -199,7 +199,7 @@ class AutonaCrewBattleWidget(QWidget):
             # (overrides the theme's accent-red indicator).
             active.setStyleSheet(
                 "QRadioButton::indicator { width: 14px; height: 14px;"
-                " border-radius: 8px; border: 2px solid #777;"
+                f" border-radius: 8px; border: 2px solid {UI.palette()['border_strong']};"
                 " background: transparent; }"
                 "QRadioButton::indicator:checked {"
                 f" border: 2px solid {ACCENT_GOLD};"

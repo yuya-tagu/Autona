@@ -56,14 +56,6 @@ class AutonaSettingsWindow(QDialog):
 
         generalSettings.append((
             QApplication.translate(
-                "settings.disable_thumbnail_widget", "Disables the Thumbnail Widget from starting (takes effect on next restart)"),
-            "disable_thumbnail_widget",
-            "checkbox",
-            False
-        ))
-
-        generalSettings.append((
-            QApplication.translate(
                 "settings.disable_autoupdate", "Disable automatic set updating for the scoreboard"),
             "disable_autoupdate",
             "checkbox",
