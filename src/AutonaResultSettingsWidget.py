@@ -1,3 +1,6 @@
+import urllib.parse
+import webbrowser
+
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
@@ -10,6 +13,7 @@ from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
+from .AutonaPlayerDB import AutonaPlayerDB
 from .Helpers.AutonaDirHelper import AutonaResolve
 from . import ui_constants as UI
 from . import ui_layout as L
@@ -38,6 +42,13 @@ class ResultPreviewWidget(QWidget):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMinimumSize(1, 1)
         self._pixmap = None
+        # Re-entrancy guard: setFixedHeight() below re-enters resizeEvent
+        # synchronously. With buttons rendered under the preview, the scroll
+        # area's scrollbar can toggle and shift our width on each pass, so the
+        # aspect-ratio recompute never converges and recurses into a stack
+        # overflow. Skip the nested recompute and let the next top-level
+        # resizeEvent settle the height.
+        self._updatingHeight = False
 
     def setPixmap(self, pixmap):
         self._pixmap = pixmap
@@ -49,13 +60,19 @@ class ResultPreviewWidget(QWidget):
         self.repaint()
 
     def _updateMaxHeight(self):
+        if self._updatingHeight:
+            return
         if self._pixmap and self._pixmap.width() > 0 and self.width() > 0:
             desired = int(
                 self.width() * self._pixmap.height() / self._pixmap.width())
             # Fix height to aspect ratio so the wrapping scroll area scrolls
             # when the viewport is shorter than the preview.
             if self.minimumHeight() != desired or self.maximumHeight() != desired:
-                self.setFixedHeight(desired)
+                self._updatingHeight = True
+                try:
+                    self.setFixedHeight(desired)
+                finally:
+                    self._updatingHeight = False
 
     def paintEvent(self, event):
         if not self._pixmap:
@@ -93,27 +110,30 @@ class AutonaResultSettingsWidget(QDockWidget):
             AutonaResolve("src/layout/AutonaResultSettings.ui"))
         self.widget_container.layout().addWidget(self.settings)
 
-        # --- Player input rows (4 rows per player) ---
-        # Row 1: rank(col 0, spans 4), name(col 1), sponsor(col 2)
-        # Row 2: main char combo, main color combo
-        # Row 3: secondary char combo, secondary color combo
-        # Row 4: tertiary char combo, tertiary color combo
+        # --- Player input rows (5 rows per player) ---
+        # Row 1: rank(col 0, spans 5), name(col 1), sponsor(col 2)
+        # Row 2: X / Twitter handle (spans col 1-2)
+        # Row 3: main char combo, main color combo
+        # Row 4: secondary char combo, secondary color combo
+        # Row 5: tertiary char combo, tertiary color combo
         # playerInputs entry:
         #   (rank_edit, name_edit, sponsor_edit,
         #    char1_combo, color1_combo,
         #    char2_combo, color2_combo,
-        #    char3_combo, color3_combo)
+        #    char3_combo, color3_combo,
+        #    twitter_edit)
         self.playerInputs = []
         grid = self.settings.findChild(QGridLayout, "gridPlayers")
         grid.setVerticalSpacing(2)
 
         for i in range(16):
             idx = i
-            base = i * 4  # 4 grid rows per player
-            row1 = base
-            row2 = base + 1
-            row3 = base + 2
-            row4 = base + 3
+            base = i * 5  # 5 grid rows per player
+            row1 = base       # name + sponsor
+            row2 = base + 1   # X (Twitter), own row
+            row3 = base + 2   # char slot 1
+            row4 = base + 3   # char slot 2
+            row5 = base + 4   # char slot 3
 
             rank_edit = self._makeRankEdit(i + 1)
 
@@ -126,6 +146,13 @@ class AutonaResultSettingsWidget(QDockWidget):
                 QApplication.translate("app", "Sponsor"))
             sponsor_edit.setFixedWidth(80)
 
+            # X (Twitter) handle, manually editable, on its own row between the
+            # player name and the character combos. Feeds result_players["twitter"]
+            # which _buildResultPostText reads for the @mention.
+            twitter_edit = QLineEdit()
+            twitter_edit.setPlaceholderText(
+                QApplication.translate("app", "Twitter"))
+
             char1_combo  = self._makeCharCombo()
             color1_combo = self._makeColorCombo()
             char2_combo  = self._makeCharCombo(sub=True)
@@ -133,22 +160,25 @@ class AutonaResultSettingsWidget(QDockWidget):
             char3_combo  = self._makeCharCombo(sub=True)
             color3_combo = self._makeColorCombo()
 
-            # Row 1: rank spans all 4 rows, name + sponsor
-            grid.addWidget(rank_edit, row1, 0, 4, 1,
+            # Row 1: rank spans all 5 rows, name + sponsor
+            grid.addWidget(rank_edit, row1, 0, 5, 1,
                            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
             grid.addWidget(name_edit,   row1, 1)
             grid.addWidget(sponsor_edit, row1, 2)
-            # Row 2–4: char + color per slot
-            grid.addWidget(char1_combo,  row2, 1)
-            grid.addWidget(color1_combo, row2, 2)
-            grid.addWidget(char2_combo,  row3, 1)
-            grid.addWidget(color2_combo, row3, 2)
-            grid.addWidget(char3_combo,  row4, 1)
-            grid.addWidget(color3_combo, row4, 2)
+            # Row 2: X (Twitter) on its own row, spanning the name + sponsor cols
+            grid.addWidget(twitter_edit, row2, 1, 1, 2)
+            # Row 3–5: char + color per slot
+            grid.addWidget(char1_combo,  row3, 1)
+            grid.addWidget(color1_combo, row3, 2)
+            grid.addWidget(char2_combo,  row4, 1)
+            grid.addWidget(color2_combo, row4, 2)
+            grid.addWidget(char3_combo,  row5, 1)
+            grid.addWidget(color3_combo, row5, 2)
 
             # Connect signals
             name_edit.editingFinished.connect(self._syncPlayersToState)
             sponsor_edit.editingFinished.connect(self._syncPlayersToState)
+            twitter_edit.editingFinished.connect(self._syncPlayersToState)
             char1_combo.currentIndexChanged.connect(
                 lambda _, i=idx: self._onAnyCharChanged(i, 0))
             char2_combo.currentIndexChanged.connect(
@@ -160,11 +190,15 @@ class AutonaResultSettingsWidget(QDockWidget):
             color3_combo.currentIndexChanged.connect(self._syncPlayersToState)
             rank_edit.editingFinished.connect(self._syncPlayersToState)
 
+            # twitter_edit is appended last so existing positional unpacks
+            # (entry[0..8]) stay valid; _onLayoutChanged iterates the whole
+            # tuple so it shows/hides with the row.
             self.playerInputs.append(
                 (rank_edit, name_edit, sponsor_edit,
                  char1_combo, color1_combo,
                  char2_combo, color2_combo,
-                 char3_combo, color3_combo))
+                 char3_combo, color3_combo,
+                 twitter_edit))
 
         # --- Team input rows (team layout) ---
         # Each rank is a team: a team name plus up to MAX_TEAM_MEMBERS members,
@@ -227,29 +261,30 @@ class AutonaResultSettingsWidget(QDockWidget):
                 "members": members,
             })
 
+        # Team rows live inside the scrolling area (verticalLayout_left_scroll)
+        # alongside the singles group; verticalLayout_left is the always-visible
+        # outer layout that hosts the "Load tournament results" button.
         self.settings.findChild(
-            QVBoxLayout, "verticalLayout_left").addWidget(self.teamGroup)
+            QVBoxLayout, "verticalLayout_left_scroll").addWidget(self.teamGroup)
 
         # --- Load from Start.gg ---
         self._standingsSignals = AutonaResultSettingsWidgetSignals()
         self._standingsSignals.StandingsLoaded.connect(self._onStandingsLoaded)
 
-        # Place load / layout controls above the Top 8 Players group box.
+        # Insert the load button into the always-visible outer layout, above
+        # the scrolling player area, so it stays on screen while the rows scroll.
         leftLayout = self.settings.findChild(QVBoxLayout, "verticalLayout_left")
         insertIdx = 0
 
-        self.btLoadFromStartgg = QPushButton(
-            QApplication.translate("app", "Load top 8 from StartGG"))
-        leftLayout.insertWidget(insertIdx, self.btLoadFromStartgg)
+        # Single "Load tournament results" button: pulls tournament info and
+        # the top-N standings (8 or 16 by layout) in one action. Replaces the
+        # former separate "Load tournament info" / "Load top 8/16 from StartGG"
+        # buttons.
+        self.btLoadResult = QPushButton(
+            QApplication.translate("app", "Load tournament results"))
+        leftLayout.insertWidget(insertIdx, self.btLoadResult)
         insertIdx += 1
-        self.btLoadFromStartgg.clicked.connect(self._loadFromStartgg)
-
-        # --- Load tournament info ---
-        self.btLoadTournamentInfo = QPushButton(
-            QApplication.translate("app", "Load tournament info"))
-        leftLayout.insertWidget(insertIdx, self.btLoadTournamentInfo)
-        insertIdx += 1
-        self.btLoadTournamentInfo.clicked.connect(self._loadTournamentInfo)
+        self.btLoadResult.clicked.connect(self._loadResult)
 
         # --- Layout selector (placed above the preview, matching thumbnail UX) ---
         rightLayout = self.settings.findChild(QVBoxLayout, "verticalLayout_right")
@@ -308,6 +343,10 @@ class AutonaResultSettingsWidget(QDockWidget):
         self.btSaveResult = self.settings.findChild(
             QPushButton, "btSaveResult")
         self.btSaveResult.clicked.connect(self._saveResult)
+
+        self.btPostResultToX = self.settings.findChild(
+            QPushButton, "btPostResultToX")
+        self.btPostResultToX.clicked.connect(self._postResultToX)
 
         # Normalise card padding / spacing across all top-level groups.
         for group in self.settings.findChildren(QGroupBox):
@@ -433,6 +472,7 @@ class AutonaResultSettingsWidget(QDockWidget):
             char1_combo, color1_combo = entry[3], entry[4]
             char2_combo, color2_combo = entry[5], entry[6]
             char3_combo, color3_combo = entry[7], entry[8]
+            twitter_edit = entry[9]
 
             try:
                 rank = int(rank_label.text())
@@ -440,6 +480,7 @@ class AutonaResultSettingsWidget(QDockWidget):
                 rank = i + 1
             name    = name_edit.text().strip()
             sponsor = sponsor_edit.text().strip()
+            twitter = twitter_edit.text().strip()
 
             char1 = self._resolveCharData(char1_combo, color1_combo, name)
             char2 = self._resolveCharData(char2_combo, color2_combo)
@@ -452,6 +493,7 @@ class AutonaResultSettingsWidget(QDockWidget):
                 "rank": rank,
                 "name": name,
                 "sponsor": sponsor,
+                "twitter": twitter,
                 "character": char1,
                 "characters": characters,
             }
@@ -522,6 +564,8 @@ class AutonaResultSettingsWidget(QDockWidget):
         game = AutonaGameAssetManager.instance.selectedGame
         codename = game.get("codename", "") if game else ""
 
+        # Capture member X (Twitter) handles by gamerTag for _buildResultPostText.
+        self._standingsTwitter = {}
         for i, team in enumerate(self.teamInputs):
             rank_label = team["rank_label"]
             name_edit = team["name_edit"]
@@ -540,6 +584,9 @@ class AutonaResultSettingsWidget(QDockWidget):
                     if m < len(roster):
                         pl = roster[m]
                         member_name.setText(pl.get("gamerTag", "") or "")
+                        tw = (pl.get("twitter") or "").strip()
+                        if pl.get("gamerTag") and tw:
+                            self._standingsTwitter[pl.get("gamerTag")] = tw
                         game_mains = pl.get("mains", {}).get(codename, []) \
                             if codename else []
                         if game_mains and game_mains[0]:
@@ -564,23 +611,28 @@ class AutonaResultSettingsWidget(QDockWidget):
         self._syncTeamsToState()
         self.GeneratePreview(True)
 
-    def _loadFromStartgg(self):
-        """Fetch standings from Start.gg (count depends on selected layout)."""
+    def _loadResult(self):
+        """Load tournament info + top-N standings (8/16 by layout) at once."""
         if not AutonaTournamentDataProvider.instance.provider:
             logger.warning("No tournament provider set")
             return
-        self.btLoadFromStartgg.setEnabled(False)
-        self.btLoadFromStartgg.setText(
+        self.btLoadResult.setEnabled(False)
+        self.btLoadResult.setText(
             QApplication.translate("app", "Loading..."))
+        # Tournament info (name/date/etc.) — fires its own update signal.
+        try:
+            AutonaTournamentDataProvider.instance.GetTournamentData()
+        except Exception as e:
+            logger.warning(f"Failed to load tournament info: {e}")
+        # Standings; the button is re-enabled in _onStandingsLoaded.
         AutonaTournamentDataProvider.instance.GetStandings(
             self._maxPlayersForLayout(), self._standingsSignals.StandingsLoaded)
 
     def _onStandingsLoaded(self, data):
         """Callback when standings data arrives from Start.gg."""
-        self.btLoadFromStartgg.setEnabled(True)
-        n = self._maxPlayersForLayout()
-        self.btLoadFromStartgg.setText(
-            QApplication.translate("app", "Load top {0} from StartGG").format(n))
+        self.btLoadResult.setEnabled(True)
+        self.btLoadResult.setText(
+            QApplication.translate("app", "Load tournament results"))
 
         if not data:
             logger.warning("No standings data received")
@@ -591,11 +643,16 @@ class AutonaResultSettingsWidget(QDockWidget):
             self._populateTeamsFromStandings(data)
             return
 
+        # Capture each player's X (Twitter) handle keyed by gamerTag; the result
+        # image / result_players don't store it, so _buildResultPostText reads
+        # this freshly-fetched map (falling back to the local player DB).
+        self._standingsTwitter = {}
         for i, entry in enumerate(self.playerInputs):
             rank_label, name_edit, sponsor_edit = entry[0], entry[1], entry[2]
             char1_combo, color1_combo = entry[3], entry[4]
             char2_combo, color2_combo = entry[5], entry[6]
             char3_combo, color3_combo = entry[7], entry[8]
+            twitter_edit = entry[9]
 
             if i < len(data):
                 team = data[i]
@@ -607,10 +664,15 @@ class AutonaResultSettingsWidget(QDockWidget):
                     player = players[0]
                     name_edit.setText(player.get("gamerTag", ""))
                     sponsor_edit.setText(player.get("prefix", "") or "")
+                    tw = (player.get("twitter") or "").strip()
+                    twitter_edit.setText(tw)
+                    if player.get("gamerTag") and tw:
+                        self._standingsTwitter[player.get("gamerTag")] = tw
                     self._setCharacterFromMains(i, player)
                 else:
                     name_edit.setText("")
                     sponsor_edit.setText("")
+                    twitter_edit.setText("")
                     for cc, cv in [(char1_combo, color1_combo),
                                    (char2_combo, color2_combo),
                                    (char3_combo, color3_combo)]:
@@ -620,6 +682,7 @@ class AutonaResultSettingsWidget(QDockWidget):
                 rank_label.setText(str(i + 1))
                 name_edit.setText("")
                 sponsor_edit.setText("")
+                twitter_edit.setText("")
                 for cc, cv in [(char1_combo, color1_combo),
                                (char2_combo, color2_combo),
                                (char3_combo, color3_combo)]:
@@ -716,17 +779,6 @@ class AutonaResultSettingsWidget(QDockWidget):
 
         char_combo.blockSignals(False)
 
-    def _loadTournamentInfo(self):
-        """Fetch tournament info from Start.gg and update state."""
-        if not AutonaTournamentDataProvider.instance.provider:
-            logger.warning("No tournament provider set")
-            return
-        try:
-            AutonaTournamentDataProvider.instance.GetTournamentData()
-            logger.info("Tournament info loaded")
-        except Exception as e:
-            logger.warning(f"Failed to load tournament info: {e}")
-
     def _findCharacterForPlayer(self, player_name):
         """Search scoreboard state for a player's first character data."""
         chars = self._findAllCharactersForPlayer(player_name)
@@ -789,8 +841,6 @@ class AutonaResultSettingsWidget(QDockWidget):
         self.playersGroup.setVisible(not is_team)
 
         n = self._maxPlayersForLayout()
-        label = QApplication.translate("app", "Load top {0} from StartGG").format(n)
-        self.btLoadFromStartgg.setText(label)
 
         # Singles rows (hidden entirely in team mode).
         for i, entry in enumerate(self.playerInputs):
@@ -884,3 +934,135 @@ class AutonaResultSettingsWidget(QDockWidget):
             msgBox.setInformativeText(str(e))
             msgBox.setIcon(QMessageBox.Warning)
             msgBox.exec()
+
+    def _postResultToX(self):
+        """Post the result to X: copy the result image to the clipboard and
+        open the X compose window prefilled with descriptive standings text.
+
+        Mirrors the SCORE tab's PostToX (clipboard + intent URL). The text is
+        built from result_players (RESULT tab) by _buildResultPostText, so the
+        posted text always describes the same standings as the posted image.
+        X has no image URL param, so the image rides on the clipboard for the
+        user to paste into the compose window.
+        """
+        try:
+            # 1. Render the result image and put it on the clipboard.
+            self._syncCurrentToState()
+            path = result_gen.generate(
+                settingsManager=SettingsManager,
+                layout=self._selectedLayout())
+            if path:
+                image = QImage(path)
+                if not image.isNull():
+                    QApplication.clipboard().setImage(image)
+                    logger.info("Result image copied to clipboard for X post")
+
+            # 2. Build the post text from the RESULT tab standings.
+            text = self._buildResultPostText()
+
+            # 3. Open X compose prefilled with the text.
+            url = ("https://twitter.com/intent/tweet?text="
+                   + urllib.parse.quote(text))
+            webbrowser.open(url)
+        except Exception as e:
+            logger.exception("Failed to post result to X")
+            msgBox = QMessageBox()
+            msgBox.setText(QApplication.translate("app", "Warning"))
+            msgBox.setInformativeText(str(e))
+            msgBox.setIcon(QMessageBox.Warning)
+            msgBox.exec()
+
+    def _buildResultPostText(self):
+        """Build X-post text from result_players (RESULT tab data).
+
+        Reads the live result_players that the result image is rendered from,
+        so the posted text and image always describe the same standings. Uses
+        the explicit per-slot rank instead of placement math. Appends the
+        Startgg / Stream URLs from tournament info + stream settings.
+        """
+        def num_key(x):
+            return int(x) if str(x).isdigit() else 0
+
+        tournament_name = StateManager.Get("tournamentInfo.tournamentName") or ""
+        event_name = StateManager.Get("tournamentInfo.eventName") or ""
+        event_date = StateManager.Get("tournamentInfo.startAt") or ""
+        num_entrants = StateManager.Get("tournamentInfo.numEntrants", 0) or 0
+
+        lines = []
+        if tournament_name:
+            lines.append(tournament_name.upper())
+        info_parts = [event_name, event_date]
+        if num_entrants:
+            info_parts.append(str(num_entrants))
+        info_line = " - ".join([s for s in info_parts if s])
+        if info_line:
+            lines.append(info_line)
+        lines.append("")
+
+        # Resolve a player's X handle as " @handle" (empty when unknown).
+        # Priority: manual result_players["twitter"] → freshly-fetched standings
+        # map → local player DB keyed by "prefix gamerTag" / gamerTag.
+        twitter_map = getattr(self, "_standingsTwitter", {}) or {}
+
+        def x_handle(name, sponsor="", manual=""):
+            raw = (manual or "").strip()
+            if not raw and name:
+                raw = twitter_map.get(name, "")
+            if not raw and name:
+                key = f"{sponsor} {name}".strip() if sponsor else name
+                rec = (AutonaPlayerDB.database.get(key)
+                       or AutonaPlayerDB.database.get(name) or {})
+                raw = rec.get("twitter", "") or ""
+            handle = raw.lstrip("@").strip()
+            return f" @{handle}" if handle else ""
+
+        # Only the TOP 4 standings are listed in the post text.
+        MAX_RANKS = 4
+        players = StateManager.Get("result_players") or {}
+        is_team = self._isTeamLayout()
+        emitted = 0
+        for key in sorted(players.keys(), key=num_key):
+            if emitted >= MAX_RANKS:
+                break
+            p = players[key] or {}
+            rank = p.get("rank", key)
+            if is_team:
+                team_name = (p.get("name") or "").strip()
+                member_entries = []
+                for m in p.get("members", []) or []:
+                    nm = (m.get("name") or "").strip()
+                    if not nm:
+                        continue
+                    member_entries.append(f"{nm}{x_handle(nm)}")
+                if not team_name and not member_entries:
+                    continue
+                members_text = " / ".join(member_entries)
+                if team_name:
+                    lines.append(f"{rank}/ {team_name} [{members_text}]")
+                else:
+                    lines.append(f"{rank}/ {members_text}")
+                emitted += 1
+            else:
+                name = (p.get("name") or "").strip()
+                if not name:
+                    continue
+                sponsor = (p.get("sponsor") or "").strip()
+                base = f"{sponsor} {name}" if sponsor else name
+                base = f"{base}{x_handle(name, sponsor, p.get('twitter'))}"
+                lines.append(f"{rank}/ {base}")
+                emitted += 1
+
+        # Startgg / Stream URLs (tournament info + stream settings). The 配信先
+        # combo mirrors its URL to score.{1,2}.stream_url; read board 1.
+        startgg_url = SettingsManager.Get("TOURNAMENT_URL", "") or ""
+        stream_url = StateManager.Get("score.1.stream_url", "") or ""
+        if startgg_url:
+            lines.append("")
+            lines.append("■Startgg")
+            lines.append(startgg_url)
+        if stream_url:
+            lines.append("")
+            lines.append("■Stream")
+            lines.append(stream_url)
+
+        return "\n".join(lines).strip("\n")

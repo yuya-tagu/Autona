@@ -280,24 +280,12 @@ class Window(QMainWindow):
             Qt.DockWidgetArea.AllDockWidgetAreas, QTabWidget.TabPosition.West)
 
         # Empty central widget — collapsed to 0×0 so the dock area fills
-        # the window directly below the menu bar. The former "大会を選ぶ"
-        # button that used to live here has moved to the top of the
-        # Tournament Info (EVENT) tab below.
+        # the window directly below the menu bar. Tournament selection lives
+        # on the "Set tournament" button at the top of the EVENT tab
+        # (btLoadInfoFromTournament) and in the Startgg menu.
         central = QWidget()
         central.setFixedSize(0, 0)
         self.setCentralWidget(central)
-
-        # "Set tournament" button. Parented/placed into the Tournament Info
-        # tab after it's created below. Default sizing matches the other
-        # buttons in the EVENT tab (e.g. btLoadInfoFromTournament). The
-        # "primary" object name picks up the accent color from the theme.
-        self.setTournamentBt = QPushButton(
-            QApplication.translate("app", "Set tournament"))
-        self.setTournamentBt.setObjectName("primary")
-        self.setTournamentBt.setIcon(QIcon(UI.icon_path('startgg.svg')))
-        self.setTournamentBt.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setTournamentBt.clicked.connect(
-            lambda: AutonaTournamentDataProvider.instance.SetStartggEventSlug(self))
 
         splash.set_message(splash_msgs[0], progress=0.25)
 
@@ -316,8 +304,6 @@ class Window(QMainWindow):
         tournamentInfo.setObjectName("Tournament Info")
         tournamentInfo.setWindowTitle(
             QApplication.translate("app", "Tournament Info"))
-        # Place the "Set tournament" button at the very top of this tab.
-        tournamentInfo.InsertHeaderWidget(self.setTournamentBt)
         self.addDockWidget(
             Qt.DockWidgetArea.BottomDockWidgetArea, tournamentInfo)
         self.dockWidgets.append(tournamentInfo)

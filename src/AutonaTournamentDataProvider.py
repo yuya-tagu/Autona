@@ -69,8 +69,10 @@ class AutonaTournamentDataProvider(QObject):
 
     @Slot(str, bool)
     @Slot(str)
-    def SetTournament(self, url, initialLoading=False):
-        if self.provider and self.provider.url == url:
+    def SetTournament(self, url, initialLoading=False, force=False):
+        # force=True re-fetches even when the same URL is already loaded
+        # (used by the "Set tournament" button to refresh on demand).
+        if not force and self.provider and self.provider.url == url:
             return
 
         if url is not None and "start.gg" in url:
@@ -153,6 +155,11 @@ class AutonaTournamentDataProvider(QObject):
 
         lineEdit.textEdited.connect(validateText)
 
+        # Prefill with the currently selected tournament URL (if any) so the
+        # operator can just press OK to re-fetch, or edit to switch events.
+        lineEdit.setText(SettingsManager.Get("TOURNAMENT_URL", ""))
+        validateText()
+
         inp.layout().addWidget(lineEdit)
 
         okButton.clicked.connect(inp.accept)
@@ -162,7 +169,8 @@ class AutonaTournamentDataProvider(QObject):
         inp.setWindowTitle(QApplication.translate("app", "Set tournament URL"))
         inp.resize(600, 10)
 
-        if inp.exec_() == QDialog.Accepted:
+        accepted = inp.exec_() == QDialog.Accepted
+        if accepted:
             url = lineEdit.text()
 
             if "start.gg" in url:
@@ -175,10 +183,12 @@ class AutonaTournamentDataProvider(QObject):
                     url = url.replace("/events/", "/event/")
 
             SettingsManager.Set("TOURNAMENT_URL", url)
+            # force=True so re-selecting the same tournament still re-fetches.
             AutonaTournamentDataProvider.instance.SetTournament(
-                SettingsManager.Get("TOURNAMENT_URL"))
+                SettingsManager.Get("TOURNAMENT_URL"), force=True)
 
         inp.deleteLater()
+        return accepted
 
     def SetTwitchUsername(self, window):
         text, okPressed = QInputDialog.getText(

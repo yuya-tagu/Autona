@@ -111,8 +111,8 @@
     </message>
     <message>
         <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Copy Stream Title</source>
-        <translation>Copy Stream Title</translation>
+        <source>Copy</source>
+        <translation>Copy</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
@@ -228,6 +228,11 @@
         <location filename="..\layout\AutonaResultSettings.ui" line="0" />
         <source>Save Result Image</source>
         <translation>Save Result Image</translation>
+    </message>
+    <message>
+        <location filename="..\layout\AutonaResultSettings.ui" line="0" />
+        <source>Post Result to X</source>
+        <translation>Post Result to X</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaScoreboardPlayer.ui" line="0" />
@@ -1191,6 +1196,11 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaResultSettingsWidget.py" line="242" />
         <source>Load top 8 from StartGG</source>
         <translation>Load top 8 from StartGG</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaResultSettingsWidget.py" line="0" />
+        <source>Load tournament results</source>
+        <translation>Load tournament results</translation>
     </message>
     <message>
         <location filename="..\AutonaResultSettingsWidget.py" line="249" />

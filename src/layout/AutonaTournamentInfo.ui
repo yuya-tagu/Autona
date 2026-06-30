@@ -184,18 +184,40 @@
         </widget>
        </item>
        <item>
-        <widget class="QLineEdit" name="streamTitleEdit">
-         <property name="placeholderText">
-          <string>Title is auto-generated from tournament info and seeds</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QPushButton" name="btCopyStreamTitle">
-         <property name="text">
-          <string>Copy Stream Title</string>
-         </property>
-        </widget>
+        <layout class="QHBoxLayout" name="horizontalLayoutStreamTitle">
+         <item>
+          <widget class="QLineEdit" name="streamTitleEdit">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="placeholderText">
+            <string>Title is auto-generated from tournament info and seeds</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btCopyStreamTitle">
+           <property name="sizePolicy">
+            <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+             <horstretch>0</horstretch>
+             <verstretch>0</verstretch>
+            </sizepolicy>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>80</width>
+             <height>16777215</height>
+            </size>
+           </property>
+           <property name="text">
+            <string>Copy</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
        </item>
        <item>
         <widget class="Line" name="streamSectionDivider">

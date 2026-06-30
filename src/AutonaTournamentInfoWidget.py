@@ -13,6 +13,7 @@ from .SettingsManager import SettingsManager
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaDirHelper import AutonaResolve
 from . import ui_layout as L
+from . import ui_constants as UI
 import traceback
 import shutil
 from pathlib import Path
@@ -95,8 +96,17 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         self.btLoadInfoFromTournament: QPushButton = self.findChild(
             QPushButton, "btLoadInfoFromTournament")
+        # This single button now both selects the tournament and loads
+        # everything from it, so override the .ui label ("Load from
+        # tournament") with the "Set tournament" string. Reusing the existing
+        # (context "app", "Set tournament") translation avoids touching the
+        # .ts/.qm files. objectName is left untouched for findChild stability.
+        self.btLoadInfoFromTournament.setText(
+            QApplication.translate("app", "Set tournament"))
+        self.btLoadInfoFromTournament.setIcon(
+            QIcon(UI.icon_path('startgg.svg')))
         L.tag_button(self.btLoadInfoFromTournament, L.BUTTON_PRIMARY)
-        self.btLoadInfoFromTournament.clicked.connect(self._OnLoadFromTournament)
+        self.btLoadInfoFromTournament.clicked.connect(self._OnSelectTournament)
 
         self.btClearInfo: QPushButton = self.findChild(
             QPushButton, "btClearInfo")
@@ -266,9 +276,11 @@ class AutonaTournamentInfoWidget(QDockWidget):
     def _emitMediaUpdated(self):
         AutonaTournamentDataProvider.instance.signals.media_updated.emit()
 
-    def _OnLoadFromTournament(self):
-        # Reload tournament metadata, then also pull the icon and banner
-        # so the operator doesn't have to push three buttons in sequence.
+    def _OnSelectTournament(self):
+        # Open the tournament-select dialog (prefilled with the current URL,
+        # forces a re-fetch of tournament data/phases/entrants). On accept,
+        # also pull the icon and banner so this one button loads everything
+        # from the tournament.
         #
         # The icon + banner downloads each fire two synchronous HTTP
         # requests (GraphQL for the URL, then GET for the image). Run
@@ -278,13 +290,17 @@ class AutonaTournamentInfoWidget(QDockWidget):
         # cycle and freeze the app harder.
         if getattr(self, "_loadInProgress", False):
             return
-        provider = AutonaTournamentDataProvider.instance.provider
-        if provider is None:
+
+        accepted = AutonaTournamentDataProvider.instance.SetStartggEventSlug(
+            self.window())
+        if not accepted:
             return
+        if AutonaTournamentDataProvider.instance.provider is None:
+            return
+
         self._loadInProgress = True
         self.btLoadInfoFromTournament.setEnabled(False)
 
-        AutonaTournamentDataProvider.instance.GetTournamentData()
         self._DownloadIconAndBannerAsync(
             on_finished=self._finishLoadFromTournament)
 
@@ -378,13 +394,6 @@ class AutonaTournamentInfoWidget(QDockWidget):
         logger.info("Tournament banner saved and set as thumbnail background")
         self.UpdateBanner()
         self._emitMediaUpdated()
-
-    def InsertHeaderWidget(self, widget: QWidget) -> None:
-        """Insert an arbitrary widget at the very top of this tab's
-        scrollable contents (above the Tournament Info group box)."""
-        layout = self._contents.layout()
-        if layout is not None:
-            layout.insertWidget(0, widget)
 
     def UpdateIcon(self):
         # iconView slot is now 60×60 (see AutonaTournamentInfo.ui).
