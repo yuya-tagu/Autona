@@ -1,28 +1,34 @@
 """
-In-app auto-updater for Autona (Option D: download + restart-to-install).
+In-app auto-updater for Autona (download + external-helper install).
 
-Design (respects the original TSH auto-update flow):
-    1. Check GitHub Releases API for yuya-tagu/Autona
+Flow:
+    1. Check GitHub Releases API for the public yuya-tagu/Autona-releases repo
     2. Compare with local assets/versions.json
-    3. If newer: show dialog -> user clicks Download
-    4. Download release-windows.zip to ./update.zip
-    5. UpdateProcedure() backs up ./layout and registers ExtractUpdate via atexit
-    6. App exits -> ExtractUpdate() renames Autona.exe -> Autona_old.exe
-       and extracts the zip (stripping the leading "Autona/" folder)
-    7. User re-launches Autona.exe; startup code removes Autona_old.exe
+    3. If newer: show dialog -> user clicks "Download and install"
+    4. Download release-windows.zip to %TEMP%/autona_update/update.zip
+    5. UpdateProcedure() copies the bundled helper (assets/apply_update.ps1) to
+       the temp workdir, shows a notice, then launches the helper as a detached
+       PowerShell process and exits the app.
+    6. The helper waits for this process to fully exit (so every file unlocks),
+       extracts the zip over the install dir (stripping the leading "Autona/"),
+       relaunches the new exe, and cleans up.
 
-Only the frozen (PyInstaller) build can actually replace Autona.exe. In
-dev mode (python main.py) the check still works, but install is disabled
-and the dialog explains why.
+Because the helper runs only after the app is gone, it can replace every file -
+the launcher, the loaded _internal/ DLLs, and the memory-mapped WebEngine
+resources - so there is no in-process extraction, no rename-aside sidecars, and
+no Qt-version gate any more.
+
+Only the frozen (PyInstaller) build can self-update. In dev mode
+(python main.py) the check still works, but install is disabled and the dialog
+explains why.
 """
-import atexit
 import json
 import os
-import re
+import shutil
+import subprocess
 import sys
 import time
 import traceback
-import zipfile
 from pathlib import Path
 
 import requests
@@ -45,23 +51,43 @@ RELEASE_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_PAGE_URL = f"https://github.com/{GITHUB_REPO}/releases/latest"
 # Release asset produced by scripts/gen_release.ps1
 ASSET_NAME = "release-windows.zip"
-# Fixed name expected by ExtractUpdate (matches original TSH behaviour)
-UPDATE_ZIP = "./update.zip"
 
-# Suffix for files moved aside during a onedir update. The launcher and the
-# loaded _internal/*.dll runtime files cannot be overwritten in place while the
-# (exiting) process still has them mapped, but Windows maps executable images
-# with FILE_SHARE_DELETE, so renaming them out of the way succeeds. The stale
-# sidecars are purged on next launch by CleanupUpdateLeftovers().
-RENAME_SUFFIX = ".autona_old"
+# Helper script bundled in assets/ (so gen_release.ps1 ships it inside the zip).
+HELPER_SCRIPT = "apply_update.ps1"
 
-# Guards ExtractUpdate from being registered via atexit twice when the
-# UpdateProcedure retry flow re-enters (see original TSH behaviour).
-_extract_registered = False
+# CreationFlags for the detached helper: survive the parent's exit, no console
+# window, own process group (so the parent's shutdown signals don't reach it).
+_DETACHED_PROCESS = 0x00000008
+_CREATE_NEW_PROCESS_GROUP = 0x00000200
+_CREATE_NO_WINDOW = 0x08000000
+
+# Legacy sidecar suffix left by the old in-process updater. Only referenced by
+# CleanupUpdateLeftovers now, to purge stragglers when upgrading from a build
+# that still used the rename-aside install path.
+_LEGACY_RENAME_SUFFIX = ".autona_old"
 
 
 def _is_frozen() -> bool:
     return getattr(sys, "frozen", False)
+
+
+def _install_dir() -> Path:
+    """The directory the launcher lives in. For a onedir PyInstaller build
+    sys.executable is ...\\Autona.exe, so its parent is the install root. This
+    is more robust than Path.cwd() against a shortcut launching with a different
+    working directory."""
+    return Path(sys.executable).resolve().parent
+
+
+def _update_workdir() -> Path:
+    """A scratch dir outside the install tree for the zip, staging and helper.
+    Keeping it out of the install dir means robocopy mirroring it back never
+    races against the files the helper itself is reading."""
+    base = Path(os.environ.get("TEMP") or os.environ.get("TMP")
+                or r"C:\Windows\Temp")
+    workdir = base / "autona_update"
+    workdir.mkdir(parents=True, exist_ok=True)
+    return workdir
 
 
 def _local_version() -> str:
@@ -81,23 +107,9 @@ def _is_newer(remote_tag: str, local_ver: str) -> bool:
         return remote_tag.lstrip("v") != local_ver
 
 
-def _parse_qt_build(body: str) -> str:
-    """Extract the `Qt-Build: <version>` fingerprint that
-    scripts/publish_release.ps1 stamps into the release notes. Returns "" when
-    absent (older releases / publish without the marker), in which case the
-    caller treats the update as same-Qt and allows it (backward compatible)."""
-    m = re.search(r"(?im)^\s*Qt-Build:\s*([0-9][0-9.]*)\s*$", body or "")
-    return m.group(1) if m else ""
-
-
 # ---------------------------------------------------------------------------
-# UpdateProcedure / ExtractUpdate
+# UpdateProcedure (launch external helper) + leftover cleanup
 # ---------------------------------------------------------------------------
-#
-# Moved here from Autona.py so the whole update flow lives in one module.
-# ExtractUpdate is a fix of the original: `z.extract(filename, path=dirname)`
-# double-nested the output (layout/Autona/layout/foo.xml). We now read the
-# entry manually and write it to the correct stripped path.
 
 def _generate_restart_messagebox(main_txt: str) -> QMessageBox:
     mb = QMessageBox()
@@ -111,28 +123,41 @@ def _generate_restart_messagebox(main_txt: str) -> QMessageBox:
 
 
 def UpdateProcedure():
-    """Back up the layout folder and register ExtractUpdate to run at exit."""
-    global _extract_registered
+    """Launch the external update helper, then close the app.
+
+    The helper waits for this process to exit, extracts update.zip over the
+    install dir, and relaunches the new exe. Install is frozen-only; in dev the
+    dialog already disables the install button before we get here.
+    """
     try:
-        if os.path.exists("./layout"):
-            os.rename("./layout", f"./layout_backup_{str(time.time())}")
+        if not _is_frozen():
+            return
 
-        if not _extract_registered:
-            atexit.register(ExtractUpdate)
-            _extract_registered = True
+        install_dir = _install_dir()
+        exe_name = Path(sys.executable).name          # Autona.exe
+        workdir = _update_workdir()
+        zip_path = workdir / "update.zip"
+        staging = workdir / "staging"
+        script = workdir / HELPER_SCRIPT
 
+        # Copy the bundled helper out to the temp workdir so it isn't itself a
+        # target of the robocopy mirror back into the install dir.
+        shutil.copyfile(AutonaResolve(f"./assets/{HELPER_SCRIPT}"), script)
+
+        # Tell the user, then close. finished -> QApplication.exit (connected in
+        # _generate_restart_messagebox). We spawn the helper after exec() so the
+        # user has acknowledged before the app starts tearing down.
         mb = _generate_restart_messagebox(
             QApplication.translate(
-                "app",
-                "Update download complete. The program will extract the update upon closing.")
-            + "\n\n"
-            + QApplication.translate(
-                "app",
-                "Please ensure the layout folder or its contents aren't open "
-                "in another application before closing this window.")
+                "updater",
+                "Update downloaded. The app will close, install the update, "
+                "and restart automatically.")
             + "\n"
         )
         mb.exec()
+
+        _LaunchHelper(script, zip_path, install_dir, staging, exe_name)
+        QApplication.exit()
     except Exception as e:
         logger.error(traceback.format_exc())
 
@@ -141,7 +166,7 @@ def UpdateProcedure():
         vbox = QVBoxLayout()
         retry.setLayout(vbox)
         vbox.addWidget(QLabel(
-            QApplication.translate("updater", "Error while backing up the layout folder:")))
+            QApplication.translate("updater", "Error while preparing the update:")))
         vbox.addWidget(QLabel(str(e)))
 
         hbox = QHBoxLayout()
@@ -156,153 +181,56 @@ def UpdateProcedure():
         retry.exec()
 
 
-def _write_entry(z: zipfile.ZipFile, entry: str, target: Path) -> None:
-    """Stream a zip entry to target, overwriting in place. Raises on failure
-    (e.g. PermissionError when target is a locked, loaded file)."""
-    with z.open(entry) as src, open(target, "wb") as dst:
-        while True:
-            chunk = src.read(1024 * 1024)
-            if not chunk:
-                break
-            dst.write(chunk)
-
-
-def _stash_existing(target: Path, update_log: list) -> bool:
-    """Rename a locked target aside so a fresh copy can be written.
-
-    Only needed for the few files the running process holds open: the launcher
-    (Autona.exe) and the loaded runtime files under _internal/ (python3xx.dll,
-    Qt6*.dll, ...). Windows maps executable images with FILE_SHARE_DELETE, so
-    renaming them to a .autona_old sidecar succeeds even though overwriting them
-    would fault. CleanupUpdateLeftovers() purges the sidecars on next launch.
-
-    Returns True if the original was moved aside (or there was nothing to move),
-    False if it could not be renamed — e.g. a memory-mapped resource opened
-    without delete-share (WebEngine's v8_context_snapshot.bin), which can be
-    replaced neither in place nor by rename while the process lives.
-    """
-    if not target.exists():
-        return True
-    sidecar = target.with_name(target.name + RENAME_SUFFIX)
-    try:
-        if sidecar.exists():
-            try:
-                sidecar.unlink()
-            except Exception:
-                pass
-        os.replace(target, sidecar)
-        return True
-    except Exception:
-        update_log.append(
-            f"Could not stash {target} - {traceback.format_exc()}")
-        return False
-
-
-def ExtractUpdate():
-    """Replace the installed files from UPDATE_ZIP on app exit.
-
-    The release zip produced by gen_release.ps1 has entries like
-        Autona/
-        Autona/Autona.exe
-        Autona/_internal/...
-        Autona/assets/...
-    We strip the leading "Autona/" segment and write files relative to CWD.
-    Each file is overwritten in place; only the few that are locked (the running
-    launcher and loaded _internal/ DLLs) are renamed aside first via
-    _stash_existing, so sidecars are confined to the root and _internal/ — which
-    is exactly what CleanupUpdateLeftovers() scans on next launch.
-    """
-    try:
-        update_log = []
-
-        with zipfile.ZipFile(UPDATE_ZIP, "r") as z:
-            install_root = Path.cwd().resolve()
-
-            for entry in z.namelist():
-                # Skip anything that doesn't live under the top-level folder.
-                if "/" not in entry:
-                    continue
-                relative = entry.split("/", 1)[1]
-                if not relative:
-                    continue
-
-                # ZIP slip guard: reject entries with .. or absolute paths
-                # that would escape the install directory.
-                rel_path = Path(relative)
-                if rel_path.is_absolute() or ".." in rel_path.parts:
-                    update_log.append(
-                        f"Rejected unsafe path {entry!r} -> {relative!r}")
-                    continue
-                try:
-                    resolved = (install_root / rel_path).resolve()
-                    resolved.relative_to(install_root)
-                except (ValueError, OSError):
-                    update_log.append(
-                        f"Rejected unsafe path {entry!r} -> {relative!r}")
-                    continue
-
-                target = Path(relative)
-                if entry.endswith("/"):
-                    update_log.append(f"Create directory {relative}")
-                    try:
-                        target.mkdir(parents=True, exist_ok=True)
-                    except Exception:
-                        update_log.append(
-                            f"Failed to mkdir {relative} - {traceback.format_exc()}")
-                    continue
-
-                update_log.append(f"Extract {entry} -> {relative}")
-                try:
-                    if target.parent and str(target.parent) not in ("", "."):
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                    try:
-                        # Fast path: overwrite in place. Works for every file
-                        # that isn't currently held open — i.e. all of assets/,
-                        # layout/, web/, user_data/ and most of _internal/.
-                        _write_entry(z, entry, target)
-                    except (PermissionError, OSError):
-                        # Locked: the running launcher or a loaded _internal/
-                        # DLL. Rename the old one aside (allowed for mapped
-                        # images), then write the fresh copy. A memory-mapped
-                        # resource that also refuses rename (e.g. WebEngine's
-                        # v8_context_snapshot.bin) can't be replaced while the
-                        # process lives — left stale, harmless for same-Qt
-                        # updates; a Qt version bump needs a manual reinstall.
-                        if _stash_existing(target, update_log):
-                            _write_entry(z, entry, target)
-                        else:
-                            raise
-                except Exception:
-                    update_log.append(
-                        f"Failed to extract {entry} - {traceback.format_exc()}")
-
-            try:
-                os.makedirs("assets", exist_ok=True)
-                with open("assets/update_log.txt", "w", encoding="utf-8") as f:
-                    f.write("\n".join(update_log))
-            except Exception:
-                logger.error(traceback.format_exc())
-
-        try:
-            os.remove(UPDATE_ZIP)
-        except Exception:
-            pass
-    except Exception:
-        logger.error(traceback.format_exc())
+def _LaunchHelper(script: Path, zip_path: Path, install_dir: Path,
+                  staging: Path, exe_name: str) -> None:
+    """Spawn apply_update.ps1 as a detached, windowless PowerShell process that
+    outlives this app. shell=False with an argument list keeps spaces/non-ASCII
+    paths safe; powershell.exe is referenced by full path so it resolves outside
+    the install dir (which is about to be mirrored over)."""
+    powershell = os.path.join(
+        os.environ.get("SystemRoot", r"C:\Windows"),
+        "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    args = [
+        powershell, "-NoProfile", "-ExecutionPolicy", "Bypass",
+        "-WindowStyle", "Hidden", "-File", str(script),
+        "-ParentPid", str(os.getpid()),
+        "-Zip", str(zip_path),
+        "-InstallDir", str(install_dir),
+        "-Staging", str(staging),
+        "-ExeName", exe_name,
+    ]
+    subprocess.Popen(
+        args,
+        cwd=str(_update_workdir()),  # not the install dir, so we don't lock it
+        creationflags=(_DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP
+                       | _CREATE_NO_WINDOW),
+        close_fds=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 
 def CleanupUpdateLeftovers():
-    """Purge update sidecars left by a previous ExtractUpdate run.
+    """Purge stragglers from older update runs and the temp workdir.
 
-    Removes the legacy ./Autona_old.exe (onefile era) and every *.autona_old
-    file produced by the onedir stash-then-write path (mostly under _internal/).
-    Runs once at startup, when nothing holds those files open anymore. Scoped to
-    the install root and a couple of subtrees to keep it cheap; missing or still
-    locked files are ignored. Frozen builds only — dev mode has no sidecars.
-    """
+    Runs once at startup, frozen builds only. Removes the temp workdir from the
+    current external-helper flow (in case the helper's self-delete didn't fire),
+    plus leftovers from the previous in-process updater that a user may carry
+    over when upgrading: the legacy ./Autona_old.exe and any *.autona_old
+    sidecars in the root and _internal/."""
     if not _is_frozen():
         return
     try:
+        # Temp workdir from the external helper (zip/staging/script). The helper
+        # self-deletes its folder, but clean it here as a backstop.
+        try:
+            workdir = _update_workdir()
+            if workdir.exists():
+                shutil.rmtree(workdir, ignore_errors=True)
+        except Exception:
+            pass
+
         # Legacy onefile backup name.
         if os.path.exists("./Autona_old.exe"):
             try:
@@ -310,16 +238,16 @@ def CleanupUpdateLeftovers():
             except Exception:
                 pass
 
-        # onedir sidecars: the launcher's sidecar sits at the root, the bulk
-        # live under _internal/. Walk just those to avoid scanning game assets.
+        # Legacy in-process sidecars: the launcher's sat at the root, the bulk
+        # under _internal/. Walk just those to avoid scanning game assets.
         roots = [Path("."), Path("./_internal")]
         seen = set()
         for root in roots:
             if not root.exists():
                 continue
-            # Path("." ) walk would recurse into _internal twice; dedupe files.
-            pattern = "*.autona_old" if root == Path(
-                ".") else "**/*.autona_old"
+            # Path(".") walk would recurse into _internal twice; dedupe files.
+            pattern = ("*" + _LEGACY_RENAME_SUFFIX) if root == Path(".") \
+                else ("**/*" + _LEGACY_RENAME_SUFFIX)
             for sidecar in root.glob(pattern):
                 rp = sidecar.resolve()
                 if rp in seen:
@@ -522,7 +450,9 @@ class _UpdateDialog(QDialog):
             self.statusLabel.setVisible(True)
 
     def _StartDownload(self):
-        dest = Path(UPDATE_ZIP)
+        # Download into the temp workdir (outside the install dir) where the
+        # helper expects update.zip.
+        dest = _update_workdir() / "update.zip"
 
         self.btInstall.setEnabled(False)
         self.btSkip.setEnabled(False)
@@ -619,43 +549,12 @@ class AutonaUpdater(QObject):
                 logger.info(f"update v{latest} skipped by user setting")
                 return
 
-        # Qt fingerprint gate: a release built against a different Qt ships
-        # incompatible WebEngine resources (v8_context_snapshot.bin, *.pak,
-        # icudtl.dat) that the onedir in-place updater can't swap while the
-        # process holds them mmap'd. Auto-applying such an update leaves a
-        # mismatched WebEngine that crashes on first use (thumbnail render), so
-        # we refuse it and point the user at a manual reinstall instead. A
-        # release without the marker (older builds) is treated as same-Qt.
-        remote_qt = _parse_qt_build(body)
-        local_qt = qVersion()
-        if remote_qt and remote_qt != local_qt:
-            logger.warning(
-                f"update v{latest} changes Qt ({local_qt} -> {remote_qt}); "
-                "auto-update blocked, manual reinstall required")
-            self._ShowManualReinstall(latest, release_url, local_qt, remote_qt)
-            return
-
+        # No Qt-version gate any more: the external helper installs after the
+        # app has fully exited, so even the memory-mapped WebEngine resources
+        # are free to replace. Any release - including a Qt bump - applies
+        # cleanly.
         self._dialog = _UpdateDialog(current, latest, release_url, asset_url, body)
         self._dialog.show()
-
-    def _ShowManualReinstall(self, latest, release_url, local_qt, remote_qt):
-        """Tell the user a Qt-changing release must be installed by hand."""
-        mb = QMessageBox()
-        mb.setIcon(QMessageBox.Icon.Information)
-        mb.setWindowTitle(QApplication.translate("updater", "Update available"))
-        mb.setText(QApplication.translate(
-            "updater",
-            "Version {0} is available, but it updates core components "
-            "(Qt {1} → {2}) that can't be replaced automatically. Please "
-            "download it and reinstall manually."
-        ).format(latest, local_qt, remote_qt))
-        openBtn = mb.addButton(
-            QApplication.translate("updater", "Open releases page"),
-            QMessageBox.ButtonRole.AcceptRole)
-        mb.addButton(QMessageBox.StandardButton.Close)
-        mb.exec()
-        if mb.clickedButton() is openBtn:
-            QDesktopServices.openUrl(QUrl(release_url or RELEASES_PAGE_URL))
 
     def _OnNoUpdate(self):
         if self._silent:
