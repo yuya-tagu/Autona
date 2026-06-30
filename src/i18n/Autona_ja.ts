@@ -112,8 +112,8 @@
     </message>
     <message>
         <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Copy Stream Title</source>
-        <translation>配信タイトルをコピー</translation>
+        <source>Copy</source>
+        <translation>コピー</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
@@ -229,6 +229,11 @@
         <location filename="..\layout\AutonaResultSettings.ui" line="0" />
         <source>Save Result Image</source>
         <translation>リザルト画像を保存</translation>
+    </message>
+    <message>
+        <location filename="..\layout\AutonaResultSettings.ui" line="0" />
+        <source>Post Result to X</source>
+        <translation>リザルトをXに投稿する</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaScoreboardPlayer.ui" line="0" />
@@ -1194,6 +1199,11 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaResultSettingsWidget.py" line="242" />
         <source>Load top 8 from StartGG</source>
         <translation>StartGG からトップ8を読み込む</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaResultSettingsWidget.py" line="0" />
+        <source>Load tournament results</source>
+        <translation>大会結果を読み込む</translation>
     </message>
     <message>
         <location filename="..\AutonaResultSettingsWidget.py" line="249" />
