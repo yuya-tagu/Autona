@@ -677,6 +677,10 @@
         <translation>サイドバーを表示</translation>
     </message>
     <message>
+        <source>Select game title</source>
+        <translation>ゲームタイトルを選ぶ</translation>
+    </message>
+    <message>
         <location filename="..\AutonaUpdater.py" line="140" />
         <location filename="..\AutonaUpdater.py" line="104" />
         <location filename="..\AutonaThumbnailSettingsWidget.py" line="700" />

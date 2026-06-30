@@ -22,6 +22,8 @@ and this module focused on layout + selection state.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from qtpy.QtCore import Qt, Signal, QSize
 from qtpy.QtGui import QIcon
 from qtpy.QtWidgets import (
@@ -38,6 +40,10 @@ from . import ui_constants as UI
 
 SIDEBAR_WIDTH = 196
 NAV_ICON_SIZE = 16
+# Every interactive row (nav item, tournament/help button, game combo, format
+# segment) shares this height so the sidebar reads as one tight, uniform stack.
+# Matches the game combo's fixed height (UI._WIDGET_H) set in Autona.py.
+ROW_H = 26
 
 _FORMATS = (("singles", "1v1"), ("team", "Team"), ("crew", "Crew"))
 
@@ -103,10 +109,14 @@ class AutonaSidebar(QWidget):
                 return i
         return -1
 
-    def setGameSelect(self, combo: QWidget, modded: QWidget | None = None) -> None:
-        """Insert the game-selector combo (built by Window) under the top row,
-        and the optional 'modded content' checkbox below the format segment."""
-        self._headerLayout.insertWidget(1, combo)
+    def setGameSelect(self, gameButton: QWidget, modded: QWidget | None = None) -> None:
+        """Insert the game-selector pulldown (a QToolButton built by Window)
+        between the tournament pulldown and the format segment, and the optional
+        'modded content' checkbox below the format segment.
+
+        Header band order is: [0] hamburger row, [1] tournament button,
+        [2] game button (inserted here), [3] format segment."""
+        self._headerLayout.insertWidget(2, gameButton)
         if modded is not None:
             self._headerLayout.addWidget(modded)
 
@@ -132,13 +142,24 @@ class AutonaSidebar(QWidget):
     def _build_header(self) -> QWidget:
         header = QWidget()
         self._headerLayout = hl = QVBoxLayout(header)
-        hl.setContentsMargins(8, 6, 8, 6)
+        hl.setContentsMargins(8, 4, 8, 4)
         hl.setSpacing(4)
 
+        # Row 1 — collapse (hamburger) alone, right-aligned in its own band.
         topRow = QHBoxLayout()
         topRow.setContentsMargins(0, 0, 0, 0)
-        topRow.setSpacing(6)
+        topRow.setSpacing(0)
+        self._collapseButton = QToolButton()
+        self._collapseButton.setObjectName("sidebarCollapseBtn")
+        self._collapseButton.setIcon(QIcon(UI.icon_path("menu.svg")))
+        self._collapseButton.setIconSize(QSize(NAV_ICON_SIZE, NAV_ICON_SIZE))
+        self._collapseButton.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._collapseButton.clicked.connect(self.collapseRequested)
+        topRow.addStretch(1)
+        topRow.addWidget(self._collapseButton, 0)
+        hl.addLayout(topRow)
 
+        # Row 2 — tournament pulldown, full width (lines up with the game combo).
         self._tournamentButton = QToolButton()
         self._tournamentButton.setObjectName("sidebarTournamentBtn")
         self._tournamentButton.setIcon(QIcon(UI.icon_path("tournament.svg")))
@@ -150,17 +171,8 @@ class AutonaSidebar(QWidget):
         self._tournamentButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self._tournamentButton.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        topRow.addWidget(self._tournamentButton, 1)
+        hl.addWidget(self._tournamentButton)
 
-        self._collapseButton = QToolButton()
-        self._collapseButton.setObjectName("sidebarCollapseBtn")
-        self._collapseButton.setIcon(QIcon(UI.icon_path("menu.svg")))
-        self._collapseButton.setIconSize(QSize(NAV_ICON_SIZE, NAV_ICON_SIZE))
-        self._collapseButton.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._collapseButton.clicked.connect(self.collapseRequested)
-        topRow.addWidget(self._collapseButton, 0)
-
-        hl.addLayout(topRow)
         hl.addWidget(self._build_format_segment())
         return header
 
@@ -188,7 +200,7 @@ class AutonaSidebar(QWidget):
     def _build_nav(self) -> QWidget:
         nav = QWidget()
         self._navLayout = nl = QVBoxLayout(nav)
-        nl.setContentsMargins(8, 3, 8, 3)
+        nl.setContentsMargins(8, 2, 8, 2)
         nl.setSpacing(1)
         nl.addStretch(1)
         return nav
@@ -196,7 +208,7 @@ class AutonaSidebar(QWidget):
     def _build_footer(self) -> QWidget:
         footer = QWidget()
         fl = QVBoxLayout(footer)
-        fl.setContentsMargins(8, 6, 8, 6)
+        fl.setContentsMargins(8, 4, 8, 4)
         fl.setSpacing(0)
         self._helpButton = QToolButton()
         self._helpButton.setObjectName("sidebarHelpBtn")
@@ -222,6 +234,10 @@ class AutonaSidebar(QWidget):
     @staticmethod
     def _build_qss() -> str:
         p = UI.palette()
+        # Shared thin chevron for all three pulldowns (tournament / game combo /
+        # help). QSS resolves relative url() unreliably on Windows, so feed it an
+        # absolute POSIX path. Forward slashes are required regardless of OS.
+        chevron = Path(UI.icon_path("chevron_down.svg")).resolve().as_posix()
         # Selected nav: crimson-tinted fill + brand text. The brand color is
         # reserved for live/status signals elsewhere; here it doubles as the
         # selection accent (Todoist-style), which is the one approved use on
@@ -232,9 +248,9 @@ class AutonaSidebar(QWidget):
 
         QToolButton#navItem {{
             background: transparent; border: none; text-align: left;
-            padding: 4px 10px; border-radius: 6px;
+            padding: 0 10px; min-height: {ROW_H}px; border-radius: 6px;
             color: {p['text_secondary']};
-            font-size: {UI.FONT_MD}pt;
+            font-size: {UI.FONT_SM}pt;
         }}
         QToolButton#navItem:hover {{ background: rgba(255, 255, 255, 6%); }}
         QToolButton#navItem:checked {{
@@ -243,17 +259,31 @@ class AutonaSidebar(QWidget):
             font-weight: 600;
         }}
 
-        QToolButton#sidebarTournamentBtn, QToolButton#sidebarHelpBtn {{
+        /* The three sidebar pulldowns share ONE implementation: QToolButton +
+           QMenu (InstantPopup). tournament / game / help are styled identically
+           so they are visually and behaviorally indistinguishable. */
+        QToolButton#sidebarTournamentBtn,
+        QToolButton#sidebarGameBtn,
+        QToolButton#sidebarHelpBtn {{
             background: rgba(255, 255, 255, 6%); border: none; text-align: left;
-            padding: 5px 9px; border-radius: 6px;
+            padding: 0 24px 0 9px; min-height: {ROW_H}px; border-radius: 6px;
             color: {p['text_primary']};
             font-size: {UI.FONT_SM}pt;
         }}
         QToolButton#sidebarTournamentBtn:hover,
+        QToolButton#sidebarGameBtn:hover,
         QToolButton#sidebarHelpBtn:hover {{ background: rgba(255, 255, 255, 10%); }}
         QToolButton#sidebarTournamentBtn::menu-indicator,
+        QToolButton#sidebarGameBtn::menu-indicator,
         QToolButton#sidebarHelpBtn::menu-indicator {{
-            subcontrol-position: right center; right: 6px;
+            image: url({chevron});
+            width: 12px; height: 12px;
+            subcontrol-origin: padding;
+            subcontrol-position: center right;
+            /* qdarktheme ships `QToolButton::menu-indicator {{top:6px;left:3px}}`
+               app-wide; our higher-specificity rule must zero those out or they
+               cascade in and push the chevron down / cancel the right offset. */
+            top: 0px; left: 0px; right: 9px;
         }}
 
         QToolButton#sidebarCollapseBtn {{
@@ -266,8 +296,9 @@ class AutonaSidebar(QWidget):
             background: rgba(255, 255, 255, 5%); border-radius: 6px;
         }}
         QToolButton#fmtSeg {{
-            background: transparent; border: none; padding: 3px 0;
-            border-radius: 4px; color: {p['text_secondary']};
+            background: transparent; border: none; padding: 0;
+            min-height: {ROW_H - 4}px; border-radius: 4px;
+            color: {p['text_secondary']};
             font-size: {UI.FONT_SM}pt;
         }}
         QToolButton#fmtSeg:hover {{ background: rgba(255, 255, 255, 6%); }}

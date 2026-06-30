@@ -675,6 +675,10 @@
         <translation>Show sidebar</translation>
     </message>
     <message>
+        <source>Select game title</source>
+        <translation>Select game title</translation>
+    </message>
+    <message>
         <location filename="..\AutonaUpdater.py" line="140" />
         <location filename="..\AutonaUpdater.py" line="104" />
         <location filename="..\AutonaThumbnailSettingsWidget.py" line="700" />

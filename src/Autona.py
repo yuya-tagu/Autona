@@ -243,9 +243,6 @@ class Window(QMainWindow):
         app_font = QFont(UI.FONT_FAMILY, UI.FONT_SM)
         QApplication.instance().setFont(app_font)
 
-        self.font_small = QFont(UI.FONT_FAMILY_CONDENSED, UI.FONT_XS)
-        QFontDatabase.addApplicationFont('./assets/font/RobotoCondensed.ttf')
-
         self.threadpool = QThreadPool()
         self.saveMutex = QMutex()
 
@@ -613,18 +610,24 @@ class Window(QMainWindow):
             lambda *_: self.UpdateTournamentButton())
 
         # ── Operations: game selector (sidebar header) ──
-        self.gameSelect = QComboBox()
-        self.gameSelect.setEditable(True)
-        self.gameSelect.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-        self.gameSelect.completer().setCompletionMode(QCompleter.PopupCompletion)
-        proxyModel = QSortFilterProxyModel()
-        proxyModel.setSortCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        proxyModel.setSourceModel(self.gameSelect.model())
-        self.gameSelect.model().setParent(proxyModel)
-        self.gameSelect.setModel(proxyModel)
-        self.gameSelect.setFont(self.font_small)
-        self.gameSelect.activated.connect(
-            lambda x: AutonaGameAssetManager.instance.LoadGameAssets(self.gameSelect.currentData()))
+        # Same widget pattern as the tournament / Help & Settings pulldowns: a
+        # QToolButton + QMenu (InstantPopup). The game list is a handful of local
+        # user_data/games/ entries, so a menu (no type-to-filter) fits and keeps
+        # all three sidebar pulldowns a single, identical implementation.
+        self.gameSelect = QToolButton()
+        self.gameSelect.setObjectName("sidebarGameBtn")
+        self.gameSelect.setIcon(QIcon(UI.icon_path("gamepad.svg")))
+        self.gameSelect.setIconSize(QSize(16, 16))
+        self.gameSelect.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.gameSelect.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.gameSelect.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.gameSelect.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.gameMenu = QMenu(self)
+        self.gameSelect.setMenu(self.gameMenu)
+        self._gameActions = {}        # 1-based game index -> QAction
+        self._currentGameIndex = 0    # 0 = no game selected
         AutonaGameAssetManager.instance.signals.onLoad.connect(self.SetGame)
         AutonaGameAssetManager.instance.signals.onLoadAssets.connect(self.ReloadGames)
         AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(self.SetGame)
@@ -644,12 +647,10 @@ class Window(QMainWindow):
         ])
         self.moddedContentCheck.stateChanged.connect(lambda x=None: [
             AutonaGameAssetManager.instance.LoadGameAssets(
-                self.gameSelect.currentData(),
+                self._currentGameIndex,
                 mods_active=self.moddedContentCheck.isChecked(),
                 mods_reload_mode=True)
         ])
-        self.gameSelect.activated.connect(
-            lambda x=None: self.moddedContentCheck.setChecked(False))
         AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
             lambda x=None: self.moddedContentCheck.setChecked(False))
 
@@ -789,16 +790,40 @@ class Window(QMainWindow):
         # Runs on the GUI thread thanks to Qt's auto signal connection.
         self._statusLabel.setText(message)
 
-    def SetGame(self, mods_active = False):
-        index = next((i for i in range(self.gameSelect.model().rowCount()) if self.gameSelect.itemText(i) == AutonaGameAssetManager.instance.selectedGame.get(
-            "name") or self.gameSelect.itemText(i) == AutonaGameAssetManager.instance.selectedGame.get("codename")), None)
-        if index is not None:
-            self.gameSelect.setCurrentIndex(index)
+    def _pickGame(self, idx):
+        # User chose a game from the menu — mirror the former combo 'activated'
+        # behavior: load the game's assets, then clear the modded toggle.
+        self._currentGameIndex = idx
+        AutonaGameAssetManager.instance.LoadGameAssets(idx)
+        self.moddedContentCheck.setChecked(False)
+
+    def SetGame(self, mods_active=False):
+        # Reflect the currently selected game on the button: check its menu
+        # action and show its name as the button label.
+        selected = AutonaGameAssetManager.instance.selectedGame
+        name = selected.get("name")
+        codename = selected.get("codename")
+        idx = next(
+            (i for i, action in self._gameActions.items()
+             if action.text() == name or action.text() == codename),
+            None)
+        self._currentGameIndex = idx if idx is not None else 0
+        for i, action in self._gameActions.items():
+            action.setChecked(i == idx)
+        if idx is not None:
+            self.gameSelect.setText(self._gameActions[idx].text())
             self.signals.GameChanged.emit()
+        else:
+            self.gameSelect.setText(
+                QApplication.translate("app", "Select game title"))
 
     def Signal_GameChange(self, url):
         if url == "":
-            self.gameSelect.setCurrentIndex(0)
+            self._currentGameIndex = 0
+            for action in self._gameActions.values():
+                action.setChecked(False)
+            self.gameSelect.setText(
+                QApplication.translate("app", "Select game title"))
             AutonaGameAssetManager.instance.selectedGame = {}
 
     def UpdateUserSetButton(self):
@@ -905,41 +930,23 @@ class Window(QMainWindow):
     def ReloadGames(self):
         logger.info("Reload games")
         with StateManager.SaveBlock():
-            self.gameSelect.setModel(QStandardItemModel())
-            self.gameSelect.addItem("", 0)
-            # Text-only entries — game logos are intentionally omitted from the
-            # sidebar game selector (compact, name-only list).
-            for i, game in enumerate(AutonaGameAssetManager.instance.games.items()):
-                if game[1].get("name"):
-                    self.gameSelect.addItem(game[1].get("name"), i+1)
-                else:
-                    self.gameSelect.addItem(game[0], i+1)
-            self.gameSelect.setFixedHeight(26)
-            self.gameSelect.setView(QListView())
-            self.gameSelect.model().sort(0)
+            self.gameMenu.clear()
+            self._gameActions = {}
+            # Name-only entries (game logos are intentionally omitted from the
+            # sidebar selector), sorted by display name. Each action carries the
+            # 1-based game index expected by GameAssetManager.LoadGameAssets.
+            entries = [
+                (game.get("name") or codename, i + 1)
+                for i, (codename, game) in enumerate(
+                    AutonaGameAssetManager.instance.games.items())
+            ]
+            for name, idx in sorted(entries, key=lambda e: e[0].lower()):
+                action = self.gameMenu.addAction(name)
+                action.setCheckable(True)
+                action.triggered.connect(
+                    lambda _checked=False, g=idx: self._pickGame(g))
+                self._gameActions[idx] = action
             self.SetGame()
-
-    def DetectGameFromId(self, id):
-        def detect_smashgg_id_match(games, game, id):
-            result = str(games[game].get("smashgg_game_id", "")) == str(id)
-            if not result:
-                alternates = games[game].get("alternate_versions")
-                alternates_ids = []
-                for alternate in alternates:
-                    if alternate.get("smashgg_game_id"):
-                        alternates_ids.append(str(alternate.get("smashgg_game_id")))
-                result = str(id) in alternates_ids
-            return(result)
-
-        game = next(
-            (i+1 for i, game in enumerate(self.games)
-             if detect_smashgg_id_match(self.games,game,id)),
-            None
-        )
-
-        if game is not None and self.gameSelect.currentIndex() != game:
-            self.gameSelect.setCurrentIndex(game)
-            self.LoadGameAssets(game)
 
     def ToggleAlwaysOnTop(self, checked):
         if checked:
