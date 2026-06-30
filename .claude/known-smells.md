@@ -244,8 +244,8 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, b
 
 **根拠**: state-keys.md「要注意事項 #2」
 
-**2026-06-24 検証**: 記述どおり現存。`element.objectName()` をキーパスに使用しているのは **6ファイル**:
-`AutonaScoreboardWidget.py`, `AutonaTournamentInfoWidget.py`, `AutonaScoreboardPlayerWidget.py`, `AutonaTeamPlayerWidget.py`, `AutonaNotesWidget.py`（`AutonaBasePlayerWidget.py` は `objectName() != ""` の検査のみでキーパス用途ではない）。`.ui` の objectName 変更でキーパスが壊れ、既存 `program_state.json` との互換が失われるリスクが継続（`STATE_VERSION` は Qt ドックレイアウト用で state スキーマのマイグレーション層は無い）。
+**2026-06-24 検証**: 記述どおり現存。`element.objectName()` をキーパスに使用しているのは **5ファイル**:
+`AutonaScoreboardWidget.py`, `AutonaTournamentInfoWidget.py`, `AutonaScoreboardPlayerWidget.py`, `AutonaTeamPlayerWidget.py`（`AutonaBasePlayerWidget.py` は `objectName() != ""` の検査のみでキーパス用途ではない）。※ かつて該当した `AutonaNotesWidget.py` は NOTE タブ廃止に伴い 2026-07-01 削除。`.ui` の objectName 変更でキーパスが壊れ、既存 `program_state.json` との互換が失われるリスクが継続（`STATE_VERSION` は Qt ドックレイアウト用で state スキーマのマイグレーション層は無い）。
 
 **2026-06-27 ガード導入（ランタイム不変・zero-risk）**: フル移行（明示キーのマッピング層＋データマイグレーション）は S3 で「低リスク」条件から外れるため見送り。代わりに**実行時の挙動を一切変えず**、契約を破る変更を検知する `tests/test_objectname_keypath_contract.py`（3テスト）を追加:
 - `.ui` の入力ウィジェット objectName 集合をスナップショット固定（リネーム/削除を検知）

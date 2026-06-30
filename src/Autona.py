@@ -142,7 +142,6 @@ from .AutonaGameAssetGuideWindow import AutonaGameAssetGuideWindow
 from .LayoutOptions.AutonaLayoutOptionsWindow import AutonaLayoutOptionsWindow
 from .AutonaHotkeys import AutonaHotkeys
 from .AutonaPlayerListWidget import AutonaPlayerListWidget
-from .AutonaNotesWidget import AutonaNotesWidget
 from .AutonaCommentaryWidget import AutonaCommentaryWidget
 # from .AutonaTeamBattleWidget import AutonaTeamBattleWidget
 from .AutonaGameAssetManager import AutonaGameAssetManager
@@ -192,7 +191,7 @@ class Window(QMainWindow):
     # Bump this when dock widget layout changes (e.g. adding/removing tabs).
     # v9: dock objectNames switched from translated strings to stable English
     # literals; old saved layouts keyed by translated names are discarded.
-    STATE_VERSION = 11
+    STATE_VERSION = 12
     signals = WindowSignals()
 
     def __init__(self, loop=None):
@@ -378,34 +377,24 @@ class Window(QMainWindow):
         self.signals.GameChanged.connect(self.webserver.ws_get_characters)
         splash.set_message(splash_msgs[1], progress=0.70)
 
+        # PLAYERS and ANLYSE are no longer top-level docks — they are built as
+        # plain panels here and embedded as sub-tabs inside the STATS dock
+        # ("選手一覧" / "この大会の試合一覧"). The NOTES dock was removed entirely.
         playerList = AutonaPlayerListWidget()
-        playerList.setWindowIcon(QIcon(UI.icon_path('players.svg')))
-        playerList.setObjectName("Player List")
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, playerList)
-        self.dockWidgets.append(playerList)
+        self.analysisWidget = AutonaAnalysisWidget()
 
-        notes = AutonaNotesWidget()
-        notes.setWindowIcon(QIcon(UI.icon_path('notes.svg')))
-        notes.setObjectName("Additional Notes")
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, notes)
-        self.dockWidgets.append(notes)
-
-        self.statsWidget = AutonaStatsWidget()
+        self.statsWidget = AutonaStatsWidget(
+            analysisPanel=self.analysisWidget,
+            playerListPanel=playerList,
+        )
         self.statsWidget.setWindowIcon(QIcon(UI.icon_path('stats.svg')))
         self.statsWidget.setObjectName("Statistics")
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.statsWidget)
         self.dockWidgets.append(self.statsWidget)
 
-        self.analysisWidget = AutonaAnalysisWidget()
-        self.analysisWidget.setWindowIcon(QIcon(UI.icon_path('analysis.svg')))
-        self.analysisWidget.setObjectName("Analysis")
-        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.analysisWidget)
-        self.dockWidgets.append(self.analysisWidget)
-
         splash.set_message(splash_msgs[1], progress=0.85)
 
-        # Tab order: EVENT, SCORE, BOARD, VIDEO, STATS, PLAYERS, COMMS, RESULT,
-        # BRACKET, NOTES, ANLYSE.
+        # Tab order: EVENT, SCORE, BOARD, VIDEO, STATS, COMMS, RESULT, BRACKET.
         previous = tournamentInfo
         for nxt in (
             self.scoreboard,
@@ -413,12 +402,9 @@ class Window(QMainWindow):
             thumbnailSetting if not SettingsManager.Get(
                 "general.disable_thumbnail_widget", False) else None,
             self.statsWidget,
-            playerList,
             commentary,
             resultSetting,
             bracket,
-            notes,
-            self.analysisWidget,
         ):
             if nxt is None:
                 continue
@@ -464,9 +450,7 @@ class Window(QMainWindow):
             toggleWidgets.addAction(thumbnailSetting.toggleViewAction())
         toggleWidgets.addAction(resultSetting.toggleViewAction())
         toggleWidgets.addAction(tournamentInfo.toggleViewAction())
-        toggleWidgets.addAction(playerList.toggleViewAction())
         toggleWidgets.addAction(bracket.toggleViewAction())
-        toggleWidgets.addAction(notes.toggleViewAction())
         toggleWidgets.addAction(self.statsWidget.toggleViewAction())
 
         action = editMenu.addAction(

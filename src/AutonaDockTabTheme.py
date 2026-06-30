@@ -69,13 +69,10 @@ TAB_SHORT_LABELS: dict[str, str] = {
     "Board": "BOARD",
     "Scoreboard": "SCORE",
     "Statistics": "STATS",
-    "Analysis": "ANLYSE",
     "Thumbnail Settings": "VIDEO",
     "Result Settings": "RESULT",
-    "Player List": "PLAYERS",
     "Commentary": "COMMS",
     "Bracket": "BRACKET",
-    "Additional Notes": "NOTES",
 }
 
 # Two-tone crimson gradient sampled from the Autona app icon (red → crimson).

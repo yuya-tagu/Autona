@@ -553,7 +553,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 
 ### 4.1 PyQt ドックウィジェット一覧と責務
 
-`Autona.py` の `Window`（QMainWindow、`STATE_VERSION = 8`）が以下のドックを管理する。
+`Autona.py` の `Window`（QMainWindow、`STATE_VERSION = 12`）が以下のドックを管理する。
 
 | # | objectName | クラス | 主な責務 | 入力先 (Set) | 表示元 (Get) | デフォルト表示 |
 |---|------------|-------|---------|------------|------------|--------------|
@@ -564,10 +564,19 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | 5 | `Scoreboard` | `AutonaScoreboardManager`（薄ラッパー）→ `AutonaScoreboardWidget` | スコア入力・選手編集・ステージ管理・セット読み込み | `score.{N}.*` | `score.{N}.*`, `game.*` | ✓ |
 | 6 | `Stage` | `AutonaScoreboardStageWidget` | ステージストライク UI（運用側） | `score.{N}.stage_strike` | 同上, `ruleset` | ✗（hidden） |
 | 7 | `Commentary` | `AutonaCommentaryWidget` | 実況者の名前・SNS・キャラクター入力 | `commentary.{N}.*` | `commentary.{N}.*` | ✓ |
-| 8 | `Player List` | `AutonaPlayerListWidget` | 選手一覧の編集・スコア管理 | `player_list.slot.{I}.*` | `player_list.*` | ✓ |
-| 9 | `Additional Notes` | `AutonaNotesWidget` | 自由記述メモ | `notes.notes_widget_{N}.*` | 同上 | ✓ |
-| 10 | `Statistics` | `AutonaStatsWidget` | recent_sets / upset_factor / last_sets の集計表示 | （read-only） | `score.{N}.recent_sets`, `last_sets`, `upset_factor` | ✓ |
-| 11 | `Analysis` | `AutonaAnalysisWidget` | フェーズ・フェーズグループ単位のトーナメント分析（read-only） | （read-only） | `bracket.bracket.rounds`、`StateManager.signals.state_big_change` 購読、TournamentDataProvider のシグナル（`tournament_phases_updated`, `tournament_phasegroup_updated`, `tournament_changed`） | ✓ |
+| 8 | `Statistics` | `AutonaStatsWidget` | 内部 `QTabWidget` で複数ビューを集約（下記 §4.1.0） | （read-only） | `score.{N}.recent_sets`, `last_sets`, `upset_factor` ほか | ✓ |
+
+> **NOTE タブ（`AutonaNotesWidget`）は廃止**。`PLAYERS`（`AutonaPlayerListWidget`）と `ANLYSE`（`AutonaAnalysisWidget`）は**トップレベルのドックではなくなり**、`Statistics` ドック内の `QTabWidget` のサブタブとして埋め込まれた（いずれも `QDockWidget` → `QWidget` パネルに降格）。`AutonaPlayerListWidget.instance` / `.signals` は維持され、`AutonaScoreboardWidget` からの参照は従来どおり動作する。
+
+##### 4.1.0 Statistics ドック内タブ（`AutonaStatsWidget.tabs`）
+
+| サブタブ | 担当パネル | 入力先 / 表示元 |
+|---------|-----------|---------------|
+| Head-to-Head (Recent Sets) | （`AutonaStatsWidget` 内蔵） | `score.{N}.recent_sets` ほか（read-only） |
+| Last Sets | （内蔵） | `score.{N}.last_sets`（read-only） |
+| Tournament History | （内蔵） | `score.{N}.history_sets`（read-only） |
+| この大会の試合一覧 | `AutonaAnalysisWidget` パネル | `bracket.bracket.rounds`、`state_big_change` 購読、TournamentDataProvider のシグナル（read-only） |
+| 選手一覧 | `AutonaPlayerListWidget` パネル | `player_list.slot.{I}.*` を Set / `player_list.*` を Get |
 
 #### 4.1.1 ドックの追加・削除規約
 
