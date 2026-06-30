@@ -329,6 +329,16 @@ class AutonaResultSettingsWidget(QDockWidget):
         )
         self.preview = ResultPreviewWidget()
         previewContainer.layout().addWidget(self.preview)
+        # Reserve the vertical scrollbar gutter permanently. The preview fixes
+        # its height to the pixmap aspect ratio in resizeEvent; if the scrollbar
+        # could toggle, the viewport width would oscillate around the toggle
+        # threshold and Qt's C++ layout would recurse into a stack overflow on a
+        # single setFixedHeight call. AlwaysOn keeps the width stable so the
+        # aspect-ratio recompute converges.
+        scrollAreaRight = self.settings.findChild(QScrollArea, "scrollArea_right")
+        if scrollAreaRight is not None:
+            scrollAreaRight.setVerticalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
         # --- Buttons ---
         self.btUpdatePreview = self.settings.findChild(
