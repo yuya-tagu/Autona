@@ -1,9 +1,10 @@
 """BOARD tab: pick a scoreboard overlay design, preview it live, tune its
 colors, and get the OBS browser-source path.
 
-The scoreboard overlays live in ``layout/scoreboard_*/`` (TSH-style HTML/CSS/JS
-that reads ``out/`` state and is loaded into OBS as a *local file*). This tab
-bundles the operator's "make it look right and get it into OBS" workflow:
+The built-in scoreboard overlays live in ``layout/scoreboard_*/`` and custom
+composer projects in ``layout/custom/{slug}/`` (TSH-style HTML/CSS/JS that
+reads ``out/`` state and is loaded into OBS as a *local file*). This tab bundles
+the operator's "make it look right and get it into OBS" workflow:
 
 * **Design** — a combo over every ``layout/scoreboard*/`` folder that has an
   ``index.html``. The choice persists to ``board.selected_design``.
@@ -13,6 +14,7 @@ bundles the operator's "make it look right and get it into OBS" workflow:
 * **Colors** — theme / accent color pickers (moved here from the EVENT tab).
   Same SettingsManager / StateManager keys, so overlays and ``out/`` export are
   unaffected.
+* **Designer** — opens the layer editor in a dedicated desktop window.
 * **Add to OBS** — the local file path for the selected design with Copy /
   Open-in-Explorer buttons and the 1920x1080 sizing note.
 """
@@ -31,6 +33,7 @@ from loguru import logger
 from .StateManager import StateManager
 from .SettingsManager import SettingsManager
 from .AutonaColorButton import AutonaColorButton
+from .AutonaDesignerWindow import AutonaDesignerWindow
 from . import ui_constants as UI
 from . import ui_layout as L
 
@@ -64,10 +67,12 @@ DESIGN_META = {
 
 
 def _discover_designs():
-    """List ``layout/scoreboard*/`` folders that have an ``index.html``.
+    """List built-in and custom folders that have an ``index.html``.
 
     The legacy ``layout/scoreboard/`` (per-game .html, no single entry) is
-    excluded by the index.html check."""
+    excluded by the index.html check. Composer projects are stored one level
+    deeper as ``layout/custom/{slug}/`` and returned with forward slashes so
+    the same value works in URLs and filesystem path construction."""
     designs = []
     try:
         base = os.path.abspath(LAYOUT_DIR)
@@ -76,6 +81,13 @@ def _discover_designs():
                 continue
             if os.path.isfile(os.path.join(base, name, "index.html")):
                 designs.append(name)
+
+        customBase = os.path.join(base, "custom")
+        if os.path.isdir(customBase):
+            for slug in sorted(os.listdir(customBase)):
+                if os.path.isfile(
+                        os.path.join(customBase, slug, "index.html")):
+                    designs.append(f"custom/{slug}")
     except OSError as e:
         logger.warning(f"Board: failed to list layout designs: {e}")
     return designs
@@ -136,6 +148,14 @@ class AutonaBoardWidget(QDockWidget):
 
         self._designs = _discover_designs()
         self._previewLoaded = False
+        self._designerWindow = None
+        self._designRefreshTimer = QTimer(self)
+        self._designRefreshTimer.setSingleShot(True)
+        self._designRefreshTimer.setInterval(750)
+        self._designRefreshTimer.timeout.connect(self._refreshDesigns)
+        self._designWatcher = QFileSystemWatcher(self)
+        self._designWatcher.directoryChanged.connect(
+            self._scheduleDesignRefresh)
 
         content = QWidget()
         outer = QVBoxLayout(content)
@@ -150,6 +170,7 @@ class AutonaBoardWidget(QDockWidget):
         scroll.setWidgetResizable(True)
         scroll.setWidget(content)
         self.setWidget(scroll)
+        self._watchDesignDirectories()
 
         # Seed colors into state at startup (moved from the EVENT tab) so
         # overlays receive theme/accent before the user touches the pickers.
@@ -166,6 +187,9 @@ class AutonaBoardWidget(QDockWidget):
     def _displayName(self, folder):
         if folder in DESIGN_DISPLAY_NAMES:
             return DESIGN_DISPLAY_NAMES[folder]
+        if folder.startswith("custom/"):
+            name = folder.split("/", 1)[1]
+            return f"Custom: {name.replace('_', ' ').replace('-', ' ').title()}"
         name = folder[len("scoreboard"):].lstrip("_") or folder
         return name.replace("_", " ").title()
 
@@ -195,8 +219,30 @@ class AutonaBoardWidget(QDockWidget):
         row = QHBoxLayout()
         row.setSpacing(UI.SPACE_MD)
         row.addWidget(self.designCombo, 1)
+        self.btRefreshDesigns = QPushButton("更新")
+        self.btRefreshDesigns.setToolTip(
+            "保存済みのカスタムデザインを再読み込みします")
+        self.btRefreshDesigns.setSizePolicy(
+            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.btRefreshDesigns.clicked.connect(self._refreshDesigns)
+        row.addWidget(self.btRefreshDesigns)
         row.addWidget(self.designMetaLabel, 1)
         group.layout().addLayout(row)
+
+        designerRow = QHBoxLayout()
+        designerDescription = QLabel(
+            "PNGと選手名・スコアを組み合わせて、新しいデザインを作成・編集します。")
+        designerDescription.setWordWrap(True)
+        designerDescription.setStyleSheet(UI.secondary_label_style())
+        designerRow.addWidget(designerDescription, 1)
+        self.btOpenDesigner = QPushButton("Designerを開く")
+        self.btOpenDesigner.setToolTip(
+            "デスクトップウインドウでスコアボードDesignerを開きます")
+        self.btOpenDesigner.setSizePolicy(
+            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        self.btOpenDesigner.clicked.connect(self._openDesigner)
+        designerRow.addWidget(self.btOpenDesigner)
+        group.layout().addLayout(designerRow)
 
         # Connect after the initial selection so it doesn't fire on startup.
         self.designCombo.currentIndexChanged.connect(self._onDesignChanged)
@@ -208,6 +254,8 @@ class AutonaBoardWidget(QDockWidget):
         return group
 
     def _designMetaText(self, design):
+        if design and design.startswith("custom/"):
+            return "対戦形式：1v1\nゲーム：カスタム"
         fmt, game = DESIGN_META.get(design, ("—", "—"))
         return f"対戦形式：{fmt}\nゲーム：{game}"
 
@@ -229,6 +277,75 @@ class AutonaBoardWidget(QDockWidget):
         self._refreshObsPath()
         if self._previewLoaded:
             self._loadPreview()
+
+    def _watchDesignDirectories(self):
+        watched = set(self._designWatcher.directories())
+        customBase = os.path.abspath(os.path.join(LAYOUT_DIR, "custom"))
+        candidates = [
+            os.path.abspath(LAYOUT_DIR),
+            customBase,
+        ]
+        if os.path.isdir(customBase):
+            try:
+                candidates.extend(
+                    os.path.join(customBase, slug)
+                    for slug in os.listdir(customBase)
+                    if os.path.isdir(os.path.join(customBase, slug))
+                )
+            except OSError as e:
+                logger.warning(
+                    f"Board: failed to watch custom designs: {e}")
+        for path in candidates:
+            if os.path.isdir(path) and path not in watched:
+                self._designWatcher.addPath(path)
+
+    def _scheduleDesignRefresh(self, _path=None):
+        # Saving creates the slug directory before writing index.html. Debounce
+        # directory notifications so discovery runs after the atomic writes.
+        self._watchDesignDirectories()
+        self._designRefreshTimer.start()
+
+    def _refreshDesigns(self):
+        self._watchDesignDirectories()
+        designs = _discover_designs()
+        current = self._currentDesign()
+        preferred = current or SettingsManager.Get(
+            "board.selected_design", DEFAULT_DESIGN)
+
+        self.designCombo.blockSignals(True)
+        try:
+            self.designCombo.clear()
+            for design in designs:
+                self.designCombo.addItem(
+                    self._displayName(design), design)
+
+            idx = self.designCombo.findData(preferred)
+            if idx < 0:
+                idx = self.designCombo.findData(DEFAULT_DESIGN)
+            if idx < 0 and self.designCombo.count() > 0:
+                idx = 0
+            if idx >= 0:
+                self.designCombo.setCurrentIndex(idx)
+        finally:
+            self.designCombo.blockSignals(False)
+
+        self._designs = designs
+        selected = self._currentDesign()
+        if selected:
+            SettingsManager.Set("board.selected_design", selected)
+        self._refreshDesignMeta()
+        self._refreshObsPath()
+        if self._previewLoaded and selected:
+            self._loadPreview()
+
+    def _openDesigner(self):
+        if self._designerWindow is None:
+            self._designerWindow = AutonaDesignerWindow(self)
+            self._designerWindow.destroyed.connect(
+                lambda: setattr(self, "_designerWindow", None))
+        self._designerWindow.show()
+        self._designerWindow.raise_()
+        self._designerWindow.activateWindow()
 
     # ── Preview ──────────────────────────────────────────────────────
     def _buildPreviewGroup(self):

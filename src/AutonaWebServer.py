@@ -12,7 +12,7 @@ import flask_socketio
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
-from flask import Flask, send_from_directory, request, send_file, abort
+from flask import Flask, send_from_directory, request, send_file, abort, jsonify
 from flask_cors import CORS, cross_origin
 from flask_socketio import SocketIO, emit
 import orjson
@@ -23,6 +23,10 @@ from .AutonaWebServerActions import WebServerActions
 from .AutonaScoreboardManager import AutonaScoreboardManager
 from .AutonaCommentaryWidget import AutonaCommentaryWidget
 from .SettingsManager import SettingsManager
+from .AutonaDesignerService import (
+    AutonaDesignerService,
+    DesignerProjectError,
+)
 import traceback
 
 import logging
@@ -698,6 +702,58 @@ class WebServer(QThread):
     def ws_get_states(message):
         args = orjson.loads(message)
         return WebServer.actions.get_states(args.get('countryCode', ''))
+
+    # ── Desktop Scoreboard Designer ────────────────────────────────
+    # These endpoints are intentionally local-only and require the
+    # short-lived token issued to AutonaDesignerWindow. The external Web
+    # Scoreboard therefore cannot write files on the host machine.
+    @staticmethod
+    def _authorize_designer_request():
+        token = request.headers.get("X-Autona-Designer-Token")
+        if not AutonaDesignerService.is_authorized(token, request.remote_addr):
+            abort(403, "Desktop Designer authorization required")
+
+    @app.get('/api/designer/projects')
+    def designer_list_projects():
+        WebServer._authorize_designer_request()
+        return jsonify({"projects": AutonaDesignerService.list_projects()})
+
+    @app.get('/api/designer/projects/<slug>')
+    def designer_load_project(slug):
+        WebServer._authorize_designer_request()
+        try:
+            return jsonify(AutonaDesignerService.load_project(slug))
+        except FileNotFoundError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except DesignerProjectError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    @app.delete('/api/designer/projects/<slug>')
+    def designer_delete_project(slug):
+        WebServer._authorize_designer_request()
+        try:
+            return jsonify(AutonaDesignerService.delete_project(slug))
+        except FileNotFoundError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except DesignerProjectError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception:
+            logger.error(traceback.format_exc())
+            return jsonify({"error": "デザインの削除に失敗しました。"}), 500
+
+    @app.post('/api/designer/projects')
+    def designer_save_project():
+        WebServer._authorize_designer_request()
+        if request.content_length and request.content_length > 70 * 1024 * 1024:
+            return jsonify({"error": "保存データがサイズ上限を超えています。"}), 413
+        try:
+            payload = request.get_json(force=False, silent=False)
+            return jsonify(AutonaDesignerService.save_project(payload))
+        except DesignerProjectError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception:
+            logger.error(traceback.format_exc())
+            return jsonify({"error": "デザインの保存に失敗しました。"}), 500
 
 
     @app.route('/')

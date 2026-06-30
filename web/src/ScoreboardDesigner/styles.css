@@ -1,0 +1,350 @@
+.scoreboard-designer {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #0a0a0a;
+}
+
+.designer-desktop-required {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: center;
+  background: #0a0a0a;
+}
+
+.designer-toolbar {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.designer-data-toggle {
+  margin-left: auto;
+  min-width: 280px;
+  display: grid;
+  grid-template-columns: 92px 48px 120px;
+  align-items: center;
+  column-gap: 4px;
+}
+
+.designer-data-toggle-label,
+.designer-data-toggle-status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.designer-workspace {
+  display: grid;
+  grid-template-columns: 280px minmax(420px, 1fr) 300px;
+  min-height: 0;
+  flex: 1;
+}
+
+.designer-sidebar {
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  background: #121212;
+  border-color: #252524;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.designer-left-sidebar {
+  border-right: 1px solid #252524;
+}
+
+.designer-right-sidebar {
+  border-left: 1px solid #252524;
+}
+
+.designer-layer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overflow-anchor: none;
+  scrollbar-gutter: stable;
+}
+
+.designer-layer-row {
+  width: 100%;
+  min-height: 42px;
+  display: grid;
+  grid-template-columns: 24px 74px minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border: 1px solid #393936;
+  border-radius: 4px;
+  color: #f0eae0;
+  background: #1a1a1a;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    transform 170ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 120ms ease,
+    background-color 120ms ease,
+    opacity 120ms ease;
+  will-change: transform;
+}
+
+.designer-layer-row:hover,
+.designer-layer-row.selected {
+  border-color: #c33732;
+  background: #2f2f2d;
+}
+
+.designer-layer-row.primary {
+  outline: 1px solid #f0c45a;
+  outline-offset: -2px;
+}
+
+.designer-layer-row.drag-placeholder {
+  opacity: 0.55;
+  transform: scale(0.98);
+}
+
+.designer-layer-row.dragging {
+  position: fixed;
+  z-index: 2147483647;
+  opacity: 1;
+  pointer-events: none;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  cursor: grabbing;
+}
+
+.designer-layer-drag {
+  width: 22px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #85807a;
+  cursor: grab;
+  touch-action: none;
+}
+
+.designer-layer-drag:active {
+  cursor: grabbing;
+}
+
+.designer-layer-type {
+  color: #85807a;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.designer-layer-type.type-image {
+  color: #72b7ff;
+}
+
+.designer-layer-type.type-data-text,
+.designer-layer-type.type-data-image,
+.designer-layer-type.type-game-history {
+  color: #f0c45a;
+}
+
+.designer-layer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.designer-layer-name-editor .MuiInputBase-input {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.designer-binding-used {
+  opacity: 0.55;
+}
+
+.designer-canvas-viewport {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background-color: #181818;
+  background-image:
+    linear-gradient(45deg, #202020 25%, transparent 25%),
+    linear-gradient(-45deg, #202020 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #202020 75%),
+    linear-gradient(-45deg, transparent 75%, #202020 75%);
+  background-size: 24px 24px;
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+  outline: none;
+}
+
+.designer-canvas-shell {
+  position: relative;
+  flex: none;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.55);
+}
+
+.designer-canvas {
+  position: absolute;
+  inset: 0 auto auto 0;
+  transform-origin: top left;
+  overflow: hidden;
+}
+
+.designer-canvas-layer {
+  position: absolute;
+  box-sizing: border-box;
+  transform-origin: center;
+  cursor: move;
+  touch-action: none;
+}
+
+.designer-canvas-layer.selected {
+  outline: 3px solid #f0c45a;
+  outline-offset: 2px;
+}
+
+.designer-canvas-layer.selected-image {
+  outline-color: #72b7ff;
+}
+
+.designer-canvas-layer.selected-data-text,
+.designer-canvas-layer.selected-data-image,
+.designer-canvas-layer.selected-game-history {
+  outline-color: #f0c45a;
+}
+
+.designer-selection-rect {
+  position: absolute;
+  border: 2px solid #f0c45a;
+  background: rgba(240, 196, 90, 0.16);
+  box-sizing: border-box;
+  pointer-events: none;
+  z-index: 2147483647;
+}
+
+.designer-layer-content,
+.designer-layer-content > img,
+.designer-data-text,
+.designer-games {
+  width: 100%;
+  height: 100%;
+}
+
+.designer-layer-content > img {
+  display: block;
+  pointer-events: none;
+}
+
+.designer-data-text {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+  line-height: 1;
+  user-select: none;
+}
+
+.designer-data-text > div {
+  width: max-content;
+  white-space: nowrap;
+}
+
+.designer-games {
+  display: flex;
+}
+
+.designer-missing-asset,
+.designer-empty-data {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: #f0a0a0;
+  border: 2px dashed #c33732;
+  box-sizing: border-box;
+  font-size: 22px;
+  overflow: hidden;
+}
+
+.designer-empty-data {
+  color: #85807a;
+  border-color: #55534e;
+}
+
+.designer-handle {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 2px solid #121212;
+  border-radius: 50%;
+  background: #f0c45a;
+  touch-action: none;
+}
+
+.designer-resize-handle {
+  right: -12px;
+  bottom: -12px;
+  cursor: nwse-resize;
+}
+
+.designer-rotate-handle {
+  top: -38px;
+  left: calc(50% - 10px);
+  cursor: grab;
+}
+
+.designer-rotate-handle::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 18px;
+  width: 2px;
+  height: 18px;
+  background: #f0c45a;
+}
+
+.designer-inspector-fields {
+  padding-bottom: 24px;
+}
+
+.designer-empty-inspector {
+  padding: 12px 0;
+}
+
+.designer-field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.designer-statusbar {
+  height: 28px;
+  flex: none;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #b5ada0;
+  background: #121212;
+  border-top: 1px solid #252524;
+  font-size: 11px;
+}
+
+@media (max-width: 1050px) {
+  .designer-workspace {
+    grid-template-columns: 230px minmax(360px, 1fr) 260px;
+  }
+}

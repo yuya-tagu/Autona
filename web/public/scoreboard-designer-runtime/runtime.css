@@ -1,0 +1,66 @@
+html,
+body {
+  width: 1920px;
+  height: 1080px;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+body {
+  opacity: 0;
+}
+
+#scoreboard-composer {
+  position: relative;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+}
+
+.composer-layer {
+  position: absolute;
+  box-sizing: border-box;
+  transform-origin: center;
+}
+
+.composer-content,
+.composer-content > img,
+.composer-text,
+.composer-games {
+  width: 100%;
+  height: 100%;
+}
+
+.composer-content > img {
+  display: block;
+}
+
+.composer-text {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.composer-text-content {
+  width: max-content;
+  white-space: nowrap;
+}
+
+.composer-games {
+  display: flex;
+}
+
+#composer-error {
+  display: none;
+  position: absolute;
+  inset: 20px auto auto 20px;
+  max-width: 800px;
+  padding: 16px;
+  color: white;
+  background: rgba(170, 20, 20, 0.92);
+  font: 24px sans-serif;
+  white-space: pre-wrap;
+}
