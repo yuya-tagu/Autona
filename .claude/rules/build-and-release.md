@@ -72,48 +72,40 @@ release だけを publish し、アップデーターはそちらを参照する
 - 公開 ZIP に Python ソース（`src/*.py`）は含まれない（`gen_release.ps1` が同梱
   するのは assets / layout / user_data / web/build / LICENSE / Autona.exe / **`_internal/`** のみ）
 
-### onedir でのアップデート挙動（重要）
+### アップデート挙動（外部ヘルパープロセス方式）
 
-onedir のアップデーター（`ExtractUpdate`）は **「まず直接上書き、ロックされた
-ファイルだけリネーム退避」**方式:
+アップデートは **アプリ完全終了後に外部 PowerShell ヘルパーが展開・再起動する**方式
+（[assets/apply_update.ps1](../../assets/apply_update.ps1)）。フロー:
 
-- 大多数（`assets/`・`layout/`・`web/`・`user_data/` と `_internal/` の大半）は
-  ロックされていないので**そのまま上書き**（退避ファイルを作らない）
-- 実行中はランチャ `Autona.exe` と `_internal/` のロード済み DLL
-  （python3xx.dll, Qt6*.dll 等）がロックされ、上書きは共有違反で失敗する。Windows は
-  実行イメージを `FILE_SHARE_DELETE` でマップするため**リネームは可能**なので、失敗した
-  ファイルだけ `*.autona_old` に退避 → 新ファイル書込、とする（`_stash_existing`）
-- 退避物は root と `_internal/` 内だけに収まる → 次回起動時に `CleanupUpdateLeftovers()`
-  が一括削除（`Autona.py` 冒頭で呼ぶ。frozen ビルドのみ動作）
-- **既知の制約（mmap ロック）**: `_internal/PyQt6/Qt6/resources/` の WebEngine リソース
-  （`v8_context_snapshot.bin`・`*.pak`・`icudtl.dat` 等）は実行中プロセスが mmap で排他
-  保持し、**上書きもリネームも不可**で置換できない。**同一 Qt バージョン間の更新では中身が
-  同一なので無害**（古いまま残っても問題なし）。WebEngine をフル起動中（サムネイル描画）に
-  閉じるとロック対象は更に広がる
+1. アップデーターが `release-windows.zip` を `%TEMP%\autona_update\update.zip` に DL
+2. `UpdateProcedure()`（[src/AutonaUpdater.py](../../src/AutonaUpdater.py)）が
+   `assets/apply_update.ps1` を temp workdir にコピーし、通知ダイアログを出して
+   ヘルパーを **detached**（`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP |
+   CREATE_NO_WINDOW`）で起動 → `QApplication.exit()`
+3. ヘルパーは **親 Autona プロセス（PID）の完全終了を待つ**（= 全ファイルのロック解放）。
+   その後 zip を staging に展開（先頭 `Autona/` を strip・ZIP slip ガード）し、
+   `robocopy /E`（**`/PURGE` なし**）で install ディレクトリへ反映。新 `Autona.exe` を
+   起動して zip/staging/自分自身を後始末
+4. 失敗時（親 PID 残存・展開例外・robocopy `exit >= 8`）は**旧 exe を再起動**し
+   `assets/update_log.txt` にログを残す（ユーザーを「何も起動しない」状態にしない）
 
-#### Qt 跨ぎ更新の安全策（2段構え・実装済み）
+**ポイント:**
+- アプリ終了後に動くため、ランチャ `Autona.exe`・ロード済み `_internal/*.dll`・
+  mmap された WebEngine リソース（`v8_context_snapshot.bin`・`*.pak`・`icudtl.dat` 等）も
+  **すべて置換可能**。旧来の in-place 上書き＋`.autona_old` リネーム退避は廃止
+- `robocopy /E`（PURGE なし）なので、release zip に含まれないユーザー資産
+  （`layout/game_images`・`user_data/` のアバター等）は**消えずに残る**。テンプレ
+  layout は更新で上書きされる（期待動作）。旧来の `layout_backup_{time}` 退避は廃止
+- `CleanupUpdateLeftovers()`（`Autona.py` 冒頭・frozen のみ）は temp workdir 残骸と、
+  旧版から移行したユーザーの legacy `Autona_old.exe` / `*.autona_old` を掃除する
 
-「Qt が変わると上記リソースが置換できず WebEngine がクラッシュする」リスクを、
-人間の記憶ではなく**仕組みで**防ぐ:
+#### Qt 跨ぎ更新も自動更新可
 
-1. **Qt をピン留め**（`requirements.txt` で `PyQt6` / `PyQt6-Qt6` /
-   `PyQt6-WebEngine` / `PyQt6-WebEngine-Qt6` を `==6.11.0`）。Qt は**意図的にピンを
-   上げた時だけ**変わる。通常リリースは自動的に「同一 Qt」＝安全
-2. **Qt フィンガープリント gate**（`AutonaUpdater._OnNewVersion`）。
-   `publish_release.ps1` が release notes に `Qt-Build: <qVersion>` を自動付与し、
-   updater は**ダウンロード前に**それと実行中の `qVersion()` を比較。**異なれば自動更新を
-   拒否し「手動で再インストールしてください」を表示**（fail-safe）。マーカーが無い古い
-   リリースは同一 Qt 扱いで許可（後方互換）
-
-→ Qt を上げたい時は **`requirements.txt` のピンを 4 つ揃えて上げて再ビルド**するだけ。
-   その release は gate により自動更新されず、ユーザーは手動再配布で受け取る。
-   恒久的な「シームレスな Qt 跨ぎ自動更新」が必要になった場合のみ、別プロセス更新
-   ヘルパー（ランチャに `--apply-update` モードを追加し、メイン終了後に全展開）を検討する
-   ＝現状は未実装でよい
-
-- **検証状況**: ローカル E2E（実 `ExtractUpdate` を起動中の onedir install に対して実行）で
-  退避が数十件に収まり残骸ゼロ・再起動成功・版数伝播を確認。GitHub publish 経由の実地 E2E
-  （0.9.0 → v1.0.0 検出 → DL → 更新 → 再起動）も完走済み
+外部ヘルパーは WebEngine リソースを含む全ファイルを置換できるため、**Qt バージョンが
+変わる更新も自動適用できる**（旧来の Qt フィンガープリント gate / 手動再インストール
+誘導は撤廃済み）。`requirements.txt` の Qt ピンは従来どおり「意図的に上げた時だけ
+変える」運用を維持してよいが、跨いでも自動更新は壊れない。`publish_release.ps1` の
+`Qt-Build:` スタンプは updater が読まなくなった（残置で害なし）。
 
 ### ローカル公開（推奨・確実）
 
