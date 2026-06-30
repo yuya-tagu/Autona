@@ -1,7 +1,7 @@
 # サードパーティ クレジット / Third-Party Attributions
 
 Autona は [TournamentStreamHelper](https://github.com/joaorb64/TournamentStreamHelper)
-のフォークであり、複数のサードパーティ素材・ライブラリを利用しています。
+（MIT License）を起点に独自開発したツールです。
 本ファイルは公開配布物に含まれる第三者素材の出典・ライセンスを集約します。
 
 > **凡例**: ✅ 確認済み（ライセンス同梱 or 周知） / ⚠️ 要確認（TBD）。

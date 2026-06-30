@@ -1,8 +1,16 @@
-# Autona (BST Scoreboard)
+# Autona
 
-格闘ゲーム大会の配信支援デスクトップアプリケーション。[TournamentStreamHelper](https://github.com/joaorb64/TournamentStreamHelper) のカスタムフォーク。
+格闘ゲームコミュニティ大会の配信を、**準備から本番・投稿まで一気通貫**で支える、日本発の配信ワークベンチ。
 
-スコアボード管理、統計情報表示、配信オーバーレイ出力など、大会運営に必要な機能を統合的に提供する。
+スコアボード管理・配信オーバーレイ・サムネ/リザルト画像生成・SNS 投稿までを 1 本に統合し、TO 兼配信オペの少人数運営を効率化する。日本語ファーストで、1v1・チーム・クルーバトルに対応する。
+
+## なぜ Autona か
+
+- **日本語ファースト** — UI・ゲーム用語・トーナメント用語の 3 系統を完全日本語化（ローマ字表示対応）
+- **配信前後まで一気通貫** — 試合中のスコア管理に加え、サムネ/リザルト画像の自動生成と X へのワンクリック投稿
+- **マルチフォーマット** — 1v1 / チーム / クルーバトル（最大 9v9・ストック管理）を再起動なしで切替
+- **Web リモート操作** — ブラウザからの分業オペレーション
+- **Start.gg 深度連携** — ブラケット・対戦表・参加者を自動取得
 
 ## 主な機能
 
@@ -14,7 +22,7 @@
 - **ローカル選手DB** — 選手のタグ・国籍・メインキャラなどをローカル管理
 - **ホットキー** — グローバルキーボードショートカットでスコア操作
 - **サムネイル生成** — 大会サムネイル画像の自動生成
-- **多言語対応** — 9 言語（英語、日本語、ドイツ語、ポルトガル語、スペイン語、フランス語、中国語簡体/繁体、イタリア語）
+- **日英対応** — 日本語・英語の 2 言語で UI を利用可能
 
 ## 技術スタック
 
@@ -178,7 +186,7 @@ Autona/
 │   │   ├── backendDataTypes.d.ts  # TypeScript 型定義
 │   │   ├── redux/                 # Redux Store / Slices
 │   │   ├── ScoreboardPage/        # スコアボードページ
-│   │   └── i18n/                  # 多言語翻訳（9言語）
+│   │   └── i18n/                  # 翻訳（日英）
 │   └── build/                     # ビルド成果物
 │
 ├── layout/                  # 配信オーバーレイ（HTML テンプレート）
@@ -199,16 +207,12 @@ Autona/
 （例: Super Smash Bros. Ultimate）。設定ファイルにより他ゲームへ拡張可能。
 
 > **ゲーム画像（キャラクター／ステージ）は同梱していません。** 各権利者に著作権が
-> あるため、TournamentStreamHelper のアセットダウンローダーから取得して
-> `user_data/games/` 配下に配置してください。詳細は
-> [user_data/games/README.md](user_data/games/README.md) を参照。
+> あるため、アプリ内のアセット取得ガイドから取得し、`user_data/games/` 配下に配置して
+> ください。詳細は [user_data/games/README.md](user_data/games/README.md) を参照。
 
 ## ライセンス
 
-MIT License - 詳細は [LICENSE](LICENSE) を参照。
+MIT License — 詳細は [LICENSE](LICENSE) を参照。
 
-本リポジトリが利用するサードパーティ素材（フォント・国旗画像・ライブラリ等）の
-出典・ライセンスは [ATTRIBUTIONS.md](ATTRIBUTIONS.md) に記載。
-
-**Original Author**: [joaorb64](https://github.com/joaorb64/TournamentStreamHelper)
-（本プロジェクトは TournamentStreamHelper のフォークです）
+利用しているサードパーティ素材（フォント・国旗画像・ライブラリ等）の出典・ライセンスは
+[ATTRIBUTIONS.md](ATTRIBUTIONS.md) に集約しています。

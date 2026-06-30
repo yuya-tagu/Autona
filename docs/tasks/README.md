@@ -11,8 +11,9 @@
 | 調査タスク（investigate-*） | 実装前に事実を確定する | 不明点が埋まり、設計判断の材料が揃う |
 | 実装チケット（implement-*） | コードを変更する | 受け入れ条件を満たし検証が通る |
 
-> ⚠️ 今回作成済みの [investigate-external-control-api.md](investigate-external-control-api.md) は
-> **調査タスク**。実装タスクではない。
+> 外部制御 API 関連の調査・実装チケットは完了済みの履歴として残す。
+> 新規作業として再着手する場合は、実装済みの [../../src/AutonaApiV1.py](../../src/AutonaApiV1.py) と
+> [../../.claude/design/external-control-api.md](../../.claude/design/external-control-api.md) を正にして差分チケットを起こす。
 
 ## チケットの書き方（自己完結が原則）
 
@@ -35,10 +36,10 @@
 | ファイル | 種類 | 内容 |
 |---------|------|------|
 | [investigate-external-control-api.md](investigate-external-control-api.md) | 調査 | 外部制御 API 設計前の事実確定（調査結果・スパイク済） |
-| [implement-external-control-api-readonly.md](implement-external-control-api-readonly.md) | 実装 | `/api/v1/` 共通基盤 + 読み取りエンドポイント（**最初に着手**） |
-| [implement-external-control-api-safe-ops.md](implement-external-control-api-safe-ops.md) | 実装 | 安全操作（score±1 / swap / reset / set 情報・confirm 不要） |
-| [implement-external-control-api-guarded-ops.md](implement-external-control-api-guarded-ops.md) | 実装 | 危険操作（confirm 必須 + 重い操作 202 受付） |
+| [implement-external-control-api-readonly.md](implement-external-control-api-readonly.md) | 実装（完了済み履歴） | `/api/v1/` 共通基盤 + 読み取りエンドポイント |
+| [implement-external-control-api-safe-ops.md](implement-external-control-api-safe-ops.md) | 実装（完了済み履歴） | 安全操作（score±1 / swap / reset / set 情報・confirm 不要） |
+| [implement-external-control-api-guarded-ops.md](implement-external-control-api-guarded-ops.md) | 実装（完了済み履歴） | 危険操作（confirm 必須 + 重い操作 202 受付） |
 
-> 外部制御 API の実装は **readonly → safe-ops → guarded-ops** の順。仕様正本は
+> 外部制御 API は **readonly → safe-ops → guarded-ops** の順で実装済み。仕様正本は
 > [../../.claude/design/external-control-api.md](../../.claude/design/external-control-api.md)、決定は
 > [../decisions/ADR-001-external-control-api-boundary.md](../decisions/ADR-001-external-control-api-boundary.md)。

@@ -1,7 +1,7 @@
 # External Control API (`/api/v1/`) I/F 仕様
 
-> **ステータス: 実装済み。** 本書は ADR-001 で確定した方針に基づく**あるべき姿の I/F 仕様（正本）**であり、
-> 実装（[../../src/AutonaApiV1.py](../../src/AutonaApiV1.py)）と一致している。実装と本書が乖離した場合は本書を優先し、差分は本書に追従させる。
+> **ステータス: 実装済み。** 本書は ADR-001 で確定した方針に基づく I/F 仕様であり、
+> 実装（[../../src/AutonaApiV1.py](../../src/AutonaApiV1.py)）の説明文書として扱う。実装と本書が乖離した場合は**実装を正**とし、本書を実装に追従させる。
 > 既存の HTTP/WS 制御面の事実は変更しない（本 API は別名前空間として**追加**済み）。
 > アプリ内導線: メニューバー「API設定」→ リファレンス・テスター（[../../src/AutonaApiInfoWindow.py](../../src/AutonaApiInfoWindow.py)）。
 

@@ -39,7 +39,7 @@
 | バインド先 | `host = "0.0.0.0"` — **localhost 限定ではなく全 NIC で待ち受け** | [AutonaWebServer.py:70](../../src/AutonaWebServer.py) |
 | 認証 | **なし**。CORS は `cors_allowed_origins='*'` / Flask-CORS 全許可 | [AutonaWebServer.py:47-56](../../src/AutonaWebServer.py) |
 | Web UI ルート | `/`・`/scoreboard`・`/team`・`/web` が React UI（`web/build/index.html`）を配信。CLAUDE.md の記述と一致 | [AutonaWebServer.py:717-723](../../src/AutonaWebServer.py) |
-| スコアボード番号 | ルートは `<scoreboardNumber>` を取るが、現行は単一スコアボード（board1）が主。crew 系は board3 既定、`GetScoreboard()` は薄いラッパー | [src/AutonaScoreboardManager.py](../../src/AutonaScoreboardManager.py) / CLAUDE.md |
+| スコアボード番号 | ルートは `<scoreboardNumber>` を取る。現行は board1=1v1、board2=team、board3=crew を常時生成し、表示形式で切替。`/api/v1/` は board1/2 用操作を board3 へ投げる場合は拒否 | [src/AutonaScoreboardManager.py](../../src/AutonaScoreboardManager.py) / [src/AutonaApiV1.py](../../src/AutonaApiV1.py) |
 | X / Bluesky 投稿 | **UI ボタン専用**。`PostToX` / `PostToBsky` はスコアボードウィジェット内。**HTTP/WS にもホットキーにも露出していない** | [AutonaScoreboardWidget.py:1114-1243](../../src/AutonaScoreboardWidget.py) |
 | ホットキー | 9 アクション（後述）。Web ルートと操作が**重複**。Windows 専用（Win32 RegisterHotKey） | [src/AutonaHotkeys.py](../../src/AutonaHotkeys.py) |
 | OBS 連携 | OBS-websocket 不使用。`out/` ファイル + ブラウザソース + WS デルタ配信。**Autona は OBS に接続しない**（OBS 未接続でも Autona 側操作は成立） | [docs/architecture/current-architecture.md](current-architecture.md) |
@@ -164,7 +164,7 @@ WS 列は対応する Socket.IO イベントの有無。
 | ゲーム変更 `update-game` | #14 | アセット再ロードで重い・全 UI 影響 |
 | 大会 URL 設定 `set-tournament` | #44 | **コンテキスト総入替・Start.gg 通信・最重量** |
 | ブラケット再取得 `update-bracket` | #41 | Start.gg 通信・タイムアウトしうる（agent-pitfalls #11） |
-| テーマ切替 `set-light-mode` | #12 | **OBS オーバーレイの見た目が本番中に変わる** |
+| ~~テーマ切替 `set-light-mode`~~ | #12 | **削除済み**。ダーク固定化により API 化対象外 |
 | サムネ生成 | #34 | WebEngine で重い・連打で競合（agent-pitfalls #10） |
 
 ### C. 読み取り専用 API として先に提供
@@ -177,7 +177,7 @@ WS 列は対応する Socket.IO イベントの有無。
 | 試合一覧 / セット詳細 / 最終選択 set | #35 #36 #39 |
 | 実況者状態 | #37 |
 | 国の州一覧 | #45 |
-| 接続性・OBS 出力健全性（**新規・既存に無い**） | — `TBD` |
+| 接続性・OBS 出力健全性 | `GET /api/v1/health` 実装済み。`revision` / `currentGame` / `activeBoard` / `outLastWriteUnix` を返す |
 
 > 選手 DB（#40）は読み取りだが**個人情報を含みうる**ため C ではなく B 寄りで扱う（CLAUDE.md 機密ルール）。
 
@@ -194,7 +194,7 @@ WS 列は対応する Socket.IO イベントの有無。
 
 | 論点 | 不明点 |
 |------|--------|
-| scoreboardNumber の有効値 | board1/2/3 のどれが現行で意味を持つか。crew 系は board3 既定だが他ボードの実在は `TBD` |
+| scoreboardNumber の有効値 | `1`/`2`/`3`。board1=1v1、board2=team、board3=crew。board3 専用操作は `/api/v1/` 初回スコープ外 |
 | `set_team_data` のスキーマ | `data` の正確な形（キー・必須項目）が未文書化 |
 | 統計再取得系の副作用範囲 | #26〜#29 が Start.gg をどれだけ叩くか・結果の反映先 |
 | X / Bluesky の API 化是非 | 外部送信・認証情報・確認 UI の扱い（機密ルール） |
@@ -278,7 +278,7 @@ WS 列は対応する Socket.IO イベントの有無。
 - `GET /api/v1/scoreboards/{n}`（= #9）、`/swap`（= #22）
 - ゲーム/キャラ/バリアント/コントローラ/match 名（= #15〜#20）
 - 試合一覧 / セット詳細（= #35 #36 #39）
-- **接続性・健全性**（新規）: `GET /api/v1/health` — webserver 稼働・現在ゲーム・`out/` 最終更新時刻等。Companion の死活監視に有用（`TBD` 設計）
+- **接続性・健全性**: `GET /api/v1/health` — webserver 稼働・現在ゲーム・表示中ボード・`out/` 最終更新時刻等。Companion の死活監視に有用（実装済み）
 
 ### 操作 API（初回スコープ）
 - スコア ±1（team1/2）、swap、reset-scores、best-of/match/phase 設定
@@ -288,7 +288,7 @@ WS 列は対応する Socket.IO イベントの有無。
 - clear-all / reset-players / reset-match（破壊的 → confirm 必須）
 - load-set / pull-stream / pull-user（盤面上書き）
 - update-game / set-tournament / update-bracket（重い・コンテキスト影響）
-- set-light-mode（OBS 見た目）
+- set-light-mode（削除済み。再導入しない）
 
 ---
 
@@ -352,7 +352,8 @@ WS 列は対応する Socket.IO イベントの有無。
 ### 7.8 本番中の誤操作防止策
 
 - 破壊的操作（clear/reset-players/reset-match）は `confirm=true` 必須。
-- 重い/コンテキスト操作（set-tournament/update-game）は初回スコープ外 or 「非配信時のみ」ガード（`TBD`: 配信状態をどう判定するか）。
+- 重い/コンテキスト操作（set-tournament/update-game/update-bracket）は初回から提供済み。
+  `202 Accepted` + 実行中フラグで多重起動を防ぐ。配信中/非配信中の自動判定は未実装。
 - レート制限 / デバウンス（同一操作の連打吸収）。サムネ・統計の連打は既存でも競合注意（agent-pitfalls #10/#11）。
 
 ### 7.9 読み取り API と操作 API の分離
@@ -382,7 +383,7 @@ WS 列は対応する Socket.IO イベントの有無。
 8. clear-all / reset-players / reset-match（= #33 #32 #31）→ **`confirm=true` 必須**
 9. load-set / pull-stream / pull-user（= #38 #24 #25）→ 盤面上書き。confirm 推奨
 10. set-tournament / update-game / update-bracket（= #44 #14 #41）→ **実行中フラグで 409**・重い
-11. set-light-mode（= #12）→ OBS 見た目影響。操作ログ対象
+11. ~~set-light-mode（= #12）~~ → 削除済み。ダーク固定のため初回対象外。
 
 > 危険操作は全て **書き込み操作ログ（INFO）** の対象（D7・A-1）。重い操作（10）は多重起動ガード（D7・B-1）。
 

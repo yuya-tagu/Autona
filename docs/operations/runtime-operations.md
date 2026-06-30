@@ -20,7 +20,8 @@
 3. ゲーム選択（Title メニュー）→ アセットの非同期ロード 📄
 4. Start.gg 大会をロード（Startgg メニュー → Set tournament）📄
 5. OBS 側でブラウザソース/テキストソースが `http://localhost:{port}/...` と `out/` を参照していることを確認 📄
-   - ⚠️ 既定ポート（README/FEATURES は `5000`）と Web UI ルートの実値は要確認 → [../product/current-features.md](../product/current-features.md)
+   - 既定ポートは `5000`。設定の `general.webserver_port` で変更可 ✅
+   - Web UI は `/`・`/web`・`/scoreboard`（board1）・`/team`（board2）✅
 6. Web リモート操作を使う場合、操作端末から該当 URL に接続できることを確認 📄
 
 > ⚠️ **起動順の厳密な依存**（Web サーバーが上がる前に OBS を繋ぐと何が起きるか等）は `TBD`。
@@ -49,7 +50,7 @@
 
 ## Network & security（外部制御 API / Web リモート）
 
-> ⚠️ **重要（ADR-001 D5 のリスク受容の前提条件）**。外部制御 API（`/api/v1/`・計画中）と既存 Web 制御面は
+> ⚠️ **重要（ADR-001 D5 のリスク受容の前提条件）**。外部制御 API（`/api/v1/`・実装済み）と既存 Web 制御面は
 > **認証なし**で動く。Web サーバーは `0.0.0.0`（全 NIC）にバインドし、CORS 全許可。
 > = **同一 LAN に到達できる端末は誰でも全操作（スコア変更・リセット・大会ロード等の破壊的操作含む）を叩ける。**
 
@@ -70,7 +71,8 @@
 
 ## OBS connection handling
 
-- OBS-websocket は使わない。連携は**ブラウザソース + テキスト/JSON ファイル参照**のみ 📄
+- Autona 本体は OBS へ直接接続しない。通常連携は**ブラウザソース + テキスト/JSON ファイル参照** 📄
+- Advanced Scene Switcher など OBS 側ツールから Autona を制御する場合は、実装済みの `/api/v1/` を HTTP で叩く ✅
 - Autona 再起動時、ブラウザソースは再読込が必要な場合がある（`TBD`: 自動再接続の有無）
 - `out/program_state.json` と個別テキストファイルは状態変更ごとに更新される ✅
 
@@ -78,8 +80,9 @@
 
 - スコア +1/−1、Swap、各種 Reset、Clear All は HTTP/WS ルートとしても提供 ✅
 - クルーバトル時はストック増減・アクティブ選手切替の専用操作あり ✅
-- ⚠️ 「自動セット更新」「ステージストライクからのスコア自動制御」等の設定は General タブにあるが、
-  ステージストライク自体は削除済みのため**該当設定の現状は要確認**（`TBD`）
+- 「自動セット更新」「自動スコア更新」は General タブの設定で制御する ✅
+- ステージストライクの操作 UI / Web ルートは削除済み。Start.gg parser には互換データとして
+  `stage_strike` / `ruleset` を読む処理が残るが、現行の外部制御対象ではない ✅
 
 ## Recovery procedure
 
@@ -95,7 +98,8 @@
 - **Start.gg クエリ timeout**（20 秒）: 重いクエリ/不安定回線で空データが返る → null-safe で表示は壊れない設計 ✅
 - **複数 GitHub アカウントによる push 失敗**: 開発側の話（運用には無関係）✅（CLAUDE.md）
 - **`__pycache__` のスタール**: 開発時のみ。`sys.dont_write_bytecode=True` で対策済 ✅
-- `TBD`: ポート競合（5000 が他プロセス使用中）時の挙動
+- **ポート競合（既定 5000）**: 起動時に競合プロセスを検出し、Autona 関連の古いプロセスなら終了を試みる。
+  それでも解放できない場合はダイアログで手動終了を促す ✅
 - `TBD`: OBS とのファイル/URL 参照ずれ時の症状切り分け手順
 
 ## Manual fallback procedures

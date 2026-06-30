@@ -71,7 +71,8 @@ LAN 内運用を前提に**既存の挙動を引き継ぐ**。新 API も認証�
 - **読み取り**: `GET /api/v1/state` + `/health`（新規）+ 既存 WS 差分購読の踏襲（candidates §6）
 - **安全操作**: スコア±1 / swap-teams / score:reset / set 情報設定（best-of・match・phase）
 - **危険操作**: 破壊的（clear-all / reset-players / reset-match）と重い操作（set-tournament /
-  update-game / update-bracket / set-light-mode）も提供。ただし **D7 のガードを必須**とする。
+  update-game / update-bracket）も提供。ただし **D7 のガードを必須**とする。
+  `set-light-mode` はテーマ切替機能ごと削除済みのため対象外。
 - **初回も除外**: GUI ウィンドウ起動（open-set）/ X・Bluesky 投稿（外部送信・機密）/ 選手 DB 全量（個人情報）。
 
 ### D7（論点6・誤操作防止／ログ／ロック）

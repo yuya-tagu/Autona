@@ -3,7 +3,7 @@
 外部制御 API / Companion / Stream Deck / OBS 連携拡張を**安全に足すための変更影響マップ**。
 アーキの「事実」（レイヤー構成・モジュール責務・データフロー・状態キーパス等）は
 **ここでは再記述せず正本へリンクする**。本書は「変更時に触る／避ける構造」と
-「既存の制御面」「未確定事項」に絞る。
+「既存の制御面」「実装済みの外部制御 API」「残課題」に絞る。
 
 事実情報の参照先（正本・調査ログ）:
 
@@ -53,6 +53,10 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
 - HTTP ルートと Socket.IO イベントが**対で**定義される（同じ操作を両方で提供）✅
 - 実処理は [src/AutonaWebServerActions.py](../../src/AutonaWebServerActions.py) に委譲 ✅
 - ⚠️ **HTTP ルートと WS イベントが二重定義**のため、片方だけ直すと不整合になる — 制御面拡張で要注意 ✅
+- 外部制御 API は **`/api/v1/` として実装済み**。既存 Flask+SocketIO サーバーに Blueprint を登録し、
+  既存ルートを壊さず `WebServerActions` を再利用する ✅
+  - 実装: [src/AutonaApiV1.py](../../src/AutonaApiV1.py)
+  - 登録: [src/AutonaWebServer.py](../../src/AutonaWebServer.py)
 - 既存ルート群（抜粋・確認済）:
   - 状態: `GET /program-state`、`socketio 'program_state' / 'program-state-update'`
   - スコア: `/score`(POST)、`/scoreboard<N>-team<T>-scoreup|scoredown|color-<c>`
@@ -63,13 +67,15 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
   - マスタ: `/games`、`/current-game`、`/match-names`、`/characters`、`/variants`、`/controllers`
   - サムネ: `/scoreboard<N>-get-thumbnail-<fmt>`
 
-## 未確定事項（外部 API 設計前に確定する）
+## 確定済み事項 / 残課題
 
 | 項目 | 現状 | 確認方法 |
 |------|------|---------|
-| 完全な HTTP/WS ルート一覧 | 上記は抜粋。**全量は未棚卸し** ⚠️ | [../tasks/investigate-external-control-api.md](../tasks/investigate-external-control-api.md) で全列挙 |
-| 既定 Web サーバーポート | README/FEATURES/CLAUDE は `5000` だが実値未確認 `TBD` | `SettingsManager` の既定値を確認 |
-| Web UI ルート | CLAUDE.md は `/web`（既定）`/scoreboard`（board1）`/team`（board2）。FEATURES/README は旧記述で不整合 ⚠️ | **CLAUDE.md を正**とし要再確認 |
+| 完全な HTTP/WS ルート一覧 | HTTP 約 45 + 対応 Socket.IO を棚卸し済み ✅ | [external-control-api-candidates.md](external-control-api-candidates.md) §3 |
+| 外部制御 API | `/api/v1/` 実装済み ✅ | [../../src/AutonaApiV1.py](../../src/AutonaApiV1.py) |
+| 既定 Web サーバーポート | `SettingsManager.Get("general.webserver_port", 5000)` = **5000**。設定で変更可 ✅ | [../../src/AutonaWebServer.py](../../src/AutonaWebServer.py) |
+| Web UI ルート | `/`・`/web`・`/scoreboard`（board1）・`/team`（board2）✅ | [../../src/AutonaWebServer.py](../../src/AutonaWebServer.py) |
+| 残課題 | LAN 外運用時の認証/認可、配信中判定による危険操作ガード、`set_team_data` の API 化要否 | ADR-001 Revisit 条件 / API spec Open items |
 
 ## OBS 連携の方針（変更時の制約）
 
@@ -95,7 +101,7 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
 2. **StateManager** — 状態変更の単一経路。外部からの書き込みは必ずここを通す（バイパス禁止）
 3. **シングルトン初期化順** — 新サービス（外部制御リスナ等）の起動位置を誤ると初期化破綻（制約は agent-pitfalls #2）
 4. **スレッド境界** — WebServer は QThread。外部 API も別スレッドなら StateManager のロックを尊重
-5. **ポート/ルーティング** — 既定ポート・既存ルートと衝突しない設計（上記「未確定事項」の確定が前提）
+5. **ポート/ルーティング** — `/api/v1/` と既存ルートの衝突回避、既定ポート `5000` の運用影響
 
 > 具体的な影響整理は [../changes/external-control-impact-analysis.md](../changes/external-control-impact-analysis.md)、
 > 設計境界の決定は [../decisions/ADR-001-external-control-api-boundary.md](../decisions/ADR-001-external-control-api-boundary.md) を参照。
