@@ -48,7 +48,7 @@
 ### Edit メニュー
 - **Always on top** — ウィンドウを常に最前面に表示
 - **Light mode** — ライトテーマ切替（要再起動）
-- **Toggle widgets** — スコアボード / 実況 / サムネイル設定 / 結果設定 / 大会情報 / 選手リスト / ブラケット / メモ / 統計 の表示・非表示トグル
+- **Toggle widgets** — スコアボード / 実況 / サムネイル設定 / 結果設定 / 大会情報 / ブラケット / 統計 の表示・非表示トグル
 - **Migrate Layout** — 古いレイアウト保存状態を現行バージョンへ移行
 - **Program Language** — アプリ UI の言語（システム + 7 言語）
 - **Game Asset Language** — ゲームアセット（キャラ名等）の言語
@@ -207,7 +207,7 @@
 
 ## 10. 選手リスト
 
-[src/AutonaPlayerListWidget.py](src/AutonaPlayerListWidget.py)・[src/AutonaPlayerList.py](src/AutonaPlayerList.py)。
+[src/AutonaPlayerListWidget.py](src/AutonaPlayerListWidget.py)・[src/AutonaPlayerList.py](src/AutonaPlayerList.py)。STATS ドック内の「選手一覧」タブとして表示（独立ドックから移設）。
 
 - スロット数 / スロットあたり選手数 / 選手あたりキャラ数
 - Start.gg Standings から一括読込
@@ -217,20 +217,19 @@
 
 ## 11. 統計・分析
 
-### Stats ウィジェット（[src/AutonaStatsWidget.py](src/AutonaStatsWidget.py)）
-- Head-to-Head / Last Sets / Tournament History
+STATS ドック（[src/AutonaStatsWidget.py](src/AutonaStatsWidget.py)）の内部タブに集約。
 
-### Analysis ウィジェット（[src/AutonaAnalysisWidget.py](src/AutonaAnalysisWidget.py)）
-- 全試合一覧（ラウンド・シード・選手・スコア）
-- Upset Factor / Loser's Run / SeedOver
-- Stream Queue 反映
-- 列ソート対応
+- **Head-to-Head / Last Sets / Tournament History**（内蔵タブ）
+- **この大会の試合一覧**（[src/AutonaAnalysisWidget.py](src/AutonaAnalysisWidget.py) パネル）
+  - 全試合一覧（ラウンド・シード・選手・スコア）
+  - Upset Factor / Loser's Run / SeedOver
+  - Stream Queue 反映 / 列ソート対応
+- **選手一覧**（[src/AutonaPlayerListWidget.py](src/AutonaPlayerListWidget.py) パネル） — 選手一覧の編集・スタンディング読み込み・結果テキスト生成
 
 ---
 
-## 12. メモ・補助ウィジェット
+## 12. 補助ウィジェット
 
-- **メモウィジェット**（[src/AutonaNotesWidget.py](src/AutonaNotesWidget.py)） — 4 エリア
 - **アラート通知**（[src/AutonaAlertNotification.py](src/AutonaAlertNotification.py)）
 
 ---

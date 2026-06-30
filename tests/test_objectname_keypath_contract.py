@@ -84,11 +84,7 @@ def test_keypath_objectnames_unchanged():
 
 # objectNames assigned programmatically (not in .ui) that also feed keypaths.
 PROGRAMMATIC_TOKENS = {
-    "src/AutonaNotesWidget.py": [
-        'setObjectName(f"notes_widget_{index+1}")',
-        'f"notes.{widget.objectName()}.title"',
-        'f"notes.{widget.objectName()}.contents"',
-    ],
+    # AutonaNotesWidget removed (NOTES tab deleted) — no notes keypaths remain.
     "src/AutonaScoreboardPlayerWidget.py": [
         'self.custom_textbox.setObjectName("custom_textbox")',
     ],

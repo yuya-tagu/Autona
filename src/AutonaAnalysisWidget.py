@@ -137,7 +137,10 @@ def _is_real_set(s):
     return not any(i == -1 for i in ids)
 
 
-class AutonaAnalysisWidget(QDockWidget):
+# NOTE: Formerly a QDockWidget (the "ANLYSE" tab). Demoted to a plain
+# QWidget panel so it can be embedded as a sub-tab inside the STATS dock
+# ("この大会の試合一覧").
+class AutonaAnalysisWidget(QWidget):
     instance: "AutonaAnalysisWidget" = None
 
     @staticmethod
@@ -146,14 +149,10 @@ class AutonaAnalysisWidget(QDockWidget):
 
     def __init__(self, *args):
         super().__init__(*args)
-        self.setWindowTitle(QApplication.translate("app", "Analysis"))
-        self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
 
-        root = QWidget()
-        root.setLayout(QVBoxLayout())
-        root.layout().setContentsMargins(6, 6, 6, 6)
-        root.layout().setSpacing(6)
-        self.setWidget(root)
+        self.setLayout(QVBoxLayout())
+        self.layout().setContentsMargins(6, 6, 6, 6)
+        self.layout().setSpacing(6)
 
         # ── Top bar: [fetch button] [status] ──(stretch)── [search] ──
         # Fetch and filter are independent actions — fetch always refreshes
@@ -182,7 +181,7 @@ class AutonaAnalysisWidget(QDockWidget):
         self.filterEdit.setClearButtonEnabled(True)
         topBar.addWidget(self.filterEdit)
 
-        root.layout().addLayout(topBar)
+        self.layout().addLayout(topBar)
 
         # ── Table ──
         self.table = QTableWidget()
@@ -211,7 +210,7 @@ class AutonaAnalysisWidget(QDockWidget):
             header.setSectionResizeMode(col, QHeaderView.ResizeMode.Stretch)
             self.table.setColumnWidth(col, TEXT_COL_MIN_WIDTH)
 
-        root.layout().addWidget(self.table)
+        self.layout().addWidget(self.table)
 
         # ── Multi-PG fetch state ──
         self._phases = []               # from tournament_phases_updated

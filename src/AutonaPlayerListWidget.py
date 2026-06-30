@@ -25,7 +25,11 @@ class AutonaPlayerListWidgetSignals(QObject):
     characters_per_player_changed = Signal(int)
 
 
-class AutonaPlayerListWidget(QDockWidget):
+# NOTE: Formerly a QDockWidget (the "PLAYERS" tab). Demoted to a plain
+# QWidget panel so it can be embedded as a sub-tab inside the STATS dock
+# ("選手一覧"). The `instance` singleton and `signals` are preserved —
+# AutonaScoreboardWidget still reaches in via AutonaPlayerListWidget.instance.
+class AutonaPlayerListWidget(QWidget):
     instance: "AutonaPlayerListWidget" = None
 
     def __init__(self, *args, base="player_list"):
@@ -37,11 +41,8 @@ class AutonaPlayerListWidget(QDockWidget):
 
             self.playerList = AutonaPlayerList(base=base)
 
-            self.setWindowTitle(QApplication.translate("app", "Player List"))
-            self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
-            self.widget = QWidget()
-            self.setWidget(self.widget)
-            self.widget.setLayout(QVBoxLayout())
+            self.setLayout(QVBoxLayout())
+            self.layout().setContentsMargins(4, 4, 4, 4)
 
             topOptions = QWidget()
             # Stack the spinbox row and the action-button row vertically so
@@ -53,7 +54,7 @@ class AutonaPlayerListWidget(QDockWidget):
             topOptions.layout().setSpacing(4)
             topOptions.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
 
-            self.widget.layout().addWidget(topOptions)
+            self.layout().addWidget(topOptions)
 
             # Row 1: three count spinboxes (label above each). Built from bare
             # layouts — no QWidget wrappers — to keep the tree flat.
@@ -104,7 +105,7 @@ class AutonaPlayerListWidget(QDockWidget):
             self.generateAltTextButton.clicked.connect(self.AltTextWindow)
             buttonRow.addWidget(self.generateAltTextButton)
 
-            self.widget.layout().addWidget(self.playerList)
+            self.layout().addWidget(self.playerList)
 
             self.slotWidgets = []
 
