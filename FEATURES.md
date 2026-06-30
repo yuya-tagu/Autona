@@ -33,7 +33,7 @@
 23. [ゲーム切替・Modded Content](#23-ゲーム切替modded-content)
 24. [レイアウト・ウィンドウ操作](#24-レイアウトウィンドウ操作)
 25. [設定・環境](#25-設定環境)
-26. [多言語・ローカライズ](#26-多言語ローカライズ)
+26. [ローカライズ](#26-ローカライズ)
 27. [ヘルプ・サポートリンク](#27-ヘルプサポートリンク)
 28. [自動アップデート](#28-自動アップデート)
 29. [配信オーバーレイ出力](#29-配信オーバーレイ出力)
@@ -43,11 +43,10 @@
 
 ## 1. メインメニュー
 
-[src/Autona.py](src/Autona.py) の QMenuBar。
+[src/Autona.py](src/Autona.py) のサイドバー / Help & Settings メニュー。
 
-### Edit メニュー
+### Help & Settings メニュー
 - **Always on top** — ウィンドウを常に最前面に表示
-- **Light mode** — ライトテーマ切替（要再起動）
 - **Toggle widgets** — スコアボード / 実況 / サムネイル設定 / 結果設定 / 大会情報 / ブラケット / 統計 の表示・非表示トグル
 - **Migrate Layout** — 古いレイアウト保存状態を現行バージョンへ移行
 - **Program Language** — アプリ UI の言語（システム + 7 言語）
@@ -55,6 +54,8 @@
 - **Tournament term language** — トーナメント用語（Winners/Losers 等）の言語
 - **Help** — Wiki / フォーラム / バグ報告リンク
 - **Settings** — 設定ダイアログ
+- **API Settings** — `/api/v1/` 外部制御 API のリファレンス / テスター
+- **OBS / Advanced Scene Switcher** — OBS 側ツールから Autona API を叩くための接続ガイド
 - **About** — アプリ情報・貢献者表示
 
 ### Startgg メニュー
@@ -328,9 +329,11 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 
 ## 20. Web API エンドポイント
 
-[src/AutonaWebServerActions.py](src/AutonaWebServerActions.py)。
+[src/AutonaWebServer.py](src/AutonaWebServer.py) / [src/AutonaApiV1.py](src/AutonaApiV1.py) / [src/AutonaWebServerActions.py](src/AutonaWebServerActions.py)。
 
-スコア操作 / セット管理 / 統計取得 / 選手情報 / 大会データロード / マスタデータ（characters・variants・controllers・match-names）など約 30 種の REST ルート + WebSocket。
+- 既存制御面: スコア操作 / セット管理 / 統計取得 / 選手情報 / 大会データロード / マスタデータ（characters・variants・controllers・match-names）など HTTP ルート + Socket.IO。
+- 外部制御 API: `/api/v1/` 名前空間で実装済み。読み取り、スコア操作、set 情報更新、破壊的操作の `confirm:true`、重い操作の `202 Accepted` + 多重起動ガードに対応。
+- API Settings 画面からエンドポイント一覧・curl 例・テスターを確認できる。
 
 ---
 
@@ -340,7 +343,7 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 
 | キー | 動作 |
 |------|------|
-| Ctrl+Shift+F1〜F4 | チーム 1/2 スコア +1/−1 |
+| Ctrl+Shift+1〜4 | チーム 1/2 スコア +1/−1 |
 | Ctrl+Shift+R | リセット |
 | Ctrl+Shift+S | スワップ |
 | Ctrl+Shift+O | セット読込 |
@@ -384,7 +387,6 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 
 ### その他
 - **Always on top** トグル
-- **Light mode** トグル
 - **Migrate Layout** — 旧保存状態を現行バージョンへ変換
 
 ---
@@ -412,7 +414,7 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 
 ---
 
-## 26. 多言語・ローカライズ
+## 26. ローカライズ
 
 3 系統の言語設定を独立して持てる。
 
@@ -422,7 +424,7 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 | **Game Asset Language** | ゲームアセット（キャラ名・ステージ名） |
 | **Tournament term language** | 大会用語（Winners/Losers 等） |
 
-対応言語: 英語 / 日本語 / ポルトガル語 / スペイン語 / フランス語 / 中国語（簡体・繁体） / イタリア語 の 8 言語。システム言語にも追従可能。変更後は再起動が必要。
+対応言語: 日本語 / 英語 の 2 言語。システム言語にも追従可能。変更後は再起動が必要。
 
 ---
 

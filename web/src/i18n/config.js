@@ -7,17 +7,8 @@ i18n.use(LanguageDetector).init({
     en: {
       translations: require("./locales/en.json"),
     },
-    pt: {
-      translations: require("./locales/pt.json"),
-    },
-    es: {
-      translations: require("./locales/es.json"),
-    },
     ja: {
       translations: require("./locales/ja.json"),
-    },
-    fr: {
-      translations: require("./locales/fr.json"),
     },
   },
   detection: {
@@ -30,6 +21,6 @@ i18n.use(LanguageDetector).init({
   interpolation: { escapeValue: false },
 });
 
-i18n.languages = ["en", "pt", "es", "ja", "fr"];
+i18n.languages = ["en", "ja"];
 
 export default i18n;

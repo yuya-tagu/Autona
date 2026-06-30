@@ -1,7 +1,8 @@
 # External Control Impact Analysis
 
-> ⚠️ **これは影響分析のプレースホルダー**。この段階で API 設計を確定しない。
-> 既存運用への影響の「観点」を洗い出すことが目的。設計境界は
+> **ステータス: 外部制御 API 実装後の影響分析。**
+> 既存運用への影響と、今後の Companion / Stream Deck / OBS 連携時に守るべき制約を整理する。
+> 設計境界は
 > [../decisions/ADR-001-external-control-api-boundary.md](../decisions/ADR-001-external-control-api-boundary.md)、
 > 事前調査は [../tasks/investigate-external-control-api.md](../tasks/investigate-external-control-api.md)。
 
@@ -9,26 +10,26 @@
 
 ## Purpose
 
-Companion / Stream Deck 連携・外部制御 API・OBS 連携拡張を追加する前に、
-**既存の実運用を壊さないために検討すべき影響**を網羅的に列挙する。
+実装済みの `/api/v1/` と、今後の Companion / Stream Deck 連携・OBS 連携拡張によって
+**既存の実運用を壊さないために検討すべき影響**を列挙する。
 
 ## Background
 
 - Autona は既に実運用レベルで完成しており、配信現場が既存挙動に依存している ✅
 - 既に **Flask + Socket.IO の HTTP/WS 制御面**が存在する（HTTP ルート **約 45**＋対応 Socket.IO イベント）✅
   → 外部制御は「ゼロからの新設」ではなく「既存制御面の上での拡張」になる
-- OBS-websocket は不使用方針。OBS 連携は `layout/` HTML + `out/` ファイル参照 📄
+- 外部制御 API は `/api/v1/` として既存 Flask+SocketIO サーバーに実装済み ✅
+- Autona 本体は OBS へ直接接続しない。通常の OBS 連携は `layout/` HTML + `out/` ファイル参照 📄
 
 > 操作の完全棚卸し・API 化候補・分類・endpoint 案は
 > [../architecture/external-control-api-candidates.md](../architecture/external-control-api-candidates.md) を正とする。
 > 本書はそれを参照し、**既存運用への影響**に絞る。
 
-## Proposed change
+## Implemented change
 
-⚠️ 未確定。想定される変更の方向性のみ（設計確定は ADR-001 で行う）:
-
-- 外部（Companion / Stream Deck / その他ツール）から Autona を制御する API/トリガー
-- 既存の HTTP/WS ルートを使う案 / 専用アダプタ層を新設する案（→ ADR-001）
+- 外部（Companion / Stream Deck / その他ツール）から Autona を制御する `/api/v1/` を追加済み
+- 既存の HTTP/WS ルートは温存し、新 API は `WebServerActions` を再利用する薄いラッパーとして実装
+- 書き込み操作ログ、破壊的操作の `confirm:true`、重い操作の `202 Accepted` + 多重起動ガードを実装
 
 ## Existing workflows affected
 
@@ -76,7 +77,7 @@ Companion / Stream Deck 連携・外部制御 API・OBS 連携拡張を追加す
 
 この変更で**やらないこと**（ROADMAP / 方針より）:
 
-- OBS-websocket 連携 📄（検討外）
+- Autona 本体から OBS を直接制御する機能（OBS-websocket クライアント化等）📄
 - Discord 連携 📄（検討外）
 - YouTube / Twitch API 連携 📄（検討外）
 - 認証/認可基盤の大規模新設（必要性が確定するまで）⚠️
@@ -104,19 +105,15 @@ Companion / Stream Deck 連携・外部制御 API・OBS 連携拡張を追加す
 - ✅ **初回スコープ**: 操作系も広く一括（危険操作も confirm 付き）= D6。
 - ✅ **誤操作防止**: 書き込み操作ログ INFO（A-1）/ 重い操作は実行中フラグ 409（B-1）/ 破壊的操作 confirm 必須（C-2）= D7。
 
-## Open questions（実装フェーズで確定）
+## Open questions / Revisit items
 
-- Companion / Stream Deck が求める**プロトコル**は HTTP / WS / どちら？ `TBD`
-- 重い操作（set-tournament/update-game/update-bracket）の**多重実行ガードが既存コードに在るか**（無ければ新 API 層で実装）⚠️
+- Companion / Stream Deck 側の具体プリセット・ボタン設計（API は HTTP、フィードバックは既存 Socket.IO を購読）`TBD`
 - 配信中/非配信中を Autona が**判定する手段**はあるか（将来の配信中ガードの前提・Revisit 条件）`TBD`
 - `set_team_data` の **payload スキーマ**（必須キー）`TBD`
 - ステージストライク削除後に残る `assets/rulesets.json` の扱いは？ `TBD`
 
 ## Recommended next steps
 
-1. [../tasks/investigate-external-control-api.md](../tasks/investigate-external-control-api.md) を実施し、
-   既存制御面・ポート・ルーティングの実態を確定する
-2. 調査結果で本ファイルの ⚠️ / `TBD` を埋める
-3. [../decisions/ADR-001-external-control-api-boundary.md](../decisions/ADR-001-external-control-api-boundary.md) で
-   責務境界（既存拡張 vs 専用アダプタ）を決定する
-4. 決定後、実装チケットを `tasks/` に切り出す（本ドキュメント作業の範囲外）
+1. `/api/v1/` の手動確認手順を運用チェックリストへ統合する
+2. Companion / Stream Deck 用の実プリセットを作る段階で、必要な読み取り値・ボタン粒度を再確認する
+3. LAN 外運用や複数オペレーター運用が出たら ADR-001 の認証/認可方針を Revisit する

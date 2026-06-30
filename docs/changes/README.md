@@ -19,4 +19,4 @@
 
 | ファイル | 内容 |
 |---------|------|
-| [external-control-impact-analysis.md](external-control-impact-analysis.md) | 外部制御 API / Companion / Stream Deck 連携の影響分析（プレースホルダー） |
+| [external-control-impact-analysis.md](external-control-impact-analysis.md) | 外部制御 API / Companion / Stream Deck 連携の影響分析（実装済み API の運用リスク含む） |

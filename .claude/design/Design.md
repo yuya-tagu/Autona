@@ -131,14 +131,14 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 
 ### 2.2 React Web UI
 
-**目的**: オペレーターが手元のスマホ・タブレット・別 PC からスコアボードやステージストライクを操作する画面。
+**目的**: オペレーターが手元のスマホ・タブレット・別 PC からスコアボードを操作する画面。
 
 **技術スタック**:
 - React 19 + TypeScript 5
 - Redux Toolkit（slice 単位で分割）
 - MUI 7（Material UI）
 - Socket.IO クライアント + REST API
-- i18next（多言語化）
+- i18next（日英ローカライズ）
 
 **設計ルール**:
 
@@ -150,7 +150,7 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 | **R-React-4** | スタイルは MUI テーマ（`themes.js`）経由で適用、`sx` props は許容、`style={{}}` ハードコードは避ける |
 | **R-React-5** | フォーム要素は `size="small"` で統一し、密度を高める |
 | **R-React-6** | `applySavedDeltas` のバッチ間隔は **既定値 100ms、上限 200ms**（旧値 1000ms は遅延が大きすぎる） |
-| **R-React-7** | テーマ（ダーク/ライト）の正本は **StateManager / SettingsManager 側**に置き、PyQt と同期する。localStorage は初期表示のチラつき防止・最終表示状態のキャッシュ用途に限定する |
+| **R-React-7** | テーマは**ダーク固定**。React Web UI は `ThemeShell.tsx` で `darkTheme` を常用し、StateManager / SettingsManager とのライト/ダーク同期は行わない |
 
 **ページ一覧** — 詳細は §4.2 参照。
 
@@ -267,7 +267,8 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 
 ##### `score.{N}` — スコアボード
 
-`{N}` は常に `"1"`（複数スコアボード対応の互換性のために残置）。
+`{N}` は `"1"` / `"2"` / `"3"`。board1=1v1、board2=team、board3=crew battle。
+board3 は `AutonaCrewBattleWidget` であり、board1/2 用の通常スコア操作とは一部 API が異なる。
 
 ```
 score.{N}
@@ -561,10 +562,9 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | 2 | `Thumbnail Settings` | `AutonaThumbnailSettingsWidget` | サムネイルテンプレ選択・背景指定・プレビュー・PNG/JPG 保存・クリップボードコピー | `thumbnail_config.*`（SettingsManager） | `score.*`, `tournamentInfo.*`, `thumbnail_config.*` | ✓（条件付き） |
 | 3 | `Result Settings` | `AutonaResultSettingsWidget` | リザルトレイアウト選択・選手入力・プレビュー・PNG/JPG 保存・クリップボードコピー | `result_config.*`, `result_players` | `tournamentInfo.*`, `result_players` | ✓ |
 | 4 | `Bracket` | `AutonaBracketWidget` | フェーズグループ選択・ブラケット表示・出力範囲指定 | `bracket.*` | `bracket.*`, `score.{N}.team.*` | ✓ |
-| 5 | `Scoreboard` | `AutonaScoreboardManager`（薄ラッパー）→ `AutonaScoreboardWidget` | スコア入力・選手編集・ステージ管理・セット読み込み | `score.{N}.*` | `score.{N}.*`, `game.*` | ✓ |
-| 6 | `Stage` | `AutonaScoreboardStageWidget` | ステージストライク UI（運用側） | `score.{N}.stage_strike` | 同上, `ruleset` | ✗（hidden） |
-| 7 | `Commentary` | `AutonaCommentaryWidget` | 実況者の名前・SNS・キャラクター入力 | `commentary.{N}.*` | `commentary.{N}.*` | ✓ |
-| 8 | `Statistics` | `AutonaStatsWidget` | 内部 `QTabWidget` で複数ビューを集約（下記 §4.1.0） | （read-only） | `score.{N}.recent_sets`, `last_sets`, `upset_factor` ほか | ✓ |
+| 5 | `Scoreboard` | `AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget` | board1=1v1、board2=team、board3=crew のスコア入力・選手編集・セット読み込み | `score.{N}.*` | `score.{N}.*`, `game.*` | ✓ |
+| 6 | `Commentary` | `AutonaCommentaryWidget` | 実況者の名前・SNS・キャラクター入力 | `commentary.{N}.*` | `commentary.{N}.*` | ✓ |
+| 7 | `Statistics` | `AutonaStatsWidget` | 内部 `QTabWidget` で複数ビューを集約（下記 §4.1.0） | （read-only） | `score.{N}.recent_sets`, `last_sets`, `upset_factor` ほか | ✓ |
 
 > **NOTE タブ（`AutonaNotesWidget`）は廃止**。`PLAYERS`（`AutonaPlayerListWidget`）と `ANLYSE`（`AutonaAnalysisWidget`）は**トップレベルのドックではなくなり**、`Statistics` ドック内の `QTabWidget` のサブタブとして埋め込まれた（いずれも `QDockWidget` → `QWidget` パネルに降格）。`AutonaPlayerListWidget.instance` / `.signals` は維持され、`AutonaScoreboardWidget` からの参照は従来どおり動作する。
 
@@ -599,7 +599,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 
 | パターン | 内容 |
 |---------|------|
-| 単一スコアボード前提 | 全ドックは「スコアボード番号 = 1」を前提に動く（複数スコアボード非対応） |
+| スコアボード番号 | board1=1v1、board2=team、board3=crew。画面表示は `scoreboard.battle_format`（`singles` / `team` / `crew`）で切り替える |
 | 編集 → state 即時反映 | `editingFinished` / `valueChanged` 等で `StateManager.Set` を呼ぶ。バッチ操作は `SaveBlock()` で囲む |
 | 設定ダイアログは別 QDialog | ドック自身は設定 UI を持たず、`AutonaSettingsWindow` に集約 |
 
@@ -609,9 +609,10 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 
 | ルート | コンポーネント | 主目的 | 接続先 |
 |-------|-------------|------|------|
-| `/scoreboard` | `ScoreboardPage` | スコア・選手・コメンテーターの操作 | Socket.IO + REST |
-| `/stage-strike-app` | `StageStrikePage` | ステージストライク操作 | Socket.IO（`stage_strike_*`） |
-| `*`（その他） | →`/stage-strike-app` にリダイレクト | — | — |
+| `/` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（既定） | Socket.IO + REST |
+| `/web` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
+| `/scoreboard` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
+| `/team` | `ScoreboardPage` | チーム用スコアボード操作（board2） | Socket.IO + REST |
 
 #### 4.2.1 ScoreboardPage コンポーネント階層
 
@@ -631,17 +632,11 @@ ScoreboardPage (function component)
 └── Clear All Button (REST: /scoreboard{N}-clear-all)
 ```
 
-#### 4.2.2 StageStrikePage コンポーネント階層
+#### 4.2.2 StageStrikePage（削除済み）
 
-```
-StageStrikePage (class component)
-├── NoRulesetError       (条件表示)
-├── StageCard ×N         (ステージ個別の操作)
-├── StagePromptText      (現在のフェーズ説明)
-├── RpsDialog            (じゃんけん勝者選択)
-├── PlayerWonButton      (試合勝者選択)
-└── FooterControls       (Undo/Redo/Reset)
-```
+旧 `/stage-strike-app` / `StageStrikePage` は現行ビルドに存在しない。
+Start.gg parser には互換データとして `stage_strike` / `ruleset` を読む処理が残るが、
+React Web UI の操作画面・外部制御 API の対象ではない。
 
 #### 4.2.3 React 共通コンポーネント
 
@@ -1151,10 +1146,10 @@ OBS HTML レイアウト（`layout/scoreboard*` `bracket*` `recent_sets/` `comme
 | アクションキー | デフォルト | Signal | 動作 |
 |--------------|-----------|--------|------|
 | `load_set` | `Ctrl+Shift+O` | `AutonaHotkeys.signals.load_set` | 次のセットを読み込み |
-| `team1_score_up` | `Ctrl+Shift+F1` | `team1_score_up` | チーム 1 スコア +1 |
-| `team1_score_down` | `Ctrl+Shift+F2` | `team1_score_down` | チーム 1 スコア -1 |
-| `team2_score_up` | `Ctrl+Shift+F3` | `team2_score_up` | チーム 2 スコア +1 |
-| `team2_score_down` | `Ctrl+Shift+F4` | `team2_score_down` | チーム 2 スコア -1 |
+| `team1_score_up` | `Ctrl+Shift+1` | `team1_score_up` | チーム 1 スコア +1 |
+| `team1_score_down` | `Ctrl+Shift+2` | `team1_score_down` | チーム 1 スコア -1 |
+| `team2_score_up` | `Ctrl+Shift+3` | `team2_score_up` | チーム 2 スコア +1 |
+| `team2_score_down` | `Ctrl+Shift+4` | `team2_score_down` | チーム 2 スコア -1 |
 | `reset_scores` | `Ctrl+Shift+R` | `reset_scores` | スコアリセット |
 | `swap_teams` | `Ctrl+Shift+S` | `swap_teams` | チーム入れ替え |
 | `refresh_phase_group` | `Ctrl+Shift+P` | `refresh_phase_group` | フェーズグループの再取得 |
@@ -1507,7 +1502,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 | **T-10** | ~~テーマ切替の PyQt⇄React 同期~~ | §5.4 | — | ❌ 撤回（2026-06-28、§5.4） |
 | **T-11** | `BlockSaving()` / `ReleaseSaving()` の手動ペアを `with StateManager.SaveBlock():` に置き換え | §3.2.2 R-Sync-2 | `AutonaScoreboardManager` / `StatsUtil` / `BasePlayerWidget` / `PlayerListSlotWidget` / `PlayerList` / `PlayerListWidget` / `ScoreboardWidget` の小〜中規模ペア。既に try/finally で守られている長大処理と lambda タプル式 / 巨大 __init__ は意図的にスキップ | ✅ 完了（M3） |
 | **T-12** | OBS HTML poll モード（`UpdateData()` 64ms ポーリング）の degraded 化と revision 検証実装 | §2.3 R-OBS-3, §3.2.3 | `layout/include/globals.js` | ✅ 完了（M1b） |
-| **T-13** | React `size="small"` を全フォーム要素に徹底（指摘事項） | §2.2 R-React-5 | `CountrySelector` / `CountryStateSelector` / `NumberInput` / `Header` / `CurrentSet` / `CharSelector` / `UpcomingSets` / `Team` / `index.tsx` / `StageStrike` 各種 | ✅ 完了（M3） |
+| **T-13** | React `size="small"` を全フォーム要素に徹底（指摘事項） | §2.2 R-React-5 | `CountrySelector` / `CountryStateSelector` / `NumberInput` / `Header` / `CurrentSet` / `CharSelector` / `UpcomingSets` / `Team` / `index.tsx` | ✅ 完了（M3） |
 | **T-14** | ハードコード hex 色をトークン参照に置換（PyQt 12+ 箇所、React App.css 数箇所） | §5.1.6 | `src/AutonaBracketView.py` / `src/AutonaBracketWidget.py` を `UI.palette()` 参照化、`web/src/index.css` 固定色を CssBaseline override に委譲、`web/src/ScoreboardPage/Header.jsx` 内 rgba を `theme.palette.divider` / `text.disabled` に | ✅ 完了（M3） |
 | **T-15** | `AutonaAnalysisWidget` の仕様反映済み確認と回帰テスト追加 | §4.1 | `src/AutonaAnalysisWidget.py` のテスト整備 | 未着手 |
 | **T-16** | サムネイルメタデータ（`_title.txt` / `_desc.txt`）を `thumbnail_config.generate_metadata` の設定で制御化 | §4.4.4 | `src/thumbnail/main_generate_thumbnail.py:save_result`, `AutonaThumbnailSettingsWidget` + `AutonaThumbnailSettings.ui` に `generateMetadataCheck` を追加（default true） | ✅ 完了（M3） |

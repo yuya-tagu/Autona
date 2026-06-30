@@ -113,8 +113,8 @@ Python / PyQt6 のドックウィジェットベース。
 | **Window** | `Autona.py` | QMainWindow。QMenuBar + 全ドックウィジェット管理。STATE_VERSION でレイアウト復元 |
 | **StateManager** | `StateManager.py` | グローバル状態（nested dict）。deepdiff でデルタ算出、ファイル出力 + WebSocket 配信 |
 | **SettingsManager** | `SettingsManager.py` | ユーザー設定の永続化（JSON） |
-| **AutonaScoreboardManager** | `AutonaScoreboardManager.py` | シングルトン。単一スコアボード(`scoreboardNumber=1`)を dock に保持する薄いラッパー |
-| **AutonaScoreboardWidget** | `AutonaScoreboardWidget.py` | スコアボード本体。`_applyScoreboardMode(singlePlayer)` で 1v1 ⇄ チーム UI を可逆切替 |
+| **AutonaScoreboardManager** | `AutonaScoreboardManager.py` | シングルトン。board1=1v1、board2=team、board3=crew を生成し、`scoreboard.battle_format` で表示切替 |
+| **AutonaScoreboardWidget** | `AutonaScoreboardWidget.py` | 1v1 / team スコアボード本体。通常スコア操作・選手編集・セット読み込みを担当 |
 | **AutonaTournamentDataProvider** | `AutonaTournamentDataProvider.py` | シングルトン。Start.gg 等からのデータ取得オーケストレーション |
 | **AutonaGameAssetManager** | `AutonaGameAssetManager.py` | シングルトン。ゲーム別キャラ/ステージ/アイコン管理 |
 | **AutonaPlayerDB** | `AutonaPlayerDB.py` | ローカル選手DB（static クラス、`user_data/local_players.json`） |

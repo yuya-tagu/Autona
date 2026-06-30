@@ -58,6 +58,7 @@
 | [`../.claude/architecture/`](../.claude/architecture/) | コードベース調査の事実情報（import 関係・状態キーパス等） | 調査ログ |
 | [`../FEATURES.md`](../FEATURES.md) | 機能一覧（リバースエンジニアリング） | 参考（※後述の注意） |
 | [`../ROADMAP.md`](../ROADMAP.md) | 将来機能の提案（PdM） | 参考 |
+| [`positioning.md`](positioning.md) | タグライン・ポジショニング・差別化・メッセージング規則 | **対外メッセージングの正本** |
 | `docs/`（本ディレクトリ） | 運用制約・変更影響・調査/実装タスク | 運用・変更管理の視点 |
 
 矛盾があった場合の優先順位: **コードの実態 > `.claude/design/Design.md` > `CLAUDE.md` > その他 Markdown**。

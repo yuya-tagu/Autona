@@ -28,7 +28,7 @@
 4. **配信オーバーレイ出力** — 状態を `out/` のファイル群＋ HTTP/WebSocket で OBS ブラウザソースに反映 ✅
 5. **告知・記録** — サムネイル/結果画像生成、X / BlueSky 投稿、YouTube メタデータ生成 📄
 
-> 各機能の HTTP/WS 制御面（`/score`・`/scoreboard<N>-*`・`stats-*` 等）と未確定ルート/ポートは
+> 各機能の HTTP/WS 制御面（`/score`・`/scoreboard<N>-*`・`stats-*` 等）と `/api/v1/` は
 > [../architecture/current-architecture.md](../architecture/current-architecture.md) に集約。
 
 ## Stage strike features（削除済み — 設計で叩かないこと）
@@ -37,12 +37,14 @@
 >
 > - `CLAUDE.md` 記載: 「ステージストライク機能（旧 `StageStrikePage` / `/stage-strike-app` /
 >   RULES ドック / `ruleset`・`stage_strike` 状態）は削除済み」
-> - コード確認: `src/**/*Stage*.py`、`web/src/**/StageStrike*`、`web` 内の `stage-strike-app` /
->   `stage_strike` 参照は **いずれも存在しない**（2026-06-14 確認）
+> - UI / ルート確認: `src/**/*Stage*.py`、`web/src/**/StageStrike*`、`web` 内の `stage-strike-app` は
+>   **存在しない**（2026-06-14 確認）
 > - 一方 `FEATURES.md` / `AGENTS.md` には記述が残っている → **これらがスタール**
+> - Start.gg parser には互換データとして `stage_strike` / `ruleset` を読む処理が残る。
+>   これは現行の操作 UI / 外部制御 API の対象ではない。
 >
 > 外部制御 API / Companion 連携の設計時に「ステージストライクを叩く」想定を入れないこと。
-> ルート直下に `assets/rulesets.json`（未追跡）が存在するが、現行機能との関係は `TBD`。
+> ルート直下に `assets/rulesets.json` が存在するが、現行操作 UI からは参照されない。削除可否は別件で整理する。
 
 ## 外部設計時に効く運用制約
 

@@ -223,7 +223,7 @@ i18next v25.5.2, i18next-browser-languagedetector v8.2.0
 ```javascript
 i18n.use(LanguageDetector).init({
   fallbackLng: ["en"],
-  resources: { en, pt, es, ja, fr },
+  resources: { en, ja },
   detection: { order: ["querystring", "navigator"], lookupQuerystring: "lng" },
   ns: ["translations"], defaultNS: "translations",
   interpolation: { escapeValue: false },
@@ -232,8 +232,7 @@ i18n.use(LanguageDetector).init({
 
 ### 5.3 対応言語
 
-- 設定済み: en, pt, es, ja, fr
-- ファイル存在するが未登録: it, zh-CN, zh-TW
+- 設定済み: en, ja
 
 ### 5.4 切替方法
 
