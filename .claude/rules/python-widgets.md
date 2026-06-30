@@ -5,29 +5,34 @@ paths:
 
 # PyQt6 ウィジェット開発ルール
 
-## QDockWidget
+## パネル（旧 Dock）
 
-- `QDockWidget` を新規作成する場合、`__init__` 内で必ず `self.setWindowTitle()` を呼ぶこと
-  - これがないとタブのテキストが空になり、ユーザーからタブが見えない
+各機能パネルは依然 `QDockWidget` サブクラスだが、**もうドックしない**。
+タイトルバーを隠し、左サイドバー（`AutonaSidebar`）＋中央 `QStackedWidget` の
+ページとして表示する（`Autona.py` の「Sidebar navigation」ブロック）。
+
+- パネルを新規作成する場合、`__init__` 内で必ず `self.setWindowTitle()` を呼ぶこと
+  - サイドバーのナビ項目ラベルは `panel.windowTitle()` を使う。空だとラベルが出ない
 - `setObjectName()` は `Autona.py` 側で設定する（ウィジェット自身では設定しない）
-- `objectName` は一度設定したら変更しない（`restoreState` がこの名前でウィジェットを識別する）
+- `objectName` は一度設定したら変更しない（入力欄の objectName は StateManager
+  キーパスに直結。下記「入力ウィジェットの objectName」参照）
 
-## ウィジェット登録（Autona.py）
+## パネル登録（Autona.py）
 
-新しいドックウィジェットを追加する場合、以下を全て行う:
+新しいパネルを追加する場合、以下を全て行う:
 
 1. import を追加
-2. インスタンス生成・`setObjectName` 設定
-3. `self.addDockWidget()` で追加
-4. `self.dockWidgets` リストに追加
-5. `self.tabifyDockWidget(self.scoreboard, ...)` でタブ化
-6. `Window.STATE_VERSION` をインクリメント
+2. インスタンス生成・`setObjectName` / `setWindowTitle` 設定
+3. `self.dockWidgets` リストに追加（後処理ループでタイトルバー非表示等を一括適用）
+4. `self._navPanels` に `(panel, 'icon.svg')` を表示順で追加
+   （`assets/icons/` のアイコン。`stack.addWidget` とナビ項目生成に使われる）
+5. `Window.STATE_VERSION` をインクリメント
 
 ## STATE_VERSION
 
-- `Window.STATE_VERSION` はドックウィジェットのレイアウト変更時にインクリメントする
-- タブの追加・削除・並び順変更が該当する
-- インクリメントしないと、古い保存状態が復元されて新ウィジェットが非表示になる
+- `Window.STATE_VERSION` はナビ（パネル）の追加・削除・並び順変更時にインクリメントする
+- `QMainWindow.saveState/restoreState` は使わない。サイドバーの選択 index と
+  折りたたみ状態を `QSettings`（`sidebarIndex_v{N}` / `sidebarCollapsed_v{N}`）に保存する
 
 ## 入力ウィジェットの objectName は StateManager キーパス（後方互換に直結）
 

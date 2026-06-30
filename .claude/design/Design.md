@@ -578,12 +578,22 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | この大会の試合一覧 | `AutonaAnalysisWidget` パネル | `bracket.bracket.rounds`、`state_big_change` 購読、TournamentDataProvider のシグナル（read-only） |
 | 選手一覧 | `AutonaPlayerListWidget` パネル | `player_list.slot.{I}.*` を Set / `player_list.*` を Get |
 
-#### 4.1.1 ドックの追加・削除規約
+#### 4.1.1 パネル（ナビ）の追加・削除規約
+
+> **NOTE（ナビゲーション刷新 / STATE_VERSION 13）**: タブ化 Dock + `QMenuBar` は廃止。
+> 各パネルは依然 `QDockWidget` サブクラスだが**ドックせず**、左サイドバー
+> （`AutonaSidebar`）＋中央 `QStackedWidget` のページとして表示する。自前描画タブバー
+> `AutonaDockTabTheme` は削除。運用操作（大会選択 / ゲーム選択 / 1v1·Team·Crew 形式）は
+> サイドバー上部、設定・ヘルプは下部「Help & Settings」ボタンに集約。サイドバー地は
+> ダークで、**選択中ナビのみブランド赤でハイライト**する（全面赤にはしない）。
+> `QMainWindow.saveState/restoreState` は不使用。サイドバー選択 index と折りたたみ状態を
+> `QSettings`（`sidebarIndex_v{N}` / `sidebarCollapsed_v{N}`）に保存する。
 
 - 追加・削除時は `STATE_VERSION` を **必ずインクリメント**する
 - **objectName は内部 ID として固定**する。i18n の対象は `setWindowTitle` などの**表示名のみ**で、objectName は不変
 - objectName を変更する場合は `STATE_VERSION` インクリメントに加えて、必要に応じて**保存済み state / QSettings のマイグレーション処理を実装**する
-- Sidebar の短縮ラベル（`AutonaDockTabTheme.TAB_SHORT_LABELS`）も追加する
+- `Autona.py` の `self._navPanels` に `(panel, 'icon.svg')` を表示順で追加する
+  （ナビ項目ラベルは `panel.windowTitle()`、アイコンは `assets/icons/`）
 
 #### 4.1.2 ドック内の標準パターン
 

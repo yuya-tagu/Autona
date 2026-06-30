@@ -669,6 +669,14 @@
 </context><context>
     <name>app</name>
     <message>
+        <source>Help &amp; Settings</source>
+        <translation>ヘルプ＆設定</translation>
+    </message>
+    <message>
+        <source>Show sidebar</source>
+        <translation>サイドバーを表示</translation>
+    </message>
+    <message>
         <location filename="..\AutonaUpdater.py" line="140" />
         <location filename="..\AutonaUpdater.py" line="104" />
         <location filename="..\AutonaThumbnailSettingsWidget.py" line="700" />
