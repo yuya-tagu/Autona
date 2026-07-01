@@ -157,7 +157,6 @@ class AutonaScoreboardWidget(QWidget):
         self.scrollArea = QScrollArea()
         self.scrollArea.setWidget(self.innerWidget)
         self.scrollArea.setWidgetResizable(True)
-        self.scrollArea.setFrameShape(QFrame.Shape.NoFrame)
         # Disallow horizontal scrolling — the layout should collapse into
         # the viewport width instead of letting team columns overflow to
         # the right.
@@ -951,16 +950,6 @@ class AutonaScoreboardWidget(QWidget):
                 else:
                     groupBox.setStyleSheet(
                         "QGroupBox { padding-top: 0px; margin-top: 0px; }")
-                scrollArea = groupBox.findChild(QScrollArea)
-                if scrollArea is not None:
-                    scrollArea.setFrameShape(
-                        QFrame.Shape.NoFrame if singlePlayer
-                        else QFrame.Shape.Panel)
-                    # Match the parent's transparency so no second fill leaks.
-                    scrollArea.setStyleSheet(
-                        "QScrollArea { background: transparent; border: none; }"
-                        " QScrollArea > QWidget > QWidget { background: transparent; }"
-                        if singlePlayer else "")
         if getattr(self, "_playerNumberLabel", None) is not None:
             self._playerNumberLabel.setVisible(not singlePlayer)
         self.playerNumber.setVisible(not singlePlayer)
@@ -1203,7 +1192,7 @@ class AutonaScoreboardWidget(QWidget):
             self.playerWidgets.append(p)
 
             self.team1column.findChild(
-                QWidget, "playersContainer").layout().addWidget(p)
+                QGroupBox, "groupBox").layout().addWidget(p)
             p.SetCharactersPerPlayer(self.charNumber.value())
             self.team1column.findChild(
                 QCheckBox, "losers").toggled.connect(p.SetLosers)
@@ -1231,7 +1220,7 @@ class AutonaScoreboardWidget(QWidget):
             self.playerWidgets.append(p)
 
             self.team2column.findChild(
-                QWidget, "playersContainer").layout().addWidget(p)
+                QGroupBox, "groupBox").layout().addWidget(p)
             p.SetCharactersPerPlayer(self.charNumber.value())
             self.team2column.findChild(
                 QCheckBox, "losers").toggled.connect(p.SetLosers)

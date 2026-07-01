@@ -100,10 +100,11 @@ class _ScoreboardPreview(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         p = UI.palette()
+        # No border here — the parent QGroupBox card already draws one;
+        # a second border would double-frame the preview.
         self.setStyleSheet(
             f"QFrame {{"
             f"background-color: {p['bg_tertiary']};"
-            f"border: 1px solid {p['border_subtle']};"
             f"border-radius: {UI.RADIUS_SM}px;"
             f"}}"
         )
@@ -126,7 +127,7 @@ class _ScoreboardPreview(QFrame):
         self._layoutView()
 
     def _layoutView(self):
-        inset = 1  # sit inside the 1px border
+        inset = 1  # small gap from the frame's rounded corners
         w = max(1, self.width() - 2 * inset)
         h = int(w * 9 / 16)
         # Centre vertically when the frame is taller than the 16:9 box.
@@ -159,8 +160,9 @@ class AutonaBoardWidget(QDockWidget):
 
         content = QWidget()
         outer = QVBoxLayout(content)
-        outer.setContentsMargins(12, 12, 12, 12)
-        outer.setSpacing(12)
+        outer.setContentsMargins(
+            UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN)
+        outer.setSpacing(UI.PANEL_MARGIN)
         outer.addWidget(self._buildDesignGroup())
         outer.addWidget(self._buildColorGroup())
         outer.addWidget(self._buildPreviewGroup(), 1)

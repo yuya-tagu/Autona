@@ -90,6 +90,8 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
         self.widget = QWidget()
         self.setWidget(self.widget)
         self.widget.setLayout(QVBoxLayout())
+        self.widget.layout().setContentsMargins(
+            UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN)
 
         self.settings = uic.loadUi(AutonaResolve("src/layout/AutonaThumbnailSettings.ui"))
         self.widget.layout().addWidget(self.settings)

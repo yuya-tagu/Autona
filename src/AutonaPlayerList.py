@@ -34,8 +34,6 @@ class AutonaPlayerList(QWidget):
             self.childDataChangedLock = False
 
             scrollArea = QScrollArea()
-            scrollArea.setFrameShadow(QFrame.Shadow.Plain)
-            scrollArea.setFrameShape(QFrame.Shape.NoFrame)
             scrollArea.setWidgetResizable(True)
 
             self.widgetArea = QWidget()
