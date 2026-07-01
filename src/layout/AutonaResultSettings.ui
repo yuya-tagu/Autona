@@ -76,20 +76,14 @@
         <property name="widgetResizable">
          <bool>true</bool>
         </property>
-        <widget class="QWidget" name="scrollAreaRightContents">
-         <layout class="QVBoxLayout" name="verticalLayout_preview_scroll">
-          <item>
-           <widget class="QWidget" name="resultPreview" native="true">
-            <property name="sizePolicy">
-             <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-              <horstretch>0</horstretch>
-              <verstretch>0</verstretch>
-             </sizepolicy>
-            </property>
-            <layout class="QVBoxLayout" name="verticalLayout_preview"/>
-           </widget>
-          </item>
-         </layout>
+        <widget class="QWidget" name="resultPreview" native="true">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_preview"/>
         </widget>
        </widget>
       </item>

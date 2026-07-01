@@ -6,6 +6,7 @@ from loguru import logger
 from .AutonaScoreboardWidget import AutonaScoreboardWidget
 from .AutonaCrewBattleWidget import AutonaCrewBattleWidget
 from .StateManager import StateManager
+from . import ui_constants as UI
 
 
 class AutonaScoreboardManager(QDockWidget):
@@ -26,6 +27,8 @@ class AutonaScoreboardManager(QDockWidget):
         self.widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.setWidget(self.widget)
         self.widget.setLayout(QVBoxLayout())
+        self.widget.layout().setContentsMargins(
+            UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN)
 
         self.scoreboard: AutonaScoreboardWidget | None = None
         self.teamScoreboard: AutonaScoreboardWidget | None = None

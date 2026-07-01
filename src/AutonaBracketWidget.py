@@ -28,6 +28,8 @@ class AutonaBracketWidget(QDockWidget):
         super().__init__(*args)
 
         uic.loadUi(AutonaResolve("src/layout/AutonaBracket.ui"), self)
+        self.widget().layout().setContentsMargins(
+            UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN)
 
         StateManager.Set("bracket", {})
 

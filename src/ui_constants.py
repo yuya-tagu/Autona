@@ -32,6 +32,13 @@ SPACE_MD = 8
 SPACE_LG = 12
 SPACE_XL = 16
 
+# Outer content margin shared by every sidebar nav panel (Tournament Info,
+# Scoreboard, Board, Thumbnail Settings, Statistics, Commentary, Result
+# Settings, Bracket). Previously each panel hardcoded its own value (or set
+# none, falling back to the Qt style default), so the gap between the
+# sidebar/window edge and a panel's content varied panel to panel.
+PANEL_MARGIN = SPACE_LG
+
 # ─── Icon & Button Sizes ────────────────────────────────────────
 
 ICON_SM = 24
@@ -494,6 +501,16 @@ QScrollBar::add-page, QScrollBar::sub-page {{
     background: transparent;
 }}
 
+/* === Scroll areas === */
+/* A QScrollArea is a layout/scrolling container, never a visual card — it
+   should never draw its own frame (the content it wraps, e.g. a QGroupBox
+   card, already provides one when needed). This is the single source of
+   truth: don't add per-instance setFrameShape(NoFrame) calls or .ui
+   frameShape properties elsewhere, since this rule overrides them anyway. */
+QScrollArea {{
+    border: none;
+}}
+
 /* === Status bar === */
 QStatusBar {{
     background-color: {p['bg_secondary']};
@@ -505,13 +522,14 @@ QStatusBar::item {{
     border: none;
 }}
 
-/* === Group boxes as elevated cards === */
-/* Title sits as a plain label inside the top-left of the card, not as a
-   chip on the border. */
+/* === Group boxes as flat sections (no card chrome) === */
+/* No border/background — a QGroupBox is just a labelled section, not a
+   bordered card. This is the single source of truth: don't reintroduce a
+   border/background on individual instances elsewhere. The compact variant
+   below still gets its own thin divider for tight list rows. */
 QGroupBox {{
-    border: 1px solid {p['border_default']};
-    border-radius: {RADIUS_MD}px;
-    background-color: {p['bg_secondary']};
+    border: none;
+    background: transparent;
     margin-top: 4px;
     padding: 28px 10px 10px 10px;
     color: {p['text_primary']};
@@ -519,10 +537,11 @@ QGroupBox {{
 QGroupBox::title {{
     subcontrol-origin: padding;
     subcontrol-position: top left;
-    /* Left/right 10px keeps the title aligned with the card's body content
-       (the card uses 10px side padding); top/bottom position it within the
-       28px header zone. Title now reads as body text — same size/colour as
-       the content, distinguished only by weight (no upper-casing / tracking). */
+    /* Left/right 10px keeps the title aligned with the section's body
+       content (the section uses 10px side padding); top/bottom position it
+       within the 28px header zone. Title reads as body text — same size/
+       colour as the content, distinguished only by weight (no upper-casing
+       / tracking). */
     padding: 6px 10px 4px 10px;
     background: transparent;
     border: none;

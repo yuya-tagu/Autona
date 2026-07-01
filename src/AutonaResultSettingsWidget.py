@@ -105,9 +105,15 @@ class AutonaResultSettingsWidget(QDockWidget):
         self.widget_container = QWidget()
         self.setWidget(self.widget_container)
         self.widget_container.setLayout(QVBoxLayout())
+        self.widget_container.layout().setContentsMargins(
+            UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN)
 
         self.settings = uic.loadUi(
             AutonaResolve("src/layout/AutonaResultSettings.ui"))
+        # The .ui Form's own root layout still carries Qt's default margin;
+        # widget_container already provides PANEL_MARGIN, so zero this one
+        # out to avoid stacking both.
+        self.settings.layout().setContentsMargins(0, 0, 0, 0)
         self.widget_container.layout().addWidget(self.settings)
 
         # --- Player input rows (5 rows per player) ---
@@ -266,6 +272,18 @@ class AutonaResultSettingsWidget(QDockWidget):
         # outer layout that hosts the "Load tournament results" button.
         self.settings.findChild(
             QVBoxLayout, "verticalLayout_left_scroll").addWidget(self.teamGroup)
+
+        # QScrollArea (widgetResizable=True) doesn't reliably propagate its
+        # content's natural width up through the layout chain — its own
+        # minimumSizeHint() ignores the contained widget entirely, so the
+        # left column was collapsing to the width of its narrowest sibling
+        # (the "Load tournament results" button) instead of the player grid.
+        # Pin an explicit floor based on the now-fully-built grid + team
+        # group, with room for the vertical scrollbar that 16 rows triggers.
+        leftScrollArea = self.settings.findChild(QScrollArea, "scrollArea")
+        leftScrollArea.setMinimumWidth(
+            leftScrollArea.widget().sizeHint().width()
+            + leftScrollArea.verticalScrollBar().sizeHint().width())
 
         # --- Load from Start.gg ---
         self._standingsSignals = AutonaResultSettingsWidgetSignals()

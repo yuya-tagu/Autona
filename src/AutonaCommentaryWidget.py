@@ -24,6 +24,8 @@ class AutonaCommentaryWidget(QDockWidget):
         self.widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.setWidget(self.widget)
         self.widget.setLayout(QVBoxLayout())
+        self.widget.layout().setContentsMargins(
+            UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN)
 
         topOptions = QWidget()
         topOptions.setLayout(QHBoxLayout())
@@ -84,8 +86,6 @@ class AutonaCommentaryWidget(QDockWidget):
         col.layout().addWidget(row)
 
         scrollArea = QScrollArea()
-        scrollArea.setFrameShadow(QFrame.Shadow.Plain)
-        scrollArea.setFrameShape(QFrame.Shape.NoFrame)
         scrollArea.setWidgetResizable(True)
 
         self.widgetArea = QWidget()

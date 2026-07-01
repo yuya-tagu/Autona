@@ -142,7 +142,7 @@ class AutonaSidebar(QWidget):
     def _build_header(self) -> QWidget:
         header = QWidget()
         self._headerLayout = hl = QVBoxLayout(header)
-        hl.setContentsMargins(8, 4, 8, 4)
+        hl.setContentsMargins(8, 10, 8, 10)
         hl.setSpacing(4)
 
         # Row 1 — collapse (hamburger) alone, right-aligned in its own band.
@@ -200,7 +200,7 @@ class AutonaSidebar(QWidget):
     def _build_nav(self) -> QWidget:
         nav = QWidget()
         self._navLayout = nl = QVBoxLayout(nav)
-        nl.setContentsMargins(8, 2, 8, 2)
+        nl.setContentsMargins(8, 10, 8, 10)
         nl.setSpacing(1)
         nl.addStretch(1)
         return nav
@@ -208,7 +208,7 @@ class AutonaSidebar(QWidget):
     def _build_footer(self) -> QWidget:
         footer = QWidget()
         fl = QVBoxLayout(footer)
-        fl.setContentsMargins(8, 4, 8, 4)
+        fl.setContentsMargins(8, 10, 8, 10)
         fl.setSpacing(0)
         self._helpButton = QToolButton()
         self._helpButton.setObjectName("sidebarHelpBtn")
@@ -243,7 +243,9 @@ class AutonaSidebar(QWidget):
         # selection accent (Todoist-style), which is the one approved use on
         # the sidebar. rgba percentages keep the tint readable on bg_secondary.
         return f"""
-        #autonaSidebar {{ background-color: {p['bg_secondary']}; }}
+        /* One step brighter than bg_secondary (used by content cards) so the
+           sidebar reads as its own zone, distinct from the page content. */
+        #autonaSidebar {{ background-color: {p['bg_tertiary']}; }}
         #sidebarDivider {{ background-color: {p['border_subtle']}; border: none; }}
 
         QToolButton#navItem {{

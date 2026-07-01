@@ -43,9 +43,10 @@ class AutonaTournamentInfoWidget(QDockWidget):
         # Wrap the dock contents in a QScrollArea so the tab doesn't
         # force the whole window to grow vertically.
         self._contents = self.widget()
+        self._contents.layout().setContentsMargins(
+            UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidget(self._contents)
         self.setWidget(scroll)
 

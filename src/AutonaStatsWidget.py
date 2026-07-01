@@ -3,6 +3,7 @@ from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 
 from .StateManager import StateManager
+from . import ui_constants as UI
 from loguru import logger
 
 ROW_HEIGHT = 40
@@ -25,8 +26,9 @@ class AutonaStatsWidget(QDockWidget):
         container.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.setWidget(container)
         container.setLayout(QVBoxLayout())
-        container.layout().setContentsMargins(4, 4, 4, 4)
-        container.layout().setSpacing(4)
+        container.layout().setContentsMargins(
+            UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN)
+        container.layout().setSpacing(UI.SPACE_XS)
 
         # Top bar
         topBar = QHBoxLayout()
@@ -154,7 +156,6 @@ class AutonaStatsWidget(QDockWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(widget)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
         return scroll
 
     def _makeTable(self, headers):
