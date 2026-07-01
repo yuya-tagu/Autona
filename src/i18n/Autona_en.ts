@@ -507,21 +507,7 @@
         <source>Generate Thumbnail</source>
         <translation>Generate Thumbnail</translation>
     </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Open File Explorer after generation?</source>
-        <translation>Open File Explorer after generation?</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Generate _title.txt / _desc.txt for YouTube alongside the image. Off = image only.</source>
-        <translation>Generate _title.txt / _desc.txt for YouTube alongside the image. Off = image only.</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Generate YouTube metadata (_title.txt / _desc.txt)</source>
-        <translation>Generate YouTube metadata (_title.txt / _desc.txt)</translation>
-    </message>
+
 </context><context>
     <name>GroupBox</name>
     <message>
@@ -727,6 +713,12 @@
         <translation>Bracket</translation>
     </message>
     <message>
+        <location filename="..\AutonaBoardWidget.py" line="148" />
+        <location filename="..\Autona.py" line="293" />
+        <source>Board</source>
+        <translation>Board</translation>
+    </message>
+    <message>
         <location filename="..\Autona.py" line="362" />
         <location filename="..\Autona.py" line="357" />
         <source>Scoreboard</source>
@@ -863,23 +855,6 @@
         <location filename="..\Autona.py" line="654" />
         <source>Unset tournament</source>
         <translation>Unset tournament</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="869" />
-        <location filename="..\Autona.py" line="865" />
-        <location filename="..\Autona.py" line="661" />
-        <source>Load tournament and sets from StartGG user</source>
-        <translation>Load tournament and sets from StartGG user</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="666" />
-        <source>Set StartGG user account</source>
-        <translation>Set StartGG user account</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="678" />
-        <source>Pull Latest Completed Sets from StartGG</source>
-        <translation>Pull Latest Completed Sets from StartGG</translation>
     </message>
     <message>
         <location filename="..\Autona.py" line="690" />
@@ -1256,6 +1231,11 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
     </message>
     <message>
         <location filename="..\AutonaResultSettingsWidget.py" line="368" />
+        <source>Main character</source>
+        <translation>Main character</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaResultSettingsWidget.py" line="368" />
         <source>Sub character</source>
         <translation>Sub character</translation>
     </message>
@@ -1445,21 +1425,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaScoreboardWidget.py" line="1575" />
         <source>Auto update (Station [{0}])</source>
         <translation>Auto update (Station [{0}])</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1578" />
-        <source>Auto update (User)</source>
-        <translation>Auto update (User)</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1688" />
-        <source>Load user set ({0})</source>
-        <translation>Load user set ({0})</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1692" />
-        <source>Load user set</source>
-        <translation>Load user set</translation>
     </message>
     <message>
         <location filename="..\AutonaSelectSetWindow.py" line="15" />
@@ -1715,21 +1680,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaTournamentDataProvider.py" line="185" />
         <source>Twitch Username:</source>
         <translation>Twitch Username:</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentDataProvider.py" line="195" />
-        <source>Paste the URL to the player's StartGG profile</source>
-        <translation>Paste the URL to the player's StartGG profile</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentDataProvider.py" line="198" />
-        <source>Invalid tournament data provider</source>
-        <translation>Invalid tournament data provider</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentDataProvider.py" line="203" />
-        <source>Set player</source>
-        <translation>Set player</translation>
     </message>
     <message>
         <location filename="..\AutonaTournamentInfoWidget.py" line="268" />
@@ -2105,11 +2055,6 @@ Terminate the existing process(es) and continue?</translation>
         <translation>Default Display Options</translation>
     </message>
     <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="255" />
-        <source>Thumbnail</source>
-        <translation>Thumbnail</translation>
-    </message>
-    <message>
         <location filename="..\Settings\AutonaSettingsWindow.py" line="297" />
         <source>Bluesky</source>
         <translation>Bluesky</translation>
@@ -2204,13 +2149,6 @@ Terminate the existing process(es) and continue?</translation>
         <location filename="..\Settings\AutonaSettingsWindow.py" line="50" />
         <source>Enable profanity filter</source>
         <translation>Enable profanity filter</translation>
-    </message>
-</context><context>
-    <name>settings.hide_track_player</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="98" />
-        <source>Hide the StartGG player tracking functionality from Autona (takes effect on next restart)</source>
-        <translation>Hide the StartGG player tracking functionality from Autona (takes effect on next restart)</translation>
     </message>
 </context><context>
     <name>settings.hotkeys</name>
@@ -2352,18 +2290,6 @@ Choose a different combination or clear the conflicting assignment first.</trans
         <translation>Default Color of Team 2</translation>
     </message>
 </context><context>
-    <name>settings.thumbnail</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="241" />
-        <source>Generate YouTube metadata (_title.txt / _desc.txt)</source>
-        <translation>Generate YouTube metadata (_title.txt / _desc.txt)</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="248" />
-        <source>Off = save the rendered thumbnail image only. On (default) = also write _title.txt / _desc.txt alongside the image for YouTube uploads.</source>
-        <translation>Off = save the rendered thumbnail image only. On (default) = also write _title.txt / _desc.txt alongside the image for YouTube uploads.</translation>
-    </message>
-</context><context>
     <name>thumb_app</name>
     <message>
         <location filename="..\AutonaThumbnailSettingsWidget.py" line="691" />
@@ -2376,11 +2302,6 @@ Choose a different combination or clear the conflicting assignment first.</trans
         <location filename="..\AutonaScoreboardWidget.py" line="1068" />
         <source>The thumbnail has been generated here:</source>
         <translation>The thumbnail has been generated here:</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1069" />
-        <source>The video title and description have also been generated.</source>
-        <translation>The video title and description have also been generated.</translation>
     </message>
     <message>
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="221" />

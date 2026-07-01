@@ -52,16 +52,10 @@ class TournamentDataProvider(QObject):
     def GetStationMatchsId(self, stationId):
         pass
 
-    def GetUserMatchId(self, user):
-        pass
-
     def GetRecentSets(self, id1, id2, videogame, callback):
         pass
 
     def GetLastSets(self, playerId, playerNumber):
-        pass
-
-    def GetCompletedSets(self):
         pass
 
     def GetPlayerHistoryStandings(self, playerId, playerNumber, gameType):

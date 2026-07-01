@@ -456,17 +456,6 @@ class WebServer(QThread):
         WebServer.ws_emit('pull_stream', WebServer.actions.pull_stream_set(
             info.get("scoreboardNumber", "1")))
 
-    # Pulls Current User Set
-    @app.route('/pull-user')
-    def pull_user_set():
-        return WebServer.actions.pull_user_set()
-
-    @socketio.on('pull_user')
-    def ws_pull_user_set(message):
-        info = orjson.loads(message)
-        WebServer.ws_emit('pull_user', WebServer.actions.pull_user_set(
-            info.get("scoreboardNumber", "1")))
-
     # Resubmits Call for Recent Sets
     @app.route('/scoreboard<scoreboardNumber>-stats-recent-sets')
     def stats_recent_sets(scoreboardNumber):

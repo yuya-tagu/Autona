@@ -18,9 +18,7 @@ class AutonaTournamentDataProviderSignals(QObject):
     tournament_changed = Signal()
     entrants_updated = Signal()
     tournament_data_updated = Signal(dict)
-    completed_sets_updated = Signal(list)
     twitch_username_updated = Signal()
-    user_updated = Signal()
     get_sets_finished = Signal(list)
     get_stations_finished = Signal(list)
     tournament_phases_updated = Signal(list)
@@ -197,25 +195,6 @@ class AutonaTournamentDataProvider(QObject):
             SettingsManager.Set("twitch_username", text)
             AutonaTournamentDataProvider.instance.signals.twitch_username_updated.emit()
 
-    def SetUserAccount(self, window, startgg=False):
-        providerName = "StartGG"
-        window_text = ""
-
-        if (self.provider and self.provider.url and "start.gg" in self.provider.url) or startgg:
-            window_text = QApplication.translate(
-                "app", "Paste the URL to the player's StartGG profile")
-        else:
-            logger.error(QApplication.translate(
-                "app", "Invalid tournament data provider"))
-            return
-
-        text, okPressed = QInputDialog.getText(
-            window, QApplication.translate("app", "Set player"), window_text, QLineEdit.Normal, "")
-
-        if okPressed:
-            SettingsManager.Set(providerName+"_user", text)
-            AutonaTournamentDataProvider.instance.signals.user_updated.emit()
-
     def GetTournamentData(self, initialLoading=False):
         if self.provider is None:
             logger.warning("GetTournamentData called with no provider set")
@@ -353,17 +332,6 @@ class AutonaTournamentDataProvider(QObject):
 
         mainWindow.signals.NewSetSelected.emit(stationSet)
 
-    def LoadUserSet(self, mainWindow, user):
-        if AutonaTournamentDataProvider.instance.provider is None:
-            return
-        _set = AutonaTournamentDataProvider.instance.provider.GetUserMatchId(user)
-
-        if not _set:
-            return
-
-        _set["auto_update"] = "user"
-        mainWindow.signals.NewSetSelected.emit(_set)
-
     # omits the first one (loaded through NewSetSelected)
     def GetStationMatches(self, matchesId, mainWindow):
         if self.provider is None:
@@ -429,16 +397,6 @@ class AutonaTournamentDataProvider(QObject):
         })
         self.threadPool.start(worker)
 
-    def GetCompletedSets(self):
-        if self.provider is None:
-            return
-        worker = Worker(self.provider.GetCompletedSets)
-        worker.signals.result.connect(lambda completedSets: [
-            AutonaTournamentDataProvider.instance.signals.completed_sets_updated.emit(
-                completedSets)
-        ])
-        self.threadPool.start(worker)
-
     def GetStreamQueue(self):
         if self.provider is None:
             return
@@ -454,7 +412,6 @@ class AutonaTournamentDataProvider(QObject):
             AutonaTournamentDataProvider.instance.SetTournament(
                 SettingsManager.Get("TOURNAMENT_URL"), initialLoading=True)
             AutonaTournamentDataProvider.instance.signals.twitch_username_updated.emit()
-            AutonaTournamentDataProvider.instance.signals.user_updated.emit()
 
     def GetProvider(self):
         return self.provider

@@ -12,8 +12,8 @@ brand, OBS-style high-density UI). Keep in sync with:
 
 FONT_XS = 8
 FONT_SM = 10
-FONT_MD = 11
-FONT_LG = 13
+FONT_MD = 12
+FONT_LG = 14
 FONT_XL = 16
 
 FONT_FAMILY = "LINE Seed JP"
@@ -282,6 +282,22 @@ QPushButton:disabled, QToolButton:disabled {{
     background-color: {p['bg_secondary']};
     border-color: {p['border_subtle']};
 }}
+/* Floating "reopen sidebar" button, shown over the page content when the
+   sidebar is collapsed. It is a fixed-size, icon-only QToolButton, so the
+   shared `QToolButton:!window` rule above (padding: 0 12px) would squeeze its
+   glyph into a ~6px content strip. Override with compact symmetric padding so
+   the hamburger renders at its real icon size (ID selector wins specificity). */
+QToolButton#sidebarExpandBtn {{
+    min-height: 0;
+    padding: 4px;
+    border: none;
+    border-radius: {RADIUS_MD}px;
+    background-color: {p['bg_tertiary']};
+    color: {p['text_secondary']};
+}}
+QToolButton#sidebarExpandBtn:hover {{
+    background-color: {p['bg_quaternary']};
+}}
 /* Primary action buttons (opt-in via objectName="primary") and default
    dialog buttons (QDialogButtonBox::Ok etc.) — YouTube-style white surface
    with a near-black label, decoupled from the accent colour. */
@@ -394,12 +410,19 @@ QTabBar::tab:selected {{
 /* === Panel widgets (former docks) === */
 /* The panels are still QDockWidget subclasses, but they are no longer
    docked: each is a page of the main-window QStackedWidget, with its title
-   bar hidden. No frame border, so pages sit flush against the sidebar. */
+   bar hidden. No frame border, so pages sit flush against the sidebar.
+   qdarktheme's base template also sets a 4px border-radius on QDockWidget;
+   border:none alone doesn't clear it, so the corners stayed rounded and let
+   the window background show through as a faint grey frame. Reset it here
+   too (and pin background to match the surrounding stack) so the page sits
+   perfectly flush. */
 QDockWidget {{
     color: {p['text_primary']};
     titlebar-close-icon: none;
     titlebar-normal-icon: none;
     border: none;
+    border-radius: 0;
+    background: {p['bg_primary']};
 }}
 QDockWidget::title {{
     background-color: {p['bg_tertiary']};
@@ -506,9 +529,31 @@ QScrollBar::add-page, QScrollBar::sub-page {{
    should never draw its own frame (the content it wraps, e.g. a QGroupBox
    card, already provides one when needed). This is the single source of
    truth: don't add per-instance setFrameShape(NoFrame) calls or .ui
-   frameShape properties elsewhere, since this rule overrides them anyway. */
+   frameShape properties elsewhere, since this rule overrides them anyway.
+   QScrollArea IS-A QFrame and none of our call sites ever set frameShape,
+   so it keeps Qt's default (StyledPanel) and also matches qdarktheme's bare
+   `QFrame` rule, which sets border-radius:4px and padding:1px in addition
+   to the border this block already cancels. border:none alone left those
+   two properties untouched, so the panel's outer edge still showed a
+   rounded, inset "card" outline — reset them explicitly here too. */
 QScrollArea {{
     border: none;
+    border-radius: 0;
+    padding: 0;
+}}
+
+/* === Stacked container (holds every panel page) === */
+/* QStackedWidget IS-A QFrame, so qdarktheme's bare `QFrame` rule paints a
+   1px grey border + 4px radius + 1px padding on it. This is the widget that
+   wraps the whole content column to the right of the sidebar, so that stray
+   frame reads as a rounded grey outline hugging the content area. It is a
+   pure layout container and must never draw a frame — reset it. Covers the
+   settings dialog's page stack as well. */
+QStackedWidget {{
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    background: transparent;
 }}
 
 /* === Status bar === */
@@ -537,16 +582,16 @@ QGroupBox {{
 QGroupBox::title {{
     subcontrol-origin: padding;
     subcontrol-position: top left;
-    /* Left/right 10px keeps the title aligned with the section's body
-       content (the section uses 10px side padding); top/bottom position it
-       within the 28px header zone. Title reads as body text — same size/
-       colour as the content, distinguished only by weight (no upper-casing
-       / tracking). */
-    padding: 6px 10px 4px 10px;
+    /* Flush left against the section edge (no left inset, unlike the 10px
+       side padding used by the body content below it); top/bottom position
+       it within the 28px header zone. Title reads as body text — same
+       colour as the content, distinguished by weight and a slightly larger
+       size (no upper-casing / tracking). */
+    padding: 6px 10px 4px 0px;
     background: transparent;
     border: none;
     color: {p['text_primary']};
-    font-size: {FONT_SM}pt;
+    font-size: {FONT_MD}pt;
     font-weight: 700;
 }}
 /* Compact variant: list rows that don't need the card framing. Applied via

@@ -103,7 +103,7 @@
     <message>
         <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
         <source>Stream Title</source>
-        <translation>配信タイトル</translation>
+        <translation>タイトル</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
@@ -212,7 +212,7 @@
     <message>
         <location filename="..\layout\AutonaResultSettings.ui" line="0" />
         <source>Top 8 Players</source>
-        <translation>TOP8 プレイヤー</translation>
+        <translation>順位・プレイヤー情報</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
@@ -415,17 +415,17 @@
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <source>Phase name?</source>
-        <translation>フェーズ?</translation>
+        <translation>フェーズ</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <source>Teams names?</source>
-        <translation>チーム名?</translation>
+        <translation>チーム名</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <source>Sponsors?</source>
-        <translation>スポンサー?</translation>
+        <translation>スポンサー</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
@@ -492,7 +492,7 @@
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <source>Preview Settings</source>
-        <translation>プレビュー設定</translation>
+        <translation>プレビュー</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
@@ -509,21 +509,7 @@
         <source>Generate Thumbnail</source>
         <translation>サムネイルを作成する</translation>
     </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Open File Explorer after generation?</source>
-        <translation>サムネを作成した後エクスプローラーで開く</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Generate _title.txt / _desc.txt for YouTube alongside the image. Off = image only.</source>
-        <translation>画像と一緒に YouTube 用の _title.txt / _desc.txt を生成します。オフ = 画像のみ。</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Generate YouTube metadata (_title.txt / _desc.txt)</source>
-        <translation>YouTube メタデータを生成 (_title.txt / _desc.txt)</translation>
-    </message>
+
 </context><context>
     <name>GroupBox</name>
     <message>
@@ -715,7 +701,7 @@
         <location filename="..\AutonaThumbnailSettingsWidget.py" line="87" />
         <location filename="..\Autona.py" line="321" />
         <source>Thumbnail Settings</source>
-        <translation>対戦動画作成</translation>
+        <translation>サムネイル設定</translation>
     </message>
     <message>
         <location filename="..\AutonaResultSettingsWidget.py" line="86" />
@@ -729,16 +715,22 @@
         <translation>トーナメント表</translation>
     </message>
     <message>
+        <location filename="..\AutonaBoardWidget.py" line="148" />
+        <location filename="..\Autona.py" line="293" />
+        <source>Board</source>
+        <translation>スコアボード設定</translation>
+    </message>
+    <message>
         <location filename="..\Autona.py" line="362" />
         <location filename="..\Autona.py" line="357" />
         <source>Scoreboard</source>
-        <translation>スコアボード</translation>
+        <translation>スコアボード入力</translation>
     </message>
     <message>
         <location filename="..\AutonaCommentaryWidget.py" line="20" />
         <location filename="..\Autona.py" line="367" />
         <source>Commentary</source>
-        <translation>解説</translation>
+        <translation>実況・解説設定</translation>
     </message>
     <message>
         <location filename="..\AutonaPlayerListWidget.py" line="40" />
@@ -865,23 +857,6 @@
         <location filename="..\Autona.py" line="654" />
         <source>Unset tournament</source>
         <translation>大会の設定を解除</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="869" />
-        <location filename="..\Autona.py" line="865" />
-        <location filename="..\Autona.py" line="661" />
-        <source>Load tournament and sets from StartGG user</source>
-        <translation>大会と対戦データをStartGGからロードする</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="666" />
-        <source>Set StartGG user account</source>
-        <translation>StartGG ユーザーアカウントを設定</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="678" />
-        <source>Pull Latest Completed Sets from StartGG</source>
-        <translation>StartGGから最新の完了セットを取得</translation>
     </message>
     <message>
         <location filename="..\Autona.py" line="690" />
@@ -1225,7 +1200,7 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
     <message>
         <location filename="..\AutonaResultSettingsWidget.py" line="258" />
         <source>Select Result Layout</source>
-        <translation>リザルトのレイアウトを選択</translation>
+        <translation>リザルトのデザインを選択</translation>
     </message>
     <message>
         <location filename="..\AutonaResultSettingsWidget.py" line="267" />
@@ -1256,6 +1231,11 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaResultSettingsWidget.py" line="277" />
         <source>Team / Crew 縦並び (1920x1080)</source>
         <translation>Team / Crew 縦並び (1920x1080)</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaResultSettingsWidget.py" line="368" />
+        <source>Main character</source>
+        <translation>メインキャラクター</translation>
     </message>
     <message>
         <location filename="..\AutonaResultSettingsWidget.py" line="368" />
@@ -1448,21 +1428,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaScoreboardWidget.py" line="1575" />
         <source>Auto update (Station [{0}])</source>
         <translation>自動更新（ステーション [{0}]）</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1578" />
-        <source>Auto update (User)</source>
-        <translation>自動更新 (ユーザー)</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1688" />
-        <source>Load user set ({0})</source>
-        <translation>ユーザーの対戦データ({0})をロードする</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1692" />
-        <source>Load user set</source>
-        <translation>ユーザーの対戦データをロードする</translation>
     </message>
     <message>
         <location filename="..\AutonaSelectSetWindow.py" line="15" />
@@ -1718,21 +1683,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaTournamentDataProvider.py" line="185" />
         <source>Twitch Username:</source>
         <translation>Twitchでのユーザー名:</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentDataProvider.py" line="195" />
-        <source>Paste the URL to the player's StartGG profile</source>
-        <translation>プレイヤーのStartGGのプロフィールへのURLをここに貼ってください</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentDataProvider.py" line="198" />
-        <source>Invalid tournament data provider</source>
-        <translation>無効な大会データプロバイダです</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentDataProvider.py" line="203" />
-        <source>Set player</source>
-        <translation>プレイヤーを選ぶ</translation>
     </message>
     <message>
         <location filename="..\AutonaTournamentInfoWidget.py" line="268" />
@@ -2108,11 +2058,6 @@ Terminate the existing process(es) and continue?</source>
         <translation>デフォルト表示オプション</translation>
     </message>
     <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="255" />
-        <source>Thumbnail</source>
-        <translation>サムネイル</translation>
-    </message>
-    <message>
         <location filename="..\Settings\AutonaSettingsWindow.py" line="297" />
         <source>Bluesky</source>
         <translation>Bluesky</translation>
@@ -2207,13 +2152,6 @@ Terminate the existing process(es) and continue?</source>
         <location filename="..\Settings\AutonaSettingsWindow.py" line="50" />
         <source>Enable profanity filter</source>
         <translation>不適切語フィルタを有効化</translation>
-    </message>
-</context><context>
-    <name>settings.hide_track_player</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="98" />
-        <source>Hide the StartGG player tracking functionality from Autona (takes effect on next restart)</source>
-        <translation>Autona 上で Start.gg の選手追跡機能を非表示にする（再起動後に反映）</translation>
     </message>
 </context><context>
     <name>settings.hotkeys</name>
@@ -2355,18 +2293,6 @@ Choose a different combination or clear the conflicting assignment first.</sourc
         <translation>チーム2のデフォルトカラー</translation>
     </message>
 </context><context>
-    <name>settings.thumbnail</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="241" />
-        <source>Generate YouTube metadata (_title.txt / _desc.txt)</source>
-        <translation>YouTube メタデータを生成 (_title.txt / _desc.txt)</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="248" />
-        <source>Off = save the rendered thumbnail image only. On (default) = also write _title.txt / _desc.txt alongside the image for YouTube uploads.</source>
-        <translation>オフ = レンダリングしたサムネイル画像のみ保存。オン（既定）= YouTube アップロード用に画像と一緒に _title.txt / _desc.txt も書き出します。</translation>
-    </message>
-</context><context>
     <name>thumb_app</name>
     <message>
         <location filename="..\AutonaThumbnailSettingsWidget.py" line="691" />
@@ -2379,11 +2305,6 @@ Choose a different combination or clear the conflicting assignment first.</sourc
         <location filename="..\AutonaScoreboardWidget.py" line="1068" />
         <source>The thumbnail has been generated here:</source>
         <translation>サムネイルはここに作成されました:</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1069" />
-        <source>The video title and description have also been generated.</source>
-        <translation>動画のタイトルと概要欄も生成しました。</translation>
     </message>
     <message>
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="221" />

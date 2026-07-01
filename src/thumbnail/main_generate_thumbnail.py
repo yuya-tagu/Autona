@@ -17,7 +17,6 @@ from src.AutonaGameAssetManager import AutonaGameAssetManager
 from src.StateManager import StateManager
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from src.Helpers.AutonaDictHelper import *
-from src.Helpers.AutonaAltTextHelper import generate_youtube
 from src.Helpers.AutonaDirHelper import AutonaResolve
 
 
@@ -252,7 +251,6 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None, scoreb
 
 def save_result(pixmap, data, settings, scoreboardNumber=1, isPreview=False):
     """Save rendered pixmap to disk. Returns output file path."""
-    display_phase = deep_get(settings, "display_phase", True)
     out_path = "./out/thumbnails" if not isPreview else AutonaResolve("tmp/thumbnail")
     Path(out_path).mkdir(parents=True, exist_ok=True)
 
@@ -266,23 +264,6 @@ def save_result(pixmap, data, settings, scoreboardNumber=1, isPreview=False):
         pixmap.save(f"{out_path}/{thumbnail_filename}.jpg")
         logger.info(
             f"Thumbnail successfully saved as {out_path}/{thumbnail_filename}.png and {out_path}/{thumbnail_filename}.jpg")
-
-        # YouTube metadata — gated by thumbnail_config.generate_metadata
-        # (Design.md §4.4.4 / §8 T-16). Default true preserves existing
-        # behaviour so users who never opened settings keep getting both
-        # files.
-        if deep_get(settings, "generate_metadata", True):
-            yt_title, yt_description = generate_youtube(
-                scoreboardNumber, display_phase, replace_characters=[["<", "❮"], [">", "❯"]])
-            with open(f"{out_path}/{thumbnail_filename}_title.txt", "wt", encoding="utf-8") as txt_file:
-                txt_file.write(yt_title)
-            with open(f"{out_path}/{thumbnail_filename}_desc.txt", "wt", encoding="utf-8") as txt_file:
-                txt_file.write(yt_description)
-            logger.info(
-                f"YouTube data successfully saved as {out_path}/{thumbnail_filename}_title.txt and {out_path}/{thumbnail_filename}_desc.txt")
-        else:
-            logger.info(
-                "Skipping YouTube metadata files (thumbnail_config.generate_metadata=false)")
         return f"{out_path}/{thumbnail_filename}.png"
     else:
         thumbnail_filename = "template"

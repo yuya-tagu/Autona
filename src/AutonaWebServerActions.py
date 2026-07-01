@@ -266,12 +266,6 @@ class WebServerActions(QThread):
         self.scoreboard.GetScoreboard(scoreboard).signals.StreamSetSelection.emit()
         return "OK"
 
-    def pull_user_set(self, scoreboard="1"):
-        # REST `/pull-user` calls with no arg (defaults to board 1); the
-        # SocketIO `pull_user` handler passes a scoreboardNumber. Accept both.
-        self.scoreboard.GetScoreboard(scoreboard).signals.UserSetSelection.emit()
-        return "OK"
-
     def stats_recent_sets(self, scoreboard):
         AutonaStatsUtil.instance.signals.RecentSetsSignal.emit()
         return "OK"
