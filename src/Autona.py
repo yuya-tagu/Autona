@@ -143,7 +143,6 @@ from .AutonaTournamentInfoWidget import AutonaTournamentInfoWidget
 from .AutonaBoardWidget import AutonaBoardWidget
 from .AutonaSidebar import AutonaSidebar
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
-from .TournamentDataProvider.StartGGDataProvider import StartGGDataProvider
 from .AutonaAlertNotification import AutonaAlertNotification
 from .AutonaUpdater import AutonaUpdater, CleanupUpdateLeftovers
 from .AutonaPlayerDB import AutonaPlayerDB
@@ -188,7 +187,9 @@ class Window(QMainWindow):
     # v13: tabified docks + QMenuBar replaced by a left sidebar + QStackedWidget.
     # QMainWindow.saveState/restoreState is no longer used; the sidebar's
     # selected index and collapsed state are persisted instead.
-    STATE_VERSION = 13
+    # v14: Statistics nav item moved to the bottom of the sidebar order.
+    # v15: Result Settings and Commentary swapped in the sidebar order.
+    STATE_VERSION = 15
     signals = WindowSignals()
 
     def __init__(self, loop=None):
@@ -369,17 +370,17 @@ class Window(QMainWindow):
         splash.set_message(splash_msgs[1], progress=0.85)
 
         # Display order of the sidebar nav items and the matching
-        # QStackedWidget pages: EVENT, SCORE, BOARD, VIDEO, STATS, COMMS,
-        # RESULT, BRACKET. Each entry is (panel widget, sidebar icon file).
+        # QStackedWidget pages: EVENT, SCORE, BOARD, VIDEO, RESULT,
+        # COMMS, BRACKET, STATS. Each entry is (panel widget, sidebar icon file).
         self._navPanels = [
             (tournamentInfo, 'tournament.svg'),
             (self.scoreboard, 'scoreboard.svg'),
             (board, 'board.svg'),
             (thumbnailSetting, 'thumbnail.svg'),
-            (self.statsWidget, 'stats.svg'),
-            (commentary, 'commentary.svg'),
             (resultSetting, 'result.svg'),
+            (commentary, 'commentary.svg'),
             (bracket, 'bracket.svg'),
+            (self.statsWidget, 'stats.svg'),
         ]
 
         for dw in self.dockWidgets:
@@ -419,8 +420,11 @@ class Window(QMainWindow):
         self.sidebarExpandButton = QToolButton(central)
         self.sidebarExpandButton.setObjectName("sidebarExpandBtn")
         self.sidebarExpandButton.setIcon(QIcon(UI.icon_path('menu.svg')))
-        self.sidebarExpandButton.setIconSize(QSize(18, 18))
-        self.sidebarExpandButton.setFixedSize(30, 30)
+        # 22px glyph in a 34px chip (4px QSS padding → 26px content box). The
+        # #sidebarExpandBtn QSS rule cancels the shared button's 12px side
+        # padding that would otherwise crush the icon.
+        self.sidebarExpandButton.setIconSize(QSize(22, 22))
+        self.sidebarExpandButton.setFixedSize(34, 34)
         self.sidebarExpandButton.setToolTip(
             QApplication.translate("app", "Show sidebar"))
         self.sidebarExpandButton.move(6, 6)
@@ -568,38 +572,6 @@ class Window(QMainWindow):
         startggMenu.addAction(
             QApplication.translate("app", "Unset tournament")).triggered.connect(
             lambda: AutonaTournamentDataProvider.instance.SetTournament(None))
-
-        startggMenu.addSeparator()
-
-        if not SettingsManager.Get("general.hide_track_player", False):
-            self.loadPlayerSetAction = startggMenu.addAction(
-                QApplication.translate("app", "Load tournament and sets from StartGG user"))
-            self.loadPlayerSetAction.setIcon(QIcon(UI.icon_path('startgg.svg')))
-            self.loadPlayerSetAction.triggered.connect(self.LoadUserSetClicked)
-
-            startggMenu.addAction(
-                QApplication.translate("app", "Set StartGG user account")).triggered.connect(
-                self.LoadUserSetOptionsClicked)
-
-            AutonaTournamentDataProvider.instance.signals.user_updated.connect(
-                self.UpdateUserSetButton)
-            AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
-                self.UpdateUserSetButton)
-            self.UpdateUserSetButton()
-
-            startggMenu.addSeparator()
-
-        self.pullCompletedSetsAction = startggMenu.addAction(
-            QApplication.translate("app", "Pull Latest Completed Sets from StartGG"))
-        self.pullCompletedSetsAction.setIcon(QIcon(UI.icon_path('startgg.svg')))
-        self.pullCompletedSetsAction.triggered.connect(
-            AutonaTournamentDataProvider.instance.GetCompletedSets)
-
-        AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
-            self.UpdateLastSetsButton)
-        AutonaTournamentDataProvider.instance.signals.completed_sets_updated.connect(
-            self.LoadCompletedSetsClicked)
-        self.UpdateLastSetsButton()
 
         self.sidebar.tournamentButton.setMenu(startggMenu)
         self.sidebar.tournamentButton.setText(
@@ -783,8 +755,6 @@ class Window(QMainWindow):
 
         StateManager.ReleaseSaving()
 
-        StateManager.Unset("completed_sets")
-
     @Slot(str)
     def _on_status_changed(self, message: str):
         # Runs on the GUI thread thanks to Qt's auto signal connection.
@@ -825,42 +795,6 @@ class Window(QMainWindow):
             self.gameSelect.setText(
                 QApplication.translate("app", "Select game title"))
             AutonaGameAssetManager.instance.selectedGame = {}
-
-    def UpdateUserSetButton(self):
-        if not hasattr(self, 'loadPlayerSetAction'):
-            return
-        if SettingsManager.Get("StartGG_user"):
-            self.loadPlayerSetAction.setText(
-                QApplication.translate("app", "Load tournament and sets from StartGG user")+" "+QApplication.translate("punctuation", "(")+f"{SettingsManager.Get('StartGG_user')}"+QApplication.translate("punctuation", ")"))
-            self.loadPlayerSetAction.setEnabled(True)
-        else:
-            self.loadPlayerSetAction.setText(
-                QApplication.translate("app", "Load tournament and sets from StartGG user"))
-            self.loadPlayerSetAction.setEnabled(False)
-    
-    def UpdateLastSetsButton(self):
-        if AutonaTournamentDataProvider.instance and AutonaTournamentDataProvider.instance.provider and AutonaTournamentDataProvider.instance.provider.name == "StartGG":
-            self.pullCompletedSetsAction.setEnabled(True)
-        else:
-            self.pullCompletedSetsAction.setEnabled(False)
-
-    def LoadUserSetClicked(self):
-        self.scoreboard.lastSetSelected = None
-        if SettingsManager.Get("StartGG_user"):
-            AutonaTournamentDataProvider.instance.provider = StartGGDataProvider(
-                "start.gg/",
-                AutonaTournamentDataProvider.instance.threadPool,
-                AutonaTournamentDataProvider.instance
-            )
-            AutonaTournamentDataProvider.instance.LoadUserSet(
-                self.scoreboard.GetScoreboard(1), SettingsManager.Get("StartGG_user"))
-    
-    def LoadCompletedSetsClicked(self, data):
-        StateManager.Set("completed_sets", {index+1: set for index, set in enumerate(data)})
-
-    def LoadUserSetOptionsClicked(self):
-        AutonaTournamentDataProvider.instance.SetUserAccount(
-            self.scoreboard, startgg=True)
 
     def HideSidebar(self):
         # Collapse the sidebar entirely; a small floating button (top-left of

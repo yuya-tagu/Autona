@@ -141,6 +141,14 @@ class AutonaSidebar(QWidget):
 
     def _build_header(self) -> QWidget:
         header = QWidget()
+        # All three bands share this objectName so a single #sidebarBand rule
+        # paints them the sidebar's lifted colour. Explicit solid fill (not
+        # transparency) is required: qdarktheme's app-wide `QWidget{background}`
+        # paints these plain containers in the page-content colour, and a
+        # `background:transparent` override renders inconsistently across Qt
+        # platforms — an ID-selector solid fill matches how #fmtSegBox already
+        # paints reliably.
+        header.setObjectName("sidebarBand")
         self._headerLayout = hl = QVBoxLayout(header)
         hl.setContentsMargins(8, 10, 8, 10)
         hl.setSpacing(4)
@@ -199,6 +207,7 @@ class AutonaSidebar(QWidget):
 
     def _build_nav(self) -> QWidget:
         nav = QWidget()
+        nav.setObjectName("sidebarBand")
         self._navLayout = nl = QVBoxLayout(nav)
         nl.setContentsMargins(8, 10, 8, 10)
         nl.setSpacing(1)
@@ -207,6 +216,7 @@ class AutonaSidebar(QWidget):
 
     def _build_footer(self) -> QWidget:
         footer = QWidget()
+        footer.setObjectName("sidebarBand")
         fl = QVBoxLayout(footer)
         fl.setContentsMargins(8, 10, 8, 10)
         fl.setSpacing(0)
@@ -243,9 +253,16 @@ class AutonaSidebar(QWidget):
         # selection accent (Todoist-style), which is the one approved use on
         # the sidebar. rgba percentages keep the tint readable on bg_secondary.
         return f"""
-        /* One step brighter than bg_secondary (used by content cards) so the
-           sidebar reads as its own zone, distinct from the page content. */
-        #autonaSidebar {{ background-color: {p['bg_tertiary']}; }}
+        /* One step up the cool-gray ramp from the page content (bg_primary)
+           so the sidebar reads as its own, subtly-lifted zone. */
+        #autonaSidebar {{ background-color: {p['bg_secondary']}; }}
+        /* The header/nav/footer bands tile the whole sidebar height. qdarktheme's
+           app-wide `QWidget {{ background: bg_primary }}` would otherwise paint
+           them in the page-content color and bury the lift. Paint them the
+           sidebar color explicitly (ID selector beats the type-selector rule) —
+           a solid fill rather than transparency, which composites reliably on
+           every Qt platform. */
+        QWidget#sidebarBand {{ background-color: {p['bg_secondary']}; }}
         #sidebarDivider {{ background-color: {p['border_subtle']}; border: none; }}
 
         QToolButton#navItem {{

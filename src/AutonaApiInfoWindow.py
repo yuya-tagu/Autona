@@ -78,7 +78,6 @@ _ENDPOINTS = [
     # ── Board overwrite (confirm recommended) ──
     ("POST", "/scoreboards/{n}:load-set", "Load a set onto the board", {"setId": "12345"}, False, True, False),
     ("POST", "/scoreboards/{n}:pull-stream", "Pull current stream set", None, False, True, False),
-    ("POST", "/scoreboards/{n}:pull-user", "Pull tracked user's set", None, False, True, False),
     # ── Heavy (202 accepted + in-progress flag) ──
     ("POST", "/tournament", "Load tournament (202, async)", {"url": "https://www.start.gg/tournament/.../event/..."}, False, True, False),
     ("POST", "/game", "Set game (202, async)", {"codename": "ssbu", "modsActive": False}, False, True, False),

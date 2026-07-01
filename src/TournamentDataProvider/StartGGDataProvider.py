@@ -19,7 +19,6 @@ from ..Workers import Worker
 
 
 class StartGGDataProvider(TournamentDataProvider):
-    CompletedSetsQuery = None
     EntrantsQuery = None
     # request for a single set with only info relevant for a set that is yet to be played
     FutureSetQuery = None
@@ -37,7 +36,6 @@ class StartGGDataProvider(TournamentDataProvider):
     TournamentPhaseGroupQuery = None
     AnalysisPhaseGroupQuery = None
     TournamentStandingsQuery = None
-    UserSetQuery = None
     _request_timeout_secs = 20.0
 
     player_seeds = {}
@@ -1405,82 +1403,6 @@ class StartGGDataProvider(TournamentDataProvider):
 
         return sets[0] if len(sets) > 0 else None
 
-    def GetUserMatchId(self, user):
-        matches = re.match(
-            r".*start.gg/(user/[^/]*)", user)
-        logger.info(matches)
-        if matches:
-            user = matches.groups()[0]
-
-        userSet = None
-
-        try:
-            logger.info(user)
-            data = self.QueryRequests(
-                "https://www.start.gg/api/-/gql",
-                type=requests.post,
-                jsonParams={
-                    "operationName": "UserSetQuery",
-                    "variables": {
-                        "userSlug": user,
-                        "filters": {
-                            "state": [1, 2, 4, 5, 6]
-                        }
-                    },
-                    "query": StartGGDataProvider.UserSetQuery
-                }
-            )
-
-            logger.info(data)
-
-            sets = deep_get(data, "data.user.player.sets.nodes")
-
-            # If there's no active set, get last finished set instead
-            if sets is not None and len(sets) == 0:
-                data = self.QueryRequests(
-                    "https://www.start.gg/api/-/gql",
-                    type=requests.post,
-                    jsonParams={
-                        "operationName": "UserSetQuery",
-                        "variables": {
-                            "userSlug": user,
-                            "filters": {
-                            }
-                        },
-                        "query": StartGGDataProvider.UserSetQuery
-                    }
-                )
-
-                logger.info(data)
-
-                sets = deep_get(data, "data.user.player.sets.nodes")
-
-            if sets and len(sets) > 0:
-                userSet = sets[0]
-
-                # This calls the slot using the queued execution mechanism without having to worry about signals.
-                # Do this because it means that SetTournament will always run in tshTdp's native thread.
-                invokeSlot(self.tshTdp.SetTournament, "https://start.gg/"+deep_get(userSet, "event.slug"))
-
-                playerId = deep_get(data, "data.user.player.id")
-                slots = userSet.get("slots", [])
-
-                # Check if player is in slot 2
-                if len(slots) >= 2:
-                    participants = deep_get(
-                        slots[1], "entrant.participants", [])
-                    for participant in participants:
-                        p = participant.get("player", {}).get("id", None)
-                        if p == playerId:
-                            userSet["reverse"] = True
-                            break
-
-                logger.info(userSet)
-        except Exception as e:
-            logger.error(traceback.format_exc())
-
-        return userSet
-
     def GetEntrants(self):
         worker = Worker(self.GetEntrantsWorker, **{
             "gameId": AutonaGameAssetManager.instance.selectedGame.get("smashgg_game_id"),
@@ -1562,110 +1484,6 @@ class StartGGDataProvider(TournamentDataProvider):
         except Exception as e:
             logger.error(traceback.format_exc())
             callback.emit({"playerNumber": playerNumber, "last_sets": []})
-
-    def GetCompletedSets(self, progress_callback, cancel_event):
-        try:
-            data = self.QueryRequests(
-                "https://www.start.gg/api/-/gql",
-                type=requests.post,
-                jsonParams={
-                    "operationName": "CompletedSetsQuery",
-                    "variables": {
-                        "eventSlug": self.url.split("start.gg/")[1]
-                    },
-                    "query": StartGGDataProvider.CompletedSetsQuery
-                }
-            )
-
-            sets = deep_get(
-                data, "data.event.sets.nodes", [])
-
-            set_data = []
-
-            for set in sets:
-                if not set:
-                    continue
-                if not set.get("winnerId"):
-                    continue
-                if len(set.get("slots", [])) < 2:
-                    continue
-
-                phaseName = ""
-                phaseIdentifier = ""
-
-                # This is because a display identifier at a major (Ex. Pools C12) will return C12,
-                # otherwise startgg will just return a string containing "1"
-                if deep_get(set, "phaseGroup.displayIdentifier") != "1":
-                    phaseIdentifier = deep_get(
-                        set, "phaseGroup.displayIdentifier")
-                phaseName = deep_get(set, "phaseGroup.phase.name")
-
-                slots = deep_get(set, "slots", [])
-                p1 = slots[0] if len(slots) > 0 else {}
-                p2 = slots[1] if len(slots) > 1 else {}
-
-                # Pulls "Team" names, only useful if more than 1 player on a team
-                # Else it'll display as "ABC | TestPlayer"
-                t1Name = deep_get(p1, "entrant.name", "")
-                t2Name = deep_get(p2, "entrant.name", "")
-
-                # Seed Info for Team/Player
-                team1Seed = deep_get(p1, "entrant.initialSeedNum", 0)
-                team2Seed = deep_get(p2, "entrant.initialSeedNum", 0)
-
-                winnerId = deep_get(p1, "entrant.id", 0)
-                
-                team1Info = set.get("slots", [{}])[0].get("entrant", {}).get(
-                    "participants", [{}])
-                team2Info = set.get("slots", [{}])[1].get("entrant", {}).get(
-                    "participants", [{}])
-                
-                # Pull Team Info and Store it
-                team1 = []
-                for players in team1Info:
-                    player = players.get("player")
-                    playerInfo = {
-                        "sponsor": player.get("prefix", ""),
-                        "gamertag": player.get("gamerTag")
-                    }
-                    team1.append(playerInfo)
-                
-                team2 = []
-                for players in team2Info:
-                    player = players.get("player")
-                    playerInfo = {
-                        "sponsor": player.get("prefix", ""),
-                        "gamertag": player.get("gamerTag")
-                    }
-                    team2.append(playerInfo)
-
-                # Setting Correct Winner Info
-                players = ["winner", "loser"]
-
-                if winnerId != set.get("winnerId"):
-                    players.reverse()
-
-                # Compiling Set Data for display
-                set = {
-                    "phase_id": phaseIdentifier,
-                    "phase_name": phaseName,
-                    "round_name": StartGGDataProvider.TranslateRoundName(set.get("fullRoundText")),
-                    f"{players[0]}_score": set.get("entrant1Score") if set.get("entrant1Score") is not None else "0",
-                    f"{players[0]}_seed": team1Seed,
-                    f"{players[0]}_team": {index+1: player for index, player in enumerate(team1)},
-                    f"{players[0]}_team_name": t1Name,
-                    f"{players[1]}_score": set.get("entrant2Score") if set.get("entrant2Score") is not None else "0",
-                    f"{players[1]}_seed": team2Seed,
-                    f"{players[1]}_team": {index+1: player for index, player in enumerate(team2)},
-                    f"{players[1]}_team_name": t2Name,
-                }
-
-                set_data.append(set)
-
-            return set_data
-        except Exception as e:
-            logger.error(traceback.format_exc())
-            return []
 
     def GetPlayerHistoryStandings(self, playerID, playerNumber, gameType, callback, progress_callback, cancel_event):
         try:
@@ -2167,7 +1985,6 @@ def readQueryFile(tdpdir, filename):
     with open(f"{tdpdir}/StartGG{filename}Query.txt", "r") as f:
         return f.read()
 
-StartGGDataProvider.CompletedSetsQuery = readQueryFile(sggTdpDir, "CompletedSets")
 StartGGDataProvider.EntrantsQuery = readQueryFile(sggTdpDir, "Entrants")
 StartGGDataProvider.FutureSetQuery = readQueryFile(sggTdpDir, "FutureSet")
 StartGGDataProvider.HistorySetsQuery = readQueryFile(sggTdpDir, "PlayerTournamentHistory")
@@ -2184,5 +2001,4 @@ StartGGDataProvider.TournamentPhasesQuery = readQueryFile(sggTdpDir, "Tournament
 StartGGDataProvider.TournamentPhaseGroupQuery = readQueryFile(sggTdpDir, "TournamentPhaseGroup")
 StartGGDataProvider.AnalysisPhaseGroupQuery = readQueryFile(sggTdpDir, "AnalysisPhaseGroup")
 StartGGDataProvider.TournamentStandingsQuery = readQueryFile(sggTdpDir, "TournamentStandings")
-StartGGDataProvider.UserSetQuery = readQueryFile(sggTdpDir, "UserSet")
 StartGGDataProvider.TournamentSlugQuery = readQueryFile(sggTdpDir, "TournamentSlug")

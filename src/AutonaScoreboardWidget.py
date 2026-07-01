@@ -1,6 +1,4 @@
 import math
-import platform
-import subprocess
 import urllib.parse
 import webbrowser
 
@@ -79,7 +77,6 @@ class AutonaScoreboardWidgetSignals(QObject):
     StationSelection = Signal()
     StationSelected = Signal(object)
     StationSetsLoaded = Signal(object)
-    UserSetSelection = Signal()
     CommandScoreChange = Signal(int, int)
     CommandTeamColor = Signal(int, str)
     SwapTeams = Signal()
@@ -109,7 +106,6 @@ class AutonaScoreboardWidget(QWidget):
         self.signals.SetSelection.connect(self.LoadSetClicked)
         self.signals.StationSelected.connect(self.LoadStationSets)
         self.signals.StationSelection.connect(self.LoadStationSetClicked)
-        self.signals.UserSetSelection.connect(self.LoadUserSetClicked)
         self.signals.ChangeSetData.connect(self.ChangeSetData)
 
         AutonaHotkeys.signals.load_set.connect(self.LoadSetClicked)
@@ -975,27 +971,13 @@ class AutonaScoreboardWidget(QWidget):
                 settingsManager=SettingsManager, scoreboardNumber=self.scoreboardNumber)
             if not disable_msgbox:
                 msgBox.setText(QApplication.translate(
-                    "thumb_app", "The thumbnail has been generated here:") + " " + thumbnailPath + "\n\n" + QApplication.translate(
-                    "thumb_app", "The video title and description have also been generated."))
+                    "thumb_app", "The thumbnail has been generated here:") + " " + thumbnailPath)
                 msgBox.setIcon(QMessageBox.NoIcon)
                 # msgBox.setInformativeText(thumbnailPath)
 
-            thumbnail_settings = SettingsManager.Get("thumbnail_config")
             if not quiet_mode:
-                if thumbnail_settings.get("open_explorer"):
-                    outThumbDir = f"{os.getcwd()}/out/thumbnails/"
-                    if platform.system() == "Windows":
-                        thumbnailPath = thumbnailPath[2:].replace("/", "\\")
-                        outThumbDir = f"{os.getcwd()}\\{thumbnailPath}"
-                        # os.startfile(outThumbDir)
-                        subprocess.Popen(r'explorer /select,"'+outThumbDir+'"')
-                    elif platform.system() == "Darwin":
-                        subprocess.Popen(["open", outThumbDir])
-                    else:
-                        subprocess.Popen(["xdg-open", outThumbDir])
-                else:
-                    if not disable_msgbox:
-                        msgBox.exec()
+                if not disable_msgbox:
+                    msgBox.exec()
             else:
                 return(thumbnailPath)
         except Exception as e:
@@ -1413,8 +1395,6 @@ class AutonaScoreboardWidget(QWidget):
                 self.labelAutonaUpdate.setText(
                     QApplication.translate("app", "Auto update (Station [{0}])").format(self.lastStationSelected.get('identifier'))
                     )
-            elif data.get("auto_update") == "user":
-                self.labelAutonaUpdate.setText(QApplication.translate("app", "Auto update (User)"))
             else:
                 self.labelAutonaUpdate.setText(QApplication.translate("app", "Auto update"))
 
@@ -1452,14 +1432,6 @@ class AutonaScoreboardWidget(QWidget):
                     StateManager.Set(
                         f'score.{self.scoreboardNumber}.station', None)
 
-                # Force user to be P1 on set change
-                if data.get("auto_update") == "user":
-                    if (data.get("reverse") and not self.teamsSwapped) or \
-                            not data.get("reverse") and self.teamsSwapped:
-                        self.teamsSwapped = not self.teamsSwapped
-                        StateManager.Set(
-                            f"score.{self.scoreboardNumber}.teamsSwapped", self.teamsSwapped)
-
                 AutonaTournamentDataProvider.instance.GetMatch(
                     self, data["id"], overwrite=True, no_mains=data.get("no_mains") if data.get("no_mains") != None else False)
 
@@ -1470,11 +1442,6 @@ class AutonaScoreboardWidget(QWidget):
                 if data.get("auto_update") in ("stream", "station"):
                     self.autoUpdateTimer.timeout.connect(
                         lambda setId=data: AutonaTournamentDataProvider.instance.LoadStationSets(self))
-
-                if data.get("auto_update") == "user":
-                    self.autoUpdateTimer.timeout.connect(
-                        lambda setId=data: AutonaTournamentDataProvider.instance.LoadUserSet(
-                            self, SettingsManager.Get(AutonaTournamentDataProvider.instance.provider.name+"_user")))
         finally:
             for p in self.playerWidgets:
                 p.dataLock.release()
@@ -1517,18 +1484,6 @@ class AutonaScoreboardWidget(QWidget):
     def LoadStationSetClicked(self):
         self.selectStationWindow.LoadStations()
         self.selectStationWindow.show()
-
-    def LoadUserSetClicked(self):
-        self.lastSetSelected = None
-        provider = None
-        if AutonaTournamentDataProvider.instance.provider:
-            provider = AutonaTournamentDataProvider.instance.provider.name
-        if provider and SettingsManager.Get(provider+"_user"):
-            AutonaTournamentDataProvider.instance.LoadUserSet(
-                self, SettingsManager.Get(provider+"_user"))
-
-    def LoadUserSetOptionsClicked(self):
-        AutonaTournamentDataProvider.instance.SetUserAccount(self)
 
     # Used for score change commands
     # Change <team>(0, 1) score by <change>(+X, -X)

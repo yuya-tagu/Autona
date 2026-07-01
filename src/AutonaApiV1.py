@@ -626,14 +626,6 @@ def pull_stream(n):
     return ok(revision=current_revision())
 
 
-@api_v1.route("/scoreboards/<int:n>:pull-user", methods=["POST"])
-@write_op("pull-user")
-def pull_user(n):
-    require_board_12(n)
-    _actions_ref().pull_user_set(n)
-    return ok(revision=current_revision())
-
-
 # ── Heavy operations (202 + in-progress flag, spec §2.8 / §7.3) ──
 @api_v1.route("/tournament", methods=["POST"])
 @write_op("tournament.load")

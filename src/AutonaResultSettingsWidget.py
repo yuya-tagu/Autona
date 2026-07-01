@@ -92,6 +92,189 @@ class ResultPreviewWidget(QWidget):
         painter.end()
 
 
+class _DragGrip(QLabel):
+    """Drag handle for a result player card.
+
+    A press-and-drag that starts on this grip begins an internal move drag;
+    PlayerCardList performs the reorder on drop. Dragging is restricted to the
+    grip so the card's input fields (name / combos) stay fully usable.
+    """
+
+    def __init__(self, card, card_list):
+        super().__init__()
+        self._card = card
+        self._card_list = card_list
+        self._press_pos = None
+        self.setObjectName("cardGrip")
+        self.setPixmap(QIcon(UI.icon_path("menu.svg")).pixmap(16, 16))
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setToolTip(QApplication.translate("app", "Drag to reorder"))
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._press_pos = e.pos()
+
+    def mouseMoveEvent(self, e):
+        if self._press_pos is None:
+            return
+        if (e.pos() - self._press_pos).manhattanLength() \
+                < QApplication.startDragDistance():
+            return
+        idx = self._card_list.indexOf(self._card)
+        self._press_pos = None
+        if idx < 0:
+            return
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setData(PlayerCardList.MIME, str(idx).encode("ascii"))
+        drag.setMimeData(mime)
+        drag.setPixmap(self._gripDragPixmap())
+        drag.setHotSpot(self.mapTo(self._card, e.pos()))
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        drag.exec(Qt.DropAction.MoveAction)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+
+    def mouseReleaseEvent(self, e):
+        self._press_pos = None
+
+    def _gripDragPixmap(self):
+        """Grab the card one step brighter (bg_quaternary) for the drag image.
+
+        The `dragging` property drives a QSS variant; toggle it around grab()
+        with a repolish so only the offscreen drag pixmap is brightened — the
+        on-screen card is restored before any repaint reaches the screen.
+        """
+        card = self._card
+        card.setProperty("dragging", True)
+        card.style().unpolish(card)
+        card.style().polish(card)
+        pixmap = card.grab()
+        card.setProperty("dragging", False)
+        card.style().unpolish(card)
+        card.style().polish(card)
+        return pixmap
+
+
+class PlayerCardList(QWidget):
+    """Vertical, drag-reorderable list of player cards.
+
+    Cards are added top-to-bottom and dragged by their grip. On drop the list
+    reorders itself and emits orderChanged; the owning widget renumbers ranks
+    to match the new visual order. Only visible cards participate as drop
+    targets, so hidden slots (beyond the 8/16 shown) never receive a drop.
+    """
+
+    MIME = "application/x-autona-result-player-card"
+    orderChanged = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._cards = []
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.setSpacing(UI.SPACE_SM)
+        self._layout.addStretch(1)
+        self.setAcceptDrops(True)
+        # 2px accent line shown at the drop position during a drag.
+        self._indicator = QFrame(self)
+        self._indicator.setFixedHeight(2)
+        self._indicator.setStyleSheet(
+            f"background-color: {UI.palette()['accent']}; border: none;")
+        self._indicator.hide()
+
+    def addCard(self, card):
+        self._cards.append(card)
+        # Insert before the trailing stretch (always the last layout item).
+        self._layout.insertWidget(self._layout.count() - 1, card)
+
+    def cards(self):
+        return list(self._cards)
+
+    def indexOf(self, card):
+        try:
+            return self._cards.index(card)
+        except ValueError:
+            return -1
+
+    # -- drag & drop --
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasFormat(self.MIME):
+            e.acceptProposedAction()
+
+    def dragMoveEvent(self, e):
+        if not e.mimeData().hasFormat(self.MIME):
+            return
+        self._showIndicator(self._insertIndex(self._eventY(e)))
+        e.acceptProposedAction()
+
+    def dragLeaveEvent(self, e):
+        self._indicator.hide()
+
+    def dropEvent(self, e):
+        self._indicator.hide()
+        if not e.mimeData().hasFormat(self.MIME):
+            return
+        try:
+            src = int(bytes(e.mimeData().data(self.MIME)).decode("ascii"))
+        except (ValueError, TypeError):
+            return
+        dst = self._insertIndex(self._eventY(e))
+        e.acceptProposedAction()
+        # Defer the reorder: mutating the layout while Qt is still delivering
+        # the drop event risks a re-entrant layout crash (agent-pitfalls #9).
+        QTimer.singleShot(0, lambda: self._commitMove(src, dst))
+
+    # -- helpers --
+    def _eventY(self, e):
+        # qtpy/Qt6 exposes position() (QPointF); fall back to pos() for Qt5.
+        try:
+            return int(e.position().y())
+        except AttributeError:
+            return e.pos().y()
+
+    def _visibleCards(self):
+        return [c for c in self._cards if c.isVisible()]
+
+    def _insertIndex(self, y):
+        """Insertion index (in _cards terms) from a y coordinate, using only
+        visible cards' vertical midpoints."""
+        for c in self._cards:
+            if not c.isVisible():
+                continue
+            if y < c.y() + c.height() / 2:
+                return self._cards.index(c)
+        vis = self._visibleCards()
+        return self._cards.index(vis[-1]) + 1 if vis else len(self._cards)
+
+    def _showIndicator(self, ins):
+        spacing = self._layout.spacing()
+        if ins < len(self._cards) and self._cards[ins].isVisible():
+            y = self._cards[ins].y() - spacing // 2
+        else:
+            vis = self._visibleCards()
+            y = (vis[-1].y() + vis[-1].height() + spacing // 2) if vis else 0
+        self._indicator.setGeometry(0, y, self.width(), 2)
+        self._indicator.show()
+        self._indicator.raise_()
+
+    def _commitMove(self, src, dst):
+        if src < 0 or src >= len(self._cards):
+            return
+        # Moving downward: removing src shifts later items up by one.
+        if dst > src:
+            dst -= 1
+        dst = max(0, min(dst, len(self._cards) - 1))
+        if dst == src:
+            return
+        card = self._cards.pop(src)
+        self._cards.insert(dst, card)
+        for c in self._cards:
+            self._layout.removeWidget(c)
+        for i, c in enumerate(self._cards):
+            self._layout.insertWidget(i, c)
+        self.orderChanged.emit()
+
+
 class AutonaResultSettingsWidget(QDockWidget):
     # Team layout: max members shown per rank (each = name + main fighter).
     MAX_TEAM_MEMBERS = 5
@@ -116,31 +299,45 @@ class AutonaResultSettingsWidget(QDockWidget):
         self.settings.layout().setContentsMargins(0, 0, 0, 0)
         self.widget_container.layout().addWidget(self.settings)
 
-        # --- Player input rows (5 rows per player) ---
-        # Row 1: rank(col 0, spans 5), name(col 1), sponsor(col 2)
-        # Row 2: X / Twitter handle (spans col 1-2)
-        # Row 3: main char combo, main color combo
-        # Row 4: secondary char combo, secondary color combo
-        # Row 5: tertiary char combo, tertiary color combo
-        # playerInputs entry:
+        # --- Player cards (one draggable card per player) ---
+        # Each player is a QFrame card (brighter background) laid out in a
+        # PlayerCardList that supports drag-to-reorder. Card body:
+        #   left column : drag grip + rank spin box
+        #   fields grid : name/sponsor, X (Twitter), then 3× char+color rows
+        # playerInputs entry (unchanged 10-tuple, index contract preserved):
         #   (rank_edit, name_edit, sponsor_edit,
         #    char1_combo, color1_combo,
         #    char2_combo, color2_combo,
         #    char3_combo, color3_combo,
         #    twitter_edit)
+        # playerInputs / playerCards are kept in VISUAL order and stay parallel;
+        # _onPlayersReordered rebuilds both from the card list after a drag.
         self.playerInputs = []
+        self.playerCards = []
+        self._entryByCard = {}
+
+        self.playerCardList = PlayerCardList()
+        self.playerCardList.orderChanged.connect(self._onPlayersReordered)
+        # One step brighter than the page so each player reads as its own card.
+        _pc = UI.palette()
+        # `dragging` variant is one step brighter (bg_quaternary); _DragGrip
+        # toggles that property around grab() so only the drag pixmap uses it.
+        self.playerCardList.setStyleSheet(
+            f"QFrame#resultPlayerCard {{"
+            f" background-color: {_pc['bg_tertiary']};"
+            f" border: 1px solid {_pc['border_subtle']};"
+            f" border-radius: {UI.RADIUS_MD}px;"
+            f" }}"
+            f"QFrame#resultPlayerCard[dragging=\"true\"] {{"
+            f" background-color: {_pc['bg_quaternary']};"
+            f" }}"
+            f"QLabel#cardGrip {{ padding: 2px; }}")
+
         grid = self.settings.findChild(QGridLayout, "gridPlayers")
-        grid.setVerticalSpacing(2)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.addWidget(self.playerCardList, 0, 0)
 
         for i in range(16):
-            idx = i
-            base = i * 5  # 5 grid rows per player
-            row1 = base       # name + sponsor
-            row2 = base + 1   # X (Twitter), own row
-            row3 = base + 2   # char slot 1
-            row4 = base + 3   # char slot 2
-            row5 = base + 4   # char slot 3
-
             rank_edit = self._makeRankEdit(i + 1)
 
             name_edit = QLineEdit()
@@ -166,45 +363,72 @@ class AutonaResultSettingsWidget(QDockWidget):
             char3_combo  = self._makeCharCombo(sub=True)
             color3_combo = self._makeColorCombo()
 
-            # Row 1: rank spans all 5 rows, name + sponsor
-            grid.addWidget(rank_edit, row1, 0, 5, 1,
-                           Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
-            grid.addWidget(name_edit,   row1, 1)
-            grid.addWidget(sponsor_edit, row1, 2)
-            # Row 2: X (Twitter) on its own row, spanning the name + sponsor cols
-            grid.addWidget(twitter_edit, row2, 1, 1, 2)
-            # Row 3–5: char + color per slot
-            grid.addWidget(char1_combo,  row3, 1)
-            grid.addWidget(color1_combo, row3, 2)
-            grid.addWidget(char2_combo,  row4, 1)
-            grid.addWidget(color2_combo, row4, 2)
-            grid.addWidget(char3_combo,  row5, 1)
-            grid.addWidget(color3_combo, row5, 2)
+            # --- Build the card ---
+            card = QFrame()
+            card.setObjectName("resultPlayerCard")
+            cardOuter = QHBoxLayout(card)
+            cardOuter.setContentsMargins(8, 8, 8, 8)
+            cardOuter.setSpacing(8)
 
-            # Connect signals
+            # Left column: rank spin box pinned top-left, drag grip alone at the
+            # true vertical centre. Both share one grid cell (rank AlignTop,
+            # grip AlignVCenter) so the grip centres over the full card height
+            # regardless of the rank's height.
+            leftCol = QGridLayout()
+            leftCol.setContentsMargins(0, 0, 0, 0)
+            grip = _DragGrip(card, self.playerCardList)
+            leftCol.addWidget(
+                rank_edit, 0, 0,
+                Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+            leftCol.addWidget(
+                grip, 0, 0,
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter)
+            cardOuter.addLayout(leftCol, 0)
+
+            fields = QGridLayout()
+            fields.setVerticalSpacing(2)
+            fields.setHorizontalSpacing(6)
+            fields.addWidget(name_edit,    0, 0)
+            fields.addWidget(sponsor_edit, 0, 1)
+            fields.addWidget(twitter_edit, 1, 0, 1, 2)
+            fields.addWidget(char1_combo,  2, 0)
+            fields.addWidget(color1_combo, 2, 1)
+            fields.addWidget(char2_combo,  3, 0)
+            fields.addWidget(color2_combo, 3, 1)
+            fields.addWidget(char3_combo,  4, 0)
+            fields.addWidget(color3_combo, 4, 1)
+            fields.setColumnStretch(0, 1)
+            cardOuter.addLayout(fields, 1)
+
+            self.playerCardList.addCard(card)
+
+            # Connect signals. Char combos capture their own widgets (not a row
+            # index) so the skin-model reload stays correct after reordering.
             name_edit.editingFinished.connect(self._syncPlayersToState)
             sponsor_edit.editingFinished.connect(self._syncPlayersToState)
             twitter_edit.editingFinished.connect(self._syncPlayersToState)
             char1_combo.currentIndexChanged.connect(
-                lambda _, i=idx: self._onAnyCharChanged(i, 0))
+                lambda _, cc=char1_combo, vc=color1_combo:
+                self._onCharComboChanged(cc, vc))
             char2_combo.currentIndexChanged.connect(
-                lambda _, i=idx: self._onAnyCharChanged(i, 1))
+                lambda _, cc=char2_combo, vc=color2_combo:
+                self._onCharComboChanged(cc, vc))
             char3_combo.currentIndexChanged.connect(
-                lambda _, i=idx: self._onAnyCharChanged(i, 2))
+                lambda _, cc=char3_combo, vc=color3_combo:
+                self._onCharComboChanged(cc, vc))
             color1_combo.currentIndexChanged.connect(self._syncPlayersToState)
             color2_combo.currentIndexChanged.connect(self._syncPlayersToState)
             color3_combo.currentIndexChanged.connect(self._syncPlayersToState)
             rank_edit.editingFinished.connect(self._syncPlayersToState)
 
-            # twitter_edit is appended last so existing positional unpacks
-            # (entry[0..8]) stay valid; _onLayoutChanged iterates the whole
-            # tuple so it shows/hides with the row.
-            self.playerInputs.append(
-                (rank_edit, name_edit, sponsor_edit,
-                 char1_combo, color1_combo,
-                 char2_combo, color2_combo,
-                 char3_combo, color3_combo,
-                 twitter_edit))
+            entry = (rank_edit, name_edit, sponsor_edit,
+                     char1_combo, color1_combo,
+                     char2_combo, color2_combo,
+                     char3_combo, color3_combo,
+                     twitter_edit)
+            self.playerInputs.append(entry)
+            self.playerCards.append(card)
+            self._entryByCard[card] = entry
 
         # --- Team input rows (team layout) ---
         # Each rank is a team: a team name plus up to MAX_TEAM_MEMBERS members,
@@ -403,18 +627,19 @@ class AutonaResultSettingsWidget(QDockWidget):
         self._onLayoutChanged()
 
     def _makeRankEdit(self, default_rank):
-        """Create an editable rank field (small integer line edit).
+        """Create an editable rank field (small integer spin box).
 
-        The rank is read back by _syncPlayersToState / _syncTeamsToState and
-        flows through to result_players[*]['rank'], so editing it here is
-        reflected in the rendered result image. Start.gg standings overwrite
-        it via setText(), matching the previous QLabel behaviour.
+        The rank is read back by _syncPlayersToState / _syncTeamsToState via
+        value() and flows through to result_players[*]['rank'], so editing it
+        here is reflected in the rendered result image. Start.gg standings
+        overwrite it via setValue().
         """
-        edit = QLineEdit(str(default_rank))
-        edit.setValidator(QIntValidator(1, 999, edit))
-        edit.setFixedWidth(30)
-        edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        return edit
+        spin = QSpinBox()
+        spin.setRange(1, 999)
+        spin.setValue(default_rank)
+        spin.setFixedWidth(52)
+        spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        return spin
 
     def _makeCharCombo(self, sub=False):
         """Create a character selection combo box."""
@@ -428,11 +653,14 @@ class AutonaResultSettingsWidget(QDockWidget):
         proxy.setSourceModel(AutonaGameAssetManager.instance.characterModel)
         combo.setModel(proxy)
         combo.setIconSize(QSize(0, 0))
-        combo.setFixedHeight(22 if sub else 28)
+        # Uniform 22px across main and sub combos so each character combo lines
+        # up with its 22px color combo in the same grid row (the former 28px
+        # main-combo left slot-1's color combo vertically offset by 3px).
+        combo.setFixedHeight(22)
         combo.setCurrentIndex(-1)
-        if sub:
-            combo.lineEdit().setPlaceholderText(
-                QApplication.translate("app", "Sub character"))
+        combo.lineEdit().setPlaceholderText(
+            QApplication.translate("app", "Sub character") if sub
+            else QApplication.translate("app", "Main character"))
         return combo
 
     def _makeColorCombo(self):
@@ -502,10 +730,7 @@ class AutonaResultSettingsWidget(QDockWidget):
             char3_combo, color3_combo = entry[7], entry[8]
             twitter_edit = entry[9]
 
-            try:
-                rank = int(rank_label.text())
-            except ValueError:
-                rank = i + 1
+            rank = rank_label.value()
             name    = name_edit.text().strip()
             sponsor = sponsor_edit.text().strip()
             twitter = twitter_edit.text().strip()
@@ -543,10 +768,7 @@ class AutonaResultSettingsWidget(QDockWidget):
         """
         players = {}
         for i, team in enumerate(self.teamInputs):
-            try:
-                rank = int(team["rank_label"].text())
-            except ValueError:
-                rank = i + 1
+            rank = team["rank_label"].value()
             team_name = team["name_edit"].text().strip()
 
             members = []
@@ -601,7 +823,7 @@ class AutonaResultSettingsWidget(QDockWidget):
             if i < len(data):
                 entry = data[i]
                 placement = entry.get("placement", i + 1)
-                rank_label.setText(str(placement) if placement else str(i + 1))
+                rank_label.setValue(int(placement) if placement else i + 1)
                 roster = entry.get("players", []) or []
                 team_name = entry.get("name") or (
                     roster[0].get("gamerTag", "") if roster else "")
@@ -629,7 +851,7 @@ class AutonaResultSettingsWidget(QDockWidget):
                         char_combo.setCurrentIndex(-1)
                         color_combo.setModel(QStandardItemModel())
             else:
-                rank_label.setText(str(i + 1))
+                rank_label.setValue(i + 1)
                 name_edit.setText("")
                 for member_name, char_combo, color_combo in team["members"]:
                     member_name.setText("")
@@ -685,7 +907,7 @@ class AutonaResultSettingsWidget(QDockWidget):
             if i < len(data):
                 team = data[i]
                 placement = team.get("placement", i + 1)
-                rank_label.setText(str(placement) if placement else str(i + 1))
+                rank_label.setValue(int(placement) if placement else i + 1)
 
                 players = team.get("players", [])
                 if players:
@@ -707,7 +929,7 @@ class AutonaResultSettingsWidget(QDockWidget):
                         cc.setCurrentIndex(-1)
                         cv.setModel(QStandardItemModel())
             else:
-                rank_label.setText(str(i + 1))
+                rank_label.setValue(i + 1)
                 name_edit.setText("")
                 sponsor_edit.setText("")
                 twitter_edit.setText("")
@@ -765,13 +987,12 @@ class AutonaResultSettingsWidget(QDockWidget):
             color_combo.setModel(QStandardItemModel())
         color_combo.blockSignals(False)
 
-    def _onAnyCharChanged(self, player_index, slot):
-        """Called when any character combo (0=main, 1=2nd, 2=3rd) changes."""
-        # slot maps to tuple indices: 0→(3,4), 1→(5,6), 2→(7,8)
-        ci = 3 + slot * 2
-        vi = 4 + slot * 2
-        char_combo  = self.playerInputs[player_index][ci]
-        color_combo = self.playerInputs[player_index][vi]
+    def _onCharComboChanged(self, char_combo, color_combo):
+        """Load the skin model for a character combo when it changes.
+
+        Takes the specific combo widgets (not a row index) so it stays correct
+        after cards are reordered by drag.
+        """
         char_data = char_combo.currentData(Qt.ItemDataRole.UserRole)
         if char_data and char_data.get("en_name"):
             skin_model = AutonaGameAssetManager.instance.skinModels.get(
@@ -784,6 +1005,29 @@ class AutonaResultSettingsWidget(QDockWidget):
         else:
             color_combo.setModel(QStandardItemModel())
         self._syncPlayersToState()
+
+    def _onPlayersReordered(self):
+        """Rebuild playerInputs/playerCards to the new visual card order, then
+        renumber ranks 1..N by position and resync + refresh the preview."""
+        order = self.playerCardList.cards()
+        self.playerCards = list(order)
+        self.playerInputs = [self._entryByCard[c] for c in order]
+        for i, entry in enumerate(self.playerInputs):
+            spin = entry[0]
+            spin.blockSignals(True)
+            spin.setValue(i + 1)
+            spin.blockSignals(False)
+        self._applyPlayerVisibility()
+        self._syncPlayersToState()
+        self.GeneratePreview(True)
+
+    def _applyPlayerVisibility(self):
+        """Show the top-N player cards (N = 8/16 by layout); hide the rest.
+        Team mode hides all singles cards."""
+        is_team = self._isTeamLayout()
+        n = self._maxPlayersForLayout()
+        for i, card in enumerate(self.playerCards):
+            card.setVisible((not is_team) and i < n)
 
     def _selectCharInCombo(self, char_combo, char_codename):
         """Select a character in a combo box by codename."""
@@ -870,11 +1114,8 @@ class AutonaResultSettingsWidget(QDockWidget):
 
         n = self._maxPlayersForLayout()
 
-        # Singles rows (hidden entirely in team mode).
-        for i, entry in enumerate(self.playerInputs):
-            visible = (not is_team) and i < n
-            for widget in entry:
-                widget.setVisible(visible)
+        # Singles cards (hidden entirely in team mode).
+        self._applyPlayerVisibility()
 
         # Team rows (hidden entirely in singles mode).
         for i, team in enumerate(self.teamInputs):
