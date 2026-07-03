@@ -7,7 +7,6 @@ from .LayoutOptionsWidget import LayoutOptionsWidget
 class AutonaLayoutOptionsWindow(QDialog):
     
     chipOptions = []
-    bracketOptions = []
     versusOptions = []
     
     def __init__(self, parent=None):
@@ -143,103 +142,6 @@ class AutonaLayoutOptionsWindow(QDialog):
         self.add_setting_widget(QApplication.translate(
             "layout_options", "Chip Options"), LayoutOptionsWidget("chip-options", self.chipOptions))
 
-        # ================================================================
-        # START BRACKET LAYOUT OPTIONS
-        # ================================================================
-
-        self.bracketOptions.append((
-            QApplication.translate("layout_options.bracket_character", "Display Player Avatar"),
-            "bracket_avatar_display",
-            "checkbox",
-            True
-        ))
-
-        self.bracketOptions.append((
-            QApplication.translate("layout_options.bracket_character", "Display Player Character"),
-            "bracket_character_display",
-            "checkbox",
-            True
-        ))
-
-        self.bracketOptions.append((
-            QApplication.translate("layout_options.bracket_country_flag", "Display Player Country Flag"),
-            "bracket_country_flag_display",
-            "checkbox",
-            True
-        ))
-
-        self.bracketOptions.append((
-            QApplication.translate("layout_options.bracket_state_flag", "Display Player State Flag"),
-            "bracket_state_flag_display",
-            "checkbox",
-            True
-        ))
-
-        self.bracketOptions.append((
-            QApplication.translate("layout_options.bracket_score_color", "Primary Color for Player Score"),
-            "bracket_score_color",
-            "color",
-            "#fe3636"
-        ))
-
-        self.bracketOptions.append((
-            QApplication.translate("layout_options.bracket_score_color_gradient", "Make Score Color a Linear Gradient"),
-            "bracket_score_color_gradient",
-            "checkbox",
-            False
-        ))
-
-        self.bracketOptions.append((
-            QApplication.translate("layout_options.bracket_score_gradient_direction", "Background Gradient Direction for Score"),
-            "bracket_score_gradient_direction",
-            "dropdown",
-            GRADIENT_DIRECTIONS
-        ))
-
-        self.bracketOptions.append((
-            QApplication.translate("layout_options.bracket_score_secondary_color", "Secondary Color for Player Score"),
-            "bracket_score_secondary_color",
-            "color",
-            "#121212"
-        ))
-        self.bracketOptions.append((
-            QApplication.translate("layout_options.bracket_sponsor_color", "Primary Color for Player Sponsor"),
-            "bracket_sponsor_color",
-            "color",
-            "#fe3636"
-        ))
-
-        self.bracketOptions.append((
-            QApplication.translate("layout_options.bracket_sponsor_color_gradient", "Make Sponsor Color a Linear Gradient"),
-            "bracket_sponsor_color_gradient",
-            "checkbox",
-            False
-        ))
-
-        self.bracketOptions.append((
-            QApplication.translate("layout_options.bracket_sponsor_gradient_direction", "Background Gradient Direction for Sponsor"),
-            "bracket_sponsor_gradient_direction",
-            "dropdown",
-            GRADIENT_DIRECTIONS
-        ))
-
-        self.bracketOptions.append((
-            QApplication.translate("layout_options.bracket_sponsor_secondary_color", "Secondary Color for Player Sponsor"),
-            "bracket_sponsor_secondary_color",
-            "color",
-            "#121212"
-        ))
-
-        self.bracketOptions.append((
-            QApplication.translate("layout_options.bracket_line_color", "Color for Bracket Lines"),
-            "bracket_lines_color",
-            "color",
-            "#000000"
-        ))
-
-        self.add_setting_widget(QApplication.translate(
-            "layout_options", "Bracket Options"), LayoutOptionsWidget("bracket-options", self.bracketOptions))
-        
         # ================================================================
         # START VERSUS LAYOUT OPTIONS
         # ================================================================

@@ -96,7 +96,7 @@ scene に `QGraphicsProxyWidget` で大量ウィジェット (100+) が乗って
 
 - loading 状態を表示したいときは **scene 外の QLabel オーバーレイ**
   (parent=QGraphicsView 本体) を使い、scene は触らない
-- 参考実装: `AutonaBracketView.loadingOverlay` と `ShowLoading()`
+  （旧参考実装 `AutonaBracketView.loadingOverlay` は Top 8 専用化で削除済み）
 
 ## 11. Start.gg GQL クエリの 20 秒タイムアウト
 
