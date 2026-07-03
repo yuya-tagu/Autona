@@ -26,14 +26,13 @@ import subprocess
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
-from qtpy.QtWebEngineWidgets import QWebEngineView
-from qtpy.QtWebEngineCore import QWebEngineSettings
 from loguru import logger
 
 from .StateManager import StateManager
 from .SettingsManager import SettingsManager
 from .AutonaColorButton import AutonaColorButton
 from .AutonaDesignerWindow import AutonaDesignerWindow
+from .AutonaLayoutPreview import AutonaLayoutPreview
 from . import ui_constants as UI
 from . import ui_layout as L
 
@@ -91,83 +90,6 @@ def _discover_designs():
     except OSError as e:
         logger.warning(f"Board: failed to list layout designs: {e}")
     return designs
-
-
-class _ScoreboardPreview(QFrame):
-    """Hosts the preview QWebEngineView and keeps it at a 16:9 letterbox,
-    zooming the 1920x1080 overlay down to the panel width.
-
-    Zooming must use setZoomFactor (not a CSS transform): the zoom factor
-    keeps the page's LAYOUT viewport at 1920x1080 logical pixels, which
-    viewport-relative overlays depend on — a CSS transform shrinks the
-    layout viewport itself and breaks them. Chromium resets the zoom
-    factor when a page finishes loading (leaving a top-left crop), so it
-    is re-applied on loadFinished. Mirrors AutonaTop8Widget._BracketPreview.
-
-    Chromium clamps the zoom factor to [0.25, 5.0], so the view itself is
-    never allowed to shrink below 480px (= 1920 * 0.25); when the pane is
-    narrower, the view keeps that minimum size inside a scroll area and
-    the preview becomes scrollable instead of cropping."""
-
-    # 1920 * Chromium's minimum zoom factor (0.25).
-    MIN_VIEW_WIDTH = 480
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        p = UI.palette()
-        # No border here — the parent QGroupBox card already draws one;
-        # a second border would double-frame the preview.
-        self.setStyleSheet(
-            f"QFrame {{"
-            f"background-color: {p['bg_tertiary']};"
-            f"border-radius: {UI.RADIUS_SM}px;"
-            f"}}"
-        )
-        self.setMinimumHeight(220)
-
-        self.view = QWebEngineView()
-        s = self.view.settings()
-        # Match ThumbnailRenderer: harmless over http, but keeps the view happy
-        # if a design ever references file:// assets.
-        s.setAttribute(
-            QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
-        s.setAttribute(
-            QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
-        # Transparent page so the frame's bg_tertiary shows as a neutral
-        # backdrop behind overlays that don't paint a full background.
-        self.view.page().setBackgroundColor(Qt.GlobalColor.transparent)
-        self.view.loadFinished.connect(lambda _ok: self._applyScale())
-
-        self.scroll = QScrollArea(self)
-        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.scroll.setWidget(self.view)
-
-    def resizeEvent(self, e):
-        super().resizeEvent(e)
-        self._layoutView()
-
-    def _layoutView(self):
-        inset = 1  # small gap from the frame's rounded corners
-        w = max(1, self.width() - 2 * inset)
-        view_w = max(w, self.MIN_VIEW_WIDTH)
-        view_h = int(view_w * 9 / 16)
-        self.view.setFixedSize(view_w, view_h)
-
-        extra = (self.scroll.horizontalScrollBar().sizeHint().height()
-                 if view_w > w else 0)
-        h = min(max(1, self.height() - 2 * inset), view_h + extra)
-        # Centre vertically when the frame is taller than the 16:9 box.
-        y = max(inset, (self.height() - h) // 2)
-        self.scroll.setGeometry(inset, y, w, h)
-        self._applyScale()
-
-    def _applyScale(self):
-        self.view.setZoomFactor(max(1, self.view.width()) / 1920.0)
-
-    def loadDesign(self, design):
-        port = SettingsManager.Get("general.webserver_port", 5000)
-        url = f"http://127.0.0.1:{port}/{LAYOUT_DIR}/{design}/index.html"
-        self.view.setUrl(QUrl(url))
 
 
 class AutonaBoardWidget(QDockWidget):
@@ -381,7 +303,7 @@ class AutonaBoardWidget(QDockWidget):
     # ── Preview ──────────────────────────────────────────────────────
     def _buildPreviewGroup(self):
         group = L.make_card("プレビュー")
-        self.preview = _ScoreboardPreview()
+        self.preview = AutonaLayoutPreview()
         self.preview.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         group.layout().addWidget(self.preview)
@@ -396,7 +318,7 @@ class AutonaBoardWidget(QDockWidget):
     def _loadPreview(self):
         design = self._currentDesign()
         if design:
-            self.preview.loadDesign(design)
+            self.preview.load(design)
 
     def _reloadPreview(self):
         self._previewLoaded = True
