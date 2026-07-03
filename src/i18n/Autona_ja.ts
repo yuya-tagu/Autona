@@ -884,8 +884,8 @@
         <translation>Discordコミュニティに参加する</translation>
     </message>
     <message>
-        <source>Corporate / commercial use inquiries</source>
-        <translation>法人利用・営利利用のご相談</translation>
+        <source>Corporate use inquiries</source>
+        <translation>法人利用のご相談</translation>
     </message>
     <message>
         <source>About Autona</source>
