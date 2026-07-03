@@ -882,8 +882,8 @@
         <translation>Join the Discord community</translation>
     </message>
     <message>
-        <source>Corporate / commercial use inquiries</source>
-        <translation>Corporate / commercial use inquiries</translation>
+        <source>Corporate use inquiries</source>
+        <translation>Corporate use inquiries</translation>
     </message>
     <message>
         <source>About Autona</source>

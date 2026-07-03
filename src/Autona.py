@@ -704,7 +704,7 @@ class Window(QMainWindow):
         # the lead-in to HiveeWorks' event support services, so it must stay
         # visible even to users who never read the bundled documents.
         action = helpMenu.addAction(
-            QApplication.translate("app", "Corporate / commercial use inquiries"))
+            QApplication.translate("app", "Corporate use inquiries"))
         action.triggered.connect(
             lambda x=None: QDesktopServices.openUrl(QUrl(BUSINESS_INQUIRY_URL)))
 
@@ -970,8 +970,8 @@ class Window(QMainWindow):
             "Built with Qt / <a href=\"https://pypi.org/project/PySide6/\">PySide6</a> "
             "under the GNU LGPL v3 (dynamically linked; the libraries in "
             "<code>_internal/</code> can be replaced by the user).<br><br>"
-            "法人・営利目的でのご利用は事前にお問い合わせください（TERMS.md 第2条・第9条）。"
-            "導入支援・運用サポートもご案内できます / For corporate or commercial use, "
+            "法人・事業としてのご利用は事前にお問い合わせください（TERMS.md 第2条・第9条）。"
+            "導入支援・運用サポートもご案内できます / For corporate or business use, "
             f"please <a href=\"{BUSINESS_INQUIRY_URL}\">contact us</a> in advance.<br><br>"
             "License details: see <code>TERMS.md</code>, "
             "<code>THIRD-PARTY-NOTICES.md</code> and the <code>licenses/</code> "
