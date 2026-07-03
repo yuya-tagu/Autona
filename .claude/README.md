@@ -91,5 +91,6 @@ frontmatter の `paths:`/`globs:` で対象ファイル編集時のみ自動ロ�
 | ファイル | 役割 |
 |---------|------|
 | `git-workflow.md` | Git 詳細（push/PR/ブランチ削除/マルチアカウント認証）。CLAUDE.md の Git 要点の詳細版 |
+| `release-runbook.md` | **リリース実行手順書**。「リリースして」と依頼されたら上から順になぞる（CWD 事故・アカウントダンス・zip 残留等の再発防止込み） |
 | `known-smells.md` | リファクタ候補リスト。architecture/ の調査結果を元に作成し、フェーズ2の夜間タスク配布の燃料として使う |
 | `manual-test-checklist.md` | 自動テストで守れない動作確認手順。朝の PR レビュー時になぞる |
