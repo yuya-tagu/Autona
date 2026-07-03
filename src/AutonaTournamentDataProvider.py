@@ -167,7 +167,7 @@ class AutonaTournamentDataProvider(QObject):
         inp.setWindowTitle(QApplication.translate("app", "Set tournament URL"))
         inp.resize(600, 10)
 
-        accepted = inp.exec_() == QDialog.Accepted
+        accepted = inp.exec() == QDialog.Accepted
         if accepted:
             url = lineEdit.text()
 

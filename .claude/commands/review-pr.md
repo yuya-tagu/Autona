@@ -12,7 +12,7 @@ description: PR の変更をレビューし、設計・保守性の観点で問�
 
 ## レビュー観点
 
-### デスクトップアプリ (PyQt6)
+### デスクトップアプリ (PySide6)
 - QDockWidget に `setWindowTitle()` が設定されているか
 - `STATE_VERSION` の更新が必要なレイアウト変更がないか
 - `objectName` が既存ウィジェットと重複していないか

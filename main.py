@@ -9,6 +9,14 @@
 import sys
 sys.dont_write_bytecode = True
 
+# Select the Qt binding BEFORE `import src` (which imports qtpy) and before
+# qasync is imported — both resolve the binding at import time, and their
+# auto-detection prefers PyQt over PySide if multiple bindings are installed.
+# PySide6 (LGPL v3) is required for the closed-source binary distribution;
+# PyQt6 (GPL v3) must not be used.
+import os
+os.environ["QT_API"] = "pyside6"
+
 # Set the Windows AppUserModelID at the EARLIEST possible point — before
 # `import src`, which constructs the QApplication and (via its many imports)
 # may lock the process/window identity Windows uses for the taskbar. Setting
@@ -25,12 +33,10 @@ if sys.platform == "win32":
 import src
 import multiprocessing
 import signal
-import os
 import asyncio
 from qasync import run, QEventLoop
 from functools import partial
 from src.Helpers.AutonaWindowsShortcut import ensure_appid_shortcut
-os.environ["QT_API"] = "PyQt6"
 
 
 async def main(event_loop):

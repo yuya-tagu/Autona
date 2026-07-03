@@ -58,7 +58,7 @@ class AutonaColorButton(QToolButton):
         if self._color:
             dlg.setCurrentColor(QColor(self._color))
 
-        if dlg.exec_():
+        if dlg.exec():
             if self.enable_alpha_selection:
                 self.setColor(dlg.currentColor().name(QColor.NameFormat.HexArgb))
             else:

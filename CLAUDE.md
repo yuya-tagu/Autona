@@ -43,7 +43,7 @@ CLAUDE.md は要点のみ。詳細は以下を**必要時に参照**する（常
 ## プロジェクト概要
 
 - **リポジトリ**: `yuya-tagu/Autona` / **メインブランチ**: `main`
-- **デスクトップアプリ**: Python (PyQt6) — `src/`
+- **デスクトップアプリ**: Python (PySide6、qtpy 経由) — `src/`。**PySide6 (LGPL) 必須・PyQt6 (GPL) 禁止**（ソース非公開配布のライセンス要件。main.py 冒頭の `QT_API=pyside6` が正本）
 - **Web UI**: React (MUI) — `web/src/`（フォルダ名は上流 TournamentStreamHelper フォーク由来の歴史的経緯。実態は汎用スコアボード Web UI。リネームは影響大のため保留）
 - **ビルド**: PyInstaller（**onedir**）→ `dist/Autona/`（ランチャ `Autona.exe` 約 20 MB + `_internal/`）。直下に `Autona.exe` + `_internal/` を配置して運用
 
@@ -106,7 +106,7 @@ python main.py                                        # 開発時の実行（基
 
 ### デスクトップアプリ (`src/`) — 主要コンポーネント
 
-Python / PyQt6 のドックウィジェットベース。
+Python / PySide6（qtpy 経由）のドックウィジェットベース。
 
 | コンポーネント | ファイル | 役割 |
 |--------------|---------|------|
