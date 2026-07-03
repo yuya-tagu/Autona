@@ -210,7 +210,7 @@ client.set_input_settings(
     overlay=True,
 )
 ```
-⚠️ Autona は PyQt6 アプリ。obs-websocket クライアントを足すなら**別スレッド/非同期**で動かし、
+⚠️ Autona は PySide6 アプリ。obs-websocket クライアントを足すなら**別スレッド/非同期**で動かし、
 GUI スレッド・StateManager のロックを尊重する（既存の QThread + Flask と同じ作法。[current-architecture.md](current-architecture.md) §「改変前に影響調査が必要な領域」）。新規依存追加の可否は ADR 事項。
 
 ---

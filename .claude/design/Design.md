@@ -107,7 +107,7 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 **目的**: オペレーターがアプリを起動して、状態を入力・編集・運用する画面。
 
 **技術スタック**:
-- PyQt6（QMainWindow + QDockWidget）
+- PySide6（qtpy 抽象化レイヤー経由。QMainWindow + QDockWidget）。旧 PyQt6 から 2026-07 に移行（LGPL 対応）。本書の「PyQt UI」「R-PyQt-*」という呼称はレイヤー名・ルール ID として維持
 - `.ui` ファイル（Qt Designer XML）+ Python 動的構築の併用
 - `src/ui_constants.py` の中央集約スタイル + `setStyleSheet` での個別調整
 

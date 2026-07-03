@@ -1,11 +1,11 @@
 import os
 import json
 
-from PyQt6.QtCore import QObject, QUrl, QEventLoop, QTimer, pyqtSignal, Qt
-from PyQt6.QtGui import QPixmap
-from PyQt6.QtWidgets import QApplication, QWidget
-from PyQt6.QtWebEngineWidgets import QWebEngineView
-from PyQt6.QtWebEngineCore import QWebEngineSettings, QWebEnginePage
+from qtpy.QtCore import QObject, QUrl, QEventLoop, QTimer, Signal, Qt
+from qtpy.QtGui import QPixmap
+from qtpy.QtWidgets import QApplication, QWidget
+from qtpy.QtWebEngineWidgets import QWebEngineView
+from qtpy.QtWebEngineCore import QWebEngineSettings, QWebEnginePage
 from loguru import logger
 
 
@@ -44,7 +44,7 @@ class ThumbnailRenderer(QObject):
     }
     DEFAULT_TEMPLATE_ID = "type_a"
 
-    renderComplete = pyqtSignal(QPixmap)
+    renderComplete = Signal(QPixmap)
 
     _instance = None
 

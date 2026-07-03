@@ -172,6 +172,14 @@ def remove_accents_lower(input_str):
     return u"".join([c for c in nfkd_form if not unicodedata.combining(c)]).lower()
 
 
+# Single source for the corporate / commercial-use inquiry contact, used by
+# the Help menu, the About dialog and (manually kept in sync) TERMS.md §9.
+# Currently the official Discord; swap to the dedicated inquiry form URL once
+# it exists — this constant is the only place in code to change.
+DISCORD_URL = "https://discord.gg/yAFAmhaUqn"
+BUSINESS_INQUIRY_URL = DISCORD_URL
+
+
 class WindowSignals(QObject):
     StopTimer = Signal()
     DetectGame = Signal(int)
@@ -263,6 +271,7 @@ class Window(QMainWindow):
         except Exception as e:
             version = "?"
 
+        self.programVersion = version
         self.setGeometry(300, 300, 800, 100)
         self.setWindowTitle("Autona v"+version)
 
@@ -688,9 +697,23 @@ class Window(QMainWindow):
 
         action = helpMenu.addAction(
             QApplication.translate("app", "Join the Discord community"))
-        discord_url = "https://discord.gg/yAFAmhaUqn"
         action.triggered.connect(
-            lambda x=None: QDesktopServices.openUrl(QUrl(discord_url)))
+            lambda x=None: QDesktopServices.openUrl(QUrl(DISCORD_URL)))
+
+        # Corporate / commercial-use inquiries (TERMS.md §2/§9). Doubles as
+        # the lead-in to HiveeWorks' event support services, so it must stay
+        # visible even to users who never read the bundled documents.
+        action = helpMenu.addAction(
+            QApplication.translate("app", "Corporate / commercial use inquiries"))
+        action.triggered.connect(
+            lambda x=None: QDesktopServices.openUrl(QUrl(BUSINESS_INQUIRY_URL)))
+
+        # About / license information. Serves double duty as the LGPL v3
+        # "prominent notice" for Qt/PySide6 and the start.gg attribution
+        # required by the start.gg APIs Terms of Use.
+        action = helpMenu.addAction(
+            QApplication.translate("app", "About Autona"))
+        action.triggered.connect(lambda x=None: self.ShowAboutDialog())
 
         # Attach the assembled menu to the sidebar footer button.
         self.sidebar.helpButton.setMenu(helpMenu)
@@ -929,6 +952,32 @@ class Window(QMainWindow):
         else:
             self.setWindowFlag(Qt.WindowStaysOnTopHint, False)
         self.show()
+
+    def ShowAboutDialog(self):
+        # Legal/attribution text is deliberately not translated: proper nouns
+        # and license names must stay verbatim (TERMS.md is the JA source).
+        box = QMessageBox(self)
+        box.setWindowTitle(QApplication.translate("app", "About Autona"))
+        box.setTextFormat(Qt.TextFormat.RichText)
+        box.setText(
+            f"<b>Autona v{self.programVersion}</b><br>"
+            "&copy; 2026 taguyan (HiveeWorks)<br><br>"
+            "Based on <a href=\"https://github.com/joaorb64/TournamentStreamHelper\">"
+            "TournamentStreamHelper</a> (MIT License) by João Ribeiro Bezerra.<br><br>"
+            "Tournament data powered by <a href=\"https://www.start.gg/\">start.gg</a>. "
+            "Autona is an unofficial tool and is not affiliated with or endorsed by "
+            "Start.gg, Inc.<br><br>"
+            "Built with Qt / <a href=\"https://pypi.org/project/PySide6/\">PySide6</a> "
+            "under the GNU LGPL v3 (dynamically linked; the libraries in "
+            "<code>_internal/</code> can be replaced by the user).<br><br>"
+            "法人・営利目的でのご利用は事前にお問い合わせください（TERMS.md 第2条・第9条）。"
+            "導入支援・運用サポートもご案内できます / For corporate or commercial use, "
+            f"please <a href=\"{BUSINESS_INQUIRY_URL}\">contact us</a> in advance.<br><br>"
+            "License details: see <code>TERMS.md</code>, "
+            "<code>THIRD-PARTY-NOTICES.md</code> and the <code>licenses/</code> "
+            "folder next to the executable.")
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.exec()
 
     @staticmethod
     def _resolveBattleFormat() -> str:

@@ -42,8 +42,14 @@ git ls-files user_data | ForEach-Object {
 }
 
 Copy-Item -Recurse -Force "web\build" "Autona\web\build"
+# Legal document set: LICENSE (upstream MIT attribution), TERMS.md (end-user
+# terms), THIRD-PARTY-NOTICES.md + licenses/ (third-party licenses incl. the
+# LGPL v3 texts required for Qt/PySide6). Ship all of them together.
 Copy-Item -Force "LICENSE" "Autona\LICENSE"
+Copy-Item -Force "TERMS.md" "Autona\TERMS.md"
+Copy-Item -Force "THIRD-PARTY-NOTICES.md" "Autona\THIRD-PARTY-NOTICES.md"
 Copy-Item -Force "ATTRIBUTIONS.md" "Autona\ATTRIBUTIONS.md"
+Copy-Item -Recurse -Force "licenses" "Autona\licenses"
 Copy-Item -Force "Autona.exe" "Autona\Autona.exe"
 
 # onedir build: ship the PyInstaller _internal/ runtime folder next to the

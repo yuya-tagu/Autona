@@ -3,10 +3,10 @@ import glob
 import os
 from PIL import Image, ImageDraw, ImageFont
 
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtSvg import QSvgRenderer
-from PyQt6.QtGui import QImage, QPainter
-from PyQt6.QtCore import QSize, Qt
+from qtpy.QtWidgets import QApplication
+from qtpy.QtSvg import QSvgRenderer
+from qtpy.QtGui import QImage, QPainter
+from qtpy.QtCore import QSize, Qt
 
 app = QApplication([])
 
@@ -39,7 +39,11 @@ def load_image(path):
         p = QPainter(qimg)
         r.render(p)
         p.end()
-        buf = qimg.bits().asstring(qimg.sizeInBytes())
+        bits = qimg.bits()
+        if hasattr(bits, "asstring"):   # PyQt: sip.voidptr
+            buf = bits.asstring(qimg.sizeInBytes())
+        else:                           # PySide: memoryview
+            buf = bytes(bits)
         return Image.frombytes("RGBA", (TILE, TILE), buf, "raw", "BGRA")
     try:
         return Image.open(path).convert("RGBA")

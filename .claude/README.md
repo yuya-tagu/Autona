@@ -24,7 +24,7 @@ frontmatter の `paths:`/`globs:` で対象ファイル編集時のみ自動ロ�
 
 | ファイル | 対象 | 概要 |
 |---------|------|------|
-| `rules/python-widgets.md` | `src/**/*.py` | PyQt6 ウィジェットの作法 |
+| `rules/python-widgets.md` | `src/**/*.py` | Qt (PySide6) ウィジェットの作法 |
 | `rules/react-web-ui.md` | `web/src/**` | React/Redux の規約 |
 | `rules/build-and-release.md` | `dependencies/**`, `*.spec`, `scripts/**` | ビルド・リリース手順（onedir/WebEngine/翻訳/配布） |
 | `rules/state-and-webserver.md` | `src/StateManager.py`, `src/AutonaWebServer*.py`, `src/Helpers/**` | 状態管理・Web サーバー・ヘルパーの作法 |

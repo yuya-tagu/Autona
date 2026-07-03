@@ -882,6 +882,14 @@
         <translation>Join the Discord community</translation>
     </message>
     <message>
+        <source>Corporate / commercial use inquiries</source>
+        <translation>Corporate / commercial use inquiries</translation>
+    </message>
+    <message>
+        <source>About Autona</source>
+        <translation>About Autona</translation>
+    </message>
+    <message>
         <location filename="..\Autona.py" line="619" />
         <source>Rules</source>
         <translation>Rules</translation>

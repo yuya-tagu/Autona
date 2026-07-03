@@ -12,15 +12,16 @@ asyncio
 python-dateutil==2.9.0
 pynput==1.7.7
 # Pinned exactly: the Qt build determines the WebEngine resource files
-# (v8_context_snapshot.bin, *.pak, icudtl.dat) that the in-place onedir updater
-# cannot replace while they are mmap'd. Keeping Qt stable means auto-updates
-# stay "same-Qt" (safe). The -Qt6 packages carry the actual Qt/WebEngine
-# binaries, so they are pinned too. Bump all four together; the release Qt
-# fingerprint is derived automatically from the runtime (scripts/publish_release.ps1).
-PyQt6==6.11.0
-PyQt6-Qt6==6.11.0
-PyQt6-WebEngine==6.11.0
-PyQt6-WebEngine-Qt6==6.11.0
+# (v8_context_snapshot.bin, *.pak, icudtl.dat). Keep Qt stable and bump only
+# intentionally; the external update helper can replace all files, so
+# Qt-crossing updates are still safe. PySide6 wheels carry the Qt/WebEngine
+# binaries themselves (Essentials = core Qt, Addons = QtWebEngine etc.).
+# Bump all three together.
+# NOTE: PySide6 (LGPL v3) replaced PyQt6 (GPL v3) so the closed-source binary
+# distribution stays license-compliant. Do NOT reintroduce PyQt6.
+PySide6-Essentials==6.11.0
+PySide6-Addons==6.11.0
+shiboken6==6.11.0
 loguru==0.7.3
 flask-socketio
 simple_websocket
@@ -31,4 +32,6 @@ qasync==0.27.1
 tqdm==2.2.3
 tzdata
 zstd==1.5.7.3
-countryflag==1.1.1
+# NOTE: countryflag was removed (2026-07): imports were already dropped from
+# AutonaCountryHelper (startup cost), and it transitively pulls GPL v3
+# packages (country_converter, aioconsole) that must not enter the bundle.

@@ -28,7 +28,7 @@
 
 | レイヤー | 技術 |
 |---------|------|
-| デスクトップ GUI | Python 3.12 / PyQt6 / qasync |
+| デスクトップ GUI | Python 3.12 / PySide6 (qtpy) / qasync |
 | Web UI | React 19 / TypeScript / Redux Toolkit / MUI 7 |
 | リアルタイム通信 | Flask-SocketIO / Socket.IO Client |
 | 状態管理 | StateManager（独自）+ deepdiff によるデルタ同期 |
@@ -212,7 +212,11 @@ Autona/
 
 ## ライセンス
 
-MIT License — 詳細は [LICENSE](LICENSE) を参照。
+- 上流 [TournamentStreamHelper](https://github.com/joaorb64/TournamentStreamHelper) 由来の部分: MIT License
+- Autona 固有の部分: © 2026 taguyan (HiveeWorks), All rights reserved
 
-利用しているサードパーティ素材（フォント・国旗画像・ライブラリ等）の出典・ライセンスは
-[ATTRIBUTIONS.md](ATTRIBUTIONS.md) に集約しています。
+詳細は [LICENSE](LICENSE)、配布バイナリの利用条件は [TERMS.md](TERMS.md) を参照。
+
+同梱する第三者ソフトウェアのライセンスは [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
+と `licenses/` に、素材（フォント・国旗画像等）の出典は [ATTRIBUTIONS.md](ATTRIBUTIONS.md)
+に集約しています。Qt / PySide6 は LGPL v3 の下で動的リンクにより使用しています。

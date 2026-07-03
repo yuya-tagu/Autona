@@ -1,6 +1,6 @@
 import os
 from time import sleep
-from PyQt6 import QtCore, QtGui, QtWidgets, QtWebEngineWidgets, QtWebEngineCore
+from qtpy import QtCore, QtGui, QtWidgets, QtWebEngineWidgets, QtWebEngineCore
 
 os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
 
@@ -17,14 +17,14 @@ class PageShotter(QtWebEngineWidgets.QWebEngineView):
                      QtWebEngineCore.QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls):
             settings.setAttribute(attr, True)
 
-        self.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setStyleSheet("background: transparent;")
 
-        self.page().setBackgroundColor(QtCore.Qt.transparent)
+        self.page().setBackgroundColor(QtCore.Qt.GlobalColor.transparent)
 
         self.loadFinished.connect(self.save)
-        self.setAttribute(QtCore.Qt.WA_DontShowOnScreen, True)
-        self.setAttribute(QtCore.Qt.WA_DeleteOnClose, True)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.resize(1920, 1080)
         self.timer = QtCore.QTimer()
         self.show()
@@ -53,7 +53,7 @@ class PageShotter(QtWebEngineWidgets.QWebEngineView):
         size = self.contentsRect()
         print(u"width: %d,hight: %d" % (size.width(), size.height()))
         img = QtGui.QImage(size.width(), size.height(),
-                           QtGui.QImage.Format_ARGB32)
+                           QtGui.QImage.Format.Format_ARGB32)
         img.fill(QtGui.QColor(255, 192, 203))
         painter = QtGui.QPainter(img)
         # Generate a light diagonal stripes background
@@ -80,7 +80,8 @@ class PageShotter(QtWebEngineWidgets.QWebEngineView):
         if bg_image:
             bg = QtGui.QImage(bg_image)
             scaled_bg = bg.scaled(
-                1920, 1080, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
+                1920, 1080, QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.SmoothTransformation)
             x_offset = (1920 - scaled_bg.width()) // 2
             y_offset = (1080 - scaled_bg.height()) // 2
             painter.drawImage(QtCore.QRect(x_offset, y_offset,
@@ -96,7 +97,8 @@ class PageShotter(QtWebEngineWidgets.QWebEngineView):
         # Resize the image to 720p
         img_720p = img.scaled(
             1280, 720,
-            QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation
+            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+            QtCore.Qt.TransformationMode.SmoothTransformation
         )
 
         if img_720p.save(filename):
