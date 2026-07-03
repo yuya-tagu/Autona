@@ -54,6 +54,7 @@ cp dist/Autona/Autona.exe ./Autona.exe
 
 ## リリース
 
+- **リリース実行時は [.claude/release-runbook.md](../release-runbook.md) を上から順になぞる**（本書は背景知識、Runbook が実行手順）
 - `scripts/gen_release.ps1` でリリース ZIP（`release-windows.zip`）を作成
 - `web/build/` が ZIP に含まれるため、最新の Web UI ビルドが必要
 
