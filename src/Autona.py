@@ -344,8 +344,28 @@ class Window(QMainWindow):
             QApplication.translate("app", "Commentary"))
         self.dockWidgets.append(commentary)
 
+        # One-time migration prompt: the bind default changed from 0.0.0.0 to
+        # 127.0.0.1, which would silently break LAN OBS setups
+        # (docs/operations/runtime-operations.md). Ask once, persist the answer.
+        if SettingsManager.Get("general.webserver_listen_lan", None) is None:
+            allow = QMessageBox.question(
+                self,
+                QApplication.translate("portguard", "LAN access"),
+                QApplication.translate(
+                    "portguard",
+                    "Autona's web server now listens only on this PC (127.0.0.1) "
+                    "by default for security.\n\n"
+                    "If you connect from other devices on your LAN (OBS on another PC, "
+                    "smartphone remote control), enable LAN access now.\n\n"
+                    "You can change this later under Settings → General."),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            ) == QMessageBox.StandardButton.Yes
+            SettingsManager.Set("general.webserver_listen_lan", allow)
+
         self.webserver = WebServer(
             parent=self, commentaryWidget=commentary)
+        self.webserver.signals.start_failed.connect(self.OnWebServerStartFailed)
         check_webserver_port(self.webserver.port, parent=self)
         self.webserver.start()
         self.signals.GameChanged.connect(self.webserver.ws_program_state)
@@ -819,6 +839,26 @@ class Window(QMainWindow):
         else:
             self.sidebar.tournamentButton.setText(
                 QApplication.translate("app", "Set tournament"))
+
+    def OnWebServerStartFailed(self, error: str):
+        # Delivered via queued signal from the webserver QThread. Use show()
+        # (non-blocking) instead of exec() per the no-nested-modal rule; keep
+        # a reference so the box is not garbage-collected while visible.
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Critical)
+        box.setWindowTitle(QApplication.translate(
+            "portguard", "Web server failed to start"))
+        box.setText(QApplication.translate(
+            "portguard",
+            "The web server could not start on port {port}:\n\n{error}\n\n"
+            "OBS browser sources and the Web UI will not work.\n"
+            "Change the port under Settings → General → Webserver Port "
+            "and restart Autona.")
+            .replace("{port}", str(self.webserver.port))
+            .replace("{error}", error))
+        box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        box.show()
+        self._webserverErrorBox = box
 
     def closeEvent(self, event):
         logger.info("Shutting down...")

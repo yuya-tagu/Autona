@@ -9,7 +9,7 @@ from qtpy import uic
 from typing import List
 from .Helpers.AutonaDirHelper import AutonaResolve
 from .Helpers.AutonaVersionHelper import add_beta_label
-from .Helpers.AutonaNetworkHelper import GetLocalIP
+from .Helpers.AutonaNetworkHelper import GetWebServerHost
 
 from . import ui_constants as UI
 from . import ui_layout as L
@@ -194,7 +194,7 @@ class AutonaScoreboardWidget(QWidget):
         # board 1 (SCORE/1v1) → /scoreboard, board 2 (TEAM) → /team. Both
         # render from the same React page parameterized by scoreboardNumber.
         webScoreboardPath = "team" if self.scoreboardNumber == 2 else "scoreboard"
-        self.webScoreboardUrl = f"http://{GetLocalIP()}:{SettingsManager.Get('general.webserver_port', 5000)}/{webScoreboardPath}"
+        self.webScoreboardUrl = f"http://{GetWebServerHost()}:{SettingsManager.Get('general.webserver_port', 5000)}/{webScoreboardPath}"
         self.btOpenWebScoreboard = QPushButton("ブラウザ版を開く")
         self.btOpenWebScoreboard.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         self.btOpenWebScoreboard.clicked.connect(lambda: webbrowser.open(self.webScoreboardUrl))

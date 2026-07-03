@@ -22,7 +22,7 @@ from qtpy.QtWidgets import *
 import json
 
 from .SettingsManager import SettingsManager
-from .Helpers.AutonaNetworkHelper import GetLocalIP
+from .Helpers.AutonaNetworkHelper import GetWebServerHost
 
 
 def _tr(text):
@@ -126,7 +126,7 @@ class AutonaIntegrationGuideWindow(QDialog):
     # ── Connection info ──────────────────────────────────────────────────
     def _baseUrl(self):
         port = SettingsManager.Get("general.webserver_port", 5000)
-        return f"http://{GetLocalIP()}:{port}/api/v1"
+        return f"http://{GetWebServerHost()}:{port}/api/v1"
 
     def _buildConnectionGroup(self):
         group = QGroupBox(_tr("Connection"))
@@ -149,9 +149,10 @@ class AutonaIntegrationGuideWindow(QDialog):
         self.portLabel = QLabel()
         form.addWidget(self.portLabel, 1, 0, 1, 2)
 
-        note = QLabel(_tr("This device must be on the same LAN as this PC."))
-        note.setWordWrap(True)
-        form.addWidget(note, 2, 0, 1, 4)
+        # Text is swapped in _refresh() depending on the LAN access setting.
+        self.lanNoteLabel = QLabel()
+        self.lanNoteLabel.setWordWrap(True)
+        form.addWidget(self.lanNoteLabel, 2, 0, 1, 4)
 
         form.setColumnStretch(1, 1)
         group.setLayout(form)
@@ -161,6 +162,13 @@ class AutonaIntegrationGuideWindow(QDialog):
         port = SettingsManager.Get("general.webserver_port", 5000)
         self.baseUrlField.setText(self._baseUrl())
         self.portLabel.setText(_tr("Port") + f": {port}")
+        if SettingsManager.Get("general.webserver_listen_lan", False):
+            self.lanNoteLabel.setText(
+                _tr("This device must be on the same LAN as this PC."))
+        else:
+            self.lanNoteLabel.setText(_tr(
+                "LAN access: disabled — other devices cannot connect. "
+                "Enable it under Settings → General (restart required)."))
         self._populateExamples()
 
     # ── Setup steps ──────────────────────────────────────────────────────

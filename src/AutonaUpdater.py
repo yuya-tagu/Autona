@@ -7,8 +7,8 @@ Flow:
     3. If newer: show dialog -> user clicks "Download and install"
     4. Download release-windows.zip to %TEMP%/autona_update/update.zip
     5. UpdateProcedure() copies the bundled helper (assets/apply_update.ps1) to
-       the temp workdir, shows a notice, then launches the helper as a detached
-       PowerShell process and exits the app.
+       the temp workdir, shows a notice, then launches the helper as a
+       hidden-console PowerShell process and exits the app.
     6. The helper waits for this process to fully exit (so every file unlocks),
        extracts the zip over the install dir (stripping the leading "Autona/"),
        relaunches the new exe, and cleans up.
@@ -55,9 +55,13 @@ ASSET_NAME = "release-windows.zip"
 # Helper script bundled in assets/ (so gen_release.ps1 ships it inside the zip).
 HELPER_SCRIPT = "apply_update.ps1"
 
-# CreationFlags for the detached helper: survive the parent's exit, no console
-# window, own process group (so the parent's shutdown signals don't reach it).
-_DETACHED_PROCESS = 0x00000008
+# CreationFlags for the helper: hidden console + own process group (so the
+# parent's shutdown signals don't reach it). Children outlive their parent on
+# Windows by default, so no extra flag is needed for that.
+# Do NOT add DETACHED_PROCESS: powershell.exe launched with no console at all
+# exits immediately with code 0 without ever running the script (ConsoleHost
+# fails to initialize), and CREATE_NO_WINDOW is ignored when combined with it.
+# This exact combination silently broke the v1.0.7 -> v1.1.0 auto-update.
 _CREATE_NEW_PROCESS_GROUP = 0x00000200
 _CREATE_NO_WINDOW = 0x08000000
 
@@ -183,7 +187,7 @@ def UpdateProcedure():
 
 def _LaunchHelper(script: Path, zip_path: Path, install_dir: Path,
                   staging: Path, exe_name: str) -> None:
-    """Spawn apply_update.ps1 as a detached, windowless PowerShell process that
+    """Spawn apply_update.ps1 as a hidden-console PowerShell process that
     outlives this app. shell=False with an argument list keeps spaces/non-ASCII
     paths safe; powershell.exe is referenced by full path so it resolves outside
     the install dir (which is about to be mirrored over)."""
@@ -202,8 +206,7 @@ def _LaunchHelper(script: Path, zip_path: Path, install_dir: Path,
     subprocess.Popen(
         args,
         cwd=str(_update_workdir()),  # not the install dir, so we don't lock it
-        creationflags=(_DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP
-                       | _CREATE_NO_WINDOW),
+        creationflags=(_CREATE_NEW_PROCESS_GROUP | _CREATE_NO_WINDOW),
         close_fds=True,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,

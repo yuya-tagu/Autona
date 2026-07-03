@@ -28,7 +28,7 @@ from qtpy.QtWidgets import *
 
 from .SettingsManager import SettingsManager
 from .Workers import Worker
-from .Helpers.AutonaNetworkHelper import GetLocalIP
+from .Helpers.AutonaNetworkHelper import GetWebServerHost
 
 
 def _tr(text):
@@ -129,7 +129,7 @@ class AutonaApiInfoWindow(QDialog):
     # ── Connection info ──────────────────────────────────────────────────
     def _baseUrl(self):
         port = SettingsManager.Get("general.webserver_port", 5000)
-        return f"http://{GetLocalIP()}:{port}/api/v1"
+        return f"http://{GetWebServerHost()}:{port}/api/v1"
 
     def _buildConnectionGroup(self):
         group = QGroupBox(_tr("Connection"))
@@ -158,12 +158,11 @@ class AutonaApiInfoWindow(QDialog):
 
         # No-auth LAN warning (spec §2.2 / D5). Emphasised so the operator
         # understands every endpoint — including destructive ones — is open.
-        warning = QLabel("⚠ " + _tr(
-            "No authentication. Anyone on the LAN can call every operation, "
-            "including destructive ones."))
-        warning.setWordWrap(True)
-        warning.setStyleSheet("color: #e2574c;")
-        form.addWidget(warning, 2, 0, 1, 4)
+        # Text is swapped in _refreshBaseUrl() when LAN access is disabled.
+        self.warningLabel = QLabel()
+        self.warningLabel.setWordWrap(True)
+        self.warningLabel.setStyleSheet("color: #e2574c;")
+        form.addWidget(self.warningLabel, 2, 0, 1, 4)
 
         form.setColumnStretch(1, 1)
         group.setLayout(form)
@@ -173,6 +172,14 @@ class AutonaApiInfoWindow(QDialog):
         port = SettingsManager.Get("general.webserver_port", 5000)
         self.baseUrlField.setText(self._baseUrl())
         self.portLabel.setText(_tr("Port") + f": {port}")
+        if SettingsManager.Get("general.webserver_listen_lan", False):
+            self.warningLabel.setText("⚠ " + _tr(
+                "No authentication. Anyone on the LAN can call every operation, "
+                "including destructive ones."))
+        else:
+            self.warningLabel.setText(_tr(
+                "LAN access is disabled; the API is reachable from this PC only. "
+                "Enable it under Settings → General (restart required)."))
 
     def _openSettings(self):
         # The Settings dialog (with the Webserver Port field) lives on the
@@ -380,7 +387,7 @@ class AutonaApiInfoWindow(QDialog):
             headers["Idempotency-Key"] = self.idemField.text().strip()
 
         # Resolve against the local server (always reachable on loopback even
-        # if GetLocalIP() returns the LAN address).
+        # if the Base URL shows the LAN address).
         port = SettingsManager.Get("general.webserver_port", 5000)
         url = f"http://127.0.0.1:{port}/api/v1{path}"
 

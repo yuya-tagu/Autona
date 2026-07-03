@@ -46,6 +46,12 @@ class SocketioJson:
         return json.loads(*args, **kwargs)
 
 
+class WebServerSignals(QObject):
+    # str = human-readable error summary. Emitted from the QThread's run();
+    # Qt queues the delivery onto the GUI thread automatically.
+    start_failed = Signal(str)
+
+
 class WebServer(QThread):
     app = Flask(__name__, static_folder=os.path.curdir)
     cors = CORS(app)
@@ -80,7 +86,12 @@ class WebServer(QThread):
             WebServer.app.register_blueprint(api_v1)
         init_api_v1(WebServer.actions)
 
-        self.host_name = "0.0.0.0"
+        self.signals = WebServerSignals()
+
+        # LAN exposure is opt-in (ADR-001 D5 revisit): default to loopback so
+        # a fresh install never exposes the unauthenticated control surface.
+        self.listen_lan = SettingsManager.Get("general.webserver_listen_lan", False)
+        self.host_name = "0.0.0.0" if self.listen_lan else "127.0.0.1"
         self.port = SettingsManager.Get("general.webserver_port", 5000)
 
     @staticmethod
@@ -783,6 +794,7 @@ class WebServer(QThread):
                               debug=False, use_reloader=False, allow_unsafe_werkzeug=True)
         except Exception as e:
             logger.error(traceback.format_exc())
+            self.signals.start_failed.emit(str(e))
 
 
 # ── Port collision guard ─────────────────────────────────────────
@@ -868,7 +880,9 @@ def check_webserver_port(port: int, parent=None) -> bool:
             "Port {port} is already in use by another process:\n\n{details}\n\n"
             "If this is a stale Autona instance, the Web UI will appear blank "
             "because Windows randomly routes connections to whichever process answers.\n\n"
-            "Terminate the existing process(es) and continue?",
+            "Terminate the existing process(es) and continue?\n\n"
+            "Alternatively, choose No and change the port under "
+            "Settings → General → Webserver Port, then restart Autona.",
         )
         .replace("{port}", str(port))
         .replace("{details}", details)

@@ -650,6 +650,30 @@
         <source>OBS / Advanced Scene Switcher</source>
         <translation>OBS / Advanced Scene Switcher</translation>
     </message>
+    <message>
+        <source>No authentication. Anyone on the LAN can call every operation, including destructive ones.</source>
+        <translation>No authentication. Anyone on the LAN can call every operation, including destructive ones.</translation>
+    </message>
+    <message>
+        <source>LAN access is disabled; the API is reachable from this PC only. Enable it under Settings → General (restart required).</source>
+        <translation>LAN access is disabled; the API is reachable from this PC only. Enable it under Settings → General (restart required).</translation>
+    </message>
+    <message>
+        <source>OBS must run on this PC, or on the same LAN.</source>
+        <translation>OBS must run on this PC, or on the same LAN.</translation>
+    </message>
+    <message>
+        <source>LAN access: disabled — OBS must run on this PC. To use OBS on another PC, enable it under Settings → General (restart required).</source>
+        <translation>LAN access: disabled — OBS must run on this PC. To use OBS on another PC, enable it under Settings → General (restart required).</translation>
+    </message>
+    <message>
+        <source>This device must be on the same LAN as this PC.</source>
+        <translation>This device must be on the same LAN as this PC.</translation>
+    </message>
+    <message>
+        <source>LAN access: disabled — other devices cannot connect. Enable it under Settings → General (restart required).</source>
+        <translation>LAN access: disabled — other devices cannot connect. Enable it under Settings → General (restart required).</translation>
+    </message>
 </context><context>
     <name>app</name>
     <message>
@@ -2014,14 +2038,52 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
 
 If this is a stale Autona instance, the Web UI will appear blank because Windows randomly routes connections to whichever process answers.
 
-Terminate the existing process(es) and continue?</source>
+Terminate the existing process(es) and continue?
+
+Alternatively, choose No and change the port under Settings → General → Webserver Port, then restart Autona.</source>
         <translation>Port {port} is already in use by another process:
 
 {details}
 
 If this is a stale Autona instance, the Web UI will appear blank because Windows randomly routes connections to whichever process answers.
 
-Terminate the existing process(es) and continue?</translation>
+Terminate the existing process(es) and continue?
+
+Alternatively, choose No and change the port under Settings → General → Webserver Port, then restart Autona.</translation>
+    </message>
+    <message>
+        <source>LAN access</source>
+        <translation>LAN access</translation>
+    </message>
+    <message>
+        <source>Autona's web server now listens only on this PC (127.0.0.1) by default for security.
+
+If you connect from other devices on your LAN (OBS on another PC, smartphone remote control), enable LAN access now.
+
+You can change this later under Settings → General.</source>
+        <translation>Autona's web server now listens only on this PC (127.0.0.1) by default for security.
+
+If you connect from other devices on your LAN (OBS on another PC, smartphone remote control), enable LAN access now.
+
+You can change this later under Settings → General.</translation>
+    </message>
+    <message>
+        <source>Web server failed to start</source>
+        <translation>Web server failed to start</translation>
+    </message>
+    <message>
+        <source>The web server could not start on port {port}:
+
+{error}
+
+OBS browser sources and the Web UI will not work.
+Change the port under Settings → General → Webserver Port and restart Autona.</source>
+        <translation>The web server could not start on port {port}:
+
+{error}
+
+OBS browser sources and the Web UI will not work.
+Change the port under Settings → General → Webserver Port and restart Autona.</translation>
     </message>
     <message>
         <location filename="..\AutonaWebServer.py" line="831" />
@@ -2158,13 +2220,19 @@ Terminate the existing process(es) and continue?</translation>
     <name>settings.general</name>
     <message>
         <location filename="..\Settings\AutonaSettingsWindow.py" line="42" />
-        <source>Webserver Port</source>
-        <translation>Webserver Port</translation>
+        <source>Webserver Port (takes effect on next restart)</source>
+        <translation>Webserver Port (takes effect on next restart)</translation>
     </message>
     <message>
         <location filename="..\Settings\AutonaSettingsWindow.py" line="50" />
         <source>Enable profanity filter</source>
         <translation>Enable profanity filter</translation>
+    </message>
+</context><context>
+    <name>settings.webserver_listen_lan</name>
+    <message>
+        <source>Allow access from other devices on the LAN (takes effect on next restart)</source>
+        <translation>Allow access from other devices on the LAN (takes effect on next restart)</translation>
     </message>
 </context><context>
     <name>settings.hotkeys</name>
