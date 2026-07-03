@@ -117,7 +117,17 @@ gh auth switch --user yuyat-highfield   # 復元を忘れない
 - publish 先は **公開リポ `yuya-tagu/Autona-releases`**（ソースリポは private のため updater が読めない）
 - 同名タグが既にあると失敗する（`gh release create` のエラーに従う）
 
-### 9. 後始末（ユーザー依頼・確認のうえ実施）
+### 9. 自動更新の E2E 確認（必須）
+
+publish 直後に、**旧バージョンの exe からアプリ内アップデータで新リリースへ実際に更新できる**ことを確認する（実機確認はユーザーが行う）。
+
+- 旧バージョン一式（`Autona.exe` + `_internal/` ほか）を退避コピーしておき、そこから起動 → 更新ダイアログ → 「ダウンロードしてインストール」を実行
+- 成功判定: 再起動後にバージョン表記が新版になり、`assets/update_log.txt` の末尾に `waiting for pid → robocopy ok → update complete` が記録されている
+- `update_log.txt` にヘルパーのログ行が 1 行も増えていない場合、ヘルパー（apply_update.ps1）自体が起動していない（v1.1.0 で踏んだ DETACHED_PROCESS 事故のパターン）
+
+背景: 更新時に動くアップデータは**インストール済みの旧バージョン側**のコード。この確認を怠ると、壊れたアップデータを持つ世代が積み重なり、全ユーザーに手動更新を強いることになる（v1.0.7→v1.1.0 で実際に発生）。
+
+### 10. 後始末（ユーザー依頼・確認のうえ実施）
 
 - [ ] `chore/release-v{X.Y.Z}` の PR をユーザーがマージ
 - [ ] マージ後にローカル main を再同期（手順 1 と同じ）
@@ -134,3 +144,4 @@ gh auth switch --user yuyat-highfield   # 復元を忘れない
 | push が `Repository not found` | アクティブ gh アカウントが `yuyat-highfield` | 全 push/fetch/publish でアカウントダンス（手順 1/2/8） |
 | 日本語リリースノートの文字化け | `-Notes` 引数渡し | `--notes-file`（UTF-8）に統一（手順 8） |
 | 旧ファイルが zip に残留 | `Compress-Archive -Update` の追記仕様 | zip / staging の事前削除（手順 7） |
+| v1.0.7→v1.1.0 自動更新が無音で不発 | powershell.exe を `DETACHED_PROCESS` 付きで spawn するとエンジン起動前に exit 0 で即死（`CREATE_NO_WINDOW` は併用時無視） | AutonaUpdater の creationflags から DETACHED_PROCESS を除去 + 自動更新 E2E 確認（手順 9） |
