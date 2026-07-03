@@ -162,10 +162,11 @@ class WebServerActions(QThread):
         return "OK"
 
     def set_commentary_data(self, index, data):
-        logger.info(self.commentaryWidget)
+        # Caster slots are fixed 1..8 (AutonaCommentaryModel.SLOTS); the
+        # old auto-grow behavior is gone.
         index = int(index) - 1
-        if index < 0:
-            return "ERROR : index can't be lower than 1"
+        if not 0 <= index < 8:
+            return "ERROR : index must be 1..8"
         self.commentaryWidget.ChangeCommDataSignal.emit(index, data)
 
         return "OK"
@@ -426,9 +427,9 @@ class WebServerActions(QThread):
 
     def load_commentator_from_tag(self, index, tag, no_mains=False):
         index = int(index) - 1
-        if index < 0:
-            return "ERROR : index can't be lower than 1" 
-        result = self.commentaryWidget.LoadCommFromTagSignal.emit(index, tag, no_mains)
+        if not 0 <= index < 8:
+            return "ERROR : index must be 1..8"
+        self.commentaryWidget.LoadCommFromTagSignal.emit(index, tag, no_mains)
 
     def load_tournament(self, url=None):
         logger.error(f"URL PROVIDED: {url}")

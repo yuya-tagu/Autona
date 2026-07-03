@@ -125,7 +125,7 @@ game                                 W R AutonaGameAssetManager / AutonaWebServe
 ├── smashgg_id                       (int: start.gg ID)
 ├── codename                         (str: 内部コード名)
 ├── logo                             (str: ロゴパス)
-├── defaults                         R   AutonaScoreboardWidget / AutonaCommentaryWidget / AutonaPlayerListWidget / AutonaBracketWidget
+├── defaults                         R   AutonaScoreboardWidget / AutonaPlayerListWidget（Commentary は 2026-07 リワークで参照廃止）
 │   ├── players_per_team             R   上記ウィジェット群
 │   └── characters_per_player        R   上記ウィジェット群
 ├── mods_active                      R   Autona.Window
@@ -158,19 +158,17 @@ bracket                              W   AutonaBracketWidget.__init__
 
 ### `commentary`
 
-実況者情報。AutonaCommentaryWidget が管理。
+実況・解説者情報。AutonaCommentaryWidget が管理（2026-07 リワークでスキーマ刷新、
+正本は `src/AutonaCommentaryModel.py`）。スロット固定 8 名・欠番なし。
+旧スキーマは起動時 `NormalizeState` でマイグレーション（custom_textbox → note、他は破棄）。
 
 ```
-commentary                           W D R  AutonaCommentaryWidget / AutonaWebServerActions
-└── {N}                              D      AutonaCommentaryWidget.RemoveExtraCommentators
-    ├── (AutonaScoreboardPlayerWidget と同じ player キー群)
-    │   ├── name, team, seed, id, city, birthday
-    │   ├── character, mains, country_code, state_code
-    │   ├── mergedName, mergedOnlyName
-    │   ├── online_avatar, avatar
-    │   ├── sponsor_logo, sponsor_logos
-    │   └── custom_textbox
-    └── (commentary 固有キーは現状なし)
+commentary                           W R  AutonaCommentaryWidget / AutonaWebServerActions
+└── {1..8}                                (スロット固定・常時 8 エントリ)
+    ├── name, team, real_name, twitter
+    ├── role                              ("実況"|"解説"|"選手"|"主催"|"")
+    ├── note                              (自由コメント)
+    └── display                           (int。0=非表示、1..4=表示順。チェック順に採番、左から表示)
 ```
 
 ### `tournamentInfo`
@@ -277,8 +275,7 @@ currentStream                        W   AutonaStatsUtil.UpdateStreamQueue
 | 変数 | 解決先 | 備考 |
 |------|--------|------|
 | `self.path` (AutonaScoreboardPlayerWidget) | `score.{N}.team.{T}.player.{M}` | AutonaScoreboardWidget から |
-| `self.path` (AutonaScoreboardPlayerWidget) | `commentary.{N}` | AutonaCommentaryWidget から |
-| `self.path` (AutonaScoreboardPlayerWidget) | `{base}.slot.{I}.player.{M}` | AutonaPlayerListSlotWidget から |
+| `self.path` (AutonaScoreboardPlayerWidget) | `{base}.slot.{I}.player.{M}` | AutonaPlayerListSlotWidget から（commentary パスは 2026-07 リワークで廃止） |
 | `self.path` (AutonaTeamPlayerWidget) | `team_battle.team.{T}.player.{N}` | AutonaTeamBattleWidget から |
 | `self.base` (AutonaPlayerList) | `bracket.players` | AutonaBracketWidget から |
 | `self.base` (AutonaPlayerList) | `player_list` | AutonaPlayerListWidget から（デフォルト値） |
@@ -326,8 +323,7 @@ AutonaScoreboardWidget の team 列、tournamentInfo のフィールドなど、
 ロックを取得していないため、SaveState のスレッドとレースコンディションの可能性がある。
 実際には Flask リクエストは短時間で完了するため問題になりにくいが、設計上のリスク。
 
-### 4. `commentary.{N}` の欠番 ⚠️
+### 4. `commentary.{N}` の欠番 — 解消済み
 
-`AutonaCommentaryWidget.RemoveExtraCommentators` で `commentary.{k}` を Unset しているが、
-残った実況者のインデックスは詰めない（1,3 のように欠番が生じうる）。
-Web UI 側でインデックスの連続性を前提としている場合にバグとなる可能性。
+2026-07 の実況・解説リワークでスロット固定 8 名（常時 1..8 が存在）となり、
+欠番の概念自体が消滅した。

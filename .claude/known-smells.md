@@ -215,14 +215,17 @@ import 時に副作用（GUI 操作含む）が発生するため pytest での�
 
 ---
 
-## S-12: commentary インデックスの欠番 [P2/D1/S2] ✅ 解消済（M1a / Design.md §8 T-2）
+## S-12: commentary インデックスの欠番 [P2/D1/S2] ✅ 解消済（概念ごと消滅）
 
 **根拠**: state-keys.md「要注意事項 #4」
 
-**現状（解消済・2026-06-24 再確認）**:
-`AutonaCommentaryWidget.SetCommentatorNumber`（136行）末尾で `_compactCommentaryState(number)`（159行）を呼び、`commentary.{k}` の中で 1..N の範囲外と非数値キーを除いた survivors を 1..N に詰め直す。SaveBlock で囲んで 1 デルタにまとめる。
+**現状（2026-07 再確認）**:
+実況・解説リワーク（docs/changes/commentary-rework-impact-analysis.md）で
+`commentary.{1..8}` のスロット固定制になり、動的増減・欠番・詰め直し
+（旧 `_compactCommentaryState`）の概念自体が消滅した。正規化は
+`AutonaCommentaryModel.NormalizeState` が起動時に一括で行う。
 
-**影響範囲**: `AutonaCommentaryWidget.py`
+**影響範囲**: `AutonaCommentaryWidget.py` / `AutonaCommentaryModel.py`
 
 ---
 

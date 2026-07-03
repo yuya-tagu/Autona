@@ -45,7 +45,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
     # dataLock is set per-instance in _initBasePlayerWidget(); see base class.
 
-    def __init__(self, index=0, teamNumber=0, path="", customName="", *args):
+    def __init__(self, index=0, teamNumber=0, path="", *args):
         super().__init__(*args)
 
         self.instanceSignals = AutonaScoreboardPlayerWidgetSignals()
@@ -54,7 +54,6 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
         self.index = index
         self.teamNumber = teamNumber
-        self.customName = customName
 
         self.losers = False
 
@@ -341,13 +340,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         self.ExportPlayerId(data["id"])
 
     def SetIndex(self, index: int, team: int):
-        if self.customName == "":
-            self.findChild(QWidget, "title").setText(
-                QApplication.translate("app", "Player {0}").format(index))
-        else:
-            title = self.customName + " {0}"
-            self.findChild(QWidget, "title").setText(
-                QApplication.translate("app", title).format(index))
+        self.findChild(QWidget, "title").setText(
+            QApplication.translate("app", "Player {0}").format(index))
         self.index = index
         self.teamNumber = team
 

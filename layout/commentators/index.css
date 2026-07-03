@@ -1,77 +1,121 @@
+/* commentators — caster lineup overlay (bottom bar, 1-4 casters).
+ *
+ * Cards share bracket_top8's visual language (dark card, accent left
+ * bar) so the two overlays can coexist on one scene. Colors come from
+ * main.css variables overridden at runtime by applyTournamentColors
+ * (tournamentInfo.themeColor/accentColor). The stage is transparent —
+ * background art is layered in OBS behind this browser source.
+ */
+
+:root {
+  --theme-color: #1d1b18;
+  --theme-color-2: #0d0c0b;
+  --card-bg: #2c2925;
+  --accent-color: #f0a500;
+  --accent-ink: #0a0a0a;
+}
+
+html,
 body {
-  font-family: var(--font);
-  font-weight: bold;
-  opacity: 0;
-  overflow: hidden;
   margin: 0;
-  letter-spacing: 1px;
-  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.12))
-    drop-shadow(0 3px 1px rgba(0, 0, 0, 0.14))
-    drop-shadow(0 1px 5px rgba(0, 0, 0, 0.12))
-    drop-shadow(0 -1px 2px rgba(0, 0, 0, 0.1));
-}
-
-.container {
-  display: flex;
-  flex-direction: row;
-  justify-content: space-around;
-  align-content: center;
-  width: 100%;
-  gap: 16px;
-  color: var(--text-color);
-  flex-wrap: wrap;
-}
-
-.commentator_container {
-  width: 300;
-  border-radius: var(--border-radius);
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 10px 30px;
-  box-sizing: border-box;
+  padding: 0;
+  width: 1920px;
+  height: 1080px;
   overflow: hidden;
-  border-radius: 12px;
-  background: var(--bg-color);
+  font-family: var(--font, "LINE Seed JP", sans-serif);
+  color: var(--text-color, #ffffff);
+  background: transparent;
 }
 
-.mic_icon {
-  display: inline-block;
-  width: 30px;
-  height: 30px;
-  -webkit-mask-image: url(./icon_mic.svg);
-  -webkit-mask-size: contain;
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-  background: var(--text-color);
+/* ── Bar ────────────────────────────────────────────────────────────── */
+
+.comms-bar {
+  position: absolute;
+  left: 60px;
+  right: 60px;
+  bottom: 48px;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  gap: 56px;
 }
 
-.name {
-  font-size: 26px;
+.comms-bar.is-empty {
+  display: none;
+}
+
+/* ── Caster cards ───────────────────────────────────────────────────── */
+
+.caster-card {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 620px;
+  box-sizing: border-box;
+  padding: 14px 20px 12px;
+  background: color-mix(in srgb, var(--card-bg) 92%, transparent);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-left: 4px solid var(--accent-color);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+/* A single caster gets a wider, still centred card. */
+.comms-bar[data-count="1"] .caster-card {
+  max-width: 840px;
+}
+
+.main-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.role-badge {
+  flex: 0 0 auto;
+  padding: 2px 10px;
+  border-radius: 4px;
+  background: var(--accent-color);
+  color: var(--accent-ink);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.who {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .team {
-  opacity: 0.6;
+  margin-right: 8px;
+  font-size: 22px;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--accent-color) 80%, #ffffff);
+}
+
+.name {
+  font-size: 34px;
+  font-weight: 800;
+}
+
+.sub-line {
+  display: flex;
+  gap: 16px;
+  margin-top: 2px;
+  font-size: 20px;
+  color: rgba(255, 255, 255, 0.75);
+  white-space: nowrap;
 }
 
 .twitter {
+  color: color-mix(in srgb, var(--accent-color) 65%, #ffffff);
+}
+
+.note {
+  margin-top: 6px;
   font-size: 20px;
-}
-
-.icon {
-  width: 128px;
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-  flex-grow: 1;
-}
-
-.index_display {
-  position: absolute;
-  bottom: 8px;
-  right: 32px;
-  z-index: 999;
-  color: white;
-  font-size: 100px;
-  text-shadow: 12px 12px 2px black;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.9);
 }

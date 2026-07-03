@@ -14,7 +14,7 @@
 4. [配信チャネル・ストリーム URL 管理](#4-配信チャネルストリーム-url-管理)
 5. [X（旧 Twitter）投稿](#5-x旧-twitter-投稿)
 6. [BlueSky 投稿](#6-bluesky-投稿)
-7. [実況者パネル](#7-実況者パネル)
+7. [実況・解説パネル](#7-実況解説パネル)
 8. [大会情報（Tournament Info）](#8-大会情報tournament-info)
 9. [ブラケット表示](#9-ブラケット表示)
 10. [選手リスト](#10-選手リスト)
@@ -158,16 +158,15 @@
 
 ---
 
-## 7. 実況者パネル
+## 7. 実況・解説パネル
 
-[src/AutonaCommentaryWidget.py](src/AutonaCommentaryWidget.py)・[src/layout/AutonaCommentator.ui](src/layout/AutonaCommentator.ui)。
+[src/AutonaCommentaryWidget.py](src/AutonaCommentaryWidget.py)・[src/AutonaCommentaryModel.py](src/AutonaCommentaryModel.py)・[layout/commentators/](layout/commentators/)。
 
-- 実況者の人数を動的増減
-- 各実況者: スポンサー / ゲーマータグ / 本名 / Twitter / 国 / 代名詞 / 追加情報
-- 表示項目ごとに表示・非表示トグル
-- 実況者順序の入れ替え（Up / Down ボタン）
-- キャラ数設定
-- ローカル DB 連携で一括ロード
+- 8 スロット固定の実況・解説者カード（名前 / チーム / 本名 / Twitter / 役割 / コメント）
+- 役割プレフィックス（実況・解説・選手・主催）を選択可能
+- 「配信に表示」トグルで OBS オーバーレイに出す 1〜4 名を選択（人数に応じた可変レイアウト）
+- 右ペインにオーバーレイのライブプレビュー + OBS 用ブラウザソース URL 案内
+- 名前フィールドはローカル選手 DB から補完（チーム / Twitter 等を自動入力）
 
 ---
 
