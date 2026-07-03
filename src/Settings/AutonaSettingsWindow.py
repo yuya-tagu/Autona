@@ -40,10 +40,19 @@ class AutonaSettingsWindow(QDialog):
 
         generalSettings.append((
             QApplication.translate(
-                "settings.general", "Webserver Port"),
+                "settings.general", "Webserver Port (takes effect on next restart)"),
             "webserver_port",
             "spinbox",
             5000
+        ))
+
+        generalSettings.append((
+            QApplication.translate(
+                "settings.webserver_listen_lan",
+                "Allow access from other devices on the LAN (takes effect on next restart)"),
+            "webserver_listen_lan",
+            "checkbox",
+            False
         ))
 
         generalSettings.append((

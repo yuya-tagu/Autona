@@ -652,6 +652,30 @@
         <source>OBS / Advanced Scene Switcher</source>
         <translation>OBS / Advanced Scene Switcher</translation>
     </message>
+    <message>
+        <source>No authentication. Anyone on the LAN can call every operation, including destructive ones.</source>
+        <translation>認証はありません。LAN 上の誰でも、破壊的な操作を含むすべての操作を実行できます。</translation>
+    </message>
+    <message>
+        <source>LAN access is disabled; the API is reachable from this PC only. Enable it under Settings → General (restart required).</source>
+        <translation>LAN アクセスは無効です。API にはこの PC からのみ接続できます。有効にするには 設定 → 一般 で設定してください（要再起動）。</translation>
+    </message>
+    <message>
+        <source>OBS must run on this PC, or on the same LAN.</source>
+        <translation>OBS はこの PC、または同一 LAN 上で実行してください。</translation>
+    </message>
+    <message>
+        <source>LAN access: disabled — OBS must run on this PC. To use OBS on another PC, enable it under Settings → General (restart required).</source>
+        <translation>LAN アクセス: 無効 — OBS はこの PC で実行する必要があります。別 PC の OBS を使う場合は 設定 → 一般 で有効にしてください（要再起動）。</translation>
+    </message>
+    <message>
+        <source>This device must be on the same LAN as this PC.</source>
+        <translation>このデバイスはこの PC と同一の LAN 上にある必要があります。</translation>
+    </message>
+    <message>
+        <source>LAN access: disabled — other devices cannot connect. Enable it under Settings → General (restart required).</source>
+        <translation>LAN アクセス: 無効 — 他のデバイスからは接続できません。有効にするには 設定 → 一般 で設定してください（要再起動）。</translation>
+    </message>
 </context><context>
     <name>app</name>
     <message>
@@ -2017,14 +2041,52 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
 
 If this is a stale Autona instance, the Web UI will appear blank because Windows randomly routes connections to whichever process answers.
 
-Terminate the existing process(es) and continue?</source>
+Terminate the existing process(es) and continue?
+
+Alternatively, choose No and change the port under Settings → General → Webserver Port, then restart Autona.</source>
         <translation>ポート {port} は既に別のプロセスが使用しています:
 
 {details}
 
 古い Autona インスタンスが残っている場合、Windows が応答したプロセスへ接続をランダムに振り分けるため、Web UI が空白表示になります。
 
-既存のプロセスを終了して続行しますか？</translation>
+既存のプロセスを終了して続行しますか？
+
+または「No」を選び、設定 → 一般 → Webサーバーポート でポートを変更してから Autona を再起動してください。</translation>
+    </message>
+    <message>
+        <source>LAN access</source>
+        <translation>LAN アクセス</translation>
+    </message>
+    <message>
+        <source>Autona's web server now listens only on this PC (127.0.0.1) by default for security.
+
+If you connect from other devices on your LAN (OBS on another PC, smartphone remote control), enable LAN access now.
+
+You can change this later under Settings → General.</source>
+        <translation>セキュリティのため、Autona の Web サーバーは既定でこの PC 内（127.0.0.1）からのみ接続を受け付けるようになりました。
+
+LAN 上の他のデバイス（別 PC の OBS、スマートフォンからのリモート操作など）から接続する場合は、今すぐ LAN アクセスを有効にしてください。
+
+この設定は後から 設定 → 一般 で変更できます。</translation>
+    </message>
+    <message>
+        <source>Web server failed to start</source>
+        <translation>Web サーバーの起動に失敗しました</translation>
+    </message>
+    <message>
+        <source>The web server could not start on port {port}:
+
+{error}
+
+OBS browser sources and the Web UI will not work.
+Change the port under Settings → General → Webserver Port and restart Autona.</source>
+        <translation>ポート {port} で Web サーバーを起動できませんでした:
+
+{error}
+
+OBS のブラウザソースと Web UI は動作しません。
+設定 → 一般 → Webサーバーポート でポートを変更し、Autona を再起動してください。</translation>
     </message>
     <message>
         <location filename="..\AutonaWebServer.py" line="831" />
@@ -2161,13 +2223,19 @@ Terminate the existing process(es) and continue?</source>
     <name>settings.general</name>
     <message>
         <location filename="..\Settings\AutonaSettingsWindow.py" line="42" />
-        <source>Webserver Port</source>
-        <translation>Webサーバーポート</translation>
+        <source>Webserver Port (takes effect on next restart)</source>
+        <translation>Webサーバーポート（再起動後に反映）</translation>
     </message>
     <message>
         <location filename="..\Settings\AutonaSettingsWindow.py" line="50" />
         <source>Enable profanity filter</source>
         <translation>不適切語フィルタを有効化</translation>
+    </message>
+</context><context>
+    <name>settings.webserver_listen_lan</name>
+    <message>
+        <source>Allow access from other devices on the LAN (takes effect on next restart)</source>
+        <translation>LAN 上の他のデバイスからのアクセスを許可（再起動後に反映）</translation>
     </message>
 </context><context>
     <name>settings.hotkeys</name>

@@ -27,7 +27,7 @@ import json
 import os
 
 from .SettingsManager import SettingsManager
-from .Helpers.AutonaNetworkHelper import GetLocalIP
+from .Helpers.AutonaNetworkHelper import GetWebServerHost
 
 
 def _tr(text):
@@ -144,7 +144,7 @@ class AutonaObsGuideWindow(QDialog):
     # ── Connection / paths ───────────────────────────────────────────────
     def _baseUrl(self):
         port = SettingsManager.Get("general.webserver_port", 5000)
-        return f"http://{GetLocalIP()}:{port}/api/v1"
+        return f"http://{GetWebServerHost()}:{port}/api/v1"
 
     def _outDir(self):
         return os.path.normpath(os.path.abspath("./out"))
@@ -177,9 +177,10 @@ class AutonaObsGuideWindow(QDialog):
         self.portLabel = QLabel()
         form.addWidget(self.portLabel, 2, 0, 1, 2)
 
-        note = QLabel(_tr("OBS must run on this PC, or on the same LAN."))
-        note.setWordWrap(True)
-        form.addWidget(note, 3, 0, 1, 4)
+        # Text is swapped in _refresh() depending on the LAN access setting.
+        self.lanNoteLabel = QLabel()
+        self.lanNoteLabel.setWordWrap(True)
+        form.addWidget(self.lanNoteLabel, 3, 0, 1, 4)
 
         form.setColumnStretch(1, 1)
         group.setLayout(form)
@@ -190,6 +191,13 @@ class AutonaObsGuideWindow(QDialog):
         self.baseUrlField.setText(self._baseUrl())
         self.outDirField.setText(self._outDir())
         self.portLabel.setText(_tr("Port") + f": {port}")
+        if SettingsManager.Get("general.webserver_listen_lan", False):
+            self.lanNoteLabel.setText(
+                _tr("OBS must run on this PC, or on the same LAN."))
+        else:
+            self.lanNoteLabel.setText(_tr(
+                "LAN access: disabled — OBS must run on this PC. To use OBS on "
+                "another PC, enable it under Settings → General (restart required)."))
         self._populateHttp()
 
     # ── (B) ASS -> Autona via curl ───────────────────────────────────────
