@@ -4,21 +4,20 @@
     <script src="../include/globals.js"></script>
     <link rel="stylesheet" href="../main.css" />
     <link rel="stylesheet" href="./index.css" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@700;800&display=swap"
-      rel="stylesheet"
-    />
   </head>
   <body>
-    <div class="stage" data-size="8">
+    <div class="stage">
       <header class="stage-header">
         <div class="event-tag"></div>
-        <h1 class="stage-title">TOP 8 BRACKET</h1>
+        <h1 class="stage-title"></h1>
       </header>
 
-      <main class="bracket-grid"></main>
+      <div class="section-label label-upper">WINNERS</div>
+      <div class="section-label label-lower">LOSERS</div>
+
+      <svg class="connectors" viewBox="0 0 1920 1080"
+           preserveAspectRatio="none"></svg>
+      <main class="bracket"></main>
 
       <div class="stage-status"></div>
     </div>

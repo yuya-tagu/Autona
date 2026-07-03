@@ -653,6 +653,22 @@
 </context><context>
     <name>app</name>
     <message>
+        <source>Top 8</source>
+        <translation>Top 8</translation>
+    </message>
+    <message>
+        <source>Top 8 Display Settings</source>
+        <translation>Top 8 Display Settings</translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation>Apply</translation>
+    </message>
+    <message>
+        <source>Load</source>
+        <translation>Load</translation>
+    </message>
+    <message>
         <source>Help &amp; Settings</source>
         <translation>Help &amp; Settings</translation>
     </message>
@@ -2193,14 +2209,9 @@ Terminate the existing process(es) and continue?</translation>
         <translation>Swap teams</translation>
     </message>
     <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="150" />
-        <source>Refresh bracket phase groups</source>
-        <translation>Refresh bracket phase groups</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="151" />
-        <source>Toggle bracket limit export</source>
-        <translation>Toggle bracket limit export</translation>
+        <location filename="..\Settings\AutonaSettingsWindow.py" line="134" />
+        <source>Reload Top 8 from Start.gg</source>
+        <translation>Reload Top 8 from Start.gg</translation>
     </message>
     <message>
         <location filename="..\Settings\SettingsWidget.py" line="147" />

@@ -30,7 +30,7 @@ export const tshStore = configureStore({
                     for (let k in ds.tshCharacters.characters) {
                         ds.tshCharacters.characters[k].skins = `<${objLen(ds.tshCharacters.characters[k].skins)} skins>`
                     }
-                    ds.tshState.tshState.bracket = "omitted";
+                    ds.tshState.tshState.top8 = "omitted";
                     ds.tshState.tshState.notes = "omitted";
                     ds.tshState.tshState.player_list = "omitted";
                 } catch {}

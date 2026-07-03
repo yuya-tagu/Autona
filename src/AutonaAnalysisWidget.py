@@ -11,13 +11,12 @@ Columns (flat, sortable):
 - SeedOver: how many seed positions the loser outperformed expectations
   by (positive = upset victim finishing higher than their seed).
 
-Two data paths feed the table:
- - Auto-triggers (bracket state change): rebuild from
-   StateManager["bracket.bracket.rounds"] — the currently selected PG.
- - Refresh button with empty filter: sequentially fetch ALL phase groups
-   from Start.gg via a lightweight GQL query, rebuild from the combined
-   result. Refresh with text in the filter is a no-op beyond re-applying
-   the in-memory filter.
+Single data path: the refresh button sequentially fetches ALL phase
+groups from Start.gg via a lightweight GQL query and rebuilds the table
+from the combined result. (The old auto-rebuild from
+StateManager["bracket.bracket.rounds"] was removed together with the
+Bracket dock — the Top 8 panel no longer maintains that state.) The
+filter box is a purely local view over the fetched data.
 """
 
 from qtpy.QtCore import *
@@ -25,7 +24,6 @@ from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from loguru import logger
 
-from .StateManager import StateManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaBracket import Bracket, BracketSet
 from . import ui_constants as UI
@@ -86,55 +84,6 @@ class NumericItem(QTableWidgetItem):
             return float(a) < float(b)
         except (TypeError, ValueError):
             return super().__lt__(other)
-
-
-def _compute_placements_from_state(rounds):
-    """Return a dict mapping (round_num, set_idx) → placement (the
-    final tournament rank of the loser of that set).
-
-    Losers of LB matches are eliminated at that point, so their rank is
-    determined by how many rounds of LB remain below them. GF / GF
-    Reset losers place 2nd. Returns nothing for sets whose loser is not
-    yet eliminated (e.g. UB matches that feed into LB)."""
-    result = {}
-
-    positive = []
-    negative = []
-    for k in rounds.keys():
-        try:
-            n = int(k)
-        except (TypeError, ValueError):
-            continue
-        (positive if n > 0 else negative).append(n)
-
-    for round_num in positive:
-        sets = (rounds[str(round_num)] or {}).get("sets") or {}
-        for set_idx_str, s in sets.items():
-            try:
-                set_idx = int(set_idx_str)
-            except (TypeError, ValueError):
-                continue
-            if s.get("nextWin") is None and s.get("nextLose") is None:
-                result[(round_num, set_idx)] = 2
-
-    sorted_neg = sorted(negative, key=abs, reverse=True)
-    next_start = 3
-    for round_num in sorted_neg:
-        sets = (rounds[str(round_num)] or {}).get("sets") or {}
-        real = [(int(k), s) for k, s in sets.items()
-                if _is_real_set(s)]
-        if not real:
-            continue
-        for set_idx, _s in real:
-            result[(round_num, set_idx)] = next_start
-        next_start += len(real)
-
-    return result
-
-
-def _is_real_set(s):
-    ids = (s or {}).get("playerId") or [-1, -1]
-    return not any(i == -1 for i in ids)
 
 
 # NOTE: Formerly a QDockWidget (the "ANLYSE" tab). Demoted to a plain
@@ -231,18 +180,14 @@ class AutonaAnalysisWidget(QWidget):
         self._refreshQueuedOnPhases = False
 
         # ── Data reload triggers ──
+        # Fetch is the only data path (no auto-rebuild from state), so the
+        # table stays empty until the user presses the fetch button.
         signals = AutonaTournamentDataProvider.instance.signals
         signals.tournament_phases_updated.connect(self._onPhasesUpdated)
-        signals.tournament_phasegroup_updated.connect(
-            lambda _payload=None: self._onAutoReload())
         signals.tournament_changed.connect(self._onTournamentChanged)
-        StateManager.signals.state_big_change.connect(self._onAutoReload)
 
         AutonaAnalysisWidget.instance = self
-        # Defer the first reload until StateManager is primed — running
-        # before the phase-group data lands produces an empty table, and a
-        # manual refresh triggers the populated one anyway.
-        QTimer.singleShot(500, self._reload)
+        self._showEmptyPrompt()
 
     # ── Signal handlers ─────────────────────────────────────────
 
@@ -259,14 +204,12 @@ class AutonaAnalysisWidget(QWidget):
         self._multiPgActive = False
         self._fetchResults = {}
         self._refreshQueuedOnPhases = False
-        self._reload()
+        self._showEmptyPrompt()
 
-    def _onAutoReload(self):
-        # Don't let automatic triggers overwrite a freshly-fetched
-        # multi-PG view.
-        if self._multiPgActive:
-            return
-        self._reload()
+    def _showEmptyPrompt(self):
+        self._fillTable([])
+        self.summaryLabel.setText(QApplication.translate(
+            "app", "「Startggからデータを取得」を押してください"))
 
     # ── Refresh button ──────────────────────────────────────────
 
@@ -357,165 +300,11 @@ class AutonaAnalysisWidget(QWidget):
         successful = sum(1 for v in self._fetchResults.values()
                          if v.get("data"))
         if successful == 0:
-            # Every PG failed — fall back to the local state so the user
-            # still sees something.
             self.summaryLabel.setText(
                 QApplication.translate("app", "取得に失敗しました"))
-            self._reload()
             return
         self._multiPgActive = True
         self._rebuildFromMultiPg()
-
-    # ── Data plumbing (single-PG, StateManager-backed) ──────────
-
-    def _reload(self):
-        try:
-            rounds = StateManager.Get("bracket.bracket.rounds") or {}
-        except Exception:
-            logger.opt(exception=True).warning(
-                "Analysis: failed to read bracket.bracket.rounds")
-            rounds = {}
-
-        rows = self._collectRowsFromState(rounds)
-        self._fillTable(rows)
-        self.summaryLabel.setText(
-            QApplication.translate("app", "{0} 試合").format(len(rows)))
-        self._applyFilter()
-
-    def _collectRowsFromState(self, rounds: dict):
-        """Walk every set in `rounds` (the StateManager shape), produce
-        per-row data as a list of (display_text, sort_key) tuples."""
-        if not isinstance(rounds, dict) or not rounds:
-            return []
-
-        pos_to_set = {}
-        win_source = {}
-        for round_key, round_data in rounds.items():
-            try:
-                round_num = int(round_key)
-            except (TypeError, ValueError):
-                continue
-            for set_idx_str, set_data in (round_data.get("sets") or {}).items():
-                try:
-                    set_idx = int(set_idx_str)
-                except (TypeError, ValueError):
-                    continue
-                pos_to_set[(round_num, set_idx)] = set_data
-                nw = set_data.get("nextWin")
-                if nw and isinstance(nw, (list, tuple)) and len(nw) == 2:
-                    win_slot = set_data.get("winSlot", 0) or 0
-                    win_source[(int(nw[0]), int(nw[1]), int(win_slot))] = (
-                        round_num, set_idx)
-
-        placements = _compute_placements_from_state(rounds)
-
-        rows = []
-        for round_key, round_data in rounds.items():
-            try:
-                round_num = int(round_key)
-            except (TypeError, ValueError):
-                continue
-            round_name = round_data.get("name") or str(round_num)
-
-            for set_idx_str, set_data in (round_data.get("sets") or {}).items():
-                try:
-                    set_idx = int(set_idx_str)
-                except (TypeError, ValueError):
-                    continue
-                ids = set_data.get("playerId") or [-1, -1]
-                if any(i == -1 for i in ids):
-                    continue
-                if ids[0] == -2 and ids[1] == -2:
-                    continue
-
-                names = set_data.get("playerName") or ["", ""]
-                scores = set_data.get("score") or [0, 0]
-                completed = bool(set_data.get("completed"))
-
-                p1_seed = ids[0] if isinstance(ids[0], int) else None
-                p2_seed = ids[1] if isinstance(ids[1], int) else None
-                p1_name = names[0] or (
-                    f"(seed {p1_seed})" if (p1_seed and p1_seed > 0) else "TBD")
-                p2_name = names[1] or (
-                    f"(seed {p2_seed})" if (p2_seed and p2_seed > 0) else "TBD")
-
-                score_text = f"{scores[0]}-{scores[1]}" if completed else "-"
-                uf_text, uf_sort = "", 0
-                if completed and scores[0] != scores[1]:
-                    if scores[0] > scores[1]:
-                        winner_seed, loser_seed = p1_seed, p2_seed
-                    else:
-                        winner_seed, loser_seed = p2_seed, p1_seed
-                    uf = _upset_factor(winner_seed, loser_seed)
-                    uf_text = str(uf)
-                    uf_sort = uf
-
-                lr = self._losersRunFromState(
-                    round_num, set_idx, set_data, pos_to_set, win_source)
-                lr_text = str(lr) if lr > 0 else ""
-                lr_sort = lr
-
-                so_text, so_sort = "", 0
-                placement = placements.get((round_num, set_idx))
-                if completed and scores[0] != scores[1] and placement is not None:
-                    loser_seed = p2_seed if scores[0] > scores[1] else p1_seed
-                    if loser_seed and loser_seed > 0 and loser_seed > placement:
-                        so_val = loser_seed - placement
-                        so_text = str(so_val)
-                        so_sort = so_val
-
-                rows.append([
-                    (str(round_name), (round_num, set_idx)),
-                    (str(p1_seed) if p1_seed and p1_seed > 0 else "-",
-                     p1_seed if (p1_seed and p1_seed > 0) else 9999),
-                    (p1_name, p1_name.lower()),
-                    (score_text, sum(scores)),
-                    (p2_name, p2_name.lower()),
-                    (str(p2_seed) if p2_seed and p2_seed > 0 else "-",
-                     p2_seed if (p2_seed and p2_seed > 0) else 9999),
-                    (uf_text, uf_sort),
-                    (lr_text, lr_sort),
-                    (so_text, so_sort),
-                ])
-        return rows
-
-    @staticmethod
-    def _losersRunFromState(round_num, set_idx, set_data, pos_to_set, win_source):
-        if round_num >= 0:
-            return 0
-        if not set_data.get("completed"):
-            return 0
-        scores = set_data.get("score") or [0, 0]
-        if scores[0] == scores[1]:
-            return 0
-        winner_slot = 0 if scores[0] > scores[1] else 1
-        ids = set_data.get("playerId") or [-1, -1]
-        winner_seed = ids[winner_slot]
-
-        run = 0
-        current = (round_num, set_idx, winner_slot)
-        visited = set()
-        while current not in visited:
-            visited.add(current)
-            source_pos = win_source.get(current)
-            if source_pos is None:
-                break
-            src = pos_to_set.get(source_pos)
-            if not src or not src.get("completed"):
-                break
-            sscores = src.get("score") or [0, 0]
-            if sscores[0] == sscores[1]:
-                break
-            src_winner_slot = 0 if sscores[0] > sscores[1] else 1
-            sids = src.get("playerId") or [-1, -1]
-            if sids[src_winner_slot] != winner_seed:
-                break
-            if source_pos[0] < 0:
-                run += 1
-                current = (source_pos[0], source_pos[1], src_winner_slot)
-            else:
-                break
-        return run
 
     # ── Data plumbing (multi-PG, fetched) ───────────────────────
 

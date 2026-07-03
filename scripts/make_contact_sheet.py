@@ -134,7 +134,7 @@ def g(pattern):
 sheet1 = [
     ("[HIGH] layout/scoreboard - game-branded images", g("layout/scoreboard/*.png")),
     ("[HIGH] template preview images (TSH demo origin)",
-     g("layout/bracket_ultimate/*_preview.png") + g("layout/commentators/*_preview.png")
+     g("layout/bracket_top8/*_preview.png") + g("layout/commentators/*_preview.png")
      + g("layout/recent_sets/*_preview.png") + g("layout/scoreboard_simple/index*.png")
      + g("layout/scoreboard_topleft/index*.png") + g("layout/top_8/*_preview.png")
      + g("layout/tournament_history/*_preview.png")),

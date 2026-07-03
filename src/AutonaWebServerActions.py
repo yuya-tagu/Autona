@@ -13,8 +13,6 @@ from .AutonaStatsUtil import AutonaStatsUtil
 from .SettingsManager import SettingsManager
 from loguru import logger
 from .AutonaGameAssetManager import AutonaGameAssetManager
-from .AutonaBracketView import AutonaBracketView
-from .AutonaBracketWidget import AutonaBracketWidget
 from .AutonaPlayerDB import AutonaPlayerDB
 from .AutonaScoreboardWidget import AutonaScoreboardWidget
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
@@ -360,6 +358,15 @@ class WebServerActions(QThread):
 
     @gui_thread_sync
     def update_bracket(self):
+        # /bracket:refresh — kept for external-macro compatibility. The Top 8
+        # panel resolves the fixed target (the tournament's final double
+        # elimination phase) and re-fetches it, queuing behind a phases fetch
+        # when needed.
+        from .AutonaTop8Widget import AutonaTop8Widget
+        panel = AutonaTop8Widget.instance
+        if panel is not None:
+            panel.RefreshPhaseGroup()
+            return "OK"
         id = AutonaTournamentDataProvider.instance.provider.GetTournamentPhases()[0].get("groups")[0].get("id")
         data = AutonaTournamentDataProvider.instance.provider.GetTournamentPhaseGroup(id)
         AutonaTournamentDataProvider.instance.signals.tournament_phasegroup_updated.emit(data)

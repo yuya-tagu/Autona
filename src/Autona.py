@@ -138,7 +138,7 @@ from .AutonaPlayerListWidget import AutonaPlayerListWidget
 from .AutonaCommentaryWidget import AutonaCommentaryWidget
 # from .AutonaTeamBattleWidget import AutonaTeamBattleWidget
 from .AutonaGameAssetManager import AutonaGameAssetManager
-from .AutonaBracketWidget import AutonaBracketWidget
+from .AutonaTop8Widget import AutonaTop8Widget
 from .AutonaTournamentInfoWidget import AutonaTournamentInfoWidget
 from .AutonaBoardWidget import AutonaBoardWidget
 from .AutonaSidebar import AutonaSidebar
@@ -189,7 +189,8 @@ class Window(QMainWindow):
     # selected index and collapsed state are persisted instead.
     # v14: Statistics nav item moved to the bottom of the sidebar order.
     # v15: Result Settings and Commentary swapped in the sidebar order.
-    STATE_VERSION = 15
+    # v16: Bracket panel replaced by the Top 8 panel (AutonaTop8Widget).
+    STATE_VERSION = 16
     signals = WindowSignals()
 
     def __init__(self, loop=None):
@@ -312,12 +313,12 @@ class Window(QMainWindow):
             QApplication.translate("app", "Result Settings"))
         self.dockWidgets.append(resultSetting)
 
-        bracket = AutonaBracketWidget()
-        bracket.setWindowIcon(QIcon(UI.icon_path('bracket.svg')))
-        bracket.setObjectName("Bracket")
-        bracket.setWindowTitle(
-            QApplication.translate("app", "Bracket"))
-        self.dockWidgets.append(bracket)
+        top8 = AutonaTop8Widget()
+        top8.setWindowIcon(QIcon(UI.icon_path('bracket.svg')))
+        top8.setObjectName("Top8")
+        top8.setWindowTitle(
+            QApplication.translate("app", "Top 8 Display Settings"))
+        self.dockWidgets.append(top8)
         splash.set_message(splash_msgs[0], progress=0.40)
 
         # teamBattle = AutonaTeamBattleWidget()
@@ -371,7 +372,7 @@ class Window(QMainWindow):
 
         # Display order of the sidebar nav items and the matching
         # QStackedWidget pages: EVENT, SCORE, BOARD, VIDEO, RESULT,
-        # COMMS, BRACKET, STATS. Each entry is (panel widget, sidebar icon file).
+        # COMMS, TOP8, STATS. Each entry is (panel widget, sidebar icon file).
         self._navPanels = [
             (tournamentInfo, 'tournament.svg'),
             (self.scoreboard, 'scoreboard.svg'),
@@ -379,7 +380,7 @@ class Window(QMainWindow):
             (thumbnailSetting, 'thumbnail.svg'),
             (resultSetting, 'result.svg'),
             (commentary, 'commentary.svg'),
-            (bracket, 'bracket.svg'),
+            (top8, 'bracket.svg'),
             (self.statsWidget, 'stats.svg'),
         ]
 

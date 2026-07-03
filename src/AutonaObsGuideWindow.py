@@ -52,7 +52,7 @@ _HTTP_EXAMPLES = [
      "path": "/scoreboards/1:swap-teams", "body": None},
     {"label": "Pull current stream set", "method": "POST",
      "path": "/scoreboards/1:pull-stream", "body": None},
-    {"label": "Refresh bracket", "method": "POST",
+    {"label": "Refresh Top 8 bracket", "method": "POST",
      "path": "/bracket:refresh", "body": None},
 ]
 

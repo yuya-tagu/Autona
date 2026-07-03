@@ -655,6 +655,22 @@
 </context><context>
     <name>app</name>
     <message>
+        <source>Top 8</source>
+        <translation>Top 8</translation>
+    </message>
+    <message>
+        <source>Top 8 Display Settings</source>
+        <translation>TOP8表示設定</translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation>反映</translation>
+    </message>
+    <message>
+        <source>Load</source>
+        <translation>読み込み</translation>
+    </message>
+    <message>
         <source>Help &amp; Settings</source>
         <translation>ヘルプ＆設定</translation>
     </message>
@@ -2196,14 +2212,9 @@ Terminate the existing process(es) and continue?</source>
         <translation>チームを入れ替え</translation>
     </message>
     <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="150" />
-        <source>Refresh bracket phase groups</source>
-        <translation>フェーズグループを再読み込み</translation>
-    </message>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="151" />
-        <source>Toggle bracket limit export</source>
-        <translation>ブラケット出力制限を切替</translation>
+        <location filename="..\Settings\AutonaSettingsWindow.py" line="134" />
+        <source>Reload Top 8 from Start.gg</source>
+        <translation>Top 8 を Start.gg から再読み込み</translation>
     </message>
     <message>
         <location filename="..\Settings\SettingsWidget.py" line="147" />

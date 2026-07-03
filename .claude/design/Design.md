@@ -229,8 +229,8 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 | 画像（PNG/JPG）出力 | × | × | × | ◎ |
 | 設定 UI | ◎ | × | × | × |
 | ホットキー受付 | ◎ | × | × | × |
-| ブラケット表示（運用） | ◎ | × | × | × |
-| ブラケット表示（配信） | × | × | ◎ | × |
+| Top 8 ブラケット編集 | ◎ | × | × | × |
+| Top 8 ブラケット表示（配信） | × | × | ◎ | × |
 
 ◎ = 主担当 / △ = 任意 / × = 担当しない
 
@@ -329,18 +329,27 @@ game
 └── has_modded_content
 ```
 
-##### `bracket`
+##### `top8` — Top 8 ブラケット
+
+旧 `bracket.*` は Top 8 専用化（2026-07）で廃止。`AutonaTop8Widget` が起動時に
+`StateManager.Unset("bracket")` で残留キーを掃除する。トポロジーと進出伝播の正本は
+`src/AutonaTop8Model.py`（FGC 標準ダブルエリミ: Winners 4 名 + Losers 4 名）。
 
 ```
-bracket
-├── phase
-├── phaseGroup
-├── bracket
-│   ├── progressionsIn / progressionsOut
-│   ├── winnersOnly / winnersOnlyProgressions
-│   ├── limitExportNumber
-│   └── rounds
-└── players  (player_list と同構造)
+top8
+├── phaseLabel                       W R   (表示ラベル。既定 "TOP 8")
+├── players.{1..8}                   W R   (スロット位置固定: 1/2=WSF1, 3/4=WSF2,
+│   │                                       5/6=LR1A, 7/8=LR1B)
+│   ├── name / sponsor               W R
+│   ├── country                      W R   ({code, asset} — AutonaCountryHelper 形式)
+│   └── characters.{K}               W R   (charData: assets 込み)
+└── matches.{wsf1|wsf2|wf|lr1a|lr1b|lqf1|lqf2|lsf|lf|gf|gf_reset}
+    ├── name                         W R   (ラウンド表示名)
+    ├── slots                        W R   ([int,int] 選手スロット 1..8 / 0=TBD。
+    │                                       AutonaTop8Model.Recompute が導出)
+    ├── score                        W R
+    ├── finished                     W R
+    └── active                       W R   (gf_reset のみ意味を持つ)
 ```
 
 ##### `commentary`
@@ -561,7 +570,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | 1 | `Tournament Info` | `AutonaTournamentInfoWidget` | 大会名・日付・URL・テーマ色など大会メタデータの編集 | `tournamentInfo.*` | `tournamentInfo.*` | ✓（最初に表示） |
 | 2 | `Thumbnail Settings` | `AutonaThumbnailSettingsWidget` | サムネイルテンプレ選択・背景指定・プレビュー・PNG/JPG 保存・クリップボードコピー | `thumbnail_config.*`（SettingsManager） | `score.*`, `tournamentInfo.*`, `thumbnail_config.*` | ✓（条件付き） |
 | 3 | `Result Settings` | `AutonaResultSettingsWidget` | リザルトレイアウト選択・選手入力・プレビュー・PNG/JPG 保存・クリップボードコピー | `result_config.*`, `result_players` | `tournamentInfo.*`, `result_players` | ✓ |
-| 4 | `Bracket` | `AutonaBracketWidget` | フェーズグループ選択・ブラケット表示・出力範囲指定 | `bracket.*` | `bracket.*`, `score.{N}.team.*` | ✓ |
+| 4 | `Top8` | `AutonaTop8Widget` | Top 8 ダブルエリミの選手・試合スコア編集、Start.gg 読み込み、OBS 用 URL 案内・プレビュー | `top8.*` | `top8.*`, `tournamentInfo.*` | ✓ |
 | 5 | `Scoreboard` | `AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget` | board1=1v1、board2=team、board3=crew のスコア入力・選手編集・セット読み込み | `score.{N}.*` | `score.{N}.*`, `game.*` | ✓ |
 | 6 | `Commentary` | `AutonaCommentaryWidget` | 実況者の名前・SNS・キャラクター入力 | `commentary.{N}.*` | `commentary.{N}.*` | ✓ |
 | 7 | `Statistics` | `AutonaStatsWidget` | 内部 `QTabWidget` で複数ビューを集約（下記 §4.1.0） | （read-only） | `score.{N}.recent_sets`, `last_sets`, `upset_factor` ほか | ✓ |
@@ -575,7 +584,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | Head-to-Head (Recent Sets) | （`AutonaStatsWidget` 内蔵） | `score.{N}.recent_sets` ほか（read-only） |
 | Last Sets | （内蔵） | `score.{N}.last_sets`（read-only） |
 | Tournament History | （内蔵） | `score.{N}.history_sets`（read-only） |
-| この大会の試合一覧 | `AutonaAnalysisWidget` パネル | `bracket.bracket.rounds`、`state_big_change` 購読、TournamentDataProvider のシグナル（read-only） |
+| この大会の試合一覧 | `AutonaAnalysisWidget` パネル | Start.gg 全フェーズグループの自前フェッチのみ（state 非依存、read-only）。TournamentDataProvider のシグナル購読 |
 | 選手一覧 | `AutonaPlayerListWidget` パネル | `player_list.slot.{I}.*` を Set / `player_list.*` を Get |
 
 #### 4.1.1 パネル（ナビ）の追加・削除規約
@@ -676,7 +685,7 @@ layout/{用途}_{variant}/
 | 用途プレフィックス | 内容 | 既存テンプレ例 |
 |----------------|------|------------|
 | `scoreboard*` | 配信中のスコアボード表示 | `scoreboard/`, `scoreboard_simple/`, `scoreboard_topleft/`, `scoreboard_Universal/` |
-| `bracket_*` | トーナメントブラケット表示 | `bracket_top8/`, `bracket_top12/`, `bracket_top16/`, `bracket_ultimate/` |
+| `bracket_*` | トーナメントブラケット表示（Top 8 専用、`top8.*` を購読） | `bracket_top8/`（top12/top16/ultimate は Top 8 専用化で削除済み） |
 | `result*` | リザルト画像（運用上 OBS には乗せない、画像生成専用） | §4.4 参照 |
 | `recent_sets/` | 最近のセット表示 | 1 種のみ |
 | `commentators/` | 実況者名タグ | tag.html / tag_twitter.html / tag_name_twitter.html の 3 バリアント |
@@ -1068,10 +1077,10 @@ React の MUI 側は `size="small"` で密度を揃える（§2.2 R-React-5）�
 
 理由: テーマ切替は `Autona.LoadTheme()` → `qdarktheme.setup_theme()` を呼び、これが
 QApplication 全体に `setStyleSheet` + `setPalette` を再適用して**全ウィジェットを再ポリッシュ**する。
-ブラケットビュー（`AutonaBracketView`）は全試合のウィジェットツリーを単一の
-`QGraphicsProxyWidget` に埋め込んでおり（`self._scene.addWidget(...)`）、proxy 埋め込み
-ウィジェットの再ポリッシュは病的に遅い。大規模ブラケット読込時に GUI スレッドが
-**30 秒以上フリーズ**していた。切替トリガー自体を無くすことで恒久的に解消する。
+旧ブラケットビュー（`AutonaBracketView`、Top 8 専用化で削除済み）は全試合のウィジェット
+ツリーを単一の `QGraphicsProxyWidget` に埋め込んでおり、proxy 埋め込みウィジェットの
+再ポリッシュは病的に遅く、大規模ブラケット読込時に GUI スレッドが **30 秒以上フリーズ**
+していた。切替トリガー自体を無くすことで恒久的に解消する。
 
 #### 5.4.1 現在の仕様
 
@@ -1152,8 +1161,7 @@ OBS HTML レイアウト（`layout/scoreboard*` `bracket*` `recent_sets/` `comme
 | `team2_score_down` | `Ctrl+Shift+4` | `team2_score_down` | チーム 2 スコア -1 |
 | `reset_scores` | `Ctrl+Shift+R` | `reset_scores` | スコアリセット |
 | `swap_teams` | `Ctrl+Shift+S` | `swap_teams` | チーム入れ替え |
-| `refresh_phase_group` | `Ctrl+Shift+P` | `refresh_phase_group` | フェーズグループの再取得 |
-| `limit_export` | `Ctrl+Shift+B` | `limit_export` | ブラケット出力範囲制限のトグル |
+| `refresh_phase_group` | `Ctrl+Shift+P` | `refresh_phase_group` | Top 8 の選択中フェーズグループを Start.gg から再取得 |
 
 ### 6.3 命名規約
 
@@ -1410,7 +1418,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 |---|---------|------|
 | 1 | provider 実装ファイル（`src/Helpers/AutonaExampleProviderDataProvider.py` 等） | 大会、フェーズ、フェーズグループ、セット、選手取得 API を実装 |
 | 2 | `AutonaTournamentDataProvider.py` 関連 | provider 切替・共通インターフェースへの接続 |
-| 3 | StateManager キーパス（§3.1.2） | `bracket.*`, `player_list.*`, `score.{N}.*` への展開仕様を確認 |
+| 3 | StateManager キーパス（§3.1.2） | `top8.*`, `player_list.*`, `score.{N}.*` への展開仕様を確認 |
 | 4 | SettingsManager | API token / endpoint / provider 選択の保存が必要なら追加（§3.3.4 命名規約） |
 | 5 | PyQt 設定 UI | provider 選択や認証情報入力が必要なら追加 |
 

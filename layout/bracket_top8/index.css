@@ -1,219 +1,258 @@
+/* bracket_top8 — FGC-standard Top 8 double elimination overlay.
+ *
+ * Dark stage with symmetric upper/lower trees and elbow connectors,
+ * modelled after championship-broadcast bracket boards. Card polish
+ * (accent bar, winner highlight, sponsor/name hierarchy) follows the
+ * result layouts. Colors come from main.css variables overridden at
+ * runtime by applyTournamentColors (tournamentInfo.themeColor/accentColor).
+ */
+
 :root {
-  /* Tournament colors — overridden from tournamentInfo at runtime. */
-  --theme-color: #0d1220;
-  --theme-color-2: #05080f;
-  --accent-color: #ffd83d;
+  --theme-color: #1d1b18;
+  --theme-color-2: #0d0c0b;
+  --card-bg: #2c2925;
+  --accent-color: #f0a500;
   --accent-ink: #0a0a0a;
-
-  --card-bg: #0e1a33;
-  --card-border: rgba(255, 255, 255, 0.08);
-  --card-divider: rgba(255, 255, 255, 0.08);
-
-  --text-primary: #ffffff;
-  --text-muted: rgba(255, 255, 255, 0.5);
-  --text-tbd: rgba(255, 255, 255, 0.45);
-
-  /* Card sizing. Tuned for 1920x1080 and 4-column grid. */
-  --card-width: 380px;
-  --card-height: 112px;
-  --row-gap: 28px;
-  --col-gap: 60px;
+  --line-color: rgba(255, 255, 255, 0.28);
 }
-
-* { box-sizing: border-box; }
 
 html,
 body {
-  width: 1920px;
-  height: 1080px;
   margin: 0;
   padding: 0;
-  background: radial-gradient(
-    ellipse at center,
-    var(--theme-color) 0%,
-    var(--theme-color-2) 100%
-  );
-  color: var(--text-primary);
-  font-family: "LINE Seed JP", "Helvetica Neue", Arial, sans-serif;
-  font-weight: 800;
+  width: 1920px;
+  height: 1080px;
   overflow: hidden;
-  letter-spacing: 0.02em;
+  font-family: var(--font, "LINE Seed JP", sans-serif);
+  color: var(--text-color, #ffffff);
 }
 
+/* Transparent stage: the background art is layered in OBS behind this
+ * browser source, so the overlay paints nothing of its own. */
 .stage {
   position: relative;
-  width: 100%;
-  height: 100%;
-  padding: 60px 80px;
-  display: flex;
-  flex-direction: column;
+  width: 1920px;
+  height: 1080px;
+  background: transparent;
 }
 
-/* ───── Header ───── */
+/* ── Header ─────────────────────────────────────────────────────────── */
 
 .stage-header {
+  position: absolute;
+  top: 28px;
+  left: 0;
+  width: 100%;
   text-align: center;
-  margin-bottom: 40px;
-  padding-bottom: 20px;
-  border-bottom: 2px solid var(--accent-color);
 }
 
 .event-tag {
-  display: inline-block;
-  color: var(--accent-color);
-  font-size: 24px;
-  letter-spacing: 6px;
-  margin-bottom: 12px;
-  min-height: 28px;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.75);
+  min-height: 34px;
 }
 
 .stage-title {
-  margin: 0;
-  font-size: 72px;
+  margin: 4px 0 0;
+  font-size: 64px;
   font-weight: 800;
-  letter-spacing: 10px;
-}
-
-/* ───── Bracket grid ───── */
-
-.bracket-grid {
-  flex: 1;
-  display: grid;
-  grid-template-columns: repeat(4, var(--card-width));
-  grid-template-rows: 1fr 1fr;
-  column-gap: var(--col-gap);
-  row-gap: 40px;
-  justify-content: center;
-  align-content: center;
-  max-width: 100%;
-}
-
-.slot-column {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  gap: var(--row-gap);
-  min-width: 0;
-}
-
-.slot-label {
-  text-align: center;
-  font-size: 20px;
-  letter-spacing: 5px;
-  color: var(--text-muted);
-  padding-bottom: 8px;
-  border-bottom: 2px solid var(--accent-color);
-  margin-bottom: 6px;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
+  line-height: 1.1;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
 }
 
-/* ───── Set card ───── */
+/* Bottoms out ~10px above the first row's match labels (cards y=230/700,
+ * labels 28px above the cards). */
+.section-label {
+  position: absolute;
+  left: 60px;
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
 
-.bracket-set {
-  height: var(--card-height);
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
+.section-label::before {
+  content: "TOP 8 | ";
+  color: var(--accent-color);
+}
+
+.label-upper { top: 148px; }
+.label-lower { top: 618px; }
+
+/* ── Connectors ─────────────────────────────────────────────────────── */
+
+.connectors {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.connector {
+  fill: none;
+  stroke: var(--line-color);
+  stroke-width: 3;
+}
+
+.connector.is-hidden {
+  visibility: hidden;
+}
+
+/* ── Match cards ────────────────────────────────────────────────────── */
+
+.bracket {
+  position: absolute;
+  inset: 0;
+}
+
+.match-card {
+  position: absolute;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  background: color-mix(in srgb, var(--card-bg) 92%, transparent);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-left: 4px solid var(--accent-color);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  overflow: visible;
 }
 
-.bracket-set[data-empty="true"] {
-  background: transparent;
-  border: 2px dashed rgba(255, 255, 255, 0.12);
+.match-card.is-hidden {
+  visibility: hidden;
 }
 
-.bracket-set[data-empty="true"] .player {
-  color: var(--text-muted);
+.match-label {
+  position: absolute;
+  top: -28px;
+  left: 0;
+  font-size: 18px;
   font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.6);
+  white-space: nowrap;
 }
 
-.bracket-set .player {
-  flex: 1;
+/* ── Player slot rows ───────────────────────────────────────────────── */
+
+.slot {
   display: flex;
   align-items: center;
-  padding: 0 20px;
-  font-size: 22px;
-  letter-spacing: 1px;
+  gap: 12px;
+  height: 60px;
+  padding: 0 0 0 12px;
+  box-sizing: border-box;
+}
+
+.slot + .slot {
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+.flag {
+  width: 34px;
+  height: 23px;
+  flex: 0 0 34px;
+  background-size: cover;
+  background-position: center;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+.flag.is-empty {
+  visibility: hidden;
+}
+
+.who {
+  flex: 1 1 auto;
   min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
 }
 
-.bracket-set .player + .player {
-  border-top: 1px solid var(--card-divider);
-}
-
-.bracket-set .seed {
-  display: inline-block;
-  min-width: 32px;
-  color: var(--text-muted);
-  font-size: 16px;
-  letter-spacing: 1px;
-}
-
-.bracket-set .sponsor {
-  color: var(--text-muted);
-  font-size: 15px;
-  margin-right: 10px;
-  letter-spacing: 1px;
-}
-
-.bracket-set .player-name {
-  flex: 1;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-weight: 800;
-}
-
-.bracket-set .player-name.is-pending {
-  color: var(--text-tbd);
+.who .name {
+  width: 100%;
+  font-size: 26px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
-.bracket-set .player-score {
-  min-width: 44px;
-  text-align: center;
-  color: var(--text-primary);
-  font-size: 22px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 800;
-  background: rgba(255, 255, 255, 0.05);
-  margin-left: 12px;
-  padding: 0 10px;
+.sponsor-text {
+  margin-right: 8px;
+  font-size: 19px;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--accent-color) 80%, #ffffff);
+}
+
+.char {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  background-size: cover;
+  background-position: center top;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background-color: rgba(0, 0, 0, 0.35);
+}
+
+.char.is-empty {
+  visibility: hidden;
+}
+
+.score {
+  width: 56px;
+  flex: 0 0 56px;
   align-self: stretch;
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 32px;
+  font-weight: 800;
+  background: rgba(0, 0, 0, 0.35);
+  font-variant-numeric: tabular-nums;
 }
 
-.bracket-set .player.is-winner .player-name {
-  color: var(--accent-color);
-}
-.bracket-set .player.is-winner .player-score {
+.slot[data-slot="0"] .score { border-radius: 0 5px 0 0; }
+.slot[data-slot="1"] .score { border-radius: 0 0 5px 0; }
+
+/* Winner / loser / TBD states */
+
+.slot.is-winner .score {
   background: var(--accent-color);
   color: var(--accent-ink);
 }
 
-/* Reset column behaves like a placeholder when empty. */
-.slot-column[data-role="reset"] .bracket-set[data-empty="true"] .player-name {
-  letter-spacing: 3px;
+.slot.is-loser {
+  opacity: 0.55;
 }
 
-/* ───── Status / fallback ───── */
+.slot.is-tbd .who .name {
+  color: rgba(255, 255, 255, 0.35);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+/* ── Empty state ────────────────────────────────────────────────────── */
 
 .stage-status {
   position: absolute;
-  left: 0;
-  right: 0;
   bottom: 24px;
+  left: 0;
+  width: 100%;
   text-align: center;
-  color: var(--text-muted);
-  font-size: 16px;
-  letter-spacing: 2px;
+  font-size: 22px;
+  color: rgba(255, 255, 255, 0.55);
 }
 
-.bracket-grid.is-hidden {
+.stage.is-empty .bracket,
+.stage.is-empty .connectors,
+.stage.is-empty .section-label {
   visibility: hidden;
 }

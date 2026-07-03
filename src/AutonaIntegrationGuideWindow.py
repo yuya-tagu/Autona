@@ -58,9 +58,9 @@ _BUTTON_EXAMPLES = [
     {"label": "Pull current stream set", "method": "POST",
      "path": "/scoreboards/1:pull-stream", "body": None,
      "bg": "#6a1b9a", "top": None, "main": "MATCH\nPULL"},
-    {"label": "Refresh bracket", "method": "POST",
+    {"label": "Refresh Top 8 bracket", "method": "POST",
      "path": "/bracket:refresh", "body": None,
-     "bg": "#00838f", "top": None, "main": "BRACKET\nREFRESH"},
+     "bg": "#00838f", "top": None, "main": "TOP8\nREFRESH"},
 ]
 
 # Companion key icons are commonly 72-144px; render at 144 so the copied bitmap

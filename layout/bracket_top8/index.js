@@ -1,44 +1,52 @@
-// bracket_top8 — template-based VALORANT/EVO-style TOP 8 bracket overlay.
-// Uses a fixed 4-column Grid layout (WSF / WF / GF / Reset × LR1 / LQF /
-// LSF / LF). Phase groups that don't populate all rounds are adapted by
-// dropping unused slots and shifting GF/Reset left.
-
-// ───── Templates ─────────────────────────────────────────────────────
+// bracket_top8 — fixed FGC-standard Top 8 double elimination overlay.
 //
-// Each template maps data-source descriptors to grid slots:
-//   source.side: "upper" (positive rounds excluding GF) | "lower" (negative)
-//                | "gf" | "reset"
-//   source.index: position within side's round list, 0-based.
-//                 For upper/lower this is sorted outer→inner (WR1, WR2, ...).
-//   setCount: expected number of sets; extra data is ignored, missing data
-//             renders TBD placeholders.
-//   row / col: 1-indexed grid position (row 1 = upper, row 2 = lower).
+// Renders the `top8.*` state written by the desktop Top 8 panel
+// (AutonaTop8Widget / AutonaTop8Model): 8 slot-fixed players and 11 fixed
+// match ids. All topology lives in the desktop app — this file is a dumb
+// "match id -> card DOM" renderer plus static connector lines.
+//
+// ───── Geometry (single source of truth) ─────────────────────────────
+// Cards are absolutely positioned on the 1920x1080 stage and the SVG
+// connectors are derived from the same table, so layout tweaks only ever
+// touch these constants.
 
-const TEMPLATES = {
-  8: {
-    topLabel: "TOP 8 BRACKET",
-    gridCols: 4,
-    slots: [
-      { id: "wsf",   label: "WINNERS SEMIFINAL",   row: 1, col: 1, side: "upper", index: 0, setCount: 2 },
-      { id: "wf",    label: "WINNERS FINAL",       row: 1, col: 2, side: "upper", index: 1, setCount: 1 },
-      { id: "gf",    label: "GRAND FINAL",         row: 1, col: 3, side: "gf",              setCount: 1 },
-      { id: "reset", label: "RESET",               row: 1, col: 4, side: "reset",           setCount: 1 },
-      { id: "lr1",   label: "LOSERS R1",           row: 2, col: 1, side: "lower", index: 0, setCount: 2 },
-      { id: "lqf",   label: "LOSERS QUARTERFINAL", row: 2, col: 2, side: "lower", index: 1, setCount: 2 },
-      { id: "lsf",   label: "LOSERS SEMIFINAL",    row: 2, col: 3, side: "lower", index: 2, setCount: 1 },
-      { id: "lf",    label: "LOSERS FINAL",        row: 2, col: 4, side: "lower", index: 3, setCount: 1 },
-    ],
-  },
+const CARD_W = 420;
+const CARD_H = 120;
+const ROW_H = CARD_H / 2;
+
+// Columns: winners rounds spread over 3 stops, losers over 4, symmetric
+// 60px side margins (last column 1440 + 420 = 1860 = 1920 - 60).
+const MATCHES = {
+  wsf1:     { x: 60,   y: 230 },
+  wsf2:     { x: 60,   y: 400 },
+  wf:       { x: 750,  y: 315 },
+  gf:       { x: 1440, y: 315 },
+  gf_reset: { x: 1440, y: 485 },
+  lr1a:     { x: 60,   y: 700 },
+  lr1b:     { x: 60,   y: 870 },
+  lqf1:     { x: 520,  y: 700 },
+  lqf2:     { x: 520,  y: 870 },
+  lsf:      { x: 980,  y: 785 },
+  lf:       { x: 1440, y: 785 },
 };
 
-// TOP-8-sized phase groups only (1..8 entrants). Larger brackets use
-// bracket_top12 or bracket_top16.
-function getTopN(entrants) {
-  const n = Math.max(0, entrants | 0);
-  if (n === 0) return null;
-  if (n <= 8) return 8;
-  return null;
-}
+// Winner-advancement lines. `row` selects the target card's slot row the
+// line plugs into (0 = top, 1 = bottom). The losers-drop routes (WSF loser
+// -> LQF etc.) and the LF -> GF hop are intentionally not drawn — they
+// cross the whole stage and the reference designs leave them implicit.
+const CONNECTORS = [
+  { from: "wsf1", to: "wf",       row: 0 },
+  { from: "wsf2", to: "wf",       row: 1 },
+  { from: "wf",   to: "gf",       row: 0 },
+  { from: "lr1a", to: "lqf1",     row: 0 },
+  { from: "lr1b", to: "lqf2",     row: 0 },
+  { from: "lqf1", to: "lsf",      row: 0 },
+  { from: "lqf2", to: "lsf",      row: 1 },
+  { from: "lsf",  to: "lf",       row: 0 },
+  { from: "gf",   to: "gf_reset", row: 0, vertical: true },
+];
+
+// ───── Theme colors (from tournamentInfo, mirrors the scoreboards) ────
 
 function applyTournamentColors(ti) {
   if (ti && ti.themeColor) {
@@ -90,314 +98,226 @@ function pickInk(hex) {
   return luma > 160 ? "#0a0a0a" : "#ffffff";
 }
 
-function isGrandFinalRound(round) {
-  const name = (round && round.name) ? String(round.name) : "";
-  if (!name) return false;
-  const lower = name.toLowerCase();
-  return lower.includes("grand final")
-    || name.includes("グランドファイナル")
-    || name.includes("グランド・ファイナル");
+// ───── Static DOM construction ────────────────────────────────────────
+
+function escapeHtml(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function isResetName(name) {
-  if (!name) return false;
-  const s = String(name);
-  return /reset/i.test(s) || s.includes("リセット");
+function resolveAsset(path) {
+  if (!path) return null;
+  return "../../" + String(path).replace(/^\.\//, "");
 }
 
-function sortedRoundNums(rounds, positive) {
-  const nums = Object.keys(rounds)
-    .map((k) => parseInt(k))
-    .filter((n) => !Number.isNaN(n) && (positive ? n > 0 : n < 0));
-  return nums.sort((a, b) => positive ? a - b : b - a);
-}
+function buildCards() {
+  const root = document.querySelector(".bracket");
+  root.innerHTML = "";
+  for (const [matchId, pos] of Object.entries(MATCHES)) {
+    const card = document.createElement("div");
+    card.className = "match-card";
+    card.dataset.match = matchId;
+    card.style.left = `${pos.x}px`;
+    card.style.top = `${pos.y}px`;
+    card.style.width = `${CARD_W}px`;
+    card.style.height = `${CARD_H}px`;
 
-function setHasBye(set) {
-  if (!set) return true;
-  const ids = set.playerId || [-1, -1];
-  return ids.some((id) => id === -1);
-}
+    const label = document.createElement("div");
+    label.className = "match-label";
+    card.appendChild(label);
 
-// Return the sets of a round in key order, with BYE-bearing sets dropped.
-// Start.gg includes phantom rounds where every set pairs a real seed
-// against a BYE; those need to be invisible to match Autona's own view.
-function sanitizeSets(round) {
-  if (!round || !round.sets) return [];
-  return Object.keys(round.sets)
-    .sort((a, b) => parseInt(a) - parseInt(b))
-    .map((k) => round.sets[k])
-    .filter((s) => !setHasBye(s));
-}
-
-function isDisplayableRound(round) {
-  return sanitizeSets(round).length > 0;
-}
-
-function classifyRounds(rounds) {
-  const allPos = sortedRoundNums(rounds, true);
-  const allNeg = sortedRoundNums(rounds, false);
-
-  // Drop BYE-only rounds from both sides before index-based slot mapping.
-  const positive = allPos.filter((n) => isDisplayableRound(rounds[String(n)]));
-  const negative = allNeg.filter((n) => isDisplayableRound(rounds[String(n)]));
-
-  // Grand Final detection. Prefer the localized round name; fall back to
-  // the structural rule (last 1-2 positive rounds with exactly one real
-  // set) for brackets whose round names weren't populated.
-  let gfNums = positive.filter((n) => isGrandFinalRound(rounds[String(n)]));
-  if (gfNums.length === 0) {
-    const realSetCount = (n) => sanitizeSets(rounds[String(n)]).length;
-    for (let i = positive.length - 1; i >= 0; i--) {
-      if (realSetCount(positive[i]) !== 1) break;
-      gfNums.unshift(positive[i]);
-      if (gfNums.length === 2) break;
+    for (const i of [0, 1]) {
+      const slot = document.createElement("div");
+      slot.className = "slot";
+      slot.dataset.slot = String(i);
+      slot.innerHTML = `
+        <div class="flag"></div>
+        <div class="who">
+          <span class="sponsor"></span>
+          <div class="name"></div>
+        </div>
+        <div class="char"></div>
+        <div class="score"></div>
+      `;
+      card.appendChild(slot);
     }
+    root.appendChild(card);
   }
-
-  let gfMain = null, gfReset = null;
-  gfNums.forEach((n) => {
-    if (isResetName(rounds[String(n)].name)) gfReset = n;
-    else if (gfMain == null) gfMain = n;
-  });
-  // If multiple GF-named rounds but none flagged as reset, the trailing
-  // one is the reset round.
-  if (gfReset == null && gfNums.length >= 2) {
-    gfReset = gfNums[gfNums.length - 1];
-    if (gfMain === gfReset) gfMain = gfNums[0];
-  }
-  // If only a reset was identified (edge case), promote it to main so the
-  // GF slot isn't left empty.
-  if (gfMain == null && gfReset != null) {
-    gfMain = gfReset;
-    gfReset = null;
-  }
-
-  const gfSet = new Set(gfNums);
-  const upper = positive.filter((n) => !gfSet.has(n));
-
-  return { upper, lower: negative, gfMain, gfReset };
 }
 
-function pickRoundForSlot(slot, classified, rounds) {
-  let num = null;
-  if (slot.side === "upper") {
-    num = classified.upper[slot.index];
-  } else if (slot.side === "lower") {
-    num = classified.lower[slot.index];
-  } else if (slot.side === "gf") {
-    num = classified.gfMain;
-  } else if (slot.side === "reset") {
-    num = classified.gfReset;
+function buildConnectors() {
+  const svg = document.querySelector(".connectors");
+  svg.innerHTML = "";
+  const ns = "http://www.w3.org/2000/svg";
+
+  for (const c of CONNECTORS) {
+    const from = MATCHES[c.from];
+    const to = MATCHES[c.to];
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute("class", "connector");
+    path.dataset.to = c.to;
+
+    let d;
+    if (c.vertical) {
+      // GF -> Reset: straight drop from the card's bottom centre.
+      const x = from.x + CARD_W / 2;
+      d = `M ${x} ${from.y + CARD_H} V ${to.y}`;
+    } else {
+      // Elbow: out of the source's right-middle, across, into the target
+      // row's centre on its left edge.
+      const x1 = from.x + CARD_W;
+      const y1 = from.y + CARD_H / 2;
+      const x2 = to.x;
+      const y2 = to.y + ROW_H / 2 + c.row * ROW_H;
+      const midX = Math.round((x1 + x2) / 2);
+      d = `M ${x1} ${y1} H ${midX} V ${y2} H ${x2}`;
+    }
+    path.setAttribute("d", d);
+    svg.appendChild(path);
   }
-  if (num == null) return null;
-  return rounds[String(num)] || null;
 }
 
-function createSlotColumn(slot, round) {
-  const col = document.createElement("div");
-  col.className = "slot-column";
-  col.dataset.role = slot.side;
+// ───── Per-update rendering ───────────────────────────────────────────
 
-  const label = document.createElement("div");
-  label.className = "slot-label";
-  label.textContent = slot.label;
-  col.appendChild(label);
-
-  const displayableSets = sanitizeSets(round);
-  for (let i = 0; i < slot.setCount; i++) {
-    col.appendChild(renderSet(displayableSets[i] || null));
-  }
-
-  col.style.gridRow = String(slot.row);
-  col.style.gridColumn = String(slot.col);
-  return col;
+function playerFor(top8, slotNumber) {
+  if (!slotNumber) return null;
+  return ((top8.players || {})[String(slotNumber)]) || null;
 }
 
-function renderSet(set) {
-  const card = document.createElement("div");
-  card.className = "bracket-set";
+function charIconPath(player) {
+  const char = ((player || {}).characters || {})["1"];
+  if (!char || !char.assets) return null;
+  const assetObj = char.assets["base_files/icon"]
+    || char.assets["full"]
+    || GetBiggestAsset(char);
+  if (!assetObj) return null;
+  const assetPath = typeof assetObj === "string" ? assetObj : assetObj.asset;
+  return resolveAsset(assetPath);
+}
 
-  if (!set) {
-    card.dataset.empty = "true";
-    card.appendChild(makePlayerRow("TBD", "", "", null));
-    card.appendChild(makePlayerRow("TBD", "", "", null));
-    return card;
+function renderSlot(card, index, player, score, showScore, state) {
+  const slot = card.querySelector(`.slot[data-slot="${index}"]`);
+  slot.classList.toggle("is-winner", state === "winner");
+  slot.classList.toggle("is-loser", state === "loser");
+  slot.classList.toggle("is-tbd", !player);
+
+  const name = player ? (player.name || "").trim() : "";
+  const sponsor = player ? (player.sponsor || "").trim() : "";
+  SetInnerHtml(
+    $(slot).find(".name"),
+    player
+      ? `${sponsor ? `<span class="sponsor-text">${escapeHtml(sponsor)}</span>` : ""}
+         ${escapeHtml(name || "—")}`
+      : "TBD");
+
+  const flag = slot.querySelector(".flag");
+  const flagAsset = player && player.country && player.country.asset
+    ? resolveAsset(String(player.country.asset).toLowerCase())
+    : null;
+  const flagUrl = flagAsset ? `url('${flagAsset}')` : "";
+  if (flag.style.backgroundImage !== flagUrl) {
+    flag.style.backgroundImage = flagUrl;
   }
+  flag.classList.toggle("is-empty", !flagAsset);
 
-  const ids = set.playerId || [-2, -2];
-  const names = set.playerName || ["", ""];
-  const scores = set.score || [0, 0];
-  const completed = !!set.completed;
-  const winnerIdx = completed && scores[0] !== scores[1]
-    ? (scores[0] > scores[1] ? 0 : 1)
+  const charEl = slot.querySelector(".char");
+  const icon = player ? charIconPath(player) : null;
+  const iconUrl = icon ? `url('${icon}')` : "";
+  if (charEl.style.backgroundImage !== iconUrl) {
+    charEl.style.backgroundImage = iconUrl;
+  }
+  charEl.classList.toggle("is-empty", !icon);
+
+  const scoreEl = slot.querySelector(".score");
+  const text = showScore ? String(score) : "";
+  if (scoreEl.textContent !== text) scoreEl.textContent = text;
+}
+
+function renderMatch(top8, matchId) {
+  const card = document.querySelector(`.match-card[data-match="${matchId}"]`);
+  const match = ((top8.matches || {})[matchId]) || {};
+  const slots = match.slots || [0, 0];
+  const score = match.score || [0, 0];
+  const finished = !!match.finished;
+  const players = [playerFor(top8, slots[0]), playerFor(top8, slots[1])];
+
+  const label = card.querySelector(".match-label");
+  const labelText = (match.name || "").toUpperCase();
+  if (label.textContent !== labelText) label.textContent = labelText;
+
+  const bothKnown = !!(players[0] && players[1]);
+  const winnerIdx = finished && score[0] !== score[1]
+    ? (score[0] > score[1] ? 0 : 1)
     : -1;
 
-  for (let i = 0; i < 2; i++) {
-    const id = ids[i];
-    const isBye = id === -1;
-    const isPending = id === -2;
-    const displayName = isBye
-      ? "BYE"
-      : (isPending ? "TBD" : (names[i] || "TBD"));
-    const score = completed ? String(scores[i] ?? "") : "";
-    const row = makePlayerRow(displayName, score, "", i === winnerIdx);
-    if (isPending || isBye || !names[i]) {
-      row.querySelector(".player-name").classList.add("is-pending");
-    }
-    card.appendChild(row);
-  }
-  return card;
-}
-
-function makePlayerRow(name, score, seed, isWinner) {
-  const row = document.createElement("div");
-  row.className = "player";
-  if (isWinner) row.classList.add("is-winner");
-
-  if (seed) {
-    const seedEl = document.createElement("span");
-    seedEl.className = "seed";
-    seedEl.textContent = seed;
-    row.appendChild(seedEl);
+  for (const i of [0, 1]) {
+    let state = "";
+    if (winnerIdx === i) state = "winner";
+    else if (winnerIdx === 1 - i) state = "loser";
+    renderSlot(card, i, players[i], score[i], bothKnown, state);
   }
 
-  const nameEl = document.createElement("div");
-  nameEl.className = "player-name";
-  nameEl.textContent = name;
-  row.appendChild(nameEl);
-
-  const scoreEl = document.createElement("div");
-  scoreEl.className = "player-score";
-  scoreEl.textContent = score || "";
-  row.appendChild(scoreEl);
-
-  return row;
+  if (matchId === "gf_reset") {
+    const active = !!match.active;
+    card.classList.toggle("is-hidden", !active);
+    document
+      .querySelectorAll(`.connector[data-to="gf_reset"]`)
+      .forEach((p) => p.classList.toggle("is-hidden", !active));
+  }
 }
 
-// Drop trailing upper/lower slots that have no backing round, then shift
-// GF/Reset left to close the gap. Handles phase groups whose UB stops
-// one or two rounds short of the template's assumption (e.g. a Top-8
-// pool whose UR1 is Winners Semifinal with no Winners Final round).
-function adaptTemplate(template, classified) {
-  const upperExpected = template.slots.filter((s) => s.side === "upper").length;
-  const lowerExpected = template.slots.filter((s) => s.side === "lower").length;
-  const upperShift = Math.max(0, upperExpected - classified.upper.length);
-  const lowerShift = Math.max(0, lowerExpected - classified.lower.length);
-  if (upperShift === 0 && lowerShift === 0) return template;
-
-  const adapted = {
-    ...template,
-    slots: template.slots
-      .map((s) => {
-        if (s.side === "upper") {
-          return s.index >= classified.upper.length ? null : s;
-        }
-        if (s.side === "lower") {
-          return s.index >= classified.lower.length ? null : s;
-        }
-        // GF / Reset live on the upper row; shift them left by however
-        // many upper slots we dropped.
-        if ((s.side === "gf" || s.side === "reset") && s.row === 1) {
-          return { ...s, col: s.col - upperShift };
-        }
-        return s;
-      })
-      .filter(Boolean),
-  };
-  return adapted;
-}
-
-function renderBracket(template, rounds) {
-  const grid = document.querySelector(".bracket-grid");
-  grid.innerHTML = "";
-  grid.style.gridTemplateColumns =
-    `repeat(${template.gridCols}, var(--card-width))`;
-
-  const classified = classifyRounds(rounds);
-  const effective = adaptTemplate(template, classified);
-
-  effective.slots.forEach((slot) => {
-    const round = pickRoundForSlot(slot, classified, rounds);
-    grid.appendChild(createSlotColumn(slot, round));
-  });
-}
-
+let built = false;
 let lastSignature = "";
 
 LoadEverything().then(() => {
-  Start = async () => {};
+  Start = async () => {
+    if (!built) {
+      built = true;
+      buildCards();
+      buildConnectors();
+    }
+  };
 
   Update = async (event) => {
     const data = event.data || {};
     const ti = data.tournamentInfo || {};
-    const bracketRoot = (data.bracket || {}).bracket || {};
-    const rounds = bracketRoot.rounds || {};
+    const top8 = data.top8 || null;
+
+    if (!built) {
+      buildCards();
+      buildConnectors();
+      built = true;
+    }
 
     applyTournamentColors(ti);
 
-    // Determine the size of the *selected phase group*, not the whole
-    // tournament. numEntrants is tournament-wide (hundreds), so use it
-    // only as a last-resort fallback.
-    //
-    // `players.slot` is authoritative for the phase-group roster (it's
-    // populated from Start.gg's entrants list for this pool), so prefer
-    // it. UR1 set count is a poor proxy when a Top-8 pool starts from
-    // WSF (2 sets → would yield entrants=4 and mis-classify as Top 6).
-    const playersSlot = ((data.bracket || {}).players || {}).slot || {};
-    const ur1Sets = rounds["1"]
-      ? Object.keys(rounds["1"].sets || {}).length
-      : 0;
-    const slotCount = Object.keys(playersSlot).length;
-    const entrants = slotCount
-      || (ur1Sets * 2)
-      || ti.numEntrants
-      || 0;
-    const topN = getTopN(entrants);
-
-    const eventTag = document.querySelector(".event-tag");
-    const title = document.querySelector(".stage-title");
-    const grid = document.querySelector(".bracket-grid");
     const status = document.querySelector(".stage-status");
-
-    eventTag.textContent = (ti.tournamentName || "").toUpperCase();
-
-    const roundKeys = Object.keys(rounds);
-
-    // Diagnostic (shown until a real render succeeds). Helps when the
-    // layout looks empty — reveals whether numbers flowed in correctly.
-    const diag =
-      `entrants=${entrants} topN=${topN || "-"} ` +
-      `rounds=[${roundKeys.join(",")}] ` +
-      `ur1Sets=${ur1Sets} slots=${slotCount}`;
-
-    const template = TEMPLATES[topN];
-    if (!template || roundKeys.length === 0) {
-      grid.classList.add("is-hidden");
-      if (topN && !template) {
-        status.textContent = `TOP ${topN} テンプレートは未実装です (${diag})`;
-      } else if (!topN && entrants > 16) {
-        status.textContent =
-          `このブラケットは TOP16 までの表示に対応しています (現在 ${entrants} 名 / ${diag})`;
-      } else if (entrants === 0) {
-        status.textContent = `ブラケット未読込 (${diag})`;
-      } else {
-        status.textContent = diag;
-      }
+    const stage = document.querySelector(".stage");
+    if (!top8 || !top8.matches) {
+      stage.classList.add("is-empty");
+      status.textContent =
+        "Autona の TOP 8 タブでブラケットを設定してください";
       return;
     }
+    stage.classList.remove("is-empty");
+    status.textContent = "";
 
-    title.textContent = template.topLabel;
-
-    // Avoid re-rendering when nothing relevant changed.
-    const signature = JSON.stringify({ rounds, topN });
+    const signature = JSON.stringify({
+      top8,
+      name: ti.tournamentName,
+      theme: ti.themeColor,
+      accent: ti.accentColor,
+    });
     if (signature === lastSignature) return;
     lastSignature = signature;
 
-    grid.classList.remove("is-hidden");
-    // Keep diagnostic visible until the bracket looks right — remove this
-    // block once rendering is confirmed working.
-    status.textContent = diag;
+    SetInnerHtml($(".event-tag"), escapeHtml(ti.tournamentName || ""));
+    SetInnerHtml(
+      $(".stage-title"),
+      escapeHtml(top8.phaseLabel || "TOP 8"));
 
-    renderBracket(template, rounds);
+    for (const matchId of Object.keys(MATCHES)) {
+      renderMatch(top8, matchId);
+    }
   };
 });
