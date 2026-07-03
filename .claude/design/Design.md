@@ -352,17 +352,25 @@ top8
     └── active                       W R   (gf_reset のみ意味を持つ)
 ```
 
-##### `commentary`
+##### `commentary` — 実況・解説
+
+実況・解説機能の全面リワーク（2026-07）でスキーマ刷新。スロット固定 8 名・
+欠番概念なし（旧「Unset 時に詰める」運用は廃止）。正規化・表示選択ルールの
+正本は `src/AutonaCommentaryModel.py`。旧スキーマ（seed / country / character /
+mains / custom_textbox 等）は起動時の `NormalizeState` でマイグレーションされる
+（custom_textbox → note、その他は破棄）。状態は再起動をまたいで永続化される。
 
 ```
 commentary
-└── {N}  (※インデックスは Unset 時に必ず詰める。欠番禁止)
-    ├── name, gamerTag, team, seed, id, city, birthday
-    ├── character, mains, country_code, state_code
-    ├── mergedName, mergedOnlyName
-    ├── online_avatar, avatar
-    ├── sponsor_logo, sponsor_logos
-    └── custom_textbox
+└── {1..8}                           W R   (スロット固定・常時 8 エントリ)
+    ├── name                         W R   (ゲーマータグ)
+    ├── team                         W R   (チーム / 所属)
+    ├── real_name                    W R
+    ├── twitter                      W R   (@ なし)
+    ├── role                         W R   ("実況"|"解説"|"選手"|"主催"|"")
+    ├── note                         W R   (自由コメント。例: 本年度ランキング2位)
+    └── display                      W R   (int。0=非表示、1..4=オーバーレイ表示順。
+                                            チェックした順に採番、左から表示)
 ```
 
 ##### `tournamentInfo`
@@ -482,7 +490,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | 問題 | 規約上の扱い |
 |-----|------------|
 | `score.upset_factor`（番号なし）二重定義 | 番号なし版は **削除済**（§8 T-1 完了） |
-| `commentary.{N}` インデックス欠番 | Unset 時に**インデックスを詰める**実装済（§8 T-2 完了） |
+| `commentary.{N}` インデックス欠番 | スロット固定 8 名化（2026-07 リワーク）で欠番概念ごと消滅（旧: Unset 時に詰める） |
 | `StateManager.state` 直接参照 | `GetFullState()` に置き換え。直接参照は禁止（§3.1.1） |
 | OBS HTML poll の順序保証なし | revision 検証で full snapshot 再取得に統一（R-Sync-8） |
 
@@ -572,7 +580,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | 3 | `Result Settings` | `AutonaResultSettingsWidget` | リザルトレイアウト選択・選手入力・プレビュー・PNG/JPG 保存・クリップボードコピー | `result_config.*`, `result_players` | `tournamentInfo.*`, `result_players` | ✓ |
 | 4 | `Top8` | `AutonaTop8Widget` | Top 8 ダブルエリミの選手・試合スコア編集、Start.gg 読み込み、OBS 用 URL 案内・プレビュー | `top8.*` | `top8.*`, `tournamentInfo.*` | ✓ |
 | 5 | `Scoreboard` | `AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget` | board1=1v1、board2=team、board3=crew のスコア入力・選手編集・セット読み込み | `score.{N}.*` | `score.{N}.*`, `game.*` | ✓ |
-| 6 | `Commentary` | `AutonaCommentaryWidget` | 実況者の名前・SNS・キャラクター入力 | `commentary.{N}.*` | `commentary.{N}.*` | ✓ |
+| 6 | `Commentary` | `AutonaCommentaryWidget` | 実況・解説者 8 スロットの編集（役割・コメント・表示トグル）、OBS 用 URL 案内・プレビュー | `commentary.{1..8}.*` | `commentary.{1..8}.*`, `tournamentInfo.*` | ✓ |
 | 7 | `Statistics` | `AutonaStatsWidget` | 内部 `QTabWidget` で複数ビューを集約（下記 §4.1.0） | （read-only） | `score.{N}.recent_sets`, `last_sets`, `upset_factor` ほか | ✓ |
 
 > **NOTE タブ（`AutonaNotesWidget`）は廃止**。`PLAYERS`（`AutonaPlayerListWidget`）と `ANLYSE`（`AutonaAnalysisWidget`）は**トップレベルのドックではなくなり**、`Statistics` ドック内の `QTabWidget` のサブタブとして埋め込まれた（いずれも `QDockWidget` → `QWidget` パネルに降格）。`AutonaPlayerListWidget.instance` / `.signals` は維持され、`AutonaScoreboardWidget` からの参照は従来どおり動作する。
@@ -688,7 +696,7 @@ layout/{用途}_{variant}/
 | `bracket_*` | トーナメントブラケット表示（Top 8 専用、`top8.*` を購読） | `bracket_top8/`（top12/top16/ultimate は Top 8 専用化で削除済み） |
 | `result*` | リザルト画像（運用上 OBS には乗せない、画像生成専用） | §4.4 参照 |
 | `recent_sets/` | 最近のセット表示 | 1 種のみ |
-| `commentators/` | 実況者名タグ | tag.html / tag_twitter.html / tag_name_twitter.html の 3 バリアント |
+| `commentators/` | 実況・解説者バー（`commentary.{1..8}` の display=ON を 1〜4 名可変表示） | index.html 一本化（旧 tag*.html 3 バリアントは 2026-07 リワークで削除） |
 | `camborder_*` | カメラ枠 | `camborder_Universal/` |
 | `top_8/` | TOP8 フロア | 1 種 |
 | `tournament_history/` | プレイヤー経歴 | player1.html / player2.html |
@@ -1494,7 +1502,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 | ID | タスク | 関連 § | 影響範囲 | 状態 |
 |----|------|------|--------|------|
 | **T-1** | `score.upset_factor`（番号なし）の二重定義を削除し、`score.{N}.upset_factor` のみに統一 | §3.1.2, §3.2.5 | `src/AutonaStatsUtil.py:176-179` 周辺 | ✅ 完了（M1a） |
-| **T-2** | `commentary.{N}` Unset 時にインデックスを詰める実装に変更 | §3.1.2, §3.2.5 | `src/AutonaCommentaryWidget.py` の `SetCommentatorNumber` / `_compactCommentaryState` | ✅ 完了（M1a） |
+| **T-2** | `commentary.{N}` Unset 時にインデックスを詰める実装に変更 | §3.1.2, §3.2.5 | `src/AutonaCommentaryWidget.py`（当時） | ✅ 完了（M1a）→ 2026-07 リワークでスロット固定 8 名化により概念ごと消滅 |
 | **T-3** | `StateManager.state` 直接参照を `GetFullState()`（ロック取得版）に置き換え | §3.1.1, §3.2.5 | `src/AutonaWebServerActions.py:41`, `src/result/main_generate_result.py`, `src/thumbnail/main_generate_thumbnail.py` | ✅ 完了（M1a） |
 | **T-4** | `StateManager.SaveState` に `revision` を単調増加で付与、`program_state` / `program_state_update` イベントに含める | §3.2.3, §3.2.5 | `src/StateManager.py`, `src/AutonaWebServer.py`, `out/program_state.json` への埋め込み | ✅ 完了（M1b） |
 | **T-5** | クライアント（OBS / React）に `revision` 連続性検証 + 不連続時の full snapshot 再取得を実装 | §3.2.3 | `layout/include/globals.js`, `web/src/redux/tshState.ts`, `web/src/ScoreboardPage/websocketInit.ts` | ✅ 完了（M1b） |
