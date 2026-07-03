@@ -884,6 +884,14 @@
         <translation>Discordコミュニティに参加する</translation>
     </message>
     <message>
+        <source>Corporate / commercial use inquiries</source>
+        <translation>法人利用・営利利用のご相談</translation>
+    </message>
+    <message>
+        <source>About Autona</source>
+        <translation>Autona について</translation>
+    </message>
+    <message>
         <location filename="..\Autona.py" line="619" />
         <source>Rules</source>
         <translation>対戦形式</translation>

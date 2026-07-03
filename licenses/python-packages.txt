@@ -1,0 +1,61 @@
+﻿# Python packages bundled in the Autona binary distribution
+# Generated with pip-licenses from the transitive closure of dependencies/requirements.txt
+# Date: 2026-07-03
+
+| Name               | Version     | License                                                 | URL                                                                  |
+|--------------------|-------------|---------------------------------------------------------|----------------------------------------------------------------------|
+| Flask              | 3.1.3       | BSD-3-Clause                                            | https://github.com/pallets/flask/                                    |
+| Flask-SocketIO     | 5.6.1       | MIT License                                             | https://github.com/miguelgrinberg/flask-socketio                     |
+| Jinja2             | 3.1.6       | BSD License                                             | https://github.com/pallets/jinja/                                    |
+| MarkupSafe         | 3.0.3       | BSD-3-Clause                                            | https://github.com/pallets/markupsafe/                               |
+| PyQtDarkThemeCglb  | 2.1.0       | MIT License                                             | https://github.com/5yutan5/PyQtDarkTheme                             |
+| PySide6_Addons     | 6.11.0      | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only           | https://pyside.org                                                   |
+| PySide6_Essentials | 6.11.0      | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only           | https://pyside.org                                                   |
+| QtPy               | 2.4.3       | MIT License                                             | https://github.com/spyder-ide/qtpy                                   |
+| Werkzeug           | 3.1.8       | BSD-3-Clause                                            | https://github.com/pallets/werkzeug/                                 |
+| asyncio            | 4.0.0       | Apache-2.0                                              | https://docs.python.org/3/library/asyncio.html                       |
+| backports.zstd     | 1.3.0       | PSF-2.0                                                 | https://github.com/rogdham/backports.zstd                            |
+| bidict             | 0.23.1      | Mozilla Public License 2.0 (MPL 2.0)                    | https://github.com/jab/bidict                                        |
+| blinker            | 1.9.0       | MIT License                                             | https://github.com/pallets-eco/blinker/                              |
+| brotli             | 1.2.0       | MIT                                                     | https://github.com/google/brotli                                     |
+| certifi            | 2026.2.25   | Mozilla Public License 2.0 (MPL 2.0)                    | https://github.com/certifi/python-certifi                            |
+| chardet            | 7.4.0.post2 | 0BSD                                                    | https://github.com/chardet/chardet                                   |
+| charset-normalizer | 3.4.1       | MIT License                                             | https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md |
+| click              | 8.3.2       | BSD-3-Clause                                            | https://github.com/pallets/click/                                    |
+| colorama           | 0.4.6       | BSD License                                             | https://github.com/tartley/colorama                                  |
+| darkdetect         | 0.7.1       | BSD License                                             | http://github.com/albertosottile/darkdetect                          |
+| deepdiff           | 8.1.1       | MIT License                                             | https://github.com/seperman/deepdiff                                 |
+| flask-cors         | 6.0.2       | MIT                                                     | https://corydolphin.github.io/flask-cors/                            |
+| h11                | 0.16.0      | MIT License                                             | https://github.com/python-hyper/h11                                  |
+| idna               | 3.11        | BSD-3-Clause                                            | https://github.com/kjd/idna                                          |
+| inflate64          | 1.0.4       | GNU Lesser General Public License v2 or later (LGPLv2+) | https://inflate64.readthedocs.io/                                    |
+| itsdangerous       | 2.2.0       | BSD License                                             | https://github.com/pallets/itsdangerous/                             |
+| loguru             | 0.7.3       | MIT License                                             | https://github.com/Delgan/loguru                                     |
+| msgpack            | 1.1.0       | Apache Software License                                 | https://msgpack.org/                                                 |
+| multivolumefile    | 0.2.3       | GNU Lesser General Public License v2 or later (LGPLv2+) | https://github.com/miurahr/multivolume                               |
+| orderly-set        | 5.5.0       | MIT License                                             | https://github.com/seperman/orderly-set                              |
+| orjson             | 3.11.8      | MPL-2.0 AND (Apache-2.0 OR MIT)                         | https://github.com/ijl/orjson                                        |
+| packaging          | 26.0        | Apache-2.0 OR BSD-2-Clause                              | https://github.com/pypa/packaging                                    |
+| pillow             | 12.2.0      | MIT-CMU                                                 | https://python-pillow.github.io                                      |
+| psutil             | 7.2.2       | BSD-3-Clause                                            | https://github.com/giampaolo/psutil                                  |
+| py7zr              | 1.1.0       | LGPL-2.1-or-later                                       | https://py7zr.readthedocs.io/                                        |
+| pybcj              | 1.0.7       | GNU Lesser General Public License v2 or later (LGPLv2+) | https://pypi.org/project/pybcj                                       |
+| pycryptodomex      | 3.23.0      | BSD License; Public Domain                              | https://www.pycryptodome.org                                         |
+| pynput             | 1.7.7       | GNU Lesser General Public License v3 (LGPLv3)           | https://github.com/moses-palmer/pynput                               |
+| pyppmd             | 1.3.1       | LGPL-2.1-or-later                                       | https://pyppmd.readthedocs.io/                                       |
+| python-dateutil    | 2.9.0       | Apache Software License; BSD License                    | https://github.com/dateutil/dateutil                                 |
+| python-engineio    | 4.13.1      | MIT                                                     | https://github.com/miguelgrinberg/python-engineio                    |
+| python-socketio    | 5.16.1      | MIT                                                     | https://github.com/miguelgrinberg/python-socketio                    |
+| qasync             | 0.27.1      | BSD License                                             | https://github.com/CabbageDevelopment/qasync                         |
+| requests           | 2.33.1      | Apache Software License                                 | https://github.com/psf/requests                                      |
+| shiboken6          | 6.11.0      | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only           | https://pyside.org                                                   |
+| simple-websocket   | 1.1.0       | MIT License                                             | https://github.com/miguelgrinberg/simple-websocket                   |
+| six                | 1.17.0      | MIT License                                             | https://github.com/benjaminp/six                                     |
+| termcolor          | 2.5.0       | MIT License                                             | https://github.com/termcolor/termcolor                               |
+| texttable          | 1.7.0       | MIT License                                             | https://github.com/foutaise/texttable/                               |
+| tqdm               | 2.2.3       | MIT License                                             | https://github.com/tqdm/tqdm                                         |
+| tzdata             | 2026.1      | Apache-2.0                                              | https://github.com/python/tzdata                                     |
+| urllib3            | 2.6.3       | MIT                                                     | https://github.com/urllib3/urllib3/blob/main/CHANGES.rst             |
+| win32_setctime     | 1.2.0       | MIT License                                             | https://github.com/Delgan/win32-setctime                             |
+| wsproto            | 1.3.2       | MIT                                                     | https://github.com/python-hyper/wsproto/                             |
+| zstd               | 1.5.7.3     | BSD                                                     | https://github.com/sergey-dryabzhinsky/python-zstd                   |

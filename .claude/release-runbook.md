@@ -86,6 +86,12 @@ Get-Content _internal/assets/versions.json -Raw   # "program" が新バージョ
 
 ### 7. release-windows.zip を生成
 
+**事前チェック**: 法務ドキュメント一式（`LICENSE` / `TERMS.md` / `THIRD-PARTY-NOTICES.md` /
+`licenses/`）が最新か確認する。特に依存を追加・更新した場合は
+`licenses/python-packages.txt`（pip-licenses で生成）と `licenses/npm-packages.txt`
+（license-checker で生成）の再生成が必要。**GPL ライセンスの依存が新たに入っていないこと**
+（ソース非公開配布と非両立。ATTRIBUTIONS.md 参照）。
+
 `gen_release.ps1` は `$PSScriptRoot` 基準で CWD 非依存（ルートから `.\scripts\gen_release.ps1` で実行可）。
 ただし **旧成果物の掃除が必須**: `Compress-Archive -Update` は既存 zip に追記更新するため、
 古い zip が残っていると削除済みファイルが zip 内に残留する。staging ディレクトリ `Autona/` も同様。
