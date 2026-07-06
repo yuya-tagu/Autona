@@ -218,8 +218,11 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         # Auto-refresh the title whenever tournament info, entrants, or game
         # assets change.
+        # Bound-method slot so Qt delivers the signal on the GUI thread
+        # (a lambda would run on the emitting worker thread and touch
+        # widgets there).
         AutonaTournamentDataProvider.instance.signals.tournament_data_updated.connect(
-            lambda _data: self._RefreshStreamTitle())
+            self._onTournamentDataUpdated)
         AutonaTournamentDataProvider.instance.signals.entrants_updated.connect(
             self._RefreshStreamTitle)
         AutonaGameAssetManager.instance.signals.onLoad.connect(
@@ -601,6 +604,9 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         # No names fit; drop the ft. framing entirely
         return f"{tournament_name}{suffix}".strip()
+
+    def _onTournamentDataUpdated(self, _data):
+        self._RefreshStreamTitle()
 
     def _RefreshStreamTitle(self):
         """Recompute the auto-generated stream title and apply it unless the

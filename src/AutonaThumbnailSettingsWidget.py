@@ -108,8 +108,11 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
         # clobbered on refresh.
         self._lastAutoVideoTitle = ""
         # Auto-refresh whenever any input to the title could have changed.
+        # Bound-method slot so Qt delivers the signal on the GUI thread
+        # (a lambda would run on the emitting worker thread and touch
+        # widgets there).
         AutonaTournamentDataProvider.instance.signals.tournament_data_updated.connect(
-            lambda _data: self._RefreshVideoTitle())
+            self._onTournamentDataUpdated)
         AutonaGameAssetManager.instance.signals.onLoad.connect(
             self._RefreshVideoTitle)
         StateManager.signals.state_big_change.connect(
@@ -427,6 +430,9 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
             if name:
                 return name
         return ""
+
+    def _onTournamentDataUpdated(self, _data):
+        self._RefreshVideoTitle()
 
     def _RefreshVideoTitle(self, force: bool = False):
         """Regenerate the auto title. When `force` is True (e.g. the
