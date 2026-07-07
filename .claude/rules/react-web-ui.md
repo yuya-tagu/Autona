@@ -5,6 +5,11 @@ paths:
 
 # Web UI (React) 開発ルール
 
+## 開発サーバー
+
+- dev サーバーのポートは **3100 固定**（`web/.env` の `PORT=3100`）。他プロジェクトが 3000 を使うため CRA 既定から変更済み
+- バックエンド（デスクトップアプリ）は従来どおり 5000（`web/src/env.js` の `BACKEND_PORT`）
+
 ## コンポーネント
 
 - MUI (Material UI) を使用。独自の CSS フレームワークを追加しない
@@ -13,9 +18,9 @@ paths:
 
 ## Redux
 
-- `uiState.ts` の `initialState` デフォルト値を変更する場合は影響範囲を確認する
-  - visibility トグルのデフォルト変更は全ユーザーの初回表示に影響する
 - 新しい state slice を追加したら `store.ts` にも登録する
+- フィールド表示トグルは Redux ではなく `display_options.show_*`（同期 state）を正とする
+  （Design.md §2.2 R-React-10。定義は `ScoreboardPage/displayOptions.js`）
 
 ## ビルド
 
