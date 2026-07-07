@@ -1,3 +1,6 @@
+/* LINE Seed JP の @font-face は public/index.html 側で定義している
+   （フォント実体は Flask がプロジェクト直下 assets/ から配信するため、
+   webpack に解決させない）。 */
 body {
   margin: 0;
   /* background-color / color are applied via MuiCssBaseline overrides

@@ -149,8 +149,11 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 | **R-React-3** | 状態の変更は REST API または Socket.IO emit で AutonaWebServer 経由でのみ行う（Redux 側で直接書き換えしない） |
 | **R-React-4** | スタイルは MUI テーマ（`themes.js`）経由で適用、`sx` props は許容、`style={{}}` ハードコードは避ける |
 | **R-React-5** | フォーム要素は `size="small"` で統一し、密度を高める |
-| **R-React-6** | `applySavedDeltas` のバッチ間隔は **既定値 100ms、上限 200ms**（旧値 1000ms は遅延が大きすぎる） |
+| **R-React-6** | delta は**到着駆動**で即時適用する（`program_state_update` 受信ハンドラ内で `applySavedDeltas` を dispatch）。サーバー側で coalesce 済みのためクライアント側バッチは不要。**200ms の setInterval は安全網**（接続状態遷移中にキューへ残った delta の回収用）としてのみ残す。rAF は不採用（モバイルのバックグラウンドタブで停止するため） |
 | **R-React-7** | テーマは**ダーク固定**。React Web UI は `ThemeShell.tsx` で `darkTheme` を常用し、StateManager / SettingsManager とのライト/ダーク同期は行わない |
+| **R-React-8** | 楽観的スコアエコー（`useScoreSubmit.ts`）: スコア±はタップ即時にローカル表示を更新し、**絶対値**で `POST /score` する。①サーバーデルタの値がローカル送信値と一致したら pending 解除 ②連打は in-flight 中最新値のみ保持し応答後に 1 回再送（シリアライズ）③失敗時はサーバー値へ revert + Snackbar ④3 秒でタイムアウトし pending 解除（サーバーが正）。R-Sync-4（後勝ち）の範囲内のため revision 突き合わせ・ロールバックログは持たない |
+| **R-React-9** | **即時反映モデル**: ScoreboardPage の全入力（選手情報・Phase/Match/Best Of・Losers・チーム名）は入力確定（blur / Enter / 選択）で即送信する。送信ボタンは置かない（デスクトップの `editingFinished` と同モデル）。サーバーエコーによるフォーム巻き戻りは「カード内にフォーカスがある間は表示フィールドを上書きしない」ガードで抑止する（`Player.jsx`） |
+| **R-React-10** | フィールド表示トグルは **`display_options.show_*`（StateManager 経由で全クライアント共有）が正**。Web の Eye メニューは `POST /display-option`（Actions 層 `set_display_option` → 各ボードの eye アクション駆動）で書き込み、ローカルの visibility 状態は持たない。キーとデフォルトは `AutonaScoreboardWidget.elements` と `web/src/ScoreboardPage/displayOptions.js` で二重管理（変更時は両方更新） |
 
 **ページ一覧** — 詳細は §4.2 参照。
 
@@ -462,11 +465,11 @@ PyQt UI    OBS HTML / React Web UI / WebEngine 画像生成
 | ルール | 内容 |
 |------|------|
 | **R-Sync-5** | StateManager は変更ごとに **`revision`**（単調増加の整数）を付与する |
-| **R-Sync-6** | `program_state_update` イベントには `{ revision, delta }` を含める。同一 revision 内で複数 chunk に分けて送る必要がある場合は `{ revision, chunk_index, chunk_total, delta }` の形式で chunk 順序を保証する |
+| **R-Sync-6** | `program_state_update` イベントには `{ revision, first_revision, delta }` を含める。サーバーの delta coalescing は複数の `state_updated` emit（= 複数 revision）を 1 メッセージへ結合するため、payload は連続区間 `[first_revision, revision]` を表す。`first_revision` 欠落時（旧 payload）はクライアントが `revision` 単一と見なす。同一 revision 内で複数 chunk に分けて送る必要がある場合は `{ revision, chunk_index, chunk_total, delta }` の形式で chunk 順序を保証する |
 | **R-Sync-7** | `program_state` イベント（full snapshot）には `{ revision, state }` を含める |
-| **R-Sync-8** | クライアントは受信した `revision` の連続性（前回 +1）を検証する。不連続なら `program_state` を再リクエストして full snapshot で再構築する |
+| **R-Sync-8** | クライアントは受信 payload の区間 `[first_revision, revision]` が次に期待する revision（前回適用 +1）を含むことを検証する。含まなければ `program_state` を再リクエストして full snapshot で再構築する。（旧規約の「単一 revision の前回 +1 検証」は coalescing と両立せず、結合 payload をギャップと誤検知して全量再取得が多発していた） |
 | **R-Sync-9** | reconnect 時はクライアントが必ず full snapshot を再取得する |
-| **R-Sync-10** | adaptive debounce: <10 delta = 50ms / 10-99 = 100ms / 100+ = 200ms + `state_big_change` シグナル発火 |
+| **R-Sync-10** | adaptive debounce: <10 delta = 50ms / 10-99 = 100ms / 100+ = 200ms + `state_big_change` シグナル発火。**leading-edge flush**: 直近 flush から 50ms 以上静かな状態で届いた最初の delta は即時送出する（単発操作の体感遅延をゼロ化。バーストは従来どおり trailing debounce） |
 
 #### 3.2.4 同期遅延の上限
 
@@ -477,11 +480,11 @@ PyQt UI    OBS HTML / React Web UI / WebEngine 画像生成
 | PyQt → StateManager | < 1ms |
 | StateManager → OBS HTML（Socket.IO） | 200ms（debounce 上限） |
 | StateManager → OBS HTML（degraded poll） | 200ms（debounce）+ 64ms（poll 周期） |
-| StateManager → React Web UI | 200ms（debounce）+ **100ms（既定 batch、§2.2 R-React-6）** = **最大 300ms** |
+| StateManager → React Web UI | 単発操作: **~0ms**（leading-edge flush + 到着駆動適用）/ バースト: 200ms（debounce 上限） |
 | StateManager → WebEngine 画像生成 | 0ms（prepare_data 時の snapshot） |
-| React → StateManager | **目標値 ~50ms**（API/Socket → AutonaWebServerActions → Set）。実値はネットワーク依存で、無線・低速 LAN では大きくなる |
+| React → StateManager | **目標値 ~50ms**（API/Socket → AutonaWebServerActions → Set）。実値はネットワーク依存で、無線・低速 LAN では大きくなる。スコア±は楽観的更新（R-React-8）により**表示は 0ms** |
 
-**注**: 旧実装の React 側 `applySavedDeltas` バッチ間隔 1000ms は仕様違反。100ms に短縮する（§2.2 R-React-6）。
+**注**: 旧実装の React 側 100ms 固定バッチは到着駆動化により廃止（§2.2 R-React-6、2026-07 Web UI 刷新 Phase 3）。
 
 #### 3.2.5 既知の不整合 → 規約上の扱い
 
@@ -905,27 +908,30 @@ async function initResult({ data, config, layout }) {
 #### 5.1.1 設計方針
 
 - PyQt（`src/ui_constants.py`）と React（`web/src/themes.js`）で**同一の役割・同一の値**を持つ
+- **機械可読の正本は `assets/design-tokens.json`**。両側の契約テスト（`tests/test_design_tokens_contract.py` / `web/src/themes.test.js`）が値のズレを検出する。変更時は json → 両コンシューマの順で更新する
 - 命名規則は言語慣例に従い、PyQt: `snake_case`、React: `camelCase`（プログラム的に変換可能）
-- DARK / LIGHT の 2 セットを両系統で保持
+- テーマは DARK のみ（LIGHT は撤回済み、§5.1.3 / §5.4 参照）
 - accent 色は **スカーレット（純色寄りの赤）** を採用。色相 ~2° はブランドクリムゾン（~348°）とタブバーのグラデーション橙端の中間で、グラデーションの色相レンジ内に収まりつつ brand と差別化される。旧クリムゾン `#8A1A2C` は暗背景上の選択タブ／メニュー文字でコントラストが低かったため明度を上げた（DARK `#C33732`、暗背景でコントラスト比 ~3.2。ベタ塗りの primary ボタンが暗背景で主張し過ぎないよう LIGHT より深めに設定 / LIGHT は明背景・白文字ボタン両対応のため `#CE3A33`）。brand（クリムゾン純色 `#DC143C`/`#C41232`）はライブ／ステータス信号用として据え置き
 
 #### 5.1.2 色トークン正本（DARK）
 
+ニュートラルは単一の寒色相（H~218°、S~6-9%）のクールグレー・ランプ。明度は旧 warm-neutral 値と同等でコントラスト比は不変。有彩トークン（brand/accent/gold/セマンティック）は暖色のまま、寒色グレーに対して際立たせる。
+
 | 役割 | 値 | PyQt キー | React キー |
 |------|-----|----------|----------|
-| キャンバス | `#0A0A0A` | `canvas` | `canvas` |
-| 主背景 | `#121212` | `bg_primary` | `bgPrimary` |
-| 副背景 | `#1A1A1A` | `bg_secondary` | `bgSecondary` |
-| 三段背景 | `#252524` | `bg_tertiary` | `bgTertiary` |
-| 四段背景 | `#2F2F2D` | `bg_quaternary` | `bgQuaternary` |
-| 淡い枠線 | `#252524` | `border_subtle` | `borderSubtle` |
-| 標準枠線 | `#393936` | `border_default` | `borderDefault` |
-| 強い枠線 | `#55534E` | `border_strong` | `borderStrong` |
-| 主テキスト | `#F0EAE0` | `text_primary` | `textPrimary` |
-| 副テキスト | `#B5ADA0` | `text_secondary` | `textSecondary` |
-| 淡いテキスト | `#85807A` | `text_muted` | `textMuted` |
-| ラベル | `#A29A90` | `text_label` | `textLabel` |
-| 無効テキスト | `#524F4A` | `text_disabled` | `textDisabled` |
+| キャンバス | `#0A0B0D` | `canvas` | `canvas` |
+| 主背景 | `#111317` | `bg_primary` | `bgPrimary` |
+| 副背景 | `#191B20` | `bg_secondary` | `bgSecondary` |
+| 三段背景 | `#23262C` | `bg_tertiary` | `bgTertiary` |
+| 四段背景 | `#2D3138` | `bg_quaternary` | `bgQuaternary` |
+| 淡い枠線 | `#23262C` | `border_subtle` | `borderSubtle` |
+| 標準枠線 | `#383C44` | `border_default` | `borderDefault` |
+| 強い枠線 | `#53575F` | `border_strong` | `borderStrong` |
+| 主テキスト | `#E9ECF1` | `text_primary` | `textPrimary` |
+| 副テキスト | `#AFB3BB` | `text_secondary` | `textSecondary` |
+| 淡いテキスト | `#81858E` | `text_muted` | `textMuted` |
+| ラベル | `#9CA0A9` | `text_label` | `textLabel` |
+| 無効テキスト | `#4F525A` | `text_disabled` | `textDisabled` |
 | ブランド色 | `#DC143C` | `brand` | `brand` |
 | ブランド淡色 | `#2A1418` | `brand_subtle` | `brandSubtle` |
 | **アクセント色（スカーレット）** | **`#C33732`** | **`accent`** | **`accent`** |
@@ -936,34 +942,15 @@ async function initResult({ data, config, layout }) {
 | ポジティブ | `#6EC77A` | `positive` | `positive` |
 | ネガティブ | `#F04E54` | `negative`（明るいアラート赤。danger ボタンはアウトライン式で暗背景での可読性確保のため brand から分離） | `negative` |
 | オンアクセント | `#FFFFFF` | `on_accent` | `onAccent` |
+| ニュートラルボタン | `#3B3F47` | `btn_neutral` | `btnNeutral` |
+| ニュートラルボタン ホバー | `#494D56` | `btn_neutral_hover` | `btnNeutralHover` |
+| プライマリボタン背景 | `#EFF1F5` | `primary_btn_bg` | `primaryBtnBg` |
+| プライマリボタン文字 | `#0E0F12` | `primary_btn_text` | `primaryBtnText` |
+| プライマリボタン ホバー | `#DBDDE3` | `primary_btn_hover` | `primaryBtnHover` |
 
-#### 5.1.3 色トークン正本（LIGHT）
+#### 5.1.3 色トークン正本（LIGHT）— ❌ 撤回
 
-| 役割 | 値 | PyQt キー | React キー |
-|------|-----|----------|----------|
-| キャンバス | `#E8E7E4` | `canvas` | `canvas` |
-| 主背景 | `#F4F3F0` | `bg_primary` | `bgPrimary` |
-| 副背景 | `#FFFFFF` | `bg_secondary` | `bgSecondary` |
-| 三段背景 | `#EAE8E3` | `bg_tertiary` | `bgTertiary` |
-| 四段背景 | `#D8D5CE` | `bg_quaternary` | `bgQuaternary` |
-| 淡い枠線 | `#E0DDD6` | `border_subtle` | `borderSubtle` |
-| 標準枠線 | `#C8C4BB` | `border_default` | `borderDefault` |
-| 強い枠線 | `#9E968B` | `border_strong` | `borderStrong` |
-| 主テキスト | `#1A1917` | `text_primary` | `textPrimary` |
-| 副テキスト | `#48433D` | `text_secondary` | `textSecondary` |
-| 淡いテキスト | `#76706B` | `text_muted` | `textMuted` |
-| ラベル | `#58544E` | `text_label` | `textLabel` |
-| 無効テキスト | `#B0AAA2` | `text_disabled` | `textDisabled` |
-| ブランド色 | `#C41232` | `brand` | `brand` |
-| ブランド淡色 | `#F5E0E4` | `brand_subtle` | `brandSubtle` |
-| **アクセント色（スカーレット）** | **`#CE3A33`** | **`accent`** | **`accent`** |
-| アクセントホバー | `#E2453F` | `accent_hover` | `accentHover` |
-| アクセント淡色 | `#F8DAD7` | `accent_subtle` | `accentSubtle` |
-| ゴールド | `#8E6812` | `gold` | `gold` |
-| ゴールド淡色 | `#F0E8D0` | `gold_subtle` | `goldSubtle` |
-| ポジティブ | `#2E8C3E` | `positive` | `positive` |
-| ネガティブ | `#C41232` | `negative`（= brand） | `negative`（= brand） |
-| オンアクセント | `#FFFFFF` | `on_accent` | `onAccent` |
+テーマ切替の撤回（§5.4、T-8〜T-10）に伴い LIGHT パレットも廃止した。PyQt（`ui_constants.py`）は削除済み、React（`themes.js`）の未使用 `LIGHT_TOKENS` も 2026-07 の Web UI 刷新 Phase 1 で削除。`assets/design-tokens.json` にも DARK のみ収録する。
 
 #### 5.1.4 セマンティック色
 
@@ -971,23 +958,26 @@ async function initResult({ data, config, layout }) {
 
 | セマンティック | 用途 | 使用トークン |
 |------|------|-----|
-| 主アクション | プライマリボタン、フォーカスリング、選択ハイライト | `accent` / `accent_hover` |
+| 主アクション | プライマリボタン、フォーカスリング、選択ハイライト | `accent` / `accent_hover`（塗りのプライマリボタンは `primary_btn_*`） |
+| ニュートラルアクション | セカンダリボタン（グレーのチップ状塗り） | `btn_neutral` / `btn_neutral_hover` |
 | 強調・ライブ | LIVE バッジ、ステータス、アラート | `brand` |
 | 成功・確定 | チェック完了、ポジティブ通知 | `positive` |
-| エラー | 入力エラー、削除確認 | `negative`（= `brand`） |
+| エラー | 入力エラー、削除確認、危険操作 | `negative`（brand から分離済み） |
 | 警告・注目 | 未確認、注意、特別ハイライト | `gold` |
 | ニュートラル | デフォルトテキスト・背景・枠線 | `text_*`, `bg_*`, `border_*` |
+
+**React MUI セマンティックスロット対応**（`themes.js`）: `error` = `negative`、`success` = `positive`、`warning` = `gold`、`info` = `text_secondary`。`MuiButton` は containedPrimary = `primary_btn_*`、outlined = `btn_neutral*`（デスクトップのニュートラルボタンと同じ塗りチップ）。
 
 #### 5.1.5 プレイヤー色（特殊）
 
 スコアボードの P1 / P2 は固定の意味を持つ:
 
-| 色 | DARK | LIGHT | 用途 |
-|----|------|-------|------|
-| P1 | `#DC143C`（= brand） | `#C41232`（= brand） | プレイヤー1 のスコア背景・名前枠 |
-| P2 | `#3D8BE8` | `#3D8BE8` | プレイヤー2 のスコア背景・名前枠 |
+| 色 | 値 | 用途 |
+|----|------|------|
+| P1 | `#DC143C`（= brand） | プレイヤー1 のスコア背景・名前枠 |
+| P2 | `#3D8BE8` | プレイヤー2 のスコア背景・名前枠 |
 
-P1/P2 は **テーマ色ではなく競技上の識別色**であり、DARK / LIGHT で意味色を変えない方針。React 側は `theme.palette.autona.p1color` / `p2color` でアクセス。PyQt 側は `AutonaColorButton` が動的に `setStyleSheet` で適用。**チームカラーがユーザー指定された場合はその値が優先**される（`score.{N}.team.{T}.color`）。
+P1/P2 は **テーマ色ではなく競技上の識別色**（`design-tokens.json` の `player_colors`）。React 側は `theme.palette.p1color` / `p2color` でアクセス。PyQt 側は `AutonaColorButton` が動的に `setStyleSheet` で適用。**チームカラーがユーザー指定された場合はその値が優先**される（`score.{N}.team.{T}.color`）。
 
 **可読性ルール**: P2 背景（`#3D8BE8`）上に小さい白文字を置く場合は、テキストシャドウ・縁取り・濃色テキストなどで可読性を担保する。LIGHT モードで P2 背景上に淡色テキストを置く場合も同様。
 
@@ -1532,8 +1522,8 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 | **T-19** | 動的キーパス（`objectName` 依存キー）の段階的な静的化。新規追加分から §3.1.2 に明記する運用 | §3.1.3 | 新規キー追加時のレビューで運用 |
 | **T-20** | OBS テンプレの命名軸統一: 新規追加分から `scoreboard_{placement}_{style}` に寄せる | §4.3.1 | 新規追加時のレビューで運用 |
 | **T-21** | フォント定義の整理: PyQt の `FONT_FAMILY_CONDENSED`（Roboto Condensed）を React にも追加するか、削除するか決定 | §5.2.1 | `web/src/themes.js`、`src/ui_constants.py` |
-| **T-22** | `danger` / `negative` トークンを `brand` から分離するか検討（エラー・削除確認・危険操作とブランド強調が同色になる懸念の解消） | §5.1.4 | `src/ui_constants.py`、`web/src/themes.js` |
-| **T-23** | React MUI theme の `shape.borderRadius` を `RADIUS_MD = 5px` に合わせる（MUI コンポーネントが参照するデフォルトを統合トークンに揃える） | §5.3.2 | `web/src/themes.js` |
+| **T-22** | `danger` / `negative` トークンを `brand` から分離するか検討（エラー・削除確認・危険操作とブランド強調が同色になる懸念の解消） | §5.1.4 | `src/ui_constants.py` 側は分離済み（`negative #F04E54`）。`web/src/themes.js` も Web UI 刷新 Phase 1（2026-07）で `error = negative` に反映 → ✅ 完了 |
+| **T-23** | React MUI theme の `shape.borderRadius` を `RADIUS_MD = 5px` に合わせる（MUI コンポーネントが参照するデフォルトを統合トークンに揃える） | §5.3.2 | `web/src/themes.js` → ✅ 完了（Web UI 刷新 Phase 1、2026-07） |
 
 ### 8.4 マイルストーン
 

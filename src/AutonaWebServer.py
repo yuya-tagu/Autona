@@ -125,7 +125,14 @@ class WebServer(QThread):
     _delta_lock = threading.Lock()
     _delta_pending = []          # list of merged delta-flat-dicts
     _delta_pending_revision = -1 # latest revision in batch (Design.md §3.2.3 R-Sync-6)
+    # First revision in the batch. StateManager bumps the revision on every
+    # state_updated emit, so a coalesced payload spans the contiguous range
+    # [first_revision, revision]. Clients validate continuity against that
+    # range; without it every coalesced batch looked like a revision gap and
+    # triggered a spurious full-snapshot refetch (Design.md §3.2.3 R-Sync-8).
+    _delta_pending_first_revision = -1
     _delta_timer = None          # threading.Timer awaiting flush
+    _delta_last_flush_ts = 0.0   # time.monotonic() of the last flush
 
     @staticmethod
     def _adaptive_debounce_sec(pending_count: int) -> float:
@@ -150,11 +157,14 @@ class WebServer(QThread):
             payload = {
                 'revision': WebServer._delta_pending_revision,
                 'delta_index': WebServer._delta_pending_revision,
+                'first_revision': WebServer._delta_pending_first_revision,
                 'delta': WebServer._delta_pending,
             }
             WebServer._delta_pending = []
             WebServer._delta_pending_revision = -1
+            WebServer._delta_pending_first_revision = -1
             WebServer._delta_timer = None
+            WebServer._delta_last_flush_ts = time.monotonic()
         try:
             WebServer.ws_emit('program_state_update', payload)
         except TypeError:
@@ -173,13 +183,26 @@ class WebServer(QThread):
         rev = changes.get('revision', changes.get('delta_index', -1))
 
         with WebServer._delta_lock:
+            was_empty = not WebServer._delta_pending
             WebServer._delta_pending.extend(delta)
+            if was_empty:
+                WebServer._delta_pending_first_revision = rev
             if rev > WebServer._delta_pending_revision:
                 WebServer._delta_pending_revision = rev
 
             if WebServer._delta_timer is None:
-                interval = WebServer._adaptive_debounce_sec(
-                    len(WebServer._delta_pending))
+                # Leading-edge flush: a delta arriving after a quiet period
+                # (>= 50ms since the last flush) goes out immediately, so a
+                # single operation (score +1 etc.) is not held back by the
+                # debounce. Bursts keep the adaptive trailing debounce and
+                # the large-burst path (100+ -> 200ms, R-Sync-10) unchanged.
+                quiet = (time.monotonic()
+                         - WebServer._delta_last_flush_ts) >= 0.05
+                if was_empty and quiet:
+                    interval = 0.0
+                else:
+                    interval = WebServer._adaptive_debounce_sec(
+                        len(WebServer._delta_pending))
                 WebServer._delta_timer = threading.Timer(
                     interval, WebServer._flush_pending_deltas)
                 WebServer._delta_timer.daemon = True
@@ -303,8 +326,17 @@ class WebServer(QThread):
             players=request.args.get('players'),
             characters=request.args.get('characters'),
             losers=request.args.get('losers'),
-            team=request.args.get('team')
+            team=request.args.get('team'),
+            teamName=request.args.get('teamName')
         )
+
+    # Toggle a scoreboard field's visibility (Web UI eye menu). Body:
+    # {"option": "show_twitter"-style key, "value": bool}. Mirrors the
+    # desktop eye menu into SettingsManager + StateManager on every board.
+    @app.post('/display-option')
+    def post_display_option():
+        return WebServer.actions.set_display_option(
+            orjson.loads(request.get_data()))
 
     @socketio.on('set')
     def ws_set_route(message):

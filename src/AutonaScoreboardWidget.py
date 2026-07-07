@@ -229,20 +229,29 @@ class AutonaScoreboardWidget(QWidget):
             [QApplication.translate("app", "Additional information"), ["custom_textbox"],       "show_additional", False],
         ]
         self._sponsorAction: QAction = None
+        # settings key -> QAction, so remote clients (React Web UI) can drive
+        # the same toggle path via SetDisplayOption().
+        self._eyeActions = {}
         for element in self.elements:
             action: QAction = self.eyeBt.menu().addAction(element[0])
             action.setCheckable(True)
             action.setChecked(SettingsManager.Get(f"display_options.{element[2]}", element[3]))
+            self._eyeActions[element[2]] = action
             if element[2] == "show_sponsor":
                 self._sponsorAction = action
                 action.toggled.connect(
                     lambda toggled, action=action, element=element: self._onSponsorActionToggled(action, element[1]))
             else:
                 action.toggled.connect(
-                    lambda toggled, action=action, element=element: self.ToggleElements(action, element[1]))
+                    lambda toggled, action=action, element=element: self._onEyeActionToggled(action, element))
 
-        StateManager.Set("display_options.show_sponsor",
-            SettingsManager.Get("display_options.show_sponsor", True))
+        # Mirror every display option into StateManager so remote clients
+        # (React Web UI, OBS) can render the same field visibility. Before
+        # this loop only show_sponsor was mirrored; the other toggles were
+        # session-local Qt visibility.
+        for element in self.elements:
+            StateManager.Set(f"display_options.{element[2]}",
+                SettingsManager.Get(f"display_options.{element[2]}", element[3]))
 
         self.playerWidgets: List[AutonaScoreboardPlayerWidget] = []
         self.team1playerWidgets: List[AutonaScoreboardPlayerWidget] = []
@@ -1117,6 +1126,32 @@ class AutonaScoreboardWidget(QWidget):
                         w.setVisible(visible and bool(w.text()))
                     else:
                         w.setVisible(visible)
+
+    def _onEyeActionToggled(self, action: QAction, element):
+        # Unified eye-menu handler (non-sponsor): apply visibility and
+        # persist to both SettingsManager (local default) and StateManager
+        # (broadcast to Web UI / OBS).
+        self.ToggleElements(action, element[1])
+        show = action.isChecked()
+        SettingsManager.Set(f"display_options.{element[2]}", show)
+        StateManager.Set(f"display_options.{element[2]}", show)
+
+    def SetDisplayOption(self, key: str, visible: bool):
+        """Remote toggle entry point (Web UI eye menu -> POST /display-option).
+
+        Drives the eye-menu QAction so widget visibility, SettingsManager and
+        StateManager stay in sync through the same handlers as a local click.
+        Must run on the GUI thread (callers use @gui_thread_sync).
+        """
+        action = self._eyeActions.get(key)
+        if action is None:
+            return
+        if action.isChecked() == visible:
+            # Handlers won't fire; still mirror the state key so the remote
+            # caller sees a consistent echo.
+            StateManager.Set(f"display_options.{key}", visible)
+            return
+        action.setChecked(visible)
 
     def _onSponsorActionToggled(self, action: QAction, elements):
         self.ToggleElements(action, elements)

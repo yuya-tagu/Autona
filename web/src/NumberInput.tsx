@@ -25,8 +25,19 @@ export function NumberInput(props: NumberInputProps) {
     const min = props.min ?? Number.MIN_SAFE_INTEGER;
     const max = props.max ?? Number.MAX_SAFE_INTEGER;
 
+    // Touch devices (pointer: coarse) get wider tap targets, matching the
+    // small-TextField height (40px); mouse keeps the compact desktop
+    // density. The wing width is a CSS variable so the buttons, the input
+    // margins and the absolute positioning stay in sync across both modes.
+    const containerSx = {
+        '--wing-w': `${wingButtonWidth}px`,
+        '@media (pointer: coarse)': {
+            '--wing-w': `${Math.max(wingButtonWidth, 40)}px`,
+        },
+    };
+
     return (
-        <Grid container sx={{...sx, width: props.width}}>
+        <Grid container sx={{...sx, ...containerSx, width: props.width}}>
             <Stack direction={"row"} sx={{position: 'relative'}}>
                 <TextField
                     type={"number"}
@@ -36,14 +47,19 @@ export function NumberInput(props: NumberInputProps) {
                     onChange={(e) => props.onChange(props.value, Number.parseInt(e.target.value))}
                     label={props.label}
                     sx={{
-                        width: props.width ? `${props.width - wingButtonWidth*2}px` : undefined,
-                        marginX: `${wingButtonWidth}px`,
+                        width: props.width ? `calc(${props.width}px - 2 * var(--wing-w))` : undefined,
+                        marginX: 'var(--wing-w)',
 
                         '& .MuiInputBase-root': {
                             paddingX: 0,
                             marginX: 0,
                             borderRadius: 0,
                             justifyContent: 'space-between',
+                        },
+                        '@media (pointer: coarse)': {
+                            '& .MuiInputBase-root': {
+                                minHeight: 40,
+                            },
                         },
                         '& .MuiOutlinedInput-notchedOutline': {
                             borderLeft: 0,
@@ -67,7 +83,7 @@ export function NumberInput(props: NumberInputProps) {
                                     position={"start"}
                                     sx={{
                                         position: 'absolute',
-                                        left: `-${wingButtonWidth}px`,
+                                        left: 'calc(-1 * var(--wing-w))',
                                         maxHeight: '100%',
                                         height: '100%',
                                         margin: 0,
@@ -83,8 +99,8 @@ export function NumberInput(props: NumberInputProps) {
                                             borderBottomRightRadius: 0,
                                             borderTopRightRadius: 0,
                                             height: '100%',
-                                            minWidth: wingButtonWidth,
-                                            width: wingButtonWidth,
+                                            minWidth: 'var(--wing-w)',
+                                            width: 'var(--wing-w)',
                                             padding:0,
                                             margin:0,
                                         }}
@@ -97,7 +113,7 @@ export function NumberInput(props: NumberInputProps) {
                                     position={"end"}
                                     sx={{
                                         position: 'absolute',
-                                        right: `-${wingButtonWidth}px`,
+                                        right: 'calc(-1 * var(--wing-w))',
                                         maxHeight: '100%',
                                         height: '100%'
                                     }}
@@ -111,8 +127,8 @@ export function NumberInput(props: NumberInputProps) {
                                             borderTopLeftRadius: 0,
                                             borderBottomLeftRadius: 0,
                                             height: '100%',
-                                            minWidth: wingButtonWidth,
-                                            width: wingButtonWidth,
+                                            minWidth: 'var(--wing-w)',
+                                            width: 'var(--wing-w)',
                                             padding:0,
                                             margin:0,
                                         }}

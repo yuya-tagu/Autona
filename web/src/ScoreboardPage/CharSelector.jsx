@@ -34,7 +34,9 @@ export function CharSelector({
     const hasCharName = charName && charName !== '';
 
     return (
-    <Stack {...stackProps} alignItems={"stretch"} justifyContent={"space-evenly"} sx={{height: 56}}>
+    // Row height pinned to the small-TextField height so the skin Select
+    // doesn't tower over the other inputs.
+    <Stack {...stackProps} alignItems={"stretch"} justifyContent={"space-evenly"} sx={{height: 40}}>
         <Autocomplete
             id={id + "-name"}
             options={Object.values(characters)}

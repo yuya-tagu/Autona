@@ -1,25 +1,26 @@
 import {createTheme, responsiveFontSizes} from "@mui/material/styles";
 
-// Autona Admin UI System — warm-neutral palette.
-// Accent is a scarlet (hue ~2°) sitting between brand crimson and the dock
-// tab-bar gradient's orange end per Design.md §5.1. Brand stays crimson.
-// Use `error`/`secondary` for live signals.
-// Keep in sync with src/ui_constants.py and 30_Products/参考資料/color-system.html
+// Autona Admin UI System — cool-gray dark palette + warm crimson brand.
+// The app is dark-only (Design.md §5.1). Accent is a scarlet (hue ~2°)
+// between brand crimson and the tab-bar gradient's orange end; brand stays
+// crimson and is reserved for live/status signals.
+// Source of truth: assets/design-tokens.json (mirrors src/ui_constants.py).
+// The contract test themes.test.js fails if DARK_TOKENS drifts from it.
 
-const DARK_TOKENS = {
-    canvas:          "#0A0A0A",
-    bgPrimary:       "#121212",
-    bgSecondary:     "#1A1A1A",
-    bgTertiary:      "#252524",
-    bgQuaternary:    "#2F2F2D",
-    borderSubtle:    "#252524",
-    borderDefault:   "#393936",
-    borderStrong:    "#55534E",
-    textPrimary:     "#F0EAE0",
-    textSecondary:   "#B5ADA0",
-    textMuted:       "#85807A",
-    textLabel:       "#A29A90",
-    textDisabled:    "#524F4A",
+export const DARK_TOKENS = {
+    canvas:          "#0A0B0D",
+    bgPrimary:       "#111317",
+    bgSecondary:     "#191B20",
+    bgTertiary:      "#23262C",
+    bgQuaternary:    "#2D3138",
+    borderSubtle:    "#23262C",
+    borderDefault:   "#383C44",
+    borderStrong:    "#53575F",
+    textPrimary:     "#E9ECF1",
+    textSecondary:   "#AFB3BB",
+    textMuted:       "#81858E",
+    textLabel:       "#9CA0A9",
+    textDisabled:    "#4F525A",
     brand:           "#DC143C",
     brandSubtle:     "#2A1418",
     accent:          "#C33732",
@@ -27,29 +28,20 @@ const DARK_TOKENS = {
     accentSubtle:    "#3A1413",
     gold:            "#F0C45A",
     goldSubtle:      "#2E2A1E",
+    positive:        "#6EC77A",
+    btnNeutral:      "#3B3F47",
+    btnNeutralHover: "#494D56",
+    negative:        "#F04E54",
+    onAccent:        "#FFFFFF",
+    primaryBtnBg:    "#EFF1F5",
+    primaryBtnText:  "#0E0F12",
+    primaryBtnHover: "#DBDDE3",
 };
 
-const LIGHT_TOKENS = {
-    canvas:          "#E8E7E4",
-    bgPrimary:       "#F4F3F0",
-    bgSecondary:     "#FFFFFF",
-    bgTertiary:      "#EAE8E3",
-    bgQuaternary:    "#D8D5CE",
-    borderSubtle:    "#E0DDD6",
-    borderDefault:   "#C8C4BB",
-    borderStrong:    "#9E968B",
-    textPrimary:     "#1A1917",
-    textSecondary:   "#48433D",
-    textMuted:       "#76706B",
-    textLabel:       "#58544E",
-    textDisabled:    "#B0AAA2",
-    brand:           "#C41232",
-    brandSubtle:     "#F5E0E4",
-    accent:          "#CE3A33",
-    accentHover:     "#E2453F",
-    accentSubtle:    "#F8DAD7",
-    gold:            "#8E6812",
-    goldSubtle:      "#F0E8D0",
+// Fixed competitive identity colors (same on desktop, see design-tokens.json).
+export const PLAYER_COLORS = {
+    p1: "#DC143C",
+    p2: "#3D8BE8",
 };
 
 const TYPOGRAPHY = {
@@ -71,31 +63,32 @@ const TYPOGRAPHY = {
     },
 };
 
-function buildTheme(mode) {
-    const t = mode === 'light' ? LIGHT_TOKENS : DARK_TOKENS;
-    // accent is now crimson; both modes need light text on top per Design.md §5.1
-    const onAccent = '#FFFFFF';
+function buildTheme() {
+    const t = DARK_TOKENS;
 
-    const base = createTheme({ palette: { mode } });
+    const base = createTheme({ palette: { mode: 'dark' } });
 
     return responsiveFontSizes(createTheme({
         breakpoints: {
             values: { xs: 0, sm: 600, md: 900, lg: 1100, xl: 1536 },
         },
         palette: {
-            mode,
+            mode: 'dark',
             primary: base.palette.augmentColor({
-                color: { main: t.accent, dark: t.accentHover, contrastText: onAccent },
+                color: { main: t.accent, dark: t.accentHover, contrastText: t.onAccent },
                 name: 'primary',
             }),
             secondary: base.palette.augmentColor({
                 color: { main: t.brand, contrastText: t.textPrimary },
                 name: 'secondary',
             }),
-            error:   { main: t.brand },
-            warning: { main: t.accent },
+            // Semantic slots follow the desktop mapping (Design.md §5.1.4):
+            // negative = errors/danger, positive = success, gold = warning.
+            // brand crimson stays reserved for live/status signals.
+            error:   { main: t.negative },
+            warning: { main: t.gold },
             info:    { main: t.textSecondary },
-            success: { main: t.gold },
+            success: { main: t.positive },
             background: {
                 default: t.canvas,
                 paper: t.bgPrimary,
@@ -108,18 +101,18 @@ function buildTheme(mode) {
             divider: t.borderSubtle,
             // Custom slots for player colors (kept for scoreboard usage).
             p1color: base.palette.augmentColor({
-                color: { main: t.brand },
+                color: { main: PLAYER_COLORS.p1 },
                 name: 'p1color',
             }),
             p2color: base.palette.augmentColor({
-                color: { main: '#3D8BE8' },
+                color: { main: PLAYER_COLORS.p2 },
                 name: 'p2color',
             }),
             // Exposed design tokens so components can read them directly.
             autona: t,
         },
         typography: TYPOGRAPHY,
-        shape: { borderRadius: 4 },
+        shape: { borderRadius: 5 },
         components: {
             MuiCssBaseline: {
                 styleOverrides: {
@@ -138,6 +131,16 @@ function buildTheme(mode) {
                     },
                 },
             },
+            MuiCard: {
+                styleOverrides: {
+                    // Cards sit one surface level above the page, matching the
+                    // desktop layering (window bg_primary -> card bg_secondary).
+                    root: {
+                        backgroundColor: t.bgSecondary,
+                        border: `1px solid ${t.borderSubtle}`,
+                    },
+                },
+            },
             MuiAppBar: {
                 styleOverrides: {
                     root: {
@@ -151,27 +154,49 @@ function buildTheme(mode) {
             MuiButton: {
                 styleOverrides: {
                     root: {
-                        borderRadius: 4,
                         fontWeight: 700,
                         textTransform: 'none',
+                        // Touch devices get taller tap targets, capped at the
+                        // small-TextField height (40px) so buttons line up
+                        // with the inputs. Mouse keeps the compact density
+                        // (Designer unaffected).
+                        '@media (pointer: coarse)': {
+                            minHeight: 40,
+                        },
                     },
-                    // YouTube-style primary: white surface, near-black label.
+                    // Primary action: near-white surface, near-black label
+                    // (desktop primary_btn_* tokens).
                     containedPrimary: {
-                        backgroundColor: '#FFFFFF',
-                        color: '#0F0F0F',
-                        '&:hover': { backgroundColor: '#D9D9D9' },
+                        backgroundColor: t.primaryBtnBg,
+                        color: t.primaryBtnText,
+                        '&:hover': { backgroundColor: t.primaryBtnHover },
                     },
+                    // Neutral (secondary) action: filled grey chip like the
+                    // desktop btn_neutral buttons, not a bare outline.
                     outlined: {
-                        borderColor: t.borderDefault,
+                        backgroundColor: t.btnNeutral,
+                        borderColor: t.btnNeutral,
                         color: t.textPrimary,
                         '&:hover': {
-                            borderColor: t.borderStrong,
-                            backgroundColor: t.bgTertiary,
+                            backgroundColor: t.btnNeutralHover,
+                            borderColor: t.btnNeutralHover,
                         },
                     },
                     text: {
                         color: t.textPrimary,
                         '&:hover': { backgroundColor: t.bgTertiary },
+                    },
+                },
+            },
+            MuiIconButton: {
+                styleOverrides: {
+                    root: {
+                        // Match the small-TextField height (40px), same as
+                        // MuiButton above.
+                        '@media (pointer: coarse)': {
+                            minHeight: 40,
+                            minWidth: 40,
+                        },
                     },
                 },
             },
@@ -231,9 +256,32 @@ function buildTheme(mode) {
                     root: { borderColor: t.borderSubtle },
                 },
             },
+            MuiTableCell: {
+                styleOverrides: {
+                    root: { borderBottom: `1px solid ${t.borderSubtle}` },
+                },
+            },
+            MuiSkeleton: {
+                styleOverrides: {
+                    root: { backgroundColor: t.bgTertiary },
+                },
+            },
+            MuiLinearProgress: {
+                styleOverrides: {
+                    colorPrimary: { backgroundColor: t.accentSubtle },
+                },
+            },
+            MuiSnackbarContent: {
+                styleOverrides: {
+                    root: {
+                        backgroundColor: t.bgQuaternary,
+                        color: t.textPrimary,
+                        border: `1px solid ${t.borderDefault}`,
+                    },
+                },
+            },
         },
     }));
 }
 
-export const defaultTheme = createTheme({ palette: { mode: 'dark' } });
-export const darkTheme = buildTheme('dark');
+export const darkTheme = buildTheme();

@@ -1,136 +1,106 @@
 import React from "react";
-import {Checkbox, FormControlLabel, FormGroup, Paper, Stack} from "@mui/material";
+import {Checkbox, FormControlLabel, FormGroup, Paper, Stack, Typography} from "@mui/material";
+import TextField from "./TextField";
 import Player from "./Player";
 import {Box} from "@mui/system";
-import {BACKEND_PORT} from "../env";
+import i18n from "../i18n/config";
+import {apiGet} from "../api";
+import {useApiAction} from "./Feedback";
 
-export default React.forwardRef(
-    /**
-     * @param {Object} props
-     * @param {string} props.teamId
-     * @param {string|int} props.tshTeamId
-     * @param {TSHTeamInfo} props.team
-     * @param {React.ForwardedRef<unknown>} ref
-     */
-    function Team({teamId, tshTeamId, team}, ref) {
+/**
+ * Team column. Mirrors the desktop Score tab: a team label ("1P" / "TEAM 1"),
+ * a team-name input on the team board, the Losers toggle, and the player
+ * forms. Every control submits immediately (no submit button).
+ *
+ * @param {Object} props
+ * @param {string} props.teamId
+ * @param {string|int} props.tshTeamId
+ * @param {TSHTeamInfo} props.team
+ * @param {number|string} props.scoreboardNumber
+ */
+export default function Team({teamId, tshTeamId, team, scoreboardNumber}) {
+    const [inLosers, setInLosers] = React.useState(team.losers);
+    const [teamName, setTeamName] = React.useState(team.teamName ?? "");
+    const {run} = useApiAction();
 
-    /**
-     * @typedef {Object} TeamState
-     * @prop {boolean} inLosers
-     */
-    const [state, setState] = React.useState( {inLosers: team.losers});
+    React.useEffect(() => {
+        setInLosers(team.losers);
+    }, [team.losers]);
 
-        React.useEffect(() => {
-            setState(s => ({
-                ...s,
-                inLosers: team.losers
-            }))
-        }, [team.losers]);
+    React.useEffect(() => {
+        setTeamName(team.teamName ?? "");
+    }, [team.teamName]);
 
-    React.useImperativeHandle(ref, () => {
-        return {
-            submitTeamData: submitTeamData,
-            getTeamDataFromForm: getTeamDataFromForm
-        }
-    },);
+    // Board 2 is the team-mode board (desktop: teamName only in team mode).
+    const isTeamBoard = String(scoreboardNumber) === "2";
+    const teamLabel = isTeamBoard
+        ? `${i18n.t("team")} ${tshTeamId}`
+        : `${tshTeamId}P`;
 
-    const playerRefs = [];
-
-    /** @returns {[any, TSHPlayerInfo]} */
-    const playersInTeam = () => {
-        return Object.keys(team.player).sort().map(k => [k, team.player[k]]);
-    }
-
-    const getTeamDataFromForm = () => {
-        /** @type TSHTeamInfo */ const rval = JSON.parse(JSON.stringify(team));
-        for (const teamKey in playerRefs) {
-            /** @type Player */ const widget = playerRefs[teamKey].current;
-            rval.player[teamKey] = widget.getModifiedPlayerData();
-        }
-        return rval;
-    }
-
-    const submitTeamData = (scoreboardNumber) => {
-        const teamData = getTeamDataFromForm();
-
-        return Promise.all(
-            [
-                (
-                    fetch(`http://${window.location.hostname}:${BACKEND_PORT}/scoreboard${scoreboardNumber}-set?` + new URLSearchParams({
-                        losers: state.inLosers,
-                        team: tshTeamId
-                    }).toString())
-                        .then(resp => resp.text())
-                        .then((d) => console.log("Submit set info: ", d))
-                ),
-                ...Object.entries(teamData.player).map(([teamKey, playerData]) => {
-                    const body = {...playerData};
-                    console.log("team update payload", body);
-
-                    return fetch(
-                        `http://${window.location.hostname}:${BACKEND_PORT}`
-                        + `/scoreboard${scoreboardNumber}-update-team-${tshTeamId}-${teamKey}`,
-                        {
-                            method: 'POST',
-                            headers: {'content-type': 'application/json'},
-                            body: JSON.stringify(body)
-                        }
-                    )
-                        .then((resp) => resp.text())
-                        .then((d) => console.info(`Submitted team ${tshTeamId} data: `, d))
-                        .catch(console.error);
-                })
-            ]
-        );
+    const onLosersChanged = (e) => {
+        const checked = e.target.checked;
+        setInLosers(checked);
+        run(() => apiGet(`/scoreboard${scoreboardNumber}-set?` + new URLSearchParams({
+            losers: checked,
+            team: tshTeamId
+        }).toString()));
     };
 
-    const playerWidgets = playersInTeam().map(([teamKey, player]) => {
-        if (!(teamKey in playerRefs)) {
-            playerRefs[teamKey] = React.createRef();
-        }
+    const submitTeamName = () => {
+        run(() => apiGet(`/scoreboard${scoreboardNumber}-set?` + new URLSearchParams({
+            teamName: teamName,
+            team: tshTeamId
+        }).toString()));
+    };
 
-        return (
-            <Player
-                key={`${teamId}-p-${teamKey}`}
-                ref={playerRefs[teamKey]}
-                teamId={teamId}
-                teamKey={teamKey}
-                player={player}
-            />
-        );
-    });
+    const playerWidgets = Object.keys(team.player).sort().map((playerKey) => (
+        <Player
+            key={`${teamId}-p-${playerKey}`}
+            teamId={teamId}
+            teamKey={playerKey}
+            player={team.player[playerKey]}
+            scoreboardNumber={scoreboardNumber}
+            tshTeamId={tshTeamId}
+        />
+    ));
 
-    let borderStyle = {};
-    if (team.color) {
-        borderStyle = {
-            borderTop: `solid 4px ${team.color}`
-        };
-    }
-
-    return <Paper padding={2} elevation={3} sx={borderStyle}>
-        <Box paddingX={1}>
-            <FormGroup>
-                <FormControlLabel
-                    control={
-                        <Checkbox
-                            id={teamId + "-losers"}
-                            size="small"
-                            checked={state.inLosers}
-                            onChange={
-                                (e) => {
-                                    setState(s => ({...s, inLosers: e.target.checked}))
-                                }
-                            }
-                        />
-                    }
-                    label={"Losers Bracket"}
-                />
-            </FormGroup>
+    return <Paper padding={2} elevation={3}>
+        <Box paddingX={1} paddingTop={0.5}>
+            <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap">
+                <Typography variant="overline" fontWeight={700} color="text.secondary">
+                    {teamLabel}
+                </Typography>
+                <FormGroup>
+                    <FormControlLabel
+                        control={
+                            <Checkbox
+                                id={teamId + "-losers"}
+                                size="small"
+                                checked={inLosers}
+                                onChange={onLosersChanged}
+                            />
+                        }
+                        label={i18n.t("losers_bracket")}
+                    />
+                </FormGroup>
+            </Stack>
+            {isTeamBoard && (
+                <Box paddingBottom={1}>
+                    <TextField
+                        label={i18n.t("team_name")}
+                        id={teamId + "-team-name"}
+                        fullWidth
+                        value={teamName}
+                        onChange={(e) => setTeamName(e.target.value)}
+                        onBlur={submitTeamName}
+                        onKeyDown={(e) => { if (e.key === 'Enter') submitTeamName(); }}
+                    />
+                </Box>
+            )}
         </Box>
 
         <Stack gap={1} padding={0.5}>
             {playerWidgets}
         </Stack>
     </Paper>
-});
-
+}

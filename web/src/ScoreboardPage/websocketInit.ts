@@ -53,8 +53,17 @@ export default function websocketInit() {
     });
 
     socket.on("program_state_update", deltaMessage => {
-        console.log("TSH state update received", deltaMessage);
+        if (process.env.NODE_ENV !== 'production') {
+            console.log("TSH state update received", deltaMessage);
+        }
         tshStore.dispatch(tshStateSlice.actions.addDeltas(deltaMessage));
+        // Arrival-driven flush (Design.md §2.2 R-React-6): the server
+        // already coalesces bursts, so waiting another client-side batch
+        // tick only adds latency. Apply immediately on arrival.
+        const state = tshStore.getState();
+        if (state.websocketInfo.status === "connected") {
+            tshStore.dispatch(tshStateSlice.actions.applySavedDeltas());
+        }
     });
 
     socket.on("playerdb", data => {
@@ -83,14 +92,15 @@ export default function websocketInit() {
     });
 
     // This can't be set up twice because of the initialization guard at the top of the function.
-    // Design.md §2.2 R-React-6 / §3.2.4: apply pending deltas on a 100ms tick
-    // (was 1000ms — caused visible scoreboard lag).
+    // Design.md §2.2 R-React-6: deltas are applied on arrival (above); this
+    // 200ms tick is only a safety net for deltas queued while the socket
+    // was not yet "connected" (e.g. reconnect races).
     setInterval(() => {
         const state = tshStore.getState();
         if (state.websocketInfo.status === "connected" && state.tshState?.stateDeltas.length > 0) {
             tshStore.dispatch(tshStateSlice.actions.applySavedDeltas());
         }
-    }, 100);
+    }, 200);
 }
 
 // Todo, maybe move this to a thunk or something.
