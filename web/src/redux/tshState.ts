@@ -15,6 +15,11 @@ export type ReceivedDeltas = {
     revision?: number;
     // Legacy alias kept while older payloads are still in flight.
     delta_index?: number;
+    // First revision coalesced into this payload. The server merges several
+    // state_updated emits into one message, so a payload covers the range
+    // [first_revision, revision]. Optional: pre-first_revision payloads
+    // fall back to treating the payload as the single revision `revision`.
+    first_revision?: number;
     delta: Delta[];
 };
 
@@ -88,14 +93,21 @@ export const tshStateSlice = createSlice({
                 // is missing we cannot safely apply (state would diverge),
                 // so request a full snapshot and drop the queue
                 // (Design.md §3.2.3 R-Sync-8).
+                // A payload covers the revision range
+                // [first_revision, revision]; it is contiguous if that
+                // range includes the next expected revision.
                 let expected = state.maxAppliedDeltaIdx + 1;
                 let gap = false;
                 for (const d of sortedDeltas) {
-                    if (getRevision(d) !== expected) {
+                    const last = getRevision(d);
+                    const first = (typeof d.first_revision === 'number' && d.first_revision >= 0)
+                        ? d.first_revision
+                        : last;
+                    if (first > expected || last < expected) {
                         gap = true;
                         break;
                     }
-                    expected += 1;
+                    expected = last + 1;
                 }
 
                 if (gap) {
@@ -112,7 +124,9 @@ export const tshStateSlice = createSlice({
                 }
 
                 for (let deltaSet of sortedDeltas) {
-                    console.log("Applying deltas: ", combineDeltas(deltaSet.delta));
+                    if (process.env.NODE_ENV !== 'production') {
+                        console.log("Applying deltas: ", combineDeltas(deltaSet.delta));
+                    }
                     applyDeltas(state.tshState, deltaSet.delta);
                 }
                 state.maxAppliedDeltaIdx = getRevision(sortedDeltas[sortedDeltas.length-1]);

@@ -1,19 +1,27 @@
 import React from "react";
 import {
     Button, Card, CardContent, CardHeader,
-    Checkbox, Collapse,
+    Checkbox, Chip, Collapse,
     FormControlLabel,
     FormGroup, IconButton,
+    Paper,
+    Skeleton,
     Stack,
     Table, TableBody, TableCell,
     TableContainer,
     TableHead, TableRow,
+    Typography,
 } from "@mui/material";
 import i18n from "../i18n/config";
 import TextField from "./TextField";
 import {alpha} from "@mui/material/styles";
 import {ExpandMore} from "@mui/icons-material";
-import {BACKEND_PORT} from "../env";
+import {apiGet, apiGetJson} from "../api";
+import {showSnackbar} from "./Feedback";
+
+// get-sets / load-set proxy Start.gg queries on the desktop side, which can
+// legitimately take tens of seconds (20s GQL timeout + retries).
+const SETS_TIMEOUT_MS = 60000;
 
 
 /**
@@ -45,40 +53,37 @@ export default class UpcomingSets extends React.Component {
     }
 
     FetchSets = () => {
-        this.setState({
-            ...this.state,
-            isLoading: true,
-        });
+        this.setState({isLoading: true});
 
-        fetch("http://" + window.location.hostname + `:${BACKEND_PORT}/get-sets?_foo=${this.state.showFinished ? "&getFinished=true" : ""}&`)
-            .then((res) => res.json())
+        apiGetJson(
+            `/get-sets?_foo=${this.state.showFinished ? "&getFinished=true" : ""}&`,
+            {timeoutMs: SETS_TIMEOUT_MS}
+        )
             .then(( /** {Array.<tourney_set>} */ data) => {
-                this.setState({
-                    ...this.state,
-                    isLoading: false,
-                    sets: data
-                });
+                this.setState({isLoading: false, sets: data});
             })
-            .catch(console.log);
+            .catch((e) => {
+                console.error(e);
+                showSnackbar(i18n.t("request_failed"));
+                this.setState({isLoading: false});
+            });
     }
 
     SubmitNewSet = () => {
-        this.setState({
-            ...this.state,
-            isLoading: true
-        });
+        this.setState({isLoading: true});
 
-        fetch(
-            "http://" + window.location.hostname + `:${BACKEND_PORT}/scoreboard${this.props.scoreboardNumber}-load-set?set=${this.state.selectedSet?.id}`,
+        apiGet(
+            `/scoreboard${this.props.scoreboardNumber}-load-set?set=${this.state.selectedSet?.id}`,
+            {timeoutMs: SETS_TIMEOUT_MS}
         )
-            .then((resp) => {resp.text()})
-            .then((respText) => {
-                this.setState({
-                    ...this.state,
-                    isLoading: false
-                });
-
+            .then(() => {
+                this.setState({isLoading: false});
                 this.props.onSelectedSetChanged && this.props.onSelectedSetChanged(this.state.selectedSet.id);
+            })
+            .catch((e) => {
+                console.error(e);
+                showSnackbar(i18n.t("request_failed"));
+                this.setState({isLoading: false});
             });
     }
 
@@ -142,6 +147,7 @@ export default class UpcomingSets extends React.Component {
                                     variant={"outlined"}
                                     size="small"
                                     onClick={() => this.FetchSets()}
+                                    disabled={this.state.isLoading}
                                 >
                                     {i18n.t("refresh_sets")}
                                 </Button>
@@ -150,7 +156,9 @@ export default class UpcomingSets extends React.Component {
                                     variant={"outlined"}
                                     size="small"
                                     onClick={() => this.SubmitNewSet()}
+                                    loading={this.state.isLoading}
                                     disabled={!this.state.selectedSet}
+                                    sx={{display: {xs: 'none', sm: 'inline-flex'}}}
                                 >
                                     {i18n.t("load_selected_set")}
                                 </Button>
@@ -172,7 +180,51 @@ export default class UpcomingSets extends React.Component {
                                 />
                             </FormGroup>
 
-                            <TableContainer>
+                            {/* Phone (xs): card list — the 6-column table is
+                                unusable at 375px. sm+ keeps the table. */}
+                            <Stack gap={1} sx={{display: {xs: 'flex', sm: 'none'}}}>
+                                {this.state.isLoading && [0, 1, 2].map((i) => (
+                                    <Skeleton key={`card-skeleton-${i}`} variant="rounded" height={72} />
+                                ))}
+                                {!this.state.isLoading && this.filteredSets().map((/** TSHSet */ set) => (
+                                    <Paper
+                                        key={`card-${set.id}`}
+                                        onClick={() => {this.onSetClicked(set)}}
+                                        sx={(theme) => ({
+                                            padding: 1.5,
+                                            cursor: 'pointer',
+                                            border: this.state.selectedSet?.id === set.id
+                                                ? `1px solid ${theme.palette.primary.main}`
+                                                : `1px solid ${theme.palette.divider}`,
+                                            backgroundColor: this.state.selectedSet?.id === set.id
+                                                ? alpha(theme.palette.primary.main, theme.palette.action.selectedOpacity)
+                                                : undefined,
+                                        })}
+                                    >
+                                        <Typography variant="body2" fontWeight={700}>
+                                            {set.p1_name} vs {set.p2_name}
+                                        </Typography>
+                                        <Stack direction="row" gap={0.5} flexWrap="wrap" marginTop={0.5}>
+                                            {set.tournament_phase && <Chip size="small" label={set.tournament_phase} />}
+                                            {set.round_name && <Chip size="small" variant="outlined" label={set.round_name} />}
+                                            {set.stream && <Chip size="small" color="secondary" label={set.stream} />}
+                                            {set.station && <Chip size="small" variant="outlined" label={`#${set.station}`} />}
+                                        </Stack>
+                                    </Paper>
+                                ))}
+                                <Button
+                                    fullWidth
+                                    variant="contained"
+                                    sx={{minHeight: 40}}
+                                    onClick={() => this.SubmitNewSet()}
+                                    loading={this.state.isLoading}
+                                    disabled={!this.state.selectedSet}
+                                >
+                                    {i18n.t("load_selected_set")}
+                                </Button>
+                            </Stack>
+
+                            <TableContainer sx={{display: {xs: 'none', sm: 'block'}}}>
                                 <Table stickyHeader>
                                     <TableHead>
                                         <TableRow>
@@ -186,6 +238,17 @@ export default class UpcomingSets extends React.Component {
                                     </TableHead>
                                     <TableBody>
                                         {
+                                            this.state.isLoading &&
+                                            [0, 1, 2].map((i) => (
+                                                <TableRow key={`skeleton-${i}`}>
+                                                    {[0, 1, 2, 3, 4, 5].map((j) => (
+                                                        <TableCell key={j}><Skeleton /></TableCell>
+                                                    ))}
+                                                </TableRow>
+                                            ))
+                                        }
+                                        {
+                                            !this.state.isLoading &&
                                             this.filteredSets().map((/** TSHSet */ set) => (
                                                 <TableRow
                                                     hover

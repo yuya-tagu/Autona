@@ -10,6 +10,27 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/icon?family=Material+Icons"
     />
+    <!--
+      LINE Seed JP is served by the desktop app's Flask catch-all route from
+      the project-root assets/ folder (absolute path, unaffected by <base>).
+      Declared here instead of src/*.css so webpack does not try to resolve
+      the URLs at build time. On the CRA dev server (:3000) these 404 and the
+      font stack falls back to Inter / system fonts.
+    -->
+    <style>
+      @font-face {
+        font-family: "LINE Seed JP";
+        src: url("/assets/font/LINESeedJP/LINESeedJP-Regular.ttf") format("truetype");
+        font-weight: 400;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "LINE Seed JP";
+        src: url("/assets/font/LINESeedJP/LINESeedJP-Bold.ttf") format("truetype");
+        font-weight: 700;
+        font-display: swap;
+      }
+    </style>
     <meta charset="utf-8" />
     <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />

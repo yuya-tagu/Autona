@@ -1,55 +1,51 @@
 import {
     AppBar,
     Button,
-    Checkbox,
+    Collapse,
     FormControlLabel,
     IconButton,
-    MenuItem,
-    Menu,
-    Select,
     Switch,
     TextField,
     Toolbar,
-    Typography
+    Typography,
+    useMediaQuery
 } from "@mui/material";
 import {Box, Stack} from "@mui/system";
 import {useTheme} from "@mui/material/styles";
-import {shallowEqual, useDispatch, useSelector} from "react-redux";
-import {BASE_URL, BACKEND_PORT} from "../env";
-import {GameIcon} from "../GameIcon";
+import {shallowEqual, useSelector} from "react-redux";
+import {BASE_URL} from "../env";
+import {apiGet} from "../api";
+import {useApiAction} from "./Feedback";
 import i18n from "../i18n/config";
 import React from "react";
-import {Visibility} from "@mui/icons-material";
-import {visibilitySlice} from "../redux/uiState";
+import {Tune} from "@mui/icons-material";
 
 
-export const Header = ({onSelectedGameChange, scoreboardNumber = 1, ...rest}) => {
-    const {tshState, games, visibility} = useSelector(state => ({
-      tshState: state.tshState.tshState,
-      games: state.tshGames.value,
-      visibility: state.visibility,
-    }), shallowEqual);
+export const Header = ({scoreboardNumber = 1, ...rest}) => {
+    const tshState = useSelector(state => state.tshState.tshState, shallowEqual);
 
-    const dispatch = useDispatch();
     const theme = useTheme();
 
     const [tournamentUrl, setTournamentUrl] = React.useState("");
     const [autoUpdate, setAutoUpdate] = React.useState(false);
     const [autoUpdateInterval, setAutoUpdateInterval] = React.useState(10);
     const autoUpdateTimerRef = React.useRef(null);
-    const [visMenuAnchor, setVisMenuAnchor] = React.useState(null);
+    // On phones the tournament-URL / auto-update row starts collapsed so the
+    // header takes a single line; sm+ always shows it.
+    const isXs = useMediaQuery(theme.breakpoints.down('sm'));
+    const [toolsOpen, setToolsOpen] = React.useState(false);
+
+    const {pending: loadPending, run: runLoad} = useApiAction();
 
     const loadTournament = () => {
         if (!tournamentUrl) return;
-        fetch(`http://${window.location.hostname}:${BACKEND_PORT}/set-tournament?url=${encodeURIComponent(tournamentUrl)}`)
-            .then(resp => resp.text())
-            .then(d => console.log("Load tournament:", d))
-            .catch(console.error);
+        runLoad(() => apiGet(`/set-tournament?url=${encodeURIComponent(tournamentUrl)}`));
     };
 
     const pullStreamSet = () => {
-        fetch(`http://${window.location.hostname}:${BACKEND_PORT}/scoreboard${scoreboardNumber}-pull-stream`)
-            .catch(console.error);
+        // Fired by the auto-update timer; keep failures out of the snackbar
+        // so a briefly unreachable desktop app doesn't spam every interval.
+        apiGet(`/scoreboard${scoreboardNumber}-pull-stream`).catch(console.error);
     };
 
     // Auto-update: periodically pull stream set
@@ -70,14 +66,6 @@ export const Header = ({onSelectedGameChange, scoreboardNumber = 1, ...rest}) =>
         };
     }, [autoUpdate, autoUpdateInterval]);
 
-    const visibilityItems = [
-        {key: "twitter",    label: i18n.t("show_twitter")},
-        {key: "seed",       label: i18n.t("show_seed")},
-        {key: "location",   label: i18n.t("show_location")},
-        {key: "characters", label: i18n.t("show_characters")},
-        {key: "additional", label: i18n.t("show_additional")},
-    ];
-
     return (
         <AppBar
           sx={{
@@ -94,9 +82,8 @@ export const Header = ({onSelectedGameChange, scoreboardNumber = 1, ...rest}) =>
                 gap: 1,
 
                 [theme.breakpoints.down('sm')]: {
-                    flexDirection: 'column',
-                    gap: 1,
-                    paddingY: 2,
+                    gap: 0.5,
+                    minHeight: 48,
                 },
             }}>
 
@@ -106,88 +93,55 @@ export const Header = ({onSelectedGameChange, scoreboardNumber = 1, ...rest}) =>
                     sx={{
                         display: 'flex',
                         alignItems: "center",
-                        mr: 2,
+                        mr: {xs: 1, sm: 2},
                     }}
                 >
-                    <img alt="Autona logo" src={`${BASE_URL}/assets/icons/icon.png`} height={48} width={48} sx={{mr: 2}} />
-                    Web Scoreboard
+                    <Box
+                        component="img"
+                        alt="Autona logo"
+                        src={`${BASE_URL}/assets/icons/icon.png`}
+                        sx={{
+                            height: {xs: 32, sm: 48},
+                            width: {xs: 32, sm: 48},
+                        }}
+                    />
+                    <Box component="span" sx={{display: {xs: 'none', md: 'inline'}, ml: 1}}>
+                        Web Scoreboard
+                    </Box>
                 </Typography>
-
-                {/* Game selector */}
-                <Box
-                    sx={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        mr: 2
-                    }}
-                >
-                    <span>Game:&nbsp;</span>
-                    <Select
-                      size="small"
-                      sx={{
-                          '.MuiSelect-select': {
-                              paddingY: 0,
-                              marginY: 0
-                          },
-                      }}
-                      value={tshState.game.codename}
-                      renderValue={(codename) =>
-                        <GameIcon game={games[codename]} />
-                      }
-                      id={"header-game-select"}
-                      onChange={(e) => onSelectedGameChange(e.target.value)}
-                    >
-                        {
-                            Object.values(games).map(game =>
-                              <MenuItem key={game.codename} value={game.codename}>
-                                  <GameIcon fixedWidth={true} game={game} />
-                                  <Typography>{game.name}</Typography>
-                              </MenuItem>
-                            )
-                        }
-                    </Select>
-                </Box>
 
                 {/* Event name */}
                 <Box sx={{
                     overflowX: "hidden",
                     textOverflow: "ellipsis",
                     maxWidth: '100%',
-                    mr: 2,
+                    minWidth: 0,
+                    flexShrink: 1,
+                    mr: {xs: 0, sm: 2},
+                    display: {xs: 'none', sm: 'block'},
                 }}>
                     <span>Event:&nbsp;</span>
                     <span>{tshState.tournamentInfo.tournamentName}:</span>
                     <span>{tshState.tournamentInfo.eventName}</span>
                 </Box>
 
-                {/* Visibility toggle button */}
+                {/* Tools toggle (phone only): tournament URL + auto-update.
+                    The field-visibility eye menu lives in each player's
+                    details dialog (DisplayOptionsMenuButton). */}
                 <IconButton
                     color="inherit"
                     size="small"
-                    onClick={(e) => setVisMenuAnchor(e.currentTarget)}
-                    title={i18n.t("visibility_settings")}
-                    sx={{ml: 'auto'}}
+                    onClick={() => setToolsOpen(!toolsOpen)}
+                    title={i18n.t("tournament_url")}
+                    sx={{ml: 'auto', display: {xs: 'inline-flex', sm: 'none'}}}
                 >
-                    <Visibility />
+                    <Tune />
                 </IconButton>
-                <Menu
-                    anchorEl={visMenuAnchor}
-                    open={Boolean(visMenuAnchor)}
-                    onClose={() => setVisMenuAnchor(null)}
-                >
-                    {visibilityItems.map(item => (
-                        <MenuItem key={item.key} onClick={() => dispatch(visibilitySlice.actions.toggle(item.key))} dense>
-                            <FormControlLabel
-                                control={<Checkbox checked={visibility[item.key]} size="small" />}
-                                label={item.label}
-                                sx={{pointerEvents: 'none'}}
-                            />
-                        </MenuItem>
-                    ))}
-                </Menu>
             </Toolbar>
 
-            {/* Second toolbar row: Tournament URL + Auto-update */}
+            {/* Second toolbar row: Tournament URL + Auto-update.
+                Collapsed by default on phones (Tune button toggles). */}
+            <Collapse in={toolsOpen || !isXs}>
             <Toolbar
                 disableGutters
                 variant="dense"
@@ -229,6 +183,7 @@ export const Header = ({onSelectedGameChange, scoreboardNumber = 1, ...rest}) =>
                         variant="contained"
                         size="small"
                         onClick={loadTournament}
+                        loading={loadPending}
                         sx={{whiteSpace: 'nowrap'}}
                     >
                         {i18n.t("load_tournament")}
@@ -271,6 +226,7 @@ export const Header = ({onSelectedGameChange, scoreboardNumber = 1, ...rest}) =>
                     <Typography variant="body2">s</Typography>
                 </Stack>
             </Toolbar>
+            </Collapse>
         </AppBar>
     )
 }

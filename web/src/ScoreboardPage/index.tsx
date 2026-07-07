@@ -1,9 +1,7 @@
 import "../App.css";
-import {darkTheme} from "../themes";
 import i18n from "../i18n/config";
 import {
-    Button,
-    Paper, Stack,
+    Button, Stack,
 } from "@mui/material";
 import React from "react";
 import {Box} from "@mui/system";
@@ -12,11 +10,15 @@ import CurrentSet from "./CurrentSet";
 import UpcomingSets from "./UpcomingSets";
 import {Header} from "./Header";
 import {ReduxState} from "../redux/store"
-import {shallowEqual, useDispatch, useSelector} from "react-redux";
+import {useDispatch, useSelector} from "react-redux";
 import {tshStateSlice} from "../redux/tshState";
 import websocketInit from "./websocketInit";
-import websocketConnection from "../websocketConnection";
-import {BACKEND_PORT} from "../env";
+import {apiGet} from "../api";
+import {FeedbackProvider, useApiAction} from "./Feedback";
+import {useScoreSubmit} from "./useScoreSubmit";
+import LoadingSkeleton from "./LoadingSkeleton";
+import ConnectionBanner from "./ConnectionBanner";
+import ScoreControlBar from "./ScoreControlBar";
 
 // scoreboardNumber selects which board this page edits: 1 = SCORE (1v1),
 // 2 = TEAM (team mode). Routed via `/scoreboard` (default 1) and `/team`
@@ -28,71 +30,64 @@ import {BACKEND_PORT} from "../env";
  * our state piecemeal. Each update has a number so that we can tell if our updates are stale
  * or out of order and request a full state send-over.
  */
-export default function ScoreboardPage(props: any) {
+function ScoreboardPageInner(props: any) {
     const SCOREBOARD_ID = props.scoreboardNumber ?? 1;
     const dispatch = useDispatch();
-    const {loading, errored} = useSelector((state: ReduxState) => ({
-        loading: (
-            state.tshState.initializing
-            || state.tshCharacters.initializing
-            || state.tshPlayers.initializing
-            || state.tshGames.initializing
-            || state.tshCountries.initializing
-        ),
-        errored: state.websocketInfo.status === "errored",
-    }), shallowEqual);
+    const loading = useSelector((state: ReduxState) => (
+        state.tshState.initializing
+        || state.tshCharacters.initializing
+        || state.tshPlayers.initializing
+        || state.tshGames.initializing
+        || state.tshCountries.initializing
+    ));
+    const {pending: clearPending, run: runClear} = useApiAction();
+
+    // Page-level optimistic score state, shared by the set card (CurrentSet
+    // -> ScorePanel) and the phone bottom bar so both show the same value.
+    const score = useSelector((state: ReduxState) =>
+        (state.tshState.tshState as any)?.score?.[SCOREBOARD_ID]);
+    const teamKeys = Object.keys(score?.team || {}).sort();
+    const scoreSubmit = useScoreSubmit(SCOREBOARD_ID, teamKeys);
 
     React.useEffect(() => {
         document.title = `Autona ${i18n.t("scoreboard")}`;
         websocketInit();
     }, []);
 
-    let body;
-    const connectionError = (
-        <Paper key="connection_error" elevation={2} sx={{padding: '8px'}}>
-            <div>{i18n.t("failed_to_connect")}</div>
-        </Paper>
-    );
-    const loadingEl = (
-        <Paper key="loading" elevation={2} sx={{padding: '8px'}}>
-            <div>{i18n.t("loading")}</div>
-        </Paper>
-    );
-
     const onSelectedSetChanged = () => {
         dispatch(tshStateSlice.actions.loadingNewData({}));
     };
 
-    const onSelectedGameChanged= (newGame: string) => {
-        websocketConnection.instance().emit('update_game', {codename: newGame});
+    const clearAll = () => {
+        if (!window.confirm(i18n.t("confirm_clear_all"))) {
+            return;
+        }
+        runClear(() => apiGet(`/scoreboard${SCOREBOARD_ID}-clear-all`));
     };
 
-    if (errored) {
-        body = connectionError;
-    } else if (loading) {
-        body = loadingEl;
+    let body;
+    if (loading) {
+        body = <LoadingSkeleton key="loading" />;
     } else {
         body = (
             // Extra margin at the bottom allows for mobile users to see the bottom of the page better.
             <>
-                <Header onSelectedGameChange={onSelectedGameChanged} scoreboardNumber={SCOREBOARD_ID}/>
+                <Header scoreboardNumber={SCOREBOARD_ID}/>
                 <Box
                     paddingX={1}
                     paddingTop={0.5}
                     paddingBottom={1}
                 >
                     <Stack gap={2} marginBottom={12}>
-                        <CurrentSet scoreboardNumber={SCOREBOARD_ID} />
+                        <CurrentSet scoreboardNumber={SCOREBOARD_ID} scoreSubmit={scoreSubmit} />
                         <UpcomingSets onSelectedSetChanged={onSelectedSetChanged} scoreboardNumber={SCOREBOARD_ID}/>
                         <Box display="flex" justifyContent="center" mt={4}>
                             <Button
                                 variant={"outlined"}
                                 size="small"
                                 color="error"
-                                onClick={() => {
-                                    fetch(`http://${window.location.hostname}:${BACKEND_PORT}/scoreboard${SCOREBOARD_ID}-clear-all`)
-                                        .catch(console.error);
-                                }}
+                                loading={clearPending}
+                                onClick={clearAll}
                             >
                                 {i18n.t("clear_all")}
                             </Button>
@@ -105,15 +100,35 @@ export default function ScoreboardPage(props: any) {
 
     return (
         <Box
-            style={{
+            sx={{
                 display: "flex",
                 flexDirection: "column",
+                // dvh tracks the iOS/Android dynamic address bar; vh is the
+                // fallback for older browsers.
                 height: "100vh",
-                gap: darkTheme.spacing(1),
+                "@supports (height: 100dvh)": {height: "100dvh"},
+                gap: 1,
+                overflow: "auto !important",
             }}
-            sx={{overflow: "auto !important"}}
         >
+            <ConnectionBanner />
             {body}
+            {!loading && (
+                <ScoreControlBar
+                    scoreboardNumber={SCOREBOARD_ID}
+                    score={score}
+                    teamKeys={teamKeys}
+                    scoreSubmit={scoreSubmit}
+                />
+            )}
         </Box>
     )
+}
+
+export default function ScoreboardPage(props: any) {
+    return (
+        <FeedbackProvider>
+            <ScoreboardPageInner {...props} />
+        </FeedbackProvider>
+    );
 }

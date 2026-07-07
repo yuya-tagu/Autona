@@ -3,52 +3,45 @@ import {
     Button,
     Card,
     CardContent,
-    Collapse, Container, IconButton,
-    Paper,
-    Stack,
+    Collapse, Container, Divider, IconButton,
     Typography, useMediaQuery
 } from "@mui/material";
 import i18n from "../i18n/config";
 
-import SetScore from "./SetScore";
+import MatchInfoBar from "./MatchInfoBar";
+import ScorePanel from "./ScorePanel";
 import Team from "./Team";
 import {ExpandMore} from "@mui/icons-material";
 import {useTheme} from "@mui/material/styles";
-import {BACKEND_PORT} from "../env";
+import {apiGet} from "../api";
+import {useApiAction} from "./Feedback";
 import {useSelector} from "react-redux";
 import {Grid} from "@mui/system";
 
-export default function CurrentSet({scoreboardNumber}) {
+/**
+ * Current-set card, mirroring the desktop Score tab: the match metadata bar
+ * (Phase / Match / Best Of + X-post) on top, then Team 1 | score panel |
+ * Team 2. Everything submits immediately — there is no submit button.
+ */
+export default function CurrentSet({scoreboardNumber, scoreSubmit}) {
     const [expanded, setExpanded] = React.useState(true);
 
     const tshState = useSelector(state => state.tshState.tshState);
-    const tshChars = useSelector(state => state.tshPlayers.players);
     const theme = useTheme();
     const isSmall = useMediaQuery(theme.breakpoints.down('lg'));
 
     /** @type {TSHScoreInfo} */
     const score = tshState?.score[scoreboardNumber];
-    const team1Ref = React.createRef();
-    const team2Ref = React.createRef();
-    const scoreRef = React.createRef();
 
-    const submitChanges = () => {
-        Promise.all([
-            team1Ref.current.submitTeamData(scoreboardNumber).catch(console.error),
-            team2Ref.current.submitTeamData(scoreboardNumber).catch(console.error),
-            scoreRef.current.submitScore(scoreboardNumber).catch(console.error),
-            scoreRef.current.submitSetInfo(scoreboardNumber).catch(console.error)
-        ]).catch((e) => console.log("Error submitting data: ", e.text()));
-    }
+    const {pending: resetPending, run: runReset} = useApiAction();
+    const {pending: swapPending, run: runSwap} = useApiAction();
 
     const resetScores = () => {
-        fetch(`http://${window.location.hostname}:${BACKEND_PORT}/scoreboard${scoreboardNumber}-reset-scores`)
-            .catch(console.error);
+        runReset(() => apiGet(`/scoreboard${scoreboardNumber}-reset-scores`));
     }
 
     const swapTeams = () => {
-        fetch(`http://${window.location.hostname}:${BACKEND_PORT}/scoreboard${scoreboardNumber}-swap-teams`)
-            .catch(console.error)
+        runSwap(() => apiGet(`/scoreboard${scoreboardNumber}-swap-teams`));
     }
 
     const postToX = () => {
@@ -128,85 +121,70 @@ export default function CurrentSet({scoreboardNumber}) {
         <Card>
             <Collapse in={expanded} timeout={"auto"}>
                 <CardContent sx={{padding: 1, '&:last-child': {paddingBottom: 1}}}>
-                    {
-                        hasSuitableTeamCount && (
-                            <Grid
-                                container
-                                direction={"row"}
-                                spacing={1}
-                                alignItems={"stretch"}
-                                justifyContent={"space-evenly"}
-                            >
-                                <Grid
-                                    size={isSmall ? 12 : 4}
-                                >
-                                    <Container disableGutters maxWidth={'sm'}>
-                                        <Team
-                                            key={`s-${scoreboardNumber}-t-${teamKeys[0]}`}
-                                            teamId={`s-${scoreboardNumber}-t-${teamKeys[0]}`}
-                                            tshTeamId={teamKeys[0]}
-                                            ref={team1Ref}
-                                            team={teams[0]}
-                                            characters={tshChars}
-                                        />
-                                    </Container>
-                                </Grid>
+                    {/* Desktop scoreBar parity: match metadata above the
+                        columns, X-post on the row's trailing edge. */}
+                    <MatchInfoBar
+                        scoreboardNumber={scoreboardNumber}
+                        phase={score.phase}
+                        match={score.match}
+                        bestOf={score.best_of}
+                        action={
+                            <Button variant="outlined" size="small" onClick={postToX}>
+                                {i18n.t("post_to_x")}
+                            </Button>
+                        }
+                    />
+                    <Divider sx={{marginY: 1}} />
+                    <Grid
+                        container
+                        direction={"row"}
+                        spacing={1}
+                        alignItems={"stretch"}
+                        justifyContent={"space-evenly"}
+                    >
+                        {/* Phones (xs): the two player columns sit side by
+                            side (6+6) on top, with the score panel full-width
+                            below them. sm..lg stacks full-width in source
+                            order; lg+ is the desktop 3-column layout. */}
+                        <Grid
+                            size={{xs: 6, sm: 12, lg: 4}}
+                            sx={{order: {xs: 1, sm: 0}}}
+                        >
+                            <Container disableGutters maxWidth={'sm'}>
+                                <Team
+                                    key={`s-${scoreboardNumber}-t-${teamKeys[0]}`}
+                                    teamId={`s-${scoreboardNumber}-t-${teamKeys[0]}`}
+                                    tshTeamId={teamKeys[0]}
+                                    team={teams[0]}
+                                    scoreboardNumber={scoreboardNumber}
+                                />
+                            </Container>
+                        </Grid>
 
+                        <Grid size={{xs: 12, lg: 4}} sx={{order: {xs: 3, sm: 0}}}>
+                            <Container disableGutters maxWidth={'xs'}>
+                                <ScorePanel
+                                    scoreSubmit={scoreSubmit}
+                                    bestOf={score.best_of}
+                                    onSwap={swapTeams}
+                                    swapPending={swapPending}
+                                    onReset={resetScores}
+                                    resetPending={resetPending}
+                                />
+                            </Container>
+                        </Grid>
 
-                                <Grid size={isSmall ? 12 : 4}>
-                                    <Container disableGutters maxWidth={'xs'}>
-                                        <Stack gap={1}>
-                                            <Button
-                                                variant={"outlined"}
-                                                fullWidth
-                                                onClick={swapTeams}
-                                                size="small"
-                                            >
-                                                {i18n.t("swap_teams")}
-                                            </Button>
-
-                                            {/* Set info (phase, match, best_of, score) */}
-                                            <Paper sx={{padding: 1.5}} elevation={3}>
-                                                <SetScore
-                                                    key={score.set_id + "score"}
-                                                    leftTeam={teams[0]}
-                                                    rightTeam={teams[1]}
-                                                    best_of={score.best_of}
-                                                    match={score.match ?? ""}
-                                                    phase={score.phase ?? ""}
-                                                    ref={scoreRef}
-                                                />
-                                            </Paper>
-
-                                            {/* Action buttons */}
-                                            <Stack gap={1}>
-                                                <Button variant={"outlined"} size="small" onClick={submitChanges}>
-                                                    {i18n.t("submit_changes")}
-                                                </Button>
-                                                <Button variant={"outlined"} size="small" onClick={resetScores} color="warning">
-                                                    {i18n.t("reset_scores")}
-                                                </Button>
-                                                <Button variant={"outlined"} size="small" onClick={postToX}>
-                                                    {i18n.t("post_to_x")}
-                                                </Button>
-                                            </Stack>
-                                        </Stack>
-                                    </Container>
-                                </Grid>
-
-                                    <Grid size={isSmall ? 12 : 4}>
-                                        <Container disableGutters maxWidth={'sm'}>
-                                            <Team key={`s-${scoreboardNumber}-t-${teamKeys[1]}`}
-                                                  teamId={`s-${scoreboardNumber}-t-${teamKeys[1]}`}
-                                                  tshTeamId={teamKeys[1]}
-                                                  ref={team2Ref}
-                                                  team={teams[1]}
-                                            />
-                                        </Container>
-                                    </Grid>
-                            </Grid>
-                        )
-                    }
+                        <Grid size={{xs: 6, sm: 12, lg: 4}} sx={{order: {xs: 2, sm: 0}}}>
+                            <Container disableGutters maxWidth={'sm'}>
+                                <Team key={`s-${scoreboardNumber}-t-${teamKeys[1]}`}
+                                      teamId={`s-${scoreboardNumber}-t-${teamKeys[1]}`}
+                                      tshTeamId={teamKeys[1]}
+                                      team={teams[1]}
+                                      scoreboardNumber={scoreboardNumber}
+                                />
+                            </Container>
+                        </Grid>
+                    </Grid>
                 </CardContent>
             </Collapse>
         </Card>

@@ -1,21 +1,30 @@
 import React from "react";
 import {
-    Avatar,
     Autocomplete,
     Card,
     CardContent,
-    CardHeader,
-    Collapse,
+    Chip,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogTitle,
+    Button,
     IconButton,
-    Stack
+    Link,
+    Stack,
+    useMediaQuery
 } from "@mui/material";
 import TextField from './TextField';
 import i18n from "../i18n/config";
-import {ExpandMore} from "@mui/icons-material";
+import {Close} from "@mui/icons-material";
+import {useTheme} from "@mui/material/styles";
 import {CharSelector} from "./CharSelector";
 import {useSelector} from "react-redux";
 import {CountrySelector} from "../CountrySelector";
 import {CountryStateSelector} from "../CountryStateSelector";
+import {apiPost} from "../api";
+import {useApiAction} from "./Feedback";
+import {DisplayOptionsMenuButton, useDisplayOptions} from "./displayOptions";
 
 /**
  * @typedef {{
@@ -36,7 +45,7 @@ import {CountryStateSelector} from "../CountryStateSelector";
  *     _name: string,
  *     _realName: string,
  *     _twitter: string,
- *     _seed: string,
+ *     _customTextbox: string,
  *     _characterSelections: CharacterSelections
  *
  *     countryCode?: string,
@@ -45,7 +54,7 @@ import {CountryStateSelector} from "../CountryStateSelector";
  *     name: string,
  *     realName: string,
  *     twitter: string,
- *     seed: string,
+ *     customTextbox: string,
  *     characterSelections: CharacterSelections
  *     expanded: boolean
  * }} PlayerState
@@ -86,11 +95,17 @@ function getMains(player, gameCodename, count) {
 }
 
 /**
+ * Player form. Mirrors the desktop Score tab: every field submits on commit
+ * (blur / selection), there is no separate submit button, and field
+ * visibility follows the shared `display_options.show_*` state.
+ *
  * @param {string} teamId
  * @param {string} teamKey
  * @param {TSHPlayerInfo} player
+ * @param {number|string} scoreboardNumber
+ * @param {string} tshTeamId
  */
-export default React.forwardRef(function Player({teamId, teamKey, player}, ref) {
+export default function Player({teamId, teamKey, player, scoreboardNumber, tshTeamId}) {
     const [
         /** @type {PlayerState} */ state,
         setState
@@ -101,7 +116,7 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
         _name: player.name,
         _realName: player.real_name,
         _twitter: player.twitter,
-        _seed: player.seed ?? "",
+        _customTextbox: player.custom_textbox ?? "",
         _charSelections: charsFromTsh(player.character),
 
         countryCode: player.country?.code,
@@ -110,18 +125,26 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
         name: player.name,
         realName: player.real_name,
         twitter: player.twitter,
-        seed: player.seed ?? "",
+        customTextbox: player.custom_textbox ?? "",
         charSelections: charsFromTsh(player.character),
-        expanded: true
     });
-
-    // console.log(`Rendering player widget: `, player)
+    // Details modal. Its fields render from the same local state the parent
+    // card already holds (loaded with the page's first view) — opening it
+    // never fetches anything.
+    const [detailsOpen, setDetailsOpen] = React.useState(false);
 
     const playerId = `${teamId}-p-${teamKey}`;
     const tshState = useSelector((s) => s.tshState.tshState);
     const gameCodename = tshState?.game?.codename;
     /** @type TSHPlayerDb */ const playerDb = useSelector(state => state.tshPlayers.players);
-    const visibility = useSelector(state => state.visibility);
+    const show = useDisplayOptions();
+    const {run} = useApiAction();
+    const theme = useTheme();
+    const fullScreenDialog = useMediaQuery(theme.breakpoints.down('sm'));
+    const cardRef = React.useRef(null);
+    // The dialog renders in a portal (outside cardRef), so the echo guard
+    // needs its own ref.
+    const dialogRef = React.useRef(null);
 
     React.useEffect(() => {
         const newProps = {
@@ -131,50 +154,35 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
             name: player.name,
             realName: player.real_name,
             twitter: player.twitter,
-            seed: player.seed ?? "",
+            customTextbox: player.custom_textbox ?? "",
             charSelections: charsFromTsh(player.character),
         }
 
         const stateUpdates = {};
         for (const prop in newProps) {
-            stateUpdates[prop] = newProps[prop];
             stateUpdates[`_${prop}`] = newProps[prop];
         }
-
-        if (Object.keys(stateUpdates).length > 0) {
-            console.log(`Received new data for [${playerId}, DB: ${tshPlayerDbId}]`, stateUpdates);
-            setState({
-                ...state,
-                ...stateUpdates,
-            });
+        // Server echoes arrive right after every commit (immediate-submit
+        // model). Don't clobber the visible fields while the operator is
+        // typing inside this card or its details dialog; the `_` baselines
+        // always track the server.
+        const editingHere =
+            cardRef.current?.contains(document.activeElement)
+            || dialogRef.current?.contains(document.activeElement);
+        if (!editingHere) {
+            for (const prop in newProps) {
+                stateUpdates[prop] = newProps[prop];
+            }
         }
+
+        setState(s => ({...s, ...stateUpdates}));
     }, [player]) // eslint-disable-line react-hooks/exhaustive-deps
     // We don't want our dependencies to be exhaustive above because we want to specifically only
 
     const /** @type {TSHCharacterDb} */ characters = useSelector(state => state.tshCharacters.characters);
-    const tshPlayerDbId = player?.id?.at(0) || player?.id?.at(1) || -1;
-
-    const changeHandlerFor = (fieldName) => {
-        return (/** React.ChangeEvent<HTMLInputElement> | string */ e) => {
-            const newVal = (
-                typeof e === 'string' ? e
-                    : e === null || e === undefined ? ''
-                    : e?.target?.value
-            );
-
-            console.log(`React-State: Setting (${playerId}).${fieldName} to ${newVal}`);
-
-            const newState = {
-                ...state,
-                [fieldName]: newVal
-            };
-
-            setState(newState);
-        }
-    }
 
     /** @returns {TSHPlayerInfo} */
-    const getModifiedPlayerData = () => {
+    const getModifiedPlayerData = (s = state) => {
         /*
          * The fields here are slightly off... The API sends the scoreboard out with the real name in the
          * player's "real_name" field and the tag in the "name" field. But on save it uses a slightly different
@@ -183,12 +191,13 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
          * In general the field names just... don't line up.
          */
         const rval = {};
-        rval.country_code = state.countryCode;
-        rval.state_code = state.stateCode;
-        rval.prefix = state.team
-        rval.gamerTag = state.name
-        rval.name = state.realName
-        rval.twitter = state.twitter
+        rval.country_code = s.countryCode;
+        rval.state_code = s.stateCode;
+        rval.prefix = s.team
+        rval.gamerTag = s.name
+        rval.name = s.realName
+        rval.twitter = s.twitter
+        rval.custom_textbox = s.customTextbox
         rval.mains = {[gameCodename]: []}
 
         /*
@@ -198,9 +207,9 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
          */
         const lookupName = !!player.prefix ? `${player.prefix} ${player.name}` : player.name;
         const existingMains = Object.values(playerDb[lookupName]?.mains?.[gameCodename] ?? [])
-        const charsFromForm = Object.values(state.charSelections)
+        const charsFromForm = Object.values(s.charSelections)
         // The number of characters from the original TSH state.
-        const maxChars = Object.values(state._charSelections).length;
+        const maxChars = Object.values(s._charSelections).length;
         const mainsToSubmit = [];
         for (let i = 0; i < maxChars; i += 1) {
             if (i < charsFromForm.length && !!charsFromForm[i].charName) {
@@ -218,10 +227,43 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
         rval.mains[gameCodename] = mainsToSubmit;
 
         // Don't persist player info to DB if they have no tag.
-        rval.savePlayerToDb = (!!state.name);
+        rval.savePlayerToDb = (!!s.name);
 
-        console.log("Player update payload:",  rval)
         return rval;
+    }
+
+    // Immediate-submit (desktop editingFinished equivalent). Pass the state
+    // explicitly for selection-type commits where setState hasn't flushed.
+    const submitPlayer = (fromState = state) => {
+        run(() => apiPost(
+            `/scoreboard${scoreboardNumber}-update-team-${tshTeamId}-${teamKey}`,
+            getModifiedPlayerData(fromState)));
+    };
+
+    const changeHandlerFor = (fieldName) => {
+        return (/** React.ChangeEvent<HTMLInputElement> | string */ e) => {
+            const newVal = (
+                typeof e === 'string' ? e
+                    : e === null || e === undefined ? ''
+                    : e?.target?.value
+            );
+
+            const newState = {
+                ...state,
+                [fieldName]: newVal
+            };
+
+            setState(newState);
+            return newState;
+        }
+    }
+
+    // Selects commit in a single gesture, so they submit right away.
+    const selectHandlerFor = (fieldName) => {
+        const change = changeHandlerFor(fieldName);
+        return (e) => {
+            submitPlayer(change(e));
+        };
     }
 
     /**
@@ -233,7 +275,7 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
     const onTagChanged = (event, newPlayer,  reason) => {
         if (newPlayer instanceof Object && newPlayer.hasOwnProperty("gamerTag")) {
             // newPlayer is a TSHPlayerDbEntry
-            setState({
+            const newState = {
                 ...state,
                 countryCode: newPlayer.country_code ?? "",
                 name: newPlayer.gamerTag,
@@ -242,9 +284,11 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
                 twitter: newPlayer.twitter ?? "",
                 stateCode: newPlayer.state_code ?? "",
                 charSelections: getMains(newPlayer, gameCodename, Object.keys(state._charSelections).length),
-            });
+            };
+            setState(newState);
+            submitPlayer(newState);
         } else {
-            // value is an ad-hoc string of a player tag.
+            // value is an ad-hoc string of a player tag; submitted on blur.
             setState({...state, name: newPlayer})
         }
     };
@@ -264,7 +308,7 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
             }
         }
 
-        setState({
+        const newState = {
             ...state,
             charSelections: {
                 ...state.charSelections,
@@ -274,11 +318,13 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
                     charSkin: charSkin
                 }
             }
-        });
+        };
+        setState(newState);
+        submitPlayer(newState);
     }
 
     const onCharSkinChanged = (charIdx, newSkinIdx) => {
-        setState({
+        const newState = {
             ...state,
             charSelections: {
                 ...state.charSelections,
@@ -287,47 +333,35 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
                     charSkin: newSkinIdx
                 }
             }
-        })
+        };
+        setState(newState);
+        submitPlayer(newState);
     }
 
     const idBase = `team-${teamId}-player-${playerId}-`;
-    const rowProps = {direction: 'row', spacing: 2};
-
-    React.useImperativeHandle(ref, () => ({
-        getModifiedPlayerData: getModifiedPlayerData
-    }), [state, getModifiedPlayerData]); // eslint-disable-line react-hooks/exhaustive-deps
-    // ignoring changes in state cause getModifiedPlayerData to return bad values for some reason.
+    // Phones stack the form fields vertically at full width; sm+ keeps the
+    // two-column rows.
+    const rowProps = {direction: {xs: 'column', sm: 'row'}, spacing: {xs: 1.5, sm: 2}};
 
     return (
-        <Card raised={true}>
-            <CardHeader
-                sx={{padding: 1, '& .MuiCardHeader-avatar': {marginRight: 1}}}
-                avatar={<Avatar
-                    src={player?.online_avatar}
-                    sx={{width: 32, height: 32, objectFit: "contain"}}
-                    alt={i18n.t("avatar_for", {player: state.name})}
-                >{state.name?.at(0) ?? "?"}</Avatar>}
-                action={<IconButton size="small" onClick={() => setState({...state, expanded: !state.expanded})}>
-                    <ExpandMore sx={{
-                        transform: state.expanded ? 'rotate(0deg)' : 'rotate(270deg)'
-                    }}/>
-                </IconButton>}
-                title={state.name}
-                titleTypographyProps={{variant: 'body2'}}
-            />
-            <Collapse in={state.expanded} timeout={"auto"}>
-                <CardContent>
-                    <Stack spacing={2}>
-                        <Stack {...rowProps}>
-                            {tshState?.display_options?.show_sponsor !== false && (
-                                <TextField label={i18n.t("sponsor")}
-                                           key={idBase + "sponsor"}
-                                           id={idBase + "sponsor"}
-                                           value={state.team ?? ''}
-                                           onChange={changeHandlerFor('team')}
-                                />
-                            )}
+        <Card raised={true} ref={cardRef}>
+            <CardContent sx={{padding: 1.5, '&:last-child': {paddingBottom: 1.5}}}>
+                <Stack spacing={1.5}>
+                    {/* Inline: only the tag and the sponsor. Everything else
+                        lives in the details dialog. */}
+                    <Stack {...rowProps} alignItems="center">
+                        {show.show_sponsor && (
+                            <TextField label={i18n.t("sponsor")}
+                                       key={idBase + "sponsor"}
+                                       id={idBase + "sponsor"}
+                                       value={state.team ?? ''}
+                                       onChange={changeHandlerFor('team')}
+                                       onBlur={() => submitPlayer()}
+                                       sx={{width: {xs: '100%', sm: '35%'}}}
+                            />
+                        )}
 
+                        {show.show_name && (
                             <Autocomplete
                                 key={idBase + "tag"}
                                 id={idBase + "tag"}
@@ -340,57 +374,110 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
                                 freeSolo={true}
                                 sx={{width: '100%'}}
                                 onChange={onTagChanged}
+                                onBlur={() => submitPlayer()}
                                 renderInput={(params) =>
                                     <TextField
                                         {...params}
                                         label={i18n.t("tag")}
                                     />}
                             />
-                        </Stack>
+                        )}
+                    </Stack>
 
-                        {(visibility.twitter || visibility.seed) && (
+                    <Link
+                        component="button"
+                        type="button"
+                        underline="hover"
+                        variant="body2"
+                        onClick={() => setDetailsOpen(true)}
+                        sx={{alignSelf: 'flex-start'}}
+                    >
+                        {`>>${i18n.t("details")}`}
+                    </Link>
+                </Stack>
+            </CardContent>
+
+            {/* Details dialog: renders the state the page already loaded
+                with its first view — opening it fetches nothing. Fields
+                submit on commit exactly like the inline ones. */}
+            <Dialog
+                open={detailsOpen}
+                onClose={() => setDetailsOpen(false)}
+                fullWidth
+                maxWidth="sm"
+                fullScreen={fullScreenDialog}
+            >
+                <DialogTitle sx={{display: 'flex', alignItems: 'center', gap: 1, paddingRight: 6}}>
+                    {state.name || i18n.t("tag")}
+                    {/* Desktop parity: the seed is a read-only badge
+                        (set by loading a set), not an input. */}
+                    {show.show_seed && !!player.seed && (
+                        <Chip
+                            size="small"
+                            variant="outlined"
+                            label={`${i18n.t("seed")} ${player.seed}`}
+                        />
+                    )}
+                    {/* Field-visibility eye menu (global toggles; moved here
+                        from the header). */}
+                    <DisplayOptionsMenuButton
+                        sx={{position: 'absolute', right: 44, top: 8}}
+                    />
+                    <IconButton
+                        size="small"
+                        onClick={() => setDetailsOpen(false)}
+                        sx={{position: 'absolute', right: 8, top: 8}}
+                    >
+                        <Close />
+                    </IconButton>
+                </DialogTitle>
+                <DialogContent ref={dialogRef}>
+                    <Stack spacing={2} paddingTop={1}>
+                        {(show.show_real_name || show.show_social) && (
                             <Stack {...rowProps}>
-                                {visibility.seed && (
-                                    <TextField label={i18n.t("seed")}
-                                               key={idBase + "seed"}
-                                               id={idBase + "seed"}
-                                               value={state.seed ?? ''}
-                                               onChange={changeHandlerFor('seed')}
-                                               sx={{width: '30%'}}
+                                {show.show_real_name && (
+                                    <TextField label={i18n.t("real_name")}
+                                               key={idBase + "real-name"}
+                                               id={idBase + "real-name"}
+                                               value={state.realName ?? ''}
+                                               onChange={changeHandlerFor('realName')}
+                                               onBlur={() => submitPlayer()}
+                                               sx={{width: {xs: '100%', sm: '50%'}}}
                                     />
                                 )}
-                                {visibility.twitter && (
+                                {show.show_social && (
                                     <TextField label={i18n.t("twitter")}
                                                key={idBase + "twitter"}
                                                id={idBase + "twitter"}
                                                value={state.twitter ?? ''}
                                                onChange={changeHandlerFor('twitter')}
-                                               sx={{width: '70%'}}
+                                               onBlur={() => submitPlayer()}
+                                               sx={{width: {xs: '100%', sm: show.show_real_name ? '50%' : '100%'}}}
                                     />
                                 )}
                             </Stack>
                         )}
 
-                        {visibility.location && (
+                        {show.show_location && (
                             <Stack {...rowProps}>
                                 <CountrySelector
-                                    sx={{width: '50%', maxWidth: '50%'}}
+                                    sx={{width: {xs: '100%', sm: '50%'}, maxWidth: {xs: '100%', sm: '50%'}}}
                                     label={i18n.t("country")}
                                     value={state.countryCode ?? ''}
-                                    onChange={changeHandlerFor('countryCode')}
+                                    onChange={selectHandlerFor('countryCode')}
                                 />
 
                                 <CountryStateSelector
                                     countryCode={state.countryCode}
-                                    sx={{width: '50%', maxWidth: '50%'}}
+                                    sx={{width: {xs: '100%', sm: '50%'}, maxWidth: {xs: '100%', sm: '50%'}}}
                                     label={i18n.t("state")}
                                     value={state.stateCode ?? ''}
-                                    onChange={changeHandlerFor('stateCode')}
+                                    onChange={selectHandlerFor('stateCode')}
                                 />
                             </Stack>
                         )}
 
-                        {visibility.characters && (
+                        {show.show_characters && (
                             Object.values(state.charSelections).map( (cs) =>
                                 <CharSelector
                                     key={`${playerId}-cs-${cs.charIdx}`}
@@ -399,16 +486,37 @@ export default React.forwardRef(function Player({teamId, teamKey, player}, ref) 
                                     charSkin={cs.charSkin}
                                     onCharNameChanged={(ev, val, _) => onCharNameChanged(cs.charIdx, val)}
                                     onCharSkinChanged={(ev, val, _) => onCharSkinChanged(cs.charIdx, ev.target.value)}
-                                    stackProps={rowProps}
+                                    // Character + skin are companion fields in
+                                    // a fixed-height row: keep them side by
+                                    // side even on xs (the column stacking of
+                                    // rowProps breaks the 40px row).
+                                    stackProps={{direction: 'row', spacing: {xs: 1.5, sm: 2}}}
                                 />
                             )
                         )}
+
+                        {show.show_additional && (
+                            <TextField label={i18n.t("show_additional")}
+                                       key={idBase + "additional"}
+                                       id={idBase + "additional"}
+                                       multiline
+                                       minRows={2}
+                                       value={state.customTextbox ?? ''}
+                                       onChange={changeHandlerFor('customTextbox')}
+                                       onBlur={() => submitPlayer()}
+                            />
+                        )}
                     </Stack>
-                </CardContent>
-            </Collapse>
+                </DialogContent>
+                <DialogActions>
+                    <Button variant="outlined" size="small" onClick={() => setDetailsOpen(false)}>
+                        {i18n.t("close")}
+                    </Button>
+                </DialogActions>
+            </Dialog>
         </Card>
     )
-});
+}
 
 /**
  *
@@ -420,8 +528,10 @@ function charsFromTsh(tshChars) {
     for (const i in tshChars) {
         res[i] = {
             charIdx: i,
-            charName: tshChars[i].en_name,
-            charSkin: tshChars[i].skin,
+            charName: tshChars[i].en_name ?? "",
+            // Never undefined: the skin <Select> must stay controlled from
+            // its first render (MUI warns on undefined -> value switches).
+            charSkin: tshChars[i].skin ?? "",
         }
 
     }
