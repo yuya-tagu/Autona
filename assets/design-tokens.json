@@ -1,0 +1,63 @@
+{
+  "_readme": [
+    "Machine-readable design tokens (source of truth) shared by the desktop",
+    "app (src/ui_constants.py) and the web UI (web/src/themes.js).",
+    "Contract tests keep both sides in sync:",
+    "  - tests/test_design_tokens_contract.py  (Python side)",
+    "  - web/src/themes.test.js                (React side)",
+    "Edit this file first, then update both consumers until the tests pass."
+  ],
+  "palette": {
+    "dark": {
+      "canvas": "#0A0B0D",
+      "bg_primary": "#111317",
+      "bg_secondary": "#191B20",
+      "bg_tertiary": "#23262C",
+      "bg_quaternary": "#2D3138",
+      "border_subtle": "#23262C",
+      "border_default": "#383C44",
+      "border_strong": "#53575F",
+      "text_primary": "#E9ECF1",
+      "text_secondary": "#AFB3BB",
+      "text_muted": "#81858E",
+      "text_label": "#9CA0A9",
+      "text_disabled": "#4F525A",
+      "brand": "#DC143C",
+      "brand_subtle": "#2A1418",
+      "accent": "#C33732",
+      "accent_hover": "#D8453E",
+      "accent_subtle": "#3A1413",
+      "gold": "#F0C45A",
+      "gold_subtle": "#2E2A1E",
+      "positive": "#6EC77A",
+      "btn_neutral": "#3B3F47",
+      "btn_neutral_hover": "#494D56",
+      "negative": "#F04E54",
+      "on_accent": "#FFFFFF",
+      "primary_btn_bg": "#EFF1F5",
+      "primary_btn_text": "#0E0F12",
+      "primary_btn_hover": "#DBDDE3"
+    }
+  },
+  "player_colors": {
+    "p1": "#DC143C",
+    "p2": "#3D8BE8"
+  },
+  "radius": {
+    "sm": 3,
+    "md": 5,
+    "lg": 8
+  },
+  "spacing": {
+    "xs": 4,
+    "sm": 8,
+    "md": 8,
+    "lg": 12,
+    "xl": 16
+  },
+  "font": {
+    "family": "LINE Seed JP",
+    "family_condensed": "Roboto Condensed",
+    "family_mono": "JetBrains Mono"
+  }
+}

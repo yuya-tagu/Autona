@@ -96,6 +96,30 @@ class WebServerActions(QThread):
         sb_widget: AutonaScoreboardWidget = self.scoreboard.GetScoreboard(scoreboard)
         return StateManager.Get(f'score.{sb_widget.scoreboardNumber}')
 
+    # Eye-menu keys accepted by set_display_option (mirrors
+    # AutonaScoreboardWidget.elements settings keys).
+    _DISPLAY_OPTION_KEYS = (
+        "show_sponsor", "show_name", "show_seed", "show_characters",
+        "show_social", "show_real_name", "show_location", "show_additional")
+
+    @gui_thread_sync
+    def set_display_option(self, data):
+        """Toggle a scoreboard field's visibility from a remote client.
+
+        Drives the same eye-menu action path as a local click so Qt widget
+        visibility, SettingsManager and StateManager stay consistent on
+        every board (Design.md §3.2.2 R-Sync-1: writes go through Actions).
+        """
+        option = (data or {}).get("option")
+        if option not in WebServerActions._DISPLAY_OPTION_KEYS:
+            return f"ERROR: unknown display option {option}"
+        value = bool((data or {}).get("value"))
+        for n in (1, 2):
+            sb = self.scoreboard.GetScoreboard(n)
+            if hasattr(sb, "SetDisplayOption"):
+                sb.SetDisplayOption(option, value)
+        return "OK"
+
     @gui_thread_sync
     def set_route(self,
                   scoreboard,
@@ -105,7 +129,8 @@ class WebServerActions(QThread):
                   players=None,
                   characters=None,
                   losers=None,
-                  team=None):
+                  team=None,
+                  teamName=None):
         # Best Of argument
         # best-of=<Best Of Amount>
         if bestOf is not None:
@@ -151,6 +176,21 @@ class WebServerActions(QThread):
                     orjson.dumps({'team' + str(team) + 'losers': False if losers.lower() == 'false' else True})
                 )
             )
+
+        # Team name argument (team-mode boards)
+        # teamName=<Name>&team=<Team Number>
+        # Drives the Qt QLineEdit like the set-load path does, so the widget,
+        # StateManager and the broadcast all stay in sync.
+        if teamName is not None and team is not None:
+            sb = self.scoreboard.GetScoreboard(scoreboard)
+            columns = [getattr(sb, "team1column", None),
+                       getattr(sb, "team2column", None)]
+            idx = int(team) - 1
+            if 0 <= idx < len(columns) and columns[idx] is not None:
+                edit = columns[idx].findChild(QLineEdit, "teamName")
+                if edit is not None and edit.text() != teamName:
+                    edit.setText(teamName)
+                    edit.editingFinished.emit()
         return "OK"
 
     def set_team_data(self, scoreboard, team, player, data):
