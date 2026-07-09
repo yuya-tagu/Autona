@@ -180,7 +180,6 @@
 | `GET /api/v1/match-names` | match/phase 名候補 | `get_match_names` | #17 |
 | `GET /api/v1/characters` | キャラ一覧 | `get_characters` | #18 |
 | `GET /api/v1/variants` | バリアント一覧 | `get_variants` | #19 |
-| `GET /api/v1/controllers` | コントローラ一覧 | `get_controllers` | #20 |
 | `GET /api/v1/sets` | 試合一覧（`?finished=true` で完了含む） | `get_sets` | #35 |
 | `GET /api/v1/sets/{setId}` | セット詳細 | `get_match` | #36 |
 | `GET /api/v1/commentary` | 実況者状態 | `get_comms` | #37 |

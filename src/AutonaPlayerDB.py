@@ -27,7 +27,7 @@ class AutonaPlayerDB:
     webServer = None
     modelLock = Lock()
     fieldnames = ["prefix", "gamerTag", "name", "twitter",
-                "country_code", "state_code", "mains", "custom_textbox", "controller"] # Used for filtering what we save locally
+                "country_code", "state_code", "mains", "custom_textbox"] # Used for filtering what we save locally
 
     @staticmethod
     def LoadDB():

@@ -1291,15 +1291,14 @@ class AutonaScoreboardWidget(QWidget):
             action: QAction = self.eyeBt.menu().actions()[x]
             self.ToggleElements(action, element[1])
 
-        # birthday + controller are not surfaced anywhere yet; keep them
-        # hidden regardless of toggle state. real_name / twitterLabel used
-        # to be force-hidden here — those are now driven by the
-        # Real Name / Twitter eye-menu toggles instead.
+        # birthday is not surfaced anywhere yet; keep it hidden regardless
+        # of toggle state. real_name / twitterLabel used to be force-hidden
+        # here — those are now driven by the Real Name / Twitter eye-menu
+        # toggles instead.
         for pw in self.playerWidgets:
-            for name in ('birthday', 'controller', 'controllerLabel'):
-                w = pw.findChild(QWidget, name)
-                if w:
-                    w.hide()
+            w = pw.findChild(QWidget, 'birthday')
+            if w:
+                w.hide()
 
     def SwapTeams(self):
         with StateManager.SaveBlock():

@@ -165,7 +165,7 @@ SocketIO/ポーリング不使用。Python から `initResult(payload)` を直�
 
 ### 5.3 ゲーム/設定情報
 
-`/games`, `/current-game`, `/characters`, `/variants`, `/controllers`, `/match-names`, `/ruleset` （GET + SocketIO）
+`/games`, `/current-game`, `/characters`, `/variants`, `/match-names`, `/ruleset` （GET + SocketIO）
 
 ### 5.4 静的ファイル配信
 

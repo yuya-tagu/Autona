@@ -64,7 +64,7 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
   - セット: `/scoreboard<N>-get|set|open-set|pull-stream`、`/get-sets`、`/get-match-<id>`
   - 操作: `swap-teams`、`reset-scores|match|players`、`clear-all`
   - 統計: `stats-recent-sets|upset-factor|last-sets-<p>|history-sets-<p>`
-  - マスタ: `/games`、`/current-game`、`/match-names`、`/characters`、`/variants`、`/controllers`
+  - マスタ: `/games`、`/current-game`、`/match-names`、`/characters`、`/variants`
   - サムネ: `/scoreboard<N>-get-thumbnail-<fmt>`
 
 ## 確定済み事項 / 残課題

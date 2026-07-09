@@ -59,7 +59,7 @@
 | `GET /api/v1/match-names` | `actions.get_match_names()` | |
 | `GET /api/v1/characters` | `actions.get_characters()` | |
 | `GET /api/v1/variants` | `actions.get_variants()` | |
-| `GET /api/v1/controllers` | `actions.get_controllers()` | |
+| `GET /api/v1/controllers` | ~~`actions.get_controllers()`~~ | コントローラ機能ごと削除済み |
 | `GET /api/v1/sets` | `actions.get_sets(request.args)` | **同期 Start.gg 呼び**→ try/except で `UPSTREAM_TIMEOUT`（§14.2） |
 | `GET /api/v1/sets/<setId>` | `actions.get_match(setId)` | **provider null 未チェック**→`NOT_READY`、`int()` 失敗→`INVALID_ARGUMENT`、同期 Start.gg→`UPSTREAM_TIMEOUT`（§14.2） |
 | `GET /api/v1/commentary` | `actions.get_comms()` | |

@@ -425,12 +425,6 @@ def get_variants():
     return ok(data=_actions_ref().get_variants())
 
 
-@api_v1.route("/controllers")
-@api_handler
-def get_controllers():
-    return ok(data=_actions_ref().get_controllers())
-
-
 @api_v1.route("/sets")
 @api_handler
 def get_sets():

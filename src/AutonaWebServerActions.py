@@ -17,7 +17,6 @@ from .AutonaPlayerDB import AutonaPlayerDB
 from .AutonaScoreboardWidget import AutonaScoreboardWidget
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaCommentaryWidget import AutonaCommentaryWidget
-from .Helpers.AutonaControllerHelper import AutonaControllerHelper
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Workers import Worker
 import os
@@ -282,12 +281,6 @@ class WebServerActions(QThread):
 
             if item_data is not None:
                 data[item_data.get("name")] = item_data
-        return data
-
-    def get_controllers(self):
-        data = AutonaControllerHelper.instance.controller_list
-        for key in data.keys():
-            data[key]["codename"] = key
         return data
 
     def swap_teams(self, scoreboard):
