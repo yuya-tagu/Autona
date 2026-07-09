@@ -158,14 +158,6 @@ from .AutonaPlayerBrowserWidget import AutonaPlayerBrowserWidget
 from src.AutonaWebServer import WebServer, check_webserver_port
 # autopep8: on
 
-def generate_restart_messagebox(main_txt):
-    messagebox = QMessageBox()
-    messagebox.setWindowTitle(QApplication.translate("app", "Warning"))
-    messagebox.setText(
-        main_txt + "\n" + QApplication.translate("app", "The program will now close."))
-    messagebox.finished.connect(QApplication.exit)
-    return (messagebox)
-
 
 def remove_accents_lower(input_str):
     nfkd_form = unicodedata.normalize('NFKD', input_str)
@@ -507,86 +499,8 @@ class Window(QMainWindow):
             QApplication.translate("app", "Add game assets"))
         action.triggered.connect(lambda: self.gameAssetGuideWindow.show())
 
-        helpMenu.addSeparator()
-
-        # Language sub-menus
-        program_language_messagebox = generate_restart_messagebox(
-            QApplication.translate("app", "Program language changed successfully."))
-        languageSelect = helpMenu.addMenu(
-            QApplication.translate("app", "Program Language"))
-        languageSelectGroup = QActionGroup(languageSelect)
-        languageSelectGroup.setExclusive(True)
-        action = languageSelect.addAction(
-            QApplication.translate("app", "System language"))
-        languageSelectGroup.addAction(action)
-        action.setCheckable(True)
-        action.setChecked(True)
-        action.triggered.connect(lambda x=None: [
-            SettingsManager.Set("program_language", "default"),
-            program_language_messagebox.exec()
-        ])
-        for code, language in AutonaLocaleHelper.languages.items():
-            action = languageSelect.addAction(f"{language[0]} / {language[1]}")
-            action.setCheckable(True)
-            languageSelectGroup.addAction(action)
-            action.triggered.connect(lambda x=None, c=code: [
-                SettingsManager.Set("program_language", c),
-                program_language_messagebox.exec()
-            ])
-            if SettingsManager.Get("program_language") == code:
-                action.setChecked(True)
-
-        game_asset_language_messagebox = generate_restart_messagebox(
-            QApplication.translate("app", "Game Asset Language changed successfully."))
-        languageSelect = helpMenu.addMenu(
-            QApplication.translate("app", "Game Asset Language"))
-        languageSelectGroup = QActionGroup(languageSelect)
-        languageSelectGroup.setExclusive(True)
-        action = languageSelect.addAction(
-            QApplication.translate("app", "Same as program language"))
-        languageSelectGroup.addAction(action)
-        action.setCheckable(True)
-        action.setChecked(True)
-        action.triggered.connect(lambda x=None: [
-            SettingsManager.Set("game_asset_language", "default"),
-            game_asset_language_messagebox.exec()
-        ])
-        for code, language in AutonaLocaleHelper.languages.items():
-            action = languageSelect.addAction(f"{language[0]} / {language[1]}")
-            action.setCheckable(True)
-            languageSelectGroup.addAction(action)
-            action.triggered.connect(lambda x=None, c=code: [
-                SettingsManager.Set("game_asset_language", c),
-                game_asset_language_messagebox.exec()
-            ])
-            if SettingsManager.Get("game_asset_language") == code:
-                action.setChecked(True)
-
-        fg_language_messagebox = generate_restart_messagebox(
-            QApplication.translate("app", "Tournament term language changed successfully."))
-        languageSelect = helpMenu.addMenu(
-            QApplication.translate("app", "Tournament term language"))
-        languageSelectGroup = QActionGroup(languageSelect)
-        languageSelectGroup.setExclusive(True)
-        action = languageSelect.addAction(
-            QApplication.translate("app", "Same as program language"))
-        languageSelectGroup.addAction(action)
-        action.setCheckable(True)
-        action.setChecked(True)
-        action.triggered.connect(lambda x=None: [
-            SettingsManager.Set("fg_term_language", "default"),
-            fg_language_messagebox.exec()
-        ])
-        for code, language in AutonaLocaleHelper.languages.items():
-            action = languageSelect.addAction(f"{language[0]} / {language[1]}")
-            action.setCheckable(True)
-            languageSelectGroup.addAction(action)
-            action.triggered.connect(lambda x=None, c=code: [
-                SettingsManager.Set("fg_term_language", c),
-                fg_language_messagebox.exec()
-            ])
-            if SettingsManager.Get("fg_term_language") == code:
-                action.setChecked(True)
+        # Program / game-asset / tournament-term language selectors moved to
+        # the Settings window (Help & Settings → Settings → Language).
 
         # ── Operations: battle format segment (1v1 / Team / Crew) ──
         # The sidebar header hosts the segmented control; choosing a format

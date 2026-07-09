@@ -3,6 +3,7 @@ from qtpy.QtWidgets import *
 from .SettingsWidget import SettingsWidget
 from ..AutonaHotkeys import AutonaHotkeys
 from ..Helpers.AutonaVersionHelper import add_beta_label
+from ..Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 
 
 class AutonaSettingsWindow(QDialog):
@@ -122,6 +123,60 @@ class AutonaSettingsWindow(QDialog):
         self.add_setting_widget(QApplication.translate(
             "settings", "General"), SettingsWidget("general", generalSettings))
 
+        # Add language settings (moved here from the Help & Settings menu).
+        # These keys are top-level (program_language / game_asset_language /
+        # fg_term_language), so the SettingsWidget uses an empty base. Each
+        # change requires a restart, shown via a deferred messagebox so the
+        # modal never nests inside the combo's currentIndexChanged handler.
+        languageSettings = []
+
+        languageChoices = [
+            (f"{language[0]} / {language[1]}", code)
+            for code, language in AutonaLocaleHelper.languages.items()
+        ]
+
+        programMsg = self._make_restart_messagebox(QApplication.translate(
+            "app", "Program language changed successfully."))
+        languageSettings.append((
+            QApplication.translate("app", "Program Language"),
+            "program_language",
+            "combo",
+            "default",
+            lambda mb=programMsg: QTimer.singleShot(0, mb.exec),
+            None,
+            [(QApplication.translate("app", "System language"), "default")]
+            + languageChoices,
+        ))
+
+        assetMsg = self._make_restart_messagebox(QApplication.translate(
+            "app", "Game Asset Language changed successfully."))
+        languageSettings.append((
+            QApplication.translate("app", "Game Asset Language"),
+            "game_asset_language",
+            "combo",
+            "default",
+            lambda mb=assetMsg: QTimer.singleShot(0, mb.exec),
+            None,
+            [(QApplication.translate("app", "Same as program language"), "default")]
+            + languageChoices,
+        ))
+
+        fgTermMsg = self._make_restart_messagebox(QApplication.translate(
+            "app", "Tournament term language changed successfully."))
+        languageSettings.append((
+            QApplication.translate("app", "Tournament term language"),
+            "fg_term_language",
+            "combo",
+            "default",
+            lambda mb=fgTermMsg: QTimer.singleShot(0, mb.exec),
+            None,
+            [(QApplication.translate("app", "Same as program language"), "default")]
+            + languageChoices,
+        ))
+
+        self.add_setting_widget(QApplication.translate(
+            "settings", "Language"), SettingsWidget("", languageSettings))
+
         # Add hotkey settings
         hotkeySettings = []
 
@@ -181,3 +236,16 @@ class AutonaSettingsWindow(QDialog):
 
         # Add the setting widget to the stack
         self.settings_stack.addWidget(widget)
+
+    def _make_restart_messagebox(self, main_txt):
+        # Language changes take effect on restart, so inform then close.
+        # Mirrors Autona.generate_restart_messagebox; shown deferred from the
+        # combo's currentIndexChanged handler (QTimer.singleShot) to avoid
+        # modal nesting inside a value-changed signal (CLAUDE.md
+        # "モーダル入れ子禁止").
+        mb = QMessageBox(self)
+        mb.setWindowTitle(QApplication.translate("app", "Warning"))
+        mb.setText(main_txt + "\n" + QApplication.translate(
+            "app", "The program will now close."))
+        mb.finished.connect(QApplication.exit)
+        return mb

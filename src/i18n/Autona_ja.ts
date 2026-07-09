@@ -2489,6 +2489,10 @@ OBS のブラウザソースと Web UI は動作しません。
         <translation>一般</translation>
     </message>
     <message>
+        <source>Language</source>
+        <translation>言語</translation>
+    </message>
+    <message>
         <location filename="..\Settings\AutonaSettingsWindow.py" line="163" />
         <source>Hotkeys</source>
         <translation>ホットキー</translation>

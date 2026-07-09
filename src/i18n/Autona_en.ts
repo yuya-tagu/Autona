@@ -2486,6 +2486,10 @@ Change the port under Settings → General → Webserver Port and restart Autona
         <translation>General</translation>
     </message>
     <message>
+        <source>Language</source>
+        <translation>Language</translation>
+    </message>
+    <message>
         <location filename="..\Settings\AutonaSettingsWindow.py" line="163" />
         <source>Hotkeys</source>
         <translation>Hotkeys</translation>
