@@ -555,7 +555,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | `general.*` | アプリ全般（disable_thumbnail_widget, theme_color, accent_color, webserver_port 等） |
 | `hotkeys.*` | ホットキー（hotkeys_enabled とアクションごとのキー） |
 | `display_options.*` | 表示切替（プレイヤー欄のフィールド表示等） |
-| `thumbnail_config.*` | サムネイル生成設定（template_id, background_path, use_sponsors 等） |
+| `thumbnail_config.*` | サムネイル生成設定（template_id, background_source（default/banner/custom）, background_path（custom 時のユーザー画像）, use_sponsors 等） |
 | `result_config.*` | リザルト生成設定（layout, accent_color, logo_path 等） |
 | `bsky_account.*` | Bluesky 連携 |
 | `update.*` | アップデーター（skipped_version 等） |

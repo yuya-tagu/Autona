@@ -394,8 +394,10 @@ class AutonaTournamentInfoWidget(QDockWidget):
         pix = QPixmap()
         pix.loadFromData(data)
         pix.save(BANNER_PATH)
-        SettingsManager.Set("thumbnail_config.background_path", BANNER_PATH)
-        logger.info("Tournament banner saved and set as thumbnail background")
+        # The banner is now consumed by the thumbnail only when the user picks
+        # "Use tournament banner" in Thumbnail Settings — no longer written into
+        # thumbnail_config.background_path here (that key is the custom image).
+        logger.info("Tournament banner saved")
         self.UpdateBanner()
         self._emitMediaUpdated()
 
@@ -487,8 +489,9 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
     def UpdateBanner(self):
         # bannerView slot is now 160×90 (see AutonaTournamentInfo.ui).
-        # Scale source to fit while keeping aspect.
-        bg_path = SettingsManager.Get("thumbnail_config.background_path", DEFAULT_BANNER_PATH)
+        # Scale source to fit while keeping aspect. Shows the saved tournament
+        # banner, falling back to the bundled default when none is saved.
+        bg_path = BANNER_PATH if os.path.exists(BANNER_PATH) else DEFAULT_BANNER_PATH
         try:
             pix = QPixmap(bg_path)
             if pix.isNull():
@@ -517,7 +520,6 @@ class AutonaTournamentInfoWidget(QDockWidget):
                 Path("./user_data").mkdir(parents=True, exist_ok=True)
                 pix = QPixmap(fileName)
                 pix.save(BANNER_PATH)
-                SettingsManager.Set("thumbnail_config.background_path", BANNER_PATH)
         except Exception as e:
             logger.error(traceback.format_exc())
 
@@ -546,9 +548,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
             pix = QPixmap()
             pix.loadFromData(response.content)
             pix.save(BANNER_PATH)
-
-            SettingsManager.Set("thumbnail_config.background_path", BANNER_PATH)
-            logger.info(f"Tournament banner saved and set as thumbnail background")
+            logger.info("Tournament banner saved")
         except Exception as e:
             logger.error(traceback.format_exc())
 
@@ -556,8 +556,12 @@ class AutonaTournamentInfoWidget(QDockWidget):
         self._emitMediaUpdated()
 
     def SetDefaultBanner(self):
+        # Reset the banner to the bundled default by removing the saved file;
+        # UpdateBanner and the thumbnail's "Use tournament banner" both fall
+        # back to DEFAULT_BANNER_PATH when BANNER_PATH is absent.
         try:
-            SettingsManager.Set("thumbnail_config.background_path", DEFAULT_BANNER_PATH)
+            if os.path.exists(BANNER_PATH):
+                os.remove(BANNER_PATH)
         except:
             logger.error(traceback.format_exc())
 
@@ -765,9 +769,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         # 2) Fall back to the locally saved banner so manual file loads
         #    (LoadBannerFile) and offline / non-Start.gg flows still work.
-        local_path = SettingsManager.Get(
-            "thumbnail_config.background_path", BANNER_PATH)
-        for candidate in (local_path, BANNER_PATH, DEFAULT_BANNER_PATH):
+        for candidate in (BANNER_PATH, DEFAULT_BANNER_PATH):
             if candidate and os.path.exists(candidate):
                 try:
                     return Image.open(candidate).convert("RGB")

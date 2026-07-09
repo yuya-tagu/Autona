@@ -131,19 +131,23 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
             self.GeneratePreview()
         ])
 
-        # IMG
-        self.background = self.settings.findChild(
-            QPushButton, "customBackground")
-        self.backgroundReset = self.settings.findChild(
-            QPushButton, "customBackgroundReset")
-        self.backgroundReset.setIcon(QIcon('assets/icons/undo.svg'))
-        self.backgroundReset.clicked.connect(lambda: [
-            SettingsManager.Unset("thumbnail_config.background_path"),
-            self.GeneratePreview()
-        ])
+        # BACKGROUND IMAGE SOURCE — three-way selector (default / tournament
+        # banner / custom file). The effective image is resolved at render time
+        # in thumbnail.prepare_data() from `thumbnail_config.background_source`;
+        # `background_path` now holds only the user's custom image.
+        self.bgSourceDefault = self.settings.findChild(
+            QRadioButton, "bgSourceDefault")
+        self.bgSourceBanner = self.settings.findChild(
+            QRadioButton, "bgSourceBanner")
+        self.bgSourceCustom = self.settings.findChild(
+            QRadioButton, "bgSourceCustom")
+        self.btSelectCustomBg = self.settings.findChild(
+            QPushButton, "btSelectCustomBg")
+        self.customBgName = self.settings.findChild(QLabel, "customBgName")
 
-        self.background.clicked.connect(
-            lambda: self.SaveImage("background_path"))
+        for rb in (self.bgSourceDefault, self.bgSourceBanner, self.bgSourceCustom):
+            rb.toggled.connect(self._onBgSourceToggled)
+        self.btSelectCustomBg.clicked.connect(self._chooseCustomBackground)
 
         # Template selector (type_a / type_b)
         # NOTE: must use `is not None` — empty QComboBox is falsy via __len__
@@ -179,13 +183,6 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
         self.horizontalAlign = self.settings.findChild(
             QSpinBox, "horizontalAlign")
         self.verticalAlign = self.settings.findChild(QSpinBox, "verticalAlign")
-
-        self.scaleToFillX = self.settings.findChild(QCheckBox, "scaleToFillX")
-        self.scaleToFillY = self.settings.findChild(QCheckBox, "scaleToFillY")
-
-        self.proportionalScaling = self.settings.findChild(
-            QCheckBox, "proportionalScaling")
-
 
         self.phase_name.stateChanged.connect(lambda: self.SaveSettings(
             key="display_phase", val=self.phase_name.isChecked(), generatePreview=True))
@@ -228,33 +225,6 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
                 self,
                 key=f"game.{AutonaGameAssetManager.instance.selectedGame.get('codename')}.align.vertical",
                 val=val,
-                generatePreview=True
-            )]
-        )
-
-        self.scaleToFillX.stateChanged.connect(lambda val: [
-            AutonaThumbnailSettingsWidget.SaveSettings(
-                self,
-                key=f"game.{AutonaGameAssetManager.instance.selectedGame.get('codename')}.scaleFillX",
-                val=self.scaleToFillX.isChecked(),
-                generatePreview=True
-            )]
-        )
-
-        self.scaleToFillY.stateChanged.connect(lambda val: [
-            AutonaThumbnailSettingsWidget.SaveSettings(
-                self,
-                key=f"game.{AutonaGameAssetManager.instance.selectedGame.get('codename')}.scaleFillY",
-                val=self.scaleToFillY.isChecked(),
-                generatePreview=True
-            )]
-        )
-
-        self.proportionalScaling.stateChanged.connect(lambda val: [
-            AutonaThumbnailSettingsWidget.SaveSettings(
-                self,
-                key=f"game.{AutonaGameAssetManager.instance.selectedGame.get('codename')}.proportionalScaling",
-                val=self.proportionalScaling.isChecked(),
                 generatePreview=True
             )]
         )
@@ -470,6 +440,9 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
 
         self.GetSetting("main_icon_path", "./layout/logo.png")
 
+        self._migrateBackgroundSource()
+        self._updateBackgroundControls()
+
         # Template selector — see note above re: `is not None`
         if getattr(self, "templateSelect", None) is not None:
             current_tid = self.GetSetting("template_id", "type_a")
@@ -529,79 +502,87 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
         ))
         self.zoom.blockSignals(False)
 
-        # Find biggest asset pack for the current game
-        biggest_pack = self._getBiggestAssetPack()
-
-        # Proportional scaling
-        self.proportionalScaling.blockSignals(True)
-        if biggest_pack.get("rescaling_factor", []):
-            self.proportionalScaling.setEnabled(True)
-            self.proportionalScaling.setChecked(self.GetSetting(
-                f"game.{game_codename}.proportionalScaling",
-                True
-            ))
-        else:
-            self.proportionalScaling.setEnabled(False)
-            self.proportionalScaling.setChecked(False)
-        self.proportionalScaling.blockSignals(False)
-
-        # Scale to fill X/Y
-        self.scaleToFillX.blockSignals(True)
-        self.scaleToFillX.setChecked(self.GetSetting(
-            f"game.{game_codename}.scaleFillX",
-            False
-        ))
-        self.scaleToFillX.blockSignals(False)
-
-        self.scaleToFillY.blockSignals(True)
-        self.scaleToFillY.setChecked(self.GetSetting(
-            f"game.{game_codename}.scaleFillY",
-            False
-        ))
-        self.scaleToFillY.blockSignals(False)
-
-        # Disable scale to fill options if it doesn't make sense with uncropped edge
-        uncropped_edge = biggest_pack.get("uncropped_edge", [])
-
-        if 'l' in uncropped_edge or 'r' in uncropped_edge:
-            self.scaleToFillX.setEnabled(True)
-            self.scaleToFillX.setChecked(
-                self.GetSetting(f"game.{game_codename}.scaleFillX", False))
-        else:
-            self.scaleToFillX.setEnabled(False)
-
-        if 'u' in uncropped_edge or 'd' in uncropped_edge:
-            self.scaleToFillY.setEnabled(True)
-            self.scaleToFillY.setChecked(
-                self.GetSetting(f"game.{game_codename}.scaleFillY", False))
-        else:
-            self.scaleToFillY.setEnabled(False)
-
-    def _getBiggestAssetPack(self):
-        """Return the asset pack dict with the largest average image size."""
-        assets = AutonaGameAssetManager.instance.selectedGame.get("assets", {})
-        biggest = {}
-        biggest_size = 0
-        for key, val in assets.items():
-            if key == "base_files":
-                continue
-            avg = val.get("average_size", {})
-            size = avg.get("x", 0) * avg.get("y", 0)
-            if size > biggest_size:
-                biggest_size = size
-                biggest = val
-        return biggest
-
     def SaveIcons(self, key, side):
         path = QFileDialog.getOpenFileName()[0]
         if path:
             self.SaveSettings(key=f"{key}.{side}",
                               val=path, generatePreview=True)
 
-    def SaveImage(self, key):
-        path = QFileDialog.getOpenFileName()[0]
+    # ── Background image source (default / banner / custom) ────────────
+
+    def _migrateBackgroundSource(self):
+        """One-time migration from the legacy single `background_path` model
+        to the explicit `background_source` selector. Runs until the key
+        exists, so it is a no-op on every subsequent call."""
+        if SettingsManager.Get("thumbnail_config.background_source") is not None:
+            return
+        legacy = SettingsManager.Get("thumbnail_config.background_path") or ""
+        if legacy in (thumbnail.BANNER_PATH, thumbnail.DEFAULT_BANNER_PATH):
+            # Was pointing at the tournament banner — free the custom slot.
+            SettingsManager.Set("thumbnail_config.background_source", "banner")
+            SettingsManager.Set("thumbnail_config.background_path", "")
+        elif legacy:
+            SettingsManager.Set("thumbnail_config.background_source", "custom")
+        else:
+            SettingsManager.Set("thumbnail_config.background_source", "default")
+
+    def _updateBackgroundControls(self):
+        """Reflect the persisted background_source into the radio group and the
+        custom-file row (signals blocked so this never re-triggers a save)."""
+        source = SettingsManager.Get(
+            "thumbnail_config.background_source", "default")
+        radios = {
+            "default": self.bgSourceDefault,
+            "banner": self.bgSourceBanner,
+            "custom": self.bgSourceCustom,
+        }
+        for rb in radios.values():
+            rb.blockSignals(True)
+        for key, rb in radios.items():
+            rb.setChecked(key == source)
+        for rb in radios.values():
+            rb.blockSignals(False)
+        self._setCustomBgRowVisible(source == "custom")
+        self._updateCustomBgName()
+
+    def _setCustomBgRowVisible(self, visible):
+        self.btSelectCustomBg.setVisible(visible)
+        self.customBgName.setVisible(visible)
+
+    def _updateCustomBgName(self):
+        path = SettingsManager.Get("thumbnail_config.background_path") or ""
+        self.customBgName.setText(os.path.basename(path) if path else "")
+
+    def _onBgSourceToggled(self, checked):
+        # toggled fires for both the newly-off and newly-on radio; act once.
+        if not checked:
+            return
+        if self.bgSourceCustom.isChecked():
+            source = "custom"
+        elif self.bgSourceBanner.isChecked():
+            source = "banner"
+        else:
+            source = "default"
+        self._setCustomBgRowVisible(source == "custom")
+        self.SaveSettings(key="background_source", val=source,
+                          generatePreview=True)
+        # Prompt for a file immediately when custom is picked with none set.
+        # Defer the modal out of the signal handler (agent-pitfalls #9).
+        if source == "custom" and not (
+                SettingsManager.Get("thumbnail_config.background_path") or ""):
+            QTimer.singleShot(0, self._chooseCustomBackground)
+
+    def _chooseCustomBackground(self):
+        path = QFileDialog.getOpenFileName(
+            self,
+            QApplication.translate("app", "Open Image"),
+            ".",
+            QApplication.translate("app", "Image Files") + " (*.png *.jpg *.jpeg *.bmp)"
+        )[0]
         if path:
-            self.SaveSettings(key=key, val=path, generatePreview=True)
+            self.SaveSettings(key="background_path", val=path,
+                              generatePreview=True)
+            self._updateCustomBgName()
 
     def SaveSettings(self, key, val, generatePreview=False):
         try:
