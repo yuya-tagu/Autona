@@ -665,6 +665,326 @@
         <source>LAN access: disabled — other devices cannot connect. Enable it under Settings → General (restart required).</source>
         <translation>LAN アクセス: 無効 — 他のデバイスからは接続できません。有効にするには 設定 → 一般 で設定してください（要再起動）。</translation>
     </message>
+    <message>
+        <source>*.txt files hold the raw value (easy to match). program_state.json carries revision/timestamp, so watch it for "file modified" to react to any state change.</source>
+        <translation>*.txt ファイルには生の値が入ります（マッチしやすい）。program_state.json は revision/timestamp を持つため、あらゆる状態変化に反応させたい場合は「file modified」で監視します。</translation>
+    </message>
+    <message>
+        <source>Add a condition -&gt; File, then browse to one of the files below (use Copy file path to get the absolute path).</source>
+        <translation>条件 -&gt; File を追加し、下記いずれかのファイルを指定します（絶対パスは「ファイルパスをコピー」で取得できます）。</translation>
+    </message>
+    <message>
+        <source>Add a trigger (e.g. Hotkey, Scene, or WebSocket message).</source>
+        <translation>トリガーを追加します（例: Hotkey、Scene、WebSocket message）。</translation>
+    </message>
+    <message>
+        <source>Add an action -&gt; Run: set the program to curl.exe (bundled with Windows), then paste everything after "curl" from the table below as the arguments.</source>
+        <translation>アクション -&gt; Run を追加します。プログラムに curl.exe（Windows 同梱）を指定し、下の表の「curl」以降をすべて引数として貼り付けます。</translation>
+    </message>
+    <message>
+        <source>Add an action -&gt; Switch scene and pick the target scene.</source>
+        <translation>アクション -&gt; Switch scene を追加し、対象のシーンを選びます。</translation>
+    </message>
+    <message>
+        <source>Base URL</source>
+        <translation>ベース URL</translation>
+    </message>
+    <message>
+        <source>Best-of value</source>
+        <translation>Best-of の値</translation>
+    </message>
+    <message>
+        <source>Bitfocus Companion controls Autona through the External Control API over HTTP. Map physical buttons to the operations below.</source>
+        <translation>Bitfocus Companion は外部制御 API（HTTP）を通じて Autona を操作します。物理ボタンを下記の操作に割り当ててください。</translation>
+    </message>
+    <message>
+        <source>Board 1 / Team 1 / Player 1 tag</source>
+        <translation>ボード1 / チーム1 / プレイヤー1 のタグ</translation>
+    </message>
+    <message>
+        <source>Board 1 / Team 1 score</source>
+        <translation>ボード1 / チーム1 のスコア</translation>
+    </message>
+    <message>
+        <source>Board 1 / Team 2 / Player 1 tag</source>
+        <translation>ボード1 / チーム2 / プレイヤー1 のタグ</translation>
+    </message>
+    <message>
+        <source>Board 1 / Team 2 score</source>
+        <translation>ボード1 / チーム2 のスコア</translation>
+    </message>
+    <message>
+        <source>Body</source>
+        <translation>ボディ</translation>
+    </message>
+    <message>
+        <source>Body (JSON)</source>
+        <translation>ボディ (JSON)</translation>
+    </message>
+    <message>
+        <source>Button icons (click to copy)</source>
+        <translation>ボタンアイコン（クリックでコピー）</translation>
+    </message>
+    <message>
+        <source>Choose the match mode: exact content / regex for a *.txt value, or "File was modified" on program_state.json to react to any change.</source>
+        <translation>マッチモードを選びます。*.txt の値には exact content / regex を、あらゆる変更に反応させるには program_state.json に「File was modified」を使います。</translation>
+    </message>
+    <message>
+        <source>Click an icon to copy it to the clipboard, then paste it onto a Companion button.</source>
+        <translation>アイコンをクリックするとクリップボードにコピーされます。Companion のボタンに貼り付けてください。</translation>
+    </message>
+    <message>
+        <source>Command</source>
+        <translation>コマンド</translation>
+    </message>
+    <message>
+        <source>Confirm</source>
+        <translation>確認</translation>
+    </message>
+    <message>
+        <source>Connection</source>
+        <translation>接続</translation>
+    </message>
+    <message>
+        <source>Contains</source>
+        <translation>内容</translation>
+    </message>
+    <message>
+        <source>Control Autona from Advanced Scene Switcher</source>
+        <translation>Advanced Scene Switcher から Autona を操作する</translation>
+    </message>
+    <message>
+        <source>Copied icon</source>
+        <translation>アイコンをコピーしました</translation>
+    </message>
+    <message>
+        <source>Copy</source>
+        <translation>コピー</translation>
+    </message>
+    <message>
+        <source>Copy URL</source>
+        <translation>URL をコピー</translation>
+    </message>
+    <message>
+        <source>Copy body</source>
+        <translation>ボディをコピー</translation>
+    </message>
+    <message>
+        <source>Copy command</source>
+        <translation>コマンドをコピー</translation>
+    </message>
+    <message>
+        <source>Copy curl</source>
+        <translation>curl をコピー</translation>
+    </message>
+    <message>
+        <source>Copy file path</source>
+        <translation>ファイルパスをコピー</translation>
+    </message>
+    <message>
+        <source>Copy this icon</source>
+        <translation>このアイコンをコピー</translation>
+    </message>
+    <message>
+        <source>Description</source>
+        <translation>説明</translation>
+    </message>
+    <message>
+        <source>Destructive operations (clear / reset) require "confirm": true in the JSON body. See the reference window for the full catalogue.</source>
+        <translation>破壊的な操作（clear / reset）は JSON ボディに "confirm": true が必要です。全一覧はリファレンスウィンドウを参照してください。</translation>
+    </message>
+    <message>
+        <source>Envelope &amp; error codes</source>
+        <translation>エンベロープ・エラーコード</translation>
+    </message>
+    <message>
+        <source>Error</source>
+        <translation>エラー</translation>
+    </message>
+    <message>
+        <source>Example button mappings</source>
+        <translation>ボタン割り当ての例</translation>
+    </message>
+    <message>
+        <source>Full state (JSON, has revision/timestamp)</source>
+        <translation>全状態（JSON、revision/timestamp を含む）</translation>
+    </message>
+    <message>
+        <source>In "Connections", add the "Generic HTTP" module.</source>
+        <translation>「Connections」で「Generic HTTP」モジュールを追加します。</translation>
+    </message>
+    <message>
+        <source>In OBS, open Tools -&gt; Advanced Scene Switcher -&gt; Macros and add a macro.</source>
+        <translation>OBS で ツール -&gt; Advanced Scene Switcher -&gt; Macros を開き、マクロを追加します。</translation>
+    </message>
+    <message>
+        <source>Invalid JSON body</source>
+        <translation>JSON ボディが不正です</translation>
+    </message>
+    <message>
+        <source>Keep text export enabled (Settings: general.disable_export must be off).</source>
+        <translation>テキスト出力を有効にしておきます（設定: general.disable_export をオフにする必要があります）。</translation>
+    </message>
+    <message>
+        <source>Launch Companion and open its web admin page (default http://127.0.0.1:8000).</source>
+        <translation>Companion を起動し、Web 管理ページ（既定は http://127.0.0.1:8000）を開きます。</translation>
+    </message>
+    <message>
+        <source>Load into tester</source>
+        <translation>テスターに読み込む</translation>
+    </message>
+    <message>
+        <source>Logged</source>
+        <translation>ログ記録</translation>
+    </message>
+    <message>
+        <source>Match label (e.g. Winners Finals)</source>
+        <translation>試合ラベル（例: Winners Finals）</translation>
+    </message>
+    <message>
+        <source>Method</source>
+        <translation>メソッド</translation>
+    </message>
+    <message>
+        <source>Open settings</source>
+        <translation>設定を開く</translation>
+    </message>
+    <message>
+        <source>Operation</source>
+        <translation>操作</translation>
+    </message>
+    <message>
+        <source>Optionally set the button text, then press the key to test.</source>
+        <translation>必要に応じてボタンのテキストを設定し、キーを押してテストします。</translation>
+    </message>
+    <message>
+        <source>Output folder</source>
+        <translation>出力フォルダ</translation>
+    </message>
+    <message>
+        <source>Paste the request URL from the table below. For POST, set the body to the JSON shown and add the header Content-Type: application/json.</source>
+        <translation>下の表のリクエスト URL を貼り付けます。POST の場合はボディに表示された JSON を設定し、ヘッダー Content-Type: application/json を追加します。</translation>
+    </message>
+    <message>
+        <source>Path</source>
+        <translation>パス</translation>
+    </message>
+    <message>
+        <source>Phase label (e.g. Top 8)</source>
+        <translation>フェーズラベル（例: Top 8）</translation>
+    </message>
+    <message>
+        <source>Player 1 score +1</source>
+        <translation>プレイヤー1 スコア +1</translation>
+    </message>
+    <message>
+        <source>Player 1 score -1</source>
+        <translation>プレイヤー1 スコア -1</translation>
+    </message>
+    <message>
+        <source>Player 2 score +1</source>
+        <translation>プレイヤー2 スコア +1</translation>
+    </message>
+    <message>
+        <source>Player 2 score -1</source>
+        <translation>プレイヤー2 スコア -1</translation>
+    </message>
+    <message>
+        <source>Port</source>
+        <translation>ポート</translation>
+    </message>
+    <message>
+        <source>Preset</source>
+        <translation>プリセット</translation>
+    </message>
+    <message>
+        <source>Pull current stream set</source>
+        <translation>現在の配信セットを取得</translation>
+    </message>
+    <message>
+        <source>Reference</source>
+        <translation>リファレンス</translation>
+    </message>
+    <message>
+        <source>Refresh</source>
+        <translation>更新</translation>
+    </message>
+    <message>
+        <source>Refresh Top 8 bracket</source>
+        <translation>Top 8 ブラケットを更新</translation>
+    </message>
+    <message>
+        <source>Request failed</source>
+        <translation>リクエストに失敗しました</translation>
+    </message>
+    <message>
+        <source>Reset scores</source>
+        <translation>スコアをリセット</translation>
+    </message>
+    <message>
+        <source>Response</source>
+        <translation>レスポンス</translation>
+    </message>
+    <message>
+        <source>Save and trigger the condition to test.</source>
+        <translation>保存し、条件を発火させてテストします。</translation>
+    </message>
+    <message>
+        <source>Select a button, then "Add action" and choose the Generic HTTP "POST" (or "GET") action.</source>
+        <translation>ボタンを選択し、「Add action」から Generic HTTP の「POST」（または「GET」）アクションを選びます。</translation>
+    </message>
+    <message>
+        <source>Send</source>
+        <translation>送信</translation>
+    </message>
+    <message>
+        <source>Sending…</source>
+        <translation>送信中…</translation>
+    </message>
+    <message>
+        <source>Set up integration between OBS Studio's Advanced Scene Switcher plugin and Autona.</source>
+        <translation>OBS Studio の Advanced Scene Switcher プラグインと Autona を連携させます。</translation>
+    </message>
+    <message>
+        <source>Setup steps</source>
+        <translation>設定手順</translation>
+    </message>
+    <message>
+        <source>Success</source>
+        <translation>成功</translation>
+    </message>
+    <message>
+        <source>Swap teams</source>
+        <translation>チームを入れ替え</translation>
+    </message>
+    <message>
+        <source>Tester</source>
+        <translation>テスター</translation>
+    </message>
+    <message>
+        <source>This is a destructive operation. Send it?</source>
+        <translation>これは破壊的な操作です。送信しますか？</translation>
+    </message>
+    <message>
+        <source>Trigger OBS from Autona state</source>
+        <translation>Autona の状態から OBS をトリガーする</translation>
+    </message>
+    <message>
+        <source>URL</source>
+        <translation>URL</translation>
+    </message>
+    <message>
+        <source>Use Run (not the HTTP action): the HTTP action discards the response and cannot set a Content-Type header, which a JSON API needs.</source>
+        <translation>HTTP アクションではなく Run を使います。HTTP アクションはレスポンスを破棄し、JSON API に必要な Content-Type ヘッダーを設定できません。</translation>
+    </message>
+    <message>
+        <source>Watch file</source>
+        <translation>監視ファイル</translation>
+    </message>
+    <message>
+        <source>optional</source>
+        <translation>任意</translation>
+    </message>
 </context><context>
     <name>app</name>
     <message>

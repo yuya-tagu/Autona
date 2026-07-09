@@ -663,6 +663,326 @@
         <source>LAN access: disabled — other devices cannot connect. Enable it under Settings → General (restart required).</source>
         <translation>LAN access: disabled — other devices cannot connect. Enable it under Settings → General (restart required).</translation>
     </message>
+    <message>
+        <source>*.txt files hold the raw value (easy to match). program_state.json carries revision/timestamp, so watch it for "file modified" to react to any state change.</source>
+        <translation>*.txt files hold the raw value (easy to match). program_state.json carries revision/timestamp, so watch it for "file modified" to react to any state change.</translation>
+    </message>
+    <message>
+        <source>Add a condition -&gt; File, then browse to one of the files below (use Copy file path to get the absolute path).</source>
+        <translation>Add a condition -&gt; File, then browse to one of the files below (use Copy file path to get the absolute path).</translation>
+    </message>
+    <message>
+        <source>Add a trigger (e.g. Hotkey, Scene, or WebSocket message).</source>
+        <translation>Add a trigger (e.g. Hotkey, Scene, or WebSocket message).</translation>
+    </message>
+    <message>
+        <source>Add an action -&gt; Run: set the program to curl.exe (bundled with Windows), then paste everything after "curl" from the table below as the arguments.</source>
+        <translation>Add an action -&gt; Run: set the program to curl.exe (bundled with Windows), then paste everything after "curl" from the table below as the arguments.</translation>
+    </message>
+    <message>
+        <source>Add an action -&gt; Switch scene and pick the target scene.</source>
+        <translation>Add an action -&gt; Switch scene and pick the target scene.</translation>
+    </message>
+    <message>
+        <source>Base URL</source>
+        <translation>Base URL</translation>
+    </message>
+    <message>
+        <source>Best-of value</source>
+        <translation>Best-of value</translation>
+    </message>
+    <message>
+        <source>Bitfocus Companion controls Autona through the External Control API over HTTP. Map physical buttons to the operations below.</source>
+        <translation>Bitfocus Companion controls Autona through the External Control API over HTTP. Map physical buttons to the operations below.</translation>
+    </message>
+    <message>
+        <source>Board 1 / Team 1 / Player 1 tag</source>
+        <translation>Board 1 / Team 1 / Player 1 tag</translation>
+    </message>
+    <message>
+        <source>Board 1 / Team 1 score</source>
+        <translation>Board 1 / Team 1 score</translation>
+    </message>
+    <message>
+        <source>Board 1 / Team 2 / Player 1 tag</source>
+        <translation>Board 1 / Team 2 / Player 1 tag</translation>
+    </message>
+    <message>
+        <source>Board 1 / Team 2 score</source>
+        <translation>Board 1 / Team 2 score</translation>
+    </message>
+    <message>
+        <source>Body</source>
+        <translation>Body</translation>
+    </message>
+    <message>
+        <source>Body (JSON)</source>
+        <translation>Body (JSON)</translation>
+    </message>
+    <message>
+        <source>Button icons (click to copy)</source>
+        <translation>Button icons (click to copy)</translation>
+    </message>
+    <message>
+        <source>Choose the match mode: exact content / regex for a *.txt value, or "File was modified" on program_state.json to react to any change.</source>
+        <translation>Choose the match mode: exact content / regex for a *.txt value, or "File was modified" on program_state.json to react to any change.</translation>
+    </message>
+    <message>
+        <source>Click an icon to copy it to the clipboard, then paste it onto a Companion button.</source>
+        <translation>Click an icon to copy it to the clipboard, then paste it onto a Companion button.</translation>
+    </message>
+    <message>
+        <source>Command</source>
+        <translation>Command</translation>
+    </message>
+    <message>
+        <source>Confirm</source>
+        <translation>Confirm</translation>
+    </message>
+    <message>
+        <source>Connection</source>
+        <translation>Connection</translation>
+    </message>
+    <message>
+        <source>Contains</source>
+        <translation>Contains</translation>
+    </message>
+    <message>
+        <source>Control Autona from Advanced Scene Switcher</source>
+        <translation>Control Autona from Advanced Scene Switcher</translation>
+    </message>
+    <message>
+        <source>Copied icon</source>
+        <translation>Copied icon</translation>
+    </message>
+    <message>
+        <source>Copy</source>
+        <translation>Copy</translation>
+    </message>
+    <message>
+        <source>Copy URL</source>
+        <translation>Copy URL</translation>
+    </message>
+    <message>
+        <source>Copy body</source>
+        <translation>Copy body</translation>
+    </message>
+    <message>
+        <source>Copy command</source>
+        <translation>Copy command</translation>
+    </message>
+    <message>
+        <source>Copy curl</source>
+        <translation>Copy curl</translation>
+    </message>
+    <message>
+        <source>Copy file path</source>
+        <translation>Copy file path</translation>
+    </message>
+    <message>
+        <source>Copy this icon</source>
+        <translation>Copy this icon</translation>
+    </message>
+    <message>
+        <source>Description</source>
+        <translation>Description</translation>
+    </message>
+    <message>
+        <source>Destructive operations (clear / reset) require "confirm": true in the JSON body. See the reference window for the full catalogue.</source>
+        <translation>Destructive operations (clear / reset) require "confirm": true in the JSON body. See the reference window for the full catalogue.</translation>
+    </message>
+    <message>
+        <source>Envelope &amp; error codes</source>
+        <translation>Envelope &amp; error codes</translation>
+    </message>
+    <message>
+        <source>Error</source>
+        <translation>Error</translation>
+    </message>
+    <message>
+        <source>Example button mappings</source>
+        <translation>Example button mappings</translation>
+    </message>
+    <message>
+        <source>Full state (JSON, has revision/timestamp)</source>
+        <translation>Full state (JSON, has revision/timestamp)</translation>
+    </message>
+    <message>
+        <source>In "Connections", add the "Generic HTTP" module.</source>
+        <translation>In "Connections", add the "Generic HTTP" module.</translation>
+    </message>
+    <message>
+        <source>In OBS, open Tools -&gt; Advanced Scene Switcher -&gt; Macros and add a macro.</source>
+        <translation>In OBS, open Tools -&gt; Advanced Scene Switcher -&gt; Macros and add a macro.</translation>
+    </message>
+    <message>
+        <source>Invalid JSON body</source>
+        <translation>Invalid JSON body</translation>
+    </message>
+    <message>
+        <source>Keep text export enabled (Settings: general.disable_export must be off).</source>
+        <translation>Keep text export enabled (Settings: general.disable_export must be off).</translation>
+    </message>
+    <message>
+        <source>Launch Companion and open its web admin page (default http://127.0.0.1:8000).</source>
+        <translation>Launch Companion and open its web admin page (default http://127.0.0.1:8000).</translation>
+    </message>
+    <message>
+        <source>Load into tester</source>
+        <translation>Load into tester</translation>
+    </message>
+    <message>
+        <source>Logged</source>
+        <translation>Logged</translation>
+    </message>
+    <message>
+        <source>Match label (e.g. Winners Finals)</source>
+        <translation>Match label (e.g. Winners Finals)</translation>
+    </message>
+    <message>
+        <source>Method</source>
+        <translation>Method</translation>
+    </message>
+    <message>
+        <source>Open settings</source>
+        <translation>Open settings</translation>
+    </message>
+    <message>
+        <source>Operation</source>
+        <translation>Operation</translation>
+    </message>
+    <message>
+        <source>Optionally set the button text, then press the key to test.</source>
+        <translation>Optionally set the button text, then press the key to test.</translation>
+    </message>
+    <message>
+        <source>Output folder</source>
+        <translation>Output folder</translation>
+    </message>
+    <message>
+        <source>Paste the request URL from the table below. For POST, set the body to the JSON shown and add the header Content-Type: application/json.</source>
+        <translation>Paste the request URL from the table below. For POST, set the body to the JSON shown and add the header Content-Type: application/json.</translation>
+    </message>
+    <message>
+        <source>Path</source>
+        <translation>Path</translation>
+    </message>
+    <message>
+        <source>Phase label (e.g. Top 8)</source>
+        <translation>Phase label (e.g. Top 8)</translation>
+    </message>
+    <message>
+        <source>Player 1 score +1</source>
+        <translation>Player 1 score +1</translation>
+    </message>
+    <message>
+        <source>Player 1 score -1</source>
+        <translation>Player 1 score -1</translation>
+    </message>
+    <message>
+        <source>Player 2 score +1</source>
+        <translation>Player 2 score +1</translation>
+    </message>
+    <message>
+        <source>Player 2 score -1</source>
+        <translation>Player 2 score -1</translation>
+    </message>
+    <message>
+        <source>Port</source>
+        <translation>Port</translation>
+    </message>
+    <message>
+        <source>Preset</source>
+        <translation>Preset</translation>
+    </message>
+    <message>
+        <source>Pull current stream set</source>
+        <translation>Pull current stream set</translation>
+    </message>
+    <message>
+        <source>Reference</source>
+        <translation>Reference</translation>
+    </message>
+    <message>
+        <source>Refresh</source>
+        <translation>Refresh</translation>
+    </message>
+    <message>
+        <source>Refresh Top 8 bracket</source>
+        <translation>Refresh Top 8 bracket</translation>
+    </message>
+    <message>
+        <source>Request failed</source>
+        <translation>Request failed</translation>
+    </message>
+    <message>
+        <source>Reset scores</source>
+        <translation>Reset scores</translation>
+    </message>
+    <message>
+        <source>Response</source>
+        <translation>Response</translation>
+    </message>
+    <message>
+        <source>Save and trigger the condition to test.</source>
+        <translation>Save and trigger the condition to test.</translation>
+    </message>
+    <message>
+        <source>Select a button, then "Add action" and choose the Generic HTTP "POST" (or "GET") action.</source>
+        <translation>Select a button, then "Add action" and choose the Generic HTTP "POST" (or "GET") action.</translation>
+    </message>
+    <message>
+        <source>Send</source>
+        <translation>Send</translation>
+    </message>
+    <message>
+        <source>Sending…</source>
+        <translation>Sending…</translation>
+    </message>
+    <message>
+        <source>Set up integration between OBS Studio's Advanced Scene Switcher plugin and Autona.</source>
+        <translation>Set up integration between OBS Studio's Advanced Scene Switcher plugin and Autona.</translation>
+    </message>
+    <message>
+        <source>Setup steps</source>
+        <translation>Setup steps</translation>
+    </message>
+    <message>
+        <source>Success</source>
+        <translation>Success</translation>
+    </message>
+    <message>
+        <source>Swap teams</source>
+        <translation>Swap teams</translation>
+    </message>
+    <message>
+        <source>Tester</source>
+        <translation>Tester</translation>
+    </message>
+    <message>
+        <source>This is a destructive operation. Send it?</source>
+        <translation>This is a destructive operation. Send it?</translation>
+    </message>
+    <message>
+        <source>Trigger OBS from Autona state</source>
+        <translation>Trigger OBS from Autona state</translation>
+    </message>
+    <message>
+        <source>URL</source>
+        <translation>URL</translation>
+    </message>
+    <message>
+        <source>Use Run (not the HTTP action): the HTTP action discards the response and cannot set a Content-Type header, which a JSON API needs.</source>
+        <translation>Use Run (not the HTTP action): the HTTP action discards the response and cannot set a Content-Type header, which a JSON API needs.</translation>
+    </message>
+    <message>
+        <source>Watch file</source>
+        <translation>Watch file</translation>
+    </message>
+    <message>
+        <source>optional</source>
+        <translation>optional</translation>
+    </message>
 </context><context>
     <name>app</name>
     <message>
