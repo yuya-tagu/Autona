@@ -26,7 +26,13 @@ class SettingsWidget(QWidget):
         for setting in settings:
             self.AddSetting(*setting)
 
-    def AddSetting(self, name: str, setting: str, type: str, defaultValue, callback=lambda: None, tooltip=None):
+    def _key(self, setting):
+        # Nest under settingsBase unless it is empty. An empty base lets a
+        # SettingsWidget drive top-level keys (e.g. program_language) that live
+        # at the state root rather than under a section prefix.
+        return f"{self.settingsBase}.{setting}" if self.settingsBase else setting
+
+    def AddSetting(self, name: str, setting: str, type: str, defaultValue, callback=lambda: None, tooltip=None, options=None):
         lastRow = self.layout().rowCount()
 
         self.layout().addWidget(QLabel(name), lastRow, 0)
@@ -38,9 +44,9 @@ class SettingsWidget(QWidget):
         if type == "checkbox":
             settingWidget = QCheckBox()
             settingWidget.setChecked(SettingsManager.Get(
-                self.settingsBase+"."+setting, defaultValue))
+                self._key(setting), defaultValue))
             settingWidget.stateChanged.connect(
-                lambda val=None: SettingsManager.Set(self.settingsBase+"."+setting, settingWidget.isChecked()))
+                lambda val=None: SettingsManager.Set(self._key(setting), settingWidget.isChecked()))
             resetButton.clicked.connect(
                 lambda bt=None, settingWidget=settingWidget:
                 settingWidget.setChecked(defaultValue)
@@ -50,9 +56,9 @@ class SettingsWidget(QWidget):
             settingWidget.setMinimum(1)
             settingWidget.setMaximum(99999)
             settingWidget.setValue(SettingsManager.Get(
-                self.settingsBase+"."+setting, defaultValue))
+                self._key(setting), defaultValue))
             settingWidget.valueChanged.connect(
-                lambda val=None: SettingsManager.Set(self.settingsBase+"."+setting, settingWidget.value()))
+                lambda val=None: SettingsManager.Set(self._key(setting), settingWidget.value()))
             resetButton.clicked.connect(
                 lambda bt=None, settingWidget=settingWidget:
                 settingWidget.setValue(defaultValue)
@@ -66,7 +72,7 @@ class SettingsWidget(QWidget):
                     0]) if keySequence.count() > 0 else None
             )
             initial = SettingsManager.Get(
-                self.settingsBase+"."+setting, defaultValue)
+                self._key(setting), defaultValue)
             settingWidget.setKeySequence(initial)
             # Track the last value we accepted so we can revert on
             # validation failure (Design.md §6.4.2 / §8 T-17).
@@ -87,9 +93,9 @@ class SettingsWidget(QWidget):
             if type == "password":
                 settingWidget.setEchoMode(QLineEdit.Password)
             settingWidget.textChanged.connect(
-                lambda val=None: SettingsManager.Set(self.settingsBase+"."+setting, settingWidget.text()))
+                lambda val=None: SettingsManager.Set(self._key(setting), settingWidget.text()))
             settingWidget.setText(SettingsManager.Get(
-                self.settingsBase+"."+setting, defaultValue))
+                self._key(setting), defaultValue))
             resetButton.clicked.connect(
                 lambda bt=None, setting=setting, settingWidget=settingWidget: [
                     settingWidget.setText(defaultValue),
@@ -97,16 +103,38 @@ class SettingsWidget(QWidget):
                 ]
             )
         elif type == "color":
-            settingWidget = AutonaColorButton(color=SettingsManager.Get(self.settingsBase+"."+setting, defaultValue), disable_right_click=True)
+            settingWidget = AutonaColorButton(color=SettingsManager.Get(self._key(setting), defaultValue), disable_right_click=True)
             settingWidget.colorChanged.connect(
-                lambda val=None: SettingsManager.Set(self.settingsBase+"."+setting, settingWidget.color()))
+                lambda val=None: SettingsManager.Set(self._key(setting), settingWidget.color()))
             resetButton.clicked.connect(
                 lambda bt=None, setting=setting, settingWidget=settingWidget: [
                     settingWidget.setColor(defaultValue),
                     callback()
                 ]
             )
-        
+        elif type == "combo":
+            # options: list of (label, value). Populate and select the current
+            # value BEFORE connecting the signal so building the widget does not
+            # fire the callback (which, for language settings, pops a restart
+            # dialog). The callback runs after persisting; callers that need a
+            # modal there must defer it (QTimer.singleShot) to avoid modal
+            # nesting inside this value-changed handler.
+            settingWidget = QComboBox()
+            for label, value in (options or []):
+                settingWidget.addItem(label, value)
+            current = SettingsManager.Get(self._key(setting), defaultValue)
+            foundIndex = settingWidget.findData(current)
+            settingWidget.setCurrentIndex(foundIndex if foundIndex >= 0 else 0)
+            settingWidget.currentIndexChanged.connect(
+                lambda i=None, settingWidget=settingWidget, setting=setting, callback=callback: [
+                    SettingsManager.Set(self._key(setting), settingWidget.currentData()),
+                    callback()
+                ])
+            resetButton.clicked.connect(
+                lambda bt=None, settingWidget=settingWidget, defaultValue=defaultValue:
+                settingWidget.setCurrentIndex(max(0, settingWidget.findData(defaultValue)))
+            )
+
         if tooltip:
             settingWidget.setToolTip('\n'.join(textwrap.wrap(tooltip, 40)))
 
@@ -173,7 +201,7 @@ class SettingsWidget(QWidget):
                     warning,
                 )
 
-            SettingsManager.Set(self.settingsBase+"."+setting, new_str)
+            SettingsManager.Set(self._key(setting), new_str)
             settingWidget._lastAcceptedSequence = new_str
             callback()
 

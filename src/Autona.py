@@ -158,14 +158,6 @@ from .AutonaPlayerBrowserWidget import AutonaPlayerBrowserWidget
 from src.AutonaWebServer import WebServer, check_webserver_port
 # autopep8: on
 
-def generate_restart_messagebox(main_txt):
-    messagebox = QMessageBox()
-    messagebox.setWindowTitle(QApplication.translate("app", "Warning"))
-    messagebox.setText(
-        main_txt + "\n" + QApplication.translate("app", "The program will now close."))
-    messagebox.finished.connect(QApplication.exit)
-    return (messagebox)
-
 
 def remove_accents_lower(input_str):
     nfkd_form = unicodedata.normalize('NFKD', input_str)
@@ -494,10 +486,6 @@ class Window(QMainWindow):
         action.setCheckable(True)
         action.toggled.connect(self.ToggleAlwaysOnTop)
 
-        action = helpMenu.addAction(
-            QApplication.translate("app", "Migrate Layout"))
-        action.triggered.connect(self.MigrateWindow)
-
         helpMenu.addSeparator()
 
         # Guidance for obtaining game assets (not bundled — see A2/copyright).
@@ -507,86 +495,8 @@ class Window(QMainWindow):
             QApplication.translate("app", "Add game assets"))
         action.triggered.connect(lambda: self.gameAssetGuideWindow.show())
 
-        helpMenu.addSeparator()
-
-        # Language sub-menus
-        program_language_messagebox = generate_restart_messagebox(
-            QApplication.translate("app", "Program language changed successfully."))
-        languageSelect = helpMenu.addMenu(
-            QApplication.translate("app", "Program Language"))
-        languageSelectGroup = QActionGroup(languageSelect)
-        languageSelectGroup.setExclusive(True)
-        action = languageSelect.addAction(
-            QApplication.translate("app", "System language"))
-        languageSelectGroup.addAction(action)
-        action.setCheckable(True)
-        action.setChecked(True)
-        action.triggered.connect(lambda x=None: [
-            SettingsManager.Set("program_language", "default"),
-            program_language_messagebox.exec()
-        ])
-        for code, language in AutonaLocaleHelper.languages.items():
-            action = languageSelect.addAction(f"{language[0]} / {language[1]}")
-            action.setCheckable(True)
-            languageSelectGroup.addAction(action)
-            action.triggered.connect(lambda x=None, c=code: [
-                SettingsManager.Set("program_language", c),
-                program_language_messagebox.exec()
-            ])
-            if SettingsManager.Get("program_language") == code:
-                action.setChecked(True)
-
-        game_asset_language_messagebox = generate_restart_messagebox(
-            QApplication.translate("app", "Game Asset Language changed successfully."))
-        languageSelect = helpMenu.addMenu(
-            QApplication.translate("app", "Game Asset Language"))
-        languageSelectGroup = QActionGroup(languageSelect)
-        languageSelectGroup.setExclusive(True)
-        action = languageSelect.addAction(
-            QApplication.translate("app", "Same as program language"))
-        languageSelectGroup.addAction(action)
-        action.setCheckable(True)
-        action.setChecked(True)
-        action.triggered.connect(lambda x=None: [
-            SettingsManager.Set("game_asset_language", "default"),
-            game_asset_language_messagebox.exec()
-        ])
-        for code, language in AutonaLocaleHelper.languages.items():
-            action = languageSelect.addAction(f"{language[0]} / {language[1]}")
-            action.setCheckable(True)
-            languageSelectGroup.addAction(action)
-            action.triggered.connect(lambda x=None, c=code: [
-                SettingsManager.Set("game_asset_language", c),
-                game_asset_language_messagebox.exec()
-            ])
-            if SettingsManager.Get("game_asset_language") == code:
-                action.setChecked(True)
-
-        fg_language_messagebox = generate_restart_messagebox(
-            QApplication.translate("app", "Tournament term language changed successfully."))
-        languageSelect = helpMenu.addMenu(
-            QApplication.translate("app", "Tournament term language"))
-        languageSelectGroup = QActionGroup(languageSelect)
-        languageSelectGroup.setExclusive(True)
-        action = languageSelect.addAction(
-            QApplication.translate("app", "Same as program language"))
-        languageSelectGroup.addAction(action)
-        action.setCheckable(True)
-        action.setChecked(True)
-        action.triggered.connect(lambda x=None: [
-            SettingsManager.Set("fg_term_language", "default"),
-            fg_language_messagebox.exec()
-        ])
-        for code, language in AutonaLocaleHelper.languages.items():
-            action = languageSelect.addAction(f"{language[0]} / {language[1]}")
-            action.setCheckable(True)
-            languageSelectGroup.addAction(action)
-            action.triggered.connect(lambda x=None, c=code: [
-                SettingsManager.Set("fg_term_language", c),
-                fg_language_messagebox.exec()
-            ])
-            if SettingsManager.Get("fg_term_language") == code:
-                action.setChecked(True)
+        # Program / game-asset / tournament-term language selectors moved to
+        # the Settings window (Help & Settings → Settings → Language).
 
         # ── Operations: battle format segment (1v1 / Team / Crew) ──
         # The sidebar header hosts the segmented control; choosing a format
@@ -1024,78 +934,3 @@ class Window(QMainWindow):
             "dark",
             custom_colors=UI.DARK_CUSTOM_COLORS,
             additional_qss=UI.global_qss())
-
-    def MigrateWindow(self):
-        migrateWindow = QDialog(self)
-        migrateWindow.setWindowTitle(
-            QApplication.translate("app", "Migrate Scoreboard Layout"))
-        migrateWindow.setMinimumWidth(800)
-        vbox = QVBoxLayout()
-        migrateWindow.setLayout(vbox)
-        hbox = QHBoxLayout()
-        label = QLabel(QApplication.translate("app", "File Path"))
-        filePath = QLineEdit()
-        fileExplorer = QPushButton(
-            text=QApplication.translate("app", "Find File..."))
-        hbox.addWidget(label)
-        hbox.addWidget(filePath)
-        hbox.addWidget(fileExplorer)
-        vbox.addLayout(hbox)
-
-        migrate = QPushButton(
-            text=QApplication.translate("app", "Migrate Layout"))
-
-        def open_dialog():
-            fname, _ok = QFileDialog.getOpenFileName(
-                migrateWindow,
-                QApplication.translate("app", "Open Layout Javascript File"),
-                os.getcwd(),
-                QApplication.translate("app", "Javascript File") + "  (*.js)",
-            )
-            if fname:
-                filePath.setText(str(fname))
-
-        fileExplorer.clicked.connect(open_dialog)
-
-        def MigrateLayout():
-            data = None
-            with open(filePath.text(), 'r') as file:
-                data = file.read()
-
-                data = data.replace("data.score.", "data.score[1].")
-                data = data.replace("oldData.score.", "oldData.score[1].")
-                data = data.replace(
-                    "_.get(data, \"score.stage_strike.", "_.get(data, \"score.1.stage_strike.")
-                data = data.replace(
-                    "_.get(oldData, \"score.stage_strike.", "_.get(oldData, \"score.1.stage_strike.")
-                data = data.replace(
-                    "source: `score.team.${t + 1}`", "source: `score.1.team.${t + 1}`")
-                data = data.replace(
-                    "data.score[1].ruleset", "data.score.ruleset")
-
-            with open(filePath.text(), 'w') as file:
-                file.write(data)
-
-            logger.info("Completed Layout Migration at: " + filePath.text())
-
-            completeDialog = QDialog(migrateWindow)
-            completeDialog.setWindowTitle(
-                QApplication.translate("app", "Migration Complete"))
-            completeDialog.setMinimumWidth(500)
-            vbox2 = QVBoxLayout()
-            completeDialog.setLayout(vbox2)
-            completeText = QLabel(QApplication.translate(
-                "app", "Layout Migration has completed!"))
-            completeText.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            closeButton = QPushButton(
-                text=QApplication.translate("app", "Close Window"))
-            vbox2.addWidget(completeText)
-            vbox2.addWidget(closeButton)
-            closeButton.clicked.connect(completeDialog.close)
-            completeDialog.show()
-
-        migrate.clicked.connect(MigrateLayout)
-
-        vbox.addWidget(migrate)
-
-        migrateWindow.show()
