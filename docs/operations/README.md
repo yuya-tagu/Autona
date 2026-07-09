@@ -13,6 +13,7 @@
 | ファイル | 内容 |
 |---------|------|
 | [runtime-operations.md](runtime-operations.md) | 起動〜本番〜復旧の運用手順と失敗モード |
+| [legacy-manual-update.md](legacy-manual-update.md) | v1.0.7 / v1.1.0 世代の自動更新不能問題の告知文・手動更新手順・リリースノート定型文 |
 
 ## 関連
 
