@@ -392,7 +392,11 @@ tournamentInfo
 旧 `ui.light_mode` キャッシュはテーマ切替機能の削除に伴い廃止（§5.4、ダーク固定）。
 現在 `ui` 配下に broadcast 用キーは無い。
 
-##### `notes` / `player_list` / `team_battle` / `layout_options` / `provider_videogame` / `completed_sets` / `streamQueue` / `currentStream` / `result_players`
+##### `notes` / `team_battle` / `layout_options` / `provider_videogame` / `completed_sets` / `streamQueue` / `currentStream` / `result_players`
+
+> 旧 `player_list.*`（PLAYERS 順位ロスター編集）は機能ごと廃止（layout/top_8 と共に削除、
+> Top-8 は `top8.*` → `layout/bracket_top8/` に一本化）。起動時に
+> `AutonaPlayerBrowserWidget.__init__` が残留キーを Unset する。
 
 詳細は [.claude/architecture/phase-a-b/state-keys.md](.claude/architecture/phase-a-b/state-keys.md) 参照。
 
@@ -585,8 +589,11 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | 5 | `Scoreboard` | `AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget` | board1=1v1、board2=team、board3=crew のスコア入力・選手編集・セット読み込み | `score.{N}.*` | `score.{N}.*`, `game.*` | ✓ |
 | 6 | `Commentary` | `AutonaCommentaryWidget` | 実況・解説者 8 スロットの編集（役割・コメント・表示トグル）、OBS 用 URL 案内・プレビュー | `commentary.{1..8}.*` | `commentary.{1..8}.*`, `tournamentInfo.*` | ✓ |
 | 7 | `Statistics` | `AutonaStatsWidget` | 内部 `QTabWidget` で複数ビューを集約（下記 §4.1.0） | （read-only） | `score.{N}.recent_sets`, `last_sets`, `upset_factor` ほか | ✓ |
+| 8 | `Players` | `AutonaPlayerBrowserWidget` | 選手一覧（2タブ）: トーナメント出場選手（provider.top_entrants ＋ ローカルDB 突き合わせ、シード順、P1/P2 セット）／登録済み選手（ローカル選手DB の閲覧・検索・新規登録・編集・削除） | `player_editor.1.*`（編集ダイアログの一時パス、close で Unset） | `AutonaPlayerDB.database`, `provider.top_entrants`（state 非依存） | ✓ |
 
-> **NOTE タブ（`AutonaNotesWidget`）は廃止**。`PLAYERS`（`AutonaPlayerListWidget`）と `ANLYSE`（`AutonaAnalysisWidget`）は**トップレベルのドックではなくなり**、`Statistics` ドック内の `QTabWidget` のサブタブとして埋め込まれた（いずれも `QDockWidget` → `QWidget` パネルに降格）。`AutonaPlayerListWidget.instance` / `.signals` は維持され、`AutonaScoreboardWidget` からの参照は従来どおり動作する。
+> **NOTE タブ（`AutonaNotesWidget`）は廃止**。`ANLYSE`（`AutonaAnalysisWidget`）は**トップレベルのドックではなく**、`Statistics` ドック内の `QTabWidget` のサブタブとして埋め込まれている（`QDockWidget` → `QWidget` パネルに降格）。
+> 旧 `PLAYERS`（`AutonaPlayerListWidget`、Top-8 順位ロスター編集）は機能ごと削除された。
+> スコアボードの「1選手あたりのキャラ数」スピンボックスはスコアボード自身が所有する（初期値 3）。
 
 ##### 4.1.0 Statistics ドック内タブ（`AutonaStatsWidget.tabs`）
 
@@ -596,7 +603,6 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | Last Sets | （内蔵） | `score.{N}.last_sets`（read-only） |
 | Tournament History | （内蔵） | `score.{N}.history_sets`（read-only） |
 | この大会の試合一覧 | `AutonaAnalysisWidget` パネル | Start.gg 全フェーズグループの自前フェッチのみ（state 非依存、read-only）。TournamentDataProvider のシグナル購読 |
-| 選手一覧 | `AutonaPlayerListWidget` パネル | `player_list.slot.{I}.*` を Set / `player_list.*` を Get |
 
 #### 4.1.1 パネル（ナビ）の追加・削除規約
 
@@ -701,7 +707,6 @@ layout/{用途}_{variant}/
 | `recent_sets/` | 最近のセット表示 | 1 種のみ |
 | `commentators/` | 実況・解説者バー（`commentary.{1..8}` の display=ON を 1〜4 名可変表示） | index.html 一本化（旧 tag*.html 3 バリアントは 2026-07 リワークで削除） |
 | `camborder_*` | カメラ枠 | `camborder_Universal/` |
-| `top_8/` | TOP8 フロア | 1 種 |
 | `tournament_history/` | プレイヤー経歴 | player1.html / player2.html |
 | `thumbnail*` | サムネイル画像生成専用 | §4.4 参照 |
 
@@ -1100,7 +1105,7 @@ QApplication 全体に `setStyleSheet` + `setPalette` を再適用して**全ウ
 
 #### 5.5.1 適用しないルール
 
-OBS HTML レイアウト（`layout/scoreboard*` `bracket*` `recent_sets/` `commentators/` `camborder*` `top_8/` `tournament_history/`）と画像生成テンプレ（`layout/thumbnail*` `result*`）には **§5.1〜§5.4 を強制しない**。
+OBS HTML レイアウト（`layout/scoreboard*` `bracket*` `recent_sets/` `commentators/` `camborder*` `tournament_history/`）と画像生成テンプレ（`layout/thumbnail*` `result*`）には **§5.1〜§5.4 を強制しない**。
 
 具体的には:
 - 配色は自由（OBS の `--accent-color: #f0a500` などアプリ内部とは異なる値で OK）
@@ -1416,7 +1421,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 |---|---------|------|
 | 1 | provider 実装ファイル（`src/Helpers/AutonaExampleProviderDataProvider.py` 等） | 大会、フェーズ、フェーズグループ、セット、選手取得 API を実装 |
 | 2 | `AutonaTournamentDataProvider.py` 関連 | provider 切替・共通インターフェースへの接続 |
-| 3 | StateManager キーパス（§3.1.2） | `top8.*`, `player_list.*`, `score.{N}.*` への展開仕様を確認 |
+| 3 | StateManager キーパス（§3.1.2） | `top8.*`, `score.{N}.*` への展開仕様を確認 |
 | 4 | SettingsManager | API token / endpoint / provider 選択の保存が必要なら追加（§3.3.4 命名規約） |
 | 5 | PyQt 設定 UI | provider 選択や認証情報入力が必要なら追加 |
 

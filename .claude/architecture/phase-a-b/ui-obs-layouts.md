@@ -21,7 +21,6 @@
 | `layout/recent_sets/` | 最近のセット | index.html/css/js |
 | `layout/commentators/` | コメンテーター名タグ | tag.html / tag_twitter.html / tag_name_twitter.html |
 | `layout/camborder_Universal/` | カメラ枠 | index.html/css（JS なし） |
-| `layout/top_8/` | TOP8 フロア | index.html/css/js + index_same_size.html |
 | `layout/thumbnail/` | サムネイル | thumbnail.html/css/js + thumbnail_assets.js |
 | `layout/thumbnail_type_b/` | サムネイル B | thumbnail.html/css/js |
 | `layout/tournament_history/` | プレイヤー経歴 | player1.html / player2.html + css/js |

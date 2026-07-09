@@ -317,27 +317,14 @@ class AutonaScoreboardWidget(QWidget):
         settingsRow.setContentsMargins(0, 0, 0, 0)
         settingsRow.setSpacing(UI.SPACE_SM)
 
-        # Characters-per-player is now controlled exclusively from the
-        # PLAYERS tab. We keep the QSpinBox here as an off-screen data
-        # holder (existing state-restore and external WebServer actions
-        # still poke self.charNumber.value()/setValue()), and mirror
-        # PLAYERS' value into it via AutonaPlayerListWidget's signal.
+        # Characters-per-player is owned by the scoreboard itself (the former
+        # PLAYERS tab that used to drive it was removed). External WebServer
+        # actions still poke self.charNumber.value()/setValue(). Default is 3.
         self.charNumber = QSpinBox()
         self.charNumber.setMaximum(100)
-        self.charNumber.setVisible(False)
+        self.charNumber.setFixedWidth(120)
         self.charNumber.valueChanged.connect(self.SetCharacterNumber)
-        try:
-            from .AutonaPlayerListWidget import AutonaPlayerListWidget
-            pl = AutonaPlayerListWidget.instance
-            if pl is not None:
-                pl.signals.characters_per_player_changed.connect(
-                    self.charNumber.setValue)
-                # Seed the initial value so scoreboards created after
-                # PLAYERS has settled inherit the current selection.
-                self.charNumber.setValue(pl.charNumber.value())
-        except Exception:
-            logger.opt(exception=True).warning(
-                "Scoreboard: failed to subscribe to PLAYERS charNumber")
+        self.charNumber.setValue(3)
 
         self.playerNumber = QSpinBox()
         self.playerNumber.setFixedWidth(120)
@@ -345,6 +332,9 @@ class AutonaScoreboardWidget(QWidget):
         settingsRow.addWidget(self._playerNumberLabel)
         settingsRow.addWidget(self.playerNumber)
         self.playerNumber.valueChanged.connect(self.SetPlayersPerTeam)
+        settingsRow.addWidget(
+            QLabel(QApplication.translate("app", "Characters per player")))
+        settingsRow.addWidget(self.charNumber)
 
         bottomOptions.layout().addLayout(settingsRow)
 
@@ -464,16 +454,9 @@ class AutonaScoreboardWidget(QWidget):
         StateManager.Unset(f'score.{self.scoreboardNumber}.team.1.player')
         StateManager.Unset(f'score.{self.scoreboardNumber}.team.2.player')
         self.playerNumber.setValue(1)
-        # Pull initial characters-per-player from the PLAYERS tab so the
-        # freshly-built player widgets pick up the user's last choice
-        # instead of getting pinned to 1 every launch.
-        try:
-            from .AutonaPlayerListWidget import AutonaPlayerListWidget
-            _pl = AutonaPlayerListWidget.instance
-            self.charNumber.setValue(
-                _pl.charNumber.value() if _pl is not None else 1)
-        except Exception:
-            self.charNumber.setValue(1)
+        # Re-assert the characters-per-player default so the freshly-built
+        # player widgets pick it up instead of getting pinned to 1.
+        self.charNumber.setValue(3)
 
         self._applyScoreboardMode(self.singlePlayer)
 
@@ -1753,22 +1736,13 @@ class AutonaScoreboardWidget(QWidget):
         return False
 
     def SetDefaultsFromAssets(self):
-        # Characters-per-player is owned by the PLAYERS tab now, so we
-        # only propagate the game's default players-per-team here. The
-        # PLAYERS tab's onLoad handler forces its own characters value
-        # and the scoreboard mirrors it via
-        # characters_per_player_changed.
+        # Propagate the game's default players-per-team; characters-per-player
+        # is forced back to its default (3) regardless of game asset config.
         if StateManager.Get('game.defaults'):
             players = StateManager.Get('game.defaults.players_per_team', 1)
         else:
             players = 1
         self.playerNumber.setValue(players)
-        try:
-            from .AutonaPlayerListWidget import AutonaPlayerListWidget
-            pl = AutonaPlayerListWidget.instance
-            if pl is not None:
-                self.charNumber.setValue(pl.charNumber.value())
-        except Exception:
-            pass
+        self.charNumber.setValue(3)
 
     pass

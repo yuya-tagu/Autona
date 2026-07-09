@@ -190,7 +190,6 @@
     <message>
         <location filename="..\layout\AutonaScoreboardTeam.ui" line="0" />
         <location filename="..\layout\AutonaBattleTeam.ui" line="0" />
-        <location filename="..\AutonaPlayerListSlotWidget.py" line="38" />
         <source>Team Name</source>
         <translation>チーム名</translation>
     </message>
@@ -625,16 +624,6 @@
         <source>Stream powered by Autona:</source>
         <translation>配信支援: Autona</translation>
     </message>
-    <message>
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="210" />
-        <source>Standings:</source>
-        <translation>順位:</translation>
-    </message>
-    <message>
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="281" />
-        <source>Stream powered by Autona</source>
-        <translation>配信支援: Autona</translation>
-    </message>
 </context><context>
     <name>api</name>
     <message>
@@ -773,10 +762,94 @@
         <translation>実況・解説設定</translation>
     </message>
     <message>
-        <location filename="..\AutonaPlayerListWidget.py" line="40" />
-        <location filename="..\Autona.py" line="381" />
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="102" />
         <source>Player List</source>
-        <translation>プレイヤーリスト</translation>
+        <translation>選手一覧</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaResultSettingsWidget.py" line="352" />
+        <source>Save player characters</source>
+        <translation>選手のキャラクターを保存</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaResultSettingsWidget.py" line="360" />
+        <source>Saves player data so you can easily reuse it in future results.</source>
+        <translation>選手データを保存し、次回以降のリザルト作成でもかんたんに呼び出すことができます</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaResultSettingsWidget.py" line="820" />
+        <source>There are no players to save.</source>
+        <translation>保存できる選手がいません。</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaResultSettingsWidget.py" line="828" />
+        <source>Saved {0} player(s) to the local database.</source>
+        <translation>{0} 人の選手をローカルDBに保存しました。</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="129" />
+        <source>Tournament Entrants</source>
+        <translation>トーナメント出場選手</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="132" />
+        <source>Registered Players</source>
+        <translation>登録済み選手</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="161" />
+        <source>No tournament loaded. Set a tournament URL in the EVENT panel.</source>
+        <translation>大会が読み込まれていません。EVENT パネルで大会 URL を設定してください。</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="176" />
+        <source>In team battle formats, this sets the first player of the team.</source>
+        <translation>チーム戦フォーマットでは各チームの1人目にセットされます。</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="178" />
+        <source>Set as P1</source>
+        <translation>P1 にセット</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="183" />
+        <source>Set as P2</source>
+        <translation>P2 にセット</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="211" />
+        <source>Search players</source>
+        <translation>選手を検索</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="215" />
+        <source>Add new player</source>
+        <translation>選手を新規登録</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="220" />
+        <source>Edit player</source>
+        <translation>選手を編集</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="225" />
+        <source>Delete selected player</source>
+        <translation>選手を削除</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="437" />
+        <source>Are you sure you want to delete this player?</source>
+        <translation>この選手を削除しますか？</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="345" />
+        <source>GamerTag</source>
+        <translation>ハンドルネーム</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="347" />
+        <source>Country</source>
+        <translation>国</translation>
     </message>
     <message>
         <location filename="..\AutonaNotesWidget.py" line="34" />
@@ -1023,19 +1096,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
 フェーズグループを選択してください。Start.ggがタイムアウトした場合は「Update bracket info」ボタンで再取得してください。</translation>
     </message>
     <message>
-        <location filename="..\AutonaPlayerListWidget.py" line="72" />
-        <location filename="..\AutonaBracketWidget.py" line="65" />
-        <source>Number of slots</source>
-        <translation>スロットの数</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerListWidget.py" line="78" />
-        <location filename="..\AutonaBracketWidget.py" line="73" />
-        <source>Players per slot</source>
-        <translation>各スロットのプレイヤー数</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerListWidget.py" line="84" />
         <location filename="..\AutonaCommentaryWidget.py" line="51" />
         <location filename="..\AutonaBracketWidget.py" line="82" />
         <source>Characters per player</source>
@@ -1181,31 +1241,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaIndividualGameTracker.py" line="79" />
         <source>Tie</source>
         <translation>引き分け</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerListSlotWidget.py" line="158" />
-        <source>Slot {0} - Team</source>
-        <translation>スロット {0} - チーム</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerListWidget.py" line="97" />
-        <source>Load tournament standings</source>
-        <translation>トーナメントの順位表をロードする</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerListWidget.py" line="102" />
-        <source>Generate Descriptive Text for Results</source>
-        <translation>結果の説明テキストを生成</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerListWidget.py" line="133" />
-        <source>Descriptive Text for Results</source>
-        <translation>結果の説明テキスト</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerListWidget.py" line="147" />
-        <source>Copy text</source>
-        <translation>テキストをコピー</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="234" />
@@ -2402,13 +2437,6 @@ Choose a different combination or clear the conflicting assignment first.</sourc
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="225" />
         <source>Player {0} tag missing</source>
         <translation>プレイヤー{0}のタグがありません</translation>
-    </message>
-</context><context>
-    <name>tips</name>
-    <message>
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="12" />
-        <source>Descriptive text (also known as Alt text) describes images for blind and low-vision users, and helps give context around images to everyone. As such, we highly recommend adding it to your image uploads on your websites and social media posts.</source>
-        <translation>記述テキスト（Alt テキスト）は、視覚に障害のあるユーザー向けに画像の内容を説明するもので、すべての人に画像の文脈を伝える助けになります。ウェブサイトや SNS に画像を投稿する際は付与することを強く推奨します。</translation>
     </message>
 </context><context>
     <name>updater</name>

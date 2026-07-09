@@ -230,7 +230,6 @@ Autona の全 UI 系統は **StateManager**（Python グローバル状態辞書
 | `tournamentInfo.*` | W (edit) | R (partial) | R | R (partial) |
 | `game.*` | W (manager) | R | R | R (socket) |
 | `bracket.*` | W (view) | R (layout dependent) | — | — |
-| `player_list.*` | W (widget) | — | — | — |
 | `result_players` | R/W (widget) | — | R (prepare) | — |
 
 凡例: R = 読み取り、W = 書き込み、R/W = 両方、— = 関与なし

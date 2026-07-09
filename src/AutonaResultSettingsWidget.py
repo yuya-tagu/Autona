@@ -337,6 +337,27 @@ class AutonaResultSettingsWidget(QDockWidget):
         grid.setContentsMargins(0, 0, 0, 0)
         grid.addWidget(self.playerCardList, 0, 0)
 
+        # --- Save the entered players/characters to the local player DB ---
+        # RESULT-tab inputs are otherwise write-only into `result_players`
+        # (image rendering); this persists them so the same players carry their
+        # mains into autocomplete / the Player List going forward.
+        saveDbContainer = QWidget()
+        saveDbCol = QVBoxLayout(saveDbContainer)
+        saveDbCol.setContentsMargins(0, UI.SPACE_SM, 0, 0)
+        saveDbCol.setSpacing(2)
+        self.btSavePlayersToDB = QPushButton(
+            QApplication.translate("app", "Save player characters"))
+        self.btSavePlayersToDB.setIcon(QIcon(UI.icon_path("save.svg")))
+        self.btSavePlayersToDB.clicked.connect(self._savePlayersToDB)
+        saveDbCol.addWidget(self.btSavePlayersToDB)
+        saveDbNote = QLabel(QApplication.translate(
+            "app",
+            "Saves player data so you can easily reuse it in future results."))
+        saveDbNote.setWordWrap(True)
+        saveDbNote.setStyleSheet(UI.secondary_label_style())
+        saveDbCol.addWidget(saveDbNote)
+        grid.addWidget(saveDbContainer, 1, 0)
+
         for i in range(16):
             rank_edit = self._makeRankEdit(i + 1)
 
@@ -760,6 +781,97 @@ class AutonaResultSettingsWidget(QDockWidget):
         else:
             self._syncPlayersToState()
 
+    @staticmethod
+    def _mainsFromResultCombos(combo_pairs):
+        """Build a mains list [[char_en_name, skin, variant], ...] from
+        (char_combo, color_combo) pairs, skipping empty character slots.
+        RESULT-tab combos carry no variant, so variant is always "" — the
+        same [char, skin, variant] shape AutonaScoreboardPlayerWidget saves."""
+        mains = []
+        for char_combo, color_combo in combo_pairs:
+            char_data = char_combo.currentData(Qt.ItemDataRole.UserRole)
+            en_name = char_data.get("en_name") if char_data else None
+            if not en_name:
+                continue
+            skin = color_combo.currentIndex()
+            if skin is None or skin < 0:
+                skin = 0
+            mains.append([en_name, skin, ""])
+        return mains
+
+    def _persistPlayersToDB(self):
+        """Persist the entered RESULT players (name/sponsor/twitter/mains) into
+        the local player DB and return the number saved. Silent (no dialogs) so
+        it can be reused both by the explicit button and as a side effect of
+        saving / posting the result. Uses overwrite=False so it MERGES —
+        existing country/real-name/etc. and other games' mains are preserved;
+        only the current game's mains and the fields we carry are updated."""
+        game = AutonaGameAssetManager.instance.selectedGame
+        codename = game.get("codename", "") if game else ""
+
+        records = []
+        if self._isTeamLayout():
+            for team in self.teamInputs:
+                for member_name, char_combo, color_combo in team["members"]:
+                    nm = member_name.text().strip()
+                    if not nm:
+                        continue
+                    rec = {"gamerTag": nm}
+                    mains = self._mainsFromResultCombos([(char_combo, color_combo)])
+                    if mains and codename:
+                        rec["mains"] = {codename: mains}
+                    records.append(rec)
+        else:
+            for entry in self.playerInputs:
+                nm = entry[1].text().strip()
+                if not nm:
+                    continue
+                rec = {"gamerTag": nm}
+                sponsor = entry[2].text().strip()
+                if sponsor:
+                    rec["prefix"] = sponsor
+                twitter = entry[9].text().strip()
+                if twitter:
+                    rec["twitter"] = twitter
+                mains = self._mainsFromResultCombos(
+                    [(entry[3], entry[4]), (entry[5], entry[6]), (entry[7], entry[8])])
+                if mains and codename:
+                    rec["mains"] = {codename: mains}
+                records.append(rec)
+
+        if not records:
+            return 0
+
+        AutonaPlayerDB.AddPlayers(records, overwrite=False)
+        logger.info(f"RESULT: saved {len(records)} player(s) to the local DB")
+        return len(records)
+
+    def _autoPersistPlayersToDB(self):
+        """Best-effort DB persist as a side effect of saving/posting the
+        result. Never interrupts the primary action with a dialog; failures are
+        logged only so a DB hiccup can't block the image save / X post."""
+        try:
+            self._persistPlayersToDB()
+        except Exception:
+            logger.exception("RESULT: auto-save players to DB failed")
+
+    def _savePlayersToDB(self):
+        """Explicit 'Save player characters' button: persist + confirm."""
+        count = self._persistPlayersToDB()
+        if count == 0:
+            QMessageBox.information(
+                self,
+                QApplication.translate("app", "Save player characters"),
+                QApplication.translate(
+                    "app", "There are no players to save."))
+            return
+        QMessageBox.information(
+            self,
+            QApplication.translate("app", "Save player characters"),
+            QApplication.translate(
+                "app", "Saved {0} player(s) to the local database.").format(
+                    count))
+
     def _syncTeamsToState(self):
         """Write team inputs to StateManager as members[] per rank.
 
@@ -1181,6 +1293,8 @@ class AutonaResultSettingsWidget(QDockWidget):
     def _saveResult(self):
         try:
             self._syncCurrentToState()
+            # Persist the entered players to the local DB alongside the save.
+            self._autoPersistPlayersToDB()
             path = result_gen.generate(
                 settingsManager=SettingsManager,
                 layout=self._selectedLayout())
@@ -1217,6 +1331,8 @@ class AutonaResultSettingsWidget(QDockWidget):
         try:
             # 1. Render the result image and put it on the clipboard.
             self._syncCurrentToState()
+            # Persist the entered players to the local DB alongside the post.
+            self._autoPersistPlayersToDB()
             path = result_gen.generate(
                 settingsManager=SettingsManager,
                 layout=self._selectedLayout())

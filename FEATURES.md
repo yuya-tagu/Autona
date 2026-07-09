@@ -205,13 +205,12 @@
 
 ---
 
-## 10. 選手リスト
+## 10. 選手一覧
 
-[src/AutonaPlayerListWidget.py](src/AutonaPlayerListWidget.py)・[src/AutonaPlayerList.py](src/AutonaPlayerList.py)。STATS ドック内の「選手一覧」タブとして表示（独立ドックから移設）。
+[src/AutonaPlayerBrowserWidget.py](src/AutonaPlayerBrowserWidget.py)。サイドバーの独立パネル（統計情報の下）。2 タブ構成。
 
-- スロット数 / スロットあたり選手数 / 選手あたりキャラ数
-- Start.gg Standings から一括読込
-- 配信用テキスト出力
+- **トーナメント出場選手** — 現在ロード中の大会の参加者をシード順に一覧表示（スポンサー / ハンドルネーム / 本名 / 国 / 使用キャラ）。行選択から P1 / P2 へワンクリックでセット
+- **登録済み選手** — ローカル選手 DB（`user_data/local_players.json`）の閲覧・インクリメンタル検索・新規登録・編集・削除。編集はスコアボードと同じ選手フォームをダイアログで再利用
 
 ---
 
@@ -224,7 +223,6 @@ STATS ドック（[src/AutonaStatsWidget.py](src/AutonaStatsWidget.py)）の内�
   - 全試合一覧（ラウンド・シード・選手・スコア）
   - Upset Factor / Loser's Run / SeedOver
   - Stream Queue 反映 / 列ソート対応
-- **選手一覧**（[src/AutonaPlayerListWidget.py](src/AutonaPlayerListWidget.py) パネル） — 選手一覧の編集・スタンディング読み込み・結果テキスト生成
 
 ---
 
@@ -460,7 +458,7 @@ Edit → Help サブメニュー。
 - `out/` 配下の個別テキストファイル（OBS テキストソース向け）
 - HTML オーバーレイテンプレート（gsap / jQuery）
 - ブラウザソースで `http://localhost:5000/layout/...` を参照
-- 用途別レイアウト多数: `scoreboard`, `bracket_top8/12/16`, `commentators`, `recent_sets`, `result`, `result_top16`, `tournament_history`, `top_8`, `thumbnail` 等
+- 用途別レイアウト多数: `scoreboard`, `bracket_top8`, `commentators`, `recent_sets`, `result`, `result_top16`, `tournament_history`, `thumbnail` 等
 
 ---
 

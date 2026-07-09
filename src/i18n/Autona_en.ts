@@ -189,7 +189,6 @@
     <message>
         <location filename="..\layout\AutonaScoreboardTeam.ui" line="0" />
         <location filename="..\layout\AutonaBattleTeam.ui" line="0" />
-        <location filename="..\AutonaPlayerListSlotWidget.py" line="38" />
         <source>Team Name</source>
         <translation>Team Name</translation>
     </message>
@@ -623,16 +622,6 @@
         <source>Stream powered by Autona:</source>
         <translation>Stream powered by Autona:</translation>
     </message>
-    <message>
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="210" />
-        <source>Standings:</source>
-        <translation>Standings:</translation>
-    </message>
-    <message>
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="281" />
-        <source>Stream powered by Autona</source>
-        <translation>Stream powered by Autona</translation>
-    </message>
 </context><context>
     <name>api</name>
     <message>
@@ -771,10 +760,94 @@
         <translation>Commentary</translation>
     </message>
     <message>
-        <location filename="..\AutonaPlayerListWidget.py" line="40" />
-        <location filename="..\Autona.py" line="381" />
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="102" />
         <source>Player List</source>
         <translation>Player List</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaResultSettingsWidget.py" line="352" />
+        <source>Save player characters</source>
+        <translation>Save player characters</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaResultSettingsWidget.py" line="360" />
+        <source>Saves player data so you can easily reuse it in future results.</source>
+        <translation>Saves player data so you can easily reuse it in future results.</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaResultSettingsWidget.py" line="820" />
+        <source>There are no players to save.</source>
+        <translation>There are no players to save.</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaResultSettingsWidget.py" line="828" />
+        <source>Saved {0} player(s) to the local database.</source>
+        <translation>Saved {0} player(s) to the local database.</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="129" />
+        <source>Tournament Entrants</source>
+        <translation>Tournament Entrants</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="132" />
+        <source>Registered Players</source>
+        <translation>Registered Players</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="161" />
+        <source>No tournament loaded. Set a tournament URL in the EVENT panel.</source>
+        <translation>No tournament loaded. Set a tournament URL in the EVENT panel.</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="176" />
+        <source>In team battle formats, this sets the first player of the team.</source>
+        <translation>In team battle formats, this sets the first player of the team.</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="178" />
+        <source>Set as P1</source>
+        <translation>Set as P1</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="183" />
+        <source>Set as P2</source>
+        <translation>Set as P2</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="211" />
+        <source>Search players</source>
+        <translation>Search players</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="215" />
+        <source>Add new player</source>
+        <translation>Add new player</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="220" />
+        <source>Edit player</source>
+        <translation>Edit player</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="225" />
+        <source>Delete selected player</source>
+        <translation>Delete selected player</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="437" />
+        <source>Are you sure you want to delete this player?</source>
+        <translation>Are you sure you want to delete this player?</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="345" />
+        <source>GamerTag</source>
+        <translation>GamerTag</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaPlayerBrowserWidget.py" line="347" />
+        <source>Country</source>
+        <translation>Country</translation>
     </message>
     <message>
         <location filename="..\AutonaNotesWidget.py" line="34" />
@@ -1020,19 +1093,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>No bracket data. Pick a phase group, or retry if Start.gg timed out.</translation>
     </message>
     <message>
-        <location filename="..\AutonaPlayerListWidget.py" line="72" />
-        <location filename="..\AutonaBracketWidget.py" line="65" />
-        <source>Number of slots</source>
-        <translation>Number of slots</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerListWidget.py" line="78" />
-        <location filename="..\AutonaBracketWidget.py" line="73" />
-        <source>Players per slot</source>
-        <translation>Players per slot</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerListWidget.py" line="84" />
         <location filename="..\AutonaCommentaryWidget.py" line="51" />
         <location filename="..\AutonaBracketWidget.py" line="82" />
         <source>Characters per player</source>
@@ -1178,31 +1238,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaIndividualGameTracker.py" line="79" />
         <source>Tie</source>
         <translation>Tie</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerListSlotWidget.py" line="158" />
-        <source>Slot {0} - Team</source>
-        <translation>Slot {0} - Team</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerListWidget.py" line="97" />
-        <source>Load tournament standings</source>
-        <translation>Load tournament standings</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerListWidget.py" line="102" />
-        <source>Generate Descriptive Text for Results</source>
-        <translation>Generate Descriptive Text for Results</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerListWidget.py" line="133" />
-        <source>Descriptive Text for Results</source>
-        <translation>Descriptive Text for Results</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerListWidget.py" line="147" />
-        <source>Copy text</source>
-        <translation>Copy text</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="234" />
@@ -2399,13 +2434,6 @@ Choose a different combination or clear the conflicting assignment first.</trans
         <location filename="..\thumbnail\main_generate_thumbnail.py" line="225" />
         <source>Player {0} tag missing</source>
         <translation>Player {0} tag missing</translation>
-    </message>
-</context><context>
-    <name>tips</name>
-    <message>
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="12" />
-        <source>Descriptive text (also known as Alt text) describes images for blind and low-vision users, and helps give context around images to everyone. As such, we highly recommend adding it to your image uploads on your websites and social media posts.</source>
-        <translation>Descriptive text (also known as Alt text) describes images for blind and low-vision users, and helps give context around images to everyone. As such, we highly recommend adding it to your image uploads on your websites and social media posts.</translation>
     </message>
 </context><context>
     <name>updater</name>

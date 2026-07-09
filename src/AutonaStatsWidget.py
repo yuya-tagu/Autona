@@ -12,9 +12,9 @@ ROW_HEIGHT = 40
 class AutonaStatsWidget(QDockWidget):
     """Statistics panel with tabbed view: Head-to-Head, Last Sets,
     Tournament History, plus the absorbed ANLYSE ("この大会の試合一覧")
-    and PLAYERS ("選手一覧") panels passed in by Autona.py."""
+    panel passed in by Autona.py."""
 
-    def __init__(self, *args, analysisPanel=None, playerListPanel=None):
+    def __init__(self, *args, analysisPanel=None):
         super().__init__(*args)
 
         self.setWindowTitle(QApplication.translate("app", "Statistics"))
@@ -137,15 +137,6 @@ class AutonaStatsWidget(QDockWidget):
             self.tabs.addTab(
                 analysisPanel,
                 QApplication.translate("app", "この大会の試合一覧"),
-            )
-
-        # --- Tab 5: 選手一覧 (absorbed PLAYERS panel) ---
-        # Not wrapped in a scroll area — AutonaPlayerList already hosts its
-        # own QScrollArea internally (double-scrolling otherwise).
-        if playerListPanel is not None:
-            self.tabs.addTab(
-                playerListPanel,
-                QApplication.translate("app", "選手一覧"),
             )
 
         # Connect signals

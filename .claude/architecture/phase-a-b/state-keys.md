@@ -125,7 +125,7 @@ game                                 W R AutonaGameAssetManager / AutonaWebServe
 ├── smashgg_id                       (int: start.gg ID)
 ├── codename                         (str: 内部コード名)
 ├── logo                             (str: ロゴパス)
-├── defaults                         R   AutonaScoreboardWidget / AutonaPlayerListWidget（Commentary は 2026-07 リワークで参照廃止）
+├── defaults                         R   AutonaScoreboardWidget（Commentary は 2026-07 リワークで参照廃止）
 │   ├── players_per_team             R   上記ウィジェット群
 │   └── characters_per_player        R   上記ウィジェット群
 ├── mods_active                      R   Autona.Window
@@ -151,8 +151,6 @@ bracket                              W   AutonaBracketWidget.__init__
 │   ├── winnersOnlyProgressions      W   AutonaBracketView
 │   ├── limitExportNumber            W   AutonaBracketView
 │   └── rounds                       W   AutonaBracketView.UpdateBracket
-├── players                          (base for AutonaPlayerList)
-│   └── (以下 player_list と同構造)
 └── (team データ)                    R   AutonaBracketView (score.{N}.team.{T} 経由で表示)
 ```
 
@@ -197,19 +195,20 @@ notes
     └── contents                     W   AutonaNotesWidget (QPlainTextEdit)
 ```
 
-### `player_list`
+### `player_list`（廃止）
 
-選手リスト。AutonaPlayerListWidget が管理。
+旧 PLAYERS 順位ロスター編集（AutonaPlayerListWidget 系）は機能ごと削除済み。
+残留キーは `AutonaPlayerBrowserWidget.__init__` が起動時に Unset する。
+
+### `player_editor`
+
+選手一覧パネル（AutonaPlayerBrowserWidget）の編集ダイアログが使う一時パス。
+ダイアログ close 時と起動時に Unset される（program_state.json に残さない）。
 
 ```
-player_list                          W   AutonaPlayerListWidget.__init__
-└── slot
-    └── {I}                          D   AutonaPlayerList.RemoveSlot
-        ├── name                     W   AutonaPlayerListSlotWidget (QLineEdit)
-        ├── score                    W   AutonaPlayerListSlotWidget (QSpinBox)
-        └── player
-            └── {M}                  D   AutonaPlayerListSlotWidget.SetPlayersPerTeam
-                └── (AutonaScoreboardPlayerWidget と同じ player キー群)
+player_editor
+└── 1                                W D  _PlayerEditorDialog 内の AutonaScoreboardPlayerWidget
+    └── (AutonaScoreboardPlayerWidget と同じ player キー群)
 ```
 
 ### `team_battle`
@@ -275,10 +274,8 @@ currentStream                        W   AutonaStatsUtil.UpdateStreamQueue
 | 変数 | 解決先 | 備考 |
 |------|--------|------|
 | `self.path` (AutonaScoreboardPlayerWidget) | `score.{N}.team.{T}.player.{M}` | AutonaScoreboardWidget から |
-| `self.path` (AutonaScoreboardPlayerWidget) | `{base}.slot.{I}.player.{M}` | AutonaPlayerListSlotWidget から（commentary パスは 2026-07 リワークで廃止） |
+| `self.path` (AutonaScoreboardPlayerWidget) | `player_editor.1` | AutonaPlayerBrowserWidget の編集ダイアログから（close で Unset） |
 | `self.path` (AutonaTeamPlayerWidget) | `team_battle.team.{T}.player.{N}` | AutonaTeamBattleWidget から |
-| `self.base` (AutonaPlayerList) | `bracket.players` | AutonaBracketWidget から |
-| `self.base` (AutonaPlayerList) | `player_list` | AutonaPlayerListWidget から（デフォルト値） |
 | `element.objectName()` | Qt Designer で定義された名前 | .ui ファイル依存。実行時まで不確定 |
 | `self.settingsBase` (LayoutOptionsWidget) | レイアウト名 | AutonaLayoutOptionsWindow から渡される |
 

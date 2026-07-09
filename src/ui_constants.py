@@ -483,6 +483,15 @@ QHeaderView::section {{
     font-size: {FONT_SM}pt;
     font-weight: 700;
 }}
+/* qdarktheme paints the active (sorted) header section's text with `primary`
+   (the scarlet accent) via `QHeaderView::section:on:enabled` — low contrast red
+   on the gray section. Override to the high-contrast primary text so sortable
+   table headers stay readable. Same specificity as qdarktheme's rule and
+   appended after it, so equal specificity resolves in our favour. */
+QHeaderView::section:on:enabled,
+QHeaderView::section:on:pressed {{
+    color: {p['text_primary']};
+}}
 QTableView, QListView, QTreeView {{
     background-color: {p['bg_primary']};
     alternate-background-color: {p['bg_secondary']};
