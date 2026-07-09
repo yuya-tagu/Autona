@@ -166,6 +166,33 @@ def remove_special_chars(input_str: str):
 SUPPORTED_TEMPLATE_IDS = ("type_a", "type_b")
 DEFAULT_TEMPLATE_ID = "type_a"
 
+# Tournament banner image locations. The EVENT tab (AutonaTournamentInfoWidget)
+# manages the banner file; the thumbnail consumes it when the user selects
+# "Use tournament banner". Keep these in sync with that widget's constants.
+BANNER_PATH = "./user_data/tournament_banner.png"
+DEFAULT_BANNER_PATH = "./assets/thumbnail_base/default_banner.png"
+
+
+def resolve_background_path(config):
+    """Resolve the effective background image from the explicit source
+    selector (Thumbnail Settings → Select Background Image) so the renderer
+    template can keep reading a single ``background_path`` key.
+
+    - ``banner``: resolved dynamically — the banner file may appear only after
+      the user downloads it, so we re-check existence on every render.
+    - ``custom``: the user's own image (``background_path``).
+    - ``default`` / unset: None → the JS falls back to ``template.default_background``.
+    """
+    source = config.get("background_source")
+    if source == "banner":
+        return BANNER_PATH if os.path.exists(BANNER_PATH) else DEFAULT_BANNER_PATH
+    if source == "custom":
+        return config.get("background_path") or None
+    if source == "default":
+        return None
+    # Legacy config (pre-selector): honour whatever background_path holds.
+    return config.get("background_path") or None
+
 
 def _resolve_template_id(settings):
     tid = (settings or {}).get("template_id", DEFAULT_TEMPLATE_ID)
@@ -245,6 +272,7 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None, scoreb
 
     config = dict(settings)
     config["scoreboardNumber"] = scoreboardNumber
+    config["background_path"] = resolve_background_path(config)
 
     return data, config, template_data
 

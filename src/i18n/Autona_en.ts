@@ -396,18 +396,33 @@
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Image</source>
-        <translation>Image</translation>
+        <source>Select Background Image</source>
+        <translation>Select Background Image</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Background</source>
-        <translation>Background</translation>
+        <source>Use default image</source>
+        <translation>Use default image</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Display</source>
-        <translation>Display</translation>
+        <source>Use tournament banner</source>
+        <translation>Use tournament banner</translation>
+    </message>
+    <message>
+        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
+        <source>Choose your own image</source>
+        <translation>Choose your own image</translation>
+    </message>
+    <message>
+        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
+        <source>Select Image...</source>
+        <translation>Select Image...</translation>
+    </message>
+    <message>
+        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
+        <source>Select items to display</source>
+        <translation>Select items to display</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
@@ -426,8 +441,8 @@
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Game Settings</source>
-        <translation>Game Settings</translation>
+        <source>Character Image Placement</source>
+        <translation>Character Image Placement</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
@@ -443,21 +458,6 @@
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <source>Flip P2 assets?</source>
         <translation>Flip P2 assets?</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Proportional character scaling</source>
-        <translation>Proportional character scaling</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Scale to fit X</source>
-        <translation>Scale to fit X</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Scale to fit Y</source>
-        <translation>Scale to fit Y</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />

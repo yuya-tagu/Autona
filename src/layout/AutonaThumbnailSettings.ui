@@ -43,14 +43,14 @@
          </property>
          <layout class="QVBoxLayout" name="verticalLayoutVideoTitle">
           <item>
-           <widget class="QLineEdit" name="videoTitleEdit">
-            <property name="placeholderText">
-             <string>Title is auto-generated from tournament info, round and characters</string>
-            </property>
-           </widget>
-          </item>
-          <item>
            <layout class="QHBoxLayout" name="horizontalLayoutVideoTitleActions">
+            <item>
+             <widget class="QLineEdit" name="videoTitleEdit">
+              <property name="placeholderText">
+               <string>Title is auto-generated from tournament info, round and characters</string>
+              </property>
+             </widget>
+            </item>
             <item>
              <widget class="QPushButton" name="btCopyVideoTitle">
               <property name="sizePolicy">
@@ -71,19 +71,6 @@
               </property>
              </widget>
             </item>
-            <item>
-             <spacer name="videoTitleActionSpacer">
-              <property name="orientation">
-               <enum>Qt::Horizontal</enum>
-              </property>
-              <property name="sizeHint" stdset="0">
-               <size>
-                <width>40</width>
-                <height>20</height>
-               </size>
-              </property>
-             </spacer>
-            </item>
            </layout>
           </item>
          </layout>
@@ -94,10 +81,22 @@
          <item>
           <widget class="QGroupBox" name="groupBoxGeneralSettings">
            <property name="sizePolicy">
-            <sizepolicy hsizetype="Minimum" vsizetype="Preferred">
+            <sizepolicy hsizetype="Fixed" vsizetype="Preferred">
              <horstretch>0</horstretch>
              <verstretch>0</verstretch>
             </sizepolicy>
+           </property>
+           <property name="minimumSize">
+            <size>
+             <width>250</width>
+             <height>0</height>
+            </size>
+           </property>
+           <property name="maximumSize">
+            <size>
+             <width>250</width>
+             <height>16777215</height>
+            </size>
            </property>
            <property name="title">
             <string>General Settings</string>
@@ -123,33 +122,51 @@
             <item>
              <widget class="QLabel" name="label_11">
               <property name="text">
-               <string>Image</string>
+               <string>Select Background Image</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QRadioButton" name="bgSourceDefault">
+              <property name="text">
+               <string>Use default image</string>
+              </property>
+              <property name="checked">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QRadioButton" name="bgSourceBanner">
+              <property name="text">
+               <string>Use tournament banner</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QRadioButton" name="bgSourceCustom">
+              <property name="text">
+               <string>Choose your own image</string>
               </property>
              </widget>
             </item>
             <item>
              <layout class="QHBoxLayout" name="horizontalLayout_14">
               <item>
-               <widget class="QPushButton" name="customBackground">
-                <property name="text">
-                 <string>Background</string>
-                </property>
-               </widget>
-              </item>
-              <item>
-               <widget class="QPushButton" name="customBackgroundReset">
+               <widget class="QPushButton" name="btSelectCustomBg">
                 <property name="sizePolicy">
-                 <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                 <sizepolicy hsizetype="Maximum" vsizetype="Fixed">
                   <horstretch>0</horstretch>
                   <verstretch>0</verstretch>
                  </sizepolicy>
                 </property>
-                <property name="minimumSize">
-                 <size>
-                  <width>22</width>
-                  <height>22</height>
-                 </size>
+                <property name="text">
+                 <string>Select Image...</string>
                 </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="customBgName">
                 <property name="text">
                  <string/>
                 </property>
@@ -180,7 +197,7 @@
             <item>
              <widget class="QLabel" name="label_13">
               <property name="text">
-               <string>Display</string>
+               <string>Select items to display</string>
               </property>
              </widget>
             </item>
@@ -224,7 +241,7 @@
             <item>
              <widget class="QLabel" name="label_19">
               <property name="text">
-               <string>Game Settings</string>
+               <string>Character Image Placement</string>
               </property>
              </widget>
             </item>
@@ -252,27 +269,6 @@
               </property>
               <property name="checked">
                <bool>false</bool>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QCheckBox" name="proportionalScaling">
-              <property name="text">
-               <string>Proportional character scaling</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QCheckBox" name="scaleToFillX">
-              <property name="text">
-               <string>Scale to fit X</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QCheckBox" name="scaleToFillY">
-              <property name="text">
-               <string>Scale to fit Y</string>
               </property>
              </widget>
             </item>

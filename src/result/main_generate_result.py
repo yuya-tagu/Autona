@@ -52,10 +52,14 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None,
     config = dict(settings)
     config["main_icon_path"] = settings.get(
         "main_icon_path", "./layout/logo.png")
+    # Inherit the thumbnail's effective background when the result has none of
+    # its own. thumbnail_config.background_path is now the custom-image slot
+    # only, so resolve the real image via the thumbnail's source selector.
+    from src.thumbnail import main_generate_thumbnail as _thumb
+    thumb_bg = _thumb.resolve_background_path(
+        settingsManager.Get("thumbnail_config") or {})
     config["background_path"] = settings.get(
-        "background_path",
-        settingsManager.Get("thumbnail_config.background_path",
-                            "./assets/thumbnail_base/default_banner.png"))
+        "background_path", thumb_bg or _thumb.DEFAULT_BANNER_PATH)
     config["accent_color"] = settingsManager.Get(
         "general.accent_color", "#f0a500")
 

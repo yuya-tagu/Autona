@@ -398,18 +398,33 @@
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Image</source>
-        <translation>画像</translation>
+        <source>Select Background Image</source>
+        <translation>背景画像を選ぶ</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Background</source>
-        <translation>背景</translation>
+        <source>Use default image</source>
+        <translation>デフォルトの画像を利用する</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Display</source>
-        <translation>表示</translation>
+        <source>Use tournament banner</source>
+        <translation>大会バナーを利用する</translation>
+    </message>
+    <message>
+        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
+        <source>Choose your own image</source>
+        <translation>自分で画像を選ぶ</translation>
+    </message>
+    <message>
+        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
+        <source>Select Image...</source>
+        <translation>画像を選択...</translation>
+    </message>
+    <message>
+        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
+        <source>Select items to display</source>
+        <translation>表示する項目を選択する</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
@@ -428,8 +443,8 @@
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Game Settings</source>
-        <translation>ゲームの設定</translation>
+        <source>Character Image Placement</source>
+        <translation>キャラクター画像配置設定</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
@@ -445,21 +460,6 @@
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <source>Flip P2 assets?</source>
         <translation>プレイヤー2の画像を反転?</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Proportional character scaling</source>
-        <translation>プロポーショナルキャラスケーリング</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Scale to fit X</source>
-        <translation>Xに合うようにサイズを変える</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Scale to fit Y</source>
-        <translation>Yに合うようにサイズを変える</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
