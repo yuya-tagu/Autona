@@ -5,7 +5,7 @@ CLAUDE.md の Git 要点の詳細版。**push / PR 作成 / ブランチ削除�
 
 ## 作業ブランチ運用
 
-Hivee と同じ「ローカル `main` 上で作業し、push 時にだけリモート種別ブランチを切って PR 経由でマージ」する運用に統一する。
+「ローカル `main` 上で作業し、push 時にだけリモート種別ブランチを切って PR 経由でマージ」する運用とする。
 
 - リモート: `origin` = `https://github.com/yuya-tagu/Autona.git`（HTTPS, GitHub アカウント `yuya-tagu`）
 - **作業はローカル `main` 上で行う**。worktree もローカル作業ブランチも作らない。ブランチはリモート push 時にだけ切る

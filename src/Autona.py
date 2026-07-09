@@ -166,10 +166,9 @@ def remove_accents_lower(input_str):
 
 # Single source for the corporate / commercial-use inquiry contact, used by
 # the Help menu, the About dialog and (manually kept in sync) TERMS.md §9.
-# Currently the official Discord; swap to the dedicated inquiry form URL once
-# it exists — this constant is the only place in code to change.
 DISCORD_URL = "https://discord.gg/yAFAmhaUqn"
-BUSINESS_INQUIRY_URL = DISCORD_URL
+BUSINESS_INQUIRY_EMAIL = "taguyangames@gmail.com"
+BUSINESS_INQUIRY_URL = f"mailto:{BUSINESS_INQUIRY_EMAIL}"
 
 
 class WindowSignals(QObject):
@@ -617,8 +616,8 @@ class Window(QMainWindow):
             lambda x=None: QDesktopServices.openUrl(QUrl(DISCORD_URL)))
 
         # Corporate / commercial-use inquiries (TERMS.md §2/§9). Doubles as
-        # the lead-in to HiveeWorks' event support services, so it must stay
-        # visible even to users who never read the bundled documents.
+        # the lead-in to the developer's event support services, so it must
+        # stay visible even to users who never read the bundled documents.
         action = helpMenu.addAction(
             QApplication.translate("app", "Corporate use inquiries"))
         action.triggered.connect(
@@ -646,7 +645,7 @@ class Window(QMainWindow):
 
         self.ReloadGames()
 
-        self.qtSettings = QSettings("HiveeWorks", "Autona")
+        self.qtSettings = QSettings("taguyan", "Autona")
 
         if self.qtSettings.value("geometry"):
             self.restoreGeometry(self.qtSettings.value("geometry"))
@@ -877,7 +876,7 @@ class Window(QMainWindow):
         box.setTextFormat(Qt.TextFormat.RichText)
         box.setText(
             f"<b>Autona v{self.programVersion}</b><br>"
-            "&copy; 2026 taguyan (HiveeWorks)<br><br>"
+            "&copy; 2026 taguyan<br><br>"
             "Based on <a href=\"https://github.com/joaorb64/TournamentStreamHelper\">"
             "TournamentStreamHelper</a> (MIT License) by João Ribeiro Bezerra.<br><br>"
             "Tournament data powered by <a href=\"https://www.start.gg/\">start.gg</a>. "
@@ -888,7 +887,8 @@ class Window(QMainWindow):
             "<code>_internal/</code> can be replaced by the user).<br><br>"
             "法人・事業としてのご利用は事前にお問い合わせください（TERMS.md 第2条・第9条）。"
             "導入支援・運用サポートもご案内できます / For corporate or business use, "
-            f"please <a href=\"{BUSINESS_INQUIRY_URL}\">contact us</a> in advance.<br><br>"
+            f"please contact <a href=\"{BUSINESS_INQUIRY_URL}\">"
+            f"{BUSINESS_INQUIRY_EMAIL}</a> in advance.<br><br>"
             "License details: see <code>TERMS.md</code>, "
             "<code>THIRD-PARTY-NOTICES.md</code> and the <code>licenses/</code> "
             "folder next to the executable.")
