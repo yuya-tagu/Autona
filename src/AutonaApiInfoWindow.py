@@ -61,7 +61,6 @@ _ENDPOINTS = [
     ("GET", "/match-names", "Match / phase name candidates", None, False, False, False),
     ("GET", "/characters", "Character list", None, False, False, False),
     ("GET", "/variants", "Variant list", None, False, False, False),
-    ("GET", "/controllers", "Controller list", None, False, False, False),
     ("GET", "/sets?finished=true", "Set list (synchronous start.gg call)", None, False, False, False),
     ("GET", "/sets/{setId}", "Set detail (synchronous start.gg call)", None, False, False, False),
     ("GET", "/commentary", "Commentary state", None, False, False, False),

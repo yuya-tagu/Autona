@@ -446,15 +446,6 @@ class WebServer(QThread):
     def ws_get_variants(message):
         WebServer.ws_emit('variants', WebServer.actions.get_variants(), json=True)
 
-    # Get controllers
-    @app.route('/controllers')
-    def get_controllers():
-        return WebServer.actions.get_controllers()
-
-    @socketio.on('controllers')
-    def ws_get_controllers(message):
-        WebServer.ws_emit('controllers', WebServer.actions.get_controllers(), json=True)
-
     # Swaps teams
     @app.route('/scoreboard<scoreboardNumber>-swap-teams')
     def swap_teams(scoreboardNumber):

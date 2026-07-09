@@ -76,7 +76,7 @@ WS 列は対応する Socket.IO イベントの有無。
 | 17 | `GET /match-names` | R | ✅ `match_names` | `get_match_names` | match/phase 名候補 |
 | 18 | `GET /characters` | R | ✅ `characters` | `get_characters` | キャラ一覧（GUI スレッド） |
 | 19 | `GET /variants` | R | ✅ `variants` | `get_variants` | バリアント一覧 |
-| 20 | `GET /controllers` | R | ✅ `controllers` | `get_controllers` | コントローラ一覧 |
+| 20 | `GET /controllers` | R | — | — | ~~コントローラ一覧~~（機能ごと削除済み） |
 | 21 | `GET /scoreboard<N>-swap-teams` | W | ✅ `swap_teams` | `swap_teams` | チーム左右入替 |
 | 22 | `GET /scoreboard<N>-get-swap` | R | ✅ `get_swap` | `get_swap` | 入替状態取得 |
 | 23 | `GET /scoreboard<N>-open-set` | U | ✅ `open_set` | `open_sets` | **セット選択ウィンドウを開く** |

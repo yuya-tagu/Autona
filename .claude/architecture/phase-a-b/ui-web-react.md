@@ -281,7 +281,7 @@ Flask `send_from_directory()` で `web/build/` 配信。SPA のため全ルー�
 | `/scoreboard<N>-team<T>-scoreup/scoredown/color-<C>` | GET | スコア・色操作 | Header (color) | △ |
 | `/scoreboard<N>-get/set` | GET/POST | スコアボード状態 | × / Socket | △ |
 | `/games`, `/current-game`, `/match-names` | GET | ゲーム情報 | Header | △ |
-| `/characters`, `/variants`, `/controllers` | GET | キャラ・バリアント | ScoreboardPage | × |
+| `/characters`, `/variants` | GET | キャラ・バリアント | ScoreboardPage | × |
 | `/scoreboard<N>-swap-teams/get-swap/open-set` | GET | チーム操作 | × | △ |
 | `/scoreboard<N>-pull-stream` | GET | ストリーム取得 | Header | × |
 | `/pull-user` | GET | プレイヤー情報取得 | × | × |

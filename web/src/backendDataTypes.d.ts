@@ -117,7 +117,6 @@ export interface TSHSet {
 }
 
 export interface TSHPlayerDbEntry {
-    controller: string;
     country_code: string;
     custom_textbox: string;
     prefixed_tag: string;

@@ -149,7 +149,6 @@ from .Workers import *
 from .StateManager import StateManager
 from .SettingsManager import SettingsManager
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
-from .Helpers.AutonaControllerHelper import AutonaControllerHelper
 from .Helpers.AutonaStatusManager import AutonaStatusManager
 from .AutonaScoreboardManager import AutonaScoreboardManager
 from .AutonaStatsWidget import AutonaStatsWidget
@@ -253,7 +252,6 @@ class Window(QMainWindow):
         self.allplayers = None
         self.local_players = None
 
-        AutonaControllerHelper.instance.init()
         AutonaCountryHelper.instance.init()
         splash.set_message(splash_msgs[0], progress=0.15)
 
