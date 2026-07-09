@@ -1203,12 +1203,6 @@
         <translation>Toggle widgets</translation>
     </message>
     <message>
-        <location filename="..\Autona.py" line="1048" />
-        <location filename="..\Autona.py" line="470" />
-        <source>Migrate Layout</source>
-        <translation>Migrate Layout</translation>
-    </message>
-    <message>
         <location filename="..\Autona.py" line="479" />
         <source>Add game assets</source>
         <translation>Add game assets</translation>
@@ -1312,46 +1306,6 @@
         <location filename="..\Autona.py" line="743" />
         <source>API Settings</source>
         <translation>API Settings</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="1033" />
-        <source>Migrate Scoreboard Layout</source>
-        <translation>Migrate Scoreboard Layout</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="1038" />
-        <source>File Path</source>
-        <translation>File Path</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="1041" />
-        <source>Find File...</source>
-        <translation>Find File...</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="1053" />
-        <source>Open Layout Javascript File</source>
-        <translation>Open Layout Javascript File</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="1055" />
-        <source>Javascript File</source>
-        <translation>Javascript File</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="1085" />
-        <source>Migration Complete</source>
-        <translation>Migration Complete</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="1089" />
-        <source>Layout Migration has completed!</source>
-        <translation>Layout Migration has completed!</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="1093" />
-        <source>Close Window</source>
-        <translation>Close Window</translation>
     </message>
     <message>
         <location filename="..\AutonaAlertNotification.py" line="38" />

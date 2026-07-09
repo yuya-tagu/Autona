@@ -486,10 +486,6 @@ class Window(QMainWindow):
         action.setCheckable(True)
         action.toggled.connect(self.ToggleAlwaysOnTop)
 
-        action = helpMenu.addAction(
-            QApplication.translate("app", "Migrate Layout"))
-        action.triggered.connect(self.MigrateWindow)
-
         helpMenu.addSeparator()
 
         # Guidance for obtaining game assets (not bundled — see A2/copyright).
@@ -938,78 +934,3 @@ class Window(QMainWindow):
             "dark",
             custom_colors=UI.DARK_CUSTOM_COLORS,
             additional_qss=UI.global_qss())
-
-    def MigrateWindow(self):
-        migrateWindow = QDialog(self)
-        migrateWindow.setWindowTitle(
-            QApplication.translate("app", "Migrate Scoreboard Layout"))
-        migrateWindow.setMinimumWidth(800)
-        vbox = QVBoxLayout()
-        migrateWindow.setLayout(vbox)
-        hbox = QHBoxLayout()
-        label = QLabel(QApplication.translate("app", "File Path"))
-        filePath = QLineEdit()
-        fileExplorer = QPushButton(
-            text=QApplication.translate("app", "Find File..."))
-        hbox.addWidget(label)
-        hbox.addWidget(filePath)
-        hbox.addWidget(fileExplorer)
-        vbox.addLayout(hbox)
-
-        migrate = QPushButton(
-            text=QApplication.translate("app", "Migrate Layout"))
-
-        def open_dialog():
-            fname, _ok = QFileDialog.getOpenFileName(
-                migrateWindow,
-                QApplication.translate("app", "Open Layout Javascript File"),
-                os.getcwd(),
-                QApplication.translate("app", "Javascript File") + "  (*.js)",
-            )
-            if fname:
-                filePath.setText(str(fname))
-
-        fileExplorer.clicked.connect(open_dialog)
-
-        def MigrateLayout():
-            data = None
-            with open(filePath.text(), 'r') as file:
-                data = file.read()
-
-                data = data.replace("data.score.", "data.score[1].")
-                data = data.replace("oldData.score.", "oldData.score[1].")
-                data = data.replace(
-                    "_.get(data, \"score.stage_strike.", "_.get(data, \"score.1.stage_strike.")
-                data = data.replace(
-                    "_.get(oldData, \"score.stage_strike.", "_.get(oldData, \"score.1.stage_strike.")
-                data = data.replace(
-                    "source: `score.team.${t + 1}`", "source: `score.1.team.${t + 1}`")
-                data = data.replace(
-                    "data.score[1].ruleset", "data.score.ruleset")
-
-            with open(filePath.text(), 'w') as file:
-                file.write(data)
-
-            logger.info("Completed Layout Migration at: " + filePath.text())
-
-            completeDialog = QDialog(migrateWindow)
-            completeDialog.setWindowTitle(
-                QApplication.translate("app", "Migration Complete"))
-            completeDialog.setMinimumWidth(500)
-            vbox2 = QVBoxLayout()
-            completeDialog.setLayout(vbox2)
-            completeText = QLabel(QApplication.translate(
-                "app", "Layout Migration has completed!"))
-            completeText.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            closeButton = QPushButton(
-                text=QApplication.translate("app", "Close Window"))
-            vbox2.addWidget(completeText)
-            vbox2.addWidget(closeButton)
-            closeButton.clicked.connect(completeDialog.close)
-            completeDialog.show()
-
-        migrate.clicked.connect(MigrateLayout)
-
-        vbox.addWidget(migrate)
-
-        migrateWindow.show()

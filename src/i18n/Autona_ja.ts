@@ -1205,12 +1205,6 @@
         <translation>ツールの表示</translation>
     </message>
     <message>
-        <location filename="..\Autona.py" line="1048" />
-        <location filename="..\Autona.py" line="470" />
-        <source>Migrate Layout</source>
-        <translation>レイアウトを移行</translation>
-    </message>
-    <message>
         <location filename="..\Autona.py" line="479" />
         <source>Add game assets</source>
         <translation>ゲームアセットを追加</translation>
@@ -1314,46 +1308,6 @@
         <location filename="..\Autona.py" line="743" />
         <source>API Settings</source>
         <translation>API設定</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="1033" />
-        <source>Migrate Scoreboard Layout</source>
-        <translation>スコアボードレイアウトを移行</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="1038" />
-        <source>File Path</source>
-        <translation>ファイルパス</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="1041" />
-        <source>Find File...</source>
-        <translation>ファイルを探す...</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="1053" />
-        <source>Open Layout Javascript File</source>
-        <translation>レイアウトの JavaScript ファイルを開く</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="1055" />
-        <source>Javascript File</source>
-        <translation>JavaScript ファイル</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="1085" />
-        <source>Migration Complete</source>
-        <translation>移行完了</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="1089" />
-        <source>Layout Migration has completed!</source>
-        <translation>レイアウトの移行が完了しました！</translation>
-    </message>
-    <message>
-        <location filename="..\Autona.py" line="1093" />
-        <source>Close Window</source>
-        <translation>ウィンドウを閉じる</translation>
     </message>
     <message>
         <location filename="..\AutonaAlertNotification.py" line="38" />
