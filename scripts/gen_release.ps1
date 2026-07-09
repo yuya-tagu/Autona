@@ -16,6 +16,18 @@ Remove-Item -Path "Autona\assets\versions.json" -Force
 # Strip runtime logs that may contain personal data (tournament URLs, etc.)
 Remove-Item -Path "Autona\assets\log.txt", "Autona\assets\log_error.txt" -Force -ErrorAction SilentlyContinue
 
+# Strip the third-party controller photo DB (ControllerDatabase-main): the
+# images come from manufacturer manuals / archive.org scans with no license,
+# so they must not be redistributed. The controller feature itself was
+# removed from the codebase (PR #118); this guard stays because the folder
+# may still exist locally on dev machines and would otherwise be shipped
+# by the blanket assets/ copy above.
+Remove-Item -Recurse -Force "Autona\assets\controller" -ErrorAction SilentlyContinue
+
+# Strip untracked leftovers that the blanket assets/ copy would otherwise
+# ship (runtime temp files, locally downloaded data).
+Remove-Item -Path "Autona\assets\characters.json.tmp" -Force -ErrorAction SilentlyContinue
+
 # Copy layout excluding game_images and symlinks
 Get-ChildItem -Path "layout" -Recurse | Where-Object {
     $_.FullName -notmatch "layout\\game_images" -and 

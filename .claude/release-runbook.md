@@ -111,7 +111,7 @@ Remove-Item -Recurse -Force ./Autona -ErrorAction SilentlyContinue   # staging �
 **UTF-8 のノートファイル + `gh release create --notes-file`** を使う（引数渡しは文字化けリスク）。
 ノート末尾に `Qt-Build: {qVersion}` マーカーを付ける（`python -c "from qtpy.QtCore import qVersion; print(qVersion())"` で取得。現行 updater は読まないが慣例として残置）。
 
-ノート構成: `Autona v{X.Y.Z}` / 新機能（ユーザー向け日本語） / アップデート時の注意（OBS URL 差し替え等の破壊的変更） / `Qt-Build:` マーカー。
+ノート構成: `Autona v{X.Y.Z}` / 新機能（ユーザー向け日本語） / アップデート時の注意（OBS URL 差し替え等の破壊的変更） / **v1.0.7・v1.1.0 向け手動更新の定型文**（[docs/operations/legacy-manual-update.md](../docs/operations/legacy-manual-update.md) の「運用ルール」から転記。該当世代の問い合わせが絶えるまで毎回載せる） / `Qt-Build:` マーカー。
 
 ```bash
 # CWD: プロジェクトルート。notes ファイルはスクラッチパッドに UTF-8 で作成しておく
