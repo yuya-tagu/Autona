@@ -26,7 +26,7 @@ if sys.platform == "win32":
     try:
         import ctypes
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            "HiveeWorks.Autona")
+            "taguyan.Autona")
     except Exception:
         pass
 

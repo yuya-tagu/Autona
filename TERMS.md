@@ -10,7 +10,7 @@
 
 - 「本ソフトウェア」: 公式配布元から配布される Autona の実行バイナリ一式
   （`Autona.exe`、`_internal/`、同梱アセット・ドキュメントを含む配布物）
-- 「開発者」: Autona の開発・配布者（taguyan / HiveeWorks）
+- 「開発者」: Autona の開発・配布者（taguyan）
 - 「公式配布元」: https://github.com/yuya-tagu/Autona-releases
 
 ## 2. 利用許諾
@@ -85,9 +85,9 @@ API リクエスト、および更新確認のための GitHub Releases への�
 
 ## 9. お問い合わせ・法人向けサポート
 
-開発元の HiveeWorks は、大会・イベントの運営支援や配信サポートを行っています。
+開発者は、大会・イベントの運営支援や配信サポートも行っています。
 法人・事業としてのご利用の際は、利用条件のご案内に加えて、導入支援・運用
 サポートも含めてご相談いただけます。お気軽にお問い合わせください。
 
-- 法人利用のご相談、その他のお問い合わせ:
-  公式 Discord コミュニティ https://discord.gg/yAFAmhaUqn
+- 法人利用のご相談: taguyangames@gmail.com
+- その他のお問い合わせ: 公式 Discord コミュニティ https://discord.gg/yAFAmhaUqn

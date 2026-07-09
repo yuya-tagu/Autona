@@ -213,7 +213,7 @@ Autona/
 ## ライセンス
 
 - 上流 [TournamentStreamHelper](https://github.com/joaorb64/TournamentStreamHelper) 由来の部分: MIT License
-- Autona 固有の部分: © 2026 taguyan (HiveeWorks), All rights reserved
+- Autona 固有の部分: © 2026 taguyan, All rights reserved
 
 詳細は [LICENSE](LICENSE)、配布バイナリの利用条件は [TERMS.md](TERMS.md) を参照。
 
