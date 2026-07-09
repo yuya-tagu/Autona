@@ -2491,11 +2491,6 @@ Change the port under Settings → General → Webserver Port and restart Autona
         <translation>Hotkeys</translation>
     </message>
     <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="233" />
-        <source>Default Display Options</source>
-        <translation>Default Display Options</translation>
-    </message>
-    <message>
         <location filename="..\Settings\AutonaSettingsWindow.py" line="297" />
         <source>Bluesky</source>
         <translation>Bluesky</translation>
@@ -2660,62 +2655,6 @@ Choose a different combination or clear the conflicting assignment first.</trans
         <location filename="..\Settings\SettingsWidget.py" line="171" />
         <source>Possible hotkey conflict</source>
         <translation>Possible hotkey conflict</translation>
-    </message>
-</context><context>
-    <name>settings.show_additional</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="226" />
-        <source>Show Additional Info</source>
-        <translation>Show Additional Info</translation>
-    </message>
-</context><context>
-    <name>settings.show_birthday</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="194" />
-        <source>Show Birthday</source>
-        <translation>Show Birthday</translation>
-    </message>
-</context><context>
-    <name>settings.show_characters</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="210" />
-        <source>Show Characters</source>
-        <translation>Show Characters</translation>
-    </message>
-</context><context>
-    <name>settings.show_controller</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="218" />
-        <source>Show Controller</source>
-        <translation>Show Controller</translation>
-    </message>
-</context><context>
-    <name>settings.show_location</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="202" />
-        <source>Show Location</source>
-        <translation>Show Location</translation>
-    </message>
-</context><context>
-    <name>settings.show_name</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="170" />
-        <source>Show Real Name</source>
-        <translation>Show Real Name</translation>
-    </message>
-</context><context>
-    <name>settings.show_seed</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="186" />
-        <source>Show Seed</source>
-        <translation>Show Seed</translation>
-    </message>
-</context><context>
-    <name>settings.show_social</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="178" />
-        <source>Show Social Media</source>
-        <translation>Show Social Media</translation>
     </message>
 </context><context>
     <name>settings.team_1_default_color</name>

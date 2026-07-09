@@ -2494,11 +2494,6 @@ OBS のブラウザソースと Web UI は動作しません。
         <translation>ホットキー</translation>
     </message>
     <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="233" />
-        <source>Default Display Options</source>
-        <translation>デフォルト表示オプション</translation>
-    </message>
-    <message>
         <location filename="..\Settings\AutonaSettingsWindow.py" line="297" />
         <source>Bluesky</source>
         <translation>Bluesky</translation>
@@ -2663,62 +2658,6 @@ Choose a different combination or clear the conflicting assignment first.</sourc
         <location filename="..\Settings\SettingsWidget.py" line="171" />
         <source>Possible hotkey conflict</source>
         <translation>ホットキー競合の可能性</translation>
-    </message>
-</context><context>
-    <name>settings.show_additional</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="226" />
-        <source>Show Additional Info</source>
-        <translation>追加情報を表示</translation>
-    </message>
-</context><context>
-    <name>settings.show_birthday</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="194" />
-        <source>Show Birthday</source>
-        <translation>誕生日を表示</translation>
-    </message>
-</context><context>
-    <name>settings.show_characters</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="210" />
-        <source>Show Characters</source>
-        <translation>キャラクターを表示</translation>
-    </message>
-</context><context>
-    <name>settings.show_controller</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="218" />
-        <source>Show Controller</source>
-        <translation>コントローラーを表示</translation>
-    </message>
-</context><context>
-    <name>settings.show_location</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="202" />
-        <source>Show Location</source>
-        <translation>所在地を表示</translation>
-    </message>
-</context><context>
-    <name>settings.show_name</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="170" />
-        <source>Show Real Name</source>
-        <translation>本名を表示</translation>
-    </message>
-</context><context>
-    <name>settings.show_seed</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="186" />
-        <source>Show Seed</source>
-        <translation>シードを表示</translation>
-    </message>
-</context><context>
-    <name>settings.show_social</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="178" />
-        <source>Show Social Media</source>
-        <translation>SNSを表示</translation>
     </message>
 </context><context>
     <name>settings.team_1_default_color</name>

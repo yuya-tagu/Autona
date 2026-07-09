@@ -154,76 +154,12 @@ class AutonaSettingsWindow(QDialog):
 
         self.add_setting_widget(QApplication.translate(
             "settings", "Hotkeys"), SettingsWidget("hotkeys", hotkeySettings))
-            
-        # Add Display Options settings
-        displaySettings = []
 
-        displaySettings.append((
-            QApplication.translate(
-                "settings.show_name", "Show Real Name"),
-            "show_name",
-            "checkbox",
-            True
-        ))
-
-        displaySettings.append((
-            QApplication.translate(
-                "settings.show_social", "Show Social Media"),
-            "show_social",
-            "checkbox",
-            True
-        ))
-
-        displaySettings.append((
-            QApplication.translate(
-                "settings.show_seed", "Show Seed"),
-            "show_seed",
-            "checkbox",
-            True
-        ))
-
-        displaySettings.append((
-            QApplication.translate(
-                "settings.show_birthday", "Show Birthday"),
-            "show_birthday",
-            "checkbox",
-            True
-        ))
-
-        displaySettings.append((
-            QApplication.translate(
-                "settings.show_location", "Show Location"),
-            "show_location",
-            "checkbox",
-            True
-        ))
-
-        displaySettings.append((
-            QApplication.translate(
-                "settings.show_characters", "Show Characters"),
-            "show_characters",
-            "checkbox",
-            True
-        ))
-
-        displaySettings.append((
-            QApplication.translate(
-                "settings.show_controller", "Show Controller"),
-            "show_controller",
-            "checkbox",
-            True
-        ))
-
-        displaySettings.append((
-            QApplication.translate(
-                "settings.show_additional", "Show Additional Info"),
-            "show_additional",
-            "checkbox",
-            True
-        ))
-        
-        self.add_setting_widget(QApplication.translate(
-            "settings", "Default Display Options"), SettingsWidget("display_options", displaySettings))
+        # Display-option visibility toggles live on the scoreboard "eye" menu
+        # (AutonaScoreboardWidget.elements) / the Web UI DISPLAY_OPTIONS, which
+        # own the display_options.show_* keys. The former Settings section here
+        # duplicated those keys (and carried two dead ones: show_birthday /
+        # show_controller) so it was removed.
 
         self.resize(1000, 500)
         QApplication.processEvents()
