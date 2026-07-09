@@ -134,7 +134,6 @@ from .AutonaObsGuideWindow import AutonaObsGuideWindow
 from .AutonaGameAssetGuideWindow import AutonaGameAssetGuideWindow
 from .LayoutOptions.AutonaLayoutOptionsWindow import AutonaLayoutOptionsWindow
 from .AutonaHotkeys import AutonaHotkeys
-from .AutonaPlayerListWidget import AutonaPlayerListWidget
 from .AutonaCommentaryWidget import AutonaCommentaryWidget
 # from .AutonaTeamBattleWidget import AutonaTeamBattleWidget
 from .AutonaGameAssetManager import AutonaGameAssetManager
@@ -155,6 +154,7 @@ from .Helpers.AutonaStatusManager import AutonaStatusManager
 from .AutonaScoreboardManager import AutonaScoreboardManager
 from .AutonaStatsWidget import AutonaStatsWidget
 from .AutonaAnalysisWidget import AutonaAnalysisWidget
+from .AutonaPlayerBrowserWidget import AutonaPlayerBrowserWidget
 from src.AutonaWebServer import WebServer, check_webserver_port
 # autopep8: on
 
@@ -198,7 +198,8 @@ class Window(QMainWindow):
     # v14: Statistics nav item moved to the bottom of the sidebar order.
     # v15: Result Settings and Commentary swapped in the sidebar order.
     # v16: Bracket panel replaced by the Top 8 panel (AutonaTop8Widget).
-    STATE_VERSION = 16
+    # v17: Player List panel (AutonaPlayerBrowserWidget) added below Statistics.
+    STATE_VERSION = 17
     signals = WindowSignals()
 
     def __init__(self, loop=None):
@@ -381,15 +382,13 @@ class Window(QMainWindow):
         self.signals.GameChanged.connect(self.webserver.ws_get_characters)
         splash.set_message(splash_msgs[1], progress=0.70)
 
-        # PLAYERS and ANLYSE are no longer top-level docks — they are built as
-        # plain panels here and embedded as sub-tabs inside the STATS dock
-        # ("選手一覧" / "この大会の試合一覧"). The NOTES dock was removed entirely.
-        playerList = AutonaPlayerListWidget()
+        # ANLYSE is no longer a top-level dock — it is built as a plain panel
+        # here and embedded as a sub-tab inside the STATS dock
+        # ("この大会の試合一覧"). The NOTES dock was removed entirely.
         self.analysisWidget = AutonaAnalysisWidget()
 
         self.statsWidget = AutonaStatsWidget(
             analysisPanel=self.analysisWidget,
-            playerListPanel=playerList,
         )
         self.statsWidget.setWindowIcon(QIcon(UI.icon_path('stats.svg')))
         self.statsWidget.setObjectName("Statistics")
@@ -397,11 +396,17 @@ class Window(QMainWindow):
             QApplication.translate("app", "Statistics"))
         self.dockWidgets.append(self.statsWidget)
 
+        playerBrowser = AutonaPlayerBrowserWidget()
+        playerBrowser.setWindowIcon(QIcon(UI.icon_path('players.svg')))
+        playerBrowser.setObjectName("Players")
+        self.dockWidgets.append(playerBrowser)
+
         splash.set_message(splash_msgs[1], progress=0.85)
 
         # Display order of the sidebar nav items and the matching
         # QStackedWidget pages: EVENT, SCORE, BOARD, VIDEO, RESULT,
-        # COMMS, TOP8, STATS. Each entry is (panel widget, sidebar icon file).
+        # COMMS, TOP8, STATS, PLAYERS. Each entry is
+        # (panel widget, sidebar icon file).
         self._navPanels = [
             (tournamentInfo, 'tournament.svg'),
             (self.scoreboard, 'scoreboard.svg'),
@@ -411,6 +416,7 @@ class Window(QMainWindow):
             (commentary, 'commentary.svg'),
             (top8, 'bracket.svg'),
             (self.statsWidget, 'stats.svg'),
+            (playerBrowser, 'players.svg'),
         ]
 
         for dw in self.dockWidgets:

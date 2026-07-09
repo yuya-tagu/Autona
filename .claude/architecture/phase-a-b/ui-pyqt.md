@@ -41,7 +41,6 @@
 **QWidget（11 クラス）:**
 - BracketSetWidget (src/AutonaBracketView.py:104) — Python
 - AutonaIndividualGameTracker (src/AutonaIndividualGameTracker.py:18) — Python
-- AutonaPlayerList (src/AutonaPlayerList.py:18) — Python
 - ResultPreviewWidget (src/AutonaResultSettingsWidget.py:28) — Python + **paintEvent**
 - AutonaScoreboardWidget (src/AutonaScoreboardWidget.py:90) — Python（大規模）
 - LoadingOverlay (src/AutonaSplash.py:418) — Python + **paintEvent**
@@ -125,7 +124,6 @@
 | 5 | scoreboard | "Scoreboard" | AutonaScoreboardManager | ✓ |
 | 6 | stageWidget | "Stage" | AutonaScoreboardStageWidget | ✗（hidden） |
 | 7 | commentary | "Commentary" | AutonaCommentaryWidget | ✓ |
-| 8 | playerList | "Player List" | AutonaPlayerListWidget | ✓ |
 | 9 | notes | "Additional Notes" | AutonaNotesWidget | ✓ |
 | 10 | statsWidget | "Statistics" | AutonaStatsWidget | ✓ |
 | 11 | analysisWidget | "Analysis" | AutonaAnalysisWidget | ✓ |

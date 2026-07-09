@@ -185,7 +185,7 @@ pronoun 撤去）。現行挙動に合わせ修復し **62件グリーン化済�
 
 **2026-06-24 検証**: `.instance =` パターンは記述の 8個 → **11クラス**に増えている。遅延初期化 `get_instance()` への移行は未実施。
 - モジュール末尾でトップレベル実行（条件付き含む）: `AutonaAlertNotification`, `AutonaHotkeys`, `AutonaScoreboardManager`, `AutonaTournamentDataProvider`, `AutonaUpdater`, `AutonaCountryHelper`, `AutonaControllerHelper`, `AutonaGameAssetManager`
-- `__init__` 内で `self` 代入（遅延割り当ての一種）: `AutonaAnalysisWidget`, `AutonaBracketWidget`, `AutonaPlayerListWidget`
+- `__init__` 内で `self` 代入（遅延割り当ての一種）: `AutonaAnalysisWidget`, `AutonaBracketWidget`
 
 import 時に副作用（GUI 操作含む）が発生するため pytest でのユニットテストが困難。
 

@@ -113,9 +113,9 @@ scripts/gen_release.ps1
    │    │   Dock Widgets         │       │
    │    │ ・Scoreboard (×N)      │       │
    │    │ ・Commentary           │       │
-   │    │ ・PlayerList           │       │
-   │    │ ・Bracket              │       │
-   │    │ ・Stats / Notes        │       │
+   │    │ ・PlayerBrowser        │       │
+   │    │ ・Top8                 │       │
+   │    │ ・Stats                │       │
    │    │ ・ThumbnailSettings    │       │
    │    └────────────────────────┘       │
    │                                     │
@@ -161,8 +161,8 @@ Autona/
 │   ├── AutonaScoreboardWidget.py     # スコアボード UI
 │   ├── AutonaScoreboardPlayerWidget.py  # 選手情報ウィジェット
 │   ├── AutonaCommentaryWidget.py     # 実況者パネル
-│   ├── AutonaBracketWidget.py        # ブラケット表示
-│   ├── AutonaPlayerListWidget.py     # 選手リスト
+│   ├── AutonaTop8Widget.py           # Top 8 ブラケット編集
+│   ├── AutonaPlayerBrowserWidget.py  # 選手一覧（出場選手 / 登録済み選手）
 │   ├── AutonaStatsWidget.py          # 統計パネル
 │   ├── AutonaTournamentDataProvider.py  # トーナメントデータ取得
 │   ├── AutonaGameAssetManager.py     # ゲームアセット管理

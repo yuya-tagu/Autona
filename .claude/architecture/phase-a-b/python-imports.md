@@ -17,7 +17,7 @@
 - 外部: (なし)
 
 ### src/Autona.py
-- 内部: `.Helpers.AutonaQtHelper`, `.Helpers.AutonaDownloadHelper`, `.Helpers.AutonaLocaleHelper`, `.Helpers.AutonaDirHelper`, `.Helpers.AutonaCountryHelper`, `.Helpers.AutonaControllerHelper`, `.Settings.AutonaSettingsWindow`, `.LayoutOptions.AutonaLayoutOptionsWindow`, `.AutonaHotkeys`, `.AutonaPlayerListWidget`, `.AutonaNotesWidget`, `.AutonaCommentaryWidget`, `.AutonaGameAssetManager`, `.AutonaBracketWidget`, `.AutonaTournamentInfoWidget`, `.AutonaTournamentDataProvider`, `.TournamentDataProvider.StartGGDataProvider`, `.AutonaAlertNotification`, `.AutonaPlayerDB`, `.Workers`, `.StateManager`, `.SettingsManager`, `.AutonaScoreboardManager`, `.AutonaScoreboardStageWidget`, `.AutonaStatsWidget`, `src.AutonaAssetDownloader`, `src.AutonaAboutWidget`, `src.AutonaWebServer`, `. (ui_constants)`
+- 内部: `.Helpers.AutonaQtHelper`, `.Helpers.AutonaDownloadHelper`, `.Helpers.AutonaLocaleHelper`, `.Helpers.AutonaDirHelper`, `.Helpers.AutonaCountryHelper`, `.Helpers.AutonaControllerHelper`, `.Settings.AutonaSettingsWindow`, `.LayoutOptions.AutonaLayoutOptionsWindow`, `.AutonaHotkeys`, `.AutonaPlayerBrowserWidget`, `.AutonaNotesWidget`, `.AutonaCommentaryWidget`, `.AutonaGameAssetManager`, `.AutonaBracketWidget`, `.AutonaTournamentInfoWidget`, `.AutonaTournamentDataProvider`, `.TournamentDataProvider.StartGGDataProvider`, `.AutonaAlertNotification`, `.AutonaPlayerDB`, `.Workers`, `.StateManager`, `.SettingsManager`, `.AutonaScoreboardManager`, `.AutonaScoreboardStageWidget`, `.AutonaStatsWidget`, `src.AutonaAssetDownloader`, `src.AutonaAboutWidget`, `src.AutonaWebServer`, `. (ui_constants)`
 - 外部: loguru, orjson, packaging.version, qdarktheme
 
 ### src/StateManager.py
@@ -164,16 +164,8 @@
 - 内部: `.Helpers.AutonaDictHelper`, `.Helpers.AutonaQtHelper`, `.AutonaGameAssetManager`, `.SettingsManager`
 - 外部: loguru, orjson
 
-### src/AutonaPlayerList.py
-- 内部: `.StateManager`, `.AutonaPlayerListSlotWidget`, `.AutonaTournamentDataProvider`
-- 外部: loguru
-
-### src/AutonaPlayerListSlotWidget.py
-- 内部: `.AutonaScoreboardPlayerWidget`, `.StateManager`
-- 外部: loguru
-
-### src/AutonaPlayerListWidget.py
-- 内部: `.Helpers.AutonaCountryHelper`, `.StateManager`, `.AutonaGameAssetManager`, `.AutonaPlayerDB`, `.AutonaPlayerList`, `.AutonaPlayerListSlotWidget`, `.AutonaScoreboardPlayerWidget`, `.AutonaTournamentDataProvider`, `src.Helpers.AutonaAltTextHelper`
+### src/AutonaPlayerBrowserWidget.py
+- 内部: `.StateManager`, `.AutonaPlayerDB`, `.AutonaGameAssetManager`, `.AutonaTournamentDataProvider`, `.AutonaScoreboardPlayerWidget`, `. (ui_constants)`（`.AutonaScoreboardManager` はメソッド内遅延 import）
 - 外部: loguru
 
 ### src/AutonaScoreboardManager.py

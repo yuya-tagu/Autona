@@ -30,7 +30,6 @@ export const tshStore = configureStore({
                     }
                     ds.tshState.tshState.top8 = "omitted";
                     ds.tshState.tshState.notes = "omitted";
-                    ds.tshState.tshState.player_list = "omitted";
                 } catch {}
             });
         },
