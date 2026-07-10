@@ -13,6 +13,7 @@ export const DARK_TOKENS = {
     bgSecondary:     "#191B20",
     bgTertiary:      "#23262C",
     bgQuaternary:    "#2D3138",
+    bgQuinary:       "#383C44",
     borderSubtle:    "#23262C",
     borderDefault:   "#383C44",
     borderStrong:    "#53575F",

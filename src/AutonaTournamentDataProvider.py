@@ -6,6 +6,7 @@ from qtpy.QtCore import *
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
+from .AutonaPlayerDB import AutonaPlayerDB
 from .TournamentDataProvider.TournamentDataProvider import TournamentDataProvider
 from .TournamentDataProvider.StartGGDataProvider import StartGGDataProvider
 from .Helpers.AutonaVersionHelper import get_supported_providers
@@ -92,6 +93,8 @@ class AutonaTournamentDataProvider(QObject):
 
             # AutonaTournamentDataProvider.instance.SetGameFromProvider()
         else:
+            # No tournament loaded -> name completers offer the whole DB.
+            AutonaPlayerDB.ClearTournamentPlayers()
             AutonaTournamentDataProvider.instance.signals.tournament_data_updated.emit({
             })
             AutonaTournamentDataProvider.instance.signals.tournament_phases_updated.emit([
@@ -119,6 +122,8 @@ class AutonaTournamentDataProvider(QObject):
             AutonaTournamentDataProvider.instance.provider.GetEntrants()
             AutonaTournamentDataProvider.instance.signals.tournament_changed.emit()
         else:
+            # No tournament loaded -> name completers offer the whole DB.
+            AutonaPlayerDB.ClearTournamentPlayers()
             AutonaTournamentDataProvider.instance.signals.tournament_data_updated.emit({
             })
             AutonaTournamentDataProvider.instance.signals.tournament_phases_updated.emit([

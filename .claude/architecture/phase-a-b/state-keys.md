@@ -157,16 +157,19 @@ bracket                              W   AutonaBracketWidget.__init__
 ### `commentary`
 
 実況・解説者情報。AutonaCommentaryWidget が管理（2026-07 リワークでスキーマ刷新、
-正本は `src/AutonaCommentaryModel.py`）。スロット固定 8 名・欠番なし。
+正本は `src/AutonaCommentaryModel.py`）。スロット固定 12 名・欠番なし。
 旧スキーマは起動時 `NormalizeState` でマイグレーション（custom_textbox → note、他は破棄）。
 
 ```
 commentary                           W R  AutonaCommentaryWidget / AutonaWebServerActions
-└── {1..8}                                (スロット固定・常時 8 エントリ)
-    ├── name, team, real_name, twitter
-    ├── role                              ("実況"|"解説"|"選手"|"主催"|"")
+└── {1..12}                               (スロット固定・常時 12 エントリ)
+    ├── name, team, twitter
+    ├── role                              (str 自由入力。補完候補は ROLES の 6 種)
+    ├── icon                              (str。""|"mic"|"megaphone"|"phone"。
+    │                                      旧 role/roles のアイコンラベルは起動時移行)
     ├── note                              (自由コメント)
-    └── display                           (int。0=非表示、1..4=表示順。チェック順に採番、左から表示)
+    └── display                           (int。0=非表示、1=表示。表示順はスロット順=カード順、
+                                           最大 4 名。旧チェック順採番値は起動時に 1 へ移行)
 ```
 
 ### `tournamentInfo`

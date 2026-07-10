@@ -71,6 +71,13 @@ body {
   min-width: 0;
 }
 
+.role-badges {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .role-badge {
   flex: 0 0 auto;
   padding: 2px 10px;
@@ -80,6 +87,20 @@ body {
   font-size: 20px;
   font-weight: 800;
   letter-spacing: 0.08em;
+}
+
+/* Icon roles (mic / megaphone / phone): SVG glyph on the same badge
+ * chip; currentColor picks up --accent-ink. */
+.role-badge-icon {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 6px;
+}
+
+.role-badge-icon svg {
+  width: 22px;
+  height: 22px;
+  display: block;
 }
 
 .who {
