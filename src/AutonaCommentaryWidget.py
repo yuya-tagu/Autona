@@ -2,14 +2,16 @@
 
 Full rework mirroring AutonaTop8Widget's list + live-preview pattern:
 
-* **Casters** — 8 slot-fixed cards (name / team / real name / Twitter /
-  role prefix / free note). A per-slot "配信に表示" toggle picks which
-  casters (max 4) the ``layout/commentators/`` overlay renders; they are
-  numbered in the order they were checked and rendered left to right.
+* **Casters** — 12 cards (name + team / role free text with a candidate
+  completer + icon pulldown / note + Twitter), drag-reorderable by
+  their hamburger grip (result-settings pattern). Slot = card position:
+  a drop moves the data between slots. A per-slot "配信に表示" toggle
+  picks which casters (max 4) the ``layout/commentators/`` overlay
+  renders, top card leftmost.
 * **Preview / Add to OBS** — embedded live preview of the overlay plus
   the browser-source URL.
 
-State contract: everything under ``commentary.{1..8}`` (see
+State contract: everything under ``commentary.{1..12}`` (see
 AutonaCommentaryModel). All writes go through explicit StateManager.Set
 inside SaveBlock — no objectName-derived keypaths. The state persists
 across restarts; the constructor normalizes whatever LoadState restored
@@ -36,14 +38,13 @@ from . import ui_layout as L
 
 LAYOUT_NAME = "commentators"
 
-CASTER_CARD_WIDTH = 240
+CASTER_CARD_WIDTH = 280
 
 # card field <- PlayerDB-shaped dict key (completer pick, web SetData and
 # load-from-tag all deliver this shape; see AutonaPlayerDB.fieldnames).
 PLAYERDB_FIELD_MAP = [
     ("name", "gamerTag"),
     ("team", "prefix"),
-    ("real_name", "name"),
     ("twitter", "twitter"),
     ("note", "custom_textbox"),
 ]
@@ -63,10 +64,6 @@ class AutonaCommentaryWidget(QDockWidget):
         # repopulated from state (same guard pattern as AutonaTop8Widget).
         self._updating = False
         self._previewLoaded = False
-        # Slots in the order their "配信に表示" toggle was checked; the
-        # position in this list is the caster's overlay position
-        # (commentary.{N}.display = index + 1).
-        self._displayOrder = []
 
         with StateManager.SaveBlock():
             StateManager.Set(
@@ -85,7 +82,7 @@ class AutonaCommentaryWidget(QDockWidget):
         leftScroll = QScrollArea()
         leftScroll.setWidgetResizable(True)
         leftScroll.setWidget(leftContent)
-        leftScroll.setFixedWidth(300)
+        leftScroll.setFixedWidth(340)
         leftScroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
@@ -120,29 +117,49 @@ class AutonaCommentaryWidget(QDockWidget):
 
     # ── Casters ──────────────────────────────────────────────────────
     def _buildCastersGroup(self):
-        group = L.make_card("実況・解説者（スロット固定 1-8）")
+        group = L.make_card("実況・解説者（最大 12 名）")
 
         note = QLabel(
-            "「配信に表示」をチェックした順（最大 4 名）に、配信オーバーレイの"
-            "左から表示されます。名前はローカル選手 DB から補完できます。")
+            "「配信に表示」をチェックした人（最大 4 名）が、上から順に配信"
+            "オーバーレイの左から表示されます。並び替えは ≡ をドラッグ。"
+            "名前はローカル選手 DB から補完できます。")
         note.setWordWrap(True)
         note.setStyleSheet(UI.secondary_label_style())
         group.layout().addWidget(note)
 
         _pc = UI.palette()
+        # `onair` variant (配信に表示 checked) is two steps brighter
+        # (bg_quinary) with a stronger border, following the panel's
+        # elevation grammar. The `dragging` variant brightens one step;
+        # L.DragGrip toggles that property around grab() so only the
+        # drag pixmap uses it.
         cardStyle = (
             f"QFrame#commentaryCasterCard {{"
             f" background-color: {_pc['bg_tertiary']};"
             f" border: 1px solid {_pc['border_subtle']};"
             f" border-radius: {UI.RADIUS_MD}px;"
-            f" }}")
+            f" }}"
+            f"QFrame#commentaryCasterCard[onair=\"true\"] {{"
+            f" background-color: {_pc['bg_quinary']};"
+            f" border: 1px solid {_pc['border_strong']};"
+            f" }}"
+            f"QFrame#commentaryCasterCard[dragging=\"true\"] {{"
+            f" background-color: {_pc['bg_quaternary']};"
+            f" }}"
+            f"QLabel#cardGrip {{ padding: 2px; }}")
 
-        cards = QVBoxLayout()
-        cards.setSpacing(6)
-        group.layout().addLayout(cards)
+        self.casterCardList = L.DragCardList(
+            mime="application/x-autona-commentary-card")
+        self.casterCardList.orderChanged.connect(self._onCardsReordered)
+        group.layout().addWidget(self.casterCardList)
 
-        # slot(str) -> {"name", "team", "real_name", "twitter", "role",
-        #               "note", "display"}
+        # Card widget-dicts in VISUAL order; position i edits slot i+1.
+        # casterInputs maps slot(str) -> widget dict and is rebuilt by
+        # _remapSlots after every drag reorder.
+        # dict keys: "card", "header", "name", "team", "twitter",
+        #            "role", "icon", "note", "display"
+        self._cards = []
+        self._cardWidgets = {}   # card QFrame -> widget dict
         self.casterInputs = {}
 
         for slot in comms.SLOTS:
@@ -150,36 +167,57 @@ class AutonaCommentaryWidget(QDockWidget):
             card.setObjectName("commentaryCasterCard")
             card.setStyleSheet(cardStyle)
             card.setFixedWidth(CASTER_CARD_WIDTH)
-            fields = QGridLayout(card)
-            fields.setContentsMargins(8, 8, 8, 8)
+            cardOuter = QHBoxLayout(card)
+            cardOuter.setContentsMargins(4, 8, 8, 8)
+            cardOuter.setSpacing(4)
+
+            # Drag grip centred over the card's full height.
+            grip = L.DragGrip(card, self.casterCardList)
+            cardOuter.addWidget(grip, 0, Qt.AlignmentFlag.AlignVCenter)
+
+            fields = QGridLayout()
+            fields.setContentsMargins(0, 0, 0, 0)
             fields.setVerticalSpacing(2)
             fields.setHorizontalSpacing(6)
+            cardOuter.addLayout(fields, 1)
 
             header = QLabel(slot)
             header.setStyleSheet(UI.secondary_label_style())
 
-            # Overlay position ("No.1"), sitting left of the checkbox.
-            order_label = QLabel("")
-            order_label.setStyleSheet(
-                f"color: {_pc['accent']}; font-weight: 700;")
-
             display_check = QCheckBox("配信に表示")
 
-            # The header spans both grid columns so the appearing "No.N"
-            # label never affects the input columns' width split.
             header_row = QHBoxLayout()
             header_row.setContentsMargins(0, 0, 0, 0)
             header_row.setSpacing(6)
             header_row.addWidget(header)
             header_row.addStretch(1)
-            header_row.addWidget(order_label)
             header_row.addWidget(display_check)
 
-            role_combo = QComboBox()
-            for role in comms.ROLES:
-                role_combo.addItem(role if role else "役割なし", role)
-            role_combo.setFixedHeight(22)
-            role_combo.setFixedWidth(80)
+            # Role: free-text box with the ROLES candidates offered by a
+            # completer (same UX as the player-name field below: case
+            # insensitive, contains match, queued pick handling).
+            role_edit = QLineEdit()
+            role_edit.setPlaceholderText("役割")
+            role_completer = QCompleter(comms.ROLES, role_edit)
+            role_completer.setCaseSensitivity(
+                Qt.CaseSensitivity.CaseInsensitive)
+            role_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+            role_edit.setCompleter(role_completer)
+            L.attach_popup_on_focus(role_edit)
+            # Queued: let the completer finish its own text insertion
+            # before we read the field (player-name pattern).
+            role_completer.activated.connect(
+                self._onFieldChanged, Qt.QueuedConnection)
+
+            # Icon: pulldown, stored as the stem ("" = no icon). No
+            # fixed height — the global QSS min-height (26px) keeps it
+            # level with the QLineEdits sharing the row.
+            icon_combo = QComboBox()
+            icon_combo.addItem("アイコンなし", "")
+            for stem, label in comms.ICONS.items():
+                icon_combo.addItem(
+                    QIcon(UI.icon_path(f"{stem}.svg")), label, stem)
+            icon_combo.setFixedWidth(120)
 
             name_edit = QLineEdit()
             name_edit.setPlaceholderText(
@@ -187,63 +225,67 @@ class AutonaCommentaryWidget(QDockWidget):
 
             team_edit = QLineEdit()
             team_edit.setPlaceholderText("チーム / 所属")
-            team_edit.setFixedWidth(80)
-
-            real_name_edit = QLineEdit()
-            real_name_edit.setPlaceholderText(
-                QApplication.translate("app", "Real Name"))
+            team_edit.setFixedWidth(120)
 
             twitter_edit = QLineEdit()
             twitter_edit.setPlaceholderText(
                 QApplication.translate("app", "Twitter"))
-            twitter_edit.setFixedWidth(80)
+            twitter_edit.setFixedWidth(120)
 
             note_edit = QLineEdit()
             note_edit.setPlaceholderText("コメント（例: 本年度ランキング2位）")
 
             fields.addLayout(header_row,     0, 0, 1, 2)
             fields.addWidget(name_edit,      1, 0)
-            fields.addWidget(role_combo,     1, 1)
-            fields.addWidget(real_name_edit, 2, 0)
-            fields.addWidget(team_edit,      2, 1)
+            fields.addWidget(team_edit,      1, 1)
+            fields.addWidget(role_edit,      2, 0)
+            fields.addWidget(icon_combo,     2, 1)
             fields.addWidget(note_edit,      3, 0)
             fields.addWidget(twitter_edit,   3, 1)
             fields.setColumnStretch(0, 1)
 
-            cards.addWidget(card, 0, Qt.AlignmentFlag.AlignLeft)
+            self.casterCardList.addCard(card)
 
-            for edit in (name_edit, team_edit, real_name_edit,
+            for edit in (name_edit, team_edit, role_edit,
                          twitter_edit, note_edit):
                 edit.editingFinished.connect(self._syncToState)
-            role_combo.currentIndexChanged.connect(self._onFieldChanged)
-            display_check.toggled.connect(
-                lambda checked, slot=slot:
-                self._onDisplayToggled(slot, checked))
+            icon_combo.currentIndexChanged.connect(self._onFieldChanged)
+            display_check.toggled.connect(self._onFieldChanged)
 
-            self.casterInputs[slot] = {
+            widgets = {
+                "card": card,
+                "header": header,
                 "name": name_edit,
                 "team": team_edit,
-                "real_name": real_name_edit,
                 "twitter": twitter_edit,
-                "role": role_combo,
+                "role": role_edit,
+                "icon": icon_combo,
                 "note": note_edit,
                 "display": display_check,
-                "order": order_label,
             }
+            self._cards.append(widgets)
+            self._cardWidgets[card] = widgets
+            self.casterInputs[slot] = widgets
 
         return group
 
     def _onFieldChanged(self, *_args):
         self._syncToState()
 
-    def _onDisplayToggled(self, slot, checked):
-        if self._updating:
-            return
-        if checked and slot not in self._displayOrder:
-            self._displayOrder.append(slot)
-        elif not checked and slot in self._displayOrder:
-            self._displayOrder.remove(slot)
+    def _onCardsReordered(self):
+        """DragCardList drop handler: the visual order changed. Slot =
+        position, so remap the slot bindings, renumber the headers and
+        rewrite the whole state (the data travels with the cards)."""
+        self._cards = [self._cardWidgets[card]
+                       for card in self.casterCardList.cards()]
+        self._remapSlots()
         self._syncToState()
+
+    def _remapSlots(self):
+        self.casterInputs = {
+            str(i + 1): w for i, w in enumerate(self._cards)}
+        for slot, w in self.casterInputs.items():
+            w["header"].setText(slot)
 
     def _syncToState(self):
         if self._updating:
@@ -256,50 +298,47 @@ class AutonaCommentaryWidget(QDockWidget):
             slots[slot] = {
                 "name": w["name"].text().strip(),
                 "team": w["team"].text().strip(),
-                "real_name": w["real_name"].text().strip(),
                 "twitter": w["twitter"].text().strip().lstrip("@"),
-                "role": w["role"].currentData() or "",
+                "role": w["role"].text().strip(),
+                "icon": w["icon"].currentData() or "",
                 "note": w["note"].text().strip(),
-                "display": (self._displayOrder.index(slot) + 1
-                            if slot in self._displayOrder else 0),
+                "display": 1 if w["display"].isChecked() else 0,
             }
         with StateManager.SaveBlock():
             StateManager.Set("commentary", slots)
         self._refreshDisplayLocks()
 
     def _refreshDisplayLocks(self):
-        """Show each checked slot's overlay position ("No.N") left of its
-        checkbox, and once MAX_DISPLAY toggles are ON disable the
-        unchecked ones (no modal — this runs inside signal handlers)."""
-        lock = len(self._displayOrder) >= comms.MAX_DISPLAY
-        for slot, w in self.casterInputs.items():
+        """Once MAX_DISPLAY toggles are ON, disable the unchecked ones
+        (no modal — this runs inside signal handlers). Also mirrors each
+        toggle onto its card's `onair` QSS variant (brighter card)."""
+        checked = sum(
+            1 for w in self._cards if w["display"].isChecked())
+        lock = checked >= comms.MAX_DISPLAY
+        for w in self._cards:
             box = w["display"]
-            if slot in self._displayOrder:
-                w["order"].setText(f"No.{self._displayOrder.index(slot) + 1}")
-            else:
-                w["order"].setText("")
             box.setEnabled(box.isChecked() or not lock)
+            card = w["card"]
+            if card.property("onair") != box.isChecked():
+                card.setProperty("onair", box.isChecked())
+                card.style().unpolish(card)
+                card.style().polish(card)
 
     # ── State -> UI ──────────────────────────────────────────────────
     def _loadFromState(self):
         state = StateManager.Get("commentary") or {}
-        shown = sorted(
-            ((data.get("display"), int(slot), slot)
-             for slot, data in state.items()
-             if isinstance(data, dict) and data.get("display")))
-        self._displayOrder = [slot for _order, _n, slot in shown]
         self._updating = True
         try:
             for slot, w in self.casterInputs.items():
                 data = state.get(slot) or comms.DefaultSlot()
                 w["name"].setText(data.get("name", ""))
                 w["team"].setText(data.get("team", ""))
-                w["real_name"].setText(data.get("real_name", ""))
                 w["twitter"].setText(data.get("twitter", ""))
                 w["note"].setText(data.get("note", ""))
-                index = w["role"].findData(data.get("role", ""))
-                w["role"].setCurrentIndex(max(index, 0))
-                w["display"].setChecked(slot in self._displayOrder)
+                w["role"].setText(data.get("role", ""))
+                index = w["icon"].findData(data.get("icon", ""))
+                w["icon"].setCurrentIndex(max(index, 0))
+                w["display"].setChecked(bool(data.get("display")))
         finally:
             self._updating = False
         self._refreshDisplayLocks()
@@ -310,30 +349,35 @@ class AutonaCommentaryWidget(QDockWidget):
         replaces the model object wholesale, so db_updated must rebind."""
         if AutonaPlayerDB.model is None:
             return
-        for slot, w in self.casterInputs.items():
+        for w in self._cards:
             edit = w["name"]
             completer = QCompleter()
             completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
             completer.setFilterMode(Qt.MatchFlag.MatchContains)
-            completer.setModel(AutonaPlayerDB.model)
+            # Entrants of the loaded tournament, or the whole DB when no
+            # tournament is loaded.
+            completer.setModel(AutonaPlayerDB.GetCompleterModel())
             edit.setCompleter(completer)
+            L.attach_popup_on_focus(edit)
             # Queued: let the completer finish its own text insertion
             # before we overwrite the fields (scoreboard widget pattern).
+            # The widget dict (not the slot) is captured — the card's
+            # slot changes when it is drag-reordered.
             completer.activated[QModelIndex].connect(
-                lambda x, slot=slot: self._onCompleterPick(slot, x),
+                lambda x, w=w: self._onCompleterPick(w, x),
                 Qt.QueuedConnection)
 
-    def _onCompleterPick(self, slot, model_index):
+    def _onCompleterPick(self, w, model_index):
         if model_index is None:
             return
         player = model_index.data(Qt.ItemDataRole.UserRole)
         if player:
-            self._applyPlayerData(slot, player)
+            self._applyPlayerData(w, player)
 
-    def _applyPlayerData(self, slot, player):
-        """Fill one card from a PlayerDB-shaped dict. Only string fields
-        present in the dict are written; role/display are left alone."""
-        w = self.casterInputs[slot]
+    def _applyPlayerData(self, w, player):
+        """Fill one card (widget dict) from a PlayerDB-shaped dict. Only
+        string fields present in the dict are written; role/icon/display
+        are left alone."""
         self._updating = True
         try:
             for field, source in PLAYERDB_FIELD_MAP:
@@ -353,7 +397,7 @@ class AutonaCommentaryWidget(QDockWidget):
             logger.warning(
                 f"Commentary: ignoring SetData for slot {index + 1}")
             return
-        self._applyPlayerData(slot, data)
+        self._applyPlayerData(self.casterInputs[slot], data)
 
     def LoadCommentatorFromTag(self, index, tag, no_mains=False):
         """LoadCommFromTagSignal handler. no_mains is accepted for
@@ -364,7 +408,7 @@ class AutonaCommentaryWidget(QDockWidget):
         player = AutonaPlayerDB.GetPlayerFromTag(str(tag))
         if not player:
             return False
-        self._applyPlayerData(slot, player)
+        self._applyPlayerData(self.casterInputs[slot], player)
         return True
 
     # ── Preview ──────────────────────────────────────────────────────

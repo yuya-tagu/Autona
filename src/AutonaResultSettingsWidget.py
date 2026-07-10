@@ -92,189 +92,6 @@ class ResultPreviewWidget(QWidget):
         painter.end()
 
 
-class _DragGrip(QLabel):
-    """Drag handle for a result player card.
-
-    A press-and-drag that starts on this grip begins an internal move drag;
-    PlayerCardList performs the reorder on drop. Dragging is restricted to the
-    grip so the card's input fields (name / combos) stay fully usable.
-    """
-
-    def __init__(self, card, card_list):
-        super().__init__()
-        self._card = card
-        self._card_list = card_list
-        self._press_pos = None
-        self.setObjectName("cardGrip")
-        self.setPixmap(QIcon(UI.icon_path("menu.svg")).pixmap(16, 16))
-        self.setCursor(Qt.CursorShape.OpenHandCursor)
-        self.setToolTip(QApplication.translate("app", "Drag to reorder"))
-
-    def mousePressEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton:
-            self._press_pos = e.pos()
-
-    def mouseMoveEvent(self, e):
-        if self._press_pos is None:
-            return
-        if (e.pos() - self._press_pos).manhattanLength() \
-                < QApplication.startDragDistance():
-            return
-        idx = self._card_list.indexOf(self._card)
-        self._press_pos = None
-        if idx < 0:
-            return
-        drag = QDrag(self)
-        mime = QMimeData()
-        mime.setData(PlayerCardList.MIME, str(idx).encode("ascii"))
-        drag.setMimeData(mime)
-        drag.setPixmap(self._gripDragPixmap())
-        drag.setHotSpot(self.mapTo(self._card, e.pos()))
-        self.setCursor(Qt.CursorShape.ClosedHandCursor)
-        drag.exec(Qt.DropAction.MoveAction)
-        self.setCursor(Qt.CursorShape.OpenHandCursor)
-
-    def mouseReleaseEvent(self, e):
-        self._press_pos = None
-
-    def _gripDragPixmap(self):
-        """Grab the card one step brighter (bg_quaternary) for the drag image.
-
-        The `dragging` property drives a QSS variant; toggle it around grab()
-        with a repolish so only the offscreen drag pixmap is brightened — the
-        on-screen card is restored before any repaint reaches the screen.
-        """
-        card = self._card
-        card.setProperty("dragging", True)
-        card.style().unpolish(card)
-        card.style().polish(card)
-        pixmap = card.grab()
-        card.setProperty("dragging", False)
-        card.style().unpolish(card)
-        card.style().polish(card)
-        return pixmap
-
-
-class PlayerCardList(QWidget):
-    """Vertical, drag-reorderable list of player cards.
-
-    Cards are added top-to-bottom and dragged by their grip. On drop the list
-    reorders itself and emits orderChanged; the owning widget renumbers ranks
-    to match the new visual order. Only visible cards participate as drop
-    targets, so hidden slots (beyond the 8/16 shown) never receive a drop.
-    """
-
-    MIME = "application/x-autona-result-player-card"
-    orderChanged = Signal()
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._cards = []
-        self._layout = QVBoxLayout(self)
-        self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(UI.SPACE_SM)
-        self._layout.addStretch(1)
-        self.setAcceptDrops(True)
-        # 2px accent line shown at the drop position during a drag.
-        self._indicator = QFrame(self)
-        self._indicator.setFixedHeight(2)
-        self._indicator.setStyleSheet(
-            f"background-color: {UI.palette()['accent']}; border: none;")
-        self._indicator.hide()
-
-    def addCard(self, card):
-        self._cards.append(card)
-        # Insert before the trailing stretch (always the last layout item).
-        self._layout.insertWidget(self._layout.count() - 1, card)
-
-    def cards(self):
-        return list(self._cards)
-
-    def indexOf(self, card):
-        try:
-            return self._cards.index(card)
-        except ValueError:
-            return -1
-
-    # -- drag & drop --
-    def dragEnterEvent(self, e):
-        if e.mimeData().hasFormat(self.MIME):
-            e.acceptProposedAction()
-
-    def dragMoveEvent(self, e):
-        if not e.mimeData().hasFormat(self.MIME):
-            return
-        self._showIndicator(self._insertIndex(self._eventY(e)))
-        e.acceptProposedAction()
-
-    def dragLeaveEvent(self, e):
-        self._indicator.hide()
-
-    def dropEvent(self, e):
-        self._indicator.hide()
-        if not e.mimeData().hasFormat(self.MIME):
-            return
-        try:
-            src = int(bytes(e.mimeData().data(self.MIME)).decode("ascii"))
-        except (ValueError, TypeError):
-            return
-        dst = self._insertIndex(self._eventY(e))
-        e.acceptProposedAction()
-        # Defer the reorder: mutating the layout while Qt is still delivering
-        # the drop event risks a re-entrant layout crash (agent-pitfalls #9).
-        QTimer.singleShot(0, lambda: self._commitMove(src, dst))
-
-    # -- helpers --
-    def _eventY(self, e):
-        # qtpy/Qt6 exposes position() (QPointF); fall back to pos() for Qt5.
-        try:
-            return int(e.position().y())
-        except AttributeError:
-            return e.pos().y()
-
-    def _visibleCards(self):
-        return [c for c in self._cards if c.isVisible()]
-
-    def _insertIndex(self, y):
-        """Insertion index (in _cards terms) from a y coordinate, using only
-        visible cards' vertical midpoints."""
-        for c in self._cards:
-            if not c.isVisible():
-                continue
-            if y < c.y() + c.height() / 2:
-                return self._cards.index(c)
-        vis = self._visibleCards()
-        return self._cards.index(vis[-1]) + 1 if vis else len(self._cards)
-
-    def _showIndicator(self, ins):
-        spacing = self._layout.spacing()
-        if ins < len(self._cards) and self._cards[ins].isVisible():
-            y = self._cards[ins].y() - spacing // 2
-        else:
-            vis = self._visibleCards()
-            y = (vis[-1].y() + vis[-1].height() + spacing // 2) if vis else 0
-        self._indicator.setGeometry(0, y, self.width(), 2)
-        self._indicator.show()
-        self._indicator.raise_()
-
-    def _commitMove(self, src, dst):
-        if src < 0 or src >= len(self._cards):
-            return
-        # Moving downward: removing src shifts later items up by one.
-        if dst > src:
-            dst -= 1
-        dst = max(0, min(dst, len(self._cards) - 1))
-        if dst == src:
-            return
-        card = self._cards.pop(src)
-        self._cards.insert(dst, card)
-        for c in self._cards:
-            self._layout.removeWidget(c)
-        for i, c in enumerate(self._cards):
-            self._layout.insertWidget(i, c)
-        self.orderChanged.emit()
-
-
 class AutonaResultSettingsWidget(QDockWidget):
     # Team layout: max members shown per rank (each = name + main fighter).
     MAX_TEAM_MEMBERS = 5
@@ -301,7 +118,7 @@ class AutonaResultSettingsWidget(QDockWidget):
 
         # --- Player cards (one draggable card per player) ---
         # Each player is a QFrame card (brighter background) laid out in a
-        # PlayerCardList that supports drag-to-reorder. Card body:
+        # L.DragCardList that supports drag-to-reorder. Card body:
         #   left column : drag grip + rank spin box
         #   fields grid : name/sponsor, X (Twitter), then 3× char+color rows
         # playerInputs entry (unchanged 10-tuple, index contract preserved):
@@ -316,11 +133,12 @@ class AutonaResultSettingsWidget(QDockWidget):
         self.playerCards = []
         self._entryByCard = {}
 
-        self.playerCardList = PlayerCardList()
+        self.playerCardList = L.DragCardList(
+            mime="application/x-autona-result-player-card")
         self.playerCardList.orderChanged.connect(self._onPlayersReordered)
         # One step brighter than the page so each player reads as its own card.
         _pc = UI.palette()
-        # `dragging` variant is one step brighter (bg_quaternary); _DragGrip
+        # `dragging` variant is one step brighter (bg_quaternary); L.DragGrip
         # toggles that property around grab() so only the drag pixmap uses it.
         self.playerCardList.setStyleSheet(
             f"QFrame#resultPlayerCard {{"
@@ -397,7 +215,7 @@ class AutonaResultSettingsWidget(QDockWidget):
             # regardless of the rank's height.
             leftCol = QGridLayout()
             leftCol.setContentsMargins(0, 0, 0, 0)
-            grip = _DragGrip(card, self.playerCardList)
+            grip = L.DragGrip(card, self.playerCardList)
             leftCol.addWidget(
                 rank_edit, 0, 0,
                 Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)

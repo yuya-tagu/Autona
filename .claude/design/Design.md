@@ -357,7 +357,7 @@ top8
 
 ##### `commentary` — 実況・解説
 
-実況・解説機能の全面リワーク（2026-07）でスキーマ刷新。スロット固定 8 名・
+実況・解説機能の全面リワーク（2026-07）でスキーマ刷新。スロット固定 12 名・
 欠番概念なし（旧「Unset 時に詰める」運用は廃止）。正規化・表示選択ルールの
 正本は `src/AutonaCommentaryModel.py`。旧スキーマ（seed / country / character /
 mains / custom_textbox 等）は起動時の `NormalizeState` でマイグレーションされる
@@ -365,15 +365,20 @@ mains / custom_textbox 等）は起動時の `NormalizeState` でマイグレー
 
 ```
 commentary
-└── {1..8}                           W R   (スロット固定・常時 8 エントリ)
+└── {1..12}                          W R   (スロット固定・常時 12 エントリ)
     ├── name                         W R   (ゲーマータグ)
     ├── team                         W R   (チーム / 所属)
-    ├── real_name                    W R
     ├── twitter                      W R   (@ なし)
-    ├── role                         W R   ("実況"|"解説"|"選手"|"主催"|"")
+    ├── role                         W R   (str 自由入力。補完候補は ROLES の 6 種:
+    │                                       "実況"|"解説"|"選手"|"主催"|"MC"|"スタッフ")
+    ├── icon                         W R   (str。""|"mic"|"megaphone"|"phone"。アイコン
+    │                                       プルダウンで選択、オーバーレイで SVG バッジ表示。
+    │                                       旧 role/roles のアイコンラベルは起動時に移行)
     ├── note                         W R   (自由コメント。例: 本年度ランキング2位)
-    └── display                      W R   (int。0=非表示、1..4=オーバーレイ表示順。
-                                            チェックした順に採番、左から表示)
+    └── display                      W R   (int。0=非表示、1=表示。表示順はスロット順
+                                            （パネルのカード順。≡ ドラッグで並び替え、
+                                            ドロップでデータがスロット間を移動）。最大 4 名。
+                                            旧チェック順採番値(1..4)は起動時に 1 へ移行)
 ```
 
 ##### `tournamentInfo`

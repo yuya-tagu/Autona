@@ -13,6 +13,7 @@ from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaPlayerDB import AutonaPlayerDB
 from .Helpers.AutonaDirHelper import AutonaResolve
 from . import ui_constants as UI
+from . import ui_layout as L
 from .Workers import Worker
 from .AutonaBasePlayerWidget import AutonaBasePlayerWidget
 import threading
@@ -512,7 +513,10 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             name_edit.completer().setCaseSensitivity(
                 Qt.CaseSensitivity.CaseInsensitive)
             name_edit.completer().setFilterMode(Qt.MatchFlag.MatchContains)
-            name_edit.completer().setModel(AutonaPlayerDB.model)
+            # Entrants of the loaded tournament, or the whole DB when no
+            # tournament is loaded.
+            name_edit.completer().setModel(AutonaPlayerDB.GetCompleterModel())
+            L.attach_popup_on_focus(name_edit)
 
             self.ManageSavePlayerToDBText()
             self.ManageDeletePlayerFromDBActive()

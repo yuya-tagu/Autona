@@ -1692,6 +1692,10 @@ class StartGGDataProvider(TournamentDataProvider):
             players = []
             # Reset top_entrants cache at the start of a fresh fetch
             self.top_entrants = []
+            # DB tags of every participant, handed to AutonaPlayerDB at
+            # the end so completers only offer this tournament's players.
+            # The previous tournament's set stays active until then.
+            entrant_tags = set()
 
             while page <= totalPages:
                 logger.info(str(page) + "/" + str(totalPages))
@@ -1727,6 +1731,7 @@ class StartGGDataProvider(TournamentDataProvider):
                         self.player_seeds[playerData["id"]
                                           [0]] = playerData["seed"]
                         players.append(playerData)
+                        entrant_tags.add(AutonaPlayerDB.PlayerTag(playerData))
                     # Capture entry-level info for stream title generation
                     # (one record per team/entrant, using first participant's
                     # gamerTag without sponsor prefix)
@@ -1746,8 +1751,11 @@ class StartGGDataProvider(TournamentDataProvider):
 
                 page += 1
 
-            # Persist + rebuild the model once for the whole fetch.
+            # Persist + rebuild the model once for the whole fetch. The
+            # entrant set is installed first so the rebuilt completer
+            # proxy filters correctly from the start.
             AutonaPlayerDB.SaveDB()
+            AutonaPlayerDB.SetTournamentPlayers(entrant_tags)
             AutonaPlayerDB.SetupModel()
 
             # Sort by seed (ascending); unseeded entries fall to the bottom

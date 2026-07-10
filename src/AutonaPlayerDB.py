@@ -20,14 +20,43 @@ class AutonaPlayerDBSignals(QObject):
     db_updated = Signal()
 
 
+class _TournamentEntrantsProxy(QSortFilterProxyModel):
+    """Filters the player model down to the currently loaded
+    tournament's entrants (AutonaPlayerDB.tournamentTags). Passes every
+    row through while no tournament entrant set is known, so completers
+    fall back to the whole DB."""
+
+    def filterAcceptsRow(self, source_row, source_parent):
+        tags = AutonaPlayerDB.tournamentTags
+        if not tags:
+            return True
+        index = self.sourceModel().index(source_row, 0, source_parent)
+        return self.sourceModel().data(index) in tags
+
+
 class AutonaPlayerDB:
     signals = AutonaPlayerDBSignals()
     database = {}
     model: QStandardItemModel = None
+    # Stable proxy over `model` used by the player-name completers; the
+    # source model is swapped on every SetupModel rebuild. See
+    # GetCompleterModel().
+    completerModel: _TournamentEntrantsProxy = None
+    # DB tags (see PlayerTag) of the loaded tournament's entrants.
+    # Empty set = no tournament loaded -> completers show the whole DB.
+    tournamentTags = set()
     webServer = None
     modelLock = Lock()
     fieldnames = ["prefix", "gamerTag", "name", "twitter",
                 "country_code", "state_code", "mains", "custom_textbox"] # Used for filtering what we save locally
+
+    @staticmethod
+    def PlayerTag(player):
+        """DB key / model display tag for a player dict. Must stay the
+        single source of truth so entrant tags collected during a
+        tournament fetch match the keys AddPlayers writes."""
+        return player.get("prefix")+" "+player.get("gamerTag") \
+            if player.get("prefix") else player.get("gamerTag")
 
     @staticmethod
     def LoadDB():
@@ -97,8 +126,7 @@ class AutonaPlayerDB:
         logger.info(f"Adding players to DB: {len(players)}")
         for player in players:
             if player is not None:
-                tag = player.get(
-                    "prefix")+" "+player.get("gamerTag") if player.get("prefix") else player.get("gamerTag")
+                tag = AutonaPlayerDB.PlayerTag(player)
 
                 if not overwrite:
                     if tag not in AutonaPlayerDB.database:
@@ -236,7 +264,40 @@ class AutonaPlayerDB:
                             f'Error loading player from local DB: {player.get("gamerTag")}')
                         logger.error(traceback.format_exc())
 
+            if AutonaPlayerDB.completerModel is None:
+                AutonaPlayerDB.completerModel = _TournamentEntrantsProxy()
+            AutonaPlayerDB.completerModel.setSourceModel(AutonaPlayerDB.model)
+
             AutonaPlayerDB.signals.db_updated.emit()
+
+    @staticmethod
+    def GetCompleterModel():
+        """Model for the player-name completers: only the loaded
+        tournament's entrants, or the whole DB when no tournament is
+        loaded. Built by SetupModel — None until the first build, same
+        lifecycle as `model`."""
+        return AutonaPlayerDB.completerModel
+
+    @staticmethod
+    @gui_thread_sync
+    def SetTournamentPlayers(tags):
+        """Restrict the completer candidates to the given DB tags (the
+        loaded tournament's entrants). Called from the entrants fetch
+        worker; marshalled to the GUI thread for the proxy refilter."""
+        AutonaPlayerDB.tournamentTags = {tag for tag in tags if tag}
+        if AutonaPlayerDB.completerModel is not None:
+            AutonaPlayerDB.completerModel.invalidateFilter()
+
+    @staticmethod
+    @gui_thread_sync
+    def ClearTournamentPlayers():
+        """Back to the whole DB as completer candidates (no tournament
+        loaded)."""
+        if not AutonaPlayerDB.tournamentTags:
+            return
+        AutonaPlayerDB.tournamentTags = set()
+        if AutonaPlayerDB.completerModel is not None:
+            AutonaPlayerDB.completerModel.invalidateFilter()
 
     @staticmethod
     def SaveDB():

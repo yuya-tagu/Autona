@@ -14,6 +14,7 @@
       "bg_secondary": "#191B20",
       "bg_tertiary": "#23262C",
       "bg_quaternary": "#2D3138",
+      "bg_quinary": "#383C44",
       "border_subtle": "#23262C",
       "border_default": "#383C44",
       "border_strong": "#53575F",

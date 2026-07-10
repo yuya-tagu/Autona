@@ -17,6 +17,7 @@ from .AutonaPlayerDB import AutonaPlayerDB
 from .AutonaScoreboardWidget import AutonaScoreboardWidget
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaCommentaryWidget import AutonaCommentaryWidget
+from . import AutonaCommentaryModel as comms
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Workers import Worker
 import os
@@ -201,11 +202,11 @@ class WebServerActions(QThread):
         return "OK"
 
     def set_commentary_data(self, index, data):
-        # Caster slots are fixed 1..8 (AutonaCommentaryModel.SLOTS); the
-        # old auto-grow behavior is gone.
+        # Caster slots are fixed (AutonaCommentaryModel.SLOTS); the old
+        # auto-grow behavior is gone.
         index = int(index) - 1
-        if not 0 <= index < 8:
-            return "ERROR : index must be 1..8"
+        if not 0 <= index < len(comms.SLOTS):
+            return f"ERROR : index must be 1..{len(comms.SLOTS)}"
         self.commentaryWidget.ChangeCommDataSignal.emit(index, data)
 
         return "OK"
@@ -444,6 +445,14 @@ class WebServerActions(QThread):
             return sets
 
     def get_playerdb(self):
+        # Same rule as the desktop name completers: only the loaded
+        # tournament's entrants when one is loaded, the whole DB
+        # otherwise. Clients receive this on (re)connect.
+        tags = AutonaPlayerDB.tournamentTags
+        if tags:
+            return {tag: player
+                    for tag, player in AutonaPlayerDB.database.items()
+                    if tag in tags}
         return AutonaPlayerDB.database
 
     def get_match(self, setId=None):

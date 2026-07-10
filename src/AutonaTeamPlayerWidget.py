@@ -14,6 +14,7 @@ from .AutonaTeamBattleModeEnum import AutonaTeamBattleModeEnum
 from .Helpers.AutonaDirHelper import AutonaResolve
 from .AutonaBasePlayerWidget import AutonaBasePlayerWidget
 from . import ui_constants as UI
+from . import ui_layout as L
 import threading
 from .Helpers.AutonaBadWordFilter import AutonaBadWordFilter
 from loguru import logger
@@ -471,8 +472,11 @@ class AutonaTeamPlayerWidget(AutonaBasePlayerWidget):
                 Qt.CaseSensitivity.CaseInsensitive)
             self.findChild(QLineEdit, "name").completer(
             ).setFilterMode(Qt.MatchFlag.MatchContains)
+            # Entrants of the loaded tournament, or the whole DB when no
+            # tournament is loaded.
             self.findChild(QLineEdit, "name").completer().setModel(
-                AutonaPlayerDB.model)
+                AutonaPlayerDB.GetCompleterModel())
+            L.attach_popup_on_focus(self.findChild(QLineEdit, "name"))
 
     def SetData(self, data, dontLoadFromDB=False, clear=True, no_mains=False):
         self.dataLock.acquire()
