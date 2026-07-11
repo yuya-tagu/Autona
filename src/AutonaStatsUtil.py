@@ -173,6 +173,10 @@ class AutonaStatsUtil:
 
                 StateManager.Set(f"score.{self.scoreboardNumber}.upset_factor",
                                     abs(p1_upset - p2_upset))
+            else:
+                # One (or both) seeds missing: reset instead of leaving the
+                # previous pairing's upset factor in state.
+                StateManager.Set(f"score.{self.scoreboardNumber}.upset_factor", 0)
         else:
             StateManager.Set(f"score.{self.scoreboardNumber}.upset_factor", 0)
 
