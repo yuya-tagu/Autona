@@ -124,6 +124,7 @@ class AutonaScoreboardWidget(QWidget):
             lambda: self.CommandScoreChange(1, 1))
         AutonaHotkeys.signals.team2_score_down.connect(
             lambda: self.CommandScoreChange(1, -1))
+        AutonaHotkeys.signals.apply_changes.connect(self.ApplyChanges)
 
         self.signals.CommandScoreChange.connect(self.CommandScoreChange)
         self.signals.SwapTeams.connect(self.SwapTeams)
@@ -528,10 +529,10 @@ class AutonaScoreboardWidget(QWidget):
         # bar above. Backed by tournamentInfo.displayTournamentName (not
         # score.{N}.*), so it is board-agnostic, immediate (no 反映 gating),
         # and survives the score subtree wipe on startup.
-        displayTournamentNameRow = QWidget()
-        displayTournamentNameRow.setLayout(QHBoxLayout())
-        displayTournamentNameRow.layout().setContentsMargins(0, 0, 0, 0)
-        displayTournamentNameRow.layout().setSpacing(UI.SPACE_SM)
+        self.displayTournamentNameRow = QWidget()
+        self.displayTournamentNameRow.setLayout(QHBoxLayout())
+        self.displayTournamentNameRow.layout().setContentsMargins(0, 0, 0, 0)
+        self.displayTournamentNameRow.layout().setSpacing(UI.SPACE_SM)
         displayTournamentNameLabel = QLabel(
             QApplication.translate("app", "表示大会名"))
         self.displayTournamentNameEdit = QLineEdit()
@@ -541,19 +542,17 @@ class AutonaScoreboardWidget(QWidget):
             lambda: StateManager.Set(
                 "tournamentInfo.displayTournamentName",
                 self.displayTournamentNameEdit.text()))
-        displayTournamentNameRow.layout().addWidget(displayTournamentNameLabel)
-        displayTournamentNameRow.layout().addWidget(self.displayTournamentNameEdit, 1)
+        self.displayTournamentNameRow.layout().addWidget(displayTournamentNameLabel)
+        self.displayTournamentNameRow.layout().addWidget(
+            self.displayTournamentNameEdit, 1)
 
         columnsIndex = self.innerWidget.layout().indexOf(self.columns)
-        # Each insertWidget call below targets the same fixed columnsIndex,
-        # which pushes the previously inserted widget down one slot — so the
-        # *last* call ends up topmost. Calling order is therefore bottom row
-        # first: scoreBar, then displayTournamentNameRow (lands just above
-        # scoreBar's phase/round pulldowns), then streamSection on top.
-        # Final visual order: streamSection, displayTournamentNameRow,
-        # scoreBar, then columns.
+        # Construction-time order only — _groupSectionsIntoFrames re-homes
+        # these rows into the scoreboard section frame in their final
+        # display order.
         self.innerWidget.layout().insertWidget(columnsIndex, self.scoreBar)
-        self.innerWidget.layout().insertWidget(columnsIndex, displayTournamentNameRow)
+        self.innerWidget.layout().insertWidget(
+            columnsIndex, self.displayTournamentNameRow)
         self.innerWidget.layout().insertWidget(columnsIndex, self.streamSection)
         self.scoreColumn.hide()
 
@@ -865,7 +864,8 @@ class AutonaScoreboardWidget(QWidget):
         the apply/reset action row).
 
         Current innerWidget child order is:
-            topOptions, streamSection, scoreBar, columns, bottomOptions
+            topOptions, streamSection, displayTournamentNameRow, scoreBar,
+            columns, bottomOptions
         """
         inner = self.innerWidget.layout()
 
@@ -874,6 +874,7 @@ class AutonaScoreboardWidget(QWidget):
         for w in (
             topOptions,
             self.streamSection,
+            self.displayTournamentNameRow,
             self.scoreBar,
             self.columns,
             bottomOptions,
@@ -939,6 +940,10 @@ class AutonaScoreboardWidget(QWidget):
         # Start.gg load row (with its auto-update timer strip) sits above
         # the phase/round/BEST OF bar.
         matchLayout.addWidget(self.streamSection)
+
+        # Display tournament name goes right above the phase/round bar,
+        # mirroring the crew battle board's layout.
+        matchLayout.addWidget(self.displayTournamentNameRow)
 
         matchLayout.addWidget(self.scoreBar)
 

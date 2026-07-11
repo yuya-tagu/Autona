@@ -365,6 +365,17 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         dlg.addLayout(buttonRow)
         buttonRow.addWidget(self.clear_bt)
         buttonRow.addStretch(1)
+        # 反映: commits the owning board's held subtree — the same publish as
+        # the board-level 反映 button, so detail edits can be applied without
+        # closing the dialog. Always enabled: a commit with nothing pending
+        # is a no-op.
+        self.btApplyDetails = QPushButton(
+            QApplication.translate("app", "反映"))
+        self.btApplyDetails.setObjectName("primary")
+        self.btApplyDetails.setToolTip(QApplication.translate(
+            "app", "入力内容を配信画面に反映する"))
+        self.btApplyDetails.clicked.connect(self._ApplyBoardChanges)
+        buttonRow.addWidget(self.btApplyDetails)
         self.btCloseDetails = QPushButton(
             QApplication.translate("app", "Close"))
         self.btCloseDetails.clicked.connect(self.detailsDialog.accept)
@@ -436,6 +447,13 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         # Window-modal, non-blocking (no exec(): モーダル入れ子禁止).
         self.detailsDialog.open()
 
+    def _ApplyBoardChanges(self):
+        # The details dialog is only built for score paths, so self.path is
+        # score.{N}.team.{T}.player.{M} here; the board's held prefix is the
+        # first two segments (score.{N}). Derived at click time because
+        # self.path can be rewritten by the owning widget.
+        StateManager.CommitHeld(".".join(self.path.split(".")[:2]))
+
     @staticmethod
     def _seedDisplayStyle() -> str:
         return f"color: {UI.palette()['text_secondary']};"
@@ -496,6 +514,12 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             character_element.setLayout(QHBoxLayout())
             character_element.layout().setSpacing(UI.SPACE_SM)
             character_element.layout().setContentsMargins(0, 0, 0, 0)
+            # Combo prefixes ("ファイター" / "カラー") only on the scoreboard,
+            # where the row lives in the roomy details dialog — the inline
+            # rows elsewhere (commentary etc.) have no width to spare.
+            if self.path.startswith("score."):
+                character_element.layout().addWidget(
+                    QLabel(QApplication.translate("app", "ファイター")))
             player_character = QComboBox()
             player_character.setEditable(True)
             character_element.layout().addWidget(player_character)
@@ -510,6 +534,9 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             player_character.setIconSize(QSize(0, 0))
             player_character.setFixedHeight(32)
 
+            if self.path.startswith("score."):
+                character_element.layout().addWidget(
+                    QLabel(QApplication.translate("app", "カラー")))
             player_character_color = QComboBox()
             character_element.layout().addWidget(player_character_color)
             player_character_color.setIconSize(QSize(16, 16))
@@ -844,12 +871,25 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                             if variant_element.currentIndex() != variantIndex:
                                 variant_element.setCurrentIndex(variantIndex)
 
-            if data.get("seed") is not None:
-                if data.get("seed") > 0:
-                    StateManager.Set(f"{self.path}.seed", data.get("seed"))
-                    self._w("seed", QSpinBox).setValue(int(data.get("seed")))
+            if "seed" in data:
+                # Normalize: providers hand back None (unseeded tournament,
+                # initialSeedNum null), 0 (key absent upstream) or a numeric
+                # string depending on the path. Anything that isn't a
+                # positive int means "no seed info" and must CLEAR the
+                # previous player's seed — the old is-not-None guard skipped
+                # None entirely and left a stale seed in state.
+                try:
+                    seed = int(data.get("seed") or 0)
+                except (TypeError, ValueError):
+                    seed = 0
+                if seed > 0:
+                    StateManager.Set(f"{self.path}.seed", seed)
+                    self._w("seed", QSpinBox).setValue(seed)
                 else:
+                    # setValue(0) alone does not emit valueChanged when the
+                    # spinbox is already 0, so write the state explicitly.
                     self._w("seed", QSpinBox).setValue(0)
+                    StateManager.Set(f"{self.path}.seed", 0)
             if data.get("city"):
                 StateManager.Set(f"{self.path}.city", data.get("city"))
         finally:
