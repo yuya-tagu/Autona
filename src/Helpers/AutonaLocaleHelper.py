@@ -28,6 +28,16 @@ class AutonaLocaleHelper(QObject):
     countryToLanguage = {}
     countryToContinent = {}
 
+    # Double-elimination "TOP N" ladders. N is the number of players still
+    # alive in the tournament when the round starts: winners rounds land on
+    # the 3*2^n series, losers rounds additionally hit the 2^n series in
+    # between. Sized for events up to ~10000 entrants — the actual first
+    # round (e.g. "Winners TOP300") uses the real entrant count and is
+    # inserted dynamically when a tournament is loaded.
+    WINNERS_TOP_TOTALS = [3 * 2 ** n for n in range(3, 12)]  # 24..6144
+    LOSERS_TOP_TOTALS = sorted(
+        {2 ** n for n in range(4, 14)} | {3 * 2 ** n for n in range(2, 12)})  # 12..8192
+
     def LoadLocale():
         settingsProgramLocale = SettingsManager.Get("program_language", None)
         settingsExportLocale = SettingsManager.Get("game_asset_language", None)
@@ -152,6 +162,44 @@ class AutonaLocaleHelper(QObject):
             AutonaLocaleHelper.matchNames.update(term_names["match"])
         except:
             logger.warning("Custom Tournament Terms were not found and/or loaded.")
+
+    def GetMatchNameCandidates():
+        """Ordered match (round) name candidates for the editable combos.
+
+        Order follows tournament prominence: winners rounds (named finals
+        first, then the TOP ladder ascending), losers rounds likewise,
+        grand finals, then generic round-robin rounds.
+        """
+        names = AutonaLocaleHelper.matchNames
+        candidates = []
+
+        def add(text):
+            if text and text not in candidates:
+                candidates.append(text)
+
+        for key in ("winners_final", "winners_semi_final",
+                    "winners_quarter_final"):
+            add(names.get(key))
+        winners_top = names.get("winners_top_n", "Winners TOP{0}")
+        for n in AutonaLocaleHelper.WINNERS_TOP_TOTALS:
+            add(winners_top.format(n))
+
+        for key in ("losers_final", "losers_semi_final",
+                    "losers_quarter_final", "losers_top8"):
+            add(names.get(key))
+        losers_top = names.get("losers_top_n", "Losers TOP{0}")
+        for n in AutonaLocaleHelper.LOSERS_TOP_TOTALS:
+            add(losers_top.format(n))
+
+        add(names.get("grand_final"))
+        add(names.get("grand_final_reset"))
+
+        round_template = names.get("round", "")
+        if "{0}" in round_template:
+            for n in range(1, 6):
+                add(round_template.format(n))
+
+        return candidates
 
     def GetRemaps(language: str):
         for remap, langs in AutonaLocaleHelper.remapping.items():

@@ -665,52 +665,24 @@ class AutonaScoreboardWidget(QWidget):
             phaseString = AutonaLocaleHelper.phaseNames[key]
 
             if "{0}" in phaseString:
-                if "top" not in key:
-                    for letter in ["A", "B", "C", "D"]:
-                        if self.phaseCombo.findText(phaseString.format(letter)) < 0:
-                            self.phaseCombo.addItem(phaseString.format(letter))
+                for letter in ["A", "B", "C", "D"]:
+                    if self.phaseCombo.findText(phaseString.format(letter)) < 0:
+                        self.phaseCombo.addItem(phaseString.format(letter))
             else:
                 if self.phaseCombo.findText(phaseString) < 0:
                     self.phaseCombo.addItem(phaseString)
 
         self.matchCombo.addItem("")
 
-        for key in AutonaLocaleHelper.matchNames.keys():
-            matchString = AutonaLocaleHelper.matchNames[key]
+        for matchString in AutonaLocaleHelper.GetMatchNameCandidates():
+            if self.matchCombo.findText(matchString) < 0:
+                self.matchCombo.addItem(matchString)
 
-            try:
-                if "{0}" in matchString and ("qualifier" in key):
-                    couples = [
-                        (AutonaLocaleHelper.phaseNames.get("top_n").format(8), AutonaLocaleHelper.matchNames.get("qualifier_winners_indicator")),
-                        (AutonaLocaleHelper.phaseNames.get("top_n").format(16), AutonaLocaleHelper.matchNames.get("qualifier_winners_indicator")),
-                        (AutonaLocaleHelper.phaseNames.get("top_n").format(32), AutonaLocaleHelper.matchNames.get("qualifier_winners_indicator")),
-                        (AutonaLocaleHelper.phaseNames.get("top_n").format(6), AutonaLocaleHelper.matchNames.get("qualifier_losers_indicator")),
-                        (AutonaLocaleHelper.phaseNames.get("top_n").format(8), AutonaLocaleHelper.matchNames.get("qualifier_losers_indicator")),
-                        (AutonaLocaleHelper.phaseNames.get("top_n").format(12), AutonaLocaleHelper.matchNames.get("qualifier_losers_indicator")),
-                        (AutonaLocaleHelper.phaseNames.get("top_n").format(16), AutonaLocaleHelper.matchNames.get("qualifier_losers_indicator")),
-                        (AutonaLocaleHelper.phaseNames.get("top_n").format(24), AutonaLocaleHelper.matchNames.get("qualifier_losers_indicator")),
-                        (AutonaLocaleHelper.phaseNames.get("top_n").format(32), AutonaLocaleHelper.matchNames.get("qualifier_losers_indicator"))
-                    ]
-
-                    for couple in couples:
-                        print(couple)
-                        self.matchCombo.addItem(matchString.format(*couple))
-                elif "{0}" in matchString and ("qualifier" not in key):
-                    for number in range(5):
-                        if key == "best_of":
-                            if self.matchCombo.findText(matchString.format(str(2*number+1))) < 0:
-                                self.matchCombo.addItem(matchString.format(str(2*number+1)))
-                        else:
-                            if self.matchCombo.findText(matchString.format(str(number+1))) < 0:
-                                self.matchCombo.addItem(matchString.format(str(number+1)))
-                elif "indicator" in key:
-                    pass
-                else:
-                    if self.matchCombo.findText(matchString) < 0:
-                        self.matchCombo.addItem(matchString)
-            except:
-                logger.error(
-                    f"Unable to generate match strings for {matchString}")
+        # The real first round (e.g. "Winners TOP300") depends on the entrant
+        # count, so it is inserted when a tournament loads.
+        self._entrantsMatchItem = None
+        AutonaTournamentDataProvider.instance.signals.tournament_data_updated.connect(
+            self._UpdateEntrantsMatchItem)
 
         AutonaGameAssetManager.instance.signals.onLoad.connect(
             lambda: [
@@ -785,6 +757,34 @@ class AutonaScoreboardWidget(QWidget):
             # the commit and this slot running.
             self.btApply.setEnabled(
                 StateManager.HasPendingChanges(self.statePrefix))
+
+    def _UpdateEntrantsMatchItem(self, data):
+        """Keep a 'Winners TOP{entrants}' candidate (the real first-round
+        headcount, e.g. TOP300) at the top of the match combo, replacing the
+        one from the previously loaded tournament."""
+        if not isinstance(data, dict):
+            return
+        # An empty dict means "tournament cleared" -> drop the old candidate.
+        numEntrants = data.get("numEntrants") or 0
+        template = AutonaLocaleHelper.matchNames.get(
+            "winners_top_n", "Winners TOP{0}")
+        newItem = template.format(numEntrants) if numEntrants > 0 else None
+        oldItem = self._entrantsMatchItem
+        if oldItem == newItem:
+            return
+        self.matchCombo.blockSignals(True)
+        try:
+            if oldItem:
+                index = self.matchCombo.findText(oldItem)
+                # Keep the entry the operator currently has selected.
+                if index >= 0 and self.matchCombo.currentText() != oldItem:
+                    self.matchCombo.removeItem(index)
+            self._entrantsMatchItem = None
+            if newItem and self.matchCombo.findText(newItem) < 0:
+                self.matchCombo.insertItem(1, newItem)
+                self._entrantsMatchItem = newItem
+        finally:
+            self.matchCombo.blockSignals(False)
 
     def _groupSectionsIntoFrames(self, topOptions, bottomOptions):
         """Re-home the construction-time rows into the single scoreboard
@@ -990,7 +990,6 @@ class AutonaScoreboardWidget(QWidget):
 
             tournament_name = StateManager.Get("tournamentInfo.tournamentName", "") or ""
             phase = StateManager.Get(f"score.{n}.phase", "") or ""
-            top_n = StateManager.Get(f"score.{n}.top_n", "") or ""
             match = StateManager.Get(f"score.{n}.match", "") or ""
             stream_url = StateManager.Get(f"score.{n}.stream_url", "") or ""
 
@@ -1008,7 +1007,7 @@ class AutonaScoreboardWidget(QWidget):
                 missing.append(QApplication.translate("app", "Team 1 player name"))
             if not _team_has_name(2):
                 missing.append(QApplication.translate("app", "Team 2 player name"))
-            if not (phase.strip() or top_n.strip() or match.strip()):
+            if not (phase.strip() or match.strip()):
                 missing.append(QApplication.translate("app", "Round name"))
 
             if missing:
@@ -1060,12 +1059,7 @@ class AutonaScoreboardWidget(QWidget):
                     players.append(entry)
                 return " / ".join(players) if players else "???"
 
-            round_parts = []
-            if phase:
-                round_parts.append(f"[{phase}]")
-            if top_n:
-                round_parts.append(top_n)
-            round_line = " ".join(round_parts)
+            round_line = f"[{phase}]" if phase else ""
             if match:
                 if round_line:
                     round_line += f" - {match}"
@@ -1558,14 +1552,6 @@ class AutonaScoreboardWidget(QWidget):
 
             tournament_phase = data.get("tournament_phase")
             if tournament_phase:
-                round_division = data.get("roundDivision", 0)
-                top_n_value = ""
-
-                if round_division and data.get("isPools", False) is False and round_division > 6:
-                    top_n_value = AutonaLocaleHelper.phaseNames.get("top_n", "Top {0}").format(round_division)
-
-                StateManager.Set(f"score.{self.scoreboardNumber}.top_n", top_n_value)
-
                 self.phaseCombo.setCurrentText(tournament_phase)
                 self.phaseCombo.lineEdit().editingFinished.emit()
                 StateManager.Set(f"score.{self.scoreboardNumber}.phase", tournament_phase)
@@ -1683,10 +1669,6 @@ class AutonaScoreboardWidget(QWidget):
                 StateManager.Set(f"score.bracket_type",
                                  data.get("bracket_type"))
                 self.stats.signals.UpsetFactorCalculation.emit()
-
-            if data.get("top_n"):
-                StateManager.Set(
-                    f"score.{self.scoreboardNumber}.top_n", data.get("top_n"))
         finally:
             StateManager.ReleaseSaving()
 

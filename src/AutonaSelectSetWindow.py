@@ -5,6 +5,7 @@ from qtpy.QtCore import *
 from loguru import logger
 
 from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
+from src import ui_constants as UI
 
 
 class AutonaSelectSetWindow(QDialog):
@@ -30,6 +31,25 @@ class AutonaSelectSetWindow(QDialog):
         searchBar.setPlaceholderText(QApplication.translate("app", "Filter..."))
         layout.addWidget(searchBar)
         searchBar.textEdited.connect(filterList)
+
+        # Pool (phase group) selector: multi-pool events fetch only the
+        # chosen pool's sets instead of paging through the whole event.
+        self.poolRow = QWidget()
+        poolRowLayout = QHBoxLayout()
+        poolRowLayout.setContentsMargins(0, 0, 0, 0)
+        self.poolRow.setLayout(poolRowLayout)
+        poolRowLayout.addWidget(
+            QLabel(QApplication.translate("app", "Pool")))
+        self.poolCombo = QComboBox()
+        self.poolCombo.addItem(
+            QApplication.translate("app", "Select a pool..."), None)
+        # `activated` (not currentIndexChanged) so re-picking the same pool
+        # re-fetches it.
+        self.poolCombo.activated.connect(self._onPoolChosen)
+        poolRowLayout.addWidget(self.poolCombo, 1)
+        layout.addWidget(self.poolRow)
+        self.poolRow.setVisible(False)
+        self.phases = []
 
         options = QHBoxLayout()
 
@@ -74,6 +94,21 @@ class AutonaSelectSetWindow(QDialog):
         bottomRow.addWidget(self.btTrackStation)
         self.btTrackStation.clicked.connect(self._openStationSelection)
 
+        # Footer: fetch progress (red bar filling left to right, one step
+        # per fetched page) above the status text.
+        self.progressBar = QProgressBar()
+        self.progressBar.setTextVisible(False)
+        self.progressBar.setFixedHeight(6)
+        self.progressBar.setStyleSheet(
+            "QProgressBar {{ background: {bg}; border: none;"
+            " border-radius: 3px; }}"
+            "QProgressBar::chunk {{ background-color: {chunk};"
+            " border-radius: 3px; }}".format(
+                bg=UI.palette()["bg_tertiary"],
+                chunk=UI.palette()["brand"]))
+        self.progressBar.setVisible(False)
+        layout.addWidget(self.progressBar)
+
         self.labelStatus = QLabel()
         layout.addWidget(self.labelStatus)
 
@@ -86,6 +121,8 @@ class AutonaSelectSetWindow(QDialog):
 
         AutonaTournamentDataProvider.instance.signals.sets_data_updated.connect(
             self.SetsUpdated)
+        AutonaTournamentDataProvider.instance.signals.tournament_phases_updated.connect(
+            self._onPhasesUpdated)
 
         self.model = QStandardItemModel()
 
@@ -95,11 +132,62 @@ class AutonaSelectSetWindow(QDialog):
                 self.LoadSelectedSet()
         return super().eventFilter(obj, event)
 
+    def _onPhasesUpdated(self, phases):
+        """Rebuild the pool selector from the tournament's phase groups
+        (fetched once on tournament load)."""
+        self.phases = phases or []
+        self.poolCombo.blockSignals(True)
+        self.poolCombo.clear()
+        self.poolCombo.addItem(
+            QApplication.translate("app", "Select a pool..."), None)
+        self.poolCombo.addItem(
+            QApplication.translate("app", "All pools"), "all")
+        for phase in self.phases:
+            groups = phase.get("groups") or []
+            if len(groups) == 1:
+                self.poolCombo.addItem(
+                    phase.get("name") or "", [groups[0].get("id")])
+            else:
+                for group in groups:
+                    self.poolCombo.addItem(
+                        f'{phase.get("name")} - {group.get("name")}',
+                        [group.get("id")])
+        self.poolCombo.setCurrentIndex(0)
+        self.poolCombo.blockSignals(False)
+
+    def _multiPool(self):
+        return sum(len(p.get("groups") or []) for p in self.phases) > 1
+
+    def _onPoolChosen(self, index):
+        if index <= 0:
+            return
+        self._FetchSets()
+
     def LoadSets(self):
+        """Entry point when the window opens. Multi-pool events wait for a
+        pool choice instead of paging through every set of the event."""
+        multiPool = self._multiPool()
+        self.poolRow.setVisible(multiPool)
+        if multiPool and self.poolCombo.currentIndex() <= 0:
+            self.model.clear()
+            self.progressBar.setVisible(False)
+            self.labelStatus.setText(QApplication.translate(
+                "app", "Select a pool to load sets"))
+            return
+        self._FetchSets()
+
+    def _FetchSets(self):
+        data = self.poolCombo.currentData() if self.poolRow.isVisibleTo(
+            self) else None
+        phaseGroupIds = data if isinstance(data, list) else None
         self.proxyModel.setSourceModel(QStandardItemModel())
         AutonaTournamentDataProvider.instance.LoadSets(
-            showFinished=self.showFinished.isChecked())
+            showFinished=self.showFinished.isChecked(),
+            phaseGroupIds=phaseGroupIds)
         self.model.clear()
+        # Busy (indeterminate) until the first page reports the page count.
+        self.progressBar.setRange(0, 0)
+        self.progressBar.setVisible(True)
         self.labelStatus.setText(
             QApplication.translate("app", "Fetching sets..."))
 
@@ -109,9 +197,12 @@ class AutonaSelectSetWindow(QDialog):
 
         if data["progress"] >= data["totalPages"]:
             self.labelStatus.setText("")
+            self.progressBar.setVisible(False)
         else:
             self.labelStatus.setText(
                 f"Fetching sets...({data['progress']}/{data['totalPages']})")
+            self.progressBar.setRange(0, data["totalPages"])
+            self.progressBar.setValue(data["progress"])
 
         horizontal_labels = ["Stream", "Station",
                              "Wave", "Title", "Player 1", "Player 2"]
@@ -180,7 +271,13 @@ class AutonaSelectSetWindow(QDialog):
 
         if setId:
             setId["auto_update"] = "set"
-            self.parent().signals.NewSetSelected.emit(setId)
+            # Defer past the double-click signal delivery: the set-load
+            # cascade (CommandClearAll -> Clear -> LoadStates -> setModel)
+            # is too heavy to run re-entrantly inside the table view's
+            # signal emission (agent-pitfalls #9; 2026-07-12 crash).
+            scoreboard = self.parent()
+            QTimer.singleShot(
+                0, lambda: scoreboard.signals.NewSetSelected.emit(setId))
 
         if AutonaTournamentDataProvider.instance.setLoadingWorker:
             # If there was a previous set loading worker,

@@ -130,7 +130,13 @@ access violation を起こす（2026-07-11 起動クラッシュ:
 `AutonaPlayerDB.SetupModel` の `setSourceModel` で発生）。
 
 - 再構築時は旧モデルを属性に退避して**最低 1 世代は生かす**:
-  `AutonaPlayerDB._retiredModel` / `AutonaGameAssetManager._retiredModels` が実例
+  `AutonaPlayerDB._retiredModel` / `AutonaGameAssetManager._retiredModels` /
+  `AutonaBasePlayerWidget._retiredStateModel`（2026-07-12 クラッシュ:
+  セット読込 → Clear → LoadStates の state コンボ `setModel` で AV）が実例
 - 新モデルへの `setSourceModel()` / `setModel()` の付け替えが完了するまで
   旧モデルを削除しない。全消費者が onLoad 等の後続ハンドラで付け替える場合は
   ハンドラ完了まで（= 次回再構築まで）保持する
+- 補足（2026-07-12 単体検証）: 現行 PySide6 では素の `setModel` /
+  `setSourceModel` / `QCompleter.setModel` は keepReference を持ち、単純な
+  差し替え単体は安全。ただし編集可能コンボ（オートコンプリータ／ポップアップ
+  付き）やシグナル連鎖の深部での差し替えは保証外のため、退避パターンを常用する

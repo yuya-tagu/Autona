@@ -137,7 +137,7 @@
            <bool>true</bool>
           </property>
           <property name="placeholderText">
-           <string>Winners Finals, Losers Semis, etc</string>
+           <string>Winners Final, Winners TOP24, etc</string>
           </property>
          </widget>
         </item>

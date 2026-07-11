@@ -241,6 +241,7 @@ def _make_provider(**kwargs):
     p.videogame = None
     p.tshTdp = None
     p.player_seeds = kwargs.get("player_seeds", {})
+    p.numEntrants = kwargs.get("numEntrants", 0)
     return p
 
 
@@ -695,21 +696,114 @@ class TestParseMatchDataNewApi:
 
 
 # ===========================================================================
+# Tests: TranslateRoundName / RoundNumberToTopName (TOP-N round naming)
+# ===========================================================================
+
+class TestTranslateRoundNameTopN:
+
+    def test_named_rounds_unaffected(self):
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Final", 300) == "Winners Final"
+        assert StartGGDataProvider.TranslateRoundName(
+            "Grand Final", 300) == "Grand Final"
+
+    def test_no_entrants_keeps_round_number(self):
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Round 2", 0) == "Winners Round 2"
+        assert StartGGDataProvider.TranslateRoundName(
+            "Losers Round 3", 0) == "Losers Round 3"
+
+    def test_winners_first_round_uses_entrant_count(self):
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Round 1", 300) == "Winners TOP300"
+
+    def test_winners_ladder_300_entrants(self):
+        # 300 entrants: WR2 enters the 3*2^n ladder below 300 and halves.
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Round 2", 300) == "Winners TOP192"
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Round 3", 300) == "Winners TOP96"
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Round 4", 300) == "Winners TOP48"
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Round 5", 300) == "Winners TOP24"
+
+    def test_winners_ladder_full_bracket(self):
+        # Full 512 bracket: 6 numbered rounds ending at TOP24 before QF.
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Round 2", 512) == "Winners TOP384"
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Round 6", 512) == "Winners TOP24"
+
+    def test_winners_ladder_exhausted_falls_back(self):
+        # Beyond the ladder (values < 6) the plain notation returns.
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Round 8", 300) == "Winners Round 8"
+
+    def test_losers_ladder(self):
+        # Alternating 2^n / 3*2^n ladder below the entrant count.
+        assert StartGGDataProvider.TranslateRoundName(
+            "Losers Round 1", 300) == "Losers TOP256"
+        assert StartGGDataProvider.TranslateRoundName(
+            "Losers Round 2", 300) == "Losers TOP192"
+        assert StartGGDataProvider.TranslateRoundName(
+            "Losers Round 11", 300) == "Losers TOP8"
+        # Ladder exhausted -> fall back to the numbered notation.
+        assert StartGGDataProvider.TranslateRoundName(
+            "Losers Round 12", 300) == "Losers Round 12"
+
+    def test_losers_full_bracket_ends_at_top8(self):
+        # Full 512 bracket: 12 numbered losers rounds ending at TOP8.
+        assert StartGGDataProvider.TranslateRoundName(
+            "Losers Round 12", 512) == "Losers TOP8"
+
+    def test_generic_round_unaffected(self):
+        assert StartGGDataProvider.TranslateRoundName(
+            "Round 1", 300) == "Round 1"
+
+    def test_metadata_uses_phase_num_seeds(self):
+        """phase.numSeeds anchors the conversion (event fallback unused)."""
+        provider = _make_provider(numEntrants=1000)
+        data = _new_api_set_basic()
+        data["fullRoundText"] = "Winners Round 2"
+        data["phaseGroup"]["phase"]["numSeeds"] = 300
+        result = provider.ParseMatchDataNewApi(data)
+        assert result["round_name"] == "Winners TOP192"
+
+    def test_metadata_falls_back_to_event_entrants(self):
+        provider = _make_provider(numEntrants=300)
+        data = _new_api_set_basic()
+        data["fullRoundText"] = "Winners Round 2"
+        result = provider.ParseMatchDataNewApi(data)
+        assert result["round_name"] == "Winners TOP192"
+
+    def test_metadata_non_double_elim_keeps_round_number(self):
+        provider = _make_provider(numEntrants=300)
+        data = _new_api_set_basic()
+        data["fullRoundText"] = "Winners Round 2"
+        data["phaseGroup"]["phase"]["bracketType"] = "SINGLE_ELIMINATION"
+        result = provider.ParseMatchDataNewApi(data)
+        assert result["round_name"] == "Winners Round 2"
+
+
+# ===========================================================================
 # Tests: ParseMatchDataOldApi
 # ===========================================================================
 
 class TestParseMatchDataOldApi:
 
     def test_basic_scores(self):
-        """Core fields: scores, bestOf, progressions."""
+        """Core fields: scores and bestOf."""
         provider = _make_provider()
         result = provider.ParseMatchDataOldApi(_old_api_response_basic())
 
         assert result["team1score"] == 3
         assert result["team2score"] == 2
         assert result["bestOf"] == 5
-        assert result["winnerProgression"] == "Winners Final"
-        assert result["loserProgression"] == "Losers Semi-Final"
+        # Progression fields were removed together with the qualifier
+        # round-name override (rounds now always use the TOP notation).
+        assert "winnerProgression" not in result
+        assert "loserProgression" not in result
 
     def test_no_stage_strike_empty(self):
         """No setTask => empty stage_strike and ruleset."""

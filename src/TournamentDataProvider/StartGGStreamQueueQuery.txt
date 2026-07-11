@@ -54,6 +54,8 @@ query StreamQueueQuery($slug: String) {
 						phase {
 							name
 							groupCount
+							bracketType
+							numSeeds
 						}
 					}
 				}

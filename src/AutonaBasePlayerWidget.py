@@ -248,6 +248,13 @@ class AutonaBasePlayerWidget(QGroupBox):
                 stateModel.appendRow(item)
 
         state: QComboBox = self._w("state", QComboBox)
+        # Retire — don't drop — the outgoing model. The editable combo's
+        # auto-completer/popup still hold references into it during the
+        # setModel swap; releasing the last Python reference mid-swap is the
+        # access-violation family documented in agent-pitfalls #13
+        # (2026-07-12 crash: set load -> Clear -> LoadStates).
+        self._retiredStateModel = getattr(self, "_stateModel", None)
+        self._stateModel = stateModel
         state.setModel(stateModel)
         state.setCurrentIndex(0)
 

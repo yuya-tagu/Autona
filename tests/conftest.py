@@ -11,6 +11,12 @@ import importlib.util
 import sys
 from pathlib import Path
 
+# Keep test runs from writing __pycache__/*.pyc for src modules. main.py
+# sets this for the app, but pytest imports src files without it and the
+# leftover .pyc can mask source edits when Windows mtimes lag
+# (agent-pitfalls #12).
+sys.dont_write_bytecode = True
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = PROJECT_ROOT / "src"
 

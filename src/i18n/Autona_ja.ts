@@ -303,7 +303,7 @@
     <message>
         <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
         <source>Pool A, Bracket, Top 8, etc</source>
-        <translation>予選プールA、ブラケット、トップ8など</translation>
+        <translation>Pool A, Bracket, Top 8, etc</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
@@ -312,8 +312,8 @@
     </message>
     <message>
         <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
-        <source>Winners Finals, Losers Semis, etc</source>
-        <translation>勝者側決勝、敗者側準決勝など</translation>
+        <source>Winners Final, Winners TOP24, etc</source>
+        <translation>Winners Final, Winners TOP24, etc</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
@@ -1708,7 +1708,7 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaScoreboardWidget.py" line="1332" />
         <location filename="..\AutonaScoreboardWidget.py" line="329" />
         <source>Load set</source>
-        <translation>対戦データをロードする</translation>
+        <translation>セットデータをロードする</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="401" />
@@ -1804,7 +1804,7 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="1328" />
         <source>Load set from {0}</source>
-        <translation>{0}から対戦データをロードする</translation>
+        <translation>{0}からセットデータをロードする</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="1567" />
@@ -1824,7 +1824,27 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
     <message>
         <location filename="..\AutonaSelectSetWindow.py" line="15" />
         <source>Select a set</source>
-        <translation>対戦を選ぶ</translation>
+        <translation>セットを選ぶ</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaSelectSetWindow.py" line="0" />
+        <source>Pool</source>
+        <translation>プール</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaSelectSetWindow.py" line="0" />
+        <source>Select a pool...</source>
+        <translation>プールを選択...</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaSelectSetWindow.py" line="0" />
+        <source>All pools</source>
+        <translation>すべてのプール</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaSelectSetWindow.py" line="0" />
+        <source>Select a pool to load sets</source>
+        <translation>プールを選択するとセットを読み込みます</translation>
     </message>
     <message>
         <location filename="..\AutonaSelectStationWindow.py" line="29" />
@@ -2598,7 +2618,7 @@ OBS のブラウザソースと Web UI は動作しません。
     <message>
         <location filename="..\Settings\AutonaSettingsWindow.py" line="143" />
         <source>Load set</source>
-        <translation>対戦データをロードする</translation>
+        <translation>セットデータをロードする</translation>
     </message>
     <message>
         <location filename="..\Settings\AutonaSettingsWindow.py" line="144" />

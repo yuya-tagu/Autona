@@ -157,24 +157,9 @@ class AutonaTeamBattleWidget(QDockWidget):
 
         matchCombo.addItem("")
 
-        for key in AutonaLocaleHelper.matchNames.keys():
-            matchString = AutonaLocaleHelper.matchNames[key]
-
-            try:
-                if "{0}" in matchString and ("qualifier" not in key):
-                    for number in range(5):
-                        if key == "best_of":
-                            if matchCombo.findText(matchString.format(str(2*number+1))) < 0:
-                                matchCombo.addItem(matchString.format(str(2*number+1)))
-                        else:
-                            if matchCombo.findText(matchString.format(str(number+1))) < 0:
-                                matchCombo.addItem(matchString.format(str(number+1)))
-                else:
-                    if matchCombo.findText(matchString) < 0:
-                        matchCombo.addItem(matchString)
-            except:
-                logger.error(
-                    f"Unable to generate match strings for {matchString}")
+        for matchString in AutonaLocaleHelper.GetMatchNameCandidates():
+            if matchCombo.findText(matchString) < 0:
+                matchCombo.addItem(matchString)
 
         infoColumn.layout().addWidget(phaseRow)
         infoColumn.layout().addWidget(matchRow)

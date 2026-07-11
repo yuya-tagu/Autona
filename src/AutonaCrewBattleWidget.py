@@ -146,7 +146,7 @@ class AutonaCrewBattleWidget(QWidget):
         phaseRow.addSpacing(12)
         phaseRow.addWidget(QLabel(QApplication.translate("app", "Match")))
         self.matchCombo = self._makePhaseCombo(
-            "match", AutonaLocaleHelper.matchNames)
+            "match", candidates=AutonaLocaleHelper.GetMatchNameCandidates())
         phaseRow.addWidget(self.matchCombo, 1)
         outer.addLayout(phaseRow)
 
@@ -247,25 +247,23 @@ class AutonaCrewBattleWidget(QWidget):
 
         return group
 
-    def _makePhaseCombo(self, state_key: str, names: dict) -> QComboBox:
+    def _makePhaseCombo(self, state_key: str, names: dict = None,
+                        candidates: list = None) -> QComboBox:
         # Editable combo seeded with the localized phase/round terms (so the
-        # user can pick "決勝" / "準決勝" etc. or type a custom value).
+        # user can pick a term or type a custom value). Pass a prebuilt
+        # `candidates` list (match names) or a `names` dict (phase names).
         combo = QComboBox()
         combo.setEditable(True)
         combo.setMinimumWidth(110)
         combo.addItem("")
+        for val in (candidates or []):
+            if combo.findText(val) < 0:
+                combo.addItem(val)
         for key, val in (names or {}).items():
             if not isinstance(val, str) or "{0}" in val or "indicator" in str(key):
                 continue
             if combo.findText(val) < 0:
                 combo.addItem(val)
-        # Common "Top N" phases as a convenience (phaseNames only).
-        top_n = (names or {}).get("top_n")
-        if isinstance(top_n, str) and "{0}" in top_n:
-            for n in (8, 16, 32, 48, 64):
-                txt = top_n.format(n)
-                if combo.findText(txt) < 0:
-                    combo.addItem(txt)
         combo.setCurrentText("")
 
         def write():
