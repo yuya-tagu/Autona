@@ -710,6 +710,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
         of the EVENT tab's Stream Settings group, above the stream title.
         """
         self.streamUrlCombo = None
+        self.editStreamChannelBtn = None
 
         streamLayout = self.findChild(QVBoxLayout, "verticalLayoutStream")
         if streamLayout is None:
@@ -731,6 +732,13 @@ class AutonaTournamentInfoWidget(QDockWidget):
         self.streamUrlCombo.lineEdit().editingFinished.connect(
             self._onStreamChannelChanged)
         row.addWidget(self.streamUrlCombo)
+
+        self.editStreamChannelBtn = QPushButton(
+            QApplication.translate("app", "配信先を編集する"))
+        self.editStreamChannelBtn.setSizePolicy(
+            QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.editStreamChannelBtn.clicked.connect(self._editStreamChannel)
+        row.addWidget(self.editStreamChannelBtn)
 
         self.addStreamChannelBtn = QPushButton(
             QApplication.translate("app", "配信先を追加する"))
@@ -761,37 +769,118 @@ class AutonaTournamentInfoWidget(QDockWidget):
         with StateManager.SaveBlock():
             for n in self._STREAM_BOARDS:
                 StateManager.Set(f"score.{n}.stream_url", url)
+        # Editing only applies to a saved channel (row 0 is the empty default,
+        # free-typed text has no saved entry to edit).
+        if self.editStreamChannelBtn is not None:
+            self.editStreamChannelBtn.setEnabled(
+                self.streamUrlCombo.currentIndex() > 0)
 
-    def _addStreamChannel(self):
+    def _promptStreamChannel(self, title, name="", url="", allowDelete=False):
+        """Show the name/URL form dialog shared by the add and edit flows.
+        Returns ("save", name, url), ("delete", None, None), or None when
+        cancelled."""
         dialog = QDialog(self)
-        dialog.setWindowTitle(QApplication.translate("app", "Add stream channel"))
+        dialog.setWindowTitle(title)
         dialog.setMinimumWidth(350)
         layout = QFormLayout(dialog)
 
-        nameEdit = QLineEdit()
+        nameEdit = QLineEdit(name)
         nameEdit.setPlaceholderText("BST Stream")
         layout.addRow(QApplication.translate("app", "Channel name"), nameEdit)
 
-        urlEdit = QLineEdit()
+        urlEdit = QLineEdit(url)
         urlEdit.setPlaceholderText("https://www.youtube.com/@B_ST_Stream/live")
         layout.addRow("URL", urlEdit)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(dialog.accept)
+
+        result = {"action": None}
+
+        def tryAccept():
+            # Reject empty input with a warning instead of silently discarding
+            # the entry after the dialog closes.
+            if not nameEdit.text().strip() or not urlEdit.text().strip():
+                QMessageBox.warning(
+                    dialog,
+                    QApplication.translate("app", "Input required"),
+                    QApplication.translate(
+                        "app", "Please enter both the channel name and URL."))
+                return
+            result["action"] = "save"
+            dialog.accept()
+
+        buttons.accepted.connect(tryAccept)
         buttons.rejected.connect(dialog.reject)
+
+        if allowDelete:
+            # DestructiveRole emits neither accepted nor rejected, so the
+            # confirm handler below fully owns closing the dialog.
+            deleteBtn = buttons.addButton(
+                QApplication.translate("app", "Delete"),
+                QDialogButtonBox.ButtonRole.DestructiveRole)
+
+            def onDelete():
+                reply = QMessageBox.question(
+                    dialog,
+                    QApplication.translate("app", "Delete stream channel"),
+                    QApplication.translate(
+                        "app", "Delete this stream channel?"),
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No)
+                if reply == QMessageBox.StandardButton.Yes:
+                    result["action"] = "delete"
+                    dialog.accept()
+
+            deleteBtn.clicked.connect(onDelete)
+
         layout.addRow(buttons)
 
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            name = nameEdit.text().strip()
-            url = urlEdit.text().strip()
-            if name and url:
-                channels = SettingsManager.Get("stream_channels", [])
-                channels.append({"name": name, "url": url})
-                SettingsManager.Set("stream_channels", channels)
-                self._loadStreamChannels()
-                # Select the newly added channel
-                self.streamUrlCombo.setCurrentIndex(self.streamUrlCombo.count() - 1)
+        if dialog.exec() != QDialog.DialogCode.Accepted or result["action"] is None:
+            return None
+        if result["action"] == "delete":
+            return ("delete", None, None)
+        return ("save", nameEdit.text().strip(), urlEdit.text().strip())
+
+    def _addStreamChannel(self):
+        result = self._promptStreamChannel(
+            QApplication.translate("app", "Add stream channel"))
+        if result is None:
+            return
+        _, name, url = result
+        channels = SettingsManager.Get("stream_channels", [])
+        channels.append({"name": name, "url": url})
+        SettingsManager.Set("stream_channels", channels)
+        self._loadStreamChannels()
+        # Select the newly added channel
+        self.streamUrlCombo.setCurrentIndex(self.streamUrlCombo.count() - 1)
+
+    def _editStreamChannel(self):
+        idx = self.streamUrlCombo.currentIndex() - 1  # row 0 is the empty default
+        channels = SettingsManager.Get("stream_channels", [])
+        if not (0 <= idx < len(channels)):
+            return
+        result = self._promptStreamChannel(
+            QApplication.translate("app", "Edit stream channel"),
+            name=channels[idx].get("name", ""),
+            url=channels[idx].get("url", ""),
+            allowDelete=True)
+        if result is None:
+            return
+        action, name, url = result
+        if action == "delete":
+            channels.pop(idx)
+            SettingsManager.Set("stream_channels", channels)
+            self._loadStreamChannels()
+            # Reload leaves the empty default row selected without emitting,
+            # so push the cleared URL to the boards explicitly.
+            self._onStreamChannelChanged()
+        else:
+            channels[idx] = {"name": name, "url": url}
+            SettingsManager.Set("stream_channels", channels)
+            self._loadStreamChannels()
+            # Re-select the edited channel (emits and re-exports the URL).
+            self.streamUrlCombo.setCurrentIndex(idx + 1)
 
     def _LoadBannerImage(self):
         """Load the source banner as a PIL Image. Prefers the provider's
