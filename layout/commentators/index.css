@@ -11,6 +11,10 @@
   --theme-color: #1d1b18;
   --theme-color-2: #0d0c0b;
   --card-bg: #2c2925;
+  /* Text ink for the card body, recomputed from --card-bg's luminance at
+   * runtime (applyTournamentColors). Defaults to white for the dark
+   * default card. */
+  --card-ink: #ffffff;
   --accent-color: #f0a500;
   --accent-ink: #0a0a0a;
 }
@@ -53,6 +57,9 @@ body {
   box-sizing: border-box;
   padding: 14px 20px 12px;
   background: color-mix(in srgb, var(--card-bg) 92%, transparent);
+  /* Card body text follows the card background's luminance so caster
+   * names stay readable under a light tournament theme. */
+  color: var(--card-ink);
   border: 1px solid rgba(255, 255, 255, 0.10);
   border-left: 4px solid var(--accent-color);
   border-radius: 6px;
@@ -113,7 +120,7 @@ body {
   margin-right: 8px;
   font-size: 22px;
   font-weight: 700;
-  color: color-mix(in srgb, var(--accent-color) 80%, #ffffff);
+  color: color-mix(in srgb, var(--accent-color) 80%, var(--card-ink));
 }
 
 .name {
@@ -126,17 +133,17 @@ body {
   gap: 16px;
   margin-top: 2px;
   font-size: 20px;
-  color: rgba(255, 255, 255, 0.75);
+  color: color-mix(in srgb, var(--card-ink) 75%, transparent);
   white-space: nowrap;
 }
 
 .twitter {
-  color: color-mix(in srgb, var(--accent-color) 65%, #ffffff);
+  color: color-mix(in srgb, var(--accent-color) 65%, var(--card-ink));
 }
 
 .note {
   margin-top: 6px;
   font-size: 20px;
   font-weight: 700;
-  color: rgba(255, 255, 255, 0.9);
+  color: color-mix(in srgb, var(--card-ink) 90%, transparent);
 }

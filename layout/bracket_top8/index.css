@@ -11,6 +11,10 @@
   --theme-color: #1d1b18;
   --theme-color-2: #0d0c0b;
   --card-bg: #2c2925;
+  /* Text ink for the card body, recomputed from --card-bg's luminance at
+   * runtime (applyTournamentColors). Defaults to white for the dark
+   * default card. */
+  --card-ink: #ffffff;
   --accent-color: #f0a500;
   --accent-ink: #0a0a0a;
   --line-color: rgba(255, 255, 255, 0.28);
@@ -117,6 +121,9 @@ body {
   display: flex;
   flex-direction: column;
   background: color-mix(in srgb, var(--card-bg) 92%, transparent);
+  /* Card body text follows the card background's luminance so names stay
+   * readable when the tournament theme is a light color. */
+  color: var(--card-ink);
   border: 1px solid rgba(255, 255, 255, 0.10);
   border-left: 4px solid var(--accent-color);
   border-radius: 6px;
@@ -188,7 +195,7 @@ body {
   margin-right: 8px;
   font-size: 19px;
   font-weight: 700;
-  color: color-mix(in srgb, var(--accent-color) 80%, #ffffff);
+  color: color-mix(in srgb, var(--accent-color) 80%, var(--card-ink));
 }
 
 .char {
@@ -234,7 +241,7 @@ body {
 }
 
 .slot.is-tbd .who .name {
-  color: rgba(255, 255, 255, 0.35);
+  color: color-mix(in srgb, var(--card-ink) 40%, transparent);
   font-weight: 700;
   letter-spacing: 0.1em;
 }

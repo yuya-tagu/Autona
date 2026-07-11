@@ -255,7 +255,7 @@ class AutonaTournamentDataProvider(QObject):
         worker.signals.result.connect(onResult)
         self.threadPool.start(worker)
 
-    def LoadSets(self, showFinished):
+    def LoadSets(self, showFinished, phaseGroupIds=None):
         if self.provider is None:
             return
         if self.setLoadingWorker:
@@ -265,7 +265,8 @@ class AutonaTournamentDataProvider(QObject):
             self.setLoadingWorker.signals.blockSignals(True)
 
         worker = Worker(self.provider.GetMatches, **
-                        {"getFinished": showFinished})
+                        {"getFinished": showFinished,
+                         "phaseGroupIds": phaseGroupIds})
         worker.signals.result.connect(lambda data: [
             logger.info(data),
             self.signals.get_sets_finished.emit(data),

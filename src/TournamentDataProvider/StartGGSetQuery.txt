@@ -81,6 +81,7 @@ query SetQuery($id: ID!) {
 				name
 				groupCount
 				bracketType
+				numSeeds
 				progressionsOut {
 					id
 				}

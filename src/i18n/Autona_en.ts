@@ -311,8 +311,8 @@
     </message>
     <message>
         <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
-        <source>Winners Finals, Losers Semis, etc</source>
-        <translation>Winners Finals, Losers Semis, etc</translation>
+        <source>Winners Final, Winners TOP24, etc</source>
+        <translation>Winners Final, Winners TOP24, etc</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
@@ -1822,6 +1822,26 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaSelectSetWindow.py" line="15" />
         <source>Select a set</source>
         <translation>Select a set</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaSelectSetWindow.py" line="0" />
+        <source>Pool</source>
+        <translation>Pool</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaSelectSetWindow.py" line="0" />
+        <source>Select a pool...</source>
+        <translation>Select a pool...</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaSelectSetWindow.py" line="0" />
+        <source>All pools</source>
+        <translation>All pools</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaSelectSetWindow.py" line="0" />
+        <source>Select a pool to load sets</source>
+        <translation>Select a pool to load sets</translation>
     </message>
     <message>
         <location filename="..\AutonaSelectStationWindow.py" line="29" />

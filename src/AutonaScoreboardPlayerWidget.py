@@ -408,12 +408,15 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         self.btDetails.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         self.btDetails.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btDetails.clicked.connect(self.ShowDetails)
-        linkRow = QHBoxLayout()
-        linkRow.setContentsMargins(0, 0, 0, 0)
-        linkRow.setSpacing(0)
-        linkRow.addWidget(self.btDetails)
-        linkRow.addStretch(1)
-        grid.addLayout(linkRow, 3, 0, 1, 1)
+        # Kept as an attribute: on the singles board the scoreboard moves
+        # the team-level LOSERS checkbox onto this row (right-aligned after
+        # the stretch), next to the details link.
+        self.linkRow = QHBoxLayout()
+        self.linkRow.setContentsMargins(0, 0, 0, 0)
+        self.linkRow.setSpacing(0)
+        self.linkRow.addWidget(self.btDetails)
+        self.linkRow.addStretch(1)
+        grid.addLayout(self.linkRow, 3, 0, 1, 1)
 
     @staticmethod
     def _takeLayoutFromGrid(grid, sub_layout):

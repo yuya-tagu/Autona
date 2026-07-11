@@ -12,6 +12,18 @@
  * The scoreboardNumber URL param MUST be 3 to follow the CREW board
  * (globals.js defaults to 1).
  */
+// Perceived-luminance ink pick for the frosted-glass body text. The glass
+// tiles are ~88% --theme-color, so a light theme needs dark text. Uses the
+// same YIQ threshold as scoreboard_team/Universal's adaptColorsForTheme
+// (dark ink rgb(24,24,27), the shared design token).
+function glassInk(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+  if (!m) return "#ffffff";
+  const v = parseInt(m[1], 16);
+  const r = (v >> 16) & 0xff, g = (v >> 8) & 0xff, b = v & 0xff;
+  return (r * 299 + g * 587 + b * 114) / 1000 > 140 ? "#18181b" : "#ffffff";
+}
+
 LoadEverything().then(() => {
   gsap.config({ nullTargetWarn: false, trialWarn: false });
 
@@ -103,6 +115,9 @@ LoadEverything().then(() => {
     const ti = event.data.tournamentInfo || {};
     if (ti.themeColor) {
       document.documentElement.style.setProperty("--theme-color", ti.themeColor);
+      // Keep body text readable when the theme is a light colour.
+      document.documentElement.style.setProperty(
+        "--glass-ink", glassInk(ti.themeColor));
     }
     if (ti.accentColor) {
       document.documentElement.style.setProperty("--accent-color", ti.accentColor);

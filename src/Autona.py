@@ -703,19 +703,48 @@ class Window(QMainWindow):
         # the app is busy rather than frozen.
         self._statusBar = self.statusBar()
         self._statusBar.setSizeGripEnabled(False)
+        # Right margin so the progress bar doesn't touch the window edge.
+        # (QSS margin-right on the bar itself is ignored for background
+        # painting; the status bar's contents margin is honored.)
+        self._statusBar.setContentsMargins(0, 0, 8, 0)
         self._statusLabel = QLabel("")
         self._statusLabel.setStyleSheet(
             f"color: {UI.palette()['text_muted']}; padding: 0 8px;")
         self._statusBar.addWidget(self._statusLabel, 1)
+        # Red progress bar filling left to right for multi-step operations
+        # (paginated Start.gg fetches, asset scans). Hidden when the active
+        # status reports no measurable progress.
+        self._statusProgress = QProgressBar()
+        self._statusProgress.setTextVisible(False)
+        self._statusProgress.setFixedSize(160, 6)
+        # padding: 0 is required — qdarktheme ships
+        # `QStatusBar QWidget { padding: 3px }`, which would otherwise eat
+        # the whole 6px height and leave the chunk a zero-height rect
+        # (bar renders as an empty strip, no red fill).
+        self._statusProgress.setStyleSheet(
+            "QProgressBar {{ background: {bg}; border: none; padding: 0px;"
+            " border-radius: 3px; }}"
+            "QProgressBar::chunk {{ background-color: {chunk};"
+            " border-radius: 3px; }}".format(
+                bg=UI.palette()["bg_tertiary"],
+                chunk=UI.palette()["brand"]))
+        self._statusProgress.setVisible(False)
+        self._statusBar.addWidget(self._statusProgress)
         AutonaStatusManager.signals.changed.connect(
             self._on_status_changed)
 
         StateManager.ReleaseSaving()
 
-    @Slot(str)
-    def _on_status_changed(self, message: str):
+    @Slot(str, int, int)
+    def _on_status_changed(self, message: str, progress: int, total: int):
         # Runs on the GUI thread thanks to Qt's auto signal connection.
         self._statusLabel.setText(message)
+        if total > 0:
+            self._statusProgress.setRange(0, total)
+            self._statusProgress.setValue(min(progress, total))
+            self._statusProgress.setVisible(True)
+        else:
+            self._statusProgress.setVisible(False)
 
     def _pickGame(self, idx):
         # User chose a game from the menu — mirror the former combo 'activated'

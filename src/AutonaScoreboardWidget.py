@@ -665,52 +665,24 @@ class AutonaScoreboardWidget(QWidget):
             phaseString = AutonaLocaleHelper.phaseNames[key]
 
             if "{0}" in phaseString:
-                if "top" not in key:
-                    for letter in ["A", "B", "C", "D"]:
-                        if self.phaseCombo.findText(phaseString.format(letter)) < 0:
-                            self.phaseCombo.addItem(phaseString.format(letter))
+                for letter in ["A", "B", "C", "D"]:
+                    if self.phaseCombo.findText(phaseString.format(letter)) < 0:
+                        self.phaseCombo.addItem(phaseString.format(letter))
             else:
                 if self.phaseCombo.findText(phaseString) < 0:
                     self.phaseCombo.addItem(phaseString)
 
         self.matchCombo.addItem("")
 
-        for key in AutonaLocaleHelper.matchNames.keys():
-            matchString = AutonaLocaleHelper.matchNames[key]
+        for matchString in AutonaLocaleHelper.GetMatchNameCandidates():
+            if self.matchCombo.findText(matchString) < 0:
+                self.matchCombo.addItem(matchString)
 
-            try:
-                if "{0}" in matchString and ("qualifier" in key):
-                    couples = [
-                        (AutonaLocaleHelper.phaseNames.get("top_n").format(8), AutonaLocaleHelper.matchNames.get("qualifier_winners_indicator")),
-                        (AutonaLocaleHelper.phaseNames.get("top_n").format(16), AutonaLocaleHelper.matchNames.get("qualifier_winners_indicator")),
-                        (AutonaLocaleHelper.phaseNames.get("top_n").format(32), AutonaLocaleHelper.matchNames.get("qualifier_winners_indicator")),
-                        (AutonaLocaleHelper.phaseNames.get("top_n").format(6), AutonaLocaleHelper.matchNames.get("qualifier_losers_indicator")),
-                        (AutonaLocaleHelper.phaseNames.get("top_n").format(8), AutonaLocaleHelper.matchNames.get("qualifier_losers_indicator")),
-                        (AutonaLocaleHelper.phaseNames.get("top_n").format(12), AutonaLocaleHelper.matchNames.get("qualifier_losers_indicator")),
-                        (AutonaLocaleHelper.phaseNames.get("top_n").format(16), AutonaLocaleHelper.matchNames.get("qualifier_losers_indicator")),
-                        (AutonaLocaleHelper.phaseNames.get("top_n").format(24), AutonaLocaleHelper.matchNames.get("qualifier_losers_indicator")),
-                        (AutonaLocaleHelper.phaseNames.get("top_n").format(32), AutonaLocaleHelper.matchNames.get("qualifier_losers_indicator"))
-                    ]
-
-                    for couple in couples:
-                        print(couple)
-                        self.matchCombo.addItem(matchString.format(*couple))
-                elif "{0}" in matchString and ("qualifier" not in key):
-                    for number in range(5):
-                        if key == "best_of":
-                            if self.matchCombo.findText(matchString.format(str(2*number+1))) < 0:
-                                self.matchCombo.addItem(matchString.format(str(2*number+1)))
-                        else:
-                            if self.matchCombo.findText(matchString.format(str(number+1))) < 0:
-                                self.matchCombo.addItem(matchString.format(str(number+1)))
-                elif "indicator" in key:
-                    pass
-                else:
-                    if self.matchCombo.findText(matchString) < 0:
-                        self.matchCombo.addItem(matchString)
-            except:
-                logger.error(
-                    f"Unable to generate match strings for {matchString}")
+        # The real first round (e.g. "Winners TOP300") depends on the entrant
+        # count, so it is inserted when a tournament loads.
+        self._entrantsMatchItem = None
+        AutonaTournamentDataProvider.instance.signals.tournament_data_updated.connect(
+            self._UpdateEntrantsMatchItem)
 
         AutonaGameAssetManager.instance.signals.onLoad.connect(
             lambda: [
@@ -726,6 +698,15 @@ class AutonaScoreboardWidget(QWidget):
         self.scoreColumn.findChild(QVBoxLayout, "verticalLayout").addWidget(self.individualGameTracker)
 
         self._groupSectionsIntoFrames(topOptions, bottomOptions)
+
+        # tournamentInfo.* lives outside this board's held subtree, so EVENT
+        # tab edits arrive as regular state_updated deltas; state_big_change
+        # covers wholesale loads (startup state restore, Start.gg import).
+        StateManager.signals.state_updated.connect(
+            self._onTournamentInfoDelta)
+        StateManager.signals.state_big_change.connect(
+            self._updateTournamentInfoLine)
+        self._updateTournamentInfoLine()
 
         # From here on, edits to this board's subtree are held back from the
         # broadcast/export pipeline until 反映 commits them. Everything Set
@@ -754,6 +735,27 @@ class AutonaScoreboardWidget(QWidget):
     def ApplyChanges(self):
         # 反映 button: publish every pending edit on this board at once.
         StateManager.CommitHeld(self.statePrefix)
+
+    def _onTournamentInfoDelta(self, delta):
+        # Same cheap containment filter AutonaStatsWidget uses on deltas.
+        if "tournamentInfo" in str(delta):
+            self._updateTournamentInfoLine()
+
+    def _updateTournamentInfoLine(self):
+        name = StateManager.Get("tournamentInfo.tournamentName", "") or ""
+        event = StateManager.Get("tournamentInfo.eventName", "") or ""
+        parts = []
+        if name:
+            parts.append(
+                QApplication.translate("app", "大会名") + f": {name}")
+        if event:
+            parts.append(
+                QApplication.translate("app", "種目") + f": {event}")
+        label = getattr(self, "tournamentInfoLabel", None)
+        if label is None:
+            return
+        label.setText("　".join(parts))
+        label.setVisible(bool(parts))
 
     def ResetAllInputs(self):
         # すべての入力値をリセット: clear players, scores, phase/round,
@@ -785,6 +787,34 @@ class AutonaScoreboardWidget(QWidget):
             # the commit and this slot running.
             self.btApply.setEnabled(
                 StateManager.HasPendingChanges(self.statePrefix))
+
+    def _UpdateEntrantsMatchItem(self, data):
+        """Keep a 'Winners TOP{entrants}' candidate (the real first-round
+        headcount, e.g. TOP300) at the top of the match combo, replacing the
+        one from the previously loaded tournament."""
+        if not isinstance(data, dict):
+            return
+        # An empty dict means "tournament cleared" -> drop the old candidate.
+        numEntrants = data.get("numEntrants") or 0
+        template = AutonaLocaleHelper.matchNames.get(
+            "winners_top_n", "Winners TOP{0}")
+        newItem = template.format(numEntrants) if numEntrants > 0 else None
+        oldItem = self._entrantsMatchItem
+        if oldItem == newItem:
+            return
+        self.matchCombo.blockSignals(True)
+        try:
+            if oldItem:
+                index = self.matchCombo.findText(oldItem)
+                # Keep the entry the operator currently has selected.
+                if index >= 0 and self.matchCombo.currentText() != oldItem:
+                    self.matchCombo.removeItem(index)
+            self._entrantsMatchItem = None
+            if newItem and self.matchCombo.findText(newItem) < 0:
+                self.matchCombo.insertItem(1, newItem)
+                self._entrantsMatchItem = newItem
+        finally:
+            self.matchCombo.blockSignals(False)
 
     def _groupSectionsIntoFrames(self, topOptions, bottomOptions):
         """Re-home the construction-time rows into the single scoreboard
@@ -851,6 +881,18 @@ class AutonaScoreboardWidget(QWidget):
         titleRowLayout.addWidget(self.xpostBtn)
         titleRowLayout.addWidget(self.btOpenWebScoreboard)
         matchLayout.addWidget(titleRow)
+
+        # Read-only mirror of the EVENT tab's tournament name / event name,
+        # so the operator sees which tournament the board is feeding without
+        # switching tabs. Kept in sync via StateManager signals (the EVENT
+        # tab publishes tournamentInfo.* immediately, not behind 反映).
+        self.tournamentInfoLabel = QLabel()
+        self.tournamentInfoLabel.setStyleSheet(
+            f"color: {UI.palette()['text_secondary']};"
+            " background: transparent; border: none;")
+        self.tournamentInfoLabel.setWordWrap(True)
+        self.tournamentInfoLabel.setVisible(False)
+        matchLayout.addWidget(self.tournamentInfoLabel)
 
         # Start.gg load row (with its auto-update timer strip) sits above
         # the phase/round/BEST OF bar.
@@ -942,6 +984,28 @@ class AutonaScoreboardWidget(QWidget):
             self._bottomOptions.setVisible(not singlePlayer)
         if singlePlayer:
             self.playerNumber.setValue(1)
+            self._placeLosersOnDetailsRow()
+
+    def _placeLosersOnDetailsRow(self):
+        # Singles board only: the card header this checkbox lived in is
+        # otherwise empty (1P/2P label and team name are hidden), so the
+        # LOSERS checkbox joins the solo player's ">>詳細" row instead,
+        # right-aligned after the row's stretch. Reparenting keeps the
+        # widget a descendant of its team column, so every existing
+        # findChild(QCheckBox, "losers") lookup (state export, SwapTeams,
+        # reset, SetData) keeps resolving the same instance. Safe on this
+        # board because the player count is pinned to 1 — the hosting
+        # player widget is never torn down by SetPlayersPerTeam.
+        for column, players in ((self.team1column, self.team1playerWidgets),
+                                (self.team2column, self.team2playerWidgets)):
+            losersCheck = column.findChild(QCheckBox, "losers")
+            if losersCheck is None or not players:
+                continue
+            if losersCheck.parentWidget() is players[0]:
+                continue
+            linkRow = getattr(players[0], "linkRow", None)
+            if linkRow is not None:
+                linkRow.addWidget(losersCheck)
 
     def ExportTeamLogo(self, team, value):
         if os.path.exists(f"./user_data/team_logo/{value.lower()}.png"):
@@ -990,7 +1054,6 @@ class AutonaScoreboardWidget(QWidget):
 
             tournament_name = StateManager.Get("tournamentInfo.tournamentName", "") or ""
             phase = StateManager.Get(f"score.{n}.phase", "") or ""
-            top_n = StateManager.Get(f"score.{n}.top_n", "") or ""
             match = StateManager.Get(f"score.{n}.match", "") or ""
             stream_url = StateManager.Get(f"score.{n}.stream_url", "") or ""
 
@@ -1008,7 +1071,7 @@ class AutonaScoreboardWidget(QWidget):
                 missing.append(QApplication.translate("app", "Team 1 player name"))
             if not _team_has_name(2):
                 missing.append(QApplication.translate("app", "Team 2 player name"))
-            if not (phase.strip() or top_n.strip() or match.strip()):
+            if not (phase.strip() or match.strip()):
                 missing.append(QApplication.translate("app", "Round name"))
 
             if missing:
@@ -1060,12 +1123,7 @@ class AutonaScoreboardWidget(QWidget):
                     players.append(entry)
                 return " / ".join(players) if players else "???"
 
-            round_parts = []
-            if phase:
-                round_parts.append(f"[{phase}]")
-            if top_n:
-                round_parts.append(top_n)
-            round_line = " ".join(round_parts)
+            round_line = f"[{phase}]" if phase else ""
             if match:
                 if round_line:
                     round_line += f" - {match}"
@@ -1155,18 +1213,16 @@ class AutonaScoreboardWidget(QWidget):
 
     def UpdateBottomButtons(self):
         if AutonaTournamentDataProvider.instance.provider and AutonaTournamentDataProvider.instance.provider.url:
-            url = AutonaTournamentDataProvider.instance.provider.url
-            if "start.gg" in url:
-                providerName = "Start.gg"
-            else:
-                providerName = url.split("/")[2] if "/" in url else url
             self.btSelectSet.setText(
-                QApplication.translate("app", "Load set from {0}").format(providerName))
+                QApplication.translate("app", "大会の試合を読み込む"))
             self.btSelectSet.setEnabled(True)
+            # Only actionable once a tournament is set — otherwise the button
+            # has nothing to load, so hide it entirely rather than showing a
+            # disabled control.
+            self.btSelectSet.setVisible(True)
         else:
-            self.btSelectSet.setText(
-                QApplication.translate("app", "Load set"))
             self.btSelectSet.setEnabled(False)
+            self.btSelectSet.setVisible(False)
 
     def SetCharacterNumber(self, value):
         # logger.info(f"AutonaScoreboardWidget#SetCharacterNumber({value})")
@@ -1558,14 +1614,6 @@ class AutonaScoreboardWidget(QWidget):
 
             tournament_phase = data.get("tournament_phase")
             if tournament_phase:
-                round_division = data.get("roundDivision", 0)
-                top_n_value = ""
-
-                if round_division and data.get("isPools", False) is False and round_division > 6:
-                    top_n_value = AutonaLocaleHelper.phaseNames.get("top_n", "Top {0}").format(round_division)
-
-                StateManager.Set(f"score.{self.scoreboardNumber}.top_n", top_n_value)
-
                 self.phaseCombo.setCurrentText(tournament_phase)
                 self.phaseCombo.lineEdit().editingFinished.emit()
                 StateManager.Set(f"score.{self.scoreboardNumber}.phase", tournament_phase)
@@ -1683,10 +1731,6 @@ class AutonaScoreboardWidget(QWidget):
                 StateManager.Set(f"score.bracket_type",
                                  data.get("bracket_type"))
                 self.stats.signals.UpsetFactorCalculation.emit()
-
-            if data.get("top_n"):
-                StateManager.Set(
-                    f"score.{self.scoreboardNumber}.top_n", data.get("top_n"))
         finally:
             StateManager.ReleaseSaving()
 

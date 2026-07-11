@@ -253,7 +253,8 @@ class AutonaGameAssetManager(QObject):
             return None
         return game
 
-    def _LoadGameAssetsCore(self, game, mods_active, run_models):
+    def _LoadGameAssetsCore(self, game, mods_active, run_models,
+                            status_token=None):
         # Shared asset-loading body for the threaded (startup) and the
         # synchronous (game/mode switch) paths. `game` is the resolved
         # codename; `run_models` runs the model-rebuild closure (marshalled
@@ -278,6 +279,21 @@ class AutonaGameAssetManager(QObject):
             self.variants = gameObj.get("variant_to_codename", {})
             self.colors = gameObj.get("preset_colors", [])
 
+            # Footer progress: the two per-character scan passes below
+            # (stock icons, skins/asset index) dominate the load time.
+            # Throttled to every 5 characters to avoid signal spam.
+            from .Helpers.AutonaStatusManager import AutonaStatusManager
+            progressTotal = max(1, len(self.characters) * 2)
+
+            def reportProgress(done):
+                if status_token is None:
+                    return
+                if done % 5 == 0 or done >= progressTotal:
+                    AutonaStatusManager.update(
+                        status_token,
+                        f"ゲームアセットを読み込み中... ({game})",
+                        progress=done, total=progressTotal)
+
             assetsKey = ""
             if len(list(gameObj.get("assets", {}).keys())) > 0:
                 assetsKey = list(gameObj.get(
@@ -295,7 +311,8 @@ class AutonaGameAssetManager(QObject):
 
             self.stockIcons = {}
 
-            for c in self.characters.keys():
+            for charIndex, c in enumerate(self.characters.keys()):
+                reportProgress(charIndex + 1)
                 self.stockIcons[c] = {}
 
                 filteredFiles = \
@@ -342,7 +359,8 @@ class AutonaGameAssetManager(QObject):
                 except OSError:
                     packFiles[assetsKey] = []
 
-            for c in self.characters.keys():
+            for charIndex, c in enumerate(self.characters.keys()):
+                reportProgress(len(self.characters) + charIndex + 1)
                 self.skins[c] = {}
                 codename = self.characters[c].get("codename")
                 for assetsKey in list(gameObj["assets"].keys()):
@@ -671,7 +689,8 @@ class AutonaGameAssetManager(QObject):
                     # SIGSEGVs seen when run from this worker thread.
                     manager._LoadGameAssetsCore(
                         game, self.mods_active,
-                        lambda fn: AutonaQtHelper.gui_executor.run_sync(fn))
+                        lambda fn: AutonaQtHelper.gui_executor.run_sync(fn),
+                        status_token=status_token)
                 except:
                     logger.error(traceback.format_exc())
                 finally:

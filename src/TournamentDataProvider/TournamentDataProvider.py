@@ -34,7 +34,7 @@ class TournamentDataProvider(QObject):
     def GetMatch(self, setId, progress_callback=None, cancel_event=None):
         pass
 
-    def GetMatches(self, getFinished=False, progress_callback=None, cancel_event=None):
+    def GetMatches(self, getFinished=False, phaseGroupIds=None, progress_callback=None, cancel_event=None):
         pass
 
     def GetStations(self, progress_callback=None, cancel_event=None):

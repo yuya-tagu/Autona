@@ -15,11 +15,13 @@ const MAX_DISPLAY = 4;
 
 function applyTournamentColors(ti) {
   if (ti && ti.themeColor) {
+    const cardBg = lighten(ti.themeColor, 0.08);
     document.documentElement.style.setProperty("--theme-color", ti.themeColor);
     document.documentElement.style.setProperty(
       "--theme-color-2", darken(ti.themeColor, 0.55));
-    document.documentElement.style.setProperty(
-      "--card-bg", lighten(ti.themeColor, 0.08));
+    document.documentElement.style.setProperty("--card-bg", cardBg);
+    // Match the card body text to the card background's luminance.
+    document.documentElement.style.setProperty("--card-ink", pickInk(cardBg));
   }
   if (ti && ti.accentColor) {
     document.documentElement.style.setProperty(

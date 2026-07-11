@@ -46,6 +46,9 @@ class StartGGDataProvider(TournamentDataProvider):
         # In-memory cache of entrants sorted by initialSeedNum for the current
         # event, populated by GetEntrantsWorker. Each item: {"seed": int, "gamerTag": str}.
         self.top_entrants = []
+        # Event headcount cached by GetTournamentData; anchors the TOP-N
+        # round naming when a set's phase doesn't report numSeeds.
+        self.numEntrants = 0
 
     # Queries the provided URL until a proper 200 status code has been provided back
     #
@@ -116,6 +119,7 @@ class StartGGDataProvider(TournamentDataProvider):
                 data, "data.event.name", "")
             finalData["numEntrants"] = deep_get(
                 data, "data.event.numEntrants", 0)
+            self.numEntrants = finalData["numEntrants"] or 0
             finalData["address"] = deep_get(
                 data, "data.event.tournament.venueAddress", "")
             finalData["shortLink"] = deep_get(
@@ -494,20 +498,6 @@ class StartGGDataProvider(TournamentDataProvider):
             finalResult.update(result["new"])
             finalResult.update(result["old"])
 
-            winnerProgression = result["old"].get("winnerProgression", None)
-            if winnerProgression:
-                indicator = "qualifier_winners_indicator"
-
-                if int(finalResult.get("round") or 0) < 0:
-                    indicator = "qualifier_losers_indicator"
-
-                indicator = AutonaLocaleHelper.matchNames.get(indicator)
-
-                winnerProgression = re.sub(
-                    r"\s*[\(\{\[].*?[\)\}\]]", "", winnerProgression).strip()
-                finalResult["round_name"] = AutonaLocaleHelper.matchNames.get(
-                    "qualifier").format(winnerProgression, indicator)
-
             if result.get("new", {}).get("isOnline") == False:
                 finalResult["bestOf"] = None
 
@@ -570,13 +560,25 @@ class StartGGDataProvider(TournamentDataProvider):
             logger.error(traceback.format_exc())
             return {}
 
-    def GetMatches(self, getFinished=False, progress_callback=None, cancel_event=None):
+    def GetMatches(self, getFinished=False, phaseGroupIds=None, progress_callback=None, cancel_event=None):
+        from ..Helpers.AutonaStatusManager import AutonaStatusManager
+        status_token = AutonaStatusManager.push(
+            "Start.gg からセット一覧を取得中...")
         try:
             logger.info("Get matches", getFinished)
             states = [1, 6, 2]
 
             if getFinished:
                 states.append(3)
+
+            # Limit the fetch to specific pools (phase groups) so large
+            # events don't page through every set of the whole bracket.
+            filters = {
+                "state": states,
+                "hideEmpty": True
+            }
+            if phaseGroupIds:
+                filters["phaseGroupIds"] = phaseGroupIds
 
             final_data = []
 
@@ -592,10 +594,7 @@ class StartGGDataProvider(TournamentDataProvider):
                     jsonParams={
                         "operationName": "EventMatchListQuery",
                         "variables": {
-                            "filters": {
-                                "state": states,
-                                "hideEmpty": True
-                            },
+                            "filters": filters,
                             "eventSlug": self.url.split("start.gg/")[1],
                             "page": page,
                             "perPage": 64
@@ -619,13 +618,19 @@ class StartGGDataProvider(TournamentDataProvider):
                     logger.info(f"progress_callback: {page}, {totalPages}")
                     progress_callback(page, totalPages)
 
+                AutonaStatusManager.update(
+                    status_token,
+                    f"Start.gg からセット一覧を取得中... ({page}/{totalPages})",
+                    progress=page, total=totalPages)
+
                 page += 1
                 logger.info(f"Fetching sets... {page}/{totalPages}")
             return (final_data)
         except Exception as e:
             logger.error(traceback.format_exc())
             return (final_data)
-        return ([])
+        finally:
+            AutonaStatusManager.pop(status_token)
 
     def GetStations(self, progress_callback=None, cancel_event=None):
         try:
@@ -681,7 +686,59 @@ class StartGGDataProvider(TournamentDataProvider):
             return (final_data)
         return ([])
 
-    def TranslateRoundName(name: str):
+    # Descending "players still alive" ladder for numbered losers rounds:
+    # the 2^n and 3*2^n series interleaved, one step per round. Must stay in
+    # sync with the match combo candidates
+    # (AutonaLocaleHelper.LOSERS_TOP_TOTALS plus Losers TOP8).
+    LosersTopLadder = sorted(
+        {2 ** n for n in range(3, 14)} | {3 * 2 ** n for n in range(2, 12)},
+        reverse=True)
+
+    def RoundNumberToTopName(roundNumber, numEntrants, losers=False):
+        """Map a numbered double-elimination round to 'Winners TOP{N}' /
+        'Losers TOP{N}', where N is the players still alive when the round
+        starts, anchored at the real entrant count: with 300 entrants the
+        winners side runs TOP300 -> TOP192 -> TOP96 -> ... Returns None when
+        the notation can't be derived (unknown entrant count, non-numeric
+        round, or the walk runs past the named finals)."""
+        try:
+            round_ = int(roundNumber)
+            entrants = int(numEntrants or 0)
+        except (TypeError, ValueError):
+            return None
+        if round_ <= 0 or entrants < 8:
+            return None
+
+        if losers:
+            ladder = [v for v in StartGGDataProvider.LosersTopLadder
+                      if v < entrants]
+            if round_ > len(ladder):
+                return None
+            value = ladder[round_ - 1]
+            if value == 8:
+                return AutonaLocaleHelper.matchNames.get(
+                    "losers_top8", "Losers TOP8")
+            return AutonaLocaleHelper.matchNames.get(
+                "losers_top_n", "Losers TOP{0}").format(value)
+
+        if round_ == 1:
+            return AutonaLocaleHelper.matchNames.get(
+                "winners_top_n", "Winners TOP{0}").format(entrants)
+        # Largest 3*2^n strictly below the entrant count, halved once per
+        # later round.
+        value = 3
+        while value * 2 < entrants:
+            value *= 2
+        value >>= (round_ - 2)
+        if value < 6:
+            return None
+        return AutonaLocaleHelper.matchNames.get(
+            "winners_top_n", "Winners TOP{0}").format(value)
+
+    def TranslateRoundName(name: str, numEntrants: int = 0):
+        """Translate a Start.gg fullRoundText. Pass the double-elimination
+        bracket's headcount as numEntrants to render numbered rounds in the
+        TOP-N notation (0 keeps the plain 'Winners Round {N}' fallback)."""
         if name == None:
             return ""
 
@@ -703,8 +760,16 @@ class StartGGDataProvider(TournamentDataProvider):
             roundNumber = name.rsplit(" ")[-1]
 
             if "Winners" in name:
+                topName = StartGGDataProvider.RoundNumberToTopName(
+                    roundNumber, numEntrants)
+                if topName:
+                    return topName
                 return AutonaLocaleHelper.matchNames.get("winners_round").format(roundNumber)
             elif "Losers" in name:
+                topName = StartGGDataProvider.RoundNumberToTopName(
+                    roundNumber, numEntrants, losers=True)
+                if topName:
+                    return topName
                 return AutonaLocaleHelper.matchNames.get("losers_round").format(roundNumber)
             elif name.startswith("Round "):
                 return AutonaLocaleHelper.matchNames.get("round").format(roundNumber)
@@ -716,12 +781,21 @@ class StartGGDataProvider(TournamentDataProvider):
     def _build_set_metadata(self, _set, p1, p2):
         """Extract set-level metadata from a new API response."""
         phase_name = deep_get(_set, "phaseGroup.phase.name")
-        round_name = StartGGDataProvider.TranslateRoundName(_set.get("fullRoundText"))
-
-        if deep_get(_set, "phaseGroup.phase.bracketType") == "MATCHMAKING":
-            round_name = ""
-
         bracket_type = deep_get(_set, "phaseGroup.phase.bracketType", "")
+
+        # TOP-N anchor: the headcount of this set's own phase when the query
+        # provides it (correct after pools), else the whole event. Only
+        # meaningful for double elimination.
+        topAnchor = 0
+        if bracket_type == "DOUBLE_ELIMINATION":
+            topAnchor = deep_get(
+                _set, "phaseGroup.phase.numSeeds") or self.numEntrants
+
+        round_name = StartGGDataProvider.TranslateRoundName(
+            _set.get("fullRoundText"), topAnchor)
+
+        if bracket_type == "MATCHMAKING":
+            round_name = ""
 
         isPools = deep_get(_set, "phaseGroup.phase.groupCount", 0) > 1
         if isPools:
@@ -1186,12 +1260,9 @@ class StartGGDataProvider(TournamentDataProvider):
             "team1score": sets.get("entrant1Score",  0),
             "team2score": sets.get("entrant2Score", 0),
             "bestOf": sets.get("bestOf", None),
-            "roundDivision": sets.get("roundDivision", None),
             "team1losers": team1losers,
             "team2losers": team2losers,
-            "currPlayer": currPlayer,
-            "winnerProgression": sets.get("wProgressingName", None),
-            "loserProgression": sets.get("lProgressingName", None)
+            "currPlayer": currPlayer
         })
 
     def ProcessFutureSet(self, _set, eventSlug):
@@ -1204,9 +1275,17 @@ class StartGGDataProvider(TournamentDataProvider):
         total_games = _set.get("totalGames", 0)
         seteventSlug = deep_get(_set, "event.slug", "")
 
+        # TOP-N anchor (see _build_set_metadata). The cached event headcount
+        # only applies to sets from the currently loaded event.
+        topAnchor = 0
+        if deep_get(_set, "phaseGroup.phase.bracketType") == "DOUBLE_ELIMINATION":
+            topAnchor = deep_get(_set, "phaseGroup.phase.numSeeds") or 0
+            if not topAnchor and seteventSlug == eventSlug:
+                topAnchor = self.numEntrants
+
         setData = {
             "id": _set.get("id"),
-            "match": StartGGDataProvider.TranslateRoundName(frt),
+            "match": StartGGDataProvider.TranslateRoundName(frt, topAnchor),
             "phase": phase_name,
             "best_of": total_games,
             "best_of_text": AutonaLocaleHelper.matchNames.get("best_of").format(total_games) if total_games > 0 else "",
@@ -1701,7 +1780,8 @@ class StartGGDataProvider(TournamentDataProvider):
                 logger.info(str(page) + "/" + str(totalPages))
                 AutonaStatusManager.update(
                     status_token,
-                    f"Start.gg から参加者情報を取得中... ({page}/{totalPages})")
+                    f"Start.gg から参加者情報を取得中... ({page}/{totalPages})",
+                    progress=page - 1, total=totalPages)
                 data = self.QueryRequests(
                     "https://www.start.gg/api/-/gql",
                     type=requests.post,

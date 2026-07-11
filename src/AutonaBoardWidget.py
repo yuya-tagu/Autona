@@ -303,6 +303,9 @@ class AutonaBoardWidget(QDockWidget):
     # ── Preview ──────────────────────────────────────────────────────
     def _buildPreviewGroup(self):
         group = L.make_card("プレビュー")
+        # Preview keeps a fixed 1920x1080 logical resolution and fits the
+        # whole canvas to the panel (zoom scales with size); see
+        # AutonaLayoutPreview.
         self.preview = AutonaLayoutPreview()
         self.preview.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
