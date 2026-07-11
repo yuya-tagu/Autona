@@ -49,7 +49,14 @@ var Update = async (event) => {
 
 // Wrapper for the update call
 async function UpdateWrapper(event) {
-  await Update(event);
+  try {
+    await Update(event);
+  } catch (e) {
+    // A single bad/partial state (e.g. game not selected yet) must not
+    // permanently block the first-reveal sequence below, or the overlay
+    // stays invisible forever (opacity 0) waiting for a timeScale flip.
+    console.error("Update() failed:", e);
+  }
 
   // If initialization wasn't done yet, call Start()
   // We use gsap.globalTimeline.timeScale as 0 for animation to not play before this
