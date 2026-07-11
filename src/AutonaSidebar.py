@@ -284,10 +284,20 @@ class AutonaSidebar(QWidget):
         QToolButton#sidebarTournamentBtn,
         QToolButton#sidebarGameBtn,
         QToolButton#sidebarHelpBtn {{
-            background: rgba(255, 255, 255, 6%); border: none; text-align: left;
+            background: rgba(255, 255, 255, 6%); text-align: left;
+            /* Transparent instead of none so the game button's attention
+               outline (below) can light up without shifting the layout. */
+            border: 1px solid transparent;
             padding: 0 24px 0 9px; min-height: {ROW_H}px; border-radius: 6px;
             color: {p['text_primary']};
             font-size: {UI.FONT_SM}pt;
+        }}
+        /* Gold outline while the tournament / game pick is still missing —
+           the required setup steps. Same gold as the crew "currently
+           playing" accent (ACCENT_GOLD in AutonaCrewBattleWidget). */
+        QToolButton#sidebarTournamentBtn[attention="true"],
+        QToolButton#sidebarGameBtn[attention="true"] {{
+            border: 1px solid #f0a500;
         }}
         QToolButton#sidebarTournamentBtn:hover,
         QToolButton#sidebarGameBtn:hover,
