@@ -9,7 +9,6 @@ body {
   width: 1920px;
   height: 1080px;
   letter-spacing: -0.3px;
-  text-transform: uppercase;
 }
 
 .hidden  { opacity: 0%;   transition: opacity 0.5s ease-in-out; }

@@ -307,7 +307,9 @@ async function renderPlayerInfo(t, team, player) {
   );
 
   SetInnerHtml($(`.p${side} .score`), String(team.score ?? 0));
-  SetInnerHtml($(`.p${side} .seed`), player.seed ? `SEED ${player.seed}` : "");
+  // Positive numbers only: unseeded players can arrive as 0 / "0" / null
+  // depending on the data source, and none of those should render.
+  SetInnerHtml($(`.p${side} .seed`), Number(player.seed) > 0 ? `SEED ${player.seed}` : "");
   SetInnerHtml(
     $(`.p${side} .flagstate`),
     player.state?.name

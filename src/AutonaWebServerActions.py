@@ -349,6 +349,13 @@ class WebServerActions(QThread):
         self.scoreboard.GetScoreboard(scoreboard).ResetScore()
         return "OK"
 
+    @gui_thread_sync
+    def apply_changes(self, scoreboard):
+        # 反映: publish the board's pending (held) edits — same commit the
+        # desktop 反映 button / hotkey performs.
+        self.scoreboard.GetScoreboard(scoreboard).ApplyChanges()
+        return "OK"
+
     def _reset_best_of(self, scoreboard):
         # The best_of QSpinBox is reparented out of `scoreColumn` while the
         # 1v1 / team board is built (AutonaScoreboardWidget moves it into the

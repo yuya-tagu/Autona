@@ -67,6 +67,7 @@ _ENDPOINTS = [
     # ── Safe write (op-logged, no confirm) ──
     ("POST", "/scoreboards/{n}/teams/{t}/score:adjust", "Adjust score by delta", {"delta": 1}, False, True, False),
     ("POST", "/scoreboards/{n}/score:reset", "Reset scores", None, False, True, False),
+    ("POST", "/scoreboards/{n}:apply", "Apply pending edits (反映)", None, False, True, False),
     ("POST", "/scoreboards/{n}:swap-teams", "Swap teams", None, False, True, False),
     ("POST", "/scoreboards/{n}/teams/{t}/color", "Set team color", {"color": "#FF0000"}, False, True, False),
     ("PATCH", "/scoreboards/{n}/set", "Patch set info (partial)", {"bestOf": 5, "phase": "Top 8", "match": "Winners Finals"}, False, True, False),

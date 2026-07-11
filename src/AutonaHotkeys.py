@@ -84,6 +84,7 @@ class AutonaHotkeysSignals(QObject):
     load_set = Signal()
     swap_teams = Signal()
     refresh_phase_group = Signal()
+    apply_changes = Signal()
 
 
 class AutonaHotkeys(QObject):
@@ -106,6 +107,7 @@ class AutonaHotkeys(QObject):
         "reset_scores": "Ctrl+Shift+R",
         "swap_teams": "Ctrl+Shift+S",
         "refresh_phase_group": "Ctrl+Shift+P",
+        "apply_changes": "Ctrl+Shift+L",
     }
 
     loaded_keys = {}

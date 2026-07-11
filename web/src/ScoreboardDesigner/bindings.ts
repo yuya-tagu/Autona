@@ -66,7 +66,7 @@ export function resolveBinding(binding: BindingKey, state: any): string | number
                 : "";
             case "score": return t.score ?? 0;
             case "countryFlag": return resolveStateAsset(p.country?.asset);
-            case "seed": return p.seed ? `SEED ${p.seed}` : "";
+            case "seed": return Number(p.seed) > 0 ? `SEED ${p.seed}` : "";
             case "twitter": return p.twitter ?? "";
             case "state": return p.state?.name ?? "";
         }

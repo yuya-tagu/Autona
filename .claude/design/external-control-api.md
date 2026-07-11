@@ -208,6 +208,15 @@
 
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
+**反映ゲート（2026-07-12 監査・明文化）**: ボード 1/2 への書き込み（§6.1〜6.5 および §7 の
+クリア/リセット/セット読込）は、デスクトップ UI の操作と同一の Qt 経路を通って
+`score.{n}` の held サブツリー（`StateManager.HoldSubtree`）に着地する。したがって
+**アプリのスコアボード入力機能には即座に映るが、layout（OBS オーバーレイ・WS デルタ・
+`program_state.json`・`out/` テキスト）へは §6.6 の `:apply`（反映）を送るまで公開されない**。
+例外（デスクトップ UI と同一挙動）: ①ゲーム切替（`POST /game`、および大会/セット読込に伴う
+自動ゲーム選択）は onLoad で held をベースライン公開する、②クルーバトル（board 3）は
+held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名等）は held 対象外で即時公開。
+
 ### 6.1 スコア加算 `POST /api/v1/scoreboards/{n}/teams/{t}/score:adjust`
 - パス: `n`=スコアボード番号, `t`=1|2
 - body: `{ "delta": 1 }`（`-N`〜`+N` の整数。±1 が基本）
@@ -236,6 +245,14 @@
   ```
 - 委譲: `set_route`（既存はクエリ引数。本 API は JSON を同 Action にマップ）= #10
 - エラー: `INVALID_ARGUMENT`（型不正）
+
+### 6.6 反映（保留編集の公開） `POST /api/v1/scoreboards/{n}:apply`（2026-07-12 追加）
+- body: なし
+- 委譲: `apply_changes`（新規 Action・`@gui_thread_sync`）。デスクトップの
+  反映ボタン / 反映ホットキー（Ctrl+Shift+L）と同一で、対象ボードの保留編集
+  （`StateManager.CommitHeld("score.{n}")`）を一括公開する
+- 冪等: 保留編集なしでの再送は no-op のため本質的に冪等
+- エラー: `INVALID_ARGUMENT`（n 不正）
 
 ---
 

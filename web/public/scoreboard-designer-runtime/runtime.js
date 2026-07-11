@@ -95,7 +95,7 @@
       }
       if (field === "score") return team.score == null ? 0 : team.score;
       if (field === "countryFlag") return stateAsset(player.country && player.country.asset);
-      if (field === "seed") return player.seed ? "SEED " + player.seed : "";
+      if (field === "seed") return Number(player.seed) > 0 ? "SEED " + player.seed : "";
       if (field === "twitter") return player.twitter || "";
       if (field === "state") return player.state && player.state.name || "";
     }

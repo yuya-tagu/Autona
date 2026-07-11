@@ -519,6 +519,9 @@ class Window(QMainWindow):
         self.sidebar.tournamentButton.setMenu(startggMenu)
         self.sidebar.tournamentButton.setText(
             QApplication.translate("app", "Set tournament"))
+        # Lit until a tournament is loaded (tournament_changed clears it via
+        # UpdateTournamentButton below).
+        self._SetPulldownAttention(self.sidebar.tournamentButton, True)
         AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
             self.UpdateTournamentButton)
         AutonaTournamentDataProvider.instance.signals.tournament_url_update.connect(
@@ -766,12 +769,23 @@ class Window(QMainWindow):
         self._currentGameIndex = idx if idx is not None else 0
         for i, action in self._gameActions.items():
             action.setChecked(i == idx)
+        self._SetPulldownAttention(self.gameSelect, idx is None)
         if idx is not None:
             self.gameSelect.setText(self._gameActions[idx].text())
             self.signals.GameChanged.emit()
         else:
             self.gameSelect.setText(
                 QApplication.translate("app", "Select game title"))
+
+    def _SetPulldownAttention(self, button, on: bool):
+        # Gold outline (QSS [attention="true"] rule in AutonaSidebar) nudging
+        # the operator to complete a required pick (tournament / game).
+        # Repolish so the attribute selector re-evaluates.
+        if button.property("attention") == on:
+            return
+        button.setProperty("attention", on)
+        button.style().unpolish(button)
+        button.style().polish(button)
 
     def Signal_GameChange(self, url):
         if url == "":
@@ -781,6 +795,7 @@ class Window(QMainWindow):
             self.gameSelect.setText(
                 QApplication.translate("app", "Select game title"))
             AutonaGameAssetManager.instance.selectedGame = {}
+            self._SetPulldownAttention(self.gameSelect, True)
 
     def HideSidebar(self):
         # Collapse the sidebar entirely; a small floating button (top-left of
@@ -799,11 +814,14 @@ class Window(QMainWindow):
         if not getattr(self, "sidebar", None):
             return
         name = StateManager.Get("tournamentInfo.tournamentName") or ""
-        if isinstance(name, str) and name.strip():
+        hasTournament = isinstance(name, str) and bool(name.strip())
+        if hasTournament:
             self.sidebar.tournamentButton.setText(name.strip())
         else:
             self.sidebar.tournamentButton.setText(
                 QApplication.translate("app", "Set tournament"))
+        self._SetPulldownAttention(
+            self.sidebar.tournamentButton, not hasTournament)
 
     def OnWebServerStartFailed(self, error: str):
         # Delivered via queued signal from the webserver QThread. Use show()
@@ -886,6 +904,12 @@ class Window(QMainWindow):
                 action.triggered.connect(
                     lambda _checked=False, g=idx: self._pickGame(g))
                 self._gameActions[idx] = action
+            # Shortcut to the same "Add game assets" guide as Help & Settings,
+            # so assets can be added right where a game is picked.
+            self.gameMenu.addSeparator()
+            self.gameMenu.addAction(
+                QApplication.translate("app", "Add game assets")).triggered.connect(
+                lambda: self.gameAssetGuideWindow.show())
             self.SetGame()
 
     def ToggleAlwaysOnTop(self, checked):

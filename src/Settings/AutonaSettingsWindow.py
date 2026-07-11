@@ -196,6 +196,7 @@ class AutonaSettingsWindow(QDialog):
             "reset_scores": QApplication.translate("settings.hotkeys", "Reset scores"),
             "swap_teams": QApplication.translate("settings.hotkeys", "Swap teams"),
             "refresh_phase_group": QApplication.translate("settings.hotkeys", "Reload Top 8 from Start.gg"),
+            "apply_changes": QApplication.translate("settings.hotkeys", "Apply changes"),
         }
 
         for i, (setting, value) in enumerate(AutonaHotkeys.instance.keys.items()):

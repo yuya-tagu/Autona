@@ -215,14 +215,20 @@ class AutonaStatsWidget(QDockWidget):
     def _updateDisplay(self):
         n = 1
 
-        p1_name = StateManager.Get(f"score.{n}.team.1.player.1.name", "P1") or "P1"
-        p2_name = StateManager.Get(f"score.{n}.team.2.player.1.name", "P2") or "P2"
+        p1_raw = (StateManager.Get(f"score.{n}.team.1.player.1.name") or "").strip()
+        p2_raw = (StateManager.Get(f"score.{n}.team.2.player.1.name") or "").strip()
+        p1_name = p1_raw or "P1"
+        p2_name = p2_raw or "P2"
 
-        # Upset factor
-        uf = StateManager.Get(f"score.{n}.upset_factor", 0)
-        self.upsetLabel.setText(
-            QApplication.translate("app", "Upset Factor") + f": {uf}    |    {p1_name} vs {p2_name}"
-        )
+        # Upset factor — only meaningful when BOTH players are selected;
+        # with one (or none) show just the matchup names.
+        if p1_raw and p2_raw:
+            uf = StateManager.Get(f"score.{n}.upset_factor", 0)
+            self.upsetLabel.setText(
+                QApplication.translate("app", "Upset Factor") + f": {uf}    |    {p1_name} vs {p2_name}"
+            )
+        else:
+            self.upsetLabel.setText(f"{p1_name} vs {p2_name}")
 
         # Labels
         self.p1LastLabel.setText(p1_name)

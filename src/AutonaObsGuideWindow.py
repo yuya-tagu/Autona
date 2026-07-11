@@ -50,6 +50,8 @@ _HTTP_EXAMPLES = [
      "path": "/scoreboards/1/score:reset", "body": None},
     {"label": "Swap teams", "method": "POST",
      "path": "/scoreboards/1:swap-teams", "body": None},
+    {"label": "Apply changes (反映)", "method": "POST",
+     "path": "/scoreboards/1:apply", "body": None},
     {"label": "Pull current stream set", "method": "POST",
      "path": "/scoreboards/1:pull-stream", "body": None},
     {"label": "Refresh Top 8 bracket", "method": "POST",

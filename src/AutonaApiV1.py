@@ -519,6 +519,14 @@ def swap_teams(n):
     return ok(revision=current_revision())
 
 
+@api_v1.route("/scoreboards/<int:n>:apply", methods=["POST"])
+@write_op("apply")
+def apply_changes(n):
+    require_board_12(n)
+    _actions_ref().apply_changes(n)  # @gui_thread_sync -> revision accurate
+    return ok(revision=current_revision())
+
+
 @api_v1.route("/scoreboards/<int:n>/teams/<int:t>/color", methods=["POST"])
 @write_op("team.color")
 def team_color(n, t):

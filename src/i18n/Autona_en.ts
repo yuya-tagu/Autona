@@ -1692,6 +1692,16 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>Player details</translation>
     </message>
     <message>
+        <location filename="..\AutonaScoreboardPlayerWidget.py" line="527" />
+        <source>ファイター</source>
+        <translation>Fighter</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaScoreboardPlayerWidget.py" line="545" />
+        <source>カラー</source>
+        <translation>Color</translation>
+    </message>
+    <message>
         <location filename="..\AutonaScoreboardWidget.py" line="291" />
         <source>配信先</source>
         <translation>Stream destination</translation>
@@ -2681,6 +2691,11 @@ Change the port under Settings → General → Webserver Port and restart Autona
         <location filename="..\Settings\AutonaSettingsWindow.py" line="134" />
         <source>Reload Top 8 from Start.gg</source>
         <translation>Reload Top 8 from Start.gg</translation>
+    </message>
+    <message>
+        <location filename="..\Settings\AutonaSettingsWindow.py" line="199" />
+        <source>Apply changes</source>
+        <translation>Apply changes</translation>
     </message>
     <message>
         <location filename="..\Settings\SettingsWidget.py" line="147" />

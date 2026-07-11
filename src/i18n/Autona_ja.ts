@@ -1013,7 +1013,7 @@
     </message>
     <message>
         <source>Select game title</source>
-        <translation>ゲームタイトルを選ぶ</translation>
+        <translation>ゲームを選ぶ</translation>
     </message>
     <message>
         <location filename="..\AutonaUpdater.py" line="140" />
@@ -1693,6 +1693,16 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaScoreboardPlayerWidget.py" line="404" />
         <source>プレイヤー詳細</source>
         <translation>プレイヤー詳細</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaScoreboardPlayerWidget.py" line="527" />
+        <source>ファイター</source>
+        <translation>ファイター</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaScoreboardPlayerWidget.py" line="545" />
+        <source>カラー</source>
+        <translation>カラー</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="291" />
@@ -2684,6 +2694,11 @@ OBS のブラウザソースと Web UI は動作しません。
         <location filename="..\Settings\AutonaSettingsWindow.py" line="134" />
         <source>Reload Top 8 from Start.gg</source>
         <translation>Top 8 を Start.gg から再読み込み</translation>
+    </message>
+    <message>
+        <location filename="..\Settings\AutonaSettingsWindow.py" line="199" />
+        <source>Apply changes</source>
+        <translation>反映</translation>
     </message>
     <message>
         <location filename="..\Settings\SettingsWidget.py" line="147" />
