@@ -622,6 +622,18 @@ class AutonaGameAssetManager(QObject):
             # the worker waits for it to finish before
             # continuing.
             def _rebuild_models():
+                # Retire the previous model generation instead of letting it
+                # be garbage-collected mid-swap: player-widget combos and
+                # proxies stay attached to the old models until their onLoad
+                # handlers (ReloadCharacters etc.) rebind AFTER this batch,
+                # and deleting a C++ model under a live view/proxy is an
+                # access-violation crash (same class as the
+                # AutonaPlayerDB.SetupModel boot crash, 2026-07-11).
+                self._retiredModels = [
+                    getattr(self, name, None)
+                    for name in ("characterModel", "skinModels",
+                                 "variantModel", "colorModel", "stageModel")
+                ]
                 self.has_modded_content = False
                 self.UpdateCharacterModel(mods_active)
                 self.UpdateSkinModel()

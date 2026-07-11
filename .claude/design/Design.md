@@ -479,6 +479,7 @@ PyQt UI    OBS HTML / React Web UI / WebEngine 画像生成
 | **R-Sync-8** | クライアントは受信 payload の区間 `[first_revision, revision]` が次に期待する revision（前回適用 +1）を含むことを検証する。含まなければ `program_state` を再リクエストして full snapshot で再構築する。（旧規約の「単一 revision の前回 +1 検証」は coalescing と両立せず、結合 payload をギャップと誤検知して全量再取得が多発していた） |
 | **R-Sync-9** | reconnect 時はクライアントが必ず full snapshot を再取得する |
 | **R-Sync-10** | adaptive debounce: <10 delta = 50ms / 10-99 = 100ms / 100+ = 200ms + `state_big_change` シグナル発火。**leading-edge flush**: 直近 flush から 50ms 以上静かな状態で届いた最初の delta は即時送出する（単発操作の体感遅延をゼロ化。バーストは従来どおり trailing debounce） |
+| **R-Sync-11** | **遅延反映（「反映」ボタン、2026-07 導入）**: `score.1` / `score.2`（1v1・チームボード）のサブツリーは `StateManager.HoldSubtree` で保留登録される。書き込みはライブ state に即適用（`Get()` は常にライブ値）だが、delta 配信・full snapshot（`GetFullState` 既定）・`program_state.json`・`./out` テキスト出力からは除外され、BEST OF 右の「反映」ボタン（`CommitHeld`）が保留分を 1 save サイクルで一括公開する。ゲーム（再）読込（`GameAssetManager.onLoad`）時は自動コミット。crew ボード（`score.3`）と `score` 以外のサブツリーは従来どおり即時配信。サムネイル/リザルト生成は `GetFullState(include_pending=True)` でフォームのライブ値を描画する。デスクトップ内で保留中データを表示するウィジェット（Statistics 等）は `held_state_updated` シグナルで更新する |
 
 #### 3.2.4 同期遅延の上限
 
@@ -494,6 +495,8 @@ PyQt UI    OBS HTML / React Web UI / WebEngine 画像生成
 | React → StateManager | **目標値 ~50ms**（API/Socket → AutonaWebServerActions → Set）。実値はネットワーク依存で、無線・低速 LAN では大きくなる。スコア±は楽観的更新（R-React-8）により**表示は 0ms** |
 
 **注**: 旧実装の React 側 100ms 固定バッチは到着駆動化により廃止（§2.2 R-React-6、2026-07 Web UI 刷新 Phase 3）。
+
+**注 2（遅延反映）**: 上表は「配信された変更」の伝搬遅延。`score.1` / `score.2` サブツリーへの編集は R-Sync-11 により「反映」ボタン押下まで配信自体が保留されるため、OBS / Web UI への反映はボタン押下が起点になる（押下後の遅延は上表どおり）。
 
 #### 3.2.5 既知の不整合 → 規約上の扱い
 
@@ -599,6 +602,12 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 > **NOTE タブ（`AutonaNotesWidget`）は廃止**。`ANLYSE`（`AutonaAnalysisWidget`）は**トップレベルのドックではなく**、`Statistics` ドック内の `QTabWidget` のサブタブとして埋め込まれている（`QDockWidget` → `QWidget` パネルに降格）。
 > 旧 `PLAYERS`（`AutonaPlayerListWidget`、Top-8 順位ロスター編集）は機能ごと削除された。
 > スコアボードの「1選手あたりのキャラ数」スピンボックスはスコアボード自身が所有する（初期値 3）。
+> **スコアボードの選手行はコンパクト表示（2026-07、Web UI パリティ）**: Web `Player.jsx`（狭幅）と同配置 — スポンサー欄・プレイヤー名欄を**縦積み全幅**、その下に左寄せの「>>詳細」リンク（共通 QSS `QPushButton#linkButton` で細身表示）。本名・Twitter・国/地域・キャラクター・追加情報・シード表示・クリアは選手ごとのモーダルダイアログ（`AutonaScoreboardPlayerWidget._buildCompactDetailsUI`、`path` が `score.*` の場合のみ）に移設。ダイアログは同一ウィジェットインスタンスの再親化なので objectName キーパスは不変。PlayerDB エディタ（`player_editor.*`）は従来のフル フォームのまま。
+> **目アイコン（フィールド表示トグル）はデスクトップから撤去（2026-07）**: 詳細ダイアログは**常時全項目表示**。`display_options.show_*` は Web UI / OBS オーバーレイ描画用の配信設定として存続し、非表示の QAction 群（`_eyeActions`）が `SetDisplayOption`（POST /display-option）と SettingsManager/StateManager 永続化を引き続き担う。デスクトップ側の表示連動が残るのは show_sponsor（インラインのスポンサー欄、「スポンサー名をスコアボードに表示しない」チェックボックス）のみ。「各プレイヤーの使用キャラクター数」スピンボックスも UI から撤去（`charNumber` は Web アクション互換のため非表示データホルダーとして存続、既定 3）。
+> **スコア操作 UI（2026-07、Web `ScorePanel.jsx` パリティ）**: チームカードの下に全幅のスコアパネルカード（`scorePanelCard`）を置き、上から「+1｜+1」「スコア表示｜スコア表示（ゴールド・モノスペース、`QSpinBox[scoreDisplay="true"]` の共通 QSS）」「-1｜-1」「スコアリセット（全幅・通常色）」「⇄ チーム入れ替え（全幅）」を縦積み。スコア表示は矢印なし（±ボタンがインクリメント役）。
+> **セクション構成（2026-07）**: 旧 topSectionFrame（Start.gg ロード行を収めた下段セクション）は廃止し、スコアボードは単一セクション。行順は「タイトル行 → Start.gg ロード行（auto-update タイマー含む） → フェーズ/ラウンド/BEST OF → スポンサー非表示チェック → 区切り線 → 共有グリッド（下記） → 下段設定（チームモードのみ）」。「すべての入力値をリセット」は Web の全クリア相当（選手・スコア・フェーズ/ラウンド・BEST OF・チーム名。確認ダイアログあり、danger スタイル）。
+> **共有 2 列グリッド（`AutonaScoreboardWidget.columns`、2026-07）**: チームカード・スコアパネル・アクション行は**単一の QGridLayout**（列 stretch 1:1）に載せる。行0 = 1P カード｜2P カード、行1 = スコアパネル（2 列スパン）、行2 = 反映｜すべての入力値をリセット。**行ごとに独立した HBox を使わないこと** — 各行が自コンテンツから別々の「中央」を計算して縦軸がずれるのが過去の不揃いの根本原因（プローブ実測でグリッド共有はカード等幅・行間の軸一致を保証）。**スコア操作専用のサイズ/タイポグラフィは全廃**（旧 `SCORE_PANEL_CTRL_H` / `score_btn_style` / `score_display_style` トークンは削除済み）: 全コントロールはグローバル QSS の標準サイズ。スコア表示スピンボックスのみ「中央揃え・矢印なし」（±ボタンがインクリメント役のため）。
+> **チームカード（2026-07、Web `Team.jsx` パリティ）**: 各チーム列は Paper 風カード（共通 QSS `QWidget#teamCard` / `QFrame#scorePanelCard`、`_styleTeamCard`）。ヘッダー行は敗者側チェックボックス（右）。シングルボードでは 1P/2P ラベルは**表示しない** — 列の識別はプレイヤー名欄のプレースホルダー「{0}Pプレイヤー名」（teamNumber ベース）が担う。チームボードのみ「TEAM N」ラベル＋チーム名欄を表示。詳細リンクの文言は「>>詳細」。
 
 ##### 4.1.0 Statistics ドック内タブ（`AutonaStatsWidget.tabs`）
 

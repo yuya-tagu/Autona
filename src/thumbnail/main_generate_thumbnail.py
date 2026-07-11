@@ -224,8 +224,10 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None, scoreb
     data = None
     try:
         # Use lock-acquired snapshot rather than touching StateManager.state
-        # directly (Design.md §3.2.5).
-        state = StateManager.GetFullState().get("state", {})
+        # directly (Design.md §3.2.5). include_pending: the thumbnail must
+        # render what the operator currently has in the form, even before
+        # the 反映 button published it.
+        state = StateManager.GetFullState(include_pending=True).get("state", {})
         if state and state.get("game", {}).get("codename"):
             has_players = True
             for i in [1, 2]:

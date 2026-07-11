@@ -1657,6 +1657,41 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>Post to X</translation>
     </message>
     <message>
+        <location filename="..\AutonaScoreboardWidget.py" line="533" />
+        <source>反映</source>
+        <translation>Apply</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaScoreboardWidget.py" line="535" />
+        <source>入力内容を配信画面に反映する</source>
+        <translation>Apply the entered data to the stream output</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaScoreboardWidget.py" line="642" />
+        <source>すべての入力値をリセット</source>
+        <translation>Reset all inputs</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaScoreboardWidget.py" line="797" />
+        <source>スコアボードの内容を全てクリアしますか？</source>
+        <translation>Clear all scoreboard data?</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaScoreboardPlayerWidget.py" line="383" />
+        <source>&gt;&gt;詳細</source>
+        <translation>&gt;&gt;Details</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaScoreboardPlayerWidget.py" line="393" />
+        <source>{0}Pプレイヤー名</source>
+        <translation>{0}P Player Name</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaScoreboardPlayerWidget.py" line="404" />
+        <source>プレイヤー詳細</source>
+        <translation>Player details</translation>
+    </message>
+    <message>
         <location filename="..\AutonaScoreboardWidget.py" line="291" />
         <source>配信先</source>
         <translation>Stream destination</translation>

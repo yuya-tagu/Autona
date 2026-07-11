@@ -31,6 +31,14 @@ from .SettingsManager import SettingsManager
 class StateManagerSignals(QObject):
     state_big_change = Signal()
     state_updated = Signal(dict)
+    # Deferred publication (Apply button). held_dirty_changed fires when a
+    # held subtree gains its first pending change (True) or is committed
+    # (False). held_state_updated fires (coalesced per save cycle) whenever
+    # live-but-unpublished data under a held prefix changes, so desktop
+    # widgets that render from the live state can refresh without waiting
+    # for the commit.
+    held_dirty_changed = Signal(str, bool)
+    held_state_updated = Signal(str)
 
 class StateManager:
     lastSavedState = {}
@@ -38,6 +46,14 @@ class StateManager:
     saveBlocked = 0
     signals = StateManagerSignals()
     changedKeys = []
+    # Deferred publication ("反映" button). Writes under a held prefix apply
+    # to the live state immediately (Get() and every in-process reader see
+    # them) but are excluded from delta broadcast / program_state.json /
+    # ./out text export until CommitHeld(prefix) publishes them in one shot.
+    heldPrefixes = set()      # dot key-path prefixes, e.g. "score.1"
+    heldKeys = {}             # prefix -> [bracket-form keys] pending commit
+    _commitPrefixes = set()   # prefixes queued to flush on the next SaveState
+    _heldTouched = set()      # prefixes with held writes not yet notified
     # Monotonically increasing counter incremented on every state mutation
     # broadcast (delta or big change). Clients use it to detect dropped or
     # out-of-order events and request a full snapshot when discontinuous
@@ -68,6 +84,95 @@ class StateManager:
         if StateManager.saveBlocked == 0:
             StateManager.SaveState()
 
+    @staticmethod
+    def _bracketPath(key: str) -> str:
+        # "score.1.best_of" -> "root['score']['1']['best_of']" (the key form
+        # DeepDiff's include_paths expects; also used for changedKeys).
+        out = "root"
+        for k in key.split("."):
+            out += f"['{k}']"
+        return out
+
+    @staticmethod
+    def _matchHeldPrefix(final_key: str):
+        # The bracket form is self-delimiting, so a prefix can never match
+        # into a sibling key ("...['1']" does not prefix "...['10']...").
+        for prefix in StateManager.heldPrefixes:
+            bracket = StateManager._bracketPath(prefix)
+            if final_key == bracket or final_key.startswith(bracket + "["):
+                return prefix
+        return None
+
+    @staticmethod
+    def _revertHeldSubtrees(snapshot):
+        # Rewind every dirty held subtree inside `snapshot` (a clone of the
+        # live state) to its last committed value so pending edits never
+        # reach the broadcast/export path.
+        for prefix in StateManager.heldPrefixes:
+            if not StateManager.heldKeys.get(prefix):
+                continue
+            committed = deep_get(StateManager.lastSavedState, prefix)
+            if committed is None:
+                deep_unset(snapshot, prefix)
+            else:
+                deep_set(snapshot, prefix, deep_clone(committed))
+
+    @staticmethod
+    def _notifyHeldTouched():
+        touched = list(StateManager._heldTouched)
+        StateManager._heldTouched.clear()
+        for prefix in touched:
+            StateManager.signals.held_state_updated.emit(prefix)
+
+    @staticmethod
+    def _trackChangedKey(final_key: str):
+        """Route a mutated key to the held buffer or the publish queue.
+
+        Caller must hold StateManager.lock. Returns the held prefix when
+        this write made it dirty (caller emits held_dirty_changed outside
+        the lock), otherwise None.
+        """
+        held_prefix = StateManager._matchHeldPrefix(final_key)
+        if held_prefix is None:
+            StateManager.changedKeys.append(final_key)
+            if StateManager.saveBlocked == 0:
+                StateManager.SaveState()
+            return None
+
+        was_dirty = bool(StateManager.heldKeys.get(held_prefix))
+        StateManager.heldKeys.setdefault(held_prefix, []).append(final_key)
+        StateManager._heldTouched.add(held_prefix)
+        if StateManager.saveBlocked == 0:
+            # No publish needed for a held write; just notify live viewers.
+            StateManager._notifyHeldTouched()
+        return None if was_dirty else held_prefix
+
+    def HoldSubtree(prefix: str):
+        """Defer publication of every key under `prefix` until CommitHeld().
+
+        Writes keep landing in the live state; only the broadcast/export
+        boundary is gated. Registered once per scoreboard widget.
+        """
+        with StateManager.lock:
+            StateManager.heldPrefixes.add(prefix)
+
+    def HasPendingChanges(prefix: str) -> bool:
+        with StateManager.lock:
+            return bool(StateManager.heldKeys.get(prefix))
+
+    def CommitHeld(prefix: str):
+        """Publish everything pending under a held prefix in one save cycle."""
+        with StateManager.lock:
+            had_pending = bool(StateManager.heldKeys.get(prefix))
+            StateManager._commitPrefixes.add(prefix)
+            StateManager._heldTouched.discard(prefix)
+            if StateManager.saveBlocked == 0:
+                StateManager.SaveState()
+            # else: _commitPrefixes stays queued; the SaveState fired by the
+            # enclosing ReleaseSaving() drains it.
+        if had_pending:
+            StateManager.signals.held_dirty_changed.emit(prefix, False)
+
     def SaveState():
         if StateManager.saveBlocked == 0:
             with StateManager.lock:
@@ -75,9 +180,26 @@ class StateManager:
                 if StateManager._export_thread is not None and StateManager._export_thread.is_alive():
                     StateManager._export_thread.join()
 
+                # Prefixes queued by CommitHeld(): their pending keys join
+                # this publish cycle. Anything held for a committing prefix
+                # at this moment is included (the user asked to apply).
+                for prefix in list(StateManager._commitPrefixes):
+                    StateManager.changedKeys.extend(
+                        StateManager.heldKeys.pop(prefix, []))
+                StateManager._commitPrefixes.clear()
+
+                # Publish view: the live state with still-dirty held subtrees
+                # reverted to their last committed value. When nothing is
+                # held-dirty this is the live state itself (no clone cost).
+                publish_state = StateManager.state
+                if any(StateManager.heldKeys.get(p)
+                       for p in StateManager.heldPrefixes):
+                    publish_state = deep_clone(StateManager.state)
+                    StateManager._revertHeldSubtrees(publish_state)
+
                 diff = DeepDiff(
                     StateManager.lastSavedState,
-                    StateManager.state,
+                    publish_state,
                     exclude_types=[type(None)],
                     include_paths=list(set(StateManager.changedKeys)),
                     verbose_level=2, # Necessary to see values of added items.
@@ -104,8 +226,13 @@ class StateManager:
 
                 if len(diff) > 0:
                     # Snapshot state for thread-safe file I/O;
-                    # update lastSavedState now so the next diff is correct
-                    state_snapshot = deep_clone(StateManager.state)
+                    # update lastSavedState now so the next diff is correct.
+                    # publish_state already is a private clone when held
+                    # subtrees were masked above.
+                    state_snapshot = (
+                        publish_state
+                        if publish_state is not StateManager.state
+                        else deep_clone(StateManager.state))
                     old_state = StateManager.lastSavedState
                     StateManager.lastSavedState = state_snapshot
 
@@ -136,6 +263,10 @@ class StateManager:
                                        ref_diff=diff))
                     StateManager._export_thread.start()
 
+                # Coalesced notification for held writes (one per prefix per
+                # save cycle, mirroring how SaveBlock coalesces deltas).
+                StateManager._notifyHeldTouched()
+
     def LoadState():
         try:
             with open("./out/program_state.json", 'rb') as file:
@@ -159,15 +290,12 @@ class StateManager:
 
             deep_set(StateManager.state, key, value)
 
-            final_key = "root"
-            for k in key.split("."):
-                final_key += f"['{k}']"
+            final_key = StateManager._bracketPath(key)
 
-            StateManager.changedKeys.append(final_key)
+            dirty_prefix = StateManager._trackChangedKey(final_key)
 
-            if StateManager.saveBlocked == 0:
-                StateManager.SaveState()
-                # StateManager.ExportText(oldState)
+        if dirty_prefix:
+            StateManager.signals.held_dirty_changed.emit(dirty_prefix, True)
 
     def Unset(key: str):
         # import inspect
@@ -179,32 +307,55 @@ class StateManager:
             # StateManager.lastSavedState = deep_clone(StateManager.state)
             deep_unset(StateManager.state, key)
 
-            final_key = "root"
-            for k in key.split("."):
-                final_key += f"['{k}']"
-            StateManager.changedKeys.append(final_key)
+            final_key = StateManager._bracketPath(key)
 
-            if StateManager.saveBlocked == 0:
-                StateManager.SaveState()
-                # StateManager.ExportText(oldState)
+            dirty_prefix = StateManager._trackChangedKey(final_key)
+
+        if dirty_prefix:
+            StateManager.signals.held_dirty_changed.emit(dirty_prefix, True)
 
     def Get(key: str, default=None):
         return deep_get(StateManager.state, key, default)
 
-    def GetFullState():
+    def GetFullState(include_pending=False):
         """Return a snapshot of the full state dict with the current revision.
 
         Thread-safe: acquires lock and returns a clone so callers cannot
         mutate the live state. Both `revision` (canonical, Design.md §3.2.3)
         and `delta_index` (legacy alias) are included so older clients keep
         working.
+
+        By default the snapshot is the *published* view: held subtrees with
+        pending (not yet applied) edits are reverted to their last committed
+        value, matching what the delta stream broadcasts. Pass
+        include_pending=True for in-process renderers (thumbnail / result)
+        that should see what the operator currently has in the form.
         """
         with StateManager.lock:
+            snapshot = deep_clone(StateManager.state)
+            if not include_pending:
+                StateManager._revertHeldSubtrees(snapshot)
             return {
-                'state': deep_clone(StateManager.state),
+                'state': snapshot,
                 'revision': StateManager.revision,
                 'delta_index': StateManager.revision,
             }
+
+    def GetCommitted(key: str, default=None):
+        """Get() variant that serves the published view of a held subtree.
+
+        When `key` lies inside a held prefix with pending edits, the last
+        committed value is returned instead of the live one. Keys outside
+        (or above) any held prefix fall back to the live state.
+        """
+        with StateManager.lock:
+            for prefix in StateManager.heldPrefixes:
+                if not StateManager.heldKeys.get(prefix):
+                    continue
+                if key == prefix or key.startswith(prefix + "."):
+                    return deep_get(
+                        StateManager.lastSavedState, key, default)
+            return deep_get(StateManager.state, key, default)
 
     @staticmethod
     def _bumpRevision():
