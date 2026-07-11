@@ -106,9 +106,9 @@ LoadEverything().then(() => {
   };
 
   Update = async (event) => {
-    const sb = event.data.score[window.scoreboardNumber];
-    if (!sb || !sb.team) return;
-
+    // Apply theme/accent colors and the tournament name BEFORE the
+    // score-data guard below, so they still apply even when this board's
+    // score subtree isn't populated yet (e.g. game not selected).
     // 大会カラー drives the frosted-glass tint; accent drives the gold
     // highlights (totals, active marker, phase/round). Falls back to the
     // CSS defaults when the EVENT tab hasn't set a tournament colour.
@@ -124,8 +124,18 @@ LoadEverything().then(() => {
     }
 
     // Tournament name (EVENT tab, board-independent) + phase | round
-    // (SCORE tab). Empty values collapse via the :empty CSS rule.
-    $("#tournament-name").text(ti.tournamentName || "");
+    // (SCORE tab). Empty values collapse via the :empty CSS rule. Prefer the
+    // operator-controlled display name; fall back to the raw tournament name
+    // only when displayTournamentName was never set (an explicit empty
+    // string means "intentionally hidden" and is respected).
+    const displayTournamentName = ti.displayTournamentName !== undefined
+      ? ti.displayTournamentName
+      : (ti.tournamentName || "");
+    $("#tournament-name").text(displayTournamentName);
+
+    const sb = event.data.score && event.data.score[window.scoreboardNumber];
+    if (!sb || !sb.team) return;
+
     const phase = sb.phase || "";
     const match = sb.match || "";
     $("#phase-round").text([phase, match].filter(Boolean).join("  |  "));

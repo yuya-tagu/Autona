@@ -175,10 +175,16 @@ function adaptColorsForTheme(t) {
   const side = t + 1;
   const container = document.querySelector(`.p${side}.container`);
   const scoreContainer = document.querySelector(`.p${side}.score_container`);
-  const scoreEl = scoreContainer.querySelector(".score");
-  const nameEl = container.querySelector(".name");
   const chips = document.querySelector(`.p${side}.chips`);
   const lightEl = document.querySelector(`.p${side}.light`);
+
+  // Defensive: DOM is static so these should always resolve, but bail
+  // instead of throwing if a selector ever comes up empty.
+  if (!container || !scoreContainer || !chips) return;
+
+  const scoreEl = scoreContainer.querySelector(".score");
+  const nameEl = container.querySelector(".name");
+  if (!scoreEl || !nameEl) return;
 
   // Measure intensity from the container itself (theme color)
   const color = getComputedStyle(container).backgroundColor;
@@ -256,10 +262,16 @@ function setRule(stylesheet, selector, property, value) {
 // ─── Display Helpers ────────────────────────────────────────────
 
 async function displayMatchPhase() {
-  const sb = data.score[window.scoreboardNumber];
-  const phase = sb.phase || "";
-  const match = sb.match || "";
-  const tournamentName = data.tournamentInfo?.tournamentName || "";
+  const sb = data.score && data.score[window.scoreboardNumber];
+  const phase = sb?.phase || "";
+  const match = sb?.match || "";
+  // Prefer the operator-controlled display name; fall back to the raw
+  // tournament name only when displayTournamentName was never set (an
+  // explicit empty string means "intentionally hidden" and is respected).
+  const ti = data.tournamentInfo || {};
+  const tournamentName = ti.displayTournamentName !== undefined
+    ? ti.displayTournamentName
+    : (ti.tournamentName || "");
   const hasInfo = phase || match || tournamentName;
 
   document.querySelector(".tournament_name").textContent = tournamentName;
@@ -289,16 +301,16 @@ async function renderPlayerInfo(t, team, player) {
 
   SetInnerHtml(
     $(`.p${side}.player_flag_container`),
-    player.country.asset
+    player.country?.asset
       ? `<div class='flag' style="background-image: url('../../${player.country.asset.toLowerCase()}')"></div>`
       : ""
   );
 
-  SetInnerHtml($(`.p${side} .score`), String(team.score));
+  SetInnerHtml($(`.p${side} .score`), String(team.score ?? 0));
   SetInnerHtml($(`.p${side} .seed`), player.seed ? `SEED ${player.seed}` : "");
   SetInnerHtml(
     $(`.p${side} .flagstate`),
-    player.state.name
+    player.state?.name
       ? `<div class="location_logo symbol"></div>${player.state.name}`
       : ""
   );
@@ -322,7 +334,7 @@ async function renderTeamInfo(t, team) {
     `<span>${names.join(" / ")}${team.losers ? " (L)" : ""}</span>`
   );
 
-  SetInnerHtml($(`.p${side} .score`), String(team.score));
+  SetInnerHtml($(`.p${side} .score`), String(team.score ?? 0));
   SetInnerHtml($(`.p${side} .seed`), "");
   SetInnerHtml($(`.p${side} .flagcountry`), "");
   SetInnerHtml($(`.p${side} .flagstate`), "");
