@@ -699,6 +699,15 @@ class AutonaScoreboardWidget(QWidget):
 
         self._groupSectionsIntoFrames(topOptions, bottomOptions)
 
+        # tournamentInfo.* lives outside this board's held subtree, so EVENT
+        # tab edits arrive as regular state_updated deltas; state_big_change
+        # covers wholesale loads (startup state restore, Start.gg import).
+        StateManager.signals.state_updated.connect(
+            self._onTournamentInfoDelta)
+        StateManager.signals.state_big_change.connect(
+            self._updateTournamentInfoLine)
+        self._updateTournamentInfoLine()
+
         # From here on, edits to this board's subtree are held back from the
         # broadcast/export pipeline until 反映 commits them. Everything Set
         # during construction above was published normally, so the committed
@@ -726,6 +735,27 @@ class AutonaScoreboardWidget(QWidget):
     def ApplyChanges(self):
         # 反映 button: publish every pending edit on this board at once.
         StateManager.CommitHeld(self.statePrefix)
+
+    def _onTournamentInfoDelta(self, delta):
+        # Same cheap containment filter AutonaStatsWidget uses on deltas.
+        if "tournamentInfo" in str(delta):
+            self._updateTournamentInfoLine()
+
+    def _updateTournamentInfoLine(self):
+        name = StateManager.Get("tournamentInfo.tournamentName", "") or ""
+        event = StateManager.Get("tournamentInfo.eventName", "") or ""
+        parts = []
+        if name:
+            parts.append(
+                QApplication.translate("app", "大会名") + f": {name}")
+        if event:
+            parts.append(
+                QApplication.translate("app", "種目") + f": {event}")
+        label = getattr(self, "tournamentInfoLabel", None)
+        if label is None:
+            return
+        label.setText("　".join(parts))
+        label.setVisible(bool(parts))
 
     def ResetAllInputs(self):
         # すべての入力値をリセット: clear players, scores, phase/round,
@@ -852,6 +882,18 @@ class AutonaScoreboardWidget(QWidget):
         titleRowLayout.addWidget(self.btOpenWebScoreboard)
         matchLayout.addWidget(titleRow)
 
+        # Read-only mirror of the EVENT tab's tournament name / event name,
+        # so the operator sees which tournament the board is feeding without
+        # switching tabs. Kept in sync via StateManager signals (the EVENT
+        # tab publishes tournamentInfo.* immediately, not behind 反映).
+        self.tournamentInfoLabel = QLabel()
+        self.tournamentInfoLabel.setStyleSheet(
+            f"color: {UI.palette()['text_secondary']};"
+            " background: transparent; border: none;")
+        self.tournamentInfoLabel.setWordWrap(True)
+        self.tournamentInfoLabel.setVisible(False)
+        matchLayout.addWidget(self.tournamentInfoLabel)
+
         # Start.gg load row (with its auto-update timer strip) sits above
         # the phase/round/BEST OF bar.
         matchLayout.addWidget(self.streamSection)
@@ -942,6 +984,28 @@ class AutonaScoreboardWidget(QWidget):
             self._bottomOptions.setVisible(not singlePlayer)
         if singlePlayer:
             self.playerNumber.setValue(1)
+            self._placeLosersOnDetailsRow()
+
+    def _placeLosersOnDetailsRow(self):
+        # Singles board only: the card header this checkbox lived in is
+        # otherwise empty (1P/2P label and team name are hidden), so the
+        # LOSERS checkbox joins the solo player's ">>詳細" row instead,
+        # right-aligned after the row's stretch. Reparenting keeps the
+        # widget a descendant of its team column, so every existing
+        # findChild(QCheckBox, "losers") lookup (state export, SwapTeams,
+        # reset, SetData) keeps resolving the same instance. Safe on this
+        # board because the player count is pinned to 1 — the hosting
+        # player widget is never torn down by SetPlayersPerTeam.
+        for column, players in ((self.team1column, self.team1playerWidgets),
+                                (self.team2column, self.team2playerWidgets)):
+            losersCheck = column.findChild(QCheckBox, "losers")
+            if losersCheck is None or not players:
+                continue
+            if losersCheck.parentWidget() is players[0]:
+                continue
+            linkRow = getattr(players[0], "linkRow", None)
+            if linkRow is not None:
+                linkRow.addWidget(losersCheck)
 
     def ExportTeamLogo(self, team, value):
         if os.path.exists(f"./user_data/team_logo/{value.lower()}.png"):
@@ -1149,18 +1213,16 @@ class AutonaScoreboardWidget(QWidget):
 
     def UpdateBottomButtons(self):
         if AutonaTournamentDataProvider.instance.provider and AutonaTournamentDataProvider.instance.provider.url:
-            url = AutonaTournamentDataProvider.instance.provider.url
-            if "start.gg" in url:
-                providerName = "Start.gg"
-            else:
-                providerName = url.split("/")[2] if "/" in url else url
             self.btSelectSet.setText(
-                QApplication.translate("app", "Load set from {0}").format(providerName))
+                QApplication.translate("app", "大会の試合を読み込む"))
             self.btSelectSet.setEnabled(True)
+            # Only actionable once a tournament is set — otherwise the button
+            # has nothing to load, so hide it entirely rather than showing a
+            # disabled control.
+            self.btSelectSet.setVisible(True)
         else:
-            self.btSelectSet.setText(
-                QApplication.translate("app", "Load set"))
             self.btSelectSet.setEnabled(False)
+            self.btSelectSet.setVisible(False)
 
     def SetCharacterNumber(self, value):
         # logger.info(f"AutonaScoreboardWidget#SetCharacterNumber({value})")

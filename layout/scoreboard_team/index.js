@@ -29,7 +29,11 @@ LoadEverything().then(() => {
   };
 
   Update = async (event) => {
-    const sb = event.data.score[window.scoreboardNumber];
+    // The first state event (or a partial delta) can arrive before this
+    // board's score subtree is populated; bail until team/player data exists
+    // instead of throwing "reading 'team'" on undefined.
+    const sb = event.data.score && event.data.score[window.scoreboardNumber];
+    if (!sb || !sb.team || !sb.team["1"] || !sb.team["2"] || !sb.team["1"].player) return;
     const teams = [sb.team["1"], sb.team["2"]];
     const isTeams = Object.keys(teams[0].player).length > 1;
 

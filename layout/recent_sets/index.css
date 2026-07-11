@@ -129,7 +129,10 @@ body {
   line-height: 64px;
   border-radius: 100%;
   background: var(--p1-score-bg-color);
-  color: var(--text-color);
+  /* Follow the score-bg's own luminance (palette[1]), not the main bg's
+   * (--text-color = setContrast of palette[0]) — the two palette colors
+   * can differ in lightness. */
+  color: var(--p1-score-color);
   flex-shrink: 0;
 }
 

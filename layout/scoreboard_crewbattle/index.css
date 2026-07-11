@@ -15,12 +15,16 @@
   --accent-color: #f0a500;
   --p1-color: #fe3636;
   --p2-color: #2e89ff;
+  /* Body text ink, recomputed from --theme-color's luminance at runtime
+   * (index.js). The glass tiles are ~88% --theme-color, so a light theme
+   * needs dark text. Defaults to white for the dark default theme. */
+  --glass-ink: #ffffff;
 }
 
 body {
   margin: 0;
   background-color: rgba(0, 0, 0, 0);
-  color: #fff;
+  color: var(--glass-ink, #fff);
   font-family: "LINE Seed JP", "Hiragino Kaku Gothic Pro",
     "Noto Sans CJK JP", Meiryo, sans-serif;
   font-weight: 700; /* a touch lighter than the previous 800 */
@@ -243,7 +247,7 @@ body {
   min-width: 34px;
   text-align: center;
   font-size: 26px;
-  color: #fff;
+  color: var(--glass-ink, #fff);
 }
 
 /* Active member: accent-colour neon outline that breathes. */

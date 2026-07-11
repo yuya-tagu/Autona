@@ -30,8 +30,8 @@ def ObsUrl(layout_name):
 
 
 class AutonaLayoutPreview(QFrame):
-    """Keeps the preview QWebEngineView at a 16:9 letterbox, zooming the
-    1920x1080 overlay down to the panel width.
+    """Fits the whole 1920x1080 overlay inside the panel, scaling the zoom
+    to the panel size while the LAYOUT viewport stays fixed at 1920x1080.
 
     Zooming must use setZoomFactor (not a CSS transform): the zoom factor
     keeps the page's LAYOUT viewport at 1920x1080 logical pixels, which
@@ -40,13 +40,27 @@ class AutonaLayoutPreview(QFrame):
     factor when a page finishes loading (leaving a top-left crop), so it
     is re-applied on loadFinished.
 
-    Chromium clamps the zoom factor to [0.25, 5.0], so the view itself is
-    never allowed to shrink below 480px (= 1920 * 0.25); when the pane is
-    narrower, the view keeps that minimum size inside a scroll area and
-    the preview becomes scrollable instead of cropping."""
+    The zoom fits BOTH dimensions (min of the width/height ratios), so the
+    entire 16:9 canvas is always visible and the inner view never overflows
+    the panel — there is nothing to scroll. This is deliberate: the earlier
+    fit-to-width sizing let a tall panel clip the canvas into a scroll area,
+    and manually scrolling it re-ran the width-based zoom and visibly
+    rescaled the overlay ("resolution changes on scroll"). Deriving the zoom
+    from the panel size alone (never from a scrollbar-affected view width)
+    keeps the logical resolution pinned at 1920x1080 at every zoom level.
 
-    # 1920 * Chromium's minimum zoom factor (0.25).
-    MIN_VIEW_WIDTH = 480
+    Chromium clamps the zoom factor to [0.25, 5.0]. Only when the panel is
+    smaller than the clamped-minimum canvas (1920*0.25 = 480 wide) does the
+    scroll area show bars — and even then the zoom is fixed, so scrolling
+    still never rescales the overlay."""
+
+    # Native OBS canvas the overlays are authored against.
+    NATIVE_WIDTH = 1920
+    NATIVE_HEIGHT = 1080
+
+    # Chromium's zoom-factor clamp.
+    MIN_ZOOM = 0.25
+    MAX_ZOOM = 5.0
 
     def __init__(self, layout_name=None, parent=None):
         # layout_name may be deferred to load() for panels that switch
@@ -80,22 +94,36 @@ class AutonaLayoutPreview(QFrame):
         super().resizeEvent(e)
         self._layoutView()
 
+    def _fitZoom(self):
+        # Zoom that fits the whole canvas in the panel, clamped to Chromium's
+        # range. Depends ONLY on the panel size, never on the view/scrollbar
+        # width, so scrolling can never change it.
+        inset = 1
+        avail_w = max(1, self.width() - 2 * inset)
+        avail_h = max(1, self.height() - 2 * inset)
+        zoom = min(avail_w / self.NATIVE_WIDTH, avail_h / self.NATIVE_HEIGHT)
+        return max(self.MIN_ZOOM, min(zoom, self.MAX_ZOOM))
+
     def _layoutView(self):
         inset = 1
-        w = max(1, self.width() - 2 * inset)
-        view_w = max(w, self.MIN_VIEW_WIDTH)
-        view_h = int(view_w * 9 / 16)
+        zoom = self._fitZoom()
+        view_w = round(self.NATIVE_WIDTH * zoom)
+        view_h = round(self.NATIVE_HEIGHT * zoom)
         self.view.setFixedSize(view_w, view_h)
 
-        extra = (self.scroll.horizontalScrollBar().sizeHint().height()
-                 if view_w > w else 0)
-        h = min(max(1, self.height() - 2 * inset), view_h + extra)
-        y = max(inset, (self.height() - h) // 2)
-        self.scroll.setGeometry(inset, y, w, h)
-        self._applyScale()
+        # Centre the scaled canvas in the panel. It fits within the panel at
+        # every zoom except the clamped minimum, where the scroll area shows
+        # bars without affecting the (fixed) zoom.
+        sw = min(max(1, self.width() - 2 * inset), view_w)
+        sh = min(max(1, self.height() - 2 * inset), view_h)
+        x = max(inset, (self.width() - sw) // 2)
+        y = max(inset, (self.height() - sh) // 2)
+        self.scroll.setGeometry(x, y, sw, sh)
+        self.view.setZoomFactor(zoom)
 
     def _applyScale(self):
-        self.view.setZoomFactor(max(1, self.view.width()) / 1920.0)
+        # Re-apply after a load (Chromium resets zoom on loadFinished).
+        self.view.setZoomFactor(self._fitZoom())
 
     def load(self, layout_name=None):
         if layout_name is not None:
