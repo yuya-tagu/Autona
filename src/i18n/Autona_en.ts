@@ -1702,6 +1702,11 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>Add stream destination</translation>
     </message>
     <message>
+        <location filename="..\AutonaTournamentInfoWidget.py" line="689" />
+        <source>配信先を編集する</source>
+        <translation>Edit stream destination</translation>
+    </message>
+    <message>
         <location filename="..\AutonaScoreboardWidget.py" line="1332" />
         <location filename="..\AutonaScoreboardWidget.py" line="329" />
         <source>Load set</source>
@@ -1772,6 +1777,21 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaTournamentInfoWidget.py" line="736" />
         <source>Please enter both the channel name and URL.</source>
         <translation>Please enter both the channel name and URL.</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaTournamentInfoWidget.py" line="795" />
+        <source>Edit stream channel</source>
+        <translation>Edit stream channel</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaTournamentInfoWidget.py" line="762" />
+        <source>Delete stream channel</source>
+        <translation>Delete stream channel</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaTournamentInfoWidget.py" line="763" />
+        <source>Delete this stream channel?</source>
+        <translation>Delete this stream channel?</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="1157" />
