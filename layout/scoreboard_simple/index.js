@@ -106,7 +106,7 @@ LoadEverything().then(() => {
 
           SetInnerHtml(
             $(`.t${t + 1}.p${p + 1} .flagcountry`),
-            player.country.asset
+            player.country?.asset
               ? `
                 <div class='flagname'>${player.country.code}</div>
                 <div class='flag' style="background-image: url('../../${player.country.asset.toLowerCase()}')"></div>
@@ -116,7 +116,7 @@ LoadEverything().then(() => {
 
           SetInnerHtml(
             $(`.t${t + 1}.p${p + 1} .flagstate`),
-            player.state.asset
+            player.state?.asset
               ? `
                 <div class='flagname'>${player.state.code}</div>
                 <div class='flag' style="background-image: url('../../${player.state.asset}')"></div>
@@ -154,9 +154,16 @@ LoadEverything().then(() => {
     if (data.score[window.scoreboardNumber].best_of_text) phaseTexts.push(data.score[window.scoreboardNumber].best_of_text);
 
     SetInnerHtml($(".info.material_container .phase"), phaseTexts.join(" - "));
+    // Prefer the operator-controlled display name; fall back to the raw
+    // tournament name only when displayTournamentName was never set (an
+    // explicit empty string means "intentionally hidden" and is respected).
+    const ti = data.tournamentInfo || {};
+    const displayTournamentName = ti.displayTournamentName !== undefined
+      ? ti.displayTournamentName
+      : (ti.tournamentName || "");
     SetInnerHtml(
       $(".info.material_container .tournament_name"),
-      data.tournamentInfo.tournamentName
+      displayTournamentName
     );
     SetInnerHtml($(".info.material_container .match"), data.score[window.scoreboardNumber].match);
   };

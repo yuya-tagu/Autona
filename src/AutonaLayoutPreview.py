@@ -10,8 +10,12 @@ this module must not pull the singleton chain, so it can sit anywhere in
 Autona.py's import order.
 """
 
+import logging
+import math
+
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
+from qtpy.QtGui import QPainter, QPixmap
 from qtpy.QtWebEngineWidgets import QWebEngineView
 from qtpy.QtWebEngineCore import QWebEngineSettings
 
@@ -19,6 +23,8 @@ from .SettingsManager import SettingsManager
 from . import ui_constants as UI
 
 LAYOUT_DIR = "layout"
+
+logger = logging.getLogger(__name__)
 
 
 def ObsUrl(layout_name):
@@ -42,17 +48,40 @@ class AutonaLayoutPreview(QFrame):
 
     The zoom fits BOTH dimensions (min of the width/height ratios), so the
     entire 16:9 canvas is always visible and the inner view never overflows
-    the panel — there is nothing to scroll. This is deliberate: the earlier
-    fit-to-width sizing let a tall panel clip the canvas into a scroll area,
-    and manually scrolling it re-ran the width-based zoom and visibly
-    rescaled the overlay ("resolution changes on scroll"). Deriving the zoom
-    from the panel size alone (never from a scrollbar-affected view width)
-    keeps the logical resolution pinned at 1920x1080 at every zoom level.
+    the panel. There is deliberately no scrollable structure anywhere in
+    this widget: an earlier design used a QScrollArea around the view, and
+    manually scrolling it re-ran zoom/geometry math derived from the
+    scrolled viewport, which visibly rescaled the overlay ("resolution
+    changes on scroll"). That bug's root cause was the scrollable structure
+    itself, not any particular calculation, so this version removes
+    scrolling entirely instead of patching around it:
 
-    Chromium clamps the zoom factor to [0.25, 5.0]. Only when the panel is
-    smaller than the clamped-minimum canvas (1920*0.25 = 480 wide) does the
-    scroll area show bars — and even then the zoom is fixed, so scrolling
-    still never rescales the overlay."""
+    - The view is a direct, geometry-managed child of this QFrame (no
+      QScrollArea, no QAbstractScrollArea ancestor anywhere).
+    - ``setMinimumSize`` is derived from Chromium's zoom-factor clamp
+      (``MIN_ZOOM``) so the panel can never shrink below the size that
+      would require scrolling to reach the clamped-minimum canvas — the
+      clamp and the minimum size are kept in lock-step on purpose.
+    - As a defense in depth, if the panel is ever forced smaller than that
+      minimum anyway (e.g. a parent layout override), ``_layoutView``
+      centres the (fixed-zoom) view and lets it clip against the frame's
+      bounds rather than reach for a scrollbar. Zoom never changes because
+      of this; only how much of the already-rendered canvas is visible
+      does.
+    - A transparent "glass pane" sits on top of the QWebEngineView and
+      absorbs mouse/wheel input before it reaches the page, so the overlay
+      page itself can never be scrolled (or clicked) from the preview.
+      This preview is display-only, so swallowing input here is fine.
+
+    Chromium clamps the zoom factor to [0.25, 5.0].
+
+    This widget also supports an optional preview-only background image
+    (``setBackgroundImage``), painted behind the (transparent-background)
+    web view so operators can see how an overlay reads against real
+    stream footage. This is purely cosmetic for the desktop preview: it
+    never touches the layout HTML/CSS that OBS actually renders, and it
+    has no effect on the browser-source output.
+    """
 
     # Native OBS canvas the overlays are authored against.
     NATIVE_WIDTH = 1920
@@ -67,6 +96,8 @@ class AutonaLayoutPreview(QFrame):
         # between designs on one preview (Board tab).
         super().__init__(parent)
         self.layout_name = layout_name
+        self._bgSource = None
+        self._bgScaled = None
 
         p = UI.palette()
         self.setStyleSheet(
@@ -75,9 +106,16 @@ class AutonaLayoutPreview(QFrame):
             f"border-radius: {UI.RADIUS_SM}px;"
             f"}}"
         )
-        self.setMinimumHeight(220)
+        # Keep the panel large enough that the canvas never needs to hit
+        # Chromium's zoom floor within a viewport smaller than that floor's
+        # rendered size — see class docstring. +2 accounts for the 1px
+        # inset kept on each side in _fitZoom/_layoutView.
+        self.setMinimumSize(
+            int(self.NATIVE_WIDTH * self.MIN_ZOOM) + 2,
+            int(self.NATIVE_HEIGHT * self.MIN_ZOOM) + 2,
+        )
 
-        self.view = QWebEngineView()
+        self.view = QWebEngineView(self)
         s = self.view.settings()
         s.setAttribute(
             QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
@@ -86,18 +124,32 @@ class AutonaLayoutPreview(QFrame):
         self.view.page().setBackgroundColor(Qt.GlobalColor.transparent)
         self.view.loadFinished.connect(lambda _ok: self._applyScale())
 
-        self.scroll = QScrollArea(self)
-        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.scroll.setWidget(self.view)
+        # Transparent input shield above the view: swallows wheel/click
+        # events so the page can never be scrolled or interacted with from
+        # the preview (see class docstring). Must be created after
+        # self.view so it stacks on top of it.
+        self._glass = QWidget(self)
+        self._glass.setStyleSheet("background: transparent;")
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self._layoutView()
 
+    def paintEvent(self, e):
+        # Draw the frame's own background (rounded rect etc.) first, then
+        # the optional preview-only background image behind the web view.
+        # Painted here (not on a child widget) so it always sits below the
+        # QWebEngineView, which is drawn by its own native surface.
+        super().paintEvent(e)
+        if self._bgScaled is not None and not self._bgScaled.isNull():
+            painter = QPainter(self)
+            painter.drawPixmap(self.view.geometry(), self._bgScaled)
+            painter.end()
+
     def _fitZoom(self):
         # Zoom that fits the whole canvas in the panel, clamped to Chromium's
-        # range. Depends ONLY on the panel size, never on the view/scrollbar
-        # width, so scrolling can never change it.
+        # range. Depends ONLY on the panel size, so nothing (including the
+        # removed scroll area) can change it out from under the layout math.
         inset = 1
         avail_w = max(1, self.width() - 2 * inset)
         avail_h = max(1, self.height() - 2 * inset)
@@ -105,21 +157,38 @@ class AutonaLayoutPreview(QFrame):
         return max(self.MIN_ZOOM, min(zoom, self.MAX_ZOOM))
 
     def _layoutView(self):
-        inset = 1
         zoom = self._fitZoom()
-        view_w = round(self.NATIVE_WIDTH * zoom)
-        view_h = round(self.NATIVE_HEIGHT * zoom)
-        self.view.setFixedSize(view_w, view_h)
+        # Round the view size up (not to nearest) so the CSS layout
+        # viewport (view_px / zoom) is never fractionally short of
+        # 1920x1080 — a viewport that undershoots lets the page's own
+        # content overflow it. Rounding up guarantees viewport >= native
+        # size, at the cost of at most 1px of clipping against the frame.
+        view_w = math.ceil(self.NATIVE_WIDTH * zoom)
+        view_h = math.ceil(self.NATIVE_HEIGHT * zoom)
 
-        # Centre the scaled canvas in the panel. It fits within the panel at
-        # every zoom except the clamped minimum, where the scroll area shows
-        # bars without affecting the (fixed) zoom.
-        sw = min(max(1, self.width() - 2 * inset), view_w)
-        sh = min(max(1, self.height() - 2 * inset), view_h)
-        x = max(inset, (self.width() - sw) // 2)
-        y = max(inset, (self.height() - sh) // 2)
-        self.scroll.setGeometry(x, y, sw, sh)
+        # Centre the view in the panel. With setMinimumSize enforcing the
+        # zoom floor, this fits within the panel at every reachable size;
+        # the (x, y) can still go negative under an externally-forced
+        # undersized panel, in which case the view is simply clipped
+        # against the frame's bounds rather than scrolled.
+        x = (self.width() - view_w) // 2
+        y = (self.height() - view_h) // 2
+        self.view.setGeometry(x, y, view_w, view_h)
+        self._glass.setGeometry(x, y, view_w, view_h)
         self.view.setZoomFactor(zoom)
+
+        # Rescale the cached background only when the view size actually
+        # changed: _layoutView runs on every resizeEvent, and a smooth
+        # 1920x1080 rescale per event is too costly during a window drag.
+        if self._bgSource is not None and not self._bgSource.isNull():
+            if (self._bgScaled is None
+                    or self._bgScaled.size() != QSize(view_w, view_h)):
+                self._bgScaled = self._bgSource.scaled(
+                    view_w, view_h,
+                    Qt.AspectRatioMode.IgnoreAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                self.update()
 
     def _applyScale(self):
         # Re-apply after a load (Chromium resets zoom on loadFinished).
@@ -135,3 +204,17 @@ class AutonaLayoutPreview(QFrame):
 
     def obs_url(self):
         return ObsUrl(self.layout_name)
+
+    def setBackgroundImage(self, path):
+        """Set a preview-only background image shown behind the (already
+        transparent-background) web view. Purely cosmetic for the desktop
+        preview; never affects the layout HTML/CSS or the OBS browser
+        source output."""
+        pixmap = QPixmap(path)
+        if pixmap.isNull():
+            logger.warning("Failed to load preview background image: %s", path)
+            self._bgSource = None
+            self._bgScaled = None
+            return
+        self._bgSource = pixmap
+        self._layoutView()

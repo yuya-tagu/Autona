@@ -82,14 +82,14 @@ LoadEverything().then(() => {
 
             SetInnerHtml(
               $(`.p${t + 1}.container .flagcountry`),
-              player.country.asset
+              player.country?.asset
                 ? `<div class='flag' style="background-image: url('../../${player.country.asset.toLowerCase()}')"></div>`
                 : ""
             );
 
             SetInnerHtml(
               $(`.p${t + 1}.container .flagstate`),
-              player.state.asset
+              player.state?.asset
                 ? `<div class='flag' style="background-image: url('../../${player.state.asset}')"></div>`
                 : ""
             );
@@ -174,16 +174,16 @@ LoadEverything().then(() => {
           `
         );
 
-        let player = team.player["1"];
+        let player = team.player["1"] || {};
 
         SetInnerHtml(
           $(`.p${t + 1}.container .flagcountry`),
-          player.country.asset ? `` : ""
+          player.country?.asset ? `` : ""
         );
 
         SetInnerHtml(
           $(`.p${t + 1}.container .flagstate`),
-          player.state.asset ? `` : ""
+          player.state?.asset ? `` : ""
         );
 
         await CharacterDisplay(
@@ -233,7 +233,14 @@ LoadEverything().then(() => {
       }
     }
 
-    SetInnerHtml($(".tournament_name"), data.tournamentInfo.tournamentName);
+    // Prefer the operator-controlled display name; fall back to the raw
+    // tournament name only when displayTournamentName was never set (an
+    // explicit empty string means "intentionally hidden" and is respected).
+    const ti = data.tournamentInfo || {};
+    const displayTournamentName = ti.displayTournamentName !== undefined
+      ? ti.displayTournamentName
+      : (ti.tournamentName || "");
+    SetInnerHtml($(".tournament_name"), displayTournamentName);
 
     SetInnerHtml($(".event_name"), data.tournamentInfo.eventName);
 

@@ -74,6 +74,44 @@ class AutonaTournamentInfoWidget(QDockWidget):
                 ])
             widget.editingFinished.emit()
 
+        # 表示大会名 auto-copy. displayTournamentName is its own
+        # tournamentInfo.* key (not score.{N}.*) so it survives the startup
+        # score-subtree wipe and is shared across every board. Two sources
+        # feed it with different override semantics:
+        #  - Manual edits to the "大会情報" tournamentName field (its
+        #    editingFinished below) follow into the display name only while
+        #    it is unmodified (empty, or still equal to the last-seen
+        #    tournamentName) — mirroring the _lastAutoStreamTitle pattern.
+        #  - A Start.gg tournament (re)selection is authoritative: it
+        #    re-applies the Start.gg name even over a manual edit (handled
+        #    in _onTournamentDataForDisplayName). The startup restore of the
+        #    previous tournament (initial_load) is not a user selection and
+        #    keeps manual edits.
+        self.tournamentNameEdit: QLineEdit = self.findChild(
+            QLineEdit, "tournamentName")
+        if StateManager.Get("tournamentInfo.displayTournamentName", None) is None:
+            StateManager.Set(
+                "tournamentInfo.displayTournamentName",
+                StateManager.Get("tournamentInfo.tournamentName", "") or "")
+        self._lastTournamentName = StateManager.Get(
+            "tournamentInfo.tournamentName", "") or ""
+
+        def _onTournamentNameEditingFinished():
+            new = self.tournamentNameEdit.text()
+            old = self._lastTournamentName
+            disp = StateManager.Get("tournamentInfo.displayTournamentName", "")
+            if disp == "" or disp == old:
+                StateManager.Set("tournamentInfo.displayTournamentName", new)
+            self._lastTournamentName = new
+
+        self.tournamentNameEdit.editingFinished.connect(
+            _onTournamentNameEditingFinished)
+
+        # Bound-method slot so Qt delivers the signal on the GUI thread
+        # (same rationale as the tournament_data_updated hooks below).
+        AutonaTournamentDataProvider.instance.signals.tournament_data_updated.connect(
+            self._onTournamentDataForDisplayName)
+
         for widget in self.findChildren(QSpinBox):
             widget.valueChanged.connect(lambda value, element=widget: [
                 StateManager.Set(
@@ -575,6 +613,21 @@ class AutonaTournamentInfoWidget(QDockWidget):
             logger.error(traceback.format_exc())
 
         self.UpdateIcon()
+
+    def _onTournamentDataForDisplayName(self, data):
+        # A Start.gg tournament (re)selection re-applies its name to the
+        # 表示大会名 even over a manual edit — picking a tournament is an
+        # explicit "use this one" action. Skipped for the startup restore
+        # of the previous tournament (initial_load) and for the empty
+        # payload emitted when the tournament is cleared, neither of which
+        # is a user selection.
+        name = data.get("tournamentName", "") or ""
+        if not name or data.get("initial_load"):
+            return
+        StateManager.Set("tournamentInfo.displayTournamentName", name)
+        # Keep the follow-guard's bookkeeping consistent with the state we
+        # just wrote, whatever order the editingFinished hook runs in.
+        self._lastTournamentName = name
 
     # ---- Stream title / thumbnail ----
 

@@ -60,12 +60,19 @@ LoadEverything().then(() => {
       })
     }
 
+    // Prefer the operator-controlled display name; fall back to the raw
+    // tournament name only when displayTournamentName was never set (an
+    // explicit empty string means "intentionally hidden" and is respected).
+    const ti = data.tournamentInfo || {};
+    const displayTournamentName = ti.displayTournamentName !== undefined
+      ? ti.displayTournamentName
+      : (ti.tournamentName || "");
     SetInnerHtml($(`.tournament_name`),
-      data.tournamentInfo.tournamentName ?
-        `<span class="faded">${data.tournamentInfo.tournamentName}</span>
+      displayTournamentName ?
+        `<span class="faded">${displayTournamentName}</span>
         <span class="divider">/</span>`
         :
-        data.tournamentInfo.tournamentName
+        displayTournamentName
     );
     SetInnerHtml($(`.event_name`), data.tournamentInfo.eventName);
   };

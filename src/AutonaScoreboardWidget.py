@@ -524,9 +524,36 @@ class AutonaScoreboardWidget(QWidget):
 
         self.scoreBar.layout().addWidget(bestOfGroup, 1)
 
+        # Display tournament name row: separate from the phase/round/best-of
+        # bar above. Backed by tournamentInfo.displayTournamentName (not
+        # score.{N}.*), so it is board-agnostic, immediate (no 反映 gating),
+        # and survives the score subtree wipe on startup.
+        displayTournamentNameRow = QWidget()
+        displayTournamentNameRow.setLayout(QHBoxLayout())
+        displayTournamentNameRow.layout().setContentsMargins(0, 0, 0, 0)
+        displayTournamentNameRow.layout().setSpacing(UI.SPACE_SM)
+        displayTournamentNameLabel = QLabel(
+            QApplication.translate("app", "表示大会名"))
+        self.displayTournamentNameEdit = QLineEdit()
+        self.displayTournamentNameEdit.setText(
+            StateManager.Get("tournamentInfo.displayTournamentName", "") or "")
+        self.displayTournamentNameEdit.editingFinished.connect(
+            lambda: StateManager.Set(
+                "tournamentInfo.displayTournamentName",
+                self.displayTournamentNameEdit.text()))
+        displayTournamentNameRow.layout().addWidget(displayTournamentNameLabel)
+        displayTournamentNameRow.layout().addWidget(self.displayTournamentNameEdit, 1)
+
         columnsIndex = self.innerWidget.layout().indexOf(self.columns)
-        # Insert order: streamSection, scoreBar, then columns
+        # Each insertWidget call below targets the same fixed columnsIndex,
+        # which pushes the previously inserted widget down one slot — so the
+        # *last* call ends up topmost. Calling order is therefore bottom row
+        # first: scoreBar, then displayTournamentNameRow (lands just above
+        # scoreBar's phase/round pulldowns), then streamSection on top.
+        # Final visual order: streamSection, displayTournamentNameRow,
+        # scoreBar, then columns.
         self.innerWidget.layout().insertWidget(columnsIndex, self.scoreBar)
+        self.innerWidget.layout().insertWidget(columnsIndex, displayTournamentNameRow)
         self.innerWidget.layout().insertWidget(columnsIndex, self.streamSection)
         self.scoreColumn.hide()
 
@@ -706,7 +733,10 @@ class AutonaScoreboardWidget(QWidget):
             self._onTournamentInfoDelta)
         StateManager.signals.state_big_change.connect(
             self._updateTournamentInfoLine)
+        StateManager.signals.state_big_change.connect(
+            self._syncDisplayTournamentNameEdit)
         self._updateTournamentInfoLine()
+        self._syncDisplayTournamentNameEdit()
 
         # From here on, edits to this board's subtree are held back from the
         # broadcast/export pipeline until 反映 commits them. Everything Set
@@ -740,6 +770,18 @@ class AutonaScoreboardWidget(QWidget):
         # Same cheap containment filter AutonaStatsWidget uses on deltas.
         if "tournamentInfo" in str(delta):
             self._updateTournamentInfoLine()
+            self._syncDisplayTournamentNameEdit()
+
+    def _syncDisplayTournamentNameEdit(self):
+        # Reflect other-board / EVENT-tab edits to displayTournamentName into
+        # this board's own field, without fighting an in-progress edit here
+        # (hasFocus) or resetting the cursor on a no-op update (same text).
+        edit = getattr(self, "displayTournamentNameEdit", None)
+        if edit is None or edit.hasFocus():
+            return
+        value = StateManager.Get("tournamentInfo.displayTournamentName", "") or ""
+        if edit.text() != value:
+            edit.setText(value)
 
     def _updateTournamentInfoLine(self):
         name = StateManager.Get("tournamentInfo.tournamentName", "") or ""

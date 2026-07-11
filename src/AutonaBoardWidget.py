@@ -307,6 +307,8 @@ class AutonaBoardWidget(QDockWidget):
         # whole canvas to the panel (zoom scales with size); see
         # AutonaLayoutPreview.
         self.preview = AutonaLayoutPreview()
+        self.preview.setBackgroundImage(
+            os.path.join("layout", "videoframe_1659973.png"))
         self.preview.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         group.layout().addWidget(self.preview)

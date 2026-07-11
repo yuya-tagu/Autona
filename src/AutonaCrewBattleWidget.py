@@ -96,6 +96,14 @@ class AutonaCrewBattleWidget(QWidget):
 
         self._writeInitialState()
 
+        # tournamentInfo.* lives outside score.{N}, so EVENT tab edits and
+        # edits made on boards 1/2 arrive here as regular state_updated
+        # deltas; state_big_change covers wholesale loads (startup restore,
+        # Start.gg import). Mirrors AutonaScoreboardWidget's equivalent hook.
+        StateManager.signals.state_updated.connect(self._onTournamentInfoDelta)
+        StateManager.signals.state_big_change.connect(
+            self._syncDisplayTournamentNameEdit)
+
     # ── UI construction ────────────────────────────────────────────────
 
     def _buildUi(self):
@@ -135,6 +143,23 @@ class AutonaCrewBattleWidget(QWidget):
         controls.addWidget(self.btReset)
 
         outer.addLayout(controls)
+
+        # Display tournament name row: backed by tournamentInfo.
+        # displayTournamentName, not score.{N}.* — board-agnostic, immediate
+        # (no 反映 gate), and shared with boards 1/2. See
+        # AutonaScoreboardWidget's equivalent row for the full rationale.
+        displayNameRow = QHBoxLayout()
+        displayNameRow.addWidget(
+            QLabel(QApplication.translate("app", "表示大会名")))
+        self.displayTournamentNameEdit = QLineEdit()
+        self.displayTournamentNameEdit.setText(
+            StateManager.Get("tournamentInfo.displayTournamentName", "") or "")
+        self.displayTournamentNameEdit.editingFinished.connect(
+            lambda: StateManager.Set(
+                "tournamentInfo.displayTournamentName",
+                self.displayTournamentNameEdit.text()))
+        displayNameRow.addWidget(self.displayTournamentNameEdit, 1)
+        outer.addLayout(displayNameRow)
 
         # Phase / round inputs (editable; written to score.3.phase / .match).
         # The OBS crew overlay shows these next to the tournament name.
@@ -277,6 +302,22 @@ class AutonaCrewBattleWidget(QWidget):
 
     def _key(self, *parts) -> str:
         return ".".join([f"score.{self.scoreboardNumber}", *map(str, parts)])
+
+    def _onTournamentInfoDelta(self, delta):
+        # Same cheap containment filter AutonaScoreboardWidget uses on deltas.
+        if "tournamentInfo" in str(delta):
+            self._syncDisplayTournamentNameEdit()
+
+    def _syncDisplayTournamentNameEdit(self):
+        # Reflect other-board / EVENT-tab edits to displayTournamentName into
+        # this board's own field, without fighting an in-progress edit here
+        # (hasFocus) or resetting the cursor on a no-op update (same text).
+        edit = getattr(self, "displayTournamentNameEdit", None)
+        if edit is None or edit.hasFocus():
+            return
+        value = StateManager.Get("tournamentInfo.displayTournamentName", "") or ""
+        if edit.text() != value:
+            edit.setText(value)
 
     def _writeInitialState(self):
         with StateManager.SaveBlock():

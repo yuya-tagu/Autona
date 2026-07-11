@@ -29,15 +29,9 @@ LoadEverything().then(() => {
   };
 
   Update = async (event) => {
-    // The first state event (or a partial delta) can arrive before this
-    // board's score subtree is populated; bail until team/player data exists
-    // instead of throwing "reading 'team'" on undefined.
-    const sb = event.data.score && event.data.score[window.scoreboardNumber];
-    if (!sb || !sb.team || !sb.team["1"] || !sb.team["2"] || !sb.team["1"].player) return;
-    const teams = [sb.team["1"], sb.team["2"]];
-    const isTeams = Object.keys(teams[0].player).length > 1;
-
-    // Apply theme/accent colors BEFORE adaptColorsForTheme
+    // Apply theme/accent colors BEFORE the score-data guard below, so colors
+    // still apply even when the score subtree isn't populated yet (e.g. game
+    // not selected). Also BEFORE adaptColorsForTheme.
     const ti = event.data.tournamentInfo || {};
     if (ti.themeColor) {
       document.documentElement.style.setProperty("--theme-color", ti.themeColor);
@@ -46,8 +40,18 @@ LoadEverything().then(() => {
       document.documentElement.style.setProperty("--accent-color", ti.accentColor);
     }
 
+    // The first state event (or a partial delta) can arrive before this
+    // board's score subtree is populated; bail until team/player data exists
+    // instead of throwing "reading 'team'" on undefined.
+    const sb = event.data.score && event.data.score[window.scoreboardNumber];
+    if (!sb || !sb.team || !sb.team["1"] || !sb.team["2"] || !sb.team["1"].player) return;
+    const teams = [sb.team["1"], sb.team["2"]];
+    const isTeams = Object.keys(teams[0].player).length > 1;
+
     for (const [t, team] of teams.entries()) {
-      const player = team.player["1"];
+      // team["2"].player isn't covered by the guard above, so this can be
+      // undefined for a partial/asymmetric state — guard the lookup itself.
+      const player = team.player && team.player["1"];
       if (!player) continue;
       const side = t + 1;
 
