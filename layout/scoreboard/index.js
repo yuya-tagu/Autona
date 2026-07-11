@@ -237,7 +237,7 @@ LoadEverything().then(() => {
 
             SetInnerHtml(
               $(`.p${t + 1} .seed`),
-              player.seed ? `Seed ${player.seed}` : ""
+              Number(player.seed) > 0 ? `Seed ${player.seed}` : ""
             );
 
             SetInnerHtml($(`.p${t + 1}.container .score`), String(team.score));

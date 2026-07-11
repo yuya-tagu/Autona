@@ -411,7 +411,7 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, tshTe
                     {state.name || i18n.t("tag")}
                     {/* Desktop parity: the seed is a read-only badge
                         (set by loading a set), not an input. */}
-                    {show.show_seed && !!player.seed && (
+                    {show.show_seed && Number(player.seed) > 0 && (
                         <Chip
                             size="small"
                             variant="outlined"

@@ -62,7 +62,7 @@ export default function CurrentSet({scoreboardNumber, scoreSubmit}) {
                 ).filter(Boolean) : [];
                 let entry = name;
                 if (chars.length > 0) entry += `(${chars.join("/")})`;
-                if (p.seed) entry += ` [Seed:${p.seed}]`;
+                if (Number(p.seed) > 0) entry += ` [Seed:${p.seed}]`;
                 return entry;
             }).filter(Boolean);
             return players.length > 0 ? players.join(" / ") : "???";
