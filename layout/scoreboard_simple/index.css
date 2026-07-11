@@ -97,7 +97,6 @@ body {
   padding-left: 2px;
   padding-right: 2px;
   justify-content: left;
-  text-transform: uppercase;
   z-index: 999;
 }
 
@@ -247,7 +246,6 @@ body {
   color: var(--text-color);
   padding: 8px 16px;
   background-position: center;
-  text-transform: uppercase;
   box-sizing: border-box;
   font-size: 22px;
 }

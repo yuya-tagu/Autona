@@ -11,7 +11,6 @@
 /* Class used for transcriptions, example: Kana -> Romaji (Japanese to Roman alphabet) */
 .tsh_transcript {
   font-size: 60%;
-  text-transform: uppercase;
   align-self: end;
 }
 

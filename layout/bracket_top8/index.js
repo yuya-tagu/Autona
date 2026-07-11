@@ -244,7 +244,7 @@ function renderMatch(top8, matchId) {
   const players = [playerFor(top8, slots[0]), playerFor(top8, slots[1])];
 
   const label = card.querySelector(".match-label");
-  const labelText = (match.name || "").toUpperCase();
+  const labelText = match.name || "";
   if (label.textContent !== labelText) label.textContent = labelText;
 
   const bothKnown = !!(players[0] && players[1]);
