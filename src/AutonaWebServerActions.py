@@ -94,7 +94,9 @@ class WebServerActions(QThread):
 
     def get_scoreboard(self, scoreboard):
         sb_widget: AutonaScoreboardWidget = self.scoreboard.GetScoreboard(scoreboard)
-        return StateManager.Get(f'score.{sb_widget.scoreboardNumber}')
+        # Committed view: pending (not yet 反映-applied) desktop edits must
+        # not leak to remote clients ahead of the delta stream.
+        return StateManager.GetCommitted(f'score.{sb_widget.scoreboardNumber}')
 
     # Eye-menu keys accepted by set_display_option (mirrors
     # AutonaScoreboardWidget.elements settings keys).

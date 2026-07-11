@@ -231,46 +231,6 @@ def media_action_row(*buttons: QPushButton) -> QHBoxLayout:
     return row
 
 
-# ─── Score control panel layout ──────────────────────────────────
-#
-# The 5-row column in AutonaScoreboardWidget that holds:
-#   [swap label] [swap btn]
-#   [+1 P1] [+1 P2]
-#   [score P1] [score P2]
-#   [-1 P1] [-1 P2]
-#   [reset btn] [reset label]
-#
-# The actual widgets are constructed in AutonaScoreboardWidget; we
-# expose the spacing tokens + a helper that normalises an existing
-# QVBoxLayout so the column can later opt-in by replacing inline magic
-# numbers with these constants.
-
-# Track the global spacing scale so the score control panel widens with the
-# rest of the app. Button gap = SPACE_SM (the standard inter-element gap),
-# row gap = SPACE_XS (half-step), preserving the original 2:1 ratio.
-SCORE_PANEL_BUTTON_SPACING = UI.SPACE_SM
-SCORE_PANEL_ROW_SPACING = UI.SPACE_XS
-
-
-def apply_score_panel_layout(vbox: QVBoxLayout) -> None:
-    """Normalise the outer QVBoxLayout of the score control column to
-    the standard tight spacing. The inner per-row HBoxes still use
-    SCORE_PANEL_BUTTON_SPACING for their internal gap."""
-    vbox.setContentsMargins(0, 0, 0, 0)
-    vbox.setSpacing(SCORE_PANEL_ROW_SPACING)
-    vbox.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-
-def score_panel_row() -> QHBoxLayout:
-    """Standard row used inside the score control column. Centred,
-    button-spaced, no margins."""
-    row = QHBoxLayout()
-    row.setContentsMargins(0, 0, 0, 0)
-    row.setSpacing(SCORE_PANEL_BUTTON_SPACING)
-    row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    return row
-
-
 # ─── Helpers: divider ────────────────────────────────────────────
 
 def horizontal_divider(parent: QWidget | None = None) -> QFrame:

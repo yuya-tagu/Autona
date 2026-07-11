@@ -167,44 +167,6 @@ def auto_update_toggle_style() -> str:
     )
 
 
-# Shared height for every control in the SCORE-tab score panel (the
-# +1/-1/swap/reset buttons and the two score displays). Pinned here because
-# setFixedSize() cannot govern height once a stylesheet with min-height is
-# applied: Qt's QStyleSheetStyle derives the height from the sheet and ignores
-# the fixed maximum (width has no QSS constraint, so setFixedSize still works
-# for width). Without this the buttons collapse to their ~13pt text height
-# while the displays sit taller at their ~18pt height; one shared value keeps
-# them aligned on every platform.
-SCORE_PANEL_CTRL_H = 32
-
-
-def score_ctrl_height_qss() -> str:
-    return (
-        f"min-height: {SCORE_PANEL_CTRL_H}px; "
-        f"max-height: {SCORE_PANEL_CTRL_H}px;"
-    )
-
-
-def score_btn_style(scale: float = 1.0) -> str:
-    p = palette()
-    size = max(1, round(FONT_LG * scale))
-    return (
-        f"font-family: '{FONT_FAMILY_MONO}'; "
-        f"font-size: {size}pt; font-weight: bold; color: {p['text_primary']};"
-        f"{score_ctrl_height_qss()}"
-    )
-
-
-def score_display_style(scale: float = 1.0) -> str:
-    p = palette()
-    size = max(1, round(FONT_XL * scale))
-    return (
-        f"font-family: '{FONT_FAMILY_MONO}'; "
-        f"font-size: {size}pt; font-weight: 800; color: {p['gold']};"
-        f"{score_ctrl_height_qss()}"
-    )
-
-
 # ─── Paths ───────────────────────────────────────────────────────
 
 def icon_path(name: str) -> str:
@@ -340,6 +302,41 @@ QPushButton#danger:disabled, QToolButton#danger:disabled {{
     color: {p['text_disabled']};
     border-color: {p['border_subtle']};
     background-color: {p['bg_secondary']};
+}}
+/* Link-style buttons (opt-in via objectName="linkButton"): tight text-only
+   accent links, e.g. the player-details opener on the scoreboard. min-height
+   0 overrides the standard control height so the link row stays slim. */
+QPushButton#linkButton {{
+    background: transparent;
+    border: none;
+    color: {p['accent']};
+    padding: 0px 4px;
+    min-height: 0;
+}}
+QPushButton#linkButton:hover {{
+    background: transparent;
+    color: {p['accent_hover']};
+    text-decoration: underline;
+}}
+QPushButton#linkButton:pressed {{
+    background: transparent;
+    color: {p['accent_hover']};
+}}
+/* Card panels (opt-in via objectName): the scoreboard team columns and the
+   score-control panel mirror the Web UI's Paper cards. */
+QWidget#teamCard, QFrame#scorePanelCard {{
+    background-color: {p['bg_secondary']};
+    border: 1px solid {p['border_subtle']};
+    border-radius: {RADIUS_MD}px;
+}}
+/* Web-parity score displays (property tag, not objectName — spinbox
+   objectNames stay reserved as potential StateManager keypaths): gold
+   monospace, matching the Web ScorePanel's ScoreDisplay. */
+QSpinBox[scoreDisplay="true"] {{
+    font-family: "{FONT_FAMILY_MONO}", monospace;
+    font-size: {FONT_XL}pt;
+    font-weight: 800;
+    color: {p['gold']};
 }}
 
 /* === Text inputs === */

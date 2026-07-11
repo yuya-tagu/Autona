@@ -141,6 +141,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         self.custom_textbox = QPlainTextEdit()
         custom_textbox_layout.addWidget(self.custom_textbox)
         self.layout().addLayout(custom_textbox_layout, 98, 0, 1, 1)
+        # Kept as attribute so _buildCompactDetailsUI can strip the row.
+        self._customTextboxRow = custom_textbox_layout
         self.custom_textbox.setObjectName("custom_textbox")
         self.custom_textbox.setFixedHeight(36)
         self.custom_textbox.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
@@ -186,6 +188,9 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         clear_row_layout = QHBoxLayout()
         clear_row_layout.setSpacing(UI.SPACE_SM)
         self.layout().addLayout(clear_row_layout, 100, 0, 1, 1)
+        # Kept as attributes so _buildCompactDetailsUI can strip the rows.
+        self._saveRow = save_row_layout
+        self._clearRow = clear_row_layout
 
         self.save_bt = QPushButton(
             QApplication.translate("app", "Save new player"))
@@ -289,9 +294,144 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         AutonaGameAssetManager.instance.signals.onLoad.connect(
             self.ReloadCharacters)
 
+        # Scoreboard rows mirror the Web UI player card: only sponsor + tag
+        # stay inline; every other field moves into a per-player details
+        # dialog. The PlayerDB editor (path "player_editor.*") keeps the
+        # full inline form.
+        if self.path.startswith("score."):
+            self._buildCompactDetailsUI()
+
     def deleteLater(self):
         self._deleted = True
         super().deleteLater()
+
+    def _buildCompactDetailsUI(self):
+        """Re-home every detail field into a modal QDialog (Web UI parity).
+
+        The dialog is a QObject child of this widget, so findChild /
+        findChildren lookups (eye-menu toggles, Clear, SwapWith, SetData)
+        keep resolving the same widget instances — only their visual home
+        changes. The hidden data holders (seed spinbox, seedLabel,
+        birthday) stay parented to the widget without a layout.
+        """
+        grid = self.layout()
+
+        # The app-wide QSS dresses every QGroupBox as a titled section
+        # (margin-top 4px + padding 28px 10px 10px 10px, reserving a header
+        # zone). This widget is a QGroupBox by inheritance only; on the
+        # compact two-row card that chrome is ~42px of dead space per player
+        # and dominated the scoreboard once the detail fields moved into the
+        # dialog. Zero it here — the characters group box keeps its own
+        # stylesheet (a widget's own sheet outranks an ancestor's).
+        self.setStyleSheet(
+            "QGroupBox { border: none; background: transparent;"
+            " margin: 0; padding: 0; }")
+
+        self.detailsDialog = QDialog(self)
+        dlg = QVBoxLayout()
+        dlg.setContentsMargins(
+            UI.SPACE_MD, UI.SPACE_MD, UI.SPACE_MD, UI.SPACE_MD)
+        dlg.setSpacing(UI.SPACE_SM)
+        self.detailsDialog.setLayout(dlg)
+        self.detailsDialog.setMinimumWidth(400)
+
+        # Attach each row to the dialog BEFORE moving widgets into it, so
+        # addWidget() reparents (and detaches from the old grid row)
+        # immediately instead of deferring to layout installation.
+        # Header: read-only seed badge (web dialog shows it as a chip).
+        seedRow = QHBoxLayout()
+        seedRow.setSpacing(UI.SPACE_SM)
+        dlg.addLayout(seedRow)
+        seedRow.addWidget(self.seedDisplay)
+        seedRow.addStretch(1)
+
+        identityRow = QHBoxLayout()
+        identityRow.setSpacing(UI.SPACE_SM)
+        dlg.addLayout(identityRow)
+        identityRow.addWidget(self._w("real_name", QLineEdit))
+        identityRow.addWidget(self._w("twitter", QLineEdit))
+
+        locationRow = QHBoxLayout()
+        locationRow.setSpacing(UI.SPACE_SM)
+        dlg.addLayout(locationRow)
+        locationRow.addWidget(self._w("country", QComboBox))
+        locationRow.addWidget(self._w("state", QComboBox))
+
+        dlg.addWidget(self.character_container)
+        dlg.addWidget(self.custom_textbox)
+
+        buttonRow = QHBoxLayout()
+        buttonRow.setSpacing(UI.SPACE_SM)
+        dlg.addLayout(buttonRow)
+        buttonRow.addWidget(self.clear_bt)
+        buttonRow.addStretch(1)
+        self.btCloseDetails = QPushButton(
+            QApplication.translate("app", "Close"))
+        self.btCloseDetails.clicked.connect(self.detailsDialog.accept)
+        buttonRow.addWidget(self.btCloseDetails)
+
+        # Strip the emptied rows out of the original grid. The seed row and
+        # identity row still hold permanently-hidden data holders (seed,
+        # seedLabel, birthday); those stay as layout-less hidden children.
+        for row in (
+            self.findChild(QHBoxLayout, "horizontalLayout"),
+            self.findChild(QHBoxLayout, "identityRow"),
+            self.findChild(QHBoxLayout, "locationRow"),
+            self._customTextboxRow,
+            self._saveRow,
+            self._clearRow,
+        ):
+            self._takeLayoutFromGrid(grid, row)
+
+        # Web Player.jsx (narrow) parity: sponsor and player name stack
+        # vertically at full width. The tag placeholder carries the column
+        # identity ("1Pプレイヤー名" / "2Pプレイヤー名") — the 1P/2P header
+        # labels were dropped.
+        team = self._w("team", QLineEdit)
+        name = self._w("name", QLineEdit)
+        name.setPlaceholderText(QApplication.translate(
+            "app", "{0}Pプレイヤー名").format(self.teamNumber))
+        # Full-width rows: neutralize the .ui's one-row styling (sponsor was
+        # content-sized and right-aligned to hug the tag).
+        team.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        team.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        grid.addWidget(team, 1, 0)
+        grid.addWidget(name, 2, 0)
+        self._takeLayoutFromGrid(grid, self.findChild(QHBoxLayout, "teamRow"))
+
+        # Details link below the name field, left-aligned (web card's
+        # ">>詳細"). Slim link look comes from the shared QSS rule
+        # QPushButton#linkButton (ui_constants).
+        self.btDetails = QPushButton(QApplication.translate("app", ">>詳細"))
+        self.btDetails.setObjectName("linkButton")
+        self.btDetails.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.btDetails.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btDetails.clicked.connect(self.ShowDetails)
+        linkRow = QHBoxLayout()
+        linkRow.setContentsMargins(0, 0, 0, 0)
+        linkRow.setSpacing(0)
+        linkRow.addWidget(self.btDetails)
+        linkRow.addStretch(1)
+        grid.addLayout(linkRow, 3, 0, 1, 1)
+
+    @staticmethod
+    def _takeLayoutFromGrid(grid, sub_layout):
+        if sub_layout is None:
+            return
+        for i in range(grid.count()):
+            item = grid.itemAt(i)
+            if item is not None and item.layout() is sub_layout:
+                grid.takeAt(i)
+                sub_layout.deleteLater()
+                return
+
+    def ShowDetails(self):
+        name = self._w("name", QLineEdit).text().strip()
+        self.detailsDialog.setWindowTitle(
+            name if name else QApplication.translate("app", "プレイヤー詳細"))
+        # Window-modal, non-blocking (no exec(): モーダル入れ子禁止).
+        self.detailsDialog.open()
 
     @staticmethod
     def _seedDisplayStyle() -> str:

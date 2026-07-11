@@ -91,6 +91,10 @@ class AutonaScoreboardWidget(QWidget):
 
         self.scoreboardNumber = scoreboardNumber
         self.singlePlayer = singlePlayer
+        # StateManager subtree owned by this board. Publication of the whole
+        # subtree is deferred (HoldSubtree at the end of __init__): edits stay
+        # local until the 反映 button commits them.
+        self.statePrefix = f"score.{self.scoreboardNumber}"
 
         StateManager.Set(f"score.{self.scoreboardNumber}", {})
         StateManager.Set(f"score.{self.scoreboardNumber}.last_sets.1", {})
@@ -199,25 +203,14 @@ class AutonaScoreboardWidget(QWidget):
         self.btOpenWebScoreboard.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         self.btOpenWebScoreboard.clicked.connect(lambda: webbrowser.open(self.webScoreboardUrl))
 
-        self.eyeBt = QToolButton()
-        self.eyeBt.setIcon(QIcon(UI.icon_path('eye.svg')))
-        self.eyeBt.setSizePolicy(
-            QSizePolicy.Maximum, QSizePolicy.Fixed)
-        # Placed beside the BEST OF spinbox in the scoreBar (see bestOfGroup
-        # setup below) so the visibility toggles live next to the match
-        # metadata instead of at the top of the tab.
-        self.eyeBt.setPopupMode(QToolButton.InstantPopup)
-        menu = QMenu()
-        self.eyeBt.setMenu(menu)
-
-        menu.addSection("Players")
-
+        # The eye (field-visibility) button was removed from the desktop UI:
+        # the details dialog always shows every field. The checkable actions
+        # below survive as invisible state carriers so the display_options
+        # broadcast (Web UI / OBS overlay rendering) and the remote toggle
+        # path (SetDisplayOption ← POST /display-option) keep working.
+        # On the desktop, only show_sponsor still drives widget visibility
+        # (the inline sponsor field, via hideSponsorCheck).
         # [label, [widget objectNames to toggle], settings key, default visible]
-        # Defaults: only sponsor / name / seed / characters are shown on a
-        # fresh install; the other fields stay off until the user enables
-        # them from the eye menu.
-        # Per-field rows no longer carry inline labels (the field name lives in
-        # the placeholder), so the toggle lists reference the inputs only.
         self.elements = [
             [QApplication.translate("app", "Sponsor"),                ["team"],                 "show_sponsor",    True],
             [QApplication.translate("app", "Player Name"),            ["name"],                 "show_name",       True],
@@ -233,7 +226,7 @@ class AutonaScoreboardWidget(QWidget):
         # the same toggle path via SetDisplayOption().
         self._eyeActions = {}
         for element in self.elements:
-            action: QAction = self.eyeBt.menu().addAction(element[0])
+            action = QAction(element[0], self)
             action.setCheckable(True)
             action.setChecked(SettingsManager.Get(f"display_options.{element[2]}", element[3]))
             self._eyeActions[element[2]] = action
@@ -260,15 +253,20 @@ class AutonaScoreboardWidget(QWidget):
         self.team1swaps = []
         self.team2swaps = []
 
+        # One shared 2-column grid for the team cards, the score panel and
+        # the apply/reset action row. Every row referencing the same grid
+        # columns keeps all rows on one axis — separate per-row HBoxes each
+        # computed their own "center" from their own content and drifted
+        # apart. Equal stretch keeps the two team cards symmetric
+        # regardless of their content minimums.
         self.columns = QWidget()
-        self.columns.setLayout(QHBoxLayout())
-        self.columns.layout().setContentsMargins(0, 0, 0, 0)
-        self.columns.layout().setSpacing(UI.SPACE_SM)
-        # Keep team and score columns flush with the top of the available
-        # area. Without this, a window taller than the columns' preferred
-        # height leaves a visible gap between the color/1P row and the
-        # player fields because the HBoxLayout centers its items by default.
-        self.columns.layout().setAlignment(Qt.AlignmentFlag.AlignTop)
+        columnsGrid = QGridLayout()
+        columnsGrid.setContentsMargins(0, 0, 0, 0)
+        columnsGrid.setHorizontalSpacing(UI.SPACE_SM)
+        columnsGrid.setVerticalSpacing(UI.SPACE_SM)
+        columnsGrid.setColumnStretch(0, 1)
+        columnsGrid.setColumnStretch(1, 1)
+        self.columns.setLayout(columnsGrid)
         self.innerWidget.layout().addWidget(self.columns)
 
         # --- Stream / set loading section (above phase/match) ---
@@ -310,6 +308,11 @@ class AutonaScoreboardWidget(QWidget):
         bottomOptions.layout().setContentsMargins(0, 0, 0, 0)
         bottomOptions.layout().setSpacing(UI.SPACE_SM)
         bottomOptions.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
+        # Kept as attribute: _applyScoreboardMode hides the whole row in
+        # single-player mode (its only remaining content, the players-per-
+        # team spinbox, is team-mode-only — an empty visible row still eats
+        # one layout-spacing step).
+        self._bottomOptions = bottomOptions
 
         self.innerWidget.layout().addWidget(bottomOptions)
 
@@ -318,13 +321,15 @@ class AutonaScoreboardWidget(QWidget):
         settingsRow.setSpacing(UI.SPACE_SM)
 
         # Characters-per-player is owned by the scoreboard itself (the former
-        # PLAYERS tab that used to drive it was removed). External WebServer
-        # actions still poke self.charNumber.value()/setValue(). Default is 3.
-        self.charNumber = QSpinBox()
+        # PLAYERS tab that used to drive it was removed). The spinbox is no
+        # longer user-facing — it survives as a hidden data holder because
+        # external WebServer actions still poke self.charNumber.value()/
+        # setValue() and SetDefaultsFromAssets re-asserts it. Default is 3.
+        self.charNumber = QSpinBox(self)
         self.charNumber.setMaximum(100)
-        self.charNumber.setFixedWidth(120)
         self.charNumber.valueChanged.connect(self.SetCharacterNumber)
         self.charNumber.setValue(3)
+        self.charNumber.setVisible(False)
 
         self.playerNumber = QSpinBox()
         self.playerNumber.setFixedWidth(120)
@@ -332,9 +337,6 @@ class AutonaScoreboardWidget(QWidget):
         settingsRow.addWidget(self._playerNumberLabel)
         settingsRow.addWidget(self.playerNumber)
         self.playerNumber.valueChanged.connect(self.SetPlayersPerTeam)
-        settingsRow.addWidget(
-            QLabel(QApplication.translate("app", "Characters per player")))
-        settingsRow.addWidget(self.charNumber)
 
         bottomOptions.layout().addLayout(settingsRow)
 
@@ -368,10 +370,9 @@ class AutonaScoreboardWidget(QWidget):
         self.team1column = uic.loadUi(AutonaResolve("src/layout/AutonaScoreboardTeam.ui"))
         self.team1column.setMinimumWidth(0)
         self.team1column.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Maximum)
-        self.columns.layout().addWidget(self.team1column)
-        self.team1column.findChild(QLabel, "teamLabel").setText(
-            QApplication.translate("app", "TEAM {0}").format(1))
-        self.team1column.findChild(QLabel, "teamLabel").setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Minimum)
+        self._styleTeamCard(self.team1column)
+        self.columns.layout().addWidget(
+            self.team1column, 0, 0, Qt.AlignmentFlag.AlignTop)
 
         colorGroup1 = QWidget()
         self.colorGroup1 = colorGroup1
@@ -422,10 +423,9 @@ class AutonaScoreboardWidget(QWidget):
         self.team2column = uic.loadUi(AutonaResolve("src/layout/AutonaScoreboardTeam.ui"))
         self.team2column.setMinimumWidth(0)
         self.team2column.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Maximum)
-        self.columns.layout().addWidget(self.team2column)
-        self.team2column.findChild(QLabel, "teamLabel").setText(
-            QApplication.translate("app", "TEAM {0}").format(2))
-        self.team2column.findChild(QLabel, "teamLabel").setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Minimum)
+        self._styleTeamCard(self.team2column)
+        self.columns.layout().addWidget(
+            self.team2column, 0, 1, Qt.AlignmentFlag.AlignTop)
 
         # See team-1 note above: swatch removed, color comes from Settings.
         DEFAULT_TEAM2_COLOR = SettingsManager.Get("general.team_2_default_color", "#2e89ff")
@@ -521,6 +521,7 @@ class AutonaScoreboardWidget(QWidget):
         bestOfLabel.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         bestOfGroup.layout().addWidget(bestOfLabel)
         bestOfGroup.layout().addWidget(bestOfSpin)
+
         self.scoreBar.layout().addWidget(bestOfGroup, 1)
 
         columnsIndex = self.innerWidget.layout().indexOf(self.columns)
@@ -529,117 +530,84 @@ class AutonaScoreboardWidget(QWidget):
         self.innerWidget.layout().insertWidget(columnsIndex, self.streamSection)
         self.scoreColumn.hide()
 
-        # Score widget: buttons + displays built in Python
-        self.scoreWidget = QWidget()
-        self.scoreWidget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-
-        scoreVBox = QVBoxLayout()
-        L.apply_score_panel_layout(scoreVBox)
-        self.scoreWidget.setLayout(scoreVBox)
-
-        SZ = int(UI.BTN_LG * 1.25)
-        SP = L.SCORE_PANEL_BUTTON_SPACING
-        ICON = int(UI.ICON_SM * 1.25)
-        scoreBtnStyle = UI.score_btn_style(scale=1.0)
-
-        # Row 1: Swap label + button
-        self.btSwapLabel = QLabel(
-            QApplication.translate("app", "Swap 1P and 2P"))
-        _swapFont = self.btSwapLabel.font()
-        _swapFont.setPointSize(7)
-        _swapFont.setBold(False)
-        self.btSwapLabel.setFont(_swapFont)
-        self.btSwapLabel.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        self.btSwapLabel.setStyleSheet(self._smallAnnotationStyle())
-        scoreVBox.addWidget(self.btSwapLabel)
-        row1 = L.score_panel_row()
-        # Slightly downsize the glyphs on the swap / reset action buttons
-        # so the icon doesn't dominate the pill — the wide buttons read
-        # better with a more proportionate symbol.
-        _ACTION_ICON = int(ICON * 0.7)
-        self.btSwap = QPushButton()
+        # Score controls: one full-width card below the team cards, rows
+        # stacked top to bottom —
+        #   [ +1 ]  [ +1 ]
+        #   [  0 ]  [  0 ]   <- gold, monospace (QSpinBox[scoreDisplay])
+        #   [ -1 ]  [ -1 ]
+        #   [ スコアリセット ]
+        #   [ ⇄ チーム入れ替え ]
+        self.btSwap = QPushButton(QApplication.translate("app", "Swap Teams"))
         self.btSwap.setIcon(QIcon(UI.icon_path("swap.svg")))
-        self.btSwap.setIconSize(QSize(_ACTION_ICON, _ACTION_ICON))
-        self.btSwap.setFixedSize(SZ * 2 + SP, SZ)
-        # Height must be pinned via QSS (setFixedSize's height is ignored under
-        # the global stylesheet); the neutral fill still comes from the app QSS.
-        self.btSwap.setStyleSheet(UI.score_ctrl_height_qss())
-        self.btSwap.setToolTip(QApplication.translate("app", "Swap Teams"))
         self.btSwap.clicked.connect(self.SwapTeams)
-        row1.addWidget(self.btSwap)
-        scoreVBox.addLayout(row1)
 
-        # Row 2: Score up
-        row2 = L.score_panel_row()
+        # Score displays (spinboxes extracted from the .ui score column).
+        # Arrow-less: the +1/-1 buttons are the increment controls. The gold
+        # mono look comes from the shared QSpinBox[scoreDisplay="true"] QSS
+        # rule (a property tag, not objectName — those stay keypath-safe).
+        self.scoreDisplay1 = self.scoreColumn.findChild(QSpinBox, "score_left")
+        self.scoreDisplay2 = self.scoreColumn.findChild(QSpinBox, "score_right")
+        for display in (self.scoreDisplay1, self.scoreDisplay2):
+            display.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            display.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+            display.setProperty("scoreDisplay", True)
+
         self.btScoreUp1 = QPushButton("+1")
-        self.btScoreUp1.setFixedSize(SZ, SZ)
-        self.btScoreUp1.setStyleSheet(scoreBtnStyle)
         self.btScoreUp1.clicked.connect(lambda: self.CommandScoreChange(0, 1))
         self.btScoreUp2 = QPushButton("+1")
-        self.btScoreUp2.setFixedSize(SZ, SZ)
-        self.btScoreUp2.setStyleSheet(scoreBtnStyle)
         self.btScoreUp2.clicked.connect(lambda: self.CommandScoreChange(1, 1))
-        row2.addWidget(self.btScoreUp1)
-        row2.addWidget(self.btScoreUp2)
-        scoreVBox.addLayout(row2)
 
-        # Row 3: Score displays
-        row3 = L.score_panel_row()
-        self.scoreDisplay1 = self.scoreColumn.findChild(QSpinBox, "score_left")
-        self.scoreDisplay1.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.scoreDisplay1.setFixedSize(SZ, SZ)
-        self.scoreDisplay1.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
-        self.scoreDisplay1.setStyleSheet(UI.score_display_style(scale=1.15))
-        self.scoreDisplay2 = self.scoreColumn.findChild(QSpinBox, "score_right")
-        self.scoreDisplay2.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.scoreDisplay2.setFixedSize(SZ, SZ)
-        self.scoreDisplay2.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
-        self.scoreDisplay2.setStyleSheet(UI.score_display_style(scale=1.15))
-        row3.addWidget(self.scoreDisplay1)
-        row3.addWidget(self.scoreDisplay2)
-        scoreVBox.addLayout(row3)
-
-        # Row 4: Score down
-        row4 = L.score_panel_row()
         self.btScoreDown1 = QPushButton("-1")
-        self.btScoreDown1.setFixedSize(SZ, SZ)
-        self.btScoreDown1.setStyleSheet(scoreBtnStyle)
         self.btScoreDown1.clicked.connect(lambda: self.CommandScoreChange(0, -1))
         self.btScoreDown2 = QPushButton("-1")
-        self.btScoreDown2.setFixedSize(SZ, SZ)
-        self.btScoreDown2.setStyleSheet(scoreBtnStyle)
         self.btScoreDown2.clicked.connect(lambda: self.CommandScoreChange(1, -1))
-        row4.addWidget(self.btScoreDown1)
-        row4.addWidget(self.btScoreDown2)
-        scoreVBox.addLayout(row4)
 
-        # Row 5: Score reset button + label
-        row5 = L.score_panel_row()
-        self.btScoreReset = QPushButton()
-        self.btScoreReset.setIcon(QIcon(UI.icon_path("cancel.svg")))
-        self.btScoreReset.setIconSize(QSize(_ACTION_ICON, _ACTION_ICON))
-        self.btScoreReset.setFixedSize(SZ * 2 + SP, SZ)
-        self.btScoreReset.setToolTip(QApplication.translate("app", "Score Reset"))
-        # Reset clears live broadcast state — flag it as a destructive
-        # action so it stands apart from the +1/-1 score controls.
-        L.tag_button(self.btScoreReset, L.BUTTON_DANGER)
-        # Match the other score-panel controls' height (see score_ctrl_height_qss);
-        # the danger fill still comes from the QPushButton#danger global rule.
-        self.btScoreReset.setStyleSheet(UI.score_ctrl_height_qss())
+        self.btScoreReset = QPushButton(
+            QApplication.translate("app", "Score Reset"))
         self.btScoreReset.clicked.connect(lambda: self.ResetScore())
-        row5.addWidget(self.btScoreReset)
-        scoreVBox.addLayout(row5)
-        self.btScoreResetLabel = QLabel(
-            QApplication.translate("app", "Reset Score"))
-        _resetFont = self.btScoreResetLabel.font()
-        _resetFont.setPointSize(7)
-        _resetFont.setBold(False)
-        self.btScoreResetLabel.setFont(_resetFont)
-        self.btScoreResetLabel.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        self.btScoreResetLabel.setStyleSheet(self._smallAnnotationStyle())
-        scoreVBox.addWidget(self.btScoreResetLabel)
 
-        self.columns.layout().insertWidget(1, self.scoreWidget)
+        self.scorePanel = QFrame()
+        # Card chrome via the shared QSS rule (teamCard / scorePanelCard).
+        self.scorePanel.setObjectName("scorePanelCard")
+        panelLayout = QVBoxLayout()
+        panelLayout.setContentsMargins(
+            UI.SPACE_SM, UI.SPACE_SM, UI.SPACE_SM, UI.SPACE_SM)
+        panelLayout.setSpacing(UI.SPACE_SM)
+        self.scorePanel.setLayout(panelLayout)
+
+        for left, right in ((self.btScoreUp1, self.btScoreUp2),
+                            (self.scoreDisplay1, self.scoreDisplay2),
+                            (self.btScoreDown1, self.btScoreDown2)):
+            pairRow = QHBoxLayout()
+            pairRow.setSpacing(UI.SPACE_SM)
+            pairRow.addWidget(left, 1)
+            pairRow.addWidget(right, 1)
+            panelLayout.addLayout(pairRow)
+        panelLayout.addWidget(self.btScoreReset)
+        panelLayout.addWidget(self.btSwap)
+
+        columnsGrid = self.columns.layout()
+        columnsGrid.addWidget(self.scorePanel, 1, 0, 1, 2)
+
+        # Action row (grid row 2): apply and reset-all-inputs side by side,
+        # each spanning its team column.
+        self.btApply = QPushButton(QApplication.translate("app", "反映"))
+        self.btApply.setObjectName("primary")
+        self.btApply.setToolTip(QApplication.translate(
+            "app", "入力内容を配信画面に反映する"))
+        self.btApply.setEnabled(False)
+        self.btApply.clicked.connect(self.ApplyChanges)
+
+        self.btResetAll = QPushButton(
+            QApplication.translate("app", "すべての入力値をリセット"))
+        self.btResetAll.setIcon(QIcon(UI.icon_path("undo.svg")))
+        # Destructive action: danger styling, same pattern as the player
+        # Clear button.
+        L.tag_button(self.btResetAll, L.BUTTON_DANGER)
+        self.btResetAll.clicked.connect(self.ResetAllInputs)
+
+        columnsGrid.addWidget(self.btApply, 2, 0)
+        columnsGrid.addWidget(self.btResetAll, 2, 1)
 
         self.innerWidget.layout().removeWidget(self.scoreColumn)
         self.scoreColumn.findChild(QGroupBox, "scoreGroupBox").setTitle("")
@@ -748,6 +716,10 @@ class AutonaScoreboardWidget(QWidget):
             lambda: [
                 self.SetDefaultsFromAssets(),
                 self.bestOfSpin.valueChanged.emit(self.bestOfSpin.value()),
+                # A game (re)load rewrites characters/defaults wholesale;
+                # publish the fresh baseline instead of leaving it pending
+                # behind the 反映 button.
+                StateManager.CommitHeld(self.statePrefix),
             ]
         )
 
@@ -755,11 +727,70 @@ class AutonaScoreboardWidget(QWidget):
 
         self._groupSectionsIntoFrames(topOptions, bottomOptions)
 
+        # From here on, edits to this board's subtree are held back from the
+        # broadcast/export pipeline until 反映 commits them. Everything Set
+        # during construction above was published normally, so the committed
+        # baseline matches the widgets' initial values.
+        StateManager.HoldSubtree(self.statePrefix)
+        StateManager.signals.held_dirty_changed.connect(
+            self._onHeldDirtyChanged)
+
+    @staticmethod
+    def _styleTeamCard(column):
+        # Web Team.jsx parity: each team column is a Paper-like card — the
+        # "1P"/"TEAM N" overline label left and the losers checkbox right in
+        # the header row, card chrome via the shared QSS rule
+        # (QWidget#teamCard, ui_constants).
+        column.setObjectName("teamCard")
+        column.layout().setContentsMargins(
+            UI.SPACE_SM, UI.SPACE_SM, UI.SPACE_SM, UI.SPACE_SM)
+        teamLabel = column.findChild(QLabel, "teamLabel")
+        teamLabel.setAlignment(
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        teamLabel.setStyleSheet(
+            f"color: {UI.palette()['text_secondary']};"
+            " background: transparent; border: none;")
+
+    def ApplyChanges(self):
+        # 反映 button: publish every pending edit on this board at once.
+        StateManager.CommitHeld(self.statePrefix)
+
+    def ResetAllInputs(self):
+        # すべての入力値をリセット: clear players, scores, phase/round,
+        # BEST OF and team names in one shot (mirrors the Web UI "全クリア"
+        # action). Values only — the team-mode player-count layout is kept.
+        # The cleared state still goes through the 反映 gate like any edit.
+        answer = QMessageBox.question(
+            self,
+            QApplication.translate("app", "すべての入力値をリセット"),
+            QApplication.translate(
+                "app", "スコアボードの内容を全てクリアしますか？"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        with StateManager.SaveBlock():
+            self.CommandClearAll()
+            self.ClearScore()
+            self.bestOfSpin.setValue(0)
+            for column in (self.team1column, self.team2column):
+                teamName = column.findChild(QLineEdit, "teamName")
+                teamName.setText("")
+                teamName.editingFinished.emit()
+
+    def _onHeldDirtyChanged(self, prefix: str, dirty: bool):
+        if prefix == self.statePrefix:
+            # Query the current truth instead of trusting the (possibly
+            # queued/stale) payload: a worker-thread write can land between
+            # the commit and this slot running.
+            self.btApply.setEnabled(
+                StateManager.HasPendingChanges(self.statePrefix))
 
     def _groupSectionsIntoFrames(self, topOptions, bottomOptions):
-        """Wrap the Start.gg-load/stream-URL area and the phase/score
-        area in two bordered frames so each section reads as its own
-        visual group.
+        """Re-home the construction-time rows into the single scoreboard
+        section frame in their final display order (Start.gg load row on
+        top, then phase/round/BEST OF, player columns, score controls and
+        the apply/reset action row).
 
         Current innerWidget child order is:
             topOptions, streamSection, scoreBar, columns, bottomOptions
@@ -767,7 +798,7 @@ class AutonaScoreboardWidget(QWidget):
         inner = self.innerWidget.layout()
 
         # Strip every previously-added child out of innerWidget so we
-        # can re-home them into the frames without leaking duplicates.
+        # can re-home them into the frame without leaking duplicates.
         for w in (
             topOptions,
             self.streamSection,
@@ -787,29 +818,6 @@ class AutonaScoreboardWidget(QWidget):
         self._topOptionsHolder = topOptions
         topOptions.hide()
         topOptions.setParent(None)
-
-        self.topSectionFrame = QFrame()
-        self.topSectionFrame.setObjectName("scoreTopSection")
-        self.topSectionFrame.setFrameShape(QFrame.Shape.NoFrame)
-        self.topSectionFrame.setFrameShadow(QFrame.Shadow.Plain)
-        # QFrame defaults to (Preferred, Preferred) which lets it stretch
-        # vertically inside innerWidget's QVBoxLayout. When that happens
-        # the children (all Maximum vsize) keep their sizeHint and the
-        # excess height pools inside the frame — visible as dead space
-        # between rows. Pin to Maximum so any surplus falls through to
-        # innerWidget's trailing stretch instead.
-        self.topSectionFrame.setSizePolicy(
-            QSizePolicy.MinimumExpanding, QSizePolicy.Maximum)
-        self.topSectionFrame.setStyleSheet(
-            self._sectionFrameStyle("scoreTopSection"))
-        topLayout = QVBoxLayout()
-        topLayout.setContentsMargins(
-            UI.SPACE_MD, UI.SPACE_MD, UI.SPACE_MD, UI.SPACE_MD)
-        topLayout.setSpacing(UI.SPACE_SM)
-        topLayout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.topSectionFrame.setLayout(topLayout)
-
-        topLayout.addWidget(self.streamSection)
 
         self.matchSectionFrame = QFrame()
         self.matchSectionFrame.setObjectName("scoreMatchSection")
@@ -842,8 +850,11 @@ class AutonaScoreboardWidget(QWidget):
         titleRowLayout.addStretch(1)
         titleRowLayout.addWidget(self.xpostBtn)
         titleRowLayout.addWidget(self.btOpenWebScoreboard)
-        titleRowLayout.addWidget(self.eyeBt)
         matchLayout.addWidget(titleRow)
+
+        # Start.gg load row (with its auto-update timer strip) sits above
+        # the phase/round/BEST OF bar.
+        matchLayout.addWidget(self.streamSection)
 
         matchLayout.addWidget(self.scoreBar)
 
@@ -869,15 +880,13 @@ class AutonaScoreboardWidget(QWidget):
             QSizePolicy.Minimum, QSizePolicy.Maximum)
         matchLayout.addWidget(scoreBarSepWrap)
 
+        # self.columns is the shared 3-column grid carrying the player
+        # columns, the score controls and the apply/reset action row.
         matchLayout.addWidget(self.columns)
         matchLayout.addWidget(bottomOptions)
 
-        # Scoreboard section on top, match-info ("対戦情報") section below it.
         inner.addWidget(self.matchSectionFrame)
-        inner.addWidget(self.topSectionFrame)
         inner.addStretch(1)
-        # Tight gap between the scoreboard and Start.gg-load sections so the
-        # player "Clear" buttons and the "Load set" button read as one cluster.
         inner.setSpacing(UI.SPACE_XS)
 
     def StageResultsToScore(self, team_1_score, team_2_score):
@@ -900,31 +909,19 @@ class AutonaScoreboardWidget(QWidget):
         # isn't double-nested inside a redundant team frame.
         self.singlePlayer = singlePlayer
         for column, side in ((self.team1column, 1), (self.team2column, 2)):
+            # Card header label: hidden on the singles board (the 1P/2P
+            # identity lives in the player-name placeholder instead);
+            # "TEAM N" on the team board, where the team-name field also
+            # shows.
             teamLabel = column.findChild(QLabel, "teamLabel")
             if teamLabel is not None:
-                if singlePlayer:
-                    teamLabel.setText(
-                        QApplication.translate("app", "{0}P").format(side))
-                else:
+                teamLabel.setVisible(not singlePlayer)
+                if not singlePlayer:
                     teamLabel.setText(
                         QApplication.translate("app", "TEAM {0}").format(side))
             teamName = column.findChild(QLineEdit, "teamName")
             if teamName is not None:
                 teamName.setVisible(not singlePlayer)
-
-            # Center the 1P/2P label over the column. The label sits between the
-            # color swatch (left) and the losers checkbox (right); since those
-            # flanks differ in width, an internally-centered label lands left of
-            # the column center. Widen the (left) color-swatch container to match
-            # the right flank so the centered label aligns with the column.
-            colorGroup = self.colorGroup1 if side == 1 else self.colorGroup2
-            losers = column.findChild(QCheckBox, "losers")
-            if colorGroup is not None and losers is not None:
-                if singlePlayer:
-                    colorGroup.setMinimumWidth(
-                        losers.sizeHint().width() + UI.SPACE_MD)
-                else:
-                    colorGroup.setMinimumWidth(0)
 
             groupBox = column.findChild(QGroupBox, "groupBox")
             if groupBox is not None:
@@ -941,6 +938,8 @@ class AutonaScoreboardWidget(QWidget):
         if getattr(self, "_playerNumberLabel", None) is not None:
             self._playerNumberLabel.setVisible(not singlePlayer)
         self.playerNumber.setVisible(not singlePlayer)
+        if getattr(self, "_bottomOptions", None) is not None:
+            self._bottomOptions.setVisible(not singlePlayer)
         if singlePlayer:
             self.playerNumber.setValue(1)
 
@@ -1093,6 +1092,9 @@ class AutonaScoreboardWidget(QWidget):
             logger.error(f"PostToX error: {e}")
 
     def ToggleElements(self, action: QAction, elements):
+        # Desktop-side field hiding only applies to the inline sponsor field
+        # nowadays (the details dialog always shows every field); this stays
+        # generic because the widget lookup is shared with the team columns.
         visible = action.isChecked()
         for pw in self.playerWidgets:
             for element in elements:
@@ -1101,20 +1103,13 @@ class AutonaScoreboardWidget(QWidget):
                 # every label objectName; silently skip missing widgets
                 # rather than crashing the toggle.
                 if w is not None:
-                    if element == "seedDisplay":
-                        # Reserve the trailing seed slot only when a seed is
-                        # actually present; an empty-but-visible label leaves
-                        # a gap that misaligns the GamerTag field with the
-                        # rows below.
-                        w.setVisible(visible and bool(w.text()))
-                    else:
-                        w.setVisible(visible)
+                    w.setVisible(visible)
 
     def _onEyeActionToggled(self, action: QAction, element):
-        # Unified eye-menu handler (non-sponsor): apply visibility and
-        # persist to both SettingsManager (local default) and StateManager
-        # (broadcast to Web UI / OBS).
-        self.ToggleElements(action, element[1])
+        # Non-sponsor display option: persist to SettingsManager (local
+        # default) and StateManager (broadcast to Web UI / OBS) only. The
+        # desktop details dialog always shows every field, so no Qt
+        # visibility is applied here.
         show = action.isChecked()
         SettingsManager.Set(f"display_options.{element[2]}", show)
         StateManager.Set(f"display_options.{element[2]}", show)
@@ -1122,8 +1117,10 @@ class AutonaScoreboardWidget(QWidget):
     def SetDisplayOption(self, key: str, visible: bool):
         """Remote toggle entry point (Web UI eye menu -> POST /display-option).
 
-        Drives the eye-menu QAction so widget visibility, SettingsManager and
-        StateManager stay in sync through the same handlers as a local click.
+        Drives the (invisible) display-option QAction so SettingsManager and
+        StateManager stay in sync through the same handlers as before. Only
+        show_sponsor still affects desktop widget visibility (inline sponsor
+        field); the details dialog always shows every field.
         Must run on the GUI thread (callers use @gui_thread_sync).
         """
         action = self._eyeActions.get(key)
@@ -1265,11 +1262,12 @@ class AutonaScoreboardWidget(QWidget):
 
         multiPlayer = number > 1
 
+        # The card header label is always visible (text set by
+        # _applyScoreboardMode); only the team-name field follows the
+        # player count.
         if multiPlayer:
             self.team1column.findChild(QLineEdit, "teamName").setVisible(True)
             self.team2column.findChild(QLineEdit, "teamName").setVisible(True)
-            self.team1column.findChild(QLabel, "teamLabel").setVisible(False)
-            self.team2column.findChild(QLabel, "teamLabel").setVisible(False)
         else:
             self.team1column.findChild(QLineEdit, "teamName").setVisible(False)
             self.team1column.findChild(QLineEdit, "teamName").setText("")
@@ -1279,22 +1277,19 @@ class AutonaScoreboardWidget(QWidget):
             self.team2column.findChild(QLineEdit, "teamName").setText("")
             self.team2column.findChild(
                 QLineEdit, "teamName").editingFinished.emit()
-            self.team1column.findChild(QLabel, "teamLabel").setVisible(True)
-            self.team2column.findChild(QLabel, "teamLabel").setVisible(True)
 
         for pw in self.playerWidgets:
             pw.findChild(QLabel, "title").setVisible(multiPlayer)
             pw.btMoveUp.setVisible(multiPlayer)
             pw.btMoveDown.setVisible(multiPlayer)
 
-        for x, element in enumerate(self.elements, start=1):
-            action: QAction = self.eyeBt.menu().actions()[x]
-            self.ToggleElements(action, element[1])
+        # Only the inline sponsor field still follows a display option on
+        # the desktop; the details dialog always shows every other field.
+        if self._sponsorAction is not None:
+            self.ToggleElements(self._sponsorAction, ["team"])
 
         # birthday is not surfaced anywhere yet; keep it hidden regardless
-        # of toggle state. real_name / twitterLabel used to be force-hidden
-        # here — those are now driven by the Real Name / Twitter eye-menu
-        # toggles instead.
+        # of toggle state.
         for pw in self.playerWidgets:
             w = pw.findChild(QWidget, 'birthday')
             if w:
@@ -1362,11 +1357,6 @@ class AutonaScoreboardWidget(QWidget):
             f"font-weight: bold; font-size: {UI.FONT_SM}pt;"
             f" color: {UI.palette()['text_primary']};"
         )
-
-    @staticmethod
-    def _smallAnnotationStyle() -> str:
-        # Tiny caption labels above the swap / reset buttons.
-        return f"color: {UI.palette()['text_muted']};"
 
     @staticmethod
     def _sectionFrameStyle(object_name: str) -> str:

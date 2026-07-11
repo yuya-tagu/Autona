@@ -212,6 +212,19 @@ try:
 except Exception:
     _teardown_mock_modules()
     raise
+else:
+    # The qtpy stubs must not outlive this module's import: test modules
+    # collected after this one (e.g. test_state_manager_held) import the
+    # real qtpy. StartGGDataProvider already bound the mock QObject at exec
+    # time, so dropping the sys.modules entries is safe. The src.* mocks
+    # stay in place because the provider lazily imports
+    # ..Helpers.AutonaStatusManager at call time through them.
+    for _name in ("qtpy", "qtpy.QtCore"):
+        _original = _original_modules.pop(_name, None)
+        if _original is None:
+            sys.modules.pop(_name, None)
+        else:
+            sys.modules[_name] = _original
 
 
 # ---------------------------------------------------------------------------

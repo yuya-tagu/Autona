@@ -42,6 +42,10 @@ class AutonaPlayerDB:
     # source model is swapped on every SetupModel rebuild. See
     # GetCompleterModel().
     completerModel: _TournamentEntrantsProxy = None
+    # Previous generation of `model`, kept alive for one rebuild cycle so
+    # the proxy/completer chain never references a deleted C++ model (see
+    # SetupModel).
+    _retiredModel: QStandardItemModel = None
     # DB tags (see PlayerTag) of the loaded tournament's entrants.
     # Empty set = no tournament loaded -> completers show the whole DB.
     tournamentTags = set()
@@ -195,6 +199,15 @@ class AutonaPlayerDB:
     @gui_thread_sync
     def SetupModel():
         with AutonaPlayerDB.modelLock:
+            # Retire — don't delete — the outgoing source model. Dropping the
+            # last Python reference here destroys the C++ model while it is
+            # still installed as completerModel's source; the proxy's stale
+            # row mapping (and the QCompleter persistents built on it) then
+            # crash with an access violation inside the setSourceModel()
+            # reset cascade below (boot crash, 2026-07-11). Holding one
+            # generation keeps every dangling C++ reference valid until the
+            # swap has rewired the proxy to the new model.
+            AutonaPlayerDB._retiredModel = AutonaPlayerDB.model
             AutonaPlayerDB.model = QStandardItemModel()
 
             cancelIcon = QIcon(QPixmap.fromImage(QImage("./assets/icons/cancel.svg").scaledToWidth(

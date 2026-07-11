@@ -118,3 +118,19 @@ Python が古い .pyc を使い続けて修正が反映されない。
 - `main.py` 冒頭で `sys.dont_write_bytecode = True` を設定済み（根本対策）
 - それでも疑わしい挙動があれば
   `find src -name "*.pyc" -delete` で .pyc を全消しして再実行
+
+## 13. 共有 QAbstractItemModel の再構築は「旧世代を retire」してから
+
+PySide6 の `QSortFilterProxyModel.setSourceModel()` / `QComboBox.setModel()` /
+`QCompleter.setModel()` は **ソースモデルへの Python 参照を保持しない**。
+`self.model = QStandardItemModel()` のような再代入で旧モデルの最後の参照を
+落とすと、プロキシ／ビュー／コンプリータがまだ旧モデルへの行マッピングや
+永続インデックスを持ったまま C++ 側が破棄され、次のリセット処理で
+access violation を起こす（2026-07-11 起動クラッシュ:
+`AutonaPlayerDB.SetupModel` の `setSourceModel` で発生）。
+
+- 再構築時は旧モデルを属性に退避して**最低 1 世代は生かす**:
+  `AutonaPlayerDB._retiredModel` / `AutonaGameAssetManager._retiredModels` が実例
+- 新モデルへの `setSourceModel()` / `setModel()` の付け替えが完了するまで
+  旧モデルを削除しない。全消費者が onLoad 等の後続ハンドラで付け替える場合は
+  ハンドラ完了まで（= 次回再構築まで）保持する
