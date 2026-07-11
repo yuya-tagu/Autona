@@ -1764,6 +1764,16 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>Channel name</translation>
     </message>
     <message>
+        <location filename="..\AutonaTournamentInfoWidget.py" line="734" />
+        <source>Input required</source>
+        <translation>Input required</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaTournamentInfoWidget.py" line="736" />
+        <source>Please enter both the channel name and URL.</source>
+        <translation>Please enter both the channel name and URL.</translation>
+    </message>
+    <message>
         <location filename="..\AutonaScoreboardWidget.py" line="1157" />
         <source>Autona - Bluesky</source>
         <translation>Autona - Bluesky</translation>

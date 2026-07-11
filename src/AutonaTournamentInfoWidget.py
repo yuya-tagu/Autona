@@ -725,20 +725,32 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(dialog.accept)
+
+        def tryAccept():
+            # Reject empty input with a warning instead of silently discarding
+            # the entry after the dialog closes.
+            if not nameEdit.text().strip() or not urlEdit.text().strip():
+                QMessageBox.warning(
+                    dialog,
+                    QApplication.translate("app", "Input required"),
+                    QApplication.translate(
+                        "app", "Please enter both the channel name and URL."))
+                return
+            dialog.accept()
+
+        buttons.accepted.connect(tryAccept)
         buttons.rejected.connect(dialog.reject)
         layout.addRow(buttons)
 
         if dialog.exec() == QDialog.DialogCode.Accepted:
             name = nameEdit.text().strip()
             url = urlEdit.text().strip()
-            if name and url:
-                channels = SettingsManager.Get("stream_channels", [])
-                channels.append({"name": name, "url": url})
-                SettingsManager.Set("stream_channels", channels)
-                self._loadStreamChannels()
-                # Select the newly added channel
-                self.streamUrlCombo.setCurrentIndex(self.streamUrlCombo.count() - 1)
+            channels = SettingsManager.Get("stream_channels", [])
+            channels.append({"name": name, "url": url})
+            SettingsManager.Set("stream_channels", channels)
+            self._loadStreamChannels()
+            # Select the newly added channel
+            self.streamUrlCombo.setCurrentIndex(self.streamUrlCombo.count() - 1)
 
     def _LoadBannerImage(self):
         """Load the source banner as a PIL Image. Prefers the provider's
