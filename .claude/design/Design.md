@@ -284,7 +284,7 @@ score.{N}
 │   └── player.{M}                   D
 │       ├── name                     R
 │       ├── gamerTag                 W
-│       ├── team                     W   (所属チーム/スポンサー名)
+│       ├── team                     W   (所属タグ。UI 表記は「所属タグ」に統一)
 │       ├── seed                     W R
 │       ├── id                       W R
 │       ├── city                     W R
@@ -305,6 +305,7 @@ score.{N}
 ├── first_to / _short_text / _text   W
 ├── match                            W R
 ├── phase                            W R
+├── pool                             W R (フェーズと分離したプール名。表示は overlay 側で "phase - pool" 合成)
 ├── top_n                            W R
 ├── stream_url                       W R
 ├── set_id                           W

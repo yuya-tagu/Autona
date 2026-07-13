@@ -38,7 +38,7 @@ EXPECTED = {
     "AutonaScoreboardTeam.ui": {"teamName", "losers"},
     "AutonaBattleTeam.ui": {"teamName", "separateSponsors"},
     "AutonaScoreboardScore.ui": {
-        "phase", "match", "best_of", "score_left", "score_right",
+        "phase", "pool", "match", "best_of", "score_left", "score_right",
     },
     "AutonaScoreboardPlayer.ui": {
         "team", "name", "seed", "real_name", "twitter", "birthday",

@@ -169,6 +169,18 @@ class AutonaCrewBattleWidget(QWidget):
             "phase", AutonaLocaleHelper.phaseNames)
         phaseRow.addWidget(self.phaseCombo, 1)
         phaseRow.addSpacing(12)
+        # Pool (phase group) is a separate state key (score.3.pool), same as
+        # the 1v1/team boards. Candidates come from the "group" template
+        # (_makePhaseCombo skips templated entries in the names dict).
+        phaseRow.addWidget(QLabel(QApplication.translate("app", "Pool")))
+        groupTemplate = AutonaLocaleHelper.phaseNames.get("group", "")
+        poolCandidates = ([groupTemplate.format(letter)
+                           for letter in ["A", "B", "C", "D"]]
+                          if "{0}" in groupTemplate else [])
+        self.poolCombo = self._makePhaseCombo(
+            "pool", candidates=poolCandidates)
+        phaseRow.addWidget(self.poolCombo, 1)
+        phaseRow.addSpacing(12)
         phaseRow.addWidget(QLabel(QApplication.translate("app", "Match")))
         self.matchCombo = self._makePhaseCombo(
             "match", candidates=AutonaLocaleHelper.GetMatchNameCandidates())
@@ -532,6 +544,8 @@ class AutonaCrewBattleWidget(QWidget):
                 StateManager.Set(self._key("match"), data.get("round_name"))
             if data.get("tournament_phase") is not None:
                 StateManager.Set(self._key("phase"), data.get("tournament_phase"))
+            if data.get("tournament_pool") is not None:
+                StateManager.Set(self._key("pool"), data.get("tournament_pool"))
             if data.get("bestOf") is not None:
                 StateManager.Set(self._key("best_of"), data.get("bestOf"))
 

@@ -582,11 +582,20 @@ class TestParseMatchDataNewApi:
         assert result["isOnline"] is False
 
     def test_pools_phase_name(self):
-        """When groupCount > 1, phase name includes pool identifier."""
+        """When groupCount > 1, the pool name is a SEPARATE field
+        (tournament_pool); tournament_phase stays the phase name only."""
         provider = _make_provider()
         result = provider.ParseMatchDataNewApi(_new_api_set_empty_slots())
-        assert result["tournament_phase"] == "Pools - Pool B"
+        assert result["tournament_phase"] == "Pools"
+        assert result["tournament_pool"] == "Pool B"
         assert result["isPools"] is True
+
+    def test_single_group_has_empty_pool(self):
+        """Single-group phases (groupCount <= 1) carry an empty pool name so
+        consumers can clear a previously loaded pool."""
+        provider = _make_provider()
+        result = provider.ParseMatchDataNewApi(_new_api_set_basic())
+        assert result["tournament_pool"] == ""
 
     def test_matchmaking_round_name_empty(self):
         """MATCHMAKING bracket type => round_name is empty string."""

@@ -313,7 +313,11 @@ function setPhaseMatch(data, config, template) {
     return;
   }
 
-  const phase = _.get(data, `score.${scoreboardNumber}.phase`, "");
+  // Pool is a separate state key (score.N.pool); join it for display.
+  const phase = [
+    _.get(data, `score.${scoreboardNumber}.phase`, ""),
+    _.get(data, `score.${scoreboardNumber}.pool`, ""),
+  ].filter(Boolean).join(" - ");
   const matchRaw = _.get(data, `score.${scoreboardNumber}.match`, "");
   const match = abbreviateMatchName(matchRaw);
 

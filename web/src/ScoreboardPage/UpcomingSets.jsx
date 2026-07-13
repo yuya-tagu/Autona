@@ -116,6 +116,8 @@ export default class UpcomingSets extends React.Component {
             set.p1_name.toLocaleLowerCase().includes(fs)
             || set.p2_name.toLocaleLowerCase().includes(fs)
             || set.round_name.toLocaleLowerCase().includes(fs)
+            || set.tournament_phase?.toLocaleLowerCase().includes(fs)
+            || set.tournament_pool?.toLocaleLowerCase().includes(fs)
             || set.stream?.toLocaleLowerCase().includes(fs)
         ));
     }
@@ -206,6 +208,7 @@ export default class UpcomingSets extends React.Component {
                                         </Typography>
                                         <Stack direction="row" gap={0.5} flexWrap="wrap" marginTop={0.5}>
                                             {set.tournament_phase && <Chip size="small" label={set.tournament_phase} />}
+                                            {set.tournament_pool && <Chip size="small" label={set.tournament_pool} />}
                                             {set.round_name && <Chip size="small" variant="outlined" label={set.round_name} />}
                                             {set.stream && <Chip size="small" color="secondary" label={set.stream} />}
                                             {set.station && <Chip size="small" variant="outlined" label={`#${set.station}`} />}
@@ -231,6 +234,7 @@ export default class UpcomingSets extends React.Component {
                                             <TableCell>{i18n.t("p1")}</TableCell>
                                             <TableCell>{i18n.t("p2")}</TableCell>
                                             <TableCell>{i18n.t("phase")}</TableCell>
+                                            <TableCell>{i18n.t("pool")}</TableCell>
                                             <TableCell>{i18n.t("match")}</TableCell>
                                             <TableCell>{i18n.t("stream")}</TableCell>
                                             <TableCell>{i18n.t("station")}</TableCell>
@@ -241,7 +245,7 @@ export default class UpcomingSets extends React.Component {
                                             this.state.isLoading &&
                                             [0, 1, 2].map((i) => (
                                                 <TableRow key={`skeleton-${i}`}>
-                                                    {[0, 1, 2, 3, 4, 5].map((j) => (
+                                                    {[0, 1, 2, 3, 4, 5, 6].map((j) => (
                                                         <TableCell key={j}><Skeleton /></TableCell>
                                                     ))}
                                                 </TableRow>
@@ -277,6 +281,7 @@ export default class UpcomingSets extends React.Component {
                                                     <TableCell>{set.p1_name}</TableCell>
                                                     <TableCell>{set.p2_name}</TableCell>
                                                     <TableCell>{set.tournament_phase}</TableCell>
+                                                    <TableCell>{set.tournament_pool}</TableCell>
                                                     <TableCell>{set.round_name}</TableCell>
                                                     <TableCell>{set.stream}</TableCell>
                                                     <TableCell>{set.station}</TableCell>

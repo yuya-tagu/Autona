@@ -70,7 +70,7 @@ _ENDPOINTS = [
     ("POST", "/scoreboards/{n}:apply", "Apply pending edits (反映)", None, False, True, False),
     ("POST", "/scoreboards/{n}:swap-teams", "Swap teams", None, False, True, False),
     ("POST", "/scoreboards/{n}/teams/{t}/color", "Set team color", {"color": "#FF0000"}, False, True, False),
-    ("PATCH", "/scoreboards/{n}/set", "Patch set info (partial)", {"bestOf": 5, "phase": "Top 8", "match": "Winners Finals"}, False, True, False),
+    ("PATCH", "/scoreboards/{n}/set", "Patch set info (partial)", {"bestOf": 5, "phase": "Top 8", "pool": "Pool A1", "match": "Winners Finals"}, False, True, False),
     # ── Destructive (confirm required) ──
     ("POST", "/scoreboards/{n}:clear", "Clear board (confirm required)", {"confirm": True}, True, True, True),
     ("POST", "/scoreboards/{n}:reset-players", "Reset players (confirm required)", {"confirm": True}, True, True, True),

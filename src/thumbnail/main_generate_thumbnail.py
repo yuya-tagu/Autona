@@ -77,7 +77,7 @@ def createFalseData(gameAssetManager: AutonaGameAssetManager = None, used_assets
             },
             "score": {
                 "1": {
-                    "best_of": 3, "match": "", "phase": "",
+                    "best_of": 3, "match": "", "phase": "", "pool": "",
                     "team": {
                         "1": {"losers": False, "player": {"1": {"character": {}, "country": {}, "mergedName": "", "name": "", "state": {}, "team": ""}}, "score": 0, "teamName": ""},
                         "2": {"losers": False, "player": {"1": {"character": {}, "country": {}, "mergedName": "", "name": "", "state": {}, "team": ""}}, "score": 0, "teamName": ""}

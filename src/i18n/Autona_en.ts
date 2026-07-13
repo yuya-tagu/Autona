@@ -301,6 +301,16 @@
     </message>
     <message>
         <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
+        <source>POOL</source>
+        <translation>POOL</translation>
+    </message>
+    <message>
+        <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
+        <source>Pool A1, etc</source>
+        <translation>Pool A1, etc</translation>
+    </message>
+    <message>
+        <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
         <source>Pool A, Bracket, Top 8, etc</source>
         <translation>Pool A, Bracket, Top 8, etc</translation>
     </message>
@@ -1760,7 +1770,7 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="944" />
-        <source>スポンサー名をスコアボードに表示しない</source>
+        <source>所属タグをスコアボードに表示しない</source>
         <translation>Hide sponsor name on scoreboard</translation>
     </message>
     <message>
@@ -1870,8 +1880,8 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
     </message>
     <message>
         <location filename="..\AutonaSelectSetWindow.py" line="0" />
-        <source>Select a pool...</source>
-        <translation>Select a pool...</translation>
+        <source>Select a phase...</source>
+        <translation>Select a phase...</translation>
     </message>
     <message>
         <location filename="..\AutonaSelectSetWindow.py" line="0" />
@@ -1880,8 +1890,13 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
     </message>
     <message>
         <location filename="..\AutonaSelectSetWindow.py" line="0" />
-        <source>Select a pool to load sets</source>
-        <translation>Select a pool to load sets</translation>
+        <source>All phases</source>
+        <translation>All phases</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaSelectSetWindow.py" line="0" />
+        <source>Select a phase to load sets</source>
+        <translation>Select a phase to load sets</translation>
     </message>
     <message>
         <location filename="..\AutonaSelectStationWindow.py" line="29" />

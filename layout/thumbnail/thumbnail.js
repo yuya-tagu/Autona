@@ -285,8 +285,10 @@ function setPhaseMatch(data, config, template) {
   // Competition name + full round name on one line, e.g.
   // "Singles - Winners Semi-Final". No abbreviation.
   const phase = _.get(data, `score.${scoreboardNumber}.phase`, "");
+  // Pool is a separate state key (score.N.pool); join it for display.
+  const pool = _.get(data, `score.${scoreboardNumber}.pool`, "");
   const match = _.get(data, `score.${scoreboardNumber}.match`, "");
-  const line = [phase, match].filter(Boolean).join(" - ");
+  const line = [phase, pool, match].filter(Boolean).join(" - ");
   if (line) {
     textEl.text(line);
   }

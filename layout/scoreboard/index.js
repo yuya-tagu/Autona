@@ -338,6 +338,8 @@ LoadEverything().then(() => {
 
     let phaseTexts = [];
     if (data.score[window.scoreboardNumber].phase) phaseTexts.push(data.score[window.scoreboardNumber].phase);
+    // Pool is a separate state key (score.N.pool); join it for display.
+    if (data.score[window.scoreboardNumber].pool) phaseTexts.push(data.score[window.scoreboardNumber].pool);
     if (data.score[window.scoreboardNumber].best_of_text) phaseTexts.push(data.score[window.scoreboardNumber].best_of_text);
 
     SetInnerHtml($(".phase"), phaseTexts.join(" - "));
