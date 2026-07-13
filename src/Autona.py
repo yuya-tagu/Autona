@@ -295,7 +295,8 @@ class Window(QMainWindow):
         self.dockWidgets.append(board)
 
         from .AutonaThumbnailSettingsWidget import AutonaThumbnailSettingsWidget
-        thumbnailSetting = AutonaThumbnailSettingsWidget()
+        # Held so the battle-format switch can hide the team-name toggle in 1v1.
+        self.thumbnailSetting = thumbnailSetting = AutonaThumbnailSettingsWidget()
         thumbnailSetting.setWindowIcon(QIcon(UI.icon_path('thumbnail.svg')))
         thumbnailSetting.setObjectName("Thumbnail Settings")
         thumbnailSetting.setWindowTitle(
@@ -643,6 +644,7 @@ class Window(QMainWindow):
         battleFormat = self._resolveBattleFormat()
         AutonaScoreboardManager.instance.SetBattleFormat(battleFormat)
         self.resultSetting.SetBattleFormat(battleFormat)
+        self.thumbnailSetting.SetBattleFormat(battleFormat)
 
         self.ReloadGames()
 
@@ -972,6 +974,8 @@ class Window(QMainWindow):
         AutonaScoreboardManager.instance.SetBattleFormat(fmt)
         if getattr(self, "resultSetting", None) is not None:
             self.resultSetting.SetBattleFormat(fmt)
+        if getattr(self, "thumbnailSetting", None) is not None:
+            self.thumbnailSetting.SetBattleFormat(fmt)
         # Keep the sidebar segment in sync when the format is changed
         # programmatically (setChecked does not re-emit the click signal).
         if getattr(self, "sidebar", None) is not None:

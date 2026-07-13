@@ -120,7 +120,7 @@ class AutonaResultSettingsWidget(QDockWidget):
         # Each player is a QFrame card (brighter background) laid out in a
         # L.DragCardList that supports drag-to-reorder. Card body:
         #   left column : drag grip + rank spin box
-        #   fields grid : name/sponsor, X (Twitter), then 3× char+color rows
+        #   fields grid : sponsor/name, X (Twitter), then 3× char+color rows
         # playerInputs entry (unchanged 10-tuple, index contract preserved):
         #   (rank_edit, name_edit, sponsor_edit,
         #    char1_combo, color1_combo,
@@ -227,8 +227,15 @@ class AutonaResultSettingsWidget(QDockWidget):
             fields = QGridLayout()
             fields.setVerticalSpacing(2)
             fields.setHorizontalSpacing(6)
-            fields.addWidget(name_edit,    0, 0)
-            fields.addWidget(sponsor_edit, 0, 1)
+            # Sponsor tag left of the player name ("[Sponsor] PlayerName"),
+            # matching the scoreboard's display order. Nested HBox spanning
+            # both columns so the fixed-width sponsor doesn't inherit the
+            # stretching char-combo column below.
+            nameRow = QHBoxLayout()
+            nameRow.setSpacing(6)
+            nameRow.addWidget(sponsor_edit)
+            nameRow.addWidget(name_edit, 1)
+            fields.addLayout(nameRow, 0, 0, 1, 2)
             fields.addWidget(twitter_edit, 1, 0, 1, 2)
             fields.addWidget(char1_combo,  2, 0)
             fields.addWidget(color1_combo, 2, 1)

@@ -218,8 +218,15 @@ class AutonaTop8Widget(QDockWidget):
             color_combo = self._makeColorCombo()
 
             fields.addWidget(header,        0, 0, 1, 2)
-            fields.addWidget(name_edit,     1, 0)
-            fields.addWidget(sponsor_edit,  1, 1)
+            # Sponsor tag left of the player name ("[Sponsor] PlayerName"),
+            # matching the scoreboard / result settings display order. Nested
+            # HBox spanning both columns so the fixed-width sponsor doesn't
+            # inherit the stretching char-combo column below.
+            nameRow = QHBoxLayout()
+            nameRow.setSpacing(6)
+            nameRow.addWidget(sponsor_edit)
+            nameRow.addWidget(name_edit, 1)
+            fields.addLayout(nameRow,       1, 0, 1, 2)
             fields.addWidget(country_combo, 2, 0, 1, 2)
             fields.addWidget(char_combo,    3, 0)
             fields.addWidget(color_combo,   3, 1)

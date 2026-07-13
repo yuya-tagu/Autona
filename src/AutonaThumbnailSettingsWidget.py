@@ -434,6 +434,16 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
             SettingsManager.Set(f"thumbnail_config.{key}", default)
         return setting
 
+    def SetBattleFormat(self, fmt):
+        # Driven by the battle-format selector (Window.SetBattleFormat).
+        # The team-name toggle only applies to team/crew boards: in 1v1 the
+        # renderer falls back to player names because teamName is empty
+        # (layout/thumbnail*/thumbnail.js setPlayerNames), so hide it there.
+        # Accepts a bool for backward compatibility with older callers.
+        if isinstance(fmt, bool):
+            fmt = "team" if fmt else "singles"
+        self.team_name.setVisible(fmt in ("team", "crew"))
+
     def updateFromSettings(self):
         game_codename = AutonaGameAssetManager.instance.selectedGame.get(
             'codename')
