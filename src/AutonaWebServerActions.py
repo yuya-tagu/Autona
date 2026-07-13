@@ -127,6 +127,7 @@ class WebServerActions(QThread):
                   scoreboard,
                   bestOf=None,
                   phase=None,
+                  pool=None,
                   match=None,
                   players=None,
                   characters=None,
@@ -148,6 +149,15 @@ class WebServerActions(QThread):
             self.scoreboard.GetScoreboard(scoreboard).signals.ChangeSetData.emit(
                 orjson.loads(
                     orjson.dumps({'tournament_phase': phase})
+                )
+            )
+
+        # Pool argument
+        # pool=<Pool Name>
+        if pool is not None:
+            self.scoreboard.GetScoreboard(scoreboard).signals.ChangeSetData.emit(
+                orjson.loads(
+                    orjson.dumps({'tournament_pool': pool})
                 )
             )
 

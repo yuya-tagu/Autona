@@ -550,6 +550,8 @@ def set_update(n):
         kwargs["bestOf"] = _require_int(body["bestOf"], "bestOf")
     if "phase" in body:
         kwargs["phase"] = body["phase"]
+    if "pool" in body:
+        kwargs["pool"] = body["pool"]
     if "match" in body:
         kwargs["match"] = body["match"]
     if "players" in body:

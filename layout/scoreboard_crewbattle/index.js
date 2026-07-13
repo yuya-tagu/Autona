@@ -136,7 +136,8 @@ LoadEverything().then(() => {
     const sb = event.data.score && event.data.score[window.scoreboardNumber];
     if (!sb || !sb.team) return;
 
-    const phase = sb.phase || "";
+    // Pool is a separate state key (score.N.pool); join it for display.
+    const phase = [sb.phase, sb.pool].filter(Boolean).join(" - ");
     const match = sb.match || "";
     $("#phase-round").text([phase, match].filter(Boolean).join("  |  "));
 

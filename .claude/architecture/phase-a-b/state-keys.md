@@ -71,6 +71,7 @@ score                                D   AutonaScoreboardManager.__init__
 │   ├── match                        W R AutonaScoreboardWidget.ChangeSetData / AutonaWebServerActions
 │   ├── {QComboBox.objectName}       W   AutonaScoreboardWidget(動的: scoreColumn の QComboBox)
 │   ├── phase                        W R AutonaScoreboardWidget.ChangeSetData / AutonaWebServerActions / AutonaStatsWidget
+│   ├── pool                         W R AutonaScoreboardWidget.ChangeSetData / AutonaWebServerActions (フェーズと分離したプール名。オーバーレイは表示時に "phase - pool" を合成)
 │   ├── top_n                        W R AutonaScoreboardWidget.ChangeSetData / AutonaStatsWidget
 │   ├── stream_url                   W R AutonaScoreboardWidget(QLineEdit) / AutonaStatsWidget
 │   ├── set_id                       W   AutonaScoreboardWidget.SetFromSetData

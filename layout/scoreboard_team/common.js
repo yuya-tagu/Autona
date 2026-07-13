@@ -263,7 +263,8 @@ function setRule(stylesheet, selector, property, value) {
 
 async function displayMatchPhase() {
   const sb = data.score && data.score[window.scoreboardNumber];
-  const phase = sb?.phase || "";
+  // Pool is a separate state key (score.N.pool); join it for display.
+  const phase = [sb?.phase, sb?.pool].filter(Boolean).join(" - ");
   const match = sb?.match || "";
   // Prefer the operator-controlled display name; fall back to the raw
   // tournament name only when displayTournamentName was never set (an

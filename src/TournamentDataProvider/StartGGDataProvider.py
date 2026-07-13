@@ -797,9 +797,14 @@ class StartGGDataProvider(TournamentDataProvider):
         if bracket_type == "MATCHMAKING":
             round_name = ""
 
+        # Pool (phase group) name is kept SEPARATE from the phase name:
+        # `tournament_phase` is the phase only and `tournament_pool` the
+        # localized group name ("" when the phase has a single group).
+        # Consumers that want the legacy combined text join them for display.
         isPools = deep_get(_set, "phaseGroup.phase.groupCount", 0) > 1
+        pool_name = ""
         if isPools:
-            phase_name += " - " + AutonaLocaleHelper.phaseNames.get(
+            pool_name = AutonaLocaleHelper.phaseNames.get(
                 "group").format(deep_get(_set, "phaseGroup.displayIdentifier"))
 
         return {
@@ -809,6 +814,7 @@ class StartGGDataProvider(TournamentDataProvider):
             "round_name": round_name,
             "round_name_en": _set.get("fullRoundText") or "",
             "tournament_phase": phase_name,
+            "tournament_pool": pool_name,
             "bracket_type": bracket_type,
             "p1_name": p1.get("entrant", {}).get("name", "") if p1 and p1.get("entrant") != None else "",
             "p2_name": p2.get("entrant", {}).get("name", "") if p2 and p2.get("entrant") != None else "",
@@ -1266,9 +1272,11 @@ class StartGGDataProvider(TournamentDataProvider):
         })
 
     def ProcessFutureSet(self, _set, eventSlug):
+        # Same phase/pool separation as _build_set_metadata.
         phase_name = deep_get(_set, "phaseGroup.phase.name")
+        pool_name = ""
         if deep_get(_set, "phaseGroup.phase.groupCount") > 1:
-            phase_name += " - " + AutonaLocaleHelper.phaseNames.get(
+            pool_name = AutonaLocaleHelper.phaseNames.get(
                 "group").format(deep_get(_set, "phaseGroup.displayIdentifier"))
 
         frt = _set.get("fullRoundText", "")
@@ -1287,6 +1295,7 @@ class StartGGDataProvider(TournamentDataProvider):
             "id": _set.get("id"),
             "match": StartGGDataProvider.TranslateRoundName(frt, topAnchor),
             "phase": phase_name,
+            "pool": pool_name,
             "best_of": total_games,
             "best_of_text": AutonaLocaleHelper.matchNames.get("best_of").format(total_games) if total_games > 0 else "",
             "state": _set.get("state"),

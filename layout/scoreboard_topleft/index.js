@@ -244,7 +244,11 @@ LoadEverything().then(() => {
 
     SetInnerHtml($(".event_name"), data.tournamentInfo.eventName);
 
-    SetInnerHtml($(".phase"), data.score[window.scoreboardNumber].phase);
+    // Pool is a separate state key (score.N.pool); join it for display.
+    SetInnerHtml($(".phase"), [
+      data.score[window.scoreboardNumber].phase,
+      data.score[window.scoreboardNumber].pool,
+    ].filter(Boolean).join(" - "));
     SetInnerHtml($(".match"), data.score[window.scoreboardNumber].match);
     SetInnerHtml($(".best_of"), data.score[window.scoreboardNumber].best_of_text);
   };

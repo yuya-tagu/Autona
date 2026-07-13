@@ -9,6 +9,10 @@ from src import ui_constants as UI
 
 
 class AutonaSelectSetWindow(QDialog):
+    # Hidden column carrying the raw set dict (UserRole); keep in sync with
+    # the appendRow order in SetsUpdated.
+    DATA_COLUMN = 7
+
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
 
@@ -32,19 +36,29 @@ class AutonaSelectSetWindow(QDialog):
         layout.addWidget(searchBar)
         searchBar.textEdited.connect(filterList)
 
-        # Pool (phase group) selector: multi-pool events fetch only the
-        # chosen pool's sets instead of paging through the whole event.
+        # Phase / pool (phase group) selectors: multi-pool events fetch only
+        # the chosen phase's (or single pool's) sets instead of paging through
+        # the whole event. Choosing a phase populates the pool combo with that
+        # phase's groups and fetches all of them; the pool combo then narrows
+        # to a single group.
         self.poolRow = QWidget()
         poolRowLayout = QHBoxLayout()
         poolRowLayout.setContentsMargins(0, 0, 0, 0)
         self.poolRow.setLayout(poolRowLayout)
         poolRowLayout.addWidget(
+            QLabel(QApplication.translate("app", "Phase")))
+        self.phaseCombo = QComboBox()
+        self.phaseCombo.addItem(
+            QApplication.translate("app", "Select a phase..."), None)
+        # `activated` (not currentIndexChanged) so re-picking the same phase
+        # re-fetches it.
+        self.phaseCombo.activated.connect(self._onPhaseChosen)
+        poolRowLayout.addWidget(self.phaseCombo, 1)
+        poolRowLayout.addSpacing(12)
+        poolRowLayout.addWidget(
             QLabel(QApplication.translate("app", "Pool")))
         self.poolCombo = QComboBox()
-        self.poolCombo.addItem(
-            QApplication.translate("app", "Select a pool..."), None)
-        # `activated` (not currentIndexChanged) so re-picking the same pool
-        # re-fetches it.
+        self.poolCombo.setEnabled(False)
         self.poolCombo.activated.connect(self._onPoolChosen)
         poolRowLayout.addWidget(self.poolCombo, 1)
         layout.addWidget(self.poolRow)
@@ -75,7 +89,8 @@ class AutonaSelectSetWindow(QDialog):
         self.startggSetSelectionItemList.setEditTriggers(
             QAbstractItemView.NoEditTriggers)
         self.startggSetSelectionItemList.setModel(self.proxyModel)
-        self.startggSetSelectionItemList.setColumnHidden(6, True)
+        self.startggSetSelectionItemList.setColumnHidden(
+            self.DATA_COLUMN, True)
         self.startggSetSelectionItemList.horizontalHeader(
         ).setSectionResizeMode(QHeaderView.Stretch)
         self.startggSetSelectionItemList.resizeColumnsToContents()
@@ -133,53 +148,89 @@ class AutonaSelectSetWindow(QDialog):
         return super().eventFilter(obj, event)
 
     def _onPhasesUpdated(self, phases):
-        """Rebuild the pool selector from the tournament's phase groups
-        (fetched once on tournament load)."""
+        """Rebuild the phase selector from the tournament's phases (fetched
+        once on tournament load). The pool selector follows the chosen phase."""
         self.phases = phases or []
+        self.phaseCombo.blockSignals(True)
+        self.phaseCombo.clear()
+        self.phaseCombo.addItem(
+            QApplication.translate("app", "Select a phase..."), None)
+        allGroupIds = [group.get("id")
+                       for phase in self.phases
+                       for group in (phase.get("groups") or [])]
+        self.phaseCombo.addItem(
+            QApplication.translate("app", "All phases"), allGroupIds)
+        for phase in self.phases:
+            self.phaseCombo.addItem(phase.get("name") or "", phase)
+        self.phaseCombo.setCurrentIndex(0)
+        self.phaseCombo.blockSignals(False)
+        self._resetPoolCombo()
+
+    def _resetPoolCombo(self):
         self.poolCombo.blockSignals(True)
         self.poolCombo.clear()
         self.poolCombo.addItem(
-            QApplication.translate("app", "Select a pool..."), None)
-        self.poolCombo.addItem(
-            QApplication.translate("app", "All pools"), "all")
-        for phase in self.phases:
-            groups = phase.get("groups") or []
-            if len(groups) == 1:
-                self.poolCombo.addItem(
-                    phase.get("name") or "", [groups[0].get("id")])
-            else:
-                for group in groups:
-                    self.poolCombo.addItem(
-                        f'{phase.get("name")} - {group.get("name")}',
-                        [group.get("id")])
-        self.poolCombo.setCurrentIndex(0)
+            QApplication.translate("app", "All pools"), None)
+        self.poolCombo.setEnabled(False)
         self.poolCombo.blockSignals(False)
 
     def _multiPool(self):
         return sum(len(p.get("groups") or []) for p in self.phases) > 1
 
-    def _onPoolChosen(self, index):
+    def _selectedGroupIds(self):
+        """Group ids to fetch, from the pool combo when a single pool is
+        picked, else from the phase combo's phase (or the all-phases list)."""
+        poolData = self.poolCombo.currentData()
+        if isinstance(poolData, list):
+            return poolData
+        phaseData = self.phaseCombo.currentData()
+        if isinstance(phaseData, dict):
+            return [group.get("id")
+                    for group in (phaseData.get("groups") or [])]
+        if isinstance(phaseData, list):
+            return phaseData
+        return None
+
+    def _onPhaseChosen(self, index):
         if index <= 0:
+            self._resetPoolCombo()
+            return
+        phaseData = self.phaseCombo.currentData()
+        self.poolCombo.blockSignals(True)
+        self.poolCombo.clear()
+        self.poolCombo.addItem(
+            QApplication.translate("app", "All pools"), None)
+        groups = (phaseData.get("groups") or []) if isinstance(
+            phaseData, dict) else []
+        for group in groups:
+            self.poolCombo.addItem(
+                group.get("name") or "", [group.get("id")])
+        # A single-group phase has nothing to narrow down.
+        self.poolCombo.setEnabled(len(groups) > 1)
+        self.poolCombo.blockSignals(False)
+        self._FetchSets()
+
+    def _onPoolChosen(self, index):
+        if self.phaseCombo.currentIndex() <= 0:
             return
         self._FetchSets()
 
     def LoadSets(self):
         """Entry point when the window opens. Multi-pool events wait for a
-        pool choice instead of paging through every set of the event."""
+        phase choice instead of paging through every set of the event."""
         multiPool = self._multiPool()
         self.poolRow.setVisible(multiPool)
-        if multiPool and self.poolCombo.currentIndex() <= 0:
+        if multiPool and self.phaseCombo.currentIndex() <= 0:
             self.model.clear()
             self.progressBar.setVisible(False)
             self.labelStatus.setText(QApplication.translate(
-                "app", "Select a pool to load sets"))
+                "app", "Select a phase to load sets"))
             return
         self._FetchSets()
 
     def _FetchSets(self):
-        data = self.poolCombo.currentData() if self.poolRow.isVisibleTo(
+        phaseGroupIds = self._selectedGroupIds() if self.poolRow.isVisibleTo(
             self) else None
-        phaseGroupIds = data if isinstance(data, list) else None
         self.proxyModel.setSourceModel(QStandardItemModel())
         AutonaTournamentDataProvider.instance.LoadSets(
             showFinished=self.showFinished.isChecked(),
@@ -204,16 +255,15 @@ class AutonaSelectSetWindow(QDialog):
             self.progressBar.setRange(0, data["totalPages"])
             self.progressBar.setValue(data["progress"])
 
-        horizontal_labels = ["Stream", "Station",
-                             "Wave", "Title", "Player 1", "Player 2"]
-        horizontal_labels[0] = QApplication.translate("app", "Stream")
-        horizontal_labels[1] = QApplication.translate("app", "Station")
-        horizontal_labels[2] = QApplication.translate("app", "Phase")
-        horizontal_labels[3] = QApplication.translate("app", "Match")
-        horizontal_labels[4] = QApplication.translate(
-            "app", "Player {0}").format(1)
-        horizontal_labels[5] = QApplication.translate(
-            "app", "Player {0}").format(2)
+        horizontal_labels = [
+            QApplication.translate("app", "Stream"),
+            QApplication.translate("app", "Station"),
+            QApplication.translate("app", "Phase"),
+            QApplication.translate("app", "Pool"),
+            QApplication.translate("app", "Match"),
+            QApplication.translate("app", "Player {0}").format(1),
+            QApplication.translate("app", "Player {0}").format(2),
+        ]
         self.model.setHorizontalHeaderLabels(horizontal_labels)
 
         sets = data["sets"]
@@ -245,6 +295,7 @@ class AutonaSelectSetWindow(QDialog):
                     QStandardItem(str(s.get("station", "")) if s.get(
                         "station", "") != None else ""),
                     QStandardItem(s.get("tournament_phase", "")),
+                    QStandardItem(s.get("tournament_pool", "")),
                     QStandardItem(s["round_name"]),
                     QStandardItem(player_names[0]),
                     QStandardItem(player_names[1]),
@@ -252,7 +303,8 @@ class AutonaSelectSetWindow(QDialog):
                 ])
 
         self.proxyModel.setSourceModel(self.model)
-        self.startggSetSelectionItemList.setColumnHidden(6, True)
+        self.startggSetSelectionItemList.setColumnHidden(
+            self.DATA_COLUMN, True)
         self.startggSetSelectionItemList.resizeColumnsToContents()
         self.startggSetSelectionItemList.horizontalHeader(
         ).setSectionResizeMode(QHeaderView.Stretch)
@@ -266,7 +318,7 @@ class AutonaSelectSetWindow(QDialog):
             row = self.startggSetSelectionItemList.selectionModel().selectedRows()[
                 0].row()
         setId = self.startggSetSelectionItemList.model().index(
-            row, 6).data(Qt.ItemDataRole.UserRole)
+            row, self.DATA_COLUMN).data(Qt.ItemDataRole.UserRole)
         self.close()
 
         if setId:

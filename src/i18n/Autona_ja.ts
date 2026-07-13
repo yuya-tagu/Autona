@@ -206,7 +206,7 @@
     <message>
         <location filename="..\layout\AutonaBattleTeam.ui" line="0" />
         <source>SPONSORS?</source>
-        <translation>スポンサー？</translation>
+        <translation>所属タグ</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaResultSettings.ui" line="0" />
@@ -243,7 +243,7 @@
         <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
         <location filename="..\layout\AutonaScoreboardPlayer.ui" line="0" />
         <source>Sponsor</source>
-        <translation>スポンサー</translation>
+        <translation>所属タグ</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaTeamPlayer.ui" line="0" />
@@ -299,6 +299,16 @@
         <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
         <source>PHASE</source>
         <translation>フェーズ</translation>
+    </message>
+    <message>
+        <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
+        <source>POOL</source>
+        <translation>プール名</translation>
+    </message>
+    <message>
+        <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
+        <source>Pool A1, etc</source>
+        <translation>予選プールA1 など</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaScoreboardScore.ui" line="0" />
@@ -439,7 +449,7 @@
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <source>Sponsors?</source>
-        <translation>スポンサー</translation>
+        <translation>所属タグ</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
@@ -526,12 +536,12 @@
     <message>
         <location filename="..\layout\AutonaCommentary.ui" line="0" />
         <source>TEAM/NAME</source>
-        <translation>スポンサー/ハンドルネーム</translation>
+        <translation>所属タグ/ハンドルネーム</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaCommentary.ui" line="0" />
         <source>Team</source>
-        <translation>スポンサー</translation>
+        <translation>所属タグ</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaCommentator.ui" line="0" />
@@ -566,12 +576,12 @@
     <message>
         <location filename="..\layout\AutonaCommentator.ui" line="0" />
         <source>SPONSOR/TAG</source>
-        <translation>スポンサー/ハンドルネーム</translation>
+        <translation>所属タグ/ハンドルネーム</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaCommentator.ui" line="0" />
         <source>Sponsor</source>
-        <translation>スポンサー</translation>
+        <translation>所属タグ</translation>
     </message>
 </context><context>
     <name>LayoutOptions</name>
@@ -1527,7 +1537,7 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaScoreboardWidget.py" line="233" />
         <location filename="..\AutonaResultSettingsWidget.py" line="126" />
         <source>Sponsor</source>
-        <translation>スポンサー</translation>
+        <translation>所属タグ</translation>
     </message>
     <message>
         <location filename="..\AutonaResultSettingsWidget.py" line="178" />
@@ -1763,8 +1773,8 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="944" />
-        <source>スポンサー名をスコアボードに表示しない</source>
-        <translation>スポンサー名をスコアボードに表示しない</translation>
+        <source>所属タグをスコアボードに表示しない</source>
+        <translation>所属タグをスコアボードに表示しない</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="1000" />
@@ -1869,12 +1879,12 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
     <message>
         <location filename="..\AutonaSelectSetWindow.py" line="0" />
         <source>Pool</source>
-        <translation>プール</translation>
+        <translation>プール名</translation>
     </message>
     <message>
         <location filename="..\AutonaSelectSetWindow.py" line="0" />
-        <source>Select a pool...</source>
-        <translation>プールを選択...</translation>
+        <source>Select a phase...</source>
+        <translation>フェーズを選択...</translation>
     </message>
     <message>
         <location filename="..\AutonaSelectSetWindow.py" line="0" />
@@ -1883,8 +1893,13 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
     </message>
     <message>
         <location filename="..\AutonaSelectSetWindow.py" line="0" />
-        <source>Select a pool to load sets</source>
-        <translation>プールを選択するとセットを読み込みます</translation>
+        <source>All phases</source>
+        <translation>すべてのフェーズ</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaSelectSetWindow.py" line="0" />
+        <source>Select a phase to load sets</source>
+        <translation>フェーズを選択するとセットを読み込みます</translation>
     </message>
     <message>
         <location filename="..\AutonaSelectStationWindow.py" line="29" />
@@ -2329,28 +2344,28 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
     <message>
         <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="206" />
         <source>Primary Color for Player Sponsor</source>
-        <translation>プレイヤースポンサーのメインカラー</translation>
+        <translation>所属タグのメインカラー</translation>
     </message>
 </context><context>
     <name>layout_options.bracket_sponsor_color_gradient</name>
     <message>
         <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="213" />
         <source>Make Sponsor Color a Linear Gradient</source>
-        <translation>スポンサーの色を線形グラデーションにする</translation>
+        <translation>所属タグの色を線形グラデーションにする</translation>
     </message>
 </context><context>
     <name>layout_options.bracket_sponsor_gradient_direction</name>
     <message>
         <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="220" />
         <source>Background Gradient Direction for Sponsor</source>
-        <translation>スポンサー背景のグラデーション方向</translation>
+        <translation>所属タグ背景のグラデーション方向</translation>
     </message>
 </context><context>
     <name>layout_options.bracket_sponsor_secondary_color</name>
     <message>
         <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="227" />
         <source>Secondary Color for Player Sponsor</source>
-        <translation>プレイヤースポンサーのサブカラー</translation>
+        <translation>所属タグのサブカラー</translation>
     </message>
 </context><context>
     <name>layout_options.bracket_state_flag</name>
@@ -2434,7 +2449,7 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
     <message>
         <location filename="..\LayoutOptions\AutonaLayoutOptionsWindow.py" line="248" />
         <source>Color for Team 1 Sponsor Color</source>
-        <translation>チーム 1 スポンサーの色</translation>
+        <translation>チーム1 所属タグの色</translation>
     </message>
 </context><context>
     <name>notes</name>

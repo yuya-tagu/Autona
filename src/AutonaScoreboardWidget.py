@@ -500,6 +500,20 @@ class AutonaScoreboardWidget(QWidget):
         phaseGroup.layout().addWidget(phaseCombo, 1)
         self.scoreBar.layout().addWidget(phaseGroup, 2)
 
+        # Pool (phase group) sits between phase and match. Kept as its own
+        # state key (`score.N.pool`) instead of being concatenated into the
+        # phase text; overlays join them for display.
+        poolGroup = QWidget()
+        poolGroup.setLayout(QHBoxLayout())
+        poolGroup.layout().setContentsMargins(0, 0, 0, 0)
+        poolGroup.layout().setSpacing(UI.SPACE_SM)
+        poolLabel = self.scoreColumn.findChild(QLabel, "label_pool")
+        self.poolCombo = self.scoreColumn.findChild(QComboBox, "pool")
+        poolLabel.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        poolGroup.layout().addWidget(poolLabel)
+        poolGroup.layout().addWidget(self.poolCombo, 1)
+        self.scoreBar.layout().addWidget(poolGroup, 1)
+
         matchGroup = QWidget()
         matchGroup.setLayout(QHBoxLayout())
         matchGroup.layout().setContentsMargins(0, 0, 0, 0)
@@ -684,19 +698,30 @@ class AutonaScoreboardWidget(QWidget):
 
         self.teamsSwapped = False
 
-        # Add default and user tournament phase title files
+        # Add default and user tournament phase title files. Templated
+        # entries (the "group" pool template, "予選プール{0}") belong to the
+        # pool combo now that the pool is a separate state key.
         self.phaseCombo.addItem("")
 
         for key in AutonaLocaleHelper.phaseNames.keys():
             phaseString = AutonaLocaleHelper.phaseNames[key]
 
             if "{0}" in phaseString:
-                for letter in ["A", "B", "C", "D"]:
-                    if self.phaseCombo.findText(phaseString.format(letter)) < 0:
-                        self.phaseCombo.addItem(phaseString.format(letter))
-            else:
-                if self.phaseCombo.findText(phaseString) < 0:
-                    self.phaseCombo.addItem(phaseString)
+                continue
+            if self.phaseCombo.findText(phaseString) < 0:
+                self.phaseCombo.addItem(phaseString)
+
+        # Generic pool candidates from the "group" template; the real pool
+        # names of the loaded tournament are prepended on
+        # tournament_phases_updated (see _UpdatePoolCandidates).
+        self.poolCombo.addItem("")
+        groupTemplate = AutonaLocaleHelper.phaseNames.get("group", "")
+        if "{0}" in groupTemplate:
+            for letter in ["A", "B", "C", "D"]:
+                if self.poolCombo.findText(groupTemplate.format(letter)) < 0:
+                    self.poolCombo.addItem(groupTemplate.format(letter))
+        AutonaTournamentDataProvider.instance.signals.tournament_phases_updated.connect(
+            self._UpdatePoolCandidates)
 
         self.matchCombo.addItem("")
 
@@ -857,6 +882,38 @@ class AutonaScoreboardWidget(QWidget):
         finally:
             self.matchCombo.blockSignals(False)
 
+    def _UpdatePoolCandidates(self, phases):
+        """Prepend the loaded tournament's real pool names to the pool combo
+        (after the leading empty item), replacing those from the previously
+        loaded tournament. Generic template candidates (予選プールA-D) stay."""
+        newItems = []
+        for phase in (phases or []):
+            groups = phase.get("groups") or []
+            # Single-group phases have no meaningful pool name.
+            if len(groups) < 2:
+                continue
+            for group in groups:
+                name = group.get("name") or ""
+                if name and name not in newItems:
+                    newItems.append(name)
+        oldItems = getattr(self, "_tournamentPoolItems", [])
+        if oldItems == newItems:
+            return
+        self.poolCombo.blockSignals(True)
+        try:
+            for item in oldItems:
+                index = self.poolCombo.findText(item)
+                # Keep the entry the operator currently has selected.
+                if index >= 0 and self.poolCombo.currentText() != item:
+                    self.poolCombo.removeItem(index)
+            self._tournamentPoolItems = []
+            for offset, item in enumerate(newItems):
+                if self.poolCombo.findText(item) < 0:
+                    self.poolCombo.insertItem(1 + offset, item)
+                    self._tournamentPoolItems.append(item)
+        finally:
+            self.poolCombo.blockSignals(False)
+
     def _groupSectionsIntoFrames(self, topOptions, bottomOptions):
         """Re-home the construction-time rows into the single scoreboard
         section frame in their final display order (Start.gg load row on
@@ -948,7 +1005,7 @@ class AutonaScoreboardWidget(QWidget):
         matchLayout.addWidget(self.scoreBar)
 
         self.hideSponsorCheck = QCheckBox(
-            QApplication.translate("app", "スポンサー名をスコアボードに表示しない"))
+            QApplication.translate("app", "所属タグをスコアボードに表示しない"))
         self.hideSponsorCheck.setChecked(
             not SettingsManager.Get("display_options.show_sponsor", True))
         self.hideSponsorCheck.toggled.connect(self._onHideSponsorToggled)
@@ -1664,6 +1721,16 @@ class AutonaScoreboardWidget(QWidget):
                 self.phaseCombo.setCurrentText(tournament_phase)
                 self.phaseCombo.lineEdit().editingFinished.emit()
                 StateManager.Set(f"score.{self.scoreboardNumber}.phase", tournament_phase)
+
+            # Key-presence check (not truthiness): sets from a pool-less phase
+            # carry tournament_pool = "" and must CLEAR the previous pool,
+            # while a phase-only web edit (no tournament_pool key) must not
+            # touch it.
+            if "tournament_pool" in data:
+                tournament_pool = data.get("tournament_pool") or ""
+                self.poolCombo.setCurrentText(tournament_pool)
+                self.poolCombo.lineEdit().editingFinished.emit()
+                StateManager.Set(f"score.{self.scoreboardNumber}.pool", tournament_pool)
 
             scoreContainers = [self.scoreDisplay1, self.scoreDisplay2]
             if self.teamsSwapped:

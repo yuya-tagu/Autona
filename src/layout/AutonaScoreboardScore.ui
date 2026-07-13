@@ -102,6 +102,48 @@
        </layout>
       </item>
       <item>
+       <layout class="QVBoxLayout" name="verticalLayout_pool">
+        <property name="spacing">
+         <number>2</number>
+        </property>
+        <item alignment="Qt::AlignHCenter">
+         <widget class="QLabel" name="label_pool">
+          <property name="font">
+           <font>
+            <pointsize>8</pointsize>
+            <bold>true</bold>
+           </font>
+          </property>
+          <property name="text">
+           <string>POOL</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QComboBox" name="pool">
+          <property name="minimumSize">
+           <size>
+            <width>10</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="font">
+           <font>
+            <pointsize>10</pointsize>
+            <bold>false</bold>
+           </font>
+          </property>
+          <property name="editable">
+           <bool>true</bool>
+          </property>
+          <property name="placeholderText">
+           <string>Pool A1, etc</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
        <layout class="QVBoxLayout" name="verticalLayout_4">
         <property name="spacing">
          <number>2</number>
@@ -244,6 +286,7 @@
  </widget>
  <tabstops>
   <tabstop>phase</tabstop>
+  <tabstop>pool</tabstop>
   <tabstop>match</tabstop>
   <tabstop>best_of</tabstop>
   <tabstop>score_left</tabstop>

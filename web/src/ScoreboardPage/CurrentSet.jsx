@@ -46,7 +46,7 @@ export default function CurrentSet({scoreboardNumber, scoreSubmit}) {
 
     const postToX = () => {
         const tournamentName = tshState?.tournamentInfo?.tournamentName || "";
-        const phase = score?.phase || "";
+        const phase = [score?.phase, score?.pool].filter(Boolean).join(" - ");
         const match = score?.match || "";
         const streamUrl = score?.stream_url || "";
 
@@ -126,6 +126,7 @@ export default function CurrentSet({scoreboardNumber, scoreSubmit}) {
                     <MatchInfoBar
                         scoreboardNumber={scoreboardNumber}
                         phase={score.phase}
+                        pool={score.pool}
                         match={score.match}
                         bestOf={score.best_of}
                         action={

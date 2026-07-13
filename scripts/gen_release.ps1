@@ -8,50 +8,29 @@ Push-Location (Join-Path $PSScriptRoot "..")
 
 New-Item -Path "Autona" -ItemType Directory
 
-Copy-Item -Recurse -Force "assets" "Autona\assets"
-
-# Already embedded inside release exe
-Remove-Item -Path "Autona\assets\versions.json" -Force
-
-# Strip runtime logs that may contain personal data (tournament URLs, etc.)
-Remove-Item -Path "Autona\assets\log.txt", "Autona\assets\log_error.txt" -Force -ErrorAction SilentlyContinue
-
-# Strip the third-party controller photo DB (ControllerDatabase-main): the
-# images come from manufacturer manuals / archive.org scans with no license,
-# so they must not be redistributed. The controller feature itself was
-# removed from the codebase (PR #118); this guard stays because the folder
-# may still exist locally on dev machines and would otherwise be shipped
-# by the blanket assets/ copy above.
-Remove-Item -Recurse -Force "Autona\assets\controller" -ErrorAction SilentlyContinue
-
-# Strip untracked leftovers that the blanket assets/ copy would otherwise
-# ship (runtime temp files, locally downloaded data).
-Remove-Item -Path "Autona\assets\characters.json.tmp" -Force -ErrorAction SilentlyContinue
-
-# Copy layout excluding game_images and symlinks
-Get-ChildItem -Path "layout" -Recurse | Where-Object {
-    $_.FullName -notmatch "layout\\game_images" -and 
-    $_.FullName -notmatch "layout\\game_screenshots" -and 
-    -not $_.Attributes.HasFlag([System.IO.FileAttributes]::ReparsePoint)
-} | ForEach-Object {
-    $destination = $_.FullName.Replace("layout", "Autona\layout")
-    if ($_.PSIsContainer) {
-        New-Item -ItemType Directory -Path $destination -Force
-    } else {
-        Copy-Item -Path $_.FullName -Destination $destination -Force
+# Copy ONLY git-tracked files for assets/, layout/ and user_data/. These
+# trees double as runtime storage: the app writes downloaded / personal data
+# into them (tournament logo layout/logo.png, designer projects layout/custom/,
+# rulesets.json, logs, *.tmp, uploaded avatars, copyrighted game images...).
+# A blanket folder copy shipped whatever the dev machine had fetched during
+# testing, so the release must contain the tracked defaults only. Missing
+# runtime files are re-seeded on first run (logo: Window.__init__; personal
+# data: SettingsManager / AutonaPlayerDB).
+# [System.IO.File]::Copy (not Copy-Item) because tracked filenames may
+# contain PowerShell wildcard chars — Copy-Item silently skipped
+# user_data\player_avatar\sponsor[space]gamerTag_png.txt. .NET needs
+# absolute paths ($PWD) since its CWD is not synced with Push-Location.
+foreach ($tree in "assets", "layout", "user_data") {
+    git ls-files $tree | ForEach-Object {
+        $rel = $_ -replace "/", "\"
+        $dst = Join-Path $PWD.Path "Autona\$rel"
+        New-Item -ItemType Directory -Path (Split-Path $dst) -Force | Out-Null
+        [System.IO.File]::Copy((Join-Path $PWD.Path $rel), $dst, $true)
     }
 }
 
-# Copy ONLY git-tracked user_data files. This deliberately excludes both
-# personal data (settings.json, local_players.json, tournament_banner.png,
-# uploaded avatars/sponsor/team logos) and copyrighted game assets — all of
-# which are gitignored. Missing personal files are regenerated as empty
-# defaults on first run (see SettingsManager / AutonaPlayerDB).
-git ls-files user_data | ForEach-Object {
-    $dst = Join-Path "Autona" $_
-    New-Item -ItemType Directory -Path (Split-Path $dst) -Force | Out-Null
-    Copy-Item -Path $_ -Destination $dst -Force
-}
+# Tracked but already embedded inside the release exe
+Remove-Item -Path "Autona\assets\versions.json" -Force
 
 Copy-Item -Recurse -Force "web\build" "Autona\web\build"
 # Legal document set: LICENSE (upstream MIT attribution), TERMS.md (end-user

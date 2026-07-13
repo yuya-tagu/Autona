@@ -15,13 +15,15 @@ let matchNamesCache = null;
  * GET /match-names) and Best Of. Every field submits on commit — there is
  * no separate submit button (desktop editingFinished parity).
  */
-export default function MatchInfoBar({scoreboardNumber, phase, match, bestOf, action}) {
+export default function MatchInfoBar({scoreboardNumber, phase, pool, match, bestOf, action}) {
     const [localPhase, setLocalPhase] = React.useState(phase ?? "");
+    const [localPool, setLocalPool] = React.useState(pool ?? "");
     const [localMatch, setLocalMatch] = React.useState(match ?? "");
     const [candidates, setCandidates] = React.useState({phase: [], match: []});
     const {run} = useApiAction();
 
     React.useEffect(() => { setLocalPhase(phase ?? ""); }, [phase]);
+    React.useEffect(() => { setLocalPool(pool ?? ""); }, [pool]);
     React.useEffect(() => { setLocalMatch(match ?? ""); }, [match]);
 
     React.useEffect(() => {
@@ -48,6 +50,11 @@ export default function MatchInfoBar({scoreboardNumber, phase, match, bestOf, ac
     const submitPhase = (value) => {
         if ((value ?? "") !== (phase ?? "")) {
             submitField({phase: value ?? ""});
+        }
+    };
+    const submitPool = (value) => {
+        if ((value ?? "") !== (pool ?? "")) {
+            submitField({pool: value ?? ""});
         }
     };
     const submitMatch = (value) => {
@@ -82,6 +89,17 @@ export default function MatchInfoBar({scoreboardNumber, phase, match, bestOf, ac
                 onBlur={() => submitPhase(localPhase)}
                 sx={comboSx}
                 renderInput={(params) => <TextField {...params} label={i18n.t("phase")} />}
+            />
+            <Autocomplete
+                freeSolo
+                size="small"
+                options={[]}
+                inputValue={localPool}
+                onInputChange={(e, v) => setLocalPool(v ?? "")}
+                onChange={(e, v) => submitPool(v)}
+                onBlur={() => submitPool(localPool)}
+                sx={comboSx}
+                renderInput={(params) => <TextField {...params} label={i18n.t("pool")} />}
             />
             <Autocomplete
                 freeSolo

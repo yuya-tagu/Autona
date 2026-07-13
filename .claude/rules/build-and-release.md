@@ -74,6 +74,11 @@ release だけを publish し、アップデーターはそちらを参照する
   （同値なら「最新です」になる＝正常）
 - 公開 ZIP に Python ソース（`src/*.py`）は含まれない（`gen_release.ps1` が同梱
   するのは assets / layout / user_data / web/build / LICENSE / Autona.exe / **`_internal/`** のみ）
+- **assets / layout / user_data は git-tracked ファイルのみ同梱**（`git ls-files` ベース）。
+  実行時にダウンロード・生成されるデータ（大会ロゴ `layout/logo.png`、デザイナー成果物
+  `layout/custom/`、`rulesets.json`、ログ、`*.tmp`、アップロード画像、ゲーム画像等）は
+  untracked / gitignored のため自動的に除外される。デフォルトは初回起動時に再生成される
+  （ロゴ: `Window.__init__` が `assets/icons/icon.png` からシード）
 
 ### アップデート挙動（外部ヘルパープロセス方式）
 
