@@ -25,6 +25,8 @@ __pycache__/
 dist
 assets/log.txt
 assets/log_error.txt
+# Written by the update helper (apply_update.ps1) on installed machines
+assets/update_log.txt
 layout_backup*
 layout_custom*
 .idea/
