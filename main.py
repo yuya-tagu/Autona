@@ -30,6 +30,41 @@ if sys.platform == "win32":
     except Exception:
         pass
 
+# Refuse to start while the external update helper (apply_update.ps1) is
+# mirroring the new version over this very install dir. The helper relaunches
+# the app itself when done; starting manually in that window would run a
+# half-copied install and, worse, trigger CleanupUpdateLeftovers, which would
+# delete the helper's staging dir mid-robocopy and lose the update (happened
+# on the v1.3.0 E2E). The helper holds update_in_progress.lock with an
+# exclusive share mode; the same check lives in src/AutonaUpdater.py
+# (_UpdateInFlight) — duplicated here because `import src` boots Qt and every
+# singleton, which is exactly what must not happen yet. Keep both in sync.
+if getattr(sys, "frozen", False):
+    def _update_in_flight():
+        base = (os.environ.get("TEMP") or os.environ.get("TMP")
+                or r"C:\Windows\Temp")
+        lock = os.path.join(base, "autona_update", "update_in_progress.lock")
+        if not os.path.exists(lock):
+            return False
+        try:
+            os.remove(lock)   # held share-none by the helper -> OSError
+            return False      # deletable = stale lock from a crashed helper
+        except OSError:
+            return True
+
+    if _update_in_flight():
+        try:
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(
+                None,
+                "アップデートを適用中です。完了すると自動で再起動します。\n"
+                "An update is being applied. Autona will restart "
+                "automatically when it finishes.",
+                "Autona", 0x40)  # MB_OK | MB_ICONINFORMATION
+        except Exception:
+            pass
+        sys.exit(0)
+
 import src
 import multiprocessing
 import signal

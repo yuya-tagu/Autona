@@ -70,6 +70,12 @@ _CREATE_NO_WINDOW = 0x08000000
 # that still used the rename-aside install path.
 _LEGACY_RENAME_SUFFIX = ".autona_old"
 
+# Lock file the external helper (apply_update.ps1) holds with an exclusive
+# share mode for its entire run. While held, a freshly started app must not
+# purge the workdir (CleanupUpdateLeftovers below) and refuses to start at all
+# (gate in main.py — duplicated there because importing src boots Qt).
+_UPDATE_LOCK_NAME = "update_in_progress.lock"
+
 
 def _is_frozen() -> bool:
     return getattr(sys, "frozen", False)
@@ -214,6 +220,23 @@ def _LaunchHelper(script: Path, zip_path: Path, install_dir: Path,
     )
 
 
+def _UpdateInFlight() -> bool:
+    """True while the external helper holds the exclusive workdir lock.
+
+    The helper opens the lock file with FileShare.None, so deleting it raises
+    a sharing violation for as long as the helper runs. A lock file that CAN
+    be deleted is a stale leftover from a crashed helper — remove it and
+    report no update in flight."""
+    lock = _update_workdir() / _UPDATE_LOCK_NAME
+    if not lock.exists():
+        return False
+    try:
+        lock.unlink()
+        return False
+    except OSError:
+        return True
+
+
 def CleanupUpdateLeftovers():
     """Purge stragglers from older update runs and the temp workdir.
 
@@ -225,6 +248,13 @@ def CleanupUpdateLeftovers():
     if not _is_frozen():
         return
     try:
+        # Never purge under a live update: deleting the helper's staging dir
+        # mid-robocopy loses the update (v1.3.0 E2E, robocopy exit 11). The
+        # main.py gate normally prevents us from running at all in this state;
+        # this covers the launch-before-lock race.
+        if _UpdateInFlight():
+            logger.info("update helper is running; skipping leftover cleanup")
+            return
         # Temp workdir from the external helper (zip/staging/script). The helper
         # self-deletes its folder, but clean it here as a backstop.
         try:
