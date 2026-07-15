@@ -93,13 +93,14 @@ Get-Content _internal/assets/versions.json -Raw   # "program" が新バージョ
 （ソース非公開配布と非両立。ATTRIBUTIONS.md 参照）。
 
 `gen_release.ps1` は `$PSScriptRoot` 基準で CWD 非依存（ルートから `.\scripts\gen_release.ps1` で実行可）。
-ただし **旧成果物の掃除が必須**: `Compress-Archive -Update` は既存 zip に追記更新するため、
-古い zip が残っていると削除済みファイルが zip 内に残留する。staging ディレクトリ `Autona/` も同様。
+旧 staging `Autona/` と旧 zip はスクリプト冒頭で自動削除される（`Compress-Archive -Update` の
+残留事故はスクリプト側で根絶済み）。zip は .NET ZipArchive で **エントリ名を `/` 区切り**で
+生成し、末尾で全エントリを自己検証する（`OK: N entries, all with '/' separators` が出ること）。
+**`Compress-Archive` に戻してはならない**: PS 5.1 では `\` 区切りエントリになり、インストール済み
+ヘルパー apply_update.ps1 が 1 ファイルも展開できず自動更新が無音で不発になる（v1.3.0 で実際に発生）。
 
 ```powershell
 cd C:\Users\ayuyt\Work\30_Products\Autona
-Remove-Item -Recurse -Force ./Autona -ErrorAction SilentlyContinue
-Remove-Item -Force ./release-windows.zip -ErrorAction SilentlyContinue
 .\scripts\gen_release.ps1
 Remove-Item -Recurse -Force ./Autona -ErrorAction SilentlyContinue   # staging 掃除
 "ZIP: {0:N1} MB" -f ((Get-Item release-windows.zip).Length / 1MB)    # 380 MB 前後が正常（WebEngine 同梱）
@@ -128,8 +129,19 @@ gh auth switch --user yuyat-highfield   # 復元を忘れない
 publish 直後に、**旧バージョンの exe からアプリ内アップデータで新リリースへ実際に更新できる**ことを確認する（実機確認はユーザーが行う）。
 
 - 旧バージョン一式（`Autona.exe` + `_internal/` ほか）を退避コピーしておき、そこから起動 → 更新ダイアログ → 「ダウンロードしてインストール」を実行
-- 成功判定: 再起動後にバージョン表記が新版になり、`assets/update_log.txt` の末尾に `waiting for pid → robocopy ok → update complete` が記録されている
+- **アプリ終了後、自動で再起動されるまでアプリを手動起動しない**（展開＋robocopy に
+  数分かかる。特に OneDrive 配下のインストール先は同期フックで大幅に遅い）。
+  v1.2.x 以前の世代には進行中ロック保護が無く、途中起動すると起動時掃除が
+  staging を削除して更新が失われる（v1.3.0 E2E で発生。v1.3.1+ は main.py の
+  起動ゲートが「適用中」メッセージを出して保護する）
+- 成功判定: **再起動後にバージョン表記が新版になっていること**（これが最終判定。ログの
+  `update complete` だけでは不十分 — v1.3.0 では zip エントリ名が `\` 区切りだったため
+  展開 0 件のまま robocopy が exit 0 で「成功」し、`update complete` が記録されつつ
+  旧バージョンが再起動された）。加えて `assets/update_log.txt` の末尾に
+  `waiting for pid → robocopy ok → update complete` が記録されていること
 - `update_log.txt` にヘルパーのログ行が 1 行も増えていない場合、ヘルパー（apply_update.ps1）自体が起動していない（v1.1.0 で踏んだ DETACHED_PROCESS 事故のパターン）
+- `staging has no Autona.exe after extraction` が記録されている場合、zip のレイアウト異常
+  （エントリ名の区切り文字・ルートフォルダ名）。手順 7 の自己検証をすり抜けていないか確認する
 
 背景: 更新時に動くアップデータは**インストール済みの旧バージョン側**のコード。この確認を怠ると、壊れたアップデータを持つ世代が積み重なり、全ユーザーに手動更新を強いることになる（v1.0.7→v1.1.0 で実際に発生）。
 
@@ -149,5 +161,6 @@ publish 直後に、**旧バージョンの exe からアプリ内アップデ�
 | ネイティブコマンドが偽エラー | PS 5.1 の `2>&1` が stderr を ErrorRecord 化 | 大原則に記載 |
 | push が `Repository not found` | アクティブ gh アカウントが `yuyat-highfield` | 全 push/fetch/publish でアカウントダンス（手順 1/2/8） |
 | 日本語リリースノートの文字化け | `-Notes` 引数渡し | `--notes-file`（UTF-8）に統一（手順 8） |
-| 旧ファイルが zip に残留 | `Compress-Archive -Update` の追記仕様 | zip / staging の事前削除（手順 7） |
+| 旧ファイルが zip に残留 | `Compress-Archive -Update` の追記仕様 | gen_release.ps1 冒頭で zip / staging を自動削除（手順 7） |
 | v1.0.7→v1.1.0 自動更新が無音で不発 | powershell.exe を `DETACHED_PROCESS` 付きで spawn するとエンジン起動前に exit 0 で即死（`CREATE_NO_WINDOW` は併用時無視） | AutonaUpdater の creationflags から DETACHED_PROCESS を除去 + 自動更新 E2E 確認（手順 9） |
+| v1.2.x→v1.3.0 自動更新が無音で不発（「update complete」ログ付きで旧版のまま） | PS 5.1 の `Compress-Archive` が zip エントリ名を `\` 区切りで書くため、`/` 前提のヘルパーが全エントリをスキップ → 空 staging を robocopy が exit 0 で「成功」 | gen_release.ps1 を .NET ZipArchive + `/` 区切り明示 + 自己検証に変更。apply_update.ps1 に区切り正規化と「staging に exe 不在なら fallback」ガードを追加（手順 7・9） |

@@ -6,6 +6,11 @@
 # (mirrors publish_release.ps1).
 Push-Location (Join-Path $PSScriptRoot "..")
 
+# Start from a clean slate: a leftover staging dir would make New-Item fail,
+# and a leftover zip must never be appended to (see the zip note below).
+Remove-Item -Path "Autona" -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -Path "release-windows.zip" -Force -ErrorAction SilentlyContinue
+
 New-Item -Path "Autona" -ItemType Directory
 
 # Copy ONLY git-tracked files for assets/, layout/ and user_data/. These
@@ -49,6 +54,39 @@ Copy-Item -Force "Autona.exe" "Autona\Autona.exe"
 # where everything was embedded inside a single ~250 MB Autona.exe.
 Copy-Item -Recurse -Force "_internal" "Autona\_internal"
 
-Compress-Archive -Path "Autona" -DestinationPath "release-windows.zip" -Update
+# Build the zip with .NET ZipArchive and EXPLICIT forward-slash entry names.
+# Do NOT use Compress-Archive or ZipFile::CreateFromDirectory here: on Windows
+# PowerShell 5.1 / .NET Framework both write entry names with backslash
+# separators ("Autona\_internal\..."). The installed update helper
+# (apply_update.ps1) strips the leading "Autona/" by looking for '/', so a
+# backslash zip extracts ZERO files and the auto-update silently no-ops
+# (this exact bug shipped as the v1.3.0 release asset and broke v1.2.x
+# auto-updates). The zip spec (APPNOTE 4.4.17) mandates '/' as well.
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zipPath = Join-Path $PWD.Path "release-windows.zip"
+$stagingRoot = Join-Path $PWD.Path "Autona"
+$zip = [System.IO.Compression.ZipFile]::Open($zipPath, [System.IO.Compression.ZipArchiveMode]::Create)
+try {
+    Get-ChildItem -LiteralPath $stagingRoot -Recurse -File | ForEach-Object {
+        $rel = $_.FullName.Substring($stagingRoot.Length + 1) -replace "\\", "/"
+        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+            $zip, $_.FullName, "Autona/$rel",
+            [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+    }
+} finally {
+    $zip.Dispose()
+}
+
+# Self-check: every entry must contain '/' or the update helper skips it.
+$zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+try {
+    $bad = @($zip.Entries | Where-Object { $_.FullName -notmatch "/" })
+    if ($bad.Count -gt 0) {
+        throw "release zip has $($bad.Count) entries without '/' separators (helper would skip them), e.g. '$($bad[0].FullName)'"
+    }
+    Write-Host ("release-windows.zip OK: {0} entries, all with '/' separators" -f $zip.Entries.Count)
+} finally {
+    $zip.Dispose()
+}
 
 Pop-Location

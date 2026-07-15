@@ -106,6 +106,17 @@ release だけを publish し、アップデーターはそちらを参照する
   layout は更新で上書きされる（期待動作）。旧来の `layout_backup_{time}` 退避は廃止
 - `CleanupUpdateLeftovers()`（`Autona.py` 冒頭・frozen のみ）は temp workdir 残骸と、
   旧版から移行したユーザーの legacy `Autona_old.exe` / `*.autona_old` を掃除する
+- **進行中アップデートの保護（2026-07-15 追加）**: ヘルパーは実行中
+  `%TEMP%\autona_update\update_in_progress.lock` を排他モード（FileShare.None）で
+  保持する。アプリはこのロックを検出すると (1) main.py の起動ゲートで
+  「適用中」メッセージを出して起動を中止し、(2) `CleanupUpdateLeftovers()` は
+  workdir 掃除をスキップする。ロック導入前は、インストール中に手動起動された
+  アプリの起動時掃除が **robocopy 中の staging を削除して更新が失われる**事故が
+  あった（v1.3.0 E2E、robocopy exit 11）。ヘルパー側も親 PID に加えて
+  **同名プロセス全終了を待ち**、フォールバック再起動は既存インスタンスが
+  いればスキップする（二重起動防止）。zip エントリ名は **`/` 区切り必須**
+  （gen_release.ps1 が生成時に自己検証。`\` 区切りだとヘルパーが全エントリを
+  スキップし無音で不発 = v1.3.0 で実際に発生）
 
 #### Qt 跨ぎ更新も自動更新可
 
