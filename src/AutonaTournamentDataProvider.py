@@ -19,7 +19,6 @@ class AutonaTournamentDataProviderSignals(QObject):
     entrants_updated = Signal()
     tournament_data_updated = Signal(dict)
     twitch_username_updated = Signal()
-    get_sets_finished = Signal(list)
     get_stations_finished = Signal(list)
     tournament_phases_updated = Signal(list)
     tournament_phasegroup_updated = Signal(dict)
@@ -263,7 +262,6 @@ class AutonaTournamentDataProvider(QObject):
                         {"getFinished": showFinished})
         worker.signals.result.connect(lambda data: [
             logger.info(data),
-            self.signals.get_sets_finished.emit(data),
             self.signals.sets_data_updated.emit({
                 "progress": 0,
                 "totalPages": 0,

@@ -30,7 +30,12 @@ from .SettingsManager import SettingsManager
 
 class StateManagerSignals(QObject):
     state_big_change = Signal()
-    state_updated = Signal(dict)
+    # object, not dict: PySide6 marshals dict-typed signal args into a
+    # QVariantMap *copy* on queued (cross-thread) delivery, which both wastes
+    # a deep copy per delta and can mangle non-string dict keys (the state
+    # allows them — see orjson.OPT_NON_STR_KEYS below). object passes the
+    # payload by reference; all receivers are read-only.
+    state_updated = Signal(object)
 
 class StateManager:
     lastSavedState = {}
