@@ -1,0 +1,299 @@
+/**
+ * scoreboard_BST — shared utilities
+ *
+ * Provides: game-box management, swap detection,
+ * theme-aware color adaptation, and display helpers.
+ */
+
+// ─── Game Box Management ────────────────────────────────────────
+
+function scoreBoxDisplayToggle() {
+  const boxes = document.querySelector(".score_boxes");
+  if (data.score[window.scoreboardNumber].best_of > 0) {
+    boxes.classList.add("unhidden");
+  } else {
+    boxes.classList.remove("unhidden");
+  }
+}
+
+function createGameBoxes(savedBestOf) {
+  const bestOf = data.score[window.scoreboardNumber].best_of;
+
+  if (bestOf > 0 && bestOf !== savedBestOf) {
+    let word = "", red = "", blue = "", dark = "";
+    for (let i = 1; i <= bestOf; i++) {
+      word += `<div class="game${i} box"></div>\n`;
+      red  += `<div class="game${i} box p1_won hidden"></div>\n`;
+      blue += `<div class="game${i} box p2_won hidden"></div>\n`;
+      dark += `<div class="game${i} box neither_won"></div>\n`;
+    }
+    SetInnerHtml($(".word.score_boxes"), word);
+    SetInnerHtml($(".red.score_boxes"), red);
+    SetInnerHtml($(".blue.score_boxes"), blue);
+    SetInnerHtml($(".dark.score_boxes"), dark);
+  } else if (bestOf === 0) {
+    SetInnerHtml($(".word.score_boxes"), "");
+    SetInnerHtml($(".red.score_boxes"), "");
+    SetInnerHtml($(".blue.score_boxes"), "");
+    SetInnerHtml($(".dark.score_boxes"), "");
+  }
+  return bestOf;
+}
+
+function colorInBoxes(savedGameArray) {
+  const bestOf = data.score[window.scoreboardNumber].best_of;
+  for (let i = 0; i < bestOf; i++) {
+    const p1Box = document.querySelector(`.game${i + 1}.p1_won`);
+    const p2Box = document.querySelector(`.game${i + 1}.p2_won`);
+    if (!p2Box) continue;
+
+    if (savedGameArray[i] === 1) {
+      p1Box.classList.add("unhidden");
+      p2Box.classList.remove("unhidden");
+    } else if (savedGameArray[i] === 2) {
+      p1Box.classList.remove("unhidden");
+      p2Box.classList.add("unhidden");
+    } else {
+      p1Box.classList.remove("unhidden");
+      p2Box.classList.remove("unhidden");
+    }
+  }
+}
+
+function scheduleColorInBoxes(savedGameArray) {
+  let count = 0;
+  const interval = setInterval(() => {
+    colorInBoxes(savedGameArray);
+    if (++count >= 10) clearInterval(interval);
+  }, 100);
+}
+
+// ─── Score / Game Array Tracking ────────────────────────────────
+
+function updateGameArray(savedGameArray, newP1, newP2, oldP1, oldP2) {
+  const bestOf = data.score[window.scoreboardNumber].best_of;
+  let arr = JSON.parse(localStorage.getItem("output")) || savedGameArray;
+
+  const teams = [
+    data.score[window.scoreboardNumber].team["1"],
+    data.score[window.scoreboardNumber].team["2"],
+  ];
+  newP1 = teams[0].score;
+  newP2 = teams[1].score;
+  const gameNum = newP1 + newP2;
+
+  if (gameNum === 0) arr = [];
+
+  // Score increased — record wins
+  if (newP1 > oldP1) {
+    for (let i = 0; i < newP1 - oldP1; i++)
+      arr[gameNum - (newP1 - oldP1) + i] = 1;
+  }
+  if (newP2 > oldP2) {
+    for (let i = 0; i < newP2 - oldP2; i++)
+      arr[gameNum - (newP2 - oldP2) + i] = 2;
+  }
+
+  // Score decreased — remove most recent wins
+  if (newP1 < oldP1 && oldP1 < 100) {
+    for (let i = 0; i < oldP1 - newP1; i++) {
+      const idx = arr.lastIndexOf(1);
+      if (idx !== -1) arr.splice(idx, 1);
+    }
+  }
+  if (newP2 < oldP2 && oldP2 < 100) {
+    for (let i = 0; i < oldP2 - newP2; i++) {
+      const idx = arr.lastIndexOf(2);
+      if (idx !== -1) arr.splice(idx, 1);
+    }
+  }
+
+  localStorage.setItem("output", JSON.stringify(arr));
+  return {
+    savedGameArray: arr,
+    newP1Score: newP1,
+    newP2Score: newP2,
+    p1Score: newP1,
+    p2Score: newP2,
+  };
+}
+
+// ─── Swap Detection ─────────────────────────────────────────────
+
+function comparePlayerObjects(obj1, obj2, skipKeys = ["character", "mains", "id", ""]) {
+  for (const key of Object.keys(obj1).sort()) {
+    if (skipKeys.includes(key)) continue;
+    if (!obj2.hasOwnProperty(key)) return false;
+    if (typeof obj1[key] === "object" && obj1[key] && obj2[key]) {
+      if (!comparePlayerObjects(obj1[key], obj2[key], skipKeys)) return false;
+    } else if (obj1[key] !== obj2[key]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function createSwapDetector(isTeams) {
+  let player1, player2;
+  const skipKeys = isTeams
+    ? ["seed", "character", "mains", "id", ""]
+    : ["character", "mains", "id", ""];
+
+  return function detect(savedGameArray, scores) {
+    const teams = [
+      data.score[window.scoreboardNumber].team["1"],
+      data.score[window.scoreboardNumber].team["2"],
+    ];
+    const newP1 = teams[0].player["1"];
+    const newP2 = teams[1].player["1"];
+
+    let swapped = false;
+    if (
+      player1 && player2 &&
+      comparePlayerObjects(player2, newP1, skipKeys) &&
+      comparePlayerObjects(player1, newP2, skipKeys)
+    ) {
+      swapped = true;
+      for (let i = 0; i < savedGameArray.length; i++) {
+        if (savedGameArray[i] === 1) savedGameArray[i] = 2;
+        else if (savedGameArray[i] === 2) savedGameArray[i] = 1;
+      }
+      localStorage.setItem("output", JSON.stringify(savedGameArray));
+      [scores.p1Score, scores.p2Score] = [scores.p2Score, scores.p1Score];
+    }
+
+    player1 = newP1;
+    player2 = newP2;
+    return swapped;
+  };
+}
+
+// ─── Theme-Aware Color Adaptation ───────────────────────────────
+
+function adaptColorsForTheme(t) {
+  const stylesheet = document.styleSheets[1];
+  const side = t + 1;
+  const container = document.querySelector(`.p${side}.container`);
+  const scoreContainer = document.querySelector(`.p${side}.score_container`);
+  const lightEl = document.querySelector(`.p${side}.light`);
+
+  // Defensive: DOM is static so these should always resolve, but bail
+  // instead of throwing if a selector ever comes up empty.
+  if (!container || !scoreContainer) return;
+
+  const scoreEl = scoreContainer.querySelector(".score");
+  const nameEl = container.querySelector(".name");
+  if (!scoreEl || !nameEl) return;
+
+  // Measure intensity from the container itself (theme color)
+  const color = getComputedStyle(container).backgroundColor;
+  const m = color.match(/^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/);
+  if (!m) return;
+
+  const intensity = parseInt(m[1]) * 0.299 + parseInt(m[2]) * 0.587 + parseInt(m[3]) * 0.114;
+
+  const noFilter = "none";
+  const glowFilter = "drop-shadow(0 0px 2px rgba(255, 255, 255, 0.85))";
+  const noStroke = "unset";
+  const thinStroke = "0.5px rgb(24, 24, 27)";
+
+  let textColor, filter, showLight, stroke;
+
+  if (intensity > 142) {
+    // Bright theme: dark text, slight stroke to compensate thin appearance
+    textColor = "rgb(24, 24, 27)";
+    filter = noFilter; showLight = false; stroke = thinStroke;
+  } else if (intensity > 75) {
+    // Medium theme: white text
+    textColor = "white";
+    filter = noFilter; showLight = false; stroke = noStroke;
+  } else {
+    // Dark theme: white text, glow
+    textColor = "white";
+    filter = glowFilter; showLight = true; stroke = noStroke;
+  }
+
+  scoreEl.style.color = textColor;
+  nameEl.style.color = textColor;
+
+  // Round info is shared/centered — update once on the p1 pass (t===0)
+  if (t === 0) {
+    const roundInfo = document.querySelector(".round_info");
+    if (roundInfo) roundInfo.style.color = textColor;
+    setRule(stylesheet, ".phase_label",     "-webkit-text-stroke", stroke);
+    setRule(stylesheet, ".match_label",     "-webkit-text-stroke", stroke);
+  }
+
+  setRule(stylesheet, `.p${side}.container`, "filter", filter);
+  setRule(stylesheet, `.p${side}.score_container`, "filter", filter);
+  setRule(stylesheet, `.p${side}.container .name`, "-webkit-text-stroke", stroke);
+  setRule(stylesheet, `.p${side} .score`, "-webkit-text-stroke", stroke);
+
+  if (lightEl) {
+    lightEl.classList.toggle("unhidden", showLight);
+  }
+}
+
+function setRule(stylesheet, selector, property, value) {
+  selector = selector.toLowerCase();
+  property = property.toLowerCase();
+  value = value.toLowerCase();
+  for (const rule of stylesheet.cssRules) {
+    if (rule.selectorText === selector) {
+      rule.style[property] = value;
+      return;
+    }
+  }
+  stylesheet.insertRule(`${selector} { ${property}: ${value}; }`, 0);
+}
+
+// ─── Display Helpers ────────────────────────────────────────────
+
+async function displayMatchPhase() {
+  const sb = data.score && data.score[window.scoreboardNumber];
+  // Pool is a separate state key (score.N.pool); join it for display.
+  const phase = [sb?.phase, sb?.pool].filter(Boolean).join(" - ");
+  const match = sb?.match || "";
+  const hasInfo = phase || match;
+
+  document.querySelector(".phase_label").textContent = phase;
+  document.querySelector(".match_label").textContent = match;
+  document.querySelector(".round_separator").textContent = (phase && match) ? "|" : "";
+
+  gsap.to(".round_info", { duration: 0.5, autoAlpha: hasInfo ? 1 : 0 });
+}
+
+async function renderPlayerInfo(t, team, player) {
+  const side = t + 1;
+
+  SetInnerHtml(
+    $(`.p${side}.container .name`),
+    `<span>
+      ${(player.team && data.display_options?.show_sponsor !== false) ? `<span class="sponsor">${player.team}</span>` : ""}${player.name ? await Transcript(player.name) : ""}${team.losers ? " (L)" : ""}
+    </span>`
+  );
+
+  SetInnerHtml($(`.p${side} .score`), String(team.score ?? 0));
+}
+
+async function renderTeamInfo(t, team) {
+  const side = t + 1;
+  const names = [];
+  for (const player of Object.values(team.player)) {
+    if (player && player.name) names.push(await Transcript(player.name));
+  }
+
+  SetInnerHtml(
+    $(`.p${side}.container .name`),
+    `<span>${names.join(" / ")}${team.losers ? " (L)" : ""}</span>`
+  );
+
+  SetInnerHtml($(`.p${side} .score`), String(team.score ?? 0));
+}
+
+// ─── Starting Animation (reusable timeline) ─────────────────────
+
+function buildStartingAnimation() {
+  return gsap.timeline({ paused: true })
+    .to("body", { duration: 0.5, opacity: 1, ease: "power2.out" }, 0);
+}

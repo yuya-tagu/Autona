@@ -729,9 +729,9 @@ class AutonaScoreboardWidget(QWidget):
             if self.matchCombo.findText(matchString) < 0:
                 self.matchCombo.addItem(matchString)
 
-        # The real first round (e.g. "Winners TOP300") depends on the entrant
-        # count, so it is inserted when a tournament loads.
-        self._entrantsMatchItem = None
+        # The real first rounds (e.g. "Winners TOP300") depend on the entrant
+        # count, so they are inserted when a tournament loads.
+        self._entrantsMatchItems = []
         AutonaTournamentDataProvider.instance.signals.tournament_data_updated.connect(
             self._UpdateEntrantsMatchItem)
 
@@ -855,30 +855,34 @@ class AutonaScoreboardWidget(QWidget):
                 StateManager.HasPendingChanges(self.statePrefix))
 
     def _UpdateEntrantsMatchItem(self, data):
-        """Keep a 'Winners TOP{entrants}' candidate (the real first-round
-        headcount, e.g. TOP300) at the top of the match combo, replacing the
-        one from the previously loaded tournament."""
+        """Keep the 'Winners TOP{entrants}' / 'Losers TOP{entrants}' candidates
+        (the real first-round headcount, e.g. TOP300 — both bracket sides open
+        with the full field alive) at the top of the match combo, replacing
+        those from the previously loaded tournament."""
         if not isinstance(data, dict):
             return
-        # An empty dict means "tournament cleared" -> drop the old candidate.
+        # An empty dict means "tournament cleared" -> drop the old candidates.
         numEntrants = data.get("numEntrants") or 0
-        template = AutonaLocaleHelper.matchNames.get(
-            "winners_top_n", "Winners TOP{0}")
-        newItem = template.format(numEntrants) if numEntrants > 0 else None
-        oldItem = self._entrantsMatchItem
-        if oldItem == newItem:
+        newItems = [
+            AutonaLocaleHelper.matchNames.get(key, fallback).format(numEntrants)
+            for key, fallback in (("winners_top_n", "Winners TOP{0}"),
+                                  ("losers_top_n", "Losers TOP{0}"))
+        ] if numEntrants > 0 else []
+        oldItems = self._entrantsMatchItems
+        if oldItems == newItems:
             return
         self.matchCombo.blockSignals(True)
         try:
-            if oldItem:
+            for oldItem in oldItems:
                 index = self.matchCombo.findText(oldItem)
                 # Keep the entry the operator currently has selected.
                 if index >= 0 and self.matchCombo.currentText() != oldItem:
                     self.matchCombo.removeItem(index)
-            self._entrantsMatchItem = None
-            if newItem and self.matchCombo.findText(newItem) < 0:
-                self.matchCombo.insertItem(1, newItem)
-                self._entrantsMatchItem = newItem
+            self._entrantsMatchItems = []
+            for offset, newItem in enumerate(newItems):
+                if self.matchCombo.findText(newItem) < 0:
+                    self.matchCombo.insertItem(1 + offset, newItem)
+                    self._entrantsMatchItems.append(newItem)
         finally:
             self.matchCombo.blockSignals(False)
 

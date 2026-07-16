@@ -45,6 +45,7 @@ DEFAULT_DESIGN = "scoreboard_crewbattle"
 
 # Friendlier labels than the prettified folder name where it helps.
 DESIGN_DISPLAY_NAMES = {
+    "scoreboard_BST": "BST",
     "scoreboard_Universal": "Universal",
     "scoreboard_crewbattle": "Crew Battle",
     "scoreboard_simple": "Simple",
@@ -57,6 +58,7 @@ DESIGN_DISPLAY_NAMES = {
 # (1v1 / team), while crewbattle is the board-3 stock-based crew overlay.
 # Edit here when adding a design; unknown designs fall back to "—".
 DESIGN_META = {
+    "scoreboard_BST": ("1v1 / チーム", "汎用（全ゲーム）"),
     "scoreboard_Universal": ("1v1 / チーム", "汎用（全ゲーム）"),
     "scoreboard_simple": ("1v1 / チーム", "汎用（全ゲーム）"),
     "scoreboard_topleft": ("1v1 / チーム", "汎用（全ゲーム）"),

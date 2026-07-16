@@ -1,4 +1,5 @@
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 import requests
 import os
@@ -560,12 +561,18 @@ class StartGGDataProvider(TournamentDataProvider):
             logger.error(traceback.format_exc())
             return {}
 
+    # Concurrent page fetches for the set list: a browser-like burst the
+    # internal GQL endpoint sees from normal site usage (the official API
+    # allows 80 req/min, which even a 10-page fetch stays well under).
+    _SETS_FETCH_WORKERS = 4
+
     def GetMatches(self, getFinished=False, phaseGroupIds=None, progress_callback=None, cancel_event=None):
         from ..Helpers.AutonaStatusManager import AutonaStatusManager
         status_token = AutonaStatusManager.push(
             "Start.gg からセット一覧を取得中...")
+        final_data = []
         try:
-            logger.info("Get matches", getFinished)
+            logger.info(f"Get matches (getFinished={getFinished})")
             states = [1, 6, 2]
 
             if getFinished:
@@ -580,15 +587,8 @@ class StartGGDataProvider(TournamentDataProvider):
             if phaseGroupIds:
                 filters["phaseGroupIds"] = phaseGroupIds
 
-            final_data = []
-
-            page = 1
-            totalPages = 1
-
-            logger.info("Fetching sets")
-
-            while page <= totalPages and (cancel_event is None or not cancel_event.is_set()):
-                data = self.QueryRequests(
+            def fetchPage(page):
+                return self.QueryRequests(
                     "https://www.start.gg/api/-/gql",
                     type=requests.post,
                     jsonParams={
@@ -603,32 +603,81 @@ class StartGGDataProvider(TournamentDataProvider):
                     }
                 )
 
-                totalPages = deep_get(
-                    data, "data.event.sets.pageInfo.totalPages", 0)
-
-                sets = deep_get(data, "data.event.sets.nodes", [])
-                newSets = []
-
-                for _set in sets:
-                    parsed = self.ParseMatchDataNewApi(_set)
-                    final_data.append(parsed)
-                    newSets.append(parsed)
-
+            def report(done, totalPages):
                 if progress_callback:
-                    logger.info(f"progress_callback: {page}, {totalPages}")
-                    progress_callback(page, totalPages)
-
+                    progress_callback(done, totalPages)
                 AutonaStatusManager.update(
                     status_token,
-                    f"Start.gg からセット一覧を取得中... ({page}/{totalPages})",
-                    progress=page, total=totalPages)
+                    f"Start.gg からセット一覧を取得中... ({done}/{totalPages})",
+                    progress=done, total=totalPages)
 
-                page += 1
-                logger.info(f"Fetching sets... {page}/{totalPages}")
-            return (final_data)
+            logger.info("Fetching sets")
+
+            # Page 1 synchronously to learn the page count. nodes None (as
+            # opposed to []) marks a failed page — QueryRequests returns {}
+            # once its own retries are exhausted.
+            data = fetchPage(1)
+            totalPages = deep_get(
+                data, "data.event.sets.pageInfo.totalPages", 0)
+            pageNodes = {1: deep_get(data, "data.event.sets.nodes", None)}
+            report(1, totalPages)
+
+            # Remaining pages concurrently. Network only in the pool; parsing
+            # stays on this worker thread. No context manager: on cancel we
+            # abandon in-flight requests instead of joining them (a page deep
+            # in its retry backoff would otherwise block for tens of seconds).
+            if totalPages > 1 and (cancel_event is None or not cancel_event.is_set()):
+                pool = ThreadPoolExecutor(
+                    max_workers=self._SETS_FETCH_WORKERS)
+                try:
+                    futures = {pool.submit(fetchPage, p): p
+                               for p in range(2, totalPages + 1)}
+                    done = 1
+                    for future in as_completed(futures):
+                        pageNodes[futures[future]] = deep_get(
+                            future.result(), "data.event.sets.nodes", None)
+                        done += 1
+                        report(done, totalPages)
+                        if cancel_event is not None and cancel_event.is_set():
+                            break
+                finally:
+                    pool.shutdown(wait=False, cancel_futures=True)
+
+            if cancel_event is not None and cancel_event.is_set():
+                return final_data
+
+            # One sequential retry round for failed pages: a transient
+            # throttle during the burst would otherwise silently drop their
+            # sets (the old sequential loop had the same blind spot).
+            for page in [p for p, nodes in pageNodes.items() if nodes is None]:
+                pageNodes[page] = deep_get(
+                    fetchPage(page), "data.event.sets.nodes", None)
+            stillFailed = sorted(
+                p for p, nodes in pageNodes.items() if nodes is None)
+            if stillFailed:
+                logger.error(
+                    f"GetMatches: pages {stillFailed} of {totalPages} failed;"
+                    " their sets are missing from the list")
+                AutonaStatusManager.update(
+                    status_token,
+                    "セット一覧の一部ページ取得に失敗しました"
+                    f" ({len(stillFailed)}/{totalPages})")
+
+            # Assemble in page order. Live brackets can shift sets across
+            # page boundaries mid-fetch, so dedupe by set id.
+            seenIds = set()
+            for page in sorted(pageNodes):
+                for _set in (pageNodes[page] or []):
+                    setId = _set.get("id")
+                    if setId is not None:
+                        if setId in seenIds:
+                            continue
+                        seenIds.add(setId)
+                    final_data.append(self.ParseMatchDataNewApi(_set))
+            return final_data
         except Exception as e:
             logger.error(traceback.format_exc())
-            return (final_data)
+            return final_data
         finally:
             AutonaStatusManager.pop(status_token)
 
@@ -687,20 +736,56 @@ class StartGGDataProvider(TournamentDataProvider):
         return ([])
 
     # Descending "players still alive" ladder for numbered losers rounds:
-    # the 2^n and 3*2^n series interleaved, one step per round. Must stay in
-    # sync with the match combo candidates
-    # (AutonaLocaleHelper.LOSERS_TOP_TOTALS plus Losers TOP8).
+    # the 2^n and 3*2^n series interleaved, one step per round, extended below
+    # 8 so the deepest rounds land on the conventional names (6 -> LQF,
+    # 4 -> LSF, 3 -> LF via TOP_NAME_REMAP). Values above 8 must stay in sync
+    # with the match combo candidates (AutonaLocaleHelper.LOSERS_TOP_TOTALS
+    # plus Losers TOP8; the sub-8 values surface as the named finals, which
+    # are combo candidates already).
     LosersTopLadder = sorted(
-        {2 ** n for n in range(3, 14)} | {3 * 2 ** n for n in range(2, 12)},
+        {2 ** n for n in range(2, 14)} | {3 * 2 ** n for n in range(0, 12)},
         reverse=True)
 
-    def RoundNumberToTopName(roundNumber, numEntrants, losers=False):
+    # Alive-count values that correspond to the conventional round names.
+    # The invariant "N = 1.5x the winners-side headcount" makes these
+    # phase-independent: the true quarter-final always happens at 12 alive
+    # (8W/4L) no matter how the event is split into phases, so a phase-local
+    # "Winners Quarter-Final" from an earlier phase converts to its honest
+    # TOP-N while the genuinely-final rounds round-trip back to their names.
+    WINNERS_TOP_NAME_REMAP = {
+        12: ("winners_quarter_final", "Winners Quarter-Final"),
+        6: ("winners_semi_final", "Winners Semi-Final"),
+        3: ("winners_final", "Winners Final"),
+    }
+    LOSERS_TOP_NAME_REMAP = {
+        8: ("losers_top8", "Losers TOP8"),
+        6: ("losers_quarter_final", "Losers Quarter-Final"),
+        4: ("losers_semi_final", "Losers Semi-Final"),
+        3: ("losers_final", "Losers Final"),
+    }
+
+    def RoundNumberToTopName(roundNumber, numEntrants, losers=False,
+                             presplit=False):
         """Map a numbered double-elimination round to 'Winners TOP{N}' /
         'Losers TOP{N}', where N is the players still alive when the round
         starts, anchored at the real entrant count: with 300 entrants the
-        winners side runs TOP300 -> TOP192 -> TOP96 -> ... Returns None when
-        the notation can't be derived (unknown entrant count, non-numeric
-        round, or the walk runs past the named finals)."""
+        winners side runs TOP300 -> TOP192 -> TOP96 -> ... and the losers
+        side TOP300 -> TOP256 -> TOP192 -> ...
+
+        presplit marks a later phase whose field enters already split between
+        the winners and losers sides (a TOP64 phase seeds 32W/32L, a TOP96
+        phase 32W/64L). There the leading losers rounds eliminate before the
+        winners side ever plays, so winners round 1 skips the TOP{entrants}
+        step and starts one rung down the 3*2^n ladder: TOP64 -> Winners
+        TOP48, TOP96 -> Winners TOP48. The losers ladder is unaffected — its
+        round 1 is the phase's first elimination either way.
+
+        Alive counts that correspond to the true finals come back as the
+        conventional names instead of TOP-N (see *_TOP_NAME_REMAP): Winners
+        12/6/3 -> WQF/WSF/WF, Losers 8/6/4/3 -> TOP8/LQF/LSF/LF.
+
+        Returns None when the notation can't be derived (unknown entrant
+        count, non-numeric round, or the walk runs past the last rung)."""
         try:
             round_ = int(roundNumber)
             entrants = int(numEntrants or 0)
@@ -710,35 +795,58 @@ class StartGGDataProvider(TournamentDataProvider):
             return None
 
         if losers:
-            ladder = [v for v in StartGGDataProvider.LosersTopLadder
-                      if v < entrants]
+            # Losers round 1 starts before anyone is out: its players carry a
+            # single loss, so the whole field is still alive. Anchor the ladder
+            # at the entrant count like the winners side rather than starting a
+            # step in.
+            ladder = [entrants] + [v for v in StartGGDataProvider.LosersTopLadder
+                                   if v < entrants]
             if round_ > len(ladder):
                 return None
             value = ladder[round_ - 1]
+            remap = StartGGDataProvider.LOSERS_TOP_NAME_REMAP.get(value)
+            # ladder[0] is the raw entrant count, not an alive-count rung on
+            # the 1.5x-winners invariant — never remap it to a named round.
+            if remap and round_ > 1:
+                return AutonaLocaleHelper.matchNames.get(*remap)
             if value == 8:
                 return AutonaLocaleHelper.matchNames.get(
                     "losers_top8", "Losers TOP8")
             return AutonaLocaleHelper.matchNames.get(
                 "losers_top_n", "Losers TOP{0}").format(value)
 
-        if round_ == 1:
+        if round_ == 1 and not presplit:
             return AutonaLocaleHelper.matchNames.get(
                 "winners_top_n", "Winners TOP{0}").format(entrants)
         # Largest 3*2^n strictly below the entrant count, halved once per
-        # later round.
+        # later round (presplit: winners round 1 already sits on the ladder).
         value = 3
         while value * 2 < entrants:
             value *= 2
-        value >>= (round_ - 2)
-        if value < 6:
+        value >>= (round_ - 1) if presplit else (round_ - 2)
+        if value < 3:
             return None
+        remap = StartGGDataProvider.WINNERS_TOP_NAME_REMAP.get(value)
+        if remap:
+            return AutonaLocaleHelper.matchNames.get(*remap)
         return AutonaLocaleHelper.matchNames.get(
             "winners_top_n", "Winners TOP{0}").format(value)
 
-    def TranslateRoundName(name: str, numEntrants: int = 0):
+    def TranslateRoundName(name: str, numEntrants: int = 0,
+                           presplit: bool = False, roundNumber=None):
         """Translate a Start.gg fullRoundText. Pass the double-elimination
         bracket's headcount as numEntrants to render numbered rounds in the
-        TOP-N notation (0 keeps the plain 'Winners Round {N}' fallback)."""
+        TOP-N notation (0 keeps the plain 'Winners Round {N}' fallback);
+        presplit as in RoundNumberToTopName.
+
+        roundNumber is the set's numeric ``round`` field (negative = losers
+        side). Start.gg names the deepest rounds of EVERY phase bracket
+        WQF/WSF/WF/LQF/..., so an early phase's "Winners Semi-Final" is only
+        phase-local. With roundNumber those named rounds are pushed through
+        the same alive-count conversion as numbered ones: phase-local finals
+        become their honest TOP-N while the event's true finals land on the
+        remap values and round-trip back to the conventional names. Grand
+        Final (Reset) only exists in the last phase and stays named."""
         if name == None:
             return ""
 
@@ -754,6 +862,12 @@ class StartGGDataProvider(TournamentDataProvider):
         }
 
         if name in roundMapping:
+            if roundNumber and not name.startswith("Grand Final"):
+                topName = StartGGDataProvider.RoundNumberToTopName(
+                    abs(roundNumber), numEntrants,
+                    losers=roundNumber < 0, presplit=presplit)
+                if topName:
+                    return topName
             return AutonaLocaleHelper.matchNames.get(roundMapping.get(name))
 
         try:
@@ -761,7 +875,7 @@ class StartGGDataProvider(TournamentDataProvider):
 
             if "Winners" in name:
                 topName = StartGGDataProvider.RoundNumberToTopName(
-                    roundNumber, numEntrants)
+                    roundNumber, numEntrants, presplit=presplit)
                 if topName:
                     return topName
                 return AutonaLocaleHelper.matchNames.get("winners_round").format(roundNumber)
@@ -785,14 +899,19 @@ class StartGGDataProvider(TournamentDataProvider):
 
         # TOP-N anchor: the headcount of this set's own phase when the query
         # provides it (correct after pools), else the whole event. Only
-        # meaningful for double elimination.
+        # meaningful for double elimination. A phase smaller than the event
+        # is a later (progression) phase whose field enters pre-split between
+        # the winners and losers sides.
         topAnchor = 0
+        presplit = False
         if bracket_type == "DOUBLE_ELIMINATION":
-            topAnchor = deep_get(
-                _set, "phaseGroup.phase.numSeeds") or self.numEntrants
+            phaseSeeds = deep_get(_set, "phaseGroup.phase.numSeeds") or 0
+            topAnchor = phaseSeeds or self.numEntrants
+            presplit = 0 < phaseSeeds < self.numEntrants
 
         round_name = StartGGDataProvider.TranslateRoundName(
-            _set.get("fullRoundText"), topAnchor)
+            _set.get("fullRoundText"), topAnchor, presplit=presplit,
+            roundNumber=_set.get("round"))
 
         if bracket_type == "MATCHMAKING":
             round_name = ""
@@ -1284,16 +1403,22 @@ class StartGGDataProvider(TournamentDataProvider):
         seteventSlug = deep_get(_set, "event.slug", "")
 
         # TOP-N anchor (see _build_set_metadata). The cached event headcount
-        # only applies to sets from the currently loaded event.
+        # only applies to sets from the currently loaded event, and so does
+        # the pre-split (later phase) detection.
         topAnchor = 0
+        presplit = False
         if deep_get(_set, "phaseGroup.phase.bracketType") == "DOUBLE_ELIMINATION":
             topAnchor = deep_get(_set, "phaseGroup.phase.numSeeds") or 0
-            if not topAnchor and seteventSlug == eventSlug:
-                topAnchor = self.numEntrants
+            if seteventSlug == eventSlug:
+                presplit = 0 < topAnchor < self.numEntrants
+                if not topAnchor:
+                    topAnchor = self.numEntrants
 
         setData = {
             "id": _set.get("id"),
-            "match": StartGGDataProvider.TranslateRoundName(frt, topAnchor),
+            "match": StartGGDataProvider.TranslateRoundName(
+                frt, topAnchor, presplit=presplit,
+                roundNumber=_set.get("round")),
             "phase": phase_name,
             "pool": pool_name,
             "best_of": total_games,

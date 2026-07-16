@@ -75,6 +75,21 @@ class _MockAutonaLocaleHelper:
     }
 
 
+# --- AutonaStatusManager (lazily imported inside GetMatches) ---
+class _MockStatusManager:
+    @staticmethod
+    def push(message, **kwargs):
+        return object()
+
+    @staticmethod
+    def update(token, message=None, **kwargs):
+        pass
+
+    @staticmethod
+    def pop(token):
+        pass
+
+
 # --- AutonaGameAssetManager ---
 class _MockGameAssetManagerInstance:
     selectedGame = {"codename": "ssbu"}
@@ -150,6 +165,10 @@ def _setup_mock_modules():
         "src.Helpers.AutonaLocaleHelper": _make_mock_module(
             "src.Helpers.AutonaLocaleHelper",
             {"AutonaLocaleHelper": _MockAutonaLocaleHelper},
+        ),
+        "src.Helpers.AutonaStatusManager": _make_mock_module(
+            "src.Helpers.AutonaStatusManager",
+            {"AutonaStatusManager": _MockStatusManager},
         ),
         "src.AutonaGameAssetManager": _make_mock_module(
             "src.AutonaGameAssetManager",
@@ -744,40 +763,121 @@ class TestTranslateRoundNameTopN:
         assert StartGGDataProvider.TranslateRoundName(
             "Winners Round 6", 512) == "Winners TOP24"
 
-    def test_winners_ladder_exhausted_falls_back(self):
-        # Beyond the ladder (values < 6) the plain notation returns.
+    def test_winners_deep_rounds_remap_to_named(self):
+        # Alive counts 12/6/3 are the true finals regardless of how the
+        # event is phased; they come back as the conventional names.
         assert StartGGDataProvider.TranslateRoundName(
-            "Winners Round 8", 300) == "Winners Round 8"
+            "Winners Round 6", 300) == "Winners Quarter-Final"
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Round 7", 300) == "Winners Semi-Final"
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Round 8", 300) == "Winners Final"
+
+    def test_winners_ladder_exhausted_falls_back(self):
+        # Beyond the ladder (values < 3) the plain notation returns.
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Round 9", 300) == "Winners Round 9"
 
     def test_losers_ladder(self):
-        # Alternating 2^n / 3*2^n ladder below the entrant count.
+        # LR1 runs before the first elimination, so it is anchored at the
+        # entrant count; the alternating 2^n / 3*2^n ladder follows.
         assert StartGGDataProvider.TranslateRoundName(
-            "Losers Round 1", 300) == "Losers TOP256"
+            "Losers Round 1", 300) == "Losers TOP300"
         assert StartGGDataProvider.TranslateRoundName(
-            "Losers Round 2", 300) == "Losers TOP192"
+            "Losers Round 2", 300) == "Losers TOP256"
         assert StartGGDataProvider.TranslateRoundName(
-            "Losers Round 11", 300) == "Losers TOP8"
+            "Losers Round 3", 300) == "Losers TOP192"
+        assert StartGGDataProvider.TranslateRoundName(
+            "Losers Round 12", 300) == "Losers TOP8"
+        # Below 8 alive the rungs land on the conventional names.
+        assert StartGGDataProvider.TranslateRoundName(
+            "Losers Round 13", 300) == "Losers Quarter-Final"
+        assert StartGGDataProvider.TranslateRoundName(
+            "Losers Round 14", 300) == "Losers Semi-Final"
+        assert StartGGDataProvider.TranslateRoundName(
+            "Losers Round 15", 300) == "Losers Final"
         # Ladder exhausted -> fall back to the numbered notation.
         assert StartGGDataProvider.TranslateRoundName(
-            "Losers Round 12", 300) == "Losers Round 12"
+            "Losers Round 16", 300) == "Losers Round 16"
 
     def test_losers_full_bracket_ends_at_top8(self):
-        # Full 512 bracket: 12 numbered losers rounds ending at TOP8.
+        # Full 512 bracket: 13 numbered losers rounds ending at TOP8.
         assert StartGGDataProvider.TranslateRoundName(
-            "Losers Round 12", 512) == "Losers TOP8"
+            "Losers Round 13", 512) == "Losers TOP8"
+
+    def test_presplit_winners_skip_entrant_step(self):
+        # Later phase entered pre-split (TOP64 = 32W/32L): the leading losers
+        # round eliminates before winners round 1, so WR1 starts one rung
+        # down the 3*2^n ladder instead of at TOP{entrants}.
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Round 1", 64, presplit=True) == "Winners TOP48"
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Round 2", 64, presplit=True) == "Winners TOP24"
+        # TOP96 phase (32W/64L): winners also opens at 96/2 = 48.
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Round 1", 96, presplit=True) == "Winners TOP48"
+
+    def test_presplit_losers_unchanged(self):
+        # The losers ladder is anchor-based either way: LR1 is the phase's
+        # first elimination round with the full field still alive.
+        assert StartGGDataProvider.TranslateRoundName(
+            "Losers Round 1", 64, presplit=True) == "Losers TOP64"
+        assert StartGGDataProvider.TranslateRoundName(
+            "Losers Round 2", 64, presplit=True) == "Losers TOP48"
+
+    def test_named_rounds_convert_in_earlier_phases(self):
+        """Start.gg names each phase bracket's deepest rounds WQF/WSF/...
+        With the numeric round they convert to the event-wide alive count:
+        an early phase's phase-local final becomes its honest TOP-N."""
+        # Pool bracket's Winners Semi-Final, round 4 of a 315-entrant event.
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Semi-Final", 315, roundNumber=4) == "Winners TOP48"
+        # Pool bracket's Losers Quarter-Final, 6th losers round.
+        assert StartGGDataProvider.TranslateRoundName(
+            "Losers Quarter-Final", 315, roundNumber=-6) == "Losers TOP64"
+
+    def test_named_rounds_round_trip_in_final_phase(self):
+        """True finals sit exactly on the remap values, so converting them
+        returns the same conventional name."""
+        # TOP8 phase (presplit, anchor 8): WSF is winners round 1.
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Semi-Final", 8, presplit=True,
+            roundNumber=1) == "Winners Semi-Final"
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Final", 8, presplit=True,
+            roundNumber=2) == "Winners Final"
+        assert StartGGDataProvider.TranslateRoundName(
+            "Losers Quarter-Final", 8, presplit=True,
+            roundNumber=-2) == "Losers Quarter-Final"
+        # TOP64 final phase: WQF is winners round 3 (8 left on that side).
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Quarter-Final", 64, presplit=True,
+            roundNumber=3) == "Winners Quarter-Final"
+
+    def test_named_rounds_without_round_number_keep_names(self):
+        assert StartGGDataProvider.TranslateRoundName(
+            "Winners Semi-Final", 315) == "Winners Semi-Final"
+
+    def test_grand_final_never_converts(self):
+        assert StartGGDataProvider.TranslateRoundName(
+            "Grand Final", 315, roundNumber=3) == "Grand Final"
+        assert StartGGDataProvider.TranslateRoundName(
+            "Grand Final Reset", 315, roundNumber=4) == "Grand Final Reset"
 
     def test_generic_round_unaffected(self):
         assert StartGGDataProvider.TranslateRoundName(
             "Round 1", 300) == "Round 1"
 
     def test_metadata_uses_phase_num_seeds(self):
-        """phase.numSeeds anchors the conversion (event fallback unused)."""
+        """phase.numSeeds anchors the conversion (event fallback unused).
+        Being smaller than the event, the phase is pre-split: WR1 opens on
+        the ladder (TOP192) and WR2 is one halving further."""
         provider = _make_provider(numEntrants=1000)
         data = _new_api_set_basic()
         data["fullRoundText"] = "Winners Round 2"
         data["phaseGroup"]["phase"]["numSeeds"] = 300
         result = provider.ParseMatchDataNewApi(data)
-        assert result["round_name"] == "Winners TOP192"
+        assert result["round_name"] == "Winners TOP96"
 
     def test_metadata_falls_back_to_event_entrants(self):
         provider = _make_provider(numEntrants=300)
@@ -785,6 +885,24 @@ class TestTranslateRoundNameTopN:
         data["fullRoundText"] = "Winners Round 2"
         result = provider.ParseMatchDataNewApi(data)
         assert result["round_name"] == "Winners TOP192"
+
+    def test_metadata_smaller_phase_is_presplit(self):
+        """A phase smaller than the event (e.g. pools -> TOP64) enters
+        pre-split, so its winners round 1 skips the TOP{entrants} step."""
+        provider = _make_provider(numEntrants=315)
+        data = _new_api_set_basic()
+        data["fullRoundText"] = "Winners Round 1"
+        data["phaseGroup"]["phase"]["numSeeds"] = 64
+        result = provider.ParseMatchDataNewApi(data)
+        assert result["round_name"] == "Winners TOP48"
+
+    def test_metadata_full_size_phase_is_not_presplit(self):
+        provider = _make_provider(numEntrants=300)
+        data = _new_api_set_basic()
+        data["fullRoundText"] = "Winners Round 1"
+        data["phaseGroup"]["phase"]["numSeeds"] = 300
+        result = provider.ParseMatchDataNewApi(data)
+        assert result["round_name"] == "Winners TOP300"
 
     def test_metadata_non_double_elim_keeps_round_number(self):
         provider = _make_provider(numEntrants=300)
@@ -1125,3 +1243,73 @@ class TestSplitGfReset:
         StartGGDataProvider._split_gf_reset(finalSets, [])
         assert "2" not in finalSets
         assert finalSets["-1"] == [{"id": "l1"}, {"id": "l2"}]
+
+
+# ===========================================================================
+# Tests: GetMatches (parallel paginated set fetch)
+# ===========================================================================
+
+class TestGetMatchesPagination:
+
+    def _paged_response(self, ids, totalPages):
+        nodes = []
+        for i in ids:
+            node = _new_api_set_basic()
+            node["id"] = i
+            nodes.append(node)
+        return {"data": {"event": {"sets": {
+            "pageInfo": {"totalPages": totalPages},
+            "nodes": nodes,
+        }}}}
+
+    def _provider(self):
+        p = _make_provider()
+        p.url = "https://www.start.gg/tournament/t/event/e"
+        return p
+
+    def test_pages_assembled_in_order_with_dedupe(self):
+        """Pages land out of order (parallel fetch) but assemble by page
+        number; a set drifting across a page boundary mid-fetch appears
+        once."""
+        provider = self._provider()
+        pages = {
+            1: self._paged_response([11, 12], 3),
+            2: self._paged_response([13, 12], 3),  # 12 repeats (page shift)
+            3: self._paged_response([14], 3),
+        }
+        provider.QueryRequests = lambda *a, **kw: pages[
+            kw["jsonParams"]["variables"]["page"]]
+        result = provider.GetMatches()
+        assert [s["id"] for s in result] == [11, 12, 13, 14]
+
+    def test_failed_page_gets_second_chance(self):
+        """A page whose query exhausted its retries ({}) is re-fetched once
+        after the burst instead of silently dropping its sets."""
+        provider = self._provider()
+        page2Calls = []
+
+        def fake(*a, **kw):
+            page = kw["jsonParams"]["variables"]["page"]
+            if page == 2:
+                page2Calls.append(True)
+                if len(page2Calls) == 1:
+                    return {}
+                return self._paged_response([22], 2)
+            return self._paged_response([21], 2)
+
+        provider.QueryRequests = fake
+        result = provider.GetMatches()
+        assert sorted(s["id"] for s in result) == [21, 22]
+        assert len(page2Calls) == 2
+
+    def test_single_page_event(self):
+        provider = self._provider()
+        provider.QueryRequests = lambda *a, **kw: self._paged_response(
+            [31], 1)
+        result = provider.GetMatches()
+        assert [s["id"] for s in result] == [31]
+
+    def test_empty_event(self):
+        provider = self._provider()
+        provider.QueryRequests = lambda *a, **kw: self._paged_response([], 0)
+        assert provider.GetMatches() == []
