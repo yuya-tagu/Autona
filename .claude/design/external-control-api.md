@@ -42,7 +42,9 @@
 - ⚠️ **無認証で破壊的操作まで叩ける**。緩和は confirm（§7）と操作ログ（§2.7）のみ。LAN 外運用が発生したら ADR-001 を Revisit。
 
 ### 2.3 Content-Type
-- リクエストボディは `application/json`（**MUST**）。
+- リクエストボディは `application/json`（**SHOULD**）。サーバーは `get_json(force=True)` で
+  Content-Type が異なって/欠けていてもボディを JSON として解釈する（2026-07-16 変更。
+  OBS Advanced Scene Switcher 等、ヘッダー設定が不確実なクライアントへの保険）。
 - レスポンスは `application/json`（**MUST**。サムネ等のバイナリ返却は初回スコープ外）。
 
 ### 2.4 成功レスポンス・エンベロープ

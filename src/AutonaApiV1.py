@@ -136,8 +136,13 @@ def _require_int(value, name):
 
 
 def _json_body():
-    """Parse the JSON request body as an object (or {} when absent)."""
-    data = request.get_json(silent=True)
+    """Parse the JSON request body as an object (or {} when absent).
+
+    ``force=True`` parses the body even without a ``Content-Type:
+    application/json`` header — integration clients (e.g. the OBS Advanced
+    Scene Switcher HTTP action) don't always send one reliably.
+    """
+    data = request.get_json(force=True, silent=True)
     if data is None:
         return {}
     if not isinstance(data, dict):
@@ -199,7 +204,7 @@ def api_handler(fn):
 def _safe_params():
     # In-scope write bodies carry only small scalar params (no PII / secrets;
     # set_team_data is out of scope). Truncate defensively all the same.
-    body = request.get_json(silent=True)
+    body = request.get_json(force=True, silent=True)
     if not body:
         return {}
     text = repr(body)

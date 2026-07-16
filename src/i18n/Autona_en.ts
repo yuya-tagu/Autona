@@ -686,8 +686,16 @@
         <translation>Add a trigger (e.g. Hotkey, Scene, or WebSocket message).</translation>
     </message>
     <message>
-        <source>Add an action -&gt; Run: set the program to curl.exe (bundled with Windows), then paste everything after "curl" from the table below as the arguments.</source>
-        <translation>Add an action -&gt; Run: set the program to curl.exe (bundled with Windows), then paste everything after "curl" from the table below as the arguments.</translation>
+        <source>Add an action -&gt; HTTP, paste the URL from the table below, and set the method to POST.</source>
+        <translation>Add an action -&gt; HTTP, paste the URL from the table below, and set the method to POST.</translation>
+    </message>
+    <message>
+        <source>If the table lists a body, paste it into the body field. Leave Content-Type at its default (application/json).</source>
+        <translation>If the table lists a body, paste it into the body field. Leave Content-Type at its default (application/json).</translation>
+    </message>
+    <message>
+        <source>Requires Advanced Scene Switcher 1.30 or newer (HTTP action with a Content-Type field). The action also stores the response status and body in temporary variables, usable in follow-up conditions.</source>
+        <translation>Requires Advanced Scene Switcher 1.30 or newer (HTTP action with a Content-Type field). The action also stores the response status and body in temporary variables, usable in follow-up conditions.</translation>
     </message>
     <message>
         <source>Add an action -&gt; Switch scene and pick the target scene.</source>
@@ -742,10 +750,6 @@
         <translation>Click an icon to copy it to the clipboard, then paste it onto a Companion button.</translation>
     </message>
     <message>
-        <source>Command</source>
-        <translation>Command</translation>
-    </message>
-    <message>
         <source>Confirm</source>
         <translation>Confirm</translation>
     </message>
@@ -776,10 +780,6 @@
     <message>
         <source>Copy body</source>
         <translation>Copy body</translation>
-    </message>
-    <message>
-        <source>Copy command</source>
-        <translation>Copy command</translation>
     </message>
     <message>
         <source>Copy curl</source>
@@ -980,10 +980,6 @@
     <message>
         <source>URL</source>
         <translation>URL</translation>
-    </message>
-    <message>
-        <source>Use Run (not the HTTP action): the HTTP action discards the response and cannot set a Content-Type header, which a JSON API needs.</source>
-        <translation>Use Run (not the HTTP action): the HTTP action discards the response and cannot set a Content-Type header, which a JSON API needs.</translation>
     </message>
     <message>
         <source>Watch file</source>
