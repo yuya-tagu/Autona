@@ -29,6 +29,7 @@ import subprocess
 import sys
 import time
 import traceback
+import zipfile
 from pathlib import Path
 
 import requests
@@ -142,6 +143,11 @@ def UpdateProcedure():
     try:
         if not _is_frozen():
             return
+        # Last line of defense against spawning a second helper (the dialog
+        # already gates the download; this covers any future caller).
+        if _UpdateInFlight():
+            logger.info("update helper already running; not spawning another")
+            return
 
         install_dir = _install_dir()
         exe_name = Path(sys.executable).name          # Autona.exe
@@ -150,9 +156,18 @@ def UpdateProcedure():
         staging = workdir / "staging"
         script = workdir / HELPER_SCRIPT
 
-        # Copy the bundled helper out to the temp workdir so it isn't itself a
-        # target of the robocopy mirror back into the install dir.
-        shutil.copyfile(AutonaResolve(f"./assets/{HELPER_SCRIPT}"), script)
+        # Run the helper that ships INSIDE the downloaded zip, not the one in
+        # the install dir. The installed copy is by definition one release old,
+        # so a helper bugfix could otherwise never apply to the very update
+        # that delivers it (v1.3.0's guard-less helper had to install v1.3.1
+        # and none of v1.3.1's fixes protected that run). Same principle as
+        # Squirrel/Omaha: update logic comes from the payload. Fall back to
+        # the installed copy so a zip without the helper still updates.
+        if not _ExtractHelperFromZip(zip_path, script):
+            logger.warning(
+                f"{HELPER_SCRIPT} not found in update.zip; "
+                "falling back to the installed copy")
+            shutil.copyfile(AutonaResolve(f"./assets/{HELPER_SCRIPT}"), script)
 
         # Tell the user, then close. finished -> QApplication.exit (connected in
         # _generate_restart_messagebox). We spawn the helper after exec() so the
@@ -189,6 +204,26 @@ def UpdateProcedure():
         btRetry.clicked.connect(lambda: [retry.close(), UpdateProcedure()])
         btCancel.clicked.connect(lambda: retry.close())
         retry.exec()
+
+
+def _ExtractHelperFromZip(zip_path: Path, dest: Path) -> bool:
+    """Pull assets/apply_update.ps1 out of the downloaded release zip.
+
+    Tolerant of the leading folder name and of '\\' separators (a malformed
+    zip already burned one release), since this runs before the helper's own
+    normalization exists on disk."""
+    suffix = f"/assets/{HELPER_SCRIPT}".lower()
+    try:
+        with zipfile.ZipFile(zip_path) as zf:
+            for info in zf.infolist():
+                name = info.filename.replace("\\", "/").lower()
+                if name.endswith(suffix):
+                    with zf.open(info) as src, open(dest, "wb") as out:
+                        shutil.copyfileobj(src, out)
+                    return True
+    except Exception:
+        logger.error(traceback.format_exc())
+    return False
 
 
 def _LaunchHelper(script: Path, zip_path: Path, install_dir: Path,
@@ -483,6 +518,20 @@ class _UpdateDialog(QDialog):
             self.statusLabel.setVisible(True)
 
     def _StartDownload(self):
+        # A helper from an earlier attempt may still be installing (this app
+        # can be an instance that was already open when it started). The
+        # download writes into the helper's live workdir, so proceeding would
+        # clobber the zip/staging it is working from — the concurrent-run
+        # mess behind the v1.3.0 -> v1.3.1 failures (update_log 2026-07-16).
+        if _UpdateInFlight():
+            self.statusLabel.setText(
+                QApplication.translate(
+                    "updater",
+                    "An update is already being installed. Close Autona and "
+                    "it will restart automatically when the install finishes."))
+            self.statusLabel.setVisible(True)
+            return
+
         # Download into the temp workdir (outside the install dir) where the
         # helper expects update.zip.
         dest = _update_workdir() / "update.zip"
