@@ -40,6 +40,9 @@ from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 
 from .Helpers.AutonaDirHelper import AutonaResolve
+from .Helpers.AutonaRemoteZip import (
+    RemoteZipError, RemoteZipReader, copy_unchanged_to_staging,
+    diff_against_install, safe_dest, strip_root)
 from .SettingsManager import SettingsManager
 
 
@@ -76,6 +79,25 @@ _LEGACY_RENAME_SUFFIX = ".autona_old"
 # purge the workdir (CleanupUpdateLeftovers below) and refuses to start at all
 # (gate in main.py — duplicated there because importing src boots Qt).
 _UPDATE_LOCK_NAME = "update_in_progress.lock"
+
+# Held by _DownloadThread while a diff download is building the staging dir
+# (minutes, not seconds). Only CleanupUpdateLeftovers respects it — unlike
+# _UPDATE_LOCK_NAME it must NOT block app startup (downloading in the
+# background while the app runs is normal), so it is a separate file and the
+# main.py gate does not know about it.
+_DOWNLOAD_LOCK_NAME = "download_in_progress.lock"
+
+# Written by the diff download after it fully assembles the staging dir.
+# The helper checks it BEFORE the zip check and skips extraction; the
+# updater checks it to skip _ExtractHelperFromZip (there is no zip). The
+# name is a contract with apply_update.ps1 — pinned by
+# tests/test_diff_update_contract.py.
+_STAGING_MARKER_NAME = "staging_prebuilt.marker"
+
+# Abort the diff path when the changed set exceeds this fraction of the
+# archive (e.g. a Qt bump): one streamed full download beats holding a
+# comparable volume of Range responses in memory.
+_DIFF_MAX_FRACTION = 0.5
 
 
 def _is_frozen() -> bool:
@@ -156,14 +178,19 @@ def UpdateProcedure():
         staging = workdir / "staging"
         script = workdir / HELPER_SCRIPT
 
-        # Run the helper that ships INSIDE the downloaded zip, not the one in
-        # the install dir. The installed copy is by definition one release old,
-        # so a helper bugfix could otherwise never apply to the very update
-        # that delivers it (v1.3.0's guard-less helper had to install v1.3.1
-        # and none of v1.3.1's fixes protected that run). Same principle as
-        # Squirrel/Omaha: update logic comes from the payload. Fall back to
+        # Run the helper that ships INSIDE the downloaded payload, not the
+        # one in the install dir. The installed copy is by definition one
+        # release old, so a helper bugfix could otherwise never apply to the
+        # very update that delivers it (v1.3.0's guard-less helper had to
+        # install v1.3.1 and none of v1.3.1's fixes protected that run).
+        # Same principle as Squirrel/Omaha: update logic comes from the
+        # payload. A diff download has no zip — it already wrote both the
+        # payload helper and the staging marker to the workdir. Fall back to
         # the installed copy so a zip without the helper still updates.
-        if not _ExtractHelperFromZip(zip_path, script):
+        marker = workdir / _STAGING_MARKER_NAME
+        if marker.exists() and script.exists():
+            logger.info("diff download prepared the staging and helper")
+        elif not _ExtractHelperFromZip(zip_path, script):
             logger.warning(
                 f"{HELPER_SCRIPT} not found in update.zip; "
                 "falling back to the installed copy")
@@ -255,14 +282,13 @@ def _LaunchHelper(script: Path, zip_path: Path, install_dir: Path,
     )
 
 
-def _UpdateInFlight() -> bool:
-    """True while the external helper holds the exclusive workdir lock.
+def _LockHeld(lock: Path) -> bool:
+    """True while someone holds `lock` open without delete-sharing.
 
-    The helper opens the lock file with FileShare.None, so deleting it raises
-    a sharing violation for as long as the helper runs. A lock file that CAN
-    be deleted is a stale leftover from a crashed helper — remove it and
-    report no update in flight."""
-    lock = _update_workdir() / _UPDATE_LOCK_NAME
+    The helper opens its lock with FileShare.None and Python's open() gives
+    no FILE_SHARE_DELETE either, so unlink raises a sharing violation for as
+    long as the owner lives. A lock file that CAN be deleted is a stale
+    leftover from a crashed owner — remove it and report not held."""
     if not lock.exists():
         return False
     try:
@@ -270,6 +296,16 @@ def _UpdateInFlight() -> bool:
         return False
     except OSError:
         return True
+
+
+def _UpdateInFlight() -> bool:
+    """True while the external helper (apply_update.ps1) is installing."""
+    return _LockHeld(_update_workdir() / _UPDATE_LOCK_NAME)
+
+
+def _DownloadInFlight() -> bool:
+    """True while a diff download is assembling the staging dir."""
+    return _LockHeld(_update_workdir() / _DOWNLOAD_LOCK_NAME)
 
 
 def CleanupUpdateLeftovers():
@@ -289,6 +325,13 @@ def CleanupUpdateLeftovers():
         # this covers the launch-before-lock race.
         if _UpdateInFlight():
             logger.info("update helper is running; skipping leftover cleanup")
+            return
+        # Same protection for a diff download building the staging dir from
+        # another instance — the window is minutes long, so this race is not
+        # theoretical (a second instance's startup cleanup deleting a live
+        # workdir is exactly the v1.3.0->v1.3.1 failure shape).
+        if _DownloadInFlight():
+            logger.info("diff download in progress; skipping leftover cleanup")
             return
         # Temp workdir from the external helper (zip/staging/script). The helper
         # self-deletes its folder, but clean it here as a backstop.
@@ -364,8 +407,14 @@ class _CheckThread(QThread):
             self.error.emit(str(e))
 
 
+class _DiffCancelled(Exception):
+    """User cancelled mid-diff: abort the update, do NOT fall back to the
+    full download."""
+
+
 class _DownloadThread(QThread):
     progress = Signal(int, int)  # received, total (total=0 if unknown)
+    status = Signal(str)         # phase description for the status label
     done = Signal()
     error = Signal(str)
 
@@ -379,6 +428,173 @@ class _DownloadThread(QThread):
         self._cancel = True
 
     def run(self):
+        # Try the differential path first: fetch only the entries whose CRC
+        # differs from the local install (~6% of the archive on a typical
+        # release, measured v1.3.0->v1.3.2: 19.7 of 310.6 MB). ANY problem
+        # falls through to the full download below — diff is an optimization
+        # and must never add a failure mode.
+        try:
+            if self._TryDiffDownload():
+                return
+        except _DiffCancelled:
+            self._CleanupDiffLeftovers()
+            self.error.emit("cancelled")
+            return
+        self._FullDownload()
+
+    # ------------------------------------------------------------------
+    # Differential download
+    # ------------------------------------------------------------------
+
+    def _CleanupDiffLeftovers(self):
+        """Remove every artifact a failed/cancelled diff may have left, so
+        the full-download path (or the next attempt) starts clean and the
+        helper can never see a marker next to a half-built staging."""
+        workdir = _update_workdir()
+        for leftover in (workdir / _STAGING_MARKER_NAME,
+                         workdir / HELPER_SCRIPT):
+            try:
+                if leftover.exists():
+                    leftover.unlink()
+            except OSError:
+                pass
+        try:
+            staging = workdir / "staging"
+            if staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
+        except Exception:
+            pass
+
+    def _TryDiffDownload(self) -> bool:
+        """Returns True when the diff path fully handled the request (done
+        emitted). False → caller runs the full download. Raises
+        _DiffCancelled on user cancel."""
+        if not _is_frozen():
+            return False  # no install dir to diff against under python main.py
+
+        workdir = _update_workdir()
+        staging = workdir / "staging"
+        marker = workdir / _STAGING_MARKER_NAME
+        install_dir = _install_dir()
+        lock = None
+        try:
+            # Order matters: write the marker LAST, remove it FIRST.
+            self._CleanupDiffLeftovers()
+
+            # Held for the whole build (minutes). CleanupUpdateLeftovers in
+            # another instance skips the workdir purge while this lives.
+            lock = open(workdir / _DOWNLOAD_LOCK_NAME, "wb")
+
+            self.status.emit(QApplication.translate(
+                "updater", "Comparing files with the new version..."))
+            reader = RemoteZipReader(self.url)
+            reader.load_directory()
+
+            def cancelled():
+                return self._cancel
+
+            plan = diff_against_install(reader.entries, install_dir,
+                                        cancel_cb=cancelled)
+
+            # The helper must come from the payload even when unchanged.
+            helper_rel = f"assets/{HELPER_SCRIPT}"
+            wanted = list(plan.changed)
+            if not any(strip_root(e.name) == helper_rel for e in wanted):
+                helper_entry = next(
+                    (e for e in reader.entries
+                     if strip_root(e.name) == helper_rel), None)
+                if helper_entry is None:
+                    raise RemoteZipError("payload has no update helper")
+                wanted.append(helper_entry)
+
+            if plan.download_comp > plan.total_comp * _DIFF_MAX_FRACTION:
+                raise RemoteZipError(
+                    f"changed set too large for diff "
+                    f"({plan.download_comp / (1024*1024):.0f} MB of "
+                    f"{plan.total_comp / (1024*1024):.0f} MB)")
+            free = shutil.disk_usage(workdir).free
+            if free < plan.total_file_size + 512 * 1024 * 1024:
+                raise RemoteZipError(
+                    f"not enough temp space for staging "
+                    f"({free / (1024*1024):.0f} MB free)")
+
+            self.status.emit(QApplication.translate("updater", "Downloading..."))
+            total_dl = sum(e.comp_size for e in wanted)
+            helper_bytes = []
+
+            def sink(entry, data):
+                rel = strip_root(entry.name)
+                if rel == helper_rel:
+                    helper_bytes.append(data)
+                dest = safe_dest(staging, rel)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(data)
+
+            reader.fetch_entries(
+                wanted, sink,
+                progress_cb=lambda comp: self.progress.emit(comp, total_dl),
+                cancel_cb=cancelled)
+            if self._cancel:
+                raise _DiffCancelled()
+
+            # The helper that will install this staging must understand the
+            # marker protocol. An older helper would fail loudly on the
+            # missing zip — recoverable, but the full download just works.
+            if not helper_bytes or \
+                    _STAGING_MARKER_NAME.encode("ascii") not in helper_bytes[0]:
+                raise RemoteZipError(
+                    "payload helper does not support prebuilt staging")
+
+            copy_unchanged_to_staging(staging, install_dir, plan.unchanged,
+                                      cancel_cb=cancelled)
+
+            (workdir / HELPER_SCRIPT).write_bytes(helper_bytes[0])
+            marker.write_text(json.dumps({
+                "changed": len(plan.changed),
+                "unchanged": len(plan.unchanged),
+                "downloaded_bytes": total_dl,
+            }), encoding="utf-8")
+
+            logger.info(
+                f"diff download ok: {len(plan.changed)} changed + "
+                f"{len(plan.unchanged)} reused entries, "
+                f"{total_dl / (1024*1024):.1f} of "
+                f"{plan.total_comp / (1024*1024):.1f} MB fetched")
+            self.progress.emit(total_dl, total_dl)
+            self.done.emit()
+            return True
+        except _DiffCancelled:
+            raise
+        except RemoteZipError as e:
+            if self._cancel:
+                raise _DiffCancelled() from None
+            logger.warning(f"diff download unavailable: {e}; "
+                           "falling back to the full download")
+            self._CleanupDiffLeftovers()
+            return False
+        except Exception:
+            if self._cancel:
+                raise _DiffCancelled() from None
+            logger.warning("diff download failed; falling back to the full "
+                           "download\n" + traceback.format_exc())
+            self._CleanupDiffLeftovers()
+            return False
+        finally:
+            if lock is not None:
+                try:
+                    lock.close()
+                    (workdir / _DOWNLOAD_LOCK_NAME).unlink()
+                except OSError:
+                    pass
+
+    # ------------------------------------------------------------------
+    # Full download (pre-diff behavior, also the fallback)
+    # ------------------------------------------------------------------
+
+    def _FullDownload(self):
+        # After a failed diff attempt the label may still read "Comparing
+        # files..." — reset it to the plain download phase.
+        self.status.emit(QApplication.translate("updater", "Downloading..."))
         # Declare tmp outside the try so the except block can safely
         # reference it even if .with_suffix() somehow raises.
         tmp = self.dest.with_suffix(self.dest.suffix + ".part")
@@ -519,11 +735,12 @@ class _UpdateDialog(QDialog):
 
     def _StartDownload(self):
         # A helper from an earlier attempt may still be installing (this app
-        # can be an instance that was already open when it started). The
-        # download writes into the helper's live workdir, so proceeding would
-        # clobber the zip/staging it is working from — the concurrent-run
-        # mess behind the v1.3.0 -> v1.3.1 failures (update_log 2026-07-16).
-        if _UpdateInFlight():
+        # can be an instance that was already open when it started), or
+        # another instance may be mid-download. Both share this workdir, so
+        # proceeding would clobber the zip/staging they are working from —
+        # the concurrent-run mess behind the v1.3.0 -> v1.3.1 failures
+        # (update_log 2026-07-16).
+        if _UpdateInFlight() or _DownloadInFlight():
             self.statusLabel.setText(
                 QApplication.translate(
                     "updater",
@@ -546,9 +763,14 @@ class _UpdateDialog(QDialog):
 
         self._thread = _DownloadThread(self._asset_url, dest)
         self._thread.progress.connect(self._OnProgress)
+        self._thread.status.connect(self._OnStatus)
         self._thread.done.connect(self._OnDownloadDone)
         self._thread.error.connect(self._OnError)
         self._thread.start()
+
+    def _OnStatus(self, text):
+        self.statusLabel.setText(text)
+        self.statusLabel.setVisible(True)
 
     def _OnProgress(self, received, total):
         if total > 0:

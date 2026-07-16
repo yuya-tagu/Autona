@@ -2834,6 +2834,11 @@ Choose a different combination or clear the conflicting assignment first.</sourc
         <translation>アップデートは既に適用中です。Autona を閉じると、インストール完了後に自動で再起動します。</translation>
     </message>
     <message>
+        <location filename="..\AutonaUpdater.py" line="500" />
+        <source>Comparing files with the new version...</source>
+        <translation>新しいバージョンとの差分を確認しています…</translation>
+    </message>
+    <message>
         <location filename="..\AutonaUpdater.py" line="548" />
         <source>Downloading... {0:.1f} / {1:.1f} MB</source>
         <translation>ダウンロード中… {0:.1f} / {1:.1f} MB</translation>
