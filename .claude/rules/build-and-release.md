@@ -92,15 +92,21 @@ release だけを publish し、アップデーターはそちらを参照する
 
 1. アップデーターが `release-windows.zip` を `%TEMP%\autona_update\update.zip` に DL
 2. `UpdateProcedure()`（[src/AutonaUpdater.py](../../src/AutonaUpdater.py)）が
-   `assets/apply_update.ps1` を temp workdir にコピーし、通知ダイアログを出して
-   ヘルパーを **detached**（`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP |
-   CREATE_NO_WINDOW`）で起動 → `QApplication.exit()`
-3. ヘルパーは **親 Autona プロセス（PID）の完全終了を待つ**（= 全ファイルのロック解放）。
+   **ダウンロードした zip の中の** `assets/apply_update.ps1` を temp workdir に抽出し
+   （2026-07-16 変更。インストール済みコピーは定義上1リリース古く、ヘルパー修正が
+   「その修正を届ける更新」自身に効かない鶏と卵があった。zip に無い場合のみ
+   インストール済みコピーへフォールバック）、通知ダイアログを出して
+   ヘルパーを `CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW` で起動 →
+   `QApplication.exit()`。**`DETACHED_PROCESS` は付けない**（付けると powershell.exe が
+   スクリプト未実行のまま exit 0。v1.0.7→v1.1.0 の自動更新が無音で壊れた原因）
+3. ヘルパーは即座に**インストール画面（WinForms・タイトル `Autona Updater`）を表示**し、
+   **親 Autona プロセス（PID）の完全終了を待つ**（= 全ファイルのロック解放）。
    その後 zip を staging に展開（先頭 `Autona/` を strip・ZIP slip ガード）し、
    `robocopy /E`（**`/PURGE` なし**）で install ディレクトリへ反映。新 `Autona.exe` を
    起動して zip/staging/自分自身を後始末
-4. 失敗時（親 PID 残存・展開例外・robocopy `exit >= 8`）は**旧 exe を再起動**し
-   `assets/update_log.txt` にログを残す（ユーザーを「何も起動しない」状態にしない）
+4. 失敗時（親 PID 残存・展開例外・robocopy `exit >= 8`）は**失敗ダイアログを出してから
+   旧 exe を再起動**し `assets/update_log.txt` にログを残す（ユーザーを「何も起動しない」
+   状態にせず、かつ「黙って旧版に戻った」とも誤解させない）
 
 **ポイント:**
 - アプリ終了後に動くため、ランチャ `Autona.exe`・ロード済み `_internal/*.dll`・
@@ -111,11 +117,28 @@ release だけを publish し、アップデーターはそちらを参照する
   layout は更新で上書きされる（期待動作）。旧来の `layout_backup_{time}` 退避は廃止
 - `CleanupUpdateLeftovers()`（`Autona.py` 冒頭・frozen のみ）は temp workdir 残骸と、
   旧版から移行したユーザーの legacy `Autona_old.exe` / `*.autona_old` を掃除する
-- **進行中アップデートの保護（2026-07-15 追加）**: ヘルパーは実行中
+- **インストール中の画面（2026-07-16 追加）**: ヘルパーはスクリプト全体を通じて
+  インストール画面を表示し、展開は実ファイル数で進捗を出す。長時間ステップでは必ず
+  `Update-UI`（`Application::DoEvents`）を回す（回さないと Windows が「応答なし」表示にする）。
+  **`assets/apply_update.ps1` は UTF-8 **BOM 付き**必須** — BOM 無しだと PowerShell 5.1 が
+  ANSI（日本語環境では cp932）で読み、画面の日本語が全部文字化けする。
+  `tests/test_apply_update_encoding.py` が BOM とウィンドウタイトル契約を守る
+- **ヘルパー多重起動の禁止（2026-07-16 追加）**: 2本のヘルパーは同じ workdir を共有する
+  ため、後発の失敗時 `Invoke-Cleanup` が先発の robocopy 中の staging/zip を削除する
+  （v1.3.0→v1.3.1 毎回失敗の確定原因。update_log 実測: #2 のフォールバック掃除 17:55:48
+  → #1 の robocopy exit 11 17:56:42）。対策3層: (1) ヘルパーは排他ロックを取れなければ
+  **何も掃除せず即 exit 0**、(2) `_UpdateDialog._StartDownload` はロック検出時に
+  ダウンロード自体を拒否（DL先も共有 workdir のため）、(3) `UpdateProcedure()` 入口でも
+  ロック検出時はヘルパーを spawn しない
+- **進行中アップデートの保護（2026-07-15 追加 / 2026-07-16 改訂）**: ヘルパーは実行中
   `%TEMP%\autona_update\update_in_progress.lock` を排他モード（FileShare.None）で
   保持する。アプリはこのロックを検出すると (1) main.py の起動ゲートで
-  「適用中」メッセージを出して起動を中止し、(2) `CleanupUpdateLeftovers()` は
-  workdir 掃除をスキップする。ロック導入前は、インストール中に手動起動された
+  **何も表示せず即 `sys.exit(0)`**（インストール画面を前面に出すだけ）し、
+  (2) `CleanupUpdateLeftovers()` は workdir 掃除をスキップする。
+  **ゲートでモーダルを出してはいけない**: そのプロセス自身が `Autona.exe` であり、
+  実行中イメージは Windows が書き込みロックするため、ダイアログを読んでいる間
+  robocopy が**ランチャを置換できず** `exit >= 8` → 旧 exe 復帰 =「勝手にロールバック
+  された」に見える（ユーザー報告の根本原因）。ロック導入前は、インストール中に手動起動された
   アプリの起動時掃除が **robocopy 中の staging を削除して更新が失われる**事故が
   あった（v1.3.0 E2E、robocopy exit 11）。ヘルパー側も親 PID に加えて
   **同名プロセス全終了を待ち**、フォールバック再起動は既存インスタンスが

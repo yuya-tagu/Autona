@@ -52,17 +52,28 @@ if getattr(sys, "frozen", False):
         except OSError:
             return True
 
-    if _update_in_flight():
+    def _focus_install_window():
+        """Bring apply_update.ps1's install window to the front. Best-effort:
+        the title is the contract between the two (UI_TITLE over there)."""
         try:
             import ctypes
-            ctypes.windll.user32.MessageBoxW(
-                None,
-                "アップデートを適用中です。完了すると自動で再起動します。\n"
-                "An update is being applied. Autona will restart "
-                "automatically when it finishes.",
-                "Autona", 0x40)  # MB_OK | MB_ICONINFORMATION
+            hwnd = ctypes.windll.user32.FindWindowW(None, "Autona Updater")
+            if hwnd:
+                ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
         except Exception:
             pass
+
+    if _update_in_flight():
+        # Exit immediately, and show NOTHING of our own. This process *is*
+        # Autona.exe, and Windows locks a running image against writes, so for
+        # as long as we are alive robocopy cannot replace the launcher: the
+        # helper fails, restores the old exe, and the user reads that as the
+        # updater silently rolling them back. A modal here is the worst case —
+        # it kept this process alive for exactly as long as the user took to
+        # read it. The helper already owns a visible install window, so just
+        # surface that and get out of the way.
+        _focus_install_window()
         sys.exit(0)
 
 import src
