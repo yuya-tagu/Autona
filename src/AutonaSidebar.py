@@ -30,6 +30,7 @@ from qtpy.QtWidgets import (
     QButtonGroup,
     QFrame,
     QHBoxLayout,
+    QLabel,
     QSizePolicy,
     QToolButton,
     QVBoxLayout,
@@ -44,6 +45,11 @@ NAV_ICON_SIZE = 16
 # segment) shares this height so the sidebar reads as one tight, uniform stack.
 # Matches the game combo's fixed height (UI._WIDGET_H) set in Autona.py.
 ROW_H = 26
+# Left inset shared by a nav item's icon and a category heading's text, both
+# measured from the nav band's content edge. The heading sits flush with the
+# item's left edge (the selected row's highlight) and the icon is inset by
+# this much inside it.
+NAV_ITEM_PAD_X = 8
 
 _FORMATS = (("singles", "1v1"), ("team", "Team"), ("crew", "Crew"))
 
@@ -79,6 +85,18 @@ class AutonaSidebar(QWidget):
         root.addWidget(self._build_footer())
 
     # ── Public API (wired by the main Window) ──────────────────────
+
+    def addNavCategory(self, title: str) -> None:
+        """Append a category heading above the nav items that follow it.
+
+        A static label, not a control: the groups never collapse, so the
+        heading only has to name the run of items beneath it (Discord-style).
+        It takes no nav index — indices belong to nav items alone, so they
+        keep matching QStackedWidget page indices."""
+        label = QLabel(title)
+        label.setObjectName("navCategory")
+        label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._navLayout.insertWidget(self._navLayout.count() - 1, label)
 
     def addNavItem(self, icon: QIcon, title: str) -> int:
         """Append a feature nav item (icon + title). Returns its index, which
@@ -265,9 +283,30 @@ class AutonaSidebar(QWidget):
         QWidget#sidebarBand {{ background-color: {p['bg_secondary']}; }}
         #sidebarDivider {{ background-color: {p['border_subtle']}; border: none; }}
 
+        /* Category heading: quieter and smaller than a nav item so the run of
+           items below it reads as the label and they read as the content.
+           Zero left padding lines its text up with the nav items' left edge —
+           i.e. with the selected row's highlight — leaving the items' icons
+           inset NAV_ITEM_PAD_X inside it. (No uppercase / letter-spacing: Qt
+           QSS supports neither, and ui_constants deliberately avoids that
+           treatment on card titles.) The top margin is what separates one
+           group from the previous group's last item — the nav layout's own
+           spacing is only 1px. */
+        QLabel#navCategory {{
+            color: {p['text_muted']};
+            font-size: {UI.FONT_XS}pt;
+            font-weight: 700;
+            padding-left: 0px;
+            padding-right: {NAV_ITEM_PAD_X}px;
+            margin-top: 10px;
+            margin-bottom: 3px;
+            background: transparent;
+        }}
+
         QToolButton#navItem {{
             background: transparent; border: none; text-align: left;
-            padding: 0 10px; min-height: {ROW_H}px; border-radius: 6px;
+            padding: 0 {NAV_ITEM_PAD_X}px; min-height: {ROW_H}px;
+            border-radius: 6px;
             color: {p['text_secondary']};
             font-size: {UI.FONT_SM}pt;
         }}

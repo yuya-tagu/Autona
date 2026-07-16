@@ -48,7 +48,7 @@ export default function CurrentSet({scoreboardNumber, scoreSubmit}) {
         const tournamentName = tshState?.tournamentInfo?.tournamentName || "";
         const phase = [score?.phase, score?.pool].filter(Boolean).join(" - ");
         const match = score?.match || "";
-        const streamUrl = score?.stream_url || "";
+        const streamUrl = tshState?.stream?.url || "";
 
         const getTeamLine = (teamKey) => {
             const team = score?.team?.[teamKey];

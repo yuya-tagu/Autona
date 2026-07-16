@@ -1051,6 +1051,26 @@
         <translation>Tournament Info</translation>
     </message>
     <message>
+        <location filename="..\Autona.py" line="416" />
+        <source>Setup</source>
+        <translation>Setup</translation>
+    </message>
+    <message>
+        <location filename="..\Autona.py" line="416" />
+        <source>Display</source>
+        <translation>Display</translation>
+    </message>
+    <message>
+        <location filename="..\Autona.py" line="416" />
+        <source>Data</source>
+        <translation>Data</translation>
+    </message>
+    <message>
+        <location filename="..\Autona.py" line="301" />
+        <source>Stream Settings</source>
+        <translation>Stream Settings</translation>
+    </message>
+    <message>
         <location filename="..\AutonaThumbnailSettingsWidget.py" line="87" />
         <location filename="..\Autona.py" line="321" />
         <source>Thumbnail Settings</source>

@@ -73,7 +73,6 @@ score                                D   AutonaScoreboardManager.__init__
 │   ├── phase                        W R AutonaScoreboardWidget.ChangeSetData / AutonaWebServerActions / AutonaStatsWidget
 │   ├── pool                         W R AutonaScoreboardWidget.ChangeSetData / AutonaWebServerActions (フェーズと分離したプール名。オーバーレイは表示時に "phase - pool" を合成)
 │   ├── top_n                        W R AutonaScoreboardWidget.ChangeSetData / AutonaStatsWidget
-│   ├── stream_url                   W R AutonaScoreboardWidget(QLineEdit) / AutonaStatsWidget
 │   ├── set_id                       W   AutonaScoreboardWidget.SetFromSetData
 │   ├── auto_update                  W   AutonaScoreboardWidget.SetFromSetData / StopAutonaUpdate
 │   ├── station                      W   AutonaScoreboardWidget.SetFromSetData / StopAutonaUpdate
@@ -187,6 +186,36 @@ tournamentInfo                       W R
 ├── themeColor                       W   AutonaTournamentInfoWidget (SettingsManager から初期化)
 └── accentColor                      W   AutonaTournamentInfoWidget (SettingsManager から初期化)
 ```
+
+### `stream`
+
+配信（大会ではなく配信チャンネル）単位の設定。AutonaStreamSettingsWidget（配信設定パネル）が管理。
+
+```
+stream                               W R
+├── url                              W R AutonaStreamSettingsWidget (配信先コンボ)
+│                                        R AutonaScoreboardWidget.PostToX / AutonaResultSettingsWidget / Web UI (CurrentSet.jsx)
+├── title                            W   AutonaStreamSettingsWidget (配信タイトル)
+├── orgIconVersion                   W   AutonaStreamSettingsWidget (layout/stream_org_icon.png の mtime)
+└── orgThumbVersion                  W   AutonaStreamSettingsWidget (layout/stream_org_thumbnail.png の mtime)
+```
+
+**階層の分離**（この 3 つを混ぜないこと）:
+
+| 階層 | パネル | サブツリー | 例 |
+|------|--------|-----------|-----|
+| 大会 | 大会情報 | `tournamentInfo.*` | 大会名・日付・会場・大会アイコン/バナー |
+| 配信 | 配信設定 | `stream.*` | 配信先・配信タイトル・配信団体アイコン/サムネイル |
+| 試合 | スコアボード入力 | `score.{N}.*` | 選手・スコア・フェーズ・ラウンド |
+
+`stream.*` は非ゲート（`score.{N}` の held subtree に入れない）。過去に配信先を
+`score.{N}.stream_url` に置いていたため、(1) 「反映」を押すまで Web UI に届かない、
+(2) 全ボードへミラーすると非表示側のボードまで dirty になる、(3) 起動時の score
+サブツリー wipe で消える、という 3 つの問題が同時に出ていた。
+
+`orgIconVersion` / `orgThumbVersion` は `tournamentInfo.logoVersion` と同じ
+キャッシュバスト用 mtime。OBS オーバーレイは `/layout/stream_org_icon.png?v={version}`
+のように参照する（`layout/` は AutonaWebServer が静的配信）。**0 は未登録**を意味する。
 
 ### `notes`
 

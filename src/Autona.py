@@ -189,7 +189,12 @@ class Window(QMainWindow):
     # v15: Result Settings and Commentary swapped in the sidebar order.
     # v16: Bracket panel replaced by the Top 8 panel (AutonaTop8Widget).
     # v17: Player List panel (AutonaPlayerBrowserWidget) added below Statistics.
-    STATE_VERSION = 17
+    # v18: Stream Settings panel (AutonaStreamSettingsWidget) inserted after
+    #      Tournament Info; the stream destination / title / thumbnail moved
+    #      into it from the Tournament Info and Scoreboard panels.
+    # v19: Sidebar grouped into categories (Setup / Display / Data) and
+    #      reordered — Scoreboard leads, uncategorised.
+    STATE_VERSION = 19
     signals = WindowSignals()
 
     def __init__(self, loop=None):
@@ -285,6 +290,19 @@ class Window(QMainWindow):
         tournamentInfo.setWindowTitle(
             QApplication.translate("app", "Tournament Info"))
         self.dockWidgets.append(tournamentInfo)
+
+        # STREAM — broadcast-scoped settings (destination, title, stream org
+        # assets, YouTube thumbnail). Sits right after EVENT: the tournament
+        # metadata and the broadcast prep are both done before the event, in
+        # that order. Deliberately separate from EVENT (tournament-scoped) and
+        # SCORE (match-scoped) so each panel owns one level of the hierarchy.
+        from .AutonaStreamSettingsWidget import AutonaStreamSettingsWidget
+        streamSetting = AutonaStreamSettingsWidget()
+        streamSetting.setWindowIcon(QIcon(UI.icon_path('megaphone.svg')))
+        streamSetting.setObjectName("Stream Settings")
+        streamSetting.setWindowTitle(
+            QApplication.translate("app", "Stream Settings"))
+        self.dockWidgets.append(streamSetting)
 
         # BOARD — pick scoreboard design, tune colors, OBS setup. Placed right
         # after EVENT (it absorbs EVENT's color pickers).
@@ -394,19 +412,34 @@ class Window(QMainWindow):
         splash.set_message(splash_msgs[1], progress=0.85)
 
         # Display order of the sidebar nav items and the matching
-        # QStackedWidget pages: EVENT, SCORE, BOARD, VIDEO, RESULT,
-        # COMMS, TOP8, STATS, PLAYERS. Each entry is
-        # (panel widget, sidebar icon file).
-        self._navPanels = [
-            (tournamentInfo, 'tournament.svg'),
-            (self.scoreboard, 'scoreboard.svg'),
-            (board, 'board.svg'),
-            (thumbnailSetting, 'thumbnail.svg'),
-            (resultSetting, 'result.svg'),
-            (commentary, 'commentary.svg'),
-            (top8, 'bracket.svg'),
-            (self.statsWidget, 'stats.svg'),
-            (playerBrowser, 'players.svg'),
+        # QStackedWidget pages, grouped into categories. Each section is
+        # (category title or None, [(panel widget, sidebar icon file), ...]);
+        # a None title emits the items with no heading above them.
+        #
+        # The scoreboard leads, uncategorised: it is the one panel used
+        # continuously while a tournament runs, so it stays a single click away
+        # at a fixed spot. The categories below it follow the operator's
+        # timeline — configure the event and the broadcast up front, set up how
+        # things look, then read the data back out.
+        self._navSections = [
+            (None, [
+                (self.scoreboard, 'scoreboard.svg'),
+            ]),
+            (QApplication.translate("app", "Setup"), [
+                (tournamentInfo, 'tournament.svg'),
+                (streamSetting, 'megaphone.svg'),
+            ]),
+            (QApplication.translate("app", "Display"), [
+                (board, 'board.svg'),
+                (thumbnailSetting, 'thumbnail.svg'),
+                (resultSetting, 'result.svg'),
+                (commentary, 'commentary.svg'),
+                (top8, 'bracket.svg'),
+            ]),
+            (QApplication.translate("app", "Data"), [
+                (self.statsWidget, 'stats.svg'),
+                (playerBrowser, 'players.svg'),
+            ]),
         ]
 
         for dw in self.dockWidgets:
@@ -461,11 +494,15 @@ class Window(QMainWindow):
         self.sidebar.navSelected.connect(self.stack.setCurrentIndex)
 
         # Build the nav items + stack pages in display order. The nav label is
-        # the panel's (translated) windowTitle.
-        for panel, iconName in self._navPanels:
-            self.stack.addWidget(panel)
-            self.sidebar.addNavItem(
-                QIcon(UI.icon_path(iconName)), panel.windowTitle())
+        # the panel's (translated) windowTitle. Category headings take no nav
+        # index, so nav index still equals stack page index.
+        for categoryTitle, panels in self._navSections:
+            if categoryTitle:
+                self.sidebar.addNavCategory(categoryTitle)
+            for panel, iconName in panels:
+                self.stack.addWidget(panel)
+                self.sidebar.addNavItem(
+                    QIcon(UI.icon_path(iconName)), panel.windowTitle())
         self.sidebar.setCurrentIndex(0)
         self.stack.setCurrentIndex(0)
 
