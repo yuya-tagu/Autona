@@ -688,8 +688,16 @@
         <translation>トリガーを追加します（例: Hotkey、Scene、WebSocket message）。</translation>
     </message>
     <message>
-        <source>Add an action -&gt; Run: set the program to curl.exe (bundled with Windows), then paste everything after "curl" from the table below as the arguments.</source>
-        <translation>アクション -&gt; Run を追加します。プログラムに curl.exe（Windows 同梱）を指定し、下の表の「curl」以降をすべて引数として貼り付けます。</translation>
+        <source>Add an action -&gt; HTTP, paste the URL from the table below, and set the method to POST.</source>
+        <translation>アクション -&gt; HTTP を追加し、下の表の URL を貼り付けて、メソッドを POST にします。</translation>
+    </message>
+    <message>
+        <source>If the table lists a body, paste it into the body field. Leave Content-Type at its default (application/json).</source>
+        <translation>表にボディがある場合はボディ欄に貼り付けます。Content-Type はデフォルト（application/json）のままにします。</translation>
+    </message>
+    <message>
+        <source>Requires Advanced Scene Switcher 1.30 or newer (HTTP action with a Content-Type field). The action also stores the response status and body in temporary variables, usable in follow-up conditions.</source>
+        <translation>Advanced Scene Switcher 1.30 以降（Content-Type 欄のある HTTP アクション）が必要です。このアクションは応答のステータスとボディを一時変数に保存するため、後続の条件でも利用できます。</translation>
     </message>
     <message>
         <source>Add an action -&gt; Switch scene and pick the target scene.</source>
@@ -744,10 +752,6 @@
         <translation>アイコンをクリックするとクリップボードにコピーされます。Companion のボタンに貼り付けてください。</translation>
     </message>
     <message>
-        <source>Command</source>
-        <translation>コマンド</translation>
-    </message>
-    <message>
         <source>Confirm</source>
         <translation>確認</translation>
     </message>
@@ -778,10 +782,6 @@
     <message>
         <source>Copy body</source>
         <translation>ボディをコピー</translation>
-    </message>
-    <message>
-        <source>Copy command</source>
-        <translation>コマンドをコピー</translation>
     </message>
     <message>
         <source>Copy curl</source>
@@ -982,10 +982,6 @@
     <message>
         <source>URL</source>
         <translation>URL</translation>
-    </message>
-    <message>
-        <source>Use Run (not the HTTP action): the HTTP action discards the response and cannot set a Content-Type header, which a JSON API needs.</source>
-        <translation>HTTP アクションではなく Run を使います。HTTP アクションはレスポンスを破棄し、JSON API に必要な Content-Type ヘッダーを設定できません。</translation>
     </message>
     <message>
         <source>Watch file</source>

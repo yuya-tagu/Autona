@@ -3,10 +3,13 @@
 Two directions are covered (A/C — Autona driving OBS over obs-websocket — are
 intentionally out of scope; see docs/architecture/obs-scene-switcher-control.md):
 
-* **(B) ASS -> Autona**: an ASS macro runs a *Run* action that calls ``curl`` to
-  hit the External Control API (``/api/v1/``). ASS's built-in *HTTP* action is
-  not used because it discards the response and offers no custom headers, so a
-  JSON API needs the Run+curl form instead.
+* **(B) ASS -> Autona**: an ASS macro uses the *HTTP* action (plugin-based
+  ``http_v2``, ASS 1.30+) to hit the External Control API (``/api/v1/``): URL,
+  method POST, optional JSON body; its Content-Type field already defaults to
+  ``application/json``. The legacy HTTP action lacked custom headers, which is
+  why this guide historically recommended Run+curl — the Run action starts the
+  process via ``QProcess`` (no shell, one argument per row), which proved far
+  too fiddly for operators, so it was dropped in favour of the HTTP action.
 * **(D) Autona -> OBS**: ASS watches the ``out/`` files Autona continuously
   exports (``out/<keypath>.txt`` = raw value, ``out/program_state.json`` = full
   state with ``revision``/``timestamp``) with a *File* condition and fires a
@@ -34,7 +37,7 @@ def _tr(text):
     return QApplication.translate("api", text)
 
 
-# (B) Ready-made curl commands for an ASS Run action. The operation set mirrors
+# (B) Ready-made requests for an ASS HTTP action. The operation set mirrors
 # the Companion guide so operators recognise it; paths target board 1 / teams
 # 1-2 (edit for other boards). label/method/path/body build the table.
 _HTTP_EXAMPLES = [
@@ -82,18 +85,21 @@ _DESC = (
     "and Autona."
 )
 
-# (B) setup steps. Keep in sync with the ASS Macros UI. The Run-vs-HTTP caveat
-# lives in _NOTE_B_RUN (rendered as a note after the steps, not a step).
+# (B) setup steps. Keep in sync with the ASS Macros UI. The version caveat
+# lives in _NOTE_B_VERSION (rendered as a note after the steps, not a step).
 _STEPS_B = [
     "In OBS, open Tools -> Advanced Scene Switcher -> Macros and add a macro.",
     "Add a trigger (e.g. Hotkey, Scene, or WebSocket message).",
-    "Add an action -> Run: set the program to curl.exe (bundled with Windows), "
-    "then paste everything after \"curl\" from the table below as the arguments.",
+    "Add an action -> HTTP, paste the URL from the table below, and set the "
+    "method to POST.",
+    "If the table lists a body, paste it into the body field. Leave "
+    "Content-Type at its default (application/json).",
     "Save and trigger the condition to test.",
 ]
-_NOTE_B_RUN = (
-    "Use Run (not the HTTP action): the HTTP action discards the response and "
-    "cannot set a Content-Type header, which a JSON API needs."
+_NOTE_B_VERSION = (
+    "Requires Advanced Scene Switcher 1.30 or newer (HTTP action with a "
+    "Content-Type field). The action also stores the response status and "
+    "body in temporary variables, usable in follow-up conditions."
 )
 
 # (D) setup steps. The text-export caveat lives in _NOTE_D_EXPORT (a note).
@@ -202,19 +208,19 @@ class AutonaObsGuideWindow(QDialog):
                 "another PC, enable it under Settings → General (restart required)."))
         self._populateHttp()
 
-    # ── (B) ASS -> Autona via curl ───────────────────────────────────────
-    def _curl(self, e):
-        url = self._baseUrl() + e["path"]
-        parts = ["curl", "-X", e["method"]]
-        if e["body"]:
-            body = json.dumps(e["body"], ensure_ascii=False)
-            # Escape inner quotes so the one-liner survives cmd / the ASS Run
-            # arguments field on Windows.
-            body_esc = body.replace('"', '\\"')
-            parts += ["-H", '"Content-Type: application/json"', "-d",
-                      f'"{body_esc}"']
-        parts.append(f'"{url}"')
-        return " ".join(parts)
+    # ── (B) ASS -> Autona via the HTTP action ────────────────────────────
+    def _url(self, e):
+        return self._baseUrl() + e["path"]
+
+    def _bodyText(self, e):
+        """JSON body for the ASS HTTP action's body field ("" when none).
+
+        Emitted without spaces so the pasted value is visibly one token.
+        """
+        if not e["body"]:
+            return ""
+        return json.dumps(e["body"], ensure_ascii=False,
+                          separators=(",", ":"))
 
     def _buildHttpGroup(self):
         group = QGroupBox(_tr("Control Autona from Advanced Scene Switcher"))
@@ -225,11 +231,11 @@ class AutonaObsGuideWindow(QDialog):
             label.setWordWrap(True)
             v.addWidget(label)
 
-        runNote = QLabel("※ " + _tr(_NOTE_B_RUN))
-        runNote.setWordWrap(True)
-        v.addWidget(runNote)
+        versionNote = QLabel("※ " + _tr(_NOTE_B_VERSION))
+        versionNote.setWordWrap(True)
+        v.addWidget(versionNote)
 
-        headers = [_tr("Operation"), _tr("Command")]
+        headers = [_tr("Operation"), _tr("URL"), _tr("Body (JSON)")]
         self.httpTable = QTableWidget(len(_HTTP_EXAMPLES), len(headers))
         self.httpTable.setHorizontalHeaderLabels(headers)
         self.httpTable.verticalHeader().setVisible(False)
@@ -245,9 +251,12 @@ class AutonaObsGuideWindow(QDialog):
         v.addWidget(self.httpTable)
 
         btnRow = QHBoxLayout()
-        btCmd = QPushButton(_tr("Copy command"))
-        btCmd.clicked.connect(self._copyCommand)
-        btnRow.addWidget(btCmd)
+        btUrl = QPushButton(_tr("Copy URL"))
+        btUrl.clicked.connect(self._copyUrl)
+        btnRow.addWidget(btUrl)
+        btBody = QPushButton(_tr("Copy body"))
+        btBody.clicked.connect(self._copyBody)
+        btnRow.addWidget(btBody)
         btnRow.addStretch(1)
         v.addLayout(btnRow)
 
@@ -263,15 +272,25 @@ class AutonaObsGuideWindow(QDialog):
     def _populateHttp(self):
         for row, e in enumerate(_HTTP_EXAMPLES):
             self.httpTable.setItem(row, 0, QTableWidgetItem(_tr(e["label"])))
-            self.httpTable.setItem(row, 1, QTableWidgetItem(self._curl(e)))
+            self.httpTable.setItem(row, 1, QTableWidgetItem(self._url(e)))
+            self.httpTable.setItem(
+                row, 2, QTableWidgetItem(self._bodyText(e) or "—"))
         self.httpTable.resizeColumnsToContents()
         self.httpTable.horizontalHeader().setStretchLastSection(True)
 
-    def _copyCommand(self):
+    def _copyUrl(self):
         row = self.httpTable.currentRow()
         if row < 0:
             return
-        QApplication.clipboard().setText(self._curl(_HTTP_EXAMPLES[row]))
+        QApplication.clipboard().setText(self._url(_HTTP_EXAMPLES[row]))
+
+    def _copyBody(self):
+        row = self.httpTable.currentRow()
+        if row < 0:
+            return
+        body = self._bodyText(_HTTP_EXAMPLES[row])
+        if body:
+            QApplication.clipboard().setText(body)
 
     # ── (D) ASS watches out/ files ───────────────────────────────────────
     def _absWatchPath(self, rel):

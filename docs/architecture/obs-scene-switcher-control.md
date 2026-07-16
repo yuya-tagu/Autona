@@ -55,7 +55,7 @@
 | 経路 | 向き | 手段 | 主な用途 |
 |------|------|------|---------|
 | **(A)** | Autona → OBS | obs-websocket v5 クライアント | Autona からシーン切替・ブラウザソース URL 差替・配信/録画制御 |
-| **(B)** | ASS → Autona | ASS の Run action + `curl`（HTTP action は §4 制約あり） | OBS 内の自動化トリガから Autona のスコア操作等を呼ぶ |
+| **(B)** | ASS → Autona | ASS の HTTP action（現行版は Content-Type 対応、§3.6） | OBS 内の自動化トリガから Autona のスコア操作等を呼ぶ |
 | **(C)** | Autona/外部 → ASS | obs-websocket `CallVendorRequest` | Autona から ASS マクロ起動・変数注入（→ ASS が OBS をローカル操作） |
 | **(D)** | ASS ← Autona の出力 | ASS の **File condition**（`out/` 監視） | コードを足さずに Autona の状態変化で OBS を自動制御 |
 
@@ -248,8 +248,8 @@ GUI スレッド・StateManager のロックを尊重する（既存の QThread 
 |--------|------|------|
 | **Scene Switch** | シーン切替（シーン名に `${var}` 展開可） | **(C/D 帰結)** |
 | **Scene Item Visibility** | ソース表示/非表示 | 自動化 |
-| **HTTP** | 外部 HTTP API を叩く（GET/POST） | (B) ⚠️ §3.6 制約 |
-| **Run** | 外部プログラム/スクリプト実行（`curl` 等）。**標準出力を変数に取込可** | **(B) 推奨** |
+| **HTTP** | 外部 HTTP API を叩く（GET/POST/PUT/PATCH/DELETE、Content-Type 設定可、応答→temp var） | **(B) 推奨**（§3.6） |
+| **Run** | 外部プログラム/スクリプト実行。**標準出力を変数に取込可**。⚠️ シェル非経由・1 行=1 引数（§3.6） | (B) 旧推奨 |
 | **WebSocket** | WS メッセージ送信（Connections 経由・リモート OBS / 汎用 WS） | (A') |
 | **File** | ファイル書込 | 連携 |
 | **Variable Operations** | 変数の set/append/数値演算/正規表現抽出/JSON 抽出 | 全般 |
@@ -261,21 +261,33 @@ GUI スレッド・StateManager のロックを尊重する（既存の QThread 
 - 外部データの取込経路: ① **Run action の標準出力 → 変数**（最実用）② File condition ③ WebSocket 受信 ④ obs-websocket vendor request（§4.6）。
 - 抽出: 正規表現キャプチャ・JSON 抽出（`EXTRACT_JSON`/`QUERY_JSON`）。⚠️ 組込 JSON 抽出は**1 階層・配列非対応**。ネストは複数回適用 or Run で前処理。
 
-### 3.6 ⚠️ HTTP action の重要な制約（(B) の設計に直結）✅
-ASS の **HTTP action** には強い制約がある:
-- **GET/POST のみ**。POST は **data フィールドのみ**設定可。
-- **カスタムヘッダ（Content-Type 等）の指定 UI が確認できない**（**TBD**／無い可能性が高い）。
-- **レスポンスは破棄される**（応答 JSON を変数に取り込めない）。
+### 3.6 HTTP action の実態（(B) の設計に直結）✅ 2026-07-16 改訂
+上記の「HTTP action は GET/POST のみ・ヘッダ不可・応答破棄」という制約は**旧世代（legacy）
+HTTP action の話**（現ソースでは `plugins/base/macro-action-http-legacy.cpp`）。
+**現行のプラグイン版 HTTP action（id=`http_v2`、`plugins/http/macro-action-http.cpp`、ASS 1.30 頃〜）は:**
+- **GET/POST/PUT/PATCH/DELETE** 対応。ボディは複数行入力・`${var}` 展開可。
+- **Content-Type 欄あり、デフォルトが `application/json`**（Autona の JSON API にそのまま合う）。
+  任意ヘッダ・クエリパラメータ・タイムアウトも設定可。
+- **応答は破棄されない**: status / body / error が temp var に入り、後続条件で利用できる。
 
-→ **結論: Autona の `/api/v1/`（JSON ボディ・`Content-Type: application/json` 必須・応答に `revision`）を叩くなら、
-HTTP action ではなく Run action + `curl` を推奨**。ヘッダ・任意メソッド・応答取込（標準出力→`${var}`）がすべて可能。
+→ **結論（改訂）: (B) は HTTP action を推奨**。設定は URL + メソッド POST +（必要時のみ）ボディ貼付だけ。
+Run + `curl` は不要になった。
+
+⚠️ 旧推奨だった Run action は `QProcess::startDetached(path, args)` で実行され**シェルを介さない**
+（`plugins/base/utils/process-config.cpp`）。引数は「詳細設定を表示」内の **1 行 = 1 引数**リストで、
+各行がそのまま argv に渡される。シェル用の引用符・エスケープを書くと引数の一部として curl に渡り
+**無音で失敗する**（2026-07-16 に実機で根本原因として確認）。この罠が HTTP action へ切り替えた動機。
 
 ```text
-# ASS の Run action 例（スコア +1）。引数に ${var} 展開可
-curl -X POST -H "Content-Type: application/json" \
-  -d "{\"delta\":1}" \
-  http://127.0.0.1:5000/api/v1/scoreboards/1/teams/1/score:adjust
+# ASS の HTTP action 例（スコア +1）
+URL:          http://127.0.0.1:5000/api/v1/scoreboards/1/teams/1/score:adjust
+Method:       POST
+Body:         {"delta":1}
+Content-Type: application/json  ← デフォルトのまま
 ```
+
+補足: Autona 側も `/api/v1/` の JSON パースを `force=True` にし、Content-Type が
+`application/json` でなくてもボディを受理する（クライアント差異への保険）。
 
 ### 3.7 Connections（リモート接続）✅
 - ASS は **obs-websocket 5.0+** で別 OBS / WS サーバーへ接続できる（"Connections" 設定: 名前・アドレス:ポート・パスワード・自動再接続・Test connection）。
@@ -295,11 +307,11 @@ curl -X POST -H "Content-Type: application/json" \
 - ⚠️ 既存の「`out/` + ブラウザソース」連携は維持。(A) は**それと併存**する能動制御。
 
 ### 4.2 経路(B): ASS → Autona（`/api/v1/` を叩く）★コード変更ほぼ不要
-- ASS の **Run action + `curl`** で Autona の既存 `/api/v1/` を叩く（§3.6）。**Autona 側は実装済み API をそのまま使える**。
+- ASS の **HTTP action** で Autona の既存 `/api/v1/` を叩く（§3.6）。**Autona 側は実装済み API をそのまま使える**。
 - **ユースケース**: OBS 側の自動化トリガ（ゲームウィンドウ検出・特定シーン遷移・ホットキー）から、Autona の
   スコアリセット・swap・set 情報設定などを呼ぶ。
-- ⚠️ 破壊的操作は `/api/v1/` の **confirm 必須**（[external-control-api.md](../../.claude/design/external-control-api.md) §7.2）。`curl` のボディに `"confirm":true` を入れる。
-- ⚠️ レイテンシ ~300ms 級・応答は Run の標準出力で受ける（HTTP action では応答破棄）。
+- ⚠️ 破壊的操作は `/api/v1/` の **confirm 必須**（[external-control-api.md](../../.claude/design/external-control-api.md) §7.2）。ボディに `"confirm":true` を入れる。
+- ⚠️ レイテンシ ~300ms 級。応答（status/body）は HTTP action の temp var で受けられる（§3.6）。
 
 ### 4.3 経路(C): Autona/外部 → ASS（`CallVendorRequest`）★ASS 起動の王道
 - obs-websocket クライアント（= 経路(A)と同じ接続）から `CallVendorRequest` を投げて ASS マクロ/変数を起動する。✅
@@ -323,9 +335,9 @@ curl -X POST -H "Content-Type: application/json" \
 | ボタンで即スコア +1 | 既存 Companion → `/api/v1/`（直接） | 即時性。ASS のポーリングを挟まない |
 | 状態連動でシーン自動切替 | **(D)** File / **(C)** Vendor → ASS の Scene Switch | シーン構成を ASS に寄せる。Autona 無改造（(D)）or 最小改造（(C)） |
 | Autona から能動的に OBS を操作 | **(A)** obs-websocket | overlay URL 差替・録画開始等、ASS を介さず直接 |
-| OBS 自動化から Autona を操作 | **(B)** ASS Run + curl → `/api/v1/` | 既存 API をそのまま再利用 |
+| OBS 自動化から Autona を操作 | **(B)** ASS HTTP action → `/api/v1/` | 既存 API をそのまま再利用 |
 
-**初手の最小コスト案**: まず **(D) File condition + (B) Run+curl** から始めれば、**Autona 本体のコード変更ゼロ〜最小**で
+**初手の最小コスト案**: まず **(D) File condition + (B) HTTP action** から始めれば、**Autona 本体のコード変更ゼロ〜最小**で
 双方向連携の検証ができる。能動制御（(A)/(C)）は OBS 接続モジュールの新設が要るので ADR 後に着手。
 
 ---
@@ -357,7 +369,7 @@ curl -X POST -H "Content-Type: application/json" \
 ## 7. 要確認事項（実機検証）
 
 - **obs-websocket**: 実機の `obsVersion` / `obsWebSocketVersion`（`GetVersion`）。`SetInputSettings` のブラウザソース対象キー名。`StopRecord` 戻り値。TLS の要否（平文前提）。
-- **ASS**: ① **HTTP condition（インバウンド）** の待受ポート/パス/ボディ/認証の具体仕様、② **HTTP action のカスタムヘッダ可否**（無ければ (B) は Run+curl 確定）、③ 利用 OBS 版と ASS リリースの整合（最小 OBS 31.1.1）、④ `CallVendorRequest` の各 requestType の引数詳細。
+- **ASS**: ① **HTTP condition（インバウンド）** の待受ポート/パス/ボディ/認証の具体仕様、② ~~HTTP action のカスタムヘッダ可否~~ → **解決済み（2026-07-16）**: 現行 HTTP action（`http_v2`）は Content-Type・任意ヘッダ設定可（§3.6）、③ 利用 OBS 版と ASS リリースの整合（最小 OBS 31.1.1）、④ `CallVendorRequest` の各 requestType の引数詳細。
 - いずれも `python main.py` 起動 + OBS/ASS 実機で 1 回ずつ叩いて確認する（自動テストは作らない方針）。
 
 ---
