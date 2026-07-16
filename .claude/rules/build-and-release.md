@@ -90,7 +90,19 @@ release だけを publish し、アップデーターはそちらを参照する
 アップデートは **アプリ完全終了後に外部 PowerShell ヘルパーが展開・再起動する**方式
 （[assets/apply_update.ps1](../../assets/apply_update.ps1)）。フロー:
 
-1. アップデーターが `release-windows.zip` を `%TEMP%\autona_update\update.zip` に DL
+1. アップデーターがまず**差分ダウンロード**を試みる（2026-07-16 追加、v1.3.3 同梱予定）:
+   zip の central directory（約1MB）を HTTP Range で取得し、各エントリの CRC32 を
+   ローカル install と比較 → 変更分のみ Range 取得（実測: リリース間で全体の約6%、
+   約20MB）→ staging を**アプリ側で事前構築**（未変更分は `copy2` でローカルから。
+   mtime 保持により robocopy がスキップ）→ `staging_prebuilt.marker` を workdir に
+   書く。コアは [src/Helpers/AutonaRemoteZip.py](../../src/Helpers/AutonaRemoteZip.py)
+   （Qt 非依存・単体テスト可）。**あらゆる失敗は全量DLへフォールバック**
+   （206 検証・ETag 固定・伸長後 CRC 検証・zip64/変更過半/TEMP 容量不足も同様）。
+   構築中は `download_in_progress.lock` を保持し `CleanupUpdateLeftovers()` の
+   workdir 掃除を抑止（main.py の起動ゲートはこのロックを見ない＝DL中の起動は正常）。
+   マーカー名は Python/ps1 両側の契約（`tests/test_diff_update_contract.py` が pin）
+1'. フォールバック時は従来どおり `release-windows.zip` 全量を
+   `%TEMP%\autona_update\update.zip` に DL
 2. `UpdateProcedure()`（[src/AutonaUpdater.py](../../src/AutonaUpdater.py)）が
    **ダウンロードした zip の中の** `assets/apply_update.ps1` を temp workdir に抽出し
    （2026-07-16 変更。インストール済みコピーは定義上1リリース古く、ヘルパー修正が
@@ -101,7 +113,9 @@ release だけを publish し、アップデーターはそちらを参照する
    スクリプト未実行のまま exit 0。v1.0.7→v1.1.0 の自動更新が無音で壊れた原因）
 3. ヘルパーは即座に**インストール画面（WinForms・タイトル `Autona Updater`）を表示**し、
    **親 Autona プロセス（PID）の完全終了を待つ**（= 全ファイルのロック解放）。
-   その後 zip を staging に展開（先頭 `Autona/` を strip・ZIP slip ガード）し、
+   `staging_prebuilt.marker` があれば展開をスキップ（**マーカー検査は zip 存在検査より
+   前**が必須 — 差分DLでは zip が存在しない）。無ければ zip を staging に展開
+   （先頭 `Autona/` を strip・ZIP slip ガード）し、
    `robocopy /E`（**`/PURGE` なし**）で install ディレクトリへ反映。新 `Autona.exe` を
    起動して zip/staging/自分自身を後始末
 4. 失敗時（親 PID 残存・展開例外・robocopy `exit >= 8`）は**失敗ダイアログを出してから

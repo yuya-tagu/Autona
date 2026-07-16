@@ -39,6 +39,15 @@ $UI_TITLE = "Autona Updater"
 # launched mid-robocopy deletes the staging dir out from under us (v1.3.0
 # E2E: robocopy failed with exit 11 and the update was silently lost).
 $LockPath = Join-Path $PSScriptRoot "update_in_progress.lock"
+
+# Written by the app's diff download after it fully assembles $Staging itself
+# (only ~6% of a release changes between versions, so the updater fetches just
+# those entries and copies the rest from the local install). When this marker
+# exists there is NO update.zip - skip the zip check and extraction entirely.
+# The name is a contract with _STAGING_MARKER_NAME in src/AutonaUpdater.py,
+# pinned by tests/test_diff_update_contract.py.
+$MarkerPath = Join-Path $PSScriptRoot "staging_prebuilt.marker"
+
 $LockStream = $null
 try {
     $LockStream = [System.IO.File]::Open(
@@ -189,6 +198,7 @@ function Invoke-Cleanup() {
         if (Test-Path -LiteralPath $script:LockPath) { Remove-Item -LiteralPath $script:LockPath -Force -ErrorAction SilentlyContinue }
     } catch {}
     try { if (Test-Path -LiteralPath $Zip) { Remove-Item -LiteralPath $Zip -Force -ErrorAction SilentlyContinue } } catch {}
+    try { if (Test-Path -LiteralPath $MarkerPath) { Remove-Item -LiteralPath $MarkerPath -Force -ErrorAction SilentlyContinue } } catch {}
     try { if (Test-Path -LiteralPath $Staging) { Remove-Item -LiteralPath $Staging -Recurse -Force -ErrorAction SilentlyContinue } } catch {}
     # Self-delete the helper's own folder. We can't remove the script while it
     # runs, so spawn a short-lived detached PowerShell that waits, then deletes.
@@ -289,56 +299,71 @@ try {
     Start-Sleep -Milliseconds 800
     Update-UI
 
-    if (-not (Test-Path -LiteralPath $Zip)) {
-        Stop-UpdateAndExit "update zip not found: $Zip" `
-            "ダウンロードしたファイルが見つかりませんでした。もう一度アップデートをお試しください。"
-    }
-
-    # 2) Extract the zip into staging, stripping the leading "Autona/" folder.
-    #    ZipFile API (not Expand-Archive) so we control stripping + slip guard.
-    Write-Log "extracting $Zip -> $Staging"
-    Set-Step "ファイルを展開しています..." 0
-    if (Test-Path -LiteralPath $Staging) { Remove-Item -LiteralPath $Staging -Recurse -Force }
-    New-Item -ItemType Directory -Path $Staging -Force | Out-Null
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    $archive = [System.IO.Compression.ZipFile]::OpenRead($Zip)
-    try {
-        $stagingFull = (Resolve-Path -LiteralPath $Staging).Path.TrimEnd('\') + '\'
-        $entryTotal = $archive.Entries.Count
-        $entryIndex = 0
-        foreach ($entry in $archive.Entries) {
-            $entryIndex++
-            # Repainting per entry would cost more than the extraction itself on
-            # a release with tens of thousands of small asset files.
-            if (($entryIndex % 50) -eq 0 -and $entryTotal -gt 0) {
-                Set-Step ("ファイルを展開しています... ({0} / {1})" -f $entryIndex, $entryTotal) `
-                    ([int](100 * $entryIndex / $entryTotal))
-            }
-            # Normalize separators first: zips built by Windows PowerShell 5.1
-            # (Compress-Archive / .NET Framework ZipFile) use backslashes in
-            # entry names. Without this, no entry matches '/' and the whole
-            # update silently extracts nothing (v1.3.0 release asset bug).
-            $name = $entry.FullName -replace '\\', '/'
-            if ($name -notmatch '/') { continue }
-            $relative = $name.Substring($name.IndexOf('/') + 1)
-            if ([string]::IsNullOrEmpty($relative)) { continue }
-            $dest = Join-Path $Staging ($relative -replace '/', '\')
-            # ZIP slip guard: reject any entry that resolves outside staging.
-            $destFull = [System.IO.Path]::GetFullPath($dest)
-            if (-not $destFull.StartsWith($stagingFull, [System.StringComparison]::OrdinalIgnoreCase)) {
-                Write-Log "REJECT unsafe entry $name"
-                continue
-            }
-            if ($name.EndsWith('/')) {
-                New-Item -ItemType Directory -Path $destFull -Force | Out-Null
-            } else {
-                $parent = Split-Path -Parent $destFull
-                if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-                [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $destFull, $true)
-            }
+    # Diff downloads pre-assemble $Staging inside the app (only the changed
+    # entries are fetched over HTTP Range; the rest is copied from the local
+    # install). In that case there is no update.zip at all, so this check
+    # must come BEFORE the zip check or every diff update would fail here.
+    if (Test-Path -LiteralPath $MarkerPath) {
+        Write-Log "prebuilt staging detected (diff download); skipping extraction"
+        Set-Step "ファイルを確認しています..."
+        if (-not (Test-Path -LiteralPath $Staging)) {
+            Stop-UpdateAndExit "marker present but staging dir missing" `
+                "アップデートの一時ファイルが見つかりませんでした。もう一度アップデートをお試しください。"
         }
-    } finally {
-        $archive.Dispose()
+    } else {
+        if (-not (Test-Path -LiteralPath $Zip)) {
+            Stop-UpdateAndExit "update zip not found: $Zip" `
+                "ダウンロードしたファイルが見つかりませんでした。もう一度アップデートをお試しください。"
+        }
+
+        # 2) Extract the zip into staging, stripping the leading "Autona/"
+        #    folder. ZipFile API (not Expand-Archive) so we control
+        #    stripping + slip guard.
+        Write-Log "extracting $Zip -> $Staging"
+        Set-Step "ファイルを展開しています..." 0
+        if (Test-Path -LiteralPath $Staging) { Remove-Item -LiteralPath $Staging -Recurse -Force }
+        New-Item -ItemType Directory -Path $Staging -Force | Out-Null
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $archive = [System.IO.Compression.ZipFile]::OpenRead($Zip)
+        try {
+            $stagingFull = (Resolve-Path -LiteralPath $Staging).Path.TrimEnd('\') + '\'
+            $entryTotal = $archive.Entries.Count
+            $entryIndex = 0
+            foreach ($entry in $archive.Entries) {
+                $entryIndex++
+                # Repainting per entry would cost more than the extraction
+                # itself on a release with thousands of small asset files.
+                if (($entryIndex % 50) -eq 0 -and $entryTotal -gt 0) {
+                    Set-Step ("ファイルを展開しています... ({0} / {1})" -f $entryIndex, $entryTotal) `
+                        ([int](100 * $entryIndex / $entryTotal))
+                }
+                # Normalize separators first: zips built by Windows PowerShell
+                # 5.1 (Compress-Archive / .NET Framework ZipFile) use
+                # backslashes in entry names. Without this, no entry matches
+                # '/' and the whole update silently extracts nothing (v1.3.0
+                # release asset bug).
+                $name = $entry.FullName -replace '\\', '/'
+                if ($name -notmatch '/') { continue }
+                $relative = $name.Substring($name.IndexOf('/') + 1)
+                if ([string]::IsNullOrEmpty($relative)) { continue }
+                $dest = Join-Path $Staging ($relative -replace '/', '\')
+                # ZIP slip guard: reject any entry that resolves outside staging.
+                $destFull = [System.IO.Path]::GetFullPath($dest)
+                if (-not $destFull.StartsWith($stagingFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    Write-Log "REJECT unsafe entry $name"
+                    continue
+                }
+                if ($name.EndsWith('/')) {
+                    New-Item -ItemType Directory -Path $destFull -Force | Out-Null
+                } else {
+                    $parent = Split-Path -Parent $destFull
+                    if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+                    [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $destFull, $true)
+                }
+            }
+        } finally {
+            $archive.Dispose()
+        }
     }
 
     # Sanity guard: an unexpected zip layout (wrong root folder, separator

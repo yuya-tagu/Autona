@@ -152,6 +152,12 @@ publish 直後に、**旧バージョンの exe からアプリ内アップデ�
   旧バージョンが再起動された）。加えて `assets/update_log.txt` の末尾に
   `waiting for pid → robocopy ok → update complete` が記録されていること
 - `update_log.txt` にヘルパーのログ行が 1 行も増えていない場合、ヘルパー（apply_update.ps1）自体が起動していない（v1.1.0 で踏んだ DETACHED_PROCESS 事故のパターン）
+- **差分ダウンロードの確認（v1.3.3 実装。効き始めは v1.3.3→v1.3.4 以降**、DL ロジックは
+  インストール済み旧版側で走るため）: 差分経路が使われた場合、アプリログに
+  `diff download ok: N changed + M reused entries, X of Y MB fetched`、
+  `update_log.txt` に `prebuilt staging detected (diff download)` が出る。
+  `diff download unavailable/failed ... falling back` が出ても**更新自体は全量DLで
+  成功するのが正常**（差分は最適化。失敗モードを増やさないことが受け入れ条件）
 - `staging has no Autona.exe after extraction` が記録されている場合、zip のレイアウト異常
   （エントリ名の区切り文字・ルートフォルダ名）。手順 7 の自己検証をすり抜けていないか確認する
 

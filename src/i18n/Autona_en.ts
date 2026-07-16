@@ -2831,6 +2831,11 @@ Choose a different combination or clear the conflicting assignment first.</trans
         <translation>An update is already being installed. Close Autona and it will restart automatically when the install finishes.</translation>
     </message>
     <message>
+        <location filename="..\AutonaUpdater.py" line="500" />
+        <source>Comparing files with the new version...</source>
+        <translation>Comparing files with the new version...</translation>
+    </message>
+    <message>
         <location filename="..\AutonaUpdater.py" line="548" />
         <source>Downloading... {0:.1f} / {1:.1f} MB</source>
         <translation>Downloading... {0:.1f} / {1:.1f} MB</translation>
