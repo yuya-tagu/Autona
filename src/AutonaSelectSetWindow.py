@@ -36,16 +36,14 @@ class AutonaSelectSetWindow(QDialog):
         layout.addWidget(searchBar)
         searchBar.textEdited.connect(filterList)
 
-        # Phase / pool (phase group) selectors: multi-pool events fetch only
-        # the chosen phase's (or single pool's) sets instead of paging through
-        # the whole event. Choosing a phase populates the pool combo with that
-        # phase's groups and fetches all of them; the pool combo then narrows
-        # to a single group.
-        self.poolRow = QWidget()
-        poolRowLayout = QHBoxLayout()
-        poolRowLayout.setContentsMargins(0, 0, 0, 0)
-        self.poolRow.setLayout(poolRowLayout)
-        poolRowLayout.addWidget(
+        # Phase selector: fetch only the chosen phase's sets instead of
+        # paging through the whole event. Pool (phase group) narrowing was
+        # dropped on purpose — phases are the operator-meaningful unit.
+        self.phaseRow = QWidget()
+        phaseRowLayout = QHBoxLayout()
+        phaseRowLayout.setContentsMargins(0, 0, 0, 0)
+        self.phaseRow.setLayout(phaseRowLayout)
+        phaseRowLayout.addWidget(
             QLabel(QApplication.translate("app", "Phase")))
         self.phaseCombo = QComboBox()
         self.phaseCombo.addItem(
@@ -53,16 +51,9 @@ class AutonaSelectSetWindow(QDialog):
         # `activated` (not currentIndexChanged) so re-picking the same phase
         # re-fetches it.
         self.phaseCombo.activated.connect(self._onPhaseChosen)
-        poolRowLayout.addWidget(self.phaseCombo, 1)
-        poolRowLayout.addSpacing(12)
-        poolRowLayout.addWidget(
-            QLabel(QApplication.translate("app", "Pool")))
-        self.poolCombo = QComboBox()
-        self.poolCombo.setEnabled(False)
-        self.poolCombo.activated.connect(self._onPoolChosen)
-        poolRowLayout.addWidget(self.poolCombo, 1)
-        layout.addWidget(self.poolRow)
-        self.poolRow.setVisible(False)
+        phaseRowLayout.addWidget(self.phaseCombo, 1)
+        layout.addWidget(self.phaseRow)
+        self.phaseRow.setVisible(False)
         self.phases = []
 
         options = QHBoxLayout()
@@ -149,7 +140,7 @@ class AutonaSelectSetWindow(QDialog):
 
     def _onPhasesUpdated(self, phases):
         """Rebuild the phase selector from the tournament's phases (fetched
-        once on tournament load). The pool selector follows the chosen phase."""
+        once on tournament load)."""
         self.phases = phases or []
         self.phaseCombo.blockSignals(True)
         self.phaseCombo.clear()
@@ -164,25 +155,11 @@ class AutonaSelectSetWindow(QDialog):
             self.phaseCombo.addItem(phase.get("name") or "", phase)
         self.phaseCombo.setCurrentIndex(0)
         self.phaseCombo.blockSignals(False)
-        self._resetPoolCombo()
-
-    def _resetPoolCombo(self):
-        self.poolCombo.blockSignals(True)
-        self.poolCombo.clear()
-        self.poolCombo.addItem(
-            QApplication.translate("app", "All pools"), None)
-        self.poolCombo.setEnabled(False)
-        self.poolCombo.blockSignals(False)
-
-    def _multiPool(self):
-        return sum(len(p.get("groups") or []) for p in self.phases) > 1
+        self.phaseRow.setVisible(bool(self.phases))
 
     def _selectedGroupIds(self):
-        """Group ids to fetch, from the pool combo when a single pool is
-        picked, else from the phase combo's phase (or the all-phases list)."""
-        poolData = self.poolCombo.currentData()
-        if isinstance(poolData, list):
-            return poolData
+        """Group ids to fetch, from the chosen phase (or the all-phases
+        list). None = no restriction (fetch the whole event)."""
         phaseData = self.phaseCombo.currentData()
         if isinstance(phaseData, dict):
             return [group.get("id")
@@ -193,34 +170,28 @@ class AutonaSelectSetWindow(QDialog):
 
     def _onPhaseChosen(self, index):
         if index <= 0:
-            self._resetPoolCombo()
-            return
-        phaseData = self.phaseCombo.currentData()
-        self.poolCombo.blockSignals(True)
-        self.poolCombo.clear()
-        self.poolCombo.addItem(
-            QApplication.translate("app", "All pools"), None)
-        groups = (phaseData.get("groups") or []) if isinstance(
-            phaseData, dict) else []
-        for group in groups:
-            self.poolCombo.addItem(
-                group.get("name") or "", [group.get("id")])
-        # A single-group phase has nothing to narrow down.
-        self.poolCombo.setEnabled(len(groups) > 1)
-        self.poolCombo.blockSignals(False)
-        self._FetchSets()
-
-    def _onPoolChosen(self, index):
-        if self.phaseCombo.currentIndex() <= 0:
             return
         self._FetchSets()
 
     def LoadSets(self):
-        """Entry point when the window opens. Multi-pool events wait for a
-        phase choice instead of paging through every set of the event."""
-        multiPool = self._multiPool()
-        self.poolRow.setVisible(multiPool)
-        if multiPool and self.phaseCombo.currentIndex() <= 0:
+        """Entry point when the window opens. Events with known phases wait
+        for a phase choice instead of paging through every set of the event."""
+        if not self.phases:
+            # The phases fetch may have raced this window or failed on
+            # tournament load; re-request so the selector can populate
+            # (the tournament_phases_updated signal repopulates the combo)
+            # and fall back to the unfiltered fetch meanwhile.
+            AutonaTournamentDataProvider.instance.GetTournamentPhases()
+            self.phaseRow.setVisible(False)
+            self._FetchSets()
+            return
+        self.phaseRow.setVisible(True)
+        if self.phaseCombo.currentIndex() <= 0:
+            # A single-phase event has nothing to choose — load it directly.
+            if len(self.phases) == 1:
+                self.phaseCombo.setCurrentIndex(2)
+                self._FetchSets()
+                return
             self.model.clear()
             self.progressBar.setVisible(False)
             self.labelStatus.setText(QApplication.translate(
@@ -229,7 +200,7 @@ class AutonaSelectSetWindow(QDialog):
         self._FetchSets()
 
     def _FetchSets(self):
-        phaseGroupIds = self._selectedGroupIds() if self.poolRow.isVisibleTo(
+        phaseGroupIds = self._selectedGroupIds() if self.phaseRow.isVisibleTo(
             self) else None
         self.proxyModel.setSourceModel(QStandardItemModel())
         AutonaTournamentDataProvider.instance.LoadSets(

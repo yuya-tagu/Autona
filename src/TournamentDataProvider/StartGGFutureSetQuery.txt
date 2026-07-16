@@ -3,6 +3,7 @@ query FutureSetQuery($id: ID!) {
 		id
 		identifier
 		fullRoundText
+		round
 		totalGames
 		state
 		station {
