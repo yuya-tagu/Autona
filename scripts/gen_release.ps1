@@ -62,6 +62,11 @@ Copy-Item -Recurse -Force "_internal" "Autona\_internal"
 # backslash zip extracts ZERO files and the auto-update silently no-ops
 # (this exact bug shipped as the v1.3.0 release asset and broke v1.2.x
 # auto-updates). The zip spec (APPNOTE 4.4.17) mandates '/' as well.
+# Both assemblies are required: FileSystem carries ZipFile/CreateEntryFromFile,
+# but the [ZipArchiveMode] / [CompressionLevel] type literals live in
+# System.IO.Compression, which PS 5.1 does NOT load transitively — in a fresh
+# session the literal below throws "Unable to find type" without this.
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zipPath = Join-Path $PWD.Path "release-windows.zip"
 $stagingRoot = Join-Path $PWD.Path "Autona"
@@ -77,16 +82,10 @@ try {
     $zip.Dispose()
 }
 
-# Self-check: every entry must contain '/' or the update helper skips it.
-$zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
-try {
-    $bad = @($zip.Entries | Where-Object { $_.FullName -notmatch "/" })
-    if ($bad.Count -gt 0) {
-        throw "release zip has $($bad.Count) entries without '/' separators (helper would skip them), e.g. '$($bad[0].FullName)'"
-    }
-    Write-Host ("release-windows.zip OK: {0} entries, all with '/' separators" -f $zip.Entries.Count)
-} finally {
-    $zip.Dispose()
-}
+# Self-check: separators ('/' or the update helper skips every entry) and
+# content (assets/layout/user_data must ship git-tracked files only — the
+# staging above guarantees it, but the validator is shared with publish so a
+# stale or hand-repaired zip fails the same way).
+& (Join-Path $PSScriptRoot "validate_release_zip.ps1") -ZipPath $zipPath
 
 Pop-Location

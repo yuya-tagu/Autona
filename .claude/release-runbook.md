@@ -95,7 +95,10 @@ Get-Content _internal/assets/versions.json -Raw   # "program" が新バージョ
 `gen_release.ps1` は `$PSScriptRoot` 基準で CWD 非依存（ルートから `.\scripts\gen_release.ps1` で実行可）。
 旧 staging `Autona/` と旧 zip はスクリプト冒頭で自動削除される（`Compress-Archive -Update` の
 残留事故はスクリプト側で根絶済み）。zip は .NET ZipArchive で **エントリ名を `/` 区切り**で
-生成し、末尾で全エントリを自己検証する（`OK: N entries, all with '/' separators` が出ること）。
+生成し、末尾で `scripts/validate_release_zip.ps1` により自己検証する
+（`OK: N entries, all '/' separators, runtime trees contain tracked files only` が出ること）。
+検証内容は ① 区切り文字 ② **assets/layout/user_data に git 管理外ファイルが混入していないこと**
+（テスト大会アイコン等の開発時データ遮断。v1.3.0 差し替えアセットで実際に混入）。
 **`Compress-Archive` に戻してはならない**: PS 5.1 では `\` 区切りエントリになり、インストール済み
 ヘルパー apply_update.ps1 が 1 ファイルも展開できず自動更新が無音で不発になる（v1.3.0 で実際に発生）。
 
@@ -113,6 +116,15 @@ Remove-Item -Recurse -Force ./Autona -ErrorAction SilentlyContinue   # staging �
 ノート末尾に `Qt-Build: {qVersion}` マーカーを付ける（`python -c "from qtpy.QtCore import qVersion; print(qVersion())"` で取得。現行 updater は読まないが慣例として残置）。
 
 ノート構成: `Autona v{X.Y.Z}` / 新機能（ユーザー向け日本語） / アップデート時の注意（OBS URL 差し替え等の破壊的変更） / **v1.0.7・v1.1.0 向け手動更新の定型文**（[docs/operations/legacy-manual-update.md](../docs/operations/legacy-manual-update.md) の「運用ルール」から転記。該当世代の問い合わせが絶えるまで毎回載せる） / `Qt-Build:` マーカー。
+
+**publish 直前に zip を必ず再検証する**（手動 `gh release create` は gen_release の自己検証を
+経由しないため。過去に「修復した旧 zip」を publish して開発時データ＝テスト大会アイコンを
+配布した事故がある。`publish_release.ps1` 経由ならこの検証は自動で走る）:
+
+```powershell
+cd C:\Users\ayuyt\Work\30_Products\Autona
+.\scripts\validate_release_zip.ps1   # OK 行が出ること。throw したらその zip は publish 禁止
+```
 
 ```bash
 # CWD: プロジェクトルート。notes ファイルはスクラッチパッドに UTF-8 で作成しておく
@@ -164,3 +176,5 @@ publish 直後に、**旧バージョンの exe からアプリ内アップデ�
 | 旧ファイルが zip に残留 | `Compress-Archive -Update` の追記仕様 | gen_release.ps1 冒頭で zip / staging を自動削除（手順 7） |
 | v1.0.7→v1.1.0 自動更新が無音で不発 | powershell.exe を `DETACHED_PROCESS` 付きで spawn するとエンジン起動前に exit 0 で即死（`CREATE_NO_WINDOW` は併用時無視） | AutonaUpdater の creationflags から DETACHED_PROCESS を除去 + 自動更新 E2E 確認（手順 9） |
 | v1.2.x→v1.3.0 自動更新が無音で不発（「update complete」ログ付きで旧版のまま） | PS 5.1 の `Compress-Archive` が zip エントリ名を `\` 区切りで書くため、`/` 前提のヘルパーが全エントリをスキップ → 空 staging を robocopy が exit 0 で「成功」 | gen_release.ps1 を .NET ZipArchive + `/` 区切り明示 + 自己検証に変更。apply_update.ps1 に区切り正規化と「staging に exe 不在なら fallback」ガードを追加（手順 7・9） |
+| 配布物にテスト大会アイコン等の開発時データが残存 | v1.3.0 の区切り文字事故対応で「旧 zip を修復して差し替え」たため、生成時の git 管理ファイル限定ガード（c80fc937）を迂回。旧 zip には一括コピー時代の `layout/logo.png`（テスト大会アイコン）・`layout/custom/`・`assets/rulesets.json` が同梱されていた | `scripts/validate_release_zip.ps1` を新設し、生成時（gen_release）・publish 時（publish_release / 手動 gh の手順 8）の両方で「assets/layout/user_data は git 管理ファイルのみ」を機械検証。**zip は必ず再生成する。修復・手詰めした zip を publish しない** |
+| gen_release.ps1 が新規 PowerShell セッションで型エラー | `[ZipArchiveMode]` / `[CompressionLevel]` リテラルの解決に必要な `System.IO.Compression` アセンブリを Add-Type しておらず、PS 5.1 は遷移ロードしない | gen_release.ps1 で両アセンブリを明示 Add-Type（2026-07-16 修正） |

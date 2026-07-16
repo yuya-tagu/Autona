@@ -79,6 +79,11 @@ release だけを publish し、アップデーターはそちらを参照する
   `layout/custom/`、`rulesets.json`、ログ、`*.tmp`、アップロード画像、ゲーム画像等）は
   untracked / gitignored のため自動的に除外される。デフォルトは初回起動時に再生成される
   （ロゴ: `Window.__init__` が `assets/icons/icon.png` からシード）
+- **`scripts/validate_release_zip.ps1` が最終ゲート**: zip の区切り文字と
+  「assets/layout/user_data = git 管理ファイルのみ」を検証する。gen_release / publish_release の
+  双方から自動で呼ばれ、手動 `gh release create` の前にも必ず単体実行する（Runbook 手順 8）。
+  修復・手詰めした zip の publish は禁止（v1.3.0 差し替えアセットがこの経路でテスト大会
+  アイコン等の開発時データを配布した）
 
 ### アップデート挙動（外部ヘルパープロセス方式）
 

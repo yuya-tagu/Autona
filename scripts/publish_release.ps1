@@ -50,6 +50,12 @@ try {
         throw "release-windows.zip not found at project root. Build the app and run scripts/gen_release.ps1 first."
     }
 
+    # Refuse to publish a zip that carries dev/runtime data or bad entry
+    # separators. gen_release.ps1 builds clean zips, but this gate is what
+    # catches a stale or hand-repaired zip (the replacement v1.3.0 asset
+    # shipped a test tournament icon exactly this way).
+    & (Join-Path $PSScriptRoot "validate_release_zip.ps1") -ZipPath "release-windows.zip"
+
     $version = (Get-Content "assets/versions.json" -Raw | ConvertFrom-Json).program
     if ([string]::IsNullOrWhiteSpace($version)) {
         throw "Could not read 'program' version from assets/versions.json."
