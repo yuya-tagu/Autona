@@ -307,7 +307,6 @@ score.{N}
 ├── phase                            W R
 ├── pool                             W R (フェーズと分離したプール名。表示は overlay 側で "phase - pool" 合成)
 ├── top_n                            W R
-├── stream_url                       W R
 ├── set_id                           W
 ├── auto_update                      W
 ├── station                          W
@@ -390,8 +389,36 @@ tournamentInfo
 ├── themeColor / accentColor       ※既存テンプレ互換のため StateManager に展開する表示用キャッシュ。
 │                                    永続化の正本ではない（正本は SettingsManager.general.theme_color / accent_color）。
 │                                    名前から「大会別テーマ色」と誤読されないよう注意。
+├── displayTournamentName          ※編集 UI は SCORE タブ（と EVENT タブの大会名追従）。下記注記参照。
 └── {動的キー}                     (Qt 入力フィールドの objectName + API 取得データ)
 ```
+
+##### `stream` — 配信単位の設定（配信設定パネル）
+
+```
+stream
+├── url                            配信先 URL（X 投稿・リザルトが参照）
+├── title                          配信タイトル
+├── orgIconVersion                 layout/stream_org_icon.png の mtime（0 = 未登録）
+└── orgThumbVersion                layout/stream_org_thumbnail.png の mtime（0 = 未登録）
+```
+
+> **データ階層を混ぜないこと**: `tournamentInfo.*`（大会: 名前・日付・会場・大会アイコン/バナー）、
+> `stream.*`（配信: 配信先・配信タイトル・配信団体素材）、`score.{N}.*`（試合: 選手・スコア・
+> ラウンド）はそれぞれ別のライフサイクルを持つ。配信先は「大会ごとに変わるとは限らない配信
+> チャンネル」なので `stream.*`。
+>
+> **`score.{N}` に置いてはいけない理由**: `score.{N}` は 反映（held subtree, §3.2.x）で
+> ゲートされる。過去に配信先を `score.{N}.stream_url` に置いた結果、(1) 「反映」を押すまで
+> Web UI / OBS に届かない、(2) 全ボードへミラーすると非表示側のボードまで dirty になる、
+> (3) 起動時の score サブツリー wipe で消える、が同時に発生した。`stream.*` /
+> `tournamentInfo.*` は非ゲート・ボード非依存・永続。
+>
+> `displayTournamentName` が `tournamentInfo` にあるのも同じ理由（編集 UI は SCORE タブだが
+> 大会単位のデータ）。
+>
+> `orgIconVersion` / `orgThumbVersion` は `tournamentInfo.logoVersion` と同じキャッシュバスト
+> 用 mtime。オーバーレイは `/layout/stream_org_icon.png?v={version}` で参照する。
 
 ##### `ui` — UI 表示用キャッシュ
 
@@ -591,7 +618,8 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 
 | # | objectName | クラス | 主な責務 | 入力先 (Set) | 表示元 (Get) | デフォルト表示 |
 |---|------------|-------|---------|------------|------------|--------------|
-| 1 | `Tournament Info` | `AutonaTournamentInfoWidget` | 大会名・日付・URL・テーマ色など大会メタデータの編集 | `tournamentInfo.*` | `tournamentInfo.*` | ✓（最初に表示） |
+| 1 | `Tournament Info` | `AutonaTournamentInfoWidget` | 大会名・日付・URL など大会メタデータの編集、大会アイコン / バナー | `tournamentInfo.*` | `tournamentInfo.*` | ✓（最初に表示） |
+| 1.5 | `Stream Settings` | `AutonaStreamSettingsWidget` | 配信先・配信タイトル・配信団体アイコン / サムネイルの登録・配信サムネイル生成 | `stream.*` | `stream.*`, `tournamentInfo.*` | — |
 | 2 | `Thumbnail Settings` | `AutonaThumbnailSettingsWidget` | サムネイルテンプレ選択・背景指定・プレビュー・PNG/JPG 保存・クリップボードコピー | `thumbnail_config.*`（SettingsManager） | `score.*`, `tournamentInfo.*`, `thumbnail_config.*` | ✓（条件付き） |
 | 3 | `Result Settings` | `AutonaResultSettingsWidget` | リザルトレイアウト選択・選手入力・プレビュー・PNG/JPG 保存・クリップボードコピー | `result_config.*`, `result_players` | `tournamentInfo.*`, `result_players` | ✓ |
 | 4 | `Top8` | `AutonaTop8Widget` | Top 8 ダブルエリミの選手・試合スコア編集、Start.gg 読み込み、OBS 用 URL 案内・プレビュー | `top8.*` | `top8.*`, `tournamentInfo.*` | ✓ |

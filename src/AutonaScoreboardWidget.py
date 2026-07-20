@@ -277,12 +277,6 @@ class AutonaScoreboardWidget(QWidget):
         self.streamSection.layout().setSpacing(UI.SPACE_SM)
         self.streamSection.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
 
-        # The stream-destination ("配信先") row used to live here. It moved to
-        # the EVENT tab's "Stream Settings" section so the broadcast channel is
-        # configured once at the event level (see AutonaTournamentInfoWidget).
-        # The chosen URL is still mirrored to score.{N}.stream_url, so the
-        # X-post builder below keeps reading its per-board key.
-
         loadSetRow = QHBoxLayout()
         loadSetRow.setContentsMargins(0, 0, 0, 0)
         loadSetRow.setSpacing(UI.SPACE_SM)
@@ -512,7 +506,10 @@ class AutonaScoreboardWidget(QWidget):
         poolLabel.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         poolGroup.layout().addWidget(poolLabel)
         poolGroup.layout().addWidget(self.poolCombo, 1)
-        self.scoreBar.layout().addWidget(poolGroup, 1)
+        # Same stretch as phase / match so the three combos come out equally
+        # wide (their labels — フェーズ / プール名 / ラウンド — are all 4
+        # characters, so equal group stretch means equal combo width).
+        self.scoreBar.layout().addWidget(poolGroup, 2)
 
         matchGroup = QWidget()
         matchGroup.setLayout(QHBoxLayout())
@@ -526,18 +523,19 @@ class AutonaScoreboardWidget(QWidget):
         matchGroup.layout().addWidget(matchCombo, 1)
         self.scoreBar.layout().addWidget(matchGroup, 2)
 
-        bestOfGroup = QWidget()
-        bestOfGroup.setLayout(QHBoxLayout())
-        bestOfGroup.layout().setContentsMargins(0, 0, 0, 0)
-        bestOfGroup.layout().setSpacing(UI.SPACE_SM)
+        # BEST OF no longer rides the phase/pool/match bar — it is re-homed
+        # into the sponsor-checkbox row (right-aligned) by
+        # _groupSectionsIntoFrames, which leaves the three combos above to
+        # split the full width evenly.
+        self.bestOfGroup = QWidget()
+        self.bestOfGroup.setLayout(QHBoxLayout())
+        self.bestOfGroup.layout().setContentsMargins(0, 0, 0, 0)
+        self.bestOfGroup.layout().setSpacing(UI.SPACE_SM)
         bestOfLabel = self.scoreColumn.findChild(QLabel, "label_3")
         self.bestOfSpin = self.scoreColumn.findChild(QSpinBox, "best_of")
-        bestOfSpin = self.bestOfSpin
         bestOfLabel.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        bestOfGroup.layout().addWidget(bestOfLabel)
-        bestOfGroup.layout().addWidget(bestOfSpin)
-
-        self.scoreBar.layout().addWidget(bestOfGroup, 1)
+        self.bestOfGroup.layout().addWidget(bestOfLabel)
+        self.bestOfGroup.layout().addWidget(self.bestOfSpin)
 
         # Display tournament name row: separate from the phase/round/best-of
         # bar above. Backed by tournamentInfo.displayTournamentName (not
@@ -920,9 +918,13 @@ class AutonaScoreboardWidget(QWidget):
 
     def _groupSectionsIntoFrames(self, topOptions, bottomOptions):
         """Re-home the construction-time rows into the single scoreboard
-        section frame in their final display order (Start.gg load row on
-        top, then phase/round/BEST OF, player columns, score controls and
-        the apply/reset action row).
+        section frame in their final display order (display tournament name,
+        the Start.gg load row, then phase/round/BEST OF, player columns, score
+        controls and the apply/reset action row).
+
+        The construction-time order below is incidental — this method is what
+        fixes the display order, so add rows here rather than reshuffling the
+        insertWidget calls in __init__.
 
         Current innerWidget child order is:
             topOptions, streamSection, displayTournamentNameRow, scoreBar,
@@ -998,22 +1000,32 @@ class AutonaScoreboardWidget(QWidget):
         self.tournamentInfoLabel.setVisible(False)
         matchLayout.addWidget(self.tournamentInfoLabel)
 
-        # Start.gg load row (with its auto-update timer strip) sits above
-        # the phase/round/BEST OF bar.
-        matchLayout.addWidget(self.streamSection)
-
-        # Display tournament name goes right above the phase/round bar,
-        # mirroring the crew battle board's layout.
         matchLayout.addWidget(self.displayTournamentNameRow)
+
+        # Start.gg load row (with its auto-update timer strip) sits right above
+        # the phase/round/BEST OF bar — loading a set fills that bar in, so the
+        # button sits next to what it populates.
+        matchLayout.addWidget(self.streamSection)
 
         matchLayout.addWidget(self.scoreBar)
 
+        # Sponsor toggle left, BEST OF right — one row, so the short controls
+        # share a line instead of each eating a full-width strip.
         self.hideSponsorCheck = QCheckBox(
             QApplication.translate("app", "所属タグをスコアボードに表示しない"))
         self.hideSponsorCheck.setChecked(
             not SettingsManager.Get("display_options.show_sponsor", True))
         self.hideSponsorCheck.toggled.connect(self._onHideSponsorToggled)
-        matchLayout.addWidget(self.hideSponsorCheck)
+
+        sponsorBestOfRow = QWidget()
+        sponsorBestOfRowLayout = QHBoxLayout()
+        sponsorBestOfRowLayout.setContentsMargins(0, 0, 0, 0)
+        sponsorBestOfRowLayout.setSpacing(UI.SPACE_SM)
+        sponsorBestOfRow.setLayout(sponsorBestOfRowLayout)
+        sponsorBestOfRowLayout.addWidget(self.hideSponsorCheck)
+        sponsorBestOfRowLayout.addStretch(1)
+        sponsorBestOfRowLayout.addWidget(self.bestOfGroup)
+        matchLayout.addWidget(sponsorBestOfRow)
 
         # Separator line below the phase/round/BEST OF row to visually
         # delimit it from the team columns beneath.
@@ -1163,7 +1175,7 @@ class AutonaScoreboardWidget(QWidget):
             tournament_name = StateManager.Get("tournamentInfo.tournamentName", "") or ""
             phase = StateManager.Get(f"score.{n}.phase", "") or ""
             match = StateManager.Get(f"score.{n}.match", "") or ""
-            stream_url = StateManager.Get(f"score.{n}.stream_url", "") or ""
+            stream_url = StateManager.Get("stream.url", "") or ""
 
             # Validate required fields: player names (both teams) and round name.
             def _team_has_name(team_n):

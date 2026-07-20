@@ -1050,7 +1050,27 @@
     <message>
         <location filename="..\Autona.py" line="309" />
         <source>Tournament Info</source>
-        <translation>大会情報</translation>
+        <translation>大会情報設定</translation>
+    </message>
+    <message>
+        <location filename="..\Autona.py" line="416" />
+        <source>Setup</source>
+        <translation>事前設定</translation>
+    </message>
+    <message>
+        <location filename="..\Autona.py" line="416" />
+        <source>Display</source>
+        <translation>表示設定</translation>
+    </message>
+    <message>
+        <location filename="..\Autona.py" line="416" />
+        <source>Data</source>
+        <translation>各種データ</translation>
+    </message>
+    <message>
+        <location filename="..\Autona.py" line="301" />
+        <source>Stream Settings</source>
+        <translation>配信チャンネル設定</translation>
     </message>
     <message>
         <location filename="..\AutonaThumbnailSettingsWidget.py" line="87" />

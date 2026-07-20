@@ -50,7 +50,20 @@ EXPECTED = {
     },
     "AutonaTournamentInfo.ui": {
         "tournamentName", "eventName", "gameTitleCombo", "numEntrants",
-        "startAt", "address", "streamTitleEdit",
+        "startAt", "address",
+        # streamTitleEdit moved to AutonaStreamSettings.ui. It only ever
+        # reached the state via this tab's generic "every QLineEdit becomes
+        # tournamentInfo.{objectName}" loop and nothing read the resulting
+        # tournamentInfo.streamTitleEdit key, so no migration is owed; the
+        # 配信設定 panel Unsets the residual key on startup.
+    },
+    # 配信設定 panel. Its inputs are wired explicitly (no findChildren keypath
+    # loop), so these objectNames are findChild keys rather than keypaths —
+    # listed to keep them under the same rename guard as the rest. Only the
+    # classes in INPUT_WIDGET_CLASSES above are scanned, so the panel's
+    # QRadioButtons are not covered here.
+    "AutonaStreamSettings.ui": {
+        "streamUrlCombo", "streamTitleEdit", "cbStreamThumbOverlayOrgIcon",
     },
 }
 

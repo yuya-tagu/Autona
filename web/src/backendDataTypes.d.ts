@@ -36,7 +36,6 @@ export interface TSHScoreInfo {
     phase: string;
     set_id: number;
     station?: string;
-    stream_url?: string;
     team: Record<number, TSHTeamInfo>;
 }
 
@@ -161,6 +160,16 @@ export interface TSHState {
         eventStartAt?: string;
         initial_load?: boolean;
         numEntrants?: number;
+    };
+    /** Broadcast-scoped settings, owned by the 配信設定 panel. */
+    stream?: {
+        /** 配信先: the broadcast channel URL. */
+        url?: string;
+        /** 配信タイトル. */
+        title?: string;
+        /** mtime cache-bust versions for /layout/stream_org_*.png (0 = unregistered). */
+        orgIconVersion?: number;
+        orgThumbVersion?: number;
     };
 }
 

@@ -374,11 +374,18 @@ QTextEdit, QPlainTextEdit {{
     selection-background-color: {p['accent_subtle']};
 }}
 
-/* === Tabs (accent-orange selection, clear separators) === */
+/* === Tabs (segmented buttons: selection reads as a lighter fill) ===
+   Every tab is a filled grey button; the selected one is simply a lighter
+   grey. Both keep primary (white) text so the label stays fully legible
+   whether or not its tab is selected — the fill alone carries the state.
+   Deliberately no accent tint here: the tab bars sit above dense data
+   tables (STATS / PLAYERS), where an accent competes with the content. */
 QTabWidget::pane {{
     border: 1px solid {p['border_default']};
     background-color: {p['bg_primary']};
-    top: -1px;
+    /* Tabs no longer merge into the pane (they are detached buttons), so
+       none of the old -1px overlap that used to hide the shared border. */
+    top: 0px;
 }}
 QTabBar {{
     background-color: {p['bg_primary']};
@@ -387,22 +394,47 @@ QTabBar {{
 QTabBar::tab {{
     padding: 7px 14px;
     margin-right: 2px;
-    background-color: {p['bg_primary']};
-    color: {p['text_muted']};
+    /* Unselected: the darker grey, one step above the page behind it. */
+    background-color: {p['bg_tertiary']};
+    color: {p['text_primary']};
     border: 1px solid transparent;
-    border-bottom: 3px solid transparent;
+    border-radius: {RADIUS_MD}px;
     font-weight: 700;
     font-size: {FONT_XS}pt;
 }}
-QTabBar::tab:hover {{
-    color: {p['text_secondary']};
-    background-color: {p['bg_tertiary']};
+/* NOTE: qdarktheme ships its own tab rules carrying 1-3 pseudo-states, and
+   feeds them `primary` — which our custom_colors map to the brand crimson.
+   They out-specify the obvious plain selectors, so each one below restates
+   ours at the SAME pseudo-state count; equal specificity then resolves in
+   our favour because we are appended after qdarktheme. Same trap as the
+   QPushButton `:!window` note above. Their rules being matched here:
+     QTabBar::tab:top                  (0,1,1) 2px bottom border, top-only
+                                               radii, 3px top margin
+     QTabBar::tab:selected:enabled     (0,2,1) crimson text AND border-color
+     QTabBar::tab:selected:hover:enabled (0,3,1) hover fill on the selected tab
+   Drop a pseudo-state from any selector below and the crimson comes back. */
+QTabBar::tab:top {{
+    margin: 0 2px 0 0;
+    border-width: 1px;
+    border-radius: {RADIUS_MD}px;
 }}
-QTabBar::tab:selected {{
-    color: {p['accent']};
-    background-color: {p['bg_secondary']};
-    border: 1px solid {p['border_default']};
-    border-bottom: 3px solid {p['accent']};
+QTabBar::tab:hover {{
+    /* Between the two rest states, so hovering an unselected tab hints at
+       the selected fill without reaching it. */
+    background-color: {p['bg_quaternary']};
+}}
+QTabBar::tab:selected:enabled {{
+    /* Selected: the lighter grey. border-color must be restated — qdarktheme
+       paints it primary here, which is what drew the crimson outline. */
+    background-color: {p['bg_quinary']};
+    color: {p['text_primary']};
+    border-color: transparent;
+}}
+QTabBar::tab:selected:hover:enabled {{
+    /* Already the lightest fill; hovering it must not drop it back down. */
+    background-color: {p['bg_quinary']};
+    color: {p['text_primary']};
+    border-color: transparent;
 }}
 
 /* === Panel widgets (former docks) === */

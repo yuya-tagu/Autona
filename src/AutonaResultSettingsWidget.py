@@ -1262,10 +1262,10 @@ class AutonaResultSettingsWidget(QDockWidget):
                 lines.append(f"{rank}/ {base}")
                 emitted += 1
 
-        # Startgg / Stream URLs (tournament info + stream settings). The 配信先
-        # combo mirrors its URL to score.{1,2}.stream_url; read board 1.
+        # Startgg / Stream URLs. The 配信先 combo (配信設定 panel) publishes to
+        # the broadcast-scoped stream.* subtree.
         startgg_url = SettingsManager.Get("TOURNAMENT_URL", "") or ""
-        stream_url = StateManager.Get("score.1.stream_url", "") or ""
+        stream_url = StateManager.Get("stream.url", "") or ""
         if startgg_url:
             lines.append("")
             lines.append("■Startgg")

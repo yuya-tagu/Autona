@@ -20,6 +20,10 @@ update.tar.gz
 # Runtime-mutable tournament logo (overwritten when a tournament is loaded).
 # Seeded from assets/icons/icon.png on first run — see Window.__init__.
 layout/logo.png
+# Stream org assets registered by the user in the 配信設定 panel. Under layout/
+# so AutonaWebServer serves them to OBS overlays; never ship one in a release.
+layout/stream_org_icon.png
+layout/stream_org_thumbnail.png
 __pycache__/
 .vscode/
 dist
