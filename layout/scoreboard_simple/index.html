@@ -6,114 +6,47 @@
     <link rel="stylesheet" href="./index.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@700;800&display=swap" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=LINE+Seed+JP:wght@700;800&display=swap"
+      rel="stylesheet"
+    />
   </head>
-  <body>
-    <div
-      class="mask"
-      style="
-        width: 600px;
-        height: 300px;
-        position: absolute;
-        top: 0;
-        left: 0;
-        overflow: hidden;
-      "
-    >
-      <div class="info material_container middle">
-        <div class="logo"></div>
-        <div class="info">
-          <div class="tournament_name"></div>
-          <div class="phase"></div>
-          <div class="match"></div>
-        </div>
-      </div>
+  <body class="ssbu">
+    <!-- Tournament logo -->
+    <div class="logo fade"></div>
+
+    <!-- Phase | Round -->
+    <div class="round_info tile fade_right">
+      <span class="phase_label"></span>
+      <span class="round_separator"></span>
+      <span class="match_label"></span>
     </div>
 
-    <div class="singles">
-      <div class="t1 p1 container">
-        <div class="bg"><div></div></div>
-        <div class="name"></div>
-        <div class="flagcountry"></div>
-        <div class="flagstate"></div>
-        <div class="score"></div>
-        <div class="sponsor-container"></div>
-        <div class="twitter-container">
-          <div class="twitter"></div>
-        </div>
-      </div>
-
-      <div class="t2 p1 container">
-        <div class="bg"><div></div></div>
-        <div class="name"></div>
-        <div class="flagcountry"></div>
-        <div class="flagstate"></div>
-        <div class="score"></div>
-        <div class="sponsor-container"></div>
-        <div class="twitter-container">
-          <div class="twitter"></div>
-        </div>
-      </div>
+    <!-- P1 -->
+    <div class="p1 container tile fade_right">
+      <div class="name"></div>
+    </div>
+    <div class="p1 score_container tile fade_right">
+      <div class="score"></div>
     </div>
 
-    <div class="doubles">
-      <div class="info doubles t1 material_container">
-        <div class="team_name"></div>
-        <div class="doubles_score"></div>
-      </div>
-      <div class="info doubles t2 material_container">
-        <div class="team_name"></div>
-        <div class="doubles_score"></div>
-      </div>
 
-      <div class="t1 p1 container">
-        <div class="bg"><div></div></div>
-        <div class="name"></div>
-        <div class="flagcountry"></div>
-        <div class="flagstate"></div>
-        <div class="score"></div>
-        <div class="sponsor-container"></div>
-        <div class="twitter-container">
-          <div class="twitter"></div>
-        </div>
-      </div>
-
-      <div class="t1 p2 container">
-        <div class="bg"><div></div></div>
-        <div class="name"></div>
-        <div class="flagcountry"></div>
-        <div class="flagstate"></div>
-        <div class="score"></div>
-        <div class="sponsor-container"></div>
-        <div class="twitter-container">
-          <div class="twitter"></div>
-        </div>
-      </div>
-
-      <div class="t2 p1 container">
-        <div class="bg"><div></div></div>
-        <div class="name"></div>
-        <div class="flagcountry"></div>
-        <div class="flagstate"></div>
-        <div class="score"></div>
-        <div class="sponsor-container"></div>
-        <div class="twitter-container">
-          <div class="twitter"></div>
-        </div>
-      </div>
-      <div class="t2 p2 container">
-        <div class="bg"><div></div></div>
-        <div class="name"></div>
-        <div class="flagcountry"></div>
-        <div class="flagstate"></div>
-        <div class="score"></div>
-        <div class="sponsor-container"></div>
-        <div class="twitter-container">
-          <div class="twitter"></div>
-        </div>
-      </div>
+    <!-- P2 -->
+    <div class="p2 container tile fade_left">
+      <div class="name"></div>
+    </div>
+    <div class="p2 score_container tile fade_left">
+      <div class="score"></div>
     </div>
 
+
+    <!-- Game Boxes -->
+    <div class="dark score_boxes"></div>
+    <div class="blue score_boxes"></div>
+    <div class="red score_boxes"></div>
+    <div class="word score_boxes"></div>
+
+    <script src="common.js"></script>
     <script src="index.js"></script>
   </body>
 </html>
