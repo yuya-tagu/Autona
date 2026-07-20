@@ -41,7 +41,7 @@ class AutonaScoreboardManager(QDockWidget):
         # can reach any board by number.
         self.scoreboards: dict[int, object] = {}
 
-    def CreateScoreboard(self, singlePlayer: bool = True) -> bool:
+    def CreateScoreboard(self) -> bool:
         # Idempotent: creates the 1v1 board (1), the team board (2) and the
         # crewbattle board (3), all hosted in this dock's layout. Boards 2 and
         # 3 start hidden; SetBattleFormat() toggles which board is shown.
@@ -76,10 +76,6 @@ class AutonaScoreboardManager(QDockWidget):
         for number, board in self.scoreboards.items():
             board.setVisible(number == visible)
         logger.info(f"Scoreboard Manager - Battle format: {fmt}")
-
-    def SetTeamMode(self, team: bool):
-        # Backward-compatible shim: the format menu now uses SetBattleFormat().
-        self.SetBattleFormat("team" if team else "singles")
 
     def GetScoreboard(self, number=1):
         number = int(number)

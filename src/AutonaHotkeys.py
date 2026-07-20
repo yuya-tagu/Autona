@@ -1,7 +1,6 @@
 import ctypes
 import ctypes.wintypes
 import platform
-import traceback
 from qtpy.QtCore import *
 from qtpy.QtWidgets import *
 from loguru import logger
@@ -91,7 +90,6 @@ class AutonaHotkeys(QObject):
     instance: "AutonaHotkeys" = None
     signals = AutonaHotkeysSignals()
     parent: QWidget = None
-    shortcuts = {}
 
     # Use Ctrl+Shift+ prefix to avoid globally swallowing common app
     # shortcuts (Ctrl+S=Save, Ctrl+O=Open, Ctrl+P=Print, Ctrl+R=Reload).

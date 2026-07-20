@@ -136,22 +136,3 @@ def test_normalize_state_migrates_legacy_bools():
     assert state["6"]["display"] == 1
 
 
-def test_displayed_slots_follow_slot_order():
-    state = model.DefaultState()
-    state["5"].update(name="E", display=1)
-    state["2"].update(name="B", display=1)
-    assert model.DisplayedSlots(state) == ["2", "5"]
-
-
-def test_displayed_slots_skips_unnamed_and_caps_at_four():
-    state = model.DefaultState()
-    for slot in ("1", "2", "3", "4", "5", "6"):
-        state[slot].update(name=f"P{slot}", display=1)
-    state["2"]["name"] = "   "          # blank name -> skipped
-    assert model.DisplayedSlots(state) == ["1", "3", "4", "5"]
-
-
-def test_displayed_slots_tolerates_garbage_state():
-    assert model.DisplayedSlots(None) == []
-    assert model.DisplayedSlots({"1": "junk", "2": None}) == []
-    assert model.DisplayedSlots(model.DefaultState()) == []

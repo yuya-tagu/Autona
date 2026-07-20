@@ -396,7 +396,6 @@ React UI 操作
 | `general.team_1/2_default_color` | チームデフォルト色 | （読み込みのみ） | AutonaScoreboardWidget.py |
 | `general.webserver_port` | Web サーバーポート | （読み込みのみ） | AutonaWebServer.py |
 | `TOURNAMENT_URL` | トーナメント URL | AutonaTournamentDataProvider, WebServerActions | 複数 |
-| `bsky_account.*` | Bluesky アカウント | （読み込みのみ） | AutonaBskyHelper.py 等 |
 | `display_options.*` | 表示オプション | AutonaCommentaryWidget, ScoreboardWidget | 各 UI |
 | `hotkeys.*` | ホットキー設定 | AutonaHotkeys.py | AutonaHotkeys.py |
 | `thumbnail_config.*` | サムネイル生成設定 | AutonaThumbnailSettingsWidget | 複数 |

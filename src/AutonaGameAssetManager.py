@@ -73,11 +73,8 @@ class AutonaGameAssetManager(QObject):
         StateManager.Set(f"game", {})
         self.assetsLoaderLock = QMutex()
         self.assetsLoaderThread = None
-        self.thumbnailSettingsLoaded = False
         self.threadpool = QThreadPool()
         self.workers = []
-
-        self.skinLoaderLock = QMutex()
 
     def UiMounted(self):
         self.DownloadStartGGCharacters()
@@ -714,7 +711,6 @@ class AutonaGameAssetManager(QObject):
                 except:
                     logger.error(traceback.format_exc())
 
-        self.thumbnailSettingsLoaded = False
         if async_mode:
             self.assetsLoaderThread = AssetsLoaderThread(
                 AutonaGameAssetManager.instance)

@@ -180,14 +180,6 @@ class AutonaStatsUtil:
         else:
             StateManager.Set(f"score.{self.scoreboardNumber}.upset_factor", 0)
 
-    def _setWithDifferentKey(source, sKey, target, tKey):
-        value = source.deep_get(sKey)
-        if value:
-            target.deep_set(tKey, value)
-
-    def formatStreamQueueData(self, data):
-        pass
-
     def UpdateStreamQueue(self, data):
         with StateManager.SaveBlock():
             StateManager.Set(f"streamQueue", data)

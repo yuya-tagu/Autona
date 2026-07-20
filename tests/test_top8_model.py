@@ -82,7 +82,6 @@ def test_grand_final_won_from_winners_side_no_reset():
     matches = finish(matches, "gf", (3, 1))     # winners side (slot 1) wins
     assert matches["gf_reset"]["active"] is False
     assert matches["gf_reset"]["slots"] == [0, 0]
-    assert model.Champion(matches) == 1
 
 
 def test_grand_final_reset():
@@ -90,10 +89,6 @@ def test_grand_final_reset():
     matches = finish(matches, "gf", (2, 3))     # losers side (slot 5) wins
     assert matches["gf_reset"]["active"] is True
     assert matches["gf_reset"]["slots"] == [1, 5]
-    assert model.Champion(matches) == 0         # reset not played yet
-
-    matches = finish(matches, "gf_reset", (1, 3))
-    assert model.Champion(matches) == 5
 
 
 def test_changed_participants_reset_downstream_score():

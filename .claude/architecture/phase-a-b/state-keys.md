@@ -314,14 +314,6 @@ currentStream                        W   AutonaStatsUtil.UpdateStreamQueue
 
 ---
 
-## 直接 state アクセス（API 経由でない）
-
-| ファイル | 行 | アクセス | 備考 |
-|---------|-----|---------|------|
-| `AutonaWebServerActions.py:41` | `StateManager.state` (R) + `StateManager.deltaIndex` (R) | WebSocket 初回接続時の全状態返却。ロックなし ⚠️ |
-
----
-
 ## シグナル接続
 
 | シグナル | 接続先 | トリガー条件 |

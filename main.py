@@ -92,7 +92,7 @@ async def main(event_loop):
 
     future = asyncio.Future()
 
-    window = src.Window(event_loop)
+    window = src.Window()
     if hasattr(src.App, "aboutToQuit"):
         getattr(src.App, "aboutToQuit").connect(
             partial(close_future, future, event_loop))

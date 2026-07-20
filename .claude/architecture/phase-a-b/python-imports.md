@@ -17,7 +17,7 @@
 - 外部: (なし)
 
 ### src/Autona.py
-- 内部: `.Helpers.AutonaQtHelper`, `.Helpers.AutonaDownloadHelper`, `.Helpers.AutonaLocaleHelper`, `.Helpers.AutonaDirHelper`, `.Helpers.AutonaCountryHelper`, `.Helpers.AutonaControllerHelper`, `.Settings.AutonaSettingsWindow`, `.LayoutOptions.AutonaLayoutOptionsWindow`, `.AutonaHotkeys`, `.AutonaPlayerBrowserWidget`, `.AutonaNotesWidget`, `.AutonaCommentaryWidget`, `.AutonaGameAssetManager`, `.AutonaBracketWidget`, `.AutonaTournamentInfoWidget`, `.AutonaTournamentDataProvider`, `.TournamentDataProvider.StartGGDataProvider`, `.AutonaAlertNotification`, `.AutonaPlayerDB`, `.Workers`, `.StateManager`, `.SettingsManager`, `.AutonaScoreboardManager`, `.AutonaScoreboardStageWidget`, `.AutonaStatsWidget`, `src.AutonaAssetDownloader`, `src.AutonaAboutWidget`, `src.AutonaWebServer`, `. (ui_constants)`
+- 内部: `.Helpers.AutonaQtHelper`, `.Helpers.AutonaLocaleHelper`, `.Helpers.AutonaDirHelper`, `.Helpers.AutonaCountryHelper`, `.Helpers.AutonaControllerHelper`, `.Settings.AutonaSettingsWindow`, `.LayoutOptions.AutonaLayoutOptionsWindow`, `.AutonaHotkeys`, `.AutonaPlayerBrowserWidget`, `.AutonaNotesWidget`, `.AutonaCommentaryWidget`, `.AutonaGameAssetManager`, `.AutonaBracketWidget`, `.AutonaTournamentInfoWidget`, `.AutonaTournamentDataProvider`, `.TournamentDataProvider.StartGGDataProvider`, `.AutonaAlertNotification`, `.AutonaPlayerDB`, `.Workers`, `.StateManager`, `.SettingsManager`, `.AutonaScoreboardManager`, `.AutonaScoreboardStageWidget`, `.AutonaStatsWidget`, `src.AutonaAssetDownloader`, `src.AutonaAboutWidget`, `src.AutonaWebServer`, `. (ui_constants)`
 - 外部: loguru, orjson, packaging.version, qdarktheme
 
 ### src/StateManager.py
@@ -42,24 +42,16 @@
 
 ---
 
-### src/Helpers/AutonaAltTextHelper.py
-- 内部: (なし)
-- 外部: atproto
-
 ### src/Helpers/AutonaBadWordFilter.py
 - 内部: `..SettingsManager`, `.AutonaLocaleHelper`
 - 外部: loguru
 
-### src/Helpers/AutonaBskyHelper.py
-- 内部: `.AutonaAltTextHelper`, `.AutonaLocaleHelper`, `src.SettingsManager`
-- 外部: atproto, atproto_client
-
 ### src/Helpers/AutonaControllerHelper.py
-- 内部: `..SettingsManager`, `.AutonaDownloadHelper`
+- 内部: `..SettingsManager`
 - 外部: loguru, requests
 
 ### src/Helpers/AutonaCountryHelper.py
-- 内部: `..SettingsManager`, `..TournamentDataProvider`, `.AutonaDictHelper`, `.AutonaDirHelper`, `.AutonaDownloadHelper`, `.AutonaLocaleHelper`
+- 内部: `..SettingsManager`, `..TournamentDataProvider`, `.AutonaDictHelper`, `.AutonaDirHelper`, `.AutonaLocaleHelper`
 - 外部: countryflag, loguru, orjson, requests, tqdm
 
 ### src/Helpers/AutonaDictHelper.py
@@ -69,10 +61,6 @@
 ### src/Helpers/AutonaDirHelper.py
 - 内部: (なし)
 - 外部: loguru
-
-### src/Helpers/AutonaDownloadHelper.py
-- 内部: `..Workers`
-- 外部: loguru, requests, tqdm
 
 ### src/Helpers/AutonaLocaleHelper.py
 - 内部: `.AutonaDictHelper`, `.AutonaDirHelper`, `src.SettingsManager`, `src.StateManager`
@@ -181,7 +169,7 @@
 - 外部: loguru, orjson, requests
 
 ### src/AutonaScoreboardWidget.py
-- 内部: `.Helpers.AutonaDirHelper`, `.Helpers.AutonaVersionHelper`, `.Helpers.AutonaBskyHelper`, `.SettingsManager`, `.StateManager`, `.AutonaHotkeys`, `.AutonaIndividualGameTracker`, `.AutonaPlayerDB`, `.AutonaScoreboardPlayerWidget`, `.AutonaSelectSetWindow`, `.AutonaSelectStationWindow`, `.AutonaStatsUtil`, `.AutonaThumbnailSettingsWidget`, `.AutonaTournamentDataProvider`, `.thumbnail.main_generate_thumbnail`, `src.AutonaColorButton`, `. (ui_constants)`
+- 内部: `.Helpers.AutonaDirHelper`, `.Helpers.AutonaVersionHelper`, `.SettingsManager`, `.StateManager`, `.AutonaHotkeys`, `.AutonaIndividualGameTracker`, `.AutonaPlayerDB`, `.AutonaScoreboardPlayerWidget`, `.AutonaSelectSetWindow`, `.AutonaSelectStationWindow`, `.AutonaStatsUtil`, `.AutonaThumbnailSettingsWidget`, `.AutonaTournamentDataProvider`, `.thumbnail.main_generate_thumbnail`, `src.AutonaColorButton`, `. (ui_constants)`
 - 外部: (なし — 標準ライブラリのみ)
 
 ### src/AutonaSelectSetWindow.py
@@ -249,7 +237,7 @@
 ---
 
 ### src/thumbnail/main_generate_thumbnail.py
-- 内部: `src.AutonaGameAssetManager`, `src.Helpers.AutonaLocaleHelper`, `src.Helpers.AutonaDictHelper`, `src.Helpers.AutonaAltTextHelper`, `src.Helpers.AutonaDirHelper`
+- 内部: `src.AutonaGameAssetManager`, `src.Helpers.AutonaLocaleHelper`, `src.Helpers.AutonaDictHelper`, `src.Helpers.AutonaDirHelper`
 - 外部: loguru
 
 ---
@@ -263,10 +251,6 @@
 - 外部: (なし) — スタンドアロンスクリプト
 
 ### src/i18n/gen_round_names_files.py
-- 内部: (なし)
-- 外部: (なし) — スタンドアロンスクリプト
-
-### src/convert_database_3_to_4.py
 - 内部: (なし)
 - 外部: (なし) — スタンドアロンスクリプト
 
@@ -298,7 +282,6 @@
 
 | ファイル | 状態 | 備考 |
 |---------|------|------|
-| `src/convert_database_3_to_4.py` | 完全孤立 | DB マイグレーション用スタンドアロンスクリプト。どこからも参照なし |
 | `src/i18n/gen_translation_files.py` | CI 専用 | `.github/workflows/build_app.yml` からのみ参照 |
 | `src/i18n/gen_translation_binaries.py` | CI 専用 | 同上 |
 | `src/i18n/gen_round_names_files.py` | CI 専用 | 同上 |

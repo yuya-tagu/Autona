@@ -7,7 +7,7 @@ from qtpy.QtCore import *
 import orjson
 
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
-from .Helpers.AutonaQtHelper import gui_thread_async, gui_thread_sync
+from .Helpers.AutonaQtHelper import gui_thread_sync
 from .StateManager import StateManager
 from .AutonaStatsUtil import AutonaStatsUtil
 from .SettingsManager import SettingsManager

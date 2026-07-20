@@ -160,7 +160,7 @@ def _setup_mock_modules():
         ),
         "src.Helpers.AutonaQtHelper": _make_mock_module(
             "src.Helpers.AutonaQtHelper",
-            {"invokeSlot": MagicMock(), "gui_thread_sync": MagicMock()},
+            {"gui_thread_sync": MagicMock()},
         ),
         "src.Helpers.AutonaLocaleHelper": _make_mock_module(
             "src.Helpers.AutonaLocaleHelper",

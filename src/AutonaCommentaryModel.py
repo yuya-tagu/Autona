@@ -124,18 +124,3 @@ def NormalizeState(state):
     return result
 
 
-def DisplayedSlots(state):
-    """Slot numbers (str) the overlay should render left to right: the
-    slots with display > 0 and a non-empty name, in slot order, capped
-    at MAX_DISPLAY. The overlay applies the same rule client-side as a
-    second line of defense."""
-    source = state if isinstance(state, dict) else {}
-    candidates = []
-    for slot in SLOTS:
-        data = source.get(slot)
-        if not isinstance(data, dict):
-            continue
-        if _coerce_display(data.get("display", 0)) \
-                and str(data.get("name") or "").strip():
-            candidates.append(slot)
-    return candidates[:MAX_DISPLAY]

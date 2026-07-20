@@ -1,5 +1,4 @@
 import re
-import sys
 import unicodedata
 from qtpy.QtCore import *
 from qtpy.QtGui import *
@@ -9,7 +8,6 @@ import traceback
 from pathlib import Path
 
 from .AutonaDirHelper import AutonaResolve
-from .AutonaDictHelper import deep_get
 from ..TournamentDataProvider import TournamentDataProvider
 from .AutonaLocaleHelper import AutonaLocaleHelper
 import orjson
@@ -225,19 +223,5 @@ class AutonaCountryHelper(QObject):
             return country_data.get("states") or {}
 
         return None
-
-    def GetCities(country_code: str, state_code: str):
-        """Returns the cities for a country+state code, or None if the state can't be found"""
-
-        states = AutonaCountryHelper.get_states(country_code)
-        if not states:
-            return None
-
-        state = states.get(state_code, None)
-        if not state:
-            return None
-
-        return state.cities
-
 
 AutonaCountryHelper.instance = AutonaCountryHelper()

@@ -597,42 +597,6 @@
         <translation>Settings</translation>
     </message>
 </context><context>
-    <name>altText</name>
-    <message>
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="31" />
-        <source>LIVE NOW</source>
-        <translation>LIVE NOW</translation>
-    </message>
-    <message>
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="33" />
-        <source>Click here to watch</source>
-        <translation>Click here to watch</translation>
-    </message>
-    <message>
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="209" />
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="69" />
-        <source>Game:</source>
-        <translation>Game:</translation>
-    </message>
-    <message>
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="142" />
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="140" />
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="138" />
-        <source>VS</source>
-        <translation>VS</translation>
-    </message>
-    <message>
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="277" />
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="153" />
-        <source>Commentators:</source>
-        <translation>Commentators:</translation>
-    </message>
-    <message>
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="156" />
-        <source>Stream powered by Autona:</source>
-        <translation>Stream powered by Autona:</translation>
-    </message>
-</context><context>
     <name>api</name>
     <message>
         <location filename="..\Autona.py" line="745" />
@@ -2239,24 +2203,9 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>Please ensure the layout folder or its contents aren't open in another application before closing this window.</translation>
     </message>
     <message>
-        <location filename="..\Helpers\AutonaBskyHelper.py" line="22" />
-        <source>Bluesky account not correctly set</source>
-        <translation>Bluesky account not correctly set</translation>
-    </message>
-    <message>
         <location filename="..\Helpers\AutonaCountryHelper.py" line="196" />
         <source>Custom Flags</source>
         <translation>Custom Flags</translation>
-    </message>
-    <message>
-        <location filename="..\Helpers\AutonaDownloadHelper.py" line="205" />
-        <source>Close</source>
-        <translation>Close</translation>
-    </message>
-    <message>
-        <location filename="..\Helpers\AutonaDownloadHelper.py" line="210" />
-        <source>Cancel</source>
-        <translation>Cancel</translation>
     </message>
     <message>
         <location filename="..\Helpers\AutonaVersionHelper.py" line="20" />

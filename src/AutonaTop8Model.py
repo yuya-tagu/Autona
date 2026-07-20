@@ -339,21 +339,3 @@ def _entrant_to_player(entrants, seed):
         "country_code": data.get("country_code"),
         "mains": data.get("mains") or {},
     }
-
-
-def Champion(matches):
-    """Return the winning player slot number (1..8) once the bracket is
-    fully decided, else TBD."""
-    reset = matches.get("gf_reset", {})
-    if reset.get("active"):
-        return matches_slot_winner(reset)
-    gf = matches.get("gf", {})
-    if _decided(gf) and _winner_index(gf) == 0:
-        return gf.get("slots", [TBD, TBD])[0]
-    return TBD
-
-
-def matches_slot_winner(match):
-    if _decided(match):
-        return match.get("slots", [TBD, TBD])[_winner_index(match)]
-    return TBD

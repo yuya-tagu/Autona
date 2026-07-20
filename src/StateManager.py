@@ -15,7 +15,6 @@ import traceback
 # runs before deephash loads. (numpy is left alone — its import is cheap.)
 sys.modules.setdefault("pandas", None)
 
-from deepdiff.helper import DELTA_VIEW
 from qtpy.QtCore import QObject, Signal
 from deepdiff import DeepDiff, Delta, extract
 from functools import partial
@@ -59,13 +58,9 @@ class StateManager:
     # out-of-order events and request a full snapshot when discontinuous
     # (Design.md §3.2.3 R-Sync-5..9 / R-OBS-3a..b).
     revision = 0
-    # Legacy alias kept for any in-process code that still references the
-    # old name. Both attributes always carry the same value.
-    deltaIndex = 0
 
     lock = threading.RLock()
     _export_thread = None
-    loop = None
     _download_semaphore = threading.Semaphore(3)
 
     @contextlib.contextmanager
@@ -359,9 +354,7 @@ class StateManager:
 
     @staticmethod
     def _bumpRevision():
-        # Keep `deltaIndex` legacy attr in sync with `revision`.
         StateManager.revision += 1
-        StateManager.deltaIndex = StateManager.revision
 
     def ExportText(oldState, diff, stateSnapshot=None):
         # logger.info("ExportState")
