@@ -10,8 +10,9 @@ AutonaTop8Model; this panel only edits players and match results.
   via AutonaTop8Model.Recompute on every edit.
 * **Start.gg** — load a double-elimination phase group and extract its
   final 8 into the fixed topology.
-* **Preview / Add to OBS** — embedded live preview of the
-  ``layout/bracket_top8/`` overlay plus the browser-source URL, mirroring
+* **Preview / Add to OBS** — design pulldown (immediate reload, Board-tab
+  spec) over ``layout/bracket_top8*/``, embedded live preview of the
+  selected overlay plus the browser-source URL, mirroring
   AutonaBoardWidget's workflow (URL instead of local file: the overlay
   needs the web server's Socket.IO feed).
 
@@ -28,7 +29,10 @@ from qtpy.QtCore import *
 from loguru import logger
 
 from .StateManager import StateManager
-from .AutonaLayoutPreview import AutonaLayoutPreview, ObsUrl
+from .SettingsManager import SettingsManager
+from .AutonaLayoutPreview import (
+    AutonaLayoutPreview, ObsUrl, DiscoverLayoutDesigns,
+    LayoutDesignDisplayName)
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaHotkeys import AutonaHotkeys
@@ -38,7 +42,10 @@ from . import AutonaTop8Model as top8
 from . import ui_constants as UI
 from . import ui_layout as L
 
-LAYOUT_NAME = "bracket_top8"
+# Design folders: layout/bracket_top8/ plus any layout/bracket_top8_*/
+# variant (discovered at launch; the pulldown spec matches the Board tab).
+LAYOUT_PREFIX = "bracket_top8"
+DEFAULT_DESIGN = "bracket_top8"
 
 # Sidebar section -> match ids, in display order.
 MATCH_SECTIONS = [
@@ -90,6 +97,7 @@ class AutonaTop8Widget(QDockWidget):
         self._statusToken = None
         self._phases = []
         self._loadQueuedOnPhases = False
+        self._designs = DiscoverLayoutDesigns(LAYOUT_PREFIX)
 
         with StateManager.SaveBlock():
             # The legacy bracket feature is gone; LoadState() restores its
@@ -111,12 +119,16 @@ class AutonaTop8Widget(QDockWidget):
 
         # Two panes, each with its own scroll: editing (Start.gg / players /
         # scores / OBS) on the left, the live preview on the right.
+        # Build the design selector (and then the preview) first: the OBS
+        # group below reads the selected design for its URL field.
+        designSelector = self._buildDesignSelector()
+        preview = self._buildPreview()
+
         leftContent = QWidget()
         leftCol = QVBoxLayout(leftContent)
         leftCol.setContentsMargins(
             UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN)
         leftCol.setSpacing(UI.PANEL_MARGIN)
-        leftCol.addWidget(self._buildStartggGroup())
         leftCol.addWidget(self._buildPlayersGroup())
         leftCol.addWidget(self._buildMatchesGroup())
         leftCol.addWidget(self._buildObsGroup())
@@ -125,16 +137,38 @@ class AutonaTop8Widget(QDockWidget):
         leftScroll = QScrollArea()
         leftScroll.setWidgetResizable(True)
         leftScroll.setWidget(leftContent)
-        leftScroll.setFixedWidth(300)
         leftScroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        # Load button pinned above the scrolling area (RESULT-tab
+        # structure, same label): stays visible while the cards scroll.
+        # It fetches the tournament's final double elimination phase —
+        # see RefreshPhaseGroup.
+        self.btLoadTop8 = QPushButton(
+            QApplication.translate("app", "Load tournament results"))
+        L.tag_button(self.btLoadTop8, L.BUTTON_PRIMARY)
+        self.btLoadTop8.clicked.connect(self.RefreshPhaseGroup)
+        loadRow = QVBoxLayout()
+        loadRow.setContentsMargins(
+            UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN, 0)
+        loadRow.addWidget(self.btLoadTop8)
+
+        leftPane = QWidget()
+        leftPane.setFixedWidth(L.LEFT_PANE_WIDTH)
+        leftPaneCol = QVBoxLayout(leftPane)
+        leftPaneCol.setContentsMargins(0, 0, 0, 0)
+        leftPaneCol.setSpacing(0)
+        leftPaneCol.addLayout(loadRow)
+        leftPaneCol.addWidget(leftScroll, 1)
 
         rightContent = QWidget()
         rightCol = QVBoxLayout(rightContent)
         rightCol.setContentsMargins(
             UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN)
         rightCol.setSpacing(UI.PANEL_MARGIN)
-        rightCol.addWidget(self._buildPreviewGroup(), 1)
+        rightCol.addLayout(designSelector)
+        rightCol.addWidget(preview, 1)
+        rightCol.addLayout(preview.BuildActionButtons())
 
         rightScroll = QScrollArea()
         rightScroll.setWidgetResizable(True)
@@ -144,7 +178,7 @@ class AutonaTop8Widget(QDockWidget):
         panesLayout = QHBoxLayout(panes)
         panesLayout.setContentsMargins(0, 0, 0, 0)
         panesLayout.setSpacing(0)
-        panesLayout.addWidget(leftScroll)
+        panesLayout.addWidget(leftPane)
         panesLayout.addWidget(rightScroll, 1)
         self.setWidget(panes)
 
@@ -397,7 +431,8 @@ class AutonaTop8Widget(QDockWidget):
                 roundLabel.setFixedWidth(48)
 
                 # Ignored horizontal policy: long names clip instead of
-                # widening the grid past the fixed 300px pane.
+                # widening the grid past the fixed-width pane
+                # (L.LEFT_PANE_WIDTH).
                 p1 = QLabel("TBD")
                 p1.setAlignment(
                     Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -433,17 +468,19 @@ class AutonaTop8Widget(QDockWidget):
                     "p1": p1, "s1": s1, "s2": s2, "p2": p2,
                 }
 
+        # Negative action left, positive action right — the app-wide
+        # button-pair convention.
         btRow = QHBoxLayout()
         btRow.addStretch(1)
+        self.btResetAll = QPushButton("全リセット")
+        L.tag_button(self.btResetAll, L.BUTTON_DANGER)
+        self.btResetAll.clicked.connect(self._onResetAll)
+        btRow.addWidget(self.btResetAll)
         self.btApplyScores = QPushButton(
             QApplication.translate("app", "Apply"))
         L.tag_button(self.btApplyScores, L.BUTTON_PRIMARY)
         self.btApplyScores.clicked.connect(self._onApplyScores)
         btRow.addWidget(self.btApplyScores)
-        self.btResetAll = QPushButton("全リセット")
-        L.tag_button(self.btResetAll, L.BUTTON_DANGER)
-        self.btResetAll.clicked.connect(self._onResetAll)
-        btRow.addWidget(self.btResetAll)
         group.layout().addLayout(btRow)
 
         return group
@@ -524,32 +561,7 @@ class AutonaTop8Widget(QDockWidget):
     # ── Start.gg ─────────────────────────────────────────────────────
     # The target bracket is fixed: the tournament's FINAL double
     # elimination phase (last DE phase in Start.gg's phase order). No
-    # phase picker — the resolved target is shown read-only.
-    def _buildStartggGroup(self):
-        group = L.make_card("Start.gg から読み込み")
-
-        note = QLabel(
-            "大会のダブルエリミネーション最終フェーズを自動で対象にし、"
-            "最終 8 名と各試合のスコアを取り込みます（大会は EVENT タブで設定）。")
-        note.setWordWrap(True)
-        note.setStyleSheet(UI.secondary_label_style())
-        group.layout().addWidget(note)
-
-        row = QHBoxLayout()
-        row.setSpacing(UI.SPACE_MD)
-        self.targetLabel = QLabel("対象: —")
-        self.targetLabel.setWordWrap(True)
-        row.addWidget(self.targetLabel, 1)
-
-        self.btLoadTop8 = QPushButton(
-            QApplication.translate("app", "Load"))
-        L.tag_button(self.btLoadTop8, L.BUTTON_PRIMARY)
-        self.btLoadTop8.clicked.connect(self.RefreshPhaseGroup)
-        row.addWidget(self.btLoadTop8)
-        group.layout().addLayout(row)
-
-        return group
-
+    # phase picker — btLoadTop8 (built in __init__) just fetches it.
     def _resolveTargetPhaseGroup(self):
         """Return (phase, group) for the final double elimination phase, or
         (None, None). Walks phases from the end; within the last phase that
@@ -562,24 +574,8 @@ class AutonaTop8Widget(QDockWidget):
                 return phase, de_groups[0]
         return None, None
 
-    def _refreshTargetLabel(self):
-        phase, group = self._resolveTargetPhaseGroup()
-        if phase is None:
-            if self._phases:
-                self.targetLabel.setText(
-                    "対象: —（ダブルエリミネーションのフェーズがありません）")
-            else:
-                self.targetLabel.setText("対象: —（大会未読込）")
-            return
-        name = phase.get("name") or ""
-        group_name = group.get("name") or ""
-        if group_name and group_name != name:
-            name = f"{name} / {group_name}"
-        self.targetLabel.setText(f"対象: {name}")
-
     def UpdatePhases(self, phases):
         self._phases = list(phases or [])
-        self._refreshTargetLabel()
         if self._loadQueuedOnPhases and self._phases:
             self._loadQueuedOnPhases = False
             QTimer.singleShot(0, self.RefreshPhaseGroup)
@@ -587,7 +583,6 @@ class AutonaTop8Widget(QDockWidget):
     def _onTournamentChanged(self):
         self._phases = []
         self._loadQueuedOnPhases = False
-        self._refreshTargetLabel()
 
     def RefreshPhaseGroup(self):
         """Fetch (or re-fetch) the final double elimination phase group.
@@ -771,23 +766,55 @@ class AutonaTop8Widget(QDockWidget):
             color_combo.blockSignals(False)
 
     # ── Preview ──────────────────────────────────────────────────────
-    def _buildPreviewGroup(self):
-        group = L.make_card("プレビュー")
-        self.preview = AutonaLayoutPreview(LAYOUT_NAME)
+    def _buildDesignSelector(self):
+        # Right-column selector above the preview: section-title label +
+        # full-width combo, matching the RESULT tab. Selecting a design
+        # reloads the preview immediately, no update button. Single entry
+        # today; future layout/bracket_top8_* variants appear automatically.
+        col = QVBoxLayout()
+        col.setSpacing(UI.SPACE_SM)
+        label = QLabel("TOP 8 のデザインを選択")
+        L.apply_section_title(label)
+        col.addWidget(label)
+
+        self.designCombo = QComboBox()
+        for d in self._designs:
+            self.designCombo.addItem(
+                LayoutDesignDisplayName(LAYOUT_PREFIX, d), d)
+        saved = SettingsManager.Get("top8.selected_design", DEFAULT_DESIGN)
+        idx = self.designCombo.findData(saved)
+        if idx < 0:
+            idx = self.designCombo.findData(DEFAULT_DESIGN)
+        if idx < 0 and self.designCombo.count() > 0:
+            idx = 0
+        if idx >= 0:
+            self.designCombo.setCurrentIndex(idx)
+        # Connect after the initial selection so it doesn't fire on startup.
+        self.designCombo.currentIndexChanged.connect(self._onDesignChanged)
+        col.addWidget(self.designCombo)
+        return col
+
+    def _buildPreview(self):
+        # Bare preview widget, no card wrapper — the RESULT tab's right-pane
+        # structure is the reference for every preview panel.
+        self.preview = AutonaLayoutPreview(self._currentDesign())
         self.preview.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        group.layout().addWidget(self.preview)
-        btRow = QHBoxLayout()
-        btRow.addStretch(1)
-        btReload = QPushButton("プレビューを再読み込み")
-        btReload.clicked.connect(self._reloadPreview)
-        btRow.addWidget(btReload)
-        group.layout().addLayout(btRow)
-        return group
+        return self.preview
 
-    def _reloadPreview(self):
-        self._previewLoaded = True
-        self.preview.load()
+    def _currentDesign(self):
+        if self.designCombo.count() == 0:
+            return None
+        return self.designCombo.currentData()
+
+    def _onDesignChanged(self, _idx):
+        design = self._currentDesign()
+        if not design:
+            return
+        SettingsManager.Set("top8.selected_design", design)
+        self.obsUrlField.setText(self._obsUrl())
+        if self._previewLoaded:
+            self.preview.load(design)
 
     def showEvent(self, e):
         super().showEvent(e)
@@ -829,6 +856,5 @@ class AutonaTop8Widget(QDockWidget):
         group.layout().addWidget(note)
         return group
 
-    @staticmethod
-    def _obsUrl():
-        return ObsUrl(LAYOUT_NAME)
+    def _obsUrl(self):
+        return ObsUrl(self._currentDesign() or DEFAULT_DESIGN)

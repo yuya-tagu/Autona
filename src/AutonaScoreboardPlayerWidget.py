@@ -217,7 +217,9 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         if self.path.startswith("score."):
             self.delete_bt.hide()
         else:
-            save_row_layout.addWidget(self.delete_bt)
+            # Delete goes LEFT of Save (negative action left, positive
+            # action right — the app-wide button-pair convention).
+            save_row_layout.insertWidget(0, self.delete_bt)
             self.findChild(QLineEdit, "name").editingFinished.connect(
                 self.ManageDeletePlayerFromDBActive)
             self.findChild(QLineEdit, "team").editingFinished.connect(

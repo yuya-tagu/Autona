@@ -8,8 +8,9 @@ Full rework mirroring AutonaTop8Widget's list + live-preview pattern:
   a drop moves the data between slots. A per-slot "配信に表示" toggle
   picks which casters (max 4) the ``layout/commentators/`` overlay
   renders, top card leftmost.
-* **Preview / Add to OBS** — embedded live preview of the overlay plus
-  the browser-source URL.
+* **Preview / Add to OBS** — design pulldown (immediate reload, Board-tab
+  spec) over ``layout/commentators*/``, embedded live preview of the
+  selected overlay, and the browser-source URL.
 
 State contract: everything under ``commentary.{1..12}`` (see
 AutonaCommentaryModel). All writes go through explicit StateManager.Set
@@ -29,14 +30,20 @@ from qtpy.QtCore import *
 from loguru import logger
 
 from .StateManager import StateManager
+from .SettingsManager import SettingsManager
 from .AutonaPlayerDB import AutonaPlayerDB
-from .AutonaLayoutPreview import AutonaLayoutPreview, ObsUrl
+from .AutonaLayoutPreview import (
+    AutonaLayoutPreview, ObsUrl, DiscoverLayoutDesigns,
+    LayoutDesignDisplayName)
 from .Helpers.AutonaBadWordFilter import AutonaBadWordFilter
 from . import AutonaCommentaryModel as comms
 from . import ui_constants as UI
 from . import ui_layout as L
 
-LAYOUT_NAME = "commentators"
+# Design folders: layout/commentators/ plus any layout/commentators_*/
+# variant (discovered at launch; the pulldown spec matches the Board tab).
+LAYOUT_PREFIX = "commentators"
+DEFAULT_DESIGN = "commentators"
 
 CASTER_CARD_WIDTH = 280
 
@@ -64,11 +71,17 @@ class AutonaCommentaryWidget(QDockWidget):
         # repopulated from state (same guard pattern as AutonaTop8Widget).
         self._updating = False
         self._previewLoaded = False
+        self._designs = DiscoverLayoutDesigns(LAYOUT_PREFIX)
 
         with StateManager.SaveBlock():
             StateManager.Set(
                 "commentary",
                 comms.NormalizeState(StateManager.Get("commentary")))
+
+        # Build the design selector (and then the preview) first: the OBS
+        # group below reads the selected design for its URL field.
+        designSelector = self._buildDesignSelector()
+        preview = self._buildPreview()
 
         leftContent = QWidget()
         leftCol = QVBoxLayout(leftContent)
@@ -82,7 +95,7 @@ class AutonaCommentaryWidget(QDockWidget):
         leftScroll = QScrollArea()
         leftScroll.setWidgetResizable(True)
         leftScroll.setWidget(leftContent)
-        leftScroll.setFixedWidth(340)
+        leftScroll.setFixedWidth(L.LEFT_PANE_WIDTH)
         leftScroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
@@ -91,7 +104,9 @@ class AutonaCommentaryWidget(QDockWidget):
         rightCol.setContentsMargins(
             UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN)
         rightCol.setSpacing(UI.PANEL_MARGIN)
-        rightCol.addWidget(self._buildPreviewGroup(), 1)
+        rightCol.addLayout(designSelector)
+        rightCol.addWidget(preview, 1)
+        rightCol.addLayout(preview.BuildActionButtons())
 
         rightScroll = QScrollArea()
         rightScroll.setWidgetResizable(True)
@@ -412,23 +427,56 @@ class AutonaCommentaryWidget(QDockWidget):
         return True
 
     # ── Preview ──────────────────────────────────────────────────────
-    def _buildPreviewGroup(self):
-        group = L.make_card("プレビュー")
-        self.preview = AutonaLayoutPreview(LAYOUT_NAME)
+    def _buildDesignSelector(self):
+        # Right-column selector above the preview: section-title label +
+        # full-width combo, matching the RESULT tab. Selecting a design
+        # reloads the preview immediately, no update button. Single entry
+        # today; future layout/commentators_* variants appear automatically.
+        col = QVBoxLayout()
+        col.setSpacing(UI.SPACE_SM)
+        label = QLabel("実況・解説のデザインを選択")
+        L.apply_section_title(label)
+        col.addWidget(label)
+
+        self.designCombo = QComboBox()
+        for d in self._designs:
+            self.designCombo.addItem(
+                LayoutDesignDisplayName(LAYOUT_PREFIX, d), d)
+        saved = SettingsManager.Get(
+            "commentary.selected_design", DEFAULT_DESIGN)
+        idx = self.designCombo.findData(saved)
+        if idx < 0:
+            idx = self.designCombo.findData(DEFAULT_DESIGN)
+        if idx < 0 and self.designCombo.count() > 0:
+            idx = 0
+        if idx >= 0:
+            self.designCombo.setCurrentIndex(idx)
+        # Connect after the initial selection so it doesn't fire on startup.
+        self.designCombo.currentIndexChanged.connect(self._onDesignChanged)
+        col.addWidget(self.designCombo)
+        return col
+
+    def _buildPreview(self):
+        # Bare preview widget, no card wrapper — the RESULT tab's right-pane
+        # structure is the reference for every preview panel.
+        self.preview = AutonaLayoutPreview(self._currentDesign())
         self.preview.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        group.layout().addWidget(self.preview)
-        btRow = QHBoxLayout()
-        btRow.addStretch(1)
-        btReload = QPushButton("プレビューを再読み込み")
-        btReload.clicked.connect(self._reloadPreview)
-        btRow.addWidget(btReload)
-        group.layout().addLayout(btRow)
-        return group
+        return self.preview
 
-    def _reloadPreview(self):
-        self._previewLoaded = True
-        self.preview.load()
+    def _currentDesign(self):
+        if self.designCombo.count() == 0:
+            return None
+        return self.designCombo.currentData()
+
+    def _onDesignChanged(self, _idx):
+        design = self._currentDesign()
+        if not design:
+            return
+        SettingsManager.Set("commentary.selected_design", design)
+        self.obsUrlField.setText(ObsUrl(design))
+        if self._previewLoaded:
+            self.preview.load(design)
 
     def showEvent(self, e):
         super().showEvent(e)
@@ -455,7 +503,8 @@ class AutonaCommentaryWidget(QDockWidget):
         urlRow = QHBoxLayout()
         self.obsUrlField = QLineEdit()
         self.obsUrlField.setReadOnly(True)
-        self.obsUrlField.setText(ObsUrl(LAYOUT_NAME))
+        self.obsUrlField.setText(
+            ObsUrl(self._currentDesign() or DEFAULT_DESIGN))
         urlRow.addWidget(self.obsUrlField, 1)
         btCopy = QPushButton("コピー")
         btCopy.clicked.connect(

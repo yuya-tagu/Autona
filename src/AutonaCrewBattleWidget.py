@@ -124,6 +124,13 @@ class AutonaCrewBattleWidget(QWidget):
         controls.addWidget(self.playerNumber)
         controls.addStretch(1)
 
+        # Negative action leftmost in the trailing cluster (app-wide
+        # button-pair convention), the neutral actions to its right.
+        self.btReset = QPushButton(QApplication.translate("app", "Reset Stocks"))
+        L.tag_button(self.btReset, L.BUTTON_DANGER)
+        self.btReset.clicked.connect(self.ResetScore)
+        controls.addWidget(self.btReset)
+
         # X-post: same flow as the 1v1 board (AutonaScoreboardWidget) — opens
         # X's web intent with a prefilled body. Neutral (secondary) styling.
         self.xpostBtn = QPushButton(QApplication.translate("app", "Xに投稿する"))
@@ -136,11 +143,6 @@ class AutonaCrewBattleWidget(QWidget):
         self.btSwap.setToolTip(QApplication.translate("app", "Swap Teams"))
         self.btSwap.clicked.connect(self.SwapTeams)
         controls.addWidget(self.btSwap)
-
-        self.btReset = QPushButton(QApplication.translate("app", "Reset Stocks"))
-        L.tag_button(self.btReset, L.BUTTON_DANGER)
-        self.btReset.clicked.connect(self.ResetScore)
-        controls.addWidget(self.btReset)
 
         outer.addLayout(controls)
 

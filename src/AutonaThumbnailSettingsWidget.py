@@ -249,14 +249,6 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
         self.preview = PreviewWidget()
         previewContainer.layout().addWidget(self.preview)
 
-        self.updatePreview = self.settings.findChild(
-            QPushButton, "btUpdatePreview")
-        L.tag_button(self.updatePreview, L.BUTTON_PRIMARY)
-        self.updatePreview.clicked.connect(lambda: [
-            self.GeneratePreview(True),
-            self._RefreshVideoTitle(force=True),
-        ])
-
         self.copyToClipboard = self.settings.findChild(
             QPushButton, "btCopyToClipboard")
         self.copyToClipboard.clicked.connect(self._copyThumbnailToClipboard)
@@ -269,6 +261,12 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
             QPushButton, "btGenerate")
         self.generateThumbnail.setHidden(True)
 
+        # Shared settings-pane width (fixed in code, not the .ui) so the
+        # left column lines up with the other preview panels.
+        self.settings.findChild(
+            QGroupBox, "groupBoxGeneralSettings").setFixedWidth(
+                L.LEFT_PANE_WIDTH)
+
         # Normalise card padding / spacing across all top-level groups.
         for group in self.settings.findChildren(QGroupBox):
             L.apply_card_layout(group)
@@ -276,7 +274,8 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
         # Apply the design-system section-title style to in-card sub-headings
         # so they read as quiet uppercase labels (Design.md §5) instead of the
         # mismatched bold 10pt the .ui used to hard-code.
-        for name in ["label_17", "label_11", "label_13", "label_19"]:
+        for name in ["label_videoTitle", "label_17", "label_11",
+                     "label_13", "label_19"]:
             lbl = self.settings.findChild(QLabel, name)
             if lbl:
                 L.apply_section_title(lbl)
@@ -313,6 +312,15 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
 
         self.updateFromSettings()
         self.GeneratePreview()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        # No manual update button: small scoreboard edits (player names,
+        # scores) don't emit the signals connected above, so re-render with
+        # the latest state whenever the panel is revealed. Non-forced title
+        # refresh preserves any manual edit to the video title.
+        self.GeneratePreview()
+        self._RefreshVideoTitle()
 
     # ── Video title (YouTube) ──────────────────────────────────────
 

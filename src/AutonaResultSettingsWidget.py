@@ -348,12 +348,9 @@ class AutonaResultSettingsWidget(QDockWidget):
         # minimumSizeHint() ignores the contained widget entirely, so the
         # left column was collapsing to the width of its narrowest sibling
         # (the "Load tournament results" button) instead of the player grid.
-        # Pin an explicit floor based on the now-fully-built grid + team
-        # group, with room for the vertical scrollbar that 16 rows triggers.
+        # Pin the shared settings-pane width (also prevents the collapse).
         leftScrollArea = self.settings.findChild(QScrollArea, "scrollArea")
-        leftScrollArea.setMinimumWidth(
-            leftScrollArea.widget().sizeHint().width()
-            + leftScrollArea.verticalScrollBar().sizeHint().width())
+        leftScrollArea.setFixedWidth(L.LEFT_PANE_WIDTH)
 
         # --- Load from Start.gg ---
         self._standingsSignals = AutonaResultSettingsWidgetSignals()
@@ -370,6 +367,7 @@ class AutonaResultSettingsWidget(QDockWidget):
         # buttons.
         self.btLoadResult = QPushButton(
             QApplication.translate("app", "Load tournament results"))
+        L.tag_button(self.btLoadResult, L.BUTTON_PRIMARY)
         leftLayout.insertWidget(insertIdx, self.btLoadResult)
         insertIdx += 1
         self.btLoadResult.clicked.connect(self._loadResult)
@@ -429,11 +427,6 @@ class AutonaResultSettingsWidget(QDockWidget):
                 Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
 
         # --- Buttons ---
-        self.btUpdatePreview = self.settings.findChild(
-            QPushButton, "btUpdatePreview")
-        L.tag_button(self.btUpdatePreview, L.BUTTON_PRIMARY)
-        self.btUpdatePreview.clicked.connect(lambda: self.GeneratePreview(True))
-
         self.btCopyToClipboard = self.settings.findChild(
             QPushButton, "btCopyToClipboard")
         self.btCopyToClipboard.clicked.connect(self._copyToClipboard)
@@ -444,6 +437,7 @@ class AutonaResultSettingsWidget(QDockWidget):
 
         self.btPostResultToX = self.settings.findChild(
             QPushButton, "btPostResultToX")
+        L.tag_button(self.btPostResultToX, L.BUTTON_PRIMARY)
         self.btPostResultToX.clicked.connect(self._postResultToX)
 
         # Normalise card padding / spacing across all top-level groups.
@@ -598,6 +592,10 @@ class AutonaResultSettingsWidget(QDockWidget):
             }
 
         StateManager.Set("result_players", players)
+        # No manual update button: every edit path lands here, so schedule a
+        # debounced re-render (the manual GeneratePreview(True) path cancels
+        # the timer and renders immediately).
+        self._previewTimer.start()
 
     def _syncCurrentToState(self):
         """Sync whichever input set matches the active layout."""
@@ -724,6 +722,8 @@ class AutonaResultSettingsWidget(QDockWidget):
             }
 
         StateManager.Set("result_players", players)
+        # Debounced re-render on every edit (see _syncPlayersToState).
+        self._previewTimer.start()
 
     def _onTeamCharChanged(self, team_index, member_index):
         """Load the skin model when a team member's fighter changes."""
@@ -1069,9 +1069,18 @@ class AutonaResultSettingsWidget(QDockWidget):
     def GeneratePreview(self, manual=False):
         if manual:
             self._syncCurrentToState()
+            # The sync above schedules a debounced render; cancel it since
+            # we render immediately here.
+            self._previewTimer.stop()
             self._doGeneratePreview()
         else:
             self._previewTimer.start()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        # No manual update button: tournament info edited elsewhere feeds the
+        # rendered image, so re-render when the panel is revealed.
+        self._previewTimer.start()
 
     def _doGeneratePreview(self):
         try:
