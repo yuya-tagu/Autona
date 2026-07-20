@@ -69,7 +69,7 @@ Autona は「格闘ゲーム大会の配信支援ツール」である。利用�
 
 例:
 - `web/src/` = React Web UI（ScoreboardPage は手元操作用、上流の OBS overlay とは別物）
-- `layout/scoreboard/` = OBS ブラウザソース用テンプレ（上流踏襲、Autona ではユーザーが OBS に貼って使う）
+- `layout/scoreboard_*/` = OBS ブラウザソース用テンプレ（上流踏襲、Autona ではユーザーが OBS に貼って使う）
 
 ---
 
@@ -1297,12 +1297,11 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 | 2 | `assets/games/streetfighter7/base_files/logo.png` | ゲームロゴ |
 | 3 | `assets/games/streetfighter7/{asset_type}/...` | キャラ画像、ステージ画像など |
 
-#### 触るファイル（推奨）
-
-| # | ファイル | 内容 |
-|---|---------|------|
-| 4 | `layout/scoreboard/streetfighter7.html` | 既存共通テンプレを参照する HTML（`<body class="streetfighter7">`） |
-| 5 | `layout/scoreboard/index.css` | ゲーム名セレクタ（`.streetfighter7 { ... }`）で配色・配置の差分を追加 |
+ゲーム別の OBS 上書き HTML/CSS（旧 `layout/scoreboard/{game}.html`）は削除済み。
+新ゲーム追加時に OBS 側の見た目を個別調整したい場合は §7.2 の汎用
+`scoreboard_*/` テンプレ側（各デザインの `index.html` / `index.css`）を編集する。
+現行テンプレは `asset_key` でゲームのキャラ画像を差し込む汎用設計であり、
+旧方式のようなゲーム名 CSS セレクタによる分岐は持たない。
 
 #### 触らない
 

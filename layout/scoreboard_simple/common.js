@@ -1,5 +1,5 @@
 /**
- * scoreboard_BST — shared utilities
+ * scoreboard_simple — shared utilities
  *
  * Provides: game-box management, swap detection,
  * theme-aware color adaptation, and display helpers.

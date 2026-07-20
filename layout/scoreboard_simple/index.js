@@ -1,172 +1,81 @@
 LoadEverything().then(() => {
   gsap.config({ nullTargetWarn: false, trialWarn: false });
 
-  let startingAnimation = gsap
-    .timeline({ paused: true })
-    .from(
-      [".container"],
-      { duration: 1, opacity: "0", x: "-40px", ease: "power2.inOut" },
-      0
-    )
-    .from(
-      [".twitter-container"],
-      { duration: 1, opacity: "0", x: "+80px", ease: "power2.inOut" },
-      0
-    )
-    .from(".mask", { width: 0, duration: 1, ease: "power2.inOut" }, 0)
-    .from(
-      ".doubles .info",
-      { opacity: 0, duration: 0.5, ease: "power2.inOut" },
-      0.8
-    );
+  let p1Score = 100, p2Score = 100;
+  let newP1Score = 0, newP2Score = 0;
+  let savedBestOf = 0;
+  let savedGameArray = [];
+  let swapDetected = false;
+
+  const startingAnimation = buildStartingAnimation();
+  const detectSwap = createSwapDetector(false);
+  const detectSwapTeam = createSwapDetector(true);
+  const scores = { p1Score, p2Score };
 
   Start = async () => {
+    gsap.set("body", { opacity: 0 });
     startingAnimation.restart();
   };
 
   Update = async (event) => {
-    let data = event.data;
-    let oldData = event.oldData;
+    // Apply theme/accent colors BEFORE the score-data guard below, so colors
+    // still apply even when the score subtree isn't populated yet (e.g. game
+    // not selected). Also BEFORE adaptColorsForTheme.
+    const ti = event.data.tournamentInfo || {};
+    if (ti.themeColor) {
+      document.documentElement.style.setProperty("--theme-color", ti.themeColor);
+    }
+    if (ti.accentColor) {
+      document.documentElement.style.setProperty("--accent-color", ti.accentColor);
+    }
 
-    let isTeams = Object.keys(data.score[window.scoreboardNumber].team["1"].player).length > 1;
+    // The first state event (or a partial delta) can arrive before this
+    // board's score subtree is populated; bail until team/player data exists
+    // instead of throwing "reading 'team'" on undefined.
+    const sb = event.data.score && event.data.score[window.scoreboardNumber];
+    if (!sb || !sb.team || !sb.team["1"] || !sb.team["2"] || !sb.team["1"].player) return;
+    const teams = [sb.team["1"], sb.team["2"]];
+    const isTeams = Object.keys(teams[0].player).length > 1;
 
-    if (
-      oldData.score == null ||
-      Object.keys(oldData.score[window.scoreboardNumber].team["1"].player).length !=
-        Object.keys(data.score[window.scoreboardNumber].team["1"].player).length
-    ) {
-      if (Object.keys(data.score[window.scoreboardNumber].team["1"].player).length == 1) {
-        gsap
-          .timeline()
-          .fromTo(
-            ["body > .doubles"],
-            { duration: 0.2, opacity: "1", ease: "power2.inOut" },
-            { duration: 0.2, opacity: "0", ease: "power2.inOut" }
-          )
-          .fromTo(
-            ["body > .singles"],
-            { duration: 0.2, opacity: "0", ease: "power2.inOut" },
-            { duration: 0.2, opacity: "1", ease: "power2.inOut" }
-          );
+    for (const [t, team] of teams.entries()) {
+      // team["2"].player isn't covered by the guard above, so this can be
+      // undefined for a partial/asymmetric state — guard the lookup itself.
+      const player = team.player && team.player["1"];
+      if (!player) continue;
+      const side = t + 1;
+
+      if (!isTeams) {
+        await renderPlayerInfo(t, team, player);
+        adaptColorsForTheme(t);
       } else {
-        gsap
-          .timeline()
-          .fromTo(
-            ["body > .singles"],
-            { duration: 0.2, opacity: "1", ease: "power2.inOut" },
-            { duration: 0.2, opacity: "0", ease: "power2.inOut" }
-          )
-          .fromTo(
-            ["body > .doubles"],
-            { duration: 0.2, opacity: "0", ease: "power2.inOut" },
-            { duration: 0.2, opacity: "1", ease: "power2.inOut" }
-          );
+        await renderTeamInfo(t, team);
+        adaptColorsForTheme(t);
+      }
+
+      if (team.color) {
+        document.documentElement.style.setProperty(`--p${side}-score-bg-color`, team.color);
       }
     }
 
-    for (const [t, team] of [
-      data.score[window.scoreboardNumber].team["1"],
-      data.score[window.scoreboardNumber].team["2"],
-    ].entries()) {
-      let teamName = "";
+    await displayMatchPhase();
 
-      if (!team.teamName || team.teamName == "") {
-        let names = [];
-        for (const [p, player] of Object.values(team.player).entries()) {
-          if (player) {
-            names.push(await Transcript(player.name));
-          }
-        }
-        teamName = names.join(" / ");
-      } else {
-        teamName = team.teamName;
-      }
+    // Swap detection
+    const detector = isTeams ? detectSwapTeam : detectSwap;
+    swapDetected = detector(savedGameArray, scores);
+    p1Score = scores.p1Score;
+    p2Score = scores.p2Score;
 
-      SetInnerHtml(
-        $(`.info.doubles.t${t + 1} .team_name`),
-        `
-          ${teamName}${team.losers ? " [L]" : ""}
-        `
-      );
+    // Game boxes
+    scoreBoxDisplayToggle();
+    savedBestOf = createGameBoxes(savedBestOf);
 
-      for (const [p, player] of Object.values(team.player).entries()) {
-        if (player) {
-          SetInnerHtml(
-            $(`.t${t + 1}.p${p + 1} .name`),
-            `
-                <span>
-                    <span class='sponsor'>
-                        ${(player.team && data.display_options?.show_sponsor !== false) ? player.team + "" : ""}
-                    </span>
-                    ${await Transcript(player.name)}
-										${team.losers && !isTeams ? " [L]" : ""}
-                </span>
-            `
-          );
-
-          SetInnerHtml(
-            $(`.t${t + 1}.p${p + 1} .flagcountry`),
-            player.country?.asset
-              ? `
-                <div class='flagname'>${player.country.code}</div>
-                <div class='flag' style="background-image: url('../../${player.country.asset.toLowerCase()}')"></div>
-              `
-              : ""
-          );
-
-          SetInnerHtml(
-            $(`.t${t + 1}.p${p + 1} .flagstate`),
-            player.state?.asset
-              ? `
-                <div class='flagname'>${player.state.code}</div>
-                <div class='flag' style="background-image: url('../../${player.state.asset}')"></div>
-              `
-              : ""
-          );
-
-          SetInnerHtml(
-            $(`.t${t + 1}.p${p + 1} .twitter`),
-            player.twitter
-              ? `<span class="twitter_logo"></span>${String(player.twitter)}`
-              : ""
-          );
-
-          SetInnerHtml(
-            $(`.t${t + 1}.p${p + 1} .score`),
-            !isTeams ? String(team.score) : ""
-          );
-
-          SetInnerHtml($(`.t${t + 1} .doubles_score`), String(team.score));
-
-          SetInnerHtml(
-            $(`.t${t + 1}.p${p + 1} .sponsor-container`),
-            `<div class='sponsor-logo' style="background-image: url('../../${player.sponsor_logo}')"></div>`
-          );
-        }
-        if(team.color && !tsh_settings["forceDefaultScoreColors"]) {
-          document.querySelector(':root').style.setProperty(`--p${t + 1}-score-bg-color`, team.color);
-        }
-      }
+    if (!swapDetected) {
+      ({ savedGameArray, newP1Score, newP2Score, p1Score, p2Score } =
+        updateGameArray(savedGameArray, newP1Score, newP2Score, p1Score, p2Score));
+      scores.p1Score = p1Score;
+      scores.p2Score = p2Score;
     }
 
-    let phaseTexts = [];
-    if (data.score[window.scoreboardNumber].phase) phaseTexts.push(data.score[window.scoreboardNumber].phase);
-    // Pool is a separate state key (score.N.pool); join it for display.
-    if (data.score[window.scoreboardNumber].pool) phaseTexts.push(data.score[window.scoreboardNumber].pool);
-    if (data.score[window.scoreboardNumber].best_of_text) phaseTexts.push(data.score[window.scoreboardNumber].best_of_text);
-
-    SetInnerHtml($(".info.material_container .phase"), phaseTexts.join(" - "));
-    // Prefer the operator-controlled display name; fall back to the raw
-    // tournament name only when displayTournamentName was never set (an
-    // explicit empty string means "intentionally hidden" and is respected).
-    const ti = data.tournamentInfo || {};
-    const displayTournamentName = ti.displayTournamentName !== undefined
-      ? ti.displayTournamentName
-      : (ti.tournamentName || "");
-    SetInnerHtml(
-      $(".info.material_container .tournament_name"),
-      displayTournamentName
-    );
-    SetInnerHtml($(".info.material_container .match"), data.score[window.scoreboardNumber].match);
+    scheduleColorInBoxes(savedGameArray);
   };
 });
