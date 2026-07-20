@@ -12,6 +12,7 @@ Autona.py's import order.
 
 import logging
 import math
+import os
 
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
@@ -33,6 +34,37 @@ def ObsUrl(layout_name):
     port = SettingsManager.Get("general.webserver_port", 5000)
     return (f"http://localhost:{port}/{LAYOUT_DIR}/"
             f"{layout_name}/index.html")
+
+
+def DiscoverLayoutDesigns(prefix):
+    """List ``layout/{prefix}`` and ``layout/{prefix}_*`` folders that have
+    an ``index.html``, sorted (the base folder first).
+
+    Shared by the panels whose preview offers a design pulldown (Commentary
+    / Top 8): dropping a ``layout/{prefix}_{variant}/`` folder adds it to
+    the pulldown on the next launch, no code change needed. The Board tab
+    keeps its own richer discovery (custom/ designs, live re-scan)."""
+    designs = []
+    try:
+        base = os.path.abspath(LAYOUT_DIR)
+        for name in sorted(os.listdir(base)):
+            if name != prefix and not name.startswith(prefix + "_"):
+                continue
+            if os.path.isfile(os.path.join(base, name, "index.html")):
+                designs.append(name)
+    except OSError as e:
+        logger.warning("Failed to list %s layout designs: %s", prefix, e)
+    return designs
+
+
+def LayoutDesignDisplayName(prefix, design):
+    """Pulldown label for a discovered design: the base folder is 標準,
+    variants use their prettified suffix (``{prefix}_dark_gold`` →
+    ``Dark Gold``)."""
+    if design == prefix:
+        return "標準"
+    suffix = design[len(prefix):].lstrip("_")
+    return suffix.replace("_", " ").replace("-", " ").title() or design
 
 
 class AutonaLayoutPreview(QFrame):
@@ -58,10 +90,15 @@ class AutonaLayoutPreview(QFrame):
 
     - The view is a direct, geometry-managed child of this QFrame (no
       QScrollArea, no QAbstractScrollArea ancestor anywhere).
-    - ``setMinimumSize`` is derived from Chromium's zoom-factor clamp
-      (``MIN_ZOOM``) so the panel can never shrink below the size that
-      would require scrolling to reach the clamped-minimum canvas — the
-      clamp and the minimum size are kept in lock-step on purpose.
+    - ``setMinimumSize`` is derived from ``MIN_FIT``, the smallest scale
+      the preview supports. Chromium clamps the zoom factor at ``MIN_ZOOM``
+      (0.25); between MIN_FIT and MIN_ZOOM the remainder is bridged by a
+      CSS ``transform: scale()`` injected on ``<body>`` (see
+      ``_applyExtraScale``). The layout viewport then shrinks below
+      1920x1080, but the body is pinned to 1920x1080 and scaled to fit, so
+      px-positioned overlays render whole. (Overlays must not rely on
+      vw/vh units or ``position: fixed`` — none of the previewed layouts
+      do.)
     - As a defense in depth, if the panel is ever forced smaller than that
       minimum anyway (e.g. a parent layout override), ``_layoutView``
       centres the (fixed-zoom) view and lets it clip against the frame's
@@ -91,6 +128,10 @@ class AutonaLayoutPreview(QFrame):
     MIN_ZOOM = 0.25
     MAX_ZOOM = 5.0
 
+    # Smallest supported preview scale (defines the widget minimum size).
+    # Below MIN_ZOOM the remainder is a CSS scale — see class docstring.
+    MIN_FIT = 0.125
+
     def __init__(self, layout_name=None, parent=None):
         # layout_name may be deferred to load() for panels that switch
         # between designs on one preview (Board tab).
@@ -106,14 +147,16 @@ class AutonaLayoutPreview(QFrame):
             f"border-radius: {UI.RADIUS_SM}px;"
             f"}}"
         )
-        # Keep the panel large enough that the canvas never needs to hit
-        # Chromium's zoom floor within a viewport smaller than that floor's
-        # rendered size — see class docstring. +2 accounts for the 1px
-        # inset kept on each side in _fitZoom/_layoutView.
+        # Keep the panel large enough that the canvas never shrinks below
+        # MIN_FIT — see class docstring. +2 accounts for the 1px inset kept
+        # on each side in _fitScale/_layoutView.
         self.setMinimumSize(
-            int(self.NATIVE_WIDTH * self.MIN_ZOOM) + 2,
-            int(self.NATIVE_HEIGHT * self.MIN_ZOOM) + 2,
+            int(self.NATIVE_WIDTH * self.MIN_FIT) + 2,
+            int(self.NATIVE_HEIGHT * self.MIN_FIT) + 2,
         )
+        # Last CSS extra-scale pushed into the page (None = unknown, e.g.
+        # right after a load wiped the injected style).
+        self._lastExtra = None
 
         self.view = QWebEngineView(self)
         s = self.view.settings()
@@ -146,25 +189,29 @@ class AutonaLayoutPreview(QFrame):
             painter.drawPixmap(self.view.geometry(), self._bgScaled)
             painter.end()
 
-    def _fitZoom(self):
-        # Zoom that fits the whole canvas in the panel, clamped to Chromium's
-        # range. Depends ONLY on the panel size, so nothing (including the
-        # removed scroll area) can change it out from under the layout math.
+    def _fitScale(self):
+        # Scale that fits the whole canvas in the panel, clamped to the
+        # supported range. Depends ONLY on the panel size, so nothing
+        # (including the removed scroll area) can change it out from under
+        # the layout math.
         inset = 1
         avail_w = max(1, self.width() - 2 * inset)
         avail_h = max(1, self.height() - 2 * inset)
-        zoom = min(avail_w / self.NATIVE_WIDTH, avail_h / self.NATIVE_HEIGHT)
-        return max(self.MIN_ZOOM, min(zoom, self.MAX_ZOOM))
+        scale = min(avail_w / self.NATIVE_WIDTH, avail_h / self.NATIVE_HEIGHT)
+        return max(self.MIN_FIT, min(scale, self.MAX_ZOOM))
 
     def _layoutView(self):
-        zoom = self._fitZoom()
+        scale = self._fitScale()
+        # Chromium refuses zoom factors below MIN_ZOOM; the remainder is
+        # bridged by a CSS scale on <body> (see class docstring).
+        zoom = max(scale, self.MIN_ZOOM)
         # Round the view size up (not to nearest) so the CSS layout
-        # viewport (view_px / zoom) is never fractionally short of
-        # 1920x1080 — a viewport that undershoots lets the page's own
-        # content overflow it. Rounding up guarantees viewport >= native
+        # viewport (view_px / zoom) is never fractionally short of the
+        # scaled canvas — a viewport that undershoots lets the page's own
+        # content overflow it. Rounding up guarantees viewport >= scaled
         # size, at the cost of at most 1px of clipping against the frame.
-        view_w = math.ceil(self.NATIVE_WIDTH * zoom)
-        view_h = math.ceil(self.NATIVE_HEIGHT * zoom)
+        view_w = math.ceil(self.NATIVE_WIDTH * scale)
+        view_h = math.ceil(self.NATIVE_HEIGHT * scale)
 
         # Centre the view in the panel. With setMinimumSize enforcing the
         # zoom floor, this fits within the panel at every reachable size;
@@ -176,6 +223,7 @@ class AutonaLayoutPreview(QFrame):
         self.view.setGeometry(x, y, view_w, view_h)
         self._glass.setGeometry(x, y, view_w, view_h)
         self.view.setZoomFactor(zoom)
+        self._applyExtraScale(scale / zoom)
 
         # Rescale the cached background only when the view size actually
         # changed: _layoutView runs on every resizeEvent, and a smooth
@@ -190,9 +238,65 @@ class AutonaLayoutPreview(QFrame):
                 )
                 self.update()
 
+    def _applyExtraScale(self, extra):
+        """Push the sub-MIN_ZOOM remainder into the page as a CSS scale on
+        <body> (pinned to the native 1920x1080 canvas). ``extra`` is 1.0
+        whenever Chromium's zoom factor covers the whole scale; the injected
+        style is then removed so normal-size rendering is untouched."""
+        # Round so resize-drag noise doesn't spam runJavaScript.
+        extra = min(round(extra, 4), 1.0)
+        if extra == self._lastExtra:
+            return
+        self._lastExtra = extra
+        js = (
+            "(function(s){"
+            "var st=document.getElementById('__autona_preview_scale');"
+            "if(s>=1){if(st)st.remove();return;}"
+            "if(!st){st=document.createElement('style');"
+            "st.id='__autona_preview_scale';"
+            "document.head.appendChild(st);}"
+            "st.textContent='body{transform:scale('+s+');"
+            "transform-origin:0 0;"
+            f"width:{self.NATIVE_WIDTH}px;height:{self.NATIVE_HEIGHT}px;"
+            "overflow:hidden;}';"
+            "})(%s)" % extra)
+        self.view.page().runJavaScript(js)
+
     def _applyScale(self):
-        # Re-apply after a load (Chromium resets zoom on loadFinished).
-        self.view.setZoomFactor(self._fitZoom())
+        # Re-apply after a load: Chromium resets the zoom factor on
+        # loadFinished, and a (re)load discards the injected scale style.
+        self._lastExtra = None
+        self._layoutView()
+
+    # ── Copy / save actions ─────────────────────────────────────────
+    def _snapshot(self):
+        """Snapshot of the canvas area as currently displayed (background
+        image + overlay composited, letterbox bars excluded)."""
+        return self.grab(self.view.geometry())
+
+    def CopyToClipboard(self):
+        QApplication.clipboard().setPixmap(self._snapshot())
+
+    def SaveImage(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "プレビューを画像として保存", "preview.png",
+            "PNG (*.png)")
+        if path:
+            self._snapshot().save(path)
+
+    def BuildActionButtons(self):
+        """Two stacked full-width buttons for the panel to place under the
+        preview. The labels are the unified wording shared by every
+        preview panel (RESULT-tab structure as the reference)."""
+        col = QVBoxLayout()
+        col.setSpacing(UI.SPACE_SM)
+        btCopy = QPushButton("プレビューをクリップボードにコピー")
+        btCopy.clicked.connect(self.CopyToClipboard)
+        col.addWidget(btCopy)
+        btSave = QPushButton("プレビューを画像として保存")
+        btSave.clicked.connect(self.SaveImage)
+        col.addWidget(btSave)
+        return col
 
     def load(self, layout_name=None):
         if layout_name is not None:

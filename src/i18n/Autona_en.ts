@@ -215,18 +215,14 @@
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <location filename="..\layout\AutonaResultSettings.ui" line="0" />
-        <source>Update Preview</source>
-        <translation>Update Preview</translation>
+        <source>Copy Preview to Clipboard</source>
+        <translation>Copy Preview to Clipboard</translation>
     </message>
     <message>
+        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <location filename="..\layout\AutonaResultSettings.ui" line="0" />
-        <source>Copy to Clipboard</source>
-        <translation>Copy to Clipboard</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaResultSettings.ui" line="0" />
-        <source>Save Result Image</source>
-        <translation>Save Result Image</translation>
+        <source>Save Preview as Image</source>
+        <translation>Save Preview as Image</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaResultSettings.ui" line="0" />
@@ -401,8 +397,8 @@
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Select Thumbnail Template</source>
-        <translation>Select Thumbnail Template</translation>
+        <source>Select Thumbnail Design</source>
+        <translation>Select Thumbnail Design</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
@@ -495,21 +491,6 @@
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <source>Reset to Defaults</source>
         <translation>Reset to Defaults</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Preview Settings</source>
-        <translation>Preview Settings</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Copy Thumbnail to Clipboard</source>
-        <translation>Copy Thumbnail to Clipboard</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Save Thumbnail</source>
-        <translation>Save Thumbnail</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
@@ -968,10 +949,6 @@
         <translation>Apply</translation>
     </message>
     <message>
-        <source>Load</source>
-        <translation>Load</translation>
-    </message>
-    <message>
         <source>Help &amp; Settings</source>
         <translation>Help &amp; Settings</translation>
     </message>
@@ -1028,6 +1005,11 @@
         <location filename="..\Autona.py" line="416" />
         <source>Data</source>
         <translation>Data</translation>
+    </message>
+    <message>
+        <location filename="..\Autona.py" line="416" />
+        <source>ScoreboardCategory</source>
+        <translation>Scoreboard</translation>
     </message>
     <message>
         <location filename="..\Autona.py" line="301" />

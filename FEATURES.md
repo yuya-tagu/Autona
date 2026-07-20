@@ -154,7 +154,7 @@
 - 8 スロット固定の実況・解説者カード（名前 / チーム / 本名 / Twitter / 役割 / コメント）
 - 役割プレフィックス（実況・解説・選手・主催）を選択可能
 - 「配信に表示」トグルで OBS オーバーレイに出す 1〜4 名を選択（人数に応じた可変レイアウト）
-- 右ペインにオーバーレイのライブプレビュー + OBS 用ブラウザソース URL 案内
+- 右ペインにデザイン選択プルダウン（`layout/commentators*/` を自動検出、選択で即時反映）+ オーバーレイのライブプレビュー + OBS 用ブラウザソース URL 案内
 - 名前フィールドはローカル選手 DB から補完（チーム / Twitter 等を自動入力）
 
 ---
@@ -268,7 +268,7 @@ STATS ドック（[src/AutonaStatsWidget.py](src/AutonaStatsWidget.py)）の内�
 [src/AutonaResultSettingsWidget.py](src/AutonaResultSettingsWidget.py)・[src/result/ResultRenderer.py](src/result/ResultRenderer.py)。
 
 - 試合結果画面の自動生成
-- **Update Preview** — プレビュー再描画
+- プレビューはレイアウト選択・選手編集で自動再描画（手動更新ボタンなし）
 - **Copy to Clipboard** — 画像をクリップボードにコピー
 - **Save Result Image** — PNG ファイルとして保存
 - 勝者ハイライト / スコア / ラウンド情報

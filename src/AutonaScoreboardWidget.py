@@ -627,8 +627,9 @@ class AutonaScoreboardWidget(QWidget):
         columnsGrid = self.columns.layout()
         columnsGrid.addWidget(self.scorePanel, 1, 0, 1, 2)
 
-        # Action row (grid row 2): apply and reset-all-inputs side by side,
-        # each spanning its team column.
+        # Action row (grid row 2): reset-all-inputs and apply side by side,
+        # each spanning its team column. Negative action left, positive
+        # action right — the app-wide button-pair convention.
         self.btApply = QPushButton(QApplication.translate("app", "反映"))
         self.btApply.setObjectName("primary")
         self.btApply.setToolTip(QApplication.translate(
@@ -644,8 +645,8 @@ class AutonaScoreboardWidget(QWidget):
         L.tag_button(self.btResetAll, L.BUTTON_DANGER)
         self.btResetAll.clicked.connect(self.ResetAllInputs)
 
-        columnsGrid.addWidget(self.btApply, 2, 0)
-        columnsGrid.addWidget(self.btResetAll, 2, 1)
+        columnsGrid.addWidget(self.btResetAll, 2, 0)
+        columnsGrid.addWidget(self.btApply, 2, 1)
 
         self.innerWidget.layout().removeWidget(self.scoreColumn)
         self.scoreColumn.findChild(QGroupBox, "scoreGroupBox").setTitle("")

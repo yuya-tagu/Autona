@@ -216,18 +216,14 @@
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <location filename="..\layout\AutonaResultSettings.ui" line="0" />
-        <source>Update Preview</source>
-        <translation>プレビューを更新する</translation>
+        <source>Copy Preview to Clipboard</source>
+        <translation>プレビューをクリップボードにコピー</translation>
     </message>
     <message>
+        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <location filename="..\layout\AutonaResultSettings.ui" line="0" />
-        <source>Copy to Clipboard</source>
-        <translation>クリップボードにコピー</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaResultSettings.ui" line="0" />
-        <source>Save Result Image</source>
-        <translation>リザルト画像を保存</translation>
+        <source>Save Preview as Image</source>
+        <translation>プレビューを画像として保存</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaResultSettings.ui" line="0" />
@@ -403,8 +399,8 @@
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Select Thumbnail Template</source>
-        <translation>サムネイルのテンプレートを選択</translation>
+        <source>Select Thumbnail Design</source>
+        <translation>サムネイルのデザインを選択</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
@@ -497,21 +493,6 @@
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
         <source>Reset to Defaults</source>
         <translation>デフォルトの設定にリセット</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Preview Settings</source>
-        <translation>プレビュー</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Copy Thumbnail to Clipboard</source>
-        <translation>サムネイルをクリップボードにコピー</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
-        <source>Save Thumbnail</source>
-        <translation>サムネイルを保存</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaThumbnailSettings.ui" line="0" />
@@ -970,10 +951,6 @@
         <translation>反映</translation>
     </message>
     <message>
-        <source>Load</source>
-        <translation>読み込み</translation>
-    </message>
-    <message>
         <source>Help &amp; Settings</source>
         <translation>ヘルプ＆設定</translation>
     </message>
@@ -1032,6 +1009,11 @@
         <translation>各種データ</translation>
     </message>
     <message>
+        <location filename="..\Autona.py" line="416" />
+        <source>ScoreboardCategory</source>
+        <translation>スコアボード</translation>
+    </message>
+    <message>
         <location filename="..\Autona.py" line="301" />
         <source>Stream Settings</source>
         <translation>配信チャンネル設定</translation>
@@ -1040,13 +1022,13 @@
         <location filename="..\AutonaThumbnailSettingsWidget.py" line="87" />
         <location filename="..\Autona.py" line="321" />
         <source>Thumbnail Settings</source>
-        <translation>サムネイル設定</translation>
+        <translation>対戦動画サムネイル</translation>
     </message>
     <message>
         <location filename="..\AutonaResultSettingsWidget.py" line="86" />
         <location filename="..\Autona.py" line="332" />
         <source>Result Settings</source>
-        <translation>リザルト設定</translation>
+        <translation>大会リザルト</translation>
     </message>
     <message>
         <location filename="..\Autona.py" line="340" />

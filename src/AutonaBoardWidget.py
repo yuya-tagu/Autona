@@ -111,20 +111,47 @@ class AutonaBoardWidget(QDockWidget):
         self._designWatcher.directoryChanged.connect(
             self._scheduleDesignRefresh)
 
-        content = QWidget()
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(
+        # Two panes, each with its own scroll (thumbnail-settings style,
+        # same idiom as the Commentary / Top 8 panels): settings (design /
+        # colors / OBS) in a fixed-width left column, the live preview
+        # filling the right.
+        leftContent = QWidget()
+        leftCol = QVBoxLayout(leftContent)
+        leftCol.setContentsMargins(
             UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN)
-        outer.setSpacing(UI.PANEL_MARGIN)
-        outer.addWidget(self._buildDesignGroup())
-        outer.addWidget(self._buildColorGroup())
-        outer.addWidget(self._buildPreviewGroup(), 1)
-        outer.addWidget(self._buildObsGroup())
+        leftCol.setSpacing(UI.PANEL_MARGIN)
+        leftCol.addWidget(self._buildDesignerGroup())
+        leftCol.addWidget(self._buildColorGroup())
+        leftCol.addWidget(self._buildObsGroup())
+        leftCol.addStretch(1)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(content)
-        self.setWidget(scroll)
+        leftScroll = QScrollArea()
+        leftScroll.setWidgetResizable(True)
+        leftScroll.setWidget(leftContent)
+        leftScroll.setFixedWidth(L.LEFT_PANE_WIDTH)
+        leftScroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        rightContent = QWidget()
+        rightCol = QVBoxLayout(rightContent)
+        rightCol.setContentsMargins(
+            UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN)
+        rightCol.setSpacing(UI.PANEL_MARGIN)
+        rightCol.addLayout(self._buildDesignSelector())
+        rightCol.addWidget(self._buildPreview(), 1)
+        rightCol.addLayout(self.preview.BuildActionButtons())
+
+        rightScroll = QScrollArea()
+        rightScroll.setWidgetResizable(True)
+        rightScroll.setWidget(rightContent)
+
+        panes = QWidget()
+        panesLayout = QHBoxLayout(panes)
+        panesLayout.setContentsMargins(0, 0, 0, 0)
+        panesLayout.setSpacing(0)
+        panesLayout.addWidget(leftScroll)
+        panesLayout.addWidget(rightScroll, 1)
+        self.setWidget(panes)
         self._watchDesignDirectories()
 
         # Seed colors into state at startup (moved from the EVENT tab) so
@@ -148,12 +175,18 @@ class AutonaBoardWidget(QDockWidget):
         name = folder[len("scoreboard"):].lstrip("_") or folder
         return name.replace("_", " ").title()
 
-    def _buildDesignGroup(self):
-        # Japanese literals follow the existing hardcoded-JP precedent
-        # ("ブラウザ版を開く" in AutonaScoreboardWidget); the runtime reads
-        # compiled .qm only, so untranslated translate() calls would show
-        # English. The tab title still uses translate() for the short-label.
-        group = L.make_card("スコアボードデザイン")
+    def _buildDesignSelector(self):
+        # Right-column selector above the preview: section-title label +
+        # full-width combo, matching the RESULT tab. Japanese literals
+        # follow the existing hardcoded-JP precedent ("ブラウザ版を開く" in
+        # AutonaScoreboardWidget); the runtime reads compiled .qm only, so
+        # untranslated translate() calls would show English.
+        col = QVBoxLayout()
+        col.setSpacing(UI.SPACE_SM)
+        label = QLabel("スコアボードのデザインを選択")
+        L.apply_section_title(label)
+        col.addWidget(label)
+
         self.designCombo = QComboBox()
         for d in self._designs:
             self.designCombo.addItem(self._displayName(d), d)
@@ -163,49 +196,37 @@ class AutonaBoardWidget(QDockWidget):
             idx = self.designCombo.findData(DEFAULT_DESIGN)
         if idx >= 0:
             self.designCombo.setCurrentIndex(idx)
+        col.addWidget(self.designCombo)
 
-        # Picker (left half) and the supported format / game (right half),
-        # split 50/50 via equal stretch.
+        # Supported format / game for the selected design. No manual
+        # refresh button: _designWatcher already re-runs _refreshDesigns
+        # whenever a design folder changes on disk.
         self.designMetaLabel = QLabel()
         self.designMetaLabel.setWordWrap(True)
-        self.designMetaLabel.setAlignment(
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.designMetaLabel.setStyleSheet(UI.secondary_label_style())
-        row = QHBoxLayout()
-        row.setSpacing(UI.SPACE_MD)
-        row.addWidget(self.designCombo, 1)
-        self.btRefreshDesigns = QPushButton("更新")
-        self.btRefreshDesigns.setToolTip(
-            "保存済みのカスタムデザインを再読み込みします")
-        self.btRefreshDesigns.setSizePolicy(
-            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        self.btRefreshDesigns.clicked.connect(self._refreshDesigns)
-        row.addWidget(self.btRefreshDesigns)
-        row.addWidget(self.designMetaLabel, 1)
-        group.layout().addLayout(row)
-
-        designerRow = QHBoxLayout()
-        designerDescription = QLabel(
-            "PNGと選手名・スコアを組み合わせて、新しいデザインを作成・編集します。")
-        designerDescription.setWordWrap(True)
-        designerDescription.setStyleSheet(UI.secondary_label_style())
-        designerRow.addWidget(designerDescription, 1)
-        self.btOpenDesigner = QPushButton("Designerを開く")
-        self.btOpenDesigner.setToolTip(
-            "デスクトップウインドウでスコアボードDesignerを開きます")
-        self.btOpenDesigner.setSizePolicy(
-            QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        self.btOpenDesigner.clicked.connect(self._openDesigner)
-        designerRow.addWidget(self.btOpenDesigner)
-        group.layout().addLayout(designerRow)
+        col.addWidget(self.designMetaLabel)
 
         # Connect after the initial selection so it doesn't fire on startup.
         self.designCombo.currentIndexChanged.connect(self._onDesignChanged)
         if not self._designs:
             warn = QLabel("layout/ にスコアボードデザインが見つかりません。")
             warn.setWordWrap(True)
-            group.layout().addWidget(warn)
+            col.addWidget(warn)
         self._refreshDesignMeta()
+        return col
+
+    def _buildDesignerGroup(self):
+        group = L.make_card("Designer")
+        designerDescription = QLabel(
+            "PNGと選手名・スコアを組み合わせて、新しいデザインを作成・編集します。")
+        designerDescription.setWordWrap(True)
+        designerDescription.setStyleSheet(UI.secondary_label_style())
+        group.layout().addWidget(designerDescription)
+        self.btOpenDesigner = QPushButton("Designerを開く")
+        self.btOpenDesigner.setToolTip(
+            "デスクトップウインドウでスコアボードDesignerを開きます")
+        self.btOpenDesigner.clicked.connect(self._openDesigner)
+        group.layout().addWidget(self.btOpenDesigner)
         return group
 
     def _designMetaText(self, design):
@@ -303,33 +324,23 @@ class AutonaBoardWidget(QDockWidget):
         self._designerWindow.activateWindow()
 
     # ── Preview ──────────────────────────────────────────────────────
-    def _buildPreviewGroup(self):
-        group = L.make_card("プレビュー")
-        # Preview keeps a fixed 1920x1080 logical resolution and fits the
-        # whole canvas to the panel (zoom scales with size); see
+    def _buildPreview(self):
+        # Bare preview widget, no card wrapper — the RESULT tab's right-pane
+        # structure is the reference for every preview panel. The preview
+        # keeps a fixed 1920x1080 logical resolution and fits the whole
+        # canvas to the panel (zoom scales with size); see
         # AutonaLayoutPreview.
         self.preview = AutonaLayoutPreview()
         self.preview.setBackgroundImage(
             os.path.join("layout", "videoframe_1659973.png"))
         self.preview.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        group.layout().addWidget(self.preview)
-        btRow = QHBoxLayout()
-        btRow.addStretch(1)
-        btReload = QPushButton("プレビューを再読み込み")
-        btReload.clicked.connect(self._reloadPreview)
-        btRow.addWidget(btReload)
-        group.layout().addLayout(btRow)
-        return group
+        return self.preview
 
     def _loadPreview(self):
         design = self._currentDesign()
         if design:
             self.preview.load(design)
-
-    def _reloadPreview(self):
-        self._previewLoaded = True
-        self._loadPreview()
 
     def showEvent(self, e):
         super().showEvent(e)
@@ -391,18 +402,21 @@ class AutonaBoardWidget(QDockWidget):
             label.setWordWrap(True)
             group.layout().addWidget(label)
 
-        pathRow = QHBoxLayout()
+        # Narrow left column: the path field gets its own row, the two
+        # action buttons share the row below.
         self.obsPathField = QLineEdit()
         self.obsPathField.setReadOnly(True)
-        pathRow.addWidget(self.obsPathField, 1)
+        group.layout().addWidget(self.obsPathField)
+        btnRow = QHBoxLayout()
         btCopy = QPushButton("コピー")
         btCopy.clicked.connect(
             lambda: QApplication.clipboard().setText(self.obsPathField.text()))
-        pathRow.addWidget(btCopy)
+        btnRow.addWidget(btCopy)
         btOpen = QPushButton("エクスプローラで開く")
         btOpen.clicked.connect(self._openInExplorer)
-        pathRow.addWidget(btOpen)
-        group.layout().addLayout(pathRow)
+        btnRow.addWidget(btOpen)
+        btnRow.addStretch(1)
+        group.layout().addLayout(btnRow)
 
         note = QLabel(
             "Autona を起動したままにすると、OBS 上でスコアがリアルタイムに反映されます。")

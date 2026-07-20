@@ -127,6 +127,16 @@ def make_section_title(text: str, parent: QWidget | None = None) -> QLabel:
     return label
 
 
+# ─── Settings-panel left pane ────────────────────────────────────
+#
+# The preview-style panels (Board / Thumbnail / Result / Top 8 /
+# Commentary) share a two-pane layout: settings in a fixed-width left
+# pane, the preview filling the right. One width so they line up when
+# switching panels.
+
+LEFT_PANE_WIDTH = 340   # px
+
+
 # ─── Form row layout ─────────────────────────────────────────────
 #
 # A single label-on-left, control(s)-on-right row. The label gets a

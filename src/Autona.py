@@ -194,7 +194,10 @@ class Window(QMainWindow):
     #      into it from the Tournament Info and Scoreboard panels.
     # v19: Sidebar grouped into categories (Setup / Display / Data) and
     #      reordered — Scoreboard leads, uncategorised.
-    STATE_VERSION = 19
+    # v20: Commentary and Top 8 swapped in the sidebar order.
+    # v21: New "Scoreboard" category between Setup and Display, holding the
+    #      scoreboard (input) and board (design) panels.
+    STATE_VERSION = 21
     signals = WindowSignals()
 
     def __init__(self):
@@ -415,25 +418,26 @@ class Window(QMainWindow):
         # (category title or None, [(panel widget, sidebar icon file), ...]);
         # a None title emits the items with no heading above them.
         #
-        # The scoreboard leads, uncategorised: it is the one panel used
-        # continuously while a tournament runs, so it stays a single click away
-        # at a fixed spot. The categories below it follow the operator's
-        # timeline — configure the event and the broadcast up front, set up how
-        # things look, then read the data back out.
+        # The categories follow the operator's timeline — configure the
+        # event and the broadcast up front, run the scoreboard while the
+        # tournament runs, set up how things look, then read the data back
+        # out. NOTE: the "ScoreboardCategory" source string is a deliberate
+        # disambiguation — plain "Scoreboard" is already the scoreboard
+        # panel's title (ja: スコアボード入力).
         self._navSections = [
-            (None, [
-                (self.scoreboard, 'scoreboard.svg'),
-            ]),
             (QApplication.translate("app", "Setup"), [
                 (tournamentInfo, 'tournament.svg'),
                 (streamSetting, 'megaphone.svg'),
             ]),
-            (QApplication.translate("app", "Display"), [
+            (QApplication.translate("app", "ScoreboardCategory"), [
+                (self.scoreboard, 'scoreboard.svg'),
                 (board, 'board.svg'),
+            ]),
+            (QApplication.translate("app", "Display"), [
                 (thumbnailSetting, 'thumbnail.svg'),
                 (resultSetting, 'result.svg'),
-                (commentary, 'commentary.svg'),
                 (top8, 'bracket.svg'),
+                (commentary, 'commentary.svg'),
             ]),
             (QApplication.translate("app", "Data"), [
                 (self.statsWidget, 'stats.svg'),

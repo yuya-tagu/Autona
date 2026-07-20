@@ -230,6 +230,15 @@ class AutonaPlayerBrowserWidget(QDockWidget):
         self.searchEdit.setClearButtonEnabled(True)
         topRow.addWidget(self.searchEdit, 1)
 
+        # Negative action leftmost in the button cluster (app-wide
+        # button-pair convention), positive actions to its right.
+        self.deleteBt = QPushButton(
+            QApplication.translate("app", "Delete selected player"))
+        self.deleteBt.setObjectName("danger")
+        self.deleteBt.setEnabled(False)
+        self.deleteBt.clicked.connect(self._DeleteSelectedPlayer)
+        topRow.addWidget(self.deleteBt)
+
         addBt = QPushButton(QApplication.translate("app", "Add new player"))
         addBt.setIcon(QIcon(UI.icon_path("add_user.svg")))
         addBt.clicked.connect(self._AddPlayer)
@@ -239,13 +248,6 @@ class AutonaPlayerBrowserWidget(QDockWidget):
         self.editBt.setEnabled(False)
         self.editBt.clicked.connect(self._EditSelectedPlayer)
         topRow.addWidget(self.editBt)
-
-        self.deleteBt = QPushButton(
-            QApplication.translate("app", "Delete selected player"))
-        self.deleteBt.setObjectName("danger")
-        self.deleteBt.setEnabled(False)
-        self.deleteBt.clicked.connect(self._DeleteSelectedPlayer)
-        topRow.addWidget(self.deleteBt)
 
         page.layout().addLayout(topRow)
 
