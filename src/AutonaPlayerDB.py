@@ -49,7 +49,6 @@ class AutonaPlayerDB:
     # DB tags (see PlayerTag) of the loaded tournament's entrants.
     # Empty set = no tournament loaded -> completers show the whole DB.
     tournamentTags = set()
-    webServer = None
     modelLock = Lock()
     fieldnames = ["prefix", "gamerTag", "name", "twitter",
                 "country_code", "state_code", "mains", "custom_textbox"] # Used for filtering what we save locally

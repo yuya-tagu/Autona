@@ -38,7 +38,6 @@ class AutonaTournamentDataProvider(QObject):
         super().__init__(None)
         self.provider: TournamentDataProvider = None
         self.signals: AutonaTournamentDataProviderSignals = AutonaTournamentDataProviderSignals()
-        self.entrantsModel: QStandardItemModel = None
         self.threadPool = QThreadPool()
 
         self.signals.game_changed.connect(self.GameChanged)
@@ -192,13 +191,6 @@ class AutonaTournamentDataProvider(QObject):
 
         inp.deleteLater()
         return accepted
-
-    def SetTwitchUsername(self, window):
-        text, okPressed = QInputDialog.getText(
-            window, QApplication.translate("app", "Set Twitch username"), QApplication.translate("app", "Twitch Username:")+" ", QLineEdit.Normal, "")
-        if okPressed:
-            SettingsManager.Set("twitch_username", text)
-            AutonaTournamentDataProvider.instance.signals.twitch_username_updated.emit()
 
     def GetTournamentData(self, initialLoading=False):
         if self.provider is None:

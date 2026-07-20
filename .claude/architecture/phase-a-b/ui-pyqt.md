@@ -36,7 +36,6 @@
 - AutonaLayoutOptionsWindow (src/LayoutOptions/AutonaLayoutOptionsWindow.py:7) — Python
 - AutonaSettingsWindow (src/Settings/AutonaSettingsWindow.py:8) — Python
 - AutonaUpdater._UpdateDialog (src/AutonaUpdater.py:308) — Python
-- DownloadDialog (src/Helpers/AutonaDownloadHelper.py:171) — Python
 
 **QWidget（11 クラス）:**
 - BracketSetWidget (src/AutonaBracketView.py:104) — Python

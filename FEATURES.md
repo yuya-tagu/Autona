@@ -147,17 +147,6 @@
 
 ---
 
-## 6. BlueSky 投稿
-
-[src/Helpers/AutonaBskyHelper.py](src/Helpers/AutonaBskyHelper.py)・[src/Helpers/AutonaAltTextHelper.py](src/Helpers/AutonaAltTextHelper.py)。
-
-- サムネイル生成連動で BlueSky へ自動投稿
-- 設定画面に専用タブ — ホスト / アカウント / App Password
-- `generate_bsky_text()` が投稿文を自動生成
-- アクセシビリティ用 alt text を自動付与
-
----
-
 ## 7. 実況・解説パネル
 
 [src/AutonaCommentaryWidget.py](src/AutonaCommentaryWidget.py)・[src/AutonaCommentaryModel.py](src/AutonaCommentaryModel.py)・[layout/commentators/](layout/commentators/)。
@@ -266,7 +255,7 @@ STATS ドック（[src/AutonaStatsWidget.py](src/AutonaStatsWidget.py)）の内�
 
 ## 16. YouTube メタデータ生成
 
-[src/Helpers/AutonaAltTextHelper.py](src/Helpers/AutonaAltTextHelper.py) `generate_youtube()`。
+[src/AutonaThumbnailSettingsWidget.py](src/AutonaThumbnailSettingsWidget.py) `_BuildVideoTitle()`。
 
 - **動画タイトル自動生成** — 対戦情報からテンプレート適用
 - **動画タイトル Copy ボタン**（`btCopyVideoTitle`）— クリップボードにコピー
@@ -484,7 +473,7 @@ Edit → Help サブメニュー。
 - タグ・本名の NG ワード警告・差し替え
 
 ### Twitch ユーザー名設定
-- `SetTwitchUsername()` — Stats や Stream Queue のフィルタに利用
+- `SettingsManager.Get("twitch_username")` — Stats や Stream Queue のフィルタに利用
 
 ---
 

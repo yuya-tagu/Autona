@@ -599,42 +599,6 @@
         <translation>設定</translation>
     </message>
 </context><context>
-    <name>altText</name>
-    <message>
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="31" />
-        <source>LIVE NOW</source>
-        <translation>配信中</translation>
-    </message>
-    <message>
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="33" />
-        <source>Click here to watch</source>
-        <translation>クリックして視聴</translation>
-    </message>
-    <message>
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="209" />
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="69" />
-        <source>Game:</source>
-        <translation>ゲーム:</translation>
-    </message>
-    <message>
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="142" />
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="140" />
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="138" />
-        <source>VS</source>
-        <translation>VS</translation>
-    </message>
-    <message>
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="277" />
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="153" />
-        <source>Commentators:</source>
-        <translation>実況者:</translation>
-    </message>
-    <message>
-        <location filename="..\Helpers\AutonaAltTextHelper.py" line="156" />
-        <source>Stream powered by Autona:</source>
-        <translation>配信支援: Autona</translation>
-    </message>
-</context><context>
     <name>api</name>
     <message>
         <location filename="..\Autona.py" line="745" />
@@ -2242,24 +2206,9 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>このウィンドウを閉じる前に、レイアウトフォルダやその中身が他のアプリで開かれていないことを確認してください。</translation>
     </message>
     <message>
-        <location filename="..\Helpers\AutonaBskyHelper.py" line="22" />
-        <source>Bluesky account not correctly set</source>
-        <translation>Bluesky アカウントが正しく設定されていません</translation>
-    </message>
-    <message>
         <location filename="..\Helpers\AutonaCountryHelper.py" line="196" />
         <source>Custom Flags</source>
         <translation>カスタムフラグ</translation>
-    </message>
-    <message>
-        <location filename="..\Helpers\AutonaDownloadHelper.py" line="205" />
-        <source>Close</source>
-        <translation>閉じる</translation>
-    </message>
-    <message>
-        <location filename="..\Helpers\AutonaDownloadHelper.py" line="210" />
-        <source>Cancel</source>
-        <translation>キャンセル</translation>
     </message>
     <message>
         <location filename="..\Helpers\AutonaVersionHelper.py" line="20" />

@@ -649,10 +649,8 @@ class _UpdateDialog(QDialog):
             QApplication.translate("updater", "A new version is available"))
         self.setMinimumWidth(520)
 
-        self._current = current
         self._latest = latest
         self._asset_url = asset_url
-        self._release_url = release_url
         self._thread = None
 
         layout = QVBoxLayout(self)

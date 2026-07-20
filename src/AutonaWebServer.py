@@ -54,7 +54,7 @@ class WebServerSignals(QObject):
 
 class WebServer(QThread):
     app = Flask(__name__, static_folder=os.path.curdir)
-    cors = CORS(app)
+    CORS(app)
     socketio = SocketIO(
         app,
         cors_allowed_origins='*',

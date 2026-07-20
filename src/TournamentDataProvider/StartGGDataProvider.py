@@ -9,7 +9,6 @@ from loguru import logger
 from ..Helpers.AutonaCountryHelper import AutonaCountryHelper
 from ..Helpers.AutonaDictHelper import deep_get
 from ..Helpers.AutonaDirHelper import AutonaResolve
-from ..Helpers.AutonaQtHelper import invokeSlot, gui_thread_sync
 from ..AutonaGameAssetManager import AutonaGameAssetManager
 from ..AutonaPlayerDB import AutonaPlayerDB
 from .TournamentDataProvider import TournamentDataProvider
@@ -733,7 +732,6 @@ class StartGGDataProvider(TournamentDataProvider):
         except Exception as e:
             logger.error(traceback.format_exc())
             return (final_data)
-        return ([])
 
     # Descending "players still alive" ladder for numbered losers rounds:
     # the 2^n and 3*2^n series interleaved, one step per round, extended below
@@ -1527,17 +1525,6 @@ class StartGGDataProvider(TournamentDataProvider):
 
             return finalData
 
-            """
-            if queues:
-                lStreamName = streamName.lower()
-                queue = next(
-                    (q for q in queues if q and q.get("stream", {}).get("streamName", "").lower() == lStreamName),
-                    {}
-                )
-
-                return queue
-            """
-
         except Exception as e:
             logger.error(traceback.format_exc())
 
@@ -1611,14 +1598,8 @@ class StartGGDataProvider(TournamentDataProvider):
 
         return sets
 
-    def GetStationMatchId(self, stationId):
-        sets = self.GetStationMatchsId(self, stationId)
-
-        return sets[0] if len(sets) > 0 else None
-
     def GetEntrants(self):
         worker = Worker(self.GetEntrantsWorker, **{
-            "gameId": AutonaGameAssetManager.instance.selectedGame.get("smashgg_game_id"),
             "eventSlug": self.url.split("start.gg/")[1]
         })
         self.threadpool.start(worker)
@@ -1895,7 +1876,7 @@ class StartGGDataProvider(TournamentDataProvider):
             logger.error(traceback.format_exc())
             return []
 
-    def GetEntrantsWorker(self, eventSlug, gameId, progress_callback, cancel_event):
+    def GetEntrantsWorker(self, eventSlug, progress_callback, cancel_event):
         from ..Helpers.AutonaStatusManager import AutonaStatusManager
         status_token = AutonaStatusManager.push("Start.gg から参加者情報を取得中...")
         try:

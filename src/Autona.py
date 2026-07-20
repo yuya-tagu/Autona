@@ -197,10 +197,9 @@ class Window(QMainWindow):
     STATE_VERSION = 19
     signals = WindowSignals()
 
-    def __init__(self, loop=None):
+    def __init__(self):
         super().__init__()
 
-        StateManager.loop = loop
         StateManager.BlockSaving()
 
         AutonaLocaleHelper.LoadLocale()
@@ -677,7 +676,7 @@ class Window(QMainWindow):
         # Create all boards (1v1 + team + crew) into the SCORE dock, then apply
         # the persisted battle format so the right board + result layout are
         # shown on startup. The "Rules" menu switches between them at runtime.
-        AutonaScoreboardManager.instance.CreateScoreboard(singlePlayer=True)
+        AutonaScoreboardManager.instance.CreateScoreboard()
         battleFormat = self._resolveBattleFormat()
         AutonaScoreboardManager.instance.SetBattleFormat(battleFormat)
         self.resultSetting.SetBattleFormat(battleFormat)
