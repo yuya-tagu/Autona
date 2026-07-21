@@ -106,7 +106,7 @@ Get-Content _internal/assets/versions.json -Raw   # "program" が新バージョ
 cd C:\Users\ayuyt\Work\30_Products\Autona
 .\scripts\gen_release.ps1
 Remove-Item -Recurse -Force ./Autona -ErrorAction SilentlyContinue   # staging 掃除
-"ZIP: {0:N1} MB" -f ((Get-Item release-windows.zip).Length / 1MB)    # 380 MB 前後が正常（WebEngine 同梱）
+"ZIP: {0:N1} MB" -f ((Get-Item release-windows.zip).Length / 1MB)    # 310〜330 MB 前後が正常（WebEngine 同梱。大きく外れたら同梱物を確認）
 ```
 
 ### 8. リリースノートを作成して publish
