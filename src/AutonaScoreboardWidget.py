@@ -645,6 +645,18 @@ class AutonaScoreboardWidget(QWidget):
         L.tag_button(self.btResetAll, L.BUTTON_DANGER)
         self.btResetAll.clicked.connect(self.ResetAllInputs)
 
+        # QGridLayout derives each column's minimum width from the widest
+        # item placed in it across ALL rows, not just the team card in row
+        # 0 — setColumnStretch only distributes space *above* that minimum.
+        # btResetAll's long label ("すべての入力値をリセット" + icon) is far
+        # wider than btApply's ("反映"), so without this it silently pins
+        # column 0 (the 1P/left card) wide while column 1 (2P/right card)
+        # is left free to shrink, breaking the equal-stretch symmetry the
+        # two team columns rely on. Same fix as save_bt/delete_bt/clear_bt
+        # in AutonaScoreboardPlayerWidget.
+        self.btResetAll.setMinimumWidth(1)
+        self.btApply.setMinimumWidth(1)
+
         columnsGrid.addWidget(self.btResetAll, 2, 0)
         columnsGrid.addWidget(self.btApply, 2, 1)
 
