@@ -1,0 +1,175 @@
+body {
+  font-family: var(--font);
+  letter-spacing: 1.2px;
+  font-weight: bold;
+  opacity: 0;
+  overflow: hidden;
+  margin: 0;
+}
+
+.container {
+  position: absolute;
+  color: var(--text-color);
+  display: flex;
+  box-sizing: border-box;
+  border-radius: var(--border-radius);
+  background: var(--bg-color);
+  align-items: center;
+  padding: 20px 40px;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.12))
+    drop-shadow(0 3px 1px rgba(0, 0, 0, 0.14))
+    drop-shadow(0 1px 5px rgba(0, 0, 0, 0.12))
+    drop-shadow(0 -1px 2px rgba(0, 0, 0, 0.1));
+}
+
+.last_sets {
+  position: absolute;
+  width: 100%;
+  height: 700px;
+  color: var(--text-color);
+  place-content: flex-start;
+  padding-left: 20px;
+  padding-right: 20px;
+  display: flex;
+  flex-direction: column;
+}
+
+.last_sets_header {
+  width: 100%;
+  flex-grow: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.last_sets_accent {
+  width: 10px;
+  height: 48px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  background: var(--p1-score-bg-color);
+}
+
+.player2 .last_sets_accent {
+  background: var(--p2-score-bg-color);
+}
+
+.last_sets_player_name {
+  height: 48px;
+  font-size: 40px;
+  letter-spacing: normal;
+  flex-grow: 1;
+  overflow: hidden;
+}
+
+.last_sets_player_name .text {
+  justify-content: left;
+}
+
+.last_sets_title {
+  font-size: 28px;
+  letter-spacing: 6px;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.last_sets_content {
+  width: 100%;
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.last_sets_empty {
+  width: 100%;
+  font-size: 32px;
+  opacity: 0.7;
+}
+
+.last_set_container {
+  width: 100%;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  box-sizing: border-box;
+  gap: 20px;
+  padding: 8px 20px;
+  border-radius: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  border-left: 8px solid transparent;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.last_set_result {
+  width: 110px;
+  height: 34px;
+  font-size: 26px;
+  flex-shrink: 0;
+}
+
+.result_win {
+  border-left-color: #29b548;
+}
+
+.result_win .last_set_result {
+  color: #29b548;
+}
+
+.result_loss {
+  border-left-color: var(--p1-score-bg-color);
+}
+
+.player2 .result_loss {
+  border-left-color: var(--p2-score-bg-color);
+}
+
+.result_loss .last_set_result {
+  opacity: 0.7;
+}
+
+.last_set_info {
+  flex-grow: 1;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.last_set_round {
+  width: 100%;
+  height: 26px;
+  font-size: 20px;
+  opacity: 0.6;
+  letter-spacing: normal;
+}
+
+.last_set_round .text {
+  justify-content: left;
+}
+
+.last_set_oponent {
+  width: 100%;
+  height: 36px;
+  font-size: 30px;
+  letter-spacing: normal;
+}
+
+.last_set_oponent .text {
+  justify-content: left;
+}
+
+.oponent_team {
+  font-size: 22px;
+  opacity: 0.7;
+  margin-right: 10px;
+}
+
+.last_set_score {
+  width: 150px;
+  height: 42px;
+  font-size: 36px;
+  flex-shrink: 0;
+}
