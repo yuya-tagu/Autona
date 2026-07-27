@@ -152,6 +152,7 @@ from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaStatusManager import AutonaStatusManager
 from .AutonaScoreboardManager import AutonaScoreboardManager
 from .AutonaStatsWidget import AutonaStatsWidget
+from .AutonaStatsPreviewWidget import AutonaStatsPreviewWidget
 from .AutonaAnalysisWidget import AutonaAnalysisWidget
 from .AutonaPlayerBrowserWidget import AutonaPlayerBrowserWidget
 from src.AutonaWebServer import WebServer, check_webserver_port
@@ -197,7 +198,9 @@ class Window(QMainWindow):
     # v20: Commentary and Top 8 swapped in the sidebar order.
     # v21: New "Scoreboard" category between Setup and Display, holding the
     #      scoreboard (input) and board (design) panels.
-    STATE_VERSION = 21
+    # v22: Stats Display Settings panel (AutonaStatsPreviewWidget) added to
+    #      the Display category, after Commentary.
+    STATE_VERSION = 22
     signals = WindowSignals()
 
     def __init__(self):
@@ -364,6 +367,15 @@ class Window(QMainWindow):
             QApplication.translate("app", "Commentary"))
         self.dockWidgets.append(commentary)
 
+        # Preview + OBS URL for the statistics overlays (layout/upset_factor,
+        # h2h_record, recent_sets, last_sets, tournament_history).
+        statsPreview = AutonaStatsPreviewWidget()
+        statsPreview.setWindowIcon(QIcon(UI.icon_path('stats.svg')))
+        statsPreview.setObjectName("statsPreviewSettings")
+        statsPreview.setWindowTitle(
+            QApplication.translate("app", "Stats Display Settings"))
+        self.dockWidgets.append(statsPreview)
+
         # One-time migration prompt: the bind default changed from 0.0.0.0 to
         # 127.0.0.1, which would silently break LAN OBS setups
         # (docs/operations/runtime-operations.md). Ask once, persist the answer.
@@ -438,6 +450,7 @@ class Window(QMainWindow):
                 (resultSetting, 'result.svg'),
                 (top8, 'bracket.svg'),
                 (commentary, 'commentary.svg'),
+                (statsPreview, 'stats.svg'),
             ]),
             (QApplication.translate("app", "Data"), [
                 (self.statsWidget, 'stats.svg'),

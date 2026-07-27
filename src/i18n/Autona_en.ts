@@ -867,6 +867,14 @@
         <translation>Refresh Top 8 bracket</translation>
     </message>
     <message>
+        <source>Refresh stats</source>
+        <translation>Refresh stats</translation>
+    </message>
+    <message>
+        <source>Refresh statistics (async fetch)</source>
+        <translation>Refresh statistics (async fetch)</translation>
+    </message>
+    <message>
         <source>Request failed</source>
         <translation>Request failed</translation>
     </message>
@@ -1998,6 +2006,41 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaStatsWidget.py" line="202" />
         <source>Upset Factor</source>
         <translation>Upset Factor</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Stats Display Settings</source>
+        <translation>Stats Display Settings</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Head-to-Head Record</source>
+        <translation>Head-to-Head Record</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Recent Sets</source>
+        <translation>Recent Sets</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Last Sets (Player 1)</source>
+        <translation>Last Sets (Player 1)</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Last Sets (Player 2)</source>
+        <translation>Last Sets (Player 2)</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Tournament History (Player 1)</source>
+        <translation>Tournament History (Player 1)</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Tournament History (Player 2)</source>
+        <translation>Tournament History (Player 2)</translation>
     </message>
     <message>
         <location filename="..\AutonaTeamBattleModeEnum.py" line="11" />

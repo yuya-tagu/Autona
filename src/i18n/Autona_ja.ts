@@ -869,6 +869,14 @@
         <translation>Top 8 ブラケットを更新</translation>
     </message>
     <message>
+        <source>Refresh stats</source>
+        <translation>統計取得</translation>
+    </message>
+    <message>
+        <source>Refresh statistics (async fetch)</source>
+        <translation>統計情報を再取得（非同期）</translation>
+    </message>
+    <message>
         <source>Request failed</source>
         <translation>リクエストに失敗しました</translation>
     </message>
@@ -2001,6 +2009,41 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaStatsWidget.py" line="202" />
         <source>Upset Factor</source>
         <translation>アップセットファクター</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Stats Display Settings</source>
+        <translation>統計情報表示設定</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Head-to-Head Record</source>
+        <translation>対戦成績（直近の対戦）</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Recent Sets</source>
+        <translation>直近セット一覧</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Last Sets (Player 1)</source>
+        <translation>直近セット（選手1）</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Last Sets (Player 2)</source>
+        <translation>直近セット（選手2）</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Tournament History (Player 1)</source>
+        <translation>大会履歴（選手1）</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Tournament History (Player 2)</source>
+        <translation>大会履歴（選手2）</translation>
     </message>
     <message>
         <location filename="..\AutonaTeamBattleModeEnum.py" line="11" />

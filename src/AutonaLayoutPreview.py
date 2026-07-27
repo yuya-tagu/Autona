@@ -25,15 +25,21 @@ from . import ui_constants as UI
 
 LAYOUT_DIR = "layout"
 
+# Overlay folders normally expose a single index.html. A few (last_sets,
+# tournament_history) ship one entry file per player, so the entry name is
+# a parameter that defaults to the usual case — every existing caller keeps
+# working unchanged.
+DEFAULT_ENTRY = "index.html"
+
 logger = logging.getLogger(__name__)
 
 
-def ObsUrl(layout_name):
+def ObsUrl(layout_name, entry=DEFAULT_ENTRY):
     """Browser-source URL for a layout, for panels that show it before
     (or without) instantiating a preview."""
     port = SettingsManager.Get("general.webserver_port", 5000)
     return (f"http://localhost:{port}/{LAYOUT_DIR}/"
-            f"{layout_name}/index.html")
+            f"{layout_name}/{entry}")
 
 
 def DiscoverLayoutDesigns(prefix):
@@ -132,11 +138,13 @@ class AutonaLayoutPreview(QFrame):
     # Below MIN_ZOOM the remainder is a CSS scale — see class docstring.
     MIN_FIT = 0.125
 
-    def __init__(self, layout_name=None, parent=None):
+    def __init__(self, layout_name=None, parent=None, entry=DEFAULT_ENTRY):
         # layout_name may be deferred to load() for panels that switch
-        # between designs on one preview (Board tab).
+        # between designs on one preview (Board tab). `entry` is the html
+        # file inside the layout folder (see DEFAULT_ENTRY).
         super().__init__(parent)
         self.layout_name = layout_name
+        self.entry = entry or DEFAULT_ENTRY
         self._bgSource = None
         self._bgScaled = None
 
@@ -298,16 +306,18 @@ class AutonaLayoutPreview(QFrame):
         col.addWidget(btSave)
         return col
 
-    def load(self, layout_name=None):
+    def load(self, layout_name=None, entry=None):
         if layout_name is not None:
             self.layout_name = layout_name
+        if entry is not None:
+            self.entry = entry
         port = SettingsManager.Get("general.webserver_port", 5000)
         url = (f"http://127.0.0.1:{port}/{LAYOUT_DIR}/"
-               f"{self.layout_name}/index.html")
+               f"{self.layout_name}/{self.entry}")
         self.view.setUrl(QUrl(url))
 
     def obs_url(self):
-        return ObsUrl(self.layout_name)
+        return ObsUrl(self.layout_name, self.entry)
 
     def setBackgroundImage(self, path):
         """Set a preview-only background image shown behind the (already
