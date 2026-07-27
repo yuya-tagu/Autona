@@ -107,6 +107,9 @@ class AutonaStatsUtil:
 
     def UpdateLastSets(self, data):
         with StateManager.SaveBlock():
+            # Reset first so sets from the previous player don't linger when
+            # the new player has fewer sets (keys are sequential 1..N).
+            StateManager.Set(f"score.{self.scoreboardNumber}.last_sets." + data.get("playerNumber"), {})
             i = 1
             for set in data.get("last_sets", []):
                 StateManager.Set(f"score.{self.scoreboardNumber}.last_sets." + data.get("playerNumber") + "." + str(i), {
@@ -146,6 +149,8 @@ class AutonaStatsUtil:
 
     def UpdateHistorySets(self, data):
         with StateManager.SaveBlock():
+            # Same stale-key reset as UpdateLastSets.
+            StateManager.Set(f"score.{self.scoreboardNumber}.history_sets." + data.get("playerNumber"), {})
             i = 1
             for set in data.get("history_sets", []):
                 StateManager.Set(f"score.{self.scoreboardNumber}.history_sets." + data.get("playerNumber") + "." + str(i), {
