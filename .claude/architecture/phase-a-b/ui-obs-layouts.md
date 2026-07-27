@@ -19,6 +19,9 @@
 | `layout/result_vertical/` | 縦リザルト | result.html/css |
 | `layout/result_vertical_geki/` | 縦リザルト・激 | result.html/css/js（独立 JS 8.9KB） |
 | `layout/recent_sets/` | 最近のセット | index.html/css/js |
+| `layout/upset_factor/` | アップセットファクター（バッジ型） | index.html/css/js |
+| `layout/h2h_record/` | 対戦成績サマリ + 直近対戦 | index.html/css/js + wifi.svg |
+| `layout/last_sets/` | プレイヤー別・直近セット | player1.html / player2.html + css/js |
 | `layout/commentators/` | コメンテーター名タグ | tag.html / tag_twitter.html / tag_name_twitter.html |
 | `layout/camborder_Universal/` | カメラ枠 | index.html/css（JS なし） |
 | `layout/thumbnail/` | サムネイル | thumbnail.html/css/js + thumbnail_assets.js |
@@ -90,10 +93,14 @@ birthday, id, last_sets, location, mic, pronouns, recent_sets, replay, seeding, 
 ### 3.4 その他
 
 - `recent_sets`: JSON poll / SocketIO
+- `upset_factor`: `score.{N}.upset_factor` + 両選手名。両者が揃ったときだけ gsap autoAlpha で表示
+- `h2h_record`: `score.{N}.recent_sets.sets` を集計（`winner == 0` が P1 勝ち）+ 直近 5 件リスト
 - `commentators`: 3 バリアント
 - `camborder_Universal`: フレーム表示（CSS のみ）
 - `top_8`, `thumbnail*`: 静的画像生成（Canvas/SVG 操作）
 - `tournament_history`: player1/player2 2 バリアント
+- `last_sets`: player1/player2 2 バリアント（`window.PLAYER` で切替）。`score.{N}.last_sets.{PLAYER}` は
+  `"1".."N"` キーの dict なので数値昇順ソートして最大 6 件表示
 
 ---
 
@@ -301,6 +308,7 @@ layout/
 ├── bracket_top8/, bracket_top12/, bracket_top16/, bracket_ultimate/
 ├── result/, result_top16/, result_vertical/, result_vertical_geki/
 ├── recent_sets/, commentators/, camborder_Universal/
+├── upset_factor/, h2h_record/, last_sets/    ← 統計オーバーレイ
 ├── top_8/, thumbnail/, thumbnail_type_b/
 └── tournament_history/
 ```
