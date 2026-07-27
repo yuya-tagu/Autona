@@ -86,6 +86,11 @@ class AutonaScoreboardWidgetSignals(QObject):
 class AutonaScoreboardWidget(QWidget):
     stationQueueCache = QueueSetsCache()
 
+    # Sub-paths of this board's held subtree that AutonaStatsUtil fills with
+    # data fetched from the provider. Exempt from the 反映 hold so overlays
+    # and the stats preview update as soon as the fetch lands.
+    STATS_KEYS = ["last_sets", "history_sets", "recent_sets", "upset_factor"]
+
     def __init__(self, scoreboardNumber=1, singlePlayer=True, *args):
         super().__init__(*args)
 
@@ -93,7 +98,10 @@ class AutonaScoreboardWidget(QWidget):
         self.singlePlayer = singlePlayer
         # StateManager subtree owned by this board. Publication of the whole
         # subtree is deferred (HoldSubtree at the end of __init__): edits stay
-        # local until the 反映 button commits them.
+        # local until the 反映 button commits them. The stats keys below are
+        # exempt — they are fetched derived data, not operator edits, so they
+        # publish immediately (stats overlays / preview would otherwise stay
+        # empty until 反映 was pressed).
         self.statePrefix = f"score.{self.scoreboardNumber}"
 
         StateManager.Set(f"score.{self.scoreboardNumber}", {})
@@ -777,7 +785,7 @@ class AutonaScoreboardWidget(QWidget):
         # broadcast/export pipeline until 反映 commits them. Everything Set
         # during construction above was published normally, so the committed
         # baseline matches the widgets' initial values.
-        StateManager.HoldSubtree(self.statePrefix)
+        StateManager.HoldSubtree(self.statePrefix, exempt=self.STATS_KEYS)
         StateManager.signals.held_dirty_changed.connect(
             self._onHeldDirtyChanged)
 
