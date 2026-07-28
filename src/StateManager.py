@@ -139,6 +139,28 @@ class StateManager:
     lock = threading.RLock()
     _export_thread = None
     _download_semaphore = threading.Semaphore(3)
+    _initialized = False
+
+    @staticmethod
+    def Initialize():
+        """Create ./out and load the persisted state.
+
+        Used to run at import time; it is now called explicitly from
+        src/bootstrap.py so that importing this module has no side effect.
+        Idempotent: later calls are a no-op (re-running LoadState() would
+        discard in-memory state that has not been exported yet).
+        """
+        if StateManager._initialized:
+            return
+        StateManager._initialized = True
+
+        if not os.path.exists("./out"):
+            os.makedirs("./out/")
+
+        if not os.path.isfile("./out/program_state.json"):
+            StateManager.SaveState()
+
+        StateManager.LoadState()
 
     @contextlib.contextmanager
     def SaveBlock():
@@ -662,12 +684,3 @@ class StateManager:
                 shutil.rmtree(f"./out/{path}")
         except:
             logger.error(traceback.format_exc())
-
-
-if not os.path.exists("./out"):
-    os.makedirs("./out/")
-
-if not os.path.isfile("./out/program_state.json"):
-    StateManager.SaveState()
-
-StateManager.LoadState()
