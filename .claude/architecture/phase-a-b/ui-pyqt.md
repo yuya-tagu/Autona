@@ -42,7 +42,7 @@
 - AutonaIndividualGameTracker (src/AutonaIndividualGameTracker.py:18) — Python
 - ResultPreviewWidget (src/AutonaResultSettingsWidget.py:28) — Python + **paintEvent**
 - AutonaScoreboardWidget (src/AutonaScoreboardWidget.py:90) — Python（大規模）
-- LoadingOverlay (src/AutonaSplash.py:418) — Python + **paintEvent**
+- LoadingOverlay (autona_splash.py:509) — Python + **paintEvent**
 - PreviewWidget (src/AutonaThumbnailSettingsWidget.py:25) — Python + **paintEvent**
 - LayoutOptionsWidget (src/LayoutOptions/LayoutOptionsWidget.py:9) — Python
 - SettingsWidget (src/Settings/SettingsWidget.py:7) — Python
@@ -58,7 +58,7 @@
 |---|---|---|---|
 | ResultPreviewWidget | src/AutonaResultSettingsWidget.py:58 | プレビュー背景・画像 | QPainter |
 | PreviewWidget | src/AutonaThumbnailSettingsWidget.py:52 | サムネイル設定プレビュー | QPainter |
-| LoadingOverlay | src/AutonaSplash.py:469 | スプラッシュスクリーン | QPainter |
+| LoadingOverlay | autona_splash.py:560 | スプラッシュスクリーン | QPainter |
 | AutonaDockTabTheme (event filter) | src/AutonaDockTabTheme.py:311 | ドックタブバーペイント | QPainter + QPainterPath |
 | AutonaBracketView | src/AutonaBracketView.py:663-664 | ブラケット接続線 | QPainterPath |
 

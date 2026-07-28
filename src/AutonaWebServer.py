@@ -919,7 +919,10 @@ def check_webserver_port(port: int, parent=None) -> bool:
     box.setWindowTitle(title)
     box.setText(text)
     box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-    box.setDefaultButton(QMessageBox.StandardButton.Yes)
+    # No is the default: killing the other process is destructive, and a
+    # stray Enter here used to terminate a healthy instance holding live
+    # tournament state.
+    box.setDefaultButton(QMessageBox.StandardButton.No)
     if box.exec() != QMessageBox.StandardButton.Yes:
         return False
 

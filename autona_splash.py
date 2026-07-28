@@ -1,12 +1,29 @@
 """RPG-style splash screen + post-show loading overlay for Autona.
 
+Lives at the project root, NOT under src/, and imports nothing from src.
+main.py shows the splash before `import src`, and importing anything under
+src/ triggers `src/__init__.py` -> the whole application boot (QApplication,
+every singleton), which is exactly what the splash exists to cover.
+For the same reason the Qt imports below are plain PySide6 rather than the
+qtpy shim used everywhere else in the app: qtpy is only pulled in later, by
+`import src`.
+
 Splash:
   * `AutonaSplashScreen` — a QSplashScreen subclass with a painted
     background (gradient + brass double frame + centered app icon + title)
     and a built-in dot animation for messages ending in ellipsis.
-  * `create_splash()` — factory returning a ready-to-show splash.
+  * `create_splash()` — factory returning a ready-to-show splash, also
+    published as `ACTIVE_SPLASH` for the later startup stages.
+  * `active_splash()` — the splash created by main.py (or a no-op stand-in).
   * `pick_splash_messages()` — returns a random sequence of 5 loading
     messages from the themed pools below, one message per init checkpoint.
+
+Startup instrumentation:
+  * `set_startup_t0()` / `log_startup_phase()` / `attach_startup_logger()` —
+    the "STARTUP phase=... elapsed=...s" markers. They live here because
+    the earliest phases happen before loguru is configured (that happens
+    during `import src`), so the marks are buffered and replayed once the
+    real logger is attached.
 
 Overlay:
   * `LoadingOverlay` — a child widget that covers the main window with
@@ -19,15 +36,16 @@ Overlay:
 from __future__ import annotations
 
 import random
+import time
 
-from qtpy.QtCore import (
+from PySide6.QtCore import (
+    QEvent,
     QPoint,
     QRect,
-    QSize,
     Qt,
     QTimer,
 )
-from qtpy.QtGui import (
+from PySide6.QtGui import (
     QColor,
     QFont,
     QIcon,
@@ -37,10 +55,15 @@ from qtpy.QtGui import (
     QPixmap,
     QPolygon,
 )
-from qtpy.QtCore import QEvent
-from qtpy.QtWidgets import QApplication, QSplashScreen, QWidget
+from PySide6.QtWidgets import QApplication, QSplashScreen, QWidget
 
-from . import ui_constants as UI
+# Standalone copies of the only two src/ui_constants.py tokens this module
+# needs. Keep them in sync with ui_constants (FONT_FAMILY / icon_path).
+FONT_FAMILY = "LINE Seed JP"
+
+
+def _icon_path(name: str) -> str:
+    return f"assets/icons/{name}"
 
 
 # ──────────────────────────────────────────────────────────
@@ -151,7 +174,7 @@ class AutonaSplashScreen(QSplashScreen):
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint)
         # Carry the app icon on the splash too (the first window shown), so
         # every window under our AppUserModelID has the Autona mark.
-        self.setWindowIcon(QIcon(UI.icon_path("icon.ico")))
+        self.setWindowIcon(QIcon(_icon_path("icon.ico")))
 
         self._message_base = ""
         self._progress = 0.0
@@ -178,7 +201,7 @@ class AutonaSplashScreen(QSplashScreen):
         painter = QPainter(pix)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            font = QFont(UI.FONT_FAMILY, 11)
+            font = QFont(FONT_FAMILY, 11)
             font.setBold(True)
             painter.setFont(font)
             painter.setPen(COLOR_MSG)
@@ -219,7 +242,7 @@ class AutonaSplashScreen(QSplashScreen):
 
         # Percentage text right-aligned below the bar
         painter.setPen(QColor("#B5ADA0"))
-        small_font = QFont(UI.FONT_FAMILY, 8)
+        small_font = QFont(FONT_FAMILY, 8)
         small_font.setBold(True)
         painter.setFont(small_font)
         painter.drawText(
@@ -231,15 +254,79 @@ class AutonaSplashScreen(QSplashScreen):
 
 
 # ──────────────────────────────────────────────────────────
-# Factory
+# Factory + process-wide splash handle
 # ──────────────────────────────────────────────────────────
+
+# The splash is created by main.py before `import src` and consumed much
+# later by Window.__init__ (progress checkpoints + finish()). Rather than
+# threading it through src.Window's signature, it is published here.
+ACTIVE_SPLASH: AutonaSplashScreen | None = None
+
+
+class _NoOpSplash:
+    """Stand-in used when no splash was created (e.g. a Window built from
+    a script or a test rather than through main.py). Keeps the startup
+    path free of `if splash is not None` noise — the splash is cosmetic
+    and must never be the reason a window fails to open."""
+
+    def set_message(self, text: str, progress: float | None = None) -> None:
+        pass
+
+    def finish(self, main_window) -> None:
+        pass
 
 
 def create_splash() -> AutonaSplashScreen:
+    global ACTIVE_SPLASH
     splash = AutonaSplashScreen()
     splash.show()
     QApplication.processEvents()
+    ACTIVE_SPLASH = splash
     return splash
+
+
+def active_splash():
+    """The splash main.py created, or a no-op stand-in."""
+    return ACTIVE_SPLASH if ACTIVE_SPLASH is not None else _NoOpSplash()
+
+
+# ──────────────────────────────────────────────────────────
+# Startup phase instrumentation
+# ──────────────────────────────────────────────────────────
+
+# Overwritten by main.py with the timestamp taken at the very top of the
+# process; the default keeps the helpers usable on their own.
+_STARTUP_T0: float = time.perf_counter()
+# Marks emitted before loguru exists (it is configured during `import src`).
+_PENDING_MARKS: list[str] = []
+_STARTUP_LOGGER = None
+
+
+def set_startup_t0(t0: float) -> None:
+    global _STARTUP_T0
+    _STARTUP_T0 = t0
+
+
+def log_startup_phase(name: str) -> None:
+    """Emit one `STARTUP phase=<name> elapsed=<s>s` marker."""
+    line = f"STARTUP phase={name} elapsed={time.perf_counter() - _STARTUP_T0:.2f}s"
+    if _STARTUP_LOGGER is not None:
+        _STARTUP_LOGGER.info(line)
+        return
+    _PENDING_MARKS.append(line)
+    # print() is a no-op when sys.stdout is None (windowed frozen build),
+    # so this is safe there; the buffered marks reach the log file anyway
+    # once attach_startup_logger() runs.
+    print(line)
+
+
+def attach_startup_logger(logger) -> None:
+    """Hand the buffered marks to loguru and route later ones straight to it."""
+    global _STARTUP_LOGGER
+    _STARTUP_LOGGER = logger
+    for line in _PENDING_MARKS:
+        logger.info(line)
+    _PENDING_MARKS.clear()
 
 
 # ──────────────────────────────────────────────────────────
@@ -364,7 +451,7 @@ def _sample_gradient(
 
 def _paint_icon(painter: QPainter) -> None:
     try:
-        icon = QPixmap(UI.icon_path("icon.png")).scaled(
+        icon = QPixmap(_icon_path("icon.png")).scaled(
             96, 96,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
@@ -377,7 +464,7 @@ def _paint_icon(painter: QPainter) -> None:
 
 def _paint_title(painter: QPainter) -> None:
     painter.setPen(COLOR_TEXT)
-    font = QFont(UI.FONT_FAMILY, 28)
+    font = QFont(FONT_FAMILY, 28)
     font.setBold(True)
     font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 6)
     painter.setFont(font)
@@ -390,7 +477,7 @@ def _paint_title(painter: QPainter) -> None:
 
 def _paint_subtitle(painter: QPainter) -> None:
     painter.setPen(QColor("#B5ADA0"))
-    font = QFont(UI.FONT_FAMILY, 10)
+    font = QFont(FONT_FAMILY, 10)
     painter.setFont(font)
     painter.drawText(
         QRect(0, 210, SPLASH_W, 20),

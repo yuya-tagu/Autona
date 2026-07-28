@@ -29,7 +29,8 @@ Path.mkdir(crashpath.parent, exist_ok=True)
 crashlog = crashpath.open(mode='w')
 faulthandler.enable(crashlog)
 
-QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+# NOTE: Qt.AA_ShareOpenGLContexts is set in main.py — it only takes effect
+# before the QApplication is constructed, and that now happens there too.
 
 if parse(qtpy.QT_VERSION).major == 6:
     QImageReader.setAllocationLimit(0)
@@ -38,7 +39,15 @@ if parse(qtpy.QT_VERSION).major == 6:
 # (before this module is imported), so the taskbar groups the app under
 # our identity rather than the host python.exe.
 
-App = QApplication(sys.argv)
+# main.py creates the QApplication before importing this package, so that
+# the splash can be painted while this import chain runs. The fallback is
+# NOT for the app itself: PyInstaller's binary-dependency analysis imports
+# this package in an isolated subprocess without main.py, and the singleton
+# construction below creates QWidgets, which hard-aborts the process when
+# no QApplication exists.
+App = QApplication.instance()
+if App is None:
+    App = QApplication(sys.argv)
 AutonaQtHelper.init_gui_executor()  # guaranteed to be the main thread.
 
 fmt = ("<green>{time:YYYY-MM-DD HH:mm:ss}</green> " +
@@ -60,8 +69,10 @@ else:
             sys.__excepthook__(exc_type, exc_value, exc_traceback)
             return
 
-        logger.critical("Uncaught exception", exc_info=(
-            exc_type, exc_value, exc_traceback))
+        # loguru does not understand the stdlib `exc_info` kwarg; passing it
+        # silently drops the traceback. Use logger.opt(exception=...) instead.
+        logger.opt(exception=(exc_type, exc_value, exc_traceback)).critical(
+            "Uncaught exception")
 
     sys.excepthook = handle_exception
 
@@ -101,6 +112,12 @@ logger.add(
     rotation="20 MB"
 )
 
+# loguru is only configured now, so the STARTUP marks recorded before
+# `import src` (gate / splash) have been buffered — replay them into the
+# log file and route the later phases straight to loguru.
+import autona_splash
+autona_splash.attach_startup_logger(logger)
+
 try:
     # Setting the icon for individual windows doesn't work on mac (and perhaps linux? unknown)
     # Use the multi-resolution .ico (not .png): a single PNG renders in the
@@ -116,7 +133,12 @@ logger.critical("=== Autona IS STARTING ===")
 
 logger.info("QApplication successfully initialized")
 
-from .AutonaSplash import LoadingOverlay, create_splash, pick_splash_messages
+from autona_splash import (
+    LoadingOverlay,
+    active_splash,
+    log_startup_phase,
+    pick_splash_messages,
+)
 
 from contextlib import contextmanager
 @contextmanager
@@ -206,6 +228,8 @@ class Window(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        log_startup_phase("window-init")
+
         StateManager.BlockSaving()
 
         AutonaLocaleHelper.LoadLocale()
@@ -214,7 +238,9 @@ class Window(QMainWindow):
 
         self.signals = WindowSignals()
 
-        splash = create_splash()
+        # Created by main.py before `import src`, so it has been on screen
+        # since a second or two after launch.
+        splash = active_splash()
         splash_msgs = pick_splash_messages()
         splash.set_message(splash_msgs[0], progress=0.05)
 
@@ -719,6 +745,7 @@ class Window(QMainWindow):
         splash.set_message(splash_msgs[2], progress=1.0)
         splash.finish(self)
         self.show()
+        log_startup_phase("core-shown")
 
         # Cover the main window with a spinner until Qt finishes its
         # first-pass layout + paint, so the user doesn't see half-drawn
@@ -899,24 +926,42 @@ class Window(QMainWindow):
         self._webserverErrorBox = box
 
     def closeEvent(self, event):
+        # Shutdown must never depend on housekeeping succeeding. Every step
+        # below is isolated so that one failure cannot abort the rest of the
+        # sequence: an uncaught exception here used to leave the process alive
+        # (e.g. shutil.rmtree hitting a locked tmp file with WinError 32),
+        # because the later teardown never ran.
         logger.info("Shutting down...")
-        self.qtSettings.setValue("geometry", self.saveGeometry())
-        self.qtSettings.setValue(
-            f"sidebarIndex_v{self.STATE_VERSION}", self.sidebar.currentIndex())
-        self.qtSettings.setValue(
-            f"sidebarCollapsed_v{self.STATE_VERSION}", self.sidebar.isHidden())
 
-        tmpDir = AutonaResolve("tmp")
-        if os.path.isdir(tmpDir):
-            shutil.rmtree(tmpDir)
+        # --- Best-effort housekeeping ------------------------------------
+        try:
+            self.qtSettings.setValue("geometry", self.saveGeometry())
+            self.qtSettings.setValue(
+                f"sidebarIndex_v{self.STATE_VERSION}",
+                self.sidebar.currentIndex())
+            self.qtSettings.setValue(
+                f"sidebarCollapsed_v{self.STATE_VERSION}",
+                self.sidebar.isHidden())
+        except Exception:
+            logger.opt(exception=True).error("Error saving window settings on shutdown")
+
+        try:
+            tmpDir = AutonaResolve("tmp")
+            if os.path.isdir(tmpDir):
+                shutil.rmtree(tmpDir)
+        except Exception:
+            # Files under tmp/ can still be locked by the OS or by another
+            # process; leaving them behind is harmless, blocking exit is not.
+            logger.opt(exception=True).error("Error removing tmp directory on shutdown")
 
         try:
             crashlog.close()
             if crashpath.stat().st_size == 0:
                 crashpath.unlink()
-        except:
+        except Exception:
             pass
 
+        # --- Mandatory teardown ------------------------------------------
         # For whatever reason, the webserver thread won't respond to the quit() signal nicely.
         # This is usually unsafe, but there's no easy way to terminate the flask server,
         # so we hard-kill its thread as we're shutting down to prevent exit-crashes.
@@ -928,17 +973,33 @@ class Window(QMainWindow):
             if web_socket_fd:
                 sock = socket.socket(fileno=int(web_socket_fd))
                 sock.close()
-        except Exception as e:
-            logger.warning("Error closing web socket on shutdown", exc_info=True)
+        except Exception:
+            logger.opt(exception=True).warning("Error closing web socket on shutdown")
 
-        self.webserver.terminate()
-        self.webserver.wait(10000)  # 10 seconds grace period.
+        try:
+            self.webserver.terminate()
+            self.webserver.wait(10000)  # 10 seconds grace period.
+        except Exception:
+            logger.opt(exception=True).error("Error terminating web server on shutdown")
 
-        for window in QApplication.allWindows():
-            if window != self:
-                window.close()
+        try:
+            # allWindows() returns QWindow, not QWidget: comparing against
+            # `self` was always true. Compare with our own window handle.
+            for window in QApplication.allWindows():
+                if window is not self.windowHandle():
+                    window.close()
+        except Exception:
+            logger.opt(exception=True).error("Error closing auxiliary windows on shutdown")
 
         super().closeEvent(event)
+
+        # Quit explicitly instead of relying on quitOnLastWindowClosed:
+        # off-screen helper widgets (thumbnail/result renderers) can keep the
+        # last-window heuristic from ever firing, which leaves a zombie
+        # process behind. Exiting must not depend on the cleanup above either.
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
 
     def ReloadGames(self):
         logger.info("Reload games")
