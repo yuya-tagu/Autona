@@ -29,8 +29,9 @@ Overlay:
   * `LoadingOverlay` — a child widget that covers the main window with
     a dim backdrop + rotating spinner, shown immediately after
     `QMainWindow.show()` so the user doesn't see the half-rendered UI
-    settle during the first paint/layout passes. Call `.finish()` once
-    the window is ready.
+    settle during the first paint/layout passes. Call
+    `.finish_when_ready()` to let it dismiss itself as soon as that first
+    pass is done, or `.finish()` to drop it immediately.
 """
 
 from __future__ import annotations
@@ -530,6 +531,9 @@ class LoadingOverlay(QWidget):
         self._timer.timeout.connect(self._tick)
         self.resize(parent.size())
         parent.installEventFilter(self)
+        self._finished = False
+        self._painted_at: float | None = None
+        self._min_ms = 0
 
     # ── Public API ─────────────────────────────────────────
 
@@ -538,7 +542,45 @@ class LoadingOverlay(QWidget):
         self.raise_()
         self._timer.start()
 
+    def finish_when_ready(self, min_ms: int = 250, max_ms: int = 1500) -> None:
+        """Dismiss once Qt has actually finished the first layout + paint
+        pass, instead of after a fixed delay.
+
+        The zero-delay timer fires after everything already queued (that
+        first pass) has been dispatched, so it is a real "the window is
+        drawn" signal rather than a guess. Note this must NOT be done with
+        processEvents(): re-entering the event loop while widgets are still
+        being built crashes at the C++ level (agent-pitfalls #9).
+
+        `min_ms` is measured from the overlay's own first paint so the
+        spinner never flashes; `max_ms` caps the wait for the case where
+        deferred work keeps the queue busy indefinitely.
+        """
+        self._min_ms = min_ms
+        QTimer.singleShot(0, self._finish_when_idle)
+        QTimer.singleShot(max_ms, self.finish)
+
+    def _finish_when_idle(self) -> None:
+        if self._finished:
+            return
+        if self._painted_at is None:
+            # Queue drained before the overlay itself was painted — retry on
+            # the next frame rather than spinning on a 0 ms timer.
+            QTimer.singleShot(SPINNER_INTERVAL_MS, self._finish_when_idle)
+            return
+        remaining = self._min_ms - int(
+            (time.monotonic() - self._painted_at) * 1000)
+        if remaining > 0:
+            QTimer.singleShot(remaining, self.finish)
+            return
+        self.finish()
+
     def finish(self) -> None:
+        # Idempotent: finish_when_ready() arms both an idle and a cap timer,
+        # and the loser must not touch an already-deleted widget.
+        if self._finished:
+            return
+        self._finished = True
         self._timer.stop()
         p = self.parentWidget()
         if p is not None:
@@ -558,6 +600,8 @@ class LoadingOverlay(QWidget):
         self.update()
 
     def paintEvent(self, _event) -> None:
+        if self._painted_at is None:
+            self._painted_at = time.monotonic()
         painter = QPainter(self)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
