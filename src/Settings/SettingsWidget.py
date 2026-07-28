@@ -1,6 +1,7 @@
 from qtpy.QtWidgets import *
 from ..AutonaColorButton import AutonaColorButton
 from ..SettingsManager import SettingsManager
+from ..AutonaHotkeys import AutonaHotkeys
 from ..Helpers.AutonaHotkeyValidator import (
     collision_summary,
     find_app_duplicates,
@@ -8,6 +9,41 @@ from ..Helpers.AutonaHotkeyValidator import (
     os_warning_for,
 )
 import textwrap
+
+
+class HotkeyCaptureEdit(QKeySequenceEdit):
+    """QKeySequenceEdit that releases the global hotkeys while focused.
+
+    Win32 RegisterHotKey swallows the combination system-wide, so typing an
+    already-assigned shortcut here would fire the action and record nothing.
+    Suspending on focus in / resuming on focus out keeps the grab off exactly
+    while the user is recording.
+    """
+
+    def _hotkeys(self):
+        # Null-safe: no bootstrap_core() means no instance to suspend.
+        return AutonaHotkeys.instance
+
+    def focusInEvent(self, event):
+        hotkeys = self._hotkeys()
+        if hotkeys is not None:
+            hotkeys.SuspendCapture()
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event):
+        hotkeys = self._hotkeys()
+        if hotkeys is not None:
+            hotkeys.ResumeCapture()
+        super().focusOutEvent(event)
+
+    def hideEvent(self, event):
+        # Safety net: closing/hiding the settings page while this field still
+        # holds focus must not leave the hotkeys suspended. ResumeCapture()
+        # is idempotent, so the usual focus-out path is unaffected.
+        hotkeys = self._hotkeys()
+        if hotkeys is not None:
+            hotkeys.ResumeCapture()
+        super().hideEvent(event)
 
 
 class SettingsWidget(QWidget):
@@ -46,7 +82,11 @@ class SettingsWidget(QWidget):
             settingWidget.setChecked(SettingsManager.Get(
                 self._key(setting), defaultValue))
             settingWidget.stateChanged.connect(
-                lambda val=None: SettingsManager.Set(self._key(setting), settingWidget.isChecked()))
+                lambda val=None: [
+                    SettingsManager.Set(
+                        self._key(setting), settingWidget.isChecked()),
+                    callback()
+                ])
             resetButton.clicked.connect(
                 lambda bt=None, settingWidget=settingWidget:
                 settingWidget.setChecked(defaultValue)
@@ -64,7 +104,7 @@ class SettingsWidget(QWidget):
                 settingWidget.setValue(defaultValue)
             )
         elif type == "hotkey":
-            settingWidget = QKeySequenceEdit()
+            settingWidget = HotkeyCaptureEdit()
             # Trim any extra chord recorded after the first key.
             settingWidget.keySequenceChanged.connect(
                 lambda keySequence, settingWidget=settingWidget:
