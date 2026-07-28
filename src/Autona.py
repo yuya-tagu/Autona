@@ -148,6 +148,16 @@ def catchtime(msg = ''):
     yield lambda: perf_counter() - start
     logger.info(f'{msg} Time: {perf_counter() - start:.3f} seconds')
 
+# Explicit construction of the core singletons (composition root). This must
+# stay ABOVE the import block below: those modules build the singletons that
+# read StateManager in their __init__ (GameAssetManager / TournamentDataProvider
+# / ScoreboardManager ...), and the settings-window chain used to be what
+# implicitly created AutonaHotkeys.instance. Running bootstrap_core() here
+# keeps the effective initialization order identical to the old import-time
+# side effects.
+from .bootstrap import bootstrap_core
+bootstrap_core()
+
 # autopep8: off
 from .Settings.AutonaSettingsWindow import AutonaSettingsWindow
 from .AutonaApiInfoWindow import AutonaApiInfoWindow

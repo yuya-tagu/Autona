@@ -181,6 +181,3 @@ class AutonaHotkeys(QObject):
         self.loaded_keys.update(
             (k, v) for k, v in user_keys.items() if k in self.keys)
         logger.info("User hotkeys loaded")
-
-
-AutonaHotkeys.instance = AutonaHotkeys()

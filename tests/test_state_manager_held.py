@@ -6,9 +6,11 @@ Held subtree semantics (the 反映 button feature):
   but are excluded from delta broadcast / GetFullState / file export
   until CommitHeld(prefix) publishes them in one save cycle.
 
-StateManager.py does file I/O relative to CWD at import time, so the module
-is imported once into a temp working directory via a fake parent package
-(direct_import can't be used: StateManager has relative imports).
+StateManager.Initialize() does file I/O relative to CWD (./out), and importing
+the module pulls in SettingsManager, which still reads ./user_data at import
+time. Both therefore happen once inside a temp working directory, via a fake
+parent package (direct_import can't be used: StateManager has relative
+imports).
 """
 import importlib.util
 import os
@@ -27,9 +29,10 @@ _ORIGINAL_CWD = os.getcwd()
 
 
 def _import_state_manager():
-    # StateManager / SettingsManager do file I/O relative to CWD at import
-    # time (./out, ./user_data). Import under the temp dir, then restore the
-    # CWD so later-collected test modules are unaffected.
+    # SettingsManager still does file I/O relative to CWD at import time
+    # (./user_data), and Initialize() creates ./out. Import and initialize
+    # under the temp dir, then restore the CWD so later-collected test
+    # modules are unaffected.
     os.chdir(_WORK_DIR)
     os.makedirs(Path(_WORK_DIR) / "user_data", exist_ok=True)
     try:
@@ -41,6 +44,9 @@ def _import_state_manager():
         mod = importlib.util.module_from_spec(spec)
         sys.modules["autona_sm_test_pkg.StateManager"] = mod
         spec.loader.exec_module(mod)
+        # Construction step that used to run at import time; the export path
+        # under test writes into ./out, which this creates.
+        mod.StateManager.Initialize()
         return mod
     finally:
         os.chdir(_ORIGINAL_CWD)
