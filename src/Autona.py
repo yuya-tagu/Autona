@@ -424,7 +424,9 @@ class Window(QMainWindow):
         self.webserver = WebServer(
             parent=self, commentaryWidget=commentary)
         self.webserver.signals.start_failed.connect(self.OnWebServerStartFailed)
-        check_webserver_port(self.webserver.port, parent=self)
+        # Probe the very interface the server will bind (LAN vs loopback).
+        check_webserver_port(
+            self.webserver.port, parent=self, host=self.webserver.host_name)
         self.webserver.start()
         self.signals.GameChanged.connect(self.webserver.ws_program_state)
         self.signals.GameChanged.connect(self.webserver.ws_get_characters)
@@ -749,11 +751,12 @@ class Window(QMainWindow):
 
         # Cover the main window with a spinner until Qt finishes its
         # first-pass layout + paint, so the user doesn't see half-drawn
-        # widgets jump into place. The overlay dismisses itself after a
-        # short delay — long enough for one or two event-loop passes.
+        # widgets jump into place. Dismissal is driven by the event queue
+        # draining (the first pass being done), not by a fixed 1.1 s delay
+        # that was pure guesswork in both directions.
         self._loading_overlay = LoadingOverlay(self)
         self._loading_overlay.start()
-        QTimer.singleShot(1100, self._loading_overlay.finish)
+        self._loading_overlay.finish_when_ready()
 
         # Prevent tab labels from being elided ("…") — show full text so the
         # tab bar uses horizontal scrolling if it overflows.
@@ -762,7 +765,12 @@ class Window(QMainWindow):
             bar.setElideMode(Qt.TextElideMode.ElideNone)
             bar.setUsesScrollButtons(True)
 
-        AutonaCountryHelper.LoadCountries()
+        # NOTE: countries are loaded once, early in __init__ (see
+        # AutonaCountryHelper.instance.init() above). The second, identical
+        # LoadCountries() that used to sit here re-parsed the ~2 MB JSON and
+        # rebuilt the 250-row countryModel from scratch after every widget had
+        # already installed the first model — pure duplicate work, and a model
+        # swap that agent-pitfalls #13 warns about. Removed.
         self.settingsWindow.UiMounted()
         self.apiInfoWindow.UiMounted()
         self.companionGuideWindow.UiMounted()

@@ -1,6 +1,7 @@
 import html
 import json
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -828,6 +829,29 @@ class WebServer(QThread):
 # runs then silently steal every other request, making the web UI
 # appear blank. Detect this at startup and offer to kill the offenders.
 
+def _port_is_free(port: int, host: str) -> bool:
+    """True when we can bind `host:port` ourselves right now.
+
+    This is the fast path of the guard below: one syscall pair instead of a
+    ~100-300 ms synchronous `netstat` subprocess on every single launch.
+
+    SO_REUSEADDR is deliberately NOT set — on Windows it lets a bind succeed
+    while another process is already listening, i.e. it would report exactly
+    the collision we are here to detect as "free".
+
+    `host` must match the interface the server will actually listen on
+    (0.0.0.0 vs 127.0.0.1), otherwise the probe tests a different binding.
+    """
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind((host, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+
 def _netstat_listeners(port: int) -> set:
     if sys.platform != 'win32':
         return set()
@@ -886,14 +910,27 @@ def _process_name(pid: int) -> str:
     return '(unknown)'
 
 
-def check_webserver_port(port: int, parent=None) -> bool:
+def check_webserver_port(port: int, parent=None, host: str = "127.0.0.1") -> bool:
     """Return True if the port is free (or was freed by killing stale procs).
 
     Shows a QMessageBox when another process is already listening so the user
     can choose to terminate it. Safe to call from the GUI thread.
+
+    The common case (port free) costs a bind attempt; the netstat/tasklist
+    subprocesses only run when something really holds the port. Since the
+    single-instance guard removed self-collisions, that is now genuinely rare.
     """
+    if _port_is_free(port, host):
+        return True
+
     conflicts = _netstat_listeners(port)
     if not conflicts:
+        # Bind failed but no other TCP listener owns the port (a socket in
+        # TIME_WAIT, or a holder netstat can't attribute). There is nothing
+        # to offer terminating — let the server start and report a real
+        # bind error through start_failed if it still can't listen.
+        logger.warning(
+            f"Port {port} could not be bound but no listening process was found")
         return True
 
     details = ', '.join(f"{pid} ({_process_name(pid)})" for pid in sorted(conflicts))
@@ -939,7 +976,7 @@ def check_webserver_port(port: int, parent=None) -> bool:
     # Wait up to ~2s for the OS to release the port.
     for _ in range(10):
         time.sleep(0.2)
-        if not _netstat_listeners(port):
+        if _port_is_free(port, host):
             return True
 
     QMessageBox.critical(

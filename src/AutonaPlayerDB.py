@@ -65,6 +65,10 @@ class AutonaPlayerDB:
     def LoadDB():
         try:
             json_db_exists = True
+            # True once the legacy CSV import actually put rows in memory. That
+            # import exists only in RAM until SaveDB() writes them out, so it is
+            # the one path in LoadDB that still has to persist (see below).
+            csv_imported = False
             if os.path.exists("./user_data/local_players.json") == False:
                 json_db_exists = False
                 with open('./user_data/local_players.json', 'wt', encoding='utf-8') as outfile:
@@ -79,7 +83,7 @@ class AutonaPlayerDB:
                             "prefix")+" "+player.get("gamerTag") if player.get("prefix") else player.get("gamerTag")
                         if tag not in AutonaPlayerDB.database:
                             AutonaPlayerDB.database[tag] = player
-                            logger.info(f"Import player {tag} from old database")
+                            csv_imported = True
                             try:
                                 player["mains"] = json.loads(
                                     player.get("mains", "{}"))
@@ -99,7 +103,6 @@ class AutonaPlayerDB:
                 player_list = orjson.loads(jsonfile.read())
                 for player in player_list:
                     tag = player.get("prefix")+" "+player.get("gamerTag") if player.get("prefix") else player.get("gamerTag")
-                    logger.info(f"Loading player {tag} from local database")
                     if tag not in AutonaPlayerDB.database:
                         AutonaPlayerDB.database[tag] = player
 
@@ -108,10 +111,27 @@ class AutonaPlayerDB:
                         except:
                             player["mains"] = {}
                             logger.error(f"No mains found for: {tag}")
-            
-            AutonaPlayerDB.SaveDB()
+
+            # One line instead of one per player: a 3k-entry DB used to emit 3k
+            # INFO records at every launch (written to two log sinks).
+            logger.info(
+                f"Loaded {len(AutonaPlayerDB.database)} players from the local database")
+
+            # No unconditional write-back: everything LoadDB does above is an
+            # in-memory normalisation, so re-serialising the whole DB (indent=2)
+            # at every launch only ever rewrote what was just read. The one
+            # side effect it also had — dropping keys outside `fieldnames` from
+            # the file — is a save-time concern and still happens on the next
+            # real mutation (AddPlayers / DeletePlayer / editor save); the
+            # in-memory copy keeps those keys either way, so nothing observable
+            # changes within a session.
+            # The legacy CSV import is the exception: its rows exist nowhere
+            # else yet, so that migration still has to be written out here.
+            if csv_imported:
+                logger.info("Persisting players migrated from the legacy CSV database")
+                AutonaPlayerDB.SaveDB()
             AutonaPlayerDB.SetupModel()
-            
+
         except Exception as e:
             logger.error(traceback.format_exc())
 
