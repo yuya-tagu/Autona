@@ -30,6 +30,75 @@ from .SettingsManager import SettingsManager
 # Sentinel telling "key absent" apart from a stored None.
 _MISSING = object()
 
+# The direct-overwrite fallback below is warned about only once per session:
+# whatever keeps the file locked usually keeps doing so, and this runs on
+# every save.
+_atomicWriteFallbackLogged = False
+
+# Retry budget for the replace step (20 + 40 + 80 ms of sleep at worst).
+_ATOMIC_REPLACE_ATTEMPTS = 4
+_ATOMIC_REPLACE_BACKOFF = 0.02
+
+
+def _atomic_write_bytes(path: str, data: bytes):
+    """Publish `data` at `path` without ever exposing a half-written file.
+
+    OBS overlays and the layout JS poll this file continuously, so a plain
+    open('wb') lets a reader observe a truncated JSON mid-write. Writing a
+    sibling temp file and os.replace()-ing it over the target makes the
+    swap atomic from a reader's point of view. The temp must live in the
+    same directory: rename is only atomic within one volume.
+
+    On Windows the replace fails with a sharing violation while a reader
+    holds the target open without FILE_SHARE_DELETE, so retry with a short
+    backoff and then fall back to the old direct overwrite -- a possible
+    torn read is better than dropping the write entirely.
+
+    No fsync: this guards against cross-process torn reads, not power loss,
+    and it sits on the hot save path.
+    """
+    global _atomicWriteFallbackLogged
+
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, 'wb', buffering=8192) as file:
+            file.write(data)
+    except Exception:
+        _remove_quietly(tmp)
+        raise
+
+    delay = _ATOMIC_REPLACE_BACKOFF
+    for attempt in range(_ATOMIC_REPLACE_ATTEMPTS):
+        try:
+            os.replace(tmp, path)
+            return
+        except OSError:  # PermissionError (sharing violation) included
+            if attempt < _ATOMIC_REPLACE_ATTEMPTS - 1:
+                time.sleep(delay)
+                delay *= 2
+
+    message = (f"Atomic replace of {path} kept failing (file locked by a "
+               f"reader?); falling back to direct overwrite.")
+    if not _atomicWriteFallbackLogged:
+        _atomicWriteFallbackLogged = True
+        logger.warning(message)
+    else:
+        logger.debug(message)
+
+    try:
+        with open(path, 'wb', buffering=8192) as file:
+            file.write(data)
+    finally:
+        _remove_quietly(tmp)
+
+
+def _remove_quietly(path: str):
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
 
 class StateManagerSignals(QObject):
     state_big_change = Signal()
@@ -275,23 +344,29 @@ class StateManager:
                     revision_at_save = StateManager.revision
 
                     def _export(state_snap, old_snap, ref_diff):
-                        with open("./out/program_state.json", 'wb', buffering=8192) as file:
-                            state_snap["timestamp"] = time.time()
-                            # Stamp revision so degraded poll clients (file
-                            # mode) can validate continuity (Design.md §2.3
-                            # R-OBS-3a, §8 T-12).
-                            state_snap["revision"] = revision_at_save
-                            # Drop OPT_INDENT_2 — OBS overlays / Web UI parse
-                            # JSON regardless of whitespace, and indenting a
-                            # multi-MB tournament state inflates file size
-                            # 3-4x for nothing. Saves disk I/O bandwidth.
-                            file.write(orjson.dumps(
-                                state_snap, option=orjson.OPT_NON_STR_KEYS))
+                        state_snap["timestamp"] = time.time()
+                        # Stamp revision so degraded poll clients (file
+                        # mode) can validate continuity (Design.md §2.3
+                        # R-OBS-3a, §8 T-12).
+                        state_snap["revision"] = revision_at_save
+                        # Drop OPT_INDENT_2 — OBS overlays / Web UI parse
+                        # JSON regardless of whitespace, and indenting a
+                        # multi-MB tournament state inflates file size
+                        # 3-4x for nothing. Saves disk I/O bandwidth.
+                        _atomic_write_bytes(
+                            "./out/program_state.json",
+                            orjson.dumps(state_snap,
+                                         option=orjson.OPT_NON_STR_KEYS))
 
                         if not SettingsManager.Get("general.disable_export", False):
                             StateManager.ExportText(
                                 old_snap, ref_diff, state_snap)
 
+                    # Deliberately NOT a daemon: this thread only does local
+                    # disk I/O (bounded, never blocks on the network), and
+                    # letting shutdown join it guarantees program_state.json
+                    # is never left truncated. Image downloads spawned below
+                    # by ExportText are the network side and are daemons.
                     StateManager._export_thread = threading.Thread(
                         target=partial(_export,
                                        state_snap=state_snapshot,
@@ -514,7 +589,13 @@ class StateManager:
                     def downloadImage(url, dlpath):
                         StateManager._download_semaphore.acquire()
                         try:
-                            r = requests.get(url, stream=True)
+                            # (connect, read): without a timeout an
+                            # unresponsive host blocks this thread forever.
+                            # The read timeout applies per chunk of the
+                            # streamed body, so 30s matches the streaming
+                            # download budget used in AutonaUpdater.
+                            r = requests.get(url, stream=True,
+                                             timeout=(5, 30))
                             if r.status_code == 200:
                                 with open(dlpath, 'wb') as f:
                                     r.raw.decode_content = True
@@ -530,12 +611,17 @@ class StateManager:
                         finally:
                             StateManager._download_semaphore.release()
 
+                    # daemon: a half-written overlay image is re-downloaded
+                    # on the next export, so it must never keep the process
+                    # alive at shutdown (threading._shutdown() joins every
+                    # non-daemon thread).
                     t = threading.Thread(
                         target=downloadImage,
                         args=[
                             di,
                             f"./out/{path}" + "." + di.rsplit(".", 1)[-1]
-                        ]
+                        ],
+                        daemon=True
                     )
                     t.start()
                 except Exception as e:
