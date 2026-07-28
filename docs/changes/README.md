@@ -21,3 +21,4 @@
 |---------|------|
 | [external-control-impact-analysis.md](external-control-impact-analysis.md) | 外部制御 API / Companion / Stream Deck 連携の影響分析（実装済み API の運用リスク含む） |
 | [commentary-rework-impact-analysis.md](commentary-rework-impact-analysis.md) | 実況・解説機能リワーク（2026-07）の破壊的変更・移行方針（スキーマ刷新 / OBS URL 差し替え） |
+| [startup-architecture-redesign.md](startup-architecture-redesign.md) | 起動アーキテクチャ再設計の設計書（終着点 4 段パイプライン / 移行 5 ステップ / 各ステップの検証チェックリスト） |
