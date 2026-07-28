@@ -70,6 +70,9 @@ class ResultRenderer(QObject):
         self._host = QWidget()
         self._host.setAttribute(
             Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+        # Keep this backstage window out of the "last window closed" check,
+        # otherwise it prevents the application from quitting.
+        self._host.setAttribute(Qt.WidgetAttribute.WA_QuitOnClose, False)
         self._host.resize(1920, 1080)
         self._view = QWebEngineView(self._host)
         self._view.setPage(self._page)

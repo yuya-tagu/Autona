@@ -217,7 +217,10 @@
 `program_state.json`・`out/` テキスト）へは §6.6 の `:apply`（反映）を送るまで公開されない**。
 例外（デスクトップ UI と同一挙動）: ①ゲーム切替（`POST /game`、および大会/セット読込に伴う
 自動ゲーム選択）は onLoad で held をベースライン公開する、②クルーバトル（board 3）は
-held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名等）は held 対象外で即時公開。
+held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名等）は held 対象外で即時公開、
+④統計キー `score.{n}.{last_sets,history_sets,recent_sets,upset_factor}` は
+`HoldSubtree(exempt=...)` により held 対象外で即時公開（`stats:refresh` の結果は
+反映を待たずに layout へ届く）。
 
 ### 6.1 スコア加算 `POST /api/v1/scoreboards/{n}/teams/{t}/score:adjust`
 - パス: `n`=スコアボード番号, `t`=1|2

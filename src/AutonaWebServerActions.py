@@ -355,6 +355,31 @@ class WebServerActions(QThread):
         return "OK"
 
     @gui_thread_sync
+    def refresh_stats(self, scoreboard):
+        """Recalculate every statistic for a board.
+
+        Emits the same signal set as the STATS panel's
+        「統計情報を取得する」 button (AutonaStatsWidget._refresh), so both
+        entry points stay identical. The fetches themselves are async
+        (start.gg), so this returns as soon as the signals are queued; the
+        results land in the state a moment later. The stats util already
+        no-ops on non-1v1 boards, so no extra guard is needed here.
+        """
+        sb = self.scoreboard.GetScoreboard(scoreboard)
+        stats = getattr(sb, "stats", None)
+        if stats is None:
+            logger.warning(
+                f"[Stats] scoreboard {scoreboard} has no stats util")
+            return f"ERROR: scoreboard {scoreboard} does not support stats"
+        stats.signals.RecentSetsSignal.emit()
+        stats.signals.LastSetsP1Signal.emit()
+        stats.signals.LastSetsP2Signal.emit()
+        stats.signals.PlayerHistoryStandingsP1Signal.emit()
+        stats.signals.PlayerHistoryStandingsP2Signal.emit()
+        stats.signals.UpsetFactorCalculation.emit()
+        return "OK"
+
+    @gui_thread_sync
     def reset_scores(self, scoreboard):
         self.scoreboard.GetScoreboard(scoreboard).ResetScore()
         return "OK"

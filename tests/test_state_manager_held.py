@@ -197,3 +197,99 @@ def test_exported_file_contains_committed_view_only():
     exported = (Path(_WORK_DIR) / "out" / "program_state.json").read_text(
         encoding="utf-8")
     assert "PendingPhase" in exported
+
+
+# --- Exempt sub-paths -------------------------------------------------
+# HoldSubtree(prefix, exempt=[...]) opts fetched derived data (the stats
+# keys AutonaStatsUtil writes) out of the hold: those keys publish as soon
+# as they are written, even while operator edits under the same prefix are
+# still pending. A separate prefix keeps this independent of the tests
+# above, which hold "score.1" without exempt paths.
+EX_PREFIX = "score.2"
+EX_KEYS = ["last_sets", "upset_factor"]
+
+
+def test_exempt_registration_publishes_baseline():
+    SM.Set(f"{EX_PREFIX}.best_of", 3)
+    SM.Set(f"{EX_PREFIX}.last_sets.1", {})
+    SM.Set(f"{EX_PREFIX}.upset_factor", 0)
+    SM.HoldSubtree(EX_PREFIX, exempt=EX_KEYS)
+    assert len(SM.heldExempt[EX_PREFIX]) == len(EX_KEYS)
+
+
+def test_exempt_write_publishes_immediately_when_clean():
+    spy = _Spy()
+    SM.Set(f"{EX_PREFIX}.upset_factor", 7)
+    # Never queued behind the 反映 button.
+    assert not SM.HasPendingChanges(EX_PREFIX)
+    assert "upset_factor" in spy.delta_str()
+    assert SM.GetFullState()["state"]["score"]["2"]["upset_factor"] == 7
+
+
+def test_exempt_write_publishes_while_held_edit_pending():
+    SM.Set(f"{EX_PREFIX}.phase", "PendingExemptPhase")
+    assert SM.HasPendingChanges(EX_PREFIX)
+
+    spy = _Spy()
+    SM.Set(f"{EX_PREFIX}.last_sets.1", {"round_name": "ExemptRound"})
+
+    # Stats go out now; the pending operator edit stays masked.
+    assert "ExemptRound" in spy.delta_str()
+    assert "PendingExemptPhase" not in spy.delta_str()
+
+    published = SM.GetFullState()["state"]["score"]["2"]
+    assert published["last_sets"]["1"]["round_name"] == "ExemptRound"
+    assert "phase" not in published
+
+    _join_export()
+    exported = (Path(_WORK_DIR) / "out" / "program_state.json").read_text(
+        encoding="utf-8")
+    assert "ExemptRound" in exported
+    assert "PendingExemptPhase" not in exported
+
+
+def test_get_committed_serves_live_value_for_exempt_paths():
+    assert SM.GetCommitted(f"{EX_PREFIX}.phase") is None
+    assert SM.GetCommitted(f"{EX_PREFIX}.last_sets.1") == {
+        "round_name": "ExemptRound"}
+    # Whole-subtree read (the /get_scoreboard path): committed elsewhere,
+    # live for the exempt keys.
+    subtree = SM.GetCommitted(EX_PREFIX)
+    assert subtree["last_sets"]["1"]["round_name"] == "ExemptRound"
+    assert subtree["best_of"] == 3
+    assert "phase" not in subtree
+
+
+def test_get_committed_overlay_does_not_mutate_last_saved_state():
+    with SM.SaveBlock():
+        SM.Set(f"{EX_PREFIX}.last_sets.1", {"round_name": "BlockedRound"})
+        # Not saved yet, but the exempt key is never masked.
+        subtree = SM.GetCommitted(EX_PREFIX)
+        assert subtree["last_sets"]["1"]["round_name"] == "BlockedRound"
+        # The overlay clones; lastSavedState keeps its own storage.
+        assert SM.lastSavedState["score"]["2"]["last_sets"]["1"][
+            "round_name"] == "ExemptRound"
+
+
+def test_commit_publishes_held_edit_without_dropping_stats():
+    spy = _Spy()
+    SM.CommitHeld(EX_PREFIX)
+    assert not SM.HasPendingChanges(EX_PREFIX)
+    assert "PendingExemptPhase" in spy.delta_str()
+
+    published = SM.GetFullState()["state"]["score"]["2"]
+    assert published["phase"] == "PendingExemptPhase"
+    assert published["last_sets"]["1"]["round_name"] == "BlockedRound"
+
+
+def test_prefix_wide_held_write_keeps_live_exempt_values():
+    # Clearing the whole subtree is itself a held write; the exempt keys
+    # written afterwards must still reach the published view.
+    SM.Set(EX_PREFIX, {})
+    assert SM.HasPendingChanges(EX_PREFIX)
+
+    SM.Set(f"{EX_PREFIX}.upset_factor", 3)
+    published = SM.GetFullState()["state"]["score"]["2"]
+    assert published["upset_factor"] == 3
+    # The rest of the subtree is still the committed view.
+    assert published["phase"] == "PendingExemptPhase"

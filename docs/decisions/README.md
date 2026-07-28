@@ -40,3 +40,4 @@ Proposed | Accepted | Superseded by ADR-XXX | Deprecated
 |---------|--------|------|
 | [ADR-001-external-control-api-boundary.md](ADR-001-external-control-api-boundary.md) | Accepted | 外部制御 API の責務境界 |
 | [ADR-002-game-asset-pack-allowlist.md](ADR-002-game-asset-pack-allowlist.md) | Accepted | ゲームアセットパックの許可制（メーカー大会ガイドライン対応） |
+| [ADR-003-startup-architecture.md](ADR-003-startup-architecture.md) | Accepted | 起動アーキテクチャ（単一インスタンス + 明示的ライフサイクル移行） |

@@ -27,6 +27,79 @@ from loguru import logger
 from .Helpers.AutonaDictHelper import deep_get, deep_set, deep_unset, deep_clone
 from .SettingsManager import SettingsManager
 
+# Sentinel telling "key absent" apart from a stored None.
+_MISSING = object()
+
+# The direct-overwrite fallback below is warned about only once per session:
+# whatever keeps the file locked usually keeps doing so, and this runs on
+# every save.
+_atomicWriteFallbackLogged = False
+
+# Retry budget for the replace step (20 + 40 + 80 ms of sleep at worst).
+_ATOMIC_REPLACE_ATTEMPTS = 4
+_ATOMIC_REPLACE_BACKOFF = 0.02
+
+
+def _atomic_write_bytes(path: str, data: bytes):
+    """Publish `data` at `path` without ever exposing a half-written file.
+
+    OBS overlays and the layout JS poll this file continuously, so a plain
+    open('wb') lets a reader observe a truncated JSON mid-write. Writing a
+    sibling temp file and os.replace()-ing it over the target makes the
+    swap atomic from a reader's point of view. The temp must live in the
+    same directory: rename is only atomic within one volume.
+
+    On Windows the replace fails with a sharing violation while a reader
+    holds the target open without FILE_SHARE_DELETE, so retry with a short
+    backoff and then fall back to the old direct overwrite -- a possible
+    torn read is better than dropping the write entirely.
+
+    No fsync: this guards against cross-process torn reads, not power loss,
+    and it sits on the hot save path.
+    """
+    global _atomicWriteFallbackLogged
+
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, 'wb', buffering=8192) as file:
+            file.write(data)
+    except Exception:
+        _remove_quietly(tmp)
+        raise
+
+    delay = _ATOMIC_REPLACE_BACKOFF
+    for attempt in range(_ATOMIC_REPLACE_ATTEMPTS):
+        try:
+            os.replace(tmp, path)
+            return
+        except OSError:  # PermissionError (sharing violation) included
+            if attempt < _ATOMIC_REPLACE_ATTEMPTS - 1:
+                time.sleep(delay)
+                delay *= 2
+
+    message = (f"Atomic replace of {path} kept failing (file locked by a "
+               f"reader?); falling back to direct overwrite.")
+    if not _atomicWriteFallbackLogged:
+        _atomicWriteFallbackLogged = True
+        logger.warning(message)
+    else:
+        logger.debug(message)
+
+    try:
+        with open(path, 'wb', buffering=8192) as file:
+            file.write(data)
+    finally:
+        _remove_quietly(tmp)
+
+
+def _remove_quietly(path: str):
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
 class StateManagerSignals(QObject):
     state_big_change = Signal()
     state_updated = Signal(dict)
@@ -51,6 +124,10 @@ class StateManager:
     # ./out text export until CommitHeld(prefix) publishes them in one shot.
     heldPrefixes = set()      # dot key-path prefixes, e.g. "score.1"
     heldKeys = {}             # prefix -> [bracket-form keys] pending commit
+    # Sub-paths of a held prefix that publish immediately anyway (fetched
+    # derived data such as stats, not operator edits waiting on 反映).
+    # prefix -> [(dot path, bracket path)], both absolute.
+    heldExempt = {}
     _commitPrefixes = set()   # prefixes queued to flush on the next SaveState
     _heldTouched = set()      # prefixes with held writes not yet notified
     # Monotonically increasing counter incremented on every state mutation
@@ -89,12 +166,24 @@ class StateManager:
         return out
 
     @staticmethod
+    def _isExemptKey(prefix: str, final_key: str) -> bool:
+        # Same self-delimiting bracket comparison as _matchHeldPrefix: an
+        # exempt path matches itself and everything below it.
+        for _dot, bracket in StateManager.heldExempt.get(prefix, ()):
+            if final_key == bracket or final_key.startswith(bracket + "["):
+                return True
+        return False
+
+    @staticmethod
     def _matchHeldPrefix(final_key: str):
         # The bracket form is self-delimiting, so a prefix can never match
         # into a sibling key ("...['1']" does not prefix "...['10']...").
         for prefix in StateManager.heldPrefixes:
             bracket = StateManager._bracketPath(prefix)
             if final_key == bracket or final_key.startswith(bracket + "["):
+                # Exempt sub-paths publish through the normal queue.
+                if StateManager._isExemptKey(prefix, final_key):
+                    return None
                 return prefix
         return None
 
@@ -106,11 +195,20 @@ class StateManager:
         for prefix in StateManager.heldPrefixes:
             if not StateManager.heldKeys.get(prefix):
                 continue
+            # Exempt sub-paths are published as they are written, so their
+            # live values must survive the rewind of the enclosing subtree.
+            carried = []
+            for dot, _bracket in StateManager.heldExempt.get(prefix, ()):
+                value = deep_get(snapshot, dot, _MISSING)
+                if value is not _MISSING:
+                    carried.append((dot, value))
             committed = deep_get(StateManager.lastSavedState, prefix)
             if committed is None:
                 deep_unset(snapshot, prefix)
             else:
                 deep_set(snapshot, prefix, deep_clone(committed))
+            for dot, value in carried:
+                deep_set(snapshot, dot, value)
 
     @staticmethod
     def _notifyHeldTouched():
@@ -142,14 +240,26 @@ class StateManager:
             StateManager._notifyHeldTouched()
         return None if was_dirty else held_prefix
 
-    def HoldSubtree(prefix: str):
+    def HoldSubtree(prefix: str, exempt=None):
         """Defer publication of every key under `prefix` until CommitHeld().
 
         Writes keep landing in the live state; only the broadcast/export
         boundary is gated. Registered once per scoreboard widget.
+
+        `exempt` lists prefix-relative dot paths (e.g. "last_sets") that opt
+        out of the hold: they are fetched derived data rather than operator
+        edits, so they publish as soon as they are written and are never
+        rewound by the pending-edit mask.
         """
         with StateManager.lock:
             StateManager.heldPrefixes.add(prefix)
+            entries = [(f"{prefix}.{sub}",
+                        StateManager._bracketPath(f"{prefix}.{sub}"))
+                       for sub in (exempt or [])]
+            if entries:
+                StateManager.heldExempt[prefix] = entries
+            else:
+                StateManager.heldExempt.pop(prefix, None)
 
     def HasPendingChanges(prefix: str) -> bool:
         with StateManager.lock:
@@ -234,23 +344,29 @@ class StateManager:
                     revision_at_save = StateManager.revision
 
                     def _export(state_snap, old_snap, ref_diff):
-                        with open("./out/program_state.json", 'wb', buffering=8192) as file:
-                            state_snap["timestamp"] = time.time()
-                            # Stamp revision so degraded poll clients (file
-                            # mode) can validate continuity (Design.md §2.3
-                            # R-OBS-3a, §8 T-12).
-                            state_snap["revision"] = revision_at_save
-                            # Drop OPT_INDENT_2 — OBS overlays / Web UI parse
-                            # JSON regardless of whitespace, and indenting a
-                            # multi-MB tournament state inflates file size
-                            # 3-4x for nothing. Saves disk I/O bandwidth.
-                            file.write(orjson.dumps(
-                                state_snap, option=orjson.OPT_NON_STR_KEYS))
+                        state_snap["timestamp"] = time.time()
+                        # Stamp revision so degraded poll clients (file
+                        # mode) can validate continuity (Design.md §2.3
+                        # R-OBS-3a, §8 T-12).
+                        state_snap["revision"] = revision_at_save
+                        # Drop OPT_INDENT_2 — OBS overlays / Web UI parse
+                        # JSON regardless of whitespace, and indenting a
+                        # multi-MB tournament state inflates file size
+                        # 3-4x for nothing. Saves disk I/O bandwidth.
+                        _atomic_write_bytes(
+                            "./out/program_state.json",
+                            orjson.dumps(state_snap,
+                                         option=orjson.OPT_NON_STR_KEYS))
 
                         if not SettingsManager.Get("general.disable_export", False):
                             StateManager.ExportText(
                                 old_snap, ref_diff, state_snap)
 
+                    # Deliberately NOT a daemon: this thread only does local
+                    # disk I/O (bounded, never blocks on the network), and
+                    # letting shutdown join it guarantees program_state.json
+                    # is never left truncated. Image downloads spawned below
+                    # by ExportText are the network side and are daemons.
                     StateManager._export_thread = threading.Thread(
                         target=partial(_export,
                                        state_snap=state_snapshot,
@@ -342,14 +458,37 @@ class StateManager:
         When `key` lies inside a held prefix with pending edits, the last
         committed value is returned instead of the live one. Keys outside
         (or above) any held prefix fall back to the live state.
+
+        Exempt sub-paths (HoldSubtree(exempt=...)) publish immediately, so
+        they always resolve to the live value — both when read directly and
+        when they sit inside a wider subtree read.
         """
         with StateManager.lock:
             for prefix in StateManager.heldPrefixes:
                 if not StateManager.heldKeys.get(prefix):
                     continue
-                if key == prefix or key.startswith(prefix + "."):
-                    return deep_get(
-                        StateManager.lastSavedState, key, default)
+                if key != prefix and not key.startswith(prefix + "."):
+                    continue
+
+                exempt = StateManager.heldExempt.get(prefix, ())
+                if any(key == dot or key.startswith(dot + ".")
+                       for dot, _bracket in exempt):
+                    return deep_get(StateManager.state, key, default)
+
+                committed = deep_get(
+                    StateManager.lastSavedState, key, default)
+                # Overlay the live value of every exempt path nested under
+                # `key`. Clone first: the committed dict is lastSavedState's
+                # own storage and must not be mutated here.
+                nested = [dot for dot, _bracket in exempt
+                          if dot.startswith(key + ".")]
+                if nested and isinstance(committed, dict):
+                    committed = deep_clone(committed)
+                    for dot in nested:
+                        live = deep_get(StateManager.state, dot, _MISSING)
+                        if live is not _MISSING:
+                            deep_set(committed, dot[len(key) + 1:], live)
+                return committed
             return deep_get(StateManager.state, key, default)
 
     @staticmethod
@@ -450,7 +589,13 @@ class StateManager:
                     def downloadImage(url, dlpath):
                         StateManager._download_semaphore.acquire()
                         try:
-                            r = requests.get(url, stream=True)
+                            # (connect, read): without a timeout an
+                            # unresponsive host blocks this thread forever.
+                            # The read timeout applies per chunk of the
+                            # streamed body, so 30s matches the streaming
+                            # download budget used in AutonaUpdater.
+                            r = requests.get(url, stream=True,
+                                             timeout=(5, 30))
                             if r.status_code == 200:
                                 with open(dlpath, 'wb') as f:
                                     r.raw.decode_content = True
@@ -466,12 +611,17 @@ class StateManager:
                         finally:
                             StateManager._download_semaphore.release()
 
+                    # daemon: a half-written overlay image is re-downloaded
+                    # on the next export, so it must never keep the process
+                    # alive at shutdown (threading._shutdown() joins every
+                    # non-daemon thread).
                     t = threading.Thread(
                         target=downloadImage,
                         args=[
                             di,
                             f"./out/{path}" + "." + di.rsplit(".", 1)[-1]
-                        ]
+                        ],
+                        daemon=True
                     )
                     t.start()
                 except Exception as e:
