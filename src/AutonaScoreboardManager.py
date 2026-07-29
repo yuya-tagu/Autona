@@ -84,6 +84,3 @@ class AutonaScoreboardManager(QDockWidget):
             logger.error(
                 f"Scoreboard Manager - Scoreboard {number} not yet created")
         return scoreboard
-
-
-AutonaScoreboardManager.instance = AutonaScoreboardManager()

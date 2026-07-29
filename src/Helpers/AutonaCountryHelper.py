@@ -223,5 +223,3 @@ class AutonaCountryHelper(QObject):
             return country_data.get("states") or {}
 
         return None
-
-AutonaCountryHelper.instance = AutonaCountryHelper()
