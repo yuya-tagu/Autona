@@ -74,4 +74,18 @@ def bootstrap_core():
     if AutonaTournamentDataProvider.instance is None:
         AutonaTournamentDataProvider.instance = AutonaTournamentDataProvider()
 
+    # AlertNotification and Updater have no dependency on each other, nor on
+    # anything constructed above: both __init__ only build the object itself
+    # (AlertNotification also ensures ./user_data/alerts_red.json exists). They
+    # are kept in this position, and in this order, because that is where the
+    # old import-time construction sat in Autona.py (imports 177 -> 178), and
+    # this stage is a behaviour-preserving move.
+    from .AutonaAlertNotification import AutonaAlertNotification
+    if AutonaAlertNotification.instance is None:
+        AutonaAlertNotification.instance = AutonaAlertNotification()
+
+    from .AutonaUpdater import AutonaUpdater
+    if AutonaUpdater.instance is None:
+        AutonaUpdater.instance = AutonaUpdater()
+
     logger.debug("bootstrap_core complete")

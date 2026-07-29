@@ -3,9 +3,10 @@
 Step 3 of the startup redesign moves every singleton construction out of
 module level and into src/bootstrap.py. This test pins down what has already
 been migrated: importing StateManager / AutonaHotkeys / AutonaGameAssetManager
-/ AutonaPlayerDB / AutonaTournamentDataProvider must not build a QApplication,
-must not create any of those singleton instances, and must not touch the
-filesystem below the current working directory (./out, ./user_data/games).
+/ AutonaPlayerDB / AutonaTournamentDataProvider / AutonaAlertNotification /
+AutonaUpdater must not build a QApplication, must not create any of those
+singleton instances, and must not touch the filesystem below the current
+working directory (./out, ./user_data/games, ./user_data/alerts_red.json).
 
 It runs in a subprocess because the checks are about a *fresh* interpreter:
 once any other test has imported these modules, the side effects (or their
@@ -61,6 +62,9 @@ game_assets = importlib.import_module(
 player_db = importlib.import_module("src.AutonaPlayerDB").AutonaPlayerDB
 tdp = importlib.import_module(
     "src.AutonaTournamentDataProvider").AutonaTournamentDataProvider
+alerts = importlib.import_module(
+    "src.AutonaAlertNotification").AutonaAlertNotification
+updater = importlib.import_module("src.AutonaUpdater").AutonaUpdater
 
 from qtpy.QtWidgets import QApplication
 
@@ -70,9 +74,14 @@ assert game_assets.instance is None, \
     "import created AutonaGameAssetManager.instance"
 assert tdp.instance is None, \
     "import created AutonaTournamentDataProvider.instance"
+assert alerts.instance is None, \
+    "import created AutonaAlertNotification.instance"
+assert updater.instance is None, "import created AutonaUpdater.instance"
 assert not os.path.exists("./out"), "import created ./out"
 assert not os.path.exists("./user_data/games"), \
     "import created ./user_data/games"
+assert not os.path.exists("./user_data/alerts_red.json"), \
+    "import created ./user_data/alerts_red.json"
 
 # Positive control: the work simply moved to the explicit entry point, so
 # the test cannot pass just because the code stopped working.
@@ -85,6 +94,13 @@ assert os.path.isdir("./out"), "Initialize() did not create ./out"
 game_assets.instance = game_assets()
 assert os.path.isdir("./user_data/games"), \
     "AutonaGameAssetManager() did not create ./user_data/games"
+
+# Same for AutonaAlertNotification: MarkNotificationRed() needs the file, so
+# the guarantee moved from module level into __init__. No QApplication is
+# needed -- it is a plain QObject.
+alerts.instance = alerts()
+assert os.path.isfile("./user_data/alerts_red.json"), \
+    "AutonaAlertNotification() did not create ./user_data/alerts_red.json"
 
 print("OK")
 '''
