@@ -4,10 +4,16 @@ Step 3 of the startup redesign moves every singleton construction out of
 module level and into src/bootstrap.py. This test pins down what has already
 been migrated: importing StateManager / AutonaHotkeys / AutonaGameAssetManager
 / AutonaPlayerDB / AutonaTournamentDataProvider / AutonaAlertNotification /
-AutonaUpdater / AutonaCountryHelper / AutonaScoreboardManager must not build a
-QApplication, must not create any of those singleton instances, and must not
-touch the filesystem below the current working directory (./out,
-./user_data/games, ./user_data/alerts_red.json).
+AutonaUpdater / AutonaCountryHelper / AutonaScoreboardManager /
+AutonaWebServer must not build a QApplication, must not create any of those
+singleton instances, and must not touch the filesystem below the current
+working directory (./out, ./user_data/games, ./user_data/alerts_red.json).
+
+AutonaWebServer is the odd one out: what it used to build at import time was
+not a singleton but a Flask app plus a SocketIO server plus ~90 route/event
+registrations, run from the WebServer class body. That moved into
+_build_web_app(), called once from WebServer.__init__. The exposed surface is
+pinned separately in tests/test_webserver_routes.py.
 
 It runs in a subprocess because the checks are about a *fresh* interpreter:
 once any other test has imported these modules, the side effects (or their
@@ -76,6 +82,11 @@ country_helper = importlib.import_module(
 # singleton while merely being imported.
 scoreboard_manager = importlib.import_module(
     "src.AutonaScoreboardManager").AutonaScoreboardManager
+# WebServer additionally pulls in AutonaWebServerActions / AutonaApiV1 /
+# AutonaDesignerService. None of those may build anything at module level
+# either -- AutonaApiV1 only declares its Blueprint, which is inert until
+# WebServer.__init__ registers it on the app.
+web_server = importlib.import_module("src.AutonaWebServer").WebServer
 
 from qtpy.QtWidgets import QApplication
 
@@ -92,6 +103,9 @@ assert country_helper.instance is None, \
     "import created AutonaCountryHelper.instance"
 assert scoreboard_manager.instance is None, \
     "import created AutonaScoreboardManager.instance"
+assert web_server.app is None, "import built WebServer.app (Flask)"
+assert web_server.socketio is None, "import built WebServer.socketio"
+assert web_server.actions is None, "import built WebServer.actions"
 assert not os.path.exists("./out"), "import created ./out"
 assert not os.path.exists("./user_data/games"), \
     "import created ./user_data/games"

@@ -53,7 +53,24 @@ class WebServerSignals(QObject):
     start_failed = Signal(str)
 
 
-class WebServer(QThread):
+def _build_web_app():
+    """Create the Flask app + SocketIO server and register every route/event.
+
+    This used to run in the WebServer class body, i.e. as an import side
+    effect: importing this module built a Flask app and registered ~90
+    route/event handlers before main() had decided anything. Step 3e of the
+    startup redesign moves it into a factory that WebServer.__init__ calls
+    once (idempotently), so import stays cheap and observable.
+
+    The handlers below are the former class-body definitions, unchanged apart
+    from dropping @staticmethod: they now close over the local `app` /
+    `socketio` instead of the class-body names of the same spelling, so their
+    bodies -- and every URL, HTTP method and event name -- are identical.
+    Three of them (ws_program_state / ws_get_characters / ws_playerdb) had to
+    stay WebServer attributes because other code reaches them by name; they
+    are registered here explicitly. tests/test_webserver_routes.py pins both
+    the resulting route/event ledger and that class-attribute contract.
+    """
     app = Flask(__name__, static_folder=os.path.curdir)
     CORS(app)
     socketio = SocketIO(
@@ -65,44 +82,13 @@ class WebServer(QThread):
         json=SocketioJson
     )
     app.config['CORS_HEADERS'] = 'Content-Type'
-    actions = None
 
-    def __init__(self, parent=None, commentaryWidget: AutonaCommentaryWidget=None) -> None:
-        super().__init__(parent)
-        WebServer.actions = WebServerActions(
-            parent=parent,
-            scoreboard=AutonaScoreboardManager.instance,
-            commentaryWidget=commentaryWidget
-        )
-
-        StateManager.signals.state_updated.connect(WebServer.on_program_state_update)
-        StateManager.signals.state_big_change.connect(WebServer.ws_program_state)
-
-        # External Control API (/api/v1/). Added as a thin Blueprint that
-        # reuses WebServer.actions; existing routes/events are untouched
-        # (ADR-001 D3 / .claude/design/external-control-api.md §9). Imported
-        # lazily here to keep singleton init order intact (agent-pitfalls #2).
-        from .AutonaApiV1 import api_v1, init_api_v1
-        if "api_v1" not in WebServer.app.blueprints:
-            WebServer.app.register_blueprint(api_v1)
-        init_api_v1(WebServer.actions)
-
-        self.signals = WebServerSignals()
-
-        # LAN exposure is opt-in (ADR-001 D5 revisit): default to loopback so
-        # a fresh install never exposes the unauthenticated control surface.
-        self.listen_lan = SettingsManager.Get("general.webserver_listen_lan", False)
-        self.host_name = "0.0.0.0" if self.listen_lan else "127.0.0.1"
-        self.port = SettingsManager.Get("general.webserver_port", 5000)
-
-    @staticmethod
     @app.before_request
     def log_request():
         # Debug level: OBS / Web UI poll dozens of endpoints per second.
         # At INFO this dominates the log file and stdout, drowning real signal.
         logger.debug(f"[FLASK] → {request.method} {request.path} from {request.remote_addr}")
 
-    @staticmethod
     @app.after_request
     def log_response(response):
         logger.debug(f"[FLASK] ← {request.method} {request.path} [{response.status_code}]")
@@ -116,124 +102,20 @@ class WebServer(QThread):
     def ws_program_state_update(message):
         WebServer.ws_emit('program_state_update', {})
 
-    # ── Delta coalescing ─────────────────────────────────────────
-    # Without throttling, every StateManager.Set outside a SaveBlock
-    # broadcasts a websocket event. Loading a set / phase group can
-    # generate dozens of small deltas in quick succession; the per-emit
-    # serialization + flush cost adds up and competes with OBS for
-    # network/CPU. Coalesce on an adaptive interval — short for small
-    # bursts (snappy UI), longer for large bursts (CPU breathing room).
-    _delta_lock = threading.Lock()
-    _delta_pending = []          # list of merged delta-flat-dicts
-    _delta_pending_revision = -1 # latest revision in batch (Design.md §3.2.3 R-Sync-6)
-    # First revision in the batch. StateManager bumps the revision on every
-    # state_updated emit, so a coalesced payload spans the contiguous range
-    # [first_revision, revision]. Clients validate continuity against that
-    # range; without it every coalesced batch looked like a revision gap and
-    # triggered a spurious full-snapshot refetch (Design.md §3.2.3 R-Sync-8).
-    _delta_pending_first_revision = -1
-    _delta_timer = None          # threading.Timer awaiting flush
-    _delta_last_flush_ts = 0.0   # time.monotonic() of the last flush
-
-    @staticmethod
-    def _adaptive_debounce_sec(pending_count: int) -> float:
-        # < 10 deltas: keep latency low for real-time feel.
-        # 10-99 deltas: medium burst (typical SetFromSet path).
-        # 100+ deltas: large burst (full reload) — let the OS catch up.
-        if pending_count < 10:
-            return 0.05
-        if pending_count < 100:
-            return 0.1
-        return 0.2
-
-    @staticmethod
-    def _flush_pending_deltas():
-        with WebServer._delta_lock:
-            if not WebServer._delta_pending:
-                WebServer._delta_timer = None
-                return
-            # Emit both `revision` (canonical) and `delta_index` (legacy
-            # alias) so old OBS templates / not-yet-rebuilt clients keep
-            # working (Design.md §3.2.3 R-Sync-6).
-            payload = {
-                'revision': WebServer._delta_pending_revision,
-                'delta_index': WebServer._delta_pending_revision,
-                'first_revision': WebServer._delta_pending_first_revision,
-                'delta': WebServer._delta_pending,
-            }
-            WebServer._delta_pending = []
-            WebServer._delta_pending_revision = -1
-            WebServer._delta_pending_first_revision = -1
-            WebServer._delta_timer = None
-            WebServer._delta_last_flush_ts = time.monotonic()
-        try:
-            WebServer.ws_emit('program_state_update', payload)
-        except TypeError:
-            logger.warning("Unserializable program state update")
-            WebServer.ws_program_state()
-        except Exception:
-            logger.error(traceback.format_exc())
-
-    def on_program_state_update(changes):
-        if not changes:
-            return
-
-        delta = changes.get('delta') or []
-        # Prefer `revision` (Design.md §3.2.3) and fall back to legacy
-        # `delta_index` so this stays compatible with older payloads.
-        rev = changes.get('revision', changes.get('delta_index', -1))
-
-        with WebServer._delta_lock:
-            was_empty = not WebServer._delta_pending
-            WebServer._delta_pending.extend(delta)
-            if was_empty:
-                WebServer._delta_pending_first_revision = rev
-            if rev > WebServer._delta_pending_revision:
-                WebServer._delta_pending_revision = rev
-
-            if WebServer._delta_timer is None:
-                # Leading-edge flush: a delta arriving after a quiet period
-                # (>= 50ms since the last flush) goes out immediately, so a
-                # single operation (score +1 etc.) is not held back by the
-                # debounce. Bursts keep the adaptive trailing debounce and
-                # the large-burst path (100+ -> 200ms, R-Sync-10) unchanged.
-                quiet = (time.monotonic()
-                         - WebServer._delta_last_flush_ts) >= 0.05
-                if was_empty and quiet:
-                    interval = 0.0
-                else:
-                    interval = WebServer._adaptive_debounce_sec(
-                        len(WebServer._delta_pending))
-                WebServer._delta_timer = threading.Timer(
-                    interval, WebServer._flush_pending_deltas)
-                WebServer._delta_timer.daemon = True
-                WebServer._delta_timer.start()
-
     @socketio.on('connect')
     def ws_connect(message):
         WebServer.ws_program_state(message)
 
-    @socketio.on('program_state')
-    def ws_program_state(message=None):
-        WebServer.ws_emit('program_state', WebServer.actions.program_state())
+    # `ws_program_state` cannot become a closure-local: it is also connected to
+    # StateManager.signals.state_big_change and called as
+    # WebServer.ws_program_state() from _flush_pending_deltas / ws_connect.
+    # It stays on the class and is registered for the same event here.
+    # Same for ws_get_characters / ws_playerdb further below.
+    socketio.on('program_state')(WebServer.ws_program_state)
 
     @socketio.on_error_default
     def ws_on_error(e):
         logger.error(traceback.format_exc())
-
-    # Don't override the QObject emit() method
-    def ws_emit(event, *args, **kwargs):
-        # flask_socketio doesn't know how to broadcast things outside the context
-        # of a flask request. But since we're potentially broadcasting state changes
-        # that don't originate from a request, we can handle both cases transparently
-        # here.
-        if flask.has_request_context():
-            flask_socketio.emit(event, *args, **kwargs)
-        else:
-            # socketio.emit() doesn't know about the json parameter.
-            if 'json' in kwargs:
-                del kwargs['json']
-            WebServer.socketio.emit(event, *args, **kwargs)
 
     @app.route('/score', methods=['POST'])
     def post_score():
@@ -436,9 +318,9 @@ class WebServer(QThread):
     def get_characters():
         return WebServer.actions.get_characters()
 
-    @socketio.on('characters')
-    def ws_get_characters(message):
-        WebServer.ws_emit('characters', WebServer.actions.get_characters(), json=True)
+    # Stays on the class: Autona.py connects Window.signals.GameChanged to
+    # self.webserver.ws_get_characters, i.e. by attribute on the instance.
+    socketio.on('characters')(WebServer.ws_get_characters)
 
     # Get variants
     @app.route('/variants')
@@ -653,10 +535,9 @@ class WebServer(QThread):
     def playerdb():
         return WebServer.actions.get_playerdb()
 
-    @socketio.on('playerdb')
-    def ws_playerdb(message):
-        logger.debug("Emitting playerdb info.")
-        WebServer.ws_emit('playerdb', WebServer.actions.get_playerdb())
+    # Stays on the class: Autona.py connects AutonaPlayerDB.signals.db_updated
+    # to self.webserver.ws_playerdb, i.e. by attribute on the instance.
+    socketio.on('playerdb')(WebServer.ws_playerdb)
 
 
     # Update bracket
@@ -733,12 +614,6 @@ class WebServer(QThread):
     # These endpoints are intentionally local-only and require the
     # short-lived token issued to AutonaDesignerWindow. The external Web
     # Scoreboard therefore cannot write files on the host machine.
-    @staticmethod
-    def _authorize_designer_request():
-        token = request.headers.get("X-Autona-Designer-Token")
-        if not AutonaDesignerService.is_authorized(token, request.remote_addr):
-            abort(403, "Desktop Designer authorization required")
-
     @app.get('/api/designer/projects')
     def designer_list_projects():
         WebServer._authorize_designer_request()
@@ -813,6 +688,185 @@ class WebServer(QThread):
         except Exception as e:
             logger.error(f"File not found: {e}")
             return "File not found", 404
+
+    return app, socketio
+
+
+class WebServer(QThread):
+    # Built by _build_web_app() on the first instantiation (Step 3e). Class
+    # level access -- WebServer.app / WebServer.socketio -- keeps working for
+    # every existing caller once __init__ has run.
+    app = None
+    socketio = None
+    actions = None
+
+    def __init__(self, parent=None, commentaryWidget: AutonaCommentaryWidget=None) -> None:
+        super().__init__(parent)
+        # Idempotent, same shape as the existing singleton guards: the Flask
+        # app and its route/event handlers are registered exactly once, no
+        # matter how many WebServer instances get built. Must run before the
+        # blueprint registration below, which needs WebServer.app.
+        if WebServer.app is None:
+            WebServer.app, WebServer.socketio = _build_web_app()
+
+        WebServer.actions = WebServerActions(
+            parent=parent,
+            scoreboard=AutonaScoreboardManager.instance,
+            commentaryWidget=commentaryWidget
+        )
+
+        StateManager.signals.state_updated.connect(WebServer.on_program_state_update)
+        StateManager.signals.state_big_change.connect(WebServer.ws_program_state)
+
+        # External Control API (/api/v1/). Added as a thin Blueprint that
+        # reuses WebServer.actions; existing routes/events are untouched
+        # (ADR-001 D3 / .claude/design/external-control-api.md §9). Imported
+        # lazily here to keep singleton init order intact (agent-pitfalls #2).
+        from .AutonaApiV1 import api_v1, init_api_v1
+        if "api_v1" not in WebServer.app.blueprints:
+            WebServer.app.register_blueprint(api_v1)
+        init_api_v1(WebServer.actions)
+
+        self.signals = WebServerSignals()
+
+        # LAN exposure is opt-in (ADR-001 D5 revisit): default to loopback so
+        # a fresh install never exposes the unauthenticated control surface.
+        self.listen_lan = SettingsManager.Get("general.webserver_listen_lan", False)
+        self.host_name = "0.0.0.0" if self.listen_lan else "127.0.0.1"
+        self.port = SettingsManager.Get("general.webserver_port", 5000)
+
+    # ── Delta coalescing ─────────────────────────────────────────
+    # Without throttling, every StateManager.Set outside a SaveBlock
+    # broadcasts a websocket event. Loading a set / phase group can
+    # generate dozens of small deltas in quick succession; the per-emit
+    # serialization + flush cost adds up and competes with OBS for
+    # network/CPU. Coalesce on an adaptive interval — short for small
+    # bursts (snappy UI), longer for large bursts (CPU breathing room).
+    _delta_lock = threading.Lock()
+    _delta_pending = []          # list of merged delta-flat-dicts
+    _delta_pending_revision = -1 # latest revision in batch (Design.md §3.2.3 R-Sync-6)
+    # First revision in the batch. StateManager bumps the revision on every
+    # state_updated emit, so a coalesced payload spans the contiguous range
+    # [first_revision, revision]. Clients validate continuity against that
+    # range; without it every coalesced batch looked like a revision gap and
+    # triggered a spurious full-snapshot refetch (Design.md §3.2.3 R-Sync-8).
+    _delta_pending_first_revision = -1
+    _delta_timer = None          # threading.Timer awaiting flush
+    _delta_last_flush_ts = 0.0   # time.monotonic() of the last flush
+
+    @staticmethod
+    def _adaptive_debounce_sec(pending_count: int) -> float:
+        # < 10 deltas: keep latency low for real-time feel.
+        # 10-99 deltas: medium burst (typical SetFromSet path).
+        # 100+ deltas: large burst (full reload) — let the OS catch up.
+        if pending_count < 10:
+            return 0.05
+        if pending_count < 100:
+            return 0.1
+        return 0.2
+
+    @staticmethod
+    def _flush_pending_deltas():
+        with WebServer._delta_lock:
+            if not WebServer._delta_pending:
+                WebServer._delta_timer = None
+                return
+            # Emit both `revision` (canonical) and `delta_index` (legacy
+            # alias) so old OBS templates / not-yet-rebuilt clients keep
+            # working (Design.md §3.2.3 R-Sync-6).
+            payload = {
+                'revision': WebServer._delta_pending_revision,
+                'delta_index': WebServer._delta_pending_revision,
+                'first_revision': WebServer._delta_pending_first_revision,
+                'delta': WebServer._delta_pending,
+            }
+            WebServer._delta_pending = []
+            WebServer._delta_pending_revision = -1
+            WebServer._delta_pending_first_revision = -1
+            WebServer._delta_timer = None
+            WebServer._delta_last_flush_ts = time.monotonic()
+        try:
+            WebServer.ws_emit('program_state_update', payload)
+        except TypeError:
+            logger.warning("Unserializable program state update")
+            WebServer.ws_program_state()
+        except Exception:
+            logger.error(traceback.format_exc())
+
+    def on_program_state_update(changes):
+        if not changes:
+            return
+
+        delta = changes.get('delta') or []
+        # Prefer `revision` (Design.md §3.2.3) and fall back to legacy
+        # `delta_index` so this stays compatible with older payloads.
+        rev = changes.get('revision', changes.get('delta_index', -1))
+
+        with WebServer._delta_lock:
+            was_empty = not WebServer._delta_pending
+            WebServer._delta_pending.extend(delta)
+            if was_empty:
+                WebServer._delta_pending_first_revision = rev
+            if rev > WebServer._delta_pending_revision:
+                WebServer._delta_pending_revision = rev
+
+            if WebServer._delta_timer is None:
+                # Leading-edge flush: a delta arriving after a quiet period
+                # (>= 50ms since the last flush) goes out immediately, so a
+                # single operation (score +1 etc.) is not held back by the
+                # debounce. Bursts keep the adaptive trailing debounce and
+                # the large-burst path (100+ -> 200ms, R-Sync-10) unchanged.
+                quiet = (time.monotonic()
+                         - WebServer._delta_last_flush_ts) >= 0.05
+                if was_empty and quiet:
+                    interval = 0.0
+                else:
+                    interval = WebServer._adaptive_debounce_sec(
+                        len(WebServer._delta_pending))
+                WebServer._delta_timer = threading.Timer(
+                    interval, WebServer._flush_pending_deltas)
+                WebServer._delta_timer.daemon = True
+                WebServer._delta_timer.start()
+
+    # ── SocketIO handlers that are also referenced by name ───────────
+    # These three are registered on the socketio server by _build_web_app(),
+    # but they cannot live there as closures: each is additionally reached
+    # through a name -- WebServer.ws_program_state() internally, and
+    # self.webserver.ws_get_characters / .ws_playerdb from Autona.py, which
+    # connects them to Qt signals (GameChanged / db_updated). Keeping them as
+    # plain class-body functions preserves that access, including the bound
+    # call with the instance standing in for `message`.
+    def ws_program_state(message=None):
+        WebServer.ws_emit('program_state', WebServer.actions.program_state())
+
+    def ws_get_characters(message):
+        WebServer.ws_emit('characters', WebServer.actions.get_characters(), json=True)
+
+    def ws_playerdb(message):
+        logger.debug("Emitting playerdb info.")
+        WebServer.ws_emit('playerdb', WebServer.actions.get_playerdb())
+
+    # Don't override the QObject emit() method
+    def ws_emit(event, *args, **kwargs):
+        # flask_socketio doesn't know how to broadcast things outside the context
+        # of a flask request. But since we're potentially broadcasting state changes
+        # that don't originate from a request, we can handle both cases transparently
+        # here.
+        if flask.has_request_context():
+            flask_socketio.emit(event, *args, **kwargs)
+        else:
+            # socketio.emit() doesn't know about the json parameter.
+            if 'json' in kwargs:
+                del kwargs['json']
+            WebServer.socketio.emit(event, *args, **kwargs)
+
+    # Called by the /api/designer/* routes in _build_web_app(); kept on the
+    # class so the guard has one obvious home next to the rest of the state.
+    @staticmethod
+    def _authorize_designer_request():
+        token = request.headers.get("X-Autona-Designer-Token")
+        if not AutonaDesignerService.is_authorized(token, request.remote_addr):
+            abort(403, "Desktop Designer authorization required")
 
     def run(self):
         try:
