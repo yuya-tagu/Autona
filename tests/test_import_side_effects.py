@@ -1,13 +1,17 @@
 """Import side-effect regression guard for the migrated singletons.
 
-Step 3 of the startup redesign moves every singleton construction out of
-module level and into src/bootstrap.py. This test pins down what has already
-been migrated: importing StateManager / AutonaHotkeys / AutonaGameAssetManager
-/ AutonaPlayerDB / AutonaTournamentDataProvider / AutonaAlertNotification /
-AutonaUpdater / AutonaCountryHelper / AutonaScoreboardManager /
+Step 3 of the startup redesign moves every singleton construction -- and
+every static data load -- out of module level and into src/bootstrap.py.
+This test pins down what has already been migrated: importing
+SettingsManager / StateManager / AutonaHotkeys / AutonaGameAssetManager /
+AutonaPlayerDB / AutonaLocaleHelper / AutonaBadWordFilter /
+StartGGDataProvider / AutonaTournamentDataProvider / AutonaAlertNotification
+/ AutonaUpdater / AutonaCountryHelper / AutonaScoreboardManager /
 AutonaWebServer must not build a QApplication, must not create any of those
-singleton instances, and must not touch the filesystem below the current
-working directory (./out, ./user_data/games, ./user_data/alerts_red.json).
+singleton instances, must not load any data file, and must not touch the
+filesystem below the current working directory (./out, ./user_data/games,
+./user_data/alerts_red.json, ./user_data/settings.json,
+./user_data/badword_*.txt).
 
 AutonaWebServer is the odd one out: what it used to build at import time was
 not a singleton but a Flask app plus a SocketIO server plus ~90 route/event
@@ -24,15 +28,15 @@ __path__ pointing at src/, which makes `src.StateManager` importable *without*
 executing src/__init__.py (that would pull in Autona.py and boot the whole
 app; agent-pitfalls #1).
 
-The temporary working directory is seeded with a few data files because
-AutonaResolve() resolves against Path.cwd() captured at import time
-(src/Helpers/AutonaDirHelper.py): AutonaLocaleHelper raises at import when it
-cannot read src/i18n/mapping.json or ./assets/data_countries.json,
-StartGGDataProvider reads its GraphQL query files at import, and
-AutonaBadWordFilter (reached through the scoreboard widget tree) reads
-./assets/ngword/. Seeding those makes the import *possible* and keeps the
-subprocess output free of swallowed FileNotFoundError tracebacks; it does not
-hide any write, since every path asserted below is deliberately left absent.
+The temporary working directory is seeded with the data files those modules
+read, because they are read cwd-relatively: AutonaResolve() resolves against
+Path.cwd() captured at import time (src/Helpers/AutonaDirHelper.py), and the
+rest use plain relative paths. Nothing may read them at import time any more
+-- the seeds exist so the *positive controls* at the end (the explicit
+Initialize() calls) exercise the real loaders rather than their error paths.
+Seeding cannot hide a write: every path asserted below is deliberately left
+absent, and ./user_data is not created at all, so an import that writes into
+it fails the check instead of quietly succeeding.
 """
 import os
 import shutil
@@ -60,6 +64,11 @@ pkg = types.ModuleType("src")
 pkg.__path__ = [SRC_ROOT]
 sys.modules["src"] = pkg
 
+# SettingsManager comes first, mirroring bootstrap_core(): StateManager
+# imports it, so it is in the chain either way, but it is listed explicitly
+# because its module tail used to create ./user_data/settings.json.
+settings_manager = importlib.import_module(
+    "src.SettingsManager").SettingsManager
 state_manager = importlib.import_module("src.StateManager").StateManager
 hotkeys = importlib.import_module("src.AutonaHotkeys").AutonaHotkeys
 game_assets = importlib.import_module(
@@ -69,6 +78,16 @@ game_assets = importlib.import_module(
 # AutonaGameAssetManager.instance.signals -- an import-time dependency on
 # another module's singleton. That wiring now lives in bootstrap_core().
 player_db = importlib.import_module("src.AutonaPlayerDB").AutonaPlayerDB
+# The three static-data modules. Their tails used to read the shipped
+# language/ngword/GraphQL files -- and, for the bad-word lists, to *create*
+# ./user_data/badword_{white,black}list.txt -- as a side effect of being
+# pulled into the chain by something else.
+locale_helper = importlib.import_module(
+    "src.Helpers.AutonaLocaleHelper").AutonaLocaleHelper
+bad_words = importlib.import_module(
+    "src.Helpers.AutonaBadWordFilter").AutonaBadWordFilter
+startgg = importlib.import_module(
+    "src.TournamentDataProvider.StartGGDataProvider").StartGGDataProvider
 tdp = importlib.import_module(
     "src.AutonaTournamentDataProvider").AutonaTournamentDataProvider
 alerts = importlib.import_module(
@@ -106,14 +125,58 @@ assert scoreboard_manager.instance is None, \
 assert web_server.app is None, "import built WebServer.app (Flask)"
 assert web_server.socketio is None, "import built WebServer.socketio"
 assert web_server.actions is None, "import built WebServer.actions"
+
+# Static data: nothing loaded, nothing written.
+assert settings_manager.settings == {}, "import loaded settings.json"
+assert locale_helper.languages == [], "import loaded the language table"
+assert locale_helper.remapping == {}, "import loaded the locale remapping"
+assert locale_helper.countryToLanguage == {}, \
+    "import loaded data_countries.json"
+assert locale_helper.countryToContinent == {}, \
+    "import loaded data_countries.json"
+assert not bad_words.patterns, "import built the bad-word patterns"
+assert not bad_words.badWordTries, "import built the bad-word tries"
+assert bad_words.whiteList == [], "import loaded the bad-word whitelist"
+assert bad_words.blackList == [], "import loaded the bad-word blacklist"
+# Every GraphQL query attribute, found by name so a newly added query is
+# covered without touching this test.
+queryAttrs = [n for n in vars(startgg) if n.endswith("Query")]
+assert len(queryAttrs) == 17, \
+    f"expected 17 StartGG query attributes, found {len(queryAttrs)}"
+for name in queryAttrs:
+    assert getattr(startgg, name) is None, \
+        f"import loaded StartGGDataProvider.{name}"
+
 assert not os.path.exists("./out"), "import created ./out"
-assert not os.path.exists("./user_data/games"), \
-    "import created ./user_data/games"
-assert not os.path.exists("./user_data/alerts_red.json"), \
-    "import created ./user_data/alerts_red.json"
+assert not os.path.exists("./user_data"), "import created ./user_data"
 
 # Positive control: the work simply moved to the explicit entry point, so
 # the test cannot pass just because the code stopped working.
+# SettingsManager first, exactly as in bootstrap_core(); it also creates
+# ./user_data, which the loads below write into.
+settings_manager.Initialize()
+assert os.path.isfile("./user_data/settings.json"), \
+    "SettingsManager.Initialize() did not create ./user_data/settings.json"
+
+locale_helper.Initialize()
+assert locale_helper.languages, \
+    "AutonaLocaleHelper.Initialize() did not load the language table"
+assert locale_helper.countryToLanguage, \
+    "AutonaLocaleHelper.Initialize() did not load data_countries.json"
+
+bad_words.Initialize()
+assert bad_words.patterns, \
+    "AutonaBadWordFilter.Initialize() did not build the patterns"
+assert os.path.isfile("./user_data/badword_whitelist.txt"), \
+    "AutonaBadWordFilter.Initialize() did not create badword_whitelist.txt"
+assert os.path.isfile("./user_data/badword_blacklist.txt"), \
+    "AutonaBadWordFilter.Initialize() did not create badword_blacklist.txt"
+
+startgg.Initialize()
+for name in queryAttrs:
+    assert getattr(startgg, name), \
+        f"StartGGDataProvider.Initialize() did not load {name}"
+
 state_manager.Initialize()
 assert os.path.isdir("./out"), "Initialize() did not create ./out"
 
@@ -140,28 +203,22 @@ assert os.path.isfile("./user_data/alerts_red.json"), \
 print("OK")
 '''
 
-# Files the import chain reads through AutonaResolve() (cwd-relative). See the
-# module docstring; without these the imports raise before any assertion runs.
+# Read-only program data the Initialize() calls consume, resolved
+# cwd-relatively. Seeded so the positive controls run the real loaders.
+# ./user_data is deliberately NOT created: its absence is what makes the
+# "import created ./user_data" assertion meaningful.
 _SEED_FILES = [
     "src/i18n/mapping.json",
     "assets/data_countries.json",
 ]
 
-# Same, for whole directories read at import time.
+# Same, for whole directories.
 _SEED_DIRS = [
     "assets/ngword",
 ]
 
 
 def _seed_cwd(tmp_path):
-    # Known remaining import-time side effects, deliberately not asserted
-    # against here, all of which need ./user_data to exist:
-    # - SettingsManager reads/writes ./user_data/settings.json (StateManager
-    #   imports it),
-    # - AutonaBadWordFilter creates ./user_data/badword_{white,black}list.txt
-    #   (reached through the scoreboard widget tree).
-    (tmp_path / "user_data").mkdir()
-
     for rel in _SEED_FILES:
         dest = tmp_path / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -170,8 +227,8 @@ def _seed_cwd(tmp_path):
     for rel in _SEED_DIRS:
         shutil.copytree(PROJECT_ROOT / rel, tmp_path / rel)
 
-    # StartGGDataProvider assigns its GraphQL queries to class attributes at
-    # import time, reading them from src/TournamentDataProvider/.
+    # StartGGDataProvider.Initialize() reads its GraphQL queries from
+    # src/TournamentDataProvider/, resolved against the cwd.
     query_dir = tmp_path / "src" / "TournamentDataProvider"
     query_dir.mkdir(parents=True, exist_ok=True)
     for query_file in (SRC_ROOT / "TournamentDataProvider").glob("StartGG*Query.txt"):

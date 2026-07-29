@@ -1,9 +1,12 @@
-"""Composition root: the single place where core singletons are created.
+"""Composition root: the single place where core state is brought up.
 
 This file is the authority on singleton construction order. Modules must
 not create their own instance at import time anymore (Design: startup
 architecture redesign, Stage 2); every migrated singleton is constructed
-here, in an explicit, readable order.
+here, in an explicit, readable order. The same holds for the static data
+that used to be read from module tails (settings, language tables, bad-word
+lists, GraphQL queries): each such module exposes an idempotent
+Initialize(), called from here.
 
 Rules for editing this file:
 
@@ -25,7 +28,7 @@ _core_bootstrapped = False
 
 
 def bootstrap_core():
-    """Create the core singletons that everything else depends on.
+    """Load the core data and create the singletons everything depends on.
 
     Safe to call more than once; only the first call does work.
     """
@@ -34,7 +37,32 @@ def bootstrap_core():
         return
     _core_bootstrapped = True
 
-    # StateManager first: it owns ./out and loads the persisted program
+    # ORDER CONSTRAINT: SettingsManager before everything else. It is the
+    # only step here with no dependency of its own, and almost every step
+    # below reads through SettingsManager.Get() -- StateManager imports it,
+    # AutonaHotkeys.LoadUserHotkeys() reads the user hotkey bindings from
+    # it, and the widgets built later read ports, languages and layout
+    # options. Loading it late would make every one of those silently fall
+    # back to its default. It also creates ./user_data, which later steps
+    # write into.
+    from .SettingsManager import SettingsManager
+    SettingsManager.Initialize()
+
+    # Static asset data with no dependency on anything constructed here:
+    # LocaleHelper reads the shipped language tables (src/i18n/mapping.json
+    # and assets/data_countries.json), BadWordFilter the ngword lists. Both
+    # only fill class attributes. They are placed this early because the
+    # data is read from all over the widget tree at runtime and there is no
+    # reason to make later steps care about the ordering. (The per-run
+    # locale itself -- LoadLocale/LoadRoundNames -- still runs from
+    # Window.__init__: it needs a QGuiApplication for the QTranslator.)
+    from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+    AutonaLocaleHelper.Initialize()
+
+    from .Helpers.AutonaBadWordFilter import AutonaBadWordFilter
+    AutonaBadWordFilter.Initialize()
+
+    # StateManager next: it owns ./out and loads the persisted program
     # state, and every widget built later reads through it.
     from .StateManager import StateManager
     StateManager.Initialize()
@@ -65,6 +93,13 @@ def bootstrap_core():
     from .AutonaPlayerDB import AutonaPlayerDB
     AutonaGameAssetManager.instance.signals.onLoad.connect(
         AutonaPlayerDB.SetupModel)
+
+    # ORDER CONSTRAINT: the GraphQL query texts must be on the class before
+    # the first Start.gg request. Loading them here, right above the
+    # provider that owns them, keeps the "read files" step next to the only
+    # consumer instead of hidden at the bottom of a 2200-line module.
+    from .TournamentDataProvider.StartGGDataProvider import StartGGDataProvider
+    StartGGDataProvider.Initialize()
 
     # ORDER CONSTRAINT: AutonaTournamentDataProvider.__init__ connects to
     # AutonaGameAssetManager.instance.signals, so the GameAssetManager above
