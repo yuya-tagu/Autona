@@ -32,6 +32,8 @@ Overlay:
     settle during the first paint/layout passes. Call
     `.finish_when_ready()` to let it dismiss itself as soon as that first
     pass is done, or `.finish()` to drop it immediately.
+    `.call_when_finished(fn)` queues work for the moment the overlay is
+    gone (used to start the web server off the startup path).
 """
 
 from __future__ import annotations
@@ -536,6 +538,7 @@ class LoadingOverlay(QWidget):
         self._finished = False
         self._painted_at: float | None = None
         self._min_ms = 0
+        self._finished_callbacks: list = []
 
     # ── Public API ─────────────────────────────────────────
 
@@ -561,6 +564,25 @@ class LoadingOverlay(QWidget):
         self._min_ms = min_ms
         QTimer.singleShot(0, self._finish_when_idle)
         QTimer.singleShot(max_ms, self.finish)
+
+    def call_when_finished(self, callback) -> None:
+        """Run `callback` once the overlay has been dismissed.
+
+        Registered callbacks are never invoked from inside finish() itself:
+        each one is dispatched through a zero-delay timer, so it runs from
+        the event loop with the overlay already hidden and deleted, and with
+        the window underneath repainted. That keeps a slow or modal callback
+        (see Window._StartWebServer) out of the finish path and off the
+        re-entrant-dispatch rule (agent-pitfalls #9).
+
+        Registering after the overlay has already finished is allowed — the
+        callback is queued straight away, so callers never have to reason
+        about the race with the `_finished` guard.
+        """
+        if self._finished:
+            QTimer.singleShot(0, callback)
+            return
+        self._finished_callbacks.append(callback)
 
     def _finish_when_idle(self) -> None:
         if self._finished:
@@ -589,6 +611,13 @@ class LoadingOverlay(QWidget):
             p.removeEventFilter(self)
         self.hide()
         self.deleteLater()
+        # Hand the callbacks to the event loop rather than calling them here:
+        # this method runs from a timer while the widget is mid-teardown, and
+        # the deferred delete + the parent's repaint are still queued behind
+        # us. See call_when_finished().
+        callbacks, self._finished_callbacks = self._finished_callbacks, []
+        for callback in callbacks:
+            QTimer.singleShot(0, callback)
 
     # ── Qt overrides ───────────────────────────────────────
 
