@@ -35,7 +35,6 @@ from .AutonaLayoutPreview import (
     LayoutDesignDisplayName)
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
-from .AutonaHotkeys import AutonaHotkeys
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Workers import Worker
 from . import AutonaTop8Model as top8
@@ -99,23 +98,11 @@ class AutonaTop8Widget(QDockWidget):
         self._loadQueuedOnPhases = False
         self._designs = DiscoverLayoutDesigns(LAYOUT_PREFIX)
 
-        with StateManager.SaveBlock():
-            # The legacy bracket feature is gone; LoadState() restores its
-            # keys from out/program_state.json, so purge them once here.
-            StateManager.Unset("bracket")
-            state = StateManager.Get("top8")
-            if not isinstance(state, dict) or not state.get("matches"):
-                StateManager.Set("top8", top8.DefaultState())
-            else:
-                # Normalise a restored state: slots are always derived.
-                StateManager.Set(
-                    "top8.matches",
-                    top8.Recompute(state.get("matches") or {}))
-                players = state.get("players") or {}
-                for slot in top8.PLAYER_SLOTS:
-                    if slot not in players:
-                        StateManager.Set(
-                            f"top8.players.{slot}", top8.DefaultPlayer())
+        # NOTE: the top8.* seed / normalisation that used to run here moved
+        # to Window._SeedPanelState() (startup Step 4b-2). This panel is
+        # built on first reveal now, and the OBS overlay reads top8.* from
+        # launch, so the state must be normalised whether or not the panel
+        # is ever opened. _loadFromState() below reads the seeded state.
 
         # Two panes, each with its own scroll: editing (Start.gg / players /
         # scores / OBS) on the left, the live preview on the right.
@@ -194,8 +181,9 @@ class AutonaTop8Widget(QDockWidget):
         signals.tournament_phasegroup_updated.connect(self.UpdatePhaseGroup)
         signals.tournament_changed.connect(self._onTournamentChanged)
 
-        AutonaHotkeys.signals.refresh_phase_group.connect(
-            self.RefreshPhaseGroup)
+        # NOTE: the Ctrl+Shift+P (refresh_phase_group) connection lives in
+        # Window now — it has to work before this panel is built, and a
+        # connection here as well would fire RefreshPhaseGroup twice.
 
         AutonaTop8Widget.instance = self
 

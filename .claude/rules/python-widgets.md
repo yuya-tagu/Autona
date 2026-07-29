@@ -25,10 +25,20 @@ Qt binding は **PySide6（qtpy 経由、LGPL）** 固定。PyQt6 (GPL) はソ�
 
 1. import を追加
 2. インスタンス生成・`setObjectName` / `setWindowTitle` 設定
-3. `self.dockWidgets` リストに追加（後処理ループでタイトルバー非表示等を一括適用）
-4. `self._navPanels` に `(panel, 'icon.svg')` を表示順で追加
+3. `self.dockWidgets` リストに追加（`_PreparePanel` でタイトルバー非表示等を一括適用）
+4. `self._navSections` の該当カテゴリに
+   `(panel, 'icon.svg', ナビラベル, None)` を表示順で追加
    （`assets/icons/` のアイコン。`stack.addWidget` とナビ項目生成に使われる）
 5. `Window.STATE_VERSION` をインクリメント
+
+WebEngine プレビュー等で重いパネルは **遅延構築**にする（起動 Step 4b-2）:
+2〜3 を行わず、`_Create*Panel()` ファクトリを書いて
+`(self._CreateXxxPanel, 'icon.svg', ナビラベル, 'キー')` を `_navSections` に
+追加する。stack にはプレースホルダが入り、初回表示時に `_EnsurePanelAt` が
+差し替える（nav index == stack index は維持）。パネル未構築でも動く必要がある
+処理（state のシード・グローバルシグナル接続）は `__init__` に置かず、
+`Window._SeedPanelState()` や Window 側の接続に寄せる。外部から構築を強制
+したい場合は `EnsureXxxPanel()` アクセサを足す。
 
 ## STATE_VERSION
 
