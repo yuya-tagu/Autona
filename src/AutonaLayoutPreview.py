@@ -34,6 +34,35 @@ DEFAULT_ENTRY = "index.html"
 logger = logging.getLogger(__name__)
 
 
+# ── Web server readiness gate (startup Step 4c) ──────────────────────────
+# The web server is started from the event loop after the main window is
+# shown, so the panel restored as the startup page issues its first load()
+# while nothing is listening on the port yet. QWebEngineView does not retry
+# a refused connection, which would leave that panel permanently blank, so
+# early load() calls are parked here and replayed once the server is up.
+_webServerReady = False
+_pendingPreviews = []
+
+
+def MarkWebServerReady():
+    """Announce that the web server thread has been started.
+
+    Called once from Window._StartWebServer(). Idempotent.
+    """
+    global _webServerReady
+    if _webServerReady:
+        return
+    _webServerReady = True
+    pending = list(_pendingPreviews)
+    _pendingPreviews.clear()
+    for preview in pending:
+        try:
+            preview._LoadNow()
+        except RuntimeError:
+            # Underlying C++ widget already deleted — nothing to load.
+            logger.debug("Skipped deferred preview load: widget is gone")
+
+
 def ObsUrl(layout_name, entry=DEFAULT_ENTRY):
     """Browser-source URL for a layout, for panels that show it before
     (or without) instantiating a preview."""
@@ -138,6 +167,14 @@ class AutonaLayoutPreview(QFrame):
     # Below MIN_ZOOM the remainder is a CSS scale — see class docstring.
     MIN_FIT = 0.125
 
+    # Bounded retry for a load that failed because the server was not
+    # listening yet. MarkWebServerReady() fires right after the server thread
+    # is spawned, so the first request can still lose a race of a few
+    # milliseconds against the bind; without this the panel would stay blank
+    # until the user switched tabs.
+    MAX_LOAD_RETRIES = 2
+    LOAD_RETRY_MS = 400
+
     def __init__(self, layout_name=None, parent=None, entry=DEFAULT_ENTRY):
         # layout_name may be deferred to load() for panels that switch
         # between designs on one preview (Board tab). `entry` is the html
@@ -173,7 +210,11 @@ class AutonaLayoutPreview(QFrame):
         s.setAttribute(
             QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
         self.view.page().setBackgroundColor(Qt.GlobalColor.transparent)
-        self.view.loadFinished.connect(lambda _ok: self._applyScale())
+        # Retry state for the short window between WebServer.start() (the
+        # QThread is spawned) and the socket actually being bound.
+        self._loadRetries = 0
+        self._pendingUrl = None
+        self.view.loadFinished.connect(self._OnLoadFinished)
 
         # Transparent input shield above the view: swallows wheel/click
         # events so the page can never be scrolled or interacted with from
@@ -311,10 +352,40 @@ class AutonaLayoutPreview(QFrame):
             self.layout_name = layout_name
         if entry is not None:
             self.entry = entry
+        if not _webServerReady:
+            # Nothing can serve the URL yet — remember this preview and let
+            # MarkWebServerReady() replay it with whatever target is current
+            # by then (see the module-level gate).
+            if self not in _pendingPreviews:
+                _pendingPreviews.append(self)
+            return
+        self._LoadNow()
+
+    def _LoadNow(self):
         port = SettingsManager.Get("general.webserver_port", 5000)
         url = (f"http://127.0.0.1:{port}/{LAYOUT_DIR}/"
                f"{self.layout_name}/{self.entry}")
+        self._loadRetries = 0
+        self._pendingUrl = url
         self.view.setUrl(QUrl(url))
+
+    def _OnLoadFinished(self, ok):
+        if not ok and self._pendingUrl and self._loadRetries < self.MAX_LOAD_RETRIES:
+            self._loadRetries += 1
+            logger.debug(
+                "Preview load failed (%s), retry %d",
+                self._pendingUrl, self._loadRetries)
+            # `self` as the timer context: the callback is dropped if the
+            # panel is destroyed while the retry is pending.
+            QTimer.singleShot(
+                self.LOAD_RETRY_MS * self._loadRetries, self, self._RetryLoad)
+            return
+        self._pendingUrl = None
+        self._applyScale()
+
+    def _RetryLoad(self):
+        if self._pendingUrl:
+            self.view.setUrl(QUrl(self._pendingUrl))
 
     def obs_url(self):
         return ObsUrl(self.layout_name, self.entry)

@@ -189,6 +189,7 @@ from .AutonaStatsPreviewWidget import AutonaStatsPreviewWidget
 from .AutonaAnalysisWidget import AutonaAnalysisWidget
 from .AutonaPlayerBrowserWidget import AutonaPlayerBrowserWidget
 from src.AutonaWebServer import WebServer, check_webserver_port
+from .AutonaLayoutPreview import MarkWebServerReady
 # autopep8: on
 
 
@@ -413,34 +414,18 @@ class Window(QMainWindow):
             QApplication.translate("app", "Stats Display Settings"))
         self.dockWidgets.append(statsPreview)
 
-        # One-time migration prompt: the bind default changed from 0.0.0.0 to
-        # 127.0.0.1, which would silently break LAN OBS setups
-        # (docs/operations/runtime-operations.md). Ask once, persist the answer.
-        if SettingsManager.Get("general.webserver_listen_lan", None) is None:
-            allow = QMessageBox.question(
-                self,
-                QApplication.translate("portguard", "LAN access"),
-                QApplication.translate(
-                    "portguard",
-                    "Autona's web server now listens only on this PC (127.0.0.1) "
-                    "by default for security.\n\n"
-                    "If you connect from other devices on your LAN (OBS on another PC, "
-                    "smartphone remote control), enable LAN access now.\n\n"
-                    "You can change this later under Settings → General."),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            ) == QMessageBox.StandardButton.Yes
-            SettingsManager.Set("general.webserver_listen_lan", allow)
-
-        self.webserver = WebServer(
-            parent=self, commentaryWidget=commentary)
-        self.webserver.signals.start_failed.connect(self.OnWebServerStartFailed)
-        # Probe the very interface the server will bind (LAN vs loopback).
-        check_webserver_port(
-            self.webserver.port, parent=self, host=self.webserver.host_name)
-        self.webserver.start()
-        self.signals.GameChanged.connect(self.webserver.ws_program_state)
-        self.signals.GameChanged.connect(self.webserver.ws_get_characters)
+        # The web server is NOT built here (startup Step 4c). Constructing the
+        # Flask/SocketIO app and binding the port dominated the window-init ->
+        # core-shown gap, and nothing the user sees at startup depends on it,
+        # so the whole block moved to _StartWebServer() which runs off the
+        # event loop right after show(). The slot exists from here on so every
+        # consumer can null-check it; `commentary` is kept on self because
+        # _StartWebServer() needs to hand it to WebServer().
+        self.webserver = None
+        self._commentaryWidget = commentary
+        # Set by closeEvent so a deferred _StartWebServer() cannot spawn a
+        # server thread that nothing will ever terminate.
+        self._shuttingDown = False
         splash.set_message(splash_msgs[1], progress=0.70)
 
         # ANLYSE is no longer a top-level dock — it is built as a plain panel
@@ -777,6 +762,21 @@ class Window(QMainWindow):
         self._loading_overlay.start()
         self._loading_overlay.finish_when_ready()
 
+        # Start the web server only once the overlay above has dismissed
+        # itself (Step 4c). Building the Flask/SocketIO app runs on the GUI
+        # thread and blocks it for a few seconds, so the order matters for
+        # perceived responsiveness: window painted -> overlay gone -> the app
+        # is briefly interactive -> the server is built. Starting it any
+        # earlier would only move the freeze behind a stalled spinner, which
+        # improves the core-shown number without improving the experience.
+        #
+        # call_when_finished() dispatches through a zero-delay timer, so this
+        # runs from the event loop and not from inside a Qt signal handler:
+        # the LAN opt-in and port-conflict QMessageBox exec() calls made below
+        # are ordinary top-level modals and do not violate the
+        # no-nested-modal / no-reentrant-dispatch rule (agent-pitfalls #9).
+        self._loading_overlay.call_when_finished(self._StartWebServer)
+
         # Prevent tab labels from being elided ("…") — show full text so the
         # tab bar uses horizontal scrolling if it overflows.
         self._ApplyTabBarPolicy(self)
@@ -800,9 +800,8 @@ class Window(QMainWindow):
         if getattr(sys, "frozen", False):
             AutonaUpdater.instance.CheckForUpdates(silent=True)
         AutonaHotkeys.instance.UiMounted(self)
-        AutonaPlayerDB.signals.db_updated.connect(
-            self.webserver.ws_playerdb
-        )
+        # NOTE: AutonaPlayerDB.signals.db_updated -> webserver.ws_playerdb is
+        # wired in _StartWebServer(); there is no server to push to yet here.
         AutonaPlayerDB.LoadDB()
 
         # Footer status bar — surfaces the current long-running task
@@ -841,6 +840,65 @@ class Window(QMainWindow):
             self._on_status_changed)
 
         StateManager.ReleaseSaving()
+
+    # ── Web server, started after the window is shown (startup Step 4c) ──
+
+    def _StartWebServer(self):
+        """Build and start the Flask/SocketIO server, off the startup path.
+
+        Registered with LoadingOverlay.call_when_finished() at the end of
+        __init__, so it runs from the event loop once the window is visible
+        AND the loading overlay is gone. Everything below is the former
+        __init__ block, in the same order.
+        """
+        if self._shuttingDown or self.webserver is not None:
+            return
+
+        # One-time migration prompt: the bind default changed from 0.0.0.0 to
+        # 127.0.0.1, which would silently break LAN OBS setups
+        # (docs/operations/runtime-operations.md). Ask once, persist the answer.
+        if SettingsManager.Get("general.webserver_listen_lan", None) is None:
+            allow = QMessageBox.question(
+                self,
+                QApplication.translate("portguard", "LAN access"),
+                QApplication.translate(
+                    "portguard",
+                    "Autona's web server now listens only on this PC (127.0.0.1) "
+                    "by default for security.\n\n"
+                    "If you connect from other devices on your LAN (OBS on another PC, "
+                    "smartphone remote control), enable LAN access now.\n\n"
+                    "You can change this later under Settings → General."),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            ) == QMessageBox.StandardButton.Yes
+            SettingsManager.Set("general.webserver_listen_lan", allow)
+            # The dialog above ran a nested event loop; the window may have
+            # been closed while it was up.
+            if self._shuttingDown:
+                return
+
+        self.webserver = WebServer(
+            parent=self, commentaryWidget=self._commentaryWidget)
+        self.webserver.signals.start_failed.connect(self.OnWebServerStartFailed)
+        # Probe the very interface the server will bind (LAN vs loopback).
+        check_webserver_port(
+            self.webserver.port, parent=self, host=self.webserver.host_name)
+        self.webserver.start()
+        self.signals.GameChanged.connect(self.webserver.ws_program_state)
+        self.signals.GameChanged.connect(self.webserver.ws_get_characters)
+        # Moved here together with the server: at its old place in __init__
+        # there is no webserver instance to bind to. Nothing is lost by
+        # connecting after LoadDB() — clients pull the player DB on demand
+        # (GET /playerdb, socket 'playerdb') and none can be connected before
+        # the server is listening anyway.
+        AutonaPlayerDB.signals.db_updated.connect(self.webserver.ws_playerdb)
+
+        # Release the overlay previews (Board / Commentary / Top 8 / Stats),
+        # which fetch their HTML from this server: a panel restored as the
+        # startup page issues its first load() before this point.
+        MarkWebServerReady()
+
+        log_startup_phase("webserver-ready")
 
     # ── Lazy settings / guide dialogs (startup Step 4a) ──────────────────
     # Each of these five dialogs is only reachable from a menu entry, so
@@ -1001,6 +1059,10 @@ class Window(QMainWindow):
         # (e.g. shutil.rmtree hitting a locked tmp file with WinError 32),
         # because the later teardown never ran.
         logger.info("Shutting down...")
+        # Blocks a still-pending _StartWebServer() (Step 4c defers it to the
+        # event loop) from spawning a thread after the teardown below has
+        # already run, which would leave the process alive.
+        self._shuttingDown = True
 
         # --- Best-effort housekeeping ------------------------------------
         try:
@@ -1046,8 +1108,10 @@ class Window(QMainWindow):
             logger.opt(exception=True).warning("Error closing web socket on shutdown")
 
         try:
-            self.webserver.terminate()
-            self.webserver.wait(10000)  # 10 seconds grace period.
+            # None when the window is closed before the deferred start ran.
+            if self.webserver is not None:
+                self.webserver.terminate()
+                self.webserver.wait(10000)  # 10 seconds grace period.
         except Exception:
             logger.opt(exception=True).error("Error terminating web server on shutdown")
 
