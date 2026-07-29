@@ -2,15 +2,8 @@ import base64
 
 import pytest
 
-from .conftest import direct_import
-
-
-designer_module = direct_import(
-    "AutonaDesignerService_under_test",
-    "src/AutonaDesignerService.py",
-)
-AutonaDesignerService = designer_module.AutonaDesignerService
-DesignerProjectError = designer_module.DesignerProjectError
+from src.AutonaDesignerService import (
+    AutonaDesignerService, DesignerProjectError)
 
 
 def make_project(name="Finals", with_image=True):

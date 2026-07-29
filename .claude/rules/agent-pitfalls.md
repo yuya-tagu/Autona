@@ -7,22 +7,25 @@ globs:
 
 # エージェント向け地雷回避ルール
 
-## 1. src/ の import は全起動を引き起こす
+## 1. src/ の import は副作用ゼロ（2026-07-29 Step 3 完了により更新）
 
-`from src.XXX import ...` や `from .XXX import ...` は `src/__init__.py` → `Autona.py` → QApplication + 全シングルトン生成を連鎖的にトリガーする。
+**旧ルール（`src` の import が QApplication + 全シングルトン生成を引く／テストは `direct_import()` を使う）は解消済み。** `src/__init__.py` は docstring だけの空 init になり、`direct_import()` は削除した。
 
-- テストで `src` パッケージ経由の import を使わない
-- テストでは `tests/conftest.py` の `direct_import()` を使う
-- `from . import ui_constants` は特に危険（3ファイルで使用中）
+新しい原則:
 
-## 2. シングルトン初期化順序を壊さない
+- **`src.*` の import は副作用ゼロ**（QApplication 生成なし・シングルトン生成なし・ファイル読み書きなし）。テストからは `from src.XXX import YYY` の**通常 import でよい**
+- **唯一の例外は `src/Autona.py`**（アプリ組み立てモジュール）。この import 自体が起動シーケンス（logger 構成 → `bootstrap_core()` → Window 定義）なので、テストや調査スクリプトから import しない。`main.py` の `from src import Autona` だけがこれを行う
+- 新しいモジュールを足すとき、**module level で「作る／読む／書く」をしない**。生成は `Initialize()` / `__init__` / `bootstrap.py` 側へ置く
+- この原則は `tests/test_import_side_effects.py` が subprocess で pin している（`import src` 自体の inert 検査＋主要モジュール群の副作用検査）。ここが落ちたら実装側を直す。テスト側を緩めない
 
-`Autona.py` の import 順序がシングルトンの生成順序を決定する。
+## 2. シングルトン初期化順序の正本は `src/bootstrap.py`（2026-07-29 Step 3 完了により更新）
 
-**絶対に守る**: `AutonaGameAssetManager` の import は `AutonaTournamentDataProvider` より前。
-理由: AutonaTournamentDataProvider.__init__ が `AutonaGameAssetManager.instance.signals` に connect する。
+旧来は `Autona.py` の **import 順序**が生成順序を決めていたが、現在は `src/bootstrap.py` の `bootstrap_core()` に**明示的な生成順として集約**されている。import 順序は順序を決めない。
 
-詳細: `.claude/architecture/singleton-init-order.md`
+- 順序を変えるときは `bootstrap.py` の `ORDER CONSTRAINT:` コメントを必ず読む。制約の理由（誰が誰の `instance.signals` に connect するか、QApplication 必須か、`StateManager.Initialize()` 後でなければならないか等）がその場に書いてある
+- **絶対に守る**: `AutonaGameAssetManager` の生成は `AutonaTournamentDataProvider` より前（`AutonaTournamentDataProvider.__init__` が `AutonaGameAssetManager.instance.signals` に connect する）
+- 新しいシングルトンは `bootstrap_core()` に追加する。モジュール末尾で `instance = XXX()` を書かない（#1 に違反する）
+- 旧構造の記録: `.claude/architecture/phase-a-b/singleton-init-order.md`（歴史資料。現状は bootstrap.py が正）
 
 ## 3. StateManager のキーパスはドット区切り文字列
 

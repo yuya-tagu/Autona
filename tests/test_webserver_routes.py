@@ -12,11 +12,10 @@ a dropped, duplicated or renamed handler fails loudly instead of silently
 returning 404 to a stream overlay. Update it only together with a deliberate,
 documented API change (external routes: ADR-001 / ADR-003).
 
-Like tests/test_import_side_effects.py this runs in a subprocess with a fake
-``src`` parent package: importing the real ``src`` package would pull in
-Autona.py and boot the whole app (agent-pitfalls #1). The seeded temp cwd is
-needed for the same reason as there -- several modules in the import chain
-read data files relative to Path.cwd() at import time.
+Like tests/test_import_side_effects.py this runs in a subprocess, so the
+module is observed in a fresh interpreter that no other test has imported it
+in. The seeded temp cwd is needed for the same reason as there -- several
+modules in the import chain read data files relative to Path.cwd().
 """
 import json
 import os
@@ -170,15 +169,8 @@ _DUMP_SCRIPT = r'''
 import importlib
 import json
 import sys
-import types
 
 sys.dont_write_bytecode = True
-
-SRC_ROOT = sys.argv[1]
-
-pkg = types.ModuleType("src")
-pkg.__path__ = [SRC_ROOT]
-sys.modules["src"] = pkg
 
 mod = importlib.import_module("src.AutonaWebServer")
 WebServer = mod.WebServer
@@ -228,7 +220,7 @@ extra = {
 }
 
 class_handlers = sorted(
-    name for name in sys.argv[2].split(",") if callable(getattr(WebServer, name, None))
+    name for name in sys.argv[1].split(",") if callable(getattr(WebServer, name, None))
 )
 
 print("<<<LEDGER>>>" + json.dumps(
@@ -272,7 +264,7 @@ def _dump_ledger(tmp_path):
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
 
     result = subprocess.run(
-        [sys.executable, "-B", "-c", _DUMP_SCRIPT, str(SRC_ROOT),
+        [sys.executable, "-B", "-c", _DUMP_SCRIPT,
          ",".join(sorted(EXPECTED_CLASS_HANDLERS))],
         cwd=str(tmp_path),
         env=env,

@@ -1,9 +1,7 @@
 """Unit tests for the Top 8 double elimination model (pure logic, no Qt)."""
 import types
 
-from tests.conftest import direct_import
-
-model = direct_import("AutonaTop8Model", "src/AutonaTop8Model.py")
+from src import AutonaTop8Model as model
 
 
 def finish(matches, match_id, score):

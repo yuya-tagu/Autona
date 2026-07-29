@@ -49,5 +49,9 @@ def test_startup_gate_shows_no_modal_while_an_update_is_in_flight():
     against writes — robocopy then cannot replace the launcher, the helper
     gives up, and the user sees a silent rollback to the old version."""
     main_py = (PROJECT_ROOT / "main.py").read_text(encoding="utf-8")
-    gate = main_py.split("if _update_in_flight():")[1].split("import src")[0]
+    # End anchor: the heavy application import, which the gate must precede.
+    assert "from src import Autona" in main_py, \
+        "main.py no longer imports the app the way this test slices on"
+    gate = main_py.split("if _update_in_flight():")[1].split(
+        "from src import Autona")[0]
     assert "MessageBoxW" not in gate

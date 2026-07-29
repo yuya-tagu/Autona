@@ -1,12 +1,12 @@
 """RPG-style splash screen + post-show loading overlay for Autona.
 
 Lives at the project root, NOT under src/, and imports nothing from src.
-main.py shows the splash before `import src`, and importing anything under
-src/ triggers `src/__init__.py` -> the whole application boot (QApplication,
-every singleton), which is exactly what the splash exists to cover.
+main.py shows the splash before `from src import Autona`, and that import is
+the whole application boot (QApplication use, logger, every singleton via
+bootstrap_core()), which is exactly what the splash exists to cover.
 For the same reason the Qt imports below are plain PySide6 rather than the
 qtpy shim used everywhere else in the app: qtpy is only pulled in later, by
-`import src`.
+the application module.
 
 Splash:
   * `AutonaSplashScreen` — a QSplashScreen subclass with a painted
@@ -22,8 +22,8 @@ Startup instrumentation:
   * `set_startup_t0()` / `log_startup_phase()` / `attach_startup_logger()` —
     the "STARTUP phase=... elapsed=...s" markers. They live here because
     the earliest phases happen before loguru is configured (that happens
-    during `import src`), so the marks are buffered and replayed once the
-    real logger is attached.
+    while src/Autona.py is imported), so the marks are buffered and replayed
+    once the real logger is attached.
 
 Overlay:
   * `LoadingOverlay` — a child widget that covers the main window with
@@ -258,9 +258,10 @@ class AutonaSplashScreen(QSplashScreen):
 # Factory + process-wide splash handle
 # ──────────────────────────────────────────────────────────
 
-# The splash is created by main.py before `import src` and consumed much
-# later by Window.__init__ (progress checkpoints + finish()). Rather than
-# threading it through src.Window's signature, it is published here.
+# The splash is created by main.py before the application module is imported
+# and consumed much later by Window.__init__ (progress checkpoints +
+# finish()). Rather than threading it through Window's signature, it is
+# published here.
 ACTIVE_SPLASH: AutonaSplashScreen | None = None
 
 
@@ -298,7 +299,8 @@ def active_splash():
 # Overwritten by main.py with the timestamp taken at the very top of the
 # process; the default keeps the helpers usable on their own.
 _STARTUP_T0: float = time.perf_counter()
-# Marks emitted before loguru exists (it is configured during `import src`).
+# Marks emitted before loguru exists (it is configured while src/Autona.py
+# is imported).
 _PENDING_MARKS: list[str] = []
 _STARTUP_LOGGER = None
 

@@ -8,20 +8,14 @@ sees it. ReloadHotkeys() also runs on every save, i.e. while the field still
 has focus, so SetupHotkeys() must stay a no-op (registration-wise) until the
 capture ends.
 
-AutonaHotkeys uses relative imports (SettingsManager, Helpers), so conftest's
-direct_import can't be used; a fake parent package is registered instead
-(agent-pitfalls #1). SettingsManager does file I/O relative to CWD at import
-time, so the import happens inside a temp working directory.
+Importing the module is enough to drive it: neither AutonaHotkeys nor the
+SettingsManager it pulls in builds anything or touches the filesystem at
+import time (pinned by tests/test_import_side_effects.py).
 
 The user32 calls are mocked: the tests assert the registration *decisions*,
 never the Windows API behaviour.
 """
-import importlib.util
-import os
 import sys
-import tempfile
-import types
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -30,31 +24,7 @@ if sys.platform != "win32":
     # ctypes.windll only exists on Windows; the module can't even be imported.
     pytest.skip("Windows-only global hotkeys", allow_module_level=True)
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SRC_ROOT = PROJECT_ROOT / "src"
-
-_WORK_DIR = tempfile.mkdtemp(prefix="autona_hotkeys_test_")
-_ORIGINAL_CWD = os.getcwd()
-
-
-def _import_hotkeys():
-    os.chdir(_WORK_DIR)
-    os.makedirs(Path(_WORK_DIR) / "user_data", exist_ok=True)
-    try:
-        pkg = types.ModuleType("autona_hk_test_pkg")
-        pkg.__path__ = [str(SRC_ROOT)]
-        sys.modules["autona_hk_test_pkg"] = pkg
-        spec = importlib.util.spec_from_file_location(
-            "autona_hk_test_pkg.AutonaHotkeys", SRC_ROOT / "AutonaHotkeys.py")
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules["autona_hk_test_pkg.AutonaHotkeys"] = mod
-        spec.loader.exec_module(mod)
-        return mod
-    finally:
-        os.chdir(_ORIGINAL_CWD)
-
-
-_mod = _import_hotkeys()
+from src import AutonaHotkeys as _mod
 
 
 @pytest.fixture

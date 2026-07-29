@@ -1,7 +1,5 @@
 """Unit tests for the commentary panel model (pure logic, no Qt)."""
-from tests.conftest import direct_import
-
-model = direct_import("AutonaCommentaryModel", "src/AutonaCommentaryModel.py")
+from src import AutonaCommentaryModel as model
 
 
 def test_default_state_has_all_twelve_slots():

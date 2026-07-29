@@ -6,20 +6,17 @@ Held subtree semantics (the 反映 button feature):
   but are excluded from delta broadcast / GetFullState / file export
   until CommitHeld(prefix) publishes them in one save cycle.
 
-StateManager.Initialize() does file I/O relative to CWD (./out), and importing
-the module pulls in SettingsManager, which still reads ./user_data at import
-time. Both therefore happen once inside a temp working directory, via a fake
-parent package (direct_import can't be used: StateManager has relative
-imports).
+Importing the module is side-effect free, but StateManager.Initialize() does
+file I/O relative to the CWD (./out), so it runs once inside a temp working
+directory.
 """
-import importlib.util
 import os
-import sys
 import tempfile
-import types
 from pathlib import Path
 
 import pytest
+
+from src.StateManager import StateManager as SM
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = PROJECT_ROOT / "src"
@@ -28,32 +25,18 @@ _WORK_DIR = tempfile.mkdtemp(prefix="autona_sm_test_")
 _ORIGINAL_CWD = os.getcwd()
 
 
-def _import_state_manager():
-    # SettingsManager still does file I/O relative to CWD at import time
-    # (./user_data), and Initialize() creates ./out. Import and initialize
-    # under the temp dir, then restore the CWD so later-collected test
-    # modules are unaffected.
+def _initialize_state_manager():
+    # Initialize() creates ./out; run it under the temp dir, then restore the
+    # CWD so later-collected test modules are unaffected.
     os.chdir(_WORK_DIR)
     os.makedirs(Path(_WORK_DIR) / "user_data", exist_ok=True)
     try:
-        pkg = types.ModuleType("autona_sm_test_pkg")
-        pkg.__path__ = [str(SRC_ROOT)]
-        sys.modules["autona_sm_test_pkg"] = pkg
-        spec = importlib.util.spec_from_file_location(
-            "autona_sm_test_pkg.StateManager", SRC_ROOT / "StateManager.py")
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules["autona_sm_test_pkg.StateManager"] = mod
-        spec.loader.exec_module(mod)
-        # Construction step that used to run at import time; the export path
-        # under test writes into ./out, which this creates.
-        mod.StateManager.Initialize()
-        return mod
+        SM.Initialize()
     finally:
         os.chdir(_ORIGINAL_CWD)
 
 
-_mod = _import_state_manager()
-SM = _mod.StateManager
+_initialize_state_manager()
 
 
 @pytest.fixture(autouse=True)

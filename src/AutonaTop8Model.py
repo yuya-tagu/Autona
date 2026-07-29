@@ -1,9 +1,9 @@
 """Pure data model for the Top 8 double elimination bracket.
 
-Qt-free on purpose: this module is imported by AutonaTop8Widget (GUI) and
-by unit tests via tests/conftest.direct_import(). It owns the bracket
-topology (FGC standard Top 8: 4 winners-side + 4 losers-side starters)
-and the winner/loser propagation logic.
+Qt-free on purpose: this module is imported by AutonaTop8Widget (GUI) and,
+unchanged, by unit tests. It owns the bracket topology (FGC standard Top 8:
+4 winners-side + 4 losers-side starters) and the winner/loser propagation
+logic.
 
 State shape (StateManager keypath "top8"):
     top8.phaseLabel                  display label, default "TOP 8"

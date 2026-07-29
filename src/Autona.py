@@ -39,12 +39,13 @@ if parse(qtpy.QT_VERSION).major == 6:
 # (before this module is imported), so the taskbar groups the app under
 # our identity rather than the host python.exe.
 
-# main.py creates the QApplication before importing this package, so that
-# the splash can be painted while this import chain runs. The fallback is
-# NOT for the app itself: PyInstaller's binary-dependency analysis imports
-# this package in an isolated subprocess without main.py, and the singleton
-# construction below creates QWidgets, which hard-aborts the process when
-# no QApplication exists.
+# main.py creates the QApplication before importing this module, so that the
+# splash can be painted while this import chain runs. The fallback is NOT for
+# the app itself: PyInstaller's binary-dependency analysis imports modules in
+# an isolated subprocess without main.py, and anything here that ends up
+# creating a QWidget hard-aborts the process when no QApplication exists.
+# Kept deliberately even though src/__init__.py no longer chains into this
+# module (Step 3g) — the analysis still reaches it through main.py.
 App = QApplication.instance()
 if App is None:
     App = QApplication(sys.argv)
@@ -112,9 +113,9 @@ logger.add(
     rotation="20 MB"
 )
 
-# loguru is only configured now, so the STARTUP marks recorded before
-# `import src` (gate / splash) have been buffered — replay them into the
-# log file and route the later phases straight to loguru.
+# loguru is only configured now, so the STARTUP marks recorded before this
+# module was imported (gate / splash) have been buffered — replay them into
+# the log file and route the later phases straight to loguru.
 import autona_splash
 autona_splash.attach_startup_logger(logger)
 
@@ -248,8 +249,8 @@ class Window(QMainWindow):
 
         self.signals = WindowSignals()
 
-        # Created by main.py before `import src`, so it has been on screen
-        # since a second or two after launch.
+        # Created by main.py before this module was imported, so it has been
+        # on screen since a second or two after launch.
         splash = active_splash()
         splash_msgs = pick_splash_messages()
         splash.set_message(splash_msgs[0], progress=0.05)
