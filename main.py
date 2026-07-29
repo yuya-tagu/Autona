@@ -14,19 +14,19 @@ sys.dont_write_bytecode = True
 import time
 _STARTUP_T0 = time.perf_counter()
 
-# Select the Qt binding BEFORE `import src` (which imports qtpy) and before
-# qasync is imported — both resolve the binding at import time, and their
-# auto-detection prefers PyQt over PySide if multiple bindings are installed.
+# Select the Qt binding BEFORE `from src import Autona` (which imports qtpy)
+# and before qasync is imported — both resolve the binding at import time,
+# and their auto-detection prefers PyQt over PySide if both are installed.
 # PySide6 (LGPL v3) is required for the closed-source binary distribution;
 # PyQt6 (GPL v3) must not be used.
 import os
 os.environ["QT_API"] = "pyside6"
 
 # Set the Windows AppUserModelID at the EARLIEST possible point — before
-# `import src`, which constructs the QApplication and (via its many imports)
-# may lock the process/window identity Windows uses for the taskbar. Setting
-# it here ensures the taskbar groups under our identity and uses the window
-# icon (the Autona .ico) instead of the generic / host-exe icon.
+# `from src import Autona`, which assembles the app and (via its many
+# imports) may lock the process/window identity Windows uses for the taskbar.
+# Setting it here ensures the taskbar groups under our identity and uses the
+# window icon (the Autona .ico) instead of the generic / host-exe icon.
 if sys.platform == "win32":
     try:
         import ctypes
@@ -42,8 +42,9 @@ if sys.platform == "win32":
 # delete the helper's staging dir mid-robocopy and lose the update (happened
 # on the v1.3.0 E2E). The helper holds update_in_progress.lock with an
 # exclusive share mode; the same check lives in src/AutonaUpdater.py
-# (_UpdateInFlight) — duplicated here because `import src` boots Qt and every
-# singleton, which is exactly what must not happen yet. Keep both in sync.
+# (_UpdateInFlight) — duplicated here because reaching that module means
+# `from src import Autona`, which assembles the whole app, and that is
+# exactly what must not happen yet. Keep both in sync.
 if getattr(sys, "frozen", False):
     def _update_in_flight():
         base = (os.environ.get("TEMP") or os.environ.get("TMP")
@@ -159,11 +160,11 @@ autona_splash.set_startup_t0(_STARTUP_T0)
 autona_splash.log_startup_phase("gate")
 
 # ── Stage 1: early feedback ──────────────────────────────────────────────
-# QApplication and the splash are built HERE, before `import src`: that
-# import chain constructs every singleton and takes tens of seconds, and
-# until this change nothing at all was drawn while it ran — the dead window
-# after a double click is what drove users to click again (and start a
-# second process).
+# QApplication and the splash are built HERE, before `from src import Autona`:
+# that import chain assembles the whole app (bootstrap_core() constructs every
+# singleton) and takes tens of seconds, and until this change nothing at all
+# was drawn while it ran — the dead window after a double click is what drove
+# users to click again (and start a second process).
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
@@ -237,7 +238,11 @@ def _start_ipc_server():
 
 _start_ipc_server()
 
-import src
+# The heavy import: `src` itself is an empty package (importing it does
+# nothing), so the application assembly module is named explicitly. This line
+# is where logger configuration, bootstrap_core() and the Window definition
+# actually run — keep it after the gate and the splash.
+from src import Autona
 autona_splash.log_startup_phase("import-src")
 
 import multiprocessing
@@ -255,11 +260,11 @@ async def main(event_loop):
 
     future = asyncio.Future()
 
-    window = src.Window()
+    window = Autona.Window()
     # From here on a second launch can be answered with a real window.
     _set_activation_target(window)
-    if hasattr(src.App, "aboutToQuit"):
-        getattr(src.App, "aboutToQuit").connect(
+    if hasattr(Autona.App, "aboutToQuit"):
+        getattr(Autona.App, "aboutToQuit").connect(
             partial(close_future, future, event_loop))
 
     try:

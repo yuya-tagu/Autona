@@ -4,9 +4,12 @@ These tests capture the current behavior of ParseMatchDataNewApi,
 ParseMatchDataOldApi, and ProcessEntrantData so that refactoring
 can be verified against known-good outputs.
 
-Strategy: pre-populate sys.modules with mocks for all src.* dependencies
-that would otherwise trigger the Qt/singleton init chain, then use
-direct_import to load only StartGGDataProvider.
+Strategy: the provider's own dependencies (game assets, player DB, workers,
+qtpy) are stubbed via sys.modules while the module is exec'd, so the parse
+functions can be exercised as pure data transforms with deterministic
+character/stage lookups. The stubs are removed again immediately afterwards
+-- they are an isolation device for this module only and must never be
+visible to another test module (src.* imports normally these days).
 """
 import sys
 import types
@@ -17,14 +20,11 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# 1. Load AutonaDictHelper (no Qt dependency) for the real deep_get
+# 1. The real deep_get (no Qt dependency) backs the stubbed dict helper
 # ---------------------------------------------------------------------------
-from tests.conftest import direct_import, PROJECT_ROOT
+from src.Helpers.AutonaDictHelper import deep_get
 
-_dict_helper = direct_import(
-    "AutonaDictHelper_test", "src/Helpers/AutonaDictHelper.py"
-)
-deep_get = _dict_helper.deep_get
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 # ---------------------------------------------------------------------------
@@ -225,25 +225,22 @@ try:
     )
     _startgg_mod = _ilu.module_from_spec(_spec)
     _startgg_mod.__package__ = "src.TournamentDataProvider"
-    sys.modules["src.TournamentDataProvider.StartGGDataProvider"] = _startgg_mod
+    _PROVIDER_NAME = "src.TournamentDataProvider.StartGGDataProvider"
+    _original_modules[_PROVIDER_NAME] = sys.modules.get(_PROVIDER_NAME)
+    sys.modules[_PROVIDER_NAME] = _startgg_mod
     _spec.loader.exec_module(_startgg_mod)
     StartGGDataProvider = _startgg_mod.StartGGDataProvider
-except Exception:
+finally:
+    # None of the stubs may outlive this module's import. Test modules
+    # collected after this one import the real qtpy and the real src.*
+    # modules, and would otherwise get these mocks handed to them. The
+    # provider bound its dependencies (mock QObject, mock asset manager, ...)
+    # at exec time, so dropping the sys.modules entries costs nothing here.
+    # The one thing resolved later is the lazy
+    # `from ..Helpers.AutonaStatusManager import AutonaStatusManager` inside
+    # GetMatches(); it then loads the real module, which is Qt-only, needs no
+    # QApplication and emits into the void with no receivers connected.
     _teardown_mock_modules()
-    raise
-else:
-    # The qtpy stubs must not outlive this module's import: test modules
-    # collected after this one (e.g. test_state_manager_held) import the
-    # real qtpy. StartGGDataProvider already bound the mock QObject at exec
-    # time, so dropping the sys.modules entries is safe. The src.* mocks
-    # stay in place because the provider lazily imports
-    # ..Helpers.AutonaStatusManager at call time through them.
-    for _name in ("qtpy", "qtpy.QtCore"):
-        _original = _original_modules.pop(_name, None)
-        if _original is None:
-            sys.modules.pop(_name, None)
-        else:
-            sys.modules[_name] = _original
 
 
 # ---------------------------------------------------------------------------

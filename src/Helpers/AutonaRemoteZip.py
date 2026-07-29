@@ -8,8 +8,8 @@ install, and Range-fetch only the entries that differ - no release-pipeline
 changes, works across any version gap.
 
 Design notes:
-- No Qt, no relative imports: tests load this via conftest.direct_import
-  without booting the src package (agent-pitfalls #1).
+- No Qt, no relative imports: the unit tests import it directly and run it
+  without any Qt or app state.
 - Entry data is located by "this entry's header_offset .. next entry's
   header_offset" using the CENTRAL directory only, then the local header is
   parsed out of the fetched bytes. This sidesteps local/central extra-field

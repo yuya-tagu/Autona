@@ -19,14 +19,15 @@ registrations, run from the WebServer class body. That moved into
 _build_web_app(), called once from WebServer.__init__. The exposed surface is
 pinned separately in tests/test_webserver_routes.py.
 
-It runs in a subprocess because the checks are about a *fresh* interpreter:
-once any other test has imported these modules, the side effects (or their
-absence) can no longer be observed. conftest's direct_import() cannot be used
-either -- the modules use relative imports, so they need a parent package.
-The subprocess therefore registers a bare types.ModuleType("src") with a
-__path__ pointing at src/, which makes `src.StateManager` importable *without*
-executing src/__init__.py (that would pull in Autona.py and boot the whole
-app; agent-pitfalls #1).
+The package itself is covered too: since Step 3g `src/__init__.py` is a
+docstring and nothing else, so `import src` must be inert as well. That is
+what keeps the init from silently growing a convenience re-export back into
+Autona.py, which would boot the whole app on any `from src.X import Y`
+(the old agent-pitfalls #1).
+
+Everything runs in a subprocess because the checks are about a *fresh*
+interpreter: once any other test has imported these modules, the side effects
+(or their absence) can no longer be observed.
 
 The temporary working directory is seeded with the data files those modules
 read, because they are read cwd-relatively: AutonaResolve() resolves against
@@ -52,17 +53,21 @@ _CHECK_SCRIPT = r'''
 import importlib
 import os
 import sys
-import types
 
 sys.dont_write_bytecode = True
 
-SRC_ROOT = sys.argv[1]
+# The package init itself: importing it must not pull in Autona.py, so
+# nothing may be constructed and no submodule may be loaded either.
+import src
 
-# Fake parent package: gives the relative imports inside the modules a
-# package to resolve against without running src/__init__.py.
-pkg = types.ModuleType("src")
-pkg.__path__ = [SRC_ROOT]
-sys.modules["src"] = pkg
+assert not hasattr(src, "Window"), \
+    "src/__init__.py re-exports Window (imports Autona.py)"
+assert not hasattr(src, "App"), \
+    "src/__init__.py re-exports App (imports Autona.py)"
+assert "src.Autona" not in sys.modules, "import src loaded src.Autona"
+assert [n for n in sys.modules if n.startswith("src.")] == [], \
+    "import src loaded submodules: " \
+    f"{[n for n in sys.modules if n.startswith('src.')]}"
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -203,6 +208,34 @@ assert os.path.isfile("./user_data/alerts_red.json"), \
 print("OK")
 '''
 
+# Standalone guard for the package init: `import src` on its own, in a cwd
+# seeded with nothing at all, must load no submodule, build no QApplication
+# and create no file or directory.
+_INIT_ONLY_SCRIPT = r'''
+import os
+import sys
+
+sys.dont_write_bytecode = True
+
+before = set(os.listdir("."))
+
+import src
+
+assert "src.Autona" not in sys.modules, "import src loaded src.Autona"
+loaded = sorted(n for n in sys.modules if n == "src" or n.startswith("src."))
+assert loaded == ["src"], f"import src loaded submodules: {loaded}"
+assert not hasattr(src, "Window") and not hasattr(src, "App"), \
+    "src/__init__.py re-exports Window/App, i.e. it imports Autona.py"
+
+from qtpy.QtWidgets import QApplication
+
+assert QApplication.instance() is None, "import src created a QApplication"
+assert set(os.listdir(".")) == before, \
+    f"import src touched the cwd: {sorted(set(os.listdir('.')) - before)}"
+
+print("OK")
+'''
+
 # Read-only program data the Initialize() calls consume, resolved
 # cwd-relatively. Seeded so the positive controls run the real loaders.
 # ./user_data is deliberately NOT created: its absence is what makes the
@@ -235,22 +268,36 @@ def _seed_cwd(tmp_path):
         shutil.copyfile(query_file, query_dir / query_file.name)
 
 
-def test_core_modules_have_no_import_side_effects(tmp_path):
-    _seed_cwd(tmp_path)
-
+def _run_check(script, tmp_path):
     env = dict(os.environ)
     env["QT_API"] = "pyside6"
     env["PYTHONPATH"] = str(PROJECT_ROOT)
     # Never let a headless CI/agent shell pop a real Qt platform plugin.
     env.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-    result = subprocess.run(
-        [sys.executable, "-B", "-c", _CHECK_SCRIPT, str(SRC_ROOT)],
+    return subprocess.run(
+        [sys.executable, "-B", "-c", script],
         cwd=str(tmp_path),
         env=env,
         capture_output=True,
         text=True,
     )
+
+
+def test_importing_the_src_package_is_inert(tmp_path):
+    """`import src` must stay a no-op: no submodule, no Qt, no file."""
+    result = _run_check(_INIT_ONLY_SCRIPT, tmp_path)
+
+    assert result.returncode == 0, (
+        f"src package init is not side-effect free\nstdout:\n{result.stdout}\n"
+        f"stderr:\n{result.stderr}")
+    assert "OK" in result.stdout
+
+
+def test_core_modules_have_no_import_side_effects(tmp_path):
+    _seed_cwd(tmp_path)
+
+    result = _run_check(_CHECK_SCRIPT, tmp_path)
 
     assert result.returncode == 0, (
         f"side-effect check failed\nstdout:\n{result.stdout}\n"

@@ -138,9 +138,10 @@ def bootstrap_core():
     # ORDER CONSTRAINT: AutonaScoreboardManager is a QDockWidget, so a
     # QApplication must already exist -- constructing a QWidget without one
     # aborts the process at the C++ level. That holds at every entry point:
-    # main.py builds the QApplication before `import src`, and Autona.py:48-50
-    # keeps a fallback for PyInstaller's dependency-analysis subprocess, which
-    # imports this package without main.py. Both run before bootstrap_core().
+    # main.py builds the QApplication before `from src import Autona`, and
+    # Autona.py keeps a fallback for PyInstaller's dependency-analysis
+    # subprocess, which imports modules without main.py. Both run before
+    # bootstrap_core().
     # It also calls StateManager.Unset("score") in __init__, so it must come
     # after StateManager.Initialize() above. The boards themselves are not
     # built here: CreateScoreboard() is called later, from the window.

@@ -14,9 +14,7 @@ os.environ.setdefault("QT_API", "pyside6")
 
 from qtpy.QtCore import QCoreApplication
 
-from tests.conftest import direct_import
-
-helper = direct_import("AutonaQtHelper", "src/Helpers/AutonaQtHelper.py")
+from src.Helpers import AutonaQtHelper as helper
 
 
 def _get_app():
