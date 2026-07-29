@@ -350,6 +350,3 @@ class AutonaPlayerDB:
                 outfile.write(json.dumps(player_list, indent=2))
         except Exception as e:
             logger.error(traceback.format_exc())
-
-
-AutonaGameAssetManager.instance.signals.onLoad.connect(AutonaPlayerDB.SetupModel)
