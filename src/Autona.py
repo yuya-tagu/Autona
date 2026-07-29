@@ -733,11 +733,12 @@ class Window(QMainWindow):
         self.sidebar.helpButton.setText(
             QApplication.translate("app", "Help & Settings"))
 
-        # Create all boards (1v1 + team + crew) into the SCORE dock, then apply
-        # the persisted battle format so the right board + result layout are
-        # shown on startup. The "Rules" menu switches between them at runtime.
-        AutonaScoreboardManager.instance.CreateScoreboard()
+        # Build only the board the persisted battle format shows (startup
+        # Step 4e — the other boards are built the first time they are needed)
+        # and apply that format so the board + result layout match. The
+        # "Rules" menu switches between them at runtime.
         battleFormat = self._resolveBattleFormat()
+        AutonaScoreboardManager.instance.CreateScoreboard(battleFormat)
         AutonaScoreboardManager.instance.SetBattleFormat(battleFormat)
         self.resultSetting.SetBattleFormat(battleFormat)
         self.thumbnailSetting.SetBattleFormat(battleFormat)
