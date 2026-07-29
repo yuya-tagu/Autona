@@ -897,6 +897,3 @@ class AutonaUpdater(QObject):
                 "updater", "Update check failed:\n{0}"
             ).format(msg),
         )
-
-
-AutonaUpdater.instance = AutonaUpdater()

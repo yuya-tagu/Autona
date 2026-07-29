@@ -16,6 +16,16 @@ class AutonaAlertNotification(QObject):
 
     def __init__(self) -> None:
         super().__init__()
+        # MarkNotificationRed() reads ./user_data/alerts_red.json before
+        # appending to it, so the notification object guarantees its own data
+        # file. This used to sit at module level next to the singleton
+        # construction; it belongs to __init__ rather than to bootstrap so
+        # that the invariant travels with the object that depends on it.
+        os.makedirs("./user_data", exist_ok=True)
+        if not os.path.exists("./user_data/alerts_red.json"):
+            with open("./user_data/alerts_red.json", 'w') as outfile:
+                outfile.write("[]")
+
         self.signals = AutonaAlertNotificationSignals()
         self.signals.alerts.connect(self.ShowAlerts)
 
@@ -73,10 +83,3 @@ class AutonaAlertNotification(QObject):
             alerts_red.append(id)
             with open("./user_data/alerts_red.json", 'w') as outfile:
                 json.dump(alerts_red, outfile)
-
-
-if not os.path.exists("./user_data/alerts_red.json"):
-    with open("./user_data/alerts_red.json", 'w') as outfile:
-        outfile.write("[]")
-
-AutonaAlertNotification.instance = AutonaAlertNotification()
