@@ -22,7 +22,6 @@ from loguru import logger
 from .StateManager import StateManager
 from .AutonaWebServerActions import WebServerActions
 from .AutonaScoreboardManager import AutonaScoreboardManager
-from .AutonaCommentaryWidget import AutonaCommentaryWidget
 from .SettingsManager import SettingsManager
 from .AutonaDesignerService import (
     AutonaDesignerService,
@@ -700,7 +699,7 @@ class WebServer(QThread):
     socketio = None
     actions = None
 
-    def __init__(self, parent=None, commentaryWidget: AutonaCommentaryWidget=None) -> None:
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
         # Idempotent, same shape as the existing singleton guards: the Flask
         # app and its route/event handlers are registered exactly once, no
@@ -709,10 +708,12 @@ class WebServer(QThread):
         if WebServer.app is None:
             WebServer.app, WebServer.socketio = _build_web_app()
 
+        # `parent` is the main window: WebServerActions reaches back through
+        # it to build the lazily-created panels an API call may need
+        # (startup Step 4b-2).
         WebServer.actions = WebServerActions(
             parent=parent,
             scoreboard=AutonaScoreboardManager.instance,
-            commentaryWidget=commentaryWidget
         )
 
         StateManager.signals.state_updated.connect(WebServer.on_program_state_update)

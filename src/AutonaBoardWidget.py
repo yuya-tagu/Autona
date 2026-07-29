@@ -153,14 +153,12 @@ class AutonaBoardWidget(QDockWidget):
         self.setWidget(panes)
         self._watchDesignDirectories()
 
-        # Seed colors into state at startup (moved from the EVENT tab) so
-        # overlays receive theme/accent before the user touches the pickers.
-        StateManager.Set(
-            "tournamentInfo.themeColor",
-            SettingsManager.Get("general.theme_color", DEFAULT_THEME_COLOR))
-        StateManager.Set(
-            "tournamentInfo.accentColor",
-            SettingsManager.Get("general.accent_color", DEFAULT_ACCENT_COLOR))
+        # NOTE: the theme/accent seed that used to run here moved to
+        # Window._SeedPanelState() (startup Step 4b-2). This panel is built
+        # on first reveal now, and the overlays need those colors from
+        # launch whether or not it is ever opened. The color buttons below
+        # still read the same SettingsManager keys, and editing one still
+        # writes StateManager directly (_onThemeColorChanged).
 
         self._refreshObsPath()
 

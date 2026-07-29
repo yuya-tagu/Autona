@@ -15,8 +15,9 @@ Full rework mirroring AutonaTop8Widget's list + live-preview pattern:
 State contract: everything under ``commentary.{1..12}`` (see
 AutonaCommentaryModel). All writes go through explicit StateManager.Set
 inside SaveBlock — no objectName-derived keypaths. The state persists
-across restarts; the constructor normalizes whatever LoadState restored
-(including the legacy pre-rework schema).
+across restarts; Window._SeedPanelState() normalizes whatever LoadState
+restored (including the legacy pre-rework schema) at launch, before this
+panel is built.
 
 ChangeCommDataSignal / LoadCommFromTagSignal keep their historical names
 and signatures: AutonaWebServerActions emits them for the
@@ -73,10 +74,11 @@ class AutonaCommentaryWidget(QDockWidget):
         self._previewLoaded = False
         self._designs = DiscoverLayoutDesigns(LAYOUT_PREFIX)
 
-        with StateManager.SaveBlock():
-            StateManager.Set(
-                "commentary",
-                comms.NormalizeState(StateManager.Get("commentary")))
+        # NOTE: the commentary.* normalisation that used to run here moved to
+        # Window._SeedPanelState() (startup Step 4b-2). This panel is built on
+        # first reveal now, and the overlay / the external control API read
+        # commentary.* from launch, so the state must be normalised whether or
+        # not the panel is ever opened. _loadFromState() below reads it.
 
         # Build the design selector (and then the preview) first: the OBS
         # group below reads the selected design for its URL field.

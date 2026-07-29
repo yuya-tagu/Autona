@@ -28,11 +28,31 @@ log.setLevel(logging.ERROR)
 
 
 class WebServerActions(QThread):
-    def __init__(self, parent=None, scoreboard=None, commentaryWidget: AutonaCommentaryWidget=None) -> None:
+    def __init__(self, parent=None, scoreboard=None) -> None:
         super().__init__(parent)
         self.scoreboard = scoreboard
-        self.commentaryWidget = commentaryWidget
         self.threadPool = QThreadPool()
+
+    # ── Lazily-built panels (startup Step 4b-2) ──────────────────────
+    # The Commentary and Top 8 panels are constructed the first time their
+    # sidebar page is revealed, so an API call can arrive while they do not
+    # exist yet. The class `instance` attribute is the fast path; when it is
+    # None the main window is asked to build the panel. `parent` is that
+    # window (see WebServer.__init__).
+
+    @gui_thread_sync
+    def _ensure_panel(self, accessor):
+        """Build a lazy main-window panel by accessor name; return it.
+
+        Dispatched to the GUI thread because it may construct widgets.
+        Returns None when the window has no such accessor (nothing to do
+        but log — the caller reports an error to the client).
+        """
+        ensure = getattr(self.parent(), accessor, None)
+        if ensure is None:
+            logger.warning(f"[WebServer] {accessor} is not available")
+            return None
+        return ensure()
 
     def program_state(self):
         return StateManager.GetFullState()
@@ -219,7 +239,11 @@ class WebServerActions(QThread):
         index = int(index) - 1
         if not 0 <= index < len(comms.SLOTS):
             return f"ERROR : index must be 1..{len(comms.SLOTS)}"
-        self.commentaryWidget.ChangeCommDataSignal.emit(index, data)
+        widget = (AutonaCommentaryWidget.instance
+                  or self._ensure_panel("EnsureCommentaryPanel"))
+        if widget is None:
+            return "ERROR : commentary panel unavailable"
+        widget.ChangeCommDataSignal.emit(index, data)
 
         return "OK"
 
@@ -441,8 +465,16 @@ class WebServerActions(QThread):
         # panel resolves the fixed target (the tournament's final double
         # elimination phase) and re-fetches it, queuing behind a phases fetch
         # when needed.
+        #
+        # The panel is built on demand rather than left to the fallback below
+        # (startup Step 4b-2): before that step it always existed, so taking
+        # the fallback for an unopened panel would change what this route
+        # does — the raw fetch below emits tournament_phasegroup_updated,
+        # which with no Top 8 panel listening updates nothing. The fallback
+        # stays for the case where the panel cannot be built at all.
         from .AutonaTop8Widget import AutonaTop8Widget
-        panel = AutonaTop8Widget.instance
+        panel = (AutonaTop8Widget.instance
+                 or self._ensure_panel("EnsureTop8Panel"))
         if panel is not None:
             panel.RefreshPhaseGroup()
             return "OK"
@@ -515,7 +547,11 @@ class WebServerActions(QThread):
         index = int(index) - 1
         if not 0 <= index < 8:
             return "ERROR : index must be 1..8"
-        self.commentaryWidget.LoadCommFromTagSignal.emit(index, tag, no_mains)
+        widget = (AutonaCommentaryWidget.instance
+                  or self._ensure_panel("EnsureCommentaryPanel"))
+        if widget is None:
+            return "ERROR : commentary panel unavailable"
+        widget.LoadCommFromTagSignal.emit(index, tag, no_mains)
 
     def load_tournament(self, url=None):
         logger.error(f"URL PROVIDED: {url}")
