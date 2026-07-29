@@ -52,6 +52,30 @@ class AutonaBadWordFilter():
     patterns = defaultdict(re.Pattern)
     whiteList = []
     blackList = []
+    _initialized = False
+
+    def Initialize():
+        """Build the bad-word tries and load the user white/black lists.
+
+        Used to run at import time; it is now called explicitly from
+        src/bootstrap.py so that importing this module has no side effect
+        (LoadWordList creates ./user_data/badword_*.txt on first run).
+        Idempotent: the tries are cumulative, so re-running would only
+        rebuild identical patterns.
+        """
+        if AutonaBadWordFilter._initialized:
+            return
+        AutonaBadWordFilter._initialized = True
+
+        # LoadWordList writes into ./user_data; SettingsManager.Initialize()
+        # creates that directory, but do not depend on call order here.
+        os.makedirs("./user_data", exist_ok=True)
+
+        AutonaBadWordFilter.LoadBadWordList()
+        AutonaBadWordFilter.whiteList = AutonaBadWordFilter.LoadWordList(
+            "badword_whitelist.txt")
+        AutonaBadWordFilter.blackList = AutonaBadWordFilter.LoadWordList(
+            "badword_blacklist.txt")
 
     def LoadBadWordList():
         langs = defaultdict(set)
@@ -255,10 +279,3 @@ class AutonaBadWordFilter():
             return set([remove_accents_lower(w) for w in words if len(w) > 0])
         except:
             logger.error(traceback.format_exc())
-
-
-AutonaBadWordFilter.LoadBadWordList()
-AutonaBadWordFilter.whiteList = AutonaBadWordFilter.LoadWordList(
-    "badword_whitelist.txt")
-AutonaBadWordFilter.blackList = AutonaBadWordFilter.LoadWordList(
-    "badword_blacklist.txt")
