@@ -218,9 +218,14 @@ class AutonaSettingsWindow(QDialog):
         # duplicated those keys (and carried two dead ones: show_birthday /
         # show_controller) so it was removed.
 
-        self.resize(1000, 500)
-        QApplication.processEvents()
-        splitter.setSizes([200, self.width()-200])
+        # Split 200px selection list / rest for the settings pane. The width
+        # is taken from the resize target instead of reading self.width()
+        # after a QApplication.processEvents() call: UiMounted() now runs from
+        # the menu action handler on first open, and re-entering the event
+        # loop inside a signal handler is forbidden (agent-pitfalls #9).
+        width = 1000
+        self.resize(width, 500)
+        splitter.setSizes([200, width - 200])
 
     def on_selection_changed(self, index):
         # Get the selected item and its associated widget

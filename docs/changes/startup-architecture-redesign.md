@@ -200,6 +200,20 @@ STARTUP phase=hydrated elapsed=12.0s
 - splash はほぼ目標圏（2.3〜3.1s。QtWidgets DLL ロードが支配的で、cold cache で伸びる）
 - import-src は cache 状態で 4〜13 秒振れる → Step 2 の excludes 削減と Step 3 の import 副作用全廃の対象
 
+### Step 2+3 完了時点（frozen exe・実機、2026-07-29 19:21 記録・ビルド直後 = cold 寄り）
+
+| phase | Step 1 基準（warm） | Step 1 基準（cold 寄り） | **Step 2+3 完了（cold 寄り）** |
+|-------|--------------------:|-------------------------:|-------------------------------:|
+| gate | 0.09s | 0.16s | 0.07s |
+| splash | 2.31s | 3.12s | 4.80s |
+| import-src | 6.58s | 16.53s | **6.91s** |
+| window-init | 6.59s | 16.56s | 6.92s |
+| core-shown | **27.58s** | **34.49s** | **19.14s** |
+
+- **core-shown はビルド直後（cold 寄り）でも 19.1s** — Step 1 の warm 基準 27.6s 比で −8.4s、cold 基準 34.5s 比で −15.4s
+- **import-src はビルド直後でも 6.9s**（Step 1 では cold で 16.5s）— excludes 削減 + import 副作用全廃の効果で cache 依存の振れが大幅に縮小
+- 残る最大の塊は **window-init → core-shown の約 12 秒**。ログ実測の内訳: WebEngine レンダラ eager 初期化（thumbnail/result、〜3s）→ Flask 起動（〜4s）→ CreateScoreboard 3 面（〜2s）→ 表示。**すべて Step 4（遅延初期化）の対象**であり、目標 `core-shown ≤ 5s` は Step 4 で達成しにいく
+
 ## 4. 決定事項（2026-07-28 PdM 回答済み・旧 Open questions）
 
 1. **2 個目起動時の挙動**: 前面化のみ（通知・トースト等は出さない）

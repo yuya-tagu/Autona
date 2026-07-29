@@ -185,9 +185,12 @@ class AutonaApiInfoWindow(QDialog):
     def _openSettings(self):
         # The Settings dialog (with the Webserver Port field) lives on the
         # main window; reuse it rather than duplicating the port control.
+        # Built on first open by the main window (startup Step 4a), so go
+        # through its accessor rather than a plain attribute.
         window = self.parent()
-        if window is not None and hasattr(window, "settingsWindow"):
-            window.settingsWindow.show()
+        ensure = getattr(window, "EnsureSettingsWindow", None)
+        if ensure is not None:
+            ensure().show()
 
     # ── Reference tab ────────────────────────────────────────────────────
     def _buildReferenceTab(self):
