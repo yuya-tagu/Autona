@@ -565,11 +565,20 @@ class Window(QMainWindow):
         # Former Edit / API Settings / Help menus, merged into one dropdown.
         helpMenu = QMenu(self)
 
-        self.settingsWindow = AutonaSettingsWindow(self)
+        # Lazy dialog slots (startup Step 4a). The settings / guide windows
+        # reachable from this menu are no longer built during startup: each
+        # one is constructed by its Ensure*Window() accessor on first open and
+        # kept afterwards, so state survives close/reopen exactly as before.
+        self._settingsWindow = None
+        self._gameAssetGuideWindow = None
+        self._apiInfoWindow = None
+        self._companionGuideWindow = None
+        self._obsGuideWindow = None
+
         action = helpMenu.addAction(
             QApplication.translate("Settings", "Settings"))
         action.setIcon(QIcon(UI.icon_path('settings.svg')))
-        action.triggered.connect(lambda: self.settingsWindow.show())
+        action.triggered.connect(lambda: self.EnsureSettingsWindow().show())
 
         action = helpMenu.addAction(
             QApplication.translate("app", "Always on top"))
@@ -579,11 +588,11 @@ class Window(QMainWindow):
         helpMenu.addSeparator()
 
         # Guidance for obtaining game assets (not bundled — see A2/copyright).
-        # The window is built lazily in UiMounted below.
-        self.gameAssetGuideWindow = AutonaGameAssetGuideWindow(self)
+        # Built on first open (see EnsureGameAssetGuideWindow).
         action = helpMenu.addAction(
             QApplication.translate("app", "Add game assets"))
-        action.triggered.connect(lambda: self.gameAssetGuideWindow.show())
+        action.triggered.connect(
+            lambda: self.EnsureGameAssetGuideWindow().show())
 
         # Program / game-asset / tournament-term language selectors moved to
         # the Settings window (Help & Settings → Settings → Language).
@@ -669,29 +678,28 @@ class Window(QMainWindow):
 
         # ── API Settings (Help & Settings submenu) ──
         # Entry point for the External Control API (/api/v1/) reference +
-        # tester window. The window itself is built lazily in UiMounted below.
+        # tester window. The window itself is built on first open (see
+        # EnsureApiInfoWindow).
         helpMenu.addSeparator()
-        self.apiInfoWindow = AutonaApiInfoWindow(self)
         apiMenu = helpMenu.addMenu(QApplication.translate("app", "API Settings"))
         action = apiMenu.addAction(
             QApplication.translate("api", "Open reference & tester"))
-        action.triggered.connect(lambda: self.apiInfoWindow.show())
+        action.triggered.connect(lambda: self.EnsureApiInfoWindow().show())
 
         # Connection guide for Bitfocus Companion (which also covers Stream
-        # Deck). Built lazily in UiMounted below.
+        # Deck). Built on first open.
         apiMenu.addSeparator()
-        self.companionGuideWindow = AutonaIntegrationGuideWindow(self)
         action = apiMenu.addAction(
             QApplication.translate("api", "Companion settings"))
-        action.triggered.connect(lambda: self.companionGuideWindow.show())
+        action.triggered.connect(
+            lambda: self.EnsureCompanionGuideWindow().show())
 
         # Connection guide for OBS Studio + Advanced Scene Switcher (ASS):
         # (B) ASS drives /api/v1/ via curl, (D) ASS watches out/ files. Built
-        # lazily in UiMounted below.
-        self.obsGuideWindow = AutonaObsGuideWindow(self)
+        # on first open.
         action = apiMenu.addAction(
             QApplication.translate("api", "OBS / Advanced Scene Switcher"))
-        action.triggered.connect(lambda: self.obsGuideWindow.show())
+        action.triggered.connect(lambda: self.EnsureObsGuideWindow().show())
 
         # ── Help (updates + community) ──
         helpMenu.addSeparator()
@@ -771,10 +779,7 @@ class Window(QMainWindow):
 
         # Prevent tab labels from being elided ("…") — show full text so the
         # tab bar uses horizontal scrolling if it overflows.
-        from qtpy.QtWidgets import QTabBar
-        for bar in self.findChildren(QTabBar):
-            bar.setElideMode(Qt.TextElideMode.ElideNone)
-            bar.setUsesScrollButtons(True)
+        self._ApplyTabBarPolicy(self)
 
         # NOTE: countries are loaded once, early in __init__ (see
         # AutonaCountryHelper.instance.init() above). The second, identical
@@ -782,11 +787,9 @@ class Window(QMainWindow):
         # rebuilt the 250-row countryModel from scratch after every widget had
         # already installed the first model — pure duplicate work, and a model
         # swap that agent-pitfalls #13 warns about. Removed.
-        self.settingsWindow.UiMounted()
-        self.apiInfoWindow.UiMounted()
-        self.companionGuideWindow.UiMounted()
-        self.obsGuideWindow.UiMounted()
-        self.gameAssetGuideWindow.UiMounted()
+        # NOTE: the settings / guide dialogs used to be constructed above and
+        # UiMounted() here. They are built on first open instead (Step 4a) —
+        # see the Ensure*Window() accessors.
         # self.layoutOptions.UiMounted()
         AutonaTournamentDataProvider.instance.UiMounted()
         AutonaGameAssetManager.instance.UiMounted()
@@ -838,6 +841,53 @@ class Window(QMainWindow):
             self._on_status_changed)
 
         StateManager.ReleaseSaving()
+
+    # ── Lazy settings / guide dialogs (startup Step 4a) ──────────────────
+    # Each of these five dialogs is only reachable from a menu entry, so
+    # building them during startup charged every launch for UI nobody had
+    # asked for. They are constructed on first access and reused from then
+    # on, which keeps the previous behaviour of a single long-lived instance
+    # (state survives close/reopen).
+
+    def _EnsureLazyWindow(self, attr, factory):
+        """Build the dialog held in `attr` on first access; return it.
+
+        The slot is filled *before* UiMounted() runs so that a re-entrant
+        call during the build (nested event dispatch) reuses the same object
+        instead of constructing a second dialog (agent-pitfalls #9).
+        """
+        window = getattr(self, attr)
+        if window is None:
+            window = factory(self)
+            setattr(self, attr, window)
+            window.UiMounted()
+            # Startup applies the tab-bar policy to every child that exists
+            # at that point; dialogs born later need the same treatment.
+            self._ApplyTabBarPolicy(window)
+        return window
+
+    def EnsureSettingsWindow(self):
+        return self._EnsureLazyWindow("_settingsWindow", AutonaSettingsWindow)
+
+    def EnsureGameAssetGuideWindow(self):
+        return self._EnsureLazyWindow(
+            "_gameAssetGuideWindow", AutonaGameAssetGuideWindow)
+
+    def EnsureApiInfoWindow(self):
+        return self._EnsureLazyWindow("_apiInfoWindow", AutonaApiInfoWindow)
+
+    def EnsureCompanionGuideWindow(self):
+        return self._EnsureLazyWindow(
+            "_companionGuideWindow", AutonaIntegrationGuideWindow)
+
+    def EnsureObsGuideWindow(self):
+        return self._EnsureLazyWindow("_obsGuideWindow", AutonaObsGuideWindow)
+
+    def _ApplyTabBarPolicy(self, root):
+        """Show full tab labels ("…" elision off) and scroll on overflow."""
+        for bar in root.findChildren(QTabBar):
+            bar.setElideMode(Qt.TextElideMode.ElideNone)
+            bar.setUsesScrollButtons(True)
 
     @Slot(str, int, int)
     def _on_status_changed(self, message: str, progress: int, total: int):
@@ -1044,7 +1094,7 @@ class Window(QMainWindow):
             self.gameMenu.addSeparator()
             self.gameMenu.addAction(
                 QApplication.translate("app", "Add game assets")).triggered.connect(
-                lambda: self.gameAssetGuideWindow.show())
+                lambda: self.EnsureGameAssetGuideWindow().show())
             self.SetGame()
 
     def ToggleAlwaysOnTop(self, checked):

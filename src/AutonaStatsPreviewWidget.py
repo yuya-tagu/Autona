@@ -233,15 +233,16 @@ class AutonaStatsPreviewWidget(QDockWidget):
     def _openCompanionGuide(self):
         """Open the shared Companion guide dialog owned by the main window.
 
-        Looked up lazily (not held as a reference): this panel is built
-        before Window creates the dialog, and the panel must not break if
-        the attribute is ever absent.
+        Looked up lazily (not held as a reference): the dialog itself is
+        built on first open by the main window (startup Step 4a), and this
+        panel must not break if the accessor is ever absent.
         """
-        guide = getattr(self.window(), "companionGuideWindow", None)
-        if guide is None:
+        ensure = getattr(self.window(), "EnsureCompanionGuideWindow", None)
+        if ensure is None:
             logger.warning(
                 "Stats preview: Companion guide window is not available")
             return
+        guide = ensure()
         guide.show()
         guide.raise_()
         guide.activateWindow()
