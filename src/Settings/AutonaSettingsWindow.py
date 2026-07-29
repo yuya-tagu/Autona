@@ -184,7 +184,8 @@ class AutonaSettingsWindow(QDialog):
             QApplication.translate("settings.hotkeys", "Enable hotkeys"),
             "hotkeys_enabled",
             "checkbox",
-            True
+            True,
+            AutonaHotkeys.instance.ApplyEnabledSetting
         ))
 
         key_names = {
