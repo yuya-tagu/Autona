@@ -55,12 +55,20 @@ class ResultRenderer(QObject):
     _instance = None
 
     @classmethod
-    def instance(cls):
+    def instance(cls, initial_layout=None):
+        """Return the process-wide renderer, building it on first use.
+
+        `initial_layout` selects the layout used for the very first page
+        load. Callers that already know which layout they need (the Result
+        panel knows the current battle format) pass it so the renderer does
+        not load the default layout and immediately replace it with a second
+        page load. Ignored once the singleton exists.
+        """
         if cls._instance is None:
-            cls._instance = cls()
+            cls._instance = cls(initial_layout)
         return cls._instance
 
-    def __init__(self):
+    def __init__(self, initial_layout=None):
         super().__init__()
 
         self._page = _ResultPage()
@@ -92,7 +100,11 @@ class ResultRenderer(QObject):
         self._page.loadFinished.connect(self._on_load_finished)
         self._page.titleChanged.connect(self._on_title_changed)
 
-        self._load_layout(DEFAULT_LAYOUT)
+        # Normalise here rather than in _load_layout: that method sets
+        # _current_layout from its argument, so an unknown name would leave
+        # the tracked layout out of sync with the page actually loaded.
+        self._load_layout(
+            initial_layout if initial_layout in LAYOUTS else DEFAULT_LAYOUT)
 
     def _load_layout(self, layout_name):
         layout = LAYOUTS.get(layout_name, LAYOUTS[DEFAULT_LAYOUT])
