@@ -305,13 +305,28 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
         self._previewTimer.setInterval(300)
         self._previewTimer.timeout.connect(self._doGeneratePreview)
 
-        # Connect renderer signal for async preview updates
-        from .thumbnail.ThumbnailRenderer import ThumbnailRenderer
-        self._renderer = ThumbnailRenderer.instance()
-        self._renderer.renderComplete.connect(self._onRenderComplete)
+        # Renderer is built on first reveal, not here: the off-screen
+        # QWebEngineView plus its initial page load and first render cost ~3s
+        # of startup for a panel most launches never open (startup Step
+        # 4b-1). See _EnsureRenderer.
+        self._renderer = None
 
         self.updateFromSettings()
-        self.GeneratePreview()
+
+    def _EnsureRenderer(self):
+        """Build the off-screen renderer on first panel reveal; return it.
+
+        Deliberately NOT called from the background signal handlers wired in
+        __init__: letting a tournament fetch or a game reload spin the
+        renderer up behind the scenes would give back the startup time this
+        deferral buys. Those paths skip rendering while _renderer is None and
+        showEvent re-renders from the latest state, so nothing is lost.
+        """
+        if self._renderer is None:
+            from .thumbnail.ThumbnailRenderer import ThumbnailRenderer
+            self._renderer = ThumbnailRenderer.instance()
+            self._renderer.renderComplete.connect(self._onRenderComplete)
+        return self._renderer
 
     def showEvent(self, e):
         super().showEvent(e)
@@ -319,6 +334,7 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
         # scores) don't emit the signals connected above, so re-render with
         # the latest state whenever the panel is revealed. Non-forced title
         # refresh preserves any manual edit to the video title.
+        self._EnsureRenderer()
         self.GeneratePreview()
         self._RefreshVideoTitle()
 
@@ -620,6 +636,11 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
 
     def _doGeneratePreview(self):
         """Prepare data and start async render (non-blocking)."""
+        # Skip entirely until the panel has been shown once (see
+        # _EnsureRenderer). Every caller reaches here again via showEvent, so
+        # a skipped update is re-rendered on reveal.
+        if self._renderer is None:
+            return
         try:
             SettingsManager.LoadSettings()
             self.updateFromSettings()

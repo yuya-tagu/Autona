@@ -451,9 +451,10 @@ class AutonaResultSettingsWidget(QDockWidget):
         self._previewTimer.timeout.connect(self._doGeneratePreview)
 
         # --- Renderer ---
-        from .result.ResultRenderer import ResultRenderer
-        self._renderer = ResultRenderer.instance()
-        self._renderer.renderComplete.connect(self._onRenderComplete)
+        # Built on first reveal, not here: the off-screen QWebEngineView plus
+        # its initial page load cost ~3s of startup for a panel most launches
+        # never open (startup Step 4b-1). See _EnsureRenderer.
+        self._renderer = None
 
         # Reload character models and preview when game changes
         AutonaGameAssetManager.instance.signals.onLoad.connect(
@@ -1076,13 +1077,40 @@ class AutonaResultSettingsWidget(QDockWidget):
         else:
             self._previewTimer.start()
 
+    def _EnsureRenderer(self):
+        """Build the off-screen renderer on first panel reveal; return it.
+
+        Deliberately NOT called from the background signal handlers wired in
+        __init__: letting a tournament fetch or a game reload spin the
+        renderer up behind the scenes would give back the startup time this
+        deferral buys. Those paths skip rendering while _renderer is None and
+        showEvent re-renders from the latest state, so nothing is lost.
+
+        The layout is resolved here rather than left to the renderer's
+        default: by the time the panel is first shown, Window.SetBattleFormat
+        has already put layoutCombo on the right entry, so the first page
+        load is the correct one and the old load-default-then-reload pair is
+        gone.
+        """
+        if self._renderer is None:
+            from .result.ResultRenderer import ResultRenderer
+            self._renderer = ResultRenderer.instance(self._selectedLayout())
+            self._renderer.renderComplete.connect(self._onRenderComplete)
+        return self._renderer
+
     def showEvent(self, e):
         super().showEvent(e)
         # No manual update button: tournament info edited elsewhere feeds the
         # rendered image, so re-render when the panel is revealed.
+        self._EnsureRenderer()
         self._previewTimer.start()
 
     def _doGeneratePreview(self):
+        # Skip entirely until the panel has been shown once (see
+        # _EnsureRenderer). Every caller reaches here again via showEvent's
+        # timer, so a skipped update is re-rendered on reveal.
+        if self._renderer is None:
+            return
         try:
             data, config = result_gen.prepare_data(
                 settingsManager=SettingsManager,
