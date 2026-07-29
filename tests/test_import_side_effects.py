@@ -2,20 +2,30 @@
 
 Step 3 of the startup redesign moves every singleton construction out of
 module level and into src/bootstrap.py. This test pins down what has already
-been migrated: importing StateManager / AutonaHotkeys must not build a
-QApplication, must not create the AutonaHotkeys instance, and must not touch
-the filesystem below the current working directory (./out).
+been migrated: importing StateManager / AutonaHotkeys / AutonaGameAssetManager
+/ AutonaPlayerDB / AutonaTournamentDataProvider must not build a QApplication,
+must not create any of those singleton instances, and must not touch the
+filesystem below the current working directory (./out, ./user_data/games).
 
 It runs in a subprocess because the checks are about a *fresh* interpreter:
 once any other test has imported these modules, the side effects (or their
 absence) can no longer be observed. conftest's direct_import() cannot be used
-either -- both modules use relative imports, so they need a parent package.
+either -- the modules use relative imports, so they need a parent package.
 The subprocess therefore registers a bare types.ModuleType("src") with a
 __path__ pointing at src/, which makes `src.StateManager` importable *without*
 executing src/__init__.py (that would pull in Autona.py and boot the whole
 app; agent-pitfalls #1).
+
+The temporary working directory is seeded with a few data files because
+AutonaResolve() resolves against Path.cwd() captured at import time
+(src/Helpers/AutonaDirHelper.py): AutonaLocaleHelper raises at import when it
+cannot read src/i18n/mapping.json or ./assets/data_countries.json, and
+StartGGDataProvider reads its GraphQL query files at import. Seeding those
+makes the import *possible*; it does not hide any write, since every path
+asserted below is deliberately left absent.
 """
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -42,28 +52,74 @@ sys.modules["src"] = pkg
 
 state_manager = importlib.import_module("src.StateManager").StateManager
 hotkeys = importlib.import_module("src.AutonaHotkeys").AutonaHotkeys
+game_assets = importlib.import_module(
+    "src.AutonaGameAssetManager").AutonaGameAssetManager
+# PlayerDB is imported explicitly, and before the provider that pulls it in
+# anyway, because its module tail used to reach into
+# AutonaGameAssetManager.instance.signals -- an import-time dependency on
+# another module's singleton. That wiring now lives in bootstrap_core().
+player_db = importlib.import_module("src.AutonaPlayerDB").AutonaPlayerDB
+tdp = importlib.import_module(
+    "src.AutonaTournamentDataProvider").AutonaTournamentDataProvider
 
 from qtpy.QtWidgets import QApplication
 
 assert QApplication.instance() is None, "import created a QApplication"
 assert hotkeys.instance is None, "import created AutonaHotkeys.instance"
+assert game_assets.instance is None, \
+    "import created AutonaGameAssetManager.instance"
+assert tdp.instance is None, \
+    "import created AutonaTournamentDataProvider.instance"
 assert not os.path.exists("./out"), "import created ./out"
+assert not os.path.exists("./user_data/games"), \
+    "import created ./user_data/games"
 
 # Positive control: the work simply moved to the explicit entry point, so
 # the test cannot pass just because the code stopped working.
 state_manager.Initialize()
 assert os.path.isdir("./out"), "Initialize() did not create ./out"
 
+# Same for the GameAssetManager: its ./user_data/games guarantee moved from
+# module level into __init__. StateManager.Initialize() has to run first --
+# the constructor writes the "game" state key.
+game_assets.instance = game_assets()
+assert os.path.isdir("./user_data/games"), \
+    "AutonaGameAssetManager() did not create ./user_data/games"
+
 print("OK")
 '''
 
+# Files the import chain reads through AutonaResolve() (cwd-relative). See the
+# module docstring; without these the imports raise before any assertion runs.
+_SEED_FILES = [
+    "src/i18n/mapping.json",
+    "assets/data_countries.json",
+]
 
-def test_core_modules_have_no_import_side_effects(tmp_path):
+
+def _seed_cwd(tmp_path):
     # SettingsManager is not migrated yet: it reads/writes
     # ./user_data/settings.json at import time, and StateManager imports it.
-    # Pre-creating the directory keeps that known remaining side effect from
-    # failing the run; it is deliberately not asserted against here.
+    # AutonaCountryHelper is not migrated either and still builds its instance
+    # at import (pulled in via StartGGDataProvider). Both are known remaining
+    # side effects, deliberately not asserted against here.
     (tmp_path / "user_data").mkdir()
+
+    for rel in _SEED_FILES:
+        dest = tmp_path / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(PROJECT_ROOT / rel, dest)
+
+    # StartGGDataProvider assigns its GraphQL queries to class attributes at
+    # import time, reading them from src/TournamentDataProvider/.
+    query_dir = tmp_path / "src" / "TournamentDataProvider"
+    query_dir.mkdir(parents=True, exist_ok=True)
+    for query_file in (SRC_ROOT / "TournamentDataProvider").glob("StartGG*Query.txt"):
+        shutil.copyfile(query_file, query_dir / query_file.name)
+
+
+def test_core_modules_have_no_import_side_effects(tmp_path):
+    _seed_cwd(tmp_path)
 
     env = dict(os.environ)
     env["QT_API"] = "pyside6"

@@ -48,4 +48,30 @@ def bootstrap_core():
     if AutonaHotkeys.instance is None:
         AutonaHotkeys.instance = AutonaHotkeys()
 
+    # GameAssetManager writes StateManager's "game" key in its __init__, so it
+    # has to come after StateManager.Initialize() above. It loads no asset
+    # here: the games/characters scan runs later, from UiMounted().
+    from .AutonaGameAssetManager import AutonaGameAssetManager
+    if AutonaGameAssetManager.instance is None:
+        AutonaGameAssetManager.instance = AutonaGameAssetManager()
+
+    # PlayerDB's model rebuild must be wired to GameAssetManager.onLoad before
+    # the first LoadGames() (UiMounted). This used to be an import-time side
+    # effect at the bottom of AutonaPlayerDB, which silently required
+    # GameAssetManager.instance to exist before *anything* imported PlayerDB --
+    # including TournamentDataProvider and StartGGDataProvider, which both do.
+    # PlayerDB is a static class, so there is no instance to create here, only
+    # this wiring.
+    from .AutonaPlayerDB import AutonaPlayerDB
+    AutonaGameAssetManager.instance.signals.onLoad.connect(
+        AutonaPlayerDB.SetupModel)
+
+    # ORDER CONSTRAINT: AutonaTournamentDataProvider.__init__ connects to
+    # AutonaGameAssetManager.instance.signals, so the GameAssetManager above
+    # must already be constructed. This used to be an implicit import-order
+    # rule in Autona.py (agent-pitfalls #2); it is an explicit call order now.
+    from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
+    if AutonaTournamentDataProvider.instance is None:
+        AutonaTournamentDataProvider.instance = AutonaTournamentDataProvider()
+
     logger.debug("bootstrap_core complete")

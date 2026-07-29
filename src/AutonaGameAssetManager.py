@@ -42,6 +42,12 @@ class AutonaGameAssetManager(QObject):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        # LoadGames() lists ./user_data/games unconditionally, so the manager
+        # guarantees its own data directory. This used to sit at module level
+        # next to the singleton construction; it belongs to __init__ rather
+        # than to bootstrap so that the invariant travels with the object that
+        # depends on it.
+        os.makedirs("./user_data/games", exist_ok=True)
         self.signals = AutonaGameAssetManagerSignals()
         self.games = {}
         self.characters = {}
@@ -1444,10 +1450,3 @@ class AutonaGameAssetManager(QObject):
         stage = next((s for s in self.stages.items() if str(
             s[1].get("smashgg_id")) == str(smashgg_id)), None)
         return stage
-
-
-if not os.path.exists("./user_data/games"):
-    os.makedirs("./user_data/games")
-
-if AutonaGameAssetManager.instance == None:
-    AutonaGameAssetManager.instance = AutonaGameAssetManager()

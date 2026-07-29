@@ -149,12 +149,12 @@ def catchtime(msg = ''):
     logger.info(f'{msg} Time: {perf_counter() - start:.3f} seconds')
 
 # Explicit construction of the core singletons (composition root). This must
-# stay ABOVE the import block below: those modules build the singletons that
-# read StateManager in their __init__ (GameAssetManager / TournamentDataProvider
-# / ScoreboardManager ...), and the settings-window chain used to be what
-# implicitly created AutonaHotkeys.instance. Running bootstrap_core() here
-# keeps the effective initialization order identical to the old import-time
-# side effects.
+# stay ABOVE the import block below: the singletons still built at import time
+# there (ScoreboardManager / AlertNotification / CountryHelper ...) read
+# StateManager and the already-migrated instances in their __init__, and the
+# settings-window chain used to be what implicitly created
+# AutonaHotkeys.instance. Running bootstrap_core() here keeps the effective
+# initialization order identical to the old import-time side effects.
 from .bootstrap import bootstrap_core
 bootstrap_core()
 

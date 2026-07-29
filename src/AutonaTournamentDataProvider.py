@@ -413,6 +413,3 @@ class AutonaTournamentDataProvider(QObject):
 
     def GetProvider(self):
         return self.provider
-
-
-AutonaTournamentDataProvider.instance = AutonaTournamentDataProvider()
