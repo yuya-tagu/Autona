@@ -4,9 +4,10 @@ Step 3 of the startup redesign moves every singleton construction out of
 module level and into src/bootstrap.py. This test pins down what has already
 been migrated: importing StateManager / AutonaHotkeys / AutonaGameAssetManager
 / AutonaPlayerDB / AutonaTournamentDataProvider / AutonaAlertNotification /
-AutonaUpdater must not build a QApplication, must not create any of those
-singleton instances, and must not touch the filesystem below the current
-working directory (./out, ./user_data/games, ./user_data/alerts_red.json).
+AutonaUpdater / AutonaCountryHelper / AutonaScoreboardManager must not build a
+QApplication, must not create any of those singleton instances, and must not
+touch the filesystem below the current working directory (./out,
+./user_data/games, ./user_data/alerts_red.json).
 
 It runs in a subprocess because the checks are about a *fresh* interpreter:
 once any other test has imported these modules, the side effects (or their
@@ -20,10 +21,12 @@ app; agent-pitfalls #1).
 The temporary working directory is seeded with a few data files because
 AutonaResolve() resolves against Path.cwd() captured at import time
 (src/Helpers/AutonaDirHelper.py): AutonaLocaleHelper raises at import when it
-cannot read src/i18n/mapping.json or ./assets/data_countries.json, and
-StartGGDataProvider reads its GraphQL query files at import. Seeding those
-makes the import *possible*; it does not hide any write, since every path
-asserted below is deliberately left absent.
+cannot read src/i18n/mapping.json or ./assets/data_countries.json,
+StartGGDataProvider reads its GraphQL query files at import, and
+AutonaBadWordFilter (reached through the scoreboard widget tree) reads
+./assets/ngword/. Seeding those makes the import *possible* and keeps the
+subprocess output free of swallowed FileNotFoundError tracebacks; it does not
+hide any write, since every path asserted below is deliberately left absent.
 """
 import os
 import shutil
@@ -65,6 +68,14 @@ tdp = importlib.import_module(
 alerts = importlib.import_module(
     "src.AutonaAlertNotification").AutonaAlertNotification
 updater = importlib.import_module("src.AutonaUpdater").AutonaUpdater
+country_helper = importlib.import_module(
+    "src.Helpers.AutonaCountryHelper").AutonaCountryHelper
+# ScoreboardManager drags in the whole scoreboard widget tree
+# (AutonaScoreboardWidget / AutonaCrewBattleWidget and ~16 further modules),
+# which is precisely the point: none of them may build a widget or a
+# singleton while merely being imported.
+scoreboard_manager = importlib.import_module(
+    "src.AutonaScoreboardManager").AutonaScoreboardManager
 
 from qtpy.QtWidgets import QApplication
 
@@ -77,6 +88,10 @@ assert tdp.instance is None, \
 assert alerts.instance is None, \
     "import created AutonaAlertNotification.instance"
 assert updater.instance is None, "import created AutonaUpdater.instance"
+assert country_helper.instance is None, \
+    "import created AutonaCountryHelper.instance"
+assert scoreboard_manager.instance is None, \
+    "import created AutonaScoreboardManager.instance"
 assert not os.path.exists("./out"), "import created ./out"
 assert not os.path.exists("./user_data/games"), \
     "import created ./user_data/games"
@@ -102,6 +117,12 @@ alerts.instance = alerts()
 assert os.path.isfile("./user_data/alerts_red.json"), \
     "AutonaAlertNotification() did not create ./user_data/alerts_red.json"
 
+# No positive control for AutonaCountryHelper (its __init__ is empty; the real
+# work is LoadCountries(), driven from init()) and none for
+# AutonaScoreboardManager either: it is a QDockWidget, and constructing a
+# QWidget without a QApplication aborts the interpreter, which would take this
+# whole subprocess down. The import-time assertions above are the contract.
+
 print("OK")
 '''
 
@@ -112,19 +133,28 @@ _SEED_FILES = [
     "assets/data_countries.json",
 ]
 
+# Same, for whole directories read at import time.
+_SEED_DIRS = [
+    "assets/ngword",
+]
+
 
 def _seed_cwd(tmp_path):
-    # SettingsManager is not migrated yet: it reads/writes
-    # ./user_data/settings.json at import time, and StateManager imports it.
-    # AutonaCountryHelper is not migrated either and still builds its instance
-    # at import (pulled in via StartGGDataProvider). Both are known remaining
-    # side effects, deliberately not asserted against here.
+    # Known remaining import-time side effects, deliberately not asserted
+    # against here, all of which need ./user_data to exist:
+    # - SettingsManager reads/writes ./user_data/settings.json (StateManager
+    #   imports it),
+    # - AutonaBadWordFilter creates ./user_data/badword_{white,black}list.txt
+    #   (reached through the scoreboard widget tree).
     (tmp_path / "user_data").mkdir()
 
     for rel in _SEED_FILES:
         dest = tmp_path / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(PROJECT_ROOT / rel, dest)
+
+    for rel in _SEED_DIRS:
+        shutil.copytree(PROJECT_ROOT / rel, tmp_path / rel)
 
     # StartGGDataProvider assigns its GraphQL queries to class attributes at
     # import time, reading them from src/TournamentDataProvider/.

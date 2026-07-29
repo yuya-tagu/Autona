@@ -88,4 +88,29 @@ def bootstrap_core():
     if AutonaUpdater.instance is None:
         AutonaUpdater.instance = AutonaUpdater()
 
+    # CountryHelper's __init__ is empty -- the expensive part (LoadCountries,
+    # ~250 flag icons + the country model) still runs from init(), called by
+    # the window. Its import-time construction used to happen wherever the
+    # module was first pulled in (in practice through StartGGDataProvider,
+    # i.e. earlier than the Autona.py import that nominally owned it); the
+    # constructor depends on nothing, so pinning it here is behaviour
+    # preserving and matches the old nominal import order (CountryHelper
+    # before ScoreboardManager).
+    from .Helpers.AutonaCountryHelper import AutonaCountryHelper
+    if AutonaCountryHelper.instance is None:
+        AutonaCountryHelper.instance = AutonaCountryHelper()
+
+    # ORDER CONSTRAINT: AutonaScoreboardManager is a QDockWidget, so a
+    # QApplication must already exist -- constructing a QWidget without one
+    # aborts the process at the C++ level. That holds at every entry point:
+    # main.py builds the QApplication before `import src`, and Autona.py:48-50
+    # keeps a fallback for PyInstaller's dependency-analysis subprocess, which
+    # imports this package without main.py. Both run before bootstrap_core().
+    # It also calls StateManager.Unset("score") in __init__, so it must come
+    # after StateManager.Initialize() above. The boards themselves are not
+    # built here: CreateScoreboard() is called later, from the window.
+    from .AutonaScoreboardManager import AutonaScoreboardManager
+    if AutonaScoreboardManager.instance is None:
+        AutonaScoreboardManager.instance = AutonaScoreboardManager()
+
     logger.debug("bootstrap_core complete")

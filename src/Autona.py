@@ -149,10 +149,10 @@ def catchtime(msg = ''):
     logger.info(f'{msg} Time: {perf_counter() - start:.3f} seconds')
 
 # Explicit construction of the core singletons (composition root). This must
-# stay ABOVE the import block below: the singletons still built at import time
-# there (ScoreboardManager / AlertNotification / CountryHelper ...) read
-# StateManager and the already-migrated instances in their __init__, and the
-# settings-window chain used to be what implicitly created
+# stay ABOVE the import block below: what is still built at import time there
+# (AutonaWebServer's Flask/SocketIO class body, SettingsManager, LocaleHelper,
+# StartGGDataProvider ...) reads StateManager and the already-migrated
+# instances, and the settings-window chain used to be what implicitly created
 # AutonaHotkeys.instance. Running bootstrap_core() here keeps the effective
 # initialization order identical to the old import-time side effects.
 from .bootstrap import bootstrap_core
