@@ -122,7 +122,7 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 | **R-PyQt-5** | QSpinBox.valueChanged 等のシグナル内から QMessageBox.exec() を呼ばない（C++ クラッシュ事例あり） |
 | **R-PyQt-6** | カスタム描画（paintEvent）は QPainter / QPainterPath のみ使用、QGraphicsScene.clear() の連続呼び出し禁止 |
 
-**ドックウィジェット一覧** — 詳細は §4.1 参照。
+**パネル一覧** — 詳細は §4.1 参照。
 
 **使われない領域**:
 - 配信画面の表示（OBS HTML が担当）
@@ -334,8 +334,9 @@ game
 
 ##### `top8` — Top 8 ブラケット
 
-旧 `bracket.*` は Top 8 専用化（2026-07）で廃止。`AutonaTop8Widget` が起動時に
-`StateManager.Unset("bracket")` で残留キーを掃除する。トポロジーと進出伝播の正本は
+旧 `bracket.*` は Top 8 専用化（2026-07）で廃止。残留キーの掃除と `top8.*` の正規化は
+`Window._SeedPanelState()` が起動時に行う（パネルが lazy 構築のため、旧 `AutonaTop8Widget.__init__`
+から移動。§4.1.1）。トポロジーと進出伝播の正本は
 `src/AutonaTop8Model.py`（FGC 標準ダブルエリミ: Winners 4 名 + Losers 4 名）。
 
 ```
@@ -361,7 +362,8 @@ top8
 欠番概念なし（旧「Unset 時に詰める」運用は廃止）。正規化・表示選択ルールの
 正本は `src/AutonaCommentaryModel.py`。旧スキーマ（seed / country / character /
 mains / custom_textbox 等）は起動時の `NormalizeState` でマイグレーションされる
-（custom_textbox → note、その他は破棄）。状態は再起動をまたいで永続化される。
+（custom_textbox → note、その他は破棄）。呼び出しは `Window._SeedPanelState()`
+（パネルが lazy 構築のため。§4.1.1）。状態は再起動をまたいで永続化される。
 
 ```
 commentary
@@ -428,8 +430,8 @@ stream
 ##### `notes` / `team_battle` / `layout_options` / `provider_videogame` / `completed_sets` / `streamQueue` / `currentStream` / `result_players`
 
 > 旧 `player_list.*`（PLAYERS 順位ロスター編集）は機能ごと廃止（layout/top_8 と共に削除、
-> Top-8 は `top8.*` → `layout/bracket_top8/` に一本化）。起動時に
-> `AutonaPlayerBrowserWidget.__init__` が残留キーを Unset する。
+> Top-8 は `top8.*` → `layout/bracket_top8/` に一本化）。残留キー（`player_list` /
+> `player_editor`）は起動時に `Window._SeedPanelState()` が Unset する。
 
 詳細は [.claude/architecture/phase-a-b/state-keys.md](.claude/architecture/phase-a-b/state-keys.md) 参照。
 
@@ -549,7 +551,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | ホットキー（ユーザー上書き） | `./user_data/settings.json` の `hotkeys` キー | JSON | `AutonaHotkeys` | PyQt 設定ダイアログ |
 | ホットキー（デフォルト定義） | `src/AutonaHotkeys.py` のクラス定数 | Python | `AutonaHotkeys` | コード変更のみ |
 | ウィンドウ位置・サイズ | QSettings（Windows レジストリ） | バイナリ | `Window` | 自動保存 |
-| ドックウィジェット配置 | QSettings（`windowState_v{STATE_VERSION}`） | バイナリ | `Window` | 自動保存 |
+| サイドバー選択・折りたたみ | QSettings（`sidebarIndex_v{STATE_VERSION}` / `sidebarCollapsed_v{STATE_VERSION}`） | バイナリ | `Window` | 自動保存 |
 | 選手 DB | `./user_data/local_players.json` | JSON 配列 | `AutonaPlayerDB` | PyQt の Player List + 直接 JSON 編集 |
 | ルールセット（キャッシュ） | `./user_data/rulesets.json` | JSON | tournament provider | API 取得時に自動更新 |
 | ゲームアセット定義 | `./user_data/games/{game}/{asset_type}/config.json` | JSON | `AutonaGameAssetManager` | アセット追加時に手動編集 |
@@ -601,10 +603,10 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 
 #### 3.3.5 STATE_VERSION とマイグレーション
 
-- `windowState_v{N}` のキー名は `STATE_VERSION = 8` に依存（[Autona.py:183](src/Autona.py#L183)）
-- `STATE_VERSION` をインクリメントすると既存ユーザーのドック配置が初期化される
+- `sidebarIndex_v{N}` / `sidebarCollapsed_v{N}` のキー名は `Window.STATE_VERSION`（現在 22）に依存（`src/Autona.py`）。旧 `windowState_v{N}`（`QMainWindow.saveState`）はナビ刷新で不使用
+- `STATE_VERSION` をインクリメントすると既存ユーザーのサイドバー選択状態が初期化される
 - インクリメントが必要なケース:
-  - ドックウィジェットの追加・削除
+  - パネル（ナビ項目）の追加・削除・並び順変更
   - `.ui` ファイルの `objectName` 変更（state 互換が壊れる時）
 - 同 `STATE_VERSION` 内では既存 state との互換性を維持する
 
@@ -612,9 +614,14 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 
 ## 4. 画面仕様
 
-### 4.1 PyQt ドックウィジェット一覧と責務
+### 4.1 PyQt パネル一覧と責務
 
-`Autona.py` の `Window`（QMainWindow、`STATE_VERSION = 12`）が以下のドックを管理する。
+`Autona.py` の `Window`（QMainWindow、`STATE_VERSION = 22`）が以下のパネルを管理する。
+
+**構築タイミング**: 起動時に構築されるのは `Tournament Info` と `Scoreboard`（アクティブな
+`battle_format` の board 1 面のみ）だけで、**残りのパネルは初回表示時にファクトリで構築**される
+（起動再設計 Step 4b。§4.1.1）。「デフォルト表示」列は QSettings に保存された最後の選択に
+依存し、初期値は先頭ページ。
 
 | # | objectName | クラス | 主な責務 | 入力先 (Set) | 表示元 (Get) | デフォルト表示 |
 |---|------------|-------|---------|------------|------------|--------------|
@@ -624,7 +631,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | 3 | `Result Settings` | `AutonaResultSettingsWidget` | リザルトレイアウト選択・選手入力・プレビュー・PNG/JPG 保存・クリップボードコピー | `result_config.*`, `result_players` | `tournamentInfo.*`, `result_players` | ✓ |
 | 4 | `Top8` | `AutonaTop8Widget` | Top 8 ダブルエリミの選手・試合スコア編集、Start.gg 読み込み、OBS 用 URL 案内・プレビュー | `top8.*` | `top8.*`, `tournamentInfo.*` | ✓ |
 | 5 | `Scoreboard` | `AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget` | board1=1v1、board2=team、board3=crew のスコア入力・選手編集・セット読み込み | `score.{N}.*` | `score.{N}.*`, `game.*` | ✓ |
-| 6 | `Commentary` | `AutonaCommentaryWidget` | 実況・解説者 8 スロットの編集（役割・コメント・表示トグル）、OBS 用 URL 案内・プレビュー | `commentary.{1..8}.*` | `commentary.{1..8}.*`, `tournamentInfo.*` | ✓ |
+| 6 | `Commentary` | `AutonaCommentaryWidget` | 実況・解説者 12 スロットの編集（役割・コメント・表示トグル）、OBS 用 URL 案内・プレビュー | `commentary.{1..12}.*` | `commentary.{1..12}.*`, `tournamentInfo.*` | ✓ |
 | 7 | `Statistics` | `AutonaStatsWidget` | 内部 `QTabWidget` で複数ビューを集約（下記 §4.1.0） | （read-only） | `score.{N}.recent_sets`, `last_sets`, `upset_factor` ほか | ✓ |
 | 8 | `Players` | `AutonaPlayerBrowserWidget` | 選手一覧（2タブ）: トーナメント出場選手（provider.top_entrants ＋ ローカルDB 突き合わせ、シード順、P1/P2 セット）／登録済み選手（ローカル選手DB の閲覧・検索・新規登録・編集・削除） | `player_editor.1.*`（編集ダイアログの一時パス、close で Unset） | `AutonaPlayerDB.database`, `provider.top_entrants`（state 非依存） | ✓ |
 
@@ -638,7 +645,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 > **共有 2 列グリッド（`AutonaScoreboardWidget.columns`、2026-07）**: チームカード・スコアパネル・アクション行は**単一の QGridLayout**（列 stretch 1:1）に載せる。行0 = 1P カード｜2P カード、行1 = スコアパネル（2 列スパン）、行2 = 反映｜すべての入力値をリセット。**行ごとに独立した HBox を使わないこと** — 各行が自コンテンツから別々の「中央」を計算して縦軸がずれるのが過去の不揃いの根本原因（プローブ実測でグリッド共有はカード等幅・行間の軸一致を保証）。**スコア操作専用のサイズ/タイポグラフィは全廃**（旧 `SCORE_PANEL_CTRL_H` / `score_btn_style` / `score_display_style` トークンは削除済み）: 全コントロールはグローバル QSS の標準サイズ。スコア表示スピンボックスのみ「中央揃え・矢印なし」（±ボタンがインクリメント役のため）。
 > **チームカード（2026-07、Web `Team.jsx` パリティ）**: 各チーム列は Paper 風カード（共通 QSS `QWidget#teamCard` / `QFrame#scorePanelCard`、`_styleTeamCard`）。ヘッダー行は敗者側チェックボックス（右）。シングルボードでは 1P/2P ラベルは**表示しない** — 列の識別はプレイヤー名欄のプレースホルダー「{0}Pプレイヤー名」（teamNumber ベース）が担う。チームボードのみ「TEAM N」ラベル＋チーム名欄を表示。詳細リンクの文言は「>>詳細」。
 
-##### 4.1.0 Statistics ドック内タブ（`AutonaStatsWidget.tabs`）
+##### 4.1.0 Statistics パネル内タブ（`AutonaStatsWidget.tabs`）
 
 | サブタブ | 担当パネル | 入力先 / 表示元 |
 |---------|-----------|---------------|
@@ -661,10 +668,18 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 - 追加・削除時は `STATE_VERSION` を **必ずインクリメント**する
 - **objectName は内部 ID として固定**する。i18n の対象は `setWindowTitle` などの**表示名のみ**で、objectName は不変
 - objectName を変更する場合は `STATE_VERSION` インクリメントに加えて、必要に応じて**保存済み state / QSettings のマイグレーション処理を実装**する
-- `Autona.py` の `self._navPanels` に `(panel, 'icon.svg')` を表示順で追加する
-  （ナビ項目ラベルは `panel.windowTitle()`、アイコンは `assets/icons/`）
+- `Autona.py` の `self._navSections`（カテゴリ単位のリスト）に
+  `(panel, 'icon.svg', ナビラベル, None)` を表示順で追加する（アイコンは `assets/icons/`）
+- **重いパネルは遅延構築**（起動再設計 Step 4b）: `panel` の代わりに `self._CreateXxxPanel`
+  ファクトリと lazy キーを渡す（`(self._CreateXxxPanel, 'icon.svg', ラベル, 'キー')`）。stack には
+  プレースホルダが入り、初回表示時に `_EnsurePanelAt` が差し替える（ナビ index == stack index を維持）。
+  外部から構築を強制する経路（ホットキー・外部制御 API 等）には `EnsureXxxPanel()` アクセサを足す
+- **パネル未構築でも成立させる**: 起動時に必要な state のシード・正規化・廃止キー掃除は
+  パネルの `__init__` ではなく `Window._SeedPanelState()` に置く（board スケルトンは
+  `AutonaScoreboardManager.CreateScoreboard()`）。グローバルシグナルへの接続も Window 側に置く
+- 手順の詳細は [.claude/rules/python-widgets.md](../rules/python-widgets.md)「パネル登録」
 
-#### 4.1.2 ドック内の標準パターン
+#### 4.1.2 パネル内の標準パターン
 
 | パターン | 内容 |
 |---------|------|
@@ -1373,7 +1388,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 - StateManager
 - React Web UI
 
-### 7.5 新ドックウィジェットの追加
+### 7.5 新パネルの追加
 
 例: 試合タイマー `AutonaMatchTimerWidget` を追加する。
 
@@ -1383,22 +1398,23 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 |---|---------|------|
 | 1 | `src/AutonaMatchTimerWidget.py` | 新ウィジェットクラス（`QDockWidget` 継承、`__init__` で `setWindowTitle()` 必須） |
 | 2 | `src/layout/AutonaMatchTimer.ui` | UI 定義（必要に応じて） |
-| 3 | `src/Autona.py` | import 追加、インスタンス生成、`setObjectName`、`addDockWidget`、`tabifyDockWidget`、`STATE_VERSION` インクリメント |
-| 4 | `src/AutonaDockTabTheme.py` の `TAB_SHORT_LABELS` | サイドバー用 6 文字以内の短縮ラベル |
-| 5 | `Design.md` §4.1 の表 | ドック一覧に追加 |
+| 3 | `src/Autona.py` | import 追加、`_navSections` への登録（eager ならインスタンス生成 + `setObjectName` + `dockWidgets` 追加、重いパネルなら `_CreateXxxPanel` ファクトリ）、`STATE_VERSION` インクリメント |
+| 4 | `Design.md` §4.1 の表 | パネル一覧に追加 |
 
 #### 触るファイル（任意）
 
 | # | ファイル | 内容 |
 |---|---------|------|
-| 6 | `src/ui_constants.py` | ウィジェット固有のスタイル関数追加（必要時） |
-| 7 | `src/StateManager.py` | キー初期化（必要時。動的キーなら不要） |
+| 5 | `src/ui_constants.py` | ウィジェット固有のスタイル関数追加（必要時） |
+| 6 | `src/StateManager.py` | キー初期化（必要時。動的キーなら不要） |
 
 #### 注意
 
 - `setObjectName()` は **Autona.py 側で設定**する（ウィジェット自身では設定しない、`.claude/rules/python-widgets.md`）
 - `STATE_VERSION` インクリメント忘れで既存ユーザーが新ウィジェットを見られなくなる
 - `signals` への `connect` は `__init__` 内で行う
+- 遅延構築にする場合、パネル未構築でも成立させるべき初期化（state のシード・正規化・グローバル
+  シグナル接続）は `__init__` に置かず `Window._SeedPanelState()` / Window 側へ寄せる（§4.1.1）
 
 ### 7.6 新 State キーパスの追加
 

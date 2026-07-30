@@ -116,23 +116,28 @@ python main.py                                        # 開発時の実行（基
 
 ### デスクトップアプリ (`src/`) — 主要コンポーネント
 
-Python / PySide6（qtpy 経由）のドックウィジェットベース。
+Python / PySide6（qtpy 経由）。各パネルは `QDockWidget` サブクラスだがドックせず、左サイドバー + 中央 `QStackedWidget` のページとして表示する。
 
 | コンポーネント | ファイル | 役割 |
 |--------------|---------|------|
-| **Window** | `Autona.py` | QMainWindow。QMenuBar + 全ドックウィジェット管理。STATE_VERSION でレイアウト復元 |
+| **bootstrap** | `bootstrap.py` | composition root。シングルトン生成順の**正本**（`bootstrap_core()`）。`src.*` の import は副作用ゼロ |
+| **Window** | `Autona.py` | QMainWindow。サイドバー + QStackedWidget で全パネル管理。起動時構築は Tournament Info と Scoreboard のみで、他パネル・設定ウィンドウは初回表示時に構築 |
 | **StateManager** | `StateManager.py` | グローバル状態（nested dict）。deepdiff でデルタ算出、ファイル出力 + WebSocket 配信 |
 | **SettingsManager** | `SettingsManager.py` | ユーザー設定の永続化（JSON） |
-| **AutonaScoreboardManager** | `AutonaScoreboardManager.py` | シングルトン。board1=1v1、board2=team、board3=crew を生成し、`scoreboard.battle_format` で表示切替 |
+| **AutonaScoreboardManager** | `AutonaScoreboardManager.py` | シングルトン。board1=1v1、board2=team、board3=crew を `scoreboard.battle_format` で表示切替。起動時はアクティブ形式の 1 面のみ構築し、他は形式切替 / `GetScoreboard()` で随時構築 |
 | **AutonaScoreboardWidget** | `AutonaScoreboardWidget.py` | 1v1 / team スコアボード本体。通常スコア操作・選手編集・セット読み込みを担当 |
 | **AutonaTournamentDataProvider** | `AutonaTournamentDataProvider.py` | シングルトン。Start.gg 等からのデータ取得オーケストレーション |
 | **AutonaGameAssetManager** | `AutonaGameAssetManager.py` | シングルトン。ゲーム別キャラ/ステージ/アイコン管理 |
 | **AutonaPlayerDB** | `AutonaPlayerDB.py` | ローカル選手DB（static クラス、`user_data/local_players.json`） |
-| **AutonaWebServer** | `AutonaWebServer.py` | QThread。Flask + SocketIO で Web UI にリアルタイム配信 |
+| **AutonaWebServer** | `AutonaWebServer.py` | QThread。Flask + SocketIO で Web UI にリアルタイム配信。構築・起動はウィンドウ表示後（`Window._StartWebServer()`） |
 | **AutonaHotkeys** | `AutonaHotkeys.py` | シングルトン。pynput によるグローバルホットキー |
 
+**起動シーケンス**（4 段。詳細は [docs/changes/startup-architecture-redesign.md](docs/changes/startup-architecture-redesign.md) / [ADR-003](docs/decisions/ADR-003-startup-architecture.md)）:
+`main.py` の単一インスタンスゲート → QApplication + スプラッシュ → `from src import Autona`（`bootstrap_core()` でシングルトン生成）→ `Window.__init__`（最小コアのみ構築）→ `show()` → WebServer を非同期起動。所要時間は `STARTUP phase=...` ログ（gate / splash / import-src / window-init / core-shown / webserver-ready）で計測する。
+
 **重要なパターン:**
-- **シングルトン**: `*.instance`（ScoreboardManager, GameAssetManager, TournamentDataProvider, Hotkeys, AlertNotification）
+- **シングルトン**: `*.instance`（ScoreboardManager, GameAssetManager, TournamentDataProvider, Hotkeys, AlertNotification）。生成は `bootstrap.py` のみで行い、モジュール末尾では作らない
+- **遅延構築**: サイドバーのパネルと設定/ガイドウィンドウは初回アクセス時にファクトリで構築（`_Create*Panel` / `Ensure*Window`）。未構築でも必要な state のシードは `Window._SeedPanelState()` に集約
 - **スレッドセーフ**: StateManager は `threading.RLock`、PlayerDB は `multiprocessing.Lock`
 - **Qt Signal/Slot**: 各コンポーネントに `*Signals(QObject)` クラスが対応
 - **Context Manager**: `StateManager.SaveBlock()` で一括更新時のファイル書き込み抑制

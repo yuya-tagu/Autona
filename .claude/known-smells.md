@@ -55,18 +55,29 @@
 
 ---
 
-## S-03: God __init__ — Autona.Window [P2/D3/S3] 🔴 未着手
+## S-03: God __init__ — Autona.Window [P2/D3/S3] 🟡 一部改善（起動再設計 Step 3/4）
 
 **根拠**: python-hotspots.md「God __init__」セクション
 
-**2026-06-24 検証**: `Window.__init__` は記述の 629行 → **662行**（`src/Autona.py` 199〜860行、ファイル総行数 1162行）。全ドックウィジェット生成・メニューバー構築・レイアウト復元・シングルトン初期化の Phase 2-3 を含む状況は変わらず。
+**2026-06-24 検証**: `Window.__init__` は記述の 629行 → **662行**（`src/Autona.py` 199〜860行、ファイル総行数 1162行）。
 
-**対策案**:
-`_create_dock_widgets()`, `_build_menu_bar()`, `_restore_layout()`, `_mount_ui()` 等に分割。
+**2026-07-30 再検証（起動再設計後）**: `Window.__init__` は `src/Autona.py` 243〜842行（約 600行）。
+肥大自体は残るが、内訳は大きく変わった:
 
-**影響範囲**: `Autona.py` のみ。ただし全シングルトンの初期化順序に影響しうる。
+- **シングルトン生成は抜けた** — `src/bootstrap.py` の `bootstrap_core()` が担う（Step 3）
+- **メニューバー構築は消滅** — サイドバー（`AutonaSidebar`）+ `QStackedWidget` に置換
+- **レイアウト復元は QSettings の `sidebarIndex_v{N}` / `sidebarCollapsed_v{N}` のみ**（`saveState/restoreState` 不使用）
+- **パネル生成は 2 個だけ**（Tournament Info + Scoreboard）。残りは `_Create*Panel` ファクトリ +
+  `_EnsurePanelAt` の遅延構築、設定/ガイド 5 ウィンドウは `Ensure*Window`（Step 4a/4b）
+- WebServer 構築・起動は `_StartWebServer()` に分離（Step 4c）
 
-**リスク**: singleton-init-order.md で特定した初期化順序依存（AutonaGameAssetManager → AutonaTournamentDataProvider）を壊す可能性。分割後も import 順序は変えないこと。
+**残る対策案**: サイドバーのナビ/メニュー組み立て（`helpMenu` / `startggMenu` / ゲームセレクタ）と
+ステータスバー構築を `_BuildHelpMenu()` / `_BuildOperationsHeader()` / `_BuildStatusBar()` 等へ分割。
+
+**影響範囲**: `Autona.py` のみ。
+
+**リスク**: `_navSections` の構築順（ナビ index == stack index）と QSettings 復元・`_EnsurePanelAt` の
+呼び出し順に依存があるため、分割時は順序を保つこと。
 
 ---
 
@@ -179,37 +190,44 @@ pronoun 撤去）。現行挙動に合わせ修復し **62件グリーン化済�
 
 ---
 
-## S-10: モジュールトップレベルのシングルトン生成 [P3/D3/S3] 🔴 未着手
+## S-10: モジュールトップレベルのシングルトン生成 [P3/D3/S3] ✅ 解消（起動再設計 Step 3・2026-07-29）
 
 **根拠**: singleton-init-order.md「暗黙の初期化順序リスク #2」
 
-**2026-06-24 検証**: `.instance =` パターンは記述の 8個 → **11クラス**に増えている。遅延初期化 `get_instance()` への移行は未実施。
+**2026-06-24 検証**: `.instance =` パターンは記述の 8個 → **11クラス**に増えていた。
 - モジュール末尾でトップレベル実行（条件付き含む）: `AutonaAlertNotification`, `AutonaHotkeys`, `AutonaScoreboardManager`, `AutonaTournamentDataProvider`, `AutonaUpdater`, `AutonaCountryHelper`, `AutonaControllerHelper`, `AutonaGameAssetManager`
 - `__init__` 内で `self` 代入（遅延割り当ての一種）: `AutonaAnalysisWidget`, `AutonaBracketWidget`
 
-import 時に副作用（GUI 操作含む）が発生するため pytest でのユニットテストが困難。
+**2026-07-30 解消確認**: 起動アーキテクチャ再設計 Step 3（`docs/changes/startup-architecture-redesign.md`）で
+モジュールレベル生成を全廃した。採用したのは当初案の `get_instance()` ではなく **composition root**
+（`src/bootstrap.py` の `bootstrap_core()`）で、`.instance` 参照側は 1 行も変えずに済んでいる。
 
-**対策案**:
-遅延初期化パターン（`@classmethod def get_instance(cls)`）への移行。ただし全コードベースで `.instance` を参照しているため影響範囲が非常に広い。
+- `src.*` の import は副作用ゼロ（QApplication 生成・シングルトン生成・ファイル I/O なし）。
+  唯一の例外は組み立てモジュール `src/Autona.py`
+- 生成順は `bootstrap_core()` に明示され、順序制約の理由は `ORDER CONSTRAINT:` コメントに併記
+- `tests/test_import_side_effects.py` が subprocess で副作用ゼロを pin（テスト側を緩めないこと）
+- `AutonaControllerHelper` / `AutonaBracketWidget` は機能ごと削除済み
 
-**影響範囲**: 全ファイル。段階的に進める必要あり。
-
-**リスク**: 初期化順序の暗黙的保証が崩れる。singleton-init-order.md の依存グラフを参照しながら進めること。
+**影響範囲**: （対応不要。ルールは `.claude/rules/agent-pitfalls.md` #1・#2 が正）
 
 ---
 
-## S-11: `from . import ui_constants` のパッケージ経由 import [P3/D1/S2] ❌ 却下（前提無効・2026-06-24）
+## S-11: `from . import ui_constants` のパッケージ経由 import [P3/D1/S2] ❌ 却下（前提無効・2026-06-24／2026-07-30 再確認）
 
 **根拠（当初）**: python-imports.md「間接循環」、singleton-init-order.md「リスク #3」
 
 **2026-06-24 却下判断**: 本項目の前提（import スタイル変更で `src/__init__.py` → Autona.py の連鎖を回避できる）は技術的に成立しないため却下する。
 
-1. **連鎖は回避不能**: `src` のサブモジュールを import すると、`from . import ui_constants` でも `from .ui_constants import X` でも、必ず先に `src/__init__.py`（=`from .Autona import Window, App`）が実行される。これは Python の仕様で、形式変更では連鎖は消えない。
-2. **テスト分離に無関係**: `tests/conftest.py` の `direct_import()` は `spec_from_file_location` で `src` パッケージを完全にバイパスする。UI ウィジェット群は相対 import 多数でそもそも direct_import 不可のため、どちらの形式でもテスト容易性は変わらない。
+1. **連鎖は回避不能**（※当時。下記 2026-07-30 追記のとおり連鎖そのものが消滅）: `src` のサブモジュールを import すると、`from . import ui_constants` でも `from .ui_constants import X` でも、必ず先に `src/__init__.py`（=`from .Autona import Window, App`）が実行される。これは Python の仕様で、形式変更では連鎖は消えない。
+2. **テスト分離に無関係**: 当時のテストは `spec_from_file_location` で `src` パッケージをバイパスする `direct_import()` を使っていた。UI ウィジェット群は相対 import 多数でそもそも direct_import 不可のため、どちらの形式でもテスト容易性は変わらなかった。
 3. **「直接 import 化」は D1 ではない**: `UI.` エイリアスを保ったまま直接 import する手段が無く、真に直接 import 化するには `from .ui_constants import FONT_SM, global_qss, ...` へ変え、**140箇所の `UI.x` → `x` を全書き換え**＋ファイル別シンボル列挙が必要。アプリ全体の UI モジュールへの純粋な churn で、機能・テスト容易性の利得ゼロ、リグレッションリスクのみ。
 4. 唯一の理論的利点（間接循環）は現代 Python が `from . import X` で吸収済みで、現在アプリは正常起動している。
 
-現状（参考）: `from . import ui_constants as UI` を13ファイルが使用、`UI.` 参照は計140箇所。テスト容易性を本気で上げたいなら本項目ではなく **S-10（シングルトン遅延初期化）** が本丸。
+**2026-07-30 追記（却下は維持、前提の消滅）**: 起動再設計 Step 3 で `src/__init__.py` は docstring のみの
+空 init になり、**却下理由 1 の「連鎖」自体が存在しない**。`direct_import()` も削除され、テストは
+`from src.XXX import YYY` の通常 import を使う（`.claude/rules/agent-pitfalls.md` #1 が正）。
+テスト容易性の本丸だった S-10 も composition root 化で解消済み。よって本項目は
+「やる理由がさらに無くなった」状態で、判断は却下のまま。
 
 **影響範囲**: （対応不要）
 
@@ -219,11 +237,12 @@ import 時に副作用（GUI 操作含む）が発生するため pytest での�
 
 **根拠**: state-keys.md「要注意事項 #4」
 
-**現状（2026-07 再確認）**:
+**現状（2026-07 再確認・2026-07-30 更新）**:
 実況・解説リワーク（docs/changes/commentary-rework-impact-analysis.md）で
-`commentary.{1..8}` のスロット固定制になり、動的増減・欠番・詰め直し
+`commentary.{1..12}` のスロット固定制になり、動的増減・欠番・詰め直し
 （旧 `_compactCommentaryState`）の概念自体が消滅した。正規化は
-`AutonaCommentaryModel.NormalizeState` が起動時に一括で行う。
+`AutonaCommentaryModel.NormalizeState` が起動時に一括で行う（呼び出しは
+パネル `__init__` から `Window._SeedPanelState()` へ移動。パネルが遅延構築のため）。
 
 **影響範囲**: `AutonaCommentaryWidget.py` / `AutonaCommentaryModel.py`
 
@@ -248,7 +267,7 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, b
 **根拠**: state-keys.md「要注意事項 #2」
 
 **2026-06-24 検証**: 記述どおり現存。`element.objectName()` をキーパスに使用しているのは **5ファイル**:
-`AutonaScoreboardWidget.py`, `AutonaTournamentInfoWidget.py`, `AutonaScoreboardPlayerWidget.py`, `AutonaTeamPlayerWidget.py`（`AutonaBasePlayerWidget.py` は `objectName() != ""` の検査のみでキーパス用途ではない）。※ かつて該当した `AutonaNotesWidget.py` は NOTE タブ廃止に伴い 2026-07-01 削除。`.ui` の objectName 変更でキーパスが壊れ、既存 `program_state.json` との互換が失われるリスクが継続（`STATE_VERSION` は Qt ドックレイアウト用で state スキーマのマイグレーション層は無い）。
+`AutonaScoreboardWidget.py`, `AutonaTournamentInfoWidget.py`, `AutonaScoreboardPlayerWidget.py`, `AutonaTeamPlayerWidget.py`（`AutonaBasePlayerWidget.py` は `objectName() != ""` の検査のみでキーパス用途ではない）。※ かつて該当した `AutonaNotesWidget.py` は NOTE タブ廃止に伴い 2026-07-01 削除。`.ui` の objectName 変更でキーパスが壊れ、既存 `program_state.json` との互換が失われるリスクが継続（`STATE_VERSION` はサイドバーのナビ構成用で、state スキーマのマイグレーション層は無い）。
 
 **2026-06-27 ガード導入（ランタイム不変・zero-risk）**: フル移行（明示キーのマッピング層＋データマイグレーション）は S3 で「低リスク」条件から外れるため見送り。代わりに**実行時の挙動を一切変えず**、契約を破る変更を検知する `tests/test_objectname_keypath_contract.py`（3テスト）を追加:
 - `.ui` の入力ウィジェット objectName 集合をスナップショット固定（リネーム/削除を検知）
@@ -358,7 +377,12 @@ grep -rEn "open\([^,]+,\s*['\"](w|wb|a)|json\.dump|shutil\.copy|\.save\(|os\.ren
 
 ---
 
-## S-16: 起動ヘルパーの GUI スレッド占有（ControllerHelper / CountryHelper）[P3/D2/S3] 🔴 未着手（別 PR 候補）
+## S-16: 起動ヘルパーの GUI スレッド占有（CountryHelper）[P3/D2/S3] 🟡 半減（別 PR 候補）
+
+> **2026-07-30 更新**: `AutonaControllerHelper` はコントローラ機能ごと削除済み（`src/Helpers/` に
+> 存在しない）ため、本項目の対象は `AutonaCountryHelper.LoadCountries` のみ。呼び出し位置も
+> `AutonaCountryHelper.instance.init()`（`Window.__init__` の前半・GUI 同期）に変わっている
+> （旧 `src/Autona.py:258/259` の 2 箇所ではない。重複呼び出しは起動再設計 Step 2 で解消）。
 
 **根拠**: 2026-06-29「ゲームアセット起動フリーズ」修正（アセット情報の単一真実源化, PR #82）の横展開調査。
 GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src/ で洗った際に発見。
@@ -369,25 +393,23 @@ GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src
 
 | 箇所 | 欠陥 | コンテキスト |
 |------|------|------------|
-| `AutonaControllerHelper.BuildControllerTree`（[src/Helpers/AutonaControllerHelper.py:30-91](src/Helpers/AutonaControllerHelper.py)） | `glob("*/*/*/")` + コントローラ毎に manufacturer/type の config.json を再読込（共有ファイルを重複オープン）+ 複数 isfile | 起動時 GUI 同期（[src/Autona.py:258](src/Autona.py)） |
-| `AutonaCountryHelper.LoadCountries`（[src/Helpers/AutonaCountryHelper.py:77-216](src/Helpers/AutonaCountryHelper.py)） | JSON ロード/パース（slim ~2MB / full ~46MB フォールバック）+ countries dict 構築 + cities 逆引き + additional_flag listdir。※`QIcon(path)` は遅延デコードなので画像自体は軽い | 起動時 GUI 同期（[src/Autona.py:259](src/Autona.py)） |
+| `AutonaCountryHelper.LoadCountries`（[src/Helpers/AutonaCountryHelper.py:77-216](src/Helpers/AutonaCountryHelper.py)） | JSON ロード/パース（slim ~2MB / full ~46MB フォールバック）+ countries dict 構築 + cities 逆引き + additional_flag listdir。※`QIcon(path)` は遅延デコードなので画像自体は軽い | `Window.__init__` 前半の `AutonaCountryHelper.instance.init()` で GUI 同期 |
+| ~~`AutonaControllerHelper.BuildControllerTree`~~ | — | 機能ごと削除済み（2026-07。対象外） |
 
 **対策案（データ準備を Worker へ、モデル構築のみ GUI へ）**:
 - CountryHelper: JSON ロード/パース・dict・cities・additional_flag listdir を Worker 側、`countryModel` の
   QStandardItem/`QIcon(path)` 構築のみ GUI 側で実行し `countriesUpdated.emit()`。
-- ControllerHelper: `BuildControllerTree`（FS 走査）を Worker、`UpdateControllerModel` を GUI。
-  併せて manufacturer/type config の重複読込をメモ化（同期のままでも有効な低リスク改善）。
 
 **実装前確認で判明した障害（S3 たる所以・2026-06-29）**:
 1. **同期フォールバックとの二重ビルド**: [src/AutonaBasePlayerWidget.py:355-356](src/AutonaBasePlayerWidget.py)
    が「`countryModel` が None なら自前で同期 `LoadCountries()` を実行」する。非同期化すると起動時に
    選手ウィジェットが先行した場合 GUI スレッドで二重ビルドが起きる。回避には同期フォールバックの無効化が必要。
-2. **ControllerHelper に更新シグナルが無い**（CountryHelper の `countriesUpdated` 相当が無い）。
-   非同期化には新規シグナル + 消費側の再バインド追加が必要。
-3. **コストが症状ではない**: 一回限り・上限ありの起動コスト（Country は slim JSON で軽量）。
+2. **コストが症状ではない**: 一回限り・上限ありの起動コスト（Country は slim JSON で軽量）。
 
-**影響範囲**: `src/Helpers/AutonaControllerHelper.py`, `src/Helpers/AutonaCountryHelper.py`,
+**影響範囲**: `src/Helpers/AutonaCountryHelper.py`,
 `src/AutonaBasePlayerWidget.py`（同期フォールバック調整）, 選手ウィジェット（再バインド）
 
 **リスク**: モデル非同期化で「構築完了までモデルが空」の時間窓が生じる。一回限り・非症状コストに対し
-回帰リスクが見合わないため、PR #82 では見送り（PdM 判断）。将来やるなら上記障害 1〜2 の解消込みで。
+回帰リスクが見合わないため、PR #82 では見送り（PdM 判断）。将来やるなら上記障害 1 の解消込みで。
+起動時間の観点では、`init()` が `Window.__init__` の GUI 同期区間に残る（起動再設計 §3
+「今後の候補」の対象外＝別枠）。
