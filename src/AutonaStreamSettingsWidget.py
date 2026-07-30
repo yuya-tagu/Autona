@@ -66,17 +66,13 @@ class AutonaStreamSettingsWidget(QDockWidget):
         scroll.setWidget(self._contents)
         self.setWidget(scroll)
 
-        # Drop residual keys from the pre-配信設定 layouts so an upgraded
-        # program_state.json doesn't keep broadcasting them:
-        #  - tournamentInfo.streamTitleEdit: the stream title used to live on
-        #    the EVENT tab, where the generic "every QLineEdit becomes
-        #    tournamentInfo.{objectName}" loop published it. Nothing read it.
-        #  - tournamentInfo.streamUrl: the destination's previous home.
-        # Guarded so a fresh install doesn't fire two no-op save cycles at
-        # startup (Unset queues a changed key unconditionally).
-        for stale in ("tournamentInfo.streamTitleEdit", "tournamentInfo.streamUrl"):
-            if StateManager.Get(stale, None) is not None:
-                StateManager.Unset(stale)
+        # NOTE: this panel is built on first reveal (startup Step 4b-3), so
+        # the state it used to seed here has moved to Window._SeedPanelState()
+        # — the residual pre-配信設定 keys (tournamentInfo.streamTitleEdit /
+        # .streamUrl) and the initial stream.orgIconVersion /
+        # stream.orgThumbVersion mtime publish, which OBS overlays need from
+        # launch. UpdateOrgIcon / UpdateOrgThumbnail below still republish
+        # those versions whenever the assets change.
 
         self._buildStreamDestination()
         self._buildStreamTitle()
