@@ -1822,6 +1822,16 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>X に投稿できません。以下の項目が未入力です:</translation>
     </message>
     <message>
+        <location filename="..\AutonaScoreboardWidget.py" line="1307" />
+        <source>Thumbnail generation failed, so no image was copied to the clipboard.</source>
+        <translation>サムネイルの生成に失敗したため、画像はクリップボードにコピーされていません。</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaScoreboardWidget.py" line="1318" />
+        <source>Failed to post to X.</source>
+        <translation>Xへの投稿に失敗しました。</translation>
+    </message>
+    <message>
         <location filename="..\AutonaScoreboardWidget.py" line="1328" />
         <source>Load set from {0}</source>
         <translation>{0}からセットデータをロードする</translation>
