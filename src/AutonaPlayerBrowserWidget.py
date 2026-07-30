@@ -100,11 +100,12 @@ class AutonaPlayerBrowserWidget(QDockWidget):
         self.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.setFloating(False)
 
-        # Purge state left behind by removed features / crashed sessions:
-        # player_list.* was written by the retired PLAYERS roster editor and
-        # would otherwise be restored from old program_state.json forever.
-        StateManager.Unset("player_list")
-        StateManager.Unset(_EDITOR_PATH_BASE)
+        # NOTE: this panel is built on first reveal (startup Step 4b-3), so
+        # the purge of state left behind by removed features / crashed
+        # sessions (player_list.* from the retired PLAYERS roster editor,
+        # player_editor.* from the editor dialog) moved to
+        # Window._SeedPanelState() — it has to happen at every launch, not
+        # only on the launches where the operator opens this panel.
 
         self._entrantsDirty = True
         self._registeredDirty = True

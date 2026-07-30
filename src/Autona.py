@@ -319,7 +319,7 @@ class Window(QMainWindow):
         splash.set_message(splash_msgs[0], progress=0.25)
 
         # State the overlays / Web UI read from launch, seeded before any
-        # panel exists (startup Step 4b-2).
+        # panel exists (startup Step 4b-2 / 4b-3).
         self._SeedPanelState()
 
         # Each panel below is a QDockWidget subclass, but they are no longer
@@ -328,12 +328,21 @@ class Window(QMainWindow):
         # as pages of a QStackedWidget driven by the left sidebar (see the
         # "Sidebar navigation" block further down).
         #
-        # The four preview panels (Board / Top 8 / Commentary / Stats
-        # Display) are NOT built here: each one owns a QWebEngineView and
-        # together they dominated the window-init -> core-shown gap, so they
-        # are constructed the first time their page is revealed (see the
-        # _Create*Panel factories and _EnsurePanelAt).
+        # Only Tournament Info and the Scoreboard are built here. Every other
+        # panel is constructed the first time its page is revealed (see the
+        # _Create*Panel factories and _EnsurePanelAt): the preview panels
+        # (Board / Top 8 / Commentary / Stats Display) each own a
+        # QWebEngineView, and the remaining five (Stream / Thumbnail / Result
+        # / Statistics / Player List) together added ~2.9s to the window-init
+        # -> core-shown gap for UI most launches never open.
         self.dockWidgets = []
+
+        # Filled by _CreateThumbnailPanel / _CreateResultPanel. Declared here
+        # because SetBattleFormat reaches for both on every format switch and
+        # has to skip whichever panel has not been revealed yet; the factory
+        # then catches that panel up to the current format as it builds.
+        self.thumbnailSetting = None
+        self.resultSetting = None
 
         tournamentInfo = AutonaTournamentInfoWidget()
         tournamentInfo.setWindowIcon(QIcon(UI.icon_path('tournament.svg')))
@@ -352,36 +361,14 @@ class Window(QMainWindow):
         # metadata and the broadcast prep are both done before the event, in
         # that order. Deliberately separate from EVENT (tournament-scoped) and
         # SCORE (match-scoped) so each panel owns one level of the hierarchy.
-        from .AutonaStreamSettingsWidget import AutonaStreamSettingsWidget
-        streamSetting = AutonaStreamSettingsWidget()
-        streamSetting.setWindowIcon(QIcon(UI.icon_path('megaphone.svg')))
-        streamSetting.setObjectName("Stream Settings")
-        streamSetting.setWindowTitle(
-            QApplication.translate("app", "Stream Settings"))
-        self.dockWidgets.append(streamSetting)
-
+        # Lazy: see _CreateStreamPanel.
+        #
         # BOARD — pick scoreboard design, tune colors, OBS setup. Placed right
         # after EVENT (it absorbs EVENT's color pickers). Lazy: see
         # _CreateBoardPanel.
-
-        from .AutonaThumbnailSettingsWidget import AutonaThumbnailSettingsWidget
-        # Held so the battle-format switch can hide the team-name toggle in 1v1.
-        self.thumbnailSetting = thumbnailSetting = AutonaThumbnailSettingsWidget()
-        thumbnailSetting.setWindowIcon(QIcon(UI.icon_path('thumbnail.svg')))
-        thumbnailSetting.setObjectName("Thumbnail Settings")
-        thumbnailSetting.setWindowTitle(
-            QApplication.translate("app", "Thumbnail Settings"))
-        self.dockWidgets.append(thumbnailSetting)
-
-        from .AutonaResultSettingsWidget import AutonaResultSettingsWidget
-        # Held so the "対戦形式" menu can switch the result layout to the team
-        # standings variant when team mode is selected.
-        self.resultSetting = resultSetting = AutonaResultSettingsWidget()
-        resultSetting.setWindowIcon(QIcon(UI.icon_path('result.svg')))
-        resultSetting.setObjectName("Result Settings")
-        resultSetting.setWindowTitle(
-            QApplication.translate("app", "Result Settings"))
-        self.dockWidgets.append(resultSetting)
+        #
+        # THUMBNAIL / RESULT — lazy as well: see _CreateThumbnailPanel /
+        # _CreateResultPanel.
 
         splash.set_message(splash_msgs[0], progress=0.40)
 
@@ -413,24 +400,8 @@ class Window(QMainWindow):
         self._shuttingDown = False
         splash.set_message(splash_msgs[1], progress=0.70)
 
-        # ANLYSE is no longer a top-level dock — it is built as a plain panel
-        # here and embedded as a sub-tab inside the STATS dock
-        # ("この大会の試合一覧"). The NOTES dock was removed entirely.
-        self.analysisWidget = AutonaAnalysisWidget()
-
-        self.statsWidget = AutonaStatsWidget(
-            analysisPanel=self.analysisWidget,
-        )
-        self.statsWidget.setWindowIcon(QIcon(UI.icon_path('stats.svg')))
-        self.statsWidget.setObjectName("Statistics")
-        self.statsWidget.setWindowTitle(
-            QApplication.translate("app", "Statistics"))
-        self.dockWidgets.append(self.statsWidget)
-
-        playerBrowser = AutonaPlayerBrowserWidget()
-        playerBrowser.setWindowIcon(QIcon(UI.icon_path('players.svg')))
-        playerBrowser.setObjectName("Players")
-        self.dockWidgets.append(playerBrowser)
+        # STATISTICS (with the absorbed ANLYSE sub-tab) and PLAYER LIST are
+        # lazy too: see _CreateStatsPanel / _CreatePlayerBrowserPanel.
 
         splash.set_message(splash_msgs[1], progress=0.85)
 
@@ -460,8 +431,8 @@ class Window(QMainWindow):
             (QApplication.translate("app", "Setup"), [
                 (tournamentInfo, 'tournament.svg',
                  QApplication.translate("app", "Tournament Info"), None),
-                (streamSetting, 'megaphone.svg',
-                 QApplication.translate("app", "Stream Settings"), None),
+                (self._CreateStreamPanel, 'megaphone.svg',
+                 QApplication.translate("app", "Stream Settings"), "stream"),
             ]),
             (QApplication.translate("app", "ScoreboardCategory"), [
                 (self.scoreboard, 'scoreboard.svg',
@@ -470,10 +441,11 @@ class Window(QMainWindow):
                  QApplication.translate("app", "Board"), "board"),
             ]),
             (QApplication.translate("app", "Display"), [
-                (thumbnailSetting, 'thumbnail.svg',
-                 QApplication.translate("app", "Thumbnail Settings"), None),
-                (resultSetting, 'result.svg',
-                 QApplication.translate("app", "Result Settings"), None),
+                (self._CreateThumbnailPanel, 'thumbnail.svg',
+                 QApplication.translate("app", "Thumbnail Settings"),
+                 "thumbnail"),
+                (self._CreateResultPanel, 'result.svg',
+                 QApplication.translate("app", "Result Settings"), "result"),
                 (self._CreateTop8Panel, 'bracket.svg',
                  QApplication.translate("app", "Top 8 Display Settings"),
                  "top8"),
@@ -484,12 +456,15 @@ class Window(QMainWindow):
                  "statsPreview"),
             ]),
             (QApplication.translate("app", "Data"), [
-                (self.statsWidget, 'stats.svg',
-                 QApplication.translate("app", "Statistics"), None),
-                # The only panel whose title is set by the widget itself
-                # (translate("app", "Player List")), not here.
-                (playerBrowser, 'players.svg',
-                 playerBrowser.windowTitle(), None),
+                (self._CreateStatsPanel, 'stats.svg',
+                 QApplication.translate("app", "Statistics"), "stats"),
+                # The only panel whose title is set by the widget itself, so
+                # the label cannot be read back off the instance while the
+                # panel is still unbuilt. Spelled out here with the exact
+                # same source string AutonaPlayerBrowserWidget.__init__ uses.
+                (self._CreatePlayerBrowserPanel, 'players.svg',
+                 QApplication.translate("app", "Player List"),
+                 "playerBrowser"),
             ]),
         ]
 
@@ -737,11 +712,12 @@ class Window(QMainWindow):
         # Step 4e — the other boards are built the first time they are needed)
         # and apply that format so the board + result layout match. The
         # "Rules" menu switches between them at runtime.
+        # The Result / Thumbnail panels used to be told the format here; they
+        # are lazy now, so each factory applies the current format itself
+        # (startup Step 4b-3).
         battleFormat = self._resolveBattleFormat()
         AutonaScoreboardManager.instance.CreateScoreboard(battleFormat)
         AutonaScoreboardManager.instance.SetBattleFormat(battleFormat)
-        self.resultSetting.SetBattleFormat(battleFormat)
-        self.thumbnailSetting.SetBattleFormat(battleFormat)
 
         self.ReloadGames()
 
@@ -759,6 +735,12 @@ class Window(QMainWindow):
         if self.qtSettings.value(
                 f"sidebarCollapsed_v{self.STATE_VERSION}", False, type=bool):
             self.HideSidebar()
+
+        # currentChanged only fires when the index actually moves, so a
+        # restore that lands back on the page the stack already shows would
+        # leave a lazy panel unbuilt and the page blank. Build whatever page
+        # ends up current, restored or not.
+        self._EnsurePanelAt(self.stack.currentIndex())
 
         splash.set_message(splash_msgs[2], progress=1.0)
         splash.finish(self)
@@ -922,16 +904,23 @@ class Window(QMainWindow):
     def _SeedPanelState(self):
         """Write the panel state the overlays / Web UI read from launch.
 
-        These three seeds used to run inside the Board / Top 8 / Commentary
-        constructors. Those panels are built on first reveal now, so the
-        seeds moved here: they have to run at every launch whether or not
-        the operator ever opens the panel (an OBS overlay reads the theme
-        colors and the commentary slots straight away). Called from
-        __init__ before any panel is built, and necessarily after
+        These seeds used to run inside the Board / Top 8 / Commentary /
+        Stream / Player List constructors. Those panels are built on first
+        reveal now, so the seeds moved here: they have to run at every launch
+        whether or not the operator ever opens the panel (an OBS overlay
+        reads the theme colors and the commentary slots straight away).
+        Called from __init__ before any panel is built, and necessarily after
         StateManager.LoadState() — which ran inside bootstrap_core(), i.e.
         while this module was imported — so what is normalised here is the
         restored program_state.json, not an empty state.
         """
+        # Local imports: both modules are only needed for the constants /
+        # helper below and for their own lazy factories, so nothing here
+        # justifies pulling them into the module-level import block.
+        from .AutonaStreamSettingsWidget import (
+            AutonaStreamSettingsWidget, ORG_ICON_PATH, ORG_THUMB_PATH)
+        from .AutonaPlayerBrowserWidget import _EDITOR_PATH_BASE
+
         with StateManager.SaveBlock():
             # Moved from AutonaBoardWidget.__init__: overlays receive
             # theme/accent before the user touches the color pickers.
@@ -968,12 +957,42 @@ class Window(QMainWindow):
                 "commentary",
                 comms.NormalizeState(StateManager.Get("commentary")))
 
-    # ── Lazy sidebar panels (startup Step 4b-2) ──────────────────────────
-    # The four panels below each own a QWebEngineView; building all of them
-    # up front is what filled the window-init -> core-shown gap. They are
-    # constructed the first time their page is revealed and kept afterwards,
-    # so input values and selections survive switching pages exactly as
-    # before. Everything the panels used to seed into StateManager at
+            # Moved from AutonaStreamSettingsWidget.__init__. The org icon /
+            # thumbnail are served out of ./layout/ and OBS overlays
+            # cache-bust them with these mtimes, so the versions have to be
+            # current from launch whether or not the panel is ever opened.
+            # The panel republishes them itself after a load / reset.
+            AutonaStreamSettingsWidget._publishAssetVersion(
+                "stream.orgIconVersion", ORG_ICON_PATH)
+            AutonaStreamSettingsWidget._publishAssetVersion(
+                "stream.orgThumbVersion", ORG_THUMB_PATH)
+
+            # Also from AutonaStreamSettingsWidget.__init__: residual keys
+            # from the pre-配信設定 layouts, where the stream title and the
+            # destination lived on the EVENT tab. Nothing reads them; drop
+            # them so an upgraded program_state.json stops broadcasting them.
+            # Guarded because Unset queues a changed key unconditionally and
+            # a fresh install would otherwise fire two no-op save cycles.
+            for stale in ("tournamentInfo.streamTitleEdit",
+                          "tournamentInfo.streamUrl"):
+                if StateManager.Get(stale, None) is not None:
+                    StateManager.Unset(stale)
+
+            # Moved from AutonaPlayerBrowserWidget.__init__: state left
+            # behind by removed features / crashed sessions. player_list.*
+            # was written by the retired PLAYERS roster editor and
+            # player_editor.* by the editor dialog, and LoadState would
+            # otherwise restore both forever.
+            StateManager.Unset("player_list")
+            StateManager.Unset(_EDITOR_PATH_BASE)
+
+    # ── Lazy sidebar panels (startup Step 4b-2 / 4b-3) ───────────────────
+    # Every panel below is built the first time its page is revealed and
+    # kept afterwards, so input values and selections survive switching
+    # pages exactly as before. The first four each own a QWebEngineView; the
+    # five added by Step 4b-3 are plain but heavy (large .ui files, editable
+    # combos with completers), and together they filled the window-init ->
+    # core-shown gap. Everything the panels used to seed into StateManager at
     # construction time now runs from _SeedPanelState() instead.
 
     def _CreateBoardPanel(self):
@@ -1007,6 +1026,73 @@ class Window(QMainWindow):
         statsPreview.setWindowTitle(
             QApplication.translate("app", "Stats Display Settings"))
         return statsPreview
+
+    def _CreateStreamPanel(self):
+        from .AutonaStreamSettingsWidget import AutonaStreamSettingsWidget
+        streamSetting = AutonaStreamSettingsWidget()
+        streamSetting.setWindowIcon(QIcon(UI.icon_path('megaphone.svg')))
+        streamSetting.setObjectName("Stream Settings")
+        streamSetting.setWindowTitle(
+            QApplication.translate("app", "Stream Settings"))
+        return streamSetting
+
+    def _CreateThumbnailPanel(self):
+        from .AutonaThumbnailSettingsWidget import AutonaThumbnailSettingsWidget
+        # Held so the battle-format switch can hide the team-name toggle in 1v1.
+        self.thumbnailSetting = thumbnailSetting = AutonaThumbnailSettingsWidget()
+        thumbnailSetting.setWindowIcon(QIcon(UI.icon_path('thumbnail.svg')))
+        thumbnailSetting.setObjectName("Thumbnail Settings")
+        thumbnailSetting.setWindowTitle(
+            QApplication.translate("app", "Thumbnail Settings"))
+        # Catch up on the format switches that happened while this panel did
+        # not exist — SetBattleFormat skips an unbuilt panel. Cheap here: the
+        # thumbnail's SetBattleFormat only toggles the team-name checkbox's
+        # visibility, it does not touch the preview.
+        thumbnailSetting.SetBattleFormat(self._resolveBattleFormat())
+        return thumbnailSetting
+
+    def _CreateResultPanel(self):
+        from .AutonaResultSettingsWidget import AutonaResultSettingsWidget
+        # Held so the "対戦形式" menu can switch the result layout to the team
+        # standings variant when team mode is selected.
+        self.resultSetting = resultSetting = AutonaResultSettingsWidget()
+        resultSetting.setWindowIcon(QIcon(UI.icon_path('result.svg')))
+        resultSetting.setObjectName("Result Settings")
+        resultSetting.setWindowTitle(
+            QApplication.translate("app", "Result Settings"))
+        # Same catch-up as the thumbnail panel, but the order matters here.
+        # SetBattleFormat moves layoutCombo, which fires _onLayoutChanged ->
+        # GeneratePreview(True). Doing it now — inside the factory, i.e.
+        # before _EnsurePanelAt puts the panel on the stack and Qt shows it —
+        # means the panel's renderer is still unbuilt (showEvent builds it),
+        # so that render call returns immediately. The single real render is
+        # then the one showEvent schedules, already on the right layout.
+        # Applying the format after the reveal would instead render the
+        # stale layout first and re-render straight after.
+        resultSetting.SetBattleFormat(self._resolveBattleFormat())
+        return resultSetting
+
+    def _CreateStatsPanel(self):
+        # ANLYSE is not a top-level panel — it is built here and embedded as
+        # a sub-tab inside the STATS panel ("この大会の試合一覧"). The NOTES
+        # dock was removed entirely. Neither widget is referenced outside
+        # this factory, so both stay local to it.
+        analysisWidget = AutonaAnalysisWidget()
+        statsWidget = AutonaStatsWidget(analysisPanel=analysisWidget)
+        statsWidget.setWindowIcon(QIcon(UI.icon_path('stats.svg')))
+        statsWidget.setObjectName("Statistics")
+        statsWidget.setWindowTitle(
+            QApplication.translate("app", "Statistics"))
+        return statsWidget
+
+    def _CreatePlayerBrowserPanel(self):
+        # Sets its own windowTitle (translate("app", "Player List")); the nav
+        # label in _navSections repeats that source string because the panel
+        # does not exist when the sidebar is built.
+        playerBrowser = AutonaPlayerBrowserWidget()
+        playerBrowser.setWindowIcon(QIcon(UI.icon_path('players.svg')))
+        playerBrowser.setObjectName("Players")
+        return playerBrowser
 
     def _PreparePanel(self, dw):
         """Panel post-processing that used to be the loop over dockWidgets.
