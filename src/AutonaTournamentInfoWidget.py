@@ -56,6 +56,17 @@ class AutonaTournamentInfoWidget(QDockWidget):
                 continue
             if isinstance(widget.parent(), QComboBox):
                 continue
+            # Restore the persisted value BEFORE seeding the key. This loop
+            # used to emit editingFinished on the still-empty .ui fields,
+            # writing "" over the tournamentInfo.* keys just restored from
+            # program_state.json. The sidebar tournament button
+            # (Window.UpdateTournamentButton) reads tournamentName from that
+            # state, so a cached tournament came up as "Set tournament" and
+            # stayed there for the whole session.
+            saved = StateManager.Get(
+                f"tournamentInfo.{widget.objectName()}", None)
+            if isinstance(saved, str):
+                widget.setText(saved)
             widget.editingFinished.connect(
                 lambda element=widget: [
                     StateManager.Set(
@@ -102,6 +113,13 @@ class AutonaTournamentInfoWidget(QDockWidget):
             self._onTournamentDataForDisplayName)
 
         for widget in self.findChildren(QSpinBox):
+            # Same one-way restore as the QLineEdit loop above (state -> UI),
+            # done before connecting so it is a plain restore and not a write
+            # back into the state we are reading.
+            saved = StateManager.Get(
+                f"tournamentInfo.{widget.objectName()}", None)
+            if isinstance(saved, int) and not isinstance(saved, bool):
+                widget.setValue(saved)
             widget.valueChanged.connect(lambda value, element=widget: [
                 StateManager.Set(
                     f"tournamentInfo.{element.objectName()}", value)

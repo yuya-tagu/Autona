@@ -590,15 +590,20 @@ class Window(QMainWindow):
             lambda: AutonaTournamentDataProvider.instance.SetTournament(None))
 
         self.sidebar.tournamentButton.setMenu(startggMenu)
-        self.sidebar.tournamentButton.setText(
-            QApplication.translate("app", "Set tournament"))
-        # Lit until a tournament is loaded (tournament_changed clears it via
-        # UpdateTournamentButton below).
-        self._SetPulldownAttention(self.sidebar.tournamentButton, True)
         AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
             self.UpdateTournamentButton)
         AutonaTournamentDataProvider.instance.signals.tournament_url_update.connect(
             lambda *_: self.UpdateTournamentButton())
+        # tournament_changed is emitted from SetTournament *before* the
+        # Start.gg fetch resolves, so on its own it can never show a name that
+        # only arrives with the data — follow the data signal as well.
+        AutonaTournamentDataProvider.instance.signals.tournament_data_updated.connect(
+            self.UpdateTournamentButton)
+        # Seed from the restored state instead of hardcoding the placeholder
+        # here: UpdateTournamentButton is the single owner of both the label
+        # and the attention outline, so a cached tournament is already named
+        # on the first paint.
+        self.UpdateTournamentButton()
 
         # ── Operations: game selector (sidebar header) ──
         # Same widget pattern as the tournament / Help & Settings pulldowns: a
