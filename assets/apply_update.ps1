@@ -235,6 +235,29 @@ function Stop-UpdateAndExit([string]$reason, [string]$userMessage) {
     exit 1
 }
 
+# Runs one robocopy pass and keeps the install window alive while it works.
+# Process.Start (not Start-Process -Wait) so the wait loop can keep painting the
+# window, and so ExitCode is reliably populated. robocopy exit codes 0-7 are
+# success; >= 8 is a real failure. $label names the pass in the log so a failure
+# says WHICH tree could not be copied.
+function Invoke-RobocopyPass([string]$label, [string]$arguments) {
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    # Full path, like _LaunchHelper does for powershell.exe: don't depend on
+    # PATH resolution from a workdir we don't control.
+    $psi.FileName = Join-Path $env:SystemRoot "System32\robocopy.exe"
+    if (-not (Test-Path -LiteralPath $psi.FileName)) { $psi.FileName = "robocopy.exe" }
+    $psi.Arguments = $arguments
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $rc = [System.Diagnostics.Process]::Start($psi)
+    while (-not $rc.WaitForExit(150)) { Update-UI }
+    if ($rc.ExitCode -ge 8) {
+        Stop-UpdateAndExit "robocopy failed in the $label pass (exit $($rc.ExitCode))" `
+            "ファイルのコピーに失敗しました (robocopy exit $($rc.ExitCode))。Autona やそのフォルダを開いているアプリを閉じてから、やり直してください。"
+    }
+    Write-Log "robocopy ok ($($rc.ExitCode)) [$label]"
+}
+
 try {
     # A second helper must NEVER run concurrently: both instances share the
     # same workdir, so the loser's Invoke-Cleanup deletes the zip and staging
@@ -374,29 +397,45 @@ try {
             "ダウンロードしたファイルの中身が想定と異なります。リリースページから手動で入手してください。"
     }
 
-    # 3) Mirror staging over the install dir. No /PURGE: keep user-side assets
-    #    (game_images, uploaded avatars, etc.) that the release zip omits.
-    #    robocopy exit codes 0-7 are success; >= 8 is a real failure.
-    #    Process.Start (not Start-Process -Wait) so the wait loop can keep the
-    #    window painting, and so ExitCode is reliably populated.
-    Write-Log "robocopy $Staging -> $InstallDir"
-    Set-Step "ファイルをコピーしています..."
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    # Full path, like _LaunchHelper does for powershell.exe: don't depend on
-    # PATH resolution from a workdir we don't control.
-    $psi.FileName = Join-Path $env:SystemRoot "System32\robocopy.exe"
-    if (-not (Test-Path -LiteralPath $psi.FileName)) { $psi.FileName = "robocopy.exe" }
-    $psi.Arguments = ('"{0}" "{1}" /E /R:3 /W:1 /NFL /NDL /NP /NJH /NJS' -f `
-        $Staging.TrimEnd('\'), $InstallDir.TrimEnd('\'))
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $rc = [System.Diagnostics.Process]::Start($psi)
-    while (-not $rc.WaitForExit(150)) { Update-UI }
-    if ($rc.ExitCode -ge 8) {
-        Stop-UpdateAndExit "robocopy failed (exit $($rc.ExitCode))" `
-            "ファイルのコピーに失敗しました (robocopy exit $($rc.ExitCode))。Autona やそのフォルダを開いているアプリを閉じてから、やり直してください。"
+    $StagingInternal = (Join-Path $Staging "_internal").TrimEnd('\')
+    $InstallInternal = (Join-Path $InstallDir "_internal").TrimEnd('\')
+
+    # Same sanity guard as the exe above: _internal is mirrored with /MIR, and
+    # mirroring a missing source would DELETE the installed runtime. An
+    # unexpected staging layout must fail loudly instead.
+    if (-not (Test-Path -LiteralPath $StagingInternal)) {
+        Stop-UpdateAndExit "staging has no _internal (unexpected zip layout)" `
+            "ダウンロードしたファイルの中身が想定と異なります。リリースページから手動で入手してください。"
     }
-    Write-Log "robocopy ok ($($rc.ExitCode))"
+
+    # 3) Mirror staging over the install dir in TWO passes. _internal goes
+    #    first: it is the runtime the relaunched exe loads, so if anything
+    #    fails we fail before the launcher is swapped, and the install is never
+    #    left with a new exe on top of an old runtime.
+    Write-Log "robocopy $Staging -> $InstallDir (_internal mirrored, rest merged)"
+    Set-Step "ファイルをコピーしています..."
+
+    # 3a) _internal with /MIR (i.e. /E + /PURGE). This tree is owned 100% by the
+    #     release - user-side assets (layout/, user_data/, game_images, uploaded
+    #     avatars, ...) all live under the install ROOT, never in here - so
+    #     purging stale files is safe, and it is required for correctness:
+    #     without it, packages dropped from a newer build's PyInstaller
+    #     excludes (numpy/pandas in v1.5.0) survive as leftover binary-only
+    #     directories. Python then imports them as NAMESPACE packages, which
+    #     shadows the new PYZ and makes the app unstartable (v1.4.1 -> v1.5.0
+    #     auto-update: deepdiff saw a truthy but gutted numpy, so its
+    #     `except ImportError` fallback never fired and np.array raised
+    #     AttributeError). A full-zip install never hit this because it lands
+    #     in a clean tree.
+    Invoke-RobocopyPass "_internal" ('"{0}" "{1}" /MIR /R:3 /W:1 /NFL /NDL /NP /NJH /NJS' -f `
+        $StagingInternal, $InstallInternal)
+
+    # 3b) Everything else, unchanged policy: /E with no purge so user-side
+    #     assets the release zip omits are kept. _internal is excluded because
+    #     pass 3a already mirrored it (and a second non-purging pass would just
+    #     re-copy it).
+    Invoke-RobocopyPass "root" ('"{0}" "{1}" /E /XD "{2}" /R:3 /W:1 /NFL /NDL /NP /NJH /NJS' -f `
+        $Staging.TrimEnd('\'), $InstallDir.TrimEnd('\'), $StagingInternal)
 
     # 4) Launch the freshly installed version. Drop TopMost first so the new
     #    app's splash isn't stuck behind this window, and hold the window until
