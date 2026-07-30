@@ -357,7 +357,7 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, tshTe
                                        value={state.team ?? ''}
                                        onChange={changeHandlerFor('team')}
                                        onBlur={() => submitPlayer()}
-                                       sx={{width: {xs: '100%', sm: '35%'}}}
+                                       sx={{width: {xs: '100%', sm: '35%'}, minWidth: 0}}
                             />
                         )}
 
@@ -372,7 +372,16 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, tshTe
                                     return player?.prefixed_tag ?? player;
                                 }}
                                 freeSolo={true}
-                                sx={{width: '100%'}}
+                                sx={{
+                                    // Sums to 100% with the sponsor field above (was 35% + 100% = 135%,
+                                    // which flexbox silently auto-corrected via shrink but made the
+                                    // intended split ambiguous). Also drop MUI's built-in 30px input
+                                    // floor (.MuiAutocomplete-input) so this field can shrink as far as
+                                    // its sibling on narrow layouts instead of protecting a fixed floor.
+                                    width: {xs: '100%', sm: show.show_sponsor ? '65%' : '100%'},
+                                    minWidth: 0,
+                                    '& .MuiAutocomplete-input': {minWidth: 0},
+                                }}
                                 onChange={onTagChanged}
                                 onBlur={() => submitPlayer()}
                                 renderInput={(params) =>
