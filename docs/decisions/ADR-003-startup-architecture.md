@@ -2,7 +2,11 @@
 
 ## Status
 
-Accepted（2026-07-28・PdM 方針承認。各移行ステップの着手は個別指示による）
+Accepted（2026-07-28・PdM 方針承認）／**実装完了: Step 1〜5・2026-07-30（PR #144〜#161）**
+
+> 目標値 `core-shown ≤ 5s`（frozen・warm）は未達。dev warm で 10.95s（Step 4e 時点）まで短縮し、
+> 残りの候補は設計書 §3「今後の候補（未着手）」に切り出した。本 ADR の決定（D1〜D3）自体は
+> 実装で検証済み。
 
 > 設計詳細・移行ステップ・検証方法は
 > [../changes/startup-architecture-redesign.md](../changes/startup-architecture-redesign.md) を正とする。

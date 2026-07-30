@@ -880,9 +880,14 @@ class WebServer(QThread):
 
 # ── Port collision guard ─────────────────────────────────────────
 # On Windows, two processes can bind the same TCP port simultaneously
-# (no SO_EXCLUSIVEADDRUSE on Werkzeug's socket). Stale `python main.py`
-# runs then silently steal every other request, making the web UI
-# appear blank. Detect this at startup and offer to kill the offenders.
+# (no SO_EXCLUSIVEADDRUSE on Werkzeug's socket) and the OS then splits the
+# incoming connections between them, so every other request reaches a
+# process that is not serving the live state and the web UI appears blank.
+# Self-collisions (a stale `python main.py` beside the exe) are prevented
+# upstream now by the single-instance mutex in main.py (startup Step 1), so
+# what is left to detect here is a *foreign* listener on our port. The check
+# runs from Window._StartWebServer(), i.e. after the window is on screen
+# (startup Step 4c) — not during startup as it originally did.
 
 def _port_is_free(port: int, host: str) -> bool:
     """True when we can bind `host:port` ourselves right now.
@@ -969,11 +974,19 @@ def check_webserver_port(port: int, parent=None, host: str = "127.0.0.1") -> boo
     """Return True if the port is free (or was freed by killing stale procs).
 
     Shows a QMessageBox when another process is already listening so the user
-    can choose to terminate it. Safe to call from the GUI thread.
+    can choose to terminate it. Called on the GUI thread from the event loop
+    (Window._StartWebServer), so the exec() below is an ordinary top-level
+    modal and not a nested one (agent-pitfalls #9).
 
     The common case (port free) costs a bind attempt; the netstat/tasklist
     subprocesses only run when something really holds the port. Since the
     single-instance guard removed self-collisions, that is now genuinely rare.
+
+    NOTE: the return value is advisory — the only caller starts the server
+    either way and surfaces a genuine bind failure through the `start_failed`
+    signal. Answering "No" therefore does not stop the server: on Windows it
+    can still bind the already-held port (Werkzeug sets SO_REUSEADDR), which
+    is why the dialog asks the user to change the port and restart.
     """
     if _port_is_free(port, host):
         return True

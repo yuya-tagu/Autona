@@ -2,6 +2,7 @@
 
 作成: 2026-07-28 ／ 根拠調査: 同日実施（コード静的解析 + `logs/autona.log` の過去起動タイムスタンプ実測）
 意思決定: [ADR-003](../decisions/ADR-003-startup-architecture.md)
+**進捗: Step 1〜5 実装完了（2026-07-30・PR #144〜#161）。各 Step の完了マークは §2、実測推移は §3 を参照。**
 
 ## 0. 目的と問題定義
 
@@ -61,24 +62,29 @@
 - `QApplication` 生成とスプラッシュ表示を main.py に移す。import するのは `PySide6.QtWidgets` / `QtGui` / `QtCore` のみ（フル連鎖と比べ大幅に軽い）。
 - 現行の `App = QApplication(sys.argv)`（[src/Autona.py](../../src/Autona.py):41 のモジュールレベル生成）は廃止し、src 側は `QApplication.instance()` を参照する。
 - **既知の制約（Step 1 で検証必須）**: 後段で QWebEngineView を生成するため、QApplication 生成前に `Qt.AA_ShareOpenGLContexts` の設定（または QtWebEngine の事前初期化）が必要。フリーズ環境（PyInstaller）での挙動確認を検証項目に含める。
-- スプラッシュは既存 `AutonaSplashScreen`（[src/AutonaSplash.py](../../src/AutonaSplash.py)）を src から独立させて main.py から使えるようにする（依存が `import src` を引きずらないこと）。
+- スプラッシュは既存 `AutonaSplashScreen`（当時 `src/AutonaSplash.py`）を src から独立させて main.py から使えるようにする（依存が `import src` を引きずらないこと）。
+  - **実装結果**: リポジトリ直下の [autona_splash.py](../../autona_splash.py) へ移設。スプラッシュ本体に加えて
+    起動フェーズ計測（`set_startup_t0()` / `log_startup_phase()` / `attach_startup_logger()`）と
+    表示後の `LoadingOverlay` もここが持つ。
 
 #### Stage 2: 明示的ブートストラップ（`src/bootstrap.py` — 新設）
 
 - 全シングルトンの生成を 1 ファイルに集約する。現行のモジュールレベル生成（例: `AutonaGameAssetManager.py:1453` の `instance = AutonaGameAssetManager()`、`StateManager.py:581-587` の static 初期化、`AutonaWebServer.py:56-64` のクラス本体での Flask/SocketIO 構築）はすべて廃止し、明示的な生成呼び出しに置き換える。
 - 順序制約はコメント付きでコードに明記する（例: 「GameAssetManager は TournamentDataProvider より先。後者の `__init__` が前者の signals に connect するため」— 現 [.claude/rules/agent-pitfalls.md](../../.claude/rules/agent-pitfalls.md) #2 の内容がコードに移る）。
 - 各生成ステップからスプラッシュへ進捗を通知する。
-- 移行完了後、`src/__init__.py` の import 副作用連鎖（`from .Autona import Window, App`）は廃止し、明示的なエントリ（例: `src.bootstrap.create_app()`）に置き換える。
+- 移行完了後、`src/__init__.py` の import 副作用連鎖（`from .Autona import Window, App`）は廃止し、明示的なエントリに置き換える。
+  - **実装結果（Step 3g）**: `src/__init__.py` は docstring のみの空 init。`main.py` が `from src import Autona` で組み立てモジュールを明示的に指名し、その import が `bootstrap_core()` を実行する（`create_app()` のような新エントリは設けなかった）。
 
 #### Stage 3: 最小コア表示
 
-- 構築するもの: ウィンドウシェル（メニューバー・サイドバー枠・ステータスバー）+ **アクティブな `battle_format` のスコアボード 1 面のみ** + StateManager/SettingsManager。
+- 構築するもの: ウィンドウシェル（サイドバー + `QStackedWidget`・ステータスバー。`QMenuBar` は STATE_VERSION 13 のナビ刷新で廃止済み）+ **アクティブな `battle_format` のスコアボード 1 面のみ** + StateManager/SettingsManager。
   - board1（1v1）/ board2（team）/ board3（crew）の全構築（現行・実測約 2 秒）は行わず、非アクティブな board は初回の形式切替時に構築する（2026-07-28 PdM 決定）。
 - ここで `show()`。目標: ダブルクリックからウィンドウ表示まで **5 秒以内**（warm cache・frozen。2026-07-28 PdM 合意）。
 
 #### Stage 4: 遅延・非同期初期化
 
 - **lazy 構築（初回表示時）**: WebEngine を持つプレビュー系パネル（Board プレビュー / Top8 / Commentary / StatsPreview / Thumbnail / Result）、設定系 5 ウィンドウ（Settings / ApiInfo / Companion / OBS / GameAssetGuide）、**非アクティブな battle_format の board**（初回の形式切替時に構築）。サイドバーのページ切替・メニューを「初回アクセスでファクトリを呼ぶ」構造にする。
+  - **実装結果**: 上記に加えて Stream / Statistics(+Analysis) / Player List も lazy（Step 4b-3）。eager に残したのは **Tournament Info**（`tournamentInfo.*` の唯一の書き手であるため意図的に据え置き）と **Scoreboard** のみ。
 - **表示後の非同期**: WebServer 起動（表示後数秒の遅延は配信運用上許容・2026-07-28 PdM 承認）、選手 DB 読み込み（ワーカーで読み込み → モデル構築は表示後の GUI バッチ）、ゲームアセット読み込み、Start.gg 再取得、更新チェック、ホットキー登録。
 - **契約**: どのパネルも「任意のタイミングで初めて構築されても動く」こと。起動時構築を前提にした暗黙依存（他パネルのシグナルへの接続等）は bootstrap かパネル自身の初期化に明示する。
 
@@ -93,11 +99,11 @@
 
 **一撃の作り直しはしない。** シングルトン初期化順序は本リポジトリ最大の地雷原（C++ クラッシュ実績複数: agent-pitfalls #2/#9/#13）のため、各ステップを独立リリース可能な単位に区切り、毎ステップで検証を挟む。ステップ順は「実害の大きい順 + リスクの小さい順」。
 
-### Step 1: 単一インスタンスガード + 早期フィードバック（Stage 0 + 1 の実現）
+### Step 1: 単一インスタンスガード + 早期フィードバック（Stage 0 + 1 の実現）✅ 完了（PR #144）
 
 **変更**: main.py に mutex ガード追加 / QApplication + スプラッシュを `import src` 前へ移動 / `Autona.py` の `App` 生成を `QApplication.instance()` 参照に変更 / 前面化用 QLocalServer 追加 / ポート衝突ダイアログのデフォルトを No に変更。
 
-**触るファイル**: `main.py`、`src/Autona.py`（App 生成部・splash 呼び出し部）、`src/AutonaSplash.py`（src 非依存化）、`src/AutonaWebServer.py`（ダイアログのデフォルトボタンのみ）。
+**触るファイル**: `main.py`、`src/Autona.py`（App 生成部・splash 呼び出し部）、`src/AutonaSplash.py` → `autona_splash.py`（src 非依存化のためリポジトリ直下へ移設）、`src/AutonaWebServer.py`（ダイアログのデフォルトボタンのみ）。
 
 **リスク**: QApplication 生成位置の移動は全 Qt オブジェクトの前提に関わる。QtWebEngine の初期化順制約（AA_ShareOpenGLContexts）を dev / frozen 両方で要確認。
 
@@ -111,7 +117,7 @@
 - [ ] プレビュー系パネル（Board / サムネ / リザルト）が正常描画（WebEngine 初期化順の確認）
 - [ ] `python main.py`（dev モード）でも上記が成立
 
-### Step 2: 即効策（局所的な無駄の除去）
+### Step 2: 即効策（局所的な無駄の除去）✅ 完了（PR #145-146）
 
 **変更**（各項目は独立・いずれも局所）:
 1. `LoadCountries()` 重複削除（[src/Autona.py](../../src/Autona.py):265 / :738 の片方）
@@ -128,7 +134,7 @@
 - [ ] excludes 追加後: exe ビルド → 起動 → 主要パネル巡回で ImportError が出ないこと（[.claude/manual-test-checklist.md](../../.claude/manual-test-checklist.md) のゴールデンパス）
 - [ ] ビルドサイズ diff を記録
 
-### Step 3: import 副作用の全廃（Stage 2 = composition root 移行）★本丸
+### Step 3: import 副作用の全廃（Stage 2 = composition root 移行）★本丸 ✅ 完了（PR #147, #149, #151-155）
 
 **変更**: `src/bootstrap.py` 新設。モジュールレベルのシングルトン生成を 1 つずつ bootstrap へ移す。**1 PR = 1〜2 シングルトン**の粒度で進め、生成順は現行の import 順を初期値としてそのまま固定する（挙動不変の移行）。
 
@@ -144,15 +150,15 @@
 - [ ] dev / frozen 両モードで起動確認（import 解決は PyInstaller で挙動が変わりうる）
 - [ ] 全移行完了後: `tests/conftest.py` の `direct_import()` が不要になったことを確認し、agent-pitfalls #1/#2 を更新
 
-### Step 4: 遅延初期化（Stage 3 + 4 の実現）
+### Step 4: 遅延初期化（Stage 3 + 4 の実現）🟡 主要項目 完了（PR #156-161）
 
 **変更**: サイドバー/メニューを「初回アクセス時にページを構築する」ファクトリ構造へ。リスクの小さい順に lazy 化する:
-1. 設定系 5 ウィンドウ（Settings / ApiInfo / Companion / OBS / GameAssetGuide）— 既に `UiMounted()` 分離があり移行しやすい
-2. WebEngine プレビュー系パネル（Top8 / Commentary / StatsPreview / Thumbnail / Result / Board プレビュー）— レンダラ生成・初回レンダも初回表示時へ
-3. 選手 DB: ワーカー読み込み + 表示後モデル構築（`SetupModel` の GUI 占有を表示後へ）
-4. WebServer 起動を `show()` 直後の非同期へ（表示後数秒の遅延は許容・2026-07-28 PdM 承認）
-5. ゲームアセット: `characters.json` 4.1 MB のパースをワーカーへ（[src/AutonaGameAssetManager.py](../../src/AutonaGameAssetManager.py):729-736）
-6. スコアボード: アクティブな battle_format の board のみ起動時構築とし、非アクティブ board は初回の形式切替時に構築（2026-07-28 PdM 決定）
+1. **（4a）✅ 完了（PR #156）** 設定系 5 ウィンドウ（Settings / ApiInfo / Companion / OBS / GameAssetGuide）— 既に `UiMounted()` 分離があり移行しやすい → `Window.Ensure*Window()` アクセサで初回オープン時に構築
+2. **（4b）✅ 完了** WebEngine プレビュー系パネル — 内訳: **4b-1（PR #157）** Thumbnail / Result のレンダラ生成・初回レンダを初回表示時へ／**4b-2（PR #159）** Board・Top8・Commentary・StatsPreview パネル本体を初回表示時構築へ／**4b-3（PR #161）** 残る Stream・Thumbnail・Result・Statistics(+Analysis)・Player List も初回表示時構築へ。結果として eager は Tournament Info と Scoreboard のみ
+3. **⏸ 未実施** 選手 DB: ワーカー読み込み + 表示後モデル構築（`SetupModel` の GUI 占有を表示後へ）。現状 `AutonaPlayerDB.LoadDB()` は `show()` 後に走るが GUI スレッド同期のまま（`core-shown` には影響しないが操作可能になるまでを延ばす）
+4. **（4c）✅ 完了（PR #158）** WebServer 起動を `show()` 直後の非同期へ（表示後数秒の遅延は許容・2026-07-28 PdM 承認）→ `Window._StartWebServer()`。オーバーレイ消滅後に起動し、`webserver-ready` フェーズを記録。`AutonaLayoutPreview` の readiness gate（`MarkWebServerReady()`）でプレビューの先行 load を抑止
+5. **⏸ 未実施** ゲームアセット: `characters.json` のパースをワーカーへ。現状 `LoadGames()` は `UiMounted()`（= 表示後）で走り、アセット本体の読み込みは既に `AssetsLoaderThread` 経由
+6. **（4e）✅ 完了（PR #160）** スコアボード: アクティブな battle_format の board のみ起動時構築とし、非アクティブ board は初回の形式切替 / `GetScoreboard()` 到達時に構築（2026-07-28 PdM 決定）。未構築 board の `score.{N}` スケルトンは `CreateScoreboard()` がシードする
 
 **リスク**: 未構築パネルへの参照（ホットキー・Web API・StateManager 経由の間接参照）が null 参照になる箇所の洗い出しが必要。lazy 化 1 対象ごとに参照元を grep で確認してから実施。
 
@@ -165,10 +171,19 @@
 - [ ] 未構築 board への外部参照（Web API / ホットキー / StateManager キー `score.2.*` `score.3.*`）が形式切替前でもエラーにならないこと
 - [ ] 起動フェーズログで目標値達成を確認（§3）
 
-### Step 5: 後始末・ドキュメント追従
+### Step 5: 後始末・ドキュメント追従 ✅ 完了（2026-07-30）
 
 - ポート衝突検知の残置分の整理（自己衝突が消えた前提でメッセージ・挙動を見直し）
-- [.claude/design/Design.md](../../.claude/design/Design.md)・[docs/architecture/current-architecture.md](../architecture/current-architecture.md)・[.claude/rules/agent-pitfalls.md](../../.claude/rules/agent-pitfalls.md)・CLAUDE.md の起動記述を実態へ更新
+  - **調査結果**: 死んだ分岐は無い。`check_webserver_port()` の役割は「**他プロセス**（Autona 以外を含む）が
+    既定 5000 を掴んでいる場合の検知と kill 提案」に縮小しており、単一インスタンスガード導入後は
+    レアケース。実行位置も「起動時」→「ウィンドウ表示後（`_StartWebServer()`）」に移っているため、
+    モジュールコメントと docstring を実態へ修正した（挙動・ダイアログ文言・翻訳は変更なし）。
+  - **未対応（提案止まり）**: 戻り値が呼び出し側で無視されており、「No」を選んでもサーバー起動は
+    続行する（Windows では `SO_REUSEADDR` によりポート共有状態で bind 成功しうる）。
+    ダイアログ文言の「No を選んでポートを変更 → 再起動」という導線と挙動が噛み合っていない。
+    修正案は「`if not check_webserver_port(...): return`（起動を中止し `OnWebServerStartFailed`
+    相当の案内を出す）」だが、挙動変更のため Step 5 のスコープ外とし PdM 判断待ち。
+- [.claude/design/Design.md](../../.claude/design/Design.md)・[docs/architecture/current-architecture.md](../architecture/current-architecture.md)・[.claude/rules/agent-pitfalls.md](../../.claude/rules/agent-pitfalls.md)・CLAUDE.md・[.claude/known-smells.md](../../.claude/known-smells.md)（S-03 / S-10 / S-11 / S-12 / S-16）の起動記述を実態へ更新
 - 検証: ドキュメント間の矛盾チェック（優先順位: コードの実態が正）
 
 ## 3. 計測基盤（全ステップ共通の検証手段）
@@ -176,12 +191,16 @@
 Step 1 の中で、起動フェーズごとの経過時間を 1 行ずつ INFO ログに出す軽量マーカーを入れる:
 
 ```
-STARTUP phase=gate elapsed=0.02s
-STARTUP phase=splash elapsed=0.8s
-STARTUP phase=bootstrap elapsed=3.1s
-STARTUP phase=core-shown elapsed=4.9s
-STARTUP phase=hydrated elapsed=12.0s
+STARTUP phase=gate elapsed=0.02s          # 単一インスタンスガード通過
+STARTUP phase=splash elapsed=0.8s         # QApplication + スプラッシュ表示
+STARTUP phase=import-src elapsed=3.1s     # from src import Autona（bootstrap_core 完了）
+STARTUP phase=window-init elapsed=3.2s    # Window.__init__ 開始
+STARTUP phase=core-shown elapsed=4.9s     # show() 直後
+STARTUP phase=webserver-ready elapsed=6.0s  # WebServer 起動完了（Step 4c 以降）
 ```
+
+（実装は `autona_splash.log_startup_phase()`。マーカーの発行位置は `main.py` と
+`src/Autona.py` の 6 箇所で、これが正本。）
 
 - 各ステップの before/after はこのログの diff で判定する（体感ではなく数値で回帰検知）
 - 成功基準（**確定・2026-07-28 PdM 合意**): warm cache・frozen で `core-shown ≤ 5s`、スプラッシュ表示 ≤ 2s、ダブルクリック連打でプロセス 1 個
@@ -213,6 +232,36 @@ STARTUP phase=hydrated elapsed=12.0s
 - **core-shown はビルド直後（cold 寄り）でも 19.1s** — Step 1 の warm 基準 27.6s 比で −8.4s、cold 基準 34.5s 比で −15.4s
 - **import-src はビルド直後でも 6.9s**（Step 1 では cold で 16.5s）— excludes 削減 + import 副作用全廃の効果で cache 依存の振れが大幅に縮小
 - 残る最大の塊は **window-init → core-shown の約 12 秒**。ログ実測の内訳: WebEngine レンダラ eager 初期化（thumbnail/result、〜3s）→ Flask 起動（〜4s）→ CreateScoreboard 3 面（〜2s）→ 表示。**すべて Step 4（遅延初期化）の対象**であり、目標 `core-shown ≤ 5s` は Step 4 で達成しにいく
+
+### Step 4 各段の推移（dev モード `python main.py`・warm）
+
+| 段 | 施策 | core-shown | webserver-ready |
+|----|------|-----------:|----------------:|
+| 4a（PR #156） | 設定系 5 ウィンドウを lazy 化 | **14.22s** | — |
+| 4b-1（PR #157） | Thumbnail / Result レンダラを lazy 化 | **13.31s** | — |
+| 4c（PR #158） | WebServer を表示後の非同期起動へ | **14.88s** | 15.66s |
+| 4b-2（PR #159） | サイドバー 4 パネル（Board / Top8 / Commentary / StatsPreview）を lazy 化 | **13.02s** | 13.81s |
+| 4e（PR #160） | アクティブ battle_format の board 1 面のみ構築 | **10.95s** | 11.64s |
+| 4b-3（PR #161） | 残り 5 パネル（Stream / Thumbnail / Result / Statistics / Player List）を lazy 化 | **実測待ち**（見込み 〜8.5〜9s） | 実測待ち |
+
+- **計測条件の注意**: 上表は **dev モード（`python main.py`）warm** の値で、§3 冒頭の成功基準
+  （frozen exe・warm で `core-shown ≤ 5s`）とは母数が違う。frozen での再計測は配布前に行う。
+- 4c で core-shown が一時的に増えているのは run 間のばらつき（WebServer 構築は core-shown より後へ
+  移動しているため、この数値自体は 4c の効果を表さない）。`webserver-ready` を併記したのはこの段から。
+- **目標 ≤5s に対する残り内訳**（4e 時点の実測ベース）: gate + splash 〜2.6s ／ import-src 〜2.8s ／
+  残りが window-init → core-shown（Tournament Info + Scoreboard 1 面 + サイドバー/メニューのシェル構築）。
+
+### 今後の候補（未着手）
+
+目標 `core-shown ≤ 5s` に到達するには、以下のいずれかが必要。**いずれも本再設計のスコープ外**で、
+着手は別タスクとして起票する。
+
+| 候補 | 内容 | 想定効果 / 論点 |
+|------|------|----------------|
+| TournamentInfo のヘッドレスサービス抽出 | 唯一 eager に残るパネル。`tournamentInfo.*` の書き手を UI から切り離せば lazy 化できる | window-init → core-shown をさらに削る。state 書き込み経路の再設計を伴う |
+| import-src の遅延化 | 〜2.8s。`src/Autona.py` の module-level import ブロックを関数内 import へ寄せる | 効果は大きいが `bootstrap_core()` 前提の順序に触るため要注意（agent-pitfalls #2） |
+| PyInstaller 側の詰め | gate + splash 〜2.6s の大半は Qt DLL ロード。excludes 追加・onedir 構成の見直し | dev モードでは測れない。frozen 実測が前提 |
+| 選手 DB / ゲームアセットのワーカー化 | Step 4 の項目 3・5（未実施）。`core-shown` ではなく「操作可能になるまで」の短縮 | 体感改善。`SetupModel` のモデル差し替えは agent-pitfalls #13 に注意 |
 
 ## 4. 決定事項（2026-07-28 PdM 回答済み・旧 Open questions）
 
