@@ -1819,6 +1819,16 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>Cannot post to X: the following fields are empty.</translation>
     </message>
     <message>
+        <location filename="..\AutonaScoreboardWidget.py" line="1307" />
+        <source>Thumbnail generation failed, so no image was copied to the clipboard.</source>
+        <translation>Thumbnail generation failed, so no image was copied to the clipboard.</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaScoreboardWidget.py" line="1318" />
+        <source>Failed to post to X.</source>
+        <translation>Failed to post to X.</translation>
+    </message>
+    <message>
         <location filename="..\AutonaScoreboardWidget.py" line="1328" />
         <source>Load set from {0}</source>
         <translation>Load set from {0}</translation>

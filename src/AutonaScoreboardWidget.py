@@ -1227,12 +1227,20 @@ class AutonaScoreboardWidget(QWidget):
                 msgBox.exec()
                 return
 
-            # Generate thumbnail and copy to clipboard
-            thumbnailPath = self.GenerateThumbnail(quiet_mode=True, disable_msgbox=True)
-            if thumbnailPath:
-                image = QImage(thumbnailPath)
-                if not image.isNull():
-                    QApplication.clipboard().setImage(image)
+            # Generate thumbnail and copy to clipboard (best-effort: a
+            # thumbnail failure must not block the post itself, so this is
+            # isolated in its own try/except and the failure is surfaced
+            # via a modal after the post completes).
+            thumbnail_error = None
+            try:
+                thumbnailPath = self.GenerateThumbnail(quiet_mode=True, disable_msgbox=True)
+                if thumbnailPath:
+                    image = QImage(thumbnailPath)
+                    if not image.isNull():
+                        QApplication.clipboard().setImage(image)
+            except Exception as e:
+                logger.exception("PostToX: thumbnail generation failed")
+                thumbnail_error = str(e)
 
             def get_team_line(team_n):
                 players = []
@@ -1287,8 +1295,28 @@ class AutonaScoreboardWidget(QWidget):
             text = "\n".join(parts)
             url = "https://twitter.com/intent/tweet?text=" + urllib.parse.quote(text)
             webbrowser.open(url)
+
+            # Notify the user after posting, so a thumbnail failure never
+            # blocks or delays the post itself.
+            if thumbnail_error:
+                msgBox = QMessageBox()
+                msgBox.setWindowIcon(QIcon(UI.icon_path('icon.png')))
+                msgBox.setWindowTitle(QApplication.translate("app", "Post to X"))
+                msgBox.setText(QApplication.translate(
+                    "app",
+                    "Thumbnail generation failed, so no image was copied to the clipboard."))
+                msgBox.setInformativeText(thumbnail_error)
+                msgBox.setIcon(QMessageBox.Warning)
+                msgBox.exec()
         except Exception as e:
-            logger.error(f"PostToX error: {e}")
+            logger.exception(f"PostToX error: {e}")
+            msgBox = QMessageBox()
+            msgBox.setWindowIcon(QIcon(UI.icon_path('icon.png')))
+            msgBox.setWindowTitle(QApplication.translate("app", "Post to X"))
+            msgBox.setText(QApplication.translate("app", "Failed to post to X."))
+            msgBox.setInformativeText(str(e))
+            msgBox.setIcon(QMessageBox.Warning)
+            msgBox.exec()
 
     def ToggleElements(self, action: QAction, elements):
         # Desktop-side field hiding only applies to the inline sponsor field
