@@ -8,7 +8,7 @@
  */
 
 :root {
-  --theme-color: #1d1b18;
+  --theme-color: #181b21;
   --theme-color-2: #0d0c0b;
   --card-bg: #2c2925;
   /* Text ink for the card body, recomputed from --card-bg's luminance at

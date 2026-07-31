@@ -15,6 +15,7 @@ from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaPlayerDB import AutonaPlayerDB
 from .Helpers.AutonaDirHelper import AutonaResolve
+from .AutonaFeatureColors import FEATURE_RESULT, MakeFeatureColorCard
 from . import ui_constants as UI
 from . import ui_layout as L
 
@@ -340,8 +341,15 @@ class AutonaResultSettingsWidget(QDockWidget):
         # Team rows live inside the scrolling area (verticalLayout_left_scroll)
         # alongside the singles group; verticalLayout_left is the always-visible
         # outer layout that hosts the "Load tournament results" button.
-        self.settings.findChild(
-            QVBoxLayout, "verticalLayout_left_scroll").addWidget(self.teamGroup)
+        leftScrollLayout = self.settings.findChild(
+            QVBoxLayout, "verticalLayout_left_scroll")
+        leftScrollLayout.addWidget(self.teamGroup)
+
+        # Result-scoped theme / accent (colors.result.*), inheriting the
+        # tournament colors while unset. Drives both the OBS result layouts and
+        # the rendered image (main_generate_result.prepare_data).
+        leftScrollLayout.addWidget(
+            MakeFeatureColorCard(FEATURE_RESULT, "リザルトの色"))
 
         # QScrollArea (widgetResizable=True) doesn't reliably propagate its
         # content's natural width up through the layout chain — its own

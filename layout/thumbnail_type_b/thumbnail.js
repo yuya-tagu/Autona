@@ -18,6 +18,7 @@ async function initThumbnail(payload) {
     clearPreviousRender();
     injectFonts();
     applyLayout(template);
+    applyFeatureColors(config);
     setBackground(data, config, template);
     await placeCharacters(data, config, template);
     setTournamentName(data, config, template);
@@ -167,6 +168,24 @@ function applyLayout(template) {
   // Fonts (hardcoded family aliases — actual font face injected separately)
   root.style.setProperty("--player-font", '"thumbnail-player-font", sans-serif');
   root.style.setProperty("--phase-font", '"thumbnail-phase-font", sans-serif');
+}
+
+// --- Feature colors (CSS variables from the Python config) ---
+//
+// Python resolves these from colors.thumbnail -> the tournament colors -> the
+// Autona defaults (AutonaFeatureColors). Applied after applyLayout so a
+// template that wants brand colors can reference them; the template JSON's
+// own color keys above (--panel-bg-color etc.) are deliberately left
+// untouched.
+
+function applyFeatureColors(config) {
+  const root = document.documentElement;
+  if (config.theme_color) {
+    root.style.setProperty("--theme-color", config.theme_color);
+  }
+  if (config.accent_color) {
+    root.style.setProperty("--accent-color", config.accent_color);
+  }
 }
 
 // --- Background ---

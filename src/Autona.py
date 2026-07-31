@@ -172,8 +172,9 @@ from .AutonaCommentaryWidget import AutonaCommentaryWidget
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTop8Widget import AutonaTop8Widget
 from .AutonaTournamentInfoWidget import AutonaTournamentInfoWidget
-from .AutonaBoardWidget import (
-    AutonaBoardWidget, DEFAULT_ACCENT_COLOR, DEFAULT_THEME_COLOR)
+from .AutonaBoardWidget import AutonaBoardWidget
+from .AutonaFeatureColors import (
+    DEFAULT_ACCENT_COLOR, DEFAULT_THEME_COLOR, SeedColorState)
 from .AutonaSidebar import AutonaSidebar
 from . import AutonaCommentaryModel as comms
 from . import AutonaTop8Model as top8
@@ -928,7 +929,9 @@ class Window(QMainWindow):
 
         with StateManager.SaveBlock():
             # Moved from AutonaBoardWidget.__init__: overlays receive
-            # theme/accent before the user touches the color pickers.
+            # theme/accent before the user touches the color pickers. These
+            # are the tournament-wide colors (EVENT tab); the per-feature
+            # overrides are expanded by SeedColorState() below.
             StateManager.Set(
                 "tournamentInfo.themeColor",
                 SettingsManager.Get("general.theme_color", DEFAULT_THEME_COLOR))
@@ -936,6 +939,11 @@ class Window(QMainWindow):
                 "tournamentInfo.accentColor",
                 SettingsManager.Get(
                     "general.accent_color", DEFAULT_ACCENT_COLOR))
+
+            # colors.{feature}.* — only the features the operator explicitly
+            # set. An unset feature stays absent from the state so the layout
+            # JS falls back to the tournament colors above.
+            SeedColorState()
 
             # Moved from AutonaTop8Widget.__init__. The legacy bracket
             # feature is gone; LoadState() restores its keys from

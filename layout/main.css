@@ -58,7 +58,7 @@
   --p2-sponsor-color: #29b6f6;
   --p2-score-color: #ffffff;
 
-  --theme-color: #1D1B18;
+  --theme-color: #181B21;
   --accent-color: #f0a500;
   --bevel-light: color-mix(in srgb, var(--theme-color), white 35%);
   --bevel-dark:  color-mix(in srgb, var(--theme-color), black 25%);

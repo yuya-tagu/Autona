@@ -10,6 +10,7 @@ from .AutonaGameAssetManager import AutonaGameAssetManager
 from .SettingsManager import SettingsManager
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaDirHelper import AutonaResolve
+from .AutonaFeatureColors import MakeTournamentColorCard
 from . import ui_layout as L
 from . import ui_constants as UI
 import traceback
@@ -210,9 +211,17 @@ class AutonaTournamentInfoWidget(QDockWidget):
         for group in self.findChildren(QGroupBox):
             L.apply_card_layout(group)
 
-        # Theme / accent color editing moved to the BOARD tab
-        # (AutonaBoardWidget). The SettingsManager / StateManager keys are
-        # unchanged, so overlays and out/ export are unaffected.
+        # 大会カラー — the tournament-wide theme / accent every feature falls
+        # back to (SettingsManager general.* / StateManager tournamentInfo.*).
+        # Built in code rather than in the .ui so the color buttons stay out of
+        # the objectName -> keypath auto-wiring loops above, and inserted right
+        # after 大会情報 so the media group keeps the bottom of the tab.
+        # Per-feature overrides live on their own panels (AutonaFeatureColors).
+        contentsLayout = self._contents.layout()
+        infoGroup = self.findChild(QGroupBox, "groupBox_2")
+        insertAt = (contentsLayout.indexOf(infoGroup) + 1) if infoGroup \
+            else contentsLayout.count()
+        contentsLayout.insertWidget(insertAt, MakeTournamentColorCard())
 
         # Stream destination / title / thumbnail generation are not
         # tournament-scoped — they belong to the broadcast and now live in

@@ -36,6 +36,7 @@ from .AutonaLayoutPreview import (
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
+from .AutonaFeatureColors import FEATURE_TOP8, MakeFeatureColorCard
 from .Workers import Worker
 from . import AutonaTop8Model as top8
 from . import ui_constants as UI
@@ -118,6 +119,7 @@ class AutonaTop8Widget(QDockWidget):
         leftCol.setSpacing(UI.PANEL_MARGIN)
         leftCol.addWidget(self._buildPlayersGroup())
         leftCol.addWidget(self._buildMatchesGroup())
+        leftCol.addWidget(MakeFeatureColorCard(FEATURE_TOP8, "TOP 8 の色"))
         leftCol.addWidget(self._buildObsGroup())
         leftCol.addStretch(1)
 
