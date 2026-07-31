@@ -183,9 +183,39 @@ tournamentInfo                       W R
 ├── {QLineEdit.objectName}           W   AutonaTournamentInfoWidget (テキストフィールド)
 ├── {QSpinBox.objectName}            W   AutonaTournamentInfoWidget (数値フィールド)
 ├── {key}                            W   AutonaTournamentInfoWidget.UpdateData (API取得データ)
-├── themeColor                       W   AutonaTournamentInfoWidget (SettingsManager から初期化)
-└── accentColor                      W   AutonaTournamentInfoWidget (SettingsManager から初期化)
+├── themeColor                       W   Autona.py _SeedPanelState (起動時に SettingsManager
+│                                        general.theme_color から展開)
+│                                     W   大会情報設定パネル「大会カラー」カード
+│                                        (AutonaFeatureColors.SetTournamentColor)
+└── accentColor                      W   同上 (general.accent_color)
 ```
+
+### `colors`
+
+機能別カラーの上書き。`src/AutonaFeatureColors.py` が管理（正本は SettingsManager
+`colors.{feature}.theme_color / accent_color`）。**明示設定がある feature のみ**が
+state に現れ、未設定の feature はレイアウト JS 側で `tournamentInfo` にフォールバックする。
+
+**大会カラーを変更すると、全 feature の同じ kind の上書きが削除される**
+（`SetTournamentColor` が SettingsManager / StateManager 両方を Unset）。
+フォールバックにより新しい大会カラーが全レイアウトへ即反映される。個別編集すれば再び独立する。
+
+```
+colors                               W R
+└── {feature}                            board / thumbnail / result / top8 /
+    │                                    commentary / stats
+    ├── themeColor                   W   Autona.py _SeedPanelState → SeedColorState (起動時)
+    │                                W   各設定パネルの「〜の色」カード
+    │                                    (AutonaFeatureColors.SetFeatureColor)
+    │                                  R OBS レイアウト JS (scoreboard_* / camborder_Universal /
+    │                                    bracket_top8* / commentators* / 統計 5 レイアウト)
+    └── accentColor                  W R 同上
+```
+
+※ サムネイル / リザルトは SocketIO ではなく Python が payload を組むため、
+`colors.{feature}` を `main_generate_thumbnail.prepare_data()` /
+`main_generate_result.prepare_data()` が読んで `config.theme_color` /
+`config.accent_color` に解決する。
 
 ### `stream`
 

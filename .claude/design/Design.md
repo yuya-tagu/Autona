@@ -388,12 +388,28 @@ commentary
 ```
 tournamentInfo
 ├── tournamentName
-├── themeColor / accentColor       ※既存テンプレ互換のため StateManager に展開する表示用キャッシュ。
+├── themeColor / accentColor       ※**大会共通カラー**（EVENT タブ「大会カラー」カードで編集）。
+│                                    既存テンプレ互換のため StateManager に展開する表示用キャッシュで、
 │                                    永続化の正本ではない（正本は SettingsManager.general.theme_color / accent_color）。
-│                                    名前から「大会別テーマ色」と誤読されないよう注意。
+│                                    機能別に上書きしたい場合は下記 `colors.{feature}` を使う
+│                                    （キー名は後方互換のため変更しない）。
 ├── displayTournamentName          ※編集 UI は SCORE タブ（と EVENT タブの大会名追従）。下記注記参照。
 └── {動的キー}                     (Qt 入力フィールドの objectName + API 取得データ)
 ```
+
+##### `colors` — 機能別カラーの上書き
+
+```
+colors
+└── {feature}                      board / thumbnail / result / top8 / commentary / stats
+    ├── themeColor                 ※表示用キャッシュ（正本は SettingsManager.colors.{feature}.theme_color）
+    └── accentColor                ※同上（正本は SettingsManager.colors.{feature}.accent_color）
+```
+
+- 各機能の設定パネルの「〜の色」カードで編集する（共通実装は `src/AutonaFeatureColors.py`）
+- **明示設定がある feature のみ**が state に現れる（`Window._SeedPanelState()` → `SeedColorState()`）。
+  未設定の feature はノードごと存在しないので、レイアウト JS 側の
+  `colors.{feature}` → `tournamentInfo` フォールバックが自然に効く（§5.5.3）
 
 ##### `stream` — 配信単位の設定（配信設定パネル）
 
@@ -563,7 +579,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 
 | カテゴリ | 正本 | キャッシュ可能な経路 |
 |---------|-----|------------------|
-| ユーザー設定全般 | `SettingsManager` (`./user_data/settings.json`) | StateManager に展開してよい（`tournamentInfo.themeColor` 等） |
+| ユーザー設定全般 | `SettingsManager` (`./user_data/settings.json`) | StateManager に展開してよい（`tournamentInfo.themeColor` / `colors.{feature}.themeColor` 等） |
 | ホットキー有効値 | `AutonaHotkeys.LoadUserHotkeys()` の結果（デフォルト + 上書きをマージ） | — |
 | トーナメント URL（最後に開いた） | `SettingsManager.Get("TOURNAMENT_URL")` | メモリキャッシュ可 |
 | ウィンドウ状態 | QSettings | — |
@@ -590,11 +606,12 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 
 | プレフィックス | 用途 |
 |--------------|------|
-| `general.*` | アプリ全般（disable_thumbnail_widget, theme_color, accent_color, webserver_port 等） |
+| `general.*` | アプリ全般（disable_thumbnail_widget, theme_color, accent_color, webserver_port 等）。`theme_color` / `accent_color` は**大会共通カラー** |
+| `colors.{feature}.*` | 機能別カラーの上書き（`theme_color` / `accent_color`）。feature は board / thumbnail / result / top8 / commentary / stats。未設定なら大会共通カラーを継承（`src/AutonaFeatureColors.py`） |
 | `hotkeys.*` | ホットキー（hotkeys_enabled とアクションごとのキー） |
 | `display_options.*` | 表示切替（プレイヤー欄のフィールド表示等） |
 | `thumbnail_config.*` | サムネイル生成設定（template_id, background_source（default/banner/custom）, background_path（custom 時のユーザー画像）, use_sponsors 等） |
-| `result_config.*` | リザルト生成設定（layout, accent_color, logo_path 等） |
+| `result_config.*` | リザルト生成設定（layout, logo_path 等）。色は保持しない — `prepare_data()` が `colors.result` → 大会共通カラーで解決して payload の `theme_color` / `accent_color` を上書きする |
 | `bsky_account.*` | Bluesky 連携 |
 | `update.*` | アップデーター（skipped_version 等） |
 | その他トップレベル（`program_language`, `TOURNAMENT_URL` 等） | 個別 |
@@ -810,7 +827,7 @@ layout/{用途}_{variant}/
 | `--p1-score-bg-color` | `#fe3636` | P1 スコア背景 |
 | `--p2-score-bg-color` | `#2e89ff` | P2 スコア背景 |
 | `--p1-sponsor-color` / `--p2-sponsor-color` | `#ff7a6d` / `#29b6f6` | スポンサー色 |
-| `--theme-color` | `#1D1B18` | テーマ色 |
+| `--theme-color` | `#181B21` | テーマ色（`AutonaFeatureColors.DEFAULT_THEME_COLOR` と同値） |
 | `--accent-color` | `#f0a500` | アクセント |
 | `--bevel-light` / `--bevel-dark` | color-mix で派生 | 立体感 |
 | `--tile-radius` / `--tile-gap` | `6px` / `5px` | タイル UI |
@@ -1182,17 +1199,57 @@ OBS HTML レイアウト（`layout/scoreboard*` `bracket*` `recent_sets/` `comme
 | `layout/fonts/` のフォント | アプリで提供するフォントセット。テンプレが好きに参照 |
 | `layout/icons/` の SVG | アプリ提供のアイコン。テンプレが好きに参照 |
 
-#### 5.5.3 大会別カスタマイズ
+#### 5.5.3 大会別カスタマイズ / 機能別カラー
 
 「大会ブランドに合わせたテーマカラー」を OBS テンプレに反映する仕組みは以下の経路で実現する:
-- `tournamentInfo.themeColor` / `accentColor` を CSS 変数経由で OBS HTML に注入（既存テンプレ互換）
+- `tournamentInfo.themeColor` / `accentColor`（大会共通）を CSS 変数経由で OBS HTML に注入（既存テンプレ互換）
 - 値の正本は `SettingsManager.general.theme_color / accent_color`（§3.1.2 注釈、§3.3.2）
+- 機能ごとに色を変えたい場合は `colors.{feature}` で上書きする（正本は `SettingsManager.colors.{feature}.*`）
+
+##### 優先順位
+
+```
+colors.{feature}.themeColor / accentColor   （機能別の上書き。設定された feature にのみ存在）
+  ↓ 無ければ
+tournamentInfo.themeColor / accentColor     （大会共通カラー）
+  ↓ 無ければ
+テンプレ CSS の :root デフォルト値
+```
+
+##### 大会カラー変更時の挙動（機能別上書きのクリア）
+
+大会カラーの変更は「全レイアウトをこの色に揃える」操作として扱う。
+`AutonaFeatureColors.SetTournamentColor(kind, color)` は永続化・state 展開に加えて、
+**全 feature の同じ kind の上書きを削除**する（SettingsManager / StateManager 両方）。
+
+- クリアは **kind 単位**。テーマ色を変えてもアクセントの機能別上書きは残る
+- 上書きが消えると各レイアウトのフォールバックが働き、新しい大会カラーが即座に全レイアウトへ反映される
+- EVENT タブの「Autonaデフォルトカラーを設定する」も `SetTournamentColor` 経由なので同挙動
+- 機能別カラーは、その後に個別編集した時点から再び独立する
+- 構築済みパネルのカラーボタン表示は、カードの showEvent リフレッシュ（`_ColorCardRefresher`）で追従する
+
+| feature | 適用先 | 設定パネル |
+|---------|--------|-----------|
+| `board` | `scoreboard_*` / `camborder_Universal` | スコアボード設定 |
+| `thumbnail` | `thumbnail` / `thumbnail_type_b`（Python が payload の `config.theme_color` / `accent_color` に解決） | 対戦動画サムネイル |
+| `result` | `result` / `result_vertical_geki`（同上） | 大会リザルト |
+| `top8` | `bracket_top8*` | TOP8 |
+| `commentary` | `commentators*` | 実況・解説 |
+| `stats` | `upset_factor` / `h2h_record` / `recent_sets` / `last_sets` / `tournament_history` | 統計情報表示 |
+
+JS 側の読み方（SocketIO 系レイアウトの共通形）:
+
+```js
+const ti = event.data.tournamentInfo || {};
+const fc = (event.data.colors || {}).board || {};
+const themeColor = fc.themeColor || ti.themeColor;
+```
 
 ##### 新規テンプレでの利用ルール
 
 | ルール | 内容 |
 |------|------|
-| **R-Brand-1** | 新規 OBS / 画像生成テンプレでは `tournamentInfo.themeColor` / `accentColor` を **JS から直接読まない**。`--theme-color` / `--accent-color` などの CSS 変数経由でのみ利用する |
+| **R-Brand-1** | 新規 OBS / 画像生成テンプレでは `tournamentInfo.themeColor` / `accentColor` / `colors.{feature}.*` を **JS から直接読まない**。`--theme-color` / `--accent-color` などの CSS 変数経由でのみ利用する（上記の解決処理は各レイアウトのエントリ JS が一度だけ行う） |
 | **R-Brand-2** | テンプレ固有のブランド表現（例: 大会公式の独自配色）がある場合は、テンプレの `settings.json` または `:root` 上書きを優先してよい |
 | **R-Brand-3** | テンプレが state の特定キーに直接依存する設計は避ける。CSS 変数 / DOM クラス経由を基本とする |
 

@@ -5,15 +5,19 @@ Two-pane panel following the Commentary tab's structure:
 
 * **Left** — a pulldown that picks which statistics overlay to look at
   (upset factor / head-to-head / recent sets / last sets / tournament
-  history), plus the Bitfocus Companion macro for the
-  ``stats:refresh`` operation so the operator can trigger a stats fetch
-  from a physical button instead of the STATS panel's button.
+  history), the theme / accent colors those overlays render with (the
+  shared AutonaFeatureColors card, feature ``stats``), plus the Bitfocus
+  Companion macro for the ``stats:refresh`` operation so the operator can
+  trigger a stats fetch from a physical button instead of the STATS
+  panel's button.
 * **Right** — the embedded live preview of the selected overlay and its
   browser-source URL.
 
-This panel is display-only: it never writes state. The selected overlay
-is remembered in SettingsManager (``stats_preview.selected_type``), which
-is a UI preference, not part of the program state contract.
+The only state this panel writes is its own color override
+(``colors.stats.*``, through AutonaFeatureColors) — the statistics
+themselves are produced elsewhere. The selected overlay is remembered in
+SettingsManager (``stats_preview.selected_type``), which is a UI
+preference, not part of the program state contract.
 
 The overlays under ``layout/`` render whatever the stats pipeline already
 wrote under ``score.1.*`` (recent_sets / last_sets / history_sets /
@@ -31,6 +35,7 @@ from loguru import logger
 from .SettingsManager import SettingsManager
 from .AutonaLayoutPreview import AutonaLayoutPreview, ObsUrl
 from .Helpers.AutonaNetworkHelper import GetWebServerHost
+from .AutonaFeatureColors import FEATURE_STATS, MakeFeatureColorCard
 from . import ui_constants as UI
 from . import ui_layout as L
 
@@ -83,6 +88,7 @@ class AutonaStatsPreviewWidget(QDockWidget):
             UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN)
         leftCol.setSpacing(UI.PANEL_MARGIN)
         leftCol.addWidget(typeCard)
+        leftCol.addWidget(MakeFeatureColorCard(FEATURE_STATS, "統計表示の色"))
         leftCol.addWidget(self._buildCompanionGroup())
         leftCol.addStretch(1)
 

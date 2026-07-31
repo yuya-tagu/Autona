@@ -11,9 +11,9 @@ the operator's "make it look right and get it into OBS" workflow:
 * **Preview** — an embedded QWebEngineView pointed at the running web server
   (``http://127.0.0.1:{port}/layout/{design}/index.html``). It shares the same
   Socket.IO feed as a real overlay, so score and color edits reflect live.
-* **Colors** — theme / accent color pickers (moved here from the EVENT tab).
-  Same SettingsManager / StateManager keys, so overlays and ``out/`` export are
-  unaffected.
+* **Colors** — the scoreboard's own theme / accent pickers (the shared
+  ``AutonaFeatureColors`` card, feature ``board``). Unset, they inherit the
+  tournament colors edited on the EVENT tab.
 * **Designer** — opens the layer editor in a dedicated desktop window.
 * **Add to OBS** — the local file path for the selected design with Copy /
   Open-in-Explorer buttons and the 1920x1080 sizing note.
@@ -28,17 +28,12 @@ from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from loguru import logger
 
-from .StateManager import StateManager
 from .SettingsManager import SettingsManager
-from .AutonaColorButton import AutonaColorButton
 from .AutonaDesignerWindow import AutonaDesignerWindow
 from .AutonaLayoutPreview import AutonaLayoutPreview
+from .AutonaFeatureColors import FEATURE_BOARD, MakeFeatureColorCard
 from . import ui_constants as UI
 from . import ui_layout as L
-
-# Mirrors the constants the EVENT tab used before the color pickers moved here.
-DEFAULT_THEME_COLOR = "#1D1B18"
-DEFAULT_ACCENT_COLOR = "#f0a500"
 
 LAYOUT_DIR = "layout"
 DEFAULT_DESIGN = "scoreboard_crewbattle"
@@ -120,7 +115,8 @@ class AutonaBoardWidget(QDockWidget):
             UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN)
         leftCol.setSpacing(UI.PANEL_MARGIN)
         leftCol.addWidget(self._buildDesignerGroup())
-        leftCol.addWidget(self._buildColorGroup())
+        leftCol.addWidget(
+            MakeFeatureColorCard(FEATURE_BOARD, "スコアボードの色"))
         leftCol.addWidget(self._buildObsGroup())
         leftCol.addStretch(1)
 
@@ -156,9 +152,9 @@ class AutonaBoardWidget(QDockWidget):
         # NOTE: the theme/accent seed that used to run here moved to
         # Window._SeedPanelState() (startup Step 4b-2). This panel is built
         # on first reveal now, and the overlays need those colors from
-        # launch whether or not it is ever opened. The color buttons below
-        # still read the same SettingsManager keys, and editing one still
-        # writes StateManager directly (_onThemeColorChanged).
+        # launch whether or not it is ever opened. The color card added above
+        # edits the board-scoped override (colors.board.*); the tournament
+        # colors it falls back to live on the EVENT tab.
 
         self._refreshObsPath()
 
@@ -346,43 +342,6 @@ class AutonaBoardWidget(QDockWidget):
         if not self._previewLoaded and self._designs:
             self._previewLoaded = True
             self._loadPreview()
-
-    # ── Colors (moved from EVENT) ────────────────────────────────────
-    def _buildColorGroup(self):
-        group = L.make_card("スコアボードの色")
-        # Theme and accent side by side: [label btn]  [label btn].
-        row = QHBoxLayout()
-        row.setSpacing(UI.SPACE_MD)
-
-        row.addWidget(QLabel("テーマカラー"))
-        self.btThemeColor = AutonaColorButton(
-            color=SettingsManager.Get("general.theme_color", DEFAULT_THEME_COLOR))
-        self.btThemeColor.setMinimumSize(32, 32)
-        self.btThemeColor.colorChanged.connect(self._onThemeColorChanged)
-        row.addWidget(self.btThemeColor)
-
-        row.addSpacing(UI.SPACE_LG)
-
-        row.addWidget(QLabel("アクセントカラー"))
-        self.btAccentColor = AutonaColorButton(
-            color=SettingsManager.Get("general.accent_color", DEFAULT_ACCENT_COLOR))
-        self.btAccentColor.setMinimumSize(32, 32)
-        self.btAccentColor.colorChanged.connect(self._onAccentColorChanged)
-        row.addWidget(self.btAccentColor)
-
-        row.addStretch(1)
-        group.layout().addLayout(row)
-        return group
-
-    def _onThemeColorChanged(self, color):
-        if color:
-            SettingsManager.Set("general.theme_color", color)
-            StateManager.Set("tournamentInfo.themeColor", color)
-
-    def _onAccentColorChanged(self, color):
-        if color:
-            SettingsManager.Set("general.accent_color", color)
-            StateManager.Set("tournamentInfo.accentColor", color)
 
     # ── Add to OBS ───────────────────────────────────────────────────
     def _buildObsGroup(self):

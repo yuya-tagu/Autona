@@ -112,15 +112,21 @@ LoadEverything().then(() => {
     // 大会カラー drives the frosted-glass tint; accent drives the gold
     // highlights (totals, active marker, phase/round). Falls back to the
     // CSS defaults when the EVENT tab hasn't set a tournament colour.
+    // colors.board is the scoreboard-scoped override; it is only present when
+    // the operator set it, so an unset feature falls back to the tournament
+    // colors on its own.
     const ti = event.data.tournamentInfo || {};
-    if (ti.themeColor) {
-      document.documentElement.style.setProperty("--theme-color", ti.themeColor);
+    const fc = (event.data.colors || {}).board || {};
+    const themeColor = fc.themeColor || ti.themeColor;
+    const accentColor = fc.accentColor || ti.accentColor;
+    if (themeColor) {
+      document.documentElement.style.setProperty("--theme-color", themeColor);
       // Keep body text readable when the theme is a light colour.
       document.documentElement.style.setProperty(
-        "--glass-ink", glassInk(ti.themeColor));
+        "--glass-ink", glassInk(themeColor));
     }
-    if (ti.accentColor) {
-      document.documentElement.style.setProperty("--accent-color", ti.accentColor);
+    if (accentColor) {
+      document.documentElement.style.setProperty("--accent-color", accentColor);
     }
 
     // Tournament name (EVENT tab, board-independent) + phase | round

@@ -85,7 +85,8 @@ birthday, id, last_sets, location, mic, pronouns, recent_sets, replay, seeding, 
 ### 3.3 リザルト系（受信方式が違う）
 
 - `result/`, `result_vertical/`, `result_vertical_geki/`: Python から `initResult(payload)` 直接呼び出し
-  - payload = `{ data: { players, tournamentName, eventName, startAt, numEntrants }, config: { main_icon_path, background_path, accent_color } }`
+  - payload = `{ data: { players, tournamentName, eventName, startAt, numEntrants }, config: { main_icon_path, background_path, theme_color, accent_color } }`
+    - `theme_color` / `accent_color` は `colors.result` → 大会共通カラー → Autona 既定の順で Python が解決（`AutonaFeatureColors.GetFeatureColors`）
   - SocketIO/ポーリング不使用
   - 完了時に `document.title = "RENDER_READY"`（Python 側で監視）
 - `result_top16/`: CSS のみ（JS なし）

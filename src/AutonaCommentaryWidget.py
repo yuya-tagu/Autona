@@ -37,6 +37,7 @@ from .AutonaLayoutPreview import (
     AutonaLayoutPreview, ObsUrl, DiscoverLayoutDesigns,
     LayoutDesignDisplayName)
 from .Helpers.AutonaBadWordFilter import AutonaBadWordFilter
+from .AutonaFeatureColors import FEATURE_COMMENTARY, MakeFeatureColorCard
 from . import AutonaCommentaryModel as comms
 from . import ui_constants as UI
 from . import ui_layout as L
@@ -91,6 +92,8 @@ class AutonaCommentaryWidget(QDockWidget):
             UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN)
         leftCol.setSpacing(UI.PANEL_MARGIN)
         leftCol.addWidget(self._buildCastersGroup())
+        leftCol.addWidget(
+            MakeFeatureColorCard(FEATURE_COMMENTARY, "実況・解説の色"))
         leftCol.addWidget(self._buildObsGroup())
         leftCol.addStretch(1)
 

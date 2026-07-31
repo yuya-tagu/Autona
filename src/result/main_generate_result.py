@@ -12,6 +12,7 @@ from loguru import logger
 from src.StateManager import StateManager
 from src.AutonaGameAssetManager import AutonaGameAssetManager
 from src.SettingsManager import SettingsManager
+from src.AutonaFeatureColors import FEATURE_RESULT, GetFeatureColors
 from src.Helpers.AutonaDictHelper import deep_get
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from src.Helpers.AutonaDirHelper import AutonaResolve
@@ -45,6 +46,7 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None,
     config = {
         "main_icon_path": str,
         "background_path": str,
+        "theme_color": str,
         "accent_color": str,
     }
     """
@@ -60,8 +62,12 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None,
         settingsManager.Get("thumbnail_config") or {})
     config["background_path"] = settings.get(
         "background_path", thumb_bg or _thumb.DEFAULT_BANNER_PATH)
-    config["accent_color"] = settingsManager.Get(
-        "general.accent_color", "#f0a500")
+    # Result-scoped colors (colors.result.*), falling back to the tournament
+    # colors and then to the Autona defaults. The layouts read theme_color for
+    # their surfaces and accent_color for the highlights.
+    theme_color, accent_color = GetFeatureColors(FEATURE_RESULT)
+    config["theme_color"] = theme_color
+    config["accent_color"] = accent_color
 
     # Build player list from result state
     data = {
