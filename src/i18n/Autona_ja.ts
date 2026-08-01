@@ -152,18 +152,13 @@
     </message>
     <message>
         <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>大会アイコンをダウンロード</source>
-        <translation>大会アイコンをダウンロード</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
         <source>大会バナーをローカルファイルから読み込む</source>
         <translation>大会バナーをローカルファイルから読み込む</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>大会バナーをダウンロード</source>
-        <translation>大会バナーをダウンロード</translation>
+        <source>大会からアイコン・バナーをダウンロード</source>
+        <translation>大会からアイコン・バナーをダウンロード</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
