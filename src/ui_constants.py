@@ -280,6 +280,17 @@ QPushButton#primary:pressed,
 QPushButton:default:pressed {{
     color: {p['primary_btn_text']};
 }}
+/* Disabled primary: the shared `QPushButton:disabled` rule above is only
+   (0,1,1), which loses to the ID selector `QPushButton#primary` (1,0,1) —
+   without this a disabled primary keeps its white surface and still reads as
+   clickable. Restate the disabled treatment at matching specificity so the
+   greyed-out state wins, same as `#danger:disabled` below. */
+QPushButton#primary:disabled,
+QPushButton:default:disabled {{
+    color: {p['text_disabled']};
+    background-color: {p['bg_secondary']};
+    border-color: {p['border_subtle']};
+}}
 /* Danger / destructive actions (objectName="danger"): opt-in red outline.
    Used for Clear / Reset / Delete style buttons so they read distinct from
    neutral secondary actions. Filled on hover for affordance, but stays an

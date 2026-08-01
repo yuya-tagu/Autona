@@ -271,13 +271,6 @@
           </widget>
          </item>
          <item>
-          <widget class="QPushButton" name="btDownloadIcon">
-           <property name="text">
-            <string>大会アイコンをダウンロード</string>
-           </property>
-          </widget>
-         </item>
-         <item>
           <widget class="QPushButton" name="btLoadBannerFile">
            <property name="text">
             <string>大会バナーをローカルファイルから読み込む</string>
@@ -285,9 +278,9 @@
           </widget>
          </item>
          <item>
-          <widget class="QPushButton" name="btDownloadBanner">
+          <widget class="QPushButton" name="btDownloadMedia">
            <property name="text">
-            <string>大会バナーをダウンロード</string>
+            <string>大会からアイコン・バナーをダウンロード</string>
            </property>
           </widget>
          </item>
