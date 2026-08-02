@@ -7,7 +7,8 @@ CLAUDE.md の Git 要点の詳細版。**push / PR 作成 / ブランチ削除�
 
 「ローカル `main` 上で作業し、push 時にだけリモート種別ブランチを切って PR 経由でマージ」する運用とする。
 
-- リモート: `origin` = `https://github.com/yuya-tagu/Autona.git`（HTTPS, GitHub アカウント `yuya-tagu`）
+- リモート: `origin` = `https://github.com/yuya-tagu/Autona.git`（HTTPS, GitHub アカウント `yuya-tagu`）。**`origin` 以外の remote を追加しない**
+- **`upstream` remote を復活させない**（2026-08-02 削除）。gh CLI は `upstream` という名前の remote を `origin` より優先して base リポジトリに選ぶため、clone 由来で残っていた `joaorb64/TournamentStreamHelper` に対して `gh pr create` / `gh pr view` が向いてしまっていた（PR #170 作成時に発覚。当リポジトリは fork ではないため GitHub 側で拒否され実害なし）。保険として `gh repo set-default yuya-tagu/Autona` を設定済み
 - **作業はローカル `main` 上で行う**。worktree もローカル作業ブランチも作らない。ブランチはリモート push 時にだけ切る
 - push 時は `git push origin main:<type>/<topic>`（種別ごとに `feat` / `fix` / `docs`）でリモート側にだけブランチを作る。**リモート `main` への直接 push はしない**（必ず PR 経由でマージ）
 - ブランチ命名（`<topic>` 部分）は内容を表す短い英語（例: `feat/bracket-fix`、`docs/operational-docs-foundation`、`fix/thumbnail-perf`）。timestamp や連番は不要（`git log --all` / `gh pr list` で時系列は追える）
