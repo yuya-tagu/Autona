@@ -9,7 +9,6 @@ import orjson
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaQtHelper import gui_thread_sync
 from .StateManager import StateManager
-from .AutonaStatsUtil import AutonaStatsUtil
 from .SettingsManager import SettingsManager
 from loguru import logger
 from .AutonaGameAssetManager import AutonaGameAssetManager
@@ -336,11 +335,13 @@ class WebServerActions(QThread):
         return "OK"
 
     def stats_recent_sets(self, scoreboard):
-        AutonaStatsUtil.instance.signals.RecentSetsSignal.emit()
+        self.scoreboard.GetScoreboard(
+            scoreboard).stats.signals.RecentSetsSignal.emit()
         return "OK"
 
     def stats_upset_factor(self, scoreboard):
-        AutonaStatsUtil.instance.signals.UpsetFactorCalculation.emit()
+        self.scoreboard.GetScoreboard(
+            scoreboard).stats.signals.UpsetFactorCalculation.emit()
         return "OK"
 
     def stats_last_sets(self, scoreboard, player):

@@ -383,7 +383,7 @@ def _build_web_app():
     def ws_stats_recent_sets(message):
         info = orjson.loads(message)
         WebServer.ws_emit('stats_recent_sets',
-             WebServer.actions.stats_recent_sets(info.get("scoreboardNumber", "1"), info.get("player")))
+             WebServer.actions.stats_recent_sets(info.get("scoreboardNumber", "1")))
 
     # Resubmits Call for Upset Factor
     @app.route('/scoreboard<scoreboardNumber>-stats-upset-factor')
@@ -394,7 +394,7 @@ def _build_web_app():
     def ws_stats_upset_factor(message):
         info = orjson.loads(message)
         WebServer.ws_emit('stats_upset_factor',
-             WebServer.actions.stats_upset_factor(info.get("scoreboardNumber", "1"), info.get("player")))
+             WebServer.actions.stats_upset_factor(info.get("scoreboardNumber", "1")))
 
     # Resubmits Call for Last Sets
     @app.route('/scoreboard<scoreboardNumber>-stats-last-sets-<player>')
