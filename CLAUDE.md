@@ -12,6 +12,7 @@ CLAUDE.md は要点のみ。詳細は以下を**必要時に参照**する（常
 | [.claude/design/Design.md](.claude/design/Design.md) | **正本**: UI 実装方式・データモデル・画面・テーマ・ホットキー |
 | [.claude/git-workflow.md](.claude/git-workflow.md) | Git 詳細（push/PR/ブランチ削除/マルチアカウント認証） |
 | [.claude/known-smells.md](.claude/known-smells.md) / [.claude/manual-test-checklist.md](.claude/manual-test-checklist.md) | リファクタ候補 / 手動テスト手順 |
+| [docs/changes/test-automation-strategy.md](docs/changes/test-automation-strategy.md) | テスト自動化の層構成・実装順・既知バグ。**ウィジェットのテストを書く前に読む**（`autonaApp` fixture の使い方と制約） |
 | [docs/README.md](docs/README.md) | 運用・変更管理（既存仕様・運用制約・変更影響・ADR・調査タスク） |
 
 矛盾時の優先順位: **コードの実態 > `.claude/design/Design.md` > `CLAUDE.md` > その他 Markdown**。
