@@ -2,6 +2,9 @@
 
 自動テストで守れない動作確認手順。PR レビュー時になぞる。
 
+**項目は自動化できたらここから削除する**（二重管理しない）。
+自動化の進め方は [docs/changes/test-automation-strategy.md](../docs/changes/test-automation-strategy.md)。
+
 ---
 
 ## 起動・終了
@@ -19,11 +22,13 @@
 
 ## スコアボード基本操作
 
-- [ ] 選手名を入力して Enter → `out/` フォルダに反映される
-- [ ] スコア変更 → `out/program_state.json` に即座に反映
-- [ ] チーム入れ替え（Swap）で選手名・スコア・キャラが正しく入れ替わる
-- [ ] Best Of 変更 → `best_of`, `best_of_text`, `first_to` 等が全て更新される
-- [ ] Clear All で選手名・スコア・キャラが全てクリアされる
+> スコア加減算・Swap・Reset Score・Clear All・Best Of の派生フィールドは
+> `tests/test_scoreboard_operations.py` が自動で検証する（board 1/2/3）。
+> ここに残っているのは、その網が届かない**目視・キャラアセット依存**の項目のみ。
+
+- [ ] 選手名を入力して Enter → `out/` フォルダに反映される（キーボード操作経由）
+- [ ] チーム入れ替え（Swap）で**キャラクター**が正しく入れ替わる（名前・スコアは自動テスト済）
+- [ ] Clear All で**キャラクター**が全てクリアされる（名前・スコアは自動テスト済）
 
 ## ゲーム選択
 

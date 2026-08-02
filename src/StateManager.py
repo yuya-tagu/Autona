@@ -517,9 +517,25 @@ class StateManager:
     def _bumpRevision():
         StateManager.revision += 1
 
-    def ExportText(oldState, diff, stateSnapshot=None):
+    def ExportText(oldState, diff, stateSnapshot):
         # logger.info("ExportState")
         # logger.info(diff)
+        #
+        # THREADING: this runs on the export thread (SaveState spawns it), so
+        # every container walked below has to be private to that thread.
+        # `oldState` and `stateSnapshot` are, but `diff` is NOT: DeepDiff was
+        # handed the live state, so its `new_value` entries are references
+        # *into* StateManager.state. Walking one while the GUI thread wrote
+        # to the same subtree killed this thread with "dictionary changed
+        # size during iteration". The traceback does reach ./logs (the
+        # frozen build routes stderr there), but nothing tells the GUI: the
+        # visible symptom is ./out silently missing that batch of files --
+        # an OBS overlay frozen on stale values.
+        # Values are therefore read out of the snapshot by path; the diff is
+        # used for its structure only. `stateSnapshot` is mandatory for the
+        # same reason -- falling back to StateManager.state here would put
+        # the live tree back under this thread's walk.
+        snapshot = stateSnapshot
 
         mergedDiffs = list(diff.get("values_changed", {}).items())
         mergedDiffs.extend(list(diff.get("type_changes", {}).items()))
@@ -537,8 +553,22 @@ class StateManager:
                 StateManager.RemoveFilesDict(
                     filename, extract(oldState, changeKey))
             else:
-                StateManager.CreateFilesDict(
-                    filename, change.get("new_value"))
+                try:
+                    newValue = extract(snapshot, changeKey)
+                except Exception:
+                    # The snapshot is taken under the same lock as the diff,
+                    # so a changed path must be present in it; getting here
+                    # means the two disagree and something upstream is wrong.
+                    # Skip the key rather than reaching for the diff's own
+                    # `new_value`: that is a live reference into
+                    # StateManager.state, and walking it is exactly the crash
+                    # this whole path exists to avoid. warning, not debug --
+                    # the frozen build's file sink only keeps INFO and above.
+                    logger.warning(
+                        f"{changeKey} missing from the export snapshot; "
+                        "skipping it")
+                    continue
+                StateManager.CreateFilesDict(filename, newValue)
 
         removedKeys = diff.get("dictionary_item_removed", {})
 
@@ -557,7 +587,7 @@ class StateManager:
 
         for key in addedKeys:
             try:
-                item = extract(stateSnapshot if stateSnapshot is not None else StateManager.state, key)
+                item = extract(snapshot, key)
 
                 # Remove "root[" from start and separate keys
                 path = "/".join(key[5:].replace(
