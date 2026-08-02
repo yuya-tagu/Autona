@@ -1383,7 +1383,7 @@ class AutonaScoreboardWidget(QWidget):
     def UpdateBottomButtons(self):
         if AutonaTournamentDataProvider.instance.provider and AutonaTournamentDataProvider.instance.provider.url:
             self.btSelectSet.setText(
-                QApplication.translate("app", "大会の試合を読み込む"))
+                QApplication.translate("app", "大会の試合を選ぶ"))
             self.btSelectSet.setEnabled(True)
             # Only actionable once a tournament is set — otherwise the button
             # has nothing to load, so hide it entirely rather than showing a
@@ -1705,7 +1705,9 @@ class AutonaScoreboardWidget(QWidget):
                 str(int(self.autoUpdateTimer.remainingTime()/1000)))
 
     def LoadSetClicked(self):
-        self.selectSetWindow.LoadSets()
+        # Restores the cached set list; fetching is the operator's call from
+        # inside the window.
+        self.selectSetWindow.PrepareForDisplay()
         self.selectSetWindow.show()
 
     def LoadStationSets(self, station):

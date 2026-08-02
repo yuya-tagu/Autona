@@ -1,4 +1,6 @@
 import traceback
+from datetime import datetime
+
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
@@ -10,8 +12,18 @@ from src import ui_constants as UI
 
 class AutonaSelectSetWindow(QDialog):
     # Hidden column carrying the raw set dict (UserRole); keep in sync with
-    # the appendRow order in SetsUpdated.
+    # the appendRow order in _RenderSets.
     DATA_COLUMN = 7
+
+    # Last fetched set list, shared by every scoreboard's window and kept for
+    # the lifetime of the process (closing Autona is expected to start clean).
+    # Opening the window renders this instead of hitting Start.gg again; the
+    # query it came from is stored alongside it so a tournament change can
+    # never show rows that belong to another event.
+    # {"url", "showFinished", "phaseIndex", "sets", "fetchedAt"}
+    _cache = None
+    # (column, Qt.SortOrder) of the sets table, likewise remembered until exit.
+    _sortState = None
 
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
@@ -20,13 +32,23 @@ class AutonaSelectSetWindow(QDialog):
             QApplication.translate("app", "Select a set"))
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
 
+        # A fetch is only ever started from this window, so a flag is enough
+        # to tell our own provider signals from another window's.
+        self._fetchPending = False
+        self._pendingQuery = None
+        self._suppressSortSave = False
+
         layout = QVBoxLayout()
         self.setLayout(layout)
 
+        # One model for the window's lifetime: rows are cleared and refilled
+        # in place, never swapped for a fresh model (agent-pitfalls #13).
+        self.model = QStandardItemModel()
         self.proxyModel = QSortFilterProxyModel()
         self.proxyModel.setFilterKeyColumn(-1)
         self.proxyModel.setFilterCaseSensitivity(
             Qt.CaseSensitivity.CaseInsensitive)
+        self.proxyModel.setSourceModel(self.model)
 
         def filterList(text):
             self.proxyModel.setFilterFixedString(text)
@@ -39,33 +61,44 @@ class AutonaSelectSetWindow(QDialog):
         # Phase selector: fetch only the chosen phase's sets instead of
         # paging through the whole event. Pool (phase group) narrowing was
         # dropped on purpose — phases are the operator-meaningful unit.
+        # The fetch button sits next to it: opening this window never hits
+        # the network, the operator decides when to refresh.
         self.phaseRow = QWidget()
         phaseRowLayout = QHBoxLayout()
         phaseRowLayout.setContentsMargins(0, 0, 0, 0)
         self.phaseRow.setLayout(phaseRowLayout)
-        phaseRowLayout.addWidget(
-            QLabel(QApplication.translate("app", "Phase")))
+        self.phaseLabel = QLabel(QApplication.translate("app", "Phase"))
+        phaseRowLayout.addWidget(self.phaseLabel)
         self.phaseCombo = QComboBox()
         self.phaseCombo.addItem(
             QApplication.translate("app", "Select a phase..."), None)
         # `activated` (not currentIndexChanged) so re-picking the same phase
-        # re-fetches it.
+        # re-fetches it, and so restoring the cached phase stays silent.
         self.phaseCombo.activated.connect(self._onPhaseChosen)
         phaseRowLayout.addWidget(self.phaseCombo, 1)
+        self.btFetchSets = QPushButton(
+            QApplication.translate("app", "最新の試合情報を取得"))
+        self.btFetchSets.setIcon(QIcon(UI.icon_path("download.svg")))
+        self.btFetchSets.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        self.btFetchSets.clicked.connect(lambda x=None: self._FetchSets())
+        phaseRowLayout.addWidget(self.btFetchSets)
         layout.addWidget(self.phaseRow)
-        self.phaseRow.setVisible(False)
+        self._SetPhaseSelectorVisible(False)
         self.phases = []
 
         options = QHBoxLayout()
 
+        # Changes the Start.gg query -> refetch; the pairs filter is applied
+        # locally, so it only re-renders what is already cached.
         self.showFinished = QCheckBox(
             QApplication.translate("app", "Show completed sets"))
         options.addWidget(self.showFinished)
-        self.showFinished.clicked.connect(lambda check: self.LoadSets())
+        self.showFinished.clicked.connect(lambda check: self._FetchSets())
         self.showCompletePairs = QCheckBox(
             QApplication.translate("app", "Show complete pairs"))
         options.addWidget(self.showCompletePairs)
-        self.showCompletePairs.clicked.connect(lambda check: self.LoadSets())
+        self.showCompletePairs.clicked.connect(
+            lambda check: self._RenderSets(self._CachedSets()))
 
         layout.layout().addLayout(options)
 
@@ -85,6 +118,8 @@ class AutonaSelectSetWindow(QDialog):
         self.startggSetSelectionItemList.horizontalHeader(
         ).setSectionResizeMode(QHeaderView.Stretch)
         self.startggSetSelectionItemList.resizeColumnsToContents()
+        self.startggSetSelectionItemList.horizontalHeader(
+        ).sortIndicatorChanged.connect(self._onSortIndicatorChanged)
 
         bottomRow = QHBoxLayout()
         layout.addLayout(bottomRow)
@@ -125,18 +160,43 @@ class AutonaSelectSetWindow(QDialog):
         qr.moveCenter(cp)
         self.move(qr.topLeft())
 
+        # Progress reporting and the fetched rows arrive separately:
+        # sets_data_updated fires per page, get_sets_finished once, with the
+        # full list.
         AutonaTournamentDataProvider.instance.signals.sets_data_updated.connect(
-            self.SetsUpdated)
+            self._OnFetchProgress)
+        AutonaTournamentDataProvider.instance.signals.get_sets_finished.connect(
+            self._OnSetsFetched)
         AutonaTournamentDataProvider.instance.signals.tournament_phases_updated.connect(
             self._onPhasesUpdated)
-
-        self.model = QStandardItemModel()
 
     def eventFilter(self, obj, event):
         if obj is self.startggSetSelectionItemList and event.type() == QEvent.KeyPress:
             if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 self.LoadSelectedSet()
         return super().eventFilter(obj, event)
+
+    def _TournamentUrl(self):
+        provider = AutonaTournamentDataProvider.instance.provider
+        return getattr(provider, "url", None) if provider else None
+
+    def _CacheForCurrentTournament(self):
+        """The cached list, but only while it still belongs to the tournament
+        that is loaded right now."""
+        cache = AutonaSelectSetWindow._cache
+        if cache and cache.get("url") == self._TournamentUrl():
+            return cache
+        return None
+
+    def _CachedSets(self):
+        cache = self._CacheForCurrentTournament()
+        return cache["sets"] if cache else []
+
+    def _SetPhaseSelectorVisible(self, visible):
+        """Hide the phase picker (not the whole row) when the event has no
+        phases — the fetch button stays reachable either way."""
+        self.phaseLabel.setVisible(visible)
+        self.phaseCombo.setVisible(visible)
 
     def _onPhasesUpdated(self, phases):
         """Rebuild the phase selector from the tournament's phases (fetched
@@ -153,9 +213,20 @@ class AutonaSelectSetWindow(QDialog):
             QApplication.translate("app", "All phases"), allGroupIds)
         for phase in self.phases:
             self.phaseCombo.addItem(phase.get("name") or "", phase)
-        self.phaseCombo.setCurrentIndex(0)
+        self.phaseCombo.setCurrentIndex(self._PreferredPhaseIndex())
         self.phaseCombo.blockSignals(False)
-        self.phaseRow.setVisible(bool(self.phases))
+        self._SetPhaseSelectorVisible(bool(self.phases))
+
+    def _PreferredPhaseIndex(self):
+        """Phase to preselect after a rebuild: the one the cached list was
+        fetched with, otherwise the only phase of a single-phase event
+        (index 0 = placeholder, 1 = all phases, 2+ = the phases themselves)."""
+        cache = self._CacheForCurrentTournament()
+        if cache and 0 <= cache["phaseIndex"] < self.phaseCombo.count():
+            return cache["phaseIndex"]
+        if len(self.phases) == 1:
+            return 2
+        return 0
 
     def _selectedGroupIds(self):
         """Group ids to fetch, from the chosen phase (or the all-phases
@@ -173,74 +244,133 @@ class AutonaSelectSetWindow(QDialog):
             return
         self._FetchSets()
 
-    def LoadSets(self):
-        """Entry point when the window opens. Events with known phases wait
-        for a phase choice instead of paging through every set of the event."""
+    def PrepareForDisplay(self):
+        """Entry point when the window opens. Deliberately does not fetch
+        sets: the previously fetched list is restored from the cache and
+        refreshing is the operator's call (btFetchSets)."""
         if not self.phases:
             # The phases fetch may have raced this window or failed on
-            # tournament load; re-request so the selector can populate
-            # (the tournament_phases_updated signal repopulates the combo)
-            # and fall back to the unfiltered fetch meanwhile.
+            # tournament load; re-request it so the selector can populate
+            # (the tournament_phases_updated signal repopulates the combo).
+            # Phases only — this never pulls sets.
             AutonaTournamentDataProvider.instance.GetTournamentPhases()
-            self.phaseRow.setVisible(False)
-            self._FetchSets()
+
+        if self._fetchPending:
+            # A fetch started from a previous open is still running; leave its
+            # progress on screen instead of overwriting it with stale rows.
             return
-        self.phaseRow.setVisible(True)
-        if self.phaseCombo.currentIndex() <= 0:
-            # A single-phase event has nothing to choose — load it directly.
-            if len(self.phases) == 1:
-                self.phaseCombo.setCurrentIndex(2)
-                self._FetchSets()
-                return
-            self.model.clear()
-            self.progressBar.setVisible(False)
+
+        cache = self._CacheForCurrentTournament()
+        if cache:
+            self.showFinished.setChecked(cache["showFinished"])
+            if 0 <= cache["phaseIndex"] < self.phaseCombo.count():
+                self.phaseCombo.setCurrentIndex(cache["phaseIndex"])
+            self._RenderSets(cache["sets"])
+            self._ShowCacheStatus(cache)
+        else:
+            self._RenderSets([])
+            self.labelStatus.setText(QApplication.translate(
+                "app", "「最新の試合情報を取得」を押すと一覧を読み込みます"))
+
+    def _ShowCacheStatus(self, cache):
+        self.labelStatus.setText(QApplication.translate(
+            "app", "{0}件（{1} 取得）").format(
+                len(cache["sets"]), cache["fetchedAt"]))
+
+    def _FetchSets(self):
+        if AutonaTournamentDataProvider.instance.provider is None:
+            # Reachable through the external open-set API, which opens this
+            # window without checking for a tournament. LoadSets would return
+            # silently and leave the button stuck on "fetching".
+            self.labelStatus.setText(QApplication.translate(
+                "app", "大会が選択されていません"))
+            return
+
+        if self.phases and self.phaseCombo.currentIndex() <= 0:
+            # Fetching every phase of a large event is exactly what the phase
+            # selector exists to avoid — "All phases" is there for that.
             self.labelStatus.setText(QApplication.translate(
                 "app", "Select a phase to load sets"))
             return
-        self._FetchSets()
 
-    def _FetchSets(self):
-        phaseGroupIds = self._selectedGroupIds() if self.phaseRow.isVisibleTo(
-            self) else None
-        self.proxyModel.setSourceModel(QStandardItemModel())
+        phaseGroupIds = self._selectedGroupIds() if self.phases else None
+        # What the result will be cached as — captured now, because the
+        # selection may have moved on by the time the fetch lands.
+        self._pendingQuery = {
+            "url": self._TournamentUrl(),
+            "showFinished": self.showFinished.isChecked(),
+            "phaseIndex": self.phaseCombo.currentIndex(),
+        }
+        # The current rows stay on screen while the refresh runs; they are
+        # replaced once the new list arrives.
+        self._SetFetching(True)
         AutonaTournamentDataProvider.instance.LoadSets(
-            showFinished=self.showFinished.isChecked(),
+            showFinished=self._pendingQuery["showFinished"],
             phaseGroupIds=phaseGroupIds)
-        self.model.clear()
-        # Busy (indeterminate) until the first page reports the page count.
-        self.progressBar.setRange(0, 0)
-        self.progressBar.setVisible(True)
-        self.labelStatus.setText(
-            QApplication.translate("app", "Fetching sets..."))
 
-    def SetsUpdated(self, data):
-        if data == None:
-            return
-
-        if data["progress"] >= data["totalPages"]:
-            self.labelStatus.setText("")
-            self.progressBar.setVisible(False)
-        else:
+    def _SetFetching(self, fetching):
+        self._fetchPending = fetching
+        self.btFetchSets.setEnabled(not fetching)
+        if fetching:
+            # Busy (indeterminate) until the first page reports the page count.
+            self.progressBar.setRange(0, 0)
+            self.progressBar.setVisible(True)
             self.labelStatus.setText(
-                f"Fetching sets...({data['progress']}/{data['totalPages']})")
-            self.progressBar.setRange(0, data["totalPages"])
-            self.progressBar.setValue(data["progress"])
+                QApplication.translate("app", "Fetching sets..."))
+        else:
+            self.progressBar.setVisible(False)
 
-        horizontal_labels = [
-            QApplication.translate("app", "Stream"),
-            QApplication.translate("app", "Station"),
-            QApplication.translate("app", "Phase"),
-            QApplication.translate("app", "Pool"),
-            QApplication.translate("app", "Match"),
-            QApplication.translate("app", "Player {0}").format(1),
-            QApplication.translate("app", "Player {0}").format(2),
-        ]
-        self.model.setHorizontalHeaderLabels(horizontal_labels)
+    def _OnFetchProgress(self, data):
+        """Per-page progress of a fetch this window started. The rows come
+        from get_sets_finished, so the payload's `sets` is ignored here."""
+        if not self._fetchPending or not data:
+            return
+        totalPages = data.get("totalPages") or 0
+        if totalPages <= 0:
+            return
+        progress = data.get("progress") or 0
+        self.progressBar.setRange(0, totalPages)
+        self.progressBar.setValue(progress)
+        self.labelStatus.setText(
+            QApplication.translate("app", "Fetching sets...")
+            + f"({progress}/{totalPages})")
 
-        sets = data["sets"]
+    def _OnSetsFetched(self, sets):
+        if not self._fetchPending:
+            return
+        query = self._pendingQuery or {}
+        self._pendingQuery = None
+        self._SetFetching(False)
 
-        if sets is not None:
-            for s in sets:
+        AutonaSelectSetWindow._cache = {
+            "url": query.get("url"),
+            "showFinished": query.get("showFinished", False),
+            "phaseIndex": query.get("phaseIndex", 0),
+            "sets": sets or [],
+            "fetchedAt": datetime.now().strftime("%H:%M"),
+        }
+        cache = AutonaSelectSetWindow._cache
+        self._RenderSets(cache["sets"])
+        self._ShowCacheStatus(cache)
+
+    def _RenderSets(self, sets):
+        """Refill the table from a set list (cached or freshly fetched)."""
+        # Clearing/refilling flaps the sort indicator; keep the operator's
+        # own choice from being overwritten by those intermediate states.
+        self._suppressSortSave = True
+        try:
+            self.model.clear()
+            self.model.setHorizontalHeaderLabels([
+                QApplication.translate("app", "Stream"),
+                QApplication.translate("app", "Station"),
+                QApplication.translate("app", "Phase"),
+                QApplication.translate("app", "Pool"),
+                QApplication.translate("app", "Match"),
+                QApplication.translate("app", "Player {0}").format(1),
+                QApplication.translate("app", "Player {0}").format(2),
+            ])
+
+            for s in (sets or []):
                 dataItem = QStandardItem(str(s.get("id")))
                 dataItem.setData(s, Qt.ItemDataRole.UserRole)
 
@@ -273,14 +403,27 @@ class AutonaSelectSetWindow(QDialog):
                     dataItem
                 ])
 
-        self.proxyModel.setSourceModel(self.model)
-        self.startggSetSelectionItemList.setColumnHidden(
-            self.DATA_COLUMN, True)
-        self.startggSetSelectionItemList.resizeColumnsToContents()
-        self.startggSetSelectionItemList.horizontalHeader(
-        ).setSectionResizeMode(QHeaderView.Stretch)
-        QApplication.processEvents()
-        self.resize(self.width(), self.height())
+            self.startggSetSelectionItemList.setColumnHidden(
+                self.DATA_COLUMN, True)
+            self.startggSetSelectionItemList.resizeColumnsToContents()
+            self.startggSetSelectionItemList.horizontalHeader(
+            ).setSectionResizeMode(QHeaderView.Stretch)
+            self._ApplySortState()
+        finally:
+            self._suppressSortSave = False
+
+    def _onSortIndicatorChanged(self, section, order):
+        if self._suppressSortSave or section < 0:
+            return
+        AutonaSelectSetWindow._sortState = (section, order)
+
+    def _ApplySortState(self):
+        state = AutonaSelectSetWindow._sortState
+        if not state:
+            return
+        section, order = state
+        if section < self.model.columnCount():
+            self.startggSetSelectionItemList.sortByColumn(section, order)
 
     def LoadSelectedSet(self):
         row = 0
@@ -308,6 +451,11 @@ class AutonaSelectSetWindow(QDialog):
             AutonaTournamentDataProvider.instance.setLoadingWorker.cancel()
             AutonaTournamentDataProvider.instance.setLoadingWorker.signals.blockSignals(
                 True)
+            if self._fetchPending:
+                # That worker was ours: its result will never arrive, so drop
+                # the pending state instead of leaving the button disabled.
+                self._pendingQuery = None
+                self._SetFetching(False)
 
     def _openStationSelection(self):
         self.close()
