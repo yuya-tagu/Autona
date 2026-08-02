@@ -671,25 +671,7 @@ class AutonaScoreboardWidget(QWidget):
         self.innerWidget.layout().removeWidget(self.scoreColumn)
         self.scoreColumn.findChild(QGroupBox, "scoreGroupBox").setTitle("")
 
-        self.bestOfSpin.valueChanged.connect(
-            lambda value: [
-                StateManager.BlockSaving(),
-                StateManager.Set(
-                    f"score.{self.scoreboardNumber}.best_of", value),
-                StateManager.Set(
-                    f"score.{self.scoreboardNumber}.best_of_short_text", f"BO{value}"),
-                StateManager.Set(f"score.{self.scoreboardNumber}.best_of_text", AutonaLocaleHelper.matchNames.get(
-                    "best_of").format(value) if value > 0 else ""),
-                StateManager.Set(
-                    f"score.{self.scoreboardNumber}.first_to", math.ceil(value/2)),
-                StateManager.Set(
-                    f"score.{self.scoreboardNumber}.first_to_short_text", f"FT{math.ceil(value/2)}"),
-                StateManager.Set(f"score.{self.scoreboardNumber}.first_to_text", AutonaLocaleHelper.matchNames.get(
-                    "first_to").format(math.ceil(value/2)) if value > 0 else ""),
-                self.individualGameTracker.SetStageCount(value),
-                StateManager.ReleaseSaving()
-            ]
-        )
+        self.bestOfSpin.valueChanged.connect(self._onBestOfChanged)
         self.bestOfSpin.valueChanged.emit(0)
 
         self.scoreDisplay1.valueChanged.connect(
@@ -808,6 +790,30 @@ class AutonaScoreboardWidget(QWidget):
     def ApplyChanges(self):
         # 反映 button: publish every pending edit on this board at once.
         StateManager.CommitHeld(self.statePrefix)
+
+    def _onBestOfChanged(self, value):
+        # bestOfSpin.valueChanged handler. The derived keys are written as one
+        # save block so a BO change is a single export, and the block is a
+        # `with` statement rather than a chain of calls: anything in here can
+        # raise (matchNames is empty until the locale is loaded, and .format()
+        # on the missing entry throws), and a BlockSaving() whose matching
+        # ReleaseSaving() is never reached leaves saveBlocked permanently
+        # positive -- every later SaveState suppressed, i.e. ./out and the
+        # WebSocket feed silently frozen mid-stream (agent-pitfalls #6).
+        with StateManager.SaveBlock():
+            StateManager.Set(
+                f"score.{self.scoreboardNumber}.best_of", value)
+            StateManager.Set(
+                f"score.{self.scoreboardNumber}.best_of_short_text", f"BO{value}")
+            StateManager.Set(f"score.{self.scoreboardNumber}.best_of_text", AutonaLocaleHelper.matchNames.get(
+                "best_of").format(value) if value > 0 else "")
+            StateManager.Set(
+                f"score.{self.scoreboardNumber}.first_to", math.ceil(value/2))
+            StateManager.Set(
+                f"score.{self.scoreboardNumber}.first_to_short_text", f"FT{math.ceil(value/2)}")
+            StateManager.Set(f"score.{self.scoreboardNumber}.first_to_text", AutonaLocaleHelper.matchNames.get(
+                "first_to").format(math.ceil(value/2)) if value > 0 else "")
+            self.individualGameTracker.SetStageCount(value)
 
     def _onTournamentInfoDelta(self, delta):
         # Same cheap containment filter AutonaStatsWidget uses on deltas.

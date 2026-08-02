@@ -110,21 +110,39 @@ try で握られるため起動は継続するが、以降**国旗が 1 つも�
 当該ディレクトリは git 管理下なので通常運用では起きないが、
 ユーザーが `user_data` を掃除した場合に再現する。フォールバックを入れるべき。
 
-### PR-1 実装中に追加検出した 3 件（いずれも未修正）
+### PR-1 実装中に追加検出した 3 件（BUG-3 は修正済み）
 
-#### BUG-3: best_of ハンドラの例外で保存が恒久的に停止しうる 🟠
+#### BUG-3: best_of ハンドラの例外で保存が恒久的に停止しうる 🟠 ✅ 修正済み（2026-08-02）
 
-[src/AutonaScoreboardWidget.py:674](../../src/AutonaScoreboardWidget.py) の `bestOfSpin.valueChanged`
-ハンドラは `StateManager.BlockSaving()` … `StateManager.ReleaseSaving()` を**リスト内包の要素として**
-並べている。途中の `StateManager.Set` が例外を投げると `ReleaseSaving()` に到達せず、
-`saveBlocked` カウンタが正の値のまま残り、**以降すべての SaveState が抑制される**
-（= 配信中に state 出力が丸ごと止まる）。agent-pitfalls #6 の裏返し。
+`bestOfSpin.valueChanged` ハンドラは `StateManager.BlockSaving()` … `StateManager.ReleaseSaving()` を
+**リスト内包の要素として**並べていた。途中の `StateManager.Set` が例外を投げると
+`ReleaseSaving()` に到達せず、`saveBlocked` カウンタが正の値のまま残り、
+**以降すべての SaveState が抑制される**（= 配信中に state 出力が丸ごと止まる）。
+agent-pitfalls #6 の裏返し。
 
 実際に harness 構築中に踏んだ: locale 未ロード時に `matchNames.get("best_of")` が None を返し
 `.format()` で AttributeError → 後続の `first_to` 等が未書き込みのまま。
-本番では `Window.__init__` が locale をロードするため現状は顕在化しないが、
-ハンドラが例外を投げれば保存が死ぬ構造そのものが問題。
-対処: `with StateManager.SaveBlock():` に置き換え、ラムダをメソッドへ抽出する。
+本番では `Window.__init__` が locale をロードするため顕在化していなかったが、
+ハンドラが例外を投げれば保存が死ぬ構造そのものが問題だった。
+
+**修正（2026-08-02）**: ラムダ + リスト内包を
+[`AutonaScoreboardWidget._onBestOfChanged`](../../src/AutonaScoreboardWidget.py) として
+メソッド抽出し、`with StateManager.SaveBlock():` に置き換えた。
+書き込むキー・値・`SetStageCount` の呼び出し順は不変。
+pin: `tests/test_save_block_symmetry.py`
+（`test_a_failing_best_of_handler_leaves_saving_unblocked` /
+`test_state_still_exports_after_a_failing_best_of_handler` の 2 件は
+修正前のコードで実際に失敗することを確認済み。
+`test_the_best_of_handler_is_a_method_not_a_lambda_chain` が構造の再発を止める）。
+
+同じファイルの他の `BlockSaving()` 対（`NewSetSelected` / `ChangeSetData`）は
+いずれも `try/finally` で `ReleaseSaving()` を保証しており、同型ではない。
+**別ファイルの要注意箇所（今回は未修正）**:
+`Autona.py` の `Window.__init__` が `BlockSaving()`（249 行）…`ReleaseSaving()`（848 行）を
+try/finally なしで対にしている。`__init__` が途中で落ちれば同じ状態になる
+（ただしその場合は起動そのものが失敗するため、実害は BUG-3 より小さい）。
+`AutonaScoreboardPlayerWidget.SetData` / `AutonaTeamPlayerWidget.SetData` /
+`AutonaBasePlayerWidget.SwapWith` は try/finally 済み。
 
 #### BUG-4: crew ボードの `reset_match` が best_of を state からクリアしない 🟡
 
