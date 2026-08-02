@@ -1,7 +1,7 @@
 # テスト自動化戦略
 
 作成日: 2026-08-02
-状態: 戦略承認済み（2026-08-02）。**Phase 1 (PR-1) 実装済み** — §5 の進捗表を参照。
+状態: 戦略承認済み（2026-08-02）。**Phase 1 (PR-1) / PR-2 実装済み** — §5 の進捗表を参照。
 背景: 潜在バグの検出が手動テスト頼みになっており、`.claude/manual-test-checklist.md` の項目が増える一方で回帰検出が追いついていない。
 
 ---
@@ -103,12 +103,24 @@ diff は「どのパスが変わったか」だけに使い、値の参照には
 回帰テストは `tests/test_state_manager_export_isolation.py`
 （うち 2 件は修正前のコードで実際に失敗することを確認済み）。
 
-#### BUG-2: `user_data/additional_flag` 不在で国旗が全滅（優先度低・未修正）
+#### BUG-2: `user_data/additional_flag` 不在で国旗が全滅（優先度低）✅ 修正済み（2026-08-02）
 
 `AutonaCountryHelper.LoadCountries` が `os.listdir("./user_data/additional_flag")` で例外。
-try で握られるため起動は継続するが、以降**国旗が 1 つも読めない**。
+try で握られるため起動は継続するが、標準国旗の読み込みと同じ try に
+カスタム国旗（`user_data/additional_flag`、任意）の読み込みが同居していたため、
+将来この節が壊れると標準国旗まで巻き込んで全滅しうる構造だった。
 当該ディレクトリは git 管理下なので通常運用では起きないが、
-ユーザーが `user_data` を掃除した場合に再現する。フォールバックを入れるべき。
+ユーザーが `user_data` を掃除した場合に再現する。ハーネスの合成 `user_data`
+（`tests/conftest.py` の `_RUNTIME_DIRS`）にも無く、ボードを1つでも作る
+テストは毎回この例外を ERROR ログに吐いていた。
+
+**修正**: カスタム国旗の読み込みを標準国旗読み込みの try/except から分離し、
+`AutonaGameAssetManager` の `./user_data/games` と同じパターンで
+`os.makedirs("./user_data/additional_flag", exist_ok=True)` を先に呼んで
+ディレクトリを保証。標準国旗の完走はカスタム国旗の有無に依存しなくなった。
+pin: `tests/test_country_helper_flags.py`。これによりハーネスでも
+`AutonaCountryHelper.countryModel` が使えるようになり、`country_code` を渡す
+`SetData` 経路も同ファイルでL2テスト済み（旧・下記「未修正の細かい歪み」の制約は解消）。
 
 ### PR-1 実装中に追加検出した 3 件（BUG-3 は修正済み）
 
@@ -137,26 +149,48 @@ pin: `tests/test_save_block_symmetry.py`
 
 同じファイルの他の `BlockSaving()` 対（`NewSetSelected` / `ChangeSetData`）は
 いずれも `try/finally` で `ReleaseSaving()` を保証しており、同型ではない。
-**別ファイルの要注意箇所（今回は未修正）**:
+**別ファイルの要注意箇所 → 解消済み（2026-08-02）**:
 `Autona.py` の `Window.__init__` が `BlockSaving()`（249 行）…`ReleaseSaving()`（848 行）を
-try/finally なしで対にしている。`__init__` が途中で落ちれば同じ状態になる
-（ただしその場合は起動そのものが失敗するため、実害は BUG-3 より小さい）。
+try/finally なしで対にしていた（`__init__` が途中で落ちれば同じ状態になる。ただしその場合は
+起動そのものが失敗するため、実害は BUG-3 より小さい）。約 600 行の span を
+`Window._BuildUi()` としてメソッド抽出し、`__init__` 側を
+`with StateManager.SaveBlock(): self._BuildUi()` に置き換えた。
+span 内に early return / ネストした `BlockSaving` は無く、抽出した 600 行は 1 バイトも
+変えていない（`git diff -w` が構造変更の数行のみ）ため、実行順・書き込むキーは不変。
+pin: `tests/test_save_block_symmetry.py`
+（`test_window_init_builds_inside_a_save_block` /
+`test_no_hand_paired_block_saving_left_in_autona_py`。`src/Autona.py` は import 自体が
+起動シーケンスでテストから import できないため、`ast` によるソース静的検査で書いている）。
 `AutonaScoreboardPlayerWidget.SetData` / `AutonaTeamPlayerWidget.SetData` /
 `AutonaBasePlayerWidget.SwapWith` は try/finally 済み。
 
-#### BUG-4: crew ボードの `reset_match` が best_of を state からクリアしない 🟡
+#### BUG-4: crew ボードの `reset_match` が best_of を state からクリアしない 🟡 **[修正済み]**
 
 board 3 の `_bestOfSpin` は「generic な WebServer アクションが AttributeError を出さないための
 hidden compat widget」であり、値が state に配信されない。
 `ChangeSetData({"bestOf": N})` は `score.3.best_of` を書くため、
 **セット読込後に reset_match しても オーバーレイは古い BO を表示し続ける**（board 1/2 はクリアされる）。
-`tests/test_scoreboard_operations.py` に `xfail(strict=True)` で追跡中。修正時にマーカーを外す。
 
-#### BUG-5: `AutonaScoreboardWidget.closeEvent` が None タイマーで例外（優先度低）
+**修正（2026-08-02）**: board 1/2 と同じく `_bestOfSpin` を `score.3.best_of` の唯一の真実源に
+昇格した。`valueChanged` → [`AutonaCrewBattleWidget._onBestOfChanged`](../../src/AutonaCrewBattleWidget.py)
+で state を書き、`ChangeSetData` は直接 `Set` せず `setValue` 経由にし、`_writeInitialState` で
+0 をシードする。これで `WebServerActions._reset_best_of`（`setValue(0)`）が reset_match /
+clear_all の両方で state をクリアする。派生キー（`best_of_text` / `first_to*`）は crew に
+消費者がおらず locale 未ロード時に例外になり得るため、意図的に board 1/2 と揃えていない。
+pin: `tests/test_scoreboard_operations.py`（xfail マーカーを削除し、seed / clear_all の回帰も追加）。
+
+#### BUG-5: `AutonaScoreboardWidget.closeEvent` が None タイマーで例外（優先度低） **[修正済み]**
 
 `closeEvent` は `self.autoUpdateTimer.stop()` を無条件で呼ぶが、両タイマーは
 `NewSetSelected` まで `None`。セットを一度も読み込まずにボードを閉じると AttributeError
 （Qt がイベントハンドラ内例外を握るため無症状）。
+
+**修正（2026-08-02）**: `autoUpdateTimer` / `timeLeftTimer` それぞれに
+`is not None` ガードを追加。`closeEvent` は 2 行の `.stop()` 呼び出しのみで
+以降の処理は無かったため、従来この例外でスキップされていた後続処理は無い。
+同型の無条件 `.stop()` は他クラスに存在しない（grep 済み）。
+pin: `tests/test_scoreboard_operations.py::test_close_without_a_loaded_set_does_not_raise`
+（`test_close_with_a_loaded_set_still_stops_the_timers` で通常経路の回帰も追加）。
 
 ### PR-1 レビューで追加検出（2026-08-02）
 
@@ -181,7 +215,7 @@ pin: `tests/test_stats_util.py`。
 - `AutonaStatsUtil` の `provider.name` 参照に provider(None) ガードが無く、
   大会未読込時に必ず AttributeError（`_IsStartGG()` ヘルパに集約して 3 箇所を修正）
 
-#### PR-2 着手前の必須前提: 画像ダウンローダスレッドの待機機構
+#### PR-2 着手前の必須前提: 画像ダウンローダスレッドの待機機構 ✅ 実装済み（2026-08-02）
 
 `StateManager.CreateFilesDict` は値が `http...png/jpg` の文字列だったとき
 **daemon スレッドを起こして画像をダウンロードし、`./out/{path}.png` に書く**
@@ -189,9 +223,22 @@ pin: `tests/test_stats_util.py`。
 **書き込み時点の CWD** で解決される。`_AutonaHarness.settle()` はエクスポートスレッドしか
 join しないため、このスレッドは harness の CWD 復元後に走りうる。
 
-**選手ウィジェット（avatar / キャラ画像の URL を state に流す層）のテストを書く前に、
-ハーネス側へダウンローダの待機機構を入れること。** 入れずに PR-2 を進めると、
-テスト実行が実プロジェクトの `./out` へ画像を書く事故になる。
+**実装（PR-2）**: `StateManager._download_threads` に起動済みスレッドを登録し
+（`_TrackDownload`、登録時に終了済みを刈るのでリストは伸び続けない）、
+`StateManager.JoinDownloads(timeout=None)` で待てるようにした。
+`_AutonaHarness.settle()` はエクスポートスレッドのループを抜けた**後**に
+`JoinDownloads()` を呼ぶ（DL スレッドを起こすのはエクスポートスレッド自身なので
+この順序でないと取りこぼす）。セッション終了時の CWD 復元前にも保険で 1 回呼ぶ。
+
+**専用ロックを使う理由**: 登録はエクスポートスレッドから走るが、
+`SaveState()` は GUI スレッドで `StateManager.lock` を**保持したまま**
+エクスポートスレッドを join する。同じ RLock を使うと所有スレッドが異なるため
+デッドロックする。`_download_lock`（素の `threading.Lock`）を別に持つこと。
+
+pin: `tests/test_harness_isolation.py` の
+`test_image_downloads_finish_before_the_directory_is_restored`（閉じたループバック
+ポートを叩くので実 HTTP アクセスは発生しない。DL 起動を先に assert して空振りを防ぐ）/
+`test_finished_image_downloads_are_not_kept_forever`。
 
 #### 運用注意: ハーネス外から設定・選手 DB の保存系を呼ばない
 
@@ -225,16 +272,84 @@ pytest は `exec()` を回さないためイベントループ階層が 0 のま
 2 回連続で access violation で落ちた（`WebServerActions.__init__` の `QThread` 生成中）。
 破棄対象を board 1 個に限定した現行実装では 6 連続グリーン。回収は必ず対象を指定する。
 
-#### 根治残件: プロダクション側の lambda 接続
+#### 根治残件: プロダクション側の lambda 接続 ✅ 完了（2026-08-02）
 
 上記ゴースト問題の根本原因は、ウィジェットがグローバルシングルトンのシグナルへ
-**lambda で接続している**こと（例:
-[src/AutonaScoreboardWidget.py:757](../../src/AutonaScoreboardWidget.py) の
-`AutonaGameAssetManager.instance.signals.onLoad`）。
-bound method なら PySide6 が receiver を weakref で追い、破棄時に自動切断するが、
-lambda は receiver への参照を持たないため切断されない。
-ハーネスは `sendPostedEvents` で C++ 破棄を強制して回避しているが、
-**プロダクション側の lambda → bound method 化は別 PR**とする。
+**lambda で接続している**こと。bound method なら Qt が receiver を識別できるため
+C++ 破棄時に自動切断されるが、lambda は receiver を持たないため切断されない。
+
+**対応（2026-08-02）**: `src/` 全体を AST で監査し、プロセス寿命のシグナル
+（`AutonaGameAssetManager` / `AutonaTournamentDataProvider` / `AutonaHotkeys` /
+`AutonaPlayerDB` / `StateManager` の各 signals）への lambda 接続 9 箇所を洗い出した。
+うち破棄されうる receiver は `AutonaScoreboardWidget` の 5 箇所のみで、
+すべて bound method に置き換えた — スコアホットキー 4 本は捕捉していた
+`(team, delta)` を `HotkeyTeam1ScoreUp` 等の 4 メソッドに畳み、`onLoad` は
+`_onGameAssetsLoaded` に抽出（書き込むキー・呼び出し順は不変）。
+残る 4 箇所（`Autona.py` の Window 3 件、`AutonaApiV1.py` のモジュール変数 2 件、
+`AutonaThumbnailSettingsWidget.py` の `Window.thumbnailSetting` 1 件）は
+**アプリ寿命と同じ receiver** なので対象外とし、テスト側の許可リストに理由付きで
+記録した。pin: `tests/test_signal_lifetime.py`（AST による静的検査 2 件 +
+破棄後の接続数が構築前のベースラインに戻ることの検証 + state 書き戻しなしの検証）。
+うち 3 件は修正前のコードで実際に失敗することを確認済み。
+
+**gc では回収されない点に注意**: ボードは自分の子ウィジェットを `self` を
+キャプチャした lambda に多数つないでおり、その循環が Qt の C++ 接続ストレージを
+経由するため Python の gc が辿れない。ボードの Python ラッパーは解放されないままで、
+これは正常。ゴーストを止めるのは C++ 破棄時の自動切断であって Python の GC ではない。
+ハーネスの `sendPostedEvents` は防御層としてそのまま残している。
+
+### PR-2 実装中に検出（2026-08-02）
+
+#### BUG-7: `AutonaTeamPlayerWidget` に旧 mains ループが残っている 🟡
+
+旧 API の単一キャラ形式 `mains: ["Mario", skin]` を渡すと、
+`AutonaTeamPlayerWidget.SetData` は `for element in self.character_elements:`
+で**全スロットに同じキャラを代入する**。分類 A の例に挙がっている
+「1 キャラ選手ロードで全スロット汚染」そのもので、
+`AutonaScoreboardPlayerWidget` 側だけが修正され、こちらは取り残されていた
+（agent-pitfalls #5 の典型例）。
+
+**現状ユーザーに露出していない**（下記の到達性を参照）ため優先度は 🟡。
+`tests/test_player_widgets.py` の
+`test_a_legacy_single_character_main_only_fills_the_first_slot` が
+`xfail(strict=True)` で追跡中。修正時にマーカーを外す。
+
+#### 到達性の実態: `AutonaTeamPlayerWidget` は現在どこからも生成されない
+
+board 2（team）は `AutonaScoreboardWidget(singlePlayer=False)` であり、
+その選手ウィジェットは board 1 と同じ `AutonaScoreboardPlayerWidget`。
+`AutonaTeamPlayerWidget` の唯一の呼び出し元 `AutonaTeamBattleWidget` は
+`src/Autona.py` で import ごとコメントアウトされている（171 / 376 行）。
+
+したがって「board1=1v1 / board2=team の 2 クラスを parametrize」という
+当初の記述は誤り。PR-2 では **`AutonaTeamPlayerWidget` をボード無しで直接構築**し
+（`_AutonaHarness.teamPlayerWidget()`、パスは production 同形の
+`score.2.team.{T}.player.{M}`）、同一テストを両実装に流している。
+前提が腐らないよう `test_the_team_board_uses_the_scoreboard_player_widget` で
+「どのボードがどのクラスを作るか」を pin した。
+
+#### ハーネス制約: 合成ゲームが無いとキャラ選択のテストは空振りする
+
+ハーネスの `user_data/games` は空なので
+`AutonaGameAssetManager.characterModel` は 0 行。キャラコンボは index -1 から
+動かせず、「どのスロットに誰が入ったか」の assert が全て自明に通ってしまう。
+`_AutonaHarness.loadCharacters()` で最小限のロスター（`characters` /
+`stockIcons` を差し込み、モデル自体は production の `UpdateCharacterModel()` で構築）
+を流し込む。スキンモデルだけは手組み — `UpdateSkinModel()` は PNG をデコードする
+スレッドプールワーカーへ展開され、CWD 復元をまたいで走らせられないため。
+差し替えた世代は `agent-pitfalls #13` に従い 1 世代 retire し、テスト後に復元する。
+
+#### 未修正の細かい歪み（今回は触っていない）
+
+- `Clear()` は `QSpinBox` の内部 `qt_spinbox_lineedit` の `editingFinished` を
+  emit するため、`score.{N}...player.{M}.seed` が**文字列 `"0"`** で published
+  される（`SetData` 経由なら int 0）。表示上は同じだが型が揺れる。
+  テスト側は `int(...)` で吸収している
+- ~~ハーネス内では `user_data/additional_flag` が無く BUG-2 が常時再現するため、
+  `AutonaCountryHelper.countryModel` は `None` のまま。
+  `SetData` に `country_code` を渡す経路は L2 でまだテストできない~~
+  → BUG-2 修正（2026-08-02）で解消。`tests/test_country_helper_flags.py` で
+  `country_code` 経路も含めて L2 テスト済み
 
 ### ドキュメントの実態乖離
 
@@ -281,7 +396,9 @@ autonaApp (session)
 
 `AutonaScoreboardPlayerWidget` と `AutonaTeamPlayerWidget` は基底クラスを共有しない別実装
 （agent-pitfalls #5）。**同一のテストを両クラスに `parametrize` で流す**ことで、
-「片方だけ直して片方を忘れる」既知の事故パターンを構造的に潰す。
+「片方だけ直して片方を忘れる」既知の事故パターンを構造的に潰す
+（実際に BUG-7 がこれで見つかった）。ただし後者はボードから取れない
+— §3「到達性の実態」を参照。
 
 ### L4 の設計
 
@@ -323,8 +440,16 @@ L4 は `main.py` を使わず、サブプロセス内で `QApplication` → `boo
     harness も `LoadLocale()` / `LoadRoundNames()` を呼ぶ必要がある（BUG-3 参照）
 
 ### Phase 2: バグ密集地帯（分類 A）
-- **PR-2** 選手ウィジェット（1v1 / team を parametrize で同時検証）
+- **PR-2** 選手ウィジェット（2 実装を parametrize で同時検証）✅ 完了（2026-08-02）
   `SetData` / キャラスロット / mains / seed 表示
+  + 前提のダウンローダ待機機構（§3）
+
+  **実績**: Python 248 件 + xfail 1 → **297 件 + xfail 2 / 44 秒**。
+  `tests/test_player_widgets.py`（40 件、うち 1 件は BUG-7 の xfail）+
+  `tests/test_harness_isolation.py` にダウンローダのガード 2 件。
+  検出: BUG-7（旧 mains ループの取り残し）/
+  `AutonaTeamPlayerWidget` が現在どこからも生成されない実態 /
+  `Clear()` 経由の seed が文字列になる型揺れ。
 - **PR-3** best_of / players_per_team / battle_format 切替
 - **PR-4** crew battle（ストック・アクティブ選手・勝敗遷移）
 

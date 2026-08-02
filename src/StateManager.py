@@ -139,6 +139,12 @@ class StateManager:
     lock = threading.RLock()
     _export_thread = None
     _download_semaphore = threading.Semaphore(3)
+    # In-flight image downloads started by CreateFilesDict. Guarded by its own
+    # lock, NOT StateManager.lock: these are registered from the export thread,
+    # while SaveState() joins that thread from the GUI thread *while holding*
+    # StateManager.lock -- reusing it here would deadlock the pair.
+    _download_threads = []
+    _download_lock = threading.Lock()
     _initialized = False
 
     @staticmethod
@@ -161,6 +167,42 @@ class StateManager:
             StateManager.SaveState()
 
         StateManager.LoadState()
+
+    @staticmethod
+    def _TrackDownload(thread):
+        """Register a running image download so it can be waited on.
+
+        The download writes to "./out/<path>.<ext>", a *relative* path that
+        the OS resolves against the process CWD at write time -- not at the
+        time the thread was started. Anything that moves the CWD (the widget
+        test harness runs the whole app inside a throwaway directory) must be
+        able to wait these out first, or a late thread lands its image in
+        whatever directory happens to be current by then.
+
+        Finished threads are dropped on every insert, so a long streaming
+        session does not grow this list without bound.
+        """
+        with StateManager._download_lock:
+            StateManager._download_threads = [
+                t for t in StateManager._download_threads if t.is_alive()]
+            StateManager._download_threads.append(thread)
+
+    @staticmethod
+    def JoinDownloads(timeout=None):
+        """Wait for every in-flight image download; True if all finished.
+
+        `timeout` is the total budget across all of them, not per thread.
+        """
+        with StateManager._download_lock:
+            threads = list(StateManager._download_threads)
+
+        deadline = None if timeout is None else time.monotonic() + timeout
+        for thread in threads:
+            if deadline is None:
+                thread.join()
+            else:
+                thread.join(max(0.0, deadline - time.monotonic()))
+        return not any(t.is_alive() for t in threads)
 
     @contextlib.contextmanager
     def SaveBlock():
@@ -676,6 +718,7 @@ class StateManager:
                         daemon=True
                     )
                     t.start()
+                    StateManager._TrackDownload(t)
                 except Exception as e:
                     logger.error(traceback.format_exc())
             else:

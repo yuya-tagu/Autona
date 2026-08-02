@@ -124,14 +124,20 @@ class AutonaScoreboardWidget(QWidget):
         AutonaHotkeys.signals.swap_teams.connect(self.SwapTeams)
         AutonaHotkeys.signals.reset_scores.connect(self.ResetScore)
 
-        AutonaHotkeys.signals.team1_score_up.connect(
-            lambda: self.CommandScoreChange(0, 1))
+        # Bound methods, never lambdas: AutonaHotkeys.signals is a class-level
+        # object that lives for the whole process, while a board is destroyed
+        # on every battle-format switch. A bound method tells Qt who the
+        # receiver is, so the connection dies with the board; a lambda does
+        # not, and nothing ever disconnects it -- the destroyed board would
+        # keep answering hotkeys and rewriting score.{n} (the "ghost board").
+        # The team/delta pair each hotkey stands for is fixed, so the four
+        # one-line methods below carry it instead of a captured argument.
+        AutonaHotkeys.signals.team1_score_up.connect(self.HotkeyTeam1ScoreUp)
         AutonaHotkeys.signals.team1_score_down.connect(
-            lambda: self.CommandScoreChange(0, -1))
-        AutonaHotkeys.signals.team2_score_up.connect(
-            lambda: self.CommandScoreChange(1, 1))
+            self.HotkeyTeam1ScoreDown)
+        AutonaHotkeys.signals.team2_score_up.connect(self.HotkeyTeam2ScoreUp)
         AutonaHotkeys.signals.team2_score_down.connect(
-            lambda: self.CommandScoreChange(1, -1))
+            self.HotkeyTeam2ScoreDown)
         AutonaHotkeys.signals.apply_changes.connect(self.ApplyChanges)
 
         self.signals.CommandScoreChange.connect(self.CommandScoreChange)
@@ -736,16 +742,10 @@ class AutonaScoreboardWidget(QWidget):
         AutonaTournamentDataProvider.instance.signals.tournament_data_updated.connect(
             self._UpdateEntrantsMatchItem)
 
+        # Bound method, not a lambda: the asset manager outlives every board
+        # (see the AutonaHotkeys block in __init__ for the full reasoning).
         AutonaGameAssetManager.instance.signals.onLoad.connect(
-            lambda: [
-                self.SetDefaultsFromAssets(),
-                self.bestOfSpin.valueChanged.emit(self.bestOfSpin.value()),
-                # A game (re)load rewrites characters/defaults wholesale;
-                # publish the fresh baseline instead of leaving it pending
-                # behind the 反映 button.
-                StateManager.CommitHeld(self.statePrefix),
-            ]
-        )
+            self._onGameAssetsLoaded)
 
         self.scoreColumn.findChild(QVBoxLayout, "verticalLayout").addWidget(self.individualGameTracker)
 
@@ -789,6 +789,14 @@ class AutonaScoreboardWidget(QWidget):
 
     def ApplyChanges(self):
         # 反映 button: publish every pending edit on this board at once.
+        StateManager.CommitHeld(self.statePrefix)
+
+    def _onGameAssetsLoaded(self):
+        # AutonaGameAssetManager.signals.onLoad handler.
+        self.SetDefaultsFromAssets()
+        self.bestOfSpin.valueChanged.emit(self.bestOfSpin.value())
+        # A game (re)load rewrites characters/defaults wholesale; publish the
+        # fresh baseline instead of leaving it pending behind the 反映 button.
         StateManager.CommitHeld(self.statePrefix)
 
     def _onBestOfChanged(self, value):
@@ -1088,8 +1096,14 @@ class AutonaScoreboardWidget(QWidget):
             StateManager.Set(f"score.{self.scoreboardNumber}.team.2.score", team_2_score)
 
     def closeEvent(self, event):
-        self.autoUpdateTimer.stop()
-        self.timeLeftTimer.stop()
+        # Both timers stay None until NewSetSelected() creates them (BUG-5:
+        # closing a board that never had a set loaded used to raise
+        # AttributeError here; Qt swallows exceptions from event handlers so
+        # it was silent, but it is still an unhandled exception on the path).
+        if self.autoUpdateTimer is not None:
+            self.autoUpdateTimer.stop()
+        if self.timeLeftTimer is not None:
+            self.timeLeftTimer.stop()
 
     def _applyScoreboardMode(self, singlePlayer: bool):
         # Toggle team-centric UI. In single-player mode, collapse team naming
@@ -1732,7 +1746,21 @@ class AutonaScoreboardWidget(QWidget):
             scoreContainers = [self.scoreDisplay1, self.scoreDisplay2]
             scoreContainers[team].setValue(
                 scoreContainers[team].value()+change)
-            
+
+    # The four global score hotkeys, one method each. They exist so the
+    # connections in __init__ can be bound methods -- see the comment there.
+    def HotkeyTeam1ScoreUp(self):
+        self.CommandScoreChange(0, 1)
+
+    def HotkeyTeam1ScoreDown(self):
+        self.CommandScoreChange(0, -1)
+
+    def HotkeyTeam2ScoreUp(self):
+        self.CommandScoreChange(1, 1)
+
+    def HotkeyTeam2ScoreDown(self):
+        self.CommandScoreChange(1, -1)
+
     def CommandClearAll(self, no_mains=False):
         for t, team in enumerate([self.team1playerWidgets, self.team2playerWidgets]):
             for i, p in enumerate(team):

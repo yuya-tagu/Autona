@@ -177,7 +177,20 @@ class AutonaCountryHelper(QObject):
                             AutonaCountryHelper.cities[country["iso2"]][city_name] = state["iso2"]
 
             AutonaCountryHelper.signals.countriesUpdated.emit()
+        except:
+            AutonaCountryHelper.countries_json = {}
+            logger.error(traceback.format_exc())
+            return
 
+        # Custom flags (./user_data/additional_flag) are an optional add-on
+        # on top of the standard country data loaded above. Isolated in its
+        # own try/except and with the directory guaranteed via makedirs
+        # (same pattern as AutonaGameAssetManager's ./user_data/games) so a
+        # missing/unreadable directory -- e.g. a user who cleaned out
+        # user_data (BUG-2) -- never rolls back the standard flags that are
+        # already loaded and usable at this point.
+        try:
+            os.makedirs("./user_data/additional_flag", exist_ok=True)
             AdditionalFlags = os.listdir("./user_data/additional_flag")
 
             AdditionalFlagsFiltered = []
@@ -210,10 +223,7 @@ class AutonaCountryHelper(QObject):
                 item.setData(flag[:-4], Qt.ItemDataRole.EditRole)
                 AutonaCountryHelper.countryModel.appendRow(item)
         except:
-            AutonaCountryHelper.countries_json = {}
             logger.error(traceback.format_exc())
-
-
 
     def GetStates(country_code: str):
         """Returns the states for a country code, or None if the country cannot be found"""
