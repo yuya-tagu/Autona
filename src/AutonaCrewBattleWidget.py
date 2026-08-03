@@ -85,8 +85,14 @@ class AutonaCrewBattleWidget(QWidget):
         # scoreboard's internals don't AttributeError on board 3.
         self.scoreColumn = QWidget(self)
         self.scoreColumn.setVisible(False)
+        # Crew has no best-of UI, but the spinbox is still the single source
+        # of truth for score.{N}.best_of, exactly like boards 1/2: every
+        # writer (ChangeSetData / set_route) goes through setValue, and the
+        # generic reset (WebServerActions._reset_best_of -> setValue(0))
+        # therefore clears state instead of leaving a stale BO on the overlay.
         self._bestOfSpin = QSpinBox(self.scoreColumn)
         self._bestOfSpin.setObjectName("best_of")
+        self._bestOfSpin.valueChanged.connect(self._onBestOfChanged)
         self.charNumber = QSpinBox(self)          # crew has no characters
         self.charNumber.setVisible(False)
 
@@ -333,11 +339,20 @@ class AutonaCrewBattleWidget(QWidget):
         if edit.text() != value:
             edit.setText(value)
 
+    def _onBestOfChanged(self, value):
+        # _bestOfSpin.valueChanged handler. Boards 1/2 also derive
+        # best_of_text / first_to* here; crew deliberately publishes the raw
+        # value only -- those derived keys have no crew consumer, and their
+        # AutonaLocaleHelper.matchNames.format() can raise before the locale
+        # is loaded, which must not happen on this tolerant compat path.
+        StateManager.Set(self._key("best_of"), value)
+
     def _writeInitialState(self):
         with StateManager.SaveBlock():
             # Board-level phase / round (shown on the OBS crew overlay).
             StateManager.Set(self._key("phase"), "")
             StateManager.Set(self._key("match"), "")
+            StateManager.Set(self._key("best_of"), self._bestOfSpin.value())
             n = self.playerNumber.value()
             for side in range(2):
                 team_no = side + 1
@@ -549,7 +564,9 @@ class AutonaCrewBattleWidget(QWidget):
             if data.get("tournament_pool") is not None:
                 StateManager.Set(self._key("pool"), data.get("tournament_pool"))
             if data.get("bestOf") is not None:
-                StateManager.Set(self._key("best_of"), data.get("bestOf"))
+                # Route through the spinbox (boards 1/2 do the same) so it
+                # stays in sync and a later reset actually clears the value.
+                self._bestOfSpin.setValue(int(data.get("bestOf")))
 
     # ── X (Twitter) post ───────────────────────────────────────────────
 

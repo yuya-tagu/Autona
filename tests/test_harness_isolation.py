@@ -112,6 +112,56 @@ def test_the_working_directory_is_restored_afterwards():
     assert Path(os.getcwd()).resolve() == Path(conftest._ORIGINAL_CWD).resolve()
 
 
+def test_image_downloads_finish_before_the_directory_is_restored(autonaApp):
+    """The other thread that writes ./out, and the one settle() used to miss.
+
+    A state value that is an http .png/.jpg URL (avatars, character art) makes
+    StateManager.CreateFilesDict spawn a daemon thread that downloads it to
+    "./out/<path>.png". That path is relative, so the OS resolves it against
+    whatever the CWD is *when the write happens* -- not when the thread
+    started. A download still in flight when the harness chdir'd back would
+    therefore land its image in the developer's real ./out.
+
+    The URL points at a closed port on loopback: nothing leaves the machine,
+    the request fails immediately, and what is under test is that settle()
+    waited for the thread at all -- so the assertion checks a download was
+    really started before checking it finished.
+    """
+    projectOut = _snapshot(PROJECT_ROOT / "out")
+
+    autonaApp.state.Set("harness_download_probe.image",
+                        "http://127.0.0.1:1/avatar.png")
+    autonaApp.settle()
+
+    threads = list(autonaApp.state._download_threads)
+    assert threads, "precondition: the export should have started a download"
+    assert not any(t.is_alive() for t in threads), (
+        "settle() returned with an image download still running")
+
+    autonaApp.state.Unset("harness_download_probe")
+    autonaApp.settle()
+
+    assert _snapshot(PROJECT_ROOT / "out") == projectOut
+
+
+def test_finished_image_downloads_are_not_kept_forever(autonaApp):
+    """The tracking list must not grow for the length of a stream.
+
+    Every avatar and every character-art URL of every set loaded in a session
+    goes through it, so a list that only ever appends is a slow leak in the
+    app itself, not just in the tests.
+    """
+    for i in range(4):
+        autonaApp.state.Set(f"harness_download_probe.image_{i}",
+                            f"http://127.0.0.1:1/{i}.png")
+        autonaApp.settle()
+
+    assert len(autonaApp.state._download_threads) <= 1
+
+    autonaApp.state.Unset("harness_download_probe")
+    autonaApp.settle()
+
+
 def test_dropped_boards_stop_reacting_to_global_signals(autonaApp):
     """A dropped board must be dead in C++, not merely unreferenced.
 

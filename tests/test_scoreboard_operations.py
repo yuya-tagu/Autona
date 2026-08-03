@@ -265,11 +265,11 @@ def test_reset_match_restores_full_stocks_on_the_crew_board(autonaApp):
 
 
 def test_change_set_data_publishes_best_of_on_the_crew_board(autonaApp):
-    """Setup guard for the xfail below, kept outside it deliberately.
+    """Setup guard for the reset test below, kept separate deliberately.
 
-    If ChangeSetData ever stops writing score.3.best_of, the xfail test's own
-    precondition would fail and it would keep passing as an xfail -- so the
-    BUG-4 fix would look untracked forever. Pinned separately instead.
+    If ChangeSetData ever stops writing score.3.best_of, the reset test's own
+    precondition would silently disappear and it would keep passing on a
+    never-written key. Pinned separately instead.
     """
     board = autonaApp.board(3)
 
@@ -277,23 +277,41 @@ def test_change_set_data_publishes_best_of_on_the_crew_board(autonaApp):
     autonaApp.settle()
 
     assert autonaApp.get("score.3.best_of") == 5
+    # The hidden compat spinbox is the source of truth, like boards 1/2.
+    assert board._bestOfSpin.value() == 5
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Known gap: reset_match sets the crew board's compat best_of spinbox, "
-    "but nothing publishes that to state, so score.3.best_of keeps the value "
-    "ChangeSetData wrote and overlays keep rendering the old BO after a "
-    "match reset. Boards 1/2 clear it. Remove this marker with the fix."))
+def test_crew_board_seeds_best_of_at_construction(autonaApp):
+    # Overlays read score.3.best_of unconditionally, so the key must exist
+    # from the start rather than only after the first ChangeSetData.
+    autonaApp.board(3)
+    autonaApp.settle()
+
+    assert autonaApp.get("score.3.best_of") == 0
+
+
 def test_reset_match_clears_best_of_on_the_crew_board(autonaApp):
-    # The precondition (ChangeSetData writes score.3.best_of) is pinned by
-    # test_change_set_data_publishes_best_of_on_the_crew_board above; only the
-    # missing clear is expected to fail here.
+    # BUG-4 regression: reset_match used to leave score.3.best_of at the value
+    # ChangeSetData wrote, so overlays kept rendering the old BO.
     board = autonaApp.board(3)
 
     board.ChangeSetData({"bestOf": 5})
     autonaApp.settle()
 
     autonaApp.actions().reset_match(3)
+    autonaApp.settle()
+
+    assert autonaApp.get("score.3.best_of") == 0
+    assert board._bestOfSpin.value() == 0
+
+
+def test_clear_all_clears_best_of_on_the_crew_board(autonaApp):
+    board = autonaApp.board(3)
+
+    board.ChangeSetData({"bestOf": 5})
+    autonaApp.settle()
+
+    autonaApp.actions().clear_all(3)
     autonaApp.settle()
 
     assert autonaApp.get("score.3.best_of") == 0
@@ -349,3 +367,40 @@ def test_score_up_action_matches_the_widget(autonaApp):
     autonaApp.settle()
 
     assert _score(autonaApp, 2) == 1
+
+
+# ── lifecycle ────────────────────────────────────────────────────────────
+
+def test_close_without_a_loaded_set_does_not_raise(autonaApp):
+    """BUG-5: autoUpdateTimer / timeLeftTimer stay None until NewSetSelected()
+    creates them, but closeEvent used to call .stop() on both unconditionally.
+    Closing a board that never had a set loaded raised AttributeError -- Qt
+    swallows exceptions from event handlers, so it was silent in production.
+    Calling closeEvent() directly (rather than .close()) makes a regression
+    fail loudly instead of vanishing into Qt's exception hook again.
+    """
+    from qtpy.QtGui import QCloseEvent
+
+    board = autonaApp.board(1)
+    assert board.autoUpdateTimer is None
+    assert board.timeLeftTimer is None
+
+    board.closeEvent(QCloseEvent())  # must not raise
+
+
+def test_close_with_a_loaded_set_still_stops_the_timers(autonaApp):
+    """The None guard must not break the ordinary path where NewSetSelected
+    already built real timers."""
+    from qtpy.QtCore import QTimer
+    from qtpy.QtGui import QCloseEvent
+
+    board = autonaApp.board(1)
+    board.autoUpdateTimer = QTimer()
+    board.autoUpdateTimer.start(5000)
+    board.timeLeftTimer = QTimer()
+    board.timeLeftTimer.start(100)
+
+    board.closeEvent(QCloseEvent())
+
+    assert not board.autoUpdateTimer.isActive()
+    assert not board.timeLeftTimer.isActive()

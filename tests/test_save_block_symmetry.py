@@ -18,9 +18,14 @@ These tests therefore assert two things after a handler blows up: that the
 counter is back to zero, and that a later write really does reach ./out.
 Only the second one is the user-visible contract; the first says why.
 """
+import ast
+from pathlib import Path
+
 import pytest
 
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+
+SRC_ROOT = Path(__file__).resolve().parent.parent / "src"
 
 
 # A key of its own rather than one of the board's: everything under score.{n}
@@ -159,3 +164,90 @@ def test_best_of_handler_is_shared_by_both_scoreboards(autonaApp, boardNumber):
     assert autonaApp.get(f"score.{boardNumber}.best_of") == 7
     assert autonaApp.get(f"score.{boardNumber}.first_to") == 4
     assert autonaApp.state.saveBlocked == 0
+
+
+# ── the same shape in Window.__init__ ────────────────────────────────────
+#
+# Window.__init__ opened the block on its first line and closed it ~600
+# lines later, with nothing in between guaranteeing the release. A window
+# that dies while building takes the launch with it, so the leaked counter
+# was less damaging than BUG-3 -- but it is the identical shape, and the
+# next person to add an early return or a try/except in there inherits it.
+#
+# src/Autona.py cannot be imported from a test: importing it IS the startup
+# sequence (logger setup -> bootstrap_core() -> Window definition), see
+# .claude/rules/agent-pitfalls.md #1. So this is read as source and checked
+# with ast, the way tests/test_signal_lifetime.py does.
+
+AUTONA_PY = SRC_ROOT / "Autona.py"
+
+
+def _parseAutona():
+    return ast.parse(AUTONA_PY.read_text(encoding="utf-8"), filename=str(AUTONA_PY))
+
+
+def _isStateManagerCall(node, name):
+    """`StateManager.<name>(...)` as an expression node."""
+    return (isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == name
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "StateManager")
+
+
+def _functionsCalling(tree, name):
+    """Names of the functions in `tree` containing a StateManager.<name>()."""
+    found = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if any(_isStateManagerCall(child, name) for child in ast.walk(node)):
+            found.append(node.name)
+    return found
+
+
+def _windowInit(tree):
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == "Window":
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef) and item.name == "__init__":
+                    return item
+    raise AssertionError("Window.__init__ not found in src/Autona.py")
+
+
+def test_window_init_builds_inside_a_save_block():
+    """The construction call has to sit under `with SaveBlock():`.
+
+    Not merely "a SaveBlock exists somewhere in __init__": the point is that
+    whatever does the building is *inside* it, so an exception unwinds
+    through the context manager's finally.
+    """
+    init = _windowInit(_parseAutona())
+
+    blocks = [node for node in ast.walk(init)
+              if isinstance(node, ast.With)
+              and any(_isStateManagerCall(item.context_expr, "SaveBlock")
+                      for item in node.items)]
+
+    assert blocks, (
+        "Window.__init__ no longer wraps its body in "
+        "`with StateManager.SaveBlock():`; a failure part-way through "
+        "construction would leave saving blocked for the whole session")
+    assert any(isinstance(node, ast.Call) for block in blocks
+               for stmt in block.body for node in ast.walk(stmt)), (
+        "the SaveBlock in Window.__init__ is empty -- the window is being "
+        "built outside it")
+
+
+def test_no_hand_paired_block_saving_left_in_autona_py():
+    """BlockSaving()/ReleaseSaving() by hand is what leaks the counter.
+
+    Every block in this module goes through the context manager, so the
+    calls should not appear at all. If a future change genuinely needs the
+    raw pair, it has to be a try/finally -- and this test is the place to
+    say so explicitly rather than to delete.
+    """
+    tree = _parseAutona()
+
+    assert _functionsCalling(tree, "BlockSaving") == []
+    assert _functionsCalling(tree, "ReleaseSaving") == []

@@ -246,8 +246,21 @@ class Window(QMainWindow):
 
         log_startup_phase("window-init")
 
-        StateManager.BlockSaving()
+        # Every state write made while the window is built is coalesced into
+        # a single save. This used to be a bare BlockSaving() ... 600 lines
+        # ... ReleaseSaving() pair: anything raising in between left the
+        # counter positive and silenced SaveState for the rest of the process
+        # (agent-pitfalls #6, the shape BUG-3 was). The body lives in a method
+        # of its own purely so the context manager has something to wrap.
+        with StateManager.SaveBlock():
+            self._BuildUi()
 
+    def _BuildUi(self):
+        """Build the window: panels, sidebar, menus, hotkeys, status bar.
+
+        Called from __init__ only, inside StateManager.SaveBlock(). Nothing
+        here changed when it was split out -- same statements, same order.
+        """
         AutonaLocaleHelper.LoadLocale()
         AutonaLocaleHelper.LoadRoundNames()
         self.LoadTheme()
@@ -844,8 +857,6 @@ class Window(QMainWindow):
         self._statusBar.addWidget(self._statusProgress)
         AutonaStatusManager.signals.changed.connect(
             self._on_status_changed)
-
-        StateManager.ReleaseSaving()
 
     # ── Web server, started after the window is shown (startup Step 4c) ──
 

@@ -10,6 +10,7 @@
 | `CLAUDE.md` | マニフェスト・目次 | 開発原則、Git方針の要点、構成への入口 | 個別技術ルール、具体的なAPI名、詳細フロー |
 | `.claude/README.md`（本書） | `.claude/` の索引 | 配下ファイルの一覧と役割 | 実装仕様そのもの |
 | `.claude/git-workflow.md` | Git 詳細 | push/PR/ブランチ削除/認証ダンスの全手順 | プロジェクト全体の方針 |
+| `agents/*.md` | サブエージェント定義 | 役割・使用モデル・ツール制限・返す成果物の契約 | プロジェクト全体の方針、手順の逐次列挙 |
 | `rules/*.md` | パス別の技術ルール | 対象ファイル固有の作法・制約 | プロジェクト全体の方針 |
 | `commands/*.md` | スラッシュコマンド | 手順・フォーマット定義 | 実行結果の記録 |
 | `settings.json` | Hooks・権限設定 | 自動検証の定義 | ルールの説明（rules に書く） |
@@ -17,6 +18,26 @@
 | `prompts/*.md` | 1セッション分の指示書 | 対象範囲・手順・制約・報告フォーマット | フェーズ全体のロードマップ（plans に書く） |
 | `architecture/*.md` | コードベース調査の成果物 | import 関係、状態キーパス、依存グラフ等の事実情報 | リファクタ方針・TODO（known-smells.md に書く） |
 | `design/*.md` | 正本ドキュメント | あるべき姿の仕様（UI / データモデル / 画面 / テーマ / ホットキー / 拡張ガイド / 移行プラン） | 個別の調査ログ（architecture/ に書く） |
+
+## Agents（サブエージェント定義）
+
+実装・検証・レビューはここへ委譲する。**モデル / ツール / effort は frontmatter が正本**で、
+呼び出し側が毎回指定する必要はない。`description` を見て Claude が委譲先を選ぶ。
+
+| ファイル | モデル | effort | ツール | 用途 |
+|---------|--------|--------|-------|------|
+| `agents/impl.md` | opus | xhigh | 全部 | 複数ファイル横断の実装・設計判断を含む変更・Qt クラッシュ調査 |
+| `agents/patch.md` | sonnet | medium | Read/Edit/Write/Bash/Glob/Grep | 手順が確定した小規模変更・機械的変更 |
+| `agents/verify.md` | sonnet | medium | Bash/Read/Grep/Glob | pytest / Web UI ビルド / 起動確認の実行と結果整理（修正しない） |
+| `agents/review.md` | opus | high | Read/Grep/Glob/Bash | 差分レビュー（読み取り専用） |
+
+- **コード探索は組み込みの Explore に任せる**（読み取り専用・CLAUDE.md を読み込まないので安い）。
+  同名のカスタム定義を置くと組み込みを上書きし CLAUDE.md を読み始めるので、置かない
+- **`CLAUDE_CODE_SUBAGENT_MODEL` を設定しないこと**。この環境変数は各定義の `model` を
+  すべて上書きするため、上表の割り当てが無効になる
+- カスタムサブエージェントは起動のたびに `CLAUDE.md` を読み込む（組み込み Explore / Plan のみ例外）。
+  委譲を増やすほど CLAUDE.md 肥大のコストが線形に効くので、CLAUDE.md は軽く保つ
+- **exe ビルドは agents に任せない**（3〜5 分かかる）。明示指示があったときにメインセッションで実行する
 
 ## Rules（パス別自動ルール）
 

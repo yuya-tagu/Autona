@@ -110,6 +110,15 @@ class _AutonaHarness:
 
     def __init__(self, directory: Path):
         self.dir = directory
+        # Player widgets built outside a board (see teamPlayerWidget) and the
+        # state subtrees they own, torn down with the boards.
+        self._looseWidgets = []
+        self._loosePrefixes = set()
+        # Saved AutonaGameAssetManager fields, restored by dropAllBoards()
+        # when a test asked for a synthetic roster (see loadCharacters).
+        self._assetBackup = None
+        # Kept alive one generation past a model swap (agent-pitfalls #13).
+        self._retiredAssetModels = None
 
     # -- state ------------------------------------------------------------
 
@@ -196,9 +205,130 @@ class _AutonaHarness:
 
         self.settle()
 
+    def teamPlayerWidget(self, index=1, teamNumber=1):
+        """A live AutonaTeamPlayerWidget, torn down with the boards.
+
+        This class is the other half of the duplicated player-widget pair
+        (agent-pitfalls #5) and has no board to build it from: its only
+        caller, AutonaTeamBattleWidget, is commented out in src/Autona.py, so
+        board 2 ("team") is an AutonaScoreboardWidget whose player widgets are
+        AutonaScoreboardPlayerWidget like board 1's. Tests that have to run
+        the same assertions against both implementations therefore construct
+        this one directly, on a production-shaped path
+        (score.2.team.{T}.player.{M}, agent-pitfalls #7).
+
+        Do not mix this with autonaApp.board(2) in one test: they would put
+        two widgets on the same state subtree.
+        """
+        from src.AutonaTeamPlayerWidget import AutonaTeamPlayerWidget
+
+        path = f"score.2.team.{teamNumber}.player.{index}"
+        widget = AutonaTeamPlayerWidget(
+            index=index, teamNumber=teamNumber, path=path)
+        self._looseWidgets.append(widget)
+        self._loosePrefixes.add("score.2")
+        self.settle()
+        return widget
+
+    def _dropLooseWidgets(self):
+        from qtpy.QtCore import QCoreApplication, QEvent
+
+        if not self._looseWidgets and not self._loosePrefixes:
+            return
+
+        while self._looseWidgets:
+            widget = self._looseWidgets.pop()
+            widget.setParent(None)
+            widget.deleteLater()
+            # Same reason as _dropBoard(): at loop level 0 nothing else reaps
+            # a DeferredDelete, and a surviving C++ widget keeps answering the
+            # global singletons' signals with its lambdas.
+            QCoreApplication.sendPostedEvents(widget, QEvent.Type.DeferredDelete)
+
+        while self._loosePrefixes:
+            self.state.Unset(self._loosePrefixes.pop())
+        self.settle()
+
+    def loadCharacters(self, names=("Mario", "Luigi", "Peach"), skins=3):
+        """Give the asset manager a small synthetic character roster.
+
+        The harness has no game installed (its user_data/games is empty), so
+        AutonaGameAssetManager.characterModel has zero rows: every character
+        combo can only ever sit at index -1, and any assertion about *which*
+        character a slot ended up on is vacuous. This loads the manager's own
+        data structures and rebuilds the model through the production
+        UpdateCharacterModel().
+
+        The per-character skin models are the one thing built here rather than
+        by UpdateSkinModel(): that fans out to thread-pool workers decoding
+        PNGs the harness does not have, and those workers must not outlive the
+        CWD. Their item payload matches what UpdateSkinModel writes for an
+        ordinary skin ({"assets": ...}, no name override).
+
+        Call before building the widgets that should see the roster --
+        existing combos only rebind on AutonaGameAssetManager's onLoad.
+        """
+        from qtpy.QtCore import Qt
+        from qtpy.QtGui import QStandardItem, QStandardItemModel
+
+        from src.AutonaGameAssetManager import AutonaGameAssetManager
+
+        manager = AutonaGameAssetManager.instance
+        if self._assetBackup is None:
+            self._assetBackup = {
+                name: getattr(manager, name)
+                for name in ("characters", "characterModel", "skinModels",
+                             "selectedGame", "stockIcons", "_iconCache")}
+
+        manager.characters = {
+            name: {
+                "export_name": name,
+                "display_name": name,
+                "codename": name.lower(),
+                "en_name": name,
+                "modded": False,
+            }
+            for name in names
+        }
+        manager.stockIcons = {}
+        manager._iconCache = {}
+        # Retire rather than drop the outgoing model: combos and proxies of
+        # widgets built earlier still point at it (agent-pitfalls #13).
+        self._retiredAssetModels = [manager.characterModel, manager.skinModels]
+        manager.UpdateCharacterModel()
+
+        manager.skinModels = {}
+        for name in names:
+            model = QStandardItemModel()
+            for skin in range(skins):
+                item = QStandardItem()
+                item.setData(str(skin), Qt.ItemDataRole.EditRole)
+                item.setData({"assets": {}}, Qt.ItemDataRole.UserRole)
+                model.appendRow(item)
+            manager.skinModels[name] = model
+
+        manager.selectedGame = {
+            "codename": "harness_game", "name": "Harness Game"}
+        return manager
+
+    def _restoreAssets(self):
+        if self._assetBackup is None:
+            return
+        from src.AutonaGameAssetManager import AutonaGameAssetManager
+
+        manager = AutonaGameAssetManager.instance
+        # Keep the synthetic generation alive one more cycle for the same
+        # reason loadCharacters() retires the previous one.
+        self._retiredAssetModels = [manager.characterModel, manager.skinModels]
+        for name, value in self._assetBackup.items():
+            setattr(manager, name, value)
+        self._assetBackup = None
+
     def dropAllBoards(self):
+        self._dropLooseWidgets()
         for number in self.manager.BOARD_NUMBERS:
             self._dropBoard(number)
+        self._restoreAssets()
 
     # -- web layer --------------------------------------------------------
 
@@ -215,7 +345,7 @@ class _AutonaHarness:
     # -- scheduling -------------------------------------------------------
 
     def settle(self):
-        """Let queued Qt work and the state export thread finish.
+        """Let queued Qt work, the export thread and image downloads finish.
 
         StateManager hands file export to a background thread; without this a
         test could read ./out before it was written, or leave the thread
@@ -225,6 +355,13 @@ class _AutonaHarness:
         slot that calls SaveState, which starts a *new* export thread after
         the join. So this loops until a pass leaves the same thread (or none)
         behind.
+
+        The image downloads come last because the export thread is what
+        spawns them (CreateFilesDict, for any state value that is an http
+        .png/.jpg URL -- avatars and character art). They write
+        "./out/<path>.png", resolved against the CWD *at write time*, so a
+        thread still running when the harness restores the directory would
+        drop its image into the developer's real ./out.
         """
         from qtpy.QtWidgets import QApplication
         from src.StateManager import StateManager
@@ -235,9 +372,11 @@ class _AutonaHarness:
 
             thread = StateManager._export_thread
             if thread is None or thread is previous:
-                return
+                break
             thread.join()
             previous = thread
+
+        StateManager.JoinDownloads()
 
 
 @pytest.fixture(scope="session")
@@ -296,6 +435,12 @@ def _autonaRuntime(qapp, tmp_path_factory):
 
         yield _AutonaHarness(directory)
     finally:
+        # Belt and braces: every autonaApp teardown already settles, but the
+        # CWD must not be restored while an image download is still resolving
+        # its relative output path.
+        from src.StateManager import StateManager
+        StateManager.JoinDownloads()
+
         AutonaDirHelper.current_dir = previousDir
         os.chdir(_ORIGINAL_CWD)
         # Break the junctions ourselves rather than leaving them for
