@@ -1373,11 +1373,30 @@ class StartGGDataProvider(TournamentDataProvider):
         """Build entrant character data from old API char selections."""
         entrants = [[], []]
 
+        def mainFor(char):
+            """["<character key>", skin] for a start.gg character id, or None.
+
+            GetCharacterFromStartGGId returns None for every id the installed
+            game assets do not know -- no asset pack installed, a modded
+            roster, a character start.gg added since. Subscripting that None
+            raised TypeError out of the whole legacy half, and the caller
+            swallows it into an empty dict: one unrecognised character cost
+            the set its bestOf, stage_strike, losers flags and currPlayer too.
+            """
+            character = AutonaGameAssetManager.instance.GetCharacterFromStartGGId(
+                char)
+            if character is None:
+                logger.warning(
+                    f"No installed character matches start.gg id {char};"
+                    " skipping its selection")
+                return None
+            return [character[0], 0]
+
         for i, entrantChars in enumerate(selectedChars):
             for char in entrantChars:
-                entrants[i].append({
-                    "mains": [AutonaGameAssetManager.instance.GetCharacterFromStartGGId(char)[0], 0]
-                })
+                main = mainFor(char)
+                if main is not None:
+                    entrants[i].append({"mains": main})
 
         # If we don't have mains from the selection data, fallback to the characterIds attribute
         for i in [0, 1]:
@@ -1387,9 +1406,9 @@ class StartGGDataProvider(TournamentDataProvider):
 
                 for char in characterIds:
                     try:
-                        entrants[i] = [{
-                            "mains": [AutonaGameAssetManager.instance.GetCharacterFromStartGGId(char)[0], 0]
-                        }]
+                        main = mainFor(char)
+                        if main is not None:
+                            entrants[i] = [{"mains": main}]
                     except:
                         logger.error(traceback.format_exc())
 

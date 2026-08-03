@@ -1310,3 +1310,93 @@ class TestGetMatchesPagination:
         provider = self._provider()
         provider.QueryRequests = lambda *a, **kw: self._paged_response([], 0)
         assert provider.GetMatches() == []
+
+
+# ===========================================================================
+# Tests: unknown character ids in the legacy half (LIVE-BUG-3)
+# ===========================================================================
+
+# The mocked asset manager at the top of this module maps ids 1..3, so any
+# other id is an unknown character by construction.
+_UNKNOWN_CHARACTER_ID = 9999
+
+
+class TestOldApiUnknownCharacterIds:
+    """A character the installed assets do not know must cost only itself.
+
+    GetCharacterFromStartGGId returns None for any start.gg character id no
+    installed game pack maps -- no pack installed at all, a modded roster, a
+    character start.gg added since the pack was built.
+    _build_entrants_old_api subscripted that None with [0], so one
+    unrecognised id raised TypeError out of the whole legacy parse; the
+    caller logs it and hands back {}, which silently costs the set its
+    bestOf, stage_strike, striked stages, losers flags and currPlayer.
+    Nothing about that failure mentions characters, and it only happens on a
+    machine with no assets installed -- which is every fresh install.
+    """
+
+    def test_an_unknown_selection_keeps_the_rest_of_the_set(self):
+        resp = _old_api_response_with_char_selection()
+        resp["entities"]["setTask"][0]["metadata"]["charSelections"] = {
+            "5001": [_UNKNOWN_CHARACTER_ID],
+            "5002": [2],  # Fox
+        }
+        provider = _make_provider()
+
+        result = provider.ParseMatchDataOldApi(resp)
+
+        # The fields the exception used to take down with it.
+        assert result["bestOf"] == 5
+        assert result["team1score"] == 3
+        assert result["team2score"] == 2
+        assert result["team1losers"] is False
+        assert result["team2losers"] is False
+        assert "currPlayer" in result
+        # ...and the entrant that *was* recognised still has its character.
+        assert result["entrants"][1][0]["mains"] == ["fox", 0]
+
+    def test_the_unknown_character_is_skipped_not_faked(self):
+        resp = _old_api_response_with_char_selection()
+        resp["entities"]["setTask"][0]["metadata"]["charSelections"] = {
+            "5001": [_UNKNOWN_CHARACTER_ID],
+            "5002": [_UNKNOWN_CHARACTER_ID],
+        }
+        provider = _make_provider()
+
+        result = provider.ParseMatchDataOldApi(resp)
+
+        # No entry at all rather than one holding None: the player widget
+        # reads mains[0] as a character name straight out of this.
+        assert result["entrants"] == [[], []]
+
+    def test_a_known_and_an_unknown_selection_for_one_entrant(self):
+        resp = _old_api_response_with_char_selection()
+        resp["entities"]["setTask"][0]["metadata"]["charSelections"] = {
+            "5001": [1, _UNKNOWN_CHARACTER_ID, 3],  # Mario, ???, Pikachu
+            "5002": [2],
+        }
+        provider = _make_provider()
+
+        result = provider.ParseMatchDataOldApi(resp)
+
+        assert [e["mains"] for e in result["entrants"][0]] == [
+            ["mario", 0], ["pikachu", 0]]
+
+    def test_an_unknown_id_in_the_characterIds_fallback(self):
+        """The same guard on the fallback path, which had a bare except.
+
+        There the TypeError was caught, so the set survived -- but the
+        entrant ended up silently without mains and the log showed a
+        traceback rather than the character id that was not recognised.
+        """
+        resp = _old_api_response_basic()
+        resp["entities"]["sets"]["entrant1CharacterIds"] = [
+            _UNKNOWN_CHARACTER_ID]
+        resp["entities"]["sets"]["entrant2CharacterIds"] = [3]  # Pikachu
+        provider = _make_provider()
+
+        result = provider.ParseMatchDataOldApi(resp)
+
+        assert result["entrants"][0] == []
+        assert result["entrants"][1][0]["mains"] == ["pikachu", 0]
+        assert result["bestOf"] == 5

@@ -28,6 +28,11 @@ from .StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from loguru import logger
 
+# Sentinel for ExportPlayerImages(onlineAvatar=...): "leave the key alone".
+# It cannot be None, because None is a meaningful value there ("this player
+# has no online avatar, clear the previous one").
+_KEEP_ONLINE_AVATAR = object()
+
 
 class AutonaBasePlayerWidget(QGroupBox):
     countries = None
@@ -131,7 +136,26 @@ class AutonaBasePlayerWidget(QGroupBox):
             StateManager.Set(
                 f"{self.path}.mergedOnlyName", nameOnlyMerged)
 
-    def ExportPlayerImages(self, onlineAvatar=None):
+    def ExportPlayerImages(self, onlineAvatar=_KEEP_ONLINE_AVATAR):
+        """Re-publish the image state derived from the player's name.
+
+        The local avatar and the sponsor images are looked up from the
+        team/name fields, so every name change has to run this again.
+        online_avatar is NOT name-derived -- it comes from the tournament
+        provider and only a caller that knows *which player is now in this
+        slot* may write it:
+
+          - a URL/path -> published
+          - None       -> explicitly cleared (Clear(), SetData with a player
+                          the API gave no avatar for)
+          - omitted    -> left untouched
+
+        The default used to be None, so both deferred refreshes (SetData's
+        own finally block and NameChanged) wiped the start.gg avatar that had
+        just been written a few lines earlier: every set loaded from start.gg
+        ended with online_avatar = None, and editing a tag by hand dropped
+        the avatar of a player that still had one.
+        """
         with self.dataLock, StateManager.SaveBlock():
             team = self._w("team", QLineEdit).text()
             name = self._w("name", QLineEdit).text()
@@ -145,8 +169,9 @@ class AutonaBasePlayerWidget(QGroupBox):
             merged = re.sub(r"[,/|;:<>\\?*]", "_", merged)
 
             # Online avatar
-            StateManager.Set(
-                f"{self.path}.online_avatar", onlineAvatar)
+            if onlineAvatar is not _KEEP_ONLINE_AVATAR:
+                StateManager.Set(
+                    f"{self.path}.online_avatar", onlineAvatar)
 
             # Local avatar
             localPath = f"./user_data/player_avatar/{merged}.png"
@@ -274,6 +299,14 @@ class AutonaBasePlayerWidget(QGroupBox):
 
     def Clear(self, no_mains=False):
         with StateManager.SaveBlock(), self.dataLock:
+            # online_avatar belongs to whoever was in this slot, and nothing
+            # below derives it: the fields are what get emptied here, and the
+            # avatar came from the provider, not from them. Clearing it used
+            # to fall out of NameChanged -> ExportPlayerImages() defaulting to
+            # None, which is exactly the accident that also wiped avatars that
+            # were supposed to stay. Now it is stated where it is meant.
+            StateManager.Set(f"{self.path}.online_avatar", None)
+
             for c in self.findChildren(QLineEdit):
                 if c.objectName() != "" and c.objectName() != 'qt_spinbox_lineedit':
                     if c.text() != "":
