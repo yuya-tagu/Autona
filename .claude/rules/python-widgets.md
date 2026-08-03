@@ -26,8 +26,14 @@ Qt binding は **PySide6（qtpy 経由、LGPL）** 固定。PyQt6 (GPL) はソ�
 1. import を追加
 2. インスタンス生成・`setObjectName` / `setWindowTitle` 設定
 3. `self.dockWidgets` リストに追加（後処理ループでタイトルバー非表示等を一括適用）
-4. `self._navPanels` に `(panel, 'icon.svg')` を表示順で追加
+4. `self._navSections` に `(panel, 'icon.svg')` を表示順で追加
    （`assets/icons/` のアイコン。`stack.addWidget` とナビ項目生成に使われる）
+   - 構造はカテゴリ付き: `[(カテゴリ見出し or None, [(パネル, アイコン名), ...]), ...]`
+     （見出しは `QApplication.translate("app", ...)`。`None` なら見出しなしで並ぶ）
+   - 既存カテゴリ（Setup / ScoreboardCategory / Display / Data）に追加する場合は、
+     該当セクションのパネルリストに表示順でタプルを挿入するだけでよい
+   - 新カテゴリを作る場合は `(translate 済み見出し, [パネルリスト])` のタプルを追加する
+   - カテゴリ見出しはナビ index を消費しないため、ナビ index = stack ページ index は維持される
 5. `Window.STATE_VERSION` をインクリメント
 
 ## STATE_VERSION
