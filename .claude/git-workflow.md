@@ -7,7 +7,8 @@ CLAUDE.md の Git 要点の詳細版。**push / PR 作成 / ブランチ削除�
 
 「ローカル `main` 上で作業し、push 時にだけリモート種別ブランチを切って PR 経由でマージ」する運用とする。
 
-- リモート: `origin` = `https://github.com/yuya-tagu/Autona.git`（HTTPS, GitHub アカウント `yuya-tagu`）
+- リモート: `origin` = `https://github.com/yuya-tagu/Autona.git`（HTTPS, GitHub アカウント `yuya-tagu`）。**`origin` 以外の remote を追加しない**
+- **`upstream` remote を復活させない**（2026-08-02 削除）。gh CLI は `upstream` という名前の remote を `origin` より優先して base リポジトリに選ぶため、clone 由来で残っていた `joaorb64/TournamentStreamHelper` に対して `gh pr create` / `gh pr view` が向いてしまっていた（PR #170 作成時に発覚。当リポジトリは fork ではないため GitHub 側で拒否され実害なし）。保険として `gh repo set-default yuya-tagu/Autona` を設定済み
 - **作業はローカル `main` 上で行う**。worktree もローカル作業ブランチも作らない。ブランチはリモート push 時にだけ切る
 - push 時は `git push origin main:<type>/<topic>`（種別ごとに `feat` / `fix` / `docs`）でリモート側にだけブランチを作る。**リモート `main` への直接 push はしない**（必ず PR 経由でマージ）
 - ブランチ命名（`<topic>` 部分）は内容を表す短い英語（例: `feat/bracket-fix`、`docs/operational-docs-foundation`、`fix/thumbnail-perf`）。timestamp や連番は不要（`git log --all` / `gh pr list` で時系列は追える）
@@ -17,8 +18,8 @@ CLAUDE.md の Git 要点の詳細版。**push / PR 作成 / ブランチ削除�
 
 1. **最新化**: `git fetch origin && git reset --hard origin/main` でローカル `main` を最新にする
 2. **作業**: ローカル `main` 上で通常通り編集・コミットする（メッセージは日本語）
-3. **PR**: 「PRを出して」と依頼されたとき、Claude は コミット（ローカル `main`）→ `git push origin main:<type>/<topic>` で push → PR 文案作成 → PR 作成 URL 共有 までを実行する（`gh pr create` 本体はユーザーが手動。コミット・push は明示的に依頼されたときのみ）
-4. **マージ後の同期**: PR マージ後は `git fetch origin && git reset --hard origin/main` でローカル `main` を再同期する
+3. **PR**: 「PRを出して」と依頼されたとき、Claude は コミット（ローカル `main`）→ `git push origin main:<type>/<topic>` で push → **`gh pr create` で PR 作成** → PR URL と変更概要の報告 までを実行する（2026-07-29 変更。以前は `gh pr create` をユーザーが手動で行っていた）。`gh pr create` は push と同じ `yuya-tagu` への switch 中に実行し、終わったら復元する。タイトル・本文は日本語（Summary / Test Plan 構成）。未実施の検証項目は Test Plan に未チェックで明記する。コミット・push・PR 作成は明示的に依頼されたときのみ
+4. **マージ後の同期**: PR マージ後はローカル `main` を再同期する。**先に `git status` で未コミット変更の有無を確認**し、無ければ `git fetch origin && git reset --hard origin/main`、有れば（別セッションの作業中ファイル等）作業ツリーに触れない `git fetch origin --prune && git merge --ff-only origin/main` を使う（2026-07-29 の消失事故を受けた手順）
 5. **マージ後のブランチ削除**: GitHub 側の自動削除は無効なので、マージした種別ブランチをリモートから削除する（後述「ブランチ削除フロー」）。push と同じく `yuya-tagu` 認証が必要
 
 ### 注意

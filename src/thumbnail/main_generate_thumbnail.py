@@ -14,6 +14,7 @@ from loguru import logger
 from qtpy.QtWidgets import QApplication
 
 from src.AutonaGameAssetManager import AutonaGameAssetManager
+from src.AutonaFeatureColors import FEATURE_THUMBNAIL, GetFeatureColors
 from src.StateManager import StateManager
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from src.Helpers.AutonaDictHelper import *
@@ -73,7 +74,6 @@ def createFalseData(gameAssetManager: AutonaGameAssetManager = None, used_assets
             "game": {"codename": "test", "name": "Test", "smashgg_id": 0},
             "tournamentInfo": {
                 "tournamentName": QApplication.translate("app", "Sample Tournament"),
-                "themeColor": "#2a2a2a",
             },
             "score": {
                 "1": {
@@ -94,7 +94,6 @@ def createFalseData(gameAssetManager: AutonaGameAssetManager = None, used_assets
         },
         "tournamentInfo": {
             "tournamentName": QApplication.translate("app", "Sample Tournament"),
-            "themeColor": "#2a2a2a",
         },
         "score": {
             "1": {
@@ -275,6 +274,11 @@ def prepare_data(settingsManager, isPreview=False, gameAssetManager=None, scoreb
     config = dict(settings)
     config["scoreboardNumber"] = scoreboardNumber
     config["background_path"] = resolve_background_path(config)
+    # Thumbnail-scoped colors (colors.thumbnail.*), falling back to the
+    # tournament colors and then to the Autona defaults. Injected as CSS
+    # variables by thumbnail.js; the per-template JSON keys are untouched.
+    config["theme_color"], config["accent_color"] = GetFeatureColors(
+        FEATURE_THUMBNAIL)
 
     return data, config, template_data
 

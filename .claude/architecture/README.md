@@ -2,6 +2,13 @@
 
 > **性格: 凍結された調査ログ（2026-04 時点のスナップショット）。原則として更新しない。**
 > 現状を追従する「変更影響マップ」は同名の [../../docs/architecture/](../../docs/architecture/) が担う。性格が逆なので混同しないこと。
+>
+> ⚠️ **特に陳腐化している項目（2026-07-30 時点）**: `phase-a-b/singleton-init-order.md` が記述する
+> 「import 順序 = 初期化順序」「モジュール末尾でのシングルトン生成」は、起動アーキテクチャ再設計
+> （[../../docs/changes/startup-architecture-redesign.md](../../docs/changes/startup-architecture-redesign.md)）で構造ごと廃止された。
+> 現在の正本は [../../src/bootstrap.py](../../src/bootstrap.py) の `bootstrap_core()`。
+> 同様に、タブ化 Dock + `QMenuBar` を前提とする `phase-a-b/ui-pyqt.md` / `ui-problems.md` の
+> レイアウト記述（`windowState_v8` / `tabifyDockWidget` / `AutonaDockTabTheme`）も現存しない。
 
 このディレクトリは Autona の設計に関する**調査成果物**を保管する。
 

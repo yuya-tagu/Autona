@@ -10,6 +10,7 @@ from .AutonaGameAssetManager import AutonaGameAssetManager
 from .SettingsManager import SettingsManager
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaDirHelper import AutonaResolve
+from .AutonaFeatureColors import MakeTournamentColorCard
 from . import ui_layout as L
 from . import ui_constants as UI
 import traceback
@@ -56,6 +57,17 @@ class AutonaTournamentInfoWidget(QDockWidget):
                 continue
             if isinstance(widget.parent(), QComboBox):
                 continue
+            # Restore the persisted value BEFORE seeding the key. This loop
+            # used to emit editingFinished on the still-empty .ui fields,
+            # writing "" over the tournamentInfo.* keys just restored from
+            # program_state.json. The sidebar tournament button
+            # (Window.UpdateTournamentButton) reads tournamentName from that
+            # state, so a cached tournament came up as "Set tournament" and
+            # stayed there for the whole session.
+            saved = StateManager.Get(
+                f"tournamentInfo.{widget.objectName()}", None)
+            if isinstance(saved, str):
+                widget.setText(saved)
             widget.editingFinished.connect(
                 lambda element=widget: [
                     StateManager.Set(
@@ -102,6 +114,13 @@ class AutonaTournamentInfoWidget(QDockWidget):
             self._onTournamentDataForDisplayName)
 
         for widget in self.findChildren(QSpinBox):
+            # Same one-way restore as the QLineEdit loop above (state -> UI),
+            # done before connecting so it is a plain restore and not a write
+            # back into the state we are reading.
+            saved = StateManager.Get(
+                f"tournamentInfo.{widget.objectName()}", None)
+            if isinstance(saved, int) and not isinstance(saved, bool):
+                widget.setValue(saved)
             widget.valueChanged.connect(lambda value, element=widget: [
                 StateManager.Set(
                     f"tournamentInfo.{element.objectName()}", value)
@@ -142,20 +161,16 @@ class AutonaTournamentInfoWidget(QDockWidget):
         self.btClearInfo.clicked.connect(self._OnClearInfo)
 
         # Tournament Icon / Banner are now grouped under groupBoxMedia
-        # (see AutonaTournamentInfo.ui). Five buttons sit beside the two
-        # stacked previews: 4 explicit load/download actions + 1 unified
-        # reset. The previous per-asset Default buttons (btClearIcon /
-        # btClearBanner) were folded into btResetMediaToDefault.
+        # (see AutonaTournamentInfo.ui). Four buttons sit beside the two
+        # stacked previews: 2 per-asset local-file loads + 1 unified
+        # download + 1 unified reset. The previous per-asset Default buttons
+        # (btClearIcon / btClearBanner) were folded into
+        # btResetMediaToDefault, and the per-asset download buttons
+        # (btDownloadIcon / btDownloadBanner) into btDownloadMedia.
         self.btLoadIconFile: QPushButton = self.findChild(
             QPushButton, "btLoadIconFile")
         self.btLoadIconFile.clicked.connect(lambda: [
             self.LoadIcon()
-        ])
-
-        self.btDownloadIcon: QPushButton = self.findChild(
-            QPushButton, "btDownloadIcon")
-        self.btDownloadIcon.clicked.connect(lambda: [
-            self.DownloadIcon()
         ])
 
         self.iconView: QLabel = self.findChild(QLabel, "iconView")
@@ -168,14 +183,18 @@ class AutonaTournamentInfoWidget(QDockWidget):
             QPushButton, "btLoadBannerFile")
         self.btLoadBannerFile.clicked.connect(self.LoadBannerFile)
 
-        self.btDownloadBanner: QPushButton = self.findChild(
-            QPushButton, "btDownloadBanner")
-        self.btDownloadBanner.clicked.connect(self.DownloadBanner)
-
         self.bannerView: QLabel = self.findChild(QLabel, "bannerView")
         L.apply_media_preview(self.bannerView)
 
         self.UpdateBanner()
+
+        # Unified download: icon and banner always come from the same
+        # tournament, so they are fetched in one shot by the shared async
+        # helper (also used by "load from tournament").
+        self.btDownloadMedia: QPushButton = self.findChild(
+            QPushButton, "btDownloadMedia")
+        L.tag_button(self.btDownloadMedia, L.BUTTON_PRIMARY)
+        self.btDownloadMedia.clicked.connect(self._OnDownloadMedia)
 
         # Unified reset: restore both icon and banner to Autona defaults.
         # Tagged danger because it discards both saved assets at once.
@@ -192,9 +211,17 @@ class AutonaTournamentInfoWidget(QDockWidget):
         for group in self.findChildren(QGroupBox):
             L.apply_card_layout(group)
 
-        # Theme / accent color editing moved to the BOARD tab
-        # (AutonaBoardWidget). The SettingsManager / StateManager keys are
-        # unchanged, so overlays and out/ export are unaffected.
+        # 大会カラー — the tournament-wide theme / accent every feature falls
+        # back to (SettingsManager general.* / StateManager tournamentInfo.*).
+        # Built in code rather than in the .ui so the color buttons stay out of
+        # the objectName -> keypath auto-wiring loops above, and inserted right
+        # after 大会情報 so the media group keeps the bottom of the tab.
+        # Per-feature overrides live on their own panels (AutonaFeatureColors).
+        contentsLayout = self._contents.layout()
+        infoGroup = self.findChild(QGroupBox, "groupBox_2")
+        insertAt = (contentsLayout.indexOf(infoGroup) + 1) if infoGroup \
+            else contentsLayout.count()
+        contentsLayout.insertWidget(insertAt, MakeTournamentColorCard())
 
         # Stream destination / title / thumbnail generation are not
         # tournament-scoped — they belong to the broadcast and now live in
@@ -290,6 +317,26 @@ class AutonaTournamentInfoWidget(QDockWidget):
             "Content-Type": "application/json",
             "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36",
         }
+
+    def _OnDownloadMedia(self):
+        # btDownloadMedia: icon and banner always belong to the same
+        # tournament, so both are fetched in one shot. Disable the button
+        # while the fetch is in flight so repeat clicks don't queue up
+        # parallel workers writing the same two files.
+        if getattr(self, "_downloadMediaInProgress", False):
+            return
+        if AutonaTournamentDataProvider.instance.provider is None:
+            logger.info("No tournament loaded, nothing to download")
+            return
+
+        self._downloadMediaInProgress = True
+        self.btDownloadMedia.setEnabled(False)
+
+        def _finished():
+            self._downloadMediaInProgress = False
+            self.btDownloadMedia.setEnabled(True)
+
+        self._DownloadIconAndBannerAsync(on_finished=_finished)
 
     def _DownloadIconAndBannerAsync(self, on_finished=None):
         from .Workers import Worker
@@ -422,42 +469,6 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         self.UpdateIcon()
 
-    def DownloadIcon(self):
-        try:
-            url = AutonaTournamentDataProvider.instance.provider.GetIconURL()
-
-            logger.info(f"Icon URL: {url}")
-
-            headers = {
-                "client-version": "20",
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36"
-            }
-
-            response = requests.get(url, headers=headers)
-            data = response.content
-
-            pix = QPixmap()
-            pix.loadFromData(data)
-
-            # Scale down large icons to prevent rendering issues
-            # in the off-screen QWebEngineView (thumbnail generator).
-            max_dim = 512
-            if pix.width() > max_dim or pix.height() > max_dim:
-                pix = pix.scaled(
-                    max_dim, max_dim,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation)
-
-            pix.save(LOGO_PATH)
-        except Exception as e:
-            logger.error(traceback.format_exc())
-
-        self.UpdateIcon()
-
-        # Also download tournament banner for thumbnail background
-        self.DownloadBanner()
-
     def UpdateBanner(self):
         # bannerView slot is now 160×90 (see AutonaTournamentInfo.ui).
         # Scale source to fit while keeping aspect. Shows the saved tournament
@@ -491,35 +502,6 @@ class AutonaTournamentInfoWidget(QDockWidget):
                 Path("./user_data").mkdir(parents=True, exist_ok=True)
                 pix = QPixmap(fileName)
                 pix.save(BANNER_PATH)
-        except Exception as e:
-            logger.error(traceback.format_exc())
-
-        self.UpdateBanner()
-        self._emitMediaUpdated()
-
-    def DownloadBanner(self):
-        try:
-            url = AutonaTournamentDataProvider.instance.provider.GetBannerURL()
-            if not url:
-                logger.info("No tournament banner available")
-                return
-
-            logger.info(f"Banner URL: {url}")
-
-            headers = {
-                "client-version": "20",
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36"
-            }
-
-            response = requests.get(url, headers=headers)
-
-            Path("./user_data").mkdir(parents=True, exist_ok=True)
-
-            pix = QPixmap()
-            pix.loadFromData(response.content)
-            pix.save(BANNER_PATH)
-            logger.info("Tournament banner saved")
         except Exception as e:
             logger.error(traceback.format_exc())
 

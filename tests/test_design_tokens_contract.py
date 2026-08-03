@@ -5,18 +5,15 @@ web UI (web/src/themes.js has the mirror contract test in themes.test.js).
 If this fails, one side changed without the other: update
 assets/design-tokens.json first, then both consumers.
 
-Runtime-free: ui_constants.py is imported directly by file path so the src
-package chain (QApplication + singletons) is never triggered
-(.claude/rules/agent-pitfalls.md #1).
+Runtime-free: ui_constants.py holds plain constants, and no src module builds
+anything at import time, so a normal import is enough.
 """
 import json
 from pathlib import Path
 
-from tests.conftest import direct_import
+from src import ui_constants as ui
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-
-ui = direct_import("ui_constants", "src/ui_constants.py")
 
 with open(PROJECT_ROOT / "assets" / "design-tokens.json", encoding="utf-8") as f:
     TOKENS = json.load(f)

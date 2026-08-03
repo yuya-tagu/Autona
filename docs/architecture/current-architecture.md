@@ -11,7 +11,9 @@
 |-------------|--------|
 | レイヤー構成・主要モジュールと責務・データフロー・状態キーパス概観 | [../../CLAUDE.md](../../CLAUDE.md)「アーキテクチャ概要」「状態キーパス」 |
 | 実装仕様の正本（UI / データモデル / 画面 / テーマ / ホットキー） | [../../.claude/design/Design.md](../../.claude/design/Design.md) |
-| import 関係・状態キー Read/Write・シングルトン初期化順の網羅事実 | [../../.claude/architecture/](../../.claude/architecture/)（2026-04 時点の凍結調査ログ） |
+| import 関係・状態キー Read/Write の網羅事実 | [../../.claude/architecture/](../../.claude/architecture/)（2026-04 時点の凍結調査ログ） |
+| シングルトン生成順の**正本** | [../../src/bootstrap.py](../../src/bootstrap.py) の `bootstrap_core()`（`ORDER CONSTRAINT:` コメントに理由を併記） |
+| 起動パイプラインの設計・移行記録 | [../changes/startup-architecture-redesign.md](../changes/startup-architecture-redesign.md) / [../decisions/ADR-003-startup-architecture.md](../decisions/ADR-003-startup-architecture.md) |
 | エージェントが踏みやすい制約の一次情報 | [../../.claude/rules/agent-pitfalls.md](../../.claude/rules/agent-pitfalls.md) |
 
 > ステータス凡例: ✅ コード/CLAUDE.md 確認済 / 📄 既存ドキュメント由来 / ⚠️ 要確認 / `TBD`
@@ -20,12 +22,14 @@
 
 ```
 ┌──────────────────────────────────────────────┐
-│            main.py (QEventLoop + asyncio)      │
+│  main.py（単一インスタンスゲート → splash →     │
+│  import src → QEventLoop + asyncio）           │
 └───────────────────────┬────────────────────────┘
-                        │
+                        │ bootstrap_core()（生成順の正本）
 ┌───────────────────────▼────────────────────────┐
 │        Window (QMainWindow / Autona.py)         │
-│        ドックウィジェット群のオーケストレーション   │
+│   サイドバー + QStackedWidget のパネル群を管理   │
+│   （大半は初回表示時に遅延構築）                  │
 └──┬──────────┬───────────┬───────────┬──────────┘
    │          │           │           │
    ▼          ▼           ▼           ▼
@@ -44,6 +48,27 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
 | HTTP / WebSocket | [AutonaWebServer.py](../../src/AutonaWebServer.py)（QThread, Flask+SocketIO） | 既存の制御面（下記）。新 API はここに同居させるのが自然 |
 | 状態書き込み | [StateManager.py](../../src/StateManager.py) `Set(keypath, value)` | **状態変更の単一経路。外部からの書き込みも必ずここを通す（バイパス禁止）** |
 | 配信出力 | `out/` ファイル群 + WS デルタ配信 | OBS ブラウザソース／既存クライアントが直接依存。出力契約を壊さない |
+
+## 起動シーケンスと構築タイミング（外部制御を足すときの前提）
+
+起動アーキテクチャ再設計（Step 1〜5・2026-07 完了）により、**「起動時に全 UI が存在する」前提は
+成立しない**。外部制御 API / 連携を足すときは以下を前提に設計する ✅
+
+| 段 | 何が起きるか | 変更時の含意 |
+|----|------------|------------|
+| ゲート | `main.py` の named mutex（`taguyan.Autona.SingleInstance`）で単一インスタンス化。2 個目は QLocalSocket で前面化要求して終了 | ポート・`out/`・ホットキーの多重占有は起こらない前提でよい |
+| 早期表示 | QApplication + スプラッシュを `import src` より前に生成 | `src` を import する新モジュールは副作用ゼロを守る（`bootstrap.py` 参照） |
+| ブートストラップ | `from src import Autona` → `bootstrap_core()` がシングルトンを明示順で生成 | 新サービスの生成は `bootstrap_core()` に追加する（モジュール末尾で作らない） |
+| 最小コア表示 | `Window.__init__` は Tournament Info + アクティブ `battle_format` の board 1 面のみ構築して `show()` | **他パネル・他 board は未構築のまま起動する** |
+| 表示後 | オーバーレイ消滅後に `Window._StartWebServer()` が Flask/SocketIO を構築・起動（`webserver-ready` フェーズ） | OBS ブラウザソースの取得開始は表示から数秒遅れる（ADR-003 で許容済み） |
+
+未構築のまま外部から呼ばれる経路には、既に構築を強制する入口がある。**新しい制御を足すときは
+同じ経路を使う**（パネル/board を直接参照して `None` を掘らない）:
+
+- パネル: `WebServerActions._ensure_panel` → `Window.EnsureTop8Panel()` / `EnsureCommentaryPanel()`
+- board: `AutonaScoreboardManager.GetScoreboard(N)`（GUI スレッドへ marshal して構築）
+- state: パネル未構築でも読める初期値は `Window._SeedPanelState()`（theme/accent・`top8` 正規化・
+  `commentary` 正規化・`stream.org*Version`）と `CreateScoreboard()`（`score.{N}` スケルトン）が書く
 
 ## 既存 HTTP / WebSocket 制御面（重要）
 
@@ -99,7 +124,7 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
 
 1. **AutonaWebServer / AutonaWebServerActions** — 既存制御面。新 API はここに同居 or 競合する
 2. **StateManager** — 状態変更の単一経路。外部からの書き込みは必ずここを通す（バイパス禁止）
-3. **シングルトン初期化順** — 新サービス（外部制御リスナ等）の起動位置を誤ると初期化破綻（制約は agent-pitfalls #2）
+3. **シングルトン生成順** — 新サービス（外部制御リスナ等）は [src/bootstrap.py](../../src/bootstrap.py) の `bootstrap_core()` に追加する。順序制約の理由は同ファイルの `ORDER CONSTRAINT:` コメント（agent-pitfalls #2）
 4. **スレッド境界** — WebServer は QThread。外部 API も別スレッドなら StateManager のロックを尊重
 5. **ポート/ルーティング** — `/api/v1/` と既存ルートの衝突回避、既定ポート `5000` の運用影響
 

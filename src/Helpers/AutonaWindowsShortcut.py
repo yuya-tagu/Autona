@@ -27,8 +27,8 @@ from pathlib import Path
 
 from loguru import logger
 
-# Must match the AppUserModelID set at the very top of main.py (before
-# `import src`). Keep the two literals in sync.
+# Must match the AppUserModelID set at the very top of main.py (before the
+# application module is imported). Keep the two literals in sync.
 APP_USER_MODEL_ID = "taguyan.Autona"
 
 _SHORTCUT_NAME = "Autona.lnk"

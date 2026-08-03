@@ -11,23 +11,36 @@
 
 const MAX_DISPLAY = 4;
 
-// ───── Theme colors (from tournamentInfo, mirrors bracket_top8) ───────
+// ───── Theme colors (colors.commentary, then tournamentInfo) ──────────
+//
+// The commentary-scoped override is only present in the state when the
+// operator set it, so an unset feature falls back to the tournament colors.
 
-function applyTournamentColors(ti) {
-  if (ti && ti.themeColor) {
-    const cardBg = lighten(ti.themeColor, 0.08);
-    document.documentElement.style.setProperty("--theme-color", ti.themeColor);
+function resolveColors(data) {
+  const ti = (data && data.tournamentInfo) || {};
+  const fc = ((data && data.colors) || {}).commentary || {};
+  return {
+    themeColor: fc.themeColor || ti.themeColor,
+    accentColor: fc.accentColor || ti.accentColor,
+  };
+}
+
+function applyTournamentColors(colors) {
+  if (colors && colors.themeColor) {
+    const cardBg = lighten(colors.themeColor, 0.08);
     document.documentElement.style.setProperty(
-      "--theme-color-2", darken(ti.themeColor, 0.55));
+      "--theme-color", colors.themeColor);
+    document.documentElement.style.setProperty(
+      "--theme-color-2", darken(colors.themeColor, 0.55));
     document.documentElement.style.setProperty("--card-bg", cardBg);
     // Match the card body text to the card background's luminance.
     document.documentElement.style.setProperty("--card-ink", pickInk(cardBg));
   }
-  if (ti && ti.accentColor) {
+  if (colors && colors.accentColor) {
     document.documentElement.style.setProperty(
-      "--accent-color", ti.accentColor);
+      "--accent-color", colors.accentColor);
     document.documentElement.style.setProperty(
-      "--accent-ink", pickInk(ti.accentColor));
+      "--accent-ink", pickInk(colors.accentColor));
   }
 }
 
@@ -176,15 +189,15 @@ LoadEverything().then(() => {
 
   Update = async (event) => {
     const data = event.data || {};
-    const ti = data.tournamentInfo || {};
+    const colors = resolveColors(data);
 
-    applyTournamentColors(ti);
+    applyTournamentColors(colors);
 
     const casters = displayedCasters(data.commentary);
     const signature = JSON.stringify({
       casters,
-      theme: ti.themeColor,
-      accent: ti.accentColor,
+      theme: colors.themeColor,
+      accent: colors.accentColor,
     });
     if (signature === lastSignature) return;
     lastSignature = signature;

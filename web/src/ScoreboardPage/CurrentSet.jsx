@@ -149,7 +149,7 @@ export default function CurrentSet({scoreboardNumber, scoreSubmit}) {
                             order; lg+ is the desktop 3-column layout. */}
                         <Grid
                             size={{xs: 6, sm: 12, lg: 4}}
-                            sx={{order: {xs: 1, sm: 0}}}
+                            sx={{order: {xs: 1, sm: 0}, minWidth: 0}}
                         >
                             <Container disableGutters maxWidth={'sm'}>
                                 <Team
@@ -175,7 +175,7 @@ export default function CurrentSet({scoreboardNumber, scoreSubmit}) {
                             </Container>
                         </Grid>
 
-                        <Grid size={{xs: 6, sm: 12, lg: 4}} sx={{order: {xs: 2, sm: 0}}}>
+                        <Grid size={{xs: 6, sm: 12, lg: 4}} sx={{order: {xs: 2, sm: 0}, minWidth: 0}}>
                             <Container disableGutters maxWidth={'sm'}>
                                 <Team key={`s-${scoreboardNumber}-t-${teamKeys[1]}`}
                                       teamId={`s-${scoreboardNumber}-t-${teamKeys[1]}`}

@@ -57,6 +57,22 @@ LoadEverything().then(() => {
       : { className: "result_loss", label: "LOSS" };
   }
 
+  // Stats overlays follow colors.stats and fall back to the tournament
+  // colors (colors.stats is only present when the operator set it). Applied
+  // as CSS variables so every stats template can consume them.
+  function ApplyStatsColors(data) {
+    const ti = (data && data.tournamentInfo) || {};
+    const fc = ((data && data.colors) || {}).stats || {};
+    const themeColor = fc.themeColor || ti.themeColor;
+    const accentColor = fc.accentColor || ti.accentColor;
+    if (themeColor) {
+      document.documentElement.style.setProperty("--theme-color", themeColor);
+    }
+    if (accentColor) {
+      document.documentElement.style.setProperty("--accent-color", accentColor);
+    }
+  }
+
   Start = async (event) => {
     if (startingAnimation) {
       startingAnimation.restart();
@@ -66,6 +82,10 @@ LoadEverything().then(() => {
   Update = async (event) => {
     let data = event.data;
     let oldData = event.oldData;
+
+    // Before the score-data guard below, so the colors still apply when the
+    // score subtree isn't populated yet.
+    ApplyStatsColors(data);
 
     let scoreData = data.score ? data.score[window.scoreboardNumber] : null;
     if (scoreData == null) return;

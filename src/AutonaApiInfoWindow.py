@@ -69,6 +69,7 @@ _ENDPOINTS = [
     ("POST", "/scoreboards/{n}/score:reset", "Reset scores", None, False, True, False),
     ("POST", "/scoreboards/{n}:apply", "Apply pending edits (反映)", None, False, True, False),
     ("POST", "/scoreboards/{n}:swap-teams", "Swap teams", None, False, True, False),
+    ("POST", "/scoreboards/{n}/stats:refresh", "Refresh statistics (async fetch)", None, False, True, False),
     ("POST", "/scoreboards/{n}/teams/{t}/color", "Set team color", {"color": "#FF0000"}, False, True, False),
     ("PATCH", "/scoreboards/{n}/set", "Patch set info (partial)", {"bestOf": 5, "phase": "Top 8", "pool": "Pool A1", "match": "Winners Finals"}, False, True, False),
     # ── Destructive (confirm required) ──
@@ -184,9 +185,12 @@ class AutonaApiInfoWindow(QDialog):
     def _openSettings(self):
         # The Settings dialog (with the Webserver Port field) lives on the
         # main window; reuse it rather than duplicating the port control.
+        # Built on first open by the main window (startup Step 4a), so go
+        # through its accessor rather than a plain attribute.
         window = self.parent()
-        if window is not None and hasattr(window, "settingsWindow"):
-            window.settingsWindow.show()
+        ensure = getattr(window, "EnsureSettingsWindow", None)
+        if ensure is not None:
+            ensure().show()
 
     # ── Reference tab ────────────────────────────────────────────────────
     def _buildReferenceTab(self):

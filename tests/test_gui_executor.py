@@ -6,21 +6,10 @@ PyQt6 -> PySide6 migration (KeyError: 'result'). These tests pin the
 closure-based implementation: results and exceptions raised on the GUI
 thread must reach a caller waiting on a worker thread.
 """
-import os
 import threading
 import time
 
-os.environ.setdefault("QT_API", "pyside6")
-
-from qtpy.QtCore import QCoreApplication
-
-from tests.conftest import direct_import
-
-helper = direct_import("AutonaQtHelper", "src/Helpers/AutonaQtHelper.py")
-
-
-def _get_app():
-    return QCoreApplication.instance() or QCoreApplication([])
+from src.Helpers import AutonaQtHelper as helper
 
 
 def _run_in_worker(app, fn, timeout=5.0):
@@ -44,13 +33,12 @@ def _run_in_worker(app, fn, timeout=5.0):
     return outcome
 
 
-def test_run_sync_returns_result_from_worker_thread():
-    app = _get_app()
+def test_run_sync_returns_result_from_worker_thread(qapp):
     if helper.gui_executor is None:
         helper.init_gui_executor()
 
     outcome = _run_in_worker(
-        app,
+        qapp,
         lambda: helper.gui_executor.run_sync(
             lambda: threading.current_thread().name),
     )
@@ -60,8 +48,7 @@ def test_run_sync_returns_result_from_worker_thread():
     assert outcome.get("result") == threading.current_thread().name
 
 
-def test_run_sync_reraises_exception_on_caller_thread():
-    app = _get_app()
+def test_run_sync_reraises_exception_on_caller_thread(qapp):
     if helper.gui_executor is None:
         helper.init_gui_executor()
 
@@ -69,14 +56,13 @@ def test_run_sync_reraises_exception_on_caller_thread():
         raise ValueError("expected failure")
 
     outcome = _run_in_worker(
-        app, lambda: helper.gui_executor.run_sync(boom))
+        qapp, lambda: helper.gui_executor.run_sync(boom))
 
     assert isinstance(outcome.get("exc"), ValueError)
     assert str(outcome["exc"]) == "expected failure"
 
 
-def test_run_sync_from_gui_thread_runs_inline():
-    _get_app()
+def test_run_sync_from_gui_thread_runs_inline(qapp):
     if helper.gui_executor is None:
         helper.init_gui_executor()
 

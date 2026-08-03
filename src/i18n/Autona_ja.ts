@@ -152,18 +152,13 @@
     </message>
     <message>
         <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>大会アイコンをダウンロード</source>
-        <translation>大会アイコンをダウンロード</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
         <source>大会バナーをローカルファイルから読み込む</source>
         <translation>大会バナーをローカルファイルから読み込む</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>大会バナーをダウンロード</source>
-        <translation>大会バナーをダウンロード</translation>
+        <source>大会からアイコン・バナーをダウンロード</source>
+        <translation>大会からアイコン・バナーをダウンロード</translation>
     </message>
     <message>
         <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
@@ -867,6 +862,14 @@
     <message>
         <source>Refresh Top 8 bracket</source>
         <translation>Top 8 ブラケットを更新</translation>
+    </message>
+    <message>
+        <source>Refresh stats</source>
+        <translation>統計取得</translation>
+    </message>
+    <message>
+        <source>Refresh statistics (async fetch)</source>
+        <translation>統計情報を再取得（非同期）</translation>
     </message>
     <message>
         <source>Request failed</source>
@@ -1814,6 +1817,16 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>X に投稿できません。以下の項目が未入力です:</translation>
     </message>
     <message>
+        <location filename="..\AutonaScoreboardWidget.py" line="1307" />
+        <source>Thumbnail generation failed, so no image was copied to the clipboard.</source>
+        <translation>サムネイルの生成に失敗したため、画像はクリップボードにコピーされていません。</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaScoreboardWidget.py" line="1318" />
+        <source>Failed to post to X.</source>
+        <translation>Xへの投稿に失敗しました。</translation>
+    </message>
+    <message>
         <location filename="..\AutonaScoreboardWidget.py" line="1328" />
         <source>Load set from {0}</source>
         <translation>{0}からセットデータをロードする</translation>
@@ -2001,6 +2014,41 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaStatsWidget.py" line="202" />
         <source>Upset Factor</source>
         <translation>アップセットファクター</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Stats Display Settings</source>
+        <translation>統計情報表示設定</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Head-to-Head Record</source>
+        <translation>対戦成績（直近の対戦）</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Recent Sets</source>
+        <translation>直近セット一覧</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Last Sets (Player 1)</source>
+        <translation>直近セット（選手1）</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Last Sets (Player 2)</source>
+        <translation>直近セット（選手2）</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Tournament History (Player 1)</source>
+        <translation>大会履歴（選手1）</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <source>Tournament History (Player 2)</source>
+        <translation>大会履歴（選手2）</translation>
     </message>
     <message>
         <location filename="..\AutonaTeamBattleModeEnum.py" line="11" />

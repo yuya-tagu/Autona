@@ -4,6 +4,7 @@ from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from .StateManager import StateManager
+from .SettingsManager import SettingsManager
 import re
 import traceback
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
@@ -42,6 +43,12 @@ class AutonaGameAssetManager(QObject):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        # LoadGames() lists ./user_data/games unconditionally, so the manager
+        # guarantees its own data directory. This used to sit at module level
+        # next to the singleton construction; it belongs to __init__ rather
+        # than to bootstrap so that the invariant travels with the object that
+        # depends on it.
+        os.makedirs("./user_data/games", exist_ok=True)
         self.signals = AutonaGameAssetManagerSignals()
         self.games = {}
         self.characters = {}
@@ -76,9 +83,57 @@ class AutonaGameAssetManager(QObject):
         self.threadpool = QThreadPool()
         self.workers = []
 
+        # Startup restore of the last-used game (see _RestoreSelectedGame).
+        # Armed by UiMounted() so a later LoadGames() rescan — "Add game
+        # assets", asset guide — never overrides the user's current pick.
+        self._pendingSelectedGameRestore = False
+        # onLoad is emitted from the asset loader thread, so this queued
+        # connection runs the settings write on the GUI thread.
+        self.signals.onLoad.connect(self._PersistSelectedGame)
+
     def UiMounted(self):
         self.DownloadStartGGCharacters()
+        self._pendingSelectedGameRestore = True
+        self.signals.onLoadAssets.connect(self._RestoreSelectedGame)
         self.LoadGames()
+
+    def _PersistSelectedGame(self):
+        # The selected game used to live only in memory (self.selectedGame,
+        # reset to {} every launch) and was re-derived solely from the
+        # Start.gg videogame id of the restored tournament. That made the
+        # sidebar game pulldown depend on a live network round trip: blank
+        # for the first seconds of every launch, and blank for the whole
+        # session when offline / when the fetch failed / with no tournament.
+        # Persist the pick locally instead. StateManager is not usable as the
+        # restore source — __init__ above clears `game`, and
+        # out/program_state.json is a regenerable export, not user settings.
+        SettingsManager.Set(
+            "SELECTED_GAME_CODENAME",
+            StateManager.Get("game.codename", "") or "")
+
+    def _RestoreSelectedGame(self):
+        # Runs on the GUI thread (queued from the GameLoaderThread emit), by
+        # which point self.games holds the local user_data/games scan.
+        if not self._pendingSelectedGameRestore:
+            return
+        self._pendingSelectedGameRestore = False
+
+        codename = SettingsManager.Get("SELECTED_GAME_CODENAME", "") or ""
+        if not codename:
+            return
+
+        codenames = list(self.games.keys())
+        if codename not in codenames:
+            logger.info(
+                f"Last used game '{codename}' is not installed anymore - "
+                "skipping restore")
+            return
+
+        # Mods stay off on restore, unchanged from the previous startup
+        # behaviour: LoadGameAssets defaults to mods_active=False and the
+        # sidebar checkbox re-syncs itself from game.mods_active on onLoad.
+        # LoadGameAssets takes a 1-based index into self.games.
+        self.LoadGameAssets(codenames.index(codename) + 1)
 
     def DownloadStartGGCharacters(self):
         class DownloaderThread(QThread):
@@ -1444,10 +1499,3 @@ class AutonaGameAssetManager(QObject):
         stage = next((s for s in self.stages.items() if str(
             s[1].get("smashgg_id")) == str(smashgg_id)), None)
         return stage
-
-
-if not os.path.exists("./user_data/games"):
-    os.makedirs("./user_data/games")
-
-if AutonaGameAssetManager.instance == None:
-    AutonaGameAssetManager.instance = AutonaGameAssetManager()

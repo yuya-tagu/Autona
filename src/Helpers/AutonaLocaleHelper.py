@@ -27,6 +27,7 @@ class AutonaLocaleHelper(QObject):
     remapping = {}
     countryToLanguage = {}
     countryToContinent = {}
+    _initialized = False
 
     # Double-elimination "TOP N" ladders. N is the number of players still
     # alive in the tournament when the round starts: winners rounds land on
@@ -37,6 +38,23 @@ class AutonaLocaleHelper(QObject):
     WINNERS_TOP_TOTALS = [3 * 2 ** n for n in range(3, 12)]  # 24..6144
     LOSERS_TOP_TOTALS = sorted(
         {2 ** n for n in range(4, 14)} | {3 * 2 ** n for n in range(2, 12)})  # 12..8192
+
+    def Initialize():
+        """Load the static language tables shipped with the program.
+
+        Used to run at import time; it is now called explicitly from
+        src/bootstrap.py so that importing this module has no side effect.
+        Both loaders raise when their data file is missing, which is
+        intentional: the program cannot render anything without them.
+        Idempotent -- reloading immutable asset data would just be wasted
+        work.
+        """
+        if AutonaLocaleHelper._initialized:
+            return
+        AutonaLocaleHelper._initialized = True
+
+        AutonaLocaleHelper.LoadLanguages()
+        AutonaLocaleHelper.LoadCountryToLanguage()
 
     def LoadLocale():
         settingsProgramLocale = SettingsManager.Get("program_language", None)
@@ -207,7 +225,3 @@ class AutonaLocaleHelper(QObject):
                 logger.info("Loaded remap: " + str(remap))
                 return remap
         return None
-
-
-AutonaLocaleHelper.LoadLanguages()
-AutonaLocaleHelper.LoadCountryToLanguage()

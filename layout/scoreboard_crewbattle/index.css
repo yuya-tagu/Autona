@@ -11,7 +11,7 @@
   --col-w: 288px; /* member column width */
 
   /* Fallbacks; index.js overrides from tournamentInfo (EVENT tab). */
-  --theme-color: #1d1b18;
+  --theme-color: #181b21;
   --accent-color: #f0a500;
   --p1-color: #fe3636;
   --p2-color: #2e89ff;

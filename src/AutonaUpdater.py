@@ -94,6 +94,14 @@ _DOWNLOAD_LOCK_NAME = "download_in_progress.lock"
 # tests/test_diff_update_contract.py.
 _STAGING_MARKER_NAME = "staging_prebuilt.marker"
 
+# Settings key holding the app version whose startup already completed the
+# leftover sweep. Leftovers can only appear because an update just ran (or
+# because this is the first launch after migrating from an older install), so
+# once the sweep has succeeded for the running version there is nothing left to
+# find and the recursive _internal/ glob (~3800 files) can be skipped entirely.
+# App-side state only — the apply_update.ps1 contract is untouched.
+_CLEANUP_VERSION_KEY = "updater.leftovers_cleaned_version"
+
 # Abort the diff path when the changed set exceeds this fraction of the
 # archive (e.g. a Qt bump): one streamed full download beats holding a
 # comparable volume of Range responses in memory.
@@ -311,12 +319,19 @@ def _DownloadInFlight() -> bool:
 def CleanupUpdateLeftovers():
     """Purge stragglers from older update runs and the temp workdir.
 
-    Runs once at startup, frozen builds only. Removes the temp workdir from the
-    current external-helper flow (in case the helper's self-delete didn't fire),
-    plus leftovers from the previous in-process updater that a user may carry
-    over when upgrading: the legacy ./Autona_old.exe and any *.autona_old
-    sidecars in the root and _internal/."""
+    Runs once per installed version at startup, frozen builds only. Removes the
+    temp workdir from the current external-helper flow (in case the helper's
+    self-delete didn't fire), plus leftovers from the previous in-process
+    updater that a user may carry over when upgrading: the legacy
+    ./Autona_old.exe and any *.autona_old sidecars in the root and _internal/.
+
+    After a successful sweep the running version is recorded, and subsequent
+    launches of that same version return immediately: nothing can create new
+    leftovers without an update (which changes the version) happening first."""
     if not _is_frozen():
+        return
+    version = _local_version()
+    if SettingsManager.Get(_CLEANUP_VERSION_KEY) == version:
         return
     try:
         # Never purge under a live update: deleting the helper's staging dir
@@ -368,6 +383,11 @@ def CleanupUpdateLeftovers():
                     sidecar.unlink()
                 except Exception:
                     pass
+
+        # Only reached on a full sweep. The in-flight early returns above and
+        # the except below deliberately leave the marker untouched, so an
+        # interrupted run is retried at the next launch.
+        SettingsManager.Set(_CLEANUP_VERSION_KEY, version)
     except Exception:
         logger.error(traceback.format_exc())
 
@@ -877,6 +897,3 @@ class AutonaUpdater(QObject):
                 "updater", "Update check failed:\n{0}"
             ).format(msg),
         )
-
-
-AutonaUpdater.instance = AutonaUpdater()

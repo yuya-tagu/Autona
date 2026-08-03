@@ -36,9 +36,60 @@ class StartGGDataProvider(TournamentDataProvider):
     TournamentPhaseGroupQuery = None
     AnalysisPhaseGroupQuery = None
     TournamentStandingsQuery = None
+    TournamentSlugQuery = None
     _request_timeout_secs = 20.0
+    _initialized = False
 
     player_seeds = {}
+
+    @staticmethod
+    def Initialize():
+        """Read the GraphQL query files into the class attributes above.
+
+        Used to run at import time; it is now called explicitly from
+        src/bootstrap.py so that importing this module has no side effect.
+        Idempotent: the query files ship with the program and never change
+        at runtime.
+
+        AutonaResolve() resolves against the cwd captured when
+        Helpers/AutonaDirHelper was imported, not against the cwd at call
+        time, so moving these reads later resolves to exactly the same
+        paths as the old module tail did.
+        """
+        if StartGGDataProvider._initialized:
+            return
+        StartGGDataProvider._initialized = True
+
+        queryDir = AutonaResolve('src/TournamentDataProvider')
+
+        def readQueryFile(filename):
+            with open(f"{queryDir}/StartGG{filename}Query.txt", "r") as f:
+                return f.read()
+
+        StartGGDataProvider.EntrantsQuery = readQueryFile("Entrants")
+        StartGGDataProvider.FutureSetQuery = readQueryFile("FutureSet")
+        StartGGDataProvider.HistorySetsQuery = readQueryFile(
+            "PlayerTournamentHistory")
+        StartGGDataProvider.LastSetsQuery = readQueryFile("PlayerLastSets")
+        StartGGDataProvider.RecentSetsQuery = readQueryFile("RecentSets")
+        StartGGDataProvider.SetQuery = readQueryFile("Set")
+        StartGGDataProvider.SetsQuery = readQueryFile("Sets")
+        StartGGDataProvider.StationsQuery = readQueryFile("Stations")
+        StartGGDataProvider.StationSetsQuery = readQueryFile("StationSets")
+        StartGGDataProvider.StreamQueueQuery = readQueryFile("StreamQueue")
+        StartGGDataProvider.StreamSetsQuery = readQueryFile("StreamSets")
+        StartGGDataProvider.TournamentDataQuery = readQueryFile(
+            "TournamentData")
+        StartGGDataProvider.TournamentPhasesQuery = readQueryFile(
+            "TournamentPhases")
+        StartGGDataProvider.TournamentPhaseGroupQuery = readQueryFile(
+            "TournamentPhaseGroup")
+        StartGGDataProvider.AnalysisPhaseGroupQuery = readQueryFile(
+            "AnalysisPhaseGroup")
+        StartGGDataProvider.TournamentStandingsQuery = readQueryFile(
+            "TournamentStandings")
+        StartGGDataProvider.TournamentSlugQuery = readQueryFile(
+            "TournamentSlug")
 
     def __init__(self, url, threadpool, tshTdp) -> None:
         super().__init__(url, threadpool, tshTdp)
@@ -1322,11 +1373,30 @@ class StartGGDataProvider(TournamentDataProvider):
         """Build entrant character data from old API char selections."""
         entrants = [[], []]
 
+        def mainFor(char):
+            """["<character key>", skin] for a start.gg character id, or None.
+
+            GetCharacterFromStartGGId returns None for every id the installed
+            game assets do not know -- no asset pack installed, a modded
+            roster, a character start.gg added since. Subscripting that None
+            raised TypeError out of the whole legacy half, and the caller
+            swallows it into an empty dict: one unrecognised character cost
+            the set its bestOf, stage_strike, losers flags and currPlayer too.
+            """
+            character = AutonaGameAssetManager.instance.GetCharacterFromStartGGId(
+                char)
+            if character is None:
+                logger.warning(
+                    f"No installed character matches start.gg id {char};"
+                    " skipping its selection")
+                return None
+            return [character[0], 0]
+
         for i, entrantChars in enumerate(selectedChars):
             for char in entrantChars:
-                entrants[i].append({
-                    "mains": [AutonaGameAssetManager.instance.GetCharacterFromStartGGId(char)[0], 0]
-                })
+                main = mainFor(char)
+                if main is not None:
+                    entrants[i].append({"mains": main})
 
         # If we don't have mains from the selection data, fallback to the characterIds attribute
         for i in [0, 1]:
@@ -1336,9 +1406,9 @@ class StartGGDataProvider(TournamentDataProvider):
 
                 for char in characterIds:
                     try:
-                        entrants[i] = [{
-                            "mains": [AutonaGameAssetManager.instance.GetCharacterFromStartGGId(char)[0], 0]
-                        }]
+                        main = mainFor(char)
+                        if main is not None:
+                            entrants[i] = [{"mains": main}]
                     except:
                         logger.error(traceback.format_exc())
 
@@ -2181,27 +2251,3 @@ class StartGGDataProvider(TournamentDataProvider):
                 logger.error(traceback.format_exc())
         self.url = url
         return url
-
-sggTdpDir = AutonaResolve('src/TournamentDataProvider')
-
-def readQueryFile(tdpdir, filename):
-    with open(f"{tdpdir}/StartGG{filename}Query.txt", "r") as f:
-        return f.read()
-
-StartGGDataProvider.EntrantsQuery = readQueryFile(sggTdpDir, "Entrants")
-StartGGDataProvider.FutureSetQuery = readQueryFile(sggTdpDir, "FutureSet")
-StartGGDataProvider.HistorySetsQuery = readQueryFile(sggTdpDir, "PlayerTournamentHistory")
-StartGGDataProvider.LastSetsQuery = readQueryFile(sggTdpDir, "PlayerLastSets")
-StartGGDataProvider.RecentSetsQuery = readQueryFile(sggTdpDir, "RecentSets")
-StartGGDataProvider.SetQuery = readQueryFile(sggTdpDir, "Set")
-StartGGDataProvider.SetsQuery = readQueryFile(sggTdpDir, "Sets")
-StartGGDataProvider.StationsQuery = readQueryFile(sggTdpDir, "Stations")
-StartGGDataProvider.StationSetsQuery = readQueryFile(sggTdpDir, "StationSets")
-StartGGDataProvider.StreamQueueQuery = readQueryFile(sggTdpDir, "StreamQueue")
-StartGGDataProvider.StreamSetsQuery = readQueryFile(sggTdpDir, "StreamSets")
-StartGGDataProvider.TournamentDataQuery = readQueryFile(sggTdpDir, "TournamentData")
-StartGGDataProvider.TournamentPhasesQuery = readQueryFile(sggTdpDir, "TournamentPhases")
-StartGGDataProvider.TournamentPhaseGroupQuery = readQueryFile(sggTdpDir, "TournamentPhaseGroup")
-StartGGDataProvider.AnalysisPhaseGroupQuery = readQueryFile(sggTdpDir, "AnalysisPhaseGroup")
-StartGGDataProvider.TournamentStandingsQuery = readQueryFile(sggTdpDir, "TournamentStandings")
-StartGGDataProvider.TournamentSlugQuery = readQueryFile(sggTdpDir, "TournamentSlug")

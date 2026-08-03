@@ -23,7 +23,15 @@ class AutonaStatsSignals(QObject):
     history_sets_updated = Signal(dict)
 
 class AutonaStatsUtil:
-    instance: "AutonaStatsUtil" = None
+    """Per-scoreboard stats fetcher/calculator.
+
+    Not a singleton: every instance is bound to one board (it writes under
+    `score.{scoreboardNumber}.*`) and is owned by that board as
+    `AutonaScoreboardWidget.stats`. Reach it through
+    `AutonaScoreboardManager.instance.GetScoreboard(n).stats`. Upstream TSH
+    had a class-level `instance` built at import time; the per-board split
+    made it meaningless, so it is gone -- do not reintroduce it.
+    """
 
     def __init__(self, scoreboardNumber, scoreboard):
         self.signals: AutonaStatsSignals = AutonaStatsSignals()
@@ -53,10 +61,22 @@ class AutonaStatsUtil:
         AutonaTournamentDataProvider.instance.signals.stream_queue_loaded.connect(
             self.UpdateStreamQueue)
 
+    def _IsStartGG(self):
+        """True only when a Start.gg tournament is currently loaded.
+
+        `provider` stays None until a tournament URL is set, so the name has
+        to be reached through a guard -- these calculations are reachable
+        from the web API and the stats panel at any time, including before
+        any tournament has been loaded.
+        """
+        provider = AutonaTournamentDataProvider.instance
+        return bool(provider and provider.provider
+                    and provider.provider.name == "StartGG")
+
     def GetRecentSets(self):
         updated = False
         # Only if 1 player on each side
-        if len(self.scoreboard.team1playerWidgets) == 1 and AutonaTournamentDataProvider.instance and AutonaTournamentDataProvider.instance.provider.name == "StartGG":
+        if len(self.scoreboard.team1playerWidgets) == 1 and self._IsStartGG():
             p1id = StateManager.Get(f"score.{self.scoreboardNumber}.team.1.player.1.id")
             p2id = StateManager.Get(f"score.{self.scoreboardNumber}.team.2.player.1.id")
             videogame = StateManager.Get("provider_videogame.id")
@@ -129,7 +149,7 @@ class AutonaStatsUtil:
 
     def GetPlayerHistoryStandingsP1(self):
         # Only if 1 player on each side
-        if len(self.scoreboard.team1playerWidgets) == 1 and AutonaTournamentDataProvider.instance and AutonaTournamentDataProvider.instance.provider.name == "StartGG":
+        if len(self.scoreboard.team1playerWidgets) == 1 and self._IsStartGG():
             p1id = StateManager.Get(f"score.{self.scoreboardNumber}.team.1.player.1.id")
             if p1id:
                 AutonaTournamentDataProvider.instance.GetPlayerHistoryStandings(
@@ -139,7 +159,7 @@ class AutonaStatsUtil:
 
     def GetPlayerHistoryStandingsP2(self):
         # Only if 1 player on each side
-        if len(self.scoreboard.team1playerWidgets) == 1 and AutonaTournamentDataProvider.instance and AutonaTournamentDataProvider.instance.provider.name == "StartGG":
+        if len(self.scoreboard.team1playerWidgets) == 1 and self._IsStartGG():
             p2id = StateManager.Get(f"score.{self.scoreboardNumber}.team.2.player.1.id")
             if p2id:
                 AutonaTournamentDataProvider.instance.GetPlayerHistoryStandings(

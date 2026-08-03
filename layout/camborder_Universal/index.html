@@ -14,9 +14,13 @@
         gsap.config({ nullTargetWarn: false, trialWarn: false });
         Start = async () => {};
         Update = async (event) => {
+          // Cam borders belong to the scoreboard look, so they follow
+          // colors.board and fall back to the tournament theme when unset.
           const ti = event.data.tournamentInfo || {};
-          if (ti.themeColor) {
-            document.documentElement.style.setProperty("--theme-color", ti.themeColor);
+          const fc = (event.data.colors || {}).board || {};
+          const themeColor = fc.themeColor || ti.themeColor;
+          if (themeColor) {
+            document.documentElement.style.setProperty("--theme-color", themeColor);
           }
         };
       });

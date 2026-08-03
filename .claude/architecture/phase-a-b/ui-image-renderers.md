@@ -139,7 +139,9 @@ DEFAULT_LAYOUT = "horizontal"
 
 **prepare_data フロー** (L29-105):
 1. `settingsManager.Get("result_config")` (L49)
-2. ロゴ・背景・accent_color を設定から or デフォルト (L50-58)
+2. ロゴ・背景を設定から or デフォルト。`theme_color` / `accent_color` は
+   `AutonaFeatureColors.GetFeatureColors("result")`（`colors.result` → 大会共通カラー
+   → Autona 既定）で解決し、`result_config` 由来の同名キーを上書きする
 3. `StateManager.state` から tournamentInfo, numEntrants (L69-81)
 4. `StateManager.Get("result_players")` から player 情報（Widget が Set） (L84)
 5. Preview で player data 空なら `_create_preview_data()` (L102-103)

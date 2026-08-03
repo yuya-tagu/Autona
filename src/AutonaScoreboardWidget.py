@@ -86,6 +86,11 @@ class AutonaScoreboardWidgetSignals(QObject):
 class AutonaScoreboardWidget(QWidget):
     stationQueueCache = QueueSetsCache()
 
+    # Sub-paths of this board's held subtree that AutonaStatsUtil fills with
+    # data fetched from the provider. Exempt from the 反映 hold so overlays
+    # and the stats preview update as soon as the fetch lands.
+    STATS_KEYS = ["last_sets", "history_sets", "recent_sets", "upset_factor"]
+
     def __init__(self, scoreboardNumber=1, singlePlayer=True, *args):
         super().__init__(*args)
 
@@ -93,7 +98,10 @@ class AutonaScoreboardWidget(QWidget):
         self.singlePlayer = singlePlayer
         # StateManager subtree owned by this board. Publication of the whole
         # subtree is deferred (HoldSubtree at the end of __init__): edits stay
-        # local until the 反映 button commits them.
+        # local until the 反映 button commits them. The stats keys below are
+        # exempt — they are fetched derived data, not operator edits, so they
+        # publish immediately (stats overlays / preview would otherwise stay
+        # empty until 反映 was pressed).
         self.statePrefix = f"score.{self.scoreboardNumber}"
 
         StateManager.Set(f"score.{self.scoreboardNumber}", {})
@@ -116,14 +124,20 @@ class AutonaScoreboardWidget(QWidget):
         AutonaHotkeys.signals.swap_teams.connect(self.SwapTeams)
         AutonaHotkeys.signals.reset_scores.connect(self.ResetScore)
 
-        AutonaHotkeys.signals.team1_score_up.connect(
-            lambda: self.CommandScoreChange(0, 1))
+        # Bound methods, never lambdas: AutonaHotkeys.signals is a class-level
+        # object that lives for the whole process, while a board is destroyed
+        # on every battle-format switch. A bound method tells Qt who the
+        # receiver is, so the connection dies with the board; a lambda does
+        # not, and nothing ever disconnects it -- the destroyed board would
+        # keep answering hotkeys and rewriting score.{n} (the "ghost board").
+        # The team/delta pair each hotkey stands for is fixed, so the four
+        # one-line methods below carry it instead of a captured argument.
+        AutonaHotkeys.signals.team1_score_up.connect(self.HotkeyTeam1ScoreUp)
         AutonaHotkeys.signals.team1_score_down.connect(
-            lambda: self.CommandScoreChange(0, -1))
-        AutonaHotkeys.signals.team2_score_up.connect(
-            lambda: self.CommandScoreChange(1, 1))
+            self.HotkeyTeam1ScoreDown)
+        AutonaHotkeys.signals.team2_score_up.connect(self.HotkeyTeam2ScoreUp)
         AutonaHotkeys.signals.team2_score_down.connect(
-            lambda: self.CommandScoreChange(1, -1))
+            self.HotkeyTeam2ScoreDown)
         AutonaHotkeys.signals.apply_changes.connect(self.ApplyChanges)
 
         self.signals.CommandScoreChange.connect(self.CommandScoreChange)
@@ -663,25 +677,7 @@ class AutonaScoreboardWidget(QWidget):
         self.innerWidget.layout().removeWidget(self.scoreColumn)
         self.scoreColumn.findChild(QGroupBox, "scoreGroupBox").setTitle("")
 
-        self.bestOfSpin.valueChanged.connect(
-            lambda value: [
-                StateManager.BlockSaving(),
-                StateManager.Set(
-                    f"score.{self.scoreboardNumber}.best_of", value),
-                StateManager.Set(
-                    f"score.{self.scoreboardNumber}.best_of_short_text", f"BO{value}"),
-                StateManager.Set(f"score.{self.scoreboardNumber}.best_of_text", AutonaLocaleHelper.matchNames.get(
-                    "best_of").format(value) if value > 0 else ""),
-                StateManager.Set(
-                    f"score.{self.scoreboardNumber}.first_to", math.ceil(value/2)),
-                StateManager.Set(
-                    f"score.{self.scoreboardNumber}.first_to_short_text", f"FT{math.ceil(value/2)}"),
-                StateManager.Set(f"score.{self.scoreboardNumber}.first_to_text", AutonaLocaleHelper.matchNames.get(
-                    "first_to").format(math.ceil(value/2)) if value > 0 else ""),
-                self.individualGameTracker.SetStageCount(value),
-                StateManager.ReleaseSaving()
-            ]
-        )
+        self.bestOfSpin.valueChanged.connect(self._onBestOfChanged)
         self.bestOfSpin.valueChanged.emit(0)
 
         self.scoreDisplay1.valueChanged.connect(
@@ -746,16 +742,10 @@ class AutonaScoreboardWidget(QWidget):
         AutonaTournamentDataProvider.instance.signals.tournament_data_updated.connect(
             self._UpdateEntrantsMatchItem)
 
+        # Bound method, not a lambda: the asset manager outlives every board
+        # (see the AutonaHotkeys block in __init__ for the full reasoning).
         AutonaGameAssetManager.instance.signals.onLoad.connect(
-            lambda: [
-                self.SetDefaultsFromAssets(),
-                self.bestOfSpin.valueChanged.emit(self.bestOfSpin.value()),
-                # A game (re)load rewrites characters/defaults wholesale;
-                # publish the fresh baseline instead of leaving it pending
-                # behind the 反映 button.
-                StateManager.CommitHeld(self.statePrefix),
-            ]
-        )
+            self._onGameAssetsLoaded)
 
         self.scoreColumn.findChild(QVBoxLayout, "verticalLayout").addWidget(self.individualGameTracker)
 
@@ -777,7 +767,7 @@ class AutonaScoreboardWidget(QWidget):
         # broadcast/export pipeline until 反映 commits them. Everything Set
         # during construction above was published normally, so the committed
         # baseline matches the widgets' initial values.
-        StateManager.HoldSubtree(self.statePrefix)
+        StateManager.HoldSubtree(self.statePrefix, exempt=self.STATS_KEYS)
         StateManager.signals.held_dirty_changed.connect(
             self._onHeldDirtyChanged)
 
@@ -800,6 +790,38 @@ class AutonaScoreboardWidget(QWidget):
     def ApplyChanges(self):
         # 反映 button: publish every pending edit on this board at once.
         StateManager.CommitHeld(self.statePrefix)
+
+    def _onGameAssetsLoaded(self):
+        # AutonaGameAssetManager.signals.onLoad handler.
+        self.SetDefaultsFromAssets()
+        self.bestOfSpin.valueChanged.emit(self.bestOfSpin.value())
+        # A game (re)load rewrites characters/defaults wholesale; publish the
+        # fresh baseline instead of leaving it pending behind the 反映 button.
+        StateManager.CommitHeld(self.statePrefix)
+
+    def _onBestOfChanged(self, value):
+        # bestOfSpin.valueChanged handler. The derived keys are written as one
+        # save block so a BO change is a single export, and the block is a
+        # `with` statement rather than a chain of calls: anything in here can
+        # raise (matchNames is empty until the locale is loaded, and .format()
+        # on the missing entry throws), and a BlockSaving() whose matching
+        # ReleaseSaving() is never reached leaves saveBlocked permanently
+        # positive -- every later SaveState suppressed, i.e. ./out and the
+        # WebSocket feed silently frozen mid-stream (agent-pitfalls #6).
+        with StateManager.SaveBlock():
+            StateManager.Set(
+                f"score.{self.scoreboardNumber}.best_of", value)
+            StateManager.Set(
+                f"score.{self.scoreboardNumber}.best_of_short_text", f"BO{value}")
+            StateManager.Set(f"score.{self.scoreboardNumber}.best_of_text", AutonaLocaleHelper.matchNames.get(
+                "best_of").format(value) if value > 0 else "")
+            StateManager.Set(
+                f"score.{self.scoreboardNumber}.first_to", math.ceil(value/2))
+            StateManager.Set(
+                f"score.{self.scoreboardNumber}.first_to_short_text", f"FT{math.ceil(value/2)}")
+            StateManager.Set(f"score.{self.scoreboardNumber}.first_to_text", AutonaLocaleHelper.matchNames.get(
+                "first_to").format(math.ceil(value/2)) if value > 0 else "")
+            self.individualGameTracker.SetStageCount(value)
 
     def _onTournamentInfoDelta(self, delta):
         # Same cheap containment filter AutonaStatsWidget uses on deltas.
@@ -1074,8 +1096,14 @@ class AutonaScoreboardWidget(QWidget):
             StateManager.Set(f"score.{self.scoreboardNumber}.team.2.score", team_2_score)
 
     def closeEvent(self, event):
-        self.autoUpdateTimer.stop()
-        self.timeLeftTimer.stop()
+        # Both timers stay None until NewSetSelected() creates them (BUG-5:
+        # closing a board that never had a set loaded used to raise
+        # AttributeError here; Qt swallows exceptions from event handlers so
+        # it was silent, but it is still an unhandled exception on the path).
+        if self.autoUpdateTimer is not None:
+            self.autoUpdateTimer.stop()
+        if self.timeLeftTimer is not None:
+            self.timeLeftTimer.stop()
 
     def _applyScoreboardMode(self, singlePlayer: bool):
         # Toggle team-centric UI. In single-player mode, collapse team naming
@@ -1219,12 +1247,20 @@ class AutonaScoreboardWidget(QWidget):
                 msgBox.exec()
                 return
 
-            # Generate thumbnail and copy to clipboard
-            thumbnailPath = self.GenerateThumbnail(quiet_mode=True, disable_msgbox=True)
-            if thumbnailPath:
-                image = QImage(thumbnailPath)
-                if not image.isNull():
-                    QApplication.clipboard().setImage(image)
+            # Generate thumbnail and copy to clipboard (best-effort: a
+            # thumbnail failure must not block the post itself, so this is
+            # isolated in its own try/except and the failure is surfaced
+            # via a modal after the post completes).
+            thumbnail_error = None
+            try:
+                thumbnailPath = self.GenerateThumbnail(quiet_mode=True, disable_msgbox=True)
+                if thumbnailPath:
+                    image = QImage(thumbnailPath)
+                    if not image.isNull():
+                        QApplication.clipboard().setImage(image)
+            except Exception as e:
+                logger.exception("PostToX: thumbnail generation failed")
+                thumbnail_error = str(e)
 
             def get_team_line(team_n):
                 players = []
@@ -1279,8 +1315,28 @@ class AutonaScoreboardWidget(QWidget):
             text = "\n".join(parts)
             url = "https://twitter.com/intent/tweet?text=" + urllib.parse.quote(text)
             webbrowser.open(url)
+
+            # Notify the user after posting, so a thumbnail failure never
+            # blocks or delays the post itself.
+            if thumbnail_error:
+                msgBox = QMessageBox()
+                msgBox.setWindowIcon(QIcon(UI.icon_path('icon.png')))
+                msgBox.setWindowTitle(QApplication.translate("app", "Post to X"))
+                msgBox.setText(QApplication.translate(
+                    "app",
+                    "Thumbnail generation failed, so no image was copied to the clipboard."))
+                msgBox.setInformativeText(thumbnail_error)
+                msgBox.setIcon(QMessageBox.Warning)
+                msgBox.exec()
         except Exception as e:
-            logger.error(f"PostToX error: {e}")
+            logger.exception(f"PostToX error: {e}")
+            msgBox = QMessageBox()
+            msgBox.setWindowIcon(QIcon(UI.icon_path('icon.png')))
+            msgBox.setWindowTitle(QApplication.translate("app", "Post to X"))
+            msgBox.setText(QApplication.translate("app", "Failed to post to X."))
+            msgBox.setInformativeText(str(e))
+            msgBox.setIcon(QMessageBox.Warning)
+            msgBox.exec()
 
     def ToggleElements(self, action: QAction, elements):
         # Desktop-side field hiding only applies to the inline sponsor field
@@ -1347,7 +1403,7 @@ class AutonaScoreboardWidget(QWidget):
     def UpdateBottomButtons(self):
         if AutonaTournamentDataProvider.instance.provider and AutonaTournamentDataProvider.instance.provider.url:
             self.btSelectSet.setText(
-                QApplication.translate("app", "大会の試合を読み込む"))
+                QApplication.translate("app", "大会の試合を選ぶ"))
             self.btSelectSet.setEnabled(True)
             # Only actionable once a tournament is set — otherwise the button
             # has nothing to load, so hide it entirely rather than showing a
@@ -1669,7 +1725,9 @@ class AutonaScoreboardWidget(QWidget):
                 str(int(self.autoUpdateTimer.remainingTime()/1000)))
 
     def LoadSetClicked(self):
-        self.selectSetWindow.LoadSets()
+        # Restores the cached set list; fetching is the operator's call from
+        # inside the window.
+        self.selectSetWindow.PrepareForDisplay()
         self.selectSetWindow.show()
 
     def LoadStationSets(self, station):
@@ -1688,7 +1746,21 @@ class AutonaScoreboardWidget(QWidget):
             scoreContainers = [self.scoreDisplay1, self.scoreDisplay2]
             scoreContainers[team].setValue(
                 scoreContainers[team].value()+change)
-            
+
+    # The four global score hotkeys, one method each. They exist so the
+    # connections in __init__ can be bound methods -- see the comment there.
+    def HotkeyTeam1ScoreUp(self):
+        self.CommandScoreChange(0, 1)
+
+    def HotkeyTeam1ScoreDown(self):
+        self.CommandScoreChange(0, -1)
+
+    def HotkeyTeam2ScoreUp(self):
+        self.CommandScoreChange(1, 1)
+
+    def HotkeyTeam2ScoreDown(self):
+        self.CommandScoreChange(1, -1)
+
     def CommandClearAll(self, no_mains=False):
         for t, team in enumerate([self.team1playerWidgets, self.team2playerWidgets]):
             for i, p in enumerate(team):

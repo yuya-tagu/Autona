@@ -22,7 +22,48 @@ a = Analysis(
     ],
     hookspath=[],
     runtime_hooks=[],
-    excludes=[],
+    # Packages that only enter the graph through optional, try/ImportError-
+    # guarded or TYPE_CHECKING-only imports in third-party code. Nothing under
+    # src/ or web/ imports any of them (verified by grep + the build's own
+    # xref-autona.html import graph), so excluding them just stops PyInstaller
+    # collecting ~55 MB of dead weight that the launcher would page in.
+    #
+    #   pandas   <- deepdiff.deephash (`try: import pandas`). StateManager
+    #               already forces that import to fail at runtime
+    #               (sys.modules.setdefault("pandas", None)).
+    #   numpy    <- deepdiff.helper / deephash, both guarded; the no-numpy
+    #               branch defines the np_* stubs the rest of deepdiff imports.
+    #               Everything else reaching it came via pandas.
+    #   openpyxl <- pandas.io.excel only.
+    #   pytest / _pytest / pluggy / iniconfig <- pandas._testing,
+    #               numpy.testing. Test-only, never imported by the app.
+    #   cryptography <- werkzeug.serving (TYPE_CHECKING + ad-hoc-TLS helpers),
+    #               flask.cli, requests (SNI fallback), redis — all optional.
+    #               HTTPS keeps working: requests uses the stdlib ssl module.
+    #   pydantic / pydantic_core / annotated_types <- deepdiff.serialization
+    #               (guarded) and yarl._url (find_spec probe + function-local
+    #               import), which degrade cleanly when absent.
+    #   redis    <- socketio.redis_manager, guarded; only used for the
+    #               multi-process message queue, which Autona does not use
+    #               (async_mode='threading', single process).
+    #
+    # NOT excluded on purpose: py7zr + Cryptodome (game-asset download), and
+    # tzdata (stdlib zoneinfo has no tz database on Windows without it, and
+    # orjson pulls zoneinfo in) — 1.6 MB is not worth the risk.
+    excludes=[
+        'pandas',
+        'numpy',
+        'openpyxl',
+        'pytest',
+        '_pytest',
+        'pluggy',
+        'iniconfig',
+        'cryptography',
+        'pydantic',
+        'pydantic_core',
+        'annotated_types',
+        'redis',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

@@ -6,18 +6,17 @@ Held subtree semantics (the 反映 button feature):
   but are excluded from delta broadcast / GetFullState / file export
   until CommitHeld(prefix) publishes them in one save cycle.
 
-StateManager.py does file I/O relative to CWD at import time, so the module
-is imported once into a temp working directory via a fake parent package
-(direct_import can't be used: StateManager has relative imports).
+Importing the module is side-effect free, but StateManager.Initialize() does
+file I/O relative to the CWD (./out), so it runs once inside a temp working
+directory.
 """
-import importlib.util
 import os
-import sys
 import tempfile
-import types
 from pathlib import Path
 
 import pytest
+
+from src.StateManager import StateManager as SM
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = PROJECT_ROOT / "src"
@@ -26,28 +25,18 @@ _WORK_DIR = tempfile.mkdtemp(prefix="autona_sm_test_")
 _ORIGINAL_CWD = os.getcwd()
 
 
-def _import_state_manager():
-    # StateManager / SettingsManager do file I/O relative to CWD at import
-    # time (./out, ./user_data). Import under the temp dir, then restore the
+def _initialize_state_manager():
+    # Initialize() creates ./out; run it under the temp dir, then restore the
     # CWD so later-collected test modules are unaffected.
     os.chdir(_WORK_DIR)
     os.makedirs(Path(_WORK_DIR) / "user_data", exist_ok=True)
     try:
-        pkg = types.ModuleType("autona_sm_test_pkg")
-        pkg.__path__ = [str(SRC_ROOT)]
-        sys.modules["autona_sm_test_pkg"] = pkg
-        spec = importlib.util.spec_from_file_location(
-            "autona_sm_test_pkg.StateManager", SRC_ROOT / "StateManager.py")
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules["autona_sm_test_pkg.StateManager"] = mod
-        spec.loader.exec_module(mod)
-        return mod
+        SM.Initialize()
     finally:
         os.chdir(_ORIGINAL_CWD)
 
 
-_mod = _import_state_manager()
-SM = _mod.StateManager
+_initialize_state_manager()
 
 
 @pytest.fixture(autouse=True)
@@ -197,3 +186,99 @@ def test_exported_file_contains_committed_view_only():
     exported = (Path(_WORK_DIR) / "out" / "program_state.json").read_text(
         encoding="utf-8")
     assert "PendingPhase" in exported
+
+
+# --- Exempt sub-paths -------------------------------------------------
+# HoldSubtree(prefix, exempt=[...]) opts fetched derived data (the stats
+# keys AutonaStatsUtil writes) out of the hold: those keys publish as soon
+# as they are written, even while operator edits under the same prefix are
+# still pending. A separate prefix keeps this independent of the tests
+# above, which hold "score.1" without exempt paths.
+EX_PREFIX = "score.2"
+EX_KEYS = ["last_sets", "upset_factor"]
+
+
+def test_exempt_registration_publishes_baseline():
+    SM.Set(f"{EX_PREFIX}.best_of", 3)
+    SM.Set(f"{EX_PREFIX}.last_sets.1", {})
+    SM.Set(f"{EX_PREFIX}.upset_factor", 0)
+    SM.HoldSubtree(EX_PREFIX, exempt=EX_KEYS)
+    assert len(SM.heldExempt[EX_PREFIX]) == len(EX_KEYS)
+
+
+def test_exempt_write_publishes_immediately_when_clean():
+    spy = _Spy()
+    SM.Set(f"{EX_PREFIX}.upset_factor", 7)
+    # Never queued behind the 反映 button.
+    assert not SM.HasPendingChanges(EX_PREFIX)
+    assert "upset_factor" in spy.delta_str()
+    assert SM.GetFullState()["state"]["score"]["2"]["upset_factor"] == 7
+
+
+def test_exempt_write_publishes_while_held_edit_pending():
+    SM.Set(f"{EX_PREFIX}.phase", "PendingExemptPhase")
+    assert SM.HasPendingChanges(EX_PREFIX)
+
+    spy = _Spy()
+    SM.Set(f"{EX_PREFIX}.last_sets.1", {"round_name": "ExemptRound"})
+
+    # Stats go out now; the pending operator edit stays masked.
+    assert "ExemptRound" in spy.delta_str()
+    assert "PendingExemptPhase" not in spy.delta_str()
+
+    published = SM.GetFullState()["state"]["score"]["2"]
+    assert published["last_sets"]["1"]["round_name"] == "ExemptRound"
+    assert "phase" not in published
+
+    _join_export()
+    exported = (Path(_WORK_DIR) / "out" / "program_state.json").read_text(
+        encoding="utf-8")
+    assert "ExemptRound" in exported
+    assert "PendingExemptPhase" not in exported
+
+
+def test_get_committed_serves_live_value_for_exempt_paths():
+    assert SM.GetCommitted(f"{EX_PREFIX}.phase") is None
+    assert SM.GetCommitted(f"{EX_PREFIX}.last_sets.1") == {
+        "round_name": "ExemptRound"}
+    # Whole-subtree read (the /get_scoreboard path): committed elsewhere,
+    # live for the exempt keys.
+    subtree = SM.GetCommitted(EX_PREFIX)
+    assert subtree["last_sets"]["1"]["round_name"] == "ExemptRound"
+    assert subtree["best_of"] == 3
+    assert "phase" not in subtree
+
+
+def test_get_committed_overlay_does_not_mutate_last_saved_state():
+    with SM.SaveBlock():
+        SM.Set(f"{EX_PREFIX}.last_sets.1", {"round_name": "BlockedRound"})
+        # Not saved yet, but the exempt key is never masked.
+        subtree = SM.GetCommitted(EX_PREFIX)
+        assert subtree["last_sets"]["1"]["round_name"] == "BlockedRound"
+        # The overlay clones; lastSavedState keeps its own storage.
+        assert SM.lastSavedState["score"]["2"]["last_sets"]["1"][
+            "round_name"] == "ExemptRound"
+
+
+def test_commit_publishes_held_edit_without_dropping_stats():
+    spy = _Spy()
+    SM.CommitHeld(EX_PREFIX)
+    assert not SM.HasPendingChanges(EX_PREFIX)
+    assert "PendingExemptPhase" in spy.delta_str()
+
+    published = SM.GetFullState()["state"]["score"]["2"]
+    assert published["phase"] == "PendingExemptPhase"
+    assert published["last_sets"]["1"]["round_name"] == "BlockedRound"
+
+
+def test_prefix_wide_held_write_keeps_live_exempt_values():
+    # Clearing the whole subtree is itself a held write; the exempt keys
+    # written afterwards must still reach the published view.
+    SM.Set(EX_PREFIX, {})
+    assert SM.HasPendingChanges(EX_PREFIX)
+
+    SM.Set(f"{EX_PREFIX}.upset_factor", 3)
+    published = SM.GetFullState()["state"]["score"]["2"]
+    assert published["upset_factor"] == 3
+    # The rest of the subtree is still the committed view.
+    assert published["phase"] == "PendingExemptPhase"

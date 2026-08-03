@@ -1,7 +1,7 @@
 """Unit tests for AutonaRemoteZip (differential update core).
 
 Everything runs against zips built in tmp_path with a fake fetcher slicing a
-bytes blob - no network, no Qt (direct_import per agent-pitfalls #1).
+bytes blob - no network, no Qt.
 """
 import io
 import zipfile
@@ -10,9 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import direct_import
-
-rz = direct_import("AutonaRemoteZip", "src/Helpers/AutonaRemoteZip.py")
+from src.Helpers import AutonaRemoteZip as rz
 
 
 # ---------------------------------------------------------------------------

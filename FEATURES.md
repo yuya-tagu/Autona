@@ -16,7 +16,7 @@
 6. [BlueSky 投稿](#6-bluesky-投稿)
 7. [実況・解説パネル](#7-実況解説パネル)
 8. [大会情報（Tournament Info）](#8-大会情報tournament-info)
-9. [ブラケット表示](#9-ブラケット表示)
+9. [ブラケット表示（TOP 8）](#9-ブラケット表示top-8)
 10. [選手リスト](#10-選手リスト)
 11. [統計・分析](#11-統計分析)
 12. [メモ・補助ウィジェット](#12-メモ補助ウィジェット)
@@ -165,8 +165,8 @@
 
 ### 自動取得情報
 - 大会名 / イベント名 / 参加者数 / 開始日 / 会場住所 / ショートリンク
-- **大会アイコン / バナーのダウンロード**（`DownloadIcon` / `DownloadBanner`）
-  - Start.gg から自動取得、ローカル画像の差し替えも可
+- **大会アイコン / バナーのダウンロード**（`_DownloadIconAndBannerAsync`）
+  - Start.gg からアイコン・バナーを一括で自動取得、ローカル画像の差し替えも可
 - **テーマカラー / アクセントカラー** のカラーピッカー
 
 ### 配信用ツール
@@ -181,16 +181,17 @@
 
 ---
 
-## 9. ブラケット表示
+## 9. ブラケット表示（TOP 8）
 
-[src/AutonaBracketWidget.py](src/AutonaBracketWidget.py)・[src/AutonaBracketView.py](src/AutonaBracketView.py)。
+[src/AutonaTop8Widget.py](src/AutonaTop8Widget.py)・[src/AutonaTop8Model.py](src/AutonaTop8Model.py)・[layout/bracket_top8/](layout/bracket_top8/)。
 
-- フェーズグループを選んでブラケット取得
-- 樹形図描画（QGraphicsView）
-- セット色分け（Winners / Losers / 完了）
-- セットをクリックしてスコアボードにロード
-- ローディングオーバーレイ
-- ダブル / シングルエリミ対応
+- FGC 標準の **TOP 8 固定ダブルエリミネーションブラケット**（Winners スタート 4 名 + Losers スタート 4 名、全 11 試合: WSF×2 / WF / LR1×2 / LQF×2 / LSF / LF / GF / GF リセット）
+- **選手カード（8 スロット固定）** — 名前 / スポンサー / 国 / 使用キャラ・カラーを編集。対戦カードの変更は選手の入れ替えで行う
+- **試合スコア表** — 各試合のスコアを入力し Apply で反映。勝者は自動で後続の試合に伝播、GF リセットは成立時のみ有効化。全リセットボタン付き
+- **Start.gg 自動読込** — 大会のダブルエリミネーション最終フェーズを自動で対象にし、最終 8 名と各試合のスコアを取り込み（Ctrl+Shift+P ホットキーでも更新可）
+- **表示ラベル**（オーバーレイに出すフェーズ名）の編集
+- **ライブプレビュー** — `layout/bracket_top8/` オーバーレイの埋め込みプレビュー（再読み込みボタン付き）
+- **OBS 追加案内** — ブラウザソース URL の表示・コピー。選手・スコアの編集は Socket.IO で OBS 上のブラケットにリアルタイム反映
 
 ---
 

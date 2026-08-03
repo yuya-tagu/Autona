@@ -75,7 +75,12 @@ function injectFonts() {
 
 function applyConfig(config) {
   const root = document.documentElement;
+  // Python resolves both from colors.result -> the tournament colors, so a
+  // missing key here only happens for a hand-built payload.
   root.style.setProperty("--accent-color", config.accent_color || "#f0a500");
+  if (config.theme_color) {
+    root.style.setProperty("--theme-color", config.theme_color);
+  }
 }
 
 function setBackground(config) {

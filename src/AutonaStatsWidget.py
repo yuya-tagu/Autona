@@ -149,6 +149,15 @@ class AutonaStatsWidget(QDockWidget):
         StateManager.signals.held_state_updated.connect(
             self._onHeldStateUpdated)
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Nothing draws this panel at construction time: every path into
+        # _updateDisplay is a StateManager signal, so a panel built after the
+        # last one fired (it is built on first reveal — startup Step 4b-3)
+        # would sit empty until the operator touched the scoreboard. Render
+        # from the live state whenever the panel is revealed instead.
+        self._onStateChanged()
+
     def _wrapInScroll(self, widget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)

@@ -4,9 +4,12 @@ These tests capture the current behavior of ParseMatchDataNewApi,
 ParseMatchDataOldApi, and ProcessEntrantData so that refactoring
 can be verified against known-good outputs.
 
-Strategy: pre-populate sys.modules with mocks for all src.* dependencies
-that would otherwise trigger the Qt/singleton init chain, then use
-direct_import to load only StartGGDataProvider.
+Strategy: the provider's own dependencies (game assets, player DB, workers,
+qtpy) are stubbed via sys.modules while the module is exec'd, so the parse
+functions can be exercised as pure data transforms with deterministic
+character/stage lookups. The stubs are removed again immediately afterwards
+-- they are an isolation device for this module only and must never be
+visible to another test module (src.* imports normally these days).
 """
 import sys
 import types
@@ -17,14 +20,11 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# 1. Load AutonaDictHelper (no Qt dependency) for the real deep_get
+# 1. The real deep_get (no Qt dependency) backs the stubbed dict helper
 # ---------------------------------------------------------------------------
-from tests.conftest import direct_import, PROJECT_ROOT
+from src.Helpers.AutonaDictHelper import deep_get
 
-_dict_helper = direct_import(
-    "AutonaDictHelper_test", "src/Helpers/AutonaDictHelper.py"
-)
-deep_get = _dict_helper.deep_get
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 # ---------------------------------------------------------------------------
@@ -225,25 +225,22 @@ try:
     )
     _startgg_mod = _ilu.module_from_spec(_spec)
     _startgg_mod.__package__ = "src.TournamentDataProvider"
-    sys.modules["src.TournamentDataProvider.StartGGDataProvider"] = _startgg_mod
+    _PROVIDER_NAME = "src.TournamentDataProvider.StartGGDataProvider"
+    _original_modules[_PROVIDER_NAME] = sys.modules.get(_PROVIDER_NAME)
+    sys.modules[_PROVIDER_NAME] = _startgg_mod
     _spec.loader.exec_module(_startgg_mod)
     StartGGDataProvider = _startgg_mod.StartGGDataProvider
-except Exception:
+finally:
+    # None of the stubs may outlive this module's import. Test modules
+    # collected after this one import the real qtpy and the real src.*
+    # modules, and would otherwise get these mocks handed to them. The
+    # provider bound its dependencies (mock QObject, mock asset manager, ...)
+    # at exec time, so dropping the sys.modules entries costs nothing here.
+    # The one thing resolved later is the lazy
+    # `from ..Helpers.AutonaStatusManager import AutonaStatusManager` inside
+    # GetMatches(); it then loads the real module, which is Qt-only, needs no
+    # QApplication and emits into the void with no receivers connected.
     _teardown_mock_modules()
-    raise
-else:
-    # The qtpy stubs must not outlive this module's import: test modules
-    # collected after this one (e.g. test_state_manager_held) import the
-    # real qtpy. StartGGDataProvider already bound the mock QObject at exec
-    # time, so dropping the sys.modules entries is safe. The src.* mocks
-    # stay in place because the provider lazily imports
-    # ..Helpers.AutonaStatusManager at call time through them.
-    for _name in ("qtpy", "qtpy.QtCore"):
-        _original = _original_modules.pop(_name, None)
-        if _original is None:
-            sys.modules.pop(_name, None)
-        else:
-            sys.modules[_name] = _original
 
 
 # ---------------------------------------------------------------------------
@@ -1313,3 +1310,93 @@ class TestGetMatchesPagination:
         provider = self._provider()
         provider.QueryRequests = lambda *a, **kw: self._paged_response([], 0)
         assert provider.GetMatches() == []
+
+
+# ===========================================================================
+# Tests: unknown character ids in the legacy half (LIVE-BUG-3)
+# ===========================================================================
+
+# The mocked asset manager at the top of this module maps ids 1..3, so any
+# other id is an unknown character by construction.
+_UNKNOWN_CHARACTER_ID = 9999
+
+
+class TestOldApiUnknownCharacterIds:
+    """A character the installed assets do not know must cost only itself.
+
+    GetCharacterFromStartGGId returns None for any start.gg character id no
+    installed game pack maps -- no pack installed at all, a modded roster, a
+    character start.gg added since the pack was built.
+    _build_entrants_old_api subscripted that None with [0], so one
+    unrecognised id raised TypeError out of the whole legacy parse; the
+    caller logs it and hands back {}, which silently costs the set its
+    bestOf, stage_strike, striked stages, losers flags and currPlayer.
+    Nothing about that failure mentions characters, and it only happens on a
+    machine with no assets installed -- which is every fresh install.
+    """
+
+    def test_an_unknown_selection_keeps_the_rest_of_the_set(self):
+        resp = _old_api_response_with_char_selection()
+        resp["entities"]["setTask"][0]["metadata"]["charSelections"] = {
+            "5001": [_UNKNOWN_CHARACTER_ID],
+            "5002": [2],  # Fox
+        }
+        provider = _make_provider()
+
+        result = provider.ParseMatchDataOldApi(resp)
+
+        # The fields the exception used to take down with it.
+        assert result["bestOf"] == 5
+        assert result["team1score"] == 3
+        assert result["team2score"] == 2
+        assert result["team1losers"] is False
+        assert result["team2losers"] is False
+        assert "currPlayer" in result
+        # ...and the entrant that *was* recognised still has its character.
+        assert result["entrants"][1][0]["mains"] == ["fox", 0]
+
+    def test_the_unknown_character_is_skipped_not_faked(self):
+        resp = _old_api_response_with_char_selection()
+        resp["entities"]["setTask"][0]["metadata"]["charSelections"] = {
+            "5001": [_UNKNOWN_CHARACTER_ID],
+            "5002": [_UNKNOWN_CHARACTER_ID],
+        }
+        provider = _make_provider()
+
+        result = provider.ParseMatchDataOldApi(resp)
+
+        # No entry at all rather than one holding None: the player widget
+        # reads mains[0] as a character name straight out of this.
+        assert result["entrants"] == [[], []]
+
+    def test_a_known_and_an_unknown_selection_for_one_entrant(self):
+        resp = _old_api_response_with_char_selection()
+        resp["entities"]["setTask"][0]["metadata"]["charSelections"] = {
+            "5001": [1, _UNKNOWN_CHARACTER_ID, 3],  # Mario, ???, Pikachu
+            "5002": [2],
+        }
+        provider = _make_provider()
+
+        result = provider.ParseMatchDataOldApi(resp)
+
+        assert [e["mains"] for e in result["entrants"][0]] == [
+            ["mario", 0], ["pikachu", 0]]
+
+    def test_an_unknown_id_in_the_characterIds_fallback(self):
+        """The same guard on the fallback path, which had a bare except.
+
+        There the TypeError was caught, so the set survived -- but the
+        entrant ended up silently without mains and the log showed a
+        traceback rather than the character id that was not recognised.
+        """
+        resp = _old_api_response_basic()
+        resp["entities"]["sets"]["entrant1CharacterIds"] = [
+            _UNKNOWN_CHARACTER_ID]
+        resp["entities"]["sets"]["entrant2CharacterIds"] = [3]  # Pikachu
+        provider = _make_provider()
+
+        result = provider.ParseMatchDataOldApi(resp)
+
+        assert result["entrants"][0] == []
+        assert result["entrants"][1][0]["mains"] == ["pikachu", 0]
+        assert result["bestOf"] == 5

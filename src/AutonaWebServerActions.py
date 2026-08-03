@@ -9,7 +9,6 @@ import orjson
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaQtHelper import gui_thread_sync
 from .StateManager import StateManager
-from .AutonaStatsUtil import AutonaStatsUtil
 from .SettingsManager import SettingsManager
 from loguru import logger
 from .AutonaGameAssetManager import AutonaGameAssetManager
@@ -28,11 +27,31 @@ log.setLevel(logging.ERROR)
 
 
 class WebServerActions(QThread):
-    def __init__(self, parent=None, scoreboard=None, commentaryWidget: AutonaCommentaryWidget=None) -> None:
+    def __init__(self, parent=None, scoreboard=None) -> None:
         super().__init__(parent)
         self.scoreboard = scoreboard
-        self.commentaryWidget = commentaryWidget
         self.threadPool = QThreadPool()
+
+    # ── Lazily-built panels (startup Step 4b-2) ──────────────────────
+    # The Commentary and Top 8 panels are constructed the first time their
+    # sidebar page is revealed, so an API call can arrive while they do not
+    # exist yet. The class `instance` attribute is the fast path; when it is
+    # None the main window is asked to build the panel. `parent` is that
+    # window (see WebServer.__init__).
+
+    @gui_thread_sync
+    def _ensure_panel(self, accessor):
+        """Build a lazy main-window panel by accessor name; return it.
+
+        Dispatched to the GUI thread because it may construct widgets.
+        Returns None when the window has no such accessor (nothing to do
+        but log — the caller reports an error to the client).
+        """
+        ensure = getattr(self.parent(), accessor, None)
+        if ensure is None:
+            logger.warning(f"[WebServer] {accessor} is not available")
+            return None
+        return ensure()
 
     def program_state(self):
         return StateManager.GetFullState()
@@ -219,7 +238,11 @@ class WebServerActions(QThread):
         index = int(index) - 1
         if not 0 <= index < len(comms.SLOTS):
             return f"ERROR : index must be 1..{len(comms.SLOTS)}"
-        self.commentaryWidget.ChangeCommDataSignal.emit(index, data)
+        widget = (AutonaCommentaryWidget.instance
+                  or self._ensure_panel("EnsureCommentaryPanel"))
+        if widget is None:
+            return "ERROR : commentary panel unavailable"
+        widget.ChangeCommDataSignal.emit(index, data)
 
         return "OK"
 
@@ -312,11 +335,13 @@ class WebServerActions(QThread):
         return "OK"
 
     def stats_recent_sets(self, scoreboard):
-        AutonaStatsUtil.instance.signals.RecentSetsSignal.emit()
+        self.scoreboard.GetScoreboard(
+            scoreboard).stats.signals.RecentSetsSignal.emit()
         return "OK"
 
     def stats_upset_factor(self, scoreboard):
-        AutonaStatsUtil.instance.signals.UpsetFactorCalculation.emit()
+        self.scoreboard.GetScoreboard(
+            scoreboard).stats.signals.UpsetFactorCalculation.emit()
         return "OK"
 
     def stats_last_sets(self, scoreboard, player):
@@ -352,6 +377,31 @@ class WebServerActions(QThread):
         else:
             logger.error(
                 "[History Standings] Unable to find player defined. Allowed values are: 1, 2, or both")
+        return "OK"
+
+    @gui_thread_sync
+    def refresh_stats(self, scoreboard):
+        """Recalculate every statistic for a board.
+
+        Emits the same signal set as the STATS panel's
+        「統計情報を取得する」 button (AutonaStatsWidget._refresh), so both
+        entry points stay identical. The fetches themselves are async
+        (start.gg), so this returns as soon as the signals are queued; the
+        results land in the state a moment later. The stats util already
+        no-ops on non-1v1 boards, so no extra guard is needed here.
+        """
+        sb = self.scoreboard.GetScoreboard(scoreboard)
+        stats = getattr(sb, "stats", None)
+        if stats is None:
+            logger.warning(
+                f"[Stats] scoreboard {scoreboard} has no stats util")
+            return f"ERROR: scoreboard {scoreboard} does not support stats"
+        stats.signals.RecentSetsSignal.emit()
+        stats.signals.LastSetsP1Signal.emit()
+        stats.signals.LastSetsP2Signal.emit()
+        stats.signals.PlayerHistoryStandingsP1Signal.emit()
+        stats.signals.PlayerHistoryStandingsP2Signal.emit()
+        stats.signals.UpsetFactorCalculation.emit()
         return "OK"
 
     @gui_thread_sync
@@ -416,8 +466,16 @@ class WebServerActions(QThread):
         # panel resolves the fixed target (the tournament's final double
         # elimination phase) and re-fetches it, queuing behind a phases fetch
         # when needed.
+        #
+        # The panel is built on demand rather than left to the fallback below
+        # (startup Step 4b-2): before that step it always existed, so taking
+        # the fallback for an unopened panel would change what this route
+        # does — the raw fetch below emits tournament_phasegroup_updated,
+        # which with no Top 8 panel listening updates nothing. The fallback
+        # stays for the case where the panel cannot be built at all.
         from .AutonaTop8Widget import AutonaTop8Widget
-        panel = AutonaTop8Widget.instance
+        panel = (AutonaTop8Widget.instance
+                 or self._ensure_panel("EnsureTop8Panel"))
         if panel is not None:
             panel.RefreshPhaseGroup()
             return "OK"
@@ -490,7 +548,11 @@ class WebServerActions(QThread):
         index = int(index) - 1
         if not 0 <= index < 8:
             return "ERROR : index must be 1..8"
-        self.commentaryWidget.LoadCommFromTagSignal.emit(index, tag, no_mains)
+        widget = (AutonaCommentaryWidget.instance
+                  or self._ensure_panel("EnsureCommentaryPanel"))
+        if widget is None:
+            return "ERROR : commentary panel unavailable"
+        widget.LoadCommFromTagSignal.emit(index, tag, no_mains)
 
     def load_tournament(self, url=None):
         logger.error(f"URL PROVIDED: {url}")

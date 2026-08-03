@@ -29,7 +29,8 @@ Path.mkdir(crashpath.parent, exist_ok=True)
 crashlog = crashpath.open(mode='w')
 faulthandler.enable(crashlog)
 
-QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+# NOTE: Qt.AA_ShareOpenGLContexts is set in main.py — it only takes effect
+# before the QApplication is constructed, and that now happens there too.
 
 if parse(qtpy.QT_VERSION).major == 6:
     QImageReader.setAllocationLimit(0)
@@ -38,7 +39,16 @@ if parse(qtpy.QT_VERSION).major == 6:
 # (before this module is imported), so the taskbar groups the app under
 # our identity rather than the host python.exe.
 
-App = QApplication(sys.argv)
+# main.py creates the QApplication before importing this module, so that the
+# splash can be painted while this import chain runs. The fallback is NOT for
+# the app itself: PyInstaller's binary-dependency analysis imports modules in
+# an isolated subprocess without main.py, and anything here that ends up
+# creating a QWidget hard-aborts the process when no QApplication exists.
+# Kept deliberately even though src/__init__.py no longer chains into this
+# module (Step 3g) — the analysis still reaches it through main.py.
+App = QApplication.instance()
+if App is None:
+    App = QApplication(sys.argv)
 AutonaQtHelper.init_gui_executor()  # guaranteed to be the main thread.
 
 fmt = ("<green>{time:YYYY-MM-DD HH:mm:ss}</green> " +
@@ -47,6 +57,17 @@ fmt = ("<green>{time:YYYY-MM-DD HH:mm:ss}</green> " +
        "- <level>{message}</level>")
 
 if sys.stdout != None:
+    # Windows consoles default to the legacy ANSI code page (e.g. cp932),
+    # which cannot encode many characters that show up in ordinary log
+    # messages (e.g. accented Latin letters in character names such as
+    # "Pokémon Trainer"). Force UTF-8 with a safe fallback so a single
+    # non-ASCII message can't raise UnicodeEncodeError and spam
+    # "Logging error in Loguru Handler" for the rest of the run.
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except Exception:
+            pass
     config = {
         "handlers": [
             {"sink": sys.stdout, "format": fmt, "level": "DEBUG"},
@@ -60,8 +81,10 @@ else:
             sys.__excepthook__(exc_type, exc_value, exc_traceback)
             return
 
-        logger.critical("Uncaught exception", exc_info=(
-            exc_type, exc_value, exc_traceback))
+        # loguru does not understand the stdlib `exc_info` kwarg; passing it
+        # silently drops the traceback. Use logger.opt(exception=...) instead.
+        logger.opt(exception=(exc_type, exc_value, exc_traceback)).critical(
+            "Uncaught exception")
 
     sys.excepthook = handle_exception
 
@@ -101,6 +124,12 @@ logger.add(
     rotation="20 MB"
 )
 
+# loguru is only configured now, so the STARTUP marks recorded before this
+# module was imported (gate / splash) have been buffered — replay them into
+# the log file and route the later phases straight to loguru.
+import autona_splash
+autona_splash.attach_startup_logger(logger)
+
 try:
     # Setting the icon for individual windows doesn't work on mac (and perhaps linux? unknown)
     # Use the multi-resolution .ico (not .png): a single PNG renders in the
@@ -116,7 +145,12 @@ logger.critical("=== Autona IS STARTING ===")
 
 logger.info("QApplication successfully initialized")
 
-from .AutonaSplash import LoadingOverlay, create_splash, pick_splash_messages
+from autona_splash import (
+    LoadingOverlay,
+    active_splash,
+    log_startup_phase,
+    pick_splash_messages,
+)
 
 from contextlib import contextmanager
 @contextmanager
@@ -125,6 +159,16 @@ def catchtime(msg = ''):
     start = perf_counter()
     yield lambda: perf_counter() - start
     logger.info(f'{msg} Time: {perf_counter() - start:.3f} seconds')
+
+# Explicit construction of the core singletons (composition root). This must
+# stay ABOVE the import block below: what is still built at import time there
+# (SettingsManager, LocaleHelper, StartGGDataProvider ...) reads StateManager
+# and the already-migrated instances, and the settings-window chain used to be
+# what implicitly created
+# AutonaHotkeys.instance. Running bootstrap_core() here keeps the effective
+# initialization order identical to the old import-time side effects.
+from .bootstrap import bootstrap_core
+bootstrap_core()
 
 # autopep8: off
 from .Settings.AutonaSettingsWindow import AutonaSettingsWindow
@@ -140,7 +184,11 @@ from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTop8Widget import AutonaTop8Widget
 from .AutonaTournamentInfoWidget import AutonaTournamentInfoWidget
 from .AutonaBoardWidget import AutonaBoardWidget
+from .AutonaFeatureColors import (
+    DEFAULT_ACCENT_COLOR, DEFAULT_THEME_COLOR, SeedColorState)
 from .AutonaSidebar import AutonaSidebar
+from . import AutonaCommentaryModel as comms
+from . import AutonaTop8Model as top8
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaAlertNotification import AutonaAlertNotification
 from .AutonaUpdater import AutonaUpdater, CleanupUpdateLeftovers
@@ -152,9 +200,11 @@ from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaStatusManager import AutonaStatusManager
 from .AutonaScoreboardManager import AutonaScoreboardManager
 from .AutonaStatsWidget import AutonaStatsWidget
+from .AutonaStatsPreviewWidget import AutonaStatsPreviewWidget
 from .AutonaAnalysisWidget import AutonaAnalysisWidget
 from .AutonaPlayerBrowserWidget import AutonaPlayerBrowserWidget
 from src.AutonaWebServer import WebServer, check_webserver_port
+from .AutonaLayoutPreview import MarkWebServerReady
 # autopep8: on
 
 
@@ -197,21 +247,40 @@ class Window(QMainWindow):
     # v20: Commentary and Top 8 swapped in the sidebar order.
     # v21: New "Scoreboard" category between Setup and Display, holding the
     #      scoreboard (input) and board (design) panels.
-    STATE_VERSION = 21
+    # v22: Stats Display Settings panel (AutonaStatsPreviewWidget) added to
+    #      the Display category, after Commentary.
+    STATE_VERSION = 22
     signals = WindowSignals()
 
     def __init__(self):
         super().__init__()
 
-        StateManager.BlockSaving()
+        log_startup_phase("window-init")
 
+        # Every state write made while the window is built is coalesced into
+        # a single save. This used to be a bare BlockSaving() ... 600 lines
+        # ... ReleaseSaving() pair: anything raising in between left the
+        # counter positive and silenced SaveState for the rest of the process
+        # (agent-pitfalls #6, the shape BUG-3 was). The body lives in a method
+        # of its own purely so the context manager has something to wrap.
+        with StateManager.SaveBlock():
+            self._BuildUi()
+
+    def _BuildUi(self):
+        """Build the window: panels, sidebar, menus, hotkeys, status bar.
+
+        Called from __init__ only, inside StateManager.SaveBlock(). Nothing
+        here changed when it was split out -- same statements, same order.
+        """
         AutonaLocaleHelper.LoadLocale()
         AutonaLocaleHelper.LoadRoundNames()
         self.LoadTheme()
 
         self.signals = WindowSignals()
 
-        splash = create_splash()
+        # Created by main.py before this module was imported, so it has been
+        # on screen since a second or two after launch.
+        splash = active_splash()
         splash_msgs = pick_splash_messages()
         splash.set_message(splash_msgs[0], progress=0.05)
 
@@ -274,12 +343,31 @@ class Window(QMainWindow):
 
         splash.set_message(splash_msgs[0], progress=0.25)
 
+        # State the overlays / Web UI read from launch, seeded before any
+        # panel exists (startup Step 4b-2 / 4b-3).
+        self._SeedPanelState()
+
         # Each panel below is a QDockWidget subclass, but they are no longer
         # docked: their title bars are hidden and dock features disabled, so
         # they behave as plain panels. They are collected here and later added
         # as pages of a QStackedWidget driven by the left sidebar (see the
         # "Sidebar navigation" block further down).
+        #
+        # Only Tournament Info and the Scoreboard are built here. Every other
+        # panel is constructed the first time its page is revealed (see the
+        # _Create*Panel factories and _EnsurePanelAt): the preview panels
+        # (Board / Top 8 / Commentary / Stats Display) each own a
+        # QWebEngineView, and the remaining five (Stream / Thumbnail / Result
+        # / Statistics / Player List) together added ~2.9s to the window-init
+        # -> core-shown gap for UI most launches never open.
         self.dockWidgets = []
+
+        # Filled by _CreateThumbnailPanel / _CreateResultPanel. Declared here
+        # because SetBattleFormat reaches for both on every format switch and
+        # has to skip whichever panel has not been revealed yet; the factory
+        # then catches that panel up to the current format as it builds.
+        self.thumbnailSetting = None
+        self.resultSetting = None
 
         tournamentInfo = AutonaTournamentInfoWidget()
         tournamentInfo.setWindowIcon(QIcon(UI.icon_path('tournament.svg')))
@@ -298,47 +386,15 @@ class Window(QMainWindow):
         # metadata and the broadcast prep are both done before the event, in
         # that order. Deliberately separate from EVENT (tournament-scoped) and
         # SCORE (match-scoped) so each panel owns one level of the hierarchy.
-        from .AutonaStreamSettingsWidget import AutonaStreamSettingsWidget
-        streamSetting = AutonaStreamSettingsWidget()
-        streamSetting.setWindowIcon(QIcon(UI.icon_path('megaphone.svg')))
-        streamSetting.setObjectName("Stream Settings")
-        streamSetting.setWindowTitle(
-            QApplication.translate("app", "Stream Settings"))
-        self.dockWidgets.append(streamSetting)
-
+        # Lazy: see _CreateStreamPanel.
+        #
         # BOARD — pick scoreboard design, tune colors, OBS setup. Placed right
-        # after EVENT (it absorbs EVENT's color pickers).
-        board = AutonaBoardWidget()
-        board.setWindowIcon(QIcon(UI.icon_path('board.svg')))
-        board.setObjectName("Board")
-        board.setWindowTitle(QApplication.translate("app", "Board"))
-        self.dockWidgets.append(board)
+        # after EVENT (it absorbs EVENT's color pickers). Lazy: see
+        # _CreateBoardPanel.
+        #
+        # THUMBNAIL / RESULT — lazy as well: see _CreateThumbnailPanel /
+        # _CreateResultPanel.
 
-        from .AutonaThumbnailSettingsWidget import AutonaThumbnailSettingsWidget
-        # Held so the battle-format switch can hide the team-name toggle in 1v1.
-        self.thumbnailSetting = thumbnailSetting = AutonaThumbnailSettingsWidget()
-        thumbnailSetting.setWindowIcon(QIcon(UI.icon_path('thumbnail.svg')))
-        thumbnailSetting.setObjectName("Thumbnail Settings")
-        thumbnailSetting.setWindowTitle(
-            QApplication.translate("app", "Thumbnail Settings"))
-        self.dockWidgets.append(thumbnailSetting)
-
-        from .AutonaResultSettingsWidget import AutonaResultSettingsWidget
-        # Held so the "対戦形式" menu can switch the result layout to the team
-        # standings variant when team mode is selected.
-        self.resultSetting = resultSetting = AutonaResultSettingsWidget()
-        resultSetting.setWindowIcon(QIcon(UI.icon_path('result.svg')))
-        resultSetting.setObjectName("Result Settings")
-        resultSetting.setWindowTitle(
-            QApplication.translate("app", "Result Settings"))
-        self.dockWidgets.append(resultSetting)
-
-        top8 = AutonaTop8Widget()
-        top8.setWindowIcon(QIcon(UI.icon_path('bracket.svg')))
-        top8.setObjectName("Top8")
-        top8.setWindowTitle(
-            QApplication.translate("app", "Top 8 Display Settings"))
-        self.dockWidgets.append(top8)
         splash.set_message(splash_msgs[0], progress=0.40)
 
         # teamBattle = AutonaTeamBattleWidget()
@@ -357,66 +413,38 @@ class Window(QMainWindow):
             QApplication.translate("app", "Scoreboard"))
         splash.set_message(splash_msgs[1], progress=0.55)
 
-        commentary = AutonaCommentaryWidget()
-        commentary.setWindowIcon(QIcon(UI.icon_path('commentary.svg')))
-        commentary.setObjectName("Commentary")
-        commentary.setWindowTitle(
-            QApplication.translate("app", "Commentary"))
-        self.dockWidgets.append(commentary)
-
-        # One-time migration prompt: the bind default changed from 0.0.0.0 to
-        # 127.0.0.1, which would silently break LAN OBS setups
-        # (docs/operations/runtime-operations.md). Ask once, persist the answer.
-        if SettingsManager.Get("general.webserver_listen_lan", None) is None:
-            allow = QMessageBox.question(
-                self,
-                QApplication.translate("portguard", "LAN access"),
-                QApplication.translate(
-                    "portguard",
-                    "Autona's web server now listens only on this PC (127.0.0.1) "
-                    "by default for security.\n\n"
-                    "If you connect from other devices on your LAN (OBS on another PC, "
-                    "smartphone remote control), enable LAN access now.\n\n"
-                    "You can change this later under Settings → General."),
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            ) == QMessageBox.StandardButton.Yes
-            SettingsManager.Set("general.webserver_listen_lan", allow)
-
-        self.webserver = WebServer(
-            parent=self, commentaryWidget=commentary)
-        self.webserver.signals.start_failed.connect(self.OnWebServerStartFailed)
-        check_webserver_port(self.webserver.port, parent=self)
-        self.webserver.start()
-        self.signals.GameChanged.connect(self.webserver.ws_program_state)
-        self.signals.GameChanged.connect(self.webserver.ws_get_characters)
+        # The web server is NOT built here (startup Step 4c). Constructing the
+        # Flask/SocketIO app and binding the port dominated the window-init ->
+        # core-shown gap, and nothing the user sees at startup depends on it,
+        # so the whole block moved to _StartWebServer() which runs off the
+        # event loop right after show(). The slot exists from here on so every
+        # consumer can null-check it.
+        self.webserver = None
+        # Set by closeEvent so a deferred _StartWebServer() cannot spawn a
+        # server thread that nothing will ever terminate.
+        self._shuttingDown = False
         splash.set_message(splash_msgs[1], progress=0.70)
 
-        # ANLYSE is no longer a top-level dock — it is built as a plain panel
-        # here and embedded as a sub-tab inside the STATS dock
-        # ("この大会の試合一覧"). The NOTES dock was removed entirely.
-        self.analysisWidget = AutonaAnalysisWidget()
-
-        self.statsWidget = AutonaStatsWidget(
-            analysisPanel=self.analysisWidget,
-        )
-        self.statsWidget.setWindowIcon(QIcon(UI.icon_path('stats.svg')))
-        self.statsWidget.setObjectName("Statistics")
-        self.statsWidget.setWindowTitle(
-            QApplication.translate("app", "Statistics"))
-        self.dockWidgets.append(self.statsWidget)
-
-        playerBrowser = AutonaPlayerBrowserWidget()
-        playerBrowser.setWindowIcon(QIcon(UI.icon_path('players.svg')))
-        playerBrowser.setObjectName("Players")
-        self.dockWidgets.append(playerBrowser)
+        # STATISTICS (with the absorbed ANLYSE sub-tab) and PLAYER LIST are
+        # lazy too: see _CreateStatsPanel / _CreatePlayerBrowserPanel.
 
         splash.set_message(splash_msgs[1], progress=0.85)
 
         # Display order of the sidebar nav items and the matching
         # QStackedWidget pages, grouped into categories. Each section is
-        # (category title or None, [(panel widget, sidebar icon file), ...]);
-        # a None title emits the items with no heading above them.
+        # (category title or None, [(page, sidebar icon file, nav label,
+        # lazy key), ...]); a None title emits the items with no heading
+        # above them.
+        #
+        # `page` is either an already-built panel or a zero-argument factory.
+        # A factory marks a LAZY page (startup Step 4b-2): the stack gets a
+        # placeholder now and the real panel is built the first time that
+        # page is revealed (_EnsurePanelAt), keeping nav index == stack page
+        # index either way. The nav label cannot be read from
+        # panel.windowTitle() before the panel exists, so every entry carries
+        # it explicitly; the strings are the same translate() calls the
+        # panels' setWindowTitle uses. `key` names a lazy page for the
+        # Ensure* accessors and the build log; it is None for eager pages.
         #
         # The categories follow the operator's timeline — configure the
         # event and the broadcast up front, run the scoreboard while the
@@ -426,38 +454,47 @@ class Window(QMainWindow):
         # panel's title (ja: スコアボード入力).
         self._navSections = [
             (QApplication.translate("app", "Setup"), [
-                (tournamentInfo, 'tournament.svg'),
-                (streamSetting, 'megaphone.svg'),
+                (tournamentInfo, 'tournament.svg',
+                 QApplication.translate("app", "Tournament Info"), None),
+                (self._CreateStreamPanel, 'megaphone.svg',
+                 QApplication.translate("app", "Stream Settings"), "stream"),
             ]),
             (QApplication.translate("app", "ScoreboardCategory"), [
-                (self.scoreboard, 'scoreboard.svg'),
-                (board, 'board.svg'),
+                (self.scoreboard, 'scoreboard.svg',
+                 QApplication.translate("app", "Scoreboard"), None),
+                (self._CreateBoardPanel, 'board.svg',
+                 QApplication.translate("app", "Board"), "board"),
             ]),
             (QApplication.translate("app", "Display"), [
-                (thumbnailSetting, 'thumbnail.svg'),
-                (resultSetting, 'result.svg'),
-                (top8, 'bracket.svg'),
-                (commentary, 'commentary.svg'),
+                (self._CreateThumbnailPanel, 'thumbnail.svg',
+                 QApplication.translate("app", "Thumbnail Settings"),
+                 "thumbnail"),
+                (self._CreateResultPanel, 'result.svg',
+                 QApplication.translate("app", "Result Settings"), "result"),
+                (self._CreateTop8Panel, 'bracket.svg',
+                 QApplication.translate("app", "Top 8 Display Settings"),
+                 "top8"),
+                (self._CreateCommentaryPanel, 'commentary.svg',
+                 QApplication.translate("app", "Commentary"), "commentary"),
+                (self._CreateStatsPreviewPanel, 'stats.svg',
+                 QApplication.translate("app", "Stats Display Settings"),
+                 "statsPreview"),
             ]),
             (QApplication.translate("app", "Data"), [
-                (self.statsWidget, 'stats.svg'),
-                (playerBrowser, 'players.svg'),
+                (self._CreateStatsPanel, 'stats.svg',
+                 QApplication.translate("app", "Statistics"), "stats"),
+                # The only panel whose title is set by the widget itself, so
+                # the label cannot be read back off the instance while the
+                # panel is still unbuilt. Spelled out here with the exact
+                # same source string AutonaPlayerBrowserWidget.__init__ uses.
+                (self._CreatePlayerBrowserPanel, 'players.svg',
+                 QApplication.translate("app", "Player List"),
+                 "playerBrowser"),
             ]),
         ]
 
         for dw in self.dockWidgets:
-            dw.setMinimumWidth(0)
-            # Call via class to avoid shadowing by instance attrs (e.g. AutonaCommentaryWidget.widget)
-            inner = QDockWidget.widget(dw)
-            if inner:
-                inner.setMinimumWidth(0)
-                inner.setSizePolicy(
-                    QSizePolicy.Ignored, inner.sizePolicy().verticalPolicy())
-            # Hide the gray title strip at the top of every dock tab.
-            # The left sidebar already identifies the active tab, so the
-            # redundant header just eats vertical space.
-            dw.setTitleBarWidget(QWidget())
-            dw.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+            self._PreparePanel(dw)
 
         self.setMinimumWidth(480)
 
@@ -496,16 +533,27 @@ class Window(QMainWindow):
         self.sidebar.collapseRequested.connect(self.HideSidebar)
         self.sidebar.navSelected.connect(self.stack.setCurrentIndex)
 
-        # Build the nav items + stack pages in display order. The nav label is
-        # the panel's (translated) windowTitle. Category headings take no nav
-        # index, so nav index still equals stack page index.
+        # Build the nav items + stack pages in display order. Category
+        # headings take no nav index, so nav index still equals stack page
+        # index — including for lazy pages, which occupy their index with an
+        # empty placeholder until they are first revealed.
+        self._lazyPanels = {}      # stack index -> (factory, key), unbuilt only
+        self._panelIndexes = {}    # lazy key -> stack index
+        self._buildingPanel = False  # suppresses currentChanged during a swap
         for categoryTitle, panels in self._navSections:
             if categoryTitle:
                 self.sidebar.addNavCategory(categoryTitle)
-            for panel, iconName in panels:
-                self.stack.addWidget(panel)
-                self.sidebar.addNavItem(
-                    QIcon(UI.icon_path(iconName)), panel.windowTitle())
+            for page, iconName, label, key in panels:
+                if callable(page):
+                    index = self.stack.addWidget(QWidget())
+                    self._lazyPanels[index] = (page, key)
+                    self._panelIndexes[key] = index
+                else:
+                    index = self.stack.addWidget(page)
+                self.sidebar.addNavItem(QIcon(UI.icon_path(iconName)), label)
+        # Connected after the pages exist so the initial addWidget() cannot
+        # trigger a build before _lazyPanels is complete.
+        self.stack.currentChanged.connect(self._OnStackPageChanged)
         self.sidebar.setCurrentIndex(0)
         self.stack.setCurrentIndex(0)
 
@@ -513,11 +561,20 @@ class Window(QMainWindow):
         # Former Edit / API Settings / Help menus, merged into one dropdown.
         helpMenu = QMenu(self)
 
-        self.settingsWindow = AutonaSettingsWindow(self)
+        # Lazy dialog slots (startup Step 4a). The settings / guide windows
+        # reachable from this menu are no longer built during startup: each
+        # one is constructed by its Ensure*Window() accessor on first open and
+        # kept afterwards, so state survives close/reopen exactly as before.
+        self._settingsWindow = None
+        self._gameAssetGuideWindow = None
+        self._apiInfoWindow = None
+        self._companionGuideWindow = None
+        self._obsGuideWindow = None
+
         action = helpMenu.addAction(
             QApplication.translate("Settings", "Settings"))
         action.setIcon(QIcon(UI.icon_path('settings.svg')))
-        action.triggered.connect(lambda: self.settingsWindow.show())
+        action.triggered.connect(lambda: self.EnsureSettingsWindow().show())
 
         action = helpMenu.addAction(
             QApplication.translate("app", "Always on top"))
@@ -527,11 +584,11 @@ class Window(QMainWindow):
         helpMenu.addSeparator()
 
         # Guidance for obtaining game assets (not bundled — see A2/copyright).
-        # The window is built lazily in UiMounted below.
-        self.gameAssetGuideWindow = AutonaGameAssetGuideWindow(self)
+        # Built on first open (see EnsureGameAssetGuideWindow).
         action = helpMenu.addAction(
             QApplication.translate("app", "Add game assets"))
-        action.triggered.connect(lambda: self.gameAssetGuideWindow.show())
+        action.triggered.connect(
+            lambda: self.EnsureGameAssetGuideWindow().show())
 
         # Program / game-asset / tournament-term language selectors moved to
         # the Settings window (Help & Settings → Settings → Language).
@@ -558,15 +615,20 @@ class Window(QMainWindow):
             lambda: AutonaTournamentDataProvider.instance.SetTournament(None))
 
         self.sidebar.tournamentButton.setMenu(startggMenu)
-        self.sidebar.tournamentButton.setText(
-            QApplication.translate("app", "Set tournament"))
-        # Lit until a tournament is loaded (tournament_changed clears it via
-        # UpdateTournamentButton below).
-        self._SetPulldownAttention(self.sidebar.tournamentButton, True)
         AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
             self.UpdateTournamentButton)
         AutonaTournamentDataProvider.instance.signals.tournament_url_update.connect(
             lambda *_: self.UpdateTournamentButton())
+        # tournament_changed is emitted from SetTournament *before* the
+        # Start.gg fetch resolves, so on its own it can never show a name that
+        # only arrives with the data — follow the data signal as well.
+        AutonaTournamentDataProvider.instance.signals.tournament_data_updated.connect(
+            self.UpdateTournamentButton)
+        # Seed from the restored state instead of hardcoding the placeholder
+        # here: UpdateTournamentButton is the single owner of both the label
+        # and the attention outline, so a cached tournament is already named
+        # on the first paint.
+        self.UpdateTournamentButton()
 
         # ── Operations: game selector (sidebar header) ──
         # Same widget pattern as the tournament / Help & Settings pulldowns: a
@@ -617,29 +679,28 @@ class Window(QMainWindow):
 
         # ── API Settings (Help & Settings submenu) ──
         # Entry point for the External Control API (/api/v1/) reference +
-        # tester window. The window itself is built lazily in UiMounted below.
+        # tester window. The window itself is built on first open (see
+        # EnsureApiInfoWindow).
         helpMenu.addSeparator()
-        self.apiInfoWindow = AutonaApiInfoWindow(self)
         apiMenu = helpMenu.addMenu(QApplication.translate("app", "API Settings"))
         action = apiMenu.addAction(
             QApplication.translate("api", "Open reference & tester"))
-        action.triggered.connect(lambda: self.apiInfoWindow.show())
+        action.triggered.connect(lambda: self.EnsureApiInfoWindow().show())
 
         # Connection guide for Bitfocus Companion (which also covers Stream
-        # Deck). Built lazily in UiMounted below.
+        # Deck). Built on first open.
         apiMenu.addSeparator()
-        self.companionGuideWindow = AutonaIntegrationGuideWindow(self)
         action = apiMenu.addAction(
             QApplication.translate("api", "Companion settings"))
-        action.triggered.connect(lambda: self.companionGuideWindow.show())
+        action.triggered.connect(
+            lambda: self.EnsureCompanionGuideWindow().show())
 
         # Connection guide for OBS Studio + Advanced Scene Switcher (ASS):
         # (B) ASS drives /api/v1/ via curl, (D) ASS watches out/ files. Built
-        # lazily in UiMounted below.
-        self.obsGuideWindow = AutonaObsGuideWindow(self)
+        # on first open.
         action = apiMenu.addAction(
             QApplication.translate("api", "OBS / Advanced Scene Switcher"))
-        action.triggered.connect(lambda: self.obsGuideWindow.show())
+        action.triggered.connect(lambda: self.EnsureObsGuideWindow().show())
 
         # ── Help (updates + community) ──
         helpMenu.addSeparator()
@@ -677,14 +738,16 @@ class Window(QMainWindow):
         self.sidebar.helpButton.setText(
             QApplication.translate("app", "Help & Settings"))
 
-        # Create all boards (1v1 + team + crew) into the SCORE dock, then apply
-        # the persisted battle format so the right board + result layout are
-        # shown on startup. The "Rules" menu switches between them at runtime.
-        AutonaScoreboardManager.instance.CreateScoreboard()
+        # Build only the board the persisted battle format shows (startup
+        # Step 4e — the other boards are built the first time they are needed)
+        # and apply that format so the board + result layout match. The
+        # "Rules" menu switches between them at runtime.
+        # The Result / Thumbnail panels used to be told the format here; they
+        # are lazy now, so each factory applies the current format itself
+        # (startup Step 4b-3).
         battleFormat = self._resolveBattleFormat()
+        AutonaScoreboardManager.instance.CreateScoreboard(battleFormat)
         AutonaScoreboardManager.instance.SetBattleFormat(battleFormat)
-        self.resultSetting.SetBattleFormat(battleFormat)
-        self.thumbnailSetting.SetBattleFormat(battleFormat)
 
         self.ReloadGames()
 
@@ -703,31 +766,54 @@ class Window(QMainWindow):
                 f"sidebarCollapsed_v{self.STATE_VERSION}", False, type=bool):
             self.HideSidebar()
 
+        # currentChanged only fires when the index actually moves, so a
+        # restore that lands back on the page the stack already shows would
+        # leave a lazy panel unbuilt and the page blank. Build whatever page
+        # ends up current, restored or not.
+        self._EnsurePanelAt(self.stack.currentIndex())
+
         splash.set_message(splash_msgs[2], progress=1.0)
         splash.finish(self)
         self.show()
+        log_startup_phase("core-shown")
 
         # Cover the main window with a spinner until Qt finishes its
         # first-pass layout + paint, so the user doesn't see half-drawn
-        # widgets jump into place. The overlay dismisses itself after a
-        # short delay — long enough for one or two event-loop passes.
+        # widgets jump into place. Dismissal is driven by the event queue
+        # draining (the first pass being done), not by a fixed 1.1 s delay
+        # that was pure guesswork in both directions.
         self._loading_overlay = LoadingOverlay(self)
         self._loading_overlay.start()
-        QTimer.singleShot(1100, self._loading_overlay.finish)
+        self._loading_overlay.finish_when_ready()
+
+        # Start the web server only once the overlay above has dismissed
+        # itself (Step 4c). Building the Flask/SocketIO app runs on the GUI
+        # thread and blocks it for a few seconds, so the order matters for
+        # perceived responsiveness: window painted -> overlay gone -> the app
+        # is briefly interactive -> the server is built. Starting it any
+        # earlier would only move the freeze behind a stalled spinner, which
+        # improves the core-shown number without improving the experience.
+        #
+        # call_when_finished() dispatches through a zero-delay timer, so this
+        # runs from the event loop and not from inside a Qt signal handler:
+        # the LAN opt-in and port-conflict QMessageBox exec() calls made below
+        # are ordinary top-level modals and do not violate the
+        # no-nested-modal / no-reentrant-dispatch rule (agent-pitfalls #9).
+        self._loading_overlay.call_when_finished(self._StartWebServer)
 
         # Prevent tab labels from being elided ("…") — show full text so the
         # tab bar uses horizontal scrolling if it overflows.
-        from qtpy.QtWidgets import QTabBar
-        for bar in self.findChildren(QTabBar):
-            bar.setElideMode(Qt.TextElideMode.ElideNone)
-            bar.setUsesScrollButtons(True)
+        self._ApplyTabBarPolicy(self)
 
-        AutonaCountryHelper.LoadCountries()
-        self.settingsWindow.UiMounted()
-        self.apiInfoWindow.UiMounted()
-        self.companionGuideWindow.UiMounted()
-        self.obsGuideWindow.UiMounted()
-        self.gameAssetGuideWindow.UiMounted()
+        # NOTE: countries are loaded once, early in __init__ (see
+        # AutonaCountryHelper.instance.init() above). The second, identical
+        # LoadCountries() that used to sit here re-parsed the ~2 MB JSON and
+        # rebuilt the 250-row countryModel from scratch after every widget had
+        # already installed the first model — pure duplicate work, and a model
+        # swap that agent-pitfalls #13 warns about. Removed.
+        # NOTE: the settings / guide dialogs used to be constructed above and
+        # UiMounted() here. They are built on first open instead (Step 4a) —
+        # see the Ensure*Window() accessors.
         # self.layoutOptions.UiMounted()
         AutonaTournamentDataProvider.instance.UiMounted()
         AutonaGameAssetManager.instance.UiMounted()
@@ -738,9 +824,14 @@ class Window(QMainWindow):
         if getattr(sys, "frozen", False):
             AutonaUpdater.instance.CheckForUpdates(silent=True)
         AutonaHotkeys.instance.UiMounted(self)
-        AutonaPlayerDB.signals.db_updated.connect(
-            self.webserver.ws_playerdb
-        )
+        # Ctrl+Shift+P used to be connected inside AutonaTop8Widget.__init__,
+        # which made the hotkey silently dead until that panel existed. The
+        # panel is lazy now (Step 4b-2), so the connection lives here — the
+        # single owner — and builds the panel on demand.
+        AutonaHotkeys.signals.refresh_phase_group.connect(
+            self.RefreshTop8PhaseGroup)
+        # NOTE: AutonaPlayerDB.signals.db_updated -> webserver.ws_playerdb is
+        # wired in _StartWebServer(); there is no server to push to yet here.
         AutonaPlayerDB.LoadDB()
 
         # Footer status bar — surfaces the current long-running task
@@ -778,7 +869,417 @@ class Window(QMainWindow):
         AutonaStatusManager.signals.changed.connect(
             self._on_status_changed)
 
-        StateManager.ReleaseSaving()
+    # ── Web server, started after the window is shown (startup Step 4c) ──
+
+    def _StartWebServer(self):
+        """Build and start the Flask/SocketIO server, off the startup path.
+
+        Registered with LoadingOverlay.call_when_finished() at the end of
+        __init__, so it runs from the event loop once the window is visible
+        AND the loading overlay is gone. Everything below is the former
+        __init__ block, in the same order.
+        """
+        if self._shuttingDown or self.webserver is not None:
+            return
+
+        # One-time migration prompt: the bind default changed from 0.0.0.0 to
+        # 127.0.0.1, which would silently break LAN OBS setups
+        # (docs/operations/runtime-operations.md). Ask once, persist the answer.
+        if SettingsManager.Get("general.webserver_listen_lan", None) is None:
+            allow = QMessageBox.question(
+                self,
+                QApplication.translate("portguard", "LAN access"),
+                QApplication.translate(
+                    "portguard",
+                    "Autona's web server now listens only on this PC (127.0.0.1) "
+                    "by default for security.\n\n"
+                    "If you connect from other devices on your LAN (OBS on another PC, "
+                    "smartphone remote control), enable LAN access now.\n\n"
+                    "You can change this later under Settings → General."),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            ) == QMessageBox.StandardButton.Yes
+            SettingsManager.Set("general.webserver_listen_lan", allow)
+            # The dialog above ran a nested event loop; the window may have
+            # been closed while it was up.
+            if self._shuttingDown:
+                return
+
+        self.webserver = WebServer(parent=self)
+        self.webserver.signals.start_failed.connect(self.OnWebServerStartFailed)
+        # Probe the very interface the server will bind (LAN vs loopback).
+        check_webserver_port(
+            self.webserver.port, parent=self, host=self.webserver.host_name)
+        self.webserver.start()
+        self.signals.GameChanged.connect(self.webserver.ws_program_state)
+        self.signals.GameChanged.connect(self.webserver.ws_get_characters)
+        # Moved here together with the server: at its old place in __init__
+        # there is no webserver instance to bind to. Nothing is lost by
+        # connecting after LoadDB() — clients pull the player DB on demand
+        # (GET /playerdb, socket 'playerdb') and none can be connected before
+        # the server is listening anyway.
+        AutonaPlayerDB.signals.db_updated.connect(self.webserver.ws_playerdb)
+
+        # Release the overlay previews (Board / Commentary / Top 8 / Stats),
+        # which fetch their HTML from this server: a panel restored as the
+        # startup page issues its first load() before this point.
+        MarkWebServerReady()
+
+        log_startup_phase("webserver-ready")
+
+    # ── Panel state seeded before the panels (startup Step 4b-2) ─────────
+
+    def _SeedPanelState(self):
+        """Write the panel state the overlays / Web UI read from launch.
+
+        These seeds used to run inside the Board / Top 8 / Commentary /
+        Stream / Player List constructors. Those panels are built on first
+        reveal now, so the seeds moved here: they have to run at every launch
+        whether or not the operator ever opens the panel (an OBS overlay
+        reads the theme colors and the commentary slots straight away).
+        Called from __init__ before any panel is built, and necessarily after
+        StateManager.LoadState() — which ran inside bootstrap_core(), i.e.
+        while this module was imported — so what is normalised here is the
+        restored program_state.json, not an empty state.
+        """
+        # Local imports: both modules are only needed for the constants /
+        # helper below and for their own lazy factories, so nothing here
+        # justifies pulling them into the module-level import block.
+        from .AutonaStreamSettingsWidget import (
+            AutonaStreamSettingsWidget, ORG_ICON_PATH, ORG_THUMB_PATH)
+        from .AutonaPlayerBrowserWidget import _EDITOR_PATH_BASE
+
+        with StateManager.SaveBlock():
+            # Moved from AutonaBoardWidget.__init__: overlays receive
+            # theme/accent before the user touches the color pickers. These
+            # are the tournament-wide colors (EVENT tab); the per-feature
+            # overrides are expanded by SeedColorState() below.
+            StateManager.Set(
+                "tournamentInfo.themeColor",
+                SettingsManager.Get("general.theme_color", DEFAULT_THEME_COLOR))
+            StateManager.Set(
+                "tournamentInfo.accentColor",
+                SettingsManager.Get(
+                    "general.accent_color", DEFAULT_ACCENT_COLOR))
+
+            # colors.{feature}.* — only the features the operator explicitly
+            # set. An unset feature stays absent from the state so the layout
+            # JS falls back to the tournament colors above.
+            SeedColorState()
+
+            # Moved from AutonaTop8Widget.__init__. The legacy bracket
+            # feature is gone; LoadState() restores its keys from
+            # out/program_state.json, so purge them once here.
+            StateManager.Unset("bracket")
+            state = StateManager.Get("top8")
+            if not isinstance(state, dict) or not state.get("matches"):
+                StateManager.Set("top8", top8.DefaultState())
+            else:
+                # Normalise a restored state: slots are always derived.
+                StateManager.Set(
+                    "top8.matches",
+                    top8.Recompute(state.get("matches") or {}))
+                players = state.get("players") or {}
+                for slot in top8.PLAYER_SLOTS:
+                    if slot not in players:
+                        StateManager.Set(
+                            f"top8.players.{slot}", top8.DefaultPlayer())
+
+            # Moved from AutonaCommentaryWidget.__init__: normalises
+            # whatever LoadState restored, including the legacy pre-rework
+            # schema.
+            StateManager.Set(
+                "commentary",
+                comms.NormalizeState(StateManager.Get("commentary")))
+
+            # Moved from AutonaStreamSettingsWidget.__init__. The org icon /
+            # thumbnail are served out of ./layout/ and OBS overlays
+            # cache-bust them with these mtimes, so the versions have to be
+            # current from launch whether or not the panel is ever opened.
+            # The panel republishes them itself after a load / reset.
+            AutonaStreamSettingsWidget._publishAssetVersion(
+                "stream.orgIconVersion", ORG_ICON_PATH)
+            AutonaStreamSettingsWidget._publishAssetVersion(
+                "stream.orgThumbVersion", ORG_THUMB_PATH)
+
+            # Also from AutonaStreamSettingsWidget.__init__: residual keys
+            # from the pre-配信設定 layouts, where the stream title and the
+            # destination lived on the EVENT tab. Nothing reads them; drop
+            # them so an upgraded program_state.json stops broadcasting them.
+            # Guarded because Unset queues a changed key unconditionally and
+            # a fresh install would otherwise fire two no-op save cycles.
+            for stale in ("tournamentInfo.streamTitleEdit",
+                          "tournamentInfo.streamUrl"):
+                if StateManager.Get(stale, None) is not None:
+                    StateManager.Unset(stale)
+
+            # Moved from AutonaPlayerBrowserWidget.__init__: state left
+            # behind by removed features / crashed sessions. player_list.*
+            # was written by the retired PLAYERS roster editor and
+            # player_editor.* by the editor dialog, and LoadState would
+            # otherwise restore both forever.
+            StateManager.Unset("player_list")
+            StateManager.Unset(_EDITOR_PATH_BASE)
+
+    # ── Lazy sidebar panels (startup Step 4b-2 / 4b-3) ───────────────────
+    # Every panel below is built the first time its page is revealed and
+    # kept afterwards, so input values and selections survive switching
+    # pages exactly as before. The first four each own a QWebEngineView; the
+    # five added by Step 4b-3 are plain but heavy (large .ui files, editable
+    # combos with completers), and together they filled the window-init ->
+    # core-shown gap. Everything the panels used to seed into StateManager at
+    # construction time now runs from _SeedPanelState() instead.
+
+    def _CreateBoardPanel(self):
+        board = AutonaBoardWidget()
+        board.setWindowIcon(QIcon(UI.icon_path('board.svg')))
+        board.setObjectName("Board")
+        board.setWindowTitle(QApplication.translate("app", "Board"))
+        return board
+
+    def _CreateTop8Panel(self):
+        top8Panel = AutonaTop8Widget()
+        top8Panel.setWindowIcon(QIcon(UI.icon_path('bracket.svg')))
+        top8Panel.setObjectName("Top8")
+        top8Panel.setWindowTitle(
+            QApplication.translate("app", "Top 8 Display Settings"))
+        return top8Panel
+
+    def _CreateCommentaryPanel(self):
+        commentary = AutonaCommentaryWidget()
+        commentary.setWindowIcon(QIcon(UI.icon_path('commentary.svg')))
+        commentary.setObjectName("Commentary")
+        commentary.setWindowTitle(QApplication.translate("app", "Commentary"))
+        return commentary
+
+    def _CreateStatsPreviewPanel(self):
+        # Preview + OBS URL for the statistics overlays (layout/upset_factor,
+        # h2h_record, recent_sets, last_sets, tournament_history).
+        statsPreview = AutonaStatsPreviewWidget()
+        statsPreview.setWindowIcon(QIcon(UI.icon_path('stats.svg')))
+        statsPreview.setObjectName("statsPreviewSettings")
+        statsPreview.setWindowTitle(
+            QApplication.translate("app", "Stats Display Settings"))
+        return statsPreview
+
+    def _CreateStreamPanel(self):
+        from .AutonaStreamSettingsWidget import AutonaStreamSettingsWidget
+        streamSetting = AutonaStreamSettingsWidget()
+        streamSetting.setWindowIcon(QIcon(UI.icon_path('megaphone.svg')))
+        streamSetting.setObjectName("Stream Settings")
+        streamSetting.setWindowTitle(
+            QApplication.translate("app", "Stream Settings"))
+        return streamSetting
+
+    def _CreateThumbnailPanel(self):
+        from .AutonaThumbnailSettingsWidget import AutonaThumbnailSettingsWidget
+        # Held so the battle-format switch can hide the team-name toggle in 1v1.
+        self.thumbnailSetting = thumbnailSetting = AutonaThumbnailSettingsWidget()
+        thumbnailSetting.setWindowIcon(QIcon(UI.icon_path('thumbnail.svg')))
+        thumbnailSetting.setObjectName("Thumbnail Settings")
+        thumbnailSetting.setWindowTitle(
+            QApplication.translate("app", "Thumbnail Settings"))
+        # Catch up on the format switches that happened while this panel did
+        # not exist — SetBattleFormat skips an unbuilt panel. Cheap here: the
+        # thumbnail's SetBattleFormat only toggles the team-name checkbox's
+        # visibility, it does not touch the preview.
+        thumbnailSetting.SetBattleFormat(self._resolveBattleFormat())
+        return thumbnailSetting
+
+    def _CreateResultPanel(self):
+        from .AutonaResultSettingsWidget import AutonaResultSettingsWidget
+        # Held so the "対戦形式" menu can switch the result layout to the team
+        # standings variant when team mode is selected.
+        self.resultSetting = resultSetting = AutonaResultSettingsWidget()
+        resultSetting.setWindowIcon(QIcon(UI.icon_path('result.svg')))
+        resultSetting.setObjectName("Result Settings")
+        resultSetting.setWindowTitle(
+            QApplication.translate("app", "Result Settings"))
+        # Same catch-up as the thumbnail panel, but the order matters here.
+        # SetBattleFormat moves layoutCombo, which fires _onLayoutChanged ->
+        # GeneratePreview(True). Doing it now — inside the factory, i.e.
+        # before _EnsurePanelAt puts the panel on the stack and Qt shows it —
+        # means the panel's renderer is still unbuilt (showEvent builds it),
+        # so that render call returns immediately. The single real render is
+        # then the one showEvent schedules, already on the right layout.
+        # Applying the format after the reveal would instead render the
+        # stale layout first and re-render straight after.
+        resultSetting.SetBattleFormat(self._resolveBattleFormat())
+        return resultSetting
+
+    def _CreateStatsPanel(self):
+        # ANLYSE is not a top-level panel — it is built here and embedded as
+        # a sub-tab inside the STATS panel ("この大会の試合一覧"). The NOTES
+        # dock was removed entirely. Neither widget is referenced outside
+        # this factory, so both stay local to it.
+        analysisWidget = AutonaAnalysisWidget()
+        statsWidget = AutonaStatsWidget(analysisPanel=analysisWidget)
+        statsWidget.setWindowIcon(QIcon(UI.icon_path('stats.svg')))
+        statsWidget.setObjectName("Statistics")
+        statsWidget.setWindowTitle(
+            QApplication.translate("app", "Statistics"))
+        return statsWidget
+
+    def _CreatePlayerBrowserPanel(self):
+        # Sets its own windowTitle (translate("app", "Player List")); the nav
+        # label in _navSections repeats that source string because the panel
+        # does not exist when the sidebar is built.
+        playerBrowser = AutonaPlayerBrowserWidget()
+        playerBrowser.setWindowIcon(QIcon(UI.icon_path('players.svg')))
+        playerBrowser.setObjectName("Players")
+        return playerBrowser
+
+    def _PreparePanel(self, dw):
+        """Panel post-processing that used to be the loop over dockWidgets.
+
+        Applied to the eager panels in one pass from __init__ and to a lazy
+        panel right after its factory returns.
+        """
+        dw.setMinimumWidth(0)
+        # Call via class to avoid shadowing by instance attrs (e.g. AutonaCommentaryWidget.widget)
+        inner = QDockWidget.widget(dw)
+        if inner:
+            inner.setMinimumWidth(0)
+            inner.setSizePolicy(
+                QSizePolicy.Ignored, inner.sizePolicy().verticalPolicy())
+        # Hide the gray title strip at the top of every dock tab.
+        # The left sidebar already identifies the active tab, so the
+        # redundant header just eats vertical space.
+        dw.setTitleBarWidget(QWidget())
+        dw.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+
+    def _OnStackPageChanged(self, index):
+        # Covers both a sidebar click (navSelected -> setCurrentIndex) and a
+        # programmatic switch (the QSettings tab restore at the end of
+        # __init__). Ignored while a page swap of our own is in flight — see
+        # _EnsurePanelAt.
+        if self._buildingPanel:
+            return
+        self._EnsurePanelAt(index)
+
+    def _EnsurePanelAt(self, index):
+        """Return the panel on stack page `index`, building it if lazy.
+
+        The placeholder added at startup is replaced in place, so nav index
+        == stack page index still holds and no other page moves.
+        """
+        entry = self._lazyPanels.get(index)
+        if entry is None:
+            # Already built, or never lazy to begin with.
+            return self.stack.widget(index)
+        factory, key = entry
+        # Drop the factory first: a re-entrant call (widget construction can
+        # dispatch events) must not start a second build, and a factory that
+        # raises must not be retried on every page switch.
+        del self._lazyPanels[index]
+
+        panel = None
+        self._buildingPanel = True
+        try:
+            panel = factory()
+            self._PreparePanel(panel)
+            # removeWidget() on the visible page makes Qt pick another one and
+            # emit currentChanged; _buildingPanel keeps that from building a
+            # panel the user never asked for. insertWidget() at the same index
+            # restores the original page order.
+            placeholder = self.stack.widget(index)
+            wasCurrent = self.stack.currentIndex() == index
+            self.stack.removeWidget(placeholder)
+            placeholder.deleteLater()
+            self.stack.insertWidget(index, panel)
+            if wasCurrent:
+                self.stack.setCurrentIndex(index)
+            self.dockWidgets.append(panel)
+            # Startup applies the tab-bar policy to every child that exists at
+            # that point; panels born later need the same treatment.
+            self._ApplyTabBarPolicy(panel)
+            logger.debug(f"Built lazy panel '{key}' (page {index})")
+        except Exception:
+            logger.opt(exception=True).error(
+                f"Failed to build lazy panel '{key}' (page {index})")
+            return None
+        finally:
+            self._buildingPanel = False
+
+        # A page switch that arrived while the swap was in flight was
+        # ignored above; honour it now.
+        current = self.stack.currentIndex()
+        if current != index and current in self._lazyPanels:
+            self._EnsurePanelAt(current)
+        return panel
+
+    def EnsureTop8Panel(self):
+        """Build the Top 8 panel if it has not been revealed yet.
+
+        Entry point for the consumers that drive the panel without the user
+        having opened it: the Ctrl+Shift+P hotkey and /bracket:refresh. The
+        class instance is what is returned (None if the build failed), so a
+        caller never gets handed the placeholder widget.
+        """
+        self._EnsurePanelAt(self._panelIndexes["top8"])
+        return AutonaTop8Widget.instance
+
+    def EnsureCommentaryPanel(self):
+        """Build the Commentary panel if it has not been revealed yet.
+
+        Entry point for the external control API (/update-commentary-N,
+        /load-commentator-from-tag-N), which drives the panel's signals.
+        """
+        self._EnsurePanelAt(self._panelIndexes["commentary"])
+        return AutonaCommentaryWidget.instance
+
+    def RefreshTop8PhaseGroup(self):
+        """Ctrl+Shift+P: reload the Top 8 from Start.gg, building it first."""
+        panel = self.EnsureTop8Panel()
+        if panel is not None:
+            panel.RefreshPhaseGroup()
+
+    # ── Lazy settings / guide dialogs (startup Step 4a) ──────────────────
+    # Each of these five dialogs is only reachable from a menu entry, so
+    # building them during startup charged every launch for UI nobody had
+    # asked for. They are constructed on first access and reused from then
+    # on, which keeps the previous behaviour of a single long-lived instance
+    # (state survives close/reopen).
+
+    def _EnsureLazyWindow(self, attr, factory):
+        """Build the dialog held in `attr` on first access; return it.
+
+        The slot is filled *before* UiMounted() runs so that a re-entrant
+        call during the build (nested event dispatch) reuses the same object
+        instead of constructing a second dialog (agent-pitfalls #9).
+        """
+        window = getattr(self, attr)
+        if window is None:
+            window = factory(self)
+            setattr(self, attr, window)
+            window.UiMounted()
+            # Startup applies the tab-bar policy to every child that exists
+            # at that point; dialogs born later need the same treatment.
+            self._ApplyTabBarPolicy(window)
+        return window
+
+    def EnsureSettingsWindow(self):
+        return self._EnsureLazyWindow("_settingsWindow", AutonaSettingsWindow)
+
+    def EnsureGameAssetGuideWindow(self):
+        return self._EnsureLazyWindow(
+            "_gameAssetGuideWindow", AutonaGameAssetGuideWindow)
+
+    def EnsureApiInfoWindow(self):
+        return self._EnsureLazyWindow("_apiInfoWindow", AutonaApiInfoWindow)
+
+    def EnsureCompanionGuideWindow(self):
+        return self._EnsureLazyWindow(
+            "_companionGuideWindow", AutonaIntegrationGuideWindow)
+
+    def EnsureObsGuideWindow(self):
+        return self._EnsureLazyWindow("_obsGuideWindow", AutonaObsGuideWindow)
+
+    def _ApplyTabBarPolicy(self, root):
+        """Show full tab labels ("…" elision off) and scroll on overflow."""
+        for bar in root.findChildren(QTabBar):
+            bar.setElideMode(Qt.TextElideMode.ElideNone)
+            bar.setUsesScrollButtons(True)
 
     @Slot(str, int, int)
     def _on_status_changed(self, message: str, progress: int, total: int):
@@ -886,24 +1387,46 @@ class Window(QMainWindow):
         self._webserverErrorBox = box
 
     def closeEvent(self, event):
+        # Shutdown must never depend on housekeeping succeeding. Every step
+        # below is isolated so that one failure cannot abort the rest of the
+        # sequence: an uncaught exception here used to leave the process alive
+        # (e.g. shutil.rmtree hitting a locked tmp file with WinError 32),
+        # because the later teardown never ran.
         logger.info("Shutting down...")
-        self.qtSettings.setValue("geometry", self.saveGeometry())
-        self.qtSettings.setValue(
-            f"sidebarIndex_v{self.STATE_VERSION}", self.sidebar.currentIndex())
-        self.qtSettings.setValue(
-            f"sidebarCollapsed_v{self.STATE_VERSION}", self.sidebar.isHidden())
+        # Blocks a still-pending _StartWebServer() (Step 4c defers it to the
+        # event loop) from spawning a thread after the teardown below has
+        # already run, which would leave the process alive.
+        self._shuttingDown = True
 
-        tmpDir = AutonaResolve("tmp")
-        if os.path.isdir(tmpDir):
-            shutil.rmtree(tmpDir)
+        # --- Best-effort housekeeping ------------------------------------
+        try:
+            self.qtSettings.setValue("geometry", self.saveGeometry())
+            self.qtSettings.setValue(
+                f"sidebarIndex_v{self.STATE_VERSION}",
+                self.sidebar.currentIndex())
+            self.qtSettings.setValue(
+                f"sidebarCollapsed_v{self.STATE_VERSION}",
+                self.sidebar.isHidden())
+        except Exception:
+            logger.opt(exception=True).error("Error saving window settings on shutdown")
+
+        try:
+            tmpDir = AutonaResolve("tmp")
+            if os.path.isdir(tmpDir):
+                shutil.rmtree(tmpDir)
+        except Exception:
+            # Files under tmp/ can still be locked by the OS or by another
+            # process; leaving them behind is harmless, blocking exit is not.
+            logger.opt(exception=True).error("Error removing tmp directory on shutdown")
 
         try:
             crashlog.close()
             if crashpath.stat().st_size == 0:
                 crashpath.unlink()
-        except:
+        except Exception:
             pass
 
+        # --- Mandatory teardown ------------------------------------------
         # For whatever reason, the webserver thread won't respond to the quit() signal nicely.
         # This is usually unsafe, but there's no easy way to terminate the flask server,
         # so we hard-kill its thread as we're shutting down to prevent exit-crashes.
@@ -915,17 +1438,35 @@ class Window(QMainWindow):
             if web_socket_fd:
                 sock = socket.socket(fileno=int(web_socket_fd))
                 sock.close()
-        except Exception as e:
-            logger.warning("Error closing web socket on shutdown", exc_info=True)
+        except Exception:
+            logger.opt(exception=True).warning("Error closing web socket on shutdown")
 
-        self.webserver.terminate()
-        self.webserver.wait(10000)  # 10 seconds grace period.
+        try:
+            # None when the window is closed before the deferred start ran.
+            if self.webserver is not None:
+                self.webserver.terminate()
+                self.webserver.wait(10000)  # 10 seconds grace period.
+        except Exception:
+            logger.opt(exception=True).error("Error terminating web server on shutdown")
 
-        for window in QApplication.allWindows():
-            if window != self:
-                window.close()
+        try:
+            # allWindows() returns QWindow, not QWidget: comparing against
+            # `self` was always true. Compare with our own window handle.
+            for window in QApplication.allWindows():
+                if window is not self.windowHandle():
+                    window.close()
+        except Exception:
+            logger.opt(exception=True).error("Error closing auxiliary windows on shutdown")
 
         super().closeEvent(event)
+
+        # Quit explicitly instead of relying on quitOnLastWindowClosed:
+        # off-screen helper widgets (thumbnail/result renderers) can keep the
+        # last-window heuristic from ever firing, which leaves a zombie
+        # process behind. Exiting must not depend on the cleanup above either.
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
 
     def ReloadGames(self):
         logger.info("Reload games")
@@ -951,7 +1492,7 @@ class Window(QMainWindow):
             self.gameMenu.addSeparator()
             self.gameMenu.addAction(
                 QApplication.translate("app", "Add game assets")).triggered.connect(
-                lambda: self.gameAssetGuideWindow.show())
+                lambda: self.EnsureGameAssetGuideWindow().show())
             self.SetGame()
 
     def ToggleAlwaysOnTop(self, checked):

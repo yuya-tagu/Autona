@@ -115,6 +115,8 @@ class AutonaHotkeys(QObject):
         self._registered_ids = {}  # hotkey_id -> action_key
         self._next_id = 1
         self._filter = None
+        # True while a hotkey capture field (QKeySequenceEdit) has focus.
+        self._capture_suspended = False
         self.LoadUserHotkeys()
 
     def UiMounted(self, parent):
@@ -125,8 +127,69 @@ class AutonaHotkeys(QObject):
         self.LoadUserHotkeys()
         self.SetupHotkeys()
 
+    def SuspendCapture(self):
+        """Release the OS hotkey registrations while the user records a key.
+
+        RegisterHotKey grabs the combination system-wide, so pressing an
+        already-assigned shortcut inside a QKeySequenceEdit fires the action
+        instead of reaching the widget. Callers pair this with
+        ResumeCapture(); it is idempotent so nested/duplicate focus events
+        are harmless.
+        """
+        if self._capture_suspended:
+            return
+        self._capture_suspended = True
+        self._unregisterAll()
+        logger.debug("Global hotkeys suspended for capture")
+
+    def ResumeCapture(self):
+        """Re-register the hotkeys after a capture field loses focus.
+
+        Registration always uses the current loaded_keys, so a shortcut that
+        was edited (and reloaded) while suspended takes effect here.
+        Idempotent: resuming when not suspended does nothing.
+        """
+        if not self._capture_suspended:
+            return
+        self._capture_suspended = False
+        self.SetupHotkeys()
+
+    def _hotkeysEnabled(self):
+        return SettingsManager.Get("hotkeys.hotkeys_enabled", True) != False
+
+    def ApplyEnabledSetting(self):
+        """Sync the OS registrations with hotkeys.hotkeys_enabled.
+
+        Called when the settings checkbox toggles. Enabling re-registers via
+        SetupHotkeys() (still a no-op while a capture field holds focus --
+        ResumeCapture() registers later, and SetupHotkeys() re-checks the
+        enabled flag itself). Disabling drops every Win32 grab immediately.
+        """
+        if self._hotkeysEnabled():
+            self.SetupHotkeys()
+        else:
+            self._unregisterAll()
+
     def SetupHotkeys(self):
         self._unregisterAll()
+
+        # ReloadHotkeys() runs on every successful save, i.e. while the
+        # capture field still has focus. Keep the freshly loaded keys but do
+        # not hand them back to the OS yet -- ResumeCapture() registers them
+        # once the field is done capturing.
+        if self._capture_suspended:
+            logger.debug("Hotkey capture suspended; skipping registration")
+            return
+
+        # Disabling hotkeys must release the OS-level grab, not just ignore
+        # the event: RegisterHotKey swallows the combination system-wide, so
+        # keeping it registered would deny Ctrl+Shift+1 etc. to every other
+        # app. Every registration path (ReloadHotkeys / ResumeCapture /
+        # UiMounted) funnels through here, and _unregisterAll() already ran
+        # above, so returning now leaves nothing registered.
+        if not self._hotkeysEnabled():
+            logger.info("Hotkeys disabled in settings; skipping registration")
+            return
 
         if platform.system() != "Windows":
             logger.warning("Global hotkeys only supported on Windows")
@@ -181,6 +244,3 @@ class AutonaHotkeys(QObject):
         self.loaded_keys.update(
             (k, v) for k, v in user_keys.items() if k in self.keys)
         logger.info("User hotkeys loaded")
-
-
-AutonaHotkeys.instance = AutonaHotkeys()

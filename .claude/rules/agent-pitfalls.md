@@ -7,22 +7,25 @@ globs:
 
 # エージェント向け地雷回避ルール
 
-## 1. src/ の import は全起動を引き起こす
+## 1. src/ の import は副作用ゼロ（2026-07-29 Step 3 完了により更新）
 
-`from src.XXX import ...` や `from .XXX import ...` は `src/__init__.py` → `Autona.py` → QApplication + 全シングルトン生成を連鎖的にトリガーする。
+**旧ルール（`src` の import が QApplication + 全シングルトン生成を引く／テストは `direct_import()` を使う）は解消済み。** `src/__init__.py` は docstring だけの空 init になり、`direct_import()` は削除した。
 
-- テストで `src` パッケージ経由の import を使わない
-- テストでは `tests/conftest.py` の `direct_import()` を使う
-- `from . import ui_constants` は特に危険（3ファイルで使用中）
+新しい原則:
 
-## 2. シングルトン初期化順序を壊さない
+- **`src.*` の import は副作用ゼロ**（QApplication 生成なし・シングルトン生成なし・ファイル読み書きなし）。テストからは `from src.XXX import YYY` の**通常 import でよい**
+- **唯一の例外は `src/Autona.py`**（アプリ組み立てモジュール）。この import 自体が起動シーケンス（logger 構成 → `bootstrap_core()` → Window 定義）なので、テストや調査スクリプトから import しない。`main.py` の `from src import Autona` だけがこれを行う
+- 新しいモジュールを足すとき、**module level で「作る／読む／書く」をしない**。生成は `Initialize()` / `__init__` / `bootstrap.py` 側へ置く
+- この原則は `tests/test_import_side_effects.py` が subprocess で pin している（`import src` 自体の inert 検査＋主要モジュール群の副作用検査）。ここが落ちたら実装側を直す。テスト側を緩めない
 
-`Autona.py` の import 順序がシングルトンの生成順序を決定する。
+## 2. シングルトン初期化順序の正本は `src/bootstrap.py`（2026-07-29 Step 3 完了により更新）
 
-**絶対に守る**: `AutonaGameAssetManager` の import は `AutonaTournamentDataProvider` より前。
-理由: AutonaTournamentDataProvider.__init__ が `AutonaGameAssetManager.instance.signals` に connect する。
+旧来は `Autona.py` の **import 順序**が生成順序を決めていたが、現在は `src/bootstrap.py` の `bootstrap_core()` に**明示的な生成順として集約**されている。import 順序は順序を決めない。
 
-詳細: `.claude/architecture/singleton-init-order.md`
+- 順序を変えるときは `bootstrap.py` の `ORDER CONSTRAINT:` コメントを必ず読む。制約の理由（誰が誰の `instance.signals` に connect するか、QApplication 必須か、`StateManager.Initialize()` 後でなければならないか等）がその場に書いてある
+- **絶対に守る**: `AutonaGameAssetManager` の生成は `AutonaTournamentDataProvider` より前（`AutonaTournamentDataProvider.__init__` が `AutonaGameAssetManager.instance.signals` に connect する）
+- 新しいシングルトンは `bootstrap_core()` に追加する。モジュール末尾で `instance = XXX()` を書かない（#1 に違反する）
+- 旧構造の記録: `.claude/architecture/phase-a-b/singleton-init-order.md`（歴史資料。現状は bootstrap.py が正）
 
 ## 3. StateManager のキーパスはドット区切り文字列
 
@@ -140,3 +143,20 @@ access violation を起こす（2026-07-11 起動クラッシュ:
   `setSourceModel` / `QCompleter.setModel` は keepReference を持ち、単純な
   差し替え単体は安全。ただし編集可能コンボ（オートコンプリータ／ポップアップ
   付き）やシグナル連鎖の深部での差し替えは保証外のため、退避パターンを常用する
+
+## 14. QLayoutItem 系は PySide6 の追跡外 — 破棄前に `Shiboken.invalidate()` する（2026-08-03 フルスイートAV根治で確定）
+
+`QLayoutItem` / `QWidgetItem` / `QSpacerItem` は QObject ではない。C++ 側で破棄されても PySide6 は検知できず、Python wrapper が Shiboken のバインディングマネージャに valid のまま残る。
+
+- `QLayout.itemAt()` / `spacerItem()` が返す wrapper はレイアウトの Shiboken 子として保持される（参照を捨てても同じ wrapper が返る）。「一時変数だから大丈夫」は成り立たない
+- 残った登録は地雷: 同アドレスに次の C++ オブジェクトが確保されると、そのコンストラクタ内で Qt が仮想 `metaObject()` を呼ぶ（Shiboken 登録前）ため古い wrapper が引き当てられ、`PySide::SignalManager::retrieveMetaObject` が NULL 参照して**無関係な場所で access violation**（実例: `QCompleter` 構築中。クラッシュ箇所は実行ごとに移動する）
+- item が破棄される操作: ウィジェットの re-home（別レイアウトへ addWidget）/ レイアウト破棄 / `QLayout.removeWidget()`（内部で `delete takeAt(i)`）
+- 対処: 破棄の前に対象レイアウト配下の item wrapper を `Shiboken.invalidate(item)` で無効化する。実装例は `AutonaScoreboardPlayerWidget._releaseLayoutItemWrappers`。サブレイアウトは QObject なので invalidate せず再帰
+- 禁止パターン: `takeAt(i)` → `deleteLater()`（takeAt/removeItem は所有権を Python へ移し、deleteLater はそれを Qt に戻す → Qt が Shiboken 無断で解放）。`removeItem()` だけにして PySide に解放させる
+- サブレイアウト探索は `itemAt()` 走査でなく `findChildren(QLayout, Qt.FindChildOption.FindDirectChildrenOnly)` / `indexOf()` を使う（走査が通りすがりに QWidgetItem を wrap してしまう）
+- pin: `tests/test_wrapper_lifetime.py`
+
+## 15. `QCompleter(model)` はモデルへの Python 参照を保持しない（PySide6 6.11 実測）
+
+- コンストラクタ渡しは参照を保持せず、`QCompleter.setModel(model)` は保持する。共有モデルは `QCompleter()` + `setModel()` に分ける
+- 関連: `AutonaCountryHelper.LoadCountries()` は共有 `countryModel` を retire 世代なしで差し替えており #13 規約の唯一の例外（AV の原因ではないことは実証済み、頑健化余地あり）
