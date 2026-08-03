@@ -685,6 +685,14 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 - 追加・削除時は `STATE_VERSION` を **必ずインクリメント**する
 - **objectName は内部 ID として固定**する。i18n の対象は `setWindowTitle` などの**表示名のみ**で、objectName は不変
 - objectName を変更する場合は `STATE_VERSION` インクリメントに加えて、必要に応じて**保存済み state / QSettings のマイグレーション処理を実装**する
+- `Autona.py` の `self._navSections` に `(panel, 'icon.svg')` を表示順で追加する
+  （ナビ項目ラベルは `panel.windowTitle()`、アイコンは `assets/icons/`）
+  - `_navSections` はカテゴリ付き構造 `[(カテゴリ見出し or None, [(パネル, アイコン名), ...]), ...]`。
+    既存カテゴリ（Setup / ScoreboardCategory / Display / Data）に足す場合は該当セクションの
+    パネルリストへ挿入し、新カテゴリを作る場合は `(translate 済み見出し, [パネルリスト])` を追加する
+  - カテゴリ見出しはナビ index を消費しないため、ナビ index = `QStackedWidget` のページ index は保たれる
+
+#### 4.1.2 ドック内の標準パターン
 - `Autona.py` の `self._navSections`（カテゴリ単位のリスト）に
   `(panel, 'icon.svg', ナビラベル, None)` を表示順で追加する（アイコンは `assets/icons/`）
 - **重いパネルは遅延構築**（起動再設計 Step 4b）: `panel` の代わりに `self._CreateXxxPanel`
