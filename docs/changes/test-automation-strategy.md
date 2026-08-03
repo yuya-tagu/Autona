@@ -16,6 +16,11 @@
 いずれも全件グリーン。実行環境: Python 3.12.10 / pytest 9.0.3 / Node v24.13.0。
 `pytest-cov` `pytest-qt` `pytest-mock` は未導入。
 
+**2026-08-03 時点（実測）**: Python は `tests/live/`（§4.5 参照）が加わり
+フルスイート **349 passed / 19 skipped(live) / 1 xfailed / 31 秒**
+（`AUTONA_LIVE_TESTS` 未設定時。設定時は live 19 件も実行される）。
+Web は 21 passed のまま変化なし。
+
 ### カバーされている領域
 
 `AutonaDictHelper` / `StateManager`（held・exempt セマンティクス）/ Start.gg パース /
@@ -252,11 +257,28 @@ pin: `tests/test_harness_isolation.py` の
 ハーネス外のテストが `SettingsManager.Get()` の戻り値に依存する場合、
 実行順によって観測値が変わる。
 
-#### 既知フレーク: フルスイートの access violation（本 PR 非起因）
+#### 既知フレーク: フルスイートの access violation → 解消済み（2026-08-03）
 
 フルスイート 13 回中 1 回の頻度で `tests/test_select_set_cache.py` 付近が
-access violation でプロセスごと落ちる。Qt の teardown 系と見られるが再現条件は未特定。
-落ちた場合は再実行する。
+access violation でプロセスごと落ちていた問題は根治した。
+
+根本原因は agent-pitfalls #14 の機構: `QLayoutItem` / `QWidgetItem` は QObject
+ではないため PySide6 の追跡外にあり、破棄されても Shiboken 登録が stale なまま
+残る。その後 C++ が同じアドレスに新しい QObject（実例: `QCompleter`）を確保すると、
+コンストラクタ内の仮想 `metaObject()` 解決が古い wrapper を引き当てて NULL 参照 →
+テストとは無関係な場所で access violation が起きる。
+
+発生源は `AutonaScoreboardPlayerWidget` に 3 件あり、すべて修正した:
+`_takeLayoutFromGrid` の `takeAt()` + `deleteLater()` パターンを `removeItem()` の
+みに廃止 / `__init__` の `itemAt()` 走査を `findChildren()` ベースに変更 /
+`_buildCompactDetailsUI` 冒頭で `_releaseLayoutItemWrappers` により事前に
+`Shiboken.invalidate()`。
+
+テスト固有の問題ではなく、本番でも起きうる latent クラッシュだった
+（選手ウィジェットの再構築 = players_per_team 変更・フォーマット切替・
+ゲーム切替のたびに stale 登録が蓄積する）。
+
+検証: フルスイート 6 回連続グリーン。pin: `tests/test_wrapper_lifetime.py`。
 
 #### ハーネス実装上の地雷: `sendPostedEvents` は対象を絞る
 
@@ -370,6 +392,38 @@ board 2（team）は `AutonaScoreboardWidget(singlePlayer=False)` であり、
 | **L5 Web UI** | Jest + RTL（既存） | redux + ScoreboardPage | 〜60 秒 |
 
 合計 3 分以内。1 コマンド（`pytest` と `npm test`）で Claude が自走実行できることを要件とする。
+
+### L-live: 実運用ライブテスト（2026-08-03 新設）
+
+`tests/live/` — start.gg 実大会（渋谷BeeSmash 53 / SSBU singles / 16エントラント・
+31セット）を実 API で読む統合テスト 19 件。
+
+`AUTONA_LIVE_TESTS=1` でオプトイン（通常実行では 19 skipped）。ネットワーク疎通
+不能・大会消失は skip、データ形状の変化は fail する設計。
+
+カバー: 大会データ取得 / 全セット取得とパース健全性 / `GetMatch` →
+`ChangeSetData` → `score.*` 反映の E2E / 再起動キャッシュ
+（`tests/live/restart_probe.py` をサブプロセスで実行し再起動を再現）/
+実アバター画像のダウンロード / サムネイル生成（QWebEngine offscreen での実レンダリング）。
+
+これにより発見・修正したバグ:
+
+- **LIVE-BUG-1**: `SetData` の `finally` が `online_avatar` を毎回 `None` で
+  上書きしてしまい、配信画面にアバターが出ない。`ExportPlayerImages` の
+  セマンティクスを「引数省略＝変更なし／`None`＝明示クリア」に整理して根治。
+  両プレイヤーウィジェット（`AutonaScoreboardPlayerWidget` /
+  `AutonaTeamPlayerWidget`）と `Swap` の復元経路も対称に修正
+- **LIVE-BUG-2**: クエリ付き画像 URL（`...jpg?ehk=...`）が拡張子判定を外れて
+  ダウンロードされない。`urlparse().path` で判定するよう修正。
+  pin: `tests/test_state_manager_image_export.py`
+- 潜在バグ: `_build_entrants_old_api` の None ガード漏れ。
+  pin: `tests/test_startgg_parse.py`
+
+実データで判明した API 仕様:
+
+- `event.endAt` は未終了時にキー自体が返らない
+- 一覧クエリは `bestOf` をリクエストしていないため常に `None`
+- オフライン大会では `GetMatch` が `bestOf` を意図的に `None` に落とす
 
 ### L2 の設計（本戦略の肝）
 

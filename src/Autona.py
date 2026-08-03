@@ -57,6 +57,17 @@ fmt = ("<green>{time:YYYY-MM-DD HH:mm:ss}</green> " +
        "- <level>{message}</level>")
 
 if sys.stdout != None:
+    # Windows consoles default to the legacy ANSI code page (e.g. cp932),
+    # which cannot encode many characters that show up in ordinary log
+    # messages (e.g. accented Latin letters in character names such as
+    # "Pokémon Trainer"). Force UTF-8 with a safe fallback so a single
+    # non-ASCII message can't raise UnicodeEncodeError and spam
+    # "Logging error in Loguru Handler" for the rest of the run.
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+        except Exception:
+            pass
     config = {
         "handlers": [
             {"sink": sys.stdout, "format": fmt, "level": "DEBUG"},

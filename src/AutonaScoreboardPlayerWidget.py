@@ -6,6 +6,9 @@ from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from qtpy import uic
+# PySide6-only, and the binding is pinned (CLAUDE.md / build-and-release.md).
+# Used by _releaseLayoutItemWrappers below; see tests/test_wrapper_lifetime.py.
+from shiboken6 import Shiboken
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaSponsorHelper import AutonaSponsorHelper
 from .StateManager import StateManager
@@ -19,6 +22,45 @@ from .AutonaBasePlayerWidget import AutonaBasePlayerWidget
 import threading
 from .Helpers.AutonaBadWordFilter import AutonaBadWordFilter
 from loguru import logger
+
+
+def _releaseLayoutItemWrappers(layout):
+    """Drop PySide6's registrations for `layout`'s items, recursively.
+
+    QWidgetItem and QSpacerItem are not QObjects, so PySide6 has no way to
+    notice when Qt frees them -- and Qt frees them constantly: moving a widget
+    into another layout deletes the QWidgetItem that used to hold it, and
+    destroying a layout deletes all of its items. Any Python wrapper handed
+    out for one of those items (itemAt(), spacerItem()) is registered in
+    Shiboken's binding manager and, worse, kept alive there as a child of the
+    layout -- so it is still flagged valid, and still pointing at the freed
+    memory, long after the item is gone.
+
+    That stale registration is what kills the process. The next C++ object
+    allocated at the same address is looked up through it (Qt calls the
+    virtual metaObject() from inside a QObject constructor, before Shiboken
+    has registered the new object) and PySide reads a QMetaObject out of the
+    dead wrapper's type: PySide::SignalManager::retrieveMetaObject
+    dereferences a null TypeUserData and the process dies with an access
+    violation, in unrelated code, much later.
+
+    Calling this *before* the items are destroyed clears the registrations
+    while they are still valid, so nothing is left behind. A caller that
+    still holds one of the wrappers afterwards gets a RuntimeError from
+    PySide instead of corrupting the heap, which is the outcome we want.
+
+    Sub-layouts are skipped: a QLayout is a QObject, and PySide does track
+    those. Recursing into them reaches the widget items they hold.
+    """
+    for i in range(layout.count()):
+        item = layout.itemAt(i)
+        if item is None:
+            continue
+        sub = item.layout()
+        if sub is not None:
+            _releaseLayoutItemWrappers(sub)
+            continue
+        Shiboken.invalidate(item)
 
 
 class NoIconProxyModel(QSortFilterProxyModel):
@@ -70,14 +112,23 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         # the full width, so all elements share the same left/right edges.
         # (Columns 1-3 are legacy from the upstream avatar layout and unused.)
         grid.setColumnStretch(0, 1)
-        for i in range(grid.count()):
-            item = grid.itemAt(i)
-            if not item:
-                continue
-            if not item.layout():
-                continue
-            item.layout().setContentsMargins(0, 0, 0, 0)
-            item.layout().setSpacing(UI.SPACE_SM)
+        # Reached through the QObject tree, NOT through grid.itemAt(i).
+        # itemAt() registers the QLayoutItem it hands out as a Shiboken child
+        # of the layout, so the wrapper outlives this loop -- and a
+        # QWidgetItem is not a QObject, so when Qt destroys it PySide6 is
+        # never told. _buildCompactDetailsUI() below destroys exactly these
+        # items, by re-homing the widgets they hold into the details dialog,
+        # which would leave the wrappers registered in Shiboken's binding
+        # manager still flagged valid and pointing at freed memory. The next
+        # QObject allocated at one of those addresses is then looked up
+        # through a dead wrapper and the process dies with an access
+        # violation inside PySide::SignalManager::retrieveMetaObject -- in
+        # unrelated code, minutes later. Sub-layouts are QObjects, whose
+        # destruction PySide does track. See tests/test_wrapper_lifetime.py.
+        for sub in grid.findChildren(
+                QLayout, options=Qt.FindChildOption.FindDirectChildrenOnly):
+            sub.setContentsMargins(0, 0, 0, 0)
+            sub.setSpacing(UI.SPACE_SM)
 
         seed = self.findChild(QSpinBox, "seed")
         seed.setMaximumWidth(seed.sizeHint().width() // 2)
@@ -102,12 +153,25 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         # the sponsor row, updated whenever the spinbox value changes.
         self.findChild(QLabel, "seedLabel").setVisible(False)
         seed.setVisible(False)
-        seedRowLayout = self.findChild(QHBoxLayout, "horizontalLayout")
-        for i in range(seedRowLayout.count()):
-            it = seedRowLayout.itemAt(i)
-            sp = it.spacerItem() if it is not None else None
-            if sp is not None:
-                sp.changeSize(0, 0, QSizePolicy.Minimum, QSizePolicy.Minimum)
+        # Only for the PlayerDB editor, which keeps this row. The scoreboard
+        # card strips it out entirely in _buildCompactDetailsUI() below, so
+        # collapsing its spacers there is dead work -- and not free: itemAt()
+        # registers the QLayoutItem it returns as a Shiboken child of the
+        # layout, so the wrapper outlives this loop, and QSpacerItem /
+        # QWidgetItem are not QObjects, so PySide6 is never told when Qt
+        # frees them. The registrations would be left in Shiboken's binding
+        # manager still flagged valid and pointing at freed memory, and the
+        # next QObject allocated at one of those addresses dies inside
+        # PySide::SignalManager::retrieveMetaObject -- an access violation in
+        # unrelated code, much later. See tests/test_wrapper_lifetime.py.
+        if not self.path.startswith("score."):
+            seedRowLayout = self.findChild(QHBoxLayout, "horizontalLayout")
+            for i in range(seedRowLayout.count()):
+                it = seedRowLayout.itemAt(i)
+                sp = it.spacerItem() if it is not None else None
+                if sp is not None:
+                    sp.changeSize(0, 0, QSizePolicy.Minimum,
+                                  QSizePolicy.Minimum)
 
         self.seedDisplay = self.findChild(QLabel, "seedDisplay")
         # The .ui used to hardcode rgba(255,255,255,0.75) which became
@@ -318,6 +382,14 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         """
         grid = self.layout()
 
+        # Everything below re-homes the detail fields into the dialog and
+        # strips the emptied rows, which frees the QWidgetItems and
+        # QSpacerItems that held them. Clear PySide6's registrations for those
+        # items first, while they are still alive -- otherwise they are left
+        # behind pointing at freed memory and kill an unrelated QObject
+        # construction later (see _releaseLayoutItemWrappers).
+        _releaseLayoutItemWrappers(grid)
+
         # The app-wide QSS dresses every QGroupBox as a titled section
         # (margin-top 4px + padding 28px 10px 10px 10px, reserving a header
         # zone). This widget is a QGroupBox by inheritance only; on the
@@ -433,14 +505,50 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
     @staticmethod
     def _takeLayoutFromGrid(grid, sub_layout):
-        if sub_layout is None:
+        """Take an emptied row layout out of `grid`, destroying it via PySide.
+
+        This used to be `grid.takeAt(i)` followed by
+        `sub_layout.deleteLater()`, and that combination corrupted the
+        process. What matters is *who* frees the layout.
+
+        takeAt() and removeItem() both hand C++ ownership of the removed item
+        to Python. deleteLater() then hands it straight back to Qt, so Qt is
+        the one that frees it -- behind Shiboken's back. Destroying a QLayout
+        destroys the QLayoutItems it holds, and QLayoutItem / QWidgetItem /
+        QSpacerItem are not QObjects, so PySide6 has no way to notice they
+        are gone. Wrappers for those items already exist by this point:
+        __init__ walks `grid.itemAt(i)` to zero the row margins and the seed
+        row's `itemAt(i)` / `spacerItem()` to collapse its spacers, and
+        itemAt() registers what it returns as a Shiboken child of the layout,
+        so the wrappers live as long as the layout's own wrapper does. They
+        were left in Shiboken's binding manager, still flagged valid,
+        pointing at freed memory.
+
+        A stale registration there is a landmine somewhere else entirely. The
+        next C++ object allocated at that address gets looked up through it --
+        Qt calls the virtual metaObject() from inside a QObject constructor,
+        before Shiboken has registered the new object -- and PySide reads a
+        QMetaObject out of the dead wrapper's type:
+        PySide::SignalManager::retrieveMetaObject dereferences a null
+        TypeUserData and the process dies with an access violation in
+        whatever widget happened to be under construction. In this codebase
+        that landed, run after run, on the QCompleter built by
+        AutonaBasePlayerWidget.LoadCountries one or two player widgets later.
+
+        So the layout is never handed back to Qt: removeItem() leaves Python
+        the owner, and dropping the last Python reference makes PySide do the
+        delete -- which invalidates the layout's wrapper and the item wrappers
+        registered under it. Do not add a deleteLater() (or a setParent(),
+        which shuffles ownership again) back into this function.
+
+        The presence check is indexOf(), not a grid.itemAt(i) scan, for the
+        same reason: the scan wrapped every QWidgetItem in the grid on its way
+        past, and the caller re-homes those widgets a few lines later, which
+        frees the items behind PySide's back.
+        """
+        if sub_layout is None or grid.indexOf(sub_layout) < 0:
             return
-        for i in range(grid.count()):
-            item = grid.itemAt(i)
-            if item is not None and item.layout() is sub_layout:
-                grid.takeAt(i)
-                sub_layout.deleteLater()
-                return
+        grid.removeItem(sub_layout)
 
     def ShowDetails(self):
         name = self._w("name", QLineEdit).text().strip()
@@ -502,6 +610,11 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         # Scoreboard restores the player id directly (NameChanged would reset
         # it to None).
         self.ExportPlayerId(data["id"])
+        # ...and the avatar, which SwapWith saved for exactly this. It used to
+        # be wiped from both widgets as a side effect of NameChanged; now that
+        # ExportPlayerImages leaves it alone by default it would otherwise
+        # stay behind and show the swapped-away player's face.
+        self.ExportPlayerImages(data["online_avatar"])
 
     def SetIndex(self, index: int, team: int):
         self.findChild(QWidget, "title").setText(
@@ -900,6 +1013,10 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 # Deferred: run name exports once.
                 # ExportPlayerId is handled directly above; calling
                 # NameChanged here would reset the id to None.
+                # No argument = keep online_avatar: it was either written
+                # above from data["avatar"] or cleared by Clear(). Passing
+                # None here (the old default) undid the write and left every
+                # start.gg set with no avatar at all.
                 self.ExportMergedName()
                 self.ExportPlayerImages()
                 team = self._w("team", QLineEdit).text()

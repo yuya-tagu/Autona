@@ -481,3 +481,139 @@ def test_the_player_fields_keep_their_state_key_object_names(autonaApp):
     # Seed is the one the two do not share.
     assert scoreboard.findChild(QSpinBox, "seed") is not None
     assert team.findChild(QSpinBox, "seed") is None
+
+
+# ── the online avatar (LIVE-BUG-1) ───────────────────────────────────────
+#
+# The avatar start.gg hands out for an entrant is the one player field that
+# is NOT derived from anything on the widget: it arrives in the set payload
+# and only a caller that knows which player now occupies the slot may write
+# it. ExportPlayerImages used to default that parameter to None, so both
+# deferred refreshes -- SetData's own finally block and NameChanged --
+# published None over the URL SetData had written moments earlier. The whole
+# thing happened inside one BlockSaving, so nothing ever observed the URL:
+# every set loaded from start.gg reached the overlays with no avatar, and
+# so did every hand-edited tag. Found by tests/live against the real API.
+#
+# A URL with no image extension is used throughout: StateManager exports any
+# state value that looks like an http .png/.jpg by *downloading* it, and a
+# unit test must not reach the network. What is under test here is which
+# state key survives, which the extension has no bearing on.
+
+AVATAR = "https://cdn.example.invalid/avatar/abc123"
+OTHER_AVATAR = "https://cdn.example.invalid/avatar/def456"
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_set_data_publishes_the_online_avatar(autonaApp, kind):
+    player = _player(autonaApp, kind)
+
+    player.SetData({"gamerTag": "TAG", "avatar": AVATAR}, dontLoadFromDB=True)
+    autonaApp.settle()
+
+    assert autonaApp.get(f"{player.path}.online_avatar") == AVATAR
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_editing_the_tag_keeps_the_online_avatar(autonaApp, kind):
+    """The operator fixing a typo in a tag must not cost the player a face."""
+    player = _player(autonaApp, kind)
+
+    player.SetData({"gamerTag": "TAG", "avatar": AVATAR}, dontLoadFromDB=True)
+    autonaApp.settle()
+
+    name = player.findChild(QLineEdit, "name")
+    name.setText("TAG_FIXED")
+    name.editingFinished.emit()
+    autonaApp.settle()
+
+    assert autonaApp.get(f"{player.path}.name") == "TAG_FIXED"
+    assert autonaApp.get(f"{player.path}.online_avatar") == AVATAR
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_editing_the_sponsor_keeps_the_online_avatar(autonaApp, kind):
+    # The sponsor field runs the same handler, and it is the one that also
+    # re-derives the sponsor images -- so it is the likeliest place for a
+    # future "just re-export everything" shortcut to reintroduce the bug.
+    player = _player(autonaApp, kind)
+
+    player.SetData({"gamerTag": "TAG", "avatar": AVATAR}, dontLoadFromDB=True)
+    autonaApp.settle()
+
+    team = player.findChild(QLineEdit, "team")
+    team.setText("SPONSOR")
+    team.editingFinished.emit()
+    autonaApp.settle()
+
+    assert autonaApp.get(f"{player.path}.online_avatar") == AVATAR
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_loading_a_player_without_an_avatar_drops_the_previous_one(
+        autonaApp, kind):
+    """The other half of the semantics: "keep" must not mean "never clears".
+
+    An entrant with no start.gg account has no avatar, and the previous
+    player's face staying on the overlay under the new name is the failure
+    that made None the default in the first place.
+    """
+    player = _player(autonaApp, kind)
+
+    player.SetData({"gamerTag": "FIRST", "avatar": AVATAR}, dontLoadFromDB=True)
+    autonaApp.settle()
+    assert autonaApp.get(f"{player.path}.online_avatar") == AVATAR
+
+    player.SetData({"gamerTag": "SECOND"}, dontLoadFromDB=True)
+    autonaApp.settle()
+
+    assert autonaApp.get(f"{player.path}.online_avatar") is None
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_loading_a_player_replaces_the_previous_avatar(autonaApp, kind):
+    player = _player(autonaApp, kind)
+
+    player.SetData({"gamerTag": "FIRST", "avatar": AVATAR}, dontLoadFromDB=True)
+    autonaApp.settle()
+
+    player.SetData({"gamerTag": "SECOND", "avatar": OTHER_AVATAR},
+                   dontLoadFromDB=True)
+    autonaApp.settle()
+
+    assert autonaApp.get(f"{player.path}.online_avatar") == OTHER_AVATAR
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_clear_removes_the_online_avatar(autonaApp, kind):
+    player = _player(autonaApp, kind)
+
+    player.SetData({"gamerTag": "TAG", "avatar": AVATAR}, dontLoadFromDB=True)
+    autonaApp.settle()
+
+    player.Clear()
+    autonaApp.settle()
+
+    assert autonaApp.get(f"{player.path}.online_avatar") is None
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_avatar_follows_a_player_swap(autonaApp, kind):
+    """Swapping the two sides of a set moves the faces with the tags.
+
+    Before the fix both avatars were wiped instead, as a side effect of the
+    same defaulting bug; with the parameter left alone they would stay on
+    the widget and end up under the other player's name, which is worse.
+    Both widget classes restore it explicitly (_swapRestoreTail).
+    """
+    left, right = _players(autonaApp, kind)
+
+    left.SetData({"gamerTag": "LEFT", "avatar": AVATAR}, dontLoadFromDB=True)
+    right.SetData({"gamerTag": "RIGHT"}, dontLoadFromDB=True)
+    autonaApp.settle()
+
+    left.SwapWith(right)
+    autonaApp.settle()
+
+    assert autonaApp.get(f"{left.path}.online_avatar") is None
+    assert autonaApp.get(f"{right.path}.online_avatar") == AVATAR

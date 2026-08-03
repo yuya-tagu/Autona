@@ -626,7 +626,12 @@ class AutonaTeamPlayerWidget(AutonaBasePlayerWidget):
         finally:
             self._bulk_updating = was_bulk
             if not was_bulk:
-                # Deferred: run name exports once
+                # Deferred: run name exports once.
+                # No argument = keep online_avatar: it was either written
+                # above from data["avatar"] or cleared by Clear(). Passing
+                # None here (the old default) undid the write and left every
+                # start.gg set with no avatar at all (agent-pitfalls #5 --
+                # the same bug lived in AutonaScoreboardPlayerWidget).
                 self.ExportMergedName()
                 self.ExportPlayerImages()
                 team = self.findChild(QLineEdit, "team").text()

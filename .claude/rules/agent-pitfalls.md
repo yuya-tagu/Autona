@@ -143,3 +143,20 @@ access violation を起こす（2026-07-11 起動クラッシュ:
   `setSourceModel` / `QCompleter.setModel` は keepReference を持ち、単純な
   差し替え単体は安全。ただし編集可能コンボ（オートコンプリータ／ポップアップ
   付き）やシグナル連鎖の深部での差し替えは保証外のため、退避パターンを常用する
+
+## 14. QLayoutItem 系は PySide6 の追跡外 — 破棄前に `Shiboken.invalidate()` する（2026-08-03 フルスイートAV根治で確定）
+
+`QLayoutItem` / `QWidgetItem` / `QSpacerItem` は QObject ではない。C++ 側で破棄されても PySide6 は検知できず、Python wrapper が Shiboken のバインディングマネージャに valid のまま残る。
+
+- `QLayout.itemAt()` / `spacerItem()` が返す wrapper はレイアウトの Shiboken 子として保持される（参照を捨てても同じ wrapper が返る）。「一時変数だから大丈夫」は成り立たない
+- 残った登録は地雷: 同アドレスに次の C++ オブジェクトが確保されると、そのコンストラクタ内で Qt が仮想 `metaObject()` を呼ぶ（Shiboken 登録前）ため古い wrapper が引き当てられ、`PySide::SignalManager::retrieveMetaObject` が NULL 参照して**無関係な場所で access violation**（実例: `QCompleter` 構築中。クラッシュ箇所は実行ごとに移動する）
+- item が破棄される操作: ウィジェットの re-home（別レイアウトへ addWidget）/ レイアウト破棄 / `QLayout.removeWidget()`（内部で `delete takeAt(i)`）
+- 対処: 破棄の前に対象レイアウト配下の item wrapper を `Shiboken.invalidate(item)` で無効化する。実装例は `AutonaScoreboardPlayerWidget._releaseLayoutItemWrappers`。サブレイアウトは QObject なので invalidate せず再帰
+- 禁止パターン: `takeAt(i)` → `deleteLater()`（takeAt/removeItem は所有権を Python へ移し、deleteLater はそれを Qt に戻す → Qt が Shiboken 無断で解放）。`removeItem()` だけにして PySide に解放させる
+- サブレイアウト探索は `itemAt()` 走査でなく `findChildren(QLayout, Qt.FindChildOption.FindDirectChildrenOnly)` / `indexOf()` を使う（走査が通りすがりに QWidgetItem を wrap してしまう）
+- pin: `tests/test_wrapper_lifetime.py`
+
+## 15. `QCompleter(model)` はモデルへの Python 参照を保持しない（PySide6 6.11 実測）
+
+- コンストラクタ渡しは参照を保持せず、`QCompleter.setModel(model)` は保持する。共有モデルは `QCompleter()` + `setModel()` に分ける
+- 関連: `AutonaCountryHelper.LoadCountries()` は共有 `countryModel` を retire 世代なしで差し替えており #13 規約の唯一の例外（AV の原因ではないことは実証済み、頑健化余地あり）

@@ -4,6 +4,7 @@ import sys
 
 import orjson
 import traceback
+from urllib.parse import urlparse
 
 # deepdiff (deephash.py) eagerly runs `try: import pandas` purely to support
 # hashing pandas Series/DataFrame objects. Autona only diffs nested dicts of
@@ -645,6 +646,19 @@ class StateManager:
             except Exception as e:
                 logger.error(traceback.format_exc())
 
+    def _FileExtension(value):
+        """Extension of a local path or URL, ignoring any query string.
+
+        start.gg hands avatars out as
+        `https://.../image-<hash>.jpg?ehk=<cache key>`, so splitting the raw
+        string on "." yields "jpg?ehk=..." -- which is neither an image
+        extension (the URL fell through to the plain-text branch and the
+        overlay got a .txt holding the URL) nor a legal Windows filename.
+        Everything the export layer derives from the extension goes through
+        here so the query string can never reach a filename again.
+        """
+        return urlparse(value).path.rsplit(".", 1)[-1].lower()
+
     def CreateFilesDict(path, di):
         pathdirs = "/".join(path.split("/")[0:-1])
 
@@ -671,12 +685,13 @@ class StateManager:
                             f"./out/{path}" + "." + di.rsplit(".", 1)[-1])
                     except Exception as e:
                         logger.error(traceback.format_exc())
-            elif type(di) == str and di.startswith("http") and (di.endswith(".png") or di.endswith(".jpg")):
+            elif type(di) == str and di.startswith("http") and StateManager._FileExtension(di) in ("png", "jpg"):
+                imageExtension = StateManager._FileExtension(di)
+                downloadTarget = f"./out/{path}.{imageExtension}"
                 try:
-                    if os.path.exists(f"./out/{path}" + "." + di.rsplit(".", 1)[-1]):
+                    if os.path.exists(downloadTarget):
                         try:
-                            os.remove(f"./out/{path}" +
-                                      "." + di.rsplit(".", 1)[-1])
+                            os.remove(downloadTarget)
                         except Exception as e:
                             logger.error(traceback.format_exc())
 
@@ -695,7 +710,9 @@ class StateManager:
                                     r.raw.decode_content = True
                                     shutil.copyfileobj(r.raw, f)
                                     f.flush()
-                            if url.endswith(".jpg"):
+                            # imageExtension, not url.endswith(".jpg"): a
+                            # cache-keyed URL ends in the query string.
+                            if imageExtension == "jpg":
                                 original = Image.open(dlpath)
                                 original.save(dlpath.rsplit(
                                     ".", 1)[0]+".png", format="png")
@@ -711,10 +728,7 @@ class StateManager:
                     # non-daemon thread).
                     t = threading.Thread(
                         target=downloadImage,
-                        args=[
-                            di,
-                            f"./out/{path}" + "." + di.rsplit(".", 1)[-1]
-                        ],
+                        args=[di, downloadTarget],
                         daemon=True
                     )
                     t.start()
@@ -735,11 +749,23 @@ class StateManager:
         else:
             if type(di) == str and (di.startswith("./") or di.startswith("http")):
                 try:
-                    removeFile = f"./out/{path}" + \
-                        "." + di.rsplit(".", 1)[-1]
-                    # logger.info("try to remove: ", removeFile)
-                    if os.path.exists(removeFile):
-                        os.remove(removeFile)
+                    if di.startswith("http"):
+                        # The same derivation CreateFilesDict named the
+                        # download with -- and a downloaded .jpg is stored
+                        # converted, so what exists on disk is the .png twin.
+                        extension = StateManager._FileExtension(di)
+                        removeFiles = [f"./out/{path}.{extension}"]
+                        if extension == "jpg":
+                            removeFiles.append(f"./out/{path}.png")
+                    else:
+                        # Local files are copied under their own extension,
+                        # original case included.
+                        removeFiles = [f"./out/{path}."
+                                       + di.rsplit(".", 1)[-1]]
+                    for removeFile in removeFiles:
+                        # logger.info("try to remove: ", removeFile)
+                        if os.path.exists(removeFile):
+                            os.remove(removeFile)
                 except:
                     logger.error(traceback.format_exc())
             else:
