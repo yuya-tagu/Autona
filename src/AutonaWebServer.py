@@ -644,16 +644,57 @@ def _build_web_app():
     @app.post('/api/designer/projects')
     def designer_save_project():
         WebServer._authorize_designer_request()
-        if request.content_length and request.content_length > 70 * 1024 * 1024:
+        if request.content_length and request.content_length > 250 * 1024 * 1024:
             return jsonify({"error": "保存データがサイズ上限を超えています。"}), 413
         try:
             payload = request.get_json(force=False, silent=False)
-            return jsonify(AutonaDesignerService.save_project(payload))
+            result = AutonaDesignerService.save_project(payload)
+            WebServer.socketio.emit("designer_project_saved", result)
+            return jsonify(result)
         except DesignerProjectError as exc:
             return jsonify({"error": str(exc)}), 400
         except Exception:
             logger.error(traceback.format_exc())
             return jsonify({"error": "デザインの保存に失敗しました。"}), 500
+
+    @app.post('/api/designer/imports')
+    def designer_receive_import():
+        WebServer._authorize_designer_import_request()
+        if request.content_length and request.content_length > 70 * 1024 * 1024:
+            return jsonify({"error": "インポートデータがサイズ上限を超えています。"}), 413
+        try:
+            payload = request.get_json(force=False, silent=False)
+            result = AutonaDesignerService.receive_import(payload)
+            WebServer.socketio.emit("designer_import_received", result)
+            return jsonify(result)
+        except DesignerProjectError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception:
+            logger.error(traceback.format_exc())
+            return jsonify({"error": "Figmaインポートの受信に失敗しました。"}), 500
+
+    @app.get('/api/designer/imports/<import_id>')
+    def designer_get_import(import_id):
+        WebServer._authorize_designer_request()
+        try:
+            return jsonify(AutonaDesignerService.get_import(import_id))
+        except FileNotFoundError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except DesignerProjectError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+    @app.get('/api/designer/imports/latest')
+    def designer_latest_import():
+        WebServer._authorize_designer_request()
+        try:
+            return jsonify(AutonaDesignerService.latest_import())
+        except FileNotFoundError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except DesignerProjectError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception:
+            logger.error(traceback.format_exc())
+            return jsonify({"error": "Figmaインポートを読み込めませんでした。"}), 500
 
 
     @app.route('/')
@@ -674,15 +715,23 @@ def _build_web_app():
             if filename.endswith('.js'):
                 mimetype = "text/javascript"
             if filename.lower().endswith('.png'):
-                mimetype = "image/apng"
+                mimetype = "image/png"
 
-            return send_from_directory(
+            is_custom_layout = filename.replace(
+                "\\", "/").startswith("layout/custom/")
+            response = send_from_directory(
                 os.path.abspath('.'),
                 filename,
                 as_attachment=filename.endswith('.gz'),
                 mimetype=mimetype,
-                max_age=86400
+                max_age=0 if is_custom_layout else 86400
             )
+            if is_custom_layout:
+                # Designer saves overwrite project.json, runtime files, and
+                # PNG assets in place. OBS must revalidate all of them.
+                response.cache_control.no_store = True
+                response.cache_control.max_age = 0
+            return response
 
         except Exception as e:
             logger.error(f"File not found: {e}")
@@ -868,6 +917,11 @@ class WebServer(QThread):
         token = request.headers.get("X-Autona-Designer-Token")
         if not AutonaDesignerService.is_authorized(token, request.remote_addr):
             abort(403, "Desktop Designer authorization required")
+
+    @staticmethod
+    def _authorize_designer_import_request():
+        if not AutonaDesignerService.is_loopback(request.remote_addr):
+            abort(403, "Figma import is only allowed from this computer")
 
     def run(self):
         try:

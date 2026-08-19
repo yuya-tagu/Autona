@@ -112,3 +112,11 @@ assets/rulesets.json
 # TournamentStreamHelper's asset downloader. Only the guidance README is tracked.
 user_data/games/*
 !user_data/games/README.md
+
+# Local Codex workspace files; keep these out of the shared repository.
+/.agents/
+/.codex/
+/AGENTS.md
+
+# Local Designer source-link registry.
+/user_data/designer_source_links.json

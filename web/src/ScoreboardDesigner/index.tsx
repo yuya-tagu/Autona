@@ -9,6 +9,7 @@ import {
     DialogTitle,
     Divider,
     IconButton,
+    Menu,
     MenuItem,
     Select,
     Stack,
@@ -22,11 +23,13 @@ import {
     AddPhotoAlternate,
     ArrowDownward,
     ArrowUpward,
-    Close,
     ContentCopy,
     Delete,
     DragIndicator,
+    Folder,
     FolderOpen,
+    KeyboardArrowDown,
+    KeyboardArrowRight,
     PlayArrow,
     Redo,
     Save,
@@ -37,13 +40,20 @@ import {
 import {useSelector} from "react-redux";
 import {ReduxState} from "../redux/store";
 import websocketInit from "../ScoreboardPage/websocketInit";
+import socketConnection from "../websocketConnection";
 import {resolveBinding, SAMPLE_STATE} from "./bindings";
 import DesignerCanvas from "./DesignerCanvas";
 import LayerInspector from "./LayerInspector";
+import AnimationPanel from "./AnimationPanel";
 import {
     AssetMap,
     BindingKey,
+    DesignerGroup,
     DesignerLayer,
+    GAME_HISTORY_PART_TARGETS,
+    GameHistoryLayerAssignment,
+    GameHistoryPartTarget,
+    GameHistoryImagePartRole,
     ImageLayer,
     ScoreboardProject,
 } from "./types";
@@ -51,21 +61,25 @@ import {
     BINDING_LABELS,
     cloneLayer,
     createBindingLayer,
+    createDefaultAnimations,
+    createDefaultEvents,
     createEmptyProject,
     createId,
-    validateProject,
 } from "./model";
 import {
-    dataUrlToAsset,
     deleteDesktopProject,
     DesignerProjectSummary,
     isDesktopDesigner,
     listDesktopProjects,
+    loadDesignerImport,
     loadDesktopProject,
+    loadLatestFigmaImport,
     makeUniqueAssetPath,
     revokeAssetUrls,
     saveDesktopProject,
 } from "./desktopApi";
+import {mergeImportedProject} from "./reimport";
+import {ensureProjectGoogleFonts} from "./fontLoader";
 import {BINDINGS} from "./types";
 import "./styles.css";
 
@@ -73,8 +87,40 @@ function maxZ(project: ScoreboardProject): number {
     return project.layers.reduce((max, layer) => Math.max(max, layer.zIndex), 0);
 }
 
+function isSharedGameHistorySet3(
+    role: GameHistoryImagePartRole,
+    setIndex?: number,
+): boolean {
+    return (role === "p1-set" || role === "p2-set") && setIndex === 2;
+}
+
 function orderedPanelLayers(project: ScoreboardProject): DesignerLayer[] {
     return [...project.layers].sort((a, b) => b.zIndex - a.zIndex);
+}
+
+async function readImageSize(file: File): Promise<{width: number; height: number}> {
+    try {
+        const bitmap = await createImageBitmap(file);
+        const size = {width: bitmap.width, height: bitmap.height};
+        bitmap.close();
+        return size;
+    } catch {
+        const url = URL.createObjectURL(file);
+        try {
+            const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+                const element = new Image();
+                element.onload = () => resolve(element);
+                element.onerror = () => reject(new Error("画像を読み込めませんでした。"));
+                element.src = url;
+            });
+            return {
+                width: image.naturalWidth,
+                height: image.naturalHeight,
+            };
+        } finally {
+            URL.revokeObjectURL(url);
+        }
+    }
 }
 
 const AUTO_LAYER_NAME_BINDINGS = new Set<BindingKey>(["p1.name", "p2.name"]);
@@ -92,6 +138,63 @@ interface LayerDragGeometry {
     listTop: number;
     rowHeight: number;
     rowStep: number;
+}
+
+interface PanelDragState {
+    sourceKey: string;
+    pointerY: number;
+    offsetY: number;
+    left: number;
+    width: number;
+    itemKeys: string[];
+}
+
+interface LayerPanelLayerItem {
+    kind: "layer";
+    layer: DesignerLayer;
+}
+
+interface LayerPanelGroupItem {
+    kind: "group";
+    group: DesignerGroup;
+    layers: DesignerLayer[];
+    collapsed: boolean;
+}
+
+type LayerPanelItem = LayerPanelLayerItem | LayerPanelGroupItem;
+type EditorMode = "design" | "animate";
+type AnimationTrackKey = "sceneEnter" | "dataChange";
+type StandardTemplateKey =
+    | "scoreboard"
+    | "scoreboard_crewbattle"
+    | "scoreboard_simple"
+    | "scoreboard_team"
+    | "scoreboard_topleft"
+    | "scoreboard_Universal";
+
+interface TemplateLayerSpec {
+    binding: BindingKey;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    fontSize?: number;
+    align?: "left" | "center" | "right";
+}
+
+const STANDARD_TEMPLATES: Array<{key: StandardTemplateKey; name: string}> = [
+    {key: "scoreboard", name: "default_board"},
+    {key: "scoreboard_crewbattle", name: "default_board_crewbattle"},
+    {key: "scoreboard_simple", name: "default_board_simple"},
+    {key: "scoreboard_team", name: "default_board_team"},
+    {key: "scoreboard_topleft", name: "default_board_topleft"},
+    {key: "scoreboard_Universal", name: "default_board_universal"},
+];
+
+function panelItemKey(item: LayerPanelItem): string {
+    return item.kind === "group"
+        ? `group:${item.group.id}`
+        : `layer:${item.layer.id}`;
 }
 
 type ProjectUpdater = (project: ScoreboardProject) => ScoreboardProject;
@@ -165,37 +268,136 @@ function projectTimelineReducer(
 }
 
 function resolvedAutoLayerName(layer: DesignerLayer, state: any): string | null {
-    if (layer.type !== "data-text" || !AUTO_LAYER_NAME_BINDINGS.has(layer.binding)) {
+    if (layer.type !== "data-text" || !layer.binding ||
+        !AUTO_LAYER_NAME_BINDINGS.has(layer.binding)) {
         return null;
     }
     const value = String(resolveBinding(layer.binding, state)).trim();
     return value || null;
 }
 
-function defaultTemplateProject(): ScoreboardProject {
-    const project = createEmptyProject("標準スコアボード");
-    const specs: Array<{
-        binding: BindingKey;
-        x: number;
-        y: number;
-        width: number;
-        height: number;
-    }> = [
-        {binding: "tournament.name", x: 560, y: 54, width: 800, height: 64},
-        {binding: "p1.name", x: 170, y: 872, width: 520, height: 72},
-        {binding: "p2.name", x: 1230, y: 872, width: 520, height: 72},
-        {binding: "p1.score", x: 735, y: 842, width: 120, height: 110},
-        {binding: "p2.score", x: 1065, y: 842, width: 120, height: 110},
+const TEMPLATE_LAYER_SPECS: Record<StandardTemplateKey, TemplateLayerSpec[]> = {
+    scoreboard: [
+        {binding: "p1.name", x: 380, y: 42, width: 500, height: 64, fontSize: 30, align: "left"},
+        {binding: "p2.name", x: 1040, y: 42, width: 500, height: 64, fontSize: 30, align: "right"},
+        {binding: "p1.score", x: 882, y: 42, width: 64, height: 64, fontSize: 42, align: "center"},
+        {binding: "p2.score", x: 974, y: 42, width: 64, height: 64, fontSize: 42, align: "center"},
+        {binding: "match.round", x: 760, y: 118, width: 400, height: 36, fontSize: 22, align: "center"},
+        {binding: "match.phase", x: 760, y: 158, width: 400, height: 34, fontSize: 20, align: "center"},
+        {binding: "games", x: 790, y: 190, width: 340, height: 32},
+    ],
+    scoreboard_crewbattle: [
+        {binding: "tournament.name", x: 24, y: 45, width: 330, height: 28, fontSize: 16, align: "left"},
+        {binding: "match.phase", x: 24, y: 76, width: 330, height: 32, fontSize: 18, align: "left"},
+        {binding: "p1.name", x: 472, y: 51, width: 330, height: 52, fontSize: 26, align: "right"},
+        {binding: "p2.name", x: 1118, y: 51, width: 330, height: 52, fontSize: 26, align: "left"},
+        {binding: "p1.score", x: 826, y: 45, width: 90, height: 64, fontSize: 40, align: "center"},
+        {binding: "p2.score", x: 1004, y: 45, width: 90, height: 64, fontSize: 40, align: "center"},
+        {binding: "p1.seed", x: 24, y: 162, width: 288, height: 46, fontSize: 24, align: "left"},
+        {binding: "p2.seed", x: 1608, y: 162, width: 288, height: 46, fontSize: 24, align: "right"},
+    ],
+    scoreboard_simple: [
+        {binding: "tournament.name", x: 124, y: 10, width: 390, height: 38, fontSize: 22, align: "left"},
+        {binding: "match.phase", x: 124, y: 50, width: 240, height: 30, fontSize: 18, align: "left"},
+        {binding: "match.round", x: 124, y: 80, width: 240, height: 30, fontSize: 18, align: "left"},
+        {binding: "p1.name", x: 495, y: 999, width: 222, height: 34, fontSize: 26, align: "left"},
+        {binding: "p2.name", x: 1235, y: 999, width: 222, height: 34, fontSize: 26, align: "left"},
+        {binding: "p1.score", x: 767, y: 998, width: 30, height: 37, fontSize: 30, align: "center"},
+        {binding: "p2.score", x: 1507, y: 998, width: 30, height: 37, fontSize: 30, align: "center"},
+        {binding: "p1.twitter", x: 613, y: 1039, width: 170, height: 20, fontSize: 16, align: "center"},
+        {binding: "p2.twitter", x: 1353, y: 1039, width: 170, height: 20, fontSize: 16, align: "center"},
+    ],
+    scoreboard_team: [
+        {binding: "p1.name", x: 444, y: 63, width: 380, height: 32, fontSize: 27, align: "left"},
+        {binding: "p2.name", x: 1096, y: 63, width: 380, height: 32, fontSize: 27, align: "right"},
+        {binding: "p1.sponsorName", x: 444, y: 96, width: 380, height: 20, fontSize: 16, align: "left"},
+        {binding: "p2.sponsorName", x: 1096, y: 96, width: 380, height: 20, fontSize: 16, align: "right"},
+        {binding: "p1.score", x: 829, y: 28, width: 82, height: 88, fontSize: 48, align: "center"},
+        {binding: "p2.score", x: 1009, y: 28, width: 82, height: 88, fontSize: 48, align: "center"},
+        {binding: "tournament.name", x: 16, y: 28, width: 340, height: 36, fontSize: 20, align: "left"},
+        {binding: "match.phase", x: 16, y: 70, width: 340, height: 24, fontSize: 16, align: "left"},
+        {binding: "match.round", x: 16, y: 94, width: 340, height: 24, fontSize: 16, align: "left"},
+        {binding: "games", x: 790, y: 128, width: 340, height: 32},
+    ],
+    scoreboard_topleft: [
+        {binding: "tournament.name", x: 32, y: 24, width: 220, height: 24, fontSize: 18, align: "left"},
+        {binding: "match.phase", x: 32, y: 50, width: 160, height: 22, fontSize: 16, align: "left"},
+        {binding: "match.round", x: 200, y: 50, width: 190, height: 22, fontSize: 16, align: "left"},
+        {binding: "p1.name", x: 72, y: 76, width: 360, height: 42, fontSize: 24, align: "left"},
+        {binding: "p2.name", x: 72, y: 120, width: 360, height: 42, fontSize: 24, align: "left"},
+        {binding: "p1.score", x: 464, y: 76, width: 48, height: 42, fontSize: 30, align: "center"},
+        {binding: "p2.score", x: 464, y: 120, width: 48, height: 42, fontSize: 30, align: "center"},
+        {binding: "games", x: 88, y: 168, width: 300, height: 30},
+    ],
+    scoreboard_Universal: [
+        {binding: "tournament.name", x: 560, y: 54, width: 800, height: 64, fontSize: 30, align: "center"},
+        {binding: "p1.name", x: 170, y: 872, width: 520, height: 72, fontSize: 36, align: "left"},
+        {binding: "p2.name", x: 1230, y: 872, width: 520, height: 72, fontSize: 36, align: "right"},
+        {binding: "p1.score", x: 735, y: 842, width: 120, height: 110, fontSize: 56, align: "center"},
+        {binding: "p2.score", x: 1065, y: 842, width: 120, height: 110, fontSize: 56, align: "center"},
+        {binding: "p1.twitter", x: 200, y: 950, width: 260, height: 28, fontSize: 18, align: "left"},
+        {binding: "p2.twitter", x: 1460, y: 950, width: 260, height: 28, fontSize: 18, align: "right"},
         {binding: "games", x: 790, y: 966, width: 340, height: 42},
-    ];
-    project.layers = specs.map((spec, index) => ({
-        ...createBindingLayer(spec.binding, index + 1),
-        x: spec.x,
-        y: spec.y,
-        width: spec.width,
-        height: spec.height,
-    } as DesignerLayer));
+    ],
+};
+
+function defaultTemplateProject(templateKey: StandardTemplateKey): ScoreboardProject {
+    const template = STANDARD_TEMPLATES.find(({key}) => key === templateKey);
+    const project = createEmptyProject(template?.name ?? `default_${templateKey}`);
+    const specs = TEMPLATE_LAYER_SPECS[templateKey];
+    project.layers = specs.map((spec, index) => {
+        const layer = {
+            ...createBindingLayer(spec.binding, index + 1),
+            x: spec.x,
+            y: spec.y,
+            width: spec.width,
+            height: spec.height,
+            animations: createDefaultAnimations(0),
+        } as DesignerLayer;
+        if ("typography" in layer) {
+            layer.typography = {
+                ...layer.typography,
+                ...(spec.fontSize ? {fontSize: spec.fontSize} : {}),
+                ...(spec.align ? {align: spec.align} : {}),
+            };
+        }
+        return layer;
+    });
     return project;
+}
+
+function layerPanelItems(
+    project: ScoreboardProject,
+    orderedLayers: DesignerLayer[],
+): LayerPanelItem[] {
+    const groups = new Map((project.groups ?? []).map((group) => [group.id, group]));
+    const groupedLayers = new Map<string, DesignerLayer[]>();
+    orderedLayers.forEach((layer) => {
+        if (!layer.groupId || !groups.has(layer.groupId)) return;
+        groupedLayers.set(layer.groupId, [
+            ...(groupedLayers.get(layer.groupId) ?? []),
+            layer,
+        ]);
+    });
+
+    const emittedGroups = new Set<string>();
+    const items: LayerPanelItem[] = [];
+    orderedLayers.forEach((layer) => {
+        const group = layer.groupId ? groups.get(layer.groupId) : undefined;
+        if (!group) {
+            items.push({kind: "layer", layer});
+            return;
+        }
+        if (emittedGroups.has(group.id)) return;
+        emittedGroups.add(group.id);
+        items.push({
+            kind: "group",
+            group,
+            layers: groupedLayers.get(group.id) ?? [],
+            collapsed: Boolean(group.collapsed),
+        });
+    });
+    return items;
 }
 
 export default function ScoreboardDesigner() {
@@ -218,19 +420,34 @@ export default function ScoreboardDesigner() {
     const [assets, setAssets] = React.useState<AssetMap>({});
     const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
     const [primarySelectedId, setPrimarySelectedId] = React.useState<string | null>(null);
+    const [gameHistoryPartEditLayerId, setGameHistoryPartEditLayerId] =
+        React.useState<string | null>(null);
+    const [selectedGameHistoryPartPath, setSelectedGameHistoryPartPath] =
+        React.useState<number[] | null>(null);
     const [bindingToAdd, setBindingToAdd] = React.useState<BindingKey>("p1.name");
-    const [sampleMode, setSampleMode] = React.useState(false);
+    const [standardTemplate, setStandardTemplate] =
+        React.useState<StandardTemplateKey>("scoreboard_Universal");
+    const [sampleMode, setSampleMode] = React.useState(true);
     const [animationNonce, setAnimationNonce] = React.useState(0);
+    const [editorMode, setEditorMode] = React.useState<EditorMode>("design");
+    const [animationTrack, setAnimationTrack] =
+        React.useState<AnimationTrackKey>("sceneEnter");
     const [message, setMessage] = React.useState("未保存");
+    const [importAnchorEl, setImportAnchorEl] =
+        React.useState<HTMLElement | null>(null);
     const [projectChoices, setProjectChoices] =
         React.useState<DesignerProjectSummary[]>([]);
     const [projectDialogOpen, setProjectDialogOpen] = React.useState(false);
     const [currentSlug, setCurrentSlug] = React.useState<string | null>(null);
     const [editingLayerId, setEditingLayerId] = React.useState<string | null>(null);
     const [editingLayerName, setEditingLayerName] = React.useState("");
+    const [editingGroupId, setEditingGroupId] = React.useState<string | null>(null);
+    const [editingGroupName, setEditingGroupName] = React.useState("");
     const [layerDrag, setLayerDrag] = React.useState<LayerDragState | null>(null);
+    const [panelDrag, setPanelDrag] = React.useState<PanelDragState | null>(null);
     const imageInputRef = React.useRef<HTMLInputElement>(null);
-    const figmaInputRef = React.useRef<HTMLInputElement>(null);
+    const svgInputRef = React.useRef<HTMLInputElement>(null);
+    const handledImportIdsRef = React.useRef(new Set<string>());
     const layerListRef = React.useRef<HTMLDivElement>(null);
     const displayedLayersRef = React.useRef<DesignerLayer[]>([]);
     const assetsRef = React.useRef(assets);
@@ -238,8 +455,10 @@ export default function ScoreboardDesigner() {
     const canvasInteractionRef = React.useRef(false);
     const canvasInteractionCapturedRef = React.useRef(false);
     const layerRowRefs = React.useRef<Record<string, HTMLButtonElement | null>>({});
+    const panelRowRefs = React.useRef<Record<string, HTMLButtonElement | null>>({});
     const previousLayerRowTopsRef = React.useRef<Map<string, number>>(new Map());
     const desktopMode = React.useMemo(isDesktopDesigner, []);
+    const closeImportMenu = () => setImportAnchorEl(null);
 
     React.useEffect(() => {
         document.title = "Autona Scoreboard Designer";
@@ -250,35 +469,93 @@ export default function ScoreboardDesigner() {
         assetsRef.current = assets;
     }, [assets]);
 
+    React.useEffect(() => {
+        ensureProjectGoogleFonts(project);
+    }, [project]);
+
     React.useEffect(
         () => () => revokeAssetUrls(assetsRef.current),
         [],
     );
 
     const orderedLayers = React.useMemo(() => orderedPanelLayers(project), [project]);
-    const displayedLayers = React.useMemo(() => {
+    const panelOrderedLayers = React.useMemo(() => {
         if (!layerDrag) return orderedLayers;
         const byId = new Map(orderedLayers.map((layer) => [layer.id, layer]));
         return layerDrag.orderIds
             .map((id) => byId.get(id))
             .filter(Boolean) as DesignerLayer[];
     }, [layerDrag, orderedLayers]);
+    const basePanelItems = React.useMemo(
+        () => layerPanelItems(project, panelOrderedLayers),
+        [panelOrderedLayers, project],
+    );
+    const panelItems = React.useMemo(() => {
+        if (!panelDrag) return basePanelItems;
+        const byKey = new Map(basePanelItems.map((item) => [panelItemKey(item), item]));
+        return panelDrag.itemKeys
+            .map((key) => byKey.get(key))
+            .filter(Boolean) as LayerPanelItem[];
+    }, [basePanelItems, panelDrag]);
+    const displayedLayers = React.useMemo(
+        () => panelItems.flatMap((item) => {
+            if (item.kind === "layer") return [item.layer];
+            return item.collapsed ? [] : item.layers;
+        }),
+        [panelItems],
+    );
     const displayedLayerOrderKey = React.useMemo(
-        () => displayedLayers.map((layer) => layer.id).join("|"),
-        [displayedLayers],
+        () => panelItems.map((item) =>
+            item.kind === "layer"
+                ? `layer:${item.layer.id}`
+                : `group:${item.group.id}:${item.collapsed ? "closed" : "open"}:${item.layers.map((layer) => layer.id).join(",")}`,
+        ).join("|"),
+        [panelItems],
     );
     displayedLayersRef.current = displayedLayers;
     const floatingLayer = layerDrag
         ? orderedLayers.find((layer) => layer.id === layerDrag.sourceId) ?? null
         : null;
     const selectedLayer = project.layers.find((layer) => layer.id === primarySelectedId) ?? null;
+    const gameHistoryAssignments = React.useMemo<GameHistoryLayerAssignment[]>(
+        () => GAME_HISTORY_PART_TARGETS.map((target) => {
+            const assignedLayer = project.layers.find((layer) =>
+                layer.type === "image" &&
+                layer.gameHistoryStyle?.parts?.some((part) =>
+                    part.path.length === 0 &&
+                    part.role === target.role &&
+                    part.setIndex === target.setIndex));
+            return {
+                target,
+                layerId: assignedLayer?.id,
+                layerName: assignedLayer?.name,
+            };
+        }),
+        [project.layers],
+    );
     const selectedLayers = selectedIds
         .map((id) => project.layers.find((layer) => layer.id === id))
         .filter(Boolean) as DesignerLayer[];
+    const selectedGroupId = React.useMemo(() => {
+        const groupIds = new Set(
+            selectedLayers
+                .map((layer) => layer.groupId)
+                .filter(Boolean) as string[],
+        );
+        if (groupIds.size !== 1) return null;
+        const [groupId] = Array.from(groupIds);
+        const groupLayerIds = project.layers
+            .filter((layer) => layer.groupId === groupId)
+            .map((layer) => layer.id);
+        return groupLayerIds.length > 0 &&
+            groupLayerIds.every((id) => selectedIds.includes(id))
+            ? groupId
+            : null;
+    }, [project.layers, selectedIds, selectedLayers]);
     const bindingCounts = React.useMemo(() => {
         const counts = new Map<BindingKey, number>();
         project.layers.forEach((layer) => {
-            if ("binding" in layer) {
+            if ("binding" in layer && layer.binding) {
                 counts.set(layer.binding, (counts.get(layer.binding) ?? 0) + 1);
             }
         });
@@ -310,8 +587,11 @@ export default function ScoreboardDesigner() {
         if (!canUndo) return;
         dispatchProject({type: "undo"});
         setLayerDrag(null);
+        setPanelDrag(null);
         setEditingLayerId(null);
         setEditingLayerName("");
+        setEditingGroupId(null);
+        setEditingGroupName("");
         setMessage("元に戻しました。");
     }, [canUndo]);
 
@@ -319,8 +599,11 @@ export default function ScoreboardDesigner() {
         if (!canRedo) return;
         dispatchProject({type: "redo"});
         setLayerDrag(null);
+        setPanelDrag(null);
         setEditingLayerId(null);
         setEditingLayerName("");
+        setEditingGroupId(null);
+        setEditingGroupName("");
         setMessage("やり直しました。");
     }, [canRedo]);
 
@@ -375,6 +658,18 @@ export default function ScoreboardDesigner() {
             setPrimarySelectedId(nextPrimaryId);
         }
     }, [primarySelectedId, project.layers, selectedIds]);
+
+    React.useEffect(() => {
+        const selected = project.layers.find((item) => item.id === primarySelectedId);
+        if (!selected || selected.type !== "image" || !selected.gameHistoryStyle) {
+            setGameHistoryPartEditLayerId(null);
+            setSelectedGameHistoryPartPath(null);
+        } else if (gameHistoryPartEditLayerId &&
+            gameHistoryPartEditLayerId !== selected.id) {
+            setGameHistoryPartEditLayerId(null);
+            setSelectedGameHistoryPartPath(null);
+        }
+    }, [gameHistoryPartEditLayerId, primarySelectedId, project.layers]);
 
     React.useEffect(() => {
         const keyDown = (event: KeyboardEvent) => {
@@ -435,6 +730,12 @@ export default function ScoreboardDesigner() {
         setPrimarySelectedId(primaryId);
     }, [project.layers]);
 
+    const selectGameHistoryAssignment = React.useCallback((layerId: string) => {
+        setSelection([layerId], layerId);
+        setGameHistoryPartEditLayerId(null);
+        setSelectedGameHistoryPartPath(null);
+    }, [setSelection]);
+
     const updateLayer = React.useCallback((
         id: string,
         patch: Partial<DesignerLayer>,
@@ -453,6 +754,116 @@ export default function ScoreboardDesigner() {
         }), "変更あり", !canvasInteractionRef.current);
     }, [applyProjectChange]);
 
+    const updateGameHistoryPartEditing = React.useCallback((enabled: boolean) => {
+        if (selectedLayer?.type !== "image" || !selectedLayer.gameHistoryStyle) return;
+        updateLayer(selectedLayer.id, {
+            gameHistoryStyle: {
+                ...selectedLayer.gameHistoryStyle,
+                mode: enabled ? "parts" : "slot",
+                parts: selectedLayer.gameHistoryStyle.parts ?? [],
+            },
+        });
+        setGameHistoryPartEditLayerId(enabled ? selectedLayer.id : null);
+        setSelectedGameHistoryPartPath(null);
+    }, [selectedLayer, updateLayer]);
+
+    const updateGameHistoryPart = React.useCallback((
+        layerId: string,
+        path: number[],
+        role: GameHistoryImagePartRole,
+        setIndex?: number,
+    ) => {
+        const layer = project.layers.find((item) => item.id === layerId);
+        if (layer?.type !== "image" || !layer.gameHistoryStyle) return;
+        const pathKey = path.join(".");
+        const hasSetIndex = role === "set" || role === "p1-set" || role === "p2-set";
+        const maxSetIndex = role === "p1-set" || role === "p2-set" ? 2 : 4;
+        const normalizedSetIndex = hasSetIndex
+            ? Math.max(0, Math.min(maxSetIndex, Math.round(setIndex ?? 0)))
+            : undefined;
+        const parts = (layer.gameHistoryStyle.parts ?? []).filter((part) =>
+            !(part.role === role && part.setIndex === normalizedSetIndex) &&
+            (part.path.join(".") !== pathKey ||
+                (isSharedGameHistorySet3(role, normalizedSetIndex) &&
+                    isSharedGameHistorySet3(part.role, part.setIndex) &&
+                    part.role !== role)));
+        const nextPart = {
+            path: [...path],
+            role,
+            ...(role === "set" || role === "p1-set" || role === "p2-set"
+                ? {setIndex: normalizedSetIndex}
+                : {}),
+        };
+        parts.push(nextPart);
+        updateLayer(layerId, {
+            gameHistoryStyle: {
+                ...layer.gameHistoryStyle,
+                mode: "parts",
+                parts,
+            },
+        });
+    }, [project.layers, updateLayer]);
+
+    const selectGameHistoryPart = React.useCallback((layerId: string, path: number[]) => {
+        setSelection([layerId], layerId);
+        setGameHistoryPartEditLayerId(layerId);
+        setSelectedGameHistoryPartPath(path);
+    }, [setSelection]);
+
+    const assignSelectedGameHistoryPart = React.useCallback((
+        target: GameHistoryPartTarget,
+    ) => {
+        if (selectedLayer?.type !== "image" || !selectedLayer.gameHistoryStyle) return;
+        // An empty path represents the selected SVG image layer itself. This
+        // lets the inspector assign a complete SVG layer without a canvas
+        // click on one of its child elements.
+        updateGameHistoryPart(
+            selectedLayer.id,
+            [],
+            target.role,
+            target.setIndex,
+        );
+        setGameHistoryPartEditLayerId(null);
+        setSelectedGameHistoryPartPath(null);
+    }, [selectedLayer, updateGameHistoryPart]);
+
+    const updateSelectedGameHistoryPart = React.useCallback((
+        role: GameHistoryImagePartRole,
+        setIndex?: number,
+    ) => {
+        if (selectedLayer?.type !== "image" || selectedGameHistoryPartPath === null) return;
+        updateGameHistoryPart(
+            selectedLayer.id,
+            selectedGameHistoryPartPath,
+            role,
+            setIndex,
+        );
+    }, [selectedGameHistoryPartPath, selectedLayer, updateGameHistoryPart]);
+
+    const removeSelectedGameHistoryPart = React.useCallback(() => {
+        if (selectedLayer?.type !== "image" || !selectedLayer.gameHistoryStyle ||
+            selectedGameHistoryPartPath === null) return;
+        const pathKey = selectedGameHistoryPartPath.join(".");
+        updateLayer(selectedLayer.id, {
+            gameHistoryStyle: {
+                ...selectedLayer.gameHistoryStyle,
+                parts: (selectedLayer.gameHistoryStyle.parts ?? [])
+                    .filter((part) => part.path.join(".") !== pathKey),
+            },
+        });
+    }, [selectedGameHistoryPartPath, selectedLayer, updateLayer]);
+
+    const removeGameHistoryPartTarget = React.useCallback((target: GameHistoryPartTarget) => {
+        if (selectedLayer?.type !== "image" || !selectedLayer.gameHistoryStyle) return;
+        updateLayer(selectedLayer.id, {
+            gameHistoryStyle: {
+                ...selectedLayer.gameHistoryStyle,
+                parts: (selectedLayer.gameHistoryStyle.parts ?? []).filter((part) =>
+                    !(part.role === target.role && part.setIndex === target.setIndex)),
+            },
+        });
+    }, [selectedLayer, updateLayer]);
+
     const addBinding = () => {
         const layer = createBindingLayer(bindingToAdd, maxZ(project) + 1);
         applyProjectChange(
@@ -465,57 +876,80 @@ export default function ScoreboardDesigner() {
         if (!files?.length) return;
         const nextAssets = {...assets};
         const nextLayers = [...project.layers];
+        const nextProjectAssets = [...project.assets];
         let zIndex = maxZ(project) + 1;
         let lastAddedId: string | null = null;
 
         for (const file of Array.from(files)) {
-            if (file.type !== "image/png" && !file.name.toLowerCase().endsWith(".png")) {
-                setMessage(`${file.name}: PNGのみ追加できます。`);
+            const lowerName = file.name.toLowerCase();
+            const isSvg = file.type === "image/svg+xml" || lowerName.endsWith(".svg");
+            const isPng = file.type === "image/png" || lowerName.endsWith(".png");
+            if (!isPng && !isSvg) {
+                setMessage(`${file.name}: PNGまたはSVGのみ追加できます。`);
                 continue;
             }
             try {
-                const bitmap = await createImageBitmap(file);
+                const {width, height} = await readImageSize(file);
                 const path = makeUniqueAssetPath(file.name, nextAssets);
                 const previewUrl = URL.createObjectURL(file);
                 nextAssets[path] = {path, blob: file, previewUrl};
                 const layer: ImageLayer = {
                     id: createId(),
-                    name: file.name.replace(/\.png$/i, ""),
+                    name: file.name.replace(/\.(png|svg)$/i, ""),
                     type: "image",
                     asset: path,
                     objectFit: "contain",
-                    x: Math.round((1920 - bitmap.width) / 2),
-                    y: Math.round((1080 - bitmap.height) / 2),
-                    width: bitmap.width,
-                    height: bitmap.height,
+                    x: Math.round((1920 - width) / 2),
+                    y: Math.round((1080 - height) / 2),
+                    width,
+                    height,
                     rotation: 0,
                     opacity: 1,
                     zIndex: zIndex++,
                     visible: true,
                     animation: {preset: "fade", durationMs: 450, delayMs: 0},
+                    animations: createDefaultAnimations(0),
+                    events: createDefaultEvents(0),
                 };
-                bitmap.close();
                 nextLayers.push(layer);
+                nextProjectAssets.push({
+                    id: createId(),
+                    kind: "image",
+                    path,
+                    mediaType: isSvg ? "image/svg+xml" : "image/png",
+                });
                 lastAddedId = layer.id;
             } catch {
                 setMessage(`${file.name}: 画像を読み込めませんでした。`);
             }
         }
         setAssets(nextAssets);
-        applyProjectChange((current) => ({...current, layers: nextLayers}), "PNGレイヤーを追加しました。");
+        applyProjectChange(
+            (current) => ({
+                ...current,
+                assets: nextProjectAssets,
+                layers: nextLayers,
+            }),
+            "画像レイヤーを追加しました。",
+        );
         if (lastAddedId) setSelection([lastAddedId], lastAddedId);
         if (imageInputRef.current) imageInputRef.current.value = "";
+        if (svgInputRef.current) svgInputRef.current.value = "";
     };
 
-    const deleteSelected = () => {
+    const deleteSelected = React.useCallback(() => {
         if (!selectedIds.length) return;
         const ids = new Set(selectedIds);
         applyProjectChange((current) => ({
             ...current,
             layers: current.layers.filter((layer) => !ids.has(layer.id)),
+            autoLayouts: current.autoLayouts?.map((layout) => ({
+                ...layout,
+                layerIds: layout.layerIds.filter((id) => !ids.has(id)),
+            })),
         }));
         setSelection([], null);
-    };
+    }, [applyProjectChange, selectedIds, setSelection]);
 
     const duplicateSelected = () => {
         if (!selectedLayers.length) return;
@@ -536,7 +970,11 @@ export default function ScoreboardDesigner() {
             ...current,
             groups: [
                 ...(current.groups ?? []),
-                {id: groupId, name: `グループ ${(current.groups?.length ?? 0) + 1}`},
+                {
+                    id: groupId,
+                    name: `グループ ${(current.groups?.length ?? 0) + 1}`,
+                    collapsed: false,
+                },
             ],
             layers: current.layers.map((layer) =>
                 selectedIds.includes(layer.id)
@@ -545,6 +983,66 @@ export default function ScoreboardDesigner() {
             ),
         }));
     };
+
+    const toggleGroupCollapsed = React.useCallback((groupId: string) => {
+        applyProjectChange((current) => ({
+            ...current,
+            groups: (current.groups ?? []).map((group) =>
+                group.id === groupId
+                    ? {...group, collapsed: !group.collapsed}
+                    : group,
+            ),
+        }));
+    }, [applyProjectChange]);
+
+    const updateGroupName = React.useCallback((groupId: string, name: string) => {
+        applyProjectChange((current) => ({
+            ...current,
+            groups: (current.groups ?? []).map((group) =>
+                group.id === groupId ? {...group, name} : group,
+            ),
+        }));
+    }, [applyProjectChange]);
+
+    const setOnlyLayersVisible = React.useCallback((visibleIds: string[]) => {
+        const visible = new Set(visibleIds);
+        applyProjectChange((current) => ({
+            ...current,
+            layers: current.layers.map((layer) => ({
+                ...layer,
+                visible: visible.has(layer.id),
+            } as DesignerLayer)),
+        }));
+    }, [applyProjectChange]);
+
+    const toggleLayerVisible = React.useCallback((
+        layerId: string,
+        nextVisible: boolean,
+    ) => {
+        applyProjectChange((current) => ({
+            ...current,
+            layers: current.layers.map((layer) =>
+                layer.id === layerId
+                    ? ({...layer, visible: nextVisible} as DesignerLayer)
+                    : layer,
+            ),
+        }));
+    }, [applyProjectChange]);
+
+    const toggleGroupVisible = React.useCallback((
+        groupLayerIds: string[],
+        nextVisible: boolean,
+    ) => {
+        const ids = new Set(groupLayerIds);
+        applyProjectChange((current) => ({
+            ...current,
+            layers: current.layers.map((layer) =>
+                ids.has(layer.id)
+                    ? ({...layer, visible: nextVisible} as DesignerLayer)
+                    : layer,
+            ),
+        }));
+    }, [applyProjectChange]);
 
     const ungroupSelected = () => {
         const groupIds = new Set(
@@ -567,58 +1065,96 @@ export default function ScoreboardDesigner() {
     const loadDefaultTemplate = () => {
         if (project.layers.length && !window.confirm("現在の編集内容を破棄しますか？")) return;
         revokeAssetUrls(assets);
-        const template = defaultTemplateProject();
+        const template = defaultTemplateProject(standardTemplate);
         setAssets({});
         resetProject(template, "標準テンプレートを読み込みました。");
         setSelection([template.layers[0].id], template.layers[0].id);
         setCurrentSlug(null);
     };
 
-    const importFigmaJson = async (files: FileList | null) => {
-        const file = files?.[0];
-        if (!file) return;
+    const selectAllLayers = React.useCallback(() => {
+        const ids = project.layers.map((layer) => layer.id);
+        setSelection(ids, ids[0] ?? null);
+    }, [project.layers, setSelection]);
+
+    const receiveDesignerImport = React.useCallback(async (
+        notification?: {importId?: string},
+    ) => {
         try {
-            const text = await file.text();
-            const parsed = JSON.parse(text);
-            const importedProject = validateProject(parsed.project ?? parsed);
-            const importedAssets: AssetMap = {};
-            for (const [path, dataUrl] of Object.entries(parsed.assets ?? {})) {
-                if (typeof dataUrl === "string") {
-                    importedAssets[path] = await dataUrlToAsset(path, dataUrl);
-                }
+            const importId = notification?.importId;
+            if (importId && handledImportIdsRef.current.has(importId)) return;
+            if (importId) handledImportIdsRef.current.add(importId);
+            const imported = importId
+                ? await loadDesignerImport(importId)
+                : await loadLatestFigmaImport();
+            if (!importId) {
+                revokeAssetUrls(assets);
+                resetProject(
+                    imported.project,
+                    "Figmaプラグインから自動受信しました。",
+                );
+                setAssets(imported.assets);
+                setSelection(
+                    imported.project.layers[0] ? [imported.project.layers[0].id] : [],
+                    imported.project.layers[0]?.id ?? null,
+                );
+                setCurrentSlug(null);
+                return;
             }
-            revokeAssetUrls(assets);
-            resetProject(importedProject, "Figma JSONを読み込みました。");
-            setAssets(importedAssets);
-            setSelection(importedProject.layers[0] ? [importedProject.layers[0].id] : [], importedProject.layers[0]?.id ?? null);
+            const merged = mergeImportedProject(project, imported.project);
+            const warnings = (
+                imported as {
+                    report?: {warnings?: string[]};
+                }
+            ).report?.warnings ?? [];
+            const summary = [
+                `${imported.project.layers.length}レイヤーを取り込みます。`,
+                merged.conflicts.length
+                    ? `${merged.conflicts.length}件の競合はAutona側を維持します。`
+                    : "競合はありません。",
+                warnings.length ? `警告: ${warnings.join(" / ")}` : "",
+            ].filter(Boolean).join("\n");
+            if (!window.confirm(`${summary}\n\n適用しますか？`)) return;
+            resetProject(merged.project, "外部制作ファイルを再インポートしました。");
+            setAssets({...assets, ...imported.assets});
+            setSelection(
+                merged.project.layers[0] ? [merged.project.layers[0].id] : [],
+                merged.project.layers[0]?.id ?? null,
+            );
             setCurrentSlug(null);
         } catch (error: any) {
-            setMessage(error?.message || "Figma JSONを読み込めませんでした。");
-        } finally {
-            if (figmaInputRef.current) figmaInputRef.current.value = "";
+            setMessage(error?.message || "外部制作ファイルを受信できませんでした。");
         }
-    };
+    }, [assets, project, resetProject, setSelection]);
+
+    React.useEffect(() => {
+        if (!desktopMode) return undefined;
+        const socket = socketConnection.instance();
+        socket.on("designer_import_received", receiveDesignerImport);
+        return () => {
+            socket.off("designer_import_received", receiveDesignerImport);
+        };
+    }, [desktopMode, receiveDesignerImport]);
 
     const reorderSelected = (direction: -1 | 1) => {
         if (!selectedLayer) return;
-        const ordered = [...project.layers].sort((a, b) => a.zIndex - b.zIndex);
-        const index = ordered.findIndex((layer) => layer.id === selectedLayer.id);
-        const targetIndex = index + direction;
-        if (targetIndex < 0 || targetIndex >= ordered.length) return;
-        const target = ordered[targetIndex];
-        const currentZ = selectedLayer.zIndex;
-        applyProjectChange((current) => ({
-            ...current,
-            layers: current.layers.map((layer) => {
-                if (layer.id === selectedLayer.id) {
-                    return {...layer, zIndex: target.zIndex} as DesignerLayer;
-                }
-                if (layer.id === target.id) {
-                    return {...layer, zIndex: currentZ} as DesignerLayer;
-                }
-                return layer;
-            }),
-        }));
+        const activeKind = selectedGroupId ? "group" : "layer";
+        const activeId = selectedGroupId ?? selectedLayer.id;
+        const index = panelItems.findIndex((item) =>
+            item.kind === activeKind &&
+            (item.kind === "group" ? item.group.id : item.layer.id) === activeId,
+        );
+        if (index < 0) return;
+        const targetIndex = direction > 0 ? index - 1 : index + 1;
+        if (targetIndex < 0 || targetIndex >= panelItems.length) return;
+        const nextItems = [...panelItems];
+        const [item] = nextItems.splice(index, 1);
+        nextItems.splice(targetIndex, 0, item);
+        reorderLayerIds(nextItems.flatMap((nextItem) =>
+            nextItem.kind === "group"
+                ? nextItem.layers.map((layer) => layer.id)
+                : [nextItem.layer.id],
+        ));
     };
 
     const reorderLayerIds = React.useCallback((orderIds: string[]) => {
@@ -701,6 +1237,82 @@ export default function ScoreboardDesigner() {
         window.addEventListener("pointerup", finish);
     }, [orderedLayers, reorderLayerIds]);
 
+    const startPanelDrag = React.useCallback((
+        event: React.PointerEvent,
+        sourceKey: string,
+    ) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const row = (event.currentTarget as HTMLElement)
+            .closest(".designer-layer-panel-row") as HTMLButtonElement | null;
+        const rect = row?.getBoundingClientRect();
+        if (!rect) return;
+        const initialItems = panelItems;
+        const initialKeys = initialItems.map(panelItemKey);
+        const sourceIndex = initialKeys.indexOf(sourceKey);
+        if (sourceIndex < 0) return;
+        const rowElements = initialKeys
+            .map((key) => panelRowRefs.current[key])
+            .filter(Boolean) as HTMLButtonElement[];
+        const firstTop = rowElements[0]?.getBoundingClientRect().top ?? rect.top;
+        const secondTop = rowElements[1]?.getBoundingClientRect().top;
+        const geometry: LayerDragGeometry = {
+            listTop: firstTop,
+            rowHeight: rect.height,
+            rowStep: secondTop ? secondTop - firstTop : rect.height + 4,
+        };
+        let finalKeys = initialKeys;
+
+        setPanelDrag({
+            sourceKey,
+            pointerY: event.clientY,
+            offsetY: event.clientY - rect.top,
+            left: rect.left,
+            width: rect.width,
+            itemKeys: initialKeys,
+        });
+
+        const move = (moveEvent: PointerEvent) => {
+            setPanelDrag((current) => {
+                if (!current) return current;
+                const draggedCenterY = moveEvent.clientY -
+                    current.offsetY + geometry.rowHeight / 2;
+                const relativeY = draggedCenterY - geometry.listTop;
+                const rawIndex = Math.floor(relativeY / geometry.rowStep);
+                const targetIndex = Math.max(
+                    0,
+                    Math.min(initialKeys.length - 1, rawIndex),
+                );
+                const nextKeys = initialKeys.filter((key) => key !== sourceKey);
+                nextKeys.splice(targetIndex, 0, sourceKey);
+                finalKeys = nextKeys;
+                return {
+                    ...current,
+                    pointerY: moveEvent.clientY,
+                    itemKeys: nextKeys,
+                };
+            });
+        };
+
+        const finish = () => {
+            if (finalKeys.join("\0") !== initialKeys.join("\0")) {
+                const byKey = new Map(initialItems.map((item) => [panelItemKey(item), item]));
+                reorderLayerIds(finalKeys.flatMap((key) => {
+                    const item = byKey.get(key);
+                    if (!item) return [];
+                    return item.kind === "group"
+                        ? item.layers.map((layer) => layer.id)
+                        : [item.layer.id];
+                }));
+            }
+            setPanelDrag(null);
+            window.removeEventListener("pointermove", move);
+            window.removeEventListener("pointerup", finish);
+        };
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", finish);
+    }, [panelItems, reorderLayerIds]);
+
     const selectLayerFromPanel = React.useCallback((
         event: React.MouseEvent,
         layerId: string,
@@ -730,6 +1342,8 @@ export default function ScoreboardDesigner() {
     const startNameEdit = React.useCallback((layer: DesignerLayer) => {
         setEditingLayerId(layer.id);
         setEditingLayerName(layer.name);
+        setEditingGroupId(null);
+        setEditingGroupName("");
         setSelection([layer.id], layer.id);
     }, [setSelection]);
 
@@ -744,6 +1358,26 @@ export default function ScoreboardDesigner() {
     const cancelNameEdit = React.useCallback(() => {
         setEditingLayerId(null);
         setEditingLayerName("");
+    }, []);
+
+    const startGroupNameEdit = React.useCallback((groupId: string, name: string) => {
+        setEditingLayerId(null);
+        setEditingLayerName("");
+        setEditingGroupId(groupId);
+        setEditingGroupName(name);
+    }, []);
+
+    const commitGroupNameEdit = React.useCallback(() => {
+        if (!editingGroupId) return;
+        const nextName = editingGroupName.trim();
+        if (nextName) updateGroupName(editingGroupId, nextName);
+        setEditingGroupId(null);
+        setEditingGroupName("");
+    }, [editingGroupId, editingGroupName, updateGroupName]);
+
+    const cancelGroupNameEdit = React.useCallback(() => {
+        setEditingGroupId(null);
+        setEditingGroupName("");
     }, []);
 
     const newProject = () => {
@@ -828,16 +1462,58 @@ export default function ScoreboardDesigner() {
         <Box className="scoreboard-designer">
             <AppBar position="static">
                 <Toolbar variant="dense" className="designer-toolbar">
-                    <Typography variant="h6" sx={{mr: 2}}>Scoreboard Designer</Typography>
-                    <TextField
-                        size="small"
-                        label="デザイン名"
-                        value={project.name}
-                        onChange={(event) => {
-                            const name = event.target.value;
-                            applyProjectChange((current) => ({...current, name}));
+                    <Typography variant="subtitle1" sx={{mr: 1}}>
+                        Scoreboard Designer
+                    </Typography>
+                    <Button
+                        id="designer-import-button"
+                        aria-controls={importAnchorEl ? "designer-import-menu" : undefined}
+                        aria-haspopup="true"
+                        aria-expanded={importAnchorEl ? "true" : undefined}
+                        variant={importAnchorEl ? "contained" : "text"}
+                        onClick={(event) => setImportAnchorEl(event.currentTarget)}
+                    >
+                        Import
+                    </Button>
+                    <Menu
+                        id="designer-import-menu"
+                        anchorEl={importAnchorEl}
+                        open={Boolean(importAnchorEl)}
+                        onClose={closeImportMenu}
+                        MenuListProps={{
+                            "aria-labelledby": "designer-import-button",
                         }}
-                        sx={{width: 240}}
+                    >
+                        <MenuItem onClick={() => {
+                            closeImportMenu();
+                            imageInputRef.current?.click();
+                        }}>
+                            <AddPhotoAlternate fontSize="small" sx={{mr: 1}} />
+                            PNGを追加
+                        </MenuItem>
+                        <MenuItem onClick={() => {
+                            closeImportMenu();
+                            svgInputRef.current?.click();
+                        }}>
+                            <AddPhotoAlternate fontSize="small" sx={{mr: 1}} />
+                            SVGを追加
+                        </MenuItem>
+                    </Menu>
+                    <input
+                        ref={imageInputRef}
+                        type="file"
+                        accept="image/png,.png"
+                        multiple
+                        hidden
+                        onChange={(event) => addImages(event.target.files)}
+                    />
+                    <input
+                        ref={svgInputRef}
+                        type="file"
+                        accept="image/svg+xml,.svg"
+                        multiple
+                        hidden
+                        onChange={(event) => addImages(event.target.files)}
                     />
                     <ButtonGroup size="small">
                         <Tooltip title="元に戻す">
@@ -868,82 +1544,113 @@ export default function ScoreboardDesigner() {
                     <Button onClick={newProject}>新規</Button>
                     <Button startIcon={<FolderOpen />} onClick={openProject}>開く</Button>
                     <Button startIcon={<Save />} variant="contained" onClick={saveProject}>
-                        保存・OBS出力
+                        保存
                     </Button>
+                    <ButtonGroup size="small" variant="outlined" aria-label="編集モード">
+                        <Button
+                            variant={editorMode === "design" ? "contained" : "outlined"}
+                            onClick={() => setEditorMode("design")}
+                        >
+                            Design
+                        </Button>
+                        <Button
+                            variant={editorMode === "animate" ? "contained" : "outlined"}
+                            onClick={() => setEditorMode("animate")}
+                        >
+                            Animate
+                        </Button>
+                    </ButtonGroup>
                     <Button
                         startIcon={<PlayArrow />}
                         onClick={() => setAnimationNonce((value) => value + 1)}
                     >
                         アニメーション
                     </Button>
-                    <Box className="designer-data-toggle">
-                        <Typography className="designer-data-toggle-label">
-                            {sampleMode ? "サンプルデータ" : "実データ"}
-                        </Typography>
-                        <Switch
-                            size="small"
-                            checked={!sampleMode}
-                            onChange={(event) => setSampleMode(!event.target.checked)}
-                            inputProps={{"aria-label": "実データを使用"}}
-                        />
-                        <Typography
-                            variant="caption"
-                            color="text.secondary"
-                            className="designer-data-toggle-status"
-                        >
-                            {!sampleMode && !hasLiveState
-                                ? `待機中 (${websocketStatus})`
-                                : websocketStatus}
-                        </Typography>
-                    </Box>
-                    <Button
-                        startIcon={<Close />}
-                        color="inherit"
-                        onClick={() => window.close()}
-                    >
-                        閉じる
-                    </Button>
                 </Toolbar>
             </AppBar>
 
             <Box className="designer-workspace">
                 <Box component="aside" className="designer-sidebar designer-left-sidebar">
-                    <Typography variant="subtitle2">追加</Typography>
-                    <input
-                        ref={imageInputRef}
-                        type="file"
-                        accept="image/png,.png"
-                        multiple
-                        hidden
-                        onChange={(event) => addImages(event.target.files)}
-                    />
-                    <input
-                        ref={figmaInputRef}
-                        type="file"
-                        accept="application/json,.json"
-                        hidden
-                        onChange={(event) => importFigmaJson(event.target.files)}
-                    />
-                    <Button
+                    <TextField
+                        size="small"
+                        label="デザイン名"
+                        value={project.name}
+                        onChange={(event) => {
+                            const name = event.target.value;
+                            applyProjectChange((current) => ({...current, name}));
+                        }}
                         fullWidth
-                        variant="outlined"
-                        startIcon={<AddPhotoAlternate />}
-                        onClick={() => imageInputRef.current?.click()}
-                    >
-                        PNGを追加
-                    </Button>
-                    <Stack direction="row" gap={1}>
-                        <Button fullWidth variant="outlined" onClick={loadDefaultTemplate}>
-                            標準テンプレート
-                        </Button>
-                        <Button fullWidth variant="outlined" onClick={() => figmaInputRef.current?.click()}>
-                            Figma JSON
-                        </Button>
-                    </Stack>
+                    />
+                    <Box className="designer-preview-data">
+                        <Typography variant="subtitle2">プレビューデータ</Typography>
+                        <Box className="designer-data-toggle">
+                            <Typography
+                                variant="body2"
+                                color={sampleMode ? "text.primary" : "text.secondary"}
+                            >
+                                サンプル
+                            </Typography>
+                            <Switch
+                                size="small"
+                                checked={!sampleMode}
+                                onChange={(event) => setSampleMode(!event.target.checked)}
+                                slotProps={{
+                                    input: {
+                                        "aria-label": "実データを使用",
+                                        role: "switch",
+                                    },
+                                }}
+                            />
+                            <Typography
+                                variant="body2"
+                                color={!sampleMode ? "text.primary" : "text.secondary"}
+                            >
+                                実データ
+                            </Typography>
+                        </Box>
+                        {!sampleMode && (
+                            <Typography
+                                variant="caption"
+                                color="text.secondary"
+                                className="designer-data-toggle-status"
+                            >
+                                {hasLiveState
+                                    ? websocketStatus
+                                    : `待機中 (${websocketStatus})`}
+                            </Typography>
+                        )}
+                    </Box>
+                    <Divider />
+                    <Typography variant="caption" color="text.secondary">
+                        標準テンプレート
+                    </Typography>
                     <Stack direction="row" gap={1}>
                         <Select
                             size="small"
-                            fullWidth
+                            sx={{flex: 1, minWidth: 0}}
+                            value={standardTemplate}
+                            onChange={(event) =>
+                                setStandardTemplate(event.target.value as StandardTemplateKey)
+                            }
+                            inputProps={{"aria-label": "標準テンプレート"}}
+                        >
+                            {STANDARD_TEMPLATES.map((template) => (
+                                <MenuItem key={template.key} value={template.key}>
+                                    {template.name}
+                                </MenuItem>
+                            ))}
+                        </Select>
+                        <Button variant="outlined" onClick={loadDefaultTemplate}>
+                            読込
+                        </Button>
+                    </Stack>
+                    <Typography variant="caption" color="text.secondary">
+                        動的要素
+                    </Typography>
+                    <Stack direction="row" gap={1}>
+                        <Select
+                            size="small"
+                            sx={{flex: 1, minWidth: 0}}
                             value={bindingToAdd}
                             onChange={(event) => setBindingToAdd(event.target.value as BindingKey)}
                         >
@@ -983,6 +1690,7 @@ export default function ScoreboardDesigner() {
                                 <span>
                                     <IconButton
                                         size="small"
+                                        aria-label="背面へ"
                                         disabled={!selectedLayer}
                                         onClick={() => reorderSelected(-1)}
                                     ><ArrowDownward fontSize="small" /></IconButton>
@@ -992,6 +1700,7 @@ export default function ScoreboardDesigner() {
                                 <span>
                                     <IconButton
                                         size="small"
+                                        aria-label="前面へ"
                                         disabled={!selectedLayer}
                                         onClick={() => reorderSelected(1)}
                                     ><ArrowUpward fontSize="small" /></IconButton>
@@ -1001,6 +1710,7 @@ export default function ScoreboardDesigner() {
                                 <span>
                                     <IconButton
                                         size="small"
+                                        aria-label="複製"
                                         disabled={!selectedLayers.length}
                                         onClick={duplicateSelected}
                                     ><ContentCopy fontSize="small" /></IconButton>
@@ -1010,6 +1720,7 @@ export default function ScoreboardDesigner() {
                                 <span>
                                     <IconButton
                                         size="small"
+                                        aria-label="削除"
                                         disabled={!selectedIds.length}
                                         onClick={deleteSelected}
                                     ><Delete fontSize="small" /></IconButton>
@@ -1041,16 +1752,187 @@ export default function ScoreboardDesigner() {
                         className="designer-layer-list"
                         ref={layerListRef}
                     >
-                        {displayedLayers
-                            .map((layer) => (
+                        {panelItems.map((item) => {
+                            if (item.kind === "group") {
+                                const layerIds = item.layers.map((layer) => layer.id);
+                                const itemKey = panelItemKey(item);
+                                const groupVisible = item.layers.some((layer) => layer.visible);
+                                const groupSelected = layerIds.length > 0 &&
+                                    layerIds.every((id) => selectedIds.includes(id));
+                                const groupPrimary = Boolean(
+                                    primarySelectedId && layerIds.includes(primarySelectedId),
+                                );
+                                return (
+                                    <React.Fragment key={item.group.id}>
+                                        <button
+                                            type="button"
+                                            ref={(element) => {
+                                                panelRowRefs.current[itemKey] = element;
+                                            }}
+                                            className={`designer-layer-panel-row designer-layer-group-row${
+                                                groupSelected ? " selected" : ""
+                                            }${
+                                                groupPrimary ? " primary" : ""
+                                            }${
+                                                panelDrag?.sourceKey === itemKey ? " drag-placeholder" : ""
+                                            }`}
+                                            onClick={() => {
+                                                setSelection(layerIds, layerIds[0] ?? null);
+                                            }}
+                                            onDoubleClick={() =>
+                                                startGroupNameEdit(item.group.id, item.group.name)
+                                            }
+                                        >
+                                            <span
+                                                className="designer-layer-drag"
+                                                onPointerDown={(event) => startPanelDrag(event, itemKey)}
+                                                aria-label={`${item.group.name}を並べ替え`}
+                                                role="button"
+                                            >
+                                                <DragIndicator fontSize="small" />
+                                            </span>
+                                            <IconButton
+                                                size="small"
+                                                component="span"
+                                                aria-label={`${item.group.name}を${
+                                                    item.collapsed ? "展開" : "折りたたみ"
+                                                }`}
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    toggleGroupCollapsed(item.group.id);
+                                                }}
+                                            >
+                                                {item.collapsed
+                                                    ? <KeyboardArrowRight fontSize="small" />
+                                                    : <KeyboardArrowDown fontSize="small" />}
+                                            </IconButton>
+                                            {item.collapsed
+                                                ? <Folder fontSize="small" />
+                                                : <FolderOpen fontSize="small" />}
+                                            {editingGroupId === item.group.id ? (
+                                                <TextField
+                                                    size="small"
+                                                    className="designer-layer-group-name-editor"
+                                                    value={editingGroupName}
+                                                    autoFocus
+                                                    onClick={(event) => event.stopPropagation()}
+                                                    onDoubleClick={(event) => event.stopPropagation()}
+                                                    onChange={(event) => setEditingGroupName(event.target.value)}
+                                                    onBlur={commitGroupNameEdit}
+                                                    onKeyDown={(event) => {
+                                                        if (event.key === "Enter") commitGroupNameEdit();
+                                                        if (event.key === "Escape") cancelGroupNameEdit();
+                                                    }}
+                                                />
+                                            ) : (
+                                                <span className="designer-layer-group-name">
+                                                    {item.group.name}
+                                                </span>
+                                            )}
+                                            <IconButton
+                                                size="small"
+                                                component="span"
+                                                aria-label={`${item.group.name}を${
+                                                    groupVisible ? "非表示" : "表示"
+                                                }`}
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    if (event.altKey) {
+                                                        setOnlyLayersVisible(layerIds);
+                                                        return;
+                                                    }
+                                                    toggleGroupVisible(layerIds, !groupVisible);
+                                                }}
+                                            >
+                                                {groupVisible
+                                                    ? <Visibility fontSize="small" />
+                                                    : <VisibilityOff fontSize="small" />}
+                                            </IconButton>
+                                        </button>
+                                        {!item.collapsed && item.layers.map((layer) => (
+                                            <button
+                                                type="button"
+                                                key={layer.id}
+                                                ref={(element) => {
+                                                    layerRowRefs.current[layer.id] = element;
+                                                    panelRowRefs.current[`layer:${layer.id}`] = element;
+                                                }}
+                                                data-layer-id={layer.id}
+                                                className={`designer-layer-panel-row designer-layer-row designer-layer-row-child${
+                                                    selectedIds.includes(layer.id) ? " selected" : ""
+                                                }${
+                                                    primarySelectedId === layer.id ? " primary" : ""
+                                                }${
+                                                    layerDrag?.sourceId === layer.id ? " drag-placeholder" : ""
+                                                }`}
+                                                onClick={(event) => selectLayerFromPanel(event, layer.id)}
+                                                onDoubleClick={() => startNameEdit(layer)}
+                                            >
+                                                <span
+                                                    className="designer-layer-drag"
+                                                    onPointerDown={(event) => startLayerDrag(event, layer.id)}
+                                                    aria-label={`${layer.name}を並べ替え`}
+                                                    role="button"
+                                                >
+                                                    <DragIndicator fontSize="small" />
+                                                </span>
+                                                <span className={`designer-layer-type type-${layer.type}`}>
+                                                    {layer.type}
+                                                </span>
+                                                {editingLayerId === layer.id ? (
+                                                    <TextField
+                                                        size="small"
+                                                        className="designer-layer-name-editor"
+                                                        value={editingLayerName}
+                                                        autoFocus
+                                                        onClick={(event) => event.stopPropagation()}
+                                                        onDoubleClick={(event) => event.stopPropagation()}
+                                                        onChange={(event) => setEditingLayerName(event.target.value)}
+                                                        onBlur={commitNameEdit}
+                                                        onKeyDown={(event) => {
+                                                            if (event.key === "Enter") commitNameEdit();
+                                                            if (event.key === "Escape") cancelNameEdit();
+                                                        }}
+                                                    />
+                                                ) : (
+                                                    <span className="designer-layer-name">{layer.name}</span>
+                                                )}
+                                                <IconButton
+                                                    size="small"
+                                                    component="span"
+                                                    aria-label={`${layer.name}を${
+                                                        layer.visible ? "非表示" : "表示"
+                                                    }`}
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        if (event.altKey) {
+                                                            setOnlyLayersVisible([layer.id]);
+                                                            return;
+                                                        }
+                                                        toggleLayerVisible(layer.id, !layer.visible);
+                                                    }}
+                                                >
+                                                    {layer.visible
+                                                        ? <Visibility fontSize="small" />
+                                                        : <VisibilityOff fontSize="small" />}
+                                                </IconButton>
+                                            </button>
+                                        ))}
+                                    </React.Fragment>
+                                );
+                            }
+                            const layer = item.layer;
+                            const itemKey = panelItemKey(item);
+                            return (
                                 <button
                                     type="button"
                                     key={layer.id}
                                     ref={(element) => {
                                         layerRowRefs.current[layer.id] = element;
+                                        panelRowRefs.current[itemKey] = element;
                                     }}
                                     data-layer-id={layer.id}
-                                    className={`designer-layer-row${
+                                    className={`designer-layer-panel-row designer-layer-row${
                                         selectedIds.includes(layer.id) ? " selected" : ""
                                     }${
                                         primarySelectedId === layer.id ? " primary" : ""
@@ -1092,9 +1974,16 @@ export default function ScoreboardDesigner() {
                                     <IconButton
                                         size="small"
                                         component="span"
+                                        aria-label={`${layer.name}を${
+                                            layer.visible ? "非表示" : "表示"
+                                        }`}
                                         onClick={(event) => {
                                             event.stopPropagation();
-                                            updateLayer(layer.id, {visible: !layer.visible});
+                                            if (event.altKey) {
+                                                setOnlyLayersVisible([layer.id]);
+                                                return;
+                                            }
+                                            toggleLayerVisible(layer.id, !layer.visible);
                                         }}
                                     >
                                         {layer.visible
@@ -1102,7 +1991,8 @@ export default function ScoreboardDesigner() {
                                             : <VisibilityOff fontSize="small" />}
                                     </IconButton>
                                 </button>
-                            ))}
+                            );
+                        })}
                         {!project.layers.length && (
                             <Typography variant="body2" color="text.secondary" p={1}>
                                 PNGまたは動的要素を追加してください。
@@ -1137,26 +2027,65 @@ export default function ScoreboardDesigner() {
                     selectedIds={selectedIds}
                     primarySelectedId={primarySelectedId}
                     animationNonce={animationNonce}
+                    animationTrack={animationTrack}
                     onSelectionChange={setSelection}
                     onLayerChange={updateLayer}
+                    onDeleteSelected={deleteSelected}
+                    onSelectAll={selectAllLayers}
+                    gameHistoryPartEditLayerId={gameHistoryPartEditLayerId}
+                    selectedGameHistoryPartPath={selectedGameHistoryPartPath}
+                    onGameHistoryPartSelect={selectGameHistoryPart}
                     onInteractionStart={beginCanvasInteraction}
                     onInteractionEnd={endCanvasInteraction}
                 />
 
                 <Box component="aside" className="designer-sidebar designer-right-sidebar">
-                    <Typography variant="subtitle2">プロパティ</Typography>
+                    <Typography variant="subtitle2">
+                        {editorMode === "design" ? "プロパティ" : "アニメーション"}
+                    </Typography>
                     <Divider />
-                    <LayerInspector
-                        layer={selectedLayer}
-                        onChange={(patch) => {
-                            if (selectedLayer) updateLayer(selectedLayer.id, patch);
-                        }}
-                    />
+                    {editorMode === "design" ? (
+                        <LayerInspector
+                            layer={selectedLayer}
+                            gameHistoryAssignments={gameHistoryAssignments}
+                            onGameHistoryAssignmentSelect={selectGameHistoryAssignment}
+                            // Any SVG image can be used as an explicit Game-History
+                            // lamp sheet, including SVGs added directly in Designer.
+                            allowGameHistory={Boolean(
+                                selectedLayer?.type === "image" &&
+                                /\.svg$/i.test(selectedLayer.asset),
+                            )}
+                            gameHistoryPartEditing={
+                                gameHistoryPartEditLayerId === selectedLayer?.id
+                            }
+                            selectedGameHistoryPartPath={selectedGameHistoryPartPath}
+                            onGameHistoryPartEditingChange={updateGameHistoryPartEditing}
+                            onGameHistoryPartTargetAssign={assignSelectedGameHistoryPart}
+                            onGameHistoryPartTargetRemove={removeGameHistoryPartTarget}
+                            onGameHistoryPartRoleChange={updateSelectedGameHistoryPart}
+                            onGameHistoryPartRemove={removeSelectedGameHistoryPart}
+                            onChange={(patch) => {
+                                if (selectedLayer) updateLayer(selectedLayer.id, patch);
+                            }}
+                        />
+                    ) : (
+                        <AnimationPanel
+                            layer={selectedLayer}
+                            trackKey={animationTrack}
+                            onTrackKeyChange={setAnimationTrack}
+                            onPreview={() => setAnimationNonce((value) => value + 1)}
+                            onChange={(patch) => {
+                                if (selectedLayer) updateLayer(selectedLayer.id, patch);
+                            }}
+                        />
+                    )}
                 </Box>
             </Box>
             <Box className="designer-statusbar">
                 <span>{message}</span>
-                <span>1920 × 1080 / {project.layers.length} layers</span>
+                <span>
+                    {project.canvas.width} × {project.canvas.height} / {project.layers.length} layers
+                </span>
             </Box>
             <Dialog
                 open={projectDialogOpen}
