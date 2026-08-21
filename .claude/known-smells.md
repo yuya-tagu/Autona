@@ -124,6 +124,15 @@
 検証時 5件が赤だったが全て意図的挙動変更へのテスト陳腐化（stream 形式/既定、state の city→state 推論削除、
 pronoun 撤去）。現行挙動に合わせ修復し **62件グリーン化済み**。
 
+> **2026-08-21 追記（city→state 推論の復活）**: 上記の「city→state 推論削除」は撤回済み。
+> 削除理由（起動時 46MB JSON パース＋エントラント毎の線形スキャン）は、
+> `scripts/gen_city_to_state.py` がビルド時に `assets/city_to_state.json`
+> （`{国コード: {正規化キー: 州 iso2}}` 約 2.5MB）を事前計算し、
+> `AutonaCountryHelper.FindState` が初回参照時に遅延ロードして O(1) で引く形で解消した。
+> 複数県にまたがる曖昧な市名（Kawasaki / Ota / Minato 等、JP 69 キー・全世界 7,568 キー）は
+> **表に載せず未解決**にする（配信では誤った地域表示が空欄より悪い）。
+> テストは `tests/test_find_state.py`、StartGG 側の挙動 pin は `tests/test_startgg_parse.py`。
+
 **2026-06-27 実施（実態に残る本物の改善 3点）**:
 1. **`oldData` デッドコード除去**: `GetTournamentPhaseGroup` がレガシー REST API を毎回叩いて未使用だった
    ブロックを削除。不要なネットワーク往復（タイムアウト時 最大 ~30秒）を解消。

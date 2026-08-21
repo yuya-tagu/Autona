@@ -563,6 +563,22 @@ class AutonaTeamPlayerWidget(AutonaBasePlayerWidget):
                         if data.get("state_code") == item.get("original_code"):
                             stateIndex = i
                             break
+                # Only when the value is not already an iso2 the combo knows:
+                # a state_code stored by an older build (or typed by hand) can
+                # be a free-form name like "Tokyo". FindState is what resolves
+                # it -- but its first call parses the pre-computed table, and
+                # this runs inside dataLock + BlockSaving on the GUI thread, so
+                # the normal path must never pay for it.
+                if stateIndex == 0 and data.get("country_code"):
+                    resolved = AutonaCountryHelper.FindState(
+                        data.get("country_code"), data.get("state_code"))
+                    if resolved:
+                        for i in range(stateElement.model().rowCount()):
+                            item = stateElement.model().item(i).data(
+                                Qt.ItemDataRole.UserRole)
+                            if item and resolved == item.get("original_code"):
+                                stateIndex = i
+                                break
                 if stateElement.currentIndex() != stateIndex:
                     stateElement.setCurrentIndex(stateIndex)
 

@@ -1058,15 +1058,35 @@ class StartGGDataProvider(TournamentDataProvider):
                                 "code")
                             break
 
-                # State — use only Start.gg's direct state field. City-based
-                # inference was removed: it ran linear scans over the country's
-                # state/city tables for every entrant, adding hundreds of ms
-                # on large pools, and the typical Japanese-user case (state
-                # null, city set to 都道府県 or 市名) didn't reliably resolve.
-                if user.get("location").get("state"):
-                    playerData["state_code"] = user.get("location").get("state")
-                if user.get("location").get("city"):
-                    playerData["city"] = user.get("location").get("city")
+                # State. The city fallback is back, now that it costs an
+                # O(1) lookup in the pre-computed table
+                # (assets/city_to_state.json, lazily loaded once) instead of
+                # a linear scan over the country's state/city tables per
+                # entrant. It matters because the typical Japanese user has
+                # state null and the region in city ("Tokyo", "Shibuya-ku").
+                # The direct field goes through the same table so that a
+                # name ("Tokyo") is normalized to the iso2 the state combo
+                # boxes match on.
+                state_raw = user.get("location").get("state")
+                city_raw = user.get("location").get("city")
+                country = playerData.get("country_code")
+                if state_raw:
+                    # A state Start.gg does know still goes through the table,
+                    # so a name ("Tokyo") becomes the iso2 the state combo
+                    # matches on. When it resolves to nothing -- a region this
+                    # dataset has no entry for -- the city gets a turn before
+                    # the raw string is published as a last resort.
+                    resolved = AutonaCountryHelper.FindState(
+                        country, state_raw) or (
+                        AutonaCountryHelper.FindState(country, city_raw)
+                        if city_raw else None)
+                    playerData["state_code"] = resolved or state_raw
+                elif city_raw and country:
+                    resolved = AutonaCountryHelper.FindState(country, city_raw)
+                    if resolved:
+                        playerData["state_code"] = resolved
+                if city_raw:
+                    playerData["city"] = city_raw
 
             if playerData.get("startggMain"):
                 main = AutonaGameAssetManager.instance.GetCharacterFromStartGGId(
@@ -1530,9 +1550,15 @@ class StartGGDataProvider(TournamentDataProvider):
                     stateData = {}
                     if countryData:
                         states = countryData.get("states")
+                        # .get(), not [...]: state_code can be a raw Start.gg
+                        # string the country's state table has no entry for
+                        # (ProcessEntrantData publishes the raw value when
+                        # FindState cannot resolve it), and a KeyError here
+                        # would take the whole standings load down.
                         if states and stateCode:
-                            stateData = states[stateCode]
+                            stateData = states.get(stateCode) or {}
 
+                        if stateData:
                             path = f'./assets/state_flag/{countryCode}/{"_CON" if stateCode == "CON" else stateCode}.png'
                             if not os.path.exists(path):
                                 path = None
@@ -2104,9 +2130,21 @@ class StartGGDataProvider(TournamentDataProvider):
                                 "code")
                             break
 
-                # State — direct only (see rationale above; city fallback removed).
-                if user.get("location").get("state"):
-                    playerData["state_code"] = user.get("location").get("state")
+                # State — same table-backed resolution as above. This call
+                # site never published "city", so it still doesn't.
+                state_raw = user.get("location").get("state")
+                city_raw = user.get("location").get("city")
+                country = playerData.get("country_code")
+                if state_raw:
+                    resolved = AutonaCountryHelper.FindState(
+                        country, state_raw) or (
+                        AutonaCountryHelper.FindState(country, city_raw)
+                        if city_raw else None)
+                    playerData["state_code"] = resolved or state_raw
+                elif city_raw and country:
+                    resolved = AutonaCountryHelper.FindState(country, city_raw)
+                    if resolved:
+                        playerData["state_code"] = resolved
 
             if playerData.get("startggMains"):
                 if AutonaGameAssetManager.instance.selectedGame:
