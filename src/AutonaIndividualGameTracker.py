@@ -131,10 +131,24 @@ class AutonaIndividualGameTracker(QWidget):
         stageWidget.setLayout(stageLayout)
         return stageWidget
 
+    @assert_gui_thread
     def SetStageCount(self, stage_count=5):
         """Sets the max number of stages in the set"""
 
         self._layout.removeWidget(self.stage_order_list_widget)
+        # ...and actually destroy it. removeWidget() only detaches it from the
+        # layout -- the container stays a child of this tracker, so rebuilding
+        # on every best-of change left a dead container behind for the rest of
+        # the session, with its stage rows and their currentIndexChanged
+        # lambdas still writing score.{n}.stages.*.
+        #
+        # deleteLater() is correct here because this is a QWidget. What
+        # agent-pitfalls #14 bans is takeAt()/removeItem() followed by
+        # deleteLater() on a QLayoutItem: those are not QObjects, so Qt frees
+        # them where Shiboken cannot see it. A QObject-derived widget is
+        # tracked by PySide6, and deleteLater() is the ordinary way to end one.
+        self.stage_order_list_widget.setParent(None)
+        self.stage_order_list_widget.deleteLater()
         self.stage_widget_list = []
         self.stage_order_list_layout = QVBoxLayout()
         self.stage_order_list_widget = QWidget()

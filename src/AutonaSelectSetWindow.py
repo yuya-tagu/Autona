@@ -438,9 +438,10 @@ class AutonaSelectSetWindow(QDialog):
         if setId:
             setId["auto_update"] = "set"
             # Defer past the double-click signal delivery: the set-load
-            # cascade (CommandClearAll -> Clear -> LoadStates -> setModel)
-            # is too heavy to run re-entrantly inside the table view's
-            # signal emission (agent-pitfalls #9; 2026-07-12 crash).
+            # cascade (CommandClearAll -> Clear -> LoadStates -> rebuilding
+            # every player's region list) is too heavy to run re-entrantly
+            # inside the table view's signal emission (agent-pitfalls #9;
+            # 2026-07-12 crash, which was a setModel() swap back then).
             scoreboard = self.parent()
             QTimer.singleShot(
                 0, lambda: scoreboard.signals.NewSetSelected.emit(setId))

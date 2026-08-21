@@ -10,6 +10,10 @@ var oldData = {};
 // being processed (Design.md §3.2.3 R-Sync-8 / §2.3 R-OBS-3a..b).
 var maxAppliedDeltaIdx = -1;
 
+// Whether the last degraded-transport poll failed. Keeps a persistent failure
+// from being reported once per 64ms poll (see UpdateData below).
+var updateDataFailed = false;
+
 // Pull the canonical revision from a payload, falling back to the legacy
 // `delta_index` so older server builds keep working.
 function getRevision(payload) {
@@ -82,10 +86,20 @@ async function UpdateWrapper(event) {
 // connection has failed after max retries. The full snapshot is the
 // source of truth in this mode, so we just advance maxAppliedDeltaIdx
 // from the snapshot's `revision` and don't have to validate gaps.
+//
+// NOTE: don't hand a state object (or any other per-update value) to the
+// console anywhere on the update path. OBS' embedded Chromium (CEF) keeps a
+// reference to what it is given, up to its retention limit, so a log call per
+// state update pins whole snapshots while the browser source lives and the
+// overlay's memory climbs for the length of the stream. Reporting failures
+// with console.warn()/console.error() in catch blocks is fine, as long as a
+// failure that repeats every poll is only reported once (see below).
 async function UpdateData() {
   try {
     oldData = data;
     data = await getData();
+    // Recovered: let the next failure be reported again.
+    updateDataFailed = false;
 
     if(data.timestamp <= oldData.timestamp){
       return
@@ -102,10 +116,16 @@ async function UpdateData() {
     event.data = data;
     event.oldData = oldData;
 
-    console.log(data);
     document.dispatchEvent(event);
   } catch (e) {
-    console.log(e);
+    // This is the degraded path: it polls every 64ms, so a failure that
+    // persists (web server gone, program_state.json unreadable) would hand the
+    // console a fresh Error fifteen times a second. Report the first one and
+    // stay quiet until a poll succeeds again.
+    if (!updateDataFailed) {
+      updateDataFailed = true;
+      console.warn('UpdateData() failed; staying quiet until it recovers', e);
+    }
   }
 }
 
@@ -166,7 +186,7 @@ async function UpdateData_SocketIO() {
     });
 
     socket.on('error', (err) => {
-      console.log(err);
+      console.warn(err);
     });
 
     socket.on('program_state', (message) => {
@@ -183,13 +203,11 @@ async function UpdateData_SocketIO() {
       event.data = data;
       event.oldData = oldData;
 
-      console.log(data);
       document.dispatchEvent(event);
     });
 
     socket.on('program_state_update', (message) => {
       try {
-        console.log("Handling state delta: ", message);
         HandleTSHStateUpdateMessage(message);
       } catch (e) {
         // We failed to handle the program state, so request a new update.
@@ -197,7 +215,7 @@ async function UpdateData_SocketIO() {
       }
     });
   } catch(e) {
-    console.log(e);
+    console.warn(e);
   }
 }
 
@@ -325,8 +343,8 @@ async function LoadSettings() {
       cache: false,
     });
   } catch (e) {
-    console.log("Could not load global settings.json");
-    console.log(e);
+    console.warn("Could not load global settings.json");
+    console.warn(e);
   }
 
   let file_settings = {};
@@ -337,8 +355,8 @@ async function LoadSettings() {
       cache: false,
     });
   } catch (e) {
-    console.log("Could not load local settings.json");
-    console.log(e);
+    console.warn("Could not load local settings.json");
+    console.warn(e);
   }
 
   tsh_settings = _.defaultsDeep(window.settings, file_settings, global_settings);
@@ -414,7 +432,7 @@ async function Transcript(text) {
       return text;
     }
   } catch (e) {
-    console.log(e);
+    console.warn(e);
     return text;
   }
 }
@@ -564,7 +582,6 @@ function resizeInCanvas(image, width, height) {
 // Detect div size changes for character images
 var imageResizeObserver = new ResizeObserver((entries) => {
   for (const entry of entries) {
-    console.log("Resized");
     CenterImageDo(entry.target);
   }
 });
@@ -603,7 +620,7 @@ async function CenterImage(element, assetData, options = {}) {
       }
     });
   } catch (e) {
-    console.log(e);
+    console.warn(e);
   }
 }
 
@@ -839,7 +856,7 @@ async function CenterImageDo(element) {
       await loadImage();
     }
   } catch (e) {
-    console.log(e);
+    console.warn(e);
   }
 }
 
@@ -919,7 +936,6 @@ function HandleTSHStateUpdateMessage(message) {
   applyDeltas(data, deltas);
   event.data = data;
   maxAppliedDeltaIdx = rev;
-  console.log(data);
 
   // it's fine if this doesn't fire because we threw an exception earlier, because
   // that means state wasn't applied and we've requested new program state.

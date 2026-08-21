@@ -160,7 +160,7 @@ async function updateCharacterContainer(e, event) {
       slice_player = settings.slice_player;
     }
   } catch (e) {
-    console.log(e);
+    console.warn(e);
   }
 
   let slice_character = [0, Infinity];
@@ -170,7 +170,7 @@ async function updateCharacterContainer(e, event) {
       slice_character = settings.slice_character;
     }
   } catch (e) {
-    console.log(e);
+    console.warn(e);
   }
 
   let players = [];
@@ -267,14 +267,12 @@ async function updateCharacterContainer(e, event) {
                 totalCharacters,
                 settings.custom_center
               )[index];
-              console.log(settingsClone.custom_center);
             }
 
             let asset = settingsClone.asset_key
               ? GetCharacterAsset(settingsClone.asset_key, character)
               : GetBiggestAsset(character);
 
-            console.log(settingsClone);
             if (!settingsClone.custom_zoom)
               settingsClone.custom_zoom = GetRecommendedZoom(asset, $(e).width(), $(e).height());
 
