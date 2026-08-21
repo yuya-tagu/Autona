@@ -106,7 +106,7 @@ Get-Content _internal/assets/versions.json -Raw   # "program" が新バージョ
 cd C:\Users\ayuyt\Work\30_Products\Autona
 .\scripts\gen_release.ps1
 Remove-Item -Recurse -Force ./Autona -ErrorAction SilentlyContinue   # staging 掃除
-"ZIP: {0:N1} MB" -f ((Get-Item release-windows.zip).Length / 1MB)    # 310〜330 MB 前後が正常（WebEngine 同梱。大きく外れたら同梱物を確認）
+"ZIP: {0:N1} MB" -f ((Get-Item release-windows.zip).Length / 1MB)    # 280〜290 MiB 前後が正常（v1.5.0 の PyInstaller excludes 適用後の実績: v1.5.1 / v1.6.0 とも 282.7 MiB。大きく外れたら同梱物を確認）
 ```
 
 ### 8. リリースノートを作成して publish
