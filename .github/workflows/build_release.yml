@@ -7,14 +7,22 @@
 #      Contents: Read and write).
 #   2. Add it to THIS repo's Actions secrets as RELEASE_REPO_TOKEN.
 #
-# NOTE: This full build+publish pipeline has not been validated in CI yet.
-#       Trigger it manually (workflow_dispatch) and confirm the produced
-#       release-windows.zip runs before relying on it. The reliable, supported
-#       path today is the local script scripts/publish_release.ps1.
+# Safety: the release is created as a DRAFT by default. Download the zip from
+# the draft (or from the workflow artifact), confirm Autona.exe starts, then
+# publish the draft from the GitHub UI. Pass publish_mode=publish only once
+# this CI pipeline has been validated end-to-end.
 name: Build Release
 
 on:
     workflow_dispatch:
+        inputs:
+            publish_mode:
+                description: "draft: create a draft release (verify before publishing). publish: publish immediately."
+                type: choice
+                options:
+                    - draft
+                    - publish
+                default: draft
 
 jobs:
     build:
@@ -26,10 +34,12 @@ jobs:
               with:
                   lfs: true
 
+            # 3.11 matches the validated local dev/build environment. Keep in
+            # sync with the machine that produced past releases before bumping.
             - name: Set up Python
               uses: actions/setup-python@v5
               with:
-                  python-version: "3.14"
+                  python-version: "3.11"
 
             - name: Set up Node
               uses: actions/setup-node@v4
@@ -45,16 +55,42 @@ jobs:
                   npm ci
                   npm run build
 
+            # onedir build: PyInstaller emits dist/Autona/ containing the
+            # launcher Autona.exe plus the _internal/ runtime tree. Both must
+            # sit at the project root for gen_release.ps1 to package them.
             - name: Build Autona.exe
-              run: |
-                  pyinstaller --noconfirm .\dependencies\autona.spec
-                  copy dist\Autona.exe Autona.exe
-
-            - name: Package release zip
               shell: pwsh
               run: |
-                  cd scripts
-                  .\gen_release.ps1
+                  pyinstaller --noconfirm .\dependencies\autona.spec
+                  if (-not (Test-Path dist\Autona\Autona.exe)) { throw "dist\Autona\Autona.exe not found (onedir layout expected)" }
+                  if (-not (Test-Path dist\Autona\_internal)) { throw "dist\Autona\_internal not found (onedir layout expected)" }
+                  Copy-Item -Force dist\Autona\Autona.exe .\Autona.exe
+                  Copy-Item -Recurse -Force dist\Autona\_internal .\_internal
+
+            # Guard against shipping a build made before the version bump:
+            # the versions.json embedded in _internal must match the repo's.
+            - name: Verify embedded version
+              shell: pwsh
+              run: |
+                  $repoVer = (Get-Content assets/versions.json -Raw | ConvertFrom-Json).program
+                  $exeVer = (Get-Content _internal/assets/versions.json -Raw | ConvertFrom-Json).program
+                  if ($repoVer -ne $exeVer) { throw "version mismatch: repo=$repoVer embedded=$exeVer" }
+                  echo "version $repoVer OK"
+
+            # gen_release.ps1 is $PSScriptRoot-based (CWD-safe) and runs
+            # validate_release_zip.ps1 itself as the final gate.
+            - name: Package release zip
+              shell: pwsh
+              run: .\scripts\gen_release.ps1
+
+            # Keep the exact zip attached to the run so it can be inspected
+            # even if the publish step fails or the draft is discarded.
+            - name: Upload zip as workflow artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: release-windows
+                  path: release-windows.zip
+                  compression-level: 0
 
             - name: Publish Release to public repo
               shell: pwsh
@@ -62,9 +98,16 @@ jobs:
                   # PAT with Contents:write on yuya-tagu/Autona-releases.
                   GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
               run: |
+                  if (-not $env:GH_TOKEN) { throw "RELEASE_REPO_TOKEN secret is not configured (see header comment). The zip is available as a workflow artifact." }
                   $version = (Get-Content assets/versions.json -Raw | ConvertFrom-Json).program
                   $tag = "v$version"
+                  $draftFlag = @()
+                  if ("${{ inputs.publish_mode }}" -ne "publish") { $draftFlag = @("--draft") }
+                  $notesFile = "docs/releases/$tag.md"
+                  $notesArgs = @("--notes", "Autona $tag")
+                  if (Test-Path $notesFile) { $notesArgs = @("--notes-file", $notesFile) }
                   gh release create $tag release-windows.zip `
                       --repo yuya-tagu/Autona-releases `
                       --title $tag `
-                      --notes "Autona $tag"
+                      @draftFlag @notesArgs
+                  if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
