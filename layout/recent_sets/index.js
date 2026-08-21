@@ -38,7 +38,6 @@ LoadEverything().then(() => {
         JSON.stringify(data.score[window.scoreboardNumber].recent_sets)
     ) {
       playersRecentSets = data.score[window.scoreboardNumber].recent_sets;
-      console.log(playersRecentSets);
     }
 
     recentSetsHtml = "";

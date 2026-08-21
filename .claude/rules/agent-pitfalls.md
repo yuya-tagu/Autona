@@ -133,9 +133,7 @@ access violation を起こす（2026-07-11 起動クラッシュ:
 `AutonaPlayerDB.SetupModel` の `setSourceModel` で発生）。
 
 - 再構築時は旧モデルを属性に退避して**最低 1 世代は生かす**:
-  `AutonaPlayerDB._retiredModel` / `AutonaGameAssetManager._retiredModels` /
-  `AutonaBasePlayerWidget._retiredStateModel`（2026-07-12 クラッシュ:
-  セット読込 → Clear → LoadStates の state コンボ `setModel` で AV）が実例
+  `AutonaPlayerDB._retiredModel` / `AutonaGameAssetManager._retiredModels` が実例
 - 新モデルへの `setSourceModel()` / `setModel()` の付け替えが完了するまで
   旧モデルを削除しない。全消費者が onLoad 等の後続ハンドラで付け替える場合は
   ハンドラ完了まで（= 次回再構築まで）保持する
@@ -143,6 +141,39 @@ access violation を起こす（2026-07-11 起動クラッシュ:
   `setSourceModel` / `QCompleter.setModel` は keepReference を持ち、単純な
   差し替え単体は安全。ただし編集可能コンボ（オートコンプリータ／ポップアップ
   付き）やシグナル連鎖の深部での差し替えは保証外のため、退避パターンを常用する
+
+**そもそもモデルを差し替えない方が安全（2026-08-21 更新）**: retire パターンは
+AV は防ぐが**リークは防がない**。`AutonaBasePlayerWidget.LoadStates` は
+国変更のたびに新しい `QStandardItemModel` を張り替えており、**捨てたモデルが
+解放されず蓄積**していた（セット読込 1 回につき選手 1 人あたりモデル 1 個・
+`QStandardItem` 約 106 個。実測 300 反映で約 +100MB）。
+現在は state コンボを **in-place refill に移行済み**（`_EnsureStateModel()` で
+生涯 1 回だけ `setModel`、以後は `clear()` + `appendRow()` で行を入れ替え。
+`_retiredStateModel` は廃止）。同じ形の「1 モデルを使い回す」実装は
+`AutonaSelectSetWindow` にもある。
+
+- 保持機構は未特定（素の `QComboBox` 単体では旧モデルは解放される）。
+  一般則として「コンボは渡された全モデルを保持する」と書かないこと。
+  実アプリ構成でのみ再現する事象として扱い、**差し替えないことで機構に依存せず
+  回避する**のが正解
+- pin: `tests/test_player_widgets.py`
+  （`test_reloading_states_does_not_accumulate_models` ほか。
+  リークする操作列は「ブランク国を経由する再構築」= `Clear()` → `SetData`。
+  国 A → 国 B の直接切替では再現しないので、テストは実セット読込の形で書く）
+
+## 13b. `QStandardItem.appendRows()` は追加した item の wrapper を解放しない（2026-08-21 実測）
+
+親 item 経由の一括追加（`model.invisibleRootItem().appendRows(items)`）は、
+追加した item を **root item の wrapper に登録したまま解放しない**。モデルを
+使い回して `clear()` → 再充填する構成だと、`clear()` しても登録が残るため
+**item だけが無限に増える**（モデル数は増えないので気づきにくい）。
+
+- 安全: `model.appendRow(item)` のループ / `model.removeRows()` + `appendRow` /
+  既存 item を `setData` で書き換える in-place 更新（いずれも実測で増加ゼロ）
+- 危険: `invisibleRootItem().appendRows(rows)`（6 回リフィルで +318 item）
+- ライブモデルへ 1 行ずつ追加するとビュー／コンプリータへの通知が行数ぶん出る。
+  `with QSignalBlocker(combo):` で囲み、最後に必要なシグナルだけ 1 回 emit して
+  旧 `setModel` 相当の発火に揃える（実装例: `LoadStates`）
 
 ## 14. QLayoutItem 系は PySide6 の追跡外 — 破棄前に `Shiboken.invalidate()` する（2026-08-03 フルスイートAV根治で確定）
 

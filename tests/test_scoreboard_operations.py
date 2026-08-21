@@ -16,9 +16,27 @@ StateManager is what OBS overlays and the Web UI actually consume -- a
 spinbox showing the right number while the state kept the old one is the
 failure these tests exist to catch.
 """
+from unittest.mock import patch
+
 import pytest
 
-from qtpy.QtWidgets import QCheckBox, QLineEdit
+from qtpy.QtCore import QCoreApplication, QEvent
+from qtpy.QtWidgets import QCheckBox, QLineEdit, QWidget
+from shiboken6 import Shiboken
+
+from src.SettingsManager import SettingsManager
+
+# The individual game tracker ships disabled, so the stage rows it rebuilds on
+# every best-of change are not built at all by default. Patching the lookup
+# (rather than writing the setting) keeps SettingsManager -- which is
+# process-global and shared with the rest of the session -- untouched.
+_realSettingsGet = SettingsManager.Get
+
+
+def _trackerEnabled(key, default=None):
+    if key == "general.disable_individual_game_tracker":
+        return False
+    return _realSettingsGet(key, default)
 
 
 def _score(app, team, board=1):
@@ -120,6 +138,75 @@ def test_best_of_zero_blanks_the_long_texts(autonaApp):
     # 0 means "not set" — the overlay shows nothing rather than "Best of 0".
     assert autonaApp.get("score.1.best_of_text") == ""
     assert autonaApp.get("score.1.first_to_text") == ""
+
+
+def test_changing_best_of_does_not_pile_up_stage_rows(autonaApp):
+    """Each best-of change rebuilds the game tracker's stage list.
+
+    It used to keep every list it had ever built: removeWidget() takes the old
+    container out of the layout but leaves it parented to the tracker, so the
+    dead rows stayed alive -- along with the currentIndexChanged lambdas that
+    write score.1.stages.*, which then answered a stage-model reload from
+    widgets no longer on screen.
+
+    Run with the tracker switched on, so the rows themselves are built and
+    counted; the default (off) build would only ever leak the empty container.
+    """
+    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
+        board = autonaApp.board(1)
+        tracker = board.individualGameTracker
+
+        # Warm up through one full rebuild, so the baseline is a settled
+        # tracker rather than the one __init__ happened to leave behind.
+        board.bestOfSpin.setValue(5)
+        board.bestOfSpin.setValue(3)
+        autonaApp.settle()
+        before = len(tracker.findChildren(QWidget))
+
+        for value in (5, 3, 5, 3, 5, 3):
+            board.bestOfSpin.setValue(value)
+        autonaApp.settle()
+
+        assert len(tracker.findChildren(QWidget)) == before, (
+            "a best-of change left its old stage list parented to the tracker. "
+            "removeWidget() only detaches it from the layout -- the container "
+            "has to be destroyed, or every rebuild stays alive for the session")
+
+
+def test_the_replaced_stage_list_is_destroyed(autonaApp):
+    """Un-parenting the old list is not enough: it has to be deleted.
+
+    The count above only sees the tracker's children, so setParent(None) alone
+    would satisfy it while the container -- and its stage rows, and their
+    connections -- lived on as an orphaned top-level widget. This is the half
+    that pins the deleteLater().
+
+    The harness never reaps deferred deletions on its own (loop level 0, no
+    exec(); see tests/conftest.py), so the DeferredDelete is delivered here
+    explicitly, aimed at the container so nothing else is torn down with it.
+    """
+    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
+        board = autonaApp.board(1)
+        tracker = board.individualGameTracker
+
+        board.bestOfSpin.setValue(5)
+        autonaApp.settle()
+        replaced = tracker.stage_order_list_widget
+        assert Shiboken.isValid(replaced)
+
+        board.bestOfSpin.setValue(3)
+        autonaApp.settle()
+
+        assert replaced is not tracker.stage_order_list_widget
+        assert replaced.parent() is None, (
+            "the replaced stage list is still parented to the tracker")
+
+        QCoreApplication.sendPostedEvents(replaced, QEvent.Type.DeferredDelete)
+        assert not Shiboken.isValid(replaced), (
+            "the replaced stage list was never handed to deleteLater(), so "
+            "nothing will ever destroy it: it stays alive as an orphan, with "
+            "its stage combos still connected to the shared stage model and "
+            "still writing score.1.stages.*")
 
 
 # ── swap ─────────────────────────────────────────────────────────────────

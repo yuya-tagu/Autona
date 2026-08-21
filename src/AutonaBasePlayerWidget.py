@@ -225,6 +225,39 @@ class AutonaBasePlayerWidget(QGroupBox):
 
             self.CharactersChanged()
 
+    def _EnsureStateModel(self) -> QStandardItemModel:
+        """Return the state combo's model, creating it on first use.
+
+        The combo keeps ONE model for the widget's lifetime: rows are cleared
+        and refilled in place, never swapped for a fresh model (same pattern as
+        AutonaSelectSetWindow).
+
+        Building a new QStandardItemModel per country change leaked. Measured
+        on this widget: a set load changes the country twice (Clear() empties
+        it, SetData puts it back), and each load left one model of ~50
+        icon-bearing rows per player alive for the rest of the session --
+        ~106 QStandardItems per loaded set, growing without bound.
+
+        What holds the discarded model has NOT been pinned down: a bare
+        QComboBox in isolation does release the model it is handed, so this is
+        not the general rule "a combo keeps every model given to setModel()".
+        Something about this widget's configuration keeps them, and rather than
+        chase it, the model is never replaced -- which is safe whatever the
+        mechanism turns out to be. Refilling in place also removes the
+        setModel() swap that agent-pitfalls #13 had to guard with a retired
+        generation: setModel() now runs exactly once, at construction, when the
+        outgoing model is the combo's own empty default and no completer or
+        popup can still be reading from it.
+        """
+        model = getattr(self, "_stateModel", None)
+        if model is None:
+            # Parented, so it dies with the widget rather than relying on the
+            # attribute below being the last reference.
+            model = QStandardItemModel(self)
+            self._stateModel = model
+            self._w("state", QComboBox).setModel(model)
+        return model
+
     def LoadStates(self, index):
         country: QComboBox = self._w("country", QComboBox)
 
@@ -239,17 +272,19 @@ class AutonaBasePlayerWidget(QGroupBox):
         # the country often stays the same across successive SetData calls.
         if hasattr(self, "_loadedStatesCountryCode") and self._loadedStatesCountryCode == new_code:
             return
-        self._loadedStatesCountryCode = new_code
 
         countryData = {}
         if new_code is not None:
             countryData = AutonaCountryHelper.countries.get(new_code, {})
 
-        stateModel = QStandardItemModel()
+        # Build the rows first, then put them into the live model in one
+        # blocked stretch (see below) — the flag lookups below touch the disk
+        # and have no business happening between two model notifications.
+        rows = []
 
         noState = QStandardItem()
         noState.setData({}, Qt.ItemDataRole.UserRole)
-        stateModel.appendRow(noState)
+        rows.append(noState)
 
         states = countryData.get("states")
 
@@ -270,18 +305,34 @@ class AutonaBasePlayerWidget(QGroupBox):
                 item.setData(states[state_code], Qt.ItemDataRole.UserRole)
                 item.setData(
                     f'{states[state_code]["name"]} ({state_code})', Qt.ItemDataRole.EditRole)
-                stateModel.appendRow(item)
+                rows.append(item)
 
+        stateModel = self._EnsureStateModel()
         state: QComboBox = self._w("state", QComboBox)
-        # Retire — don't drop — the outgoing model. The editable combo's
-        # auto-completer/popup still hold references into it during the
-        # setModel swap; releasing the last Python reference mid-swap is the
-        # access-violation family documented in agent-pitfalls #13
-        # (2026-07-12 crash: set load -> Clear -> LoadStates).
-        self._retiredStateModel = getattr(self, "_stateModel", None)
-        self._stateModel = stateModel
-        state.setModel(stateModel)
-        state.setCurrentIndex(0)
+
+        # Refill in place, one row at a time through the model's own
+        # appendRow(). invisibleRootItem().appendRows(rows) would hand the
+        # whole list over in a single call, but PySide6 registers every item
+        # appended that way on the root item's wrapper and never releases it --
+        # the rows would then pile up for the widget's lifetime, exactly where
+        # the discarded models used to. appendRow() on the model does not.
+        #
+        # Signals stay blocked for the whole clear + refill so consumers see a
+        # single index change for the rebuild, exactly as they did when a
+        # finished model was attached with setModel(). NOTE: the old setModel()
+        # path also emitted currentTextChanged/editTextChanged; nothing is
+        # connected to either on this combo, so only currentIndexChanged is
+        # replayed here.
+        with QSignalBlocker(state):
+            stateModel.clear()
+            for item in rows:
+                stateModel.appendRow(item)
+            state.setCurrentIndex(0)
+        state.currentIndexChanged.emit(state.currentIndex())
+
+        # Last: a country whose rebuild raised half-way must not be recorded as
+        # loaded, or the guard above would keep serving the broken list.
+        self._loadedStatesCountryCode = new_code
 
     def LoadSkinOptions(self, element, target):
         characterData = element.currentData()
@@ -411,6 +462,12 @@ class AutonaBasePlayerWidget(QGroupBox):
             country.currentIndexChanged.connect(self.LoadStates)
 
             state: QComboBox = self._w("state", QComboBox)
+            # Attach the lifetime model first, while we are outside any signal
+            # handler and nothing is connected to this combo yet: setModel()
+            # re-points the completer and the view, so it belongs before they
+            # are configured, not after. Every later LoadStates() only refills
+            # its rows.
+            self._EnsureStateModel()
             state.completer().setFilterMode(Qt.MatchFlag.MatchContains)
             state.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
             state.completer().setFilterMode(Qt.MatchFlag.MatchContains)

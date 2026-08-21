@@ -22,9 +22,16 @@ AutonaTeamPlayerWidget's only caller, AutonaTeamBattleWidget, is commented out
 in src/Autona.py -- see test_the_team_board_uses_the_scoreboard_player_widget
 below, which pins that so this file's premise cannot rot silently.
 """
+import gc
+from unittest.mock import patch
+
 import pytest
 
-from qtpy.QtWidgets import QLineEdit, QSpinBox
+from qtpy.QtGui import QStandardItem, QStandardItemModel
+from qtpy.QtWidgets import QComboBox, QLineEdit, QSpinBox
+
+from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
+from src.StateManager import StateManager
 
 # Both parametrized values build a real widget; see _players().
 KINDS = ["scoreboard", "team"]
@@ -653,3 +660,194 @@ def test_the_avatar_follows_a_player_swap(autonaApp, kind):
 
     assert autonaApp.get(f"{left.path}.online_avatar") is None
     assert autonaApp.get(f"{right.path}.online_avatar") == AVATAR
+
+
+# ── The state combo's model outlives the rebuilds ────────────────────────
+#
+# Loading a set changes the player's country twice: Clear() empties it and
+# SetData puts it back. LoadStates rebuilds the region list on each change,
+# and it used to hand the combo a brand-new QStandardItemModel every time.
+# Measured on this widget, every discarded model then stayed alive: ~50
+# icon-bearing rows per player per loaded set, for the rest of the session.
+#
+# What kept them has not been pinned down -- a bare QComboBox in isolation
+# does release the model it is handed, so this is not the general rule "a
+# combo keeps every model it is given". These tests therefore assert the
+# observable (nothing accumulates, the model object never changes) rather
+# than a mechanism. Nothing failed while it leaked; the process just grew for
+# as long as the stream ran, which is why it went unnoticed, and why only
+# repetition makes it visible.
+
+def _liveCounts():
+    """How many models and how many rows are alive in the process.
+
+    Both halves matter, and the model count alone is not enough: refilling one
+    model through invisibleRootItem().appendRows() keeps the model count flat
+    while every appended item stays registered on the root item's wrapper --
+    same leak, one level down (agent-pitfalls #13b).
+    """
+    gc.collect()
+    gc.collect()
+    objects = gc.get_objects()
+    return (len([o for o in objects if isinstance(o, QStandardItemModel)]),
+            len([o for o in objects if isinstance(o, QStandardItem)]))
+
+
+def _loadSet(player, index, country="JP", state="13"):
+    """The player-side shape of a set load.
+
+    The board clears every player first (CommandClearAll -> Clear(), which
+    empties the country combo and rebuilds the regions for "no country") and
+    then hands each one its new data, which rebuilds them again for the real
+    country. That empty-then-refill pair is what stranded a model: going
+    straight from one country to another does not, so a test that only
+    switches countries passes against the bug.
+    """
+    player.Clear()
+    player.SetData({"gamerTag": f"TAG{index}", "country_code": country,
+                    "state_code": state}, dontLoadFromDB=True)
+
+
+def _loadSets(player, count):
+    for i in range(count):
+        _loadSet(player, i)
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_reloading_states_does_not_accumulate_models(autonaApp, kind):
+    """The pin: repeating the rebuild must not add live models or rows.
+
+    Counted process-wide rather than per-widget, because the leak was not a
+    dangling attribute anyone could find by inspection: nothing in the widget
+    referred to the discarded models, and only their continued existence gave
+    them away.
+    """
+    player = _player(autonaApp, kind)
+
+    # Warm up: the first two loads create the model and the country/state
+    # tables, so the baseline is taken with everything already built.
+    _loadSets(player, 2)
+    autonaApp.settle()
+    models, items = _liveCounts()
+
+    _loadSets(player, 8)
+    autonaApp.settle()
+    modelsAfter, itemsAfter = _liveCounts()
+
+    assert modelsAfter == models, (
+        "a set load left a QStandardItemModel behind. LoadStates has to refill "
+        "the state combo's existing model rather than hand the combo a new "
+        "one: a replaced model is not reliably released here, so one per "
+        "country change grows the process for the whole session.")
+    assert itemsAfter == items, (
+        f"a set load left {(itemsAfter - items) / 8:.0f} QStandardItems behind "
+        "per load. The rows have to go into the model one at a time through "
+        "model.appendRow(); invisibleRootItem().appendRows() keeps every item "
+        "it appends registered on the root item, which clear() does not "
+        "release (agent-pitfalls #13b).")
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_the_state_combo_keeps_one_model_for_its_lifetime(autonaApp, kind):
+    """The mechanism: same model object before and after, and only one.
+
+    This is what makes the count above stay flat, and it is the assertion that
+    says *why* if the count ever moves.
+    """
+    player = _player(autonaApp, kind)
+    combo = player._w("state", QComboBox)
+
+    _loadSets(player, 2)
+    autonaApp.settle()
+    first = combo.model()
+
+    _loadSets(player, 6)
+    autonaApp.settle()
+
+    assert combo.model() is first, (
+        "the state combo was handed a different model; it must be refilled "
+        "in place")
+    # Counted by identity: PySide6 registers the current model under more than
+    # one key, so the same object legitimately shows up twice here. What must
+    # never grow is the number of *distinct* models.
+    held = {id(o) for o in gc.get_referents(combo)
+            if isinstance(o, QStandardItemModel)}
+    assert len(held) == 1, (
+        f"the state combo is holding {len(held)} distinct models. A model it "
+        "is handed is not reliably released, so setModel() may only be called "
+        "once, when the combo is built.")
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_refilled_states_still_resolve(autonaApp, kind):
+    """Refilling in place must leave a combo the region lookup can read.
+
+    SetData walks stateElement.model().item(i) to find the region, so a
+    rebuild that left the rows, the row count or the item payload behind
+    would publish the wrong region -- or none -- while the model count
+    stayed reassuringly flat.
+    """
+    player = _player(autonaApp, kind)
+
+    # Come from a different country first: this is the rebuild path, not the
+    # initial fill.
+    _loadSet(player, 0, country="US", state="CA")
+    autonaApp.settle()
+    assert autonaApp.get(f"{player.path}.state").get("original_code") == "CA"
+
+    _loadSet(player, 1, country="JP", state="13")
+    autonaApp.settle()
+
+    combo = player._w("state", QComboBox)
+    # Every region of the country, plus the blank row each rebuild starts with.
+    expected = len(AutonaCountryHelper.countries["JP"]["states"]) + 1
+    assert combo.model().rowCount() == expected
+    assert autonaApp.get(f"{player.path}.state").get("original_code") == "13"
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_a_rebuild_publishes_the_state_exactly_once(autonaApp, kind):
+    """The refill must look like the old model swap to everyone downstream.
+
+    Attaching a finished model with setModel() produced exactly one index
+    change per rebuild. Clearing and refilling a live model would produce one
+    per row instead, so the combo is blocked for the refill and the single
+    change is replayed by hand afterwards -- which is easy to drop, and just
+    as easy to end up emitting twice. Both show up here: the published value
+    is written once per rebuild, and it is {} while no country is selected.
+    """
+    player = _player(autonaApp, kind)
+    _loadSet(player, 0)
+    autonaApp.settle()
+
+    published = []
+    original = StateManager.Set
+
+    def recordingSet(key, value):
+        if key == f"{player.path}.state":
+            published.append(value)
+        return original(key, value)
+
+    with patch.object(StateManager, "Set", side_effect=recordingSet):
+        player.Clear()
+        autonaApp.settle()
+        afterClear = list(published)
+
+        published.clear()
+        player.SetData({"gamerTag": "TAG", "country_code": "JP",
+                        "state_code": "13"}, dontLoadFromDB=True)
+        autonaApp.settle()
+        duringLoad = list(published)
+
+    assert afterClear == [{}], (
+        f"emptying the country published the region {afterClear!r}; expected "
+        "exactly one empty write. The refill either lost its replayed "
+        "currentIndexChanged or emitted it more than once.")
+
+    # Loading writes twice on purpose: the rebuild resets the combo to its
+    # blank row, then the region the set actually carries is selected. It is
+    # the first of those -- the replayed change -- that must happen once.
+    assert duringLoad.count({}) == 1, (
+        f"the rebuild's own publish happened {duringLoad.count({})} times "
+        f"during one country change (writes: {duringLoad!r})")
+    assert duringLoad[-1].get("original_code") == "13"
