@@ -53,7 +53,9 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
         ...init,
         headers: {
             "X-Autona-Designer-Token": token(),
-            ...(init?.body ? {"Content-Type": "application/json"} : {}),
+            ...(init?.body && !(init.body instanceof FormData)
+                ? {"Content-Type": "application/json"}
+                : {}),
             ...init?.headers,
         },
     });
@@ -68,7 +70,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(new Error("PNGを読み込めませんでした。"));
+        reader.onerror = () => reject(new Error("画像を読み込めませんでした。"));
         reader.readAsDataURL(blob);
     });
 }
@@ -99,13 +101,14 @@ export async function saveDesktopProject(
 ): Promise<{slug: string; path: string}> {
     const validated = validateProject(project);
     const encodedAssets: Record<string, string> = {};
-    for (const layer of validated.layers) {
-        if (layer.type !== "image" || encodedAssets[layer.asset]) continue;
-        const asset = assets[layer.asset];
+    const assetPaths = validated.assets.map((asset) => asset.path);
+    for (const path of assetPaths) {
+        if (encodedAssets[path]) continue;
+        const asset = assets[path];
         if (!asset) {
-            throw new Error(`${layer.name} の画像データが読み込まれていません。`);
+            throw new Error(`${path} のassetデータが読み込まれていません。`);
         }
-        encodedAssets[layer.asset] = await blobToDataUrl(asset.blob);
+        encodedAssets[path] = await blobToDataUrl(asset.blob);
     }
     return apiRequest("/api/designer/projects", {
         method: "POST",
@@ -127,6 +130,40 @@ export async function loadDesktopProject(
         assets[path] = await dataUrlToAsset(path, dataUrl);
     }
     return {project, assets, slug: result.slug};
+}
+
+export async function loadLatestFigmaImport(): Promise<{
+    project: ScoreboardProject;
+    assets: AssetMap;
+}> {
+    const result = await apiRequest<{
+        project: ScoreboardProject;
+        assets: Record<string, string>;
+    }>("/api/designer/imports/latest");
+    const project = validateProject(result.project);
+    const assets: AssetMap = {};
+    for (const [path, dataUrl] of Object.entries(result.assets)) {
+        assets[path] = await dataUrlToAsset(path, dataUrl);
+    }
+    return {project, assets};
+}
+
+export async function loadDesignerImport(importId: string): Promise<{
+    project: ScoreboardProject;
+    assets: AssetMap;
+    report?: {warnings?: string[]; rasterizedLayers?: number};
+}> {
+    const result = await apiRequest<{
+        project: ScoreboardProject;
+        assets: Record<string, string>;
+        report?: {warnings?: string[]; rasterizedLayers?: number};
+    }>(`/api/designer/imports/${encodeURIComponent(importId)}`);
+    const project = validateProject(result.project);
+    const assets: AssetMap = {};
+    for (const [path, dataUrl] of Object.entries(result.assets)) {
+        assets[path] = await dataUrlToAsset(path, dataUrl);
+    }
+    return {project, assets, report: result.report};
 }
 
 export async function deleteDesktopProject(

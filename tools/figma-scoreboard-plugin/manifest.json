@@ -1,0 +1,17 @@
+{
+  "name": "Autona Scoreboard Export",
+  "id": "autona-scoreboard-export",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "networkAccess": {
+    "allowedDomains": [
+      "none"
+    ],
+    "devAllowedDomains": [
+      "http://localhost:5000/"
+    ],
+    "reasoning": "Send selected scoreboard layers to the local Autona desktop web server."
+  }
+}

@@ -1,15 +1,31 @@
 import React from "react";
-import {Box} from "@mui/material";
+import {
+    Box,
+    Button,
+    ButtonGroup,
+    Tooltip,
+} from "@mui/material";
+import Add from "@mui/icons-material/Add";
+import CenterFocusStrong from "@mui/icons-material/CenterFocusStrong";
+import Remove from "@mui/icons-material/Remove";
 import {BASE_URL} from "../env";
-import {playLayerAnimation} from "./animation";
+import {playEventTimeline} from "./animation";
 import {resolveBinding} from "./bindings";
 import {
     AssetMap,
     DataTextLayer,
     DesignerLayer,
+    DesignerAsset,
     GameHistoryLayer,
+    ImageLayer,
     ScoreboardProject,
 } from "./types";
+import {
+    colorizeGameHistorySvg,
+    colorizeGameHistorySvgParts,
+    gameHistoryImageStatus,
+    svgElementPath,
+} from "./svgGameHistory";
 
 interface Props {
     project: ScoreboardProject;
@@ -18,8 +34,14 @@ interface Props {
     selectedIds: string[];
     primarySelectedId: string | null;
     animationNonce: number;
+    animationTrack: "sceneEnter" | "dataChange";
     onSelectionChange: (ids: string[], primaryId: string | null) => void;
     onLayerChange: (id: string, patch: Partial<DesignerLayer>) => void;
+    onDeleteSelected: () => void;
+    onSelectAll: () => void;
+    gameHistoryPartEditLayerId?: string | null;
+    selectedGameHistoryPartPath?: number[] | null;
+    onGameHistoryPartSelect?: (layerId: string, path: number[]) => void;
     onInteractionStart?: () => void;
     onInteractionEnd?: () => void;
 }
@@ -92,14 +114,60 @@ function AutoFitText({layer, value}: {layer: DataTextLayer; value: string}) {
 
 function GameHistory({
     layer,
+    assets,
     state,
 }: {
     layer: GameHistoryLayer;
+    assets: AssetMap;
     state: any;
 }) {
     const bestOf = Math.max(0, Number(resolveBinding("games", state)) || 0);
     const p1 = Math.max(0, Number(resolveBinding("p1.score", state)) || 0);
     const p2 = Math.max(0, Number(resolveBinding("p2.score", state)) || 0);
+    const customSlots = layer.slots?.slice(0, Math.min(5, bestOf));
+    if (customSlots) {
+        return (
+            <div
+                className="designer-games designer-games-custom"
+                style={{gap: layer.gap, position: "relative"}}
+            >
+                {customSlots.map((slot, index) => {
+                    const status = index < p1
+                        ? "p1"
+                        : index < p1 + p2 ? "p2" : "neutral";
+                    const source = assets[slot.asset]?.previewUrl;
+                    return (
+                        <div
+                            key={`${slot.asset}-${index}`}
+                            className={`designer-game-slot designer-game-slot-${status}`}
+                            style={{
+                                position: "absolute",
+                                left: slot.x,
+                                top: slot.y,
+                                width: slot.width,
+                                height: slot.height,
+                                opacity: (slot.opacity ?? 1) * (
+                                    status === "neutral" ? 0.35 : 1),
+                                border: `${layer.borderWidth}px solid ${
+                                    status === "p1" ? layer.p1Color
+                                        : status === "p2" ? layer.p2Color
+                                            : layer.borderColor}`,
+                                borderRadius: layer.radius,
+                                boxSizing: "border-box",
+                                filter: status === "neutral" ? "grayscale(1)" : undefined,
+                            }}
+                        >
+                            {source ? (
+                                <img src={source} alt="" style={{objectFit: "contain"}} />
+                            ) : (
+                                <div className="designer-missing-asset">SVGなし</div>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+        );
+    }
     return (
         <div className="designer-games" style={{gap: layer.gap}}>
             {Array.from({length: bestOf}, (_, index) => {
@@ -124,6 +192,71 @@ function GameHistory({
     );
 }
 
+function SvgGameHistoryImage({
+    layer,
+    asset,
+    state,
+    partEditing,
+    selectedPartPath,
+    onPartSelect,
+}: {
+    layer: ImageLayer;
+    asset: DesignerAsset;
+    state: any;
+    partEditing: boolean;
+    selectedPartPath?: number[] | null;
+    onPartSelect?: (path: number[]) => void;
+}) {
+    const style = layer.gameHistoryStyle!;
+    const status = gameHistoryImageStatus(style, state);
+    const [source, setSource] = React.useState<string | null>(null);
+
+    React.useEffect(() => {
+        let cancelled = false;
+        setSource(null);
+        asset.blob.text().then((source) => {
+            if (cancelled) return;
+            setSource(source);
+        }).catch(() => {
+            if (!cancelled) setSource(null);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [asset]);
+
+    const markup = React.useMemo(() => {
+        if (!source) return null;
+        if (style.mode === "parts") {
+            return colorizeGameHistorySvgParts(
+                source,
+                style,
+                state,
+                selectedPartPath ?? null,
+            );
+        }
+        return colorizeGameHistorySvg(source, status, style);
+    }, [selectedPartPath, source, state, status, style]);
+
+    if (!markup) {
+        return <img src={asset.previewUrl} alt="" style={{objectFit: layer.objectFit}} />;
+    }
+    return (
+        <div
+            className={`designer-svg-game-history${partEditing ? " part-editing" : ""}`}
+            onPointerDown={partEditing ? (event) => event.stopPropagation() : undefined}
+            onClick={partEditing ? (event) => {
+                event.stopPropagation();
+                const root = event.currentTarget.querySelector("svg");
+                const target = event.target instanceof Element ? event.target : null;
+                const path = root && target ? svgElementPath(target, root) : null;
+                if (path) onPartSelect?.(path);
+            } : undefined}
+            dangerouslySetInnerHTML={{__html: markup}}
+        />
+    );
+}
+
 function previewImageSource(value: string): string {
     if (value.startsWith("../logo.png")) {
         return `${BASE_URL}/layout/logo.png${value.includes("?") ? value.slice(value.indexOf("?")) : ""}`;
@@ -135,19 +268,41 @@ function LayerContent({
     layer,
     assets,
     state,
+    gameHistoryPartEditLayerId,
+    selectedGameHistoryPartPath,
+    onGameHistoryPartSelect,
 }: {
     layer: DesignerLayer;
     assets: AssetMap;
     state: any;
+    gameHistoryPartEditLayerId?: string | null;
+    selectedGameHistoryPartPath?: number[] | null;
+    onGameHistoryPartSelect?: (layerId: string, path: number[]) => void;
 }) {
     if (layer.type === "image") {
-        const source = assets[layer.asset]?.previewUrl;
+        const asset = assets[layer.asset];
+        const source = asset?.previewUrl;
+        if (layer.gameHistoryStyle && asset) {
+            return (
+                <SvgGameHistoryImage
+                    layer={layer}
+                    asset={asset}
+                    state={state}
+                    partEditing={gameHistoryPartEditLayerId === layer.id}
+                    selectedPartPath={selectedGameHistoryPartPath}
+                    onPartSelect={(path) => onGameHistoryPartSelect?.(layer.id, path)}
+                />
+            );
+        }
         return source
             ? <img src={source} alt="" style={{objectFit: layer.objectFit}} />
             : <div className="designer-missing-asset">画像なし<br />{layer.asset}</div>;
     }
     if (layer.type === "data-text") {
-        return <AutoFitText layer={layer} value={String(resolveBinding(layer.binding, state))} />;
+        const value = layer.binding
+            ? String(resolveBinding(layer.binding, state))
+            : String(layer.text ?? "");
+        return <AutoFitText layer={layer} value={value} />;
     }
     if (layer.type === "data-image") {
         const source = previewImageSource(String(resolveBinding(layer.binding, state)));
@@ -155,7 +310,10 @@ function LayerContent({
             ? <img src={source} alt="" style={{objectFit: layer.objectFit}} />
             : <div className="designer-empty-data">画像データなし</div>;
     }
-    return <GameHistory layer={layer} state={state} />;
+    if (layer.type === "game-history") {
+        return <GameHistory layer={layer} assets={assets} state={state} />;
+    }
+    return null;
 }
 
 function CanvasLayer({
@@ -165,6 +323,10 @@ function CanvasLayer({
     selected,
     primary,
     animationNonce,
+    animationTrack,
+    gameHistoryPartEditLayerId,
+    selectedGameHistoryPartPath,
+    onGameHistoryPartSelect,
     onPointerStart,
     onPointerSelect,
 }: {
@@ -174,6 +336,10 @@ function CanvasLayer({
     selected: boolean;
     primary: boolean;
     animationNonce: number;
+    animationTrack: "sceneEnter" | "dataChange";
+    gameHistoryPartEditLayerId?: string | null;
+    selectedGameHistoryPartPath?: number[] | null;
+    onGameHistoryPartSelect?: (layerId: string, path: number[]) => void;
     onPointerStart: (
         event: React.PointerEvent,
         layer: DesignerLayer,
@@ -183,9 +349,11 @@ function CanvasLayer({
 }) {
     const animatedRef = React.useRef<HTMLDivElement>(null);
     React.useEffect(() => {
-        if (animatedRef.current && layer.visible) {
-            playLayerAnimation(animatedRef.current, layer.animation, layer.opacity);
+        const timeline = layer.events[animationTrack];
+        if (animatedRef.current && layer.visible && timeline) {
+            playEventTimeline(animatedRef.current, timeline);
         }
+        return undefined;
     }, [animationNonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
     if (!layer.visible) return null;
@@ -202,7 +370,9 @@ function CanvasLayer({
                 width: layer.width,
                 height: layer.height,
                 zIndex: layer.zIndex,
-                transform: `rotate(${layer.rotation}deg)`,
+                transform: layer.assetTransformApplied
+                    ? `scale(${layer.flipX ? -1 : 1}, ${layer.flipY ? -1 : 1})`
+                    : `rotate(${layer.rotation}deg) scale(${layer.flipX ? -1 : 1}, ${layer.flipY ? -1 : 1})`,
             }}
             onPointerDown={(event) => {
                 onPointerSelect(event, layer);
@@ -215,7 +385,14 @@ function CanvasLayer({
                 className="designer-layer-content"
                 style={{opacity: layer.opacity}}
             >
-                <LayerContent layer={layer} assets={assets} state={state} />
+                <LayerContent
+                    layer={layer}
+                    assets={assets}
+                    state={state}
+                    gameHistoryPartEditLayerId={gameHistoryPartEditLayerId}
+                    selectedGameHistoryPartPath={selectedGameHistoryPartPath}
+                    onGameHistoryPartSelect={onGameHistoryPartSelect}
+                />
             </div>
             {primary && (
                 <>
@@ -331,8 +508,14 @@ export default function DesignerCanvas({
     selectedIds,
     primarySelectedId,
     animationNonce,
+    animationTrack,
     onSelectionChange,
     onLayerChange,
+    onDeleteSelected,
+    onSelectAll,
+    gameHistoryPartEditLayerId,
+    selectedGameHistoryPartPath,
+    onGameHistoryPartSelect,
     onInteractionStart,
     onInteractionEnd,
 }: Props) {
@@ -340,6 +523,7 @@ export default function DesignerCanvas({
     const [scale, setScale] = React.useState(0.5);
     const [pan, setPan] = React.useState({x: 0, y: 0});
     const [selectionRect, setSelectionRect] = React.useState<Rect | null>(null);
+    const scaleRef = React.useRef(scale);
     const manualZoomRef = React.useRef(false);
     const spacePressedRef = React.useRef(false);
     const selectedIdsRef = React.useRef(selectedIds);
@@ -353,27 +537,75 @@ export default function DesignerCanvas({
         projectRef.current = project;
     }, [project]);
 
+    const updateScale = React.useCallback((nextScale: number, manual = true) => {
+        manualZoomRef.current = manual;
+        const next = clamp(nextScale, MIN_SCALE, MAX_SCALE);
+        scaleRef.current = next;
+        setScale(next);
+    }, []);
+
+    const fitCanvas = React.useCallback(() => {
+        const viewport = viewportRef.current;
+        if (!viewport) return;
+        const next = Math.min(
+            (viewport.clientWidth - 32) / project.canvas.width,
+            (viewport.clientHeight - 32) / project.canvas.height,
+        );
+        updateScale(next, false);
+        setPan({x: 0, y: 0});
+    }, [project.canvas.height, project.canvas.width, updateScale]);
+
     React.useLayoutEffect(() => {
         const resize = () => {
-            const viewport = viewportRef.current;
-            if (!viewport || manualZoomRef.current) return;
-            const next = Math.min(
-                (viewport.clientWidth - 32) / project.canvas.width,
-                (viewport.clientHeight - 32) / project.canvas.height,
-            );
-            setScale(Math.max(MIN_SCALE, next));
-            setPan({x: 0, y: 0});
+            if (!manualZoomRef.current) fitCanvas();
         };
         resize();
         const observer = new ResizeObserver(resize);
         if (viewportRef.current) observer.observe(viewportRef.current);
         return () => observer.disconnect();
-    }, [project.canvas.width, project.canvas.height]);
+    }, [fitCanvas]);
+
+    React.useEffect(() => {
+        const viewport = viewportRef.current;
+        if (!viewport) return;
+        const wheel = (event: WheelEvent) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.ctrlKey || event.metaKey) {
+                updateScale(
+                    scaleRef.current * (event.deltaY < 0 ? 1.1 : 0.9),
+                );
+                return;
+            }
+            setPan((current) => ({
+                x: current.x - event.deltaX,
+                y: current.y - event.deltaY,
+            }));
+        };
+        viewport.addEventListener("wheel", wheel, {passive: false});
+        return () => viewport.removeEventListener("wheel", wheel);
+    }, [updateScale]);
 
     React.useEffect(() => {
         const keyDown = (event: KeyboardEvent) => {
             if (event.code === "Space") {
                 spacePressedRef.current = true;
+                return;
+            }
+            const target = event.target as HTMLElement | null;
+            if (target && (
+                /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) ||
+                target.isContentEditable
+            )) return;
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+                event.preventDefault();
+                onSelectAll();
+                return;
+            }
+            if ((event.key === "Delete" || event.key === "Backspace") &&
+                selectedIdsRef.current.length) {
+                event.preventDefault();
+                onDeleteSelected();
                 return;
             }
             const directions: Record<string, Point> = {
@@ -384,8 +616,6 @@ export default function DesignerCanvas({
             };
             const direction = directions[event.key];
             if (!direction || !selectedIdsRef.current.length) return;
-            const target = event.target as HTMLElement | null;
-            if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
             event.preventDefault();
             const step = event.shiftKey ? 10 : 1;
             selectedIdsRef.current.forEach((id) => {
@@ -406,7 +636,7 @@ export default function DesignerCanvas({
             window.removeEventListener("keydown", keyDown);
             window.removeEventListener("keyup", keyUp);
         };
-    }, [onLayerChange]);
+    }, [onDeleteSelected, onLayerChange, onSelectAll]);
 
     const canvasPoint = React.useCallback((clientX: number, clientY: number): Point => {
         const viewport = viewportRef.current?.getBoundingClientRect();
@@ -587,24 +817,6 @@ export default function DesignerCanvas({
         onSelectionChange([next.id], next.id);
     }, [canvasPoint, onSelectionChange, primarySelectedId, project.layers]);
 
-    const handleWheel = React.useCallback((event: React.WheelEvent) => {
-        event.preventDefault();
-        if (event.ctrlKey || event.metaKey) {
-            manualZoomRef.current = true;
-            const nextScale = clamp(
-                scale * (event.deltaY < 0 ? 1.1 : 0.9),
-                MIN_SCALE,
-                MAX_SCALE,
-            );
-            setScale(nextScale);
-        } else {
-            setPan((current) => ({
-                x: current.x - event.deltaX,
-                y: current.y - event.deltaY,
-            }));
-        }
-    }, [scale]);
-
     return (
         <Box
             ref={viewportRef}
@@ -612,8 +824,48 @@ export default function DesignerCanvas({
             tabIndex={0}
             onPointerDown={startCanvasPointer}
             onDoubleClick={handleDoubleClick}
-            onWheel={handleWheel}
         >
+            <Box
+                className="designer-zoom-controls"
+                onPointerDown={(event) => event.stopPropagation()}
+                onDoubleClick={(event) => event.stopPropagation()}
+            >
+                <ButtonGroup size="small" variant="contained" aria-label="キャンバスのズーム">
+                    <Tooltip title="縮小">
+                        <Button
+                            aria-label="キャンバスを縮小"
+                            onClick={() => updateScale(scaleRef.current / 1.1)}
+                        >
+                            <Remove fontSize="small" />
+                        </Button>
+                    </Tooltip>
+                    <Tooltip title="100%に戻す">
+                        <Button
+                            className="designer-zoom-value"
+                            aria-label="キャンバスを100%に戻す"
+                            onClick={() => {
+                                updateScale(1);
+                                setPan({x: 0, y: 0});
+                            }}
+                        >
+                            {Math.round(scale * 100)}%
+                        </Button>
+                    </Tooltip>
+                    <Tooltip title="拡大">
+                        <Button
+                            aria-label="キャンバスを拡大"
+                            onClick={() => updateScale(scaleRef.current * 1.1)}
+                        >
+                            <Add fontSize="small" />
+                        </Button>
+                    </Tooltip>
+                    <Tooltip title="キャンバス全体を表示">
+                        <Button aria-label="キャンバス全体を表示" onClick={fitCanvas}>
+                            <CenterFocusStrong fontSize="small" />
+                        </Button>
+                    </Tooltip>
+                </ButtonGroup>
+            </Box>
             <div
                 className="designer-canvas-shell"
                 style={{
@@ -642,6 +894,14 @@ export default function DesignerCanvas({
                                 selected={selectedIds.includes(layer.id)}
                                 primary={primarySelectedId === layer.id}
                                 animationNonce={animationNonce}
+                                animationTrack={animationTrack}
+                                gameHistoryPartEditLayerId={gameHistoryPartEditLayerId}
+                                selectedGameHistoryPartPath={
+                                    primarySelectedId === layer.id
+                                        ? selectedGameHistoryPartPath
+                                        : null
+                                }
+                                onGameHistoryPartSelect={onGameHistoryPartSelect}
                                 onPointerStart={startInteraction}
                                 onPointerSelect={handlePointerSelect}
                             />

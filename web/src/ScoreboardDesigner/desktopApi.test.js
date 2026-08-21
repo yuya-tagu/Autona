@@ -2,12 +2,15 @@ import {
     deleteDesktopProject,
     isDesktopDesigner,
     listDesktopProjects,
+    loadLatestFigmaImport,
     saveDesktopProject,
 } from "./desktopApi";
 import {createEmptyProject} from "./model";
 
 describe("desktop Designer API", () => {
     beforeEach(() => {
+        URL.createObjectURL = jest.fn(() => "blob:preview");
+        URL.revokeObjectURL = jest.fn();
         window.history.replaceState(
             {}, "", "/web?view=designer&desktop=1&token=desktop-token");
         global.fetch = jest.fn(async (url, init) => {
@@ -78,4 +81,58 @@ describe("desktop Designer API", () => {
             }),
         );
     });
+
+    test("loads the latest Figma import with the desktop token", async () => {
+        const pngData = "data:image/png;base64,iVBORw0KGgp0ZXN0";
+        global.fetch = jest.fn(async (url) => {
+            if (url === pngData) {
+                return {blob: async () => new Blob(["png"], {type: "image/png"})};
+            }
+            return {
+                ok: true,
+                json: async () => ({
+                    project: {
+                        ...createEmptyProject("Figma Import"),
+                        assets: [{
+                            id: "frame-asset",
+                            kind: "image",
+                            path: "assets/frame.png",
+                            mediaType: "image/png",
+                        }],
+                        layers: [{
+                            id: "frame",
+                            name: "Frame",
+                            type: "image",
+                            asset: "assets/frame.png",
+                            objectFit: "contain",
+                            x: 0,
+                            y: 0,
+                            width: 1920,
+                            height: 1080,
+                            rotation: 0,
+                            opacity: 1,
+                            zIndex: 1,
+                            visible: true,
+                            animation: {preset: "none", durationMs: 0, delayMs: 0},
+                        }],
+                    },
+                    assets: {"assets/frame.png": pngData},
+                }),
+            };
+        });
+
+        const result = await loadLatestFigmaImport();
+
+        expect(result.project.name).toBe("Figma Import");
+        expect(result.assets["assets/frame.png"].blob).toBeInstanceOf(Blob);
+        expect(global.fetch).toHaveBeenCalledWith(
+            "/api/designer/imports/latest",
+            expect.objectContaining({
+                headers: expect.objectContaining({
+                    "X-Autona-Designer-Token": "desktop-token",
+                }),
+            }),
+        );
+    });
+
 });

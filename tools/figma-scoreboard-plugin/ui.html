@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: Inter, "Noto Sans JP", sans-serif;
+      font-size: 12px;
+    }
+    body {
+      margin: 0;
+      padding: 14px;
+      color: var(--figma-color-text);
+      background: var(--figma-color-bg);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 15px;
+      font-weight: 700;
+    }
+    label {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--figma-color-text-secondary);
+      font-size: 11px;
+    }
+    input,
+    select,
+    button {
+      box-sizing: border-box;
+      width: 100%;
+      border: 1px solid var(--figma-color-border);
+      border-radius: 4px;
+      padding: 7px 8px;
+      color: var(--figma-color-text);
+      background: var(--figma-color-bg);
+      font: inherit;
+    }
+    button {
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button.primary {
+      border-color: var(--figma-color-bg-brand);
+      color: var(--figma-color-text-onbrand);
+      background: var(--figma-color-bg-brand);
+    }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: .55;
+    }
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .layers {
+      margin-top: 12px;
+      border: 1px solid var(--figma-color-border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .layer {
+      display: grid;
+      grid-template-columns: 1fr 118px;
+      gap: 8px;
+      padding: 10px;
+      border-top: 1px solid var(--figma-color-border);
+      cursor: pointer;
+    }
+    .layer.is-focused {
+      background: var(--figma-color-bg-secondary);
+      box-shadow: inset 3px 0 0 var(--figma-color-bg-brand);
+    }
+    .layer:first-child {
+      border-top: 0;
+    }
+    .layer-title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 600;
+    }
+    .layer-title-line {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+    .layer-title-line .layer-title {
+      flex: 1;
+      min-width: 0;
+    }
+    .focus-layer {
+      width: auto;
+      flex: 0 0 auto;
+      padding: 3px 6px;
+      color: var(--figma-color-text-secondary);
+      font-size: 10px;
+      font-weight: 500;
+    }
+    .layer-meta {
+      margin-top: 3px;
+      color: var(--figma-color-text-secondary);
+      font-size: 11px;
+    }
+    .binding {
+      grid-column: 1 / -1;
+    }
+    .status {
+      min-height: 34px;
+      margin-top: 12px;
+      padding: 8px;
+      border-radius: 6px;
+      background: var(--figma-color-bg-secondary);
+      white-space: pre-wrap;
+    }
+    .error {
+      color: var(--figma-color-text-danger);
+    }
+    .empty {
+      padding: 12px;
+      color: var(--figma-color-text-secondary);
+    }
+  </style>
+</head>
+<body>
+  <h1>Autona Scoreboard Export</h1>
+
+  <div>
+    <label for="project-name">デザイン名</label>
+    <input id="project-name" value="Figma Scoreboard">
+  </div>
+
+  <div id="layers" class="layers">
+    <div class="empty">FigmaでLayerを選択してください。</div>
+  </div>
+
+  <div class="actions">
+    <button id="send" class="primary" type="button">Autonaへ送信</button>
+    <button id="close" type="button">閉じる</button>
+  </div>
+
+  <div id="status" class="status">Autonaを起動し、既定ポート5000で待機してください。</div>
+
+  <script>
+    const AUTONA_IMPORT_URL = "http://localhost:5000/api/designer/imports";
+    const layerState = new Map();
+    let bindings = [];
+    let imageBindings = new Set();
+    let selectedLayers = [];
+    let focusedLayerIds = new Set();
+    let sending = false;
+
+    const layersEl = document.getElementById("layers");
+    const statusEl = document.getElementById("status");
+    const sendButton = document.getElementById("send");
+
+    function setStatus(message, isError = false) {
+      statusEl.textContent = message;
+      statusEl.classList.toggle("error", isError);
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;",
+        "'": "&#39;",
+      }[char]));
+    }
+
+    function bindingOptions(mode, selected) {
+      const allowed = bindings.filter((binding) => {
+        if (mode === "data-image") return imageBindings.has(binding);
+        if (mode === "game-history") return binding === "games";
+        if (mode === "data-text") return !imageBindings.has(binding) && binding !== "games";
+        return true;
+      });
+      return allowed.map((binding) =>
+        `<option value="${binding}"${binding === selected ? " selected" : ""}>${binding}</option>`
+      ).join("");
+    }
+
+    function defaultLayerState(layer) {
+      const suggestedBinding = layer.suggestedBinding || undefined;
+      return {
+        mode: layer.suggestedMode || (layer.isText ? "data-text" : layer.isVector ? "svg" : "image"),
+        binding: suggestedBinding || "p1.name",
+      };
+    }
+
+    function renderLayers() {
+      if (!selectedLayers.length) {
+        layersEl.innerHTML = '<div class="empty">FigmaでLayerを選択してください。</div>';
+        return;
+      }
+      layersEl.innerHTML = selectedLayers.map((layer) => {
+        const state = layerState.get(layer.id) || defaultLayerState(layer);
+        const focused = focusedLayerIds.has(layer.id);
+        const disabled = !layer.hasCanvasFrame ? " disabled" : "";
+        const layerName = escapeHtml(layer.displayName || layer.name || "layer");
+        const layerType = escapeHtml(layer.type);
+        const frameName = escapeHtml(layer.frameName);
+        const bindingHtml = state.mode === "data-text" || state.mode === "data-image"
+          ? `<div class="binding">
+              <label for="binding-${layer.id}">Binding</label>
+              <select id="binding-${layer.id}" data-id="${layer.id}" data-field="binding">
+                ${bindingOptions(state.mode, state.binding)}
+              </select>
+            </div>`
+          : "";
+        return `<div class="layer${focused ? " is-focused" : ""}" data-layer-id="${escapeHtml(layer.id)}" tabindex="0" aria-selected="${focused}">
+          <div>
+            <div class="layer-title-line">
+              <div class="layer-title" title="${layerName}">${layerName}</div>
+              <button class="focus-layer" type="button" data-action="focus" data-id="${escapeHtml(layer.id)}">Figmaで選択</button>
+            </div>
+            <div class="layer-meta">
+              ${layerType}${layer.hasCanvasFrame ? ` / ${frameName}` : " / 1920x1080親Frameなし"}
+            </div>
+          </div>
+          <div>
+            <label for="mode-${layer.id}">Type</label>
+            <select id="mode-${layer.id}" data-id="${layer.id}" data-field="mode"${disabled}>
+              <option value="image"${state.mode === "image" ? " selected" : ""}>PNG</option>
+              <option value="svg"${state.mode === "svg" ? " selected" : ""}>SVG</option>
+              <option value="data-text"${state.mode === "data-text" ? " selected" : ""}>動的テキスト</option>
+              <option value="data-image"${state.mode === "data-image" ? " selected" : ""}>動的画像</option>
+              <option value="game-history"${state.mode === "game-history" ? " selected" : ""}>ゲーム履歴</option>
+              <option value="ignore"${state.mode === "ignore" ? " selected" : ""}>除外</option>
+            </select>
+          </div>
+          ${bindingHtml}
+        </div>`;
+      }).join("");
+    }
+
+    function focusLayer(id) {
+      if (!id) return;
+      focusedLayerIds = new Set([id]);
+      renderLayers();
+      parent.postMessage({
+        pluginMessage: {type: "select-layer", id},
+      }, "*");
+    }
+
+    layersEl.addEventListener("click", (event) => {
+      const target = event.target;
+      const focusButton = target.closest("[data-action='focus']");
+      const row = target.closest(".layer");
+      if (!row) return;
+      if (focusButton) {
+        focusLayer(focusButton.dataset.id);
+        return;
+      }
+      if (target.closest("select, input, button")) return;
+      focusLayer(row.dataset.layerId);
+    });
+
+    layersEl.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const row = event.target.closest(".layer");
+      if (!row || event.target !== row) return;
+      event.preventDefault();
+      focusLayer(row.dataset.layerId);
+    });
+
+    layersEl.addEventListener("change", (event) => {
+      const target = event.target;
+      const id = target.dataset.id;
+      if (!id) return;
+      const layer = selectedLayers.find((item) => item.id === id);
+      const current = layerState.get(id) || defaultLayerState(layer || {});
+      const next = Object.assign({}, current);
+      next[target.dataset.field] = target.value;
+      if (target.dataset.field === "mode") {
+        if (target.value === "data-image" && !imageBindings.has(next.binding)) {
+          next.binding = "p1.sponsorLogo";
+        }
+        if (target.value === "game-history") {
+          next.binding = "games";
+        }
+        if (target.value === "data-text" &&
+            (imageBindings.has(next.binding) || next.binding === "games")) {
+          next.binding = "p1.name";
+        }
+      }
+      layerState.set(id, next);
+      renderLayers();
+    });
+
+    document.getElementById("close").addEventListener("click", () => {
+      parent.postMessage({ pluginMessage: { type: "close" } }, "*");
+    });
+
+    function requestBuildPayload() {
+      if (sending) return;
+      const layers = selectedLayers.map((layer) => Object.assign(
+        { id: layer.id },
+        layerState.get(layer.id) || defaultLayerState(layer),
+      ));
+      sending = true;
+      sendButton.disabled = true;
+      setStatus("Figma LayerをAutona形式に変換しています...");
+      parent.postMessage({
+        pluginMessage: {
+          type: "build-payload",
+          config: {
+            projectName: document.getElementById("project-name").value || "Figma Scoreboard",
+            layers,
+          },
+        },
+      }, "*");
+    }
+
+    sendButton.addEventListener("click", requestBuildPayload);
+
+    async function sendPayload(payload) {
+      setStatus("Autonaへ送信しています...");
+      const response = await fetch(AUTONA_IMPORT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error || `Autona API error: ${response.status}`);
+      }
+      parent.postMessage({
+        pluginMessage: {
+          type: "notify",
+          message: "Autonaへ送信しました。",
+        },
+      }, "*");
+      setStatus(`送信しました。\nAutona Designerに自動反映されます。\nLayers: ${body.layers}`);
+    }
+
+    window.onmessage = async (event) => {
+      const message = event.data.pluginMessage;
+      if (!message) return;
+
+      if (message.type === "selection") {
+        bindings = message.bindings || [];
+        imageBindings = new Set(message.imageBindings || []);
+        focusedLayerIds = new Set(message.selectionIds || []);
+        selectedLayers = message.layers || [];
+        selectedLayers.forEach((layer) => {
+          if (!layerState.has(layer.id)) {
+            layerState.set(layer.id, defaultLayerState(layer));
+          }
+        });
+        renderLayers();
+        setStatus(selectedLayers.length
+          ? `${selectedLayers.length}個のLayerを選択中です。`
+           : "FigmaでLayerを選択してください。");
+      }
+
+      if (message.type === "layer-focused") {
+        focusedLayerIds = new Set([message.id]);
+        renderLayers();
+      }
+
+      if (message.type === "payload-ready") {
+        try {
+          await sendPayload(message.payload);
+        } catch (error) {
+          setStatus(error && error.message ? error.message : String(error), true);
+        } finally {
+          sending = false;
+          sendButton.disabled = false;
+        }
+      }
+
+      if (message.type === "error") {
+        sending = false;
+        sendButton.disabled = false;
+        setStatus(message.message, true);
+      }
+    };
+
+    parent.postMessage({ pluginMessage: { type: "ready" } }, "*");
+  </script>
+</body>
+</html>

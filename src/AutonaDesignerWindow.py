@@ -13,13 +13,14 @@ class AutonaDesignerWindow(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Autona Scoreboard Designer")
         self.resize(1440, 900)
-        self.setMinimumSize(1100, 700)
+        self.setMinimumSize(800, 560)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
 
         self._token = AutonaDesignerService.issue_token()
         self._tokenRevoked = False
 
         self.webView = QWebEngineView(self)
+        self.webView.setZoomFactor(1.0)
         self.webView.page().windowCloseRequested.connect(self.close)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)

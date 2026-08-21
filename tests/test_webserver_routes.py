@@ -36,6 +36,9 @@ EXPECTED_ROUTES = [
     ('/api/designer/projects', 'designer_save_project', 'OPTIONS,POST'),
     ('/api/designer/projects/<slug>', 'designer_delete_project', 'DELETE,OPTIONS'),
     ('/api/designer/projects/<slug>', 'designer_load_project', 'GET,HEAD,OPTIONS'),
+    ('/api/designer/imports', 'designer_receive_import', 'OPTIONS,POST'),
+    ('/api/designer/imports/<import_id>', 'designer_get_import', 'GET,HEAD,OPTIONS'),
+    ('/api/designer/imports/latest', 'designer_latest_import', 'GET,HEAD,OPTIONS'),
     ('/characters', 'get_characters', 'GET,HEAD,OPTIONS'),
     ('/current-game', 'get_current_game', 'GET,HEAD,OPTIONS'),
     ('/display-option', 'post_display_option', 'OPTIONS,POST'),
@@ -149,6 +152,7 @@ EXPECTED_CLASS_HANDLERS = {
     "ws_emit",
     "on_program_state_update",
     "_authorize_designer_request",
+    "_authorize_designer_import_request",
     "_flush_pending_deltas",
     "_adaptive_debounce_sec",
 }

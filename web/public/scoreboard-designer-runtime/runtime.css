@@ -36,6 +36,13 @@ body {
   display: block;
 }
 
+.composer-svg-game-history,
+.composer-svg-game-history > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .composer-text {
   display: flex;
   align-items: center;
@@ -51,6 +58,18 @@ body {
 
 .composer-games {
   display: flex;
+}
+
+.composer-games-custom {
+  position: relative;
+  overflow: hidden;
+}
+
+.composer-game-slot,
+.composer-game-slot > img {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 #composer-error {

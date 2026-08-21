@@ -125,6 +125,9 @@ async function UpdateData_SocketIO() {
       reconnectionDelay: 500,
       reconnectionDelayMax: 1500
     });
+    // Expose this page-local connection so generated layouts can subscribe to
+    // Designer lifecycle events without creating a duplicate Socket.IO client.
+    window.tshSocket = socket;
 
     socket.on('connect', () => {
       console.log('socket.io connected');
@@ -282,12 +285,20 @@ async function InitAll() {
     // Set up listener to regrab data and rerun intro animations on OBS scene switch
     initOnBrowserActive(
       () => {
-        // hide function - nothing right now
         console.log("Hidden");
+        if (window.AutonaDesignerRuntime &&
+            typeof window.AutonaDesignerRuntime.hide === "function") {
+          window.AutonaDesignerRuntime.hide();
+        }
       },
       () => {
         UpdateData().then(() => {
-          Start();
+          if (window.AutonaDesignerRuntime &&
+              typeof window.AutonaDesignerRuntime.show === "function") {
+            window.AutonaDesignerRuntime.show();
+          } else {
+            Start();
+          }
         });
       }
     );
