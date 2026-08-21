@@ -661,15 +661,16 @@ class TestParseMatchDataNewApi:
         p2 = result["entrants"][1][0]
         assert p2["country_code"] == "JP"
 
-    def test_entrant_city_no_state_inference(self):
-        """City-based state inference was removed (StartGGDataProvider.py
-        ~843-847: linear scans were slow on large pools and unreliable for
-        Japanese users). P2 (Japan, state null, city=Tokyo) gets no
-        state_code, but the raw city is captured."""
+    def test_entrant_city_infers_the_state(self):
+        """City-based state inference is back, now backed by the
+        pre-computed assets/city_to_state.json (an O(1) lookup instead of
+        the linear scans that got it removed). P2 (Japan, state null,
+        city=Tokyo) is the typical Japanese Start.gg user: without this the
+        region field stays empty. The raw city is still captured."""
         provider = _make_provider()
         result = provider.ParseMatchDataNewApi(_new_api_set_basic())
         p2 = result["entrants"][1][0]
-        assert "state_code" not in p2
+        assert p2["state_code"] == "13"  # Tokyo, as the state combo keys it
         assert p2["city"] == "Tokyo"
 
     def test_character_selection_main(self):
@@ -1079,9 +1080,9 @@ class TestProcessEntrantData:
         }
         result = StartGGDataProvider.ProcessEntrantData(entrant)
         assert result["country_code"] == "JP"
-        # City-based state inference removed; with no direct state field
-        # Start.gg gives us, state_code is not set.
-        assert "state_code" not in result
+        # No direct state field, so the city falls back through
+        # AutonaCountryHelper.FindState and resolves to the prefecture iso2.
+        assert result["state_code"] == "13"
 
     def test_no_user_gives_zero_id(self):
         """When user is None/falsy, id should be [player_id, 0]."""

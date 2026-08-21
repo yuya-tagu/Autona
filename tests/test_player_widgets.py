@@ -106,6 +106,42 @@ def test_set_data_without_a_sponsor_publishes_the_bare_tag(autonaApp, kind):
 
 
 @pytest.mark.parametrize("kind", KINDS)
+def test_set_data_resolves_a_free_form_state_name(autonaApp, kind):
+    """The state combo matches on the region's iso2 ("13"), but a
+    state_code saved by an older build -- or auto-filled from Start.gg
+    before this existed -- is a free-form name ("Tokyo"). SetData falls back
+    to AutonaCountryHelper.FindState for exactly that case, so the region
+    reaches the overlay instead of staying blank.
+
+    Both implementations are covered because SetData is written twice
+    (agent-pitfalls #5) and this is the kind of fix that lands in one.
+    """
+    player = _player(autonaApp, kind)
+
+    player.SetData({"gamerTag": "TAG", "country_code": "JP",
+                    "state_code": "Tokyo"}, dontLoadFromDB=True)
+    autonaApp.settle()
+
+    published = autonaApp.get(f"{player.path}.state")
+    assert published, "state_code did not reach state at all"
+    assert published.get("original_code") == "13"
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_set_data_takes_a_state_iso2_as_is(autonaApp, kind):
+    """The normal path: Start.gg already gave us the iso2, so the direct
+    match wins and FindState is never consulted (its first call parses the
+    pre-computed table, and this runs on the GUI thread under dataLock)."""
+    player = _player(autonaApp, kind)
+
+    player.SetData({"gamerTag": "TAG", "country_code": "JP",
+                    "state_code": "13"}, dontLoadFromDB=True)
+    autonaApp.settle()
+
+    assert autonaApp.get(f"{player.path}.state").get("original_code") == "13"
+
+
+@pytest.mark.parametrize("kind", KINDS)
 def test_loading_a_second_player_replaces_the_first(autonaApp, kind):
     """SetData(clear=True) is how a set load overwrites the previous match."""
     player = _player(autonaApp, kind)
