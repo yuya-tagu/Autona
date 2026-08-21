@@ -233,8 +233,10 @@ def save_result(pixmap, data):
     num_players = len(data.get("players", [])) or 8
     filename = f"{tournament}-top{num_players}-{timestamp}"
 
+    # PNG only: the .jpg twin the upstream fork also wrote was consumed by
+    # nothing (unlike the thumbnail's, which the /thumbnail API serves) and
+    # made every save look duplicated in out/results/.
     pixmap.save(f"{out_path}/{filename}.png")
-    pixmap.save(f"{out_path}/{filename}.jpg")
     logger.info(f"Result image saved: {out_path}/{filename}.png")
     return f"{out_path}/{filename}.png"
 
