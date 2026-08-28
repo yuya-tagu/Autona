@@ -26,11 +26,10 @@ log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
 
-class WebServerActions(QThread):
+class WebServerActions(QObject):
     def __init__(self, parent=None, scoreboard=None) -> None:
         super().__init__(parent)
         self.scoreboard = scoreboard
-        self.threadPool = QThreadPool()
 
     # ── Lazily-built panels (startup Step 4b-2) ──────────────────────
     # The Commentary and Top 8 panels are constructed the first time their

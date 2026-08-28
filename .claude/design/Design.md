@@ -443,11 +443,16 @@ stream
 旧 `ui.light_mode` キャッシュはテーマ切替機能の削除に伴い廃止（§5.4、ダーク固定）。
 現在 `ui` 配下に broadcast 用キーは無い。
 
-##### `notes` / `team_battle` / `layout_options` / `provider_videogame` / `completed_sets` / `streamQueue` / `currentStream` / `result_players`
+##### `notes` / `layout_options` / `provider_videogame` / `completed_sets` / `streamQueue` / `currentStream` / `result_players`
 
 > 旧 `player_list.*`（PLAYERS 順位ロスター編集）は機能ごと廃止（layout/top_8 と共に削除、
 > Top-8 は `top8.*` → `layout/bracket_top8/` に一本化）。残留キー（`player_list` /
 > `player_editor`）は起動時に `Window._SeedPanelState()` が Unset する。
+>
+> 旧 `team_battle.*`（チームバトル編集）は `AutonaTeamBattleWidget` / `AutonaTeamPlayerWidget`
+> の削除（2026-08-28）に伴い廃止。クルーバトル（board 3）は別キー `score.3.*` に統合済みで
+> `team_battle.*` を書き込むコードは存在しない（player_list と異なり自動 Unset 処理はなく、
+> 既存 `program_state.json` に残留する場合がある）。
 
 詳細は [.claude/architecture/phase-a-b/state-keys.md](.claude/architecture/phase-a-b/state-keys.md) 参照。
 
@@ -551,7 +556,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | 問題 | 規約上の扱い |
 |-----|------------|
 | `score.upset_factor`（番号なし）二重定義 | 番号なし版は **削除済**（§8 T-1 完了） |
-| `commentary.{N}` インデックス欠番 | スロット固定 8 名化（2026-07 リワーク）で欠番概念ごと消滅（旧: Unset 時に詰める） |
+| `commentary.{N}` インデックス欠番 | スロット固定 12 名化（2026-07 リワーク）で欠番概念ごと消滅（旧: Unset 時に詰める） |
 | `StateManager.state` 直接参照 | `GetFullState()` に置き換え。直接参照は禁止（§3.1.1） |
 | OBS HTML poll の順序保証なし | revision 検証で full snapshot 再取得に統一（R-Sync-8） |
 
@@ -788,7 +793,7 @@ layout/{用途}_{variant}/
 | `bracket_*` | トーナメントブラケット表示（Top 8 専用、`top8.*` を購読） | `bracket_top8/`（top12/top16/ultimate は Top 8 専用化で削除済み） |
 | `result*` | リザルト画像（運用上 OBS には乗せない、画像生成専用） | §4.4 参照 |
 | `recent_sets/` | 最近のセット表示 | 1 種のみ |
-| `commentators/` | 実況・解説者バー（`commentary.{1..8}` の display=ON を 1〜4 名可変表示） | index.html 一本化（旧 tag*.html 3 バリアントは 2026-07 リワークで削除） |
+| `commentators/` | 実況・解説者バー（`commentary.{1..12}` の display=ON を 1〜4 名可変表示） | index.html 一本化（旧 tag*.html 3 バリアントは 2026-07 リワークで削除） |
 | `camborder_*` | カメラ枠 | `camborder_Universal/` |
 | `tournament_history/` | プレイヤー経歴 | player1.html / player2.html |
 | `thumbnail*` | サムネイル画像生成専用 | §4.4 参照 |
@@ -1620,7 +1625,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 | ID | タスク | 関連 § | 影響範囲 | 状態 |
 |----|------|------|--------|------|
 | **T-1** | `score.upset_factor`（番号なし）の二重定義を削除し、`score.{N}.upset_factor` のみに統一 | §3.1.2, §3.2.5 | `src/AutonaStatsUtil.py:176-179` 周辺 | ✅ 完了（M1a） |
-| **T-2** | `commentary.{N}` Unset 時にインデックスを詰める実装に変更 | §3.1.2, §3.2.5 | `src/AutonaCommentaryWidget.py`（当時） | ✅ 完了（M1a）→ 2026-07 リワークでスロット固定 8 名化により概念ごと消滅 |
+| **T-2** | `commentary.{N}` Unset 時にインデックスを詰める実装に変更 | §3.1.2, §3.2.5 | `src/AutonaCommentaryWidget.py`（当時） | ✅ 完了（M1a）→ 2026-07 リワークでスロット固定 12 名化により概念ごと消滅 |
 | **T-3** | `StateManager.state` 直接参照を `GetFullState()`（ロック取得版）に置き換え | §3.1.1, §3.2.5 | `src/AutonaWebServerActions.py:41`, `src/result/main_generate_result.py`, `src/thumbnail/main_generate_thumbnail.py` | ✅ 完了（M1a） |
 | **T-4** | `StateManager.SaveState` に `revision` を単調増加で付与、`program_state` / `program_state_update` イベントに含める | §3.2.3, §3.2.5 | `src/StateManager.py`, `src/AutonaWebServer.py`, `out/program_state.json` への埋め込み | ✅ 完了（M1b） |
 | **T-5** | クライアント（OBS / React）に `revision` 連続性検証 + 不連続時の full snapshot 再取得を実装 | §3.2.3 | `layout/include/globals.js`, `web/src/redux/tshState.ts`, `web/src/ScoreboardPage/websocketInit.ts` | ✅ 完了（M1b） |

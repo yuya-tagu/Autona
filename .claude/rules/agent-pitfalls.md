@@ -40,13 +40,12 @@ globs:
 - `.ui` ファイルの objectName を変更すると保存データとの互換性が壊れる
 - 新しいウィジェットを追加する際も、objectName = StateManager キー であることを意識する
 
-## 5. AutonaScoreboardPlayerWidget と AutonaTeamPlayerWidget は別クラス
+## 5. （解消済み）AutonaTeamPlayerWidget は削除済み
 
-見た目も構造もほぼ同じだが、**基底クラスを共有していない**。
-
-- 片方を修正したら、もう片方にも同じ修正が必要か確認する
-- 共通メソッド 19 個（SetData, SetCharactersPerPlayer, SwapWith 等）
-- 詳細: `.claude/architecture/python-hotspots.md`
+「選手ウィジェットが 2 実装あり、片方を直したらもう片方も直す」規約だったが、
+**`AutonaTeamPlayerWidget` は 2026-08-28（Headless Core 再設計 Step 0）にデッドコードとして削除**。
+現在の選手ウィジェットは `AutonaScoreboardPlayerWidget` のみで（board 1/2/3 いずれもこれを使う）、
+共通処理は `AutonaBasePlayerWidget` にある。
 
 ## 6. SaveBlock の対称性
 

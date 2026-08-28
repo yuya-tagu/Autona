@@ -179,7 +179,6 @@ from .AutonaGameAssetGuideWindow import AutonaGameAssetGuideWindow
 from .LayoutOptions.AutonaLayoutOptionsWindow import AutonaLayoutOptionsWindow
 from .AutonaHotkeys import AutonaHotkeys
 from .AutonaCommentaryWidget import AutonaCommentaryWidget
-# from .AutonaTeamBattleWidget import AutonaTeamBattleWidget
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTop8Widget import AutonaTop8Widget
 from .AutonaTournamentInfoWidget import AutonaTournamentInfoWidget
@@ -396,14 +395,6 @@ class Window(QMainWindow):
         # _CreateResultPanel.
 
         splash.set_message(splash_msgs[0], progress=0.40)
-
-        # teamBattle = AutonaTeamBattleWidget()
-        # teamBattle.setWindowIcon(QIcon(UI.icon_path('info.svg')))
-        # teamBattle.setObjectName(
-        #     QApplication.translate("app", "Crew/Team Battle"))
-        # self.addDockWidget(
-        #     Qt.DockWidgetArea.BottomDockWidgetArea, teamBattle)
-        # self.dockWidgets.append(teamBattle)
 
         self.scoreboard = AutonaScoreboardManager.instance
         self.scoreboard.setWindowIcon(QIcon(UI.icon_path('scoreboard.svg')))

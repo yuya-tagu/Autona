@@ -35,7 +35,7 @@ import 副作用 / objectName キーパス契約 / WebServer ルート台帳 / G
 | `AutonaScoreboardWidget` | 1962 | ゼロ |
 | `AutonaGameAssetManager` | 1501 | ゼロ |
 | `AutonaScoreboardPlayerWidget` | 983 | ゼロ |
-| `AutonaTeamPlayerWidget` | 637 | ゼロ |
+| ~~`AutonaTeamPlayerWidget`~~ | ~~637~~ | 2026-08-28 削除（デッドコード） |
 | `AutonaApiV1` | 733 | ゼロ（26 ルート） |
 | `AutonaCrewBattleWidget` | 657 | ゼロ |
 | `AutonaTournamentInfoWidget` | 610 | ゼロ |
@@ -322,7 +322,14 @@ C++ 破棄時に自動切断されるが、lambda は receiver を持たない�
 
 ### PR-2 実装中に検出（2026-08-02）
 
-#### BUG-7: `AutonaTeamPlayerWidget` に旧 mains ループが残っている 🟡
+#### BUG-7: `AutonaTeamPlayerWidget` に旧 mains ループが残っている ✅ クローズ（2026-08-28・コードごと削除）
+
+> **2026-08-28（Headless Core 再設計 Step 0）**: バグを抱えていた `AutonaTeamPlayerWidget` 自体を
+> `AutonaTeamBattleWidget` / `AutonaTeamBattleModeEnum` ごと**デッドコードとして削除**したため、
+> BUG-7 は「修正」ではなく**消滅**という形でクローズ。
+> `xfail(strict=True)` マーカーと `_AutonaHarness.teamPlayerWidget()` も同時に撤去し、
+> `tests/test_player_widgets.py` は実装 1 本（`AutonaScoreboardPlayerWidget`）に対する
+> 非 parametrize なテストになった。以下は経緯の記録。
 
 旧 API の単一キャラ形式 `mains: ["Mario", skin]` を渡すと、
 `AutonaTeamPlayerWidget.SetData` は `for element in self.character_elements:`
@@ -331,24 +338,25 @@ C++ 破棄時に自動切断されるが、lambda は receiver を持たない�
 `AutonaScoreboardPlayerWidget` 側だけが修正され、こちらは取り残されていた
 （agent-pitfalls #5 の典型例）。
 
-**現状ユーザーに露出していない**（下記の到達性を参照）ため優先度は 🟡。
+**現状ユーザーに露出していない**（下記の到達性を参照）ため優先度は 🟡 だった。
 `tests/test_player_widgets.py` の
 `test_a_legacy_single_character_main_only_fills_the_first_slot` が
-`xfail(strict=True)` で追跡中。修正時にマーカーを外す。
+`xfail(strict=True)` で追跡していた。
 
-#### 到達性の実態: `AutonaTeamPlayerWidget` は現在どこからも生成されない
+#### 到達性の実態: `AutonaTeamPlayerWidget` は現在どこからも生成されない → 削除（2026-08-28）
 
 board 2（team）は `AutonaScoreboardWidget(singlePlayer=False)` であり、
 その選手ウィジェットは board 1 と同じ `AutonaScoreboardPlayerWidget`。
 `AutonaTeamPlayerWidget` の唯一の呼び出し元 `AutonaTeamBattleWidget` は
-`src/Autona.py` で import ごとコメントアウトされている（171 / 376 行）。
+`src/Autona.py` で import ごとコメントアウトされていた（171 / 376 行）。
 
 したがって「board1=1v1 / board2=team の 2 クラスを parametrize」という
 当初の記述は誤り。PR-2 では **`AutonaTeamPlayerWidget` をボード無しで直接構築**し
 （`_AutonaHarness.teamPlayerWidget()`、パスは production 同形の
-`score.2.team.{T}.player.{M}`）、同一テストを両実装に流している。
-前提が腐らないよう `test_the_team_board_uses_the_scoreboard_player_widget` で
-「どのボードがどのクラスを作るか」を pin した。
+`score.2.team.{T}.player.{M}`）、同一テストを両実装に流していた。
+**2026-08-28 に到達不能なコードごと削除**したため、この直接構築ハーネスも不要になり撤去済み。
+「どのボードがどのクラスを作るか」の pin
+（`test_the_team_board_uses_the_scoreboard_player_widget`）は引き続き有効。
 
 #### ハーネス制約: 合成ゲームが無いとキャラ選択のテストは空振りする
 
@@ -448,11 +456,17 @@ autonaApp (session)
 | 実運用の `out/` `user_data/` を汚染しうる | 全て使い捨て cwd。**「テスト後にプロジェクト直下の `out/` が変化していないこと」を検証するガードテストを入れる** |
 | pytest-xdist 並列化すると Qt が壊れる | 当面導入しない。3 分に収まる想定 |
 
-`AutonaScoreboardPlayerWidget` と `AutonaTeamPlayerWidget` は基底クラスを共有しない別実装
+~~`AutonaScoreboardPlayerWidget` と `AutonaTeamPlayerWidget` は基底クラスを共有しない別実装
 （agent-pitfalls #5）。**同一のテストを両クラスに `parametrize` で流す**ことで、
 「片方だけ直して片方を忘れる」既知の事故パターンを構造的に潰す
 （実際に BUG-7 がこれで見つかった）。ただし後者はボードから取れない
-— §3「到達性の実態」を参照。
+— §3「到達性の実態」を参照。~~
+
+**2026-08-28 更新**: `AutonaTeamPlayerWidget` を削除したため、この 2 実装 parametrize は撤去。
+選手ウィジェットは `AutonaScoreboardPlayerWidget` 1 本になり、
+`tests/test_player_widgets.py` は非 parametrize な単一実装テストになった。
+どのボードがどのクラスを作るかの pin
+（`test_the_team_board_uses_the_scoreboard_player_widget`）は残してある。
 
 ### L4 の設計
 

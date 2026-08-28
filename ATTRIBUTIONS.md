@@ -106,7 +106,7 @@ OSS の一覧は [licenses/npm-packages.txt](licenses/npm-packages.txt) に機�
 
 `dependencies/requirements.txt` の推移的閉包の一覧を
 [licenses/python-packages.txt](licenses/python-packages.txt) に機械生成済み。
-コピーレフト系（LGPL の PySide6 / pynput / py7zr 系）の扱いは
+コピーレフト系（LGPL の PySide6 / py7zr 系）の扱いは
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) を参照。
 
 **注**: `countryflag` は GPL v3 の `country_converter` / `aioconsole` を引き込むため

@@ -36,17 +36,12 @@ INPUT_WIDGET_CLASSES = {
 # compatibility break that needs a migration first.
 EXPECTED = {
     "AutonaScoreboardTeam.ui": {"teamName", "losers"},
-    "AutonaBattleTeam.ui": {"teamName", "separateSponsors"},
     "AutonaScoreboardScore.ui": {
         "phase", "pool", "match", "best_of", "score_left", "score_right",
     },
     "AutonaScoreboardPlayer.ui": {
         "team", "name", "seed", "real_name", "twitter", "birthday",
         "country", "state",
-    },
-    "AutonaTeamPlayer.ui": {
-        "team", "name", "country", "state", "twitter", "activePlayer",
-        "dead", "dynamicSpinner",
     },
     "AutonaTournamentInfo.ui": {
         "tournamentName", "eventName", "gameTitleCombo", "numEntrants",
@@ -119,7 +114,6 @@ def test_programmatic_keypath_names_present():
 # spinbox values keep landing on the right key.
 QT_SPINBOX_FALLBACK_FILES = [
     "src/AutonaScoreboardPlayerWidget.py",
-    "src/AutonaTeamPlayerWidget.py",
     "src/AutonaTournamentInfoWidget.py",
 ]
 

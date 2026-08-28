@@ -110,10 +110,6 @@ class _AutonaHarness:
 
     def __init__(self, directory: Path):
         self.dir = directory
-        # Player widgets built outside a board (see teamPlayerWidget) and the
-        # state subtrees they own, torn down with the boards.
-        self._looseWidgets = []
-        self._loosePrefixes = set()
         # Saved AutonaGameAssetManager fields, restored by dropAllBoards()
         # when a test asked for a synthetic roster (see loadCharacters).
         self._assetBackup = None
@@ -205,50 +201,6 @@ class _AutonaHarness:
 
         self.settle()
 
-    def teamPlayerWidget(self, index=1, teamNumber=1):
-        """A live AutonaTeamPlayerWidget, torn down with the boards.
-
-        This class is the other half of the duplicated player-widget pair
-        (agent-pitfalls #5) and has no board to build it from: its only
-        caller, AutonaTeamBattleWidget, is commented out in src/Autona.py, so
-        board 2 ("team") is an AutonaScoreboardWidget whose player widgets are
-        AutonaScoreboardPlayerWidget like board 1's. Tests that have to run
-        the same assertions against both implementations therefore construct
-        this one directly, on a production-shaped path
-        (score.2.team.{T}.player.{M}, agent-pitfalls #7).
-
-        Do not mix this with autonaApp.board(2) in one test: they would put
-        two widgets on the same state subtree.
-        """
-        from src.AutonaTeamPlayerWidget import AutonaTeamPlayerWidget
-
-        path = f"score.2.team.{teamNumber}.player.{index}"
-        widget = AutonaTeamPlayerWidget(
-            index=index, teamNumber=teamNumber, path=path)
-        self._looseWidgets.append(widget)
-        self._loosePrefixes.add("score.2")
-        self.settle()
-        return widget
-
-    def _dropLooseWidgets(self):
-        from qtpy.QtCore import QCoreApplication, QEvent
-
-        if not self._looseWidgets and not self._loosePrefixes:
-            return
-
-        while self._looseWidgets:
-            widget = self._looseWidgets.pop()
-            widget.setParent(None)
-            widget.deleteLater()
-            # Same reason as _dropBoard(): at loop level 0 nothing else reaps
-            # a DeferredDelete, and a surviving C++ widget keeps answering the
-            # global singletons' signals with its lambdas.
-            QCoreApplication.sendPostedEvents(widget, QEvent.Type.DeferredDelete)
-
-        while self._loosePrefixes:
-            self.state.Unset(self._loosePrefixes.pop())
-        self.settle()
-
     def loadCharacters(self, names=("Mario", "Luigi", "Peach"), skins=3):
         """Give the asset manager a small synthetic character roster.
 
@@ -325,7 +277,6 @@ class _AutonaHarness:
         self._assetBackup = None
 
     def dropAllBoards(self):
-        self._dropLooseWidgets()
         for number in self.manager.BOARD_NUMBERS:
             self._dropBoard(number)
         self._restoreAssets()

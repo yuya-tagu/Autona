@@ -20,7 +20,7 @@
 10. [選手リスト](#10-選手リスト)
 11. [統計・分析](#11-統計分析)
 12. [メモ・補助ウィジェット](#12-メモ補助ウィジェット)
-13. [チームバトル / クルーバトル](#13-チームバトル--クルーバトル)
+13. [クルーバトル](#13-クルーバトル)
 14. [Individual Game Tracker](#14-individual-game-tracker)
 15. [サムネイル・対戦動画生成](#15-サムネイル対戦動画生成)
 16. [YouTube メタデータ生成](#16-youtube-メタデータ生成)
@@ -96,7 +96,7 @@
 
 ## 3. 選手情報管理
 
-[src/AutonaScoreboardPlayerWidget.py](src/AutonaScoreboardPlayerWidget.py)・[src/AutonaTeamPlayerWidget.py](src/AutonaTeamPlayerWidget.py)。
+[src/AutonaScoreboardPlayerWidget.py](src/AutonaScoreboardPlayerWidget.py)。
 
 ### 入力項目
 - ゲーマータグ / 本名 / スポンサー（Prefix）
@@ -222,12 +222,17 @@ STATS ドック（[src/AutonaStatsWidget.py](src/AutonaStatsWidget.py)）の内�
 
 ---
 
-## 13. チームバトル / クルーバトル
+## 13. クルーバトル
 
-[src/AutonaTeamBattleWidget.py](src/AutonaTeamBattleWidget.py)。
+[src/AutonaCrewBattleWidget.py](src/AutonaCrewBattleWidget.py)（board 3。[src/AutonaScoreboardManager.py](src/AutonaScoreboardManager.py) が生成）。
 
-- Stock Pool / First To モード
-- アクティブ選手切替 / ストック数追跡 / チーム内交代
+- メンバー数設定（1〜9人、両チーム共通）
+- メンバーごとのストック数管理・チーム合計の自動集計（名前未入力のメンバーは合計に含まない）
+- アクティブメンバー（現在プレイ中）マーカー
+- チーム名 / チームカラー編集・チーム入れ替え（Swap Teams）
+- ストックリセット（Reset Stocks）
+- Phase / Pool / Match / Best of 入力
+- X 投稿ボタン
 
 ---
 

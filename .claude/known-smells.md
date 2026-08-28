@@ -18,7 +18,14 @@
 
 ---
 
-## S-01: AutonaScoreboardPlayerWidget ↔ AutonaTeamPlayerWidget の重複 [P1/D2/S2] ✅ 実質解消（2026-06-27）
+## S-01: AutonaScoreboardPlayerWidget ↔ AutonaTeamPlayerWidget の重複 [P1/D2/S2] ✅ 完全解消（2026-08-28 削除済み）
+
+> **2026-08-28（Headless Core 再設計 Step 0）**: `AutonaTeamPlayerWidget` を
+> `AutonaTeamBattleWidget` / `AutonaTeamBattleModeEnum` ごと**デッドコードとして削除**。
+> 唯一の生成元 `AutonaTeamBattleWidget` は `src/Autona.py` で import ごとコメントアウト済みだった。
+> 重複していた対の片方が消えたため、この smell は**完全に消滅**（以下は経緯の記録）。
+> 選手ウィジェットは `AutonaScoreboardPlayerWidget` 1 実装のみ（board 1/2/3 いずれもこれを使う）。
+> agent-pitfalls #5 も同日に「解消済み」へ更新。
 
 **根拠**: python-hotspots.md「コード重複」セクション
 
@@ -290,14 +297,20 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, b
 | .ui | objectName | キーパス例 |
 |-----|-----------|-----------|
 | AutonaScoreboardTeam.ui | teamName, losers | `score.{N}.team.{T}.{name}` |
-| AutonaBattleTeam.ui | teamName, separateSponsors | team battle ボードのチームキー |
+| AutonaBattleTeam.ui | teamName, separateSponsors | .ui ごと削除済み（2026-08-28） |
 | AutonaScoreboardScore.ui | phase, match, best_of, score_left, score_right | `score.{N}.{name}`（best_of 等）/ findChild キー |
 | AutonaScoreboardPlayer.ui | team, name, seed, real_name, twitter, birthday, country, state | `score.{N}.team.{T}.player.{M}.{name}` |
-| AutonaTeamPlayer.ui | team, name, country, state, twitter, activePlayer, dead, dynamicSpinner | `{self.path}.{name}` |
+| AutonaTeamPlayer.ui | team, name, country, state, twitter, activePlayer, dead, dynamicSpinner | .ui ごと削除済み（2026-08-28） |
 | AutonaTournamentInfo.ui | tournamentName, eventName, gameTitleCombo, numEntrants, startAt, address, streamTitleEdit | `tournamentInfo.{name}` |
 | （プログラム的） | notes_widget_{N}, custom_textbox | `notes.{name}.{title\|contents}` / `{self.path}.custom_textbox` |
 
 **運用ルール**: 上表の objectName を変更/削除する場合は、**先に StateManager のマイグレーション層を追加**してから `tests/test_objectname_keypath_contract.py` の `EXPECTED` を更新する（= S-14 フル移行を将来やる際の入口）。
+
+> **AutonaBattleTeam.ui / AutonaTeamPlayer.ui について（2026-08-28）**: これらを読み込んでいた
+> `AutonaTeamBattleWidget` / `AutonaTeamPlayerWidget` はデッドコードとして削除された（S-01 参照）。
+> 孤立していた `.ui` ファイル自体も `src/layout/` から削除済み（2026-08-28）。契約テストの
+> `EXPECTED` からも該当エントリを除去した。現在これらのキーを書くコードは無いが、旧ビルドの
+> `program_state.json` にはまだ残っている可能性があるため、上表には削除済みの記録として残す。
 
 **対策案（フル移行・将来）**:
 objectName → 明示的なキー名マッピング＋`program_state.json` のスキーマ版管理＋ロード時マイグレーション。工数大・後方互換要注意。

@@ -1,15 +1,17 @@
-"""Base class for AutonaScoreboardPlayerWidget and AutonaTeamPlayerWidget.
+"""Base class for AutonaScoreboardPlayerWidget.
 
-Extracts methods that are identical (or functionally equivalent) between
-both widget classes, eliminating ~200 lines of code duplication.
+Originally extracted to share the methods that were identical (or
+functionally equivalent) between this class and AutonaTeamPlayerWidget,
+eliminating ~200 lines of duplication. AutonaTeamPlayerWidget was dead code
+and was deleted on 2026-08-28 (Headless Core redesign Step 0), so
+AutonaScoreboardPlayerWidget is now the only subclass.
 
 Subclasses are responsible for:
-- __init__ (different .ui files, different widget setup)
-- ComboBoxIndexChanged (Scoreboard emits dataChanged, Team does not)
-- NameChanged (Scoreboard calls ExportPlayerId, Team does not)
+- __init__ (own .ui file, own widget setup)
+- ComboBoxIndexChanged / NameChanged
 - SetData, SetCharactersPerPlayer, ReloadCharacters, SetIndex,
-  SetupAutocomplete (genuinely divergent: different .ui widgets, icon
-  sizes, fonts, proxy models, and per-mode fields — kept per-subclass)
+  SetupAutocomplete (widget-specific: .ui widgets, icon sizes, fonts,
+  proxy models — kept per-subclass)
 - _swapRestoreTail / _styleCountryStateWidgets (small hooks that customise
   the otherwise-shared SwapWith / LoadCountries defined here)
 """

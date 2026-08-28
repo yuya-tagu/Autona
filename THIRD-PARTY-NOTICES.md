@@ -49,7 +49,6 @@ Autona は TournamentStreamHelper を起点に開発されており、その部�
 
 | パッケージ | ライセンス | 全文 | ソース入手先 |
 |-----------|-----------|------|-------------|
-| pynput | LGPL v3 | [licenses/LGPL-3.0.txt](licenses/LGPL-3.0.txt) | https://pypi.org/project/pynput/ |
 | py7zr | LGPL v2.1+ | [licenses/LGPL-2.1.txt](licenses/LGPL-2.1.txt) | https://pypi.org/project/py7zr/ |
 | pyppmd / pybcj / inflate64 / multivolumefile | LGPL v2.1+ | 同上 | https://pypi.org/ の各プロジェクトページ |
 

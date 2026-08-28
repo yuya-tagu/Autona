@@ -146,26 +146,16 @@ def designer_service(tmp_path, monkeypatch):
     root = tmp_path / "layout" / "custom"
     template = tmp_path / "runtime"
     template.mkdir()
-    for name in (
-            *AutonaDesignerService.TEMPLATE_FILES,
-            *AutonaDesignerService.NATIVE_TEMPLATE_FILES):
-        target = template / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(f"template:{name}", encoding="utf-8")
+    for name in AutonaDesignerService.TEMPLATE_FILES:
+        (template / name).write_text(f"template:{name}", encoding="utf-8")
 
     monkeypatch.setattr(AutonaDesignerService, "ROOT", root)
     monkeypatch.setattr(
         AutonaDesignerService, "TEMPLATE_CANDIDATES", (template,))
-    monkeypatch.setattr(
-        AutonaDesignerService,
-        "LINK_REGISTRY",
-        tmp_path / "user_data" / "designer_source_links.json",
-    )
     with AutonaDesignerService._token_lock:
         AutonaDesignerService._tokens.clear()
     with AutonaDesignerService._import_lock:
         AutonaDesignerService._latest_import = None
-        AutonaDesignerService._latest_import_id = None
         AutonaDesignerService._imports.clear()
     return AutonaDesignerService
 
