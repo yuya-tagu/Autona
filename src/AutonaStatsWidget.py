@@ -3,6 +3,7 @@ from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 
 from .StateManager import StateManager
+from .StateManagerBridge import StateManagerBridge
 from . import ui_constants as UI
 from loguru import logger
 
@@ -140,13 +141,14 @@ class AutonaStatsWidget(QDockWidget):
             )
 
         # Connect signals
-        StateManager.signals.state_big_change.connect(self._onStateChanged)
-        StateManager.signals.state_updated.connect(self._onStateUpdated)
+        StateManagerBridge.instance.state_big_change.connect(
+            self._onStateChanged)
+        StateManagerBridge.instance.state_updated.connect(self._onStateUpdated)
         # Scoreboard edits are held (not broadcast) until the 反映 button
         # commits them, so they never arrive as state_updated deltas. This
         # panel renders from the live state via Get(), so refresh on the
         # coalesced held-write notification instead.
-        StateManager.signals.held_state_updated.connect(
+        StateManagerBridge.instance.held_state_updated.connect(
             self._onHeldStateUpdated)
 
     def showEvent(self, event):

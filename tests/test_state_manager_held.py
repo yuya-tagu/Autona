@@ -53,14 +53,18 @@ PREFIX = "score.1"
 
 
 class _Spy:
+    # Subscribes to the core channels directly (headless core Step 1): no
+    # Qt involved, which is the point -- the state layer's notifications are
+    # observable without a QApplication or the StateManagerBridge adapter.
     def __init__(self):
         self.deltas = []
         self.dirty_events = []
         self.held_updates = []
-        SM.signals.state_updated.connect(lambda d: self.deltas.append(d))
-        SM.signals.held_dirty_changed.connect(
+        SM.observers.state_updated.subscribe(
+            lambda d: self.deltas.append(d))
+        SM.observers.held_dirty_changed.subscribe(
             lambda p, dirty: self.dirty_events.append((p, dirty)))
-        SM.signals.held_state_updated.connect(
+        SM.observers.held_state_updated.subscribe(
             lambda p: self.held_updates.append(p))
 
     def delta_str(self):

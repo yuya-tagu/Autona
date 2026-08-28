@@ -20,6 +20,7 @@ import orjson
 from loguru import logger
 
 from .StateManager import StateManager
+from .StateManagerBridge import StateManagerBridge
 from .AutonaWebServerActions import WebServerActions
 from .AutonaScoreboardManager import AutonaScoreboardManager
 from .SettingsManager import SettingsManager
@@ -106,7 +107,7 @@ def _build_web_app():
         WebServer.ws_program_state(message)
 
     # `ws_program_state` cannot become a closure-local: it is also connected to
-    # StateManager.signals.state_big_change and called as
+    # StateManagerBridge.instance.state_big_change and called as
     # WebServer.ws_program_state() from _flush_pending_deltas / ws_connect.
     # It stays on the class and is registered for the same event here.
     # Same for ws_get_characters / ws_playerdb further below.
@@ -765,8 +766,18 @@ class WebServer(QThread):
             scoreboard=AutonaScoreboardManager.instance,
         )
 
-        StateManager.signals.state_updated.connect(WebServer.on_program_state_update)
-        StateManager.signals.state_big_change.connect(WebServer.ws_program_state)
+        # Through the bridge rather than subscribing to the core channels
+        # directly. Both handlers are plain functions, and PySide6 still
+        # routes those through Qt's connection machinery (a worker-thread
+        # write is queued onto the GUI thread, same as for a bound method),
+        # so going via the bridge is what keeps the delivery these two had
+        # before the state layer moved to core. Subscribing straight to the
+        # channels would run them inline on the writer's thread instead --
+        # a real change, deferred to a later step.
+        StateManagerBridge.instance.state_updated.connect(
+            WebServer.on_program_state_update)
+        StateManagerBridge.instance.state_big_change.connect(
+            WebServer.ws_program_state)
 
         # External Control API (/api/v1/). Added as a thin Blueprint that
         # reuses WebServer.actions; existing routes/events are untouched

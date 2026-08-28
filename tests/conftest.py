@@ -166,7 +166,7 @@ class _AutonaHarness:
         # exec(), so the level stays 0 and every deleteLater() here would sit
         # in the queue for the whole session. The C++ widget would stay alive
         # with its lambda connections to the process-wide singletons
-        # (AutonaGameAssetManager.signals.onLoad, StateManager.signals, ...)
+        # (AutonaGameAssetManager.signals.onLoad, StateManagerBridge, ...)
         # intact -- a lambda holds no weak reference to its receiver, so
         # PySide6 cannot auto-disconnect it. Every dropped board would then
         # keep answering signals and rewriting score.{n}, including after the
@@ -424,7 +424,7 @@ def autonaApp(_autonaRuntime):
       and neither the rest of the suite nor the developer's real
       installation may be touched;
     - the boards, because a live scoreboard stays connected to
-      StateManager.signals and would keep reacting to writes made by test
+      StateManagerBridge and would keep reacting to writes made by test
       modules that never asked for a widget.
     """
     os.chdir(_autonaRuntime.dir)

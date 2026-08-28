@@ -138,7 +138,7 @@ EXPECTED_EVENTS = [
 EXPECTED_CLASS_HANDLERS = {
     # SocketIO handlers that must stay reachable as WebServer attributes,
     # because something outside the factory reaches them by name:
-    #   ws_program_state    -> StateManager.signals.state_big_change and
+    #   ws_program_state    -> StateManagerBridge.instance.state_big_change and
     #                          WebServer.ws_program_state() calls in-module
     #   ws_get_characters   -> Autona.py: Window.signals.GameChanged
     #   ws_playerdb         -> Autona.py: AutonaPlayerDB.signals.db_updated

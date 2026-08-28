@@ -8,6 +8,7 @@ from loguru import logger
 
 from .AutonaColorButton import AutonaColorButton
 from .StateManager import StateManager
+from .StateManagerBridge import StateManagerBridge
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from . import ui_constants as UI
 from . import ui_layout as L
@@ -106,8 +107,9 @@ class AutonaCrewBattleWidget(QWidget):
         # edits made on boards 1/2 arrive here as regular state_updated
         # deltas; state_big_change covers wholesale loads (startup restore,
         # Start.gg import). Mirrors AutonaScoreboardWidget's equivalent hook.
-        StateManager.signals.state_updated.connect(self._onTournamentInfoDelta)
-        StateManager.signals.state_big_change.connect(
+        StateManagerBridge.instance.state_updated.connect(
+            self._onTournamentInfoDelta)
+        StateManagerBridge.instance.state_big_change.connect(
             self._syncDisplayTournamentNameEdit)
 
     # ── UI construction ────────────────────────────────────────────────

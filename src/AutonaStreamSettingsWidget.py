@@ -6,6 +6,7 @@ import os
 import datetime
 from io import BytesIO
 from .StateManager import StateManager
+from .StateManagerBridge import StateManagerBridge
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .SettingsManager import SettingsManager
@@ -109,7 +110,7 @@ class AutonaStreamSettingsWidget(QDockWidget):
         # destination outlives the session.
         self._syncStreamDestinationCombo()
         self._updateEditStreamChannelBtn()
-        StateManager.signals.state_big_change.connect(
+        StateManagerBridge.instance.state_big_change.connect(
             self._syncStreamDestinationCombo)
 
     def _loadStreamChannels(self):

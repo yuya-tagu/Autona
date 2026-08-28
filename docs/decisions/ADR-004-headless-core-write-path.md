@@ -53,7 +53,7 @@ Accepted（2026-08-28 PdM 承認。PdM 方針指示「Qt ウィジェットが�
 `StateManager`・新設 `AutonaActions`（ドメイン操作）・state スキーマ定義（キーパスカタログ、
 held/exempt 定義、シード）を Qt 非依存の core 層とし、**core の Qt import ゼロをテストで恒久固定**する
 （`test_import_side_effects.py` と同じ subprocess pin 方式）。`StateManager` の Qt シグナル 4 本は
-汎用 observer に置換し、Qt への通知はアダプタ（QtBridge）が担う。
+汎用 observer に置換し、Qt への通知はアダプタ（StateManagerBridge）が担う。
 
 ### D2: すべての書き込み経路を Actions 一本に集約し、Qt を「クライアントの一つ」に降格する
 

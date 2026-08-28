@@ -164,6 +164,7 @@
 主要なもの:
 - WindowSignals (src/Autona.py) — `GameChanged` など
 - StateManagerSignals (src/StateManager.py)
+  - > **現状は `src/core` + `StateManagerBridge` が正（2026-08-28 Step 1）**: `StateManagerSignals` は廃止され、通知は Qt 非依存の observer（`StateManager.observers`）、Qt シグナルは `src/StateManagerBridge.py` が提供する
 - AutonaScoreboardWidgetSignals (src/AutonaScoreboardWidget.py)
 - AutonaStageStrikeStateSignals (src/AutonaStageStrikeLogic.py) — `state_updated`
 - その他 `AutonaXxxWidgetSignals`（各ウィジェット専有）
@@ -171,3 +172,4 @@
 **StateManager 接続例:**
 - Autona.py:357-359 で webserver に GameChanged を接続
 - 各ウィジェット `__init__` で StateManager.signals に connect
+  - > **現状は `src/core` + `StateManagerBridge` が正（2026-08-28 Step 1）**: 接続先は `StateManagerBridge.instance` に変わった（シグナル名・引数は同一）。ウィジェットから observer を直接 subscribe してはいけない

@@ -29,7 +29,10 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-import src.StateManager as state_manager
+# The module object, not the shim: `requests` is patched on it below, and
+# the binding lives in src/core/StateManager.py since headless core Step 1
+# (src/StateManager.py only re-exports the class).
+import src.core.StateManager as state_manager
 from src.StateManager import StateManager as SM
 
 _ORIGINAL_CWD = os.getcwd()
