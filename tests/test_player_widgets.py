@@ -1,26 +1,21 @@
-"""Player widgets against the real thing, both implementations at once.
+"""Player widgets against the real thing.
 
 A player widget is what turns "a set was loaded" into the tags, sponsors and
-character art an overlay renders, and it exists twice:
-AutonaScoreboardPlayerWidget and AutonaTeamPlayerWidget share no base beyond
-AutonaBasePlayerWidget's helpers and reimplement SetData, the character slots
-and the mains handling separately. That duplication is agent-pitfalls #5, and
-"fixed one, forgot the other" is a shipped-bug pattern here -- so every
-assertion that applies to both is parametrized over both rather than written
-once against whichever one was handy.
+character art an overlay renders. AutonaScoreboardPlayerWidget is now the only
+implementation: every board builds it, including board 2 ("team") and board 3
+("crew") -- see test_the_team_board_uses_the_scoreboard_player_widget below,
+which pins that so this file's premise cannot rot silently.
 
-Where the two genuinely differ (only the scoreboard widget carries a seed),
-the test says so and covers the one that has the field.
+These assertions used to run against a second implementation as well
+(AutonaTeamPlayerWidget, the duplicated half of agent-pitfalls #5). It and its
+sole caller AutonaTeamBattleWidget were dead code -- the caller had been
+commented out in src/Autona.py -- and were deleted in the Headless Core
+redesign Step 0 (2026-08-28), which is why nothing here is parametrized over
+an implementation any more.
 
 Assertions read StateManager, not the widgets: state is what the OBS overlays
 and the Web UI consume, and a combo box showing the right character while the
 published value stayed behind is exactly the failure worth catching.
-
-NOTE ON REACHABILITY: board 2 ("team") is an AutonaScoreboardWidget, so its
-player widgets are AutonaScoreboardPlayerWidget just like board 1's.
-AutonaTeamPlayerWidget's only caller, AutonaTeamBattleWidget, is commented out
-in src/Autona.py -- see test_the_team_board_uses_the_scoreboard_player_widget
-below, which pins that so this file's premise cannot rot silently.
 """
 import gc
 from unittest.mock import patch
@@ -33,30 +28,21 @@ from qtpy.QtWidgets import QComboBox, QLineEdit, QSpinBox
 from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
 from src.StateManager import StateManager
 
-# Both parametrized values build a real widget; see _players().
-KINDS = ["scoreboard", "team"]
 
+def _players(app):
+    """One live player widget per team, off the real 1v1 board.
 
-def _players(app, kind):
-    """One live player widget per team, of the requested implementation.
-
-    "scoreboard" comes off the real 1v1 board. "team" is built standalone
-    (autonaApp.teamPlayerWidget) because no board builds that class anymore;
-    it still gets a production-shaped path, score.2.team.{T}.player.1.
-
-    The synthetic character roster is loaded first either way: with no game
-    installed the character model is empty and every "which character ended
-    up in slot N" assertion would be vacuously true.
+    The synthetic character roster is loaded first: with no game installed the
+    character model is empty and every "which character ended up in slot N"
+    assertion would be vacuously true.
     """
     app.loadCharacters()
-    if kind == "scoreboard":
-        board = app.board(1)
-        return board.team1playerWidgets[0], board.team2playerWidgets[0]
-    return app.teamPlayerWidget(teamNumber=1), app.teamPlayerWidget(teamNumber=2)
+    board = app.board(1)
+    return board.team1playerWidgets[0], board.team2playerWidgets[0]
 
 
-def _player(app, kind):
-    return _players(app, kind)[0]
+def _player(app):
+    return _players(app)[0]
 
 
 def _characters(app, player):
@@ -71,9 +57,8 @@ def _names(app, player):
 
 # ── SetData: the fields an overlay reads ─────────────────────────────────
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_set_data_publishes_the_tag_and_the_sponsor(autonaApp, kind):
-    player = _player(autonaApp, kind)
+def test_set_data_publishes_the_tag_and_the_sponsor(autonaApp):
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "TAG", "prefix": "SPONSOR"},
                    dontLoadFromDB=True)
@@ -87,9 +72,8 @@ def test_set_data_publishes_the_tag_and_the_sponsor(autonaApp, kind):
     assert autonaApp.get(f"{player.path}.team") == "SPONSOR"
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_set_data_merges_the_sponsor_into_the_display_name(autonaApp, kind):
-    player = _player(autonaApp, kind)
+def test_set_data_merges_the_sponsor_into_the_display_name(autonaApp):
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "TAG", "prefix": "SPONSOR"},
                    dontLoadFromDB=True)
@@ -101,9 +85,8 @@ def test_set_data_merges_the_sponsor_into_the_display_name(autonaApp, kind):
     assert autonaApp.get(f"{player.path}.mergedOnlyName") == "TAG"
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_set_data_without_a_sponsor_publishes_the_bare_tag(autonaApp, kind):
-    player = _player(autonaApp, kind)
+def test_set_data_without_a_sponsor_publishes_the_bare_tag(autonaApp):
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "TAG"}, dontLoadFromDB=True)
     autonaApp.settle()
@@ -112,18 +95,14 @@ def test_set_data_without_a_sponsor_publishes_the_bare_tag(autonaApp, kind):
     assert autonaApp.get(f"{player.path}.mergedName") == "TAG"
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_set_data_resolves_a_free_form_state_name(autonaApp, kind):
+def test_set_data_resolves_a_free_form_state_name(autonaApp):
     """The state combo matches on the region's iso2 ("13"), but a
     state_code saved by an older build -- or auto-filled from Start.gg
     before this existed -- is a free-form name ("Tokyo"). SetData falls back
     to AutonaCountryHelper.FindState for exactly that case, so the region
     reaches the overlay instead of staying blank.
-
-    Both implementations are covered because SetData is written twice
-    (agent-pitfalls #5) and this is the kind of fix that lands in one.
     """
-    player = _player(autonaApp, kind)
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "TAG", "country_code": "JP",
                     "state_code": "Tokyo"}, dontLoadFromDB=True)
@@ -134,12 +113,11 @@ def test_set_data_resolves_a_free_form_state_name(autonaApp, kind):
     assert published.get("original_code") == "13"
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_set_data_takes_a_state_iso2_as_is(autonaApp, kind):
+def test_set_data_takes_a_state_iso2_as_is(autonaApp):
     """The normal path: Start.gg already gave us the iso2, so the direct
     match wins and FindState is never consulted (its first call parses the
     pre-computed table, and this runs on the GUI thread under dataLock)."""
-    player = _player(autonaApp, kind)
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "TAG", "country_code": "JP",
                     "state_code": "13"}, dontLoadFromDB=True)
@@ -148,10 +126,9 @@ def test_set_data_takes_a_state_iso2_as_is(autonaApp, kind):
     assert autonaApp.get(f"{player.path}.state").get("original_code") == "13"
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_loading_a_second_player_replaces_the_first(autonaApp, kind):
+def test_loading_a_second_player_replaces_the_first(autonaApp):
     """SetData(clear=True) is how a set load overwrites the previous match."""
-    player = _player(autonaApp, kind)
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "FIRST", "prefix": "OLD"}, dontLoadFromDB=True)
     autonaApp.settle()
@@ -164,9 +141,8 @@ def test_loading_a_second_player_replaces_the_first(autonaApp, kind):
     assert autonaApp.get(f"{player.path}.mergedName") == "SECOND"
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_clear_empties_the_published_player_fields(autonaApp, kind):
-    player = _player(autonaApp, kind)
+def test_clear_empties_the_published_player_fields(autonaApp):
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "TAG", "prefix": "SPONSOR"},
                    dontLoadFromDB=True)
@@ -179,9 +155,8 @@ def test_clear_empties_the_published_player_fields(autonaApp, kind):
     assert autonaApp.get(f"{player.path}.team") == ""
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_the_losers_flag_is_appended_to_the_merged_name(autonaApp, kind):
-    player = _player(autonaApp, kind)
+def test_the_losers_flag_is_appended_to_the_merged_name(autonaApp):
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "TAG", "prefix": "SPONSOR"},
                    dontLoadFromDB=True)
@@ -195,9 +170,8 @@ def test_the_losers_flag_is_appended_to_the_merged_name(autonaApp, kind):
 
 # ── character slots ──────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_character_slots_follow_the_requested_count(autonaApp, kind):
-    player = _player(autonaApp, kind)
+def test_character_slots_follow_the_requested_count(autonaApp):
+    player = _player(autonaApp)
 
     player.SetCharactersPerPlayer(3)
     autonaApp.settle()
@@ -210,14 +184,13 @@ def test_character_slots_follow_the_requested_count(autonaApp, kind):
     assert sorted(_characters(autonaApp, player)) == [1]
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_the_slot_count_change_republishes_mains(autonaApp, kind):
+def test_the_slot_count_change_republishes_mains(autonaApp):
     """mains is only rewritten on a slot rebuild, so it must track the count.
 
     Overlays that render "this player's mains" next to the live pick read
     score.N...mains; if it keeps the old slot count they disagree.
     """
-    player = _player(autonaApp, kind)
+    player = _player(autonaApp)
 
     player.SetCharactersPerPlayer(2)
     autonaApp.settle()
@@ -225,9 +198,8 @@ def test_the_slot_count_change_republishes_mains(autonaApp, kind):
     assert sorted(autonaApp.get(f"{player.path}.mains") or {}) == [1, 2]
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_mains_for_the_selected_game_fill_their_own_slots(autonaApp, kind):
-    player = _player(autonaApp, kind)
+def test_mains_for_the_selected_game_fill_their_own_slots(autonaApp):
+    player = _player(autonaApp)
     player.SetCharactersPerPlayer(3)
     autonaApp.settle()
 
@@ -247,10 +219,9 @@ def test_mains_for_the_selected_game_fill_their_own_slots(autonaApp, kind):
     assert _characters(autonaApp, player)[2]["skin"] == 0
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_mains_from_another_game_are_ignored(autonaApp, kind):
+def test_mains_from_another_game_are_ignored(autonaApp):
     """mains is keyed by game codename; a different game's entry is not ours."""
-    player = _player(autonaApp, kind)
+    player = _player(autonaApp)
     player.SetCharactersPerPlayer(2)
     autonaApp.settle()
 
@@ -261,25 +232,18 @@ def test_mains_from_another_game_are_ignored(autonaApp, kind):
     assert _names(autonaApp, player) == {1: "", 2: ""}
 
 
-@pytest.mark.parametrize("kind", [
-    "scoreboard",
-    pytest.param("team", marks=pytest.mark.xfail(strict=True, reason=(
-        "BUG-7: AutonaTeamPlayerWidget still has the pre-fix legacy-mains "
-        "loop -- it walks every character_element and assigns the single "
-        "character to all of them, so loading a one-character player shows "
-        "that character in every slot. AutonaScoreboardPlayerWidget was "
-        "fixed; this copy was not (agent-pitfalls #5). Not user-visible "
-        "today only because AutonaTeamBattleWidget, its sole caller, is "
-        "commented out in src/Autona.py. Remove this marker with the fix."))),
-])
-def test_a_legacy_single_character_main_only_fills_the_first_slot(
-        autonaApp, kind):
+def test_a_legacy_single_character_main_only_fills_the_first_slot(autonaApp):
     """The shipped "one-character player pollutes every slot" regression.
 
     The old single-character mains format is a flat ["Name", skin] list.
     It describes ONE character, so it belongs in slot 1 and nowhere else.
+
+    (This was BUG-7's other half: AutonaTeamPlayerWidget kept the pre-fix
+    loop that assigned the single character to every slot, tracked here as a
+    strict xfail. That widget was dead code and is gone as of 2026-08-28, so
+    only the fixed implementation is left to assert against.)
     """
-    player = _player(autonaApp, kind)
+    player = _player(autonaApp)
     player.SetCharactersPerPlayer(3)
     autonaApp.settle()
 
@@ -293,10 +257,9 @@ def test_a_legacy_single_character_main_only_fills_the_first_slot(
     assert names[3] == ""
 
 
-@pytest.mark.parametrize("kind", KINDS)
 def test_loading_a_player_without_mains_clears_the_previous_characters(
-        autonaApp, kind):
-    player = _player(autonaApp, kind)
+        autonaApp):
+    player = _player(autonaApp)
     player.SetCharactersPerPlayer(2)
     autonaApp.settle()
 
@@ -315,10 +278,9 @@ def test_loading_a_player_without_mains_clears_the_previous_characters(
     assert _names(autonaApp, player) == {1: "", 2: ""}
 
 
-@pytest.mark.parametrize("kind", KINDS)
 def test_swapping_two_character_slots_exchanges_the_published_names(
-        autonaApp, kind):
-    player = _player(autonaApp, kind)
+        autonaApp):
+    player = _player(autonaApp)
     player.SetCharactersPerPlayer(2)
     autonaApp.settle()
 
@@ -335,9 +297,8 @@ def test_swapping_two_character_slots_exchanges_the_published_names(
 
 # ── swapping two players ─────────────────────────────────────────────────
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_swap_with_exchanges_the_published_names(autonaApp, kind):
-    left, right = _players(autonaApp, kind)
+def test_swap_with_exchanges_the_published_names(autonaApp):
+    left, right = _players(autonaApp)
 
     left.SetData({"gamerTag": "LEFT", "prefix": "LS"}, dontLoadFromDB=True)
     right.SetData({"gamerTag": "RIGHT", "prefix": "RS"}, dontLoadFromDB=True)
@@ -354,10 +315,9 @@ def test_swap_with_exchanges_the_published_names(autonaApp, kind):
     assert autonaApp.get(f"{right.path}.mergedName") == "LS | LEFT"
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_swapping_a_player_with_itself_is_a_no_op(autonaApp, kind):
+def test_swapping_a_player_with_itself_is_a_no_op(autonaApp):
     # Reachable from the move-up/move-down buttons at the ends of a team.
-    player = _player(autonaApp, kind)
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "TAG", "prefix": "SPONSOR"},
                    dontLoadFromDB=True)
@@ -370,15 +330,14 @@ def test_swapping_a_player_with_itself_is_a_no_op(autonaApp, kind):
     assert autonaApp.get(f"{player.path}.team") == "SPONSOR"
 
 
-# ── seed (AutonaScoreboardPlayerWidget only) ─────────────────────────────
+# ── seed ─────────────────────────────────────────────────────────────────
 #
-# AutonaTeamPlayer.ui has no seed field at all, so these are not parametrized.
 # The seed reaches the overlay through state and the operator through the
 # seedDisplay badge; both are asserted, because the shipped bug was a
 # mismatch between them.
 
 def test_a_seed_reaches_the_state_and_the_badge(autonaApp):
-    player = _player(autonaApp, "scoreboard")
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "TAG", "seed": 7}, dontLoadFromDB=True)
     autonaApp.settle()
@@ -395,7 +354,7 @@ def test_a_player_without_seed_info_clears_the_previous_seed(autonaApp):
     null). The old guard was `is not None`, so None skipped the whole branch
     and the previous entrant's seed stayed on the overlay under the new name.
     """
-    player = _player(autonaApp, "scoreboard")
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "SEEDED", "seed": 7}, dontLoadFromDB=True)
     autonaApp.settle()
@@ -412,7 +371,7 @@ def test_a_player_without_seed_info_clears_the_previous_seed(autonaApp):
 def test_a_player_with_no_seed_key_clears_the_previous_seed(autonaApp):
     # Same failure through the other door: some provider paths omit the key
     # entirely rather than sending None.
-    player = _player(autonaApp, "scoreboard")
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "SEEDED", "seed": 7}, dontLoadFromDB=True)
     autonaApp.settle()
@@ -430,7 +389,7 @@ def test_a_non_numeric_seed_is_treated_as_unseeded(autonaApp):
     # Providers also send seeds as strings; garbage must not raise inside a
     # set load (SetData holds a SaveBlock -- an exception escaping it is the
     # BUG-3 shape, where saving never resumes).
-    player = _player(autonaApp, "scoreboard")
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "TAG", "seed": "not a number"},
                    dontLoadFromDB=True)
@@ -441,7 +400,7 @@ def test_a_non_numeric_seed_is_treated_as_unseeded(autonaApp):
 
 
 def test_a_string_seed_is_published_as_a_number(autonaApp):
-    player = _player(autonaApp, "scoreboard")
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "TAG", "seed": "12"}, dontLoadFromDB=True)
     autonaApp.settle()
@@ -451,7 +410,7 @@ def test_a_string_seed_is_published_as_a_number(autonaApp):
 
 
 def test_the_seed_survives_a_player_swap(autonaApp):
-    left, right = _players(autonaApp, "scoreboard")
+    left, right = _players(autonaApp)
 
     left.SetData({"gamerTag": "SEEDED", "seed": 3}, dontLoadFromDB=True)
     right.SetData({"gamerTag": "UNSEEDED"}, dontLoadFromDB=True)
@@ -489,13 +448,12 @@ def test_each_board_publishes_its_players_under_its_own_subtree(
 def test_the_team_board_uses_the_scoreboard_player_widget(autonaApp):
     """Pins which class each board builds -- this file's premise.
 
-    docs and the strategy note describe board 2 as the AutonaTeamPlayerWidget
-    board; it is not. Board 2 is an AutonaScoreboardWidget, so both boards
-    build AutonaScoreboardPlayerWidget, and AutonaTeamPlayerWidget has no
-    caller left (AutonaTeamBattleWidget is commented out in src/Autona.py).
-    That is why the parametrized tests above construct the team widget
-    directly instead of taking it off a board. If someone wires the team
-    battle widget back in, this fails and the helper needs revisiting.
+    Older docs and the strategy note describe board 2 as the
+    AutonaTeamPlayerWidget board; it never was. Board 2 is an
+    AutonaScoreboardWidget, so both boards build AutonaScoreboardPlayerWidget
+    -- which is why the assertions above can be written once, against the one
+    class that ships. If a second player-widget implementation is ever wired
+    back in, this fails and this file needs revisiting.
     """
     from src.AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
 
@@ -506,24 +464,20 @@ def test_the_team_board_uses_the_scoreboard_player_widget(autonaApp):
 
 
 def test_the_player_fields_keep_their_state_key_object_names(autonaApp):
-    """objectName IS the state key (agent-pitfalls #4), on both widgets.
+    """objectName IS the state key (agent-pitfalls #4).
 
     Renaming any of these in the .ui breaks every overlay and every saved
     program_state.json without a migration layer. tests/
     test_objectname_keypath_contract.py guards the board-level names; these
-    are the per-player ones the two widget classes have in common.
+    are the per-player ones.
     """
-    scoreboard, _ = _players(autonaApp, "scoreboard")
-    team, _ = _players(autonaApp, "team")
+    scoreboard, _ = _players(autonaApp)
 
-    for widget in (scoreboard, team):
-        for name in ("name", "team", "twitter"):
-            assert widget.findChild(QLineEdit, name) is not None, (
-                f"{type(widget).__name__} lost the '{name}' field")
+    for name in ("name", "team", "twitter"):
+        assert scoreboard.findChild(QLineEdit, name) is not None, (
+            f"{type(scoreboard).__name__} lost the '{name}' field")
 
-    # Seed is the one the two do not share.
     assert scoreboard.findChild(QSpinBox, "seed") is not None
-    assert team.findChild(QSpinBox, "seed") is None
 
 
 # ── the online avatar (LIVE-BUG-1) ───────────────────────────────────────
@@ -547,9 +501,8 @@ AVATAR = "https://cdn.example.invalid/avatar/abc123"
 OTHER_AVATAR = "https://cdn.example.invalid/avatar/def456"
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_set_data_publishes_the_online_avatar(autonaApp, kind):
-    player = _player(autonaApp, kind)
+def test_set_data_publishes_the_online_avatar(autonaApp):
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "TAG", "avatar": AVATAR}, dontLoadFromDB=True)
     autonaApp.settle()
@@ -557,10 +510,9 @@ def test_set_data_publishes_the_online_avatar(autonaApp, kind):
     assert autonaApp.get(f"{player.path}.online_avatar") == AVATAR
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_editing_the_tag_keeps_the_online_avatar(autonaApp, kind):
+def test_editing_the_tag_keeps_the_online_avatar(autonaApp):
     """The operator fixing a typo in a tag must not cost the player a face."""
-    player = _player(autonaApp, kind)
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "TAG", "avatar": AVATAR}, dontLoadFromDB=True)
     autonaApp.settle()
@@ -574,12 +526,11 @@ def test_editing_the_tag_keeps_the_online_avatar(autonaApp, kind):
     assert autonaApp.get(f"{player.path}.online_avatar") == AVATAR
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_editing_the_sponsor_keeps_the_online_avatar(autonaApp, kind):
+def test_editing_the_sponsor_keeps_the_online_avatar(autonaApp):
     # The sponsor field runs the same handler, and it is the one that also
     # re-derives the sponsor images -- so it is the likeliest place for a
     # future "just re-export everything" shortcut to reintroduce the bug.
-    player = _player(autonaApp, kind)
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "TAG", "avatar": AVATAR}, dontLoadFromDB=True)
     autonaApp.settle()
@@ -592,16 +543,15 @@ def test_editing_the_sponsor_keeps_the_online_avatar(autonaApp, kind):
     assert autonaApp.get(f"{player.path}.online_avatar") == AVATAR
 
 
-@pytest.mark.parametrize("kind", KINDS)
 def test_loading_a_player_without_an_avatar_drops_the_previous_one(
-        autonaApp, kind):
+        autonaApp):
     """The other half of the semantics: "keep" must not mean "never clears".
 
     An entrant with no start.gg account has no avatar, and the previous
     player's face staying on the overlay under the new name is the failure
     that made None the default in the first place.
     """
-    player = _player(autonaApp, kind)
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "FIRST", "avatar": AVATAR}, dontLoadFromDB=True)
     autonaApp.settle()
@@ -613,9 +563,8 @@ def test_loading_a_player_without_an_avatar_drops_the_previous_one(
     assert autonaApp.get(f"{player.path}.online_avatar") is None
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_loading_a_player_replaces_the_previous_avatar(autonaApp, kind):
-    player = _player(autonaApp, kind)
+def test_loading_a_player_replaces_the_previous_avatar(autonaApp):
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "FIRST", "avatar": AVATAR}, dontLoadFromDB=True)
     autonaApp.settle()
@@ -627,9 +576,8 @@ def test_loading_a_player_replaces_the_previous_avatar(autonaApp, kind):
     assert autonaApp.get(f"{player.path}.online_avatar") == OTHER_AVATAR
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_clear_removes_the_online_avatar(autonaApp, kind):
-    player = _player(autonaApp, kind)
+def test_clear_removes_the_online_avatar(autonaApp):
+    player = _player(autonaApp)
 
     player.SetData({"gamerTag": "TAG", "avatar": AVATAR}, dontLoadFromDB=True)
     autonaApp.settle()
@@ -640,16 +588,15 @@ def test_clear_removes_the_online_avatar(autonaApp, kind):
     assert autonaApp.get(f"{player.path}.online_avatar") is None
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_the_avatar_follows_a_player_swap(autonaApp, kind):
+def test_the_avatar_follows_a_player_swap(autonaApp):
     """Swapping the two sides of a set moves the faces with the tags.
 
     Before the fix both avatars were wiped instead, as a side effect of the
     same defaulting bug; with the parameter left alone they would stay on
     the widget and end up under the other player's name, which is worse.
-    Both widget classes restore it explicitly (_swapRestoreTail).
+    The widget restores it explicitly (_swapRestoreTail).
     """
-    left, right = _players(autonaApp, kind)
+    left, right = _players(autonaApp)
 
     left.SetData({"gamerTag": "LEFT", "avatar": AVATAR}, dontLoadFromDB=True)
     right.SetData({"gamerTag": "RIGHT"}, dontLoadFromDB=True)
@@ -713,8 +660,7 @@ def _loadSets(player, count):
         _loadSet(player, i)
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_reloading_states_does_not_accumulate_models(autonaApp, kind):
+def test_reloading_states_does_not_accumulate_models(autonaApp):
     """The pin: repeating the rebuild must not add live models or rows.
 
     Counted process-wide rather than per-widget, because the leak was not a
@@ -722,7 +668,7 @@ def test_reloading_states_does_not_accumulate_models(autonaApp, kind):
     referred to the discarded models, and only their continued existence gave
     them away.
     """
-    player = _player(autonaApp, kind)
+    player = _player(autonaApp)
 
     # Warm up: the first two loads create the model and the country/state
     # tables, so the baseline is taken with everything already built.
@@ -747,14 +693,13 @@ def test_reloading_states_does_not_accumulate_models(autonaApp, kind):
         "release (agent-pitfalls #13b).")
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_the_state_combo_keeps_one_model_for_its_lifetime(autonaApp, kind):
+def test_the_state_combo_keeps_one_model_for_its_lifetime(autonaApp):
     """The mechanism: same model object before and after, and only one.
 
     This is what makes the count above stay flat, and it is the assertion that
     says *why* if the count ever moves.
     """
-    player = _player(autonaApp, kind)
+    player = _player(autonaApp)
     combo = player._w("state", QComboBox)
 
     _loadSets(player, 2)
@@ -778,8 +723,7 @@ def test_the_state_combo_keeps_one_model_for_its_lifetime(autonaApp, kind):
         "once, when the combo is built.")
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_refilled_states_still_resolve(autonaApp, kind):
+def test_refilled_states_still_resolve(autonaApp):
     """Refilling in place must leave a combo the region lookup can read.
 
     SetData walks stateElement.model().item(i) to find the region, so a
@@ -787,7 +731,7 @@ def test_refilled_states_still_resolve(autonaApp, kind):
     would publish the wrong region -- or none -- while the model count
     stayed reassuringly flat.
     """
-    player = _player(autonaApp, kind)
+    player = _player(autonaApp)
 
     # Come from a different country first: this is the rebuild path, not the
     # initial fill.
@@ -805,8 +749,7 @@ def test_refilled_states_still_resolve(autonaApp, kind):
     assert autonaApp.get(f"{player.path}.state").get("original_code") == "13"
 
 
-@pytest.mark.parametrize("kind", KINDS)
-def test_a_rebuild_publishes_the_state_exactly_once(autonaApp, kind):
+def test_a_rebuild_publishes_the_state_exactly_once(autonaApp):
     """The refill must look like the old model swap to everyone downstream.
 
     Attaching a finished model with setModel() produced exactly one index
@@ -816,7 +759,7 @@ def test_a_rebuild_publishes_the_state_exactly_once(autonaApp, kind):
     as easy to end up emitting twice. Both show up here: the published value
     is written once per rebuild, and it is {} while no country is selected.
     """
-    player = _player(autonaApp, kind)
+    player = _player(autonaApp)
     _loadSet(player, 0)
     autonaApp.settle()
 

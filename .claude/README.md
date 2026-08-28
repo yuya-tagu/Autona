@@ -105,7 +105,7 @@ frontmatter の `paths:`/`globs:` で対象ファイル編集時のみ自動ロ�
 | ファイル | 内容 |
 |---------|------|
 | `design/Design.md` | UI 実装方式・データモデル・画面仕様・デザインシステム・ホットキー仕様の正本 |
-| `design/external-control-api.md` | External Control API（`/api/v1/`）の I/F 仕様正本（計画/未実装。ADR-001 準拠） |
+| `design/external-control-api.md` | External Control API（`/api/v1/`）の I/F 仕様正本（実装済み: `src/AutonaApiV1.py`。ADR-001 準拠） |
 
 ## その他
 

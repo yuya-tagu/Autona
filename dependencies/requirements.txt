@@ -10,7 +10,6 @@ Flask
 flask-cors
 asyncio
 python-dateutil==2.9.0
-pynput==1.7.7
 # Pinned exactly: the Qt build determines the WebEngine resource files
 # (v8_context_snapshot.bin, *.pak, icudtl.dat). Keep Qt stable and bump only
 # intentionally; the external update helper can replace all files, so
