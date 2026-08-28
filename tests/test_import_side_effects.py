@@ -13,6 +13,21 @@ filesystem below the current working directory (./out, ./user_data/games,
 ./user_data/alerts_red.json, ./user_data/settings.json,
 ./user_data/badword_*.txt).
 
+Headless core Step 1 adds two things to that list. The core package itself
+(src/core: the state layer, its settings and the observer channels) is
+imported directly rather than through the compatibility shims, so the rule
+holds for the module that actually defines the state rather than for the
+re-export in front of it -- and the channels must come up with no
+subscribers, since a module-level subscription would be exactly the kind of
+hidden wiring bootstrap_core() exists to eliminate. StateManagerBridge is
+the other: it is a singleton like the rest, created by bootstrap_core(),
+and importing it must not build it.
+
+Note what this cannot check: src/core must also import without Qt, which is
+a stronger property than "no side effects" and lives in
+tests/test_core_qt_free.py. This module imports the whole widget tree, so
+Qt is in sys.modules here either way.
+
 AutonaWebServer is the odd one out: what it used to build at import time was
 not a singleton but a Flask app plus a SocketIO server plus ~90 route/event
 registrations, run from the WebServer class body. That moved into
@@ -69,12 +84,35 @@ assert [n for n in sys.modules if n.startswith("src.")] == [], \
     "import src loaded submodules: " \
     f"{[n for n in sys.modules if n.startswith('src.')]}"
 
+# The core package, imported by its real name before anything reaches it
+# through a shim: src/core is where the state layer lives (headless core
+# Step 1), so that is where the "inert import" rule has to hold.
+core_package = importlib.import_module("src.core")
+# Like src/__init__.py, this one is a docstring and nothing else. A
+# convenience re-export here would make `from src.core import X` drag in the
+# whole state layer, which is how the old import-order coupling started.
+assert not hasattr(core_package, "StateManager"), \
+    "src/core/__init__.py re-exports StateManager"
+assert not hasattr(core_package, "SettingsManager"), \
+    "src/core/__init__.py re-exports SettingsManager"
+importlib.import_module("src.core.Observable")
+core_settings = importlib.import_module(
+    "src.core.SettingsManager").SettingsManager
+core_state = importlib.import_module("src.core.StateManager").StateManager
+
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
 # because its module tail used to create ./user_data/settings.json.
 settings_manager = importlib.import_module(
     "src.SettingsManager").SettingsManager
 state_manager = importlib.import_module("src.StateManager").StateManager
+# The shims must re-export the core classes themselves, not copies: a second
+# StateManager class would give the widget layer and the core layer separate
+# state dicts, which no other assertion here would notice.
+assert settings_manager is core_settings, \
+    "src/SettingsManager.py no longer re-exports the core class"
+assert state_manager is core_state, \
+    "src/StateManager.py no longer re-exports the core class"
 hotkeys = importlib.import_module("src.AutonaHotkeys").AutonaHotkeys
 game_assets = importlib.import_module(
     "src.AutonaGameAssetManager").AutonaGameAssetManager
@@ -111,6 +149,10 @@ scoreboard_manager = importlib.import_module(
 # either -- AutonaApiV1 only declares its Blueprint, which is inert until
 # WebServer.__init__ registers it on the app.
 web_server = importlib.import_module("src.AutonaWebServer").WebServer
+# The Qt adapter for the state layer. Imported last on purpose: everything
+# above already pulled it in (every widget that listens to state does), so
+# if any of them built one at import time this assertion catches it.
+bridge = importlib.import_module("src.StateManagerBridge").StateManagerBridge
 
 from qtpy.QtWidgets import QApplication
 
@@ -127,9 +169,22 @@ assert country_helper.instance is None, \
     "import created AutonaCountryHelper.instance"
 assert scoreboard_manager.instance is None, \
     "import created AutonaScoreboardManager.instance"
+assert bridge.instance is None, "import created StateManagerBridge.instance"
 assert web_server.app is None, "import built WebServer.app (Flask)"
 assert web_server.socketio is None, "import built WebServer.socketio"
 assert web_server.actions is None, "import built WebServer.actions"
+
+# The core state layer comes up empty, and -- the point of importing the
+# whole widget tree above -- with nobody wired to its channels. Only
+# bootstrap_core() subscribes (through StateManagerBridge); a module-level
+# subscription anywhere would show up as a non-zero count here.
+assert core_state.state == {}, "import populated StateManager.state"
+assert core_state.lastSavedState == {}, "import populated lastSavedState"
+for channel_name in ("state_big_change", "state_updated",
+                     "held_dirty_changed", "held_state_updated"):
+    channel = getattr(core_state.observers, channel_name)
+    assert channel.subscriber_count() == 0, \
+        f"import subscribed to StateManager.observers.{channel_name}"
 
 # Static data: nothing loaded, nothing written.
 assert settings_manager.settings == {}, "import loaded settings.json"

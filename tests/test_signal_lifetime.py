@@ -9,13 +9,28 @@ not -- Qt holds the callable, the closure holds the widget, and nothing ever
 disconnects it. The destroyed widget stays reachable and keeps answering,
 rewriting the state subtree it used to own (the "ghost board").
 
-Two tests below: a structural one that keeps new lambdas out, and a
-behavioural one that shows a dropped board really does go quiet on its own.
+Since headless core Step 1 there is a second, blunter way into the same bug.
+The state layer publishes through `ObserverChannel` (src/core/Observable.py),
+whose `subscribe()` holds a **strong** reference to the callback and has no
+weak-receiver machinery at all. A bound method is no safer there than a
+lambda: nothing is ever disconnected implicitly, so a widget that subscribes
+directly is a ghost board by construction, not by accident. Widgets connect
+to `StateManagerBridge.instance` instead and let Qt disconnect them; the
+channels themselves are for core and other Qt-free code. That is the third
+structural check below.
+
+Tests below: two structural ones that keep new lambdas and new direct
+subscriptions out, and behavioural ones that show a dropped board really
+does go quiet on its own.
 """
 import ast
 from pathlib import Path
 
 SRC_ROOT = Path(__file__).resolve().parent.parent / "src"
+# The Qt-free half of src. Code here has no widgets and no Qt lifetime, so
+# subscribing to an ObserverChannel is exactly what it is supposed to do;
+# the subscription check below applies to the Qt-side files only.
+CORE_DIR = SRC_ROOT / "core"
 
 # Senders that live for the whole process. A connection made from one of
 # these is only as short-lived as Qt can prove the receiver to be.
@@ -26,7 +41,10 @@ PROCESS_WIDE_SENDERS = (
     "AutonaAlertNotification.instance.signals",
     "AutonaHotkeys.signals",
     "AutonaPlayerDB.signals",
-    "StateManager.signals",
+    # The state layer's Qt signals live on the adapter now, not on
+    # StateManager itself (headless core Step 1). Same four signals, same
+    # process lifetime -- the bridge is built once by bootstrap_core().
+    "StateManagerBridge.instance",
 )
 
 # The exceptions, listed as (module, full sender expression). Every receiver
@@ -55,6 +73,16 @@ ALLOWED_LAMBDA_CONNECTIONS = {
     ("AutonaThumbnailSettingsWidget.py",
      "AutonaGameAssetManager.instance.signals.onLoad"),
 }
+
+# The one Qt-side module allowed to subscribe to a core channel: the adapter
+# whose entire job is to turn those channels into Qt signals. It is built
+# once by bootstrap_core(), lives for the whole process, and refuses a second
+# construction, so its four subscriptions can never be stale or duplicated.
+#
+# Do not add a widget here. A widget cannot hold this kind of subscription
+# safely -- see the module docstring -- and the fix is always the same:
+# connect to StateManagerBridge.instance instead.
+ALLOWED_OBSERVER_SUBSCRIBERS = {"StateManagerBridge.py"}
 
 
 def _lambda_connections():
@@ -104,6 +132,67 @@ def test_the_allow_list_only_covers_connections_that_still_exist():
     present = {(module, sender) for module, sender, _ in _lambda_connections()}
     stale = sorted(ALLOWED_LAMBDA_CONNECTIONS - present)
     assert not stale, f"ALLOWED_LAMBDA_CONNECTIONS entries no longer found: {stale}"
+
+
+def _observer_subscriptions():
+    """Every `<something>.subscribe(...)` in the Qt-side half of src/.
+
+    Matched on the call name rather than on a list of channel expressions:
+    `subscribe` belongs to exactly one thing in this codebase
+    (ObserverChannel), and the receiver is written every which way at the
+    call site -- `StateManager.observers.state_updated`, a local
+    `observers`, a channel passed in as an argument. Keying off the
+    expression text would miss the last two, which are the ones a
+    refactor produces.
+    """
+    found = []
+    for path in sorted(SRC_ROOT.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        if CORE_DIR in path.parents:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr != "subscribe":
+                continue
+            try:
+                sender = ast.unparse(node.func.value)
+            except Exception:
+                sender = "<unparseable>"
+            found.append((
+                str(path.relative_to(SRC_ROOT)).replace("\\", "/"),
+                sender,
+                node.lineno,
+            ))
+    return found
+
+
+def test_no_qt_side_module_subscribes_to_a_core_observer_channel():
+    offenders = [
+        f"{module}:{line}: {sender}.subscribe(...)"
+        for module, sender, line in _observer_subscriptions()
+        if module not in ALLOWED_OBSERVER_SUBSCRIBERS
+    ]
+    assert not offenders, (
+        "an ObserverChannel subscription from the Qt side is never undone: "
+        "the channel holds a strong reference to the callback, so even a "
+        "bound method keeps the receiver alive and answering after the "
+        "widget is destroyed (the ghost board, with none of Qt's "
+        "weak-receiver protection). Connect to StateManagerBridge.instance "
+        "instead:\n  " + "\n  ".join(offenders))
+
+
+def test_the_observer_allow_list_only_covers_modules_that_still_subscribe():
+    # Same discipline as the lambda allow list: an entry that no longer
+    # matches anything is an exception nobody needs.
+    present = {module for module, _, _ in _observer_subscriptions()}
+    stale = sorted(ALLOWED_OBSERVER_SUBSCRIBERS - present)
+    assert not stale, (
+        f"ALLOWED_OBSERVER_SUBSCRIBERS entries no longer subscribe: {stale}")
 
 
 def test_the_scoreboard_hotkey_slots_are_bound_methods(autonaApp):

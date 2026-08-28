@@ -79,8 +79,16 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 
 ```
                          ┌──────────────────────────────┐
-                         │     StateManager (Python)    │
+                         │  StateManager (src/core, Qt-free) │
                          │  単一の真実の源 / RLock 保護    │
+                         │  通知は StateManager.observers  │
+                         │  （素の callback、Qt 非依存）    │
+                         └──────────────┬───────────────┘
+                                        │
+                         ┌──────────────┴───────────────┐
+                         │ StateManagerBridge (Qt adapter)│
+                         │ core の observer を購読し同名の │
+                         │ Qt シグナル 4 本を re-emit      │
                          └──────────────┬───────────────┘
                                         │
                 ┌───────────────────────┼───────────────────────┐
@@ -258,11 +266,13 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 | `StateManager.Unset(key)` | キー削除 | Yes (RLock) |
 | `StateManager.SaveBlock()` | コンテキストマネージャ。バッチ書き込み中にファイル出力を抑制 | カウンタ式 |
 | `StateManager.GetFullState()` | スナップショット取得（**ロック取得**版） | Yes |
+| `StateManager.observers.<channel>.subscribe(cb)` | 変更通知の購読（`state_big_change` / `state_updated` / `held_dirty_changed` / `held_state_updated`）。Qt 非依存の素の callback 登録 | Yes |
 
 **規約**:
 - キーパスは **ドット区切り文字列**（例: `"score.1.team.1.player.1.gamerTag"`）
 - 数値添字も**文字列として扱う**（`"1"` であって `1` ではない）
 - `StateManager.state` への直接参照は **禁止**。必ず `Get` / `GetFullState()` 経由。
+- モジュールは `src/core/StateManager.py`（`src/StateManager.py` は headless core Step 1 の互換シム・1 世代で削除予定）。Qt シグナルが必要な場合は `src/StateManagerBridge.py` の `StateManagerBridge.instance` に接続する（core 側に Qt シグナルを追加しない）
 
 #### 3.1.2 キーパスツリー（正本）
 
@@ -493,29 +503,32 @@ stream
              │ StateManager.Set / Unset / SaveBlock
              ▼
 ┌─────────────────────────────────┐
-│ StateManager                    │
+│ StateManager (src/core, Qt-free)│
 │ - DeepDiff で delta 算出        │
 │ - revision を単調増加で付与      │
 │ - adaptive debounce (50/100/200ms)│
-└──┬───────────┬──────────────────┘
-   │           │
-   │ delta     │ snapshot
-   ▼           ▼
-┌──────────┐ ┌────────────────────┐
-│ Socket.IO│ │ ./out/program_state│
-│ broadcast│ │ .json (degraded用) │
-└──┬───────┘ └─────┬──────────────┘
-   │               │
-   ▼               ▼
-PyQt UI    OBS HTML / React Web UI / WebEngine 画像生成
-(直接接続)  (Socket.IO + revision 検証)
+│ - 通知は StateManager.observers │
+│   （素の callback、Qt 非依存）   │
+└──┬───────────┬───────────┬──────┘
+   │           │           │
+   │ delta     │ snapshot  │ observer 通知
+   ▼           ▼           ▼
+┌──────────┐ ┌────────────┐ ┌───────────────────────┐
+│ Socket.IO│ │./out/program│ │ StateManagerBridge     │
+│ broadcast│ │_state.json  │ │ (Qt adapter, 同名シグナル│
+│          │ │(degraded用) │ │  4本を re-emit)         │
+└──┬───────┘ └─────┬──────┘ └──────────┬─────────────┘
+   │               │                   │
+   ▼               ▼                   ▼
+OBS HTML / React Web UI / WebEngine 画像生成      PyQt UI
+(Socket.IO + revision 検証)                      (Bridge 経由で接続)
 ```
 
 #### 3.2.2 書き込み規約
 
 | ルール | 内容 |
 |------|------|
-| **R-Sync-1** | 書き込み経路の規約: <br>① React Web UI / 外部システムからの書き込みは **必ず AutonaWebServerActions 経由**。<br>② OBS HTML は原則 **read-only**。例外的に書き込みを許可する場合も AutonaWebServerActions 経由とする。<br>③ PyQt Widget は現行互換のため `StateManager.Set` 直接呼び出しを **暫定許可**。<br>④ 新規の複合操作・正規化を伴う操作は Actions 層へ実装する。<br>⑤ 将来的には PyQt のドメイン状態書き込みも Actions 層へ移行する（§8 の移行プラン参照、将来名称は `AutonaActions` / `StateActions` のように WebServer 非依存名に寄せる）。 |
+| **R-Sync-1** | 書き込み経路の規約: <br>① React Web UI / 外部システムからの書き込みは **必ず AutonaWebServerActions 経由**。<br>② OBS HTML は原則 **read-only**。例外的に書き込みを許可する場合も AutonaWebServerActions 経由とする。<br>③ PyQt Widget は現行互換のため `StateManager.Set` 直接呼び出しを **暫定許可**。<br>④ 新規の複合操作・正規化を伴う操作は Actions 層へ実装する。<br>⑤ 将来的には PyQt のドメイン状態書き込みも Actions 層へ移行する（§8 の移行プラン参照、将来名称は `AutonaActions` / `StateActions` のように WebServer 非依存名に寄せる）。<br>⑥ state 変更通知の Qt シグナルは `StateManagerBridge.instance` が提供する。core（`src/core/`）に Qt シグナルを追加しない。 |
 | **R-Sync-2** | バッチ書き込みは `with StateManager.SaveBlock():` を使う。`BlockSaving()` / `ReleaseSaving()` の手動ペアは避ける（例外時の漏れリスク） |
 | **R-Sync-3** | 同一トランザクション内の複数 `Set` は SaveBlock で囲み、delta を 1 回にまとめる |
 | **R-Sync-4** | 競合時の優先順位: **後勝ち**（最後の書き込みで上書き）。同時操作の検出・拒否は行わない |
@@ -529,8 +542,8 @@ PyQt UI    OBS HTML / React Web UI / WebEngine 画像生成
 | **R-Sync-7** | `program_state` イベント（full snapshot）には `{ revision, state }` を含める |
 | **R-Sync-8** | クライアントは受信 payload の区間 `[first_revision, revision]` が次に期待する revision（前回適用 +1）を含むことを検証する。含まなければ `program_state` を再リクエストして full snapshot で再構築する。（旧規約の「単一 revision の前回 +1 検証」は coalescing と両立せず、結合 payload をギャップと誤検知して全量再取得が多発していた） |
 | **R-Sync-9** | reconnect 時はクライアントが必ず full snapshot を再取得する |
-| **R-Sync-10** | adaptive debounce: <10 delta = 50ms / 10-99 = 100ms / 100+ = 200ms + `state_big_change` シグナル発火。**leading-edge flush**: 直近 flush から 50ms 以上静かな状態で届いた最初の delta は即時送出する（単発操作の体感遅延をゼロ化。バーストは従来どおり trailing debounce） |
-| **R-Sync-11** | **遅延反映（「反映」ボタン、2026-07 導入）**: `score.1` / `score.2`（1v1・チームボード）のサブツリーは `StateManager.HoldSubtree` で保留登録される。書き込みはライブ state に即適用（`Get()` は常にライブ値）だが、delta 配信・full snapshot（`GetFullState` 既定）・`program_state.json`・`./out` テキスト出力からは除外され、BEST OF 右の「反映」ボタン（`CommitHeld`）が保留分を 1 save サイクルで一括公開する。ゲーム（再）読込（`GameAssetManager.onLoad`）時は自動コミット。crew ボード（`score.3`）と `score` 以外のサブツリーは従来どおり即時配信。**除外サブキー（exempt、2026-07-27 追加）**: `HoldSubtree(prefix, exempt=[...])` で指定したサブパスは保留対象外となり、書き込み時点で即時公開される。現在の指定は `last_sets` / `history_sets` / `recent_sets` / `upset_factor`（`AutonaScoreboardWidget.STATS_KEYS`）— 取得済みの派生データであり操作者の未確定編集ではないため、統計オーバーレイ（`layout/last_sets` 等）と統計プレビューが「反映」を待たずに更新される。保留中の編集がある状態でも exempt キーのライブ値は公開スナップショットに残る。サムネイル/リザルト生成は `GetFullState(include_pending=True)` でフォームのライブ値を描画する。デスクトップ内で保留中データを表示するウィジェット（Statistics 等）は `held_state_updated` シグナルで更新する |
+| **R-Sync-10** | adaptive debounce: <10 delta = 50ms / 10-99 = 100ms / 100+ = 200ms + `state_big_change` 通知（core の observer 発火 → `StateManagerBridge` が同名 Qt シグナルを re-emit）。**leading-edge flush**: 直近 flush から 50ms 以上静かな状態で届いた最初の delta は即時送出する（単発操作の体感遅延をゼロ化。バーストは従来どおり trailing debounce） |
+| **R-Sync-11** | **遅延反映（「反映」ボタン、2026-07 導入）**: `score.1` / `score.2`（1v1・チームボード）のサブツリーは `StateManager.HoldSubtree` で保留登録される。書き込みはライブ state に即適用（`Get()` は常にライブ値）だが、delta 配信・full snapshot（`GetFullState` 既定）・`program_state.json`・`./out` テキスト出力からは除外され、BEST OF 右の「反映」ボタン（`CommitHeld`）が保留分を 1 save サイクルで一括公開する。ゲーム（再）読込（`GameAssetManager.onLoad`）時は自動コミット。crew ボード（`score.3`）と `score` 以外のサブツリーは従来どおり即時配信。**除外サブキー（exempt、2026-07-27 追加）**: `HoldSubtree(prefix, exempt=[...])` で指定したサブパスは保留対象外となり、書き込み時点で即時公開される。現在の指定は `last_sets` / `history_sets` / `recent_sets` / `upset_factor`（`AutonaScoreboardWidget.STATS_KEYS`）— 取得済みの派生データであり操作者の未確定編集ではないため、統計オーバーレイ（`layout/last_sets` 等）と統計プレビューが「反映」を待たずに更新される。保留中の編集がある状態でも exempt キーのライブ値は公開スナップショットに残る。サムネイル/リザルト生成は `GetFullState(include_pending=True)` でフォームのライブ値を描画する。デスクトップ内で保留中データを表示するウィジェット（Statistics 等）は `StateManagerBridge.instance.held_state_updated` シグナル（core 側は `StateManager.observers.held_state_updated` 通知が起点）で更新する |
 
 #### 3.2.4 同期遅延の上限
 
@@ -1651,7 +1664,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 
 | ID | タスク | 関連 § | 影響範囲 |
 |----|------|------|--------|
-| **T-18** | **PyQt 書き込みの Actions 層移行**: PyQt Widget の `StateManager.Set` 直接呼び出しを Actions 層に移行する。WebServer 非依存名 `AutonaActions` / `StateActions` への改名も検討 | §3.2.2 R-Sync-1 | 大規模リファクタ。`src/AutonaWebServerActions.py` の独立化 + 全 PyQt Widget の書き込み経路差し替え |
+| **T-18** | **PyQt 書き込みの Actions 層移行**: PyQt Widget の `StateManager.Set` 直接呼び出しを Actions 層に移行する。WebServer 非依存名 `AutonaActions` / `StateActions` への改名も検討。Step 1（core 境界確立・Qt-free pin）完了 2026-08-28 | §3.2.2 R-Sync-1 | 大規模リファクタ。`src/AutonaWebServerActions.py` の独立化 + 全 PyQt Widget の書き込み経路差し替え |
 | **T-19** | 動的キーパス（`objectName` 依存キー）の段階的な静的化。新規追加分から §3.1.2 に明記する運用 | §3.1.3 | 新規キー追加時のレビューで運用 |
 | **T-20** | OBS テンプレの命名軸統一: 新規追加分から `scoreboard_{placement}_{style}` に寄せる | §4.3.1 | 新規追加時のレビューで運用 |
 | **T-21** | フォント定義の整理: PyQt の `FONT_FAMILY_CONDENSED`（Roboto Condensed）を React にも追加するか、削除するか決定 | §5.2.1 | `web/src/themes.js`、`src/ui_constants.py` |

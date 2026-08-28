@@ -10,6 +10,7 @@ import json
 
 from .thumbnail import main_generate_thumbnail as thumbnail
 from .StateManager import StateManager
+from .StateManagerBridge import StateManagerBridge
 from .SettingsManager import *
 from .AutonaGameAssetManager import *
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
@@ -116,7 +117,7 @@ class AutonaThumbnailSettingsWidget(QDockWidget):
             self._onTournamentDataUpdated)
         AutonaGameAssetManager.instance.signals.onLoad.connect(
             self._RefreshVideoTitle)
-        StateManager.signals.state_big_change.connect(
+        StateManagerBridge.instance.state_big_change.connect(
             self._RefreshVideoTitle)
         self._RefreshVideoTitle()
 

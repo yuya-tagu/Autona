@@ -77,14 +77,14 @@ PdM 方針（2026-08-28）「Qt ウィジェットが書き込み経路の主役
 └──────────────┬────────────────────────────────────────────────┘
                ▼ 通知（observer）
 ┌─ adapters ────────────────────────────────────────────────────┐
-│  QtBridge（observer → Qt シグナル変換。GUI スレッド境界もここ）│
+│  StateManagerBridge（observer → Qt シグナル変換。GUI スレッド境界もここ）│
 │  WebServer（Flask/Socket.IO。既存の delta 配信・契約は不変）   │
 └───────────────────────────────────────────────────────────────┘
 ```
 
 設計上の要点:
 
-- **エコーループ抑止を規約化する**: Actions が書いた state 変更を QtBridge 経由で受けた
+- **エコーループ抑止を規約化する**: Actions が書いた state 変更を StateManagerBridge 経由で受けた
   ウィジェットが、表示更新の副作用（`setText` → `editingFinished` 等）で再度 Actions を
   呼ばないこと。プログラム的更新中は `QSignalBlocker` で囲む（agent-pitfalls #13b の
   既存パターンを標準とする）。各ステップの検証項目に「同一操作で delta が 1 回だけ出る」を含める
@@ -99,7 +99,7 @@ PdM 方針（2026-08-28）「Qt ウィジェットが書き込み経路の主役
 ADR-003 と同じ規律: 1 PR = 独立検証・revert 可能。粒度は「1 PR = 1 ステップ以下」とし、
 Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
 
-### Step 0: 掃除・準備（リスク極小）
+### Step 0: 掃除・準備（リスク極小）✅ 完了（2026-08-28, PR #188）
 
 - `pynput` を requirements / Pipfile / licenses から削除（import ゼロの残留依存）
 - デッドコード削除: `AutonaTeamBattleWidget`(423 行) + `AutonaTeamPlayerWidget`(658 行) +
@@ -110,15 +110,21 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
   commentary 12/8 混在、`.claude/README.md` の external-control-api「未実装」表記
 - 検証: フルスイート + `test_webserver_routes.py`（台帳不変）
 
-### Step 1: core 境界の確立（要石）
+### Step 1: core 境界の確立（要石）✅ 完了（2026-08-28）
 
 - `src/core/` パッケージ新設。`StateManager` のシグナル 4 本を Qt 非依存 observer
-  （素の callback 登録）に置換し、既存シグナルと同名の Qt シグナルを `QtBridge` が提供
-  （既存の接続元 20 箇所は QtBridge に付け替え、挙動不変）
+  （`src/core/Observable.py` の `ObserverChannel`。素の callback 登録）に置換し、
+  既存シグナルと同名の Qt シグナルを `StateManagerBridge` が提供。
+  **付け替えの実数: ウィジェット側 `connect` 13 箇所（6 ファイル）→ `StateManagerBridge.instance`、
+  core 側 `emit` 8 箇所 → `observers.<名前>.notify()`**。挙動不変
 - `tests/test_core_qt_free.py` 新設: core 配下の import が Qt を引かないことを
-  subprocess で pin（`test_import_side_effects.py` 方式）
-- `StateManager` / `SettingsManager` / `AutonaDictHelper` 等の Qt-free 資産を core へ移動
-  （import パスは互換 re-export を 1 世代残す）
+  subprocess で pin（`test_import_side_effects.py` 方式）。対象モジュールは
+  `src/core` の `rglob` で動的列挙するため、新設 core モジュールの**間接的な** Qt 汚染も
+  自動で pin される
+- **移動したのは `StateManager` / `SettingsManager` の 2 つ**（import パスは互換
+  re-export シムを 1 世代残す）。`AutonaDictHelper` 等の Qt-free Helpers は当面
+  `src/Helpers` に残し、core から参照する形にした（移動は後続ステップで判断する。
+  Helpers は Qt 側の利用者も多く、Step 1 の目的である「core 境界の確立」には不要）
 - 検証: フルスイート + 手動チェックリスト「起動/終了」節。delta 配信の回帰がないこと
   （React 側 revision 連番・OBS poll）
 
@@ -193,7 +199,7 @@ Step 5 は Step 2（カタログの器）と Step 3（Actions 基盤）の完了
 ## 6. ロールバック方針
 
 - 各ステップは独立 PR・独立リリース。問題時は当該 PR revert で戻る
-- Step 1（observer 化）だけは接続元 20 箇所に触るため、リリース前に
+- Step 1（observer 化）だけは通知経路の全点（`connect` 13 + `emit` 8）に触るため、リリース前に
   dev / frozen / OBS 実機（delta 配信）の 3 点を必ず通す
 - Step 5 のマイグレーション層は「旧キーの読み替え」方式のため、revert しても
   旧バージョンで保存されたデータは読める（前方互換を壊す変更を入れない）

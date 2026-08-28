@@ -66,5 +66,20 @@ WebEngine プレビュー等で重いパネルは **遅延構築**にする（�
 
 ## StateManager シグナル
 
-- `StateManager.signals` への `connect` は `__init__` 内で行う
+state の通知は Qt 非依存の observer（`StateManager.observers`、`src/core/Observable.py`）が
+正本で、**Qt シグナルはアダプタ `src/StateManagerBridge.py` が提供する**（headless core Step 1）。
+ウィジェットからは Bridge に繋ぐ。core 側に Qt シグナルを足さない
+（`tests/test_core_qt_free.py` が落ちる）。
+
+- `StateManagerBridge.instance.{state_big_change, state_updated,
+  held_dirty_changed, held_state_updated}` への `connect` は `__init__` 内で行う
+  （シグナル名・引数は旧 `StateManager` 上のシグナルと同一）
+- **ウィジェットから `StateManager.observers...subscribe()` を直接呼ばない**。
+  `ObserverChannel` は callback を**強参照**し、Qt の weak receiver に相当する仕組みが無い。
+  bound method で登録しても破棄時に自動解除されないため、破棄済みウィジェットが
+  シグナルに答え続けて state を書き戻す（ゴーストボード）。Qt シグナル経由なら
+  C++ オブジェクト破棄時に Qt が接続を切るので、必ず Bridge に繋ぐ。
+  `tests/test_signal_lifetime.py` がこの違反を検出する
+- observer の直接購読は **core / 非 Qt コード専用**（core のテスト、将来の core サービス）。
+  寿命がチャンネルより短い購読者は自分で `unsubscribe()` する責任を持つ
 - スロットでの例外は握りつぶさず `logger.debug` 以上でログに出す

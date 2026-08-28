@@ -67,6 +67,25 @@ def bootstrap_core():
     from .StateManager import StateManager
     StateManager.Initialize()
 
+    # ORDER CONSTRAINT: the Qt bridge for the state layer must exist before
+    # the first consumer connects to it -- that is every widget built from
+    # Window.__init__ and WebServer.__init__, i.e. everything from
+    # AutonaHotkeys below onwards. It must also come *after*
+    # StateManager.Initialize(): LoadState() fires state_big_change, and
+    # creating the bridge earlier would re-emit that into a widget tree that
+    # does not exist yet (today it reaches nobody either way -- keeping the
+    # order makes that true by construction rather than by luck).
+    # It is a plain QObject, so it needs a QApplication no more than
+    # AutonaHotkeys does; it only has to be built on the GUI thread, which
+    # is where bootstrap_core() runs.
+    # The None check is the same idempotence guard the other singletons get
+    # here; the bridge additionally refuses a second construction from its
+    # own __init__, because a duplicate would double every state
+    # notification without raising anything.
+    from .StateManagerBridge import StateManagerBridge
+    if StateManagerBridge.instance is None:
+        StateManagerBridge.instance = StateManagerBridge()
+
     # AutonaHotkeys only needs SettingsManager (read at construction time by
     # LoadUserHotkeys); the Windows hotkeys themselves are registered later,
     # from UiMounted(). Its `signals` class attribute is referenced by

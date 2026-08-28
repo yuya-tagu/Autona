@@ -20,6 +20,7 @@ from .AutonaIndividualGameTracker import AutonaIndividualGameTracker
 from .AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
+from .StateManagerBridge import StateManagerBridge
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaStatsUtil import AutonaStatsUtil
 from .AutonaHotkeys import AutonaHotkeys
@@ -754,11 +755,11 @@ class AutonaScoreboardWidget(QWidget):
         # tournamentInfo.* lives outside this board's held subtree, so EVENT
         # tab edits arrive as regular state_updated deltas; state_big_change
         # covers wholesale loads (startup state restore, Start.gg import).
-        StateManager.signals.state_updated.connect(
+        StateManagerBridge.instance.state_updated.connect(
             self._onTournamentInfoDelta)
-        StateManager.signals.state_big_change.connect(
+        StateManagerBridge.instance.state_big_change.connect(
             self._updateTournamentInfoLine)
-        StateManager.signals.state_big_change.connect(
+        StateManagerBridge.instance.state_big_change.connect(
             self._syncDisplayTournamentNameEdit)
         self._updateTournamentInfoLine()
         self._syncDisplayTournamentNameEdit()
@@ -768,7 +769,7 @@ class AutonaScoreboardWidget(QWidget):
         # during construction above was published normally, so the committed
         # baseline matches the widgets' initial values.
         StateManager.HoldSubtree(self.statePrefix, exempt=self.STATS_KEYS)
-        StateManager.signals.held_dirty_changed.connect(
+        StateManagerBridge.instance.held_dirty_changed.connect(
             self._onHeldDirtyChanged)
 
     @staticmethod

@@ -48,7 +48,7 @@ frontmatter の `paths:`/`globs:` で対象ファイル編集時のみ自動ロ�
 | `rules/python-widgets.md` | `src/**/*.py` | Qt (PySide6) ウィジェットの作法 |
 | `rules/react-web-ui.md` | `web/src/**` | React/Redux の規約 |
 | `rules/build-and-release.md` | `dependencies/**`, `*.spec`, `scripts/**` | ビルド・リリース手順（onedir/WebEngine/翻訳/配布） |
-| `rules/state-and-webserver.md` | `src/StateManager.py`, `src/AutonaWebServer*.py`, `src/Helpers/**` | 状態管理・Web サーバー・ヘルパーの作法 |
+| `rules/state-and-webserver.md` | `src/core/**`, `src/StateManager*.py`, `src/AutonaWebServer*.py`, `src/Helpers/**` | 状態管理（正本は `src/core/StateManager.py`。`src/StateManager.py` は互換シム）・observer/Bridge 通知・Web サーバー・ヘルパーの作法 |
 | `rules/agent-pitfalls.md` | `src/**/*.py`, `tests/**/*.py` | エージェントが踏みやすい地雷の回避ルール |
 
 ## Hooks（自動検証）

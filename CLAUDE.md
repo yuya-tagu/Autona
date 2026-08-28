@@ -60,7 +60,7 @@ cp dist/Autona/Autona.exe ./Autona.exe
 
 - `src/bootstrap.py` — composition root。**シングルトン生成順の正本**（`bootstrap_core()`）
 - `src/Autona.py` — QMainWindow。サイドバー + `QStackedWidget` で全パネル管理。**この import 自体が起動シーケンス**なので、テストや調査スクリプトから import しない
-- `src/StateManager.py` — グローバル状態（nested dict）。deepdiff でデルタ算出、ファイル出力 + WebSocket 配信
+- `src/core/StateManager.py` — グローバル状態（nested dict）。deepdiff でデルタ算出、ファイル出力 + WebSocket 配信。**core は Qt を import しない**（`tests/test_core_qt_free.py` が pin）。Qt シグナルはアダプタ `src/StateManagerBridge.py` が提供する。`src/StateManager.py` は互換 re-export シム（1 世代のみ）
 
 **遅延構築**: 起動時に作るのは Tournament Info と Scoreboard のみ。他パネルと設定/ガイドウィンドウは初回アクセス時にファクトリで構築（`_Create*Panel` / `Ensure*Window`）。未構築でも必要な state のシードは `Window._SeedPanelState()` に集約。起動時間は `STARTUP phase=...` ログで計測する（詳細は [ADR-003](docs/decisions/ADR-003-startup-architecture.md)）。
 
