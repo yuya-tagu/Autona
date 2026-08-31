@@ -292,3 +292,116 @@ def test_prefix_wide_held_write_keeps_live_exempt_values():
     assert published["upset_factor"] == 3
     # The rest of the subtree is still the committed view.
     assert published["phase"] == "PendingExemptPhase"
+
+
+# --- A save cycle with nothing to publish -----------------------------
+# A write under a held prefix is buffered into heldKeys and never reaches
+# changedKeys, so a SaveBlock that only wrote held keys releases into
+# SaveState with an empty changed-key list. That list is handed to DeepDiff
+# as `include_paths`, and DeepDiff reads an empty one as "no filter" -- the
+# most expensive diff there is, on every +1 with the game tracker on, every
+# SwapTeams and every stage click (headless core Step 4a).
+#
+# It was not even a *harmless* full diff: the export thread stamps
+# `timestamp` and `revision` into lastSavedState, and the live state has
+# neither, so the unfiltered comparison always found those two "removed" --
+# publishing a delta, bumping the revision and rewriting program_state.json
+# for a cycle in which nothing was published at all.
+
+
+class _DiffSpy:
+    """Counts DeepDiff calls made by SaveState and records their filter."""
+
+    def __init__(self, monkeypatch):
+        import src.core.StateManager as module
+
+        self.calls = []
+        real = module.DeepDiff
+
+        def spy(*args, **kwargs):
+            self.calls.append(kwargs.get("include_paths"))
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(module, "DeepDiff", spy)
+
+
+HELD_ONLY_PREFIX = "score.9"
+
+
+@pytest.fixture
+def _heldOnlyBoard():
+    SM.Set(f"{HELD_ONLY_PREFIX}.match", "Baseline")
+    SM.HoldSubtree(HELD_ONLY_PREFIX)
+    _join_export()
+    yield HELD_ONLY_PREFIX
+    with SM.lock:
+        SM.heldPrefixes.discard(HELD_ONLY_PREFIX)
+        SM.heldKeys.pop(HELD_ONLY_PREFIX, None)
+        SM._commitPrefixes.discard(HELD_ONLY_PREFIX)
+        SM._heldTouched.discard(HELD_ONLY_PREFIX)
+    SM.Unset(HELD_ONLY_PREFIX)
+
+
+def test_a_held_only_save_block_never_diffs(monkeypatch, _heldOnlyBoard):
+    diffs = _DiffSpy(monkeypatch)
+    spy = _Spy()
+    revision = SM.revision
+
+    with SM.SaveBlock():
+        SM.Set(f"{_heldOnlyBoard}.team.1.score", 1)
+        SM.Set(f"{_heldOnlyBoard}.stages.1.t1_win", True)
+
+    assert diffs.calls == [], (
+        "a save cycle with nothing to publish still ran DeepDiff; with an "
+        "empty include_paths that is a full-state comparison")
+    assert spy.deltas == []
+    assert SM.revision == revision, (
+        "a held-only cycle bumped the revision, so every client saw a "
+        "discontinuity for a change that was never published")
+    # What the cycle exists for still happens: the live-value notification.
+    assert spy.held_updates == [_heldOnlyBoard]
+    assert SM.Get(f"{_heldOnlyBoard}.team.1.score") == 1
+
+
+def test_committing_a_clean_prefix_diffs_nothing(monkeypatch, _heldOnlyBoard):
+    assert not SM.HasPendingChanges(_heldOnlyBoard)
+
+    diffs = _DiffSpy(monkeypatch)
+    spy = _Spy()
+    SM.CommitHeld(_heldOnlyBoard)
+
+    assert diffs.calls == []
+    assert spy.deltas == []
+
+
+def test_a_block_that_wrote_an_unheld_key_still_diffs_filtered(
+        monkeypatch, _heldOnlyBoard):
+    """The skip must be "nothing queued", not "held prefixes exist"."""
+    diffs = _DiffSpy(monkeypatch)
+    spy = _Spy()
+
+    with SM.SaveBlock():
+        SM.Set(f"{_heldOnlyBoard}.phase", "Pending")   # held
+        SM.Set("game.name", "MixedGame")               # published
+
+    assert len(diffs.calls) == 1
+    # A set, because SaveState builds include_paths with set(changedKeys) and
+    # that order is not the write order -- asserting the list would make a
+    # second changed key here a flaky test rather than a failing one.
+    assert set(diffs.calls[0]) == {"root['game']['name']"}, (
+        "the diff was not filtered to the keys that actually changed")
+    assert "MixedGame" in spy.delta_str()
+    assert "Pending" not in spy.delta_str()
+
+
+def test_committing_pending_edits_still_diffs_them(monkeypatch, _heldOnlyBoard):
+    SM.Set(f"{_heldOnlyBoard}.match", "Grand Final")
+    assert SM.HasPendingChanges(_heldOnlyBoard)
+
+    diffs = _DiffSpy(monkeypatch)
+    spy = _Spy()
+    SM.CommitHeld(_heldOnlyBoard)
+
+    assert len(diffs.calls) == 1
+    assert set(diffs.calls[0]) == {"root['score']['9']['match']"}
+    assert "Grand Final" in spy.delta_str()

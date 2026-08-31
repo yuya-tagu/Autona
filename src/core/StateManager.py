@@ -367,10 +367,6 @@ class StateManager:
     def SaveState():
         if StateManager.saveBlocked == 0:
             with StateManager.lock:
-                # Wait for any previous export before computing new diff
-                if StateManager._export_thread is not None and StateManager._export_thread.is_alive():
-                    StateManager._export_thread.join()
-
                 # Prefixes queued by CommitHeld(): their pending keys join
                 # this publish cycle. Anything held for a committing prefix
                 # at this moment is included (the user asked to apply).
@@ -378,6 +374,42 @@ class StateManager:
                     StateManager.changedKeys.extend(
                         StateManager.heldKeys.pop(prefix, []))
                 StateManager._commitPrefixes.clear()
+
+                if not StateManager.changedKeys:
+                    # Nothing was queued for publication, so there is nothing
+                    # to diff -- and falling through would not produce an
+                    # empty diff, it would produce the most expensive one
+                    # there is: DeepDiff reads `include_paths=[]` as "no
+                    # filter", i.e. a full-state comparison, and the
+                    # held-subtree mask above it a full-state deep_clone.
+                    #
+                    # This is the ordinary shape of a SaveBlock that only
+                    # wrote held keys (a write under a held prefix goes to
+                    # heldKeys, never to changedKeys): every +1 with the game
+                    # tracker on, SwapTeams, the stage handlers, ResetScore,
+                    # StationSetsLoaded. It also covers CommitHeld on a board
+                    # with nothing pending.
+                    #
+                    # Skipping is not merely an optimisation. lastSavedState
+                    # carries the `timestamp` / `revision` keys the export
+                    # thread stamps into it, and the live state does not, so
+                    # the unfiltered diff was never empty: it published a
+                    # delta removing those two keys, bumped the revision, and
+                    # rewrote program_state.json -- once per held-only save
+                    # cycle, for no state change at all.
+                    #
+                    # The held notification still goes out: it is what tells
+                    # the widgets rendering live (unpublished) values to
+                    # refresh, and it is the entire point of these cycles.
+                    StateManager._notifyHeldTouched()
+                    return
+
+                # Wait for any previous export before computing new diff.
+                # Below the early return above on purpose: joining is only
+                # required because the diff reads lastSavedState, which the
+                # export thread is still stamping.
+                if StateManager._export_thread is not None and StateManager._export_thread.is_alive():
+                    StateManager._export_thread.join()
 
                 # Publish view: the live state with still-dirty held subtrees
                 # reverted to their last committed value. When nothing is

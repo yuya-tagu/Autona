@@ -533,7 +533,7 @@ OBS HTML / React Web UI / WebEngine 画像生成      PyQt UI
 | ルール | 内容 |
 |------|------|
 | **R-Sync-1** | 書き込み経路の規約: <br>① React Web UI / 外部システムからの書き込みは **必ず AutonaWebServerActions 経由**。<br>② OBS HTML は原則 **read-only**。例外的に書き込みを許可する場合も AutonaWebServerActions 経由とする。<br>③ PyQt Widget は現行互換のため `StateManager.Set` 直接呼び出しを **暫定許可**（**移行済みの操作は除く** — 下の R-Sync-1b）。<br>④ 新規の複合操作・正規化を伴う操作は Actions 層へ実装する。<br>⑤ PyQt のドメイン状態書き込みは `src/core/Actions.py` の **`AutonaActions`** へ段階移行中（ADR-004 / [headless-core-redesign.md](../../docs/changes/headless-core-redesign.md)）。<br>⑥ state 変更通知の Qt シグナルは `StateManagerBridge.instance` が提供する。core（`src/core/`）に Qt シグナルを追加しない。 |
-| **R-Sync-1b** | **Actions へ移行済みの操作**（headless core Step 3）: スコア増減 / スコアリセット / チーム色 / `display_options` トグル / 反映（`CommitHeld`）。**これらの操作の入口は `AutonaActions.instance` に一本化**され、Qt ウィジェット・REST v1・legacy REST / Socket.IO・グローバルホットキーはすべてそこを呼ぶ。ウィジェットは state 通知（`held_state_updated` / `state_updated`）を受けて表示だけを更新し、更新中は `QSignalBlocker` で囲んで書き戻さない（エコーループ抑止）。<br>**未移行**: チームスワップ（選手サブツリーの入れ替えが選手ウィジェット側にある）/ best_of（`best_of_text` の生成が Qt 依存の `AutonaLocaleHelper` に依存）/ クルーボードのスコアリセット（チーム合計がメンバーストックの派生値）/ **スピンボックス主導のスコア書き込み**（セット読込 / `ClearScore` / `SwapTeams` / ステージ集計）。<br>**したがって `score.{n}.team.{t}.score` の書き手は Step 3 時点でまだ 2 系統**（Actions とスピンボックス主導経路）で、「唯一の書き手」ではない。両者は state 経由でのみ噛み合い、ステージ集計側は書き込み区間を `AutonaIndividualGameTracker.writingScore` で公開して `_SyncScoreDisplays` の二重加算を防ぐ。一本化は Step 4/5。 |
+| **R-Sync-1b** | **Actions へ移行済みの操作**（headless core Step 3）: スコア増減 / スコアリセット / チーム色 / `display_options` トグル / 反映（`CommitHeld`）。**これらの操作の入口は `AutonaActions.instance` に一本化**され、Qt ウィジェット・REST v1・legacy REST / Socket.IO・グローバルホットキーはすべてそこを呼ぶ。ウィジェットは state 通知（`held_state_updated` / `state_updated`）を受けて表示だけを更新し、更新中は `QSignalBlocker` で囲んで書き戻さない（エコーループ抑止）。<br>**ステージ集計は core へ移行済み**（Step 4a）: `score.{n}.stages.*` の記録とステージ⇔スコアの相互整合は `src/core/GameTrackerService.py` が持ち、`AutonaIndividualGameTracker` は行の生成とボタン描画だけを行う（**state が記録・ボタンは表示**）。`writingScore` フラグの所有者もサービス側で、ウィジェットは property で委譲する。<br>**未移行**: チームスワップ（選手サブツリーの入れ替えが選手ウィジェット側にある）/ best_of（`best_of_text` の生成が Qt 依存の `AutonaLocaleHelper` に依存）/ クルーボードのスコアリセット（チーム合計がメンバーストックの派生値）/ **スピンボックス主導のスコア書き込み**（セット読込 / `ClearScore` / `SwapTeams`。スピンボックスの `valueChanged` が `GameTrackerService.UpdateScore` を呼ぶ）。<br>**したがって `score.{n}.team.{t}.score` の書き手は Step 4a 時点で core 内に 2 系統**（`AutonaActions` とステージ集計の `GameTrackerService`）で、「唯一の書き手」ではない。呼び出し口が Actions に一本化されていないためで、**core の外から直接 `Set` する経路は残っていない**。両者は state 経由でのみ噛み合い、ステージ集計側は書き込み区間を `GameTrackerService.writingScore` で公開して `_SyncScoreDisplays` の二重加算を防ぐ。一本化は Step 4b/5。 |
 | **R-Sync-2** | バッチ書き込みは `with StateManager.SaveBlock():` を使う。`BlockSaving()` / `ReleaseSaving()` の手動ペアは避ける（例外時の漏れリスク） |
 | **R-Sync-3** | 同一トランザクション内の複数 `Set` は SaveBlock で囲み、delta を 1 回にまとめる |
 | **R-Sync-4** | 競合時の優先順位: **後勝ち**（最後の書き込みで上書き）。同時操作の検出・拒否は行わない |
@@ -1591,7 +1591,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 
 | # | ファイル | 内容 |
 |---|---------|------|
-| 1 | 統計算出ユーティリティ（`src/AutonaStatsUtil.py` 等） | 算出ロジックを追加 |
+| 1 | `src/core/StatsService.py` | 算出ロジック・state 書き込みを追加（headless core Step 4a で core へ移行。`AutonaStatsUtil` はシグナル中継のみの Qt アダプタ） |
 | 2 | `AutonaStatsWidget` または `AutonaAnalysisWidget` | 表示 UI を追加 |
 | 3 | `Design.md` §3.1.2 | State に保存する場合のみキーパスを追記 |
 

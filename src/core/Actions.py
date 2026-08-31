@@ -27,15 +27,20 @@ that are self-evident state edits and deliberately left two behind:
   handler resizes the individual-game tracker's stage rows. Faithful
   reproduction needs the locale tables in core, which Step 3 does not do.
 - **The spinbox-driven half of the score.** `AdjustScore` / `ResetScore`
-  below are not yet the *only* writers of `score.{n}.team.{t}.score`.
-  Set loading, ClearScore, SwapTeams and the individual-game tracker's
-  stage tally all still drive the score spinbox (or the tracker) and let
-  `AutonaIndividualGameTracker.UpdateScore` / `StageResultsChanged` write
-  the result -- they cannot be expressed here until the player subtree and
-  the stage logic move (Step 4/5). Everything in that group is GUI-thread
-  only, and the two writers coordinate through the state rather than
-  through each other; a board reconciles its display in
-  `AutonaScoreboardWidget._SyncScoreDisplays`.
+  below are not yet the *only* writers of `score.{n}.team.{t}.score`. Since
+  Step 4a there are two writers inside core -- these, and the stage tally in
+  `GameTrackerService.UpdateScore` / `PublishStageResults` -- plus the paths
+  that have not moved at all: set loading, ClearScore and SwapTeams still
+  drive the score spinbox, whose valueChanged runs the tracker's
+  `UpdateScore`. So the *implementation* is core in both cases; what is
+  still outside is the entry point, and folding it in needs the set-loading
+  path (Step 4b) and the player subtree (Step 5).
+  The two writers coordinate through the state rather than through each
+  other; a board reconciles its display in
+  `AutonaScoreboardWidget._SyncScoreDisplays`, and tells them apart with
+  `GameTrackerService.writingScore`. Nothing outside core re-Sets the score:
+  `StageResultsToScore` used to echo the published value back and no longer
+  does.
 
 Import side effects: none (agent-pitfalls #1). `bootstrap_core()` creates the
 single instance; nothing is created here at module level.
@@ -165,11 +170,12 @@ class AutonaActions:
         with StateManager.lock:
             value = self._clampScore(
                 self._asInt(StateManager.Get(key, 0)) + self._asInt(delta))
-            # No SaveBlock: this is one key, and wrapping a single write in
-            # one would ask SaveState for a diff with an *empty* changed-key
-            # list -- which DeepDiff reads as "no filter" and answers with a
-            # full-state diff. Free for a single write, expensive per key
-            # press on a loaded tournament.
+            # No SaveBlock: a single write is already a single save cycle,
+            # so a block would only add a pair of counter operations. (It
+            # used to be worse than pointless -- an empty changed-key list
+            # made DeepDiff run unfiltered, i.e. over the whole state, on
+            # every key press. SaveState skips that cycle outright since
+            # Step 4a.)
             StateManager.Set(key, value)
         return value
 

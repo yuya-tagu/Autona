@@ -1,13 +1,34 @@
+"""The per-game result rows: buttons in, service calls out.
 
-from loguru import logger
+Everything this widget used to decide -- which game a +1 awards, what the
+team score adds up to, how a swap maps onto the rows -- moved to
+`src/core/GameTrackerService.py` (headless core Step 4a), together with the
+`score.{n}.stages.*` reads and writes. The inversion that came with it is
+the one Step 3 applied to the score: the *state* is the record and these
+buttons render it, where before `stageTeam1Check_{i}.isChecked()` was the
+truth and the state a mirror.
+
+So every handler below has the same three steps: turn the click into one
+service call, re-read the state into the buttons, and (where the score
+follows from the rows) tell the board. Re-reading is safe because
+`QAbstractButton.setChecked()` emits `toggled`, never `clicked` -- nothing
+here is connected to `toggled`, so a refresh cannot echo back into another
+write.
+
+What is deliberately still here: the rows themselves, the stage combo bound
+to AutonaGameAssetManager's shared model, and `signals.stageResultsUpdate`,
+which is how the board learns the score changed.
+"""
+
 from qtpy.QtCore import *
 from qtpy.QtWidgets import *
 from qtpy.QtGui import *
 
 from .AutonaGameAssetManager import AutonaGameAssetManager
+from .core.GameTrackerService import (
+    GameTrackerService, TEAM_1, TEAM_2, TIE, UNREPORTED)
 from .Helpers.AutonaQtHelper import assert_gui_thread
 from .Helpers.AutonaVersionHelper import add_beta_label
-from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 
 
@@ -36,39 +57,26 @@ class AutonaIndividualGameTracker(QWidget):
         label_font.setBold(True)
         label.setFont(label_font)
         self.scoreboard_number = scoreboard_number
+        self.service = GameTrackerService(scoreboard_number)
         self._layout.addWidget(label)
         self.setLayout(self._layout)
         self.stage_widget_list = []
         self.stage_order_list_widget = QWidget()
 
-        # True while StageResultsChanged is publishing the team scores it
-        # summed from the stage rows. See the property below.
-        self._writingScore = False
-
     @property
     def writingScore(self) -> bool:
-        """True while this tracker is itself the author of the team score.
+        """True while the tracker is itself the author of the team score.
 
-        The scoreboard reads this from its held_state_updated handler. A
-        score write notifies synchronously on the same thread, so the board's
-        _SyncScoreDisplays runs *inside* StageResultsChanged -- with the
-        spinbox still holding the previous value. Left to itself it would
-        read that as a score transition and call SyncStagesToScore, which
-        awards a stage for it: one click on "game 1: T1" would mark game 2 as
-        won as well. While this is set the board syncs its spinbox and stops
-        there, because the stage rows are already exactly what the operator
-        clicked.
+        Read by AutonaScoreboardWidget._SyncScoreDisplays; the reasoning is
+        on GameTrackerService.writingScore, which owns the flag now.
         """
-        return self._writingScore
+        return self.service.writingScore
+
+    # ── the rows ─────────────────────────────────────────────────────────
 
     @assert_gui_thread
     def CreateStage(self, index=0):
         """ Creates a new stage in the list of stage results. """
-
-        def uncheck_buttons_if_true(value, list_buttons):
-            if value:
-                for button in list_buttons:
-                    button.setChecked(False)
 
         stageWidget = QWidget()
         stageLayout = QHBoxLayout()
@@ -99,47 +107,22 @@ class AutonaIndividualGameTracker(QWidget):
         stageTieCheck.setText(QApplication.translate("app", "Tie"))
         stageTieCheck.setCheckable(True)
 
-        # Add Logic
+        # Add Logic. Connected after setModel() above, so binding the shared
+        # stage model does not count as a selection.
         stageMenu.currentIndexChanged.connect(
-            lambda: [
-                StateManager.Set(f"score.{self.scoreboard_number}.stages.{index+1}", stageMenu.currentData()),
-                StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.t1_win", stageTeam1Check.isChecked()),
-                StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.t2_win", stageTeam2Check.isChecked()),
-                StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.tie", stageTieCheck.isChecked()),
-            ]
-        )
-        with StateManager.SaveBlock():
-            StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.t1_win", False)
-            StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.t2_win", False)
-            StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.tie", False)
+            lambda: self._StageAssetChanged(index, stageMenu))
 
-        stageTeam1Check.clicked.connect(
-            lambda: [
-                uncheck_buttons_if_true(stageTeam1Check.isChecked(), [stageTeam2Check, stageTieCheck]),
-                StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.t1_win", stageTeam1Check.isChecked()),
-                StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.t2_win", stageTeam2Check.isChecked()),
-                StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.tie", stageTieCheck.isChecked()),
-                self.StageResultsChanged()
-            ]
-        )
-        stageTeam2Check.clicked.connect(
-            lambda: [
-                uncheck_buttons_if_true(stageTeam2Check.isChecked(), [stageTeam1Check, stageTieCheck]),
-                StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.t1_win", stageTeam1Check.isChecked()),
-                StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.t2_win", stageTeam2Check.isChecked()),
-                StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.tie", stageTieCheck.isChecked()),
-                self.StageResultsChanged()
-            ]
-        )
-        stageTieCheck.clicked.connect(
-            lambda: [
-                uncheck_buttons_if_true(stageTieCheck.isChecked(), [stageTeam1Check, stageTeam2Check]),
-                StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.t1_win", stageTeam1Check.isChecked()),
-                StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.t2_win", stageTeam2Check.isChecked()),
-                StateManager.Set(f"score.{self.scoreboard_number}.stages.{index + 1}.tie", stageTieCheck.isChecked()),
-                self.StageResultsChanged()
-            ]
-        )
+        # A checkable QPushButton has already toggled by the time `clicked`
+        # arrives, so "still checked" means this result was set and "no
+        # longer checked" means the operator cleared the game. The siblings
+        # are not touched here: exclusivity is the service's business, and
+        # the refresh below brings them into line.
+        for button, result in ((stageTeam1Check, TEAM_1),
+                               (stageTeam2Check, TEAM_2),
+                               (stageTieCheck, TIE)):
+            button.clicked.connect(
+                lambda checked=False, b=button, r=result:
+                    self._StageResultClicked(index, r, b))
 
         stageLayout.addWidget(gameLabel)
         if StateManager.Get("game.has_stages", False): # Only add stage column if the game supports stage
@@ -150,6 +133,50 @@ class AutonaIndividualGameTracker(QWidget):
 
         stageWidget.setLayout(stageLayout)
         return stageWidget
+
+    @assert_gui_thread
+    def _StageButtons(self, index):
+        """The (T1, T2, Tie) buttons of one row.
+
+        Raises rather than returning None for a missing button: the object
+        names are built from the same index the row was created with, so a
+        miss means the row is not what this widget thinks it is, and every
+        caller would otherwise fail one line later on None.
+        """
+        row = self.stage_widget_list[index]
+        buttons = []
+        for name in ("stageTeam1Check", "stageTeam2Check", "stageTieCheck"):
+            button = row.findChild(QPushButton, f"{name}_{index}")
+            if button is None:
+                raise RuntimeError(f"{name}_{index} not found")
+            buttons.append(button)
+        return tuple(buttons)
+
+    @assert_gui_thread
+    def _SyncStageButtons(self):
+        """Render the recorded results. The one direction state -> buttons."""
+        for index in range(len(self.stage_widget_list)):
+            winner = self.service.GameWinner(index)
+            team1, team2, tie = self._StageButtons(index)
+            team1.setChecked(winner == TEAM_1)
+            team2.setChecked(winner == TEAM_2)
+            tie.setChecked(winner == TIE)
+
+    # ── handlers ─────────────────────────────────────────────────────────
+
+    @assert_gui_thread
+    def _StageResultClicked(self, index, result, button):
+        self.service.SetStageResult(
+            index, result if button.isChecked() else UNREPORTED)
+        self._SyncStageButtons()
+        self.StageResultsChanged()
+
+    @assert_gui_thread
+    def _StageAssetChanged(self, index, combo):
+        # No button refresh: the service carries the result flags across the
+        # overwrite itself, so there is nothing here for the buttons to
+        # learn.
+        self.service.SetStageAsset(index, combo.currentData())
 
     @assert_gui_thread
     def SetStageCount(self, stage_count=5):
@@ -173,215 +200,49 @@ class AutonaIndividualGameTracker(QWidget):
         self.stage_order_list_layout = QVBoxLayout()
         self.stage_order_list_widget = QWidget()
         self.stage_order_list_widget.setLayout(self.stage_order_list_layout)
-        # Coalesce all per-stage Set calls into a single state save / WS broadcast.
-        with StateManager.SaveBlock():
-            StateManager.Set(f"score.{self.scoreboard_number}.stages", {})
-            if stage_count == 0 or SettingsManager.Get('general.disable_individual_game_tracker', True):
-                self.setVisible(False)
-            else:
-                self.setVisible(True)
-                for i in range(stage_count):
-                    self.stage_widget_list.append(self.CreateStage(i))
-                    self.stage_order_list_layout.addWidget(self.stage_widget_list[-1])
+
+        # 0 when the feature is switched off or the best-of is unset, which
+        # is also what hides the widget.
+        count = self.service.ResolveStageCount(stage_count)
+        self.setVisible(count > 0)
+        for i in range(count):
+            self.stage_widget_list.append(self.CreateStage(i))
+            self.stage_order_list_layout.addWidget(self.stage_widget_list[-1])
+        # After the rows, and in one save cycle: building a row no longer
+        # writes anything, so the rebuilt list is published in one go.
+        self.service.SetStageCount(count)
         self._layout.addWidget(self.stage_order_list_widget)
-
-    @assert_gui_thread
-    def GetFirstEmptyStage(self, start_idx=None) -> int:
-        idx = start_idx if start_idx is not None else 0
-
-        while idx < len(self.stage_widget_list):
-            game_winner = self._get_game_winner(idx)
-            if game_winner == -1:
-                return idx
-            idx += 1
-
-        return -1
-
-    @assert_gui_thread
-    def GetWonStages(self, team) -> list[int]:
-        idx = len(self.stage_widget_list)-1
-
-        return [
-            idx
-            for idx
-            in range(len(self.stage_widget_list))
-            if self._get_game_winner(idx) == (team + 1)
-        ]
-
-    def _get_game_winner(self, game_idx):
-        """
-        -1 = unreported, 0 = draw, 1 = team 1, 2 = team 2
-        """
-        current_stage_widget = self.stage_widget_list[game_idx]
-        stageTeam1Check: QPushButton = current_stage_widget.findChild(QPushButton, f"stageTeam1Check_{game_idx}")
-        stageTeam2Check: QPushButton = current_stage_widget.findChild(QPushButton, f"stageTeam2Check_{game_idx}")
-        stageTieCheck: QPushButton = current_stage_widget.findChild(QPushButton, f"stageTieCheck_{game_idx}")
-
-        if stageTeam1Check is None:
-            raise RuntimeError(f"stageTeam1Check_{game_idx} not found")
-        if stageTeam2Check is None:
-            raise RuntimeError(f"stageTeam2Check_{game_idx} not found")
-        if stageTieCheck is None:
-            raise RuntimeError(f"stageTieCheck_{game_idx} not found")
-
-        if stageTieCheck.isChecked(): return 0
-        elif stageTeam1Check.isChecked(): return 1
-        elif stageTeam2Check.isChecked(): return 2
-        else: return -1
 
     @Slot(int, int)
     @assert_gui_thread
     def UpdateScore(self, team, new_value):
         """Responds to the score being modified in a non-per-game context.
 
-        Still the handler for the paths that drive the score spinbox
-        directly (set loading, ClearScore, SwapTeams): they change the widget
-        and this writes the result. The paths that go through
-        AutonaActions.AdjustScore / ResetScore instead write the state first
-        and call SyncStagesToScore() below with the transition, so the two
-        halves were split apart (headless core Step 3).
+        The score spinbox's valueChanged handler: set loading, ClearScore
+        and SwapTeams drive the widget, and this publishes the result and
+        moves the rows to match.
         """
-
-        # Read-modify-write under the lock, same as AutonaActions.AdjustScore:
-        # the score is written from the web/API threads through Actions now, so
-        # a concurrent write between the Get and the Set here would be read
-        # back as this widget's own transition and desynchronise the stages.
-        key = f"score.{self.scoreboard_number}.team.{team + 1}.score"
-        with StateManager.lock:
-            old_value = StateManager.Get(key, 0)
-            StateManager.Set(key, new_value)
-
-        self.SyncStagesToScore(team, old_value, new_value)
+        self.service.UpdateScore(team, new_value)
+        self._SyncStageButtons()
 
     @assert_gui_thread
     def SyncStagesToScore(self, team, old_value, new_value):
         """Award / clear as many stage rows as the score moved by.
 
-        Writes only `score.{n}.stages.*` -- the team score itself is the
-        caller's business either way.
+        Called by the board when the score was written by somebody else
+        (AutonaActions: the +1 buttons, the hotkeys, the Web UI, the API).
         """
-        logger.info(f"UpdateScore: old[{old_value}] new[{new_value}]")
-
-        # Disable individual game tracker logic if ties were reported
-        has_ties = False
-        game_data = StateManager.Get(f"score.{self.scoreboard_number}.stages")
-        for key in (game_data or {}).keys():
-            if game_data[key].get("tie"):
-                has_ties = True
-
-        if has_ties:
-            logger.warning("Disabling individual game tracker due to detected tie results.")
-            return
-
-        counter = old_value
-        for _ in range(abs(new_value - old_value)):
-            if new_value > old_value:
-                self.IncrementScore(team)
-                counter += 1
-            else:
-                self.DecrementScore(team, counter)
-                counter -= 1
-
-    def IncrementScore(self, team, current_stage=None):
-        """Sets the next stage to be won by the provided team."""
-
-        if not current_stage:
-            current_stage = 0
-
-        current_stage = self.GetFirstEmptyStage(current_stage)
-
-        if current_stage == -1:
-            logger.warning(f"Attempted to increment score for team {team+1}, but all stages are completed.")
-            return
-
-        logger.info(f"Setting a win for team {team+1} on game {current_stage}")
-
-        if current_stage >= len(self.stage_widget_list):
-            logger.warning(f"Attempted to increment score for team {team+1} on stage {current_stage+1}, but there are only {len(self.stage_widget_list)} stages.")
-
-        current_stage_widget = self.stage_widget_list[current_stage]
-        stageTeam1Check: QPushButton = current_stage_widget.findChild(QPushButton, f"stageTeam1Check_{current_stage}")
-        stageTeam2Check: QPushButton = current_stage_widget.findChild(QPushButton, f"stageTeam2Check_{current_stage}")
-        stageTieCheck: QPushButton = current_stage_widget.findChild(QPushButton, f"stageTieCheck_{current_stage}")
-        if team == 0:
-            stageTeam1Check.setChecked(True)
-            stageTeam2Check.setChecked(False)
-        else:
-            stageTeam2Check.setChecked(True)
-            stageTeam1Check.setChecked(False)
-
-        stageTieCheck.setChecked(False)
-        with StateManager.SaveBlock():
-            StateManager.Set(f"score.{self.scoreboard_number}.stages.{current_stage+1}.t1_win", stageTeam1Check.isChecked())
-            StateManager.Set(f"score.{self.scoreboard_number}.stages.{current_stage+1}.t2_win", stageTeam2Check.isChecked())
-            StateManager.Set(f"score.{self.scoreboard_number}.stages.{current_stage+1}.tie", stageTieCheck.isChecked())
-
-    @assert_gui_thread
-    def DecrementScore(self, team=None, original_score=None):
-        """ Removes the last reported stage result. Optionally bounded to team. """
-
-        won_stages = self.GetWonStages(team)
-
-        if original_score and len(won_stages) < original_score:
-            logger.warning(f"Failed to decrement score for team {team} because they have won fewer stages than their score. {len(won_stages)} < {original_score}")
-            return
-
-        current_stage = won_stages[-1]
-        if current_stage == -1:
-            logger.warning(f"Could not decrement score for team {team}, could not find a stage to clear.")
-            return
-
-        logger.info(f"Clearing result for stage {current_stage+1}")
-
-        current_stage_widget = self.stage_widget_list[current_stage]
-        stageTeam1Check: QPushButton = current_stage_widget.findChild(QPushButton, f"stageTeam1Check_{current_stage}")
-        stageTeam2Check: QPushButton = current_stage_widget.findChild(QPushButton, f"stageTeam2Check_{current_stage}")
-        stageTieCheck: QPushButton = current_stage_widget.findChild(QPushButton, f"stageTieCheck_{current_stage}")
-        stageTeam1Check.setChecked(False)
-        stageTeam2Check.setChecked(False)
-        stageTieCheck.setChecked(False)
-        with StateManager.SaveBlock():
-            StateManager.Set(f"score.{self.scoreboard_number}.stages.{current_stage+1}.t1_win", stageTeam1Check.isChecked())
-            StateManager.Set(f"score.{self.scoreboard_number}.stages.{current_stage+1}.t2_win", stageTeam2Check.isChecked())
-            StateManager.Set(f"score.{self.scoreboard_number}.stages.{current_stage+1}.tie", stageTieCheck.isChecked())
+        self.service.SyncStagesToScore(team, old_value, new_value)
+        self._SyncStageButtons()
 
     @assert_gui_thread
     def StageResultsChanged(self):
-        team_1_score, team_2_score = 0, 0
-        for i in range(len(self.stage_widget_list)):
-            stageTeam1Check = self.stage_widget_list[i].findChild(QPushButton, f"stageTeam1Check_{i}")
-            stageTeam2Check = self.stage_widget_list[i].findChild(QPushButton, f"stageTeam2Check_{i}")
-            if stageTeam1Check.isChecked():
-                team_1_score += 1
-            if stageTeam2Check.isChecked():
-                team_2_score += 1
-
-        # The flag has to cover the SaveBlock's *exit* as well as its body:
-        # a held write only notifies when the block is released, so that is
-        # when the board's _SyncScoreDisplays runs (see the writingScore
-        # property). Cleared before the signal below, which is the board's cue
-        # to update the spinboxes for the ordinary, non-held case.
-        self._writingScore = True
-        try:
-            with StateManager.SaveBlock():
-                StateManager.Set(f"score.{self.scoreboard_number}.team.1.score", team_1_score)
-                StateManager.Set(f"score.{self.scoreboard_number}.team.2.score", team_2_score)
-        finally:
-            self._writingScore = False
+        team_1_score, team_2_score = self.service.PublishStageResults()
+        # Emitted after the flag inside the service is cleared: this is the
+        # board's cue to update the spinboxes for the ordinary, non-held case.
         self.signals.stageResultsUpdate.emit(team_1_score, team_2_score)
 
     @assert_gui_thread
     def SwapStageResults(self):
-        # Coalesce all 3*N stage Sets into a single broadcast.
-        with StateManager.SaveBlock():
-            for i in range(len(self.stage_widget_list)):
-                stageTeam1Check = self.stage_widget_list[i].findChild(QPushButton, f"stageTeam1Check_{i}")
-                stageTeam2Check = self.stage_widget_list[i].findChild(QPushButton, f"stageTeam2Check_{i}")
-                stageTieCheck = self.stage_widget_list[i].findChild(QPushButton, f"stageTieCheck_{i}")
-                team_1_old_state, team_2_old_state = stageTeam1Check.isChecked(), stageTeam2Check.isChecked()
-                stageTeam1Check.setChecked(team_2_old_state)
-                stageTeam2Check.setChecked(team_1_old_state)
-                StateManager.Set(f"score.{self.scoreboard_number}.stages.{i+1}.t1_win", stageTeam1Check.isChecked())
-                StateManager.Set(f"score.{self.scoreboard_number}.stages.{i+1}.t2_win", stageTeam2Check.isChecked())
-                StateManager.Set(f"score.{self.scoreboard_number}.stages.{i+1}.tie", stageTieCheck.isChecked())
-
+        self.service.SwapStageResults()
+        self._SyncStageButtons()

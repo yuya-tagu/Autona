@@ -757,6 +757,32 @@ def test_a_stage_click_awards_exactly_the_game_that_was_clicked(
         "tracker to award another stage for it")
 
 
+def test_a_stage_click_is_exactly_two_save_cycles(autonaApp, trackedBoard):
+    """One click = the row it wrote, then the score that follows from it.
+
+    History, because the number has been wrong twice. Before headless core
+    Step 4a a click ran six held cycles: three bare Sets for the result
+    flags, the summed score, and two more from StageResultsToScore re-Setting
+    what the tracker had just written. Step 4a folded the flags into one
+    SaveBlock (six -> four) and the review of it removed the redundant pair
+    (four -> two). Two is the floor without merging the row write and the
+    score write into a single cycle, which would need one writer for both.
+
+    Nothing is published while the board is held either way, so this is not
+    a correctness bound -- it is the tripwire for a third writer creeping
+    back in, which is exactly how the extra pair survived Step 4a.
+    """
+    seen, unsubscribe = _heldUpdateSpy("score.1")
+    try:
+        _stageButton(trackedBoard, game=1, team=1).click()
+        autonaApp.settle()
+    finally:
+        unsubscribe()
+
+    assert seen == ["score.1", "score.1"], (
+        f"a stage click produced {len(seen)} save cycles instead of 2")
+
+
 def test_stage_clicks_keep_tracking_each_game_independently(
         autonaApp, trackedBoard):
     """The other half of the fix: suppression must not disable the tracker."""

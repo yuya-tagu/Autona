@@ -1,12 +1,30 @@
+"""Qt transport for one board's statistics.
+
+Everything this class used to compute and write now lives in
+`src/core/StatsService.py` (headless core Step 4a). What is left is the
+part that is genuinely Qt: the signals.
+
+They come in two kinds, and the distinction is the whole reason this file
+still exists:
+
+- **triggers (in)** -- `RecentSetsSignal`, `LastSetsP1/P2Signal`,
+  `PlayerHistoryStandingsP1/P2Signal`, `UpsetFactorCalculation`. Emitted by
+  the player widgets (an id or a seed changed), the STATS panel's refresh
+  button, and the web layer, which reaches them from the Flask thread. The
+  signal is what carries the call to the GUI thread; that is why the
+  WebServerActions stats routes can stay `@gui_thread_sync`-free.
+- **results (out)** -- `recent_sets_updated`, `last_sets_updated`,
+  `history_sets_updated`. Handed to `AutonaTournamentDataProvider` as the
+  callback a Start.gg worker emits when its request comes back, which is
+  the worker-thread -> GUI-thread hop.
+
+`AutonaTournamentDataProvider` (Worker / QThreadPool) is deliberately not
+migrated: Step 4a moves the decisions and the writes, not the fetching.
+"""
 from qtpy.QtCore import *
 
-from datetime import datetime
-import math
-import orjson
-
-from .StateManager import StateManager
-from .SettingsManager import SettingsManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
+from .core.StatsService import StatsService
 from loguru import logger
 
 
@@ -23,7 +41,7 @@ class AutonaStatsSignals(QObject):
     history_sets_updated = Signal(dict)
 
 class AutonaStatsUtil:
-    """Per-scoreboard stats fetcher/calculator.
+    """Per-scoreboard stats fetcher.
 
     Not a singleton: every instance is bound to one board (it writes under
     `score.{scoreboardNumber}.*`) and is owned by that board as
@@ -31,6 +49,9 @@ class AutonaStatsUtil:
     `AutonaScoreboardManager.instance.GetScoreboard(n).stats`. Upstream TSH
     had a class-level `instance` built at import time; the per-board split
     made it meaningless, so it is gone -- do not reintroduce it.
+
+    The calculations and the state writes are `self.service`
+    (`src/core/StatsService.py`), one per board as well.
     """
 
     def __init__(self, scoreboardNumber, scoreboard):
@@ -38,6 +59,11 @@ class AutonaStatsUtil:
 
         self.scoreboardNumber = scoreboardNumber
         self.scoreboard = scoreboard
+        # Lazily read, not captured: this runs from the board's __init__,
+        # where team1playerWidgets does not exist yet.
+        self.service = StatsService(
+            scoreboardNumber,
+            playersPerTeam=lambda: len(self.scoreboard.team1playerWidgets))
 
         self.signals.PlayerHistoryStandingsP1Signal.connect(
             self.GetPlayerHistoryStandingsP1)
@@ -74,164 +100,64 @@ class AutonaStatsUtil:
                     and provider.provider.name == "StartGG")
 
     def GetRecentSets(self):
-        updated = False
-        # Only if 1 player on each side
-        if len(self.scoreboard.team1playerWidgets) == 1 and self._IsStartGG():
-            p1id = StateManager.Get(f"score.{self.scoreboardNumber}.team.1.player.1.id")
-            p2id = StateManager.Get(f"score.{self.scoreboardNumber}.team.2.player.1.id")
-            videogame = StateManager.Get("provider_videogame.id")
+        request = self.service.RecentSetsRequest() if self._IsStartGG() else None
 
-            if p1id and p2id and orjson.dumps(p1id) != orjson.dumps(p2id) and videogame:
-                StateManager.Set(f"score.{self.scoreboardNumber}.recent_sets", {
-                    "state": "loading",
-                    "sets": []
-                })
-                AutonaTournamentDataProvider.instance.GetRecentSets(self.signals.recent_sets_updated, p1id, p2id, videogame)
-                updated = True
+        if request is None:
+            self.service.ClearRecentSets()
+            return
 
-        if not updated:
-            StateManager.Set(f"score.{self.scoreboardNumber}.recent_sets", {
-                "state": "done",
-                "sets": []
-            })
+        self.service.MarkRecentSetsLoading()
+        AutonaTournamentDataProvider.instance.GetRecentSets(
+            self.signals.recent_sets_updated, *request)
 
     def UpdateRecentSets(self, data):
-        lastUpdateTime = StateManager.Get(f"score.{self.scoreboardNumber}.recent_sets.request_time", 0)
-
-        if data.get("request_time", 0) > lastUpdateTime:
-            StateManager.Set(f"score.{self.scoreboardNumber}.recent_sets", {
-                "state": "done",
-                "sets": data.get("sets"),
-                "request_time": data.get("request_time")
-            })
+        self.service.UpdateRecentSets(data)
 
     def GetLastSetsP1(self):
-        # Only if 1 player on each side
-        if len(self.scoreboard.team1playerWidgets) == 1 and AutonaTournamentDataProvider.instance:
-            p1id = StateManager.Get(f"score.{self.scoreboardNumber}.team.1.player.1.id")
-            logger.info(f"Player 1 ID: {p1id}")
-            if p1id:
-                AutonaTournamentDataProvider.instance.GetLastSets(self.signals.last_sets_updated, p1id, "1")
-            else:
-                StateManager.Set(f"score.{self.scoreboardNumber}.last_sets.1", {})
+        self._GetLastSets(1)
 
     def GetLastSetsP2(self):
-        # Only if 1 player on each side
-        if len(self.scoreboard.team1playerWidgets) == 1 and AutonaTournamentDataProvider.instance:
-            p2id = StateManager.Get(f"score.{self.scoreboardNumber}.team.2.player.1.id")
-            logger.info(f"Player 2 ID: {p2id}")
-            if p2id:
-                AutonaTournamentDataProvider.instance.GetLastSets(self.signals.last_sets_updated, p2id, "2")
-            else:
-                StateManager.Set(f"score.{self.scoreboardNumber}.last_sets.2", {})
+        self._GetLastSets(2)
+
+    def _GetLastSets(self, team):
+        # Note the guard: any loaded provider will do here, unlike the
+        # Start.gg-only statistics below.
+        if not (self.service.IsSingles()
+                and AutonaTournamentDataProvider.instance):
+            return
+        playerId = self.service.PlayerId(team)
+        logger.info(f"Player {team} ID: {playerId}")
+        if playerId:
+            AutonaTournamentDataProvider.instance.GetLastSets(
+                self.signals.last_sets_updated, playerId, str(team))
+        else:
+            self.service.ClearLastSets(team)
 
     def UpdateLastSets(self, data):
-        with StateManager.SaveBlock():
-            # Reset first so sets from the previous player don't linger when
-            # the new player has fewer sets (keys are sequential 1..N).
-            StateManager.Set(f"score.{self.scoreboardNumber}.last_sets." + data.get("playerNumber"), {})
-            i = 1
-            for set in data.get("last_sets", []):
-                StateManager.Set(f"score.{self.scoreboardNumber}.last_sets." + data.get("playerNumber") + "." + str(i), {
-                    "phase_id": set.get("phase_id"),
-                    "phase_name": set.get("phase_name"),
-                    "round_name": set.get("round_name"),
-                    "player_score": set.get("player1_score"),
-                    "player_seed": set.get("player1_seed"),
-                    "player_team": set.get("player1_team"),
-                    "player_name": set.get("player1_name"),
-                    "oponent_score": set.get("player2_score"),
-                    "oponent_seed": set.get("player2_seed"),
-                    "oponent_team": set.get("player2_team"),
-                    "oponent_name": set.get("player2_name")
-                })
-                i += 1
+        self.service.UpdateLastSets(data)
 
     def GetPlayerHistoryStandingsP1(self):
-        # Only if 1 player on each side
-        if len(self.scoreboard.team1playerWidgets) == 1 and self._IsStartGG():
-            p1id = StateManager.Get(f"score.{self.scoreboardNumber}.team.1.player.1.id")
-            if p1id:
-                AutonaTournamentDataProvider.instance.GetPlayerHistoryStandings(
-                    self.signals.history_sets_updated, p1id, "1", StateManager.Get(f"provider_videogame.id"))
-            else:
-                StateManager.Set(f"score.{self.scoreboardNumber}.history_sets.1", {})
+        self._GetPlayerHistoryStandings(1)
 
     def GetPlayerHistoryStandingsP2(self):
-        # Only if 1 player on each side
-        if len(self.scoreboard.team1playerWidgets) == 1 and self._IsStartGG():
-            p2id = StateManager.Get(f"score.{self.scoreboardNumber}.team.2.player.1.id")
-            if p2id:
-                AutonaTournamentDataProvider.instance.GetPlayerHistoryStandings(
-                    self.signals.history_sets_updated, p2id, "2", StateManager.Get(f"provider_videogame.id"))
-            else:
-                StateManager.Set(f"score.{self.scoreboardNumber}.history_sets.2", {})
+        self._GetPlayerHistoryStandings(2)
+
+    def _GetPlayerHistoryStandings(self, team):
+        if not (self.service.IsSingles() and self._IsStartGG()):
+            return
+        playerId = self.service.PlayerId(team)
+        if playerId:
+            AutonaTournamentDataProvider.instance.GetPlayerHistoryStandings(
+                self.signals.history_sets_updated, playerId, str(team),
+                self.service.VideogameId())
+        else:
+            self.service.ClearHistorySets(team)
 
     def UpdateHistorySets(self, data):
-        with StateManager.SaveBlock():
-            # Same stale-key reset as UpdateLastSets.
-            StateManager.Set(f"score.{self.scoreboardNumber}.history_sets." + data.get("playerNumber"), {})
-            i = 1
-            for set in data.get("history_sets", []):
-                StateManager.Set(f"score.{self.scoreboardNumber}.history_sets." + data.get("playerNumber") + "." + str(i), {
-                    "placement": set.get("placement"),
-                    "event_name": set.get("event_name"),
-                    "tournament_name": set.get("tournament_name"),
-                    "entrants": set.get("entrants"),
-                    "event_date_month": datetime.fromtimestamp(set.get("event_date")).strftime("%B"),
-                    "event_date_day": datetime.fromtimestamp(set.get("event_date")).strftime("%d"),
-                    "event_date_year": datetime.fromtimestamp(set.get("event_date")).strftime("%Y")
-                })
-                i += 1
+        self.service.UpdateHistorySets(data)
 
     def GetSetUpsetFactor(self):
-        if len(self.scoreboard.team1playerWidgets) == 1:
-            bracket_type = StateManager.Get(f"score.bracket_type", "DOUBLE_ELIMINATION")
-
-            p1 = StateManager.Get(f"score.{self.scoreboardNumber}.team.1.player.1.seed")
-            logger.info(f"Scoreboard {self.scoreboardNumber} - P1 Seed: " + str(p1))
-            p2 = StateManager.Get(f"score.{self.scoreboardNumber}.team.2.player.1.seed")
-            logger.info(f"Scoreboard {self.scoreboardNumber} - P2 Seed: " + str(p2))
-            if p1 and p2:
-                p1_upset = self.CalculatePlacementMath(bracket_type, int(p1))
-                p2_upset = self.CalculatePlacementMath(bracket_type, int(p2))
-
-                StateManager.Set(f"score.{self.scoreboardNumber}.upset_factor",
-                                    abs(p1_upset - p2_upset))
-            else:
-                # One (or both) seeds missing: reset instead of leaving the
-                # previous pairing's upset factor in state.
-                StateManager.Set(f"score.{self.scoreboardNumber}.upset_factor", 0)
-        else:
-            StateManager.Set(f"score.{self.scoreboardNumber}.upset_factor", 0)
+        self.service.UpdateUpsetFactor()
 
     def UpdateStreamQueue(self, data):
-        with StateManager.SaveBlock():
-            StateManager.Set(f"streamQueue", data)
-            StateManager.Set(f"currentStream",
-                             SettingsManager.Get("twitch_username"))
-
-    # Calculation of Seeding/Placement to determine
-    # Upset Factor or Seeding Performance Rating
-    #
-    # bracket_type [STRING] = The bracket type returned from Start.GG
-    #
-    # x [INTEGER] = The seeding/placement value being used to determine
-    # the end product (Ex. Seeding for UF or Seeding/Placement for SPR)
-    def CalculatePlacementMath(self, bracket_type, x):
-        # Due to how the logs works, if the player is first seed,
-        # the value will always be 0 and no math needs to be done.
-        if x <= 1:
-            return 0
-
-        single_elim_calc = math.floor(math.log2(x - 1))
-        double_elim_calc = math.ceil(math.log2((2 * x) / 3))
-
-        # Double Elimination Sum of Values
-        if bracket_type == "DOUBLE_ELIMINATION":
-            return single_elim_calc + double_elim_calc
-        # Single Elimination Sum of Values
-        elif bracket_type == "SINGLE_ELIMINATION":
-            return single_elim_calc
-        else:
-            return 0
+        self.service.UpdateStreamQueue(data)
