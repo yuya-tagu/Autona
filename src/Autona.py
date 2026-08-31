@@ -192,6 +192,7 @@ from .AutonaPlayerDB import AutonaPlayerDB
 from .Workers import *
 from .StateManager import StateManager
 from .core import StateSchema as schema
+from .core.Actions import AutonaActions
 from .SettingsManager import SettingsManager
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaStatusManager import AutonaStatusManager
@@ -1451,13 +1452,11 @@ class Window(QMainWindow):
 
     @staticmethod
     def _resolveBattleFormat() -> str:
-        # `scoreboard.battle_format` (str) is the source of truth: "singles",
-        # "team" or "crew". Fall back to the legacy `scoreboard.team_mode`
-        # bool when the new key is absent so existing settings keep working.
-        fmt = SettingsManager.Get("scoreboard.battle_format", None)
-        if fmt in ("singles", "team", "crew"):
-            return fmt
-        return "team" if SettingsManager.Get("scoreboard.team_mode", False) else "singles"
+        # Delegated to core so the window and the headless callers
+        # (AutonaActions.ActiveBoard -> hotkeys, /api/v1/health) cannot answer
+        # differently -- including the legacy `scoreboard.team_mode` fallback,
+        # which the hotkeys used to miss (headless core Step 3).
+        return AutonaActions.instance.ResolveBattleFormat()
 
     def SetBattleFormat(self, fmt):
         # Persist + apply the battle format chosen from the "Rules" menu.

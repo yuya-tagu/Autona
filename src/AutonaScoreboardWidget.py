@@ -21,6 +21,7 @@ from .AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 from .core import StateSchema as schema
+from .core.Actions import AutonaActions
 from .StateManagerBridge import StateManagerBridge
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaStatsUtil import AutonaStatsUtil
@@ -101,6 +102,12 @@ class AutonaScoreboardWidget(QWidget):
         # empty until 反映 was pressed).
         self.statePrefix = f"score.{self.scoreboardNumber}"
 
+        # Re-entrancy guard for _SyncScoreDisplays (agent-pitfalls #9). The
+        # sync is driven by a state notification and can itself cause writes
+        # (the individual game tracker clears/sets stage rows), which produce
+        # another notification. Set before anything can notify us.
+        self._syncingScore = False
+
         # Same skeleton AutonaScoreboardManager writes for the boards that are
         # not built yet, from the same place (headless core Step 2).
         schema.SeedBoard(self.scoreboardNumber)
@@ -114,25 +121,21 @@ class AutonaScoreboardWidget(QWidget):
         self.signals.StationSelection.connect(self.LoadStationSetClicked)
         self.signals.ChangeSetData.connect(self.ChangeSetData)
 
-        AutonaHotkeys.signals.load_set.connect(self.LoadSetClicked)
-        AutonaHotkeys.signals.swap_teams.connect(self.SwapTeams)
-        AutonaHotkeys.signals.reset_scores.connect(self.ResetScore)
-
+        # Only the two hotkeys that drive a *panel* are still connected here.
+        # The score / reset / 反映 hotkeys were moved to AutonaHotkeys ->
+        # AutonaActions (headless core Step 3): connected per board, they
+        # answered from every board that happened to be built -- both of them
+        # after a singles/team switch, and none at all when the saved format
+        # was crew.
+        #
         # Bound methods, never lambdas: AutonaHotkeys.signals is a class-level
         # object that lives for the whole process, while a board is destroyed
         # on every battle-format switch. A bound method tells Qt who the
         # receiver is, so the connection dies with the board; a lambda does
         # not, and nothing ever disconnects it -- the destroyed board would
         # keep answering hotkeys and rewriting score.{n} (the "ghost board").
-        # The team/delta pair each hotkey stands for is fixed, so the four
-        # one-line methods below carry it instead of a captured argument.
-        AutonaHotkeys.signals.team1_score_up.connect(self.HotkeyTeam1ScoreUp)
-        AutonaHotkeys.signals.team1_score_down.connect(
-            self.HotkeyTeam1ScoreDown)
-        AutonaHotkeys.signals.team2_score_up.connect(self.HotkeyTeam2ScoreUp)
-        AutonaHotkeys.signals.team2_score_down.connect(
-            self.HotkeyTeam2ScoreDown)
-        AutonaHotkeys.signals.apply_changes.connect(self.ApplyChanges)
+        AutonaHotkeys.signals.load_set.connect(self.LoadSetClicked)
+        AutonaHotkeys.signals.swap_teams.connect(self.SwapTeams)
 
         self.signals.CommandScoreChange.connect(self.CommandScoreChange)
         self.signals.SwapTeams.connect(self.SwapTeams)
@@ -215,11 +218,15 @@ class AutonaScoreboardWidget(QWidget):
         # The eye (field-visibility) menu was removed from the desktop UI:
         # the details dialog always shows every field. Nothing adds these
         # QActions to a menu any more, so their text is never rendered —
-        # they survive as invisible state carriers, for the display_options
-        # broadcast (Web UI / OBS overlay rendering), for the remote toggle
-        # path (SetDisplayOption ← POST /display-option), and for
-        # show_sponsor alone, which still drives the inline sponsor field's
-        # Qt visibility through hideSponsorCheck.
+        # they survive as invisible state carriers, and show_sponsor alone
+        # still drives the inline sponsor field's Qt visibility.
+        #
+        # They no longer *write* anything: the toggle is
+        # AutonaActions.SetDisplayOption, and this board mirrors the result
+        # back into these actions from the state notification
+        # (_SyncDisplayOptions, headless core Step 3). That is what keeps the
+        # local checkbox, a Web UI eye-menu click and the OBS overlays showing
+        # the same thing without a second writer.
         #
         # The keys, their defaults and the fields each one hides live in
         # StateSchema.DISPLAY_OPTIONS (headless core Step 2) — they used to be
@@ -241,8 +248,8 @@ class AutonaScoreboardWidget(QWidget):
                 "app", "Additional information"),
         }
         self._sponsorAction: QAction = None
-        # settings key -> QAction, so remote clients (React Web UI) can drive
-        # the same toggle path via SetDisplayOption().
+        # settings key -> QAction. Read-only carriers: nothing is connected to
+        # their toggled signal, so setting one can never write state back.
         self._eyeActions = {}
         for option in schema.DISPLAY_OPTIONS:
             # Falls back to the raw key rather than raising: these actions are
@@ -255,11 +262,6 @@ class AutonaScoreboardWidget(QWidget):
             self._eyeActions[option.key] = action
             if option.key == "show_sponsor":
                 self._sponsorAction = action
-                action.toggled.connect(
-                    lambda toggled, action=action, fields=list(option.fields): self._onSponsorActionToggled(action, fields))
-            else:
-                action.toggled.connect(
-                    lambda toggled, action=action, key=option.key: self._onEyeActionToggled(action, key))
 
         # Mirror every display option into StateManager so remote clients
         # (React Web UI, OBS) can render the same field visibility. Before
@@ -612,6 +614,12 @@ class AutonaScoreboardWidget(QWidget):
             display.setAlignment(Qt.AlignmentFlag.AlignCenter)
             display.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
             display.setProperty("scoreDisplay", True)
+            # Stated rather than inherited from QSpinBox's defaults: the same
+            # bounds are what AutonaActions clamps a score adjustment to, and
+            # a spinbox that silently disagreed would either refuse a value
+            # the state already holds or let one through that the headless
+            # path rejects.
+            display.setRange(AutonaActions.SCORE_MIN, AutonaActions.SCORE_MAX)
 
         self.btScoreUp1 = QPushButton("+1")
         self.btScoreUp1.clicked.connect(lambda: self.CommandScoreChange(0, 1))
@@ -760,15 +768,14 @@ class AutonaScoreboardWidget(QWidget):
 
         self._groupSectionsIntoFrames(topOptions, bottomOptions)
 
-        # tournamentInfo.* lives outside this board's held subtree, so EVENT
-        # tab edits arrive as regular state_updated deltas; state_big_change
-        # covers wholesale loads (startup state restore, Start.gg import).
+        # tournamentInfo.* and display_options.* live outside this board's
+        # held subtree, so edits to either arrive as regular state_updated
+        # deltas; state_big_change covers wholesale loads (startup state
+        # restore, Start.gg import).
         StateManagerBridge.instance.state_updated.connect(
-            self._onTournamentInfoDelta)
+            self._onStateDelta)
         StateManagerBridge.instance.state_big_change.connect(
-            self._updateTournamentInfoLine)
-        StateManagerBridge.instance.state_big_change.connect(
-            self._syncDisplayTournamentNameEdit)
+            self._onStateBigChange)
         self._updateTournamentInfoLine()
         self._syncDisplayTournamentNameEdit()
 
@@ -779,6 +786,13 @@ class AutonaScoreboardWidget(QWidget):
         StateManager.HoldSubtree(self.statePrefix, exempt=schema.STATS_KEYS)
         StateManagerBridge.instance.held_dirty_changed.connect(
             self._onHeldDirtyChanged)
+        # The score is written by AutonaActions now, not by these spinboxes
+        # (headless core Step 3), so the displays follow the state instead of
+        # leading it. held_state_updated is the notification for a held
+        # subtree: it fires once per save cycle while the edits are still
+        # pending behind 反映.
+        StateManagerBridge.instance.held_state_updated.connect(
+            self._onHeldStateUpdated)
 
     @staticmethod
     def _styleTeamCard(column):
@@ -798,7 +812,7 @@ class AutonaScoreboardWidget(QWidget):
 
     def ApplyChanges(self):
         # 反映 button: publish every pending edit on this board at once.
-        StateManager.CommitHeld(self.statePrefix)
+        AutonaActions.instance.ApplyChanges(self.scoreboardNumber)
 
     def _onGameAssetsLoaded(self):
         # AutonaGameAssetManager.signals.onLoad handler.
@@ -832,11 +846,119 @@ class AutonaScoreboardWidget(QWidget):
                 "first_to").format(math.ceil(value/2)) if value > 0 else "")
             self.individualGameTracker.SetStageCount(value)
 
-    def _onTournamentInfoDelta(self, delta):
-        # Same cheap containment filter AutonaStatsWidget uses on deltas.
-        if "tournamentInfo" in str(delta):
+    def _onStateDelta(self, delta):
+        # Same cheap containment filter AutonaStatsWidget uses on deltas. One
+        # slot for both subtrees so the (not free) str(delta) is paid once.
+        text = str(delta)
+        if "tournamentInfo" in text:
             self._updateTournamentInfoLine()
             self._syncDisplayTournamentNameEdit()
+        if "display_options" in text:
+            self._SyncDisplayOptions()
+
+    def _onStateBigChange(self):
+        self._updateTournamentInfoLine()
+        self._syncDisplayTournamentNameEdit()
+        self._SyncDisplayOptions()
+
+    def _onHeldStateUpdated(self, prefix: str):
+        # Live-but-unpublished data under a held prefix changed. Only this
+        # board's own subtree is of interest here.
+        if prefix == self.statePrefix:
+            self._SyncScoreDisplays()
+
+    def _SyncScoreDisplays(self):
+        """Bring the two score spinboxes in line with the state.
+
+        The state is the source of truth for the score since Step 3: an
+        adjustment made through AutonaActions -- from the +1 button, a
+        hotkey, the Web UI or the API -- lands in `score.{n}.team.{t}.score`
+        and arrives here as a notification.
+
+        Two things make this safe to run on every held notification:
+
+        - the spinbox is updated inside a QSignalBlocker, so valueChanged
+          (which still writes the score for the paths that drive the spinbox
+          directly -- set loading, ClearScore, SwapTeams) cannot fire and
+          write the value straight back;
+        - the individual game tracker is then told about the transition
+          explicitly, with the *old* spinbox value, because that is what it
+          needs to decide which stage rows to award or clear. It is the one
+          thing in here that can write state, hence the re-entrancy guard.
+
+        The one transition the tracker must NOT be told about is the one it
+        produced itself. A stage button click sums the rows and publishes the
+        result, and that write lands here with the spinbox still on the old
+        value -- indistinguishable from an external +1 unless the tracker says
+        so, which is what `writingScore` is for. Without it a single click on
+        "game 1: T1" also awarded game 2.
+        """
+        if self._syncingScore:
+            return
+        self._syncingScore = True
+        try:
+            tracker = self.individualGameTracker
+            for team, display in ((1, self.scoreDisplay1),
+                                  (2, self.scoreDisplay2)):
+                value = StateManager.Get(
+                    f"{self.statePrefix}.team.{team}.score", None)
+                if not isinstance(value, int) or isinstance(value, bool):
+                    # Nothing renders a non-numeric score, so the spinbox is
+                    # left alone -- but a writer that put one there is a bug
+                    # worth a breadcrumb rather than a silent skip.
+                    if value is not None:
+                        logger.warning(
+                            f"{self.statePrefix}.team.{team}.score is "
+                            f"{value!r}, not an int; leaving the display at "
+                            f"{display.value()}")
+                    continue
+                previous = display.value()
+                if previous == value:
+                    continue
+                with QSignalBlocker(display):
+                    display.setValue(value)
+                if tracker.writingScore:
+                    continue
+                # setValue clamps to the spinbox range, so read back what it
+                # actually took rather than assuming the state value fit.
+                tracker.SyncStagesToScore(team - 1, previous, display.value())
+        finally:
+            self._syncingScore = False
+
+    def _SyncDisplayOptions(self):
+        """Mirror display_options.* into this board's Qt carriers.
+
+        The write path is AutonaActions.SetDisplayOption (local checkbox, Web
+        UI eye menu and POST /display-option all go through it), so everything
+        here is one-way: read the state, set the widgets with their signals
+        blocked. show_sponsor is the only option with a desktop effect left --
+        the inline sponsor field's visibility and the "所属タグを…しない"
+        checkbox.
+        """
+        sponsorChanged = False
+        for key, action in self._eyeActions.items():
+            value = StateManager.Get(f"display_options.{key}", None)
+            if not isinstance(value, bool) or action.isChecked() == value:
+                continue
+            with QSignalBlocker(action):
+                action.setChecked(value)
+            if action is self._sponsorAction:
+                sponsorChanged = True
+        # Everything below re-derives the sponsor field's Qt visibility, which
+        # means walking every player widget. This runs on every
+        # display_options delta -- including the seven options with no desktop
+        # effect at all -- so it is worth doing only when show_sponsor is the
+        # option that moved. The initial application is not this method's job:
+        # _setPlayersPerTeamImpl re-asserts it whenever the player widgets are
+        # (re)built.
+        if self._sponsorAction is None or not sponsorChanged:
+            return
+        show = self._sponsorAction.isChecked()
+        checkBox = getattr(self, "hideSponsorCheck", None)
+        if checkBox is not None and checkBox.isChecked() == show:
+            with QSignalBlocker(checkBox):
+                checkBox.setChecked(not show)
+        self.ToggleElements(self._sponsorAction, ["team"])
 
     def _syncDisplayTournamentNameEdit(self):
         # Reflect other-board / EVENT-tab edits to displayTournamentName into
@@ -1361,53 +1483,12 @@ class AutonaScoreboardWidget(QWidget):
                 if w is not None:
                     w.setVisible(visible)
 
-    def _onEyeActionToggled(self, action: QAction, key: str):
-        # Non-sponsor display option: persist to SettingsManager (local
-        # default) and StateManager (broadcast to Web UI / OBS) only. The
-        # desktop details dialog always shows every field, so no Qt
-        # visibility is applied here.
-        show = action.isChecked()
-        SettingsManager.Set(f"display_options.{key}", show)
-        StateManager.Set(f"display_options.{key}", show)
-
-    def SetDisplayOption(self, key: str, visible: bool):
-        """Remote toggle entry point (Web UI eye menu -> POST /display-option).
-
-        Drives the (invisible) display-option QAction so SettingsManager and
-        StateManager stay in sync through the same handlers as before. Only
-        show_sponsor still affects desktop widget visibility (inline sponsor
-        field); the details dialog always shows every field.
-        Must run on the GUI thread (callers use @gui_thread_sync).
-        """
-        action = self._eyeActions.get(key)
-        if action is None:
-            return
-        if action.isChecked() == visible:
-            # Handlers won't fire; still mirror the state key so the remote
-            # caller sees a consistent echo.
-            StateManager.Set(f"display_options.{key}", visible)
-            return
-        action.setChecked(visible)
-
-    def _onSponsorActionToggled(self, action: QAction, elements):
-        self.ToggleElements(action, elements)
-        if hasattr(self, 'hideSponsorCheck'):
-            self.hideSponsorCheck.blockSignals(True)
-            self.hideSponsorCheck.setChecked(not action.isChecked())
-            self.hideSponsorCheck.blockSignals(False)
-        show = action.isChecked()
-        SettingsManager.Set("display_options.show_sponsor", show)
-        StateManager.Set("display_options.show_sponsor", show)
-
     def _onHideSponsorToggled(self, hide: bool):
-        if self._sponsorAction is not None:
-            self._sponsorAction.blockSignals(True)
-            self._sponsorAction.setChecked(not hide)
-            self._sponsorAction.blockSignals(False)
-            self.ToggleElements(self._sponsorAction, ["team"])
-        show = not hide
-        SettingsManager.Set("display_options.show_sponsor", show)
-        StateManager.Set("display_options.show_sponsor", show)
+        # The one display option with a desktop control. It only asks for the
+        # operation; the QAction, this checkbox on every other built board and
+        # the inline sponsor field all follow from _SyncDisplayOptions when
+        # the state change comes back (headless core Step 3).
+        AutonaActions.instance.SetDisplayOption("show_sponsor", not hide)
 
     def UpdateBottomButtons(self):
         if AutonaTournamentDataProvider.instance.provider and AutonaTournamentDataProvider.instance.provider.url:
@@ -1594,8 +1675,9 @@ class AutonaScoreboardWidget(QWidget):
                     p.dataLock.release()
 
     def ResetScore(self):
-        self.scoreDisplay1.setValue(0)
-        self.scoreDisplay2.setValue(0)
+        # One operation, one save cycle: driving the two spinboxes in turn
+        # (as this used to) made a reset two separate export cycles.
+        AutonaActions.instance.ResetScore(self.scoreboardNumber)
 
     def ToggleAutonaUpdate(self, checked):
         SettingsManager.Set("general.disable_autoupdate", not checked)
@@ -1751,24 +1833,12 @@ class AutonaScoreboardWidget(QWidget):
     # Used for score change commands
     # Change <team>(0, 1) score by <change>(+X, -X)
     def CommandScoreChange(self, team: int, change: int):
-        if team in (0, 1):
-            scoreContainers = [self.scoreDisplay1, self.scoreDisplay2]
-            scoreContainers[team].setValue(
-                scoreContainers[team].value()+change)
-
-    # The four global score hotkeys, one method each. They exist so the
-    # connections in __init__ can be bound methods -- see the comment there.
-    def HotkeyTeam1ScoreUp(self):
-        self.CommandScoreChange(0, 1)
-
-    def HotkeyTeam1ScoreDown(self):
-        self.CommandScoreChange(0, -1)
-
-    def HotkeyTeam2ScoreUp(self):
-        self.CommandScoreChange(1, 1)
-
-    def HotkeyTeam2ScoreDown(self):
-        self.CommandScoreChange(1, -1)
+        # Kept as the widget-side name for the operation (the +1 / -1 buttons
+        # and the CommandScoreChange signal use it), but the write is
+        # AutonaActions': the spinbox follows through _SyncScoreDisplays.
+        # `team` is 0-based here and 1-based in the state, hence the +1.
+        AutonaActions.instance.AdjustScore(
+            self.scoreboardNumber, team + 1, change)
 
     def CommandClearAll(self, no_mains=False):
         for t, team in enumerate([self.team1playerWidgets, self.team2playerWidgets]):
@@ -1788,24 +1858,26 @@ class AutonaScoreboardWidget(QWidget):
         self.team2column.findChild(QCheckBox, "losers").setChecked(False)
 
     def CommandTeamColor(self, team: int, color, force_opponent=False):
-        if color:
-            value = None
-            if type(color) is str:
-                value = color
-            if type(color) is int and color > 0:
-                value = AutonaGameAssetManager.instance.colorModel.item(color).data(Qt.ItemDataRole.UserRole)
-                if force_opponent:
-                    value = value.get("force_opponent")
-                else:
-                    value = value.get("value")
-                if value:
-                    value = "#" + value
-
+        # Resolving a game's preset color *index* to a hex string stays here:
+        # it reads AutonaGameAssetManager's color model, which is Qt. What is
+        # written, and where, is AutonaActions' business (headless core
+        # Step 3) -- this method only produces the value.
+        if not color:
+            return
+        value = None
+        if type(color) is str:
+            value = color
+        if type(color) is int and color > 0:
+            value = AutonaGameAssetManager.instance.colorModel.item(color).data(Qt.ItemDataRole.UserRole)
+            if force_opponent:
+                value = value.get("force_opponent")
+            else:
+                value = value.get("value")
             if value:
-                if team in (0, 1):
-                    with StateManager.SaveBlock():
-                        StateManager.Set(
-                            f"score.{self.scoreboardNumber}.team.{team + 1}.color", value)
+                value = "#" + value
+
+        AutonaActions.instance.SetTeamColor(
+            self.scoreboardNumber, team + 1, value)
 
 
     # Modifies the current set data. Does not check for id, so do not call this with data that may lead to another hbox incident

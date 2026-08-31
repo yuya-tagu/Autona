@@ -59,8 +59,10 @@ PROCESS_WIDE_SENDERS = (
 #
 # Do not extend this list for a widget that can be destroyed. Convert the
 # lambda into a bound method instead; if it captured a value, put that value
-# in a method of its own (AutonaScoreboardWidget.HotkeyTeam1ScoreUp and
-# friends are the worked example).
+# in a method of its own (AutonaHotkeys._onTeam1ScoreUp and friends are the
+# worked example -- they started as lambdas capturing (team, delta), became
+# bound methods on the board, and are static hotkey slots on a
+# process-lifetime object now that the write itself moved to core).
 ALLOWED_LAMBDA_CONNECTIONS = {
     ("Autona.py",
      "AutonaTournamentDataProvider.instance.signals.tournament_url_update"),
@@ -195,21 +197,38 @@ def test_the_observer_allow_list_only_covers_modules_that_still_subscribe():
         f"ALLOWED_OBSERVER_SUBSCRIBERS entries no longer subscribe: {stale}")
 
 
-def test_the_scoreboard_hotkey_slots_are_bound_methods(autonaApp):
-    # The four score hotkeys used to be lambdas capturing (team, delta).
-    # They are methods now, and each still maps to the pair it always did.
-    board = autonaApp.board(1)
+def test_the_score_hotkeys_no_longer_belong_to_a_board(autonaApp):
+    """The four score hotkeys are wired once, in core, not per board.
 
-    for method, expected in (
-            (board.HotkeyTeam1ScoreUp, ("1", 1)),
-            (board.HotkeyTeam2ScoreUp, ("2", 1)),
-            (board.HotkeyTeam1ScoreDown, ("1", 0)),
-            (board.HotkeyTeam2ScoreDown, ("2", 0)),
+    They were lambdas capturing (team, delta) first, then bound methods on
+    AutonaScoreboardWidget -- which made "what does Ctrl+Shift+1 do" depend
+    on which boards happened to exist. Since headless core Step 3 they go
+    AutonaHotkeys -> AutonaActions -> StateManager, so this drives the
+    signals themselves and checks the board follows.
+    """
+    from src.AutonaHotkeys import AutonaHotkeys
+    from src.core.Actions import AutonaActions
+
+    board = autonaApp.board(1)
+    # The hotkeys act on the board the saved battle format shows; the
+    # harness never writes one, so it is the default. Asserted rather than
+    # assumed, so a stray SettingsManager write elsewhere in the session
+    # fails here instead of two assertions further down.
+    assert AutonaActions.instance.ActiveBoard() == 1
+
+    for signal, expected in (
+            (AutonaHotkeys.signals.team1_score_up, ("1", 1)),
+            (AutonaHotkeys.signals.team2_score_up, ("2", 1)),
+            (AutonaHotkeys.signals.team1_score_down, ("1", 0)),
+            (AutonaHotkeys.signals.team2_score_down, ("2", 0)),
     ):
         team, score = expected
-        method()
+        signal.emit()
         autonaApp.settle()
         assert autonaApp.get(f"score.1.team.{team}.score") == score
+        # The board is a display now: its spinbox follows the state.
+        display = board.scoreDisplay1 if team == "1" else board.scoreDisplay2
+        assert display.value() == score
 
 
 def _connectionCounts():
@@ -217,13 +236,19 @@ def _connectionCounts():
 
     QObject.receivers() wants the old SIGNAL()-encoded signature -- a "2"
     prefix in front of the normalised signal name.
+
+    `swap_teams` rather than `team1_score_up`: the score hotkeys are wired
+    to AutonaActions once for the process now (headless core Step 3), so
+    building a board no longer changes their receiver count. `swap_teams`
+    is one of the two hotkeys a board still owns, and it is a board-owned
+    connection that is what this measures.
     """
     from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.AutonaHotkeys import AutonaHotkeys
 
     return (
         AutonaGameAssetManager.instance.signals.receivers("2onLoad()"),
-        AutonaHotkeys.signals.receivers("2team1_score_up()"),
+        AutonaHotkeys.signals.receivers("2swap_teams()"),
     )
 
 
@@ -276,7 +301,10 @@ def test_a_destroyed_board_stops_writing_its_state_subtree(autonaApp):
     assert autonaApp.get(prefix) is None
 
     AutonaGameAssetManager.instance.signals.onLoad.emit()
-    AutonaHotkeys.signals.team1_score_up.emit()
+    # A board-owned hotkey: the score ones write score.{n} through
+    # AutonaActions whether or not a board exists, which is the point of
+    # Step 3 and would say nothing about a ghost here.
+    AutonaHotkeys.signals.swap_teams.emit()
     autonaApp.settle()
 
     assert autonaApp.get(prefix) is None, (

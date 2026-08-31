@@ -27,7 +27,7 @@ from flask import Blueprint, jsonify, request
 from loguru import logger
 
 from .StateManager import StateManager
-from .SettingsManager import SettingsManager
+from .core.Actions import AutonaActions
 # Import order mirrors the singleton init order (agent-pitfalls #2): the asset
 # manager must be importable before the tournament data provider. By the time
 # this module loads both singletons already exist (WebServerActions imported
@@ -367,8 +367,12 @@ def health():
     provider = AutonaTournamentDataProvider.instance.GetProvider()
     game = StateManager.Get("game") or {}
     current_game = game.get("codename") if isinstance(game, dict) else None
-    fmt = SettingsManager.Get("scoreboard.battle_format", "singles")
-    active_board = {"singles": 1, "team": 2, "crew": 3}.get(fmt, 1)
+    # Same resolver the hotkeys and the window use, rather than a third copy
+    # of the format->board table: it also carries the legacy
+    # `scoreboard.team_mode` fallback, so a settings file predating
+    # `battle_format` no longer reports activeBoard 1 while the window shows
+    # the team board (headless core Step 3).
+    active_board = AutonaActions.instance.ActiveBoard()
     try:
         out_mtime = int(os.path.getmtime("./out/program_state.json"))
     except OSError:
@@ -485,7 +489,11 @@ def score_adjust(n, t):
     actions = _actions_ref()
 
     def apply():
-        # Non-sync: emits CommandScoreChange |delta| times (spec §6.1).
+        # |delta| single-step adjustments (spec §6.1). Synchronous since
+        # headless core Step 3 -- the actions write the state on this thread
+        # instead of queueing a Qt signal into a board widget. The response
+        # revision below is still the *published* one, which a board 1/2
+        # score does not move until 反映 (R-Sync-11).
         if delta >= 0:
             for _ in range(delta):
                 actions.team_scoreup(n, t)
@@ -504,7 +512,8 @@ def score_adjust(n, t):
         # else: duplicate key — already applied, skip (spec §2.9)
     else:
         apply()
-    # Non-sync emit: revision is best-effort; client confirms via WS (§14.1a).
+    # Held subtree: the edit is applied but not published, so this revision
+    # is the last published one; the client sees the score after 反映 (§14.1a).
     return ok(revision=current_revision())
 
 
@@ -512,7 +521,12 @@ def score_adjust(n, t):
 @write_op("score.reset")
 def score_reset(n):
     require_board_12(n)
-    _actions_ref().reset_scores(n)  # @gui_thread_sync -> revision accurate
+    # Boards 1/2 only (require_board_12), so this is AutonaActions.ResetScore:
+    # a held write, applied synchronously but not published. The revision
+    # below is therefore the last published one and does not move until 反映
+    # -- same as score:adjust above, not the "accurate after the GUI hop"
+    # case the crew path would have been.
+    _actions_ref().reset_scores(n)
     return ok(revision=current_revision())
 
 
@@ -541,7 +555,7 @@ def swap_teams(n):
 @write_op("apply")
 def apply_changes(n):
     require_board_12(n)
-    _actions_ref().apply_changes(n)  # @gui_thread_sync -> revision accurate
+    _actions_ref().apply_changes(n)  # synchronous core write -> accurate
     return ok(revision=current_revision())
 
 

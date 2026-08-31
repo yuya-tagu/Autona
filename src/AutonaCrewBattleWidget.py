@@ -108,14 +108,25 @@ class AutonaCrewBattleWidget(QWidget):
 
         self._writeInitialState()
 
+        # A flat delta renders its key path as a Python list, so
+        # str(delta) contains "['score', '3', 'team', '1', 'color']"
+        # verbatim -- an exact containment test with no false positives.
+        # Matching plain "color" instead also caught colors.{feature}.*,
+        # tournamentInfo's themeColor and the *other* boards' team colours,
+        # any of which made this board re-read its colour buttons for nothing.
+        self._colorPathMarkers = tuple(
+            str(["score", str(self.scoreboardNumber), "team", str(team),
+                 "color"])
+            for team in (1, 2))
+
         # tournamentInfo.* lives outside score.{N}, so EVENT tab edits and
         # edits made on boards 1/2 arrive here as regular state_updated
         # deltas; state_big_change covers wholesale loads (startup restore,
         # Start.gg import). Mirrors AutonaScoreboardWidget's equivalent hook.
         StateManagerBridge.instance.state_updated.connect(
-            self._onTournamentInfoDelta)
+            self._onStateDelta)
         StateManagerBridge.instance.state_big_change.connect(
-            self._syncDisplayTournamentNameEdit)
+            self._onStateBigChange)
 
     # ── UI construction ────────────────────────────────────────────────
 
@@ -330,10 +341,36 @@ class AutonaCrewBattleWidget(QWidget):
     def _key(self, *parts) -> str:
         return ".".join([f"score.{self.scoreboardNumber}", *map(str, parts)])
 
-    def _onTournamentInfoDelta(self, delta):
+    def _onStateDelta(self, delta):
         # Same cheap containment filter AutonaScoreboardWidget uses on deltas.
-        if "tournamentInfo" in str(delta):
+        # One slot for both subtrees so str(delta) is paid once.
+        text = str(delta)
+        if "tournamentInfo" in text:
             self._syncDisplayTournamentNameEdit()
+        if any(marker in text for marker in self._colorPathMarkers):
+            self._SyncTeamColors()
+
+    def _SyncTeamColors(self):
+        """Follow score.{n}.team.{t}.color into the two colour buttons.
+
+        The team colour is written by AutonaActions now (headless core
+        Step 3) rather than by CommandTeamColor poking this button, so an
+        /api/v1 or legacy colour change reaches the board here. Signals are
+        blocked: colorChanged is what writes the state on a local pick, and
+        letting it fire would echo the value straight back.
+        """
+        for side, button in enumerate(self.colorButtons):
+            value = StateManager.Get(self._key("team", side + 1, "color"), None)
+            if not isinstance(value, str) or not value:
+                continue
+            if button.color() == value:
+                continue
+            with QSignalBlocker(button):
+                button.setColor(value)
+
+    def _onStateBigChange(self):
+        self._syncDisplayTournamentNameEdit()
+        self._SyncTeamColors()
 
     def _syncDisplayTournamentNameEdit(self):
         # Reflect other-board / EVENT-tab edits to displayTournamentName into

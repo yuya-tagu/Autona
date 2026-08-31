@@ -44,6 +44,35 @@ paths:
   移す候補）を import してよい。Qt 依存モジュールの import は禁止で、
   `tests/test_core_qt_free.py` が subprocess で検出する
 
+## AutonaActions（ドメイン操作の唯一の書き手）
+
+`src/core/Actions.py`（headless core Step 3）。**移行済みの操作は
+`AutonaActions.instance` 以外が書かない**。インスタンスは `bootstrap_core()` が作る。
+
+- 移行済み: `AdjustScore` / `ResetScore`（board 1,2 のみ）/ `SetTeamColor` /
+  `SetDisplayOption` / `ApplyChanges`（反映 = `CommitHeld`）
+- 未移行（Qt 側が書き手のまま。理由は `Actions.py` の docstring）: チームスワップ /
+  best_of / クルーボードのスコアリセット /
+  **スピンボックス主導のスコア書き込み**（セット読込 / `ClearScore` / `SwapTeams` /
+  ステージ集計 → `AutonaIndividualGameTracker.UpdateScore` ・ `StageResultsChanged`）
+- したがって `score.{n}.team.{t}.score` の書き手は **まだ 2 系統**（Actions と
+  スピンボックス主導経路）。両者は state 経由でのみ噛み合う。ステージ集計側は
+  自分が書いている区間を `AutonaIndividualGameTracker.writingScore` で公開し、
+  `_SyncScoreDisplays` はその間 `SyncStagesToScore` を呼ばない（呼ぶと 1 クリックで
+  次のゲームまで勝ちになる）。完全一本化は Step 4/5
+- 呼び出し側は Qt ウィジェット・`AutonaWebServerActions`・`AutonaHotkeys` の 3 つ。
+  **どのスレッドから呼んでもよい**（Qt に触れないのが層の定義）。委譲した
+  WebServerActions メソッドからは `@gui_thread_sync` を外す
+- **単一キーの書き込みを `SaveBlock` で包まない**。空の `changedKeys` で SaveState を
+  呼ぶことになり、DeepDiff の `include_paths=[]` は「フィルタなし」= **全 state 差分**を
+  意味する（キー押下ごとにフル diff）。SaveBlock は複数キーを 1 サイクルにまとめる時だけ
+- ウィジェット側は通知（`held_state_updated` / `state_updated`）で表示を更新する。
+  プログラム的更新は必ず `QSignalBlocker` で囲む（囲まないと `valueChanged` 等が
+  発火して書き戻し = エコーループ）。再入ガードの実例は
+  `AutonaScoreboardWidget._SyncScoreDisplays`
+- ホットキーは `AutonaHotkeys.ConnectActions()` が `bootstrap_core()` から 1 回だけ結線する。
+  対象ボードは `AutonaActions.ActiveBoard()`（`SettingsManager.scoreboard.battle_format`）
+
 ## 状態変更の通知（observer + Bridge）
 
 通知の正本は Qt 非依存の observer チャンネル（`src/core/Observable.py` の

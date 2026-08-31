@@ -495,10 +495,14 @@ stream
              │
              ▼
 ┌─────────────────────────────────┐
+│ AutonaActions (src/core, Qt-free)│
+│  移行済み操作の唯一の書き手      │
+│  (R-Sync-1b)                    │
 │ AutonaWebServerActions          │
-│ （※将来的な書き込みハブ。       │
-│   現行は React/OBS/外部のみ経由、 │
-│   PyQt は直接 Set を暫定許可）   │
+│  Web/外部の入口。移行済みは      │
+│  Actions へ委譲、残りは従来どおり │
+│  ウィジェットへのリモコン        │
+│  PyQt は未移行分のみ直接 Set     │
 └────────────┬────────────────────┘
              │ StateManager.Set / Unset / SaveBlock
              ▼
@@ -528,7 +532,8 @@ OBS HTML / React Web UI / WebEngine 画像生成      PyQt UI
 
 | ルール | 内容 |
 |------|------|
-| **R-Sync-1** | 書き込み経路の規約: <br>① React Web UI / 外部システムからの書き込みは **必ず AutonaWebServerActions 経由**。<br>② OBS HTML は原則 **read-only**。例外的に書き込みを許可する場合も AutonaWebServerActions 経由とする。<br>③ PyQt Widget は現行互換のため `StateManager.Set` 直接呼び出しを **暫定許可**。<br>④ 新規の複合操作・正規化を伴う操作は Actions 層へ実装する。<br>⑤ 将来的には PyQt のドメイン状態書き込みも Actions 層へ移行する（§8 の移行プラン参照、将来名称は `AutonaActions` / `StateActions` のように WebServer 非依存名に寄せる）。<br>⑥ state 変更通知の Qt シグナルは `StateManagerBridge.instance` が提供する。core（`src/core/`）に Qt シグナルを追加しない。 |
+| **R-Sync-1** | 書き込み経路の規約: <br>① React Web UI / 外部システムからの書き込みは **必ず AutonaWebServerActions 経由**。<br>② OBS HTML は原則 **read-only**。例外的に書き込みを許可する場合も AutonaWebServerActions 経由とする。<br>③ PyQt Widget は現行互換のため `StateManager.Set` 直接呼び出しを **暫定許可**（**移行済みの操作は除く** — 下の R-Sync-1b）。<br>④ 新規の複合操作・正規化を伴う操作は Actions 層へ実装する。<br>⑤ PyQt のドメイン状態書き込みは `src/core/Actions.py` の **`AutonaActions`** へ段階移行中（ADR-004 / [headless-core-redesign.md](../../docs/changes/headless-core-redesign.md)）。<br>⑥ state 変更通知の Qt シグナルは `StateManagerBridge.instance` が提供する。core（`src/core/`）に Qt シグナルを追加しない。 |
+| **R-Sync-1b** | **Actions へ移行済みの操作**（headless core Step 3）: スコア増減 / スコアリセット / チーム色 / `display_options` トグル / 反映（`CommitHeld`）。**これらの操作の入口は `AutonaActions.instance` に一本化**され、Qt ウィジェット・REST v1・legacy REST / Socket.IO・グローバルホットキーはすべてそこを呼ぶ。ウィジェットは state 通知（`held_state_updated` / `state_updated`）を受けて表示だけを更新し、更新中は `QSignalBlocker` で囲んで書き戻さない（エコーループ抑止）。<br>**未移行**: チームスワップ（選手サブツリーの入れ替えが選手ウィジェット側にある）/ best_of（`best_of_text` の生成が Qt 依存の `AutonaLocaleHelper` に依存）/ クルーボードのスコアリセット（チーム合計がメンバーストックの派生値）/ **スピンボックス主導のスコア書き込み**（セット読込 / `ClearScore` / `SwapTeams` / ステージ集計）。<br>**したがって `score.{n}.team.{t}.score` の書き手は Step 3 時点でまだ 2 系統**（Actions とスピンボックス主導経路）で、「唯一の書き手」ではない。両者は state 経由でのみ噛み合い、ステージ集計側は書き込み区間を `AutonaIndividualGameTracker.writingScore` で公開して `_SyncScoreDisplays` の二重加算を防ぐ。一本化は Step 4/5。 |
 | **R-Sync-2** | バッチ書き込みは `with StateManager.SaveBlock():` を使う。`BlockSaving()` / `ReleaseSaving()` の手動ペアは避ける（例外時の漏れリスク） |
 | **R-Sync-3** | 同一トランザクション内の複数 `Set` は SaveBlock で囲み、delta を 1 回にまとめる |
 | **R-Sync-4** | 競合時の優先順位: **後勝ち**（最後の書き込みで上書き）。同時操作の検出・拒否は行わない |
@@ -1296,19 +1301,21 @@ const themeColor = fc.themeColor || ti.themeColor;
 | **R-Hotkey-4** | アクション通知は `AutonaHotkeysSignals` の Signal 経由（PyQt の signal/slot） |
 | **R-Hotkey-5** | デフォルトのモディファイアは **`Ctrl+Shift+`** プレフィックス（標準ショートカット `Ctrl+S`/`Ctrl+O`/`Ctrl+P`/`Ctrl+R` の食い合いを避けるため） |
 | **R-Hotkey-6** | `SettingsManager.hotkeys.hotkeys_enabled = false` でグローバル無効化できる |
+| **R-Hotkey-7** | **state を書くだけのアクションは `AutonaHotkeys.ConnectActions()` が `AutonaActions` に直結する**（`bootstrap_core()` から 1 回・プロセス寿命）。対象ボードは `AutonaActions.ActiveBoard()`（= `SettingsManager.scoreboard.battle_format`）で解決するため、パネル未構築でも動き、作用するのは常に 1 面だけ。パネル操作を伴うアクション（`load_set` / `swap_teams` はボード、`refresh_phase_group` は Window）だけがウィジェット側に接続を持つ（headless core Step 3 / ADR-004 D2） |
 
 ### 6.2 デフォルトホットキー一覧
 
-| アクションキー | デフォルト | Signal | 動作 |
-|--------------|-----------|--------|------|
-| `load_set` | `Ctrl+Shift+O` | `AutonaHotkeys.signals.load_set` | 次のセットを読み込み |
-| `team1_score_up` | `Ctrl+Shift+1` | `team1_score_up` | チーム 1 スコア +1 |
-| `team1_score_down` | `Ctrl+Shift+2` | `team1_score_down` | チーム 1 スコア -1 |
-| `team2_score_up` | `Ctrl+Shift+3` | `team2_score_up` | チーム 2 スコア +1 |
-| `team2_score_down` | `Ctrl+Shift+4` | `team2_score_down` | チーム 2 スコア -1 |
-| `reset_scores` | `Ctrl+Shift+R` | `reset_scores` | スコアリセット |
-| `swap_teams` | `Ctrl+Shift+S` | `swap_teams` | チーム入れ替え |
-| `refresh_phase_group` | `Ctrl+Shift+P` | `refresh_phase_group` | Top 8 の選択中フェーズグループを Start.gg から再取得 |
+| アクションキー | デフォルト | Signal | 動作 | 受け手 |
+|--------------|-----------|--------|------|-------|
+| `load_set` | `Ctrl+Shift+O` | `AutonaHotkeys.signals.load_set` | 次のセットを読み込み | ボード |
+| `team1_score_up` | `Ctrl+Shift+1` | `team1_score_up` | チーム 1 スコア +1 | Actions |
+| `team1_score_down` | `Ctrl+Shift+2` | `team1_score_down` | チーム 1 スコア -1 | Actions |
+| `team2_score_up` | `Ctrl+Shift+3` | `team2_score_up` | チーム 2 スコア +1 | Actions |
+| `team2_score_down` | `Ctrl+Shift+4` | `team2_score_down` | チーム 2 スコア -1 | Actions |
+| `reset_scores` | `Ctrl+Shift+R` | `reset_scores` | スコアリセット | Actions |
+| `apply_changes` | `Ctrl+Shift+L` | `apply_changes` | 反映（保留中の編集を配信へ公開） | Actions |
+| `swap_teams` | `Ctrl+Shift+S` | `swap_teams` | チーム入れ替え | ボード |
+| `refresh_phase_group` | `Ctrl+Shift+P` | `refresh_phase_group` | Top 8 の選択中フェーズグループを Start.gg から再取得 | Window |
 
 ### 6.3 命名規約
 
