@@ -10,8 +10,9 @@ import i18n from "../i18n/config";
 //
 // The desktop app mirrors every toggle into StateManager under
 // `display_options.show_*` (broadcast to all clients) and accepts remote
-// toggles via POST /display-option. Keys and defaults mirror
-// AutonaScoreboardWidget.elements — keep both lists in sync.
+// toggles via POST /display-option. Keys and defaults are defined in
+// src/core/StateSchema.py (DISPLAY_OPTIONS); this list is the copy that
+// cannot import it. tests/test_state_schema.py fails if the two drift.
 export const DISPLAY_OPTIONS = [
     {key: "show_sponsor",    labelKey: "show_sponsor",    default: true},
     {key: "show_name",       labelKey: "show_name",       default: true},

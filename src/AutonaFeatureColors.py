@@ -28,15 +28,15 @@ from qtpy.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QPushButton
 
 from .StateManager import StateManager
 from .SettingsManager import SettingsManager
+# schema.DEFAULT_THEME_COLOR / DEFAULT_ACCENT_COLOR are Autona's own defaults,
+# used when neither the tournament nor the feature has a stored color. They
+# live in the core schema because the launch seed writes
+# tournamentInfo.themeColor / accentColor from them before any panel exists
+# (headless core Step 2).
+from .core import StateSchema as schema
 from .AutonaColorButton import AutonaColorButton
 from . import ui_constants as UI
 from . import ui_layout as L
-
-# Autona's own defaults, used when neither the tournament nor the feature has
-# a stored color. Historically defined in AutonaBoardWidget (the panel that
-# owned the color pickers); moved here now that six panels need them.
-DEFAULT_THEME_COLOR = "#181B21"
-DEFAULT_ACCENT_COLOR = "#f0a500"
 
 # Feature keys. One per settings panel that owns an overlay / rendered image.
 FEATURE_BOARD = "board"
@@ -76,8 +76,9 @@ def GetTournamentColors():
     """Return the (theme, accent) tournament colors, falling back to the
     Autona defaults when nothing has been stored yet."""
     return (
-        SettingsManager.Get("general.theme_color", DEFAULT_THEME_COLOR),
-        SettingsManager.Get("general.accent_color", DEFAULT_ACCENT_COLOR),
+        SettingsManager.Get("general.theme_color", schema.DEFAULT_THEME_COLOR),
+        SettingsManager.Get(
+            "general.accent_color", schema.DEFAULT_ACCENT_COLOR),
     )
 
 
@@ -302,10 +303,10 @@ def MakeTournamentColorCard() -> QGroupBox:
 
     def _resetToDefaults():
         # Explicit persistence for the same ignore_same_color reason as above.
-        btTheme.setColor(DEFAULT_THEME_COLOR)
-        btAccent.setColor(DEFAULT_ACCENT_COLOR)
-        SetTournamentColor(KIND_THEME, DEFAULT_THEME_COLOR)
-        SetTournamentColor(KIND_ACCENT, DEFAULT_ACCENT_COLOR)
+        btTheme.setColor(schema.DEFAULT_THEME_COLOR)
+        btAccent.setColor(schema.DEFAULT_ACCENT_COLOR)
+        SetTournamentColor(KIND_THEME, schema.DEFAULT_THEME_COLOR)
+        SetTournamentColor(KIND_ACCENT, schema.DEFAULT_ACCENT_COLOR)
 
     btDefault = QPushButton("Autonaデフォルトカラーを設定する")
     btDefault.clicked.connect(_resetToDefaults)

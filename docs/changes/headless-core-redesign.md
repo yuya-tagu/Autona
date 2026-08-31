@@ -128,14 +128,34 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
 - 検証: フルスイート + 手動チェックリスト「起動/終了」節。delta 配信の回帰がないこと
   （React 側 revision 連番・OBS poll）
 
-### Step 2: シード・スキーマの core 移動
+### Step 2: シード・スキーマの core 移動 ✅ 完了（2026-08-28）
 
-- シード一本化: `AutonaScoreboardWidget.__init__` と `_SeedBoardState` の重複を解消し、
-  core の `schema.SeedBoard()` に集約。`_SeedPanelState` も同様
-- ウィジェット属性として存在するスキーマ定義（`STATS_KEYS`（held exempt）、
-  `display_options` のキー集合 `elements`）を core の schema へ移動
-- キーパスカタログの器を新設（この時点では既存キーの列挙のみ。静的化は Step 6）
-- 検証: `test_objectname_keypath_contract.py` 不変 + held/commit 系テスト
+- `src/core/StateSchema.py` を新設。シード一本化: `AutonaScoreboardWidget.__init__` /
+  `AutonaCrewBattleWidget.__init__` / `AutonaScoreboardManager._SeedBoardState` の 3 実装を
+  `StateSchema.SeedBoard(n)` に集約（`_SeedBoardState` は削除）。`Window._SeedPanelState` の
+  本体も `StateSchema.SeedPanelState()` へ移した
+- ウィジェット属性として存在したスキーマ定義を schema へ移動: `STATS_KEYS`（held exempt）、
+  `display_options` のキー集合（`AutonaScoreboardWidget.elements` と
+  `WebServerActions._DISPLAY_OPTION_KEYS` の二重定義を `DISPLAY_OPTIONS` へ統合。
+  ラベル文字列だけ Qt 側に残る）。付随して `stream.org*Version` の mtime 発行
+  （`_publishAssetVersion` → `PublishAssetVersion`）とその素材パス、`player_editor` ルート、
+  既定テーマ/アクセントカラーも schema 側へ
+- キーパスカタログの器 `KEY_CATALOG` / `DYNAMIC_KEY_FAMILIES` を新設（列挙のみ。
+  何も消費していない。静的化とマイグレーション層は Step 5）
+- **唯一の挙動追加: `display_options.*` を `SeedPanelState()` でもシードする**。従来の
+  書き手は 1v1 / チームボードの `__init__` だけで、保存フォーマットが crew ボード
+  （`score.3`。eye メニューを持たない）の環境では state にキーが 1 つも出なかった。
+  **欠損キーのみ**を `SettingsManager`（トグルの永続正本）から埋めるので、復元済みの
+  `program_state.json` の値は上書きしない
+- **`colors.{feature}.*` のシード（`SeedColorState`）は AutonaFeatureColors に残した**:
+  同じキー族の読み書き（`GetFeatureColors` / `SetFeatureColor` / `SetTournamentColor`）が
+  同居しており、seed だけ core に出すと所有者が 2 つに割れる。カラーモジュール全体の
+  core 移行は書き込み経路と一緒に Step 3/4 で行う。`Window._SeedPanelState` は
+  `SaveBlock` 内で `StateSchema.SeedPanelState()` と `SeedColorState()` を呼ぶだけ
+- 検証: フルスイート 417 passed / 19 skipped（Step 2 前 393 + 新規 24）。
+  `test_objectname_keypath_contract.py` は不変で pass、held/commit 系も不変。
+  `tests/test_state_schema.py` 新設（移動前の値をリテラルで pin・シードの挙動・
+  `Window._SeedPanelState` からの結線と eye メニューのラベル一致を AST で pin）
 
 ### Step 3: AutonaActions 新設と「簡単な書き込み」の反転
 

@@ -24,6 +24,26 @@ paths:
 - **core は Qt を import しない**（`tests/test_core_qt_free.py` が subprocess で pin）。
   Qt が要る処理はアダプタ（`src/StateManagerBridge.py` が実例）へ出す
 
+## StateSchema（キー定義とシードの正本）
+
+`src/core/StateSchema.py`（headless core Step 2）。**state の「何があるか」の定義を
+ウィジェットに書かない**。
+
+- held exempt (`STATS_KEYS`) / 表示トグル (`DISPLAY_OPTIONS`) / 起動時シード
+  (`SeedBoard` / `SeedPanelState`) はここが正本。ウィジェット側に同じ定義を置き直さない
+- `SeedBoard(n)` は「埋める」ではなく **サブツリーを skeleton に戻す**。生きているボードに
+  対して呼ばない（未構築ボードのプレースホルダと、遅延構築時の再シードが用途）
+- `KEY_CATALOG` / `DYNAMIC_KEY_FAMILIES` は**列挙のみで誰も消費していない**。Step 5 の
+  キーパス静的化とマイグレーション層のアンカー。新しい state キーを足したらここにも書く
+  （テストで強制できないためベストエフォート運用。**PR レビュー時に KEY_CATALOG との差分を
+  確認する**）
+- 例外: `colors.{feature}.*` のシードは `AutonaFeatureColors.SeedColorState()` に残っている
+  （キー族の読み書きと同居。Step 3/4 で core へ移す）
+- **core → src の逆依存は Qt-free モジュールのみ**: `StateSchema` は `src` 直下の
+  `AutonaCommentaryModel` / `AutonaTop8Model`（いずれも Qt 非依存の state モデル。将来 core へ
+  移す候補）を import してよい。Qt 依存モジュールの import は禁止で、
+  `tests/test_core_qt_free.py` が subprocess で検出する
+
 ## 状態変更の通知（observer + Bridge）
 
 通知の正本は Qt 非依存の observer チャンネル（`src/core/Observable.py` の

@@ -183,17 +183,15 @@ from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTop8Widget import AutonaTop8Widget
 from .AutonaTournamentInfoWidget import AutonaTournamentInfoWidget
 from .AutonaBoardWidget import AutonaBoardWidget
-from .AutonaFeatureColors import (
-    DEFAULT_ACCENT_COLOR, DEFAULT_THEME_COLOR, SeedColorState)
+from .AutonaFeatureColors import SeedColorState
 from .AutonaSidebar import AutonaSidebar
-from . import AutonaCommentaryModel as comms
-from . import AutonaTop8Model as top8
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaAlertNotification import AutonaAlertNotification
 from .AutonaUpdater import AutonaUpdater, CleanupUpdateLeftovers
 from .AutonaPlayerDB import AutonaPlayerDB
 from .Workers import *
 from .StateManager import StateManager
+from .core import StateSchema as schema
 from .SettingsManager import SettingsManager
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaStatusManager import AutonaStatusManager
@@ -923,94 +921,25 @@ class Window(QMainWindow):
     def _SeedPanelState(self):
         """Write the panel state the overlays / Web UI read from launch.
 
-        These seeds used to run inside the Board / Top 8 / Commentary /
-        Stream / Player List constructors. Those panels are built on first
-        reveal now, so the seeds moved here: they have to run at every launch
-        whether or not the operator ever opens the panel (an OBS overlay
-        reads the theme colors and the commentary slots straight away).
+        The seed itself is StateSchema.SeedPanelState() — Qt-free, so the
+        state a headless run starts from is the state a GUI launch starts
+        from (headless core Step 2). What is left here is the save cycle it
+        runs in and the one seed the core cannot reach: the per-feature color
+        overrides, whose whole key family (read, write and seed) is still
+        owned by AutonaFeatureColors.
+
         Called from __init__ before any panel is built, and necessarily after
         StateManager.LoadState() — which ran inside bootstrap_core(), i.e.
         while this module was imported — so what is normalised here is the
         restored program_state.json, not an empty state.
         """
-        # Local imports: both modules are only needed for the constants /
-        # helper below and for their own lazy factories, so nothing here
-        # justifies pulling them into the module-level import block.
-        from .AutonaStreamSettingsWidget import (
-            AutonaStreamSettingsWidget, ORG_ICON_PATH, ORG_THUMB_PATH)
-        from .AutonaPlayerBrowserWidget import _EDITOR_PATH_BASE
-
         with StateManager.SaveBlock():
-            # Moved from AutonaBoardWidget.__init__: overlays receive
-            # theme/accent before the user touches the color pickers. These
-            # are the tournament-wide colors (EVENT tab); the per-feature
-            # overrides are expanded by SeedColorState() below.
-            StateManager.Set(
-                "tournamentInfo.themeColor",
-                SettingsManager.Get("general.theme_color", DEFAULT_THEME_COLOR))
-            StateManager.Set(
-                "tournamentInfo.accentColor",
-                SettingsManager.Get(
-                    "general.accent_color", DEFAULT_ACCENT_COLOR))
+            schema.SeedPanelState()
 
             # colors.{feature}.* — only the features the operator explicitly
             # set. An unset feature stays absent from the state so the layout
-            # JS falls back to the tournament colors above.
+            # JS falls back to the tournament colors SeedPanelState wrote.
             SeedColorState()
-
-            # Moved from AutonaTop8Widget.__init__. The legacy bracket
-            # feature is gone; LoadState() restores its keys from
-            # out/program_state.json, so purge them once here.
-            StateManager.Unset("bracket")
-            state = StateManager.Get("top8")
-            if not isinstance(state, dict) or not state.get("matches"):
-                StateManager.Set("top8", top8.DefaultState())
-            else:
-                # Normalise a restored state: slots are always derived.
-                StateManager.Set(
-                    "top8.matches",
-                    top8.Recompute(state.get("matches") or {}))
-                players = state.get("players") or {}
-                for slot in top8.PLAYER_SLOTS:
-                    if slot not in players:
-                        StateManager.Set(
-                            f"top8.players.{slot}", top8.DefaultPlayer())
-
-            # Moved from AutonaCommentaryWidget.__init__: normalises
-            # whatever LoadState restored, including the legacy pre-rework
-            # schema.
-            StateManager.Set(
-                "commentary",
-                comms.NormalizeState(StateManager.Get("commentary")))
-
-            # Moved from AutonaStreamSettingsWidget.__init__. The org icon /
-            # thumbnail are served out of ./layout/ and OBS overlays
-            # cache-bust them with these mtimes, so the versions have to be
-            # current from launch whether or not the panel is ever opened.
-            # The panel republishes them itself after a load / reset.
-            AutonaStreamSettingsWidget._publishAssetVersion(
-                "stream.orgIconVersion", ORG_ICON_PATH)
-            AutonaStreamSettingsWidget._publishAssetVersion(
-                "stream.orgThumbVersion", ORG_THUMB_PATH)
-
-            # Also from AutonaStreamSettingsWidget.__init__: residual keys
-            # from the pre-配信設定 layouts, where the stream title and the
-            # destination lived on the EVENT tab. Nothing reads them; drop
-            # them so an upgraded program_state.json stops broadcasting them.
-            # Guarded because Unset queues a changed key unconditionally and
-            # a fresh install would otherwise fire two no-op save cycles.
-            for stale in ("tournamentInfo.streamTitleEdit",
-                          "tournamentInfo.streamUrl"):
-                if StateManager.Get(stale, None) is not None:
-                    StateManager.Unset(stale)
-
-            # Moved from AutonaPlayerBrowserWidget.__init__: state left
-            # behind by removed features / crashed sessions. player_list.*
-            # was written by the retired PLAYERS roster editor and
-            # player_editor.* by the editor dialog, and LoadState would
-            # otherwise restore both forever.
-            StateManager.Unset("player_list")
-            StateManager.Unset(_EDITOR_PATH_BASE)
 
     # ── Lazy sidebar panels (startup Step 4b-2 / 4b-3) ───────────────────
     # Every panel below is built the first time its page is revealed and

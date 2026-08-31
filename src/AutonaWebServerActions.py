@@ -9,6 +9,7 @@ import orjson
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaQtHelper import gui_thread_sync
 from .StateManager import StateManager
+from .core import StateSchema as schema
 from .SettingsManager import SettingsManager
 from loguru import logger
 from .AutonaGameAssetManager import AutonaGameAssetManager
@@ -116,12 +117,6 @@ class WebServerActions(QObject):
         # not leak to remote clients ahead of the delta stream.
         return StateManager.GetCommitted(f'score.{sb_widget.scoreboardNumber}')
 
-    # Eye-menu keys accepted by set_display_option (mirrors
-    # AutonaScoreboardWidget.elements settings keys).
-    _DISPLAY_OPTION_KEYS = (
-        "show_sponsor", "show_name", "show_seed", "show_characters",
-        "show_social", "show_real_name", "show_location", "show_additional")
-
     @gui_thread_sync
     def set_display_option(self, data):
         """Toggle a scoreboard field's visibility from a remote client.
@@ -131,7 +126,9 @@ class WebServerActions(QObject):
         every board (Design.md §3.2.2 R-Sync-1: writes go through Actions).
         """
         option = (data or {}).get("option")
-        if option not in WebServerActions._DISPLAY_OPTION_KEYS:
+        # The accepted key set is the schema's, not a second copy of it
+        # (headless core Step 2).
+        if option not in schema.DISPLAY_OPTION_KEYS:
             return f"ERROR: unknown display option {option}"
         value = bool((data or {}).get("value"))
         for n in (1, 2):

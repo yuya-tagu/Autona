@@ -27,8 +27,14 @@ _ORIGINAL_CWD = os.getcwd()
 
 def _initialize_state_manager():
     # Initialize() creates ./out; run it under the temp dir, then restore the
-    # CWD so later-collected test modules are unaffected.
+    # CWD so later-collected test modules are unaffected. In a full-suite run
+    # this module is the first in-process caller (pytest collects by ascending
+    # filename), so Initialize() does create the directories here. The
+    # makedirs below are forward defence: Initialize() is a no-op after its
+    # first call anywhere in the process, so a future module sorting ahead of
+    # this one would silently leave the export thread with nowhere to write.
     os.chdir(_WORK_DIR)
+    os.makedirs(Path(_WORK_DIR) / "out", exist_ok=True)
     os.makedirs(Path(_WORK_DIR) / "user_data", exist_ok=True)
     try:
         SM.Initialize()

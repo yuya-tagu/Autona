@@ -6,6 +6,7 @@ import os
 import datetime
 from io import BytesIO
 from .StateManager import StateManager
+from .core import StateSchema as schema
 from .StateManagerBridge import StateManagerBridge
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaGameAssetManager import AutonaGameAssetManager
@@ -24,11 +25,12 @@ from PIL import Image, ImageFilter, ImageEnhance
 DEFAULT_BANNER_PATH = "./assets/thumbnail_base/default_banner.png"
 BANNER_PATH = "./user_data/tournament_banner.png"
 
-# Stream-org-scoped assets, owned by this panel. They live under ./layout/
+# Stream-org-scoped assets, edited by this panel. They live under ./layout/
 # (served statically by AutonaWebServer, same as the tournament logo) so OBS
 # overlays can fetch them by URL with the published version as a cache-bust.
-ORG_ICON_PATH = "./layout/stream_org_icon.png"
-ORG_THUMB_PATH = "./layout/stream_org_thumbnail.png"
+# The paths themselves live in StateSchema together with the stream.org*
+# Version keys they back, because the launch seed publishes those versions
+# whether or not this panel is ever built (headless core Step 2).
 
 STREAM_OUTPUT_DIR = "./out/stream"
 STREAM_TITLE_MAX_LENGTH = 100
@@ -404,22 +406,6 @@ class AutonaStreamSettingsWidget(QDockWidget):
         self.UpdateOrgIcon()
         self.UpdateOrgThumbnail()
 
-    @staticmethod
-    def _publishAssetVersion(key: str, path: str):
-        """Publish an asset file's mtime as a cache-bust version.
-
-        Mirrors tournamentInfo.logoVersion: OBS overlays append it as a query
-        string to bypass the Cache-Control: max-age served by AutonaWebServer.
-        mtime keeps the value stable across restarts when the file hasn't
-        changed, so overlays don't re-fetch every launch. 0 means "no asset".
-        """
-        try:
-            version = int(os.path.getmtime(path) * 1000)
-        except OSError:
-            version = 0
-        if StateManager.Get(key, None) != version:
-            StateManager.Set(key, version)
-
     def _LoadImageInto(self, path: str, max_dim: int) -> bool:
         """Prompt for an image and save it to `path`, scaled to fit max_dim.
         Returns True when a file was saved."""
@@ -450,16 +436,16 @@ class AutonaStreamSettingsWidget(QDockWidget):
     def LoadOrgIcon(self):
         # Same 512px cap as the tournament icon: oversized sources choke the
         # off-screen QWebEngineView used by the thumbnail generator.
-        if self._LoadImageInto(ORG_ICON_PATH, 512):
+        if self._LoadImageInto(schema.STREAM_ORG_ICON_PATH, 512):
             self.UpdateOrgIcon()
 
     def LoadOrgThumbnail(self):
         # 1920 keeps a full-HD thumbnail source usable without re-encoding.
-        if self._LoadImageInto(ORG_THUMB_PATH, 1920):
+        if self._LoadImageInto(schema.STREAM_ORG_THUMB_PATH, 1920):
             self.UpdateOrgThumbnail()
 
     def UpdateOrgIcon(self):
-        pix = QPixmap(ORG_ICON_PATH) if os.path.exists(ORG_ICON_PATH) else QPixmap()
+        pix = QPixmap(schema.STREAM_ORG_ICON_PATH) if os.path.exists(schema.STREAM_ORG_ICON_PATH) else QPixmap()
         if pix.isNull():
             self.orgIconView.setPixmap(QPixmap())
             self.orgIconView.setText(QApplication.translate("app", "未登録"))
@@ -469,10 +455,11 @@ class AutonaStreamSettingsWidget(QDockWidget):
                 60, 60,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation))
-        self._publishAssetVersion("stream.orgIconVersion", ORG_ICON_PATH)
+        schema.PublishAssetVersion(
+            "stream.orgIconVersion", schema.STREAM_ORG_ICON_PATH)
 
     def UpdateOrgThumbnail(self):
-        pix = QPixmap(ORG_THUMB_PATH) if os.path.exists(ORG_THUMB_PATH) else QPixmap()
+        pix = QPixmap(schema.STREAM_ORG_THUMB_PATH) if os.path.exists(schema.STREAM_ORG_THUMB_PATH) else QPixmap()
         if pix.isNull():
             self.orgThumbView.setPixmap(QPixmap())
             self.orgThumbView.setText(QApplication.translate("app", "未登録"))
@@ -482,7 +469,8 @@ class AutonaStreamSettingsWidget(QDockWidget):
                 160, 90,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation))
-        self._publishAssetVersion("stream.orgThumbVersion", ORG_THUMB_PATH)
+        schema.PublishAssetVersion(
+            "stream.orgThumbVersion", schema.STREAM_ORG_THUMB_PATH)
 
     def ResetOrgMedia(self):
         reply = QMessageBox.question(
@@ -494,7 +482,7 @@ class AutonaStreamSettingsWidget(QDockWidget):
             QMessageBox.StandardButton.No)
         if reply != QMessageBox.StandardButton.Yes:
             return
-        for path in (ORG_ICON_PATH, ORG_THUMB_PATH):
+        for path in (schema.STREAM_ORG_ICON_PATH, schema.STREAM_ORG_THUMB_PATH):
             try:
                 if os.path.exists(path):
                     os.remove(path)
@@ -544,10 +532,10 @@ class AutonaStreamSettingsWidget(QDockWidget):
 
     def _LoadOrgThumbImage(self):
         """Load the registered org thumbnail as a PIL Image, or None."""
-        if not os.path.exists(ORG_THUMB_PATH):
+        if not os.path.exists(schema.STREAM_ORG_THUMB_PATH):
             return None
         try:
-            return Image.open(ORG_THUMB_PATH).convert("RGB")
+            return Image.open(schema.STREAM_ORG_THUMB_PATH).convert("RGB")
         except Exception:
             logger.error(traceback.format_exc())
             return None
@@ -667,10 +655,10 @@ class AutonaStreamSettingsWidget(QDockWidget):
     def _OverlayOrgIcon(self, img):
         """Composite the registered org icon into the bottom-right corner.
         No-op when nothing is registered."""
-        if not os.path.exists(ORG_ICON_PATH):
+        if not os.path.exists(schema.STREAM_ORG_ICON_PATH):
             return img
         try:
-            icon = Image.open(ORG_ICON_PATH).convert("RGBA")
+            icon = Image.open(schema.STREAM_ORG_ICON_PATH).convert("RGBA")
         except Exception:
             logger.error(traceback.format_exc())
             return img

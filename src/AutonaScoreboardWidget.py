@@ -20,6 +20,7 @@ from .AutonaIndividualGameTracker import AutonaIndividualGameTracker
 from .AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
+from .core import StateSchema as schema
 from .StateManagerBridge import StateManagerBridge
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaStatsUtil import AutonaStatsUtil
@@ -87,11 +88,6 @@ class AutonaScoreboardWidgetSignals(QObject):
 class AutonaScoreboardWidget(QWidget):
     stationQueueCache = QueueSetsCache()
 
-    # Sub-paths of this board's held subtree that AutonaStatsUtil fills with
-    # data fetched from the provider. Exempt from the 反映 hold so overlays
-    # and the stats preview update as soon as the fetch lands.
-    STATS_KEYS = ["last_sets", "history_sets", "recent_sets", "upset_factor"]
-
     def __init__(self, scoreboardNumber=1, singlePlayer=True, *args):
         super().__init__(*args)
 
@@ -99,18 +95,15 @@ class AutonaScoreboardWidget(QWidget):
         self.singlePlayer = singlePlayer
         # StateManager subtree owned by this board. Publication of the whole
         # subtree is deferred (HoldSubtree at the end of __init__): edits stay
-        # local until the 反映 button commits them. The stats keys below are
+        # local until the 反映 button commits them. StateSchema.STATS_KEYS are
         # exempt — they are fetched derived data, not operator edits, so they
         # publish immediately (stats overlays / preview would otherwise stay
         # empty until 反映 was pressed).
         self.statePrefix = f"score.{self.scoreboardNumber}"
 
-        StateManager.Set(f"score.{self.scoreboardNumber}", {})
-        StateManager.Set(f"score.{self.scoreboardNumber}.last_sets.1", {})
-        StateManager.Set(f"score.{self.scoreboardNumber}.last_sets.2", {})
-        StateManager.Set(f"score.{self.scoreboardNumber}.history_sets.1", {})
-        StateManager.Set(f"score.{self.scoreboardNumber}.history_sets.2", {})
-        StateManager.Set(f"score.{self.scoreboardNumber}.station_queue", {})
+        # Same skeleton AutonaScoreboardManager writes for the boards that are
+        # not built yet, from the same place (headless core Step 2).
+        schema.SeedBoard(self.scoreboardNumber)
 
         self.signals = AutonaScoreboardWidgetSignals()
         self.signals.UpdateSetData.connect(self.UpdateSetData)
@@ -219,48 +212,63 @@ class AutonaScoreboardWidget(QWidget):
         self.btOpenWebScoreboard.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         self.btOpenWebScoreboard.clicked.connect(lambda: webbrowser.open(self.webScoreboardUrl))
 
-        # The eye (field-visibility) button was removed from the desktop UI:
-        # the details dialog always shows every field. The checkable actions
-        # below survive as invisible state carriers so the display_options
-        # broadcast (Web UI / OBS overlay rendering) and the remote toggle
-        # path (SetDisplayOption ← POST /display-option) keep working.
-        # On the desktop, only show_sponsor still drives widget visibility
-        # (the inline sponsor field, via hideSponsorCheck).
-        # [label, [widget objectNames to toggle], settings key, default visible]
-        self.elements = [
-            [QApplication.translate("app", "Sponsor"),                ["team"],                 "show_sponsor",    True],
-            [QApplication.translate("app", "Player Name"),            ["name"],                 "show_name",       True],
-            [QApplication.translate("app", "Seed"),                   ["seedDisplay"],          "show_seed",       True],
-            [QApplication.translate("app", "Characters"),             ["characters"],           "show_characters", True],
-            [QApplication.translate("app", "Twitter"),                ["twitter"],              "show_social",     True],
-            [QApplication.translate("app", "Real Name"),              ["real_name"],            "show_real_name",  False],
-            [QApplication.translate("app", "Location"),               ["country", "state"],     "show_location",   True],
-            [QApplication.translate("app", "Additional information"), ["custom_textbox"],       "show_additional", False],
-        ]
+        # The eye (field-visibility) menu was removed from the desktop UI:
+        # the details dialog always shows every field. Nothing adds these
+        # QActions to a menu any more, so their text is never rendered —
+        # they survive as invisible state carriers, for the display_options
+        # broadcast (Web UI / OBS overlay rendering), for the remote toggle
+        # path (SetDisplayOption ← POST /display-option), and for
+        # show_sponsor alone, which still drives the inline sponsor field's
+        # Qt visibility through hideSponsorCheck.
+        #
+        # The keys, their defaults and the fields each one hides live in
+        # StateSchema.DISPLAY_OPTIONS (headless core Step 2) — they used to be
+        # spelled out here and again in WebServerActions. Only the labels are
+        # Qt's business, so only they stay. They stay *translated* despite
+        # never being rendered because most of these source strings also
+        # label visible UI elsewhere (player browser columns, commentary,
+        # result settings): removing them from the .ts files would blank
+        # those too.
+        labels = {
+            "show_sponsor":    QApplication.translate("app", "Sponsor"),
+            "show_name":       QApplication.translate("app", "Player Name"),
+            "show_seed":       QApplication.translate("app", "Seed"),
+            "show_characters": QApplication.translate("app", "Characters"),
+            "show_social":     QApplication.translate("app", "Twitter"),
+            "show_real_name":  QApplication.translate("app", "Real Name"),
+            "show_location":   QApplication.translate("app", "Location"),
+            "show_additional": QApplication.translate(
+                "app", "Additional information"),
+        }
         self._sponsorAction: QAction = None
         # settings key -> QAction, so remote clients (React Web UI) can drive
         # the same toggle path via SetDisplayOption().
         self._eyeActions = {}
-        for element in self.elements:
-            action = QAction(element[0], self)
+        for option in schema.DISPLAY_OPTIONS:
+            # Falls back to the raw key rather than raising: these actions are
+            # invisible state carriers, so a schema entry added without a
+            # label here must not take the whole board down with a KeyError.
+            action = QAction(labels.get(option.key, option.key), self)
             action.setCheckable(True)
-            action.setChecked(SettingsManager.Get(f"display_options.{element[2]}", element[3]))
-            self._eyeActions[element[2]] = action
-            if element[2] == "show_sponsor":
+            action.setChecked(SettingsManager.Get(
+                f"display_options.{option.key}", option.default))
+            self._eyeActions[option.key] = action
+            if option.key == "show_sponsor":
                 self._sponsorAction = action
                 action.toggled.connect(
-                    lambda toggled, action=action, element=element: self._onSponsorActionToggled(action, element[1]))
+                    lambda toggled, action=action, fields=list(option.fields): self._onSponsorActionToggled(action, fields))
             else:
                 action.toggled.connect(
-                    lambda toggled, action=action, element=element: self._onEyeActionToggled(action, element))
+                    lambda toggled, action=action, key=option.key: self._onEyeActionToggled(action, key))
 
         # Mirror every display option into StateManager so remote clients
         # (React Web UI, OBS) can render the same field visibility. Before
         # this loop only show_sponsor was mirrored; the other toggles were
         # session-local Qt visibility.
-        for element in self.elements:
-            StateManager.Set(f"display_options.{element[2]}",
-                SettingsManager.Get(f"display_options.{element[2]}", element[3]))
+        for option in schema.DISPLAY_OPTIONS:
+            StateManager.Set(f"display_options.{option.key}",
+                SettingsManager.Get(
+                    f"display_options.{option.key}", option.default))
 
         self.playerWidgets: List[AutonaScoreboardPlayerWidget] = []
         self.team1playerWidgets: List[AutonaScoreboardPlayerWidget] = []
@@ -768,7 +776,7 @@ class AutonaScoreboardWidget(QWidget):
         # broadcast/export pipeline until 反映 commits them. Everything Set
         # during construction above was published normally, so the committed
         # baseline matches the widgets' initial values.
-        StateManager.HoldSubtree(self.statePrefix, exempt=self.STATS_KEYS)
+        StateManager.HoldSubtree(self.statePrefix, exempt=schema.STATS_KEYS)
         StateManagerBridge.instance.held_dirty_changed.connect(
             self._onHeldDirtyChanged)
 
@@ -1353,14 +1361,14 @@ class AutonaScoreboardWidget(QWidget):
                 if w is not None:
                     w.setVisible(visible)
 
-    def _onEyeActionToggled(self, action: QAction, element):
+    def _onEyeActionToggled(self, action: QAction, key: str):
         # Non-sponsor display option: persist to SettingsManager (local
         # default) and StateManager (broadcast to Web UI / OBS) only. The
         # desktop details dialog always shows every field, so no Qt
         # visibility is applied here.
         show = action.isChecked()
-        SettingsManager.Set(f"display_options.{element[2]}", show)
-        StateManager.Set(f"display_options.{element[2]}", show)
+        SettingsManager.Set(f"display_options.{key}", show)
+        StateManager.Set(f"display_options.{key}", show)
 
     def SetDisplayOption(self, key: str, visible: bool):
         """Remote toggle entry point (Web UI eye menu -> POST /display-option).

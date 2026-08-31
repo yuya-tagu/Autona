@@ -213,10 +213,10 @@ class AutonaSettingsWindow(QDialog):
             "settings", "Hotkeys"), SettingsWidget("hotkeys", hotkeySettings))
 
         # Display-option visibility toggles live on the scoreboard "eye" menu
-        # (AutonaScoreboardWidget.elements) / the Web UI DISPLAY_OPTIONS, which
-        # own the display_options.show_* keys. The former Settings section here
-        # duplicated those keys (and carried two dead ones: show_birthday /
-        # show_controller) so it was removed.
+        # / the Web UI DISPLAY_OPTIONS, which own the display_options.show_*
+        # keys (defined in src/core/StateSchema.py). The former Settings section
+        # here duplicated those keys (and carried two dead ones:
+        # show_birthday / show_controller) so it was removed.
 
         # Split 200px selection list / rest for the settings pane. The width
         # is taken from the resize target instead of reading self.width()

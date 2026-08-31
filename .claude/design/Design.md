@@ -161,7 +161,7 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 | **R-React-7** | テーマは**ダーク固定**。React Web UI は `ThemeShell.tsx` で `darkTheme` を常用し、StateManager / SettingsManager とのライト/ダーク同期は行わない |
 | **R-React-8** | 楽観的スコアエコー（`useScoreSubmit.ts`）: スコア±はタップ即時にローカル表示を更新し、**絶対値**で `POST /score` する。①サーバーデルタの値がローカル送信値と一致したら pending 解除 ②連打は in-flight 中最新値のみ保持し応答後に 1 回再送（シリアライズ）③失敗時はサーバー値へ revert + Snackbar ④3 秒でタイムアウトし pending 解除（サーバーが正）。R-Sync-4（後勝ち）の範囲内のため revision 突き合わせ・ロールバックログは持たない |
 | **R-React-9** | **即時反映モデル**: ScoreboardPage の全入力（選手情報・Phase/Match/Best Of・Losers・チーム名）は入力確定（blur / Enter / 選択）で即送信する。送信ボタンは置かない（デスクトップの `editingFinished` と同モデル）。サーバーエコーによるフォーム巻き戻りは「カード内にフォーカスがある間は表示フィールドを上書きしない」ガードで抑止する（`Player.jsx`） |
-| **R-React-10** | フィールド表示トグルは **`display_options.show_*`（StateManager 経由で全クライアント共有）が正**。Web の Eye メニューは `POST /display-option`（Actions 層 `set_display_option` → 各ボードの eye アクション駆動）で書き込み、ローカルの visibility 状態は持たない。キーとデフォルトは `AutonaScoreboardWidget.elements` と `web/src/ScoreboardPage/displayOptions.js` で二重管理（変更時は両方更新） |
+| **R-React-10** | フィールド表示トグルは **`display_options.show_*`（StateManager 経由で全クライアント共有）が正**。Web の Eye メニューは `POST /display-option`（Actions 層 `set_display_option` → 各ボードの eye アクション駆動）で書き込み、ローカルの visibility 状態は持たない。キーとデフォルトの正本は `src/core/StateSchema.py` の `DISPLAY_OPTIONS`（デスクトップの eye アクションも `set_display_option` の受理キーもここを読む）。`web/src/ScoreboardPage/displayOptions.js` だけは言語が違うため写しが残り、`tests/test_state_schema.py` が両者の一致を検査する |
 
 **ページ一覧** — 詳細は §4.2 参照。
 
@@ -543,7 +543,7 @@ OBS HTML / React Web UI / WebEngine 画像生成      PyQt UI
 | **R-Sync-8** | クライアントは受信 payload の区間 `[first_revision, revision]` が次に期待する revision（前回適用 +1）を含むことを検証する。含まなければ `program_state` を再リクエストして full snapshot で再構築する。（旧規約の「単一 revision の前回 +1 検証」は coalescing と両立せず、結合 payload をギャップと誤検知して全量再取得が多発していた） |
 | **R-Sync-9** | reconnect 時はクライアントが必ず full snapshot を再取得する |
 | **R-Sync-10** | adaptive debounce: <10 delta = 50ms / 10-99 = 100ms / 100+ = 200ms + `state_big_change` 通知（core の observer 発火 → `StateManagerBridge` が同名 Qt シグナルを re-emit）。**leading-edge flush**: 直近 flush から 50ms 以上静かな状態で届いた最初の delta は即時送出する（単発操作の体感遅延をゼロ化。バーストは従来どおり trailing debounce） |
-| **R-Sync-11** | **遅延反映（「反映」ボタン、2026-07 導入）**: `score.1` / `score.2`（1v1・チームボード）のサブツリーは `StateManager.HoldSubtree` で保留登録される。書き込みはライブ state に即適用（`Get()` は常にライブ値）だが、delta 配信・full snapshot（`GetFullState` 既定）・`program_state.json`・`./out` テキスト出力からは除外され、BEST OF 右の「反映」ボタン（`CommitHeld`）が保留分を 1 save サイクルで一括公開する。ゲーム（再）読込（`GameAssetManager.onLoad`）時は自動コミット。crew ボード（`score.3`）と `score` 以外のサブツリーは従来どおり即時配信。**除外サブキー（exempt、2026-07-27 追加）**: `HoldSubtree(prefix, exempt=[...])` で指定したサブパスは保留対象外となり、書き込み時点で即時公開される。現在の指定は `last_sets` / `history_sets` / `recent_sets` / `upset_factor`（`AutonaScoreboardWidget.STATS_KEYS`）— 取得済みの派生データであり操作者の未確定編集ではないため、統計オーバーレイ（`layout/last_sets` 等）と統計プレビューが「反映」を待たずに更新される。保留中の編集がある状態でも exempt キーのライブ値は公開スナップショットに残る。サムネイル/リザルト生成は `GetFullState(include_pending=True)` でフォームのライブ値を描画する。デスクトップ内で保留中データを表示するウィジェット（Statistics 等）は `StateManagerBridge.instance.held_state_updated` シグナル（core 側は `StateManager.observers.held_state_updated` 通知が起点）で更新する |
+| **R-Sync-11** | **遅延反映（「反映」ボタン、2026-07 導入）**: `score.1` / `score.2`（1v1・チームボード）のサブツリーは `StateManager.HoldSubtree` で保留登録される。書き込みはライブ state に即適用（`Get()` は常にライブ値）だが、delta 配信・full snapshot（`GetFullState` 既定）・`program_state.json`・`./out` テキスト出力からは除外され、BEST OF 右の「反映」ボタン（`CommitHeld`）が保留分を 1 save サイクルで一括公開する。ゲーム（再）読込（`GameAssetManager.onLoad`）時は自動コミット。crew ボード（`score.3`）と `score` 以外のサブツリーは従来どおり即時配信。**除外サブキー（exempt、2026-07-27 追加）**: `HoldSubtree(prefix, exempt=[...])` で指定したサブパスは保留対象外となり、書き込み時点で即時公開される。現在の指定は `last_sets` / `history_sets` / `recent_sets` / `upset_factor`（`src/core/StateSchema.py` の `STATS_KEYS`）— 取得済みの派生データであり操作者の未確定編集ではないため、統計オーバーレイ（`layout/last_sets` 等）と統計プレビューが「反映」を待たずに更新される。保留中の編集がある状態でも exempt キーのライブ値は公開スナップショットに残る。サムネイル/リザルト生成は `GetFullState(include_pending=True)` でフォームのライブ値を描画する。デスクトップ内で保留中データを表示するウィジェット（Statistics 等）は `StateManagerBridge.instance.held_state_updated` シグナル（core 側は `StateManager.observers.held_state_updated` 通知が起点）で更新する |
 
 #### 3.2.4 同期遅延の上限
 
@@ -718,8 +718,11 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
   プレースホルダが入り、初回表示時に `_EnsurePanelAt` が差し替える（ナビ index == stack index を維持）。
   外部から構築を強制する経路（ホットキー・外部制御 API 等）には `EnsureXxxPanel()` アクセサを足す
 - **パネル未構築でも成立させる**: 起動時に必要な state のシード・正規化・廃止キー掃除は
-  パネルの `__init__` ではなく `Window._SeedPanelState()` に置く（board スケルトンは
-  `AutonaScoreboardManager.CreateScoreboard()`）。グローバルシグナルへの接続も Window 側に置く
+  パネルの `__init__` ではなく **`src/core/StateSchema.py`（`SeedPanelState()` / `SeedBoard()`）**
+  に置く。`Window._SeedPanelState()` はその起動時の呼び出し口（SaveBlock で 1 サイクルに束ねる）で、
+  Qt 依存で core に置けない `SeedColorState()` だけがここに残る。board スケルトンは
+  `SeedBoard()` を `AutonaScoreboardManager.CreateScoreboard()` とボード自身の `__init__` が呼ぶ。
+  グローバルシグナルへの接続も Window 側に置く
 - 手順の詳細は [.claude/rules/python-widgets.md](../rules/python-widgets.md)「パネル登録」
 
 #### 4.1.2 パネル内の標準パターン
@@ -853,7 +856,7 @@ layout/{用途}_{variant}/
 | `--p1-score-bg-color` | `#fe3636` | P1 スコア背景 |
 | `--p2-score-bg-color` | `#2e89ff` | P2 スコア背景 |
 | `--p1-sponsor-color` / `--p2-sponsor-color` | `#ff7a6d` / `#29b6f6` | スポンサー色 |
-| `--theme-color` | `#181B21` | テーマ色（`AutonaFeatureColors.DEFAULT_THEME_COLOR` と同値） |
+| `--theme-color` | `#181B21` | テーマ色（正本 `src/core/StateSchema.py` の `DEFAULT_THEME_COLOR` と同値） |
 | `--accent-color` | `#f0a500` | アクセント |
 | `--bevel-light` / `--bevel-dark` | color-mix で派生 | 立体感 |
 | `--tile-radius` / `--tile-gap` | `6px` / `5px` | タイル UI |
@@ -1496,8 +1499,9 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 - `setObjectName()` は **Autona.py 側で設定**する（ウィジェット自身では設定しない、`.claude/rules/python-widgets.md`）
 - `STATE_VERSION` インクリメント忘れで既存ユーザーが新ウィジェットを見られなくなる
 - `signals` への `connect` は `__init__` 内で行う
-- 遅延構築にする場合、パネル未構築でも成立させるべき初期化（state のシード・正規化・グローバル
-  シグナル接続）は `__init__` に置かず `Window._SeedPanelState()` / Window 側へ寄せる（§4.1.1）
+- 遅延構築にする場合、パネル未構築でも成立させるべき初期化は `__init__` に置かない（§4.1.1）。
+  state のシード・正規化は `src/core/StateSchema.py` の `SeedPanelState()` / `SeedBoard()` に、
+  グローバルシグナル接続は Window 側に置く（`Window._SeedPanelState()` は前者の呼び出し口）
 
 ### 7.6 新 State キーパスの追加
 
