@@ -8,16 +8,21 @@ from .AutonaCrewBattleWidget import AutonaCrewBattleWidget
 from .Helpers.AutonaQtHelper import gui_thread_sync, in_gui_thread
 from .StateManager import StateManager
 from .core import StateSchema as schema
+from .core.Actions import AutonaActions
 from . import ui_constants as UI
 
 
 class AutonaScoreboardManager(QDockWidget):
     instance: "AutonaScoreboardManager" = None
 
-    # battle format -> board number. Single source of truth for both the
-    # startup build (CreateScoreboard) and the runtime switch
-    # (SetBattleFormat).
-    FORMAT_BOARDS = {"singles": 1, "team": 2, "crew": 3}
+    # battle format -> board number, used by the startup build
+    # (CreateScoreboard) and the runtime switch (SetBattleFormat). Aliased
+    # from core rather than spelled out again: AutonaActions resolves the
+    # same mapping to decide which board a hotkey acts on, and two copies
+    # would let the headless answer drift from the one the window shows
+    # (headless core Step 3). The core definition is already a read-only
+    # MappingProxyType, so this alias cannot be edited for both holders.
+    FORMAT_BOARDS = AutonaActions.FORMAT_BOARDS
     BOARD_NUMBERS = (1, 2, 3)
     BOARD_LABELS = {1: "1v1", 2: "team", 3: "crew"}
 

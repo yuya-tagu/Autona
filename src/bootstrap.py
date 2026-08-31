@@ -86,6 +86,16 @@ def bootstrap_core():
     if StateManagerBridge.instance is None:
         StateManagerBridge.instance = StateManagerBridge()
 
+    # ORDER CONSTRAINT: the domain-operations layer must exist before its
+    # first caller. That is AutonaHotkeys immediately below (which routes its
+    # signals here), and after it every widget and the web server. It has to
+    # come after StateManager.Initialize() and SettingsManager.Initialize()
+    # above, because its methods read and write both. Qt-free by construction
+    # (tests/test_core_qt_free.py), so it needs no QApplication.
+    from .core.Actions import AutonaActions
+    if AutonaActions.instance is None:
+        AutonaActions.instance = AutonaActions()
+
     # AutonaHotkeys only needs SettingsManager (read at construction time by
     # LoadUserHotkeys); the Windows hotkeys themselves are registered later,
     # from UiMounted(). Its `signals` class attribute is referenced by
@@ -94,6 +104,12 @@ def bootstrap_core():
     from .AutonaHotkeys import AutonaHotkeys
     if AutonaHotkeys.instance is None:
         AutonaHotkeys.instance = AutonaHotkeys()
+    # The board-independent hotkeys (score +/-, reset, 反映) are routed to
+    # AutonaActions here rather than by each board to itself, which is what
+    # made them die when the panel behind them was not built (ADR-004 D2).
+    # Idempotent, and deliberately outside the `instance is None` guard so a
+    # re-bootstrap re-checks it rather than depending on which branch ran.
+    AutonaHotkeys.ConnectActions()
 
     # GameAssetManager writes StateManager's "game" key in its __init__, so it
     # has to come after StateManager.Initialize() above. It loads no asset

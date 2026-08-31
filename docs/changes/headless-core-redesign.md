@@ -157,19 +157,80 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
   `tests/test_state_schema.py` 新設（移動前の値をリテラルで pin・シードの挙動・
   `Window._SeedPanelState` からの結線と eye メニューのラベル一致を AST で pin）
 
-### Step 3: AutonaActions 新設と「簡単な書き込み」の反転
+### Step 3: AutonaActions 新設と「簡単な書き込み」の反転 ✅ 完了（2026-08-31）
 
-- core に `AutonaActions` を新設。**state を直接書く実装**を、ロジックが自明な操作から
-  実装する: スコア増減 / リセット / スワップ / チーム色 / `display_options` / best_of
-- `WebServerActions` は該当メソッドを `AutonaActions` へ委譲する互換層に変える
-  （経路 [2][3] が自動的に headless 経由になる）
-- Qt ウィジェット側: 該当操作のハンドラを「Actions 呼び出し + state 通知での表示更新」に
-  差し替え（エコーループ抑止規約を適用）
-- 検証: v1 API の手動チェックリスト該当節 / 同一操作で delta 1 回 / スコア操作の
-  既存テスト群
-- ホットキー 9 本の接続先をウィジェットのバウンドメソッドから `AutonaActions` に付け替え
-  （「パネル未構築でホットキーが死ぬ」の構造的解消）。`Autona.py` の
-  `refresh_phase_group` はパネル構築を伴うため Window 側に残す
+- `src/core/Actions.py` に `AutonaActions` を新設（`bootstrap_core()` が生成）。
+  **移行した操作**: スコア増減 / スコアリセット / チーム色 / `display_options` /
+  反映（`CommitHeld`）。`WebServerActions` の該当メソッドは委譲になり、
+  `set_display_option` / `apply_changes` からは `@gui_thread_sync` が外れた
+  （`reset_scores` だけ残置 — クルーボード分岐がウィジェットを触るため）
+- **スコープから外した 2 操作**（自明ではないと判明）:
+  - **チームスワップ** — 選手データの入れ替えが `AutonaScoreboardPlayerWidget.SwapWith`
+    （ウィジェット間コピー）で、`teamsSwapped` も `WebServerActions.get_swap` が
+    ウィジェットから読む。選手サブツリーを core で表現できる Step 4/5 が前提
+  - **best_of** — `best_of_text` / `first_to_text` が `AutonaLocaleHelper.matchNames`
+    （Qt を import するモジュール）由来。同じハンドラが個別ゲームトラッカーの
+    ステージ行も作り直す。ロケールテーブルの core 移動が前提
+  - あわせて **クルーボード（board 3）のスコアリセット**も対象外。チーム合計が
+    メンバーストックの派生値で、リセット = 全員ストック満タン復元というウィジェット側の意味
+- **ホットキー**: `AutonaHotkeys.ConnectActions()`（`bootstrap_core()` から 1 回）が
+  スコア ±4 本 / `reset_scores` / `apply_changes` を `AutonaActions` に直結。
+  ボードは `AutonaActions.ActiveBoard()` = `SettingsManager.scoreboard.battle_format`
+  で解決する。**挙動変化（意図した修正）**: 従来は「構築済みの全ボードが応答」だったため、
+  singles↔team 切替後は非表示ボードのスコアまで動き、crew 起動時は 1 本も効かなかった。
+  以降は常にアクティブな 1 面だけ。`load_set` / `swap_teams` はボード、
+  `refresh_phase_group` は Window に残置
+- **battle format の解決を core に一本化**: `AutonaActions.ResolveBattleFormat()` が
+  `scoreboard.battle_format` → 旧 `scoreboard.team_mode`（bool）フォールバックまで含めて
+  正本になり、`Window._resolveBattleFormat()` と `/api/v1/health` の `activeBoard`
+  （`{"singles":1,...}` リテラルの 3 コピー目）はこれを呼ぶ形に統一。
+  `battle_format` 導入前から team 運用のユーザーでも、ホットキーと `activeBoard` が
+  表示中のボードに一致する。`FORMAT_BOARDS` は `MappingProxyType`
+  （`AutonaScoreboardManager.FORMAT_BOARDS` がエイリアスするため共有 mutable を避ける）
+- 挙動差分（記録）:
+  - 未構築ボードを宛先にした Web/API 操作が **ボードを構築しなくなった**
+    （`display_options` トグルは board 1/2 を構築していた）。その代わり、未構築ボードの
+    state に書いた値は、そのボードが後から構築されると `SeedBoard` で消える
+  - **不正なボード番号の扱いが 500 → 無視 + `"OK"` に変わった**。従来は
+    `GetScoreboard(999)` が `None` を返し、その属性アクセスが `AttributeError` →
+    HTTP 500 になっていた。委譲後の `AdjustScore` / `ResetScore` / `SetTeamColor` は
+    board 番号を検証して `logger` に落とし、no-op で戻る（legacy ルートは `"OK"`）。
+    v1 API 側は `require_board_12` が先に 400 を返すため影響なし。影響するのは
+    legacy REST / Socket.IO で存在しないボード番号を投げた場合のみ
+  - `set_display_option`（legacy）は Actions の戻り値をそのまま反映して
+    `"ERROR: unknown display option ..."` / `"OK"` を返す。判定の正本は schema 一箇所
+
+- **既知の残リスク・非効率（Step 4 で回収）**:
+  - **スコアの書き手はまだ 2 系統**。Actions（`AdjustScore` / `ResetScore`）と、
+    スピンボックス主導経路（セット読込 / `ClearScore` / `SwapTeams` / ステージ集計 →
+    `AutonaIndividualGameTracker.UpdateScore` ・ `StageResultsChanged`）。
+    両者は state 経由でのみ噛み合うため、「どちらが書いたか」を
+    `AutonaIndividualGameTracker.writingScore` で見分ける必要がある
+    （立っている間 `_SyncScoreDisplays` は `SyncStagesToScore` を呼ばない。
+    呼ぶとステージボタン 1 クリックで次のゲームまで勝ちになる）。
+    `UpdateScore` の Get→Set は `AdjustScore` と同じく `StateManager.lock` で囲んだ。
+    完全一本化は Step 4/5
+  - **held のみを書く `SaveBlock` が全 state 差分を踏む**。held キーへの書き込みは
+    `SaveState` を起こさない（`_notifyHeldTouched` だけ）ので、held だけを書いた
+    `SaveBlock` は `changedKeys` が空のまま `ReleaseSaving()` → `SaveState()` に入り、
+    `include_paths=[]` = フィルタなし = **全 state の DeepDiff** になる。
+    実測（トラッカー ON・BO5・`+1` 1 回）で `DeepDiff(include_paths=[])` が 1 回発生。
+    該当箇所は `AutonaIndividualGameTracker.IncrementScore` / `DecrementScore` に
+    限らず、`StageResultsChanged` / `SwapStageResults` / `SetStageCount` /
+    `AutonaScoreboardWidget.SwapTeams` / **`AutonaActions.ResetScore`** も同型。
+    **Step 3 では code を触らず記録に留めた**: 個別に `SaveBlock` を外すと
+    (1) held 通知が 1 回 → 3 回に増え、(2) 万一 hold 未登録のボードに対して呼ばれた
+    場合は 1 サイクル → 3 サイクルの publish になる、という副作用が付く一方、
+    原因は 2 箇所の `SaveBlock` ではなく `ReleaseSaving()` が空の `changedKeys` でも
+    `SaveState()` を呼ぶという **StateManager 側のセマンティクス**にあるため。
+    Step 4 で `SaveState` 側（空 `changedKeys` かつ `_commitPrefixes` 空なら diff を
+    スキップ）として一括で回収する
+- 検証: フルスイート 445 passed / 19 skipped（Step 3 前 417 + 新規 28）。
+  `tests/test_actions.py` 新設（QApplication なしで書き込み内容・held/即時の別・
+  1 操作 = 1 サイクル・スレッド安全を pin）。ウィジェット側のエコーループ検査は
+  `tests/test_scoreboard_operations.py`（1 操作あたり `held_state_updated` 1 回 /
+  `display_options` は revision +1）。`test_webserver_routes` の台帳・
+  `test_objectname_keypath_contract` は不変で pass
 
 ### Step 4: (b) データロード系の抽出
 

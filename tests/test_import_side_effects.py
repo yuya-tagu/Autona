@@ -99,6 +99,10 @@ importlib.import_module("src.core.Observable")
 core_settings = importlib.import_module(
     "src.core.SettingsManager").SettingsManager
 core_state = importlib.import_module("src.core.StateManager").StateManager
+# The domain-operations layer (headless core Step 3). It is a singleton like
+# the Qt-side ones, so the same rule applies: bootstrap_core() creates it,
+# importing the module must not.
+core_actions = importlib.import_module("src.core.Actions").AutonaActions
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -157,7 +161,10 @@ bridge = importlib.import_module("src.StateManagerBridge").StateManagerBridge
 from qtpy.QtWidgets import QApplication
 
 assert QApplication.instance() is None, "import created a QApplication"
+assert core_actions.instance is None, "import created AutonaActions.instance"
 assert hotkeys.instance is None, "import created AutonaHotkeys.instance"
+assert not hotkeys._actions_connected, \
+    "import wired the hotkeys to AutonaActions"
 assert game_assets.instance is None, \
     "import created AutonaGameAssetManager.instance"
 assert tdp.instance is None, \
@@ -239,6 +246,14 @@ for name in queryAttrs:
 
 state_manager.Initialize()
 assert os.path.isdir("./out"), "Initialize() did not create ./out"
+
+# The actions layer needs both managers above, which is why bootstrap_core()
+# creates it here rather than at import. Its positive control is that it can
+# be built and used with no Qt object in sight.
+core_actions.instance = core_actions()
+core_actions.instance.SetDisplayOption("show_seed", False)
+assert core_state.Get("display_options.show_seed") is False, \
+    "AutonaActions could not write the state headlessly"
 
 # Same for the GameAssetManager: its ./user_data/games guarantee moved from
 # module level into __init__. StateManager.Initialize() has to run first --

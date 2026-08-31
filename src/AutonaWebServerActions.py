@@ -9,7 +9,7 @@ import orjson
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaQtHelper import gui_thread_sync
 from .StateManager import StateManager
-from .core import StateSchema as schema
+from .core.Actions import AutonaActions
 from .SettingsManager import SettingsManager
 from loguru import logger
 from .AutonaGameAssetManager import AutonaGameAssetManager
@@ -72,25 +72,27 @@ class WebServerActions(QObject):
         self.scoreboard.GetScoreboard(scoreboard_number).signals.ChangeSetData.emit(score)
         return "OK"
 
+    # ── Migrated to the core Actions layer (headless core Step 3) ──────
+    # These four used to emit a signal into a board widget, which did the
+    # writing. They call AutonaActions directly now: no widget is built to
+    # serve them, the write happens synchronously on the caller's thread
+    # (so /api/v1's `revision` is accurate for them too), and the board --
+    # if one exists -- updates its display from the state notification.
+    # No @gui_thread_sync: nothing here touches a Qt object any more.
+
     def team_scoreup(self, scoreboard, team):
-        if str(team) == "1":
-            self.scoreboard.GetScoreboard(scoreboard).signals.CommandScoreChange.emit(0, 1)
-        else:
-            self.scoreboard.GetScoreboard(scoreboard).signals.CommandScoreChange.emit(1, 1)
+        AutonaActions.instance.AdjustScore(
+            scoreboard, 1 if str(team) == "1" else 2, 1)
         return "OK"
 
     def team_scoredown(self, scoreboard, team):
-        if str(team) == "1":
-            self.scoreboard.GetScoreboard(scoreboard).signals.CommandScoreChange.emit(0, -1)
-        else:
-            self.scoreboard.GetScoreboard(scoreboard).signals.CommandScoreChange.emit(1, -1)
+        AutonaActions.instance.AdjustScore(
+            scoreboard, 1 if str(team) == "1" else 2, -1)
         return "OK"
 
     def team_color(self, scoreboard, team, color):
-        if str(team) == "1":
-            self.scoreboard.GetScoreboard(scoreboard).signals.CommandTeamColor.emit(0, color)
-        else:
-            self.scoreboard.GetScoreboard(scoreboard).signals.CommandTeamColor.emit(1, color)
+        AutonaActions.instance.SetTeamColor(
+            scoreboard, 1 if str(team) == "1" else 2, color)
         return "OK"
 
     # ── Crewbattle (board 3) ──────────────────────────────────────────
@@ -117,24 +119,24 @@ class WebServerActions(QObject):
         # not leak to remote clients ahead of the delta stream.
         return StateManager.GetCommitted(f'score.{sb_widget.scoreboardNumber}')
 
-    @gui_thread_sync
     def set_display_option(self, data):
         """Toggle a scoreboard field's visibility from a remote client.
 
-        Drives the same eye-menu action path as a local click so Qt widget
-        visibility, SettingsManager and StateManager stay consistent on
-        every board (Design.md §3.2.2 R-Sync-1: writes go through Actions).
+        One write, to the one place the option lives (headless core Step 3).
+        This used to walk boards 1 and 2 and poke each one's QAction --
+        which *built* both boards as a side effect of a Web UI eye-menu
+        click, and needed @gui_thread_sync to do it. Boards that exist mirror
+        the change from the state notification instead.
         """
         option = (data or {}).get("option")
-        # The accepted key set is the schema's, not a second copy of it
-        # (headless core Step 2).
-        if option not in schema.DISPLAY_OPTION_KEYS:
+        # Reported from the operation's own answer rather than assumed: the
+        # accepted key set is the schema's (headless core Step 2) and Actions
+        # is the one that consults it, so a rejection there must not come back
+        # to the client as "OK". The legacy route's error string is this
+        # layer's contract, hence the wording rather than a bare False.
+        if not AutonaActions.instance.SetDisplayOption(
+                option, bool((data or {}).get("value"))):
             return f"ERROR: unknown display option {option}"
-        value = bool((data or {}).get("value"))
-        for n in (1, 2):
-            sb = self.scoreboard.GetScoreboard(n)
-            if hasattr(sb, "SetDisplayOption"):
-                sb.SetDisplayOption(option, value)
         return "OK"
 
     @gui_thread_sync
@@ -400,16 +402,21 @@ class WebServerActions(QObject):
         stats.signals.UpsetFactorCalculation.emit()
         return "OK"
 
+    # @gui_thread_sync is still required: boards 1/2 go through Actions, but
+    # a crew board's "reset score" means restoring every member's stocks —
+    # widget-owned state that Step 3 did not migrate (see core/Actions.py).
     @gui_thread_sync
     def reset_scores(self, scoreboard):
+        if AutonaActions.instance.ResetScore(scoreboard):
+            return "OK"
         self.scoreboard.GetScoreboard(scoreboard).ResetScore()
         return "OK"
 
-    @gui_thread_sync
     def apply_changes(self, scoreboard):
         # 反映: publish the board's pending (held) edits — same commit the
-        # desktop 反映 button / hotkey performs.
-        self.scoreboard.GetScoreboard(scoreboard).ApplyChanges()
+        # desktop 反映 button / hotkey performs. Pure state, so no GUI hop
+        # and no board is built to serve it (headless core Step 3).
+        AutonaActions.instance.ApplyChanges(scoreboard)
         return "OK"
 
     def _reset_best_of(self, scoreboard):

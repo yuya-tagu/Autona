@@ -6,6 +6,7 @@ from qtpy.QtWidgets import *
 from loguru import logger
 
 from .SettingsManager import SettingsManager
+from .core.Actions import AutonaActions
 from .Helpers.AutonaDictHelper import deep_clone
 
 # Win32 constants
@@ -109,6 +110,119 @@ class AutonaHotkeys(QObject):
     }
 
     loaded_keys = {}
+
+    # True once ConnectActions() has wired the signals below to the core
+    # operations. Class-level, because `signals` is class-level too: the
+    # connections belong to the process, not to an instance (the hotkey unit
+    # tests build extra AutonaHotkeys objects, and a per-instance connection
+    # would have every one of them answering the same key press).
+    _actions_connected = False
+
+    @classmethod
+    def ConnectActions(cls):
+        """Route the board-independent hotkeys to AutonaActions.
+
+        These six used to be connected by AutonaScoreboardWidget.__init__ to
+        its own bound methods, which made the answer to "what does
+        Ctrl+Shift+1 do" depend on which boards were built: nothing at all
+        when the saved battle format was crew, and *both* boards after a
+        singles/team switch -- scoring a hidden one along with the visible
+        one. AutonaActions resolves the active board from the persisted
+        format instead, so the hotkey works with no panel built and reaches
+        exactly one board (ADR-004 D2, headless core Step 3).
+
+        Not moved: `load_set` (opens the set-selection window) and
+        `swap_teams` (swaps the player widgets' data, still widget-owned)
+        stay on the board, and `refresh_phase_group` stays on the window,
+        because all three drive a panel rather than the state.
+
+        Not applicable to board 3: a crew battle's team score is the sum of
+        its members' remaining stocks, so there is no team-level score to
+        nudge or zero. AutonaActions logs and ignores a score adjustment or
+        reset aimed at it, which is what these hotkeys do while the operator
+        is in crew format.
+
+        Idempotent -- the guard matters because bootstrap_core() can run more
+        than once in a process (the test harness bootstraps its own runtime,
+        and any re-bootstrap re-checks this), and a second connect would
+        apply every score hotkey twice per key press.
+        """
+        if cls._actions_connected:
+            return
+        cls._actions_connected = True
+        cls.signals.team1_score_up.connect(cls._onTeam1ScoreUp)
+        cls.signals.team1_score_down.connect(cls._onTeam1ScoreDown)
+        cls.signals.team2_score_up.connect(cls._onTeam2ScoreUp)
+        cls.signals.team2_score_down.connect(cls._onTeam2ScoreDown)
+        cls.signals.reset_scores.connect(cls._onResetScores)
+        cls.signals.apply_changes.connect(cls._onApplyChanges)
+        logger.debug("Hotkeys routed to AutonaActions")
+
+    @classmethod
+    def DisconnectActions(cls):
+        """Undo ConnectActions(). For tests only.
+
+        `signals` and the connected slots are class-level, so once
+        ConnectActions() has run there is no object whose destruction would
+        release them -- a test that wants to observe the un-routed state, or
+        to count how many times a routing happens, has no other way back.
+        Nothing in the app calls this: the routing is meant to live as long
+        as the process.
+        """
+        if not cls._actions_connected:
+            return
+        cls._actions_connected = False
+        cls.signals.team1_score_up.disconnect(cls._onTeam1ScoreUp)
+        cls.signals.team1_score_down.disconnect(cls._onTeam1ScoreDown)
+        cls.signals.team2_score_up.disconnect(cls._onTeam2ScoreUp)
+        cls.signals.team2_score_down.disconnect(cls._onTeam2ScoreDown)
+        cls.signals.reset_scores.disconnect(cls._onResetScores)
+        cls.signals.apply_changes.disconnect(cls._onApplyChanges)
+
+    # The slots are plain functions rather than bound methods on purpose:
+    # `signals` outlives any instance, and these targets are meant to live as
+    # long as the process. Nothing here holds a widget, so there is no
+    # receiver whose death Qt would need to notice.
+
+    @staticmethod
+    def _adjustActiveScore(team, delta):
+        actions = AutonaActions.instance
+        if actions is None:
+            logger.warning("Hotkey ignored: AutonaActions is not built yet")
+            return
+        actions.AdjustScore(actions.ActiveBoard(), team, delta)
+
+    @staticmethod
+    def _onTeam1ScoreUp():
+        AutonaHotkeys._adjustActiveScore(1, 1)
+
+    @staticmethod
+    def _onTeam1ScoreDown():
+        AutonaHotkeys._adjustActiveScore(1, -1)
+
+    @staticmethod
+    def _onTeam2ScoreUp():
+        AutonaHotkeys._adjustActiveScore(2, 1)
+
+    @staticmethod
+    def _onTeam2ScoreDown():
+        AutonaHotkeys._adjustActiveScore(2, -1)
+
+    @staticmethod
+    def _onResetScores():
+        actions = AutonaActions.instance
+        if actions is None:
+            logger.warning("Hotkey ignored: AutonaActions is not built yet")
+            return
+        actions.ResetScore(actions.ActiveBoard())
+
+    @staticmethod
+    def _onApplyChanges():
+        actions = AutonaActions.instance
+        if actions is None:
+            logger.warning("Hotkey ignored: AutonaActions is not built yet")
+            return
+        actions.ApplyChanges(actions.ActiveBoard())
 
     def __init__(self) -> None:
         super().__init__()

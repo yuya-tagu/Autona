@@ -41,6 +41,26 @@ class AutonaIndividualGameTracker(QWidget):
         self.stage_widget_list = []
         self.stage_order_list_widget = QWidget()
 
+        # True while StageResultsChanged is publishing the team scores it
+        # summed from the stage rows. See the property below.
+        self._writingScore = False
+
+    @property
+    def writingScore(self) -> bool:
+        """True while this tracker is itself the author of the team score.
+
+        The scoreboard reads this from its held_state_updated handler. A
+        score write notifies synchronously on the same thread, so the board's
+        _SyncScoreDisplays runs *inside* StageResultsChanged -- with the
+        spinbox still holding the previous value. Left to itself it would
+        read that as a score transition and call SyncStagesToScore, which
+        awards a stage for it: one click on "game 1: T1" would mark game 2 as
+        won as well. While this is set the board syncs its spinbox and stops
+        there, because the stage rows are already exactly what the operator
+        clicked.
+        """
+        return self._writingScore
+
     @assert_gui_thread
     def CreateStage(self, index=0):
         """ Creates a new stage in the list of stage results. """
@@ -212,17 +232,40 @@ class AutonaIndividualGameTracker(QWidget):
     @Slot(int, int)
     @assert_gui_thread
     def UpdateScore(self, team, new_value):
-        """Responds to the score being modified in a non-per-game context."""
+        """Responds to the score being modified in a non-per-game context.
 
-        old_value = StateManager.Get(f"score.{self.scoreboard_number}.team.{team + 1}.score", 0)
-        StateManager.Set(f"score.{self.scoreboard_number}.team.{team + 1}.score", new_value)
+        Still the handler for the paths that drive the score spinbox
+        directly (set loading, ClearScore, SwapTeams): they change the widget
+        and this writes the result. The paths that go through
+        AutonaActions.AdjustScore / ResetScore instead write the state first
+        and call SyncStagesToScore() below with the transition, so the two
+        halves were split apart (headless core Step 3).
+        """
 
+        # Read-modify-write under the lock, same as AutonaActions.AdjustScore:
+        # the score is written from the web/API threads through Actions now, so
+        # a concurrent write between the Get and the Set here would be read
+        # back as this widget's own transition and desynchronise the stages.
+        key = f"score.{self.scoreboard_number}.team.{team + 1}.score"
+        with StateManager.lock:
+            old_value = StateManager.Get(key, 0)
+            StateManager.Set(key, new_value)
+
+        self.SyncStagesToScore(team, old_value, new_value)
+
+    @assert_gui_thread
+    def SyncStagesToScore(self, team, old_value, new_value):
+        """Award / clear as many stage rows as the score moved by.
+
+        Writes only `score.{n}.stages.*` -- the team score itself is the
+        caller's business either way.
+        """
         logger.info(f"UpdateScore: old[{old_value}] new[{new_value}]")
 
         # Disable individual game tracker logic if ties were reported
         has_ties = False
         game_data = StateManager.Get(f"score.{self.scoreboard_number}.stages")
-        for key in game_data.keys():
+        for key in (game_data or {}).keys():
             if game_data[key].get("tie"):
                 has_ties = True
 
@@ -313,9 +356,18 @@ class AutonaIndividualGameTracker(QWidget):
             if stageTeam2Check.isChecked():
                 team_2_score += 1
 
-        with StateManager.SaveBlock():
-            StateManager.Set(f"score.{self.scoreboard_number}.team.1.score", team_1_score)
-            StateManager.Set(f"score.{self.scoreboard_number}.team.2.score", team_2_score)
+        # The flag has to cover the SaveBlock's *exit* as well as its body:
+        # a held write only notifies when the block is released, so that is
+        # when the board's _SyncScoreDisplays runs (see the writingScore
+        # property). Cleared before the signal below, which is the board's cue
+        # to update the spinboxes for the ordinary, non-held case.
+        self._writingScore = True
+        try:
+            with StateManager.SaveBlock():
+                StateManager.Set(f"score.{self.scoreboard_number}.team.1.score", team_1_score)
+                StateManager.Set(f"score.{self.scoreboard_number}.team.2.score", team_2_score)
+        finally:
+            self._writingScore = False
         self.signals.stageResultsUpdate.emit(team_1_score, team_2_score)
 
     @assert_gui_thread
