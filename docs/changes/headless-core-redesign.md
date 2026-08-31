@@ -200,7 +200,7 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
   - `set_display_option`（legacy）は Actions の戻り値をそのまま反映して
     `"ERROR: unknown display option ..."` / `"OK"` を返す。判定の正本は schema 一箇所
 
-- **既知の残リスク・非効率（Step 4 で回収）**:
+- **既知の残リスク・非効率（Step 4a で回収済み。以下は当時の記録）**:
   - **スコアの書き手はまだ 2 系統**。Actions（`AdjustScore` / `ResetScore`）と、
     スピンボックス主導経路（セット読込 / `ClearScore` / `SwapTeams` / ステージ集計 →
     `AutonaIndividualGameTracker.UpdateScore` ・ `StageResultsChanged`）。
@@ -225,6 +225,9 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
     `SaveState()` を呼ぶという **StateManager 側のセマンティクス**にあるため。
     Step 4 で `SaveState` 側（空 `changedKeys` かつ `_commitPrefixes` 空なら diff を
     スキップ）として一括で回収する
+    → **Step 4a で実施済み**。スコアの 2 系統も、スピンボックス主導側が
+    `src/core/GameTrackerService.py` に移って **両方 core 内**になった
+    （呼び出し口が 2 つ残っている状態。完全一本化は Step 4b/5）
 - 検証: フルスイート 445 passed / 19 skipped（Step 3 前 417 + 新規 28）。
   `tests/test_actions.py` 新設（QApplication なしで書き込み内容・held/即時の別・
   1 操作 = 1 サイクル・スレッド安全を pin）。ウィジェット側のエコーループ検査は
@@ -232,17 +235,92 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
   `display_options` は revision +1）。`test_webserver_routes` の台帳・
   `test_objectname_keypath_contract` は不変で pass
 
-### Step 4: (b) データロード系の抽出
+### Step 4a: (b) データロード系の抽出（統計・ステージ）+ 空 diff の回収 ✅ 完了（2026-08-31）
 
-- `AutonaStatsUtil` を core のドメインサービス化（Qt 依存はシグナル定義のみ・全書き込みが
-  (b) 型・テスト済みで最有力候補）
+- **`SaveState` の空 `changedKeys` 全量 diff を回収**（Step 3 の既知の非効率）。
+  commit 分をマージした後で `changedKeys` が空なら、diff・delta 配信・保存・
+  export スレッド join をすべてスキップし、held 通知だけ出す。
+  **単なる最適化ではなかった**: export スレッドが `lastSavedState` に
+  `timestamp` / `revision` を書き込むため、フィルタなし diff は毎回この 2 キーの
+  `dictionary_item_removed` を拾い、**delta 配信 + revision +1 + program_state.json
+  再書き込み**を起こしていた（実測で確認）。held のみの `SaveBlock` 解放
+  （トラッカー ON の `+1` / `SwapTeams` / ステージ操作 / `ResetScore` /
+  `StationSetsLoaded`）と、pending の無いボードへの `CommitHeld` が該当。
+  副作用として**フルスイートが 63 秒 → 47 秒**になった
+  - 到達経路の棚卸し（全 5 箇所）: `ReleaseSaving` / `_trackChangedKey` /
+    `CommitHeld` / `Initialize` / `LoadState` の例外分岐。**全量 diff に依存して
+    delta を出していた正当な経路は無い**。`Initialize` と `LoadState` 例外分岐は
+    どちらも `state` も `lastSavedState` も空の時点でしか走らない（`LoadState` の
+    呼び出し元は `Initialize` のみ）ので、従来から diff は空だった
+- **`AutonaStatsUtil` → `src/core/StatsService.py`**。判断と書き込み（取得の可否・
+  必要な id・アップセット計算・公開する各サブツリーの形）はすべて core。Qt 側に
+  残したのは**トランスポートだけ**: 取得トリガー 6 本（Flask スレッド → GUI スレッドの
+  ホップ）と結果 3 本（start.gg ワーカー → GUI スレッド）、および
+  `AutonaTournamentDataProvider`（Worker / QThreadPool は本ステップの対象外）。
+  シグナルの in/out 分類は `AutonaStatsUtil` の docstring が正本
+  - `playersPerTeam` は callable で注入する。統計はすべて 1v1 限定の指標だが、
+    人数の正本はまだ Qt 側（`team1playerWidgets`）。state から
+    `len(score.{n}.team.1.player)` を読む形にするのは選手サブツリー移行（Step 5）と一緒
+- **`AutonaIndividualGameTracker` → `src/core/GameTrackerService.py`**。Step 3 が
+  スコアに対して行った反転をステージ行にも適用した: **state が記録・ボタンは表示**
+  （従来は `stageTeam1Check_{i}.isChecked()` が正本で state はミラー）。
+  ウィジェットに残るのは行の生成・ステージコンボ・`stageResultsUpdate` シグナル、
+  そして「クリック → サービス呼び出し 1 回 → state からボタンを再描画」の 3 手順のみ。
+  `QAbstractButton.setChecked()` は `toggled` しか出さない（`clicked` は出ない）ので
+  再描画がエコーループにならない
+  - `writingScore` ガード・`StateManager.lock` RMW・`_SyncScoreDisplays` との
+    連携の語義は不変（フラグの所有者がサービスに移り、ウィジェットは property で委譲）
+  - 挙動差分（記録）: ステージボタン 1 クリックの held 通知が **6 回 → 4 回**に減った
+    （フラグ 3 キーが個別 Set から 1 `SaveBlock` になったため。公開内容は同じ）。
+    残る 4 回のうち 2 回は `AutonaScoreboardWidget.StageResultsToScore` が
+    `PublishStageResults` の書いた 2 キーを同値で再 Set していたもので、**検収レビュー
+    （S1）で削除し 2 回になった**。実測値: 修正前 4 / 修正後 2（新規 pin
+    `test_a_stage_click_is_exactly_two_save_cycles`）、移行前 6 は旧コードの
+    Set 回数（フラグ 3 + 集計 SaveBlock 1 + 再 Set 2）による
+  - ステージコンボの `stages.{i}` 上書き時、結果フラグの復元元がボタンから state に
+    変わった（両者一致が不変条件なので値は同じ）
+  - 挙動差分（記録）: **pending の無い「反映」が完全な no-op になった**。従来は
+    空 `changedKeys` の `SaveState` が全量 diff を走らせ、`lastSavedState` にだけ
+    ある `timestamp` / `revision` の削除 delta を配信 + `program_state.json` を
+    再書き込みしていた（= 中身が変わらないまま OBS/Web UI へ更新が飛ぶ）。
+    R-Sync-11 に照らせば旧挙動の方が違反（保留分が無いのに配信していた）だが、
+    **副作用として「反映」を OBS 側の強制リフレッシュ手段に使えていた**。
+    これは使えなくなった。強制再出力が要る場面が出たら専用の操作を用意する
+- **スコープから外した項目**（Step 4b = 次 PR）: セット読込の正規化
+  （`ChangeSetData` / `NewSetSelected` / `SetData` / `UpdateData`）と
+  TournamentInfo のヘッドレス化。これらは選手サブツリー（`SwapWith` / `SetData`）と
+  `AutonaLocaleHelper` に依存し、1 PR の粒度を超える
+- 検証: フルスイート **503 passed / 19 skipped**（Step 4a 前 453 + 新規 49 +
+  検収レビューの pin 1）。**既存テストのアサーションは 1 つも書き換えていない** —
+  トラッカー ON の回帰群（`test_scoreboard_operations.py`）・エコーループ検査・
+  held/commit 系・`test_webserver_routes` の台帳・`test_objectname_keypath_contract`
+  はすべて不変で pass（S1 の再 Set 削除後も同じ）。
+  新規: `tests/test_stats_service.py`（21）/ `tests/test_game_tracker_service.py`（24）は
+  QApplication なしで動く = 移行で得たもの。`tests/test_state_manager_held.py` に
+  空 diff の pin を 4 本追加（DeepDiff の呼び出し回数と `include_paths` を spy で確認）
+  - 検収レビューでの追加・修正: `test_a_stage_click_is_exactly_two_save_cycles`
+    （S4 の pin）を追加。`test_game_tracker_service.py` の分離 fixture が
+    `heldPrefixes` / `heldKeys` も退避・復元するようにし（N8）、
+    `test_state_manager_held.py` の `include_paths` 検査を set 比較へ（N9。
+    `SaveState` が `set(changedKeys)` で組むため list 比較は順序依存）
+- 未実施（次 PR 以降で回収）: start.gg 実データでのセット読込（手動チェックリスト
+  「トーナメントデータ」節）と `STARTUP phase=` ログでの計測。Step 4a は起動経路を
+  変えていないため後者は Step 4b とまとめて測る
+
+### Step 4b: セット読込の正規化と TournamentInfo のヘッドレス化
+
 - `ChangeSetData`（140 行超の正規化ロジック）/ `NewSetSelected` / `SetData` /
   `UpdateData`（TournamentInfo）を core サービスへ抽出し、Actions から呼ぶ。
   ウィジェットは通知を受けて表示するだけにする
 - これにより起動残候補「TournamentInfo のヘッドレスサービス抽出」
   （startup-architecture-redesign.md §3）が実行可能になる → 実施して eager パネルを解消
-- `AutonaIndividualGameTracker` のステージトラッキングロジック（29 Set のうちドメイン部分）を
-  core へ。UI トグル 16 箇所は Step 6 扱い
+- `AutonaIndividualGameTracker` の UI トグル 16 箇所は Step 6 扱い（Step 4a でロジックは
+  core に出たが、行の生成と表示は Qt 側に残っている）
+- **注意（不変条件）**: セット読込で `stagesWon` を `score.{n}.stages` へ流し込む際は、
+  「state の `stages` の行数 == ウィジェットの `stage_widget_list` の長さ」を
+  `GameTrackerService.SetStageCount()` だけが保証している点に注意する
+  （`StageCount()` の docstring 参照）。行を直接足す経路を作ると、描画されない行や
+  クリック位置のズレが出る
 - 検証: start.gg 実データでのセット読込（手動チェックリスト「トーナメントデータ」節）+
   統計系テスト + `STARTUP phase=` ログで core-shown 短縮を計測
 
@@ -260,7 +338,9 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
 
 ### ステップ間の依存
 
-Step 0 → 1 → 2 → 3 は直列。Step 4 は Step 3 完了後に (b) 対象ごとに並行可。
+Step 0 → 1 → 2 → 3 は直列。Step 4 は Step 3 完了後に (b) 対象ごとに並行可
+（実際には 4a = 統計・ステージ・空 diff / 4b = セット読込・TournamentInfo に分割した。
+4b は選手サブツリーに触るため 4a と同一 PR に収まらない）。
 Step 5 は Step 2（カタログの器）と Step 3（Actions 基盤）の完了が前提。
 **移行専念で連続実施する**（2026-08-28 PdM 決定）: 新旧経路の併存期間とエコーループ抑止の
 運用負荷を最小化するため、移行完了まで機能開発を挟まない。独立リリース可能な粒度

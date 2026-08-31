@@ -1218,13 +1218,28 @@ class AutonaScoreboardWidget(QWidget):
         inner.setSpacing(UI.SPACE_XS)
 
     def StageResultsToScore(self, team_1_score, team_2_score):
+        """Show the score the tracker just summed from its stage rows.
+
+        Display only, since the review of headless core Step 4a. Both keys
+        are already written -- GameTrackerService.PublishStageResults() does
+        it in one save cycle before this signal is emitted -- so re-Setting
+        them here bought nothing and cost two more save cycles per click,
+        outside the writingScore guard at that (six per click before Step 4a,
+        four after, two now; pinned by
+        test_a_stage_click_is_exactly_two_save_cycles).
+
+        The spinboxes are still set here rather than left to
+        _SyncScoreDisplays. Every board built from this class holds its
+        subtree (see HoldSubtree in __init__), so today that handler does run
+        first and this is a no-op refresh -- but it is the one path that does
+        not depend on the notification arriving, and it is what the tracker's
+        signal has always meant.
+        """
         with QSignalBlocker(self.scoreDisplay1):
             self.scoreDisplay1.setValue(team_1_score)
-            StateManager.Set(f"score.{self.scoreboardNumber}.team.1.score", team_1_score)
 
         with QSignalBlocker(self.scoreDisplay2):
             self.scoreDisplay2.setValue(team_2_score)
-            StateManager.Set(f"score.{self.scoreboardNumber}.team.2.score", team_2_score)
 
     def closeEvent(self, event):
         # Both timers stay None until NewSetSelected() creates them (BUG-5:

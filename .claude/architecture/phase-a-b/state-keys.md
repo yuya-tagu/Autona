@@ -36,7 +36,7 @@ score                                D   AutonaScoreboardManager.__init__
 │   │       ├── teamName             W R AutonaScoreboardWidget(QLineEdit) / AutonaWebServerActions
 │   │       ├── {QLineEdit.objectName}  W  AutonaScoreboardWidget(動的: team列のQLineEdit)
 │   │       ├── {QCheckBox.objectName}  W  AutonaScoreboardWidget(動的: team列のQCheckBox, e.g. losers)
-│   │       ├── score                W R AutonaScoreboardWidget / AutonaIndividualGameTracker
+│   │       ├── score                W R core/Actions / core/GameTrackerService（+ 未移行のスピンボックス経路: セット読込 / ClearScore / SwapTeams）
 │   │       ├── color                W   AutonaScoreboardWidget.SetColor / ChangeSetData
 │   │       ├── logo                 W   AutonaScoreboardWidget.ExportTeamLogo
 │   │       └── player
@@ -91,28 +91,27 @@ score                                D   AutonaScoreboardManager.__init__
 │   │   ├── gentlemans               (bool)
 │   │   ├── canUndo                  (bool)
 │   │   └── canRedo                  (bool)
-│   ├── stages                       W R AutonaIndividualGameTracker
+│   ├── stages                       W R core/GameTrackerService
 │   │   └── {I}                      W   (ステージデータ dict)
-│   │       ├── t1_win               W   AutonaIndividualGameTracker
-│   │       ├── t2_win               W   AutonaIndividualGameTracker
-│   │       └── tie                  W   AutonaIndividualGameTracker
+│   │       ├── t1_win               W   core/GameTrackerService
+│   │       ├── t2_win               W   core/GameTrackerService
+│   │       └── tie                  W   core/GameTrackerService
 │   ├── last_sets
-│   │   ├── 1                        W R AutonaScoreboardWidget.__init__ / AutonaStatsUtil / AutonaStatsWidget
-│   │   │   └── {I}                  W   AutonaStatsUtil (set data dict)
-│   │   └── 2                        W R AutonaScoreboardWidget.__init__ / AutonaStatsUtil / AutonaStatsWidget
-│   │       └── {I}                  W   AutonaStatsUtil
+│   │   ├── 1                        W R core/StateSchema.SeedBoard / core/StatsService / AutonaStatsWidget
+│   │   │   └── {I}                  W   core/StatsService (set data dict)
+│   │   └── 2                        W R core/StateSchema.SeedBoard / core/StatsService / AutonaStatsWidget
+│   │       └── {I}                  W   core/StatsService
 │   ├── history_sets
-│   │   ├── 1                        W R AutonaScoreboardWidget.__init__ / AutonaStatsUtil / AutonaStatsWidget
-│   │   │   └── {I}                  W   AutonaStatsUtil
-│   │   └── 2                        W R AutonaScoreboardWidget.__init__ / AutonaStatsUtil / AutonaStatsWidget
-│   │       └── {I}                  W   AutonaStatsUtil
-│   ├── recent_sets                  W R AutonaStatsUtil
+│   │   ├── 1                        W R core/StateSchema.SeedBoard / core/StatsService / AutonaStatsWidget
+│   │   │   └── {I}                  W   core/StatsService
+│   │   └── 2                        W R core/StateSchema.SeedBoard / core/StatsService / AutonaStatsWidget
+│   │       └── {I}                  W   core/StatsService
+│   ├── recent_sets                  W R core/StatsService
 │   │   ├── sets                     R   AutonaStatsWidget
-│   │   └── request_time             R   AutonaStatsUtil
-│   └── upset_factor                 W R AutonaStatsUtil / AutonaStatsWidget
+│   │   └── request_time             R   core/StatsService
+│   └── upset_factor                 W R core/StatsService / AutonaStatsWidget
 ├── ruleset                          W R AutonaScoreboardStageWidget / AutonaScoreboardWidget / AutonaWebServerActions
-├── bracket_type                     W R AutonaScoreboardWidget / AutonaStatsUtil
-└── upset_factor                     W   AutonaStatsUtil (スコアボード番号なし — 要確認)
+└── bracket_type                     W R AutonaScoreboardWidget / core/StatsService
 ```
 
 ### `game`
