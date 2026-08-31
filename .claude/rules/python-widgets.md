@@ -44,9 +44,12 @@ WebEngine プレビュー等で重いパネルは **遅延構築**にする（�
 `(self._CreateXxxPanel, 'icon.svg', ナビラベル, 'キー')` を `_navSections` に
 追加する。stack にはプレースホルダが入り、初回表示時に `_EnsurePanelAt` が
 差し替える（nav index == stack index は維持）。パネル未構築でも動く必要がある
-処理（state のシード・グローバルシグナル接続）は `__init__` に置かず、
-`Window._SeedPanelState()` や Window 側の接続に寄せる。外部から構築を強制
-したい場合は `EnsureXxxPanel()` アクセサを足す。
+処理は `__init__` に置かない。**state のシード実体は `src/core/StateSchema.py`
+（`SeedPanelState()` / `SeedBoard()`）に置く**（Qt 非依存なので headless でも同じ
+state になる）。`Window._SeedPanelState()` はその起動時の呼び出し口で、SaveBlock で
+1 サイクルに束ねる役目 + Qt 依存で core に置けない `SeedColorState()` のみを持つ。
+グローバルシグナル接続は Window 側に寄せる。外部から構築を強制したい場合は
+`EnsureXxxPanel()` アクセサを足す。
 
 ## STATE_VERSION
 

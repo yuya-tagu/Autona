@@ -7,6 +7,7 @@ from .AutonaScoreboardWidget import AutonaScoreboardWidget
 from .AutonaCrewBattleWidget import AutonaCrewBattleWidget
 from .Helpers.AutonaQtHelper import gui_thread_sync, in_gui_thread
 from .StateManager import StateManager
+from .core import StateSchema as schema
 from . import ui_constants as UI
 
 
@@ -55,23 +56,6 @@ class AutonaScoreboardManager(QDockWidget):
         # registered in `scoreboards` until construction finishes, so this
         # guards against a re-entrant build of the same board.
         self._ensuring: set[int] = set()
-
-    def _SeedBoardState(self, number: int):
-        # Boards seed their own score.{N} subtree from their __init__; a board
-        # that is not built yet would leave the key missing entirely and the
-        # Web UI / OBS overlays would read "no such board" instead of an empty
-        # one. Seed the same skeleton the board writes so a later build only
-        # ever rewrites keys that already exist.
-        StateManager.Set(f"score.{number}", {})
-        if number == 3:
-            # AutonaCrewBattleWidget seeds nothing beyond the subtree root
-            # (the rest is written by its _writeInitialState()).
-            return
-        StateManager.Set(f"score.{number}.last_sets.1", {})
-        StateManager.Set(f"score.{number}.last_sets.2", {})
-        StateManager.Set(f"score.{number}.history_sets.1", {})
-        StateManager.Set(f"score.{number}.history_sets.2", {})
-        StateManager.Set(f"score.{number}.station_queue", {})
 
     def EnsureScoreboard(self, number: int):
         # Build board `number` once and return it. Idempotent and GUI-thread
@@ -134,11 +118,14 @@ class AutonaScoreboardManager(QDockWidget):
         # score.{N} subtree is seeded here so nothing reads a missing key in
         # the meantime. Idempotent: already-built boards are left alone and
         # re-seeding an unbuilt one rewrites the same empty skeleton.
+        # StateSchema.SeedBoard is the same function the board's own __init__
+        # calls, so the placeholder and the built board can no longer drift
+        # apart (headless core Step 2).
         number = self.FORMAT_BOARDS.get(fmt, 1)
         with StateManager.SaveBlock():
             for other in self.BOARD_NUMBERS:
                 if other != number and other not in self.scoreboards:
-                    self._SeedBoardState(other)
+                    schema.SeedBoard(other)
             self.EnsureScoreboard(number)
         return True
 

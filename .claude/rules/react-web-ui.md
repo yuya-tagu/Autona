@@ -20,7 +20,10 @@ paths:
 
 - 新しい state slice を追加したら `store.ts` にも登録する
 - フィールド表示トグルは Redux ではなく `display_options.show_*`（同期 state）を正とする
-  （Design.md §2.2 R-React-10。定義は `ScoreboardPage/displayOptions.js`）
+  （Design.md §2.2 R-React-10）。**キーとデフォルトの定義の正本は `src/core/StateSchema.py`
+  の `DISPLAY_OPTIONS`**。`ScoreboardPage/displayOptions.js` は JS から Python を import
+  できないための写しで、`tests/test_state_schema.py` が両者の一致を検査する。キーを増減する
+  ときは StateSchema 側を先に直す
 
 ## ビルド
 

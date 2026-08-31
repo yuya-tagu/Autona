@@ -8,6 +8,7 @@ from loguru import logger
 
 from .AutonaColorButton import AutonaColorButton
 from .StateManager import StateManager
+from .core import StateSchema as schema
 from .StateManagerBridge import StateManagerBridge
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from . import ui_constants as UI
@@ -65,7 +66,11 @@ class AutonaCrewBattleWidget(QWidget):
         # Compat flag read by WebServerActions.get_swap / SwapTeams logic.
         self.teamsSwapped = False
 
-        StateManager.Set(f"score.{self.scoreboardNumber}", {})
+        # Board 3's skeleton is just the subtree root; the rest is written by
+        # _writeInitialState() below. Seeded through the shared schema helper
+        # so this and AutonaScoreboardManager's placeholder stay identical
+        # (headless core Step 2).
+        schema.SeedBoard(self.scoreboardNumber)
 
         self.signals = AutonaCrewBattleWidgetSignals()
         self.signals.CommandScoreChange.connect(self.CommandScoreChange)

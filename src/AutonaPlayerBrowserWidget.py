@@ -8,17 +8,18 @@ from qtpy.QtWidgets import *
 from loguru import logger
 
 from .StateManager import StateManager
+from .core import StateSchema as schema
 from .AutonaPlayerDB import AutonaPlayerDB
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
 from . import ui_constants as UI
 
-# StateManager base path the editor dialog writes to while it is open.
-# It is unset again when the dialog closes (and defensively on panel init,
-# in case a crash left a stale subtree in program_state.json).
-_EDITOR_PATH_BASE = "player_editor"
-_EDITOR_PATH = f"{_EDITOR_PATH_BASE}.1"
+# StateManager base path the editor dialog writes to while it is open
+# (StateSchema.PLAYER_EDITOR_ROOT). It is unset again when the dialog closes,
+# and the launch seed purges it in case a crash left a stale subtree in
+# program_state.json.
+_EDITOR_PATH = f"{schema.PLAYER_EDITOR_ROOT}.1"
 
 # Seed value GetEntrantsWorker assigns to unseeded entrants.
 _UNSEEDED = 999999
@@ -76,7 +77,7 @@ class _PlayerEditorDialog(QDialog):
     def done(self, result):
         # The editor mirrors every field into player_editor.* — scrub the
         # temporary subtree so it doesn't linger in program_state.json.
-        StateManager.Unset(_EDITOR_PATH_BASE)
+        StateManager.Unset(schema.PLAYER_EDITOR_ROOT)
         # _deleted flag stops the widget's global-signal handlers
         # (db_updated / onLoad) from touching a dying C++ object.
         self.editor.deleteLater()
