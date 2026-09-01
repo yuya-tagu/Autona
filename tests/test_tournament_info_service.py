@@ -242,6 +242,33 @@ def test_reapplying_the_same_payload_publishes_nothing(service):
 
 # ── 表示大会名 ────────────────────────────────────────────────────────────
 
+def test_typing_a_display_name_writes_it(service):
+    # The SCORE panel's 表示大会名 field (headless core Step 5). It used to
+    # Set the key itself, which is why this operation did not exist.
+    assert service.SetDisplayName("SPECIAL EDITION") is True
+    assert _get("displayTournamentName") == "SPECIAL EDITION"
+    assert service.SetDisplayName("SPECIAL EDITION") is False
+    assert service.SetDisplayName(None) is True
+    assert _get("displayTournamentName") == ""
+
+
+def test_a_typed_display_name_stops_following_the_tournament_name(service):
+    """The reason SetDisplayName must not touch the follow ledger.
+
+    `_lastTournamentName` means "the tournament name the display name last
+    followed". Updating it here would make the typed value look like it was
+    still following, and the next rename would silently overwrite what the
+    operator typed.
+    """
+    SM.Set(f"{PREFIX}.tournamentName", "Autona Cup")
+    service.Seed()
+
+    service.SetDisplayName("SPECIAL EDITION")
+    service.FollowDisplayName("Autona Cup 2")
+
+    assert _get("displayTournamentName") == "SPECIAL EDITION"
+
+
 def test_the_display_name_follows_a_manual_rename(service):
     SM.Set(f"{PREFIX}.tournamentName", "Autona Cup")
     service.Seed()

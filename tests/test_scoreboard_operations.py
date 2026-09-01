@@ -22,7 +22,8 @@ from unittest.mock import patch
 import pytest
 
 from qtpy.QtCore import QCoreApplication, QEvent
-from qtpy.QtWidgets import QCheckBox, QLineEdit, QPushButton, QWidget
+from qtpy.QtWidgets import (
+    QCheckBox, QComboBox, QLineEdit, QPushButton, QWidget)
 from shiboken6 import Shiboken
 
 from src.SettingsManager import SettingsManager
@@ -702,6 +703,264 @@ def test_an_unknown_display_option_is_still_rejected(autonaApp):
 
     assert result.startswith("ERROR")
     assert autonaApp.get("display_options.show_nothing") is None
+
+
+# ── the panel's own fields (headless core Step 5) ────────────────────────
+#
+# The team card's two inputs and the match bar's three combos used to be
+# bound by findChildren loops that wrote score.{N}.team.{T}.{objectName} /
+# score.{N}.{objectName}. They call AutonaActions now, against key names that
+# live in StateSchema. What that can break is what these check: the operator's
+# edit still has to reach the state, the widgets' *other* handlers have to
+# survive (the team crest, the " [L]" suffix), and neither may cost an extra
+# save cycle.
+
+def test_typing_a_team_name_reaches_the_state(autonaApp):
+    board = autonaApp.board(2)  # the team board, where the names are visible
+    edit = _teamName(board, 1)
+
+    edit.setText("Alpha")
+    edit.editingFinished.emit()
+    autonaApp.settle()
+
+    assert autonaApp.get("score.2.team.1.teamName") == "Alpha"
+
+
+def test_a_team_name_edit_is_exactly_one_save_cycle(autonaApp):
+    """Echo-loop check, and the crest handler has to stay free.
+
+    editingFinished runs two handlers: the name write and the team-crest
+    lookup. The crest is a no-op when no ./user_data/team_logo file matches
+    (SetLoadService._SetIfChanged), so the pair is one cycle -- a second one
+    would mean either handler wrote something it did not have to.
+    """
+    board = autonaApp.board(2)
+    autonaApp.settle()
+
+    seen, unsubscribe = _heldUpdateSpy("score.2")
+    try:
+        edit = _teamName(board, 1)
+        edit.setText("Alpha")
+        edit.editingFinished.emit()
+        autonaApp.settle()
+    finally:
+        unsubscribe()
+
+    assert autonaApp.get("score.2.team.1.teamName") == "Alpha"
+    assert seen == ["score.2"], (
+        f"a team name edit produced {len(seen)} save cycles instead of 1")
+
+
+def test_leaving_a_team_name_unchanged_does_not_light_the_apply_button(
+        autonaApp):
+    """Behaviour change, pinned deliberately (headless core Step 5).
+
+    editingFinished fires on every focus-out, typed into or not, and the old
+    handler wrote unconditionally -- so tabbing through the field marked the
+    board dirty. The write is guarded now, the same way the set-load path has
+    been since Step 4b.
+    """
+    from src.StateManager import StateManager
+
+    board = autonaApp.board(2)
+    edit = _teamName(board, 1)
+    edit.setText("Alpha")
+    edit.editingFinished.emit()
+    StateManager.CommitHeld("score.2")
+    autonaApp.settle()
+    assert StateManager.HasPendingChanges("score.2") is False
+
+    edit.editingFinished.emit()
+    autonaApp.settle()
+
+    assert StateManager.HasPendingChanges("score.2") is False
+
+
+def test_the_losers_checkbox_writes_the_flag_and_the_player_names(autonaApp):
+    """The checkbox's two jobs, only one of which moved to core.
+
+    `toggled` writes team.{t}.losers (AutonaActions now) *and* runs every
+    player widget's SetLosers, which re-exports mergedName with the " [L]"
+    the thumbnail generator renders. The second connection is made per player
+    in _setPlayersPerTeamImpl and must keep firing after the first one was
+    rerouted -- the set-load path needs _ApplyLosersToPlayers precisely
+    because it does not have this signal.
+    """
+    board = autonaApp.board(1)
+    _setPlayerName(board, 1, "AAA")
+    autonaApp.settle()
+
+    _losers(board, 1).setChecked(True)
+    autonaApp.settle()
+
+    assert autonaApp.get("score.1.team.1.losers") is True
+    assert autonaApp.get("score.1.team.1.player.1.mergedName") == "AAA [L]"
+    assert board.team1playerWidgets[0].losers is True
+
+    _losers(board, 1).setChecked(False)
+    autonaApp.settle()
+
+    assert autonaApp.get("score.1.team.1.losers") is False
+    assert autonaApp.get("score.1.team.1.player.1.mergedName") == "AAA"
+
+
+def test_typing_in_the_match_bar_reaches_the_state(autonaApp):
+    board = autonaApp.board(1)
+
+    for combo, value in ((board.phaseCombo, "Bracket"),
+                         (board.poolCombo, "Pool A"),
+                         (board.matchCombo, "Winners Final")):
+        combo.setCurrentText(value)
+        combo.lineEdit().editingFinished.emit()
+    autonaApp.settle()
+
+    assert autonaApp.get("score.1.phase") == "Bracket"
+    assert autonaApp.get("score.1.pool") == "Pool A"
+    assert autonaApp.get("score.1.match") == "Winners Final"
+
+
+def test_a_match_bar_edit_is_exactly_one_save_cycle(autonaApp):
+    """Two signals, one write.
+
+    Both currentIndexChanged and the line edit's editingFinished are wired to
+    the same operation (either can be what changed the text), so picking a
+    listed entry used to write the same value twice.
+    """
+    board = autonaApp.board(1)
+    autonaApp.settle()
+
+    seen, unsubscribe = _heldUpdateSpy("score.1")
+    try:
+        board.matchCombo.setCurrentText("Winners Final")
+        board.matchCombo.lineEdit().editingFinished.emit()
+        autonaApp.settle()
+    finally:
+        unsubscribe()
+
+    assert autonaApp.get("score.1.match") == "Winners Final"
+    assert seen == ["score.1"], (
+        f"one match-bar edit produced {len(seen)} save cycles instead of 1")
+
+
+def test_clearing_the_score_does_not_clear_the_match_bar_known_gap(autonaApp):
+    """A pre-existing gap, found while rewiring the combos and left as it is.
+
+    ClearScore's first loop is `self.scoreColumn.findChildren(QComboBox)`,
+    and the three combos are re-homed out of `scoreColumn` into the score bar
+    while the board is built -- so on boards 1 and 2 that loop has matched
+    nothing for as long as this layout has existed. (WebServerActions'
+    `_reset_best_of` carries a comment about the same reparenting biting the
+    best_of spinbox, where it raised an AttributeError instead of quietly
+    doing nothing.) ResetAllInputs' own docstring still claims it clears
+    "phase/round", so the intent was there.
+
+    Pinned rather than fixed: ClearScore is also what NewSetSelected runs
+    before loading a new set, and SetLoadService.ApplyMatchInfo deliberately
+    leaves the round name alone for a payload that carries none -- so
+    clearing here would blank the round mid-stream for exactly those
+    payloads. That is a product decision, not a rewiring one.
+    """
+    board = autonaApp.board(1)
+    board.ChangeSetData(dict(_SET))
+    autonaApp.settle()
+
+    board.ClearScore()
+    autonaApp.settle()
+
+    assert board.scoreColumn.findChildren(QComboBox) == [], (
+        "the match combos are back under scoreColumn -- ClearScore's loop is "
+        "live again, which is a behaviour change to decide on deliberately")
+    assert autonaApp.get("score.1.match") == "Winners Final"
+    assert autonaApp.get("score.1.phase") == "Bracket"
+    assert autonaApp.get("score.1.pool") == "Pool A"
+
+
+def test_clearing_the_score_still_zeroes_the_score_and_the_losers_flags(
+        autonaApp):
+    # The half of ClearScore that does work, driven through the rewired
+    # widgets: the spinboxes still reach GameTrackerService.UpdateScore and
+    # the checkboxes still reach AutonaActions.SetTeamLosers.
+    board = autonaApp.board(1)
+    board.ChangeSetData(dict(_SET))
+    autonaApp.settle()
+    assert (_score(autonaApp, 1), _score(autonaApp, 2)) == (2, 1)
+    assert autonaApp.get("score.1.team.2.losers") is True
+
+    board.ClearScore()
+    autonaApp.settle()
+
+    assert (_score(autonaApp, 1), _score(autonaApp, 2)) == (0, 0)
+    assert autonaApp.get("score.1.team.2.losers") is False
+
+
+def test_a_best_of_change_is_exactly_one_save_cycle(autonaApp):
+    """The six derived keys and the stage rows are one operation.
+
+    AutonaActions.SetBestOf opens its own block for the six keys and
+    _onBestOfChanged wraps that plus GameTrackerService.SetStageCount in
+    another, so the whole change is a single export. Tracker off here, which
+    is the shipped default; with it on the row rebuild joins the same cycle.
+    """
+    board = autonaApp.board(1)
+    autonaApp.settle()
+
+    seen, unsubscribe = _heldUpdateSpy("score.1")
+    try:
+        board.bestOfSpin.setValue(5)
+        autonaApp.settle()
+    finally:
+        unsubscribe()
+
+    assert autonaApp.get("score.1.best_of") == 5
+    assert autonaApp.get("score.1.first_to_short_text") == "FT3"
+    assert seen == ["score.1"], (
+        f"a best-of change produced {len(seen)} save cycles instead of 1")
+
+
+def test_the_display_tournament_name_field_publishes_once(autonaApp):
+    """Not held (it is tournamentInfo.*), so the delta is directly visible."""
+    from src.StateManager import StateManager
+
+    board = autonaApp.board(1)
+    autonaApp.settle()
+    stored = StateManager.Get("tournamentInfo.displayTournamentName")
+    try:
+        revision = StateManager.revision
+        board.displayTournamentNameEdit.setText("SPECIAL EDITION")
+        board.displayTournamentNameEdit.editingFinished.emit()
+        autonaApp.settle()
+
+        assert autonaApp.get(
+            "tournamentInfo.displayTournamentName") == "SPECIAL EDITION"
+        assert StateManager.revision == revision + 1, (
+            "the display-name field published more than once: the board wrote "
+            "the state change back after receiving it")
+    finally:
+        StateManager.Set(
+            "tournamentInfo.displayTournamentName", stored or "")
+
+
+def test_building_a_board_republishes_every_display_option(autonaApp):
+    """The loop the board used to carry its own copy of.
+
+    An operator's toggles persist in SettingsManager, so building a board is
+    what brings a program_state.json restored from an older session back in
+    line with them. The definition is StateSchema's now.
+    """
+    from src.core import StateSchema as schema
+    from src.StateManager import StateManager
+
+    stored = StateManager.Get("display_options")
+    try:
+        StateManager.Unset("display_options")
+        autonaApp.board(1)
+        autonaApp.settle()
+
+        assert set(StateManager.Get("display_options") or {}) == set(
+            schema.DISPLAY_OPTION_KEYS)
+    finally:
+        if stored is not None:
+            StateManager.Set("display_options", stored)
 
 
 # ── the individual game tracker, switched ON ─────────────────────────────

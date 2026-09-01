@@ -440,6 +440,85 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
   `test_objectname_keypath_contract.py` は役目を終え、schema カタログの契約テストに置換
 - 検証: ウィジェットごとに手動チェックリスト該当節 + 旧バージョンの保存データ読込テスト
 
+#### 5-1: AutonaScoreboardWidget ✅ 完了（2026-09-01）
+
+- **`AutonaScoreboardWidget` の `StateManager.Set` 直接呼び出しが 15 → 0**
+  （ソース上の箇所数。残るのは選手サブツリーの `Unset` 5 箇所で、第 2 弾で回収）。
+  移行した操作グループ:
+  | 旧 | 新 |
+  |----|----|
+  | team カラムの `findChildren(QLineEdit/QCheckBox)` + `objectName()` ループ | `_WireTeamColumn()` が `schema.TEAM_NAME_KEY` / `TEAM_LOSERS_KEY` で `findChild` し、`AutonaActions.SetTeamName` / `SetTeamLosers` に接続 |
+  | scoreColumn の `findChildren(QComboBox)` + `objectName()` ループ | `schema.SCORE_MATCH_FIELDS` でループし `AutonaActions.SetMatchField` |
+  | `_onBestOfChanged` の 6 キー直書き | `AutonaActions.SetBestOf`（1 `SaveBlock`）。ステージ行だけウィジェット側 |
+  | `SwapTeams` の `teamsSwapped` 直書き | `AutonaActions.SetTeamsSwapped`（ミラーの publish のみ） |
+  | `displayTournamentNameEdit` の直書き | `TournamentInfoService.SetDisplayName` |
+  | `__init__` の `display_options` 8 キー直書きループ | `StateSchema.PublishDisplayOptions()` |
+- **キーパス静的化（T-19 の第 1 弾）**: `SCORE_MATCH_FIELDS` / `SCORE_TEAM_INPUT_KEYS`
+  （`TEAM_NAME_KEY` / `TEAM_LOSERS_KEY`）を `StateSchema` に新設し、
+  `DYNAMIC_KEY_FAMILIES` から Scoreboard の 2 族を削除。**キー名は 1 文字も変えていない**
+  ので**マイグレーション層は不要**（`.ui` の objectName は `findChild` の引数として
+  引き続き使われ、schema の文字列と一致していなければならない）。
+  `test_objectname_keypath_contract.py` は「.ui の objectName 凍結」に加えて
+  **schema 名 ⊆ .ui objectName** と **`AutonaScoreboardWidget` に `objectName()` 呼び出しが
+  無いこと**（AST 検査）を pin する。既存の `EXPECTED` は不変
+- **ローカライズ文字列の注入**: `best_of_text` / `first_to_text` が Step 3/4b で
+  core に出せなかった唯一の理由（`AutonaLocaleHelper.matchNames` が Qt モジュール）は、
+  `AutonaLocaleHelper.FormatMatchText` を `bootstrap_core()` が `AutonaActions` へ
+  callable で渡す形で解消（`TournamentInfoService.formatEventDate` と同じ形）。
+  未注入時は shipped 英語既定（`Best of {0}` / `First to {0}`）にフォールバックするので
+  headless でも空キーにならない
+- **スコープアウト（判断が自明でない / 第 2 弾以降）**:
+  | 項目 | 理由 |
+  |------|------|
+  | `SwapTeams` のスコア・ステージ・選手コピー | 選手データの入れ替えが `AutonaScoreboardPlayerWidget.SwapWith`。スコアはスピンボックス駆動 → `GameTrackerService.UpdateScore` で、トラッカー ON 時は `SyncStagesToScore` ×2 と `SwapStageResults` が重なる既存挙動があり、触ると回帰リスクが高い。第 2 弾（選手サブツリー）でまとめる |
+  | `ClearScore` / `ResetAllInputs` | ウィジェットを駆動するだけで直接 `Set` しない。新しい配線を通って正しく動く（回帰テストあり） |
+  | `best_of` の state 先行への反転 | 反転すると `SetStageCount`（state 書き込み）が通知ハンドラ内に入り、再入 + 2 サイクルになる。スピンボックスを入口のまま残した |
+  | 選手サブツリーの `Unset` 5 箇所 | 第 2 弾 |
+  | `AutonaCrewBattleWidget:185` の `displayTournamentName` 直書き | 挙動は同値（`StateManager.Set` を直接呼ぶ旧経路のまま）。意図的な残置 — `AutonaScoreboardWidget` 側だけを今回移行対象にした。クルーボード（board 3）の移行は第 4 弾で `TournamentInfoService.SetDisplayName` に揃える |
+- 挙動差分（意図したもの）:
+  - **held 配下の「同値なら書かない」を team カラム・match バー・best_of にも適用**
+    （`AutonaActions._SetIfChanged`。Step 4b が `SetLoadService` に入れたのと同じ規則）。
+    入力欄にフォーカスを当てて何も打たずに外す／同じセットを読み直す／既に空の
+    ボードで `ClearScore` する、のいずれも **反映 ボタンを点灯させなくなった**。
+    旧 Qt 経路は `setText`/`setChecked` が無変化なら emit しないことで偶然
+    これを満たしていた箇所があるが、`editingFinished` は無条件に飛ぶので
+    無条件書き込みだったのは teamName だけではない — match バーの 3 combo も
+    `lineEdit().editingFinished` 経由で同じく無条件に飛んでいた。`_SetIfChanged`
+    が新たに効くようになったのはこの 4 フィールド（teamName / phase / pool /
+    match）
+  - **リスト項目を選んだ match バー編集が 2 回書き込みから 1 回になった**
+    （`currentIndexChanged` と `editingFinished` が同じ操作に繋がるため）
+  - `SetMatchField` は `SCORE_MATCH_FIELDS` 以外を拒否する。旧経路では
+    「combo の objectName が何であれ書く」だったので、そもそも不正な field という
+    ケースが存在しなかった
+- **調査で見つかった既存バグ（今回は修正せず pin のみ）**:
+  `AutonaScoreboardWidget.ClearScore` の combo ループは
+  `self.scoreColumn.findChildren(QComboBox)` だが、3 つの combo は構築時に
+  `scoreBar` へ re-home されるため **board 1/2 では 1 個もマッチしない**
+  （`WebServerActions._reset_best_of` が best_of スピンボックスについて同じ再親付けを
+  コメントしている。あちらは `AttributeError` で顕在化した）。つまり
+  `reset_match` / `clear_all` / `ResetAllInputs` はラウンド名・フェーズ・プールを
+  クリアしていない（`ResetAllInputs` の docstring はかつて「phase/round もクリアする」と
+  誤って主張していたが、検収指摘を受けて実態に修正済み）。**直すと `NewSetSelected` が
+  読込前に走らせる `ClearScore` もクリアするようになり、`round_name` を持たないペイロードで
+  配信中のラウンド名が消える**ため、プロダクト判断が要る（`.claude/known-smells.md` S-17 参照）。
+  `test_clearing_the_score_does_not_clear_the_match_bar_known_gap`
+  が現状を pin している
+- 検証: フルスイート **621 passed / 19 skipped**（Step 5-1 前 587 + 新規 34）。
+  **既存テストのアサーションは 1 つも書き換えていない**。新規:
+  `tests/test_actions.py` に 15（新操作の契約・held/即時・1 操作 1 サイクル・
+  注入フォーマッタとフォールバック）、`tests/test_state_schema.py` に 4
+  （カタログ整合・`DYNAMIC_KEY_FAMILIES` の縮退・`PublishDisplayOptions`）、
+  `tests/test_objectname_keypath_contract.py` に 2（静的カタログ契約）、
+  `tests/test_tournament_info_service.py` に 2（`SetDisplayName`）、
+  `tests/test_scoreboard_operations.py` に 11（実ウィジェットでのエコーループ検査:
+  team 名編集 = held 通知 1 回 / match バー編集 = 1 回 / best_of 変更 = 1 回 /
+  表示大会名 = revision +1、および losers チェックボックスの二次接続
+  （`SetLosers` → `mergedName` の `[L]`）が生きていること）
+- 未実施（ユーザー実機確認）: 手動チェックリストの「スコアボード」節
+  （ラウンド名/フェーズ/プールの入力、チーム名とチームロゴ、LOSERS、BEST OF、
+  表示大会名、反映ボタンの点灯タイミング）
+
 ### ステップ間の依存
 
 Step 0 → 1 → 2 → 3 は直列。Step 4 は Step 3 完了後に (b) 対象ごとに並行可

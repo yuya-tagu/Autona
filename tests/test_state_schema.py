@@ -172,6 +172,39 @@ def test_stream_asset_versions_pin_both_keys_and_paths():
     ]
 
 
+def test_the_scoreboard_field_names_stay_inside_the_catalog():
+    """The static names and the catalog must not drift apart.
+
+    SCORE_MATCH_FIELDS / SCORE_TEAM_INPUT_KEYS are what AutonaActions writes
+    and what AutonaScoreboardWidget finds its inputs by (headless core
+    Step 5); SCORE_BOARD_KEYS / SCORE_TEAM_KEYS are what KEY_CATALOG
+    enumerates. A name in one but not the other is either a key nothing
+    documents or a key nothing writes.
+    """
+    assert set(schema.SCORE_MATCH_FIELDS) <= set(schema.SCORE_BOARD_KEYS)
+    assert set(schema.SCORE_TEAM_INPUT_KEYS) <= set(schema.SCORE_TEAM_KEYS)
+    # Spelled out too: these are the strings an existing program_state.json is
+    # keyed by, so a "harmless" rename here is a data break.
+    assert schema.SCORE_MATCH_FIELDS == ("phase", "pool", "match")
+    assert schema.SCORE_TEAM_INPUT_KEYS == ("teamName", "losers")
+
+
+def test_the_scoreboard_families_left_the_dynamic_key_inventory():
+    """DYNAMIC_KEY_FAMILIES is the Step 5 checklist, so it has to shrink.
+
+    Nothing consumes it, which is exactly why it needs a test: an instalment
+    that converts a widget without striking its family off leaves the
+    remaining work overstated, and the next one understates it.
+    """
+    described = " ".join(
+        f"{family} {owner}" for family, owner in schema.DYNAMIC_KEY_FAMILIES)
+    assert "AutonaScoreboardWidget" not in described, (
+        "the SCORE panel's team card and match bar are static keys now")
+    # Still to come, and still listed.
+    assert "AutonaScoreboardPlayerWidget" in described
+    assert "AutonaTournamentInfoWidget" in described
+
+
 def test_display_options_match_the_web_ui_list():
     """The Web UI carries the fourth copy, and no build step ties them.
 
@@ -393,6 +426,45 @@ def test_seed_panel_state_keeps_stored_display_options(_blank_settings):
     assert SM.Get("display_options.show_real_name") is True
     # The keys that really were missing still got filled.
     assert SM.Get("display_options.show_sponsor") is True
+
+
+# ── PublishDisplayOptions ────────────────────────────────────────────────
+
+
+def test_publish_display_options_rewrites_every_key_from_settings():
+    """The board-build pass, as opposed to SeedPanelState's missing-keys one.
+
+    This is the loop AutonaScoreboardWidget.__init__ used to spell out over
+    its own copy of the option list (headless core Step 5). It rewrites all
+    eight, which is the point: SettingsManager is where the toggles persist,
+    so building a board is what brings a program_state.json restored from an
+    older session back in line with them.
+    """
+    previous = SettingsManager.settings
+    SettingsManager.settings = {"display_options": {"show_seed": False}}
+    try:
+        SM.Unset("display_options")
+        # A value a previous session left in the state, with nothing in
+        # settings backing it.
+        SM.Set("display_options.show_name", False)
+
+        schema.PublishDisplayOptions()
+
+        assert SM.Get("display_options.show_seed") is False   # from settings
+        assert SM.Get("display_options.show_name") is True    # back to default
+        assert set(SM.Get("display_options")) == set(
+            schema.DISPLAY_OPTION_KEYS)
+    finally:
+        SettingsManager.settings = previous
+
+
+def test_publish_display_options_does_not_write_settings(_blank_settings):
+    # One direction only. The toggle (AutonaActions.SetDisplayOption) writes
+    # both halves of the mirror; this republishes one of them, and writing
+    # back would turn a factory default into a persisted operator choice.
+    SM.Unset("display_options")
+    schema.PublishDisplayOptions()
+    assert SettingsManager.settings == {}
 
 
 def test_seed_panel_state_purges_retired_and_stale_keys(_blank_settings):

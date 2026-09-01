@@ -33,10 +33,17 @@ paths:
   (`SeedBoard` / `SeedPanelState`) はここが正本。ウィジェット側に同じ定義を置き直さない
 - `SeedBoard(n)` は「埋める」ではなく **サブツリーを skeleton に戻す**。生きているボードに
   対して呼ばない（未構築ボードのプレースホルダと、遅延構築時の再シードが用途）
-- `KEY_CATALOG` / `DYNAMIC_KEY_FAMILIES` は**列挙のみで誰も消費していない**。Step 5 の
-  キーパス静的化とマイグレーション層のアンカー。新しい state キーを足したらここにも書く
-  （テストで強制できないためベストエフォート運用。**PR レビュー時に KEY_CATALOG との差分を
-  確認する**）
+- `KEY_CATALOG` / `DYNAMIC_KEY_FAMILIES` は基本的に**列挙のみ**（マイグレーション層の
+  アンカー）。新しい state キーを足したらここにも書く（テストで強制できないため
+  ベストエフォート運用。**PR レビュー時に KEY_CATALOG との差分を確認する**）
+- 例外は**静的化済みのキー名**: `SCORE_MATCH_FIELDS`（`phase`/`pool`/`match`）と
+  `SCORE_TEAM_INPUT_KEYS`（`teamName`/`losers`）は Step 5 第 1 弾で実際に消費される
+  ようになった — `AutonaActions` がこれらを書き、`AutonaScoreboardWidget` は
+  `findChild` の**引数として**使う（objectName から作らない）。**文字列は .ui の
+  objectName と一致していなければならない**（既存 `program_state.json` の互換）。
+  `tests/test_objectname_keypath_contract.py` が一致と「objectName() 非使用」を pin
+- `DYNAMIC_KEY_FAMILIES` は Step 5 の**残タスク一覧**として縮んでいく。ウィジェットを
+  静的化したら該当エントリを消す（`tests/test_state_schema.py` が pin）
 - 例外: `colors.{feature}.*` のシードは `AutonaFeatureColors.SeedColorState()` に残っている
   （キー族の読み書きと同居。Step 3/4 で core へ移す）
 - **core → src の逆依存は Qt-free モジュールのみ**: `StateSchema` は `src` 直下の
@@ -50,9 +57,19 @@ paths:
 `AutonaActions.instance` 以外が書かない**。インスタンスは `bootstrap_core()` が作る。
 
 - 移行済み: `AdjustScore` / `ResetScore`（board 1,2 のみ）/ `SetTeamColor` /
-  `SetDisplayOption` / `ApplyChanges`（反映 = `CommitHeld`）
-- 未移行（Qt 側が書き手のまま。理由は `Actions.py` の docstring）: チームスワップ /
-  best_of / クルーボードのスコアリセット・`ChangeSetData`
+  `SetDisplayOption` / `ApplyChanges`（反映 = `CommitHeld`）/ **Step 5 第 1 弾で追加**:
+  `SetMatchField`（`phase`/`pool`/`match`）/ `SetTeamName` / `SetTeamLosers` /
+  `SetTeamsSwapped` / `SetBestOf`
+- 未移行（Qt 側が書き手のまま。理由は `Actions.py` の docstring）: チームスワップ操作
+  そのもの（`teamsSwapped` は `SetTeamsSwapped` がミラーを publish するだけで、正本は
+  ウィジェット属性）/ クルーボードのスコアリセット・`ChangeSetData`
+- **`SetBestOf` はスピンボックス主導のまま**（state 先行に反転していない）。
+  `AutonaScoreboardWidget._onBestOfChanged` が 1 つの `SaveBlock` で
+  `SetBestOf` → `individualGameTracker.SetStageCount(value)` を呼ぶ。反転すると
+  ステージ行の再構築（= state 書き込み）が通知ハンドラ内に入り、再入 + 2 サイクルになる
+- **ローカライズ文字列は callable で注入**する。`best_of_text` / `first_to_text` は
+  `AutonaLocaleHelper.FormatMatchText` を `bootstrap_core()` が `AutonaActions` に渡す
+  （`TournamentInfoService.formatEventDate` と同じ形）。未注入時は英語既定にフォールバック
 - `score.{n}.team.{t}.score` の書き手は **core 内に 3 系統**（`AutonaActions`、
   ステージ集計の `GameTrackerService.PublishStageResults` / `UpdateScore`、
   セット読込の `SetLoadService.ApplyScores`）。加えて**未移行の Qt 側経路**
