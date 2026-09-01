@@ -488,6 +488,96 @@ def test_best_of_falls_back_to_the_shipped_english_text(heldBoard):
     assert SM.Get(f"{PREFIX}.first_to_text") == "First to 3"
 
 
+# ── the team roster (headless core Step 5, player instalment) ────────────
+#
+# The slots themselves belong to PlayerService (one per player widget); the
+# *count* is a board operation, and both of these used to be bare
+# StateManager.Unset calls inside AutonaScoreboardWidget.
+
+def _seedRoster(team, slots):
+    for slot in slots:
+        SM.Set(f"{PREFIX}.team.{team}.player.{slot}.name", f"P{slot}")
+
+
+def test_clearing_a_roster_drops_every_slot(actions):
+    _seedRoster(1, ("1", "2", "3"))
+
+    assert actions.ClearTeamRoster(BOARD, 1) is True
+
+    assert SM.Get(f"{PREFIX}.team.1.player") is None
+
+
+def test_clearing_one_roster_leaves_the_other_alone(actions):
+    _seedRoster(1, ("1",))
+    _seedRoster(2, ("1",))
+
+    actions.ClearTeamRoster(BOARD, 1)
+
+    assert SM.Get(f"{PREFIX}.team.2.player.1.name") == "P1"
+
+
+def test_trimming_a_roster_removes_only_the_surplus(actions):
+    _seedRoster(1, ("1", "2", "3", "4"))
+
+    assert sorted(actions.TrimTeamRoster(BOARD, 1, 2)) == ["3", "4"]
+
+    assert sorted(SM.Get(f"{PREFIX}.team.1.player")) == ["1", "2"]
+
+
+def test_trimming_a_roster_that_is_already_short_enough(actions):
+    _seedRoster(1, ("1", "2"))
+
+    assert actions.TrimTeamRoster(BOARD, 1, 5) == []
+    assert sorted(SM.Get(f"{PREFIX}.team.1.player")) == ["1", "2"]
+
+
+def test_trimming_a_team_with_no_roster_is_a_no_op(actions):
+    """Null-safe where the loop it replaced was not.
+
+    That one read `team.{t}.player` as a dict whenever `team.{t}` was truthy
+    at all, so a team carrying only a name would have raised
+    AttributeError -- inside the save block that wraps a players-per-team
+    change.
+    """
+    SM.Set(f"{PREFIX}.team.1.teamName", "Alpha")
+
+    assert actions.TrimTeamRoster(BOARD, 1, 1) == []
+    assert SM.Get(f"{PREFIX}.team.1.teamName") == "Alpha"
+
+
+def test_a_non_numeric_roster_slot_is_left_where_it_is(actions):
+    """`int(k)` used to raise on it; skipping is the smaller failure."""
+    SM.Set(f"{PREFIX}.team.1.player.junk", {"name": "?"})
+    _seedRoster(1, ("1", "2"))
+
+    assert actions.TrimTeamRoster(BOARD, 1, 1) == ["2"]
+    assert SM.Get(f"{PREFIX}.team.1.player.junk") == {"name": "?"}
+
+
+@pytest.mark.parametrize("team", [0, 3, None, "x"])
+def test_the_roster_operations_ignore_an_impossible_team(actions, team):
+    _seedRoster(1, ("1",))
+
+    assert actions.ClearTeamRoster(BOARD, team) is False
+    assert actions.TrimTeamRoster(BOARD, team, 0) == []
+    assert SM.Get(f"{PREFIX}.team.1.player.1.name") == "P1"
+
+
+def test_trimming_a_roster_is_one_save_cycle(actions, heldBoard, spy):
+    """Every removed slot in one cycle: an overlay must not render a board
+    that is losing its players one at a time."""
+    _seedRoster(1, ("1", "2", "3"))
+    SM.CommitHeld(PREFIX)
+    if SM._export_thread is not None:
+        SM._export_thread.join()
+    spy.held_updates.clear()
+
+    with SM.SaveBlock():
+        actions.TrimTeamRoster(BOARD, 1, 1)
+
+    assert spy.held_updates_for(PREFIX) == [PREFIX]
+
+
 # ── display options ──────────────────────────────────────────────────────
 
 def test_set_display_option_writes_both_halves_of_the_mirror(actions):

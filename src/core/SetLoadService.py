@@ -21,10 +21,12 @@ What deliberately did NOT move (and why):
 
 - **Player data.** ``AutonaScoreboardPlayerWidget.SetData`` resolves country
   and state combos, character/skin/variant model rows and the bad-word
-  filter -- all of it against Qt models. The board still runs that loop; what
+  filter -- all of it against Qt models, and all of it still there. What
   moved here is the *addressing* (which entrant lands on which team once the
   teams have been swapped, see ``DisplayTeam``) and the team name that comes
-  with it. The player subtree itself is Step 5.
+  with it; the player subtree's own writes went to ``core/PlayerService.py``
+  in the next instalment, which is what SetData now hands its resolved
+  values to.
 - **Best of.** ``best_of_text`` / ``first_to_text`` are formatted from
   ``AutonaLocaleHelper.matchNames`` and the same handler resizes the stage
   rows; Step 3 left it on the Qt side and this step does not change that.
@@ -59,9 +61,11 @@ class SetLoadService:
     ``teamsSwapped`` is a callable telling whether the operator has swapped
     the two sides. The flag is mirrored into ``score.{n}.teamsSwapped``, but
     the authority is still the board's own attribute -- the swap itself is a
-    widget-to-widget copy of player data
-    (``AutonaScoreboardPlayerWidget.SwapWith``) that Step 3 explicitly left
-    behind, so the flag moves here with it, in Step 5. Injecting it follows
+    widget-to-widget copy of player *field values*
+    (``AutonaBasePlayerWidget.SwapWith``) that Step 3 explicitly left behind,
+    and it stays there for as long as those values live in the widgets
+    rather than in the state (see the note in ``Actions.py``), so the flag
+    moves here with it. Injecting it follows
     ``StatsService.playersPerTeam``: core reads no Qt object, and the two
     answers cannot drift because there is still only one of them.
     """
@@ -227,9 +231,17 @@ class SetLoadService:
         so it is treated as a set-team write and flips with the board's
         swap state. The neighboring `teamName=` query, by contrast, drives
         the QLineEdit in the literal `team{N}column` slot and does not flip
-        (see AutonaWebServerActions.set_route). That inconsistency predates
-        this file (the old code reversed `losersContainers` the same way);
-        unifying the two web query semantics is Step 5 work.
+        (see AutonaWebServerActions.set_route), and neither does
+        `set_team_data`, whose caller names the team it means.
+
+        That inconsistency predates this file (the old code reversed
+        `losersContainers` the same way) and is **still open**: `losers=` is
+        the odd one out among the web queries, so the consistent reading is
+        that `team=` always means the column the operator is looking at.
+        Making it so is a semantics change to a legacy REST route with no
+        test coverage, on the one query an operator may already be using
+        while swapped -- a product call, not a refactor, so it is recorded
+        here rather than taken.
         """
         if not isinstance(data, dict):
             return False

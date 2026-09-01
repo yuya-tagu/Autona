@@ -37,19 +37,25 @@ paths:
   アンカー）。新しい state キーを足したらここにも書く（テストで強制できないため
   ベストエフォート運用。**PR レビュー時に KEY_CATALOG との差分を確認する**）
 - 例外は**静的化済みのキー名**: `SCORE_MATCH_FIELDS`（`phase`/`pool`/`match`）と
-  `SCORE_TEAM_INPUT_KEYS`（`teamName`/`losers`）は Step 5 第 1 弾で実際に消費される
-  ようになった — `AutonaActions` がこれらを書き、`AutonaScoreboardWidget` は
-  `findChild` の**引数として**使う（objectName から作らない）。**文字列は .ui の
-  objectName と一致していなければならない**（既存 `program_state.json` の互換）。
-  `tests/test_objectname_keypath_contract.py` が一致と「objectName() 非使用」を pin
+  `SCORE_TEAM_INPUT_KEYS`（`teamName`/`losers`）は Step 5 第 1 弾で、
+  `PLAYER_INPUT_KEYS`（`team`/`name`/`real_name`/`twitter`/`custom_textbox`/
+  `seed`/`birthday`/`country`/`state`）は第 2 弾で実際に消費されるようになった —
+  `AutonaActions` / `PlayerService` がこれらを書き、`AutonaScoreboardWidget` /
+  `AutonaScoreboardPlayerWidget` は `findChild` の**引数として**使う
+  （objectName から作らない）。**文字列は .ui の objectName と一致していなければ
+  ならない**（既存 `program_state.json` の互換に加えて、eye メニューの表示トグルも
+  同じ名前で widget を引く）。`tests/test_objectname_keypath_contract.py` が
+  一致・「objectName() 非使用」・「選手ウィジェットは StateManager を直接書かない」を pin
 - `DYNAMIC_KEY_FAMILIES` は Step 5 の**残タスク一覧**として縮んでいく。ウィジェットを
   静的化したら該当エントリを消す（`tests/test_state_schema.py` が pin）
 - 例外: `colors.{feature}.*` のシードは `AutonaFeatureColors.SeedColorState()` に残っている
   （キー族の読み書きと同居。Step 3/4 で core へ移す）
-- **core → src の逆依存は Qt-free モジュールのみ**: `StateSchema` は `src` 直下の
-  `AutonaCommentaryModel` / `AutonaTop8Model`（いずれも Qt 非依存の state モデル。将来 core へ
-  移す候補）を import してよい。Qt 依存モジュールの import は禁止で、
-  `tests/test_core_qt_free.py` が subprocess で検出する
+- **core → src の逆依存は Qt-free モジュールのみ import 可**（`tests/test_core_qt_free.py`
+  が推移的に検査する）。現行の逆依存は 2 系統:
+  `StateSchema` → `src` 直下の `AutonaCommentaryModel` / `AutonaTop8Model`
+  （いずれも Qt 非依存の state モデル。将来 core へ移す候補）、
+  `PlayerService` → `src/Helpers/AutonaSponsorHelper`。
+  新たな逆依存を足すときはこの一覧に追記する
 
 ## AutonaActions（ドメイン操作の唯一の書き手）
 
@@ -59,10 +65,13 @@ paths:
 - 移行済み: `AdjustScore` / `ResetScore`（board 1,2 のみ）/ `SetTeamColor` /
   `SetDisplayOption` / `ApplyChanges`（反映 = `CommitHeld`）/ **Step 5 第 1 弾で追加**:
   `SetMatchField`（`phase`/`pool`/`match`）/ `SetTeamName` / `SetTeamLosers` /
-  `SetTeamsSwapped` / `SetBestOf`
+  `SetTeamsSwapped` / `SetBestOf` / **第 2 弾で追加**: `ClearTeamRoster` /
+  `TrimTeamRoster`（チームの選手スロット数。スロットの中身は `PlayerService`）
 - 未移行（Qt 側が書き手のまま。理由は `Actions.py` の docstring）: チームスワップ操作
-  そのもの（`teamsSwapped` は `SetTeamsSwapped` がミラーを publish するだけで、正本は
-  ウィジェット属性）/ クルーボードのスコアリセット・`ChangeSetData`
+  そのもの（選手側は**ウィジェット間の値コピー**で、選手フィールドの正本が
+  ウィジェットにある限り core に出せない。`teamsSwapped` は `SetTeamsSwapped` が
+  ミラーを publish するだけで正本はウィジェット属性）/ クルーボードのスコアリセット・
+  `ChangeSetData`
 - **`SetBestOf` はスピンボックス主導のまま**（state 先行に反転していない）。
   `AutonaScoreboardWidget._onBestOfChanged` が 1 つの `SaveBlock` で
   `SetBestOf` → `individualGameTracker.SetStageCount(value)` を呼ぶ。反転すると
@@ -108,15 +117,21 @@ paths:
 | `src/core/GameTrackerService.py` | `AutonaIndividualGameTracker.service` | ステージ勝敗の記録（`score.{n}.stages.*`）・ステージ⇔スコアの相互整合・`writingScore` ガード |
 | `src/core/SetLoadService.py` | `AutonaScoreboardWidget.setLoad` | セット読込の正規化（ラウンド/フェーズ/プール・スコア・敗者フラグ・チーム名とロゴ・`bracket_type`・追従中セット）。スワップ後の面の解決は `DisplayTeam()` が唯一の正本 |
 | `src/core/TournamentInfoService.py` | `TournamentInfoService.instance`（`bootstrap_core()` 生成） | `tournamentInfo.*` の書き込み全部（provider ペイロードの適用・表示大会名の 2 系統の上書き規則・`logoVersion`・起動時シード）。EVENT パネル不在でも動くことが遅延構築の前提 |
+| `src/core/PlayerService.py` | `AutonaBasePlayerWidget.player`（選手ウィジェット 1 枚につき 1 個。path に束縛） | 選手スロット配下の書き込み全部（入力フィールド・seed/birthday・国/州の選択行・`mergedName`/`mergedOnlyName`・アバターとスポンサーロゴ・キャラスロット・`city`/`id`・スロット削除）。`BoardNumber()` が `score.{N}` と `player_editor.1` を見分ける |
 
 - **`SetLoadService` はステージ行を書かない**。行数と `stage_widget_list` の長さを
   一致させているのは `GameTrackerService.SetStageCount()` だけなので、読み込んだ
   スコアは `team.{t}.score` を書いて `_SyncScoreDisplays` → `SyncStagesToScore()` に
   渡す（+1 と同じ経路）。`stages` を直接足す経路を作らない
 - **held 配下は「同値なら書かない」**（`SetLoadService._SetIfChanged` /
-  `TournamentInfoService._SetIfChanged`）。同値でも `Set` すればボードは dirty になり
-  反映 ボタンが点灯する。Qt 経路は `setChecked`/`setValue` が無変化なら emit しない
-  ことで偶然これを満たしていた
+  `TournamentInfoService._SetIfChanged` / `AutonaActions._SetIfChanged`）。同値でも
+  `Set` すればボードは dirty になり 反映 ボタンが点灯する。Qt 経路は
+  `setChecked`/`setValue` が無変化なら emit しないことで偶然これを満たしていた
+  - **`PlayerService` はこの規則を採らない**（例外）。理由は同モジュールの docstring:
+    ここに来る書き込みは「すでに変化したウィジェット」からのもので、かつ
+    州コンボの再構築とキャラスロットは**同じ空値を 2 回連続で publish するのが正常**
+    （リークテストがその回数を数えている）。元から guard があった `city` / `id` の
+    2 つだけは guard を保持している
 
 - **state が記録、ウィジェットは表示**。ステージ結果は `score.{n}.stages.{i}` が正本で、
   ボタンはそれを描画するだけ（`_SyncStageButtons`）。`setChecked()` は `toggled` しか

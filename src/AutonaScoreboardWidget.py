@@ -458,8 +458,12 @@ class AutonaScoreboardWidget(QWidget):
 
         self._WireTeamColumn(self.team2column, 2)
 
-        StateManager.Unset(f'score.{self.scoreboardNumber}.team.1.player')
-        StateManager.Unset(f'score.{self.scoreboardNumber}.team.2.player')
+        # A restored program_state.json can carry a roster from a session
+        # that ran with more players per team; drop both before the first
+        # player widget is built, so the slots that come back are the ones
+        # this board actually has.
+        for team in (1, 2):
+            AutonaActions.instance.ClearTeamRoster(self.scoreboardNumber, team)
         self.playerNumber.setValue(1)
         # Re-assert the characters-per-player default so the freshly-built
         # player widgets pick it up instead of getting pinned to 1.
@@ -1662,6 +1666,27 @@ class AutonaScoreboardWidget(QWidget):
         with StateManager.SaveBlock():
             self._setPlayersPerTeamImpl(number)
 
+    def _AdoptTeamLosers(self, player, team: int):
+        """Give a freshly built player card its team's current losers flag.
+
+        Closes a gap that predates the core migration: a player widget is
+        only connected to the LOSERS checkbox from the moment it is created,
+        so a set that arrives with the flag set *and* grows the roster left
+        the new cards at losers=False -- their `mergedName` lost the " [L]"
+        the thumbnail generator renders, until the next load happened to
+        flip the flag and `_ApplyLosersToPlayers` swept them up.
+
+        Read from the state rather than from the checkbox: inside
+        `ChangeSetData` the flag has already been written by
+        `SetLoadService.ApplyLosers`, but the checkbox is only re-rendered by
+        `_SyncSetFields` when the surrounding save block is released -- i.e.
+        after the entrants have been poured in.
+        """
+        value = bool(StateManager.Get(
+            f"{self.statePrefix}.team.{team}.{schema.TEAM_LOSERS_KEY}", False))
+        if player.losers != value:
+            player.SetLosers(value)
+
     def _setPlayersPerTeamImpl(self, number):
         while len(self.team1playerWidgets) < number:
             p = AutonaScoreboardPlayerWidget(
@@ -1675,6 +1700,7 @@ class AutonaScoreboardWidget(QWidget):
             p.SetCharactersPerPlayer(self.charNumber.value())
             self.team1column.findChild(
                 QCheckBox, schema.TEAM_LOSERS_KEY).toggled.connect(p.SetLosers)
+            self._AdoptTeamLosers(p, 1)
 
             p.btMoveUp.clicked.connect(lambda index, p=p: p.SwapWith(
                 self.team1playerWidgets[max(0, self.team1playerWidgets.index(p) - 1)]))
@@ -1703,6 +1729,7 @@ class AutonaScoreboardWidget(QWidget):
             p.SetCharactersPerPlayer(self.charNumber.value())
             self.team2column.findChild(
                 QCheckBox, schema.TEAM_LOSERS_KEY).toggled.connect(p.SetLosers)
+            self._AdoptTeamLosers(p, 2)
 
             p.btMoveUp.clicked.connect(lambda index, p=p: p.SwapWith(
                 self.team2playerWidgets[max(0, self.team2playerWidgets.index(p) - 1)]))
@@ -1722,25 +1749,25 @@ class AutonaScoreboardWidget(QWidget):
 
         while len(self.team1playerWidgets) > number:
             team1player = self.team1playerWidgets[-1]
-            StateManager.Unset(team1player.path)
+            team1player.player.Unset()
             team1player.setParent(None)
             self.playerWidgets.remove(team1player)
             self.team1playerWidgets.remove(team1player)
             team1player.deleteLater()
 
             team2player = self.team2playerWidgets[-1]
-            StateManager.Unset(team2player.path)
+            team2player.player.Unset()
             team2player.setParent(None)
             self.playerWidgets.remove(team2player)
             self.team2playerWidgets.remove(team2player)
             team2player.deleteLater()
 
-        for team in [1, 2]:
-            if StateManager.Get(f'score.{self.scoreboardNumber}.team.{team}'):
-                for k in list(StateManager.Get(f'score.{self.scoreboardNumber}.team.{team}.player').keys()):
-                    if int(k) > number:
-                        StateManager.Unset(
-                            f'score.{self.scoreboardNumber}.team.{team}.player.{k}')
+        # ...and the slots the state carries without a widget: a roster
+        # restored from a previous session, or one left behind by a board
+        # that shrank while it was not built.
+        for team in (1, 2):
+            AutonaActions.instance.TrimTeamRoster(
+                self.scoreboardNumber, team, number)
 
         multiPlayer = number > 1
 
@@ -2084,12 +2111,11 @@ class AutonaScoreboardWidget(QWidget):
         before the entrant rosters, which is where the checkbox used to fire:
         SetData's own mergedName export then already sees the flag.
 
-        NOTE (pre-existing, unchanged): player widgets *created* by the
-        player-count change further down start at losers=False and are only
-        connected to the checkbox from then on, so a set that also grows the
-        roster leaves the new widgets unflagged. That was equally true when
-        the checkbox drove this, and fixing it belongs with the player
-        subtree (Step 5).
+        Only the widgets that exist *now*: a set that also grows the roster
+        creates its extra cards further down, after this has run. Those pick
+        the flag up from the state themselves (`_AdoptTeamLosers`, called as
+        each one is built) -- until the player instalment of Step 5 they did
+        not, and stayed unflagged until some later load moved the flag.
         """
         for setTeam in (1, 2):
             value = data.get(f"team{setTeam}losers")

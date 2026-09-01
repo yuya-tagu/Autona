@@ -19,14 +19,21 @@ to be expressed is not ready to move. Step 3 therefore migrated the writes
 that are self-evident state edits; Step 5 added the SCORE panel's remaining
 field writes (`SetMatchField` / `SetTeamName` / `SetTeamLosers` /
 `SetTeamsSwapped` / `SetBestOf`), which is what took the last
-`StateManager.Set` out of `AutonaScoreboardWidget`. What is still outside:
+`StateManager.Set` out of `AutonaScoreboardWidget`, and then the team roster
+operations below (`ClearTeamRoster` / `TrimTeamRoster`) alongside the player
+subtree's own writer, `core/PlayerService.py`. What is still outside:
 
 - **Swap teams**, as an operation. The player half of a swap is a
-  widget-to-widget data copy (`AutonaScoreboardPlayerWidget.SwapWith`), and
-  the board's own `teamsSwapped` attribute is still the authority that
-  `SetLoadService` and `WebServerActions.get_swap` read -- `SetTeamsSwapped`
-  below only publishes the mirror. The operation moves with the player
-  subtree (Step 5, player widgets).
+  widget-to-widget copy of *field values*
+  (`AutonaBasePlayerWidget.SwapWith`), and it stays that way for as long as
+  those fields live in the widgets: the player subtree is written from Qt
+  now rather than by Qt, but the state is still the output, not the source
+  of truth, so there is nothing in core to exchange. Inverting that needs a
+  render side for the player card (a `_SyncPlayerFields` to match the
+  board's `_SyncSetFields`), which is a bigger change than the write-path
+  move was. The board's own `teamsSwapped` attribute likewise remains the
+  authority that `SetLoadService` and `WebServerActions.get_swap` read --
+  `SetTeamsSwapped` below only publishes the mirror.
 - **The spinbox-driven half of the score.** `AdjustScore` / `ResetScore`
   below are not yet the *only* writers of `score.{n}.team.{t}.score`. Three
   writers live inside core now -- these, the stage tally in
@@ -287,7 +294,7 @@ class AutonaActions:
     # re-resolves the team crest. Two writers per key, coordinating through
     # the state exactly as the three score writers do (see the module
     # docstring); folding them together needs the swap flag itself to live in
-    # core, which is Step 5's player-widget instalment.
+    # core, which is what the swap operation is still waiting on.
 
     def SetTeamName(self, board, team, name) -> bool:
         """Set one team's displayed name. True if the state changed.
@@ -314,8 +321,10 @@ class AutonaActions:
         Overlays render the flag, and the desktop additionally suffixes
         " [L]" onto each player's `mergedName`. That second half is the
         checkbox's *other* handler (`AutonaScoreboardPlayerWidget.SetLosers`,
-        connected per player) and is deliberately not done here -- it writes
-        the player subtree, which is still Qt's.
+        connected per player) and is deliberately not done here: the suffix
+        is part of a *name*, and which name a slot currently holds is the
+        widget's -- `PlayerService.PublishMergedName` is handed both halves
+        by the card that knows them.
         """
         team = self._asInt(team, 0)
         if team not in (1, 2):
@@ -335,6 +344,62 @@ class AutonaActions:
         """
         StateManager.Set(
             f"score.{self._asInt(board, 0)}.teamsSwapped", bool(swapped))
+
+    # ── the team roster (how many player slots a team has) ────────────────
+    #
+    # The player slots themselves are `PlayerService`'s (one instance per
+    # player widget); what belongs here is the *count* -- an operation on the
+    # board, reached from the PLAYERS-per-team spinbox and from a set load
+    # whose entrants are more numerous than the current roster. Both used to
+    # be bare `StateManager.Unset` calls inside
+    # `AutonaScoreboardWidget._setPlayersPerTeamImpl`.
+
+    def ClearTeamRoster(self, board, team) -> bool:
+        """Drop every player slot of one team. True if it applied.
+
+        Run once per team while a board is built, before the first player
+        widget is created: a restored program_state.json can carry a roster
+        from a session that ran with more players per team, and nothing else
+        would ever remove the surplus.
+        """
+        team = self._asInt(team, 0)
+        if team not in (1, 2):
+            logger.warning(f"ClearTeamRoster: ignoring team {team}")
+            return False
+        StateManager.Unset(
+            f"score.{self._asInt(board, 0)}.team.{team}.player")
+        return True
+
+    def TrimTeamRoster(self, board, team, count) -> list:
+        """Drop the player slots numbered above `count`; returns their keys.
+
+        The caller has already torn the surplus *widgets* down (each one
+        unsets its own slot through `PlayerService.Unset`); this is the pass
+        that also catches slots the state carries without a widget -- a
+        restored roster, or a board that shrank while it was not built.
+
+        Null-safe where the loop it replaced was not: that one read
+        `team.{t}.player` as a dict whenever `team.{t}` was truthy at all, so
+        a team with a name but no roster would have raised inside a save
+        block.
+        """
+        team = self._asInt(team, 0)
+        if team not in (1, 2):
+            logger.warning(f"TrimTeamRoster: ignoring team {team}")
+            return []
+        prefix = f"score.{self._asInt(board, 0)}.team.{team}.player"
+        players = StateManager.Get(prefix)
+        if not isinstance(players, dict):
+            return []
+        count = self._asInt(count, 0)
+        removed = []
+        with StateManager.SaveBlock():
+            for slot in list(players.keys()):
+                index = self._asInt(slot, 0)
+                if index > count:
+                    StateManager.Unset(f"{prefix}.{slot}")
+                    removed.append(slot)
+        return removed
 
     # ── the match bar (round name / phase / pool) ─────────────────────────
 

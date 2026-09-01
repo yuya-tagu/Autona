@@ -290,24 +290,25 @@ score.{N}
 │   ├── score                        W R
 │   ├── color                        W
 │   ├── logo                         W
-│   ├── losers                       W   (動的: QCheckBox.objectName)
+│   ├── losers                       W R
 │   └── player.{M}                   D
-│       ├── name                     R
-│       ├── gamerTag                 W
+│       ├── name                     W R  (プレイヤー名 = ゲーマータグ)
 │       ├── team                     W   (所属タグ。UI 表記は「所属タグ」に統一)
-│       ├── seed                     W R
+│       ├── real_name                W
+│       ├── twitter                  W
+│       ├── custom_textbox           W
+│       ├── seed                     W R  (int。未シードは 0)
+│       ├── birthday                 W   (bool)
+│       ├── country                  W   (dict: code, name, display_name, en_name, asset)
+│       ├── state                    W   (dict: code, original_code, name, asset)
 │       ├── id                       W R
 │       ├── city                     W R
-│       ├── birthday                 W   (bool)
-│       ├── custom_textbox           W
 │       ├── online_avatar            W R
 │       ├── avatar                   W
 │       ├── mergedName               W
 │       ├── mergedOnlyName           W
 │       ├── character.{K}            W R   (dict: name, en_name, assets, skin, variant)
 │       ├── mains                    W
-│       ├── country_code             W
-│       ├── state_code               W
 │       └── sponsor_logo(s)          W D
 ├── best_of                          W R
 ├── best_of_short_text               W
@@ -468,18 +469,19 @@ stream
 
 #### 3.1.3 動的キーパスの規約
 
-以下のキーは Qt の `objectName()` から動的に決まる:
+かつては以下の 4 族が Qt の `objectName()` から動的に決まっていた。Headless Core
+Step 5（T-19）で順に静的化しており、**残るのは最後の 1 族のみ**:
 
-| 動的キー | 解決元 |
-|--------|--------|
-| `score.{N}.team.{T}.{QCheckBox.objectName}` | AutonaScoreboardWidget の team 列の QCheckBox |
-| `score.{N}.team.{T}.player.{M}.{QLineEdit.objectName}` | AutonaScoreboardPlayerWidget の全 QLineEdit |
-| `score.{N}.{QComboBox.objectName}` | AutonaScoreboardWidget の scoreColumn の QComboBox |
-| `tournamentInfo.{Q*.objectName}` | AutonaTournamentInfoWidget のフィールド全般 |
+| 族 | 状態 |
+|----|------|
+| `score.{N}.team.{T}.{QCheckBox/QLineEdit.objectName}` | ✅ 静的化（`StateSchema.SCORE_TEAM_INPUT_KEYS` = `teamName` / `losers`。書き手は `AutonaActions`） |
+| `score.{N}.{QComboBox.objectName}` | ✅ 静的化（`StateSchema.SCORE_MATCH_FIELDS` = `phase` / `pool` / `match`。書き手は `AutonaActions`） |
+| `score.{N}.team.{T}.player.{M}.{objectName}` | ✅ 静的化（`StateSchema.PLAYER_INPUT_KEYS`。書き手は `core/PlayerService.py`） |
+| `tournamentInfo.{Q*.objectName}` | ⏳ 未（AutonaTournamentInfoWidget の入力方向のみ。`StateSchema.DYNAMIC_KEY_FAMILIES` の残タスク） |
 
 **規約**:
-- 既存の動的キーパスは **維持**する（`.ui` ファイルの `objectName` を変更するとキーパスが変わり、保存済み state と互換性が壊れるため安易に変えない。やむを得ず変える場合は `STATE_VERSION` をインクリメントする）。
-- **新規追加は §3.1.2 に静的キーパスとして明記する方針**。動的キーパスの新規追加は、Qt Widget の単純な入力フィールド保存など、UI 構造と state 構造を一致させる合理性がある場合に限定する。
+- **キー名は静的化後も不変**（`.ui` の `objectName` を変更するとキーパスが変わり、保存済み state と互換性が壊れる。静的化済みの族でも `StateSchema` の文字列と `objectName` が一致していなければ `findChild` が解決できず同じ結果になる）。やむを得ず変える場合は state のマイグレーション層が前提（known-smells S-14）。
+- **新規追加は §3.1.2 に静的キーパスとして明記し、`StateSchema` に定数を置く**。動的キーパスの新規追加はしない。
 
 ### 3.2 同期経路の規約
 

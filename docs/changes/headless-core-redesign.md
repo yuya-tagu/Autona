@@ -519,6 +519,102 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
   （ラウンド名/フェーズ/プールの入力、チーム名とチームロゴ、LOSERS、BEST OF、
   表示大会名、反映ボタンの点灯タイミング）
 
+#### 5-2: AutonaScoreboardPlayerWidget / AutonaBasePlayerWidget（選手サブツリー）✅ 完了（2026-09-01）
+
+- **`src/core/PlayerService.py` 新設**（選手ウィジェット 1 枚につき 1 インスタンス、
+  `path` に束縛。`SetLoadService` がボードに対して持つ関係と同じ）。**選手サブツリーへの
+  `StateManager.Set` / `Unset` が 20 → 0**（`AutonaScoreboardPlayerWidget` 9 +
+  `AutonaBasePlayerWidget` 11）。加えて `AutonaScoreboardWidget` に残っていた
+  選手サブツリーの `Unset` 5 箇所も 0 になり、**同ファイルの直接書き込みは完全にゼロ**
+  | 旧 | 新 |
+  |----|----|
+  | `findChildren(QLineEdit)` + `objectName()` ループ（内部 line edit まで拾う） | `schema.PLAYER_LINE_EDIT_KEYS` で `findChild` → `PlayerService.SetText` |
+  | `custom_textbox.textChanged` の `objectName()` 直書き | `PlayerService.SetText(PLAYER_NOTE_KEY, ...)` |
+  | `seed.valueChanged` / spinbox 内部 line edit の 2 経路（int と文字列） | どちらも `PlayerService.SetSeed`（常に数値化） |
+  | `birthday.toggled` の直書き | `PlayerService.SetBirthday` |
+  | `findChildren(QComboBox)` + `ComboBoxIndexChanged` | `schema.PLAYER_LOCATION_KEYS` で `findChild` → `PlayerService.SetLocation` |
+  | `ExportMergedName` の 2 キー直書き | `PlayerService.PublishMergedName`（1 `SaveBlock`） |
+  | `ExportPlayerImages` のアバター解決 + `AutonaSponsorHelper` | `PlayerService.PublishImages`（sponsor helper の呼び出しごと core へ） |
+  | `CharactersChanged` の `character` / `mains` | `PlayerService.PublishCharacters` |
+  | `ExportPlayerCity` / `ExportPlayerId` / `Clear` の `online_avatar` | `SetCity` / `SetPlayerId`（変化を bool で返す）/ `SetOnlineAvatar` |
+  | 詳細ダイアログ 反映 の `CommitHeld(path[:2])` | `PlayerService.BoardNumber()` → `AutonaActions.ApplyChanges` |
+  | `_setPlayersPerTeamImpl` の `Unset` 3 種 | `PlayerService.Unset()` / `AutonaActions.ClearTeamRoster` / `TrimTeamRoster` |
+- **キーパス静的化（T-19 第 2 弾）**: `StateSchema` に `PLAYER_INPUT_KEYS`
+  （`PLAYER_LINE_EDIT_KEYS` + `PLAYER_NOTE_KEY` + `PLAYER_SEED_KEY` /
+  `PLAYER_BIRTHDAY_KEY` + `PLAYER_LOCATION_KEYS`）を新設し、`DYNAMIC_KEY_FAMILIES` から
+  Player 族を削除。**残るは `AutonaTournamentInfoWidget` の 1 族のみ**。
+  **キー名は 1 文字も変えていない**のでマイグレーション層は不要。なお同じ名前は
+  eye メニューの表示トグル（`DisplayOption.fields`）が `findChild` に使う名前でもあり、
+  リネームの影響範囲は保存データだけではない
+- **`self.path` の形は 2 パターンだった**（agent-pitfalls #7 は 3 と書いていた）。
+  実在するのは `score.{N}.team.{T}.player.{M}` と `player_editor.1` のみで、
+  `commentary.{N}` と `{base}.slot.{I}.player.{M}` の呼び出し元はすでに存在しない
+  （実況者パネルは独自カード、PLAYERS ロスターは廃止済み）。ルールを訂正し、
+  **構築元の数と形を AST で pin**（`test_the_player_widget_is_only_built_on_two_kinds_of_path`）。
+  `player_editor` 側は実ウィジェットを建てて「エディタのキーがボードに漏れないこと」を確認
+- **`PlayerService` は `_SetIfChanged` を採らない**（Step 4b / 5-1 との意図的な差）。
+  ここに来る書き込みは「すでに変化したウィジェット」からのもので、かつ
+  州コンボの再構築とキャラスロットは**同じ空値を続けて publish するのが正常**
+  （`test_a_rebuild_publishes_the_state_exactly_once` がその回数を数えている）。
+  元から guard のあった `city` / `id` の 2 つだけ guard を保持。理由は
+  `PlayerService` の docstring が正本
+- **既知ギャップの処遇**:
+  | ギャップ | 処遇 |
+  |---------|------|
+  | (a) セット読込で選手数が増えた場合の losers 取り逃し | **修正した**。新規カードは構築時に state から自チームの `losers` を読む（`AutonaScoreboardWidget._AdoptTeamLosers`）。チェックボックスではなく state から読むのは、`ChangeSetData` の SaveBlock 内ではチェックボックスがまだ再描画されていないため |
+  | (b) SwapTeams のスコア・ステージ・選手コピー | **スコープアウト**。選手側は `SwapWith` による*ウィジェット値*の交換で、選手フィールドの正本がウィジェットにある限り core に交換対象が存在しない。移すには選手カードの描画側（`_SyncPlayerFields` 相当）を作る必要があり、今回の書き込み経路移行より大きい変更になる |
+  | (c) `set_route` の `losers=` と `teamName=` の面解決不整合 | **スコープアウト（提案のみ）**。`losers=` だけが `DisplayTeam()` を通ってスワップで反転し、`teamName=` と `set_team_data` は反転しない。**`team=` は常に「見えている列」と読むのが一貫する**が、テストの無い legacy REST ルートの意味変更であり、スワップ中に `losers=` を使っている運用があり得るためプロダクト判断。`SetLoadService.ApplyLosers` の docstring に残置理由ごと記録 |
+  | (d) 選手 SetData の Qt モデル解決 | **設計どおり Qt 側に残置**。国/州コンボ・キャラ/スキン/バリアントの行解決・bad word フィルタは「表示の仕事」。今回移したのは「state に何を書くか」だけ |
+- 挙動差分（意図したもの）:
+  - **国/州コンボでの編集確定が空セグメントのキーを書かなくなった**。両コンボは
+    `editable` なので内部 `QLineEdit`（objectName `""`）を持ち、旧 `findChildren(QLineEdit)`
+    ループがそれも拾っていた。結果 `score.{N}.team.{T}.player.{M}.`（末尾が空のキー）が
+    書かれ、何も読まないまま毎回の export に載っていた。pin:
+    `test_finishing_an_edit_in_the_country_combo_writes_no_stray_key`
+  - **`seed` が常に数値になった**。旧経路では spinbox 内部 line edit の
+    `editingFinished`（`qt_spinbox_lineedit` → 親 objectName フォールバック）が
+    *テキスト*を書いていたため、`Clear()` 後の seed は文字列 `"0"` だった。
+    この経路自体は残している（`SwapWith` は spinbox を触らず state だけを入れ替えるので、
+    両者がずれた状態から `Clear()` でリセットできる必要がある）
+  - **選手名 1 回の編集が 4 → 3 save cycle**。`mergedName` / `mergedOnlyName` が
+    1 `SaveBlock` になった（同様に `character` + `mains` も 1 サイクル）。
+    held 中は publish されないので正しさの境界ではないが、
+    `test_a_player_tag_edit_is_exactly_three_save_cycles` が第 4 の書き手を検知する
+  - **同じ `city` の再適用が 反映 を点灯させなくなった**。`SetData` の city 書き込みは
+    無条件だったが、`ExportPlayerCity` 側に元からあった guard に揃えた
+    （セット自動更新は同じエントラントを数秒ごとに送り直す）
+  - **`TrimTeamRoster` が null-safe になった**。旧ループは `team.{t}` が truthy なら
+    `team.{t}.player` を dict として読んでいたため、名前だけあってロスターが無いチームで
+    `AttributeError`（players-per-team 変更の SaveBlock 内）になり得た。
+    非数値スロット名も `int(k)` で例外にせず読み飛ばす
+  - **`KEY_CATALOG` の記載を実態に合わせた**（書き込み側は不変）。詳細は known-smells S-14
+- 検証: フルスイート **687 passed / 19 skipped**（5-2 前 621 + 新規 66）。
+  **既存アサーションの変更は 1 つだけ** — `test_the_scoreboard_families_left_the_dynamic_key_inventory`
+  の `assert "AutonaScoreboardPlayerWidget" in described` を `not in` へ。これは
+  「残タスク一覧が縮んだことを強制する」ラチェットそのもので、第 1 弾が
+  `AutonaScoreboardWidget` について同じ行を反転したのと同じ操作。新規:
+  `tests/test_player_service.py`(43、QApplication 不要) /
+  `tests/test_actions.py` に 11（ロスター操作）/ `tests/test_state_schema.py` に 2
+  （カタログ整合・PlayerService が書くキーの列挙）/
+  `tests/test_objectname_keypath_contract.py` に 2（schema 名 ⊆ .ui objectName、
+  選手ウィジェットは StateManager を直接書かない）/
+  `tests/test_scoreboard_operations.py` に 6（実ウィジェットでのエコーループ検査・
+  ロスター縮小・losers 継承・詳細ダイアログの 反映）/ `tests/test_player_widgets.py` に 2
+  （構築元 2 パターンの pin と `player_editor` 実動作）。
+  リーク pin（`test_reloading_states_does_not_accumulate_models` ほか）と
+  `test_wrapper_lifetime` / `test_signal_lifetime` / `test_core_qt_free` は不変で pass
+- 未実施（ユーザー実機確認）: 手動チェックリストの「選手情報」相当
+  （タグ/スポンサー/実名/Twitter/追加情報の入力、国・地域の選択、キャラ/カラー/バリアント、
+  選手詳細ダイアログの 反映、選手の入れ替え（↑↓）、PLAYERS per team の増減、
+  LOSERS 付きセットで人数が増えるケース、PLAYERS パネルの選手編集）
+- 次弾以降の削除候補: `AutonaScoreboardPlayerWidget.instanceSignals.dataChanged` は
+  購読者ゼロのデッドシグナル（emit 3 箇所のみ）。seed / コンボの内部 `QLineEdit` からの
+  emit は本ステップで書き込み経路が変わった際に落ちたが実害はない
+- 既知事象（記録のみ、pre-existing・無害）: `SwapWith` のスナップショットに
+  objectName `""` のキーが残り、`findChild(QWidget, "")` が任意の子（実測 `QPushButton`）に
+  マッチする。type チェックで実害はないが、選手カード描画側を作る際
+  （(b) SwapTeams の core 化とセット）に掃除する
+
 ### ステップ間の依存
 
 Step 0 → 1 → 2 → 3 は直列。Step 4 は Step 3 完了後に (b) 対象ごとに並行可

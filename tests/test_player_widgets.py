@@ -794,3 +794,85 @@ def test_a_rebuild_publishes_the_state_exactly_once(autonaApp):
         f"the rebuild's own publish happened {duringLoad.count({})} times "
         f"during one country change (writes: {duringLoad!r})")
     assert duringLoad[-1].get("original_code") == "13"
+
+
+# ── the paths a player widget is built on (agent-pitfalls #7) ────────────
+#
+# `self.path` is a constructor argument, and everything the widget publishes
+# hangs off it -- so "which path shapes exist" is the premise of every
+# assertion above. agent-pitfalls #7 lists three; two of those callers are
+# gone (the commentary panel builds its own cards, and the roster editor that
+# used `{base}.slot.{I}.player.{M}` was retired), which the first test below
+# is what keeps honest. The second drives the surviving non-board shape.
+
+def test_the_player_widget_is_only_built_on_two_kinds_of_path():
+    """Enumerate the construction sites rather than trust the pitfall note.
+
+    A third shape appearing here is not a bug by itself -- it is the signal
+    that PlayerService.BoardNumber(), the details dialog's 反映 button and
+    the leak tests above all need revisiting for it.
+    """
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent / "src"
+    sites = []
+    for source in root.rglob("*.py"):
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "AutonaScoreboardPlayerWidget"):
+                path = next((kw.value for kw in node.keywords
+                             if kw.arg == "path"), None)
+                sites.append((source.name, ast.dump(path) if path else None))
+
+    files = sorted({name for name, _ in sites})
+    assert files == [
+        "AutonaPlayerBrowserWidget.py", "AutonaScoreboardWidget.py"], (
+        f"a player widget is now built somewhere new: {files}")
+    # Both scoreboard sites build an f-string keyed by board/team/index; the
+    # browser passes the module-level editor constant.
+    assert len(sites) == 3, f"construction sites changed: {sites}"
+
+
+def test_the_editor_path_publishes_outside_every_board(autonaApp):
+    """The PLAYERS panel's editor is the same widget on a scratch subtree.
+
+    Its keys must land under `player_editor.1` and nowhere else: publishing
+    an operator's draft onto a live scoreboard is the failure this path shape
+    exists to avoid. Built directly rather than through the panel, which
+    needs a Window.
+    """
+    from qtpy.QtCore import QCoreApplication, QEvent
+
+    from src.AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
+    from src.core import StateSchema as schema
+
+    board = autonaApp.board(1)
+    board.team1playerWidgets[0].SetData({"gamerTag": "LIVE"},
+                                        dontLoadFromDB=True)
+    autonaApp.settle()
+
+    editorPath = f"{schema.PLAYER_EDITOR_ROOT}.1"
+    editor = AutonaScoreboardPlayerWidget(index=1, teamNumber=1,
+                                          path=editorPath)
+    try:
+        editor.SetData({"gamerTag": "DRAFT", "prefix": "SCRATCH"},
+                       dontLoadFromDB=True)
+        autonaApp.settle()
+
+        assert autonaApp.get(f"{editorPath}.name") == "DRAFT"
+        assert autonaApp.get(f"{editorPath}.mergedName") == "SCRATCH | DRAFT"
+        # ...and the live board is untouched.
+        assert autonaApp.get("score.1.team.1.player.1.name") == "LIVE"
+    finally:
+        editor.setParent(None)
+        editor.deleteLater()
+        # Actually reap it: pytest never runs an event loop, so a deferred
+        # deletion would sit in the queue for the rest of the session with
+        # its connections to the process-wide singletons intact (see
+        # conftest._dropBoard).
+        QCoreApplication.sendPostedEvents(editor, QEvent.Type.DeferredDelete)
+        StateManager.Unset(schema.PLAYER_EDITOR_ROOT)
+        autonaApp.settle()
