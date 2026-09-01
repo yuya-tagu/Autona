@@ -1,4 +1,3 @@
-import math
 import urllib.parse
 import webbrowser
 
@@ -23,6 +22,7 @@ from .StateManager import StateManager
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
 from .core.SetLoadService import SetLoadService
+from .core.TournamentInfoService import TournamentInfoService
 from .StateManagerBridge import StateManagerBridge
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaStatsUtil import AutonaStatsUtil
@@ -281,12 +281,11 @@ class AutonaScoreboardWidget(QWidget):
 
         # Mirror every display option into StateManager so remote clients
         # (React Web UI, OBS) can render the same field visibility. Before
-        # this loop only show_sponsor was mirrored; the other toggles were
-        # session-local Qt visibility.
-        for option in schema.DISPLAY_OPTIONS:
-            StateManager.Set(f"display_options.{option.key}",
-                SettingsManager.Get(
-                    f"display_options.{option.key}", option.default))
+        # this existed only show_sponsor was mirrored; the other toggles were
+        # session-local Qt visibility. The loop itself is the schema's now
+        # (headless core Step 5) -- it read this widget's own copy of the
+        # option list, which is exactly the drift StateSchema exists to end.
+        schema.PublishDisplayOptions()
 
         self.playerWidgets: List[AutonaScoreboardPlayerWidget] = []
         self.team1playerWidgets: List[AutonaScoreboardPlayerWidget] = []
@@ -431,21 +430,7 @@ class AutonaScoreboardWidget(QWidget):
         # inside AutonaScoreboardPlayer.ui is 5px).
         team1HeaderRow.layout().addSpacing(UI.SPACE_MD)
 
-        for c in self.team1column.findChildren(QLineEdit):
-            c.editingFinished.connect(
-                lambda element=c: [
-                    StateManager.Set(
-                        f"score.{self.scoreboardNumber}.team.1.{element.objectName()}", element.text())
-                ])
-            c.editingFinished.emit()
-
-        for c in self.team1column.findChildren(QCheckBox):
-            c.toggled.connect(
-                lambda state, element=c: [
-                    StateManager.Set(
-                        f"score.{self.scoreboardNumber}.team.1.{element.objectName()}", state)
-                ])
-            c.toggled.emit(False)
+        self._WireTeamColumn(self.team1column, 1)
 
         self.scoreColumn = uic.loadUi(AutonaResolve("src/layout/AutonaScoreboardScore.ui"))
 
@@ -471,21 +456,7 @@ class AutonaScoreboardWidget(QWidget):
         team2HeaderRow.layout().insertWidget(0, colorGroup2)
         team2HeaderRow.layout().addSpacing(UI.SPACE_MD)
 
-        for c in self.team2column.findChildren(QLineEdit):
-            c.editingFinished.connect(
-                lambda element=c: [
-                    StateManager.Set(
-                        f"score.{self.scoreboardNumber}.team.2.{element.objectName()}", element.text())
-                ])
-            c.editingFinished.emit()
-
-        for c in self.team2column.findChildren(QCheckBox):
-            c.toggled.connect(
-                lambda state, element=c: [
-                    StateManager.Set(
-                        f"score.{self.scoreboardNumber}.team.2.{element.objectName()}", state)
-                ])
-            c.toggled.emit(False)
+        self._WireTeamColumn(self.team2column, 2)
 
         StateManager.Unset(f'score.{self.scoreboardNumber}.team.1.player')
         StateManager.Unset(f'score.{self.scoreboardNumber}.team.2.player')
@@ -496,21 +467,32 @@ class AutonaScoreboardWidget(QWidget):
 
         self._applyScoreboardMode(self.singlePlayer)
 
-        for c in self.scoreColumn.findChildren(QComboBox):
-            c.lineEdit().editingFinished.connect(
-                lambda element=c: [
-                    StateManager.Set(
-                        f"score.{self.scoreboardNumber}.{element.objectName()}", element.currentText())
-                ]
-            )
-            c.currentIndexChanged.connect(
-                lambda x, element=c: [
-                    StateManager.Set(
-                        f"score.{self.scoreboardNumber}.{element.objectName()}", element.currentText())
-                ]
-            )
-            c.lineEdit().editingFinished.emit()
-            c.lineEdit().setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Match bar (フェーズ / プール名 / ラウンド). Both signals are wired
+        # because either can change the text: currentIndexChanged for a pick
+        # from the list, editingFinished for something typed into the
+        # editable line edit. Which key each combo writes comes from
+        # StateSchema now rather than from its own objectName -- see
+        # _WireTeamColumn for the whole story.
+        for field in schema.SCORE_MATCH_FIELDS:
+            combo = self.scoreColumn.findChild(QComboBox, field)
+            if combo is None:
+                # A field the .ui no longer carries would otherwise fail one
+                # line later on None, with nothing naming the missing widget.
+                logger.error(
+                    f"AutonaScoreboardScore.ui has no '{field}' combo; the "
+                    f"score.{self.scoreboardNumber}.{field} key will not be "
+                    "written")
+                continue
+            combo.lineEdit().editingFinished.connect(
+                lambda field=field, element=combo:
+                    AutonaActions.instance.SetMatchField(
+                        self.scoreboardNumber, field, element.currentText()))
+            combo.currentIndexChanged.connect(
+                lambda _index, field=field, element=combo:
+                    AutonaActions.instance.SetMatchField(
+                        self.scoreboardNumber, field, element.currentText()))
+            combo.lineEdit().editingFinished.emit()
+            combo.lineEdit().setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Add stage order widget
         self.individualGameTracker = AutonaIndividualGameTracker(self.scoreboardNumber)
@@ -528,7 +510,7 @@ class AutonaScoreboardWidget(QWidget):
         phaseGroup.layout().setContentsMargins(0, 0, 0, 0)
         phaseGroup.layout().setSpacing(UI.SPACE_SM)
         phaseLabel = self.scoreColumn.findChild(QLabel, "label")
-        self.phaseCombo = self.scoreColumn.findChild(QComboBox, "phase")
+        self.phaseCombo = self.scoreColumn.findChild(QComboBox, schema.PHASE_KEY)
         phaseCombo = self.phaseCombo
         phaseLabel.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         phaseGroup.layout().addWidget(phaseLabel)
@@ -543,7 +525,7 @@ class AutonaScoreboardWidget(QWidget):
         poolGroup.layout().setContentsMargins(0, 0, 0, 0)
         poolGroup.layout().setSpacing(UI.SPACE_SM)
         poolLabel = self.scoreColumn.findChild(QLabel, "label_pool")
-        self.poolCombo = self.scoreColumn.findChild(QComboBox, "pool")
+        self.poolCombo = self.scoreColumn.findChild(QComboBox, schema.POOL_KEY)
         poolLabel.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         poolGroup.layout().addWidget(poolLabel)
         poolGroup.layout().addWidget(self.poolCombo, 1)
@@ -557,7 +539,7 @@ class AutonaScoreboardWidget(QWidget):
         matchGroup.layout().setContentsMargins(0, 0, 0, 0)
         matchGroup.layout().setSpacing(UI.SPACE_SM)
         matchLabel = self.scoreColumn.findChild(QLabel, "label_2")
-        self.matchCombo = self.scoreColumn.findChild(QComboBox, "match")
+        self.matchCombo = self.scoreColumn.findChild(QComboBox, schema.MATCH_KEY)
         matchCombo = self.matchCombo
         matchLabel.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         matchGroup.layout().addWidget(matchLabel)
@@ -591,9 +573,13 @@ class AutonaScoreboardWidget(QWidget):
         self.displayTournamentNameEdit = QLineEdit()
         self.displayTournamentNameEdit.setText(
             StateManager.Get("tournamentInfo.displayTournamentName", "") or "")
+        # tournamentInfo.* is TournamentInfoService's, EVENT panel or no
+        # EVENT panel (headless core Step 4b). Typing here is the strongest
+        # of the three writers of 表示大会名: it does not disturb the
+        # service's "name the display last followed" ledger, which is what
+        # stops a later tournament-name edit from overwriting what was typed.
         self.displayTournamentNameEdit.editingFinished.connect(
-            lambda: StateManager.Set(
-                "tournamentInfo.displayTournamentName",
+            lambda: TournamentInfoService.instance.SetDisplayName(
                 self.displayTournamentNameEdit.text()))
         self.displayTournamentNameRow.layout().addWidget(displayTournamentNameLabel)
         self.displayTournamentNameRow.layout().addWidget(
@@ -727,14 +713,10 @@ class AutonaScoreboardWidget(QWidget):
         )
         self.scoreDisplay2.valueChanged.emit(0)
 
-        self.team1column.findChild(QLineEdit, "teamName").editingFinished.connect(
-            lambda: self.ExportTeamLogo(
-                "1", self.team1column.findChild(QLineEdit, "teamName").text())
-        )
-        self.team2column.findChild(QLineEdit, "teamName").editingFinished.connect(
-            lambda: self.ExportTeamLogo(
-                "2", self.team2column.findChild(QLineEdit, "teamName").text())
-        )
+        # (The team-name -> crest connection used to be made here, after the
+        # generic objectName loops above had already seeded the names. It is
+        # part of _WireTeamColumn now, so both halves of "the operator named
+        # a team" are wired in one place -- see that method.)
 
         # Add default and user tournament phase title files. Templated
         # entries (the "group" pool template, "予選プール{0}") belong to the
@@ -824,6 +806,64 @@ class AutonaScoreboardWidget(QWidget):
             f"color: {UI.palette()['text_secondary']};"
             " background: transparent; border: none;")
 
+    def _WireTeamColumn(self, column, team: int):
+        """Bind one team card's inputs to the operations they stand for.
+
+        This used to be two `findChildren` loops per column -- every
+        QLineEdit and every QCheckBox connected to a lambda that built
+        `score.{N}.team.{T}.{widget.objectName()}` and wrote it. That is the
+        pattern that made the .ui file the state schema (known-smells S-14):
+        the keys existed only as a side effect of what a designer happened to
+        name a widget, and no catalog could be trusted because the widget
+        tree was the catalog.
+
+        Now the names come from `StateSchema.SCORE_TEAM_INPUT_KEYS` and are
+        used to *find* the widgets; the writes are AutonaActions'. The
+        objectNames still have to match those keys, which is the same
+        backward-compatibility constraint as before (an existing
+        program_state.json is keyed by them) -- pinned by
+        tests/test_objectname_keypath_contract.py.
+
+        Both widgets keep a second handler connected elsewhere, and both are
+        load-bearing: the team crest follows the name (ExportTeamLogo, below)
+        and every player widget's " [L]" suffix follows the losers flag
+        (`SetLosers`, connected per player in `_setPlayersPerTeamImpl`).
+        Neither moved to core, so neither may be replaced by a state
+        notification -- `_SyncSetFields` sets these two widgets with their
+        signals blocked precisely because it is the render side.
+
+        The initial emit seeds the two keys, as it always did: a board starts
+        with an empty name and an unchecked losers box, and the overlays read
+        both from launch.
+        """
+        name = column.findChild(QLineEdit, schema.TEAM_NAME_KEY)
+        if name is not None:
+            name.editingFinished.connect(
+                lambda team=team, edit=name:
+                    AutonaActions.instance.SetTeamName(
+                        self.scoreboardNumber, team, edit.text()))
+            # Second handler, kept in the order it used to be connected in
+            # (name first, crest after): a set load writes the pair together
+            # through SetLoadService.ApplyTeamName.
+            name.editingFinished.connect(
+                lambda team=team, edit=name:
+                    self.ExportTeamLogo(team, edit.text()))
+            name.editingFinished.emit()
+
+        losers = column.findChild(QCheckBox, schema.TEAM_LOSERS_KEY)
+        if losers is not None:
+            losers.toggled.connect(
+                lambda state, team=team: AutonaActions.instance.SetTeamLosers(
+                    self.scoreboardNumber, team, state))
+            losers.toggled.emit(False)
+
+        if name is None or losers is None:
+            logger.error(
+                f"AutonaScoreboardTeam.ui is missing "
+                f"{schema.TEAM_NAME_KEY!r} / {schema.TEAM_LOSERS_KEY!r}; "
+                f"score.{self.scoreboardNumber}.team.{team} will be "
+                "incomplete")
+
     def ApplyChanges(self):
         # 反映 button: publish every pending edit on this board at once.
         AutonaActions.instance.ApplyChanges(self.scoreboardNumber)
@@ -837,27 +877,28 @@ class AutonaScoreboardWidget(QWidget):
         StateManager.CommitHeld(self.statePrefix)
 
     def _onBestOfChanged(self, value):
-        # bestOfSpin.valueChanged handler. The derived keys are written as one
-        # save block so a BO change is a single export, and the block is a
-        # `with` statement rather than a chain of calls: anything in here can
-        # raise (matchNames is empty until the locale is loaded, and .format()
-        # on the missing entry throws), and a BlockSaving() whose matching
-        # ReleaseSaving() is never reached leaves saveBlocked permanently
-        # positive -- every later SaveState suppressed, i.e. ./out and the
-        # WebSocket feed silently frozen mid-stream (agent-pitfalls #6).
+        """bestOfSpin.valueChanged handler: publish the set length.
+
+        The six derived keys are AutonaActions' since headless core Step 5
+        (the localized long forms reach it as an injected formatter, because
+        AutonaLocaleHelper imports Qt and core may not). The spinbox is still
+        what drives them -- see the note in core/Actions.py on why inverting
+        this one would cost a second, re-entrant save cycle per change.
+
+        The stage rows join the same cycle, so a BO change stays a single
+        export. That is what this `with` is for, and it must stay a `with`
+        rather than a hand-paired block/release: anything inside can raise
+        (matchNames is empty until the locale is loaded, and .format() on the
+        missing entry throws), and a block that is never released leaves
+        saveBlocked permanently positive -- every later SaveState suppressed,
+        i.e. ./out and the WebSocket feed silently frozen mid-stream
+        (agent-pitfalls #6). tests/test_save_block_symmetry.py pins it.
+        """
         with StateManager.SaveBlock():
-            StateManager.Set(
-                f"score.{self.scoreboardNumber}.best_of", value)
-            StateManager.Set(
-                f"score.{self.scoreboardNumber}.best_of_short_text", f"BO{value}")
-            StateManager.Set(f"score.{self.scoreboardNumber}.best_of_text", AutonaLocaleHelper.matchNames.get(
-                "best_of").format(value) if value > 0 else "")
-            StateManager.Set(
-                f"score.{self.scoreboardNumber}.first_to", math.ceil(value/2))
-            StateManager.Set(
-                f"score.{self.scoreboardNumber}.first_to_short_text", f"FT{math.ceil(value/2)}")
-            StateManager.Set(f"score.{self.scoreboardNumber}.first_to_text", AutonaLocaleHelper.matchNames.get(
-                "first_to").format(math.ceil(value/2)) if value > 0 else "")
+            AutonaActions.instance.SetBestOf(self.scoreboardNumber, value)
+            # Only GameTrackerService.SetStageCount() may resize the rows, and
+            # only this widget can rebuild the buttons that render them, so
+            # the two stay wired together here.
             self.individualGameTracker.SetStageCount(value)
 
     def _onStateDelta(self, delta):
@@ -907,9 +948,9 @@ class AutonaScoreboardWidget(QWidget):
         notification arriving mid-edit must not yank the text out from under
         the caret. Same rule as _syncDisplayTournamentNameEdit.
         """
-        for combo, key in ((self.matchCombo, "match"),
-                           (self.phaseCombo, "phase"),
-                           (self.poolCombo, "pool")):
+        for combo, key in ((self.matchCombo, schema.MATCH_KEY),
+                           (self.phaseCombo, schema.PHASE_KEY),
+                           (self.poolCombo, schema.POOL_KEY)):
             value = StateManager.Get(f"{self.statePrefix}.{key}", None)
             if not isinstance(value, str) or combo.currentText() == value:
                 continue
@@ -934,16 +975,17 @@ class AutonaScoreboardWidget(QWidget):
             # (_placeLosersOnDetailsRow), and a cached wrapper would outlive
             # the C++ object if its host were ever torn down.
             losers = StateManager.Get(
-                f"{self.statePrefix}.team.{team}.losers", None)
-            check = column.findChild(QCheckBox, "losers")
+                f"{self.statePrefix}.team.{team}.{schema.TEAM_LOSERS_KEY}",
+                None)
+            check = column.findChild(QCheckBox, schema.TEAM_LOSERS_KEY)
             if (isinstance(losers, bool) and check is not None
                     and check.isChecked() != losers):
                 with QSignalBlocker(check):
                     check.setChecked(losers)
 
             name = StateManager.Get(
-                f"{self.statePrefix}.team.{team}.teamName", None)
-            edit = column.findChild(QLineEdit, "teamName")
+                f"{self.statePrefix}.team.{team}.{schema.TEAM_NAME_KEY}", None)
+            edit = column.findChild(QLineEdit, schema.TEAM_NAME_KEY)
             if (isinstance(name, str) and edit is not None
                     and edit.text() != name and not edit.hasFocus()):
                 with QSignalBlocker(edit):
@@ -1070,10 +1112,19 @@ class AutonaScoreboardWidget(QWidget):
         label.setVisible(bool(parts))
 
     def ResetAllInputs(self):
-        # すべての入力値をリセット: clear players, scores, phase/round,
-        # BEST OF and team names in one shot (mirrors the Web UI "全クリア"
-        # action). Values only — the team-mode player-count layout is kept.
-        # The cleared state still goes through the 反映 gate like any edit.
+        # すべての入力値をリセット: clear players, scores, BEST OF and team
+        # names in one shot (mirrors the Web UI "全クリア" action). Values
+        # only — the team-mode player-count layout is kept. The cleared
+        # state still goes through the 反映 gate like any edit.
+        #
+        # NOTE: this does NOT clear phase/round despite what it used to
+        # claim above. ClearScore's combo loop (below) targets
+        # self.scoreColumn.findChildren(QComboBox), but the three combos are
+        # re-homed out of scoreColumn into the score bar at construction
+        # time, so on boards 1/2 that loop matches nothing — round name,
+        # phase and pool survive a reset untouched. Known gap, not fixed
+        # here (see .claude/known-smells.md S-17 and
+        # tests/test_clearing_the_score_does_not_clear_the_match_bar_known_gap).
         answer = QMessageBox.question(
             self,
             QApplication.translate("app", "すべての入力値をリセット"),
@@ -1088,7 +1139,7 @@ class AutonaScoreboardWidget(QWidget):
             self.ClearScore()
             self.bestOfSpin.setValue(0)
             for column in (self.team1column, self.team2column):
-                teamName = column.findChild(QLineEdit, "teamName")
+                teamName = column.findChild(QLineEdit, schema.TEAM_NAME_KEY)
                 teamName.setText("")
                 teamName.editingFinished.emit()
 
@@ -1350,7 +1401,7 @@ class AutonaScoreboardWidget(QWidget):
                 if not singlePlayer:
                     teamLabel.setText(
                         QApplication.translate("app", "TEAM {0}").format(side))
-            teamName = column.findChild(QLineEdit, "teamName")
+            teamName = column.findChild(QLineEdit, schema.TEAM_NAME_KEY)
             if teamName is not None:
                 teamName.setVisible(not singlePlayer)
 
@@ -1387,7 +1438,7 @@ class AutonaScoreboardWidget(QWidget):
         # player widget is never torn down by SetPlayersPerTeam.
         for column, players in ((self.team1column, self.team1playerWidgets),
                                 (self.team2column, self.team2playerWidgets)):
-            losersCheck = column.findChild(QCheckBox, "losers")
+            losersCheck = column.findChild(QCheckBox, schema.TEAM_LOSERS_KEY)
             if losersCheck is None or not players:
                 continue
             if losersCheck.parentWidget() is players[0]:
@@ -1623,7 +1674,7 @@ class AutonaScoreboardWidget(QWidget):
                 QGroupBox, "groupBox").layout().addWidget(p)
             p.SetCharactersPerPlayer(self.charNumber.value())
             self.team1column.findChild(
-                QCheckBox, "losers").toggled.connect(p.SetLosers)
+                QCheckBox, schema.TEAM_LOSERS_KEY).toggled.connect(p.SetLosers)
 
             p.btMoveUp.clicked.connect(lambda index, p=p: p.SwapWith(
                 self.team1playerWidgets[max(0, self.team1playerWidgets.index(p) - 1)]))
@@ -1651,7 +1702,7 @@ class AutonaScoreboardWidget(QWidget):
                 QGroupBox, "groupBox").layout().addWidget(p)
             p.SetCharactersPerPlayer(self.charNumber.value())
             self.team2column.findChild(
-                QCheckBox, "losers").toggled.connect(p.SetLosers)
+                QCheckBox, schema.TEAM_LOSERS_KEY).toggled.connect(p.SetLosers)
 
             p.btMoveUp.clicked.connect(lambda index, p=p: p.SwapWith(
                 self.team2playerWidgets[max(0, self.team2playerWidgets.index(p) - 1)]))
@@ -1697,17 +1748,17 @@ class AutonaScoreboardWidget(QWidget):
         # _applyScoreboardMode); only the team-name field follows the
         # player count.
         if multiPlayer:
-            self.team1column.findChild(QLineEdit, "teamName").setVisible(True)
-            self.team2column.findChild(QLineEdit, "teamName").setVisible(True)
+            self.team1column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setVisible(True)
+            self.team2column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setVisible(True)
         else:
-            self.team1column.findChild(QLineEdit, "teamName").setVisible(False)
-            self.team1column.findChild(QLineEdit, "teamName").setText("")
+            self.team1column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setVisible(False)
+            self.team1column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setText("")
             self.team1column.findChild(
-                QLineEdit, "teamName").editingFinished.emit()
-            self.team2column.findChild(QLineEdit, "teamName").setVisible(False)
-            self.team2column.findChild(QLineEdit, "teamName").setText("")
+                QLineEdit, schema.TEAM_NAME_KEY).editingFinished.emit()
+            self.team2column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setVisible(False)
+            self.team2column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setText("")
             self.team2column.findChild(
-                QLineEdit, "teamName").editingFinished.emit()
+                QLineEdit, schema.TEAM_NAME_KEY).editingFinished.emit()
 
         for pw in self.playerWidgets:
             pw.findChild(QLabel, "title").setVisible(multiPlayer)
@@ -1743,29 +1794,32 @@ class AutonaScoreboardWidget(QWidget):
 
                 # Losers
                 losersLeft = self.team1column.findChild(
-                    QCheckBox, "losers").isChecked()
-                self.team1column.findChild(QCheckBox, "losers").setChecked(
-                    self.team2column.findChild(QCheckBox, "losers").isChecked())
+                    QCheckBox, schema.TEAM_LOSERS_KEY).isChecked()
+                self.team1column.findChild(QCheckBox, schema.TEAM_LOSERS_KEY).setChecked(
+                    self.team2column.findChild(QCheckBox, schema.TEAM_LOSERS_KEY).isChecked())
                 self.team2column.findChild(
-                    QCheckBox, "losers").setChecked(losersLeft)
+                    QCheckBox, schema.TEAM_LOSERS_KEY).setChecked(losersLeft)
 
                 # Team Names
                 teamNameLeft = self.team1column.findChild(
-                    QLineEdit, "teamName").text()
-                self.team1column.findChild(QLineEdit, "teamName").setText(
-                    self.team2column.findChild(QLineEdit, "teamName").text())
+                    QLineEdit, schema.TEAM_NAME_KEY).text()
+                self.team1column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setText(
+                    self.team2column.findChild(QLineEdit, schema.TEAM_NAME_KEY).text())
                 self.team2column.findChild(
-                    QLineEdit, "teamName").setText(teamNameLeft)
+                    QLineEdit, schema.TEAM_NAME_KEY).setText(teamNameLeft)
                 self.team1column.findChild(
-                    QLineEdit, "teamName").editingFinished.emit()
+                    QLineEdit, schema.TEAM_NAME_KEY).editingFinished.emit()
                 self.team2column.findChild(
-                    QLineEdit, "teamName").editingFinished.emit()
+                    QLineEdit, schema.TEAM_NAME_KEY).editingFinished.emit()
 
                 self.individualGameTracker.SwapStageResults()
                 self.teamsSwapped = not self.teamsSwapped
             finally:
-                StateManager.Set(
-                    f"score.{self.scoreboardNumber}.teamsSwapped", self.teamsSwapped)
+                # The flag itself is still this widget's (SetLoadService and
+                # WebServerActions.get_swap read the attribute); this
+                # publishes the mirror overlays render from.
+                AutonaActions.instance.SetTeamsSwapped(
+                    self.scoreboardNumber, self.teamsSwapped)
 
                 for p in self.playerWidgets:
                     p.dataLock.release()
@@ -1938,8 +1992,8 @@ class AutonaScoreboardWidget(QWidget):
         self.scoreDisplay1.setValue(0)
         self.scoreDisplay2.setValue(0)
 
-        self.team1column.findChild(QCheckBox, "losers").setChecked(False)
-        self.team2column.findChild(QCheckBox, "losers").setChecked(False)
+        self.team1column.findChild(QCheckBox, schema.TEAM_LOSERS_KEY).setChecked(False)
+        self.team2column.findChild(QCheckBox, schema.TEAM_LOSERS_KEY).setChecked(False)
 
     def CommandTeamColor(self, team: int, color, force_opponent=False):
         # Resolving a game's preset color *index* to a hex string stays here:

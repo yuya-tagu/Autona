@@ -12,13 +12,14 @@ exactly the same state a GUI launch does.
 
 Two things it deliberately is *not* yet:
 
-- **Not a replacement for the dynamic keypaths.** A large part of
-  ``score.{N}.*`` and all of ``tournamentInfo.*`` is still generated from Qt
-  ``objectName`` values at runtime (known-smells S-14). ``KEY_CATALOG`` below
-  only *enumerates* what those produce; replacing the generation with catalog
-  lookups is Step 5 of docs/changes/headless-core-redesign.md. Nothing reads
-  the catalog to decide behaviour, so it cannot break the app -- it is
-  documentation with a type.
+- **Not a replacement for *every* dynamic keypath.** Step 5 is converting
+  them widget by widget. The SCORE panel's board-level and team-card inputs
+  are done (``SCORE_MATCH_FIELDS`` / ``SCORE_TEAM_INPUT_KEYS`` below are read
+  by ``AutonaActions`` and by ``AutonaScoreboardWidget``); the player subtree
+  and all of ``tournamentInfo.*`` are still generated from Qt ``objectName``
+  values at runtime (known-smells S-14, and ``DYNAMIC_KEY_FAMILIES`` below is
+  the remaining inventory). For those, ``KEY_CATALOG`` only *enumerates* what
+  the widgets produce -- documentation with a type.
 - **Not a migration layer.** There is none yet: a renamed ``objectName``
   still breaks an existing ``out/program_state.json`` silently. When Step 5
   statically names those keys it needs one anchor listing the *old* names to
@@ -158,8 +159,40 @@ COMMENTARY_SLOTS = tuple(comms.SLOTS)
 TOP8_PLAYER_SLOTS = tuple(top8.PLAYER_SLOTS)
 TOP8_MATCH_IDS = tuple(top8.MATCH_IDS)
 
+# ── Statically named keys the SCORE panel writes ─────────────────────────
+#
+# Two of the board's key families used to be produced at runtime from Qt
+# objectNames -- `score.{N}.{combo.objectName()}` for the match bar and
+# `score.{N}.team.{T}.{widget.objectName()}` for the team cards (S-14). Since
+# headless core Step 5 the names live here: AutonaActions writes them, and
+# AutonaScoreboardWidget looks its widgets up *by* them instead of reading
+# them back off the widgets.
+#
+# The strings are unchanged on purpose. An existing out/program_state.json
+# holds keys named after the old objectNames and there is still no migration
+# layer, so renaming one here (or in the .ui) is the same compatibility break
+# it always was -- tests/test_objectname_keypath_contract.py now pins that the
+# two spellings agree.
+
+# The match bar's three editable combos (src/layout/AutonaScoreboardScore.ui).
+# Boards 1 and 2 only: the crew board has no match bar. Named individually
+# (not just indexed into the tuple) for the same reason as TEAM_NAME_KEY /
+# TEAM_LOSERS_KEY below: AutonaScoreboardWidget looks its widgets up *by*
+# these constants (findChild), not by SCORE_MATCH_FIELDS[i].
+PHASE_KEY = "phase"
+POOL_KEY = "pool"
+MATCH_KEY = "match"
+SCORE_MATCH_FIELDS = (PHASE_KEY, POOL_KEY, MATCH_KEY)
+
+# The team card's two operator-editable inputs
+# (src/layout/AutonaScoreboardTeam.ui). Both are also findChild lookup keys.
+TEAM_NAME_KEY = "teamName"
+TEAM_LOSERS_KEY = "losers"
+SCORE_TEAM_INPUT_KEYS = (TEAM_NAME_KEY, TEAM_LOSERS_KEY)
+
 # Board-level keys under score.{N}. Nested groups are listed by their own
-# tuples below rather than expanded here.
+# tuples below rather than expanded here. SCORE_MATCH_FIELDS above is the
+# operator-editable subset of this list (pinned by tests/test_state_schema).
 SCORE_BOARD_KEYS = (
     "best_of",
     "best_of_short_text",
@@ -184,11 +217,11 @@ SCORE_BOARD_KEYS = (
 )
 
 SCORE_TEAM_KEYS = (
-    "teamName",
+    TEAM_NAME_KEY,
     "score",
     "color",
     "logo",
-    "losers",
+    TEAM_LOSERS_KEY,
 )
 
 SCORE_PLAYER_KEYS = (
@@ -334,16 +367,15 @@ KEY_CATALOG = {
     "result_players": (),
 }
 
-# Key families whose final segment comes from a Qt objectName at runtime
-# instead of from this catalog (known-smells S-14). Listed so the Step 5
-# static-key work has the inventory in one place; nothing consumes it yet.
+# Key families whose final segment still comes from a Qt objectName at
+# runtime instead of from this catalog (known-smells S-14). This is the
+# remaining Step 5 inventory: AutonaScoreboardWidget's two families (the team
+# card and the match bar) came off this list when they became
+# SCORE_TEAM_INPUT_KEYS / SCORE_MATCH_FIELDS above. Nothing consumes the
+# tuple; it is the checklist.
 DYNAMIC_KEY_FAMILIES = (
-    ("score.{N}.team.{T}.{objectName}",
-     "AutonaScoreboardWidget -- the team column's QLineEdit / QCheckBox"),
     ("score.{N}.team.{T}.player.{M}.{objectName}",
      "AutonaScoreboardPlayerWidget -- every QLineEdit"),
-    ("score.{N}.{objectName}",
-     "AutonaScoreboardWidget -- the score column's QComboBox"),
     ("tournamentInfo.{objectName}",
      "AutonaTournamentInfoWidget -- every input field"),
 )
@@ -380,6 +412,28 @@ def SeedBoard(number):
     StateManager.Set(f"{prefix}.history_sets.1", {})
     StateManager.Set(f"{prefix}.history_sets.2", {})
     StateManager.Set(f"{prefix}.station_queue", {})
+
+
+def PublishDisplayOptions():
+    """Re-publish all eight display options from their persisted defaults.
+
+    Run when a 1v1 / team board is built, which is what the "SettingsManager
+    is the source of truth, StateManager is what the overlays render" mirror
+    rests on: whatever a previous session left in program_state.json is
+    brought back in line with the settings file the toggles actually persist
+    to. Unlike the missing-keys-only pass in ``SeedPanelState()`` this
+    rewrites every key, because that is what the board's constructor has
+    always done -- it used to spell the loop out inline, over its own copy of
+    the option list.
+
+    Not a ``SaveBlock``: the caller owns the cycle
+    (``AutonaScoreboardManager.EnsureScoreboard`` already wraps the whole
+    construction in one), and ``display_options.*`` is not held, so an
+    unblocked call here would fire eight of them.
+    """
+    for key, default in DISPLAY_OPTION_DEFAULTS.items():
+        path = f"display_options.{key}"
+        StateManager.Set(path, SettingsManager.Get(path, default))
 
 
 def PublishAssetVersion(key: str, path: str):

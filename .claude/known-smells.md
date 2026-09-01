@@ -307,6 +307,17 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, b
 
 **運用ルール**: 上表の objectName を変更/削除する場合は、**先に StateManager のマイグレーション層を追加**してから `tests/test_objectname_keypath_contract.py` の `EXPECTED` を更新する（= S-14 フル移行を将来やる際の入口）。
 
+> **2026-09-01（Headless Core Step 5 第 1 弾）**: `AutonaScoreboardWidget` の 2 族
+> （`AutonaScoreboardTeam.ui` の teamName/losers、`AutonaScoreboardScore.ui` の
+> phase/pool/match）は**静的化済み**。キー名は `src/core/StateSchema.py` の
+> `SCORE_TEAM_INPUT_KEYS` / `SCORE_MATCH_FIELDS` が正本で、`objectName()` からキーを
+> 組む処理はこのファイルから消えた（契約テストが AST で pin）。**キー名は変えていない**
+> ので保存データ互換は不変で、マイグレーション層は依然として不要。ただし
+> `.ui` の objectName は `findChild` の引数として使われ続けるため、**上表の運用ルールは
+> そのまま適用される**（schema 側の文字列も同時に直す必要がある）。
+> 残りは `AutonaScoreboardPlayerWidget` と `AutonaTournamentInfoWidget` の 2 族
+> （`StateSchema.DYNAMIC_KEY_FAMILIES` が残タスク一覧）。
+
 > **AutonaBattleTeam.ui / AutonaTeamPlayer.ui について（2026-08-28）**: これらを読み込んでいた
 > `AutonaTeamBattleWidget` / `AutonaTeamPlayerWidget` はデッドコードとして削除された（S-01 参照）。
 > 孤立していた `.ui` ファイル自体も `src/layout/` から削除済み（2026-08-28）。契約テストの
@@ -436,3 +447,28 @@ GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src
 回帰リスクが見合わないため、PR #82 では見送り（PdM 判断）。将来やるなら上記障害 1 の解消込みで。
 起動時間の観点では、`init()` が `Window.__init__` の GUI 同期区間に残る（起動再設計 §3
 「今後の候補」の対象外＝別枠）。
+
+---
+
+## S-17: ResetAllInputs / ClearScore が match バー（ラウンド名・フェーズ・プール）をクリアしない [P2/D1/S2] 🔴 未着手（既知バグ・PdM 判断待ち）
+
+**根拠**: Headless Core 移行 Step 5-1 の検収（`docs/changes/headless-core-redesign.md` 5-1 節）。
+既存コードの調査中に発見。今回は修正せず pin のみ。
+
+**症状**: `AutonaScoreboardWidget.ClearScore` の先頭ループは
+`self.scoreColumn.findChildren(QComboBox)` だが、phase/pool/match の 3 combo は構築時に
+`scoreColumn` から `scoreBar` へ re-home されるため、board 1/2 では 1 個もマッチしない
+（`WebServerActions._reset_best_of` が best_of スピンボックスについて同じ再親付けをコメントして
+いる。あちらは `AttributeError` で顕在化した）。結果、`reset_match` / `clear_all` /
+`ResetAllInputs`（すべての入力値をリセット ボタン・Web UI 全クリア）は**ラウンド名・フェーズ・
+プールをクリアしない**。`ResetAllInputs` の docstring はかつて「phase/round もクリアする」と
+主張していたが、実態と合っていなかった（今回コメントのみ実態に修正）。
+
+**直さない理由**: `ClearScore` は `NewSetSelected` が新しいセットを読み込む直前にも呼ばれる。
+`SetLoadService.ApplyMatchInfo` は round_name を持たないペイロードに対してラウンド名を意図的に
+そのまま残す設計なので、ここでクリアするようにすると **`round_name` の無いセットを読み込むたびに
+配信中のラウンド名が消える**副作用が生じる。「リセットボタン／全クリアではクリアしてほしいが、
+セット読込の前処理としては残ってほしい」という要求が競合しており、UX 判断が要る
+（例: `ClearScore` を「操作者が押した場合」と「内部前処理」で分岐させる等）。
+
+**Pin**: `tests/test_scoreboard_operations.py::test_clearing_the_score_does_not_clear_the_match_bar_known_gap`

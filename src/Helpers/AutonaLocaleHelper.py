@@ -109,6 +109,22 @@ class AutonaLocaleHelper(QObject):
             AutonaLocaleHelper.fgTermLocale = current_locale[0]
 
     @staticmethod
+    def FormatMatchText(key, number) -> str:
+        """One of the localized set-length texts ("Best of 5" / "First to 3").
+
+        The writer is ``core/Actions.AutonaActions.SetBestOf`` now, which may
+        not import Qt, so the lookup lives here -- next to the tables it
+        reads -- and is injected into the operation by bootstrap_core(), the
+        same arrangement as FormatExportDate below.
+
+        Deliberately unguarded: ``matchNames`` is empty until
+        LoadRoundNames() has run, and ``None.format`` raising is exactly what
+        the old AutonaScoreboardWidget._onBestOfChanged did. Swallowing it
+        would publish a blank BEST OF for the rest of the session instead.
+        """
+        return AutonaLocaleHelper.matchNames.get(key).format(number)
+
+    @staticmethod
     def FormatExportDate(timestamp) -> str:
         """A unix timestamp as the export locale's short date.
 

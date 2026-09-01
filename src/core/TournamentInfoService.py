@@ -153,6 +153,23 @@ class TournamentInfoService:
 
     # ── 表示大会名 (the display name the overlays render) ─────────────────
 
+    def SetDisplayName(self, name) -> bool:
+        """The operator typed a 表示大会名 directly. True if it changed.
+
+        The strongest of the three writers, and the simplest: it just writes.
+        `_lastTournamentName` is deliberately *not* updated -- that ledger
+        means "the tournament name the display name last followed", and
+        leaving it where it is is what makes `FollowDisplayName` below treat
+        the typed value as customised and stop overwriting it.
+
+        The field lives on the SCORE panel (and the crew board), not the
+        EVENT tab, which is why this is an operation rather than part of
+        `ApplyTournamentData`.
+        """
+        return self._SetIfChanged(
+            f"{self.PREFIX}.displayTournamentName",
+            "" if name is None else str(name))
+
     def FollowDisplayName(self, newName):
         """Let the display name follow the tournament name while unmodified.
 

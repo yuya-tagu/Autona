@@ -11,11 +11,24 @@ This test freezes that contract as a snapshot. If it fails, an objectName was
 renamed/removed: add a StateManager migration (or restore the name) BEFORE
 updating the snapshot below.
 
-The test is deliberately runtime-free: it only parses the ``.ui`` XML and reads
-source text, so it never imports the ``src`` package (see
-``tests/conftest.py`` and agent-pitfalls #1). See ``.claude/known-smells.md``
-S-14 and ``.claude/rules/python-widgets.md``.
+Headless core Step 5 is converting the *derivation* widget by widget: for the
+SCORE panel the key names are ``src/core/StateSchema.py`` constants now and
+the widget looks its inputs up by them, instead of reading them back off
+whatever it found. That does not retire this file -- the .ui names and the
+schema names still have to be the same strings, or an existing
+``program_state.json`` stops matching and ``findChild`` stops resolving -- so
+the scoreboard section below pins exactly that agreement, plus the absence of
+the old derivation.
+
+Beyond that agreement the test stays runtime-free: it parses the ``.ui`` XML
+and reads source text. The one import it does make (inside the test, not at
+collection) is ``src.core.StateSchema``, which is Qt-free and side-effect-free
+by construction -- ``tests/test_core_qt_free.py`` and
+``tests/test_import_side_effects.py`` pin both. ``src`` itself is still never
+imported wholesale (agent-pitfalls #1). See ``.claude/known-smells.md`` S-14
+and ``.claude/rules/python-widgets.md``.
 """
+import ast
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -88,6 +101,72 @@ def test_keypath_objectnames_unchanged():
             "Update EXPECTED only after confirming a StateManager migration "
             "covers any rename/removal. See known-smells S-14."
         )
+
+
+# ── The scoreboard's static keypaths (headless core Step 5) ──────────────
+#
+# The two families AutonaScoreboardWidget used to derive at runtime --
+# score.{N}.{combo.objectName()} and score.{N}.team.{T}.{widget.objectName()}
+# -- are StateSchema constants now. Two things have to hold for that to be a
+# migration-free change, and both are checked here.
+
+
+def test_the_scoreboard_schema_names_are_the_ui_objectnames():
+    """The strings on both sides of the (now explicit) binding must match.
+
+    The schema names are what gets written to the state, so they have to stay
+    equal to what an existing program_state.json is keyed by -- i.e. the .ui
+    objectNames. They are *also* what findChild() is given, so a disagreement
+    would additionally leave the widget unwired and the key never written.
+    Frozen in EXPECTED above as well, which is what makes a rename fail
+    loudly on both counts.
+    """
+    from src.core import StateSchema as schema
+
+    scoreNames = _object_names(LAYOUT / "AutonaScoreboardScore.ui")
+    assert set(schema.SCORE_MATCH_FIELDS) <= scoreNames, (
+        "StateSchema.SCORE_MATCH_FIELDS names a widget "
+        "AutonaScoreboardScore.ui does not have")
+    assert set(schema.SCORE_MATCH_FIELDS) <= EXPECTED[
+        "AutonaScoreboardScore.ui"]
+
+    teamNames = _object_names(LAYOUT / "AutonaScoreboardTeam.ui")
+    assert set(schema.SCORE_TEAM_INPUT_KEYS) <= teamNames, (
+        "StateSchema.SCORE_TEAM_INPUT_KEYS names a widget "
+        "AutonaScoreboardTeam.ui does not have")
+    assert set(schema.SCORE_TEAM_INPUT_KEYS) <= EXPECTED[
+        "AutonaScoreboardTeam.ui"]
+
+
+def _object_name_calls(relative_path):
+    """Every ``<something>.objectName()`` call in a source file."""
+    tree = ast.parse((PROJECT_ROOT / relative_path).read_text(encoding="utf-8"))
+    return [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "objectName"
+    ]
+
+
+def test_the_scoreboard_no_longer_derives_keypaths_from_objectname():
+    """The `findChildren` + objectName() loops must not come back.
+
+    That pattern is what made the .ui file the state schema: a key existed
+    because a designer named a widget, no catalog could be trusted, and a
+    rename was a silent data-compatibility break rather than a failing test.
+    Read as a syntax tree so the docstrings that *describe* the old pattern
+    do not count as the pattern.
+    """
+    calls = _object_name_calls("src/AutonaScoreboardWidget.py")
+    assert calls == [], (
+        "AutonaScoreboardWidget calls objectName() again (line(s) "
+        f"{sorted(node.lineno for node in calls)}). Key path segments come "
+        "from StateSchema now -- see _WireTeamColumn. If the new call builds "
+        "a StateManager key path, replace it with a StateSchema constant "
+        "instead of reverting this test; if it is a legitimate non-keypath "
+        "use (logging, etc.), add it to an allowlist here instead of "
+        "deleting the assertion.")
 
 
 # objectNames assigned programmatically (not in .ui) that also feed keypaths.

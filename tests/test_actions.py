@@ -325,6 +325,169 @@ def test_team_color_is_held_like_the_rest_of_the_board(actions, heldBoard, spy):
     assert SM.revision == revision
 
 
+# ── the match bar (headless core Step 5) ─────────────────────────────────
+#
+# `phase` / `pool` / `match` were written by a lambda that used the combo's
+# own objectName as the key segment, so "which fields exist" was a property of
+# a .ui file and "an unknown field" was not a case that could occur. Both are
+# decidable here now.
+
+def test_set_match_field_writes_each_of_the_three_keys(actions, heldBoard):
+    for field, value in (("phase", "Bracket"),
+                         ("pool", "Pool A"),
+                         ("match", "Winners Final")):
+        assert actions.SetMatchField(BOARD, field, value) is True
+        assert SM.Get(f"{PREFIX}.{field}") == value
+
+
+def test_set_match_field_accepts_exactly_the_schema_field_list(actions,
+                                                               heldBoard):
+    for field in schema.SCORE_MATCH_FIELDS:
+        assert actions.SetMatchField(BOARD, field, "x") is True
+    # Real board keys, but not fields of the match bar: writing them from
+    # here would bypass the operations that own them.
+    for field in ("best_of", "teamsSwapped", "score", "", None):
+        assert actions.SetMatchField(BOARD, field, "x") is False
+    assert SM.Get(f"{PREFIX}.best_of") is None
+
+
+def test_set_match_field_writes_a_cleared_field_as_an_empty_string(
+        actions, heldBoard):
+    # The overlays render the key; unsetting it would leave them showing the
+    # previous round for a set that has none.
+    actions.SetMatchField(BOARD, "match", "Winners Final")
+    assert actions.SetMatchField(BOARD, "match", None) is True
+    assert SM.Get(f"{PREFIX}.match") == ""
+
+
+def test_rewriting_an_unchanged_field_does_not_light_the_apply_button(
+        actions, heldBoard, spy):
+    """The behaviour the Qt widgets used to provide for free.
+
+    setCurrentText() / setChecked() emit nothing when the value has not
+    moved, so re-asserting a field (ClearScore on an already-clear board, a
+    re-loaded set, a focus-out with nothing typed) never marked the board
+    dirty. The write does not go through the widget any more, so the guard
+    has to be in the operation -- same rule as SetLoadService._SetIfChanged.
+    """
+    actions.SetMatchField(BOARD, "match", "Winners Final")
+    actions.ApplyChanges(BOARD)
+    spy.held_updates.clear()
+    assert SM.HasPendingChanges(PREFIX) is False
+
+    assert actions.SetMatchField(BOARD, "match", "Winners Final") is False
+
+    assert SM.HasPendingChanges(PREFIX) is False
+    assert spy.held_updates_for(PREFIX) == []
+
+
+# ── team card fields ─────────────────────────────────────────────────────
+
+def test_set_team_name_writes_the_display_team(actions, heldBoard):
+    assert actions.SetTeamName(BOARD, 2, "Alpha") is True
+    assert SM.Get(f"{PREFIX}.team.2.teamName") == "Alpha"
+
+
+def test_clearing_a_team_name_writes_an_empty_string(actions, heldBoard):
+    actions.SetTeamName(BOARD, 1, "Alpha")
+    assert actions.SetTeamName(BOARD, 1, None) is True
+    assert SM.Get(f"{PREFIX}.team.1.teamName") == ""
+
+
+def test_set_team_name_ignores_an_unknown_team(actions, heldBoard):
+    assert actions.SetTeamName(BOARD, 3, "Alpha") is False
+    assert SM.Get(f"{PREFIX}.team.3") is None
+
+
+def test_set_team_losers_writes_a_bool(actions, heldBoard):
+    # The Qt caller hands over a checkbox state; everything else can hand
+    # over whatever a query string parsed to.
+    assert actions.SetTeamLosers(BOARD, 1, "yes") is True
+    assert SM.Get(f"{PREFIX}.team.1.losers") is True
+    assert actions.SetTeamLosers(BOARD, 1, 0) is True
+    assert SM.Get(f"{PREFIX}.team.1.losers") is False
+
+
+def test_set_team_losers_ignores_an_unknown_team(actions, heldBoard):
+    assert actions.SetTeamLosers(BOARD, 0, True) is False
+    assert SM.Get(f"{PREFIX}.team.0") is None
+
+
+def test_set_teams_swapped_publishes_the_mirror(actions, heldBoard):
+    actions.SetTeamsSwapped(BOARD, True)
+    assert SM.Get(f"{PREFIX}.teamsSwapped") is True
+    actions.SetTeamsSwapped(BOARD, False)
+    assert SM.Get(f"{PREFIX}.teamsSwapped") is False
+
+
+# ── best of ──────────────────────────────────────────────────────────────
+
+def test_set_best_of_publishes_every_derived_key_in_one_cycle(
+        actions, heldBoard, spy):
+    actions.SetBestOf(BOARD, 5)
+
+    assert SM.Get(f"{PREFIX}.best_of") == 5
+    assert SM.Get(f"{PREFIX}.best_of_short_text") == "BO5"
+    assert SM.Get(f"{PREFIX}.first_to") == 3
+    assert SM.Get(f"{PREFIX}.first_to_short_text") == "FT3"
+    # The long forms are localized, so the wording is not a contract -- the
+    # number is. A truthy check would pass on an unformatted template.
+    assert "5" in SM.Get(f"{PREFIX}.best_of_text")
+    assert "3" in SM.Get(f"{PREFIX}.first_to_text")
+    # Six keys, one fact, one save cycle: an overlay must never render BO5
+    # beside FT2.
+    assert spy.held_updates_for(PREFIX) == [PREFIX]
+
+
+def test_best_of_zero_blanks_the_long_texts_only(actions, heldBoard):
+    actions.SetBestOf(BOARD, 3)
+    actions.SetBestOf(BOARD, 0)
+
+    # 0 means "not set" -- the overlay shows nothing rather than "Best of 0".
+    assert SM.Get(f"{PREFIX}.best_of_text") == ""
+    assert SM.Get(f"{PREFIX}.first_to_text") == ""
+    # The short forms have always been unconditional.
+    assert SM.Get(f"{PREFIX}.best_of_short_text") == "BO0"
+    assert SM.Get(f"{PREFIX}.first_to_short_text") == "FT0"
+
+
+def test_best_of_rounds_the_first_to_up(actions, heldBoard):
+    for bestOf, firstTo in ((1, 1), (3, 2), (5, 3), (7, 4)):
+        actions.SetBestOf(BOARD, bestOf)
+        assert SM.Get(f"{PREFIX}.first_to") == firstTo
+
+
+def test_best_of_uses_the_injected_text_formatter(heldBoard):
+    """The one Qt-shaped part of a set length, handed in from outside.
+
+    The localized "Best of 5" comes from AutonaLocaleHelper.matchNames, whose
+    module imports Qt, so bootstrap_core() injects the lookup instead
+    (AutonaLocaleHelper.FormatMatchText) -- the same arrangement as
+    TournamentInfoService's date format.
+    """
+    calls = []
+
+    def formatter(key, number):
+        calls.append((key, number))
+        return f"<{key}:{number}>"
+
+    AutonaActions(formatMatchText=formatter).SetBestOf(BOARD, 5)
+
+    assert calls == [("best_of", 5), ("first_to", 3)]
+    assert SM.Get(f"{PREFIX}.best_of_text") == "<best_of:5>"
+    assert SM.Get(f"{PREFIX}.first_to_text") == "<first_to:3>"
+
+
+def test_best_of_falls_back_to_the_shipped_english_text(heldBoard):
+    # No formatter = a headless run. Publishing the English default beats
+    # publishing a blank key, and it is the same string the shipped
+    # src/i18n/tournament_term/en.json carries.
+    AutonaActions().SetBestOf(BOARD, 5)
+
+    assert SM.Get(f"{PREFIX}.best_of_text") == "Best of 5"
+    assert SM.Get(f"{PREFIX}.first_to_text") == "First to 3"
+
+
 # ── display options ──────────────────────────────────────────────────────
 
 def test_set_display_option_writes_both_halves_of_the_mirror(actions):

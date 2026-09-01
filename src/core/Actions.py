@@ -16,16 +16,17 @@ Like everything under `src/core` it must stay Qt-free (pinned by
 tests/test_core_qt_free.py), which is also the acceptance test for whether an
 operation belongs here yet: an operation whose *domain* rule needs a Qt object
 to be expressed is not ready to move. Step 3 therefore migrated the writes
-that are self-evident state edits and deliberately left two behind:
+that are self-evident state edits; Step 5 added the SCORE panel's remaining
+field writes (`SetMatchField` / `SetTeamName` / `SetTeamLosers` /
+`SetTeamsSwapped` / `SetBestOf`), which is what took the last
+`StateManager.Set` out of `AutonaScoreboardWidget`. What is still outside:
 
-- **Swap teams.** The player half of a swap is a widget-to-widget data copy
-  (`AutonaScoreboardPlayerWidget.SwapWith`), and `teamsSwapped` is read off
-  the widget by `WebServerActions.get_swap`. It needs the player subtree to
-  be expressible in core first (Step 4/5).
-- **Best of.** `best_of_text` / `first_to_text` are formatted from
-  `AutonaLocaleHelper.matchNames`, a Qt-importing module, and the same
-  handler resizes the individual-game tracker's stage rows. Faithful
-  reproduction needs the locale tables in core, which Step 3 does not do.
+- **Swap teams**, as an operation. The player half of a swap is a
+  widget-to-widget data copy (`AutonaScoreboardPlayerWidget.SwapWith`), and
+  the board's own `teamsSwapped` attribute is still the authority that
+  `SetLoadService` and `WebServerActions.get_swap` read -- `SetTeamsSwapped`
+  below only publishes the mirror. The operation moves with the player
+  subtree (Step 5, player widgets).
 - **The spinbox-driven half of the score.** `AdjustScore` / `ResetScore`
   below are not yet the *only* writers of `score.{n}.team.{t}.score`. Three
   writers live inside core now -- these, the stage tally in
@@ -42,6 +43,13 @@ that are self-evident state edits and deliberately left two behind:
   `GameTrackerService.writingScore`. Nothing outside core re-Sets the score:
   `StageResultsToScore` used to echo the published value back and no longer
   does.
+- **`best_of` as an inversion.** `SetBestOf` owns the six derived keys, but
+  the board's BEST OF spinbox is still the *entry point*: its `valueChanged`
+  calls here and then resizes the stage rows, in one save cycle. Making the
+  state lead instead would put `GameTrackerService.SetStageCount` (which
+  writes) inside the notification for the write that triggered it, i.e. a
+  second held cycle per BO change and a re-entrant one. Left as it is
+  deliberately.
 
 Import side effects: none (agent-pitfalls #1). `bootstrap_core()` creates the
 single instance; nothing is created here at module level.
@@ -54,6 +62,7 @@ that is the point of the layer. The notification that follows a write is
 delivered on the calling thread and crosses to the GUI thread in
 `StateManagerBridge` (Qt's AutoConnection), exactly as before.
 """
+import math
 from types import MappingProxyType
 
 from loguru import logger
@@ -93,6 +102,24 @@ class AutonaActions:
     # drift apart.
     SCORE_MIN = 0
     SCORE_MAX = 99
+
+    # Fallback for the two localized round texts below when nothing injected
+    # a formatter -- i.e. a headless run. Verbatim from the shipped English
+    # table (src/i18n/tournament_term/en.json), so a headless publish has the
+    # same shape as a GUI one instead of a blank key.
+    DEFAULT_MATCH_TEXTS = MappingProxyType({
+        "best_of": "Best of {0}",
+        "first_to": "First to {0}",
+    })
+
+    def __init__(self, formatMatchText=None):
+        # `formatMatchText(key, number) -> str` produces the localized
+        # "Best of 5" / "First to 3" strings. Injected rather than imported
+        # for the same reason TournamentInfoService takes its date format:
+        # the tables live on AutonaLocaleHelper, which imports Qt, and core
+        # may not (tests/test_core_qt_free.py). bootstrap_core() passes
+        # AutonaLocaleHelper.FormatMatchText.
+        self._formatMatchText = formatMatchText
 
     # ── helpers ──────────────────────────────────────────────────────────
 
@@ -142,6 +169,29 @@ class AutonaActions:
             return int(value)
         except (TypeError, ValueError):
             return default
+
+    @staticmethod
+    def _SetIfChanged(key, value) -> bool:
+        """Write `key` only when it would actually change. True if written.
+
+        Same rule, and the same reason, as `SetLoadService._SetIfChanged`
+        (Step 4b): every write under a board's held prefix marks it dirty and
+        lights the 反映 button, so re-writing a value the state already holds
+        would announce an edit the operator did not make. The Qt path used to
+        get this for free -- `setChecked` / `setValue` / `setCurrentText` emit
+        nothing when the value is unchanged -- and the field writes below are
+        reached from paths that deliberately re-assert values (ClearScore,
+        ResetAllInputs, a re-loaded set), so it has to be explicit here.
+        """
+        if StateManager.Get(key, None) == value:
+            return False
+        StateManager.Set(key, value)
+        return True
+
+    def _matchText(self, key, number) -> str:
+        if self._formatMatchText is not None:
+            return self._formatMatchText(key, number)
+        return self.DEFAULT_MATCH_TEXTS[key].format(number)
 
     # ── score ────────────────────────────────────────────────────────────
 
@@ -222,6 +272,126 @@ class AutonaActions:
         # One key, so no SaveBlock -- see AdjustScore.
         StateManager.Set(f"score.{board}.team.{team}.color", color)
         return True
+
+    # ── team card fields (name / losers flag) ────────────────────────────
+    #
+    # Both keys were written by a `findChildren` loop that used each widget's
+    # objectName as the final key segment, which is what made the .ui file
+    # the schema (S-14). The names are `StateSchema.SCORE_TEAM_INPUT_KEYS`
+    # now and these are the operations behind them.
+    #
+    # `team` is the *display* team, i.e. the column the operator is looking
+    # at, already resolved for a swap. `SetLoadService.ApplyTeamName` /
+    # `ApplyLosers` are the set-load counterparts: they take the *set's*
+    # team and run it through `DisplayTeam()` first, and the name one also
+    # re-resolves the team crest. Two writers per key, coordinating through
+    # the state exactly as the three score writers do (see the module
+    # docstring); folding them together needs the swap flag itself to live in
+    # core, which is Step 5's player-widget instalment.
+
+    def SetTeamName(self, board, team, name) -> bool:
+        """Set one team's displayed name. True if the state changed.
+
+        The team crest that goes with it is *not* written here: on the
+        desktop the QLineEdit's second handler
+        (`AutonaScoreboardWidget.ExportTeamLogo` ->
+        `SetLoadService.PublishTeamLogo`) does that, which is the arrangement
+        this replaced and the one the set-load path pairs into
+        `ApplyTeamName`.
+        """
+        team = self._asInt(team, 0)
+        if team not in (1, 2):
+            logger.warning(f"SetTeamName: ignoring team {team}")
+            return False
+        text = "" if name is None else str(name)
+        return self._SetIfChanged(
+            f"score.{self._asInt(board, 0)}.team.{team}."
+            f"{schema.TEAM_NAME_KEY}", text)
+
+    def SetTeamLosers(self, board, team, value) -> bool:
+        """Flag one team as coming from the losers bracket. True if changed.
+
+        Overlays render the flag, and the desktop additionally suffixes
+        " [L]" onto each player's `mergedName`. That second half is the
+        checkbox's *other* handler (`AutonaScoreboardPlayerWidget.SetLosers`,
+        connected per player) and is deliberately not done here -- it writes
+        the player subtree, which is still Qt's.
+        """
+        team = self._asInt(team, 0)
+        if team not in (1, 2):
+            logger.warning(f"SetTeamLosers: ignoring team {team}")
+            return False
+        return self._SetIfChanged(
+            f"score.{self._asInt(board, 0)}.team.{team}."
+            f"{schema.TEAM_LOSERS_KEY}", bool(value))
+
+    def SetTeamsSwapped(self, board, swapped):
+        """Publish which way round a board's two sides currently are.
+
+        A mirror, not the authority: the swap itself is still
+        `AutonaScoreboardWidget.SwapTeams`, whose `teamsSwapped` attribute is
+        what `SetLoadService` and `WebServerActions.get_swap` read. Written
+        unconditionally, because the one caller has just toggled it.
+        """
+        StateManager.Set(
+            f"score.{self._asInt(board, 0)}.teamsSwapped", bool(swapped))
+
+    # ── the match bar (round name / phase / pool) ─────────────────────────
+
+    def SetMatchField(self, board, field, value) -> bool:
+        """Set one of the match bar's three fields. True if it applied.
+
+        `field` is one of `StateSchema.SCORE_MATCH_FIELDS`, which is the
+        board-level half of what used to be objectName-derived. The
+        set-loading path writes the same keys through
+        `SetLoadService.ApplyMatchInfo`, which additionally decides *whether*
+        a payload's blank value means "clear" or "not carried" -- a question
+        an operator typing into the combo does not have.
+        """
+        if field not in schema.SCORE_MATCH_FIELDS:
+            logger.warning(f"SetMatchField: unknown field {field}")
+            return False
+        text = "" if value is None else str(value)
+        return self._SetIfChanged(
+            f"score.{self._asInt(board, 0)}.{field}", text)
+
+    # ── best of ──────────────────────────────────────────────────────────
+
+    def SetBestOf(self, board, value):
+        """Publish a set length and everything derived from it.
+
+        Six keys, one save cycle, because they are one fact: the raw
+        `best_of`, the short forms overlays use in tight spaces (`BO5` /
+        `FT3`), and the localized long forms. 0 means "not set", and the long
+        forms are then blank rather than "Best of 0".
+
+        The caller is expected to resize the individual game tracker's stage
+        rows in the same cycle -- `GameTrackerService.SetStageCount()` is the
+        only thing allowed to, and `AutonaScoreboardWidget._onBestOfChanged`
+        wraps both in one `SaveBlock`. See the module docstring for why the
+        spinbox is still the entry point.
+
+        Raises whatever the injected formatter raises (the Qt one throws when
+        the locale tables have not been loaded yet), inside the block rather
+        than around it, so a failure cannot leave `saveBlocked` positive --
+        which would freeze ./out and the WebSocket feed for the rest of the
+        session (agent-pitfalls #6).
+        """
+        board = self._asInt(board, 0)
+        value = self._asInt(value, 0)
+        firstTo = math.ceil(value / 2)
+        prefix = f"score.{board}"
+        with StateManager.SaveBlock():
+            self._SetIfChanged(f"{prefix}.best_of", value)
+            self._SetIfChanged(f"{prefix}.best_of_short_text", f"BO{value}")
+            self._SetIfChanged(
+                f"{prefix}.best_of_text",
+                self._matchText("best_of", value) if value > 0 else "")
+            self._SetIfChanged(f"{prefix}.first_to", firstTo)
+            self._SetIfChanged(f"{prefix}.first_to_short_text", f"FT{firstTo}")
+            self._SetIfChanged(
+                f"{prefix}.first_to_text",
+                self._matchText("first_to", firstTo) if value > 0 else "")
 
     # ── display options ──────────────────────────────────────────────────
 

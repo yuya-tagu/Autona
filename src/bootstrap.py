@@ -91,10 +91,15 @@ def bootstrap_core():
     # signals here), and after it every widget and the web server. It has to
     # come after StateManager.Initialize() and SettingsManager.Initialize()
     # above, because its methods read and write both. Qt-free by construction
-    # (tests/test_core_qt_free.py), so it needs no QApplication.
+    # (tests/test_core_qt_free.py), so it needs no QApplication -- which is
+    # why the localized BEST OF texts are injected as a callable rather than
+    # imported (see AutonaLocaleHelper.FormatMatchText). The tables it reads
+    # are filled by LoadRoundNames(), which runs later (Window.__init__); the
+    # callable is only invoked when a set length is actually written.
     from .core.Actions import AutonaActions
     if AutonaActions.instance is None:
-        AutonaActions.instance = AutonaActions()
+        AutonaActions.instance = AutonaActions(
+            formatMatchText=AutonaLocaleHelper.FormatMatchText)
 
     # AutonaHotkeys only needs SettingsManager (read at construction time by
     # LoadUserHotkeys); the Windows hotkeys themselves are registered later,
