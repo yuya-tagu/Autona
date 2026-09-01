@@ -181,7 +181,6 @@ from .AutonaHotkeys import AutonaHotkeys
 from .AutonaCommentaryWidget import AutonaCommentaryWidget
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTop8Widget import AutonaTop8Widget
-from .AutonaTournamentInfoWidget import AutonaTournamentInfoWidget
 from .AutonaBoardWidget import AutonaBoardWidget
 from .AutonaFeatureColors import SeedColorState
 from .AutonaSidebar import AutonaSidebar
@@ -193,6 +192,7 @@ from .Workers import *
 from .StateManager import StateManager
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
+from .core.TournamentInfoService import TournamentInfoService
 from .SettingsManager import SettingsManager
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaStatusManager import AutonaStatusManager
@@ -367,18 +367,13 @@ class Window(QMainWindow):
         self.thumbnailSetting = None
         self.resultSetting = None
 
-        tournamentInfo = AutonaTournamentInfoWidget()
-        tournamentInfo.setWindowIcon(QIcon(UI.icon_path('tournament.svg')))
-        # objectName is the stable identity that saveState/restoreState uses to
-        # match docks. It must NOT be translated: a translated objectName changes
-        # with the UI language, so a layout saved in one language fails to restore
-        # in another and the tab order scrambles. The visible tab label comes from
-        # windowTitle (translated) instead.
-        tournamentInfo.setObjectName("Tournament Info")
-        tournamentInfo.setWindowTitle(
-            QApplication.translate("app", "Tournament Info"))
-        self.dockWidgets.append(tournamentInfo)
-
+        # EVENT — lazy since headless core Step 4b: see
+        # _CreateTournamentInfoPanel. It was the last eager panel, and could
+        # only be one because it was the sole writer of tournamentInfo.* —
+        # an operator who never opened it would have had no tournament name
+        # in the state. core/TournamentInfoService is that writer now, wired
+        # below, so the page can be built on first reveal like every other.
+        #
         # STREAM — broadcast-scoped settings (destination, title, stream org
         # assets, YouTube thumbnail). Sits right after EVENT: the tournament
         # metadata and the broadcast prep are both done before the event, in
@@ -444,8 +439,9 @@ class Window(QMainWindow):
         # panel's title (ja: スコアボード入力).
         self._navSections = [
             (QApplication.translate("app", "Setup"), [
-                (tournamentInfo, 'tournament.svg',
-                 QApplication.translate("app", "Tournament Info"), None),
+                (self._CreateTournamentInfoPanel, 'tournament.svg',
+                 QApplication.translate("app", "Tournament Info"),
+                 "tournamentInfo"),
                 (self._CreateStreamPanel, 'megaphone.svg',
                  QApplication.translate("app", "Stream Settings"), "stream"),
             ]),
@@ -605,6 +601,14 @@ class Window(QMainWindow):
             lambda: AutonaTournamentDataProvider.instance.SetTournament(None))
 
         self.sidebar.tournamentButton.setMenu(startggMenu)
+        # ORDER CONSTRAINT: the tournamentInfo.* writer must run before the
+        # readers of that state. Connected here, ahead of the
+        # UpdateTournamentButton hooks below, because the button reads
+        # tournamentInfo.tournamentName out of the state — the EVENT panel
+        # used to provide that ordering by being constructed earlier in this
+        # method, and it is lazy now (headless core Step 4b).
+        AutonaTournamentDataProvider.instance.signals.tournament_data_updated.connect(
+            self._OnTournamentDataUpdated)
         AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
             self.UpdateTournamentButton)
         AutonaTournamentDataProvider.instance.signals.tournament_url_update.connect(
@@ -937,6 +941,12 @@ class Window(QMainWindow):
         with StateManager.SaveBlock():
             schema.SeedPanelState()
 
+            # tournamentInfo.*: the 表示大会名 default, the EVENT tab's text
+            # keys and the tournament icon's cache-bust version. Not part of
+            # the schema seed because the display-name follow rule needs the
+            # service's own "last seen tournament name" bookkeeping.
+            TournamentInfoService.instance.Seed()
+
             # colors.{feature}.* — only the features the operator explicitly
             # set. An unset feature stays absent from the state so the layout
             # JS falls back to the tournament colors SeedPanelState wrote.
@@ -950,6 +960,20 @@ class Window(QMainWindow):
     # combos with completers), and together they filled the window-init ->
     # core-shown gap. Everything the panels used to seed into StateManager at
     # construction time now runs from _SeedPanelState() instead.
+
+    def _CreateTournamentInfoPanel(self):
+        from .AutonaTournamentInfoWidget import AutonaTournamentInfoWidget
+        tournamentInfo = AutonaTournamentInfoWidget()
+        tournamentInfo.setWindowIcon(QIcon(UI.icon_path('tournament.svg')))
+        # objectName is the stable identity that saveState/restoreState uses to
+        # match docks. It must NOT be translated: a translated objectName changes
+        # with the UI language, so a layout saved in one language fails to restore
+        # in another and the tab order scrambles. The visible tab label comes from
+        # windowTitle (translated) instead.
+        tournamentInfo.setObjectName("Tournament Info")
+        tournamentInfo.setWindowTitle(
+            QApplication.translate("app", "Tournament Info"))
+        return tournamentInfo
 
     def _CreateBoardPanel(self):
         board = AutonaBoardWidget()
@@ -1271,6 +1295,37 @@ class Window(QMainWindow):
     def ShowSidebar(self):
         self.sidebar.show()
         self.sidebarExpandButton.hide()
+
+    def _OnTournamentDataUpdated(self, data):
+        """Publish a tournament payload, and report a load failure.
+
+        The Qt half of core/TournamentInfoService: the writing is the
+        service's, and this is here for the one thing it cannot do -- tell
+        the operator that the URL did not load. Owned by the window rather
+        than the EVENT panel because the panel may never be built.
+
+        The display-name override runs after the payload either way, exactly
+        as the two separate connections on the panel used to.
+        """
+        service = TournamentInfoService.instance
+        applied = service.ApplyTournamentData(data)
+        service.ApplyDisplayNameFromSelection(data)
+        if applied:
+            return
+        message = (
+            QApplication.translate(
+                "app", "The tournament URL could not be loaded.") + "\n"
+            + QApplication.translate(
+                "app",
+                "Make sure that your tournament URL is correctly formatted "
+                "and points to an existing event, and try again."))
+        box = QMessageBox(self)
+        box.setWindowIcon(QIcon(UI.icon_path('icon.png')))
+        box.setWindowTitle(QApplication.translate("app", "Error"))
+        box.setText(QApplication.translate("app", "Error"))
+        box.setInformativeText(message)
+        box.setIcon(QMessageBox.Icon.Critical)
+        box.exec()
 
     def UpdateTournamentButton(self, *args):
         # Reflect the loaded tournament name on the sidebar "tournament"

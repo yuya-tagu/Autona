@@ -258,7 +258,7 @@ STARTUP phase=webserver-ready elapsed=6.0s  # WebServer 起動完了（Step 4c �
 
 | 候補 | 内容 | 想定効果 / 論点 |
 |------|------|----------------|
-| TournamentInfo のヘッドレスサービス抽出 | 唯一 eager に残るパネル。`tournamentInfo.*` の書き手を UI から切り離せば lazy 化できる | window-init → core-shown をさらに削る。state 書き込み経路の再設計を伴う |
+| ~~TournamentInfo のヘッドレスサービス抽出~~ **✅ 実施済み（2026-08-31）** | `tournamentInfo.*` の書き手を `src/core/TournamentInfoService.py` へ移し、EVENT パネルを遅延構築化した（[headless-core-redesign.md](headless-core-redesign.md) Step 4b）。eager パネルはスコアボードのみ | window-init → core-shown の短縮。**ただしサイドバーの既定インデックスは 0 = EVENT** なので、最後に EVENT を開いていた／新規インストールの起動では `_EnsurePanelAt(0)` が結局そこで建てる。効果が出るのは直前に別ページ（SCORE 等）を開いていた場合。実測は未取得 |
 | import-src の遅延化 | 〜2.8s。`src/Autona.py` の module-level import ブロックを関数内 import へ寄せる | 効果は大きいが `bootstrap_core()` 前提の順序に触るため要注意（agent-pitfalls #2） |
 | PyInstaller 側の詰め | gate + splash 〜2.6s の大半は Qt DLL ロード。excludes 追加・onedir 構成の見直し | dev モードでは測れない。frozen 実測が前提 |
 | 選手 DB / ゲームアセットのワーカー化 | Step 4 の項目 3・5（未実施）。`core-shown` ではなく「操作可能になるまで」の短縮 | 体感改善。`SetupModel` のモデル差し替えは agent-pitfalls #13 に注意 |

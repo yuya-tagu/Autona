@@ -22,6 +22,7 @@ from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
+from .core.SetLoadService import SetLoadService
 from .StateManagerBridge import StateManagerBridge
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaStatsUtil import AutonaStatsUtil
@@ -107,6 +108,21 @@ class AutonaScoreboardWidget(QWidget):
         # (the individual game tracker clears/sets stage rows), which produce
         # another notification. Set before anything can notify us.
         self._syncingScore = False
+
+        # Which way round the two sides currently are. Declared here rather
+        # than further down (where it used to sit, after the combos) because
+        # setLoad below reads it through a callable and the state
+        # notifications that drive _SyncSetFields can arrive from the moment
+        # this widget connects to the bridge. `score.{n}.teamsSwapped`
+        # mirrors it; SwapTeams is the single place that moves both.
+        self.teamsSwapped = False
+
+        # Set loading (Start.gg payloads, /post_data, set_route): what a
+        # loaded set means for this board's state lives in core since
+        # headless core Step 4b. This widget renders the result -- see
+        # _SyncSetFields / _SyncScoreDisplays.
+        self.setLoad = SetLoadService(
+            self.scoreboardNumber, lambda: self.teamsSwapped)
 
         # Same skeleton AutonaScoreboardManager writes for the boards that are
         # not built yet, from the same place (headless core Step 2).
@@ -720,8 +736,6 @@ class AutonaScoreboardWidget(QWidget):
                 "2", self.team2column.findChild(QLineEdit, "teamName").text())
         )
 
-        self.teamsSwapped = False
-
         # Add default and user tournament phase title files. Templated
         # entries (the "group" pool template, "予選プール{0}") belong to the
         # pool combo now that the pool is a separate state key.
@@ -865,7 +879,75 @@ class AutonaScoreboardWidget(QWidget):
         # Live-but-unpublished data under a held prefix changed. Only this
         # board's own subtree is of interest here.
         if prefix == self.statePrefix:
+            self._SyncSetFields()
             self._SyncScoreDisplays()
+
+    def _SyncSetFields(self):
+        """Render the set-level state into the match bar and team cards.
+
+        The counterpart of _SyncScoreDisplays for everything a loaded set
+        carries besides the score: round / phase / pool, the losers flags and
+        the team names. Since headless core Step 4b the writer is
+        core/SetLoadService (a Start.gg set load, /post_data, set_route), and
+        these widgets show what it wrote instead of being poked into writing
+        it themselves.
+
+        This method writes nothing -- that is what makes it safe to run on
+        every held notification without a re-entrancy guard. Each widget is
+        updated inside a QSignalBlocker, because the handlers it would
+        otherwise fire (the objectName-to-keypath lambdas, still the write
+        path for a human editing the field) would write the value straight
+        back. That is a real echo for the combos' currentIndexChanged; for
+        the teamName QLineEdit it is defensive rather than closing a live
+        path -- setText() does not itself emit editingFinished (only
+        Return/focus-out do) -- but the blocker is kept for symmetry with
+        the rest of this method.
+
+        A field the operator currently has focus in is left alone: a
+        notification arriving mid-edit must not yank the text out from under
+        the caret. Same rule as _syncDisplayTournamentNameEdit.
+        """
+        for combo, key in ((self.matchCombo, "match"),
+                           (self.phaseCombo, "phase"),
+                           (self.poolCombo, "pool")):
+            value = StateManager.Get(f"{self.statePrefix}.{key}", None)
+            if not isinstance(value, str) or combo.currentText() == value:
+                continue
+            edit = combo.lineEdit()
+            if edit is not None and edit.hasFocus():
+                continue
+            # Both objects: currentIndexChanged is the combo's, while
+            # editingFinished belongs to the line edit, and each of them is
+            # connected to the same write.
+            with QSignalBlocker(combo):
+                if edit is not None:
+                    edit.blockSignals(True)
+                try:
+                    combo.setCurrentText(value)
+                finally:
+                    if edit is not None:
+                        edit.blockSignals(False)
+
+        for team, column in ((1, self.team1column), (2, self.team2column)):
+            # findChild rather than a cached reference: the losers checkbox
+            # is re-homed into the solo player's row on the singles board
+            # (_placeLosersOnDetailsRow), and a cached wrapper would outlive
+            # the C++ object if its host were ever torn down.
+            losers = StateManager.Get(
+                f"{self.statePrefix}.team.{team}.losers", None)
+            check = column.findChild(QCheckBox, "losers")
+            if (isinstance(losers, bool) and check is not None
+                    and check.isChecked() != losers):
+                with QSignalBlocker(check):
+                    check.setChecked(losers)
+
+            name = StateManager.Get(
+                f"{self.statePrefix}.team.{team}.teamName", None)
+            edit = column.findChild(QLineEdit, "teamName")
+            if (isinstance(name, str) and edit is not None
+                    and edit.text() != name and not edit.hasFocus()):
+                with QSignalBlocker(edit):
+                    edit.setText(name)
 
     def _SyncScoreDisplays(self):
         """Bring the two score spinboxes in line with the state.
@@ -1315,12 +1397,11 @@ class AutonaScoreboardWidget(QWidget):
                 linkRow.addWidget(losersCheck)
 
     def ExportTeamLogo(self, team, value):
-        if os.path.exists(f"./user_data/team_logo/{value.lower()}.png"):
-            StateManager.Set(f"score.{self.scoreboardNumber}.team.{team}.logo",
-                             f"./user_data/team_logo/{value.lower()}.png")
-        else:
-            StateManager.Set(
-                f"score.{self.scoreboardNumber}.team.{team}.logo", None)
+        # The team-name QLineEdit's editingFinished handler (a human typing).
+        # The rule itself -- which file backs which name -- is core's, so a
+        # name written by a set load resolves its crest the same way
+        # (SetLoadService.ApplyTeamName).
+        self.setLoad.PublishTeamLogo(team, value)
 
     def GenerateThumbnail(self, quiet_mode=False, disable_msgbox=False):
         if not disable_msgbox:
@@ -1728,8 +1809,7 @@ class AutonaScoreboardWidget(QWidget):
 
         logger.info("STATION SETS LOADED -----------------------------")
         logger.info(data)
-        with StateManager.SaveBlock():
-            StateManager.Set(f"score.{self.scoreboardNumber}.station_queue", data)
+        self.setLoad.SetStationQueue(data)
 
     def NewSetSelected(self, data):
         if not SettingsManager.Get("general.disable_autoupdate", False):
@@ -1776,19 +1856,13 @@ class AutonaScoreboardWidget(QWidget):
                 # A new set was loaded
                 self.lastSetSelected = data.get("id")
 
-                # Add general set data to object: id, auto update type, station/stream identifier, etc
-                StateManager.Set(
-                    f'score.{self.scoreboardNumber}.set_id', data.get("id"))
-
-                StateManager.Set(
-                    f'score.{self.scoreboardNumber}.auto_update', data.get("auto_update"))
-
-                if self.lastStationSelected:
-                    StateManager.Set(
-                        f'score.{self.scoreboardNumber}.station', self.lastStationSelected.get('identifier'))
-                else:
-                    StateManager.Set(
-                        f'score.{self.scoreboardNumber}.station', None)
+                # Which set this board is following, and how (id, auto
+                # update type, station/stream identifier).
+                self.setLoad.BeginSet(
+                    data.get("id"),
+                    data.get("auto_update"),
+                    self.lastStationSelected.get('identifier')
+                    if self.lastStationSelected else None)
 
                 AutonaTournamentDataProvider.instance.GetMatch(
                     self, data["id"], overwrite=True, no_mains=data.get("no_mains") if data.get("no_mains") != None else False)
@@ -1816,12 +1890,7 @@ class AutonaScoreboardWidget(QWidget):
         if clear_variables:
             self.lastSetSelected = None
             self.lastStationSelected = None
-
-            with StateManager.SaveBlock():
-                StateManager.Set(
-                    f'score.{self.scoreboardNumber}.auto_update', None)
-                StateManager.Set(f'score.{self.scoreboardNumber}.set_id', None)
-                StateManager.Set(f'score.{self.scoreboardNumber}.station', None)
+            self.setLoad.ClearSetTracking()
 
         self.timerLayout.setVisible(False)
 
@@ -1897,162 +1966,174 @@ class AutonaScoreboardWidget(QWidget):
 
     # Modifies the current set data. Does not check for id, so do not call this with data that may lead to another hbox incident
     def ChangeSetData(self, data):
-        StateManager.BlockSaving()
+        """Apply a set payload to this board.
 
-        try:
-            round_name = data.get("round_name")
-            if round_name:
-                self.matchCombo.setCurrentText(round_name)
-                self.matchCombo.lineEdit().editingFinished.emit()
-                StateManager.Set(f"score.{self.scoreboardNumber}.match", round_name)
-            # Also persist the raw English long-form round text (e.g.
-            # "Winners Final"); used for English-only outputs like the
-            # YouTube video title generator.
-            StateManager.Set(
-                f"score.{self.scoreboardNumber}.match_en",
-                data.get("round_name_en") or "",
-            )
+        The 140 lines this used to be were a form being poked: a combo's
+        text set so its editingFinished lambda would write the round name,
+        the score spinboxes driven so their valueChanged would write the
+        score, each of them re-deriving "which side is which after a swap"
+        from its own reversed list. All of that is core/SetLoadService since
+        headless core Step 4b, and the widgets follow the state through
+        _SyncSetFields / _SyncScoreDisplays.
 
-            tournament_phase = data.get("tournament_phase")
-            if tournament_phase:
-                self.phaseCombo.setCurrentText(tournament_phase)
-                self.phaseCombo.lineEdit().editingFinished.emit()
-                StateManager.Set(f"score.{self.scoreboardNumber}.phase", tournament_phase)
+        What is still done here is what still needs Qt:
 
-            # Key-presence check (not truthiness): sets from a pool-less phase
-            # carry tournament_pool = "" and must CLEAR the previous pool,
-            # while a phase-only web edit (no tournament_pool key) must not
-            # touch it.
-            if "tournament_pool" in data:
-                tournament_pool = data.get("tournament_pool") or ""
-                self.poolCombo.setCurrentText(tournament_pool)
-                self.poolCombo.lineEdit().editingFinished.emit()
-                StateManager.Set(f"score.{self.scoreboardNumber}.pool", tournament_pool)
+        - **best of**, whose derived texts come from
+          AutonaLocaleHelper.matchNames and whose handler resizes the stage
+          rows (left behind by Step 3 for the same reason);
+        - **player data**, which SetData resolves against the country,
+          character and skin models (Step 5). Which team an entrant lands on
+          is core's answer (SetLoadService.DisplayTeam), so the swap rule is
+          stated once instead of four times.
 
-            scoreContainers = [self.scoreDisplay1, self.scoreDisplay2]
-            if self.teamsSwapped:
-                scoreContainers.reverse()
+        One save cycle for the whole payload, as before.
+        """
+        with StateManager.SaveBlock():
+            service = self.setLoad
+            service.ApplyMatchInfo(data)
+            service.ApplyScores(data)
 
-            if data.get("reset_score"):
-                scoreContainers[0].setValue(0)
-                scoreContainers[1].setValue(0)
-            if not SettingsManager.Get("general.disable_scoreupdate", False):
-                if data.get("team1score") is not None:
-                    if data.get("team1score") != 0:
-                        scoreContainers[0].setValue(data.get("team1score"))
-                    else:
-                        scoreContainers[0].setValue(0)
-                if data.get("team2score") is not None:
-                    if data.get("team2score") != 0:
-                        scoreContainers[1].setValue(data.get("team2score"))
-                    else:
-                        scoreContainers[1].setValue(0)
-            
             if data.get("bestOf"):
                 self.bestOfSpin.setValue(data.get("bestOf"))
 
-            losersContainers = [
-                self.team1column.findChild(QCheckBox, "losers"),
-                self.team2column.findChild(QCheckBox, "losers")
-            ]
-            if self.teamsSwapped:
-                losersContainers.reverse()
-
             # Stream URL is user-managed via the dropdown; do not overwrite
             # it when loading a set from StartGG.
-
-            if data.get("team1losers") is not None:
-                losersContainers[0].setChecked(data.get("team1losers"))
-            if data.get("team2losers") is not None:
-                losersContainers[1].setChecked(data.get("team2losers"))
+            service.ApplyLosers(data)
+            self._ApplyLosersToPlayers(data)
 
             if data.get("entrants"):
-                self.playerNumber.setValue(
-                    len(max(data.get("entrants"), key=lambda x: len(x))))
+                self._ApplyEntrants(data)
+            elif not self._ApplySinglePlayerData(data):
+                # Neither entrants nor a team/player target: nothing to
+                # apply, and the old code returned here -- before
+                # bracket_type. Kept as it was; a payload carrying a bracket
+                # type always carries entrants too.
+                return
 
-                # Lock all player widgets
-                for p in self.playerWidgets:
-                    p.dataLock.acquire()
-
-                try:
-                    for t, team in enumerate(data.get("entrants")):
-                        teamInstances = [self.team1playerWidgets,
-                                         self.team2playerWidgets]
-                        if self.teamsSwapped:
-                            teamInstances.reverse()
-                        teamInstance = teamInstances[t]
-
-                        if len(team) > 1:
-                            teamColumns = [self.team1column, self.team2column]
-                            teamNames = [
-                                data.get("p1_name"), data.get("p2_name")]
-                            if self.teamsSwapped:
-                                teamNames.reverse()
-                            teamColumns[t].findChild(
-                                QLineEdit, "teamName").setText(teamNames[t])
-                            teamColumns[t].findChild(
-                                QLineEdit, "teamName").editingFinished.emit()
-
-                        for p, player in enumerate(team):
-                            if data.get("overwrite"):
-                                # Overwrite path already applies mains via the full
-                                # player dict; the old code followed this with a
-                                # redundant mains-only SetData that doubled the
-                                # per-player cost on set load. Using elif so the
-                                # mains-only path only runs in the non-overwrite case.
-                                teamInstance[p].SetData(player, False, True, data.get(
-                                    "no_mains") if data.get("no_mains") != None else False)
-                            elif data.get("has_selection_data") and data.get("no_mains") != True:
-                                player_mains_only = {
-                                    "mains": player.get("mains")
-                                }
-                                teamInstance[p].SetData(player_mains_only, True, False)
-                except Exception as e:
-                    logger.error(f"Error while setting entrants: {e}")
-                finally:
-                    for p in self.playerWidgets:
-                        p.dataLock.release()
-            else:
-                try:
-                    # Lock all player widgets
-                    for p in self.playerWidgets:
-                        p.dataLock.acquire()
-
-                    if not data.get("team") or not data.get("player"):
-                        return
-
-                    team = int(data.get("team"))-1
-                    player = int(data.get("player"))-1
-
-                    teamInstances = [self.team1playerWidgets,
-                                     self.team2playerWidgets]
-                    teamInstance = teamInstances[team]
-
-                    teamInstance[player].SetData(
-                        data.get("data"), False, False)
-                    if data.get("data", {}).get("savePlayerToDb", False):
-                        teamInstance[player].SavePlayerToDB()
-                except Exception as e:
-                    logger.error(f"Error while setting entrants: {e}")
-                finally:
-                    for p in self.playerWidgets:
-                        p.dataLock.release()
-
-            if data.get("bracket_type"):
-                StateManager.Set(f"score.bracket_type",
-                                 data.get("bracket_type"))
+            if service.ApplyBracketType(data):
                 self.stats.signals.UpsetFactorCalculation.emit()
+
+    def _ApplyLosersToPlayers(self, data):
+        """Carry a loaded losers flag into the player widgets themselves.
+
+        The checkbox's `toggled` was doing two jobs at once: writing
+        `team.{t}.losers`, and running every player widget's SetLosers, which
+        re-exports `mergedName` with the " [L]" suffix the thumbnail
+        generator renders. Only the first half moved to core --
+        _SyncSetFields sets the checkbox with its signals blocked, because it
+        is the render side and may not write -- so without this the loaded
+        flag reached the state and the checkbox but not the names, and
+        `p.losers` stayed False against a checked box for the rest of the
+        session.
+
+        Called from ChangeSetData's save block, right after the write and
+        before the entrant rosters, which is where the checkbox used to fire:
+        SetData's own mergedName export then already sees the flag.
+
+        NOTE (pre-existing, unchanged): player widgets *created* by the
+        player-count change further down start at losers=False and are only
+        connected to the checkbox from then on, so a set that also grows the
+        roster leaves the new widgets unflagged. That was equally true when
+        the checkbox drove this, and fixing it belongs with the player
+        subtree (Step 5).
+        """
+        for setTeam in (1, 2):
+            value = data.get(f"team{setTeam}losers")
+            if value is None:
+                continue
+            value = bool(value)
+            team = self.setLoad.DisplayTeam(setTeam)
+            widgets = (self.team1playerWidgets if team == 1
+                       else self.team2playerWidgets)
+            for player in widgets:
+                # Only on change, because that is what `toggled` gave us:
+                # SetLosers re-exports mergedName unconditionally, so calling
+                # it for a flag that did not move would mark the board dirty
+                # and light the 反映 button on a re-load of the same set.
+                if player.losers != value:
+                    player.SetLosers(value)
+
+    def _ApplyEntrants(self, data):
+        """Pour a set's two entrant rosters into the player widgets."""
+        entrants = data.get("entrants")
+        self.playerNumber.setValue(len(max(entrants, key=lambda x: len(x))))
+
+        # Lock all player widgets
+        for p in self.playerWidgets:
+            p.dataLock.acquire()
+
+        try:
+            # Kept exactly as it was, `!=` included: no_mains reaches here
+            # from a provider payload, and `1 != True` is False in Python --
+            # an `is True` here would quietly change how a non-bool truthy
+            # value behaves in the two branches below.
+            noMains = data.get("no_mains")
+            if noMains is None:
+                noMains = False
+            for t, team in enumerate(entrants):
+                stateTeam = self.setLoad.DisplayTeam(t + 1)
+                teamInstance = (self.team1playerWidgets if stateTeam == 1
+                                else self.team2playerWidgets)
+
+                if len(team) > 1:
+                    # The team name and the crest that follows from it are
+                    # written together by the service; the QLineEdit picks
+                    # the name up from _SyncSetFields.
+                    self.setLoad.ApplyTeamName(
+                        t + 1, data.get(f"p{t + 1}_name"))
+
+                for p, player in enumerate(team):
+                    if data.get("overwrite"):
+                        # Overwrite path already applies mains via the full
+                        # player dict; the old code followed this with a
+                        # redundant mains-only SetData that doubled the
+                        # per-player cost on set load. Using elif so the
+                        # mains-only path only runs in the non-overwrite case.
+                        teamInstance[p].SetData(player, False, True, noMains)
+                    elif data.get("has_selection_data") and noMains != True:
+                        teamInstance[p].SetData(
+                            {"mains": player.get("mains")}, True, False)
+        except Exception as e:
+            logger.error(f"Error while setting entrants: {e}")
         finally:
-            StateManager.ReleaseSaving()
+            for p in self.playerWidgets:
+                p.dataLock.release()
+
+    def _ApplySinglePlayerData(self, data):
+        """Apply a one-player payload (set_team_data). False if it had none.
+
+        Unlike the entrants path this addresses the state teams directly:
+        the caller names the team it means, and a swap has already been
+        applied to what it is looking at.
+        """
+        for p in self.playerWidgets:
+            p.dataLock.acquire()
+
+        try:
+            if not data.get("team") or not data.get("player"):
+                return False
+
+            team = int(data.get("team")) - 1
+            player = int(data.get("player")) - 1
+
+            teamInstances = [self.team1playerWidgets,
+                             self.team2playerWidgets]
+            teamInstance = teamInstances[team]
+
+            teamInstance[player].SetData(data.get("data"), False, False)
+            if data.get("data", {}).get("savePlayerToDb", False):
+                teamInstance[player].SavePlayerToDB()
+        except Exception as e:
+            logger.error(f"Error while setting entrants: {e}")
+        finally:
+            for p in self.playerWidgets:
+                p.dataLock.release()
+        return True
 
     def UpdateSetData(self, data):
-        # Do not update the scoreboard on empty data
-        if data is None or len(data) == 0 or data.get("id") == None:
-            return
-
-        # If you switched sets and it was still finishing an async update call
-        # Avoid loading data from the previous set
-        if str(data.get("id")) != str(self.lastSetSelected):
+        # An empty payload, or one answering for a set the operator has
+        # already navigated away from (an in-flight fetch resolving late).
+        if SetLoadService.IsStaleUpdate(data, self.lastSetSelected):
             return
 
         if SettingsManager.Get("general.disable_overwrite", False):

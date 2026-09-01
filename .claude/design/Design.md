@@ -658,14 +658,18 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 
 `Autona.py` の `Window`（QMainWindow、`STATE_VERSION = 22`）が以下のパネルを管理する。
 
-**構築タイミング**: 起動時に構築されるのは `Tournament Info` と `Scoreboard`（アクティブな
-`battle_format` の board 1 面のみ）だけで、**残りのパネルは初回表示時にファクトリで構築**される
-（起動再設計 Step 4b。§4.1.1）。「デフォルト表示」列は QSettings に保存された最後の選択に
-依存し、初期値は先頭ページ。
+**構築タイミング**: 起動時に構築されるのは `Scoreboard`（アクティブな `battle_format` の
+board 1 面のみ）だけで、**残りのパネルは初回表示時にファクトリで構築**される
+（起動再設計 Step 4b + headless core Step 4b。§4.1.1）。`Tournament Info` も
+2026-08-31 に遅延構築へ移行した — `tournamentInfo.*` の書き手が
+`src/core/TournamentInfoService.py`（`bootstrap_core()` 生成）になり、パネル不在でも
+大会データが state に入るようになったため。ただし先頭ページなので、最後に EVENT を
+開いていた／新規インストールの起動では結局そこで構築される。「デフォルト表示」列は
+QSettings に保存された最後の選択に依存し、初期値は先頭ページ。
 
 | # | objectName | クラス | 主な責務 | 入力先 (Set) | 表示元 (Get) | デフォルト表示 |
 |---|------------|-------|---------|------------|------------|--------------|
-| 1 | `Tournament Info` | `AutonaTournamentInfoWidget` | 大会名・日付・URL など大会メタデータの編集、大会アイコン / バナー | `tournamentInfo.*` | `tournamentInfo.*` | ✓（最初に表示） |
+| 1 | `Tournament Info` | `AutonaTournamentInfoWidget` | 大会名・日付・URL など大会メタデータの編集、大会アイコン / バナー。**書き込みの正本は `src/core/TournamentInfoService.py`**（Start.gg ペイロード・表示大会名・`logoVersion`）で、パネルは手入力と描画のみ | `tournamentInfo.*`（手入力） | `tournamentInfo.*` | ✓（最初に表示） |
 | 1.5 | `Stream Settings` | `AutonaStreamSettingsWidget` | 配信先・配信タイトル・配信団体アイコン / サムネイルの登録・配信サムネイル生成 | `stream.*` | `stream.*`, `tournamentInfo.*` | — |
 | 2 | `Thumbnail Settings` | `AutonaThumbnailSettingsWidget` | サムネイルテンプレ選択・背景指定・プレビュー・PNG/JPG 保存・クリップボードコピー | `thumbnail_config.*`（SettingsManager） | `score.*`, `tournamentInfo.*`, `thumbnail_config.*` | ✓（条件付き） |
 | 3 | `Result Settings` | `AutonaResultSettingsWidget` | リザルトレイアウト選択・選手入力・プレビュー・PNG/JPG 保存・クリップボードコピー | `result_config.*`, `result_players` | `tournamentInfo.*`, `result_players` | ✓ |

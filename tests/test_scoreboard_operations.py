@@ -892,3 +892,308 @@ def test_close_with_a_loaded_set_still_stops_the_timers(autonaApp):
 
     assert not board.autoUpdateTimer.isActive()
     assert not board.timeLeftTimer.isActive()
+
+
+# ── set loading (headless core Step 4b) ──────────────────────────────────
+#
+# The board no longer *is* the set data: core/SetLoadService writes it and
+# these widgets render it (_SyncSetFields / _SyncScoreDisplays). So the two
+# things worth checking through a real board are the ones the service tests
+# cannot see -- that the widgets actually follow, and that following does
+# not write the value straight back.
+
+def _matchFields(board):
+    return (board.matchCombo.currentText(),
+            board.phaseCombo.currentText(),
+            board.poolCombo.currentText())
+
+
+_SET = {
+    "round_name": "Winners Final",
+    "round_name_en": "Winners Final",
+    "tournament_phase": "Bracket",
+    "tournament_pool": "Pool A",
+    "team1score": 2,
+    "team2score": 1,
+    "team1losers": False,
+    "team2losers": True,
+}
+
+
+def test_a_loaded_set_reaches_the_state(autonaApp):
+    board = autonaApp.board(1)
+    board.ChangeSetData(dict(_SET))
+    autonaApp.settle()
+
+    assert autonaApp.get("score.1.match") == "Winners Final"
+    assert autonaApp.get("score.1.match_en") == "Winners Final"
+    assert autonaApp.get("score.1.phase") == "Bracket"
+    assert autonaApp.get("score.1.pool") == "Pool A"
+    assert (_score(autonaApp, 1), _score(autonaApp, 2)) == (2, 1)
+    assert autonaApp.get("score.1.team.1.losers") is False
+    assert autonaApp.get("score.1.team.2.losers") is True
+
+
+def test_the_board_renders_a_loaded_set(autonaApp):
+    """The widgets follow the state now instead of being poked into it."""
+    board = autonaApp.board(1)
+    board.ChangeSetData(dict(_SET))
+    autonaApp.settle()
+
+    assert _matchFields(board) == ("Winners Final", "Bracket", "Pool A")
+    assert board.scoreDisplay1.value() == 2
+    assert board.scoreDisplay2.value() == 1
+    assert _losers(board, 1).isChecked() is False
+    assert _losers(board, 2).isChecked() is True
+
+
+def test_a_set_load_is_exactly_one_save_cycle(autonaApp):
+    """Echo-loop check: rendering the set must not write any of it back.
+
+    Tracker OFF, which is the shipped default and what `autonaApp.board(1)`
+    gives. With it on, a loaded score also drives the stage rows
+    (_SyncScoreDisplays -> SyncStagesToScore), and those writes are held too
+    -- so more than one cycle is correct there, exactly as it is for a +1.
+    """
+    board = autonaApp.board(1)
+    autonaApp.settle()
+
+    seen, unsubscribe = _heldUpdateSpy("score.1")
+    try:
+        board.ChangeSetData(dict(_SET))
+        autonaApp.settle()
+    finally:
+        unsubscribe()
+
+    assert seen == ["score.1"], (
+        f"loading a set produced {len(seen)} save cycles instead of 1: the "
+        "board reacted to the state change by writing it again")
+
+
+def test_reloading_the_same_set_publishes_nothing(autonaApp):
+    """The second load is all no-ops, so it must not mark the board dirty."""
+    from src.StateManager import StateManager
+
+    board = autonaApp.board(1)
+    board.ChangeSetData(dict(_SET))
+    StateManager.CommitHeld("score.1")
+    autonaApp.settle()
+    assert StateManager.HasPendingChanges("score.1") is False
+
+    board.ChangeSetData(dict(_SET))
+    autonaApp.settle()
+
+    assert StateManager.HasPendingChanges("score.1") is False, (
+        "re-applying an identical set lit the 反映 button for edits nobody "
+        "made")
+
+
+def test_a_set_loaded_onto_a_swapped_board_lands_on_the_right_side(autonaApp):
+    board = autonaApp.board(2)
+    board.SwapTeams()
+    autonaApp.settle()
+    assert board.teamsSwapped is True
+
+    # Two players a side: the team-name half of a set only applies to a
+    # multi-player entrant, as it always has.
+    board.ChangeSetData(dict(
+        _SET,
+        entrants=[[{"gamerTag": "A"}, {"gamerTag": "B"}],
+                  [{"gamerTag": "C"}, {"gamerTag": "D"}]],
+        p1_name="Alpha", p2_name="Bravo", overwrite=True))
+    autonaApp.settle()
+
+    # The set's first entrant is shown on the right after a swap, so its
+    # score, losers flag, team name and players all belong to state team 2.
+    assert (_score(autonaApp, 1, board=2), _score(autonaApp, 2, board=2)) == (1, 2)
+    assert autonaApp.get("score.2.team.2.losers") is False
+    assert autonaApp.get("score.2.team.1.losers") is True
+    assert autonaApp.get("score.2.team.2.teamName") == "Alpha"
+    assert autonaApp.get("score.2.team.1.teamName") == "Bravo"
+    assert _playerName(autonaApp, 2, board=2) == "A"
+    assert _playerName(autonaApp, 1, board=2) == "C"
+
+
+def test_a_loaded_team_name_reaches_the_line_edit(autonaApp):
+    board = autonaApp.board(2)
+    board.ChangeSetData({
+        "entrants": [[{"gamerTag": "A"}, {"gamerTag": "B"}],
+                     [{"gamerTag": "C"}, {"gamerTag": "D"}]],
+        "p1_name": "Alpha", "p2_name": "Bravo", "overwrite": True,
+    })
+    autonaApp.settle()
+
+    assert autonaApp.get("score.2.team.1.teamName") == "Alpha"
+    assert _teamName(board, 1).text() == "Alpha"
+    assert _teamName(board, 2).text() == "Bravo"
+
+
+def test_following_a_set_records_which_set_it_is(autonaApp):
+    board = autonaApp.board(1)
+    board.NewSetSelected({"id": "999", "auto_update": "set"})
+    autonaApp.settle()
+
+    assert autonaApp.get("score.1.set_id") == "999"
+    assert autonaApp.get("score.1.auto_update") == "set"
+    assert board.lastSetSelected == "999"
+
+
+def test_cancelling_the_follow_forgets_the_set(autonaApp):
+    board = autonaApp.board(1)
+    board.NewSetSelected({"id": "999", "auto_update": "set"})
+    autonaApp.settle()
+
+    board.StopAutonaUpdate(clear_variables=True)
+    autonaApp.settle()
+
+    assert autonaApp.get("score.1.set_id") is None
+    assert autonaApp.get("score.1.auto_update") is None
+    assert board.lastSetSelected is None
+
+
+def test_a_stale_async_refresh_is_dropped(autonaApp):
+    """An in-flight fetch answering after the operator moved on."""
+    board = autonaApp.board(1)
+    board.lastSetSelected = "999"
+    board.ChangeSetData({"round_name": "Winners Final"})
+    autonaApp.settle()
+
+    board.UpdateSetData({"id": "111", "round_name": "Losers Round 1",
+                         "entrants": []})
+    autonaApp.settle()
+
+    assert autonaApp.get("score.1.match") == "Winners Final"
+
+
+def test_a_loaded_score_reaches_the_stage_rows(autonaApp, trackedBoard):
+    """A set's score awards games the same way a +1 does.
+
+    SetLoadService writes team.{t}.score and *nothing under stages*; the
+    rows follow through _SyncScoreDisplays -> SyncStagesToScore. The row
+    count must be untouched by a set load: only
+    GameTrackerService.SetStageCount() keeps it equal to the widget's
+    stage_widget_list, so a writer that grew `stages` on its own would leave
+    rows nothing renders (see StageCount()).
+    """
+    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
+        trackedBoard.ChangeSetData({"team1score": 2, "team2score": 1})
+        autonaApp.settle()
+
+    assert _wonGames(autonaApp, 1) == [1, 2]
+    assert _wonGames(autonaApp, 2) == [3]
+    assert len(autonaApp.get("score.1.stages") or {}) == 5
+    assert len(trackedBoard.individualGameTracker.stage_widget_list) == 5
+
+
+def test_a_reset_set_load_does_not_reshuffle_recorded_games(
+        autonaApp, trackedBoard):
+    """Behaviour change, pinned deliberately (headless core Step 4b).
+
+    /post_data always sends reset_score, and the old path acted on it
+    literally: the spinboxes went to 0 (clearing every row) and then back up
+    (re-awarding from the top), so a set whose wins alternated came back
+    reordered -- T2, T1, T1 turned into T1, T1, T2. The zero and the real
+    value are one save cycle now, so the rows only move by however much the
+    score actually moved.
+    """
+    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
+        _stageButton(trackedBoard, game=1, team=2).click()
+        _stageButton(trackedBoard, game=2, team=1).click()
+        _stageButton(trackedBoard, game=3, team=1).click()
+        autonaApp.settle()
+        assert _wonGames(autonaApp, 1) == [2, 3]
+        assert _wonGames(autonaApp, 2) == [1]
+
+        trackedBoard.ChangeSetData(
+            {"reset_score": True, "team1score": 2, "team2score": 1})
+        autonaApp.settle()
+
+    assert _wonGames(autonaApp, 1) == [2, 3]
+    assert _wonGames(autonaApp, 2) == [1]
+
+
+def test_a_loaded_losers_flag_reaches_the_player_names(autonaApp):
+    """The " [L]" suffix the thumbnail generator renders.
+
+    The losers checkbox's `toggled` was doing two jobs: writing
+    `team.{t}.losers`, and running every player widget's SetLosers, which
+    re-exports mergedName with the suffix. Only the first half moved to core
+    -- _SyncSetFields sets the checkbox with its signals blocked, because it
+    is the render side and may not write -- so ChangeSetData has to carry
+    the flag into the widgets itself. Without that the state and the
+    checkbox said "losers" while the exported name did not, and `p.losers`
+    stayed False against a checked box for the rest of the session.
+    """
+    board = autonaApp.board(1)
+    board.ChangeSetData({
+        "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]],
+        "team1losers": False, "team2losers": True, "overwrite": True,
+    })
+    autonaApp.settle()
+
+    assert autonaApp.get("score.1.team.2.mergedName") is None  # team-level
+    assert autonaApp.get("score.1.team.2.player.1.mergedName") == "BBB [L]"
+    assert autonaApp.get("score.1.team.1.player.1.mergedName") == "AAA"
+    # The three carriers of the same fact must agree.
+    assert _losers(board, 2).isChecked() is True
+    assert board.team2playerWidgets[0].losers is True
+    assert _losers(board, 1).isChecked() is False
+    assert board.team1playerWidgets[0].losers is False
+
+
+def test_a_loaded_losers_flag_follows_the_swap(autonaApp):
+    board = autonaApp.board(1)
+    board.SwapTeams()
+    autonaApp.settle()
+
+    board.ChangeSetData({
+        "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]],
+        "team1losers": True, "team2losers": False, "overwrite": True,
+    })
+    autonaApp.settle()
+
+    # The set's first entrant is on the right after a swap, so its flag and
+    # its player both belong to state team 2.
+    assert autonaApp.get("score.1.team.2.player.1.mergedName") == "AAA [L]"
+    assert board.team2playerWidgets[0].losers is True
+    assert board.team1playerWidgets[0].losers is False
+
+
+def test_clearing_the_score_still_clears_the_losers_names(autonaApp):
+    """ClearScore drives the checkbox directly (no blocker), so its
+
+    `toggled` still runs SetLosers -- the path this step did not touch, kept
+    honest here because ChangeSetData now applies the same flag by hand.
+    """
+    board = autonaApp.board(1)
+    board.ChangeSetData({
+        "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]],
+        "team2losers": True, "overwrite": True,
+    })
+    autonaApp.settle()
+    assert board.team2playerWidgets[0].losers is True
+
+    board.ClearScore()
+    autonaApp.settle()
+
+    assert board.team2playerWidgets[0].losers is False
+    assert autonaApp.get("score.1.team.2.player.1.mergedName") == "BBB"
+    assert _losers(board, 2).isChecked() is False
+
+
+def test_swapping_teams_carries_the_losers_names_across(autonaApp):
+    """SwapTeams exchanges the checkboxes, whose toggled re-exports both."""
+    board = autonaApp.board(1)
+    board.ChangeSetData({
+        "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]],
+        "team1losers": False, "team2losers": True, "overwrite": True,
+    })
+    autonaApp.settle()
+
+    board.SwapTeams()
+    autonaApp.settle()
+
+    assert board.team1playerWidgets[0].losers is True
+    assert board.team2playerWidgets[0].losers is False
+    assert autonaApp.get("score.1.team.1.player.1.mergedName") == "BBB [L]"
+    assert autonaApp.get("score.1.team.2.player.1.mergedName") == "AAA"

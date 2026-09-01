@@ -307,22 +307,126 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
   「トーナメントデータ」節）と `STARTUP phase=` ログでの計測。Step 4a は起動経路を
   変えていないため後者は Step 4b とまとめて測る
 
-### Step 4b: セット読込の正規化と TournamentInfo のヘッドレス化
+### Step 4b: セット読込の正規化と TournamentInfo のヘッドレス化 ✅ 完了（2026-08-31）
 
-- `ChangeSetData`（140 行超の正規化ロジック）/ `NewSetSelected` / `SetData` /
-  `UpdateData`（TournamentInfo）を core サービスへ抽出し、Actions から呼ぶ。
-  ウィジェットは通知を受けて表示するだけにする
-- これにより起動残候補「TournamentInfo のヘッドレスサービス抽出」
-  （startup-architecture-redesign.md §3）が実行可能になる → 実施して eager パネルを解消
-- `AutonaIndividualGameTracker` の UI トグル 16 箇所は Step 6 扱い（Step 4a でロジックは
-  core に出たが、行の生成と表示は Qt 側に残っている）
-- **注意（不変条件）**: セット読込で `stagesWon` を `score.{n}.stages` へ流し込む際は、
-  「state の `stages` の行数 == ウィジェットの `stage_widget_list` の長さ」を
-  `GameTrackerService.SetStageCount()` だけが保証している点に注意する
-  （`StageCount()` の docstring 参照）。行を直接足す経路を作ると、描画されない行や
-  クリック位置のズレが出る
-- 検証: start.gg 実データでのセット読込（手動チェックリスト「トーナメントデータ」節）+
-  統計系テスト + `STARTUP phase=` ログで core-shown 短縮を計測
+- **`AutonaScoreboardWidget.ChangeSetData` → `src/core/SetLoadService.py`**（ボードごとに
+  1 インスタンス）。140 行超の「正規化」は実体としては*フォームを叩く処理*だった —
+  コンボに `setCurrentText` して `editingFinished` を emit し、objectName→キーパスの
+  lambda に書かせる／スコアスピンボックスを駆動して `valueChanged` に書かせる、という
+  形で、**state は副産物**だった。現在は core が判断して書き、ウィジェットは
+  `_SyncSetFields`（新設）と `_SyncScoreDisplays` で state を描画するだけ。
+  移行した規則: ラウンド名/フェーズ/プール（3 つの判定基準の違いが仕様。下記）・
+  スコア（クランプ込み）・敗者側フラグ・チーム名とチームロゴ・`bracket_type`・
+  追従中セットの記録（`set_id` / `auto_update` / `station`）・`station_queue`・
+  遅延到着した更新の破棄判定（`IsStaleUpdate`）
+  - **スワップの規則が 1 箇所になった**: 「入れ替え後はセットの第 1 エントラントが右」を
+    スコア・敗者フラグ・チーム名・選手ロスターの 4 箇所がそれぞれ reverse したリストで
+    再実装していた。`SetLoadService.DisplayTeam()` 1 つに集約
+  - **書かない書き込みをやめた**（`_SetIfChanged`）。held 配下への書き込みは値が同じでも
+    ボードを dirty にして 反映 ボタンを点灯させる。Qt 経路は `setChecked` /
+    `setValue` が無変化なら何も emit しないことで偶然これを満たしていたので、
+    ウィジェットを経由しなくなった今は明示的に満たす
+- **`AutonaTournamentInfoWidget.UpdateData` → `src/core/TournamentInfoService.py`**
+  （`bootstrap_core()` が生成する単一インスタンス）。`tournamentInfo.*` の書き手が
+  パネルだったことが、**EVENT が唯一 eager に残っていた理由**そのものだった
+  （開かないユーザーには大会名が state に 1 つも入らない）。移行したもの:
+  provider ペイロードの適用（widget を持つキーと持たないキーの分岐・非 initial_load 時の
+  クリアパス・短縮日付キー 3 つ）・表示大会名の 2 系統の上書き規則とその
+  「最後に見た大会名」の帳簿・`logoVersion` の発行・起動時シード
+  - Qt 側に残したのは**入力方向だけ**（人が入力欄を編集したときの
+    objectName→キーパス書き込み = カテゴリ (a)、Step 5）と、
+    **短縮日付の書式**（QLocale 依存なので `AutonaLocaleHelper.FormatExportDate` を
+    `bootstrap_core()` が callable として注入。`StatsService.playersPerTeam` と同じ形）
+  - 失敗時のダイアログは Qt なので `Window._OnTournamentDataUpdated` が持つ。
+    サービスは真偽値を返すだけ
+- **EVENT パネルを遅延構築化**（`Window._CreateTournamentInfoPanel`）。これで eager パネルは
+  スコアボードのみになった。`AutonaTournamentInfoWidget` は `state_updated` /
+  `state_big_change` を購読して `_SyncFieldsFromState()` で描画する。
+  **`QDateEdit` だけは state から復元できない**（保存されているのは*整形済み*の日付文字列で
+  QDate に戻せない）ため、サービスが最後に適用した生の unix timestamp を保持し、
+  後から構築されたパネルはそこから復元する
+  - **敗者フラグは core が書くだけでは足りない**（検収 B-1）。旧経路では losers
+    チェックボックスの `toggled` が 2 つの仕事をしていた —
+    `team.{t}.losers` の書き込みと、**各選手ウィジェットの `SetLosers()`**
+    （`mergedName` に `" [L]"` を付け直す。サムネイル生成が読む）。core に移ったのは
+    前者だけで、`_SyncSetFields` は「同期は書かない」不変条件のためチェックボックスを
+    `QSignalBlocker` で設定する。そのため `ChangeSetData` が
+    `_ApplyLosersToPlayers()` で後者を明示適用する（`ApplyLosers` の直後・エントラント
+    適用の前 = 旧チェックボックスが発火していた位置。**値が動いたときだけ呼ぶ** —
+    `SetLosers` は無条件に `mergedName` を書くので、`toggled` と同じ「変化時のみ」に
+    しないと同一セット再読込で 反映 が点灯する）。
+    pin: `test_a_loaded_losers_flag_reaches_the_player_names` ほか 4 本
+    （`ClearScore` / `SwapTeams` の素の `setChecked` 経路も併せて確認）
+  - 遅延化で 1 件退行を作りかけたので記録: 大会タイトルコンボは
+    `AutonaGameAssetManager.signals.onLoadAssets`（起動時に 1 回）でしか埋まらず、
+    後から構築されるパネルはこれを取り逃して**空のコンボ**になる。
+    `__init__` 末尾で `_PopulateGameCombo()` を呼ぶ形にした（他の遅延パネルと同じ
+    「不在中に起きたことに追いつく」パターン）。pin:
+    `test_the_game_combo_catches_up_on_the_assets_already_loaded`
+- **不変条件（守った）**: セット読込は `score.{n}.stages.*` を一切書かない。
+  行数と `stage_widget_list` の長さを一致させているのは
+  `GameTrackerService.SetStageCount()` だけ（`StageCount()` の docstring 参照）。
+  読み込んだスコアは +1 と同じ経路でステージに届く — サービスが
+  `team.{t}.score` を書き、ボードの `_SyncScoreDisplays` が遷移を
+  `SyncStagesToScore()` に渡す
+- **スコープアウトした項目**（判断が自明でないもの。詳細は §4.1）:
+  選手データ (`SetData`) / `best_of` / `ClearScore`・`SwapTeams`・`ResetAllInputs` /
+  **クルーボード (board 3) の `ChangeSetData`**
+- 挙動差分（意図したもの）:
+  - **`reset_score` 付きペイロードでステージ行が組み替わらなくなった**。旧経路は
+    スピンボックスを 0 に落としてから実値を入れ直していたので、個別ゲームトラッカー
+    有効時は「全消し → 先頭から再付与」になり、勝者が交互だったセット（T2, T1, T1）が
+    (T1, T1, T2) に並び替わっていた。0 と実値が同一 save cycle に入る現在は、
+    スコアが実際に動いた分だけ行が動く
+  - **数値でない `teamNscore` がセット読込全体を巻き添えにしなくなった**。旧経路は
+    `QSpinBox.setValue` に渡って TypeError になり（シグナルハンドラ内なので
+    stderr に出るだけ）、残りの適用が捨てられていた。現在は当該キーだけ
+    warning ログで飛ばす
+  - **`p1_name` が None のチーム名で例外にならなくなった**（`setText(None)` →
+    現在は `""`）。旧コードでは entrants ループの except に捕まっていた
+  - **`_OnClearInfo` の二重クリアをやめた**。`SetTournament(None)` が空ペイロードを
+    emit してサービスがクリアするので、パネル側の `UpdateData({})` は同じ処理の
+    2 回目でしかなかった
+  - **同一セットの再読込・同一大会データの再適用が delta を出さなくなった**
+    （`_SetIfChanged`）。再読込で 反映 ボタンが点灯しなくなる
+  - **片側だけ複数エントラント + スワップ中のチーム名の載る面が変わった**（S-1）。
+    旧コードは `teamColumns` を reverse せず `teamNames` だけ reverse していたため、
+    「エントラント 1 は 2 人・エントラント 2 は 1 人」のような非対称なセットを
+    スワップ中に読むと、チーム名だけが選手と逆の面に載ることがあった
+    （`if len(team) > 1` の判定がエントラントごとで、列の解決だけ非対称だったため）。
+    現在は `DisplayTeam()` が選手・スコア・敗者フラグ・チーム名を同じ規則で解決するので
+    **新しい方が意味的に正しい**。旧挙動は潜在バグとして記録
+  - **`bestOf` と既存スコアが同居するペイロードで、ステージ行の「付与 → 行数変更」が
+    「行数変更 → 付与」に反転した**（S-5）。旧はスピンボックス駆動でスコア反映が
+    同期的に先行し、その後 `bestOfSpin.setValue` が `SetStageCount()` で行を作り直して
+    いた（= 付与した行が消える）。現在はスコアが held 書き込みになり通知が
+    SaveBlock 解放時なので、`SetStageCount()` が先に走ってから付与される。
+    個別ゲームトラッカー有効時のみ影響。**実データでの確認は手動チェックリスト対象**
+- 検証: フルスイート **586 passed / 19 skipped**（Step 4b 前 503 + 新規 83）。
+  **既存テストのアサーションは 1 つも書き換えていない**。新規:
+  `tests/test_set_load_service.py`(33) / `tests/test_tournament_info_service.py`(25) は
+  QApplication なしで動く。`tests/test_tournament_info_panel.py`(10) は本物のパネルを
+  建てて「後から構築しても state を描画する」「描画が書き戻さない」「大会タイトル
+  コンボが追いつく」を見る（Window は建てられないので配線 3 本はソース検査で pin。
+  エコーループ検査は `StateManager.Set` を spy して**同値の書き戻し**まで見る —
+  revision 比較では同値書き込みが delta を出さないため素通りする）。
+  `tests/test_scoreboard_operations.py` に 15 本追加 — セット読込のエコーループ検査
+  （1 読込 = held 通知 1 回。トラッカー OFF 前提）、スワップ済みボードへの読込、
+  トラッカー ON での「セットのスコアがステージ行に届く／行数は増えない」と reset の
+  挙動差分、敗者フラグ → `mergedName` の `[L]`（B-1 の回帰 4 本）
+- 未実施（ユーザー実機確認）: start.gg 実データでのセット読込（手動チェックリスト
+  「トーナメントデータ」節）と `STARTUP phase=` ログでの core-shown 計測
+
+#### 4.1 Step 4b でスコープアウトした項目
+
+| 項目 | 理由 |
+|------|------|
+| 選手データ (`AutonaScoreboardPlayerWidget.SetData`) | 国/州コンボ・キャラ/スキン/バリアントのモデル行・bad word フィルタを Qt モデルに対して解決する処理そのもの。core で表現できるのは選手サブツリー移行（Step 5）が前提。**エントラントがどちらのチームに載るかの判断だけ** core に出した（`DisplayTeam`） |
+| `best_of` | `best_of_text` / `first_to_text` が `AutonaLocaleHelper.matchNames` 由来で、同じハンドラがステージ行を作り直す。Step 3 が同じ理由で残した判断を変えていない |
+| `ClearScore` / `SwapTeams` / `ResetAllInputs` | いずれもスピンボックス駆動でスコアを書く既存経路。**新しい `_SyncSetFields` と競合しない**（同値を読み戻すだけ）ので、Step 4b の差分を膨らませずに残せる。スコアの書き手完全一本化は Step 5 |
+| **クルーボード (board 3) の `ChangeSetData`** | **同型ではないと判明**。board 1/2 は `round_name` を真偽値で・`tournament_pool` をキーの有無で判定し `match_en` を常に書くのに対し、crew は 3 つとも `is not None` 判定で `match_en` を書かない。`bestOf` も crew は `is not None`（board 1/2 は真偽値）。共通化すると (1) `round_name=""` の扱いが逆転し (2) board 3 に `match_en` キーが増え (3) `bestOf=0` の扱いが変わる、という 3 つの無言の挙動変化になる。crew はそもそも「セット読込」経路を持たず `set_route` / `post_score` からしか届かないためテストも無い。**crew の書き込み経路全体（`_flushAllState` は全項目をウィジェットから書く典型的なカテゴリ (a)）を移す Step 5 でまとめて統一するのが正しい**と判断し、今回は触っていない |
+| `AutonaIndividualGameTracker` の UI トグル 16 箇所 | Step 6 扱い（Step 4a でロジックは core に出たが、行の生成と表示は Qt 側） |
+| セット読込で選手数が増えた場合の losers フラグ | 同一読込中に新規生成された選手ウィジェットは losers フラグの適用を取り逃す（旧コードも同じ既存ギャップ。次回読込の `_ApplyLosersToPlayers` で自己修復する）。恒久対応は選手サブツリー移行（Step 5） |
 
 ### Step 5: (a) UI 直接反応の移行 + キーパス静的化（最難関・最後）
 

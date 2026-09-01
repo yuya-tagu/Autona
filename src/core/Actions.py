@@ -27,15 +27,16 @@ that are self-evident state edits and deliberately left two behind:
   handler resizes the individual-game tracker's stage rows. Faithful
   reproduction needs the locale tables in core, which Step 3 does not do.
 - **The spinbox-driven half of the score.** `AdjustScore` / `ResetScore`
-  below are not yet the *only* writers of `score.{n}.team.{t}.score`. Since
-  Step 4a there are two writers inside core -- these, and the stage tally in
-  `GameTrackerService.UpdateScore` / `PublishStageResults` -- plus the paths
-  that have not moved at all: set loading, ClearScore and SwapTeams still
+  below are not yet the *only* writers of `score.{n}.team.{t}.score`. Three
+  writers live inside core now -- these, the stage tally in
+  `GameTrackerService.UpdateScore` / `PublishStageResults`, and a loaded
+  set's `SetLoadService.ApplyScores` (Step 4b) -- plus the paths that have
+  not moved at all: `ClearScore`, `SwapTeams` and `ResetAllInputs` still
   drive the score spinbox, whose valueChanged runs the tracker's
-  `UpdateScore`. So the *implementation* is core in both cases; what is
-  still outside is the entry point, and folding it in needs the set-loading
-  path (Step 4b) and the player subtree (Step 5).
-  The two writers coordinate through the state rather than through each
+  `UpdateScore`. So the *implementation* is core in every case; what is
+  still outside is those three entry points, and folding them in needs the
+  player subtree (Step 5).
+  The writers coordinate through the state rather than through each
   other; a board reconciles its display in
   `AutonaScoreboardWidget._SyncScoreDisplays`, and tells them apart with
   `GameTrackerService.writingScore`. Nothing outside core re-Sets the score:

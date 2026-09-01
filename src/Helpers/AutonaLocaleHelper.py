@@ -3,6 +3,7 @@ from qtpy import QtCore
 from qtpy.QtCore import *
 from qtpy.QtGui import *
 import os
+import time
 import traceback
 from loguru import logger
 
@@ -106,6 +107,23 @@ class AutonaLocaleHelper(QObject):
             AutonaLocaleHelper.fgTermLocale = settingsFgTerm
         else:
             AutonaLocaleHelper.fgTermLocale = current_locale[0]
+
+    @staticmethod
+    def FormatExportDate(timestamp) -> str:
+        """A unix timestamp as the export locale's short date.
+
+        The EVENT tab's QDateEdit used to produce this on its own: the
+        payload timestamp became a local date, the QDateEdit took it, and
+        its dateChanged lambda wrote back
+        ``QDate.toString(QLocale(exportLocale).dateFormat(ShortFormat))``.
+        The writer is ``core/TournamentInfoService`` now, which may not
+        import Qt, so the format lives here -- next to the locale it depends
+        on -- and is injected into the service by bootstrap_core().
+        """
+        localDate = time.strftime("%Y-%m-%d", time.localtime(float(timestamp)))
+        return QDate.fromString(localDate, "yyyy-MM-dd").toString(
+            QLocale(AutonaLocaleHelper.exportLocale).dateFormat(
+                QLocale.FormatType.ShortFormat))
 
     def LoadLanguages():
         try:

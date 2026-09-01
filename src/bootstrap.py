@@ -144,6 +144,23 @@ def bootstrap_core():
     if AutonaTournamentDataProvider.instance is None:
         AutonaTournamentDataProvider.instance = AutonaTournamentDataProvider()
 
+    # ORDER CONSTRAINT: the tournament metadata writer must exist before the
+    # provider above ever emits tournament_data_updated, and before anything
+    # that *reads* tournamentInfo.* connects to that signal -- the sidebar
+    # tournament button (Window.UpdateTournamentButton) is one such reader,
+    # and it used to be correct only because the EVENT panel happened to be
+    # constructed earlier in Window.__init__ than the button. The panel is
+    # lazy since headless core Step 4b, so the writer lives here instead.
+    # Window.__init__ makes the actual connection (the failure path is a
+    # dialog); this only has to exist first. The date format is injected
+    # because core may not import Qt (tests/test_core_qt_free.py) -- see
+    # AutonaLocaleHelper.FormatExportDate.
+    from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+    from .core.TournamentInfoService import TournamentInfoService
+    if TournamentInfoService.instance is None:
+        TournamentInfoService.instance = TournamentInfoService(
+            formatEventDate=AutonaLocaleHelper.FormatExportDate)
+
     # AlertNotification and Updater have no dependency on each other, nor on
     # anything constructed above: both __init__ only build the object itself
     # (AlertNotification also ensures ./user_data/alerts_red.json exists). They
