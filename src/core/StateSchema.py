@@ -269,8 +269,18 @@ COMMENTARY_SLOT_KEYS = (
     "display",                      # int: 0 hidden, 1 shown (max 4 shown)
 )
 
-# tournamentInfo also collects one key per input field of the EVENT tab,
-# named after that field's objectName (see DYNAMIC_KEY_FAMILIES).
+# tournamentInfo collects three further groups, none of them enumerated here
+# yet (Step 5 is what turns them into catalog entries):
+#
+# - the EVENT tab's input fields, still keyed by their Qt objectName on the
+#   *write* side (a human typing) -- see DYNAMIC_KEY_FAMILIES. Since
+#   headless core Step 4b the provider-side writer names them statically
+#   instead: TournamentInfoService.{TEXT,NUMBER,DATE}_FIELDS.
+# - `endAt` / `eventStartAt` / `eventEndAt`, which have no field on the tab
+#   at all. TournamentInfoService.SHORT_DATE_KEYS is their definition: they
+#   are published as short date strings rather than timestamps.
+# - whatever else the provider payload carries (`shortLink`, and the
+#   `initial_load` flag that rides along with it), written through as-is.
 TOURNAMENT_INFO_KEYS = (
     "tournamentName",
     "themeColor",

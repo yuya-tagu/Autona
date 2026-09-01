@@ -30,11 +30,12 @@ whose very next statement is that restore -- so a non-dict stage payload
 would raise, not corrupt. Unreachable today because the combo's blank item
 carries ``{}`` rather than None.
 
-Two writers, still. ``score.{n}.team.{t}.score`` is written both by
-``AutonaActions`` (the +1 buttons, hotkeys, Web UI, API) and by
+More than one writer, still. ``score.{n}.team.{t}.score`` is written by
+``AutonaActions`` (the +1 buttons, hotkeys, Web UI, API), by
+``SetLoadService.ApplyScores`` (a loaded set, Step 4b) and by
 ``PublishStageResults`` below, which sums the stage rows. They coordinate
 through the state, and the board tells them apart with ``writingScore`` --
-see that property. Collapsing the two into one writer is Step 4b/5.
+see that property. Collapsing them into one writer is Step 5.
 
 Import side effects: none (agent-pitfalls #1). One instance per board,
 created by that board's AutonaIndividualGameTracker.
@@ -310,11 +311,12 @@ class GameTrackerService:
         """Publish a score set from outside, and follow it with the stages.
 
         Still the entry point for the paths that drive the score spinbox
-        directly (set loading, ClearScore, SwapTeams): the widget changes,
-        and this writes the result. The paths that go through
-        AutonaActions.AdjustScore / ResetScore instead write the state first
-        and call SyncStagesToScore() with the transition, which is why the
-        two halves are separate methods (headless core Step 3).
+        directly (ClearScore, SwapTeams, ResetAllInputs): the widget
+        changes, and this writes the result. The paths that write the state
+        first -- AutonaActions.AdjustScore / ResetScore, and a loaded set's
+        SetLoadService.ApplyScores -- instead call SyncStagesToScore() with
+        the transition, which is why the two halves are separate methods
+        (headless core Step 3; set loading joined them in Step 4b).
 
         Read-modify-write under the lock, same as AutonaActions.AdjustScore:
         the score is written from the web/API threads through Actions, so a

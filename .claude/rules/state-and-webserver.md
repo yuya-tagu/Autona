@@ -52,18 +52,18 @@ paths:
 - 移行済み: `AdjustScore` / `ResetScore`（board 1,2 のみ）/ `SetTeamColor` /
   `SetDisplayOption` / `ApplyChanges`（反映 = `CommitHeld`）
 - 未移行（Qt 側が書き手のまま。理由は `Actions.py` の docstring）: チームスワップ /
-  best_of / クルーボードのスコアリセット / セット読込の正規化（Step 4b）
-- `score.{n}.team.{t}.score` の書き手は **core 内に 2 系統**（`AutonaActions` と、
-  ステージ集計の `GameTrackerService.PublishStageResults` / `UpdateScore`）。
-  Step 4a でどちらも core 内には入ったが、呼び出し口は別のまま。加えて**未移行の
-  Qt 側経路**（セット読込 / `ClearScore` / `SwapTeams`）がスコアスピンボックスを
+  best_of / クルーボードのスコアリセット・`ChangeSetData`
+- `score.{n}.team.{t}.score` の書き手は **core 内に 3 系統**（`AutonaActions`、
+  ステージ集計の `GameTrackerService.PublishStageResults` / `UpdateScore`、
+  セット読込の `SetLoadService.ApplyScores`）。加えて**未移行の Qt 側経路**
+  （`ClearScore` / `SwapTeams` / `ResetAllInputs`）がスコアスピンボックスを
   駆動し、その `valueChanged` が `GameTrackerService.UpdateScore` を呼ぶ形で書く。
   **core の外から直接 `Set` する経路は残っていない**（`StageResultsToScore` の
-  再 Set は検収レビューで削除済み。表示更新のみ）。両者は state 経由で
+  再 Set は検収レビューで削除済み。表示更新のみ）。すべて state 経由で
   のみ噛み合う。ステージ集計側は自分が書いている区間を
   `GameTrackerService.writingScore` で公開し（ウィジェットは property で委譲）、
   `_SyncScoreDisplays` はその間 `SyncStagesToScore` を呼ばない（呼ぶと 1 クリックで
-  次のゲームまで勝ちになる）。完全一本化は Step 4b/5
+  次のゲームまで勝ちになる）。完全一本化は Step 5
 - 呼び出し側は Qt ウィジェット・`AutonaWebServerActions`・`AutonaHotkeys` の 3 つ。
   **どのスレッドから呼んでもよい**（Qt に触れないのが層の定義）。委譲した
   WebServerActions メソッドからは `@gui_thread_sync` を外す
@@ -89,6 +89,17 @@ paths:
 |---------|--------|------|
 | `src/core/StatsService.py` | `AutonaScoreboardWidget.stats.service` | 統計の取得可否判断・アップセット計算・`last_sets`/`history_sets`/`recent_sets`/`upset_factor` の書き込み |
 | `src/core/GameTrackerService.py` | `AutonaIndividualGameTracker.service` | ステージ勝敗の記録（`score.{n}.stages.*`）・ステージ⇔スコアの相互整合・`writingScore` ガード |
+| `src/core/SetLoadService.py` | `AutonaScoreboardWidget.setLoad` | セット読込の正規化（ラウンド/フェーズ/プール・スコア・敗者フラグ・チーム名とロゴ・`bracket_type`・追従中セット）。スワップ後の面の解決は `DisplayTeam()` が唯一の正本 |
+| `src/core/TournamentInfoService.py` | `TournamentInfoService.instance`（`bootstrap_core()` 生成） | `tournamentInfo.*` の書き込み全部（provider ペイロードの適用・表示大会名の 2 系統の上書き規則・`logoVersion`・起動時シード）。EVENT パネル不在でも動くことが遅延構築の前提 |
+
+- **`SetLoadService` はステージ行を書かない**。行数と `stage_widget_list` の長さを
+  一致させているのは `GameTrackerService.SetStageCount()` だけなので、読み込んだ
+  スコアは `team.{t}.score` を書いて `_SyncScoreDisplays` → `SyncStagesToScore()` に
+  渡す（+1 と同じ経路）。`stages` を直接足す経路を作らない
+- **held 配下は「同値なら書かない」**（`SetLoadService._SetIfChanged` /
+  `TournamentInfoService._SetIfChanged`）。同値でも `Set` すればボードは dirty になり
+  反映 ボタンが点灯する。Qt 経路は `setChecked`/`setValue` が無変化なら emit しない
+  ことで偶然これを満たしていた
 
 - **state が記録、ウィジェットは表示**。ステージ結果は `score.{n}.stages.{i}` が正本で、
   ボタンはそれを描画するだけ（`_SyncStageButtons`）。`setChecked()` は `toggled` しか

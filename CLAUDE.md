@@ -62,7 +62,7 @@ cp dist/Autona/Autona.exe ./Autona.exe
 - `src/Autona.py` — QMainWindow。サイドバー + `QStackedWidget` で全パネル管理。**この import 自体が起動シーケンス**なので、テストや調査スクリプトから import しない
 - `src/core/StateManager.py` — グローバル状態（nested dict）。deepdiff でデルタ算出、ファイル出力 + WebSocket 配信。**core は Qt を import しない**（`tests/test_core_qt_free.py` が pin）。Qt シグナルはアダプタ `src/StateManagerBridge.py` が提供する。`src/StateManager.py` は互換 re-export シム（1 世代のみ）
 
-**遅延構築**: 起動時に作るのは Tournament Info と Scoreboard のみ。他パネルと設定/ガイドウィンドウは初回アクセス時にファクトリで構築（`_Create*Panel` / `Ensure*Window`）。未構築でも必要な state のシードは `Window._SeedPanelState()` に集約。起動時間は `STARTUP phase=...` ログで計測する（詳細は [ADR-003](docs/decisions/ADR-003-startup-architecture.md)）。
+**遅延構築**: 起動時に無条件で作るのは Scoreboard（アクティブな battle_format の 1 面）のみ。他パネルと設定/ガイドウィンドウは初回アクセス時にファクトリで構築（`_Create*Panel` / `Ensure*Window`）。Tournament Info も headless core Step 4b で遅延構築に移行したが、**サイドバーの既定 index 0 = EVENT** なので、そこを最後に開いていた／新規インストールでは結局起動時に建つ。未構築でも必要な state のシードは `Window._SeedPanelState()` に集約。起動時間は `STARTUP phase=...` ログで計測する（詳細は [ADR-003](docs/decisions/ADR-003-startup-architecture.md)）。
 
 ## ハーネス挙動の注意
 

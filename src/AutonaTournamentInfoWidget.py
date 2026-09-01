@@ -5,9 +5,11 @@ from qtpy import uic
 import os
 import time
 from .StateManager import StateManager
+from .StateManagerBridge import StateManagerBridge
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaGameAssetManager import AutonaGameAssetManager
-from .SettingsManager import SettingsManager
+from .core.TournamentInfoService import (
+    TournamentInfoService, TOURNAMENT_LOGO_PATH)
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaDirHelper import AutonaResolve
 from .AutonaFeatureColors import MakeTournamentColorCard
@@ -21,10 +23,32 @@ import requests
 
 DEFAULT_BANNER_PATH = "./assets/thumbnail_base/default_banner.png"
 BANNER_PATH = "./user_data/tournament_banner.png"
-LOGO_PATH = "./layout/logo.png"
+# Aliased rather than respelled: core/TournamentInfoService publishes this
+# file's mtime as tournamentInfo.logoVersion whether or not this panel is
+# ever built, so the two must be the same path.
+LOGO_PATH = TOURNAMENT_LOGO_PATH
 
 
 class AutonaTournamentInfoWidget(QDockWidget):
+    """The EVENT tab: the tournament's metadata, icon and banner.
+
+    Since headless core Step 4b this panel no longer *owns*
+    ``tournamentInfo.*``. A loaded tournament is applied by
+    ``core/TournamentInfoService``, which is wired from ``bootstrap_core()``
+    / ``Window.__init__`` and therefore runs whether or not this page has
+    ever been revealed -- which is what let the page become lazy
+    (startup-architecture-redesign.md §3).
+
+    Two directions remain here, and only two:
+
+    - **out**: a human editing a field still writes
+      ``tournamentInfo.{objectName}`` through the historical binding
+      (known-smells S-14; migrating it is Step 5);
+    - **in**: ``_SyncFieldsFromState`` renders the state into the fields, so
+      a panel built after the tournament was loaded shows it, and a name
+      changed elsewhere (the service, another panel) appears here.
+    """
+
     def __init__(self, *args):
         super().__init__(*args)
 
@@ -40,91 +64,58 @@ class AutonaTournamentInfoWidget(QDockWidget):
         scroll.setWidget(self._contents)
         self.setWidget(scroll)
 
-        AutonaTournamentDataProvider.instance.signals.tournament_data_updated.connect(
-            self.UpdateData)
+        # ── EVENT tab fields ─────────────────────────────────────────────
+        # The write direction only: every input still writes
+        # tournamentInfo.{objectName} when a human edits it (S-14, Step 5).
+        # The restore that used to sit in these loops is
+        # _SyncFieldsFromState() at the end of __init__ -- one place, and one
+        # that keeps working when the state changes later.
+        self._dateFields = []
+        self._textFields = []
+        self._numberFields = []
 
         for widget in self.findChildren(QDateEdit):
+            self._dateFields.append(widget)
             widget.dateChanged.connect(lambda value, element=widget: [
                 StateManager.Set(
                     f"tournamentInfo.{element.objectName()}", value.toString(QLocale(AutonaLocaleHelper.exportLocale).dateFormat(QLocale.FormatType.ShortFormat)))
             ])
-            # widget.setDate(d)
-            # widget.setValue(StateManager.Get(
-            #    f"tournamentInfo.{widget.objectName()}", 0))
 
         for widget in self.findChildren(QLineEdit):
+            # Qt's own line edit inside a QSpinBox, and an editable combo's:
+            # neither carries a key of its own (S-14 fallback guard).
             if widget.objectName() == "qt_spinbox_lineedit":
                 continue
             if isinstance(widget.parent(), QComboBox):
                 continue
-            # Restore the persisted value BEFORE seeding the key. This loop
-            # used to emit editingFinished on the still-empty .ui fields,
-            # writing "" over the tournamentInfo.* keys just restored from
-            # program_state.json. The sidebar tournament button
-            # (Window.UpdateTournamentButton) reads tournamentName from that
-            # state, so a cached tournament came up as "Set tournament" and
-            # stayed there for the whole session.
-            saved = StateManager.Get(
-                f"tournamentInfo.{widget.objectName()}", None)
-            if isinstance(saved, str):
-                widget.setText(saved)
+            self._textFields.append(widget)
             widget.editingFinished.connect(
                 lambda element=widget: [
                     StateManager.Set(
                         f"tournamentInfo.{element.objectName()}", element.text())
                 ])
-            widget.editingFinished.emit()
-
-        # 表示大会名 auto-copy. displayTournamentName is its own
-        # tournamentInfo.* key (not score.{N}.*) so it survives the startup
-        # score-subtree wipe and is shared across every board. Two sources
-        # feed it with different override semantics:
-        #  - Manual edits to the "大会情報" tournamentName field (its
-        #    editingFinished below) follow into the display name only while
-        #    it is unmodified (empty, or still equal to the last-seen
-        #    tournamentName) — mirroring the _lastAutoStreamTitle pattern.
-        #  - A Start.gg tournament (re)selection is authoritative: it
-        #    re-applies the Start.gg name even over a manual edit (handled
-        #    in _onTournamentDataForDisplayName). The startup restore of the
-        #    previous tournament (initial_load) is not a user selection and
-        #    keeps manual edits.
-        self.tournamentNameEdit: QLineEdit = self.findChild(
-            QLineEdit, "tournamentName")
-        if StateManager.Get("tournamentInfo.displayTournamentName", None) is None:
-            StateManager.Set(
-                "tournamentInfo.displayTournamentName",
-                StateManager.Get("tournamentInfo.tournamentName", "") or "")
-        self._lastTournamentName = StateManager.Get(
-            "tournamentInfo.tournamentName", "") or ""
-
-        def _onTournamentNameEditingFinished():
-            new = self.tournamentNameEdit.text()
-            old = self._lastTournamentName
-            disp = StateManager.Get("tournamentInfo.displayTournamentName", "")
-            if disp == "" or disp == old:
-                StateManager.Set("tournamentInfo.displayTournamentName", new)
-            self._lastTournamentName = new
-
-        self.tournamentNameEdit.editingFinished.connect(
-            _onTournamentNameEditingFinished)
-
-        # Bound-method slot so Qt delivers the signal on the GUI thread
-        # (same rationale as the tournament_data_updated hooks below).
-        AutonaTournamentDataProvider.instance.signals.tournament_data_updated.connect(
-            self._onTournamentDataForDisplayName)
 
         for widget in self.findChildren(QSpinBox):
-            # Same one-way restore as the QLineEdit loop above (state -> UI),
-            # done before connecting so it is a plain restore and not a write
-            # back into the state we are reading.
-            saved = StateManager.Get(
-                f"tournamentInfo.{widget.objectName()}", None)
-            if isinstance(saved, int) and not isinstance(saved, bool):
-                widget.setValue(saved)
+            self._numberFields.append(widget)
             widget.valueChanged.connect(lambda value, element=widget: [
                 StateManager.Set(
                     f"tournamentInfo.{element.objectName()}", value)
             ])
+
+        # 表示大会名 auto-copy. displayTournamentName is its own
+        # tournamentInfo.* key (not score.{N}.*) so it survives the startup
+        # score-subtree wipe and is shared across every board. Two sources
+        # feed it with different override semantics, and both rules -- plus
+        # the "last tournament name we saw" bookkeeping they share -- live in
+        # core/TournamentInfoService now. What is connected here is only the
+        # weaker one: a manual edit of the 大会情報 name field follows into
+        # the display name while it has not been customised. Connected after
+        # the loop above so the name is already written when it runs.
+        self.tournamentNameEdit: QLineEdit = self.findChild(
+            QLineEdit, "tournamentName")
+        self.tournamentNameEdit.editingFinished.connect(
+            lambda: TournamentInfoService.instance.FollowDisplayName(
+                self.tournamentNameEdit.text()))
 
         # Game title combo
         self.gameTitleCombo: QComboBox = self.findChild(
@@ -140,6 +131,12 @@ class AutonaTournamentInfoWidget(QDockWidget):
             self._SyncGameCombo)
         AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
             self._SyncGameCombo)
+        # Catch up on the asset load that already happened. The combo used to
+        # be filled by the onLoadAssets broadcast above, which this panel was
+        # always built in time for; now that it is lazy (headless core Step
+        # 4b) the games are loaded long before it exists and the combo would
+        # come up empty. Same catch-up the other lazy factories do.
+        self._PopulateGameCombo()
 
         self.btLoadInfoFromTournament: QPushButton = self.findChild(
             QPushButton, "btLoadInfoFromTournament")
@@ -228,6 +225,74 @@ class AutonaTournamentInfoWidget(QDockWidget):
         # their own 配信設定 panel (AutonaStreamSettingsWidget). This tab keeps
         # only what a tournament owns: its metadata and its icon / banner.
 
+        # Render whatever the state already holds (this page is lazy, so a
+        # tournament may well have been loaded before it existed), and keep
+        # following it. tournamentInfo.* is not held, so edits arrive as
+        # ordinary deltas; state_big_change covers wholesale loads.
+        StateManagerBridge.instance.state_updated.connect(self._onStateDelta)
+        StateManagerBridge.instance.state_big_change.connect(
+            self._SyncFieldsFromState)
+        self._SyncFieldsFromState()
+
+    def _onStateDelta(self, delta):
+        # Same cheap containment filter the scoreboard uses on deltas.
+        if "tournamentInfo" in str(delta):
+            self._SyncFieldsFromState()
+
+    def _SyncFieldsFromState(self):
+        """Render tournamentInfo.* into this tab's inputs.
+
+        Writes nothing — that is what makes it safe on every delta. Each
+        widget is set inside a QSignalBlocker so the handler that would fire
+        (the objectName-to-keypath write above) cannot echo the value back.
+        For the number fields this closes a real echo: QSpinBox.setValue()
+        emits valueChanged even when set programmatically. For the text
+        fields it is defensive rather than closing a live path --
+        QLineEdit.setText() does not itself emit editingFinished (only
+        Return/focus-out do) -- but the blocker is kept so the two loops
+        read the same either way. A field the operator has focus in is left
+        alone so a notification cannot yank text out from under the caret.
+        """
+        for widget in self._textFields:
+            value = StateManager.Get(
+                f"tournamentInfo.{widget.objectName()}", None)
+            if (isinstance(value, str) and widget.text() != value
+                    and not widget.hasFocus()):
+                with QSignalBlocker(widget):
+                    widget.setText(value)
+
+        for widget in self._numberFields:
+            value = StateManager.Get(
+                f"tournamentInfo.{widget.objectName()}", None)
+            if (isinstance(value, int) and not isinstance(value, bool)
+                    and widget.value() != value and not widget.hasFocus()):
+                with QSignalBlocker(widget):
+                    widget.setValue(value)
+
+        # The date fields are the one thing the state cannot restore: it
+        # holds the *formatted* short date, which does not parse back into a
+        # QDate. The service keeps the raw timestamp it published, so a panel
+        # built after the tournament was loaded still shows the right day.
+        # Reached unguarded, like AutonaActions.instance and
+        # StateManagerBridge.instance elsewhere in this layer: bootstrap_core()
+        # creates it before any widget exists, and a null check here would
+        # only turn a broken bootstrap into a panel that silently renders
+        # nothing.
+        service = TournamentInfoService.instance
+        for widget in self._dateFields:
+            raw = service.RawDate(widget.objectName())
+            if raw is None or widget.hasFocus():
+                continue
+            try:
+                localDate = time.strftime(
+                    "%Y-%m-%d", time.localtime(float(raw)))
+            except (TypeError, ValueError):
+                continue
+            date = QDate.fromString(localDate, "yyyy-MM-dd")
+            if date.isValid() and widget.date() != date:
+                with QSignalBlocker(widget):
+                    widget.setDate(date)
+
     def _PopulateGameCombo(self):
         games = AutonaGameAssetManager.instance.games
         self.gameTitleCombo.clear()
@@ -272,8 +337,10 @@ class AutonaTournamentInfoWidget(QDockWidget):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
+        # SetTournament(None) emits an empty tournament_data_updated, which
+        # core/TournamentInfoService clears the fields from. The explicit
+        # second clear this used to do was that same pass, run twice.
         AutonaTournamentDataProvider.instance.SetTournament(None)
-        self.UpdateData({})
 
     def _emitMediaUpdated(self):
         AutonaTournamentDataProvider.instance.signals.media_updated.emit()
@@ -436,14 +503,10 @@ class AutonaTournamentInfoWidget(QDockWidget):
         # browser source and the off-screen WebEngine renderer (thumbnail /
         # result) can append it as a query string and bypass the
         # Cache-Control: max-age=86400 served by AutonaWebServer.
-        # Using mtime keeps the value stable across app restarts when the
-        # logo file hasn't changed (avoids re-fetching every launch).
-        try:
-            mtime = int(os.path.getmtime(LOGO_PATH) * 1000)
-        except OSError:
-            mtime = 0
-        if StateManager.Get("tournamentInfo.logoVersion", None) != mtime:
-            StateManager.Set("tournamentInfo.logoVersion", mtime)
+        # The publication itself is core's (it also has to happen at launch,
+        # whether or not this lazy page is ever opened); this call is the
+        # "the file just changed" half.
+        TournamentInfoService.instance.PublishLogoVersion()
 
     def LoadIcon(self):
         try:
@@ -528,83 +591,3 @@ class AutonaTournamentInfoWidget(QDockWidget):
             logger.error(traceback.format_exc())
 
         self.UpdateIcon()
-
-    def _onTournamentDataForDisplayName(self, data):
-        # A Start.gg tournament (re)selection re-applies its name to the
-        # 表示大会名 even over a manual edit — picking a tournament is an
-        # explicit "use this one" action. Skipped for the startup restore
-        # of the previous tournament (initial_load) and for the empty
-        # payload emitted when the tournament is cleared, neither of which
-        # is a user selection.
-        name = data.get("tournamentName", "") or ""
-        if not name or data.get("initial_load"):
-            return
-        StateManager.Set("tournamentInfo.displayTournamentName", name)
-        # Keep the follow-guard's bookkeeping consistent with the state we
-        # just wrote, whatever order the editingFinished hook runs in.
-        self._lastTournamentName = name
-
-    def DisplayErrorMessage(self, message):
-        msgBox = QMessageBox()
-        msgBox.setWindowIcon(QIcon('assets/icons/icon.png'))
-        msgBox.setWindowTitle(QApplication.translate("app", "Error"))
-        msgBox.setText(QApplication.translate("app", "Error"))
-        msgBox.setInformativeText(message)
-        msgBox.setIcon(QMessageBox.Critical)
-        msgBox.exec()
-
-    def UpdateData(self, data):
-        logger.info("Tournament Data: "+ str(data))
-
-        if not data.get("initial_load"):
-            for widget in self.findChildren(QLineEdit):
-                if isinstance(widget.parent(), QComboBox):
-                    continue
-                widget.setText("")
-                widget.editingFinished.emit()
-            for widget in self.findChildren(QSpinBox):
-                widget.setValue(0)
-
-        for key in data.keys():
-            try:
-                widget: QWidget = self.findChild(QWidget, key)
-
-                if widget and data[key] is not None:
-                    if type(widget) == QLineEdit:
-                        widget.setText(data[key])
-                        widget.editingFinished.emit()
-
-                    if type(widget) == QSpinBox:
-                        widget.setValue(data[key])
-
-                    if type(widget) == QDateEdit:
-                        # This is how to put a date into QDateEdit Element using a timestamp
-                        #        aTime = '2018-07-24 19:24:11.272000'
-                        unix_timestamp = float(data[key])
-                        #        tmToDate = datetime.datetime.utcfromtimestamp(unix_timestamp).strftime('%Y-%m-%d %H:%M:%S')
-                        #        utc_time = time.gmtime(unix_timestamp)
-                        local_datetime = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(
-                            unix_timestamp))  # converts timestampt to local time and apply the format
-                        local_date = local_datetime.split(
-                            " ")[0]  # get only the date
-                        # Convert date into QDate object
-                        d = QDate.fromString(local_date, "yyyy-MM-dd")
-                        widget.setDate(d)
-                else:
-                    exceptions = ["endAt", "eventStartAt", "eventEndAt"]
-                    info = data.get(key)
-
-                    if key in exceptions and data.get(key) != "":
-                        unix_timestamp = float(data[key])
-                        local_datetime = time.strftime("%x", time.localtime(
-                            unix_timestamp))
-                        info = local_datetime
-                    
-                    StateManager.Set(f"tournamentInfo.{key}", info)
-            except:
-                logger.error(traceback.format_exc())
-                SettingsManager.Set("TOURNAMENT_URL", '')
-                error_message = QApplication.translate("app", "The tournament URL could not be loaded.") + "\n" + QApplication.translate(
-                    "app", "Make sure that your tournament URL is correctly formatted and points to an existing event, and try again.")
-                self.DisplayErrorMessage(error_message)
-                break

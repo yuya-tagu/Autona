@@ -74,8 +74,9 @@
 - **シングルトン生成は抜けた** — `src/bootstrap.py` の `bootstrap_core()` が担う（Step 3）
 - **メニューバー構築は消滅** — サイドバー（`AutonaSidebar`）+ `QStackedWidget` に置換
 - **レイアウト復元は QSettings の `sidebarIndex_v{N}` / `sidebarCollapsed_v{N}` のみ**（`saveState/restoreState` 不使用）
-- **パネル生成は 2 個だけ**（Tournament Info + Scoreboard）。残りは `_Create*Panel` ファクトリ +
-  `_EnsurePanelAt` の遅延構築、設定/ガイド 5 ウィンドウは `Ensure*Window`（Step 4a/4b）
+- **パネル生成は 1 個だけ**（Scoreboard）。残りは `_Create*Panel` ファクトリ +
+  `_EnsurePanelAt` の遅延構築、設定/ガイド 5 ウィンドウは `Ensure*Window`（Step 4a/4b）。
+  Tournament Info も headless core Step 4b で遅延構築に移行
 - WebServer 構築・起動は `_StartWebServer()` に分離（Step 4c）
 
 **残る対策案**: サイドバーのナビ/メニュー組み立て（`helpMenu` / `startggMenu` / ゲームセレクタ）と
