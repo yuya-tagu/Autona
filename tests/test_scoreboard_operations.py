@@ -1456,3 +1456,164 @@ def test_swapping_teams_carries_the_losers_names_across(autonaApp):
     assert board.team2playerWidgets[0].losers is False
     assert autonaApp.get("score.1.team.1.player.1.mergedName") == "BBB [L]"
     assert autonaApp.get("score.1.team.2.player.1.mergedName") == "AAA"
+
+
+# ── the player card's write path (headless core Step 5, instalment 2) ────
+#
+# The card's inputs are wired to core/PlayerService by name now
+# (StateSchema.PLAYER_INPUT_KEYS) instead of through a findChildren loop that
+# used each widget's objectName as the last key segment. The service is
+# tested without Qt in tests/test_player_service.py; what needs a real widget
+# is the wiring itself -- that each input still reaches its key, that the
+# board does not write anything back when it renders the result, and that the
+# roster's own size changes still take the state with them.
+
+
+def _tagEdit(board, team, index=0):
+    from src.core import StateSchema as schema
+
+    widgets = board.team1playerWidgets if team == 1 else board.team2playerWidgets
+    return widgets[index].findChild(QLineEdit, schema.PLAYER_TAG_KEY)
+
+
+def test_typing_a_player_tag_reaches_its_key(autonaApp):
+    board = autonaApp.board(1)
+    autonaApp.settle()
+
+    edit = _tagEdit(board, 1)
+    edit.setText("TAG")
+    edit.editingFinished.emit()
+    autonaApp.settle()
+
+    assert _playerName(autonaApp, 1) == "TAG"
+    assert autonaApp.get("score.1.team.1.player.1.mergedName") == "TAG"
+
+
+def test_a_player_tag_edit_is_exactly_three_save_cycles(autonaApp):
+    """Echo-loop check, with the number stated so a fourth writer is noticed.
+
+    One editingFinished runs three operations, and each is a cycle of its
+    own: the display names (`PlayerService.PublishMergedName`, one block for
+    the two spellings), the name-derived images (`PublishImages`, one block
+    for the avatar and the sponsor crests), and the tag itself. The player id
+    is a fourth handler but writes nothing when the slot has not changed
+    hands.
+
+    It was four before the player instalment -- the two name spellings were
+    bare Sets. Nothing is published while the board is held either way, so
+    this is a tripwire rather than a correctness bound.
+    """
+    board = autonaApp.board(1)
+    autonaApp.settle()
+
+    seen, unsubscribe = _heldUpdateSpy("score.1")
+    try:
+        edit = _tagEdit(board, 1)
+        edit.setText("TAG")
+        edit.editingFinished.emit()
+        autonaApp.settle()
+    finally:
+        unsubscribe()
+
+    assert _playerName(autonaApp, 1) == "TAG"
+    assert seen == ["score.1"] * 3, (
+        f"a player tag edit produced {len(seen)} save cycles instead of 3")
+
+
+def test_finishing_an_edit_in_the_country_combo_writes_no_stray_key(autonaApp):
+    """A pre-existing leak the static wiring closes.
+
+    The country and region combos are editable, so each owns an internal
+    QLineEdit whose objectName is "". `findChildren(QLineEdit)` reached them,
+    so finishing an edit there published `score.1.team.1.player.1.` -- a key
+    with an empty last segment, which nothing reads and every export carried.
+    """
+    from src.core import StateSchema as schema
+
+    board = autonaApp.board(1)
+    autonaApp.settle()
+    player = board.team1playerWidgets[0]
+
+    combo = player._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
+    combo.lineEdit().setText("Japan (JP)")
+    combo.lineEdit().editingFinished.emit()
+    autonaApp.settle()
+
+    assert "" not in (autonaApp.get(player.path) or {}), (
+        "an edit in the country combo wrote a nameless key under the player")
+
+
+def test_shrinking_the_roster_takes_the_player_slots_with_it(autonaApp):
+    board = autonaApp.board(2)
+    board.playerNumber.setValue(3)
+    autonaApp.settle()
+    for team in (1, 2):
+        widgets = (board.team1playerWidgets if team == 1
+                   else board.team2playerWidgets)
+        for index, widget in enumerate(widgets):
+            widget.SetData({"gamerTag": f"T{team}P{index + 1}"},
+                           dontLoadFromDB=True)
+    autonaApp.settle()
+    assert autonaApp.get("score.2.team.1.player.3.name") == "T1P3"
+
+    board.playerNumber.setValue(1)
+    autonaApp.settle()
+
+    for team in (1, 2):
+        remaining = autonaApp.get(f"score.2.team.{team}.player") or {}
+        assert sorted(remaining) == ["1"], (
+            f"team {team} kept {sorted(remaining)} after shrinking to one "
+            "player; the surplus stays on the overlay")
+
+
+def test_a_roster_that_grows_with_a_loaded_losers_flag_is_flagged(autonaApp):
+    """The gap the player instalment closed.
+
+    A player widget is only connected to the LOSERS checkbox from the moment
+    it is created, so a set that arrives with the flag set *and* more
+    entrants than the board currently shows left the new cards at
+    losers=False: their mergedName lost the " [L]" the thumbnail generator
+    renders, and stayed wrong until some later load happened to move the
+    flag. The cards read the flag out of the state as they are built now.
+    """
+    board = autonaApp.board(2)
+    autonaApp.settle()
+    assert len(board.team1playerWidgets) == 1
+
+    board.ChangeSetData({
+        "entrants": [[{"gamerTag": "A1"}, {"gamerTag": "A2"}],
+                     [{"gamerTag": "B1"}, {"gamerTag": "B2"}]],
+        "team1losers": True, "team2losers": False, "overwrite": True,
+    })
+    autonaApp.settle()
+
+    assert len(board.team1playerWidgets) == 2
+    assert [p.losers for p in board.team1playerWidgets] == [True, True]
+    assert autonaApp.get(
+        "score.2.team.1.player.2.mergedName") == "A2 [L]"
+    # ...and the team that did not come out of losers stays unflagged.
+    assert [p.losers for p in board.team2playerWidgets] == [False, False]
+    assert autonaApp.get("score.2.team.2.player.2.mergedName") == "B2"
+
+
+def test_the_details_dialog_apply_button_commits_the_board(autonaApp):
+    """反映 from inside a player card is the board-level publish.
+
+    The button used to call StateManager.CommitHeld with a prefix it sliced
+    out of self.path; it resolves the board through PlayerService and calls
+    the same operation the board's own button does.
+    """
+    from src.StateManager import StateManager
+
+    board = autonaApp.board(1)
+    autonaApp.settle()
+    player = board.team1playerWidgets[0]
+
+    _setPlayerName(board, 1, "PENDING")
+    autonaApp.settle()
+    assert StateManager.HasPendingChanges("score.1") is True
+
+    player.btApplyDetails.click()
+    autonaApp.settle()
+
+    assert StateManager.HasPendingChanges("score.1") is False

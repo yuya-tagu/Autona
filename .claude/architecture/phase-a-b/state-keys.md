@@ -4,6 +4,15 @@
 対象: `src/**/*.py`
 方法: `grep -n "StateManager\.(Set|Get|Unset)"` + コンテキスト読解。動的パスは実際の引数を追跡して展開。
 
+> **2026-09-01 注記（Headless Core Step 5）**: 本書は調査時点のスナップショット。
+> キー定義の正本は **`src/core/StateSchema.py` の `KEY_CATALOG`**（および静的化済みの
+> `SCORE_MATCH_FIELDS` / `SCORE_TEAM_INPUT_KEYS` / `PLAYER_INPUT_KEYS`）に移った。
+> 本書の既知の誤り: 選手配下の `country_code` / `state_code` は**実際には
+> `country` / `state`**（選択行の dict をそのまま載せる）。`{QLineEdit.objectName}` /
+> `{QComboBox.objectName}` の動的行は静的化済みで、書き手も
+> `AutonaScoreboardPlayerWidget` / `AutonaScoreboardWidget` から
+> `src/core/PlayerService.py` / `src/core/Actions.py` に移っている。
+
 ---
 
 ## API サマリー

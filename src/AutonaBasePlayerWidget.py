@@ -6,9 +6,16 @@ eliminating ~200 lines of duplication. AutonaTeamPlayerWidget was dead code
 and was deleted on 2026-08-28 (Headless Core redesign Step 0), so
 AutonaScoreboardPlayerWidget is now the only subclass.
 
+Since the player instalment of headless core Step 5 this class no longer
+writes the state itself: `self.player` is a `core.PlayerService` bound to
+this widget's path, and the methods below read Qt (combo rows, line-edit
+text, the losers flag) and hand the answer to it. What each of them decided
+-- how a display name is merged, where an avatar file is looked for, the
+shape of a character slot -- lives in that service.
+
 Subclasses are responsible for:
 - __init__ (own .ui file, own widget setup)
-- ComboBoxIndexChanged / NameChanged
+- NameChanged, and wiring the card's inputs to `self.player`
 - SetData, SetCharactersPerPlayer, ReloadCharacters, SetIndex,
   SetupAutocomplete (widget-specific: .ui widgets, icon sizes, fonts,
   proxy models — kept per-subclass)
@@ -16,7 +23,6 @@ Subclasses are responsible for:
   the otherwise-shared SwapWith / LoadCountries defined here)
 """
 import os
-import re
 import threading
 import traceback
 
@@ -25,15 +31,12 @@ from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
-from .Helpers.AutonaSponsorHelper import AutonaSponsorHelper
+from .core import StateSchema as schema
+from .core.PlayerService import KEEP_ONLINE_AVATAR, PlayerService
 from .StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from loguru import logger
 
-# Sentinel for ExportPlayerImages(onlineAvatar=...): "leave the key alone".
-# It cannot be None, because None is a meaningful value there ("this player
-# has no online avatar, clear the previous one").
-_KEEP_ONLINE_AVATAR = object()
 
 
 class AutonaBasePlayerWidget(QGroupBox):
@@ -49,8 +52,12 @@ class AutonaBasePlayerWidget(QGroupBox):
 
     def _initBasePlayerWidget(self):
         """Subclasses MUST call this from their __init__ after uic.loadUi.
-        Initialises per-instance lock + findChild cache."""
+        Initialises per-instance lock + findChild cache + state service."""
         self.dataLock = threading.RLock()
+        # Everything this widget publishes goes through here (headless core
+        # Step 5). Bound to self.path, which the subclass sets before
+        # uic.loadUi and never rewrites.
+        self.player = PlayerService(self.path)
         # Lazy widget cache — populated by _w(); avoids O(n) findChild walks
         # on hot paths (SetData, ExportMergedName, ExportPlayerImages...).
         self._widget_cache = {}
@@ -109,88 +116,32 @@ class AutonaBasePlayerWidget(QGroupBox):
 
                 characters[i+1] = data
 
-            StateManager.Set(
-                f"{self.path}.character", characters)
-
-            if includeMains:
-                StateManager.Set(
-                    f"{self.path}.mains", characters)
+            self.player.PublishCharacters(characters, includeMains)
 
     def ExportMergedName(self):
         with self.dataLock:
-            team = self._w("team", QLineEdit).text()
-            name = self._w("name", QLineEdit).text()
-            merged = ""
-            nameOnlyMerged = ""
+            self.player.PublishMergedName(
+                self._w(schema.PLAYER_SPONSOR_KEY, QLineEdit).text(),
+                self._w(schema.PLAYER_TAG_KEY, QLineEdit).text(),
+                self.losers)
 
-            if team != "":
-                merged += team+" | "
-
-            merged += name
-            nameOnlyMerged += name
-
-            if self.losers:
-                merged += " [L]"
-                nameOnlyMerged += " [L]"
-
-            StateManager.Set(
-                f"{self.path}.mergedName", merged)
-            StateManager.Set(
-                f"{self.path}.mergedOnlyName", nameOnlyMerged)
-
-    def ExportPlayerImages(self, onlineAvatar=_KEEP_ONLINE_AVATAR):
+    def ExportPlayerImages(self, onlineAvatar=KEEP_ONLINE_AVATAR):
         """Re-publish the image state derived from the player's name.
 
-        The local avatar and the sponsor images are looked up from the
-        team/name fields, so every name change has to run this again.
-        online_avatar is NOT name-derived -- it comes from the tournament
-        provider and only a caller that knows *which player is now in this
-        slot* may write it:
-
-          - a URL/path -> published
-          - None       -> explicitly cleared (Clear(), SetData with a player
-                          the API gave no avatar for)
-          - omitted    -> left untouched
-
-        The default used to be None, so both deferred refreshes (SetData's
-        own finally block and NameChanged) wiped the start.gg avatar that had
-        just been written a few lines earlier: every set loaded from start.gg
-        ended with online_avatar = None, and editing a tag by hand dropped
-        the avatar of a player that still had one.
+        Reads the two name fields and hands them to
+        `PlayerService.PublishImages`, whose docstring carries the
+        online_avatar semantics (published / cleared / left alone) and the
+        LIVE-BUG-1 history behind them.
         """
-        with self.dataLock, StateManager.SaveBlock():
-            team = self._w("team", QLineEdit).text()
-            name = self._w("name", QLineEdit).text()
-            merged = ""
-
-            if team != "":
-                merged += team+" "
-
-            merged += name
-
-            merged = re.sub(r"[,/|;:<>\\?*]", "_", merged)
-
-            # Online avatar
-            if onlineAvatar is not _KEEP_ONLINE_AVATAR:
-                StateManager.Set(
-                    f"{self.path}.online_avatar", onlineAvatar)
-
-            # Local avatar
-            localPath = f"./user_data/player_avatar/{merged}.png"
-            if os.path.exists(localPath):
-                StateManager.Set(
-                    f"{self.path}.avatar", localPath)
-            else:
-                StateManager.Set(
-                    f"{self.path}.avatar", None)
-
-            AutonaSponsorHelper.ExportValidSponsors(team, self.path)
+        with self.dataLock:
+            self.player.PublishImages(
+                self._w(schema.PLAYER_SPONSOR_KEY, QLineEdit).text(),
+                self._w(schema.PLAYER_TAG_KEY, QLineEdit).text(),
+                onlineAvatar=onlineAvatar)
 
     def ExportPlayerCity(self, city=None):
         with self.dataLock:
-            if StateManager.Get(f"{self.path}.city") != city:
-                StateManager.Set(
-                    f"{self.path}.city", city)
+            self.player.SetCity(city)
 
     def SwapCharacters(self, index1: int, index2: int):
         with StateManager.SaveBlock():
@@ -257,11 +208,11 @@ class AutonaBasePlayerWidget(QGroupBox):
             # attribute below being the last reference.
             model = QStandardItemModel(self)
             self._stateModel = model
-            self._w("state", QComboBox).setModel(model)
+            self._w(schema.PLAYER_STATE_KEY, QComboBox).setModel(model)
         return model
 
     def LoadStates(self, index):
-        country: QComboBox = self._w("country", QComboBox)
+        country: QComboBox = self._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
 
         new_code = None
         if country.currentData(Qt.ItemDataRole.UserRole) != None:
@@ -310,7 +261,7 @@ class AutonaBasePlayerWidget(QGroupBox):
                 rows.append(item)
 
         stateModel = self._EnsureStateModel()
-        state: QComboBox = self._w("state", QComboBox)
+        state: QComboBox = self._w(schema.PLAYER_STATE_KEY, QComboBox)
 
         # Refill in place, one row at a time through the model's own
         # appendRow(). invisibleRootItem().appendRows(rows) would hand the
@@ -346,8 +297,8 @@ class AutonaBasePlayerWidget(QGroupBox):
             target.setModel(QStandardItemModel())
 
     def GetCurrentPlayerTag(self):
-        gamerTag = self._w("name").text()
-        prefix = self._w("team").text()
+        gamerTag = self._w(schema.PLAYER_TAG_KEY).text()
+        prefix = self._w(schema.PLAYER_SPONSOR_KEY).text()
         return prefix+" "+gamerTag if prefix else gamerTag
 
     def Clear(self, no_mains=False):
@@ -358,7 +309,7 @@ class AutonaBasePlayerWidget(QGroupBox):
             # to fall out of NameChanged -> ExportPlayerImages() defaulting to
             # None, which is exactly the accident that also wiped avatars that
             # were supposed to stay. Now it is stated where it is meant.
-            StateManager.Set(f"{self.path}.online_avatar", None)
+            self.player.SetOnlineAvatar(None)
 
             for c in self.findChildren(QLineEdit):
                 if c.objectName() != "" and c.objectName() != 'qt_spinbox_lineedit':
@@ -433,8 +384,13 @@ class AutonaBasePlayerWidget(QGroupBox):
                                 if type(widget) == QPlainTextEdit:
                                     widget.setPlainText(tmpData[i][objName])
                         w._swapRestoreTail(tmpData[i])
-                        StateManager.Set(f"{w.path}.seed", tmpData[i]["seed"])
-                        StateManager.Set(f"{w.path}.city", tmpData[i]["city"])
+                        # Neither field is a widget value the loop above
+                        # could have carried across: the seed spinbox is not
+                        # one of the three copied types and the city has no
+                        # input at all, so both are moved through the state
+                        # they were read from.
+                        w.player.SetSeed(tmpData[i]["seed"])
+                        w.player.SetCity(tmpData[i]["city"])
         finally:
             StateManager.ReleaseSaving()
 
@@ -451,7 +407,7 @@ class AutonaBasePlayerWidget(QGroupBox):
             countryCompleter = QCompleter(
                 AutonaCountryHelper.countryModel)
 
-            country: QComboBox = self._w("country", QComboBox)
+            country: QComboBox = self._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
             country.setCompleter(countryCompleter)
             country.completer().setFilterMode(Qt.MatchFlag.MatchContains)
             country.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
@@ -463,7 +419,7 @@ class AutonaBasePlayerWidget(QGroupBox):
 
             country.currentIndexChanged.connect(self.LoadStates)
 
-            state: QComboBox = self._w("state", QComboBox)
+            state: QComboBox = self._w(schema.PLAYER_STATE_KEY, QComboBox)
             # Attach the lifetime model first, while we are outside any signal
             # handler and nothing is connected to this combo yet: setModel()
             # re-points the completer and the view, so it belongs before they

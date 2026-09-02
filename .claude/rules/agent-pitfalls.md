@@ -33,12 +33,19 @@ globs:
 - `StateManager.Set("score/1/team/1", value)` — **間違い**
 - 数値も文字列: `"1"` であって `1` ではない
 
-## 4. `element.objectName()` をキーパスに使う既存パターン
+## 4. `element.objectName()` をキーパスに使う既存パターン（縮小中）
 
-`AutonaScoreboardWidget`, `AutonaTournamentInfoWidget` 等で Qt の `objectName()` がそのまま StateManager のキーに使われる。
+Qt の `objectName()` がそのまま StateManager のキーになる旧パターン。Headless Core
+Step 5 で順に静的化しており、**残るのは `AutonaTournamentInfoWidget` のみ**
+（`AutonaScoreboardWidget` と `AutonaScoreboardPlayerWidget` は
+`src/core/StateSchema.py` の定数を `findChild` の引数として使う形に移行済み）。
 
-- `.ui` ファイルの objectName を変更すると保存データとの互換性が壊れる
-- 新しいウィジェットを追加する際も、objectName = StateManager キー であることを意識する
+- `.ui` ファイルの objectName を変更すると保存データとの互換性が壊れる。
+  **静的化済みのウィジェットでも同じ**（schema の文字列と objectName が一致して
+  いなければ `findChild` が解決できず、キーも一致しない）
+- 新しいウィジェットを追加する際は、キーを `StateSchema` に定義してから
+  objectName をそれに合わせる（逆をやらない）
+- 残タスクの一覧は `StateSchema.DYNAMIC_KEY_FAMILIES`（`tests/test_state_schema.py` が pin）
 
 ## 5. （解消済み）AutonaTeamPlayerWidget は削除済み
 
@@ -54,14 +61,23 @@ globs:
 - `with StateManager.SaveBlock():` を使うのが安全
 - try/finally で囲む既存パターンもあるが、例外時に ReleaseSaving を漏らすリスクがある
 
-## 7. `self.path` の動的構築
+## 7. `self.path` の動的構築（2026-09-01 更新: 現存は 2 パターン）
 
-`AutonaScoreboardPlayerWidget.path` は呼び出し元によって異なる:
-- スコアボード: `score.{N}.team.{T}.player.{M}`
-- 実況者: `commentary.{N}`
-- 選手リスト: `{base}.slot.{I}.player.{M}`
+`AutonaScoreboardPlayerWidget.path` は呼び出し元によって異なる。**現存する構築元は 2 つ**:
 
-`self.path` を前提としたリファクタでは、全3パターンでの動作を確認すること。
+- スコアボード（`AutonaScoreboardWidget`）: `score.{N}.team.{T}.player.{M}`
+- 選手 DB エディタ（`AutonaPlayerBrowserWidget`）: `player_editor.1`
+
+旧記述の `commentary.{N}` / `{base}.slot.{I}.player.{M}` は**もう存在しない**
+（実況者パネルは独自カードを持ち、選手リスト（PLAYERS ロスター）は廃止済み）。
+構築元の数と形は `tests/test_player_widgets.py` の
+`test_the_player_widget_is_only_built_on_two_kinds_of_path` が pin している。
+
+- `self.path` を前提としたリファクタでは、**両パターンでの動作を確認する**
+  （エディタ側のキーがボードに漏れると配信中のスコアボードが書き換わる）
+- 書き込みは `self.player`（`src/core/PlayerService.py`、path に束縛された
+  1 インスタンス）が唯一の経路。ボード番号が要る処理は `PlayerService.BoardNumber()`
+  を使う（`player_editor` では `None` を返す）
 
 ## 8. Autona.exe はプロジェクト直下
 

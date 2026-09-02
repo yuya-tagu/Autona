@@ -15,11 +15,13 @@ Two things it deliberately is *not* yet:
 - **Not a replacement for *every* dynamic keypath.** Step 5 is converting
   them widget by widget. The SCORE panel's board-level and team-card inputs
   are done (``SCORE_MATCH_FIELDS`` / ``SCORE_TEAM_INPUT_KEYS`` below are read
-  by ``AutonaActions`` and by ``AutonaScoreboardWidget``); the player subtree
-  and all of ``tournamentInfo.*`` are still generated from Qt ``objectName``
-  values at runtime (known-smells S-14, and ``DYNAMIC_KEY_FAMILIES`` below is
-  the remaining inventory). For those, ``KEY_CATALOG`` only *enumerates* what
-  the widgets produce -- documentation with a type.
+  by ``AutonaActions`` and by ``AutonaScoreboardWidget``), and so is the
+  player card (``PLAYER_INPUT_KEYS``, read by ``PlayerService`` and by
+  ``AutonaScoreboardPlayerWidget``); all of ``tournamentInfo.*`` is still
+  generated from Qt ``objectName`` values at runtime (known-smells S-14, and
+  ``DYNAMIC_KEY_FAMILIES`` below is the remaining inventory). For that one,
+  ``KEY_CATALOG`` only *enumerates* what the widget produces -- documentation
+  with a type.
 - **Not a migration layer.** There is none yet: a renamed ``objectName``
   still breaks an existing ``out/program_state.json`` silently. When Step 5
   statically names those keys it needs one anchor listing the *old* names to
@@ -190,6 +192,46 @@ TEAM_NAME_KEY = "teamName"
 TEAM_LOSERS_KEY = "losers"
 SCORE_TEAM_INPUT_KEYS = (TEAM_NAME_KEY, TEAM_LOSERS_KEY)
 
+# The player card's operator-editable inputs
+# (src/layout/AutonaScoreboardPlayer.ui, plus the note box built in code).
+# These were the last family generated from Qt objectNames at runtime: one
+# `findChildren(QLineEdit)` loop wrote `{path}.{element.objectName()}` and a
+# matching `findChildren(QComboBox)` loop did the same for the two location
+# combos. `AutonaScoreboardPlayerWidget` looks the widgets up *by* these
+# constants now and `PlayerService` writes them; the strings are unchanged,
+# so an existing out/program_state.json still matches
+# (tests/test_objectname_keypath_contract.py pins both spellings).
+#
+# NOTE: the same names double as the eye-menu's field ids
+# (DisplayOption.fields above) -- `team`, `name`, `twitter`, `real_name`,
+# `country`, `state` and `custom_textbox` all appear there as findChild keys
+# for visibility toggling. One more reason a rename is never local.
+PLAYER_SPONSOR_KEY = "team"
+PLAYER_TAG_KEY = "name"
+PLAYER_REAL_NAME_KEY = "real_name"
+PLAYER_TWITTER_KEY = "twitter"
+PLAYER_NOTE_KEY = "custom_textbox"     # QPlainTextEdit, created in code
+PLAYER_SEED_KEY = "seed"               # QSpinBox (hidden; badge renders it)
+PLAYER_BIRTHDAY_KEY = "birthday"       # QCheckBox (hidden; nothing reads it)
+PLAYER_COUNTRY_KEY = "country"
+PLAYER_STATE_KEY = "state"
+
+# The four QLineEdits carrying a key, in .ui order.
+PLAYER_LINE_EDIT_KEYS = (
+    PLAYER_SPONSOR_KEY,
+    PLAYER_TAG_KEY,
+    PLAYER_REAL_NAME_KEY,
+    PLAYER_TWITTER_KEY,
+)
+# Every free-text input, i.e. what PlayerService.SetText accepts.
+PLAYER_TEXT_KEYS = PLAYER_LINE_EDIT_KEYS + (PLAYER_NOTE_KEY,)
+# The two combos whose selected row is published whole (a dict carrying the
+# code, the display name and the flag asset) -- PlayerService.SetLocation.
+PLAYER_LOCATION_KEYS = (PLAYER_COUNTRY_KEY, PLAYER_STATE_KEY)
+
+PLAYER_INPUT_KEYS = PLAYER_TEXT_KEYS + (
+    PLAYER_SEED_KEY, PLAYER_BIRTHDAY_KEY) + PLAYER_LOCATION_KEYS
+
 # Board-level keys under score.{N}. Nested groups are listed by their own
 # tuples below rather than expanded here. SCORE_MATCH_FIELDS above is the
 # operator-editable subset of this list (pinned by tests/test_state_schema).
@@ -224,23 +266,35 @@ SCORE_TEAM_KEYS = (
     TEAM_LOSERS_KEY,
 )
 
+# PLAYER_INPUT_KEYS above is the operator-editable subset (pinned by
+# tests/test_state_schema); the rest are derived or provider-supplied and are
+# written by PlayerService from what the widget resolved.
+#
+# Three names in this list were wrong until the player instalment of Step 5,
+# which is the drift a catalog nobody consumed was always going to collect:
+# `gamerTag` is the *input* field name in a provider payload and has never
+# been a state key (the published key is `name`), and the location combos
+# publish their whole selected row under `country` / `state`, not the
+# `country_code` / `state_code` that a payload and the player database use.
+# `birthday` was missing.
 SCORE_PLAYER_KEYS = (
-    "name",
-    "gamerTag",
-    "team",
-    "seed",
+    PLAYER_TAG_KEY,
+    PLAYER_SPONSOR_KEY,
+    PLAYER_REAL_NAME_KEY,
+    PLAYER_TWITTER_KEY,
+    PLAYER_NOTE_KEY,
+    PLAYER_SEED_KEY,
+    PLAYER_BIRTHDAY_KEY,
+    PLAYER_COUNTRY_KEY,      # dict: code, name, display_name, en_name, asset
+    PLAYER_STATE_KEY,        # dict: code, original_code, name, asset
     "id",
     "city",
-    "birthday",
-    "custom_textbox",
     "online_avatar",
     "avatar",
     "mergedName",
     "mergedOnlyName",
     "character.{K}",         # dict: name, en_name, assets, skin, variant
     "mains",
-    "country_code",
-    "state_code",
     "sponsor_logo",
     "sponsor_logos.{I}",
 )
@@ -371,11 +425,10 @@ KEY_CATALOG = {
 # runtime instead of from this catalog (known-smells S-14). This is the
 # remaining Step 5 inventory: AutonaScoreboardWidget's two families (the team
 # card and the match bar) came off this list when they became
-# SCORE_TEAM_INPUT_KEYS / SCORE_MATCH_FIELDS above. Nothing consumes the
-# tuple; it is the checklist.
+# SCORE_TEAM_INPUT_KEYS / SCORE_MATCH_FIELDS, and the player card's family
+# followed when it became PLAYER_INPUT_KEYS. Nothing consumes the tuple; it
+# is the checklist.
 DYNAMIC_KEY_FAMILIES = (
-    ("score.{N}.team.{T}.player.{M}.{objectName}",
-     "AutonaScoreboardPlayerWidget -- every QLineEdit"),
     ("tournamentInfo.{objectName}",
      "AutonaTournamentInfoWidget -- every input field"),
 )

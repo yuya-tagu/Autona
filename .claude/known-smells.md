@@ -318,6 +318,22 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, b
 > 残りは `AutonaScoreboardPlayerWidget` と `AutonaTournamentInfoWidget` の 2 族
 > （`StateSchema.DYNAMIC_KEY_FAMILIES` が残タスク一覧）。
 
+> **2026-09-01（同 Step 5 第 2 弾）**: `AutonaScoreboardPlayer.ui` の族も**静的化済み**。
+> キー名は `StateSchema.PLAYER_INPUT_KEYS`（`team` / `name` / `real_name` / `twitter` /
+> `custom_textbox` / `seed` / `birthday` / `country` / `state`）が正本で、書き込みは
+> `src/core/PlayerService.py` に集約された。**キー名は変えていない**ためマイグレーション層は
+> 依然不要。契約テストは (1) schema 名 ⊆ .ui objectName、(2) 選手ウィジェット 2 ファイルに
+> `StateManager.Set/Unset` が存在しないこと（AST）を pin する。
+> なお `qt_spinbox_lineedit` フォールバックの検査対象からは
+> `AutonaScoreboardPlayerWidget.py` を外した（objectName 由来のキーパスが無くなり、
+> seed スピンボックスとその line edit はどちらも `PLAYER_SEED_KEY` に明示配線されたため）。
+> **残るは `AutonaTournamentInfoWidget` の 1 族のみ。**
+>
+> 併せて `KEY_CATALOG` の記載ドリフトを修正: `score.{N}...player.{M}` に
+> `gamerTag`（provider ペイロード側の項目名で state キーではない）、
+> `country_code` / `state_code`（実際のキーは選択行そのものを載せる `country` / `state`）が
+> 載っており、`birthday` が抜けていた。**カタログの記述だけの修正で、書き込み側は不変**。
+
 > **AutonaBattleTeam.ui / AutonaTeamPlayer.ui について（2026-08-28）**: これらを読み込んでいた
 > `AutonaTeamBattleWidget` / `AutonaTeamPlayerWidget` はデッドコードとして削除された（S-01 参照）。
 > 孤立していた `.ui` ファイル自体も `src/layout/` から削除済み（2026-08-28）。契約テストの

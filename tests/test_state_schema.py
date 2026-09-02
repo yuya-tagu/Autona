@@ -189,19 +189,75 @@ def test_the_scoreboard_field_names_stay_inside_the_catalog():
     assert schema.SCORE_TEAM_INPUT_KEYS == ("teamName", "losers")
 
 
+def test_the_player_field_names_stay_inside_the_catalog():
+    """Same contract for the player card (headless core Step 5, instalment 2).
+
+    PLAYER_INPUT_KEYS is what AutonaScoreboardPlayerWidget finds its inputs
+    by and what PlayerService accepts; SCORE_PLAYER_KEYS is what KEY_CATALOG
+    enumerates. The catalog used to name three keys that were never written
+    (`gamerTag`, `country_code`, `state_code` -- the first is a provider
+    payload's field name, the other two are how the player *database* spells
+    a location) and to omit `birthday`, which is exactly the drift an
+    enumeration nothing consumes collects.
+    """
+    assert set(schema.PLAYER_INPUT_KEYS) <= set(schema.SCORE_PLAYER_KEYS)
+    # Spelled out: an existing program_state.json is keyed by these.
+    assert schema.PLAYER_TEXT_KEYS == (
+        "team", "name", "real_name", "twitter", "custom_textbox")
+    assert schema.PLAYER_LOCATION_KEYS == ("country", "state")
+    assert schema.PLAYER_SEED_KEY == "seed"
+    assert schema.PLAYER_BIRTHDAY_KEY == "birthday"
+    # The retired spellings must not come back as catalog entries.
+    assert "gamerTag" not in schema.SCORE_PLAYER_KEYS
+    assert "country_code" not in schema.SCORE_PLAYER_KEYS
+    assert "state_code" not in schema.SCORE_PLAYER_KEYS
+
+
+def test_the_player_service_writes_only_catalogued_keys():
+    """Every leaf PlayerService names has to be in the catalog.
+
+    Read out of the source rather than by running it: the point is the
+    *enumeration*, and a key that only some payload reaches at runtime would
+    slip past a behavioural test. The regex only catches `Key(<literal>)`
+    calls, though -- keys built from a variable (`SetText` / `SetLocation`
+    / `SetSeed` / `SetBirthday` each take the field name as an argument) do
+    not show up here. Those are covered by the other half of this pair:
+    `test_the_player_field_names_stay_inside_the_catalog`'s
+    `set(schema.PLAYER_INPUT_KEYS) <= set(schema.SCORE_PLAYER_KEYS)`, above.
+    Together the two tests cover both call shapes.
+    """
+    source = (PROJECT_ROOT / "src" / "core"
+              / "PlayerService.py").read_text(encoding="utf-8")
+    leaves = set(re.findall(r'self\.Key\("([^"]+)"\)', source))
+    assert leaves, "PlayerService no longer builds its keys through Key()"
+
+    catalogued = set(schema.SCORE_PLAYER_KEYS) | {
+        # Written whole rather than per index; the catalog spells out the
+        # indexed leaves the dict expands into.
+        "character",
+    }
+    assert leaves <= catalogued, (
+        f"PlayerService writes {sorted(leaves - catalogued)}, which "
+        "StateSchema.SCORE_PLAYER_KEYS does not list")
+
+
 def test_the_scoreboard_families_left_the_dynamic_key_inventory():
     """DYNAMIC_KEY_FAMILIES is the Step 5 checklist, so it has to shrink.
 
     Nothing consumes it, which is exactly why it needs a test: an instalment
     that converts a widget without striking its family off leaves the
-    remaining work overstated, and the next one understates it.
+    remaining work overstated, and the next one understates it. The two
+    entries below came off as their instalments landed -- the SCORE panel's
+    board-level and team-card inputs first, the player card second -- and
+    this is the assertion each of them had to flip.
     """
     described = " ".join(
         f"{family} {owner}" for family, owner in schema.DYNAMIC_KEY_FAMILIES)
     assert "AutonaScoreboardWidget" not in described, (
         "the SCORE panel's team card and match bar are static keys now")
+    assert "AutonaScoreboardPlayerWidget" not in described, (
+        "the player card's inputs are StateSchema.PLAYER_INPUT_KEYS now")
     # Still to come, and still listed.
-    assert "AutonaScoreboardPlayerWidget" in described
     assert "AutonaTournamentInfoWidget" in described
 
 

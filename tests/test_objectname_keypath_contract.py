@@ -149,6 +149,79 @@ def _object_name_calls(relative_path):
     ]
 
 
+def test_the_player_schema_names_are_the_ui_objectnames():
+    """The player card's half of the same agreement (Step 5, instalment 2).
+
+    Every operator-editable field of AutonaScoreboardPlayer.ui is a
+    StateSchema constant now, used both as the state key and as the
+    findChild argument. The note box is the one input built in code rather
+    than in the .ui, so it is checked against PROGRAMMATIC_TOKENS below
+    instead.
+    """
+    from src.core import StateSchema as schema
+
+    playerNames = _object_names(LAYOUT / "AutonaScoreboardPlayer.ui")
+    fromUi = set(schema.PLAYER_INPUT_KEYS) - {schema.PLAYER_NOTE_KEY}
+    assert fromUi <= playerNames, (
+        "StateSchema.PLAYER_INPUT_KEYS names a widget "
+        f"AutonaScoreboardPlayer.ui does not have: "
+        f"{sorted(fromUi - playerNames)}")
+    assert fromUi <= EXPECTED["AutonaScoreboardPlayer.ui"]
+    # The note box's objectName is assigned in code; both spellings have to
+    # be the same string or the eye menu's "show_additional" toggle stops
+    # finding the widget its key belongs to.
+    assert schema.PLAYER_NOTE_KEY == "custom_textbox"
+
+
+def _state_write_calls(relative_path):
+    """Every ``StateManager.Set`` / ``.Unset`` call in a source file.
+
+    Matches on the receiver name being literally ``StateManager``, so an
+    aliased import (``from ...StateManager import StateManager as SM``)
+    would slip through undetected. If a source file ever introduces an
+    alias like that, update this AST check to match it too.
+    """
+    tree = ast.parse((PROJECT_ROOT / relative_path).read_text(encoding="utf-8"))
+    return [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in ("Set", "Unset")
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "StateManager"
+    ]
+
+
+PLAYER_WIDGET_SOURCES = [
+    "src/AutonaScoreboardPlayerWidget.py",
+    "src/AutonaBasePlayerWidget.py",
+]
+
+
+def test_the_player_widgets_do_not_write_the_state_directly():
+    """The completion condition for this instalment, as a tripwire.
+
+    A player widget that writes StateManager itself is, in this codebase,
+    always a keypath built from `self.path` plus something -- and the
+    "something" was an objectName every time. Checking for the write rather
+    than for `objectName()` is what makes this readable: the widgets still
+    call objectName() legitimately (Clear's field filter, SwapWith's
+    widget-to-widget copy, the character combos' width rules), so an
+    objectName ban would need an allowlist that grows until it means
+    nothing.
+
+    SaveBlock / BlockSaving / ReleaseSaving are deliberately not covered:
+    they coalesce cycles, they do not name keys.
+    """
+    for relative in PLAYER_WIDGET_SOURCES:
+        calls = _state_write_calls(relative)
+        assert calls == [], (
+            f"{relative} writes StateManager directly again (line(s) "
+            f"{sorted(node.lineno for node in calls)}). The player subtree "
+            "is core/PlayerService.py's -- add a method there and call it "
+            "through self.player instead of reverting this test.")
+
+
 def test_the_scoreboard_no_longer_derives_keypaths_from_objectname():
     """The `findChildren` + objectName() loops must not come back.
 
@@ -191,8 +264,13 @@ def test_programmatic_keypath_names_present():
 # The QSpinBox internal QLineEdit reports objectName 'qt_spinbox_lineedit';
 # keypath code must fall back to the parent objectName. Guard that fallback so
 # spinbox values keep landing on the right key.
+#
+# AutonaScoreboardPlayerWidget is no longer on this list: it has no
+# objectName-derived keypath left to need the fallback (the seed spinbox and
+# its line edit are both wired to StateSchema.PLAYER_SEED_KEY explicitly),
+# which the two tests above pin. AutonaTournamentInfoWidget still derives
+# its keys and still needs it.
 QT_SPINBOX_FALLBACK_FILES = [
-    "src/AutonaScoreboardPlayerWidget.py",
     "src/AutonaTournamentInfoWidget.py",
 ]
 

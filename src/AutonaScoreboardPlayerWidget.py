@@ -10,7 +10,8 @@ from qtpy import uic
 # Used by _releaseLayoutItemWrappers below; see tests/test_wrapper_lifetime.py.
 from shiboken6 import Shiboken
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
-from .Helpers.AutonaSponsorHelper import AutonaSponsorHelper
+from .core import StateSchema as schema
+from .core.Actions import AutonaActions
 from .StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaPlayerDB import AutonaPlayerDB
@@ -130,21 +131,21 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             sub.setContentsMargins(0, 0, 0, 0)
             sub.setSpacing(UI.SPACE_SM)
 
-        seed = self.findChild(QSpinBox, "seed")
+        seed = self.findChild(QSpinBox, schema.PLAYER_SEED_KEY)
         seed.setMaximumWidth(seed.sizeHint().width() // 2)
 
         # The Twitter field has no inline label anymore; carry the field name
         # in the placeholder. "Twitter" only exists in the "app" translation
         # context (not the .ui Form context), so set it here rather than in
         # the .ui.
-        twitter = self.findChild(QLineEdit, "twitter")
+        twitter = self.findChild(QLineEdit, schema.PLAYER_TWITTER_KEY)
         twitter.setPlaceholderText(QApplication.translate("app", "Twitter"))
 
         # Birthday flag is not surfaced anywhere downstream yet; keep it
         # hidden unconditionally. Visibility of twitter / twitterLabel and
         # the other per-field rows is driven by the eye-menu toggles in
         # AutonaScoreboardWidget.
-        self.findChild(QCheckBox, "birthday").setVisible(False)
+        self.findChild(QCheckBox, schema.PLAYER_BIRTHDAY_KEY).setVisible(False)
 
         # Seed is not user-editable from the widget anymore. The spinbox
         # stays in the layout as a data holder (other code paths read /
@@ -196,8 +197,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         seed.valueChanged.connect(_syncSeedDisplay)
         _syncSeedDisplay(seed.value())
 
-        country = self.findChild(QComboBox, "country")
-        state = self.findChild(QComboBox, "state")
+        country = self.findChild(QComboBox, schema.PLAYER_COUNTRY_KEY)
+        state = self.findChild(QComboBox, schema.PLAYER_STATE_KEY)
 
         # Custom textbox
         custom_textbox_layout = QHBoxLayout()
@@ -207,16 +208,16 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         self.layout().addLayout(custom_textbox_layout, 98, 0, 1, 1)
         # Kept as attribute so _buildCompactDetailsUI can strip the row.
         self._customTextboxRow = custom_textbox_layout
+        # The objectName is what the eye menu's "show_additional" toggle
+        # finds this box by, and it is also its state key
+        # (StateSchema.PLAYER_NOTE_KEY) -- the literal is kept here, and the
+        # two spellings are pinned together in
+        # tests/test_objectname_keypath_contract.py.
         self.custom_textbox.setObjectName("custom_textbox")
         self.custom_textbox.setFixedHeight(36)
         self.custom_textbox.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
         self.custom_textbox.setPlaceholderText(QApplication.translate("app", "Additional information"))
-        self.custom_textbox.textChanged.connect(
-                lambda element=self.custom_textbox: [
-                    StateManager.Set(
-                        f"{self.path}.{element.objectName()}", element.toPlainText()),
-                    self.instanceSignals.dataChanged.emit()
-                ])
+        self.custom_textbox.textChanged.connect(self._OnNoteChanged)
 
         self.character_container = self.findChild(QWidget, "characters")
         # On the scoreboard the player block is chrome-free (the team column's
@@ -267,9 +268,9 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             self.save_bt.hide()
         else:
             save_row_layout.addWidget(self.save_bt)
-            self.findChild(QLineEdit, "name").editingFinished.connect(
+            self.findChild(QLineEdit, schema.PLAYER_TAG_KEY).editingFinished.connect(
                 self.ManageSavePlayerToDBText)
-            self.findChild(QLineEdit, "team").editingFinished.connect(
+            self.findChild(QLineEdit, schema.PLAYER_SPONSOR_KEY).editingFinished.connect(
                 self.ManageSavePlayerToDBText)
 
         self.delete_bt = QPushButton(
@@ -284,9 +285,9 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             # Delete goes LEFT of Save (negative action left, positive
             # action right — the app-wide button-pair convention).
             save_row_layout.insertWidget(0, self.delete_bt)
-            self.findChild(QLineEdit, "name").editingFinished.connect(
+            self.findChild(QLineEdit, schema.PLAYER_TAG_KEY).editingFinished.connect(
                 self.ManageDeletePlayerFromDBActive)
-            self.findChild(QLineEdit, "team").editingFinished.connect(
+            self.findChild(QLineEdit, schema.PLAYER_SPONSOR_KEY).editingFinished.connect(
                 self.ManageDeletePlayerFromDBActive)
 
         self.clear_bt = QPushButton(QApplication.translate("app", "Clear"))
@@ -313,43 +314,12 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
         self.lastExportedName = ""
 
-        self.findChild(QLineEdit, "name").editingFinished.connect(
+        self.findChild(QLineEdit, schema.PLAYER_TAG_KEY).editingFinished.connect(
             self.NameChanged)
-        self.findChild(QLineEdit, "team").editingFinished.connect(
+        self.findChild(QLineEdit, schema.PLAYER_SPONSOR_KEY).editingFinished.connect(
             self.NameChanged)
 
-        for c in self.findChildren(QLineEdit):
-            c.editingFinished.connect(
-                lambda element=c: [
-                    StateManager.Set(
-                        f"{self.path}.{element.objectName() if element.objectName() != 'qt_spinbox_lineedit' else element.parent().objectName()}", element.text()),
-                    self.instanceSignals.dataChanged.emit()
-                ])
-
-        seed.valueChanged.connect(
-            lambda value: StateManager.Set(f"{self.path}.seed", value)
-        )
-        seed.valueChanged.connect(
-            lambda value: self.instanceSignals.player_seed_changed.emit()
-        )
-
-        seed.setValue(0)
-        seed.valueChanged.emit(seed.value())
-
-        self.findChild(QCheckBox, "birthday").toggled.connect(
-            lambda state, element=c: [
-                StateManager.Set(
-                    f"{self.path}.birthday", state)
-        ])
-        self.findChild(QCheckBox, "birthday").toggled.emit(False)
-
-        for c in self.findChildren(QComboBox):
-            c.currentIndexChanged.connect(
-                lambda text, element=c: [
-                    self.ComboBoxIndexChanged(element)
-                ]
-            )
-            c.currentIndexChanged.emit(0)
+        self._WireInputs(seed)
 
         self.SetCharactersPerPlayer(1)
 
@@ -422,14 +392,14 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         identityRow = QHBoxLayout()
         identityRow.setSpacing(UI.SPACE_SM)
         dlg.addLayout(identityRow)
-        identityRow.addWidget(self._w("real_name", QLineEdit))
-        identityRow.addWidget(self._w("twitter", QLineEdit))
+        identityRow.addWidget(self._w(schema.PLAYER_REAL_NAME_KEY, QLineEdit))
+        identityRow.addWidget(self._w(schema.PLAYER_TWITTER_KEY, QLineEdit))
 
         locationRow = QHBoxLayout()
         locationRow.setSpacing(UI.SPACE_SM)
         dlg.addLayout(locationRow)
-        locationRow.addWidget(self._w("country", QComboBox))
-        locationRow.addWidget(self._w("state", QComboBox))
+        locationRow.addWidget(self._w(schema.PLAYER_COUNTRY_KEY, QComboBox))
+        locationRow.addWidget(self._w(schema.PLAYER_STATE_KEY, QComboBox))
 
         dlg.addWidget(self.character_container)
         dlg.addWidget(self.custom_textbox)
@@ -472,8 +442,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         # vertically at full width. The tag placeholder carries the column
         # identity ("1Pプレイヤー名" / "2Pプレイヤー名") — the 1P/2P header
         # labels were dropped.
-        team = self._w("team", QLineEdit)
-        name = self._w("name", QLineEdit)
+        team = self._w(schema.PLAYER_SPONSOR_KEY, QLineEdit)
+        name = self._w(schema.PLAYER_TAG_KEY, QLineEdit)
         name.setPlaceholderText(QApplication.translate(
             "app", "{0}Pプレイヤー名").format(self.teamNumber))
         # Full-width rows: neutralize the .ui's one-row styling (sponsor was
@@ -551,26 +521,117 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         grid.removeItem(sub_layout)
 
     def ShowDetails(self):
-        name = self._w("name", QLineEdit).text().strip()
+        name = self._w(schema.PLAYER_TAG_KEY, QLineEdit).text().strip()
         self.detailsDialog.setWindowTitle(
             name if name else QApplication.translate("app", "プレイヤー詳細"))
         # Window-modal, non-blocking (no exec(): モーダル入れ子禁止).
         self.detailsDialog.open()
 
     def _ApplyBoardChanges(self):
-        # The details dialog is only built for score paths, so self.path is
-        # score.{N}.team.{T}.player.{M} here; the board's held prefix is the
-        # first two segments (score.{N}). Derived at click time because
-        # self.path can be rewritten by the owning widget.
-        StateManager.CommitHeld(".".join(self.path.split(".")[:2]))
+        # The details dialog is only built for score paths, so the slot
+        # always resolves to a board here; ApplyChanges is the same
+        # operation the board-level 反映 button runs.
+        board = self.player.BoardNumber()
+        if board is None:
+            logger.warning(
+                f"反映 pressed on a player card with no board: {self.path}")
+            return
+        AutonaActions.instance.ApplyChanges(board)
 
     @staticmethod
     def _seedDisplayStyle() -> str:
         return f"color: {UI.palette()['text_secondary']};"
 
-    def ComboBoxIndexChanged(self, element: QComboBox):
-        StateManager.Set(
-            f"{self.path}.{element.objectName()}", element.currentData())
+    def _WireInputs(self, seed: QSpinBox):
+        """Bind the card's inputs to the operations they stand for.
+
+        This used to be three loops over `findChildren`, each connecting a
+        lambda that built `{self.path}.{element.objectName()}` and wrote it
+        (known-smells S-14, and the last instance of the pattern outside
+        AutonaTournamentInfoWidget). The names come from
+        `StateSchema.PLAYER_INPUT_KEYS` now and are used to *find* the
+        widgets; the writes are `PlayerService`'s. The objectNames still have
+        to equal those keys -- an existing program_state.json is keyed by
+        them and the eye menu finds these same widgets by them -- which is
+        what tests/test_objectname_keypath_contract.py pins.
+
+        Two things the old loops did that this deliberately does not:
+
+        - `findChildren(QLineEdit)` also reached the *internal* line edits of
+          the editable country/state combos, whose objectName is "". Finishing
+          an edit in either of them wrote a key with an empty final segment
+          under the player (`score.1.team.1.player.1.` -> a "" key), which
+          nothing reads and every export carried.
+        - the seed spinbox's internal line edit went through the same loop
+          via the `qt_spinbox_lineedit` -> parent fallback and published the
+          spinbox's *text*, so a Clear() left the seed as the string "0". It
+          is wired explicitly below and publishes the value, because it is
+          not redundant: `SwapWith` moves the seed through the state without
+          touching the spinbox, so the two can disagree and Clear() has to be
+          able to reset the state from a spinbox that is already at 0.
+
+        The initial emits are kept exactly where they were: the seed, the
+        birthday flag and the two location combos publish as the card is
+        built, the four line edits do not (they reach the state on the first
+        editingFinished, or through SetData). An empty card therefore starts
+        with `seed`, `birthday`, `country` and `state` and gains the rest as
+        it is filled -- unchanged, and relied on by the overlays that read
+        the location from launch.
+        """
+        for field in schema.PLAYER_LINE_EDIT_KEYS:
+            edit = self._w(field, QLineEdit)
+            if edit is None:
+                logger.error(
+                    f"AutonaScoreboardPlayer.ui is missing {field!r}; "
+                    f"{self.path}.{field} will never be written")
+                continue
+            edit.editingFinished.connect(
+                lambda field=field, edit=edit: self._OnTextChanged(
+                    field, edit.text()))
+
+        seed.valueChanged.connect(self.player.SetSeed)
+        seed.valueChanged.connect(
+            lambda value: self.instanceSignals.player_seed_changed.emit()
+        )
+        seedEdit = seed.lineEdit()
+        if seedEdit is not None:
+            seedEdit.editingFinished.connect(
+                lambda seed=seed: self.player.SetSeed(seed.value()))
+
+        seed.setValue(0)
+        seed.valueChanged.emit(seed.value())
+
+        birthday = self._w(schema.PLAYER_BIRTHDAY_KEY, QCheckBox)
+        birthday.toggled.connect(self.player.SetBirthday)
+        birthday.toggled.emit(False)
+
+        for field in schema.PLAYER_LOCATION_KEYS:
+            combo = self._w(field, QComboBox)
+            if combo is None:
+                logger.error(
+                    f"AutonaScoreboardPlayer.ui is missing {field!r}; "
+                    f"{self.path}.{field} will never be written")
+                continue
+            combo.currentIndexChanged.connect(
+                lambda index, field=field, combo=combo:
+                    self._OnLocationChanged(field, combo))
+            combo.currentIndexChanged.emit(0)
+
+    def _OnTextChanged(self, field, text):
+        self.player.SetText(field, text)
+        self.instanceSignals.dataChanged.emit()
+
+    def _OnNoteChanged(self):
+        self.player.SetText(
+            schema.PLAYER_NOTE_KEY, self.custom_textbox.toPlainText())
+        self.instanceSignals.dataChanged.emit()
+
+    def _OnLocationChanged(self, field, combo: QComboBox):
+        # currentData() carries the whole selected row (code, names, flag
+        # asset) or {} for the blank row every region rebuild starts on.
+        # Which row that is has just been decided by Qt (LoadStates /
+        # SetData); publishing it is core's.
+        self.player.SetLocation(field, combo.currentData())
         self.instanceSignals.dataChanged.emit()
 
     def SetLosers(self, value):
@@ -583,8 +644,9 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         if getattr(self, '_bulk_updating', False):
             return
         with self.dataLock:
-            team = self.findChild(QLineEdit, "team").text()
-            name = self.findChild(QLineEdit, "name").text()
+            team = self.findChild(
+                QLineEdit, schema.PLAYER_SPONSOR_KEY).text()
+            name = self.findChild(QLineEdit, schema.PLAYER_TAG_KEY).text()
             merged = team + " " + name
 
             if merged != self.lastExportedName:
@@ -596,9 +658,10 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
     def ExportPlayerId(self, id=None):
         with self.dataLock:
-            if StateManager.Get(f"{self.path}.id") != id:
-                StateManager.Set(
-                    f"{self.path}.id", id)
+            # The service reports whether the slot actually changed hands;
+            # the statistics fetches below must not re-run for a re-asserted
+            # id (that guard used to be the `if` around the write itself).
+            if self.player.SetPlayerId(id):
                 if "score" in self.path:
                     self.instanceSignals.playerId_changed.emit()
                     if "team.1" in self.path:
@@ -791,7 +854,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
     def SetupAutocomplete(self):
         if AutonaPlayerDB.model:
-            name_edit = self._w("name", QLineEdit)
+            name_edit = self._w(schema.PLAYER_TAG_KEY, QLineEdit)
             name_edit.setCompleter(QCompleter())
             name_edit.completer().activated[QModelIndex].connect(
                 lambda x: self.SetData(x.data(Qt.ItemDataRole.UserRole)) if x is not None else None, Qt.QueuedConnection)
@@ -822,7 +885,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 # rebuild is immediately discarded by the subsequent
                 # country_code assignment, so suppressing it saves one
                 # LoadStates pass per SetData.
-                country_element = self._w("country", QComboBox)
+                country_element = self._w(
+                    schema.PLAYER_COUNTRY_KEY, QComboBox)
                 country_was_blocked = False
                 if country_element is not None:
                     country_was_blocked = country_element.signalsBlocked()
@@ -843,21 +907,21 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                     self.SetData(dbPlayer, dontLoadFromDB=True,
                                  clear=False, no_mains=no_mains)
 
-            name = self._w("name")
+            name = self._w(schema.PLAYER_TAG_KEY)
             if data.get("gamerTag") and data.get("gamerTag") != name.text():
                 data["gamerTag"] = AutonaBadWordFilter.Censor(
                     data["gamerTag"], data.get("country_code"))
                 name.setText(f'{data.get("gamerTag")}')
                 name.editingFinished.emit()
 
-            team = self._w("team")
+            team = self._w(schema.PLAYER_SPONSOR_KEY)
             if data.get("prefix") and data.get("prefix") != team.text():
                 data["prefix"] = AutonaBadWordFilter.Censor(
                     data["prefix"], data.get("country_code"))
                 team.setText(f'{data.get("prefix")}')
                 team.editingFinished.emit()
 
-            real_name = self._w("real_name")
+            real_name = self._w(schema.PLAYER_REAL_NAME_KEY)
             if data.get("name") and data.get("name") != real_name.text():
                 data["name"] = AutonaBadWordFilter.Censor(
                     data["name"], data.get("country_code"))
@@ -873,7 +937,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             if data.get("city"):
                 self.ExportPlayerCity(data.get("city"))
 
-            twitter = self._w("twitter")
+            twitter = self._w(schema.PLAYER_TWITTER_KEY)
             if data.get("twitter") and data.get("twitter") != twitter.text():
                 data["twitter"] = AutonaBadWordFilter.Censor(
                     data["twitter"], data.get("country_code"))
@@ -889,7 +953,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 self.custom_textbox.textChanged.emit()
 
             if data.get("country_code"):
-                countryElement: QComboBox = self._w("country", QComboBox)
+                countryElement: QComboBox = self._w(
+                    schema.PLAYER_COUNTRY_KEY, QComboBox)
                 countryIndex = 0
                 for i in range(AutonaCountryHelper.countryModel.rowCount()):
                     item = AutonaCountryHelper.countryModel.item(
@@ -902,8 +967,10 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                     countryElement.setCurrentIndex(countryIndex)
 
             if data.get("state_code"):
-                countryElement: QComboBox = self._w("country", QComboBox)
-                stateElement: QComboBox = self._w("state", QComboBox)
+                countryElement: QComboBox = self._w(
+                    schema.PLAYER_COUNTRY_KEY, QComboBox)
+                stateElement: QComboBox = self._w(
+                    schema.PLAYER_STATE_KEY, QComboBox)
                 stateIndex = 0
                 for i in range(stateElement.model().rowCount()):
                     item = stateElement.model().item(i).data(Qt.ItemDataRole.UserRole)
@@ -1014,15 +1081,15 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 except (TypeError, ValueError):
                     seed = 0
                 if seed > 0:
-                    StateManager.Set(f"{self.path}.seed", seed)
-                    self._w("seed", QSpinBox).setValue(seed)
+                    self.player.SetSeed(seed)
+                    self._w(schema.PLAYER_SEED_KEY, QSpinBox).setValue(seed)
                 else:
                     # setValue(0) alone does not emit valueChanged when the
                     # spinbox is already 0, so write the state explicitly.
-                    self._w("seed", QSpinBox).setValue(0)
-                    StateManager.Set(f"{self.path}.seed", 0)
+                    self._w(schema.PLAYER_SEED_KEY, QSpinBox).setValue(0)
+                    self.player.SetSeed(0)
             if data.get("city"):
-                StateManager.Set(f"{self.path}.city", data.get("city"))
+                self.player.SetCity(data.get("city"))
         finally:
             self._bulk_updating = was_bulk
             if not was_bulk:
@@ -1035,8 +1102,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 # start.gg set with no avatar at all.
                 self.ExportMergedName()
                 self.ExportPlayerImages()
-                team = self._w("team", QLineEdit).text()
-                name = self._w("name", QLineEdit).text()
+                team = self._w(schema.PLAYER_SPONSOR_KEY, QLineEdit).text()
+                name = self._w(schema.PLAYER_TAG_KEY, QLineEdit).text()
                 self.lastExportedName = team + " " + name
             StateManager.ReleaseSaving()
             self.dataLock.release()
@@ -1045,10 +1112,10 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         tag = self.GetCurrentPlayerTag()
 
         playerData = {
-            "prefix": self._w("team").text(),
-            "gamerTag": self._w("name").text(),
-            "name": self._w("real_name").text(),
-            "twitter": self._w("twitter").text(),
+            "prefix": self._w(schema.PLAYER_SPONSOR_KEY).text(),
+            "gamerTag": self._w(schema.PLAYER_TAG_KEY).text(),
+            "name": self._w(schema.PLAYER_REAL_NAME_KEY).text(),
+            "twitter": self._w(schema.PLAYER_TWITTER_KEY).text(),
             "custom_textbox": "\\n".join(self.custom_textbox.toPlainText().splitlines())
         }
 
@@ -1080,13 +1147,15 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 AutonaGameAssetManager.instance.selectedGame.get("codename"): mains
             }
 
-        if self._w("country", QComboBox).currentData(Qt.ItemDataRole.UserRole):
+        if self._w(schema.PLAYER_COUNTRY_KEY, QComboBox).currentData(Qt.ItemDataRole.UserRole):
             playerData["country_code"] = self._w(
-                "country", QComboBox).currentData(Qt.ItemDataRole.UserRole).get("code")
+                schema.PLAYER_COUNTRY_KEY,
+                QComboBox).currentData(Qt.ItemDataRole.UserRole).get("code")
 
-        if self._w("state", QComboBox).currentData(Qt.ItemDataRole.UserRole):
+        if self._w(schema.PLAYER_STATE_KEY, QComboBox).currentData(Qt.ItemDataRole.UserRole):
             playerData["state_code"] = self._w(
-                "state", QComboBox).currentData(Qt.ItemDataRole.UserRole).get("code")
+                schema.PLAYER_STATE_KEY,
+                QComboBox).currentData(Qt.ItemDataRole.UserRole).get("code")
 
         AutonaPlayerDB.AddPlayers([playerData], overwrite=True)
 
