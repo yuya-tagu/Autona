@@ -8,9 +8,9 @@ from .StateManager import StateManager
 from .StateManagerBridge import StateManagerBridge
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaGameAssetManager import AutonaGameAssetManager
+from .core import StateSchema as schema
 from .core.TournamentInfoService import (
     TournamentInfoService, TOURNAMENT_LOGO_PATH)
-from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaDirHelper import AutonaResolve
 from .AutonaFeatureColors import MakeTournamentColorCard
 from . import ui_layout as L
@@ -29,6 +29,23 @@ BANNER_PATH = "./user_data/tournament_banner.png"
 LOGO_PATH = TOURNAMENT_LOGO_PATH
 
 
+def _DateToTimestamp(date: QDate) -> int:
+    """A QDate as the unix timestamp of its local midnight.
+
+    The state holds a *formatted* short date, so the service keeps the raw
+    timestamp behind it (that is what lets a panel built after a tournament
+    was loaded put the right day in its QDateEdit). Handing it a timestamp
+    rather than a preformatted string is what keeps the format itself in one
+    place -- AutonaLocaleHelper.FormatExportDate, injected into the service
+    by bootstrap_core() -- instead of duplicated here.
+
+    Cannot go negative: AutonaTournamentInfo.ui sets the QDateEdit's minimum
+    to 2000-01-01, which matters because the service formats through
+    time.localtime() and that rejects pre-epoch values on Windows.
+    """
+    return date.startOfDay().toSecsSinceEpoch()
+
+
 class AutonaTournamentInfoWidget(QDockWidget):
     """The EVENT tab: the tournament's metadata, icon and banner.
 
@@ -39,11 +56,14 @@ class AutonaTournamentInfoWidget(QDockWidget):
     ever been revealed -- which is what let the page become lazy
     (startup-architecture-redesign.md §3).
 
-    Two directions remain here, and only two:
+    Two directions remain here, and only two -- neither of them naming a key
+    of its own since Step 5's third instalment. ``StateSchema`` holds the
+    names; this panel looks its widgets up *by* them and hands values to the
+    service, instead of reading a key back off whatever ``findChildren``
+    turned up (known-smells S-14):
 
-    - **out**: a human editing a field still writes
-      ``tournamentInfo.{objectName}`` through the historical binding
-      (known-smells S-14; migrating it is Step 5);
+    - **out**: a human editing a field calls
+      ``TournamentInfoService.Set{Text,Number,Date}Field``;
     - **in**: ``_SyncFieldsFromState`` renders the state into the fields, so
       a panel built after the tournament was loaded shows it, and a name
       changed elsewhere (the service, another panel) appears here.
@@ -65,57 +85,54 @@ class AutonaTournamentInfoWidget(QDockWidget):
         self.setWidget(scroll)
 
         # ── EVENT tab fields ─────────────────────────────────────────────
-        # The write direction only: every input still writes
-        # tournamentInfo.{objectName} when a human edits it (S-14, Step 5).
-        # The restore that used to sit in these loops is
-        # _SyncFieldsFromState() at the end of __init__ -- one place, and one
-        # that keeps working when the state changes later.
+        # The write direction only. The field names come from StateSchema and
+        # are used *as* the findChild keys; nothing here reads an objectName
+        # back to build a key path with (S-14, headless core Step 5). The
+        # restore that used to sit in these loops is _SyncFieldsFromState()
+        # at the end of __init__ -- one place, and one that keeps working
+        # when the state changes later.
+        #
+        # Each list is (field name, widget) so the render pass below has the
+        # key without asking the widget for its name.
+        #
+        # 表示大会名 rides along with the tournament name rather than having
+        # its own connection here: `SetTextField` applies the follow rule
+        # (the weaker of the two -- a manual rename carries into the display
+        # name only while it has not been customised), which is what the
+        # provider path has always done too.
         self._dateFields = []
         self._textFields = []
         self._numberFields = []
 
-        for widget in self.findChildren(QDateEdit):
-            self._dateFields.append(widget)
-            widget.dateChanged.connect(lambda value, element=widget: [
-                StateManager.Set(
-                    f"tournamentInfo.{element.objectName()}", value.toString(QLocale(AutonaLocaleHelper.exportLocale).dateFormat(QLocale.FormatType.ShortFormat)))
-            ])
-
-        for widget in self.findChildren(QLineEdit):
-            # Qt's own line edit inside a QSpinBox, and an editable combo's:
-            # neither carries a key of its own (S-14 fallback guard).
-            if widget.objectName() == "qt_spinbox_lineedit":
+        for field in schema.TOURNAMENT_TEXT_FIELDS:
+            widget = self._input(field, QLineEdit)
+            if widget is None:
                 continue
-            if isinstance(widget.parent(), QComboBox):
-                continue
-            self._textFields.append(widget)
+            self._textFields.append((field, widget))
             widget.editingFinished.connect(
-                lambda element=widget: [
-                    StateManager.Set(
-                        f"tournamentInfo.{element.objectName()}", element.text())
-                ])
+                lambda field=field, widget=widget:
+                    TournamentInfoService.instance.SetTextField(
+                        field, widget.text()))
 
-        for widget in self.findChildren(QSpinBox):
-            self._numberFields.append(widget)
-            widget.valueChanged.connect(lambda value, element=widget: [
-                StateManager.Set(
-                    f"tournamentInfo.{element.objectName()}", value)
-            ])
+        for field in schema.TOURNAMENT_NUMBER_FIELDS:
+            widget = self._input(field, QSpinBox)
+            if widget is None:
+                continue
+            self._numberFields.append((field, widget))
+            widget.valueChanged.connect(
+                lambda value, field=field:
+                    TournamentInfoService.instance.SetNumberField(
+                        field, value))
 
-        # 表示大会名 auto-copy. displayTournamentName is its own
-        # tournamentInfo.* key (not score.{N}.*) so it survives the startup
-        # score-subtree wipe and is shared across every board. Two sources
-        # feed it with different override semantics, and both rules -- plus
-        # the "last tournament name we saw" bookkeeping they share -- live in
-        # core/TournamentInfoService now. What is connected here is only the
-        # weaker one: a manual edit of the 大会情報 name field follows into
-        # the display name while it has not been customised. Connected after
-        # the loop above so the name is already written when it runs.
-        self.tournamentNameEdit: QLineEdit = self.findChild(
-            QLineEdit, "tournamentName")
-        self.tournamentNameEdit.editingFinished.connect(
-            lambda: TournamentInfoService.instance.FollowDisplayName(
-                self.tournamentNameEdit.text()))
+        for field in schema.TOURNAMENT_DATE_FIELDS:
+            widget = self._input(field, QDateEdit)
+            if widget is None:
+                continue
+            self._dateFields.append((field, widget))
+            widget.dateChanged.connect(
+                lambda date, field=field:
+                    TournamentInfoService.instance.SetDateField(
+                        field, _DateToTimestamp(date)))
 
         # Game title combo
         self.gameTitleCombo: QComboBox = self.findChild(
@@ -210,10 +227,15 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         # 大会カラー — the tournament-wide theme / accent every feature falls
         # back to (SettingsManager general.* / StateManager tournamentInfo.*).
-        # Built in code rather than in the .ui so the color buttons stay out of
-        # the objectName -> keypath auto-wiring loops above, and inserted right
-        # after 大会情報 so the media group keeps the bottom of the tab.
-        # Per-feature overrides live on their own panels (AutonaFeatureColors).
+        # Built in code rather than in the .ui (originally so the color
+        # buttons stayed out of the findChildren keypath loops this tab used
+        # to run; the card is shared with the six per-feature panels now),
+        # and inserted right after 大会情報 so the media group keeps the bottom
+        # of the tab. The card is its own writer —
+        # AutonaFeatureColors.SetTournamentColor writes tournamentInfo.
+        # themeColor / accentColor directly, which is the FeatureColors
+        # instalment of Step 5, not this one. Per-feature overrides live on
+        # their own panels.
         contentsLayout = self._contents.layout()
         infoGroup = self.findChild(QGroupBox, "groupBox_2")
         insertAt = (contentsLayout.indexOf(infoGroup) + 1) if infoGroup \
@@ -234,6 +256,22 @@ class AutonaTournamentInfoWidget(QDockWidget):
             self._SyncFieldsFromState)
         self._SyncFieldsFromState()
 
+    def _input(self, field, cls):
+        """The tab's widget for one schema field, or None with a loud log.
+
+        The schema name and the .ui objectName have to be the same string
+        (tests/test_objectname_keypath_contract.py pins that they are). If
+        they ever stop being, the field would silently go unwired and its
+        key would never be written again -- so say so rather than skip
+        quietly.
+        """
+        widget = self.findChild(cls, field)
+        if widget is None:
+            logger.error(
+                f"AutonaTournamentInfo.ui is missing {cls.__name__} "
+                f"{field!r}; tournamentInfo.{field} will never be written")
+        return widget
+
     def _onStateDelta(self, delta):
         # Same cheap containment filter the scoreboard uses on deltas.
         if "tournamentInfo" in str(delta):
@@ -244,26 +282,28 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         Writes nothing — that is what makes it safe on every delta. Each
         widget is set inside a QSignalBlocker so the handler that would fire
-        (the objectName-to-keypath write above) cannot echo the value back.
-        For the number fields this closes a real echo: QSpinBox.setValue()
-        emits valueChanged even when set programmatically. For the text
-        fields it is defensive rather than closing a live path --
-        QLineEdit.setText() does not itself emit editingFinished (only
-        Return/focus-out do) -- but the blocker is kept so the two loops
-        read the same either way. A field the operator has focus in is left
-        alone so a notification cannot yank text out from under the caret.
+        (the SetTextField / SetNumberField / SetDateField call wired above)
+        cannot echo the value back. For the number and date fields this
+        closes a real echo: QSpinBox.setValue() and QDateEdit.setDate() emit
+        even when set programmatically. For the text fields it is defensive
+        rather than closing a live path -- QLineEdit.setText() does not
+        itself emit editingFinished (only Return/focus-out do) -- but the
+        blocker is kept so the loops read the same either way. A field the
+        operator has focus in is left alone so a notification cannot yank
+        text out from under the caret.
         """
-        for widget in self._textFields:
+        service = TournamentInfoService.instance
+        for field, widget in self._textFields:
             value = StateManager.Get(
-                f"tournamentInfo.{widget.objectName()}", None)
+                service.Key(field), None)
             if (isinstance(value, str) and widget.text() != value
                     and not widget.hasFocus()):
                 with QSignalBlocker(widget):
                     widget.setText(value)
 
-        for widget in self._numberFields:
+        for field, widget in self._numberFields:
             value = StateManager.Get(
-                f"tournamentInfo.{widget.objectName()}", None)
+                service.Key(field), None)
             if (isinstance(value, int) and not isinstance(value, bool)
                     and widget.value() != value and not widget.hasFocus()):
                 with QSignalBlocker(widget):
@@ -278,9 +318,8 @@ class AutonaTournamentInfoWidget(QDockWidget):
         # creates it before any widget exists, and a null check here would
         # only turn a broken bootstrap into a panel that silently renders
         # nothing.
-        service = TournamentInfoService.instance
-        for widget in self._dateFields:
-            raw = service.RawDate(widget.objectName())
+        for field, widget in self._dateFields:
+            raw = service.RawDate(field)
             if raw is None or widget.hasFocus():
                 continue
             try:

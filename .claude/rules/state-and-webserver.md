@@ -39,15 +39,20 @@ paths:
 - 例外は**静的化済みのキー名**: `SCORE_MATCH_FIELDS`（`phase`/`pool`/`match`）と
   `SCORE_TEAM_INPUT_KEYS`（`teamName`/`losers`）は Step 5 第 1 弾で、
   `PLAYER_INPUT_KEYS`（`team`/`name`/`real_name`/`twitter`/`custom_textbox`/
-  `seed`/`birthday`/`country`/`state`）は第 2 弾で実際に消費されるようになった —
-  `AutonaActions` / `PlayerService` がこれらを書き、`AutonaScoreboardWidget` /
-  `AutonaScoreboardPlayerWidget` は `findChild` の**引数として**使う
+  `seed`/`birthday`/`country`/`state`）は第 2 弾で、
+  `TOURNAMENT_INPUT_KEYS`（`tournamentName`/`eventName`/`address`/`numEntrants`/
+  `startAt`）は第 3 弾で実際に消費されるようになった —
+  `AutonaActions` / `PlayerService` / `TournamentInfoService` がこれらを書き、
+  `AutonaScoreboardWidget` / `AutonaScoreboardPlayerWidget` /
+  `AutonaTournamentInfoWidget` は `findChild` の**引数として**使う
   （objectName から作らない）。**文字列は .ui の objectName と一致していなければ
   ならない**（既存 `program_state.json` の互換に加えて、eye メニューの表示トグルも
   同じ名前で widget を引く）。`tests/test_objectname_keypath_contract.py` が
-  一致・「objectName() 非使用」・「選手ウィジェットは StateManager を直接書かない」を pin
-- `DYNAMIC_KEY_FAMILIES` は Step 5 の**残タスク一覧**として縮んでいく。ウィジェットを
-  静的化したら該当エントリを消す（`tests/test_state_schema.py` が pin）
+  一致・「objectName() 非使用」・「選手ウィジェット / EVENT パネルは StateManager を
+  直接書かない」を pin
+- `DYNAMIC_KEY_FAMILIES` は Step 5 の残タスク一覧として縮み、**第 3 弾で空になった**。
+  新しいウィジェットを objectName 由来キーで書かない（`tests/test_state_schema.py` が
+  空であることを pin）
 - 例外: `colors.{feature}.*` のシードは `AutonaFeatureColors.SeedColorState()` に残っている
   （キー族の読み書きと同居。Step 3/4 で core へ移す）
 - **core → src の逆依存は Qt-free モジュールのみ import 可**（`tests/test_core_qt_free.py`
@@ -116,7 +121,7 @@ paths:
 | `src/core/StatsService.py` | `AutonaScoreboardWidget.stats.service` | 統計の取得可否判断・アップセット計算・`last_sets`/`history_sets`/`recent_sets`/`upset_factor` の書き込み |
 | `src/core/GameTrackerService.py` | `AutonaIndividualGameTracker.service` | ステージ勝敗の記録（`score.{n}.stages.*`）・ステージ⇔スコアの相互整合・`writingScore` ガード |
 | `src/core/SetLoadService.py` | `AutonaScoreboardWidget.setLoad` | セット読込の正規化（ラウンド/フェーズ/プール・スコア・敗者フラグ・チーム名とロゴ・`bracket_type`・追従中セット）。スワップ後の面の解決は `DisplayTeam()` が唯一の正本 |
-| `src/core/TournamentInfoService.py` | `TournamentInfoService.instance`（`bootstrap_core()` 生成） | `tournamentInfo.*` の書き込み全部（provider ペイロードの適用・表示大会名の 2 系統の上書き規則・`logoVersion`・起動時シード）。EVENT パネル不在でも動くことが遅延構築の前提 |
+| `src/core/TournamentInfoService.py` | `TournamentInfoService.instance`（`bootstrap_core()` 生成） | `tournamentInfo.*` の書き込み全部（provider ペイロードの適用・**EVENT タブ入力欄の `Set{Text,Number,Date}Field`**・表示大会名の 3 系統の上書き規則・`logoVersion`・起動時シード）。EVENT パネル不在でも動くことが遅延構築の前提。**両方向が同じ 3 操作を通る**（provider 側の `_ApplyKey` も入力側と同じメソッドを呼ぶ）。ただし `AutonaFeatureColors:105` の `themeColor`/`accentColor`（objectName 由来ではない静的キー）と `AutonaCrewBattleWidget:184` の `displayTournamentName`（クルーボード側が未移行）の 2 件は意図的にスコープアウトしており本サービスを通らない |
 | `src/core/PlayerService.py` | `AutonaBasePlayerWidget.player`（選手ウィジェット 1 枚につき 1 個。path に束縛） | 選手スロット配下の書き込み全部（入力フィールド・seed/birthday・国/州の選択行・`mergedName`/`mergedOnlyName`・アバターとスポンサーロゴ・キャラスロット・`city`/`id`・スロット削除）。`BoardNumber()` が `score.{N}` と `player_editor.1` を見分ける |
 
 - **`SetLoadService` はステージ行を書かない**。行数と `stage_widget_list` の長さを

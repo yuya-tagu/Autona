@@ -246,10 +246,14 @@ def test_the_scoreboard_families_left_the_dynamic_key_inventory():
 
     Nothing consumes it, which is exactly why it needs a test: an instalment
     that converts a widget without striking its family off leaves the
-    remaining work overstated, and the next one understates it. The two
-    entries below came off as their instalments landed -- the SCORE panel's
-    board-level and team-card inputs first, the player card second -- and
-    this is the assertion each of them had to flip.
+    remaining work overstated, and the next one understates it. The three
+    entries came off as their instalments landed -- the SCORE panel's
+    board-level and team-card inputs first, the player card second, the
+    EVENT tab third -- and this is the assertion each of them had to flip.
+
+    It is empty now, and the emptiness is the assertion: a widget that
+    reaches for `objectName()`-derived keys again either gets converted or
+    gets listed here, and listing it fails this test on purpose.
     """
     described = " ".join(
         f"{family} {owner}" for family, owner in schema.DYNAMIC_KEY_FAMILIES)
@@ -257,8 +261,53 @@ def test_the_scoreboard_families_left_the_dynamic_key_inventory():
         "the SCORE panel's team card and match bar are static keys now")
     assert "AutonaScoreboardPlayerWidget" not in described, (
         "the player card's inputs are StateSchema.PLAYER_INPUT_KEYS now")
-    # Still to come, and still listed.
-    assert "AutonaTournamentInfoWidget" in described
+    assert "AutonaTournamentInfoWidget" not in described, (
+        "the EVENT tab's inputs are StateSchema.TOURNAMENT_INPUT_KEYS now")
+    assert schema.DYNAMIC_KEY_FAMILIES == (), (
+        f"a key family is being derived from Qt objectNames again: "
+        f"{schema.DYNAMIC_KEY_FAMILIES}. Name it in StateSchema and have the "
+        "widget look its inputs up by that name (S-14), the way the three "
+        "Step 5 instalments did.")
+
+
+def test_the_tournament_field_names_stay_inside_the_catalog():
+    """Same contract for the EVENT tab (headless core Step 5, instalment 3).
+
+    TOURNAMENT_INPUT_KEYS is what AutonaTournamentInfoWidget finds its
+    inputs by and what TournamentInfoService accepts; TOURNAMENT_INFO_KEYS is
+    what KEY_CATALOG enumerates. The catalog used to list only five of these
+    keys and describe the rest in a comment, which is how an enumeration
+    nobody consumes drifts.
+    """
+    assert set(schema.TOURNAMENT_INPUT_KEYS) <= set(
+        schema.TOURNAMENT_INFO_KEYS)
+    assert schema.KEY_CATALOG["tournamentInfo"] == schema.TOURNAMENT_INFO_KEYS
+    # Spelled out: an existing program_state.json is keyed by these.
+    assert schema.TOURNAMENT_TEXT_FIELDS == (
+        "tournamentName", "eventName", "address")
+    assert schema.TOURNAMENT_NUMBER_FIELDS == ("numEntrants",)
+    assert schema.TOURNAMENT_DATE_FIELDS == ("startAt",)
+    assert schema.TOURNAMENT_SHORT_DATE_KEYS == (
+        "endAt", "eventStartAt", "eventEndAt")
+    assert schema.TOURNAMENT_DISPLAY_NAME_KEY == "displayTournamentName"
+
+
+def test_the_tournament_service_field_lists_are_the_schema_ones():
+    """One spelling, not two.
+
+    TournamentInfoService named these itself in Step 4b, before the widget
+    side existed; the panel's findChild keys have to be the same strings, so
+    the service aliases the schema tuples rather than repeating them. A copy
+    that drifts would leave the panel wiring a field the service rejects.
+    """
+    from src.core.TournamentInfoService import TournamentInfoService
+
+    assert TournamentInfoService.TEXT_FIELDS is schema.TOURNAMENT_TEXT_FIELDS
+    assert TournamentInfoService.NUMBER_FIELDS is (
+        schema.TOURNAMENT_NUMBER_FIELDS)
+    assert TournamentInfoService.DATE_FIELDS is schema.TOURNAMENT_DATE_FIELDS
+    assert TournamentInfoService.SHORT_DATE_KEYS is (
+        schema.TOURNAMENT_SHORT_DATE_KEYS)
 
 
 def test_display_options_match_the_web_ui_list():

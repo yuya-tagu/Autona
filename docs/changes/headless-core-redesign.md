@@ -437,7 +437,15 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
 - 保存データ互換のマイグレーション層を schema に実装（旧キー → 新キーの読み替え。
   互換が守れないケースが出たら ADR-004 Revisit conditions に従い `STATE_VERSION` 一括変換へ）
 - 完了条件: ウィジェットからの `StateManager.Set` 直接呼び出し 0。
-  `test_objectname_keypath_contract.py` は役目を終え、schema カタログの契約テストに置換
+  ~~`test_objectname_keypath_contract.py` は役目を終え、schema カタログの契約テストに置換~~
+  → **この見立ては誤り**（第 1 弾で判明）。`.ui` の objectName は `findChild` の引数として
+  使われ続け、schema の文字列と一致していなければならないので、同ファイルは
+  「.ui 名 ↔ schema 名の一致」「objectName 由来キーの不在」「該当ウィジェットが
+  StateManager を直接書かないこと」を pin する形で**残る**
+- 進捗: 第 1 弾 Scoreboard / 第 2 弾 Player / 第 3 弾 TournamentInfo が完了し、
+  **objectName 由来の動的キーはこれで解消**（`DYNAMIC_KEY_FAMILIES` は空 = T-19 完了）。
+  残るのは動的キーを持たないウィジェットの書き込み経路移行 —
+  CrewBattle（board 3 全体）と LayoutOptions / StreamSettings / FeatureColors / Sponsor
 - 検証: ウィジェットごとに手動チェックリスト該当節 + 旧バージョンの保存データ読込テスト
 
 #### 5-1: AutonaScoreboardWidget ✅ 完了（2026-09-01）
@@ -610,10 +618,93 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
 - 次弾以降の削除候補: `AutonaScoreboardPlayerWidget.instanceSignals.dataChanged` は
   購読者ゼロのデッドシグナル（emit 3 箇所のみ）。seed / コンボの内部 `QLineEdit` からの
   emit は本ステップで書き込み経路が変わった際に落ちたが実害はない
+  → **第 3 弾で削除済み**
 - 既知事象（記録のみ、pre-existing・無害）: `SwapWith` のスナップショットに
   objectName `""` のキーが残り、`findChild(QWidget, "")` が任意の子（実測 `QPushButton`）に
   マッチする。type チェックで実害はないが、選手カード描画側を作る際
   （(b) SwapTeams の core 化とセット）に掃除する
+
+#### 5-3: AutonaTournamentInfoWidget（EVENT タブ）✅ 完了（2026-09-02）
+
+- **`AutonaTournamentInfoWidget` の `StateManager.Set` 直接呼び出しが 3 → 0**
+  （`findChildren` ループ 3 本。ウィジェットに残るのは `Get` = 描画のみ）。
+  **`DYNAMIC_KEY_FAMILIES` は空になった** — objectName 由来キーの族はこれで全滅
+  （T-19 完了）。
+  | 旧 | 新 |
+  |----|----|
+  | `findChildren(QLineEdit)` + `objectName()` ループ（内部 line edit を除外する 2 つの guard 付き） | `schema.TOURNAMENT_TEXT_FIELDS` で `findChild` → `TournamentInfoService.SetTextField` |
+  | `findChildren(QSpinBox)` + `objectName()` ループ | `schema.TOURNAMENT_NUMBER_FIELDS` → `SetNumberField` |
+  | `findChildren(QDateEdit)` + `objectName()` + `QLocale(...).dateFormat()` で整形して直書き | `schema.TOURNAMENT_DATE_FIELDS` → `SetDateField(field, unix ts)`。整形は注入済みの `AutonaLocaleHelper.FormatExportDate`（Step 4b で入れた口）1 箇所に集約 |
+  | `tournamentNameEdit.editingFinished` → `FollowDisplayName` の 2 本目の接続 | `SetTextField` が `tournamentName` のときに適用（provider 側 `_ApplyKey` と同じ規則） |
+  | `_SyncFieldsFromState` の `widget.objectName()` からのキー組み立て（3 箇所） | `(field, widget)` のペアを保持し `TournamentInfoService.Key(field)` で読む |
+- **キーパス静的化（T-19 第 3 弾・最終）**: `StateSchema` に `TOURNAMENT_INPUT_KEYS`
+  （`TOURNAMENT_TEXT_FIELDS` = `tournamentName`/`eventName`/`address`、
+  `TOURNAMENT_NUMBER_FIELDS` = `numEntrants`、`TOURNAMENT_DATE_FIELDS` = `startAt`）と
+  `TOURNAMENT_SHORT_DATE_KEYS` / `TOURNAMENT_DISPLAY_NAME_KEY` /
+  `TOURNAMENT_LOGO_VERSION_KEY` を新設。**キー名は 1 文字も変えていない**ので
+  マイグレーション層は不要。`TournamentInfoService.{TEXT,NUMBER,DATE}_FIELDS` /
+  `SHORT_DATE_KEYS`（Step 4b で provider 側だけ静的に名付けたもの）は
+  **schema タプルのエイリアスにした** — 5-1 の教訓「半分だけ定数に追随する非対称を
+  作らない」。`KEY_CATALOG["tournamentInfo"]` も 5 キーの列挙 + コメントから
+  実際の集合の列挙に更新した（透過キー `shortLink` 等だけコメントで残す）
+- **両方向が同じ 3 操作を通る**: `_ApplyKey`（provider ペイロード）も
+  `_ClearFields` も `Set{Text,Number,Date}Field` を呼ぶ形にした。Step 4b は
+  provider 側だけを core に出したので、同じ「テキストを書いたら表示大会名が追従する」
+  規則がサービス内に 2 箇所あった（`_ApplyKey` の分岐とパネルの 2 本目の接続）。1 箇所になった
+- **スコープアウト（判断が自明でない / 別弾）**:
+  | 項目 | 理由 |
+  |------|------|
+  | EVENT タブ「大会カラー」カード（`AutonaFeatureColors.SetTournamentColor` が `tournamentInfo.themeColor` / `accentColor` を直書き） | **objectName 由来ではない**（`_STATE_SUFFIX` の静的キー）ので本弾の対象外。同モジュールは per-feature カラー 6 面と共有で、`SettingsManager` への永続化・6 機能の上書きクリア・`SeedColorState` が同居している。Step 5 の「その他（FeatureColors）」弾でまとめて移す |
+  | `AutonaCrewBattleWidget:185` の `displayTournamentName` 直書き | 5-1 が第 4 弾（クルーボード）に送った判断を変えていない。1 行で `SetDisplayName` に置換できるが、クルーボードは `_flushAllState` を含む書き込み経路全体が未移行で、そこだけ先に変えると「board 3 の書き手は誰か」が 2 通りになる |
+  | 大会アイコン / バナー（`UpdateIcon` / `LoadIcon` / `UpdateBanner` / `SetDefault*`） | **state を書いていない**。ファイル I/O と `QPixmap` 表示で、state に触るのは `TournamentInfoService.PublishLogoVersion()` の呼び出し 1 本のみ（Step 4b で移行済み） |
+  | 大会タイトルコンボ（`gameTitleCombo`） | state を書かない。`AutonaGameAssetManager.LoadGameAssets` を呼ぶだけで、`game.*` の書き手はそちら |
+- **デッドシグナル削除**: `AutonaScoreboardPlayerWidget.instanceSignals.dataChanged`
+  （5-2 の記録どおり購読者ゼロ）と emit 3 箇所を削除
+- 挙動差分（意図したもの）:
+  - **入力欄にフォーカスして何も打たずに外しても書き込みが起きなくなった**。
+    `editingFinished` は無条件に飛ぶので旧経路は毎回 `Set` していた
+    （`tournamentInfo.*` は held ではないので 反映 の点灯ではなく、フィールドごとの
+    save cycle が消えた）。5-1 が team カラー・match バーに入れた `_SetIfChanged` と同じ規則
+  - **手動で選んだ日付が、その後の `tournamentInfo` 更新で巻き戻らなくなった**
+    （Step 4b が作った退行の修正）。`QDateEdit` は state（整形済み文字列）からは
+    復元できないので `TournamentInfoService.RawDate()` から描画するが、手動編集は
+    キーだけを直書きして生タイムスタンプ台帳を更新していなかった。そのため
+    「大会を読み込む → 日付を手で直す → 任意の `tournamentInfo` 更新」で
+    読み込んだ日付に戻っていた。pin: `test_a_picked_date_survives_the_next_state_change`
+  - **EVENT タブの入力欄に無い名前は書けなくなった**。旧ループは
+    「タブ配下の QLineEdit なら objectName が何であれ書く」だったので、
+    不正な field という状態が存在しなかった（5-1 の `SetMatchField` と同じ変化）
+  - `SetDateField` は整形に成功してから生タイムスタンプを記録する（旧 `_ApplyKey` は
+    記録が先）。壊れた `startAt` を含むペイロードでのみ差が出る（そのペイロードは
+    どのみち全体が破棄される）
+- 検証: フルスイート **708 passed / 19 skipped**（5-3 前 687 + 新規 21）。
+  **既存アサーションの変更は 1 つだけ** —
+  `test_the_scoreboard_families_left_the_dynamic_key_inventory` の
+  `assert "AutonaTournamentInfoWidget" in described` を `not in` へ（第 1/2 弾と同じ
+  ラチェット反転）。加えて `DYNAMIC_KEY_FAMILIES == ()` を追加した。
+  **削除したテストが 1 本**: `test_qt_spinbox_fallback_present`
+  （`findChildren(QLineEdit)` ループが QSpinBox 内部 line edit を拾うことへの guard の
+  存在検査。ループ自体が全ウィジェットから消えたため守る対象が無く、代わりに
+  「`objectName()` を呼んでいないこと」の AST 検査が入った = 検知力は強化）。
+  新規: `tests/test_tournament_info_service.py` に 12（3 操作の契約・未知 field の拒否・
+  同値なら書かない・追従規則が無変化でも走ること・生タイムスタンプ台帳）、
+  `tests/test_tournament_info_panel.py` に 7（実パネルでのフィールド別書き込みキー pin と
+  エコーループ検査 = 1 操作 1 書き込み・無編集フォーカスアウトで書き込みゼロ・
+  日付の巻き戻り回帰）、`tests/test_state_schema.py` に 2（カタログ整合・
+  サービスの field リストが schema と同一オブジェクトであること）、
+  `tests/test_objectname_keypath_contract.py` に 3（schema 名 ⊆ .ui objectName、
+  `objectName()` 非使用、`StateManager.Set/Unset` 非使用）。
+  `test_tournament_info_panel.py` の `_restoreTournamentInfo` fixture は
+  サービスの `_rawDates` / `_lastTournamentName` も退避・復元するようにした
+  （どちらもプロセス global の台帳）
+- 未実施（ユーザー実機確認）: 手動チェックリストの「大会情報」節
+  （大会名 / イベント名 / 参加者数 / 開催日 / 会場の入力、表示大会名の追従、
+  Start.gg からの大会読込での各欄の反映、大会アイコン・バナーの読込 / DL / リセット、
+  大会カラー）
+- 記録のみ: `_ClearFields` は `TEXT_FIELDS` / `NUMBER_FIELDS` のみを消去し、
+  `DATE_FIELDS`（`startAt`）と `_rawDates` 台帳には触らない。そのため大会解除後も
+  日付欄が残る。旧来からの非対称であって本弾の退行ではなく、クリア時の日付の扱いは
+  UX 判断が要るため据え置き
 
 ### ステップ間の依存
 

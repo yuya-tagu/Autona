@@ -279,7 +279,12 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, b
 
 ---
 
-## S-14: Qt objectName 依存の動的 StateManager キー [P2/D3/S3] 🟡 ガード導入済み（フル移行は将来）
+## S-14: Qt objectName 依存の動的 StateManager キー [P2/D3/S3] ✅ 解消（2026-09-02, Headless Core Step 5）
+
+> **現状（結論を先に）**: 動的キー族は 4 族すべて静的化され、`StateSchema.DYNAMIC_KEY_FAMILIES`
+> は空。**ただし `.ui` の objectName ↔ キー名の一致は今も要件**（`findChild` の引数として
+> 使われ、かつ既存 `program_state.json` のキーそのもの）なので、下の「保護対象」表と
+> 運用ルールは有効なまま。以下は経緯の記録。
 
 **根拠**: state-keys.md「要注意事項 #2」
 
@@ -334,6 +339,27 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, b
 > `country_code` / `state_code`（実際のキーは選択行そのものを載せる `country` / `state`）が
 > 載っており、`birthday` が抜けていた。**カタログの記述だけの修正で、書き込み側は不変**。
 
+> **2026-09-02（同 Step 5 第 3 弾）— 動的キー族は解消**: `AutonaTournamentInfo.ui` の族も
+> 静的化し、**`StateSchema.DYNAMIC_KEY_FAMILIES` は空**になった。キー名は
+> `StateSchema.TOURNAMENT_INPUT_KEYS`（`tournamentName` / `eventName` / `address` /
+> `numEntrants` / `startAt`）が正本で、書き込みは入力側・provider 側とも
+> `core/TournamentInfoService.Set{Text,Number,Date}Field` に集約された。
+> **キー名は変えていない**ためマイグレーション層は依然不要。
+> 契約テストは (1) schema 名 ⊆ .ui objectName、(2) `AutonaTournamentInfoWidget` に
+> `objectName()` 呼び出しが無いこと、(3) 同ファイルに `StateManager.Set/Unset` が
+> 無いことを AST で pin する。
+>
+> `qt_spinbox_lineedit` フォールバックの検査（`test_qt_spinbox_fallback_present`）は
+> **削除**した。あの guard は `findChildren(QLineEdit)` ループが QSpinBox の内部 line edit を
+> 拾ってしまうことへの対処で、ループ自体が全ウィジェットから消えたため守る対象が無い
+> （上記 (2) の AST 検査がループの復活そのものを検知するので、検知力は強化されている）。
+>
+> **上表の運用ルールは今後も有効**: `.ui` の objectName は `findChild` の引数として
+> 使われ続けるため、変更時は schema 側の文字列も同時に直す（+ 保存データの
+> マイグレーションが前提）。`tournamentInfo.themeColor` / `accentColor` は
+> objectName 由来ではなく `AutonaFeatureColors._STATE_SUFFIX` の静的キーで、
+> 書き手も同モジュール（FeatureColors の core 移行は Step 5 の別弾）。
+
 > **AutonaBattleTeam.ui / AutonaTeamPlayer.ui について（2026-08-28）**: これらを読み込んでいた
 > `AutonaTeamBattleWidget` / `AutonaTeamPlayerWidget` はデッドコードとして削除された（S-01 参照）。
 > 孤立していた `.ui` ファイル自体も `src/layout/` から削除済み（2026-08-28）。契約テストの
@@ -381,7 +407,7 @@ objectName → 明示的なキー名マッピング＋`program_state.json` の�
 |----|------|------|------|
 | S-03 | Window __init__ | 影響範囲広い。慎重に | 🔴 未着手 |
 | S-10 | シングルトン遅延初期化 | 全ファイルに影響（11クラス）。フェーズ3以降 | 🔴 未着手 |
-| S-14 | objectName 依存 | 契約テストでリネーム/削除を検知（zero-risk）。フル移行は将来 | 🟡 ガード導入済み（2026-06-27） |
+| S-14 | objectName 依存 | 契約テストでリネーム/削除を検知（2026-06-27）→ Headless Core Step 5 で 4 族すべて静的化 | ✅ 解消（2026-09-02、動的生成は解消。objectName ↔ キー名の一致要件は継続） |
 
 ---
 
