@@ -16,9 +16,11 @@ AutonaTop8Model; this panel only edits players and match results.
   AutonaBoardWidget's workflow (URL instead of local file: the overlay
   needs the web server's Socket.IO feed).
 
-State contract: everything under ``top8.*`` (see AutonaTop8Model). All
-writes go through explicit StateManager.Set inside SaveBlock — no
-objectName-derived keypaths.
+State contract: everything under ``top8.*`` (see AutonaTop8Model). Every
+write goes through ``src/core/Top8Service.py`` — this panel assembles the
+player entries (their country and character come out of Qt models) and reads
+the state back to render, but it does not write it (headless core Step 5,
+instalment 5).
 """
 
 import traceback
@@ -38,6 +40,7 @@ from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .AutonaFeatureColors import FEATURE_TOP8, MakeFeatureColorCard
 from .Workers import Worker
+from .core import Top8Service
 from . import AutonaTop8Model as top8
 from . import ui_constants as UI
 from . import ui_layout as L
@@ -384,10 +387,10 @@ class AutonaTop8Widget(QDockWidget):
                 "country": country,
                 "characters": {"1": char} if char else {},
             }
-        with StateManager.SaveBlock():
-            StateManager.Set("top8.players", players)
+        Top8Service.PublishPlayers(players)
         self._refreshMatchRows(
-            StateManager.Get("top8.matches") or {}, update_scores=False)
+            StateManager.Get(Top8Service.MATCHES_PATH) or {},
+            update_scores=False)
 
     # ── Matches ──────────────────────────────────────────────────────
     def _buildMatchesGroup(self):
@@ -478,26 +481,23 @@ class AutonaTop8Widget(QDockWidget):
     def _onPhaseLabelChanged(self):
         if self._updating:
             return
-        text = self.phaseLabelEdit.text().strip() or top8.DEFAULT_PHASE_LABEL
-        StateManager.Set("top8.phaseLabel", text)
+        # The "an empty field means TOP 8" rule is the service's; the field
+        # is left as the operator typed it either way (it shows the
+        # placeholder), exactly as before.
+        Top8Service.SetPhaseLabel(self.phaseLabelEdit.text())
 
     def _onApplyScores(self):
-        """反映 button: write the staged spin values to state. A match is
-        considered finished when its applied score is a non-tie — there is
-        no separate confirm checkbox."""
-        # StateManager.Get returns a live reference — never mutate it in
-        # place, or DeepDiff sees no change and the delta is never broadcast.
-        current = StateManager.Get("top8.matches") or {}
-        matches = {}
-        for match_id, row in self.matchRows.items():
-            m = dict(current.get(match_id) or top8.DefaultMatch(match_id))
-            score = [row["s1"].value(), row["s2"].value()]
-            m["score"] = score
-            m["finished"] = score[0] != score[1]
-            matches[match_id] = m
-        matches = top8.Recompute(matches)
-        with StateManager.SaveBlock():
-            StateManager.Set("top8.matches", matches)
+        """反映 button: hand the staged spin values to the service.
+
+        Merging them into the published matches, deciding what counts as
+        finished and propagating the winners is Top8Service.ApplyScores; the
+        rows are re-rendered from what it returns, because Recompute may have
+        reset matches downstream of a changed result.
+        """
+        matches = Top8Service.ApplyScores({
+            match_id: [row["s1"].value(), row["s2"].value()]
+            for match_id, row in self.matchRows.items()
+        })
         self._refreshMatchRows(matches)
 
     def _onResetAll(self):
@@ -510,16 +510,12 @@ class AutonaTop8Widget(QDockWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if answer != QMessageBox.StandardButton.Yes:
             return
-        matches = top8.Recompute(
-            {mid: top8.DefaultMatch(mid) for mid in top8.MATCH_IDS})
-        with StateManager.SaveBlock():
-            StateManager.Set("top8.matches", matches)
-        self._refreshMatchRows(matches)
+        self._refreshMatchRows(Top8Service.ResetMatches())
 
     def _playerLabel(self, slot):
         if not slot:
             return "TBD"
-        player = StateManager.Get(f"top8.players.{slot}") or {}
+        player = StateManager.Get(f"{Top8Service.PLAYERS_PATH}.{slot}") or {}
         name = (player.get("name") or "").strip()
         return name if name else f"({slot})"
 
@@ -637,9 +633,7 @@ class AutonaTop8Widget(QDockWidget):
                 slot: self._resolveImportedPlayer(p)
                 for slot, p in players.items()
             }
-            with StateManager.SaveBlock():
-                StateManager.Set("top8.players", resolved)
-                StateManager.Set("top8.matches", top8.Recompute(matches))
+            Top8Service.ImportBracket(resolved, matches)
             self._loadFromState()
         except Exception:
             logger.error(traceback.format_exc())
@@ -688,10 +682,10 @@ class AutonaTop8Widget(QDockWidget):
         self._updating = True
         try:
             self.phaseLabelEdit.setText(
-                StateManager.Get("top8.phaseLabel")
+                StateManager.Get(Top8Service.PHASE_LABEL_PATH)
                 or top8.DEFAULT_PHASE_LABEL)
 
-            players = StateManager.Get("top8.players") or {}
+            players = StateManager.Get(Top8Service.PLAYERS_PATH) or {}
             for slot, w in self.playerInputs.items():
                 player = players.get(slot) or {}
                 w["name"].setText(player.get("name", ""))
@@ -702,7 +696,7 @@ class AutonaTop8Widget(QDockWidget):
                 self._selectCharacter(w["char"], w["color"], char)
         finally:
             self._updating = False
-        self._refreshMatchRows(StateManager.Get("top8.matches") or {})
+        self._refreshMatchRows(StateManager.Get(Top8Service.MATCHES_PATH) or {})
 
     @staticmethod
     def _selectCountry(combo, code):

@@ -44,16 +44,18 @@ load, which a guard would swallow. The two that *were* guarded in the widget
 (``city`` and ``id``) keep their guards below.
 
 Import side effects: none (agent-pitfalls #1). Qt-free, like everything under
-``src/core`` -- ``AutonaSponsorHelper`` is imported for the crest lookup and
-is itself Qt-free (``tests/test_core_qt_free.py`` pins both).
+``src/core`` -- including ``SponsorHelper``, which is imported for the crest
+lookup and which moved into core alongside this module's own instalment
+(Step 5-5) precisely because this was its only caller
+(``tests/test_core_qt_free.py`` pins both).
 """
 import os
 import re
 
 from loguru import logger
 
-from ..Helpers.AutonaSponsorHelper import AutonaSponsorHelper
 from . import StateSchema as schema
+from .SponsorHelper import AutonaSponsorHelper
 from .StateManager import StateManager
 
 # Sentinel for PublishImages(onlineAvatar=...): "leave the key alone". It

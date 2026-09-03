@@ -362,7 +362,9 @@ game
 旧 `bracket.*` は Top 8 専用化（2026-07）で廃止。残留キーの掃除と `top8.*` の正規化は
 `Window._SeedPanelState()` が起動時に行う（パネルが lazy 構築のため、旧 `AutonaTop8Widget.__init__`
 から移動。§4.1.1）。トポロジーと進出伝播の正本は
-`src/AutonaTop8Model.py`（FGC 標準ダブルエリミ: Winners 4 名 + Losers 4 名）。
+`src/AutonaTop8Model.py`（FGC 標準ダブルエリミ: Winners 4 名 + Losers 4 名）、
+**`top8.*` への書き込みの正本は `src/core/Top8Service.py`**（headless core Step 5 第 5 弾。
+パネルは選手カードの組み立てと描画のみ）。
 
 ```
 top8
@@ -556,8 +558,8 @@ OBS HTML / React Web UI / WebEngine 画像生成      PyQt UI
 
 | ルール | 内容 |
 |------|------|
-| **R-Sync-1** | 書き込み経路の規約: <br>① React Web UI / 外部システムからの書き込みは **必ず AutonaWebServerActions 経由**。<br>② OBS HTML は原則 **read-only**。例外的に書き込みを許可する場合も AutonaWebServerActions 経由とする。<br>③ PyQt Widget は現行互換のため `StateManager.Set` 直接呼び出しを **暫定許可**（**移行済みの操作は除く** — 下の R-Sync-1b）。<br>④ 新規の複合操作・正規化を伴う操作は Actions 層へ実装する。<br>⑤ PyQt のドメイン状態書き込みは `src/core/Actions.py` の **`AutonaActions`** へ段階移行中（ADR-004 / [headless-core-redesign.md](../../docs/changes/headless-core-redesign.md)）。<br>⑥ state 変更通知の Qt シグナルは `StateManagerBridge.instance` が提供する。core（`src/core/`）に Qt シグナルを追加しない。 |
-| **R-Sync-1b** | **Actions へ移行済みの操作**（headless core Step 3）: スコア増減 / スコアリセット / チーム色 / `display_options` トグル / 反映（`CommitHeld`）。**これらの操作の入口は `AutonaActions.instance` に一本化**され、Qt ウィジェット・REST v1・legacy REST / Socket.IO・グローバルホットキーはすべてそこを呼ぶ。ウィジェットは state 通知（`held_state_updated` / `state_updated`）を受けて表示だけを更新し、更新中は `QSignalBlocker` で囲んで書き戻さない（エコーループ抑止）。<br>**ステージ集計は core へ移行済み**（Step 4a）: `score.{n}.stages.*` の記録とステージ⇔スコアの相互整合は `src/core/GameTrackerService.py` が持ち、`AutonaIndividualGameTracker` は行の生成とボタン描画だけを行う（**state が記録・ボタンは表示**）。`writingScore` フラグの所有者もサービス側で、ウィジェットは property で委譲する。<br>**未移行**: チームスワップ（選手サブツリーの入れ替えが選手ウィジェット側にある）/ best_of（`best_of_text` の生成が Qt 依存の `AutonaLocaleHelper` に依存）/ クルーボードのスコアリセット（チーム合計がメンバーストックの派生値）/ **スピンボックス主導のスコア書き込み**（セット読込 / `ClearScore` / `SwapTeams`。スピンボックスの `valueChanged` が `GameTrackerService.UpdateScore` を呼ぶ）。<br>**したがって `score.{n}.team.{t}.score` の書き手は Step 4a 時点で core 内に 2 系統**（`AutonaActions` とステージ集計の `GameTrackerService`）で、「唯一の書き手」ではない。呼び出し口が Actions に一本化されていないためで、**core の外から直接 `Set` する経路は残っていない**。両者は state 経由でのみ噛み合い、ステージ集計側は書き込み区間を `GameTrackerService.writingScore` で公開して `_SyncScoreDisplays` の二重加算を防ぐ。一本化は Step 4b/5。 |
+| **R-Sync-1** | 書き込み経路の規約: <br>① React Web UI / 外部システムからの書き込みは **必ず AutonaWebServerActions 経由**。<br>② OBS HTML は原則 **read-only**。例外的に書き込みを許可する場合も AutonaWebServerActions 経由とする。<br>③ **PyQt Widget は `StateManager.Set` / `Unset` を直接呼ばない**（2026-09-03、headless core Step 5 完了で暫定許可を撤廃）。書き込みは `AutonaActions` か core のドメインサービスを通す。`tests/test_objectname_keypath_contract.py` の書き手台帳テストが `src/core` 外の書き手集合を pin する。<br>④ 新規の複合操作・正規化を伴う操作は Actions 層へ実装する。<br>⑤ PyQt のドメイン状態書き込みは `src/core/Actions.py` の **`AutonaActions`** と core のドメインサービスへ**移行済み**（ADR-004 D2 / [headless-core-redesign.md](../../docs/changes/headless-core-redesign.md) の「Step 5 完了時点の書き手台帳」）。`src/core` 外に残る書き手は `AutonaGameAssetManager`（`game.*`）と `AutonaTournamentDataProvider`（`provider_videogame`）の 2 つだけで、どちらも Qt ウィジェットではない provider 層。<br>⑥ state 変更通知の Qt シグナルは `StateManagerBridge.instance` が提供する。core（`src/core/`）に Qt シグナルを追加しない。 |
+| **R-Sync-1b** | **Actions へ移行済みの操作**: スコア増減 / スコアリセット / チーム色 / `display_options` トグル / 反映（`CommitHeld`）（Step 3）、match バー 3 combo / チーム名 / LOSERS / `teamsSwapped` / `best_of`（Step 5 第 1 弾）、チームの選手スロット数（第 2 弾）、レイアウトオプション / 配信 URL・タイトル / 実況スロット / リザルト順位（第 5 弾）。**これらの操作の入口は `AutonaActions.instance` に一本化**され、Qt ウィジェット・REST v1・legacy REST / Socket.IO・グローバルホットキーはすべてそこを呼ぶ。ウィジェットは state 通知（`held_state_updated` / `state_updated`）を受けて表示だけを更新し、更新中は `QSignalBlocker` で囲んで書き戻さない（エコーループ抑止）。<br>**ステージ集計は core へ移行済み**（Step 4a）: `score.{n}.stages.*` の記録とステージ⇔スコアの相互整合は `src/core/GameTrackerService.py` が持ち、`AutonaIndividualGameTracker` は行の生成とボタン描画だけを行う（**state が記録・ボタンは表示**）。`writingScore` フラグの所有者もサービス側で、ウィジェットは property で委譲する。<br>**書き込みの実装はすべて core にある**（Step 5 完了）が、*入口* が Actions に一本化されていない操作は残る: チームスワップ（選手サブツリーの入れ替えが選手ウィジェット側の値コピー）/ `best_of`（スピンボックス主導のまま。state 先行に反転するとステージ行の再構築が通知ハンドラ内に入る）/ クルーボードのスコアリセット・スワップ・全消し（チーム合計がメンバーストックの派生値で、入口はウィジェット）/ **スピンボックス主導のスコア書き込み**（`ClearScore` / `SwapTeams` / `ResetAllInputs`。スピンボックスの `valueChanged` が `GameTrackerService.UpdateScore` を呼ぶ）。<br>**したがって `score.{n}.team.{t}.score` の書き手は core 内に 3 系統**（`AutonaActions` / ステージ集計の `GameTrackerService` / セット読込の `SetLoadService`）で、「唯一の書き手」ではない。呼び出し口が Actions に一本化されていないためで、**core の外から直接 `Set` する経路は残っていない**。3 者は state 経由でのみ噛み合い、ステージ集計側は書き込み区間を `GameTrackerService.writingScore` で公開して `_SyncScoreDisplays` の二重加算を防ぐ。 |
 | **R-Sync-2** | バッチ書き込みは `with StateManager.SaveBlock():` を使う。`BlockSaving()` / `ReleaseSaving()` の手動ペアは避ける（例外時の漏れリスク） |
 | **R-Sync-3** | 同一トランザクション内の複数 `Set` は SaveBlock で囲み、delta を 1 回にまとめる |
 | **R-Sync-4** | 競合時の優先順位: **後勝ち**（最後の書き込みで上書き）。同時操作の検出・拒否は行わない |
@@ -654,7 +656,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | プレフィックス | 用途 |
 |--------------|------|
 | `general.*` | アプリ全般（disable_thumbnail_widget, theme_color, accent_color, webserver_port 等）。`theme_color` / `accent_color` は**大会共通カラー** |
-| `colors.{feature}.*` | 機能別カラーの上書き（`theme_color` / `accent_color`）。feature は board / thumbnail / result / top8 / commentary / stats。未設定なら大会共通カラーを継承（`src/AutonaFeatureColors.py`） |
+| `colors.{feature}.*` | 機能別カラーの上書き（`theme_color` / `accent_color`）。feature は board / thumbnail / result / top8 / commentary / stats。未設定なら大会共通カラーを継承（読み書き・シードは `src/core/ColorService.py`。Qt のカードは `src/AutonaFeatureColors.py`） |
 | `hotkeys.*` | ホットキー（hotkeys_enabled とアクションごとのキー） |
 | `display_options.*` | 表示切替（プレイヤー欄のフィールド表示等） |
 | `thumbnail_config.*` | サムネイル生成設定（template_id, background_source（default/banner/custom）, background_path（custom 時のユーザー画像）, use_sponsors 等） |
@@ -694,14 +696,14 @@ QSettings に保存された最後の選択に依存し、初期値は先頭ペ�
 | # | objectName | クラス | 主な責務 | 入力先 (Set) | 表示元 (Get) | デフォルト表示 |
 |---|------------|-------|---------|------------|------------|--------------|
 | 1 | `Tournament Info` | `AutonaTournamentInfoWidget` | 大会名・日付・URL など大会メタデータの編集、大会アイコン / バナー。**書き込みの正本は `src/core/TournamentInfoService.py`**（Start.gg ペイロード・表示大会名・`logoVersion`）で、パネルは手入力と描画のみ | `tournamentInfo.*`（手入力） | `tournamentInfo.*` | ✓（最初に表示） |
-| 1.5 | `Stream Settings` | `AutonaStreamSettingsWidget` | 配信先・配信タイトル・配信団体アイコン / サムネイルの登録・配信サムネイル生成 | `stream.*` | `stream.*`, `tournamentInfo.*` | — |
+| 1.5 | `Stream Settings` | `AutonaStreamSettingsWidget` | 配信先・配信タイトル・配信団体アイコン / サムネイルの登録・配信サムネイル生成。`stream.url` / `title` の書き込みは `AutonaActions.SetStreamUrl` / `SetStreamTitle`（同値なら書かない） | `stream.*` | `stream.*`, `tournamentInfo.*` | — |
 | 2 | `Thumbnail Settings` | `AutonaThumbnailSettingsWidget` | サムネイルテンプレ選択・背景指定・プレビュー・PNG/JPG 保存・クリップボードコピー | `thumbnail_config.*`（SettingsManager） | `score.*`, `tournamentInfo.*`, `thumbnail_config.*` | ✓（条件付き） |
-| 3 | `Result Settings` | `AutonaResultSettingsWidget` | リザルトレイアウト選択・選手入力・プレビュー・PNG/JPG 保存・クリップボードコピー | `result_config.*`, `result_players` | `tournamentInfo.*`, `result_players` | ✓ |
-| 4 | `Top8` | `AutonaTop8Widget` | Top 8 ダブルエリミの選手・試合スコア編集、Start.gg 読み込み、OBS 用 URL 案内・プレビュー | `top8.*` | `top8.*`, `tournamentInfo.*` | ✓ |
+| 3 | `Result Settings` | `AutonaResultSettingsWidget` | リザルトレイアウト選択・選手入力・プレビュー・PNG/JPG 保存・クリップボードコピー。`result_players` の書き込みは `AutonaActions.PublishResultPlayers` | `result_config.*`, `result_players` | `tournamentInfo.*`, `result_players` | ✓ |
+| 4 | `Top8` | `AutonaTop8Widget` | Top 8 ダブルエリミの選手・試合スコア編集、Start.gg 読み込み、OBS 用 URL 案内・プレビュー。**書き込みの正本は `src/core/Top8Service.py`** | `top8.*` | `top8.*`, `tournamentInfo.*` | ✓ |
 | 5 | `Scoreboard` | `AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget` | board1=1v1、board2=team、board3=crew のスコア入力・選手編集・セット読み込み | `score.{N}.*` | `score.{N}.*`, `game.*` | ✓ |
-| 6 | `Commentary` | `AutonaCommentaryWidget` | 実況・解説者 12 スロットの編集（役割・コメント・表示トグル）、OBS 用 URL 案内・プレビュー | `commentary.{1..12}.*` | `commentary.{1..12}.*`, `tournamentInfo.*` | ✓ |
+| 6 | `Commentary` | `AutonaCommentaryWidget` | 実況・解説者 12 スロットの編集（役割・コメント・表示トグル）、OBS 用 URL 案内・プレビュー。`commentary` の書き込みは `AutonaActions.PublishCommentary` | `commentary.{1..12}.*` | `commentary.{1..12}.*`, `tournamentInfo.*` | ✓ |
 | 7 | `Statistics` | `AutonaStatsWidget` | 内部 `QTabWidget` で複数ビューを集約（下記 §4.1.0） | （read-only） | `score.{N}.recent_sets`, `last_sets`, `upset_factor` ほか | ✓ |
-| 8 | `Players` | `AutonaPlayerBrowserWidget` | 選手一覧（2タブ）: トーナメント出場選手（provider.top_entrants ＋ ローカルDB 突き合わせ、シード順、P1/P2 セット）／登録済み選手（ローカル選手DB の閲覧・検索・新規登録・編集・削除） | `player_editor.1.*`（編集ダイアログの一時パス、close で Unset） | `AutonaPlayerDB.database`, `provider.top_entrants`（state 非依存） | ✓ |
+| 8 | `Players` | `AutonaPlayerBrowserWidget` | 選手一覧（2タブ）: トーナメント出場選手（provider.top_entrants ＋ ローカルDB 突き合わせ、シード順、P1/P2 セット）／登録済み選手（ローカル選手DB の閲覧・検索・新規登録・編集・削除） | `player_editor.1.*`（編集ダイアログの一時パス、close で `StateSchema.ClearPlayerEditor()`） | `AutonaPlayerDB.database`, `provider.top_entrants`（state 非依存） | ✓ |
 
 > **NOTE タブ（`AutonaNotesWidget`）は廃止**。`ANLYSE`（`AutonaAnalysisWidget`）は**トップレベルのドックではなく**、`Statistics` ドック内の `QTabWidget` のサブタブとして埋め込まれている（`QDockWidget` → `QWidget` パネルに降格）。
 > 旧 `PLAYERS`（`AutonaPlayerListWidget`、Top-8 順位ロスター編集）は機能ごと削除された。
@@ -1281,7 +1283,7 @@ tournamentInfo.themeColor / accentColor     （大会共通カラー）
 ##### 大会カラー変更時の挙動（機能別上書きのクリア）
 
 大会カラーの変更は「全レイアウトをこの色に揃える」操作として扱う。
-`AutonaFeatureColors.SetTournamentColor(kind, color)` は永続化・state 展開に加えて、
+`core/ColorService.SetTournamentColor(kind, color)` は永続化・state 展開に加えて、
 **全 feature の同じ kind の上書きを削除**する（SettingsManager / StateManager 両方）。
 
 - クリアは **kind 単位**。テーマ色を変えてもアクセントの機能別上書きは残る

@@ -430,9 +430,11 @@ def test_window_seed_panel_state_runs_both_seeds_in_one_save_block():
     if it stops calling it, every OBS overlay reads a state that was never
     normalised (unresolved Top 8 slots, legacy commentary schema, retired
     subtrees restored from program_state.json) and no test above would
-    notice, because they all call the seed directly. SeedColorState() is the
-    one seed the core cannot host yet -- colors.{feature}.* is still owned by
-    AutonaFeatureColors -- so it has to run in the same block.
+    notice, because they all call the seed directly. SeedColorState() is
+    core's too since Step 5-5 (core/ColorService.py) but is kept a separate
+    call -- that module reads StateSchema for its defaults and its key
+    spellings, so the schema cannot call back into it -- and it has to run in
+    the same block to stay one save cycle.
     """
     function = _function_node("src/Autona.py", "_SeedPanelState")
     blocks = [node for node in function.body if isinstance(node, ast.With)]
@@ -518,6 +520,106 @@ def test_seed_board_is_repeatable():
     first = deep_clone(SM.Get("score.2"))
     schema.SeedBoard(2)
     assert SM.Get("score.2") == first
+
+
+# ── Subtree lifecycle ops (headless core Step 5-5) ───────────────────────
+#
+# Two Unsets that used to sit in a QDockWidget's body. They are here for the
+# same reason SeedBoard is: `score` and `player_editor` are schema names, and
+# the completion condition of Step 5 is that no Qt widget spells a state key.
+
+
+def test_reset_score_root_drops_the_whole_subtree():
+    """What AutonaScoreboardManager.__init__ runs before any board is built.
+
+    A program_state.json from an older multi-scoreboard build can carry
+    boards no widget owns; dropping the root is how a launch starts from the
+    single-scoreboard layout. Destructive by design -- nothing may call it
+    once a board exists.
+    """
+    schema.SeedBoard(1)
+    SM.Set("score.1.team.1.teamName", "Alpha")
+    SM.Set("score.bracket_type", "DOUBLE_ELIMINATION")
+
+    schema.ResetScoreRoot()
+
+    assert SM.Get(schema.SCORE_ROOT, None) in (None, {})
+    assert SM.Get("score.1.team.1.teamName", None) is None
+
+
+def test_clear_player_editor_drops_the_scratch_subtree():
+    """What the PLAYERS editor dialog runs on close.
+
+    Same root the launch seed purges (RETIRED_ROOTS), for the case where a
+    crash meant the dialog never closed.
+    """
+    SM.Set(f"{schema.PLAYER_EDITOR_ROOT}.1.name", "Ada")
+
+    schema.ClearPlayerEditor()
+
+    assert SM.Get(schema.PLAYER_EDITOR_ROOT, None) in (None, {})
+    assert schema.PLAYER_EDITOR_ROOT in schema.RETIRED_ROOTS
+
+
+# ── Subtree roots ────────────────────────────────────────────────────────
+
+
+def test_every_root_constant_is_a_catalog_key():
+    """The roots and the catalog cannot disagree.
+
+    Step 5-5 gave the top-level names constants because each of them is
+    written from outside this module now (a core service or AutonaActions),
+    and a root spelled at its write site drifts exactly the way a leaf does.
+    KEY_CATALOG is keyed by the constants, so this checks the spellings as
+    well as the membership.
+    """
+    roots = {
+        schema.SCORE_ROOT: "score",
+        schema.GAME_ROOT: "game",
+        schema.TOP8_ROOT: "top8",
+        schema.COMMENTARY_ROOT: "commentary",
+        schema.TOURNAMENT_INFO_ROOT: "tournamentInfo",
+        schema.STREAM_ROOT: "stream",
+        schema.COLORS_ROOT: "colors",
+        schema.DISPLAY_OPTIONS_ROOT: "display_options",
+        schema.LAYOUT_OPTIONS_ROOT: "layout_options",
+        schema.RESULT_PLAYERS_ROOT: "result_players",
+        schema.PROVIDER_VIDEOGAME_ROOT: "provider_videogame",
+    }
+    for constant, expected in roots.items():
+        # Literal, because these are the names an existing
+        # out/program_state.json is keyed by and there is no migration layer.
+        assert constant == expected
+        assert constant in schema.KEY_CATALOG
+
+
+def test_the_color_key_names_are_shared_by_both_families():
+    """`themeColor` / `accentColor` name a tournament colour *and* an override.
+
+    One pair of constants for both, so the catalog entry and
+    core/ColorService cannot end up spelling them differently.
+    """
+    assert schema.COLORS_FEATURE_KEYS == (
+        schema.THEME_COLOR_KEY, schema.ACCENT_COLOR_KEY)
+    assert schema.THEME_COLOR_KEY in schema.TOURNAMENT_INFO_KEYS
+    assert schema.ACCENT_COLOR_KEY in schema.TOURNAMENT_INFO_KEYS
+    assert (schema.THEME_COLOR_KEY, schema.ACCENT_COLOR_KEY) == (
+        "themeColor", "accentColor")
+
+
+def test_the_top8_service_paths_come_from_the_schema():
+    """The TOP 8 panel's six hand-spelled key paths, as three constants."""
+    from src.core import Top8Service
+
+    assert Top8Service.PLAYERS_PATH == (
+        f"{schema.TOP8_ROOT}.{schema.TOP8_PLAYERS_KEY}")
+    assert Top8Service.MATCHES_PATH == (
+        f"{schema.TOP8_ROOT}.{schema.TOP8_MATCHES_KEY}")
+    assert Top8Service.PHASE_LABEL_PATH == (
+        f"{schema.TOP8_ROOT}.{schema.TOP8_PHASE_LABEL_KEY}")
+    assert schema.TOP8_PHASE_LABEL_KEY in schema.TOP8_KEYS
+    catalogued = {key.split(".", 1)[0] for key in schema.TOP8_KEYS}
+    assert {schema.TOP8_PLAYERS_KEY, schema.TOP8_MATCHES_KEY} <= catalogued
 
 
 # ── SeedPanelState ───────────────────────────────────────────────────────

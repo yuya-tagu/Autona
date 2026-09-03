@@ -13,8 +13,10 @@ Full rework mirroring AutonaTop8Widget's list + live-preview pattern:
   selected overlay, and the browser-source URL.
 
 State contract: everything under ``commentary.{1..12}`` (see
-AutonaCommentaryModel). All writes go through explicit StateManager.Set
-inside SaveBlock — no objectName-derived keypaths. The state persists
+AutonaCommentaryModel). The write goes through
+``AutonaActions.PublishCommentary`` — this panel assembles the slot dict out
+of its cards and renders the state, but does not write it (headless core
+Step 5, instalment 5). The state persists
 across restarts; Window._SeedPanelState() normalizes whatever LoadState
 restored (including the legacy pre-rework schema) at launch, before this
 panel is built.
@@ -38,6 +40,8 @@ from .AutonaLayoutPreview import (
     LayoutDesignDisplayName)
 from .Helpers.AutonaBadWordFilter import AutonaBadWordFilter
 from .AutonaFeatureColors import FEATURE_COMMENTARY, MakeFeatureColorCard
+from .core import StateSchema as schema
+from .core.Actions import AutonaActions
 from . import AutonaCommentaryModel as comms
 from . import ui_constants as UI
 from . import ui_layout as L
@@ -324,8 +328,7 @@ class AutonaCommentaryWidget(QDockWidget):
                 "note": w["note"].text().strip(),
                 "display": 1 if w["display"].isChecked() else 0,
             }
-        with StateManager.SaveBlock():
-            StateManager.Set("commentary", slots)
+        AutonaActions.instance.PublishCommentary(slots)
         self._refreshDisplayLocks()
 
     def _refreshDisplayLocks(self):
@@ -346,7 +349,7 @@ class AutonaCommentaryWidget(QDockWidget):
 
     # ── State -> UI ──────────────────────────────────────────────────
     def _loadFromState(self):
-        state = StateManager.Get("commentary") or {}
+        state = StateManager.Get(schema.COMMENTARY_ROOT) or {}
         self._updating = True
         try:
             for slot, w in self.casterInputs.items():

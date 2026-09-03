@@ -29,6 +29,12 @@ the SCORE panel's board-level and team-card inputs (``SCORE_MATCH_FIELDS`` /
 checklist that inventory shrank against -- is empty as a result
 (known-smells S-14).
 
+The final instalment added the **subtree roots** (``SCORE_ROOT`` and the rest,
+below ``COLORS_FEATURE_KEYS``). They are here for the same reason the leaves
+are: every one of them is now written from outside this module -- a core
+service or ``AutonaActions`` -- and a root spelled at its write site drifts
+exactly the way a leaf did. ``KEY_CATALOG`` is keyed by them.
+
 Import side effects: none (agent-pitfalls #1). Every read and write happens
 inside a call.
 """
@@ -347,8 +353,14 @@ GAME_KEYS = (
     "has_modded_content",
 )
 
+# The three sub-roots of top8.*, written whole by core/Top8Service.py (the
+# TOP 8 panel used to spell them at each of its six write sites).
+TOP8_PHASE_LABEL_KEY = "phaseLabel"
+TOP8_PLAYERS_KEY = "players"
+TOP8_MATCHES_KEY = "matches"
+
 TOP8_KEYS = (
-    "phaseLabel",
+    TOP8_PHASE_LABEL_KEY,
     "players.{I}.name",
     "players.{I}.sponsor",
     "players.{I}.country",          # {code, asset} -- AutonaCountryHelper form
@@ -415,6 +427,14 @@ TOURNAMENT_SHORT_DATE_KEYS = ("endAt", "eventStartAt", "eventEndAt")
 # TournamentInfoService. Named here because that service writes it and this
 # is where its key names live.
 TOURNAMENT_DISPLAY_NAME_KEY = "displayTournamentName"
+# Also not an EVENT tab field, and not TournamentInfoService's either: the
+# tournament theme / accent pair is core/ColorService.py's, published under
+# this historical prefix because that is what the layouts and ./out consumers
+# have always read. The same two spellings name a per-feature override under
+# colors.{feature} (COLORS_FEATURE_KEYS below), which is why they are defined
+# once here rather than in each of the three places that used to say them.
+THEME_COLOR_KEY = "themeColor"
+ACCENT_COLOR_KEY = "accentColor"
 # Cache-bust version of ./layout/logo.png, published like the stream org
 # assets in STREAM_ASSET_VERSIONS above.
 TOURNAMENT_LOGO_VERSION_KEY = "logoVersion"
@@ -425,29 +445,53 @@ TOURNAMENT_LOGO_VERSION_KEY = "logoVersion"
 # enumerating Start.gg's response shape.
 TOURNAMENT_INFO_KEYS = (
     TOURNAMENT_INPUT_KEYS + TOURNAMENT_SHORT_DATE_KEYS + (
-        "themeColor",
-        "accentColor",
+        THEME_COLOR_KEY,
+        ACCENT_COLOR_KEY,
         TOURNAMENT_DISPLAY_NAME_KEY,
         TOURNAMENT_LOGO_VERSION_KEY,
         "shortLink",
     )
 )
 
+STREAM_URL_KEY = "url"
+STREAM_TITLE_KEY = "title"
+
 STREAM_KEYS = (
-    "url",
-    "title",
+    STREAM_URL_KEY,
+    STREAM_TITLE_KEY,
     "orgIconVersion",
     "orgThumbVersion",
 )
 
 # colors.{feature}.* -- only features the operator explicitly set are present,
 # which is what makes the layouts' colors.{feature} -> tournamentInfo fallback
-# work. The feature list itself is owned by AutonaFeatureColors.FEATURES
-# (still Qt-side; it moves to core with the color write path).
-COLORS_FEATURE_KEYS = ("themeColor", "accentColor")
+# work. The feature list itself is owned by core/ColorService.FEATURES, which
+# also writes these keys (headless core Step 5, instalment 5); it is not
+# referenced here because that module reads this one.
+COLORS_FEATURE_KEYS = (THEME_COLOR_KEY, ACCENT_COLOR_KEY)
+
+
+# ── Subtree roots ────────────────────────────────────────────────────────
+#
+# The top-level names below. Spelled once here because each of them is now
+# written by something outside this module -- a core service or AutonaActions
+# -- and a root spelled at its write site is the same drift as a leaf spelled
+# at its write site (instalment 4's thirty crew literals). KEY_CATALOG is
+# keyed by them so the catalog and the writers cannot disagree.
+SCORE_ROOT = "score"
+GAME_ROOT = "game"
+TOP8_ROOT = "top8"
+COMMENTARY_ROOT = "commentary"
+TOURNAMENT_INFO_ROOT = "tournamentInfo"
+STREAM_ROOT = "stream"
+COLORS_ROOT = "colors"
+DISPLAY_OPTIONS_ROOT = "display_options"
+LAYOUT_OPTIONS_ROOT = "layout_options"
+RESULT_PLAYERS_ROOT = "result_players"
+PROVIDER_VIDEOGAME_ROOT = "provider_videogame"
 
 KEY_CATALOG = {
-    "score": SCORE_SHARED_KEYS + tuple(
+    SCORE_ROOT: SCORE_SHARED_KEYS + tuple(
         f"{{N}}.{key}" for key in SCORE_BOARD_KEYS
     ) + tuple(
         f"{{N}}.team.{{T}}.{key}" for key in SCORE_TEAM_KEYS
@@ -460,22 +504,22 @@ KEY_CATALOG = {
     ) + tuple(
         f"3.team.{{T}}.player.{{M}}.{key}" for key in SCORE_CREW_PLAYER_KEYS
     ),
-    "game": GAME_KEYS,
-    "top8": TOP8_KEYS,
-    "commentary": tuple(
+    GAME_ROOT: GAME_KEYS,
+    TOP8_ROOT: TOP8_KEYS,
+    COMMENTARY_ROOT: tuple(
         f"{{I}}.{key}" for key in COMMENTARY_SLOT_KEYS),
-    "tournamentInfo": TOURNAMENT_INFO_KEYS,
-    "stream": STREAM_KEYS,
-    "colors": tuple(f"{{feature}}.{key}" for key in COLORS_FEATURE_KEYS),
-    "display_options": DISPLAY_OPTION_KEYS,
+    TOURNAMENT_INFO_ROOT: TOURNAMENT_INFO_KEYS,
+    STREAM_ROOT: STREAM_KEYS,
+    COLORS_ROOT: tuple(f"{{feature}}.{key}" for key in COLORS_FEATURE_KEYS),
+    DISPLAY_OPTIONS_ROOT: DISPLAY_OPTION_KEYS,
     # Roots whose shape is owned elsewhere and not enumerated here:
     # layout_options mirrors LayoutOptionsManager (per-layout, open-ended),
     # the rest are provider payloads written wholesale.
-    "layout_options": (),
-    "provider_videogame": (),
+    LAYOUT_OPTIONS_ROOT: (),
+    PROVIDER_VIDEOGAME_ROOT: (),
     "streamQueue": (),
     "currentStream": (),
-    "result_players": (),
+    RESULT_PLAYERS_ROOT: (),
 }
 
 # Key families whose final segment comes from a Qt objectName at runtime
@@ -512,7 +556,7 @@ def SeedBoard(number):
     lazy build relies on -- a board built later reseeds over the manager's
     placeholder -- and it is why nothing may call it on a live board.
     """
-    prefix = f"score.{number}"
+    prefix = f"{SCORE_ROOT}.{number}"
     StateManager.Set(prefix, {})
     if str(number) == "3":
         # Crew battle (AutonaCrewBattleWidget) has no set history and no
@@ -544,8 +588,38 @@ def PublishDisplayOptions():
     unblocked call here would fire eight of them.
     """
     for key, default in DISPLAY_OPTION_DEFAULTS.items():
-        path = f"display_options.{key}"
+        path = f"{DISPLAY_OPTIONS_ROOT}.{key}"
         StateManager.Set(path, SettingsManager.Get(path, default))
+
+
+def ResetScoreRoot():
+    """Drop the whole ``score`` subtree.
+
+    Run once per launch, from ``AutonaScoreboardManager.__init__`` -- i.e.
+    before any board is built -- so a program_state.json written by an older
+    multi-scoreboard build cannot leave boards behind that no widget owns.
+    It is a subtree lifecycle operation like ``SeedBoard()`` above and lives
+    next to it for the same reason: ``score`` is a schema name, and the
+    manager is a QDockWidget, which is exactly what Step 5 took the state
+    writes out of.
+
+    Nothing may call this after a board exists -- the boards seed themselves
+    from ``SeedBoard()`` afterwards, and a live board would be left rendering
+    a subtree that is no longer there.
+    """
+    StateManager.Unset(SCORE_ROOT)
+
+
+def ClearPlayerEditor():
+    """Drop the scratch subtree the PLAYERS panel's editor dialog mirrors into.
+
+    The dialog writes ``player_editor.1`` while it is open (the player card is
+    the same widget the boards use, bound to that path) and calls this on
+    close, so the scratch data does not linger in program_state.json. A
+    crashed session leaves it behind instead, which is why the same root is
+    also in ``RETIRED_ROOTS`` and gets dropped at every launch.
+    """
+    StateManager.Unset(PLAYER_EDITOR_ROOT)
 
 
 def PublishAssetVersion(key: str, path: str):
@@ -578,12 +652,15 @@ def SeedPanelState():
     Window._SeedPanelState is that caller.
     """
     # Tournament-wide colors (EVENT tab). The per-feature overrides are
-    # expanded separately by AutonaFeatureColors.SeedColorState().
+    # expanded separately by core/ColorService.SeedColorState(), which the
+    # same caller runs inside the same SaveBlock. The two seeds stay apart
+    # because this one has to be reachable without importing ColorService --
+    # that module reads this one for its defaults and its key spellings.
     StateManager.Set(
-        "tournamentInfo.themeColor",
+        f"{TOURNAMENT_INFO_ROOT}.{THEME_COLOR_KEY}",
         SettingsManager.Get("general.theme_color", DEFAULT_THEME_COLOR))
     StateManager.Set(
-        "tournamentInfo.accentColor",
+        f"{TOURNAMENT_INFO_ROOT}.{ACCENT_COLOR_KEY}",
         SettingsManager.Get("general.accent_color", DEFAULT_ACCENT_COLOR))
 
     # display_options.*: the Web UI eye menu and the OBS overlays render
@@ -598,29 +675,32 @@ def SeedPanelState():
     # ends up with, and the guard keeps a restored program_state.json value
     # from being republished for the one save cycle before a board is built.
     for key, default in DISPLAY_OPTION_DEFAULTS.items():
-        path = f"display_options.{key}"
+        path = f"{DISPLAY_OPTIONS_ROOT}.{key}"
         if StateManager.Get(path, None) is None:
             StateManager.Set(
                 path, SettingsManager.Get(path, default))
 
     # top8: LoadState restores whatever the last session had, including the
     # legacy bracket keys. Slots are always derived, never restored.
-    state = StateManager.Get("top8")
+    state = StateManager.Get(TOP8_ROOT)
     if not isinstance(state, dict) or not state.get("matches"):
-        StateManager.Set("top8", top8.DefaultState())
+        StateManager.Set(TOP8_ROOT, top8.DefaultState())
     else:
         StateManager.Set(
-            "top8.matches", top8.Recompute(state.get("matches") or {}))
-        players = state.get("players") or {}
+            f"{TOP8_ROOT}.{TOP8_MATCHES_KEY}",
+            top8.Recompute(state.get(TOP8_MATCHES_KEY) or {}))
+        players = state.get(TOP8_PLAYERS_KEY) or {}
         for slot in top8.PLAYER_SLOTS:
             if slot not in players:
                 StateManager.Set(
-                    f"top8.players.{slot}", top8.DefaultPlayer())
+                    f"{TOP8_ROOT}.{TOP8_PLAYERS_KEY}.{slot}",
+                    top8.DefaultPlayer())
 
     # commentary: normalises whatever LoadState restored, including the
     # legacy pre-rework schema.
     StateManager.Set(
-        "commentary", comms.NormalizeState(StateManager.Get("commentary")))
+        COMMENTARY_ROOT,
+        comms.NormalizeState(StateManager.Get(COMMENTARY_ROOT)))
 
     # The org icon / thumbnail are served out of ./layout/ and OBS overlays
     # cache-bust them with these mtimes, so the versions have to be current

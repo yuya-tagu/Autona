@@ -46,8 +46,9 @@ WebEngine プレビュー等で重いパネルは **遅延構築**にする（�
 差し替える（nav index == stack index は維持）。パネル未構築でも動く必要がある
 処理は `__init__` に置かない。**state のシード実体は `src/core/StateSchema.py`
 （`SeedPanelState()` / `SeedBoard()`）に置く**（Qt 非依存なので headless でも同じ
-state になる）。`Window._SeedPanelState()` はその起動時の呼び出し口で、SaveBlock で
-1 サイクルに束ねる役目 + Qt 依存で core に置けない `SeedColorState()` のみを持つ。
+state になる）。`Window._SeedPanelState()` はその起動時の呼び出し口で、3 つのシード
+（`StateSchema.SeedPanelState()` / `TournamentInfoService.Seed()` /
+`core.ColorService.SeedColorState()`）を 1 SaveBlock に束ねる役目だけを持つ。
 グローバルシグナル接続は Window 側に寄せる。外部から構築を強制したい場合は
 `EnsureXxxPanel()` アクセサを足す。
 
@@ -74,6 +75,20 @@ state になる）。`Window._SeedPanelState()` はその起動時の呼び出�
   `StateSchema` の定数と `tests/test_objectname_keypath_contract.py` の `EXPECTED` を
   **同時に**更新する（片方だけ直すと `findChild` が解決できず無言で書き込みが止まる）
 - 保護対象 objectName ↔ キーパスの一覧は `.claude/known-smells.md` S-14 の対応表を参照
+
+## ウィジェットは state を書かない（Headless Core Step 5 完了）
+
+- **`StateManager.Set` / `Unset` を Qt ウィジェットから呼ばない**。書き込みは
+  `src/core/Actions.py` の `AutonaActions` か、core のドメインサービス
+  （`PlayerService` / `SetLoadService` / `CrewBattleService` / `TournamentInfoService` /
+  `Top8Service` / `ColorService` / `StatsService` / `GameTrackerService`）を通す。
+  サブツリーのシード・破棄は `src/core/StateSchema.py`
+- ウィジェットの役割は「値を組み立てて操作を依頼する」「state を読んで描画する」の 2 つだけ。
+  Qt モデル（国コンボ・キャラスロット・スキン行）から値を解決する処理は**ウィジェット側に残す**
+  のが正しい（core は Qt を import しない）
+- `src/core` 外で state を書いてよいのは `AutonaGameAssetManager`（`game.*`）と
+  `AutonaTournamentDataProvider`（`provider_videogame`）の 2 つだけ。
+  `tests/test_objectname_keypath_contract.py` の書き手台帳テストが集合ごと pin している
 
 ## StateManager シグナル
 

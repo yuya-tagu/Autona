@@ -15,6 +15,27 @@
 > `AutonaTournamentInfoWidget` から `src/core/PlayerService.py` /
 > `src/core/Actions.py` / `src/core/TournamentInfoService.py` に移っている
 > （下記「要注意事項 #2」も解消済み）。
+>
+> **2026-09-03 追記（Step 5 第 5 弾で書き手が移った分）**: 本書が `W` の主体として
+> 記している以下のウィジェット名は、**現在の書き手ではない**（読み手・組み立て役として
+> は現役）。正本は
+> [headless-core-redesign.md](../../../docs/changes/headless-core-redesign.md) の
+> 「Step 5 完了時点の書き手台帳」。
+>
+> | 本書の記載 | 現在の書き手 |
+> |-----------|-------------|
+> | `commentary` = `AutonaCommentaryWidget` | `AutonaActions.PublishCommentary` |
+> | `result_players` = `AutonaResultSettingsWidget` | `AutonaActions.PublishResultPlayers` |
+> | `stream.url` / `title` = `AutonaStreamSettingsWidget` | `AutonaActions.SetStreamUrl` / `SetStreamTitle` |
+> | `layout_options.{settingsBase}` = `LayoutOptionsWidget` | `AutonaActions.SetLayoutOption` |
+> | `tournamentInfo.themeColor`/`accentColor`・`colors.{feature}.*` = `AutonaFeatureColors` | `src/core/ColorService.py` |
+> | `top8.*` = `AutonaTop8Widget`（本書には行なし） | `src/core/Top8Service.py` |
+> | `...player.{M}.sponsor_logo(s)` = `AutonaSponsorHelper` | `src/core/SponsorHelper.py`（同クラスの移動先） |
+> | `score`（起動時 Unset）= `AutonaScoreboardManager` | `StateSchema.ResetScoreRoot()` |
+> | `player_editor`（close で Unset）= `AutonaPlayerBrowserWidget` | `StateSchema.ClearPlayerEditor()` |
+>
+> `src/core` 外に残る書き手は `AutonaGameAssetManager`（`game.*`）と
+> `AutonaTournamentDataProvider`（`provider_videogame`）の 2 つだけ。
 
 ---
 

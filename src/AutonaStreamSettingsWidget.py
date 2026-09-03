@@ -7,6 +7,7 @@ import datetime
 from io import BytesIO
 from .StateManager import StateManager
 from .core import StateSchema as schema
+from .core.Actions import AutonaActions
 from .StateManagerBridge import StateManagerBridge
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaGameAssetManager import AutonaGameAssetManager
@@ -34,6 +35,9 @@ BANNER_PATH = "./user_data/tournament_banner.png"
 
 STREAM_OUTPUT_DIR = "./out/stream"
 STREAM_TITLE_MAX_LENGTH = 100
+# Read back by _syncStreamDestinationCombo. The writes go through
+# AutonaActions.SetStreamUrl / SetStreamTitle (headless core Step 5).
+_STREAM_URL_PATH = f"{schema.STREAM_ROOT}.{schema.STREAM_URL_KEY}"
 # Fallback abbreviation by smashgg_game_id when the per-game config.json
 # does not specify one (games not installed in user_data/games/)
 GAME_ABBREVIATION_FALLBACK = {
@@ -131,9 +135,9 @@ class AutonaStreamSettingsWidget(QDockWidget):
         return self.streamUrlCombo.currentData() or self.streamUrlCombo.currentText()
 
     def _onStreamChannelChanged(self, *args):
-        url = self._currentStreamUrl()
-        if StateManager.Get("stream.url", None) != url:
-            StateManager.Set("stream.url", url)
+        # SetStreamUrl carries the "only write when it changed" guard that
+        # used to sit here (headless core Step 5).
+        AutonaActions.instance.SetStreamUrl(self._currentStreamUrl())
         self._updateEditStreamChannelBtn()
 
     def _updateEditStreamChannelBtn(self):
@@ -144,7 +148,7 @@ class AutonaStreamSettingsWidget(QDockWidget):
 
     def _syncStreamDestinationCombo(self):
         """Point the combo at the persisted stream.url without re-emitting."""
-        url = StateManager.Get("stream.url", "") or ""
+        url = StateManager.Get(_STREAM_URL_PATH, "") or ""
         combo = self.streamUrlCombo
         # Don't fight an edit in progress. The combo is editable, so its line
         # edit is the focus proxy and hasFocus() covers both.
@@ -287,8 +291,8 @@ class AutonaStreamSettingsWidget(QDockWidget):
         self.btCopyStreamTitle.clicked.connect(self.CopyStreamTitle)
 
         self.streamTitleEdit.editingFinished.connect(
-            lambda: StateManager.Set(
-                "stream.title", self.streamTitleEdit.text()))
+            lambda: AutonaActions.instance.SetStreamTitle(
+                self.streamTitleEdit.text()))
 
         # Tracks the last auto-generated title; used to detect whether the
         # user has manually edited the field so auto-refreshes don't clobber
@@ -370,7 +374,7 @@ class AutonaStreamSettingsWidget(QDockWidget):
         current = self.streamTitleEdit.text()
         if current == self._lastAutoStreamTitle or not current:
             self.streamTitleEdit.setText(new_title)
-            StateManager.Set("stream.title", new_title)
+            AutonaActions.instance.SetStreamTitle(new_title)
         self._lastAutoStreamTitle = new_title
 
     def CopyStreamTitle(self):

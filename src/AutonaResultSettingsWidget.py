@@ -16,6 +16,8 @@ from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaPlayerDB import AutonaPlayerDB
 from .Helpers.AutonaDirHelper import AutonaResolve
 from .AutonaFeatureColors import FEATURE_RESULT, MakeFeatureColorCard
+from .core import StateSchema as schema
+from .core.Actions import AutonaActions
 from . import ui_constants as UI
 from . import ui_layout as L
 
@@ -570,7 +572,12 @@ class AutonaResultSettingsWidget(QDockWidget):
         return {}
 
     def _syncPlayersToState(self):
-        """Write player inputs to StateManager so prepare_data can read them."""
+        """Publish the player inputs so prepare_data can read them.
+
+        The write itself is AutonaActions.PublishResultPlayers (headless
+        core Step 5): what stays here is resolving each row's fighter out
+        of the character / skin combos, which are Qt models.
+        """
         players = {}
         for i, entry in enumerate(self.playerInputs):
             rank_label, name_edit, sponsor_edit = entry[0], entry[1], entry[2]
@@ -600,7 +607,7 @@ class AutonaResultSettingsWidget(QDockWidget):
                 "characters": characters,
             }
 
-        StateManager.Set("result_players", players)
+        AutonaActions.instance.PublishResultPlayers(players)
         # No manual update button: every edit path lands here, so schedule a
         # debounced re-render (the manual GeneratePreview(True) path cancels
         # the timer and renders immediately).
@@ -705,7 +712,7 @@ class AutonaResultSettingsWidget(QDockWidget):
                     count))
 
     def _syncTeamsToState(self):
-        """Write team inputs to StateManager as members[] per rank.
+        """Publish the team inputs as members[] per rank.
 
         Each rank entry: { rank, name (team name), members: [{name, character}] }
         prepare_data passes members through; result.js placeTeams renders them.
@@ -730,7 +737,7 @@ class AutonaResultSettingsWidget(QDockWidget):
                 "members": members,
             }
 
-        StateManager.Set("result_players", players)
+        AutonaActions.instance.PublishResultPlayers(players)
         # Debounced re-render on every edit (see _syncPlayersToState).
         self._previewTimer.start()
 
@@ -1273,7 +1280,7 @@ class AutonaResultSettingsWidget(QDockWidget):
 
         # Only the TOP 4 standings are listed in the post text.
         MAX_RANKS = 4
-        players = StateManager.Get("result_players") or {}
+        players = StateManager.Get(schema.RESULT_PLAYERS_ROOT) or {}
         is_team = self._isTeamLayout()
         emitted = 0
         for key in sorted(players.keys(), key=num_key):
