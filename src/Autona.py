@@ -182,7 +182,7 @@ from .AutonaCommentaryWidget import AutonaCommentaryWidget
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTop8Widget import AutonaTop8Widget
 from .AutonaBoardWidget import AutonaBoardWidget
-from .AutonaFeatureColors import SeedColorState
+from .core.ColorService import SeedColorState
 from .AutonaSidebar import AutonaSidebar
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaAlertNotification import AutonaAlertNotification
@@ -928,10 +928,10 @@ class Window(QMainWindow):
 
         The seed itself is StateSchema.SeedPanelState() — Qt-free, so the
         state a headless run starts from is the state a GUI launch starts
-        from (headless core Step 2). What is left here is the save cycle it
-        runs in and the one seed the core cannot reach: the per-feature color
-        overrides, whose whole key family (read, write and seed) is still
-        owned by AutonaFeatureColors.
+        from (headless core Step 2). What is left here is the save cycle the
+        three seeds share. All three are core now: the per-feature color
+        overrides were the last exception, and moved with the rest of their
+        key family in Step 5's final instalment (core/ColorService.py).
 
         Called from __init__ before any panel is built, and necessarily after
         StateManager.LoadState() — which ran inside bootstrap_core(), i.e.

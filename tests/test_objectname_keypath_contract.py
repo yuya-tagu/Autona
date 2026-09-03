@@ -272,9 +272,11 @@ def test_the_event_panel_does_not_write_the_state_directly():
     those fields, and the display-name follow rule is stateful enough that
     two writers disagreeing is a silent bug rather than a visible one.
     (One other tournamentInfo.* writer exists deliberately outside this
-    panel and outside the service: AutonaFeatureColors:105's themeColor/
-    accentColor -- a static, non-objectName-derived key. It is not this
-    panel's file, so this tripwire is unaffected. The crew board used to be
+    panel and outside the service: core/ColorService.py's themeColor/
+    accentColor -- static, non-objectName-derived keys that belong to the
+    colour feature and only carry this prefix for backwards compatibility.
+    It is not this panel's file, so this tripwire is unaffected. The crew
+    board used to be
     a second one; its displayTournamentName write goes through
     TournamentInfoService.SetDisplayName since Step 5's crew instalment,
     which is what test_the_crew_board_does_not_write_the_state_directly
@@ -377,3 +379,107 @@ def test_programmatic_keypath_names_present():
 # two `..._no_longer_derives_keypaths_from_objectname` tests above are what
 # replaced it, and they fail if a loop comes back -- with or without the
 # fallback.
+
+
+# ── The write ledger (headless core Step 5, completion condition) ────────
+
+
+def _source_files_outside_core():
+    """Every src/*.py except the core package itself."""
+    core = PROJECT_ROOT / "src" / "core"
+    for path in sorted((PROJECT_ROOT / "src").rglob("*.py")):
+        if core in path.parents or path == core:
+            continue
+        yield path.relative_to(PROJECT_ROOT).as_posix()
+
+
+# ADR-004 D2's completion condition, as a ledger rather than a count: no Qt
+# widget writes StateManager, and the writers that remain outside core are
+# named, with a reason, in docs/changes/headless-core-redesign.md ("Step 5
+# 完了時点の書き手台帳").
+#
+# Both entries are provider-layer singletons, not widgets: they publish what
+# they just loaded, from the thread that loaded it. Neither key family is
+# operator input, so neither has an operation to route through Actions --
+# and moving the writes would put a QThreadPool worker's asset load behind an
+# extra hop for no gain. Adding a file here is a design decision, not a
+# bookkeeping one.
+STATE_WRITERS_OUTSIDE_CORE = {
+    # `game.*` -- the loaded game's metadata, written by the asset loader
+    # thread inside the same SaveBlock as the model rebuild.
+    "src/AutonaGameAssetManager.py",
+    # `provider_videogame` -- the Start.gg videogame id, mirrored from the
+    # provider so overlays can tell which game a set belongs to.
+    "src/AutonaTournamentDataProvider.py",
+}
+
+
+def test_the_state_writer_ledger_outside_core_is_the_documented_one():
+    """Pins the exact set of non-core files that still call StateManager.
+
+    Detection limit: `_state_write_calls` (like `_no_qt_widget_writes...`
+    above) recognizes `StateManager.Set`/`Unset` by matching the receiver
+    name literally against the string "StateManager". An import under a
+    different local name (`from src.core.StateManager import StateManager
+    as SM`, then `SM.Set(...)`) would not be flagged and would slip through
+    this ledger undetected -- this is the shared assumption behind every
+    `_state_write_calls` call in this file, not just this one.
+    """
+    actual = {
+        relative for relative in _source_files_outside_core()
+        if _state_write_calls(relative)
+    }
+    assert actual == STATE_WRITERS_OUTSIDE_CORE, (
+        "\nThe set of StateManager writers outside src/core changed.\n"
+        f"  added   (a widget writing the state again?): "
+        f"{sorted(actual - STATE_WRITERS_OUTSIDE_CORE)}\n"
+        f"  removed (migrated -- update the ledger): "
+        f"{sorted(STATE_WRITERS_OUTSIDE_CORE - actual)}\n"
+        "Writes belong to a core service or AutonaActions. If a new writer "
+        "is genuinely provider-layer, add it here *and* to the ledger in "
+        "docs/changes/headless-core-redesign.md.")
+
+
+def test_no_qt_widget_writes_the_state():
+    """The same condition stated the way ADR-004 D2 states it.
+
+    Redundant with the ledger above by construction today, and deliberately
+    so: the ledger is a list someone can extend, while this says the thing
+    the decision actually promised -- that a class deriving from a Qt widget
+    never writes StateManager. A future provider-layer writer may join the
+    ledger; a QDockWidget may not.
+
+    Detection limit: the base-class check only matches a class whose *own*
+    base name starts with "Q" (e.g. `class Foo(QWidget)`). A class that
+    inherits from a non-Qt intermediate that itself derives from a Qt
+    widget (e.g. `AutonaBasePlayerWidget` subclasses) is not walked back to
+    its Qt ancestor and slips through this test undetected. That gap is
+    covered by the other layer instead: the ledger test above pins the
+    *complete* set of writer files outside core, so an indirect-subclass
+    offender still fails there even if it passes here.
+    """
+    offenders = {}
+    for relative in _source_files_outside_core():
+        if not _state_write_calls(relative):
+            continue
+        source = (PROJECT_ROOT / relative).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            bases = {ast.unparse(base).rsplit(".", 1)[-1]
+                     for base in node.bases}
+            if not any(base.startswith("Q") and base not in ("QObject",)
+                       for base in bases):
+                continue
+            if any(isinstance(inner, ast.Call)
+                   and isinstance(inner.func, ast.Attribute)
+                   and inner.func.attr in ("Set", "Unset")
+                   and isinstance(inner.func.value, ast.Name)
+                   and inner.func.value.id == "StateManager"
+                   for inner in ast.walk(node)):
+                offenders.setdefault(relative, []).append(node.name)
+    assert offenders == {}, (
+        f"Qt widget classes writing StateManager directly: {offenders}. "
+        "Route the write through a core service or AutonaActions "
+        "(ADR-004 D2).")

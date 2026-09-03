@@ -31,7 +31,10 @@ class AutonaScoreboardManager(QDockWidget):
 
         # Wipe any residual score.* keys from an older multi-scoreboard
         # state.json so we start from a clean single-scoreboard layout.
-        StateManager.Unset("score")
+        # The subtree lifecycle op lives with SeedBoard() in the schema
+        # (headless core Step 5) -- `score` is a schema name, and this class
+        # is a QDockWidget.
+        schema.ResetScoreRoot()
 
         logger.info("Scoreboard Manager - Initializing")
 

@@ -460,7 +460,7 @@ Edit → Help サブメニュー。
 ## 30. その他の連携機能
 
 ### スポンサー / チームロゴ
-[src/Helpers/AutonaSponsorHelper.py](src/Helpers/AutonaSponsorHelper.py)。
+[src/core/SponsorHelper.py](src/core/SponsorHelper.py)。
 - `user_data/sponsor_logo/` から prefix で自動マッチ
 - 複数スポンサー対応
 

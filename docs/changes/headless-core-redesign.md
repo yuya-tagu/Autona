@@ -436,16 +436,18 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
   キーパスカタログ参照 + Actions 呼び出しに置換（T-19）
 - 保存データ互換のマイグレーション層を schema に実装（旧キー → 新キーの読み替え。
   互換が守れないケースが出たら ADR-004 Revisit conditions に従い `STATE_VERSION` 一括変換へ）
-- 完了条件: ウィジェットからの `StateManager.Set` 直接呼び出し 0。
+- 完了条件: ウィジェットからの `StateManager.Set` 直接呼び出し 0 → **達成（2026-09-03、
+  第 5 弾）**。残置している非ウィジェットの書き手 2 つは「Step 5 完了時点の書き手台帳」を参照。
   ~~`test_objectname_keypath_contract.py` は役目を終え、schema カタログの契約テストに置換~~
   → **この見立ては誤り**（第 1 弾で判明）。`.ui` の objectName は `findChild` の引数として
   使われ続け、schema の文字列と一致していなければならないので、同ファイルは
   「.ui 名 ↔ schema 名の一致」「objectName 由来キーの不在」「該当ウィジェットが
   StateManager を直接書かないこと」を pin する形で**残る**
-- 進捗: 第 1 弾 Scoreboard / 第 2 弾 Player / 第 3 弾 TournamentInfo が完了し、
-  **objectName 由来の動的キーはこれで解消**（`DYNAMIC_KEY_FAMILIES` は空 = T-19 完了）。
-  第 4 弾 CrewBattle（board 3 全体）も完了。残るのは
-  LayoutOptions / StreamSettings / FeatureColors / Sponsor
+- 進捗: **全 5 弾完了**。第 1 弾 Scoreboard / 第 2 弾 Player / 第 3 弾 TournamentInfo で
+  **objectName 由来の動的キーが解消**（`DYNAMIC_KEY_FAMILIES` は空 = T-19 完了）、
+  第 4 弾 CrewBattle（board 3 全体）、第 5 弾で残りのパネル
+  （Top8 / Commentary / Result / StreamSettings / LayoutOptions）と
+  共有モジュール（FeatureColors / SponsorHelper / LayoutOptionsManager）
 - 検証: ウィジェットごとに手動チェックリスト該当節 + 旧バージョンの保存データ読込テスト
 
 #### 5-1: AutonaScoreboardWidget ✅ 完了（2026-09-01）
@@ -797,6 +799,140 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
   Phase/Pool/Match の入力、⇄ 入れ替え、Reset Stocks、X 投稿、
   `/scoreboard3-crew-member{T}-{M}-stock{up,down}` と `/scoreboard3-crew-active{T}-{M}`、
   `set_route?bestOf=&phase=&pool=&match=` の board 3 宛て、OBS クルーレイアウトの表示）
+
+#### 5-5: 残りのパネルと共有モジュール（最終弾）✅ 完了（2026-09-03）
+
+- **ウィジェットからの `StateManager.Set` / `Unset` が 0 になった**（残 32 箇所 / 11 ファイルの処遇は
+  下表）。第 1〜4 弾がスコアボード系を移したのに対し、本弾は「ボード以外のパネル」と
+  「Qt と core にまたがっていた共有モジュール 2 つ」が対象で、objectName 由来のキーは
+  **一つも無かった**（第 4 弾の crew と同じく、散らばったキーパス文字列リテラルが実体）
+  | 旧 | 新 |
+  |----|----|
+  | `AutonaTop8Widget` の 6 Set（`top8.players` / `matches` / `phaseLabel` を手書きパスで） | **`src/core/Top8Service.py`（新設）**。staged スコアの取り込み・「非タイなら finished」・`Recompute` の再実行・空キャプションの既定値がここへ |
+  | `AutonaCommentaryWidget._syncToState` の `Set("commentary", slots)` | `AutonaActions.PublishCommentary` |
+  | `AutonaResultSettingsWidget` の `Set("result_players", ...)` 2 箇所 | `AutonaActions.PublishResultPlayers` |
+  | `AutonaStreamSettingsWidget` の `stream.url` / `stream.title` 3 箇所 | `AutonaActions.SetStreamUrl` / `SetStreamTitle` |
+  | `LayoutOptionsWidget` の 4 ハンドラ（`LayoutOptionsManager.Set` + `StateManager.Set` の対） | `AutonaActions.SetLayoutOption`（対を 1 操作に。**`LayoutOptionsManager` も core へ移動**） |
+  | `AutonaFeatureColors` の 5 Set/Unset（`tournamentInfo.themeColor`/`accentColor` + `colors.{feature}.*` + `SeedColorState`） | **`src/core/ColorService.py`（モジュールごと移動）**。Qt 側に残るのはカード 2 種と show 時リフレッシャだけで、旧名は re-export |
+  | `Helpers/AutonaSponsorHelper` の 5 Set/Unset | **`src/core/SponsorHelper.py`（core へ移動）**。唯一の呼び出し元が `PlayerService` なので、core→src の逆依存が 1 本減った |
+  | `AutonaScoreboardManager.__init__` の `Unset("score")` | `StateSchema.ResetScoreRoot()` |
+  | `AutonaPlayerBrowserWidget` 編集ダイアログの `Unset(PLAYER_EDITOR_ROOT)` | `StateSchema.ClearPlayerEditor()` |
+- **32 箇所の処遇**（移行 18 / core 移動 10 / 正当な書き手として残置 4）:
+  | ファイル | 箇所 | 処遇 | 理由 |
+  |---------|-----|------|------|
+  | `AutonaTop8Widget` | 6 | 移行（新サービス） | 判断（マージ・Recompute・既定値）が実際にウィジェット内にあった |
+  | `Helpers/AutonaSponsorHelper` | 5 | core 移動 | 既に Qt-free。呼び出し元は core 1 箇所のみ |
+  | `AutonaFeatureColors` | 5 | core 移動 | Step 2 が「seed だけ出すと所有者が 2 つに割れる」として保留した族。族ごと移すのが本弾 |
+  | `LayoutOptionsWidget` | 4 | 移行 | 2 ファイルのミラーの片方だけをウィジェットが持っていた |
+  | `AutonaStreamSettingsWidget` | 3 | 移行 | 単純な 2 キー |
+  | **`AutonaGameAssetManager`** | 3 | **残置** | ウィジェットではない（`QObject` シングルトン）。`game.*` はロード結果の publish で操作者入力ではなく、Actions を通す「操作」が無い。書き込みはアセットローダースレッドがモデル再構築と同じ `SaveBlock` で行うため、ホップを増やす利得も無い |
+  | `AutonaResultSettingsWidget` | 2 | 移行 | 単純な 1 キー |
+  | **`AutonaTournamentDataProvider`** | 1 | **残置** | 同上（`provider_videogame` は provider からのミラー） |
+  | `AutonaScoreboardManager` | 1 | 移行（schema） | `score` は schema 名。クラスは `QDockWidget` |
+  | `AutonaPlayerBrowserWidget` | 1 | 移行（schema） | 5-2 では「schema 定数経由なので可」としたが、**ダイアログも Qt ウィジェット**なので一貫性を取って schema 関数に寄せた |
+  | `AutonaCommentaryWidget` | 1 | 移行 | 単純な 1 キー |
+- **キー名の静的化**: `StateSchema` に**サブツリールート定数**（`SCORE_ROOT` / `GAME_ROOT` /
+  `TOP8_ROOT` / `COMMENTARY_ROOT` / `TOURNAMENT_INFO_ROOT` / `STREAM_ROOT` / `COLORS_ROOT` /
+  `DISPLAY_OPTIONS_ROOT` / `LAYOUT_OPTIONS_ROOT` / `RESULT_PLAYERS_ROOT` /
+  `PROVIDER_VIDEOGAME_ROOT`）と、`THEME_COLOR_KEY` / `ACCENT_COLOR_KEY` /
+  `STREAM_URL_KEY` / `STREAM_TITLE_KEY` / `TOP8_{PHASE_LABEL,PLAYERS,MATCHES}_KEY` を新設。
+  `KEY_CATALOG` はこの定数で keying され、`COLORS_FEATURE_KEYS` と `TOURNAMENT_INFO_KEYS` の
+  `themeColor`/`accentColor` も同じ定数を参照する（5-3 の教訓「半分だけ定数に追随する
+  非対称を作らない」— 移行前は同じ 2 語が 3 箇所に別々のリテラルで存在していた）。
+  **キー名は 1 文字も変えていない**のでマイグレーション層は不要
+- **`LayoutOptionsManager` を `src/core/` へ移動**（import 時のファイル生成 + 読み込みを
+  `Initialize()` に切り出し、`bootstrap_core()` が `SettingsManager.Initialize()` の直後に
+  呼ぶ）。import 副作用ゼロ（agent-pitfalls #1）に揃うのと、**bootstrap を通さず
+  `src.LayoutOptions.*` を直接 import する経路でのみ到達していた潜在バグが解消した** —
+  旧実装は `./user_data` が無い環境で `SaveSettings()` が raise していた（`SettingsManager`
+  が同じ理由で `os.makedirs` を持っている）。`bootstrap_core()` は `SettingsManager.Initialize()`
+  が先に `./user_data` を作るため、通常起動（`python main.py` / exe）ではこのバグは
+  発火しなかった。旧 `src/LayoutOptionsManager.py` は
+  **シムを残さず削除**（import 元が `LayoutOptionsWidget` の 1 つだけだったため。
+  `Helpers/AutonaSponsorHelper` も同じ理由でシム無し）
+- **スコープアウト（判断の記録）**:
+  | 項目 | 理由 |
+  |------|------|
+  | `AutonaGameAssetManager` / `AutonaTournamentDataProvider` の 4 箇所 | 上表のとおり残置。ADR-004 D2 の文言は「Qt ウィジェットの `StateManager.Set` 直接呼び出しをゼロにする」であり、provider 層のシングルトンはその対象ではない。`tests/test_objectname_keypath_contract.py` の台帳テストが**この 2 ファイルだけ**であることを pin する |
+  | `top8.DefaultState()` が Recompute されない件（下記「発見した既存バグ」） | シードの問題であって書き込み経路の問題ではない。現状を pin するに留めた |
+  | `AutonaWebServerActions` の `@gui_thread_sync` 縮退 | 本弾で移行した操作はいずれも WebServerActions から呼ばれていない（TOP 8 の `/bracket:refresh` はシグナル経由）。委譲の見直しは別件 |
+  | 大会カラー 2 キー（`themeColor`/`accentColor`）の起動シードが `StateSchema.SeedPanelState()` に残り、`ColorService` へ完全統合していない | 意図的な残る分割: シード = StateSchema、編集 = ColorService。キー定数は `THEME_COLOR_KEY`/`ACCENT_COLOR_KEY` に一本化済みなので実害はない |
+- 挙動差分（意図したもの）:
+  - **配信タイトル / 配信先が「同値なら書かない」になった**（`AutonaActions._SetIfChanged`）。
+    `stream.*` は held ではないので 反映 の点灯ではなく save cycle が消える。配信タイトルは
+    大会情報・エントラント・ゲームアセットのどの変化でも自動再生成が走り、**大半は同じ
+    文字列を書き直していた**。入力欄の無編集フォーカスアウトも同様（5-1 / 5-3 と同じ規則）
+  - **`layout_options` は逆に guard を入れていない**。LAYOUT パネルは構築時に全コントロールへ
+    保存値を代入し、その emit が「新規インストールでレイアウトのオプションが state に
+    載る」唯一の経路なので、guard を足すと設定ファイルと state が食い違ったまま直らなくなる
+  - **`commentary` / `result_players` / `top8.*` の publish から冗長な `SaveBlock` が消えた**
+    （単一キー書き込みを包んでいたもの。Step 4a 以降 `SaveState` の挙動は同一）。
+    `Top8Service.ImportBracket` の 2 キーだけは `SaveBlock` を維持
+  - **`Top8Service.ApplyScores` に渡すスコアは list 化される**。スピンボックスは常に int を
+    返すので実挙動差は無く、headless 呼び出し（tuple を渡す）のための正規化
+  - `AutonaFeatureColors` から import していた名前（`FEATURES` / `FEATURE_*` / `KIND_*` /
+    `Get*Colors` / `Set*Color` / `SeedColorState`）は**すべて re-export で維持**。
+    `Window._SeedPanelState` だけ `src.core.ColorService` を直接 import する形に変えた
+- **発見した既存バグ（今回は修正せず pin のみ）**: `top8.DefaultState()` は全マッチの
+  `slots` を `[TBD, TBD]` で返し、`StateSchema.SeedPanelState()` は**初回起動時のみ**それを
+  そのまま書く（`Recompute` は「復元された state」側の分岐にしかない）。`Recompute` は
+  「参加者が変わった＝この結果は別の対戦のもの」として score を捨てるので、
+  **新規インストール直後の 1 回目の 反映 はスコアが入らない**（2 回目は入る。1 回目が
+  slots を正しくするため）。移行前の `_onApplyScores` も同じマージをインラインで
+  行っていたので**挙動は不変**。pin:
+  `test_the_first_apply_on_an_unrecomputed_seed_drops_the_scores`。
+  修正は「シード側で `Recompute` を通す」1 行だが、シードの責務であって本弾の対象外
+- 検証: フルスイート **830 passed / 19 skipped**（5-5 前 794 + 新規 36）。
+  **既存テストのアサーションは 1 つも書き換えていない**（`test_actions.py` の分離 fixture が
+  新しい 4 ルートも退避するようにしたのと、`test_state_schema.py` /
+  `test_objectname_keypath_contract.py` の docstring・コメントを実態へ更新しただけ）。新規:
+  `tests/test_color_service.py`(11) / `tests/test_top8_service.py`(12) は QApplication なしで動く
+  = 移行で得たもの（TOP 8 パネルは QWebEngineView 持ちでハーネスが建てられないため、
+  マージ規則・Recompute の再実行・既定キャプションはこれまで**一切テストが無かった**）。
+  `tests/test_actions.py` に 6（layout option の両面書き込みと guard 無し・stream の
+  同値スキップ・whole-subtree publish）、`tests/test_settings_panels.py`(4) は実ウィジェットで
+  LayoutOptions 4 種のコントロールとカラーカード 2 種を駆動、`tests/test_state_schema.py` に 5
+  （ルート定数 ↔ カタログ・色キーの共有・`ResetScoreRoot` / `ClearPlayerEditor` ・Top8 パス）、
+  `tests/test_objectname_keypath_contract.py` に 2（**書き手台帳**と「Qt ウィジェットクラスは
+  書かない」の 2 段ラチェット）
+- 未実施（ユーザー実機確認）: TOP 8 パネル（選手 8 枠の編集 / 表示ラベル / 反映 / 全リセット /
+  Start.gg からの Top 8 読込 / OBS プレビュー）、実況パネル（カード編集・並べ替え・
+  ON AIR トグル）、RESULT パネル（個人 / チームレイアウト両方の入力と画像生成）、
+  配信設定パネル（配信先コンボの選択・追加・編集、配信タイトルの自動生成と手編集）、
+  LAYOUT オプションウィンドウ（4 種のコントロールと Default ボタン）、
+  大会カラー / 各機能カラーのカードと「大会のカラーに合わせる」、
+  PLAYERS パネルの選手編集ダイアログ（閉じたときに `player_editor` が消えること）
+
+### Step 5 完了時点の書き手台帳（ADR-004 D2）
+
+**宣言**: ADR-004 D2 の完了条件「Qt ウィジェットからの `StateManager.Set` 直接呼び出しをゼロにする」は
+**達成した**（2026-09-03）。`src/**/*.py`（`src/core/**` を除く）で `StateManager.Set` /
+`Unset` を呼ぶファイルは次の 2 つだけで、どちらも Qt ウィジェットではない。
+`tests/test_objectname_keypath_contract.py` の
+`test_the_state_writer_ledger_outside_core_is_the_documented_one` が**この集合そのもの**を pin し、
+`test_no_qt_widget_writes_the_state` が「`Q*` を継承するクラスは書かない」を AST で pin する。
+
+| 残置している書き手 | 書くキー | 分類 | 残置の理由 |
+|-------------------|---------|------|-----------|
+| `src/AutonaGameAssetManager.py`（3） | `game` / `game.has_modded_content` | provider / asset 層の `QObject` シングルトン | 操作者入力ではなく「読み込んだゲームの publish」。Actions を通すべき *操作* が存在しない。書き込みはアセットローダースレッドがモデル再構築と同じ `SaveBlock` 内で行っており（agent-pitfalls #13 の当該領域）、経路を増やす利得が無い |
+| `src/AutonaTournamentDataProvider.py`（1） | `provider_videogame` | 同上 | provider が選んだ videogame id のミラー |
+
+core 側の書き手（= 正本）は以下。**キー族ごとに所有者が 1 つ**であることが本再設計の到達点:
+
+| キー族 | 所有者 |
+|--------|--------|
+| `score.{1,2}.*`（操作） | `core/Actions.py` |
+| `score.{1,2}.*`（セット読込） | `core/SetLoadService.py` |
+| `score.{n}.stages.*` / ステージ⇔スコア | `core/GameTrackerService.py` |
+| `score.{n}.team.{t}.player.{m}.*` | `core/PlayerService.py`（`sponsor_logo*` は `core/SponsorHelper.py`） |
+| `score.{n}.{last,history,recent}_sets` / `upset_factor` | `core/StatsService.py` |
+| `score.3.*`（クルー） | `core/CrewBattleService.py` |
+| `tournamentInfo.*`（`themeColor`/`accentColor` を除く） | `core/TournamentInfoService.py` |
+| `tournamentInfo.{themeColor,accentColor}` / `colors.{feature}.*` | `core/ColorService.py` |
+| `top8.*` | `core/Top8Service.py` |
+| `commentary` / `result_players` / `stream.{url,title}` / `layout_options.*` / `display_options.*` | `core/Actions.py` |
+| シード・サブツリーのライフサイクル（`SeedBoard` / `SeedPanelState` / `ResetScoreRoot` / `ClearPlayerEditor` / `PublishDisplayOptions` / `PublishAssetVersion`） | `core/StateSchema.py` |
+| `game.*` / `provider_videogame` | **上表の 2 ファイル（残置）** |
 
 ### ステップ間の依存
 

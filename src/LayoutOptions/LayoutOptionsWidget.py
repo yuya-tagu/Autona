@@ -1,8 +1,18 @@
+"""One settings control per option an OBS layout exposes.
+
+Each control mirrors its value into two places: LayoutOptionsManager
+(./user_data/layout_options.json, the persisted source of truth this widget
+reads back when it is rebuilt) and StateManager (``layout_options.*``, what
+the overlay renders from). Both writes are one call --
+``AutonaActions.SetLayoutOption`` -- since headless core Step 5; the pair used
+to be spelled out in each of the four handlers below, which meant the widget
+owned half of a mirror.
+"""
 from qtpy.QtWidgets import *
 from ..AutonaColorButton import AutonaColorButton
-from ..LayoutOptionsManager import LayoutOptionsManager
+from ..core.LayoutOptionsManager import LayoutOptionsManager
 import textwrap
-from ..StateManager import StateManager
+from ..core.Actions import AutonaActions
 from loguru import logger
 
 
@@ -34,10 +44,8 @@ class LayoutOptionsWidget(QWidget):
         if type == "checkbox":
             settingWidget = QCheckBox()
             settingWidget.stateChanged.connect(
-                lambda val=None: [
-                    LayoutOptionsManager.Set(self.settingsBase+"."+setting, settingWidget.isChecked()),
-                    StateManager.Set("layout_options."+self.settingsBase+"."+setting, settingWidget.isChecked())
-                ])
+                lambda val=None: AutonaActions.instance.SetLayoutOption(
+                    self.settingsBase, setting, settingWidget.isChecked()))
             settingWidget.setChecked(LayoutOptionsManager.Get(self.settingsBase+"."+setting, defaultValue))
             resetButton.clicked.connect(
                 lambda bt=None, settingWidget=settingWidget:
@@ -48,10 +56,8 @@ class LayoutOptionsWidget(QWidget):
             if type == "password":
                 settingWidget.setEchoMode(QLineEdit.Password)
             settingWidget.textChanged.connect(
-                lambda val=None: [
-                    LayoutOptionsManager.Set(self.settingsBase+"."+setting, settingWidget.text()),
-                    StateManager.Set("layout_options."+self.settingsBase+"."+setting, settingWidget.text())
-                ])
+                lambda val=None: AutonaActions.instance.SetLayoutOption(
+                    self.settingsBase, setting, settingWidget.text()))
             settingWidget.setText(LayoutOptionsManager.Get(
                 self.settingsBase+"."+setting, defaultValue))
             resetButton.clicked.connect(
@@ -63,10 +69,8 @@ class LayoutOptionsWidget(QWidget):
         elif type == "color":
             settingWidget = AutonaColorButton(color="#000000", disable_right_click=True, enable_alpha_selection=True, ignore_same_color=False)
             settingWidget.colorChanged.connect(
-                lambda val=None: [
-                    LayoutOptionsManager.Set(self.settingsBase+"."+setting, settingWidget.color()),
-                    StateManager.Set("layout_options."+self.settingsBase+"."+setting, settingWidget.color())
-                ])
+                lambda val=None: AutonaActions.instance.SetLayoutOption(
+                    self.settingsBase, setting, settingWidget.color()))
             settingWidget.setColor(LayoutOptionsManager.Get(self.settingsBase+"."+setting, defaultValue))
             resetButton.clicked.connect(
                 lambda bt=None, setting=setting, settingWidget=settingWidget: [
@@ -79,10 +83,8 @@ class LayoutOptionsWidget(QWidget):
             for item in defaultValue:
                 settingWidget.addItem(item)
             settingWidget.currentIndexChanged.connect(
-                lambda val=None: [
-                    LayoutOptionsManager.Set(self.settingsBase+"."+setting, settingWidget.currentText()),
-                    StateManager.Set("layout_options."+self.settingsBase+"."+setting, settingWidget.currentText())
-                ])
+                lambda val=None: AutonaActions.instance.SetLayoutOption(
+                    self.settingsBase, setting, settingWidget.currentText()))
             index = LayoutOptionsManager.Get(self.settingsBase+"."+setting, "")
             settingWidget.setCurrentIndex(defaultValue.index(index) if index != "" and index in defaultValue else 0)
             resetButton.clicked.connect(

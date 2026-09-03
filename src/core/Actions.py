@@ -21,7 +21,12 @@ field writes (`SetMatchField` / `SetTeamName` / `SetTeamLosers` /
 `SetTeamsSwapped` / `SetBestOf`), which is what took the last
 `StateManager.Set` out of `AutonaScoreboardWidget`, and then the team roster
 operations below (`ClearTeamRoster` / `TrimTeamRoster`) alongside the player
-subtree's own writer, `core/PlayerService.py`. What is still outside:
+subtree's own writer, `core/PlayerService.py`. The final instalment added the
+operations of the panels that are not a scoreboard at all -- `SetLayoutOption`,
+`SetStreamUrl` / `SetStreamTitle`, `PublishCommentary` /
+`PublishResultPlayers` -- which is what took the last `StateManager.Set` out
+of a Qt widget (the ledger of what remains is in
+docs/changes/headless-core-redesign.md). What is still outside:
 
 - **Swap teams**, as an operation. The player half of a swap is a
   widget-to-widget copy of *field values*
@@ -75,6 +80,7 @@ from types import MappingProxyType
 from loguru import logger
 
 from . import StateSchema as schema
+from .LayoutOptionsManager import LayoutOptionsManager
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 
@@ -495,11 +501,78 @@ class AutonaActions:
             logger.warning(f"SetDisplayOption: unknown option {key}")
             return False
         value = bool(value)
-        path = f"display_options.{key}"
+        path = f"{schema.DISPLAY_OPTIONS_ROOT}.{key}"
         SettingsManager.Set(path, value)
         # One key, so no SaveBlock -- see AdjustScore.
         StateManager.Set(path, value)
         return True
+
+    # ── layout options (per-overlay settings) ─────────────────────────────
+
+    def SetLayoutOption(self, base, setting, value):
+        """Persist and republish one OBS layout's option.
+
+        The same two-sided mirror as SetDisplayOption above, over a different
+        pair of files: `LayoutOptionsManager` (./user_data/layout_options.json)
+        is what the LAYOUT panel re-reads when it rebuilds its controls, and
+        `layout_options.{base}.{setting}` is what the overlay renders from.
+        `base` and `setting` come from the layout's own options definition,
+        not from a Qt objectName, so there is no catalog of them here --
+        KEY_CATALOG records the root as open-ended for that reason.
+
+        Not guarded by _SetIfChanged: building the LAYOUT panel assigns every
+        control its stored value, and those assignments emit, which is how a
+        layout's options reach the state at all on a fresh install. A guard
+        would keep the settings file and the state from agreeing after a
+        manual edit of program_state.json.
+        """
+        path = f"{base}.{setting}"
+        LayoutOptionsManager.Set(path, value)
+        # One state key, so no SaveBlock -- see AdjustScore.
+        StateManager.Set(f"{schema.LAYOUT_OPTIONS_ROOT}.{path}", value)
+
+    # ── stream (配信設定) ─────────────────────────────────────────────────
+
+    def SetStreamUrl(self, url) -> bool:
+        """Publish the stream destination URL. True if it changed.
+
+        `stream.*` is not held, so this reaches the overlays immediately.
+        """
+        return self._SetIfChanged(
+            f"{schema.STREAM_ROOT}.{schema.STREAM_URL_KEY}", url or "")
+
+    def SetStreamTitle(self, title) -> bool:
+        """Publish the broadcast title. True if it changed.
+
+        Reached both from the operator's edit and from the auto-refresh that
+        rebuilds the title out of the tournament name -- the latter runs on
+        every tournament / entrant / game-asset change, and usually produces
+        the string that is already there.
+        """
+        return self._SetIfChanged(
+            f"{schema.STREAM_ROOT}.{schema.STREAM_TITLE_KEY}", title or "")
+
+    # ── whole-subtree publishes (commentary / result rosters) ─────────────
+    #
+    # Both panels hold their data in Qt inputs and republish the whole subtree
+    # on every edit, which is the shape of the operation rather than an
+    # accident: an overlay reads one dict of slots, and a partial write would
+    # leave it rendering a mix of two edits. What moved here is the key and
+    # the fact that the write happens at all; assembling the dict stays with
+    # the panel, because the values come out of combos whose rows are Qt
+    # models (the same line PlayerService.SetData draws).
+
+    def PublishCommentary(self, slots):
+        """Publish the caster line-up (`commentary.{slot}.*`)."""
+        StateManager.Set(schema.COMMENTARY_ROOT, slots)
+
+    def PublishResultPlayers(self, players):
+        """Publish the RESULT panel's placement list (`result_players.*`).
+
+        One key for both layouts: the panel writes either the singles entries
+        or the team entries, whichever its current layout uses.
+        """
+        StateManager.Set(schema.RESULT_PLAYERS_ROOT, players)
 
     # ── 反映 (deferred publication) ───────────────────────────────────────
 

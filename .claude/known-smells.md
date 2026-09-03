@@ -514,3 +514,30 @@ GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src
 （例: `ClearScore` を「操作者が押した場合」と「内部前処理」で分岐させる等）。
 
 **Pin**: `tests/test_scoreboard_operations.py::test_clearing_the_score_does_not_clear_the_match_bar_known_gap`
+
+---
+
+## S-18: 新規インストール直後の TOP 8 は 1 回目の 反映 がスコアを捨てる [P2/D1/S1] 🔴 未着手（既知バグ・1 行修正だが PdM 判断待ち）
+
+**根拠**: Headless Core 移行 Step 5-5 の調査（`docs/changes/headless-core-redesign.md` 5-5 節）。
+既存コードの調査中に発見。今回は修正せず pin のみ。
+
+**症状**: `AutonaTop8Model.DefaultState()` は全マッチの `slots` を `[TBD, TBD]` で返す。
+`StateSchema.SeedPanelState()` はそれを**初回起動時だけそのまま書く**（`Recompute` は
+「復元された state がある」側の分岐にしかない）。`Recompute` は「参加者が変わった＝この結果は
+別の対戦のもの」として score / finished を捨てる仕様なので、**新規インストール直後の 1 回目の
+反映（`Top8Service.ApplyScores`）はスコアが state に入らない**。1 回目が slots を正しくするため
+2 回目は入り、以後は正常。移行前の `AutonaTop8Widget._onApplyScores` も同じマージを
+インラインで行っていたので**挙動は不変**（Step 5-5 が持ち込んだ退行ではない）。
+
+**修正案（未適用）**: `SeedPanelState()` の初回分岐を
+`Set(TOP8_ROOT, {**DefaultState(), "matches": Recompute(DefaultState()["matches"])})` にする、
+または `DefaultState()` 自体が Recompute 済みの matches を返す。後者は
+`tests/test_top8_model.py` のヘルパー（`Recompute(DefaultState()["matches"])`）が
+その前提で書かれているので影響が読みやすい。
+
+**直さなかった理由**: シードの責務であって Step 5-5（書き込み経路の移行）の対象外。
+新規インストールの `program_state.json` の初期内容が変わるため、5-4 が `pool` のシードについて
+採ったのと同じ「現状を pin して PdM 判断へ回す」扱いにした。
+
+**Pin**: `tests/test_top8_service.py::test_the_first_apply_on_an_unrecomputed_seed_drops_the_scores`

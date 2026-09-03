@@ -4,6 +4,11 @@
 対象: `src/**/*.py` (62ファイル)
 方法: `grep -n "^import\|^from"` による機械的抽出。標準ライブラリ・qtpy/PyQt6 は除外。
 
+> 注: このファイルは phase A-B 時点のスナップショットで更新していない。
+> `src/LayoutOptionsManager.py` と `src/Helpers/AutonaSponsorHelper.py` は
+> 2026-09-03（Headless Core Step 5-5）に `src/core/` へ移動済みで、以下の
+> 記載はその移動前の状態を指す。
+
 ---
 
 ## ファイル別 import 一覧

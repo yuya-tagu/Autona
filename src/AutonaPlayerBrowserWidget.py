@@ -7,7 +7,6 @@ from qtpy.QtWidgets import *
 
 from loguru import logger
 
-from .StateManager import StateManager
 from .core import StateSchema as schema
 from .AutonaPlayerDB import AutonaPlayerDB
 from .AutonaGameAssetManager import AutonaGameAssetManager
@@ -77,7 +76,7 @@ class _PlayerEditorDialog(QDialog):
     def done(self, result):
         # The editor mirrors every field into player_editor.* — scrub the
         # temporary subtree so it doesn't linger in program_state.json.
-        StateManager.Unset(schema.PLAYER_EDITOR_ROOT)
+        schema.ClearPlayerEditor()
         # _deleted flag stops the widget's global-signal handlers
         # (db_updated / onLoad) from touching a dying C++ object.
         self.editor.deleteLater()

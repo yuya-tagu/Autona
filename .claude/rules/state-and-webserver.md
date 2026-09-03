@@ -53,25 +53,43 @@ paths:
 - `DYNAMIC_KEY_FAMILIES` は Step 5 の残タスク一覧として縮み、**第 3 弾で空になった**。
   新しいウィジェットを objectName 由来キーで書かない（`tests/test_state_schema.py` が
   空であることを pin）
-- 例外: `colors.{feature}.*` のシードは `AutonaFeatureColors.SeedColorState()` に残っている
-  （キー族の読み書きと同居。Step 3/4 で core へ移す）
+- **サブツリールートも定数**（Step 5 第 5 弾）: `SCORE_ROOT` / `GAME_ROOT` / `TOP8_ROOT` /
+  `COMMENTARY_ROOT` / `TOURNAMENT_INFO_ROOT` / `STREAM_ROOT` / `COLORS_ROOT` /
+  `DISPLAY_OPTIONS_ROOT` / `LAYOUT_OPTIONS_ROOT` / `RESULT_PLAYERS_ROOT` /
+  `PROVIDER_VIDEOGAME_ROOT`。`KEY_CATALOG` はこれで keying されているので、
+  ルート名を変えるとカタログ側も必ず追随する
+- `colors.{feature}.*`（機能別カラー）のシード（`SeedColorState()`）は **Step 5 第 5 弾で
+  `src/core/ColorService.py` へ移動**（この族の読み・書き・シードが 1 モジュールに揃った）。
+  **大会カラー 2 キー（`tournamentInfo.themeColor`/`accentColor`）の起動シードは
+  `StateSchema.SeedPanelState()` 側に残っている**（シード = StateSchema、編集 = ColorService
+  の 2 モジュール分割。キー定数は `THEME_COLOR_KEY`/`ACCENT_COLOR_KEY` に一本化済みなので
+  分割していても実体は 1 箇所を指す）。`Window._SeedPanelState()` は
+  `StateSchema.SeedPanelState()` と別呼び出しのまま（ColorService が StateSchema を読むので
+  schema からは呼べない）。同じ `SaveBlock` 内
 - **core → src の逆依存は Qt-free モジュールのみ import 可**（`tests/test_core_qt_free.py`
-  が推移的に検査する）。現行の逆依存は 2 系統:
-  `StateSchema` → `src` 直下の `AutonaCommentaryModel` / `AutonaTop8Model`
-  （いずれも Qt 非依存の state モデル。将来 core へ移す候補）、
-  `PlayerService` → `src/Helpers/AutonaSponsorHelper`。
-  新たな逆依存を足すときはこの一覧に追記する
+  が推移的に検査する）。現行の逆依存:
+  - `StateSchema` / `Top8Service` → `src` 直下の `AutonaCommentaryModel` / `AutonaTop8Model`
+    （いずれも Qt 非依存の state モデル。将来 core へ移す候補）
+  - `StateManager` / `SettingsManager`（従来から）+ `LayoutOptionsManager`（Step 5 第 5 弾で追加）
+    → `src/Helpers/AutonaDictHelper`（`deep_get`/`deep_set`。Qt 非依存のユーティリティ）
+  - `PlayerService` → `Helpers/AutonaSponsorHelper` は **Step 5 第 5 弾で解消**
+    （`src/core/SponsorHelper.py` へ移動）。新たな逆依存を足すときはこの一覧に追記する
 
 ## AutonaActions（ドメイン操作の唯一の書き手）
 
 `src/core/Actions.py`（headless core Step 3）。**移行済みの操作は
 `AutonaActions.instance` 以外が書かない**。インスタンスは `bootstrap_core()` が作る。
+永続側のストア 2 つ（`src/core/SettingsManager.py` / `src/core/LayoutOptionsManager.py`）も
+core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（import 副作用ゼロ）。
 
 - 移行済み: `AdjustScore` / `ResetScore`（board 1,2 のみ）/ `SetTeamColor` /
   `SetDisplayOption` / `ApplyChanges`（反映 = `CommitHeld`）/ **Step 5 第 1 弾で追加**:
   `SetMatchField`（`phase`/`pool`/`match`）/ `SetTeamName` / `SetTeamLosers` /
   `SetTeamsSwapped` / `SetBestOf` / **第 2 弾で追加**: `ClearTeamRoster` /
-  `TrimTeamRoster`（チームの選手スロット数。スロットの中身は `PlayerService`）
+  `TrimTeamRoster`（チームの選手スロット数。スロットの中身は `PlayerService`）/
+  **第 5 弾で追加**: `SetLayoutOption`（`LayoutOptionsManager` + `layout_options.*` の
+  両面ミラー）/ `SetStreamUrl` / `SetStreamTitle` / `PublishCommentary` /
+  `PublishResultPlayers`（後 2 つはパネルが組んだ dict をサブツリーごと publish する操作）
 - 未移行（Qt 側が書き手のまま。理由は `Actions.py` の docstring）: チームスワップ操作
   そのもの（選手側は**ウィジェット間の値コピー**で、選手フィールドの正本が
   ウィジェットにある限り core に出せない。`teamsSwapped` は `SetTeamsSwapped` が
@@ -126,9 +144,16 @@ paths:
 | `src/core/StatsService.py` | `AutonaScoreboardWidget.stats.service` | 統計の取得可否判断・アップセット計算・`last_sets`/`history_sets`/`recent_sets`/`upset_factor` の書き込み |
 | `src/core/GameTrackerService.py` | `AutonaIndividualGameTracker.service` | ステージ勝敗の記録（`score.{n}.stages.*`）・ステージ⇔スコアの相互整合・`writingScore` ガード |
 | `src/core/SetLoadService.py` | `AutonaScoreboardWidget.setLoad` | セット読込の正規化（ラウンド/フェーズ/プール・スコア・敗者フラグ・チーム名とロゴ・`bracket_type`・追従中セット）。スワップ後の面の解決は `DisplayTeam()` が唯一の正本 |
-| `src/core/TournamentInfoService.py` | `TournamentInfoService.instance`（`bootstrap_core()` 生成） | `tournamentInfo.*` の書き込み全部（provider ペイロードの適用・**EVENT タブ入力欄の `Set{Text,Number,Date}Field`**・表示大会名の 3 系統の上書き規則・`logoVersion`・起動時シード）。EVENT パネル不在でも動くことが遅延構築の前提。**両方向が同じ 3 操作を通る**（provider 側の `_ApplyKey` も入力側と同じメソッドを呼ぶ）。ただし `AutonaFeatureColors:105` の `themeColor`/`accentColor`（objectName 由来ではない静的キー）だけは意図的にスコープアウトしており本サービスを通らない。**表示大会名の入力欄は SCORE パネルとクルーボードの 2 箇所にあり、どちらも `SetDisplayName` を呼ぶ**（クルー側は Step 5 第 4 弾で合流） |
+| `src/core/TournamentInfoService.py` | `TournamentInfoService.instance`（`bootstrap_core()` 生成） | `tournamentInfo.*` の書き込み全部（provider ペイロードの適用・**EVENT タブ入力欄の `Set{Text,Number,Date}Field`**・表示大会名の 3 系統の上書き規則・`logoVersion`・起動時シード）。EVENT パネル不在でも動くことが遅延構築の前提。**両方向が同じ 3 操作を通る**（provider 側の `_ApplyKey` も入力側と同じメソッドを呼ぶ）。ただし `themeColor`/`accentColor` の 2 キーだけは **`core/ColorService.py` の持ち物**で本サービスを通らない（歴史的にこのプレフィックスなだけで、意味はカラー機能側）。**表示大会名の入力欄は SCORE パネルとクルーボードの 2 箇所にあり、どちらも `SetDisplayName` を呼ぶ**（クルー側は Step 5 第 4 弾で合流） |
 | `src/core/PlayerService.py` | `AutonaBasePlayerWidget.player`（選手ウィジェット 1 枚につき 1 個。path に束縛） | 選手スロット配下の書き込み全部（入力フィールド・seed/birthday・国/州の選択行・`mergedName`/`mergedOnlyName`・アバターとスポンサーロゴ・キャラスロット・`city`/`id`・スロット削除）。`BoardNumber()` が `score.{N}` と `player_editor.1` を見分ける |
 | `src/core/CrewBattleService.py` | `AutonaCrewBattleWidget.crew` | クルーボード（board 3）の書き込み全部（起動シード・メンバー名/ストック・`memberNum`/`activeMember`・**クルー合計の算出**（名前が入った表示中メンバーの stock 合計 → `team.{t}.score`）・crew 版のセットデータ正規化・`best_of`（raw のみ）・スワップ/リセット/クリア後の全体 publish）。合計は**state から算出**する（旧実装はウィジェットの値を合計していた） |
+| `src/core/Top8Service.py` | なし（モジュール関数） | `top8.*` の書き込み全部（選手 8 枠の publish・表示ラベルの既定値・反映（staged スコアのマージ + `Recompute`）・全リセット・Start.gg 取り込み）。トポロジ自体は Qt-free の `src/AutonaTop8Model.py` が正本 |
+| `src/core/ColorService.py` | なし（モジュール関数） | 大会カラー（`tournamentInfo.themeColor`/`accentColor`）と機能別カラー（`colors.{feature}.*`）の読み・書き・起動シード。**`tournamentInfo` プレフィックスだがこの族は本サービスのもの**で、`TournamentInfoService` は触らない（歴史的なキー名） |
+| `src/core/SponsorHelper.py` | なし（静的メソッド） | `...player.{M}.sponsor_logo` / `sponsor_logos.{I}` の解決と書き込み。`PlayerService.PublishImages` から呼ばれる |
+
+**状態を持たないサービスはモジュール関数でよい**（`Top8Service` / `ColorService`）。
+`bootstrap_core()` が作るのは、ボードごとに要る／台帳を持つもの（`SetLoadService` /
+`TournamentInfoService` / `PlayerService` / `CrewBattleService` / `AutonaActions`）だけ。
 
 - **`SetLoadService` はステージ行を書かない**。行数と `stage_widget_list` の長さを
   一致させているのは `GameTrackerService.SetStageCount()` だけなので、読み込んだ

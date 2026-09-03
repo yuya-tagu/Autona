@@ -231,11 +231,11 @@ class AutonaTournamentInfoWidget(QDockWidget):
         # buttons stayed out of the findChildren keypath loops this tab used
         # to run; the card is shared with the six per-feature panels now),
         # and inserted right after 大会情報 so the media group keeps the bottom
-        # of the tab. The card is its own writer —
-        # AutonaFeatureColors.SetTournamentColor writes tournamentInfo.
-        # themeColor / accentColor directly, which is the FeatureColors
-        # instalment of Step 5, not this one. Per-feature overrides live on
-        # their own panels.
+        # of the tab. The card writes through its own service —
+        # core/ColorService.SetTournamentColor owns tournamentInfo.themeColor
+        # / accentColor, which is the FeatureColors instalment of Step 5, not
+        # this one; TournamentInfoService never touches those two. Per-feature
+        # overrides live on their own panels.
         contentsLayout = self._contents.layout()
         infoGroup = self.findChild(QGroupBox, "groupBox_2")
         insertAt = (contentsLayout.indexOf(infoGroup) + 1) if infoGroup \

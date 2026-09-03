@@ -59,6 +59,14 @@ Step 5（第 1〜3 弾、2026-09-01/02）で**全ウィジェット静的化完�
   （`tests/test_state_schema.py`）。`tests/test_objectname_keypath_contract.py` が
   「schema 名 ⊆ .ui objectName」「該当ウィジェットに `objectName()` 呼び出しが無い」
   「該当ウィジェットが `StateManager.Set/Unset` を直接呼ばない」を AST で pin する
+- **2026-09-03（Step 5 完了）: ウィジェットは `StateManager.Set/Unset` を呼ばない。**
+  `src/core` 外で呼んでよいのは `AutonaGameAssetManager` と
+  `AutonaTournamentDataProvider` の 2 ファイルだけで、
+  `tests/test_objectname_keypath_contract.py` の
+  `test_the_state_writer_ledger_outside_core_is_the_documented_one` が**その集合そのもの**を、
+  `test_no_qt_widget_writes_the_state` が「`Q*` を継承するクラスは書かない」を pin する。
+  新しい書き込みは `AutonaActions` か core のドメインサービスに足す
+  （台帳は `docs/changes/headless-core-redesign.md`）
 
 ## 5. （解消済み）AutonaTeamPlayerWidget は削除済み
 

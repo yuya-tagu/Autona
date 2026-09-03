@@ -49,6 +49,13 @@ os.makedirs(Path(_WORK_DIR) / "user_data", exist_ok=True)
 BOARD = 1
 PREFIX = f"score.{BOARD}"
 
+_EXTRA_ROOTS = (
+    schema.STREAM_ROOT,
+    schema.LAYOUT_OPTIONS_ROOT,
+    schema.COMMENTARY_ROOT,
+    schema.RESULT_PLAYERS_ROOT,
+)
+
 
 class _Spy:
     """Counts what the state layer published, without Qt.
@@ -123,6 +130,12 @@ def _isolated_state():
         changedKeys = list(SM.changedKeys)
         SM.state.pop("score", None)
         SM.lastSavedState.pop("score", None)
+        # The roots the Step 5-5 operations below write. Popped for the same
+        # reason `score` is: this module shares one StateManager with every
+        # other, and a revision count is only meaningful from a known start.
+        for root in _EXTRA_ROOTS:
+            SM.state.pop(root, None)
+            SM.lastSavedState.pop(root, None)
         SM.heldPrefixes.discard(PREFIX)
         SM.heldExempt.pop(PREFIX, None)
         SM.heldKeys.pop(PREFIX, None)
@@ -688,3 +701,106 @@ def test_the_other_operations_are_callable_off_the_main_thread(
     assert errors == []
     assert SM.Get(f"{PREFIX}.team.1.color") == "#00ff00"
     assert SM.Get("display_options.show_seed") is False
+
+
+# ── layout options / stream / whole-subtree publishes (Step 5-5) ─────────
+#
+# The four panels these belong to are lazily built and three of them own a
+# QWebEngineView, so none of them is in the widget harness. Before this
+# instalment their writes therefore had no coverage of any kind; the
+# operations are here now, and this is it.
+
+def test_set_layout_option_writes_both_halves_of_the_mirror(actions):
+    from src.core.LayoutOptionsManager import LayoutOptionsManager
+
+    stored = LayoutOptionsManager.settings
+    LayoutOptionsManager.settings = {}
+    try:
+        actions.SetLayoutOption("scoreboard", "show_flags", True)
+
+        # LayoutOptionsManager is what the LAYOUT panel reads back when it
+        # rebuilds its controls; StateManager is what the overlay renders.
+        assert LayoutOptionsManager.Get("scoreboard.show_flags") is True
+        assert SM.Get("layout_options.scoreboard.show_flags") is True
+    finally:
+        LayoutOptionsManager.settings = stored
+
+
+def test_set_layout_option_is_not_guarded(actions):
+    """Rewriting the same value has to reach both sides.
+
+    Building the LAYOUT panel assigns every control its stored value and
+    those assignments emit, which is how a layout's options reach the state
+    at all on a fresh install. A _SetIfChanged here would leave the settings
+    file and the state disagreeing after either one was edited by hand.
+    """
+    from src.core.LayoutOptionsManager import LayoutOptionsManager
+
+    stored = LayoutOptionsManager.settings
+    LayoutOptionsManager.settings = {}
+    try:
+        actions.SetLayoutOption("scoreboard", "font", "Inter")
+        SM.Unset("layout_options.scoreboard.font")
+        actions.SetLayoutOption("scoreboard", "font", "Inter")
+        assert SM.Get("layout_options.scoreboard.font") == "Inter"
+    finally:
+        LayoutOptionsManager.settings = stored
+
+
+def test_the_stream_setters_publish_once_and_skip_a_no_op(actions, spy):
+    revision = SM.revision
+
+    assert actions.SetStreamUrl("https://twitch.tv/example") is True
+    assert SM.Get("stream.url") == "https://twitch.tv/example"
+    assert SM.revision == revision + 1
+
+    # The auto-refresh recomputes the same title on every tournament /
+    # entrant / asset change, and the operator's focus-out fires
+    # unconditionally: neither may cost a save cycle.
+    assert actions.SetStreamUrl("https://twitch.tv/example") is False
+    assert SM.revision == revision + 1
+
+    assert actions.SetStreamTitle("Autona Cup") is True
+    assert actions.SetStreamTitle("Autona Cup") is False
+    assert SM.Get("stream.title") == "Autona Cup"
+    assert SM.revision == revision + 2
+    # stream.* is not held, so both writes were broadcast, not staged.
+    assert spy.held_updates == []
+    assert len(spy.deltas) == 2
+
+
+def test_the_stream_setters_normalise_none_to_an_empty_string(actions):
+    """An absent key and an empty one are different to the guard.
+
+    "not set yet" -> "" is a real change and is published once; the second
+    call is the no-op. The combo yields "" for its blank row anyway, so this
+    only matters to a headless caller.
+    """
+    assert actions.SetStreamUrl(None) is True
+    assert SM.Get("stream.url") == ""
+    assert actions.SetStreamUrl(None) is False
+
+    assert actions.SetStreamTitle(None) is True
+    assert SM.Get("stream.title") == ""
+    assert actions.SetStreamTitle("") is False
+
+
+def test_publishing_the_commentary_lineup_writes_the_whole_root(actions):
+    slots = {"1": {"name": "Ada", "display": 1}, "2": {"name": "", "display": 0}}
+    revision = SM.revision
+
+    actions.PublishCommentary(slots)
+
+    assert SM.Get("commentary.1.name") == "Ada"
+    assert SM.Get("commentary") == slots
+    assert SM.revision == revision + 1
+
+
+def test_publishing_the_result_placements_writes_the_whole_root(actions):
+    players = {"1": {"rank": 1, "name": "Ada", "characters": []}}
+    revision = SM.revision
+
+    actions.PublishResultPlayers(players)
+
+    assert SM.Get("result_players") == players
+    assert SM.revision == revision + 1
