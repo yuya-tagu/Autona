@@ -73,11 +73,14 @@ class NoIconProxyModel(QSortFilterProxyModel):
 
 
 class AutonaScoreboardPlayerWidgetSignals(QObject):
+    # `dataChanged` used to sit here and was emitted from the three input
+    # handlers below. Nothing ever connected to it -- the state delta is how
+    # a change reaches anything interested -- so it went with the write path
+    # it was announcing (headless core Step 5, instalment 3).
     playerId_changed = Signal()
     player1Id_changed = Signal()
     player2Id_changed = Signal()
     player_seed_changed = Signal()
-    dataChanged = Signal()
 
 
 
@@ -619,12 +622,10 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
     def _OnTextChanged(self, field, text):
         self.player.SetText(field, text)
-        self.instanceSignals.dataChanged.emit()
 
     def _OnNoteChanged(self):
         self.player.SetText(
             schema.PLAYER_NOTE_KEY, self.custom_textbox.toPlainText())
-        self.instanceSignals.dataChanged.emit()
 
     def _OnLocationChanged(self, field, combo: QComboBox):
         # currentData() carries the whole selected row (code, names, flag
@@ -632,7 +633,6 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         # Which row that is has just been decided by Qt (LoadStates /
         # SetData); publishing it is core's.
         self.player.SetLocation(field, combo.currentData())
-        self.instanceSignals.dataChanged.emit()
 
     def SetLosers(self, value):
         with self.dataLock:

@@ -11,14 +11,14 @@ This test freezes that contract as a snapshot. If it fails, an objectName was
 renamed/removed: add a StateManager migration (or restore the name) BEFORE
 updating the snapshot below.
 
-Headless core Step 5 is converting the *derivation* widget by widget: for the
-SCORE panel the key names are ``src/core/StateSchema.py`` constants now and
-the widget looks its inputs up by them, instead of reading them back off
-whatever it found. That does not retire this file -- the .ui names and the
-schema names still have to be the same strings, or an existing
-``program_state.json`` stops matching and ``findChild`` stops resolving -- so
-the scoreboard section below pins exactly that agreement, plus the absence of
-the old derivation.
+Headless core Step 5 converted the *derivation* widget by widget, and is
+done: for the SCORE panel, the player card and the EVENT tab alike, the key
+names are ``src/core/StateSchema.py`` constants now and each widget looks its
+inputs up by them, instead of reading them back off whatever it found. That
+does not retire this file -- the .ui names and the schema names still have to
+be the same strings, or an existing ``program_state.json`` stops matching and
+``findChild`` stops resolving -- so the sections below pin exactly that
+agreement, plus the absence of the old derivation.
 
 Beyond that agreement the test stays runtime-free: it parses the ``.ui`` XML
 and reads source text. The one import it does make (inside the test, not at
@@ -192,6 +192,47 @@ def _state_write_calls(relative_path):
     ]
 
 
+def test_the_tournament_info_schema_names_are_the_ui_objectnames():
+    """The EVENT tab's half of the same agreement (Step 5, instalment 3).
+
+    The last family that was built from objectNames at runtime: three
+    findChildren loops (QLineEdit / QSpinBox / QDateEdit) each wrote
+    `tournamentInfo.{widget.objectName()}`. The names are StateSchema
+    constants now, used both as the state key and as the findChild argument,
+    so the two spellings have to agree or the field goes unwired *and* stops
+    matching an existing program_state.json.
+    """
+    from src.core import StateSchema as schema
+
+    names = _object_names(LAYOUT / "AutonaTournamentInfo.ui")
+    assert set(schema.TOURNAMENT_INPUT_KEYS) <= names, (
+        "StateSchema.TOURNAMENT_INPUT_KEYS names a widget "
+        "AutonaTournamentInfo.ui does not have: "
+        f"{sorted(set(schema.TOURNAMENT_INPUT_KEYS) - names)}")
+    assert set(schema.TOURNAMENT_INPUT_KEYS) <= EXPECTED[
+        "AutonaTournamentInfo.ui"]
+
+
+def test_the_event_panel_no_longer_derives_keypaths_from_objectname():
+    """The EVENT tab's `findChildren` + objectName() loops must not return.
+
+    Same tripwire as the scoreboard's above, and the reason this file's
+    qt_spinbox_lineedit check is gone: that guard existed only because the
+    panel's QLineEdit loop swept up a QSpinBox's internal line edit and had
+    to recognise it. There is no loop to sweep anything now -- numEntrants
+    is reached by findChild(QSpinBox, "numEntrants") -- so the guard has
+    nothing left to protect and this assertion covers strictly more.
+    """
+    calls = _object_name_calls("src/AutonaTournamentInfoWidget.py")
+    assert calls == [], (
+        "AutonaTournamentInfoWidget calls objectName() again (line(s) "
+        f"{sorted(node.lineno for node in calls)}). Field names come from "
+        "StateSchema.TOURNAMENT_INPUT_KEYS now and are passed *to* "
+        "findChild. If the new call builds a StateManager key path, use a "
+        "StateSchema constant instead of reverting this test; if it is a "
+        "legitimate non-keypath use, add an allowlist here.")
+
+
 PLAYER_WIDGET_SOURCES = [
     "src/AutonaScoreboardPlayerWidget.py",
     "src/AutonaBasePlayerWidget.py",
@@ -220,6 +261,48 @@ def test_the_player_widgets_do_not_write_the_state_directly():
             f"{sorted(node.lineno for node in calls)}). The player subtree "
             "is core/PlayerService.py's -- add a method there and call it "
             "through self.player instead of reverting this test.")
+
+
+def test_the_event_panel_does_not_write_the_state_directly():
+    """The completion condition for the EVENT tab, as the same tripwire.
+
+    `tournamentInfo.*` has one writer for this panel's own fields --
+    core/TournamentInfoService -- from both ends now: the provider payload
+    and an operator typing. A StateManager.Set here would be a second one for
+    those fields, and the display-name follow rule is stateful enough that
+    two writers disagreeing is a silent bug rather than a visible one.
+    (Two other tournamentInfo.* writers exist deliberately outside this
+    panel and outside the service: AutonaFeatureColors:105's themeColor/
+    accentColor -- a static, non-objectName-derived key -- and
+    AutonaCrewBattleWidget:184's displayTournamentName -- crew board's
+    write path is unmigrated. Neither is this panel's file, so this
+    tripwire is unaffected.) Reads (`StateManager.Get`, which
+    _SyncFieldsFromState needs) are deliberately not covered: rendering the
+    state is what this panel is for.
+    """
+    calls = _state_write_calls("src/AutonaTournamentInfoWidget.py")
+    assert calls == [], (
+        "AutonaTournamentInfoWidget writes StateManager directly again "
+        f"(line(s) {sorted(node.lineno for node in calls)}). "
+        "tournamentInfo.* is core/TournamentInfoService.py's -- add a method "
+        "there and call it instead of reverting this test.")
+
+
+def test_the_scoreboard_does_not_write_the_state_directly():
+    """The scoreboard's own writer tripwire, matching the player/event ones.
+
+    score.* keypaths are StateSchema constants now (see _WireTeamColumn), but
+    nothing pinned that AutonaScoreboardWidget itself never calls
+    StateManager.Set/Unset with a hand-built keypath -- it measures zero
+    today, same as the player and EVENT-tab widgets, so it gets the same
+    ratchet instead of staying an unenforced assumption.
+    """
+    calls = _state_write_calls("src/AutonaScoreboardWidget.py")
+    assert calls == [], (
+        "AutonaScoreboardWidget writes StateManager directly (line(s) "
+        f"{sorted(node.lineno for node in calls)}). score.* keypaths come "
+        "from StateSchema constants -- route the write through the "
+        "appropriate service instead of reverting this test.")
 
 
 def test_the_scoreboard_no_longer_derives_keypaths_from_objectname():
@@ -261,24 +344,12 @@ def test_programmatic_keypath_names_present():
             )
 
 
-# The QSpinBox internal QLineEdit reports objectName 'qt_spinbox_lineedit';
-# keypath code must fall back to the parent objectName. Guard that fallback so
-# spinbox values keep landing on the right key.
-#
-# AutonaScoreboardPlayerWidget is no longer on this list: it has no
-# objectName-derived keypath left to need the fallback (the seed spinbox and
-# its line edit are both wired to StateSchema.PLAYER_SEED_KEY explicitly),
-# which the two tests above pin. AutonaTournamentInfoWidget still derives
-# its keys and still needs it.
-QT_SPINBOX_FALLBACK_FILES = [
-    "src/AutonaTournamentInfoWidget.py",
-]
-
-
-def test_qt_spinbox_fallback_present():
-    for rel in QT_SPINBOX_FALLBACK_FILES:
-        text = (PROJECT_ROOT / rel).read_text(encoding="utf-8")
-        assert "qt_spinbox_lineedit" in text, (
-            f"{rel}: the qt_spinbox_lineedit -> parent objectName fallback is "
-            "gone; QSpinBox values would persist under the wrong key (S-14)."
-        )
+# There used to be a `test_qt_spinbox_fallback_present` here, guarding the
+# "a QSpinBox's internal QLineEdit reports objectName 'qt_spinbox_lineedit',
+# so fall back to the parent's" branch that every findChildren(QLineEdit)
+# keypath loop needed. It was checked in AutonaScoreboardPlayerWidget until
+# the player instalment and in AutonaTournamentInfoWidget until this one; no
+# such loop exists anywhere now, so there is no fallback left to guard. The
+# two `..._no_longer_derives_keypaths_from_objectname` tests above are what
+# replaced it, and they fail if a loop comes back -- with or without the
+# fallback.

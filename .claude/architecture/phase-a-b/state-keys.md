@@ -4,14 +4,17 @@
 対象: `src/**/*.py`
 方法: `grep -n "StateManager\.(Set|Get|Unset)"` + コンテキスト読解。動的パスは実際の引数を追跡して展開。
 
-> **2026-09-01 注記（Headless Core Step 5）**: 本書は調査時点のスナップショット。
+> **2026-09-02 注記（Headless Core Step 5 完了）**: 本書は調査時点のスナップショット。
 > キー定義の正本は **`src/core/StateSchema.py` の `KEY_CATALOG`**（および静的化済みの
-> `SCORE_MATCH_FIELDS` / `SCORE_TEAM_INPUT_KEYS` / `PLAYER_INPUT_KEYS`）に移った。
+> `SCORE_MATCH_FIELDS` / `SCORE_TEAM_INPUT_KEYS` / `PLAYER_INPUT_KEYS` /
+> `TOURNAMENT_INPUT_KEYS`）に移った。
 > 本書の既知の誤り: 選手配下の `country_code` / `state_code` は**実際には
-> `country` / `state`**（選択行の dict をそのまま載せる）。`{QLineEdit.objectName}` /
-> `{QComboBox.objectName}` の動的行は静的化済みで、書き手も
-> `AutonaScoreboardPlayerWidget` / `AutonaScoreboardWidget` から
-> `src/core/PlayerService.py` / `src/core/Actions.py` に移っている。
+> `country` / `state`**（選択行の dict をそのまま載せる）。
+> **`{Q*.objectName}` と書かれた動的行はすべて静的化済み**で、書き手も
+> `AutonaScoreboardPlayerWidget` / `AutonaScoreboardWidget` /
+> `AutonaTournamentInfoWidget` から `src/core/PlayerService.py` /
+> `src/core/Actions.py` / `src/core/TournamentInfoService.py` に移っている
+> （下記「要注意事項 #2」も解消済み）。
 
 ---
 
@@ -187,10 +190,10 @@ commentary                           W R  AutonaCommentaryWidget / AutonaWebServ
 ```
 tournamentInfo                       W R
 ├── tournamentName                   R   AutonaScoreboardWidget (サムネイル生成時)
-├── {QDateEdit.objectName}           W   AutonaTournamentInfoWidget (日付フィールド)
-├── {QLineEdit.objectName}           W   AutonaTournamentInfoWidget (テキストフィールド)
-├── {QSpinBox.objectName}            W   AutonaTournamentInfoWidget (数値フィールド)
-├── {key}                            W   AutonaTournamentInfoWidget.UpdateData (API取得データ)
+├── startAt                          W   TournamentInfoService.SetDateField (旧 {QDateEdit.objectName})
+├── eventName / address              W   TournamentInfoService.SetTextField (旧 {QLineEdit.objectName})
+├── numEntrants                      W   TournamentInfoService.SetNumberField (旧 {QSpinBox.objectName})
+├── {key}                            W   TournamentInfoService.ApplyTournamentData (API取得データ)
 ├── themeColor                       W   Autona.py _SeedPanelState (起動時に SettingsManager
 │                                        general.theme_color から展開)
 │                                     W   大会情報設定パネル「大会カラー」カード
@@ -371,11 +374,16 @@ currentStream                        W   AutonaStatsUtil.UpdateStreamQueue
 一方 `AutonaStatsUtil.py:177` では `StateManager.Set(f"score.{self.scoreboardNumber}.upset_factor", ...)` が呼ばれている。
 `score.upset_factor`（番号なし）は意図的かバグか不明。
 
-### 2. Qt objectName 依存の動的キー ⚠️
+### 2. Qt objectName 依存の動的キー ✅ 解消（2026-09-02）
 
-AutonaScoreboardWidget の team 列、tournamentInfo のフィールドなど、複数箇所で `element.objectName()` をキーパスに使用している。
-実際のキー名は `.ui` ファイルに定義されており、コードからは静的に特定できない。
-`.ui` ファイルを変更するとキーパスが変わり、既存の保存データとの互換性が壊れる。
+（調査時点）AutonaScoreboardWidget の team 列、tournamentInfo のフィールドなど、複数箇所で `element.objectName()` をキーパスに使用していた。
+実際のキー名は `.ui` ファイルに定義されており、コードからは静的に特定できなかった。
+
+**現状**: Headless Core Step 5（第 1〜3 弾）で 4 族すべて `StateSchema` の定数になり、
+ウィジェットは定数を `findChild` の引数として使う形に反転した（`StateSchema.DYNAMIC_KEY_FAMILIES`
+は空）。**ただし `.ui` の objectName を変更するとキーパスが変わり既存保存データとの互換が
+壊れる点は不変**（schema の文字列と一致していなければ `findChild` も解決できない）。
+known-smells S-14 を参照。
 
 ### 3. `StateManager.state` の直接参照 ⚠️
 

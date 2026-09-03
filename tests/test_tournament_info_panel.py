@@ -16,6 +16,7 @@ keep answering them for the rest of the session (the "ghost panel" the board
 harness has the same teardown for).
 """
 import contextlib
+import time
 
 import pytest
 
@@ -86,14 +87,25 @@ def panel(makePanel):
 
 @pytest.fixture(autouse=True)
 def _restoreTournamentInfo(autonaApp):
-    """Hand tournamentInfo.* back untouched -- it is process-global."""
+    """Hand tournamentInfo.* back untouched -- it is process-global.
+
+    The service's two ledgers go with it: `_rawDates` is what a date field
+    renders from (so a test that picks a date would otherwise decide what a
+    later one sees in its QDateEdit) and `_lastTournamentName` is the whole
+    表示大会名 follow rule.
+    """
     from src.Helpers.AutonaDictHelper import deep_clone
 
     saved = deep_clone(StateManager.Get("tournamentInfo") or {})
+    service = TournamentInfoService.instance
+    rawDates = dict(service._rawDates)
+    lastName = service._lastTournamentName
     try:
         yield
     finally:
         StateManager.Set("tournamentInfo", saved)
+        service._rawDates = rawDates
+        service._lastTournamentName = lastName
         autonaApp.settle()
 
 
@@ -201,6 +213,103 @@ def test_a_loaded_date_reaches_the_date_edit(autonaApp, panel):
     widget = _field(panel, "startAt", QDateEdit)
     assert widget.date().toString("yyyy-MM-dd") == time.strftime(
         "%Y-%m-%d", time.localtime(timestamp))
+
+
+# ── the inputs, once they stopped naming their own keys (Step 5) ─────────
+#
+# Each field is wired by a StateSchema name that is also its findChild key,
+# and hands the value to TournamentInfoService. What these check is the pair
+# of things a source-level test cannot: that the wiring reaches the *right*
+# key, and that it reaches it exactly once.
+
+@pytest.mark.parametrize("field, typed", [
+    ("tournamentName", "Autona Cup"),
+    ("eventName", "Singles"),
+    ("address", "Tokyo"),
+])
+def test_each_text_field_writes_its_own_key_once(
+        autonaApp, panel, field, typed):
+    edit = _field(panel, field)
+    with _stateWrites() as written:
+        edit.setText(typed)
+        edit.editingFinished.emit()
+        autonaApp.settle()
+
+    assert StateManager.Get(f"tournamentInfo.{field}") == typed
+    assert written.count(f"tournamentInfo.{field}") == 1, (
+        f"{field} was written {written.count(f'tournamentInfo.{field}')} "
+        f"times: {written}")
+
+
+def test_the_entrant_count_writes_its_own_key_once(autonaApp, panel):
+    spin = _field(panel, "numEntrants", QSpinBox)
+    with _stateWrites() as written:
+        spin.setValue(96)
+        autonaApp.settle()
+
+    assert StateManager.Get("tournamentInfo.numEntrants") == 96
+    assert written.count("tournamentInfo.numEntrants") == 1, written
+
+
+def test_the_date_field_writes_its_own_key_once(autonaApp, panel):
+    from qtpy.QtCore import QDate
+
+    widget = _field(panel, "startAt", QDateEdit)
+    with _stateWrites() as written:
+        widget.setDate(QDate(2026, 3, 14))
+        autonaApp.settle()
+
+    assert written.count("tournamentInfo.startAt") == 1, written
+    # The published form is the formatted short date, and the raw timestamp
+    # behind it is the one the operator picked.
+    raw = TournamentInfoService.instance.RawDate("startAt")
+    assert time.strftime("%Y-%m-%d", time.localtime(raw)) == "2026-03-14"
+
+
+def test_leaving_a_field_untouched_writes_nothing(autonaApp, panel):
+    """editingFinished fires on focus-out whether or not anything was typed.
+
+    The old lambda wrote the key unconditionally; the service applies
+    _SetIfChanged like every other tournamentInfo writer, so tabbing through
+    the form no longer queues changed keys. tournamentInfo.* is not held, so
+    this was never a 反映 problem -- it was a save cycle per field.
+    """
+    edit = _field(panel, "eventName")
+    edit.setText("Singles")
+    edit.editingFinished.emit()
+    autonaApp.settle()
+
+    with _stateWrites() as written:
+        edit.editingFinished.emit()
+        autonaApp.settle()
+
+    assert written == []
+
+
+def test_a_picked_date_survives_the_next_state_change(autonaApp, panel):
+    """The regression the raw-date ledger used to have.
+
+    The QDateEdit is restored from TournamentInfoService.RawDate(), not from
+    the state (which holds a formatted date). While a manual edit wrote the
+    key directly, that ledger still held the *loaded* tournament's date, so
+    the next tournamentInfo delta -- any of them -- re-rendered the panel and
+    put the loaded date back over what the operator had picked.
+    """
+    from qtpy.QtCore import QDate
+
+    TournamentInfoService.instance.ApplyTournamentData({
+        "startAt": 1735689600, "initial_load": True})
+    autonaApp.settle()
+
+    widget = _field(panel, "startAt", QDateEdit)
+    widget.setDate(QDate(2026, 3, 14))
+    autonaApp.settle()
+
+    # Any other tournamentInfo write re-renders the whole tab.
+    TournamentInfoService.instance.SetDisplayName("SPECIAL EDITION")
+    autonaApp.settle()
+
+    assert widget.date().toString("yyyy-MM-dd") == "2026-03-14"
 
 
 # ── the wiring that replaces the eager panel ─────────────────────────────

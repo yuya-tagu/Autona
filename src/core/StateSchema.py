@@ -10,23 +10,24 @@ place those definitions live now (ADR-004 D3, headless core Step 2), and like
 everything under ``src/core`` it must stay Qt-free -- so a headless run seeds
 exactly the same state a GUI launch does.
 
-Two things it deliberately is *not* yet:
+One thing it deliberately is *not*:
 
-- **Not a replacement for *every* dynamic keypath.** Step 5 is converting
-  them widget by widget. The SCORE panel's board-level and team-card inputs
-  are done (``SCORE_MATCH_FIELDS`` / ``SCORE_TEAM_INPUT_KEYS`` below are read
-  by ``AutonaActions`` and by ``AutonaScoreboardWidget``), and so is the
-  player card (``PLAYER_INPUT_KEYS``, read by ``PlayerService`` and by
-  ``AutonaScoreboardPlayerWidget``); all of ``tournamentInfo.*`` is still
-  generated from Qt ``objectName`` values at runtime (known-smells S-14, and
-  ``DYNAMIC_KEY_FAMILIES`` below is the remaining inventory). For that one,
-  ``KEY_CATALOG`` only *enumerates* what the widget produces -- documentation
-  with a type.
-- **Not a migration layer.** There is none yet: a renamed ``objectName``
-  still breaks an existing ``out/program_state.json`` silently. When Step 5
-  statically names those keys it needs one anchor listing the *old* names to
-  read from, and this catalog is meant to be it -- which is why it is written
-  against the keys as they exist today rather than as they ought to be.
+- **Not a migration layer.** There is none: a renamed ``objectName`` still
+  breaks an existing ``out/program_state.json`` silently. The static key
+  families below were introduced without renaming a single string precisely
+  so none was owed; if one ever is, this catalog is the anchor listing the
+  *old* names to read from, which is why it is written against the keys as
+  they exist today rather than as they ought to be.
+
+Step 5 finished the conversion of the dynamic keypaths widget by widget:
+the SCORE panel's board-level and team-card inputs (``SCORE_MATCH_FIELDS`` /
+``SCORE_TEAM_INPUT_KEYS``, read by ``AutonaActions`` and by
+``AutonaScoreboardWidget``), the player card (``PLAYER_INPUT_KEYS``, read by
+``PlayerService`` and by ``AutonaScoreboardPlayerWidget``) and the EVENT tab
+(``TOURNAMENT_INPUT_KEYS``, read by ``TournamentInfoService`` and by
+``AutonaTournamentInfoWidget``). ``DYNAMIC_KEY_FAMILIES`` below -- the
+checklist that inventory shrank against -- is empty as a result
+(known-smells S-14).
 
 Import side effects: none (agent-pitfalls #1). Every read and write happens
 inside a call.
@@ -356,24 +357,67 @@ COMMENTARY_SLOT_KEYS = (
     "display",                      # int: 0 hidden, 1 shown (max 4 shown)
 )
 
-# tournamentInfo collects three further groups, none of them enumerated here
-# yet (Step 5 is what turns them into catalog entries):
+# ── Statically named keys the EVENT tab writes ───────────────────────────
 #
-# - the EVENT tab's input fields, still keyed by their Qt objectName on the
-#   *write* side (a human typing) -- see DYNAMIC_KEY_FAMILIES. Since
-#   headless core Step 4b the provider-side writer names them statically
-#   instead: TournamentInfoService.{TEXT,NUMBER,DATE}_FIELDS.
-# - `endAt` / `eventStartAt` / `eventEndAt`, which have no field on the tab
-#   at all. TournamentInfoService.SHORT_DATE_KEYS is their definition: they
-#   are published as short date strings rather than timestamps.
-# - whatever else the provider payload carries (`shortLink`, and the
-#   `initial_load` flag that rides along with it), written through as-is.
+# The last family generated from Qt objectNames at runtime (Step 5,
+# instalment 3). `AutonaTournamentInfoWidget` ran three findChildren loops --
+# QLineEdit / QSpinBox / QDateEdit -- and each wrote
+# `tournamentInfo.{widget.objectName()}`; the panel now looks its inputs up
+# *by* these constants and `TournamentInfoService` writes them (it already
+# named them for the provider side since Step 4b, as its
+# {TEXT,NUMBER,DATE}_FIELDS -- which alias these tuples rather than
+# respelling them).
+#
+# Split by widget kind because the behaviour differs per kind, not for
+# tidiness: a text field carries a string, a number field an int, and a date
+# field is published as a *formatted short date* (the raw timestamp is kept
+# by the service so a late-built panel can restore its QDateEdit).
+#
+# The strings are unchanged, so an existing out/program_state.json still
+# matches (tests/test_objectname_keypath_contract.py pins both spellings).
+TOURNAMENT_NAME_KEY = "tournamentName"
+TOURNAMENT_EVENT_NAME_KEY = "eventName"
+TOURNAMENT_ADDRESS_KEY = "address"
+TOURNAMENT_ENTRANTS_KEY = "numEntrants"      # QSpinBox
+TOURNAMENT_START_AT_KEY = "startAt"          # QDateEdit
+
+TOURNAMENT_TEXT_FIELDS = (
+    TOURNAMENT_NAME_KEY,
+    TOURNAMENT_EVENT_NAME_KEY,
+    TOURNAMENT_ADDRESS_KEY,
+)
+TOURNAMENT_NUMBER_FIELDS = (TOURNAMENT_ENTRANTS_KEY,)
+TOURNAMENT_DATE_FIELDS = (TOURNAMENT_START_AT_KEY,)
+
+TOURNAMENT_INPUT_KEYS = (
+    TOURNAMENT_TEXT_FIELDS + TOURNAMENT_NUMBER_FIELDS + TOURNAMENT_DATE_FIELDS)
+
+# Provider timestamps with no field on the tab at all. Published as short
+# date strings rather than as timestamps, which is the only thing that sets
+# them apart from the pass-through keys below.
+TOURNAMENT_SHORT_DATE_KEYS = ("endAt", "eventStartAt", "eventEndAt")
+
+# Not an EVENT tab field: 表示大会名 is edited on the SCORE panel and on the
+# crew board, and follows the tournament name by the rules in
+# TournamentInfoService. Named here because that service writes it and this
+# is where its key names live.
+TOURNAMENT_DISPLAY_NAME_KEY = "displayTournamentName"
+# Cache-bust version of ./layout/logo.png, published like the stream org
+# assets in STREAM_ASSET_VERSIONS above.
+TOURNAMENT_LOGO_VERSION_KEY = "logoVersion"
+
+# One group is still open-ended and stays that way: whatever else the
+# provider payload carries (`shortLink`, and the `initial_load` flag that
+# rides along with it) is written through as-is, so enumerating it would be
+# enumerating Start.gg's response shape.
 TOURNAMENT_INFO_KEYS = (
-    "tournamentName",
-    "themeColor",
-    "accentColor",
-    "displayTournamentName",
-    "logoVersion",
+    TOURNAMENT_INPUT_KEYS + TOURNAMENT_SHORT_DATE_KEYS + (
+        "themeColor",
+        "accentColor",
+        TOURNAMENT_DISPLAY_NAME_KEY,
+        TOURNAMENT_LOGO_VERSION_KEY,
+        "shortLink",
+    )
 )
 
 STREAM_KEYS = (
@@ -421,17 +465,19 @@ KEY_CATALOG = {
     "result_players": (),
 }
 
-# Key families whose final segment still comes from a Qt objectName at
-# runtime instead of from this catalog (known-smells S-14). This is the
-# remaining Step 5 inventory: AutonaScoreboardWidget's two families (the team
-# card and the match bar) came off this list when they became
-# SCORE_TEAM_INPUT_KEYS / SCORE_MATCH_FIELDS, and the player card's family
-# followed when it became PLAYER_INPUT_KEYS. Nothing consumes the tuple; it
-# is the checklist.
-DYNAMIC_KEY_FAMILIES = (
-    ("tournamentInfo.{objectName}",
-     "AutonaTournamentInfoWidget -- every input field"),
-)
+# Key families whose final segment comes from a Qt objectName at runtime
+# instead of from this catalog (known-smells S-14). This was the Step 5
+# inventory and it is **empty**: AutonaScoreboardWidget's two families (the
+# team card and the match bar) came off when they became
+# SCORE_TEAM_INPUT_KEYS / SCORE_MATCH_FIELDS, the player card's followed as
+# PLAYER_INPUT_KEYS, and the EVENT tab's -- the last one -- as
+# TOURNAMENT_INPUT_KEYS. Nothing consumes the tuple; it is the checklist,
+# and tests/test_state_schema.py keeps it from growing back.
+#
+# Kept rather than deleted so a new widget that reaches for the old pattern
+# has somewhere to be listed while it is being converted -- not so one can
+# live here permanently.
+DYNAMIC_KEY_FAMILIES = ()
 
 
 # ── Seeds ────────────────────────────────────────────────────────────────

@@ -240,6 +240,97 @@ def test_reapplying_the_same_payload_publishes_nothing(service):
     assert SM.revision == before
 
 
+# ── the EVENT tab's fields (headless core Step 5, instalment 3) ──────────
+#
+# The panel's inputs call these instead of writing
+# tournamentInfo.{objectName} from a lambda, and _ApplyKey applies the
+# payload through the very same three operations -- so "one writer" is true
+# of both directions, not just the provider one.
+
+def test_typing_a_text_field_writes_it(service):
+    assert service.SetTextField("eventName", "Singles") is True
+    assert _get("eventName") == "Singles"
+
+
+def test_retyping_the_same_text_writes_nothing(service):
+    service.SetTextField("address", "Tokyo")
+    if SM._export_thread is not None:
+        SM._export_thread.join()
+    before = SM.revision
+    assert service.SetTextField("address", "Tokyo") is False
+    assert SM.revision == before
+
+
+def test_an_unknown_text_field_is_refused(service):
+    """The old loop accepted whatever objectName it found under the tab."""
+    assert service.SetTextField("gameTitleCombo", "Smash") is False
+    assert _get("gameTitleCombo") is None
+
+
+def test_typing_the_tournament_name_carries_into_the_display_name(service):
+    """The follow rule rides on the field, not on a second connection.
+
+    The panel used to connect FollowDisplayName to editingFinished next to
+    the key write; folding it in here is what keeps the typed path and the
+    payload path (_ApplyKey) applying the same rule.
+    """
+    service.Seed()
+    service.SetTextField("tournamentName", "Autona Cup")
+    assert _get("displayTournamentName") == "Autona Cup"
+
+
+def test_the_follow_rule_runs_even_when_the_name_did_not_move(service):
+    """Unconditional, exactly as both former callers were.
+
+    Focusing the name field and leaving it writes nothing now, but an empty
+    display name still adopts the name that is already there -- which is the
+    behaviour the panel's separate connection used to provide.
+    """
+    SM.Set(f"{PREFIX}.tournamentName", "Autona Cup")
+    service.Seed()
+    SM.Set(f"{PREFIX}.displayTournamentName", "")
+
+    assert service.SetTextField("tournamentName", "Autona Cup") is False
+    assert _get("displayTournamentName") == "Autona Cup"
+
+
+def test_typing_a_number_field_writes_it(service):
+    assert service.SetNumberField("numEntrants", 64) is True
+    assert _get("numEntrants") == 64
+    assert service.SetNumberField("numEntrants", 64) is False
+
+
+def test_an_unknown_number_field_is_refused(service):
+    assert service.SetNumberField("tournamentName", 64) is False
+
+
+def test_picking_a_date_publishes_the_formatted_form(service):
+    assert service.SetDateField("startAt", 1735689600) is True
+    assert _get("startAt") == "DATE:" + time.strftime(
+        "%Y-%m-%d", time.localtime(1735689600))
+
+
+def test_picking_a_date_records_the_raw_timestamp(service):
+    """The reason the typed path goes through the service at all.
+
+    The state holds a formatted date that cannot be parsed back into a
+    QDate, so the panel restores its QDateEdit from RawDate(). While a
+    manual edit wrote the key directly, that ledger kept the *loaded*
+    tournament's date -- and the panel's next re-render put it back over
+    whatever the operator had picked.
+    """
+    service.ApplyTournamentData(_payload())
+    assert service.RawDate("startAt") == 1735689600
+
+    service.SetDateField("startAt", 1767225600)
+    assert service.RawDate("startAt") == 1767225600
+
+
+def test_an_unknown_date_field_is_refused(service):
+    assert service.SetDateField("endAt", 1735689600) is False
+    assert service.RawDate("endAt") is None
+
+
 # ── 表示大会名 ────────────────────────────────────────────────────────────
 
 def test_typing_a_display_name_writes_it(service):

@@ -33,19 +33,32 @@ globs:
 - `StateManager.Set("score/1/team/1", value)` — **間違い**
 - 数値も文字列: `"1"` であって `1` ではない
 
-## 4. `element.objectName()` をキーパスに使う既存パターン（縮小中）
+## 4. `element.objectName()` をキーパスに使う旧パターン（解消済み・再導入禁止）
 
-Qt の `objectName()` がそのまま StateManager のキーになる旧パターン。Headless Core
-Step 5 で順に静的化しており、**残るのは `AutonaTournamentInfoWidget` のみ**
-（`AutonaScoreboardWidget` と `AutonaScoreboardPlayerWidget` は
-`src/core/StateSchema.py` の定数を `findChild` の引数として使う形に移行済み）。
+Qt の `objectName()` がそのまま StateManager のキーになる旧パターンは、Headless Core
+Step 5（第 1〜3 弾、2026-09-01/02）で**全ウィジェット静的化完了**。`findChildren` で
+拾ったウィジェットに名前を聞いてキーを組む書き方はもう存在しない。現在は
+`src/core/StateSchema.py` の定数が正本で、ウィジェットはそれを **`findChild` の引数として**
+使う（方向が逆になった）。
+
+| 族 | 定数 | 書き手 |
+|----|------|--------|
+| `score.{N}.{phase,pool,match}` | `SCORE_MATCH_FIELDS` | `AutonaActions` |
+| `score.{N}.team.{T}.{teamName,losers}` | `SCORE_TEAM_INPUT_KEYS` | `AutonaActions` |
+| `score.{N}.team.{T}.player.{M}.*` | `PLAYER_INPUT_KEYS` | `core/PlayerService.py` |
+| `tournamentInfo.*`（EVENT タブ入力欄） | `TOURNAMENT_INPUT_KEYS` | `core/TournamentInfoService.py` |
 
 - `.ui` ファイルの objectName を変更すると保存データとの互換性が壊れる。
-  **静的化済みのウィジェットでも同じ**（schema の文字列と objectName が一致して
-  いなければ `findChild` が解決できず、キーも一致しない）
+  **静的化後も同じ**（schema の文字列と objectName が一致していなければ
+  `findChild` が解決できず、キーも一致しない）。加えて eye メニューの表示トグルも
+  同じ名前で widget を引く
 - 新しいウィジェットを追加する際は、キーを `StateSchema` に定義してから
-  objectName をそれに合わせる（逆をやらない）
-- 残タスクの一覧は `StateSchema.DYNAMIC_KEY_FAMILIES`（`tests/test_state_schema.py` が pin）
+  objectName をそれに合わせる（逆をやらない）。**`findChildren` ループで
+  objectName からキーを組む書き方に戻さない**
+- pin: `StateSchema.DYNAMIC_KEY_FAMILIES` は**空**でなければならない
+  （`tests/test_state_schema.py`）。`tests/test_objectname_keypath_contract.py` が
+  「schema 名 ⊆ .ui objectName」「該当ウィジェットに `objectName()` 呼び出しが無い」
+  「該当ウィジェットが `StateManager.Set/Unset` を直接呼ばない」を AST で pin する
 
 ## 5. （解消済み）AutonaTeamPlayerWidget は削除済み
 

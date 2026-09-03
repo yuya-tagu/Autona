@@ -405,7 +405,14 @@ tournamentInfo
 │                                    機能別に上書きしたい場合は下記 `colors.{feature}` を使う
 │                                    （キー名は後方互換のため変更しない）。
 ├── displayTournamentName          ※編集 UI は SCORE タブ（と EVENT タブの大会名追従）。下記注記参照。
-└── {動的キー}                     (Qt 入力フィールドの objectName + API 取得データ)
+├── eventName / address / numEntrants / startAt
+│                                  ※EVENT タブの入力欄。キー名は `StateSchema.TOURNAMENT_INPUT_KEYS`
+│                                    が正本（`tournamentName` を含む）。書き手は
+│                                    `core/TournamentInfoService.py` のみ（入力・provider 両方向）
+├── endAt / eventStartAt / eventEndAt
+│                                  ※タブに入力欄を持たない provider 由来の日時。短縮日付文字列で公開
+├── logoVersion                    ※`./layout/logo.png` の mtime（OBS のキャッシュバスト用）
+└── {provider 由来}                (`shortLink` 等。ペイロードの残りをそのまま透過)
 ```
 
 ##### `colors` — 機能別カラーの上書き
@@ -470,14 +477,15 @@ stream
 #### 3.1.3 動的キーパスの規約
 
 かつては以下の 4 族が Qt の `objectName()` から動的に決まっていた。Headless Core
-Step 5（T-19）で順に静的化しており、**残るのは最後の 1 族のみ**:
+Step 5（T-19）で順に静的化し、**全族が完了**（`StateSchema.DYNAMIC_KEY_FAMILIES`
+は空になった）:
 
 | 族 | 状態 |
 |----|------|
 | `score.{N}.team.{T}.{QCheckBox/QLineEdit.objectName}` | ✅ 静的化（`StateSchema.SCORE_TEAM_INPUT_KEYS` = `teamName` / `losers`。書き手は `AutonaActions`） |
 | `score.{N}.{QComboBox.objectName}` | ✅ 静的化（`StateSchema.SCORE_MATCH_FIELDS` = `phase` / `pool` / `match`。書き手は `AutonaActions`） |
 | `score.{N}.team.{T}.player.{M}.{objectName}` | ✅ 静的化（`StateSchema.PLAYER_INPUT_KEYS`。書き手は `core/PlayerService.py`） |
-| `tournamentInfo.{Q*.objectName}` | ⏳ 未（AutonaTournamentInfoWidget の入力方向のみ。`StateSchema.DYNAMIC_KEY_FAMILIES` の残タスク） |
+| `tournamentInfo.{Q*.objectName}` | ✅ 静的化（`StateSchema.TOURNAMENT_INPUT_KEYS` = `tournamentName` / `eventName` / `address` / `numEntrants` / `startAt`。書き手は `core/TournamentInfoService.py`） |
 
 **規約**:
 - **キー名は静的化後も不変**（`.ui` の `objectName` を変更するとキーパスが変わり、保存済み state と互換性が壊れる。静的化済みの族でも `StateSchema` の文字列と `objectName` が一致していなければ `findChild` が解決できず同じ結果になる）。やむを得ず変える場合は state のマイグレーション層が前提（known-smells S-14）。
@@ -1682,7 +1690,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 | ID | タスク | 関連 § | 影響範囲 |
 |----|------|------|--------|
 | **T-18** | **PyQt 書き込みの Actions 層移行**: PyQt Widget の `StateManager.Set` 直接呼び出しを Actions 層に移行する。WebServer 非依存名 `AutonaActions` / `StateActions` への改名も検討。Step 1（core 境界確立・Qt-free pin）完了 2026-08-28 | §3.2.2 R-Sync-1 | 大規模リファクタ。`src/AutonaWebServerActions.py` の独立化 + 全 PyQt Widget の書き込み経路差し替え |
-| **T-19** | 動的キーパス（`objectName` 依存キー）の段階的な静的化。新規追加分から §3.1.2 に明記する運用 | §3.1.3 | 新規キー追加時のレビューで運用 |
+| **T-19** | 動的キーパス（`objectName` 依存キー）の段階的な静的化。新規追加分から §3.1.2 に明記する運用 → ✅ **完了**（Headless Core Step 5 第 1〜3 弾、2026-09-01/02。`StateSchema.DYNAMIC_KEY_FAMILIES` は空）。以降は「新規キーは `StateSchema` に定数を置く」運用のみ | §3.1.3 | 新規キー追加時のレビューで運用 |
 | **T-20** | OBS テンプレの命名軸統一: 新規追加分から `scoreboard_{placement}_{style}` に寄せる | §4.3.1 | 新規追加時のレビューで運用 |
 | **T-21** | フォント定義の整理: PyQt の `FONT_FAMILY_CONDENSED`（Roboto Condensed）を React にも追加するか、削除するか決定 | §5.2.1 | `web/src/themes.js`、`src/ui_constants.py` |
 | **T-22** | `danger` / `negative` トークンを `brand` から分離するか検討（エラー・削除確認・危険操作とブランド強調が同色になる懸念の解消） | §5.1.4 | `src/ui_constants.py` 側は分離済み（`negative #F04E54`）。`web/src/themes.js` も Web UI 刷新 Phase 1（2026-07）で `error = negative` に反映 → ✅ 完了 |
