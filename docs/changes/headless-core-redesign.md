@@ -444,8 +444,8 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
   StateManager を直接書かないこと」を pin する形で**残る**
 - 進捗: 第 1 弾 Scoreboard / 第 2 弾 Player / 第 3 弾 TournamentInfo が完了し、
   **objectName 由来の動的キーはこれで解消**（`DYNAMIC_KEY_FAMILIES` は空 = T-19 完了）。
-  残るのは動的キーを持たないウィジェットの書き込み経路移行 —
-  CrewBattle（board 3 全体）と LayoutOptions / StreamSettings / FeatureColors / Sponsor
+  第 4 弾 CrewBattle（board 3 全体）も完了。残るのは
+  LayoutOptions / StreamSettings / FeatureColors / Sponsor
 - 検証: ウィジェットごとに手動チェックリスト該当節 + 旧バージョンの保存データ読込テスト
 
 #### 5-1: AutonaScoreboardWidget ✅ 完了（2026-09-01）
@@ -705,6 +705,98 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
   `DATE_FIELDS`（`startAt`）と `_rawDates` 台帳には触らない。そのため大会解除後も
   日付欄が残る。旧来からの非対称であって本弾の退行ではなく、クリア時の日付の扱いは
   UX 判断が要るため据え置き
+
+#### 5-4: AutonaCrewBattleWidget（クルーボード / board 3）✅ 完了（2026-09-03）
+
+- **`AutonaCrewBattleWidget` の `StateManager.Set` 直接呼び出しが 30 → 0**
+  （`Unset` は元から 0）。board 3 は objectName 由来の動的キーを**一度も持っていない**
+  （メンバー行はコードで組み立てられ objectName を持たない）。代わりにあったのは
+  **30 箇所に散ったキーパス文字列リテラル**で、S-14 と同じドリフトの別ルート。
+  新設 `src/core/CrewBattleService.py`（ボードごとに 1 インスタンス。
+  `SetLoadService` と同じ関係）が正本になった
+  | 旧 | 新 |
+  |----|----|
+  | `_writeInitialState`（起動シード 9 Set + `_recalcTotal`） | `CrewBattleService.SeedBoardState()` |
+  | `_flushAllState`（ウィジェットから全 7 種を書き出す） | `PublishBoard()` — ウィジェットは `_snapshotTeams()` で `CrewTeam`/`CrewMember` を組むだけ |
+  | `_teamTotal`（QSpinBox 値を QLineEdit の中身で絞って合計） | `TeamTotal()` — **state から算出**。ヘッドレスでも同じ数字が出る |
+  | `_recalcTotal` の 10 Set | `PublishStocks()`（1 SaveBlock、合計を返す） |
+  | `_onMemberNameChanged` の Set + recalc | `SetMemberName()`（「名前を入れると合計が変わる」規則を core が持つ） |
+  | `_onMemberNumChanged` の 2 チーム分ループ | `SetMemberNum()` |
+  | `_onActiveToggled` の直書き | `SetActiveMember()`（`"0"` 文字列化も core） |
+  | `_onBestOfChanged` の直書き | `SetBestOf()`（**raw キーのみ**。差分は下記） |
+  | `ChangeSetData` の crew 版正規化 | `ApplyMatchInfo()` + `BestOfFromSetData()` |
+  | `_onTeamNameChanged` / `_onColorChanged` / 3 combo の `write()` | **`AutonaActions`**（`SetTeamName` / `SetTeamColor` / `SetMatchField`）— board 1/2 と語義が同じ入口は共通操作へ |
+  | `displayTournamentNameEdit` の直書き（5-1/5-3 からの送り） | `TournamentInfoService.SetDisplayName`（SCORE パネルと同じ配線） |
+- **board 1/2 との語義差は保存した**（Step 4b が統一を見送った理由そのもの）。
+  `CrewBattleService` の docstring と `tests/test_crew_battle_service.py` の
+  「ApplyMatchInfo」節が正本:
+  | 項目 | crew | board 1/2 (`SetLoadService`) |
+  |------|------|------------------------------|
+  | `round_name` | `is not None`（空文字はクリア） | 真偽値（空文字は「載っていない」） |
+  | `tournament_phase` | `is not None` | 真偽値 |
+  | `tournament_pool` | `is not None`（明示 null は無視） | キーの有無（明示 null はクリア） |
+  | `match_en` | **書かない** | 常に書く |
+  | `bestOf` | `is not None`（0 で「未設定」に戻せる） | 真偽値 |
+  | `best_of` 派生キー | 書かない（`best_of` のみ） | 6 キー（`best_of_text` / `first_to*`） |
+- **キー名の静的化**: `StateSchema` に `CREW_MEMBER_NUM_KEY` / `CREW_ACTIVE_MEMBER_KEY` /
+  `CREW_STOCK_KEY` を新設し、既存の `SCORE_CREW_TEAM_KEYS` / `SCORE_CREW_PLAYER_KEYS` を
+  そこから導出する形にした（5-3 の教訓「半分だけ定数に追随する非対称を作らない」）。
+  メンバー名は `PLAYER_TAG_KEY`（board 1/2 と同じ `name`）を使う。
+  **キー名は 1 文字も変えていない**のでマイグレーション層は不要。
+  `MAX_MEMBERS` / `DEFAULT_STOCK` / `DEFAULT_MEMBER_NUM` / `DEFAULT_COLORS` は
+  サービスへ移し、ウィジェット側は re-export（既存の import 元を壊さないため）。
+  `ACCENT_GOLD` は塗りの色なので Qt 側に残した
+- **スコープアウト（判断が自明でない / 別弾）**:
+  | 項目 | 理由 |
+  |------|------|
+  | クルーボードの「入口」の core 化（`SwapTeams` / `ResetScore` / `CommandClearAll` / `CommandMemberStock`） | **ウィジェット主導のまま**。いずれも「行の signal を止めて値を並べ替え → `_flushAllState`」という形で、state 先行に反転するには選手カードと同じ描画側（`_SyncCrewFields` 相当）が要る。書き込み*実装*は全部 core に入ったので、残るのは入口 4 つ（5-1 が `best_of` について採った判断と同じ） |
+  | `AutonaActions.ResetScore(3)` の no-op | 変えていない。クルーの「リセット」= 全員ストック満タン復元は上記の入口。`WebServerActions.reset_scores` の `@gui_thread_sync` もそのため残置 |
+  | `pool` を起動シードに追加すること | **やらなかった**。旧実装は `phase` / `match` だけをシードし `pool` はシードしない（board 1/2 は 3 つともシードしない）。足すと新規インストールの `program_state.json` の内容が変わるため、`tests/test_crew_board.py` / `test_crew_battle_service.py` で**現状を pin するに留めた** |
+  | 起動シードの `player_editor` 的なマイグレーション | 不要（キー名不変） |
+- 挙動差分（意図したもの）:
+  - **チーム名の入力が「同値なら書かない」になった**（`AutonaActions.SetTeamName` の
+    `_SetIfChanged`）。board 3 は held ではないので 反映 の点灯ではなく、
+    無編集フォーカスアウトの save cycle が消える。5-1 が board 1/2 に入れた規則と同じ
+  - **match バーの 3 combo も同様**（`SetMatchField`）。加えて**リスト項目を選んだ編集が
+    2 回書き込みから 1 回になった**（`currentIndexChanged` と `editingFinished` が
+    同じ操作に繋がるため。5-1 と同じ）。`SCORE_MATCH_FIELDS` 以外は拒否されるが、
+    crew の呼び出し元は 3 定数のみ
+  - **`ChangeSetData` の同一ペイロード再適用が delta を出さなくなった**
+    （`ApplyMatchInfo._SetIfChanged`）
+  - **数値でない `bestOf` がセットデータ全体を巻き添えにしなくなった**。旧経路は
+    `int(...)` が `QSpinBox.setValue` の手前で raise し（Qt シグナルハンドラ内なので
+    stderr に出るだけ）残りの適用が捨てられていた。現在は warning ログで当該キーだけ
+    飛ばす（同メソッドの「tolerant by design」という宣言に実装を合わせた）
+  - **起動シードとクリア後の全体 publish が同一パスになった**。旧実装は 2 つのループで、
+    すでにドリフトしていた（シードは stock を 2 回書き、`activeMember` の解決方法が
+    違った）。書かれる値は同じ
+  - **合計の算出元がウィジェットから state に変わった**。両者は常に一致するので値は同じ
+    （ウィジェット変更 → state 書き込み → 合計算出の順は不変）。`memberNum` が state に
+    無いボードでは 0 になる（旧実装はスピンボックス値を使っていた）— 未構築ボードの
+    プレースホルダに対してのみ差が出る経路で、そこには合計を書く呼び出し元がない
+  - **チーム色の空/None が黙って無視されるようになった**。旧 `_onColorChanged` は
+    `color or ""` で空文字を書けたが、新 `AutonaActions.SetTeamColor` は falsy を
+    そのまま無視する。全経路を洗った限り実際に空/None が届く経路は無い
+    （`AutonaColorButton` は常に有効な色を持つ、右クリックはデフォルト色への復帰、
+    `AutonaWebServerActions.team_color` / `CommandTeamColor` はいずれも
+    事前に空文字を弾く）ので実挙動差はないが、記録として残す
+- 検証: フルスイート **793 passed / 19 skipped**（5-4 前 709 + 新規 84）。
+  **既存テストのアサーションは 1 つも書き換えていない**（`test_objectname_keypath_contract.py`
+  の docstring 内の「crew は未移行」という記述だけを実態に合わせて更新）。新規:
+  `tests/test_crew_board.py`(45) は**移行前に書いて現状を pin した characterization test**
+  （board 3 は「generic な web 操作が落ちない」ことしか見られていない領域だった。
+  シード内容・合計規則・スワップ/リセット/クリア・crew 版正規化の 5 差分・
+  エコーループ検査（1 操作 = revision +1）・書き込みキー pin）。
+  移行の前後で**同じ 45 本が無改変で pass**する。
+  `tests/test_crew_battle_service.py`(36) は QApplication なしで動く = 移行で得たもの。
+  `tests/test_state_schema.py` に 2（crew キー定数とカタログの整合・サービスが書く
+  リテラル葉の検査）、`tests/test_objectname_keypath_contract.py` に 1
+  （`AutonaCrewBattleWidget` が `StateManager.Set/Unset` を直接呼ばないラチェット）
+- 未実施（ユーザー実機確認）: クルーボードの手動確認
+  （メンバー名/ストック/出場中マーカーの入力、Members 数の増減、チーム名・カラー、
+  Phase/Pool/Match の入力、⇄ 入れ替え、Reset Stocks、X 投稿、
+  `/scoreboard3-crew-member{T}-{M}-stock{up,down}` と `/scoreboard3-crew-active{T}-{M}`、
+  `set_route?bestOf=&phase=&pool=&match=` の board 3 宛て、OBS クルーレイアウトの表示）
 
 ### ステップ間の依存
 

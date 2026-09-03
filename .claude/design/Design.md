@@ -331,6 +331,20 @@ score.{N}
 └── upset_factor                     W R    ※番号なし版（`score.upset_factor`）は **削除済**（T-1 完了）
 ```
 
+board3（crew）のみ、上記に加えてクルー名簿のキーを持つ。書き手は
+`src/core/CrewBattleService.py`（board1/2 は一切書かない）:
+
+```
+score.3
+└── team.{1|2}
+    ├── memberNum                    W R  (int。表示中のメンバー行数。両チーム共通)
+    ├── activeMember                 W R  (str。出場中メンバーの 1 始まり index。"0" = 不在)
+    ├── score                        W    (派生値: 名前が入った表示中メンバーの stock 合計)
+    └── player.{M}
+        ├── name                     W R  (board1/2 と同じキー = 同じ意味)
+        └── stock                    W R  (int。残ストック)
+```
+
 ##### `game` — 選択中ゲーム情報
 
 ```

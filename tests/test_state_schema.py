@@ -241,6 +241,77 @@ def test_the_player_service_writes_only_catalogued_keys():
         "StateSchema.SCORE_PLAYER_KEYS does not list")
 
 
+def test_the_crew_field_names_stay_inside_the_catalog():
+    """Same contract for the crew board (headless core Step 5, instalment 4).
+
+    The crew keys were never objectName-derived -- board 3 builds its rows in
+    code -- but they were spelled out as string literals at each of the
+    widget's thirty write sites, which is the same drift by a different
+    route. They are named constants now, consumed by
+    core/CrewBattleService.py, and KEY_CATALOG's crew entries are built from
+    the same names rather than repeating them.
+    """
+    assert schema.CREW_MEMBER_NUM_KEY == "memberNum"
+    assert schema.CREW_ACTIVE_MEMBER_KEY == "activeMember"
+    assert schema.CREW_STOCK_KEY == "stock"
+    assert schema.SCORE_CREW_TEAM_KEYS == (
+        schema.CREW_MEMBER_NUM_KEY, schema.CREW_ACTIVE_MEMBER_KEY)
+    assert schema.SCORE_CREW_PLAYER_KEYS == (schema.CREW_STOCK_KEY,)
+    # Board 3's roster rides on the shared player subtree: a member's name is
+    # the same key an entrant's tag is on boards 1/2, so an overlay written
+    # for one reads the other.
+    assert schema.PLAYER_TAG_KEY in schema.SCORE_PLAYER_KEYS
+    for key in schema.SCORE_CREW_TEAM_KEYS:
+        assert f"3.team.{{T}}.{key}" in schema.KEY_CATALOG["score"]
+    for key in schema.SCORE_CREW_PLAYER_KEYS:
+        assert f"3.team.{{T}}.player.{{M}}.{key}" in schema.KEY_CATALOG["score"]
+
+
+def test_the_crew_service_writes_only_catalogued_keys():
+    """Every leaf CrewBattleService names has to be in the catalog.
+
+    Read out of the source for the same reason the PlayerService check is:
+    the point is the enumeration, and a key only some payload reaches at
+    runtime would slip past a behavioural test. The crew service builds its
+    paths through _teamKey / _memberKey, plus the board-level fields it
+    writes with an f-string.
+
+    Only the *literal* leaves show up here -- the ones taken from a schema
+    constant are covered by the test above, which is what leaves so few of
+    them. The anchors below are there so that this does not degenerate into
+    a test of the empty set if the shape of those calls ever changes.
+    """
+    source = (PROJECT_ROOT / "src" / "core"
+              / "CrewBattleService.py").read_text(encoding="utf-8")
+
+    teamLeaves = set(re.findall(r'_teamKey\([^,]+,\s*"([^"]+)"\)', source))
+    memberLeaves = set(
+        re.findall(r'_memberKey\([^,]+,\s*[^,]+,\s*"([^"]+)"\)', source))
+    boardLeaves = set(re.findall(r'\{self\.prefix\}\.([a-z_]+)"', source))
+    assert "score" in teamLeaves, (
+        "the crew team total is no longer written through _teamKey(...) -- "
+        "update this test's reader before trusting its result")
+    assert "best_of" in boardLeaves, (
+        "the crew set length is no longer written as a prefix f-string -- "
+        "update this test's reader before trusting its result")
+
+    catalogued = set(schema.SCORE_TEAM_KEYS) | set(schema.SCORE_CREW_TEAM_KEYS)
+    assert teamLeaves <= catalogued, (
+        f"CrewBattleService writes team key(s) {sorted(teamLeaves - catalogued)} "
+        "that StateSchema does not list")
+
+    catalogued = set(schema.SCORE_PLAYER_KEYS) | set(
+        schema.SCORE_CREW_PLAYER_KEYS)
+    assert memberLeaves <= catalogued, (
+        "CrewBattleService writes member key(s) "
+        f"{sorted(memberLeaves - catalogued)} that StateSchema does not list")
+
+    assert boardLeaves <= set(schema.SCORE_BOARD_KEYS), (
+        "CrewBattleService writes board key(s) "
+        f"{sorted(boardLeaves - set(schema.SCORE_BOARD_KEYS))} that "
+        "StateSchema.SCORE_BOARD_KEYS does not list")
+
+
 def test_the_scoreboard_families_left_the_dynamic_key_inventory():
     """DYNAMIC_KEY_FAMILIES is the Step 5 checklist, so it has to shrink.
 

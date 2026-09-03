@@ -9,23 +9,26 @@ from loguru import logger
 from .AutonaColorButton import AutonaColorButton
 from .StateManager import StateManager
 from .core import StateSchema as schema
+from .core.Actions import AutonaActions
+from .core.CrewBattleService import CrewBattleService, CrewMember, CrewTeam
+from .core.TournamentInfoService import TournamentInfoService
 from .StateManagerBridge import StateManagerBridge
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from . import ui_constants as UI
 from . import ui_layout as L
 
 
-# LatteCon crew battles support 1v1 up to 9v9.
-MAX_MEMBERS = 9
-# Stocks a fresh member row starts with (typical Smash crew battle).
-DEFAULT_STOCK = 3
-# Default member count shown on a clean board (both teams share the count,
-# mirroring LatteCon's single `cb_memberNum`).
-DEFAULT_MEMBER_NUM = 3
-# LatteCon's left/right crew colours.
-DEFAULT_COLORS = ("#fe0000", "#0071bc")
+# The crew battle's own rules (roster size, starting stocks, default crew
+# colours) belong to the board's state, not to its widgets, so they live with
+# the writer — core/CrewBattleService.py — and are re-exported here because
+# this module's readers (and tests) have always reached them by these names.
+MAX_MEMBERS = CrewBattleService.MAX_MEMBERS
+DEFAULT_STOCK = CrewBattleService.DEFAULT_STOCK
+DEFAULT_MEMBER_NUM = CrewBattleService.DEFAULT_MEMBER_NUM
+DEFAULT_COLORS = CrewBattleService.DEFAULT_COLORS
 # Accent gold for the "currently playing" marker — matches the OBS crew
 # layout's --accent-color (layout/main.css) so the app and overlay agree.
+# Purely a paint colour, so unlike the four above it stays on the Qt side.
 ACCENT_GOLD = "#f0a500"
 
 
@@ -65,6 +68,11 @@ class AutonaCrewBattleWidget(QWidget):
 
         # Compat flag read by WebServerActions.get_swap / SwapTeams logic.
         self.teamsSwapped = False
+
+        # Every score.3 write this widget makes goes through here (headless
+        # core Step 5, instalment 4). One instance per board, like
+        # AutonaScoreboardWidget's SetLoadService.
+        self.crew = CrewBattleService(self.scoreboardNumber)
 
         # Board 3's skeleton is just the subtree root; the rest is written by
         # _writeInitialState() below. Seeded through the shared schema helper
@@ -179,10 +187,18 @@ class AutonaCrewBattleWidget(QWidget):
             QLabel(QApplication.translate("app", "表示大会名")))
         self.displayTournamentNameEdit = QLineEdit()
         self.displayTournamentNameEdit.setText(
-            StateManager.Get("tournamentInfo.displayTournamentName", "") or "")
+            StateManager.Get(
+                TournamentInfoService.Key(
+                    schema.TOURNAMENT_DISPLAY_NAME_KEY), "") or "")
+        # tournamentInfo.* is TournamentInfoService's, EVENT panel or no EVENT
+        # panel (headless core Step 4b), and typing here is the strongest of
+        # its three 表示大会名 writers: it does not disturb the "name the
+        # display last followed" ledger, so a later tournament-name edit
+        # cannot overwrite what was typed. Same wiring as the SCORE panel's
+        # row (AutonaScoreboardWidget), which is the point — the two fields
+        # are the same field.
         self.displayTournamentNameEdit.editingFinished.connect(
-            lambda: StateManager.Set(
-                "tournamentInfo.displayTournamentName",
+            lambda: TournamentInfoService.instance.SetDisplayName(
                 self.displayTournamentNameEdit.text()))
         displayNameRow.addWidget(self.displayTournamentNameEdit, 1)
         outer.addLayout(displayNameRow)
@@ -192,7 +208,7 @@ class AutonaCrewBattleWidget(QWidget):
         phaseRow = QHBoxLayout()
         phaseRow.addWidget(QLabel(QApplication.translate("app", "Phase")))
         self.phaseCombo = self._makePhaseCombo(
-            "phase", AutonaLocaleHelper.phaseNames)
+            schema.PHASE_KEY, AutonaLocaleHelper.phaseNames)
         phaseRow.addWidget(self.phaseCombo, 1)
         phaseRow.addSpacing(12)
         # Pool (phase group) is a separate state key (score.3.pool), same as
@@ -204,12 +220,13 @@ class AutonaCrewBattleWidget(QWidget):
                            for letter in ["A", "B", "C", "D"]]
                           if "{0}" in groupTemplate else [])
         self.poolCombo = self._makePhaseCombo(
-            "pool", candidates=poolCandidates)
+            schema.POOL_KEY, candidates=poolCandidates)
         phaseRow.addWidget(self.poolCombo, 1)
         phaseRow.addSpacing(12)
         phaseRow.addWidget(QLabel(QApplication.translate("app", "Match")))
         self.matchCombo = self._makePhaseCombo(
-            "match", candidates=AutonaLocaleHelper.GetMatchNameCandidates())
+            schema.MATCH_KEY,
+            candidates=AutonaLocaleHelper.GetMatchNameCandidates())
         phaseRow.addWidget(self.matchCombo, 1)
         outer.addLayout(phaseRow)
 
@@ -310,11 +327,14 @@ class AutonaCrewBattleWidget(QWidget):
 
         return group
 
-    def _makePhaseCombo(self, state_key: str, names: dict = None,
+    def _makePhaseCombo(self, field: str, names: dict = None,
                         candidates: list = None) -> QComboBox:
         # Editable combo seeded with the localized phase/round terms (so the
         # user can pick a term or type a custom value). Pass a prebuilt
         # `candidates` list (match names) or a `names` dict (phase names).
+        # `field` is one of StateSchema.SCORE_MATCH_FIELDS — the same three
+        # keys the 1v1 / team boards' match bar writes, through the same
+        # operation, so board 3 is not a second reading of what "phase" means.
         combo = QComboBox()
         combo.setEditable(True)
         combo.setMinimumWidth(110)
@@ -331,7 +351,8 @@ class AutonaCrewBattleWidget(QWidget):
 
         def write():
             if not self._building:
-                StateManager.Set(self._key(state_key), combo.currentText())
+                AutonaActions.instance.SetMatchField(
+                    self.scoreboardNumber, field, combo.currentText())
         combo.lineEdit().editingFinished.connect(write)
         combo.currentIndexChanged.connect(lambda _i: write())
         return combo
@@ -379,64 +400,67 @@ class AutonaCrewBattleWidget(QWidget):
         edit = getattr(self, "displayTournamentNameEdit", None)
         if edit is None or edit.hasFocus():
             return
-        value = StateManager.Get("tournamentInfo.displayTournamentName", "") or ""
+        value = StateManager.Get(
+            TournamentInfoService.Key(
+                schema.TOURNAMENT_DISPLAY_NAME_KEY), "") or ""
         if edit.text() != value:
             edit.setText(value)
 
     def _onBestOfChanged(self, value):
-        # _bestOfSpin.valueChanged handler. Boards 1/2 also derive
-        # best_of_text / first_to* here; crew deliberately publishes the raw
-        # value only -- those derived keys have no crew consumer, and their
-        # AutonaLocaleHelper.matchNames.format() can raise before the locale
-        # is loaded, which must not happen on this tolerant compat path.
-        StateManager.Set(self._key("best_of"), value)
+        # _bestOfSpin.valueChanged handler. The spinbox stays the entry point
+        # (same arrangement as boards 1/2); what gets written is the
+        # service's business — and for crew that is the raw key only. See
+        # CrewBattleService.SetBestOf for why the derived texts are omitted.
+        self.crew.SetBestOf(value)
 
     def _writeInitialState(self):
-        with StateManager.SaveBlock():
-            # Board-level phase / round (shown on the OBS crew overlay).
-            StateManager.Set(self._key("phase"), "")
-            StateManager.Set(self._key("match"), "")
-            StateManager.Set(self._key("best_of"), self._bestOfSpin.value())
-            n = self.playerNumber.value()
-            for side in range(2):
-                team_no = side + 1
-                StateManager.Set(self._key("team", team_no, "teamName"), "")
-                StateManager.Set(
-                    self._key("team", team_no, "color"), DEFAULT_COLORS[side])
-                StateManager.Set(self._key("team", team_no, "memberNum"), n)
-                StateManager.Set(self._key("team", team_no, "activeMember"), "0")
-                for m in range(1, MAX_MEMBERS + 1):
-                    rows = self.memberRows[side][m - 1]
-                    StateManager.Set(
-                        self._key("team", team_no, "player", m, "name"), "")
-                    StateManager.Set(
-                        self._key("team", team_no, "player", m, "stock"),
-                        rows["stock"].value())
-                self._recalcTotal(side)
+        # The launch write is the same pass as _flushAllState plus the
+        # board-level fields, so a fresh board and a just-cleared board
+        # cannot drift apart. Everything below is read off the freshly built
+        # rows, i.e. the defaults they were constructed with.
+        self._applyTotals(
+            self.crew.SeedBoardState(
+                self._snapshotTeams(), self.playerNumber.value(),
+                self._bestOfSpin.value()))
 
-    def _teamTotal(self, side: int) -> int:
-        # Sum remaining stocks only for visible members that have a name
-        # entered — unnamed roster slots don't count toward the team total.
-        n = self.playerNumber.value()
-        return sum(
-            self.memberRows[side][m]["stock"].value()
-            for m in range(n)
-            if self.memberRows[side][m]["name"].text().strip())
+    def _snapshotTeams(self) -> list:
+        """The two crews exactly as the rows currently show them.
+
+        Resolving the widget values is the Qt half; deciding what that means
+        in the state (which stocks count, what the team total is) is
+        CrewBattleService's.
+        """
+        return [
+            CrewTeam(
+                name=self.teamNameEdits[side].text(),
+                color=self.colorButtons[side].color() or "",
+                members=tuple(
+                    CrewMember(
+                        name=rows["name"].text(),
+                        stock=rows["stock"].value(),
+                        active=rows["active"].isChecked())
+                    for rows in self.memberRows[side]))
+            for side in range(2)]
+
+    def _stocks(self, side: int) -> list:
+        return [rows["stock"].value() for rows in self.memberRows[side]]
+
+    def _applyTotals(self, totals):
+        for side, total in enumerate(totals):
+            self.totalLabels[side].setText(str(total))
 
     def _recalcTotal(self, side: int):
-        team_no = side + 1
-        total = self._teamTotal(side)
-        self.totalLabels[side].setText(str(total))
-        if not self._building:
-            # Write the changed member stock(s) + the recomputed team total.
-            with StateManager.SaveBlock():
-                for m in range(MAX_MEMBERS):
-                    StateManager.Set(
-                        self._key("team", team_no, "player", m + 1, "stock"),
-                        self.memberRows[side][m]["stock"].value())
-                StateManager.Set(self._key("team", team_no, "score"), total)
-        else:
-            StateManager.Set(self._key("team", team_no, "score"), total)
+        # Stock spinbox handler: publish the column and render the total the
+        # service computed from it.
+        if self._building:
+            # Unreachable today — every stock spinbox is given its default
+            # before its valueChanged is connected — but kept as the
+            # no-broadcast counterpart of the branch below.
+            self.totalLabels[side].setText(
+                str(self.crew.PublishTotal(side + 1)))
+            return
+        self.totalLabels[side].setText(
+            str(self.crew.PublishStocks(side + 1, self._stocks(side))))
 
     # ── UI signal handlers ─────────────────────────────────────────────
 
@@ -446,30 +470,30 @@ class AutonaCrewBattleWidget(QWidget):
             for m in range(MAX_MEMBERS):
                 self.memberRows[side][m]["row"].setVisible(m < value)
         if not self._building:
-            with StateManager.SaveBlock():
-                for side in range(2):
-                    StateManager.Set(
-                        self._key("team", side + 1, "memberNum"), value)
-                    self._recalcTotal(side)
+            self._applyTotals(
+                self.crew.SetMemberNum(
+                    value, [self._stocks(side) for side in range(2)]))
 
     def _onTeamNameChanged(self, side: int):
-        StateManager.Set(
-            self._key("team", side + 1, "teamName"),
-            self.teamNameEdits[side].text())
+        # The shared operation: score.{n}.team.{t}.teamName means the same
+        # thing on all three boards.
+        AutonaActions.instance.SetTeamName(
+            self.scoreboardNumber, side + 1, self.teamNameEdits[side].text())
 
     def _onColorChanged(self, side: int, color):
         if self._building:
             return
-        StateManager.Set(self._key("team", side + 1, "color"), color or "")
+        AutonaActions.instance.SetTeamColor(
+            self.scoreboardNumber, side + 1, color)
 
     def _onMemberNameChanged(self, side: int, member: int):
-        with StateManager.SaveBlock():
-            StateManager.Set(
-                self._key("team", side + 1, "player", member, "name"),
-                self.memberRows[side][member - 1]["name"].text())
-            # Naming/clearing a slot changes which stocks count toward the
-            # team total, so recompute it.
-            self._recalcTotal(side)
+        # Naming/clearing a slot changes which stocks count toward the team
+        # total; the service owns that pairing.
+        self.totalLabels[side].setText(
+            str(self.crew.SetMemberName(
+                side + 1, member,
+                self.memberRows[side][member - 1]["name"].text(),
+                self._stocks(side))))
 
     def _onActiveToggled(self, side: int, member: int, checked: bool):
         if self._building:
@@ -485,8 +509,7 @@ class AutonaCrewBattleWidget(QWidget):
             active = member
         else:
             active = 0
-        StateManager.Set(
-            self._key("team", side + 1, "activeMember"), str(active))
+        self.crew.SetActiveMember(side + 1, active)
 
     # ── Crew command slots ─────────────────────────────────────────────
 
@@ -595,34 +618,37 @@ class AutonaCrewBattleWidget(QWidget):
             self._flushAllState()
 
     def ChangeSetData(self, data):
-        # set_route() can route best-of/phase/match here. Crew v1 has no such
-        # UI, so persist the generic fields if present and ignore the rest —
-        # tolerant by design so generic callers don't crash board 3.
-        if not isinstance(data, dict):
-            return
+        # set_route() / post_score() can route best-of/phase/match here. Crew
+        # has no set-loading UI, so the generic fields are persisted if
+        # present and the rest is ignored — tolerant by design so generic
+        # callers don't crash board 3.
+        #
+        # The rules are CrewBattleService's, and they are deliberately NOT
+        # SetLoadService's: see that module's docstring for the five readings
+        # that differ and why unifying them would be a silent change. A
+        # payload carrying nothing board 3 understands (a set load's
+        # entrants, a score) leaves the block empty, which costs no cycle.
         with StateManager.SaveBlock():
-            if data.get("round_name") is not None:
-                StateManager.Set(self._key("match"), data.get("round_name"))
-            if data.get("tournament_phase") is not None:
-                StateManager.Set(self._key("phase"), data.get("tournament_phase"))
-            if data.get("tournament_pool") is not None:
-                StateManager.Set(self._key("pool"), data.get("tournament_pool"))
-            if data.get("bestOf") is not None:
+            self.crew.ApplyMatchInfo(data)
+            bestOf = self.crew.BestOfFromSetData(data)
+            if bestOf is not None:
                 # Route through the spinbox (boards 1/2 do the same) so it
                 # stays in sync and a later reset actually clears the value.
-                self._bestOfSpin.setValue(int(data.get("bestOf")))
+                self._bestOfSpin.setValue(bestOf)
 
     # ── X (Twitter) post ───────────────────────────────────────────────
 
     def _teamMemberNames(self, team_n: int) -> list[str]:
         # Named members within the team's visible roster (memberNum), in order.
         member_num = int(
-            StateManager.Get(self._key("team", team_n, "memberNum"))
+            StateManager.Get(
+                self._key("team", team_n, schema.CREW_MEMBER_NUM_KEY))
             or MAX_MEMBERS)
         names = []
         for m in range(1, member_num + 1):
             name = (StateManager.Get(
-                self._key("team", team_n, "player", m, "name")) or "").strip()
+                self._key("team", team_n, "player", m,
+                          schema.PLAYER_TAG_KEY)) or "").strip()
             if name:
                 names.append(name)
         return names
@@ -634,8 +660,10 @@ class AutonaCrewBattleWidget(QWidget):
         try:
             tournament_name = StateManager.Get(
                 "tournamentInfo.tournamentName", "") or ""
-            phase = (StateManager.Get(self._key("phase")) or "").strip()
-            match = (StateManager.Get(self._key("match")) or "").strip()
+            phase = (StateManager.Get(
+                self._key(schema.PHASE_KEY)) or "").strip()
+            match = (StateManager.Get(
+                self._key(schema.MATCH_KEY)) or "").strip()
 
             # Validate: both teams need a member name and a round name is set.
             missing = []
@@ -659,7 +687,8 @@ class AutonaCrewBattleWidget(QWidget):
 
             def team_line(team_n):
                 team_name = (StateManager.Get(
-                    self._key("team", team_n, "teamName")) or "").strip()
+                    self._key("team", team_n,
+                              schema.TEAM_NAME_KEY)) or "").strip()
                 member_str = " / ".join(self._teamMemberNames(team_n))
                 if team_name and member_str:
                     return f"{team_name} ({member_str})"
@@ -689,30 +718,10 @@ class AutonaCrewBattleWidget(QWidget):
     # ── internal ───────────────────────────────────────────────────────
 
     def _flushAllState(self):
-        # Write the full board snapshot from the widgets to StateManager.
-        # Call inside a SaveBlock for a single broadcast.
-        n = self.playerNumber.value()
-        for side in range(2):
-            team_no = side + 1
-            StateManager.Set(
-                self._key("team", team_no, "teamName"),
-                self.teamNameEdits[side].text())
-            StateManager.Set(
-                self._key("team", team_no, "color"),
-                self.colorButtons[side].color() or "")
-            StateManager.Set(self._key("team", team_no, "memberNum"), n)
-            active = 0
-            for m, rows in enumerate(self.memberRows[side], start=1):
-                StateManager.Set(
-                    self._key("team", team_no, "player", m, "name"),
-                    rows["name"].text())
-                StateManager.Set(
-                    self._key("team", team_no, "player", m, "stock"),
-                    rows["stock"].value())
-                if rows["active"].isChecked():
-                    active = m
-            StateManager.Set(
-                self._key("team", team_no, "activeMember"), str(active))
-            total = self._teamTotal(side)
-            self.totalLabels[side].setText(str(total))
-            StateManager.Set(self._key("team", team_no, "score"), total)
+        # Hand the finished board to the service after a bulk operation
+        # (swap / reset / clear) rearranged the rows with their signals
+        # blocked. One broadcast, so a swap never puts a half-swapped board
+        # on the stream.
+        self._applyTotals(
+            self.crew.PublishBoard(
+                self._snapshotTeams(), self.playerNumber.value()))

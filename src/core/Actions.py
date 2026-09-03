@@ -189,6 +189,14 @@ class AutonaActions:
         nothing when the value is unchanged -- and the field writes below are
         reached from paths that deliberately re-assert values (ClearScore,
         ResetAllInputs, a re-loaded set), so it has to be explicit here.
+
+        Board 3 (crew) has none of that -- score.3 is not held -- but calls
+        into `SetMatchField` / `SetTeamName` land here too, and for that board
+        the same guard earns a different thing: an unchanged write still
+        costs a full save cycle (an ./out rewrite plus an export thread), so
+        skipping it avoids a wasted cycle rather than a false-dirty held
+        prefix. `CrewBattleService._SetIfChanged` states this reading
+        directly; this docstring only had the board 1/2 one.
         """
         if StateManager.Get(key, None) == value:
             return False
@@ -268,6 +276,12 @@ class AutonaActions:
         clearing it would render a transparent team strip nobody asked for.
         Resolving a game's preset color index to a hex string stays on the Qt
         side -- that lookup reads AutonaGameAssetManager's color model.
+
+        `board` is not validated (unlike `AdjustScore` / `ResetScore`'s
+        `SCORE_BOARDS` check): this, `SetTeamName` and `SetMatchField` are
+        the entry points a crew (board 3) uses too, so an out-of-range board
+        would have to mean a caller bug rather than "not this board's turn",
+        and every caller is a widget that already knows which board it is.
         """
         board = self._asInt(board, 0)
         team = self._asInt(team, 0)
@@ -304,7 +318,9 @@ class AutonaActions:
         (`AutonaScoreboardWidget.ExportTeamLogo` ->
         `SetLoadService.PublishTeamLogo`) does that, which is the arrangement
         this replaced and the one the set-load path pairs into
-        `ApplyTeamName`.
+        `ApplyTeamName`. That second handler exists only on boards 1/2 --
+        board 3's team name field has always called just this one, and a
+        crew has no logo to resolve.
         """
         team = self._asInt(team, 0)
         if team not in (1, 2):
@@ -407,11 +423,15 @@ class AutonaActions:
         """Set one of the match bar's three fields. True if it applied.
 
         `field` is one of `StateSchema.SCORE_MATCH_FIELDS`, which is the
-        board-level half of what used to be objectName-derived. The
+        board-level half of what used to be objectName-derived. Boards 1/2's
         set-loading path writes the same keys through
-        `SetLoadService.ApplyMatchInfo`, which additionally decides *whether*
-        a payload's blank value means "clear" or "not carried" -- a question
-        an operator typing into the combo does not have.
+        `SetLoadService.ApplyMatchInfo`; board 3's does through
+        `CrewBattleService.ApplyMatchInfo`. Both additionally decide
+        *whether* a payload's blank value means "clear" or "not carried" --
+        a question an operator typing into the combo does not have -- and the
+        two disagree with each other on that reading (see the module
+        docstrings), which is exactly why they stayed separate rather than
+        folding into this method.
         """
         if field not in schema.SCORE_MATCH_FIELDS:
             logger.warning(f"SetMatchField: unknown field {field}")

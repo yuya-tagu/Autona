@@ -177,11 +177,12 @@ TOP8_MATCH_IDS = tuple(top8.MATCH_IDS)
 # it always was -- tests/test_objectname_keypath_contract.py now pins that the
 # two spellings agree.
 
-# The match bar's three editable combos (src/layout/AutonaScoreboardScore.ui).
-# Boards 1 and 2 only: the crew board has no match bar. Named individually
-# (not just indexed into the tuple) for the same reason as TEAM_NAME_KEY /
-# TEAM_LOSERS_KEY below: AutonaScoreboardWidget looks its widgets up *by*
-# these constants (findChild), not by SCORE_MATCH_FIELDS[i].
+# The match bar's three editable combos (src/layout/AutonaScoreboardScore.ui
+# on boards 1 and 2; the crew board builds its own three in code and writes
+# the same keys). Named individually (not just indexed into the tuple) for
+# the same reason as TEAM_NAME_KEY / TEAM_LOSERS_KEY below:
+# AutonaScoreboardWidget looks its widgets up *by* these constants
+# (findChild), not by SCORE_MATCH_FIELDS[i].
 PHASE_KEY = "phase"
 POOL_KEY = "pool"
 MATCH_KEY = "match"
@@ -303,16 +304,28 @@ SCORE_PLAYER_KEYS = (
 # score.3 only. The crew board (AutonaCrewBattleWidget) writes the team and
 # player keys above, plus a roster on top of them: `memberNum` is how many
 # member rows are visible, `activeMember` the 1-based index of the member
-# currently playing ("0" = nobody), and each member carries its own remaining
-# `stock` (the team's `score` is the sum of the named members' stocks).
-# Boards 1 and 2 never write any of these.
+# currently playing ("0" = nobody, and it is published as a *string*), and
+# each member carries its own remaining `stock` (the team's `score` is the
+# sum of the named members' stocks). Boards 1 and 2 never write any of these.
+#
+# Named individually, and consumed by `core/CrewBattleService.py`, for the
+# same reason the families above are: the crew board built these key paths
+# from string literals spelled out at each of its write sites, which is the
+# half-converted state Step 5 exists to end. Unlike the other families they
+# were never derived from a Qt objectName -- the crew rows are built in code
+# and have no objectName at all -- so there is nothing here for
+# tests/test_objectname_keypath_contract.py to cross-check against a .ui.
+CREW_MEMBER_NUM_KEY = "memberNum"
+CREW_ACTIVE_MEMBER_KEY = "activeMember"
+CREW_STOCK_KEY = "stock"
+
 SCORE_CREW_TEAM_KEYS = (
-    "memberNum",
-    "activeMember",
+    CREW_MEMBER_NUM_KEY,
+    CREW_ACTIVE_MEMBER_KEY,
 )
 
 SCORE_CREW_PLAYER_KEYS = (
-    "stock",
+    CREW_STOCK_KEY,
 )
 
 # Board-independent, written from the loaded set and read by AutonaStatsUtil

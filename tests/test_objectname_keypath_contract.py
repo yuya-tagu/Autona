@@ -271,12 +271,14 @@ def test_the_event_panel_does_not_write_the_state_directly():
     and an operator typing. A StateManager.Set here would be a second one for
     those fields, and the display-name follow rule is stateful enough that
     two writers disagreeing is a silent bug rather than a visible one.
-    (Two other tournamentInfo.* writers exist deliberately outside this
+    (One other tournamentInfo.* writer exists deliberately outside this
     panel and outside the service: AutonaFeatureColors:105's themeColor/
-    accentColor -- a static, non-objectName-derived key -- and
-    AutonaCrewBattleWidget:184's displayTournamentName -- crew board's
-    write path is unmigrated. Neither is this panel's file, so this
-    tripwire is unaffected.) Reads (`StateManager.Get`, which
+    accentColor -- a static, non-objectName-derived key. It is not this
+    panel's file, so this tripwire is unaffected. The crew board used to be
+    a second one; its displayTournamentName write goes through
+    TournamentInfoService.SetDisplayName since Step 5's crew instalment,
+    which is what test_the_crew_board_does_not_write_the_state_directly
+    below now keeps true.) Reads (`StateManager.Get`, which
     _SyncFieldsFromState needs) are deliberately not covered: rendering the
     state is what this panel is for.
     """
@@ -303,6 +305,28 @@ def test_the_scoreboard_does_not_write_the_state_directly():
         f"{sorted(node.lineno for node in calls)}). score.* keypaths come "
         "from StateSchema constants -- route the write through the "
         "appropriate service instead of reverting this test.")
+
+
+def test_the_crew_board_does_not_write_the_state_directly():
+    """The crew board's completion condition, as the same ratchet.
+
+    Board 3 never derived a key from an objectName -- its rows are built in
+    code and carry none -- so what it had instead was thirty hand-built
+    keypath literals spread across a launch seed, seven signal handlers, a
+    tolerant set-data path and a full-board flush. They are
+    core/CrewBattleService.py's now (plus AutonaActions for the three keys
+    board 3 shares with the others, and TournamentInfoService for 表示大会名),
+    and this is what stops the thirty-first from being written here.
+
+    Reads are deliberately not covered: PostToX builds its tweet body out of
+    the state, and _SyncTeamColors renders the team colour.
+    """
+    calls = _state_write_calls("src/AutonaCrewBattleWidget.py")
+    assert calls == [], (
+        "AutonaCrewBattleWidget writes StateManager directly (line(s) "
+        f"{sorted(node.lineno for node in calls)}). score.3 belongs to "
+        "core/CrewBattleService.py -- add a method there and call it through "
+        "self.crew instead of reverting this test.")
 
 
 def test_the_scoreboard_no_longer_derives_keypaths_from_objectname():
