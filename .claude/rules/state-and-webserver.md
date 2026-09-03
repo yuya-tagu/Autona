@@ -75,8 +75,13 @@ paths:
 - 未移行（Qt 側が書き手のまま。理由は `Actions.py` の docstring）: チームスワップ操作
   そのもの（選手側は**ウィジェット間の値コピー**で、選手フィールドの正本が
   ウィジェットにある限り core に出せない。`teamsSwapped` は `SetTeamsSwapped` が
-  ミラーを publish するだけで正本はウィジェット属性）/ クルーボードのスコアリセット・
-  `ChangeSetData`
+  ミラーを publish するだけで正本はウィジェット属性）
+- **クルーボード（board 3）は `CrewBattleService` が書き手**（Step 5 第 4 弾）。
+  ただし *入口* のうち board 1/2 と語義が同じもの — チーム名（`SetTeamName`）・
+  チームカラー（`SetTeamColor`）・match バーの 3 combo（`SetMatchField`）— は
+  `AutonaActions` を呼ぶ。`AdjustScore` / `ResetScore` は board 3 では今も no-op で、
+  クルーの「リセット」= 全員ストック満タン復元はウィジェットが入口
+  （`WebServerActions.reset_scores` の `@gui_thread_sync` はそのために残っている）
 - **`SetBestOf` はスピンボックス主導のまま**（state 先行に反転していない）。
   `AutonaScoreboardWidget._onBestOfChanged` が 1 つの `SaveBlock` で
   `SetBestOf` → `individualGameTracker.SetStageCount(value)` を呼ぶ。反転すると
@@ -121,8 +126,9 @@ paths:
 | `src/core/StatsService.py` | `AutonaScoreboardWidget.stats.service` | 統計の取得可否判断・アップセット計算・`last_sets`/`history_sets`/`recent_sets`/`upset_factor` の書き込み |
 | `src/core/GameTrackerService.py` | `AutonaIndividualGameTracker.service` | ステージ勝敗の記録（`score.{n}.stages.*`）・ステージ⇔スコアの相互整合・`writingScore` ガード |
 | `src/core/SetLoadService.py` | `AutonaScoreboardWidget.setLoad` | セット読込の正規化（ラウンド/フェーズ/プール・スコア・敗者フラグ・チーム名とロゴ・`bracket_type`・追従中セット）。スワップ後の面の解決は `DisplayTeam()` が唯一の正本 |
-| `src/core/TournamentInfoService.py` | `TournamentInfoService.instance`（`bootstrap_core()` 生成） | `tournamentInfo.*` の書き込み全部（provider ペイロードの適用・**EVENT タブ入力欄の `Set{Text,Number,Date}Field`**・表示大会名の 3 系統の上書き規則・`logoVersion`・起動時シード）。EVENT パネル不在でも動くことが遅延構築の前提。**両方向が同じ 3 操作を通る**（provider 側の `_ApplyKey` も入力側と同じメソッドを呼ぶ）。ただし `AutonaFeatureColors:105` の `themeColor`/`accentColor`（objectName 由来ではない静的キー）と `AutonaCrewBattleWidget:184` の `displayTournamentName`（クルーボード側が未移行）の 2 件は意図的にスコープアウトしており本サービスを通らない |
+| `src/core/TournamentInfoService.py` | `TournamentInfoService.instance`（`bootstrap_core()` 生成） | `tournamentInfo.*` の書き込み全部（provider ペイロードの適用・**EVENT タブ入力欄の `Set{Text,Number,Date}Field`**・表示大会名の 3 系統の上書き規則・`logoVersion`・起動時シード）。EVENT パネル不在でも動くことが遅延構築の前提。**両方向が同じ 3 操作を通る**（provider 側の `_ApplyKey` も入力側と同じメソッドを呼ぶ）。ただし `AutonaFeatureColors:105` の `themeColor`/`accentColor`（objectName 由来ではない静的キー）だけは意図的にスコープアウトしており本サービスを通らない。**表示大会名の入力欄は SCORE パネルとクルーボードの 2 箇所にあり、どちらも `SetDisplayName` を呼ぶ**（クルー側は Step 5 第 4 弾で合流） |
 | `src/core/PlayerService.py` | `AutonaBasePlayerWidget.player`（選手ウィジェット 1 枚につき 1 個。path に束縛） | 選手スロット配下の書き込み全部（入力フィールド・seed/birthday・国/州の選択行・`mergedName`/`mergedOnlyName`・アバターとスポンサーロゴ・キャラスロット・`city`/`id`・スロット削除）。`BoardNumber()` が `score.{N}` と `player_editor.1` を見分ける |
+| `src/core/CrewBattleService.py` | `AutonaCrewBattleWidget.crew` | クルーボード（board 3）の書き込み全部（起動シード・メンバー名/ストック・`memberNum`/`activeMember`・**クルー合計の算出**（名前が入った表示中メンバーの stock 合計 → `team.{t}.score`）・crew 版のセットデータ正規化・`best_of`（raw のみ）・スワップ/リセット/クリア後の全体 publish）。合計は**state から算出**する（旧実装はウィジェットの値を合計していた） |
 
 - **`SetLoadService` はステージ行を書かない**。行数と `stage_widget_list` の長さを
   一致させているのは `GameTrackerService.SetStageCount()` だけなので、読み込んだ
