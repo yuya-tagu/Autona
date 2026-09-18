@@ -167,7 +167,7 @@ layout/
         └── runtime.js
 ```
 
-各デザインは `http://127.0.0.1:5000/layout/custom/{slug}/index.html` でも
+各デザインは `http://127.0.0.1:5107/layout/custom/{slug}/index.html` でも
 直接確認できます。保存後はBOARDタブのデザイン一覧に `Custom: {slug}` として
 表示されます。
 

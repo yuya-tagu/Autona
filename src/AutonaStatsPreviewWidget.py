@@ -32,7 +32,7 @@ from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from loguru import logger
 
-from .SettingsManager import SettingsManager
+from .SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 from .AutonaLayoutPreview import AutonaLayoutPreview, ObsUrl
 from .Helpers.AutonaNetworkHelper import GetWebServerHost
 from .AutonaFeatureColors import FEATURE_STATS, MakeFeatureColorCard
@@ -193,7 +193,7 @@ class AutonaStatsPreviewWidget(QDockWidget):
 
     # ── Companion macro ──────────────────────────────────────────────
     def _apiBaseUrl(self):
-        port = SettingsManager.Get("general.webserver_port", 5000)
+        port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
         return f"http://{GetWebServerHost()}:{port}/api/v1"
 
     def _requestUrl(self):

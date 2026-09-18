@@ -2,6 +2,14 @@ import os
 import orjson
 from ..Helpers.AutonaDictHelper import *
 
+# Default port for the built-in web server (OBS browser sources, Web UI,
+# external control API). Deliberately NOT 5000: that is Flask's own default and
+# the port the upstream TournamentStreamHelper family listens on, so on a
+# streaming PC running several tools at once the collision is real. 5107 is
+# unassigned by IANA and has no common consumer use.
+# Keep in sync with web/src/env.js (dev fallback).
+DEFAULT_WEBSERVER_PORT = 5107
+
 
 class SettingsManager:
     settings = {}

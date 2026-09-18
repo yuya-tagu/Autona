@@ -17,7 +17,7 @@ from .AutonaSelectStationWindow import AutonaSelectStationWindow
 from .AutonaIndividualGameTracker import AutonaIndividualGameTracker
 
 from .AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
-from .SettingsManager import SettingsManager
+from .SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 from .StateManager import StateManager
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
@@ -226,7 +226,7 @@ class AutonaScoreboardWidget(QWidget):
         # board 1 (SCORE/1v1) → /scoreboard, board 2 (TEAM) → /team. Both
         # render from the same React page parameterized by scoreboardNumber.
         webScoreboardPath = "team" if self.scoreboardNumber == 2 else "scoreboard"
-        self.webScoreboardUrl = f"http://{GetWebServerHost()}:{SettingsManager.Get('general.webserver_port', 5000)}/{webScoreboardPath}"
+        self.webScoreboardUrl = f"http://{GetWebServerHost()}:{SettingsManager.Get('general.webserver_port', DEFAULT_WEBSERVER_PORT)}/{webScoreboardPath}"
         self.btOpenWebScoreboard = QPushButton("ブラウザ版を開く")
         self.btOpenWebScoreboard.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
         self.btOpenWebScoreboard.clicked.connect(lambda: webbrowser.open(self.webScoreboardUrl))
