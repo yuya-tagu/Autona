@@ -452,7 +452,7 @@ autonaApp (session)
 |------|------|
 | `bootstrap_core()` はプロセス内 1 回きり（再入ガード） | L2 は「1 プロセス = 1 ブート + 多数のテスト」。テスト間の独立性は function スコープの `resetState` fixture（`StateManager.Unset("score")` → `EnsureScoreboard` 再構築）で担保 |
 | グローバルホットキーを OS に登録すると実機と衝突 | `hotkeys.enabled=false` を合成 settings に。加えて `AutonaHotkeys.UiMounted` は L2 では呼ばない |
-| WebServer がポート 5000 を掴む | L2 では WebServer を構築しない（L3 は `run()` を呼ばず `test_client()` のみ） |
+| WebServer が既定ポート 5107 を掴む | L2 では WebServer を構築しない（L3 は `run()` を呼ばず `test_client()` のみ） |
 | 実運用の `out/` `user_data/` を汚染しうる | 全て使い捨て cwd。**「テスト後にプロジェクト直下の `out/` が変化していないこと」を検証するガードテストを入れる** |
 | pytest-xdist 並列化すると Qt が壊れる | 当面導入しない。3 分に収まる想定 |
 
@@ -476,7 +476,7 @@ L4 は `main.py` を使わず、サブプロセス内で `QApplication` → `boo
 
 - `STARTUP phase=` ログが所定の段階まで出る
 - `out/program_state.json` が生成され妥当な JSON である
-- WebServer が指定ポート（5000 ではない）で応答する
+- WebServer が指定ポート（既定の 5107 ではない）で応答する
 - ログに `ERROR` / 未捕捉例外が出ていない ← **BUG-1 はここで恒久的に捕まる**
 
 ---

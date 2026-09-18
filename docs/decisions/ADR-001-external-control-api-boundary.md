@@ -26,7 +26,7 @@ Companion / Stream Deck 連携、外部制御 API、OBS 連携拡張を予定し
 - 同じ操作が **HTTP ルートと Socket.IO イベントの両方**で二重定義されている（保守上、片方だけ直すと不整合）。
 - 全ルートは **`WebServerActions` へ委譲**。状態変更は Qt Signal emit → widget → **`StateManager` 単一経路**
   （直接 dict 書き込みなし、多くが `@gui_thread_sync` で GUI スレッドに直列化）。
-- **既定ポート = `5000`** / **Web UI ルート = `/`・`/scoreboard`・`/team`・`/web`**（確定）。
+- **既定ポート = `5000`** / **Web UI ルート = `/`・`/scoreboard`・`/team`・`/web`**（確定）。（→ 既定ポートは 2026-09-19 に `5107` へ変更。末尾 Addendum 参照）
 - **現状の制御面は `0.0.0.0` バインド + 認証なし + CORS 全許可**。既に LAN 内から全操作が可能。
 - **X / Bluesky 投稿は UI ボタン専用**（Web/WS 未露出）。
 - OBS-websocket は使わない方針（ROADMAP で検討外と明記）。Autona は OBS に接続しない。
@@ -133,3 +133,19 @@ LAN 内運用を前提に**既存の挙動を引き継ぐ**。新 API も認証�
 - Companion / Stream Deck の要求プロトコルが確定したとき → I/F 詳細（D8）を調整。
 - X / Bluesky など外部送信操作を API 化する需要が固まったとき（初回除外を見直し）。
 - 既存 HTTP/WS 二重定義の保守負荷が問題化したとき → 既存ルートの整理を別 ADR で検討。
+
+## Addendum (2026-09-19): 既定ポートを `5000` → `5107` に変更
+
+上記 Context / Decision に記録した **既定ポート `5000` は `5107` に変更**した（正本は
+`src/core/SettingsManager.py` の `DEFAULT_WEBSERVER_PORT`）。
+
+- 理由: `5000` は Flask の既定ポートであり、上流 TournamentStreamHelper とその派生も
+  `5000` を listen する。配信 PC は複数ツールを同時起動するため、競合が実際に起きる。
+  `5107` は IANA 未割当で一般的な利用がない。
+- 既存インストールも新既定へ移行する（利用者数が少なく告知で足りるため、マイグレーション
+  コードや一度きりのダイアログは置かない）。`settings.json` に `general.webserver_port` を
+  明示保存済みのユーザーはその値を維持する（意図した挙動）。
+- **本 ADR のルーティング決定（`/api/v1/` の切り方・既存ルート温存・D1〜D8）は変更なし。**
+  変わるのは既定ポート番号のみ。
+- 運用側の影響（OBS ブラウザソース URL / ASS マクロ URL の書き換え）は
+  [../operations/runtime-operations.md](../operations/runtime-operations.md) を参照。

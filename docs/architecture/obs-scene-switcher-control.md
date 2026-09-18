@@ -153,7 +153,7 @@ Request の `d` = `{ requestType, requestId, requestData }`。応答 = `{ reques
   "requestType": "SetInputSettings", "requestId": "url-1",
   "requestData": {
     "inputName": "Scoreboard Overlay",
-    "inputSettings": { "url": "http://127.0.0.1:5000/scoreboard?board=1" },
+    "inputSettings": { "url": "http://127.0.0.1:5107/scoreboard?board=1" },
     "overlay": true
   }
 }}
@@ -206,7 +206,7 @@ client = obs.ReqClient(host="localhost", port=4455, password="****", timeout=3)
 client.set_current_program_scene("Match")
 client.set_input_settings(
     name="Scoreboard Overlay",
-    settings={"url": "http://127.0.0.1:5000/scoreboard?board=1"},
+    settings={"url": "http://127.0.0.1:5107/scoreboard?board=1"},
     overlay=True,
 )
 ```
@@ -280,7 +280,7 @@ Run + `curl` は不要になった。
 
 ```text
 # ASS の HTTP action 例（スコア +1）
-URL:          http://127.0.0.1:5000/api/v1/scoreboards/1/teams/1/score:adjust
+URL:          http://127.0.0.1:5107/api/v1/scoreboards/1/teams/1/score:adjust
 Method:       POST
 Body:         {"delta":1}
 Content-Type: application/json  ← デフォルトのまま

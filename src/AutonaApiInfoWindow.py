@@ -26,7 +26,7 @@ from qtpy.QtCore import *
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 
-from .SettingsManager import SettingsManager
+from .SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 from .Workers import Worker
 from .Helpers.AutonaNetworkHelper import GetWebServerHost
 
@@ -129,7 +129,7 @@ class AutonaApiInfoWindow(QDialog):
 
     # ── Connection info ──────────────────────────────────────────────────
     def _baseUrl(self):
-        port = SettingsManager.Get("general.webserver_port", 5000)
+        port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
         return f"http://{GetWebServerHost()}:{port}/api/v1"
 
     def _buildConnectionGroup(self):
@@ -170,7 +170,7 @@ class AutonaApiInfoWindow(QDialog):
         return group
 
     def _refreshBaseUrl(self):
-        port = SettingsManager.Get("general.webserver_port", 5000)
+        port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
         self.baseUrlField.setText(self._baseUrl())
         self.portLabel.setText(_tr("Port") + f": {port}")
         if SettingsManager.Get("general.webserver_listen_lan", False):
@@ -392,7 +392,7 @@ class AutonaApiInfoWindow(QDialog):
 
         # Resolve against the local server (always reachable on loopback even
         # if the Base URL shows the LAN address).
-        port = SettingsManager.Get("general.webserver_port", 5000)
+        port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
         url = f"http://127.0.0.1:{port}/api/v1{path}"
 
         self.sendBtn.setEnabled(False)

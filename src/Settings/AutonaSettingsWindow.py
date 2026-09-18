@@ -1,6 +1,7 @@
 from qtpy.QtCore import *
 from qtpy.QtWidgets import *
 from .SettingsWidget import SettingsWidget
+from ..SettingsManager import DEFAULT_WEBSERVER_PORT
 from ..AutonaHotkeys import AutonaHotkeys
 from ..Helpers.AutonaVersionHelper import add_beta_label
 from ..Helpers.AutonaLocaleHelper import AutonaLocaleHelper
@@ -44,7 +45,7 @@ class AutonaSettingsWindow(QDialog):
                 "settings.general", "Webserver Port (takes effect on next restart)"),
             "webserver_port",
             "spinbox",
-            5000
+            DEFAULT_WEBSERVER_PORT
         ))
 
         generalSettings.append((

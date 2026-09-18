@@ -600,8 +600,8 @@
         <translation>LAN アクセスは無効です。API にはこの PC からのみ接続できます。有効にするには 設定 → 一般 で設定してください（要再起動）。</translation>
     </message>
     <message>
-        <source>OBS must run on this PC, or on the same LAN.</source>
-        <translation>OBS はこの PC、または同一 LAN 上で実行してください。</translation>
+        <source>OBS must run on this PC. For OBS on another PC on the same LAN, replace 127.0.0.1 with this PC's IP address.</source>
+        <translation>OBS はこの PC で実行してください。同一 LAN 上の別 PC の OBS から使う場合は、127.0.0.1 をこの PC の IP アドレスに置き換えてください。</translation>
     </message>
     <message>
         <source>LAN access: disabled — OBS must run on this PC. To use OBS on another PC, enable it under Settings → General (restart required).</source>

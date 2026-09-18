@@ -185,10 +185,10 @@ SocketIO/ポーリング不使用。Python から `initResult(payload)` を直�
 | MIME | 自動判定 (.js → text/javascript, .png → image/apng) |
 
 アクセス例:
-- `http://localhost:5000/layout/scoreboard/arms.html`
-- `http://localhost:5000/layout/include/globals.js`
-- `http://localhost:5000/layout/fonts/Saira/Saira-Bold.ttf`
-- `http://localhost:5000/layout/main.css`
+- `http://localhost:5107/layout/scoreboard/arms.html`
+- `http://localhost:5107/layout/include/globals.js`
+- `http://localhost:5107/layout/fonts/Saira/Saira-Bold.ttf`
+- `http://localhost:5107/layout/main.css`
 
 ---
 

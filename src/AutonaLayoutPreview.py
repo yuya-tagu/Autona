@@ -20,7 +20,7 @@ from qtpy.QtGui import QPainter, QPixmap
 from qtpy.QtWebEngineWidgets import QWebEngineView
 from qtpy.QtWebEngineCore import QWebEngineSettings
 
-from .SettingsManager import SettingsManager
+from .SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 from . import ui_constants as UI
 
 LAYOUT_DIR = "layout"
@@ -66,7 +66,7 @@ def MarkWebServerReady():
 def ObsUrl(layout_name, entry=DEFAULT_ENTRY):
     """Browser-source URL for a layout, for panels that show it before
     (or without) instantiating a preview."""
-    port = SettingsManager.Get("general.webserver_port", 5000)
+    port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
     return (f"http://localhost:{port}/{LAYOUT_DIR}/"
             f"{layout_name}/{entry}")
 
@@ -362,7 +362,7 @@ class AutonaLayoutPreview(QFrame):
         self._LoadNow()
 
     def _LoadNow(self):
-        port = SettingsManager.Get("general.webserver_port", 5000)
+        port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
         url = (f"http://127.0.0.1:{port}/{LAYOUT_DIR}/"
                f"{self.layout_name}/{self.entry}")
         self._loadRetries = 0

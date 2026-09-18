@@ -23,7 +23,7 @@ from .StateManager import StateManager
 from .StateManagerBridge import StateManagerBridge
 from .AutonaWebServerActions import WebServerActions
 from .AutonaScoreboardManager import AutonaScoreboardManager
-from .SettingsManager import SettingsManager
+from .SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 from .AutonaDesignerService import (
     AutonaDesignerService,
     DesignerProjectError,
@@ -195,10 +195,10 @@ def _build_web_app():
         return WebServer.actions.get_scoreboard(scoreboardNumber)
 
     # Dynamic endpoint to allow flexible sets of information
-    # Ex. http://192.168.1.2:5000/set?best-of=5
+    # Ex. http://192.168.1.2:5107/set?best-of=5
     #
     # Test Scenario that was used
-    # Ex. http://192.168.4.34:5000/set?best-of=5&phase=Top 32&match=Winners Finals
+    # Ex. http://192.168.4.34:5107/set?best-of=5&phase=Top 32&match=Winners Finals
     @app.route('/scoreboard<scoreboardNumber>-set')
     def set_route(scoreboardNumber):
         return WebServer.actions.set_route(
@@ -794,7 +794,7 @@ class WebServer(QThread):
         # a fresh install never exposes the unauthenticated control surface.
         self.listen_lan = SettingsManager.Get("general.webserver_listen_lan", False)
         self.host_name = "0.0.0.0" if self.listen_lan else "127.0.0.1"
-        self.port = SettingsManager.Get("general.webserver_port", 5000)
+        self.port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
 
     # ── Delta coalescing ─────────────────────────────────────────
     # Without throttling, every StateManager.Set outside a SaveBlock

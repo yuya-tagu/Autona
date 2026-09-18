@@ -21,7 +21,7 @@ from qtpy.QtWidgets import *
 
 import json
 
-from .SettingsManager import SettingsManager
+from .SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 from .Helpers.AutonaNetworkHelper import GetWebServerHost
 
 
@@ -131,7 +131,7 @@ class AutonaIntegrationGuideWindow(QDialog):
 
     # ── Connection info ──────────────────────────────────────────────────
     def _baseUrl(self):
-        port = SettingsManager.Get("general.webserver_port", 5000)
+        port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
         return f"http://{GetWebServerHost()}:{port}/api/v1"
 
     def _buildConnectionGroup(self):
@@ -165,7 +165,7 @@ class AutonaIntegrationGuideWindow(QDialog):
         return group
 
     def _refresh(self):
-        port = SettingsManager.Get("general.webserver_port", 5000)
+        port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
         self.baseUrlField.setText(self._baseUrl())
         self.portLabel.setText(_tr("Port") + f": {port}")
         if SettingsManager.Get("general.webserver_listen_lan", False):

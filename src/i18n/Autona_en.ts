@@ -598,8 +598,8 @@
         <translation>LAN access is disabled; the API is reachable from this PC only. Enable it under Settings → General (restart required).</translation>
     </message>
     <message>
-        <source>OBS must run on this PC, or on the same LAN.</source>
-        <translation>OBS must run on this PC, or on the same LAN.</translation>
+        <source>OBS must run on this PC. For OBS on another PC on the same LAN, replace 127.0.0.1 with this PC's IP address.</source>
+        <translation>OBS must run on this PC. For OBS on another PC on the same LAN, replace 127.0.0.1 with this PC's IP address.</translation>
     </message>
     <message>
         <source>LAN access: disabled — OBS must run on this PC. To use OBS on another PC, enable it under Settings → General (restart required).</source>

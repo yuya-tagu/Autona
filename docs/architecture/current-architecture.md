@@ -98,7 +98,7 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
 |------|------|---------|
 | 完全な HTTP/WS ルート一覧 | HTTP 約 45 + 対応 Socket.IO を棚卸し済み ✅ | [external-control-api-candidates.md](external-control-api-candidates.md) §3 |
 | 外部制御 API | `/api/v1/` 実装済み ✅ | [../../src/AutonaApiV1.py](../../src/AutonaApiV1.py) |
-| 既定 Web サーバーポート | `SettingsManager.Get("general.webserver_port", 5000)` = **5000**。設定で変更可 ✅ | [../../src/AutonaWebServer.py](../../src/AutonaWebServer.py) |
+| 既定 Web サーバーポート | `SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)` = **5107**（2026-09-19 に 5000 から変更。ADR-001 Addendum 参照）。設定で変更可 ✅ | [../../src/AutonaWebServer.py](../../src/AutonaWebServer.py) |
 | Web UI ルート | `/`・`/web`・`/scoreboard`（board1）・`/team`（board2）✅ | [../../src/AutonaWebServer.py](../../src/AutonaWebServer.py) |
 | 残課題 | LAN 外運用時の認証/認可、配信中判定による危険操作ガード、`set_team_data` の API 化要否 | ADR-001 Revisit 条件 / API spec Open items |
 
@@ -126,7 +126,7 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
 2. **StateManager** — 状態変更の単一経路。外部からの書き込みは必ずここを通す（バイパス禁止）
 3. **シングルトン生成順** — 新サービス（外部制御リスナ等）は [src/bootstrap.py](../../src/bootstrap.py) の `bootstrap_core()` に追加する。順序制約の理由は同ファイルの `ORDER CONSTRAINT:` コメント（agent-pitfalls #2）
 4. **スレッド境界** — WebServer は QThread。外部 API も別スレッドなら StateManager のロックを尊重
-5. **ポート/ルーティング** — `/api/v1/` と既存ルートの衝突回避、既定ポート `5000` の運用影響
+5. **ポート/ルーティング** — `/api/v1/` と既存ルートの衝突回避、既定ポート `5107` の運用影響
 
 > 具体的な影響整理は [../changes/external-control-impact-analysis.md](../changes/external-control-impact-analysis.md)、
 > 設計境界の決定は [../decisions/ADR-001-external-control-api-boundary.md](../decisions/ADR-001-external-control-api-boundary.md) を参照。

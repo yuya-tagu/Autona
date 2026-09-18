@@ -29,8 +29,7 @@ from qtpy.QtWidgets import *
 import json
 import os
 
-from .SettingsManager import SettingsManager
-from .Helpers.AutonaNetworkHelper import GetWebServerHost
+from .SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 
 
 def _tr(text):
@@ -151,8 +150,13 @@ class AutonaObsGuideWindow(QDialog):
 
     # ── Connection / paths ───────────────────────────────────────────────
     def _baseUrl(self):
-        port = SettingsManager.Get("general.webserver_port", 5000)
-        return f"http://{GetWebServerHost()}:{port}/api/v1"
+        port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
+        # Always advertise loopback here (unlike AutonaApiInfoWindow, which
+        # shows the LAN IP for Companion/phones on other devices). ASS runs
+        # inside OBS on this same PC in practice; the server binds 0.0.0.0
+        # when LAN access is on, so 127.0.0.1 always works locally, and it
+        # won't break if the PC's LAN IP later changes.
+        return f"http://127.0.0.1:{port}/api/v1"
 
     def _outDir(self):
         return os.path.normpath(os.path.abspath("./out"))
@@ -195,13 +199,14 @@ class AutonaObsGuideWindow(QDialog):
         return group
 
     def _refresh(self):
-        port = SettingsManager.Get("general.webserver_port", 5000)
+        port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
         self.baseUrlField.setText(self._baseUrl())
         self.outDirField.setText(self._outDir())
         self.portLabel.setText(_tr("Port") + f": {port}")
         if SettingsManager.Get("general.webserver_listen_lan", False):
-            self.lanNoteLabel.setText(
-                _tr("OBS must run on this PC, or on the same LAN."))
+            self.lanNoteLabel.setText(_tr(
+                "OBS must run on this PC. For OBS on another PC on the same "
+                "LAN, replace 127.0.0.1 with this PC's IP address."))
         else:
             self.lanNoteLabel.setText(_tr(
                 "LAN access: disabled — OBS must run on this PC. To use OBS on "
