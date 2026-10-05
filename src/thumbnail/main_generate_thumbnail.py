@@ -19,6 +19,7 @@ from src.StateManager import StateManager
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from src.Helpers.AutonaDictHelper import *
 from src.Helpers.AutonaDirHelper import AutonaResolve
+from src.Helpers.AutonaOutputRetention import PruneOutputFiles
 
 
 def createFalseData(gameAssetManager: AutonaGameAssetManager = None, used_assets: str = None):
@@ -298,6 +299,9 @@ def save_result(pixmap, data, settings, scoreboardNumber=1, isPreview=False):
         pixmap.save(f"{out_path}/{thumbnail_filename}.jpg")
         logger.info(
             f"Thumbnail successfully saved as {out_path}/{thumbnail_filename}.png and {out_path}/{thumbnail_filename}.jpg")
+        # Keep disk usage bounded; the file just written is protected
+        PruneOutputFiles(out_path, ("*.png", "*.jpg"), 30,
+                         protect=f"{out_path}/{thumbnail_filename}.png")
         return f"{out_path}/{thumbnail_filename}.png"
     else:
         thumbnail_filename = "template"

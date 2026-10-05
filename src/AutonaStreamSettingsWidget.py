@@ -13,6 +13,7 @@ from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .SettingsManager import SettingsManager
 from .Helpers.AutonaDirHelper import AutonaResolve
+from .Helpers.AutonaOutputRetention import PruneOutputFiles
 from . import ui_layout as L
 from . import ui_constants as UI
 import traceback
@@ -615,6 +616,9 @@ class AutonaStreamSettingsWidget(QDockWidget):
             out_path = out_dir / filename
             out_img.save(out_path, "JPEG", quality=90)
             self._lastStreamThumbPath = str(out_path)
+            # out/stream may hold other files: prune only our own thumbnail_* output
+            PruneOutputFiles(out_dir, ("thumbnail_*.jpg",), 30,
+                             protect=out_path)
 
             # Show a scaled preview in the UI
             pix = QPixmap(str(out_path))

@@ -260,7 +260,7 @@ class AutonaTournamentDataProvider(QObject):
                         {"getFinished": showFinished,
                          "phaseGroupIds": phaseGroupIds})
         worker.signals.result.connect(lambda data: [
-            logger.info(data),
+            logger.info(f"Sets loaded: {len(data) if data is not None and hasattr(data, '__len__') else 0} items"),
             self.signals.get_sets_finished.emit(data),
             self.signals.sets_data_updated.emit({
                 "progress": 0,
@@ -284,7 +284,7 @@ class AutonaTournamentDataProvider(QObject):
             return
         worker = Worker(self.provider.GetStations)
         worker.signals.result.connect(lambda data: [
-            logger.info(data),
+            logger.info(f"Stations loaded: {len(data) if data is not None and hasattr(data, '__len__') else 0} items"),
             self.signals.get_stations_finished.emit(data)
         ])
         self.threadPool.start(worker)
@@ -314,8 +314,9 @@ class AutonaTournamentDataProvider(QObject):
                 stationSet = stationSets[0]
 
                 queueCache = mainWindow.stationQueueCache
-                logger.info(queueCache.queue)
-                logger.info(stationSets)
+                logger.info(
+                    f"Station follow: queue={len(getattr(queueCache, 'queue', None) or [])} "
+                    f"stationSets={len(stationSets)}")
                 if queueCache and not queueCache.CheckQueue(stationSets):
                     queueCache.UpdateQueue(stationSets)
 

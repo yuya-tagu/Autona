@@ -113,7 +113,8 @@ logger.add(
     format="[{time:YYYY-MM-DD HH:mm:ss}] - {level} - {file}:{function}:{line} | {message}",
     encoding="utf-8",
     level="INFO",
-    rotation="20 MB"
+    rotation="20 MB",
+    retention=5
 )
 
 logger.add(
@@ -121,7 +122,8 @@ logger.add(
     format="[{time:YYYY-MM-DD HH:mm:ss}] - {level} - {file}:{function}:{line} | {message}",
     encoding="utf-8",
     level="ERROR",
-    rotation="20 MB"
+    rotation="20 MB",
+    retention=5
 )
 
 # loguru is only configured now, so the STARTUP marks recorded before this

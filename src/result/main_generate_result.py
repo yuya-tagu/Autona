@@ -16,6 +16,7 @@ from src.AutonaFeatureColors import FEATURE_RESULT, GetFeatureColors
 from src.Helpers.AutonaDictHelper import deep_get
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from src.Helpers.AutonaDirHelper import AutonaResolve
+from src.Helpers.AutonaOutputRetention import PruneOutputFiles
 
 
 def _remove_special_chars(s):
@@ -238,6 +239,9 @@ def save_result(pixmap, data):
     # made every save look duplicated in out/results/.
     pixmap.save(f"{out_path}/{filename}.png")
     logger.info(f"Result image saved: {out_path}/{filename}.png")
+    # Keep disk usage bounded (also sweeps legacy .jpg twins)
+    PruneOutputFiles(out_path, ("*.png", "*.jpg"), 30,
+                     protect=f"{out_path}/{filename}.png")
     return f"{out_path}/{filename}.png"
 
 
