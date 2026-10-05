@@ -18,7 +18,7 @@ from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from qtpy.QtGui import QPainter, QPixmap
 from qtpy.QtWebEngineWidgets import QWebEngineView
-from qtpy.QtWebEngineCore import QWebEngineSettings
+from qtpy.QtWebEngineCore import QWebEngineSettings, QWebEnginePage
 
 from .SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 from . import ui_constants as UI
@@ -32,6 +32,15 @@ LAYOUT_DIR = "layout"
 DEFAULT_ENTRY = "index.html"
 
 logger = logging.getLogger(__name__)
+
+# Asks an overlay page for a full state snapshot over its own Socket.IO
+# connection (globals.js exposes it as window.tshSocket; the server answers a
+# 'program_state' request to the sender only). A socket that is not
+# connected needs nothing from us: socket.io reconnects on its own and the
+# server's connect handler pushes the full state.
+_REQUEST_FULL_STATE_JS = (
+    "(function(){var s=window.tshSocket;"
+    "if(s&&s.connected){s.emit('program_state',{});}})()")
 
 
 # ── Web server readiness gate (startup Step 4c) ──────────────────────────
@@ -153,6 +162,16 @@ class AutonaLayoutPreview(QFrame):
     stream footage. This is purely cosmetic for the desktop preview: it
     never touches the layout HTML/CSS that OBS actually renders, and it
     has no effect on the browser-source output.
+
+    Previews live for the whole process, so while nothing of one is on
+    screen -- its panel is not the current stack page, or the main window
+    is minimized -- its page is first frozen and, if it stays hidden for
+    ``DISCARD_AFTER_MS``, discarded (``QWebEnginePage.LifecycleState``).
+    Frozen, Chromium suspends the overlay's JavaScript and timers (it
+    already stops painting a hidden page, infinite CSS animations
+    included); discarded, the renderer process itself is shut down. See
+    the "Lifecycle" section for the transitions and for how the page is
+    brought back up to date on reveal.
     """
 
     # Native OBS canvas the overlays are authored against.
@@ -174,6 +193,14 @@ class AutonaLayoutPreview(QFrame):
     # until the user switched tabs.
     MAX_LOAD_RETRIES = 2
     LOAD_RETRY_MS = 400
+
+    # How long a frozen (hidden) preview is kept before it is discarded.
+    # A frozen page still holds its renderer (~200 MB, most of it the
+    # kuromoji dictionary every overlay loads); a discarded one costs a
+    # reload of roughly a second when its panel is shown again. Panels the
+    # operator flips between during a set come back well within this, so
+    # they reveal instantly; one left alone this long releases its memory.
+    DISCARD_AFTER_MS = 5 * 60 * 1000
 
     def __init__(self, layout_name=None, parent=None, entry=DEFAULT_ENTRY):
         # layout_name may be deferred to load() for panels that switch
@@ -215,6 +242,15 @@ class AutonaLayoutPreview(QFrame):
         self._loadRetries = 0
         self._pendingUrl = None
         self.view.loadFinished.connect(self._OnLoadFinished)
+        # Freeze / discard while off screen, catch up on reveal (see the
+        # class docstring and the "Lifecycle" section below).
+        self._discardTimer = QTimer(self)
+        self._discardTimer.setSingleShot(True)
+        self._discardTimer.setInterval(self.DISCARD_AFTER_MS)
+        self._discardTimer.timeout.connect(self._DiscardIfIdle)
+        page = self.view.page()
+        page.recommendedStateChanged.connect(self._OnRecommendedStateChanged)
+        page.lifecycleStateChanged.connect(self._OnLifecycleStateChanged)
 
         # Transparent input shield above the view: swallows wheel/click
         # events so the page can never be scrolled or interacted with from
@@ -382,10 +418,80 @@ class AutonaLayoutPreview(QFrame):
             return
         self._pendingUrl = None
         self._applyScale()
+        # A load that finished while the panel was hidden: Qt's recommended
+        # state may already have settled while _pendingUrl still held the
+        # freeze back, so no further change would come to trigger it.
+        self._ScheduleFreeze()
 
     def _RetryLoad(self):
         if self._pendingUrl:
             self.view.setUrl(QUrl(self._pendingUrl))
+
+    # ── Lifecycle: freeze / discard while off screen ────────────────
+    # Active --(hidden)--> Frozen --(DISCARD_AFTER_MS)--> Discarded, and
+    # straight back to Active when shown. Qt enforces the rules this relies
+    # on: a visible page cannot leave Active, a discarded one can only
+    # return to Active, and Qt itself returns a page to Active before it
+    # reports it visible again, and on setUrl() (a design switch on a
+    # hidden panel) -- so neither revealing nor loading needs a thaw here,
+    # only the catch-up in _OnLifecycleStateChanged.
+    #
+    # "Hidden" is the page's own visibility, which covers an inactive stack
+    # page and a minimized main window alike (QWidget.isVisible() stays
+    # True for the latter, so the view's visibility cannot be used).
+    def _OnRecommendedStateChanged(self, state):
+        # Qt recommends leaving Active only for a page that is hidden,
+        # finished loading and not under DevTools.
+        if state != QWebEnginePage.LifecycleState.Active:
+            self._ScheduleFreeze()
+
+    def _ScheduleFreeze(self):
+        # Deferred: both callers run inside Qt's own notifications, and the
+        # transition is re-validated when it actually happens.
+        QTimer.singleShot(0, self, self._FreezeIfIdle)
+
+    def _FreezeIfIdle(self):
+        page = self.view.page()
+        if (page.isVisible()
+                or self._pendingUrl
+                or page.lifecycleState() != QWebEnginePage.LifecycleState.Active
+                or page.recommendedState() == QWebEnginePage.LifecycleState.Active):
+            return
+        page.setLifecycleState(QWebEnginePage.LifecycleState.Frozen)
+        if page.lifecycleState() == QWebEnginePage.LifecycleState.Frozen:
+            self._discardTimer.start()
+
+    def _DiscardIfIdle(self):
+        # Only on Qt's own recommendation: it withholds Discarded from a
+        # page whose state a reload would lose (form input, unload hooks).
+        page = self.view.page()
+        if (page.isVisible()
+                or self._pendingUrl
+                or page.lifecycleState() != QWebEnginePage.LifecycleState.Frozen
+                or page.recommendedState() != QWebEnginePage.LifecycleState.Discarded):
+            return
+        page.setLifecycleState(QWebEnginePage.LifecycleState.Discarded)
+
+    def _OnLifecycleStateChanged(self, state):
+        if state != QWebEnginePage.LifecycleState.Active:
+            return
+        self._discardTimer.stop()
+        # Back from Discarded, Qt reloads the page and the new document
+        # gets the full state from the server's connect handler. Back from
+        # Frozen, the deltas broadcast meanwhile were either queued --
+        # applied in order now, under globals.js' revision-gap check -- or,
+        # after a long freeze, lost with a connection the server dropped on
+        # a missed ping, in which case socket.io reconnects and the connect
+        # handler sends the full state. Ask for a full snapshot anyway so
+        # the preview is current on reveal whichever of these happened.
+        # Deferred out of Qt's notification, like freezing.
+        QTimer.singleShot(0, self, self._RequestFullState)
+
+    def _RequestFullState(self):
+        if self._pendingUrl:
+            # Navigating: the new document gets the full state on connect.
+            return
+        self.view.page().runJavaScript(_REQUEST_FULL_STATE_JS)
 
     def obs_url(self):
         return ObsUrl(self.layout_name, self.entry)
