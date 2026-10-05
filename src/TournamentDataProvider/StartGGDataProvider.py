@@ -276,7 +276,8 @@ class StartGGDataProvider(TournamentDataProvider):
                 }
             )
 
-            logger.info(data)
+            logger.info(
+                f"Phases loaded: {len(deep_get(data, 'data.event.phases', []) or [])} items")
 
             for phase in deep_get(data, "data.event.phases", []):
                 phaseObj = {

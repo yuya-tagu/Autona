@@ -1889,7 +1889,8 @@ class AutonaScoreboardWidget(QWidget):
         # Ici peut être lancer le chargement des sets voire même trigger un autre signal ?
 
         logger.info("STATION SETS LOADED -----------------------------")
-        logger.info(data)
+        logger.info(
+            f"Station sets: {len(data) if data is not None and hasattr(data, '__len__') else 0} items")
         self.setLoad.SetStationQueue(data)
 
     def NewSetSelected(self, data):
