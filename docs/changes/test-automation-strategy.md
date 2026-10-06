@@ -237,8 +237,9 @@ join しないため、このスレッドは harness の CWD 復元後に走り�
 
 **専用ロックを使う理由**: 登録はエクスポートスレッドから走るが、
 `SaveState()` は GUI スレッドで `StateManager.lock` を**保持したまま**
-エクスポートスレッドを join する。同じ RLock を使うと所有スレッドが異なるため
-デッドロックする。`_download_lock`（素の `threading.Lock`）を別に持つこと。
+エクスポートスレッドを待ちうる（2026-10 以降は毎回の join ではなく、export writer の
+backlog が `_EXPORT_BACKLOG_LIMIT` に達したときだけ待つ）。同じ RLock を使うと
+所有スレッドが異なるためデッドロックする。`_download_lock`（素の `threading.Lock`）を別に持つこと。
 
 pin: `tests/test_harness_isolation.py` の
 `test_image_downloads_finish_before_the_directory_is_restored`（閉じたループバック

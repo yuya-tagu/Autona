@@ -302,11 +302,13 @@ def test_prefix_wide_held_write_keeps_live_exempt_values():
 # most expensive diff there is, on every +1 with the game tracker on, every
 # SwapTeams and every stage click (headless core Step 4a).
 #
-# It was not even a *harmless* full diff: the export thread stamps
-# `timestamp` and `revision` into lastSavedState, and the live state has
-# neither, so the unfiltered comparison always found those two "removed" --
-# publishing a delta, bumping the revision and rewriting program_state.json
-# for a cycle in which nothing was published at all.
+# It was not even a *harmless* full diff: lastSavedState is only advanced at
+# the paths each cycle diffs, so it does not have to equal the live state
+# anywhere else. When this was found, the export thread also stamped
+# `timestamp` and `revision` into lastSavedState (it stamps a copy since the
+# 2026-10 export writer), and the unfiltered comparison always found those
+# two "removed" -- publishing a delta, bumping the revision and rewriting
+# program_state.json for a cycle in which nothing was published at all.
 
 
 class _DiffSpy:

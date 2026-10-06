@@ -397,7 +397,7 @@ HTTP/1.1 409 Conflict
 |------|-----------------|------|
 | `revision` | `StateManager.revision`（単調増加カウンタ、`_bumpRevision()` で +1）。読み取りは `GetFullState()` が `{'state','revision','delta_index'}` を返す。`GET /api/v1/state` はこれをそのまま使う | [StateManager.py:34,183-202](../../src/StateManager.py) |
 | `activeBoard` | **`SettingsManager.Get("scoreboard.battle_format", "singles")`** を `{"singles":1,"team":2,"crew":3}` で写像。これが表示中ボードの真実源 | [Autona.py:952,968](../../src/Autona.py) / [AutonaScoreboardManager.py:69-75](../../src/AutonaScoreboardManager.py) |
-| `outLastWriteUnix` | `os.path.getmtime("./out/program_state.json")`（毎 SaveState でエクスポートスレッドが書く）。または同ファイル内の `timestamp`/`revision` フィールド | [StateManager.py:104-109](../../src/StateManager.py) |
+| `outLastWriteUnix` | `os.path.getmtime("./out/program_state.json")`（SaveState が積んだ job を export writer が書く。書き込み待ちが溜まった場合は最新スナップショットだけを 1 回書く）。または同ファイル内の `timestamp`/`revision` フィールド | [StateManager.py:104-109](../../src/StateManager.py) |
 
 ### 14.1a revision のタイミング（重要）
 - **`@gui_thread_sync` の Action は同期実行**されるため、戻り時点で `StateManager.revision` は当該変更を反映済み
