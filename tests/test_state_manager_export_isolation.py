@@ -122,10 +122,19 @@ def test_a_full_save_cycle_never_kills_the_export_thread():
     is the shape the crash was first seen in, and because threading.excepthook
     is the only place that failure ever surfaced: the exception never reached
     the GUI thread, which is why it went unnoticed for so long.
+
+    Since the export moved to a single long-lived writer, an export failure
+    is caught and logged so the writer survives it -- the same exception now
+    arrives as an ERROR record rather than through the hook. Both are
+    watched: the hook still catches anything that escapes the writer.
     """
+    from loguru import logger
+
     failures = []
     previousHook = threading.excepthook
     threading.excepthook = lambda args: failures.append(args)
+    logged = []
+    sink = logger.add(logged.append, level="ERROR")
 
     try:
         for i in range(25):
@@ -146,7 +155,10 @@ def test_a_full_save_cycle_never_kills_the_export_thread():
         if SM._export_thread is not None:
             SM._export_thread.join()
         threading.excepthook = previousHook
+        logger.remove(sink)
 
     assert failures == [], (
         "the export thread died: "
         + "; ".join(f"{f.exc_type.__name__}: {f.exc_value}" for f in failures))
+    assert logged == [], (
+        "the export failed: " + "; ".join(str(m) for m in logged))

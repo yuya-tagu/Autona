@@ -17,7 +17,6 @@ from urllib.parse import urlparse
 sys.modules.setdefault("pandas", None)
 
 from deepdiff import DeepDiff, Delta, extract
-from functools import partial
 import shutil
 import threading
 import requests
@@ -39,6 +38,16 @@ _atomicWriteFallbackLogged = False
 # Retry budget for the replace step (20 + 40 + 80 ms of sleep at worst).
 _ATOMIC_REPLACE_ATTEMPTS = 4
 _ATOMIC_REPLACE_BACKOFF = 0.02
+
+# Save cycles allowed to queue *behind* the batch the export writer is
+# working on before SaveState blocks. Every job pins a full state snapshot,
+# so this bounds memory if the disk stalls. The writer takes the whole queue
+# as one batch, so the number of jobs alive is at most the batch in hand
+# (itself at most this many) plus this many queued -- roughly 2x, or briefly
+# more right after a crashed writer re-queued its unfinished batch. In normal
+# operation the writer keeps up (ExportText is cheaper than the DeepDiff that
+# produced the job) and the queue stays at 0-1.
+_EXPORT_BACKLOG_LIMIT = 16
 
 
 def _atomic_write_bytes(path: str, data: bytes):
@@ -159,12 +168,22 @@ class StateManager:
     revision = 0
 
     lock = threading.RLock()
+    # Export pipeline (program_state.json + ./out text files). SaveState only
+    # queues a job; one writer thread at a time drains the queue in save
+    # order (_QueueExport / _DrainExports). `_export_thread` is the most
+    # recently started writer -- possibly finished -- so joining it waits out
+    # every job queued so far. `_export_cond` guards the other two and is
+    # never held during I/O.
     _export_thread = None
+    _export_running = False
+    _export_jobs = []
+    _export_cond = threading.Condition(threading.Lock())
     _download_semaphore = threading.Semaphore(3)
     # In-flight image downloads started by CreateFilesDict. Guarded by its own
-    # lock, NOT StateManager.lock: these are registered from the export thread,
-    # while SaveState() joins that thread from the GUI thread *while holding*
-    # StateManager.lock -- reusing it here would deadlock the pair.
+    # lock, NOT StateManager.lock: these are registered from the export
+    # writer, while SaveState() can wait on that writer (backlog full) from
+    # the GUI thread *while holding* StateManager.lock -- reusing it here
+    # would deadlock the pair.
     _download_threads = []
     _download_lock = threading.Lock()
     _initialized = False
@@ -250,6 +269,30 @@ class StateManager:
         for k in key.split("."):
             out += f"['{k}']"
         return out
+
+    @staticmethod
+    def _includePaths(changed_keys):
+        """changedKeys reduced to what DeepDiff's include_paths needs.
+
+        A key below another queued key adds nothing: DeepDiff already keeps
+        every path under an included one, so dropping it leaves the diff
+        identical. It is not free to keep, though -- DeepDiff's per-node
+        filter is linear in the number of include paths, and a commit after
+        a set load queues a cleared player subtree (Unset) together with
+        every field written back into it. Measured on such a commit: 51 ->
+        15 paths, DeepDiff 60 -> 38 ms, same result.
+
+        Sorted, a bracket path is immediately followed by its descendants
+        (strings sharing a prefix are contiguous), so comparing against the
+        last kept path is enough. The "[" makes the test self-delimiting:
+        "...['1']" never swallows a sibling "...['10']".
+        """
+        kept = []
+        for path in sorted(set(changed_keys)):
+            if kept and path.startswith(kept[-1] + "["):
+                continue
+            kept.append(path)
+        return kept
 
     @staticmethod
     def _isExemptKey(prefix: str, final_key: str) -> bool:
@@ -391,12 +434,14 @@ class StateManager:
                     # with nothing pending.
                     #
                     # Skipping is not merely an optimisation. lastSavedState
-                    # carries the `timestamp` / `revision` keys the export
-                    # thread stamps into it, and the live state does not, so
-                    # the unfiltered diff was never empty: it published a
-                    # delta removing those two keys, bumped the revision, and
-                    # rewrote program_state.json -- once per held-only save
-                    # cycle, for no state change at all.
+                    # is only advanced at the paths each cycle diffs, so it
+                    # is not guaranteed to equal the live state elsewhere
+                    # (after LoadState it is {}; until the export writer
+                    # stopped stamping it, it also carried `timestamp` /
+                    # `revision`). The unfiltered diff was therefore never
+                    # empty: it published a delta for those leftovers, bumped
+                    # the revision, and rewrote program_state.json -- once
+                    # per held-only save cycle, for no state change at all.
                     #
                     # The held notification still goes out: it is what tells
                     # the widgets rendering live (unpublished) values to
@@ -404,12 +449,15 @@ class StateManager:
                     StateManager._notifyHeldTouched()
                     return
 
-                # Wait for any previous export before computing new diff.
-                # Below the early return above on purpose: joining is only
-                # required because the diff reads lastSavedState, which the
-                # export thread is still stamping.
-                if StateManager._export_thread is not None and StateManager._export_thread.is_alive():
-                    StateManager._export_thread.join()
+                # No wait for the previous export here. This used to join it,
+                # because the export thread stamped `timestamp` / `revision`
+                # into the very dict that is lastSavedState while the diff
+                # below read it. The writer now stamps a shallow copy of its
+                # own, so a published snapshot is never mutated after this
+                # point, and write order is kept by the single writer
+                # draining jobs in save order (_QueueExport). The join had
+                # the GUI thread wait out the previous cycle's whole export --
+                # ExportText alone is tens of ms after a set load.
 
                 # Publish view: the live state with still-dirty held subtrees
                 # reverted to their last committed value. When nothing is
@@ -424,9 +472,12 @@ class StateManager:
                     StateManager.lastSavedState,
                     publish_state,
                     exclude_types=[type(None)],
-                    include_paths=list(set(StateManager.changedKeys)),
+                    include_paths=StateManager._includePaths(
+                        StateManager.changedKeys),
                     verbose_level=2, # Necessary to see values of added items.
                 )
+                # Computed once: the size check and the payload are the same
+                # rows (this used to build the Delta twice).
                 delta = Delta(diff).to_flat_dicts()
                 if len(delta) > 100:
                     StateManager._bumpRevision()
@@ -440,7 +491,7 @@ class StateManager:
                             # OBS templates / not-yet-rebuilt clients.
                             'revision': StateManager.revision,
                             'delta_index': StateManager.revision,
-                            'delta': Delta(diff).to_flat_dicts()
+                            'delta': delta
                         })
                     except TypeError:
                         # DEFENSIVE BRANCH -- measurement says it is not
@@ -487,42 +538,165 @@ class StateManager:
                     old_state = StateManager.lastSavedState
                     StateManager.lastSavedState = state_snapshot
 
-                    revision_at_save = StateManager.revision
-
-                    def _export(state_snap, old_snap, ref_diff):
-                        state_snap["timestamp"] = time.time()
-                        # Stamp revision so degraded poll clients (file
-                        # mode) can validate continuity (Design.md §2.3
-                        # R-OBS-3a, §8 T-12).
-                        state_snap["revision"] = revision_at_save
-                        # Drop OPT_INDENT_2 — OBS overlays / Web UI parse
-                        # JSON regardless of whitespace, and indenting a
-                        # multi-MB tournament state inflates file size
-                        # 3-4x for nothing. Saves disk I/O bandwidth.
-                        _atomic_write_bytes(
-                            "./out/program_state.json",
-                            orjson.dumps(state_snap,
-                                         option=orjson.OPT_NON_STR_KEYS))
-
-                        if not SettingsManager.Get("general.disable_export", False):
-                            StateManager.ExportText(
-                                old_snap, ref_diff, state_snap)
-
-                    # Deliberately NOT a daemon: this thread only does local
-                    # disk I/O (bounded, never blocks on the network), and
-                    # letting shutdown join it guarantees program_state.json
-                    # is never left truncated. Image downloads spawned below
-                    # by ExportText are the network side and are daemons.
-                    StateManager._export_thread = threading.Thread(
-                        target=partial(_export,
-                                       state_snap=state_snapshot,
-                                       old_snap=old_state,
-                                       ref_diff=diff))
-                    StateManager._export_thread.start()
+                    StateManager._QueueExport(
+                        state_snapshot, old_state, diff, StateManager.revision)
 
                 # Coalesced notification for held writes (one per prefix per
                 # save cycle, mirroring how SaveBlock coalesces deltas).
                 StateManager._notifyHeldTouched()
+
+    @staticmethod
+    def _QueueExport(state_snap, old_snap, diff, revision):
+        """Hand one published save cycle to the export writer.
+
+        Returns without waiting for any I/O unless _EXPORT_BACKLOG_LIMIT
+        jobs are already pending (a stalled disk), in which case it waits
+        for the writer to take them -- the old always-join behaviour, kept
+        only as a memory bound.
+
+        Ordering: there is at most one writer at a time, it takes jobs in
+        the order they were queued, and a new writer is started only after
+        the previous one found the queue empty and cleared
+        `_export_running` under the same lock. So ./out sees the save
+        cycles in save order, exactly as when each cycle joined the last.
+
+        Shutdown: the writer is deliberately NOT a daemon. It only does
+        local disk I/O (bounded, never blocks on the network) and keeps
+        draining until the queue is empty, so the interpreter's shutdown
+        join of non-daemon threads still guarantees that the last state is
+        written and program_state.json is never left truncated. Image
+        downloads spawned by ExportText are the network side and are
+        daemons.
+        """
+        with StateManager._export_cond:
+            while (StateManager._export_running
+                   and len(StateManager._export_jobs) >= _EXPORT_BACKLOG_LIMIT):
+                StateManager._export_cond.wait()
+            StateManager._export_jobs.append(
+                (state_snap, old_snap, diff, revision))
+            if StateManager._export_running:
+                return
+            thread = threading.Thread(
+                target=StateManager._DrainExports, name="AutonaStateExport")
+            StateManager._export_running = True
+            try:
+                thread.start()
+            except BaseException:
+                # e.g. "can't create new thread at interpreter shutdown".
+                # Leaving the flag set would make every later save assume a
+                # writer exists and never start one. The job stays queued:
+                # the next SaveState that does start a writer exports it,
+                # ahead of its own. `_export_thread` is left pointing at the
+                # last writer that really ran, never at this unstarted one
+                # (join() on a thread that was never started raises).
+                StateManager._export_running = False
+                raise
+            # Assigned only once the thread exists. The new writer cannot
+            # look at it before this line: its first step takes
+            # `_export_cond`, which is still held here.
+            StateManager._export_thread = thread
+
+    @staticmethod
+    def _DrainExports():
+        """Writer thread body: run queued exports until the queue is empty."""
+        me = threading.current_thread()
+        jobs = []
+        try:
+            while True:
+                with StateManager._export_cond:
+                    jobs = StateManager._export_jobs
+                    StateManager._export_jobs = []
+                    if not jobs:
+                        # Cleared under the lock that _QueueExport checks,
+                        # so a job queued after this point starts a new
+                        # writer instead of being stranded.
+                        StateManager._export_running = False
+                    StateManager._export_cond.notify_all()
+                    if not jobs:
+                        return
+                # Consumes `jobs` in place; empty again on a normal return.
+                StateManager._WriteExports(jobs)
+        finally:
+            # The flag is still set (and still ours) only if this writer is
+            # dying with an exception: _WriteExports isolates every ordinary
+            # Exception, so this is a BaseException escaping mid-batch. What
+            # _WriteExports had not finished is still in `jobs`; put it back
+            # at the head of the queue, ahead of anything saved since, and
+            # release the flag. The writer the next SaveState starts then
+            # exports it first, so save order is kept. Nothing is restarted
+            # from here: a failure that repeats would respawn forever, and a
+            # BaseException in a worker usually means the process is going
+            # down. Until another save comes, the re-queued jobs wait (and
+            # are lost if the process exits first).
+            with StateManager._export_cond:
+                if (StateManager._export_running
+                        and StateManager._export_thread is me):
+                    StateManager._export_jobs = (
+                        list(jobs) + StateManager._export_jobs)
+                    StateManager._export_running = False
+                    StateManager._export_cond.notify_all()
+
+    @staticmethod
+    def _WriteExports(jobs):
+        """Write one batch of save cycles: text export first, then the JSON.
+
+        The ./out text export is incremental (each job carries its own
+        diff), so every job runs, oldest first. program_state.json is a full
+        snapshot, so only the newest job's is written -- the intermediate
+        files would be overwritten before any reader could rely on them.
+
+        program_state.json goes LAST, after every .txt of the batch. The OBS
+        guide (AutonaObsGuideWindow) tells operators to use "file was
+        modified" on program_state.json as the trigger to re-read the .txt
+        exports, so the JSON must never announce a state whose text files
+        are not on disk yet.
+
+        `jobs` is consumed in place: a job is removed once its text export
+        is done, except the newest, which stays until program_state.json has
+        been written. So if a BaseException escapes, what is left in `jobs`
+        is exactly the work still owed -- the job whose text export was cut
+        off, or the newest one if only the JSON was missing -- and
+        _DrainExports re-queues it. Re-running an ExportText replays the
+        same diff against the same snapshots, so a job that was partly or
+        fully exported once converges to the same files.
+
+        Each step is otherwise isolated: one failing export must not stop
+        the writer, or nothing would be exported again until a new one
+        started. Failures go to the application log -- with one thread per
+        cycle they used to surface only through threading.excepthook.
+        """
+        newest_snap, _old_snap, _diff, revision = jobs[-1]
+
+        if not SettingsManager.Get("general.disable_export", False):
+            while True:
+                state_snap, old_snap, diff, _revision = jobs[0]
+                try:
+                    StateManager.ExportText(old_snap, diff, state_snap)
+                except Exception:
+                    logger.error(traceback.format_exc())
+                if len(jobs) == 1:
+                    break  # the newest stays until the JSON below is out
+                jobs.pop(0)
+
+        try:
+            # Stamped into a shallow copy, never into the snapshot itself:
+            # the snapshot is lastSavedState, which the GUI thread diffs
+            # against without waiting for this writer.
+            stamped = dict(newest_snap)
+            stamped["timestamp"] = time.time()
+            # Stamp revision so degraded poll clients (file mode) can
+            # validate continuity (Design.md §2.3 R-OBS-3a, §8 T-12).
+            stamped["revision"] = revision
+            # Drop OPT_INDENT_2 — OBS overlays / Web UI parse JSON
+            # regardless of whitespace, and indenting a multi-MB tournament
+            # state inflates file size 3-4x for nothing. Saves disk I/O
+            # bandwidth.
+            _atomic_write_bytes(
+                "./out/program_state.json",
+                orjson.dumps(stamped, option=orjson.OPT_NON_STR_KEYS))
+        except Exception:
+            logger.error(traceback.format_exc())
+        jobs.clear()
 
     def LoadState():
         try:
@@ -645,7 +819,7 @@ class StateManager:
         # logger.info("ExportState")
         # logger.info(diff)
         #
-        # THREADING: this runs on the export thread (SaveState spawns it), so
+        # THREADING: this runs on the export writer (_QueueExport), so
         # every container walked below has to be private to that thread.
         # `oldState` and `stateSnapshot` are, but `diff` is NOT: DeepDiff was
         # handed the live state, so its `new_value` entries are references
