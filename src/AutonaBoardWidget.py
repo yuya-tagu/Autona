@@ -369,16 +369,47 @@ class AutonaBoardWidget(QDockWidget):
             lambda: QApplication.clipboard().setText(self.obsPathField.text()))
         btnRow.addWidget(btCopy)
         btOpen = QPushButton("エクスプローラで開く")
-        btOpen.clicked.connect(self._openInExplorer)
+        btOpen.clicked.connect(lambda: self._openInExplorer())
         btnRow.addWidget(btOpen)
         btnRow.addStretch(1)
         group.layout().addLayout(btnRow)
+
+        # Winner popup: a separate OBS source, so it gets its own fixed path
+        # (it does not depend on the selected design).
+        popupTitle = QLabel("勝者ポップアップ（WINNER / CHAMPION）")
+        popupTitle.setWordWrap(True)
+        group.layout().addWidget(popupTitle)
+        popupHint = QLabel(
+            "試合の勝者が決まると中央下部に名前入りで表示されます。"
+            "上と同じ手順で、別のブラウザソースとして追加します。")
+        popupHint.setWordWrap(True)
+        group.layout().addWidget(popupHint)
+        self.winnerPopupPathField = QLineEdit()
+        self.winnerPopupPathField.setReadOnly(True)
+        self.winnerPopupPathField.setText(self._winnerPopupPath())
+        group.layout().addWidget(self.winnerPopupPathField)
+        popupBtnRow = QHBoxLayout()
+        btPopupCopy = QPushButton("コピー")
+        btPopupCopy.clicked.connect(
+            lambda: QApplication.clipboard().setText(
+                self.winnerPopupPathField.text()))
+        popupBtnRow.addWidget(btPopupCopy)
+        btPopupOpen = QPushButton("エクスプローラで開く")
+        btPopupOpen.clicked.connect(
+            lambda: self._openInExplorer(self._winnerPopupPath()))
+        popupBtnRow.addWidget(btPopupOpen)
+        popupBtnRow.addStretch(1)
+        group.layout().addLayout(popupBtnRow)
 
         note = QLabel(
             "Autona を起動したままにすると、OBS 上でスコアがリアルタイムに反映されます。")
         note.setWordWrap(True)
         group.layout().addWidget(note)
         return group
+
+    def _winnerPopupPath(self):
+        return os.path.normpath(
+            os.path.abspath(f"{LAYOUT_DIR}/winner_popup/index.html"))
 
     def _obsPath(self):
         design = self._currentDesign()
@@ -390,8 +421,9 @@ class AutonaBoardWidget(QDockWidget):
     def _refreshObsPath(self):
         self.obsPathField.setText(self._obsPath())
 
-    def _openInExplorer(self):
-        path = self._obsPath()
+    def _openInExplorer(self, path=None):
+        if path is None:
+            path = self._obsPath()
         if not path or not os.path.exists(path):
             return
         try:

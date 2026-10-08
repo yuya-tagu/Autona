@@ -1,0 +1,150 @@
+/* winner_popup — 1920x1080 transparent overlay for an OBS browser source.
+   --theme-color / --accent-color are written by index.js from the board
+   colors; --text-color is picked there for contrast against the theme. */
+:root {
+  --theme-color: #1a2440;
+  --accent-color: #e8b923;
+  --text-color: #ffffff;
+}
+
+html, body {
+  margin: 0;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  background: transparent;
+  font-family: "LINE Seed JP", "NotoSans", sans-serif;
+}
+
+.winner_popup {
+  position: absolute;
+  left: 50%;
+  bottom: 96px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  min-width: 460px;
+  max-width: 1400px;
+  height: 104px;
+  padding: 0 44px 0 18px;
+  box-sizing: border-box;
+  background: var(--theme-color);
+  color: var(--text-color);
+  border: 3px solid var(--accent-color);
+  border-radius: 6px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  visibility: hidden;
+}
+
+.logo {
+  flex: none;
+  width: 76px;
+  height: 76px;
+  background-image: var(--logo-url, url("../logo.png"));
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.text_block {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+.winner_label {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.32em;
+  color: var(--accent-color);
+  line-height: 1.1;
+}
+
+.winner_name {
+  font-size: 48px;
+  font-weight: 700;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.winner_name .sponsor {
+  opacity: 0.75;
+  margin-right: 0.35em;
+}
+.winner_name .sponsor::after {
+  content: " |";
+}
+
+/* ─── Champion (Grand Final / Grand Final Reset) ───────────── */
+.crown { display: none; }
+
+.winner_popup.champion {
+  height: 128px;
+  gap: 28px;
+  padding: 0 64px 0 26px;
+  border-width: 4px;
+  border-radius: 8px;
+  overflow: visible;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0) 45%),
+    var(--theme-color);
+  box-shadow:
+    0 0 0 2px rgba(0, 0, 0, 0.35),
+    0 0 36px var(--accent-color),
+    0 12px 36px rgba(0, 0, 0, 0.55);
+}
+
+/* Slow light sweep, clipped to the popup box. */
+.winner_popup.champion::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  background: linear-gradient(
+    105deg,
+    transparent 40%,
+    rgba(255, 255, 255, 0.28) 50%,
+    transparent 60%
+  );
+  background-size: 250% 100%;
+  background-position: 150% 0;
+  animation: champion_shine 3.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+@keyframes champion_shine {
+  0%, 35% { background-position: 150% 0; }
+  100%    { background-position: -50% 0; }
+}
+
+.winner_popup.champion .crown {
+  display: block;
+  position: absolute;
+  left: 50%;
+  top: -34px;
+  width: 64px;
+  height: 40px;
+  transform: translateX(-50%);
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.55));
+}
+
+.winner_popup.champion .logo {
+  width: 96px;
+  height: 96px;
+}
+
+.winner_popup.champion .winner_label {
+  font-size: 28px;
+  letter-spacing: 0.5em;
+  text-shadow: 0 0 14px var(--accent-color);
+}
+
+.winner_popup.champion .winner_name {
+  font-size: 60px;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
