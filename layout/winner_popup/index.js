@@ -17,11 +17,28 @@ LoadEverything().then(() => {
     return L > 0.5 ? "#111111" : "#ffffff";
   }
 
-  // Show is instant (OBS owns the in-transition); only the automatic hide,
-  // when the score is reset for the next match, fades out.
-  function show() {
+  // Seconds between the score reaching first_to and the fade-in starting, so
+  // the final point can land on stream first. Preview skips it.
+  const SHOW_DELAY_S = 1;
+
+  // Fades in (mirror of hide). The delay lives in the tween itself, so the
+  // killTweensOf() in hide() also cancels a show still waiting: if the score
+  // is taken back within the delay the popup never appears. The fromTo keeps
+  // it invisible (opacity 0) while waiting; visibility flips when it starts.
+  function show(delay) {
     gsap.killTweensOf(popup);
-    gsap.set(popup, { visibility: "visible", opacity: 1, y: 0 });
+    gsap.fromTo(
+      popup,
+      { opacity: 0, y: 40 },
+      {
+        opacity: 1,
+        y: 0,
+        duration: 0.4,
+        ease: "power2.out",
+        delay,
+        onStart: () => gsap.set(popup, { visibility: "visible" }),
+      }
+    );
   }
 
   function hide() {
@@ -48,6 +65,57 @@ LoadEverything().then(() => {
     return { sponsor, name: await Transcript(p.name) };
   }
 
+  // Desktop preview only: the BOARD tab stacks this page over its scoreboard
+  // preview as index.html#preview=winner|champion, and the popup is then shown
+  // whatever the score so its look can be checked. The OBS browser source
+  // loads the file without a fragment, so none of this applies there.
+  function previewMode() {
+    const mode = new URLSearchParams(location.hash.slice(1)).get("preview");
+    return mode === "winner" || mode === "champion" ? mode : null;
+  }
+
+  // The side that reached first_to (the higher score if both did), or 0.
+  function winnerSide(sb) {
+    const bestOf = Number(sb.best_of) || 0;
+    const firstTo = Number(sb.first_to) || (bestOf > 0 ? Math.floor(bestOf / 2) + 1 : 0);
+    const s1 = Number(sb.team["1"].score) || 0;
+    const s2 = Number(sb.team["2"].score) || 0;
+    if (firstTo > 0) {
+      if (s1 >= firstTo && s1 >= s2) return 1;
+      if (s2 >= firstTo) return 2;
+    }
+    return 0;
+  }
+
+  // Render the popup (and show it if it was hidden); no-op when unchanged.
+  function present(side, sponsor, name, isChampion, delay = SHOW_DELAY_S) {
+    const key = `${side}:${sponsor}|${name}|${isChampion}`;
+    if (key === shownKey) return;
+
+    popup.classList.toggle("champion", isChampion);
+    document.querySelector(".winner_label").textContent = isChampion ? "CHAMPION" : "WINNER";
+    document.querySelector(".winner_name").innerHTML =
+      (sponsor ? `<span class="sponsor">${sponsor}</span>` : "") + `<span>${name}</span>`;
+    const first = shownKey === null;
+    shownKey = key;
+    if (first) show(delay);
+  }
+
+  // Preview: the decided winner if any, else the side ahead, else team 1,
+  // with a placeholder while the board has no name yet.
+  async function presentPreview(sb, mode) {
+    const teams = sb && sb.team && sb.team["1"] && sb.team["2"] ? sb.team : null;
+    let side = 1;
+    if (teams) {
+      side = winnerSide(sb) ||
+        ((Number(teams["2"].score) || 0) > (Number(teams["1"].score) || 0) ? 2 : 1);
+    }
+    const { sponsor, name } = teams
+      ? await nameOf(teams[String(side)])
+      : { sponsor: "", name: "" };
+    present(side, sponsor, name || `PLAYER ${side}`, mode === "champion", 0);
+  }
+
   Start = async () => {};
 
   Update = async (event) => {
@@ -65,20 +133,13 @@ LoadEverything().then(() => {
     if (accent) root.setProperty("--accent-color", accent);
 
     const sb = event.data.score && event.data.score[window.scoreboardNumber];
+
+    const mode = previewMode();
+    if (mode) return presentPreview(sb, mode);
+
     if (!sb || !sb.team || !sb.team["1"] || !sb.team["2"]) return;
 
-    const bestOf = Number(sb.best_of) || 0;
-    const firstTo = Number(sb.first_to) || (bestOf > 0 ? Math.floor(bestOf / 2) + 1 : 0);
-    const s1 = Number(sb.team["1"].score) || 0;
-    const s2 = Number(sb.team["2"].score) || 0;
-
-    // Winner = the side that reached first_to (the higher score if both did).
-    let side = 0;
-    if (firstTo > 0) {
-      if (s1 >= firstTo && s1 >= s2) side = 1;
-      else if (s2 >= firstTo) side = 2;
-    }
-
+    const side = winnerSide(sb);
     if (!side) {
       if (shownKey !== null) {
         shownKey = null;
@@ -92,15 +153,12 @@ LoadEverything().then(() => {
     const isChampion = /grand\s*final|グランド\s*ファイナル|グランドファイナル/i.test(sb.match || "");
 
     const { sponsor, name } = await nameOf(sb.team[String(side)]);
-    const key = `${side}:${sponsor}|${name}|${isChampion}`;
-    if (key === shownKey) return;
-
-    popup.classList.toggle("champion", isChampion);
-    document.querySelector(".winner_label").textContent = isChampion ? "CHAMPION" : "WINNER";
-    document.querySelector(".winner_name").innerHTML =
-      (sponsor ? `<span class="sponsor">${sponsor}</span>` : "") + `<span>${name}</span>`;
-    const first = shownKey === null;
-    shownKey = key;
-    if (first) show();
+    present(side, sponsor, name, isChampion);
   };
+
+  // The BOARD tab switches WINNER <-> CHAMPION by rewriting the fragment
+  // only (a same-document navigation): re-render from the last state.
+  window.addEventListener("hashchange", () => {
+    Update({ data }).catch((e) => console.error("Update() failed:", e));
+  });
 });

@@ -235,3 +235,94 @@ def test_a_load_on_a_hidden_preview_navigates_then_freezes_again(buildPreview):
 
     assert "/layout/second/" in rig.page.url().toString()
     assert _waitUntil(lambda: rig.state() == FROZEN)
+
+
+# ── Stacked overlay frame (SetOverlayFrame) ─────────────────────────
+# The Board tab stacks the winner popup over the scoreboard preview as an
+# <iframe> on the previewed page. The throwaway server answers every path
+# with PAGE, so the frame's document carries its own __loadId / __emits.
+
+def _frame(prop):
+    return ("(function(){var f=document.getElementById('%s');"
+            "if(!f)return null;var w=f.contentWindow;"
+            "return w?%s:null;})()" % (LP._OVERLAY_FRAME_ID, prop))
+
+
+def _frameLoadId(rig):
+    return rig.js(_frame("(w.__loadId===undefined?null:w.__loadId)"))
+
+
+def test_an_overlay_frame_is_stacked_on_the_canvas_and_removed_again(
+        buildPreview):
+    rig = buildPreview()
+    rig.load()
+
+    rig.preview.SetOverlayFrame("overlay/index.html#preview=winner")
+
+    assert _waitUntil(lambda: _frameLoadId(rig) is not None)
+    assert rig.js(_frame("w.location.pathname")) == "/layout/overlay/index.html"
+    assert rig.js(_frame("w.location.hash")) == "#preview=winner"
+    # Pinned to the native canvas, above the layout, and inert.
+    assert rig.js(_frame("f.style.width")) == "1920px"
+    assert rig.js(_frame("f.style.height")) == "1080px"
+    assert rig.js(_frame("f.style.pointerEvents")) == "none"
+    assert rig.js(_frame("f.parentNode===document.body")) is True
+
+    rig.preview.SetOverlayFrame(None)
+
+    assert _waitUntil(lambda: rig.js(
+        "document.getElementById('%s')===null" % LP._OVERLAY_FRAME_ID))
+
+
+def test_retargeting_the_overlay_fragment_keeps_its_document(buildPreview):
+    # WINNER <-> CHAMPION on the Board tab: no reload of the popup page.
+    rig = buildPreview()
+    rig.load()
+    page = rig.js("window.__loadId")
+    rig.preview.SetOverlayFrame("overlay/index.html#preview=winner")
+    assert _waitUntil(lambda: _frameLoadId(rig) is not None)
+    frame = _frameLoadId(rig)
+
+    rig.preview.SetOverlayFrame("overlay/index.html#preview=champion")
+
+    assert _waitUntil(
+        lambda: rig.js(_frame("w.location.hash")) == "#preview=champion")
+    assert _frameLoadId(rig) == frame
+    assert rig.js("window.__loadId") == page
+
+
+def test_the_overlay_frame_follows_the_preview_across_loads(buildPreview):
+    # Set before the first load, then a design switch, then a discard: each
+    # new document gets the frame back.
+    rig = buildPreview(discardAfterMs=200)
+    rig.preview.SetOverlayFrame("overlay/index.html#preview=champion")
+    rig.load("first")
+    assert _waitUntil(lambda: _frameLoadId(rig) is not None)
+
+    rig.load("second")
+    assert _waitUntil(lambda: _frameLoadId(rig) is not None)
+    assert rig.js(_frame("w.location.hash")) == "#preview=champion"
+
+    rig.hide()
+    assert _waitUntil(lambda: rig.state() == DISCARDED)
+    loads = len(rig.loads)
+    rig.reveal()
+    assert _waitUntil(lambda: len(rig.loads) > loads), "no reload on reveal"
+    assert _waitUntil(lambda: _frameLoadId(rig) is not None)
+    assert rig.js(_frame("w.location.hash")) == "#preview=champion"
+
+
+def test_a_revealed_preview_asks_the_overlay_frame_for_the_full_state(
+        buildPreview):
+    rig = buildPreview()
+    rig.load()
+    rig.preview.SetOverlayFrame("overlay/index.html#preview=winner")
+    assert _waitUntil(lambda: _frameLoadId(rig) is not None)
+
+    rig.hide()
+    assert _waitUntil(lambda: rig.state() == FROZEN)
+    rig.reveal()
+
+    assert _waitUntil(
+        lambda: rig.js(_frame("w.__emits.join()")) == "program_state")
+    assert rig.js("window.__emits.join()") == "program_state"
