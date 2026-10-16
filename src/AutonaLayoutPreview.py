@@ -10,6 +10,7 @@ this module must not pull the singleton chain, so it can sit anywhere in
 Autona.py's import order.
 """
 
+import json
 import logging
 import math
 import os
@@ -33,14 +34,44 @@ DEFAULT_ENTRY = "index.html"
 
 logger = logging.getLogger(__name__)
 
+# Element id of the optional second overlay stacked on the previewed page
+# (see AutonaLayoutPreview.SetOverlayFrame).
+_OVERLAY_FRAME_ID = "__autona_overlay_frame"
+
 # Asks an overlay page for a full state snapshot over its own Socket.IO
 # connection (globals.js exposes it as window.tshSocket; the server answers a
 # 'program_state' request to the sender only). A socket that is not
 # connected needs nothing from us: socket.io reconnects on its own and the
-# server's connect handler pushes the full state.
+# server's connect handler pushes the full state. A stacked overlay frame
+# runs its own globals.js and socket, so it is asked too.
 _REQUEST_FULL_STATE_JS = (
-    "(function(){var s=window.tshSocket;"
-    "if(s&&s.connected){s.emit('program_state',{});}})()")
+    "(function(){function ask(w){var s=w&&w.tshSocket;"
+    "if(s&&s.connected){s.emit('program_state',{});}}"
+    "ask(window);"
+    f"var f=document.getElementById('{_OVERLAY_FRAME_ID}');"
+    "if(f){ask(f.contentWindow);}})()")
+
+# Adds, retargets or removes the stacked overlay frame. The frame is a
+# same-origin <iframe> pinned to the native 1920x1080 canvas inside <body>,
+# so it follows the CSS scale bridged onto <body> and is part of what the
+# preview snapshot grabs. Retargeting goes through location.replace(): a
+# change of the URL fragment alone is then a same-document navigation, so the
+# overlay is not reloaded (and leaves no history entry behind).
+_SET_OVERLAY_FRAME_JS = (
+    "(function(src){"
+    f"var f=document.getElementById('{_OVERLAY_FRAME_ID}');"
+    "if(!src){if(f){f.remove();}return;}"
+    "if(!document.body){return;}"
+    "if(!f){f=document.createElement('iframe');"
+    f"f.id='{_OVERLAY_FRAME_ID}';"
+    "f.setAttribute('aria-hidden','true');f.tabIndex=-1;"
+    "f.style.cssText='position:absolute;left:0;top:0;"
+    "width:%dpx;height:%dpx;border:0;margin:0;padding:0;"
+    "background:transparent;pointer-events:none;z-index:2147483647;';"
+    "f.dataset.src=src;f.src=src;document.body.appendChild(f);return;}"
+    "if(f.dataset.src!==src){f.dataset.src=src;"
+    "f.contentWindow.location.replace(src);}"
+    "})(%s)")
 
 
 # ── Web server readiness gate (startup Step 4c) ──────────────────────────
@@ -241,6 +272,9 @@ class AutonaLayoutPreview(QFrame):
         # QThread is spawned) and the socket actually being bound.
         self._loadRetries = 0
         self._pendingUrl = None
+        # Optional overlay stacked on the page (SetOverlayFrame), re-applied
+        # after every load since a load replaces the document it lived in.
+        self._overlayFrame = None
         self.view.loadFinished.connect(self._OnLoadFinished)
         # Freeze / discard while off screen, catch up on reveal (see the
         # class docstring and the "Lifecycle" section below).
@@ -418,6 +452,8 @@ class AutonaLayoutPreview(QFrame):
             return
         self._pendingUrl = None
         self._applyScale()
+        if ok and self._overlayFrame:
+            self._applyOverlayFrame()
         # A load that finished while the panel was hidden: Qt's recommended
         # state may already have settled while _pendingUrl still held the
         # freeze back, so no further change would come to trigger it.
@@ -426,6 +462,34 @@ class AutonaLayoutPreview(QFrame):
     def _RetryLoad(self):
         if self._pendingUrl:
             self.view.setUrl(QUrl(self._pendingUrl))
+
+    # ── Stacked overlay frame ───────────────────────────────────────
+    def SetOverlayFrame(self, path):
+        """Stack a second overlay over the previewed layout, or remove it.
+
+        ``path`` is relative to the layout directory, e.g.
+        ``"winner_popup/index.html#preview=winner"``; ``None`` removes the
+        frame and frees its document. The overlay is an ``<iframe>`` on the
+        previewed page (same web server, so same origin) rather than a second
+        QWebEngineView: it shares the page's renderer, follows its zoom and
+        CSS scale, shows in copy / save snapshots, and composites over the
+        page the way two browser sources stack in OBS. Desktop preview only:
+        nothing is written to the state or to the overlay OBS loads.
+
+        Switching to a path that differs only in its ``#fragment`` keeps the
+        overlay's document (no reload), so an overlay can take a cheap,
+        reload-free option there. The frame survives design switches and
+        the reload after a discard: it is re-added after every load."""
+        self._overlayFrame = path
+        # Not loaded yet, or navigating: the coming loadFinished applies it.
+        if self._pendingUrl is None and not self.view.url().isEmpty():
+            self._applyOverlayFrame()
+
+    def _applyOverlayFrame(self):
+        src = (f"/{LAYOUT_DIR}/{self._overlayFrame}"
+               if self._overlayFrame else None)
+        self.view.page().runJavaScript(_SET_OVERLAY_FRAME_JS % (
+            self.NATIVE_WIDTH, self.NATIVE_HEIGHT, json.dumps(src)))
 
     # ── Lifecycle: freeze / discard while off screen ────────────────
     # Active --(hidden)--> Frozen --(DISCARD_AFTER_MS)--> Discarded, and

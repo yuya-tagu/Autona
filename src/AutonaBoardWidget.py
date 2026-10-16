@@ -11,6 +11,8 @@ the operator's "make it look right and get it into OBS" workflow:
 * **Preview** — an embedded QWebEngineView pointed at the running web server
   (``http://127.0.0.1:{port}/layout/{design}/index.html``). It shares the same
   Socket.IO feed as a real overlay, so score and color edits reflect live.
+  The winner popup (``layout/winner_popup/``) can be stacked on it as
+  WINNER / CHAMPION to check its look; preview-only, never persisted.
 * **Colors** — the scoreboard's own theme / accent pickers (the shared
   ``AutonaFeatureColors`` card, feature ``board``). Unset, they inherit the
   tournament colors edited on the EVENT tab.
@@ -37,6 +39,16 @@ from . import ui_layout as L
 
 LAYOUT_DIR = "layout"
 DEFAULT_DESIGN = "scoreboard_crewbattle"
+WINNER_POPUP_DIR = "winner_popup"
+
+# Winner-popup choices for the preview: (label, mode). The mode goes to the
+# popup page as its #preview= fragment (see layout/winner_popup/index.js);
+# None leaves the popup off the preview.
+WINNER_POPUP_PREVIEW_MODES = (
+    ("非表示", None),
+    ("WINNER", "winner"),
+    ("CHAMPION", "champion"),
+)
 
 # Friendlier labels than the prettified folder name where it helps.
 DESIGN_DISPLAY_NAMES = {
@@ -133,6 +145,7 @@ class AutonaBoardWidget(QDockWidget):
             UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN, UI.PANEL_MARGIN)
         rightCol.setSpacing(UI.PANEL_MARGIN)
         rightCol.addLayout(self._buildDesignSelector())
+        rightCol.addLayout(self._buildWinnerPopupSelector())
         rightCol.addWidget(self._buildPreview(), 1)
         rightCol.addLayout(self.preview.BuildActionButtons())
 
@@ -335,6 +348,34 @@ class AutonaBoardWidget(QDockWidget):
         if design:
             self.preview.load(design)
 
+    def _buildWinnerPopupSelector(self):
+        # Same label + full-width combo shape as the design selector above.
+        # Preview-only and not persisted: it starts off on every launch and
+        # never reaches the state or the popup OBS shows.
+        col = QVBoxLayout()
+        col.setSpacing(UI.SPACE_SM)
+        label = QLabel("勝者ポップアップをプレビューに重ねる")
+        L.apply_section_title(label)
+        col.addWidget(label)
+
+        self.winnerPopupCombo = QComboBox()
+        for text, mode in WINNER_POPUP_PREVIEW_MODES:
+            self.winnerPopupCombo.addItem(text, mode)
+        self.winnerPopupCombo.setToolTip(
+            "このプレビューにだけ表示します。OBS の表示には影響しません。")
+        # Connect after the items are in so filling the combo doesn't fire.
+        self.winnerPopupCombo.currentIndexChanged.connect(
+            self._onWinnerPopupPreviewChanged)
+        col.addWidget(self.winnerPopupCombo)
+        return col
+
+    def _onWinnerPopupPreviewChanged(self, _idx):
+        # The preview re-adds the popup after every load, so the choice
+        # carries over design switches without anything here.
+        mode = self.winnerPopupCombo.currentData()
+        self.preview.SetOverlayFrame(
+            f"{WINNER_POPUP_DIR}/index.html#preview={mode}" if mode else None)
+
     def showEvent(self, e):
         super().showEvent(e)
         # Lazy-load on first reveal: by the time the user opens this tab the
@@ -369,16 +410,47 @@ class AutonaBoardWidget(QDockWidget):
             lambda: QApplication.clipboard().setText(self.obsPathField.text()))
         btnRow.addWidget(btCopy)
         btOpen = QPushButton("エクスプローラで開く")
-        btOpen.clicked.connect(self._openInExplorer)
+        btOpen.clicked.connect(lambda: self._openInExplorer())
         btnRow.addWidget(btOpen)
         btnRow.addStretch(1)
         group.layout().addLayout(btnRow)
+
+        # Winner popup: a separate OBS source, so it gets its own fixed path
+        # (it does not depend on the selected design).
+        popupTitle = QLabel("勝者ポップアップ（WINNER / CHAMPION）")
+        popupTitle.setWordWrap(True)
+        group.layout().addWidget(popupTitle)
+        popupHint = QLabel(
+            "試合の勝者が決まると中央下部に名前入りで表示されます。"
+            "上と同じ手順で、別のブラウザソースとして追加します。")
+        popupHint.setWordWrap(True)
+        group.layout().addWidget(popupHint)
+        self.winnerPopupPathField = QLineEdit()
+        self.winnerPopupPathField.setReadOnly(True)
+        self.winnerPopupPathField.setText(self._winnerPopupPath())
+        group.layout().addWidget(self.winnerPopupPathField)
+        popupBtnRow = QHBoxLayout()
+        btPopupCopy = QPushButton("コピー")
+        btPopupCopy.clicked.connect(
+            lambda: QApplication.clipboard().setText(
+                self.winnerPopupPathField.text()))
+        popupBtnRow.addWidget(btPopupCopy)
+        btPopupOpen = QPushButton("エクスプローラで開く")
+        btPopupOpen.clicked.connect(
+            lambda: self._openInExplorer(self._winnerPopupPath()))
+        popupBtnRow.addWidget(btPopupOpen)
+        popupBtnRow.addStretch(1)
+        group.layout().addLayout(popupBtnRow)
 
         note = QLabel(
             "Autona を起動したままにすると、OBS 上でスコアがリアルタイムに反映されます。")
         note.setWordWrap(True)
         group.layout().addWidget(note)
         return group
+
+    def _winnerPopupPath(self):
+        return os.path.normpath(
+            os.path.abspath(f"{LAYOUT_DIR}/{WINNER_POPUP_DIR}/index.html"))
 
     def _obsPath(self):
         design = self._currentDesign()
@@ -390,8 +462,9 @@ class AutonaBoardWidget(QDockWidget):
     def _refreshObsPath(self):
         self.obsPathField.setText(self._obsPath())
 
-    def _openInExplorer(self):
-        path = self._obsPath()
+    def _openInExplorer(self, path=None):
+        if path is None:
+            path = self._obsPath()
         if not path or not os.path.exists(path):
             return
         try:
