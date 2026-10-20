@@ -501,7 +501,7 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
   - `SetMatchField` は `SCORE_MATCH_FIELDS` 以外を拒否する。旧経路では
     「combo の objectName が何であれ書く」だったので、そもそも不正な field という
     ケースが存在しなかった
-- **調査で見つかった既存バグ（今回は修正せず pin のみ）**:
+- **調査で見つかった既存バグ（今回は修正せず pin のみ → 2026-10-21 S-17 として解消: リセット系は `ResetMatch` でラウンド名・フェーズ・プールも消し、セット読込前の `ClearScore` は消さない）**:
   `AutonaScoreboardWidget.ClearScore` の combo ループは
   `self.scoreColumn.findChildren(QComboBox)` だが、3 つの combo は構築時に
   `scoreBar` へ re-home されるため **board 1/2 では 1 個もマッチしない**

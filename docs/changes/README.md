@@ -23,3 +23,4 @@
 | [commentary-rework-impact-analysis.md](commentary-rework-impact-analysis.md) | 実況・解説機能リワーク（2026-07）の破壊的変更・移行方針（スキーマ刷新 / OBS URL 差し替え） |
 | [startup-architecture-redesign.md](startup-architecture-redesign.md) | 起動アーキテクチャ再設計の設計書（終着点 4 段パイプライン / 移行 5 ステップ / 各ステップの検証チェックリスト） |
 | [headless-core-redesign.md](headless-core-redesign.md) | Headless Core 再設計（書き込み経路の Actions 集約）の設計書（ADR-004 の実行計画 / 移行 6 ステップ / T-18・T-19 の具体化） |
+| [layout-custom-unification.md](layout-custom-unification.md) | layout/custom（Designer 製）を他 layout と同じ概念に統合する設計書（共通ランタイム 1 本化 / LayoutCatalog + `/api/v1/layouts` / 移行 5 ステップ） |

@@ -394,6 +394,49 @@ def test_rewriting_an_unchanged_field_does_not_light_the_apply_button(
     assert spy.held_updates_for(PREFIX) == []
 
 
+def test_clear_match_info_blanks_the_bar_and_the_english_round_in_one_cycle(
+        actions, heldBoard, spy):
+    # The match-bar half of an operator's reset (S-17).
+    for field, value in (("phase", "Bracket"),
+                         ("pool", "Pool A"),
+                         ("match", "Winners Final")):
+        actions.SetMatchField(BOARD, field, value)
+    SM.Set(f"{PREFIX}.match_en", "Winners Final")
+    spy.held_updates.clear()
+
+    assert actions.ClearMatchInfo(BOARD) is True
+
+    for field in schema.SCORE_MATCH_FIELDS:
+        assert SM.Get(f"{PREFIX}.{field}") == ""
+    assert SM.Get(f"{PREFIX}.match_en") == ""
+    assert spy.held_updates_for(PREFIX) == [PREFIX]
+
+
+def test_clear_match_info_does_not_add_an_english_round_to_a_board_without_one(
+        actions):
+    # Board 3 never publishes match_en (CrewBattleService); a reset must not
+    # be what introduces it.
+    actions.SetMatchField(3, "match", "Winners Final")
+
+    actions.ClearMatchInfo(3)
+
+    assert SM.Get("score.3.match") == ""
+    assert SM.Get("score.3.match_en") is None
+
+
+def test_clear_match_info_on_a_clear_bar_does_not_light_the_apply_button(
+        actions, heldBoard, spy):
+    for field in schema.SCORE_MATCH_FIELDS:
+        actions.SetMatchField(BOARD, field, "")
+    actions.ApplyChanges(BOARD)
+    spy.held_updates.clear()
+
+    assert actions.ClearMatchInfo(BOARD) is False
+
+    assert SM.HasPendingChanges(PREFIX) is False
+    assert spy.held_updates_for(PREFIX) == []
+
+
 # ── team card fields ─────────────────────────────────────────────────────
 
 def test_set_team_name_writes_the_display_team(actions, heldBoard):

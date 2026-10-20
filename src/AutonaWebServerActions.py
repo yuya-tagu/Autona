@@ -433,9 +433,12 @@ class WebServerActions(QObject):
         if best_of is not None:
             best_of.setValue(0)
 
+    # reset_match / clear_all are operator resets, so they go through the
+    # board's ResetMatch (scores + losers flags + round name / phase / pool),
+    # not the set-load pre-pass ClearScore, which keeps the match bar (S-17).
     @gui_thread_sync
     def reset_match(self, scoreboard):
-        self.scoreboard.GetScoreboard(scoreboard).ClearScore()
+        self.scoreboard.GetScoreboard(scoreboard).ResetMatch()
         self._reset_best_of(scoreboard)
         return "OK"
 
@@ -446,7 +449,7 @@ class WebServerActions(QObject):
 
     @gui_thread_sync
     def clear_all(self, scoreboard):
-        self.scoreboard.GetScoreboard(scoreboard).ClearScore()
+        self.scoreboard.GetScoreboard(scoreboard).ResetMatch()
         self._reset_best_of(scoreboard)
         self.scoreboard.GetScoreboard(scoreboard).playerNumber.setValue(1)
         self.scoreboard.GetScoreboard(scoreboard).charNumber.setValue(1)

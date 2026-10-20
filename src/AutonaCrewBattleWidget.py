@@ -603,6 +603,21 @@ class AutonaCrewBattleWidget(QWidget):
         # crew that means full stocks + no active member.
         self.ResetScore()
 
+    def ResetMatch(self):
+        # Mirrors AutonaScoreboardWidget.ResetMatch: the reset that
+        # WebServerActions' reset_match / clear_all run, i.e. ClearScore plus
+        # the match bar (S-17). The three keys are the ones board 3 shares
+        # with boards 1/2, so they are cleared by the same operation.
+        with StateManager.SaveBlock():
+            self.ClearScore()
+            AutonaActions.instance.ClearMatchInfo(self.scoreboardNumber)
+            # Nothing renders score.3.{phase,pool,match} back into these
+            # combos, so they are blanked here -- silenced, because their
+            # handlers would only write the value just written above.
+            for combo in (self.phaseCombo, self.poolCombo, self.matchCombo):
+                with QSignalBlocker(combo), QSignalBlocker(combo.lineEdit()):
+                    combo.setCurrentText("")
+
     def CommandClearAll(self, no_mains=False):
         # Mirrors AutonaScoreboardWidget.CommandClearAll (wipe player data).
         with StateManager.SaveBlock():

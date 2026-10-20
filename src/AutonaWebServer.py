@@ -94,6 +94,16 @@ def _build_web_app():
         logger.debug(f"[FLASK] ← {request.method} {request.path} [{response.status_code}]")
         return response
 
+    # ------------------------------------------------------------------
+    # DEPRECATED legacy routes (/program-state, /score, /scoreboard<N>-*,
+    # /update-*, /get-*, /load-*, ... down to /states below).
+    # The canonical external-control API is /api/v1/ (src/AutonaApiV1.py,
+    # ADR-001). These legacy routes are kept unchanged for existing OBS /
+    # Stream Deck setups, are frozen (no new routes here), and are scheduled
+    # for removal in v2.0. Do not change their behavior.
+    # /api/designer/* and the static-file routes further below are NOT part
+    # of the deprecation.
+    # ------------------------------------------------------------------
     @app.route('/program-state')
     def program_state():
         return WebServer.actions.program_state()

@@ -842,37 +842,103 @@ def test_a_match_bar_edit_is_exactly_one_save_cycle(autonaApp):
         f"one match-bar edit produced {len(seen)} save cycles instead of 1")
 
 
-def test_clearing_the_score_does_not_clear_the_match_bar_known_gap(autonaApp):
-    """A pre-existing gap, found while rewiring the combos and left as it is.
+# ── the match bar: an operator's reset vs. a set load's pre-pass (S-17) ──
+#
+# Two clears that used to be one function. The reset entry points -- the
+# すべての入力値をリセット button, and WebServerActions' reset_match /
+# clear_all, which every legacy route, Socket.IO event and /api/v1
+# :reset-match / :clear delegates to -- blank round name / phase / pool.
+# The clear NewSetSelected runs before a new set arrives must not:
+# SetLoadService.ApplyMatchInfo keeps the round for a payload that carries
+# none, so a reset-style clear there would blank the round mid-stream.
 
-    ClearScore's first loop is `self.scoreColumn.findChildren(QComboBox)`,
-    and the three combos are re-homed out of `scoreColumn` into the score bar
-    while the board is built -- so on boards 1 and 2 that loop has matched
-    nothing for as long as this layout has existed. (WebServerActions'
-    `_reset_best_of` carries a comment about the same reparenting biting the
-    best_of spinbox, where it raised an AttributeError instead of quietly
-    doing nothing.) ResetAllInputs' own docstring still claims it clears
-    "phase/round", so the intent was there.
+def _confirmed(method):
+    """Run a method that asks "are you sure?" first, answering Yes."""
+    from qtpy.QtWidgets import QMessageBox
 
-    Pinned rather than fixed: ClearScore is also what NewSetSelected runs
-    before loading a new set, and SetLoadService.ApplyMatchInfo deliberately
-    leaves the round name alone for a payload that carries none -- so
-    clearing here would blank the round mid-stream for exactly those
-    payloads. That is a product decision, not a rewiring one.
+    with patch.object(QMessageBox, "question",
+                      return_value=QMessageBox.StandardButton.Yes):
+        method()
+
+
+_RESETS = {
+    "ResetAllInputs": lambda app, board, n: _confirmed(board.ResetAllInputs),
+    "reset_match": lambda app, board, n: app.actions().reset_match(n),
+    "clear_all": lambda app, board, n: app.actions().clear_all(n),
+}
+
+
+@pytest.mark.parametrize("reset", sorted(_RESETS))
+@pytest.mark.parametrize("boardNumber", [1, 2])
+def test_a_reset_clears_the_match_bar(autonaApp, boardNumber, reset):
+    board = autonaApp.board(boardNumber)
+    board.ChangeSetData(dict(_SET))
+    autonaApp.settle()
+    assert _matchFields(board) == ("Winners Final", "Bracket", "Pool A")
+
+    _RESETS[reset](autonaApp, board, boardNumber)
+    autonaApp.settle()
+
+    prefix = f"score.{boardNumber}"
+    assert autonaApp.get(f"{prefix}.match") == ""
+    assert autonaApp.get(f"{prefix}.phase") == ""
+    assert autonaApp.get(f"{prefix}.pool") == ""
+    # The English form of the same round name (the YouTube title reads it).
+    assert autonaApp.get(f"{prefix}.match_en") == ""
+    # The combos follow the state, exactly as they do for a loaded set.
+    assert _matchFields(board) == ("", "", "")
+    # ...and the half of the reset that already worked still does.
+    assert (_score(autonaApp, 1, boardNumber),
+            _score(autonaApp, 2, boardNumber)) == (0, 0)
+    assert autonaApp.get(f"{prefix}.team.2.losers") is False
+
+
+def test_a_set_without_a_round_name_keeps_the_previous_one(autonaApp):
+    """The set-load pre-pass (NewSetSelected -> ClearScore) is not a reset.
+
+    A payload carrying no round_name / tournament_phase / tournament_pool
+    leaves the match bar as the previous set had it.
     """
     board = autonaApp.board(1)
     board.ChangeSetData(dict(_SET))
     autonaApp.settle()
 
-    board.ClearScore()
+    board.NewSetSelected({"id": "1001", "auto_update": "set"})
+    autonaApp.settle()
+    # The pre-pass alone must not have touched it either.
+    assert autonaApp.get("score.1.match") == "Winners Final"
+
+    board.UpdateSetData({"id": "1001", "team1score": 1, "team2score": 0})
     autonaApp.settle()
 
-    assert board.scoreColumn.findChildren(QComboBox) == [], (
-        "the match combos are back under scoreColumn -- ClearScore's loop is "
-        "live again, which is a behaviour change to decide on deliberately")
     assert autonaApp.get("score.1.match") == "Winners Final"
     assert autonaApp.get("score.1.phase") == "Bracket"
     assert autonaApp.get("score.1.pool") == "Pool A"
+    assert _matchFields(board) == ("Winners Final", "Bracket", "Pool A")
+    assert (_score(autonaApp, 1), _score(autonaApp, 2)) == (1, 0)
+
+
+def test_a_set_with_a_round_name_overwrites_the_previous_one(autonaApp):
+    board = autonaApp.board(1)
+    board.ChangeSetData(dict(_SET))
+    autonaApp.settle()
+
+    board.NewSetSelected({"id": "1002", "auto_update": "set"})
+    autonaApp.settle()
+    board.UpdateSetData({
+        "id": "1002",
+        "round_name": "Losers Final",
+        "round_name_en": "Losers Final",
+        "tournament_phase": "Top 8",
+        "tournament_pool": "Pool B",
+    })
+    autonaApp.settle()
+
+    assert autonaApp.get("score.1.match") == "Losers Final"
+    assert autonaApp.get("score.1.match_en") == "Losers Final"
+    assert autonaApp.get("score.1.phase") == "Top 8"
+    assert autonaApp.get("score.1.pool") == "Pool B"
+    assert _matchFields(board) == ("Losers Final", "Top 8", "Pool B")
 
 
 def test_clearing_the_score_still_zeroes_the_score_and_the_losers_flags(
