@@ -1116,19 +1116,11 @@ class AutonaScoreboardWidget(QWidget):
         label.setVisible(bool(parts))
 
     def ResetAllInputs(self):
-        # すべての入力値をリセット: clear players, scores, BEST OF and team
-        # names in one shot (mirrors the Web UI "全クリア" action). Values
-        # only — the team-mode player-count layout is kept. The cleared
-        # state still goes through the 反映 gate like any edit.
-        #
-        # NOTE: this does NOT clear phase/round despite what it used to
-        # claim above. ClearScore's combo loop (below) targets
-        # self.scoreColumn.findChildren(QComboBox), but the three combos are
-        # re-homed out of scoreColumn into the score bar at construction
-        # time, so on boards 1/2 that loop matches nothing — round name,
-        # phase and pool survive a reset untouched. Known gap, not fixed
-        # here (see .claude/known-smells.md S-17 and
-        # tests/test_clearing_the_score_does_not_clear_the_match_bar_known_gap).
+        # すべての入力値をリセット: clear players, scores, round name / phase /
+        # pool, BEST OF and team names in one shot (mirrors the Web UI
+        # "全クリア" action). Values only — the team-mode player-count layout
+        # is kept. The cleared state still goes through the 反映 gate like
+        # any edit.
         answer = QMessageBox.question(
             self,
             QApplication.translate("app", "すべての入力値をリセット"),
@@ -1140,7 +1132,7 @@ class AutonaScoreboardWidget(QWidget):
             return
         with StateManager.SaveBlock():
             self.CommandClearAll()
-            self.ClearScore()
+            self.ResetMatch()
             self.bestOfSpin.setValue(0)
             for column in (self.team1column, self.team2column):
                 teamName = column.findChild(QLineEdit, schema.TEAM_NAME_KEY)
@@ -1931,6 +1923,8 @@ class AutonaScoreboardWidget(QWidget):
                 # Important because when we receive scores as 0 we don't update based on that
                 # Otherwise an offline set which is only updated after it's complete would reset the score
                 # all the time since it would be 0-0 until then
+                # ClearScore, not ResetMatch: the round name / phase / pool
+                # stay until the new set brings its own (S-17).
                 self.CommandClearAll(no_mains=data.get(
                     "no_mains") if data.get("no_mains") != None else False)
                 self.ClearScore()
@@ -2013,15 +2007,37 @@ class AutonaScoreboardWidget(QWidget):
         self.lastSetSelected = None
 
     def ClearScore(self):
-        for c in self.scoreColumn.findChildren(QComboBox):
-            c.setCurrentText("")
-            c.lineEdit().editingFinished.emit()
+        """Zero both scores and both losers flags -- and nothing else.
 
+        This is the clear NewSetSelected runs before a new set arrives, so it
+        must leave the match bar alone: SetLoadService.ApplyMatchInfo keeps
+        the round name / phase for a payload that carries none, and blanking
+        them here would wipe the round mid-stream for exactly those sets. The
+        operator's reset is ResetMatch(), which adds the match bar (S-17).
+
+        (It used to start with a loop over scoreColumn's combos, which has
+        matched nothing since the three were re-homed into the score bar.)
+        """
         self.scoreDisplay1.setValue(0)
         self.scoreDisplay2.setValue(0)
 
         self.team1column.findChild(QCheckBox, schema.TEAM_LOSERS_KEY).setChecked(False)
         self.team2column.findChild(QCheckBox, schema.TEAM_LOSERS_KEY).setChecked(False)
+
+    def ResetMatch(self):
+        """The operator's reset: ClearScore plus the match bar (S-17).
+
+        Every reset entry point comes here -- the すべての入力値をリセット
+        button (ResetAllInputs) and WebServerActions' reset_match / clear_all
+        (legacy REST, Socket.IO and /api/v1 :reset-match / :clear). A set
+        load does not: see ClearScore.
+
+        The match bar is cleared in the state; the combos follow through
+        _SyncSetFields like they do for a loaded set. One save cycle.
+        """
+        with StateManager.SaveBlock():
+            self.ClearScore()
+            AutonaActions.instance.ClearMatchInfo(self.scoreboardNumber)
 
     def CommandTeamColor(self, team: int, color, force_opponent=False):
         # Resolving a game's preset color *index* to a hex string stays here:

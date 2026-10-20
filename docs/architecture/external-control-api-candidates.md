@@ -26,6 +26,8 @@
 
 ---
 
+> **2026-10-21 更新**: 本書が棚卸しした旧ルートは ADR-001 Addendum により **deprecated（v2.0 で削除予定、それまで挙動不変）** と宣言済み。外部制御の正本は `/api/v1`。
+
 ## 2. 重要な前提（Confirmed）
 
 外部 API を設計する上で土台になる、コードから確認した事実。
@@ -87,9 +89,9 @@ WS 列は対応する Socket.IO イベントの有無。
 | 28 | `GET /scoreboard<N>-stats-last-sets-<player>` | W | ✅ `stats_last_sets` | `stats_last_sets` | 選手の直近成績 |
 | 29 | `GET /scoreboard<N>-stats-history-sets-<player>` | W | ✅ `stats_history_sets` | `stats_history_sets` | 選手の通算成績 |
 | 30 | `GET /scoreboard<N>-reset-scores` | W | ✅ `reset_scores` | `reset_scores` | スコアのみリセット |
-| 31 | `GET /scoreboard<N>-reset-match` | W | ✅ `reset_match` | `reset_match` | スコア+best_of リセット |
+| 31 | `GET /scoreboard<N>-reset-match` | W | ✅ `reset_match` | `reset_match` | スコア+best_of+ラウンド名/フェーズ/プール リセット（2026-10-21〜） |
 | 32 | `GET /scoreboard<N>-reset-players` | W | ✅ `reset_players` | `reset_players` | 選手情報クリア |
-| 33 | `GET /scoreboard<N>-clear-all` | W | ✅ `clear_all` | `clear_all` | **全消去（スコア/best_of/人数/キャラ/選手）** |
+| 33 | `GET /scoreboard<N>-clear-all` | W | ✅ `clear_all` | `clear_all` | **全消去（スコア/best_of/人数/キャラ/選手/ラウンド名・フェーズ・プール）** |
 | 34 | `GET /scoreboard<N>-get-thumbnail-<fmt>` | R/W | — | `get_thumbnail` | サムネ生成して画像返却（**WebEngine=重い**） |
 | 35 | `GET /get-sets` | R | ✅ `get_sets` | `get_sets` | 試合一覧（provider 無なら `[]`） |
 | 36 | `GET /get-match-<setId>` | R | ✅ `get_match` | `get_match` | セット詳細 |

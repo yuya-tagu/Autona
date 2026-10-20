@@ -492,7 +492,7 @@ GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src
 
 ---
 
-## S-17: ResetAllInputs / ClearScore が match バー（ラウンド名・フェーズ・プール）をクリアしない [P2/D1/S2] 🔴 未着手（既知バグ・PdM 判断待ち）
+## S-17: ResetAllInputs / ClearScore が match バー（ラウンド名・フェーズ・プール）をクリアしない [P2/D1/S2] ✅ 解消済み（2026-10-21）
 
 **根拠**: Headless Core 移行 Step 5-1 の検収（`docs/changes/headless-core-redesign.md` 5-1 節）。
 既存コードの調査中に発見。今回は修正せず pin のみ。
@@ -513,7 +513,30 @@ GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src
 セット読込の前処理としては残ってほしい」という要求が競合しており、UX 判断が要る
 （例: `ClearScore` を「操作者が押した場合」と「内部前処理」で分岐させる等）。
 
-**Pin**: `tests/test_scoreboard_operations.py::test_clearing_the_score_does_not_clear_the_match_bar_known_gap`
+**仕様（PdM 決定）**: 「リセット」操作ではラウンド名・フェーズ・プールも消す。セット読込の前処理では
+消さない（新しいセットに `round_name` / `tournament_phase` / `tournament_pool` があれば上書き、
+無ければ前の値を残す）。
+
+**解消**: 2 つの意図を名前で分けた。
+
+- `AutonaScoreboardWidget.ClearScore` = スコアと LOSERS だけを消す（セット読込前処理。
+  `NewSetSelected` だけが直接呼ぶ）。中身の無かった `scoreColumn` combo ループは削除
+- `AutonaScoreboardWidget.ResetMatch` = `ClearScore` + match バー（1 SaveBlock）。
+  match バーは `AutonaActions.ClearMatchInfo(board)`（core）が `phase`/`pool`/`match` を空にし、
+  `match_en`（同じラウンド名の英語版。YouTube タイトルが読む）もキーがある board なら空にする。
+  combo は `_SyncSetFields` が state から描画する
+- リセット全経路が `ResetMatch` を通る: すべての入力値をリセット（`ResetAllInputs`）/
+  `WebServerActions.reset_match` / `clear_all`（legacy REST・Socket.IO・`/api/v1 :reset-match`・
+  `:clear` はすべてここへ委譲）。board 3 も同名の `AutonaCrewBattleWidget.ResetMatch` で
+  match バーを消す（`match_en` は作らない）
+- スコアだけのリセット（スコアリセット ボタン / `reset_scores` / `Ctrl+Shift+R` /
+  `/api/v1 score:reset` = `AutonaActions.ResetScore`）は対象外のまま（match バーは残る）
+
+**回帰テスト**: `tests/test_scoreboard_operations.py::test_a_reset_clears_the_match_bar`（board 1/2 ×
+3 経路）/ `::test_a_set_without_a_round_name_keeps_the_previous_one` /
+`::test_a_set_with_a_round_name_overwrites_the_previous_one`、
+`tests/test_crew_board.py::test_a_reset_clears_the_crew_match_bar`、
+`tests/test_actions.py::test_clear_match_info_*`（3 件）
 
 ---
 

@@ -452,6 +452,31 @@ def test_typing_in_the_crew_match_bar_reaches_the_state(autonaApp):
     assert _get(autonaApp, "match") == "Winners Final"
 
 
+@pytest.mark.parametrize("reset", ["reset_match", "clear_all"])
+def test_a_reset_clears_the_crew_match_bar(autonaApp, reset):
+    # S-17, board 3 half: the generic resets clear round / phase / pool here
+    # too (tests/test_scoreboard_operations.py has boards 1/2).
+    board = autonaApp.board(BOARD)
+    _typeCombo(board.phaseCombo, "Pools")
+    _typeCombo(board.poolCombo, "A")
+    _typeCombo(board.matchCombo, "Winners Final")
+    autonaApp.settle()
+
+    getattr(autonaApp.actions(), reset)(BOARD)
+    autonaApp.settle()
+
+    assert _get(autonaApp, "phase") == ""
+    assert _get(autonaApp, "pool") == ""
+    assert _get(autonaApp, "match") == ""
+    # Nothing renders these keys back into board 3's combos, so the reset
+    # blanks them itself.
+    assert (board.phaseCombo.currentText(), board.poolCombo.currentText(),
+            board.matchCombo.currentText()) == ("", "", "")
+    # Board 3 has never published the English round name; a reset must not
+    # start to.
+    assert _get(autonaApp, "match_en") is None
+
+
 # ── ChangeSetData: the crew rules, which are NOT the board 1/2 rules ─────
 #
 # Four documented differences from SetLoadService.ApplyMatchInfo, all pinned

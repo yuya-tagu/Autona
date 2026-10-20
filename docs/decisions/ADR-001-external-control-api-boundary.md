@@ -134,6 +134,23 @@ LAN 内運用を前提に**既存の挙動を引き継ぐ**。新 API も認証�
 - X / Bluesky など外部送信操作を API 化する需要が固まったとき（初回除外を見直し）。
 - 既存 HTTP/WS 二重定義の保守負荷が問題化したとき → 既存ルートの整理を別 ADR で検討。
 
+## Addendum (2026-10-21): 旧ルートを deprecated と宣言（削除は v2.0）
+
+`/api/v1/` を外部制御の**正本**とし、既存の旧ルート（`/score`・`/scoreboard<N>-...`・`/program-state`・
+`/update-*`・`/get-*`・`/load-*` 等、`src/AutonaWebServer.py`）を **deprecated** と宣言する。**削除は v2.0**。
+
+- OBS / Stream Deck の既存設定が旧 URL を直打ちしているため、**v2.0 まで挙動は一切変えない**（新規ルートも足さない）。
+- 新規の外部連携は `/api/v1/` を使う。アプリ内の API 案内窓（API Settings）にも同旨を表示する。
+- `/api/v1` に対応物が無い旧ルート（crew 系・`display-option`・`update-team-*`・`update-commentary-*`・
+  `open-set`・`stats-last-sets/history-sets`・`get-thumbnail`・`playerdb`・`load-player/commentator-from-tag`・
+  `states`・`score`(POST) 等）は、v2.0 までに `/api/v1` への追加か廃止かを個別に判断する。
+- **自前の Web UI（`web/src/ScoreboardPage/`）自体が旧ルートを使っている**（`-set`・`-swap-teams`・`-load-set`・
+  `-update-team-*`・`-reset-scores`・`-pull-stream`・`-clear-all`・`/score`・`/display-option`）。v2.0 より前に
+  Web UI を `/api/v1` へ移行することが削除の前提条件（対応物の無い `update-team`・`score`・`display-option` は
+  `/api/v1` 側に追加する）。
+- `/api/designer/*`（Scoreboard Designer / Figma プラグイン用）は本 deprecated の対象外。
+- 上記「既存ルートの整理を別 ADR で検討」の Revisit 条件は、この宣言をもって方針だけ確定した（実削除は v2.0 で再判断）。
+
 ## Addendum (2026-09-19): 既定ポートを `5000` → `5107` に変更
 
 上記 Context / Decision に記録した **既定ポート `5000` は `5107` に変更**した（正本は

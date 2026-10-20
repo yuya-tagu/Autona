@@ -84,7 +84,8 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
 
 - 移行済み: `AdjustScore` / `ResetScore`（board 1,2 のみ）/ `SetTeamColor` /
   `SetDisplayOption` / `ApplyChanges`（反映 = `CommitHeld`）/ **Step 5 第 1 弾で追加**:
-  `SetMatchField`（`phase`/`pool`/`match`）/ `SetTeamName` / `SetTeamLosers` /
+  `SetMatchField`（`phase`/`pool`/`match`）/ `ClearMatchInfo`（リセット時に match バー +
+  `match_en` を空にする。S-17）/ `SetTeamName` / `SetTeamLosers` /
   `SetTeamsSwapped` / `SetBestOf` / **第 2 弾で追加**: `ClearTeamRoster` /
   `TrimTeamRoster`（チームの選手スロット数。スロットの中身は `PlayerService`）/
   **第 5 弾で追加**: `SetLayoutOption`（`LayoutOptionsManager` + `layout_options.*` の

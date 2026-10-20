@@ -4,7 +4,7 @@ Figmaで選択したLayerをAutona Scoreboard Designerの一時インポート�
 
 ## 使い方
 
-1. Autonaを起動し、Webサーバーを既定ポート `5000` で待機させます。
+1. Autonaを起動し、Webサーバーを既定ポート `5107` で待機させます（Autonaの設定でポートを変更している場合は、プラグイン画面の「Autonaのポート」に同じ値を入力してください）。
 2. Figma Desktopで `Plugins > Development > Import plugin from manifest...` を開きます。
 3. このディレクトリの `manifest.json` を選択します。
 4. 1920x1080のFrame（アートボード）内で移植したいLayerを選択します。アートボード自体を選択した場合は、表示中の子要素を展開して読み込みます。
@@ -36,7 +36,8 @@ Figma上で選択して表示位置へ移動します。Figma上の選択状態�
 
 ## 制約
 
-- 接続先は `http://localhost:5000/api/designer/imports` 固定です。
+- 接続先は `http://localhost:{ポート}/api/designer/imports` です。ポートの既定は `5107`（Autonaの既定と同じ）で、プラグイン画面で変更できます。
+- Figmaの `manifest.json` の `networkAccess.devAllowedDomains` はポートのワイルドカードが使えないため、`http://localhost:5107/` を固定で記載しています。**既定以外のポートを使う場合は `manifest.json` の `devAllowedDomains` も同じポートに書き換え**、Figmaでプラグインを再読み込みしてください。
 - 選択Layerの直近親Frameは1920x1080である必要があります。1920x1080のFrame（アートボード）を選択した場合は、表示中の子要素を個別レイヤーとして送信します。
 - アートボード内の子Frame・Groupも再帰的に展開します。アートボード以外のFrameやGroupを直接選択した場合は、その選択対象を1枚のPNGまたはSVGとして扱います。
 - 固定テキストは `PNG` または `SVG` として取り込めます。Autonaの実データで差し替える文字は `動的テキスト` を選んでbindingを指定してください。

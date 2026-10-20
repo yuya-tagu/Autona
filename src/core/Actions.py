@@ -446,6 +446,34 @@ class AutonaActions:
         return self._SetIfChanged(
             f"score.{self._asInt(board, 0)}.{field}", text)
 
+    def ClearMatchInfo(self, board) -> bool:
+        """Blank the match bar (round name / phase / pool). True if changed.
+
+        The match-bar half of an operator's *reset* -- the すべての入力値を
+        リセット button, `reset_match` and `clear_all` (S-17). It is NOT part
+        of the clear a set load runs first (`ClearScore`): SetLoadService's
+        `ApplyMatchInfo` keeps the round name for a payload that carries
+        none, so clearing ahead of it would blank the round mid-stream for
+        exactly those payloads.
+
+        `match_en` goes with it: it is the English form of the same round
+        name (the YouTube title reads it), and leaving it would put the
+        previous set's round into the next title. Only where a set load has
+        written one, though -- board 3 never carries the key
+        (CrewBattleService does not publish it), and a reset must not add it.
+
+        One save cycle for all of it, and nothing written for a field that is
+        already blank (see `_SetIfChanged`).
+        """
+        prefix = f"score.{self._asInt(board, 0)}"
+        written = False
+        with StateManager.SaveBlock():
+            for field in schema.SCORE_MATCH_FIELDS:
+                written |= self._SetIfChanged(f"{prefix}.{field}", "")
+            if StateManager.Get(f"{prefix}.match_en", None) is not None:
+                written |= self._SetIfChanged(f"{prefix}.match_en", "")
+        return written
+
     # ── best of ──────────────────────────────────────────────────────────
 
     def SetBestOf(self, board, value):

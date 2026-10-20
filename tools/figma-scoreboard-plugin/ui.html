@@ -143,10 +143,20 @@
     <button id="close" type="button">閉じる</button>
   </div>
 
-  <div id="status" class="status">Autonaを起動し、既定ポート5000で待機してください。</div>
+  <div>
+    <label for="autona-port">Autonaのポート</label>
+    <input id="autona-port" type="number" min="1" max="65535" value="5107">
+  </div>
+
+  <div id="status" class="status">Autonaを起動し、既定ポート5107で待機してください。</div>
 
   <script>
-    const AUTONA_IMPORT_URL = "http://localhost:5000/api/designer/imports";
+    const DEFAULT_AUTONA_PORT = 5107;
+    const portInput = document.getElementById("autona-port");
+    function autonaImportUrl() {
+      const port = Number.parseInt(portInput.value, 10);
+      return `http://localhost:${Number.isInteger(port) && port > 0 ? port : DEFAULT_AUTONA_PORT}/api/designer/imports`;
+    }
     const layerState = new Map();
     let bindings = [];
     let imageBindings = new Set();
@@ -321,7 +331,7 @@
 
     async function sendPayload(payload) {
       setStatus("Autonaへ送信しています...");
-      const response = await fetch(AUTONA_IMPORT_URL, {
+      const response = await fetch(autonaImportUrl(), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

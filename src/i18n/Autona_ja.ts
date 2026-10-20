@@ -744,6 +744,10 @@
         <translation>破壊的な操作（clear / reset）は JSON ボディに "confirm": true が必要です。全一覧はリファレンスウィンドウを参照してください。</translation>
     </message>
     <message>
+        <source>Deprecated: the legacy routes (/scoreboardN-..., /score, /program-state, etc.) will be removed in v2.0. Use /api/v1 (listed above) for new integrations.</source>
+        <translation>非推奨: 旧ルート（/scoreboardN-...、/score、/program-state など）は v2.0 で削除予定です。新規の連携には /api/v1（上記一覧）を使用してください。</translation>
+    </message>
+    <message>
         <source>Envelope &amp; error codes</source>
         <translation>エンベロープ・エラーコード</translation>
     </message>

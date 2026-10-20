@@ -742,6 +742,10 @@
         <translation>Destructive operations (clear / reset) require "confirm": true in the JSON body. See the reference window for the full catalogue.</translation>
     </message>
     <message>
+        <source>Deprecated: the legacy routes (/scoreboardN-..., /score, /program-state, etc.) will be removed in v2.0. Use /api/v1 (listed above) for new integrations.</source>
+        <translation>Deprecated: the legacy routes (/scoreboardN-..., /score, /program-state, etc.) will be removed in v2.0. Use /api/v1 (listed above) for new integrations.</translation>
+    </message>
+    <message>
         <source>Envelope &amp; error codes</source>
         <translation>Envelope &amp; error codes</translation>
     </message>

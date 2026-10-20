@@ -237,6 +237,16 @@ class AutonaApiInfoWindow(QDialog):
 
         v.addWidget(self._buildLegend())
 
+        # Legacy-route notice: the old /scoreboardN-xxx style routes still
+        # work unchanged but are deprecated in favour of /api/v1 (ADR-001).
+        legacy = QLabel(_tr(
+            "Deprecated: the legacy routes (/scoreboardN-..., /score, "
+            "/program-state, etc.) will be removed in v2.0. Use /api/v1 "
+            "(listed above) for new integrations."))
+        legacy.setWordWrap(True)
+        legacy.setStyleSheet("color: #e2574c;")
+        v.addWidget(legacy)
+
         tab.setLayout(v)
         return tab
 
