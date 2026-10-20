@@ -2,7 +2,7 @@
 
 作成日: 2026-04-08
 最終検証: 2026-06-29（S-16 追加: 起動ヘルパーの GUI スレッド占有。アセット起動フリーズ修正の横展開で発見）
-根拠: `.claude/architecture/` 配下の調査成果物 (python-imports.md, singleton-init-order.md, state-keys.md, python-hotspots.md)
+根拠: 2026-06 時点の調査成果物（現在は削除済み。正本は `src/bootstrap.py` / `src/core/StateSchema.py`）
 
 本ファイルはフェーズ2の夜間タスク配布の燃料として使う。各項目に優先度・難易度・影響範囲を付記する。
 
@@ -517,7 +517,7 @@ GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src
 
 ---
 
-## S-18: 新規インストール直後の TOP 8 は 1 回目の 反映 がスコアを捨てる [P2/D1/S1] 🔴 未着手（既知バグ・1 行修正だが PdM 判断待ち）
+## S-18: 新規インストール直後の TOP 8 は 1 回目の 反映 がスコアを捨てる [P2/D1/S1] ✅ 解消済み（2026-10-20）
 
 **根拠**: Headless Core 移行 Step 5-5 の調査（`docs/changes/headless-core-redesign.md` 5-5 節）。
 既存コードの調査中に発見。今回は修正せず pin のみ。
@@ -540,4 +540,9 @@ GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src
 新規インストールの `program_state.json` の初期内容が変わるため、5-4 が `pool` のシードについて
 採ったのと同じ「現状を pin して PdM 判断へ回す」扱いにした。
 
-**Pin**: `tests/test_top8_service.py::test_the_first_apply_on_an_unrecomputed_seed_drops_the_scores`
+**解消**: `StateSchema.SeedPanelState()` の初回分岐で `DefaultState()` の matches を `Recompute` してから
+書くようにした（OSS 公開前整理）。新規インストールの初期 `program_state.json` では slots が
+`[1, 2]` 等に解決済みになる。
+
+**回帰テスト**: `tests/test_top8_service.py::test_the_first_apply_on_a_fresh_install_seed_keeps_the_scores` /
+`tests/test_state_schema.py::test_seed_panel_state_is_idempotent_from_the_first_pass`

@@ -29,7 +29,7 @@ from src.core import ColorService as colors
 from src.core import StateSchema as schema
 from src.core.LayoutOptionsManager import LayoutOptionsManager
 from src.core.SettingsManager import SettingsManager
-from src.StateManager import StateManager as SM
+from src.core.StateManager import StateManager as SM
 
 BASE = "chip-options"
 

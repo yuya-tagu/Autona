@@ -1,12 +1,12 @@
 import {
-    tshCharactersSlice,
-    tshCountriesSlice,
-    tshGamesSlice,
-    tshPlayersSlice,
-    tshStateSlice,
+    autonaCharactersSlice,
+    autonaCountriesSlice,
+    autonaGamesSlice,
+    autonaPlayersSlice,
+    autonaStateSlice,
     websocketInfoSlice
-} from "../redux/tshState";
-import { tshStore } from "../redux/store";
+} from "../redux/autonaState";
+import { autonaStore } from "../redux/store";
 import socketConnection from "../websocketConnection";
 import {BACKEND_PORT} from "../env";
 
@@ -22,63 +22,63 @@ export default function websocketInit() {
 
     socket.on("connect", () => {
         console.log("SocketIO connection established.");
-        tshStore.dispatch(websocketInfoSlice.actions.setStatus("connected"));
+        autonaStore.dispatch(websocketInfoSlice.actions.setStatus("connected"));
         socket.emit("playerdb", {}, () => {
-            console.log("TSH acked player db request")
+            console.log("Autona acked player db request")
         });
         socket.emit("characters", {}, () => {
-            console.log("TSH acked characters request")
+            console.log("Autona acked characters request")
         });
         socket.emit("games", {}, () => {
-            console.log("TSH acked games request")
+            console.log("Autona acked games request")
         });
 
         loadCountriesFile();
     });
 
     socket.on("program_state", data => {
-        console.log("TSH state received ", data);
-        tshStore.dispatch(tshStateSlice.actions.overwrite(data));
+        console.log("Autona state received ", data);
+        autonaStore.dispatch(autonaStateSlice.actions.overwrite(data));
     });
 
     socket.on("games", data => {
-        console.log("TSH game info received ", data);
-        tshStore.dispatch(tshGamesSlice.actions.overwrite(data));
+        console.log("Autona game info received ", data);
+        autonaStore.dispatch(autonaGamesSlice.actions.overwrite(data));
     })
 
     socket.on("countries", data => {
-        console.log("TSH countries info received.")
-        tshStore.dispatch(tshCountriesSlice.actions.overwrite(data));
+        console.log("Autona countries info received.")
+        autonaStore.dispatch(autonaCountriesSlice.actions.overwrite(data));
 
     });
 
     socket.on("program_state_update", deltaMessage => {
         if (process.env.NODE_ENV !== 'production') {
-            console.log("TSH state update received", deltaMessage);
+            console.log("Autona state update received", deltaMessage);
         }
-        tshStore.dispatch(tshStateSlice.actions.addDeltas(deltaMessage));
+        autonaStore.dispatch(autonaStateSlice.actions.addDeltas(deltaMessage));
         // Arrival-driven flush (Design.md §2.2 R-React-6): the server
         // already coalesces bursts, so waiting another client-side batch
         // tick only adds latency. Apply immediately on arrival.
-        const state = tshStore.getState();
+        const state = autonaStore.getState();
         if (state.websocketInfo.status === "connected") {
-            tshStore.dispatch(tshStateSlice.actions.applySavedDeltas());
+            autonaStore.dispatch(autonaStateSlice.actions.applySavedDeltas());
         }
     });
 
     socket.on("playerdb", data => {
         console.log("Player data received", data);
-        tshStore.dispatch(tshPlayersSlice.actions.overwrite(data));
+        autonaStore.dispatch(autonaPlayersSlice.actions.overwrite(data));
     })
 
     socket.on("characters", data => {
         console.log("Character data received", data);
-        tshStore.dispatch(tshCharactersSlice.actions.overwrite(data));
+        autonaStore.dispatch(autonaCharactersSlice.actions.overwrite(data));
     })
 
     socket.on("disconnect", () => {
         console.log("SocketIO disconnected.")
-        tshStore.dispatch(websocketInfoSlice.actions.setStatus("disconnected"));
+        autonaStore.dispatch(websocketInfoSlice.actions.setStatus("disconnected"));
         // Per Design.md §3.2.3 R-Sync-9, the server pushes a fresh
         // `program_state` event on every (re)connect, so reconnecting is
         // enough — the resulting overwrite() reducer adopts the new
@@ -88,7 +88,7 @@ export default function websocketInit() {
 
     socket.on('error', (err) => {
         console.log(err);
-        tshStore.dispatch(websocketInfoSlice.actions.setStatus("errored"));
+        autonaStore.dispatch(websocketInfoSlice.actions.setStatus("errored"));
     });
 
     // This can't be set up twice because of the initialization guard at the top of the function.
@@ -96,9 +96,9 @@ export default function websocketInit() {
     // 200ms tick is only a safety net for deltas queued while the socket
     // was not yet "connected" (e.g. reconnect races).
     setInterval(() => {
-        const state = tshStore.getState();
-        if (state.websocketInfo.status === "connected" && state.tshState?.stateDeltas.length > 0) {
-            tshStore.dispatch(tshStateSlice.actions.applySavedDeltas());
+        const state = autonaStore.getState();
+        if (state.websocketInfo.status === "connected" && state.autonaState?.stateDeltas.length > 0) {
+            autonaStore.dispatch(autonaStateSlice.actions.applySavedDeltas());
         }
     }, 200);
 }
@@ -115,10 +115,10 @@ const loadCountriesFile = () => {
         }
 
         console.log("Loaded countries json file", json);
-        tshStore.dispatch(tshCountriesSlice.actions.overwrite(json));
+        autonaStore.dispatch(autonaCountriesSlice.actions.overwrite(json));
     }).catch((e) => {
         console.error("Failed to request countries file", e);
-        tshStore.dispatch(tshCountriesSlice.actions.overwrite({}));
+        autonaStore.dispatch(autonaCountriesSlice.actions.overwrite({}));
     });
 }
 

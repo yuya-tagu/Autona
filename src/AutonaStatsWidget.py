@@ -2,7 +2,7 @@ from qtpy.QtCore import *
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 
-from .StateManager import StateManager
+from .core.StateManager import StateManager
 from .StateManagerBridge import StateManagerBridge
 from . import ui_constants as UI
 from loguru import logger

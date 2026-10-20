@@ -445,7 +445,7 @@ WS 列は対応する Socket.IO イベントの有無。
 - 設計境界 ADR: [../decisions/ADR-001-external-control-api-boundary.md](../decisions/ADR-001-external-control-api-boundary.md)
 - 調査タスク: [../tasks/investigate-external-control-api.md](../tasks/investigate-external-control-api.md)
 - 現アーキ: [current-architecture.md](current-architecture.md)
-- プロダクト視点: [../product/current-features.md](../product/current-features.md)
+- プロダクト視点: [../product/features.md](../product/features.md)
 - 実装仕様の正本: [../../.claude/design/Design.md](../../.claude/design/Design.md)
 - 地雷集: [../../.claude/rules/agent-pitfalls.md](../../.claude/rules/agent-pitfalls.md)
 </content>

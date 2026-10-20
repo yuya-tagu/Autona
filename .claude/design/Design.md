@@ -2,10 +2,8 @@
 
 > **本書の位置づけ**
 > Autona の UI 実装方式・データモデル・画面仕様・デザインシステム・ホットキー仕様の「あるべき姿」を定義する正本。
-> 実装と乖離する場合は本書が優先される。差異は別途リファクタ計画（[.claude/plans/ui-design-refactor.md](.claude/plans/ui-design-refactor.md)）で吸収する。
+> 実装と乖離する場合は本書が優先される。差異は実装側または本書の更新で吸収する。
 >
-> 本書は Phase A（現状洗い出し）と Phase B（問題整理）の調査結果に基づく。
-> 詳細な事実情報は `.claude/architecture/phase-a-b/ui-{pyqt,obs-layouts,image-renderers,web-react,styles-theme,problems}.md` を参照。
 
 ---
 
@@ -488,7 +486,7 @@ stream
 > `team_battle.*` を書き込むコードは存在しない（player_list と異なり自動 Unset 処理はなく、
 > 既存 `program_state.json` に残留する場合がある）。
 
-詳細は [.claude/architecture/phase-a-b/state-keys.md](.claude/architecture/phase-a-b/state-keys.md) 参照。
+キー定義の正本は `src/core/StateSchema.py`（`KEY_CATALOG`）。
 
 #### 3.1.3 動的キーパスの規約
 

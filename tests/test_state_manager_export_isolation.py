@@ -25,7 +25,7 @@ from pathlib import Path
 import pytest
 from deepdiff import DeepDiff
 
-from src.StateManager import StateManager as SM
+from src.core.StateManager import StateManager as SM
 
 _ORIGINAL_CWD = os.getcwd()
 

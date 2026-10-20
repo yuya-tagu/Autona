@@ -1,21 +1,21 @@
 import {configureStore, combineReducers, Action} from '@reduxjs/toolkit'
 import {
-    tshCharactersSlice,
-    tshCountriesSlice,
-    tshGamesSlice,
-    tshPlayersSlice,
-    tshStateSlice,
+    autonaCharactersSlice,
+    autonaCountriesSlice,
+    autonaGamesSlice,
+    autonaPlayersSlice,
+    autonaStateSlice,
     websocketInfoSlice
-} from './tshState';
+} from './autonaState';
 import {produce} from "immer";
 
-export const tshStore = configureStore({
+export const autonaStore = configureStore({
     reducer: combineReducers({
-        tshState: tshStateSlice.reducer,
-        tshPlayers: tshPlayersSlice.reducer,
-        tshCharacters: tshCharactersSlice.reducer,
-        tshGames: tshGamesSlice.reducer,
-        tshCountries: tshCountriesSlice.reducer,
+        autonaState: autonaStateSlice.reducer,
+        autonaPlayers: autonaPlayersSlice.reducer,
+        autonaCharacters: autonaCharactersSlice.reducer,
+        autonaGames: autonaGamesSlice.reducer,
+        autonaCountries: autonaCountriesSlice.reducer,
         websocketInfo: websocketInfoSlice.reducer,
     }),
     devTools: {
@@ -23,24 +23,24 @@ export const tshStore = configureStore({
         stateSanitizer: function<S>(state: S, index) {
             return produce(state, (ds: any) => {
                 try {
-                    ds.tshPlayers = `<${objLen(ds.tshPlayers.players)} players>`;
-                    ds.tshCountries = `<${objLen(ds.tshCountries.value)} countries>`;
-                    for (let k in ds.tshCharacters.characters) {
-                        ds.tshCharacters.characters[k].skins = `<${objLen(ds.tshCharacters.characters[k].skins)} skins>`
+                    ds.autonaPlayers = `<${objLen(ds.autonaPlayers.players)} players>`;
+                    ds.autonaCountries = `<${objLen(ds.autonaCountries.value)} countries>`;
+                    for (let k in ds.autonaCharacters.characters) {
+                        ds.autonaCharacters.characters[k].skins = `<${objLen(ds.autonaCharacters.characters[k].skins)} skins>`
                     }
-                    ds.tshState.tshState.top8 = "omitted";
-                    ds.tshState.tshState.notes = "omitted";
+                    ds.autonaState.autonaState.top8 = "omitted";
+                    ds.autonaState.autonaState.notes = "omitted";
                 } catch {}
             });
         },
         predicate: function<S, A extends Action>(state: S, action: A) {
-            return action.type !== 'tshState/maybeApplySavedDeltas';
+            return action.type !== 'autonaState/maybeApplySavedDeltas';
         }
     },
 });
 
 const objLen = (o: any) => Object.keys(o).length;
 
-export type TshStore = typeof tshStore;
-export type ReduxState = ReturnType<TshStore['getState']>
-export type ReduxDispatch = TshStore['dispatch'];
+export type AutonaStore = typeof autonaStore;
+export type ReduxState = ReturnType<AutonaStore['getState']>
+export type ReduxDispatch = AutonaStore['dispatch'];

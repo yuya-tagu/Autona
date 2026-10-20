@@ -9,8 +9,8 @@ from pathlib import Path
 from loguru import logger
 
 from .result import main_generate_result as result_gen
-from .SettingsManager import SettingsManager
-from .StateManager import StateManager
+from .core.SettingsManager import SettingsManager
+from .core.StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaPlayerDB import AutonaPlayerDB

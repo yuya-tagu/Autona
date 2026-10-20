@@ -107,16 +107,17 @@ core_actions = importlib.import_module("src.core.Actions").AutonaActions
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
 # because its module tail used to create ./user_data/settings.json.
-settings_manager = importlib.import_module(
-    "src.SettingsManager").SettingsManager
-state_manager = importlib.import_module("src.StateManager").StateManager
-# The shims must re-export the core classes themselves, not copies: a second
-# StateManager class would give the widget layer and the core layer separate
-# state dicts, which no other assertion here would notice.
-assert settings_manager is core_settings, \
-    "src/SettingsManager.py no longer re-exports the core class"
-assert state_manager is core_state, \
-    "src/StateManager.py no longer re-exports the core class"
+settings_manager = core_settings
+state_manager = core_state
+# The old src/SettingsManager.py / src/StateManager.py compat shims are gone;
+# nothing may bring a second copy of the state layer back.
+for _shim in ("src.SettingsManager", "src.StateManager"):
+    try:
+        importlib.import_module(_shim)
+    except ModuleNotFoundError:
+        pass
+    else:
+        raise AssertionError(f"{_shim} compat shim is back")
 hotkeys = importlib.import_module("src.AutonaHotkeys").AutonaHotkeys
 game_assets = importlib.import_module(
     "src.AutonaGameAssetManager").AutonaGameAssetManager

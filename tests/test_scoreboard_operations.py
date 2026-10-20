@@ -26,7 +26,7 @@ from qtpy.QtWidgets import (
     QCheckBox, QComboBox, QLineEdit, QPushButton, QWidget)
 from shiboken6 import Shiboken
 
-from src.SettingsManager import SettingsManager
+from src.core.SettingsManager import SettingsManager
 
 # The individual game tracker ships disabled, so the stage rows it rebuilds on
 # every best-of change are not built at all by default. Patching the lookup
@@ -100,7 +100,7 @@ def _restoredDisplayOption(key):
     the same state the test found, and a later board would publish that
     invented value.
     """
-    from src.StateManager import StateManager
+    from src.core.StateManager import StateManager
 
     path = f"display_options.{key}"
     missing = object()
@@ -534,7 +534,7 @@ def _heldUpdateSpy(prefix):
     what test code and core code may do; a *widget* may not (it would never
     be unsubscribed -- tests/test_signal_lifetime.py enforces that).
     """
-    from src.StateManager import StateManager
+    from src.core.StateManager import StateManager
 
     seen = []
 
@@ -629,7 +629,7 @@ def test_the_score_hotkey_is_routed_exactly_once(autonaApp):
     guard inside ConnectActions is there for.
     """
     from src.AutonaHotkeys import AutonaHotkeys
-    from src.StateManager import StateManager
+    from src.core.StateManager import StateManager
 
     autonaApp.dropAllBoards()
     # dropAllBoards() only clears score.{n} for boards that were actually
@@ -661,7 +661,7 @@ def test_the_sponsor_toggle_publishes_once_and_does_not_echo(autonaApp):
     mirror (the QAction, the checkbox, the inline sponsor field) must not
     produce a second one.
     """
-    from src.StateManager import StateManager
+    from src.core.StateManager import StateManager
 
     board = autonaApp.board(1)
     autonaApp.settle()
@@ -760,7 +760,7 @@ def test_leaving_a_team_name_unchanged_does_not_light_the_apply_button(
     board dirty. The write is guarded now, the same way the set-load path has
     been since Step 4b.
     """
-    from src.StateManager import StateManager
+    from src.core.StateManager import StateManager
 
     board = autonaApp.board(2)
     edit = _teamName(board, 1)
@@ -919,7 +919,7 @@ def test_a_best_of_change_is_exactly_one_save_cycle(autonaApp):
 
 def test_the_display_tournament_name_field_publishes_once(autonaApp):
     """Not held (it is tournamentInfo.*), so the delta is directly visible."""
-    from src.StateManager import StateManager
+    from src.core.StateManager import StateManager
 
     board = autonaApp.board(1)
     autonaApp.settle()
@@ -948,7 +948,7 @@ def test_building_a_board_republishes_every_display_option(autonaApp):
     line with them. The definition is StateSchema's now.
     """
     from src.core import StateSchema as schema
-    from src.StateManager import StateManager
+    from src.core.StateManager import StateManager
 
     stored = StateManager.Get("display_options")
     try:
@@ -1231,7 +1231,7 @@ def test_a_set_load_is_exactly_one_save_cycle(autonaApp):
 
 def test_reloading_the_same_set_publishes_nothing(autonaApp):
     """The second load is all no-ops, so it must not mark the board dirty."""
-    from src.StateManager import StateManager
+    from src.core.StateManager import StateManager
 
     board = autonaApp.board(1)
     board.ChangeSetData(dict(_SET))
@@ -1603,7 +1603,7 @@ def test_the_details_dialog_apply_button_commits_the_board(autonaApp):
     out of self.path; it resolves the board through PlayerService and calls
     the same operation the board's own button does.
     """
-    from src.StateManager import StateManager
+    from src.core.StateManager import StateManager
 
     board = autonaApp.board(1)
     autonaApp.settle()

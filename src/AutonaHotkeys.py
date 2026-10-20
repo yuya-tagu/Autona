@@ -5,7 +5,7 @@ from qtpy.QtCore import *
 from qtpy.QtWidgets import *
 from loguru import logger
 
-from .SettingsManager import SettingsManager
+from .core.SettingsManager import SettingsManager
 from .core.Actions import AutonaActions
 from .Helpers.AutonaDictHelper import deep_clone
 

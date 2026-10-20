@@ -32,7 +32,7 @@ import pytest
 from src.core import StateSchema as schema
 from src.Helpers.AutonaDictHelper import deep_clone
 from src.core.SettingsManager import SettingsManager
-from src.StateManager import StateManager as SM
+from src.core.StateManager import StateManager as SM
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -767,28 +767,18 @@ def test_seed_panel_state_publishes_zero_for_a_missing_asset(_blank_settings):
         assert SM.Get(key) == 0
 
 
-def test_seed_panel_state_converges_after_the_first_pass(_blank_settings):
-    """Pinned as it behaves, which is *not* idempotent on the first pass.
+def test_seed_panel_state_is_idempotent_from_the_first_pass(_blank_settings):
+    """The fresh-install top8 seed is already Recompute-d (known-smells S-18).
 
-    A state with no top8 takes the ``top8.DefaultState()`` branch, and that
-    default carries the match slots unresolved ([0, 0]); the next pass takes
-    the "normalise a restored state" branch, where ``Recompute()`` derives
-    them. From there the seed is stable.
-
-    Pre-existing launch behaviour that Step 2 moved without changing -- the
-    practical effect is that a brand-new install's Top 8 overlay shows TBD
-    slots until the second launch. Recorded here rather than fixed, so that a
-    later fix is a deliberate change with a test to update.
+    It used to carry unresolved [0, 0] slots until the second pass, which
+    made the first 反映 on a new install drop its scores.
 
     State only: GetFullState also carries the revision counter, which is
     supposed to move on every write.
     """
     schema.SeedPanelState()
-    assert SM.Get("top8.matches.wsf1.slots") == [0, 0]
-
-    schema.SeedPanelState()
     assert SM.Get("top8.matches.wsf1.slots") == [1, 2]
-    second = deep_clone(SM.GetFullState()["state"])
+    first = deep_clone(SM.GetFullState()["state"])
 
     schema.SeedPanelState()
-    assert SM.GetFullState()["state"] == second
+    assert SM.GetFullState()["state"] == first

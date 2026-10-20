@@ -3,8 +3,8 @@ import time
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
-from .SettingsManager import SettingsManager
-from .StateManager import StateManager
+from .core.SettingsManager import SettingsManager
+from .core.StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaPlayerDB import AutonaPlayerDB
 from .TournamentDataProvider.TournamentDataProvider import TournamentDataProvider

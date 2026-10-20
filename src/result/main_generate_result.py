@@ -9,9 +9,9 @@ from pathlib import Path
 from qtpy.QtWidgets import QApplication
 from loguru import logger
 
-from src.StateManager import StateManager
+from src.core.StateManager import StateManager
 from src.AutonaGameAssetManager import AutonaGameAssetManager
-from src.SettingsManager import SettingsManager
+from src.core.SettingsManager import SettingsManager
 from src.AutonaFeatureColors import FEATURE_RESULT, GetFeatureColors
 from src.Helpers.AutonaDictHelper import deep_get
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper

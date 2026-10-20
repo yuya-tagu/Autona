@@ -15,9 +15,8 @@
          project root (run scripts/gen_release.ps1, which needs Autona.exe and
          web/build present).
       2. gh CLI authenticated as an account with write access to the release
-         repo (yuya-tagu). On this machine the active gh account may be
-         yuyat-highfield; switch with `gh auth switch --user yuya-tagu` before
-         running and switch back afterwards (see CLAUDE.md).
+         repo. If you use multiple gh accounts, switch to the one with access
+         before running (machine-specific steps: CLAUDE.local.md).
 
     The release tag is derived from assets/versions.json ("program") as
     v<version>, which is exactly what AutonaUpdater compares against the

@@ -30,7 +30,7 @@ from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from loguru import logger
 
-from .SettingsManager import SettingsManager
+from .core.SettingsManager import SettingsManager
 from .AutonaDesignerWindow import AutonaDesignerWindow
 from .AutonaLayoutPreview import AutonaLayoutPreview
 from .AutonaFeatureColors import FEATURE_BOARD, MakeFeatureColorCard

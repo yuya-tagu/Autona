@@ -17,8 +17,8 @@ from .AutonaSelectStationWindow import AutonaSelectStationWindow
 from .AutonaIndividualGameTracker import AutonaIndividualGameTracker
 
 from .AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
-from .SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
-from .StateManager import StateManager
+from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
+from .core.StateManager import StateManager
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
 from .core.SetLoadService import SetLoadService

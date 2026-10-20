@@ -7,21 +7,6 @@
 
 ---
 
-## 1. 競合ポジショニング
-
-| ツール | 強み | Autona との差分 |
-|-------|------|---------------|
-| **TournamentStreamHelper**（上流） | マルチスコアボード、汎用ゲーム対応 | Autona は単一スコアボード化・日本語 UI 強化 |
-| **Challonge / Start.gg** | ブラケット運営の SaaS | Autona は配信オペ特化で組合せ前提 |
-| **OBS + StreamDeck** | 配信ソフト本体 | Autona は OBS の「テキスト・画像ソース」を自動更新する位置 |
-| **Streamlabs / Overlay.gg** | オーバーレイテンプレ豊富 | Autona はゲーム固有（格ゲー）特化 |
-
-**Autona の固有価値**: 格ゲー特化 UI + Start.gg 深度連携 + 配信オペの 1 人運用効率化 + 日本語コミュニティ対応。
-
-**狙うべきポジション**: 「小〜中規模大会（参加者 32〜256 名）の TO 兼配信オペ 1〜2 名運営を 1 本でカバーする統合ワークベンチ」。
-
----
-
 ## 2. 機能ギャップ分析
 
 ### 2-1. 大会運営フロー全体のカバレッジ
@@ -211,6 +196,6 @@
 
 ## 参考
 
-- [FEATURES.md](FEATURES.md) — 現状の機能一覧
+- [docs/product/features.md](docs/product/features.md) — 現状の機能一覧
 - [README.md](README.md) — インストール・ビルド
 - [CLAUDE.md](CLAUDE.md) — 開発者向けガイド

@@ -7,8 +7,8 @@ import time
 import traceback
 from loguru import logger
 
-from src.SettingsManager import SettingsManager
-from src.StateManager import StateManager
+from src.core.SettingsManager import SettingsManager
+from src.core.StateManager import StateManager
 from .AutonaDictHelper import deep_clone
 from .AutonaDirHelper import AutonaResolve
 

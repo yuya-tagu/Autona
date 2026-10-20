@@ -43,7 +43,7 @@ from .Helpers.AutonaDirHelper import AutonaResolve
 from .Helpers.AutonaRemoteZip import (
     RemoteZipError, RemoteZipReader, copy_unchanged_to_staging,
     diff_against_install, safe_dest, strip_root)
-from .SettingsManager import SettingsManager
+from .core.SettingsManager import SettingsManager
 
 
 # Public distribution repo. The source repo (yuya-tagu/Autona) is private, so

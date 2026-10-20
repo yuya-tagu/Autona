@@ -384,9 +384,7 @@ board 2（team）は `AutonaScoreboardWidget(singlePlayer=False)` であり、
 
 ### ドキュメントの実態乖離
 
-`.claude/architecture/phase-a-b/state-keys.md` は選手タグのキーを `gamerTag` と記載しているが、
-実際に配信されるのは `name`（QLineEdit の objectName がそのままキーになる）。
-`gamerTag` は `SetData` の**入力** dict のフィールド名であって state キーではない。
+選手タグについて、実際に配信される state キーは `name`（`gamerTag` は `SetData` の**入力** dict のフィールド名であって state キーではない）。キー定義の正本は `src/core/StateSchema.py`。
 
 ---
 

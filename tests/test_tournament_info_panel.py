@@ -24,7 +24,7 @@ from qtpy.QtCore import QCoreApplication, QEvent
 from qtpy.QtWidgets import QDateEdit, QLineEdit, QSpinBox
 
 from src.core.TournamentInfoService import TournamentInfoService
-from src.StateManager import StateManager
+from src.core.StateManager import StateManager
 
 
 @contextlib.contextmanager

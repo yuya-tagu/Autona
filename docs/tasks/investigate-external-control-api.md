@@ -25,7 +25,7 @@
 2. [../changes/external-control-impact-analysis.md](../changes/external-control-impact-analysis.md) — 影響観点
 3. [../../CLAUDE.md](../../CLAUDE.md) — アーキ概要・状態キーパス
 4. [../../.claude/design/Design.md](../../.claude/design/Design.md) — 実装仕様の正本
-5. [../../.claude/architecture/phase-a-b/state-keys.md](../../.claude/architecture/phase-a-b/state-keys.md) — 状態キーパス read/write
+5. [../../src/core/StateSchema.py](../../src/core/StateSchema.py) — 状態キーパス定義の正本
 6. [../../.claude/rules/state-and-webserver.md](../../.claude/rules/state-and-webserver.md) — 状態/Web サーバーの作法
 
 ## Investigation targets
@@ -94,7 +94,7 @@ External Control API / Companion / Stream Deck 連携の設計前提として、
 - [src/AutonaHotkeys.py](../../src/AutonaHotkeys.py)（9 ホットキーと接続先）
 - [src/AutonaScoreboardWidget.py](../../src/AutonaScoreboardWidget.py)（`PostToX`/`PostToBsky`/`GenerateThumbnail`・ホットキー接続）
 - [src/Autona.py](../../src/Autona.py)（シグナル配線・`UiMounted` 起動順）（抜粋 grep）
-- 既存 docs（README / current-architecture / current-features / 旧 changes・ADR・task）
+- 既存 docs（README / current-architecture / product/features / 旧 changes・ADR・task）
 
 ### 調査した既存機能
 スコア操作 / チームカラー / クルー戦ストック / 入替 / 各種リセット・全消去 / セット&大会ロード /

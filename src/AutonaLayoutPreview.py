@@ -21,7 +21,7 @@ from qtpy.QtGui import QPainter, QPixmap
 from qtpy.QtWebEngineWidgets import QWebEngineView
 from qtpy.QtWebEngineCore import QWebEngineSettings, QWebEnginePage
 
-from .SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
+from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 from . import ui_constants as UI
 
 LAYOUT_DIR = "layout"

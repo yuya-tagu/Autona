@@ -11,7 +11,7 @@
 |-------------|--------|
 | レイヤー構成・主要モジュールと責務・データフロー・状態キーパス概観 | [../../CLAUDE.md](../../CLAUDE.md)「アーキテクチャ概要」「状態キーパス」 |
 | 実装仕様の正本（UI / データモデル / 画面 / テーマ / ホットキー） | [../../.claude/design/Design.md](../../.claude/design/Design.md) |
-| import 関係・状態キー Read/Write の網羅事実 | [../../.claude/architecture/](../../.claude/architecture/)（2026-04 時点の凍結調査ログ） |
+| 状態キーの正本 | [../../src/core/StateSchema.py](../../src/core/StateSchema.py)（`KEY_CATALOG`） |
 | シングルトン生成順の**正本** | [../../src/bootstrap.py](../../src/bootstrap.py) の `bootstrap_core()`（`ORDER CONSTRAINT:` コメントに理由を併記） |
 | 起動パイプラインの設計・移行記録 | [../changes/startup-architecture-redesign.md](../changes/startup-architecture-redesign.md) / [../decisions/ADR-003-startup-architecture.md](../decisions/ADR-003-startup-architecture.md) |
 | エージェントが踏みやすい制約の一次情報 | [../../.claude/rules/agent-pitfalls.md](../../.claude/rules/agent-pitfalls.md) |

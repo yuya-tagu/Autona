@@ -25,7 +25,6 @@ globs:
 - 順序を変えるときは `bootstrap.py` の `ORDER CONSTRAINT:` コメントを必ず読む。制約の理由（誰が誰の `instance.signals` に connect するか、QApplication 必須か、`StateManager.Initialize()` 後でなければならないか等）がその場に書いてある
 - **絶対に守る**: `AutonaGameAssetManager` の生成は `AutonaTournamentDataProvider` より前（`AutonaTournamentDataProvider.__init__` が `AutonaGameAssetManager.instance.signals` に connect する）
 - 新しいシングルトンは `bootstrap_core()` に追加する。モジュール末尾で `instance = XXX()` を書かない（#1 に違反する）
-- 旧構造の記録: `.claude/architecture/phase-a-b/singleton-init-order.md`（歴史資料。現状は bootstrap.py が正）
 
 ## 3. StateManager のキーパスはドット区切り文字列
 

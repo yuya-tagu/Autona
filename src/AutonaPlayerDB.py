@@ -14,7 +14,7 @@ from copy import deepcopy
 from .Helpers.AutonaDictHelper import deep_clone
 from .Helpers.AutonaQtHelper import gui_thread_sync
 from .AutonaGameAssetManager import AutonaGameAssetManager
-from .SettingsManager import SettingsManager
+from .core.SettingsManager import SettingsManager
 
 class AutonaPlayerDBSignals(QObject):
     db_updated = Signal()

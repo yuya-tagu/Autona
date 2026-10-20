@@ -233,7 +233,7 @@ def syntheticGame(autonaApp):
     installed, and StateManager state is process-global -- an unrestored
     write here would follow the session into other test modules.
     """
-    from src.StateManager import StateManager
+    from src.core.StateManager import StateManager
 
     previous = copy.deepcopy(StateManager.Get("game"))
     StateManager.Set("game", {

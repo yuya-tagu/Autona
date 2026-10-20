@@ -53,13 +53,12 @@ def test_the_default_port_constant_is_5107():
         "(docs/operations/runtime-operations.md) and an ADR-001 addendum.")
 
 
-def test_the_compat_shim_re_exports_the_constant():
-    """`src/SettingsManager.py` is a star-import shim over `src/core`.
+def test_core_settings_manager_exports_the_constant():
+    """Call sites import the constant from `src.core.SettingsManager`.
 
-    Most call sites still import through it, so a constant the star import
-    does not carry would be an ImportError at app start, not at test time.
+    A missing export would be an ImportError at app start, not at test time.
     """
-    from src.SettingsManager import DEFAULT_WEBSERVER_PORT
+    from src.core.SettingsManager import DEFAULT_WEBSERVER_PORT
 
     assert DEFAULT_WEBSERVER_PORT == EXPECTED_PORT
 

@@ -1,7 +1,7 @@
 import {BASE_URL} from "./env";
 import {useState} from "react";
 
-/** @param {{game: TSHGameInfo, fixedWidth: boolean, size: number}} props */
+/** @param {{game: AutonaGameInfo, fixedWidth: boolean, size: number}} props */
 export function GameIcon({game, fixedWidth=false, size=48, ...rest}) {
   const {errored, setErrored} = useState(false);
 

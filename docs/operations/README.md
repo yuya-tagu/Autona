@@ -18,4 +18,4 @@
 ## 関連
 
 - [../../.claude/manual-test-checklist.md](../../.claude/manual-test-checklist.md) — 動作確認手順
-- [../product/current-features.md](../product/current-features.md) — リグレッション禁止リスト
+- [../product/features.md](../product/features.md) — リグレッション禁止リスト

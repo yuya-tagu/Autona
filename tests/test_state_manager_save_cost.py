@@ -29,7 +29,7 @@ import orjson
 import pytest
 
 import src.core.StateManager as module
-from src.StateManager import StateManager as SM
+from src.core.StateManager import StateManager as SM
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _ORIGINAL_CWD = os.getcwd()

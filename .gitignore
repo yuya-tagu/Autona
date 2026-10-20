@@ -120,3 +120,6 @@ user_data/games/*
 
 # Local Designer source-link registry.
 /user_data/designer_source_links.json
+
+# Owner-local machine-specific notes
+/CLAUDE.local.md

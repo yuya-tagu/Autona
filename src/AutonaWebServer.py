@@ -19,11 +19,11 @@ from flask_socketio import SocketIO, emit
 import orjson
 from loguru import logger
 
-from .StateManager import StateManager
+from .core.StateManager import StateManager
 from .StateManagerBridge import StateManagerBridge
 from .AutonaWebServerActions import WebServerActions
 from .AutonaScoreboardManager import AutonaScoreboardManager
-from .SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
+from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 from .AutonaDesignerService import (
     AutonaDesignerService,
     DesignerProjectError,
