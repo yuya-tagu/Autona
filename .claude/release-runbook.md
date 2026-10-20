@@ -2,14 +2,14 @@
 
 「新バージョンをリリースして」と依頼されたときに **上から順になぞる** 実行手順。
 ビルド方式・アップデーター仕様などの背景知識は [rules/build-and-release.md](rules/build-and-release.md)、
-Git 認証ダンスの詳細は [git-workflow.md](git-workflow.md) を参照。
+Git 詳細は [git-workflow.md](git-workflow.md)、マシン固有の認証手順・絶対パスは `CLAUDE.local.md`（gitignore 済み）を参照。
 
 ## 大原則: 作業ディレクトリ（CWD）の取り扱い
 
 **PowerShell / Bash ツールは呼び出し間で作業ディレクトリが持続する。**
 過去のリリースで「`cd web` したまま次のステップを実行 → spec が見つからずビルド失敗」が発生した。
 
-- **各ステップのコマンドは必ず `cd C:\Users\ayuyt\Work\30_Products\Autona` から始める**か、
+- **各ステップのコマンドは必ず `cd <プロジェクトルート>` から始める**か、
   同一コマンド内で完結させる（例: `cd web; npm run build` は 1 呼び出しに閉じ、次の呼び出しは再度ルートから）
 - ステップをまたいで CWD を仮定しない。「前のコマンドでルートにいたはず」を信用しない
 - PowerShell 5.1 でネイティブ exe に `2>&1` を付けない（NativeCommandError で偽の失敗になる。stderr は付けなくても取得される）
@@ -26,9 +26,7 @@ Git 認証ダンスの詳細は [git-workflow.md](git-workflow.md) を参照。
 
 ```bash
 # CWD: プロジェクトルート
-gh auth switch --user yuya-tagu
-git -c credential.helper= -c credential.helper="!gh auth git-credential" fetch origin --prune
-gh auth switch --user yuyat-highfield
+git fetch origin --prune   # 認証手順は CLAUDE.local.md 参照
 git merge --ff-only origin/main
 git status --short   # クリーンであること
 ```
@@ -42,9 +40,7 @@ git status --short   # クリーンであること
 # CWD: プロジェクトルート
 git add assets/versions.json
 git commit -m "chore(release): バージョンを {X.Y.Z} に更新 ..."   # 日本語・Co-Authored-By 付き
-gh auth switch --user yuya-tagu
-git -c credential.helper= -c credential.helper="!gh auth git-credential" push origin main:chore/release-v{X.Y.Z}
-gh auth switch --user yuyat-highfield
+git push origin main:chore/release-v{X.Y.Z}   # 認証手順は CLAUDE.local.md 参照
 ```
 
 - PR 作成はユーザーが手動（URL・タイトル案・本文案を提示する）。**PR マージを待たずに手順 3 以降へ進んでよい**
@@ -54,20 +50,20 @@ gh auth switch --user yuyat-highfield
 
 ```powershell
 # 1 呼び出しに閉じる（次の呼び出しは CWD が web/ に残っている前提で書かない）
-cd C:\Users\ayuyt\Work\30_Products\Autona\web; npm run build
+cd <プロジェクトルート>\web; npm run build
 ```
 
 ### 4. exe をビルド（3〜5 分）
 
 ```powershell
-cd C:\Users\ayuyt\Work\30_Products\Autona; pyinstaller dependencies/autona.spec --noconfirm
+cd <プロジェクトルート>; pyinstaller dependencies/autona.spec --noconfirm
 # 最後に "Build complete!" と exit 0 を確認
 ```
 
 ### 5. 成果物をプロジェクト直下へ配置
 
 ```powershell
-cd C:\Users\ayuyt\Work\30_Products\Autona
+cd <プロジェクトルート>
 try { Stop-Process -Name Autona -Force -ErrorAction Stop } catch {}   # 起動中なら終了（_internal がロックされるため）
 Remove-Item -Recurse -Force ./_internal -ErrorAction SilentlyContinue
 Copy-Item -Recurse dist/Autona/_internal ./_internal
@@ -103,7 +99,7 @@ Get-Content _internal/assets/versions.json -Raw   # "program" が新バージョ
 ヘルパー apply_update.ps1 が 1 ファイルも展開できず自動更新が無音で不発になる（v1.3.0 で実際に発生）。
 
 ```powershell
-cd C:\Users\ayuyt\Work\30_Products\Autona
+cd <プロジェクトルート>
 .\scripts\gen_release.ps1
 Remove-Item -Recurse -Force ./Autona -ErrorAction SilentlyContinue   # staging 掃除
 "ZIP: {0:N1} MB" -f ((Get-Item release-windows.zip).Length / 1MB)    # 280〜290 MiB 前後が正常（v1.5.0 の PyInstaller excludes 適用後の実績: v1.5.1 / v1.6.0 とも 282.7 MiB。大きく外れたら同梱物を確認）
@@ -122,15 +118,13 @@ Remove-Item -Recurse -Force ./Autona -ErrorAction SilentlyContinue   # staging �
 配布した事故がある。`publish_release.ps1` 経由ならこの検証は自動で走る）:
 
 ```powershell
-cd C:\Users\ayuyt\Work\30_Products\Autona
+cd <プロジェクトルート>
 .\scripts\validate_release_zip.ps1   # OK 行が出ること。throw したらその zip は publish 禁止
 ```
 
 ```bash
 # CWD: プロジェクトルート。notes ファイルはスクラッチパッドに UTF-8 で作成しておく
-gh auth switch --user yuya-tagu
-gh release create v{X.Y.Z} release-windows.zip --repo yuya-tagu/Autona-releases --title v{X.Y.Z} --notes-file "{notes のフルパス}"
-gh auth switch --user yuyat-highfield   # 復元を忘れない
+gh release create v{X.Y.Z} release-windows.zip --repo yuya-tagu/Autona-releases --title v{X.Y.Z} --notes-file "{notes のフルパス}"   # 認証手順は CLAUDE.local.md 参照
 ```
 
 - publish 先は **公開リポ `yuya-tagu/Autona-releases`**（ソースリポは private のため updater が読めない）
@@ -177,7 +171,7 @@ publish 直後に、**旧バージョンの exe からアプリ内アップデ�
 | exe ビルドが「spec not found」で失敗 | 手順 3 の `cd web` が次の呼び出しに持続 | 大原則 + 各手順の `cd` 徹底 |
 | versions.json が消えた | 旧 gen_release.ps1 をルートから実行し `..` が親ディレクトリに解決 | スクリプト側で修正済み（`$PSScriptRoot` 基準）。手順 7 に経緯を記載 |
 | ネイティブコマンドが偽エラー | PS 5.1 の `2>&1` が stderr を ErrorRecord 化 | 大原則に記載 |
-| push が `Repository not found` | アクティブ gh アカウントが `yuyat-highfield` | 全 push/fetch/publish でアカウントダンス（手順 1/2/8） |
+| push が `Repository not found` | アクティブ gh アカウントが書き込み権限のないアカウント | 全 push/fetch/publish で認証手順を適用（`CLAUDE.local.md` 参照。手順 1/2/8） |
 | 日本語リリースノートの文字化け | `-Notes` 引数渡し | `--notes-file`（UTF-8）に統一（手順 8） |
 | 旧ファイルが zip に残留 | `Compress-Archive -Update` の追記仕様 | gen_release.ps1 冒頭で zip / staging を自動削除（手順 7） |
 | v1.0.7→v1.1.0 自動更新が無音で不発 | powershell.exe を `DETACHED_PROCESS` 付きで spawn するとエンジン起動前に exit 0 で即死（`CREATE_NO_WINDOW` は併用時無視） | AutonaUpdater の creationflags から DETACHED_PROCESS を除去 + 自動更新 E2E 確認（手順 9） |

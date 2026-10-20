@@ -62,8 +62,8 @@ def main():
     bootstrap_core()
 
     from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
-    from src.SettingsManager import SettingsManager
-    from src.StateManager import StateManager
+    from src.core.SettingsManager import SettingsManager
+    from src.core.StateManager import StateManager
 
     # (a) StateManager.LoadState() restored the persisted tree, and
     # (b) AutonaScoreboardManager.__init__ deliberately dropped score.*

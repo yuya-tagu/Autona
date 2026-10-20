@@ -26,7 +26,7 @@ def GetWebServerHost():
     """Host to advertise in user-facing URLs. Matches the server bind:
     loopback unless LAN access is enabled (general.webserver_listen_lan).
     """
-    from ..SettingsManager import SettingsManager  # avoid import cycle at module load
+    from ..core.SettingsManager import SettingsManager  # avoid import cycle at module load
     if SettingsManager.Get("general.webserver_listen_lan", False):
         return GetLocalIP()
     return "127.0.0.1"

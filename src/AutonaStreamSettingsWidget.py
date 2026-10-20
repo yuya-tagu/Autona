@@ -5,13 +5,13 @@ from qtpy import uic
 import os
 import datetime
 from io import BytesIO
-from .StateManager import StateManager
+from .core.StateManager import StateManager
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
 from .StateManagerBridge import StateManagerBridge
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaGameAssetManager import AutonaGameAssetManager
-from .SettingsManager import SettingsManager
+from .core.SettingsManager import SettingsManager
 from .Helpers.AutonaDirHelper import AutonaResolve
 from .Helpers.AutonaOutputRetention import PruneOutputFiles
 from . import ui_layout as L

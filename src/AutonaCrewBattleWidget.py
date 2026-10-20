@@ -7,7 +7,7 @@ from qtpy.QtCore import *
 from loguru import logger
 
 from .AutonaColorButton import AutonaColorButton
-from .StateManager import StateManager
+from .core.StateManager import StateManager
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
 from .core.CrewBattleService import CrewBattleService, CrewMember, CrewTeam

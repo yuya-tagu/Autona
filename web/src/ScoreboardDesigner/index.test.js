@@ -7,8 +7,8 @@ import {
     screen,
     waitFor,
 } from "@testing-library/react";
-import {tshStore} from "../redux/store";
-import {tshStateSlice} from "../redux/tshState";
+import {autonaStore} from "../redux/store";
+import {autonaStateSlice} from "../redux/autonaState";
 import {SAMPLE_STATE} from "./bindings";
 import ScoreboardDesigner from ".";
 
@@ -59,7 +59,7 @@ describe("ScoreboardDesigner", () => {
             {}, "", "/web?view=designer&desktop=1&token=test-token");
 
         render(
-            <Provider store={tshStore}>
+            <Provider store={autonaStore}>
                 <ScoreboardDesigner />
             </Provider>,
         );
@@ -80,7 +80,7 @@ describe("ScoreboardDesigner", () => {
             {}, "", "/web?view=designer&desktop=1&token=test-token");
 
         render(
-            <Provider store={tshStore}>
+            <Provider store={autonaStore}>
                 <ScoreboardDesigner />
             </Provider>,
         );
@@ -115,13 +115,13 @@ describe("ScoreboardDesigner", () => {
             {}, "", "/web?view=designer&desktop=1&token=test-token");
         const startggState = JSON.parse(JSON.stringify(SAMPLE_STATE));
         startggState.score["1"].team["1"].player["1"].name = "STARTGG PLAYER";
-        tshStore.dispatch(tshStateSlice.actions.overwrite({
+        autonaStore.dispatch(autonaStateSlice.actions.overwrite({
             state: startggState,
             revision: 1,
         }));
 
         render(
-            <Provider store={tshStore}>
+            <Provider store={autonaStore}>
                 <ScoreboardDesigner />
             </Provider>,
         );
@@ -148,7 +148,7 @@ describe("ScoreboardDesigner", () => {
         const updatedState = JSON.parse(JSON.stringify(startggState));
         updatedState.score["1"].team["1"].player["1"].name = "UPDATED PLAYER";
         act(() => {
-            tshStore.dispatch(tshStateSlice.actions.overwrite({
+            autonaStore.dispatch(autonaStateSlice.actions.overwrite({
                 state: updatedState,
                 revision: 2,
             }));
@@ -170,7 +170,7 @@ describe("ScoreboardDesigner", () => {
         const finalState = JSON.parse(JSON.stringify(updatedState));
         finalState.score["1"].team["1"].player["1"].name = "FINAL PLAYER";
         act(() => {
-            tshStore.dispatch(tshStateSlice.actions.overwrite({
+            autonaStore.dispatch(autonaStateSlice.actions.overwrite({
                 state: finalState,
                 revision: 3,
             }));
@@ -183,7 +183,7 @@ describe("ScoreboardDesigner", () => {
         window.history.replaceState(
             {}, "", "/web?view=designer&desktop=1&token=test-token");
         render(
-            <Provider store={tshStore}>
+            <Provider store={autonaStore}>
                 <ScoreboardDesigner />
             </Provider>,
         );
@@ -201,7 +201,7 @@ describe("ScoreboardDesigner", () => {
         window.history.replaceState(
             {}, "", "/web?view=designer&desktop=1&token=test-token");
         render(
-            <Provider store={tshStore}>
+            <Provider store={autonaStore}>
                 <ScoreboardDesigner />
             </Provider>,
         );
@@ -218,7 +218,7 @@ describe("ScoreboardDesigner", () => {
         window.history.replaceState(
             {}, "", "/web?view=designer&desktop=1&token=test-token");
         render(
-            <Provider store={tshStore}>
+            <Provider store={autonaStore}>
                 <ScoreboardDesigner />
             </Provider>,
         );
@@ -240,7 +240,7 @@ describe("ScoreboardDesigner", () => {
         window.history.replaceState(
             {}, "", "/web?view=designer&desktop=1&token=test-token");
         render(
-            <Provider store={tshStore}>
+            <Provider store={autonaStore}>
                 <ScoreboardDesigner />
             </Provider>,
         );
@@ -253,7 +253,7 @@ describe("ScoreboardDesigner", () => {
         window.history.replaceState(
             {}, "", "/web?view=designer&desktop=1&token=test-token");
         render(
-            <Provider store={tshStore}>
+            <Provider store={autonaStore}>
                 <ScoreboardDesigner />
             </Provider>,
         );
@@ -279,7 +279,7 @@ describe("ScoreboardDesigner", () => {
         window.history.replaceState(
             {}, "", "/web?view=designer&desktop=1&token=test-token");
         render(
-            <Provider store={tshStore}>
+            <Provider store={autonaStore}>
                 <ScoreboardDesigner />
             </Provider>,
         );
@@ -306,7 +306,7 @@ describe("ScoreboardDesigner", () => {
         window.history.replaceState(
             {}, "", "/web?view=designer&desktop=1&token=test-token");
         render(
-            <Provider store={tshStore}>
+            <Provider store={autonaStore}>
                 <ScoreboardDesigner />
             </Provider>,
         );
@@ -325,7 +325,7 @@ describe("ScoreboardDesigner", () => {
         window.history.replaceState(
             {}, "", "/web?view=designer&desktop=1&token=test-token");
         render(
-            <Provider store={tshStore}>
+            <Provider store={autonaStore}>
                 <ScoreboardDesigner />
             </Provider>,
         );
@@ -350,7 +350,7 @@ describe("ScoreboardDesigner", () => {
         window.history.replaceState(
             {}, "", "/web?view=designer&desktop=1&token=test-token");
         render(
-            <Provider store={tshStore}>
+            <Provider store={autonaStore}>
                 <ScoreboardDesigner />
             </Provider>,
         );
@@ -376,7 +376,7 @@ describe("ScoreboardDesigner", () => {
         window.history.replaceState(
             {}, "", "/web?view=designer&desktop=1&token=test-token");
         render(
-            <Provider store={tshStore}>
+            <Provider store={autonaStore}>
                 <ScoreboardDesigner />
             </Provider>,
         );
@@ -403,7 +403,7 @@ describe("ScoreboardDesigner", () => {
     test("blocks use outside the desktop Designer window", () => {
         window.history.replaceState({}, "", "/web?view=designer");
         render(
-            <Provider store={tshStore}>
+            <Provider store={autonaStore}>
                 <ScoreboardDesigner />
             </Provider>,
         );
@@ -434,7 +434,7 @@ describe("ScoreboardDesigner", () => {
         window.confirm = jest.fn(() => true);
 
         render(
-            <Provider store={tshStore}>
+            <Provider store={autonaStore}>
                 <ScoreboardDesigner />
             </Provider>,
         );
@@ -495,7 +495,7 @@ describe("ScoreboardDesigner", () => {
         });
 
         render(
-            <Provider store={tshStore}>
+            <Provider store={autonaStore}>
                 <ScoreboardDesigner />
             </Provider>,
         );

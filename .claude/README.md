@@ -69,37 +69,6 @@ frontmatter の `paths:`/`globs:` で対象ファイル編集時のみ自動ロ�
 | `/build-all` | Web UI + exe 一括ビルド |
 | `/verify` | テスト + ビルド + 起動確認の一括検証 |
 
-## Plans（フェーズ単位の作業計画）
-
-| ファイル | 概要 |
-|---------|------|
-| `plans/refactor-phase1.md` | Python 読解と安全網フェーズの計画 |
-| `plans/ui-design-refactor.md` | UI 実装方式リファクタ計画（Design.md と対応） |
-
-## Prompts（セッション指示書）
-
-| ファイル | 用途 |
-|---------|------|
-| `prompts/step1.md` | Python import 関係 + シングルトン初期化順の調査 |
-
-## Architecture（調査成果物）
-
-| ファイル | 内容 |
-|---------|------|
-| `architecture/README.md` | 本ディレクトリの利用ルール（正本は `design/Design.md`、ここは調査ログ） |
-| `architecture/phase-a-b/python-imports.md` | src/ の import 関係マップ |
-| `architecture/phase-a-b/singleton-init-order.md` | シングルトン初期化順と依存グラフ |
-| `architecture/phase-a-b/state-keys.md` | StateManager キーパスの read/write マップ |
-| `architecture/phase-a-b/python-hotspots.md` | 巨大ファイル・関数・コード重複の特定 |
-| `architecture/phase-a-b/ui-pyqt.md` | PyQt UI レイヤー（Phase A） |
-| `architecture/phase-a-b/ui-obs-layouts.md` | OBS HTML レイアウト（Phase A） |
-| `architecture/phase-a-b/ui-image-renderers.md` | WebEngine 画像生成（Phase A） |
-| `architecture/phase-a-b/ui-web-react.md` | React Web UI（Phase A） |
-| `architecture/phase-a-b/ui-styles-theme.md` | スタイル/テーマ定義の所在（Phase A） |
-| `architecture/phase-a-b/ui-problems.md` | 重複/同期/設定/拡張範囲/テーマ統合 + OBS/ClickUp 比較（Phase B） |
-
-※ 本ディレクトリのファイルは調査の事実情報のみを記録する。正本は `design/Design.md`。矛盾時は Design.md 優先。リファクタ方針や TODO は Design.md §8 と `known-smells.md` に分離する。
-
 ## Design（正本ドキュメント）
 
 | ファイル | 内容 |
@@ -113,5 +82,5 @@ frontmatter の `paths:`/`globs:` で対象ファイル編集時のみ自動ロ�
 |---------|------|
 | `git-workflow.md` | Git 詳細（push/PR/ブランチ削除/マルチアカウント認証）。CLAUDE.md の Git 要点の詳細版 |
 | `release-runbook.md` | **リリース実行手順書**。「リリースして」と依頼されたら上から順になぞる（CWD 事故・アカウントダンス・zip 残留等の再発防止込み） |
-| `known-smells.md` | リファクタ候補リスト。architecture/ の調査結果を元に作成し、フェーズ2の夜間タスク配布の燃料として使う |
+| `known-smells.md` | リファクタ候補リスト。コードベース調査を元に作成し、フェーズ2の夜間タスク配布の燃料として使う |
 | `manual-test-checklist.md` | 自動テストで守れない動作確認手順。朝の PR レビュー時になぞる |

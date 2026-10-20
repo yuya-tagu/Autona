@@ -2,12 +2,12 @@ import {Action, createSlice, PayloadAction, WritableDraft} from '@reduxjs/toolki
 import {applyDeltas, combineDeltas} from "../stateDelta";
 import websocketConnection from "../websocketConnection";
 import {
-    TSHCountryDb,
-    TSHCharacterDb,
-    TSHCharacterDbEntry,
-    TSHPlayerDb,
-    TSHState,
-    TSHGamesDb, Delta
+    AutonaCountryDb,
+    AutonaCharacterDb,
+    AutonaCharacterDbEntry,
+    AutonaPlayerDb,
+    AutonaState,
+    AutonaGamesDb, Delta
 } from "../backendDataTypes";
 
 export type ReceivedDeltas = {
@@ -23,8 +23,8 @@ export type ReceivedDeltas = {
     delta: Delta[];
 };
 
-export type TSHStateMessage = {
-    state: TSHState;
+export type AutonaStateMessage = {
+    state: AutonaState;
     // Canonical name per Design.md §3.2.3 R-Sync-7.
     revision?: number;
     // Legacy alias.
@@ -57,23 +57,23 @@ export const websocketInfoSlice = createSlice({
     }
 });
 
-export type TshStateReduxState = {
-    tshState: TSHState;
+export type AutonaStateReduxState = {
+    autonaState: AutonaState;
     stateDeltas: ReceivedDeltas[];
     maxAppliedDeltaIdx: number;
     initializing: boolean;
 };
 
-export const tshStateSlice = createSlice({
-    name: 'tshState',
+export const autonaStateSlice = createSlice({
+    name: 'autonaState',
     initialState: {
-        tshState: {} as TSHState,
+        autonaState: {} as AutonaState,
         stateDeltas: [],
         maxAppliedDeltaIdx: -1,
         initializing: true,
-    } as TshStateReduxState,
+    } as AutonaStateReduxState,
     reducers: {
-        applySavedDeltas(state: WritableDraft<TshStateReduxState>, action: Action) {
+        applySavedDeltas(state: WritableDraft<AutonaStateReduxState>, action: Action) {
             // Sort by revision so out-of-order arrivals get applied in
             // the right sequence (Design.md §3.2.3 R-Sync-6).
             let sortedDeltas = state.stateDeltas
@@ -127,7 +127,7 @@ export const tshStateSlice = createSlice({
                     if (process.env.NODE_ENV !== 'production') {
                         console.log("Applying deltas: ", combineDeltas(deltaSet.delta));
                     }
-                    applyDeltas(state.tshState, deltaSet.delta);
+                    applyDeltas(state.autonaState, deltaSet.delta);
                 }
                 state.maxAppliedDeltaIdx = getRevision(sortedDeltas[sortedDeltas.length-1]);
             }
@@ -136,7 +136,7 @@ export const tshStateSlice = createSlice({
             state.stateDeltas = [];
         },
 
-        addDeltas(state: TshStateReduxState, action: PayloadAction<ReceivedDeltas>){
+        addDeltas(state: AutonaStateReduxState, action: PayloadAction<ReceivedDeltas>){
             const rev = getRevision(action.payload);
             // Strictly-less-than handles the duplicate-delta case (revision
             // equal to maxApplied means we already applied it). The gap
@@ -149,8 +149,8 @@ export const tshStateSlice = createSlice({
             state.stateDeltas.push(action.payload);
         },
 
-        overwrite(state: TshStateReduxState, action: PayloadAction<TSHStateMessage>) {
-            state.tshState = action.payload.state;
+        overwrite(state: AutonaStateReduxState, action: PayloadAction<AutonaStateMessage>) {
+            state.autonaState = action.payload.state;
             const rev = getRevision(action.payload);
             // A snapshot is the source of truth for revision, so adopt it
             // (could be lower than maxApplied after server restart).
@@ -165,14 +165,14 @@ export const tshStateSlice = createSlice({
     }
 })
 
-export const tshPlayersSlice = createSlice({
-    name: 'tshPlayers',
+export const autonaPlayersSlice = createSlice({
+    name: 'autonaPlayers',
     initialState: {
-        players: {} as TSHPlayerDb,
+        players: {} as AutonaPlayerDb,
         initializing: true,
     },
     reducers: {
-        overwrite(state, action: PayloadAction<TSHPlayerDb>) {
+        overwrite(state, action: PayloadAction<AutonaPlayerDb>) {
             state.players = action.payload;
             for (let k in state.players) {
                 state.players[k].prefixed_tag = k;
@@ -182,19 +182,19 @@ export const tshPlayersSlice = createSlice({
     }
 });
 
-export const tshCharactersSlice = createSlice({
-    name: 'tshCharacters',
+export const autonaCharactersSlice = createSlice({
+    name: 'autonaCharacters',
     initialState: {
-        characters: {} as TSHCharacterDb,
+        characters: {} as AutonaCharacterDb,
         initializing: true,
     },
     reducers: {
-        overwrite(state, action: PayloadAction<TSHCharacterDb>) {
+        overwrite(state, action: PayloadAction<AutonaCharacterDb>) {
             // We need our character list to be keyed by the en_name, because things like player mains are set
             // to the english name instead the localized name. We won't be able to do lookups if we don't
             // rearrange it like this.
-            const enChars: TSHCharacterDb = {};
-            Object.values(action.payload).forEach((char: TSHCharacterDbEntry) => {
+            const enChars: AutonaCharacterDb = {};
+            Object.values(action.payload).forEach((char: AutonaCharacterDbEntry) => {
                 enChars[char.en_name] = char;
             });
             console.log("Character data set", enChars);
@@ -204,14 +204,14 @@ export const tshCharactersSlice = createSlice({
     }
 });
 
-export const tshGamesSlice = createSlice({
-    name: 'tshGames',
+export const autonaGamesSlice = createSlice({
+    name: 'autonaGames',
     initialState: {
-        value: {} as TSHGamesDb,
+        value: {} as AutonaGamesDb,
         initializing: true
     },
     reducers: {
-        overwrite(state, action: PayloadAction<TSHGamesDb>) {
+        overwrite(state, action: PayloadAction<AutonaGamesDb>) {
             state.value = action.payload;
             for (let k in state.value) {
                 state.value[k].codename = k;
@@ -221,14 +221,14 @@ export const tshGamesSlice = createSlice({
     }
 });
 
-export const tshCountriesSlice = createSlice({
-    name: 'tshCountries',
+export const autonaCountriesSlice = createSlice({
+    name: 'autonaCountries',
     initialState: {
-        value: {} as TSHCountryDb,
+        value: {} as AutonaCountryDb,
         initializing: true,
     },
     reducers: {
-        overwrite(state, action: PayloadAction<TSHCountryDb>) {
+        overwrite(state, action: PayloadAction<AutonaCountryDb>) {
             state.value = action.payload;
             state.initializing = false;
         }

@@ -33,7 +33,7 @@ from qtpy.QtCore import *
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .core import StateSchema as schema
 from .core.PlayerService import KEEP_ONLINE_AVATAR, PlayerService
-from .StateManager import StateManager
+from .core.StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from loguru import logger
 

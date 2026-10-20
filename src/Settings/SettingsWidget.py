@@ -1,6 +1,6 @@
 from qtpy.QtWidgets import *
 from ..AutonaColorButton import AutonaColorButton
-from ..SettingsManager import SettingsManager
+from ..core.SettingsManager import SettingsManager
 from ..AutonaHotkeys import AutonaHotkeys
 from ..Helpers.AutonaHotkeyValidator import (
     collision_summary,

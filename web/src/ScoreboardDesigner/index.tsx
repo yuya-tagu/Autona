@@ -401,7 +401,7 @@ function layerPanelItems(
 }
 
 export default function ScoreboardDesigner() {
-    const liveState = useSelector((state: ReduxState) => state.tshState.tshState);
+    const liveState = useSelector((state: ReduxState) => state.autonaState.autonaState);
     const websocketStatus = useSelector(
         (state: ReduxState) => state.websocketInfo.status,
     );

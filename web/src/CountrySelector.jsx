@@ -16,7 +16,7 @@ export function CountrySelector({
     onChange,
     ...props
 }) {
-    const countries = useSelector(state => state.tshCountries.value);
+    const countries = useSelector(state => state.autonaCountries.value);
 
     const country = countries[value];
     const getCountryFlagAsset = (inp) => {
@@ -31,7 +31,7 @@ export function CountrySelector({
         return `http://${window.location.hostname}:${BACKEND_PORT}/assets/country_flag/${c.code.toLowerCase()}.png`
     };
 
-    const countryDisplayName = (/** TSHCountry */ country) => {
+    const countryDisplayName = (/** AutonaCountry */ country) => {
         return country?.name ? `${country.name} (${country.code})` : country;
     };
 

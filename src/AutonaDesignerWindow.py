@@ -5,7 +5,7 @@ from qtpy.QtWidgets import QDialog, QVBoxLayout
 from qtpy.QtWebEngineWidgets import QWebEngineView
 
 from .AutonaDesignerService import AutonaDesignerService
-from .SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
+from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 
 
 class AutonaDesignerWindow(QDialog):

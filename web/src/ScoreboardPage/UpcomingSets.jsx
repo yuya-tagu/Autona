@@ -27,10 +27,10 @@ const SETS_TIMEOUT_MS = 60000;
 /**
  * @typedef {object} UpcomingSetsState
  * @property {?string} setFilter
- * @property {?TSHSet} selectedSet
+ * @property {?AutonaSet} selectedSet
  * @property {boolean} showFinished
  * @property {boolean} expanded
- * @property {Array.<TSHSet>} sets
+ * @property {Array.<AutonaSet>} sets
  */
 export default class UpcomingSets extends React.Component {
     /** @type UpcomingSetsState */ state;
@@ -103,7 +103,7 @@ export default class UpcomingSets extends React.Component {
     }
 
     /**
-     * @returns {TSHSet[]}
+     * @returns {AutonaSet[]}
      */
     filteredSets = () => {
         if (this.state.setFilter === null) {
@@ -122,7 +122,7 @@ export default class UpcomingSets extends React.Component {
         ));
     }
 
-    onSetClicked = ( /** @type {TSHSet} */ set) => {
+    onSetClicked = ( /** @type {AutonaSet} */ set) => {
         this.setState({
             selectedSet: set
         });
@@ -188,7 +188,7 @@ export default class UpcomingSets extends React.Component {
                                 {this.state.isLoading && [0, 1, 2].map((i) => (
                                     <Skeleton key={`card-skeleton-${i}`} variant="rounded" height={72} />
                                 ))}
-                                {!this.state.isLoading && this.filteredSets().map((/** TSHSet */ set) => (
+                                {!this.state.isLoading && this.filteredSets().map((/** AutonaSet */ set) => (
                                     <Paper
                                         key={`card-${set.id}`}
                                         onClick={() => {this.onSetClicked(set)}}
@@ -253,7 +253,7 @@ export default class UpcomingSets extends React.Component {
                                         }
                                         {
                                             !this.state.isLoading &&
-                                            this.filteredSets().map((/** TSHSet */ set) => (
+                                            this.filteredSets().map((/** AutonaSet */ set) => (
                                                 <TableRow
                                                     hover
                                                     onClick={() => {this.onSetClicked(set)}}

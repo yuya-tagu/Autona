@@ -3,8 +3,8 @@ import orjson
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
-from .StateManager import StateManager
-from .SettingsManager import SettingsManager
+from .core.StateManager import StateManager
+from .core.SettingsManager import SettingsManager
 import re
 import traceback
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper

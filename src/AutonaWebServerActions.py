@@ -8,9 +8,9 @@ import orjson
 
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaQtHelper import gui_thread_sync
-from .StateManager import StateManager
+from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
-from .SettingsManager import SettingsManager
+from .core.SettingsManager import SettingsManager
 from loguru import logger
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaPlayerDB import AutonaPlayerDB

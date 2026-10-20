@@ -55,8 +55,7 @@
 |-------------|------|------------|
 | [`../CLAUDE.md`](../CLAUDE.md) | 開発原則・Git 方針の要点・アーキ概要・参照マップ（詳細索引は [`../.claude/README.md`](../.claude/README.md)） | 開発運用の正本 |
 | [`../.claude/design/Design.md`](../.claude/design/Design.md) | UI 実装方式・データモデル・画面仕様・デザインシステム・ホットキー | **実装仕様の正本** |
-| [`../.claude/architecture/`](../.claude/architecture/) | コードベース調査の事実情報（import 関係・状態キーパス等） | 調査ログ |
-| [`../FEATURES.md`](../FEATURES.md) | 機能一覧（リバースエンジニアリング） | 参考（※後述の注意） |
+| [`product/features.md`](product/features.md) | 機能一覧・運用制約・リグレッション禁止リスト | 機能一覧の正本 |
 | [`../ROADMAP.md`](../ROADMAP.md) | 将来機能の提案（PdM） | 参考 |
 | [`positioning.md`](positioning.md) | タグライン・ポジショニング・差別化・メッセージング規則 | **対外メッセージングの正本** |
 | `docs/`（本ディレクトリ） | 運用制約・変更影響・調査/実装タスク | 運用・変更管理の視点 |
@@ -65,11 +64,9 @@
 `docs/` 配下に書く内容が実装仕様に踏み込む場合は、Design.md を正本として参照し、
 ここには「運用・変更時に注意すべき点」を書く。
 
-> ⚠️ **既知の不整合（2026-06-14 時点）**: ルートの `FEATURES.md` と `AGENTS.md` には
-> ステージストライク機能（`/stage-strike-app`・`StageStrikePage`・`stage_strike` 状態等）の
-> 記述が残っているが、`CLAUDE.md` には「削除済み」と明記されており、コードベース上にも
-> 該当ファイル・ルートは存在しない（確認済み）。`docs/` 配下では**ステージストライクは
-> 現行ビルドに存在しない**前提で記述する。詳細は [product/current-features.md](product/current-features.md) を参照。
+> **ステージストライク機能は削除済み**（旧 `StageStrikePage` / `/stage-strike-app` / `ruleset`・`stage_strike` 状態）。
+> `docs/` 配下では現行ビルドに存在しない前提で記述する。Start.gg parser には互換データとして
+> `stage_strike` / `ruleset` を読む処理が残るが、操作 UI / 外部制御 API の対象ではない。
 
 ## 記入ルール
 

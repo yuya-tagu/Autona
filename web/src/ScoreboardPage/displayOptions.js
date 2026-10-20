@@ -28,7 +28,7 @@ export const DISPLAY_OPTIONS = [
  *  desktop defaults for keys the server hasn't broadcast yet). */
 export function useDisplayOptions() {
     return useSelector((state) => {
-        const opts = state.tshState.tshState?.display_options || {};
+        const opts = state.autonaState.autonaState?.display_options || {};
         const result = {};
         for (const o of DISPLAY_OPTIONS) {
             result[o.key] = opts[o.key] ?? o.default;

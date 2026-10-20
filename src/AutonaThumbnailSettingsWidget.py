@@ -9,9 +9,9 @@ import traceback
 import json
 
 from .thumbnail import main_generate_thumbnail as thumbnail
-from .StateManager import StateManager
+from .core.StateManager import StateManager
 from .StateManagerBridge import StateManagerBridge
-from .SettingsManager import *
+from .core.SettingsManager import *
 from .AutonaGameAssetManager import *
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaDictHelper import deep_get, deep_set

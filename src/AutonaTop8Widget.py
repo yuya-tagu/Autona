@@ -30,8 +30,8 @@ from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from loguru import logger
 
-from .StateManager import StateManager
-from .SettingsManager import SettingsManager
+from .core.StateManager import StateManager
+from .core.SettingsManager import SettingsManager
 from .AutonaLayoutPreview import (
     AutonaLayoutPreview, ObsUrl, DiscoverLayoutDesigns,
     LayoutDesignDisplayName)

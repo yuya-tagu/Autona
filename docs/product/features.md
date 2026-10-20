@@ -2,7 +2,7 @@
 
 格闘ゲーム大会の配信オペレーションを支援するデスクトップアプリケーション。スコアボード管理を中核に、配信オーバーレイ出力・Web リモート操作・サムネイル生成・SNS 投稿までを統合する。
 
-本ドキュメントはコードベースと UI 定義（`.ui` ファイル・メニュー定義）をリバースエンジニアリングしてまとめたユーザー視点の機能一覧。実装詳細は [CLAUDE.md](CLAUDE.md) と [.claude/architecture/](.claude/architecture/) を参照。
+本ドキュメントはコードベースと UI 定義（`.ui` ファイル・メニュー定義）をリバースエンジニアリングしてまとめたユーザー視点の機能一覧。実装詳細は [CLAUDE.md](../../CLAUDE.md) と [.claude/design/Design.md](../../.claude/design/Design.md) を参照。
 
 ---
 
@@ -43,7 +43,7 @@
 
 ## 1. メインメニュー
 
-[src/Autona.py](src/Autona.py) のサイドバー / Help & Settings メニュー。
+[src/Autona.py](../../src/Autona.py) のサイドバー / Help & Settings メニュー。
 
 ### Help & Settings メニュー
 - **Always on top** — ウィンドウを常に最前面に表示
@@ -73,7 +73,7 @@
 
 ## 2. スコアボード管理
 
-[src/AutonaScoreboardWidget.py](src/AutonaScoreboardWidget.py)。
+[src/AutonaScoreboardWidget.py](../../src/AutonaScoreboardWidget.py)。
 
 ### できること
 - **スコア加算・減算** — チーム 1 / チーム 2 それぞれに +1 / −1
@@ -96,7 +96,7 @@
 
 ## 3. 選手情報管理
 
-[src/AutonaScoreboardPlayerWidget.py](src/AutonaScoreboardPlayerWidget.py)。
+[src/AutonaScoreboardPlayerWidget.py](../../src/AutonaScoreboardPlayerWidget.py)。
 
 ### 入力項目
 - ゲーマータグ / 本名 / スポンサー（Prefix）
@@ -118,7 +118,7 @@
 
 ## 4. 配信チャネル・ストリーム URL 管理
 
-[src/AutonaScoreboardWidget.py](src/AutonaScoreboardWidget.py)（`_addStreamChannel`・`PopulateStreamChannels`）。
+[src/AutonaScoreboardWidget.py](../../src/AutonaScoreboardWidget.py)（`_addStreamChannel`・`PopulateStreamChannels`）。
 
 - スコアボードにストリーム URL 欄（YouTube / Twitch / ニコ生 等）
 - **ストリームチャネル追加ボタン** — 使う URL をドロップダウンにプリセット登録
@@ -129,7 +129,7 @@
 
 ## 5. X（旧 Twitter）投稿
 
-[src/AutonaScoreboardWidget.py](src/AutonaScoreboardWidget.py:1160) `PostToX`。
+[src/AutonaScoreboardWidget.py](../../src/AutonaScoreboardWidget.py) `PostToX`。
 
 ### ワンクリックで以下を実行
 1. **サムネイル画像を自動生成**（`GenerateThumbnail(quiet_mode=True)`）
@@ -149,7 +149,7 @@
 
 ## 7. 実況・解説パネル
 
-[src/AutonaCommentaryWidget.py](src/AutonaCommentaryWidget.py)・[src/AutonaCommentaryModel.py](src/AutonaCommentaryModel.py)・[layout/commentators/](layout/commentators/)。
+[src/AutonaCommentaryWidget.py](../../src/AutonaCommentaryWidget.py)・[src/AutonaCommentaryModel.py](../../src/AutonaCommentaryModel.py)・[layout/commentators/](../../layout/commentators/)。
 
 - 8 スロット固定の実況・解説者カード（名前 / チーム / 本名 / Twitter / 役割 / コメント）
 - 役割プレフィックス（実況・解説・選手・主催）を選択可能
@@ -161,7 +161,7 @@
 
 ## 8. 大会情報（Tournament Info）
 
-[src/AutonaTournamentInfoWidget.py](src/AutonaTournamentInfoWidget.py)・[src/layout/AutonaTournamentInfo.ui](src/layout/AutonaTournamentInfo.ui)。
+[src/AutonaTournamentInfoWidget.py](../../src/AutonaTournamentInfoWidget.py)・[src/layout/AutonaTournamentInfo.ui](../../src/layout/AutonaTournamentInfo.ui)。
 
 ### 自動取得情報
 - 大会名 / イベント名 / 参加者数 / 開始日 / 会場住所 / ショートリンク
@@ -183,7 +183,7 @@
 
 ## 9. ブラケット表示（TOP 8）
 
-[src/AutonaTop8Widget.py](src/AutonaTop8Widget.py)・[src/AutonaTop8Model.py](src/AutonaTop8Model.py)・[layout/bracket_top8/](layout/bracket_top8/)。
+[src/AutonaTop8Widget.py](../../src/AutonaTop8Widget.py)・[src/AutonaTop8Model.py](../../src/AutonaTop8Model.py)・[layout/bracket_top8/](../../layout/bracket_top8/)。
 
 - FGC 標準の **TOP 8 固定ダブルエリミネーションブラケット**（Winners スタート 4 名 + Losers スタート 4 名、全 11 試合: WSF×2 / WF / LR1×2 / LQF×2 / LSF / LF / GF / GF リセット）
 - **選手カード（8 スロット固定）** — 名前 / スポンサー / 国 / 使用キャラ・カラーを編集。対戦カードの変更は選手の入れ替えで行う
@@ -197,7 +197,7 @@
 
 ## 10. 選手一覧
 
-[src/AutonaPlayerBrowserWidget.py](src/AutonaPlayerBrowserWidget.py)。サイドバーの独立パネル（統計情報の下）。2 タブ構成。
+[src/AutonaPlayerBrowserWidget.py](../../src/AutonaPlayerBrowserWidget.py)。サイドバーの独立パネル（統計情報の下）。2 タブ構成。
 
 - **トーナメント出場選手** — 現在ロード中の大会の参加者をシード順に一覧表示（スポンサー / ハンドルネーム / 本名 / 国 / 使用キャラ）。行選択から P1 / P2 へワンクリックでセット
 - **登録済み選手** — ローカル選手 DB（`user_data/local_players.json`）の閲覧・インクリメンタル検索・新規登録・編集・削除。編集はスコアボードと同じ選手フォームをダイアログで再利用
@@ -206,10 +206,10 @@
 
 ## 11. 統計・分析
 
-STATS ドック（[src/AutonaStatsWidget.py](src/AutonaStatsWidget.py)）の内部タブに集約。
+STATS ドック（[src/AutonaStatsWidget.py](../../src/AutonaStatsWidget.py)）の内部タブに集約。
 
 - **Head-to-Head / Last Sets / Tournament History**（内蔵タブ）
-- **この大会の試合一覧**（[src/AutonaAnalysisWidget.py](src/AutonaAnalysisWidget.py) パネル）
+- **この大会の試合一覧**（[src/AutonaAnalysisWidget.py](../../src/AutonaAnalysisWidget.py) パネル）
   - 全試合一覧（ラウンド・シード・選手・スコア）
   - Upset Factor / Loser's Run / SeedOver
   - Stream Queue 反映 / 列ソート対応
@@ -218,13 +218,13 @@ STATS ドック（[src/AutonaStatsWidget.py](src/AutonaStatsWidget.py)）の内�
 
 ## 12. 補助ウィジェット
 
-- **アラート通知**（[src/AutonaAlertNotification.py](src/AutonaAlertNotification.py)）
+- **アラート通知**（[src/AutonaAlertNotification.py](../../src/AutonaAlertNotification.py)）
 
 ---
 
 ## 13. クルーバトル
 
-[src/AutonaCrewBattleWidget.py](src/AutonaCrewBattleWidget.py)（board 3。[src/AutonaScoreboardManager.py](src/AutonaScoreboardManager.py) が生成）。
+[src/AutonaCrewBattleWidget.py](../../src/AutonaCrewBattleWidget.py)（board 3。[src/AutonaScoreboardManager.py](../../src/AutonaScoreboardManager.py) が生成）。
 
 - メンバー数設定（1〜9人、両チーム共通）
 - メンバーごとのストック数管理・チーム合計の自動集計（名前未入力のメンバーは合計に含まない）
@@ -238,7 +238,7 @@ STATS ドック（[src/AutonaStatsWidget.py](src/AutonaStatsWidget.py)）の内�
 
 ## 14. Individual Game Tracker
 
-[src/AutonaIndividualGameTracker.py](src/AutonaIndividualGameTracker.py)。
+[src/AutonaIndividualGameTracker.py](../../src/AutonaIndividualGameTracker.py)。
 
 - Bo3/Bo5 の各ゲームごとに使われたステージ・勝者を記録（ベータ機能）
 - 設定から有効化
@@ -247,7 +247,7 @@ STATS ドック（[src/AutonaStatsWidget.py](src/AutonaStatsWidget.py)）の内�
 
 ## 15. サムネイル・対戦動画生成
 
-[src/AutonaThumbnailSettingsWidget.py](src/AutonaThumbnailSettingsWidget.py)・[src/thumbnail/ThumbnailRenderer.py](src/thumbnail/ThumbnailRenderer.py)。
+[src/AutonaThumbnailSettingsWidget.py](../../src/AutonaThumbnailSettingsWidget.py)・[src/thumbnail/ThumbnailRenderer.py](../../src/thumbnail/ThumbnailRenderer.py)。
 
 - YouTube / Twitch 用サムネイルを自動生成
 - テーマ / アクセントカラー
@@ -261,7 +261,7 @@ STATS ドック（[src/AutonaStatsWidget.py](src/AutonaStatsWidget.py)）の内�
 
 ## 16. YouTube メタデータ生成
 
-[src/AutonaThumbnailSettingsWidget.py](src/AutonaThumbnailSettingsWidget.py) `_BuildVideoTitle()`。
+[src/AutonaThumbnailSettingsWidget.py](../../src/AutonaThumbnailSettingsWidget.py) `_BuildVideoTitle()`。
 
 - **動画タイトル自動生成** — 対戦情報からテンプレート適用
 - **動画タイトル Copy ボタン**（`btCopyVideoTitle`）— クリップボードにコピー
@@ -271,7 +271,7 @@ STATS ドック（[src/AutonaStatsWidget.py](src/AutonaStatsWidget.py)）の内�
 
 ## 17. 結果画面生成
 
-[src/AutonaResultSettingsWidget.py](src/AutonaResultSettingsWidget.py)・[src/result/ResultRenderer.py](src/result/ResultRenderer.py)。
+[src/AutonaResultSettingsWidget.py](../../src/AutonaResultSettingsWidget.py)・[src/result/ResultRenderer.py](../../src/result/ResultRenderer.py)。
 
 - 試合結果画面の自動生成
 - プレビューはレイアウト選択・選手編集で自動再描画（手動更新ボタンなし）
@@ -283,7 +283,7 @@ STATS ドック（[src/AutonaStatsWidget.py](src/AutonaStatsWidget.py)）の内�
 
 ## 18. Start.gg 連携
 
-[src/TournamentDataProvider/StartGGDataProvider.py](src/TournamentDataProvider/StartGGDataProvider.py)。
+[src/TournamentDataProvider/StartGGDataProvider.py](../../src/TournamentDataProvider/StartGGDataProvider.py)。
 
 ### 取得できるデータ
 | データ | 用途 |
@@ -308,7 +308,7 @@ STATS ドック（[src/AutonaStatsWidget.py](src/AutonaStatsWidget.py)）の内�
 
 ## 19. Web UI（リモート操作）
 
-[web/src/](web/src/)。React 19 / Redux Toolkit / MUI 7 / Socket.IO。
+[web/src/](../../web/src/)。React 19 / Redux Toolkit / MUI 7 / Socket.IO。
 
 ### `/web`・`/scoreboard`（board1）・`/team`（board2）
 Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / Commentators
@@ -321,7 +321,7 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 
 ## 20. Web API エンドポイント
 
-[src/AutonaWebServer.py](src/AutonaWebServer.py) / [src/AutonaApiV1.py](src/AutonaApiV1.py) / [src/AutonaWebServerActions.py](src/AutonaWebServerActions.py)。
+[src/AutonaWebServer.py](../../src/AutonaWebServer.py) / [src/AutonaApiV1.py](../../src/AutonaApiV1.py) / [src/AutonaWebServerActions.py](../../src/AutonaWebServerActions.py)。
 
 - 既存制御面: スコア操作 / セット管理 / 統計取得 / 選手情報 / 大会データロード / マスタデータ（characters・variants・controllers・match-names）など HTTP ルート + Socket.IO。
 - 外部制御 API: `/api/v1/` 名前空間で実装済み。読み取り、スコア操作、set 情報更新、破壊的操作の `confirm:true`、重い操作の `202 Accepted` + 多重起動ガードに対応。
@@ -331,7 +331,7 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 
 ## 21. ホットキー
 
-[src/AutonaHotkeys.py](src/AutonaHotkeys.py)。Windows グローバルホットキー。
+[src/AutonaHotkeys.py](../../src/AutonaHotkeys.py)。Windows グローバルホットキー。
 
 | キー | 動作 |
 |------|------|
@@ -348,7 +348,7 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 
 ## 22. ローカル選手 DB
 
-[src/AutonaPlayerDB.py](src/AutonaPlayerDB.py)。
+[src/AutonaPlayerDB.py](../../src/AutonaPlayerDB.py)。
 
 - 保存先: `user_data/local_players.json`
 - 項目: prefix / gamerTag / name / twitter / country_code / state_code / mains / pronoun / custom_textbox / controller
@@ -372,7 +372,7 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 - 状態自動保存・復元（`STATE_VERSION` 管理）
 
 ### プリセット
-[src/LayoutOptions/AutonaLayoutOptionsWindow.py](src/LayoutOptions/AutonaLayoutOptionsWindow.py)。
+[src/LayoutOptions/AutonaLayoutOptionsWindow.py](../../src/LayoutOptions/AutonaLayoutOptionsWindow.py)。
 - レイアウトプリセットの保存 / 読込 / 削除
 - プリセット名管理
 - ウィジェット表示状態の一括切替
@@ -385,7 +385,7 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 
 ## 25. 設定・環境
 
-[src/Settings/AutonaSettingsWindow.py](src/Settings/AutonaSettingsWindow.py)。
+[src/Settings/AutonaSettingsWindow.py](../../src/Settings/AutonaSettingsWindow.py)。
 
 ### General タブ
 - Web サーバーポート（既定 5000）
@@ -435,7 +435,7 @@ Edit → Help サブメニュー。
 
 ## 28. 自動アップデート
 
-[src/AutonaUpdater.py](src/AutonaUpdater.py)。
+[src/AutonaUpdater.py](../../src/AutonaUpdater.py)。
 
 - 起動時に GitHub Releases を確認
 - 新バージョン検出時にダイアログ
@@ -447,7 +447,7 @@ Edit → Help サブメニュー。
 
 ## 29. 配信オーバーレイ出力
 
-[src/AutonaWebServer.py](src/AutonaWebServer.py) + `layout/` サブモジュール。
+[src/AutonaWebServer.py](../../src/AutonaWebServer.py) + `layout/` サブモジュール。
 
 - `out/program_state.json` — 全状態 JSON
 - `out/` 配下の個別テキストファイル（OBS テキストソース向け）
@@ -460,22 +460,22 @@ Edit → Help サブメニュー。
 ## 30. その他の連携機能
 
 ### スポンサー / チームロゴ
-[src/core/SponsorHelper.py](src/core/SponsorHelper.py)。
+[src/core/SponsorHelper.py](../../src/core/SponsorHelper.py)。
 - `user_data/sponsor_logo/` から prefix で自動マッチ
 - 複数スポンサー対応
 
 ### コントローラー検出
-[src/Helpers/AutonaControllerHelper.py](src/Helpers/AutonaControllerHelper.py)。
+[src/Helpers/AutonaControllerHelper.py](../../src/Helpers/AutonaControllerHelper.py)。
 - DirectInput / XInput デバイス検出
 - 選手ごとの使用機器ドロップダウン選択
 - Web API 経由でも取得可能
 
 ### 国・地域マスタ
-[src/Helpers/AutonaCountryHelper.py](src/Helpers/AutonaCountryHelper.py)。
+[src/Helpers/AutonaCountryHelper.py](../../src/Helpers/AutonaCountryHelper.py)。
 - ISO 国コード / 米国州コードの国旗マスタ
 
 ### 下品表現フィルター
-[src/Helpers/AutonaBadWordFilter.py](src/Helpers/AutonaBadWordFilter.py)。
+[src/Helpers/AutonaBadWordFilter.py](../../src/Helpers/AutonaBadWordFilter.py)。
 - タグ・本名の NG ワード警告・差し替え
 
 ### Twitch ユーザー名設定
@@ -509,6 +509,27 @@ Edit → Help サブメニュー。
 
 ## 参考
 
-- [README.md](README.md) — インストール・ビルド手順
-- [CLAUDE.md](CLAUDE.md) — 開発者向けアーキテクチャ
-- [.claude/architecture/](.claude/architecture/) — 技術資料
+- [README.md](../../README.md) — インストール・ビルド手順
+- [CLAUDE.md](../../CLAUDE.md) — 開発者向けアーキテクチャ
+- [.claude/design/Design.md](../../.claude/design/Design.md) — 実装仕様の正本
+
+---
+
+## 運用上の前提と劣化させてはいけない機能
+
+- Windows 専用前提（グローバルホットキーは pynput、exe 配布）
+- 言語変更は再起動必須（Program / Game Asset / Tournament term の 3 系統）
+- 自動アップデートは PyInstaller ビルド版のみ動作（`python main.py` では無効）
+- Bluesky 設定は認証情報（App Password）を含む。値の出力・外部送信禁止
+- 永続化: 設定 `user_data/settings.json` / ローカル選手 DB `user_data/local_players.json`
+
+変更時に必ず動作確認する対象（リグレッション禁止リスト）:
+
+1. 既存 Web UI / OBS ブラウザソースの動作（`out/` 出力 + HTTP/WS 配信）
+2. デスクトップ UI からのスコア操作とホットキー
+3. 既存 HTTP/Socket.IO ルート群（`/score`・`/scoreboard<N>-*` 等）
+4. StateManager → WebSocket デルタ配信のリアルタイム性
+5. Start.gg ロード〜セット反映フロー
+6. レイアウト保存/復元（STATE_VERSION）と保存データ互換
+
+手順は [../operations/runtime-operations.md](../operations/runtime-operations.md) と [../../.claude/manual-test-checklist.md](../../.claude/manual-test-checklist.md) を参照。

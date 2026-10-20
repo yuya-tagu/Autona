@@ -41,17 +41,16 @@
 ### 前提条件
 
 - Python 3.12
-- Node.js（Web UI ビルド用）
-- pip / pipenv
+- Node.js 20 以降（Web UI ビルド用）
 
 ### インストール
 
 ```bash
 # Python 依存パッケージ
-python -m pipenv install -r dependencies/requirements.txt
+pip install -r dependencies/requirements.txt
 
 # Web UI 依存パッケージ
-cd web && npm install
+cd web && npm ci
 ```
 
 ### 実行
@@ -59,12 +58,6 @@ cd web && npm install
 ```bash
 # 開発モード
 python main.py
-
-# Windows バッチ
-Autona_bat.bat
-
-# Linux/Mac
-./Autona.sh
 ```
 
 ### ビルド
@@ -73,11 +66,12 @@ Autona_bat.bat
 # 1. Web UI をビルド（先に実行）
 cd web && npm run build
 
-# 2. exe をビルド
-python -m PyInstaller dependencies/autona.spec --distpath . --workpath build -y
+# 2. exe をビルド（onedir）
+pip install pyinstaller
+pyinstaller dependencies/autona.spec --noconfirm
 ```
 
-- `Autona.exe` はプロジェクト直下に生成される（`dist/` ではない）
+- 成果物は `dist/Autona/`（`Autona.exe` + `_internal/`）に生成される。`_internal/` が無いと起動しない
 - Web UI のビルドを先に行わないと、exe に古い Web UI が同梱される
 
 ### リリース
@@ -148,10 +142,6 @@ scripts/gen_release.ps1
 ```
 Autona/
 ├── main.py                  # エントリーポイント
-├── Autona.exe                  # ビルド済み実行ファイル
-├── Autona_bat.bat              # Windows 起動スクリプト
-├── Autona.sh                   # Linux/Mac 起動スクリプト
-├── Pipfile                  # Python 依存定義
 │
 ├── src/                     # Python ソースコード
 │   ├── Autona.py                  # メインウィンドウ (QMainWindow)

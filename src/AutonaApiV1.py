@@ -26,7 +26,7 @@ from collections import OrderedDict
 from flask import Blueprint, jsonify, request
 from loguru import logger
 
-from .StateManager import StateManager
+from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
 # Import order mirrors the singleton init order (agent-pitfalls #2): the asset
 # manager must be importable before the tournament data provider. By the time

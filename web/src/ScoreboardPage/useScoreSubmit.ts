@@ -23,7 +23,7 @@ export function useScoreSubmit(
     teamKeys: string[],
 ) {
     const serverScores: Scores = useSelector((state: any) => {
-        const score = state.tshState.tshState?.score?.[scoreboardNumber];
+        const score = state.autonaState.autonaState?.score?.[scoreboardNumber];
         return {
             left: score?.team?.[teamKeys[0]]?.score ?? 0,
             right: score?.team?.[teamKeys[1]]?.score ?? 0,

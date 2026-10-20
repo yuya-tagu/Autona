@@ -61,7 +61,7 @@ import {DisplayOptionsMenuButton, useDisplayOptions} from "./displayOptions";
  */
 
 /**
- * @param {TSHPlayerDbEntry} player
+ * @param {AutonaPlayerDbEntry} player
  * @param {string} gameCodename
  * @param {number} count
  * @return {CharacterSelections}
@@ -101,11 +101,11 @@ function getMains(player, gameCodename, count) {
  *
  * @param {string} teamId
  * @param {string} teamKey
- * @param {TSHPlayerInfo} player
+ * @param {AutonaPlayerInfo} player
  * @param {number|string} scoreboardNumber
- * @param {string} tshTeamId
+ * @param {string} autonaTeamId
  */
-export default function Player({teamId, teamKey, player, scoreboardNumber, tshTeamId}) {
+export default function Player({teamId, teamKey, player, scoreboardNumber, autonaTeamId}) {
     const [
         /** @type {PlayerState} */ state,
         setState
@@ -117,7 +117,7 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, tshTe
         _realName: player.real_name,
         _twitter: player.twitter,
         _customTextbox: player.custom_textbox ?? "",
-        _charSelections: charsFromTsh(player.character),
+        _charSelections: charsFromAutona(player.character),
 
         countryCode: player.country?.code,
         stateCode: player.state?.code,
@@ -126,7 +126,7 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, tshTe
         realName: player.real_name,
         twitter: player.twitter,
         customTextbox: player.custom_textbox ?? "",
-        charSelections: charsFromTsh(player.character),
+        charSelections: charsFromAutona(player.character),
     });
     // Details modal. Its fields render from the same local state the parent
     // card already holds (loaded with the page's first view) — opening it
@@ -134,9 +134,9 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, tshTe
     const [detailsOpen, setDetailsOpen] = React.useState(false);
 
     const playerId = `${teamId}-p-${teamKey}`;
-    const tshState = useSelector((s) => s.tshState.tshState);
-    const gameCodename = tshState?.game?.codename;
-    /** @type TSHPlayerDb */ const playerDb = useSelector(state => state.tshPlayers.players);
+    const autonaState = useSelector((s) => s.autonaState.autonaState);
+    const gameCodename = autonaState?.game?.codename;
+    /** @type AutonaPlayerDb */ const playerDb = useSelector(state => state.autonaPlayers.players);
     const show = useDisplayOptions();
     const {run} = useApiAction();
     const theme = useTheme();
@@ -155,7 +155,7 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, tshTe
             realName: player.real_name,
             twitter: player.twitter,
             customTextbox: player.custom_textbox ?? "",
-            charSelections: charsFromTsh(player.character),
+            charSelections: charsFromAutona(player.character),
         }
 
         const stateUpdates = {};
@@ -179,9 +179,9 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, tshTe
     }, [player]) // eslint-disable-line react-hooks/exhaustive-deps
     // We don't want our dependencies to be exhaustive above because we want to specifically only
 
-    const /** @type {TSHCharacterDb} */ characters = useSelector(state => state.tshCharacters.characters);
+    const /** @type {AutonaCharacterDb} */ characters = useSelector(state => state.autonaCharacters.characters);
 
-    /** @returns {TSHPlayerInfo} */
+    /** @returns {AutonaPlayerInfo} */
     const getModifiedPlayerData = (s = state) => {
         /*
          * The fields here are slightly off... The API sends the scoreboard out with the real name in the
@@ -208,7 +208,7 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, tshTe
         const lookupName = !!player.prefix ? `${player.prefix} ${player.name}` : player.name;
         const existingMains = Object.values(playerDb[lookupName]?.mains?.[gameCodename] ?? [])
         const charsFromForm = Object.values(s.charSelections)
-        // The number of characters from the original TSH state.
+        // The number of characters from the original Autona state.
         const maxChars = Object.values(s._charSelections).length;
         const mainsToSubmit = [];
         for (let i = 0; i < maxChars; i += 1) {
@@ -236,7 +236,7 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, tshTe
     // explicitly for selection-type commits where setState hasn't flushed.
     const submitPlayer = (fromState = state) => {
         run(() => apiPost(
-            `/scoreboard${scoreboardNumber}-update-team-${tshTeamId}-${teamKey}`,
+            `/scoreboard${scoreboardNumber}-update-team-${autonaTeamId}-${teamKey}`,
             getModifiedPlayerData(fromState)));
     };
 
@@ -269,12 +269,12 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, tshTe
     /**
      *
      * @param {React.SyntheticEvent} event
-     * @param {TSHPlayerDbEntry|string} newPlayer
+     * @param {AutonaPlayerDbEntry|string} newPlayer
      * @param {string} reason
      */
     const onTagChanged = (event, newPlayer,  reason) => {
         if (newPlayer instanceof Object && newPlayer.hasOwnProperty("gamerTag")) {
-            // newPlayer is a TSHPlayerDbEntry
+            // newPlayer is a AutonaPlayerDbEntry
             const newState = {
                 ...state,
                 countryCode: newPlayer.country_code ?? "",
@@ -296,7 +296,7 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, tshTe
     /**
      *
      * @param charIdx
-     * @param {TSHCharacterBase|string} newChar
+     * @param {AutonaCharacterBase|string} newChar
      */
     const onCharNameChanged = (charIdx, newChar) => {
         const charEntry = characters?.[newChar?.en_name];
@@ -368,7 +368,7 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, tshTe
                                 size="small"
                                 options={Object.values(playerDb)}
                                 value={state.name ?? ''}
-                                getOptionLabel={(/** TSHPlayerDbEntry|string */ player) => {
+                                getOptionLabel={(/** AutonaPlayerDbEntry|string */ player) => {
                                     return player?.prefixed_tag ?? player;
                                 }}
                                 freeSolo={true}
@@ -529,18 +529,18 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, tshTe
 
 /**
  *
- * @param {TSHCharacterSelections} tshChars
+ * @param {AutonaCharacterSelections} autonaChars
  * @returns {CharacterSelections}
  */
-function charsFromTsh(tshChars) {
+function charsFromAutona(autonaChars) {
     const res = {};
-    for (const i in tshChars) {
+    for (const i in autonaChars) {
         res[i] = {
             charIdx: i,
-            charName: tshChars[i].en_name ?? "",
+            charName: autonaChars[i].en_name ?? "",
             // Never undefined: the skin <Select> must stay controlled from
             // its first render (MUI warns on undefined -> value switches).
-            charSkin: tshChars[i].skin ?? "",
+            charSkin: autonaChars[i].skin ?? "",
         }
 
     }

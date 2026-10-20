@@ -4,7 +4,7 @@ from qtpy.QtCore import *
 from qtpy import uic
 import os
 import time
-from .StateManager import StateManager
+from .core.StateManager import StateManager
 from .StateManagerBridge import StateManagerBridge
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaGameAssetManager import AutonaGameAssetManager

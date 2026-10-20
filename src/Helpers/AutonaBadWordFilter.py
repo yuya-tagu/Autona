@@ -1,7 +1,7 @@
 import re
 import unicodedata
 from typing import Union, Dict
-from ..SettingsManager import SettingsManager
+from ..core.SettingsManager import SettingsManager
 import json
 from .AutonaLocaleHelper import AutonaLocaleHelper
 import traceback

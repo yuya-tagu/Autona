@@ -45,7 +45,7 @@ def bootstrap_core():
     # options. Loading it late would make every one of those silently fall
     # back to its default. It also creates ./user_data, which later steps
     # write into.
-    from .SettingsManager import SettingsManager
+    from .core.SettingsManager import SettingsManager
     SettingsManager.Initialize()
 
     # The other on-disk settings file: the per-layout options an OBS overlay
@@ -73,7 +73,7 @@ def bootstrap_core():
 
     # StateManager next: it owns ./out and loads the persisted program
     # state, and every widget built later reads through it.
-    from .StateManager import StateManager
+    from .core.StateManager import StateManager
     StateManager.Initialize()
 
     # ORDER CONSTRAINT: the Qt bridge for the state layer must exist before

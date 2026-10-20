@@ -295,7 +295,7 @@ def test_a_remote_colour_change_reaches_the_crew_board(autonaApp):
     value straight back (that is what _SyncTeamColors' QSignalBlocker is
     for).
     """
-    from src.StateManager import StateManager
+    from src.core.StateManager import StateManager
 
     board = autonaApp.board(BOARD)
     autonaApp.settle()
@@ -566,7 +566,7 @@ def test_a_set_payload_with_nothing_crew_understands_changes_nothing(
     Board 3 has no entrant roster, so a payload built for boards 1/2 must
     leave it exactly as it was rather than half-apply.
     """
-    from src.StateManager import StateManager
+    from src.core.StateManager import StateManager
 
     board = autonaApp.board(BOARD)
     autonaApp.settle()
@@ -593,7 +593,7 @@ def restoreTournamentInfo(autonaApp):
     """
     from src.core.TournamentInfoService import TournamentInfoService
     from src.Helpers.AutonaDictHelper import deep_clone
-    from src.StateManager import StateManager
+    from src.core.StateManager import StateManager
 
     saved = deep_clone(StateManager.Get("tournamentInfo") or {})
     service = TournamentInfoService.instance
@@ -636,7 +636,7 @@ def test_a_display_name_written_elsewhere_reaches_the_crew_field(
 # handler wrote the state back after receiving its own notification.
 
 def _revisionCost(app, action):
-    from src.StateManager import StateManager
+    from src.core.StateManager import StateManager
 
     app.settle()
     before = StateManager.revision

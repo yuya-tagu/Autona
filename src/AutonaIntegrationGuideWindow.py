@@ -21,7 +21,7 @@ from qtpy.QtWidgets import *
 
 import json
 
-from .SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
+from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 from .Helpers.AutonaNetworkHelper import GetWebServerHost
 
 

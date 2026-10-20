@@ -20,7 +20,7 @@ from src import AutonaTop8Model as top8
 from src.core import StateSchema as schema
 from src.core import Top8Service
 from src.Helpers.AutonaDictHelper import deep_clone
-from src.StateManager import StateManager as SM
+from src.core.StateManager import StateManager as SM
 
 _WORK_DIR = tempfile.mkdtemp(prefix="autona_top8_test_")
 _ORIGINAL_CWD = os.getcwd()
@@ -161,31 +161,21 @@ def test_applying_scores_is_one_save_cycle():
     assert SM.revision == before + 1
 
 
-def test_the_first_apply_on_an_unrecomputed_seed_drops_the_scores():
-    """Characterization of a pre-existing gap, not a rule worth having.
+def test_the_first_apply_on_a_fresh_install_seed_keeps_the_scores():
+    """Regression for known-smells S-18.
 
-    ``top8.DefaultState()`` hands out matches whose ``slots`` are all TBD,
-    and ``StateSchema.SeedPanelState`` writes it verbatim on a first launch
-    (the Recompute is in the *restored*-state branch). Recompute then treats
-    "the participants changed" as "this result is about the wrong players"
-    and clears the score -- correctly, given what it was told. So the very
-    first 反映 on a fresh install does not stick, and the second one does,
-    because by then the published slots agree.
-
-    Identical before this instalment: the panel ran the same merge inline.
-    Pinned rather than fixed -- the fix belongs to the seed, not to the write
-    path this instalment moved.
+    ``top8.DefaultState()`` hands out matches whose ``slots`` are all TBD.
+    ``SeedPanelState`` used to write it verbatim on a first launch, so
+    Recompute read the first 反映 as "the participants changed" and cleared
+    the score. The seed is now recomputed, so the first apply sticks.
     """
-    SM.Set(schema.TOP8_ROOT, top8.DefaultState())
+    SM.Set(schema.TOP8_ROOT, None)
+    schema.SeedPanelState()
     _settle()
-    assert SM.Get("top8.matches.wsf1.slots") == [top8.TBD, top8.TBD]
+    assert SM.Get("top8.matches.wsf1.slots") == [1, 2]
 
     first = Top8Service.ApplyScores({**_allTies(), "wsf1": [2, 1]})
-    assert first["wsf1"]["score"] == [0, 0]
-    # ...but the slots are right now, so the retry lands.
-    assert first["wsf1"]["slots"] == [1, 2]
-    second = Top8Service.ApplyScores({**_allTies(), "wsf1": [2, 1]})
-    assert second["wsf1"]["score"] == [2, 1]
+    assert first["wsf1"]["score"] == [2, 1]
 
 
 def test_the_service_never_mutates_the_live_matches_dict():

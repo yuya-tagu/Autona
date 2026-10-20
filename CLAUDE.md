@@ -24,11 +24,11 @@ CLAUDE.md は要点のみ。詳細は以下を**必要時に参照**する（常
 
 ## 体制と作業分担
 
-個人開発プロジェクト。**PdM 兼経営者**（ユーザー・田口）がプロダクト方針・優先順位・UX 意思決定・リリース判断を持ち、**エンジニアリード**（Claude）が設計・実装・検証・コード品質の最終責任を持つ。
+個人開発プロジェクト。**オーナー／メンテナー**（人間）がプロダクト方針・優先順位・UX 意思決定・リリース判断を持ち、**エンジニアリード**（Claude Code）が設計・実装・検証・コード品質の最終責任を持つ。
 
 - 実装・検証・レビューは [`.claude/agents/`](.claude/agents/) のサブエージェントへ委譲する（`impl` / `patch` / `verify` / `review`）。モデルとツールは各定義の frontmatter が正本。メインセッションはタスク分解・設計判断・要件のすり合わせ・成果物の検収に専念し、自明な 1〜2 行修正を除いて自分でコードを書かない
 - 設計上の懸念は、指示に反していても提起する
-- 「OK」「ビルドして」等の短い指示は、直前の文脈で確定した方針の実行として解釈する
+- オーナーの「OK」「ビルドして」等の短い指示は、直前の文脈で確定した方針の実行として解釈する
 
 ## 開発原則
 
@@ -54,13 +54,13 @@ cp dist/Autona/Autona.exe ./Autona.exe
 
 ## アーキテクチャの入口
 
-コンポーネント一覧・データフロー・Redux slices の詳細は [.claude/design/Design.md](.claude/design/Design.md)（正本）。状態キーパスは [.claude/architecture/phase-a-b/state-keys.md](.claude/architecture/phase-a-b/state-keys.md)。
+コンポーネント一覧・データフロー・Redux slices の詳細は [.claude/design/Design.md](.claude/design/Design.md)（正本）。状態キーパスの正本は `src/core/StateSchema.py`（`KEY_CATALOG`）。
 
 読み始める場所:
 
 - `src/bootstrap.py` — composition root。**シングルトン生成順の正本**（`bootstrap_core()`）
 - `src/Autona.py` — QMainWindow。サイドバー + `QStackedWidget` で全パネル管理。**この import 自体が起動シーケンス**なので、テストや調査スクリプトから import しない
-- `src/core/StateManager.py` — グローバル状態（nested dict）。deepdiff でデルタ算出、ファイル出力 + WebSocket 配信。**core は Qt を import しない**（`tests/test_core_qt_free.py` が pin）。Qt シグナルはアダプタ `src/StateManagerBridge.py` が提供する。`src/StateManager.py` は互換 re-export シム（1 世代のみ）
+- `src/core/StateManager.py` — グローバル状態（nested dict）。deepdiff でデルタ算出、ファイル出力 + WebSocket 配信。**core は Qt を import しない**（`tests/test_core_qt_free.py` が pin）。Qt シグナルはアダプタ `src/StateManagerBridge.py` が提供する。
 
 **遅延構築**: 起動時に無条件で作るのは Scoreboard（アクティブな battle_format の 1 面）のみ。他パネルと設定/ガイドウィンドウは初回アクセス時にファクトリで構築（`_Create*Panel` / `Ensure*Window`）。Tournament Info も headless core Step 4b で遅延構築に移行したが、**サイドバーの既定 index 0 = EVENT** なので、そこを最後に開いていた／新規インストールでは結局起動時に建つ。未構築でも必要な state のシードは `Window._SeedPanelState()` に集約。起動時間は `STARTUP phase=...` ログで計測する（詳細は [ADR-003](docs/decisions/ADR-003-startup-architecture.md)）。
 
@@ -75,11 +75,4 @@ Edit/Write 後に出る「No preview server is running...（ブラウザプレ�
 - **作業はローカル `main` 上で行う**（worktree も作業ブランチも作らない）。ブランチはリモート push 時にだけ切る
 - push は `git push origin main:<type>/<topic>`（種別 `feat`/`fix`/`docs`）。**リモート `main` への直接 push 禁止**（必ず PR 経由）
 - コミットメッセージ・PR 説明文は日本語。**コミット・push は明示的に依頼されたときのみ**
-- **このマシン固有**: アクティブ gh アカウントが `yuyat-highfield` だと `yuya-tagu/Autona` へ push/fetch が `Repository not found` で失敗する。一回限りの手順で行う（push 後は必ず元に戻す）:
-
-```bash
-gh auth switch --user yuya-tagu
-git -c credential.helper= -c credential.helper="!gh auth git-credential" \
-  push origin main:<type>/<topic>
-gh auth switch --user yuyat-highfield   # 元のアクティブアカウントに復元
-```
+- **マシン固有の認証手順**（複数 GitHub アカウント環境での push / fetch 等）は `CLAUDE.local.md`（gitignore 済み）を参照

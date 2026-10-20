@@ -29,7 +29,7 @@ from .core.GameTrackerService import (
     GameTrackerService, TEAM_1, TEAM_2, TIE, UNREPORTED)
 from .Helpers.AutonaQtHelper import assert_gui_thread
 from .Helpers.AutonaVersionHelper import add_beta_label
-from .StateManager import StateManager
+from .core.StateManager import StateManager
 
 
 class AutonaIndividualGameTrackerSignals(QObject):

@@ -684,7 +684,12 @@ def SeedPanelState():
     # legacy bracket keys. Slots are always derived, never restored.
     state = StateManager.Get(TOP8_ROOT)
     if not isinstance(state, dict) or not state.get("matches"):
-        StateManager.Set(TOP8_ROOT, top8.DefaultState())
+        # Recompute the fresh seed too: DefaultState() hands out TBD slots,
+        # and the first ApplyScores would otherwise treat that as "the
+        # participants changed" and drop the score (known-smells S-18).
+        seed = top8.DefaultState()
+        seed[TOP8_MATCHES_KEY] = top8.Recompute(seed[TOP8_MATCHES_KEY])
+        StateManager.Set(TOP8_ROOT, seed)
     else:
         StateManager.Set(
             f"{TOP8_ROOT}.{TOP8_MATCHES_KEY}",

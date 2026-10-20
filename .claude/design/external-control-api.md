@@ -339,7 +339,7 @@ HTTP/1.1 409 Conflict
 - **配置**: `/api/v1` ルート定義は既存 `AutonaWebServer.WebServer` に追加し、内部は `WebServer.actions.*`（既存 `WebServerActions`）を呼ぶ。
   状態ロジックを新規に書かない（D4）。エンベロープ整形は本 API 層の薄いヘルパーに集約。
 - **GUI スレッド**: 委譲先 Action の多くは `@gui_thread_sync`。本 API も既存同様 QThread 上で呼べばよい（既存 Web ルートと同じ呼び方）。
-- **既存ルートを壊さない**: 既存ハンドラ・Socket.IO イベントは変更しない（regression 禁止・current-features.md「must not regress」）。
+- **既存ルートを壊さない**: 既存ハンドラ・Socket.IO イベントは変更しない（regression 禁止・docs/product/features.md「リグレッション禁止リスト」）。
 - **二重定義に追従不要**: 本 API は HTTP のみ提供（WS フィードバックは §4 の既存購読で足りる）。Socket.IO 側に `/api/v1` 相当は作らない。
 - **ポート**: 既存 `general.webserver_port`（既定 5000）を共有。新ポートは開かない。
 

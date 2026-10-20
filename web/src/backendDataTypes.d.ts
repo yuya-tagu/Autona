@@ -1,14 +1,14 @@
-export interface TSHCountryInfo {
+export interface AutonaCountryInfo {
     code: string;
     display_name: string;
     en_name: string;
 }
 
-export interface TSHPlayerInfo {
+export interface AutonaPlayerInfo {
     id?: [number, number];
     city?: string;
-    state?: TSHCountryInfo;
-    country?: TSHCountryInfo;
+    state?: AutonaCountryInfo;
+    country?: AutonaCountryInfo;
     online_avatar?: string;
     name: string;
     mergedName: string;
@@ -18,62 +18,62 @@ export interface TSHPlayerInfo {
     sponsor_logo?: string;
     team?: string;
     twitter?: string;
-    character: TSHCharacterSelections;
+    character: AutonaCharacterSelections;
 }
 
-export interface TSHTeamInfo {
+export interface AutonaTeamInfo {
     score: number;
     teamName: string;
-    player: Record<number, TSHPlayerInfo>;
+    player: Record<number, AutonaPlayerInfo>;
     losers: boolean;
     color: string;
 }
 
-export interface TSHScoreInfo {
+export interface AutonaScoreInfo {
     best_of: number;
     best_of_text: string;
     match: string;
     phase: string;
     set_id: number;
     station?: string;
-    team: Record<number, TSHTeamInfo>;
+    team: Record<number, AutonaTeamInfo>;
 }
 
-export interface TSHCharacterBase {
+export interface AutonaCharacterBase {
     codename: string;
     display_name: string;
     en_name: string;
     name: string;
 }
 
-export interface TSHCharacterSelection extends TSHCharacterBase {
+export interface AutonaCharacterSelection extends AutonaCharacterBase {
     skin: number; // This is -1 if unset.
 }
 
-export type TSHCharacterSelections = Record<number, TSHCharacterSelection>;
+export type AutonaCharacterSelections = Record<number, AutonaCharacterSelection>;
 
-export interface TSHCharacterDb {
-    [codename: string]: TSHCharacterDbEntry;
+export interface AutonaCharacterDb {
+    [codename: string]: AutonaCharacterDbEntry;
 }
 
-export interface TSHCharacterDbEntry extends TSHCharacterBase {
-    skins: TSHCharacterSkin[];
+export interface AutonaCharacterDbEntry extends AutonaCharacterBase {
+    skins: AutonaCharacterSkin[];
 }
 
-export interface TSHCharacterSkin {
-    assets: TSHCharacterSkinAssets;
+export interface AutonaCharacterSkin {
+    assets: AutonaCharacterSkinAssets;
 }
 
-export interface TSHCharacterSkinAssets {
-    art?: TSHCharacterSkinAsset;
-    "base_files/icon"?: TSHCharacterSkinAsset;
-    costume?: TSHCharacterSkinAsset;
-    css?: TSHCharacterSkinAsset;
-    full?: TSHCharacterSkinAsset;
-    profile?: TSHCharacterSkinAsset;
+export interface AutonaCharacterSkinAssets {
+    art?: AutonaCharacterSkinAsset;
+    "base_files/icon"?: AutonaCharacterSkinAsset;
+    costume?: AutonaCharacterSkinAsset;
+    css?: AutonaCharacterSkinAsset;
+    full?: AutonaCharacterSkinAsset;
+    profile?: AutonaCharacterSkinAsset;
 }
 
-export interface TSHCharacterSkinAsset {
+export interface AutonaCharacterSkinAsset {
     asset: string; // Path to the asset
     average_size?: Point2D;
     image_size?: Point2D;
@@ -87,18 +87,18 @@ export interface Point2D {
     y: number;
 }
 
-export type TSHCharacters = Record<string, TSHCharacterSelection>;
+export type AutonaCharacters = Record<string, AutonaCharacterSelection>;
 
-export interface TSHSetEntrant {
+export interface AutonaSetEntrant {
     gamerTag: string;
     prefix?: string;
     name?: string;
     id: number[];
 }
 
-export interface TSHSet {
+export interface AutonaSet {
     bracket_type: string;
-    entrants: [TSHSetEntrant, TSHSetEntrant];
+    entrants: [AutonaSetEntrant, AutonaSetEntrant];
     id: number;
     isOnline?: boolean;
     isPools: boolean;
@@ -115,32 +115,32 @@ export interface TSHSet {
     tournament_phase?: string;
 }
 
-export interface TSHPlayerDbEntry {
+export interface AutonaPlayerDbEntry {
     country_code: string;
     custom_textbox: string;
     prefixed_tag: string;
     gamerTag: string;
-    mains?: TSHMainsMap;
+    mains?: AutonaMainsMap;
     name: string;
     prefix: string;
     twitter: string;
 }
 
-export type TSHCountryCode = string;
+export type AutonaCountryCode = string;
 
-export interface TSHCountryDb {
-    [country_code: TSHCountryCode]: TSHCountryInfo
+export interface AutonaCountryDb {
+    [country_code: AutonaCountryCode]: AutonaCountryInfo
 }
 
-export type TSHMainsMap = Record<string, TSHMain[]>;
+export type AutonaMainsMap = Record<string, AutonaMain[]>;
 
-export type TSHMain = [string, number, string];
+export type AutonaMain = [string, number, string];
 
-export type TSHPlayerDb = Record<string, TSHPlayerDbEntry>;
+export type AutonaPlayerDb = Record<string, AutonaPlayerDbEntry>;
 
-export interface TSHState {
+export interface AutonaState {
     score: {
-        [scoreboard: number]: TSHScoreInfo;
+        [scoreboard: number]: AutonaScoreInfo;
         ruleset: object;
     };
     game?: {
@@ -173,11 +173,11 @@ export interface TSHState {
     };
 }
 
-export interface TSHGamesDb {
-    [codename: string]: TSHGameInfo
+export interface AutonaGamesDb {
+    [codename: string]: AutonaGameInfo
 }
 
-export interface TSHGameInfo{
+export interface AutonaGameInfo{
     challonge_game_id: number,
     has_stages: boolean
     has_variants: boolean

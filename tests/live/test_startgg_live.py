@@ -284,7 +284,7 @@ def test_a_restart_restores_the_tournament_and_refetches(autonaApp, liveEvent,
     showing yesterday's set), the URL still in settings, and a fresh fetch
     against the live API on startup.
     """
-    from src.SettingsManager import SettingsManager
+    from src.core.SettingsManager import SettingsManager
 
     state = autonaApp.state
     tournamentName = liveEvent.tournament["tournamentName"]
@@ -523,7 +523,7 @@ def test_a_query_string_avatar_is_not_written_as_text(autonaApp, liveEvent,
 
 def _prepare(scoreboardNumber=1):
     from src.AutonaGameAssetManager import AutonaGameAssetManager
-    from src.SettingsManager import SettingsManager
+    from src.core.SettingsManager import SettingsManager
     from src.thumbnail.main_generate_thumbnail import prepare_data
 
     return prepare_data(SettingsManager, isPreview=False,
@@ -552,7 +552,7 @@ def test_save_result_writes_both_image_formats(autonaApp, liveEvent,
     """The disk half of generation, without a renderer in the way."""
     from qtpy.QtGui import QColor, QPixmap
 
-    from src.SettingsManager import SettingsManager
+    from src.core.SettingsManager import SettingsManager
     from src.thumbnail.main_generate_thumbnail import save_result
 
     data, _config, _template = _prepare()
@@ -586,7 +586,7 @@ def test_generate_renders_a_full_size_thumbnail(autonaApp, liveEvent,
     from PIL import Image
 
     from src.AutonaGameAssetManager import AutonaGameAssetManager
-    from src.SettingsManager import SettingsManager
+    from src.core.SettingsManager import SettingsManager
     from src.thumbnail.main_generate_thumbnail import generate
 
     saved = Path(generate(SettingsManager, isPreview=False,

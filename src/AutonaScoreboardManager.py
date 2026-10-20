@@ -6,7 +6,7 @@ from loguru import logger
 from .AutonaScoreboardWidget import AutonaScoreboardWidget
 from .AutonaCrewBattleWidget import AutonaCrewBattleWidget
 from .Helpers.AutonaQtHelper import gui_thread_sync, in_gui_thread
-from .StateManager import StateManager
+from .core.StateManager import StateManager
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
 from . import ui_constants as UI

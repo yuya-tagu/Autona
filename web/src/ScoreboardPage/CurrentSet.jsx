@@ -26,12 +26,12 @@ import {Grid} from "@mui/system";
 export default function CurrentSet({scoreboardNumber, scoreSubmit}) {
     const [expanded, setExpanded] = React.useState(true);
 
-    const tshState = useSelector(state => state.tshState.tshState);
+    const autonaState = useSelector(state => state.autonaState.autonaState);
     const theme = useTheme();
     const isSmall = useMediaQuery(theme.breakpoints.down('lg'));
 
-    /** @type {TSHScoreInfo} */
-    const score = tshState?.score[scoreboardNumber];
+    /** @type {AutonaScoreInfo} */
+    const score = autonaState?.score[scoreboardNumber];
 
     const {pending: resetPending, run: runReset} = useApiAction();
     const {pending: swapPending, run: runSwap} = useApiAction();
@@ -45,10 +45,10 @@ export default function CurrentSet({scoreboardNumber, scoreSubmit}) {
     }
 
     const postToX = () => {
-        const tournamentName = tshState?.tournamentInfo?.tournamentName || "";
+        const tournamentName = autonaState?.tournamentInfo?.tournamentName || "";
         const phase = [score?.phase, score?.pool].filter(Boolean).join(" - ");
         const match = score?.match || "";
-        const streamUrl = tshState?.stream?.url || "";
+        const streamUrl = autonaState?.stream?.url || "";
 
         const getTeamLine = (teamKey) => {
             const team = score?.team?.[teamKey];
@@ -155,7 +155,7 @@ export default function CurrentSet({scoreboardNumber, scoreSubmit}) {
                                 <Team
                                     key={`s-${scoreboardNumber}-t-${teamKeys[0]}`}
                                     teamId={`s-${scoreboardNumber}-t-${teamKeys[0]}`}
-                                    tshTeamId={teamKeys[0]}
+                                    autonaTeamId={teamKeys[0]}
                                     team={teams[0]}
                                     scoreboardNumber={scoreboardNumber}
                                 />
@@ -179,7 +179,7 @@ export default function CurrentSet({scoreboardNumber, scoreSubmit}) {
                             <Container disableGutters maxWidth={'sm'}>
                                 <Team key={`s-${scoreboardNumber}-t-${teamKeys[1]}`}
                                       teamId={`s-${scoreboardNumber}-t-${teamKeys[1]}`}
-                                      tshTeamId={teamKeys[1]}
+                                      autonaTeamId={teamKeys[1]}
                                       team={teams[1]}
                                       scoreboardNumber={scoreboardNumber}
                                 />

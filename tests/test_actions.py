@@ -33,7 +33,7 @@ from src.core import StateSchema as schema
 from src.core.Actions import AutonaActions
 from src.core.SettingsManager import SettingsManager
 from src.Helpers.AutonaDictHelper import deep_clone
-from src.StateManager import StateManager as SM
+from src.core.StateManager import StateManager as SM
 
 _WORK_DIR = tempfile.mkdtemp(prefix="autona_actions_test_")
 _ORIGINAL_CWD = os.getcwd()

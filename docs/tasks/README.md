@@ -28,7 +28,7 @@
 
 - このリポジトリの実装ルールは [../../CLAUDE.md](../../CLAUDE.md) と
   [../../.claude/rules/](../../.claude/rules/) に従う（worktree 運用・検証・地雷回避）
-- フェーズ計画は [../../.claude/plans/](../../.claude/plans/)、設計正本は
+- 設計正本は
   [../../.claude/design/Design.md](../../.claude/design/Design.md)
 
 ## ファイル

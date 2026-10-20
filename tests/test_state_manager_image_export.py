@@ -33,7 +33,7 @@ from PIL import Image
 # the binding lives in src/core/StateManager.py since headless core Step 1
 # (src/StateManager.py only re-exports the class).
 import src.core.StateManager as state_manager
-from src.StateManager import StateManager as SM
+from src.core.StateManager import StateManager as SM
 
 _ORIGINAL_CWD = os.getcwd()
 

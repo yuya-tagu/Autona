@@ -191,11 +191,11 @@ from .AutonaAlertNotification import AutonaAlertNotification
 from .AutonaUpdater import AutonaUpdater, CleanupUpdateLeftovers
 from .AutonaPlayerDB import AutonaPlayerDB
 from .Workers import *
-from .StateManager import StateManager
+from .core.StateManager import StateManager
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
 from .core.TournamentInfoService import TournamentInfoService
-from .SettingsManager import SettingsManager
+from .core.SettingsManager import SettingsManager
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaStatusManager import AutonaStatusManager
 from .AutonaScoreboardManager import AutonaScoreboardManager

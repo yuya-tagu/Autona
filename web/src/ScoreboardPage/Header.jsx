@@ -22,7 +22,7 @@ import {Tune} from "@mui/icons-material";
 
 
 export const Header = ({scoreboardNumber = 1, ...rest}) => {
-    const tshState = useSelector(state => state.tshState.tshState, shallowEqual);
+    const autonaState = useSelector(state => state.autonaState.autonaState, shallowEqual);
 
     const theme = useTheme();
 
@@ -121,8 +121,8 @@ export const Header = ({scoreboardNumber = 1, ...rest}) => {
                     display: {xs: 'none', sm: 'block'},
                 }}>
                     <span>Event:&nbsp;</span>
-                    <span>{tshState.tournamentInfo.tournamentName}:</span>
-                    <span>{tshState.tournamentInfo.eventName}</span>
+                    <span>{autonaState.tournamentInfo.tournamentName}:</span>
+                    <span>{autonaState.tournamentInfo.eventName}</span>
                 </Box>
 
                 {/* Tools toggle (phone only): tournament URL + auto-update.

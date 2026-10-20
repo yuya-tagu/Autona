@@ -32,7 +32,7 @@ from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from loguru import logger
 
-from .SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
+from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 from .AutonaLayoutPreview import AutonaLayoutPreview, ObsUrl
 from .Helpers.AutonaNetworkHelper import GetWebServerHost
 from .AutonaFeatureColors import FEATURE_STATS, MakeFeatureColorCard

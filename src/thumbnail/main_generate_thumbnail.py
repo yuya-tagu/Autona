@@ -15,7 +15,7 @@ from qtpy.QtWidgets import QApplication
 
 from src.AutonaGameAssetManager import AutonaGameAssetManager
 from src.AutonaFeatureColors import FEATURE_THUMBNAIL, GetFeatureColors
-from src.StateManager import StateManager
+from src.core.StateManager import StateManager
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from src.Helpers.AutonaDictHelper import *
 from src.Helpers.AutonaDirHelper import AutonaResolve

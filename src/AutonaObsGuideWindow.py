@@ -29,7 +29,7 @@ from qtpy.QtWidgets import *
 import json
 import os
 
-from .SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
+from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 
 
 def _tr(text):

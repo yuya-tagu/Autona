@@ -120,11 +120,11 @@ class _AutonaHarness:
 
     @property
     def state(self):
-        from src.StateManager import StateManager
+        from src.core.StateManager import StateManager
         return StateManager
 
     def get(self, keypath, default=None):
-        from src.StateManager import StateManager
+        from src.core.StateManager import StateManager
         return StateManager.Get(keypath, default)
 
     # -- widgets ----------------------------------------------------------
@@ -315,7 +315,7 @@ class _AutonaHarness:
         drop its image into the developer's real ./out.
         """
         from qtpy.QtWidgets import QApplication
-        from src.StateManager import StateManager
+        from src.core.StateManager import StateManager
 
         previous = object()
         while True:
@@ -389,7 +389,7 @@ def _autonaRuntime(qapp, tmp_path_factory):
         # Belt and braces: every autonaApp teardown already settles, but the
         # CWD must not be restored while an image download is still resolving
         # its relative output path.
-        from src.StateManager import StateManager
+        from src.core.StateManager import StateManager
         StateManager.JoinDownloads()
 
         AutonaDirHelper.current_dir = previousDir

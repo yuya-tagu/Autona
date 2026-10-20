@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from src.StateManager import StateManager as SM
+from src.core.StateManager import StateManager as SM
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = PROJECT_ROOT / "src"

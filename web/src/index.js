@@ -1,11 +1,10 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
-import reportWebVitals from './reportWebVitals';
 
 import {BrowserRouter, Navigate, Route, Routes} from "react-router-dom";
 import ScoreboardPage from "./ScoreboardPage";
-import {tshStore} from "./redux/store";
+import {autonaStore} from "./redux/store";
 import {Provider} from "react-redux";
 import ThemeShell from "./ThemeShell";
 import ScoreboardDesigner from "./ScoreboardDesigner";
@@ -21,7 +20,7 @@ const WebPage = () => (
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
-      <Provider store={tshStore}>
+      <Provider store={autonaStore}>
           <ThemeShell>
               <BrowserRouter>
                   <Routes>
@@ -52,7 +51,3 @@ root.render(
   </React.StrictMode>
 );
 
-// If you want to start measuring performance in your app, pass a function
-// to log results (for example: reportWebVitals(console.log))
-// or send to an analytics endpoint. Learn more: https://bit.ly/CRA-vitals
-reportWebVitals();

@@ -26,7 +26,7 @@ from qtpy.QtGui import QStandardItem, QStandardItemModel
 from qtpy.QtWidgets import QComboBox, QLineEdit, QSpinBox
 
 from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
-from src.StateManager import StateManager
+from src.core.StateManager import StateManager
 
 
 def _players(app):
@@ -66,8 +66,7 @@ def test_set_data_publishes_the_tag_and_the_sponsor(autonaApp):
 
     # The keys are the QLineEdit objectNames ("name" / "team"), which is the
     # contract the overlays are written against (agent-pitfalls #4). Note
-    # that the *input* field is "gamerTag" and the *published* key is "name":
-    # .claude/architecture/phase-a-b/state-keys.md still says gamerTag.
+    # that the *input* field is "gamerTag" and the *published* key is "name".
     assert autonaApp.get(f"{player.path}.name") == "TAG"
     assert autonaApp.get(f"{player.path}.team") == "SPONSOR"
 

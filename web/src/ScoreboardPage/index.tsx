@@ -11,7 +11,7 @@ import UpcomingSets from "./UpcomingSets";
 import {Header} from "./Header";
 import {ReduxState} from "../redux/store"
 import {useDispatch, useSelector} from "react-redux";
-import {tshStateSlice} from "../redux/tshState";
+import {autonaStateSlice} from "../redux/autonaState";
 import websocketInit from "./websocketInit";
 import {apiGet} from "../api";
 import {FeedbackProvider, useApiAction} from "./Feedback";
@@ -25,7 +25,7 @@ import ScoreControlBar from "./ScoreControlBar";
 // (2) in index.js. Defaults to 1 for backward compatibility.
 
 /**
- * Main page for the scoreboard. This whole contraption is powered by TSH's python-side
+ * Main page for the scoreboard. This whole contraption is powered by Autona's python-side
  * program state. In order to do that, we subscribe to updates that get sent out and update
  * our state piecemeal. Each update has a number so that we can tell if our updates are stale
  * or out of order and request a full state send-over.
@@ -34,18 +34,18 @@ function ScoreboardPageInner(props: any) {
     const SCOREBOARD_ID = props.scoreboardNumber ?? 1;
     const dispatch = useDispatch();
     const loading = useSelector((state: ReduxState) => (
-        state.tshState.initializing
-        || state.tshCharacters.initializing
-        || state.tshPlayers.initializing
-        || state.tshGames.initializing
-        || state.tshCountries.initializing
+        state.autonaState.initializing
+        || state.autonaCharacters.initializing
+        || state.autonaPlayers.initializing
+        || state.autonaGames.initializing
+        || state.autonaCountries.initializing
     ));
     const {pending: clearPending, run: runClear} = useApiAction();
 
     // Page-level optimistic score state, shared by the set card (CurrentSet
     // -> ScorePanel) and the phone bottom bar so both show the same value.
     const score = useSelector((state: ReduxState) =>
-        (state.tshState.tshState as any)?.score?.[SCOREBOARD_ID]);
+        (state.autonaState.autonaState as any)?.score?.[SCOREBOARD_ID]);
     const teamKeys = Object.keys(score?.team || {}).sort();
     const scoreSubmit = useScoreSubmit(SCOREBOARD_ID, teamKeys);
 
@@ -55,7 +55,7 @@ function ScoreboardPageInner(props: any) {
     }, []);
 
     const onSelectedSetChanged = () => {
-        dispatch(tshStateSlice.actions.loadingNewData({}));
+        dispatch(autonaStateSlice.actions.loadingNewData({}));
     };
 
     const clearAll = () => {

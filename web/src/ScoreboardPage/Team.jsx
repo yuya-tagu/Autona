@@ -14,11 +14,11 @@ import {useApiAction} from "./Feedback";
  *
  * @param {Object} props
  * @param {string} props.teamId
- * @param {string|int} props.tshTeamId
- * @param {TSHTeamInfo} props.team
+ * @param {string|int} props.autonaTeamId
+ * @param {AutonaTeamInfo} props.team
  * @param {number|string} props.scoreboardNumber
  */
-export default function Team({teamId, tshTeamId, team, scoreboardNumber}) {
+export default function Team({teamId, autonaTeamId, team, scoreboardNumber}) {
     const [inLosers, setInLosers] = React.useState(team.losers);
     const [teamName, setTeamName] = React.useState(team.teamName ?? "");
     const {run} = useApiAction();
@@ -34,22 +34,22 @@ export default function Team({teamId, tshTeamId, team, scoreboardNumber}) {
     // Board 2 is the team-mode board (desktop: teamName only in team mode).
     const isTeamBoard = String(scoreboardNumber) === "2";
     const teamLabel = isTeamBoard
-        ? `${i18n.t("team")} ${tshTeamId}`
-        : `${tshTeamId}P`;
+        ? `${i18n.t("team")} ${autonaTeamId}`
+        : `${autonaTeamId}P`;
 
     const onLosersChanged = (e) => {
         const checked = e.target.checked;
         setInLosers(checked);
         run(() => apiGet(`/scoreboard${scoreboardNumber}-set?` + new URLSearchParams({
             losers: checked,
-            team: tshTeamId
+            team: autonaTeamId
         }).toString()));
     };
 
     const submitTeamName = () => {
         run(() => apiGet(`/scoreboard${scoreboardNumber}-set?` + new URLSearchParams({
             teamName: teamName,
-            team: tshTeamId
+            team: autonaTeamId
         }).toString()));
     };
 
@@ -60,7 +60,7 @@ export default function Team({teamId, tshTeamId, team, scoreboardNumber}) {
             teamKey={playerKey}
             player={team.player[playerKey]}
             scoreboardNumber={scoreboardNumber}
-            tshTeamId={tshTeamId}
+            autonaTeamId={autonaTeamId}
         />
     ));
 
