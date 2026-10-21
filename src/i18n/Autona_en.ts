@@ -910,6 +910,22 @@
         <translation>Setup steps</translation>
     </message>
     <message>
+        <source>Set both scores (absolute)</source>
+        <translation>Set both scores (absolute)</translation>
+    </message>
+    <message>
+        <source>States / regions of a country</source>
+        <translation>States / regions of a country</translation>
+    </message>
+    <message>
+        <source>Toggle display options (partial)</source>
+        <translation>Toggle display options (partial)</translation>
+    </message>
+    <message>
+        <source>Update player fields (partial)</source>
+        <translation>Update player fields (partial)</translation>
+    </message>
+    <message>
         <source>Success</source>
         <translation>Success</translation>
     </message>

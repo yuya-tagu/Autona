@@ -2196,36 +2196,72 @@ class AutonaScoreboardWidget(QWidget):
             for p in self.playerWidgets:
                 p.dataLock.release()
 
+    def ApplyPlayerData(self, team, player, data):
+        """Apply one player's fields from a remote client (/api/v1 PATCH).
+
+        Just the player half of ChangeSetData. Run through ChangeSetData (as
+        the legacy update-team route does), a player edit also went through
+        the set-level writers, and `SetLoadService.ApplyMatchInfo` writes
+        `match_en` unconditionally -- so every remote player edit blanked
+        the English round text. Same SaveBlock, same player write, nothing
+        else.
+
+        Unlike the legacy path, a failure is reported instead of logged and
+        swallowed: False when the team has no such slot (`player` is 1-based
+        and must be within the team's current roster -- checked here, on the
+        GUI thread, against the widgets that actually exist), and an
+        exception from the write itself propagates. True when applied.
+        GUI thread only (the player widgets are written).
+        """
+        team = int(team)
+        player = int(player)
+        if team not in (1, 2):
+            return False
+        widgets = (self.team1playerWidgets if team == 1
+                   else self.team2playerWidgets)
+        if not 1 <= player <= len(widgets):
+            return False
+        with StateManager.SaveBlock():
+            self._WritePlayerSlot(team, player, data)
+        return True
+
     def _ApplySinglePlayerData(self, data):
         """Apply a one-player payload (set_team_data). False if it had none.
 
         Unlike the entrants path this addresses the state teams directly:
         the caller names the team it means, and a swap has already been
-        applied to what it is looking at.
+        applied to what it is looking at. A failed write -- an out-of-range
+        slot included -- is logged and ignored, which is what the legacy
+        update-team route has always answered "OK" to.
         """
+        if not data.get("team") or not data.get("player"):
+            return False
+        try:
+            self._WritePlayerSlot(
+                data.get("team"), data.get("player"), data.get("data"))
+        except Exception as e:
+            logger.error(f"Error while setting entrants: {e}")
+        return True
+
+    def _WritePlayerSlot(self, team, player, data):
+        """Write one player slot (1-based team/player). Raises on failure."""
         for p in self.playerWidgets:
             p.dataLock.acquire()
 
         try:
-            if not data.get("team") or not data.get("player"):
-                return False
-
-            team = int(data.get("team")) - 1
-            player = int(data.get("player")) - 1
+            team = int(team) - 1
+            player = int(player) - 1
 
             teamInstances = [self.team1playerWidgets,
                              self.team2playerWidgets]
             teamInstance = teamInstances[team]
 
-            teamInstance[player].SetData(data.get("data"), False, False)
-            if data.get("data", {}).get("savePlayerToDb", False):
+            teamInstance[player].SetData(data, False, False)
+            if data.get("savePlayerToDb", False):
                 teamInstance[player].SavePlayerToDB()
-        except Exception as e:
-            logger.error(f"Error while setting entrants: {e}")
         finally:
             for p in self.playerWidgets:
                 p.dataLock.release()
-        return True
 
     def UpdateSetData(self, data):
         # An empty payload, or one answering for a set the operator has

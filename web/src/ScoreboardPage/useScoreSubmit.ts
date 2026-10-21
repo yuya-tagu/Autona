@@ -8,10 +8,10 @@ export type Scores = {left: number, right: number};
 
 // Optimistic score submission (Design.md §2.2 R-React-8).
 //
-// Score +/- taps show the new value immediately and POST /score right away
-// (matching the desktop SCORE tab's +1/-1 behavior). Reconciliation stays
-// simple because the POST carries absolute values and the server is
-// last-writer-wins (R-Sync-4):
+// Score +/- taps show the new value immediately and POST
+// /api/v1/scoreboards/{n}/score:set right away (matching the desktop SCORE
+// tab's +1/-1 behavior). Reconciliation stays simple because the POST
+// carries absolute values and the server is last-writer-wins (R-Sync-4):
 //   - the optimistic value is cleared once the server echo matches it
 //   - rapid taps are serialized: while a POST is in flight only the latest
 //     desired value is kept, and it is sent once the response arrives
@@ -67,10 +67,9 @@ export function useScoreSubmit(
             while (latestDesiredRef.current) {
                 const target = latestDesiredRef.current;
                 latestDesiredRef.current = null;
-                await apiPost('/score', {
-                    scoreboard: Number(scoreboardNumber),
-                    team1score: target.left,
-                    team2score: target.right,
+                await apiPost(`/api/v1/scoreboards/${scoreboardNumber}/score:set`, {
+                    team1: target.left,
+                    team2: target.right,
                 });
             }
         } catch (e) {

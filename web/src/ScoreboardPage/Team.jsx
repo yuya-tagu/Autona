@@ -4,7 +4,7 @@ import TextField from "./TextField";
 import Player from "./Player";
 import {Box} from "@mui/system";
 import i18n from "../i18n/config";
-import {apiGet} from "../api";
+import {apiPatch} from "../api";
 import {useApiAction} from "./Feedback";
 
 /**
@@ -37,20 +37,21 @@ export default function Team({teamId, autonaTeamId, team, scoreboardNumber}) {
         ? `${i18n.t("team")} ${autonaTeamId}`
         : `${autonaTeamId}P`;
 
+    // PATCH /api/v1/scoreboards/{n}/set takes the team as a number.
+    const teamNumber = Number(autonaTeamId);
+
     const onLosersChanged = (e) => {
         const checked = e.target.checked;
         setInLosers(checked);
-        run(() => apiGet(`/scoreboard${scoreboardNumber}-set?` + new URLSearchParams({
-            losers: checked,
-            team: autonaTeamId
-        }).toString()));
+        run(() => apiPatch(`/api/v1/scoreboards/${scoreboardNumber}/set`, {
+            losers: {team: teamNumber, value: checked},
+        }));
     };
 
     const submitTeamName = () => {
-        run(() => apiGet(`/scoreboard${scoreboardNumber}-set?` + new URLSearchParams({
-            teamName: teamName,
-            team: autonaTeamId
-        }).toString()));
+        run(() => apiPatch(`/api/v1/scoreboards/${scoreboardNumber}/set`, {
+            teamName: {team: teamNumber, value: teamName},
+        }));
     };
 
     const playerWidgets = Object.keys(team.player).sort().map((playerKey) => (

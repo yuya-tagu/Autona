@@ -28,6 +28,7 @@ from loguru import logger
 
 from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
+from .core import StateSchema as schema
 # Import order mirrors the singleton init order (agent-pitfalls #2): the asset
 # manager must be importable before the tournament data provider. By the time
 # this module loads both singletons already exist (WebServerActions imported
@@ -35,6 +36,7 @@ from .core.Actions import AutonaActions
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers import AutonaQtHelper
+from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 
 # ── Blueprint ────────────────────────────────────────────────────────────
 api_v1 = Blueprint("api_v1", __name__, url_prefix="/api/v1")
@@ -201,24 +203,30 @@ def api_handler(fn):
     return wrapper
 
 
-def _safe_params():
-    # In-scope write bodies carry only small scalar params (no PII / secrets;
-    # set_team_data is out of scope). Truncate defensively all the same.
+def _safe_params(keys_only=False):
+    # Most write bodies carry only small scalar params (no PII / secrets).
+    # Truncate defensively all the same. Bodies that can carry personal data
+    # (the player PATCH: tag, real name, social handle) are logged by key
+    # only (spec §2.7: no PII in the op log).
     body = request.get_json(force=True, silent=True)
     if not body:
         return {}
+    if keys_only:
+        if isinstance(body, dict):
+            return repr(sorted(body.keys()))
+        return "<non-object body>"
     text = repr(body)
     return text if len(text) <= 300 else text[:300] + "…"
 
 
-def write_op(operation):
+def write_op(operation, log_keys_only=False):
     """Write endpoints: exception->envelope conversion plus an INFO op-log
     line recording IP / method / path / params / result (spec §2.7)."""
 
     def deco(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            params = _safe_params()
+            params = _safe_params(keys_only=log_keys_only)
             try:
                 resp = fn(*args, **kwargs)
                 status = getattr(resp, "status_code", 200)
@@ -298,7 +306,7 @@ class _HeavyOpGuard:
     ``ttl`` is a generous backstop, not the primary clear: a full game asset
     reload can take ~60-70s, so it must comfortably exceed the slowest heavy
     op or the flag would expire mid-operation and the completion signal
-    (onLoad / tournament_changed) would never be the effective clear.
+    (onLoad, for the game) would never be the effective clear.
     """
 
     def __init__(self, ttl=120.0):
@@ -336,16 +344,14 @@ def init_api_v1(actions):
 
 
 def _connect_completion_signals():
-    # Clear heavy-op flags when the underlying operation finishes. These
-    # signals also fire for UI-triggered loads; end() is a harmless no-op when
-    # the flag isn't set, and loads are serialized upstream so this can't clear
-    # a different in-flight API op.
+    # Clear the game flag when the async asset load finishes. The signal also
+    # fires for UI-triggered loads; end() is a harmless no-op when the flag
+    # isn't set, and loads are serialized upstream so this can't clear a
+    # different in-flight API op. (tournament / bracket release their flags
+    # themselves, at the end of the GUI-thread task that runs them.)
     try:
         AutonaGameAssetManager.instance.signals.onLoad.connect(
             lambda: _heavy.end("game")
-        )
-        AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
-            lambda: _heavy.end("tournament")
         )
     except Exception:
         logger.error(traceback.format_exc())
@@ -474,6 +480,23 @@ def get_commentary():
     return ok(data=_actions_ref().get_comms())
 
 
+@api_v1.route("/countries/<code>/states")
+@api_handler
+def get_country_states(code):
+    # Country data is keyed by upper-case ISO code ("JP"). It is loaded by
+    # the first player widget built, so before that every code would read as
+    # unknown -- answer NOT_READY rather than a misleading 404.
+    if not AutonaCountryHelper.countries:
+        raise ApiError(NOT_READY, "country data is not loaded yet", 409)
+    code = code.upper()
+    # The legacy /states?countryCode= answers an unknown code with None,
+    # which Flask turns into a 500; here it is a 404.
+    states = _actions_ref().get_states(code)
+    if states is None:
+        raise ApiError(NOT_FOUND, f"unknown country code: {code}", 404)
+    return ok(data=states)
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Safe write operations (spec §6 — op-logged, no confirm)
 # ═══════════════════════════════════════════════════════════════════════
@@ -598,7 +621,163 @@ def set_update(n):
         # set_route expects a string for losers (it calls .lower()).
         kwargs["losers"] = "true" if _truthy(losers.get("value")) else "false"
         kwargs["team"] = team
-    _actions_ref().set_route(n, **kwargs)  # @gui_thread_sync -> revision accurate
+    team_name = None
+    if "teamName" in body:
+        named = body["teamName"]
+        if not isinstance(named, dict):
+            raise ApiError(INVALID_ARGUMENT, "teamName must be an object {team,value}", 400)
+        named_team = _validate_team(named.get("team"))
+        value = named.get("value")
+        if not isinstance(value, str):
+            raise ApiError(INVALID_ARGUMENT, "teamName.value must be a string", 400)
+        team_name = (named_team, value)
+    actions = _actions_ref()
+
+    def apply():
+        # Every v1 team parameter names the *state* team (the column the
+        # operator sees), as score:adjust and color do. set_route's losers is
+        # a set-shaped write -- SetLoadService.ApplyLosers runs the team
+        # through DisplayTeam() -- so on a swapped board it is flipped here to
+        # land where the caller pointed. teamName needs nothing: set_route
+        # writes it into the literal team{N}column. Read and write happen in
+        # one GUI-thread task so a swap cannot slip in between.
+        if "losers" in kwargs and actions.get_swap(n) == "True":
+            kwargs["team"] = 3 - kwargs["team"]
+        if kwargs or team_name is None:
+            actions.set_route(n, **kwargs)  # @gui_thread_sync -> revision accurate
+        if team_name is not None:
+            # set_route takes a single `team` for both losers and teamName, so
+            # the name goes in its own call -- after the rest, the order the
+            # legacy `-set?teamName=&team=` query applies it in.
+            actions.set_route(n, team=team_name[0], teamName=team_name[1])
+
+    AutonaQtHelper.gui_thread_sync(apply)()
+    return ok(revision=current_revision())
+
+
+@api_v1.route("/scoreboards/<int:n>/score:set", methods=["POST"])
+@write_op("score.set")
+def score_set(n):
+    require_board_12(n)
+    body = _json_body()
+    for key in ("team1", "team2"):
+        if key not in body:
+            raise ApiError(INVALID_ARGUMENT, f"{key} is required", 400)
+    team1 = _require_int(body["team1"], "team1")
+    team2 = _require_int(body["team2"], "team2")
+    # The v1 counterpart of the legacy POST /score (Web UI migration,
+    # ADR-001 Addendum 2026-10-21), but not its action: post_score is a
+    # set-shaped write that flips the teams on a swapped board, obeys
+    # general.disable_scoreupdate and blanks match_en. This writes the two
+    # *state* teams (AutonaActions.SetScore), clamped, in one save cycle.
+    _actions_ref().set_scores(n, team1, team2)
+    # Held subtree, like score:adjust: the revision is the last published one.
+    return ok(revision=current_revision())
+
+
+# Player fields the player PATCH accepts: what the Web UI player card sends.
+# The action applies a field only when it is non-empty (SetData with
+# clear=False), so a blank value leaves the current one in place -- same as
+# the legacy update-team route.
+_PLAYER_STRING_FIELDS = (
+    "gamerTag", "prefix", "name", "twitter", "custom_textbox",
+    "country_code", "state_code",
+)
+
+
+_MAINS_SHAPE = "{gameCodename: [[name: str, skin: int, variant?: str], ...]}"
+
+
+def _validate_mains(mains):
+    """`mains` in the one shape SetData reads per game, checked entry by entry.
+
+    SetData (clear=False) looks up the current game's list in the object and
+    reads each entry as [en_name, skin, variant]. A malformed entry used to
+    raise inside the widget write -- after the other fields had already been
+    applied -- so it is refused up front instead. (SetData's other, flat
+    ["Mario", skin] form is a legacy single-character payload; v1 does not
+    take it.)
+    """
+    if not isinstance(mains, dict):
+        raise ApiError(INVALID_ARGUMENT, f"mains must be {_MAINS_SHAPE}", 400)
+    for codename, entries in mains.items():
+        if not isinstance(entries, list):
+            raise ApiError(
+                INVALID_ARGUMENT, f"mains.{codename} must be a list", 400)
+        for entry in entries:
+            if not (isinstance(entry, list) and 2 <= len(entry) <= 3
+                    and isinstance(entry[0], str)
+                    and isinstance(entry[1], int)
+                    and not isinstance(entry[1], bool)
+                    and entry[1] >= 0
+                    and (len(entry) == 2 or isinstance(entry[2], str))):
+                raise ApiError(
+                    INVALID_ARGUMENT,
+                    f"mains.{codename} entries must be "
+                    "[name: str, skin: int >= 0, variant?: str]", 400)
+
+
+@api_v1.route(
+    "/scoreboards/<int:n>/teams/<int:t>/players/<int:p>", methods=["PATCH"])
+@write_op("player.update", log_keys_only=True)
+def player_update(n, t, p):
+    require_board_12(n)
+    _validate_team(t)
+    if p < 1:
+        raise ApiError(INVALID_ARGUMENT, "player must be 1 or greater", 400)
+    body = _json_body()
+    for key, value in body.items():
+        if key in _PLAYER_STRING_FIELDS:
+            if value is not None and not isinstance(value, str):
+                raise ApiError(INVALID_ARGUMENT, f"{key} must be a string", 400)
+        elif key == "mains":
+            _validate_mains(value)
+        elif key != "savePlayerToDb":
+            raise ApiError(INVALID_ARGUMENT, f"unknown player field: {key}", 400)
+    if body:
+        data = dict(body)
+        if "savePlayerToDb" in data:
+            data["savePlayerToDb"] = _truthy(data["savePlayerToDb"])
+        # The player write of the legacy update-team route without the rest of
+        # its ChangeSetData pass (which blanks match_en). Addresses the state
+        # team directly (no swap flip). Unlike the legacy route, which logs
+        # and answers "OK" whatever happened, the outcome comes back: a slot
+        # beyond the team's roster (checked on the GUI thread against the
+        # live widgets) is a 404, and an exception from the write itself is
+        # turned into 500 INTERNAL by write_op. @gui_thread_sync, but the
+        # subtree is held: the revision is the last published one.
+        if not _actions_ref().update_player(n, t, p, data):
+            raise ApiError(
+                NOT_FOUND, f"team {t} has no player {p}", 404)
+    return ok(revision=current_revision())
+
+
+@api_v1.route("/display-options", methods=["PATCH"])
+@write_op("display-options.update")
+def display_options_update():
+    body = _json_body()
+    if not body:
+        raise ApiError(
+            INVALID_ARGUMENT, "at least one display option is required", 400)
+    # Validate every key and value before applying any, so a bad entry
+    # changes nothing. Values are JSON booleans only: the legacy route's
+    # bool() made the string "false" switch an option *on*.
+    unknown = sorted(k for k in body if k not in schema.DISPLAY_OPTION_KEYS)
+    if unknown:
+        raise ApiError(
+            INVALID_ARGUMENT, f"unknown display option: {', '.join(unknown)}", 400)
+    notBool = sorted(k for k, v in body.items() if not isinstance(v, bool))
+    if notBool:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"display option values must be true or false: {', '.join(notBool)}",
+            400)
+    actions = _actions_ref()
+    for key, value in body.items():
+        result = actions.set_display_option({"option": key, "value": value})
+        if result != "OK":
+            raise ApiError(INVALID_ARGUMENT, str(result), 400)
+    # display_options is not held: the write is published synchronously.
     return ok(revision=current_revision())
 
 
@@ -674,10 +853,29 @@ def tournament_load():
         )
     if not _heavy.try_begin("tournament"):
         raise ApiError(CONFLICT, "tournament load already in progress", 409)
+    actions = _actions_ref()
+
+    def _run():
+        # load_tournament normalizes the URL and emits tournament_url_update.
+        # Run on the GUI thread, that emit is a direct call into
+        # AutonaTournamentDataProvider.SetTournamentSignal, so when it returns
+        # the provider switch is done (the start.gg fetches it starts are
+        # async and reported over WS) -- or it returned early because that
+        # URL is already the loaded one. The flag is released here in both
+        # cases. It used to wait for tournament_changed, which that early
+        # return never emits, so re-sending the loaded URL held the flag for
+        # the guard's full TTL and every retry got 409. Empty url clears the
+        # tournament.
+        try:
+            actions.load_tournament(url if url else None)
+        except Exception:
+            logger.error(traceback.format_exc())
+        finally:
+            _heavy.end("tournament")
+
     try:
-        # load_tournament emits a queued signal and returns immediately; the
-        # actual fetch runs async. Empty url clears the tournament.
-        _actions_ref().load_tournament(url if url else None)
+        # Fire-and-forget on the GUI thread, like bracket:refresh.
+        AutonaQtHelper.gui_executor(_run)
     except Exception:
         _heavy.end("tournament")
         raise

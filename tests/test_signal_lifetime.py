@@ -70,8 +70,6 @@ ALLOWED_LAMBDA_CONNECTIONS = {
      "AutonaTournamentDataProvider.instance.signals.tournament_changed"),
     ("Autona.py", "AutonaGameAssetManager.instance.signals.onLoad"),
     ("AutonaApiV1.py", "AutonaGameAssetManager.instance.signals.onLoad"),
-    ("AutonaApiV1.py",
-     "AutonaTournamentDataProvider.instance.signals.tournament_changed"),
     ("AutonaThumbnailSettingsWidget.py",
      "AutonaGameAssetManager.instance.signals.onLoad"),
 }

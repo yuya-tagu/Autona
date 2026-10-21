@@ -22,7 +22,7 @@ import {CharSelector} from "./CharSelector";
 import {useSelector} from "react-redux";
 import {CountrySelector} from "../CountrySelector";
 import {CountryStateSelector} from "../CountryStateSelector";
-import {apiPost} from "../api";
+import {apiPatch} from "../api";
 import {useApiAction} from "./Feedback";
 import {DisplayOptionsMenuButton, useDisplayOptions} from "./displayOptions";
 
@@ -66,6 +66,21 @@ import {DisplayOptionsMenuButton, useDisplayOptions} from "./displayOptions";
  * @param {number} count
  * @return {CharacterSelections}
  */
+/**
+ * One main as PATCH /api/v1/.../players/{p} takes it: [en_name, skin, variant]
+ * with a string name, an integer skin index and a string variant. The skin
+ * picker yields its index as a string ("2") and player-DB entries may carry
+ * either type, so every entry is normalized before it is sent.
+ */
+export function toApiMain(name, skin, variant) {
+    const skinIndex = Number.parseInt(skin, 10);
+    return [
+        typeof name === "string" ? name : "",
+        Number.isNaN(skinIndex) || skinIndex < 0 ? 0 : skinIndex,
+        typeof variant === "string" ? variant : "",
+    ];
+}
+
 function getMains(player, gameCodename, count) {
     const /** @type CharacterSelections */ rval = {};
     // Yeah, we do 1-based counting here.
@@ -213,13 +228,14 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, auton
         const mainsToSubmit = [];
         for (let i = 0; i < maxChars; i += 1) {
             if (i < charsFromForm.length && !!charsFromForm[i].charName) {
-                mainsToSubmit.push([
-                    (charsFromForm[i].charName ? characters[charsFromForm[i].charName]?.en_name : ""),
-                    charsFromForm[i].charSkin || 0,
+                mainsToSubmit.push(toApiMain(
+                    characters[charsFromForm[i].charName]?.en_name,
+                    charsFromForm[i].charSkin,
                     ""
-                ])
+                ))
             } else if (i < existingMains.length) {
-                mainsToSubmit.push(existingMains[i]);
+                const main = existingMains[i] ?? [];
+                mainsToSubmit.push(toApiMain(main[0], main[1], main[2]));
             } else {
                 mainsToSubmit.push(["", 0, ""])
             }
@@ -235,8 +251,8 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, auton
     // Immediate-submit (desktop editingFinished equivalent). Pass the state
     // explicitly for selection-type commits where setState hasn't flushed.
     const submitPlayer = (fromState = state) => {
-        run(() => apiPost(
-            `/scoreboard${scoreboardNumber}-update-team-${autonaTeamId}-${teamKey}`,
+        run(() => apiPatch(
+            `/api/v1/scoreboards/${scoreboardNumber}/teams/${autonaTeamId}/players/${teamKey}`,
             getModifiedPlayerData(fromState)));
     };
 

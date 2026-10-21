@@ -60,7 +60,7 @@ export function FeedbackProvider({children}) {
  * Wraps an async action with pending state + error snackbar.
  * Usage:
  *   const {pending, run} = useApiAction();
- *   <Button loading={pending} onClick={() => run(() => apiGet("/..."))}>
+ *   <Button loading={pending} onClick={() => run(() => apiPost("/api/v1/..."))}>
  */
 export function useApiAction() {
     const show = React.useContext(SnackbarContext);

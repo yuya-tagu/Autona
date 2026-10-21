@@ -97,6 +97,7 @@
   メソッド・パス・主要パラメータ・結果（ok/error code）。
 - 読み取り（§5）は**記録しない**（or DEBUG）。既存 `before_request`/`after_request`（DEBUG・パスのみ）とは別建て。
 - ⚠️ 無認証のため操作主体は **IP 粒度まで**（D5 の帰結）。ボディに認証情報や PII を含めない（CLAUDE.md 機密ルール）。
+  - 選手データを運ぶ `PATCH .../players/{p}`（§6.8）は**ボディのキー名だけ**を記録し、値（タグ・本名・SNS）は記録しない。
 
 ### 2.8 重い操作の非同期受付（202・D7）
 - **重い操作**（`POST /tournament`・`POST /game`・`POST /bracket:refresh`）は**同期完了を待たず
@@ -118,7 +119,7 @@
 - **相対操作**（`score:adjust`）は冪等でない。`Idempotency-Key` ヘッダを**任意対応（SHOULD）**:
   同一キーの再送は**重複適用せず**直前結果を返す。キー無しは従来通り（毎回適用）。
   - キーの保持はプロセス内の短命キャッシュ（直近 N 件 / 数十秒・`TBD`）。
-- **絶対値設定**（`score:reset`・`PATCH set`・`:swap-teams`）は本質的に冪等寄りのため必須ではない。
+- **絶対値設定**（`score:reset`・`score:set`・`PATCH set`・`PATCH .../players/{p}`・`PATCH /display-options`・`:swap-teams`）は本質的に冪等寄りのため必須ではない。
 
 ### 2.10 スレッド安全性（実行中フラグ・冪等キャッシュ）
 - WebServer は QThread ＋ Flask `async_mode='threading'` ＝ **複数リクエストスレッドが並行**しうる。
@@ -186,6 +187,7 @@
 | `GET /api/v1/sets` | 試合一覧（`?finished=true` で完了含む） | `get_sets` | #35 |
 | `GET /api/v1/sets/{setId}` | セット詳細 | `get_match` | #36 |
 | `GET /api/v1/commentary` | 実況者状態 | `get_comms` | #37 |
+| `GET /api/v1/countries/{code}/states` | 国の州・地域一覧（未知の国は `404 NOT_FOUND`。2026-10-21 追加） | `get_states` | #45 |
 
 > `data` の具体スキーマは委譲先 Action の現返却（candidates §3）に準拠。本 API はそれを `{"ok":true,"data":...}` で包むだけ。
 
@@ -223,6 +225,10 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 `HoldSubtree(exempt=...)` により held 対象外で即時公開（`stats:refresh` の結果は
 反映を待たずに layout へ届く）。
 
+**チーム番号の規約（2026-10-21 明文化）**: v1 のチーム番号（パスの `{t}`・body の `team`/`team1`/`team2`）は
+すべて**状態側のチーム**（`score.{n}.team.{t}`。運用者と Web UI が見ている列）を指す。スワップ後も同じ列を指す。
+旧ルートの `/score` と `-set?losers=` は set 形式の書き込みでスワップ時に反転するが、v1 はこれを持ち込まない。
+
 ### 6.1 スコア加算 `POST /api/v1/scoreboards/{n}/teams/{t}/score:adjust`
 - パス: `n`=スコアボード番号, `t`=1|2
 - body: `{ "delta": 1 }`（`-N`〜`+N` の整数。±1 が基本）
@@ -246,11 +252,20 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 ### 6.5 セット情報設定 `PATCH /api/v1/scoreboards/{n}/set`
 - body（部分更新・与えたキーのみ反映）:
   ```json
-  { "bestOf": 5, "phase": "Top 8", "match": "Winners Finals",
-    "players": 1, "characters": 1, "losers": { "team": 1, "value": true } }
+  { "bestOf": 5, "phase": "Top 8", "pool": "A1", "match": "Winners Finals",
+    "players": 1, "characters": 1, "losers": { "team": 1, "value": true },
+    "teamName": { "team": 1, "value": "Team Alpha" } }
   ```
 - 委譲: `set_route`（既存はクエリ引数。本 API は JSON を同 Action にマップ）= #10
-- エラー: `INVALID_ARGUMENT`（型不正）
+- `teamName`（2026-10-21 追加・Web UI 移行用）: 旧 `-set?teamName=&team=` 相当。`set_route` は `team` を
+  `losers` と共用するため、`teamName` は別呼び出しで最後に適用する（旧クエリと同じ順序）。
+  チーム名は**状態側のチーム**（`team{t}column`）に書く。
+- `losers` も**状態側のチーム**。`set_route` の losers は set 形式（`SetLoadService.ApplyLosers` が `DisplayTeam` を通す）
+  なので、v1 層がスワップ状態を読んでチーム番号を補正してから委譲する（読み取りと適用は 1 つの GUI スレッドタスク内）。
+  旧 `-set?losers=` はスワップ中に反対側へ着地する（旧ルートは不変）。
+- 空の `phase` / `match` は「指定なし」扱いで反映されない（`SetLoadService.ApplyMatchInfo`・旧ルートと同じ）。
+  `pool` は空文字でクリアされる。
+- エラー: `INVALID_ARGUMENT`（型不正・team 範囲外・`teamName` が `{team,value}` でない／value が文字列でない）
 
 ### 6.6 反映（保留編集の公開） `POST /api/v1/scoreboards/{n}:apply`（2026-07-12 追加）
 - body: なし
@@ -259,6 +274,47 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
   （`StateManager.CommitHeld("score.{n}")`）を一括公開する
 - 冪等: 保留編集なしでの再送は no-op のため本質的に冪等
 - エラー: `INVALID_ARGUMENT`（n 不正）
+
+### 6.7 スコア一括設定 `POST /api/v1/scoreboards/{n}/score:set`（2026-10-21 追加）
+- 旧 `POST /score` の v1 版（Web UI のスコア ± はこれで絶対値を送る。Design.md R-React-8）。
+- body: `{ "team1": 2, "team2": 1 }`（**両方必須**・整数）。**状態側のチーム**（§6 冒頭）。
+- 委譲: `set_scores` → `AutonaActions.SetScore` ×2（1 つの SaveBlock = 1 保存サイクル）。旧 `/score` の
+  `post_score`（`ChangeSetData` に `reset_score` 付きで渡す set 形式の書き込み）は使わない。
+- 値は 0〜99 にクランプ。現在値と同じ値は書かない（反映ボタンを点けない）。
+- 旧 `/score` との違い（意図的）: スワップ中も反転しない／`general.disable_scoreupdate`（start.gg 由来のスコアを
+  取り込まない設定）の影響を受けない／`match_en` を空にしない。スワップしていないボードでのスコアは旧ルートと同じ。
+- held 対象（§6 冒頭の反映ゲート）。`revision` は最後に公開されたもの（`score:adjust` と同じ）。
+- エラー: `INVALID_ARGUMENT`（n が 1/2 以外・team1/team2 欠落・整数でない）
+
+### 6.8 選手データ更新 `PATCH /api/v1/scoreboards/{n}/teams/{t}/players/{p}`（2026-10-21 追加）
+- 旧 `POST /scoreboard<N>-update-team-<T>-<P>` の v1 版（Web UI の選手カード）。
+- body（部分更新）: 受け付けるキーは次のみ。それ以外は `INVALID_ARGUMENT`（任意 URL を取得させる
+  `avatar` 等の内部キーを外部に開かないため）。
+  ```json
+  { "gamerTag": "Alpha", "prefix": "TM", "name": "本名", "twitter": "alpha_x",
+    "custom_textbox": "", "country_code": "JP", "state_code": "13",
+    "mains": { "ssbu": [["Mario", 0, ""]] }, "savePlayerToDb": false }
+  ```
+  - 文字列キーは `null` 可。**空・`null` の値は「変更なし」**（Action が空値を適用しない。旧ルートと同じ）。
+  - `mains` はゲーム codename → `[en_name, skin, ""]` 配列のオブジェクト。`savePlayerToDb: true` で選手 DB にも保存。
+  - 空ボディ `{}` は何もしない（200）。
+- 委譲: `update_player` → `AutonaScoreboardWidget.ApplyPlayerData`（旧 `set_team_data` が `ChangeSetData` 経由で行う
+  選手書き込みの部分だけ）= #11。`t` は**状態側のチーム**。旧ルートと違い `match_en` を空にしない
+  （`ChangeSetData` の `ApplyMatchInfo` を通らないため）。それ以外の結果は旧ルートと同じ。
+- `p` が選手数を超える場合、Action がログに残して無視する（旧ルートと同じ。エラーは返らない）。
+- `@gui_thread_sync`（同期）。held 対象のため `revision` は最後に公開されたもの。
+- 操作ログはキー名のみ（§2.7）。
+- エラー: `INVALID_ARGUMENT`（n が 1/2 以外・t が 1/2 以外・p < 1・未知キー・型不正）
+
+### 6.9 表示トグル `PATCH /api/v1/display-options`（2026-10-21 追加）
+- 旧 `POST /display-option` の v1 版（Web UI の目アイコンメニュー）。ボード非依存のグローバル設定。
+- body: `{ "show_seed": false, "show_social": true }`（1 つ以上・部分更新）。キーは
+  `src/core/StateSchema.py` の `DISPLAY_OPTIONS`（`show_sponsor`/`show_name`/`show_seed`/`show_characters`/
+  `show_social`/`show_real_name`/`show_location`/`show_additional`）。
+- 委譲: `set_display_option`（旧ルートと同一 Action。SettingsManager + StateManager の両面に書く）をキーごとに呼ぶ。
+- **全キーを先に検証**し、未知キーが 1 つでもあれば何も適用せず `INVALID_ARGUMENT`。
+- held 対象外のため即時公開され、`revision` は正確。
+- エラー: `INVALID_ARGUMENT`（未知キー）
 
 ---
 
@@ -292,6 +348,9 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - `POST /api/v1/tournament`: `{ "url": "https://www.start.gg/tournament/.../event/..." }`
   - URL 正規化は既存 `load_tournament` に委譲。`url` 空/省略で大会クリア（既存挙動）。
   - 外部通信を伴う。受付は 202、ロード結果は WS で観測。実行中は `409 CONFLICT`（§2.8）。
+  - 実行中フラグは `load_tournament` を GUI スレッドで走らせたタスクの終了時に解除する（2026-10-21 修正）。
+    以前は `tournament_changed` を待っていたが、読込済みと同じ URL では早期 return でこれが出ず、
+    最大 120 秒（ガードの TTL）409 を返し続けていた。
 - `POST /api/v1/game`: `{ "codename": "ssbu", "modsActive": false }`
   - 未知 codename は受付前に判定できれば `404 NOT_FOUND`。アセット再ロードで重い → 202 + 実行中フラグ。
 - `POST /api/v1/bracket:refresh`: body なし。provider 不在は受付前に `409 NOT_READY`。それ以外は 202 + 実行中フラグ。
@@ -348,6 +407,12 @@ HTTP/1.1 409 Conflict
 
 ## 10. テスト方針（手動・自動テストなし）
 
+> 例外（2026-10-21）: Web UI 移行で追加・拡張したルート（§5 `countries/{code}/states`・§6.5 `teamName`/`losers`・
+> §6.7〜§6.9・§7.3 `tournament` の実行中フラグ）と、Web UI が置換した呼び出しは `tests/test_api_v1.py` が
+> 自動で pin する（旧ルートと同じ状態になること、および §6 冒頭のチーム番号規約など意図的な差分）。
+> Web UI 側が状態側のチーム番号を送ることは `web/src/ScoreboardPage/v1Requests.test.js` が pin する。
+> ルート一覧そのものは `tests/test_webserver_routes.py` の `EXPECTED_API_V1_ROUTES` が台帳。
+
 - **自動テストは作らない**（PdM 決定）。動作確認は**アプリ上で手動**で行う
   （`python main.py` 起動 → curl/HTTP クライアントで `/api/v1/...` を叩く → UI / `out/` / OBS で反映確認）。
 - 手動確認項目は [../manual-test-checklist.md](../manual-test-checklist.md) の「外部制御 API」節になぞる:
@@ -375,7 +440,8 @@ HTTP/1.1 409 Conflict
 - 多重実行フラグ・冪等キャッシュの粒度（操作種別ごと / グローバル）と Lock 設計（§2.10）→ §14 に方針あり、実装で確定。
 - `Idempotency-Key` キャッシュの保持件数・TTL。
 - `set_route`（PATCH set）の `players`/`characters` 同時指定時の適用順（既存挙動の確認）。
-- `set_team_data`（選手データ更新）の payload スキーマ未確定のため**初回スコープ外**（確定後に追補）。
+- ~~`set_team_data`（選手データ更新）の payload スキーマ未確定のため初回スコープ外~~ → 2026-10-21 に
+  Web UI が送るキーで確定し §6.8 として追加。
 
 ## 13. 実装前に確認すること（pre-implementation・コーディング着手前）
 

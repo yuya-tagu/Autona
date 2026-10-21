@@ -5,6 +5,11 @@ import {BASE_URL} from "./env";
 // class components) can surface failures instead of silently logging.
 // URL shape stays `http://${hostname}:${BACKEND_PORT}` via BASE_URL
 // (.claude/rules/react-web-ui.md).
+//
+// Controls go through the external control API (`/api/v1/...`, ADR-001);
+// the legacy `/scoreboard<N>-...` routes are deprecated. v1 answers with an
+// envelope `{"ok": true, "data"?: ..., "revision"?: n}`, so reads take
+// `.data` off the parsed JSON; its errors are non-2xx and reject here.
 
 const DEFAULT_TIMEOUT_MS = 10000;
 
@@ -25,19 +30,23 @@ async function request(path: string, init?: RequestInit, opts?: ApiOptions): Pro
     return resp;
 }
 
-export async function apiGet(path: string, opts?: ApiOptions): Promise<string> {
-    return (await request(path, undefined, opts)).text();
-}
-
 export async function apiGetJson<T = unknown>(path: string, opts?: ApiOptions): Promise<T> {
     return (await request(path, undefined, opts)).json();
 }
 
-export async function apiPost(path: string, body?: unknown, opts?: ApiOptions): Promise<string> {
+async function send(method: string, path: string, body?: unknown, opts?: ApiOptions): Promise<string> {
     const resp = await request(path, {
-        method: "POST",
+        method,
         headers: {"content-type": "application/json"},
         body: JSON.stringify(body ?? {}),
     }, opts);
     return resp.text();
+}
+
+export async function apiPost(path: string, body?: unknown, opts?: ApiOptions): Promise<string> {
+    return send("POST", path, body, opts);
+}
+
+export async function apiPatch(path: string, body?: unknown, opts?: ApiOptions): Promise<string> {
+    return send("PATCH", path, body, opts);
 }

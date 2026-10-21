@@ -141,13 +141,26 @@ LAN 内運用を前提に**既存の挙動を引き継ぐ**。新 API も認証�
 
 - OBS / Stream Deck の既存設定が旧 URL を直打ちしているため、**v2.0 まで挙動は一切変えない**（新規ルートも足さない）。
 - 新規の外部連携は `/api/v1/` を使う。アプリ内の API 案内窓（API Settings）にも同旨を表示する。
-- `/api/v1` に対応物が無い旧ルート（crew 系・`display-option`・`update-team-*`・`update-commentary-*`・
-  `open-set`・`stats-last-sets/history-sets`・`get-thumbnail`・`playerdb`・`load-player/commentator-from-tag`・
-  `states`・`score`(POST) 等）は、v2.0 までに `/api/v1` への追加か廃止かを個別に判断する。
-- **自前の Web UI（`web/src/ScoreboardPage/`）自体が旧ルートを使っている**（`-set`・`-swap-teams`・`-load-set`・
-  `-update-team-*`・`-reset-scores`・`-pull-stream`・`-clear-all`・`/score`・`/display-option`）。v2.0 より前に
-  Web UI を `/api/v1` へ移行することが削除の前提条件（対応物の無い `update-team`・`score`・`display-option` は
-  `/api/v1` 側に追加する）。
+- `/api/v1` に対応物が無い旧ルート（crew 系・`update-commentary-*`・
+  `open-set`・`stats-last-sets/history-sets`・`get-thumbnail`・`playerdb`・`load-player/commentator-from-tag` 等）は、
+  v2.0 までに `/api/v1` への追加か廃止かを個別に判断する。
+- **自前の Web UI（`web/src/`）は 2026-10-21 に `/api/v1` へ移行済み**（旧ルート呼び出し 0 件）。v2.0 より前に
+  Web UI を移行することが削除の前提条件だった（`-set`・`-swap-teams`・`-load-set`・`-update-team-*`・
+  `-reset-scores`・`-pull-stream`・`-clear-all`・`/score`・`/display-option`・`/match-names`・`/get-sets`・
+  `/set-tournament`・`/states`）。対応物の無かった 4 つは `/api/v1` 側に追加した:
+  `/score` → `POST /scoreboards/{n}/score:set`、`update-team-*` → `PATCH /scoreboards/{n}/teams/{t}/players/{p}`、
+  `display-option` → `PATCH /display-options`、`states` → `GET /countries/{code}/states`
+  （あわせて `-set?teamName=` 用に `PATCH /scoreboards/{n}/set` へ `teamName` を追加）。
+  旧ルートと同じ結果になることは `tests/test_api_v1.py` が pin する。ただし次の 3 点は**意図して旧ルートと変えた**:
+  - **v1 のチーム番号はすべて状態側のチーム**（運用者・Web UI が見ている列）。旧 `/score` と `-set?losers=` は
+    set 形式の書き込みでスワップ時に反転して着地し、Web UI でスワップ後に ± / Losers が逆側に付いていた。
+    `score:set` は `AutonaActions.SetScore` に委譲し、`PATCH set` の `losers` は v1 層でスワップを補正する。
+    **リリースノート記載事項**: 「v1 の team 番号は状態側に統一。スワップ中の `PATCH set` の `losers` の着地が
+    変わる（旧挙動に合わせて番号を反転して送っていた外部連携は補正を外すこと）」。
+  - `score:set` と選手 PATCH は旧ルートの set 形式の副作用（`general.disable_scoreupdate` 有効時にスコアが 0 になる、
+    `match_en` が空になる）を持たない。
+  - `POST /tournament` は同じ URL の再読込で実行中フラグが解除されず、最大 120 秒 409 を返していた。フラグは
+    `load_tournament` を GUI スレッドで走らせたタスクの終了時に解除するよう直した（Web UI の `/set-tournament` 置換の前提）。
 - `/api/designer/*`（Scoreboard Designer / Figma プラグイン用）は本 deprecated の対象外。
 - 上記「既存ルートの整理を別 ADR で検討」の Revisit 条件は、この宣言をもって方針だけ確定した（実削除は v2.0 で再判断）。
 

@@ -1,7 +1,7 @@
 import React from "react";
 import {IconButton, Paper, Stack, Typography} from "@mui/material";
 import {Add, Remove, SwapHoriz} from "@mui/icons-material";
-import {apiGet} from "../api";
+import {apiPost} from "../api";
 import {useApiAction} from "./Feedback";
 import i18n from "../i18n/config";
 
@@ -42,7 +42,7 @@ export default function ScoreControlBar({scoreboardNumber, score, teamKeys, scor
     };
 
     const swapTeams = () => {
-        runSwap(() => apiGet(`/scoreboard${scoreboardNumber}-swap-teams`));
+        runSwap(() => apiPost(`/api/v1/scoreboards/${scoreboardNumber}:swap-teams`));
     };
 
     const scoreSx = {

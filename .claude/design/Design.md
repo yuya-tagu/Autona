@@ -157,9 +157,9 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 | **R-React-5** | フォーム要素は `size="small"` で統一し、密度を高める |
 | **R-React-6** | delta は**到着駆動**で即時適用する（`program_state_update` 受信ハンドラ内で `applySavedDeltas` を dispatch）。サーバー側で coalesce 済みのためクライアント側バッチは不要。**200ms の setInterval は安全網**（接続状態遷移中にキューへ残った delta の回収用）としてのみ残す。rAF は不採用（モバイルのバックグラウンドタブで停止するため） |
 | **R-React-7** | テーマは**ダーク固定**。React Web UI は `ThemeShell.tsx` で `darkTheme` を常用し、StateManager / SettingsManager とのライト/ダーク同期は行わない |
-| **R-React-8** | 楽観的スコアエコー（`useScoreSubmit.ts`）: スコア±はタップ即時にローカル表示を更新し、**絶対値**で `POST /score` する。①サーバーデルタの値がローカル送信値と一致したら pending 解除 ②連打は in-flight 中最新値のみ保持し応答後に 1 回再送（シリアライズ）③失敗時はサーバー値へ revert + Snackbar ④3 秒でタイムアウトし pending 解除（サーバーが正）。R-Sync-4（後勝ち）の範囲内のため revision 突き合わせ・ロールバックログは持たない |
+| **R-React-8** | 楽観的スコアエコー（`useScoreSubmit.ts`）: スコア±はタップ即時にローカル表示を更新し、**絶対値**で `POST /api/v1/scoreboards/{n}/score:set` する（2026-10-21 に旧 `POST /score` から移行）。①サーバーデルタの値がローカル送信値と一致したら pending 解除 ②連打は in-flight 中最新値のみ保持し応答後に 1 回再送（シリアライズ）③失敗時はサーバー値へ revert + Snackbar ④3 秒でタイムアウトし pending 解除（サーバーが正）。R-Sync-4（後勝ち）の範囲内のため revision 突き合わせ・ロールバックログは持たない |
 | **R-React-9** | **即時反映モデル**: ScoreboardPage の全入力（選手情報・Phase/Match/Best Of・Losers・チーム名）は入力確定（blur / Enter / 選択）で即送信する。送信ボタンは置かない（デスクトップの `editingFinished` と同モデル）。サーバーエコーによるフォーム巻き戻りは「カード内にフォーカスがある間は表示フィールドを上書きしない」ガードで抑止する（`Player.jsx`） |
-| **R-React-10** | フィールド表示トグルは **`display_options.show_*`（StateManager 経由で全クライアント共有）が正**。Web の Eye メニューは `POST /display-option`（Actions 層 `set_display_option` → 各ボードの eye アクション駆動）で書き込み、ローカルの visibility 状態は持たない。キーとデフォルトの正本は `src/core/StateSchema.py` の `DISPLAY_OPTIONS`（デスクトップの eye アクションも `set_display_option` の受理キーもここを読む）。`web/src/ScoreboardPage/displayOptions.js` だけは言語が違うため写しが残り、`tests/test_state_schema.py` が両者の一致を検査する |
+| **R-React-10** | フィールド表示トグルは **`display_options.show_*`（StateManager 経由で全クライアント共有）が正**。Web の Eye メニューは `PATCH /api/v1/display-options`（2026-10-21 に旧 `POST /display-option` から移行。Actions 層 `set_display_option` → 各ボードの eye アクション駆動）で書き込み、ローカルの visibility 状態は持たない。キーとデフォルトの正本は `src/core/StateSchema.py` の `DISPLAY_OPTIONS`（デスクトップの eye アクションも `set_display_option` の受理キーもここを読む）。`web/src/ScoreboardPage/displayOptions.js` だけは言語が違うため写しが残り、`tests/test_state_schema.py` が両者の一致を検査する |
 
 **ページ一覧** — 詳細は §4.2 参照。
 
@@ -783,8 +783,8 @@ QSettings に保存された最後の選択に依存し、初期値は先頭ペ�
 ScoreboardPage (function component)
 ├── Header (AppBar)
 │   ├── Game selector (Redux: tshGames)
-│   ├── Tournament URL loader (REST: /set-tournament)
-│   ├── Auto-update toggle (REST: /scoreboard{N}-pull-stream)
+│   ├── Tournament URL loader (REST: POST /api/v1/tournament)
+│   ├── Auto-update toggle (REST: POST /api/v1/scoreboards/{N}:pull-stream)
 │   └── Visibility menu (Redux: visibility)
 ├── CurrentSet
 │   ├── Player ×2
@@ -792,7 +792,7 @@ ScoreboardPage (function component)
 │   │   └── CountryStateSelector (Redux: tshCountries)
 │   └── SetScore (NumberInput ×2 + match/phase/best_of)
 ├── UpcomingSets
-└── Clear All Button (REST: /scoreboard{N}-clear-all)
+└── Clear All Button (REST: POST /api/v1/scoreboards/{N}:clear)
 ```
 
 #### 4.2.2 StageStrikePage（削除済み）

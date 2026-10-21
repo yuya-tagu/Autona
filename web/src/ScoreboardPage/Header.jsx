@@ -14,7 +14,7 @@ import {Box, Stack} from "@mui/system";
 import {useTheme} from "@mui/material/styles";
 import {shallowEqual, useSelector} from "react-redux";
 import {BASE_URL} from "../env";
-import {apiGet} from "../api";
+import {apiPost} from "../api";
 import {useApiAction} from "./Feedback";
 import i18n from "../i18n/config";
 import React from "react";
@@ -39,13 +39,15 @@ export const Header = ({scoreboardNumber = 1, ...rest}) => {
 
     const loadTournament = () => {
         if (!tournamentUrl) return;
-        runLoad(() => apiGet(`/set-tournament?url=${encodeURIComponent(tournamentUrl)}`));
+        // 202 Accepted: the start.gg fetch continues on the desktop and its
+        // result arrives over the program-state broadcast.
+        runLoad(() => apiPost('/api/v1/tournament', {url: tournamentUrl}));
     };
 
     const pullStreamSet = () => {
         // Fired by the auto-update timer; keep failures out of the snackbar
         // so a briefly unreachable desktop app doesn't spam every interval.
-        apiGet(`/scoreboard${scoreboardNumber}-pull-stream`).catch(console.error);
+        apiPost(`/api/v1/scoreboards/${scoreboardNumber}:pull-stream`).catch(console.error);
     };
 
     // Auto-update: periodically pull stream set

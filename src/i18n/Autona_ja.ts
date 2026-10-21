@@ -912,6 +912,22 @@
         <translation>設定手順</translation>
     </message>
     <message>
+        <source>Set both scores (absolute)</source>
+        <translation>両チームのスコアを設定（絶対値）</translation>
+    </message>
+    <message>
+        <source>States / regions of a country</source>
+        <translation>国の州・地域一覧</translation>
+    </message>
+    <message>
+        <source>Toggle display options (partial)</source>
+        <translation>表示項目を切り替え（部分更新）</translation>
+    </message>
+    <message>
+        <source>Update player fields (partial)</source>
+        <translation>選手データを更新（部分更新）</translation>
+    </message>
+    <message>
         <source>Success</source>
         <translation>成功</translation>
     </message>
