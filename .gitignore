@@ -80,7 +80,7 @@ Pipfile*
 env
 desktop.ini
 assets/*_tmp
-layout_*
+/layout_*
 
 # Build artifacts
 Autona.exe

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 質問・相談は Discord へ / Questions? Ask on Discord
+    url: https://discord.gg/yAFAmhaUqn
+    about: 使い方の質問や相談は Discord で受け付けています。 / Usage questions and discussions are handled on Discord.
+  - name: セキュリティ脆弱性の報告 / Report a security vulnerability
+    url: https://github.com/yuya-tagu/Autona/security/advisories/new
+    about: 公開 Issue ではなく、こちらから非公開で報告してください。 / Please report privately here, not in a public issue.

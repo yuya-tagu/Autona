@@ -1,0 +1,52 @@
+name: バグ報告 / Bug report
+description: 不具合の報告 / Report a bug
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        日本語・英語どちらでも書けます。 / Japanese or English is fine.
+        質問は Discord へ / For questions, use Discord: https://discord.gg/yAFAmhaUqn
+  - type: input
+    id: version
+    attributes:
+      label: Autona のバージョン / Autona version
+      description: アプリ内のバージョン表示で確認できます。 / Shown in the app.
+      placeholder: "例 / e.g. v1.8.1"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: "例 / e.g. Windows 11 23H2"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現手順 / Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期待する動作と実際の動作 / Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: ログ / Logs
+      description: |
+        Autona フォルダ直下の `logs/` にあるログファイルの関連部分を貼ってください。API トークン等の秘密情報は削除してください。
+        Paste the relevant part of the log files in the `logs/` folder next to Autona. Remove secrets such as API tokens.
+      render: text
+  - type: textarea
+    id: extra
+    attributes:
+      label: スクリーンショット・補足 / Screenshots and notes
