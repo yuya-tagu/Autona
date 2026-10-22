@@ -295,6 +295,21 @@ export interface SourceDocument {
     snapshot?: Record<string, Record<string, unknown>>;
 }
 
+/**
+ * Free text about the design, shown on the BOARD tab's meta line
+ * (src/core/LayoutCatalog.py reads it). Optional within schemaVersion 3;
+ * the OBS runtime never reads it. validateProject() trims it and drops
+ * empty fields, so an unset field is never written.
+ */
+export interface ProjectMeta {
+    /** Match format, e.g. "1v1" or "クルーバトル". */
+    format?: string;
+    /** Game, e.g. "スト6". */
+    game?: string;
+}
+
+export type ProjectMetaKey = keyof ProjectMeta;
+
 export interface ScoreboardProject {
     schemaVersion: typeof PROJECT_SCHEMA_VERSION;
     id: string;
@@ -309,6 +324,7 @@ export interface ScoreboardProject {
     layers: DesignerLayer[];
     groups?: DesignerGroup[];
     autoLayouts?: AutoLayoutFrame[];
+    meta?: ProjectMeta;
 }
 
 export interface DesignerAsset {

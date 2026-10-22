@@ -625,6 +625,49 @@ def test_save_and_load_preserves_optional_editor_metadata(designer_service):
     assert loaded["autoLayouts"][0]["layerIds"] == ["name"]
 
 
+def test_save_and_load_preserves_meta(designer_service):
+    # meta (format / game) is optional within schemaVersion 3; model.ts sends
+    # it trimmed and leaves unset fields out.
+    project = make_v3_project("Meta Finals")
+    project["meta"] = {"format": "クルーバトル", "game": "スト6"}
+    result = designer_service.save_project({
+        "project": project,
+        "assets": {"assets/frame.png": png_data_url()},
+    })
+
+    stored = json.loads((designer_service.ROOT / result["slug"] /
+                         "project.json").read_text(encoding="utf-8"))
+    assert stored["meta"] == {"format": "クルーバトル", "game": "スト6"}
+    loaded = designer_service.load_project(result["slug"])["project"]
+    assert loaded["schemaVersion"] == 3
+    assert loaded["meta"] == {"format": "クルーバトル", "game": "スト6"}
+
+
+@pytest.mark.parametrize("meta", ["1v1", ["1v1"], None, 3])
+def test_rejects_meta_that_is_not_an_object(designer_service, meta):
+    project = make_v3_project()
+    project["meta"] = meta
+    with pytest.raises(DesignerProjectError, match="meta"):
+        designer_service.save_project({
+            "project": project,
+            "assets": {"assets/frame.png": png_data_url()},
+        })
+
+
+def test_meta_fields_are_left_to_model_ts(designer_service):
+    # Only meta's type is a safety question here: its fields (strings, their
+    # length, trimming) are model.ts's call, and the catalog shows nothing
+    # but a non-empty string from them (test_layout_catalog.py).
+    project = make_v3_project("Meta Elsewhere")
+    project["meta"] = {"format": 3, "game": "x" * 500, "extra": {"a": 1}}
+    saved = designer_service.save_project({
+        "project": project,
+        "assets": {"assets/frame.png": png_data_url()},
+    })
+    loaded = designer_service.load_project(saved["slug"])["project"]
+    assert loaded["meta"]["game"] == "x" * 500
+
+
 def test_delete_project_removes_its_entire_directory(designer_service):
     designer_service.save_project({
         "project": make_project("Finals"),

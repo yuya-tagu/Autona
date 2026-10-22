@@ -21,6 +21,11 @@ saves it).
 give: a v1/v2 image or slot reference that is null or not a string. Deriving
 the manifest skips those (model.ts once crashed there with a TypeError) and
 validation rejects them, naming the layer or the slot.
+
+``meta_overlay.json`` is laid over ``v3.json``: project.json's optional
+``meta`` (format / game, for the Board tab). model.ts keeps it trimmed; the
+runtime carries it through untouched and draws the same DOM with or without
+it.
 """
 
 import json
@@ -214,6 +219,46 @@ def test_slot_images_in_the_manifest_do_not_change_rendering(tmp_path):
     # ... and the comparison did exercise the slots.
     assert with_slots.count("composer-game-slot ") == 5
     assert 'src="assets/game-1.svg"' in with_slots
+
+
+def project_with_meta(tmp_path):
+    """v3.json with meta_overlay.json laid over it, as a file; and the meta."""
+    project = {**read_fixture("v3.json"), **read_fixture("meta_overlay.json")}
+    path = tmp_path / "v3_meta.json"
+    path.write_text(json.dumps(project, ensure_ascii=False), encoding="utf-8")
+    return path, project["meta"]
+
+
+def test_runtime_carries_meta_through_untouched(tmp_path):
+    # project.json's meta (format / game) is for the Board tab. The runtime
+    # neither needs nor checks it: the project reads exactly as without it,
+    # meta riding along as written (model.ts trims it on save; model.test.js
+    # pins that against the same overlay).
+    path, meta = project_with_meta(tmp_path)
+    [migrated] = run_runtime("opt-in", path)["results"].values()
+    expected = read_fixture("expected_v3.json")
+
+    assert migrated.pop("meta") == meta
+    assert normalize(migrated, read_fixture("v3.json"), expected) == expected
+
+
+@pytest.mark.skipif(not JSDOM.is_dir(),
+                    reason="web/node_modules is not installed")
+def test_meta_does_not_change_rendering(tmp_path):
+    path, meta = project_with_meta(tmp_path)
+    result = subprocess.run(
+        [NODE, "-e", _RENDER_HARNESS, str(JSDOM), str(RUNTIME),
+         str(FIXTURES / "v3.json"), str(path)],
+        capture_output=True, text=True, encoding="utf-8", timeout=60)
+    assert result.returncode == 0, result.stderr
+    without_meta, with_meta = json.loads(result.stdout)
+
+    assert with_meta == without_meta
+    # ... nothing of it is drawn (the overlay's game is markup on purpose).
+    assert meta["format"].strip() not in with_meta
+    assert "スト6" not in with_meta
+    # ... and the comparison did render the project with live data.
+    assert "Alpha" in with_meta
 
 
 def test_the_contract_hook_is_inert_unless_the_page_opts_in():

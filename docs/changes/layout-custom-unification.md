@@ -4,7 +4,7 @@
 `layout/README.md`（Designer の操作説明）、OSS 公開前整理（PR #206 の続き）。
 凡例: 【確認】= ファイル・行で裏取り済み、【推測】= 状況証拠。
 
-**状態（2026-10-22）: Step 1〜3 完了**（Step 2 は PR #208 でマージ済み、Step 1・3 は実装済み）。残りは Step 4・5。
+**状態（2026-10-22）: Step 1〜4 完了**（Step 2 は PR #208、Step 1・3 は PR #209 でマージ済み、Step 4 は実装済み）。残りは Step 5（公開後可）。
 実装で確定した規約と既知の制約は §7。
 
 ## 1. 目的と非目標
@@ -102,10 +102,10 @@ layout/
 | 1（完了） | `src/core/LayoutCatalog.py` 新設 + 旧来型 5 scoreboard の `settings.json` に `autona` ブロック + `GET /api/v1/layouts` + Board / `DiscoverLayoutDesigns` / Designer「開く」を catalog 消費に置換、`DESIGN_*` 削除 | M | 新 `tests/test_layout_catalog.py`（tmp layout ツリーで発見・既定値・kind）、`test_webserver_routes.py` のルート台帳更新、`test_core_qt_free.py`（catalog が Qt を import しない） | 低。表示名の文字列が変わらないことをテストで固定 |
 | 2（完了・PR #208） | 共通 runtime 化: `web/public/scoreboard-designer-runtime/` → `layout/designer_runtime/` 移動、`save_project` はスタブのみ書く、`MigrateLegacyProjects()`、webserver の no-store 拡張 | M | `test_designer_service.py` に「保存後に runtime.* が無い」「移行が冪等で `_legacy/` を作る」「スタブが相対パスで runtime を参照」、`validate_release_zip.ps1` の許可リスト | 中。OBS 配信中の移行は起動時のみ・保存時に再読込なので配信中変更なし。`web/build` 依存が消える（Designer プレビューは `/layout/designer_runtime/` を読む） |
 | 3（完了） | 検証の分担: Python `_validate_project` を安全性のみ（~60 行）に縮小、TS を正本、`tests/fixtures/designer/*.json` で TS と runtime の移行一致を契約テスト化 | S〜M | jest（`model.test.js`）+ node で `runtime.js` を `vm` 実行する `tests/test_designer_runtime_contract.py` | 低。Python を緩めた分は TS 側テストが既に v1→v3 を網羅（`model.test.js:228-238`） |
-| 4 | Designer プリセットの切り離し（幽霊キー削除・命名変更）+ `project.json.meta`（format/game）を Designer から編集可能に | S | `index.test.js`（プリセット一覧）、`test_layout_catalog.py`（meta 反映） | 無 |
+| 4（完了） | Designer プリセットの切り離し（幽霊キー削除・命名変更）+ `project.json.meta`（format/game）を Designer から編集可能に | S | `index.test.js`（プリセット一覧・meta の保存）、`model.test.js`（meta の正規化）、`test_layout_catalog.py` / `test_board_widget.py`（meta 反映）、`test_designer_runtime_contract.py`（meta で描画が変わらない） | 無 |
 | 5（公開後可） | `/api/designer/*` を `/api/v1/designer/*` へ移し旧パスをエイリアス、Figma プラグインの接続先更新 | S | ルート台帳 | 低（Figma プラグインは別エージェント編集中の `tools/` に依存） |
 
-Step 1 と 2 は独立（並行可）。Step 3 は 2 の後、Step 4 は 1 の後。Step 1〜3 は完了（2026-10-22）。
+Step 1 と 2 は独立（並行可）。Step 3 は 2 の後、Step 4 は 1 の後。Step 1〜4 は完了（2026-10-22）。
 
 ## 6. 決めてほしいこと（推奨付き）
 
@@ -115,7 +115,7 @@ Step 1 と 2 は独立（並行可）。Step 3 は 2 の後、Step 4 は 1 の�
 2. **Python 検証の縮小幅** — 推奨: **安全性のみ**に縮小。Designer はローカル QWebEngine 専用（トークン＋loopback 限定: `AutonaDesignerService.py:74-85`）で、意味論の二重検証は防御価値より保守コストが大きい。LAN 公開を将来許すなら再検討（ADR-001 D5 の見直し時）
 3. **custom のメタデータ（対戦形式・ゲーム）を project.json に持たせるか** — 推奨: **持たせる**（Step 4）。持たせないと Board の「1v1 / カスタム」固定が残り、catalog 上で custom だけ情報欠落のまま公開することになる
 
-## 7. 実装で確定した規約と既知の制約（Step 1〜3 完了時点）
+## 7. 実装で確定した規約と既知の制約（Step 1〜4 完了時点）
 
 ### 7.1 確定した規約
 
@@ -132,6 +132,18 @@ Step 1 と 2 は独立（並行可）。Step 3 は 2 の後、Step 4 は 1 の�
   （ロック・破損・`RecursionError` になる深いネストを含む）は警告ログを出してその 1 件だけ無視する
 - **`GET /api/v1/layouts`** は読み取り専用のカタログ系なので `WebServerActions` を経由しない
   （ADR-001 2026-10-22 Addendum、`.claude/rules/state-and-webserver.md`）
+- **`project.json.meta`**（Step 4）: `{format?, game?}` の任意フィールド。schemaVersion は 3 のまま
+  （v1/v2 からの移行にも素通しで乗る）。Designer 左サイドバーの「対戦形式」「ゲーム」欄で編集し、
+  編集中は入力どおり保持、保存時に `model.ts` の `validateProject()` が trim し、空の項目は書かず、
+  両方空なら `meta` ごと書かない。各 64 文字（trim 後）まで、文字列以外は拒否、`null` は未設定扱い、
+  `format`/`game` 以外のキーは保存時に落とす。Python `_validate_project` は `meta` が dict か不在かだけ
+  （サイズは `MAX_PROJECT_BYTES` で全体として制限）。`runtime.js` は読まない。Board のメタ欄は
+  `setTextFormat(PlainText)` なので値は HTML として解釈されない
+- **Designer のプリセット**（Step 4）: `空 / 基本 1v1 / チーム / クルー`（`index.tsx` の `DESIGNER_PRESETS`）。
+  キー・座標とも Designer 内部の資産で `layout/` のフォルダ名とは対応しない。座標は旧テンプレートから
+  `基本 1v1` ← Universal、`チーム` ← team、`クルー` ← crewbattle を引き継ぎ、幽霊キー `scoreboard` と
+  simple / topleft の座標は削除した。`空` 以外は `meta.format`（`1v1` / `チーム戦` / `クルーバトル`）も入れる。
+  プロジェクト名はプリセット名（`空` は通常の新規と同じ「新しいデザイン」）
 
 ### 7.2 既知の制約
 

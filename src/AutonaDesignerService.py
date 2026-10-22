@@ -414,6 +414,11 @@ class AutonaDesignerService:
         confined to the design's assets/ folder, and PNG/SVG content
         (_decode_asset, when the bytes arrive). What is stored or held also
         has to fit MAX_PROJECT_BYTES and be plain JSON (_project_json).
+        ``meta`` (format / game, the Board tab's meta line) only has to be an
+        object when present: its fields are model.ts's call, its size is
+        bounded with the rest of the file, and its one reader
+        (core/LayoutCatalog.py) takes nothing from it but non-empty strings,
+        shown as plain text.
 
         Not every caller is the Designer. Its routes need the desktop
         window's token and a loopback peer (is_authorized), but the Figma
@@ -439,6 +444,8 @@ class AutonaDesignerService:
             raise DesignerProjectError("デザイン名がありません。")
         if len(name) > 128:
             raise DesignerProjectError("デザイン名が長すぎます。")
+        if "meta" in project and not isinstance(project["meta"], dict):
+            raise DesignerProjectError("metaがオブジェクトではありません。")
         layers = project.get("layers")
         if not isinstance(layers, list):
             raise DesignerProjectError("layersが配列ではありません。")

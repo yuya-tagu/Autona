@@ -18,6 +18,8 @@ import {
     MotionKeyframe,
     PREVIOUS_PROJECT_SCHEMA_VERSION,
     ProjectAsset,
+    ProjectMeta,
+    ProjectMetaKey,
     PROJECT_SCHEMA_VERSION,
     ScoreboardProject,
     VisualKeyframe,
@@ -25,6 +27,17 @@ import {
 
 export const CANVAS_WIDTH = 1920;
 export const CANVAS_HEIGHT = 1080;
+
+export const PROJECT_META_KEYS: readonly ProjectMetaKey[] = ["format", "game"];
+// Per field, after trimming. The BOARD tab wraps the meta line, so this only
+// keeps it from turning into a paragraph.
+export const PROJECT_META_MAX_LENGTH = 64;
+// What the BOARD tab shows for a field the project leaves unset
+// (DESIGNER_DEFAULT_FORMAT / DESIGNER_DEFAULT_GAME in src/core/LayoutCatalog.py).
+export const PROJECT_META_DEFAULTS: Required<ProjectMeta> = {
+    format: "1v1",
+    game: "カスタム",
+};
 
 const DEFAULT_ANIMATION = {
     preset: "fade" as AnimationPreset,
@@ -591,6 +604,32 @@ export function sanitizeSlug(name: string): string {
     return normalized || "custom";
 }
 
+// project.meta as it is saved: each field trimmed, an empty one left out,
+// and no meta at all when nothing is left. A missing or null field is
+// unset; anything else that is not a string is refused, as is a meta that
+// is not an object. Keys other than PROJECT_META_KEYS are not kept.
+function normalizedMeta(value: unknown): ProjectMeta | undefined {
+    if (value === undefined) return undefined;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error("meta がオブジェクトではありません。");
+    }
+    const meta: ProjectMeta = {};
+    PROJECT_META_KEYS.forEach((key) => {
+        const field = (value as Record<string, unknown>)[key];
+        if (field === undefined || field === null) return;
+        if (typeof field !== "string") {
+            throw new Error(`meta.${key} が文字列ではありません。`);
+        }
+        const text = field.trim();
+        if (text.length > PROJECT_META_MAX_LENGTH) {
+            throw new Error(
+                `meta.${key} は${PROJECT_META_MAX_LENGTH}文字以内にしてください。`);
+        }
+        if (text) meta[key] = text;
+    });
+    return Object.keys(meta).length ? meta : undefined;
+}
+
 export function validateProject(value: unknown): ScoreboardProject {
     const project = migrateProject(value);
     if (project.schemaVersion !== PROJECT_SCHEMA_VERSION) {
@@ -598,6 +637,14 @@ export function validateProject(value: unknown): ScoreboardProject {
     }
     if (typeof project.name !== "string" || !project.name.trim()) {
         throw new Error("デザイン名がありません。");
+    }
+    // migrateProject() returned a copy, so this never touches the editor's
+    // own project: the editor keeps what is typed, the save gets it trimmed.
+    const meta = normalizedMeta((project as {meta?: unknown}).meta);
+    if (meta) {
+        project.meta = meta;
+    } else {
+        delete project.meta;
     }
     if (project.canvas?.width !== CANVAS_WIDTH ||
         project.canvas?.height !== CANVAS_HEIGHT) {

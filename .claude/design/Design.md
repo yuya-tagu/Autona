@@ -876,6 +876,8 @@ BOARD / 実況 / TOP 8 タブのプルダウン・Designer の「開く」・`GE
 
 - **フォルダ名へのフォールバック**: ブロックが無い／壊れたフォルダは旧来の命名規約で拾う（`scoreboard*` → scoreboard、`commentators` / `commentators_*` → commentary、`bracket_top8` / `bracket_top8_*` → top8。基本フォルダは「標準」、バリアントは接尾辞を整形: `commentators_dark-gold` → `Dark Gold`）。`displayName` だけ省略したときも同規則、規約外の名前は `_` → 空白 + 単語先頭大文字。入口ファイルの無いフォルダ、`custom/` `designer_runtime/` `include/` `icons/` は載らない
 - **Designer 製**: 表示名は `Custom: {project.json の name}`（空なら slug）。対戦形式・ゲームは `meta.format` / `meta.game`、未設定なら `1v1` / `カスタム`。Designer の「開く」一覧だけは接頭辞なしの `name` を出す（Designer の中なので区別が要らない）
+  - `meta` は schemaVersion 3 の任意フィールド（バージョンは上げない）。Designer 左サイドバーの「対戦形式」「ゲーム」欄で編集し、`model.ts` の `validateProject()` が保存時に trim・空項目の除去（全部空なら `meta` ごと省略）・各 64 文字上限・文字列型を検査する。Python `_validate_project` は `meta` が dict か不在かだけを見る（サイズは `MAX_PROJECT_BYTES` で全体として制限）。`runtime.js` は読まない（`tests/test_designer_runtime_contract.py` が描画不変を pin）
+  - Designer のプリセット（空 / 基本 1v1 / チーム / クルー、`web/src/ScoreboardDesigner/index.tsx` の `DESIGNER_PRESETS`）は Designer 内部の資産で、`layout/` の組み込みフォルダとは対応しない。空以外は `meta.format` も入れる
 - **重複時の表記**: 同じ `kind` の中で表示名が重なったら、重なったもの全部を `{displayName} ({id})` にする（例: 複製フォルダ `scoreboard_simple - コピー` → `Simple (scoreboard_simple)` / `Simple (scoreboard_simple - コピー)`）。`kind` ごとに別のプルダウンなので、kind をまたぐ同名（実況と TOP 8 の「標準」）は変えない
 - pin: `tests/test_layout_catalog.py`（出荷フォルダのブロックの値そのものは `test_the_shipped_layouts_declare_their_metadata_explicitly`）
 

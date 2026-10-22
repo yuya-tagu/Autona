@@ -156,6 +156,41 @@ def test_project_meta_fields_fall_back_one_by_one(layoutRoot, meta, expected):
     assert (entry["format"], entry["game"]) == expected
 
 
+def test_a_project_saved_by_the_designer_lists_its_meta(
+        layoutRoot, monkeypatch):
+    # The Designer edits project.json's meta (format / game) and saves it
+    # through AutonaDesignerService; the catalog -- and so the Board tab's
+    # meta line -- shows exactly that, with the defaults for what is unset.
+    from src.AutonaDesignerService import AutonaDesignerService
+
+    runtime = layoutRoot / "designer_runtime"
+    runtime.mkdir()
+    for name in AutonaDesignerService.RUNTIME_FILES:
+        (runtime / name).write_bytes(b"/* shared runtime */")
+    monkeypatch.setattr(AutonaDesignerService, "ROOT", layoutRoot / "custom")
+    monkeypatch.setattr(AutonaDesignerService, "RUNTIME_ROOT", runtime)
+
+    def save(name, meta=None):
+        project = {"schemaVersion": 3, "id": name, "name": name,
+                   "canvas": {"width": 1920, "height": 1080},
+                   "assets": [], "layers": []}
+        if meta is not None:
+            project["meta"] = meta
+        AutonaDesignerService.save_project({"project": project, "assets": {}})
+
+    save("Crew", {"format": "クルーバトル", "game": "スマブラSP"})
+    save("Game Only", {"game": "スト6"})
+    save("Plain")
+
+    assert [(entry["displayName"], entry["format"], entry["game"])
+            for entry in LayoutCatalog.Layouts([KIND_DESIGNER], root=layoutRoot)
+            ] == [
+        ("Custom: Crew", "クルーバトル", "スマブラSP"),
+        ("Custom: Game Only", "1v1", "スト6"),
+        ("Custom: Plain", "1v1", "カスタム"),
+    ]
+
+
 @pytest.mark.parametrize("name, expected", [
     (None, "my-slug"),
     ("", "my-slug"),
