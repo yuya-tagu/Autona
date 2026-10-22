@@ -273,7 +273,7 @@ Tauri / Electron 移行 / core の別プロセス常駐（ヘッドレス起動�
 
 ## 5. 移行の実施記録
 
-### S0 掃除 ✅ 実装完了（2026-10-23・未コミット）
+### S0 掃除 ✅ 完了（2026-10-23・PR #215 マージ済み）
 
 - **core → src 逆依存ゼロ**: `Helpers/AutonaDictHelper` → `core/DictHelper`、`AutonaCommentaryModel` → `core/CommentaryModel`、`AutonaTop8Model` → `core/Top8Model` へ移設（互換 shim なし）。
   pin: `tests/test_core_qt_free.py::test_no_core_module_imports_src_outside_core`（AST・遅延 import 含む）+ subprocess 検査に「core import 後に `src.core` 外の `src.*` が sys.modules に無い」を追加

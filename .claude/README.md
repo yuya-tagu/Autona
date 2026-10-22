@@ -26,9 +26,9 @@
 
 | ファイル | モデル | effort | ツール | 用途 |
 |---------|--------|--------|-------|------|
-| `agents/impl.md` | opus | xhigh | 全部 | 複数ファイル横断の実装・設計判断を含む変更・Qt クラッシュ調査 |
-| `agents/patch.md` | sonnet | medium | Read/Edit/Write/Bash/Glob/Grep | 手順が確定した小規模変更・機械的変更 |
-| `agents/verify.md` | sonnet | medium | Bash/Read/Grep/Glob | pytest / Web UI ビルド / 起動確認の実行と結果整理（修正しない） |
+| `agents/impl.md` | opus | xhigh | 全部 | 設計判断を含む変更（Qt ライフサイクル・スレッド・生成順・state スキーマ・自動更新）・Qt クラッシュ/原因不明バグの調査 |
+| `agents/patch.md` | sonnet | medium | Read/Edit/Write/Bash/Glob/Grep | 設計が決まっている変更（規模問わず） |
+| `agents/verify.md` | sonnet | low | Bash/Read/Grep/Glob | pytest 全量 / Web UI build・test（CI と同内容）。修正しない・起動しない |
 | `agents/review.md` | opus | high | Read/Grep/Glob/Bash | 差分レビュー（読み取り専用） |
 
 - **コード探索は組み込みの Explore に任せる**（読み取り専用・CLAUDE.md を読み込まないので安い）。
@@ -38,6 +38,7 @@
 - カスタムサブエージェントは起動のたびに `CLAUDE.md` を読み込む（組み込み Explore / Plan のみ例外）。
   委譲を増やすほど CLAUDE.md 肥大のコストが線形に効くので、CLAUDE.md は軽く保つ
 - **exe ビルドは agents に任せない**（3〜5 分かかる）。明示指示があったときにメインセッションで実行する
+- 委譲先の振り分け・標準フロー・動作確認の分担は [orchestration.md](orchestration.md)
 
 ## Rules（パス別自動ルール）
 
@@ -53,10 +54,17 @@ frontmatter の `paths:`/`globs:` で対象ファイル編集時のみ自動ロ�
 
 ## Hooks（自動検証）
 
-| トリガー | 内容 |
-|---------|------|
-| コミット前 | Web UI ビルド確認リマインド |
-| ファイル編集後 | QDockWidget の必須設定チェック |
+`settings.json` に登録した PreToolUse（matcher: `Bash|PowerShell`）ガード `hooks/pretooluse-guard.mjs`。
+パース不能な入力は素通し（fail-open）。heredoc 本文・引用符内の `;` `&` は判定対象外。
+判定前に行継続（`\` + 改行）を連結し、`;` `&&` `||` `|` `&` と改行で文に分割する。
+各文は先頭のラッパー（環境変数代入・`env`・`sudo`・`timeout <n>`・`nohup`・`exec`・`command`・`(`・PowerShell の `&` と
+`Start-Process`・`cmd /c [start]`・`powershell|pwsh|bash|sh -c "..."`（引用符内を再帰判定））を剥がしてから R1〜R3 に当てる。
+
+| ルール | 判定 | 対象 |
+|-------|------|------|
+| R1 push-to-main | deny | 宛先 ref が `main` / `HEAD` / `@` の push（`-u origin HEAD` 含む）・引数なし `git push`・`--delete main`。`git` / `git.exe` / パス付き、`-C` `-c` `--no-pager` `--git-dir=..` 等のグローバルオプション越しも判定。`main:<type>/<topic>`・`--delete <他ブランチ>`・`--tags` は許可。PowerShell ツールも対象 |
+| R2 app-launch | ask | `python main.py`（`py [-3]` / `python3` / パス付き、`-X dev` 等の値付きフラグ越し）・`Autona.exe` の起動（`Start-Process` / `& ./Autona.exe` / `cmd /c start` 経由も）。`taskkill` と `cp`・`Copy-Item` は許可 |
+| R3 exe-build | ask | `pyinstaller` / `python -m PyInstaller` |
 
 ## Commands（スラッシュコマンド）
 
@@ -67,7 +75,7 @@ frontmatter の `paths:`/`globs:` で対象ファイル編集時のみ自動ロ�
 | `/create-test-checklist` | テストチェックリスト生成 |
 | `/review-pr` | 設計・保守性レビュー |
 | `/build-all` | Web UI + exe 一括ビルド |
-| `/verify` | テスト + ビルド + 起動確認の一括検証 |
+| `/verify` | 静的検証（pytest 全量 / Web UI の build・test）の一括実行 |
 
 ## Design（正本ドキュメント）
 
@@ -80,6 +88,7 @@ frontmatter の `paths:`/`globs:` で対象ファイル編集時のみ自動ロ�
 
 | ファイル | 役割 |
 |---------|------|
+| `orchestration.md` | オーケストレータ運用（メイン 1 本・委譲先の選び方・標準フロー・動作確認の分担・compact 区切り・並列作業） |
 | `git-workflow.md` | Git 詳細（push/PR/ブランチ削除/マルチアカウント認証）。CLAUDE.md の Git 要点の詳細版 |
 | `release-runbook.md` | **リリース実行手順書**。「リリースして」と依頼されたら上から順になぞる（CWD 事故・アカウントダンス・zip 残留等の再発防止込み） |
 | `known-smells.md` | リファクタ候補リスト。コードベース調査を元に作成し、フェーズ2の夜間タスク配布の燃料として使う |
