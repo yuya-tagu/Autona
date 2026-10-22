@@ -15,19 +15,12 @@ from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaPlayerDB import AutonaPlayerDB
 from .Helpers.AutonaDirHelper import AutonaResolve
+from .Helpers.AutonaQtHelper import NoIconProxyModel
 from .AutonaFeatureColors import FEATURE_RESULT, MakeFeatureColorCard
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
 from . import ui_constants as UI
 from . import ui_layout as L
-
-
-class NoIconProxyModel(QSortFilterProxyModel):
-    """Proxy model that strips icons (DecorationRole) from the source model."""
-    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if role == Qt.ItemDataRole.DecorationRole:
-            return None
-        return super().data(index, role)
 
 
 class AutonaResultSettingsWidgetSignals(QObject):

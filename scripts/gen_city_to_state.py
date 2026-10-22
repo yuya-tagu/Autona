@@ -113,11 +113,11 @@ JP_PREFECTURES = {
 
 
 def normalize(value: str) -> str:
-    """Same normalization as AutonaCountryHelper.remove_accents_lower.
+    """Same normalization as remove_accents_lower (src/core/TextHelper.py,
+    which AutonaCountryHelper.FindState uses).
 
-    Kept as a local copy so this script never imports src (which would drag
-    Qt in for a build-time tool). The two must stay identical: the runtime
-    looks up keys produced here.
+    Kept as a local copy so this build-time tool never imports src. The two
+    must stay identical: the runtime looks up keys produced here.
 
     The trailing strip() is the one addition, and it is not optional: the
     source data contains padded names ("Barisal "), while FindState strips

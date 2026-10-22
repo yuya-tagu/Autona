@@ -23,7 +23,7 @@ import requests
 from PIL import Image
 import time
 from loguru import logger
-from ..Helpers.AutonaDictHelper import deep_get, deep_set, deep_unset, deep_clone
+from .DictHelper import deep_get, deep_set, deep_unset, deep_clone
 from .Observable import ObserverChannel
 from .SettingsManager import SettingsManager
 
@@ -727,6 +727,27 @@ class StateManager:
 
         if dirty_prefix:
             StateManager.observers.held_dirty_changed.notify(dirty_prefix, True)
+
+    def SetIfChanged(key: str, value) -> bool:
+        """Set `key` only when it would actually change. True if written.
+
+        The shared "unchanged value is not a write" rule of the core writers
+        (AutonaActions, SetLoadService, TournamentInfoService,
+        CrewBattleService), each of which binds it as `_SetIfChanged`. An
+        identical Set is not free: under a held prefix it marks the board
+        dirty and lights the 反映 button for an edit the operator did not
+        make, and anywhere it still runs a save cycle (an ./out rewrite plus
+        an export thread) for no delta. The Qt path used to get this for free
+        -- `setChecked` / `setValue` emit nothing when the value is unchanged
+        -- so writers reached from paths that re-assert values have to ask.
+
+        Not a universal Set: PlayerService writes unconditionally on purpose
+        (see its module docstring).
+        """
+        if StateManager.Get(key, None) == value:
+            return False
+        StateManager.Set(key, value)
+        return True
 
     def Unset(key: str):
         # import inspect

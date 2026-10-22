@@ -9,7 +9,7 @@ from loguru import logger
 
 from src.core.SettingsManager import SettingsManager
 from src.core.StateManager import StateManager
-from .AutonaDictHelper import deep_clone
+from ..core.DictHelper import deep_clone
 from .AutonaDirHelper import AutonaResolve
 
 

@@ -7,7 +7,7 @@ from loguru import logger
 
 from .core.SettingsManager import SettingsManager
 from .core.Actions import AutonaActions
-from .Helpers.AutonaDictHelper import deep_clone
+from .core.DictHelper import deep_clone
 
 # Win32 constants
 MOD_ALT = 0x0001

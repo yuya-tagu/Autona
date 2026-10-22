@@ -13,7 +13,7 @@ from src.core.StateManager import StateManager
 from src.AutonaGameAssetManager import AutonaGameAssetManager
 from src.core.SettingsManager import SettingsManager
 from src.AutonaFeatureColors import FEATURE_RESULT, GetFeatureColors
-from src.Helpers.AutonaDictHelper import deep_get
+from src.core.DictHelper import deep_get
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from src.Helpers.AutonaDirHelper import AutonaResolve
 from src.Helpers.AutonaOutputRetention import PruneOutputFiles

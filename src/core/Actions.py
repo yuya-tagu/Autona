@@ -183,31 +183,17 @@ class AutonaActions:
         except (TypeError, ValueError):
             return default
 
-    @staticmethod
-    def _SetIfChanged(key, value) -> bool:
-        """Write `key` only when it would actually change. True if written.
-
-        Same rule, and the same reason, as `SetLoadService._SetIfChanged`
-        (Step 4b): every write under a board's held prefix marks it dirty and
-        lights the 反映 button, so re-writing a value the state already holds
-        would announce an edit the operator did not make. The Qt path used to
-        get this for free -- `setChecked` / `setValue` / `setCurrentText` emit
-        nothing when the value is unchanged -- and the field writes below are
-        reached from paths that deliberately re-assert values (ClearScore,
-        ResetAllInputs, a re-loaded set), so it has to be explicit here.
-
-        Board 3 (crew) has none of that -- score.3 is not held -- but calls
-        into `SetMatchField` / `SetTeamName` land here too, and for that board
-        the same guard earns a different thing: an unchanged write still
-        costs a full save cycle (an ./out rewrite plus an export thread), so
-        skipping it avoids a wasted cycle rather than a false-dirty held
-        prefix. `CrewBattleService._SetIfChanged` states this reading
-        directly; this docstring only had the board 1/2 one.
-        """
-        if StateManager.Get(key, None) == value:
-            return False
-        StateManager.Set(key, value)
-        return True
+    # Write `key` only when it would actually change; True if written. The
+    # shared rule is `StateManager.SetIfChanged` (one definition for every
+    # core writer). Why it matters here: every write under a board's held
+    # prefix marks it dirty and lights the 反映 button, and the field writes
+    # below are reached from paths that deliberately re-assert values
+    # (ClearScore, ResetAllInputs, a re-loaded set) -- the Qt path got the
+    # guard for free from `setChecked` / `setValue` / `setCurrentText`.
+    # Board 3 (crew) is not held, but `SetMatchField` / `SetTeamName` land
+    # here for it too, and there the guard saves a wasted save cycle (an
+    # ./out rewrite plus an export thread) rather than a false-dirty prefix.
+    _SetIfChanged = staticmethod(StateManager.SetIfChanged)
 
     def _matchText(self, key, number) -> str:
         if self._formatMatchText is not None:

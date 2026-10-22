@@ -108,22 +108,16 @@ class CrewBattleService:
         except (TypeError, ValueError):
             return default
 
-    @staticmethod
-    def _SetIfChanged(key, value) -> bool:
-        """Write `key` only when it would actually change. True if written.
-
-        score.3 is not a held subtree, so unlike the 1v1 / team boards this
-        is not about the 反映 button lighting up: an unchanged write produces
-        no delta, but it still runs a save cycle -- a ./out rewrite and an
-        export thread -- for nothing. Worth guarding because the payload path
-        this is used from (``ApplyMatchInfo``) is a remote one that can be
-        polled: a control panel re-posting the same round name every few
-        seconds is the shape that makes it add up.
-        """
-        if StateManager.Get(key, None) == value:
-            return False
-        StateManager.Set(key, value)
-        return True
+    # Write `key` only when it would actually change; True if written (the
+    # shared `StateManager.SetIfChanged`). score.3 is not a held subtree, so
+    # unlike the 1v1 / team boards this is not about the 反映 button lighting
+    # up: an unchanged write produces no delta, but it still runs a save
+    # cycle -- a ./out rewrite and an export thread -- for nothing. Worth
+    # guarding because the payload path this is used from
+    # (``ApplyMatchInfo``) is a remote one that can be polled: a control
+    # panel re-posting the same round name every few seconds is the shape
+    # that makes it add up.
+    _SetIfChanged = staticmethod(StateManager.SetIfChanged)
 
     # ── the team total (the crew rule that makes this board different) ───
 

@@ -3,11 +3,11 @@
 Replaces the old free-form Bracket dock (AutonaBracketWidget /
 AutonaBracketView). The bracket is now a fixed FGC-standard Top 8
 (4 winners-side + 4 losers-side starters) whose topology lives in
-AutonaTop8Model; this panel only edits players and match results.
+core/Top8Model.py; this panel only edits players and match results.
 
 * **Players** — 8 slot-fixed cards (name / sponsor / country / character).
 * **Matches** — one score row per match; winners propagate automatically
-  via AutonaTop8Model.Recompute on every edit.
+  via Top8Model.Recompute on every edit.
 * **Start.gg** — load a double-elimination phase group and extract its
   final 8 into the fixed topology.
 * **Preview / Add to OBS** — design pulldown (immediate reload, Board-tab
@@ -16,7 +16,7 @@ AutonaTop8Model; this panel only edits players and match results.
   AutonaBoardWidget's workflow (URL instead of local file: the overlay
   needs the web server's Socket.IO feed).
 
-State contract: everything under ``top8.*`` (see AutonaTop8Model). Every
+State contract: everything under ``top8.*`` (see src/core/Top8Model.py). Every
 write goes through ``src/core/Top8Service.py`` — this panel assembles the
 player entries (their country and character come out of Qt models) and reads
 the state back to render, but it does not write it (headless core Step 5,
@@ -37,10 +37,11 @@ from .AutonaLayoutPreview import AutonaLayoutPreview, ObsUrl
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
+from .Helpers.AutonaQtHelper import NoIconProxyModel
 from .AutonaFeatureColors import FEATURE_TOP8, MakeFeatureColorCard
 from .Workers import Worker
 from .core import Top8Service
-from . import AutonaTop8Model as top8
+from .core import Top8Model as top8
 from . import ui_constants as UI
 from . import ui_layout as L
 
@@ -67,19 +68,6 @@ SHORT_MATCH_LABELS = {
 }
 
 PLAYER_CARD_WIDTH = 240
-
-
-class _NoIconProxyModel(QSortFilterProxyModel):
-    """Strip icons (DecorationRole) from the source model.
-
-    Duplicated from AutonaResultSettingsWidget on purpose: importing that
-    module here would pull the result renderer chain into Autona.py's
-    import order (singleton init-order hazard)."""
-
-    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if role == Qt.ItemDataRole.DecorationRole:
-            return None
-        return super().data(index, role)
 
 
 class AutonaTop8Widget(QDockWidget):
@@ -314,7 +302,7 @@ class AutonaTop8Widget(QDockWidget):
         combo.completer().setFilterMode(Qt.MatchFlag.MatchContains)
         combo.completer().setCompletionMode(
             QCompleter.CompletionMode.PopupCompletion)
-        proxy = _NoIconProxyModel(combo)
+        proxy = NoIconProxyModel(combo)
         proxy.setSourceModel(AutonaGameAssetManager.instance.characterModel)
         combo.setModel(proxy)
         combo.setIconSize(QSize(0, 0))
@@ -341,7 +329,7 @@ class AutonaTop8Widget(QDockWidget):
         for w in self.playerInputs.values():
             char_combo = w["char"]
             char_combo.blockSignals(True)
-            proxy = _NoIconProxyModel(char_combo)
+            proxy = NoIconProxyModel(char_combo)
             proxy.setSourceModel(
                 AutonaGameAssetManager.instance.characterModel)
             char_combo.setModel(proxy)

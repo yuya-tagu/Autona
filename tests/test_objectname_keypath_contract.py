@@ -173,8 +173,13 @@ def test_the_player_schema_names_are_the_ui_objectnames():
     assert schema.PLAYER_NOTE_KEY == "custom_textbox"
 
 
+_STATE_WRITE_METHODS = ("Set", "Unset", "SetIfChanged")
+
+
 def _state_write_calls(relative_path):
-    """Every ``StateManager.Set`` / ``.Unset`` call in a source file.
+    """Every ``StateManager.Set`` / ``.Unset`` / ``.SetIfChanged`` call in a
+    source file (``SetIfChanged`` is a write too: the guarded Set the core
+    writers share).
 
     Matches on the receiver name being literally ``StateManager``, so an
     aliased import (``from ...StateManager import StateManager as SM``)
@@ -186,7 +191,7 @@ def _state_write_calls(relative_path):
         node for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
-        and node.func.attr in ("Set", "Unset")
+        and node.func.attr in _STATE_WRITE_METHODS
         and isinstance(node.func.value, ast.Name)
         and node.func.value.id == "StateManager"
     ]
@@ -474,7 +479,7 @@ def test_no_qt_widget_writes_the_state():
                 continue
             if any(isinstance(inner, ast.Call)
                    and isinstance(inner.func, ast.Attribute)
-                   and inner.func.attr in ("Set", "Unset")
+                   and inner.func.attr in _STATE_WRITE_METHODS
                    and isinstance(inner.func.value, ast.Name)
                    and inner.func.value.id == "StateManager"
                    for inner in ast.walk(node)):

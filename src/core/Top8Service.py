@@ -1,7 +1,7 @@
 """The write path for the TOP 8 bracket (``top8.*``).
 
 The topology -- who plays whom, where a winner goes, what an undecided match
-looks like -- has always been Qt-free, in ``src/AutonaTop8Model.py``. What was
+looks like -- has always been Qt-free, in ``src/core/Top8Model.py``. What was
 not was the deciding *when* to write it: the panel merged staged spin values
 into the published matches, re-ran ``Recompute``, and wrote the two subtrees
 itself, from six ``StateManager.Set`` calls that spelled ``top8.players`` /
@@ -23,7 +23,7 @@ has nothing to create.
 Import side effects: none (agent-pitfalls #1). Qt-free, like everything under
 ``src/core``.
 """
-from .. import AutonaTop8Model as top8
+from . import Top8Model as top8
 from . import StateSchema as schema
 from .StateManager import StateManager
 

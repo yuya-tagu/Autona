@@ -23,7 +23,17 @@ module that nothing imports yet would otherwise be checked by nothing at all.
 Verified by construction: a throwaway core module importing qtpy fails this,
 and so does one that imports a Qt-carrying module without naming Qt itself
 (the case the source-reading check below cannot see).
+
+The second contract pinned here is the direction of the dependency
+(ADR-005 S0): src/core imports nothing from `src` outside `src.core`. Being
+Qt-free is necessary but not sufficient -- a core module that reaches back
+into `src/` for a Qt-free helper still ties the core to the application
+package, so it cannot be lifted out (headless start, a separate test
+harness) without dragging the rest along. The last of those reverse
+dependencies (the dict helper and the Top 8 / commentary state models) moved
+into src/core; this keeps a new one from appearing.
 """
+import ast
 import os
 import subprocess
 import sys
@@ -85,14 +95,28 @@ def qt_modules():
     )
 
 
+def src_modules_outside_core():
+    # `src` itself is the parent package and is always loaded on the way to
+    # src.core; anything else under it is the application, not the core.
+    return sorted(
+        name for name in sys.modules
+        if name.startswith("src.")
+        and name != "src.core" and not name.startswith("src.core.")
+    )
+
+
 # Nothing may have pulled Qt in before the first core import, or the check
 # below would be measuring the harness rather than src.core.
 assert not qt_modules(), f"Qt was already imported: {qt_modules()}"
+assert not src_modules_outside_core(), \
+    f"src modules were already imported: {src_modules_outside_core()}"
 
 for module in CORE_MODULES:
     importlib.import_module(module)
     leaked = qt_modules()
     assert not leaked, f"{module} imported Qt: {leaked}"
+    outside = src_modules_outside_core()
+    assert not outside, f"{module} imported src outside src.core: {outside}"
 
 # The state layer publishes through plain callbacks, so its notifications
 # must be observable without Qt. Exercised rather than asserted structurally:
@@ -138,7 +162,7 @@ def test_the_core_package_imports_without_qt(tmp_path):
     )
 
     assert result.returncode == 0, (
-        "src.core is no longer Qt-free\n"
+        "src.core is no longer Qt-free, or imports src outside src.core\n"
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}")
     assert "OK" in result.stdout
 
@@ -168,4 +192,73 @@ def test_no_core_module_mentions_a_qt_binding():
     assert not offenders, (
         "a core module imports a Qt binding; the Qt-facing part belongs in an "
         "adapter (src/StateManagerBridge.py is the worked example):\n  "
+        + "\n  ".join(offenders))
+
+
+def _package_parts(path):
+    """The package a source file's relative imports resolve against.
+
+    Dropping the last path part covers both cases: a module resolves against
+    its package, and a package's ``__init__`` against the package itself.
+    """
+    return list(path.relative_to(PROJECT_ROOT).with_suffix("").parts)[:-1]
+
+
+def _imported_names(path):
+    """(line, absolute dotted name) for every module an import can load.
+
+    Every import statement in the file, including ones nested in a function
+    body: a lazy import is still a dependency, it only fails later. For
+    ``from M import a, b`` both ``M`` and ``M.a`` / ``M.b`` are yielded,
+    because ``a`` may be a submodule -- that is the ``from .. import X``
+    form the old reverse dependencies used.
+    """
+    package = _package_parts(path)
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                yield node.lineno, alias.name
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                base = package[:len(package) - (node.level - 1)]
+                if node.module:
+                    base = base + node.module.split(".")
+                module = ".".join(base)
+            else:
+                module = node.module
+            yield node.lineno, module
+            for alias in node.names:
+                if alias.name != "*":
+                    yield node.lineno, f"{module}.{alias.name}"
+
+
+def _is_src_outside_core(name):
+    parts = name.split(".")
+    return parts[0] == "src" and len(parts) > 1 and parts[1] != "core"
+
+
+def test_no_core_module_imports_src_outside_core():
+    """src/core depends on nothing in `src` but itself (ADR-005 S0).
+
+    The import check in the subprocess above sees what actually got loaded;
+    this one reads every import statement, so it also catches a lazy import
+    inside a function that the module import never executes, and it names
+    the line. Relative imports are resolved, so ``from .. import X`` and
+    ``from ..Helpers.X import y`` count the same as ``import src.X``.
+    """
+    offenders = {}
+    for path in _core_source_files():
+        for number, name in _imported_names(path):
+            if _is_src_outside_core(name):
+                # One line per statement: `from ..X import y` yields both
+                # src.X and src.X.y, and the first one already says it all.
+                offenders.setdefault(
+                    f"{path.relative_to(PROJECT_ROOT)}:{number}", name)
+    offenders = [f"{where}: {name}" for where, name in offenders.items()]
+
+    assert not offenders, (
+        "a core module imports from src outside src/core; move the Qt-free "
+        "dependency into src/core (or inject it from bootstrap_core() as a "
+        "callable, like AutonaActions' match-text formatter):\n  "
         + "\n  ".join(offenders))

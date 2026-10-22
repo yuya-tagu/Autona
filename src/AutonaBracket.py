@@ -3,7 +3,7 @@
 The old Bracket dock rendering (AutonaBracketView / AutonaBracketWidget)
 was removed with the Top 8 rework; this module stays as the pure
 topology/propagation model consumed by AutonaAnalysisWidget (multi phase
-group table) and AutonaTop8Model.FromBracket (Top 8 extraction).
+group table) and core.Top8Model.FromBracket (Top 8 extraction).
 """
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from loguru import logger

@@ -19,7 +19,7 @@ import os
 
 import orjson
 
-from ..Helpers.AutonaDictHelper import *
+from .DictHelper import *
 
 
 class LayoutOptionsManager:

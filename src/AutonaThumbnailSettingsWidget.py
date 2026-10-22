@@ -14,7 +14,7 @@ from .StateManagerBridge import StateManagerBridge
 from .core.SettingsManager import *
 from .AutonaGameAssetManager import *
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
-from .Helpers.AutonaDictHelper import deep_get, deep_set
+from .core.DictHelper import deep_get, deep_set
 from .Helpers.AutonaDirHelper import AutonaResolve
 from .AutonaFeatureColors import FEATURE_THUMBNAIL, MakeFeatureColorCard
 from . import ui_constants as UI

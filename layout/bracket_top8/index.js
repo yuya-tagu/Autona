@@ -1,7 +1,7 @@
 // bracket_top8 — fixed FGC-standard Top 8 double elimination overlay.
 //
 // Renders the `top8.*` state written by the desktop Top 8 panel
-// (AutonaTop8Widget / AutonaTop8Model): 8 slot-fixed players and 11 fixed
+// (AutonaTop8Widget / core/Top8Model): 8 slot-fixed players and 11 fixed
 // match ids. All topology lives in the desktop app — this file is a dumb
 // "match id -> card DOM" renderer plus static connector lines.
 //

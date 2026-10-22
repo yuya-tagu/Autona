@@ -78,7 +78,7 @@ BOARD / 実況 / TOP 8 タブのデザイン一覧と `GET /api/v1/layouts` は�
 cd web
 npm run build
 cd ..
-python -m pipenv run python main.py
+python main.py
 ```
 
 Autona起動後、デスクトップアプリのBOARDタブにある `Designerを開く` を

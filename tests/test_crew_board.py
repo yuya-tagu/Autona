@@ -617,7 +617,7 @@ def restoreTournamentInfo(autonaApp):
     later module's follow-rule test sees.
     """
     from src.core.TournamentInfoService import TournamentInfoService
-    from src.Helpers.AutonaDictHelper import deep_clone
+    from src.core.DictHelper import deep_clone
     from src.core.StateManager import StateManager
 
     saved = deep_clone(StateManager.Get("tournamentInfo") or {})

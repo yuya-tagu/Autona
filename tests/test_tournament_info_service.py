@@ -24,7 +24,7 @@ import pytest
 from src.core.SettingsManager import SettingsManager
 from src.core.TournamentInfoService import (
     TournamentInfoService, TOURNAMENT_LOGO_PATH)
-from src.Helpers.AutonaDictHelper import deep_clone
+from src.core.DictHelper import deep_clone
 from src.core.StateManager import StateManager as SM
 
 _WORK_DIR = tempfile.mkdtemp(prefix="autona_tinfo_test_")

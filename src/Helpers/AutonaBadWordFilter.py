@@ -1,7 +1,7 @@
 import re
-import unicodedata
 from typing import Union, Dict
 from ..core.SettingsManager import SettingsManager
+from ..core.TextHelper import remove_accents_lower
 import json
 from .AutonaLocaleHelper import AutonaLocaleHelper
 import traceback
@@ -9,11 +9,6 @@ import os
 from collections import defaultdict
 from typing import List, Set, Tuple
 from loguru import logger
-
-
-def remove_accents_lower(input_str):
-    nfkd_form = unicodedata.normalize('NFKD', input_str)
-    return u"".join([c for c in nfkd_form if not unicodedata.combining(c)]).lower()
 
 
 class TrieNode:

@@ -8,7 +8,6 @@ PyQtDarkThemeCglb
 Pillow
 Flask
 flask-cors
-asyncio
 python-dateutil==2.9.0
 # Pinned exactly: the Qt build determines the WebEngine resource files
 # (v8_context_snapshot.bin, *.pak, icudtl.dat). Keep Qt stable and bump only
