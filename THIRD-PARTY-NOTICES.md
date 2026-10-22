@@ -14,8 +14,8 @@ Autona の配布物には、以下の第三者ソフトウェア・素材が含�
 |-------------|-----------|------|
 | [TournamentStreamHelper](https://github.com/joaorb64/TournamentStreamHelper) (João Ribeiro Bezerra) | MIT License | [licenses/TournamentStreamHelper-MIT.txt](licenses/TournamentStreamHelper-MIT.txt) |
 
-Autona は TournamentStreamHelper を起点に開発されており、その部分の著作権表示は
-[LICENSE](LICENSE) にも保持されています。
+Autona 自体も MIT License です。TournamentStreamHelper を起点に開発されており、
+その著作権表示は [LICENSE](LICENSE) にも保持されています。
 
 ## 2. GUI フレームワーク（Qt / PySide6）— LGPL v3
 
@@ -35,7 +35,7 @@ Autona は TournamentStreamHelper を起点に開発されており、その部�
   （DLL / pyd）として同梱されており、利用者は互換バージョンのライブラリに
   **自由に差し替える（relink する）ことができます**
 - LGPL ライブラリの差し替え・差し替えのためのデバッグは、本ソフトウェアの
-  利用規約（TERMS.md）によって妨げられません
+  ライセンス（MIT）および TERMS.md によって妨げられません
 - ソースコードの入手先: Qt — https://download.qt.io/ / PySide6 —
   https://pypi.org/project/PySide6/ および https://code.qt.io/cgit/pyside/pyside-setup.git/
 - Autona は Qt / PySide6 を**改変せずに**使用しています
@@ -72,7 +72,7 @@ socket.io-client (MIT), i18next (MIT), Emotion (MIT), TypeScript (Apache 2.0)。
 | color-thief | MIT | |
 | he.js | MIT | |
 | kuroshiro / kuroshiro-analyzer-kuromoji | MIT | 形態素解析は kuromoji.js (Apache 2.0) を利用 |
-| GSAP 3.12.5 (GreenSock) | GreenSock Standard License | 無償配布アプリへの同梱利用。https://gsap.com/standard-license 参照 |
+| GSAP 3.13.0 (Webflow / GreenSock) | GSAP Standard "No Charge" License | 無償配布アプリへの同梱利用。全文は `licenses/GSAP-LICENSE.txt`、https://gsap.com/standard-license 参照 |
 
 MIT ライブラリの著作権表示は各 `.min.js` ファイル先頭のヘッダに保持されています。
 

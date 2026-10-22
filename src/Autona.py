@@ -213,8 +213,8 @@ def remove_accents_lower(input_str):
     return u"".join([c for c in nfkd_form if not unicodedata.combining(c)]).lower()
 
 
-# Single source for the corporate / commercial-use inquiry contact, used by
-# the Help menu, the About dialog and (manually kept in sync) TERMS.md §9.
+# Single source for the support inquiry contact, used by the Help menu, the
+# About dialog and (manually kept in sync) TERMS.md §4.
 DISCORD_URL = "https://discord.gg/yAFAmhaUqn"
 BUSINESS_INQUIRY_EMAIL = "taguyangames@gmail.com"
 BUSINESS_INQUIRY_URL = f"mailto:{BUSINESS_INQUIRY_EMAIL}"
@@ -714,11 +714,10 @@ class Window(QMainWindow):
         action.triggered.connect(
             lambda x=None: QDesktopServices.openUrl(QUrl(DISCORD_URL)))
 
-        # Corporate / commercial-use inquiries (TERMS.md §2/§9). Doubles as
-        # the lead-in to the developer's event support services, so it must
-        # stay visible even to users who never read the bundled documents.
+        # Support inquiries (TERMS.md §4). Not a license requirement: Autona is
+        # MIT. Kept as the lead-in to the developer's event support services.
         action = helpMenu.addAction(
-            QApplication.translate("app", "Corporate use inquiries"))
+            QApplication.translate("app", "Event support inquiries"))
         action.triggered.connect(
             lambda x=None: QDesktopServices.openUrl(QUrl(BUSINESS_INQUIRY_URL)))
 
@@ -1482,13 +1481,14 @@ class Window(QMainWindow):
 
     def ShowAboutDialog(self):
         # Legal/attribution text is deliberately not translated: proper nouns
-        # and license names must stay verbatim (TERMS.md is the JA source).
+        # and license names must stay verbatim.
         box = QMessageBox(self)
         box.setWindowTitle(QApplication.translate("app", "About Autona"))
         box.setTextFormat(Qt.TextFormat.RichText)
         box.setText(
             f"<b>Autona v{self.programVersion}</b><br>"
-            "&copy; 2026 taguyan<br><br>"
+            "&copy; 2026 taguyan and Autona contributors. Released under the "
+            "MIT License.<br><br>"
             "Based on <a href=\"https://github.com/joaorb64/TournamentStreamHelper\">"
             "TournamentStreamHelper</a> (MIT License) by João Ribeiro Bezerra.<br><br>"
             "Tournament data powered by <a href=\"https://www.start.gg/\">start.gg</a>. "
@@ -1497,11 +1497,10 @@ class Window(QMainWindow):
             "Built with Qt / <a href=\"https://pypi.org/project/PySide6/\">PySide6</a> "
             "under the GNU LGPL v3 (dynamically linked; the libraries in "
             "<code>_internal/</code> can be replaced by the user).<br><br>"
-            "法人・事業としてのご利用は事前にお問い合わせください（TERMS.md 第2条・第9条）。"
-            "導入支援・運用サポートもご案内できます / For corporate or business use, "
-            f"please contact <a href=\"{BUSINESS_INQUIRY_URL}\">"
-            f"{BUSINESS_INQUIRY_EMAIL}</a> in advance.<br><br>"
-            "License details: see <code>TERMS.md</code>, "
+            "Setup and operation support for events is available: "
+            f"<a href=\"{BUSINESS_INQUIRY_URL}\">{BUSINESS_INQUIRY_EMAIL}</a>.<br><br>"
+            "License details: see <code>LICENSE</code>, <code>TERMS.md</code>, "
+            "<code>TRADEMARK.md</code>, "
             "<code>THIRD-PARTY-NOTICES.md</code> and the <code>licenses/</code> "
             "folder next to the executable.")
         box.setStandardButtons(QMessageBox.StandardButton.Ok)

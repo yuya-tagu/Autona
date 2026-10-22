@@ -202,11 +202,16 @@ Autona/
 
 ## ライセンス
 
-- 上流 [TournamentStreamHelper](https://github.com/joaorb64/TournamentStreamHelper) 由来の部分: MIT License
-- Autona 固有の部分: © 2026 taguyan, All rights reserved
+Autona は [MIT License](LICENSE) で公開されています（© 2026 taguyan and Autona contributors）。
+上流 [TournamentStreamHelper](https://github.com/joaorb64/TournamentStreamHelper)（MIT License）の
+著作権表示も [LICENSE](LICENSE) に保持しています。
 
-詳細は [LICENSE](LICENSE)、配布バイナリの利用条件は [TERMS.md](TERMS.md) を参照。
+配布バイナリのご利用上の注意は [TERMS.md](TERMS.md)、「Autona」の名称・アイコンの扱いは
+[TRADEMARK.md](TRADEMARK.md) を参照してください。
 
 同梱する第三者ソフトウェアのライセンスは [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
 と `licenses/` に、素材（フォント・国旗画像等）の出典は [ATTRIBUTIONS.md](ATTRIBUTIONS.md)
 に集約しています。Qt / PySide6 は LGPL v3 の下で動的リンクにより使用しています。
+これら第三者のファイルには MIT License は及びません。特に `layout/include/gsap.min.js`（GSAP）は
+オープンソースライセンスではない GSAP Standard "No Charge" License（[licenses/GSAP-LICENSE.txt](licenses/GSAP-LICENSE.txt)）
+の下で同梱しており、フォーク・再配布時はその条件（有償提供しない・著作権表示を残す等）に従ってください。

@@ -17,7 +17,7 @@ _STARTUP_T0 = time.perf_counter()
 # Select the Qt binding BEFORE `from src import Autona` (which imports qtpy)
 # and before qasync is imported — both resolve the binding at import time,
 # and their auto-detection prefers PyQt over PySide if both are installed.
-# PySide6 (LGPL v3) is required for the closed-source binary distribution;
+# PySide6 (LGPL v3) is required because Autona is distributed under MIT;
 # PyQt6 (GPL v3) must not be used.
 import os
 os.environ["QT_API"] = "pyside6"

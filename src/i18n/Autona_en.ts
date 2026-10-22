@@ -1268,8 +1268,8 @@
         <translation>Join the Discord community</translation>
     </message>
     <message>
-        <source>Corporate use inquiries</source>
-        <translation>Corporate use inquiries</translation>
+        <source>Event support inquiries</source>
+        <translation>Event support inquiries</translation>
     </message>
     <message>
         <source>About Autona</source>

@@ -40,7 +40,7 @@ cp dist/Autona/Autona.exe ./Autona.exe
 - **WebEngine 依存**: サムネイル生成（[src/thumbnail/ThumbnailRenderer.py](../../src/thumbnail/ThumbnailRenderer.py)）が
   QtWebEngine（`PySide6-Addons` に含まれる）を使用。`dependencies/requirements.txt` に含まれ `pip install -r` で自動導入される。
   `Qt6WebEngineCore.dll` が約 196 MB あるため、`_internal/` 全体が 600 MB 超になるのは正常
-- **Qt binding は PySide6 固定（LGPL）**: PyQt6 (GPL v3) はソース非公開配布と両立しないため使用禁止。
+- **Qt binding は PySide6 固定（LGPL）**: PyQt6 (GPL v3) は MIT 配布と両立しないため使用禁止。
   環境に PyQt6 が同居していると qtpy/qasync の自動検出が PyQt を優先して混在事故になるため、必ずアンインストールする
 - **フォント**: LINE Seed JP（`assets/font/LINESeedJP/`、Google Fonts gstatic CDN から取得）
 - **上流成果物の扱い**: `TSH.exe` / `TSH/` は上流 TournamentStreamHelper のビルド成果物。Autona 側では

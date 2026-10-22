@@ -13,7 +13,7 @@ Autona は [TournamentStreamHelper](https://github.com/joaorb64/TournamentStream
 
 | 項目 | ライセンス | 状態 |
 |------|-----------|------|
-| TournamentStreamHelper (joaorb64) | MIT License | ✅ [LICENSE](LICENSE) に原著作権を保持、全文を [licenses/TournamentStreamHelper-MIT.txt](licenses/TournamentStreamHelper-MIT.txt) に同梱 |
+| TournamentStreamHelper (joaorb64) | MIT License | ✅ Autona も MIT。[LICENSE](LICENSE) に原著作権を保持、全文を [licenses/TournamentStreamHelper-MIT.txt](licenses/TournamentStreamHelper-MIT.txt) に同梱 |
 
 ---
 
@@ -23,8 +23,8 @@ Autona は [TournamentStreamHelper](https://github.com/joaorb64/TournamentStream
 |------|-----------|------|
 | Qt 6 / PySide6 / shiboken6 | **LGPL v3** | ✅ 動的リンクで使用（`_internal/` に個別ファイルとして同梱、利用者が差し替え可能）。全文 [licenses/LGPL-3.0.txt](licenses/LGPL-3.0.txt) + [licenses/GPL-3.0.txt](licenses/GPL-3.0.txt) 同梱 |
 
-2026-07 に PyQt6 (GPL v3) から PySide6 (LGPL v3) へ移行済み。GPL はソース非公開の
-バイナリ配布と両立しないため、**PyQt6 の再導入は禁止**。LGPL 準拠の詳細は
+2026-07 に PyQt6 (GPL v3) から PySide6 (LGPL v3) へ移行済み。Autona は MIT で配布する
+ため GPL の PyQt6 は使わず、**PyQt6 の再導入は禁止**。LGPL 準拠の詳細は
 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) §2 を参照。
 
 ---
@@ -90,7 +90,7 @@ Autona は [TournamentStreamHelper](https://github.com/joaorb64/TournamentStream
 | color-thief | MIT | ✅ 同上 |
 | he.js | MIT | ✅ 同上 |
 | kuroshiro / kuroshiro-analyzer-kuromoji | MIT（形態素解析部は kuromoji.js = Apache 2.0） | ✅ 確認済み |
-| GSAP 3.12.5 (GreenSock) | GreenSock Standard License | ✅ 確認済み（2026-07-03）。無償配布アプリへの同梱は Standard License の範囲内（本体 min.js ヘッダの `@license` 表記を保持）。参考: 3.13 以降は Webflow 傘下で完全無料の新ライセンスに移行済みのため、将来バージョン更新時はそちらに乗る |
+| GSAP 3.13.0 (Webflow / GreenSock) | GSAP Standard "No Charge" License | 2026-10-23 に 3.12.5 から更新。無償配布アプリへの同梱は範囲内（min.js ヘッダの `@license` 表記を保持）。本文は `licenses/GSAP-LICENSE.txt`、https://gsap.com/standard-license 。OSI 承認ライセンスではない（Webflow と競合するビジュアルアニメーション作成ツールでの利用は禁止） |
 
 ---
 
@@ -111,7 +111,7 @@ OSS の一覧は [licenses/npm-packages.txt](licenses/npm-packages.txt) に機�
 
 **注**: `countryflag` は GPL v3 の `country_converter` / `aioconsole` を引き込むため
 requirements から削除済み（2026-07。コード側の import は以前から削除されていた）。
-**GPL ライセンスのパッケージを依存に追加してはならない**（ソース非公開配布と非両立）。
+**GPL ライセンスのパッケージを依存に追加してはならない**（MIT 配布と非両立）。
 
 ---
 
