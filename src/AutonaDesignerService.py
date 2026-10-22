@@ -3,18 +3,27 @@
 The React editor runs inside a QWebEngineView, but it never receives direct
 filesystem access. A short-lived token owned by the desktop window authorizes
 requests to this service, which writes only below ``layout/custom``.
+
+The one route that does not take that token is the Figma plugin's import
+(``POST /api/designer/imports``): the plugin cannot know a token issued to
+the Designer window, so it proves itself with a pairing code instead -- a
+persistent secret the user reads off the Designer and types into the plugin
+once (check_import_pairing).
 """
 
 from __future__ import annotations
 
 import base64
+import hmac
 import json
+import math
 import os
 import re
 import secrets
 import shutil
 import tempfile
 import threading
+import time
 import unicodedata
 import uuid
 import xml.etree.ElementTree as ET
@@ -24,6 +33,7 @@ from typing import Any
 from loguru import logger
 
 from .core import LayoutCatalog
+from .core.SettingsManager import SettingsManager
 
 
 class DesignerProjectError(ValueError):
@@ -118,11 +128,35 @@ class AutonaDesignerService:
     # Pages that may POST a Figma import (is_import_origin_allowed).
     IMPORT_ORIGINS = frozenset({"null", "https://www.figma.com"})
 
+    # Figma import pairing (check_import_pairing). The code is read off the
+    # Designer and typed into the plugin, so its alphabet leaves out the
+    # look-alikes 0/O and 1/I/L: 31 symbols, 12 of them in groups of 4
+    # (XXXX-XXXX-XXXX) = 12 * log2(31) ~ 59.4 bits.
+    PAIRING_SETTING = "designer.figma_pairing_code"
+    PAIRING_HEADER = "X-Autona-Pairing"
+    PAIRING_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
+    PAIRING_GROUPS = 3
+    PAIRING_GROUP_LENGTH = 4
+    # A header longer than this is not a typo of the code; it is not even
+    # normalized (bounded work per request).
+    PAIRING_MAX_INPUT = 64
+    # Lockout: the PAIRING_MAX_FAILURES-th wrong code in a row locks the
+    # route for PAIRING_LOCK_SECONDS, each further one doubles it, up to
+    # PAIRING_MAX_LOCK_SECONDS. A right code (or a new code) clears it.
+    PAIRING_MAX_FAILURES = 5
+    PAIRING_LOCK_SECONDS = 60
+    PAIRING_MAX_LOCK_SECONDS = 3600
+
     _tokens: set[str] = set()
     _token_lock = threading.Lock()
     _latest_import: dict[str, Any] | None = None
     _imports: dict[str, dict[str, Any]] = {}
     _import_lock = threading.Lock()
+    _pairing_lock = threading.Lock()
+    _pairing_failures = 0
+    _pairing_locked_until = 0.0
+    # The lockout clock; tests move it instead of sleeping.
+    _clock = staticmethod(time.monotonic)
 
     @classmethod
     def issue_token(cls) -> str:
@@ -154,16 +188,120 @@ class AutonaDesignerService:
     def is_import_origin_allowed(cls, origin: str | None) -> bool:
         """Whether a Figma import may come from a page of this ``Origin``.
 
-        The import route takes no token, and a loopback peer is any page
-        open in a browser on this computer, so the Origin header is what
-        tells the plugin apart. No header: not a browser page (curl, a
-        script). ``"null"``: the plugin UI, which Figma runs in an
-        opaque-origin iframe (tools/figma-scoreboard-plugin/ui.html). And
-        Figma itself. Note that "null" is also what a sandboxed iframe or a
-        file:// page on any site sends, so this narrows the route rather
-        than closing it (see _validate_project).
+        The import route takes no Designer token, and a loopback peer is any
+        page open in a browser on this computer, so the Origin header narrows
+        who may even try. No header: not a browser page (curl, a script).
+        ``"null"``: the plugin UI, which Figma runs in an opaque-origin
+        iframe (tools/figma-scoreboard-plugin/ui.html). And Figma itself.
+        "null" is also what a sandboxed iframe, a data: URL or a file://
+        page on any site sends, so this only narrows the route; what closes
+        it is the pairing code (check_import_pairing), checked after this.
         """
         return origin is None or origin in cls.IMPORT_ORIGINS
+
+    @classmethod
+    def pairing_code(cls) -> str:
+        """The Figma pairing code, as shown to the user (XXXX-XXXX-XXXX).
+
+        Kept in settings.json so the plugin stays paired across restarts.
+        Issued on first use, and again if the stored one is not a code this
+        method could have issued (a hand-edited settings.json).
+        """
+        with cls._pairing_lock:
+            return cls._current_pairing_code()
+
+    @classmethod
+    def regenerate_pairing_code(cls) -> str:
+        """Replace the pairing code; the old one stops working at once."""
+        with cls._pairing_lock:
+            code = cls._issue_pairing_code()
+        logger.info("designer: issued a new Figma pairing code")
+        return code
+
+    @classmethod
+    def check_import_pairing(cls, supplied: str | None) -> tuple[str, int]:
+        """Whether a Figma import's pairing code lets it in.
+
+        Returns ``(status, retry_after_seconds)``, status being one of
+        ``"ok"``, ``"missing"`` (no code sent: not counted as a failure, the
+        plugin was just never paired), ``"invalid"`` (a wrong code: counted)
+        or ``"locked"`` (too many wrong codes in a row; nothing is compared
+        until the lock expires, so a right code is refused too). Neither
+        code is ever logged, only the failure count.
+        """
+        with cls._pairing_lock:
+            now = cls._clock()
+            if now < cls._pairing_locked_until:
+                return "locked", max(1, math.ceil(cls._pairing_locked_until - now))
+            if not isinstance(supplied, str) or not supplied.strip():
+                return "missing", 0
+            expected = cls._normalize_pairing_code(cls._current_pairing_code())
+            given = ("" if len(supplied) > cls.PAIRING_MAX_INPUT
+                     else cls._normalize_pairing_code(supplied))
+            # Bytes: compare_digest refuses non-ASCII str, and the header is
+            # whatever the client sent.
+            if hmac.compare_digest(given.encode("utf-8"),
+                                   expected.encode("ascii")):
+                cls._pairing_failures = 0
+                return "ok", 0
+            cls._pairing_failures += 1
+            failures = cls._pairing_failures
+            if failures < cls.PAIRING_MAX_FAILURES:
+                logger.warning(
+                    "designer: refused a Figma import with a wrong pairing "
+                    "code ({} in a row)", failures)
+                return "invalid", 0
+            seconds = min(
+                cls.PAIRING_LOCK_SECONDS * 2 ** min(
+                    failures - cls.PAIRING_MAX_FAILURES, 16),
+                cls.PAIRING_MAX_LOCK_SECONDS)
+            cls._pairing_locked_until = now + seconds
+            logger.warning(
+                "designer: refused a Figma import with a wrong pairing code "
+                "({} in a row); refusing every import for {}s",
+                failures, seconds)
+            return "invalid", 0
+
+    @classmethod
+    def _current_pairing_code(cls) -> str:
+        # Caller holds _pairing_lock.
+        code = SettingsManager.Get(cls.PAIRING_SETTING)
+        if isinstance(code, str) and cls._is_pairing_code(code):
+            return code
+        if code is not None:
+            logger.warning(
+                "designer: the stored Figma pairing code is malformed; "
+                "issuing a new one")
+        return cls._issue_pairing_code()
+
+    @classmethod
+    def _issue_pairing_code(cls) -> str:
+        # Caller holds _pairing_lock. A new secret makes earlier wrong
+        # guesses irrelevant, so it also lifts the lockout.
+        length = cls.PAIRING_GROUPS * cls.PAIRING_GROUP_LENGTH
+        raw = "".join(
+            secrets.choice(cls.PAIRING_ALPHABET) for _ in range(length))
+        code = "-".join(
+            raw[i:i + cls.PAIRING_GROUP_LENGTH]
+            for i in range(0, length, cls.PAIRING_GROUP_LENGTH))
+        SettingsManager.Set(cls.PAIRING_SETTING, code)
+        cls._pairing_failures = 0
+        cls._pairing_locked_until = 0.0
+        return code
+
+    @classmethod
+    def _is_pairing_code(cls, code: str) -> bool:
+        group = f"[{cls.PAIRING_ALPHABET}]{{{cls.PAIRING_GROUP_LENGTH}}}"
+        return re.fullmatch(
+            "-".join([group] * cls.PAIRING_GROUPS), code) is not None
+
+    @staticmethod
+    def _normalize_pairing_code(value: str) -> str:
+        """What the user meant to type: case, separators and full-width
+        characters (a Japanese IME) do not matter."""
+        return re.sub(
+            r"[^0-9A-Z]", "",
+            unicodedata.normalize("NFKC", value).upper())
 
     @staticmethod
     def slugify(name: str) -> str:
@@ -421,16 +559,16 @@ class AutonaDesignerService:
         shown as plain text.
 
         Not every caller is the Designer. Its routes need the desktop
-        window's token and a loopback peer (is_authorized), but the Figma
-        import takes no token: any page open in a browser on this computer
-        is a loopback peer, and the Origin check (is_import_origin_allowed)
-        still admits "null", which a sandboxed iframe on any web site can
-        send. An import is only held in memory -- an open Designer merges
-        it into the editor, where model.ts validates it -- and reaches
-        layout/custom only when the user saves it, through these checks
-        again. So these checks must hold for any input on their own, never
-        assuming model.ts has seen it. Revisit before these routes ever
-        accept another computer
+        window's token and a loopback peer (is_authorized); the Figma
+        import needs a loopback peer, an admitted Origin
+        (is_import_origin_allowed) and the pairing code
+        (check_import_pairing) -- but whoever holds the code (the plugin,
+        or any program the user gave it to) can send anything. An import is
+        only held in memory -- an open Designer merges it into the editor,
+        where model.ts validates it -- and reaches layout/custom only when
+        the user saves it, through these checks again. So these checks must
+        hold for any input on their own, never assuming model.ts has seen
+        it. Revisit before these routes ever accept another computer
         (docs/changes/layout-custom-unification.md section 6).
         """
         if not isinstance(project, dict):

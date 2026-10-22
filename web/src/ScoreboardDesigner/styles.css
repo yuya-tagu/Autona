@@ -58,6 +58,20 @@
   justify-content: flex-start;
 }
 
+/* Read off here and typed into the Figma plugin: large, monospaced, and
+   selected whole on click. */
+.designer-pairing-code {
+  display: block;
+  padding: 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  font-family: Consolas, "Roboto Mono", monospace;
+  font-size: 28px;
+  letter-spacing: 0.08em;
+  text-align: center;
+  user-select: all;
+}
+
 .designer-data-toggle {
   display: grid;
   grid-template-columns: 1fr 48px 1fr;

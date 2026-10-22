@@ -1,5 +1,6 @@
 import base64
 import json
+import math
 import os
 import posixpath
 import re
@@ -14,8 +15,10 @@ from loguru import logger
 
 from src.AutonaDesignerService import (
     AutonaDesignerService, DesignerProjectError)
+from src.core.SettingsManager import SettingsManager
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_REAL_SAVE_SETTINGS = SettingsManager.SaveSettings
 
 # The entry point every design was saved with before the shared runtime: a
 # verbatim copy of the former web/public/scoreboard-designer-runtime/
@@ -191,6 +194,12 @@ def designer_service(tmp_path, monkeypatch):
     with AutonaDesignerService._import_lock:
         AutonaDesignerService._latest_import = None
         AutonaDesignerService._imports.clear()
+    # The pairing code lives in settings.json: give each test its own,
+    # never written to the real user_data/.
+    monkeypatch.setattr(SettingsManager, "settings", {})
+    monkeypatch.setattr(SettingsManager, "SaveSettings", lambda: None)
+    monkeypatch.setattr(AutonaDesignerService, "_pairing_failures", 0)
+    monkeypatch.setattr(AutonaDesignerService, "_pairing_locked_until", 0.0)
     return AutonaDesignerService
 
 
@@ -948,25 +957,33 @@ def _import_payload():
             "assets": {"assets/frame.png": png_data_url()}}
 
 
+def _paired(designer_service, headers=None):
+    """``headers`` plus the right pairing code, as the paired plugin sends."""
+    return {**(headers or {}),
+            "X-Autona-Pairing": designer_service.pairing_code()}
+
+
 @pytest.mark.parametrize("origin", ["null", "https://www.figma.com"])
 def test_the_figma_plugin_can_post_an_import(
         designer_service, import_client, origin):
-    # What tools/figma-scoreboard-plugin/ui.html sends: a JSON POST, so the
-    # browser preflights it first. The plugin UI's origin is "null".
+    # What tools/figma-scoreboard-plugin/ui.html sends: a JSON POST with the
+    # pairing code header, so the browser preflights it first. The plugin
+    # UI's origin is "null".
     preflight = import_client.options("/api/designer/imports", headers={
         "Origin": origin,
         "Access-Control-Request-Method": "POST",
-        "Access-Control-Request-Headers": "content-type",
+        "Access-Control-Request-Headers": "content-type,x-autona-pairing",
     })
     assert preflight.status_code == 200
     assert preflight.headers["Access-Control-Allow-Origin"] == origin
     assert "POST" in preflight.headers["Access-Control-Allow-Methods"]
-    assert "content-type" in preflight.headers[
-        "Access-Control-Allow-Headers"].lower()
+    allowed = preflight.headers["Access-Control-Allow-Headers"].lower()
+    assert "content-type" in allowed
+    assert "x-autona-pairing" in allowed
 
     response = import_client.post(
         "/api/designer/imports", json=_import_payload(),
-        headers={"Origin": origin})
+        headers=_paired(designer_service, {"Origin": origin}))
     assert response.status_code == 200, response.get_json()
     assert response.headers["Access-Control-Allow-Origin"] == origin
     assert response.get_json()["layers"] == 1
@@ -975,10 +992,25 @@ def test_the_figma_plugin_can_post_an_import(
         "Figma Finals")
 
 
+def test_the_preflight_admits_only_the_pairing_header(
+        designer_service, import_client):
+    preflight = import_client.options("/api/designer/imports", headers={
+        "Origin": "null",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers":
+            "content-type,x-autona-pairing,x-autona-designer-token",
+    })
+    assert preflight.status_code == 200
+    allowed = {header.strip() for header in preflight.headers[
+        "Access-Control-Allow-Headers"].lower().split(",")}
+    assert allowed == {"content-type", "x-autona-pairing"}
+
+
 def test_an_import_without_an_origin_is_not_a_browser_page(
         designer_service, import_client):
     response = import_client.post(
-        "/api/designer/imports", json=_import_payload())
+        "/api/designer/imports", json=_import_payload(),
+        headers=_paired(designer_service))
     assert response.status_code == 200
     assert _cors_headers(response) == {}
     assert import_client.emitted == ["designer_import_received"]
@@ -991,18 +1023,19 @@ def test_other_pages_cannot_post_an_import(
     # Every page in a browser on this computer is a loopback peer, and
     # CORS(app) answers any origin elsewhere. Here a foreign page gets a
     # 403 and no CORS headers, on the preflight and on the POST itself
-    # (a form post or a no-cors fetch skips the preflight).
+    # (a form post or a no-cors fetch skips the preflight) -- even with the
+    # right pairing code: the Origin check stays as a second layer.
     preflight = import_client.options("/api/designer/imports", headers={
         "Origin": origin,
         "Access-Control-Request-Method": "POST",
-        "Access-Control-Request-Headers": "content-type",
+        "Access-Control-Request-Headers": "content-type,x-autona-pairing",
     })
     assert preflight.status_code == 403
     assert _cors_headers(preflight) == {}
 
     response = import_client.post(
         "/api/designer/imports", json=_import_payload(),
-        headers={"Origin": origin})
+        headers=_paired(designer_service, {"Origin": origin}))
     assert response.status_code == 403
     assert _cors_headers(response) == {}
     assert import_client.emitted == []
@@ -1014,12 +1047,309 @@ def test_an_import_from_another_computer_is_refused(
         designer_service, import_client):
     response = import_client.post(
         "/api/designer/imports", json=_import_payload(),
-        headers={"Origin": "null"},
+        headers=_paired(designer_service, {"Origin": "null"}),
         environ_base={"REMOTE_ADDR": "192.168.1.20"})
     assert response.status_code == 403
     assert import_client.emitted == []
     with pytest.raises(FileNotFoundError):
         designer_service.latest_import()
+
+
+@pytest.mark.parametrize("code, reason", [
+    (None, "pairing_required"),
+    ("", "pairing_required"),
+    ("ABCD-EFGH-JKMN", "pairing_invalid"),
+])
+@pytest.mark.parametrize("origin", ["null", None])
+def test_an_import_needs_the_pairing_code(
+        designer_service, import_client, origin, code, reason):
+    # The hole this closes: a sandboxed iframe, a data: URL or a file://
+    # page on any site also sends "Origin: null".
+    designer_service.pairing_code()
+    headers = {} if origin is None else {"Origin": origin}
+    if code is not None:
+        headers["X-Autona-Pairing"] = code
+    response = import_client.post(
+        "/api/designer/imports", json=_import_payload(), headers=headers)
+    assert response.status_code == 401
+    assert response.get_json()["reason"] == reason
+    if origin == "null":
+        # The plugin has to be able to read why.
+        assert response.headers["Access-Control-Allow-Origin"] == "null"
+    assert import_client.emitted == []
+    with pytest.raises(FileNotFoundError):
+        designer_service.latest_import()
+
+
+@pytest.fixture
+def pairing_clock(monkeypatch):
+    """The lockout clock, moved by hand: ``pairing_clock.now += 60``."""
+    clock = types.SimpleNamespace(now=1000.0)
+    monkeypatch.setattr(AutonaDesignerService, "_clock",
+                        staticmethod(lambda: clock.now))
+    return clock
+
+
+def test_repeated_wrong_codes_lock_the_import_route(
+        designer_service, import_client, pairing_clock):
+    def post(code):
+        return import_client.post(
+            "/api/designer/imports", json=_import_payload(),
+            headers={"Origin": "null", "X-Autona-Pairing": code})
+
+    right = designer_service.pairing_code()
+    for _ in range(designer_service.PAIRING_MAX_FAILURES):
+        assert post("ABCD-EFGH-JKMN").status_code == 401
+
+    locked = post(right)
+    assert locked.status_code == 429
+    assert locked.headers["Retry-After"] == "60"
+    assert locked.get_json()["retryAfter"] == 60
+    assert locked.get_json()["reason"] == "pairing_locked"
+    assert locked.headers["Access-Control-Allow-Origin"] == "null"
+    assert import_client.emitted == []
+
+    pairing_clock.now += 59.5
+    assert post(right).status_code == 429
+    pairing_clock.now += 0.5
+    response = post(right)
+    assert response.status_code == 200, response.get_json()
+    assert import_client.emitted == ["designer_import_received"]
+
+
+def test_the_pairing_code_is_shown_and_replaced_only_through_the_designer(
+        designer_service, import_client):
+    token = designer_service.issue_token()
+    designer = {"X-Autona-Designer-Token": token}
+
+    assert import_client.get("/api/designer/pairing").status_code == 403
+    assert import_client.get(
+        "/api/designer/pairing", headers=designer,
+        environ_base={"REMOTE_ADDR": "192.168.1.20"}).status_code == 403
+    assert import_client.post(
+        "/api/designer/pairing/regenerate").status_code == 403
+
+    shown = import_client.get("/api/designer/pairing", headers=designer)
+    assert shown.status_code == 200
+    assert "no-store" in shown.headers["Cache-Control"]
+    old = shown.get_json()["code"]
+    assert old == designer_service.pairing_code()
+
+    regenerated = import_client.post(
+        "/api/designer/pairing/regenerate", headers=designer)
+    assert regenerated.status_code == 200
+    assert "no-store" in regenerated.headers["Cache-Control"]
+    new = regenerated.get_json()["code"]
+    assert new != old
+    assert import_client.get(
+        "/api/designer/pairing", headers=designer).get_json()["code"] == new
+
+    stale = import_client.post(
+        "/api/designer/imports", json=_import_payload(),
+        headers={"Origin": "null", "X-Autona-Pairing": old})
+    assert stale.status_code == 401
+    fresh = import_client.post(
+        "/api/designer/imports", json=_import_payload(),
+        headers={"Origin": "null", "X-Autona-Pairing": new})
+    assert fresh.status_code == 200
+
+
+# --- Figma pairing code -------------------------------------------------------
+
+PAIRING_PATTERN = re.compile(
+    r"[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{4}"
+    r"(?:-[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{4}){2}")
+
+
+def test_the_pairing_code_is_typeable_and_has_enough_entropy(
+        designer_service):
+    alphabet = designer_service.PAIRING_ALPHABET
+    # No look-alikes: the code is read off one screen and typed into another.
+    assert not set("0O1IL") & set(alphabet)
+    assert len(set(alphabet)) == len(alphabet) == 31
+    length = (designer_service.PAIRING_GROUPS
+              * designer_service.PAIRING_GROUP_LENGTH)
+    assert length >= 10
+    assert length * math.log2(len(alphabet)) >= 50   # ~59.4 bits
+
+    codes = {designer_service.regenerate_pairing_code() for _ in range(200)}
+    assert len(codes) == 200
+    assert all(PAIRING_PATTERN.fullmatch(code) for code in codes)
+    # Every symbol is drawn: 2400 draws from 31 never miss one by chance.
+    assert set("".join(codes).replace("-", "")) == set(alphabet)
+
+
+def test_the_pairing_code_is_issued_once_and_kept_in_settings(
+        designer_service):
+    assert SettingsManager.Get(designer_service.PAIRING_SETTING) is None
+    code = designer_service.pairing_code()
+    assert PAIRING_PATTERN.fullmatch(code)
+    assert SettingsManager.Get(designer_service.PAIRING_SETTING) == code
+    assert designer_service.pairing_code() == code
+
+
+def test_the_pairing_code_survives_a_restart(
+        designer_service, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "user_data").mkdir()
+    monkeypatch.setattr(SettingsManager, "SaveSettings", _REAL_SAVE_SETTINGS)
+    code = designer_service.pairing_code()
+
+    saved = json.loads(
+        (tmp_path / "user_data" / "settings.json").read_text(encoding="utf-8"))
+    assert saved["designer"]["figma_pairing_code"] == code
+
+    # A restart: settings.json read back into an empty process.
+    monkeypatch.setattr(SettingsManager, "settings", {})
+    SettingsManager.LoadSettings()
+    assert designer_service.pairing_code() == code
+    assert designer_service.check_import_pairing(code) == ("ok", 0)
+
+
+def test_regenerating_the_pairing_code_invalidates_the_old_one(
+        designer_service):
+    old = designer_service.pairing_code()
+    assert designer_service.check_import_pairing(old) == ("ok", 0)
+    new = designer_service.regenerate_pairing_code()
+    assert new != old
+    assert SettingsManager.Get(designer_service.PAIRING_SETTING) == new
+    assert designer_service.check_import_pairing(old)[0] == "invalid"
+    assert designer_service.check_import_pairing(new) == ("ok", 0)
+
+
+@pytest.mark.parametrize("stored", [
+    "0000-0000-0000", "abcd-efgh-jkmn", "ABCD-EFGH", "ABCDEFGHJKMN", 12345])
+def test_a_malformed_stored_pairing_code_is_replaced(
+        designer_service, stored):
+    SettingsManager.settings["designer"] = {"figma_pairing_code": stored}
+    code = designer_service.pairing_code()
+    assert PAIRING_PATTERN.fullmatch(code)
+    assert SettingsManager.Get(designer_service.PAIRING_SETTING) == code
+
+
+def _full_width(text):
+    return "".join(
+        "－" if char == "-" else chr(ord(char) + 0xFEE0) for char in text)
+
+
+@pytest.mark.parametrize("typed", [
+    lambda code: code,
+    lambda code: code.lower(),
+    lambda code: code.replace("-", ""),
+    lambda code: "  " + code.replace("-", " ") + "  ",
+    _full_width,    # typed with a Japanese IME left on
+])
+def test_the_pairing_code_tolerates_how_it_was_typed(
+        designer_service, typed):
+    code = designer_service.pairing_code()
+    assert designer_service.check_import_pairing(typed(code)) == ("ok", 0)
+
+
+def test_the_pairing_code_is_compared_in_constant_time(
+        designer_service, monkeypatch):
+    import src.AutonaDesignerService as module
+
+    real = module.hmac.compare_digest
+    calls = []
+
+    def spy(a, b):
+        calls.append((a, b))
+        return real(a, b)
+
+    monkeypatch.setattr(module.hmac, "compare_digest", spy)
+    code = designer_service.pairing_code()
+    assert designer_service.check_import_pairing(code)[0] == "ok"
+    assert designer_service.check_import_pairing("ABCD-EFGH-JKMN")[0] == (
+        "invalid")
+    assert len(calls) == 2
+    assert all(isinstance(a, bytes) and isinstance(b, bytes)
+               for a, b in calls)
+
+
+def test_a_missing_pairing_code_is_not_counted_as_a_failure(
+        designer_service):
+    code = designer_service.pairing_code()
+    for supplied in [None, "", "   "] * 5:
+        assert designer_service.check_import_pairing(supplied) == (
+            "missing", 0)
+    assert designer_service.check_import_pairing(code) == ("ok", 0)
+
+
+def test_wrong_pairing_codes_lock_and_back_off(
+        designer_service, pairing_clock):
+    check = designer_service.check_import_pairing
+    code = designer_service.pairing_code()
+    wrong = "ABCD-EFGH-JKMN"
+
+    # Four wrong codes are only refused; the fifth starts a 60 s lock.
+    for _ in range(4):
+        assert check(wrong) == ("invalid", 0)
+    assert check(wrong) == ("invalid", 0)
+    assert check(code) == ("locked", 60)
+    assert check(None) == ("locked", 60)
+    pairing_clock.now += 30
+    assert check(code) == ("locked", 30)
+
+    # Each further wrong code doubles the lock ...
+    pairing_clock.now += 30
+    assert check(wrong) == ("invalid", 0)
+    assert check(code) == ("locked", 120)
+    pairing_clock.now += 120
+    assert check(wrong) == ("invalid", 0)
+    assert check(code) == ("locked", 240)
+
+    # ... up to an hour.
+    for _ in range(10):
+        pairing_clock.now += 3600
+        assert check(wrong) == ("invalid", 0)
+    assert check(code) == ("locked", designer_service.PAIRING_MAX_LOCK_SECONDS)
+
+    # A right code after the lock clears the count: five more to lock again.
+    pairing_clock.now += 3600
+    assert check(code) == ("ok", 0)
+    for _ in range(4):
+        assert check(wrong) == ("invalid", 0)
+    assert check(code) == ("ok", 0)
+
+
+def test_regenerating_the_pairing_code_lifts_the_lock(
+        designer_service, pairing_clock):
+    designer_service.pairing_code()
+    for _ in range(designer_service.PAIRING_MAX_FAILURES):
+        designer_service.check_import_pairing("ABCD-EFGH-JKMN")
+    assert designer_service.check_import_pairing("x")[0] == "locked"
+    new = designer_service.regenerate_pairing_code()
+    assert designer_service.check_import_pairing(new) == ("ok", 0)
+
+
+def test_pairing_codes_never_reach_the_log(
+        designer_service, import_client, pairing_clock):
+    messages = []
+    handler = logger.add(
+        lambda message: messages.append(message.record["message"]),
+        level="DEBUG", format="{message}")
+    try:
+        old = designer_service.pairing_code()
+        code = designer_service.regenerate_pairing_code()
+        # A near miss: one symbol off.
+        near = code[:-1] + ("2" if code[-1] != "2" else "3")
+        for supplied in [old, near, near.lower(), near, near, near]:
+            import_client.post(
+                "/api/designer/imports", json=_import_payload(),
+                headers={"Origin": "null", "X-Autona-Pairing": supplied})
+        pairing_clock.now += 3600
+        assert import_client.post(
+            "/api/designer/imports", json=_import_payload(),
+            headers={"Origin": "null", "X-Autona-Pairing": code},
+        ).status_code == 200
+    finally:
+        logger.remove(handler)
+
+    # The failures are logged -- as a count.
+    assert any("5 in a row" in message for message in messages)
+    for secret in {old, code, near}:
+        for form in {secret, secret.replace("-", ""), secret.lower()}:
+            assert not any(form in message for message in messages), form
 
 
 # --- Shared runtime (layout-custom-unification Step 2) ----------------------

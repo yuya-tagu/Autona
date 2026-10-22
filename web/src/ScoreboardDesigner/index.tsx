@@ -5,6 +5,7 @@ import {
     Button,
     ButtonGroup,
     Dialog,
+    DialogActions,
     DialogContent,
     DialogTitle,
     Divider,
@@ -28,6 +29,7 @@ import {
     DragIndicator,
     Folder,
     FolderOpen,
+    Key,
     KeyboardArrowDown,
     KeyboardArrowRight,
     PlayArrow,
@@ -77,8 +79,10 @@ import {
     listDesktopProjects,
     loadDesignerImport,
     loadDesktopProject,
+    loadFigmaPairingCode,
     loadLatestFigmaImport,
     makeUniqueAssetPath,
+    regenerateFigmaPairingCode,
     revokeAssetUrls,
     saveDesktopProject,
 } from "./desktopApi";
@@ -413,6 +417,9 @@ export default function ScoreboardDesigner() {
     const [projectChoices, setProjectChoices] =
         React.useState<DesignerProjectSummary[]>([]);
     const [projectDialogOpen, setProjectDialogOpen] = React.useState(false);
+    const [pairingDialogOpen, setPairingDialogOpen] = React.useState(false);
+    const [pairingCode, setPairingCode] = React.useState<string | null>(null);
+    const [pairingMessage, setPairingMessage] = React.useState("");
     const [currentSlug, setCurrentSlug] = React.useState<string | null>(null);
     const [editingLayerId, setEditingLayerId] = React.useState<string | null>(null);
     const [editingLayerName, setEditingLayerName] = React.useState("");
@@ -1438,6 +1445,36 @@ export default function ScoreboardDesigner() {
         }
     };
 
+    // Fetched when the dialog opens, never on mount: it is a secret, and
+    // only this dialog shows it.
+    const openPairingDialog = async () => {
+        setPairingCode(null);
+        setPairingMessage("");
+        setPairingDialogOpen(true);
+        try {
+            setPairingCode(await loadFigmaPairingCode());
+        } catch (error: any) {
+            setPairingMessage(
+                error?.message || "ペアリングコードを読み込めませんでした。");
+        }
+    };
+
+    const regeneratePairingCode = async () => {
+        if (!window.confirm(
+            "ペアリングコードを再生成しますか？\n" +
+            "今のコードを入力したFigmaプラグインからは、" +
+            "新しいコードを入力し直すまで送信できなくなります。",
+        )) return;
+        try {
+            setPairingCode(await regenerateFigmaPairingCode());
+            setPairingMessage(
+                "新しいコードを発行しました。Figmaプラグインに入力し直してください。");
+        } catch (error: any) {
+            setPairingMessage(
+                error?.message || "ペアリングコードを再生成できませんでした。");
+        }
+    };
+
     if (!desktopMode) {
         return (
             <Box className="designer-desktop-required">
@@ -1488,6 +1525,14 @@ export default function ScoreboardDesigner() {
                         }}>
                             <AddPhotoAlternate fontSize="small" sx={{mr: 1}} />
                             SVGを追加
+                        </MenuItem>
+                        <Divider />
+                        <MenuItem onClick={() => {
+                            closeImportMenu();
+                            openPairingDialog();
+                        }}>
+                            <Key fontSize="small" sx={{mr: 1}} />
+                            Figmaペアリングコード
                         </MenuItem>
                     </Menu>
                     <input
@@ -2157,6 +2202,51 @@ export default function ScoreboardDesigner() {
                         )}
                     </Stack>
                 </DialogContent>
+            </Dialog>
+            <Dialog
+                open={pairingDialogOpen}
+                onClose={() => setPairingDialogOpen(false)}
+                fullWidth
+                maxWidth="xs"
+                aria-labelledby="designer-pairing-title"
+            >
+                <DialogTitle id="designer-pairing-title">
+                    Figmaペアリングコード
+                </DialogTitle>
+                <DialogContent dividers>
+                    <Stack gap={1.5}>
+                        <Typography variant="body2">
+                            {"Figmaプラグイン「Autona Scoreboard Export」の" +
+                                "「ペアリングコード」欄にこのコードを入力してください。" +
+                                "このコードを知っているプラグインだけが、" +
+                                "Designerへレイヤーを送信できます。"}
+                        </Typography>
+                        <Typography
+                            component="output"
+                            aria-label="ペアリングコード"
+                            className="designer-pairing-code"
+                        >
+                            {pairingCode ?? (pairingMessage ? "—" : "読み込み中...")}
+                        </Typography>
+                        {pairingMessage && (
+                            <Typography variant="caption" color="text.secondary">
+                                {pairingMessage}
+                            </Typography>
+                        )}
+                    </Stack>
+                </DialogContent>
+                <DialogActions>
+                    <Button
+                        color="warning"
+                        disabled={!pairingCode}
+                        onClick={regeneratePairingCode}
+                    >
+                        再生成
+                    </Button>
+                    <Button onClick={() => setPairingDialogOpen(false)}>
+                        閉じる
+                    </Button>
+                </DialogActions>
             </Dialog>
         </Box>
     );

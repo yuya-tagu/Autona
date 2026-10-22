@@ -12,8 +12,8 @@ paths:
 
 ## StateManager
 
-**正本は `src/core/StateManager.py`**（headless core Step 1）。`src/StateManager.py` は
-互換 re-export シムで、1 世代だけ残す。新規コードは `from .core.StateManager import StateManager`。
+**正本は `src/core/StateManager.py`**（headless core Step 1）。新規コードは
+`from .core.StateManager import StateManager`。
 
 - StateManager は static クラス（インスタンス化しない）
 - 状態アクセスは `StateManager.Get(key)` / `StateManager.Set(key, value)`
@@ -224,7 +224,7 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
     `src/core/LayoutCatalog.py` を直接呼ぶ。state を読み書きせず、パネル（Board /
     Commentary / Top 8）と同じ関数を呼ぶこと自体が一本化なので、`WebServerActions` に
     中継メソッドを足しても経路が増えるだけになる。state を書く操作はこの例外に入らない
-- CORS は Flask-CORS で全オリジン許可済み
+- CORS は Flask-CORS で全オリジン許可済み。**例外: `/api/designer/imports`** は Origin を `null` / figma.com に限定し、ペアリングコード（`X-Autona-Pairing` ヘッダ）が必須
 
 ## Helpers
 

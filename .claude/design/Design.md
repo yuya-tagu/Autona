@@ -661,6 +661,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | `result_config.*` | リザルト生成設定（layout, logo_path 等）。色は保持しない — `prepare_data()` が `colors.result` → 大会共通カラーで解決して payload の `theme_color` / `accent_color` を上書きする |
 | `bsky_account.*` | Bluesky 連携 |
 | `update.*` | アップデーター（skipped_version 等） |
+| `designer.*` | Scoreboard Designer。`figma_pairing_code` は Figma プラグイン取込（`POST /api/designer/imports`）のペアリングコード（`XXXX-XXXX-XXXX`）。`AutonaDesignerService` が初回参照時に発行し、Designer の `Import` → `Figmaペアリングコード` で表示・再生成する。旧来の「取込は Origin `null` を許可するだけ」という穴はこれで解消（仕様・ロックの詳細は `docs/changes/layout-custom-unification.md` §7） |
 | その他トップレベル（`program_language`, `TOURNAMENT_URL` 等） | 個別 |
 
 新規キーは原則ネームスペース付きで作成し、トップレベルは増やさない。

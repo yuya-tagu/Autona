@@ -173,6 +173,21 @@ export async function loadDesignerImport(importId: string): Promise<{
     return {project, assets, report: result.report};
 }
 
+// The code the Figma plugin sends with every import (X-Autona-Pairing).
+export async function loadFigmaPairingCode(): Promise<string> {
+    const result = await apiRequest<{code: string}>("/api/designer/pairing");
+    return result.code;
+}
+
+// Replaces the code; the one the plugin holds stops working at once.
+export async function regenerateFigmaPairingCode(): Promise<string> {
+    const result = await apiRequest<{code: string}>(
+        "/api/designer/pairing/regenerate",
+        {method: "POST"},
+    );
+    return result.code;
+}
+
 export async function deleteDesktopProject(
     slug: string,
 ): Promise<{slug: string}> {

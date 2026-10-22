@@ -529,9 +529,40 @@ async function buildPayload(config) {
   };
 }
 
+// The Autona pairing code the UI sends with every import. The UI iframe
+// cannot reach figma.clientStorage itself, so it is kept here.
+const PAIRING_CODE_STORAGE_KEY = "autonaPairingCode";
+
+async function postStoredPairingCode() {
+  let code = "";
+  try {
+    const stored = await figma.clientStorage.getAsync(PAIRING_CODE_STORAGE_KEY);
+    if (typeof stored === "string") code = stored;
+  } catch (error) {
+    // Unreadable storage: start empty, the user can type the code again.
+  }
+  figma.ui.postMessage({ type: "pairing-code", code });
+}
+
 figma.ui.onmessage = async (message) => {
   if (message.type === "ready" || message.type === "refresh-selection") {
     postSelectionSummary();
+    if (message.type === "ready") {
+      await postStoredPairingCode();
+    }
+    return;
+  }
+
+  if (message.type === "save-pairing-code") {
+    try {
+      await figma.clientStorage.setAsync(
+        PAIRING_CODE_STORAGE_KEY, String(message.code || ""));
+    } catch (error) {
+      // Not an "error" message: that one also ends a send in progress.
+      figma.notify(
+        "ペアリングコードを保存できませんでした。次回も入力が必要です。",
+        { error: true });
+    }
     return;
   }
 

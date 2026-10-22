@@ -5,13 +5,31 @@ Figmaで選択したLayerをAutona Scoreboard Designerの一時インポート�
 ## 使い方
 
 1. Autonaを起動し、Webサーバーを既定ポート `5107` で待機させます（Autonaの設定でポートを変更している場合は、プラグイン画面の「Autonaのポート」に同じ値を入力してください）。
-2. Figma Desktopで `Plugins > Development > Import plugin from manifest...` を開きます。
-3. このディレクトリの `manifest.json` を選択します。
-4. 1920x1080のFrame（アートボード）内で移植したいLayerを選択します。アートボード自体を選択した場合は、表示中の子要素を展開して読み込みます。
-5. プラグインを起動し、各Layerを `PNG` / `SVG` / `動的テキスト` / `動的画像` / `ゲーム履歴` / `除外` に割り当てます。Layer名が `p1.name` や `p1.score` などのbindingと一致する場合は自動認識します。
-6. `Autonaへ送信` を押します。
-7. AutonaのScoreboard Designerに自動反映されます。追加し忘れたLayerは、後から選択して再送信できます。
-8. 内容を確認して、`保存` で `layout/custom/{slug}` に保存します。
+2. AutonaのBOARDタブから `Designerを開く` でScoreboard Designerを開き、`Import` → `Figmaペアリングコード` を選びます。`XXXX-XXXX-XXXX` 形式のコードが表示されます。
+3. Figma Desktopで `Plugins > Development > Import plugin from manifest...` を開きます。
+4. このディレクトリの `manifest.json` を選択します。
+5. プラグインを起動し、「ペアリングコード」欄に手順2のコードを入力します。小文字・ハイフンなし・全角で入力しても構いません。コードはFigmaに保存されるので、次回からは入力不要です。
+6. 1920x1080のFrame（アートボード）内で移植したいLayerを選択します。アートボード自体を選択した場合は、表示中の子要素を展開して読み込みます。
+7. 各Layerを `PNG` / `SVG` / `動的テキスト` / `動的画像` / `ゲーム履歴` / `除外` に割り当てます。Layer名が `p1.name` や `p1.score` などのbindingと一致する場合は自動認識します。
+8. `Autonaへ送信` を押します。
+9. AutonaのScoreboard Designerに自動反映されます。追加し忘れたLayerは、後から選択して再送信できます。
+10. 内容を確認して、`保存` で `layout/custom/{slug}` に保存します。
+
+### ペアリングコード
+
+Autonaは、ペアリングコードを知っているプラグインからの送信だけを受け付けます（コードを知らない
+Webページなどから、開いているDesignerへレイヤーを混入されるのを防ぐため）。
+
+- コードはAutonaの `user_data/settings.json` に保存され、Autonaを再起動しても変わりません。
+- Designerの `Figmaペアリングコード` 画面で `再生成` を押すと新しいコードに切り替わり、古いコードは
+  すぐに使えなくなります。コードを他人に見られた場合などに使ってください。再生成後はプラグインに
+  新しいコードを入力し直します。
+- プラグインに次の表示が出た場合:
+  - 「ペアリングコードが正しくありません」: Designerに表示されているコードを入力し直してください。
+  - 「一時的に受付を停止しています」: 誤ったコードで5回続けて送信すると、Autonaが60秒間すべての
+    送信を拒否します（正しいコードでも拒否されます）。停止中にさらに誤ると停止時間が倍になります
+    （最長1時間）。表示された秒数だけ待ってから正しいコードで送信してください。すぐに解除したい
+    場合は、Designerでコードを再生成するか、Autonaを再起動します。
 
 TEXT Layerは自動的に初期値が `動的テキスト` になります。ベクター図形は自動的に初期値が `SVG` になります。
 TEXT Layerでも `PNG` / `SVG` を選べば、文字を固定したまま取り込めます。`SVG`を選択したLayerは
@@ -36,7 +54,7 @@ Figma上で選択して表示位置へ移動します。Figma上の選択状態�
 
 ## 制約
 
-- 接続先は `http://localhost:{ポート}/api/designer/imports` です。ポートの既定は `5107`（Autonaの既定と同じ）で、プラグイン画面で変更できます。
+- 接続先は `http://localhost:{ポート}/api/designer/imports` です。ポートの既定は `5107`（Autonaの既定と同じ）で、プラグイン画面で変更できます。送信には `X-Autona-Pairing` ヘッダでペアリングコードを付けます（コードが無い・誤りは 401、連続失敗による停止中は 429）。
 - Figmaの `manifest.json` の `networkAccess.devAllowedDomains` はポートのワイルドカードが使えないため、`http://localhost:5107/` を固定で記載しています。**既定以外のポートを使う場合は `manifest.json` の `devAllowedDomains` も同じポートに書き換え**、Figmaでプラグインを再読み込みしてください。
 - 選択Layerの直近親Frameは1920x1080である必要があります。1920x1080のFrame（アートボード）を選択した場合は、表示中の子要素を個別レイヤーとして送信します。
 - アートボード内の子Frame・Groupも再帰的に展開します。アートボード以外のFrameやGroupを直接選択した場合は、その選択対象を1枚のPNGまたはSVGとして扱います。
