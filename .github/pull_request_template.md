@@ -32,5 +32,5 @@
 ## スクリーンショット
 <!-- Before / After 画像 -->
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+（任意 / optional）AI エージェントを使って作成した場合は、末尾に「🤖 Generated with Claude Code」等と記載してかまいません。必須ではありません。
 -->

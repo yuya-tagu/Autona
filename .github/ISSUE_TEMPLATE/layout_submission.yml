@@ -1,0 +1,57 @@
+name: layout 投稿 / Layout submission
+description: 自作の配信オーバーレイ (layout) の共有 / Share your own overlay layout
+labels: ["layout"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        作り方は [layout/README.md](https://github.com/yuya-tagu/Autona/blob/main/layout/README.md) を参照してください。
+        See layout/README.md for how to build a layout. Japanese or English is fine.
+  - type: input
+    id: name
+    attributes:
+      label: layout 名 / Layout name
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 種類 / Kind
+      options:
+        - scoreboard
+        - commentators
+        - top8
+        - thumbnail / result
+        - その他 / Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: 説明 / Description
+      description: 対応するゲーム・フォーマット (1v1 / team / crew)・解像度など。 / Supported game, format, resolution, etc.
+    validations:
+      required: true
+  - type: input
+    id: link
+    attributes:
+      label: ダウンロード先または PR のリンク / Download or PR link
+      description: zip の URL、または layout を追加した PR のリンク。 / Link to a zip or to a PR adding the layout.
+    validations:
+      required: true
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: スクリーンショット / Screenshot
+      description: 画像を貼り付けてください。 / Paste or drag in images.
+  - type: checkboxes
+    id: license
+    attributes:
+      label: 確認事項 / Checklist
+      options:
+        - label: 自作、または再配布が許可された素材のみを使用しています。 / I made this myself or only use assets I may redistribute.
+          required: true
+        - label: 他の権利者のロゴ・画像・フォントを含む場合は出典とライセンスを記載しました。 / I listed sources and licenses for any third-party logos, images, or fonts.
+          required: true
+        - label: MIT License での公開に同意します。 / I agree to release it under the MIT License.
+          required: true
