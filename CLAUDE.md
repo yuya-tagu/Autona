@@ -15,6 +15,7 @@ CLAUDE.md は要点のみ。詳細は以下を**必要時に参照**する（常
 |------|------|
 | [.claude/README.md](.claude/README.md) | `.claude/` 全索引・記載ルール・Agents/Rules/Commands/Hooks 一覧 |
 | [.claude/design/Design.md](.claude/design/Design.md) | **正本**: UI 実装方式・データモデル・画面・テーマ・ホットキー・コンポーネント構成 |
+| [.claude/orchestration.md](.claude/orchestration.md) | **オーケストレータ運用**（委譲先の選び方・標準フロー・動作確認の分担・モデル運用・台帳と compact 区切り・worktree 並列の条件） |
 | [.claude/git-workflow.md](.claude/git-workflow.md) | Git 詳細（push/PR/ブランチ削除/マルチアカウント認証） |
 | [.claude/known-smells.md](.claude/known-smells.md) / [.claude/manual-test-checklist.md](.claude/manual-test-checklist.md) | リファクタ候補 / 手動テスト手順 |
 | [docs/changes/test-automation-strategy.md](docs/changes/test-automation-strategy.md) | テスト自動化の層構成・実装順・既知バグ。**ウィジェットのテストを書く前に読む**（`autonaApp` fixture の使い方と制約） |
@@ -26,7 +27,8 @@ CLAUDE.md は要点のみ。詳細は以下を**必要時に参照**する（常
 
 個人開発プロジェクト。**オーナー／メンテナー**（人間）がプロダクト方針・優先順位・UX 意思決定・リリース判断を持ち、**エンジニアリード**（Claude Code）が設計・実装・検証・コード品質の最終責任を持つ。
 
-- 実装・検証・レビューは [`.claude/agents/`](.claude/agents/) のサブエージェントへ委譲する（`impl` / `patch` / `verify` / `review`）。モデルとツールは各定義の frontmatter が正本。メインセッションはタスク分解・設計判断・要件のすり合わせ・成果物の検収に専念し、自明な 1〜2 行修正を除いて自分でコードを書かない
+- 実装・検証・レビューは [`.claude/agents/`](.claude/agents/) のサブエージェントへ委譲する（`impl` / `patch` / `verify` / `review`）。モデルとツールは各定義の frontmatter が正本。メインセッションはタスク分解・設計判断・要件のすり合わせ・成果物の検収に専念し、自明な 1〜2 行修正を除いて自分でコードを書かない。調査・横断検索も Explore に委譲し、メインは結論だけ受け取る（詳細は [.claude/orchestration.md](.claude/orchestration.md)）
+- 課題を先延ばしにして docs やメモリを膨らませない。方針が決まっているものはその場で片付ける。次ターンへ送ってよいのは **オーナーの判断が要る論点**と、**先にマージが必要な依存**だけ
 - 設計上の懸念は、指示に反していても提起する
 - オーナーの「OK」「ビルドして」等の短い指示は、直前の文脈で確定した方針の実行として解釈する
 
@@ -39,10 +41,10 @@ CLAUDE.md は要点のみ。詳細は以下を**必要時に参照**する（常
 
 ## ビルド
 
-**反復開発中の動作確認は必ず `python main.py` で行う**（exe ビルドは 3〜5 分かかり反復速度を損なう。main.py と exe は同じコードを実行）。exe ビルドは「配布前の最終確認」「PyInstaller 固有挙動の検証」「凍結後の挙動を疑うバグ調査」のときだけ、かつユーザーから明示的に「ビルドして」「exe で確認」と言われた時のみ実行する。詳細（onedir/WebEngine/font/翻訳/配布）は [.claude/rules/build-and-release.md](.claude/rules/build-and-release.md)。
+**実機の動作確認はオーナーが `python main.py` で行う**（Claude・サブエージェントはアプリを起動せず、pytest までを担う → [.claude/orchestration.md](.claude/orchestration.md)。exe ビルドは 3〜5 分かかり反復速度を損なう。main.py と exe は同じコードを実行）。exe ビルドは「配布前の最終確認」「PyInstaller 固有挙動の検証」「凍結後の挙動を疑うバグ調査」のときだけ、かつユーザーから明示的に「ビルドして」「exe で確認」と言われた時のみ実行する。詳細（onedir/WebEngine/font/翻訳/配布）は [.claude/rules/build-and-release.md](.claude/rules/build-and-release.md)。
 
 ```bash
-python main.py                                        # 開発時の実行（基本これ）
+python main.py                                        # 開発時の実行（オーナーが実行）
 cd web && npm run build                              # Web UI（exe ビルド前に実行）
 pyinstaller dependencies/autona.spec --noconfirm     # exe（配布前のみ）→ dist/Autona/
 rm -rf ./_internal && cp -r dist/Autona/_internal ./_internal   # 成果物を直下へ
@@ -72,7 +74,24 @@ Edit/Write 後に出る「No preview server is running...（ブラウザプレ�
 
 詳細フロー・ブランチ削除・複数行コミット構文は [.claude/git-workflow.md](.claude/git-workflow.md) を参照。
 
-- **作業はローカル `main` 上で行う**（worktree も作業ブランチも作らない）。ブランチはリモート push 時にだけ切る
-- push は `git push origin main:<type>/<topic>`（種別 `feat`/`fix`/`docs`）。**リモート `main` への直接 push 禁止**（必ず PR 経由）
+- **作業はローカル `main` 上で行う**（worktree も作業ブランチも作らない。例外はサブエージェントの worktree 並列のみ → [.claude/orchestration.md](.claude/orchestration.md)）。ブランチはリモート push 時にだけ切る
+- push は `git push origin main:<type>/<topic>`（種別 `feat`/`fix`/`docs`/`chore`/`ci`）。**リモート `main` への直接 push 禁止**（必ず PR 経由）
 - コミットメッセージ・PR 説明文は日本語。**コミット・push は明示的に依頼されたときのみ**
 - **マシン固有の認証手順**（複数 GitHub アカウント環境での push / fetch 等）は `CLAUDE.local.md`（gitignore 済み）を参照
+
+# Compact instructions
+
+要約時は以下を優先して保持する:
+
+- 未マージ PR / push 済みブランチと、その検収状態（OK / NG / 検証待ち）
+- オーナーの判断待ち論点と、直近の設計判断 + その理由
+- 作業中タスクの現在地と次アクション（どこまでやったか・次に何をするか）
+- ワーキングツリーの状態（未コミット変更が何のためのものか）
+
+以下は捨ててよい（正本がディスクにある・再取得可能）:
+
+- テスト / build の生ログ（合否と失敗箇所の 1 行要約だけ残す）
+- サブエージェントの報告原文（結論と検収結果だけ残す）
+- 読んだファイルの本文（パスと要点だけ残す）
+
+進捗の正本は台帳（[.claude/orchestration.md](.claude/orchestration.md) 参照）。コンテキストには台帳にまだ書いていない差分だけ残せばよい。

@@ -1,4 +1,5 @@
 {
+  "autoCompactWindow": 400000,
   "permissions": {
     "allow": [
       "Bash(find:*)",
@@ -15,6 +16,20 @@
       "Bash(git diff:*)",
       "Bash(git branch:*)",
       "Bash(git show:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/pretooluse-guard.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
