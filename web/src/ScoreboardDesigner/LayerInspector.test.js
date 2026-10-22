@@ -30,6 +30,29 @@ describe("LayerInspector", () => {
         }));
     });
 
+    test("regenerates the intro without rotating keyframes on top of the layer", () => {
+        // Keyframe rotation is added to the layer's own rotation when
+        // played, so the regenerated intro must stay at 0 (see migrateLayer).
+        const layer = {...createBindingLayer("p1.name", 1), rotation: 30};
+        const onChange = jest.fn();
+
+        render(<LayerInspector layer={layer} onChange={onChange} />);
+        fireEvent.change(screen.getByLabelText("時間(ms)"), {
+            target: {value: "600"},
+        });
+
+        expect(onChange).toHaveBeenCalledTimes(1);
+        const patch = onChange.mock.calls[0][0];
+        expect(patch.animation.durationMs).toBe(600);
+        expect(patch.animations.intro.durationMs).toBe(600);
+        expect(patch.events.sceneEnter.durationMs).toBe(600);
+        const frames = [
+            ...patch.animations.intro.keyframes,
+            ...patch.events.sceneEnter.visualKeyframes,
+        ];
+        expect(frames.map((frame) => frame.rotation)).toEqual(frames.map(() => 0));
+    });
+
     test("toggles horizontal and vertical reflection", () => {
         const layer = createBindingLayer("p1.name", 1);
         const onChange = jest.fn();

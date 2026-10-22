@@ -182,18 +182,29 @@
     });
     if (!value.id) value.id = "legacy-runtime";
     if (!Array.isArray(value.assets)) {
+      // The same manifest model.ts migratedAssets() builds (and the Designer
+      // saves): image layers and Game-History slots, first use wins.
+      // Rendering never reads it -- layers and slots use their own paths.
       value.assets = [];
       value.layers.forEach(function (layer) {
-        if (layer.type === "image" &&
-            !value.assets.some(function (asset) { return asset.path === layer.asset; })) {
+        var paths = layer.type === "image"
+          ? [layer.asset]
+          : layer.type === "game-history" && Array.isArray(layer.slots)
+            ? layer.slots.map(function (slot) { return slot && slot.asset; })
+            : [];
+        paths.forEach(function (path) {
+          if (typeof path !== "string" ||
+              value.assets.some(function (asset) { return asset.path === path; })) {
+            return;
+          }
           value.assets.push({
             id: "legacy-image-" + (value.assets.length + 1),
             kind: "image",
-            path: layer.asset,
-            mediaType: layer.asset.toLowerCase().endsWith(".svg")
+            path: path,
+            mediaType: path.toLowerCase().endsWith(".svg")
               ? "image/svg+xml" : "image/png"
           });
-        }
+        });
       });
     }
     value.schemaVersion = 3;
@@ -411,6 +422,17 @@
             partPaths[pathKey] = samePathParts;
           });
         }
+      }
+      if (layer.type === "game-history" && Array.isArray(layer.slots)) {
+        // renderGames() reads every slot; reject a broken one here, with
+        // the message model.ts gives, rather than fail mid-render.
+        layer.slots.forEach(function (slot, slotIndex) {
+          if (!slot || typeof slot.asset !== "string" ||
+              !/^assets\/[^/\\]+\.(png|svg)$/i.test(slot.asset)) {
+            throw new Error(
+              layer.name + ".slots[" + slotIndex + "].assetが不正です。");
+          }
+        });
       }
       if (layer.type === "data-text") {
         validateTypography(layer.typography, layer.name + ".typography");
@@ -1043,6 +1065,15 @@
         window.location.reload();
       }
     });
+  }
+
+  // Contract-test hook, inert unless the host defines
+  // window.__autonaDesignerContractTest first (no shipped page does): hands
+  // out what loadProject() applies to ./project.json, so
+  // tests/test_designer_runtime_contract.py can check that this migrates
+  // exactly like web/src/ScoreboardDesigner/model.ts.
+  if (window.__autonaDesignerContractTest) {
+    window.__autonaDesignerContractTest.readProject = validateProject;
   }
 
   loadProject()

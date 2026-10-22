@@ -320,8 +320,11 @@ function migrateLayer(value: any, sourceVersion: number): DesignerLayer {
         typeof value.animation === "object"
         ? value.animation as LayerAnimation
         : DEFAULT_ANIMATION;
+    // Keyframe rotation is added on top of the layer's own rotation (the
+    // canvas and runtime.js rotate the layer box, then animate its content),
+    // so generated keyframes stay at 0 -- the layer rotation would apply twice.
     const animations = value.animations ?? createDefaultAnimations(
-        Number(value.rotation) || 0,
+        0,
         legacyAnimation,
     );
     const events = sourceVersion === PROJECT_SCHEMA_VERSION && value.events
@@ -360,13 +363,18 @@ function migratedAssets(project: any, layers: DesignerLayer[]): ProjectAsset[] {
     const assets: ProjectAsset[] = [];
     const seen = new Set<string>();
     layers.forEach((layer) => {
-        const paths = layer.type === "image"
-            ? [layer.asset]
+        // Read as unknown: this runs before validateProject() has looked at
+        // the file, so an asset may be missing or not a string and a slot
+        // may be null. Such a reference is skipped here -- as runtime.js
+        // does -- and validateProject() rejects it naming the layer/slot.
+        const paths: unknown[] = layer.type === "image"
+            ? [(layer as {asset?: unknown}).asset]
             : layer.type === "game-history" && Array.isArray(layer.slots)
-                ? layer.slots.map((slot) => slot.asset)
+                ? (layer.slots as unknown[]).map((slot) =>
+                    (slot as {asset?: unknown} | null)?.asset)
                 : [];
         paths.forEach((assetPath) => {
-            if (seen.has(assetPath)) return;
+            if (typeof assetPath !== "string" || seen.has(assetPath)) return;
             seen.add(assetPath);
             assets.push({
                 id: `legacy-image-${assets.length + 1}`,
@@ -681,7 +689,8 @@ export function validateProject(value: unknown): ScoreboardProject {
             true,
         );
         if (layer.type === "image" &&
-            (!/^assets\/[^/]+\.(png|svg)$/i.test(layer.asset) ||
+            (typeof layer.asset !== "string" ||
+                !/^assets\/[^/]+\.(png|svg)$/i.test(layer.asset) ||
                 layer.asset.includes(".."))) {
             throw new Error(`${layer.name || layer.id} のassetが不正です。`);
         }

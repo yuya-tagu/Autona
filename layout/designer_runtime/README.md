@@ -34,6 +34,13 @@ v2・v3 → v4 の移行を `migrateProject()` に足し、v1 の読込を外す
 実在するデザインを確認してから決める（Designer は保存時に常に最新版を書くので、
 一度でも保存し直したデザインは最新版になっている）。
 
+**移行結果は Designer の `web/src/ScoreboardDesigner/model.ts`（意味論の正本）と一致させる。**
+共通フィクスチャ `tests/fixtures/designer/{v1,v2,v3}.json` → `expected_v3.json` を、
+`model.test.js`（jest）と `tests/test_designer_runtime_contract.py`（node で本ファイルを実行）が
+両側から pin している。`migrateProject()` を変えたら両方を通すこと。node 側は、ページが
+`window.__autonaDesignerContractTest` を先に定義したときだけ有効になるフック経由で
+`validateProject()` を呼ぶ（出荷ページは定義しないので描画には影響しない）。
+
 ## 旧形式からの移行とロールバック
 
 起動時に `AutonaDesignerService.MigrateLegacyProjects()` が、`runtime.js` をフォルダ内に

@@ -23,6 +23,8 @@ from typing import Any
 
 from loguru import logger
 
+from .core import LayoutCatalog
+
 
 class DesignerProjectError(ValueError):
     pass
@@ -92,22 +94,29 @@ class AutonaDesignerService:
 """
 
     MAX_PROJECT_BYTES = 2 * 1024 * 1024
+    MAX_LAYERS = 200
     MAX_ASSET_BYTES = 50 * 1024 * 1024
     MAX_TOTAL_ASSET_BYTES = 200 * 1024 * 1024
     MAX_ASSETS = 200
-    BINDINGS = {
-        "p1.name", "p1.sponsorName", "p1.sponsorLogo", "p1.score",
-        "p1.countryFlag", "p1.seed", "p1.twitter", "p1.state",
-        "p2.name", "p2.sponsorName", "p2.sponsorLogo", "p2.score",
-        "p2.countryFlag", "p2.seed", "p2.twitter", "p2.state",
-        "tournament.logo", "tournament.name", "match.phase",
-        "match.round", "games",
-    }
-    IMAGE_BINDINGS = {
-        "p1.sponsorLogo", "p1.countryFlag",
-        "p2.sponsorLogo", "p2.countryFlag",
-        "tournament.logo",
-    }
+    # The versions the shared runtime reads (layout/designer_runtime/README.md).
+    SCHEMA_VERSIONS = frozenset({1, 2, 3})
+    # The only files a design may reference: a PNG/SVG directly below
+    # assets/, under a name Windows stores and opens as written -- no colon
+    # (drive / alternate data stream), no control character, no DOS device
+    # name (CON, nul.png, "COM1 .svg", ...: the part before the first dot,
+    # trailing spaces ignored, as ntpath.isreserved() reads it) and no dot
+    # or space right before the extension (the extension is required, so
+    # that is where Windows' trailing-dot/space rule can still bite). Any
+    # other character, Japanese included, is fine. Used with re.fullmatch
+    # and re.IGNORECASE.
+    ASSET_PATH_PATTERN = (
+        r"assets/"
+        r"(?!(?:con|prn|aux|nul|conin\$|conout\$|com[0-9¹²³]|lpt[0-9¹²³]) *\.)"
+        r"[^/\\:\x00-\x1f\x7f-\x9f]*[^/\\:\x00-\x1f\x7f-\x9f. ]"
+        r"\.(?:png|svg)"
+    )
+    # Pages that may POST a Figma import (is_import_origin_allowed).
+    IMPORT_ORIGINS = frozenset({"null", "https://www.figma.com"})
 
     _tokens: set[str] = set()
     _token_lock = threading.Lock()
@@ -141,6 +150,21 @@ class AutonaDesignerService:
             "127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost"
         }
 
+    @classmethod
+    def is_import_origin_allowed(cls, origin: str | None) -> bool:
+        """Whether a Figma import may come from a page of this ``Origin``.
+
+        The import route takes no token, and a loopback peer is any page
+        open in a browser on this computer, so the Origin header is what
+        tells the plugin apart. No header: not a browser page (curl, a
+        script). ``"null"``: the plugin UI, which Figma runs in an
+        opaque-origin iframe (tools/figma-scoreboard-plugin/ui.html). And
+        Figma itself. Note that "null" is also what a sandboxed iframe or a
+        file:// page on any site sends, so this narrows the route rather
+        than closing it (see _validate_project).
+        """
+        return origin is None or origin in cls.IMPORT_ORIGINS
+
     @staticmethod
     def slugify(name: str) -> str:
         normalized = unicodedata.normalize("NFKC", name).strip().casefold()
@@ -150,24 +174,13 @@ class AutonaDesignerService:
 
     @classmethod
     def list_projects(cls) -> list[dict[str, str]]:
-        root = cls.ROOT
-        if not root.is_dir():
-            return []
-        projects = []
-        for directory in sorted(root.iterdir(), key=lambda item: item.name.casefold()):
-            if not directory.is_dir() or directory.is_symlink():
-                continue
-            project_path = directory / "project.json"
-            index_path = directory / "index.html"
-            if not project_path.is_file() or not index_path.is_file():
-                continue
-            try:
-                project = json.loads(project_path.read_text(encoding="utf-8"))
-                name = str(project.get("name") or directory.name)
-            except (OSError, ValueError, TypeError):
-                continue
-            projects.append({"slug": directory.name, "name": name})
-        return projects
+        # The Designer's "open" list is the layout catalog's designer entries,
+        # so it lists exactly what the Board tab offers, under the same name.
+        prefix = f"{LayoutCatalog.CUSTOM_DIRNAME}/"
+        return [
+            {"slug": entry["id"][len(prefix):], "name": entry["displayName"]}
+            for entry in LayoutCatalog.CustomLayouts(cls.ROOT)
+        ]
 
     @classmethod
     def load_project(cls, slug: str) -> dict[str, Any]:
@@ -180,7 +193,12 @@ class AutonaDesignerService:
             project = json.loads(project_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise DesignerProjectError("project.jsonを読み込めません。") from exc
+        # No MAX_PROJECT_BYTES here: that bounds what the Designer saves and
+        # what an import may hold, and a larger project.json placed by hand
+        # must still open.
         cls._validate_project(project)
+        for asset_path in cls._layer_asset_paths(project):
+            cls._assert_within(directory, directory / Path(asset_path))
 
         asset_specs = cls._project_asset_specs(project)
         assets: dict[str, str] = {}
@@ -272,6 +290,7 @@ class AutonaDesignerService:
         cls._validate_project(project)
         if not isinstance(assets, dict):
             raise DesignerProjectError("assetsがオブジェクトではありません。")
+        cls._project_json(project)  # NaN / size, before anything is written
         if not cls._shared_runtime_available():
             raise DesignerProjectError(
                 "OBSランタイム（layout/designer_runtime）が見つかりません。")
@@ -299,11 +318,15 @@ class AutonaDesignerService:
         decoded_assets = cls._validate_assets_for_project(project, assets)
         project_to_write = json.loads(json.dumps(project, ensure_ascii=False))
         for layer in project_to_write["layers"]:
-            if layer.get("type") != "image":
-                continue
             style = layer.get("gameHistoryStyle")
+            if not isinstance(style, dict):
+                continue
+            # The runtime renders svgSource inline in OBS. Only an SVG this
+            # save decoded (_decode_svg vetted it) may end up there; whatever
+            # the payload carried under that key is dropped.
+            style.pop("svgSource", None)
             asset_path = layer.get("asset")
-            if not isinstance(style, dict) or not isinstance(asset_path, str):
+            if layer.get("type") != "image" or not isinstance(asset_path, str):
                 continue
             if not asset_path.lower().endswith(".svg"):
                 continue
@@ -312,11 +335,10 @@ class AutonaDesignerService:
                 continue
             style["svgSource"] = svg_data.decode("utf-8-sig")
 
-        project_bytes = json.dumps(
-            project_to_write, ensure_ascii=False, indent=2).encode("utf-8")
-        if len(project_bytes) > cls.MAX_PROJECT_BYTES:
-            raise DesignerProjectError("project.jsonがサイズ上限を超えています。")
+        project_bytes = cls._project_json(project_to_write)
 
+        for asset_path in cls._layer_asset_paths(project_to_write):
+            cls._assert_within(directory, directory / Path(asset_path))
         for asset_path, data in decoded_assets.items():
             destination = directory / Path(asset_path)
             cls._assert_within(directory, destination)
@@ -340,6 +362,8 @@ class AutonaDesignerService:
         cls._validate_project(project)
         if not isinstance(assets, dict):
             raise DesignerProjectError("assetsがオブジェクトではありません。")
+        # Held here, then saved by the Designer: the same limits as a save.
+        cls._project_json(project)
         decoded_assets = cls._validate_assets_for_project(project, assets)
 
         project_copy = json.loads(json.dumps(project, ensure_ascii=False))
@@ -378,383 +402,77 @@ class AutonaDesignerService:
 
     @classmethod
     def _validate_project(cls, project: Any) -> None:
-        if not isinstance(project, dict) or project.get("schemaVersion") not in {1, 2, 3}:
+        """Reject what would be unsafe to store or serve -- nothing more.
+
+        What a project *means* (layer types and their fields, events, the
+        asset manifest, schemaVersion 1/2 -> 3 migration) is owned by
+        web/src/ScoreboardDesigner/model.ts, whose validateProject() the
+        Designer runs on everything it loads, imports and saves; the OBS
+        runtime migrates again at load time (layout/designer_runtime/).
+        Here: a bounded layer count, a schemaVersion the runtime can read,
+        every file reference (the manifest and every path the runtime loads)
+        confined to the design's assets/ folder, and PNG/SVG content
+        (_decode_asset, when the bytes arrive). What is stored or held also
+        has to fit MAX_PROJECT_BYTES and be plain JSON (_project_json).
+
+        Not every caller is the Designer. Its routes need the desktop
+        window's token and a loopback peer (is_authorized), but the Figma
+        import takes no token: any page open in a browser on this computer
+        is a loopback peer, and the Origin check (is_import_origin_allowed)
+        still admits "null", which a sandboxed iframe on any web site can
+        send. An import is only held in memory -- an open Designer merges
+        it into the editor, where model.ts validates it -- and reaches
+        layout/custom only when the user saves it, through these checks
+        again. So these checks must hold for any input on their own, never
+        assuming model.ts has seen it. Revisit before these routes ever
+        accept another computer
+        (docs/changes/layout-custom-unification.md section 6).
+        """
+        if not isinstance(project, dict):
             raise DesignerProjectError("project.jsonの形式が不正です。")
-        if not isinstance(project.get("name"), str) or not project["name"].strip():
+        version = project.get("schemaVersion")
+        if isinstance(version, bool) or version not in cls.SCHEMA_VERSIONS:
+            raise DesignerProjectError("未対応のschemaVersionです。")
+        # save_project derives the folder name from it.
+        name = project.get("name")
+        if not isinstance(name, str) or not name.strip():
             raise DesignerProjectError("デザイン名がありません。")
-        if len(project["name"]) > 128:
+        if len(name) > 128:
             raise DesignerProjectError("デザイン名が長すぎます。")
-        canvas = project.get("canvas")
-        if not isinstance(canvas, dict) or (
-                canvas.get("width"), canvas.get("height")) != (1920, 1080):
-            raise DesignerProjectError("キャンバスは1920×1080である必要があります。")
         layers = project.get("layers")
         if not isinstance(layers, list):
             raise DesignerProjectError("layersが配列ではありません。")
-        if len(layers) > 200:
+        if len(layers) > cls.MAX_LAYERS:
             raise DesignerProjectError("レイヤー数が上限を超えています。")
-
-        ids = set()
-        allowed_types = {
-            "image", "data-text", "data-image", "game-history",
-        }
-        asset_by_id: dict[str, dict[str, Any]] = {}
-        if project.get("schemaVersion") == 3:
-            project_id = project.get("id")
-            if not isinstance(project_id, str) or not project_id:
-                raise DesignerProjectError("project.idが不正です。")
-            project_assets = project.get("assets")
-            if not isinstance(project_assets, list):
-                raise DesignerProjectError("assetsが配列ではありません。")
-            for index, asset in enumerate(project_assets):
-                cls._validate_project_asset(asset, index)
-                asset_id = asset["id"]
-                if asset_id in asset_by_id:
-                    raise DesignerProjectError("asset IDが重複しています。")
-                asset_by_id[asset_id] = asset
-        for layer in layers:
-            if not isinstance(layer, dict):
-                raise DesignerProjectError("不正なレイヤーがあります。")
-            layer_id = layer.get("id")
-            if not isinstance(layer_id, str) or not layer_id or layer_id in ids:
-                raise DesignerProjectError("レイヤーIDが空または重複しています。")
-            ids.add(layer_id)
-            if layer.get("type") not in allowed_types:
-                raise DesignerProjectError("未対応のレイヤー形式です。")
-            for key in (
-                    "x", "y", "width", "height",
-                    "rotation", "opacity", "zIndex"):
-                value = layer.get(key)
-                if not isinstance(value, (int, float)):
-                    raise DesignerProjectError(
-                        f"{layer_id}.{key}が数値ではありません。")
-            if layer["width"] <= 0 or layer["height"] <= 0:
-                raise DesignerProjectError("レイヤーサイズが不正です。")
-            if not 0 <= layer["opacity"] <= 1:
-                raise DesignerProjectError("レイヤー透明度が不正です。")
-            for key in ("flipX", "flipY"):
-                if key in layer and not isinstance(layer[key], bool):
-                    raise DesignerProjectError(
-                        f"{layer_id}.{key}が不正です。")
-            if ("assetTransformApplied" in layer and
-                    not isinstance(layer["assetTransformApplied"], bool)):
-                raise DesignerProjectError(
-                    f"{layer_id}.assetTransformAppliedが不正です。")
-            if project.get("schemaVersion") == 2:
-                animations = layer.get("animations")
-                if not isinstance(animations, dict):
-                    raise DesignerProjectError("animationsが不正です。")
-                cls._validate_motion_animation(
-                    animations.get("intro"), "animations.intro")
-                cls._validate_motion_animation(
-                    animations.get("update"), "animations.update")
-            if project.get("schemaVersion") == 3:
-                events = layer.get("events")
-                if not isinstance(events, dict):
-                    raise DesignerProjectError("eventsが不正です。")
-                cls._validate_event_timeline(
-                    events.get("sceneEnter"), "events.sceneEnter", False)
-                cls._validate_event_timeline(
-                    events.get("dataChange"), "events.dataChange", True)
-            if layer.get("type") == "image":
-                asset = layer.get("asset")
-                if not isinstance(asset, str) or not re.fullmatch(
-                        r"assets/[^/\\]+\.(png|svg)", asset,
-                        flags=re.IGNORECASE):
-                    raise DesignerProjectError("PNG/SVGのassetパスが不正です。")
-                if project.get("schemaVersion") == 3 and not any(
-                        candidate.get("kind") == "image" and
-                        candidate.get("path") == asset
-                        for candidate in asset_by_id.values()):
-                    raise DesignerProjectError(
-                        "PNG/SVGのasset manifestがありません。")
-                style = layer.get("gameHistoryStyle")
-                if style is not None:
-                    if not asset.lower().endswith(".svg") or not isinstance(
-                            style, dict):
-                        raise DesignerProjectError(
-                            f"{layer_id}のSVG Game-History設定が不正です。")
-                    slot_index = style.get("slotIndex")
-                    if (isinstance(slot_index, bool) or
-                            not isinstance(slot_index, int) or
-                            not 0 <= slot_index <= 4):
-                        raise DesignerProjectError(
-                            f"{layer_id}.gameHistoryStyle.slotIndexが不正です。")
-                    stroke_width = style.get("strokeWidth")
-                    if (isinstance(stroke_width, bool) or
-                            not isinstance(stroke_width, (int, float)) or
-                            not 0 <= stroke_width <= 100):
-                        raise DesignerProjectError(
-                            f"{layer_id}.gameHistoryStyle.strokeWidthが不正です。")
-                    for key in ("p1Color", "p2Color", "neutralColor"):
-                        if not isinstance(style.get(key), str) or not style[key].strip():
-                            raise DesignerProjectError(
-                                f"{layer_id}.gameHistoryStyle.{key}が不正です。")
-                    if style.get("mode") not in (None, "slot", "parts"):
-                        raise DesignerProjectError(
-                            f"{layer_id}.gameHistoryStyle.modeが不正です。")
-                    parts = style.get("parts")
-                    if parts is not None:
-                        if not isinstance(parts, list) or len(parts) > 100:
-                            raise DesignerProjectError(
-                                f"{layer_id}.gameHistoryStyle.partsが不正です。")
-                        paths: dict[str, list[dict[str, Any]]] = {}
-                        for index, part in enumerate(parts):
-                            if not isinstance(part, dict):
-                                raise DesignerProjectError(
-                                    f"{layer_id}.gameHistoryStyle.parts[{index}]が不正です。")
-                            path = part.get("path")
-                            if (not isinstance(path, list) or len(path) > 64 or
-                                    any(isinstance(value, bool) or not isinstance(value, int) or
-                                        value < 0 or value > 10000 for value in path)):
-                                raise DesignerProjectError(
-                                    f"{layer_id}.gameHistoryStyle.parts[{index}].pathが不正です。")
-                            path_key = ".".join(map(str, path))
-                            same_path_parts = paths.get(path_key, [])
-                            can_share_path = bool(same_path_parts) and all(
-                                existing.get("role") != part.get("role") and
-                                existing.get("role") in {"p1-set", "p2-set"} and
-                                part.get("role") in {"p1-set", "p2-set"} and
-                                existing.get("setIndex") == 2 and
-                                part.get("setIndex") == 2
-                                for existing in same_path_parts
-                            )
-                            if same_path_parts and not can_share_path:
-                                raise DesignerProjectError(
-                                    f"{layer_id}.gameHistoryStyle.parts[{index}].pathが重複しています。")
-                            same_path_parts.append(part)
-                            paths[path_key] = same_path_parts
-                            role = part.get("role")
-                            if role not in {"set", "p1-set", "p2-set", "winner"}:
-                                raise DesignerProjectError(
-                                    f"{layer_id}.gameHistoryStyle.parts[{index}].roleが不正です。")
-                            set_index = part.get("setIndex")
-                            if role in {"set", "p1-set", "p2-set"} and (
-                                    isinstance(set_index, bool) or
-                                    not isinstance(set_index, int) or
-                                    not 0 <= set_index <= 4):
-                                raise DesignerProjectError(
-                                    f"{layer_id}.gameHistoryStyle.parts[{index}].setIndexが不正です。")
-                            if role == "winner" and set_index is not None:
-                                raise DesignerProjectError(
-                                    f"{layer_id}.gameHistoryStyle.parts[{index}].setIndexが不正です。")
-            if layer.get("type") == "data-text":
-                binding = layer.get("binding")
-                if binding is None:
-                    if not isinstance(layer.get("text"), str):
-                        raise DesignerProjectError(
-                            f"{layer_id}.textが不正です。")
-                elif binding not in cls.BINDINGS or (
-                        binding in cls.IMAGE_BINDINGS or binding == "games"):
-                    raise DesignerProjectError(
-                        f"{layer_id}.bindingが不正です。")
-                cls._validate_typography(layer.get("typography"), layer_id)
-            if layer.get("type") == "data-image" and layer.get(
-                    "binding") not in cls.IMAGE_BINDINGS:
-                raise DesignerProjectError(
-                    f"{layer_id}.bindingが不正です。")
-            if layer.get("type") == "game-history" and layer.get(
-                    "binding") != "games":
-                raise DesignerProjectError(
-                    f"{layer_id}.bindingが不正です。")
-            if layer.get("type") == "game-history" and "slots" in layer:
-                slots = layer.get("slots")
-                if not isinstance(slots, list) or len(slots) != 5:
-                    raise DesignerProjectError(
-                        f"{layer_id}.slotsは5要素である必要があります。")
-                for index, slot in enumerate(slots):
-                    if not isinstance(slot, dict):
-                        raise DesignerProjectError(
-                            f"{layer_id}.slots[{index}]が不正です。")
-                    asset_path = slot.get("asset")
-                    if not isinstance(asset_path, str) or not re.fullmatch(
-                            r"assets/[^/\\]+\.(png|svg)", asset_path,
-                            flags=re.IGNORECASE):
-                        raise DesignerProjectError(
-                            f"{layer_id}.slots[{index}].assetが不正です。")
-                    if project.get("schemaVersion") == 3 and not any(
-                            candidate.get("kind") == "image" and
-                            candidate.get("path") == asset_path
-                            for candidate in asset_by_id.values()):
-                        raise DesignerProjectError(
-                            f"{layer_id}.slots[{index}]のasset manifestがありません。")
-                    for key in ("x", "y", "width", "height"):
-                        value = slot.get(key)
-                        if isinstance(value, bool) or not isinstance(value, (int, float)):
-                            raise DesignerProjectError(
-                                f"{layer_id}.slots[{index}].{key}が不正です。")
-                    if slot["width"] <= 0 or slot["height"] <= 0:
-                        raise DesignerProjectError(
-                            f"{layer_id}.slots[{index}]のサイズが不正です。")
-                    if "opacity" in slot and (
-                            isinstance(slot["opacity"], bool) or
-                            not isinstance(slot["opacity"], (int, float)) or
-                            not 0 <= slot["opacity"] <= 1):
-                        raise DesignerProjectError(
-                            f"{layer_id}.slots[{index}].opacityが不正です。")
-    @classmethod
-    def _validate_project_asset(cls, asset: Any, index: int) -> None:
-        if not isinstance(asset, dict):
-            raise DesignerProjectError(f"assets[{index}]が不正です。")
-        if not isinstance(asset.get("id"), str) or not asset["id"]:
-            raise DesignerProjectError(f"assets[{index}].idが不正です。")
-        kind = asset.get("kind")
-        allowed = {
-            "image": (
-                r"assets/[^/\\]+\.(png|svg)",
-                {"image/png", "image/svg+xml"},
-            ),
-        }
-        if kind not in allowed:
-            raise DesignerProjectError(f"assets[{index}].kindが不正です。")
-        path_pattern, media_type = allowed[kind]
-        if not isinstance(asset.get("path"), str) or not re.fullmatch(
-                path_pattern, asset["path"], flags=re.IGNORECASE):
-            raise DesignerProjectError(f"assets[{index}].pathが不正です。")
-        if isinstance(media_type, set):
-            media_valid = asset.get("mediaType") in media_type
-        else:
-            media_valid = asset.get("mediaType") == media_type
-        media_valid = media_valid and asset.get("mediaType") == cls._image_media_type(
-            asset["path"])
-        if not media_valid:
-            raise DesignerProjectError(
-                f"assets[{index}].mediaTypeが不正です。")
-
-    @staticmethod
-    def _validate_typography(typography: Any, layer_id: str) -> None:
-        if not isinstance(typography, dict):
-            raise DesignerProjectError(
-                f"{layer_id}.typographyが不正です。")
-        if not isinstance(typography.get("fontFamily"), str) or not typography[
-                "fontFamily"].strip():
-            raise DesignerProjectError(
-                f"{layer_id}.typography.fontFamilyが不正です。")
-        google_family = typography.get("googleFontFamily")
-        if google_family is not None and (
-                not isinstance(google_family, str) or not google_family.strip()):
-            raise DesignerProjectError(
-                f"{layer_id}.typography.googleFontFamilyが不正です。")
-        for key in ("fontSize", "fontWeight", "letterSpacing"):
-            value = typography.get(key)
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise DesignerProjectError(
-                    f"{layer_id}.typography.{key}が不正です。")
-        if not 1 <= typography["fontSize"] <= 1000:
-            raise DesignerProjectError(
-                f"{layer_id}.typography.fontSizeが範囲外です。")
-        if not 1 <= typography["fontWeight"] <= 1000:
-            raise DesignerProjectError(
-                f"{layer_id}.typography.fontWeightが範囲外です。")
-        if not isinstance(typography.get("color"), str) or not typography[
-                "color"].strip():
-            raise DesignerProjectError(
-                f"{layer_id}.typography.colorが不正です。")
-        if typography.get("align") not in {"left", "center", "right"}:
-            raise DesignerProjectError(
-                f"{layer_id}.typography.alignが不正です。")
-        if not isinstance(typography.get("italic"), bool):
-            raise DesignerProjectError(
-                f"{layer_id}.typography.italicが不正です。")
+        # save_project and _project_asset_specs read fields off each layer.
+        if not all(isinstance(layer, dict) for layer in layers):
+            raise DesignerProjectError("不正なレイヤーがあります。")
+        cls._project_asset_specs(project)  # the files stored with it
+        # schemaVersion 3 lists its files in the manifest, but the runtime
+        # loads each image layer and Game-History slot by its own path, so
+        # those must be just as confined. Whether they are listed in the
+        # manifest is model.ts's call.
+        for path in cls._layer_asset_paths(project):
+            cls._check_asset_path(path)
 
     @classmethod
-    def _validate_motion_animation(cls, animation: Any, label: str) -> None:
-        if not isinstance(animation, dict):
-            raise DesignerProjectError(f"{label}が不正です。")
-        if animation.get("renderer") != "webAnimations":
-            raise DesignerProjectError(f"{label}.rendererが不正です。")
-        for key in ("durationMs", "delayMs"):
-            value = animation.get(key)
-            if not isinstance(value, (int, float)) or value < 0:
-                raise DesignerProjectError(f"{label}.{key}が不正です。")
-        easing = animation.get("easing")
-        if not isinstance(easing, dict):
-            raise DesignerProjectError(f"{label}.easingが不正です。")
-        for key in ("x1", "y1", "x2", "y2"):
-            value = easing.get(key)
-            if not isinstance(value, (int, float)) or not 0 <= value <= 1:
-                raise DesignerProjectError(f"{label}.easing.{key}が不正です。")
-        if not isinstance(animation.get("loop"), bool):
-            raise DesignerProjectError(f"{label}.loopが不正です。")
-        keyframes = animation.get("keyframes")
-        if not isinstance(keyframes, list) or not keyframes:
-            raise DesignerProjectError(f"{label}.keyframesが不正です。")
-        previous_time = -1
-        duration = animation["durationMs"]
-        for index, frame in enumerate(keyframes):
-            if not isinstance(frame, dict):
-                raise DesignerProjectError(f"{label}.keyframes[{index}]が不正です。")
-            for key in ("timeMs", "x", "y", "rotation", "scaleX", "scaleY"):
-                value = frame.get(key)
-                if not isinstance(value, (int, float)):
-                    raise DesignerProjectError(
-                        f"{label}.keyframes[{index}].{key}が不正です。")
-            if frame["timeMs"] < 0 or frame["timeMs"] > duration:
-                raise DesignerProjectError(
-                    f"{label}.keyframes[{index}].timeMsが範囲外です。")
-            if frame["timeMs"] < previous_time:
-                raise DesignerProjectError(f"{label}.keyframesの順序が不正です。")
-            if frame["scaleX"] <= 0 or frame["scaleY"] <= 0:
-                raise DesignerProjectError(
-                    f"{label}.keyframes[{index}].scaleが不正です。")
-            previous_time = frame["timeMs"]
+    def _project_json(cls, project: dict[str, Any]) -> bytes:
+        """project.json as save_project writes it, within MAX_PROJECT_BYTES.
 
-    @classmethod
-    def _validate_event_timeline(
-            cls, timeline: Any, label: str, is_change: bool) -> None:
-        if not isinstance(timeline, dict):
-            raise DesignerProjectError(f"{label}が不正です。")
-        for key in ("durationMs", "delayMs"):
-            value = timeline.get(key)
-            if not isinstance(value, (int, float)) or value < 0:
-                raise DesignerProjectError(f"{label}.{key}が不正です。")
-        easing = timeline.get("easing")
-        if not isinstance(easing, dict):
-            raise DesignerProjectError(f"{label}.easingが不正です。")
-        for key in ("x1", "y1", "x2", "y2"):
-            if not isinstance(easing.get(key), (int, float)) or not (
-                    0 <= easing[key] <= 1):
-                raise DesignerProjectError(f"{label}.easing.{key}が不正です。")
-        frames = timeline.get("visualKeyframes")
-        if not isinstance(frames, list) or not frames:
+        Also the bound on an import, which is saved the same way. NaN and
+        Infinity are refused: Python would write them as bare tokens that
+        JSON.parse -- the Designer, the OBS runtime -- rejects.
+        """
+        try:
+            data = json.dumps(
+                project, ensure_ascii=False, indent=2,
+                allow_nan=False).encode("utf-8")
+        except ValueError as exc:
             raise DesignerProjectError(
-                f"{label}.visualKeyframesが不正です。")
-        previous_time = -1
-        for index, frame in enumerate(frames):
-            if not isinstance(frame, dict):
-                raise DesignerProjectError(
-                    f"{label}.visualKeyframes[{index}]が不正です。")
-            for key in (
-                    "timeMs", "x", "y", "rotation",
-                    "scaleX", "scaleY", "opacity"):
-                if not isinstance(frame.get(key), (int, float)):
-                    raise DesignerProjectError(
-                        f"{label}.visualKeyframes[{index}].{key}が不正です。")
-            if not previous_time <= frame["timeMs"] <= timeline["durationMs"]:
-                raise DesignerProjectError(
-                    f"{label}.visualKeyframes[{index}].timeMsが不正です。")
-            if frame["scaleX"] <= 0 or frame["scaleY"] <= 0 or not (
-                    0 <= frame["opacity"] <= 1):
-                raise DesignerProjectError(
-                    f"{label}.visualKeyframes[{index}]の表示値が不正です。")
-            previous_time = frame["timeMs"]
-        actions = timeline.get("rendererActions")
-        if not isinstance(actions, list) or actions:
-            raise DesignerProjectError(
-                f"{label}.rendererActionsが不正です。")
-        if is_change:
-            swap_at = timeline.get("swapAtMs")
-            if not isinstance(swap_at, (int, float)) or not (
-                    0 <= swap_at <= timeline["durationMs"]):
-                raise DesignerProjectError(f"{label}.swapAtMsが不正です。")
-            if timeline.get("interruptPolicy") != "coalesceLatest":
-                raise DesignerProjectError(
-                    f"{label}.interruptPolicyが不正です。")
-            watch_bindings = timeline.get("watchBindings")
-            if not isinstance(watch_bindings, list) or any(
-                    binding not in cls.BINDINGS for binding in watch_bindings):
-                raise DesignerProjectError(
-                    f"{label}.watchBindingsが不正です。")
+                "project.jsonにNaNまたはInfinityは使用できません。") from exc
+        if len(data) > cls.MAX_PROJECT_BYTES:
+            raise DesignerProjectError("project.jsonがサイズ上限を超えています。")
+        return data
 
     @classmethod
     def _validate_assets_for_project(
@@ -781,20 +499,51 @@ class AutonaDesignerService:
     @classmethod
     def _project_asset_specs(
             cls, project: dict[str, Any]) -> dict[str, str]:
+        """Media type of every file stored with the project below assets/.
+
+        Raises unless each one is a PNG/SVG directly below assets/; the type
+        follows the extension, which is how the file is served.
+        schemaVersion 3 lists the files in its ``assets`` manifest; 1 and 2
+        predate the manifest, so their layer references are the list (the
+        Figma import still arrives as version 1).
+        """
         if project.get("schemaVersion") == 3:
-            specs: dict[str, str] = {}
-            for asset in project.get("assets", []):
-                specs[asset["path"]] = asset["mediaType"]
-            return specs
+            manifest = project.get("assets")
+            if not isinstance(manifest, list):
+                raise DesignerProjectError("assetsが配列ではありません。")
+            paths = [entry.get("path") if isinstance(entry, dict) else None
+                     for entry in manifest]
+        else:
+            paths = cls._layer_asset_paths(project)
         specs: dict[str, str] = {}
+        for path in paths:
+            cls._check_asset_path(path)
+            specs[path] = cls._image_media_type(path)
+        return specs
+
+    @staticmethod
+    def _layer_asset_paths(project: dict[str, Any]) -> list[Any]:
+        """What image layers and Game-History slots point at, unchecked.
+
+        These are the paths the OBS runtime loads (an <img> src, a fetch).
+        A slot that is not an object counts as a missing path.
+        """
+        paths: list[Any] = []
         for layer in project["layers"]:
             if layer.get("type") == "image":
-                specs[layer["asset"]] = cls._image_media_type(layer["asset"])
-            elif layer.get("type") == "game-history":
-                for slot in layer.get("slots", []):
-                    if isinstance(slot, dict) and isinstance(slot.get("asset"), str):
-                        specs[slot["asset"]] = cls._image_media_type(slot["asset"])
-        return specs
+                paths.append(layer.get("asset"))
+            elif layer.get("type") == "game-history" and isinstance(
+                    layer.get("slots"), list):
+                paths.extend(
+                    slot.get("asset") if isinstance(slot, dict) else None
+                    for slot in layer["slots"])
+        return paths
+
+    @classmethod
+    def _check_asset_path(cls, path: Any) -> None:
+        if not isinstance(path, str) or not re.fullmatch(
+                cls.ASSET_PATH_PATTERN, path, flags=re.IGNORECASE):
+            raise DesignerProjectError("PNG/SVGのassetパスが不正です。")
 
     @staticmethod
     def _image_media_type(asset_path: str) -> str:
@@ -814,49 +563,6 @@ class AutonaDesignerService:
             if imported is None:
                 raise FileNotFoundError("インポートが見つかりません。")
             return json.loads(json.dumps(imported, ensure_ascii=False))
-
-    @staticmethod
-    def _default_events(binding: str) -> dict[str, Any]:
-        easing = {"x1": 0.2, "y1": 0.8, "x2": 0.2, "y2": 1}
-
-        def frame(time_ms: int, scale: float, opacity: float) -> dict[str, Any]:
-            return {
-                "id": uuid.uuid4().hex,
-                "timeMs": time_ms,
-                "x": 0,
-                "y": 0,
-                "rotation": 0,
-                "scaleX": scale,
-                "scaleY": scale,
-                "opacity": opacity,
-            }
-
-        return {
-            "sceneEnter": {
-                "durationMs": 450,
-                "delayMs": 0,
-                "easing": easing,
-                "visualKeyframes": [
-                    frame(0, 1, 0),
-                    frame(450, 1, 1),
-                ],
-                "rendererActions": [],
-            },
-            "dataChange": {
-                "durationMs": 440,
-                "delayMs": 0,
-                "easing": easing,
-                "swapAtMs": 220,
-                "watchBindings": [binding] if binding else [],
-                "interruptPolicy": "coalesceLatest",
-                "visualKeyframes": [
-                    frame(0, 1, 1),
-                    frame(220, 1.04, 0),
-                    frame(440, 1, 1),
-                ],
-                "rendererActions": [],
-            },
-        }
 
     @classmethod
     def _decode_asset(
