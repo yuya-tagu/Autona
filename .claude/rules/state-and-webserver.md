@@ -219,6 +219,11 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
 - ルートハンドラは `AutonaWebServerActions` に集約
 - Web UI からの POST リクエスト → Actions → StateManager 更新 → WebSocket 配信の流れ
 - 新しいエンドポイントを追加する場合は `AutonaWebServerActions` に記述する
+  - 例外: **読み取り専用のカタログ系エンドポイントは Actions を経由しない**
+    （ADR-001 2026-10-22 Addendum）。`GET /api/v1/layouts` はルートから Qt 非依存の
+    `src/core/LayoutCatalog.py` を直接呼ぶ。state を読み書きせず、パネル（Board /
+    Commentary / Top 8）と同じ関数を呼ぶこと自体が一本化なので、`WebServerActions` に
+    中継メソッドを足しても経路が増えるだけになる。state を書く操作はこの例外に入らない
 - CORS は Flask-CORS で全オリジン許可済み
 
 ## Helpers

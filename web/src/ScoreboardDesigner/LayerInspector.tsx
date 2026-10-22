@@ -224,12 +224,14 @@ export default function LayerInspector({
             ...layer.animation,
             ...patch,
         } as NonNullable<DesignerLayer["animation"]>;
-        const events = createDefaultEvents(layer.rotation, animation);
+        // Rotation 0: keyframes rotate on top of the layer's own rotation
+        // (see migrateLayer in model.ts).
+        const events = createDefaultEvents(0, animation);
         onChange({
             animation,
             animations: {
-                ...(layer.animations ?? createDefaultAnimations(layer.rotation, animation)),
-                intro: createDefaultAnimations(layer.rotation, animation).intro,
+                ...(layer.animations ?? createDefaultAnimations(0, animation)),
+                intro: createDefaultAnimations(0, animation).intro,
             },
             events: {
                 ...layer.events,

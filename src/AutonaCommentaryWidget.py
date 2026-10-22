@@ -9,8 +9,9 @@ Full rework mirroring AutonaTop8Widget's list + live-preview pattern:
   picks which casters (max 4) the ``layout/commentators/`` overlay
   renders, top card leftmost.
 * **Preview / Add to OBS** — design pulldown (immediate reload, Board-tab
-  spec) over ``layout/commentators*/``, embedded live preview of the
-  selected overlay, and the browser-source URL.
+  spec) over the layout catalog's ``commentary`` entries
+  (``src/core/LayoutCatalog.py``), embedded live preview of the selected
+  overlay, and the browser-source URL.
 
 State contract: everything under ``commentary.{1..12}`` (see
 AutonaCommentaryModel). The write goes through
@@ -34,10 +35,9 @@ from loguru import logger
 
 from .core.StateManager import StateManager
 from .core.SettingsManager import SettingsManager
+from .core import LayoutCatalog
 from .AutonaPlayerDB import AutonaPlayerDB
-from .AutonaLayoutPreview import (
-    AutonaLayoutPreview, ObsUrl, DiscoverLayoutDesigns,
-    LayoutDesignDisplayName)
+from .AutonaLayoutPreview import AutonaLayoutPreview, ObsUrl
 from .Helpers.AutonaBadWordFilter import AutonaBadWordFilter
 from .AutonaFeatureColors import FEATURE_COMMENTARY, MakeFeatureColorCard
 from .core import StateSchema as schema
@@ -46,9 +46,10 @@ from . import AutonaCommentaryModel as comms
 from . import ui_constants as UI
 from . import ui_layout as L
 
-# Design folders: layout/commentators/ plus any layout/commentators_*/
-# variant (discovered at launch; the pulldown spec matches the Board tab).
-LAYOUT_PREFIX = "commentators"
+# Designs: the catalog's commentary layouts (layout/commentators/ and any
+# variant declaring the kind; read at launch, the pulldown spec matches the
+# Board tab).
+LAYOUT_KIND = LayoutCatalog.KIND_COMMENTARY
 DEFAULT_DESIGN = "commentators"
 
 CASTER_CARD_WIDTH = 280
@@ -77,7 +78,7 @@ class AutonaCommentaryWidget(QDockWidget):
         # repopulated from state (same guard pattern as AutonaTop8Widget).
         self._updating = False
         self._previewLoaded = False
-        self._designs = DiscoverLayoutDesigns(LAYOUT_PREFIX)
+        self._designs = LayoutCatalog.Layouts([LAYOUT_KIND])
 
         # NOTE: the commentary.* normalisation that used to run here moved to
         # Window._SeedPanelState() (startup Step 4b-2). This panel is built on
@@ -439,7 +440,7 @@ class AutonaCommentaryWidget(QDockWidget):
         # Right-column selector above the preview: section-title label +
         # full-width combo, matching the RESULT tab. Selecting a design
         # reloads the preview immediately, no update button. Single entry
-        # today; future layout/commentators_* variants appear automatically.
+        # today; further commentary layouts appear automatically.
         col = QVBoxLayout()
         col.setSpacing(UI.SPACE_SM)
         label = QLabel("実況・解説のデザインを選択")
@@ -447,9 +448,8 @@ class AutonaCommentaryWidget(QDockWidget):
         col.addWidget(label)
 
         self.designCombo = QComboBox()
-        for d in self._designs:
-            self.designCombo.addItem(
-                LayoutDesignDisplayName(LAYOUT_PREFIX, d), d)
+        for entry in self._designs:
+            self.designCombo.addItem(entry["displayName"], entry["id"])
         saved = SettingsManager.Get(
             "commentary.selected_design", DEFAULT_DESIGN)
         idx = self.designCombo.findData(saved)
@@ -467,7 +467,8 @@ class AutonaCommentaryWidget(QDockWidget):
     def _buildPreview(self):
         # Bare preview widget, no card wrapper — the RESULT tab's right-pane
         # structure is the reference for every preview panel.
-        self.preview = AutonaLayoutPreview(self._currentDesign())
+        self.preview = AutonaLayoutPreview(
+            self._currentDesign(), entry=self._currentEntry())
         self.preview.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         return self.preview
@@ -477,14 +478,20 @@ class AutonaCommentaryWidget(QDockWidget):
             return None
         return self.designCombo.currentData()
 
+    def _currentEntry(self):
+        """Entry file of the selected design (catalog ``entry``)."""
+        design = self._currentDesign()
+        return next((entry["entry"] for entry in self._designs
+                     if entry["id"] == design), LayoutCatalog.DEFAULT_ENTRY)
+
     def _onDesignChanged(self, _idx):
         design = self._currentDesign()
         if not design:
             return
         SettingsManager.Set("commentary.selected_design", design)
-        self.obsUrlField.setText(ObsUrl(design))
+        self.obsUrlField.setText(ObsUrl(design, self._currentEntry()))
         if self._previewLoaded:
-            self.preview.load(design)
+            self.preview.load(design, self._currentEntry())
 
     def showEvent(self, e):
         super().showEvent(e)
@@ -512,7 +519,8 @@ class AutonaCommentaryWidget(QDockWidget):
         self.obsUrlField = QLineEdit()
         self.obsUrlField.setReadOnly(True)
         self.obsUrlField.setText(
-            ObsUrl(self._currentDesign() or DEFAULT_DESIGN))
+            ObsUrl(self._currentDesign() or DEFAULT_DESIGN,
+                   self._currentEntry()))
         urlRow.addWidget(self.obsUrlField, 1)
         btCopy = QPushButton("コピー")
         btCopy.clicked.connect(

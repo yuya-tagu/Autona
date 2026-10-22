@@ -1,0 +1,224 @@
+[
+  {
+    "label": "an image layer whose asset is null",
+    "error": "Frame のassetが不正です。",
+    "project": {
+      "schemaVersion": 1,
+      "name": "契約フィクスチャ（不正入力）",
+      "canvas": {
+        "width": 1920,
+        "height": 1080,
+        "backgroundColor": "transparent"
+      },
+      "layers": [
+        {
+          "id": "frame",
+          "name": "Frame",
+          "type": "image",
+          "asset": null,
+          "objectFit": "contain",
+          "x": 0,
+          "y": 0,
+          "width": 1920,
+          "height": 1080,
+          "rotation": 0,
+          "opacity": 1,
+          "zIndex": 1,
+          "visible": true,
+          "animation": {
+            "preset": "none",
+            "durationMs": 0,
+            "delayMs": 0
+          }
+        }
+      ]
+    }
+  },
+  {
+    "label": "an image layer whose asset is a number",
+    "error": "Frame のassetが不正です。",
+    "project": {
+      "schemaVersion": 1,
+      "name": "契約フィクスチャ（不正入力）",
+      "canvas": {
+        "width": 1920,
+        "height": 1080,
+        "backgroundColor": "transparent"
+      },
+      "layers": [
+        {
+          "id": "frame",
+          "name": "Frame",
+          "type": "image",
+          "asset": 42,
+          "objectFit": "contain",
+          "x": 0,
+          "y": 0,
+          "width": 1920,
+          "height": 1080,
+          "rotation": 0,
+          "opacity": 1,
+          "zIndex": 1,
+          "visible": true,
+          "animation": {
+            "preset": "none",
+            "durationMs": 0,
+            "delayMs": 0
+          }
+        }
+      ]
+    }
+  },
+  {
+    "label": "a null Game-History slot",
+    "error": "ゲーム取得表示.slots[1].assetが不正です。",
+    "project": {
+      "schemaVersion": 1,
+      "name": "契約フィクスチャ（不正入力）",
+      "canvas": {
+        "width": 1920,
+        "height": 1080,
+        "backgroundColor": "transparent"
+      },
+      "layers": [
+        {
+          "id": "games",
+          "name": "ゲーム取得表示",
+          "type": "game-history",
+          "binding": "games",
+          "gap": 10,
+          "neutralColor": "#252524",
+          "p1Color": "#dc143c",
+          "p2Color": "#3d8be8",
+          "borderColor": "#f0eae0",
+          "borderWidth": 2,
+          "radius": 8,
+          "slots": [
+            {
+              "asset": "assets/game-1.svg",
+              "x": 0,
+              "y": 0,
+              "width": 60,
+              "height": 42
+            },
+            null,
+            {
+              "asset": "assets/game-3.svg",
+              "x": 140,
+              "y": 0,
+              "width": 60,
+              "height": 42,
+              "opacity": 0.8
+            },
+            {
+              "asset": "assets/game-4.svg",
+              "x": 210,
+              "y": 0,
+              "width": 60,
+              "height": 42
+            },
+            {
+              "asset": "assets/game-1.svg",
+              "x": 280,
+              "y": 0,
+              "width": 60,
+              "height": 42
+            }
+          ],
+          "x": 790,
+          "y": 1000,
+          "width": 340,
+          "height": 42,
+          "rotation": 0,
+          "opacity": 1,
+          "zIndex": 6,
+          "visible": true,
+          "animation": {
+            "preset": "slide-right",
+            "durationMs": 400,
+            "delayMs": 0
+          }
+        }
+      ]
+    }
+  },
+  {
+    "label": "a Game-History slot whose asset is a number",
+    "error": "ゲーム取得表示.slots[2].assetが不正です。",
+    "project": {
+      "schemaVersion": 1,
+      "name": "契約フィクスチャ（不正入力）",
+      "canvas": {
+        "width": 1920,
+        "height": 1080,
+        "backgroundColor": "transparent"
+      },
+      "layers": [
+        {
+          "id": "games",
+          "name": "ゲーム取得表示",
+          "type": "game-history",
+          "binding": "games",
+          "gap": 10,
+          "neutralColor": "#252524",
+          "p1Color": "#dc143c",
+          "p2Color": "#3d8be8",
+          "borderColor": "#f0eae0",
+          "borderWidth": 2,
+          "radius": 8,
+          "slots": [
+            {
+              "asset": "assets/game-1.svg",
+              "x": 0,
+              "y": 0,
+              "width": 60,
+              "height": 42
+            },
+            {
+              "asset": "assets/game-2.svg",
+              "x": 70,
+              "y": 0,
+              "width": 60,
+              "height": 42
+            },
+            {
+              "asset": 7,
+              "x": 140,
+              "y": 0,
+              "width": 60,
+              "height": 42,
+              "opacity": 0.8
+            },
+            {
+              "asset": "assets/game-4.svg",
+              "x": 210,
+              "y": 0,
+              "width": 60,
+              "height": 42
+            },
+            {
+              "asset": "assets/game-1.svg",
+              "x": 280,
+              "y": 0,
+              "width": 60,
+              "height": 42
+            }
+          ],
+          "x": 790,
+          "y": 1000,
+          "width": 340,
+          "height": 42,
+          "rotation": 0,
+          "opacity": 1,
+          "zIndex": 6,
+          "visible": true,
+          "animation": {
+            "preset": "slide-right",
+            "durationMs": 400,
+            "delayMs": 0
+          }
+        }
+      ]
+    }
+  }
+]

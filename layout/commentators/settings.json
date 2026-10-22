@@ -1,4 +1,8 @@
 {
+  "autona": {
+    "kind": "commentary",
+    "displayName": "標準"
+  },
   "assets": {
     "default": {}
   }

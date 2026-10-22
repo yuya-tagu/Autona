@@ -29,6 +29,7 @@ from loguru import logger
 from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
 from .core import StateSchema as schema
+from .core import LayoutCatalog
 # Import order mirrors the singleton init order (agent-pitfalls #2): the asset
 # manager must be importable before the tournament data provider. By the time
 # this module loads both singletons already exist (WebServerActions imported
@@ -495,6 +496,26 @@ def get_country_states(code):
     if states is None:
         raise ApiError(NOT_FOUND, f"unknown country code: {code}", 404)
     return ok(data=states)
+
+
+@api_v1.route("/layouts")
+@api_handler
+def get_layouts():
+    # The layout catalog the Board / Commentary / Top 8 tabs and the Designer
+    # list from (src/core/LayoutCatalog.py). Not state, so no revision and
+    # no WebServerActions hop: the catalog is already the single reader.
+    # ?kind= takes one kind, a comma-separated list, or a repeated parameter.
+    kinds = [kind.strip() for raw in request.args.getlist("kind")
+             for kind in raw.split(",") if kind.strip()]
+    unknown = sorted(set(kinds) - set(LayoutCatalog.KINDS))
+    if unknown:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"unknown kind: {', '.join(unknown)} "
+            f"(expected one of: {', '.join(LayoutCatalog.KINDS)})",
+            400,
+        )
+    return ok(data=LayoutCatalog.Layouts(kinds))
 
 
 # ═══════════════════════════════════════════════════════════════════════

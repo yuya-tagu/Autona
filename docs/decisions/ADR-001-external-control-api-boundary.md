@@ -134,6 +134,21 @@ LAN 内運用を前提に**既存の挙動を引き継ぐ**。新 API も認証�
 - X / Bluesky など外部送信操作を API 化する需要が固まったとき（初回除外を見直し）。
 - 既存 HTTP/WS 二重定義の保守負荷が問題化したとき → 既存ルートの整理を別 ADR で検討。
 
+## Addendum (2026-10-22): `GET /api/v1/layouts` を追加（レイアウトカタログの読み取り）
+
+[layout/custom 統合設計書](../changes/layout-custom-unification.md) Step 1 で、`layout/` 配下の配信用レイアウト
+（旧来型テンプレート + Designer 生成の `layout/custom/{slug}/`）の一覧 `GET /api/v1/layouts`（`?kind=` で絞り込み）を
+追加した。I/F は [external-control-api.md](../../.claude/design/external-control-api.md) §5.2。D1〜D8 との関係:
+
+- **D3**: 委譲先は `WebServerActions` ではなく Qt 非依存の `src/core/LayoutCatalog.py`。D3 の「既存処理を唯一の実処理として
+  再利用し二重化しない」は、ここでは Board / Commentary / Top 8 タブと Designer の「開く」が使う**同じ関数**を呼ぶことで満たす
+  （`WebServerActions` に中継メソッドを足すと経路が増えるだけで、状態ロジックの一本化には寄与しない）
+- **D4**: 読み取りのみ。`StateManager` / `SettingsManager` のどちらも書かない。状態ではないので `revision` は返さない
+- **D5**: 認証なしのまま。LAN 公開時を考え、レスポンスにファイルシステムの絶対パスは含めない（`id` は `layout/` からの相対）
+- **D6**: 初回スコープ外の除外対象（GUI 起動・外部送信・個人情報）に当たらない読み取り
+- **D7**: GET なので操作ログ対象外
+- **D8**: `{"ok": true, "data": [...]}`。未知の `kind` は `400 INVALID_ARGUMENT`
+
 ## Addendum (2026-10-21): 旧ルートを deprecated と宣言（削除は v2.0）
 
 `/api/v1/` を外部制御の**正本**とし、既存の旧ルート（`/score`・`/scoreboard<N>-...`・`/program-state`・

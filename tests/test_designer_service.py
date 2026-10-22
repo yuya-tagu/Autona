@@ -3,8 +3,10 @@ import json
 import os
 import posixpath
 import re
+import shutil
 import subprocess
 import sys
+import types
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -299,22 +301,274 @@ def test_save_and_load_preserves_figma_reflection_flags(designer_service):
     assert loaded["layers"][0]["assetTransformApplied"] is True
 
 
-def test_rejects_invalid_schema_v2_animation(designer_service):
-    project = make_v2_project()
-    project["layers"][0]["animations"]["intro"]["easing"]["x1"] = 1.5
-    with pytest.raises(DesignerProjectError, match="easing"):
+def test_layer_semantics_are_left_to_model_ts(designer_service):
+    # What a project means is judged by web/src/ScoreboardDesigner/model.ts
+    # alone (model.test.js pins the rejections); the service stores what is
+    # safe to store. Re-adding these checks here would fork that rule. Only
+    # values with no bearing on safety are pinned as accepted: layer ids and
+    # types are left open, so the service may refuse them later if that
+    # ever becomes a safety question.
+    project = make_v3_project("Semantics Elsewhere")
+    project["canvas"]["width"] = 1280
+    layer = project["layers"][0]
+    layer["opacity"] = 7
+    layer["events"]["sceneEnter"]["easing"]["x1"] = 1.5
+    layer["gameHistoryStyle"] = {"mode": "parts", "parts": [
+        {"path": [0], "role": "set", "setIndex": 0},
+        {"path": [0], "role": "winner"},
+    ]}
+    # The manifest's mediaType is not trusted either: the extension decides
+    # how the bytes are checked and served.
+    project["assets"][0].update({
+        "path": "assets/frame.svg", "mediaType": "image/png"})
+    layer["asset"] = "assets/frame.svg"
+
+    saved = designer_service.save_project({
+        "project": project,
+        "assets": {"assets/frame.svg": svg_data_url()},
+    })
+    loaded = designer_service.load_project(saved["slug"])
+
+    assert loaded["project"]["canvas"]["width"] == 1280
+    assert loaded["assets"]["assets/frame.svg"].startswith(
+        "data:image/svg+xml;base64,")
+
+
+@pytest.mark.parametrize("version", [None, 0, 4, "3", 3.5, True])
+def test_rejects_unknown_schema_versions(designer_service, version):
+    project = make_v3_project()
+    project["schemaVersion"] = version
+    with pytest.raises(DesignerProjectError, match="schemaVersion"):
         designer_service.save_project({
             "project": project,
             "assets": {"assets/frame.png": png_data_url()},
         })
 
-    project = make_v2_project()
-    project["layers"][0]["animations"]["intro"]["keyframes"][1]["timeMs"] = 999
-    with pytest.raises(DesignerProjectError, match="timeMs"):
-        designer_service.save_project({
-            "project": project,
-            "assets": {"assets/frame.png": png_data_url()},
-        })
+
+def test_rejects_projects_over_the_size_limit(designer_service, monkeypatch):
+    monkeypatch.setattr(AutonaDesignerService, "MAX_PROJECT_BYTES", 4096)
+    project = make_project("Large", with_image=False)
+    project["layers"].append({"id": "note", "type": "data-text",
+                              "text": "x" * 4096})
+    with pytest.raises(DesignerProjectError, match="サイズ上限"):
+        designer_service.receive_import({"project": project, "assets": {}})
+
+
+def test_rejects_more_layers_than_the_limit(designer_service):
+    project = make_project("Crowded", with_image=False)
+    project["layers"] = [
+        {"id": f"text-{index}", "type": "data-text", "text": ""}
+        for index in range(AutonaDesignerService.MAX_LAYERS + 1)]
+    with pytest.raises(DesignerProjectError, match="レイヤー数"):
+        designer_service.save_project({"project": project, "assets": {}})
+
+    project["layers"] = ["not a layer"]
+    with pytest.raises(DesignerProjectError, match="不正なレイヤー"):
+        designer_service.save_project({"project": project, "assets": {}})
+
+
+def _with_asset_path(kind, path):
+    if kind == "v3 manifest":
+        project = make_v3_project()
+        project["assets"][0]["path"] = path
+        return project
+    if kind in ("v1 image layer", "v3 image layer"):
+        # v3: the manifest still lists a valid file; only the layer -- the
+        # path the runtime actually loads -- points elsewhere.
+        project = make_project() if kind.startswith("v1") else make_v3_project()
+        project["layers"][0]["asset"] = path
+        return project
+    project = (make_project(with_image=False) if kind.startswith("v1")
+               else make_v3_project(with_image=False))
+    project["layers"].append({
+        "id": "games", "type": "game-history", "binding": "games",
+        "slots": [{"asset": "assets/game.png"}, {"asset": path}],
+    })
+    return project
+
+
+ASSET_PATH_KINDS = [
+    "v3 manifest", "v1 image layer", "v1 game-history slot",
+    "v3 image layer", "v3 game-history slot"]
+
+UNSAFE_ASSET_PATHS = [
+    "../outside.png", "assets/../../outside.png", "assets/sub/frame.png",
+    "assets\\frame.png", "/frame.png", "C:/frame.png", "frame.png",
+    "assets/frame.gif", "assets/.png", None,
+    "https://example.com/assets/frame.png",
+    # A drive or an alternate data stream.
+    "assets/C:frame.png", "assets/frame.png:hidden.png",
+    # Control characters.
+    "assets/fr\x00ame.png", "assets/fr\name.png", "assets/fr\x7fame.svg",
+    "assets/fr\x85ame.png",
+    # DOS device names, with an extension and any case.
+    "assets/CON.png", "assets/con.svg", "assets/Nul.tar.png",
+    "assets/aux .png", "assets/PRN.png", "assets/COM1.png",
+    "assets/lpt9.svg", "assets/COM¹.png", "assets/CONIN$.png",
+    # A dot or space right before the extension.
+    "assets/frame .png", "assets/frame..png", "assets/ .svg",
+]
+
+
+@pytest.mark.parametrize("kind", ASSET_PATH_KINDS)
+@pytest.mark.parametrize("path", UNSAFE_ASSET_PATHS)
+def test_rejects_asset_references_outside_assets(designer_service, kind, path):
+    project = _with_asset_path(kind, path)
+    with pytest.raises(DesignerProjectError, match="assetパス"):
+        designer_service.save_project({"project": project, "assets": {}})
+    assert not designer_service.ROOT.exists()
+    with pytest.raises(DesignerProjectError, match="assetパス"):
+        designer_service.receive_import({"project": project, "assets": {}})
+
+
+def test_rejects_unsafe_layer_references_in_a_saved_v3_design(
+        designer_service):
+    # project.json files placed by hand are checked on load as well.
+    saved = designer_service.save_project({
+        "project": make_v3_project("Hand Edited"),
+        "assets": {"assets/frame.png": png_data_url()},
+    })
+    project_path = designer_service.ROOT / saved["slug"] / "project.json"
+    project = json.loads(project_path.read_text(encoding="utf-8"))
+    project["layers"][0]["asset"] = "../../../secret.png"
+    project_path.write_text(json.dumps(project), encoding="utf-8")
+
+    with pytest.raises(DesignerProjectError, match="assetパス"):
+        designer_service.load_project(saved["slug"])
+
+
+@pytest.mark.parametrize("path", [
+    "assets/決勝ロゴ.png", "assets/フレーム 1.svg", "assets/console.png",
+    "assets/com10.png", "assets/CONTROL.svg", "assets/nul_frame.png",
+    "assets/lpt.png", "assets/.hidden.png", "assets/frame.v2.PNG",
+    "assets/Vector-183-164.svg",
+])
+def test_accepts_ordinary_asset_names(designer_service, path):
+    project = make_project("Names")
+    project["layers"][0]["asset"] = path
+    data = (svg_data_url() if path.lower().endswith(".svg")
+            else png_data_url())
+
+    saved = designer_service.save_project(
+        {"project": project, "assets": {path: data}})
+
+    assert (designer_service.ROOT / saved["slug"] / path).is_file()
+    assert set(designer_service.load_project(saved["slug"])["assets"]) == {
+        path}
+
+
+def test_svg_source_is_only_ever_the_decoded_svg(designer_service):
+    project = make_v3_project("Inline SVG")
+    style = {
+        "slotIndex": 0, "p1Color": "#dc143c", "p2Color": "#3d8be8",
+        "neutralColor": "#f0eae0", "strokeWidth": 3,
+        "svgSource": "<svg><script>alert(1)</script></svg>",
+    }
+    project["layers"][0].update({
+        "asset": "assets/frame.svg", "gameHistoryStyle": dict(style)})
+    project["assets"][0].update({
+        "path": "assets/frame.svg", "mediaType": "image/svg+xml"})
+    # Neither of these has a decoded SVG to inline, so neither keeps one.
+    project["layers"].append({
+        "id": "png", "type": "image", "asset": "assets/frame.svg.png",
+        "gameHistoryStyle": dict(style)})
+    project["assets"].append({
+        "id": "png-asset", "kind": "image", "path": "assets/frame.svg.png",
+        "mediaType": "image/png"})
+    project["layers"].append({
+        "id": "text", "type": "data-text", "gameHistoryStyle": dict(style)})
+
+    saved = designer_service.save_project({
+        "project": project,
+        "assets": {
+            "assets/frame.svg": svg_data_url(),
+            "assets/frame.svg.png": png_data_url(),
+        },
+    })
+
+    layers = {layer["id"]: layer
+              for layer in designer_service.load_project(
+                  saved["slug"])["project"]["layers"]}
+    decoded = base64.b64decode(svg_data_url().split(",", 1)[1]).decode()
+    assert layers["frame"]["gameHistoryStyle"]["svgSource"] == decoded
+    assert "svgSource" not in layers["png"]["gameHistoryStyle"]
+    assert "svgSource" not in layers["text"]["gameHistoryStyle"]
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_rejects_nan_and_infinity_before_storing(designer_service, value):
+    project = make_project("Not A Number")
+    project["layers"][0]["x"] = value
+    payload = {"project": project,
+               "assets": {"assets/frame.png": png_data_url()}}
+
+    with pytest.raises(DesignerProjectError, match="NaN"):
+        designer_service.save_project(payload)
+    assert not designer_service.ROOT.exists()
+    with pytest.raises(DesignerProjectError, match="NaN"):
+        designer_service.receive_import(payload)
+    with pytest.raises(FileNotFoundError):
+        designer_service.latest_import()
+
+
+def test_the_size_limit_bounds_saves_and_imports_but_not_loads(
+        designer_service, monkeypatch):
+    saved = designer_service.save_project({
+        "project": make_project("Hand Grown"),
+        "assets": {"assets/frame.png": png_data_url()},
+    })
+    project_path = designer_service.ROOT / saved["slug"] / "project.json"
+    project = json.loads(project_path.read_text(encoding="utf-8"))
+    project["layers"][0]["note"] = "x" * 8192
+    project_path.write_text(json.dumps(project), encoding="utf-8")
+    monkeypatch.setattr(AutonaDesignerService, "MAX_PROJECT_BYTES", 4096)
+
+    # A larger project.json placed by hand still opens ...
+    assert designer_service.load_project(saved["slug"])["project"][
+        "layers"][0]["note"] == "x" * 8192
+    # ... but is not written back, nor held as an import.
+    payload = {"project": project,
+               "assets": {"assets/frame.png": png_data_url()}}
+    with pytest.raises(DesignerProjectError, match="サイズ上限"):
+        designer_service.save_project(payload)
+    with pytest.raises(DesignerProjectError, match="サイズ上限"):
+        designer_service.receive_import(payload)
+    assert json.loads(project_path.read_text(encoding="utf-8")) == project
+
+
+def _unlink_tree(link):
+    # A Windows junction is a directory entry (rmdir); a symlink is unlinked.
+    if link.is_symlink():
+        os.unlink(link)
+    else:
+        os.rmdir(link)
+
+
+def test_rejects_an_assets_folder_linked_outside_the_design(
+        designer_service, tmp_path):
+    from tests.conftest import _link_tree
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "frame.png").write_bytes(b"\x89PNG\r\n\x1a\noutside")
+    payload = {
+        "project": make_project("Linked"),
+        "assets": {"assets/frame.png": png_data_url()},
+    }
+    saved = designer_service.save_project(payload)
+    assets = designer_service.ROOT / saved["slug"] / "assets"
+    shutil.rmtree(assets)
+    _link_tree(assets, outside)
+    try:
+        with pytest.raises(DesignerProjectError, match="外を指して"):
+            designer_service.load_project(saved["slug"])
+        with pytest.raises(
+                DesignerProjectError, match="外を指して|シンボリックリンク"):
+            designer_service.save_project(payload)
+    finally:
+        _unlink_tree(assets)
+    assert (outside / "frame.png").read_bytes() == (
+        b"\x89PNG\r\n\x1a\noutside")
 
 
 def test_save_and_load_preserves_optional_editor_metadata(designer_service):
@@ -442,8 +696,8 @@ def test_latest_import_rejects_missing_import(designer_service):
 
 def test_receive_import_uses_project_and_png_validation(designer_service):
     project = make_project()
-    project["canvas"]["width"] = 1280
-    with pytest.raises(DesignerProjectError, match="1920"):
+    project["schemaVersion"] = 4
+    with pytest.raises(DesignerProjectError, match="schemaVersion"):
         designer_service.receive_import({
             "project": project,
             "assets": {"assets/frame.png": png_data_url()},
@@ -541,33 +795,6 @@ def test_save_and_load_preserves_svg_game_history_parts(designer_service):
     ]
 
 
-def test_rejects_invalid_svg_game_history_parts(designer_service):
-    project = make_v3_project("Invalid SVG Game History Parts")
-    project["layers"][0]["asset"] = "assets/frame.svg"
-    project["layers"][0]["gameHistoryStyle"] = {
-        "slotIndex": 0,
-        "mode": "parts",
-        "parts": [
-            {"path": [0], "role": "set", "setIndex": 0},
-            {"path": [0], "role": "winner"},
-        ],
-        "p1Color": "#dc143c",
-        "p2Color": "#3d8be8",
-        "neutralColor": "#f0eae0",
-        "strokeWidth": 3,
-    }
-    project["assets"][0].update({
-        "path": "assets/frame.svg",
-        "mediaType": "image/svg+xml",
-    })
-
-    with pytest.raises(DesignerProjectError, match="重複"):
-        designer_service.save_project({
-            "project": project,
-            "assets": {"assets/frame.svg": svg_data_url()},
-        })
-
-
 def test_save_and_receive_import_support_five_game_history_svgs(
         designer_service):
     project = make_project("Custom Game History", with_image=False)
@@ -636,6 +863,120 @@ def test_import_authorization_is_loopback_only(designer_service):
     assert designer_service.is_loopback("127.0.0.1")
     assert designer_service.is_loopback("::1")
     assert not designer_service.is_loopback("192.168.1.20")
+
+
+@pytest.mark.parametrize("origin, allowed", [
+    (None, True),                     # not a browser page (curl, a script)
+    ("null", True),                   # the plugin UI's opaque-origin iframe
+    ("https://www.figma.com", True),
+    ("https://evil.example", False),
+    ("http://localhost:3100", False),  # e.g. the Web UI dev server
+    ("http://127.0.0.1:5107", False),  # pages served by Autona itself
+    ("https://figma.com", False),
+    ("https://www.figma.com.evil.example", False),
+    ("NULL", False),
+    ("", False),
+])
+def test_import_origins(designer_service, origin, allowed):
+    assert designer_service.is_import_origin_allowed(origin) is allowed
+
+
+@pytest.fixture
+def import_client(designer_service, monkeypatch):
+    """The real import route, with the SocketIO broadcast recorded."""
+    from src.AutonaWebServer import WebServer, _build_web_app
+
+    emitted = []
+    monkeypatch.setattr(WebServer, "socketio", types.SimpleNamespace(
+        emit=lambda event, data: emitted.append(event)))
+    app, _socketio = _build_web_app()
+    client = app.test_client()
+    client.emitted = emitted
+    return client
+
+
+def _cors_headers(response):
+    return {key: value for key, value in response.headers.items()
+            if key.lower().startswith("access-control-")}
+
+
+def _import_payload():
+    return {"project": make_project("Figma Finals"),
+            "assets": {"assets/frame.png": png_data_url()}}
+
+
+@pytest.mark.parametrize("origin", ["null", "https://www.figma.com"])
+def test_the_figma_plugin_can_post_an_import(
+        designer_service, import_client, origin):
+    # What tools/figma-scoreboard-plugin/ui.html sends: a JSON POST, so the
+    # browser preflights it first. The plugin UI's origin is "null".
+    preflight = import_client.options("/api/designer/imports", headers={
+        "Origin": origin,
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type",
+    })
+    assert preflight.status_code == 200
+    assert preflight.headers["Access-Control-Allow-Origin"] == origin
+    assert "POST" in preflight.headers["Access-Control-Allow-Methods"]
+    assert "content-type" in preflight.headers[
+        "Access-Control-Allow-Headers"].lower()
+
+    response = import_client.post(
+        "/api/designer/imports", json=_import_payload(),
+        headers={"Origin": origin})
+    assert response.status_code == 200, response.get_json()
+    assert response.headers["Access-Control-Allow-Origin"] == origin
+    assert response.get_json()["layers"] == 1
+    assert import_client.emitted == ["designer_import_received"]
+    assert designer_service.latest_import()["project"]["name"] == (
+        "Figma Finals")
+
+
+def test_an_import_without_an_origin_is_not_a_browser_page(
+        designer_service, import_client):
+    response = import_client.post(
+        "/api/designer/imports", json=_import_payload())
+    assert response.status_code == 200
+    assert _cors_headers(response) == {}
+    assert import_client.emitted == ["designer_import_received"]
+
+
+@pytest.mark.parametrize("origin", [
+    "https://evil.example", "http://localhost:3100", "http://127.0.0.1:5107"])
+def test_other_pages_cannot_post_an_import(
+        designer_service, import_client, origin):
+    # Every page in a browser on this computer is a loopback peer, and
+    # CORS(app) answers any origin elsewhere. Here a foreign page gets a
+    # 403 and no CORS headers, on the preflight and on the POST itself
+    # (a form post or a no-cors fetch skips the preflight).
+    preflight = import_client.options("/api/designer/imports", headers={
+        "Origin": origin,
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type",
+    })
+    assert preflight.status_code == 403
+    assert _cors_headers(preflight) == {}
+
+    response = import_client.post(
+        "/api/designer/imports", json=_import_payload(),
+        headers={"Origin": origin})
+    assert response.status_code == 403
+    assert _cors_headers(response) == {}
+    assert import_client.emitted == []
+    with pytest.raises(FileNotFoundError):
+        designer_service.latest_import()
+
+
+def test_an_import_from_another_computer_is_refused(
+        designer_service, import_client):
+    response = import_client.post(
+        "/api/designer/imports", json=_import_payload(),
+        headers={"Origin": "null"},
+        environ_base={"REMOTE_ADDR": "192.168.1.20"})
+    assert response.status_code == 403
+    assert import_client.emitted == []
+    with pytest.raises(FileNotFoundError):
+        designer_service.latest_import()
 
 
 # --- Shared runtime (layout-custom-unification Step 2) ----------------------

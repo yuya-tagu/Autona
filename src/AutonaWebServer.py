@@ -668,9 +668,26 @@ def _build_web_app():
             logger.error(traceback.format_exc())
             return jsonify({"error": "デザインの保存に失敗しました。"}), 500
 
-    @app.post('/api/designer/imports')
+    # The Figma plugin posts here from its own origin, so unlike the token
+    # routes above this one answers CORS -- but only to the origins
+    # AutonaDesignerService.is_import_origin_allowed() admits. The route's
+    # own cross_origin() decides every response it returns (the app-wide
+    # CORS(app) skips one it has evaluated), and it handles the preflight
+    # itself so a refused page gets a 403 there too. Refusals are returned,
+    # never abort()ed: an aborted request would bypass cross_origin() and
+    # get CORS(app)'s allow-any-origin headers.
+    @app.route('/api/designer/imports', methods=['POST', 'OPTIONS'])
+    @cross_origin(
+        origins=sorted(AutonaDesignerService.IMPORT_ORIGINS),
+        methods=['POST'],
+        automatic_options=False,
+        always_send=False)
     def designer_receive_import():
-        WebServer._authorize_designer_import_request()
+        refusal = WebServer._authorize_designer_import_request()
+        if refusal is not None:
+            return refusal
+        if request.method == 'OPTIONS':
+            return app.make_default_options_response()
         if request.content_length and request.content_length > 70 * 1024 * 1024:
             return jsonify({"error": "インポートデータがサイズ上限を超えています。"}), 413
         try:
@@ -944,8 +961,22 @@ class WebServer(QThread):
 
     @staticmethod
     def _authorize_designer_import_request():
+        """None if the Figma import may go ahead, else the 403 to return.
+
+        Returned, not raised: see the comment on the import route.
+        """
         if not AutonaDesignerService.is_loopback(request.remote_addr):
-            abort(403, "Figma import is only allowed from this computer")
+            return jsonify({
+                "error": "Figma import is only allowed from this computer"
+            }), 403
+        origin = request.headers.get("Origin")
+        if not AutonaDesignerService.is_import_origin_allowed(origin):
+            logger.warning(
+                "designer: refused a Figma import from origin {!r}", origin)
+            return jsonify({
+                "error": "Figma import is not allowed from this page"
+            }), 403
+        return None
 
     def run(self):
         try:

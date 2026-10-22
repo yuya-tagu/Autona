@@ -3,6 +3,7 @@ import {
     isDesktopDesigner,
     listDesktopProjects,
     loadLatestFigmaImport,
+    makeUniqueAssetPath,
     saveDesktopProject,
 } from "./desktopApi";
 import {createEmptyProject} from "./model";
@@ -135,4 +136,26 @@ describe("desktop Designer API", () => {
         );
     });
 
+    describe("makeUniqueAssetPath", () => {
+        // Same shape as ASSET_PATH_PATTERN in src/AutonaDesignerService.py.
+        const ACCEPTED = new RegExp(
+            String.raw`^assets/` +
+            String.raw`(?!(?:con|prn|aux|nul|conin\$|conout\$|com[0-9¹²³]|lpt[0-9¹²³]) *\.)` +
+            String.raw`[^/\:\x00-\x1f\x7f-\x9f]*[^/\:\x00-\x1f\x7f-\x9f. ]` +
+            String.raw`\.(?:png|svg)$`,
+            "i",
+        );
+
+        test.each(["CON.png", "nul.tar.png", "a..png", "COM1.svg", "...png"])(
+            "turns %s into an accepted name", (name) => {
+                const path = makeUniqueAssetPath(name, {});
+                expect(path).toMatch(ACCEPTED);
+                const taken = {[path]: {}};
+                expect(makeUniqueAssetPath(name, taken)).toMatch(ACCEPTED);
+            });
+
+        test("leaves an ordinary name unchanged", () => {
+            expect(makeUniqueAssetPath("logo.png", {})).toBe("assets/logo.png");
+        });
+    });
 });

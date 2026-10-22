@@ -1,4 +1,10 @@
 {
+  "autona": {
+    "kind": "scoreboard",
+    "displayName": "Team",
+    "format": "1v1 / チーム",
+    "game": "汎用（全ゲーム）"
+  },
   "assets": {
     "default": {
       "asset_key": "portrait"

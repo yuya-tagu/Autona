@@ -23,6 +23,9 @@ export function isDesktopDesigner(): boolean {
     return params.get("desktop") === "1" && Boolean(params.get("token"));
 }
 
+// Windows device names (the part before the first dot), case-insensitive.
+const RESERVED_FIRST_SEGMENT = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?=\.|$)/i;
+
 export function makeUniqueAssetPath(
     originalName: string,
     assets: AssetMap,
@@ -32,7 +35,11 @@ export function makeUniqueAssetPath(
         .replace(/[^a-zA-Z0-9._-]+/g, "-")
         .replace(/^-+/, "") || "layer.png";
     const dot = normalized.lastIndexOf(".");
-    const base = dot > 0 ? normalized.slice(0, dot) : normalized;
+    let base = dot > 0 ? normalized.slice(0, dot) : normalized;
+    // Mirror ASSET_PATH_PATTERN in AutonaDesignerService.py: no dot/space/hyphen
+    // right before the extension, and no Windows device name before the first dot.
+    base = base.replace(/[.\s-]+$/, "") || "layer";
+    base = base.replace(RESERVED_FIRST_SEGMENT, "$1-file");
     const extension = dot > 0 ? normalized.slice(dot).toLowerCase() : ".png";
     let candidate = `assets/${base}${extension}`;
     let index = 2;
