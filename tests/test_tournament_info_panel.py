@@ -94,7 +94,7 @@ def _restoreTournamentInfo(autonaApp):
     later one sees in its QDateEdit) and `_lastTournamentName` is the whole
     表示大会名 follow rule.
     """
-    from src.Helpers.AutonaDictHelper import deep_clone
+    from src.core.DictHelper import deep_clone
 
     saved = deep_clone(StateManager.Get("tournamentInfo") or {})
     service = TournamentInfoService.instance

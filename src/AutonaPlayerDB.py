@@ -11,7 +11,7 @@ from loguru import logger
 
 from copy import deepcopy
 
-from .Helpers.AutonaDictHelper import deep_clone
+from .core.DictHelper import deep_clone
 from .Helpers.AutonaQtHelper import gui_thread_sync
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .core.SettingsManager import SettingsManager

@@ -42,3 +42,4 @@ Proposed | Accepted | Superseded by ADR-XXX | Deprecated
 | [ADR-002-game-asset-pack-allowlist.md](ADR-002-game-asset-pack-allowlist.md) | Accepted | ゲームアセットパックの許可制（メーカー大会ガイドライン対応） |
 | [ADR-003-startup-architecture.md](ADR-003-startup-architecture.md) | Accepted | 起動アーキテクチャ（単一インスタンス + 明示的ライフサイクル移行） |
 | [ADR-004-headless-core-write-path.md](ADR-004-headless-core-write-path.md) | Accepted | 書き込み経路アーキテクチャ（Headless Core / Actions 層への集約・移行専念） |
+| [ADR-005-web-first-ui-thin-shell.md](ADR-005-web-first-ui-thin-shell.md) | Accepted | Web-first UI と薄い Qt シェル（Headless Core の完成・UI 技術の一本化・新規 Qt パネル凍結） |

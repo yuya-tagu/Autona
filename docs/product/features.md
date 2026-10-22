@@ -1,6 +1,6 @@
 # Autona 機能一覧
 
-格闘ゲーム大会の配信オペレーションを支援するデスクトップアプリケーション。スコアボード管理を中核に、配信オーバーレイ出力・Web リモート操作・サムネイル生成・SNS 投稿までを統合する。
+格闘ゲーム大会の配信オペレーションを支援するデスクトップアプリケーション。スコアボード管理を中核に、配信オーバーレイ出力・Web リモート操作・サムネイル生成・X 投稿までを統合する。
 
 本ドキュメントはコードベースと UI 定義（`.ui` ファイル・メニュー定義）をリバースエンジニアリングしてまとめたユーザー視点の機能一覧。実装詳細は [CLAUDE.md](../../CLAUDE.md) と [.claude/design/Design.md](../../.claude/design/Design.md) を参照。
 
@@ -13,13 +13,12 @@
 3. [選手情報管理](#3-選手情報管理)
 4. [配信チャネル・ストリーム URL 管理](#4-配信チャネルストリーム-url-管理)
 5. [X（旧 Twitter）投稿](#5-x旧-twitter-投稿)
-6. [BlueSky 投稿](#6-bluesky-投稿)
 7. [実況・解説パネル](#7-実況解説パネル)
 8. [大会情報（Tournament Info）](#8-大会情報tournament-info)
 9. [ブラケット表示（TOP 8）](#9-ブラケット表示top-8)
 10. [選手リスト](#10-選手リスト)
 11. [統計・分析](#11-統計分析)
-12. [メモ・補助ウィジェット](#12-メモ補助ウィジェット)
+12. [補助ウィジェット](#12-補助ウィジェット)
 13. [クルーバトル](#13-クルーバトル)
 14. [Individual Game Tracker](#14-individual-game-tracker)
 15. [サムネイル・対戦動画生成](#15-サムネイル対戦動画生成)
@@ -38,35 +37,37 @@
 28. [自動アップデート](#28-自動アップデート)
 29. [配信オーバーレイ出力](#29-配信オーバーレイ出力)
 30. [その他の連携機能](#30-その他の連携機能)
+31. [Board・Designer・Figma 取込](#31-boarddesignerfigma-取込)
+32. [統計表示設定](#32-統計表示設定)
 
 ---
 
 ## 1. メインメニュー
 
-[src/Autona.py](../../src/Autona.py) のサイドバー / Help & Settings メニュー。
+[src/Autona.py](../../src/Autona.py) のサイドバー（`_navSections`）/ Help & Settings メニュー。
+
+### サイドバー（`QStackedWidget` のページ切替）
+- **Setup** — Tournament Info / Stream Settings（配信設定）
+- **Scoreboard** — Scoreboard / Board（デザイン選択・ライブプレビュー・機能別カラー・Designer 起動。§ 31 参照）
+- **Display** — Thumbnail Settings / Result Settings / Top 8 Display Settings / Commentary / Stats Display Settings（統計表示設定）
+- **Data** — Statistics / Player List
 
 ### Help & Settings メニュー
 - **Always on top** — ウィンドウを常に最前面に表示
-- **Toggle widgets** — スコアボード / 実況 / サムネイル設定 / 結果設定 / 大会情報 / ブラケット / 統計 の表示・非表示トグル
-- **Migrate Layout** — 古いレイアウト保存状態を現行バージョンへ移行
-- **Program Language** — アプリ UI の言語（システム + 7 言語）
-- **Game Asset Language** — ゲームアセット（キャラ名等）の言語
-- **Tournament term language** — トーナメント用語（Winners/Losers 等）の言語
-- **Help** — Wiki / フォーラム / バグ報告リンク
-- **Settings** — 設定ダイアログ
-- **API Settings** — `/api/v1/` 外部制御 API のリファレンス / テスター
-- **OBS / Advanced Scene Switcher** — OBS 側ツールから Autona API を叩くための接続ガイド
-- **About** — アプリ情報・貢献者表示
+- **Settings** — 設定ダイアログ（General / Language / Hotkeys。言語設定は Language カテゴリ。§ 25・§ 26）
+- **Add game assets** — ゲームアセット入手ガイド
+- **API Settings** — サブメニュー: 外部制御 API のリファレンス / テスター（Open reference & tester）、Companion settings（Bitfocus Companion / Stream Deck 接続ガイド）、OBS / Advanced Scene Switcher（OBS 側ツールから Autona API を叩くための接続ガイド）
+- **Check for updates** — 手動アップデート確認
+- **Join the Discord community** — Discord コミュニティ
+- **Event support inquiries** — イベント運営支援の問い合わせ
+- **About Autona** — アプリ情報・ライセンス表示
 
-### Startgg メニュー
+### 大会メニュー（サイドバー上部の大会ボタン）
 - **Set tournament** — Start.gg イベント URL を入力してロード
 - **Unset tournament** — 大会解除
-- **Load tournament and sets from StartGG user** — Start.gg ユーザーアカウントから参加大会を自動検出
-- **Set StartGG user account** — ユーザーアカウント設定
-- **Pull Latest Completed Sets from StartGG** — 最新の完了済みセットを取得
 
-### Title メニュー
-- **ゲーム選択（オートコンプリート付きコンボボックス）** — 対応ゲームから選択してアセットロード
+### ゲーム選択（サイドバー上部）
+- **ゲーム選択メニュー** — 対応ゲームから選択してアセットロード
 - **Modded content** — Mod コンテンツの有効化（対応ゲームのみ表示）
 
 ---
@@ -104,15 +105,13 @@
 - シード番号
 - 代名詞 / カスタムテキスト
 - **Twitter ハンドル** — X 投稿時のメンションに自動利用
-- **Birthday** — 誕生日（オーバーレイ演出用）
 - キャラクター選択（複数キャラ・バリアント・スキン対応）
-- **コントローラー選択** — 使用機器（DirectInput/XInput 検出）
 - 選手状態（ロスト側 / Welcome Back 等）
 
 ### 連携機能
 - タグ入力でローカル DB 自動補完
 - 国旗 / キャラアイコン / スポンサーロゴの自動表示
-- 表示項目ごとの表示・非表示トグル（Twitter / Birthday / Pronoun 等）
+- 表示項目ごとの表示・非表示トグル（スコアボードの eye メニュー / Web UI の DISPLAY_OPTIONS。Twitter / Pronoun 等）
 
 ---
 
@@ -149,11 +148,11 @@
 
 ## 7. 実況・解説パネル
 
-[src/AutonaCommentaryWidget.py](../../src/AutonaCommentaryWidget.py)・[src/AutonaCommentaryModel.py](../../src/AutonaCommentaryModel.py)・[layout/commentators/](../../layout/commentators/)。
+[src/AutonaCommentaryWidget.py](../../src/AutonaCommentaryWidget.py)・[src/core/CommentaryModel.py](../../src/core/CommentaryModel.py)・[layout/commentators/](../../layout/commentators/)。
 
-- 8 スロット固定の実況・解説者カード（名前 / チーム / 本名 / Twitter / 役割 / コメント）
+- 12 スロット固定の実況・解説者カード（名前 / チーム / 本名 / Twitter / 役割 / コメント）
 - 役割プレフィックス（実況・解説・選手・主催）を選択可能
-- 「配信に表示」トグルで OBS オーバーレイに出す 1〜4 名を選択（人数に応じた可変レイアウト）
+- 「配信に表示」トグルで OBS オーバーレイに出す最大 4 名（`MAX_DISPLAY`）を選択（人数に応じた可変レイアウト）
 - 右ペインにデザイン選択プルダウン（`layout/commentators*/` を自動検出、選択で即時反映）+ オーバーレイのライブプレビュー + OBS 用ブラウザソース URL 案内
 - 名前フィールドはローカル選手 DB から補完（チーム / Twitter 等を自動入力）
 
@@ -170,10 +169,7 @@
 - **テーマカラー / アクセントカラー** のカラーピッカー
 
 ### 配信用ツール
-- **Copy Stream Title ボタン** — 大会名＋ラウンド＋選手から配信タイトルを生成してクリップボードにコピー
-- **Generate Stream Thumbnail ボタン** — 大会バナーから配信サムネイルを生成
-  - **Center Crop / Netflix Style** のラジオボタン選択
-  - プレビュー表示・ファイルパス表示
+配信 URL・配信タイトルコピー・配信サムネイル生成（Center Crop / Netflix Style）は Stream Settings パネル（[src/AutonaStreamSettingsWidget.py](../../src/AutonaStreamSettingsWidget.py)）に移動済み。
 
 ### その他
 - **Load from tournament** — Start.gg から一括ロード
@@ -183,7 +179,7 @@
 
 ## 9. ブラケット表示（TOP 8）
 
-[src/AutonaTop8Widget.py](../../src/AutonaTop8Widget.py)・[src/AutonaTop8Model.py](../../src/AutonaTop8Model.py)・[layout/bracket_top8/](../../layout/bracket_top8/)。
+[src/AutonaTop8Widget.py](../../src/AutonaTop8Widget.py)・[src/core/Top8Model.py](../../src/core/Top8Model.py)・[layout/bracket_top8/](../../layout/bracket_top8/)。
 
 - FGC 標準の **TOP 8 固定ダブルエリミネーションブラケット**（Winners スタート 4 名 + Losers スタート 4 名、全 11 試合: WSF×2 / WF / LR1×2 / LQF×2 / LSF / LF / GF / GF リセット）
 - **選手カード（8 スロット固定）** — 名前 / スポンサー / 国 / 使用キャラ・カラーを編集。対戦カードの変更は選手の入れ替えで行う
@@ -191,7 +187,7 @@
 - **Start.gg 自動読込** — 大会のダブルエリミネーション最終フェーズを自動で対象にし、最終 8 名と各試合のスコアを取り込み（Ctrl+Shift+P ホットキーでも更新可）
 - **表示ラベル**（オーバーレイに出すフェーズ名）の編集
 - **ライブプレビュー** — `layout/bracket_top8/` オーバーレイの埋め込みプレビュー（再読み込みボタン付き）
-- **OBS 追加案内** — ブラウザソース URL の表示・コピー。選手・スコアの編集は Socket.IO で OBS 上のブラケットにリアルタイム反映
+- **OBS 追加案内** — ブラウザソース URL の表示・コピー。選手・スコアの編集は WebSocket（Socket.IO）で OBS 上のブラケットにリアルタイム反映
 
 ---
 
@@ -308,14 +304,15 @@ STATS ドック（[src/AutonaStatsWidget.py](../../src/AutonaStatsWidget.py)）�
 
 ## 19. Web UI（リモート操作）
 
-[web/src/](../../web/src/)。React 19 / Redux Toolkit / MUI 7 / Socket.IO。
+[web/src/](../../web/src/)。React 19 / Redux Toolkit / MUI 7 / Socket.IO（状態受信）。操作は `/api/v1` REST 経由。
 
 ### `/web`・`/scoreboard`（board1）・`/team`（board2）
 Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / Commentators
 
 ### 通信
 - Socket.IO で `program_state` 全体受信、差分は `program_state_update`
-- 1000ms 間隔でデルタパッチ適用
+- デルタは到着時に即適用（200ms の救済タイマーは接続前に溜まった分の保険）
+- 操作（スコア更新等）は Socket.IO ではなく `/api/v1` REST 経由
 
 ---
 
@@ -323,7 +320,7 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 
 [src/AutonaWebServer.py](../../src/AutonaWebServer.py) / [src/AutonaApiV1.py](../../src/AutonaApiV1.py) / [src/AutonaWebServerActions.py](../../src/AutonaWebServerActions.py)。
 
-- 既存制御面: スコア操作 / セット管理 / 統計取得 / 選手情報 / 大会データロード / マスタデータ（characters・variants・controllers・match-names）など HTTP ルート + Socket.IO。
+- 既存制御面: スコア操作 / セット管理 / 統計取得 / 選手情報 / 大会データロード / マスタデータ（characters・variants・match-names）など HTTP ルート + Socket.IO。
 - 外部制御 API: `/api/v1/` 名前空間で実装済み。読み取り、スコア操作、set 情報更新、破壊的操作の `confirm:true`、重い操作の `202 Accepted` + 多重起動ガードに対応。
 - API Settings 画面からエンドポイント一覧・curl 例・テスターを確認できる。
 
@@ -335,12 +332,12 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 
 | キー | 動作 |
 |------|------|
-| Ctrl+Shift+1〜4 | チーム 1/2 スコア +1/−1 |
+| Ctrl+Shift+1〜4 | 1: チーム 1 +1 / 2: チーム 1 −1 / 3: チーム 2 +1 / 4: チーム 2 −1 |
 | Ctrl+Shift+R | リセット |
 | Ctrl+Shift+S | スワップ |
 | Ctrl+Shift+O | セット読込 |
 | Ctrl+Shift+P | フェーズグループ更新 |
-| Ctrl+Shift+B | 配信情報エクスポート |
+| Ctrl+Shift+L | 反映（apply changes） |
 
 設定から再割り当て可能。
 
@@ -351,7 +348,7 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 [src/AutonaPlayerDB.py](../../src/AutonaPlayerDB.py)。
 
 - 保存先: `user_data/local_players.json`
-- 項目: prefix / gamerTag / name / twitter / country_code / state_code / mains / pronoun / custom_textbox / controller
+- 項目: prefix / gamerTag / name / twitter / country_code / state_code / mains / pronoun / custom_textbox
 - タグ入力でオートコンプリート
 - 旧 CSV 形式からの自動移行
 
@@ -368,18 +365,12 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 ## 24. レイアウト・ウィンドウ操作
 
 ### 基本
-- QDockWidget による自由配置（ドッキング / タブ化 / デタッチ）
-- 状態自動保存・復元（`STATE_VERSION` 管理）
-
-### プリセット
-[src/LayoutOptions/AutonaLayoutOptionsWindow.py](../../src/LayoutOptions/AutonaLayoutOptionsWindow.py)。
-- レイアウトプリセットの保存 / 読込 / 削除
-- プリセット名管理
-- ウィジェット表示状態の一括切替
+- 左サイドバー + `QStackedWidget` のページ切替（自由ドッキングは廃止。パネルは `QDockWidget` サブクラスだがドックしない）
+- 選択ページとサイドバー折りたたみ状態を `QSettings` に保存・復元（`STATE_VERSION` 管理）
+- 重いパネルは初回表示時に遅延構築
 
 ### その他
-- **Always on top** トグル
-- **Migrate Layout** — 旧保存状態を現行バージョンへ変換
+- **Always on top** トグル（Help & Settings メニュー）
 
 ---
 
@@ -388,7 +379,8 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 [src/Settings/AutonaSettingsWindow.py](../../src/Settings/AutonaSettingsWindow.py)。
 
 ### General タブ
-- Web サーバーポート（既定 5000）
+- Web サーバーポート（既定 5107）
+- LAN 公開（他デバイスからのアクセス許可。次回起動で反映）
 - 下品表現フィルター
 - 自動セット更新の有効/無効
 - サムネイルウィジェット無効化
@@ -397,12 +389,8 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 ### Hotkeys タブ
 - 各アクションの再割り当て
 
-### Default Display Options タブ
-- 選手ウィジェットの表示項目デフォルト（Twitter / Birthday / Pronoun 等）
-
-### Bluesky タブ
-- ホスト / アカウント / App Password
-- BlueSky 自動投稿の認証情報
+### Language タブ
+- Program / Game Asset / Tournament term の言語設定（§ 26）
 
 ---
 
@@ -422,14 +410,14 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 
 ## 27. ヘルプ・サポートリンク
 
-Edit → Help サブメニュー。
+Help & Settings メニュー。
 
 - **Check for updates** — 手動アップデート確認
-- **Open the Wiki** — GitHub Wiki (`yuya-tagu/Autona/wiki`)
-- **Look for Help on the forum** — GitHub Discussions Q&A
-- **Report a bug** — GitHub Issues
+- **Join the Discord community** — Discord
+- **Event support inquiries** — イベント運営支援の問い合わせ
+- **About Autona** — アプリ情報・ライセンス表示
 
-すべて既定ブラウザで開く。
+リンクは既定ブラウザで開く。
 
 ---
 
@@ -452,7 +440,7 @@ Edit → Help サブメニュー。
 - `out/program_state.json` — 全状態 JSON
 - `out/` 配下の個別テキストファイル（OBS テキストソース向け）
 - HTML オーバーレイテンプレート（gsap / jQuery）
-- ブラウザソースで `http://localhost:5000/layout/...` を参照
+- ブラウザソースで `http://localhost:5107/layout/...` を参照
 - 用途別レイアウト多数: `scoreboard`, `bracket_top8`, `commentators`, `recent_sets`, `result`, `result_top16`, `tournament_history`, `thumbnail` 等
 
 ---
@@ -463,12 +451,6 @@ Edit → Help サブメニュー。
 [src/core/SponsorHelper.py](../../src/core/SponsorHelper.py)。
 - `user_data/sponsor_logo/` から prefix で自動マッチ
 - 複数スポンサー対応
-
-### コントローラー検出
-[src/Helpers/AutonaControllerHelper.py](../../src/Helpers/AutonaControllerHelper.py)。
-- DirectInput / XInput デバイス検出
-- 選手ごとの使用機器ドロップダウン選択
-- Web API 経由でも取得可能
 
 ### 国・地域マスタ
 [src/Helpers/AutonaCountryHelper.py](../../src/Helpers/AutonaCountryHelper.py)。
@@ -507,6 +489,32 @@ Edit → Help サブメニュー。
 
 ---
 
+## 31. Board・Designer・Figma 取込
+
+### BOARD パネル
+[src/AutonaBoardWidget.py](../../src/AutonaBoardWidget.py)。
+- スコアボードのデザイン選択（`layout/` の組込み + Designer 製 `layout/custom/{slug}`）
+- ライブプレビュー（埋め込み WebEngine）
+- 機能別カラー（`AutonaFeatureColors`、feature `board`）
+- Designer 起動ボタン
+
+### Designer
+[web/src/ScoreboardDesigner/](../../web/src/ScoreboardDesigner/)・[src/AutonaDesignerWindow.py](../../src/AutonaDesignerWindow.py)・[src/AutonaDesignerService.py](../../src/AutonaDesignerService.py)。
+- レイヤーエディタでスコアボードデザインを作成し `layout/custom/{slug}` に保存
+
+### Figma 取込
+[tools/figma-scoreboard-plugin/](../../tools/figma-scoreboard-plugin/)。
+- Figma プラグインから Designer へデザインを取り込む。認証はペアリングコード方式
+
+---
+
+## 32. 統計表示設定
+[src/AutonaStatsPreviewWidget.py](../../src/AutonaStatsPreviewWidget.py)（Stats Display Settings パネル）。
+- 統計オーバーレイに出す統計情報の種類を選択
+- Companion マクロ / OBS への追加案内
+
+---
+
 ## 参考
 
 - [README.md](../../README.md) — インストール・ビルド手順
@@ -520,7 +528,6 @@ Edit → Help サブメニュー。
 - Windows 専用前提（グローバルホットキーは pynput、exe 配布）
 - 言語変更は再起動必須（Program / Game Asset / Tournament term の 3 系統）
 - 自動アップデートは PyInstaller ビルド版のみ動作（`python main.py` では無効）
-- Bluesky 設定は認証情報（App Password）を含む。値の出力・外部送信禁止
 - 永続化: 設定 `user_data/settings.json` / ローカル選手 DB `user_data/local_players.json`
 
 変更時に必ず動作確認する対象（リグレッション禁止リスト）:

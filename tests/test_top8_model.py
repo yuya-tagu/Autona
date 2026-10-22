@@ -1,7 +1,7 @@
 """Unit tests for the Top 8 double elimination model (pure logic, no Qt)."""
 import types
 
-from src import AutonaTop8Model as model
+from src.core import Top8Model as model
 
 
 def finish(matches, match_id, score):

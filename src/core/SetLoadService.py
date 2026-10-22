@@ -116,21 +116,14 @@ class SetLoadService:
         except (TypeError, ValueError):
             return None
 
-    @staticmethod
-    def _SetIfChanged(key, value) -> bool:
-        """Write `key` only when it would actually change. True if written.
-
-        Every write under a held prefix marks the board dirty and lights the
-        反映 button, so re-writing a value the state already holds would
-        announce an edit the operator did not make. The Qt path got this for
-        free from the widgets (``setChecked`` / ``setValue`` emit nothing
-        when the value is unchanged); doing it here keeps that property now
-        that the write no longer goes through them.
-        """
-        if StateManager.Get(key, None) == value:
-            return False
-        StateManager.Set(key, value)
-        return True
+    # Write `key` only when it would actually change; True if written (the
+    # shared `StateManager.SetIfChanged`). Every write under a held prefix
+    # marks the board dirty and lights the 反映 button, so re-writing a value
+    # the state already holds would announce an edit the operator did not
+    # make. The Qt path got this for free from the widgets (``setChecked`` /
+    # ``setValue`` emit nothing when the value is unchanged); doing it here
+    # keeps that property now that the write no longer goes through them.
+    _SetIfChanged = staticmethod(StateManager.SetIfChanged)
 
     # ── match information (phase / pool / round) ─────────────────────────
 

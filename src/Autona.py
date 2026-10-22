@@ -13,7 +13,6 @@ import orjson
 import traceback
 import time
 import os
-import unicodedata
 import socket
 import sys
 import qtpy
@@ -206,11 +205,6 @@ from .AutonaPlayerBrowserWidget import AutonaPlayerBrowserWidget
 from src.AutonaWebServer import WebServer, check_webserver_port
 from .AutonaLayoutPreview import MarkWebServerReady
 # autopep8: on
-
-
-def remove_accents_lower(input_str):
-    nfkd_form = unicodedata.normalize('NFKD', input_str)
-    return u"".join([c for c in nfkd_form if not unicodedata.combining(c)]).lower()
 
 
 # Single source for the support inquiry contact, used by the Help menu, the

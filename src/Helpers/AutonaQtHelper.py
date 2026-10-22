@@ -112,3 +112,17 @@ def assert_gui_thread(fn=None):
     else:
         return _assert()
 
+
+class NoIconProxyModel(QSortFilterProxyModel):
+    """Proxy model that strips icons (DecorationRole) from the source model.
+
+    One definition for every combo that lists a shared asset model as text
+    only (the player card, the RESULT and TOP 8 panels). It lives here rather
+    than in one of those widget modules so that using it never means
+    importing another panel.
+    """
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if role == Qt.ItemDataRole.DecorationRole:
+            return None
+        return super().data(index, role)
+

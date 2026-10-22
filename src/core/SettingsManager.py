@@ -2,7 +2,7 @@ import os
 import tempfile
 import threading
 import orjson
-from ..Helpers.AutonaDictHelper import *
+from .DictHelper import *
 
 # Default port for the built-in web server (OBS browser sources, Web UI,
 # external control API). Deliberately NOT 5000: that is Flask's own default and

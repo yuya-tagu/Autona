@@ -16,10 +16,10 @@ from pathlib import Path
 
 import pytest
 
-from src import AutonaTop8Model as top8
+from src.core import Top8Model as top8
 from src.core import StateSchema as schema
 from src.core import Top8Service
-from src.Helpers.AutonaDictHelper import deep_clone
+from src.core.DictHelper import deep_clone
 from src.core.StateManager import StateManager as SM
 
 _WORK_DIR = tempfile.mkdtemp(prefix="autona_top8_test_")

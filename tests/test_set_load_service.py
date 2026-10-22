@@ -26,7 +26,7 @@ import pytest
 
 from src.core.SetLoadService import SetLoadService, TEAM_LOGO_DIR
 from src.core.SettingsManager import SettingsManager
-from src.Helpers.AutonaDictHelper import deep_clone
+from src.core.DictHelper import deep_clone
 from src.core.StateManager import StateManager as SM
 
 _WORK_DIR = tempfile.mkdtemp(prefix="autona_setload_test_")

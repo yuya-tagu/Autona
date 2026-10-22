@@ -16,6 +16,7 @@ from .core.StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaPlayerDB import AutonaPlayerDB
 from .Helpers.AutonaDirHelper import AutonaResolve
+from .Helpers.AutonaQtHelper import NoIconProxyModel
 from . import ui_constants as UI
 from . import ui_layout as L
 from .Workers import Worker
@@ -62,14 +63,6 @@ def _releaseLayoutItemWrappers(layout):
             _releaseLayoutItemWrappers(sub)
             continue
         Shiboken.invalidate(item)
-
-
-class NoIconProxyModel(QSortFilterProxyModel):
-    """Proxy model that strips icons (DecorationRole) from the source model."""
-    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
-        if role == Qt.ItemDataRole.DecorationRole:
-            return None
-        return super().data(index, role)
 
 
 class AutonaScoreboardPlayerWidgetSignals(QObject):

@@ -1,11 +1,11 @@
-"""Characterization tests for AutonaDictHelper (deep_get / deep_set / deep_unset / deep_clone).
+"""Characterization tests for core.DictHelper (deep_get / deep_set / deep_unset / deep_clone).
 
 Target: known-smells S-01, S-09 — StateManager relies on these primitives.
 Refactoring PlayerWidget or StateManager without breaking these is critical.
 """
 import pytest
 
-from src.Helpers.AutonaDictHelper import (
+from src.core.DictHelper import (
     deep_clone, deep_get, deep_set, deep_unset)
 
 

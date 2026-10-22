@@ -14,7 +14,7 @@ Full rework mirroring AutonaTop8Widget's list + live-preview pattern:
   overlay, and the browser-source URL.
 
 State contract: everything under ``commentary.{1..12}`` (see
-AutonaCommentaryModel). The write goes through
+src/core/CommentaryModel.py). The write goes through
 ``AutonaActions.PublishCommentary`` — this panel assembles the slot dict out
 of its cards and renders the state, but does not write it (headless core
 Step 5, instalment 5). The state persists
@@ -42,7 +42,7 @@ from .Helpers.AutonaBadWordFilter import AutonaBadWordFilter
 from .AutonaFeatureColors import FEATURE_COMMENTARY, MakeFeatureColorCard
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
-from . import AutonaCommentaryModel as comms
+from .core import CommentaryModel as comms
 from . import ui_constants as UI
 from . import ui_layout as L
 

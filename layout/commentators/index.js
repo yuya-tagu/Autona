@@ -1,7 +1,7 @@
 // commentators — caster lineup overlay (bottom bar, 1-4 casters).
 //
 // Renders the `commentary.{1..12}` state written by the desktop Commentary
-// panel (AutonaCommentaryWidget / AutonaCommentaryModel): the slots with
+// panel (AutonaCommentaryWidget / core/CommentaryModel): the slots with
 // display > 0 and a non-empty name, left to right by slot order (the
 // panel's card order — cards are drag-reorderable), capped at 4. The
 // desktop panel enforces the same rule — the client-side filter is a
@@ -84,7 +84,7 @@ function escapeHtml(s) {
 }
 
 // Icon badge glyphs, keyed by the stem stored in `icon` (same tokens as
-// AutonaCommentaryModel.ICONS; glyphs mirror assets/icons/*.svg).
+// core/CommentaryModel.ICONS; glyphs mirror assets/icons/*.svg).
 const ICON_SVGS = {
   mic: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15C6.99 11.36 6.58 11 6.09 11c-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z"/></svg>',
   megaphone: '<svg viewBox="0 0 24 24"><path fill="currentColor" d="M18 11v2h4v-2h-4zm-2 6.61c.96.71 2.21 1.65 3.2 2.39.4-.53.8-1.07 1.2-1.6-.99-.74-2.24-1.68-3.2-2.4-.4.54-.8 1.08-1.2 1.61zM20.4 5.6c-.4-.53-.8-1.07-1.2-1.6-.99.74-2.24 1.68-3.2 2.4.4.53.8 1.07 1.2 1.6.96-.72 2.21-1.65 3.2-2.4zM4 9c-1.1 0-2 .9-2 2v2c0 1.1.9 2 2 2h1v4h2v-4h1l5 3V6L8 9H4zm11.5 3c0-1.33-.58-2.53-1.5-3.35v6.69c.92-.81 1.5-2.01 1.5-3.34z"/></svg>',

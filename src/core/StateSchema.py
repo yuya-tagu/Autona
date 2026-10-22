@@ -45,8 +45,8 @@ from typing import NamedTuple
 # Qt-free (these two are pure state models, and are the candidates to move
 # into core next). Importing a Qt-dependent module from here would make core
 # unusable headless -- tests/test_core_qt_free.py detects it.
-from .. import AutonaCommentaryModel as comms
-from .. import AutonaTop8Model as top8
+from . import CommentaryModel as comms
+from . import Top8Model as top8
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 
@@ -633,8 +633,7 @@ def PublishAssetVersion(key: str, path: str):
         version = int(os.path.getmtime(path) * 1000)
     except OSError:
         version = 0
-    if StateManager.Get(key, None) != version:
-        StateManager.Set(key, version)
+    StateManager.SetIfChanged(key, version)
 
 
 def SeedPanelState():

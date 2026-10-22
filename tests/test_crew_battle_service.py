@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 
 from src.core.CrewBattleService import CrewBattleService, CrewMember, CrewTeam
-from src.Helpers.AutonaDictHelper import deep_clone
+from src.core.DictHelper import deep_clone
 from src.core.StateManager import StateManager as SM
 
 _WORK_DIR = tempfile.mkdtemp(prefix="autona_crew_test_")

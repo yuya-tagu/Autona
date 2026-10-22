@@ -1,6 +1,5 @@
 import re
 import threading
-import unicodedata
 from qtpy.QtCore import *
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
@@ -11,6 +10,7 @@ from pathlib import Path
 from .AutonaDirHelper import AutonaResolve
 from ..TournamentDataProvider import TournamentDataProvider
 from .AutonaLocaleHelper import AutonaLocaleHelper
+from ..core.TextHelper import remove_accents_lower
 import orjson
 from loguru import logger
 # NOTE: `countryflag` / `country_converter` were dropped here. They were only
@@ -56,10 +56,6 @@ class AutonaCountryHelper(QObject):
 
     def init(self):
         AutonaCountryHelper.LoadCountries()
-
-    def remove_accents_lower(input_str):
-        nfkd_form = unicodedata.normalize('NFKD', input_str)
-        return u"".join([c for c in nfkd_form if not unicodedata.combining(c)]).lower()
 
     @staticmethod
     def _iso2_to_flag_emoji(iso2: str) -> str | None:
@@ -191,7 +187,7 @@ class AutonaCountryHelper(QObject):
                     for c in state.get("cities") or []:
                         if country["iso2"] not in AutonaCountryHelper.cities:
                             AutonaCountryHelper.cities[country["iso2"]] = {}
-                        city_name = AutonaCountryHelper.remove_accents_lower(
+                        city_name = remove_accents_lower(
                             c["name"])
                         if city_name not in AutonaCountryHelper.cities[country["iso2"]]:
                             AutonaCountryHelper.cities[country["iso2"]][city_name] = state["iso2"]
@@ -304,7 +300,7 @@ class AutonaCountryHelper(QObject):
         split = str(location_string).replace(" - ", ",").split(",")
 
         for part in split[::-1]:
-            part = AutonaCountryHelper.remove_accents_lower(part.strip())
+            part = remove_accents_lower(part.strip())
             if not part:
                 continue
 

@@ -31,7 +31,7 @@ import pytest
 
 from src.core import StateSchema as schema
 from src.core.PlayerService import KEEP_ONLINE_AVATAR, PlayerService
-from src.Helpers.AutonaDictHelper import deep_clone
+from src.core.DictHelper import deep_clone
 from src.core.StateManager import StateManager as SM
 
 _WORK_DIR = tempfile.mkdtemp(prefix="autona_player_service_test_")

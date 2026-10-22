@@ -30,7 +30,7 @@ from pathlib import Path
 import pytest
 
 from src.core import StateSchema as schema
-from src.Helpers.AutonaDictHelper import deep_clone
+from src.core.DictHelper import deep_clone
 from src.core.SettingsManager import SettingsManager
 from src.core.StateManager import StateManager as SM
 

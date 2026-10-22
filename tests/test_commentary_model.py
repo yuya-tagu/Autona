@@ -1,5 +1,5 @@
 """Unit tests for the commentary panel model (pure logic, no Qt)."""
-from src import AutonaCommentaryModel as model
+from src.core import CommentaryModel as model
 
 
 def test_default_state_has_all_twelve_slots():

@@ -17,7 +17,7 @@ from .AutonaPlayerDB import AutonaPlayerDB
 from .AutonaScoreboardWidget import AutonaScoreboardWidget
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaCommentaryWidget import AutonaCommentaryWidget
-from . import AutonaCommentaryModel as comms
+from .core import CommentaryModel as comms
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Workers import Worker
 import os
@@ -257,7 +257,7 @@ class WebServerActions(QObject):
             team, player, data)
 
     def set_commentary_data(self, index, data):
-        # Caster slots are fixed (AutonaCommentaryModel.SLOTS); the old
+        # Caster slots are fixed (core.CommentaryModel.SLOTS); the old
         # auto-grow behavior is gone.
         index = int(index) - 1
         if not 0 <= index < len(comms.SLOTS):

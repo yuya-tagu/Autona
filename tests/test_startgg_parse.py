@@ -22,7 +22,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # 1. The real deep_get (no Qt dependency) backs the stubbed dict helper
 # ---------------------------------------------------------------------------
-from src.Helpers.AutonaDictHelper import deep_get
+from src.core.DictHelper import deep_get
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -150,8 +150,9 @@ def _setup_mock_modules():
             "src.Helpers.AutonaCountryHelper",
             {"AutonaCountryHelper": _MockAutonaCountryHelper},
         ),
-        "src.Helpers.AutonaDictHelper": _make_mock_module(
-            "src.Helpers.AutonaDictHelper",
+        "src.core": _make_mock_module("src.core", is_package=True),
+        "src.core.DictHelper": _make_mock_module(
+            "src.core.DictHelper",
             {"deep_get": deep_get},
         ),
         "src.Helpers.AutonaDirHelper": _make_mock_module(

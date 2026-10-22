@@ -117,7 +117,7 @@ def _ClearFeatureColor(feature: str, kind: str):
     """Drop one stored feature override if it exists.
 
     Both Unset helpers create the intermediate dicts on their way down
-    (deep_unset in AutonaDictHelper), and SettingsManager.Unset rewrites
+    (deep_unset in core/DictHelper.py), and SettingsManager.Unset rewrites
     settings.json on every call, so the existence guards are what keep an
     untouched feature from collecting empty ``colors.{feature}`` nodes and
     what keeps a single color pick from triggering six pointless file

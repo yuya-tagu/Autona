@@ -258,10 +258,10 @@ pronoun 撤去）。現行挙動に合わせ修復し **62件グリーン化済�
 実況・解説リワーク（docs/changes/commentary-rework-impact-analysis.md）で
 `commentary.{1..12}` のスロット固定制になり、動的増減・欠番・詰め直し
 （旧 `_compactCommentaryState`）の概念自体が消滅した。正規化は
-`AutonaCommentaryModel.NormalizeState` が起動時に一括で行う（呼び出しは
+`core/CommentaryModel.NormalizeState` が起動時に一括で行う（呼び出しは
 パネル `__init__` から `Window._SeedPanelState()` へ移動。パネルが遅延構築のため）。
 
-**影響範囲**: `AutonaCommentaryWidget.py` / `AutonaCommentaryModel.py`
+**影響範囲**: `AutonaCommentaryWidget.py` / `core/CommentaryModel.py`
 
 ---
 
@@ -545,7 +545,7 @@ GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src
 **根拠**: Headless Core 移行 Step 5-5 の調査（`docs/changes/headless-core-redesign.md` 5-5 節）。
 既存コードの調査中に発見。今回は修正せず pin のみ。
 
-**症状**: `AutonaTop8Model.DefaultState()` は全マッチの `slots` を `[TBD, TBD]` で返す。
+**症状**: `core/Top8Model.DefaultState()` は全マッチの `slots` を `[TBD, TBD]` で返す。
 `StateSchema.SeedPanelState()` はそれを**初回起動時だけそのまま書く**（`Recompute` は
 「復元された state がある」側の分岐にしかない）。`Recompute` は「参加者が変わった＝この結果は
 別の対戦のもの」として score / finished を捨てる仕様なので、**新規インストール直後の 1 回目の

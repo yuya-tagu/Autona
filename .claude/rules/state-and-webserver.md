@@ -66,14 +66,14 @@ paths:
   分割していても実体は 1 箇所を指す）。`Window._SeedPanelState()` は
   `StateSchema.SeedPanelState()` と別呼び出しのまま（ColorService が StateSchema を読むので
   schema からは呼べない）。同じ `SaveBlock` 内
-- **core → src の逆依存は Qt-free モジュールのみ import 可**（`tests/test_core_qt_free.py`
-  が推移的に検査する）。現行の逆依存:
-  - `StateSchema` / `Top8Service` → `src` 直下の `AutonaCommentaryModel` / `AutonaTop8Model`
-    （いずれも Qt 非依存の state モデル。将来 core へ移す候補）
-  - `StateManager` / `SettingsManager`（従来から）+ `LayoutOptionsManager`（Step 5 第 5 弾で追加）
-    → `src/Helpers/AutonaDictHelper`（`deep_get`/`deep_set`。Qt 非依存のユーティリティ）
-  - `PlayerService` → `Helpers/AutonaSponsorHelper` は **Step 5 第 5 弾で解消**
-    （`src/core/SponsorHelper.py` へ移動）。新たな逆依存を足すときはこの一覧に追記する
+- **core は `src/core` 外の `src` モジュールを import しない**（ADR-005 S0 で逆依存ゼロ。
+  `tests/test_core_qt_free.py` が AST（関数内の遅延 import 含む）と subprocess の
+  `sys.modules` の両方で pin）。core が必要とする Qt-free の部品は core に置く:
+  `core/DictHelper.py`（旧 `Helpers/AutonaDictHelper`）/ `core/CommentaryModel.py`
+  （旧 `src/AutonaCommentaryModel`）/ `core/Top8Model.py`（旧 `src/AutonaTop8Model`）/
+  `core/SponsorHelper.py`（旧 `Helpers/AutonaSponsorHelper`）/ `core/TextHelper.py`
+  （`remove_accents_lower`）。ローカライズ等 Qt 側にしか無いものは
+  `bootstrap_core()` から callable で注入する
 
 ## AutonaActions（ドメイン操作の唯一の書き手）
 
@@ -149,7 +149,7 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
 | `src/core/TournamentInfoService.py` | `TournamentInfoService.instance`（`bootstrap_core()` 生成） | `tournamentInfo.*` の書き込み全部（provider ペイロードの適用・**EVENT タブ入力欄の `Set{Text,Number,Date}Field`**・表示大会名の 3 系統の上書き規則・`logoVersion`・起動時シード）。EVENT パネル不在でも動くことが遅延構築の前提。**両方向が同じ 3 操作を通る**（provider 側の `_ApplyKey` も入力側と同じメソッドを呼ぶ）。ただし `themeColor`/`accentColor` の 2 キーだけは **`core/ColorService.py` の持ち物**で本サービスを通らない（歴史的にこのプレフィックスなだけで、意味はカラー機能側）。**表示大会名の入力欄は SCORE パネルとクルーボードの 2 箇所にあり、どちらも `SetDisplayName` を呼ぶ**（クルー側は Step 5 第 4 弾で合流） |
 | `src/core/PlayerService.py` | `AutonaBasePlayerWidget.player`（選手ウィジェット 1 枚につき 1 個。path に束縛） | 選手スロット配下の書き込み全部（入力フィールド・seed/birthday・国/州の選択行・`mergedName`/`mergedOnlyName`・アバターとスポンサーロゴ・キャラスロット・`city`/`id`・スロット削除）。`BoardNumber()` が `score.{N}` と `player_editor.1` を見分ける |
 | `src/core/CrewBattleService.py` | `AutonaCrewBattleWidget.crew` | クルーボード（board 3）の書き込み全部（起動シード・メンバー名/ストック・`memberNum`/`activeMember`・**クルー合計の算出**（名前が入った表示中メンバーの stock 合計 → `team.{t}.score`）・crew 版のセットデータ正規化・`best_of`（raw のみ）・スワップ/リセット/クリア後の全体 publish）。合計は**state から算出**する（旧実装はウィジェットの値を合計していた） |
-| `src/core/Top8Service.py` | なし（モジュール関数） | `top8.*` の書き込み全部（選手 8 枠の publish・表示ラベルの既定値・反映（staged スコアのマージ + `Recompute`）・全リセット・Start.gg 取り込み）。トポロジ自体は Qt-free の `src/AutonaTop8Model.py` が正本 |
+| `src/core/Top8Service.py` | なし（モジュール関数） | `top8.*` の書き込み全部（選手 8 枠の publish・表示ラベルの既定値・反映（staged スコアのマージ + `Recompute`）・全リセット・Start.gg 取り込み）。トポロジ自体は Qt-free の `src/core/Top8Model.py` が正本 |
 | `src/core/ColorService.py` | なし（モジュール関数） | 大会カラー（`tournamentInfo.themeColor`/`accentColor`）と機能別カラー（`colors.{feature}.*`）の読み・書き・起動シード。**`tournamentInfo` プレフィックスだがこの族は本サービスのもの**で、`TournamentInfoService` は触らない（歴史的なキー名） |
 | `src/core/SponsorHelper.py` | なし（静的メソッド） | `...player.{M}.sponsor_logo` / `sponsor_logos.{I}` の解決と書き込み。`PlayerService.PublishImages` から呼ばれる |
 
@@ -161,10 +161,13 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
   一致させているのは `GameTrackerService.SetStageCount()` だけなので、読み込んだ
   スコアは `team.{t}.score` を書いて `_SyncScoreDisplays` → `SyncStagesToScore()` に
   渡す（+1 と同じ経路）。`stages` を直接足す経路を作らない
-- **held 配下は「同値なら書かない」**（`SetLoadService._SetIfChanged` /
-  `TournamentInfoService._SetIfChanged` / `AutonaActions._SetIfChanged`）。同値でも
+- **held 配下は「同値なら書かない」**（実装は `StateManager.SetIfChanged` の 1 つ。
+  `AutonaActions` / `SetLoadService` / `TournamentInfoService` / `CrewBattleService` が
+  それぞれ `_SetIfChanged` として束ねている）。同値でも
   `Set` すればボードは dirty になり 反映 ボタンが点灯する。Qt 経路は
-  `setChecked`/`setValue` が無変化なら emit しないことで偶然これを満たしていた
+  `setChecked`/`setValue` が無変化なら emit しないことで偶然これを満たしていた。
+  `SetIfChanged` も書き込みなので、`tests/test_objectname_keypath_contract.py` の
+  書き手検出（`Set`/`Unset`）と同じく core 外のウィジェットからは呼ばない
   - **`PlayerService` はこの規則を採らない**（例外）。理由は同モジュールの docstring:
     ここに来る書き込みは「すでに変化したウィジェット」からのもので、かつ
     州コンボの再構築とキャラスロットは**同じ空値を 2 回連続で publish するのが正常**
@@ -206,10 +209,10 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
 - `StateManagerBridge` は process 内で 1 個だけ（`bootstrap_core()` が生成。
   2 個目の生成は `__init__` が RuntimeError で拒否する）
 
-## AutonaDictHelper
+## DictHelper（`src/core/DictHelper.py`）
 
 - `deep_get(d, keys)` / `deep_set(d, keys, value)` でネスト操作
-- キーは文字列リスト: `["score", "1", "team", "1"]`
+- キーはドット区切り文字列: `"score.1.team.1"`
 - StateManager 内部で使用。外部から直接呼ぶ場面は少ない
 
 ## Web サーバー（Flask + SocketIO）

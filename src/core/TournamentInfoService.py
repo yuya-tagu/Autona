@@ -108,12 +108,10 @@ class TournamentInfoService:
         """The full key path of one ``tournamentInfo`` leaf."""
         return f"{cls.PREFIX}.{field}"
 
-    @staticmethod
-    def _SetIfChanged(key, value) -> bool:
-        if StateManager.Get(key, None) == value:
-            return False
-        StateManager.Set(key, value)
-        return True
+    # Write `key` only when it would actually change; True if written (the
+    # shared `StateManager.SetIfChanged`; see TEXT_FIELDS above for why the
+    # EVENT tab's fields all take this path).
+    _SetIfChanged = staticmethod(StateManager.SetIfChanged)
 
     def _FormatEventDate(self, timestamp) -> str:
         if self._formatEventDate is not None:

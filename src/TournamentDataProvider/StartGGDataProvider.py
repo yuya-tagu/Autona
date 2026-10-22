@@ -7,7 +7,7 @@ import time
 import traceback
 from loguru import logger
 from ..Helpers.AutonaCountryHelper import AutonaCountryHelper
-from ..Helpers.AutonaDictHelper import deep_get
+from ..core.DictHelper import deep_get
 from ..Helpers.AutonaDirHelper import AutonaResolve
 from ..AutonaGameAssetManager import AutonaGameAssetManager
 from ..AutonaPlayerDB import AutonaPlayerDB

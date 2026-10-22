@@ -360,7 +360,7 @@ game
 旧 `bracket.*` は Top 8 専用化（2026-07）で廃止。残留キーの掃除と `top8.*` の正規化は
 `Window._SeedPanelState()` が起動時に行う（パネルが lazy 構築のため、旧 `AutonaTop8Widget.__init__`
 から移動。§4.1.1）。トポロジーと進出伝播の正本は
-`src/AutonaTop8Model.py`（FGC 標準ダブルエリミ: Winners 4 名 + Losers 4 名）、
+`src/core/Top8Model.py`（FGC 標準ダブルエリミ: Winners 4 名 + Losers 4 名）、
 **`top8.*` への書き込みの正本は `src/core/Top8Service.py`**（headless core Step 5 第 5 弾。
 パネルは選手カードの組み立てと描画のみ）。
 
@@ -375,7 +375,7 @@ top8
 └── matches.{wsf1|wsf2|wf|lr1a|lr1b|lqf1|lqf2|lsf|lf|gf|gf_reset}
     ├── name                         W R   (ラウンド表示名)
     ├── slots                        W R   ([int,int] 選手スロット 1..8 / 0=TBD。
-    │                                       AutonaTop8Model.Recompute が導出)
+    │                                       core/Top8Model.Recompute が導出)
     ├── score                        W R
     ├── finished                     W R
     └── active                       W R   (gf_reset のみ意味を持つ)
@@ -385,7 +385,7 @@ top8
 
 実況・解説機能の全面リワーク（2026-07）でスキーマ刷新。スロット固定 12 名・
 欠番概念なし（旧「Unset 時に詰める」運用は廃止）。正規化・表示選択ルールの
-正本は `src/AutonaCommentaryModel.py`。旧スキーマ（seed / country / character /
+正本は `src/core/CommentaryModel.py`。旧スキーマ（seed / country / character /
 mains / custom_textbox 等）は起動時の `NormalizeState` でマイグレーションされる
 （custom_textbox → note、その他は破棄）。呼び出しは `Window._SeedPanelState()`
 （パネルが lazy 構築のため。§4.1.1）。状態は再起動をまたいで永続化される。
