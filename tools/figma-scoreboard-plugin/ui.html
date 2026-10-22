@@ -117,6 +117,18 @@
       background: var(--figma-color-bg-secondary);
       white-space: pre-wrap;
     }
+    .field {
+      margin-top: 10px;
+    }
+    .hint {
+      margin-top: 4px;
+      color: var(--figma-color-text-secondary);
+      font-size: 11px;
+    }
+    #pairing-code {
+      font-family: "Roboto Mono", Consolas, monospace;
+      letter-spacing: .06em;
+    }
     .error {
       color: var(--figma-color-text-danger);
     }
@@ -148,6 +160,13 @@
     <input id="autona-port" type="number" min="1" max="65535" value="5107">
   </div>
 
+  <div class="field">
+    <label for="pairing-code">ペアリングコード</label>
+    <input id="pairing-code" type="text" autocomplete="off" spellcheck="false"
+      maxlength="32" placeholder="XXXX-XXXX-XXXX">
+    <div class="hint">AutonaのScoreboard Designerで「Import → Figmaペアリングコード」を開くと表示されます。一度入力すれば次回からは不要です。</div>
+  </div>
+
   <div id="status" class="status">Autonaを起動し、既定ポート5107で待機してください。</div>
 
   <script>
@@ -157,6 +176,23 @@
       const port = Number.parseInt(portInput.value, 10);
       return `http://localhost:${Number.isInteger(port) && port > 0 ? port : DEFAULT_AUTONA_PORT}/api/designer/imports`;
     }
+
+    // Autona accepts the code however it was typed, but a header value must
+    // be plain ASCII, so it is normalized here: full-width characters (a
+    // Japanese IME) folded, case and separators dropped, regrouped by 4.
+    const pairingInput = document.getElementById("pairing-code");
+    const PAIRING_HELP = "AutonaのScoreboard Designerで「Import → Figmaペアリングコード」を開き、表示されたコードを入力してください。";
+    function normalizePairingCode(value) {
+      const compact = String(value || "").normalize("NFKC").toUpperCase()
+        .replace(/[^0-9A-Z]/g, "");
+      return (compact.match(/.{1,4}/g) || []).join("-");
+    }
+    pairingInput.addEventListener("change", () => {
+      pairingInput.value = normalizePairingCode(pairingInput.value);
+      parent.postMessage({
+        pluginMessage: { type: "save-pairing-code", code: pairingInput.value },
+      }, "*");
+    });
     const layerState = new Map();
     let bindings = [];
     let imageBindings = new Set();
@@ -309,6 +345,11 @@
 
     function requestBuildPayload() {
       if (sending) return;
+      if (!normalizePairingCode(pairingInput.value)) {
+        setStatus(`ペアリングコードを入力してください。\n${PAIRING_HELP}`, true);
+        pairingInput.focus();
+        return;
+      }
       const layers = selectedLayers.map((layer) => Object.assign(
         { id: layer.id },
         layerState.get(layer.id) || defaultLayerState(layer),
@@ -333,10 +374,26 @@
       setStatus("Autonaへ送信しています...");
       const response = await fetch(autonaImportUrl(), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-Autona-Pairing": normalizePairingCode(pairingInput.value),
+        },
         body: JSON.stringify(payload),
       });
       const body = await response.json().catch(() => ({}));
+      if (response.status === 401) {
+        throw new Error(body.reason === "pairing_required"
+          ? `ペアリングコードを入力してください。\n${PAIRING_HELP}`
+          : "ペアリングコードが正しくありません。\n" +
+            "AutonaのScoreboard Designerで「Import → Figmaペアリングコード」を開き、" +
+            "表示されているコードを入力し直してください（再生成した場合は新しいコードが必要です）。");
+      }
+      if (response.status === 429) {
+        const seconds = Number(body.retryAfter) > 0 ? Number(body.retryAfter) : 60;
+        throw new Error(
+          "ペアリングコードの誤りが続いたため、Autonaが一時的に受付を停止しています。\n" +
+          `約${seconds}秒後に、正しいコードでもう一度送信してください。`);
+      }
       if (!response.ok) {
         throw new Error(body.error || `Autona API error: ${response.status}`);
       }
@@ -367,6 +424,13 @@
         setStatus(selectedLayers.length
           ? `${selectedLayers.length}個のLayerを選択中です。`
            : "FigmaでLayerを選択してください。");
+      }
+
+      if (message.type === "pairing-code") {
+        // Do not overwrite what the user has already started typing.
+        if (!pairingInput.value) {
+          pairingInput.value = normalizePairingCode(message.code);
+        }
       }
 
       if (message.type === "layer-focused") {

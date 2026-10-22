@@ -39,6 +39,8 @@ EXPECTED_ROUTES = [
     ('/api/designer/imports', 'designer_receive_import', 'OPTIONS,POST'),
     ('/api/designer/imports/<import_id>', 'designer_get_import', 'GET,HEAD,OPTIONS'),
     ('/api/designer/imports/latest', 'designer_latest_import', 'GET,HEAD,OPTIONS'),
+    ('/api/designer/pairing', 'designer_pairing_code', 'GET,HEAD,OPTIONS'),
+    ('/api/designer/pairing/regenerate', 'designer_regenerate_pairing_code', 'OPTIONS,POST'),
     ('/characters', 'get_characters', 'GET,HEAD,OPTIONS'),
     ('/current-game', 'get_current_game', 'GET,HEAD,OPTIONS'),
     ('/display-option', 'post_display_option', 'OPTIONS,POST'),

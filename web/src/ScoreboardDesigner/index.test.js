@@ -592,4 +592,90 @@ describe("ScoreboardDesigner", () => {
             }),
         ));
     });
+
+    function mockPairingApi(codes) {
+        const issued = [...codes];
+        global.fetch = jest.fn(async (url, init) => {
+            if (url === "/api/designer/pairing/regenerate" &&
+                    init?.method === "POST") {
+                issued.shift();
+            }
+            return {ok: true, json: async () => ({code: issued[0]})};
+        });
+    }
+
+    function openPairingDialog() {
+        fireEvent.click(screen.getByRole("button", {name: "Import"}));
+        fireEvent.click(screen.getByRole("menuitem", {
+            name: "Figmaペアリングコード",
+        }));
+    }
+
+    test("shows the Figma pairing code from the Import menu", async () => {
+        window.history.replaceState(
+            {}, "", "/web?view=designer&desktop=1&token=test-token");
+        mockPairingApi(["ABCD-EFGH-JKMN"]);
+        render(
+            <Provider store={autonaStore}>
+                <ScoreboardDesigner />
+            </Provider>,
+        );
+        // A secret: not fetched until the user asks for it.
+        expect(global.fetch).not.toHaveBeenCalled();
+
+        openPairingDialog();
+
+        expect(await screen.findByRole("dialog", {
+            name: "Figmaペアリングコード",
+        })).toBeInTheDocument();
+        await waitFor(() => expect(screen.getByLabelText("ペアリングコード"))
+            .toHaveTextContent("ABCD-EFGH-JKMN"));
+        expect(global.fetch).toHaveBeenCalledWith(
+            "/api/designer/pairing",
+            expect.objectContaining({
+                headers: expect.objectContaining({
+                    "X-Autona-Designer-Token": "test-token",
+                }),
+            }),
+        );
+    });
+
+    test("regenerates the Figma pairing code only after confirmation", async () => {
+        window.history.replaceState(
+            {}, "", "/web?view=designer&desktop=1&token=test-token");
+        mockPairingApi(["ABCD-EFGH-JKMN", "WXYZ-2345-6789"]);
+        render(
+            <Provider store={autonaStore}>
+                <ScoreboardDesigner />
+            </Provider>,
+        );
+        openPairingDialog();
+        await waitFor(() => expect(screen.getByLabelText("ペアリングコード"))
+            .toHaveTextContent("ABCD-EFGH-JKMN"));
+
+        window.confirm = jest.fn(() => false);
+        fireEvent.click(screen.getByRole("button", {name: "再生成"}));
+        expect(window.confirm).toHaveBeenCalledWith(
+            expect.stringContaining("送信できなくなります"));
+        expect(global.fetch).not.toHaveBeenCalledWith(
+            "/api/designer/pairing/regenerate", expect.anything());
+        expect(screen.getByLabelText("ペアリングコード"))
+            .toHaveTextContent("ABCD-EFGH-JKMN");
+
+        window.confirm = jest.fn(() => true);
+        fireEvent.click(screen.getByRole("button", {name: "再生成"}));
+        await waitFor(() => expect(screen.getByLabelText("ペアリングコード"))
+            .toHaveTextContent("WXYZ-2345-6789"));
+        expect(global.fetch).toHaveBeenCalledWith(
+            "/api/designer/pairing/regenerate",
+            expect.objectContaining({
+                method: "POST",
+                headers: expect.objectContaining({
+                    "X-Autona-Designer-Token": "test-token",
+                }),
+            }),
+        );
+        expect(screen.getByText(/Figmaプラグインに入力し直してください/))
+            .toBeInTheDocument();
+    });
 });

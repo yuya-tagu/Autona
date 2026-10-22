@@ -1,4 +1,6 @@
 import os
+import tempfile
+import threading
 import orjson
 from ..Helpers.AutonaDictHelper import *
 
@@ -14,6 +16,10 @@ DEFAULT_WEBSERVER_PORT = 5107
 class SettingsManager:
     settings = {}
     _initialized = False
+    # Set() is called from the GUI thread and from Flask threads (e.g. Figma
+    # pairing code issue/regenerate). Re-entrant because Set -> SaveSettings
+    # both take it. Creating a lock has no side effect at import time.
+    lock = threading.RLock()
 
     def Initialize():
         """Create ./user_data/settings.json if missing and load it.
@@ -39,23 +45,41 @@ class SettingsManager:
         SettingsManager.LoadSettings()
 
     def SaveSettings():
-        with open("./user_data/settings.json", 'wb') as file:
-            file.write(orjson.dumps(SettingsManager.settings, option=orjson.OPT_NON_STR_KEYS))
+        with SettingsManager.lock:
+            path = "./user_data/settings.json"
+            data = orjson.dumps(SettingsManager.settings, option=orjson.OPT_NON_STR_KEYS)
+            # Write a sibling temp file and os.replace() it, so a crash or a
+            # failure mid-write never leaves a truncated settings.json.
+            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix="settings.", suffix=".tmp")
+            try:
+                with os.fdopen(fd, 'wb') as file:
+                    file.write(data)
+                os.replace(tmp, path)
+            except BaseException:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                raise
 
     def LoadSettings():
-        try:
-            with open("./user_data/settings.json", 'rb') as file:
-                SettingsManager.settings = orjson.loads(file.read())
-        except:
-            SettingsManager.settings = {}
+        with SettingsManager.lock:
+            try:
+                with open("./user_data/settings.json", 'rb') as file:
+                    SettingsManager.settings = orjson.loads(file.read())
+            except:
+                SettingsManager.settings = {}
 
     def Set(key: str, value):
-        deep_set(SettingsManager.settings, key, value)
-        SettingsManager.SaveSettings()
-    
+        with SettingsManager.lock:
+            deep_set(SettingsManager.settings, key, value)
+            SettingsManager.SaveSettings()
+
     def Unset(key: str):
-        deep_unset(SettingsManager.settings, key)
-        SettingsManager.SaveSettings()
+        with SettingsManager.lock:
+            deep_unset(SettingsManager.settings, key)
+            SettingsManager.SaveSettings()
 
     def Get(key: str, default=None):
-        return deep_get(SettingsManager.settings, key, default)
+        with SettingsManager.lock:
+            return deep_get(SettingsManager.settings, key, default)

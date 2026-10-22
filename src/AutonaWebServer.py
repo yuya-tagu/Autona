@@ -668,18 +668,39 @@ def _build_web_app():
             logger.error(traceback.format_exc())
             return jsonify({"error": "デザインの保存に失敗しました。"}), 500
 
+    # The Figma plugin's pairing code (AutonaDesignerService.
+    # check_import_pairing). Shown and replaced only through the Designer
+    # window's token, and never cached: it is a secret.
+    @app.get('/api/designer/pairing')
+    def designer_pairing_code():
+        WebServer._authorize_designer_request()
+        response = jsonify({"code": AutonaDesignerService.pairing_code()})
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.post('/api/designer/pairing/regenerate')
+    def designer_regenerate_pairing_code():
+        WebServer._authorize_designer_request()
+        response = jsonify(
+            {"code": AutonaDesignerService.regenerate_pairing_code()})
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
     # The Figma plugin posts here from its own origin, so unlike the token
     # routes above this one answers CORS -- but only to the origins
-    # AutonaDesignerService.is_import_origin_allowed() admits. The route's
-    # own cross_origin() decides every response it returns (the app-wide
+    # AutonaDesignerService.is_import_origin_allowed() admits, and its
+    # preflight admits the pairing-code header. The route's own
+    # cross_origin() decides every response it returns (the app-wide
     # CORS(app) skips one it has evaluated), and it handles the preflight
     # itself so a refused page gets a 403 there too. Refusals are returned,
     # never abort()ed: an aborted request would bypass cross_origin() and
-    # get CORS(app)'s allow-any-origin headers.
+    # get CORS(app)'s allow-any-origin headers -- and the plugin could not
+    # read a 401/429 without this route's CORS headers.
     @app.route('/api/designer/imports', methods=['POST', 'OPTIONS'])
     @cross_origin(
         origins=sorted(AutonaDesignerService.IMPORT_ORIGINS),
         methods=['POST'],
+        allow_headers=['Content-Type', AutonaDesignerService.PAIRING_HEADER],
         automatic_options=False,
         always_send=False)
     def designer_receive_import():
@@ -961,8 +982,11 @@ class WebServer(QThread):
 
     @staticmethod
     def _authorize_designer_import_request():
-        """None if the Figma import may go ahead, else the 403 to return.
+        """None if the Figma import may go ahead, else the refusal to return.
 
+        403: not this computer, or not a page the plugin runs in. 401: no
+        or a wrong pairing code. 429: locked after repeated wrong codes.
+        A preflight carries no code, so it stops after the Origin check.
         Returned, not raised: see the comment on the import route.
         """
         if not AutonaDesignerService.is_loopback(request.remote_addr):
@@ -976,6 +1000,27 @@ class WebServer(QThread):
             return jsonify({
                 "error": "Figma import is not allowed from this page"
             }), 403
+        if request.method == "OPTIONS":
+            return None
+        status, retry_after = AutonaDesignerService.check_import_pairing(
+            request.headers.get(AutonaDesignerService.PAIRING_HEADER))
+        if status == "locked":
+            return jsonify({
+                "error": "ペアリングコードの誤りが続いたため、"
+                         "Figmaインポートを一時的に停止しています。",
+                "reason": "pairing_locked",
+                "retryAfter": retry_after,
+            }), 429, {"Retry-After": str(retry_after)}
+        if status == "missing":
+            return jsonify({
+                "error": "ペアリングコードがありません。",
+                "reason": "pairing_required",
+            }), 401
+        if status != "ok":
+            return jsonify({
+                "error": "ペアリングコードが正しくありません。",
+                "reason": "pairing_invalid",
+            }), 401
         return None
 
     def run(self):

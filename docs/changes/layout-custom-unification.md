@@ -144,8 +144,33 @@ Step 1 と 2 は独立（並行可）。Step 3 は 2 の後、Step 4 は 1 の�
   `基本 1v1` ← Universal、`チーム` ← team、`クルー` ← crewbattle を引き継ぎ、幽霊キー `scoreboard` と
   simple / topleft の座標は削除した。`空` 以外は `meta.format`（`1v1` / `チーム戦` / `クルーバトル`）も入れる。
   プロジェクト名はプリセット名（`空` は通常の新規と同じ「新しいデザイン」）
+- **Figma 取込のペアリング**（2026-10-23）: `POST /api/designer/imports` は loopback・Origin（`null` /
+  `https://www.figma.com` / Origin なし）に加えて **`X-Autona-Pairing` ヘッダのペアリングコード**を要求する
+  （`AutonaDesignerService.check_import_pairing`）。
+  - コード: `0 O 1 I L` を除く英数字 31 種 × 12 文字を `XXXX-XXXX-XXXX` で表示（約 59.4 ビット、`secrets.choice`）。
+    `settings.json` の `designer.figma_pairing_code` に保存し、初回参照時に発行、再起動後も同じ。不正な保存値は再発行。
+    照合は NFKC・大文字化・英数字以外の除去をしてから `hmac.compare_digest`（バイト列）。64 文字超は照合前に不一致扱い
+  - Designer の `Import` → `Figmaペアリングコード` で表示・再生成（`GET /api/designer/pairing` /
+    `POST /api/designer/pairing/regenerate`、Designer トークン必須・`Cache-Control: no-store`）。再生成で旧コードは即無効。
+    コードは**ダイアログを開いたときだけ**取得する（マウント時には取らない）
+  - 応答: Origin・loopback 不許可は従来どおり 403（コードが正しくても）。ヘッダ欠落は 401 `pairing_required`
+    （失敗回数に数えない）、不一致は 401 `pairing_invalid`。プリフライトは許可 Origin にだけ
+    `Content-Type, X-Autona-Pairing` を返す（コードは見ない）
+  - 総当たり対策: 連続 5 回の不一致で 60 秒ロック、ロック明け後の不一致ごとに倍（120 → 240 → … 最長 3600 秒）。
+    ロック中は照合せず 429（`Retry-After` ヘッダと本文 `retryAfter`）。正しいコードの成功か再生成でカウンタと
+    ロックを解除。状態はメモリのみ（再起動で解除）
+  - ログは失敗回数とロック秒数だけで、コードの値（正解・送信値とも）は出さない
+  - Figma プラグインは入力欄の値を `figma.clientStorage` に保存し（`code.js` 経由）、送信時にヘッダへ付ける。
+    401 / 429 は日本語で案内する（`tools/figma-scoreboard-plugin/README.md`）
+  - pin: `tests/test_designer_service.py`（形式・エントロピー・永続化・再生成・ルートの 200/401/403/429・
+    プリフライト・`compare_digest`・ログ）、`web/src/ScoreboardDesigner/index.test.js`（表示・再生成）
 
 ### 7.2 既知の制約
+
+- **（解消済み 2026-10-23: ペアリング）Figma 取込が `Origin: null` を許可していた**。取込ルートはトークン不要で、
+  loopback と Origin（`null` / figma.com）しか見ていなかった。`null` は sandbox 付き iframe・`data:`・`file://` の
+  ページも送れるため、ブラウザで開いた任意サイトから、開いている Designer へレイヤーを混入できた。
+  ペアリングコード必須にして解消した（§7.1）。Origin・loopback のチェックは多層防御として残している
 
 - **保存済み v3 データのキーフレーム rotation 二重適用は自動補正しない**。旧 Designer の v1/v2 → v3 移行は、
   生成するキーフレームの rotation にレイヤー自身の rotation を入れていた（キャンバスと `runtime.js` はレイヤー枠を
