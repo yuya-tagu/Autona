@@ -38,11 +38,13 @@ foreach ($tree in "assets", "layout", "user_data") {
 Remove-Item -Path "Autona\assets\versions.json" -Force
 
 Copy-Item -Recurse -Force "web\build" "Autona\web\build"
-# Legal document set: LICENSE (upstream MIT attribution), TERMS.md (end-user
-# terms), THIRD-PARTY-NOTICES.md + licenses/ (third-party licenses incl. the
-# LGPL v3 texts required for Qt/PySide6). Ship all of them together.
+# Legal document set: LICENSE (MIT, incl. upstream attribution), TERMS.md
+# (binary usage notes), TRADEMARK.md (name/icon policy), THIRD-PARTY-NOTICES.md
+# + licenses/ (third-party licenses incl. the LGPL v3 texts required for
+# Qt/PySide6). Ship all of them together.
 Copy-Item -Force "LICENSE" "Autona\LICENSE"
 Copy-Item -Force "TERMS.md" "Autona\TERMS.md"
+Copy-Item -Force "TRADEMARK.md" "Autona\TRADEMARK.md"
 Copy-Item -Force "THIRD-PARTY-NOTICES.md" "Autona\THIRD-PARTY-NOTICES.md"
 Copy-Item -Force "ATTRIBUTIONS.md" "Autona\ATTRIBUTIONS.md"
 Copy-Item -Recurse -Force "licenses" "Autona\licenses"

@@ -1270,8 +1270,8 @@
         <translation>Discordコミュニティに参加する</translation>
     </message>
     <message>
-        <source>Corporate use inquiries</source>
-        <translation>法人利用のご相談</translation>
+        <source>Event support inquiries</source>
+        <translation>イベント運営支援のご相談</translation>
     </message>
     <message>
         <source>About Autona</source>

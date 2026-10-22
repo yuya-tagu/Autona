@@ -3,7 +3,7 @@
 格闘ゲーム大会の配信支援ツール（スコアボード管理、統計情報表示など）。
 リポジトリ `yuya-tagu/Autona` / メインブランチ `main`。
 
-- **デスクトップアプリ**: Python (PySide6、qtpy 経由) — `src/`。**PySide6 (LGPL) 必須・PyQt6 (GPL) 禁止**（ソース非公開配布のライセンス要件。`main.py` 冒頭の `QT_API=pyside6` が正本）
+- **デスクトップアプリ**: Python (PySide6、qtpy 経由) — `src/`。**PySide6 (LGPL) 必須・PyQt6 (GPL) 禁止**（MIT で配布するため、GPL の PyQt6 は使わず LGPL の PySide6 を使う。`main.py` 冒頭の `QT_API=pyside6` が正本）
 - **Web UI**: React (MUI) — `web/src/`（フォルダ名は上流 TournamentStreamHelper フォーク由来の歴史的経緯。実態は汎用スコアボード Web UI。リネームは影響大のため保留）
 - **ビルド**: PyInstaller（**onedir**）→ `dist/Autona/`。プロジェクト直下に `Autona.exe` + `_internal/` を配置して運用
 

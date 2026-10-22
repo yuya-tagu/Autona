@@ -1,28 +1,7 @@
-Autona — License Information
-============================
+MIT License
 
-This software consists of two parts:
-
-1. Portions derived from TournamentStreamHelper
-   (https://github.com/joaorb64/TournamentStreamHelper) are licensed under
-   the MIT License reproduced below, and the original copyright notice is
-   retained as required.
-
-2. All other portions (original work of the Autona project) are
-   Copyright (c) 2026 taguyan. All rights reserved.
-   Use of the distributed binaries is governed by the Terms of Use
-   (TERMS.md included in the distribution).
-
-Third-party software bundled with the distribution is licensed under its
-respective licenses. See THIRD-PARTY-NOTICES.md and the licenses/ directory.
-Nothing in the Terms of Use restricts the rights granted to you by those
-third-party licenses (including the LGPL v3 that applies to Qt / PySide6).
-
----------------------------------------------------------------------------
-
-MIT License (TournamentStreamHelper, original work)
-
-Copyright (c) 2024 João Ribeiro Bezerra
+Copyright (c) 2026 taguyan and Autona contributors
+Copyright (c) 2024 João Ribeiro Bezerra (TournamentStreamHelper)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

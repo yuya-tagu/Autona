@@ -16,7 +16,7 @@ python-dateutil==2.9.0
 # Qt-crossing updates are still safe. PySide6 wheels carry the Qt/WebEngine
 # binaries themselves (Essentials = core Qt, Addons = QtWebEngine etc.).
 # Bump all three together.
-# NOTE: PySide6 (LGPL v3) replaced PyQt6 (GPL v3) so the closed-source binary
+# NOTE: PySide6 (LGPL v3) replaced PyQt6 (GPL v3) so the MIT-licensed
 # distribution stays license-compliant. Do NOT reintroduce PyQt6.
 PySide6-Essentials==6.11.0
 PySide6-Addons==6.11.0

@@ -5,7 +5,7 @@ paths:
 
 # Qt (PySide6) ウィジェット開発ルール
 
-Qt binding は **PySide6（qtpy 経由、LGPL）** 固定。PyQt6 (GPL) はソース非公開配布と両立しないため使用禁止（build-and-release.md 参照）。import は `from qtpy...`、シグナルは `Signal` / `Slot`（`pyqtSignal` / `pyqtSlot` は書かない）。
+Qt binding は **PySide6（qtpy 経由、LGPL）** 固定。PyQt6 (GPL) は MIT 配布と両立しないため使用禁止（build-and-release.md 参照）。import は `from qtpy...`、シグナルは `Signal` / `Slot`（`pyqtSignal` / `pyqtSlot` は書かない）。
 
 ## パネル（旧 Dock）
 
