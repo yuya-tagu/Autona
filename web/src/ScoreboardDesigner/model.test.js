@@ -5,6 +5,7 @@ import {
     createBindingLayer,
     createDefaultGameHistoryImageStyle,
     createEmptyProject,
+    PROJECT_META_MAX_LENGTH,
     sanitizeSlug,
     validateProject,
 } from "./model";
@@ -235,6 +236,52 @@ describe("scoreboard designer model", () => {
         expect(copy.x).toBe(layer.x + 24);
     });
 
+    test("saves meta trimmed and leaves out what is empty", () => {
+        const project = createEmptyProject("Meta");
+        project.meta = {format: "  2v2 ", game: "   "};
+        const validated = validateProject(project);
+        expect(validated.meta).toEqual({format: "2v2"});
+        expect(validated.schemaVersion).toBe(3);
+        // The editor's own project is not rewritten.
+        expect(project.meta).toEqual({format: "  2v2 ", game: "   "});
+
+        project.meta = {format: "", game: null};
+        expect("meta" in validateProject(project)).toBe(false);
+        delete project.meta;
+        expect("meta" in validateProject(project)).toBe(false);
+    });
+
+    test("keeps meta through a schema v1 migration", () => {
+        const migrated = validateProject({
+            schemaVersion: 1,
+            name: "Legacy",
+            canvas: {width: 1920, height: 1080, backgroundColor: "transparent"},
+            layers: [],
+            meta: {game: "スト6", unknown: "dropped"},
+        });
+        expect(migrated.schemaVersion).toBe(3);
+        expect(migrated.meta).toEqual({game: "スト6"});
+    });
+
+    test.each([
+        ["a string", "1v1", /meta がオブジェクト/],
+        ["an array", ["1v1"], /meta がオブジェクト/],
+        ["null", null, /meta がオブジェクト/],
+        ["a non-string field", {format: 2}, /meta\.format が文字列/],
+        ["a field over the length limit",
+            {game: "x".repeat(PROJECT_META_MAX_LENGTH + 1)}, /meta\.game は64文字以内/],
+    ])("rejects meta that is %s", (_label, meta, message) => {
+        const project = createEmptyProject("Meta");
+        project.meta = meta;
+        expect(() => validateProject(project)).toThrow(message);
+    });
+
+    test("measures the meta length after trimming", () => {
+        const project = createEmptyProject("Meta");
+        project.meta = {game: ` ${"x".repeat(PROJECT_META_MAX_LENGTH)} `};
+        expect(validateProject(project).meta.game).toHaveLength(PROJECT_META_MAX_LENGTH);
+    });
+
     test("keeps optional group and auto layout metadata in schema v3", () => {
         const project = createEmptyProject();
         const layer = createBindingLayer("p1.name", 1);
@@ -394,6 +441,20 @@ describe("migration contract shared with the OBS runtime", () => {
             expect(normalizeMigrated(migrated, input, expected)).toEqual(expected);
         },
     );
+
+    // meta_overlay.json is laid over v3.json. model.ts keeps meta (trimmed);
+    // the runtime carries it through untouched and never renders it -- the
+    // Python side pins both against the same overlay.
+    test("v3.json with meta reads as expected_v3.json plus the trimmed meta", () => {
+        const input = {
+            ...readContractFixture("v3.json"),
+            ...readContractFixture("meta_overlay.json"),
+        };
+        const migrated = validateProject(input);
+        expect(migrated.meta).toEqual({format: "クルーバトル", game: "<b>スト6</b>"});
+        const {meta, ...rest} = migrated;
+        expect(normalizeMigrated(rest, input, expected)).toEqual(expected);
+    });
 
     // Inputs both must turn away with the same message (the Python side
     // runs them through runtime.js): a v1/v2 reference that is null or not

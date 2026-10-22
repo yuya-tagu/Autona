@@ -176,6 +176,32 @@ def test_choosing_the_fallback_that_is_shown_saves_it(
                               (SAVED_KEY, "scoreboard_simple")]
 
 
+def test_the_meta_line_shows_what_the_designer_saved(
+        makeBoard, layoutRoot, monkeypatch):
+    # A project's meta (format / game, edited in the Designer) reaches the
+    # Board tab's meta line through the catalog on the next scan.
+    from src.AutonaDesignerService import AutonaDesignerService
+
+    runtime = layoutRoot / "designer_runtime"
+    runtime.mkdir()
+    for name in AutonaDesignerService.RUNTIME_FILES:
+        (runtime / name).write_bytes(b"/* shared runtime */")
+    monkeypatch.setattr(AutonaDesignerService, "ROOT", layoutRoot / "custom")
+    monkeypatch.setattr(AutonaDesignerService, "RUNTIME_ROOT", runtime)
+
+    board = makeBoard("custom/crew")
+    AutonaDesignerService.save_project({"project": {
+        "schemaVersion": 3, "id": "crew", "name": "Crew",
+        "canvas": {"width": 1920, "height": 1080}, "assets": [], "layers": [],
+        "meta": {"format": "クルーバトル", "game": "<b>スマブラSP</b>"},
+    }, "assets": {}})
+    board._refreshDesigns()
+
+    assert board.designCombo.currentData() == "custom/crew"
+    assert board.designMetaLabel.text() == (
+        "対戦形式：クルーバトル\nゲーム：<b>スマブラSP</b>")
+
+
 def test_the_meta_line_is_plain_text(makeBoard):
     # format / game are free text from settings.json / project.json.
     board = makeBoard(FINALS)

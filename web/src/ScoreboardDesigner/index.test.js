@@ -214,7 +214,7 @@ describe("ScoreboardDesigner", () => {
         expect(document.querySelectorAll(".designer-layer-row.selected")).toHaveLength(2);
     });
 
-    test("loads the selected built-in scoreboard template", () => {
+    test("offers the Designer's own presets, not layout folder names", () => {
         window.history.replaceState(
             {}, "", "/web?view=designer&desktop=1&token=test-token");
         render(
@@ -223,17 +223,94 @@ describe("ScoreboardDesigner", () => {
             </Provider>,
         );
 
-        const templateSelect = screen.getByRole("combobox", {name: "標準テンプレート"});
-        expect(templateSelect)
-            .toHaveTextContent("default_board_universal");
+        const presetSelect = screen.getByRole("combobox", {name: "プリセット"});
+        expect(presetSelect).toHaveTextContent("基本 1v1");
 
-        fireEvent.mouseDown(templateSelect);
-        fireEvent.click(screen.getByRole("option", {name: "default_board_simple"}));
+        fireEvent.mouseDown(presetSelect);
+        expect(screen.getAllByRole("option").map((option) => option.textContent))
+            .toEqual(["空", "基本 1v1", "チーム", "クルー"]);
+    });
+
+    test("loads the selected preset with its match format", () => {
+        window.history.replaceState(
+            {}, "", "/web?view=designer&desktop=1&token=test-token");
+        render(
+            <Provider store={autonaStore}>
+                <ScoreboardDesigner />
+            </Provider>,
+        );
+
+        fireEvent.mouseDown(screen.getByRole("combobox", {name: "プリセット"}));
+        fireEvent.click(screen.getByRole("option", {name: "クルー"}));
         fireEvent.click(screen.getByRole("button", {name: "読込"}));
 
-        expect(screen.getByDisplayValue("default_board_simple"))
+        expect(screen.getByLabelText("デザイン名")).toHaveValue("クルー");
+        expect(screen.getByLabelText("対戦形式")).toHaveValue("クルーバトル");
+        expect(screen.getByLabelText("ゲーム")).toHaveValue("");
+        expect(document.querySelectorAll(".designer-layer-row")).toHaveLength(8);
+        expect(screen.getByText("プリセット「クルー」を読み込みました。"))
             .toBeInTheDocument();
-        expect(document.querySelectorAll(".designer-layer-row")).toHaveLength(9);
+    });
+
+    test("the empty preset is a new blank design", () => {
+        window.history.replaceState(
+            {}, "", "/web?view=designer&desktop=1&token=test-token");
+        window.confirm = jest.fn(() => true);
+        render(
+            <Provider store={autonaStore}>
+                <ScoreboardDesigner />
+            </Provider>,
+        );
+        fireEvent.click(screen.getByRole("button", {name: "追加"}));
+
+        fireEvent.mouseDown(screen.getByRole("combobox", {name: "プリセット"}));
+        fireEvent.click(screen.getByRole("option", {name: "空"}));
+        fireEvent.click(screen.getByRole("button", {name: "読込"}));
+
+        expect(window.confirm).toHaveBeenCalled();
+        expect(document.querySelectorAll(".designer-layer-row")).toHaveLength(0);
+        expect(screen.getByLabelText("デザイン名")).toHaveValue("新しいデザイン");
+        expect(screen.getByLabelText("対戦形式")).toHaveValue("");
+    });
+
+    test("saves the match format and game trimmed, and leaves unset ones out", async () => {
+        window.history.replaceState(
+            {}, "", "/web?view=designer&desktop=1&token=test-token");
+        global.fetch = jest.fn(async () => ({
+            ok: true,
+            json: async () => ({slug: "meta", path: "layout/custom/meta"}),
+        }));
+        render(
+            <Provider store={autonaStore}>
+                <ScoreboardDesigner />
+            </Provider>,
+        );
+
+        // Unset fields show what the BOARD tab falls back to.
+        expect(screen.getByLabelText("対戦形式"))
+            .toHaveAttribute("placeholder", "1v1");
+        expect(screen.getByLabelText("ゲーム"))
+            .toHaveAttribute("placeholder", "カスタム");
+        expect(screen.getByLabelText("ゲーム")).toHaveAttribute("maxLength", "64");
+
+        fireEvent.change(screen.getByLabelText("デザイン名"), {
+            target: {value: "Meta"},
+        });
+        fireEvent.change(screen.getByLabelText("ゲーム"), {
+            target: {value: "  スト6 "},
+        });
+        fireEvent.click(screen.getByRole("button", {name: "保存"}));
+        await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+        const saved = JSON.parse(global.fetch.mock.calls[0][1].body).project;
+        expect(saved.meta).toEqual({game: "スト6"});
+        // The field keeps what was typed.
+        expect(screen.getByLabelText("ゲーム")).toHaveValue("  スト6 ");
+
+        fireEvent.change(screen.getByLabelText("ゲーム"), {target: {value: ""}});
+        fireEvent.click(screen.getByRole("button", {name: "保存"}));
+        await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+        const cleared = JSON.parse(global.fetch.mock.calls[1][1].body).project;
+        expect("meta" in cleared).toBe(false);
     });
 
     test("shows the save button as save only", () => {

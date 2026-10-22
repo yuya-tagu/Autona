@@ -55,6 +55,8 @@ import {
     GameHistoryPartTarget,
     GameHistoryImagePartRole,
     ImageLayer,
+    ProjectMeta,
+    ProjectMetaKey,
     ScoreboardProject,
 } from "./types";
 import {
@@ -65,6 +67,8 @@ import {
     createDefaultEvents,
     createEmptyProject,
     createId,
+    PROJECT_META_DEFAULTS,
+    PROJECT_META_MAX_LENGTH,
 } from "./model";
 import {
     deleteDesktopProject,
@@ -164,15 +168,9 @@ interface LayerPanelGroupItem {
 type LayerPanelItem = LayerPanelLayerItem | LayerPanelGroupItem;
 type EditorMode = "design" | "animate";
 type AnimationTrackKey = "sceneEnter" | "dataChange";
-type StandardTemplateKey =
-    | "scoreboard"
-    | "scoreboard_crewbattle"
-    | "scoreboard_simple"
-    | "scoreboard_team"
-    | "scoreboard_topleft"
-    | "scoreboard_Universal";
+type DesignerPresetKey = "empty" | "basic-1v1" | "team" | "crew";
 
-interface TemplateLayerSpec {
+interface PresetLayerSpec {
     binding: BindingKey;
     x: number;
     y: number;
@@ -182,14 +180,18 @@ interface TemplateLayerSpec {
     align?: "left" | "center" | "right";
 }
 
-const STANDARD_TEMPLATES: Array<{key: StandardTemplateKey; name: string}> = [
-    {key: "scoreboard", name: "default_board"},
-    {key: "scoreboard_crewbattle", name: "default_board_crewbattle"},
-    {key: "scoreboard_simple", name: "default_board_simple"},
-    {key: "scoreboard_team", name: "default_board_team"},
-    {key: "scoreboard_topleft", name: "default_board_topleft"},
-    {key: "scoreboard_Universal", name: "default_board_universal"},
-];
+// Starting points for a new design. They belong to the Designer alone:
+// neither the keys nor the coordinates refer to a folder under layout/
+// (the built-in layouts are hand-written pages the Designer cannot open).
+// A preset may declare the match format (project.meta.format) it is for.
+interface DesignerPreset {
+    key: DesignerPresetKey;
+    label: string;
+    format?: string;
+    layers: PresetLayerSpec[];
+}
+
+const DEFAULT_PRESET_KEY: DesignerPresetKey = "basic-1v1";
 
 function panelItemKey(item: LayerPanelItem): string {
     return item.kind === "group"
@@ -276,38 +278,19 @@ function resolvedAutoLayerName(layer: DesignerLayer, state: any): string | null 
     return value || null;
 }
 
-const TEMPLATE_LAYER_SPECS: Record<StandardTemplateKey, TemplateLayerSpec[]> = {
-    scoreboard: [
-        {binding: "p1.name", x: 380, y: 42, width: 500, height: 64, fontSize: 30, align: "left"},
-        {binding: "p2.name", x: 1040, y: 42, width: 500, height: 64, fontSize: 30, align: "right"},
-        {binding: "p1.score", x: 882, y: 42, width: 64, height: 64, fontSize: 42, align: "center"},
-        {binding: "p2.score", x: 974, y: 42, width: 64, height: 64, fontSize: 42, align: "center"},
-        {binding: "match.round", x: 760, y: 118, width: 400, height: 36, fontSize: 22, align: "center"},
-        {binding: "match.phase", x: 760, y: 158, width: 400, height: 34, fontSize: 20, align: "center"},
-        {binding: "games", x: 790, y: 190, width: 340, height: 32},
-    ],
-    scoreboard_crewbattle: [
-        {binding: "tournament.name", x: 24, y: 45, width: 330, height: 28, fontSize: 16, align: "left"},
-        {binding: "match.phase", x: 24, y: 76, width: 330, height: 32, fontSize: 18, align: "left"},
-        {binding: "p1.name", x: 472, y: 51, width: 330, height: 52, fontSize: 26, align: "right"},
-        {binding: "p2.name", x: 1118, y: 51, width: 330, height: 52, fontSize: 26, align: "left"},
-        {binding: "p1.score", x: 826, y: 45, width: 90, height: 64, fontSize: 40, align: "center"},
-        {binding: "p2.score", x: 1004, y: 45, width: 90, height: 64, fontSize: 40, align: "center"},
-        {binding: "p1.seed", x: 24, y: 162, width: 288, height: 46, fontSize: 24, align: "left"},
-        {binding: "p2.seed", x: 1608, y: 162, width: 288, height: 46, fontSize: 24, align: "right"},
-    ],
-    scoreboard_simple: [
-        {binding: "tournament.name", x: 124, y: 10, width: 390, height: 38, fontSize: 22, align: "left"},
-        {binding: "match.phase", x: 124, y: 50, width: 240, height: 30, fontSize: 18, align: "left"},
-        {binding: "match.round", x: 124, y: 80, width: 240, height: 30, fontSize: 18, align: "left"},
-        {binding: "p1.name", x: 495, y: 999, width: 222, height: 34, fontSize: 26, align: "left"},
-        {binding: "p2.name", x: 1235, y: 999, width: 222, height: 34, fontSize: 26, align: "left"},
-        {binding: "p1.score", x: 767, y: 998, width: 30, height: 37, fontSize: 30, align: "center"},
-        {binding: "p2.score", x: 1507, y: 998, width: 30, height: 37, fontSize: 30, align: "center"},
-        {binding: "p1.twitter", x: 613, y: 1039, width: 170, height: 20, fontSize: 16, align: "center"},
-        {binding: "p2.twitter", x: 1353, y: 1039, width: 170, height: 20, fontSize: 16, align: "center"},
-    ],
-    scoreboard_team: [
+const DESIGNER_PRESETS: DesignerPreset[] = [
+    {key: "empty", label: "空", layers: []},
+    {key: "basic-1v1", label: "基本 1v1", format: "1v1", layers: [
+        {binding: "tournament.name", x: 560, y: 54, width: 800, height: 64, fontSize: 30, align: "center"},
+        {binding: "p1.name", x: 170, y: 872, width: 520, height: 72, fontSize: 36, align: "left"},
+        {binding: "p2.name", x: 1230, y: 872, width: 520, height: 72, fontSize: 36, align: "right"},
+        {binding: "p1.score", x: 735, y: 842, width: 120, height: 110, fontSize: 56, align: "center"},
+        {binding: "p2.score", x: 1065, y: 842, width: 120, height: 110, fontSize: 56, align: "center"},
+        {binding: "p1.twitter", x: 200, y: 950, width: 260, height: 28, fontSize: 18, align: "left"},
+        {binding: "p2.twitter", x: 1460, y: 950, width: 260, height: 28, fontSize: 18, align: "right"},
+        {binding: "games", x: 790, y: 966, width: 340, height: 42},
+    ]},
+    {key: "team", label: "チーム", format: "チーム戦", layers: [
         {binding: "p1.name", x: 444, y: 63, width: 380, height: 32, fontSize: 27, align: "left"},
         {binding: "p2.name", x: 1096, y: 63, width: 380, height: 32, fontSize: 27, align: "right"},
         {binding: "p1.sponsorName", x: 444, y: 96, width: 380, height: 20, fontSize: 16, align: "left"},
@@ -318,34 +301,26 @@ const TEMPLATE_LAYER_SPECS: Record<StandardTemplateKey, TemplateLayerSpec[]> = {
         {binding: "match.phase", x: 16, y: 70, width: 340, height: 24, fontSize: 16, align: "left"},
         {binding: "match.round", x: 16, y: 94, width: 340, height: 24, fontSize: 16, align: "left"},
         {binding: "games", x: 790, y: 128, width: 340, height: 32},
-    ],
-    scoreboard_topleft: [
-        {binding: "tournament.name", x: 32, y: 24, width: 220, height: 24, fontSize: 18, align: "left"},
-        {binding: "match.phase", x: 32, y: 50, width: 160, height: 22, fontSize: 16, align: "left"},
-        {binding: "match.round", x: 200, y: 50, width: 190, height: 22, fontSize: 16, align: "left"},
-        {binding: "p1.name", x: 72, y: 76, width: 360, height: 42, fontSize: 24, align: "left"},
-        {binding: "p2.name", x: 72, y: 120, width: 360, height: 42, fontSize: 24, align: "left"},
-        {binding: "p1.score", x: 464, y: 76, width: 48, height: 42, fontSize: 30, align: "center"},
-        {binding: "p2.score", x: 464, y: 120, width: 48, height: 42, fontSize: 30, align: "center"},
-        {binding: "games", x: 88, y: 168, width: 300, height: 30},
-    ],
-    scoreboard_Universal: [
-        {binding: "tournament.name", x: 560, y: 54, width: 800, height: 64, fontSize: 30, align: "center"},
-        {binding: "p1.name", x: 170, y: 872, width: 520, height: 72, fontSize: 36, align: "left"},
-        {binding: "p2.name", x: 1230, y: 872, width: 520, height: 72, fontSize: 36, align: "right"},
-        {binding: "p1.score", x: 735, y: 842, width: 120, height: 110, fontSize: 56, align: "center"},
-        {binding: "p2.score", x: 1065, y: 842, width: 120, height: 110, fontSize: 56, align: "center"},
-        {binding: "p1.twitter", x: 200, y: 950, width: 260, height: 28, fontSize: 18, align: "left"},
-        {binding: "p2.twitter", x: 1460, y: 950, width: 260, height: 28, fontSize: 18, align: "right"},
-        {binding: "games", x: 790, y: 966, width: 340, height: 42},
-    ],
-};
+    ]},
+    {key: "crew", label: "クルー", format: "クルーバトル", layers: [
+        {binding: "tournament.name", x: 24, y: 45, width: 330, height: 28, fontSize: 16, align: "left"},
+        {binding: "match.phase", x: 24, y: 76, width: 330, height: 32, fontSize: 18, align: "left"},
+        {binding: "p1.name", x: 472, y: 51, width: 330, height: 52, fontSize: 26, align: "right"},
+        {binding: "p2.name", x: 1118, y: 51, width: 330, height: 52, fontSize: 26, align: "left"},
+        {binding: "p1.score", x: 826, y: 45, width: 90, height: 64, fontSize: 40, align: "center"},
+        {binding: "p2.score", x: 1004, y: 45, width: 90, height: 64, fontSize: 40, align: "center"},
+        {binding: "p1.seed", x: 24, y: 162, width: 288, height: 46, fontSize: 24, align: "left"},
+        {binding: "p2.seed", x: 1608, y: 162, width: 288, height: 46, fontSize: 24, align: "right"},
+    ]},
+];
 
-function defaultTemplateProject(templateKey: StandardTemplateKey): ScoreboardProject {
-    const template = STANDARD_TEMPLATES.find(({key}) => key === templateKey);
-    const project = createEmptyProject(template?.name ?? `default_${templateKey}`);
-    const specs = TEMPLATE_LAYER_SPECS[templateKey];
-    project.layers = specs.map((spec, index) => {
+function presetProject(preset: DesignerPreset): ScoreboardProject {
+    // The empty preset is a plain new project: "空" is no design name.
+    const project = preset.layers.length
+        ? createEmptyProject(preset.label)
+        : createEmptyProject();
+    if (preset.format) project.meta = {format: preset.format};
+    project.layers = preset.layers.map((spec, index) => {
         const layer = {
             ...createBindingLayer(spec.binding, index + 1),
             x: spec.x,
@@ -425,8 +400,8 @@ export default function ScoreboardDesigner() {
     const [selectedGameHistoryPartPath, setSelectedGameHistoryPartPath] =
         React.useState<number[] | null>(null);
     const [bindingToAdd, setBindingToAdd] = React.useState<BindingKey>("p1.name");
-    const [standardTemplate, setStandardTemplate] =
-        React.useState<StandardTemplateKey>("scoreboard_Universal");
+    const [presetKey, setPresetKey] =
+        React.useState<DesignerPresetKey>(DEFAULT_PRESET_KEY);
     const [sampleMode, setSampleMode] = React.useState(true);
     const [animationNonce, setAnimationNonce] = React.useState(0);
     const [editorMode, setEditorMode] = React.useState<EditorMode>("design");
@@ -1062,14 +1037,30 @@ export default function ScoreboardDesigner() {
         }));
     };
 
-    const loadDefaultTemplate = () => {
+    const loadPreset = () => {
+        const preset = DESIGNER_PRESETS.find(({key}) => key === presetKey);
+        if (!preset) return;
         if (project.layers.length && !window.confirm("現在の編集内容を破棄しますか？")) return;
         revokeAssetUrls(assets);
-        const template = defaultTemplateProject(standardTemplate);
+        const next = presetProject(preset);
+        const firstLayer = next.layers[0];
         setAssets({});
-        resetProject(template, "標準テンプレートを読み込みました。");
-        setSelection([template.layers[0].id], template.layers[0].id);
+        resetProject(next, `プリセット「${preset.label}」を読み込みました。`);
+        setSelection(firstLayer ? [firstLayer.id] : [], firstLayer?.id ?? null);
         setCurrentSlug(null);
+    };
+
+    // The editor keeps what is typed (trailing spaces included, so typing
+    // is not fought); validateProject() trims it when saving. A cleared
+    // field -- and a meta with no field left -- is removed, never kept "".
+    const updateProjectMeta = (key: ProjectMetaKey, value: string) => {
+        applyProjectChange((current) => {
+            const meta: ProjectMeta = {...current.meta, [key]: value};
+            if (!value) delete meta[key];
+            const next: ScoreboardProject = {...current, meta};
+            if (!Object.keys(meta).length) delete next.meta;
+            return next;
+        });
     };
 
     const selectAllLayers = React.useCallback(() => {
@@ -1581,6 +1572,36 @@ export default function ScoreboardDesigner() {
                         }}
                         fullWidth
                     />
+                    {/* project.meta: the BOARD tab's meta line. The placeholder
+                        is what it shows while the field is left empty. */}
+                    <Stack direction="row" gap={1}>
+                        <TextField
+                            size="small"
+                            label="対戦形式"
+                            value={project.meta?.format ?? ""}
+                            placeholder={PROJECT_META_DEFAULTS.format}
+                            onChange={(event) =>
+                                updateProjectMeta("format", event.target.value)}
+                            slotProps={{
+                                htmlInput: {maxLength: PROJECT_META_MAX_LENGTH},
+                                inputLabel: {shrink: true},
+                            }}
+                            fullWidth
+                        />
+                        <TextField
+                            size="small"
+                            label="ゲーム"
+                            value={project.meta?.game ?? ""}
+                            placeholder={PROJECT_META_DEFAULTS.game}
+                            onChange={(event) =>
+                                updateProjectMeta("game", event.target.value)}
+                            slotProps={{
+                                htmlInput: {maxLength: PROJECT_META_MAX_LENGTH},
+                                inputLabel: {shrink: true},
+                            }}
+                            fullWidth
+                        />
+                    </Stack>
                     <Box className="designer-preview-data">
                         <Typography variant="subtitle2">プレビューデータ</Typography>
                         <Box className="designer-data-toggle">
@@ -1622,25 +1643,25 @@ export default function ScoreboardDesigner() {
                     </Box>
                     <Divider />
                     <Typography variant="caption" color="text.secondary">
-                        標準テンプレート
+                        プリセット
                     </Typography>
                     <Stack direction="row" gap={1}>
                         <Select
                             size="small"
                             sx={{flex: 1, minWidth: 0}}
-                            value={standardTemplate}
+                            value={presetKey}
                             onChange={(event) =>
-                                setStandardTemplate(event.target.value as StandardTemplateKey)
+                                setPresetKey(event.target.value as DesignerPresetKey)
                             }
-                            inputProps={{"aria-label": "標準テンプレート"}}
+                            inputProps={{"aria-label": "プリセット"}}
                         >
-                            {STANDARD_TEMPLATES.map((template) => (
-                                <MenuItem key={template.key} value={template.key}>
-                                    {template.name}
+                            {DESIGNER_PRESETS.map((preset) => (
+                                <MenuItem key={preset.key} value={preset.key}>
+                                    {preset.label}
                                 </MenuItem>
                             ))}
                         </Select>
-                        <Button variant="outlined" onClick={loadDefaultTemplate}>
+                        <Button variant="outlined" onClick={loadPreset}>
                             読込
                         </Button>
                     </Stack>
