@@ -17,7 +17,14 @@
        v1.3.0 asset was derived from a pre-cleanup zip and shipped
        dev-fetched data (test tournament icon layout/logo.png, designer test
        project layout/custom/, stale assets/rulesets.json). This check makes
-       such a zip fail loudly instead.
+       such a zip fail loudly instead. The shared Designer runtime
+       (layout/designer_runtime/) is tracked and therefore allowed; designer
+       projects (layout/custom/) are gitignored and therefore still rejected.
+
+    3. Required-entry check: layout/designer_runtime/runtime.js and
+       runtime.css must be in the zip. Every Designer design's index.html
+       is a stub that loads them, so a release without them would render
+       every user design blank in OBS.
 
     Run automatically by gen_release.ps1 and publish_release.ps1. When
     publishing manually with `gh release create` (release runbook step 8),
@@ -69,6 +76,17 @@ try {
             $sample = ($leaked | Select-Object -First 5 | ForEach-Object { $_.FullName }) -join ", "
             throw ("release zip ships {0} file(s) under assets/layout/user_data that are not git-tracked " `
                 + "(dev/runtime data must not be distributed): {1}") -f $leaked.Count, $sample
+        }
+
+        $entryNames = New-Object 'System.Collections.Generic.HashSet[string]'
+        $entries | ForEach-Object { [void]$entryNames.Add($_.FullName) }
+        $missing = @(@(
+                "Autona/layout/designer_runtime/runtime.js",
+                "Autona/layout/designer_runtime/runtime.css"
+            ) | Where-Object { -not $entryNames.Contains($_) })
+        if ($missing.Count -gt 0) {
+            throw ("release zip is missing the shared Designer runtime (every custom design loads it): {0}" `
+                -f ($missing -join ", "))
         }
 
         Write-Host ("{0} OK: {1} entries, all '/' separators, runtime trees contain tracked files only" `

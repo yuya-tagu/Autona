@@ -21,6 +21,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 
 class DesignerProjectError(ValueError):
     pass
@@ -28,11 +30,66 @@ class DesignerProjectError(ValueError):
 
 class AutonaDesignerService:
     ROOT = Path("layout/custom")
-    TEMPLATE_CANDIDATES = (
-        Path("web/build/scoreboard-designer-runtime"),
-        Path("web/public/scoreboard-designer-runtime"),
-    )
-    TEMPLATE_FILES = ("index.html", "runtime.css", "runtime.js")
+    # The shared renderer every stub loads. Writing a stub while it is
+    # missing (e.g. only Autona.exe and _internal/ were swapped by hand)
+    # would turn every design blank in OBS, so both callers check it first.
+    RUNTIME_ROOT = Path("layout/designer_runtime")
+    RUNTIME_FILES = ("runtime.js", "runtime.css")
+    # Identifies a stub regardless of line endings or later edits to the
+    # template below.
+    STUB_MARKER = "Autona Designer stub"
+    # Every design's entry point is this logic-free stub; the renderer is the
+    # single shared runtime in layout/designer_runtime/ (README there). The
+    # paths are relative to layout/custom/{slug}/index.html, so the same file
+    # works over http (preview) and file:// (OBS local file), and runtime.js
+    # keeps resolving ./project.json and assets/ against the design folder.
+    STUB_INDEX_HTML = """<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <!-- Autona Designer stub: the renderer is layout/designer_runtime/. -->
+    <script>
+      window.tshLayoutRootPath = "../..";
+      window.tshProgramRootPath = "../../..";
+    </script>
+    <script src="../../include/globals.js"></script>
+    <link rel="stylesheet" href="../../main.css" />
+    <link rel="stylesheet" href="../../designer_runtime/runtime.css" />
+  </head>
+  <body>
+    <main id="scoreboard-composer" aria-label="Autona scoreboard"></main>
+    <div id="composer-error" role="alert"></div>
+    <script src="../../designer_runtime/runtime.js"></script>
+  </body>
+</html>
+"""
+    # Designs saved before the shared runtime carried a private copy of these
+    # three files; MigrateLegacyProjects() parks them here for rollback.
+    LEGACY_DIRNAME = "_legacy"
+    LEGACY_FILES = ("index.html", "runtime.js", "runtime.css")
+    # The index.html those designs were saved with. Only used to tell an
+    # untouched entry point from a hand-edited one when replacing it.
+    LEGACY_INDEX_HTML = """<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script>
+      window.tshLayoutRootPath = "../..";
+      window.tshProgramRootPath = "../../..";
+    </script>
+    <script src="../../include/globals.js"></script>
+    <link rel="stylesheet" href="../../main.css" />
+    <link rel="stylesheet" href="./runtime.css" />
+  </head>
+  <body>
+    <main id="scoreboard-composer" aria-label="Autona scoreboard"></main>
+    <div id="composer-error" role="alert"></div>
+    <script src="./runtime.js"></script>
+  </body>
+</html>
+"""
 
     MAX_PROJECT_BYTES = 2 * 1024 * 1024
     MAX_ASSET_BYTES = 50 * 1024 * 1024
@@ -161,6 +218,52 @@ class AutonaDesignerService:
         return {"slug": safe_slug}
 
     @classmethod
+    def MigrateLegacyProjects(cls) -> list[str]:
+        """Switch designs that carry a private runtime copy over to the stub.
+
+        Called once from bootstrap_core(). For every design folder holding a
+        runtime.js, its index.html / runtime.js / runtime.css are parked in
+        ``_legacy/`` (the rollback copy, docs/operations/runtime-operations.md)
+        and the stub index.html is written in their place. project.json and
+        assets/ are never touched: the shared runtime migrates older
+        schemaVersions at load time.
+
+        Idempotent: the marker is runtime.js in the design folder, which
+        nothing writes any more. Never raises -- a design that cannot be
+        migrated keeps rendering with its own copy, and startup must not
+        depend on user files. Does nothing while the shared runtime is
+        missing (see RUNTIME_ROOT). Returns the migrated slugs.
+        """
+        migrated: list[str] = []
+        try:
+            root = cls.ROOT
+            if not root.is_dir():
+                return migrated
+            if not cls._shared_runtime_available():
+                logger.warning(
+                    "designer: shared runtime missing in {}; legacy designs "
+                    "keep their own runtime copy (incomplete update?)",
+                    cls.RUNTIME_ROOT)
+                return migrated
+            directories = sorted(
+                root.iterdir(), key=lambda item: item.name.casefold())
+        except Exception:
+            logger.exception("designer: cannot scan {} for migration", cls.ROOT)
+            return migrated
+        for directory in directories:
+            try:
+                if cls._migrate_legacy_project(directory):
+                    migrated.append(directory.name)
+            except Exception:
+                logger.exception(
+                    "designer: legacy migration failed for {}", directory)
+        if migrated:
+            logger.info(
+                "designer: migrated {} legacy design(s) to the shared runtime: {}",
+                len(migrated), ", ".join(migrated))
+        return migrated
+
+    @classmethod
     def save_project(cls, payload: Any) -> dict[str, str]:
         if not isinstance(payload, dict):
             raise DesignerProjectError("保存データがオブジェクトではありません。")
@@ -169,13 +272,25 @@ class AutonaDesignerService:
         cls._validate_project(project)
         if not isinstance(assets, dict):
             raise DesignerProjectError("assetsがオブジェクトではありません。")
-        template_root = cls._template_root()
+        if not cls._shared_runtime_available():
+            raise DesignerProjectError(
+                "OBSランタイム（layout/designer_runtime）が見つかりません。")
 
         slug = cls.slugify(project["name"])
         directory = cls._project_directory(slug)
         if directory.exists() and directory.is_symlink():
             raise DesignerProjectError("シンボリックリンクには保存できません。")
         directory.mkdir(parents=True, exist_ok=True)
+        # A legacy design that arrived after startup (e.g. copied in while
+        # the app runs) is migrated first, so overwriting its index.html
+        # below never loses the rollback copy. Not fatal: the save itself
+        # does not depend on it.
+        try:
+            cls._migrate_legacy_project(directory)
+        except Exception:
+            logger.exception(
+                "designer: legacy migration before save failed for {}",
+                directory)
         asset_directory = directory / "assets"
         if asset_directory.exists() and asset_directory.is_symlink():
             raise DesignerProjectError("assetsがシンボリックリンクです。")
@@ -207,11 +322,8 @@ class AutonaDesignerService:
             cls._assert_within(directory, destination)
             cls._atomic_write(destination, data)
 
-        for filename in cls.TEMPLATE_FILES:
-            cls._atomic_write(
-                directory / filename,
-                (template_root / filename).read_bytes(),
-            )
+        cls._atomic_write(
+            directory / "index.html", cls.STUB_INDEX_HTML.encode("utf-8"))
 
         # Write the manifest last so readers never see references to assets
         # that have not finished saving.
@@ -839,12 +951,62 @@ class AutonaDesignerService:
                 "保存先がlayout/customの外を指しています。") from exc
 
     @classmethod
-    def _template_root(cls) -> Path:
-        for candidate in cls.TEMPLATE_CANDIDATES:
-            if all((candidate / name).is_file()
-                   for name in cls.TEMPLATE_FILES):
-                return candidate
-        raise DesignerProjectError("OBSランタイムテンプレートが見つかりません。")
+    def _shared_runtime_available(cls) -> bool:
+        return all((cls.RUNTIME_ROOT / name).is_file()
+                   for name in cls.RUNTIME_FILES)
+
+    @classmethod
+    def _is_stub(cls, index_html: bytes) -> bool:
+        return cls.STUB_MARKER.encode("utf-8") in index_html
+
+    @classmethod
+    def _migrate_legacy_project(cls, directory: Path) -> bool:
+        """Migrate one design folder; False when there is nothing to do."""
+        if not directory.is_dir() or directory.is_symlink():
+            return False
+        if not (directory / "runtime.js").is_file() or not (
+                directory / "project.json").is_file():
+            return False
+        legacy = directory / cls.LEGACY_DIRNAME
+        if legacy.is_symlink():
+            raise DesignerProjectError("_legacyがシンボリックリンクです。")
+        index = directory / "index.html"
+        index_data = index.read_bytes() if index.is_file() else None
+        replaces_entry_point = (
+            index_data is not None and not cls._is_stub(index_data))
+        # Back up, then swap the entry point, then drop the old runtime: an
+        # interruption anywhere leaves a design that still renders, and the
+        # next start finishes the job because runtime.js is still there.
+        index_backed_up = False
+        for name in cls.LEGACY_FILES:
+            source = directory / name
+            destination = legacy / name
+            if not source.is_file() or destination.exists():
+                # The first backup wins (an interrupted earlier run, or a
+                # design migrated before and rolled back by copying).
+                continue
+            if name == "index.html" and not replaces_entry_point:
+                continue  # already a stub; nothing to roll back to
+            cls._atomic_write(destination, source.read_bytes())
+            index_backed_up = index_backed_up or name == "index.html"
+        cls._atomic_write(index, cls.STUB_INDEX_HTML.encode("utf-8"))
+        for name in ("runtime.js", "runtime.css"):
+            (directory / name).unlink(missing_ok=True)
+        if replaces_entry_point and cls._normalized(index_data) != (
+                cls._normalized(cls.LEGACY_INDEX_HTML.encode("utf-8"))):
+            logger.warning(
+                "designer: replaced a hand-edited index.html in {} with the "
+                "shared-runtime stub; {}",
+                directory,
+                f"the edited file is kept in {cls.LEGACY_DIRNAME}/index.html"
+                if index_backed_up else
+                f"{cls.LEGACY_DIRNAME}/index.html keeps an earlier backup and "
+                "the edited file was not kept")
+        return True
+
+    @staticmethod
+    def _normalized(data: bytes) -> bytes:
+        return data.replace(b"\r\n", b"\n").strip()
 
     @staticmethod
     def _atomic_write(path: Path, data: bytes) -> None:

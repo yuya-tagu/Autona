@@ -13,7 +13,7 @@ import ScorePanel from "./ScorePanel";
 import Team from "./Team";
 import {ExpandMore} from "@mui/icons-material";
 import {useTheme} from "@mui/material/styles";
-import {apiGet} from "../api";
+import {apiPost} from "../api";
 import {useApiAction} from "./Feedback";
 import {useSelector} from "react-redux";
 import {Grid} from "@mui/system";
@@ -37,11 +37,11 @@ export default function CurrentSet({scoreboardNumber, scoreSubmit}) {
     const {pending: swapPending, run: runSwap} = useApiAction();
 
     const resetScores = () => {
-        runReset(() => apiGet(`/scoreboard${scoreboardNumber}-reset-scores`));
+        runReset(() => apiPost(`/api/v1/scoreboards/${scoreboardNumber}/score:reset`));
     }
 
     const swapTeams = () => {
-        runSwap(() => apiGet(`/scoreboard${scoreboardNumber}-swap-teams`));
+        runSwap(() => apiPost(`/api/v1/scoreboards/${scoreboardNumber}:swap-teams`));
     }
 
     const postToX = () => {

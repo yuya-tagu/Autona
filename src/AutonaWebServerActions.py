@@ -230,6 +230,32 @@ class WebServerActions(QObject):
         })
         return "OK"
 
+    # ── /api/v1 only (Web UI migration, ADR-001 Addendum 2026-10-21) ──
+    # The v1 counterparts of `post_score` / `set_team_data`. The legacy
+    # routes keep the two methods above unchanged; these address the *state*
+    # team and skip the set-payload side effects those carry (the score's
+    # DisplayTeam flip and general.disable_scoreupdate, and match_en being
+    # blanked by ChangeSetData).
+
+    def set_scores(self, scoreboard, team1, team2):
+        # Both teams in one save cycle. Pure state, so no GUI hop (headless
+        # core Step 3): the board follows from the state notification.
+        with StateManager.SaveBlock():
+            AutonaActions.instance.SetScore(scoreboard, 1, team1)
+            AutonaActions.instance.SetScore(scoreboard, 2, team2)
+        return "OK"
+
+    @gui_thread_sync
+    def update_player(self, scoreboard, team, player, data):
+        # The player widgets are the writers here (SetData resolves country,
+        # character and skin models), so this runs on the GUI thread -- and
+        # synchronously, unlike set_team_data's queued signal, so the caller
+        # gets the outcome: False when the team has no such player slot (the
+        # roster is checked on the GUI thread, against the live widgets);
+        # an exception from the write propagates to the caller.
+        return self.scoreboard.GetScoreboard(scoreboard).ApplyPlayerData(
+            team, player, data)
+
     def set_commentary_data(self, index, data):
         # Caster slots are fixed (AutonaCommentaryModel.SLOTS); the old
         # auto-grow behavior is gone.

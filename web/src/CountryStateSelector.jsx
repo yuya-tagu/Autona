@@ -3,6 +3,7 @@ import i18n from "./i18n/config";
 import React, {useEffect, useState} from "react";
 import {Autocomplete, InputAdornment} from "@mui/material";
 import {BACKEND_PORT, inlineFlagWidth} from "./env";
+import {apiGetJson} from "./api";
 
 /**
  * @param {?string} countryCode
@@ -35,10 +36,9 @@ export function CountryStateSelector({
 
     useEffect(() => {
         if (isValidCountryCode) {
-            fetch(`http://${window.location.hostname}:${BACKEND_PORT}/states?countryCode=${countryCode}`)
-                .then(d => d.json())
-                .then(j => setStateData({
-                    states: j,
+            apiGetJson(`/api/v1/countries/${encodeURIComponent(countryCode)}/states`)
+                .then(({data}) => setStateData({
+                    states: data ?? {},
                     isLoading: false
                 }))
                 .catch(e => {

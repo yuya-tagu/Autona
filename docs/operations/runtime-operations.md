@@ -110,6 +110,29 @@
 - `TBD`: 自動バックアップ/スナップショットは**現状なし**（ROADMAP に提案あり、未実装）📄
 - Web UI 側が状態を見失った場合、ページ再読込で `program_state` 全受信からやり直せる ✅
 
+### Designer デザインのロールバック（共通ランタイム導入前の exe に戻す場合）
+
+共通ランタイム（`layout/designer_runtime/`）導入後の Autona は、起動時に旧形式の Designer
+デザイン（`layout/custom/{slug}/` に `runtime.js` を持つもの）の `index.html` / `runtime.js` /
+`runtime.css` を `layout/custom/{slug}/_legacy/` へ退避し、`index.html` を共通ランタイムを読む
+スタブに置き換える（`project.json` と `assets/` はそのまま）。
+
+- **上書きダウングレード**（旧版 zip を既存フォルダへ上から展開）: 展開は上書きのみで
+  削除をしない（更新ヘルパーの `robocopy /E` も PURGE なし）ので `layout/designer_runtime/` が
+  残り、スタブのまま表示される。戻し作業は不要 ✅
+- **クリーンインストールで旧版に戻した場合**（フォルダを作り直して旧版を入れ、`layout/custom/` だけ
+  持ち込んだ場合）: 旧版には `layout/designer_runtime/` が無いので、スタブのままだと OBS が
+  **真っ白になる**。以下の手順で戻す
+
+1. Autona を終了する
+2. 各 `layout/custom/{slug}/_legacy/` の 3 ファイル（`index.html` / `runtime.js` / `runtime.css`）を
+   1 つ上の `layout/custom/{slug}/` へ**移動**して上書きする（コピーではなく移動。`_legacy/` が
+   空になっていれば、再度新版に上げたときに改めて退避される）
+3. 旧版 exe を起動し、OBS のブラウザソースを再読込する（URL は変わらない）
+
+`_legacy/` を戻さなくても、旧版 exe の Designer でそのデザインを開いて「保存」すれば旧形式
+（runtime 同梱）で書き直される ✅
+
 ## Known failure modes
 
 - **Start.gg クエリ timeout**（20 秒）: 重いクエリ/不安定回線で空データが返る → null-safe で表示は壊れない設計 ✅

@@ -13,7 +13,7 @@ import {ReduxState} from "../redux/store"
 import {useDispatch, useSelector} from "react-redux";
 import {autonaStateSlice} from "../redux/autonaState";
 import websocketInit from "./websocketInit";
-import {apiGet} from "../api";
+import {apiPost} from "../api";
 import {FeedbackProvider, useApiAction} from "./Feedback";
 import {useScoreSubmit} from "./useScoreSubmit";
 import LoadingSkeleton from "./LoadingSkeleton";
@@ -62,7 +62,9 @@ function ScoreboardPageInner(props: any) {
         if (!window.confirm(i18n.t("confirm_clear_all"))) {
             return;
         }
-        runClear(() => apiGet(`/scoreboard${SCOREBOARD_ID}-clear-all`));
+        // The window.confirm above is the operator's confirmation; v1 makes
+        // destructive ops state it explicitly (ADR-001 D7).
+        runClear(() => apiPost(`/api/v1/scoreboards/${SCOREBOARD_ID}:clear`, {confirm: true}));
     };
 
     let body;

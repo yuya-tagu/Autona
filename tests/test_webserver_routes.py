@@ -87,6 +87,46 @@ EXPECTED_ROUTES = [
     ('/web', 'web_index', 'GET,HEAD,OPTIONS'),
 ]
 
+# The /api/v1 blueprint (src/AutonaApiV1.py, ADR-001). WebServer.__init__
+# registers it, not _build_web_app() -- hence "blueprints": [] below -- so it
+# is pinned separately by test_api_v1_route_ledger. Same rule: update only
+# with a documented API change (.claude/design/external-control-api.md).
+# score:set / players/<p> / display-options / countries/<code>/states were
+# added for the Web UI's move off the legacy routes (ADR-001 Addendum
+# 2026-10-21).
+EXPECTED_API_V1_ROUTES = [
+    ('/api/v1/bracket:refresh', 'api_v1.bracket_refresh', 'OPTIONS,POST'),
+    ('/api/v1/characters', 'api_v1.get_characters', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/commentary', 'api_v1.get_commentary', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/countries/<code>/states', 'api_v1.get_country_states', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/display-options', 'api_v1.display_options_update', 'OPTIONS,PATCH'),
+    ('/api/v1/game', 'api_v1.game_set', 'OPTIONS,POST'),
+    ('/api/v1/games', 'api_v1.get_games', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/games/current', 'api_v1.get_current_game', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/health', 'api_v1.health', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/match-names', 'api_v1.get_match_names', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/scoreboards/<int:n>', 'api_v1.get_scoreboard', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/scoreboards/<int:n>/score:reset', 'api_v1.score_reset', 'OPTIONS,POST'),
+    ('/api/v1/scoreboards/<int:n>/score:set', 'api_v1.score_set', 'OPTIONS,POST'),
+    ('/api/v1/scoreboards/<int:n>/set', 'api_v1.set_update', 'OPTIONS,PATCH'),
+    ('/api/v1/scoreboards/<int:n>/stats:refresh', 'api_v1.stats_refresh', 'OPTIONS,POST'),
+    ('/api/v1/scoreboards/<int:n>/teams/<int:t>/color', 'api_v1.team_color', 'OPTIONS,POST'),
+    ('/api/v1/scoreboards/<int:n>/teams/<int:t>/players/<int:p>', 'api_v1.player_update', 'OPTIONS,PATCH'),
+    ('/api/v1/scoreboards/<int:n>/teams/<int:t>/score:adjust', 'api_v1.score_adjust', 'OPTIONS,POST'),
+    ('/api/v1/scoreboards/<int:n>:apply', 'api_v1.apply_changes', 'OPTIONS,POST'),
+    ('/api/v1/scoreboards/<int:n>:clear', 'api_v1.clear', 'OPTIONS,POST'),
+    ('/api/v1/scoreboards/<int:n>:load-set', 'api_v1.load_set', 'OPTIONS,POST'),
+    ('/api/v1/scoreboards/<int:n>:pull-stream', 'api_v1.pull_stream', 'OPTIONS,POST'),
+    ('/api/v1/scoreboards/<int:n>:reset-match', 'api_v1.reset_match', 'OPTIONS,POST'),
+    ('/api/v1/scoreboards/<int:n>:reset-players', 'api_v1.reset_players', 'OPTIONS,POST'),
+    ('/api/v1/scoreboards/<int:n>:swap-teams', 'api_v1.swap_teams', 'OPTIONS,POST'),
+    ('/api/v1/sets', 'api_v1.get_sets', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/sets/<setId>', 'api_v1.get_match', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/state', 'api_v1.state', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/tournament', 'api_v1.tournament_load', 'OPTIONS,POST'),
+    ('/api/v1/variants', 'api_v1.get_variants', 'GET,HEAD,OPTIONS'),
+]
+
 # SocketIO handlers, all on the default namespace "/".
 EXPECTED_EVENTS = [
     'characters',
@@ -306,3 +346,24 @@ def test_webserver_route_and_event_ledger(tmp_path):
     assert not missing, (
         "these must stay callable WebServer attributes (see the set's "
         f"comment); they are no longer reachable: {sorted(missing)}")
+
+
+def test_api_v1_route_ledger():
+    # In-process: importing src.AutonaApiV1 only declares the Blueprint
+    # (tests/test_import_side_effects.py), and registering it on a bare app
+    # is all WebServer.__init__ does with it.
+    from flask import Flask
+
+    from src.AutonaApiV1 import api_v1
+
+    app = Flask(__name__)
+    app.register_blueprint(api_v1)
+    routes = sorted(
+        (str(r.rule), r.endpoint, ",".join(sorted(r.methods)))
+        for r in app.url_map.iter_rules()
+        if r.endpoint.startswith("api_v1.")
+    )
+    assert routes == sorted(EXPECTED_API_V1_ROUTES), (
+        "/api/v1 routes changed.\n"
+        f"missing: {sorted(set(EXPECTED_API_V1_ROUTES) - set(routes))}\n"
+        f"unexpected: {sorted(set(routes) - set(EXPECTED_API_V1_ROUTES))}")

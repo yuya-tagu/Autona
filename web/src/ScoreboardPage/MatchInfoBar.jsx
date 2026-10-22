@@ -2,7 +2,7 @@ import React from "react";
 import {Autocomplete, Stack} from "@mui/material";
 import TextField from "./TextField";
 import {NumberInput} from "../NumberInput";
-import {apiGet, apiGetJson} from "../api";
+import {apiGetJson, apiPatch} from "../api";
 import {useApiAction} from "./Feedback";
 import i18n from "../i18n/config";
 
@@ -12,8 +12,8 @@ let matchNamesCache = null;
 /**
  * Match metadata bar, mirroring the desktop scoreBar row above the team
  * columns: editable Phase / Match (with locale candidates from
- * GET /match-names) and Best Of. Every field submits on commit — there is
- * no separate submit button (desktop editingFinished parity).
+ * GET /api/v1/match-names) and Best Of. Every field submits on commit — there
+ * is no separate submit button (desktop editingFinished parity).
  */
 export default function MatchInfoBar({scoreboardNumber, phase, pool, match, bestOf, action}) {
     const [localPhase, setLocalPhase] = React.useState(phase ?? "");
@@ -31,8 +31,8 @@ export default function MatchInfoBar({scoreboardNumber, phase, pool, match, best
             setCandidates(matchNamesCache);
             return;
         }
-        apiGetJson('/match-names')
-            .then((data) => {
+        apiGetJson('/api/v1/match-names')
+            .then(({data}) => {
                 matchNamesCache = {
                     phase: data?.phase ?? [],
                     match: data?.match ?? [],
@@ -42,9 +42,10 @@ export default function MatchInfoBar({scoreboardNumber, phase, pool, match, best
             .catch(console.error); // candidates are a nicety; fail quietly
     }, []);
 
-    const submitField = (params) => {
-        run(() => apiGet(`/scoreboard${scoreboardNumber}-set?`
-            + new URLSearchParams(params).toString()));
+    // PATCH /api/v1/scoreboards/{n}/set: a partial update, only the keys sent
+    // are applied.
+    const submitField = (fields) => {
+        run(() => apiPatch(`/api/v1/scoreboards/${scoreboardNumber}/set`, fields));
     };
 
     const submitPhase = (value) => {
@@ -63,8 +64,10 @@ export default function MatchInfoBar({scoreboardNumber, phase, pool, match, best
         }
     };
     const onBestOfChanged = (_, newVal) => {
-        if (Number.isNaN(newVal)) return;
-        submitField({"best-of": newVal});
+        // A cleared field reports null/undefined; bestOf must be an integer
+        // (the API answers 400 otherwise), so there is nothing to send.
+        if (newVal === null || newVal === undefined || Number.isNaN(newVal)) return;
+        submitField({bestOf: newVal});
     };
 
     // On phones the phase and match combos share one row (50% each, minus

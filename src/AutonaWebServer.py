@@ -728,18 +728,21 @@ def _build_web_app():
             if filename.lower().endswith('.png'):
                 mimetype = "image/png"
 
-            is_custom_layout = filename.replace(
-                "\\", "/").startswith("layout/custom/")
+            # Case-insensitive: the Windows filesystem serves
+            # /Layout/Custom/... too, and it must not be cached either.
+            is_designer_file = filename.replace("\\", "/").lower().startswith(
+                ("layout/custom/", "layout/designer_runtime/"))
             response = send_from_directory(
                 os.path.abspath('.'),
                 filename,
                 as_attachment=filename.endswith('.gz'),
                 mimetype=mimetype,
-                max_age=0 if is_custom_layout else 86400
+                max_age=0 if is_designer_file else 86400
             )
-            if is_custom_layout:
-                # Designer saves overwrite project.json, runtime files, and
-                # PNG assets in place. OBS must revalidate all of them.
+            if is_designer_file:
+                # Designer saves overwrite project.json and PNG assets in
+                # place, and an app update replaces the shared runtime every
+                # design loads. OBS must revalidate all of them.
                 response.cache_control.no_store = True
                 response.cache_control.max_age = 0
             return response

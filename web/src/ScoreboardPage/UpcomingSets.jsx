@@ -16,11 +16,11 @@ import i18n from "../i18n/config";
 import TextField from "./TextField";
 import {alpha} from "@mui/material/styles";
 import {ExpandMore} from "@mui/icons-material";
-import {apiGet, apiGetJson} from "../api";
+import {apiGetJson, apiPost} from "../api";
 import {showSnackbar} from "./Feedback";
 
-// get-sets / load-set proxy Start.gg queries on the desktop side, which can
-// legitimately take tens of seconds (20s GQL timeout + retries).
+// /api/v1/sets and :load-set proxy Start.gg queries on the desktop side, which
+// can legitimately take tens of seconds (20s GQL timeout + retries).
 const SETS_TIMEOUT_MS = 60000;
 
 
@@ -56,11 +56,11 @@ export default class UpcomingSets extends React.Component {
         this.setState({isLoading: true});
 
         apiGetJson(
-            `/get-sets?_foo=${this.state.showFinished ? "&getFinished=true" : ""}&`,
+            `/api/v1/sets${this.state.showFinished ? "?finished=true" : ""}`,
             {timeoutMs: SETS_TIMEOUT_MS}
         )
-            .then(( /** {Array.<tourney_set>} */ data) => {
-                this.setState({isLoading: false, sets: data});
+            .then((/** {{data: Array.<tourney_set>}} */ resp) => {
+                this.setState({isLoading: false, sets: resp.data});
             })
             .catch((e) => {
                 console.error(e);
@@ -72,8 +72,9 @@ export default class UpcomingSets extends React.Component {
     SubmitNewSet = () => {
         this.setState({isLoading: true});
 
-        apiGet(
-            `/scoreboard${this.props.scoreboardNumber}-load-set?set=${this.state.selectedSet?.id}`,
+        apiPost(
+            `/api/v1/scoreboards/${this.props.scoreboardNumber}:load-set`,
+            {setId: this.state.selectedSet?.id},
             {timeoutMs: SETS_TIMEOUT_MS}
         )
             .then(() => {

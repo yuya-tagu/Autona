@@ -272,6 +272,45 @@ class AutonaActions:
                     f"score.{board}.team.{team}.score", self.SCORE_MIN)
         return True
 
+    def SetScore(self, board, team, value):
+        """Set one team's score; returns the resulting score, or None.
+
+        None means the call was ignored (a team other than 1/2, or a board
+        without a team-level score). Otherwise the return value is `value`
+        clamped to SCORE_MIN..SCORE_MAX -- the score the team now has,
+        whether or not the state had to be written to get there.
+
+        The absolute counterpart of `AdjustScore`, with the same addressing:
+        `team` is the *state* team (the column the operator sees, already
+        resolved for a swap), not a set's team. That is what separates it
+        from the set-load writer, `SetLoadService.ApplyScores`, which the
+        legacy POST /score reaches -- that one runs the team through
+        `DisplayTeam()`, honours `general.disable_scoreupdate` (a provider
+        setting) and rides along with the rest of a set payload. A remote
+        client typing a score is none of those things.
+
+        Written only when it changes (`_SetIfChanged`): re-asserting the
+        value the state already holds would light the 反映 button for an
+        edit nobody made. The compare-and-write is taken under
+        StateManager.lock, as `AdjustScore`'s read-modify-write is, so it
+        cannot interleave with a concurrent +1. Wrap two calls in a SaveBlock
+        to set both teams in one save cycle.
+        """
+        board = self._asInt(board, 0)
+        team = self._asInt(team, 0)
+        if team not in (1, 2):
+            logger.warning(f"SetScore: ignoring team {team}")
+            return None
+        if board not in self.SCORE_BOARDS:
+            logger.debug(
+                f"SetScore: board {board} has no team-level score "
+                "(crew scores are summed from member stocks); ignoring")
+            return None
+        value = self._clampScore(self._asInt(value))
+        with StateManager.lock:
+            self._SetIfChanged(f"score.{board}.team.{team}.score", value)
+        return value
+
     # ── team color ───────────────────────────────────────────────────────
 
     def SetTeamColor(self, board, team, color):

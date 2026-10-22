@@ -82,7 +82,8 @@ paths:
 永続側のストア 2 つ（`src/core/SettingsManager.py` / `src/core/LayoutOptionsManager.py`）も
 core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（import 副作用ゼロ）。
 
-- 移行済み: `AdjustScore` / `ResetScore`（board 1,2 のみ）/ `SetTeamColor` /
+- 移行済み: `AdjustScore` / `ResetScore` / `SetScore`（board 1,2 のみ。`SetScore` は /api/v1 `score:set` 用・
+  状態側チーム指定）/ `SetTeamColor` /
   `SetDisplayOption` / `ApplyChanges`（反映 = `CommitHeld`）/ **Step 5 第 1 弾で追加**:
   `SetMatchField`（`phase`/`pool`/`match`）/ `ClearMatchInfo`（リセット時に match バー +
   `match_en` を空にする。S-17）/ `SetTeamName` / `SetTeamLosers` /

@@ -42,7 +42,8 @@ _REQUEST_TIMEOUT = 25
 
 # Placeholder substitutions used when turning a template path into a concrete,
 # copy-pasteable curl / tester default.
-_PATH_DEFAULTS = {"{n}": "1", "{t}": "1", "{setId}": "12345"}
+_PATH_DEFAULTS = {"{n}": "1", "{t}": "1", "{p}": "1", "{setId}": "12345",
+                  "{code}": "JP"}
 
 
 # Endpoint catalogue. Mirrors AutonaApiV1.py route-by-route. `desc` is an
@@ -64,14 +65,18 @@ _ENDPOINTS = [
     ("GET", "/sets?finished=true", "Set list (synchronous start.gg call)", None, False, False, False),
     ("GET", "/sets/{setId}", "Set detail (synchronous start.gg call)", None, False, False, False),
     ("GET", "/commentary", "Commentary state", None, False, False, False),
+    ("GET", "/countries/{code}/states", "States / regions of a country", None, False, False, False),
     # ── Safe write (op-logged, no confirm) ──
     ("POST", "/scoreboards/{n}/teams/{t}/score:adjust", "Adjust score by delta", {"delta": 1}, False, True, False),
     ("POST", "/scoreboards/{n}/score:reset", "Reset scores", None, False, True, False),
+    ("POST", "/scoreboards/{n}/score:set", "Set both scores (absolute)", {"team1": 2, "team2": 1}, False, True, False),
     ("POST", "/scoreboards/{n}:apply", "Apply pending edits (反映)", None, False, True, False),
     ("POST", "/scoreboards/{n}:swap-teams", "Swap teams", None, False, True, False),
     ("POST", "/scoreboards/{n}/stats:refresh", "Refresh statistics (async fetch)", None, False, True, False),
     ("POST", "/scoreboards/{n}/teams/{t}/color", "Set team color", {"color": "#FF0000"}, False, True, False),
     ("PATCH", "/scoreboards/{n}/set", "Patch set info (partial)", {"bestOf": 5, "phase": "Top 8", "pool": "Pool A1", "match": "Winners Finals"}, False, True, False),
+    ("PATCH", "/scoreboards/{n}/teams/{t}/players/{p}", "Update player fields (partial)", {"gamerTag": "Player", "twitter": "player_x"}, False, True, False),
+    ("PATCH", "/display-options", "Toggle display options (partial)", {"show_seed": False}, False, True, False),
     # ── Destructive (confirm required) ──
     ("POST", "/scoreboards/{n}:clear", "Clear board (confirm required)", {"confirm": True}, True, True, True),
     ("POST", "/scoreboards/{n}:reset-players", "Reset players (confirm required)", {"confirm": True}, True, True, True),

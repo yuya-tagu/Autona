@@ -216,4 +216,14 @@ def bootstrap_core():
     if AutonaScoreboardManager.instance is None:
         AutonaScoreboardManager.instance = AutonaScoreboardManager()
 
+    # ORDER CONSTRAINT: Designer designs saved with a private runtime copy
+    # are switched to the stub + shared layout/designer_runtime/ before
+    # anything can serve or list them -- the web server (_StartWebServer) and
+    # the BOARD panel's design discovery are both started by the Window,
+    # which is built after this function returns.
+    # No dependency on anything above (plain file moves under layout/custom),
+    # and it never raises: a failed design keeps its own copy and is logged.
+    from .AutonaDesignerService import AutonaDesignerService
+    AutonaDesignerService.MigrateLegacyProjects()
+
     logger.debug("bootstrap_core complete")

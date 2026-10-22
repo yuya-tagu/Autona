@@ -2,7 +2,7 @@ import React from "react";
 import {Checkbox, FormControlLabel, IconButton, Menu, MenuItem} from "@mui/material";
 import {Visibility} from "@mui/icons-material";
 import {shallowEqual, useSelector} from "react-redux";
-import {apiPost} from "../api";
+import {apiPatch} from "../api";
 import {showSnackbar} from "./Feedback";
 import i18n from "../i18n/config";
 
@@ -10,7 +10,7 @@ import i18n from "../i18n/config";
 //
 // The desktop app mirrors every toggle into StateManager under
 // `display_options.show_*` (broadcast to all clients) and accepts remote
-// toggles via POST /display-option. Keys and defaults are defined in
+// toggles via PATCH /api/v1/display-options. Keys and defaults are defined in
 // src/core/StateSchema.py (DISPLAY_OPTIONS); this list is the copy that
 // cannot import it. tests/test_state_schema.py fails if the two drift.
 export const DISPLAY_OPTIONS = [
@@ -40,7 +40,7 @@ export function useDisplayOptions() {
 /** Toggle a field on the desktop side; the change echoes back through the
  *  program-state broadcast (no local optimistic state needed). */
 export function setDisplayOption(option, value) {
-    return apiPost('/display-option', {option, value})
+    return apiPatch('/api/v1/display-options', {[option]: value})
         .catch((e) => {
             console.error(e);
             showSnackbar(i18n.t("request_failed"));

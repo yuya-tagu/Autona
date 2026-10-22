@@ -158,14 +158,16 @@ OBSの両方へ反映されることを確認してください。
 
 ```text
 layout/
+├── designer_runtime/        # 全デザイン共通のOBS用ランタイム（runtime.js / runtime.css）
 └── custom/
     └── <slug>/
         ├── assets/          # PNG / SVG資産
         ├── project.json     # 編集可能なレイヤー情報（schemaVersion: 3）
-        ├── index.html       # OBS入口
-        ├── runtime.css
-        └── runtime.js
+        └── index.html       # OBS入口（designer_runtime を読むだけのスタブ）
 ```
+
+旧バージョンで保存したデザインは、起動時に自動でこの形式へ切り替わります
+（元の `index.html` / `runtime.*` は `<slug>/_legacy/` に退避されます）。
 
 各デザインは `http://127.0.0.1:5107/layout/custom/{slug}/index.html` でも
 直接確認できます。保存後はBOARDタブのデザイン一覧に `Custom: {slug}` として

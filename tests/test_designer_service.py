@@ -1,10 +1,43 @@
 import base64
 import json
+import os
+import posixpath
+import re
+import subprocess
+import sys
+from pathlib import Path, PurePosixPath
 
 import pytest
+from loguru import logger
 
 from src.AutonaDesignerService import (
     AutonaDesignerService, DesignerProjectError)
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# The entry point every design was saved with before the shared runtime: a
+# verbatim copy of the former web/public/scoreboard-designer-runtime/
+# index.html, which save_project() copied next to a private runtime.js/css.
+LEGACY_INDEX_HTML = """<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script>
+      window.tshLayoutRootPath = "../..";
+      window.tshProgramRootPath = "../../..";
+    </script>
+    <script src="../../include/globals.js"></script>
+    <link rel="stylesheet" href="../../main.css" />
+    <link rel="stylesheet" href="./runtime.css" />
+  </head>
+  <body>
+    <main id="scoreboard-composer" aria-label="Autona scoreboard"></main>
+    <div id="composer-error" role="alert"></div>
+    <script src="./runtime.js"></script>
+  </body>
+</html>
+"""
 
 
 def make_project(name="Finals", with_image=True):
@@ -144,14 +177,13 @@ def make_v3_project(name="Finals", with_image=True):
 @pytest.fixture
 def designer_service(tmp_path, monkeypatch):
     root = tmp_path / "layout" / "custom"
-    template = tmp_path / "runtime"
-    template.mkdir()
-    for name in AutonaDesignerService.TEMPLATE_FILES:
-        (template / name).write_text(f"template:{name}", encoding="utf-8")
+    runtime = tmp_path / "layout" / "designer_runtime"
+    runtime.mkdir(parents=True)
+    for name in AutonaDesignerService.RUNTIME_FILES:
+        (runtime / name).write_bytes(b"/* shared runtime */")
 
     monkeypatch.setattr(AutonaDesignerService, "ROOT", root)
-    monkeypatch.setattr(
-        AutonaDesignerService, "TEMPLATE_CANDIDATES", (template,))
+    monkeypatch.setattr(AutonaDesignerService, "RUNTIME_ROOT", runtime)
     with AutonaDesignerService._token_lock:
         AutonaDesignerService._tokens.clear()
     with AutonaDesignerService._import_lock:
@@ -195,8 +227,8 @@ def test_save_list_and_load_project(designer_service):
     directory = designer_service.ROOT / "決勝-design"
     assert (directory / "project.json").is_file()
     assert (directory / "assets" / "frame.png").is_file()
-    assert (directory / "runtime.js").read_text(
-        encoding="utf-8") == "template:runtime.js"
+    assert (directory / "index.html").read_text(
+        encoding="utf-8") == designer_service.STUB_INDEX_HTML
 
     assert designer_service.list_projects() == [{
         "slug": "決勝-design",
@@ -604,3 +636,357 @@ def test_import_authorization_is_loopback_only(designer_service):
     assert designer_service.is_loopback("127.0.0.1")
     assert designer_service.is_loopback("::1")
     assert not designer_service.is_loopback("192.168.1.20")
+
+
+# --- Shared runtime (layout-custom-unification Step 2) ----------------------
+
+
+def make_legacy_design(root, slug):
+    """A design as saved before the shared runtime: private runtime copy."""
+    directory = root / slug
+    (directory / "assets").mkdir(parents=True)
+    files = {
+        "index.html": LEGACY_INDEX_HTML.encode("utf-8"),
+        "runtime.js": f"/* frozen runtime of {slug} */".encode("utf-8"),
+        "runtime.css": b"body { opacity: 0; }",
+        "project.json": json.dumps(
+            make_project(slug, with_image=False),
+            ensure_ascii=False).encode("utf-8"),
+        "assets/frame.png": b"\x89PNG\r\n\x1a\nlegacy",
+    }
+    for name, data in files.items():
+        (directory / name).write_bytes(data)
+    return directory, files
+
+
+def snapshot(directory):
+    return {
+        path.relative_to(directory).as_posix(): path.read_bytes()
+        for path in sorted(directory.rglob("*")) if path.is_file()
+    }
+
+
+@pytest.fixture
+def warnings_logged():
+    messages = []
+    handler = logger.add(
+        lambda message: messages.append(message.record["message"]),
+        level="WARNING", format="{message}")
+    yield messages
+    logger.remove(handler)
+
+
+def test_save_writes_only_the_stub_project_and_assets(designer_service):
+    result = designer_service.save_project({
+        "project": make_project("Finals"),
+        "assets": {"assets/frame.png": png_data_url()},
+    })
+
+    directory = designer_service.ROOT / result["slug"]
+    assert set(snapshot(directory)) == {
+        "index.html", "project.json", "assets/frame.png"}
+    assert (directory / "index.html").read_bytes() == (
+        designer_service.STUB_INDEX_HTML.encode("utf-8"))
+
+
+def test_stub_loads_the_shared_runtime_by_relative_path():
+    stub = AutonaDesignerService.STUB_INDEX_HTML
+    references = re.findall(r'(?:src|href)="([^"]+)"', stub)
+    # Relative only: OBS opens the stub as a local file (file://) as well as
+    # over http, and both must resolve to the same shipped files.
+    assert references
+    assert not [ref for ref in references
+                if ref.startswith(("/", "http:", "https:", "file:"))]
+
+    design = PurePosixPath("layout/custom/some-design")
+    resolved = {posixpath.normpath(str(design / ref)) for ref in references}
+    assert {
+        "layout/designer_runtime/runtime.js",
+        "layout/designer_runtime/runtime.css",
+    } <= resolved
+    for path in resolved:
+        assert (PROJECT_ROOT / path).is_file(), f"stub points at missing {path}"
+    assert "./runtime." not in stub
+
+    # The DOM the runtime renders into must survive the move to a stub.
+    runtime = (PROJECT_ROOT / "layout/designer_runtime/runtime.js").read_text(
+        encoding="utf-8")
+    for element_id in ("scoreboard-composer", "composer-error"):
+        assert f'id="{element_id}"' in stub
+        assert f'getElementById("{element_id}")' in runtime
+
+
+def test_migrate_parks_the_private_runtime_and_is_idempotent(
+        designer_service, warnings_logged):
+    directory, files = make_legacy_design(designer_service.ROOT, "shibuya")
+
+    assert designer_service.MigrateLegacyProjects() == ["shibuya"]
+    # An untouched entry point is replaced silently (INFO summary only).
+    assert warnings_logged == []
+    migrated = snapshot(directory)
+    assert migrated == {
+        "index.html": designer_service.STUB_INDEX_HTML.encode("utf-8"),
+        # project.json and assets/ are never touched: the shared runtime
+        # migrates older schemaVersions at load time.
+        "project.json": files["project.json"],
+        "assets/frame.png": files["assets/frame.png"],
+        "_legacy/index.html": files["index.html"],
+        "_legacy/runtime.js": files["runtime.js"],
+        "_legacy/runtime.css": files["runtime.css"],
+    }
+
+    assert designer_service.MigrateLegacyProjects() == []
+    assert snapshot(directory) == migrated
+    assert designer_service.list_projects() == [
+        {"slug": "shibuya", "name": "shibuya"}]
+
+
+def test_migrate_leaves_everything_else_alone(designer_service):
+    root = designer_service.ROOT
+    saved = designer_service.save_project({
+        "project": make_project("Already Shared"),
+        "assets": {"assets/frame.png": png_data_url()},
+    })
+    hand_made = root / "hand-made"
+    hand_made.mkdir()
+    (hand_made / "index.html").write_bytes(b"<script src=./runtime.js>")
+    (hand_made / "runtime.js").write_bytes(b"/* not a designer project */")
+    (root / "notes.txt").write_bytes(b"stray file")
+    before = snapshot(root)
+
+    assert designer_service.MigrateLegacyProjects() == []
+    assert snapshot(root) == before
+    assert saved["slug"] in {p["slug"] for p in designer_service.list_projects()}
+
+
+def test_migrate_finishes_an_interrupted_run_without_losing_the_original(
+        designer_service):
+    directory, files = make_legacy_design(designer_service.ROOT, "finals")
+    # Interrupted after the entry point was swapped, before the old runtime
+    # was dropped: _legacy/ holds the original, index.html is already a stub
+    # (here with CRLF line endings: a stub is recognised by its marker, not
+    # by byte equality).
+    (directory / "_legacy").mkdir()
+    (directory / "_legacy" / "index.html").write_bytes(files["index.html"])
+    (directory / "index.html").write_bytes(
+        designer_service.STUB_INDEX_HTML.replace("\n", "\r\n").encode("utf-8"))
+
+    assert designer_service.MigrateLegacyProjects() == ["finals"]
+    assert (directory / "_legacy" / "index.html").read_bytes() == (
+        files["index.html"])
+    assert (directory / "_legacy" / "runtime.js").read_bytes() == (
+        files["runtime.js"])
+    assert not list(directory.glob("runtime.*"))
+
+
+def test_migrate_keeps_the_first_backup(designer_service):
+    directory, files = make_legacy_design(designer_service.ROOT, "finals")
+    legacy = directory / "_legacy"
+    legacy.mkdir()
+    first = {
+        "index.html": b"<!-- first index -->",
+        "runtime.js": b"/* first runtime */",
+    }
+    for name, data in first.items():
+        (legacy / name).write_bytes(data)
+
+    assert designer_service.MigrateLegacyProjects() == ["finals"]
+    assert (legacy / "index.html").read_bytes() == first["index.html"]
+    assert (legacy / "runtime.js").read_bytes() == first["runtime.js"]
+    # Files without an earlier backup are still parked.
+    assert (legacy / "runtime.css").read_bytes() == files["runtime.css"]
+    assert not list(directory.glob("runtime.*"))
+
+
+def test_replacing_a_hand_edited_entry_point_is_a_warning(
+        designer_service, warnings_logged):
+    root = designer_service.ROOT
+    edited_dir, files = make_legacy_design(root, "edited")
+    edited = files["index.html"].replace(
+        b"</head>", b"<style>body { zoom: 2; }</style>\n  </head>")
+    (edited_dir / "index.html").write_bytes(edited)
+    untouched_dir, _ = make_legacy_design(root, "untouched")
+    # Same template with CRLF line endings still counts as untouched.
+    (untouched_dir / "index.html").write_bytes(
+        LEGACY_INDEX_HTML.replace("\n", "\r\n").encode("utf-8"))
+
+    assert designer_service.MigrateLegacyProjects() == ["edited", "untouched"]
+    assert (edited_dir / "_legacy" / "index.html").read_bytes() == edited
+    hand_edited = [m for m in warnings_logged if "hand-edited" in m]
+    assert len(hand_edited) == 1
+    assert str(edited_dir) in hand_edited[0]
+
+
+@pytest.mark.parametrize("missing", AutonaDesignerService.RUNTIME_FILES)
+def test_migrate_waits_for_the_shared_runtime(
+        designer_service, warnings_logged, missing):
+    # e.g. only Autona.exe and _internal/ were replaced by hand: stubbing the
+    # designs now would turn every one of them blank in OBS.
+    (designer_service.RUNTIME_ROOT / missing).unlink()
+    directory, files = make_legacy_design(designer_service.ROOT, "finals")
+
+    assert designer_service.MigrateLegacyProjects() == []
+    assert snapshot(directory) == files
+    assert [m for m in warnings_logged if "shared runtime missing" in m]
+
+
+@pytest.mark.parametrize("missing", AutonaDesignerService.RUNTIME_FILES)
+def test_save_refuses_without_the_shared_runtime(designer_service, missing):
+    (designer_service.RUNTIME_ROOT / missing).unlink()
+
+    with pytest.raises(DesignerProjectError, match="OBSランタイム"):
+        designer_service.save_project({
+            "project": make_project("Finals"),
+            "assets": {"assets/frame.png": png_data_url()},
+        })
+    assert not designer_service.ROOT.exists()
+
+
+def test_migrate_never_raises_and_a_failed_design_keeps_rendering(
+        designer_service, monkeypatch):
+    broken, broken_files = make_legacy_design(designer_service.ROOT, "broken")
+    make_legacy_design(designer_service.ROOT, "healthy")
+    original_write = AutonaDesignerService._atomic_write
+
+    def failing_write(path, data):
+        if "broken" in path.parts:
+            raise OSError("disk full")
+        original_write(path, data)
+
+    monkeypatch.setattr(
+        AutonaDesignerService, "_atomic_write", staticmethod(failing_write))
+
+    assert designer_service.MigrateLegacyProjects() == ["healthy"]
+    # Nothing was swapped, so the design still loads its own runtime copy.
+    assert snapshot(broken) == broken_files
+
+
+def test_migrate_survives_an_unreadable_root(designer_service, monkeypatch):
+    class UnreadableRoot:
+        def is_dir(self):
+            return True
+
+        def iterdir(self):
+            raise PermissionError("denied")
+
+    monkeypatch.setattr(AutonaDesignerService, "ROOT", UnreadableRoot())
+    assert designer_service.MigrateLegacyProjects() == []
+
+
+def test_saving_over_a_legacy_design_keeps_its_rollback_copy(designer_service):
+    directory, files = make_legacy_design(designer_service.ROOT, "finals")
+
+    designer_service.save_project({
+        "project": make_project("Finals"),
+        "assets": {"assets/frame.png": png_data_url()},
+    })
+
+    assert (directory / "_legacy" / "index.html").read_bytes() == (
+        files["index.html"])
+    assert not list(directory.glob("runtime.*"))
+    assert (directory / "index.html").read_bytes() == (
+        designer_service.STUB_INDEX_HTML.encode("utf-8"))
+
+
+_BOOTSTRAP_SCRIPT = r'''
+import sys
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, sys.argv[1])
+
+from qtpy.QtWidgets import QApplication
+
+# AutonaScoreboardManager (built by bootstrap_core) is a QWidget.
+app = QApplication([])
+
+from src.bootstrap import bootstrap_core
+
+bootstrap_core()
+print("<<<BOOTSTRAPPED>>>")
+'''
+
+
+def test_bootstrap_core_migrates_legacy_designs(tmp_path):
+    # A real, fresh boot in a throwaway working directory: bootstrap_core()
+    # runs once per process, and the session harness has already used it up.
+    from tests.conftest import _LINKED_TREES, _link_tree
+
+    for relative in _LINKED_TREES:
+        link = tmp_path / relative
+        link.parent.mkdir(parents=True, exist_ok=True)
+        _link_tree(link, PROJECT_ROOT / relative)
+    for relative in ("out", "user_data", "user_data/games", "tmp"):
+        (tmp_path / relative).mkdir(parents=True, exist_ok=True)
+    runtime = tmp_path / "layout" / "designer_runtime"
+    runtime.mkdir(parents=True)
+    for name in AutonaDesignerService.RUNTIME_FILES:
+        (runtime / name).write_bytes(b"/* shared runtime */")
+    directory, files = make_legacy_design(
+        tmp_path / "layout" / "custom", "finals")
+
+    env = dict(os.environ)
+    env.update({
+        "QT_API": "pyside6",
+        "QT_QPA_PLATFORM": "offscreen",
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONDONTWRITEBYTECODE": "1",
+    })
+    try:
+        result = subprocess.run(
+            [sys.executable, "-B", "-c", _BOOTSTRAP_SCRIPT, str(PROJECT_ROOT)],
+            cwd=str(tmp_path), env=env, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=180)
+    finally:
+        # Break the junctions before tmp cleanup can descend through them
+        # into the real assets/ and src/ trees (see tests/conftest.py).
+        for relative in reversed(_LINKED_TREES):
+            link = tmp_path / relative
+            try:
+                if link.is_symlink():
+                    os.unlink(link)
+                else:
+                    os.rmdir(link)
+            except OSError:
+                pass
+
+    assert result.returncode == 0 and "<<<BOOTSTRAPPED>>>" in result.stdout, (
+        f"bootstrap failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}")
+    assert (directory / "_legacy" / "runtime.js").read_bytes() == (
+        files["runtime.js"])
+    assert AutonaDesignerService.STUB_MARKER in (
+        directory / "index.html").read_text(encoding="utf-8")
+    assert not list(directory.glob("runtime.*"))
+
+
+def test_designer_files_are_served_no_store(tmp_path, monkeypatch):
+    from src.AutonaWebServer import _build_web_app
+
+    for relative in (
+            "layout/designer_runtime/runtime.js",
+            "layout/custom/finals/index.html",
+            "layout/scoreboard_simple/index.js"):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"x")
+    monkeypatch.chdir(tmp_path)
+    app, _socketio = _build_web_app()
+    client = app.test_client()
+
+    def cache_control(url):
+        response = client.get(url)
+        try:
+            assert response.status_code == 200, url
+            return response.headers.get("Cache-Control", "")
+        finally:
+            response.close()
+
+    # An app update replaces the shared runtime under every design; OBS must
+    # not keep a day-old copy of it.
+    assert "no-store" in cache_control("/layout/designer_runtime/runtime.js")
+    assert "no-store" in cache_control("/layout/custom/finals/index.html")
+    assert "no-store" not in cache_control("/layout/scoreboard_simple/index.js")
+    if sys.platform == "win32":
+        # The Windows filesystem serves the same files under any casing.
+        assert "no-store" in cache_control(
+            "/Layout/Designer_Runtime/runtime.js")
+        assert "no-store" in cache_control("/LAYOUT/Custom/finals/index.html")
