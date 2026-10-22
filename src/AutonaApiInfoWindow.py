@@ -66,6 +66,7 @@ _ENDPOINTS = [
     ("GET", "/sets/{setId}", "Set detail (synchronous start.gg call)", None, False, False, False),
     ("GET", "/commentary", "Commentary state", None, False, False, False),
     ("GET", "/countries/{code}/states", "States / regions of a country", None, False, False, False),
+    ("GET", "/layouts?kind=scoreboard", "Layout list (?kind=scoreboard|designer|commentary|top8)", None, False, False, False),
     # ── Safe write (op-logged, no confirm) ──
     ("POST", "/scoreboards/{n}/teams/{t}/score:adjust", "Adjust score by delta", {"delta": 1}, False, True, False),
     ("POST", "/scoreboards/{n}/score:reset", "Reset scores", None, False, True, False),

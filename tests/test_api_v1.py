@@ -703,3 +703,104 @@ def test_tournament_reload_releases_the_flag_asynchronously_off_thread(
     # A 409 on the second POST would mean the first one never released it.
     assert statuses == [202, 202]
     assert SettingsManager.Get("TOURNAMENT_URL") == _EVENT_URL
+
+
+# ── GET /layouts (layout catalog) ────────────────────────────────────────
+# docs/changes/layout-custom-unification.md Step 1. A read of the layout
+# catalog the Board / Commentary / Top 8 tabs and the Designer list from
+# (src/core/LayoutCatalog.py; its discovery rules are pinned in
+# tests/test_layout_catalog.py). Here: the envelope, the ?kind= filter and
+# its rejection, against a throwaway layout tree.
+
+@pytest.fixture
+def layoutTree(tmp_path, monkeypatch):
+    from src.core import LayoutCatalog
+    from tests.test_layout_catalog import builtin, project
+
+    root = tmp_path / "layout"
+    root.mkdir()
+    builtin(root, "scoreboard_simple", {
+        "kind": "scoreboard", "displayName": "Simple",
+        "format": "1v1 / チーム", "game": "汎用（全ゲーム）"})
+    builtin(root, "commentators", {"kind": "commentary", "displayName": "標準"})
+    builtin(root, "bracket_top8", {"kind": "top8", "displayName": "標準"})
+    project(root, "finals", {"name": "決勝", "layers": []})
+    # The catalog resolves its default root on every call, so the route
+    # reads this tree whatever the working directory is.
+    monkeypatch.setattr(LayoutCatalog, "LAYOUT_ROOT", str(root))
+    return root
+
+
+def _layoutIds(response):
+    assert response.status_code == 200, response.get_data(as_text=True)
+    body = response.get_json()
+    assert body["ok"] is True
+    return [entry["id"] for entry in body["data"]]
+
+
+def test_layouts_lists_the_catalog(webApp, layoutTree):
+    from src.core import LayoutCatalog
+
+    response = webApp.test_client().get("/api/v1/layouts")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    # Not state: no revision rides along (spec §5).
+    assert body == {"ok": True, "data": LayoutCatalog.Layouts()}
+    assert body["data"][-1] == {
+        "id": "custom/finals", "kind": "designer",
+        "displayName": "Custom: 決勝",
+        "format": "1v1", "game": "カスタム", "entry": "index.html"}
+
+
+@pytest.mark.parametrize("query, expected", [
+    ("?kind=scoreboard", ["scoreboard_simple"]),
+    ("?kind=designer", ["custom/finals"]),
+    ("?kind=commentary", ["commentators"]),
+    ("?kind=top8", ["bracket_top8"]),
+    ("?kind=scoreboard,designer", ["scoreboard_simple", "custom/finals"]),
+    ("?kind=scoreboard&kind=designer", ["scoreboard_simple", "custom/finals"]),
+    ("?kind=%20top8%20,", ["bracket_top8"]),
+    ("?kind=", ["bracket_top8", "commentators", "scoreboard_simple",
+                "custom/finals"]),
+])
+def test_layouts_filters_by_kind(webApp, layoutTree, query, expected):
+    assert _layoutIds(
+        webApp.test_client().get(f"/api/v1/layouts{query}")) == expected
+
+
+@pytest.mark.parametrize("query", ["?kind=bogus", "?kind=scoreboard,Designer"])
+def test_layouts_rejects_an_unknown_kind(webApp, layoutTree, query):
+    response = webApp.test_client().get(f"/api/v1/layouts{query}")
+    _assertRejected(response)
+    message = response.get_json()["error"]["message"]
+    assert "scoreboard, designer, commentary, top8" in message
+
+
+def test_layouts_reads_the_shipped_tree_with_the_panel_labels(
+        webApp, monkeypatch):
+    # The real layout/ folder through the route: the Board tab's labels, in
+    # the Board tab's order. Only the shipped folders are checked -- a
+    # developer's local layout/ may hold more -- and a local copy sharing a
+    # shipped name makes the catalog append the id (pinned in
+    # tests/test_layout_catalog.py), so that form is accepted too.
+    from pathlib import Path
+    from src.core import LayoutCatalog
+
+    shipped = [("scoreboard_Universal", "Universal"),
+               ("scoreboard_crewbattle", "Crew Battle"),
+               ("scoreboard_simple", "Simple"),
+               ("scoreboard_team", "Team"),
+               ("scoreboard_topleft", "Top Left")]
+    monkeypatch.setattr(LayoutCatalog, "LAYOUT_ROOT", str(
+        Path(__file__).resolve().parent.parent / "layout"))
+    body = webApp.test_client().get(
+        "/api/v1/layouts?kind=scoreboard").get_json()
+    names = dict(shipped)
+    listed = [(entry["id"], entry["displayName"]) for entry in body["data"]
+              if entry["id"] in names]
+    assert [layoutId for layoutId, _ in listed] == [
+        layoutId for layoutId, _ in shipped]
+    for layoutId, displayName in listed:
+        assert displayName in (
+            names[layoutId], f"{names[layoutId]} ({layoutId})"), layoutId

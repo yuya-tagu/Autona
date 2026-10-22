@@ -857,7 +857,27 @@ layout/{用途}_{variant}/
 | `index.css` または `{template}.css` | テンプレ専用 CSS | ○ |
 | `index.js` または `{template}.js` | `Start()` / `Update(event)` 実装 | ○（read-only テンプレでも空で配置） |
 | `*_preview.png` | テンプレ選択 UI のプレビュー画像 | テンプレ選択 UI に表示するテンプレでは必須／直接 URL 指定のみで使う内部テンプレでは任意 |
-| `settings.json` | テンプレ ローカル設定 | △（必要時） |
+| `settings.json` | テンプレ ローカル設定。アプリのデザイン一覧用の `autona` ブロックもここに置く（下記） | △（必要時。BOARD / 実況 / TOP 8 の一覧に載せるテンプレでは `autona` ブロックを置く） |
+
+##### アプリのデザイン一覧のメタデータ（`settings.json` の `autona` ブロック）
+
+BOARD / 実況 / TOP 8 タブのプルダウン・Designer の「開く」・`GET /api/v1/layouts` は、すべて
+`src/core/LayoutCatalog.py`（Qt 非依存）の 1 つのカタログを読む。旧来型テンプレのメタデータは
+`settings.json` の `autona` ブロック（ページ側の `globals.js` は読まない）、Designer 製
+（`layout/custom/{slug}/`）は `project.json`。利用者向けの詳しい説明は `layout/README.md`
+「アプリのデザイン一覧に載せる」。
+
+| キー | 必須 | 内容 |
+|------|------|------|
+| `kind` | ○ | `scoreboard` / `commentary` / `top8`（`designer` は `layout/custom/` 専用で宣言不可）。不正・破損ブロックは警告ログを出してブロック無し扱い |
+| `displayName` | | 一覧の表示名。省略時はフォルダ名から生成 |
+| `format` / `game` | | BOARD のメタ欄（対戦形式・ゲーム）。省略時は `null`（画面は「—」） |
+| `entry` | | 入口 HTML のファイル名（フォルダ内のみ）。省略・フォルダ外指定は `index.html` |
+
+- **フォルダ名へのフォールバック**: ブロックが無い／壊れたフォルダは旧来の命名規約で拾う（`scoreboard*` → scoreboard、`commentators` / `commentators_*` → commentary、`bracket_top8` / `bracket_top8_*` → top8。基本フォルダは「標準」、バリアントは接尾辞を整形: `commentators_dark-gold` → `Dark Gold`）。`displayName` だけ省略したときも同規則、規約外の名前は `_` → 空白 + 単語先頭大文字。入口ファイルの無いフォルダ、`custom/` `designer_runtime/` `include/` `icons/` は載らない
+- **Designer 製**: 表示名は `Custom: {project.json の name}`（空なら slug）。対戦形式・ゲームは `meta.format` / `meta.game`、未設定なら `1v1` / `カスタム`。Designer の「開く」一覧だけは接頭辞なしの `name` を出す（Designer の中なので区別が要らない）
+- **重複時の表記**: 同じ `kind` の中で表示名が重なったら、重なったもの全部を `{displayName} ({id})` にする（例: 複製フォルダ `scoreboard_simple - コピー` → `Simple (scoreboard_simple)` / `Simple (scoreboard_simple - コピー)`）。`kind` ごとに別のプルダウンなので、kind をまたぐ同名（実況と TOP 8 の「標準」）は変えない
+- pin: `tests/test_layout_catalog.py`（出荷フォルダのブロックの値そのものは `test_the_shipped_layouts_declare_their_metadata_explicitly`）
 
 #### 4.3.4 共有リソース（`layout/include/`）
 

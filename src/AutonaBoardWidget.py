@@ -6,8 +6,12 @@ composer projects in ``layout/custom/{slug}/`` (TSH-style HTML/CSS/JS that
 reads ``out/`` state and is loaded into OBS as a *local file*). This tab bundles
 the operator's "make it look right and get it into OBS" workflow:
 
-* **Design** — a combo over every ``layout/scoreboard*/`` folder that has an
-  ``index.html``. The choice persists to ``board.selected_design``.
+* **Design** — a combo over the ``scoreboard`` and ``designer`` entries of
+  the layout catalog (``src/core/LayoutCatalog.py``: display name and
+  format / game come from each folder's metadata, not from this module).
+  The operator's choice persists to ``board.selected_design``; a re-scan
+  that cannot find it (a project.json locked mid-save or broken) only falls
+  back on screen and never overwrites it.
 * **Preview** — an embedded QWebEngineView pointed at the running web server
   (``http://127.0.0.1:{port}/layout/{design}/index.html``). It shares the same
   Socket.IO feed as a real overlay, so score and color edits reflect live.
@@ -31,6 +35,7 @@ from qtpy.QtCore import *
 from loguru import logger
 
 from .core.SettingsManager import SettingsManager
+from .core import LayoutCatalog
 from .AutonaDesignerWindow import AutonaDesignerWindow
 from .AutonaLayoutPreview import AutonaLayoutPreview
 from .AutonaFeatureColors import FEATURE_BOARD, MakeFeatureColorCard
@@ -50,54 +55,16 @@ WINNER_POPUP_PREVIEW_MODES = (
     ("CHAMPION", "champion"),
 )
 
-# Friendlier labels than the prettified folder name where it helps.
-DESIGN_DISPLAY_NAMES = {
-    "scoreboard_Universal": "Universal",
-    "scoreboard_crewbattle": "Crew Battle",
-    "scoreboard_simple": "Simple",
-    "scoreboard_team": "Team",
-    "scoreboard_topleft": "Top Left",
-}
-
-# Per-design (match format, supported game) shown beside the picker. Derived
-# from each layout's index.js: the index.html designs branch on player count
-# (1v1 / team), while crewbattle is the board-3 stock-based crew overlay.
-# Edit here when adding a design; unknown designs fall back to "—".
-DESIGN_META = {
-    "scoreboard_Universal": ("1v1 / チーム", "汎用（全ゲーム）"),
-    "scoreboard_simple": ("1v1 / チーム", "汎用（全ゲーム）"),
-    "scoreboard_topleft": ("1v1 / チーム", "汎用（全ゲーム）"),
-    "scoreboard_team": ("1v1 / チーム", "汎用（全ゲーム）"),
-    "scoreboard_crewbattle": ("クルーバトル", "スマブラSP（ストック制）"),
-}
+# Catalog kinds this tab offers: the built-in scoreboards, then the
+# Designer projects (layout/custom/{slug}). Metadata for both -- display
+# name, match format, supported game -- is the catalog's; a format / game a
+# layout does not declare shows as "—".
+BOARD_KINDS = (LayoutCatalog.KIND_SCOREBOARD, LayoutCatalog.KIND_DESIGNER)
+UNKNOWN_META = "—"
 
 
-def _discover_designs():
-    """List built-in and custom folders that have an ``index.html``.
-
-    The index.html check keeps this robust against non-design folders
-    accidentally dropped under ``layout/`` (e.g. a ``custom/{slug}/`` that
-    hasn't been built out yet). Composer projects are stored one level
-    deeper as ``layout/custom/{slug}/`` and returned with forward slashes so
-    the same value works in URLs and filesystem path construction."""
-    designs = []
-    try:
-        base = os.path.abspath(LAYOUT_DIR)
-        for name in sorted(os.listdir(base)):
-            if not name.startswith("scoreboard"):
-                continue
-            if os.path.isfile(os.path.join(base, name, "index.html")):
-                designs.append(name)
-
-        customBase = os.path.join(base, "custom")
-        if os.path.isdir(customBase):
-            for slug in sorted(os.listdir(customBase)):
-                if os.path.isfile(
-                        os.path.join(customBase, slug, "index.html")):
-                    designs.append(f"custom/{slug}")
-    except OSError as e:
-        logger.warning(f"Board: failed to list layout designs: {e}")
-    return designs
+def _boardLayouts(catalog):
+    return [entry for entry in catalog.layouts if entry["kind"] in BOARD_KINDS]
 
 
 class AutonaBoardWidget(QDockWidget):
@@ -106,7 +73,8 @@ class AutonaBoardWidget(QDockWidget):
         # windowTitle is the visible tab label (objectName is set in Autona.py).
         self.setWindowTitle(QApplication.translate("app", "Board"))
 
-        self._designs = _discover_designs()
+        catalog = LayoutCatalog.Discover()
+        self._designs = _boardLayouts(catalog)
         self._previewLoaded = False
         self._designerWindow = None
         self._designRefreshTimer = QTimer(self)
@@ -160,7 +128,7 @@ class AutonaBoardWidget(QDockWidget):
         panesLayout.addWidget(leftScroll)
         panesLayout.addWidget(rightScroll, 1)
         self.setWidget(panes)
-        self._watchDesignDirectories()
+        self._watchDesignDirectories(catalog.watchDirs)
 
         # NOTE: the theme/accent seed that used to run here moved to
         # Window._SeedPanelState() (startup Step 4b-2). This panel is built
@@ -172,15 +140,6 @@ class AutonaBoardWidget(QDockWidget):
         self._refreshObsPath()
 
     # ── Design selection ─────────────────────────────────────────────
-    def _displayName(self, folder):
-        if folder in DESIGN_DISPLAY_NAMES:
-            return DESIGN_DISPLAY_NAMES[folder]
-        if folder.startswith("custom/"):
-            name = folder.split("/", 1)[1]
-            return f"Custom: {name.replace('_', ' ').replace('-', ' ').title()}"
-        name = folder[len("scoreboard"):].lstrip("_") or folder
-        return name.replace("_", " ").title()
-
     def _buildDesignSelector(self):
         # Right-column selector above the preview: section-title label +
         # full-width combo, matching the RESULT tab. Japanese literals
@@ -194,9 +153,13 @@ class AutonaBoardWidget(QDockWidget):
         col.addWidget(label)
 
         self.designCombo = QComboBox()
-        for d in self._designs:
-            self.designCombo.addItem(self._displayName(d), d)
+        for entry in self._designs:
+            self.designCombo.addItem(entry["displayName"], entry["id"])
         saved = SettingsManager.Get("board.selected_design", DEFAULT_DESIGN)
+        # What the operator picked, kept apart from what the combo shows: a
+        # design missing from a scan is shown as the fallback below but stays
+        # the choice, so it comes back as soon as a scan lists it again.
+        self._selectedDesign = saved
         idx = self.designCombo.findData(saved)
         if idx < 0:
             idx = self.designCombo.findData(DEFAULT_DESIGN)
@@ -208,12 +171,15 @@ class AutonaBoardWidget(QDockWidget):
         # refresh button: _designWatcher already re-runs _refreshDesigns
         # whenever a design folder changes on disk.
         self.designMetaLabel = QLabel()
+        # format / game are free text from settings.json / project.json.
+        self.designMetaLabel.setTextFormat(Qt.TextFormat.PlainText)
         self.designMetaLabel.setWordWrap(True)
         self.designMetaLabel.setStyleSheet(UI.secondary_label_style())
         col.addWidget(self.designMetaLabel)
 
         # Connect after the initial selection so it doesn't fire on startup.
         self.designCombo.currentIndexChanged.connect(self._onDesignChanged)
+        self.designCombo.activated.connect(self._onDesignActivated)
         if not self._designs:
             warn = QLabel("layout/ にスコアボードデザインが見つかりません。")
             warn.setWordWrap(True)
@@ -235,11 +201,20 @@ class AutonaBoardWidget(QDockWidget):
         group.layout().addWidget(self.btOpenDesigner)
         return group
 
+    def _designEntry(self, design):
+        return next(
+            (entry for entry in self._designs if entry["id"] == design), None)
+
     def _designMetaText(self, design):
-        if design and design.startswith("custom/"):
-            return "対戦形式：1v1\nゲーム：カスタム"
-        fmt, game = DESIGN_META.get(design, ("—", "—"))
+        entry = self._designEntry(design) or {}
+        fmt = entry.get("format") or UNKNOWN_META
+        game = entry.get("game") or UNKNOWN_META
         return f"対戦形式：{fmt}\nゲーム：{game}"
+
+    def _designFile(self, design):
+        """The design's entry file name inside its folder."""
+        entry = self._designEntry(design)
+        return entry["entry"] if entry else LayoutCatalog.DEFAULT_ENTRY
 
     def _refreshDesignMeta(self):
         design = self._currentDesign()
@@ -252,54 +227,59 @@ class AutonaBoardWidget(QDockWidget):
         return self.designCombo.currentData()
 
     def _onDesignChanged(self, _idx):
+        # Only the operator's own pick reaches here (_refreshDesigns refills
+        # the combo with signals blocked), so this and _onDesignActivated are
+        # the only places the choice is persisted.
         design = self._currentDesign()
         if design:
+            self._selectedDesign = design
             SettingsManager.Set("board.selected_design", design)
         self._refreshDesignMeta()
         self._refreshObsPath()
         if self._previewLoaded:
             self._loadPreview()
 
-    def _watchDesignDirectories(self):
+    def _onDesignActivated(self, _idx):
+        # Choosing the item already shown emits no currentIndexChanged. That
+        # matters while the combo shows a fallback for a saved design it
+        # cannot find: picking that fallback must still make it the choice.
+        # Qt emits activated after currentIndexChanged, so an ordinary pick
+        # is already saved by _onDesignChanged and this is a no-op.
+        design = self._currentDesign()
+        if design and design != self._selectedDesign:
+            self._selectedDesign = design
+            SettingsManager.Set("board.selected_design", design)
+
+    def _watchDesignDirectories(self, paths):
+        # The catalog says which directories can change its contents
+        # (LayoutCatalog.Catalog.watchDirs); this tab only watches them.
         watched = set(self._designWatcher.directories())
-        customBase = os.path.abspath(os.path.join(LAYOUT_DIR, "custom"))
-        candidates = [
-            os.path.abspath(LAYOUT_DIR),
-            customBase,
-        ]
-        if os.path.isdir(customBase):
-            try:
-                candidates.extend(
-                    os.path.join(customBase, slug)
-                    for slug in os.listdir(customBase)
-                    if os.path.isdir(os.path.join(customBase, slug))
-                )
-            except OSError as e:
-                logger.warning(
-                    f"Board: failed to watch custom designs: {e}")
-        for path in candidates:
-            if os.path.isdir(path) and path not in watched:
+        for path in paths:
+            if path not in watched:
                 self._designWatcher.addPath(path)
 
     def _scheduleDesignRefresh(self, _path=None):
         # Saving creates the slug directory before writing index.html. Debounce
         # directory notifications so discovery runs after the atomic writes.
-        self._watchDesignDirectories()
+        # Watch a new slug directory right away (a cheap listing, no file
+        # reads) so its writes keep pushing the debounce back.
+        self._watchDesignDirectories(LayoutCatalog.WatchDirs())
         self._designRefreshTimer.start()
 
     def _refreshDesigns(self):
-        self._watchDesignDirectories()
-        designs = _discover_designs()
-        current = self._currentDesign()
-        preferred = current or SettingsManager.Get(
-            "board.selected_design", DEFAULT_DESIGN)
+        catalog = LayoutCatalog.Discover()
+        self._watchDesignDirectories(catalog.watchDirs)
+        designs = _boardLayouts(catalog)
+        # The operator's choice, not what the combo currently shows: after a
+        # scan that missed it the combo shows a fallback, and keying on that
+        # would make the fallback stick once the design is listed again.
+        preferred = self._selectedDesign
 
         self.designCombo.blockSignals(True)
         try:
             self.designCombo.clear()
-            for design in designs:
-                self.designCombo.addItem(
-                    self._displayName(design), design)
+            for entry in designs:
+                self.designCombo.addItem(entry["displayName"], entry["id"])
 
             idx = self.designCombo.findData(preferred)
             if idx < 0:
@@ -312,9 +292,9 @@ class AutonaBoardWidget(QDockWidget):
             self.designCombo.blockSignals(False)
 
         self._designs = designs
+        # No SettingsManager write: a fallback is for display only, and a
+        # found choice is already what is saved.
         selected = self._currentDesign()
-        if selected:
-            SettingsManager.Set("board.selected_design", selected)
         self._refreshDesignMeta()
         self._refreshObsPath()
         if self._previewLoaded and selected:
@@ -346,7 +326,7 @@ class AutonaBoardWidget(QDockWidget):
     def _loadPreview(self):
         design = self._currentDesign()
         if design:
-            self.preview.load(design)
+            self.preview.load(design, self._designFile(design))
 
     def _buildWinnerPopupSelector(self):
         # Same label + full-width combo shape as the design selector above.
@@ -456,8 +436,8 @@ class AutonaBoardWidget(QDockWidget):
         design = self._currentDesign()
         if not design:
             return ""
-        return os.path.normpath(
-            os.path.abspath(f"{LAYOUT_DIR}/{design}/index.html"))
+        return os.path.normpath(os.path.abspath(
+            f"{LAYOUT_DIR}/{design}/{self._designFile(design)}"))
 
     def _refreshObsPath(self):
         self.obsPathField.setText(self._obsPath())

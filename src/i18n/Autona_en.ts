@@ -782,6 +782,10 @@
         <translation>Launch Companion and open its web admin page (default http://127.0.0.1:8000).</translation>
     </message>
     <message>
+        <source>Layout list (?kind=scoreboard|designer|commentary|top8)</source>
+        <translation>Layout list (?kind=scoreboard|designer|commentary|top8)</translation>
+    </message>
+    <message>
         <source>Load into tester</source>
         <translation>Load into tester</translation>
     </message>

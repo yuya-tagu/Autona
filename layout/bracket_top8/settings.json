@@ -1,4 +1,8 @@
 {
+  "autona": {
+    "kind": "top8",
+    "displayName": "標準"
+  },
   "assets": {
     "default": {}
   },

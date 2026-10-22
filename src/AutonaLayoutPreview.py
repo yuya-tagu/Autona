@@ -13,7 +13,6 @@ Autona.py's import order.
 import json
 import logging
 import math
-import os
 
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
@@ -111,35 +110,8 @@ def ObsUrl(layout_name, entry=DEFAULT_ENTRY):
             f"{layout_name}/{entry}")
 
 
-def DiscoverLayoutDesigns(prefix):
-    """List ``layout/{prefix}`` and ``layout/{prefix}_*`` folders that have
-    an ``index.html``, sorted (the base folder first).
-
-    Shared by the panels whose preview offers a design pulldown (Commentary
-    / Top 8): dropping a ``layout/{prefix}_{variant}/`` folder adds it to
-    the pulldown on the next launch, no code change needed. The Board tab
-    keeps its own richer discovery (custom/ designs, live re-scan)."""
-    designs = []
-    try:
-        base = os.path.abspath(LAYOUT_DIR)
-        for name in sorted(os.listdir(base)):
-            if name != prefix and not name.startswith(prefix + "_"):
-                continue
-            if os.path.isfile(os.path.join(base, name, "index.html")):
-                designs.append(name)
-    except OSError as e:
-        logger.warning("Failed to list %s layout designs: %s", prefix, e)
-    return designs
-
-
-def LayoutDesignDisplayName(prefix, design):
-    """Pulldown label for a discovered design: the base folder is 標準,
-    variants use their prettified suffix (``{prefix}_dark_gold`` →
-    ``Dark Gold``)."""
-    if design == prefix:
-        return "標準"
-    suffix = design[len(prefix):].lstrip("_")
-    return suffix.replace("_", " ").replace("-", " ").title() or design
+# Which designs a panel's pulldown offers, and their labels, come from the
+# layout catalog (src/core/LayoutCatalog.py), not from this module.
 
 
 class AutonaLayoutPreview(QFrame):

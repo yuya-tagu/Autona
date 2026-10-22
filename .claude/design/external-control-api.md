@@ -188,6 +188,7 @@
 | `GET /api/v1/sets/{setId}` | セット詳細 | `get_match` | #36 |
 | `GET /api/v1/commentary` | 実況者状態 | `get_comms` | #37 |
 | `GET /api/v1/countries/{code}/states` | 国の州・地域一覧（未知の国は `404 NOT_FOUND`。2026-10-21 追加） | `get_states` | #45 |
+| `GET /api/v1/layouts` | レイアウト一覧（§5.2。2026-10-22 追加） | なし（`core/LayoutCatalog.Layouts`） | — |
 
 > `data` の具体スキーマは委譲先 Action の現返却（candidates §3）に準拠。本 API はそれを `{"ok":true,"data":...}` で包むだけ。
 
@@ -208,6 +209,34 @@
 - `activeBoard`: 現在表示中のボード番号（1/2/3）。外部コントローラが「表示中ボードを操作」する判断材料（§2.12）。取得方法は `TBD`（`SetBattleFormat` の現在値をどこから読むか）。
 - `outLastWriteUnix`: `out/` 配信ファイルの最終更新時刻（OBS 出力健全性の指標）。取得方法は `TBD`。
 - `tournamentLoaded`: provider 有無。
+
+### 5.2 `GET /api/v1/layouts`（2026-10-22 追加）
+`layout/` 配下の配信用レイアウト（旧来型テンプレート + Designer で作った `layout/custom/{slug}/`）の一覧。
+Board / Commentary / Top 8 タブと Designer の「開く」一覧が使う**同じカタログ**（`src/core/LayoutCatalog.py`）を返す
+（[../../docs/changes/layout-custom-unification.md](../../docs/changes/layout-custom-unification.md) Step 1）。
+
+- `?kind=` で絞り込む。値は `scoreboard` / `designer` / `commentary` / `top8`。カンマ区切り（`?kind=scoreboard,designer`）・
+  パラメータの繰り返しのどちらでも複数指定できる。省略・空なら全件。未知の kind は `400 INVALID_ARGUMENT`
+- 状態ではないので `revision` は付かない。読み取りなので操作ログにも出ない（§2.7）
+- 並び順は旧来型（フォルダ名順）→ Designer プロジェクト（slug の大文字小文字無視順）。Board タブのプルダウンと同じ
+
+```json
+{ "ok": true, "data": [
+  { "id": "scoreboard_simple", "kind": "scoreboard", "displayName": "Simple",
+    "format": "1v1 / チーム", "game": "汎用（全ゲーム）", "entry": "index.html" },
+  { "id": "custom/finals", "kind": "designer", "displayName": "Custom: 決勝",
+    "format": "1v1", "game": "カスタム", "entry": "index.html" }
+] }
+```
+- `id`: `layout/` からの相対パス（区切りは `/`）。配信 URL は `http://{host}:{port}/layout/{id}/{entry}`、
+  OBS のローカルファイルは `layout/{id}/{entry}`
+- `displayName` / `format` / `game`: 旧来型は各フォルダの `settings.json` の `autona` ブロック、Designer は
+  `project.json` の `name` と `meta.format` / `meta.game`（未設定なら `"1v1"` / `"カスタム"`）。旧来型で宣言の無い
+  `format` / `game` は `null`
+- `displayName` の表記: Designer は `"Custom: " + name`。同じ `kind` の中で `displayName` が重複したエントリは、
+  重複したもの全部が `"{displayName} ({id})"` になる（例: `"Simple (scoreboard_simple - コピー)"`）。重複が無ければそのまま。
+  規約の正本は `layout/README.md`「レイアウトのメタデータ（`autona` ブロック）」
+- ファイルシステムの絶対パス（カタログ内部の監視ディレクトリ等）は返さない（D5: LAN 公開時もパスを出さない）
 
 ---
 
@@ -411,6 +440,8 @@ HTTP/1.1 409 Conflict
 > §6.7〜§6.9・§7.3 `tournament` の実行中フラグ）と、Web UI が置換した呼び出しは `tests/test_api_v1.py` が
 > 自動で pin する（旧ルートと同じ状態になること、および §6 冒頭のチーム番号規約など意図的な差分）。
 > Web UI 側が状態側のチーム番号を送ることは `web/src/ScoreboardPage/v1Requests.test.js` が pin する。
+> §5.2 `layouts`（2026-10-22）はエンベロープと `?kind=` を `tests/test_api_v1.py`、カタログの発見規則を
+> `tests/test_layout_catalog.py` が pin する。
 > ルート一覧そのものは `tests/test_webserver_routes.py` の `EXPECTED_API_V1_ROUTES` が台帳。
 
 - **自動テストは作らない**（PdM 決定）。動作確認は**アプリ上で手動**で行う

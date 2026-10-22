@@ -1,1 +1,8 @@
-{}
+{
+  "autona": {
+    "kind": "scoreboard",
+    "displayName": "Crew Battle",
+    "format": "クルーバトル",
+    "game": "スマブラSP（ストック制）"
+  }
+}

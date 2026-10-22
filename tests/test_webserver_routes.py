@@ -104,6 +104,7 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/games', 'api_v1.get_games', 'GET,HEAD,OPTIONS'),
     ('/api/v1/games/current', 'api_v1.get_current_game', 'GET,HEAD,OPTIONS'),
     ('/api/v1/health', 'api_v1.health', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/layouts', 'api_v1.get_layouts', 'GET,HEAD,OPTIONS'),
     ('/api/v1/match-names', 'api_v1.get_match_names', 'GET,HEAD,OPTIONS'),
     ('/api/v1/scoreboards/<int:n>', 'api_v1.get_scoreboard', 'GET,HEAD,OPTIONS'),
     ('/api/v1/scoreboards/<int:n>/score:reset', 'api_v1.score_reset', 'OPTIONS,POST'),

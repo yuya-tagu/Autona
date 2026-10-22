@@ -784,6 +784,10 @@
         <translation>Companion を起動し、Web 管理ページ（既定は http://127.0.0.1:8000）を開きます。</translation>
     </message>
     <message>
+        <source>Layout list (?kind=scoreboard|designer|commentary|top8)</source>
+        <translation>レイアウト一覧（?kind=scoreboard|designer|commentary|top8 で絞り込み）</translation>
+    </message>
+    <message>
         <source>Load into tester</source>
         <translation>テスターに読み込む</translation>
     </message>

@@ -17,6 +17,45 @@ OBS 等のブラウザソースで読み込んで使用します。
 
 これでコンソールログ（とエラー）の確認、CSS ルールの即時編集ができます。
 
+### アプリのデザイン一覧に載せる（`settings.json` の `autona` ブロック）
+
+BOARD / 実況 / TOP 8 タブのデザイン一覧と `GET /api/v1/layouts` は、各フォルダの
+`settings.json` にある `autona` ブロックを読んで表示名などを決めます
+（読み手は `src/core/LayoutCatalog.py`。ページ側の `globals.js` はこのキーを使いません）。
+
+```json
+{
+  "autona": {
+    "kind": "scoreboard",
+    "displayName": "Simple",
+    "format": "1v1 / チーム",
+    "game": "汎用（全ゲーム）"
+  }
+}
+```
+
+| キー | 必須 | 内容 |
+|---|---|---|
+| `kind` | ○ | `scoreboard`（BOARD）/ `commentary`（実況）/ `top8`（TOP 8）。`designer` は `layout/custom/` 専用で宣言できない。不正な値・壊れたブロックは警告ログを出し、ブロック無しとして扱う |
+| `displayName` | | 一覧の表示名。省略時はフォルダ名から作る（下記） |
+| `format` | | 対戦形式（BOARD のメタ欄）。省略時は「—」 |
+| `game` | | 対応ゲーム（BOARD のメタ欄）。省略時は「—」 |
+| `entry` | | 入口の HTML ファイル名（フォルダ内のファイル名のみ）。省略時は `index.html`。フォルダの外を指す値は無視して `index.html` |
+
+- 入口ファイルが無いフォルダは一覧に出ない。`custom/` `designer_runtime/` `include/` `icons/` はデザインとして扱わない
+- **フォルダ名へのフォールバック**: ブロックが無い（または壊れている）フォルダは、従来のフォルダ名規約で拾う。
+  `scoreboard*` → BOARD（`scoreboard_my_overlay` → `My Overlay`）、`commentators` / `commentators_*` → 実況、
+  `bracket_top8` / `bracket_top8_*` → TOP 8（基本フォルダは「標準」、`commentators_dark-gold` → `Dark Gold`）。
+  `displayName` だけ省略したときも同じ規則で名前を作り、規約に当たらないフォルダ名は `_` を空白にして
+  単語の先頭を大文字にする（`lower_third` → `Lower Third`）。規約に当たらずブロックも無いフォルダは一覧に出ない
+- **Designer で作ったデザイン**（`layout/custom/{slug}/`）はブロックを持たない。表示名は `project.json` の
+  `name` を使って `Custom: {name}`（`name` が空なら slug）、対戦形式・ゲームは `meta.format` / `meta.game`
+  （未設定なら「1v1」「カスタム」）
+- **表示名の重複**: 同じ `kind` の中で表示名が重なったら、重なったもの全部を `{表示名} ({id})` と表示する
+  （`id` は `layout/` からの相対パス。例: フォルダを複製した `scoreboard_simple - コピー` があると
+  `Simple (scoreboard_simple)` と `Simple (scoreboard_simple - コピー)`）。重なりが無くなれば元に戻る。
+  `kind` が違えば同名でもそのまま（実況と TOP 8 の「標準」など）
+
 > **Note:** 現行テンプレートは前身プロジェクトのデザインを引き継いでいます。
 > 今後 Autona 版として順次リデザインを進める予定です。
 
@@ -146,7 +185,7 @@ Autonaへまだデータが届いていない場合は `実データ待機中` �
 
 ### OBSへ追加する
 
-保存後、BOARDタブのスコアボードデザイン一覧へ `Custom: {slug}` として
+保存後、BOARDタブのスコアボードデザイン一覧へ `Custom: {デザイン名}` として
 自動的に追加されます。表示されない場合は一覧横の `更新` を押してください。
 OBSではBOARDタブに表示される `index.html` をブラウザソースの
 ローカルファイルとして指定し、幅1920・高さ1080に設定します。
@@ -170,8 +209,8 @@ layout/
 （元の `index.html` / `runtime.*` は `<slug>/_legacy/` に退避されます）。
 
 各デザインは `http://127.0.0.1:5107/layout/custom/{slug}/index.html` でも
-直接確認できます。保存後はBOARDタブのデザイン一覧に `Custom: {slug}` として
-表示されます。
+直接確認できます。保存後はBOARDタブのデザイン一覧に `Custom: {デザイン名}` として
+表示されます（同名のデザインが複数あると `Custom: {デザイン名} (custom/{slug})`）。
 
 `project.json` のレイヤーIDや `schemaVersion` は互換性判定に使います。
 schemaVersion 1・2 の既存デザインはDesignerで読み込むと schemaVersion 3 へ

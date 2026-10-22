@@ -32,9 +32,8 @@ from loguru import logger
 
 from .core.StateManager import StateManager
 from .core.SettingsManager import SettingsManager
-from .AutonaLayoutPreview import (
-    AutonaLayoutPreview, ObsUrl, DiscoverLayoutDesigns,
-    LayoutDesignDisplayName)
+from .core import LayoutCatalog
+from .AutonaLayoutPreview import AutonaLayoutPreview, ObsUrl
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
@@ -45,9 +44,10 @@ from . import AutonaTop8Model as top8
 from . import ui_constants as UI
 from . import ui_layout as L
 
-# Design folders: layout/bracket_top8/ plus any layout/bracket_top8_*/
-# variant (discovered at launch; the pulldown spec matches the Board tab).
-LAYOUT_PREFIX = "bracket_top8"
+# Designs: the catalog's top8 layouts (layout/bracket_top8/ and any variant
+# declaring the kind; read at launch, the pulldown spec matches the Board
+# tab).
+LAYOUT_KIND = LayoutCatalog.KIND_TOP8
 DEFAULT_DESIGN = "bracket_top8"
 
 # Sidebar section -> match ids, in display order.
@@ -100,7 +100,7 @@ class AutonaTop8Widget(QDockWidget):
         self._statusToken = None
         self._phases = []
         self._loadQueuedOnPhases = False
-        self._designs = DiscoverLayoutDesigns(LAYOUT_PREFIX)
+        self._designs = LayoutCatalog.Layouts([LAYOUT_KIND])
 
         # NOTE: the top8.* seed / normalisation that used to run here moved
         # to Window._SeedPanelState() (startup Step 4b-2). This panel is
@@ -754,7 +754,7 @@ class AutonaTop8Widget(QDockWidget):
         # Right-column selector above the preview: section-title label +
         # full-width combo, matching the RESULT tab. Selecting a design
         # reloads the preview immediately, no update button. Single entry
-        # today; future layout/bracket_top8_* variants appear automatically.
+        # today; further top8 layouts appear automatically.
         col = QVBoxLayout()
         col.setSpacing(UI.SPACE_SM)
         label = QLabel("TOP 8 のデザインを選択")
@@ -762,9 +762,8 @@ class AutonaTop8Widget(QDockWidget):
         col.addWidget(label)
 
         self.designCombo = QComboBox()
-        for d in self._designs:
-            self.designCombo.addItem(
-                LayoutDesignDisplayName(LAYOUT_PREFIX, d), d)
+        for entry in self._designs:
+            self.designCombo.addItem(entry["displayName"], entry["id"])
         saved = SettingsManager.Get("top8.selected_design", DEFAULT_DESIGN)
         idx = self.designCombo.findData(saved)
         if idx < 0:
@@ -781,7 +780,8 @@ class AutonaTop8Widget(QDockWidget):
     def _buildPreview(self):
         # Bare preview widget, no card wrapper — the RESULT tab's right-pane
         # structure is the reference for every preview panel.
-        self.preview = AutonaLayoutPreview(self._currentDesign())
+        self.preview = AutonaLayoutPreview(
+            self._currentDesign(), entry=self._currentEntry())
         self.preview.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         return self.preview
@@ -791,6 +791,12 @@ class AutonaTop8Widget(QDockWidget):
             return None
         return self.designCombo.currentData()
 
+    def _currentEntry(self):
+        """Entry file of the selected design (catalog ``entry``)."""
+        design = self._currentDesign()
+        return next((entry["entry"] for entry in self._designs
+                     if entry["id"] == design), LayoutCatalog.DEFAULT_ENTRY)
+
     def _onDesignChanged(self, _idx):
         design = self._currentDesign()
         if not design:
@@ -798,7 +804,7 @@ class AutonaTop8Widget(QDockWidget):
         SettingsManager.Set("top8.selected_design", design)
         self.obsUrlField.setText(self._obsUrl())
         if self._previewLoaded:
-            self.preview.load(design)
+            self.preview.load(design, self._currentEntry())
 
     def showEvent(self, e):
         super().showEvent(e)
@@ -841,4 +847,5 @@ class AutonaTop8Widget(QDockWidget):
         return group
 
     def _obsUrl(self):
-        return ObsUrl(self._currentDesign() or DEFAULT_DESIGN)
+        return ObsUrl(self._currentDesign() or DEFAULT_DESIGN,
+                      self._currentEntry())
