@@ -29,7 +29,8 @@ jobs:
             - name: Set up Python
               uses: actions/setup-python@v5
               with:
-                  python-version: "3.14"
+                  # Same as CI and the local release build.
+                  python-version: "3.12"
 
             - name: Set up Node
               uses: actions/setup-node@v4
@@ -39,32 +40,42 @@ jobs:
             - name: Install Python dependencies
               run: pip install -r .\dependencies\requirements.txt pyinstaller
 
+            # CI=false: Actions sets CI=true, which makes react-scripts fail
+            # the build on ESLint warnings. The local release build (runbook
+            # step 3) does not, and neither should this.
             - name: Build Web UI
+              env:
+                  CI: "false"
               run: |
                   cd web
                   npm ci
                   npm run build
 
+            # onedir build: dist/Autona/ holds the small Autona.exe launcher
+            # and _internal/ (Python runtime + Qt/WebEngine). gen_release.ps1
+            # packages both from the project root, and the launcher does not
+            # start without _internal/ (see .claude/rules/build-and-release.md).
             - name: Build Autona.exe
-              run: |
-                  pyinstaller --noconfirm .\dependencies\autona.spec
-                  copy dist\Autona.exe Autona.exe
-
-            - name: Package release zip
               shell: pwsh
               run: |
-                  cd scripts
-                  .\gen_release.ps1
+                  pyinstaller --noconfirm .\dependencies\autona.spec
+                  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+                  Remove-Item -Recurse -Force .\_internal -ErrorAction SilentlyContinue
+                  Copy-Item -Recurse .\dist\Autona\_internal .\_internal
+                  Copy-Item -Force .\dist\Autona\Autona.exe .\Autona.exe
 
+            # gen_release.ps1 resolves the project root from its own location
+            # and validates the zip it writes (validate_release_zip.ps1).
+            - name: Package release zip
+              shell: pwsh
+              run: .\scripts\gen_release.ps1
+
+            # publish_release.ps1 re-validates the zip right before publishing
+            # (release runbook step 8) and tags it v<assets/versions.json
+            # program>, the version the in-app updater compares against.
             - name: Publish Release to public repo
               shell: pwsh
               env:
                   # PAT with Contents:write on yuya-tagu/Autona-releases.
                   GH_TOKEN: ${{ secrets.RELEASE_REPO_TOKEN }}
-              run: |
-                  $version = (Get-Content assets/versions.json -Raw | ConvertFrom-Json).program
-                  $tag = "v$version"
-                  gh release create $tag release-windows.zip `
-                      --repo yuya-tagu/Autona-releases `
-                      --title $tag `
-                      --notes "Autona $tag"
+              run: .\scripts\publish_release.ps1

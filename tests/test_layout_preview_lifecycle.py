@@ -20,6 +20,7 @@ verified out of tree against a Flask-SocketIO server speaking the app's
 program_state protocol; it needs the full layout include tree and a
 websocket server, which this suite does not stand up.
 """
+import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -110,11 +111,24 @@ class _Rig:
 
     def js(self, expr):
         # Only on an Active page: a frozen one answers after it thaws.
-        # Scalars only -- a JS array comes back as an empty string.
+        #
+        # The value is round-tripped through JSON because PySide6 hands
+        # null, undefined, arrays, objects and a thrown exception alike back
+        # as '' -- never None. A probe that returns null for "not there yet"
+        # then reads as "there" on its very first poll: every "the overlay
+        # frame has loaded" wait below used to pass against the frame's
+        # initial about:blank document, and the steps after it raced the
+        # real document's commit.
         box = []
-        self.page.runJavaScript(expr, 0, box.append)
+        self.page.runJavaScript(
+            "(function(){try{var v=(" + expr + ");"
+            "return JSON.stringify({value:v===undefined?null:v});}"
+            "catch(e){return JSON.stringify({error:String(e)});}})()",
+            0, box.append)
         assert _waitUntil(lambda: box), f"no reply to {expr!r}"
-        return box[0]
+        reply = json.loads(box[0])
+        assert "error" not in reply, f"{expr!r} threw {reply['error']}"
+        return reply["value"]
 
     def state(self):
         return self.page.lifecycleState()
@@ -256,6 +270,8 @@ def test_an_overlay_frame_is_stacked_on_the_canvas_and_removed_again(
         buildPreview):
     rig = buildPreview()
     rig.load()
+    # "No frame (yet)" must read as None, or the frame waits are vacuous.
+    assert _frameLoadId(rig) is None
 
     rig.preview.SetOverlayFrame("overlay/index.html#preview=winner")
 

@@ -1,0 +1,101 @@
+# Checks every pull request and every push to main: the Python suite and the
+# web UI. Nothing here builds the exe or publishes anything (that is
+# build_release.yml, run by hand).
+name: CI
+
+on:
+    pull_request:
+    push:
+        branches: [main]
+
+permissions:
+    contents: read
+
+jobs:
+    python:
+        name: Python tests
+        # Same OS as the shipped app: the global-hotkey tests only run on
+        # Windows (they skip elsewhere), and Qt/WebEngine behave as shipped.
+        runs-on: windows-latest
+        timeout-minutes: 30
+        env:
+            # tests/conftest.py also defaults this; set here so subprocesses
+            # spawned outside pytest's environment get it too.
+            QT_QPA_PLATFORM: offscreen
+            # QtWebEngine on a headless runner: no Chromium sandbox (the app's
+            # own ThumbnailRenderer turns it off the same way) and no GPU.
+            QTWEBENGINE_DISABLE_SANDBOX: "1"
+            QTWEBENGINE_CHROMIUM_FLAGS: --disable-gpu
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+                  cache: pip
+                  cache-dependency-path: dependencies/requirements.txt
+
+            - name: Install Python dependencies
+              run: python -m pip install -r dependencies/requirements.txt pytest==9.0.3
+
+            # tests/live talks to the real start.gg API. It is already opt-in
+            # (skipped unless AUTONA_LIVE_TESTS=1); ignoring it keeps CI
+            # offline even if that variable is ever set on the runner.
+            # test_designer_runtime_contract.py needs web/node_modules (jsdom)
+            # and runs in the web job, where those are installed.
+            - name: Run pytest
+              run: >-
+                  python -m pytest -q -ra -p no:cacheprovider
+                  --ignore=tests/live
+                  --ignore=tests/test_designer_runtime_contract.py
+
+    web:
+        name: Web UI build and tests
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Set up Node
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+                  cache: npm
+                  cache-dependency-path: web/package-lock.json
+
+            - name: Install web dependencies
+              working-directory: web
+              run: npm ci
+
+            # Actions sets CI=true on every step, and react-scripts then fails
+            # the build on any ESLint warning. Build as the release does
+            # (warnings printed, not fatal); the tests below run with CI=true.
+            - name: Build web UI
+              working-directory: web
+              env:
+                  CI: "false"
+              run: npm run build
+
+            - name: Run web tests
+              working-directory: web
+              env:
+                  CI: "true"
+              run: npm test -- --watchAll=false
+
+            # The OBS runtime (layout/designer_runtime/runtime.js) and the
+            # editor model (model.ts, pinned by model.test.js above) must
+            # migrate project files identically. The Python side of that
+            # contract runs runtime.js under node, with jsdom from
+            # web/node_modules for its rendering checks.
+            - name: Set up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.12"
+
+            - name: Run runtime/model contract tests
+              run: |
+                  python -m pip install pytest==9.0.3
+                  python -m pytest -q -ra -p no:cacheprovider tests/test_designer_runtime_contract.py
