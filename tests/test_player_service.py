@@ -24,15 +24,22 @@ Isolation follows tests/test_actions.py: temp CWD, and the shared
 StateManager / SettingsManager handed back untouched.
 """
 import os
+import shutil
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from src.core import StateSchema as schema
-from src.core.PlayerService import KEEP_ONLINE_AVATAR, PlayerService
+from src.core.CountryCatalog import CountryCatalog
+from src.core.GameAssetCatalog import GameAssetCatalog
+from src.core.PlayerService import (
+    KEEP_ONLINE_AVATAR, CharacterSlot, PlayerService)
 from src.core.DictHelper import deep_clone
 from src.core.StateManager import StateManager as SM
+from tests.conftest import _link_tree
+from tests.fixtures.player_slots import recording
 
 _WORK_DIR = tempfile.mkdtemp(prefix="autona_player_service_test_")
 _ORIGINAL_CWD = os.getcwd()
@@ -189,25 +196,96 @@ def test_the_seed_is_always_published_as_a_number(player, value, expected):
     assert SM.Get(f"{BOARD_PATH}.{schema.PLAYER_SEED_KEY}") == expected
 
 
-def test_the_location_fields_publish_the_whole_selected_row(player):
-    row = {"code": "JP", "name": "Japan", "asset": "./assets/jp.png"}
-    assert player.SetLocation(schema.PLAYER_COUNTRY_KEY, row) is True
-    assert SM.Get(f"{BOARD_PATH}.{schema.PLAYER_COUNTRY_KEY}") == row
+# ── the location: codes in, the catalog's rows out (ADR-005 S1d) ────────
+#
+# The card hands over the picked codes and the value comes from
+# CountryCatalog. A two-row stand-in catalog is enough for the rules; the
+# shipped data is replayed against the recording at the end of the module.
+
+class _Countries:
+    """CountryCatalog's two lookups over literal rows (fresh dicts, as the
+    catalog returns), recording what was asked."""
+
+    def __init__(self):
+        self.asked = []
+
+    def CountryByCode(self, code):
+        self.asked.append(("country", code))
+        if code == "JP":
+            return {"name": "Japan", "en_name": "Japan", "code": "JP",
+                    "asset": "./assets/country_flag/jp.png"}
+        return None
+
+    def State(self, iso2, code):
+        self.asked.append(("state", iso2, code))
+        if (iso2, code) == ("JP", "13"):
+            return {"name": "Tokyo", "code": "13", "original_code": "13",
+                    "asset": "./assets/state_flag/JP/13.png"}
+        return {}
 
 
-def test_an_unknown_location_field_is_refused(player):
-    assert player.SetLocation("variants", {"code": "x"}) is False
-    assert SM.Get(f"{BOARD_PATH}.variants") is None
+@pytest.mark.parametrize("path", [BOARD_PATH, EDITOR_PATH])
+def test_the_country_is_the_catalog_row_for_its_code(path):
+    countries = _Countries()
+    PlayerService(path, countries=countries).SetCountry("JP")
+
+    published = SM.Get(f"{path}.{schema.PLAYER_COUNTRY_KEY}")
+    assert published == countries.CountryByCode("JP")
+    # The order a Qt model handed the row out in (QVariantMap: UTF-16 code
+    # units), which program_state.json and the Socket.IO delta carry.
+    assert list(published) == ["asset", "code", "en_name", "name"]
 
 
-def test_an_empty_location_is_published_rather_than_skipped(player):
+@pytest.mark.parametrize("path", [BOARD_PATH, EDITOR_PATH])
+def test_the_region_is_resolved_against_the_country_the_card_shows(path):
+    countries = _Countries()
+    PlayerService(path, countries=countries).SetRegion("JP", "13")
+
+    published = SM.Get(f"{path}.{schema.PLAYER_STATE_KEY}")
+    assert countries.asked == [("state", "JP", "13")]
+    assert list(published) == ["asset", "code", "name", "original_code"]
+    assert published["name"] == "Tokyo"
+
+
+def test_no_country_and_no_region_are_an_empty_dict():
+    countries = _Countries()
+    service = PlayerService(BOARD_PATH, countries=countries)
+
+    service.SetCountry(None)
+    service.SetRegion("JP", None)
+
+    assert SM.Get(f"{BOARD_PATH}.{schema.PLAYER_COUNTRY_KEY}") == {}
+    assert SM.Get(f"{BOARD_PATH}.{schema.PLAYER_STATE_KEY}") == {}
+    assert countries.asked == [], "nothing to look up for no pick"
+
+
+def test_a_code_the_catalog_does_not_know_is_no_location():
+    """A name typed into the editable country (or region) combo, or the
+    custom-flag separator, has no row behind it. The card used to publish
+    that missing row as null; it publishes {} now, the type every other
+    "no country" / "no region" has always had."""
+    service = PlayerService(BOARD_PATH, countries=_Countries())
+
+    service.SetCountry("Atlantis")
+    service.SetRegion("JP", "99")
+
+    assert SM.Get(f"{BOARD_PATH}.{schema.PLAYER_COUNTRY_KEY}") == {}
+    assert SM.Get(f"{BOARD_PATH}.{schema.PLAYER_STATE_KEY}") == {}
+
+
+def test_an_empty_location_is_published_rather_than_skipped():
     """The blank row every region rebuild starts on has to reach the state.
 
     Guarding it as "same value, skip" would swallow the publish
     tests/test_player_widgets counts to know the in-place refill still emits
     exactly one index change per country change.
     """
-    player.SetLocation(schema.PLAYER_STATE_KEY, {})
+    service = PlayerService(BOARD_PATH, countries=_Countries())
+    with patch.object(SM, "Set", wraps=SM.Set) as written:
+        service.SetRegion(None, None)
+        service.SetRegion(None, None)
+
+    assert written.call_count == 2
     assert SM.Get(f"{BOARD_PATH}.{schema.PLAYER_STATE_KEY}") == {}
 
 
@@ -326,29 +404,147 @@ def test_publishing_images_is_one_save_cycle(player):
         "the sponsor crests belong in one")
 
 
-# ── the character slots ──────────────────────────────────────────────────
+# ── the character slots: identifiers in, the catalog's rows out (S1d) ───
 
-def test_the_character_slots_are_published_whole(player):
-    slots = {1: {"name": "Mario", "skin": 0}, 2: {"name": "Luigi", "skin": 1}}
-    player.PublishCharacters(slots)
+class _Games:
+    """GameAssetCatalog's three row lookups over literal rows, recording the
+    snapshot every lookup was resolved against."""
 
-    assert SM.Get(f"{BOARD_PATH}.character") == slots
-    assert SM.Get(f"{BOARD_PATH}.mains") is None
+    def __init__(self):
+        self.snapshots = []
+        self.against = []
+
+    def Current(self):
+        snapshot = object()
+        self.snapshots.append(snapshot)
+        return snapshot
+
+    def CharacterRow(self, en_name, snapshot=None):
+        self.against.append(snapshot)
+        rows = {
+            "Mario": {"name": "Mario", "en_name": "Mario",
+                      "display_name": "Mario", "codename": "mario",
+                      "modded": False},
+            "Doctor": {"name": "Doc", "en_name": "Doctor",
+                       "display_name": "Doc", "codename": "doctor",
+                       "modded": False},
+        }
+        return dict(rows[en_name]) if en_name in rows else None
+
+    def SkinRow(self, en_name, row, snapshot=None):
+        self.against.append(snapshot)
+        if en_name == "Mario" and row == 1:
+            return {"name": "", "en_name": "",
+                    "assets": {"full": {"asset": "./m1.png"},
+                               "base_files/icon": {"asset": "./i1.png"}}}
+        if en_name == "Doctor" and row == 0:
+            # A skin that is another character (the Dr. Mario case).
+            return {"name": "Dr. Mario", "en_name": "Dr. Mario",
+                    "assets": {}}
+        return None
+
+    def VariantRow(self, en_name, snapshot=None):
+        self.against.append(snapshot)
+        if en_name == "EX":
+            return {"name": "EX", "en_name": "EX", "assets": {}}
+        return None
 
 
-def test_mains_are_only_republished_when_asked(player):
-    slots = {1: {"name": "Mario", "skin": 0}}
-    player.PublishCharacters(slots, includeMains=True)
+def test_a_slot_is_built_from_the_rows_it_names():
+    service = PlayerService(BOARD_PATH, games=_Games())
 
-    assert SM.Get(f"{BOARD_PATH}.character") == slots
-    assert SM.Get(f"{BOARD_PATH}.mains") == slots
+    value = service.CharacterValue(CharacterSlot("Mario", 1, "EX", "shown"))
+
+    assert value == {
+        "codename": "mario", "display_name": "Mario", "en_name": "Mario",
+        "modded": False, "name": "Mario",
+        "assets": {"base_files/icon": {"asset": "./i1.png"},
+                   "full": {"asset": "./m1.png"}},
+        "skin": 1,
+        "variant": {"assets": {}, "en_name": "EX", "name": "EX"},
+    }
+    # The rows in QVariantMap order, then the three keys the card always
+    # appended last, in the order it appended them.
+    assert list(value) == ["codename", "display_name", "en_name", "modded",
+                           "name", "assets", "skin", "variant"]
+    assert list(value["assets"]) == ["base_files/icon", "full"]
 
 
-def test_character_and_mains_are_one_save_cycle(player):
+def test_a_skin_that_is_another_character_renames_the_slot():
+    value = PlayerService(BOARD_PATH, games=_Games()).CharacterValue(
+        CharacterSlot("Doctor", 0, None, "Doc"))
+
+    assert value["name"] == "Dr. Mario"
+    assert value["en_name"] == "Dr. Mario"
+    assert value["codename"] == "doctor"
+
+
+@pytest.mark.parametrize("slot", [
+    # The blank row, and a name typed into the editable combo.
+    CharacterSlot(None, -1, None, ""),
+    CharacterSlot(None, -1, None, "Typed Name"),
+    # A character the loaded game does not have: the moment between a game
+    # load and the combos' rebind. It converges on the rebind's republish.
+    CharacterSlot("Ghost", 0, None, "Ghost"),
+])
+def test_a_slot_without_a_row_is_its_shown_text(slot):
+    value = PlayerService(BOARD_PATH, games=_Games()).CharacterValue(slot)
+
+    assert value == {"name": slot.text, "assets": {}, "skin": slot.skin,
+                     "variant": {}}
+    assert list(value) == ["name", "assets", "skin", "variant"]
+
+
+def test_a_character_without_a_skin_row_has_no_assets():
+    value = PlayerService(BOARD_PATH, games=_Games()).CharacterValue(
+        CharacterSlot("Mario", -1, "nope", "Mario"))
+
+    assert value["assets"] == {}
+    assert value["skin"] == -1
+    assert value["variant"] == {}
+
+
+def test_every_slot_of_a_card_is_resolved_against_one_snapshot():
+    """A game load swaps the catalog's snapshot; slot 1 and slot 3 of one
+    publish must not come from two games."""
+    games = _Games()
+    PlayerService(BOARD_PATH, games=games).PublishCharacterSlots(
+        [CharacterSlot("Mario", 1, "EX"), CharacterSlot("Doctor", 0),
+         CharacterSlot()])
+
+    assert len(games.snapshots) == 1
+    assert games.against
+    assert all(snapshot is games.snapshots[0] for snapshot in games.against)
+
+
+@pytest.mark.parametrize("path", [BOARD_PATH, EDITOR_PATH])
+def test_the_character_slots_are_published_whole(path):
+    PlayerService(path, games=_Games()).PublishCharacterSlots(
+        [CharacterSlot("Mario", 1, "EX"), CharacterSlot()])
+
+    published = SM.Get(f"{path}.character")
+    assert published[1]["name"] == "Mario"
+    assert published[2] == {"name": "", "assets": {}, "skin": -1,
+                            "variant": {}}
+    assert SM.Get(f"{path}.mains") is None
+
+
+def test_mains_are_only_republished_when_asked():
+    service = PlayerService(BOARD_PATH, games=_Games())
+    service.PublishCharacterSlots([CharacterSlot("Mario", 1)],
+                                  includeMains=True)
+
+    assert SM.Get(f"{BOARD_PATH}.mains") == SM.Get(f"{BOARD_PATH}.character")
+    assert SM.Get(f"{BOARD_PATH}.mains")[1]["name"] == "Mario"
+
+
+def test_character_and_mains_are_one_save_cycle():
+    service = PlayerService(BOARD_PATH, games=_Games())
     SM.HoldSubtree(PREFIX)
     seen, unsubscribe = _heldSpy()
     try:
-        player.PublishCharacters({1: {"name": "Mario"}}, includeMains=True)
+        service.PublishCharacterSlots([CharacterSlot("Mario", 1)],
+                                      includeMains=True)
     finally:
         unsubscribe()
         SM.heldPrefixes.discard(PREFIX)
@@ -404,3 +600,139 @@ def test_unset_drops_the_whole_slot(player):
 
     assert SM.Get(BOARD_PATH) is None, (
         "a torn-down player widget left its name on the overlay")
+
+
+# ── the recording: the old card's bytes, without a widget (S1d) ──────────
+#
+# tests/fixtures/player_slots/golden.json holds what the card published
+# before S1d -- the values read back out of its Qt models, keys in
+# QVariantMap order -- for every row of every combo, with the identifiers
+# of each pick. Replayed here through the service alone: the same
+# identifiers have to give the same bytes. (tests/test_player_slot_publish.py
+# replays it through the card, and documents how it was recorded.)
+
+# The world the recording was made in (scenarios, custom flags, locale)
+# and its encoding come from the module both replays share.
+SLOT_GOLDEN = recording.loadGolden()
+_encode = recording.encode
+_digest = recording.digest
+
+
+@pytest.fixture(scope="module")
+def recordingDir(tmp_path_factory):
+    directory = tmp_path_factory.mktemp("player_slot_recording")
+    link = directory / "assets"
+    _link_tree(link, Path(__file__).resolve().parent.parent / "assets")
+    (directory / "out").mkdir()
+    shutil.copytree(recording.GAME_FIXTURE / "games",
+                    directory / "user_data" / "games")
+    flags = directory / "user_data" / "additional_flag"
+    flags.mkdir(parents=True)
+    for name in recording.CUSTOM_FLAGS:
+        (flags / name).write_bytes(b"")
+    try:
+        yield directory
+    finally:
+        # The link is removed, never followed (conftest's _autonaRuntime
+        # teardown, for the same reason): a POSIX symlink is unlinked, a
+        # Windows junction is a directory entry and needs rmdir.
+        try:
+            if link.is_symlink():
+                os.unlink(link)
+            else:
+                os.rmdir(link)
+        except OSError:
+            pass
+
+
+@pytest.fixture
+def recordedCatalogs(recordingDir, monkeypatch):
+    """Both catalogs over the recording's data and locale. The CWD stays in
+    the recording directory: a region's flag is resolved on the disk when it
+    is asked for."""
+    monkeypatch.chdir(recordingDir)
+
+    locale = recording.LOCALE
+
+    def locales():
+        return locale["program"], locale["export"]
+
+    games = GameAssetCatalog(locales=locales,
+                             remap=recording.remapFor(locale["remapping"]))
+    games.ResetGameState()
+    games.ScanGames()
+    countries = CountryCatalog(locales=locales)
+    assert countries.Load() is True
+    return games, countries
+
+
+def _published(service, slots):
+    """What one PublishCharacterSlots hands StateManager, encoded."""
+    with patch.object(SM, "Set") as written:
+        service.PublishCharacterSlots(slots)
+    assert written.call_count == 1
+    key, value = written.call_args.args
+    assert key == f"{service.path}.character"
+    return _encode(value)
+
+
+@pytest.mark.parametrize("label", list(recording.GAME_SCENARIOS))
+def test_every_recorded_character_slot_is_rebuilt_byte_for_byte(
+        recordedCatalogs, label):
+    games, countries = recordedCatalogs
+    codename, modsActive, reload = recording.GAME_SCENARIOS[label]
+    games.SelectGame(codename, modsActive=modsActive, reload=reload)
+    service = PlayerService(BOARD_PATH, games=games, countries=countries)
+    golden = SLOT_GOLDEN[f"characters.{label}"]
+
+    def published(entry):
+        # The recording varied slot 1 of a three-slot card; the other two
+        # stayed blank.
+        return _published(service, [
+            CharacterSlot(entry["character"], entry["skin"],
+                          entry["variant"], entry["text"]),
+            CharacterSlot(), CharacterSlot()])
+
+    for sample in golden["samples"]:
+        assert published(sample) == sample["published"], sample
+    assert [_digest(published(entry)) for entry in golden["entries"]] \
+        == [entry["digest"] for entry in golden["entries"]]
+
+
+def test_every_recorded_country_and_region_is_rebuilt_byte_for_byte(
+        recordedCatalogs):
+    games, countries = recordedCatalogs
+    service = PlayerService(BOARD_PATH, games=games, countries=countries)
+    golden = SLOT_GOLDEN["locations"]
+
+    def countryPick(code):
+        # One pick of the country combo: the region list is rebuilt for the
+        # new country (its blank row is published), then the country.
+        return [["state", _encode(service.RegionValue(code, None))],
+                ["country", _encode(service.CountryValue(code))]]
+
+    samples = {sample["row"]: sample for sample in golden["countrySamples"]}
+    for entry in golden["countries"]:
+        calls = countryPick(entry["code"])
+        if not entry["hasData"]:
+            # The custom-flag separator published its missing row as null;
+            # it is "no country" now (the one intended change here).
+            assert calls == [["state", "{}"], ["country", "{}"]]
+            continue
+        if entry["row"] in samples:
+            assert calls == samples[entry["row"]]["calls"], entry["code"]
+        assert _digest(calls) == entry["digest"], entry["code"]
+
+    def regionPicks(code):
+        # Every row of the region combo, in the combo's (the catalog's)
+        # order, named by the row's own code as the card names it.
+        return [[region["code"],
+                 [["state",
+                   _encode(service.RegionValue(code, region["code"]))]]]
+                for region in countries.States(code).values()]
+
+    assert regionPicks("JP") == golden["regionSamples"]["JP"]
+    assert [pick for pick in regionPicks("GB") if pick[0] == "CON"] \
+        == golden["regionSamples"]["GB.CON"]
+    assert {code: _digest(regionPicks(code)) for code in golden["regions"]} \
+        == golden["regions"]

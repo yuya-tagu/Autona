@@ -623,11 +623,25 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             schema.PLAYER_NOTE_KEY, self.custom_textbox.toPlainText())
 
     def _OnLocationChanged(self, field, combo: QComboBox):
-        # currentData() carries the whole selected row (code, names, flag
-        # asset) or {} for the blank row every region rebuild starts on.
-        # Which row that is has just been decided by Qt (LoadStates /
-        # SetData); publishing it is core's.
-        self.player.SetLocation(field, combo.currentData())
+        # Which row is shown has just been decided here (LoadStates /
+        # SetData / the operator); only its code leaves the widget, and
+        # PlayerService builds the published value from the country catalog
+        # (ADR-005 S1d). No code -- the blank row, a typed name that matches
+        # no row, the custom-flag separator -- publishes "no location".
+        data = combo.currentData()
+        code = data.get("code") if isinstance(data, dict) else None
+        if field == schema.PLAYER_COUNTRY_KEY:
+            self.player.SetCountry(code)
+        else:
+            # The region index points into the rows LoadStates built, so the
+            # code is resolved against the country it built them for -- not
+            # the one the country combo shows, which can differ while
+            # SetData runs (its Clear() empties the country with the
+            # signals blocked and leaves the rows alone). The one region
+            # publish LoadStates makes itself, before it records the code,
+            # is the blank row, which needs no country.
+            self.player.SetRegion(
+                getattr(self, "_loadedStatesCountryCode", None), code)
 
     def SetLosers(self, value):
         with self.dataLock:
@@ -872,6 +886,10 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
         logger.debug(f"Setting data for {self.path}: {data}")
 
+        # True when Clear() below emptied the country without telling anyone
+        # (see there); settled after the country_code step.
+        country_cleared_silently = False
+
         try:
             if clear:
                 # Block country signals during Clear: Clear() calls
@@ -883,14 +901,19 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 country_element = self._w(
                     schema.PLAYER_COUNTRY_KEY, QComboBox)
                 country_was_blocked = False
+                country_before = None
                 if country_element is not None:
                     country_was_blocked = country_element.signalsBlocked()
+                    country_before = country_element.currentIndex()
                     country_element.blockSignals(True)
                 try:
                     self.Clear(no_mains=no_mains)
                 finally:
                     if country_element is not None:
                         country_element.blockSignals(country_was_blocked)
+                country_cleared_silently = (
+                    country_element is not None and not country_was_blocked
+                    and country_element.currentIndex() != country_before)
 
             # Load player data from DB; will be overwriten by incoming data
             if not dontLoadFromDB:
@@ -960,6 +983,19 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                             break
                 if countryElement.currentIndex() != countryIndex:
                     countryElement.setCurrentIndex(countryIndex)
+
+            if country_cleared_silently:
+                countryElement = self._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
+                if countryElement.currentIndex() == 0:
+                    # The blocked Clear() above relied on a country_code
+                    # following and announcing itself. None did (or it named
+                    # no known country), so the emptying is announced here,
+                    # once: the regions are rebuilt for "no country" and the
+                    # state stops naming the previous player's country --
+                    # which it used to keep, under the new player's name,
+                    # while the card showed none (and a state_code would be
+                    # looked up among that country's regions).
+                    countryElement.currentIndexChanged.emit(0)
 
             if data.get("state_code"):
                 countryElement: QComboBox = self._w(

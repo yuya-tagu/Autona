@@ -1,0 +1,5058 @@
+{
+ "characters.tgame": {
+  "entries": [
+   {
+    "character": null,
+    "text": "",
+    "skin": -1,
+    "variant": null,
+    "digest": "167e7b74af549301"
+   },
+   {
+    "character": null,
+    "text": "",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "bdbcd1bb68913b8c"
+   },
+   {
+    "character": null,
+    "text": "",
+    "skin": -1,
+    "variant": "None",
+    "digest": "51851995ac1645ae"
+   },
+   {
+    "character": null,
+    "text": "",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "7463fcec6142853a"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": 0,
+    "variant": null,
+    "digest": "eccb19f33a89641d"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": 0,
+    "variant": "Alt",
+    "digest": "f156ce9359107585"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": 0,
+    "variant": "None",
+    "digest": "513beb4e24f61b1c"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": 0,
+    "variant": "EX",
+    "digest": "a85560368c32bfe4"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": 1,
+    "variant": null,
+    "digest": "349a9de44e5c7b0a"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": 1,
+    "variant": "Alt",
+    "digest": "3931aef6ed03ba24"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": 1,
+    "variant": "None",
+    "digest": "80718d76e4bb0dc4"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": 1,
+    "variant": "EX",
+    "digest": "069de53791d26647"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": -1,
+    "variant": null,
+    "digest": "3d68c9585fb9f6c9"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "91df906195bdd63a"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": -1,
+    "variant": "None",
+    "digest": "1fe91eea75053b20"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "07a8e5dc4cbfb09c"
+   },
+   {
+    "character": "NoArt",
+    "text": "NoArt",
+    "skin": -1,
+    "variant": null,
+    "digest": "38981b0ff0c8c6bf"
+   },
+   {
+    "character": "NoArt",
+    "text": "NoArt",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "ec5166bf7829ee1b"
+   },
+   {
+    "character": "NoArt",
+    "text": "NoArt",
+    "skin": -1,
+    "variant": "None",
+    "digest": "cdd64f06c6886931"
+   },
+   {
+    "character": "NoArt",
+    "text": "NoArt",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "021948b88be4823b"
+   },
+   {
+    "character": "Random",
+    "text": "Random",
+    "skin": 0,
+    "variant": null,
+    "digest": "41f0992b312ddf76"
+   },
+   {
+    "character": "Random",
+    "text": "Random",
+    "skin": 0,
+    "variant": "Alt",
+    "digest": "a60a8bbdd082f75d"
+   },
+   {
+    "character": "Random",
+    "text": "Random",
+    "skin": 0,
+    "variant": "None",
+    "digest": "d7a1cfffdb2f41f6"
+   },
+   {
+    "character": "Random",
+    "text": "Random",
+    "skin": 0,
+    "variant": "EX",
+    "digest": "e690f44030ce77f9"
+   },
+   {
+    "character": "Random",
+    "text": "Random",
+    "skin": -1,
+    "variant": null,
+    "digest": "791e86be805ee508"
+   },
+   {
+    "character": "Random",
+    "text": "Random",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "d2d8265a0610b2de"
+   },
+   {
+    "character": "Random",
+    "text": "Random",
+    "skin": -1,
+    "variant": "None",
+    "digest": "62688348015934dc"
+   },
+   {
+    "character": "Random",
+    "text": "Random",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "83ef933fa4d28271"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 0,
+    "variant": null,
+    "digest": "abf48ddd2e7e2b58"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 0,
+    "variant": "Alt",
+    "digest": "f7da98b9ba17faca"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 0,
+    "variant": "None",
+    "digest": "15819bd97e756bb2"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 0,
+    "variant": "EX",
+    "digest": "1fcc68045fac0857"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 1,
+    "variant": null,
+    "digest": "8611a56b30cb1e4c"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 1,
+    "variant": "Alt",
+    "digest": "22fdd8b684682c0c"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 1,
+    "variant": "None",
+    "digest": "b22e0c2a5326b74b"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 1,
+    "variant": "EX",
+    "digest": "7734176dd6425dfd"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 2,
+    "variant": null,
+    "digest": "8979bce12d8a9036"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 2,
+    "variant": "Alt",
+    "digest": "375b5f36cb3ce486"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 2,
+    "variant": "None",
+    "digest": "ea845b443f767e91"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 2,
+    "variant": "EX",
+    "digest": "bb4e3ad953f87ceb"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": -1,
+    "variant": null,
+    "digest": "f896d3a27d517ab0"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "9705831f9a365a32"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": -1,
+    "variant": "None",
+    "digest": "9eb9cfa039496010"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "e4770c049e353d28"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 0,
+    "variant": null,
+    "digest": "1192292cba29005b"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 0,
+    "variant": "Alt",
+    "digest": "a8a2908db5d20a54"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 0,
+    "variant": "None",
+    "digest": "81e281b8960b5841"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 0,
+    "variant": "EX",
+    "digest": "8fc76d917c41a062"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 1,
+    "variant": null,
+    "digest": "ef4495fd2a3f3600"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 1,
+    "variant": "Alt",
+    "digest": "e59debb477480f7c"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 1,
+    "variant": "None",
+    "digest": "c3f21fc44a782bb8"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 1,
+    "variant": "EX",
+    "digest": "c262268fd01034dc"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 2,
+    "variant": null,
+    "digest": "65f6946fd4c4f1c4"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 2,
+    "variant": "Alt",
+    "digest": "8dc9452cdccdfe53"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 2,
+    "variant": "None",
+    "digest": "6dacc0e8e297ece1"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 2,
+    "variant": "EX",
+    "digest": "2b0880c2bfcd8dc7"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": -1,
+    "variant": null,
+    "digest": "098af90538c00159"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "203d5b16effe879b"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": -1,
+    "variant": "None",
+    "digest": "50d8035bbfde53bc"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "9e2273020c853e4f"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 0,
+    "variant": null,
+    "digest": "1b84edaedb637461"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 0,
+    "variant": "Alt",
+    "digest": "77a37b6cb00a3f90"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 0,
+    "variant": "None",
+    "digest": "6c5d16efe47ab7ec"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 0,
+    "variant": "EX",
+    "digest": "afdecf139231b04d"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 1,
+    "variant": null,
+    "digest": "6787d200ca5e73be"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 1,
+    "variant": "Alt",
+    "digest": "8109c83ca216fbbd"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 1,
+    "variant": "None",
+    "digest": "8215146445599376"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 1,
+    "variant": "EX",
+    "digest": "c8dbd4f7d08ed6c8"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 2,
+    "variant": null,
+    "digest": "ad423be3c0191ae5"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 2,
+    "variant": "Alt",
+    "digest": "879a812b21a55c8e"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 2,
+    "variant": "None",
+    "digest": "bbcf0f25deec8753"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 2,
+    "variant": "EX",
+    "digest": "249e5b53ed4a8782"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": -1,
+    "variant": null,
+    "digest": "3a9679f67da3c3d9"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "28fbfed1941b23da"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": -1,
+    "variant": "None",
+    "digest": "bec771b2f4a1c83f"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "7d0a369fc529b6e4"
+   },
+   {
+    "character": "Ghost",
+    "text": "𝓖host / Ghost",
+    "skin": 0,
+    "variant": null,
+    "digest": "610658d7ebd3b6a1"
+   },
+   {
+    "character": "Ghost",
+    "text": "𝓖host / Ghost",
+    "skin": 0,
+    "variant": "Alt",
+    "digest": "ef0f388c6b650e1f"
+   },
+   {
+    "character": "Ghost",
+    "text": "𝓖host / Ghost",
+    "skin": 0,
+    "variant": "None",
+    "digest": "945bfa118de7808e"
+   },
+   {
+    "character": "Ghost",
+    "text": "𝓖host / Ghost",
+    "skin": 0,
+    "variant": "EX",
+    "digest": "6f20db471e56318a"
+   },
+   {
+    "character": "Ghost",
+    "text": "𝓖host / Ghost",
+    "skin": -1,
+    "variant": null,
+    "digest": "18b0c3cce2eef530"
+   },
+   {
+    "character": "Ghost",
+    "text": "𝓖host / Ghost",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "cfee15c031d08c84"
+   },
+   {
+    "character": "Ghost",
+    "text": "𝓖host / Ghost",
+    "skin": -1,
+    "variant": "None",
+    "digest": "fa0fd4ef513733bc"
+   },
+   {
+    "character": "Ghost",
+    "text": "𝓖host / Ghost",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "75257f78aed47e84"
+   },
+   {
+    "character": "Zelda",
+    "text": "ｚｅｌｄａ / Zelda",
+    "skin": 0,
+    "variant": null,
+    "digest": "b5e6df396e109fb2"
+   },
+   {
+    "character": "Zelda",
+    "text": "ｚｅｌｄａ / Zelda",
+    "skin": 0,
+    "variant": "Alt",
+    "digest": "be6958c15e1257fa"
+   },
+   {
+    "character": "Zelda",
+    "text": "ｚｅｌｄａ / Zelda",
+    "skin": 0,
+    "variant": "None",
+    "digest": "29f6b4e1c3a9baef"
+   },
+   {
+    "character": "Zelda",
+    "text": "ｚｅｌｄａ / Zelda",
+    "skin": 0,
+    "variant": "EX",
+    "digest": "b3df24ee8af62039"
+   },
+   {
+    "character": "Zelda",
+    "text": "ｚｅｌｄａ / Zelda",
+    "skin": -1,
+    "variant": null,
+    "digest": "cb18e3ca8368687e"
+   },
+   {
+    "character": "Zelda",
+    "text": "ｚｅｌｄａ / Zelda",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "c61a32a91e7291fc"
+   },
+   {
+    "character": "Zelda",
+    "text": "ｚｅｌｄａ / Zelda",
+    "skin": -1,
+    "variant": "None",
+    "digest": "172c6369a2dfa982"
+   },
+   {
+    "character": "Zelda",
+    "text": "ｚｅｌｄａ / Zelda",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "901c8f3f6da26656"
+   },
+   {
+    "character": null,
+    "text": "Typed Name",
+    "skin": -1,
+    "variant": null,
+    "digest": "7ef251ebcdee2eca"
+   },
+   {
+    "character": null,
+    "text": "Typed Name",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "46fb6eb382995ad1"
+   },
+   {
+    "character": null,
+    "text": "Typed Name",
+    "skin": -1,
+    "variant": "None",
+    "digest": "1a810a9578d592dd"
+   },
+   {
+    "character": null,
+    "text": "Typed Name",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "6159c0c37eef1b4e"
+   }
+  ],
+  "samples": [
+   {
+    "character": null,
+    "text": "",
+    "skin": -1,
+    "variant": null,
+    "published": "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": null,
+    "text": "",
+    "skin": -1,
+    "variant": "Alt",
+    "published": "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{\"codename\":\"alt\",\"display_name\":\"Alt\",\"en_name\":\"Alt\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_alt.jpg\",\"image_size\":null,\"name\":\"Alt\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": null,
+    "text": "",
+    "skin": -1,
+    "variant": "None",
+    "published": "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{\"codename\":\"nope\",\"display_name\":\"None\",\"en_name\":\"None\",\"icon_path\":\"\",\"image_size\":null,\"name\":\"None\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": null,
+    "text": "",
+    "skin": -1,
+    "variant": "EX",
+    "published": "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{\"codename\":\"ex\",\"display_name\":\"強化\",\"en_name\":\"EX\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_ex.png\",\"image_size\":[32,32],\"name\":\"EX版\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 0,
+    "variant": null,
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_00.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_0.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_0.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":0,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 0,
+    "variant": "Alt",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_00.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_0.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_0.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":0,\"variant\":{\"codename\":\"alt\",\"display_name\":\"Alt\",\"en_name\":\"Alt\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_alt.jpg\",\"image_size\":null,\"name\":\"Alt\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 0,
+    "variant": "None",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_00.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_0.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_0.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":0,\"variant\":{\"codename\":\"nope\",\"display_name\":\"None\",\"en_name\":\"None\",\"icon_path\":\"\",\"image_size\":null,\"name\":\"None\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 0,
+    "variant": "EX",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_00.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_0.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_0.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":0,\"variant\":{\"codename\":\"ex\",\"display_name\":\"強化\",\"en_name\":\"EX\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_ex.png\",\"image_size\":[32,32],\"name\":\"EX版\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 1,
+    "variant": null,
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_01.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_1.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":11,\"y\":21},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1.5,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_1.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 1,
+    "variant": "Alt",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_01.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_1.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":11,\"y\":21},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1.5,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_1.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":1,\"variant\":{\"codename\":\"alt\",\"display_name\":\"Alt\",\"en_name\":\"Alt\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_alt.jpg\",\"image_size\":null,\"name\":\"Alt\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 1,
+    "variant": "None",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_01.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_1.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":11,\"y\":21},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1.5,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_1.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":1,\"variant\":{\"codename\":\"nope\",\"display_name\":\"None\",\"en_name\":\"None\",\"icon_path\":\"\",\"image_size\":null,\"name\":\"None\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 1,
+    "variant": "EX",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_01.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_1.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":11,\"y\":21},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1.5,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_1.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":1,\"variant\":{\"codename\":\"ex\",\"display_name\":\"強化\",\"en_name\":\"EX\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_ex.png\",\"image_size\":[32,32],\"name\":\"EX版\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 2,
+    "variant": null,
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Dr. Mario\",\"modded\":false,\"name\":\"Dr. Mario\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_02.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_2.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_2.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":2,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 2,
+    "variant": "Alt",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Dr. Mario\",\"modded\":false,\"name\":\"Dr. Mario\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_02.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_2.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_2.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":2,\"variant\":{\"codename\":\"alt\",\"display_name\":\"Alt\",\"en_name\":\"Alt\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_alt.jpg\",\"image_size\":null,\"name\":\"Alt\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 2,
+    "variant": "None",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Dr. Mario\",\"modded\":false,\"name\":\"Dr. Mario\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_02.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_2.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_2.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":2,\"variant\":{\"codename\":\"nope\",\"display_name\":\"None\",\"en_name\":\"None\",\"icon_path\":\"\",\"image_size\":null,\"name\":\"None\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 2,
+    "variant": "EX",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Dr. Mario\",\"modded\":false,\"name\":\"Dr. Mario\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_02.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_2.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_2.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":2,\"variant\":{\"codename\":\"ex\",\"display_name\":\"強化\",\"en_name\":\"EX\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_ex.png\",\"image_size\":[32,32],\"name\":\"EX版\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": -1,
+    "variant": null,
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": -1,
+    "variant": "Alt",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{},\"skin\":-1,\"variant\":{\"codename\":\"alt\",\"display_name\":\"Alt\",\"en_name\":\"Alt\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_alt.jpg\",\"image_size\":null,\"name\":\"Alt\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": -1,
+    "variant": "None",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{},\"skin\":-1,\"variant\":{\"codename\":\"nope\",\"display_name\":\"None\",\"en_name\":\"None\",\"icon_path\":\"\",\"image_size\":null,\"name\":\"None\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": -1,
+    "variant": "EX",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{},\"skin\":-1,\"variant\":{\"codename\":\"ex\",\"display_name\":\"強化\",\"en_name\":\"EX\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_ex.png\",\"image_size\":[32,32],\"name\":\"EX版\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": null,
+    "text": "Typed Name",
+    "skin": -1,
+    "variant": null,
+    "published": "{\"1\":{\"name\":\"Typed Name\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": null,
+    "text": "Typed Name",
+    "skin": -1,
+    "variant": "Alt",
+    "published": "{\"1\":{\"name\":\"Typed Name\",\"assets\":{},\"skin\":-1,\"variant\":{\"codename\":\"alt\",\"display_name\":\"Alt\",\"en_name\":\"Alt\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_alt.jpg\",\"image_size\":null,\"name\":\"Alt\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": null,
+    "text": "Typed Name",
+    "skin": -1,
+    "variant": "None",
+    "published": "{\"1\":{\"name\":\"Typed Name\",\"assets\":{},\"skin\":-1,\"variant\":{\"codename\":\"nope\",\"display_name\":\"None\",\"en_name\":\"None\",\"icon_path\":\"\",\"image_size\":null,\"name\":\"None\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": null,
+    "text": "Typed Name",
+    "skin": -1,
+    "variant": "EX",
+    "published": "{\"1\":{\"name\":\"Typed Name\",\"assets\":{},\"skin\":-1,\"variant\":{\"codename\":\"ex\",\"display_name\":\"強化\",\"en_name\":\"EX\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_ex.png\",\"image_size\":[32,32],\"name\":\"EX版\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   }
+  ]
+ },
+ "characters.tgame_mods": {
+  "entries": [
+   {
+    "character": null,
+    "text": "",
+    "skin": -1,
+    "variant": null,
+    "digest": "167e7b74af549301"
+   },
+   {
+    "character": null,
+    "text": "",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "bdbcd1bb68913b8c"
+   },
+   {
+    "character": null,
+    "text": "",
+    "skin": -1,
+    "variant": "None",
+    "digest": "51851995ac1645ae"
+   },
+   {
+    "character": null,
+    "text": "",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "7463fcec6142853a"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": 0,
+    "variant": null,
+    "digest": "eccb19f33a89641d"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": 0,
+    "variant": "Alt",
+    "digest": "f156ce9359107585"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": 0,
+    "variant": "None",
+    "digest": "513beb4e24f61b1c"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": 0,
+    "variant": "EX",
+    "digest": "a85560368c32bfe4"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": 1,
+    "variant": null,
+    "digest": "349a9de44e5c7b0a"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": 1,
+    "variant": "Alt",
+    "digest": "3931aef6ed03ba24"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": 1,
+    "variant": "None",
+    "digest": "80718d76e4bb0dc4"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": 1,
+    "variant": "EX",
+    "digest": "069de53791d26647"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": -1,
+    "variant": null,
+    "digest": "3d68c9585fb9f6c9"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "91df906195bdd63a"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": -1,
+    "variant": "None",
+    "digest": "1fe91eea75053b20"
+   },
+   {
+    "character": "Bowser",
+    "text": "Bowser",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "07a8e5dc4cbfb09c"
+   },
+   {
+    "character": "NoArt",
+    "text": "NoArt",
+    "skin": -1,
+    "variant": null,
+    "digest": "38981b0ff0c8c6bf"
+   },
+   {
+    "character": "NoArt",
+    "text": "NoArt",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "ec5166bf7829ee1b"
+   },
+   {
+    "character": "NoArt",
+    "text": "NoArt",
+    "skin": -1,
+    "variant": "None",
+    "digest": "cdd64f06c6886931"
+   },
+   {
+    "character": "NoArt",
+    "text": "NoArt",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "021948b88be4823b"
+   },
+   {
+    "character": "Random",
+    "text": "Random",
+    "skin": 0,
+    "variant": null,
+    "digest": "41f0992b312ddf76"
+   },
+   {
+    "character": "Random",
+    "text": "Random",
+    "skin": 0,
+    "variant": "Alt",
+    "digest": "a60a8bbdd082f75d"
+   },
+   {
+    "character": "Random",
+    "text": "Random",
+    "skin": 0,
+    "variant": "None",
+    "digest": "d7a1cfffdb2f41f6"
+   },
+   {
+    "character": "Random",
+    "text": "Random",
+    "skin": 0,
+    "variant": "EX",
+    "digest": "e690f44030ce77f9"
+   },
+   {
+    "character": "Random",
+    "text": "Random",
+    "skin": -1,
+    "variant": null,
+    "digest": "791e86be805ee508"
+   },
+   {
+    "character": "Random",
+    "text": "Random",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "d2d8265a0610b2de"
+   },
+   {
+    "character": "Random",
+    "text": "Random",
+    "skin": -1,
+    "variant": "None",
+    "digest": "62688348015934dc"
+   },
+   {
+    "character": "Random",
+    "text": "Random",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "83ef933fa4d28271"
+   },
+   {
+    "character": "Waluigi",
+    "text": "Waluigi",
+    "skin": 0,
+    "variant": null,
+    "digest": "d09c353776452ecf"
+   },
+   {
+    "character": "Waluigi",
+    "text": "Waluigi",
+    "skin": 0,
+    "variant": "Alt",
+    "digest": "f1f5b5cd545934e3"
+   },
+   {
+    "character": "Waluigi",
+    "text": "Waluigi",
+    "skin": 0,
+    "variant": "None",
+    "digest": "b03e314f29ebce10"
+   },
+   {
+    "character": "Waluigi",
+    "text": "Waluigi",
+    "skin": 0,
+    "variant": "EX",
+    "digest": "25a29ede76720af5"
+   },
+   {
+    "character": "Waluigi",
+    "text": "Waluigi",
+    "skin": -1,
+    "variant": null,
+    "digest": "b6bef8ea08e6ed32"
+   },
+   {
+    "character": "Waluigi",
+    "text": "Waluigi",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "94b08a9b51d2c166"
+   },
+   {
+    "character": "Waluigi",
+    "text": "Waluigi",
+    "skin": -1,
+    "variant": "None",
+    "digest": "ca9538651d02a39f"
+   },
+   {
+    "character": "Waluigi",
+    "text": "Waluigi",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "d875ddc3d120989b"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 0,
+    "variant": null,
+    "digest": "abf48ddd2e7e2b58"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 0,
+    "variant": "Alt",
+    "digest": "f7da98b9ba17faca"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 0,
+    "variant": "None",
+    "digest": "15819bd97e756bb2"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 0,
+    "variant": "EX",
+    "digest": "1fcc68045fac0857"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 1,
+    "variant": null,
+    "digest": "8611a56b30cb1e4c"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 1,
+    "variant": "Alt",
+    "digest": "22fdd8b684682c0c"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 1,
+    "variant": "None",
+    "digest": "b22e0c2a5326b74b"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 1,
+    "variant": "EX",
+    "digest": "7734176dd6425dfd"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 2,
+    "variant": null,
+    "digest": "8979bce12d8a9036"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 2,
+    "variant": "Alt",
+    "digest": "375b5f36cb3ce486"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 2,
+    "variant": "None",
+    "digest": "ea845b443f767e91"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 2,
+    "variant": "EX",
+    "digest": "bb4e3ad953f87ceb"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": -1,
+    "variant": null,
+    "digest": "f896d3a27d517ab0"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "9705831f9a365a32"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": -1,
+    "variant": "None",
+    "digest": "9eb9cfa039496010"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "e4770c049e353d28"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 0,
+    "variant": null,
+    "digest": "1192292cba29005b"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 0,
+    "variant": "Alt",
+    "digest": "a8a2908db5d20a54"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 0,
+    "variant": "None",
+    "digest": "81e281b8960b5841"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 0,
+    "variant": "EX",
+    "digest": "8fc76d917c41a062"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 1,
+    "variant": null,
+    "digest": "ef4495fd2a3f3600"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 1,
+    "variant": "Alt",
+    "digest": "e59debb477480f7c"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 1,
+    "variant": "None",
+    "digest": "c3f21fc44a782bb8"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 1,
+    "variant": "EX",
+    "digest": "c262268fd01034dc"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 2,
+    "variant": null,
+    "digest": "65f6946fd4c4f1c4"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 2,
+    "variant": "Alt",
+    "digest": "8dc9452cdccdfe53"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 2,
+    "variant": "None",
+    "digest": "6dacc0e8e297ece1"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": 2,
+    "variant": "EX",
+    "digest": "2b0880c2bfcd8dc7"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": -1,
+    "variant": null,
+    "digest": "098af90538c00159"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "203d5b16effe879b"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": -1,
+    "variant": "None",
+    "digest": "50d8035bbfde53bc"
+   },
+   {
+    "character": "Peach",
+    "text": "碧姬 / Peach",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "9e2273020c853e4f"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 0,
+    "variant": null,
+    "digest": "1b84edaedb637461"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 0,
+    "variant": "Alt",
+    "digest": "77a37b6cb00a3f90"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 0,
+    "variant": "None",
+    "digest": "6c5d16efe47ab7ec"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 0,
+    "variant": "EX",
+    "digest": "afdecf139231b04d"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 1,
+    "variant": null,
+    "digest": "6787d200ca5e73be"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 1,
+    "variant": "Alt",
+    "digest": "8109c83ca216fbbd"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 1,
+    "variant": "None",
+    "digest": "8215146445599376"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 1,
+    "variant": "EX",
+    "digest": "c8dbd4f7d08ed6c8"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 2,
+    "variant": null,
+    "digest": "ad423be3c0191ae5"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 2,
+    "variant": "Alt",
+    "digest": "879a812b21a55c8e"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 2,
+    "variant": "None",
+    "digest": "bbcf0f25deec8753"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": 2,
+    "variant": "EX",
+    "digest": "249e5b53ed4a8782"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": -1,
+    "variant": null,
+    "digest": "3a9679f67da3c3d9"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "28fbfed1941b23da"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": -1,
+    "variant": "None",
+    "digest": "bec771b2f4a1c83f"
+   },
+   {
+    "character": "Luigi",
+    "text": "路易吉 / Luigi",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "7d0a369fc529b6e4"
+   },
+   {
+    "character": "Ghost",
+    "text": "𝓖host / Ghost",
+    "skin": 0,
+    "variant": null,
+    "digest": "610658d7ebd3b6a1"
+   },
+   {
+    "character": "Ghost",
+    "text": "𝓖host / Ghost",
+    "skin": 0,
+    "variant": "Alt",
+    "digest": "ef0f388c6b650e1f"
+   },
+   {
+    "character": "Ghost",
+    "text": "𝓖host / Ghost",
+    "skin": 0,
+    "variant": "None",
+    "digest": "945bfa118de7808e"
+   },
+   {
+    "character": "Ghost",
+    "text": "𝓖host / Ghost",
+    "skin": 0,
+    "variant": "EX",
+    "digest": "6f20db471e56318a"
+   },
+   {
+    "character": "Ghost",
+    "text": "𝓖host / Ghost",
+    "skin": -1,
+    "variant": null,
+    "digest": "18b0c3cce2eef530"
+   },
+   {
+    "character": "Ghost",
+    "text": "𝓖host / Ghost",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "cfee15c031d08c84"
+   },
+   {
+    "character": "Ghost",
+    "text": "𝓖host / Ghost",
+    "skin": -1,
+    "variant": "None",
+    "digest": "fa0fd4ef513733bc"
+   },
+   {
+    "character": "Ghost",
+    "text": "𝓖host / Ghost",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "75257f78aed47e84"
+   },
+   {
+    "character": "Zelda",
+    "text": "ｚｅｌｄａ / Zelda",
+    "skin": 0,
+    "variant": null,
+    "digest": "b5e6df396e109fb2"
+   },
+   {
+    "character": "Zelda",
+    "text": "ｚｅｌｄａ / Zelda",
+    "skin": 0,
+    "variant": "Alt",
+    "digest": "be6958c15e1257fa"
+   },
+   {
+    "character": "Zelda",
+    "text": "ｚｅｌｄａ / Zelda",
+    "skin": 0,
+    "variant": "None",
+    "digest": "29f6b4e1c3a9baef"
+   },
+   {
+    "character": "Zelda",
+    "text": "ｚｅｌｄａ / Zelda",
+    "skin": 0,
+    "variant": "EX",
+    "digest": "b3df24ee8af62039"
+   },
+   {
+    "character": "Zelda",
+    "text": "ｚｅｌｄａ / Zelda",
+    "skin": -1,
+    "variant": null,
+    "digest": "cb18e3ca8368687e"
+   },
+   {
+    "character": "Zelda",
+    "text": "ｚｅｌｄａ / Zelda",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "c61a32a91e7291fc"
+   },
+   {
+    "character": "Zelda",
+    "text": "ｚｅｌｄａ / Zelda",
+    "skin": -1,
+    "variant": "None",
+    "digest": "172c6369a2dfa982"
+   },
+   {
+    "character": "Zelda",
+    "text": "ｚｅｌｄａ / Zelda",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "901c8f3f6da26656"
+   },
+   {
+    "character": null,
+    "text": "Typed Name",
+    "skin": -1,
+    "variant": null,
+    "digest": "7ef251ebcdee2eca"
+   },
+   {
+    "character": null,
+    "text": "Typed Name",
+    "skin": -1,
+    "variant": "Alt",
+    "digest": "46fb6eb382995ad1"
+   },
+   {
+    "character": null,
+    "text": "Typed Name",
+    "skin": -1,
+    "variant": "None",
+    "digest": "1a810a9578d592dd"
+   },
+   {
+    "character": null,
+    "text": "Typed Name",
+    "skin": -1,
+    "variant": "EX",
+    "digest": "6159c0c37eef1b4e"
+   }
+  ],
+  "samples": [
+   {
+    "character": null,
+    "text": "",
+    "skin": -1,
+    "variant": null,
+    "published": "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": null,
+    "text": "",
+    "skin": -1,
+    "variant": "Alt",
+    "published": "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{\"codename\":\"alt\",\"display_name\":\"Alt\",\"en_name\":\"Alt\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_alt.jpg\",\"image_size\":null,\"name\":\"Alt\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": null,
+    "text": "",
+    "skin": -1,
+    "variant": "None",
+    "published": "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{\"codename\":\"nope\",\"display_name\":\"None\",\"en_name\":\"None\",\"icon_path\":\"\",\"image_size\":null,\"name\":\"None\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": null,
+    "text": "",
+    "skin": -1,
+    "variant": "EX",
+    "published": "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{\"codename\":\"ex\",\"display_name\":\"強化\",\"en_name\":\"EX\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_ex.png\",\"image_size\":[32,32],\"name\":\"EX版\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 0,
+    "variant": null,
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_00.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_0.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_0.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":0,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 0,
+    "variant": "Alt",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_00.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_0.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_0.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":0,\"variant\":{\"codename\":\"alt\",\"display_name\":\"Alt\",\"en_name\":\"Alt\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_alt.jpg\",\"image_size\":null,\"name\":\"Alt\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 0,
+    "variant": "None",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_00.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_0.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_0.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":0,\"variant\":{\"codename\":\"nope\",\"display_name\":\"None\",\"en_name\":\"None\",\"icon_path\":\"\",\"image_size\":null,\"name\":\"None\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 0,
+    "variant": "EX",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_00.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_0.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_0.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":0,\"variant\":{\"codename\":\"ex\",\"display_name\":\"強化\",\"en_name\":\"EX\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_ex.png\",\"image_size\":[32,32],\"name\":\"EX版\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 1,
+    "variant": null,
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_01.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_1.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":11,\"y\":21},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1.5,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_1.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 1,
+    "variant": "Alt",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_01.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_1.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":11,\"y\":21},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1.5,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_1.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":1,\"variant\":{\"codename\":\"alt\",\"display_name\":\"Alt\",\"en_name\":\"Alt\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_alt.jpg\",\"image_size\":null,\"name\":\"Alt\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 1,
+    "variant": "None",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_01.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_1.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":11,\"y\":21},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1.5,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_1.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":1,\"variant\":{\"codename\":\"nope\",\"display_name\":\"None\",\"en_name\":\"None\",\"icon_path\":\"\",\"image_size\":null,\"name\":\"None\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 1,
+    "variant": "EX",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_01.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_1.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":11,\"y\":21},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1.5,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_1.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":1,\"variant\":{\"codename\":\"ex\",\"display_name\":\"強化\",\"en_name\":\"EX\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_ex.png\",\"image_size\":[32,32],\"name\":\"EX版\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 2,
+    "variant": null,
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Dr. Mario\",\"modded\":false,\"name\":\"Dr. Mario\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_02.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_2.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_2.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":2,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 2,
+    "variant": "Alt",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Dr. Mario\",\"modded\":false,\"name\":\"Dr. Mario\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_02.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_2.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_2.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":2,\"variant\":{\"codename\":\"alt\",\"display_name\":\"Alt\",\"en_name\":\"Alt\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_alt.jpg\",\"image_size\":null,\"name\":\"Alt\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 2,
+    "variant": "None",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Dr. Mario\",\"modded\":false,\"name\":\"Dr. Mario\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_02.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_2.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_2.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":2,\"variant\":{\"codename\":\"nope\",\"display_name\":\"None\",\"en_name\":\"None\",\"icon_path\":\"\",\"image_size\":null,\"name\":\"None\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": 2,
+    "variant": "EX",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Dr. Mario\",\"modded\":false,\"name\":\"Dr. Mario\",\"assets\":{\"base_files/icon\":{\"asset\":\"./user_data/games/tgame//base_files/icon/chara_2_mario_02.png\",\"type\":[\"icon\"]},\"full\":{\"asset\":\"./user_data/games/tgame//full/mario_2.png\",\"average_size\":{\"x\":100.0,\"y\":120.0},\"eyesight\":{\"x\":10,\"y\":20},\"image_size\":[100,120],\"metadata\":{\"0\":{\"title\":\"重さ\",\"title_en\":\"Weight\",\"value\":\"98kg\",\"value_en\":\"98\"}},\"rescaling_factor\":1,\"type\":[\"full\"],\"uncropped_edge\":[\"u\",\"d\"]},\"portrait\":{\"asset\":\"./user_data/games/tgame//portrait/mario_2.png\",\"average_size\":{\"x\":200.0,\"y\":200.0},\"type\":\"portrait\"}},\"skin\":2,\"variant\":{\"codename\":\"ex\",\"display_name\":\"強化\",\"en_name\":\"EX\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_ex.png\",\"image_size\":[32,32],\"name\":\"EX版\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": -1,
+    "variant": null,
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": -1,
+    "variant": "Alt",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{},\"skin\":-1,\"variant\":{\"codename\":\"alt\",\"display_name\":\"Alt\",\"en_name\":\"Alt\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_alt.jpg\",\"image_size\":null,\"name\":\"Alt\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": -1,
+    "variant": "None",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{},\"skin\":-1,\"variant\":{\"codename\":\"nope\",\"display_name\":\"None\",\"en_name\":\"None\",\"icon_path\":\"\",\"image_size\":null,\"name\":\"None\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": "Mario",
+    "text": "瑪利歐 / Mario",
+    "skin": -1,
+    "variant": "EX",
+    "published": "{\"1\":{\"codename\":\"mario\",\"display_name\":\"瑪利歐\",\"en_name\":\"Mario\",\"modded\":false,\"name\":\"マリオ\",\"assets\":{},\"skin\":-1,\"variant\":{\"codename\":\"ex\",\"display_name\":\"強化\",\"en_name\":\"EX\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_ex.png\",\"image_size\":[32,32],\"name\":\"EX版\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": null,
+    "text": "Typed Name",
+    "skin": -1,
+    "variant": null,
+    "published": "{\"1\":{\"name\":\"Typed Name\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": null,
+    "text": "Typed Name",
+    "skin": -1,
+    "variant": "Alt",
+    "published": "{\"1\":{\"name\":\"Typed Name\",\"assets\":{},\"skin\":-1,\"variant\":{\"codename\":\"alt\",\"display_name\":\"Alt\",\"en_name\":\"Alt\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_alt.jpg\",\"image_size\":null,\"name\":\"Alt\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": null,
+    "text": "Typed Name",
+    "skin": -1,
+    "variant": "None",
+    "published": "{\"1\":{\"name\":\"Typed Name\",\"assets\":{},\"skin\":-1,\"variant\":{\"codename\":\"nope\",\"display_name\":\"None\",\"en_name\":\"None\",\"icon_path\":\"\",\"image_size\":null,\"name\":\"None\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": null,
+    "text": "Typed Name",
+    "skin": -1,
+    "variant": "EX",
+    "published": "{\"1\":{\"name\":\"Typed Name\",\"assets\":{},\"skin\":-1,\"variant\":{\"codename\":\"ex\",\"display_name\":\"強化\",\"en_name\":\"EX\",\"icon_path\":\"./user_data/games/tgame/variant_icon/var_ex.png\",\"image_size\":[32,32],\"name\":\"EX版\"}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   }
+  ]
+ },
+ "characters.game2": {
+  "entries": [
+   {
+    "character": null,
+    "text": "",
+    "skin": -1,
+    "variant": null,
+    "digest": "167e7b74af549301"
+   },
+   {
+    "character": "Ryu",
+    "text": "Ryu",
+    "skin": 0,
+    "variant": null,
+    "digest": "3d0fae48f74c29bf"
+   },
+   {
+    "character": "Ryu",
+    "text": "Ryu",
+    "skin": -1,
+    "variant": null,
+    "digest": "d0663cad59e9779c"
+   },
+   {
+    "character": null,
+    "text": "Typed Name",
+    "skin": -1,
+    "variant": null,
+    "digest": "7ef251ebcdee2eca"
+   }
+  ],
+  "samples": [
+   {
+    "character": null,
+    "text": "",
+    "skin": -1,
+    "variant": null,
+    "published": "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   },
+   {
+    "character": null,
+    "text": "Typed Name",
+    "skin": -1,
+    "variant": null,
+    "published": "{\"1\":{\"name\":\"Typed Name\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+   }
+  ]
+ },
+ "locations": {
+  "countries": [
+   {
+    "row": 1,
+    "code": "AF",
+    "hasData": true,
+    "digest": "02bf6453dc05f96f"
+   },
+   {
+    "row": 2,
+    "code": "AX",
+    "hasData": true,
+    "digest": "7f2d6efaff33b060"
+   },
+   {
+    "row": 3,
+    "code": "AL",
+    "hasData": true,
+    "digest": "fd512507a9d14300"
+   },
+   {
+    "row": 4,
+    "code": "DZ",
+    "hasData": true,
+    "digest": "7327285ae824cbdf"
+   },
+   {
+    "row": 5,
+    "code": "AS",
+    "hasData": true,
+    "digest": "c3c911a7647ccb9d"
+   },
+   {
+    "row": 6,
+    "code": "AD",
+    "hasData": true,
+    "digest": "fa14ef45c75cdc7d"
+   },
+   {
+    "row": 7,
+    "code": "AO",
+    "hasData": true,
+    "digest": "4945f5d30e77f2a4"
+   },
+   {
+    "row": 8,
+    "code": "AI",
+    "hasData": true,
+    "digest": "c909a8056a5f9aeb"
+   },
+   {
+    "row": 9,
+    "code": "AQ",
+    "hasData": true,
+    "digest": "eeeeee194a337058"
+   },
+   {
+    "row": 10,
+    "code": "AG",
+    "hasData": true,
+    "digest": "30ba197f34c544eb"
+   },
+   {
+    "row": 11,
+    "code": "AR",
+    "hasData": true,
+    "digest": "5cf1c8682c2f9b7b"
+   },
+   {
+    "row": 12,
+    "code": "AM",
+    "hasData": true,
+    "digest": "f588ecbd3c7f64a7"
+   },
+   {
+    "row": 13,
+    "code": "AW",
+    "hasData": true,
+    "digest": "56e5d001012dd6a0"
+   },
+   {
+    "row": 14,
+    "code": "AU",
+    "hasData": true,
+    "digest": "35e9c86ce0d0939b"
+   },
+   {
+    "row": 15,
+    "code": "AT",
+    "hasData": true,
+    "digest": "f9caab4a9b51be68"
+   },
+   {
+    "row": 16,
+    "code": "AZ",
+    "hasData": true,
+    "digest": "2de8558b3232fae1"
+   },
+   {
+    "row": 17,
+    "code": "BH",
+    "hasData": true,
+    "digest": "3252c3acf77c0119"
+   },
+   {
+    "row": 18,
+    "code": "BD",
+    "hasData": true,
+    "digest": "ca325012b9a60927"
+   },
+   {
+    "row": 19,
+    "code": "BB",
+    "hasData": true,
+    "digest": "735668bcb8272efe"
+   },
+   {
+    "row": 20,
+    "code": "BY",
+    "hasData": true,
+    "digest": "082413f3550e7488"
+   },
+   {
+    "row": 21,
+    "code": "BE",
+    "hasData": true,
+    "digest": "fb2f016f93eccd01"
+   },
+   {
+    "row": 22,
+    "code": "BZ",
+    "hasData": true,
+    "digest": "c89302815154146f"
+   },
+   {
+    "row": 23,
+    "code": "BJ",
+    "hasData": true,
+    "digest": "c7d15d3e65298b6c"
+   },
+   {
+    "row": 24,
+    "code": "BM",
+    "hasData": true,
+    "digest": "187cfe48adca8e14"
+   },
+   {
+    "row": 25,
+    "code": "BT",
+    "hasData": true,
+    "digest": "5a820abd2a6865d6"
+   },
+   {
+    "row": 26,
+    "code": "BO",
+    "hasData": true,
+    "digest": "22ec289538fadd07"
+   },
+   {
+    "row": 27,
+    "code": "BQ",
+    "hasData": true,
+    "digest": "7b19ffb8a364ff05"
+   },
+   {
+    "row": 28,
+    "code": "BA",
+    "hasData": true,
+    "digest": "70cb12cbe0cf3501"
+   },
+   {
+    "row": 29,
+    "code": "BW",
+    "hasData": true,
+    "digest": "56473e710d2434f7"
+   },
+   {
+    "row": 30,
+    "code": "BV",
+    "hasData": true,
+    "digest": "f3d41e0025dc2731"
+   },
+   {
+    "row": 31,
+    "code": "BR",
+    "hasData": true,
+    "digest": "02c65b9a276c64b3"
+   },
+   {
+    "row": 32,
+    "code": "IO",
+    "hasData": true,
+    "digest": "8c5792e31376fa9f"
+   },
+   {
+    "row": 33,
+    "code": "BN",
+    "hasData": true,
+    "digest": "1260b4892a2efee2"
+   },
+   {
+    "row": 34,
+    "code": "BG",
+    "hasData": true,
+    "digest": "87f5ba1028ea2111"
+   },
+   {
+    "row": 35,
+    "code": "BF",
+    "hasData": true,
+    "digest": "5529c3bac6be06a9"
+   },
+   {
+    "row": 36,
+    "code": "BI",
+    "hasData": true,
+    "digest": "e41f61f9bf09cfe5"
+   },
+   {
+    "row": 37,
+    "code": "KH",
+    "hasData": true,
+    "digest": "1abba8db07f6002d"
+   },
+   {
+    "row": 38,
+    "code": "CM",
+    "hasData": true,
+    "digest": "7f0fc365f16f467c"
+   },
+   {
+    "row": 39,
+    "code": "CA",
+    "hasData": true,
+    "digest": "3665b7ad4efba293"
+   },
+   {
+    "row": 40,
+    "code": "CV",
+    "hasData": true,
+    "digest": "3e93ae356da3f599"
+   },
+   {
+    "row": 41,
+    "code": "KY",
+    "hasData": true,
+    "digest": "e7ab3c74762ed650"
+   },
+   {
+    "row": 42,
+    "code": "CF",
+    "hasData": true,
+    "digest": "b58246d3fb1087ef"
+   },
+   {
+    "row": 43,
+    "code": "TD",
+    "hasData": true,
+    "digest": "8a8d6694b2a13b1a"
+   },
+   {
+    "row": 44,
+    "code": "CL",
+    "hasData": true,
+    "digest": "34421ed6170529a0"
+   },
+   {
+    "row": 45,
+    "code": "CN",
+    "hasData": true,
+    "digest": "beeb689110d4d138"
+   },
+   {
+    "row": 46,
+    "code": "CX",
+    "hasData": true,
+    "digest": "4dfdcd62f7c1b736"
+   },
+   {
+    "row": 47,
+    "code": "CC",
+    "hasData": true,
+    "digest": "07079b07c7dba31f"
+   },
+   {
+    "row": 48,
+    "code": "CO",
+    "hasData": true,
+    "digest": "6fe6a880c0ae1cb2"
+   },
+   {
+    "row": 49,
+    "code": "KM",
+    "hasData": true,
+    "digest": "bd2c74bf11628787"
+   },
+   {
+    "row": 50,
+    "code": "CG",
+    "hasData": true,
+    "digest": "1a3fb458ae1dc02f"
+   },
+   {
+    "row": 51,
+    "code": "CK",
+    "hasData": true,
+    "digest": "69c3f53c9a388f47"
+   },
+   {
+    "row": 52,
+    "code": "CR",
+    "hasData": true,
+    "digest": "259725c703aded69"
+   },
+   {
+    "row": 53,
+    "code": "HR",
+    "hasData": true,
+    "digest": "6a11c1bceae7e9fc"
+   },
+   {
+    "row": 54,
+    "code": "CU",
+    "hasData": true,
+    "digest": "5b69d8552397bd41"
+   },
+   {
+    "row": 55,
+    "code": "CW",
+    "hasData": true,
+    "digest": "d0cdb994326b2e42"
+   },
+   {
+    "row": 56,
+    "code": "CY",
+    "hasData": true,
+    "digest": "faeb4c4ceb658d6a"
+   },
+   {
+    "row": 57,
+    "code": "CZ",
+    "hasData": true,
+    "digest": "58efd3dbc3bc81ac"
+   },
+   {
+    "row": 58,
+    "code": "CD",
+    "hasData": true,
+    "digest": "3997ed19086f9e3f"
+   },
+   {
+    "row": 59,
+    "code": "DK",
+    "hasData": true,
+    "digest": "0867a48adf0dccf7"
+   },
+   {
+    "row": 60,
+    "code": "DJ",
+    "hasData": true,
+    "digest": "cdd647aa14239fcc"
+   },
+   {
+    "row": 61,
+    "code": "DM",
+    "hasData": true,
+    "digest": "9800f38dcbd3d4e7"
+   },
+   {
+    "row": 62,
+    "code": "DO",
+    "hasData": true,
+    "digest": "a609e5a4757d5e5b"
+   },
+   {
+    "row": 63,
+    "code": "EC",
+    "hasData": true,
+    "digest": "22e206063a2a0a44"
+   },
+   {
+    "row": 64,
+    "code": "EG",
+    "hasData": true,
+    "digest": "bb7a652e13d7c5f8"
+   },
+   {
+    "row": 65,
+    "code": "SV",
+    "hasData": true,
+    "digest": "ff37d953d6e824f1"
+   },
+   {
+    "row": 66,
+    "code": "GQ",
+    "hasData": true,
+    "digest": "bba0e66e871e3bbf"
+   },
+   {
+    "row": 67,
+    "code": "ER",
+    "hasData": true,
+    "digest": "f43e716b3422db0e"
+   },
+   {
+    "row": 68,
+    "code": "EE",
+    "hasData": true,
+    "digest": "a807a8cf616c7c43"
+   },
+   {
+    "row": 69,
+    "code": "SZ",
+    "hasData": true,
+    "digest": "9982f465f1e58429"
+   },
+   {
+    "row": 70,
+    "code": "ET",
+    "hasData": true,
+    "digest": "67138e568f3ef3dc"
+   },
+   {
+    "row": 71,
+    "code": "FK",
+    "hasData": true,
+    "digest": "7d9158b736c420b8"
+   },
+   {
+    "row": 72,
+    "code": "FO",
+    "hasData": true,
+    "digest": "4f8e1b6faa9a2cc1"
+   },
+   {
+    "row": 73,
+    "code": "FJ",
+    "hasData": true,
+    "digest": "71634bce9458601e"
+   },
+   {
+    "row": 74,
+    "code": "FI",
+    "hasData": true,
+    "digest": "7ae66da124cda0d1"
+   },
+   {
+    "row": 75,
+    "code": "FR",
+    "hasData": true,
+    "digest": "07f6bf69232ba64e"
+   },
+   {
+    "row": 76,
+    "code": "GF",
+    "hasData": true,
+    "digest": "6282553d776e90e1"
+   },
+   {
+    "row": 77,
+    "code": "PF",
+    "hasData": true,
+    "digest": "33d21b559fd3a4bc"
+   },
+   {
+    "row": 78,
+    "code": "TF",
+    "hasData": true,
+    "digest": "c2067604639edd53"
+   },
+   {
+    "row": 79,
+    "code": "GA",
+    "hasData": true,
+    "digest": "9bee6838e3f7ee73"
+   },
+   {
+    "row": 80,
+    "code": "GE",
+    "hasData": true,
+    "digest": "6c09c7b57ef937f0"
+   },
+   {
+    "row": 81,
+    "code": "DE",
+    "hasData": true,
+    "digest": "a00e912bcb0e2b3a"
+   },
+   {
+    "row": 82,
+    "code": "GH",
+    "hasData": true,
+    "digest": "63bb950ce3a5f977"
+   },
+   {
+    "row": 83,
+    "code": "GI",
+    "hasData": true,
+    "digest": "8bbab4ab006bf39f"
+   },
+   {
+    "row": 84,
+    "code": "GR",
+    "hasData": true,
+    "digest": "72d3cee3f5d7716c"
+   },
+   {
+    "row": 85,
+    "code": "GL",
+    "hasData": true,
+    "digest": "6407e236be2af54e"
+   },
+   {
+    "row": 86,
+    "code": "GD",
+    "hasData": true,
+    "digest": "d1cabaa1b3e67791"
+   },
+   {
+    "row": 87,
+    "code": "GP",
+    "hasData": true,
+    "digest": "54d3692f3860e1e3"
+   },
+   {
+    "row": 88,
+    "code": "GU",
+    "hasData": true,
+    "digest": "986a834fff93546b"
+   },
+   {
+    "row": 89,
+    "code": "GT",
+    "hasData": true,
+    "digest": "62759baf4442926c"
+   },
+   {
+    "row": 90,
+    "code": "GG",
+    "hasData": true,
+    "digest": "252d7d89e51f7c64"
+   },
+   {
+    "row": 91,
+    "code": "GN",
+    "hasData": true,
+    "digest": "b6c3b64fe4fc057c"
+   },
+   {
+    "row": 92,
+    "code": "GW",
+    "hasData": true,
+    "digest": "a4294e4b5ea6323d"
+   },
+   {
+    "row": 93,
+    "code": "GY",
+    "hasData": true,
+    "digest": "5e2983a0a40a8e85"
+   },
+   {
+    "row": 94,
+    "code": "HT",
+    "hasData": true,
+    "digest": "f310a572f2200a14"
+   },
+   {
+    "row": 95,
+    "code": "HM",
+    "hasData": true,
+    "digest": "f8889360e505cebd"
+   },
+   {
+    "row": 96,
+    "code": "HN",
+    "hasData": true,
+    "digest": "7f529a101a677aba"
+   },
+   {
+    "row": 97,
+    "code": "HK",
+    "hasData": true,
+    "digest": "ecd91dd7de3d4b3a"
+   },
+   {
+    "row": 98,
+    "code": "HU",
+    "hasData": true,
+    "digest": "ef72ab0507dba333"
+   },
+   {
+    "row": 99,
+    "code": "IS",
+    "hasData": true,
+    "digest": "00cdc2a2a3b6ac64"
+   },
+   {
+    "row": 100,
+    "code": "IN",
+    "hasData": true,
+    "digest": "20318561ea776125"
+   },
+   {
+    "row": 101,
+    "code": "ID",
+    "hasData": true,
+    "digest": "dd0c007cedfd39f5"
+   },
+   {
+    "row": 102,
+    "code": "IR",
+    "hasData": true,
+    "digest": "01d8c3f566922158"
+   },
+   {
+    "row": 103,
+    "code": "IQ",
+    "hasData": true,
+    "digest": "d93e49e61d8554fe"
+   },
+   {
+    "row": 104,
+    "code": "IE",
+    "hasData": true,
+    "digest": "85a9a19101fd14a4"
+   },
+   {
+    "row": 105,
+    "code": "IL",
+    "hasData": true,
+    "digest": "f90c09c0ff9739bd"
+   },
+   {
+    "row": 106,
+    "code": "IT",
+    "hasData": true,
+    "digest": "807f146016e549b7"
+   },
+   {
+    "row": 107,
+    "code": "CI",
+    "hasData": true,
+    "digest": "9ebb42e3a80af05e"
+   },
+   {
+    "row": 108,
+    "code": "JM",
+    "hasData": true,
+    "digest": "c56413dc0ca02369"
+   },
+   {
+    "row": 109,
+    "code": "JP",
+    "hasData": true,
+    "digest": "632f291b1d120183"
+   },
+   {
+    "row": 110,
+    "code": "JE",
+    "hasData": true,
+    "digest": "cf551c307e27ac5c"
+   },
+   {
+    "row": 111,
+    "code": "JO",
+    "hasData": true,
+    "digest": "1ea51987b1895019"
+   },
+   {
+    "row": 112,
+    "code": "KZ",
+    "hasData": true,
+    "digest": "b7c94c72594b3927"
+   },
+   {
+    "row": 113,
+    "code": "KE",
+    "hasData": true,
+    "digest": "18eba6cbaafed4b8"
+   },
+   {
+    "row": 114,
+    "code": "KI",
+    "hasData": true,
+    "digest": "bc0025afca004b81"
+   },
+   {
+    "row": 115,
+    "code": "XK",
+    "hasData": true,
+    "digest": "ee1d3e366c784419"
+   },
+   {
+    "row": 116,
+    "code": "KW",
+    "hasData": true,
+    "digest": "6818d8865edc4e34"
+   },
+   {
+    "row": 117,
+    "code": "KG",
+    "hasData": true,
+    "digest": "acd72ed72bbfba51"
+   },
+   {
+    "row": 118,
+    "code": "LA",
+    "hasData": true,
+    "digest": "851fc5f3129db0a5"
+   },
+   {
+    "row": 119,
+    "code": "LV",
+    "hasData": true,
+    "digest": "461b4c1f3203332a"
+   },
+   {
+    "row": 120,
+    "code": "LB",
+    "hasData": true,
+    "digest": "c2b14c4135505be8"
+   },
+   {
+    "row": 121,
+    "code": "LS",
+    "hasData": true,
+    "digest": "fca02af494d97e2c"
+   },
+   {
+    "row": 122,
+    "code": "LR",
+    "hasData": true,
+    "digest": "9adf377e42b2122b"
+   },
+   {
+    "row": 123,
+    "code": "LY",
+    "hasData": true,
+    "digest": "98cea8fd9686698c"
+   },
+   {
+    "row": 124,
+    "code": "LI",
+    "hasData": true,
+    "digest": "8ba33eb30aec1233"
+   },
+   {
+    "row": 125,
+    "code": "LT",
+    "hasData": true,
+    "digest": "ff086fc158a6cce2"
+   },
+   {
+    "row": 126,
+    "code": "LU",
+    "hasData": true,
+    "digest": "111b25e4f27589ab"
+   },
+   {
+    "row": 127,
+    "code": "MO",
+    "hasData": true,
+    "digest": "3a0708274446fe03"
+   },
+   {
+    "row": 128,
+    "code": "MG",
+    "hasData": true,
+    "digest": "2cdb58d999de344d"
+   },
+   {
+    "row": 129,
+    "code": "MW",
+    "hasData": true,
+    "digest": "690557161a19aa2b"
+   },
+   {
+    "row": 130,
+    "code": "MY",
+    "hasData": true,
+    "digest": "553aa1e2948b3a33"
+   },
+   {
+    "row": 131,
+    "code": "MV",
+    "hasData": true,
+    "digest": "5859bb557335c955"
+   },
+   {
+    "row": 132,
+    "code": "ML",
+    "hasData": true,
+    "digest": "06625db2701c41d8"
+   },
+   {
+    "row": 133,
+    "code": "MT",
+    "hasData": true,
+    "digest": "81e678411d21eebd"
+   },
+   {
+    "row": 134,
+    "code": "IM",
+    "hasData": true,
+    "digest": "6bd09e608b39d570"
+   },
+   {
+    "row": 135,
+    "code": "MH",
+    "hasData": true,
+    "digest": "93290c0f02b754ce"
+   },
+   {
+    "row": 136,
+    "code": "MQ",
+    "hasData": true,
+    "digest": "8ac6e5332cb6f949"
+   },
+   {
+    "row": 137,
+    "code": "MR",
+    "hasData": true,
+    "digest": "8029cd1d316b16d5"
+   },
+   {
+    "row": 138,
+    "code": "MU",
+    "hasData": true,
+    "digest": "90a212e45bcdeaf2"
+   },
+   {
+    "row": 139,
+    "code": "YT",
+    "hasData": true,
+    "digest": "fa483c9450991bbf"
+   },
+   {
+    "row": 140,
+    "code": "MX",
+    "hasData": true,
+    "digest": "6b604b0b4b25ec9f"
+   },
+   {
+    "row": 141,
+    "code": "FM",
+    "hasData": true,
+    "digest": "e71beb5f32368219"
+   },
+   {
+    "row": 142,
+    "code": "MD",
+    "hasData": true,
+    "digest": "f4abebb93abd4523"
+   },
+   {
+    "row": 143,
+    "code": "MC",
+    "hasData": true,
+    "digest": "288bb188c12f1190"
+   },
+   {
+    "row": 144,
+    "code": "MN",
+    "hasData": true,
+    "digest": "26588d0a98e73305"
+   },
+   {
+    "row": 145,
+    "code": "ME",
+    "hasData": true,
+    "digest": "2dcfa89d769909f6"
+   },
+   {
+    "row": 146,
+    "code": "MS",
+    "hasData": true,
+    "digest": "27ba32a37a274c77"
+   },
+   {
+    "row": 147,
+    "code": "MA",
+    "hasData": true,
+    "digest": "b36ecb0496708c6b"
+   },
+   {
+    "row": 148,
+    "code": "MZ",
+    "hasData": true,
+    "digest": "059097a003783b0c"
+   },
+   {
+    "row": 149,
+    "code": "MM",
+    "hasData": true,
+    "digest": "fc9c65508ae85ab7"
+   },
+   {
+    "row": 150,
+    "code": "NA",
+    "hasData": true,
+    "digest": "958ee49dd2ab91e9"
+   },
+   {
+    "row": 151,
+    "code": "NR",
+    "hasData": true,
+    "digest": "f011d710532dac90"
+   },
+   {
+    "row": 152,
+    "code": "NP",
+    "hasData": true,
+    "digest": "e7eaa37c03773738"
+   },
+   {
+    "row": 153,
+    "code": "NL",
+    "hasData": true,
+    "digest": "163c799109c94fdb"
+   },
+   {
+    "row": 154,
+    "code": "NC",
+    "hasData": true,
+    "digest": "a1807943d1ad2bca"
+   },
+   {
+    "row": 155,
+    "code": "NZ",
+    "hasData": true,
+    "digest": "cfcd08f32829c443"
+   },
+   {
+    "row": 156,
+    "code": "NI",
+    "hasData": true,
+    "digest": "2fa4c654c2a90474"
+   },
+   {
+    "row": 157,
+    "code": "NE",
+    "hasData": true,
+    "digest": "2291229c329ae3e6"
+   },
+   {
+    "row": 158,
+    "code": "NG",
+    "hasData": true,
+    "digest": "f637128807279adb"
+   },
+   {
+    "row": 159,
+    "code": "NU",
+    "hasData": true,
+    "digest": "18157bfe34872fcd"
+   },
+   {
+    "row": 160,
+    "code": "NF",
+    "hasData": true,
+    "digest": "0570ac62847ea727"
+   },
+   {
+    "row": 161,
+    "code": "KP",
+    "hasData": true,
+    "digest": "552760d8ea814a8c"
+   },
+   {
+    "row": 162,
+    "code": "MK",
+    "hasData": true,
+    "digest": "d953103a014b7716"
+   },
+   {
+    "row": 163,
+    "code": "MP",
+    "hasData": true,
+    "digest": "b3ceb652080cecd5"
+   },
+   {
+    "row": 164,
+    "code": "NO",
+    "hasData": true,
+    "digest": "e28743c550d8caf4"
+   },
+   {
+    "row": 165,
+    "code": "OM",
+    "hasData": true,
+    "digest": "9d0e582385afa247"
+   },
+   {
+    "row": 166,
+    "code": "PK",
+    "hasData": true,
+    "digest": "88df7dd4244f2335"
+   },
+   {
+    "row": 167,
+    "code": "PW",
+    "hasData": true,
+    "digest": "4db8b9933ee38238"
+   },
+   {
+    "row": 168,
+    "code": "PS",
+    "hasData": true,
+    "digest": "8209d1db817b2083"
+   },
+   {
+    "row": 169,
+    "code": "PA",
+    "hasData": true,
+    "digest": "900da1c4148794c8"
+   },
+   {
+    "row": 170,
+    "code": "PG",
+    "hasData": true,
+    "digest": "d15bcfc3b27f700c"
+   },
+   {
+    "row": 171,
+    "code": "PY",
+    "hasData": true,
+    "digest": "a3a0826da8426ef8"
+   },
+   {
+    "row": 172,
+    "code": "PE",
+    "hasData": true,
+    "digest": "1d84802d79d23899"
+   },
+   {
+    "row": 173,
+    "code": "PH",
+    "hasData": true,
+    "digest": "c5c8f9206dc3940f"
+   },
+   {
+    "row": 174,
+    "code": "PN",
+    "hasData": true,
+    "digest": "6f2171fb96847f39"
+   },
+   {
+    "row": 175,
+    "code": "PL",
+    "hasData": true,
+    "digest": "cd25b6245742b3a6"
+   },
+   {
+    "row": 176,
+    "code": "PT",
+    "hasData": true,
+    "digest": "42b60850a76022b6"
+   },
+   {
+    "row": 177,
+    "code": "PR",
+    "hasData": true,
+    "digest": "af693e39d0eb5369"
+   },
+   {
+    "row": 178,
+    "code": "QA",
+    "hasData": true,
+    "digest": "43208a728fb1c727"
+   },
+   {
+    "row": 179,
+    "code": "RE",
+    "hasData": true,
+    "digest": "87e270ee1655b887"
+   },
+   {
+    "row": 180,
+    "code": "RO",
+    "hasData": true,
+    "digest": "69613e4d31361f16"
+   },
+   {
+    "row": 181,
+    "code": "RU",
+    "hasData": true,
+    "digest": "2edc83ccf0e54055"
+   },
+   {
+    "row": 182,
+    "code": "RW",
+    "hasData": true,
+    "digest": "9e7d7baca9155aa9"
+   },
+   {
+    "row": 183,
+    "code": "SH",
+    "hasData": true,
+    "digest": "065522f7846aa546"
+   },
+   {
+    "row": 184,
+    "code": "KN",
+    "hasData": true,
+    "digest": "e6519fe409741daa"
+   },
+   {
+    "row": 185,
+    "code": "LC",
+    "hasData": true,
+    "digest": "384f04fde9a5c970"
+   },
+   {
+    "row": 186,
+    "code": "PM",
+    "hasData": true,
+    "digest": "055ce88c4c47c923"
+   },
+   {
+    "row": 187,
+    "code": "VC",
+    "hasData": true,
+    "digest": "5e376166eac51116"
+   },
+   {
+    "row": 188,
+    "code": "BL",
+    "hasData": true,
+    "digest": "8979b375ab9cfc44"
+   },
+   {
+    "row": 189,
+    "code": "MF",
+    "hasData": true,
+    "digest": "1ae690cd88437d85"
+   },
+   {
+    "row": 190,
+    "code": "WS",
+    "hasData": true,
+    "digest": "f584a345765b447f"
+   },
+   {
+    "row": 191,
+    "code": "SM",
+    "hasData": true,
+    "digest": "84d985d2fd8348be"
+   },
+   {
+    "row": 192,
+    "code": "ST",
+    "hasData": true,
+    "digest": "24ab44ed6846dab8"
+   },
+   {
+    "row": 193,
+    "code": "SA",
+    "hasData": true,
+    "digest": "5ef4056f587d33a9"
+   },
+   {
+    "row": 194,
+    "code": "SN",
+    "hasData": true,
+    "digest": "0157a8eba7c9ec0d"
+   },
+   {
+    "row": 195,
+    "code": "RS",
+    "hasData": true,
+    "digest": "4f0fe15bc3a21de5"
+   },
+   {
+    "row": 196,
+    "code": "SC",
+    "hasData": true,
+    "digest": "f5b21de4635c676e"
+   },
+   {
+    "row": 197,
+    "code": "SL",
+    "hasData": true,
+    "digest": "8ce662a0f4dcd405"
+   },
+   {
+    "row": 198,
+    "code": "SG",
+    "hasData": true,
+    "digest": "491f5e6bb1891ea5"
+   },
+   {
+    "row": 199,
+    "code": "SX",
+    "hasData": true,
+    "digest": "bab4d05deaffb562"
+   },
+   {
+    "row": 200,
+    "code": "SK",
+    "hasData": true,
+    "digest": "0a9363dfe5dc96aa"
+   },
+   {
+    "row": 201,
+    "code": "SI",
+    "hasData": true,
+    "digest": "19973c92286a8f1e"
+   },
+   {
+    "row": 202,
+    "code": "SB",
+    "hasData": true,
+    "digest": "8989a70d329d9f5d"
+   },
+   {
+    "row": 203,
+    "code": "SO",
+    "hasData": true,
+    "digest": "f2e72a9b08218954"
+   },
+   {
+    "row": 204,
+    "code": "ZA",
+    "hasData": true,
+    "digest": "4324c069c85ecd6c"
+   },
+   {
+    "row": 205,
+    "code": "GS",
+    "hasData": true,
+    "digest": "06e3db03bd52e3b1"
+   },
+   {
+    "row": 206,
+    "code": "KR",
+    "hasData": true,
+    "digest": "ea160b966bb2f878"
+   },
+   {
+    "row": 207,
+    "code": "SS",
+    "hasData": true,
+    "digest": "b4bd48004091befa"
+   },
+   {
+    "row": 208,
+    "code": "ES",
+    "hasData": true,
+    "digest": "c70f5ef404e463c0"
+   },
+   {
+    "row": 209,
+    "code": "LK",
+    "hasData": true,
+    "digest": "63773e6849f14888"
+   },
+   {
+    "row": 210,
+    "code": "SD",
+    "hasData": true,
+    "digest": "aba701297dc12869"
+   },
+   {
+    "row": 211,
+    "code": "SR",
+    "hasData": true,
+    "digest": "031e34961f7fe651"
+   },
+   {
+    "row": 212,
+    "code": "SJ",
+    "hasData": true,
+    "digest": "30a9a4c64f53af19"
+   },
+   {
+    "row": 213,
+    "code": "SE",
+    "hasData": true,
+    "digest": "d7ff8d61fbb58be8"
+   },
+   {
+    "row": 214,
+    "code": "CH",
+    "hasData": true,
+    "digest": "ea36de28b77624d2"
+   },
+   {
+    "row": 215,
+    "code": "SY",
+    "hasData": true,
+    "digest": "1ad37ec118828970"
+   },
+   {
+    "row": 216,
+    "code": "TW",
+    "hasData": true,
+    "digest": "1a2f8a564426a12a"
+   },
+   {
+    "row": 217,
+    "code": "TJ",
+    "hasData": true,
+    "digest": "b460374e1c14a723"
+   },
+   {
+    "row": 218,
+    "code": "TZ",
+    "hasData": true,
+    "digest": "c46d72166db2c30c"
+   },
+   {
+    "row": 219,
+    "code": "TH",
+    "hasData": true,
+    "digest": "d58530ed0f68dfce"
+   },
+   {
+    "row": 220,
+    "code": "BS",
+    "hasData": true,
+    "digest": "e09e032addf68176"
+   },
+   {
+    "row": 221,
+    "code": "GM",
+    "hasData": true,
+    "digest": "5fac8d21b272ad76"
+   },
+   {
+    "row": 222,
+    "code": "TL",
+    "hasData": true,
+    "digest": "890def84417cbbed"
+   },
+   {
+    "row": 223,
+    "code": "TG",
+    "hasData": true,
+    "digest": "f2c959b2b5001815"
+   },
+   {
+    "row": 224,
+    "code": "TK",
+    "hasData": true,
+    "digest": "bb3723592c6b4ce1"
+   },
+   {
+    "row": 225,
+    "code": "TO",
+    "hasData": true,
+    "digest": "80f990e106599717"
+   },
+   {
+    "row": 226,
+    "code": "TT",
+    "hasData": true,
+    "digest": "029d722022867f54"
+   },
+   {
+    "row": 227,
+    "code": "TN",
+    "hasData": true,
+    "digest": "8ab7a74b5c12ee66"
+   },
+   {
+    "row": 228,
+    "code": "TR",
+    "hasData": true,
+    "digest": "7cc0c49b0a4fe644"
+   },
+   {
+    "row": 229,
+    "code": "TM",
+    "hasData": true,
+    "digest": "21eaf7044aa9fc1b"
+   },
+   {
+    "row": 230,
+    "code": "TC",
+    "hasData": true,
+    "digest": "80e4fa93860b42bd"
+   },
+   {
+    "row": 231,
+    "code": "TV",
+    "hasData": true,
+    "digest": "86e3a129f438e496"
+   },
+   {
+    "row": 232,
+    "code": "UG",
+    "hasData": true,
+    "digest": "94aaa2eb733cfbf5"
+   },
+   {
+    "row": 233,
+    "code": "UA",
+    "hasData": true,
+    "digest": "13a1b1fe44946717"
+   },
+   {
+    "row": 234,
+    "code": "AE",
+    "hasData": true,
+    "digest": "4256140565997e4e"
+   },
+   {
+    "row": 235,
+    "code": "GB",
+    "hasData": true,
+    "digest": "d0369e0fbd2dbd8a"
+   },
+   {
+    "row": 236,
+    "code": "US",
+    "hasData": true,
+    "digest": "4e32698f28435992"
+   },
+   {
+    "row": 237,
+    "code": "UM",
+    "hasData": true,
+    "digest": "809372b29d356003"
+   },
+   {
+    "row": 238,
+    "code": "UY",
+    "hasData": true,
+    "digest": "5b5fa16c192b83c5"
+   },
+   {
+    "row": 239,
+    "code": "UZ",
+    "hasData": true,
+    "digest": "4bc4a640f3e6ee45"
+   },
+   {
+    "row": 240,
+    "code": "VU",
+    "hasData": true,
+    "digest": "21a09559f062bc18"
+   },
+   {
+    "row": 241,
+    "code": "VA",
+    "hasData": true,
+    "digest": "3bb05b5b680252d5"
+   },
+   {
+    "row": 242,
+    "code": "VE",
+    "hasData": true,
+    "digest": "b3c2d5811e89e85d"
+   },
+   {
+    "row": 243,
+    "code": "VN",
+    "hasData": true,
+    "digest": "9cd94995581c5bf5"
+   },
+   {
+    "row": 244,
+    "code": "VG",
+    "hasData": true,
+    "digest": "409bcca1661950f5"
+   },
+   {
+    "row": 245,
+    "code": "VI",
+    "hasData": true,
+    "digest": "8f99efb719d65eac"
+   },
+   {
+    "row": 246,
+    "code": "WF",
+    "hasData": true,
+    "digest": "de05cab7517cb124"
+   },
+   {
+    "row": 247,
+    "code": "EH",
+    "hasData": true,
+    "digest": "ea70067f220329a7"
+   },
+   {
+    "row": 248,
+    "code": "YE",
+    "hasData": true,
+    "digest": "1669d268afbbd413"
+   },
+   {
+    "row": 249,
+    "code": "ZM",
+    "hasData": true,
+    "digest": "7adb3a5b4db50229"
+   },
+   {
+    "row": 250,
+    "code": "ZW",
+    "hasData": true,
+    "digest": "1767741cd6aadaea"
+   },
+   {
+    "row": 251,
+    "code": null,
+    "hasData": false,
+    "digest": "b889c9057fc99860"
+   },
+   {
+    "row": 252,
+    "code": "Agender",
+    "hasData": true,
+    "digest": "a7101050e29cebe0"
+   },
+   {
+    "row": 253,
+    "code": "Custom Flag",
+    "hasData": true,
+    "digest": "8dd20a99f85faa0a"
+   },
+   {
+    "row": 254,
+    "code": "zzz",
+    "hasData": true,
+    "digest": "4a5026cbcfd3080f"
+   },
+   {
+    "row": 0,
+    "code": null,
+    "hasData": true,
+    "digest": "d23b2adad3cc857c"
+   }
+  ],
+  "countrySamples": [
+   {
+    "row": 109,
+    "code": "JP",
+    "hasData": true,
+    "calls": [
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "country",
+      "{\"asset\":\"./assets/country_flag/jp.png\",\"code\":\"JP\",\"display_name\":\"Japan\",\"emoji\":\"🇯🇵\",\"en_name\":\"Japan\",\"latitude\":\"36.00000000\",\"longitude\":\"138.00000000\",\"name\":\"日本\"}"
+     ]
+    ]
+   },
+   {
+    "row": 235,
+    "code": "GB",
+    "hasData": true,
+    "calls": [
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "country",
+      "{\"asset\":\"./assets/country_flag/gb.png\",\"code\":\"GB\",\"display_name\":\"United Kingdom\",\"emoji\":\"🇬🇧\",\"en_name\":\"United Kingdom\",\"latitude\":\"54.00000000\",\"longitude\":\"-2.00000000\",\"name\":\"イギリス\"}"
+     ]
+    ]
+   },
+   {
+    "row": 236,
+    "code": "US",
+    "hasData": true,
+    "calls": [
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "country",
+      "{\"asset\":\"./assets/country_flag/us.png\",\"code\":\"US\",\"display_name\":\"United States\",\"emoji\":\"🇺🇸\",\"en_name\":\"United States\",\"latitude\":\"38.00000000\",\"longitude\":\"-97.00000000\",\"name\":\"アメリカ合衆国\"}"
+     ]
+    ]
+   },
+   {
+    "row": 251,
+    "code": null,
+    "hasData": false,
+    "calls": [
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "country",
+      "null"
+     ]
+    ]
+   },
+   {
+    "row": 252,
+    "code": "Agender",
+    "hasData": true,
+    "calls": [
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "country",
+      "{\"asset\":\"./user_data/additional_flag/Agender.png\",\"code\":\"Agender\",\"display_name\":\"Agender\",\"en_name\":\"Agender\",\"name\":\"Agender\"}"
+     ]
+    ]
+   },
+   {
+    "row": 253,
+    "code": "Custom Flag",
+    "hasData": true,
+    "calls": [
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "country",
+      "{\"asset\":\"./user_data/additional_flag/Custom Flag.png\",\"code\":\"Custom Flag\",\"display_name\":\"Custom Flag\",\"en_name\":\"Custom Flag\",\"name\":\"Custom Flag\"}"
+     ]
+    ]
+   },
+   {
+    "row": 254,
+    "code": "zzz",
+    "hasData": true,
+    "calls": [
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "country",
+      "{\"asset\":\"./user_data/additional_flag/zzz.jpg\",\"code\":\"zzz\",\"display_name\":\"zzz\",\"en_name\":\"zzz\",\"name\":\"zzz\"}"
+     ]
+    ]
+   },
+   {
+    "row": 0,
+    "code": null,
+    "hasData": true,
+    "calls": [
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "country",
+      "{}"
+     ]
+    ]
+   }
+  ],
+  "regions": {
+   "AF": "af16d26a3536fb4c",
+   "AX": "578a197593e2bf2c",
+   "AL": "904c6682c21bdf81",
+   "DZ": "6acb2649325e281a",
+   "AS": "dc484f4ae5c4ebe0",
+   "AD": "2f42ae6f21480224",
+   "AO": "a552d5a5417c5d08",
+   "AI": "3c51b34e6dae527d",
+   "AG": "e74d9ac26f110a21",
+   "AR": "13e2e94716b5a791",
+   "AM": "06c81a7b6df9e48c",
+   "AW": "cf3dc28f937de406",
+   "AU": "6e23cc8f666f388f",
+   "AT": "c77384badb267a5a",
+   "AZ": "7d54cc5547f044a9",
+   "BH": "7a9291926d0e6b92",
+   "BD": "5a95b3d4d1da260d",
+   "BB": "83dd380a3085d4f2",
+   "BY": "fe5b52243e68bf93",
+   "BE": "a609191ba82e28d8",
+   "BZ": "b02dec753b7fe7e4",
+   "BJ": "4250d78991e3978a",
+   "BM": "2cff4600aa715566",
+   "BT": "8a7d1cc744ee466f",
+   "BO": "14d3e77dfcd5204d",
+   "BQ": "cc33347a29f1da80",
+   "BA": "3e54c5071fa74dd3",
+   "BW": "2e60311ca65b1908",
+   "BR": "2063951666f1bc99",
+   "BN": "c0217d0c8cef14d8",
+   "BG": "bf1b442d54c26dda",
+   "BF": "8f1b2af73e2d00d6",
+   "BI": "431e423a56cab40a",
+   "KH": "a8238be17602acf4",
+   "CM": "871bf69214c5d5a2",
+   "CA": "f3aa71532db39459",
+   "CV": "344c3ae11a0f4499",
+   "KY": "6466a918dfbd41db",
+   "CF": "9a381d5dfc46520e",
+   "TD": "68153879b9ddd763",
+   "CL": "6d8ad0842ce8180f",
+   "CN": "ea71b10f4a14539c",
+   "CO": "fd1d8ecbcad7ba7d",
+   "KM": "fe84758a9fecf156",
+   "CG": "dbf441471a1f45b8",
+   "CR": "68065f7677d82839",
+   "HR": "ff8daf7d5432d0cf",
+   "CU": "955cf234b88ebc21",
+   "CY": "c33bd7c355509543",
+   "CZ": "f9b00ac58a9a03dc",
+   "CD": "920e5c060304304c",
+   "DK": "586c464f50a70b7f",
+   "DJ": "3de57af096ab0674",
+   "DM": "cffca29c2d5a08cb",
+   "DO": "ac0dc732a1ddf533",
+   "EC": "75ff972fcacb6108",
+   "EG": "c70a396fcdd25d1e",
+   "SV": "540d4e756ed0b00c",
+   "GQ": "4ff4b76271d3e7b2",
+   "ER": "c3352229532b5c73",
+   "EE": "e9cb6a2f0493db34",
+   "SZ": "77b38a22efd48943",
+   "ET": "f834d07d073afb25",
+   "FO": "fd9f50f8cdb483df",
+   "FJ": "2a9da95c554612b3",
+   "FI": "d52f4e33e17e0f26",
+   "FR": "706957cbcdbdc614",
+   "PF": "41c5292271617212",
+   "GA": "f5baa1682b6368ac",
+   "GE": "9fd4567f225578b5",
+   "DE": "b7bca4c1a9f02e5e",
+   "GH": "3ffa8623059bb117",
+   "GR": "febabaa49ec65181",
+   "GL": "e91d6bae9b052873",
+   "GD": "17fb4bef0a332dea",
+   "GP": "869fc424fb2c58f7",
+   "GU": "a026c5d6f4cd5cc3",
+   "GT": "bb489197cf5bce0f",
+   "GG": "f1b24aba01c2dda4",
+   "GN": "5fa897c8bd473b69",
+   "GW": "81d9535f24db26b3",
+   "GY": "7fb72924d9194060",
+   "HT": "ed2dc345246cd2dd",
+   "HN": "fad3da79d34d1bf0",
+   "HK": "cfec357851254b94",
+   "HU": "80c96e194103bbda",
+   "IS": "a7c014dc2901593a",
+   "IN": "e888564b3a1ca11c",
+   "ID": "98f4829b75b84b5c",
+   "IR": "bd9dc898bcfbaeb5",
+   "IQ": "dadd69d6b81f800a",
+   "IE": "e8bbacde6c548468",
+   "IL": "62e7ea4853a4ae41",
+   "IT": "8e4b0501f9b825e4",
+   "CI": "67c796d65b5659ef",
+   "JM": "35add5d1d1b81a37",
+   "JP": "53a9356f80651231",
+   "JE": "eb7ccd5fe5da5de1",
+   "JO": "d12c180923355b7d",
+   "KZ": "83f2ba6608897c0a",
+   "KE": "280407bbf0b17571",
+   "KI": "5c37935bbe22fb1c",
+   "XK": "1a4206f8610b95bf",
+   "KW": "12d61f991b97dc56",
+   "KG": "e5ce4904eeab2fea",
+   "LA": "614aa2ab2df4932a",
+   "LV": "c64b2192827a0dc5",
+   "LB": "0944274d9d6536d5",
+   "LS": "7c39a80ce537370a",
+   "LR": "9ce71732a5082e48",
+   "LY": "c1b91ae85b19c3e6",
+   "LI": "78b7247491c240aa",
+   "LT": "1189b77d34135007",
+   "LU": "aa9dcef6f4d17435",
+   "MG": "2826e7048c631b89",
+   "MW": "de58044391d2d945",
+   "MY": "0834877243dfe2b1",
+   "MV": "16b2d3742b301a88",
+   "ML": "ed7ba4bed3625a5c",
+   "MT": "07b372e4c7d14901",
+   "IM": "3039e1cf40af3cea",
+   "MH": "e64cb8b9bacd0807",
+   "MQ": "8088ca91ebb7221f",
+   "MR": "068e7088e077a9ad",
+   "MU": "39d69f7b362b8a85",
+   "YT": "6f9bfe68a0b4c46b",
+   "MX": "425048967cbc2d94",
+   "FM": "24830e0ca916636e",
+   "MD": "fa3c203199738a43",
+   "MC": "436728a7bbcb73c3",
+   "MN": "98135e08ef4bfdb1",
+   "ME": "1a97d44f6a700b36",
+   "MS": "f4a7584775634a6b",
+   "MA": "f24e8eef893d2d8f",
+   "MZ": "43e0e81bacbed638",
+   "MM": "37796504543027d0",
+   "NA": "a6bb79d2466b12d6",
+   "NR": "6f9b2ec21d846036",
+   "NP": "48b229f95043bf7d",
+   "NL": "ca083782c83921a6",
+   "NC": "151d7bd8481223ca",
+   "NZ": "6d9ea541404463e3",
+   "NI": "fa5b835c795e3393",
+   "NE": "70eaed3249b8d1be",
+   "NG": "e073d88f4cacb052",
+   "NU": "fad0f4cf219bbe06",
+   "KP": "6ca2047b435543d7",
+   "MK": "635d2d58c51ee561",
+   "NO": "d76019d94c9a394b",
+   "OM": "a270f531400de94b",
+   "PK": "71e3f0387c26abda",
+   "PW": "2c0fccff20d4eb3a",
+   "PS": "fe2247e7785295f6",
+   "PA": "d0d1cd3866d7d7b5",
+   "PG": "c319f826ea16c393",
+   "PY": "e8ba9b86a63fdb38",
+   "PE": "d089ce50bc0bdfbb",
+   "PH": "7c302d4f7631a467",
+   "PL": "359502fb43af7e93",
+   "PT": "cf2fe9bac0c48d9d",
+   "PR": "26f9fe9a17d050c4",
+   "QA": "12e50c8264970735",
+   "RE": "a28f102edf87db12",
+   "RO": "1fb264584a1de6cf",
+   "RU": "359aaf2cf4b82fc2",
+   "RW": "693fe5b90b4652c9",
+   "SH": "32fc5e09ccd7892c",
+   "KN": "a881ecdf2a090d77",
+   "LC": "dd83cab92655fc13",
+   "VC": "d23fbfe1c48bd3eb",
+   "WS": "98cb1b367c164ce1",
+   "SM": "ff0d3d58c2494425",
+   "ST": "4bff18c61dde6ca4",
+   "SA": "45f607cb1973cf8d",
+   "SN": "09eac127a357f578",
+   "RS": "60e6a6e5ab6025c4",
+   "SC": "c245a7131d64a65e",
+   "SL": "a16314ded76ee8c8",
+   "SG": "38a5b0a44fc6ee07",
+   "SK": "158f3e60362dde47",
+   "SI": "e14a1c240ea35f59",
+   "SB": "0c8be70aeb9dadd0",
+   "SO": "0a85c93dd848c1eb",
+   "ZA": "3b8582f9ac7c7e5b",
+   "KR": "3551054b53d44867",
+   "SS": "ec79f3fde0a40f9b",
+   "ES": "f79125885a4668f0",
+   "LK": "6c2b9e83bed6f297",
+   "SD": "62acc73a73d3ad43",
+   "SR": "d80d0b137b1b5c9f",
+   "SE": "5e61568810c608e7",
+   "CH": "41d484f1f930ad03",
+   "SY": "9c4162ffe116222c",
+   "TW": "a0afdda046f7f5a4",
+   "TJ": "8d39625994f2df08",
+   "TZ": "1dd8bff00f0599d5",
+   "TH": "a570151a9b7bca57",
+   "BS": "ff13f1e2957a588c",
+   "GM": "b623a805e023c5ca",
+   "TL": "cc53737534ea89f0",
+   "TG": "8393bb6cf536e097",
+   "TO": "b323d6f04157d6e4",
+   "TT": "0dc39a1b72b1f8c2",
+   "TN": "5ffcc80f5722062b",
+   "TR": "e020b789eb51f248",
+   "TM": "35dfecb18945e188",
+   "TC": "3ba1c45e42b3bf86",
+   "TV": "d615e2a06542eec1",
+   "UG": "a5a516d26ed39c43",
+   "UA": "4e1126379ca38ee4",
+   "AE": "cc5aa626c4a1d03f",
+   "GB": "66e6ede4cc7c81ab",
+   "US": "76f1f475d5340cb4",
+   "UM": "882d509fa3583ab0",
+   "UY": "c9f28d13ff305394",
+   "UZ": "7876ebb830dc1ea4",
+   "VU": "bf733a464d25acf1",
+   "VE": "5b41886f50fa034c",
+   "VN": "b6c7ddce218a8183",
+   "VI": "2277bd982f0a5547",
+   "WF": "be1af94bc34f8dd5",
+   "YE": "acbbc19e230988a3",
+   "ZM": "cb5a5ff86ee45835",
+   "ZW": "8e53c8122622689e"
+  },
+  "regionSamples": {
+   "JP": [
+    [
+     "23",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/23.png\",\"code\":\"23\",\"latitude\":\"34.99916450\",\"longitude\":\"137.25457400\",\"name\":\"Aichi\",\"original_code\":\"23\"}"
+      ]
+     ]
+    ],
+    [
+     "05",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/05.png\",\"code\":\"05\",\"latitude\":\"39.68988020\",\"longitude\":\"140.34260800\",\"name\":\"Akita\",\"original_code\":\"05\"}"
+      ]
+     ]
+    ],
+    [
+     "02",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/02.png\",\"code\":\"02\",\"latitude\":\"40.82228330\",\"longitude\":\"140.74720270\",\"name\":\"Aomori\",\"original_code\":\"02\"}"
+      ]
+     ]
+    ],
+    [
+     "12",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/12.png\",\"code\":\"12\",\"latitude\":\"35.54939900\",\"longitude\":\"140.26473030\",\"name\":\"Chiba\",\"original_code\":\"12\"}"
+      ]
+     ]
+    ],
+    [
+     "38",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/38.png\",\"code\":\"38\",\"latitude\":\"33.60136460\",\"longitude\":\"132.81852750\",\"name\":\"Ehime\",\"original_code\":\"38\"}"
+      ]
+     ]
+    ],
+    [
+     "18",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/18.png\",\"code\":\"18\",\"latitude\":\"36.06175100\",\"longitude\":\"136.22605420\",\"name\":\"Fukui\",\"original_code\":\"18\"}"
+      ]
+     ]
+    ],
+    [
+     "40",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/40.png\",\"code\":\"40\",\"latitude\":\"33.62512410\",\"longitude\":\"130.61800160\",\"name\":\"Fukuoka\",\"original_code\":\"40\"}"
+      ]
+     ]
+    ],
+    [
+     "07",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/07.png\",\"code\":\"07\",\"latitude\":\"37.76077700\",\"longitude\":\"140.47458070\",\"name\":\"Fukushima\",\"original_code\":\"07\"}"
+      ]
+     ]
+    ],
+    [
+     "21",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/21.png\",\"code\":\"21\",\"latitude\":\"35.78674490\",\"longitude\":\"137.04607770\",\"name\":\"Gifu\",\"original_code\":\"21\"}"
+      ]
+     ]
+    ],
+    [
+     "10",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/10.png\",\"code\":\"10\",\"latitude\":\"36.52198000\",\"longitude\":\"139.03348300\",\"name\":\"Gunma\",\"original_code\":\"10\"}"
+      ]
+     ]
+    ],
+    [
+     "34",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/34.png\",\"code\":\"34\",\"latitude\":\"34.39172410\",\"longitude\":\"132.45175890\",\"name\":\"Hiroshima\",\"original_code\":\"34\"}"
+      ]
+     ]
+    ],
+    [
+     "01",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/01.png\",\"code\":\"01\",\"latitude\":\"43.45198310\",\"longitude\":\"142.81978340\",\"name\":\"Hokkaidō\",\"original_code\":\"01\"}"
+      ]
+     ]
+    ],
+    [
+     "28",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/28.png\",\"code\":\"28\",\"latitude\":\"34.91493400\",\"longitude\":\"134.86066600\",\"name\":\"Hyōgo\",\"original_code\":\"28\"}"
+      ]
+     ]
+    ],
+    [
+     "08",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/08.png\",\"code\":\"08\",\"latitude\":\"36.28711860\",\"longitude\":\"140.42409260\",\"name\":\"Ibaraki\",\"original_code\":\"08\"}"
+      ]
+     ]
+    ],
+    [
+     "17",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/17.png\",\"code\":\"17\",\"latitude\":\"36.98905740\",\"longitude\":\"136.81628390\",\"name\":\"Ishikawa\",\"original_code\":\"17\"}"
+      ]
+     ]
+    ],
+    [
+     "03",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/03.png\",\"code\":\"03\",\"latitude\":\"39.57137630\",\"longitude\":\"141.42535740\",\"name\":\"Iwate\",\"original_code\":\"03\"}"
+      ]
+     ]
+    ],
+    [
+     "37",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/37.png\",\"code\":\"37\",\"latitude\":\"34.24801040\",\"longitude\":\"134.05865790\",\"name\":\"Kagawa\",\"original_code\":\"37\"}"
+      ]
+     ]
+    ],
+    [
+     "46",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/46.png\",\"code\":\"46\",\"latitude\":\"31.52158700\",\"longitude\":\"130.54740770\",\"name\":\"Kagoshima\",\"original_code\":\"46\"}"
+      ]
+     ]
+    ],
+    [
+     "14",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/14.png\",\"code\":\"14\",\"latitude\":\"35.43429350\",\"longitude\":\"139.37475300\",\"name\":\"Kanagawa\",\"original_code\":\"14\"}"
+      ]
+     ]
+    ],
+    [
+     "39",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/39.png\",\"code\":\"39\",\"latitude\":\"33.56803840\",\"longitude\":\"133.53942210\",\"name\":\"Kōchi\",\"original_code\":\"39\"}"
+      ]
+     ]
+    ],
+    [
+     "43",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/43.png\",\"code\":\"43\",\"latitude\":\"32.80339090\",\"longitude\":\"130.70827370\",\"name\":\"Kumamoto\",\"original_code\":\"43\"}"
+      ]
+     ]
+    ],
+    [
+     "26",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/26.png\",\"code\":\"26\",\"latitude\":\"35.01157540\",\"longitude\":\"135.76814410\",\"name\":\"Kyōto\",\"original_code\":\"26\"}"
+      ]
+     ]
+    ],
+    [
+     "24",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/24.png\",\"code\":\"24\",\"latitude\":\"34.73396850\",\"longitude\":\"136.51544890\",\"name\":\"Mie\",\"original_code\":\"24\"}"
+      ]
+     ]
+    ],
+    [
+     "04",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/04.png\",\"code\":\"04\",\"latitude\":\"38.38801550\",\"longitude\":\"140.97610250\",\"name\":\"Miyagi\",\"original_code\":\"04\"}"
+      ]
+     ]
+    ],
+    [
+     "45",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/45.png\",\"code\":\"45\",\"latitude\":\"32.09768100\",\"longitude\":\"131.29454200\",\"name\":\"Miyazaki\",\"original_code\":\"45\"}"
+      ]
+     ]
+    ],
+    [
+     "20",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/20.png\",\"code\":\"20\",\"latitude\":\"36.11439450\",\"longitude\":\"138.03190150\",\"name\":\"Nagano\",\"original_code\":\"20\"}"
+      ]
+     ]
+    ],
+    [
+     "42",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/42.png\",\"code\":\"42\",\"latitude\":\"33.11546830\",\"longitude\":\"129.78743390\",\"name\":\"Nagasaki\",\"original_code\":\"42\"}"
+      ]
+     ]
+    ],
+    [
+     "29",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/29.png\",\"code\":\"29\",\"latitude\":\"34.29630890\",\"longitude\":\"135.88168190\",\"name\":\"Nara\",\"original_code\":\"29\"}"
+      ]
+     ]
+    ],
+    [
+     "15",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/15.png\",\"code\":\"15\",\"latitude\":\"37.64522830\",\"longitude\":\"138.76691250\",\"name\":\"Niigata\",\"original_code\":\"15\"}"
+      ]
+     ]
+    ],
+    [
+     "44",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/44.png\",\"code\":\"44\",\"latitude\":\"33.18198750\",\"longitude\":\"131.42702170\",\"name\":\"Ōita\",\"original_code\":\"44\"}"
+      ]
+     ]
+    ],
+    [
+     "33",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/33.png\",\"code\":\"33\",\"latitude\":\"34.85813340\",\"longitude\":\"133.77592560\",\"name\":\"Okayama\",\"original_code\":\"33\"}"
+      ]
+     ]
+    ],
+    [
+     "47",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/47.png\",\"code\":\"47\",\"latitude\":\"26.33437380\",\"longitude\":\"127.80565970\",\"name\":\"Okinawa\",\"original_code\":\"47\"}"
+      ]
+     ]
+    ],
+    [
+     "27",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/27.png\",\"code\":\"27\",\"latitude\":\"34.61988130\",\"longitude\":\"135.49035700\",\"name\":\"Ōsaka\",\"original_code\":\"27\"}"
+      ]
+     ]
+    ],
+    [
+     "41",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/41.png\",\"code\":\"41\",\"latitude\":\"33.26391340\",\"longitude\":\"130.30083780\",\"name\":\"Saga\",\"original_code\":\"41\"}"
+      ]
+     ]
+    ],
+    [
+     "11",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/11.png\",\"code\":\"11\",\"latitude\":\"35.97541680\",\"longitude\":\"139.41601140\",\"name\":\"Saitama\",\"original_code\":\"11\"}"
+      ]
+     ]
+    ],
+    [
+     "25",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/25.png\",\"code\":\"25\",\"latitude\":\"35.24715400\",\"longitude\":\"136.10938500\",\"name\":\"Shiga\",\"original_code\":\"25\"}"
+      ]
+     ]
+    ],
+    [
+     "32",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/32.png\",\"code\":\"32\",\"latitude\":\"34.94182120\",\"longitude\":\"132.53743900\",\"name\":\"Shimane\",\"original_code\":\"32\"}"
+      ]
+     ]
+    ],
+    [
+     "22",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/22.png\",\"code\":\"22\",\"latitude\":\"34.97519740\",\"longitude\":\"138.38316970\",\"name\":\"Shizuoka\",\"original_code\":\"22\"}"
+      ]
+     ]
+    ],
+    [
+     "09",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/09.png\",\"code\":\"09\",\"latitude\":\"36.67821670\",\"longitude\":\"139.80965490\",\"name\":\"Tochigi\",\"original_code\":\"09\"}"
+      ]
+     ]
+    ],
+    [
+     "36",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/36.png\",\"code\":\"36\",\"latitude\":\"33.91964180\",\"longitude\":\"134.25096340\",\"name\":\"Tokushima\",\"original_code\":\"36\"}"
+      ]
+     ]
+    ],
+    [
+     "13",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/13.png\",\"code\":\"13\",\"latitude\":\"35.67686010\",\"longitude\":\"139.76389470\",\"name\":\"Tokyo\",\"original_code\":\"13\"}"
+      ]
+     ]
+    ],
+    [
+     "31",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/31.png\",\"code\":\"31\",\"latitude\":\"35.35550750\",\"longitude\":\"133.86785250\",\"name\":\"Tottori\",\"original_code\":\"31\"}"
+      ]
+     ]
+    ],
+    [
+     "16",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/16.png\",\"code\":\"16\",\"latitude\":\"36.69582660\",\"longitude\":\"137.21370710\",\"name\":\"Toyama\",\"original_code\":\"16\"}"
+      ]
+     ]
+    ],
+    [
+     "30",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/30.png\",\"code\":\"30\",\"latitude\":\"33.80702920\",\"longitude\":\"135.59307430\",\"name\":\"Wakayama\",\"original_code\":\"30\"}"
+      ]
+     ]
+    ],
+    [
+     "06",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/06.png\",\"code\":\"06\",\"latitude\":\"38.47467050\",\"longitude\":\"140.08323700\",\"name\":\"Yamagata\",\"original_code\":\"06\"}"
+      ]
+     ]
+    ],
+    [
+     "35",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/35.png\",\"code\":\"35\",\"latitude\":\"34.23796140\",\"longitude\":\"131.58738450\",\"name\":\"Yamaguchi\",\"original_code\":\"35\"}"
+      ]
+     ]
+    ],
+    [
+     "19",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/JP/19.png\",\"code\":\"19\",\"latitude\":\"35.63993280\",\"longitude\":\"138.63804950\",\"name\":\"Yamanashi\",\"original_code\":\"19\"}"
+      ]
+     ]
+    ]
+   ],
+   "GB.CON": [
+    [
+     "CON",
+     [
+      [
+       "state",
+       "{\"asset\":\"./assets/state_flag/GB/_CON.png\",\"code\":\"CON\",\"latitude\":\"50.44334890\",\"longitude\":\"-4.62465660\",\"name\":\"Cornwall\",\"original_code\":\"CON\"}"
+      ]
+     ]
+    ]
+   ]
+  }
+ },
+ "operations": {
+  "board": [
+   {
+    "step": "three slots",
+    "calls": [
+     [
+      "character",
+      "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+     ],
+     [
+      "mains",
+      "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "set data with mains",
+    "calls": [
+     [
+      "online_avatar",
+      "null"
+     ],
+     [
+      "seed",
+      "0"
+     ],
+     [
+      "name",
+      "\"TAG\""
+     ],
+     [
+      "team",
+      "\"SP\""
+     ],
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "country",
+      "{\"asset\":\"./assets/country_flag/jp.png\",\"code\":\"JP\",\"display_name\":\"Japan\",\"emoji\":\"🇯🇵\",\"en_name\":\"Japan\",\"latitude\":\"36.00000000\",\"longitude\":\"138.00000000\",\"name\":\"日本\"}"
+     ],
+     [
+      "state",
+      "{\"asset\":\"./assets/state_flag/JP/13.png\",\"code\":\"13\",\"latitude\":\"35.67686010\",\"longitude\":\"139.76389470\",\"name\":\"Tokyo\",\"original_code\":\"13\"}"
+     ],
+     [
+      "character",
+      "sha:abf48ddd2e7e2b58"
+     ],
+     [
+      "character",
+      "sha:abf48ddd2e7e2b58"
+     ],
+     [
+      "character",
+      "sha:8979bce12d8a9036"
+     ],
+     [
+      "character",
+      "sha:bb4e3ad953f87ceb"
+     ],
+     [
+      "character",
+      "sha:0cda2e9df370e61a"
+     ],
+     [
+      "character",
+      "sha:0cda2e9df370e61a"
+     ],
+     [
+      "character",
+      "sha:ee5545a416ee4869"
+     ],
+     [
+      "character",
+      "sha:80e28cdf516e0dce"
+     ],
+     [
+      "character",
+      "sha:80e28cdf516e0dce"
+     ],
+     [
+      "mergedName",
+      "\"SP | TAG\""
+     ],
+     [
+      "mergedOnlyName",
+      "\"TAG\""
+     ],
+     [
+      "avatar",
+      "null"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "pick a variant",
+    "calls": [
+     [
+      "character",
+      "sha:1e7ff98cd83b5609"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "pick a skin",
+    "calls": [
+     [
+      "character",
+      "sha:fa09e90dc1daf56d"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "pick a character",
+    "calls": [
+     [
+      "character",
+      "sha:d8991a83e04d5370"
+     ],
+     [
+      "character",
+      "sha:d8991a83e04d5370"
+     ]
+    ],
+    "cycles": 2
+   },
+   {
+    "step": "swap two slots",
+    "calls": [
+     [
+      "character",
+      "sha:7636661ddc29d9b0"
+     ],
+     [
+      "character",
+      "sha:7636661ddc29d9b0"
+     ],
+     [
+      "character",
+      "sha:321e9053d2756a62"
+     ],
+     [
+      "character",
+      "sha:3626eb1ddd0ea3e3"
+     ],
+     [
+      "character",
+      "sha:3626eb1ddd0ea3e3"
+     ],
+     [
+      "character",
+      "sha:940404f1c23090c9"
+     ],
+     [
+      "character",
+      "sha:940404f1c23090c9"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "set data with a legacy main",
+    "calls": [
+     [
+      "online_avatar",
+      "null"
+     ],
+     [
+      "team",
+      "\"\""
+     ],
+     [
+      "name",
+      "\"\""
+     ],
+     [
+      "seed",
+      "0"
+     ],
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "character",
+      "sha:f80abc681ae679c8"
+     ],
+     [
+      "character",
+      "sha:f80abc681ae679c8"
+     ],
+     [
+      "character",
+      "sha:9dca0aaf65a3cd5a"
+     ],
+     [
+      "character",
+      "sha:38dc5e75ea98d200"
+     ],
+     [
+      "character",
+      "sha:38dc5e75ea98d200"
+     ],
+     [
+      "character",
+      "sha:77a43cf7a106d309"
+     ],
+     [
+      "character",
+      "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+     ],
+     [
+      "character",
+      "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+     ],
+     [
+      "name",
+      "\"LEG\""
+     ],
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "country",
+      "{\"asset\":\"./assets/country_flag/us.png\",\"code\":\"US\",\"display_name\":\"United States\",\"emoji\":\"🇺🇸\",\"en_name\":\"United States\",\"latitude\":\"38.00000000\",\"longitude\":\"-97.00000000\",\"name\":\"アメリカ合衆国\"}"
+     ],
+     [
+      "state",
+      "{\"asset\":\"./assets/state_flag/US/CA.png\",\"code\":\"CA\",\"latitude\":\"36.70146310\",\"longitude\":\"-118.75599700\",\"name\":\"California\",\"original_code\":\"CA\"}"
+     ],
+     [
+      "character",
+      "sha:1192292cba29005b"
+     ],
+     [
+      "character",
+      "sha:1192292cba29005b"
+     ],
+     [
+      "character",
+      "sha:ef4495fd2a3f3600"
+     ],
+     [
+      "mergedName",
+      "\"LEG\""
+     ],
+     [
+      "mergedOnlyName",
+      "\"LEG\""
+     ],
+     [
+      "avatar",
+      "null"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "set data with a free-form region",
+    "calls": [
+     [
+      "online_avatar",
+      "null"
+     ],
+     [
+      "name",
+      "\"\""
+     ],
+     [
+      "seed",
+      "0"
+     ],
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "character",
+      "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+     ],
+     [
+      "character",
+      "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+     ],
+     [
+      "name",
+      "\"FREE\""
+     ],
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "country",
+      "{\"asset\":\"./assets/country_flag/jp.png\",\"code\":\"JP\",\"display_name\":\"Japan\",\"emoji\":\"🇯🇵\",\"en_name\":\"Japan\",\"latitude\":\"36.00000000\",\"longitude\":\"138.00000000\",\"name\":\"日本\"}"
+     ],
+     [
+      "state",
+      "{\"asset\":\"./assets/state_flag/JP/13.png\",\"code\":\"13\",\"latitude\":\"35.67686010\",\"longitude\":\"139.76389470\",\"name\":\"Tokyo\",\"original_code\":\"13\"}"
+     ],
+     [
+      "mergedName",
+      "\"FREE\""
+     ],
+     [
+      "mergedOnlyName",
+      "\"FREE\""
+     ],
+     [
+      "avatar",
+      "null"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "set data without a country",
+    "calls": [
+     [
+      "online_avatar",
+      "null"
+     ],
+     [
+      "name",
+      "\"\""
+     ],
+     [
+      "seed",
+      "0"
+     ],
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "name",
+      "\"NOWHERE\""
+     ],
+     [
+      "mergedName",
+      "\"NOWHERE\""
+     ],
+     [
+      "mergedOnlyName",
+      "\"NOWHERE\""
+     ],
+     [
+      "avatar",
+      "null"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "set data with a custom flag",
+    "calls": [
+     [
+      "online_avatar",
+      "null"
+     ],
+     [
+      "name",
+      "\"\""
+     ],
+     [
+      "seed",
+      "0"
+     ],
+     [
+      "name",
+      "\"FLAG\""
+     ],
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "country",
+      "{\"asset\":\"./user_data/additional_flag/Agender.png\",\"code\":\"Agender\",\"display_name\":\"Agender\",\"en_name\":\"Agender\",\"name\":\"Agender\"}"
+     ],
+     [
+      "mergedName",
+      "\"FLAG\""
+     ],
+     [
+      "mergedOnlyName",
+      "\"FLAG\""
+     ],
+     [
+      "avatar",
+      "null"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "clear",
+    "calls": [
+     [
+      "online_avatar",
+      "null"
+     ],
+     [
+      "mergedName",
+      "\"\""
+     ],
+     [
+      "mergedOnlyName",
+      "\"\""
+     ],
+     [
+      "avatar",
+      "null"
+     ],
+     [
+      "name",
+      "\"\""
+     ],
+     [
+      "seed",
+      "0"
+     ],
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "country",
+      "{}"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "one slot",
+    "calls": [
+     [
+      "character",
+      "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+     ],
+     [
+      "mains",
+      "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+     ]
+    ],
+    "cycles": 1
+   }
+  ],
+  "editor": [
+   {
+    "step": "construction",
+    "calls": [
+     [
+      "seed",
+      "0"
+     ],
+     [
+      "birthday",
+      "false"
+     ],
+     [
+      "country",
+      "{}"
+     ],
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "character",
+      "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+     ],
+     [
+      "mains",
+      "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+     ]
+    ],
+    "cycles": 5
+   },
+   {
+    "step": "three slots",
+    "calls": [
+     [
+      "character",
+      "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+     ],
+     [
+      "mains",
+      "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "set data with mains",
+    "calls": [
+     [
+      "online_avatar",
+      "null"
+     ],
+     [
+      "seed",
+      "0"
+     ],
+     [
+      "name",
+      "\"TAG\""
+     ],
+     [
+      "team",
+      "\"SP\""
+     ],
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "country",
+      "{\"asset\":\"./assets/country_flag/jp.png\",\"code\":\"JP\",\"display_name\":\"Japan\",\"emoji\":\"🇯🇵\",\"en_name\":\"Japan\",\"latitude\":\"36.00000000\",\"longitude\":\"138.00000000\",\"name\":\"日本\"}"
+     ],
+     [
+      "state",
+      "{\"asset\":\"./assets/state_flag/JP/13.png\",\"code\":\"13\",\"latitude\":\"35.67686010\",\"longitude\":\"139.76389470\",\"name\":\"Tokyo\",\"original_code\":\"13\"}"
+     ],
+     [
+      "character",
+      "sha:abf48ddd2e7e2b58"
+     ],
+     [
+      "character",
+      "sha:abf48ddd2e7e2b58"
+     ],
+     [
+      "character",
+      "sha:8979bce12d8a9036"
+     ],
+     [
+      "character",
+      "sha:bb4e3ad953f87ceb"
+     ],
+     [
+      "character",
+      "sha:0cda2e9df370e61a"
+     ],
+     [
+      "character",
+      "sha:0cda2e9df370e61a"
+     ],
+     [
+      "character",
+      "sha:ee5545a416ee4869"
+     ],
+     [
+      "character",
+      "sha:80e28cdf516e0dce"
+     ],
+     [
+      "character",
+      "sha:80e28cdf516e0dce"
+     ],
+     [
+      "mergedName",
+      "\"SP | TAG\""
+     ],
+     [
+      "mergedOnlyName",
+      "\"TAG\""
+     ],
+     [
+      "avatar",
+      "null"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "pick a variant",
+    "calls": [
+     [
+      "character",
+      "sha:1e7ff98cd83b5609"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "pick a skin",
+    "calls": [
+     [
+      "character",
+      "sha:fa09e90dc1daf56d"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "pick a character",
+    "calls": [
+     [
+      "character",
+      "sha:d8991a83e04d5370"
+     ],
+     [
+      "character",
+      "sha:d8991a83e04d5370"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "swap two slots",
+    "calls": [
+     [
+      "character",
+      "sha:7636661ddc29d9b0"
+     ],
+     [
+      "character",
+      "sha:7636661ddc29d9b0"
+     ],
+     [
+      "character",
+      "sha:321e9053d2756a62"
+     ],
+     [
+      "character",
+      "sha:3626eb1ddd0ea3e3"
+     ],
+     [
+      "character",
+      "sha:3626eb1ddd0ea3e3"
+     ],
+     [
+      "character",
+      "sha:940404f1c23090c9"
+     ],
+     [
+      "character",
+      "sha:940404f1c23090c9"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "set data with a legacy main",
+    "calls": [
+     [
+      "online_avatar",
+      "null"
+     ],
+     [
+      "team",
+      "\"\""
+     ],
+     [
+      "name",
+      "\"\""
+     ],
+     [
+      "seed",
+      "0"
+     ],
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "character",
+      "sha:f80abc681ae679c8"
+     ],
+     [
+      "character",
+      "sha:f80abc681ae679c8"
+     ],
+     [
+      "character",
+      "sha:9dca0aaf65a3cd5a"
+     ],
+     [
+      "character",
+      "sha:38dc5e75ea98d200"
+     ],
+     [
+      "character",
+      "sha:38dc5e75ea98d200"
+     ],
+     [
+      "character",
+      "sha:77a43cf7a106d309"
+     ],
+     [
+      "character",
+      "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+     ],
+     [
+      "character",
+      "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+     ],
+     [
+      "name",
+      "\"LEG\""
+     ],
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "country",
+      "{\"asset\":\"./assets/country_flag/us.png\",\"code\":\"US\",\"display_name\":\"United States\",\"emoji\":\"🇺🇸\",\"en_name\":\"United States\",\"latitude\":\"38.00000000\",\"longitude\":\"-97.00000000\",\"name\":\"アメリカ合衆国\"}"
+     ],
+     [
+      "state",
+      "{\"asset\":\"./assets/state_flag/US/CA.png\",\"code\":\"CA\",\"latitude\":\"36.70146310\",\"longitude\":\"-118.75599700\",\"name\":\"California\",\"original_code\":\"CA\"}"
+     ],
+     [
+      "character",
+      "sha:1192292cba29005b"
+     ],
+     [
+      "character",
+      "sha:1192292cba29005b"
+     ],
+     [
+      "character",
+      "sha:ef4495fd2a3f3600"
+     ],
+     [
+      "mergedName",
+      "\"LEG\""
+     ],
+     [
+      "mergedOnlyName",
+      "\"LEG\""
+     ],
+     [
+      "avatar",
+      "null"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "set data with a free-form region",
+    "calls": [
+     [
+      "online_avatar",
+      "null"
+     ],
+     [
+      "name",
+      "\"\""
+     ],
+     [
+      "seed",
+      "0"
+     ],
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "character",
+      "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+     ],
+     [
+      "character",
+      "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"2\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}},\"3\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+     ],
+     [
+      "name",
+      "\"FREE\""
+     ],
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "country",
+      "{\"asset\":\"./assets/country_flag/jp.png\",\"code\":\"JP\",\"display_name\":\"Japan\",\"emoji\":\"🇯🇵\",\"en_name\":\"Japan\",\"latitude\":\"36.00000000\",\"longitude\":\"138.00000000\",\"name\":\"日本\"}"
+     ],
+     [
+      "state",
+      "{\"asset\":\"./assets/state_flag/JP/13.png\",\"code\":\"13\",\"latitude\":\"35.67686010\",\"longitude\":\"139.76389470\",\"name\":\"Tokyo\",\"original_code\":\"13\"}"
+     ],
+     [
+      "mergedName",
+      "\"FREE\""
+     ],
+     [
+      "mergedOnlyName",
+      "\"FREE\""
+     ],
+     [
+      "avatar",
+      "null"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "set data without a country",
+    "calls": [
+     [
+      "online_avatar",
+      "null"
+     ],
+     [
+      "name",
+      "\"\""
+     ],
+     [
+      "seed",
+      "0"
+     ],
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "name",
+      "\"NOWHERE\""
+     ],
+     [
+      "mergedName",
+      "\"NOWHERE\""
+     ],
+     [
+      "mergedOnlyName",
+      "\"NOWHERE\""
+     ],
+     [
+      "avatar",
+      "null"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "set data with a custom flag",
+    "calls": [
+     [
+      "online_avatar",
+      "null"
+     ],
+     [
+      "name",
+      "\"\""
+     ],
+     [
+      "seed",
+      "0"
+     ],
+     [
+      "name",
+      "\"FLAG\""
+     ],
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "country",
+      "{\"asset\":\"./user_data/additional_flag/Agender.png\",\"code\":\"Agender\",\"display_name\":\"Agender\",\"en_name\":\"Agender\",\"name\":\"Agender\"}"
+     ],
+     [
+      "mergedName",
+      "\"FLAG\""
+     ],
+     [
+      "mergedOnlyName",
+      "\"FLAG\""
+     ],
+     [
+      "avatar",
+      "null"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "clear",
+    "calls": [
+     [
+      "online_avatar",
+      "null"
+     ],
+     [
+      "mergedName",
+      "\"\""
+     ],
+     [
+      "mergedOnlyName",
+      "\"\""
+     ],
+     [
+      "avatar",
+      "null"
+     ],
+     [
+      "name",
+      "\"\""
+     ],
+     [
+      "seed",
+      "0"
+     ],
+     [
+      "state",
+      "{}"
+     ],
+     [
+      "country",
+      "{}"
+     ]
+    ],
+    "cycles": 1
+   },
+   {
+    "step": "one slot",
+    "calls": [
+     [
+      "character",
+      "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+     ],
+     [
+      "mains",
+      "{\"1\":{\"name\":\"\",\"assets\":{},\"skin\":-1,\"variant\":{}}}"
+     ]
+    ],
+    "cycles": 1
+   }
+  ]
+ }
+}

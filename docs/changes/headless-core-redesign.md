@@ -544,10 +544,10 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
   | `custom_textbox.textChanged` の `objectName()` 直書き | `PlayerService.SetText(PLAYER_NOTE_KEY, ...)` |
   | `seed.valueChanged` / spinbox 内部 line edit の 2 経路（int と文字列） | どちらも `PlayerService.SetSeed`（常に数値化） |
   | `birthday.toggled` の直書き | `PlayerService.SetBirthday` |
-  | `findChildren(QComboBox)` + `ComboBoxIndexChanged` | `schema.PLAYER_LOCATION_KEYS` で `findChild` → `PlayerService.SetLocation` |
+  | `findChildren(QComboBox)` + `ComboBoxIndexChanged` | `schema.PLAYER_LOCATION_KEYS` で `findChild` → `PlayerService.SetLocation`（ADR-005 S1d でコードを渡す `SetCountry` / `SetRegion` に置き換え） |
   | `ExportMergedName` の 2 キー直書き | `PlayerService.PublishMergedName`（1 `SaveBlock`） |
   | `ExportPlayerImages` のアバター解決 + `AutonaSponsorHelper` | `PlayerService.PublishImages`（sponsor helper の呼び出しごと core へ） |
-  | `CharactersChanged` の `character` / `mains` | `PlayerService.PublishCharacters` |
+  | `CharactersChanged` の `character` / `mains` | `PlayerService.PublishCharacters`（ADR-005 S1d で識別子を渡す `PublishCharacterSlots` に置き換え） |
   | `ExportPlayerCity` / `ExportPlayerId` / `Clear` の `online_avatar` | `SetCity` / `SetPlayerId`（変化を bool で返す）/ `SetOnlineAvatar` |
   | 詳細ダイアログ 反映 の `CommitHeld(path[:2])` | `PlayerService.BoardNumber()` → `AutonaActions.ApplyChanges` |
   | `_setPlayersPerTeamImpl` の `Unset` 3 種 | `PlayerService.Unset()` / `AutonaActions.ClearTeamRoster` / `TrimTeamRoster` |

@@ -12,13 +12,21 @@ key catalog could never describe because the .ui file *was* the catalog
 (known-smells S-14).
 
 Since headless core Step 5 (player instalment) the names live in
-``StateSchema`` and the writes live here. The division of labour with the Qt
-side is the one Step 4b drew for ``SetData``: **resolving a value stays in
-Qt, deciding what the state holds is core's**. The country combo's row, the
-character/skin/variant model rows and the bad-word filter are all Qt model
-lookups and are still done by ``AutonaScoreboardPlayerWidget``; what it does
-with the answer -- which key, in what shape, under which slot -- is a call
-into this class.
+``StateSchema`` and the writes live here. Step 5 still had the card resolve
+its combos' rows in Qt and hand the whole row dicts over; since ADR-005 S1d
+the card hands over **identifiers only** -- which character (en_name), which
+skin row, which variant (en_name), which country code, which region code --
+and this class builds the values from the Qt-free catalogs
+(``GameAssetCatalog`` / ``CountryCatalog``). Which row a combo shows (and the
+bad-word filter) is still the card's business; what the state holds for that
+pick is decided here, so it can be produced without a widget.
+
+The values are byte-compatible with what the card used to publish. A Qt
+model hands its dicts out as QVariantMaps -- the keys of every nested dict in
+UTF-16 order -- and program_state.json and the Socket.IO delta are both
+serialised in insertion order, so that order is reproduced
+(``DictHelper.qvariantmap_copy``); tests/test_player_slot_publish.py pins it
+against a recording of the old path.
 
 One instance per player widget, bound to that widget's path, exactly as
 ``SetLoadService`` is bound to one board. The path is one of two shapes
@@ -51,10 +59,15 @@ lookup and which moved into core alongside this module's own instalment
 """
 import os
 import re
+from dataclasses import dataclass
+from typing import Optional
 
 from loguru import logger
 
 from . import StateSchema as schema
+from .CountryCatalog import CountryCatalog
+from .DictHelper import qvariantmap_copy
+from .GameAssetCatalog import GameAssetCatalog
 from .SponsorHelper import AutonaSponsorHelper
 from .StateManager import StateManager
 
@@ -76,11 +89,47 @@ AVATAR_DIR = "./user_data/player_avatar"
 _FILENAME_UNSAFE = re.compile(r"[,/|;:<>\\?*]")
 
 
+@dataclass(frozen=True)
+class CharacterSlot:
+    """One character slot as the card picked it: identifiers only.
+
+    `character` / `variant` are en_names (the keys of the game's tables);
+    None means no row is picked -- the blank row, or a name typed into the
+    editable combo that matches no row. `skin` is the row of the
+    character's skin combo, -1 for none; that row index is what the slot has
+    always published as `skin`.
+
+    `text` becomes the slot's name when the catalog has no row for
+    `character`: the typed text when no row is picked, and the picked row's
+    own `name` when the loaded game does not have it (the moment between a
+    game load and the combos' rebind -- the combo's text would be the
+    "display name / en_name" label there, which is no name an overlay ever
+    saw).
+    """
+    character: Optional[str] = None
+    skin: int = -1
+    variant: Optional[str] = None
+    text: str = ""
+
+
 class PlayerService:
     """The state subtree of one player slot."""
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, games=None, countries=None):
+        """`games` / `countries` default to the process catalogs
+        (`GameAssetCatalog.instance` / `CountryCatalog.instance`), looked up
+        at call time; a test hands its own."""
         self.path = path
+        self._games = games
+        self._countries = countries
+
+    def _GameCatalog(self):
+        return self._games if self._games is not None \
+            else GameAssetCatalog.instance
+
+    def _CountryCatalog(self):
+        return self._countries if self._countries is not None \
+            else CountryCatalog.instance
 
     # ── key paths ────────────────────────────────────────────────────────
 
@@ -147,24 +196,49 @@ class PlayerService:
         StateManager.Set(self.Key(schema.PLAYER_BIRTHDAY_KEY), bool(value))
         return True
 
-    def SetLocation(self, field, value) -> bool:
-        """Set the country or the region. False when `field` is neither.
+    # ── the location ─────────────────────────────────────────────────────
+    #
+    # Written even when it is the same value: a set load empties the country
+    # and puts it back, and the empty publish in between is what
+    # tests/test_player_widgets counts to know the region combo's in-place
+    # refill still emits exactly one index change.
 
-        The value is the combo's ``currentData()`` -- a dict carrying the
-        code, the display name and the flag asset, or ``{}`` for the blank
-        row every rebuild starts on. Resolving *which* row is Qt's job
-        (``LoadStates`` / ``SetData``); this is where the answer lands.
+    def CountryValue(self, code) -> dict:
+        """What `country` holds for the country (or custom flag) `code`.
 
-        Written even when it is the same value: a set load empties the
-        country and puts it back, and the empty publish in between is what
-        ``tests/test_player_widgets`` counts to know the region combo's
-        in-place refill still emits exactly one index change.
+        The country combo's row for that code -- code, names, flag asset,
+        emoji, coordinates -- in the key order the combo handed it out in.
+        {} for no country, which is also the answer for a code the catalog
+        does not know: a name typed into the editable combo that matches no
+        row, or the custom-flag separator. Those two used to publish null;
+        they now have the type every other "no country" has always had.
         """
-        if field not in schema.PLAYER_LOCATION_KEYS:
-            logger.warning(f"PlayerService.SetLocation: unknown field {field}")
-            return False
-        StateManager.Set(self.Key(field), value)
-        return True
+        row = self._CountryCatalog().CountryByCode(code) if code else None
+        return qvariantmap_copy(row) if row else {}
+
+    def RegionValue(self, countryCode, regionCode) -> dict:
+        """What `state` holds for region `regionCode` of `countryCode`.
+
+        The region combo's row (with the flag asset resolved now, as the
+        combo's rebuild resolved it), in the combo's key order; {} for no
+        region or one the catalog does not know -- a name typed into the
+        editable region combo, which used to publish null (see CountryValue).
+        """
+        if not regionCode:
+            return {}
+        return qvariantmap_copy(
+            self._CountryCatalog().State(countryCode, regionCode))
+
+    def SetCountry(self, code):
+        """Publish the country picked by code (None: no country)."""
+        StateManager.Set(self.Key(schema.PLAYER_COUNTRY_KEY),
+                         self.CountryValue(code))
+
+    def SetRegion(self, countryCode, regionCode):
+        """Publish the region picked by code, of the country whose regions
+        the card is showing (None: no region)."""
+        StateManager.Set(self.Key(schema.PLAYER_STATE_KEY),
+                         self.RegionValue(countryCode, regionCode))
 
     # ── derived: the display name ────────────────────────────────────────
 
@@ -225,18 +299,64 @@ class PlayerService:
 
     # ── derived: the character slots ─────────────────────────────────────
 
-    def PublishCharacters(self, characters, includeMains=False):
-        """Publish the slot -> character mapping the widget just read.
+    def CharacterValue(self, slot: CharacterSlot, snapshot=None) -> dict:
+        """What one slot of `character` holds for `slot`.
 
-        `characters` is keyed by 1-based slot number and each value is the
-        shape the overlays expect ({name, en_name, assets, skin, variant}).
-        Building it is Qt work (three combos per slot, each answering with a
-        model row); the shape and where it goes are here.
+        The shape the overlays read: the character row (name, en_name,
+        display_name, codename, modded), with the skin row's name / en_name
+        over it when that skin is a different character (Dr. Mario), then
+        `assets` (every asset pack's file for that skin), `skin` and
+        `variant`. Without a character row the slot is just its name
+        (CharacterSlot.text): {name, assets: {}, skin, variant}.
 
-        `includeMains` additionally republishes it as the player's mains,
-        which is what a slot-count change does -- one save cycle for the two
-        keys, since they are written from the same read.
+        Dict keys come in the order the combos handed their rows out in
+        (module docstring); the three appended keys come last, as they
+        always did. `snapshot` is GameAssetCatalog.Current(), taken once by
+        the caller so every slot of a card comes from one game.
         """
+        games = self._GameCatalog()
+        snap = snapshot if snapshot is not None else games.Current()
+
+        row = games.CharacterRow(slot.character, snapshot=snap) \
+            if slot.character is not None else None
+        if row is None:
+            # No row picked (or the picked one is not in the loaded game,
+            # e.g. for the moment between a game load and the combos'
+            # rebind): the card has no skin rows either.
+            value = {"name": slot.text}
+            skin = None
+        else:
+            value = qvariantmap_copy(row)
+            skin = games.SkinRow(slot.character, slot.skin, snapshot=snap)
+
+        if skin:
+            if skin.get("name", ""):
+                value["name"] = skin["name"]
+            if skin.get("en_name", ""):
+                value["en_name"] = skin["en_name"]
+            value["assets"] = qvariantmap_copy(skin.get("assets", {}))
+        if value.get("assets") is None:
+            value["assets"] = {}
+
+        value["skin"] = slot.skin
+
+        variant = games.VariantRow(slot.variant, snapshot=snap) \
+            if slot.variant is not None else None
+        value["variant"] = qvariantmap_copy(variant) if variant else {}
+        return value
+
+    def PublishCharacterSlots(self, slots, includeMains=False):
+        """Publish the card's character slots (`character`, keyed by 1-based
+        slot number), built from what each slot picked.
+
+        `includeMains` additionally republishes them as the player's mains,
+        which is what a slot-count change does -- one save cycle for the two
+        keys, since they are written from the same read (and, as before, the
+        same dict).
+        """
+        snap = self._GameCatalog().Current()
+        characters = {index + 1: self.CharacterValue(slot, snap)
+                      for index, slot in enumerate(slots)}
         if not includeMains:
             StateManager.Set(self.Key("character"), characters)
             return
