@@ -1,0 +1,151 @@
+{
+  "name": "Test Game",
+  "abbreviation": "TG",
+  "smashgg_game_id": 1386,
+  "alternate_versions": [
+    {
+      "smashgg_game_id": 9999
+    }
+  ],
+  "locale": {
+    "zh_TW": {
+      "name": "測試遊戲"
+    },
+    "ja": {
+      "name": "テストゲーム"
+    }
+  },
+  "defaults": {
+    "best_of": 3
+  },
+  "character_to_codename": {
+    "Mario": {
+      "codename": "mario",
+      "smashgg_name": "Mario",
+      "locale": {
+        "zh_TW": "瑪利歐",
+        "ja": "マリオ"
+      },
+      "skin_name": {
+        "1": {
+          "name": "Fire Mario",
+          "locale": {
+            "zh_TW": "火焰瑪利歐"
+          }
+        },
+        "2": {
+          "name": "Dr. Mario",
+          "is_different_character": true,
+          "locale": {
+            "ja": "ドクターマリオ"
+          }
+        }
+      }
+    },
+    "Luigi": {
+      "codename": "luigi",
+      "smashgg_name": "Luigi",
+      "locale": {
+        "zh": "路易吉",
+        "ja_JP": "ルイージ"
+      }
+    },
+    "Peach": {
+      "codename": "peach",
+      "smashgg_name": "Peach",
+      "locale": {
+        "zh_Hant": "碧姬"
+      }
+    },
+    "Bowser": {
+      "codename": "koopa",
+      "smashgg_name": "Bowser"
+    },
+    "Zelda": {
+      "codename": "zelda",
+      "smashgg_name": "Zelda",
+      "locale": {
+        "zh_TW": "ｚｅｌｄａ"
+      }
+    },
+    "Ghost": {
+      "codename": "ghost",
+      "locale": {
+        "zh_TW": "𝓖host"
+      }
+    },
+    "Random": {
+      "codename": "random"
+    },
+    "Waluigi": {
+      "codename": "waluigi",
+      "smashgg_name": "Waluigi",
+      "modded": true
+    },
+    "NoArt": {
+      "codename": "noart"
+    }
+  },
+  "stage_to_codename": {
+    "Battlefield": {
+      "codename": "battlefield",
+      "smashgg_id": 311,
+      "locale": {
+        "zh_TW": "戰場",
+        "ja": "戦場"
+      }
+    },
+    "Final Destination": {
+      "codename": "fd",
+      "smashgg_id": 328
+    },
+    "Smashville": {
+      "codename": "smashville",
+      "smashgg_id": 484,
+      "locale": {
+        "zh": "小鎮"
+      }
+    },
+    "Mod Land": {
+      "codename": "modland",
+      "smashgg_id": 999,
+      "modded": true
+    }
+  },
+  "variant_to_codename": {
+    "EX": {
+      "codename": "ex",
+      "locale": {
+        "zh_TW": "強化",
+        "ja": "EX版"
+      }
+    },
+    "Alt": {
+      "codename": "alt"
+    },
+    "None": {
+      "codename": "nope"
+    }
+  },
+  "preset_colors": [
+    {
+      "name": "Red",
+      "value": "ff0000",
+      "force_opponent": "0000ff",
+      "locale": {
+        "zh_TW": "紅"
+      }
+    },
+    {
+      "name": "Blue",
+      "value": "0000ff"
+    },
+    {
+      "name": "Green",
+      "value": "00ff00",
+      "locale": {
+        "ja": "緑"
+      }
+    }
+  ]
+}

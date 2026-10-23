@@ -362,16 +362,11 @@ def test_the_game_combo_catches_up_on_the_assets_already_loaded(
     populate itself -- otherwise the 大会タイトル combo comes up empty and an
     operator cannot pick a game from this tab at all.
     """
-    from src.AutonaGameAssetManager import AutonaGameAssetManager
+    # Installs and scans a real game; the autonaApp teardown removes it.
+    autonaApp.loadCharacters()
 
-    manager = AutonaGameAssetManager.instance
-    savedGames = manager.games
-    manager.games = {"harness_game": {"name": "Harness Game"}}
-    try:
-        panel = makePanel()
-        texts = [panel.gameTitleCombo.itemText(i)
-                 for i in range(panel.gameTitleCombo.count())]
-    finally:
-        manager.games = savedGames
+    panel = makePanel()
+    texts = [panel.gameTitleCombo.itemText(i)
+             for i in range(panel.gameTitleCombo.count())]
 
     assert "Harness Game" in texts

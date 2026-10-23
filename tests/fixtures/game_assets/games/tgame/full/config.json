@@ -1,0 +1,72 @@
+{
+  "type": [
+    "full"
+  ],
+  "prefix": "",
+  "postfix": "_",
+  "average_size": {
+    "x": 100.0,
+    "y": 120.0
+  },
+  "uncropped_edge": [
+    "u",
+    "d"
+  ],
+  "eyesights": {
+    "mario": {
+      "0": {
+        "x": 10,
+        "y": 20
+      },
+      "1": {
+        "x": 11,
+        "y": 21
+      }
+    },
+    "luigi": {
+      "0": {
+        "x": 12,
+        "y": 22
+      }
+    }
+  },
+  "image_sizes": {
+    "mario": {
+      "0": [
+        100,
+        120
+      ]
+    }
+  },
+  "rescaling_factor": {
+    "mario": {
+      "1": 1.5
+    }
+  },
+  "unflippable": {
+    "peach": {
+      "0": true
+    }
+  },
+  "skin_mapping": {
+    "mario": {
+      "5": "1"
+    }
+  },
+  "metadata": [
+    {
+      "title": "Weight",
+      "locale": {
+        "ja": "重さ"
+      },
+      "values": {
+        "mario": {
+          "value": "98",
+          "locale": {
+            "ja": "98kg"
+          }
+        }
+      }
+    }
+  ]
+}

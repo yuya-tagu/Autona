@@ -341,6 +341,7 @@ SCORE_SHARED_KEYS = ("bracket_type",)
 
 GAME_KEYS = (
     "name",
+    "abbreviation",
     "smashgg_id",
     "codename",
     "logo",

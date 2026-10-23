@@ -125,12 +125,28 @@ def bootstrap_core():
     # re-bootstrap re-checks it rather than depending on which branch ran.
     AutonaHotkeys.ConnectActions()
 
-    # GameAssetManager writes StateManager's "game" key in its __init__, so it
-    # has to come after StateManager.Initialize() above. It loads no asset
-    # here: the games/characters scan runs later, from UiMounted().
+    # ORDER CONSTRAINT: the game asset catalog (the Qt-free source of truth
+    # for games, characters, stages and asset paths) publishes the empty
+    # "game" state from ResetGameState(), so it has to come after
+    # StateManager.Initialize() above. It reads the per-run locale through
+    # the injected callables only when a game is scanned or loaded, i.e.
+    # after Window.__init__ ran LoadLocale() -- the same deferred-read
+    # pattern as AutonaActions' formatMatchText. Nothing is scanned here:
+    # the games/characters scan runs later, from UiMounted().
+    from .core.GameAssetCatalog import GameAssetCatalog
+    if GameAssetCatalog.instance is None:
+        GameAssetCatalog.instance = GameAssetCatalog(
+            locales=lambda: (AutonaLocaleHelper.programLocale,
+                             AutonaLocaleHelper.exportLocale),
+            remap=AutonaLocaleHelper.GetRemaps)
+        GameAssetCatalog.instance.ResetGameState()
+
+    # ORDER CONSTRAINT: the Qt adapter wraps the catalog above, so it comes
+    # right after it. It only builds the (empty) Qt models here.
     from .AutonaGameAssetManager import AutonaGameAssetManager
     if AutonaGameAssetManager.instance is None:
-        AutonaGameAssetManager.instance = AutonaGameAssetManager()
+        AutonaGameAssetManager.instance = AutonaGameAssetManager(
+            GameAssetCatalog.instance)
 
     # PlayerDB's model rebuild must be wired to GameAssetManager.onLoad before
     # the first LoadGames() (UiMounted). This used to be an import-time side
@@ -152,7 +168,8 @@ def bootstrap_core():
 
     # ORDER CONSTRAINT: AutonaTournamentDataProvider.__init__ connects to
     # AutonaGameAssetManager.instance.signals, so the GameAssetManager above
-    # must already be constructed. This used to be an implicit import-order
+    # (the Qt adapter -- the signals are not the catalog's) must already be
+    # constructed. This used to be an implicit import-order
     # rule in Autona.py (agent-pitfalls #2); it is an explicit call order now.
     from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
     if AutonaTournamentDataProvider.instance is None:

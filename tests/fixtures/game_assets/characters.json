@@ -1,0 +1,26 @@
+{
+  "entities": {
+    "character": [
+      {
+        "id": 1,
+        "name": "Mario"
+      },
+      {
+        "id": 2,
+        "name": "Luigi"
+      },
+      {
+        "id": 3,
+        "name": "Bowser"
+      },
+      {
+        "id": 4,
+        "name": "Ryu"
+      },
+      {
+        "id": 5,
+        "name": "Unknown Fighter"
+      }
+    ]
+  }
+}

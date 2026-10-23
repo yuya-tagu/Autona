@@ -23,7 +23,7 @@ globs:
 旧来は `Autona.py` の **import 順序**が生成順序を決めていたが、現在は `src/bootstrap.py` の `bootstrap_core()` に**明示的な生成順として集約**されている。import 順序は順序を決めない。
 
 - 順序を変えるときは `bootstrap.py` の `ORDER CONSTRAINT:` コメントを必ず読む。制約の理由（誰が誰の `instance.signals` に connect するか、QApplication 必須か、`StateManager.Initialize()` 後でなければならないか等）がその場に書いてある
-- **絶対に守る**: `AutonaGameAssetManager` の生成は `AutonaTournamentDataProvider` より前（`AutonaTournamentDataProvider.__init__` が `AutonaGameAssetManager.instance.signals` に connect する）
+- **絶対に守る**: `AutonaGameAssetManager` の生成は `AutonaTournamentDataProvider` より前（`AutonaTournamentDataProvider.__init__` が `AutonaGameAssetManager.instance.signals` に connect する）。そのさらに前に、アダプタが包む `GameAssetCatalog`（core）を生成して `ResetGameState()` する（ADR-005 S1a）
 - 新しいシングルトンは `bootstrap_core()` に追加する。モジュール末尾で `instance = XXX()` を書かない（#1 に違反する）
 
 ## 3. StateManager のキーパスはドット区切り文字列
@@ -59,8 +59,8 @@ Step 5（第 1〜3 弾、2026-09-01/02）で**全ウィジェット静的化完�
   「schema 名 ⊆ .ui objectName」「該当ウィジェットに `objectName()` 呼び出しが無い」
   「該当ウィジェットが `StateManager.Set/Unset` を直接呼ばない」を AST で pin する
 - **2026-09-03（Step 5 完了）: ウィジェットは `StateManager.Set/Unset` を呼ばない。**
-  `src/core` 外で呼んでよいのは `AutonaGameAssetManager` と
-  `AutonaTournamentDataProvider` の 2 ファイルだけで、
+  `src/core` 外で呼んでよいのは `AutonaTournamentDataProvider` の 1 ファイルだけで
+  （`game.*` は 2026-10-23 の ADR-005 S1a で `core/GameAssetCatalog.py` へ移った）、
   `tests/test_objectname_keypath_contract.py` の
   `test_the_state_writer_ledger_outside_core_is_the_documented_one` が**その集合そのもの**を、
   `test_no_qt_widget_writes_the_state` が「`Q*` を継承するクラスは書かない」を pin する。
@@ -226,3 +226,7 @@ AV は防ぐが**リークは防がない**。`AutonaBasePlayerWidget.LoadStates
 
 - コンストラクタ渡しは参照を保持せず、`QCompleter.setModel(model)` は保持する。共有モデルは `QCompleter()` + `setModel()` に分ける
 - 関連: `AutonaCountryHelper.LoadCountries()` は共有 `countryModel` を retire 世代なしで差し替えており #13 規約の唯一の例外（AV の原因ではないことは実証済み、頑健化余地あり）
+
+## 16. StateManager の observer から GameAssetCatalog の writer を呼ばない（ADR-005 S1a）
+
+- StateManager の observer（Bridge の direct 接続ハンドラ含む）から `GameAssetCatalog` の writer（`SelectGame` / `ForgetSelection` / `ScanGames`）を呼ばない。catalog は「catalog lock → `StateManager.lock`」の順で取るので、`SM.lock` 保持中の observer から writer を呼ぶと順序が逆転してデッドロックする。必要なら `QTimer.singleShot(0, ...)` 等で observer の外へ出してから呼ぶ

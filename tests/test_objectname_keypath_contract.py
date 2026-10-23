@@ -403,16 +403,13 @@ def _source_files_outside_core():
 # named, with a reason, in docs/changes/headless-core-redesign.md ("Step 5
 # 完了時点の書き手台帳").
 #
-# Both entries are provider-layer singletons, not widgets: they publish what
-# they just loaded, from the thread that loaded it. Neither key family is
-# operator input, so neither has an operation to route through Actions --
-# and moving the writes would put a QThreadPool worker's asset load behind an
-# extra hop for no gain. Adding a file here is a design decision, not a
-# bookkeeping one.
+# The remaining entry is a provider-layer singleton, not a widget: it
+# publishes what it just loaded. The key family is not operator input, so
+# there is no operation to route through Actions. Adding a file here is a
+# design decision, not a bookkeeping one. (`game.*` left this ledger in
+# ADR-005 S1a: src/core/GameAssetCatalog.py publishes it now, and the Qt
+# AutonaGameAssetManager only builds models.)
 STATE_WRITERS_OUTSIDE_CORE = {
-    # `game.*` -- the loaded game's metadata, written by the asset loader
-    # thread inside the same SaveBlock as the model rebuild.
-    "src/AutonaGameAssetManager.py",
     # `provider_videogame` -- the Start.gg videogame id, mirrored from the
     # provider so overlays can tell which game a set belongs to.
     "src/AutonaTournamentDataProvider.py",

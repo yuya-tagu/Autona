@@ -108,6 +108,8 @@
 
 **影響範囲**: `AutonaGameAssetManager.py` 内部のみ
 
+**2026-10-23 注記**: ADR-005 S1a で `_LoadGameAssetsCore` / `_ResolveTargetGame` は `src/core/GameAssetCatalog.py`（`SelectGame` ほか）に移った。アダプタ側に残る共有本体は `_Load`。
+
 **検証**: py_compile OK、`python main.py` 起動正常（worker スレッドで `_LoadGameAssetsCore` 実行・`UpdateColorModel` が list から正常生成を確認）、pytest 73件グリーン。**PdM 手動確認済み（2026-06-28）**: ゲーム/モード切替（同期版パス）でのキャラ/スキン/カラー/ステージ再構築と切替が1書き込みになることを目視、問題なし。本項目はクローズ。
 
 ---
@@ -396,7 +398,7 @@ objectName → 明示的なキー名マッピング＋`program_state.json` の�
 | ID | 対象 | 理由 | 状態 |
 |----|------|------|------|
 | S-02 | ScoreboardWidget __init__ | 単一ファイル内。動作確認は手動。884行に肥大化 | 🔴 未着手 |
-| S-04 | GameAssetManager 内部クラス | `_LoadGameAssetsCore`/`_ResolveTargetGame` 抽出。colors型/SaveBlock/finally の diverge 解消 | ✅ 解消（2026-06-27） |
+| S-04 | GameAssetManager 内部クラス | `_LoadGameAssetsCore`/`_ResolveTargetGame` 抽出。colors型/SaveBlock/finally の diverge 解消。S1a（2026-10-23）で両メソッドは `core/GameAssetCatalog` に移った | ✅ 解消（2026-06-27） |
 | S-13 | AutonaWebServer Blueprint 分割 | 91ルート。stage_strike は除外 | 🔴 未着手 |
 | ~~S-06~~ | ~~ThumbnailSettings 分割~~ | 縮小済みで優先度低下 | 🟢 縮小 |
 | ~~S-07~~ | ~~thumbnail 巨大関数~~ | WebEngine 移行で解消 | ✅ 解消 |
