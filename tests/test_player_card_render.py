@@ -18,9 +18,16 @@ the writers are unchanged -- so it is pinned two ways:
 
       AUTONA_RECORD_BOARD_OPERATIONS=1 python -m pytest tests/test_player_card_render.py
 
-  (on a pre-S2a checkout with this file and fixtures/board_operations
+  (on a pre-migration checkout with this file and fixtures/board_operations
   copied in). Re-record only when the fixture games or the country data
   change.
+
+  S2b (the losers flag's " [L]" moved from the cards into core) extended the
+  steps and re-recorded them on the last pre-S2b tree (76a740fb; the
+  original fourteen came out identical to the bd0fa50b recording). The
+  recording is still the *pre*-migration truth: what S2b changed on purpose
+  is listed step by step in ``S2B_CHANGES`` and applied to it before the
+  comparison, so every other field of every step still has to match.
 - **the card shows its slot after every one of those steps**, and a slot
   written straight into the state -- which is what S2c's core swap will do --
   reaches the card without a single write on the way back.
@@ -111,11 +118,17 @@ class _Published:
             self._onBigChange)
         return False
 
-    def encoded(self):
+    def encoded(self, sortKeys=False):
         # The flat delta rows carry Python types (`type`: <class 'str'>);
-        # named, they are as comparable as the rest of the row.
+        # named, they are as comparable as the rest of the row. `sortKeys`
+        # gives the same rows with every dict's keys sorted: what was
+        # published, regardless of the order a new slot's keys were written
+        # in.
+        option = orjson.OPT_NON_STR_KEYS
+        if sortKeys:
+            option |= orjson.OPT_SORT_KEYS
         return orjson.dumps(
-            self.deltas, option=orjson.OPT_NON_STR_KEYS,
+            self.deltas, option=option,
             default=lambda o: getattr(o, "__name__", repr(o))).decode()
 
 
@@ -187,6 +200,13 @@ def _teamName(board, team, text):
     edit.editingFinished.emit()
 
 
+def _rename(card, text):
+    """The operator typing a new tag into a card and leaving the field."""
+    edit = card._w(schema.PLAYER_TAG_KEY, QLineEdit)
+    edit.setText(text)
+    edit.editingFinished.emit()
+
+
 def _confirmed(operation):
     """Run an operation that asks first, answering Yes."""
     with patch.object(QMessageBox, "question",
@@ -247,6 +267,25 @@ def _steps(board):
                   "mains": {"tgame": [["Zelda", 0]]}}],
                 [{"gamerTag": "E2", "prefix": "PX", "seed": 4}]]})),
         ("reset all inputs", lambda: _confirmed(board.ResetAllInputs)),
+        # The losers flag and the " [L]" it puts on every name of its team
+        # (S2b moved that suffix from the cards to core). Recorded on the
+        # pre-S2b tree (76a740fb).
+        ("two players again", lambda: (
+            board.playerNumber.setValue(2), _fill(board, 1), _fill(board, 2))),
+        ("losers on a filled team", lambda: _losers(board, 1).setChecked(True)),
+        ("rename on a losers team",
+         lambda: _rename(board.team1playerWidgets[0], "ALPHA2")),
+        ("grow the roster on a losers team",
+         lambda: board.playerNumber.setValue(3)),
+        ("back to one player", lambda: board.playerNumber.setValue(1)),
+        ("load a losers set that grows the roster", lambda: board.ChangeSetData({
+            "team1losers": False, "team2losers": True, "overwrite": True,
+            "entrants": [
+                [{"gamerTag": "L1"}, {"gamerTag": "L2", "prefix": "LP"}],
+                [{"gamerTag": "W1", "prefix": "WP"}, {"gamerTag": "W2"}]]})),
+        ("swap teams with a losers side", board.SwapTeams),
+        ("load the losers flags while swapped", lambda: board.ChangeSetData({
+            "team1losers": True, "team2losers": False})),
     ]
 
 
@@ -265,6 +304,8 @@ def _runSteps(app, board, afterEach=None):
             app.settle()
         entry["published"] = [len(published.deltas), published.bigChanges,
                               digest(_normalise(published.encoded(), app))]
+        entry["publishedRows"] = digest(
+            _normalise(published.encoded(sortKeys=True), app))
         recorded.append(entry)
     return recorded
 
@@ -275,15 +316,75 @@ def board(slotEnv, autonaApp):
     return autonaApp.board(BOARD)
 
 
+# What ADR-005 S2b changed on purpose, against the pre-S2b recording. Each
+# entry replaces the listed fields of that step; `dropped` are paths taken
+# out of the recorded `state`. Everything not listed must still match.
+S2B_CHANGES = {
+    # The flag and the " [L]" on each name of its team are one save cycle
+    # (AutonaActions.SetTeamLosers); they were the flag plus one cycle per
+    # player card (SetLosers). Same state, same delta published by 反映.
+    "losers": {"cycles": 1},
+    "losers on a filled team": {"cycles": 1},
+    # A card added to a losers team no longer publishes " [L]" for a player
+    # it does not have yet (_AdoptTeamLosers is gone). Its name gets the
+    # suffix once one is typed or loaded -- as on a team that is not losers,
+    # where a new blank card has never published a name.
+    "grow the roster on a losers team": {
+        "dropped": ["team.1.player.3.mergedName",
+                    "team.1.player.3.mergedOnlyName"],
+        "stateDigest": "dd980b0f6c120fc5",
+        "published": [1, 0, "4819ec28dc08861c"],
+        "publishedRows": "342100cde21357ad"},
+    # Key order only (state and publishedRows match the recording): the new
+    # card on the losers team writes its names once, after its entrant's
+    # tag, instead of " [L]" first and the tag over it.
+    "load a losers set that grows the roster": {
+        "stateDigest": "66843402bfc798d6",
+        "published": [1, 0, "218d15dc5cab7632"]},
+    # The cards "back to one player" removed were still connected to the
+    # LOSERS box until their deleteLater ran; this harness never runs it,
+    # so the swap's toggles made them re-create their gone slots with just
+    # a merged name. In the app that needs a toggle in the same event-loop
+    # turn as the removal. The connection itself is gone with S2b.
+    "swap teams with a losers side": {
+        "dropped": ["team.1.player.3", "team.2.player.3"],
+        "stateDigest": "ee445bb1781e88f3",
+        "published": [1, 0, "d7765079abe64354"],
+        "publishedRows": "a3834ea0c315eaad"},
+    "load the losers flags while swapped": {
+        "dropped": ["team.1.player.3", "team.2.player.3"],
+        "stateDigest": "7aac9cae3ee8607f"},
+}
+
+
+def _afterS2b(entry):
+    """A recorded step with S2B_CHANGES applied."""
+    change = S2B_CHANGES.get(entry["step"])
+    if change is None:
+        return entry
+    expected = json.loads(json.dumps(entry))
+    for path in change.get("dropped", ()):
+        *parents, leaf = path.split(".")
+        node = expected["state"]
+        for key in parents:
+            node = node[key]
+        del node[leaf]
+    expected.update({field: value for field, value in change.items()
+                     if field != "dropped"})
+    return expected
+
+
 def test_board_operations_publish_the_recorded_state(board, autonaApp):
     """The state after every operation, its save cycles and what 反映 then
-    published are what the pre-S2a tree produced -- and every card shows
-    its slot after every one of them."""
+    published are what the pre-migration tree produced, apart from what S2b
+    changed on purpose -- and every card shows its slot after every one of
+    them."""
     mismatches = {}
 
     def check(step):
         if not RECORD:
             mismatches[step] = _cardMismatches(board)
+            mismatches[step].update(_losersMismatches(board))
 
     recorded = _runSteps(autonaApp, board, afterEach=check)
 
@@ -293,7 +394,7 @@ def test_board_operations_publish_the_recorded_state(board, autonaApp):
             {"operations": recorded}, ensure_ascii=False, indent=1),
             encoding="utf-8")
         return
-    golden = GOLDEN["operations"]
+    golden = [_afterS2b(entry) for entry in GOLDEN["operations"]]
     assert [e["step"] for e in recorded] == [e["step"] for e in golden]
     for actual, expected in zip(recorded, golden):
         assert actual["state"] == expected["state"], actual["step"]
@@ -369,6 +470,22 @@ def _expected(slot, card):
     return expected
 
 
+def _losersMismatches(board):
+    """{team: (box, state)} for a LOSERS box that is off its team's flag.
+
+    The flag's other carrier, the " [L]" in the names, is in the recorded
+    state itself.
+    """
+    result = {}
+    for team in (1, 2):
+        shown = _losers(board, team).isChecked()
+        flag = bool(StateManager.Get(
+            f"{PREFIX}.team.{team}.{schema.TEAM_LOSERS_KEY}", False))
+        if shown != flag:
+            result[f"team.{team}.{schema.TEAM_LOSERS_KEY}"] = (shown, flag)
+    return result
+
+
 def _cardMismatches(board):
     """{path: {field: (shown, state)}} for every card that is off."""
     result = {}
@@ -384,10 +501,16 @@ def _cardMismatches(board):
 
 # The steps that are one operation in one save cycle today. The others are
 # still a widget writing field by field (a SetData per card, a Clear per
-# card, a losers flag re-exported per player): S2c/S2d move those writers
-# into core, where an operation is one save block.
-ONE_CYCLE_STEPS = ("swap teams", "move a player down", "swap teams back",
-                   "reset match", "load a set", "reset all inputs")
+# card): S2c/S2d move those writers into core, where an operation is one save
+# block. The losers flag became one in S2b -- it was the flag plus one cycle
+# per player card.
+ONE_CYCLE_STEPS = ("losers", "swap teams", "move a player down",
+                   "swap teams back", "reset match", "load a set",
+                   "reset all inputs", "losers on a filled team",
+                   "grow the roster on a losers team", "back to one player",
+                   "load a losers set that grows the roster",
+                   "swap teams with a losers side",
+                   "load the losers flags while swapped")
 
 
 def test_a_single_operation_is_a_single_save_cycle(board, autonaApp):

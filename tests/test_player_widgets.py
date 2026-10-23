@@ -186,16 +186,28 @@ def test_clear_empties_the_published_player_fields(autonaApp):
 
 
 def test_the_losers_flag_is_appended_to_the_merged_name(autonaApp):
+    """A name the card publishes carries its team's flag from the state.
+
+    The card has no copy of the flag since ADR-005 S2b (it had `losers`,
+    kept in step by a per-card SetLosers); PlayerService reads
+    `team.{t}.losers` when the card publishes.
+    """
+    from src.core.Actions import AutonaActions
+
     player = _player(autonaApp)
+    AutonaActions.instance.SetTeamLosers(1, player.teamNumber, True)
+    try:
+        player.SetData({"gamerTag": "TAG", "prefix": "SPONSOR"},
+                       dontLoadFromDB=True)
+        autonaApp.settle()
 
-    player.SetData({"gamerTag": "TAG", "prefix": "SPONSOR"},
-                   dontLoadFromDB=True)
-    player.losers = True
-    player.ExportMergedName()
-    autonaApp.settle()
-
-    assert autonaApp.get(f"{player.path}.mergedName") == "SPONSOR | TAG [L]"
-    assert autonaApp.get(f"{player.path}.mergedOnlyName") == "TAG [L]"
+        assert not hasattr(player, "losers")
+        assert autonaApp.get(
+            f"{player.path}.mergedName") == "SPONSOR | TAG [L]"
+        assert autonaApp.get(f"{player.path}.mergedOnlyName") == "TAG [L]"
+    finally:
+        AutonaActions.instance.SetTeamLosers(1, player.teamNumber, False)
+        autonaApp.settle()
 
 
 # ── character slots ──────────────────────────────────────────────────────

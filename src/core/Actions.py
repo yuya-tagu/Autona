@@ -81,6 +81,7 @@ from loguru import logger
 
 from . import StateSchema as schema
 from .LayoutOptionsManager import LayoutOptionsManager
+from .PlayerService import RepublishTeamMergedNames
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 
@@ -365,21 +366,29 @@ class AutonaActions:
     def SetTeamLosers(self, board, team, value) -> bool:
         """Flag one team as coming from the losers bracket. True if changed.
 
-        Overlays render the flag, and the desktop additionally suffixes
-        " [L]" onto each player's `mergedName`. That second half is the
-        checkbox's *other* handler (`AutonaScoreboardPlayerWidget.SetLosers`,
-        connected per player) and is deliberately not done here: the suffix
-        is part of a *name*, and which name a slot currently holds is the
-        widget's -- `PlayerService.PublishMergedName` is handed both halves
-        by the card that knows them.
+        Overlays render the flag, and every player of the team carries it as
+        a " [L]" suffix on `mergedName` / `mergedOnlyName` (the thumbnail
+        generator reads it). Both halves are written here, in one save cycle
+        (ADR-005 S2b): the names are rebuilt from the slots' own state by
+        `PlayerService.RepublishTeamMergedNames`. They used to be the
+        checkbox's second handler, one `SetLosers` per player card -- a save
+        cycle each, from each card's copy of the flag. Only on a change, as
+        that handler was: re-asserting the flag must not mark the board
+        dirty. A loaded set writes the same pair through
+        `SetLoadService.ApplyLosers`.
         """
         team = self._asInt(team, 0)
         if team not in (1, 2):
             logger.warning(f"SetTeamLosers: ignoring team {team}")
             return False
-        return self._SetIfChanged(
-            f"score.{self._asInt(board, 0)}.team.{team}."
-            f"{schema.TEAM_LOSERS_KEY}", bool(value))
+        board = self._asInt(board, 0)
+        with StateManager.SaveBlock():
+            changed = self._SetIfChanged(
+                f"score.{board}.team.{team}.{schema.TEAM_LOSERS_KEY}",
+                bool(value))
+            if changed:
+                RepublishTeamMergedNames(board, team)
+        return changed
 
     def SetTeamsSwapped(self, board, swapped):
         """Publish which way round a board's two sides currently are.

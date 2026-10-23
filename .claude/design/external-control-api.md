@@ -286,12 +286,15 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
     "teamName": { "team": 1, "value": "Team Alpha" } }
   ```
 - 委譲: `set_route`（既存はクエリ引数。本 API は JSON を同 Action にマップ）= #10
-- `teamName`（2026-10-21 追加・Web UI 移行用）: 旧 `-set?teamName=&team=` 相当。`set_route` は `team` を
-  `losers` と共用するため、`teamName` は別呼び出しで最後に適用する（旧クエリと同じ順序）。
+- `teamName`（2026-10-21 追加・Web UI 移行用）: 旧 `-set?teamName=&team=` 相当。`teamName` は別呼び出しで最後に適用する
+  （他のキー → `losers` → `teamName`。旧クエリと同じ適用順）。
   チーム名は**状態側のチーム**（`team{t}column`）に書く。
-- `losers` も**状態側のチーム**。`set_route` の losers は set 形式（`SetLoadService.ApplyLosers` が `DisplayTeam` を通す）
-  なので、v1 層がスワップ状態を読んでチーム番号を補正してから委譲する（読み取りと適用は 1 つの GUI スレッドタスク内）。
-  旧 `-set?losers=` はスワップ中に反対側へ着地する（旧ルートは不変）。
+- `losers` も**状態側のチーム**。`set_route` には渡さず `WebServerActions.set_team_losers` → `AutonaActions.SetTeamLosers` を呼ぶ（ADR-005 S2b〜。
+  それ以前は set 形式の `set_route` の losers をスワップ状態で補正して委譲していた）。フラグとそのチームの選手名の
+  ` [L]`（`mergedName` / `mergedOnlyName`）を書く。旧経路（`ChangeSetData` ペイロード）の副作用は外部挙動として維持する:
+  `match_en` を空にする（`SetLoadService.ApplyMatchInfo({})` をフラグと同じ保存サイクルで適用。フラグが変わらなくても空にする）、
+  未構築のボードを構築する（構築で `score.{n}` が held 登録され、反映待ちになる）。
+  適用順は旧クエリと同じ（他のキー → losers → `teamName`）。旧 `-set?losers=` はスワップ中に反対側へ着地する（旧ルートは不変）。
 - 空の `phase` / `match` は「指定なし」扱いで反映されない（`SetLoadService.ApplyMatchInfo`・旧ルートと同じ）。
   `pool` は空文字でクリアされる。
 - エラー: `INVALID_ARGUMENT`（型不正・team 範囲外・`teamName` が `{team,value}` でない／value が文字列でない）

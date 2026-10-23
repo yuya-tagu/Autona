@@ -236,7 +236,9 @@ class WebServerActions(QObject):
     # routes keep the two methods above unchanged; these address the *state*
     # team and skip the set-payload side effects those carry (the score's
     # DisplayTeam flip and general.disable_scoreupdate, and match_en being
-    # blanked by ChangeSetData).
+    # blanked by ChangeSetData). Except set_team_losers, which replaced a v1
+    # route that already went through that payload: it keeps the match_en
+    # blanking and the board build (see there).
 
     def set_scores(self, scoreboard, team1, team2):
         # Both teams in one save cycle. Pure state, so no GUI hop (headless
@@ -244,6 +246,40 @@ class WebServerActions(QObject):
         with StateManager.SaveBlock():
             AutonaActions.instance.SetScore(scoreboard, 1, team1)
             AutonaActions.instance.SetScore(scoreboard, 2, team2)
+        return "OK"
+
+    @gui_thread_sync
+    def set_team_losers(self, scoreboard, team, value):
+        """The v1 counterpart of `set_route`'s losers (ADR-005 S2b).
+
+        `team` is the *state* team: AutonaActions.SetTeamLosers, which also
+        puts the " [L]" on that team's player names. Not set_route's
+        set-shaped `team{N}losers` payload, which SetLoadService.ApplyLosers
+        runs through DisplayTeam() and so lands on the other side of a
+        swapped board.
+
+        What that payload did besides is kept, because it is visible from
+        outside:
+
+        - it built the board when it was not built yet (GetScoreboard), and
+          building it is what holds score.{n} for 反映 -- without it the flag
+          would be published at once. Until the held registration moves to
+          bootstrap (ADR-005 S2, decision 7);
+        - it went through ChangeSetData, whose match-info half
+          (SetLoadService.ApplyMatchInfo) blanks match_en for a payload that
+          carries no round_name_en -- also when the flag does not change.
+          Applied first, as ChangeSetData did, in the same save block: one
+          save cycle, as before.
+
+        On the GUI thread: it builds the board, and the cards publish their
+        names from it.
+        """
+        board = self.scoreboard.EnsureScoreboard(scoreboard)
+        if board is None:
+            return f"ERROR: scoreboard {scoreboard} is not available"
+        with StateManager.SaveBlock():
+            board.setLoad.ApplyMatchInfo({})
+            AutonaActions.instance.SetTeamLosers(scoreboard, team, value)
         return "OK"
 
     @gui_thread_sync

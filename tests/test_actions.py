@@ -469,6 +469,53 @@ def test_set_team_losers_ignores_an_unknown_team(actions, heldBoard):
     assert SM.Get(f"{PREFIX}.team.0") is None
 
 
+def _named(team, number, sponsor, tag):
+    path = f"{PREFIX}.team.{team}.player.{number}"
+    SM.Set(f"{path}.{schema.PLAYER_SPONSOR_KEY}", sponsor)
+    SM.Set(f"{path}.{schema.PLAYER_TAG_KEY}", tag)
+    return path
+
+
+def test_set_team_losers_suffixes_the_teams_names_in_one_cycle(
+        actions, heldBoard, spy):
+    """The flag and the " [L]" on every name of its team: one save cycle.
+
+    ADR-005 S2b. The suffix used to be each player card's SetLosers, one
+    cycle per card after the flag's own.
+    """
+    one = _named(1, 1, "SP", "ALPHA")
+    two = _named(1, 2, "", "BETA")
+    other = _named(2, 1, "", "GAMMA")
+    spy.held_updates.clear()
+
+    assert actions.SetTeamLosers(BOARD, 1, True) is True
+
+    assert spy.held_updates_for(PREFIX) == [PREFIX]
+    assert SM.Get(f"{one}.mergedName") == "SP | ALPHA [L]"
+    assert SM.Get(f"{one}.mergedOnlyName") == "ALPHA [L]"
+    assert SM.Get(f"{two}.mergedName") == "BETA [L]"
+    assert SM.Get(f"{other}.mergedName") is None
+
+    spy.held_updates.clear()
+    assert actions.SetTeamLosers(BOARD, 1, False) is True
+    assert spy.held_updates_for(PREFIX) == [PREFIX]
+    assert SM.Get(f"{one}.mergedName") == "SP | ALPHA"
+    assert SM.Get(f"{two}.mergedOnlyName") == "BETA"
+
+
+def test_reasserting_the_losers_flag_writes_nothing(actions, heldBoard, spy):
+    """Re-sending the flag the team has must not light 反映."""
+    _named(1, 1, "", "ALPHA")
+    actions.SetTeamLosers(BOARD, 1, True)
+    spy.held_updates.clear()
+    spy.dirty_events.clear()
+
+    assert actions.SetTeamLosers(BOARD, 1, True) is False
+
+    assert spy.held_updates == []
+    assert spy.dirty_events == []
+
+
 def test_set_teams_swapped_publishes_the_mirror(actions, heldBoard):
     actions.SetTeamsSwapped(BOARD, True)
     assert SM.Get(f"{PREFIX}.teamsSwapped") is True

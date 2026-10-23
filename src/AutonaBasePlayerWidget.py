@@ -8,8 +8,8 @@ AutonaScoreboardPlayerWidget is now the only subclass.
 
 Since the player instalment of headless core Step 5 this class no longer
 writes the state itself: `self.player` is a `core.PlayerService` bound to
-this widget's path, and the methods below read Qt (line-edit text, the
-losers flag, which combo rows are picked) and hand the answer to it. What
+this widget's path, and the methods below read Qt (line-edit text, which
+combo rows are picked) and hand the answer to it. What
 each of them decided -- how a display name is merged, where an avatar file
 is looked for, what a character slot holds -- lives in that service. Since
 ADR-005 S1d a combo pick leaves the widget as identifiers only (en_name,
@@ -122,10 +122,11 @@ class AutonaBasePlayerWidget(QGroupBox):
 
     def ExportMergedName(self):
         with self.dataLock:
+            # The " [L]" suffix is the service's: it reads the team's
+            # losers flag from the state (ADR-005 S2b).
             self.player.PublishMergedName(
                 self._w(schema.PLAYER_SPONSOR_KEY, QLineEdit).text(),
-                self._w(schema.PLAYER_TAG_KEY, QLineEdit).text(),
-                self.losers)
+                self._w(schema.PLAYER_TAG_KEY, QLineEdit).text())
 
     def ExportPlayerImages(self, onlineAvatar=KEEP_ONLINE_AVATAR):
         """Re-publish the image state derived from the player's name.
