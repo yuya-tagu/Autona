@@ -25,8 +25,10 @@ What deliberately did NOT move (and why):
   moved here is the *addressing* (which entrant lands on which team once the
   teams have been swapped, see ``DisplayTeam``) and the team name that comes
   with it; the player subtree's own writes went to ``core/PlayerService.py``
-  in the next instalment, which is what SetData now hands its resolved
-  values to.
+  in the next instalment, which is what SetData now hands its picks to
+  (since ADR-005 S1d as identifiers -- character en_name, skin row, country
+  and region code -- which PlayerService turns into the published values
+  from the core catalogs).
 - **Best of.** ``best_of_text`` / ``first_to_text`` are formatted from
   ``AutonaLocaleHelper.matchNames`` and the same handler resizes the stage
   rows; Step 3 left it on the Qt side and this step does not change that.

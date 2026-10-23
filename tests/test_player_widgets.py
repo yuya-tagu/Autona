@@ -22,10 +22,12 @@ from unittest.mock import patch
 
 import pytest
 
+from qtpy.QtCore import Qt
 from qtpy.QtGui import QStandardItem, QStandardItemModel
 from qtpy.QtWidgets import QComboBox, QLineEdit, QSpinBox
 
 from src.core.CountryCatalog import CountryCatalog
+from src.core.PlayerService import CharacterSlot
 from src.core.StateManager import StateManager
 
 
@@ -123,6 +125,35 @@ def test_set_data_takes_a_state_iso2_as_is(autonaApp):
     autonaApp.settle()
 
     assert autonaApp.get(f"{player.path}.state").get("original_code") == "13"
+
+
+def test_loading_a_player_without_a_country_drops_the_previous_one(
+        autonaApp):
+    """SetData's Clear() empties the country combo with its signals
+    blocked, so a player loaded without a country_code used to keep the
+    previous player's flag on the overlay (found while recording the
+    ADR-005 S1d golden). The emptying is announced now, in SetData's own
+    save cycle: no region, then no country."""
+    player = _player(autonaApp)
+
+    player.SetData({"gamerTag": "FIRST", "country_code": "JP",
+                    "state_code": "13"}, dontLoadFromDB=True)
+    autonaApp.settle()
+    assert autonaApp.get(f"{player.path}.country").get("code") == "JP"
+    assert autonaApp.get(f"{player.path}.state").get("code") == "13"
+
+    player.SetData({"gamerTag": "SECOND"}, dontLoadFromDB=True)
+    autonaApp.settle()
+
+    assert autonaApp.get(f"{player.path}.country") == {}
+    assert autonaApp.get(f"{player.path}.state") == {}
+
+    # A third player with a country is not disturbed by the fix.
+    player.SetData({"gamerTag": "THIRD", "country_code": "US",
+                    "state_code": "CA"}, dontLoadFromDB=True)
+    autonaApp.settle()
+    assert autonaApp.get(f"{player.path}.country").get("code") == "US"
+    assert autonaApp.get(f"{player.path}.state").get("code") == "CA"
 
 
 def test_loading_a_second_player_replaces_the_first(autonaApp):
@@ -275,6 +306,46 @@ def test_loading_a_player_without_mains_clears_the_previous_characters(
     # character combos, otherwise the overlay shows the previous entrant's
     # picks under the new name.
     assert _names(autonaApp, player) == {1: "", 2: ""}
+
+
+def test_a_slot_hands_over_identifiers_and_a_name_to_fall_back_on(autonaApp):
+    """What CharactersChanged hands PlayerService for one slot (ADR-005 S1d).
+
+    The fallback name only matters when the game catalog has no row for the
+    pick. For a typed name that is the typed text. For a picked row it is
+    the row's own name: that happens between a game load and the combos'
+    rebind, and the combo's text there is its "display name / en_name"
+    label, which no overlay ever showed as a name.
+    """
+    from src.AutonaBasePlayerWidget import AutonaBasePlayerWidget
+
+    def combo(rows):
+        box = QComboBox()
+        box.setEditable(True)
+        model = QStandardItemModel(box)
+        for text, data in rows:
+            item = QStandardItem(text)
+            item.setData(data, Qt.ItemDataRole.UserRole)
+            model.appendRow(item)
+        box.setModel(model)
+        return box
+
+    character = combo([("", None), ("マリオ / Mario",
+                                    {"en_name": "Mario", "name": "マリオ"})])
+    color = combo([("0", {"assets": {}}), ("1", {"assets": {}})])
+    variant = combo([("", {}), ("EX", {"en_name": "EX", "name": "EX"})])
+
+    character.setCurrentIndex(1)
+    color.setCurrentIndex(1)
+    variant.setCurrentIndex(1)
+    assert AutonaBasePlayerWidget._CharacterSlot(character, color, variant) \
+        == CharacterSlot("Mario", 1, "EX", "マリオ")
+
+    character.setCurrentIndex(0)
+    character.setEditText("Typed Name")
+    variant.setCurrentIndex(0)
+    assert AutonaBasePlayerWidget._CharacterSlot(character, color, variant) \
+        == CharacterSlot(None, 1, None, "Typed Name")
 
 
 def test_swapping_two_character_slots_exchanges_the_published_names(

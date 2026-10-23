@@ -83,9 +83,16 @@ state になる）。`Window._SeedPanelState()` はその起動時の呼び出�
   （`PlayerService` / `SetLoadService` / `CrewBattleService` / `TournamentInfoService` /
   `Top8Service` / `ColorService` / `StatsService` / `GameTrackerService`）を通す。
   サブツリーのシード・破棄は `src/core/StateSchema.py`
-- ウィジェットの役割は「値を組み立てて操作を依頼する」「state を読んで描画する」の 2 つだけ。
-  Qt モデル（国コンボ・キャラスロット・スキン行）から値を解決する処理は**ウィジェット側に残す**
-  のが正しい（core は Qt を import しない）
+- ウィジェットの役割は「操作を依頼する」「state を読んで描画する」の 2 つだけ。
+  **コンボの選択は行の dict ではなく識別子で渡す**（キャラ / バリアントの `en_name`・
+  スキンの行番号・国 / 地域のコード）。state に入れる値は core がカタログ
+  （`GameAssetCatalog` / `CountryCatalog`）から組む（ADR-005 S1d。実例は選手カードの
+  `PlayerService.PublishCharacterSlots` / `SetCountry` / `SetRegion`）。Qt モデルの UserRole を
+  読み出してそのまま publish すると、値の形とキー順（QVariantMap 順 = 外部契約）が
+  Qt に縛られ、Qt なしでは同じ state を作れなくなる
+  - どの行を表示するか（Qt モデルの走査・手入力）はウィジェット側に残る
+  - Top 8・実況・リザルトの各パネルは、まだコンボの行 dict から値を組んでいる（S4 で置き換え）。
+    新しく同じ形を書かない
 - `src/core` 外で state を書いてよいのは `AutonaTournamentDataProvider`
   （`provider_videogame`）の 1 つだけ（`game.*` は ADR-005 S1a で
   `core/GameAssetCatalog.py` へ移動）。
