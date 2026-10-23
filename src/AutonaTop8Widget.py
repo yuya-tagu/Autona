@@ -33,6 +33,7 @@ from loguru import logger
 from .core.StateManager import StateManager
 from .core.SettingsManager import SettingsManager
 from .core.DictHelper import deep_clone
+from .core.CountryCatalog import CountryCatalog
 from .core import LayoutCatalog
 from .AutonaLayoutPreview import AutonaLayoutPreview, ObsUrl
 from .AutonaGameAssetManager import AutonaGameAssetManager
@@ -85,6 +86,9 @@ class AutonaTop8Widget(QDockWidget):
         # AutonaBracketWidget crash notes).
         self._updating = False
         self._updatingPhaseGroup = False
+        # True while a country-model reload holds _updating (see
+        # _onCountriesAboutToReload / _rebindCountryModels).
+        self._heldForCountryReload = False
         self._previewLoaded = False
         self._statusToken = None
         self._phases = []
@@ -167,6 +171,8 @@ class AutonaTop8Widget(QDockWidget):
 
         AutonaGameAssetManager.instance.signals.onLoad.connect(
             self._onGameChanged)
+        AutonaCountryHelper.signals.countriesAboutToReload.connect(
+            self._onCountriesAboutToReload)
         AutonaCountryHelper.signals.countriesUpdated.connect(
             self._rebindCountryModels)
 
@@ -288,13 +294,37 @@ class AutonaTop8Widget(QDockWidget):
             QApplication.translate("app", "Country"))
         return combo
 
+    def _onCountriesAboutToReload(self):
+        """The shared country model is about to be cleared and refilled in
+        place. Each country combo reports that as index changes, and each of
+        those would publish all eight slots with the combos' momentary
+        (blank) countries. Hold the inputs -> state path until
+        _rebindCountryModels has put the combos back on the state."""
+        if not self._updating:
+            self._updating = True
+            self._heldForCountryReload = True
+
     def _rebindCountryModels(self):
-        for w in self.playerInputs.values():
-            combo = w["country"]
-            combo.blockSignals(True)
-            combo.setModel(AutonaCountryHelper.countryModel)
-            combo.setCurrentIndex(0)
-            combo.blockSignals(False)
+        """countriesUpdated: attach the shared model where it is not yet (a
+        panel built before the first load) and re-select every slot's country
+        from top8.* -- the state decides what the combos show, never the
+        other way round, so neither a first load nor a reload publishes."""
+        try:
+            model = AutonaCountryHelper.countryModel
+            players = StateManager.Get(Top8Service.PLAYERS_PATH) or {}
+            for slot, w in self.playerInputs.items():
+                combo = w["country"]
+                if model is not None and combo.model() is not model:
+                    combo.blockSignals(True)
+                    combo.setModel(model)
+                    combo.blockSignals(False)
+                player = players.get(slot) or {}
+                self._selectCountry(combo,
+                                    (player.get("country") or {}).get("code"))
+        finally:
+            if self._heldForCountryReload:
+                self._heldForCountryReload = False
+                self._updating = False
 
     def _makeCharCombo(self):
         combo = QComboBox()
@@ -639,7 +669,7 @@ class AutonaTop8Widget(QDockWidget):
 
         code = imported.get("country_code")
         if code:
-            country = AutonaCountryHelper.GetBasicCountryInfo(code)
+            country = CountryCatalog.instance.BasicCountryInfo(code)
             if country:
                 player["country"] = country
 

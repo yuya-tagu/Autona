@@ -31,6 +31,7 @@ from .core.Actions import AutonaActions
 from .core import StateSchema as schema
 from .core import LayoutCatalog
 from .core.GameAssetCatalog import GameAssetCatalog
+from .core.CountryCatalog import CountryCatalog
 # Import order mirrors the singleton init order (agent-pitfalls #2): the asset
 # manager must be importable before the tournament data provider. By the time
 # this module loads both singletons already exist (WebServerActions imported
@@ -38,7 +39,6 @@ from .core.GameAssetCatalog import GameAssetCatalog
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers import AutonaQtHelper
-from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 
 # ── Blueprint ────────────────────────────────────────────────────────────
 api_v1 = Blueprint("api_v1", __name__, url_prefix="/api/v1")
@@ -472,10 +472,11 @@ def get_commentary():
 @api_v1.route("/countries/<code>/states")
 @api_handler
 def get_country_states(code):
-    # Country data is keyed by upper-case ISO code ("JP"). It is loaded by
-    # the first player widget built, so before that every code would read as
-    # unknown -- answer NOT_READY rather than a misleading 404.
-    if not AutonaCountryHelper.countries:
+    # Country data is keyed by upper-case ISO code ("JP"). It is loaded while
+    # the window is built (or by the first player widget), so before that
+    # every code would read as unknown -- answer NOT_READY rather than a
+    # misleading 404.
+    if not CountryCatalog.instance.IsLoaded():
         raise ApiError(NOT_READY, "country data is not loaded yet", 409)
     code = code.upper()
     # The legacy /states?countryCode= answers an unknown code with None,

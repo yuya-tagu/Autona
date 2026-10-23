@@ -107,6 +107,10 @@ core_actions = importlib.import_module("src.core.Actions").AutonaActions
 # AutonaGameAssetManager, a singleton created by bootstrap_core() as well.
 game_catalog = importlib.import_module(
     "src.core.GameAssetCatalog").GameAssetCatalog
+# The country catalog (ADR-005 S1c): the Qt-free half of what used to be
+# AutonaCountryHelper, likewise created by bootstrap_core().
+country_catalog = importlib.import_module(
+    "src.core.CountryCatalog").CountryCatalog
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -168,6 +172,7 @@ from qtpy.QtWidgets import QApplication
 assert QApplication.instance() is None, "import created a QApplication"
 assert core_actions.instance is None, "import created AutonaActions.instance"
 assert game_catalog.instance is None, "import created GameAssetCatalog.instance"
+assert country_catalog.instance is None,     "import created CountryCatalog.instance"
 assert hotkeys.instance is None, "import created AutonaHotkeys.instance"
 assert not hotkeys._actions_connected, \
     "import wired the hotkeys to AutonaActions"
@@ -286,9 +291,19 @@ alerts.instance = alerts()
 assert os.path.isfile("./user_data/alerts_red.json"), \
     "AutonaAlertNotification() did not create ./user_data/alerts_red.json"
 
+# The country catalog reads nothing until Load() -- which the Qt adapter
+# drives from Window.__init__, once the locale is known -- and the
+# ./user_data/additional_flag guarantee travels with that load.
+country_catalog.instance = country_catalog()
+assert not country_catalog.instance.IsLoaded(),     "CountryCatalog() loaded the country data"
+assert not os.path.exists("./user_data/additional_flag"),     "CountryCatalog() created ./user_data/additional_flag"
+assert country_catalog.instance.Load(), "CountryCatalog.Load() failed"
+assert country_catalog.instance.BasicCountryInfo("JP").get("en_name")     == "Japan", "CountryCatalog.Load() did not load the country data"
+assert os.path.isdir("./user_data/additional_flag"),     "CountryCatalog.Load() did not create ./user_data/additional_flag"
+
 # No positive control for AutonaCountryHelper (its __init__ is empty; the real
-# work is LoadCountries(), driven from init()) and none for
-# AutonaScoreboardManager either: it is a QDockWidget, and constructing a
+# work is LoadCountries(), driven from init(), and it builds Qt items) and none
+# for AutonaScoreboardManager either: it is a QDockWidget, and constructing a
 # QWidget without a QApplication aborts the interpreter, which would take this
 # whole subprocess down. The import-time assertions above are the contract.
 
@@ -330,6 +345,7 @@ print("OK")
 _SEED_FILES = [
     "src/i18n/mapping.json",
     "assets/data_countries.json",
+    "assets/countries+states.json",
 ]
 
 # Same, for whole directories.

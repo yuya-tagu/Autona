@@ -25,7 +25,7 @@ import pytest
 from qtpy.QtGui import QStandardItem, QStandardItemModel
 from qtpy.QtWidgets import QComboBox, QLineEdit, QSpinBox
 
-from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
+from src.core.CountryCatalog import CountryCatalog
 from src.core.StateManager import StateManager
 
 
@@ -98,7 +98,7 @@ def test_set_data_resolves_a_free_form_state_name(autonaApp):
     """The state combo matches on the region's iso2 ("13"), but a
     state_code saved by an older build -- or auto-filled from Start.gg
     before this existed -- is a free-form name ("Tokyo"). SetData falls back
-    to AutonaCountryHelper.FindState for exactly that case, so the region
+    to CountryCatalog.FindState for exactly that case, so the region
     reaches the overlay instead of staying blank.
     """
     player = _player(autonaApp)
@@ -743,7 +743,7 @@ def test_refilled_states_still_resolve(autonaApp):
 
     combo = player._w("state", QComboBox)
     # Every region of the country, plus the blank row each rebuild starts with.
-    expected = len(AutonaCountryHelper.countries["JP"]["states"]) + 1
+    expected = len(CountryCatalog.instance.States("JP")) + 1
     assert combo.model().rowCount() == expected
     assert autonaApp.get(f"{player.path}.state").get("original_code") == "13"
 

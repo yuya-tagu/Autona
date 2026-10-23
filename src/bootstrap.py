@@ -206,14 +206,30 @@ def bootstrap_core():
     if AutonaUpdater.instance is None:
         AutonaUpdater.instance = AutonaUpdater()
 
-    # CountryHelper's __init__ is empty -- the expensive part (LoadCountries,
-    # ~250 flag icons + the country model) still runs from init(), called by
-    # the window. Its import-time construction used to happen wherever the
-    # module was first pulled in (in practice through StartGGDataProvider,
-    # i.e. earlier than the Autona.py import that nominally owned it); the
-    # constructor depends on nothing, so pinning it here is behaviour
-    # preserving and matches the old nominal import order (CountryHelper
-    # before ScoreboardManager).
+    # ORDER CONSTRAINT: the country catalog (the Qt-free source of truth for
+    # countries, regions and the city -> region lookup, ADR-005 S1c) has to
+    # exist before its Qt adapter right below, whose LoadCountries() drives
+    # it, and before any reader -- the player widgets built from
+    # Window.__init__, the Start.gg parser, the web server. It depends on
+    # nothing constructed here. Nothing is read here: the load runs from
+    # AutonaCountryHelper.init() in Window.__init__, after LoadLocale(),
+    # because the country names are localized and the locale is only read
+    # through the injected callable at load time (the GameAssetCatalog
+    # pattern).
+    from .core.CountryCatalog import CountryCatalog
+    if CountryCatalog.instance is None:
+        CountryCatalog.instance = CountryCatalog(
+            locales=lambda: (AutonaLocaleHelper.programLocale,
+                             AutonaLocaleHelper.exportLocale))
+
+    # CountryHelper (the catalog's Qt adapter) has an empty __init__ -- the
+    # expensive part (LoadCountries: the catalog load, ~250 flag icons + the
+    # country model) still runs from init(), called by the window. Its
+    # import-time construction used to happen wherever the module was first
+    # pulled in (in practice through StartGGDataProvider, i.e. earlier than
+    # the Autona.py import that nominally owned it); the constructor depends
+    # on nothing, so pinning it here is behaviour preserving and matches the
+    # old nominal import order (CountryHelper before ScoreboardManager).
     from .Helpers.AutonaCountryHelper import AutonaCountryHelper
     if AutonaCountryHelper.instance is None:
         AutonaCountryHelper.instance = AutonaCountryHelper()

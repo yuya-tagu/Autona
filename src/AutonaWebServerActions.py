@@ -6,10 +6,10 @@ from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 import orjson
 
-from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaQtHelper import gui_thread_sync
 from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
+from .core.CountryCatalog import CountryCatalog
 from .core.SettingsManager import SettingsManager
 from loguru import logger
 from .AutonaGameAssetManager import AutonaGameAssetManager
@@ -586,6 +586,8 @@ class WebServerActions(QObject):
             
             return "OK"
 
-    @gui_thread_sync
     def get_states(self, countryCode: str):
-        return AutonaCountryHelper.GetStates(countryCode)
+        # The country catalog, read on the calling (Flask / Socket.IO)
+        # thread: no GUI hop (ADR-005 S1c). Each region comes with its flag
+        # `asset`, whichever countries the desktop has shown so far.
+        return CountryCatalog.instance.States(countryCode)

@@ -225,7 +225,7 @@ AV は防ぐが**リークは防がない**。`AutonaBasePlayerWidget.LoadStates
 ## 15. `QCompleter(model)` はモデルへの Python 参照を保持しない（PySide6 6.11 実測）
 
 - コンストラクタ渡しは参照を保持せず、`QCompleter.setModel(model)` は保持する。共有モデルは `QCompleter()` + `setModel()` に分ける
-- 関連: `AutonaCountryHelper.LoadCountries()` は共有 `countryModel` を retire 世代なしで差し替えており #13 規約の唯一の例外（AV の原因ではないことは実証済み、頑健化余地あり）
+- 関連（2026-10-23 ADR-005 S1c で解消）: 共有 `AutonaCountryHelper.countryModel` は初回ロードで 1 個作ったきり差し替えない（再ロードは同じモデルを `clear()` + `appendRow` で入れ替える）。かつて #13 規約の唯一の例外だった「retire 世代なしの差し替え」はもう無い。選手ウィジェットのコンプリータも `QCompleter()` + `setModel()` に揃えた（`AutonaBasePlayerWidget._WireCountryState`）。再ロードは `clear()` の直前に `countriesAboutToReload` が出るので、国コンボの index を state に流す消費者はそこで経路を止め、`countriesUpdated` で選び直す（Top 8・選手カードが実例。止めないと再ロードで国が `{}` に publish される）
 
 ## 16. StateManager の observer から GameAssetCatalog の writer を呼ばない（ADR-005 S1a）
 
