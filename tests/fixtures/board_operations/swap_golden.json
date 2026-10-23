@@ -1,0 +1,5331 @@
+{
+ "operations": [
+  {
+   "step": "two players, two characters",
+   "cycles": 5,
+   "stats": {
+    "RecentSetsSignal": 0,
+    "LastSetsP1Signal": 0,
+    "LastSetsP2Signal": 0,
+    "PlayerHistoryStandingsP1Signal": 0,
+    "PlayerHistoryStandingsP2Signal": 0,
+    "UpsetFactorCalculation": 0
+   },
+   "state": {
+    "best_of": 0,
+    "best_of_short_text": "BO0",
+    "best_of_text": "",
+    "first_to": 0,
+    "first_to_short_text": "FT0",
+    "first_to_text": "",
+    "history_sets": {
+     "1": {},
+     "2": {}
+    },
+    "last_sets": {
+     "1": {},
+     "2": {}
+    },
+    "match": "",
+    "phase": "",
+    "pool": "",
+    "stages": {},
+    "station_queue": {},
+    "team": {
+     "1": {
+      "color": "#fe3636",
+      "losers": false,
+      "player": {
+       "1": {
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {},
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "seed": 0,
+        "state": {}
+       },
+       "2": {
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {},
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "seed": 0,
+        "state": {}
+       }
+      },
+      "score": 0,
+      "teamName": ""
+     },
+     "2": {
+      "color": "#2e89ff",
+      "losers": false,
+      "player": {
+       "1": {
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {},
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "seed": 0,
+        "state": {}
+       },
+       "2": {
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {},
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "seed": 0,
+        "state": {}
+       }
+      },
+      "score": 0,
+      "teamName": ""
+     }
+    }
+   },
+   "stateDigest": "2169246acf01bd80",
+   "published": [
+    1,
+    0,
+    "1bfe8d6bd884c3bb"
+   ],
+   "publishedRows": "ae33d2a4190deb43"
+  },
+  {
+   "step": "tracker on, best of 5",
+   "cycles": 1,
+   "stats": {
+    "RecentSetsSignal": 0,
+    "LastSetsP1Signal": 0,
+    "LastSetsP2Signal": 0,
+    "PlayerHistoryStandingsP1Signal": 0,
+    "PlayerHistoryStandingsP2Signal": 0,
+    "UpsetFactorCalculation": 0
+   },
+   "state": {
+    "best_of": 5,
+    "best_of_short_text": "BO5",
+    "best_of_text": "Best of 5",
+    "first_to": 3,
+    "first_to_short_text": "FT3",
+    "first_to_text": "First to 3",
+    "history_sets": {
+     "1": {},
+     "2": {}
+    },
+    "last_sets": {
+     "1": {},
+     "2": {}
+    },
+    "match": "",
+    "phase": "",
+    "pool": "",
+    "stages": {
+     "1": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "2": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "3": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "4": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "5": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     }
+    },
+    "station_queue": {},
+    "team": {
+     "1": {
+      "color": "#fe3636",
+      "losers": false,
+      "player": {
+       "1": {
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {},
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "seed": 0,
+        "state": {}
+       },
+       "2": {
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {},
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "seed": 0,
+        "state": {}
+       }
+      },
+      "score": 0,
+      "teamName": ""
+     },
+     "2": {
+      "color": "#2e89ff",
+      "losers": false,
+      "player": {
+       "1": {
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {},
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "seed": 0,
+        "state": {}
+       },
+       "2": {
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {},
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "seed": 0,
+        "state": {}
+       }
+      },
+      "score": 0,
+      "teamName": ""
+     }
+    }
+   },
+   "stateDigest": "da79359f318c4ae1",
+   "published": [
+    1,
+    0,
+    "7452436f6e75dfb3"
+   ],
+   "publishedRows": "8bab95622cb85e48"
+  },
+  {
+   "step": "fill team 1",
+   "cycles": 2,
+   "stats": {
+    "RecentSetsSignal": 1,
+    "LastSetsP1Signal": 1,
+    "LastSetsP2Signal": 0,
+    "PlayerHistoryStandingsP1Signal": 1,
+    "PlayerHistoryStandingsP2Signal": 0,
+    "UpsetFactorCalculation": 2
+   },
+   "state": {
+    "best_of": 5,
+    "best_of_short_text": "BO5",
+    "best_of_text": "Best of 5",
+    "first_to": 3,
+    "first_to_short_text": "FT3",
+    "first_to_text": "First to 3",
+    "history_sets": {
+     "1": {},
+     "2": {}
+    },
+    "last_sets": {
+     "1": {},
+     "2": {}
+    },
+    "match": "",
+    "phase": "",
+    "pool": "",
+    "recent_sets": {
+     "sets": [],
+     "state": "done"
+    },
+    "stages": {
+     "1": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "2": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "3": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "4": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "5": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     }
+    },
+    "station_queue": {},
+    "team": {
+     "1": {
+      "color": "#fe3636",
+      "losers": false,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {
+           "codename": "ex",
+           "display_name": "強化",
+           "en_name": "EX",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_ex.png",
+           "image_size": [
+            32,
+            32
+           ],
+           "name": "EX版"
+          }
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         }
+        },
+        "city": "Shibuya",
+        "country": {
+         "asset": "./assets/country_flag/jp.png",
+         "code": "JP",
+         "display_name": "Japan",
+         "emoji": "🇯🇵",
+         "en_name": "Japan",
+         "latitude": "36.00000000",
+         "longitude": "138.00000000",
+         "name": "日本"
+        },
+        "custom_textbox": "first\nnote",
+        "id": [
+         101,
+         1101
+        ],
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "SP | ALPHA",
+        "mergedOnlyName": "ALPHA",
+        "name": "ALPHA",
+        "online_avatar": "avatars/alpha.png",
+        "real_name": "Real Alpha",
+        "seed": 3,
+        "state": {
+         "asset": "./assets/state_flag/JP/13.png",
+         "code": "13",
+         "latitude": "35.67686010",
+         "longitude": "139.76389470",
+         "name": "Tokyo",
+         "original_code": "13"
+        },
+        "team": "SP",
+        "twitter": "alpha_tw"
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {
+           "codename": "alt",
+           "display_name": "Alt",
+           "en_name": "Alt",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_alt.jpg",
+           "image_size": null,
+           "name": "Alt"
+          }
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {
+         "asset": "./assets/country_flag/us.png",
+         "code": "US",
+         "display_name": "United States",
+         "emoji": "🇺🇸",
+         "en_name": "United States",
+         "latitude": "38.00000000",
+         "longitude": "-97.00000000",
+         "name": "アメリカ合衆国"
+        },
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "BETA",
+        "mergedOnlyName": "BETA",
+        "name": "BETA",
+        "online_avatar": null,
+        "seed": 7,
+        "state": {
+         "asset": "./assets/state_flag/US/CA.png",
+         "code": "CA",
+         "latitude": "36.70146310",
+         "longitude": "-118.75599700",
+         "name": "California",
+         "original_code": "CA"
+        }
+       }
+      },
+      "score": 0,
+      "teamName": ""
+     },
+     "2": {
+      "color": "#2e89ff",
+      "losers": false,
+      "player": {
+       "1": {
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {},
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "seed": 0,
+        "state": {}
+       },
+       "2": {
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {},
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "seed": 0,
+        "state": {}
+       }
+      },
+      "score": 0,
+      "teamName": ""
+     }
+    },
+    "upset_factor": 0
+   },
+   "stateDigest": "fa762460bb532be2",
+   "published": [
+    1,
+    0,
+    "e12b20433c0a5d07"
+   ],
+   "publishedRows": "4c42113d38324fbd"
+  },
+  {
+   "step": "fill team 2",
+   "cycles": 2,
+   "stats": {
+    "RecentSetsSignal": 2,
+    "LastSetsP1Signal": 0,
+    "LastSetsP2Signal": 2,
+    "PlayerHistoryStandingsP1Signal": 0,
+    "PlayerHistoryStandingsP2Signal": 2,
+    "UpsetFactorCalculation": 1
+   },
+   "state": {
+    "best_of": 5,
+    "best_of_short_text": "BO5",
+    "best_of_text": "Best of 5",
+    "first_to": 3,
+    "first_to_short_text": "FT3",
+    "first_to_text": "First to 3",
+    "history_sets": {
+     "1": {},
+     "2": {}
+    },
+    "last_sets": {
+     "1": {},
+     "2": {}
+    },
+    "match": "",
+    "phase": "",
+    "pool": "",
+    "recent_sets": {
+     "sets": [],
+     "state": "done"
+    },
+    "stages": {
+     "1": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "2": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "3": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "4": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "5": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     }
+    },
+    "station_queue": {},
+    "team": {
+     "1": {
+      "color": "#fe3636",
+      "losers": false,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {
+           "codename": "ex",
+           "display_name": "強化",
+           "en_name": "EX",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_ex.png",
+           "image_size": [
+            32,
+            32
+           ],
+           "name": "EX版"
+          }
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         }
+        },
+        "city": "Shibuya",
+        "country": {
+         "asset": "./assets/country_flag/jp.png",
+         "code": "JP",
+         "display_name": "Japan",
+         "emoji": "🇯🇵",
+         "en_name": "Japan",
+         "latitude": "36.00000000",
+         "longitude": "138.00000000",
+         "name": "日本"
+        },
+        "custom_textbox": "first\nnote",
+        "id": [
+         101,
+         1101
+        ],
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "SP | ALPHA",
+        "mergedOnlyName": "ALPHA",
+        "name": "ALPHA",
+        "online_avatar": "avatars/alpha.png",
+        "real_name": "Real Alpha",
+        "seed": 3,
+        "state": {
+         "asset": "./assets/state_flag/JP/13.png",
+         "code": "13",
+         "latitude": "35.67686010",
+         "longitude": "139.76389470",
+         "name": "Tokyo",
+         "original_code": "13"
+        },
+        "team": "SP",
+        "twitter": "alpha_tw"
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {
+           "codename": "alt",
+           "display_name": "Alt",
+           "en_name": "Alt",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_alt.jpg",
+           "image_size": null,
+           "name": "Alt"
+          }
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {
+         "asset": "./assets/country_flag/us.png",
+         "code": "US",
+         "display_name": "United States",
+         "emoji": "🇺🇸",
+         "en_name": "United States",
+         "latitude": "38.00000000",
+         "longitude": "-97.00000000",
+         "name": "アメリカ合衆国"
+        },
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "BETA",
+        "mergedOnlyName": "BETA",
+        "name": "BETA",
+        "online_avatar": null,
+        "seed": 7,
+        "state": {
+         "asset": "./assets/state_flag/US/CA.png",
+         "code": "CA",
+         "latitude": "36.70146310",
+         "longitude": "-118.75599700",
+         "name": "California",
+         "original_code": "CA"
+        }
+       }
+      },
+      "score": 0,
+      "teamName": ""
+     },
+     "2": {
+      "color": "#2e89ff",
+      "losers": false,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {
+         "asset": "./assets/country_flag/gb.png",
+         "code": "GB",
+         "display_name": "United Kingdom",
+         "emoji": "🇬🇧",
+         "en_name": "United Kingdom",
+         "latitude": "54.00000000",
+         "longitude": "-2.00000000",
+         "name": "イギリス"
+        },
+        "id": [
+         303,
+         3303
+        ],
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "GG | GAMMA",
+        "mergedOnlyName": "GAMMA",
+        "name": "GAMMA",
+        "online_avatar": null,
+        "seed": 12,
+        "state": {
+         "asset": "./assets/state_flag/GB/_CON.png",
+         "code": "CON",
+         "latitude": "50.44334890",
+         "longitude": "-4.62465660",
+         "name": "Cornwall",
+         "original_code": "CON"
+        },
+        "team": "GG"
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Osaka",
+        "country": {},
+        "id": [
+         404,
+         4404
+        ],
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "DELTA",
+        "mergedOnlyName": "DELTA",
+        "name": "DELTA",
+        "online_avatar": null,
+        "seed": 0,
+        "state": {}
+       }
+      },
+      "score": 0,
+      "teamName": ""
+     }
+    },
+    "upset_factor": 0
+   },
+   "stateDigest": "b163ab90e66fc2bb",
+   "published": [
+    1,
+    0,
+    "6badd555011908dc"
+   ],
+   "publishedRows": "0b835b2298047159"
+  },
+  {
+   "step": "three characters",
+   "cycles": 4,
+   "stats": {
+    "RecentSetsSignal": 0,
+    "LastSetsP1Signal": 0,
+    "LastSetsP2Signal": 0,
+    "PlayerHistoryStandingsP1Signal": 0,
+    "PlayerHistoryStandingsP2Signal": 0,
+    "UpsetFactorCalculation": 0
+   },
+   "state": {
+    "best_of": 5,
+    "best_of_short_text": "BO5",
+    "best_of_text": "Best of 5",
+    "first_to": 3,
+    "first_to_short_text": "FT3",
+    "first_to_text": "First to 3",
+    "history_sets": {
+     "1": {},
+     "2": {}
+    },
+    "last_sets": {
+     "1": {},
+     "2": {}
+    },
+    "match": "",
+    "phase": "",
+    "pool": "",
+    "recent_sets": {
+     "sets": [],
+     "state": "done"
+    },
+    "stages": {
+     "1": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "2": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "3": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "4": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "5": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     }
+    },
+    "station_queue": {},
+    "team": {
+     "1": {
+      "color": "#fe3636",
+      "losers": false,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {
+           "codename": "ex",
+           "display_name": "強化",
+           "en_name": "EX",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_ex.png",
+           "image_size": [
+            32,
+            32
+           ],
+           "name": "EX版"
+          }
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Shibuya",
+        "country": {
+         "asset": "./assets/country_flag/jp.png",
+         "code": "JP",
+         "display_name": "Japan",
+         "emoji": "🇯🇵",
+         "en_name": "Japan",
+         "latitude": "36.00000000",
+         "longitude": "138.00000000",
+         "name": "日本"
+        },
+        "custom_textbox": "first\nnote",
+        "id": [
+         101,
+         1101
+        ],
+        "mains": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {
+           "codename": "ex",
+           "display_name": "強化",
+           "en_name": "EX",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_ex.png",
+           "image_size": [
+            32,
+            32
+           ],
+           "name": "EX版"
+          }
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "SP | ALPHA",
+        "mergedOnlyName": "ALPHA",
+        "name": "ALPHA",
+        "online_avatar": "avatars/alpha.png",
+        "real_name": "Real Alpha",
+        "seed": 3,
+        "state": {
+         "asset": "./assets/state_flag/JP/13.png",
+         "code": "13",
+         "latitude": "35.67686010",
+         "longitude": "139.76389470",
+         "name": "Tokyo",
+         "original_code": "13"
+        },
+        "team": "SP",
+        "twitter": "alpha_tw"
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {
+           "codename": "alt",
+           "display_name": "Alt",
+           "en_name": "Alt",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_alt.jpg",
+           "image_size": null,
+           "name": "Alt"
+          }
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {
+         "asset": "./assets/country_flag/us.png",
+         "code": "US",
+         "display_name": "United States",
+         "emoji": "🇺🇸",
+         "en_name": "United States",
+         "latitude": "38.00000000",
+         "longitude": "-97.00000000",
+         "name": "アメリカ合衆国"
+        },
+        "mains": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {
+           "codename": "alt",
+           "display_name": "Alt",
+           "en_name": "Alt",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_alt.jpg",
+           "image_size": null,
+           "name": "Alt"
+          }
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "BETA",
+        "mergedOnlyName": "BETA",
+        "name": "BETA",
+        "online_avatar": null,
+        "seed": 7,
+        "state": {
+         "asset": "./assets/state_flag/US/CA.png",
+         "code": "CA",
+         "latitude": "36.70146310",
+         "longitude": "-118.75599700",
+         "name": "California",
+         "original_code": "CA"
+        }
+       }
+      },
+      "score": 0,
+      "teamName": ""
+     },
+     "2": {
+      "color": "#2e89ff",
+      "losers": false,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {
+         "asset": "./assets/country_flag/gb.png",
+         "code": "GB",
+         "display_name": "United Kingdom",
+         "emoji": "🇬🇧",
+         "en_name": "United Kingdom",
+         "latitude": "54.00000000",
+         "longitude": "-2.00000000",
+         "name": "イギリス"
+        },
+        "id": [
+         303,
+         3303
+        ],
+        "mains": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "GG | GAMMA",
+        "mergedOnlyName": "GAMMA",
+        "name": "GAMMA",
+        "online_avatar": null,
+        "seed": 12,
+        "state": {
+         "asset": "./assets/state_flag/GB/_CON.png",
+         "code": "CON",
+         "latitude": "50.44334890",
+         "longitude": "-4.62465660",
+         "name": "Cornwall",
+         "original_code": "CON"
+        },
+        "team": "GG"
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Osaka",
+        "country": {},
+        "id": [
+         404,
+         4404
+        ],
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "DELTA",
+        "mergedOnlyName": "DELTA",
+        "name": "DELTA",
+        "online_avatar": null,
+        "seed": 0,
+        "state": {}
+       }
+      },
+      "score": 0,
+      "teamName": ""
+     }
+    },
+    "upset_factor": 0
+   },
+   "stateDigest": "b22dc8b8e359af8e",
+   "published": [
+    1,
+    0,
+    "cdc6c9c010e13b9f"
+   ],
+   "publishedRows": "ffa1798f0515dc2c"
+  },
+  {
+   "step": "team names",
+   "cycles": 3,
+   "stats": {
+    "RecentSetsSignal": 0,
+    "LastSetsP1Signal": 0,
+    "LastSetsP2Signal": 0,
+    "PlayerHistoryStandingsP1Signal": 0,
+    "PlayerHistoryStandingsP2Signal": 0,
+    "UpsetFactorCalculation": 0
+   },
+   "state": {
+    "best_of": 5,
+    "best_of_short_text": "BO5",
+    "best_of_text": "Best of 5",
+    "first_to": 3,
+    "first_to_short_text": "FT3",
+    "first_to_text": "First to 3",
+    "history_sets": {
+     "1": {},
+     "2": {}
+    },
+    "last_sets": {
+     "1": {},
+     "2": {}
+    },
+    "match": "",
+    "phase": "",
+    "pool": "",
+    "recent_sets": {
+     "sets": [],
+     "state": "done"
+    },
+    "stages": {
+     "1": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "2": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "3": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "4": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "5": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     }
+    },
+    "station_queue": {},
+    "team": {
+     "1": {
+      "color": "#fe3636",
+      "logo": "./user_data/team_logo/alpha.png",
+      "losers": false,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {
+           "codename": "ex",
+           "display_name": "強化",
+           "en_name": "EX",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_ex.png",
+           "image_size": [
+            32,
+            32
+           ],
+           "name": "EX版"
+          }
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Shibuya",
+        "country": {
+         "asset": "./assets/country_flag/jp.png",
+         "code": "JP",
+         "display_name": "Japan",
+         "emoji": "🇯🇵",
+         "en_name": "Japan",
+         "latitude": "36.00000000",
+         "longitude": "138.00000000",
+         "name": "日本"
+        },
+        "custom_textbox": "first\nnote",
+        "id": [
+         101,
+         1101
+        ],
+        "mains": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {
+           "codename": "ex",
+           "display_name": "強化",
+           "en_name": "EX",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_ex.png",
+           "image_size": [
+            32,
+            32
+           ],
+           "name": "EX版"
+          }
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "SP | ALPHA",
+        "mergedOnlyName": "ALPHA",
+        "name": "ALPHA",
+        "online_avatar": "avatars/alpha.png",
+        "real_name": "Real Alpha",
+        "seed": 3,
+        "state": {
+         "asset": "./assets/state_flag/JP/13.png",
+         "code": "13",
+         "latitude": "35.67686010",
+         "longitude": "139.76389470",
+         "name": "Tokyo",
+         "original_code": "13"
+        },
+        "team": "SP",
+        "twitter": "alpha_tw"
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {
+           "codename": "alt",
+           "display_name": "Alt",
+           "en_name": "Alt",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_alt.jpg",
+           "image_size": null,
+           "name": "Alt"
+          }
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {
+         "asset": "./assets/country_flag/us.png",
+         "code": "US",
+         "display_name": "United States",
+         "emoji": "🇺🇸",
+         "en_name": "United States",
+         "latitude": "38.00000000",
+         "longitude": "-97.00000000",
+         "name": "アメリカ合衆国"
+        },
+        "mains": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {
+           "codename": "alt",
+           "display_name": "Alt",
+           "en_name": "Alt",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_alt.jpg",
+           "image_size": null,
+           "name": "Alt"
+          }
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "BETA",
+        "mergedOnlyName": "BETA",
+        "name": "BETA",
+        "online_avatar": null,
+        "seed": 7,
+        "state": {
+         "asset": "./assets/state_flag/US/CA.png",
+         "code": "CA",
+         "latitude": "36.70146310",
+         "longitude": "-118.75599700",
+         "name": "California",
+         "original_code": "CA"
+        }
+       }
+      },
+      "score": 0,
+      "teamName": "Alpha"
+     },
+     "2": {
+      "color": "#2e89ff",
+      "losers": false,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {
+         "asset": "./assets/country_flag/gb.png",
+         "code": "GB",
+         "display_name": "United Kingdom",
+         "emoji": "🇬🇧",
+         "en_name": "United Kingdom",
+         "latitude": "54.00000000",
+         "longitude": "-2.00000000",
+         "name": "イギリス"
+        },
+        "id": [
+         303,
+         3303
+        ],
+        "mains": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "GG | GAMMA",
+        "mergedOnlyName": "GAMMA",
+        "name": "GAMMA",
+        "online_avatar": null,
+        "seed": 12,
+        "state": {
+         "asset": "./assets/state_flag/GB/_CON.png",
+         "code": "CON",
+         "latitude": "50.44334890",
+         "longitude": "-4.62465660",
+         "name": "Cornwall",
+         "original_code": "CON"
+        },
+        "team": "GG"
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Osaka",
+        "country": {},
+        "id": [
+         404,
+         4404
+        ],
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "DELTA",
+        "mergedOnlyName": "DELTA",
+        "name": "DELTA",
+        "online_avatar": null,
+        "seed": 0,
+        "state": {}
+       }
+      },
+      "score": 0,
+      "teamName": "Bravo"
+     }
+    },
+    "upset_factor": 0
+   },
+   "stateDigest": "9d5cf3268956f494",
+   "published": [
+    1,
+    0,
+    "af6f1e15d951a1f5"
+   ],
+   "publishedRows": "652743e81a6c71f0"
+  },
+  {
+   "step": "stage results",
+   "cycles": 6,
+   "stats": {
+    "RecentSetsSignal": 0,
+    "LastSetsP1Signal": 0,
+    "LastSetsP2Signal": 0,
+    "PlayerHistoryStandingsP1Signal": 0,
+    "PlayerHistoryStandingsP2Signal": 0,
+    "UpsetFactorCalculation": 0
+   },
+   "state": {
+    "best_of": 5,
+    "best_of_short_text": "BO5",
+    "best_of_text": "Best of 5",
+    "first_to": 3,
+    "first_to_short_text": "FT3",
+    "first_to_text": "First to 3",
+    "history_sets": {
+     "1": {},
+     "2": {}
+    },
+    "last_sets": {
+     "1": {},
+     "2": {}
+    },
+    "match": "",
+    "phase": "",
+    "pool": "",
+    "recent_sets": {
+     "sets": [],
+     "state": "done"
+    },
+    "stages": {
+     "1": {
+      "t1_win": false,
+      "t2_win": true,
+      "tie": false
+     },
+     "2": {
+      "t1_win": true,
+      "t2_win": false,
+      "tie": false
+     },
+     "3": {
+      "t1_win": true,
+      "t2_win": false,
+      "tie": false
+     },
+     "4": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "5": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     }
+    },
+    "station_queue": {},
+    "team": {
+     "1": {
+      "color": "#fe3636",
+      "logo": "./user_data/team_logo/alpha.png",
+      "losers": false,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {
+           "codename": "ex",
+           "display_name": "強化",
+           "en_name": "EX",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_ex.png",
+           "image_size": [
+            32,
+            32
+           ],
+           "name": "EX版"
+          }
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Shibuya",
+        "country": {
+         "asset": "./assets/country_flag/jp.png",
+         "code": "JP",
+         "display_name": "Japan",
+         "emoji": "🇯🇵",
+         "en_name": "Japan",
+         "latitude": "36.00000000",
+         "longitude": "138.00000000",
+         "name": "日本"
+        },
+        "custom_textbox": "first\nnote",
+        "id": [
+         101,
+         1101
+        ],
+        "mains": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {
+           "codename": "ex",
+           "display_name": "強化",
+           "en_name": "EX",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_ex.png",
+           "image_size": [
+            32,
+            32
+           ],
+           "name": "EX版"
+          }
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "SP | ALPHA",
+        "mergedOnlyName": "ALPHA",
+        "name": "ALPHA",
+        "online_avatar": "avatars/alpha.png",
+        "real_name": "Real Alpha",
+        "seed": 3,
+        "state": {
+         "asset": "./assets/state_flag/JP/13.png",
+         "code": "13",
+         "latitude": "35.67686010",
+         "longitude": "139.76389470",
+         "name": "Tokyo",
+         "original_code": "13"
+        },
+        "team": "SP",
+        "twitter": "alpha_tw"
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {
+           "codename": "alt",
+           "display_name": "Alt",
+           "en_name": "Alt",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_alt.jpg",
+           "image_size": null,
+           "name": "Alt"
+          }
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {
+         "asset": "./assets/country_flag/us.png",
+         "code": "US",
+         "display_name": "United States",
+         "emoji": "🇺🇸",
+         "en_name": "United States",
+         "latitude": "38.00000000",
+         "longitude": "-97.00000000",
+         "name": "アメリカ合衆国"
+        },
+        "mains": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {
+           "codename": "alt",
+           "display_name": "Alt",
+           "en_name": "Alt",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_alt.jpg",
+           "image_size": null,
+           "name": "Alt"
+          }
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "BETA",
+        "mergedOnlyName": "BETA",
+        "name": "BETA",
+        "online_avatar": null,
+        "seed": 7,
+        "state": {
+         "asset": "./assets/state_flag/US/CA.png",
+         "code": "CA",
+         "latitude": "36.70146310",
+         "longitude": "-118.75599700",
+         "name": "California",
+         "original_code": "CA"
+        }
+       }
+      },
+      "score": 2,
+      "teamName": "Alpha"
+     },
+     "2": {
+      "color": "#2e89ff",
+      "losers": false,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {
+         "asset": "./assets/country_flag/gb.png",
+         "code": "GB",
+         "display_name": "United Kingdom",
+         "emoji": "🇬🇧",
+         "en_name": "United Kingdom",
+         "latitude": "54.00000000",
+         "longitude": "-2.00000000",
+         "name": "イギリス"
+        },
+        "id": [
+         303,
+         3303
+        ],
+        "mains": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "GG | GAMMA",
+        "mergedOnlyName": "GAMMA",
+        "name": "GAMMA",
+        "online_avatar": null,
+        "seed": 12,
+        "state": {
+         "asset": "./assets/state_flag/GB/_CON.png",
+         "code": "CON",
+         "latitude": "50.44334890",
+         "longitude": "-4.62465660",
+         "name": "Cornwall",
+         "original_code": "CON"
+        },
+        "team": "GG"
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Osaka",
+        "country": {},
+        "id": [
+         404,
+         4404
+        ],
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "DELTA",
+        "mergedOnlyName": "DELTA",
+        "name": "DELTA",
+        "online_avatar": null,
+        "seed": 0,
+        "state": {}
+       }
+      },
+      "score": 1,
+      "teamName": "Bravo"
+     }
+    },
+    "upset_factor": 0
+   },
+   "stateDigest": "32b6c1cc643adf78",
+   "published": [
+    1,
+    0,
+    "7a2f83b430d8f467"
+   ],
+   "publishedRows": "5535ae15b26eeda2"
+  },
+  {
+   "step": "losers",
+   "cycles": 1,
+   "stats": {
+    "RecentSetsSignal": 0,
+    "LastSetsP1Signal": 0,
+    "LastSetsP2Signal": 0,
+    "PlayerHistoryStandingsP1Signal": 0,
+    "PlayerHistoryStandingsP2Signal": 0,
+    "UpsetFactorCalculation": 0
+   },
+   "state": {
+    "best_of": 5,
+    "best_of_short_text": "BO5",
+    "best_of_text": "Best of 5",
+    "first_to": 3,
+    "first_to_short_text": "FT3",
+    "first_to_text": "First to 3",
+    "history_sets": {
+     "1": {},
+     "2": {}
+    },
+    "last_sets": {
+     "1": {},
+     "2": {}
+    },
+    "match": "",
+    "phase": "",
+    "pool": "",
+    "recent_sets": {
+     "sets": [],
+     "state": "done"
+    },
+    "stages": {
+     "1": {
+      "t1_win": false,
+      "t2_win": true,
+      "tie": false
+     },
+     "2": {
+      "t1_win": true,
+      "t2_win": false,
+      "tie": false
+     },
+     "3": {
+      "t1_win": true,
+      "t2_win": false,
+      "tie": false
+     },
+     "4": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "5": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     }
+    },
+    "station_queue": {},
+    "team": {
+     "1": {
+      "color": "#fe3636",
+      "logo": "./user_data/team_logo/alpha.png",
+      "losers": false,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {
+           "codename": "ex",
+           "display_name": "強化",
+           "en_name": "EX",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_ex.png",
+           "image_size": [
+            32,
+            32
+           ],
+           "name": "EX版"
+          }
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Shibuya",
+        "country": {
+         "asset": "./assets/country_flag/jp.png",
+         "code": "JP",
+         "display_name": "Japan",
+         "emoji": "🇯🇵",
+         "en_name": "Japan",
+         "latitude": "36.00000000",
+         "longitude": "138.00000000",
+         "name": "日本"
+        },
+        "custom_textbox": "first\nnote",
+        "id": [
+         101,
+         1101
+        ],
+        "mains": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {
+           "codename": "ex",
+           "display_name": "強化",
+           "en_name": "EX",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_ex.png",
+           "image_size": [
+            32,
+            32
+           ],
+           "name": "EX版"
+          }
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "SP | ALPHA",
+        "mergedOnlyName": "ALPHA",
+        "name": "ALPHA",
+        "online_avatar": "avatars/alpha.png",
+        "real_name": "Real Alpha",
+        "seed": 3,
+        "state": {
+         "asset": "./assets/state_flag/JP/13.png",
+         "code": "13",
+         "latitude": "35.67686010",
+         "longitude": "139.76389470",
+         "name": "Tokyo",
+         "original_code": "13"
+        },
+        "team": "SP",
+        "twitter": "alpha_tw"
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {
+           "codename": "alt",
+           "display_name": "Alt",
+           "en_name": "Alt",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_alt.jpg",
+           "image_size": null,
+           "name": "Alt"
+          }
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {
+         "asset": "./assets/country_flag/us.png",
+         "code": "US",
+         "display_name": "United States",
+         "emoji": "🇺🇸",
+         "en_name": "United States",
+         "latitude": "38.00000000",
+         "longitude": "-97.00000000",
+         "name": "アメリカ合衆国"
+        },
+        "mains": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {
+           "codename": "alt",
+           "display_name": "Alt",
+           "en_name": "Alt",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_alt.jpg",
+           "image_size": null,
+           "name": "Alt"
+          }
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "BETA",
+        "mergedOnlyName": "BETA",
+        "name": "BETA",
+        "online_avatar": null,
+        "seed": 7,
+        "state": {
+         "asset": "./assets/state_flag/US/CA.png",
+         "code": "CA",
+         "latitude": "36.70146310",
+         "longitude": "-118.75599700",
+         "name": "California",
+         "original_code": "CA"
+        }
+       }
+      },
+      "score": 2,
+      "teamName": "Alpha"
+     },
+     "2": {
+      "color": "#2e89ff",
+      "losers": true,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "country": {
+         "asset": "./assets/country_flag/gb.png",
+         "code": "GB",
+         "display_name": "United Kingdom",
+         "emoji": "🇬🇧",
+         "en_name": "United Kingdom",
+         "latitude": "54.00000000",
+         "longitude": "-2.00000000",
+         "name": "イギリス"
+        },
+        "id": [
+         303,
+         3303
+        ],
+        "mains": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "GG | GAMMA [L]",
+        "mergedOnlyName": "GAMMA [L]",
+        "name": "GAMMA",
+        "online_avatar": null,
+        "seed": 12,
+        "state": {
+         "asset": "./assets/state_flag/GB/_CON.png",
+         "code": "CON",
+         "latitude": "50.44334890",
+         "longitude": "-4.62465660",
+         "name": "Cornwall",
+         "original_code": "CON"
+        },
+        "team": "GG"
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Osaka",
+        "country": {},
+        "id": [
+         404,
+         4404
+        ],
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "DELTA [L]",
+        "mergedOnlyName": "DELTA [L]",
+        "name": "DELTA",
+        "online_avatar": null,
+        "seed": 0,
+        "state": {}
+       }
+      },
+      "score": 1,
+      "teamName": "Bravo"
+     }
+    },
+    "upset_factor": 0
+   },
+   "stateDigest": "ce595faa244b3084",
+   "published": [
+    1,
+    0,
+    "bfe43f0cfcf11ceb"
+   ],
+   "publishedRows": "e2ab3423eab8926a"
+  },
+  {
+   "step": "swap teams",
+   "cycles": 1,
+   "stats": {
+    "RecentSetsSignal": 6,
+    "LastSetsP1Signal": 3,
+    "LastSetsP2Signal": 3,
+    "PlayerHistoryStandingsP1Signal": 3,
+    "PlayerHistoryStandingsP2Signal": 3,
+    "UpsetFactorCalculation": 4
+   },
+   "state": {
+    "best_of": 5,
+    "best_of_short_text": "BO5",
+    "best_of_text": "Best of 5",
+    "first_to": 3,
+    "first_to_short_text": "FT3",
+    "first_to_text": "First to 3",
+    "history_sets": {
+     "1": {},
+     "2": {}
+    },
+    "last_sets": {
+     "1": {},
+     "2": {}
+    },
+    "match": "",
+    "phase": "",
+    "pool": "",
+    "recent_sets": {
+     "sets": [],
+     "state": "done"
+    },
+    "stages": {
+     "1": {
+      "t1_win": true,
+      "t2_win": false,
+      "tie": false
+     },
+     "2": {
+      "t1_win": false,
+      "t2_win": true,
+      "tie": false
+     },
+     "3": {
+      "t1_win": true,
+      "t2_win": false,
+      "tie": false
+     },
+     "4": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "5": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     }
+    },
+    "station_queue": {},
+    "team": {
+     "1": {
+      "color": "#fe3636",
+      "logo": null,
+      "losers": true,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": null,
+        "country": {
+         "asset": "./assets/country_flag/gb.png",
+         "code": "GB",
+         "display_name": "United Kingdom",
+         "emoji": "🇬🇧",
+         "en_name": "United Kingdom",
+         "latitude": "54.00000000",
+         "longitude": "-2.00000000",
+         "name": "イギリス"
+        },
+        "custom_textbox": "",
+        "id": [
+         303,
+         3303
+        ],
+        "mains": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {
+           "codename": "ex",
+           "display_name": "強化",
+           "en_name": "EX",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_ex.png",
+           "image_size": [
+            32,
+            32
+           ],
+           "name": "EX版"
+          }
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "GG | GAMMA [L]",
+        "mergedOnlyName": "GAMMA [L]",
+        "name": "GAMMA",
+        "online_avatar": null,
+        "real_name": "",
+        "seed": 12,
+        "state": {
+         "asset": "./assets/state_flag/GB/_CON.png",
+         "code": "CON",
+         "latitude": "50.44334890",
+         "longitude": "-4.62465660",
+         "name": "Cornwall",
+         "original_code": "CON"
+        },
+        "team": "GG",
+        "twitter": ""
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Osaka",
+        "country": {},
+        "custom_textbox": "",
+        "id": [
+         404,
+         4404
+        ],
+        "mains": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {
+           "codename": "alt",
+           "display_name": "Alt",
+           "en_name": "Alt",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_alt.jpg",
+           "image_size": null,
+           "name": "Alt"
+          }
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "DELTA [L]",
+        "mergedOnlyName": "DELTA [L]",
+        "name": "DELTA",
+        "online_avatar": null,
+        "real_name": "",
+        "seed": 0,
+        "state": {},
+        "team": "",
+        "twitter": ""
+       }
+      },
+      "score": 1,
+      "teamName": "Bravo"
+     },
+     "2": {
+      "color": "#2e89ff",
+      "logo": "./user_data/team_logo/alpha.png",
+      "losers": false,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {}
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Shibuya",
+        "country": {
+         "asset": "./assets/country_flag/jp.png",
+         "code": "JP",
+         "display_name": "Japan",
+         "emoji": "🇯🇵",
+         "en_name": "Japan",
+         "latitude": "36.00000000",
+         "longitude": "138.00000000",
+         "name": "日本"
+        },
+        "custom_textbox": "first\nnote",
+        "id": [
+         101,
+         1101
+        ],
+        "mains": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "SP | ALPHA",
+        "mergedOnlyName": "ALPHA",
+        "name": "ALPHA",
+        "online_avatar": "avatars/alpha.png",
+        "real_name": "Real Alpha",
+        "seed": 3,
+        "state": {
+         "asset": "./assets/state_flag/JP/13.png",
+         "code": "13",
+         "latitude": "35.67686010",
+         "longitude": "139.76389470",
+         "name": "Tokyo",
+         "original_code": "13"
+        },
+        "team": "SP",
+        "twitter": "alpha_tw"
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": null,
+        "country": {
+         "asset": "./assets/country_flag/us.png",
+         "code": "US",
+         "display_name": "United States",
+         "emoji": "🇺🇸",
+         "en_name": "United States",
+         "latitude": "38.00000000",
+         "longitude": "-97.00000000",
+         "name": "アメリカ合衆国"
+        },
+        "custom_textbox": "",
+        "id": null,
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "BETA",
+        "mergedOnlyName": "BETA",
+        "name": "BETA",
+        "online_avatar": null,
+        "real_name": "",
+        "seed": 7,
+        "state": {
+         "asset": "./assets/state_flag/US/CA.png",
+         "code": "CA",
+         "latitude": "36.70146310",
+         "longitude": "-118.75599700",
+         "name": "California",
+         "original_code": "CA"
+        },
+        "team": "",
+        "twitter": ""
+       }
+      },
+      "score": 2,
+      "teamName": "Alpha"
+     }
+    },
+    "teamsSwapped": true,
+    "upset_factor": 0
+   },
+   "stateDigest": "1720b7bf36714157",
+   "published": [
+    0,
+    1,
+    "b3283bf184bb082f"
+   ],
+   "publishedRows": "b3283bf184bb082f"
+  },
+  {
+   "step": "move a player down",
+   "cycles": 1,
+   "stats": {
+    "RecentSetsSignal": 4,
+    "LastSetsP1Signal": 4,
+    "LastSetsP2Signal": 0,
+    "PlayerHistoryStandingsP1Signal": 4,
+    "PlayerHistoryStandingsP2Signal": 0,
+    "UpsetFactorCalculation": 2
+   },
+   "state": {
+    "best_of": 5,
+    "best_of_short_text": "BO5",
+    "best_of_text": "Best of 5",
+    "first_to": 3,
+    "first_to_short_text": "FT3",
+    "first_to_text": "First to 3",
+    "history_sets": {
+     "1": {},
+     "2": {}
+    },
+    "last_sets": {
+     "1": {},
+     "2": {}
+    },
+    "match": "",
+    "phase": "",
+    "pool": "",
+    "recent_sets": {
+     "sets": [],
+     "state": "done"
+    },
+    "stages": {
+     "1": {
+      "t1_win": true,
+      "t2_win": false,
+      "tie": false
+     },
+     "2": {
+      "t1_win": false,
+      "t2_win": true,
+      "tie": false
+     },
+     "3": {
+      "t1_win": true,
+      "t2_win": false,
+      "tie": false
+     },
+     "4": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "5": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     }
+    },
+    "station_queue": {},
+    "team": {
+     "1": {
+      "color": "#fe3636",
+      "logo": null,
+      "losers": true,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Osaka",
+        "country": {},
+        "custom_textbox": "",
+        "id": [
+         404,
+         4404
+        ],
+        "mains": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {
+           "codename": "ex",
+           "display_name": "強化",
+           "en_name": "EX",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_ex.png",
+           "image_size": [
+            32,
+            32
+           ],
+           "name": "EX版"
+          }
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "DELTA [L]",
+        "mergedOnlyName": "DELTA [L]",
+        "name": "DELTA",
+        "online_avatar": null,
+        "real_name": "",
+        "seed": 0,
+        "state": {},
+        "team": "",
+        "twitter": ""
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": null,
+        "country": {
+         "asset": "./assets/country_flag/gb.png",
+         "code": "GB",
+         "display_name": "United Kingdom",
+         "emoji": "🇬🇧",
+         "en_name": "United Kingdom",
+         "latitude": "54.00000000",
+         "longitude": "-2.00000000",
+         "name": "イギリス"
+        },
+        "custom_textbox": "",
+        "id": [
+         303,
+         3303
+        ],
+        "mains": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {
+           "codename": "alt",
+           "display_name": "Alt",
+           "en_name": "Alt",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_alt.jpg",
+           "image_size": null,
+           "name": "Alt"
+          }
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "GG | GAMMA [L]",
+        "mergedOnlyName": "GAMMA [L]",
+        "name": "GAMMA",
+        "online_avatar": null,
+        "real_name": "",
+        "seed": 12,
+        "state": {
+         "asset": "./assets/state_flag/GB/_CON.png",
+         "code": "CON",
+         "latitude": "50.44334890",
+         "longitude": "-4.62465660",
+         "name": "Cornwall",
+         "original_code": "CON"
+        },
+        "team": "GG",
+        "twitter": ""
+       }
+      },
+      "score": 1,
+      "teamName": "Bravo"
+     },
+     "2": {
+      "color": "#2e89ff",
+      "logo": "./user_data/team_logo/alpha.png",
+      "losers": false,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {}
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Shibuya",
+        "country": {
+         "asset": "./assets/country_flag/jp.png",
+         "code": "JP",
+         "display_name": "Japan",
+         "emoji": "🇯🇵",
+         "en_name": "Japan",
+         "latitude": "36.00000000",
+         "longitude": "138.00000000",
+         "name": "日本"
+        },
+        "custom_textbox": "first\nnote",
+        "id": [
+         101,
+         1101
+        ],
+        "mains": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "SP | ALPHA",
+        "mergedOnlyName": "ALPHA",
+        "name": "ALPHA",
+        "online_avatar": "avatars/alpha.png",
+        "real_name": "Real Alpha",
+        "seed": 3,
+        "state": {
+         "asset": "./assets/state_flag/JP/13.png",
+         "code": "13",
+         "latitude": "35.67686010",
+         "longitude": "139.76389470",
+         "name": "Tokyo",
+         "original_code": "13"
+        },
+        "team": "SP",
+        "twitter": "alpha_tw"
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": null,
+        "country": {
+         "asset": "./assets/country_flag/us.png",
+         "code": "US",
+         "display_name": "United States",
+         "emoji": "🇺🇸",
+         "en_name": "United States",
+         "latitude": "38.00000000",
+         "longitude": "-97.00000000",
+         "name": "アメリカ合衆国"
+        },
+        "custom_textbox": "",
+        "id": null,
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "BETA",
+        "mergedOnlyName": "BETA",
+        "name": "BETA",
+        "online_avatar": null,
+        "real_name": "",
+        "seed": 7,
+        "state": {
+         "asset": "./assets/state_flag/US/CA.png",
+         "code": "CA",
+         "latitude": "36.70146310",
+         "longitude": "-118.75599700",
+         "name": "California",
+         "original_code": "CA"
+        },
+        "team": "",
+        "twitter": ""
+       }
+      },
+      "score": 2,
+      "teamName": "Alpha"
+     }
+    },
+    "teamsSwapped": true,
+    "upset_factor": 0
+   },
+   "stateDigest": "f303a746bcd01a3f",
+   "published": [
+    1,
+    0,
+    "8d21d6a036cfcac9"
+   ],
+   "publishedRows": "a64ea4cbf7ab5383"
+  },
+  {
+   "step": "move a player up",
+   "cycles": 1,
+   "stats": {
+    "RecentSetsSignal": 2,
+    "LastSetsP1Signal": 0,
+    "LastSetsP2Signal": 2,
+    "PlayerHistoryStandingsP1Signal": 0,
+    "PlayerHistoryStandingsP2Signal": 2,
+    "UpsetFactorCalculation": 2
+   },
+   "state": {
+    "best_of": 5,
+    "best_of_short_text": "BO5",
+    "best_of_text": "Best of 5",
+    "first_to": 3,
+    "first_to_short_text": "FT3",
+    "first_to_text": "First to 3",
+    "history_sets": {
+     "1": {},
+     "2": {}
+    },
+    "last_sets": {
+     "1": {},
+     "2": {}
+    },
+    "match": "",
+    "phase": "",
+    "pool": "",
+    "recent_sets": {
+     "sets": [],
+     "state": "done"
+    },
+    "stages": {
+     "1": {
+      "t1_win": true,
+      "t2_win": false,
+      "tie": false
+     },
+     "2": {
+      "t1_win": false,
+      "t2_win": true,
+      "tie": false
+     },
+     "3": {
+      "t1_win": true,
+      "t2_win": false,
+      "tie": false
+     },
+     "4": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "5": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     }
+    },
+    "station_queue": {},
+    "team": {
+     "1": {
+      "color": "#fe3636",
+      "logo": null,
+      "losers": true,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Osaka",
+        "country": {},
+        "custom_textbox": "",
+        "id": [
+         404,
+         4404
+        ],
+        "mains": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {
+           "codename": "ex",
+           "display_name": "強化",
+           "en_name": "EX",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_ex.png",
+           "image_size": [
+            32,
+            32
+           ],
+           "name": "EX版"
+          }
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "DELTA [L]",
+        "mergedOnlyName": "DELTA [L]",
+        "name": "DELTA",
+        "online_avatar": null,
+        "real_name": "",
+        "seed": 0,
+        "state": {},
+        "team": "",
+        "twitter": ""
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": null,
+        "country": {
+         "asset": "./assets/country_flag/gb.png",
+         "code": "GB",
+         "display_name": "United Kingdom",
+         "emoji": "🇬🇧",
+         "en_name": "United Kingdom",
+         "latitude": "54.00000000",
+         "longitude": "-2.00000000",
+         "name": "イギリス"
+        },
+        "custom_textbox": "",
+        "id": [
+         303,
+         3303
+        ],
+        "mains": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {
+           "codename": "alt",
+           "display_name": "Alt",
+           "en_name": "Alt",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_alt.jpg",
+           "image_size": null,
+           "name": "Alt"
+          }
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "GG | GAMMA [L]",
+        "mergedOnlyName": "GAMMA [L]",
+        "name": "GAMMA",
+        "online_avatar": null,
+        "real_name": "",
+        "seed": 12,
+        "state": {
+         "asset": "./assets/state_flag/GB/_CON.png",
+         "code": "CON",
+         "latitude": "50.44334890",
+         "longitude": "-4.62465660",
+         "name": "Cornwall",
+         "original_code": "CON"
+        },
+        "team": "GG",
+        "twitter": ""
+       }
+      },
+      "score": 1,
+      "teamName": "Bravo"
+     },
+     "2": {
+      "color": "#2e89ff",
+      "logo": "./user_data/team_logo/alpha.png",
+      "losers": false,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": null,
+        "country": {
+         "asset": "./assets/country_flag/us.png",
+         "code": "US",
+         "display_name": "United States",
+         "emoji": "🇺🇸",
+         "en_name": "United States",
+         "latitude": "38.00000000",
+         "longitude": "-97.00000000",
+         "name": "アメリカ合衆国"
+        },
+        "custom_textbox": "",
+        "id": null,
+        "mains": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "BETA",
+        "mergedOnlyName": "BETA",
+        "name": "BETA",
+        "online_avatar": null,
+        "real_name": "",
+        "seed": 7,
+        "state": {
+         "asset": "./assets/state_flag/US/CA.png",
+         "code": "CA",
+         "latitude": "36.70146310",
+         "longitude": "-118.75599700",
+         "name": "California",
+         "original_code": "CA"
+        },
+        "team": "",
+        "twitter": ""
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {}
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Shibuya",
+        "country": {
+         "asset": "./assets/country_flag/jp.png",
+         "code": "JP",
+         "display_name": "Japan",
+         "emoji": "🇯🇵",
+         "en_name": "Japan",
+         "latitude": "36.00000000",
+         "longitude": "138.00000000",
+         "name": "日本"
+        },
+        "custom_textbox": "first\nnote",
+        "id": [
+         101,
+         1101
+        ],
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "SP | ALPHA",
+        "mergedOnlyName": "ALPHA",
+        "name": "ALPHA",
+        "online_avatar": "avatars/alpha.png",
+        "real_name": "Real Alpha",
+        "seed": 3,
+        "state": {
+         "asset": "./assets/state_flag/JP/13.png",
+         "code": "13",
+         "latitude": "35.67686010",
+         "longitude": "139.76389470",
+         "name": "Tokyo",
+         "original_code": "13"
+        },
+        "team": "SP",
+        "twitter": "alpha_tw"
+       }
+      },
+      "score": 2,
+      "teamName": "Alpha"
+     }
+    },
+    "teamsSwapped": true,
+    "upset_factor": 0
+   },
+   "stateDigest": "8f0e0ed865e50917",
+   "published": [
+    1,
+    0,
+    "9aaee69855a93d22"
+   ],
+   "publishedRows": "89ea7493a43fa805"
+  },
+  {
+   "step": "move the top player up",
+   "cycles": 0,
+   "stats": {
+    "RecentSetsSignal": 0,
+    "LastSetsP1Signal": 0,
+    "LastSetsP2Signal": 0,
+    "PlayerHistoryStandingsP1Signal": 0,
+    "PlayerHistoryStandingsP2Signal": 0,
+    "UpsetFactorCalculation": 0
+   },
+   "state": {
+    "best_of": 5,
+    "best_of_short_text": "BO5",
+    "best_of_text": "Best of 5",
+    "first_to": 3,
+    "first_to_short_text": "FT3",
+    "first_to_text": "First to 3",
+    "history_sets": {
+     "1": {},
+     "2": {}
+    },
+    "last_sets": {
+     "1": {},
+     "2": {}
+    },
+    "match": "",
+    "phase": "",
+    "pool": "",
+    "recent_sets": {
+     "sets": [],
+     "state": "done"
+    },
+    "stages": {
+     "1": {
+      "t1_win": true,
+      "t2_win": false,
+      "tie": false
+     },
+     "2": {
+      "t1_win": false,
+      "t2_win": true,
+      "tie": false
+     },
+     "3": {
+      "t1_win": true,
+      "t2_win": false,
+      "tie": false
+     },
+     "4": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "5": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     }
+    },
+    "station_queue": {},
+    "team": {
+     "1": {
+      "color": "#fe3636",
+      "logo": null,
+      "losers": true,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Osaka",
+        "country": {},
+        "custom_textbox": "",
+        "id": [
+         404,
+         4404
+        ],
+        "mains": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {
+           "codename": "ex",
+           "display_name": "強化",
+           "en_name": "EX",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_ex.png",
+           "image_size": [
+            32,
+            32
+           ],
+           "name": "EX版"
+          }
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "DELTA [L]",
+        "mergedOnlyName": "DELTA [L]",
+        "name": "DELTA",
+        "online_avatar": null,
+        "real_name": "",
+        "seed": 0,
+        "state": {},
+        "team": "",
+        "twitter": ""
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": null,
+        "country": {
+         "asset": "./assets/country_flag/gb.png",
+         "code": "GB",
+         "display_name": "United Kingdom",
+         "emoji": "🇬🇧",
+         "en_name": "United Kingdom",
+         "latitude": "54.00000000",
+         "longitude": "-2.00000000",
+         "name": "イギリス"
+        },
+        "custom_textbox": "",
+        "id": [
+         303,
+         3303
+        ],
+        "mains": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {
+           "codename": "alt",
+           "display_name": "Alt",
+           "en_name": "Alt",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_alt.jpg",
+           "image_size": null,
+           "name": "Alt"
+          }
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "GG | GAMMA [L]",
+        "mergedOnlyName": "GAMMA [L]",
+        "name": "GAMMA",
+        "online_avatar": null,
+        "real_name": "",
+        "seed": 12,
+        "state": {
+         "asset": "./assets/state_flag/GB/_CON.png",
+         "code": "CON",
+         "latitude": "50.44334890",
+         "longitude": "-4.62465660",
+         "name": "Cornwall",
+         "original_code": "CON"
+        },
+        "team": "GG",
+        "twitter": ""
+       }
+      },
+      "score": 1,
+      "teamName": "Bravo"
+     },
+     "2": {
+      "color": "#2e89ff",
+      "logo": "./user_data/team_logo/alpha.png",
+      "losers": false,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": null,
+        "country": {
+         "asset": "./assets/country_flag/us.png",
+         "code": "US",
+         "display_name": "United States",
+         "emoji": "🇺🇸",
+         "en_name": "United States",
+         "latitude": "38.00000000",
+         "longitude": "-97.00000000",
+         "name": "アメリカ合衆国"
+        },
+        "custom_textbox": "",
+        "id": null,
+        "mains": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "BETA",
+        "mergedOnlyName": "BETA",
+        "name": "BETA",
+        "online_avatar": null,
+        "real_name": "",
+        "seed": 7,
+        "state": {
+         "asset": "./assets/state_flag/US/CA.png",
+         "code": "CA",
+         "latitude": "36.70146310",
+         "longitude": "-118.75599700",
+         "name": "California",
+         "original_code": "CA"
+        },
+        "team": "",
+        "twitter": ""
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {}
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Shibuya",
+        "country": {
+         "asset": "./assets/country_flag/jp.png",
+         "code": "JP",
+         "display_name": "Japan",
+         "emoji": "🇯🇵",
+         "en_name": "Japan",
+         "latitude": "36.00000000",
+         "longitude": "138.00000000",
+         "name": "日本"
+        },
+        "custom_textbox": "first\nnote",
+        "id": [
+         101,
+         1101
+        ],
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "SP | ALPHA",
+        "mergedOnlyName": "ALPHA",
+        "name": "ALPHA",
+        "online_avatar": "avatars/alpha.png",
+        "real_name": "Real Alpha",
+        "seed": 3,
+        "state": {
+         "asset": "./assets/state_flag/JP/13.png",
+         "code": "13",
+         "latitude": "35.67686010",
+         "longitude": "139.76389470",
+         "name": "Tokyo",
+         "original_code": "13"
+        },
+        "team": "SP",
+        "twitter": "alpha_tw"
+       }
+      },
+      "score": 2,
+      "teamName": "Alpha"
+     }
+    },
+    "teamsSwapped": true,
+    "upset_factor": 0
+   },
+   "stateDigest": "8f0e0ed865e50917",
+   "published": [
+    0,
+    0,
+    "b3283bf184bb082f"
+   ],
+   "publishedRows": "b3283bf184bb082f"
+  },
+  {
+   "step": "a point with the tracker on",
+   "cycles": 2,
+   "stats": {
+    "RecentSetsSignal": 0,
+    "LastSetsP1Signal": 0,
+    "LastSetsP2Signal": 0,
+    "PlayerHistoryStandingsP1Signal": 0,
+    "PlayerHistoryStandingsP2Signal": 0,
+    "UpsetFactorCalculation": 0
+   },
+   "state": {
+    "best_of": 5,
+    "best_of_short_text": "BO5",
+    "best_of_text": "Best of 5",
+    "first_to": 3,
+    "first_to_short_text": "FT3",
+    "first_to_text": "First to 3",
+    "history_sets": {
+     "1": {},
+     "2": {}
+    },
+    "last_sets": {
+     "1": {},
+     "2": {}
+    },
+    "match": "",
+    "phase": "",
+    "pool": "",
+    "recent_sets": {
+     "sets": [],
+     "state": "done"
+    },
+    "stages": {
+     "1": {
+      "t1_win": true,
+      "t2_win": false,
+      "tie": false
+     },
+     "2": {
+      "t1_win": false,
+      "t2_win": true,
+      "tie": false
+     },
+     "3": {
+      "t1_win": true,
+      "t2_win": false,
+      "tie": false
+     },
+     "4": {
+      "t1_win": false,
+      "t2_win": true,
+      "tie": false
+     },
+     "5": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     }
+    },
+    "station_queue": {},
+    "team": {
+     "1": {
+      "color": "#fe3636",
+      "logo": null,
+      "losers": true,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Osaka",
+        "country": {},
+        "custom_textbox": "",
+        "id": [
+         404,
+         4404
+        ],
+        "mains": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {
+           "codename": "ex",
+           "display_name": "強化",
+           "en_name": "EX",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_ex.png",
+           "image_size": [
+            32,
+            32
+           ],
+           "name": "EX版"
+          }
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "DELTA [L]",
+        "mergedOnlyName": "DELTA [L]",
+        "name": "DELTA",
+        "online_avatar": null,
+        "real_name": "",
+        "seed": 0,
+        "state": {},
+        "team": "",
+        "twitter": ""
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": null,
+        "country": {
+         "asset": "./assets/country_flag/gb.png",
+         "code": "GB",
+         "display_name": "United Kingdom",
+         "emoji": "🇬🇧",
+         "en_name": "United Kingdom",
+         "latitude": "54.00000000",
+         "longitude": "-2.00000000",
+         "name": "イギリス"
+        },
+        "custom_textbox": "",
+        "id": [
+         303,
+         3303
+        ],
+        "mains": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {
+           "codename": "alt",
+           "display_name": "Alt",
+           "en_name": "Alt",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_alt.jpg",
+           "image_size": null,
+           "name": "Alt"
+          }
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "GG | GAMMA [L]",
+        "mergedOnlyName": "GAMMA [L]",
+        "name": "GAMMA",
+        "online_avatar": null,
+        "real_name": "",
+        "seed": 12,
+        "state": {
+         "asset": "./assets/state_flag/GB/_CON.png",
+         "code": "CON",
+         "latitude": "50.44334890",
+         "longitude": "-4.62465660",
+         "name": "Cornwall",
+         "original_code": "CON"
+        },
+        "team": "GG",
+        "twitter": ""
+       }
+      },
+      "score": 1,
+      "teamName": "Bravo"
+     },
+     "2": {
+      "color": "#2e89ff",
+      "logo": "./user_data/team_logo/alpha.png",
+      "losers": false,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": null,
+        "country": {
+         "asset": "./assets/country_flag/us.png",
+         "code": "US",
+         "display_name": "United States",
+         "emoji": "🇺🇸",
+         "en_name": "United States",
+         "latitude": "38.00000000",
+         "longitude": "-97.00000000",
+         "name": "アメリカ合衆国"
+        },
+        "custom_textbox": "",
+        "id": null,
+        "mains": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "BETA",
+        "mergedOnlyName": "BETA",
+        "name": "BETA",
+        "online_avatar": null,
+        "real_name": "",
+        "seed": 7,
+        "state": {
+         "asset": "./assets/state_flag/US/CA.png",
+         "code": "CA",
+         "latitude": "36.70146310",
+         "longitude": "-118.75599700",
+         "name": "California",
+         "original_code": "CA"
+        },
+        "team": "",
+        "twitter": ""
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {}
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Shibuya",
+        "country": {
+         "asset": "./assets/country_flag/jp.png",
+         "code": "JP",
+         "display_name": "Japan",
+         "emoji": "🇯🇵",
+         "en_name": "Japan",
+         "latitude": "36.00000000",
+         "longitude": "138.00000000",
+         "name": "日本"
+        },
+        "custom_textbox": "first\nnote",
+        "id": [
+         101,
+         1101
+        ],
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "SP | ALPHA",
+        "mergedOnlyName": "ALPHA",
+        "name": "ALPHA",
+        "online_avatar": "avatars/alpha.png",
+        "real_name": "Real Alpha",
+        "seed": 3,
+        "state": {
+         "asset": "./assets/state_flag/JP/13.png",
+         "code": "13",
+         "latitude": "35.67686010",
+         "longitude": "139.76389470",
+         "name": "Tokyo",
+         "original_code": "13"
+        },
+        "team": "SP",
+        "twitter": "alpha_tw"
+       }
+      },
+      "score": 3,
+      "teamName": "Alpha"
+     }
+    },
+    "teamsSwapped": true,
+    "upset_factor": 0
+   },
+   "stateDigest": "557ebb89c5b7111f",
+   "published": [
+    1,
+    0,
+    "a0665b7f904f1e8f"
+   ],
+   "publishedRows": "e6b722a3566b5bee"
+  },
+  {
+   "step": "swap teams back",
+   "cycles": 1,
+   "stats": {
+    "RecentSetsSignal": 6,
+    "LastSetsP1Signal": 3,
+    "LastSetsP2Signal": 3,
+    "PlayerHistoryStandingsP1Signal": 3,
+    "PlayerHistoryStandingsP2Signal": 3,
+    "UpsetFactorCalculation": 4
+   },
+   "state": {
+    "best_of": 5,
+    "best_of_short_text": "BO5",
+    "best_of_text": "Best of 5",
+    "first_to": 3,
+    "first_to_short_text": "FT3",
+    "first_to_text": "First to 3",
+    "history_sets": {
+     "1": {},
+     "2": {}
+    },
+    "last_sets": {
+     "1": {},
+     "2": {}
+    },
+    "match": "",
+    "phase": "",
+    "pool": "",
+    "recent_sets": {
+     "sets": [],
+     "state": "done"
+    },
+    "stages": {
+     "1": {
+      "t1_win": false,
+      "t2_win": true,
+      "tie": false
+     },
+     "2": {
+      "t1_win": true,
+      "t2_win": false,
+      "tie": false
+     },
+     "3": {
+      "t1_win": false,
+      "t2_win": true,
+      "tie": false
+     },
+     "4": {
+      "t1_win": false,
+      "t2_win": false,
+      "tie": false
+     },
+     "5": {
+      "t1_win": false,
+      "t2_win": true,
+      "tie": false
+     }
+    },
+    "station_queue": {},
+    "team": {
+     "1": {
+      "color": "#fe3636",
+      "logo": "./user_data/team_logo/alpha.png",
+      "losers": false,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": null,
+        "country": {
+         "asset": "./assets/country_flag/us.png",
+         "code": "US",
+         "display_name": "United States",
+         "emoji": "🇺🇸",
+         "en_name": "United States",
+         "latitude": "38.00000000",
+         "longitude": "-97.00000000",
+         "name": "アメリカ合衆国"
+        },
+        "custom_textbox": "",
+        "id": null,
+        "mains": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {
+           "codename": "ex",
+           "display_name": "強化",
+           "en_name": "EX",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_ex.png",
+           "image_size": [
+            32,
+            32
+           ],
+           "name": "EX版"
+          }
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "BETA",
+        "mergedOnlyName": "BETA",
+        "name": "BETA",
+        "online_avatar": null,
+        "real_name": "",
+        "seed": 7,
+        "state": {
+         "asset": "./assets/state_flag/US/CA.png",
+         "code": "CA",
+         "latitude": "36.70146310",
+         "longitude": "-118.75599700",
+         "name": "California",
+         "original_code": "CA"
+        },
+        "team": "",
+        "twitter": ""
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "0231d3e56d86065d",
+          "codename": "mario",
+          "display_name": "瑪利歐",
+          "en_name": "Dr. Mario",
+          "modded": false,
+          "name": "Dr. Mario",
+          "skin": 2,
+          "variant": {}
+         },
+         "2": {
+          "assets": "0654ebeb9f202624",
+          "codename": "luigi",
+          "display_name": "路易吉",
+          "en_name": "Luigi",
+          "modded": false,
+          "name": "ルイージ",
+          "skin": 1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Shibuya",
+        "country": {
+         "asset": "./assets/country_flag/jp.png",
+         "code": "JP",
+         "display_name": "Japan",
+         "emoji": "🇯🇵",
+         "en_name": "Japan",
+         "latitude": "36.00000000",
+         "longitude": "138.00000000",
+         "name": "日本"
+        },
+        "custom_textbox": "first\nnote",
+        "id": [
+         101,
+         1101
+        ],
+        "mains": {
+         "1": {
+          "assets": "ac8d9cae931c54cd",
+          "codename": "peach",
+          "display_name": "碧姬",
+          "en_name": "Peach",
+          "modded": false,
+          "name": "Peach",
+          "skin": 1,
+          "variant": {
+           "codename": "alt",
+           "display_name": "Alt",
+           "en_name": "Alt",
+           "icon_path": "./user_data/games/tgame/variant_icon/var_alt.jpg",
+           "image_size": null,
+           "name": "Alt"
+          }
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "SP | ALPHA",
+        "mergedOnlyName": "ALPHA",
+        "name": "ALPHA",
+        "online_avatar": "avatars/alpha.png",
+        "real_name": "Real Alpha",
+        "seed": 3,
+        "state": {
+         "asset": "./assets/state_flag/JP/13.png",
+         "code": "13",
+         "latitude": "35.67686010",
+         "longitude": "139.76389470",
+         "name": "Tokyo",
+         "original_code": "13"
+        },
+        "team": "SP",
+        "twitter": "alpha_tw"
+       }
+      },
+      "score": 3,
+      "teamName": "Alpha"
+     },
+     "2": {
+      "color": "#2e89ff",
+      "logo": null,
+      "losers": true,
+      "player": {
+       "1": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": "Osaka",
+        "country": {},
+        "custom_textbox": "",
+        "id": [
+         404,
+         4404
+        ],
+        "mains": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "DELTA [L]",
+        "mergedOnlyName": "DELTA [L]",
+        "name": "DELTA",
+        "online_avatar": null,
+        "real_name": "",
+        "seed": 0,
+        "state": {},
+        "team": "",
+        "twitter": ""
+       },
+       "2": {
+        "avatar": null,
+        "birthday": false,
+        "character": {
+         "1": {
+          "assets": "f7fbae75b4bd34e9",
+          "codename": "koopa",
+          "display_name": "Bowser",
+          "en_name": "Bowser",
+          "modded": false,
+          "name": "Bowser",
+          "skin": 0,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "city": null,
+        "country": {
+         "asset": "./assets/country_flag/gb.png",
+         "code": "GB",
+         "display_name": "United Kingdom",
+         "emoji": "🇬🇧",
+         "en_name": "United Kingdom",
+         "latitude": "54.00000000",
+         "longitude": "-2.00000000",
+         "name": "イギリス"
+        },
+        "custom_textbox": "",
+        "id": [
+         303,
+         3303
+        ],
+        "mains": {
+         "1": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "2": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         },
+         "3": {
+          "assets": "44136fa355b3678a",
+          "name": "",
+          "skin": -1,
+          "variant": {}
+         }
+        },
+        "mergedName": "GG | GAMMA [L]",
+        "mergedOnlyName": "GAMMA [L]",
+        "name": "GAMMA",
+        "online_avatar": null,
+        "real_name": "",
+        "seed": 12,
+        "state": {
+         "asset": "./assets/state_flag/GB/_CON.png",
+         "code": "CON",
+         "latitude": "50.44334890",
+         "longitude": "-4.62465660",
+         "name": "Cornwall",
+         "original_code": "CON"
+        },
+        "team": "GG",
+        "twitter": ""
+       }
+      },
+      "score": 1,
+      "teamName": "Bravo"
+     }
+    },
+    "teamsSwapped": false,
+    "upset_factor": 0
+   },
+   "stateDigest": "1f1331f4d98b69b8",
+   "published": [
+    0,
+    1,
+    "b3283bf184bb082f"
+   ],
+   "publishedRows": "b3283bf184bb082f"
+  }
+ ]
+}

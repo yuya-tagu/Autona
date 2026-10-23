@@ -151,6 +151,7 @@ pin: `tests/test_save_block_symmetry.py`
 `test_state_still_exports_after_a_failing_best_of_handler` の 2 件は
 修正前のコードで実際に失敗することを確認済み。
 `test_the_best_of_handler_is_a_method_not_a_lambda_chain` が構造の再発を止める）。
+ADR-005 S2e で書き込みが core の `AutonaActions.SetBestOf` / `RepublishBestOf` に移り、構造の検査対象も core へ移した（整形の失敗は英語既定へフォールバックするので、block 内で実際に例外を出す検査は `test_a_raising_write_inside_the_best_of_block_leaves_saving_unblocked` が担う）。
 
 同じファイルの他の `BlockSaving()` 対（`NewSetSelected` / `ChangeSetData`）は
 いずれも `try/finally` で `ReleaseSaving()` を保証しており、同型ではない。
@@ -167,7 +168,8 @@ pin: `tests/test_save_block_symmetry.py`
 `test_no_hand_paired_block_saving_left_in_autona_py`。`src/Autona.py` は import 自体が
 起動シーケンスでテストから import できないため、`ast` によるソース静的検査で書いている）。
 `AutonaScoreboardPlayerWidget.SetData` / `AutonaTeamPlayerWidget.SetData` /
-`AutonaBasePlayerWidget.SwapWith` は try/finally 済み。
+`AutonaBasePlayerWidget.SwapWith` は try/finally 済み（`SwapWith` は ADR-005 S2c で削除。
+スワップは `AutonaActions.SwapTeams` の 1 SaveBlock になった）。
 
 #### BUG-4: crew ボードの `reset_match` が best_of を state からクリアしない 🟡 **[修正済み]**
 

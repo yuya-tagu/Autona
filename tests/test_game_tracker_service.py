@@ -117,6 +117,20 @@ def test_setting_the_stage_count_again_clears_the_previous_set(tracker):
     assert _winners(tracker) == [UNREPORTED] * 3
 
 
+def test_every_rebuild_moves_the_rows_version():
+    """Also to the same count: the widget rebuilds its buttons from this
+    (AutonaIndividualGameTracker.RenderStageRows, ADR-005 S2e), and a game
+    load resets the rows without changing their number."""
+    service = GameTrackerService(BOARD)
+    assert service.rowsVersion == 0
+
+    service.SetStageCount(5)
+    service.SetStageCount(5)
+    service.SetStageResult(0, TEAM_1)
+
+    assert service.rowsVersion == 2
+
+
 def test_rebuilding_the_rows_is_one_save_cycle():
     """Five rows are 16 keys; OBS must not see them arrive one at a time."""
     service = GameTrackerService(BOARD)
@@ -160,6 +174,31 @@ def test_a_result_is_written_exclusively(tracker, winner, flags):
     row = SM.Get(f"{PREFIX}.stages.1")
     assert {key: row[key] for key in flags} == flags
     assert tracker.GameWinner(0) == winner
+
+
+@pytest.mark.parametrize("index", [5, 7, -1])
+def test_a_game_the_set_does_not_have_is_not_written(tracker, index):
+    """SetStageCount alone decides how many rows there are. A click on a
+    button whose row a set length from another thread has just removed must
+    not add one back (a stray `stages.6`, out of sequence)."""
+    before = deep_clone(SM.Get(f"{PREFIX}.stages"))
+
+    assert tracker.SetStageResult(index, TEAM_1) is False
+    assert tracker.SetStageAsset(index, {"name": "Final Destination"}) \
+        is False
+
+    assert SM.Get(f"{PREFIX}.stages") == before
+    assert tracker.StageCount() == 5
+
+
+def test_a_shrunk_set_refuses_its_old_last_game(tracker):
+    tracker.SetStageCount(3)
+
+    assert tracker.SetStageResult(4, TEAM_2) is False
+    assert tracker.SetStageResult(2, TEAM_2) is True
+
+    assert set(SM.Get(f"{PREFIX}.stages")) == {"1", "2", "3"}
+    assert _winners(tracker) == [UNREPORTED, UNREPORTED, TEAM_2]
 
 
 def test_a_row_that_is_not_a_dict_reads_as_unreported(tracker):

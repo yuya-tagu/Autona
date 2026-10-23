@@ -251,10 +251,10 @@ def test_the_player_widgets_do_not_write_the_state_directly():
     always a keypath built from `self.path` plus something -- and the
     "something" was an objectName every time. Checking for the write rather
     than for `objectName()` is what makes this readable: the widgets still
-    call objectName() legitimately (Clear's field filter, SwapWith's
-    widget-to-widget copy, the character combos' width rules), so an
-    objectName ban would need an allowlist that grows until it means
-    nothing.
+    call objectName() legitimately (Clear's field filter, the character
+    combos' width rules -- and, until ADR-005 S2c made the swap a state
+    operation, SwapWith's widget-to-widget copy), so an objectName ban would
+    need an allowlist that grows until it means nothing.
 
     SaveBlock / BlockSaving / ReleaseSaving are deliberately not covered:
     they coalesce cycles, they do not name keys.

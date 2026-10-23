@@ -178,7 +178,7 @@
 |---------------|------------|--------------|-----------|
 | `GET /api/v1/state` | 全状態（フル） | `program_state` | #1 |
 | `GET /api/v1/health` | §5.1 参照（新規） | 新規 | — |
-| `GET /api/v1/scoreboards/{n}` | スコアボード n の状態（`swapped` 含む） | `get_scoreboard`(+`get_swap`) | #9/#22 |
+| `GET /api/v1/scoreboards/{n}` | スコアボード n の状態（`swapped` 含む。`swapped` はボード 1/2 では `score.{n}.teamsSwapped` のライブ値（反映前でも入替を返す。ADR-005 S2c〜）、ボード 3 はクルーウィジェットのフラグ） | `get_scoreboard`(+`get_swap`) | #9/#22 |
 | `GET /api/v1/games` | ゲーム一覧 | `get_games` | #15 |
 | `GET /api/v1/games/current` | 現在ゲーム | `get_current_game` | #16 |
 | `GET /api/v1/match-names` | match/phase 名候補 | `get_match_names` | #17 |
@@ -271,7 +271,17 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 
 ### 6.3 チーム入替 `POST /api/v1/scoreboards/{n}:swap-teams`
 - body: なし
-- 委譲: `swap_teams` = #21
+- 委譲: `swap_teams` = #21 → ボードを構築してから `AutonaActions.SwapTeams`（core。ADR-005 S2c〜）
+- 入れ替えるもの: 選手スロット全体（キャラのバリアント・mains・id・city・アバター・スポンサー画像を含む）・
+  スコア・LOSERS・チーム名・チームロゴ・ゲームトラッカーの勝敗（鏡映）。**チームカラーは入れ替えない**（色は列のもの）。
+  `score.{n}.teamsSwapped` を反転する（セット読込がどちらの列に第 1 エントラントを置くかの正本）。1 回の保存サイクル。
+- `@gui_thread_sync` で同期実行（S2f まで。選手カードの入力確定が GUI スレッドで 2 書き込みに分かれるため、
+  その間に入らないように）。応答時点で入替は完了している（旧実装は queued シグナルで、入替前に `OK` を返していた）。
+  入力中の欄があれば先に確定する（フォーカスを外して Qt に確定させる。打ちかけの文字はその選手と一緒に動く。旧実装と同じ）。
+- 未構築のボードは従来どおり構築してから入れ替える（未構築ボードは held 登録されていないので、構築前に入れ替えると
+  即時公開されたうえ、構築時のシードで消える）。held 対象（反映待ち）。
+- 旧ルート `/scoreboard{n}-swap-teams` / Socket.IO `swap_teams` も同じ Action。ボード 3 は旧ルートではクルーウィジェット自身の
+  入替に委譲（v1 は `require_board_12` で拒否）。
 
 ### 6.4 チームカラー `POST /api/v1/scoreboards/{n}/teams/{t}/color`
 - body: `{ "color": "#FF0000" }`（`#` 付き hex）
@@ -286,12 +296,15 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
     "teamName": { "team": 1, "value": "Team Alpha" } }
   ```
 - 委譲: `set_route`（既存はクエリ引数。本 API は JSON を同 Action にマップ）= #10
-- `teamName`（2026-10-21 追加・Web UI 移行用）: 旧 `-set?teamName=&team=` 相当。`set_route` は `team` を
-  `losers` と共用するため、`teamName` は別呼び出しで最後に適用する（旧クエリと同じ順序）。
+- `teamName`（2026-10-21 追加・Web UI 移行用）: 旧 `-set?teamName=&team=` 相当。`teamName` は別呼び出しで最後に適用する
+  （他のキー → `losers` → `teamName`。旧クエリと同じ適用順）。
   チーム名は**状態側のチーム**（`team{t}column`）に書く。
-- `losers` も**状態側のチーム**。`set_route` の losers は set 形式（`SetLoadService.ApplyLosers` が `DisplayTeam` を通す）
-  なので、v1 層がスワップ状態を読んでチーム番号を補正してから委譲する（読み取りと適用は 1 つの GUI スレッドタスク内）。
-  旧 `-set?losers=` はスワップ中に反対側へ着地する（旧ルートは不変）。
+- `losers` も**状態側のチーム**。`set_route` には渡さず `WebServerActions.set_team_losers` → `AutonaActions.SetTeamLosers` を呼ぶ（ADR-005 S2b〜。
+  それ以前は set 形式の `set_route` の losers をスワップ状態で補正して委譲していた）。フラグとそのチームの選手名の
+  ` [L]`（`mergedName` / `mergedOnlyName`）を書く。旧経路（`ChangeSetData` ペイロード）の副作用は外部挙動として維持する:
+  `match_en` を空にする（`SetLoadService.ApplyMatchInfo({})` をフラグと同じ保存サイクルで適用。フラグが変わらなくても空にする）、
+  未構築のボードを構築する（構築で `score.{n}` が held 登録され、反映待ちになる）。
+  適用順は旧クエリと同じ（他のキー → losers → `teamName`）。旧 `-set?losers=` はスワップ中に反対側へ着地する（旧ルートは不変）。
 - 空の `phase` / `match` は「指定なし」扱いで反映されない（`SetLoadService.ApplyMatchInfo`・旧ルートと同じ）。
   `pool` は空文字でクリアされる。
 - エラー: `INVALID_ARGUMENT`（型不正・team 範囲外・`teamName` が `{team,value}` でない／value が文字列でない）
@@ -514,13 +527,13 @@ HTTP/1.1 409 Conflict
 | `GET /state` | `program_state` | ✕ | なし（`GetFullState`） | — |
 | `GET /health` | （新規） | — | `out` 未生成時の getmtime → ファイル無ガード | 内部で握り潰し |
 | `GET /scoreboards/{n}` | `get_scoreboard` | ✕ | n 不正→`GetScoreboard()`=None→`None.scoreboardNumber` で **AttributeError** | `INVALID_ARGUMENT`（n 事前検証） |
-| `GET /scoreboards/{n}`(swap) | `get_swap` | ✕ | 同上（`None.teamsSwapped`） | `INVALID_ARGUMENT` |
+| `GET /scoreboards/{n}`(swap) | `get_swap` | ✕ | ボードを構築してから、ボード 1/2 は `score.{n}.teamsSwapped` を読む（ADR-005 S2c〜）。n 不正→None→`None.teamsSwapped` | `INVALID_ARGUMENT` |
 | `GET /games`他マスタ | `get_games`等 | ✕ | アセット未ロードで空。致命例外は低。ADR-005 S1b からゲームアセットカタログを直接読む（GUI スレッドを経由しない） | — |
 | `GET /sets` | `get_sets` | ✕ | provider null は **✓ガード済→[]**。ただし `provider.GetMatches()` は**同期 Start.gg 呼び**で例外/タイムアウト | `UPSTREAM_TIMEOUT`（要 try/except） |
 | `GET /sets/{id}` | `get_match` | ✕ | **provider null 未チェック→AttributeError**／`int(setId)` 失敗→ValueError／同期 Start.gg 呼び | `NOT_READY`/`INVALID_ARGUMENT`/`UPSTREAM_TIMEOUT` |
 | `POST .../score:adjust` | `team_scoreup/down` | ✕ | n/t 不正→`GetScoreboard()`=None→**AttributeError** | `INVALID_ARGUMENT` |
 | `POST .../teams/{t}/color` | `team_color` | ✕ | n/t 不正→None→AttributeError／色形式未検証 | `INVALID_ARGUMENT` |
-| `POST .../:swap-teams` | `swap_teams` | ✕ | n 不正→None→AttributeError | `INVALID_ARGUMENT` |
+| `POST .../:swap-teams` | `swap_teams` | ✓ | ボードを構築してから、ボード 1/2 は `AutonaActions.SwapTeams`（ADR-005 S2c〜）。n 不正→None→AttributeError | `INVALID_ARGUMENT` |
 | `POST .../score:reset` | `reset_scores` | ✓ | n 不正→None→AttributeError | `INVALID_ARGUMENT` |
 | `PATCH .../set` | `set_route` | ✓ | n 不正→None／`int(bestOf/players/characters)` 失敗→ValueError | `INVALID_ARGUMENT` |
 | `POST .../:clear` | `clear_all` | ✓ | n 不正→None→AttributeError | `INVALID_ARGUMENT`（+ confirm 検証） |

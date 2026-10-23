@@ -17,7 +17,9 @@ write.
 
 What is deliberately still here: the rows themselves, the stage combo bound
 to AutonaGameAssetManager's shared model, and `signals.stageResultsUpdate`,
-which is how the board learns the score changed.
+which is how the board learns the score changed. How many rows there are is
+the state's as well since ADR-005 S2e (AutonaActions.SetBestOf resizes them
+with the set length); RenderStageRows builds the buttons for them.
 """
 
 from qtpy.QtCore import *
@@ -62,6 +64,9 @@ class AutonaIndividualGameTracker(QWidget):
         self.setLayout(self._layout)
         self.stage_widget_list = []
         self.stage_order_list_widget = QWidget()
+        # The service's rowsVersion the rows were last built for; None until
+        # the first RenderStageRows(), which always builds.
+        self._renderedRowsVersion = None
 
     @property
     def writingScore(self) -> bool:
@@ -169,8 +174,9 @@ class AutonaIndividualGameTracker(QWidget):
         The asset manager replaces its models on every game load and keeps
         the previous generation alive for one more load only
         (agent-pitfalls #13). The board normally rebuilds the rows on the
-        same onLoad (bestOf re-emit -> SetStageCount), but a row that
-        survived it would be left bound to a model that the next load
+        same onLoad (AutonaActions.RepublishBestOf resets them, and
+        RenderStageRows rebuilds the buttons from the held cycle), but a row
+        that survived it would be left bound to a model that the next load
         deletes. Signals are blocked: this is not a stage selection, and
         must not write score.{n}.stages.*.
 
@@ -194,10 +200,14 @@ class AutonaIndividualGameTracker(QWidget):
 
     @assert_gui_thread
     def _StageResultClicked(self, index, result, button):
-        self.service.SetStageResult(
+        written = self.service.SetStageResult(
             index, result if button.isChecked() else UNREPORTED)
         self._SyncStageButtons()
-        self.StageResultsChanged()
+        # A row the set no longer has (resized from another thread, its
+        # buttons not rebuilt yet) is refused: the score is not summed from
+        # a click that recorded nothing.
+        if written:
+            self.StageResultsChanged()
 
     @assert_gui_thread
     def _StageAssetChanged(self, index, combo):
@@ -207,8 +217,25 @@ class AutonaIndividualGameTracker(QWidget):
         self.service.SetStageAsset(index, combo.currentData())
 
     @assert_gui_thread
-    def SetStageCount(self, stage_count=5):
-        """Sets the max number of stages in the set"""
+    def RenderStageRows(self):
+        """Show one row per game the state records. Writes nothing.
+
+        The rows are resized by core with the set length
+        (AutonaActions.SetBestOf -> GameTrackerService.SetStageCount, ADR-005
+        S2e); this used to be the method that did both, from the BEST OF
+        spinbox's valueChanged. Called by the board on every held cycle,
+        before the score is followed onto the rows, so the buttons a
+        transition is rendered on are the ones it was made for.
+
+        Rebuilt when core rebuilt the rows -- also to the same number, which
+        is what a game load does: the stage combos start over with the new
+        game's stages -- and otherwise left alone.
+        """
+        count = self.service.StageCount()
+        if (self._renderedRowsVersion == self.service.rowsVersion
+                and len(self.stage_widget_list) == count):
+            return
+        self._renderedRowsVersion = self.service.rowsVersion
 
         self._layout.removeWidget(self.stage_order_list_widget)
         # ...and actually destroy it. removeWidget() only detaches it from the
@@ -229,26 +256,25 @@ class AutonaIndividualGameTracker(QWidget):
         self.stage_order_list_widget = QWidget()
         self.stage_order_list_widget.setLayout(self.stage_order_list_layout)
 
-        # 0 when the feature is switched off or the best-of is unset, which
-        # is also what hides the widget.
-        count = self.service.ResolveStageCount(stage_count)
+        # 0 when the feature is switched off or the best-of is unset
+        # (GameTrackerService.ResolveStageCount), which is also what hides
+        # the widget.
         self.setVisible(count > 0)
         for i in range(count):
             self.stage_widget_list.append(self.CreateStage(i))
             self.stage_order_list_layout.addWidget(self.stage_widget_list[-1])
-        # After the rows, and in one save cycle: building a row no longer
-        # writes anything, so the rebuilt list is published in one go.
-        self.service.SetStageCount(count)
         self._layout.addWidget(self.stage_order_list_widget)
+        self._SyncStageButtons()
 
     @Slot(int, int)
     @assert_gui_thread
     def UpdateScore(self, team, new_value):
         """Responds to the score being modified in a non-per-game context.
 
-        The score spinbox's valueChanged handler: set loading, ClearScore
-        and SwapTeams drive the widget, and this publishes the result and
-        moves the rows to match.
+        The score spinbox's valueChanged handler. Only a number typed into
+        the score display drives the spinbox now (the clears write the state
+        since ADR-005 S2d); this publishes the result and moves the rows to
+        match.
         """
         self.service.UpdateScore(team, new_value)
         self._SyncStageButtons()
@@ -271,6 +297,8 @@ class AutonaIndividualGameTracker(QWidget):
         self.signals.stageResultsUpdate.emit(team_1_score, team_2_score)
 
     @assert_gui_thread
-    def SwapStageResults(self):
-        self.service.SwapStageResults()
+    def RenderStageResults(self):
+        """Redraw the buttons from the recorded results, for a write that
+        did not come through here -- a swap mirrors the rows in core
+        (AutonaActions.SwapTeams, ADR-005 S2c). Writes nothing."""
         self._SyncStageButtons()

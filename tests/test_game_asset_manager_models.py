@@ -250,10 +250,15 @@ def test_a_tracker_row_is_rebound_to_the_new_stage_model(
         lambda key, default=None:
             False if key == "general.disable_individual_game_tracker"
             else realGet(key, default)))
+    from src.core.Actions import AutonaActions
+
     manager = goldenGames
     _load(manager, "tgame")
     tracker = autonaApp.board(1).individualGameTracker
-    tracker.SetStageCount(3)
+    # Three rows: the set length resizes them in core, and the board builds
+    # their buttons from its held cycle (ADR-005 S2e).
+    AutonaActions.instance.SetBestOf(1, 3)
+    autonaApp.settle()
     combos = [row.findChild(QComboBox, f"stageMenu_{index}")
               for index, row in enumerate(tracker.stage_widget_list)]
     assert combos and all(c is not None for c in combos)

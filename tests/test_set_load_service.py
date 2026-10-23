@@ -76,23 +76,27 @@ def _isolated_state():
 
 
 class _Swap:
-    """A settable stand-in for the board's teamsSwapped attribute."""
+    """Which way round the board is: `score.{n}.teamsSwapped`, the flag
+    AutonaActions.SwapTeams toggles (ADR-005 S2c; it used to be read from
+    the board's attribute through a callable)."""
 
-    def __init__(self, value=False):
-        self.value = value
+    @property
+    def value(self):
+        return SM.Get(f"{PREFIX}.teamsSwapped", False)
 
-    def __call__(self):
-        return self.value
+    @value.setter
+    def value(self, swapped):
+        SM.Set(f"{PREFIX}.teamsSwapped", swapped)
 
 
 @pytest.fixture
 def swap():
-    return _Swap(False)
+    return _Swap()
 
 
 @pytest.fixture
 def service(swap):
-    return SetLoadService(BOARD, swap)
+    return SetLoadService(BOARD)
 
 
 def _score(team):
@@ -203,6 +207,48 @@ def test_a_numeric_string_score_is_accepted(service):
     assert _score(1) == 3
 
 
+# ── best of ──────────────────────────────────────────────────────────────
+#
+# Read here, written by AutonaActions.SetBestOf (ADR-005 S2e), which also
+# clamps it to 0..99 -- so a negative or an oversized one passes through.
+
+@pytest.mark.parametrize("data, expected", [
+    ({"bestOf": 5}, 5),
+    ({"bestOf": "7"}, 7),
+    ({"bestOf": " 3 "}, 3),
+    ({"bestOf": -3}, -3),
+    ({"bestOf": 150}, 150),
+    # Not carried, as the old `if data.get("bestOf")` did not: 0 is "not
+    # set" there, not "clear it".
+    ({"bestOf": 0}, None),
+    ({"bestOf": None}, None),
+    ({"bestOf": ""}, None),
+    ({}, None),
+    (None, None),
+    ("bestOf=5", None),
+    ([("bestOf", 5)], None),
+])
+def test_the_best_of_read_from_a_set(data, expected):
+    assert SetLoadService.BestOfFromSetData(data) == expected
+
+
+@pytest.mark.parametrize("raw", ["five", "5.5", [5], {"n": 5}])
+def test_a_best_of_that_is_not_a_number_is_dropped_with_a_warning(raw):
+    """It used to reach QSpinBox.setValue, whose TypeError abandoned the
+    rest of the set load; now it is the one key refused, like a score."""
+    from loguru import logger
+
+    lines = []
+    sink = logger.add(lambda message: lines.append(str(message)),
+                      level="WARNING")
+    try:
+        assert SetLoadService.BestOfFromSetData({"bestOf": raw}) is None
+    finally:
+        logger.remove(sink)
+
+    assert any("bestOf" in line for line in lines), lines
+
+
 # ── losers flags ─────────────────────────────────────────────────────────
 
 def test_losers_flags_follow_the_swap(service, swap):
@@ -217,6 +263,43 @@ def test_a_missing_losers_flag_is_left_alone(service):
     service.ApplyLosers({"team1losers": False})
     assert SM.Get(f"{PREFIX}.team.1.losers") is False
     assert SM.Get(f"{PREFIX}.team.2.losers") is True
+
+
+def _named(team, tag):
+    path = f"{PREFIX}.team.{team}.player.1"
+    SM.Set(f"{path}.name", tag)
+    SM.Set(f"{path}.team", "")
+    return path
+
+
+def test_a_loaded_losers_flag_takes_its_teams_names_along(service, swap):
+    """The " [L]" lands on the display team the flag landed on, in the
+    flag's own save cycle (ADR-005 S2b) -- the board's per-card
+    _ApplyLosersToPlayers used to do this half."""
+    left = _named(1, "LEFT")
+    right = _named(2, "RIGHT")
+    swap.value = True
+    deltas = []
+    SM.observers.state_updated.subscribe(deltas.append)
+    try:
+        assert service.ApplyLosers({"team1losers": True}) is True
+    finally:
+        SM.observers.state_updated.unsubscribe(deltas.append)
+
+    assert SM.Get(f"{right}.mergedName") == "RIGHT [L]"
+    assert SM.Get(f"{right}.mergedOnlyName") == "RIGHT [L]"
+    assert SM.Get(f"{left}.mergedName") is None
+    assert len(deltas) == 1
+
+
+def test_an_unchanged_losers_flag_leaves_the_names_alone(service):
+    named = _named(1, "ALPHA")
+    service.ApplyLosers({"team1losers": True})
+    SM.Set(f"{named}.mergedName", "kept")
+
+    assert service.ApplyLosers({"team1losers": True}) is False
+
+    assert SM.Get(f"{named}.mergedName") == "kept"
 
 
 # ── team name and crest ──────────────────────────────────────────────────
@@ -289,6 +372,20 @@ def test_clearing_the_tracking_forgets_all_three_keys(service):
     assert SM.Get(f"{PREFIX}.set_id") is None
     assert SM.Get(f"{PREFIX}.auto_update") is None
     assert SM.Get(f"{PREFIX}.station") is None
+
+
+def test_the_set_loaded_last_is_kept_outside_the_state(service):
+    """ADR-005 S2 decision 4: the set the board skips re-loading lives here
+    (it was a board attribute), not in the state -- a clear forgets it, and
+    making `set_id` its home would publish a null for every clear."""
+    assert service.lastSetSelected is None
+    service.lastSetSelected = "12345"
+    service.BeginSet("12345", "set", None)
+    assert "lastSetSelected" not in (SM.Get(PREFIX) or {})
+
+    service.ClearSetTracking()
+
+    assert service.lastSetSelected is None
 
 
 def test_the_station_queue_is_published(service):

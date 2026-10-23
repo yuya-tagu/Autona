@@ -100,10 +100,11 @@ class AutonaCrewBattleWidget(QWidget):
         self.scoreColumn = QWidget(self)
         self.scoreColumn.setVisible(False)
         # Crew has no best-of UI, but the spinbox is still the single source
-        # of truth for score.{N}.best_of, exactly like boards 1/2: every
-        # writer (ChangeSetData / set_route) goes through setValue, and the
-        # generic reset (WebServerActions._reset_best_of -> setValue(0))
-        # therefore clears state instead of leaving a stale BO on the overlay.
+        # of truth for score.3.best_of (boards 1/2's is AutonaActions.SetBestOf
+        # since ADR-005 S2e): every writer (ChangeSetData / set_route) goes
+        # through setValue, and the generic reset
+        # (WebServerActions._reset_best_of -> setValue(0)) therefore clears
+        # state instead of leaving a stale BO on the overlay.
         self._bestOfSpin = QSpinBox(self.scoreColumn)
         self._bestOfSpin.setObjectName("best_of")
         self._bestOfSpin.valueChanged.connect(self._onBestOfChanged)

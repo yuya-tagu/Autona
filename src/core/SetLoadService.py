@@ -25,19 +25,22 @@ What deliberately did NOT move (and why):
   moved here is the *addressing* (which entrant lands on which team once the
   teams have been swapped, see ``DisplayTeam``) and the team name that comes
   with it; the player subtree's own writes went to ``core/PlayerService.py``
-  in the next instalment, which is what SetData now hands its resolved
-  values to.
-- **Best of.** ``best_of_text`` / ``first_to_text`` are formatted from
-  ``AutonaLocaleHelper.matchNames`` and the same handler resizes the stage
-  rows; Step 3 left it on the Qt side and this step does not change that.
+  in the next instalment, which is what SetData now hands its picks to
+  (since ADR-005 S1d as identifiers -- character en_name, skin row, country
+  and region code -- which PlayerService turns into the published values
+  from the core catalogs).
+Best of: what a payload carries is read here (``BestOfFromSetData``), and
+written by ``AutonaActions.SetBestOf`` -- the operation every entry point of
+the set length shares since ADR-005 S2e (it was the BEST OF spinbox, which
+the board drove from a set load).
 
 INVARIANT -- stage rows. Nothing here writes ``score.{n}.stages.*``. The row
-count is kept equal to the widget's ``stage_widget_list`` by
-``GameTrackerService.SetStageCount()`` alone (see its ``StageCount()``
-docstring), and a set load that grew the rows on its own would leave rows
-nothing renders. A loaded score reaches the stages the same way a +1 does:
-this class writes ``team.{t}.score`` and the board's ``_SyncScoreDisplays``
-hands the transition to ``GameTrackerService.SyncStagesToScore``.
+count is resized by ``GameTrackerService.SetStageCount()`` alone, reached
+from ``AutonaActions.SetBestOf`` (see ``StageCount()``), and a set load that
+grew the rows on its own would leave rows nothing renders. A loaded score
+reaches the stages the same way a +1 does: this class writes
+``team.{t}.score`` and the board's ``_SyncScoreDisplays`` hands the
+transition to ``GameTrackerService.SyncStagesToScore``.
 
 Import side effects: none (agent-pitfalls #1). One instance per board,
 created by that board's AutonaScoreboardWidget.
@@ -47,6 +50,7 @@ import os
 from loguru import logger
 
 from .Actions import AutonaActions
+from .PlayerService import RepublishTeamMergedNames
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 
@@ -58,21 +62,24 @@ TEAM_LOGO_DIR = "./user_data/team_logo"
 class SetLoadService:
     """The set-loading rules of one board. Bound to ``score.{number}``.
 
-    ``teamsSwapped`` is a callable telling whether the operator has swapped
-    the two sides. The flag is mirrored into ``score.{n}.teamsSwapped``, but
-    the authority is still the board's own attribute -- the swap itself is a
-    widget-to-widget copy of player *field values*
-    (``AutonaBasePlayerWidget.SwapWith``) that Step 3 explicitly left behind,
-    and it stays there for as long as those values live in the widgets
-    rather than in the state (see the note in ``Actions.py``), so the flag
-    moves here with it. Injecting it follows
-    ``StatsService.playersPerTeam``: core reads no Qt object, and the two
-    answers cannot drift because there is still only one of them.
+    Which way round the two sides are is read from the state,
+    ``score.{n}.teamsSwapped``, which ``AutonaActions.SwapTeams`` toggles
+    (ADR-005 S2c). Until then the swap was a widget-to-widget copy of the
+    player fields and the board's own ``teamsSwapped`` attribute was the
+    authority, handed in here as a callable; the key was only its mirror.
     """
 
-    def __init__(self, scoreboardNumber, teamsSwapped):
+    def __init__(self, scoreboardNumber):
         self.scoreboardNumber = scoreboardNumber
-        self._teamsSwapped = teamsSwapped
+        # The provider id of the set this board last loaded, or None (ADR-005
+        # S2d; it was the board's own attribute). Outside the state on
+        # purpose: `score.{n}.set_id` says which set is *followed* and stays
+        # through a clear, while this is forgotten by every clear of the
+        # players, so that loading the same set again loads it again
+        # (NewSetSelected skips a set it already has). It is also what an
+        # async refresh is checked against (IsStaleUpdate) and what the Web's
+        # get_set answers.
+        self.lastSetSelected = None
 
     # ── key paths ────────────────────────────────────────────────────────
 
@@ -94,7 +101,7 @@ class SetLoadService:
         on the right, so it writes ``team.2``.
         """
         setTeam = 1 if int(setTeam) == 1 else 2
-        if self._teamsSwapped():
+        if StateManager.Get(f"{self.prefix}.teamsSwapped", False):
             return 3 - setTeam
         return setTeam
 
@@ -165,6 +172,31 @@ class SetLoadService:
 
         return bool(written)
 
+    # ── best of ───────────────────────────────────────────────────────────
+
+    @classmethod
+    def BestOfFromSetData(cls, data):
+        """The set length a payload carries, or None when it carries none.
+
+        Truthiness, which is how boards 1/2 have always read it
+        (``if data.get("bestOf")`` in front of the spinbox): ``bestOf: 0``
+        is "not carried" here, so set_route's / /api/v1's ``bestOf=0`` has
+        never cleared it -- the resets do (``AutonaActions.SetBestOf(n,
+        0)``). The crew board reads it with ``is not None``
+        (``CrewBattleService.BestOfFromSetData``). A value that is not a
+        number is dropped with a warning, where setValue() raised inside the
+        set load.
+        """
+        if not isinstance(data, dict):
+            return None
+        raw = data.get("bestOf")
+        if not raw:
+            return None
+        value = cls._asInt(raw)
+        if value is None:
+            logger.warning(f"Set load: ignoring non-numeric bestOf {raw!r}")
+        return value
+
     # ── score ────────────────────────────────────────────────────────────
 
     def ApplyScores(self, data) -> bool:
@@ -234,18 +266,33 @@ class SetLoadService:
         Making it so is a semantics change to a legacy REST route with no
         test coverage, on the one query an operator may already be using
         while swapped -- a product call, not a refactor, so it is recorded
-        here rather than taken.
+        here rather than taken. (/api/v1's ``PATCH set`` no longer goes
+        through here for its losers flag: it names the state team and calls
+        ``AutonaActions.SetTeamLosers``, ADR-005 S2b.)
+
+        A flag that changes takes its team's display names with it, in the
+        same save cycle -- the " [L]" suffix, rebuilt from the slots' state by
+        ``PlayerService.RepublishTeamMergedNames`` exactly as
+        ``AutonaActions.SetTeamLosers`` does. The board used to do that half
+        per player card (``_ApplyLosersToPlayers`` / ``_AdoptTeamLosers``).
+        Slots a set load creates afterwards (a roster that grows) need
+        nothing: their name is published once their entrant is in, and that
+        reads the flag written here.
         """
         if not isinstance(data, dict):
             return False
         written = False
-        for setTeam in (1, 2):
-            value = data.get(f"team{setTeam}losers")
-            if value is None:
-                continue
-            written |= self._SetIfChanged(
-                self._teamKey(self.DisplayTeam(setTeam), "losers"), bool(value))
-        return bool(written)
+        with StateManager.SaveBlock():
+            for setTeam in (1, 2):
+                value = data.get(f"team{setTeam}losers")
+                if value is None:
+                    continue
+                team = self.DisplayTeam(setTeam)
+                if self._SetIfChanged(
+                        self._teamKey(team, "losers"), bool(value)):
+                    RepublishTeamMergedNames(self.scoreboardNumber, team)
+                    written = True
+        return written
 
     # ── team name and its crest ──────────────────────────────────────────
 
@@ -303,7 +350,9 @@ class SetLoadService:
             StateManager.Set(f"{self.prefix}.station", station)
 
     def ClearSetTracking(self):
-        """Forget the followed set (the timer's cancel button)."""
+        """Forget the followed set (the timer's cancel button), and the set
+        loaded last with it."""
+        self.lastSetSelected = None
         with StateManager.SaveBlock():
             StateManager.Set(f"{self.prefix}.auto_update", None)
             StateManager.Set(f"{self.prefix}.set_id", None)

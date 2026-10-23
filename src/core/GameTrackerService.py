@@ -38,7 +38,9 @@ through the state, and the board tells them apart with ``writingScore`` --
 see that property. Collapsing them into one writer is Step 5.
 
 Import side effects: none (agent-pitfalls #1). One instance per board,
-created by that board's AutonaIndividualGameTracker.
+created by that board's AutonaIndividualGameTracker and registered with
+AutonaActions by the board while it is built (ADR-005 S2e), so that a set
+length set from any entry point resizes the rows in the same cycle.
 """
 from loguru import logger
 
@@ -60,6 +62,23 @@ class GameTrackerService:
         # True while PublishStageResults is writing the team scores it summed
         # from the rows. See the property below.
         self._writingScore = False
+        # Bumped by every SetStageCount(): how the widget tells that the rows
+        # were rebuilt, which a same-sized rebuild (a game load) does not say
+        # through the row count (ADR-005 S2e).
+        self._rowsVersion = 0
+
+    @property
+    def rowsVersion(self) -> int:
+        """How many times SetStageCount() has rebuilt the rows.
+
+        The widget (AutonaIndividualGameTracker.RenderStageRows) rebuilds
+        its buttons when this moved since it last did: the rows are fresh
+        then even when their number is not -- a game load resets them to the
+        same set length, and its stage combos must start over with the new
+        game's stages, as they did when the spinbox's re-emitted valueChanged
+        rebuilt them.
+        """
+        return self._rowsVersion
 
     # ── the two-writer guard ─────────────────────────────────────────────
 
@@ -94,13 +113,16 @@ class GameTrackerService:
     def StageCount(self) -> int:
         """How many game rows the set currently has.
 
-        INVARIANT: this counts the state, while the widget renders its own
-        `stage_widget_list`, and only SetStageCount() keeps the two equal --
-        it is the single place that resizes either. Everything else here
-        indexes rows the widget is assumed to have a button for, so a writer
-        that grows `stages` on its own (a set load flowing `stagesWon` in --
-        Step 4b) would leave rows nothing renders and clicks that address
-        the wrong game. Such a path must go through SetStageCount().
+        INVARIANT: this counts the state, and SetStageCount() is the single
+        place that resizes it -- reached from AutonaActions.SetBestOf, which
+        rebuilds a built board's rows in the same cycle as the set length
+        (ADR-005 S2e). The widget renders `stage_widget_list` from it on the
+        board's held cycle (RenderStageRows), before the score is followed
+        onto the rows. Everything else here indexes rows the widget is
+        assumed to have a button for, so a writer that grows `stages` on its
+        own (a set load flowing `stagesWon` in -- Step 4b) would leave rows
+        nothing renders and clicks that address the wrong game. Such a path
+        must go through SetStageCount().
         """
         stages = StateManager.Get(f"{self.prefix}.stages")
         return len(stages) if isinstance(stages, dict) else 0
@@ -142,18 +164,42 @@ class GameTrackerService:
         StateManager.Set(f"{key}.t2_win", winner == TEAM_2)
         StateManager.Set(f"{key}.tie", winner == TIE)
 
-    def SetStageResult(self, index, winner):
+    def _HasRow(self, index, operation) -> bool:
+        """Whether row `index` exists; a warning when it does not. Caller
+        holds StateManager.lock, so the answer stands for its write.
+
+        The rows are resized by SetStageCount() alone, and a set length set
+        from another thread (the Web, the API) resizes them before the
+        board's held cycle has rebuilt its buttons. A click on a button of a
+        row that is gone in between must not write one back: it would add a
+        row nothing renders, out of sequence with the others
+        (`stages.{n}` without the rows before it).
+        """
+        if isinstance(index, int) and 0 <= index < self.StageCount():
+            return True
+        logger.warning(
+            f"{self.prefix}: {operation} on game {index}, but the set has "
+            f"{self.StageCount()} game(s); ignored")
+        return False
+
+    def SetStageResult(self, index, winner) -> bool:
         """Record who won one game. `winner` is UNREPORTED/TIE/TEAM_1/TEAM_2.
+        True if written; a row that does not exist is not (`_HasRow`).
 
         Exclusive by construction: the three flags are always written
         together, so no row can ever come out with two of them set. The
         widget used to rely on unchecking the sibling buttons for that.
         """
         with StateManager.SaveBlock():
-            self._writeResult(index, winner)
+            with StateManager.lock:
+                if not self._HasRow(index, "a result"):
+                    return False
+                self._writeResult(index, winner)
+        return True
 
-    def SetStageAsset(self, index, data):
-        """Replace one row with the stage asset the combo selected.
+    def SetStageAsset(self, index, data) -> bool:
+        """Replace one row with the stage asset the combo selected. True if
+        written; a row that does not exist is not (`_HasRow`).
 
         Faithful to what the combo handler has always done, oddity included:
         the row *is* the stage payload, so writing it drops the three result
@@ -162,10 +208,14 @@ class GameTrackerService:
         buttons, which is the same value and one less thing the widget has
         to be right about.
         """
-        winner = self.GameWinner(index)
         with StateManager.SaveBlock():
-            StateManager.Set(self._stageKey(index), data)
-            self._writeResult(index, winner)
+            with StateManager.lock:
+                if not self._HasRow(index, "a stage"):
+                    return False
+                winner = self.GameWinner(index)
+                StateManager.Set(self._stageKey(index), data)
+                self._writeResult(index, winner)
+        return True
 
     def ResolveStageCount(self, requested) -> int:
         """How many rows to actually show for a best-of of `requested`.
@@ -185,6 +235,9 @@ class GameTrackerService:
             StateManager.Set(f"{self.prefix}.stages", {})
             for index in range(count):
                 self._writeResult(index, UNREPORTED)
+            # Inside the block: the held cycle its release notifies is where
+            # the widget reads it.
+            self._rowsVersion += 1
 
     def IncrementScore(self, team, current_stage=None):
         """Award the next unreported game to `team` (0-based)."""
@@ -310,10 +363,11 @@ class GameTrackerService:
     def UpdateScore(self, team, new_value):
         """Publish a score set from outside, and follow it with the stages.
 
-        Still the entry point for the paths that drive the score spinbox
-        directly (ClearScore, SwapTeams, ResetAllInputs): the widget
+        Still the entry point for the one path that drives the score
+        spinbox directly (a number typed into it): the widget
         changes, and this writes the result. The paths that write the state
-        first -- AutonaActions.AdjustScore / ResetScore, and a loaded set's
+        first -- AutonaActions.AdjustScore / ResetScore and the clears
+        (ADR-005 S2d), and a loaded set's
         SetLoadService.ApplyScores -- instead call SyncStagesToScore() with
         the transition, which is why the two halves are separate methods
         (headless core Step 3; set loading joined them in Step 4b).

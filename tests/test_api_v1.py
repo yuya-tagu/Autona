@@ -293,6 +293,67 @@ def test_player_patch_addresses_the_state_team_on_a_swapped_board(
     assert state["team"]["1"]["player"]["1"]["name"] == "Alpha"
 
 
+def test_set_patch_losers_still_blanks_the_english_round_text(
+        autonaApp, client):
+    """An external behaviour kept on purpose.
+
+    v1's losers used to go through set_route, i.e. a ChangeSetData payload,
+    whose match-info writer blanks match_en for any payload without one.
+    Since ADR-005 S2b it is AutonaActions.SetTeamLosers, and the route
+    applies that match-info half itself (SetLoadService.ApplyMatchInfo, in
+    the same save cycle) so the request still does what it did -- also when
+    the flag does not change.
+    """
+    from src.core.StateManager import StateManager
+
+    autonaApp.board(1)
+    autonaApp.state.Set("score.1.match_en", "Winners Final")
+    autonaApp.settle()
+
+    cycles = []
+    StateManager.observers.held_state_updated.subscribe(cycles.append)
+    try:
+        response = client.patch("/api/v1/scoreboards/1/set", json={
+            "losers": {"team": 1, "value": True}})
+        assert response.status_code == 200
+        autonaApp.settle()
+    finally:
+        StateManager.observers.held_state_updated.unsubscribe(cycles.append)
+
+    assert autonaApp.get("score.1.team.1.losers") is True
+    assert autonaApp.get("score.1.match_en") == ""
+    assert cycles.count("score.1") == 1
+
+    autonaApp.state.Set("score.1.match_en", "Winners Final")
+    autonaApp.settle()
+    response = client.patch("/api/v1/scoreboards/1/set", json={
+        "losers": {"team": 1, "value": True}})
+    assert response.status_code == 200
+    autonaApp.settle()
+
+    assert autonaApp.get("score.1.match_en") == ""
+
+
+def test_set_patch_losers_on_a_board_not_built_yet_still_waits_for_apply(
+        autonaApp, client):
+    """The old route built the board first (set_route -> GetScoreboard), and
+    the build is what holds score.{n} for 反映. v1's losers still builds it,
+    so the flag is pending rather than published at once."""
+    from src.core.StateManager import StateManager
+
+    autonaApp._dropBoard(2)
+    assert 2 not in autonaApp.manager.scoreboards
+
+    response = client.patch("/api/v1/scoreboards/2/set", json={
+        "losers": {"team": 1, "value": True}})
+    assert response.status_code == 200
+    autonaApp.settle()
+
+    assert 2 in autonaApp.manager.scoreboards
+    assert autonaApp.get("score.2.team.1.losers") is True
+    assert StateManager.HasPendingChanges("score.2") is True
+
+
 def test_player_patch_keeps_the_english_round_text(autonaApp, client):
     """The legacy route ran a player edit through all of ChangeSetData, whose
     match-info writer blanks match_en for any payload without one. The v1
@@ -422,6 +483,50 @@ def test_set_patch_team_name_and_losers_for_different_teams(autonaApp, client):
     assert state["team"]["2"]["losers"] is True
 
 
+def test_set_patch_players_and_losers_together_match_legacy_query(
+        autonaApp, client):
+    """A grown roster and the losers flag in one PATCH.
+
+    The legacy query applies them in this order (set_route: players, then
+    losers), and so does v1: set_route for the roster, then set_team_losers
+    for the flag (ADR-005 S2b). The flag's rebuild of the team's names
+    therefore sees the new slots on both routes, and leaves the same state.
+    """
+    from qtpy.QtWidgets import QCheckBox, QLineEdit
+
+    def prepare(board):
+        _setPlayerName(board, 1, "AAA")
+        _setPlayerName(board, 2, "BBB")
+
+    state = _sameStateAsLegacy(
+        autonaApp, 2,
+        legacy=lambda: client.get(
+            "/scoreboard2-set?players=3&losers=true&team=1"),
+        v1=lambda: client.patch("/api/v1/scoreboards/2/set", json={
+            "players": 3, "losers": {"team": 1, "value": True}}),
+        prepare=prepare,
+    )
+
+    for team in ("1", "2"):
+        assert sorted(state["team"][team]["player"]) == ["1", "2", "3"]
+    assert state["team"]["1"]["losers"] is True
+    assert state["team"]["2"]["losers"] is False
+    assert state["team"]["1"]["player"]["1"]["mergedName"] == "AAA [L]"
+    assert state["team"]["1"]["player"]["1"]["mergedOnlyName"] == "AAA [L]"
+    assert state["team"]["2"]["player"]["1"]["mergedName"] == "BBB"
+
+    # The board shows what the state holds.
+    board = autonaApp.manager.scoreboards[2]
+    assert board.team1column.findChild(QCheckBox, "losers").isChecked()
+    assert not board.team2column.findChild(QCheckBox, "losers").isChecked()
+    for team, cards in (("1", board.team1playerWidgets),
+                        ("2", board.team2playerWidgets)):
+        assert len(cards) == 3
+        for slot, card in enumerate(cards, start=1):
+            assert card.findChild(QLineEdit, "name").text() == \
+                (state["team"][team]["player"][str(slot)].get("name") or "")
+
+
 @pytest.mark.parametrize("n", [1, 2])
 @pytest.mark.parametrize("team", [1, 2])
 def test_losers_lands_on_the_state_team_on_a_swapped_board(
@@ -431,8 +536,10 @@ def test_losers_lands_on_the_state_team_on_a_swapped_board(
     The checkbox sits in the column of score.{n}.team.{t} and sends that t.
     set_route's losers is set-shaped (SetLoadService.ApplyLosers runs it
     through DisplayTeam), so the legacy -set?losers= flagged the other team
-    on a swapped board. v1 corrects for the swap -- the flag and the
-    " [L]" suffix on that team's player names both land on team t.
+    on a swapped board. v1 calls AutonaActions.SetTeamLosers with the state
+    team (ADR-005 S2b; it used to flip the team back before set_route) --
+    the flag and the " [L]" suffix on that team's player names both land on
+    team t.
     """
     board = autonaApp.board(n)
     _setPlayerName(board, 1, "AAA")

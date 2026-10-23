@@ -391,7 +391,10 @@ def get_scoreboard(n):
     actions = _actions_ref()
     board_state = actions.get_scoreboard(n)
     data = dict(board_state) if isinstance(board_state, dict) else {"state": board_state}
-    # teamsSwapped lives on the widget; crew board may lack it — tolerate.
+    # The live swap flag (score.{n}.teamsSwapped for boards 1/2 -- not the
+    # committed view above; the crew widget's own flag for board 3), read
+    # through the legacy action so both routes answer the same. Tolerate a
+    # board that cannot answer.
     try:
         data["swapped"] = actions.get_swap(n) == "True"
     except Exception:
@@ -623,14 +626,12 @@ def set_update(n):
         kwargs["players"] = _require_int(body["players"], "players")
     if "characters" in body:
         kwargs["characters"] = _require_int(body["characters"], "characters")
+    losers = None
     if "losers" in body:
-        losers = body["losers"]
-        if not isinstance(losers, dict):
+        flag = body["losers"]
+        if not isinstance(flag, dict):
             raise ApiError(INVALID_ARGUMENT, "losers must be an object {team,value}", 400)
-        team = _validate_team(losers.get("team"))
-        # set_route expects a string for losers (it calls .lower()).
-        kwargs["losers"] = "true" if _truthy(losers.get("value")) else "false"
-        kwargs["team"] = team
+        losers = (_validate_team(flag.get("team")), _truthy(flag.get("value")))
     team_name = None
     if "teamName" in body:
         named = body["teamName"]
@@ -645,20 +646,23 @@ def set_update(n):
 
     def apply():
         # Every v1 team parameter names the *state* team (the column the
-        # operator sees), as score:adjust and color do. set_route's losers is
-        # a set-shaped write -- SetLoadService.ApplyLosers runs the team
-        # through DisplayTeam() -- so on a swapped board it is flipped here to
-        # land where the caller pointed. teamName needs nothing: set_route
-        # writes it into the literal team{N}column. Read and write happen in
-        # one GUI-thread task so a swap cannot slip in between.
-        if "losers" in kwargs and actions.get_swap(n) == "True":
-            kwargs["team"] = 3 - kwargs["team"]
-        if kwargs or team_name is None:
+        # operator sees), as score:adjust and color do. The losers flag is
+        # therefore set_team_losers (AutonaActions.SetTeamLosers, plus what
+        # the old set-shaped write did besides -- see there), not
+        # set_route's losers, which SetLoadService.ApplyLosers runs through
+        # DisplayTeam() and which had to be flipped back here on a swapped
+        # board until ADR-005 S2b. teamName needs nothing: set_route writes
+        # it into the literal team{N}column.
+        #
+        # Applied in the order the legacy queries apply them: the rest, then
+        # the losers flag, then the team name. That order is why the name
+        # goes in a call of its own. One GUI-thread task, so nothing slips
+        # in between.
+        if kwargs or (losers is None and team_name is None):
             actions.set_route(n, **kwargs)  # @gui_thread_sync -> revision accurate
+        if losers is not None:
+            actions.set_team_losers(n, *losers)  # @gui_thread_sync
         if team_name is not None:
-            # set_route takes a single `team` for both losers and teamName, so
-            # the name goes in its own call -- after the rest, the order the
-            # legacy `-set?teamName=&team=` query applies it in.
             actions.set_route(n, team=team_name[0], teamName=team_name[1])
 
     AutonaQtHelper.gui_thread_sync(apply)()

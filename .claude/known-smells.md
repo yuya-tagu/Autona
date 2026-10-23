@@ -508,8 +508,9 @@ GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src
 **症状**: `AutonaScoreboardWidget.ClearScore` の先頭ループは
 `self.scoreColumn.findChildren(QComboBox)` だが、phase/pool/match の 3 combo は構築時に
 `scoreColumn` から `scoreBar` へ re-home されるため、board 1/2 では 1 個もマッチしない
-（`WebServerActions._reset_best_of` が best_of スピンボックスについて同じ再親付けをコメントして
-いる。あちらは `AttributeError` で顕在化した）。結果、`reset_match` / `clear_all` /
+（best_of スピンボックスも同じ再親付けを受けており、`WebServerActions._reset_best_of` がそれで
+`AttributeError` を出していた。ADR-005 S2e 以降、board 1/2 の best_of はスピンボックスを探さず
+`AutonaActions.SetBestOf` で書くので、その説明コメントは削除済み）。結果、`reset_match` / `clear_all` /
 `ResetAllInputs`（すべての入力値をリセット ボタン・Web UI 全クリア）は**ラウンド名・フェーズ・
 プールをクリアしない**。`ResetAllInputs` の docstring はかつて「phase/round もクリアする」と
 主張していたが、実態と合っていなかった（今回コメントのみ実態に修正）。
@@ -539,6 +540,8 @@ GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src
   match バーを消す（`match_en` は作らない）
 - スコアだけのリセット（スコアリセット ボタン / `reset_scores` / `Ctrl+Shift+R` /
   `/api/v1 score:reset` = `AutonaActions.ResetScore`）は対象外のまま（match バーは残る）
+- ADR-005 S2d（2026-10-23）から、2 つの実体は `AutonaActions.ClearScore` / `ResetMatch`（core）。
+  ボードの同名メソッドと Web の `reset_match` / `clear_all` はそれを呼ぶ（分け方は上と同じ）
 
 **回帰テスト**: `tests/test_scoreboard_operations.py::test_a_reset_clears_the_match_bar`（board 1/2 ×
 3 経路）/ `::test_a_set_without_a_round_name_keeps_the_previous_one` /
