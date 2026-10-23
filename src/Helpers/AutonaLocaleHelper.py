@@ -117,10 +117,11 @@ class AutonaLocaleHelper(QObject):
         reads -- and is injected into the operation by bootstrap_core(), the
         same arrangement as FormatExportDate below.
 
-        Deliberately unguarded: ``matchNames`` is empty until
-        LoadRoundNames() has run, and ``None.format`` raising is exactly what
-        the old AutonaScoreboardWidget._onBestOfChanged did. Swallowing it
-        would publish a blank BEST OF for the rest of the session instead.
+        Unguarded here: ``matchNames`` is empty until LoadRoundNames() has
+        run, and ``None.format`` raises. The caller handles it
+        (AutonaActions._matchText logs it and publishes the English default,
+        ADR-005 S2e) -- a blank here would publish an empty BEST OF for the
+        rest of the session instead.
         """
         return AutonaLocaleHelper.matchNames.get(key).format(number)
 

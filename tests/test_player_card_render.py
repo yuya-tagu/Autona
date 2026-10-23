@@ -72,6 +72,8 @@ from src.core.StateManager import StateManager
 # The S1d world: the fixture games under the recording's locale. Imported so
 # both recordings are made in exactly the same one.
 from tests.test_player_slot_publish import slotEnv  # noqa: F401  (fixture)
+# /api/v1 through the real route table, for the best-of recordings (S2e).
+from tests.test_api_v1 import client, webApp  # noqa: F401  (fixtures)
 from tests.fixtures.player_slots.recording import digest, encode
 
 RECORD = os.environ.get("AUTONA_RECORD_BOARD_OPERATIONS") == "1"
@@ -92,10 +94,8 @@ SWAP_GOLDEN = None if RECORD or not SWAP_GOLDEN_PATH.exists() else json.loads(
 # for the team board ("operations"), one for the singles board ("singles")
 # and one for the set load's pre-pass with game rows recorded ("prepass").
 # Recorded on the last pre-S2d tree (2045c973) with `-k clear_operations`;
-# each test writes its own section.
+# each test writes its own section (and reads it back, _replayClears).
 CLEAR_GOLDEN_PATH = GOLDEN_PATH.parent / "clear_golden.json"
-CLEAR_GOLDEN = None if RECORD or not CLEAR_GOLDEN_PATH.exists() \
-    else json.loads(CLEAR_GOLDEN_PATH.read_text(encoding="utf-8"))
 # The key order of every dict of the board subtree after each step of both
 # step lists, recorded on the last pre-S2c tree (6a6f04cc):
 #
@@ -899,6 +899,49 @@ S2D_PREPASS_CHANGES = {
     "follow another set keeping mains": {"cycles": 4, "stats": _CLEAR_STATS},
 }
 
+# ADR-005 S2e, on top of the S2d differences: the rows a held cycle moves to
+# follow the score are one save cycle for both teams (they were one a row).
+# So a score that moves by more than one game with the tracker on -- cleared
+# (ClearScore / ResetMatch / ResetScore), loaded (ApplyScores) or adjusted by
+# two (AdjustScore) -- is 1 + 1 cycles. A +1 moves one row and is unchanged,
+# and so is everything with the tracker off. The state, key order and
+# publication of every step are unchanged.
+S2E_CLEAR_CHANGES = {
+    "clear the score": {"cycles": 2},
+    "score and losers again": {"cycles": 5},     # team 2's +2
+    "reset match": {"cycles": 2},
+    "a set with a match bar, a score and losers": {"cycles": 2},
+    "web reset match": {"cycles": 3},
+    "refill everything": {"cycles": 11},         # team 2's +2
+    "web clear all": {"cycles": 7},
+    "two players, two characters, best of 5 and refill everything": {
+        "cycles": 19},
+}
+
+S2E_SINGLES_CLEAR_CHANGES = {
+    "clear the score": {"cycles": 2},
+    "score and losers again": {"cycles": 5},
+    "reset match": {"cycles": 2},
+    "a set with a match bar, a score and losers": {"cycles": 2},
+    "web reset match": {"cycles": 3},
+    "two characters, best of 5 and refill everything": {"cycles": 11},
+}
+
+S2E_PREPASS_CHANGES = {
+    "follow a set without keeping mains": {"cycles": 2},
+    "follow another set keeping mains": {"cycles": 2},
+}
+
+
+def _layered(*layers):
+    """Per-step change dicts of successive migrations as one: a later
+    migration's fields replace an earlier one's for the same step."""
+    merged = {}
+    for layer in layers:
+        for step, change in layer.items():
+            merged[step] = {**merged.get(step, {}), **change}
+    return merged
+
 
 def _travelled(state, reference):
     """`state` with every player's mains and character variants taken from
@@ -1088,28 +1131,36 @@ def test_swap_operations_publish_the_recorded_state(
     assert mismatches == {step: {} for step in mismatches}
 
 
-def _recordClearGolden(section, recorded):
+def _recordClearGolden(section, recorded, path=CLEAR_GOLDEN_PATH):
     # Read now, not at import: the clear recordings share the file, one
-    # section per test.
-    golden = json.loads(CLEAR_GOLDEN_PATH.read_text(encoding="utf-8")) \
-        if CLEAR_GOLDEN_PATH.exists() else {}
+    # section per test (and so do the best-of ones, in theirs).
+    golden = json.loads(path.read_text(encoding="utf-8")) \
+        if path.exists() else {}
     golden[section] = recorded
-    CLEAR_GOLDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CLEAR_GOLDEN_PATH.write_text(json.dumps(
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(
         golden, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
-def _replayClears(app, board, steps, section, keyOrderSection, changes):
+def _replayClears(app, board, steps, section, keyOrderSection, changes,
+                  path=CLEAR_GOLDEN_PATH, tree="pre-S2d tree (2045c973)",
+                  selector="clear_operations", alsoCheck=None):
     """`steps` against the pre-S2d recording `section` of clear_golden.json:
     the same state (key order included), cycles, publication and
     statistics fetches, apart from `changes` -- and every card showing its
-    slot after every step."""
+    slot after every step.
+
+    The best-of recordings (ADR-005 S2e) are replayed the same way from
+    their own file (`path`, recorded on `tree`), with `alsoCheck(board)`
+    adding what else has to show the state after every step."""
     mismatches = {}
 
     def check(step):
         if not (RECORD or RECORD_KEY_ORDER):
             mismatches[step] = _cardMismatches(board)
             mismatches[step].update(_losersMismatches(board))
+            if alsoCheck is not None:
+                mismatches[step].update(alsoCheck(board))
 
     keyOrders = []
     recorded = _runSteps(app, board, afterEach=check, steps=steps,
@@ -1119,13 +1170,14 @@ def _replayClears(app, board, steps, section, keyOrderSection, changes):
         _recordKeyOrder(keyOrderSection, keyOrders)
         return
     if RECORD:
-        _recordClearGolden(section, recorded)
+        _recordClearGolden(section, recorded, path)
         return
-    assert CLEAR_GOLDEN is not None and section in CLEAR_GOLDEN, (
-        f"{CLEAR_GOLDEN_PATH} has no {section!r}: it is recorded on the "
-        "pre-S2d tree (2045c973) with AUTONA_RECORD_BOARD_OPERATIONS=1 "
-        "-k clear_operations")
-    recording = CLEAR_GOLDEN[section]
+    golden = json.loads(path.read_text(encoding="utf-8")) \
+        if path.exists() else None
+    assert golden is not None and section in golden, (
+        f"{path} has no {section!r}: it is recorded on the {tree} with "
+        f"AUTONA_RECORD_BOARD_OPERATIONS=1 -k {selector}")
+    recording = golden[section]
     golden = [_withChanges(entry, changes, recording)
               for entry in recording]
     assert [e["step"] for e in recorded] == [e["step"] for e in golden]
@@ -1141,7 +1193,8 @@ def test_clear_operations_publish_the_recorded_state(
         board, autonaApp, teamLogo):
     """Every clear from every entry point on the team board."""
     _replayClears(autonaApp, board, _clearSteps(board, autonaApp),
-                  "operations", "clear operations", S2D_CLEAR_CHANGES)
+                  "operations", "clear operations",
+                  _layered(S2D_CLEAR_CHANGES, S2E_CLEAR_CHANGES))
 
 
 @pytest.fixture
@@ -1156,14 +1209,265 @@ def test_singles_clear_operations_publish_the_recorded_state(
     _replayClears(autonaApp, singlesBoard,
                   _singlesClearSteps(singlesBoard, autonaApp),
                   "singles", "singles clear operations",
-                  S2D_SINGLES_CHANGES)
+                  _layered(S2D_SINGLES_CHANGES, S2E_SINGLES_CLEAR_CHANGES))
 
 
 def test_set_load_prepass_clear_operations_publish_the_recorded_state(
         board, autonaApp, teamLogo):
     """A set load's pre-pass with game rows recorded, both ways."""
     _replayClears(autonaApp, board, _prepassSteps(board),
-                  "prepass", "set load pre-pass", S2D_PREPASS_CHANGES)
+                  "prepass", "set load pre-pass",
+                  _layered(S2D_PREPASS_CHANGES, S2E_PREPASS_CHANGES))
+
+
+# ── the best of (ADR-005 S2e) ────────────────────────────────────────────
+#
+# The set length was the BEST OF spinbox's: its valueChanged published the
+# six keys and rebuilt the game tracker's rows, and every other entry point
+# (a set load, the Web's set_route / reset_match / clear_all, /api/v1's
+# PATCH set, a game load, the reset-all button) drove that spinbox. S2e makes
+# it a core operation (AutonaActions.SetBestOf) that resizes the rows in the
+# same cycle, and the spinbox and the rows render the state. Recorded on the
+# last pre-S2e tree (79da38bf) with `-k best_of_operations`, one section per
+# test in best_of_golden.json, the key order in key_order.json.
+
+BEST_OF_GOLDEN_PATH = GOLDEN_PATH.parent / "best_of_golden.json"
+BEST_OF_TREE = "pre-S2e tree (79da38bf)"
+
+
+def _v1Set(client, number, body):
+    """/api/v1's PATCH set, through the real route table."""
+    response = client.patch(f"/api/v1/scoreboards/{number}/set", json=body)
+    assert response.status_code == 200, response.get_json()
+
+
+def _stageResultsShown(board):
+    """(T1, T2, Tie) checked on each of the tracker's rows."""
+    tracker = board.individualGameTracker
+    return [tuple(button.isChecked()
+                  for button in tracker._StageButtons(index))
+            for index in range(len(tracker.stage_widget_list))]
+
+
+def _bestOfMismatches(board):
+    """What the BEST OF spinbox and the game tracker show, against the
+    state: the set length, one row per game the state records, each row's
+    result, and the tracker hidden when there is none."""
+    prefix = board.statePrefix
+    found = {}
+    with StateManager.lock:
+        bestOf = StateManager.Get(f"{prefix}.best_of", None)
+        stages = deep_clone(StateManager.Get(f"{prefix}.stages", None) or {})
+    if board.bestOfSpin.value() != bestOf:
+        found["bestOf"] = (board.bestOfSpin.value(), bestOf)
+    tracker = board.individualGameTracker
+    if len(tracker.stage_widget_list) != len(stages):
+        found["rows"] = (len(tracker.stage_widget_list), len(stages))
+    else:
+        expected = []
+        for number in range(1, len(stages) + 1):
+            row = stages.get(str(number))
+            row = row if isinstance(row, dict) else {}
+            winner = ("tie" if row.get("tie") else "t1_win"
+                      if row.get("t1_win") else "t2_win"
+                      if row.get("t2_win") else None)
+            expected.append((winner == "t1_win", winner == "t2_win",
+                             winner == "tie"))
+        shown = _stageResultsShown(board)
+        if shown != expected:
+            found["results"] = (shown, expected)
+    if tracker.isHidden() != (len(stages) == 0):
+        found["hidden"] = (tracker.isHidden(), len(stages))
+    return found
+
+
+def _bestOfSteps(board, app, client):
+    """Every way the set length is set, on a board with the game tracker on
+    and off: the spinbox, a set load, the Web's set_route (a number and a
+    query string), /api/v1's PATCH set, a game load, the Web's resets and
+    the reset-all button -- with game results recorded in between, so that
+    a step that rebuilt the rows (or did not) shows."""
+    actions = app.actions()
+    number = board.scoreboardNumber
+
+    def spin(value):
+        return lambda: board.bestOfSpin.setValue(value)
+
+    def tracked(operation):
+        return lambda: _withTracker(operation)
+
+    def web(**query):
+        return lambda: actions.set_route(number, **query)
+
+    def v1(body):
+        return lambda: _v1Set(client, number, body)
+
+    if number == 2:
+        counts = ("two players, two characters", lambda: (
+            board.playerNumber.setValue(2), board.charNumber.setValue(2)))
+    else:
+        counts = ("two characters", lambda: board.charNumber.setValue(2))
+    return [
+        counts,
+        ("fill both teams", lambda: _fillBoth(board)),
+        ("best of 3", spin(3)),
+        ("best of 5", spin(5)),
+        ("the same best of", spin(5)),
+        ("best of 0", spin(0)),
+        ("best of over the maximum", spin(150)),
+        ("tracker on, best of 5", tracked(spin(5))),
+        ("stage results", lambda: _stageResults(board)),
+        ("tracker on, best of 7 over the results", tracked(spin(7))),
+        ("stage results on the new rows", lambda: _stageResults(board)),
+        ("tracker on, best of 3", tracked(spin(3))),
+        ("stage results on every game", lambda: _stageResults(board)),
+        ("a point on a full set", lambda: board.CommandScoreChange(0, 1)),
+        ("tracker on, reset the score", tracked(board.ResetScore)),
+        ("tracker on, best of 5 again", tracked(spin(5))),
+        ("a set with a score, tracker on", tracked(lambda: board.ChangeSetData(
+            {"team1score": 2, "team2score": 1}))),
+        ("web best of 7, tracker on", tracked(web(bestOf=7))),
+        ("stage results after the web", lambda: _stageResults(board)),
+        ("web same best of, tracker on", tracked(web(bestOf="7"))),
+        ("web best of 0 is not carried", tracked(web(bestOf=0))),
+        ("a match bar", lambda: board.ChangeSetData(dict(_SET_MATCH_BAR))),
+        ("web best of 3 blanks the English round",
+         tracked(web(bestOf="3"))),
+        ("web best of over the maximum, tracker off", web(bestOf=150)),
+        ("v1 best of 5, tracker on", tracked(v1({"bestOf": 5}))),
+        ("stage results after v1", lambda: _stageResults(board)),
+        ("v1 best of 7 with a phase and a match", tracked(v1(
+            {"bestOf": 7, "phase": "Top 8", "match": "Grand Final"}))),
+        ("v1 best of 0 is not carried", tracked(v1({"bestOf": 0}))),
+        ("stage results before a set", lambda: _stageResults(board)),
+        ("a set with a best of, a round and a score",
+         tracked(lambda: board.ChangeSetData({
+             "bestOf": 5, "round_name": "Losers Final",
+             "team1score": 1, "team2score": 2}))),
+        ("stage results after the set", lambda: _stageResults(board)),
+        ("a set with the same best of", tracked(lambda: board.ChangeSetData(
+            {"bestOf": 5, "round_name": "Losers Final"}))),
+        ("a set with best of 0", tracked(lambda: board.ChangeSetData(
+            {"bestOf": 0, "round_name": "Losers Final"}))),
+        ("game load, tracker on", tracked(board._onGameAssetsLoaded)),
+        ("stage results after the game load",
+         lambda: _stageResults(board)),
+        ("web reset match, tracker on",
+         tracked(lambda: actions.reset_match(number))),
+        ("tracker on, best of 5 and stage results",
+         tracked(lambda: (board.bestOfSpin.setValue(5),
+                          _stageResults(board)))),
+        ("web clear all, tracker on",
+         tracked(lambda: actions.clear_all(number))),
+        ("refill, best of 5 and stage results",
+         tracked(lambda: (_fillBoth(board), board.bestOfSpin.setValue(5),
+                          _stageResults(board)))),
+        ("reset all inputs, tracker on",
+         tracked(lambda: _confirmed(board.ResetAllInputs))),
+        ("reset all inputs again", lambda: _confirmed(board.ResetAllInputs)),
+        ("game load with no best of, tracker on",
+         tracked(board._onGameAssetsLoaded)),
+        ("tracker on, best of 3 after the resets", tracked(spin(3))),
+    ]
+
+
+# What ADR-005 S2e changed on purpose, step by step (see _withChanges). The
+# best of itself changed nothing: every step's state, key order, cycles and
+# publication are the recording's, and the spinbox and the rows show the
+# state after each. What did change is the score's follow on the rows (see
+# S2E_CLEAR_CHANGES): one cycle where a score moved by several games.
+S2E_CHANGES = {
+    "tracker on, reset the score": {"cycles": 2},
+    "a set with a score, tracker on": {"cycles": 2},
+    "web reset match, tracker on": {"cycles": 3},
+    "web clear all, tracker on": {"cycles": 6},
+}
+S2E_SINGLES_CHANGES = dict(S2E_CHANGES)
+
+
+def test_best_of_operations_publish_the_recorded_state(
+        board, autonaApp, client):
+    """Every way to set the best of on the team board."""
+    _replayClears(autonaApp, board, _bestOfSteps(board, autonaApp, client),
+                  "operations", "best of operations", S2E_CHANGES,
+                  path=BEST_OF_GOLDEN_PATH, tree=BEST_OF_TREE,
+                  selector="best_of_operations",
+                  alsoCheck=_bestOfMismatches)
+
+
+def test_singles_best_of_operations_publish_the_recorded_state(
+        singlesBoard, autonaApp, client):
+    """The same on the singles board."""
+    _replayClears(autonaApp, singlesBoard,
+                  _bestOfSteps(singlesBoard, autonaApp, client),
+                  "singles", "singles best of operations",
+                  S2E_SINGLES_CHANGES, path=BEST_OF_GOLDEN_PATH,
+                  tree=BEST_OF_TREE, selector="best_of_operations",
+                  alsoCheck=_bestOfMismatches)
+
+
+def test_best_of_operations_on_an_unbuilt_board_publish_the_recorded_state(
+        slotEnv, autonaApp, client):
+    """The Web's set_route and /api/v1's PATCH set on a board that is not
+    built: the board is built first (that is what lets the write wait for
+    反映), so the state, the cycles and what is published while it is
+    built and then on 反映 are the old ones."""
+    slotEnv("tgame")
+    actions = autonaApp.actions()
+    steps = [
+        ("web best of on an unbuilt team board", 2,
+         lambda: _withTracker(lambda: actions.set_route(2, bestOf=5))),
+        ("v1 best of on an unbuilt singles board", 1,
+         lambda: _withTracker(lambda: _v1Set(client, 1, {"bestOf": 3}))),
+    ]
+    for number in (1, 2):
+        autonaApp._dropBoard(number)
+        # What AutonaScoreboardManager leaves for a board it has not built.
+        schema.SeedBoard(number)
+    autonaApp.settle()
+
+    recorded = []
+    keyOrders = []
+    for name, number, step in steps:
+        prefix = f"score.{number}"
+        assert number not in autonaApp.manager.scoreboards
+        with _Cycles(prefix) as cycles, _Published() as during:
+            step()
+            autonaApp.settle()
+        entry = {"step": name, "cycles": cycles.count,
+                 "during": [len(during.deltas), during.bigChanges,
+                            digest(_normalise(during.encoded(sortKeys=True),
+                                              autonaApp))]}
+        entry.update(_boardState(autonaApp, prefix))
+        keyOrders.append({"step": name, "keyOrder": _boardKeyOrder(prefix)})
+        board = autonaApp.manager.scoreboards[number]
+        mismatches = {} if (RECORD or RECORD_KEY_ORDER) \
+            else _bestOfMismatches(board)
+        with _Published() as published:
+            StateManager.CommitHeld(prefix)
+            autonaApp.settle()
+        entry["published"] = [len(published.deltas), published.bigChanges,
+                              digest(_normalise(published.encoded(),
+                                                autonaApp))]
+        entry["publishedRows"] = digest(
+            _normalise(published.encoded(sortKeys=True), autonaApp))
+        recorded.append(entry)
+        assert mismatches == {}, name
+
+    if RECORD_KEY_ORDER:
+        _recordKeyOrder("unbuilt best of operations", keyOrders)
+        return
+    if RECORD:
+        _recordClearGolden("unbuilt", recorded, BEST_OF_GOLDEN_PATH)
+        return
+    golden = json.loads(BEST_OF_GOLDEN_PATH.read_text(encoding="utf-8")) \
+        if BEST_OF_GOLDEN_PATH.exists() else None
+    assert golden is not None and "unbuilt" in golden, (
+        f"{BEST_OF_GOLDEN_PATH} has no 'unbuilt': it is recorded on the "
+        f"{BEST_OF_TREE} with AUTONA_RECORD_BOARD_OPERATIONS=1 "
+        "-k best_of_operations")
+    _assertKeyOrder("unbuilt best of operations", keyOrders)
+    assert recorded == golden["unbuilt"]
 
 
 # ── the card shows its slot ──────────────────────────────────────────────
@@ -2055,6 +2359,94 @@ def test_typing_after_a_web_team_name_wins(teamBoard, autonaApp, teamLogo):
         assert autonaApp.get(key) == "Bravo"
         assert autonaApp.get(f"{PREFIX}.team.1.logo") is None
         assert edit.text() == "Bravo"
+
+
+# ── a best of the Web writes while the operator is in the spinbox ──────
+#
+# The spinbox renders the state since ADR-005 S2e, with _SyncSetFields'
+# focus rule: left alone while the operator is in it, shown once they leave
+# it. The game rows follow the state whatever has the focus.
+
+def test_a_web_best_of_shows_once_the_operator_leaves_the_spinbox(
+        board, autonaApp):
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    spin, other = board.bestOfSpin, _teamNameEdit(board, 1)
+    key = f"{PREFIX}.best_of"
+
+    with _onScreen(board, autonaApp):
+        _focus(spin, autonaApp)
+        QTest.keyClick(spin, Qt.Key.Key_Up)
+        autonaApp.settle()
+        assert autonaApp.get(key) == 1 and spin.value() == 1
+
+        _withTracker(lambda: autonaApp.actions().set_route(BOARD, bestOf=5))
+        autonaApp.settle()
+        assert autonaApp.get(key) == 5
+        # Not changed under the operator's hands; the rows are the state's.
+        assert spin.value() == 1
+        assert len(board.individualGameTracker.stage_widget_list) == 5
+
+        # Leaving shows the state, and writes nothing.
+        _focus(other, autonaApp)
+        assert spin.value() == 5
+        assert autonaApp.get(key) == 5
+        assert len(autonaApp.get(f"{PREFIX}.stages")) == 5
+
+        # The spinbox is the operator's again afterwards.
+        _focus(spin, autonaApp)
+        QTest.keyClick(spin, Qt.Key.Key_Up)
+        autonaApp.settle()
+        assert autonaApp.get(key) == 6
+        assert _bestOfMismatches(board) == {}
+
+
+def test_return_in_the_spinbox_keeps_a_web_best_of_held_back(
+        board, autonaApp):
+    """Return finishes the edit but keeps the focus: the spinbox is still
+    the operator's, so it is still left alone -- and the value it shows,
+    which they did not change, is not written back over the Web's."""
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    spin, other = board.bestOfSpin, _teamNameEdit(board, 1)
+    key = f"{PREFIX}.best_of"
+
+    with _onScreen(board, autonaApp):
+        _focus(spin, autonaApp)
+        QTest.keyClick(spin, Qt.Key.Key_Up)
+        autonaApp.settle()
+        assert autonaApp.get(key) == 1
+
+        autonaApp.actions().set_route(BOARD, bestOf=5)
+        autonaApp.settle()
+        assert spin.value() == 1
+
+        QTest.keyClick(spin, Qt.Key.Key_Return)
+        autonaApp.settle()
+
+        assert spin.hasFocus()
+        assert spin.value() == 1
+        # Return makes Qt emit valueChanged for the value it holds; the one
+        # left there over the Web's is not written back.
+        assert autonaApp.get(key) == 5
+        assert board._heldBackBestOf == 1
+
+        _focus(other, autonaApp)
+        assert spin.value() == 5
+        assert autonaApp.get(key) == 5
+        assert board._heldBackBestOf is None
+
+        # A value the operator does choose while held back is theirs.
+        autonaApp.actions().set_route(BOARD, bestOf=3)
+        autonaApp.settle()
+        _focus(spin, autonaApp)
+        autonaApp.actions().set_route(BOARD, bestOf=7)
+        autonaApp.settle()
+        assert spin.value() == 3 and board._heldBackBestOf == 3
+        QTest.keyClick(spin, Qt.Key.Key_Up)
+        autonaApp.settle()
+        assert autonaApp.get(key) == 4
+        assert board._heldBackBestOf is None
 
 
 # ── a card's own Clear and the core clear (ADR-005 S2d review) ──────────

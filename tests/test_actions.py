@@ -31,6 +31,8 @@ import pytest
 
 from src.core import StateSchema as schema
 from src.core.Actions import AutonaActions
+from src.core.GameTrackerService import (GameTrackerService, TEAM_1,
+                                         UNREPORTED)
 from src.core.SettingsManager import SettingsManager
 from src.core.DictHelper import deep_clone
 from src.core.StateManager import StateManager as SM
@@ -1049,6 +1051,7 @@ def test_clear_board_takes_the_team_names_too_in_one_cycle(
     _sides(actions)
     for field, value in (("phase", "Bracket"), ("match", "Winners Final")):
         actions.SetMatchField(BOARD, field, value)
+    actions.SetBestOf(BOARD, 5)
     actions.ApplyChanges(BOARD)
     spy.held_updates.clear()
 
@@ -1056,6 +1059,9 @@ def test_clear_board_takes_the_team_names_too_in_one_cycle(
 
     assert spy.held_updates_for(PREFIX) == [PREFIX]
     board = SM.Get(PREFIX)
+    # The best of in the same cycle (ADR-005 S2e; the board's spinbox reset
+    # it inside the same block before).
+    assert board["best_of"] == 0 and board["best_of_text"] == ""
     for team in ("1", "2"):
         assert board["team"][team]["teamName"] == ""
         # No crest for no name; a side that had none gets no key for it
@@ -1076,6 +1082,9 @@ def test_clear_board_on_a_clear_board_writes_nothing(actions, heldBoard, spy):
         actions.SetTeamLosers(BOARD, team, False)
     for field in schema.SCORE_MATCH_FIELDS:
         actions.SetMatchField(BOARD, field, "")
+    # The best of is ClearBoard's too since ADR-005 S2e; a built board's is
+    # 0 from the moment it is built.
+    actions.SetBestOf(BOARD, 0)
     actions.ApplyChanges(BOARD)
     spy.held_updates.clear()
     spy.dirty_events.clear()
@@ -1165,6 +1174,194 @@ def test_best_of_falls_back_to_the_shipped_english_text(heldBoard):
 
     assert SM.Get(f"{PREFIX}.best_of_text") == "Best of 5"
     assert SM.Get(f"{PREFIX}.first_to_text") == "First to 3"
+
+
+# The set length leads since ADR-005 S2e: SetBestOf is every entry point's,
+# and it resizes a built board's game rows in the same cycle through the
+# tracker the board registers. A fresh AutonaActions where the registry
+# matters, so that no board another module left built takes part.
+
+@pytest.fixture
+def trackerOn():
+    # The tracker ships disabled; the isolated settings are put back by
+    # _isolated_state.
+    SettingsManager.settings = {
+        "general": {"disable_individual_game_tracker": False}}
+
+
+def test_the_same_best_of_is_not_a_write(actions, heldBoard, spy):
+    # The spinbox's valueChanged, which every entry point went through, does
+    # not fire for the value it holds.
+    assert actions.SetBestOf(BOARD, 5) is True
+    spy.held_updates.clear()
+
+    assert actions.SetBestOf(BOARD, 5) is False
+
+    assert spy.held_updates == []
+
+
+@pytest.mark.parametrize("value, expected", [
+    (150, 99), (-3, 0), ("7", 7)])
+def test_best_of_clamps_to_the_spinbox_range(actions, heldBoard, value,
+                                             expected):
+    # setValue() clamped a Web or set-load value to 0..99 before S2e.
+    actions.SetBestOf(BOARD, value)
+
+    assert SM.Get(f"{PREFIX}.best_of") == expected
+
+
+@pytest.mark.parametrize("value", ["seven", None, "", {"n": 5}, [5]])
+def test_a_best_of_that_is_not_a_number_is_refused(actions, heldBoard, spy,
+                                                   value):
+    """Not read as 0, which would clear the set length: refused with a
+    warning and nothing written, as SetLoadService treats a set's numbers."""
+    assert actions.SetBestOf(BOARD, 5) is True
+    spy.held_updates.clear()
+
+    assert actions.SetBestOf(BOARD, value) is False
+
+    assert SM.Get(f"{PREFIX}.best_of") == 5
+    assert spy.held_updates == []
+
+
+def test_a_failing_text_formatter_gets_the_english_default(heldBoard,
+                                                           trackerOn):
+    """The Qt formatter raises while the locale tables are empty, and a
+    custom term file can hold a template .format() rejects. The set length,
+    its short forms and the rows are written all the same, with the English
+    texts, and nothing reaches the caller -- a set load, the Web's set_route
+    and a game load call this directly since ADR-005 S2e."""
+    def broken(key, number):
+        return {}.get(key).format(number)
+
+    actions = AutonaActions(formatMatchText=broken)
+    tracker = GameTrackerService(BOARD)
+    actions.RegisterGameTracker(BOARD, tracker)
+
+    assert actions.SetBestOf(BOARD, 5) is True
+
+    assert SM.Get(f"{PREFIX}.best_of") == 5
+    assert SM.Get(f"{PREFIX}.best_of_short_text") == "BO5"
+    assert SM.Get(f"{PREFIX}.best_of_text") == "Best of 5"
+    assert SM.Get(f"{PREFIX}.first_to_text") == "First to 3"
+    assert tracker.StageCount() == 5
+    assert SM.saveBlocked == 0
+
+    def badTemplate(key, number):
+        return "Best of {count}".format(number)     # KeyError
+
+    assert AutonaActions(formatMatchText=badTemplate).RepublishBestOf(
+        BOARD) is True
+    assert SM.Get(f"{PREFIX}.best_of_text") == "Best of 5"
+    assert SM.saveBlocked == 0
+
+
+def test_the_crew_board_keeps_its_own_best_of(actions):
+    """Board 3's set length is the raw key its spinbox writes
+    (CrewBattleService.SetBestOf)."""
+    SM.Set("score.3", {"best_of": 3})
+
+    assert actions.SetBestOf(3, 5) is False
+    assert actions.RepublishBestOf(3) is False
+
+    assert SM.Get("score.3") == {"best_of": 3}
+
+
+def test_a_best_of_resizes_the_registered_rows_in_the_same_cycle(
+        heldBoard, spy, trackerOn):
+    actions = AutonaActions()
+    tracker = GameTrackerService(BOARD)
+    actions.RegisterGameTracker(BOARD, tracker)
+
+    actions.SetBestOf(BOARD, 5)
+
+    assert [tracker.GameWinner(i) for i in range(tracker.StageCount())] \
+        == [UNREPORTED] * 5
+    assert spy.held_updates_for(PREFIX) == [PREFIX]
+    # The rows after the six keys, as the spinbox's handler wrote them.
+    assert list(SM.Get(PREFIX)) == [
+        "team", "best_of", "best_of_short_text", "best_of_text", "first_to",
+        "first_to_short_text", "first_to_text", "stages"]
+
+
+def test_the_tracker_switched_off_gives_no_rows(heldBoard):
+    actions = AutonaActions()
+    actions.RegisterGameTracker(BOARD, GameTrackerService(BOARD))
+
+    actions.SetBestOf(BOARD, 5)
+
+    assert SM.Get(f"{PREFIX}.stages") == {}
+
+
+def test_the_same_best_of_keeps_the_recorded_games(heldBoard, trackerOn):
+    actions = AutonaActions()
+    tracker = GameTrackerService(BOARD)
+    actions.RegisterGameTracker(BOARD, tracker)
+    actions.SetBestOf(BOARD, 5)
+    tracker.SetStageResult(0, TEAM_1)
+
+    assert actions.SetBestOf(BOARD, 5) is False
+
+    assert tracker.GameWinner(0) == TEAM_1
+
+
+def test_republishing_the_best_of_starts_the_rows_over(
+        heldBoard, spy, trackerOn):
+    """A game load: the rows recorded games of the previous game's stages,
+    so they start over at the same length -- a rebuild the widget learns of
+    from rowsVersion, the count being unchanged."""
+    actions = AutonaActions()
+    tracker = GameTrackerService(BOARD)
+    actions.RegisterGameTracker(BOARD, tracker)
+    actions.SetBestOf(BOARD, 5)
+    tracker.SetStageResult(0, TEAM_1)
+    version = tracker.rowsVersion
+    spy.held_updates.clear()
+
+    assert actions.RepublishBestOf(BOARD) is True
+
+    assert tracker.StageCount() == 5
+    assert tracker.GameWinner(0) == UNREPORTED
+    assert tracker.rowsVersion == version + 1
+    assert spy.held_updates_for(PREFIX) == [PREFIX]
+
+
+def test_republishing_the_best_of_derives_the_texts_again(heldBoard):
+    # A reload can be a locale change.
+    AutonaActions(formatMatchText=lambda key, n: f"old {n}").SetBestOf(
+        BOARD, 5)
+
+    AutonaActions(formatMatchText=lambda key, n: f"new {n}").RepublishBestOf(
+        BOARD)
+
+    assert SM.Get(f"{PREFIX}.best_of_text") == "new 5"
+    assert SM.Get(f"{PREFIX}.first_to_text") == "new 3"
+
+
+def test_a_board_that_is_not_built_gets_the_keys_alone(heldBoard, trackerOn):
+    # No tracker registered: building the board reseeds the subtree anyway.
+    AutonaActions().SetBestOf(BOARD, 5)
+
+    assert SM.Get(f"{PREFIX}.best_of") == 5
+    assert SM.Get(f"{PREFIX}.stages") is None
+
+
+def test_unregistering_leaves_a_newer_tracker_in_place(heldBoard, trackerOn):
+    """A board built again in its place has registered its own tracker by
+    the time the old one's destruction unregisters."""
+    actions = AutonaActions()
+    old, new = GameTrackerService(BOARD), GameTrackerService(BOARD)
+    actions.RegisterGameTracker(BOARD, old)
+    actions.RegisterGameTracker(BOARD, new)
+
+    actions.UnregisterGameTracker(BOARD, old)
+    actions.SetBestOf(BOARD, 3)
+    assert new.rowsVersion == 1 and old.rowsVersion == 0
+    assert len(SM.Get(f"{PREFIX}.stages")) == 3
+
+    actions.UnregisterGameTracker(BOARD, new)
+    actions.SetBestOf(BOARD, 5)
+    assert len(SM.Get(f"{PREFIX}.stages")) == 3
 
 
 # ── the team roster (headless core Step 5, player instalment) ────────────

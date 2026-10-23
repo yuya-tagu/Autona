@@ -131,6 +131,11 @@ class AutonaScoreboardWidget(QWidget):
         # state (_OnTeamNameFocusChanged) -- the player cards' rule
         # (AutonaScoreboardPlayerWidget._heldBackText).
         self._heldBackTeamName = {}
+        # The value _SyncBestOf left on the BEST OF spinbox because the
+        # operator was in it (None when it left nothing): shown once they
+        # leave it, and not written back over the newer one meanwhile
+        # (_onBestOfChanged).
+        self._heldBackBestOf = None
 
         # Set loading (Start.gg payloads, /post_data, set_route): what a
         # loaded set means for this board's state lives in core since
@@ -518,6 +523,18 @@ class AutonaScoreboardWidget(QWidget):
         # Add stage order widget
         self.individualGameTracker = AutonaIndividualGameTracker(self.scoreboardNumber)
         self.individualGameTracker.signals.stageResultsUpdate.connect(self.StageResultsToScore)
+        # The set length resizes the rows in core (AutonaActions.SetBestOf,
+        # ADR-005 S2e), through the tracker's service registered here for as
+        # long as this board exists. Undone from the board's own `destroyed`:
+        # the tracker sits in the score column, which can outlive the board,
+        # and the lambda holds the number and the service, not the board.
+        trackerService = self.individualGameTracker.service
+        AutonaActions.instance.RegisterGameTracker(
+            self.scoreboardNumber, trackerService)
+        self.destroyed.connect(
+            lambda _obj=None, number=self.scoreboardNumber,
+            service=trackerService:
+                AutonaActions.instance.UnregisterGameTracker(number, service))
 
         # Score bar: phase/match/bestof extracted from .ui, placed above columns
         self.scoreBar = QWidget()
@@ -717,8 +734,17 @@ class AutonaScoreboardWidget(QWidget):
         self.innerWidget.layout().removeWidget(self.scoreColumn)
         self.scoreColumn.findChild(QGroupBox, "scoreGroupBox").setTitle("")
 
+        # The spinbox asks for the change and renders the state
+        # (_SyncBestOf); the range is the operation's, so the two cannot
+        # drift apart. The construction's 0 is core's too: the seeded
+        # subtree has no best_of, so this writes the six keys and the empty
+        # rows, as the emitted valueChanged(0) did.
+        self.bestOfSpin.setRange(
+            AutonaActions.BEST_OF_MIN, AutonaActions.BEST_OF_MAX)
         self.bestOfSpin.valueChanged.connect(self._onBestOfChanged)
-        self.bestOfSpin.valueChanged.emit(0)
+        self.bestOfSpin.editingFinished.connect(self._OnBestOfEditingFinished)
+        AutonaActions.instance.SetBestOf(self.scoreboardNumber, 0)
+        self._SyncBestOf()
 
         self.scoreDisplay1.valueChanged.connect(
             lambda value: [
@@ -928,35 +954,42 @@ class AutonaScoreboardWidget(QWidget):
         # replaced its models, so no stage row may stay on the retired one.
         self.individualGameTracker.RebindStageModel()
         self.SetDefaultsFromAssets()
-        self.bestOfSpin.valueChanged.emit(self.bestOfSpin.value())
+        # The set length again, rows included (they recorded games of the
+        # previous game's stages): what re-emitting the spinbox's
+        # valueChanged did, now core's. The rows are rebuilt from its held
+        # cycle.
+        AutonaActions.instance.RepublishBestOf(self.scoreboardNumber)
         # A game (re)load rewrites characters/defaults wholesale; publish the
         # fresh baseline instead of leaving it pending behind the 反映 button.
         StateManager.CommitHeld(self.statePrefix)
 
     def _onBestOfChanged(self, value):
-        """bestOfSpin.valueChanged handler: publish the set length.
+        """bestOfSpin.valueChanged handler: the operator set the length.
 
-        The six derived keys are AutonaActions' since headless core Step 5
-        (the localized long forms reach it as an injected formatter, because
-        AutonaLocaleHelper imports Qt and core may not). The spinbox is still
-        what drives them -- see the note in core/Actions.py on why inverting
-        this one would cost a second, re-entrant save cycle per change.
-
-        The stage rows join the same cycle, so a BO change stays a single
-        export. That is what this `with` is for, and it must stay a `with`
-        rather than a hand-paired block/release: anything inside can raise
-        (matchNames is empty until the locale is loaded, and .format() on the
-        missing entry throws), and a block that is never released leaves
-        saveBlocked permanently positive -- every later SaveState suppressed,
-        i.e. ./out and the WebSocket feed silently frozen mid-stream
-        (agent-pitfalls #6). tests/test_save_block_symmetry.py pins it.
+        One call, AutonaActions.SetBestOf: the six keys and the stage rows,
+        in one save cycle (ADR-005 S2e). The spinbox and the rows then show
+        what the state holds (_SyncBestOf, from the held cycle) -- the
+        spinbox used to be the length's source of truth, and every other
+        entry point (a set load, the Web, a game load, the resets) drove it.
+        A render sets it with its signals blocked, so this only ever runs
+        for the operator's own edit -- or for Return, which makes Qt emit
+        valueChanged for the value the spinbox already holds. That one is
+        not written while a render left it there over a newer length (the
+        Web's, say): the operator did not change it, as _OnTeamNameFinished
+        does not write back a held-back team name.
         """
-        with StateManager.SaveBlock():
-            AutonaActions.instance.SetBestOf(self.scoreboardNumber, value)
-            # Only GameTrackerService.SetStageCount() may resize the rows, and
-            # only this widget can rebuild the buttons that render them, so
-            # the two stay wired together here.
-            self.individualGameTracker.SetStageCount(value)
+        if self._heldBackBestOf is not None and value == self._heldBackBestOf:
+            return
+        AutonaActions.instance.SetBestOf(self.scoreboardNumber, value)
+
+    def _OnBestOfEditingFinished(self):
+        """bestOfSpin.editingFinished (Return, or the focus leaving): show
+        the state in the spinbox if a render had to skip it while the
+        operator was in it. Deferred, as the team name's is, so that nothing
+        is redrawn inside the focus change (agent-pitfalls #9). After Return
+        the operator is still in it, and the render leaves it alone again."""
+        if self._heldBackBestOf is not None:
+            QTimer.singleShot(0, self, self._SyncBestOf)
 
     def _onStateDelta(self, delta):
         # Same cheap containment filter AutonaStatsWidget uses on deltas. One
@@ -982,6 +1015,10 @@ class AutonaScoreboardWidget(QWidget):
             self._SchedulePlayerRender()
             swapped = self._NoticeSwap()
             self._SyncSetFields()
+            # Before the score: a cycle that resized the rows (a set load's
+            # best of with its score) has its transition followed onto the
+            # new ones, as when the spinbox rebuilt them inside the write.
+            self._SyncBestOf()
             # A swap exchanged the scores and mirrored the game rows in the
             # same cycle (AutonaActions.SwapTeams): the rows already show the
             # new scores, so the tracker is not told about the transition.
@@ -1114,6 +1151,32 @@ class AutonaScoreboardWidget(QWidget):
                 with QSignalBlocker(edit):
                     edit.setText(name)
 
+    def _SyncBestOf(self):
+        """Render the set length: the BEST OF spinbox and the game
+        tracker's rows (ADR-005 S2e). Writes nothing.
+
+        `score.{n}.best_of` and `score.{n}.stages` are written together by
+        AutonaActions.SetBestOf, from every entry point. The spinbox is set
+        with its signals blocked -- its valueChanged is the operator's edit
+        -- and left alone while the operator is in it, as _SyncSetFields
+        leaves a focused field; it shows the state once they leave it
+        (_OnBestOfEditingFinished). The rows follow whatever the state
+        holds, focus or not.
+        """
+        value = StateManager.Get(f"{self.statePrefix}.best_of", None)
+        if (isinstance(value, int) and not isinstance(value, bool)
+                and self.bestOfSpin.value() != value):
+            if self.bestOfSpin.hasFocus():
+                # Left alone, and remembered (_onBestOfChanged).
+                self._heldBackBestOf = self.bestOfSpin.value()
+            else:
+                self._heldBackBestOf = None
+                with QSignalBlocker(self.bestOfSpin):
+                    self.bestOfSpin.setValue(value)
+        else:
+            self._heldBackBestOf = None
+        self.individualGameTracker.RenderStageRows()
+
     def _SyncScoreDisplays(self, followStages=True):
         """Bring the two score spinboxes in line with the state.
 
@@ -1144,36 +1207,44 @@ class AutonaScoreboardWidget(QWidget):
         the swap mirrored the rows along with the scores, and following the
         exchanged scores re-awarded games on top of the mirror -- T2 T1 T1
         (2-1) came out as T1 T2 T1.
+
+        The rows a cycle moves, for both teams, are one save cycle (ADR-005
+        S2e): a score cleared with three games recorded used to follow in
+        three, a row at a time. Nothing is written when nothing follows, so
+        the block costs no cycle then.
         """
         if self._syncingScore:
             return
         self._syncingScore = True
         try:
             tracker = self.individualGameTracker
-            for team, display in ((1, self.scoreDisplay1),
-                                  (2, self.scoreDisplay2)):
-                value = StateManager.Get(
-                    f"{self.statePrefix}.team.{team}.score", None)
-                if not isinstance(value, int) or isinstance(value, bool):
-                    # Nothing renders a non-numeric score, so the spinbox is
-                    # left alone -- but a writer that put one there is a bug
-                    # worth a breadcrumb rather than a silent skip.
-                    if value is not None:
-                        logger.warning(
-                            f"{self.statePrefix}.team.{team}.score is "
-                            f"{value!r}, not an int; leaving the display at "
-                            f"{display.value()}")
-                    continue
-                previous = display.value()
-                if previous == value:
-                    continue
-                with QSignalBlocker(display):
-                    display.setValue(value)
-                if tracker.writingScore or not followStages:
-                    continue
-                # setValue clamps to the spinbox range, so read back what it
-                # actually took rather than assuming the state value fit.
-                tracker.SyncStagesToScore(team - 1, previous, display.value())
+            with StateManager.SaveBlock():
+                for team, display in ((1, self.scoreDisplay1),
+                                      (2, self.scoreDisplay2)):
+                    value = StateManager.Get(
+                        f"{self.statePrefix}.team.{team}.score", None)
+                    if not isinstance(value, int) or isinstance(value, bool):
+                        # Nothing renders a non-numeric score, so the spinbox
+                        # is left alone -- but a writer that put one there is
+                        # a bug worth a breadcrumb rather than a silent skip.
+                        if value is not None:
+                            logger.warning(
+                                f"{self.statePrefix}.team.{team}.score is "
+                                f"{value!r}, not an int; leaving the display "
+                                f"at {display.value()}")
+                        continue
+                    previous = display.value()
+                    if previous == value:
+                        continue
+                    with QSignalBlocker(display):
+                        display.setValue(value)
+                    if tracker.writingScore or not followStages:
+                        continue
+                    # setValue clamps to the spinbox range, so read back what
+                    # it actually took rather than assuming the state value
+                    # fit.
+                    tracker.SyncStagesToScore(
+                        team - 1, previous, display.value())
         finally:
             self._syncingScore = False
 
@@ -1257,13 +1328,12 @@ class AutonaScoreboardWidget(QWidget):
             QMessageBox.StandardButton.No)
         if answer != QMessageBox.StandardButton.Yes:
             return
-        # The clear is core's (AutonaActions.ClearBoard, ADR-005 S2d). The
-        # BEST OF spinbox is still the best of's entry point, so it joins the
-        # same save cycle from here.
+        # The clear is core's (AutonaActions.ClearBoard, ADR-005 S2d), the
+        # best of included since S2e. The block also takes in the focused
+        # field _ClearingPlayers commits first, as it always has.
         with StateManager.SaveBlock():
             self._ClearingPlayers(lambda: AutonaActions.instance.ClearBoard(
                 self.scoreboardNumber))
-            self.bestOfSpin.setValue(0)
 
     def _onHeldDirtyChanged(self, prefix: str, dirty: bool):
         if prefix == self.statePrefix:
@@ -2316,15 +2386,13 @@ class AutonaScoreboardWidget(QWidget):
         headless core Step 4b, and the widgets follow the state through
         _SyncSetFields / _SyncScoreDisplays.
 
-        What is still done here is what still needs Qt:
-
-        - **best of**, whose derived texts come from
-          AutonaLocaleHelper.matchNames and whose handler resizes the stage
-          rows (left behind by Step 3 for the same reason);
-        - **player data**, which SetData resolves against the country,
-          character and skin models (Step 5). Which team an entrant lands on
-          is core's answer (SetLoadService.DisplayTeam), so the swap rule is
-          stated once instead of four times.
+        The best of is AutonaActions.SetBestOf's since ADR-005 S2e (it was
+        the BEST OF spinbox driven from here), the rows it resizes included.
+        What is still done here is what still needs Qt: **player data**,
+        which SetData resolves against the country, character and skin
+        models (Step 5). Which team an entrant lands on is core's answer
+        (SetLoadService.DisplayTeam), so the swap rule is stated once
+        instead of four times.
 
         One save cycle for the whole payload, as before.
         """
@@ -2333,8 +2401,9 @@ class AutonaScoreboardWidget(QWidget):
             service.ApplyMatchInfo(data)
             service.ApplyScores(data)
 
-            if data.get("bestOf"):
-                self.bestOfSpin.setValue(data.get("bestOf"))
+            bestOf = service.BestOfFromSetData(data)
+            if bestOf is not None:
+                AutonaActions.instance.SetBestOf(self.scoreboardNumber, bestOf)
 
             # Stream URL is user-managed via the dropdown; do not overwrite
             # it when loading a set from StartGG.
