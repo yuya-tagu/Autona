@@ -25,9 +25,9 @@ from pathlib import Path
 
 import pytest
 
-from src.core.DictHelper import deep_clone
+from src.core.DictHelper import deep_clone, qvariantmap_copy
 from src.core.GameAssetCatalog import (
-    GameAssetCatalog, GameAssetSnapshot, _qvariantmap_copy, _utf16_sorted)
+    GameAssetCatalog, GameAssetSnapshot, _utf16_sorted)
 from src.core.StateManager import StateManager as SM
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "game_assets"
@@ -213,7 +213,7 @@ def test_the_payload_key_order_is_qvariantmap_s():
     QVariantList -- they stay as they were, nested dicts included."""
     value = {"ｚ": 1, "𝓖": 2, "B": {"b": 1, "a": 2},
              "a": [{"y": 1, "x": 2}], "Ä": None, "10": 1.0, "2": True}
-    copied = _qvariantmap_copy(value)
+    copied = qvariantmap_copy(value)
     assert json.dumps(copied) == json.dumps(
         {"10": 1.0, "2": True, "B": {"a": 2, "b": 1}, "a": [{"x": 2, "y": 1}],
          "Ä": None, "𝓖": 2, "ｚ": 1})
@@ -221,13 +221,13 @@ def test_the_payload_key_order_is_qvariantmap_s():
     assert value["B"]["a"] == 2
 
     notAMap = {"outer": {1: "int key", "s": {"b": 1, "a": 2}}}
-    assert json.dumps(_qvariantmap_copy(notAMap)) == json.dumps(notAMap)
+    assert json.dumps(qvariantmap_copy(notAMap)) == json.dumps(notAMap)
 
     # PySide6 hands a tuple back as the same tuple, inner dicts untouched,
     # also inside a list (which it does convert).
     tuples = {"b": ({"y": 1, "x": 2}, {"d": 1, "c": 2}),
               "l": [({"y": 1, "x": 2},)], "a": 1}
-    copied = _qvariantmap_copy(tuples)
+    copied = qvariantmap_copy(tuples)
     assert json.dumps(copied) == json.dumps(
         {"a": 1, "b": [{"y": 1, "x": 2}, {"d": 1, "c": 2}],
          "l": [[{"y": 1, "x": 2}]]})

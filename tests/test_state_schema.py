@@ -219,9 +219,10 @@ def test_the_player_service_writes_only_catalogued_keys():
     Read out of the source rather than by running it: the point is the
     *enumeration*, and a key that only some payload reaches at runtime would
     slip past a behavioural test. The regex only catches `Key(<literal>)`
-    calls, though -- keys built from a variable (`SetText` / `SetLocation`
-    / `SetSeed` / `SetBirthday` each take the field name as an argument) do
-    not show up here. Those are covered by the other half of this pair:
+    calls, though -- keys built from a variable or a constant (`SetText`
+    takes the field name as an argument; `SetSeed` / `SetBirthday` /
+    `SetCountry` / `SetRegion` name a schema constant) do not show up
+    here. Those are covered by the other half of this pair:
     `test_the_player_field_names_stay_inside_the_catalog`'s
     `set(schema.PLAYER_INPUT_KEYS) <= set(schema.SCORE_PLAYER_KEYS)`, above.
     Together the two tests cover both call shapes.

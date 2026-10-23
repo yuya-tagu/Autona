@@ -613,7 +613,8 @@ class AutonaActions:
     # leave it rendering a mix of two edits. What moved here is the key and
     # the fact that the write happens at all; assembling the dict stays with
     # the panel, because the values come out of combos whose rows are Qt
-    # models (the same line PlayerService.SetData draws).
+    # models (the line the player card drew too, until ADR-005 S1d moved its
+    # values into PlayerService; these two panels follow with S4).
 
     def PublishCommentary(self, slots):
         """Publish the caster line-up (`commentary.{slot}.*`)."""

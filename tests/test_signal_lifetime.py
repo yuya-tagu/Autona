@@ -45,6 +45,11 @@ PROCESS_WIDE_SENDERS = (
     # StateManager itself (headless core Step 1). Same four signals, same
     # process lifetime -- the bridge is built once by bootstrap_core().
     "StateManagerBridge.instance",
+    # The application object itself (focusChanged, which the player cards
+    # listen to since ADR-005 S2a, and the rest of its signals).
+    "QApplication.instance()",
+    "QGuiApplication.instance()",
+    "QCoreApplication.instance()",
 )
 
 # The exceptions, listed as (module, full sender expression). Every receiver
