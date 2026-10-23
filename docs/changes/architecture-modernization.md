@@ -487,7 +487,7 @@ LOSERS フラグと、そのチームの選手名に付く ` [L]`（`mergedName`
   - `SetTeamLosers` は core なので GUI スレッド以外からも呼べる（今の呼び出しはすべて GUI スレッド: チェックボックス・`ChangeSetData`・v1 の `set_team_losers`）。カードの名前確定との競合は、上記の接続順の変更で解消した
   - ボード構築時の `losers.toggled.emit(False)` も `SetTeamLosers` を通るが、作り直す対象は無い。`__init__` の `SeedBoard` がサブツリーを skeleton に戻した後（`_WireTeamColumn`）で、選手カードを作る（`playerNumber.setValue(1)`）より前なので、state にそのチームのスロットが無い。skeleton にフラグのキーが無いので `False` の書き込みだけは起きる（旧経路と同じ）
 
-#### S2c swap を core へ（2026-10-23・PR 未作成）
+#### S2c swap を core へ（2026-10-23・PR #224）
 
 チームスワップと選手カードの上下移動を、カード間の値コピー（`SwapWith`）から state の入れ替え（`AutonaActions.SwapTeams` / `SwapPlayers`）にした。カードは S2a の描画で追従する。
 
