@@ -110,6 +110,12 @@ class AutonaScoreboardWidget(QWidget):
         # another notification. Set before anything can notify us.
         self._syncingScore = False
 
+        # The player cards render their slots from the state (ADR-005 S2a):
+        # one pass, queued by the first held save cycle of an event-loop turn
+        # (_SchedulePlayerRender), with a re-entrancy guard on the pass itself.
+        self._playerRenderPending = False
+        self._renderingPlayers = False
+
         # Which way round the two sides currently are. Declared here rather
         # than further down (where it used to sit, after the combos) because
         # setLoad below reads it through a callable and the state
@@ -829,13 +835,14 @@ class AutonaScoreboardWidget(QWidget):
         program_state.json is keyed by them) -- pinned by
         tests/test_objectname_keypath_contract.py.
 
-        Both widgets keep a second handler connected elsewhere, and both are
-        load-bearing: the team crest follows the name (ExportTeamLogo, below)
-        and every player widget's " [L]" suffix follows the losers flag
-        (`SetLosers`, connected per player in `_setPlayersPerTeamImpl`).
-        Neither moved to core, so neither may be replaced by a state
-        notification -- `_SyncSetFields` sets these two widgets with their
-        signals blocked precisely because it is the render side.
+        The name keeps a second handler, and it is load-bearing: the team
+        crest follows the name (ExportTeamLogo, below). It did not move to
+        core, so it may not be replaced by a state notification --
+        `_SyncSetFields` sets these two widgets with their signals blocked
+        precisely because it is the render side. The losers box used to have
+        one too (every player card's `SetLosers`, re-exporting its name with
+        the " [L]" suffix); since ADR-005 S2b that is part of
+        `AutonaActions.SetTeamLosers`, so the box has a single handler.
 
         The initial emit seeds the two keys, as it always did: a board starts
         with an empty name and an unchecked losers box, and the overlays read
@@ -928,8 +935,57 @@ class AutonaScoreboardWidget(QWidget):
         # Live-but-unpublished data under a held prefix changed. Only this
         # board's own subtree is of interest here.
         if prefix == self.statePrefix:
+            # First: it only queues, and a sync below that raises must not
+            # leave the cards behind the state.
+            self._SchedulePlayerRender()
             self._SyncSetFields()
             self._SyncScoreDisplays()
+
+    def _SchedulePlayerRender(self):
+        """Have every player card show its slot, once control is back in
+        the event loop (ADR-005 S2a).
+
+        Deferred, unlike the two syncs in _onHeldStateUpdated, and that is
+        the point rather than an optimisation. The player slots are still
+        written by the cards themselves, an operation at a time, and an
+        operation can take several save cycles -- a country pick publishes
+        the rebuilt region before the country, SetData and Clear publish
+        field by field. In
+        between, the card is legitimately ahead of the state; a render run
+        right there would put the old country back on the combo, and the
+        country handler still to come would then publish *that*. Once the
+        operation has returned, card and state agree again, and a render
+        only changes what was written somewhere else.
+
+        Coalesced: however many cycles a turn produces, one pass is queued.
+        The board is the timer's context, so a board torn down first takes
+        the pending pass with it. A card also asks for a pass once the
+        operator has left a field the last one had to skip
+        (render_requested).
+        """
+        if self._playerRenderPending:
+            return
+        self._playerRenderPending = True
+        QTimer.singleShot(0, self, self._RenderPlayerCards)
+
+    def _RenderPlayerCards(self):
+        self._playerRenderPending = False
+        if self._renderingPlayers:
+            # Nothing in a pass can bring us back here (it writes nothing,
+            # agent-pitfalls #9), but a pass must never stack on another.
+            logger.warning(
+                f"{self.statePrefix}: re-entrant player render, skipping")
+            return
+        self._renderingPlayers = True
+        try:
+            for card in list(self.playerWidgets):
+                try:
+                    card.RenderFromState()
+                except Exception:
+                    logger.exception(
+                        f"{self.statePrefix}: rendering {card.path} failed")
+        finally:
+            self._renderingPlayers = False
 
     def _SyncSetFields(self):
         """Render the set-level state into the match bar and team cards.
@@ -1662,27 +1718,6 @@ class AutonaScoreboardWidget(QWidget):
         with StateManager.SaveBlock():
             self._setPlayersPerTeamImpl(number)
 
-    def _AdoptTeamLosers(self, player, team: int):
-        """Give a freshly built player card its team's current losers flag.
-
-        Closes a gap that predates the core migration: a player widget is
-        only connected to the LOSERS checkbox from the moment it is created,
-        so a set that arrives with the flag set *and* grows the roster left
-        the new cards at losers=False -- their `mergedName` lost the " [L]"
-        the thumbnail generator renders, until the next load happened to
-        flip the flag and `_ApplyLosersToPlayers` swept them up.
-
-        Read from the state rather than from the checkbox: inside
-        `ChangeSetData` the flag has already been written by
-        `SetLoadService.ApplyLosers`, but the checkbox is only re-rendered by
-        `_SyncSetFields` when the surrounding save block is released -- i.e.
-        after the entrants have been poured in.
-        """
-        value = bool(StateManager.Get(
-            f"{self.statePrefix}.team.{team}.{schema.TEAM_LOSERS_KEY}", False))
-        if player.losers != value:
-            player.SetLosers(value)
-
     def _setPlayersPerTeamImpl(self, number):
         while len(self.team1playerWidgets) < number:
             p = AutonaScoreboardPlayerWidget(
@@ -1694,9 +1729,6 @@ class AutonaScoreboardWidget(QWidget):
             self.team1column.findChild(
                 QGroupBox, "groupBox").layout().addWidget(p)
             p.SetCharactersPerPlayer(self.charNumber.value())
-            self.team1column.findChild(
-                QCheckBox, schema.TEAM_LOSERS_KEY).toggled.connect(p.SetLosers)
-            self._AdoptTeamLosers(p, 1)
 
             p.btMoveUp.clicked.connect(lambda index, p=p: p.SwapWith(
                 self.team1playerWidgets[max(0, self.team1playerWidgets.index(p) - 1)]))
@@ -1711,6 +1743,8 @@ class AutonaScoreboardWidget(QWidget):
                 self.stats.signals.PlayerHistoryStandingsP1Signal.emit)
             p.instanceSignals.player_seed_changed.connect(
                 self.stats.signals.UpsetFactorCalculation.emit)
+            p.instanceSignals.render_requested.connect(
+                self._SchedulePlayerRender)
 
             self.team1playerWidgets.append(p)
 
@@ -1723,9 +1757,6 @@ class AutonaScoreboardWidget(QWidget):
             self.team2column.findChild(
                 QGroupBox, "groupBox").layout().addWidget(p)
             p.SetCharactersPerPlayer(self.charNumber.value())
-            self.team2column.findChild(
-                QCheckBox, schema.TEAM_LOSERS_KEY).toggled.connect(p.SetLosers)
-            self._AdoptTeamLosers(p, 2)
 
             p.btMoveUp.clicked.connect(lambda index, p=p: p.SwapWith(
                 self.team2playerWidgets[max(0, self.team2playerWidgets.index(p) - 1)]))
@@ -1740,6 +1771,8 @@ class AutonaScoreboardWidget(QWidget):
                 self.stats.signals.PlayerHistoryStandingsP2Signal.emit)
             p.instanceSignals.player_seed_changed.connect(
                 self.stats.signals.UpsetFactorCalculation.emit)
+            p.instanceSignals.render_requested.connect(
+                self._SchedulePlayerRender)
 
             self.team2playerWidgets.append(p)
 
@@ -2100,8 +2133,8 @@ class AutonaScoreboardWidget(QWidget):
 
             # Stream URL is user-managed via the dropdown; do not overwrite
             # it when loading a set from StartGG.
+            # The flag and its team's " [L]" names, in core (ADR-005 S2b).
             service.ApplyLosers(data)
-            self._ApplyLosersToPlayers(data)
 
             if data.get("entrants"):
                 self._ApplyEntrants(data)
@@ -2114,45 +2147,6 @@ class AutonaScoreboardWidget(QWidget):
 
             if service.ApplyBracketType(data):
                 self.stats.signals.UpsetFactorCalculation.emit()
-
-    def _ApplyLosersToPlayers(self, data):
-        """Carry a loaded losers flag into the player widgets themselves.
-
-        The checkbox's `toggled` was doing two jobs at once: writing
-        `team.{t}.losers`, and running every player widget's SetLosers, which
-        re-exports `mergedName` with the " [L]" suffix the thumbnail
-        generator renders. Only the first half moved to core --
-        _SyncSetFields sets the checkbox with its signals blocked, because it
-        is the render side and may not write -- so without this the loaded
-        flag reached the state and the checkbox but not the names, and
-        `p.losers` stayed False against a checked box for the rest of the
-        session.
-
-        Called from ChangeSetData's save block, right after the write and
-        before the entrant rosters, which is where the checkbox used to fire:
-        SetData's own mergedName export then already sees the flag.
-
-        Only the widgets that exist *now*: a set that also grows the roster
-        creates its extra cards further down, after this has run. Those pick
-        the flag up from the state themselves (`_AdoptTeamLosers`, called as
-        each one is built) -- until the player instalment of Step 5 they did
-        not, and stayed unflagged until some later load moved the flag.
-        """
-        for setTeam in (1, 2):
-            value = data.get(f"team{setTeam}losers")
-            if value is None:
-                continue
-            value = bool(value)
-            team = self.setLoad.DisplayTeam(setTeam)
-            widgets = (self.team1playerWidgets if team == 1
-                       else self.team2playerWidgets)
-            for player in widgets:
-                # Only on change, because that is what `toggled` gave us:
-                # SetLosers re-exports mergedName unconditionally, so calling
-                # it for a flag that did not move would mark the board dirty
-                # and light the 反映 button on a re-load of the same set.
-                if player.losers != value:
-                    player.SetLosers(value)
 
     def _ApplyEntrants(self, data):
         """Pour a set's two entrant rosters into the player widgets."""

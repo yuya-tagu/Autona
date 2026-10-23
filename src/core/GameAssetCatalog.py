@@ -62,7 +62,7 @@ import requests
 from loguru import logger
 
 from . import StateSchema as schema
-from .DictHelper import deep_clone
+from .DictHelper import deep_clone, qvariantmap_copy
 from .StateManager import StateManager
 
 GAMES_DIR = "./user_data/games/"
@@ -107,36 +107,6 @@ def _utf16_key(row):
 
 def _utf16_sorted(rows):
     return tuple(sorted(rows, key=_utf16_key))
-
-
-def _qvariantmap_copy(value):
-    """A deep copy of `value` with every dict's keys in QVariantMap order.
-
-    The Web readers (get_characters / get_variants) used to read their
-    payloads back out of the Qt models, so every dict in them had made a
-    round trip through QVariantMap, i.e. a QMap: keys sorted by UTF-16 code
-    unit, at every level. Socket.IO serialises in insertion order, so that
-    order is on the wire; the payload readers reproduce it to keep the
-    bytes unchanged (ADR-005 S1b). Lists keep their order, and come back as
-    lists, as deep_clone's do.
-
-    Only a str-keyed dict and a list convert (to QVariantMap / QVariantList).
-    A dict with any other key, and a tuple, PySide6 keeps as an opaque
-    Python object, so nothing inside them is reordered: they are copied as
-    is (deep_clone -- a tuple comes back as a list, the same JSON).
-    """
-    if isinstance(value, dict):
-        if all(isinstance(key, str) for key in value):
-            return {key: _qvariantmap_copy(value[key])
-                    for key in sorted(value, key=lambda k: k.encode("utf-16-be"))}
-        # Not a QVariantMap candidate: copied as is.
-        return deep_clone(value)
-    if isinstance(value, tuple):
-        # Not a QVariantList either (PySide6 6.11, measured): copied as is.
-        return deep_clone(value)
-    if isinstance(value, list):
-        return [_qvariantmap_copy(item) for item in value]
-    return value
 
 
 @dataclass(frozen=True)
@@ -437,13 +407,13 @@ class GameAssetCatalog:
         """The legacy `get_characters` payload: the character combo's rows
         (in display order, modded ones only when mods are active), each with
         its skin list, keyed by export name. Nested key order is the one the
-        model-backed reader produced (see _qvariantmap_copy), with `skins`
-        appended last as it did."""
+        model-backed reader produced (see DictHelper.qvariantmap_copy), with
+        `skins` appended last as it did."""
         snap = self._current
         data = {}
         for _text, row in snap.characterRows:
-            item = _qvariantmap_copy(row)
-            item["skins"] = [_qvariantmap_copy(skinData)
+            item = qvariantmap_copy(row)
+            item["skins"] = [qvariantmap_copy(skinData)
                              for _skin, _label, skinData
                              in snap.skinRows.get(item.get("en_name"), ())]
             data[item.get("name")] = item
@@ -455,12 +425,52 @@ class GameAssetCatalog:
         snap = self._current
         data = {}
         for _text, row in snap.variantRows:
-            data[row.get("name")] = _qvariantmap_copy(row)
+            data[row.get("name")] = qvariantmap_copy(row)
         return data
 
     def Character(self, en_name):
         character = self._current.characters.get(en_name)
         return deep_clone(character) if character is not None else None
+
+    # The three combo rows a player card's character slot picks from, keyed
+    # the way the card names its pick (ADR-005 S1d): the character and the
+    # variant by en_name -- the key of their tables, so unique -- and the
+    # skin by its row in that character's skin combo. `snapshot` as in
+    # CharacterFromStartGGId: one slot (or one card) resolves against one
+    # game. Copies, in insertion order; PlayerService decides what the state
+    # holds.
+
+    def CharacterRow(self, en_name, snapshot=None):
+        """The character combo row's data for `en_name`, or None when the
+        combo has no such row (an unknown name, or a modded character while
+        mods are off)."""
+        snap = snapshot if snapshot is not None else self._current
+        for _text, data in snap.characterRows:
+            if data.get("en_name") == en_name:
+                return deep_clone(data)
+        return None
+
+    def SkinRow(self, en_name, row, snapshot=None):
+        """The data of row `row` of `en_name`'s skin combo, or None.
+
+        A row, not a skin number: the rows are the skins in number order, so
+        the two differ as soon as the numbering has a gap. The row is what a
+        card has always published as `skin` (and what the player database
+        stores in `mains`)."""
+        snap = snapshot if snapshot is not None else self._current
+        rows = snap.skinRows.get(en_name, ())
+        if not isinstance(row, int) or isinstance(row, bool) \
+                or row < 0 or row >= len(rows):
+            return None
+        return deep_clone(rows[row][2])
+
+    def VariantRow(self, en_name, snapshot=None):
+        """The variant combo row's data for `en_name`, or None."""
+        snap = snapshot if snapshot is not None else self._current
+        for _text, data in snap.variantRows:
+            if data.get("en_name") == en_name:
+                return deep_clone(data)
+        return None
 
     def CharacterByCodename(self, codename):
         for character in self._current.characters.values():
