@@ -391,7 +391,10 @@ def get_scoreboard(n):
     actions = _actions_ref()
     board_state = actions.get_scoreboard(n)
     data = dict(board_state) if isinstance(board_state, dict) else {"state": board_state}
-    # teamsSwapped lives on the widget; crew board may lack it — tolerate.
+    # The live swap flag (score.{n}.teamsSwapped for boards 1/2 -- not the
+    # committed view above; the crew widget's own flag for board 3), read
+    # through the legacy action so both routes answer the same. Tolerate a
+    # board that cannot answer.
     try:
         data["swapped"] = actions.get_swap(n) == "True"
     except Exception:

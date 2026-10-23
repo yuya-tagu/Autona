@@ -246,8 +246,8 @@ class AutonaIndividualGameTracker(QWidget):
     def UpdateScore(self, team, new_value):
         """Responds to the score being modified in a non-per-game context.
 
-        The score spinbox's valueChanged handler: set loading, ClearScore
-        and SwapTeams drive the widget, and this publishes the result and
+        The score spinbox's valueChanged handler: ClearScore and
+        ResetAllInputs drive the widget, and this publishes the result and
         moves the rows to match.
         """
         self.service.UpdateScore(team, new_value)
@@ -271,6 +271,8 @@ class AutonaIndividualGameTracker(QWidget):
         self.signals.stageResultsUpdate.emit(team_1_score, team_2_score)
 
     @assert_gui_thread
-    def SwapStageResults(self):
-        self.service.SwapStageResults()
+    def RenderStageResults(self):
+        """Redraw the buttons from the recorded results, for a write that
+        did not come through here -- a swap mirrors the rows in core
+        (AutonaActions.SwapTeams, ADR-005 S2c). Writes nothing."""
         self._SyncStageButtons()

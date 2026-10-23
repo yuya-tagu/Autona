@@ -572,6 +572,27 @@ def SeedBoard(number):
     StateManager.Set(f"{prefix}.station_queue", {})
 
 
+def HoldBoard(number):
+    """Put a 1v1 / team board's ``score.{number}`` behind the 反映 gate.
+
+    Edits under a held prefix stay in the live state but are not published
+    until ``StateManager.CommitHeld`` (the 反映 button, ``ApplyChanges``);
+    ``STATS_KEYS`` are fetched data, not edits, and publish at once.
+
+    Called by the board's constructor, after its ``SeedBoard()`` -- a
+    registration made first would hold back the skeleton itself. A board
+    that is not built is not held: nothing would ever apply its edits (the
+    反映 button is on the board, and the Web UI has none), and the seed
+    written when the board is built would wipe them. Holding the unbuilt
+    board from startup was ADR-005 S2 decision 7, withdrawn in S2c for that
+    reason; the routes that edit a board widget-side build it first.
+
+    Idempotent (``HoldSubtree`` keeps a set). Board 3 (crew) is not held:
+    the crew board publishes as it goes.
+    """
+    StateManager.HoldSubtree(f"{SCORE_ROOT}.{number}", exempt=STATS_KEYS)
+
+
 def PublishDisplayOptions():
     """Re-publish all eight display options from their persisted defaults.
 

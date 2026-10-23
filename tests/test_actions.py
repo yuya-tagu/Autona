@@ -516,11 +516,308 @@ def test_reasserting_the_losers_flag_writes_nothing(actions, heldBoard, spy):
     assert spy.dirty_events == []
 
 
-def test_set_teams_swapped_publishes_the_mirror(actions, heldBoard):
-    actions.SetTeamsSwapped(BOARD, True)
+# ── swapping sides / moving a player (ADR-005 S2c) ───────────────────────
+#
+# Both were a copy of field values from one player card into another; they
+# exchange the slots in the state now, which is what makes them testable
+# here -- and what fixed what the copy lost on the way (a character's
+# variant, the mains, the game tracker's order).
+
+VARIANT_EX = {"codename": "ex", "en_name": "EX", "name": "EX"}
+
+
+def _player(side, number, **leaves):
+    path = f"{PREFIX}.team.{side}.player.{number}"
+    for key, value in leaves.items():
+        SM.Set(f"{path}.{key}", value)
+    return path
+
+
+def _sides(actions):
+    """Two players a side with everything a swap carries, committed."""
+    _player(1, 1, team="SP", name="ALPHA", mergedName="SP | ALPHA",
+            mergedOnlyName="ALPHA", avatar="avatars/alpha.png", seed=3,
+            id=[101, 1101], city="Shibuya", country={"code": "JP"},
+            character={"1": {"en_name": "Dr. Mario", "skin": 2,
+                             "variant": dict(VARIANT_EX)}},
+            mains={"1": {"en_name": "Dr. Mario", "variant": dict(VARIANT_EX)}},
+            sponsor_logo="sponsor/SP.png")
+    _player(1, 2, team="", name="BETA", mergedName="BETA",
+            mergedOnlyName="BETA", seed=7)
+    _player(2, 1, team="GG", name="GAMMA", mergedName="GG | GAMMA",
+            mergedOnlyName="GAMMA", seed=12, id=[303, 3303],
+            character={"1": {"en_name": "Bowser", "skin": 0, "variant": {}}})
+    _player(2, 2, name="DELTA", mergedName="DELTA [L]",
+            mergedOnlyName="DELTA [L]", id=[404, 4404], city="Osaka")
+    SM.Set(f"{PREFIX}.team.1.score", 2)
+    SM.Set(f"{PREFIX}.team.2.score", 1)
+    SM.Set(f"{PREFIX}.team.1.teamName", "Alpha")
+    SM.Set(f"{PREFIX}.team.2.teamName", "Bravo")
+    SM.Set(f"{PREFIX}.team.1.logo", "./user_data/team_logo/alpha.png")
+    SM.Set(f"{PREFIX}.team.1.losers", False)
+    SM.Set(f"{PREFIX}.team.2.losers", True)
+    SM.Set(f"{PREFIX}.team.1.color", "#ff0000")
+    SM.Set(f"{PREFIX}.team.2.color", "#0000ff")
+    actions.ApplyChanges(BOARD)
+    return deep_clone(SM.Get(PREFIX))
+
+
+def test_swap_teams_exchanges_the_sides_in_one_held_cycle(
+        actions, heldBoard, spy):
+    before = _sides(actions)
+    spy.held_updates.clear()
+    spy.deltas.clear()
+
+    assert actions.SwapTeams(BOARD) is True
+
+    after = SM.Get(PREFIX)
+    one, two = before["team"]["1"], before["team"]["2"]
+    for slot in ("1", "2"):
+        assert after["team"]["1"]["player"][slot][schema.PLAYER_TAG_KEY] \
+            == two["player"][slot][schema.PLAYER_TAG_KEY]
+        assert after["team"]["2"]["player"][slot][schema.PLAYER_TAG_KEY] \
+            == one["player"][slot][schema.PLAYER_TAG_KEY]
+    for key in ("score", "losers", "teamName"):
+        assert after["team"]["1"][key] == two[key]
+        assert after["team"]["2"][key] == one[key]
+    # The crest goes with the name; the side that had none gets none.
+    assert after["team"]["2"]["logo"] == one["logo"]
+    assert after["team"]["1"]["logo"] is None
+    # The colors are the sides', not the players'.
+    assert after["team"]["1"]["color"] == "#ff0000"
+    assert after["team"]["2"]["color"] == "#0000ff"
+    assert after["teamsSwapped"] is True
+    # One operation, one save cycle -- and still behind 反映.
+    assert spy.held_updates_for(PREFIX) == [PREFIX]
+    assert SM.HasPendingChanges(PREFIX) is True
+
+
+def test_a_player_keeps_the_variant_and_the_mains(actions, heldBoard):
+    """The copy re-picked the character by name (losing the variant) and
+    never moved the mains."""
+    _sides(actions)
+
+    actions.SwapTeams(BOARD)
+
+    alpha = SM.Get(f"{PREFIX}.team.2.player.1")
+    assert alpha[schema.PLAYER_TAG_KEY] == "ALPHA"
+    assert alpha["character"]["1"]["variant"] == VARIANT_EX
+    assert alpha["mains"]["1"]["en_name"] == "Dr. Mario"
+    gamma = SM.Get(f"{PREFIX}.team.1.player.1")
+    assert gamma["character"]["1"]["en_name"] == "Bowser"
+    assert "mains" not in gamma
+    assert "sponsor_logo" not in gamma
+    assert alpha["sponsor_logo"] == "sponsor/SP.png"
+
+
+def test_a_key_one_slot_lacks_follows_the_copy(actions, heldBoard):
+    """What a slot gets for a key only the other one had: what the copy
+    published for an empty field."""
+    _sides(actions)
+
+    actions.SwapTeams(BOARD)
+
+    beta = SM.Get(f"{PREFIX}.team.2.player.2")
+    delta = SM.Get(f"{PREFIX}.team.1.player.2")
+    assert delta["city"] == "Osaka" and delta["id"] == [404, 4404]
+    # The slot had them (DELTA's): emptied, not removed.
+    assert beta["city"] is None and beta["id"] is None
+    # BETA had no `team` text and DELTA no sponsor at all: both get "".
+    assert delta[schema.PLAYER_SPONSOR_KEY] == ""
+    assert beta[schema.PLAYER_SPONSOR_KEY] == ""
+    # Neither ever had a real name: the copy published an empty one anyway.
+    assert delta[schema.PLAYER_REAL_NAME_KEY] == ""
+    assert beta[schema.PLAYER_REAL_NAME_KEY] == ""
+
+
+def test_no_city_or_id_is_created_to_hold_none(actions, heldBoard):
+    """A city / id key belongs to the slot that has it, as with the copy:
+    the slot that had None keeps the key, the one without does not gain
+    it."""
+    _player(1, 1, name="ALPHA", city=None, id=None)
+    _player(1, 2, name="BETA")
+
+    actions.SwapPlayers(BOARD, 1, 1, 2)
+
+    alpha = SM.Get(f"{PREFIX}.team.1.player.2")
+    assert alpha[schema.PLAYER_TAG_KEY] == "ALPHA"
+    assert "city" not in alpha and "id" not in alpha
+    beta = SM.Get(f"{PREFIX}.team.1.player.1")
+    assert beta["city"] is None and beta["id"] is None
+
+
+def test_the_seed_is_always_a_number(actions, heldBoard):
+    """The copy set the seed on both cards through PlayerService.SetSeed:
+    always an int, 0 for a player without one -- also when neither had
+    one."""
+    _player(1, 1, name="ALPHA", seed=3)
+    _player(1, 2, name="BETA")
+    _player(2, 1, name="GAMMA", seed="5")
+    _player(2, 2, name="DELTA", seed="not a seed")
+
+    actions.SwapPlayers(BOARD, 1, 1, 2)
+    actions.SwapPlayers(BOARD, 2, 1, 2)
+
+    seeds = {SM.Get(f"{PREFIX}.team.{team}.player.{slot}.name"):
+             SM.Get(f"{PREFIX}.team.{team}.player.{slot}.seed")
+             for team in (1, 2) for slot in (1, 2)}
+    assert seeds == {"ALPHA": 3, "BETA": 0, "GAMMA": 5, "DELTA": 0}
+    assert all(type(seed) is int for seed in seeds.values())
+
+    _player(1, 3, name="EPSILON")
+    _player(1, 4, name="ZETA")
+    actions.SwapPlayers(BOARD, 1, 3, 4)
+    assert SM.Get(f"{PREFIX}.team.1.player.3.seed") == 0
+    assert SM.Get(f"{PREFIX}.team.1.player.4.seed") == 0
+
+
+def test_the_birthday_goes_with_its_player(actions, heldBoard):
+    """Changed on purpose: the copy never read the hidden birthday checkbox,
+    so the flag stayed on the card while its player moved."""
+    _player(1, 1, name="ALPHA", birthday=True)
+    _player(1, 2, name="BETA", birthday=False)
+
+    actions.SwapPlayers(BOARD, 1, 1, 2)
+
+    assert SM.Get(f"{PREFIX}.team.1.player.2.birthday") is True
+    assert SM.Get(f"{PREFIX}.team.1.player.1.birthday") is False
+
+
+def test_a_slot_only_one_team_has_stays_where_it_is(actions, heldBoard):
+    """The copy paired the cards; a slot the other team does not have (a
+    roster the state carries without a card) is not moved."""
+    _player(1, 1, name="ALPHA")
+    _player(1, 2, name="BETA")
+    _player(2, 1, name="GAMMA")
+
+    actions.SwapTeams(BOARD)
+
+    assert SM.Get(f"{PREFIX}.team.1.player.1.name") == "GAMMA"
+    assert SM.Get(f"{PREFIX}.team.2.player.1.name") == "ALPHA"
+    assert SM.Get(f"{PREFIX}.team.1.player.2.name") == "BETA"
+    assert SM.Get(f"{PREFIX}.team.2.player.2") is None
+
+
+def test_a_slot_keeps_its_key_order(actions, heldBoard):
+    """program_state.json and the Socket.IO delta keep the order the copy
+    produced: a key both slots have stays where it was in each."""
+    before = _sides(actions)
+
+    actions.SwapTeams(BOARD)
+
+    for team in ("1", "2"):
+        for slot in ("1", "2"):
+            had = list(before["team"][team]["player"][slot])
+            has = list(SM.Get(f"{PREFIX}.team.{team}.player.{slot}"))
+            assert [k for k in has if k in had] == \
+                [k for k in had if k in has], (team, slot)
+
+
+def test_swapping_twice_restores_every_value(actions, heldBoard):
+    before = _sides(actions)
+
+    actions.SwapTeams(BOARD)
+    actions.SwapTeams(BOARD)
+
+    after = deep_clone(SM.Get(PREFIX))
+    assert after.pop("teamsSwapped") is False
+    for team in ("1", "2"):
+        for slot, player in before["team"][team]["player"].items():
+            now = after["team"][team]["player"][slot]
+            # Same values; the swap may add the empty texts (and seed 0)
+            # the copy published for fields the slot never had.
+            assert {k: v for k, v in now.items() if k in player} == player
+            assert all(now[k] in ("", None) or (k == "seed" and now[k] == 0)
+                       for k in now if k not in player)
+        assert after["team"][team]["score"] == before["team"][team]["score"]
+
+
+def test_swap_teams_mirrors_the_game_results(actions, heldBoard):
+    from src.core.GameTrackerService import (
+        GameTrackerService, TEAM_1, TEAM_2, UNREPORTED)
+    _sides(actions)
+    tracker = GameTrackerService(BOARD)
+    tracker.SetStageCount(5)
+    for index, winner in enumerate((TEAM_2, TEAM_1, TEAM_1)):
+        tracker.SetStageResult(index, winner)
+
+    actions.SwapTeams(BOARD)
+
+    assert [tracker.GameWinner(i) for i in range(5)] == [
+        TEAM_1, TEAM_2, TEAM_2, UNREPORTED, UNREPORTED]
+    assert tracker.SumStageResults() == (
+        SM.Get(f"{PREFIX}.team.1.score"), SM.Get(f"{PREFIX}.team.2.score"))
+
+
+def test_swap_teams_recalculates_the_upset_factor(actions, heldBoard):
+    """The seeds move with the players. The upset factor is a statistic
+    (published at once, not held) and is recalculated by the operation --
+    no card's seed spinbox is edited to trigger it any more."""
+    _player(1, 1, name="ALPHA", seed=1)
+    _player(2, 1, name="GAMMA", seed=9)
+    SM.Set(f"{PREFIX}.upset_factor", -1)
+
+    actions.SwapTeams(BOARD)
+
+    assert SM.Get(f"{PREFIX}.team.1.player.1.seed") == 9
+    assert SM.Get(f"{PREFIX}.upset_factor") >= 0
+
+
+def test_swap_teams_on_a_board_with_no_players_only_turns_the_board(
+        actions, heldBoard):
+    """An unbuilt board's skeleton: nothing to exchange, nothing created."""
+    SM.Unset(f"{PREFIX}.team")
+
+    assert actions.SwapTeams(BOARD) is True
+
+    assert SM.Get(f"{PREFIX}.team") is None
     assert SM.Get(f"{PREFIX}.teamsSwapped") is True
-    actions.SetTeamsSwapped(BOARD, False)
-    assert SM.Get(f"{PREFIX}.teamsSwapped") is False
+
+
+def test_the_crew_board_swaps_itself(actions):
+    """Board 3's members are the crew widget's; the caller falls back to
+    it on False."""
+    SM.Set("score.3", {})
+
+    assert actions.SwapTeams(3) is False
+
+    assert SM.Get("score.3") == {}
+
+
+def test_swap_players_exchanges_two_slots_of_one_team(
+        actions, heldBoard, spy):
+    before = _sides(actions)
+    spy.held_updates.clear()
+
+    assert actions.SwapPlayers(BOARD, 1, 1, 2) is True
+
+    assert SM.Get(f"{PREFIX}.team.1.player.1.{schema.PLAYER_TAG_KEY}") \
+        == "BETA"
+    moved = SM.Get(f"{PREFIX}.team.1.player.2")
+    assert moved[schema.PLAYER_TAG_KEY] == "ALPHA"
+    assert moved["character"]["1"]["variant"] == VARIANT_EX
+    assert moved["mains"]["1"]["en_name"] == "Dr. Mario"
+    # The other team and the board are untouched.
+    assert SM.Get(f"{PREFIX}.team.2") == before["team"]["2"]
+    assert SM.Get(f"{PREFIX}.teamsSwapped") is None
+    assert spy.held_updates_for(PREFIX) == [PREFIX]
+
+
+@pytest.mark.parametrize("board, team, first, second", [
+    (BOARD, 1, 1, 1),       # the top card moved up: not a move
+    (BOARD, 1, 0, 1),       # slots are 1-based
+    (BOARD, 3, 1, 2),       # no such team
+    (3, 1, 1, 2),           # the crew board has no player slots
+])
+def test_what_is_not_a_player_move(actions, heldBoard, spy,
+                                   board, team, first, second):
+    before = _sides(actions)
+    spy.held_updates.clear()
+
+    assert actions.SwapPlayers(board, team, first, second) is False
+
+    assert SM.Get(PREFIX) == before
+    assert spy.held_updates == []
 
 
 # ── best of ──────────────────────────────────────────────────────────────

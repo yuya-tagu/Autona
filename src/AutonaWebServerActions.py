@@ -115,6 +115,12 @@ class WebServerActions(QObject):
         return "OK"
 
     def get_scoreboard(self, scoreboard):
+        # Still builds a board that is not built yet (GetScoreboard), although
+        # the answer is read from the state: building is what writes a board's
+        # full initial subtree, and an unbuilt board's is only the skeleton
+        # (StateSchema.SeedBoard). Dropping the build would change what this
+        # returns for that board, so it stays until the subtree is seeded
+        # without the widget.
         sb_widget: AutonaScoreboardWidget = self.scoreboard.GetScoreboard(scoreboard)
         # Committed view: pending (not yet 反映-applied) desktop edits must
         # not leak to remote clients ahead of the delta stream.
@@ -263,8 +269,9 @@ class WebServerActions(QObject):
 
         - it built the board when it was not built yet (GetScoreboard), and
           building it is what holds score.{n} for 反映 -- without it the flag
-          would be published at once. Until the held registration moves to
-          bootstrap (ADR-005 S2, decision 7);
+          would be published at once (an unbuilt board is not held: moving
+          that registration to startup was ADR-005 S2 decision 7, withdrawn
+          in S2c);
         - it went through ChangeSetData, whose match-info half
           (SetLoadService.ApplyMatchInfo) blanks match_en for a payload that
           carries no round_name_en -- also when the flag does not change.
@@ -350,12 +357,42 @@ class WebServerActions(QObject):
     def get_variants(self):
         return GameAssetCatalog.instance.VariantsPayload()
 
+    # ── Swap (ADR-005 S2c) ───────────────────────────────────────────────
+    # A 1v1 / team board's swap is a state operation (AutonaActions.SwapTeams)
+    # and its flag is `score.{n}.teamsSwapped`. Both routes still build a
+    # board that is not built yet (GetScoreboard), as they always did: an
+    # unbuilt board is not held, so a swap made there would be published at
+    # once -- to a board no 反映 button shows -- and then wiped by the seed
+    # the board's construction writes. Built first, the swap waits for 反映
+    # on the board like any other edit. The crew board still swaps itself,
+    # through its widget.
+
+    @gui_thread_sync
     def swap_teams(self, scoreboard):
-        self.scoreboard.GetScoreboard(scoreboard).signals.SwapTeams.emit()
+        # On the GUI thread although the operation is core's: the player
+        # cards still publish a typed edit in two writes on the GUI thread
+        # (the field, then the merged name), and a swap run from the Flask
+        # thread could land between them and leave one slot's name on the
+        # other. Until those writes are a single operation (ADR-005 S2f).
+        # It also makes the swap synchronous -- the old queued signal
+        # answered "OK" before anything had moved -- and lets the board
+        # finish a field being typed in first (SwapTeams ->
+        # CommitFocusedEdit).
+        board = self.scoreboard.GetScoreboard(scoreboard)
+        if int(scoreboard) in AutonaActions.SCORE_BOARDS:
+            board.SwapTeams()
+        else:
+            board.signals.SwapTeams.emit()
         return "OK"
-    
+
     def get_swap(self, scoreboard):
-        return str(self.scoreboard.GetScoreboard(scoreboard).teamsSwapped)
+        # The live flag, like the widget attribute it replaces: a swap is
+        # reported as soon as it is made, before 反映 publishes it.
+        board = self.scoreboard.GetScoreboard(scoreboard)
+        if int(scoreboard) in AutonaActions.SCORE_BOARDS:
+            return str(bool(StateManager.Get(
+                f"score.{int(scoreboard)}.teamsSwapped", False)))
+        return str(board.teamsSwapped)
 
     def open_sets(self, scoreboard):
         self.scoreboard.GetScoreboard(scoreboard).signals.SetSelection.emit()

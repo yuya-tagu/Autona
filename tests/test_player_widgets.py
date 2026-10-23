@@ -378,16 +378,26 @@ def test_swapping_two_character_slots_exchanges_the_published_names(
 
 
 # ── swapping two players ─────────────────────────────────────────────────
+#
+# A swap exchanges the two slots in the state (AutonaActions.SwapTeams,
+# ADR-005 S2c) and each card renders its own; it used to be a copy from one
+# card into the other (SwapWith). `left` / `right` are slot 1 of the two
+# teams of board 1, i.e. exactly the pair a team swap exchanges.
 
-def test_swap_with_exchanges_the_published_names(autonaApp):
+def _swap(app):
+    from src.core.Actions import AutonaActions
+    assert AutonaActions.instance.SwapTeams(1) is True
+    app.settle()
+
+
+def test_a_swap_exchanges_the_published_names(autonaApp):
     left, right = _players(autonaApp)
 
     left.SetData({"gamerTag": "LEFT", "prefix": "LS"}, dontLoadFromDB=True)
     right.SetData({"gamerTag": "RIGHT", "prefix": "RS"}, dontLoadFromDB=True)
     autonaApp.settle()
 
-    left.SwapWith(right)
-    autonaApp.settle()
+    _swap(autonaApp)
 
     assert autonaApp.get(f"{left.path}.name") == "RIGHT"
     assert autonaApp.get(f"{left.path}.team") == "RS"
@@ -397,19 +407,20 @@ def test_swap_with_exchanges_the_published_names(autonaApp):
     assert autonaApp.get(f"{right.path}.mergedName") == "LS | LEFT"
 
 
-def test_swapping_a_player_with_itself_is_a_no_op(autonaApp):
-    # Reachable from the move-up/move-down buttons at the ends of a team.
+def test_moving_the_top_player_up_is_a_no_op(autonaApp):
+    # The move-up / move-down buttons at the ends of a team.
     player = _player(autonaApp)
 
     player.SetData({"gamerTag": "TAG", "prefix": "SPONSOR"},
                    dontLoadFromDB=True)
     autonaApp.settle()
+    before = autonaApp.get(player.path)
 
-    player.SwapWith(player)
+    player.btMoveUp.click()
+    player.btMoveDown.click()
     autonaApp.settle()
 
-    assert autonaApp.get(f"{player.path}.name") == "TAG"
-    assert autonaApp.get(f"{player.path}.team") == "SPONSOR"
+    assert autonaApp.get(player.path) == before
 
 
 # ── seed ─────────────────────────────────────────────────────────────────
@@ -498,11 +509,15 @@ def test_the_seed_survives_a_player_swap(autonaApp):
     right.SetData({"gamerTag": "UNSEEDED"}, dontLoadFromDB=True)
     autonaApp.settle()
 
-    left.SwapWith(right)
-    autonaApp.settle()
+    _swap(autonaApp)
 
     assert int(autonaApp.get(f"{left.path}.seed")) == 0
     assert autonaApp.get(f"{right.path}.seed") == 3
+    # The badges follow too. The copy typed the seed into the spinbox with
+    # the badge's update blocked, so the card that lost its seed kept
+    # showing it.
+    assert right.seedDisplay.text() == "Seed: 3"
+    assert left.seedDisplay.text() == ""
 
 
 # ── the boards the widgets actually live on ──────────────────────────────
@@ -676,7 +691,8 @@ def test_the_avatar_follows_a_player_swap(autonaApp):
     Before the fix both avatars were wiped instead, as a side effect of the
     same defaulting bug; with the parameter left alone they would stay on
     the widget and end up under the other player's name, which is worse.
-    The widget restores it explicitly (_swapRestoreTail).
+    The swap moves the slot's `online_avatar` with the rest of it
+    (AutonaActions.SwapTeams; the card copy had to restore it by hand).
     """
     left, right = _players(autonaApp)
 
@@ -684,8 +700,7 @@ def test_the_avatar_follows_a_player_swap(autonaApp):
     right.SetData({"gamerTag": "RIGHT"}, dontLoadFromDB=True)
     autonaApp.settle()
 
-    left.SwapWith(right)
-    autonaApp.settle()
+    _swap(autonaApp)
 
     assert autonaApp.get(f"{left.path}.online_avatar") is None
     assert autonaApp.get(f"{right.path}.online_avatar") == AVATAR
@@ -803,6 +818,32 @@ def test_the_state_combo_keeps_one_model_for_its_lifetime(autonaApp):
         f"the state combo is holding {len(held)} distinct models. A model it "
         "is handed is not reliably released, so setModel() may only be called "
         "once, when the combo is built.")
+
+
+def test_a_card_without_a_character_keeps_one_empty_skin_model(autonaApp):
+    """LoadSkinOptions handed the skin combo a fresh QStandardItemModel each
+    time a card lost its character. Since the swap is a state operation
+    (ADR-005 S2c), the card's render does that on every swap that brings it
+    a slot with no character -- so the empty model is made once per card and
+    handed back (agent-pitfalls #13: reuse rather than replace)."""
+    left, right = _players(autonaApp)
+    left.SetData({"gamerTag": "LEFT",
+                  "mains": {"harness_game": [["Mario", 0]]}},
+                 dontLoadFromDB=True)
+    right.SetData({"gamerTag": "RIGHT"}, dontLoadFromDB=True)
+    autonaApp.settle()
+    # Warm up: both cards have now been without a character once.
+    _swap(autonaApp)
+    _swap(autonaApp)
+    models, _ = _liveCounts()
+
+    for _ in range(6):
+        _swap(autonaApp)
+
+    assert _liveCounts()[0] == models
+    skins = right.character_elements[0][2]
+    assert autonaApp.get(f"{right.path}.name") == "RIGHT"
+    assert skins.model() is right._emptySkinModel
 
 
 def test_refilled_states_still_resolve(autonaApp):

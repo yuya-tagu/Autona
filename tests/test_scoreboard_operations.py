@@ -332,6 +332,188 @@ def test_swap_publishes_the_swapped_flag(autonaApp):
     assert autonaApp.get("score.1.teamsSwapped") is False
 
 
+def test_a_swap_is_one_save_cycle_and_the_cards_show_it(autonaApp):
+    board = autonaApp.board(1)
+    _setPlayerName(board, 1, "LEFT")
+    _setPlayerName(board, 2, "RIGHT")
+    autonaApp.settle()
+
+    seen, unsubscribe = _heldUpdateSpy("score.1")
+    try:
+        board.SwapTeams()
+        autonaApp.settle()
+    finally:
+        unsubscribe()
+
+    assert seen == ["score.1"]
+    tag = board.team1playerWidgets[0].findChild(QLineEdit, "name")
+    assert tag.text() == "RIGHT"
+    tag = board.team2playerWidgets[0].findChild(QLineEdit, "name")
+    assert tag.text() == "LEFT"
+
+
+# The swap is a core operation since ADR-005 S2c (AutonaActions.SwapTeams).
+# The hotkey calls it for the active board; the Web UI builds the board
+# first, as it always did (an unbuilt board is not held).
+
+
+_STATS_SIGNALS = ("RecentSetsSignal", "LastSetsP1Signal", "LastSetsP2Signal",
+                  "PlayerHistoryStandingsP1Signal",
+                  "PlayerHistoryStandingsP2Signal", "UpsetFactorCalculation")
+
+
+@contextlib.contextmanager
+def _statsFetches(board):
+    """How often each of the board's statistics triggers fired."""
+    counts = dict.fromkeys(_STATS_SIGNALS, 0)
+    slots = []
+    for name in _STATS_SIGNALS:
+        def slot(name=name):
+            counts[name] += 1
+        getattr(board.stats.signals, name).connect(slot)
+        slots.append((name, slot))
+    try:
+        yield counts
+    finally:
+        for name, slot in slots:
+            getattr(board.stats.signals, name).disconnect(slot)
+
+
+@pytest.mark.parametrize("ids, fetches", [
+    (([101, 1101], [303, 3303]), 1),    # other players on each side: once
+    ((None, None), 0),                  # no ids, nothing to fetch for
+])
+def test_a_1v1_swap_refetches_the_stats_once(autonaApp, ids, fetches):
+    """The swap exchanges the ids in the state with no card involved, so
+    the board asks for the statistics itself (_NoticeSwap): once per swap,
+    and only when it put other players on the sides. The upset factor is
+    recalculated by the operation, not through the trigger."""
+    board = autonaApp.board(1)
+    for card, value in zip((board.team1playerWidgets[0],
+                            board.team2playerWidgets[0]), ids):
+        card.player.SetPlayerId(value)
+    autonaApp.settle()
+
+    with _statsFetches(board) as counts:
+        board.SwapTeams()
+        autonaApp.settle()
+
+    assert counts == dict(dict.fromkeys(_STATS_SIGNALS, fetches),
+                          UpsetFactorCalculation=0)
+
+def test_the_swap_hotkey_swaps_the_active_board_only(autonaApp):
+    """It used to be connected to every built board: after a singles/team
+    switch one key press swapped the hidden board as well."""
+    from src.AutonaHotkeys import AutonaHotkeys
+    from src.core.Actions import AutonaActions
+
+    one = autonaApp.board(1)
+    autonaApp.board(2)
+    _setPlayerName(one, 1, "LEFT")
+    _setPlayerName(one, 2, "RIGHT")
+    autonaApp.settle()
+    assert AutonaActions.instance.ActiveBoard() == 1
+
+    AutonaHotkeys.signals.swap_teams.emit()
+    autonaApp.settle()
+
+    assert autonaApp.get("score.1.teamsSwapped") is True
+    assert _playerName(autonaApp, 1) == "RIGHT"
+    assert autonaApp.get("score.2.teamsSwapped") is None
+
+
+def test_the_swap_hotkey_does_nothing_with_no_board_built(autonaApp):
+    """As before the swap moved to core (each built board connected the
+    hotkey to itself). Unlike the score hotkeys, which do work without a
+    panel: an unbuilt board is not held, so a swap there would be published
+    at once and then wiped by the seed that builds the board."""
+    from src.AutonaHotkeys import AutonaHotkeys
+    from src.core.Actions import AutonaActions
+    from src.core.StateManager import StateManager
+
+    autonaApp.dropAllBoards()
+    StateManager.Unset("score.1")
+    autonaApp.settle()
+    assert AutonaActions.instance.ActiveBoard() == 1
+    try:
+        with patch.object(AutonaActions.instance, "SwapTeams") as swap:
+            AutonaHotkeys.signals.swap_teams.emit()
+            autonaApp.settle()
+
+        swap.assert_not_called()
+        assert autonaApp.manager.scoreboards.get(1) is None
+        assert autonaApp.get("score.1") is None
+    finally:
+        StateManager.Unset("score.1")
+        autonaApp.settle()
+
+
+def test_a_web_swap_is_done_when_it_answers(autonaApp):
+    """The legacy route used to queue a signal into the board and answer
+    "OK" before anything had moved; get_swap read the board's attribute."""
+    board = autonaApp.board(1)
+    _setPlayerName(board, 1, "LEFT")
+    _setPlayerName(board, 2, "RIGHT")
+    autonaApp.settle()
+    actions = autonaApp.actions()
+
+    assert actions.swap_teams("1") == "OK"
+    assert actions.get_swap("1") == "True"
+    assert _playerName(autonaApp, 1) == "RIGHT"
+
+    assert actions.swap_teams(1) == "OK"
+    assert actions.get_swap(1) == "False"
+
+
+def test_a_web_swap_builds_the_board_first(autonaApp):
+    """An unbuilt board is not held, and building it seeds its subtree
+    afresh: a swap made on it before the build would go out at once -- to
+    a board no 反映 button shows -- and then be wiped. So the route builds
+    the board first, as it always did, and the swap waits for 反映 there
+    and survives every later route to the board."""
+    from src.core.StateManager import StateManager
+
+    autonaApp.dropAllBoards()
+    StateManager.Unset("score.2")
+    autonaApp.settle()
+    actions = autonaApp.actions()
+    try:
+        assert actions.swap_teams(2) == "OK"
+        autonaApp.settle()
+
+        board = autonaApp.manager.scoreboards.get(2)
+        assert board is not None
+        assert autonaApp.get("score.2.teamsSwapped") is True
+        assert StateManager.HasPendingChanges("score.2") is True
+        assert StateManager.GetCommitted("score.2.teamsSwapped") is None
+
+        assert autonaApp.manager.GetScoreboard(2) is board
+        assert actions.get_swap(2) == "True"
+        actions.get_scoreboard(2)
+        autonaApp.settle()
+        assert autonaApp.get("score.2.teamsSwapped") is True
+    finally:
+        autonaApp.dropAllBoards()
+        StateManager.Unset("score.2")
+        autonaApp.settle()
+
+
+def test_reading_the_swap_flag_builds_the_board(autonaApp):
+    """As before S2c: get_swap reached the flag through the board."""
+    from src.core.StateManager import StateManager
+
+    autonaApp.dropAllBoards()
+    StateManager.Unset("score.2")
+    autonaApp.settle()
+    try:
+        assert autonaApp.actions().get_swap(2) == "False"
+        assert autonaApp.manager.scoreboards.get(2) is not None
+    finally:
+        autonaApp.dropAllBoards()
+        StateManager.Unset("score.2")
+        autonaApp.settle()
+
+
 # ── reset score ──────────────────────────────────────────────────────────
 
 def test_reset_score_zeroes_scores_and_keeps_players(autonaApp):
@@ -1376,7 +1558,7 @@ def test_a_set_loaded_onto_a_swapped_board_lands_on_the_right_side(autonaApp):
     board = autonaApp.board(2)
     board.SwapTeams()
     autonaApp.settle()
-    assert board.teamsSwapped is True
+    assert autonaApp.get("score.2.teamsSwapped") is True
 
     # Two players a side: the team-name half of a set only applies to a
     # multi-player entrant, as it always has.
@@ -1467,6 +1649,34 @@ def test_a_loaded_score_reaches_the_stage_rows(autonaApp, trackedBoard):
     assert _wonGames(autonaApp, 2) == [3]
     assert len(autonaApp.get("score.1.stages") or {}) == 5
     assert len(trackedBoard.individualGameTracker.stage_widget_list) == 5
+
+
+@pytest.mark.parametrize("games, swapped", [
+    # 2-1: the scores cross over with the rows.
+    (((1, 2), (2, 1), (3, 1)), {1: [1], 2: [2, 3]}),
+    # 1-1: the score does not move, the rows still mirror.
+    (((1, 1), (2, 2)), {1: [2], 2: [1]}),
+])
+def test_a_swap_mirrors_the_games_on_the_rows_and_the_buttons(
+        autonaApp, trackedBoard, games, swapped):
+    """The swap mirrors the rows in the same save cycle as it exchanges the
+    scores (ADR-005 S2c). It used to swap the scores through the spinboxes,
+    whose transition the tracker then followed on top of the mirror: T2 T1
+    T1 came out as T1 T2 T1, 1-2 on the score and 2-1 on the rows."""
+    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
+        for game, team in games:
+            _stageButton(trackedBoard, game=game, team=team).click()
+        autonaApp.settle()
+
+        trackedBoard.SwapTeams()
+        autonaApp.settle()
+
+    for team in (1, 2):
+        assert _wonGames(autonaApp, team) == swapped[team]
+        assert _score(autonaApp, team) == len(swapped[team])
+        for game in range(1, 6):
+            assert _stageButton(trackedBoard, game, team).isChecked() \
+                == (game in swapped[team]), (team, game)
 
 
 def test_a_reset_set_load_does_not_reshuffle_recorded_games(
@@ -1564,8 +1774,10 @@ def test_clearing_the_score_still_clears_the_losers_names(autonaApp):
 
 
 def test_swapping_teams_carries_the_losers_names_across(autonaApp):
-    """SwapTeams exchanges the checkboxes, whose toggled re-publishes both
-    teams' names (AutonaActions.SetTeamLosers)."""
+    """The flags and the names cross over together in the state
+    (AutonaActions.SwapTeams): a name's " [L]" came from its team's flag,
+    and the flag goes with it, so nothing is re-derived. The checkboxes
+    render the result."""
     board = autonaApp.board(1)
     board.ChangeSetData({
         "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]],
@@ -1580,6 +1792,8 @@ def test_swapping_teams_carries_the_losers_names_across(autonaApp):
     assert autonaApp.get("score.1.team.2.losers") is False
     assert autonaApp.get("score.1.team.1.player.1.mergedName") == "BBB [L]"
     assert autonaApp.get("score.1.team.2.player.1.mergedName") == "AAA"
+    assert _losers(board, 1).isChecked() is True
+    assert _losers(board, 2).isChecked() is False
 
 
 # ── the player card's write path (headless core Step 5, instalment 2) ────

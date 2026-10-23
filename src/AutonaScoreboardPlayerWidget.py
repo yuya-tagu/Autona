@@ -358,7 +358,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         """Re-home every detail field into a modal QDialog (Web UI parity).
 
         The dialog is a QObject child of this widget, so findChild /
-        findChildren lookups (eye-menu toggles, Clear, SwapWith, SetData)
+        findChildren lookups (eye-menu toggles, Clear, SetData, the render)
         keep resolving the same widget instances — only their visual home
         changes. The hidden data holders (seed spinbox, seedLabel,
         birthday) stay parented to the widget without a layout.
@@ -600,9 +600,10 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
           via the `qt_spinbox_lineedit` -> parent fallback and published the
           spinbox's *text*, so a Clear() left the seed as the string "0". It
           is wired explicitly below and publishes the value, because it is
-          not redundant: `SwapWith` moves the seed through the state without
-          touching the spinbox, so the two can disagree and Clear() has to be
-          able to reset the state from a spinbox that is already at 0.
+          not redundant: a slot written in the state (a swap, ADR-005 S2c)
+          can carry a seed the spinbox does not show yet, so the two can
+          disagree and Clear() has to be able to reset the state from a
+          spinbox that is already at 0.
 
         The initial emits are kept exactly where they were: the seed, the
         birthday flag and the two location combos publish as the card is
@@ -744,16 +745,6 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                         self.instanceSignals.player1Id_changed.emit()
                     else:
                         self.instanceSignals.player2Id_changed.emit()
-
-    def _swapRestoreTail(self, data):
-        # Scoreboard restores the player id directly (NameChanged would reset
-        # it to None).
-        self.ExportPlayerId(data["id"])
-        # ...and the avatar, which SwapWith saved for exactly this. It used to
-        # be wiped from both widgets as a side effect of NameChanged; now that
-        # ExportPlayerImages leaves it alone by default it would otherwise
-        # stay behind and show the swapped-away player's face.
-        self.ExportPlayerImages(data["online_avatar"])
 
     # ── render: the slot, from the state (ADR-005 S2a) ───────────────────
     #

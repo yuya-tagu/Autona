@@ -122,25 +122,29 @@ class AutonaHotkeys(QObject):
     def ConnectActions(cls):
         """Route the board-independent hotkeys to AutonaActions.
 
-        These six used to be connected by AutonaScoreboardWidget.__init__ to
+        These seven used to be connected by AutonaScoreboardWidget.__init__ to
         its own bound methods, which made the answer to "what does
         Ctrl+Shift+1 do" depend on which boards were built: nothing at all
         when the saved battle format was crew, and *both* boards after a
         singles/team switch -- scoring a hidden one along with the visible
         one. AutonaActions resolves the active board from the persisted
         format instead, so the hotkey works with no panel built and reaches
-        exactly one board (ADR-004 D2, headless core Step 3).
+        exactly one board (ADR-004 D2, headless core Step 3). `swap_teams`
+        joined them in ADR-005 S2c, once the swap became a state operation
+        (AutonaActions.SwapTeams) instead of a copy between the player
+        widgets.
 
-        Not moved: `load_set` (opens the set-selection window) and
-        `swap_teams` (swaps the player widgets' data, still widget-owned)
-        stay on the board, and `refresh_phase_group` stays on the window,
-        because all three drive a panel rather than the state.
+        Not moved, and not state operations: `load_set` opens the board's
+        set-selection window and `refresh_phase_group` refetches the bracket
+        on the window -- both are shell / panel commands, so they stay with
+        the Qt side that owns those panels.
 
         Not applicable to board 3: a crew battle's team score is the sum of
         its members' remaining stocks, so there is no team-level score to
         nudge or zero. AutonaActions logs and ignores a score adjustment or
         reset aimed at it, which is what these hotkeys do while the operator
-        is in crew format.
+        is in crew format. The swap hotkey is ignored there too: the crew
+        board never listened to it (its SWAP button and the Web UI swap it).
 
         Idempotent -- the guard matters because bootstrap_core() can run more
         than once in a process (the test harness bootstraps its own runtime,
@@ -156,6 +160,7 @@ class AutonaHotkeys(QObject):
         cls.signals.team2_score_down.connect(cls._onTeam2ScoreDown)
         cls.signals.reset_scores.connect(cls._onResetScores)
         cls.signals.apply_changes.connect(cls._onApplyChanges)
+        cls.signals.swap_teams.connect(cls._onSwapTeams)
         logger.debug("Hotkeys routed to AutonaActions")
 
     @classmethod
@@ -178,6 +183,7 @@ class AutonaHotkeys(QObject):
         cls.signals.team2_score_down.disconnect(cls._onTeam2ScoreDown)
         cls.signals.reset_scores.disconnect(cls._onResetScores)
         cls.signals.apply_changes.disconnect(cls._onApplyChanges)
+        cls.signals.swap_teams.disconnect(cls._onSwapTeams)
 
     # The slots are plain functions rather than bound methods on purpose:
     # `signals` outlives any instance, and these targets are meant to live as
@@ -223,6 +229,33 @@ class AutonaHotkeys(QObject):
             logger.warning("Hotkey ignored: AutonaActions is not built yet")
             return
         actions.ApplyChanges(actions.ActiveBoard())
+
+    @staticmethod
+    def _onSwapTeams():
+        actions = AutonaActions.instance
+        if actions is None:
+            logger.warning("Hotkey ignored: AutonaActions is not built yet")
+            return
+        number = actions.ActiveBoard()
+        # Imported here, not at module level: the board module imports
+        # this one.
+        from .AutonaScoreboardManager import AutonaScoreboardManager
+        manager = AutonaScoreboardManager.instance
+        board = None if manager is None else manager.scoreboards.get(number)
+        if board is None:
+            # As before the swap moved to core: the hotkey was connected by
+            # each built board to itself, so an unbuilt one never swapped.
+            # (An unbuilt board is not held: a swap there would publish at
+            # once and be wiped by the seed that builds it.)
+            logger.debug(f"Swap hotkey ignored: board {number} is not built")
+            return
+        if number in AutonaActions.SCORE_BOARDS:
+            # A field being typed in on that board is finished first, as
+            # the SWAP button does (AutonaScoreboardWidget.
+            # CommitFocusedEdit): the typed text belongs to the player who
+            # is about to move.
+            board.CommitFocusedEdit()
+        actions.SwapTeams(number)
 
     def __init__(self) -> None:
         super().__init__()

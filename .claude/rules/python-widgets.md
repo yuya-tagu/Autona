@@ -84,6 +84,10 @@ state になる）。`Window._SeedPanelState()` はその起動時の呼び出�
   `Top8Service` / `ColorService` / `StatsService` / `GameTrackerService`）を通す。
   サブツリーのシード・破棄は `src/core/StateSchema.py`
 - ウィジェットの役割は「操作を依頼する」「state を読んで描画する」の 2 つだけ。
+  **ウィジェット同士で値をコピーして操作を実現しない**（ADR-005 S2c で選手カードの `SwapWith` を削除し、
+  スワップ / 上下移動は `AutonaActions.SwapTeams` / `SwapPlayers` が state を入れ替え、カードは
+  `RenderFromState` で追従する）。コピーは値の形を Qt に縛り（バリアント・mains が落ちた）、
+  入口ごとに挙動がずれる。
   **コンボの選択は行の dict ではなく識別子で渡す**（キャラ / バリアントの `en_name`・
   スキンの行番号・国 / 地域のコード）。state に入れる値は core がカタログ
   （`GameAssetCatalog` / `CountryCatalog`）から組む（ADR-005 S1d。実例は選手カードの
