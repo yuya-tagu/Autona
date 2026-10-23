@@ -18,7 +18,7 @@ operation belongs here yet: an operation whose *domain* rule needs a Qt object
 to be expressed is not ready to move. Step 3 therefore migrated the writes
 that are self-evident state edits; Step 5 added the SCORE panel's remaining
 field writes (`SetMatchField` / `SetTeamName` / `SetTeamLosers` /
-`SetTeamsSwapped` / `SetBestOf`), which is what took the last
+`SetBestOf`), which is what took the last
 `StateManager.Set` out of `AutonaScoreboardWidget`, and then the team roster
 operations below (`ClearTeamRoster` / `TrimTeamRoster`) alongside the player
 subtree's own writer, `core/PlayerService.py`. The final instalment added the
@@ -26,29 +26,23 @@ operations of the panels that are not a scoreboard at all -- `SetLayoutOption`,
 `SetStreamUrl` / `SetStreamTitle`, `PublishCommentary` /
 `PublishResultPlayers` -- which is what took the last `StateManager.Set` out
 of a Qt widget (the ledger of what remains is in
-docs/changes/headless-core-redesign.md). What is still outside:
+docs/changes/headless-core-redesign.md). ADR-005 S2c then moved the swap
+(`SwapTeams` / `SwapPlayers`): since S2a the player cards render their slot
+from the state, so a swap exchanges the slots here instead of copying field
+values from one card into another, and `score.{n}.teamsSwapped` became the
+flag itself rather than the mirror of a board attribute. What is still
+outside:
 
-- **Swap teams**, as an operation. The player half of a swap is a
-  widget-to-widget copy of *field values*
-  (`AutonaBasePlayerWidget.SwapWith`), and it stays that way for as long as
-  those fields live in the widgets: the player subtree is written from Qt
-  now rather than by Qt, but the state is still the output, not the source
-  of truth, so there is nothing in core to exchange. Inverting that needs a
-  render side for the player card (a `_SyncPlayerFields` to match the
-  board's `_SyncSetFields`), which is a bigger change than the write-path
-  move was. The board's own `teamsSwapped` attribute likewise remains the
-  authority that `SetLoadService` and `WebServerActions.get_swap` read --
-  `SetTeamsSwapped` below only publishes the mirror.
 - **The spinbox-driven half of the score.** `AdjustScore` / `ResetScore`
   below are not yet the *only* writers of `score.{n}.team.{t}.score`. Three
-  writers live inside core now -- these, the stage tally in
+  writers live inside core now -- this class (`SetScore` / `AdjustScore` /
+  `ResetScore`, and `SwapTeams` since S2c), the stage tally in
   `GameTrackerService.UpdateScore` / `PublishStageResults`, and a loaded
-  set's `SetLoadService.ApplyScores` (Step 4b) -- plus the paths that have
-  not moved at all: `ClearScore`, `SwapTeams` and `ResetAllInputs` still
-  drive the score spinbox, whose valueChanged runs the tracker's
-  `UpdateScore`. So the *implementation* is core in every case; what is
-  still outside is those three entry points, and folding them in needs the
-  player subtree (Step 5).
+  set's `SetLoadService.ApplyScores` (Step 4b) --
+  plus the paths that have not moved at all: `ClearScore` and
+  `ResetAllInputs` still drive the score spinbox, whose valueChanged runs
+  the tracker's `UpdateScore`. So the *implementation* is core in every
+  case; what is still outside is those two entry points.
   The writers coordinate through the state rather than through each
   other; a board reconciles its display in
   `AutonaScoreboardWidget._SyncScoreDisplays`, and tells them apart with
@@ -80,9 +74,60 @@ from types import MappingProxyType
 from loguru import logger
 
 from . import StateSchema as schema
+from .GameTrackerService import GameTrackerService
 from .LayoutOptionsManager import LayoutOptionsManager
+from .PlayerService import RepublishTeamMergedNames
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
+from .StatsService import StatsService
+
+# "This dict has no such key", for the key-by-key exchange of SwapTeams /
+# SwapPlayers (None is a value there: no city, no avatar).
+_MISSING = object()
+
+# The player slot keys a swap writes in a fixed order -- where a key is new
+# to a slot, this is the order the old widget-to-widget copy appended it in
+# (its line edits in .ui order with the merged names behind the tag, the
+# note, then the id and the avatar it restored afterwards, then the seed and
+# the city it set last). The slot's other keys follow in their own order.
+SLOT_ORDER = (
+    schema.PLAYER_SPONSOR_KEY, schema.PLAYER_TAG_KEY,
+    "mergedName", "mergedOnlyName", "avatar",
+    schema.PLAYER_REAL_NAME_KEY, schema.PLAYER_TWITTER_KEY,
+    schema.PLAYER_NOTE_KEY, "id", "online_avatar", schema.PLAYER_SEED_KEY,
+    "city")
+# What a slot holds for a key it does not have: what the copy published for
+# an empty field (an unseeded player is seed 0). The other keys (birthday,
+# country, state, character, mains, the sponsor crests) move by presence.
+SLOT_DEFAULTS = MappingProxyType(
+    {key: "" for key in schema.PLAYER_TEXT_KEYS}
+    | {"mergedName": "", "mergedOnlyName": "", schema.PLAYER_SEED_KEY: 0,
+       "id": None, "city": None, "online_avatar": None, "avatar": None})
+# Re-published on both cards by the copy whatever they held (every text
+# field, the names derived from them, the two avatar keys and the seed), so
+# both slots carry them after a swap even when neither had them before.
+SLOT_ALWAYS = frozenset(
+    schema.PLAYER_TEXT_KEYS
+    + ("mergedName", "mergedOnlyName", "online_avatar", "avatar",
+       schema.PLAYER_SEED_KEY))
+# Written in the type the copy wrote: the seed went through
+# PlayerService.SetSeed, which makes anything non-numeric 0.
+SLOT_CONVERT = MappingProxyType({
+    schema.PLAYER_SEED_KEY: lambda value: AutonaActions._asInt(value, 0)})
+# Written by the copy only when the value changed, with a missing key read
+# as None (PlayerService.SetCity / SetPlayerId keep that guard), so a None
+# never creates one of these keys on a slot that lacks it.
+SLOT_NONE_ABSENT = frozenset(("id", "city"))
+
+# The team keys that cross over with the players (not `color`: the colors
+# belong to the sides), in the order the old swap wrote them.
+TEAM_SWAP_ORDER = ("score", schema.TEAM_LOSERS_KEY, schema.TEAM_NAME_KEY,
+                   "logo")
+TEAM_DEFAULTS = MappingProxyType({
+    "score": 0, schema.TEAM_LOSERS_KEY: False, schema.TEAM_NAME_KEY: "",
+    "logo": None})
+# The team name was re-set on both teams whatever it held.
+TEAM_ALWAYS = frozenset((schema.TEAM_NAME_KEY,))
 
 
 class AutonaActions:
@@ -337,9 +382,10 @@ class AutonaActions:
     # `ApplyLosers` are the set-load counterparts: they take the *set's*
     # team and run it through `DisplayTeam()` first, and the name one also
     # re-resolves the team crest. Two writers per key, coordinating through
-    # the state exactly as the three score writers do (see the module
-    # docstring); folding them together needs the swap flag itself to live in
-    # core, which is what the swap operation is still waiting on.
+    # the state exactly as the score writers do (see the module docstring).
+    # The swap flag they both depend on is core's since ADR-005 S2c
+    # (`score.{n}.teamsSwapped`, toggled by `SwapTeams`); folding the two
+    # writers together was not part of that step.
 
     def SetTeamName(self, board, team, name) -> bool:
         """Set one team's displayed name. True if the state changed.
@@ -365,32 +411,209 @@ class AutonaActions:
     def SetTeamLosers(self, board, team, value) -> bool:
         """Flag one team as coming from the losers bracket. True if changed.
 
-        Overlays render the flag, and the desktop additionally suffixes
-        " [L]" onto each player's `mergedName`. That second half is the
-        checkbox's *other* handler (`AutonaScoreboardPlayerWidget.SetLosers`,
-        connected per player) and is deliberately not done here: the suffix
-        is part of a *name*, and which name a slot currently holds is the
-        widget's -- `PlayerService.PublishMergedName` is handed both halves
-        by the card that knows them.
+        Overlays render the flag, and every player of the team carries it as
+        a " [L]" suffix on `mergedName` / `mergedOnlyName` (the thumbnail
+        generator reads it). Both halves are written here, in one save cycle
+        (ADR-005 S2b): the names are rebuilt from the slots' own state by
+        `PlayerService.RepublishTeamMergedNames`. They used to be the
+        checkbox's second handler, one `SetLosers` per player card -- a save
+        cycle each, from each card's copy of the flag. Only on a change, as
+        that handler was: re-asserting the flag must not mark the board
+        dirty. A loaded set writes the same pair through
+        `SetLoadService.ApplyLosers`.
         """
         team = self._asInt(team, 0)
         if team not in (1, 2):
             logger.warning(f"SetTeamLosers: ignoring team {team}")
             return False
-        return self._SetIfChanged(
-            f"score.{self._asInt(board, 0)}.team.{team}."
-            f"{schema.TEAM_LOSERS_KEY}", bool(value))
+        board = self._asInt(board, 0)
+        with StateManager.SaveBlock():
+            changed = self._SetIfChanged(
+                f"score.{board}.team.{team}.{schema.TEAM_LOSERS_KEY}",
+                bool(value))
+            if changed:
+                RepublishTeamMergedNames(board, team)
+        return changed
 
-    def SetTeamsSwapped(self, board, swapped):
-        """Publish which way round a board's two sides currently are.
+    # ── swapping sides / moving a player (ADR-005 S2c) ────────────────────
+    #
+    # Both used to be a widget-to-widget copy of field values
+    # (`AutonaBasePlayerWidget.SwapWith`, now gone): each card's line edits
+    # and combo indexes were read and typed into the other card, whose
+    # handlers then published them. Since S2a the cards render their slot
+    # from the state, so the slots are exchanged here, in the state, and the
+    # cards follow.
+    #
+    # A slot is exchanged key by key over the union of both slots' keys --
+    # not by putting one slot's dict in place of the other's. A key both
+    # slots have keeps its place in each dict, so program_state.json and the
+    # Socket.IO delta keep the key order the copy produced. What a slot gets
+    # for a key only the other one has is `SLOT_DEFAULTS` (an empty text, no
+    # city / id / avatar); a key with no default moves by presence (the
+    # sponsor crests have always been either present or unset). The keys in
+    # `SLOT_ALWAYS` were re-published on both cards by the copy whatever they
+    # held, so a swap leaves them on both slots even when neither had them.
+    # New keys are appended in `SLOT_ORDER`, the order the copy wrote them.
+    #
+    # The team swap exchanges the slots both teams have, as the copy did --
+    # it paired the cards, and both teams always have as many. A slot only
+    # one team has (a roster the state carries without a card) stays put.
 
-        A mirror, not the authority: the swap itself is still
-        `AutonaScoreboardWidget.SwapTeams`, whose `teamsSwapped` attribute is
-        what `SetLoadService` and `WebServerActions.get_swap` read. Written
-        unconditionally, because the one caller has just toggled it.
+    def SwapTeams(self, board) -> bool:
+        """Exchange the two sides of a board in one save cycle. True if it
+        applied; False for the crew board, which swaps itself.
+
+        What crosses over: every player slot, the score, the losers flag,
+        the team name and crest, and the game tracker's per-game winners
+        (mirrored: a game team 1 won is team 2's after the swap). The team
+        colors stay where they are -- they are the sides' colors, not the
+        players'. `score.{n}.teamsSwapped` is toggled: it is what tells a set
+        load which side a set's first entrant goes to
+        (`SetLoadService.DisplayTeam`), so clearing a board never resets it.
+
+        The names do not need re-deriving: a player's " [L]" comes from the
+        flag of the team the name was published on, and that flag crosses
+        over with the name.
         """
-        StateManager.Set(
-            f"score.{self._asInt(board, 0)}.teamsSwapped", bool(swapped))
+        board = self._asInt(board, 0)
+        if board not in self.SCORE_BOARDS:
+            logger.debug(
+                f"SwapTeams: board {board} is not a score board; the crew "
+                "board swaps its own members")
+            return False
+        prefix = f"score.{board}"
+        with StateManager.SaveBlock():
+            with StateManager.lock:
+                one = StateManager.Get(f"{prefix}.team.1.player")
+                two = StateManager.Get(f"{prefix}.team.2.player")
+                one = one if isinstance(one, dict) else {}
+                two = two if isinstance(two, dict) else {}
+                slots = [slot for slot in one if slot in two]
+                for slot in sorted(slots, key=lambda s: self._asInt(s, 0)):
+                    self._ExchangeSlots(
+                        f"{prefix}.team.1.player.{slot}",
+                        f"{prefix}.team.2.player.{slot}")
+                self._UpdateUpsetFactor(board)
+                self._ExchangeLeaves(
+                    f"{prefix}.team.1", f"{prefix}.team.2", TEAM_SWAP_ORDER,
+                    TEAM_DEFAULTS, TEAM_ALWAYS, listedOnly=True)
+                GameTrackerService(board).SwapStageResults()
+                StateManager.Set(f"{prefix}.teamsSwapped", not bool(
+                    StateManager.Get(f"{prefix}.teamsSwapped", False)))
+        return True
+
+    def SwapPlayers(self, board, team, first, second) -> bool:
+        """Exchange two player slots of one team (the card's move up / move
+        down). True if it applied.
+
+        `first` / `second` are 1-based slot numbers. The same slot twice --
+        the top card moved up, the bottom one down -- is not a move.
+        """
+        board = self._asInt(board, 0)
+        team = self._asInt(team, 0)
+        first = self._asInt(first, 0)
+        second = self._asInt(second, 0)
+        if team not in (1, 2):
+            logger.warning(f"SwapPlayers: ignoring team {team}")
+            return False
+        if board not in self.SCORE_BOARDS:
+            logger.debug(f"SwapPlayers: board {board} is not a score board")
+            return False
+        if first < 1 or second < 1 or first == second:
+            return False
+        prefix = f"score.{board}.team.{team}.player"
+        with StateManager.SaveBlock():
+            with StateManager.lock:
+                self._ExchangeSlots(f"{prefix}.{first}", f"{prefix}.{second}")
+                self._UpdateUpsetFactor(board)
+        return True
+
+    def _ExchangeSlots(self, first, second):
+        """Exchange two player slots. Caller holds the lock and the block."""
+        a = StateManager.Get(first)
+        b = StateManager.Get(second)
+        if not isinstance(a, dict) and not isinstance(b, dict):
+            return
+        if not isinstance(a, dict) or not isinstance(b, dict):
+            # Only one of the two slots exists. Reached from SwapPlayers
+            # only -- SwapTeams passes just the slots both teams have and
+            # leaves a slot only one team has where it is (see above): the
+            # existing slot moves whole to the other position in its team.
+            source, target, value = \
+                (second, first, b) if isinstance(b, dict) else (first, second, a)
+            StateManager.Set(target, value)
+            StateManager.Unset(source)
+            return
+        self._ExchangeLeaves(first, second, SLOT_ORDER, SLOT_DEFAULTS,
+                             SLOT_ALWAYS, noneAbsent=SLOT_NONE_ABSENT,
+                             convert=SLOT_CONVERT)
+
+    @staticmethod
+    def _ExchangeLeaves(first, second, order, defaults, always,
+                        listedOnly=False, noneAbsent=frozenset(),
+                        convert=MappingProxyType({})):
+        """Exchange the keys of two dicts in the state, one key at a time.
+
+        `order` first (where a key is new to a dict, this is the order it is
+        appended in), then -- unless `listedOnly` -- every other key either
+        dict has. A key one side lacks takes `defaults[key]` there, or is
+        unset when it has no default; a key in `always` is written on both
+        even when neither has it, and a key in `noneAbsent` is not created
+        to hold None. A value written for a key in `convert` goes through
+        that function first. Caller holds the lock and the block.
+
+        The values are moved, not copied: each object read from one side is
+        put on the other, so nothing in the state is shared afterwards.
+        """
+        a = StateManager.Get(first)
+        b = StateManager.Get(second)
+        if not isinstance(a, dict) and not isinstance(b, dict):
+            return
+        a = a if isinstance(a, dict) else {}
+        b = b if isinstance(b, dict) else {}
+        keys = list(order)
+        if not listedOnly:
+            keys += [key for key in a if key not in keys]
+            keys += [key for key in b if key not in keys]
+        moves = []
+        for key in keys:
+            mine = a.get(key, _MISSING)
+            theirs = b.get(key, _MISSING)
+            if mine is _MISSING and theirs is _MISSING:
+                if key not in always:
+                    continue
+            if mine is _MISSING:
+                mine = defaults.get(key, _MISSING)
+            if theirs is _MISSING:
+                theirs = defaults.get(key, _MISSING)
+            if key in convert:
+                mine, theirs = (value if value is _MISSING
+                                else convert[key](value)
+                                for value in (mine, theirs))
+            moves.append((key, theirs, mine))
+        for key, toFirst, toSecond in moves:
+            for path, held, value in ((first, a, toFirst),
+                                      (second, b, toSecond)):
+                if value is not _MISSING:
+                    if value is None and key in noneAbsent \
+                            and key not in held:
+                        continue
+                    StateManager.Set(f"{path}.{key}", value)
+                elif key in held:
+                    StateManager.Unset(f"{path}.{key}")
+
+    def _UpdateUpsetFactor(self, board):
+        """Recalculate `upset_factor` after the seeds moved.
+
+        The card's seed spinbox used to trigger it (`player_seed_changed`)
+        when the copy typed the other player's seed into it; a slot the
+        state exchanges has no such edit. The roster size is the state's:
+        a swap does not change it, and core has no card list to count.
+        """
+        def playersPerTeam():
+            roster = StateManager.Get(f"score.{board}.team.1.player")
+            return len(roster) if isinstance(roster, dict) else 0
+        StatsService(board, playersPerTeam).UpdateUpsetFactor()
 
     # ── the team roster (how many player slots a team has) ────────────────
     #
@@ -613,7 +836,8 @@ class AutonaActions:
     # leave it rendering a mix of two edits. What moved here is the key and
     # the fact that the write happens at all; assembling the dict stays with
     # the panel, because the values come out of combos whose rows are Qt
-    # models (the same line PlayerService.SetData draws).
+    # models (the line the player card drew too, until ADR-005 S1d moved its
+    # values into PlayerService; these two panels follow with S4).
 
     def PublishCommentary(self, slots):
         """Publish the caster line-up (`commentary.{slot}.*`)."""

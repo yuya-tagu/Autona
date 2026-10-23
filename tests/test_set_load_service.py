@@ -76,23 +76,27 @@ def _isolated_state():
 
 
 class _Swap:
-    """A settable stand-in for the board's teamsSwapped attribute."""
+    """Which way round the board is: `score.{n}.teamsSwapped`, the flag
+    AutonaActions.SwapTeams toggles (ADR-005 S2c; it used to be read from
+    the board's attribute through a callable)."""
 
-    def __init__(self, value=False):
-        self.value = value
+    @property
+    def value(self):
+        return SM.Get(f"{PREFIX}.teamsSwapped", False)
 
-    def __call__(self):
-        return self.value
+    @value.setter
+    def value(self, swapped):
+        SM.Set(f"{PREFIX}.teamsSwapped", swapped)
 
 
 @pytest.fixture
 def swap():
-    return _Swap(False)
+    return _Swap()
 
 
 @pytest.fixture
 def service(swap):
-    return SetLoadService(BOARD, swap)
+    return SetLoadService(BOARD)
 
 
 def _score(team):
@@ -217,6 +221,43 @@ def test_a_missing_losers_flag_is_left_alone(service):
     service.ApplyLosers({"team1losers": False})
     assert SM.Get(f"{PREFIX}.team.1.losers") is False
     assert SM.Get(f"{PREFIX}.team.2.losers") is True
+
+
+def _named(team, tag):
+    path = f"{PREFIX}.team.{team}.player.1"
+    SM.Set(f"{path}.name", tag)
+    SM.Set(f"{path}.team", "")
+    return path
+
+
+def test_a_loaded_losers_flag_takes_its_teams_names_along(service, swap):
+    """The " [L]" lands on the display team the flag landed on, in the
+    flag's own save cycle (ADR-005 S2b) -- the board's per-card
+    _ApplyLosersToPlayers used to do this half."""
+    left = _named(1, "LEFT")
+    right = _named(2, "RIGHT")
+    swap.value = True
+    deltas = []
+    SM.observers.state_updated.subscribe(deltas.append)
+    try:
+        assert service.ApplyLosers({"team1losers": True}) is True
+    finally:
+        SM.observers.state_updated.unsubscribe(deltas.append)
+
+    assert SM.Get(f"{right}.mergedName") == "RIGHT [L]"
+    assert SM.Get(f"{right}.mergedOnlyName") == "RIGHT [L]"
+    assert SM.Get(f"{left}.mergedName") is None
+    assert len(deltas) == 1
+
+
+def test_an_unchanged_losers_flag_leaves_the_names_alone(service):
+    named = _named(1, "ALPHA")
+    service.ApplyLosers({"team1losers": True})
+    SM.Set(f"{named}.mergedName", "kept")
+
+    assert service.ApplyLosers({"team1losers": True}) is False
+
+    assert SM.Get(f"{named}.mergedName") == "kept"
 
 
 # ── team name and crest ──────────────────────────────────────────────────

@@ -25,8 +25,10 @@ What deliberately did NOT move (and why):
   moved here is the *addressing* (which entrant lands on which team once the
   teams have been swapped, see ``DisplayTeam``) and the team name that comes
   with it; the player subtree's own writes went to ``core/PlayerService.py``
-  in the next instalment, which is what SetData now hands its resolved
-  values to.
+  in the next instalment, which is what SetData now hands its picks to
+  (since ADR-005 S1d as identifiers -- character en_name, skin row, country
+  and region code -- which PlayerService turns into the published values
+  from the core catalogs).
 - **Best of.** ``best_of_text`` / ``first_to_text`` are formatted from
   ``AutonaLocaleHelper.matchNames`` and the same handler resizes the stage
   rows; Step 3 left it on the Qt side and this step does not change that.
@@ -47,6 +49,7 @@ import os
 from loguru import logger
 
 from .Actions import AutonaActions
+from .PlayerService import RepublishTeamMergedNames
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 
@@ -58,21 +61,15 @@ TEAM_LOGO_DIR = "./user_data/team_logo"
 class SetLoadService:
     """The set-loading rules of one board. Bound to ``score.{number}``.
 
-    ``teamsSwapped`` is a callable telling whether the operator has swapped
-    the two sides. The flag is mirrored into ``score.{n}.teamsSwapped``, but
-    the authority is still the board's own attribute -- the swap itself is a
-    widget-to-widget copy of player *field values*
-    (``AutonaBasePlayerWidget.SwapWith``) that Step 3 explicitly left behind,
-    and it stays there for as long as those values live in the widgets
-    rather than in the state (see the note in ``Actions.py``), so the flag
-    moves here with it. Injecting it follows
-    ``StatsService.playersPerTeam``: core reads no Qt object, and the two
-    answers cannot drift because there is still only one of them.
+    Which way round the two sides are is read from the state,
+    ``score.{n}.teamsSwapped``, which ``AutonaActions.SwapTeams`` toggles
+    (ADR-005 S2c). Until then the swap was a widget-to-widget copy of the
+    player fields and the board's own ``teamsSwapped`` attribute was the
+    authority, handed in here as a callable; the key was only its mirror.
     """
 
-    def __init__(self, scoreboardNumber, teamsSwapped):
+    def __init__(self, scoreboardNumber):
         self.scoreboardNumber = scoreboardNumber
-        self._teamsSwapped = teamsSwapped
 
     # ── key paths ────────────────────────────────────────────────────────
 
@@ -94,7 +91,7 @@ class SetLoadService:
         on the right, so it writes ``team.2``.
         """
         setTeam = 1 if int(setTeam) == 1 else 2
-        if self._teamsSwapped():
+        if StateManager.Get(f"{self.prefix}.teamsSwapped", False):
             return 3 - setTeam
         return setTeam
 
@@ -234,18 +231,33 @@ class SetLoadService:
         Making it so is a semantics change to a legacy REST route with no
         test coverage, on the one query an operator may already be using
         while swapped -- a product call, not a refactor, so it is recorded
-        here rather than taken.
+        here rather than taken. (/api/v1's ``PATCH set`` no longer goes
+        through here for its losers flag: it names the state team and calls
+        ``AutonaActions.SetTeamLosers``, ADR-005 S2b.)
+
+        A flag that changes takes its team's display names with it, in the
+        same save cycle -- the " [L]" suffix, rebuilt from the slots' state by
+        ``PlayerService.RepublishTeamMergedNames`` exactly as
+        ``AutonaActions.SetTeamLosers`` does. The board used to do that half
+        per player card (``_ApplyLosersToPlayers`` / ``_AdoptTeamLosers``).
+        Slots a set load creates afterwards (a roster that grows) need
+        nothing: their name is published once their entrant is in, and that
+        reads the flag written here.
         """
         if not isinstance(data, dict):
             return False
         written = False
-        for setTeam in (1, 2):
-            value = data.get(f"team{setTeam}losers")
-            if value is None:
-                continue
-            written |= self._SetIfChanged(
-                self._teamKey(self.DisplayTeam(setTeam), "losers"), bool(value))
-        return bool(written)
+        with StateManager.SaveBlock():
+            for setTeam in (1, 2):
+                value = data.get(f"team{setTeam}losers")
+                if value is None:
+                    continue
+                team = self.DisplayTeam(setTeam)
+                if self._SetIfChanged(
+                        self._teamKey(team, "losers"), bool(value)):
+                    RepublishTeamMergedNames(self.scoreboardNumber, team)
+                    written = True
+        return written
 
     # ── team name and its crest ──────────────────────────────────────────
 

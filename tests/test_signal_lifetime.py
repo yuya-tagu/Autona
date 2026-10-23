@@ -45,6 +45,11 @@ PROCESS_WIDE_SENDERS = (
     # StateManager itself (headless core Step 1). Same four signals, same
     # process lifetime -- the bridge is built once by bootstrap_core().
     "StateManagerBridge.instance",
+    # The application object itself (focusChanged, which the player cards
+    # listen to since ADR-005 S2a, and the rest of its signals).
+    "QApplication.instance()",
+    "QGuiApplication.instance()",
+    "QCoreApplication.instance()",
 )
 
 # The exceptions, listed as (module, full sender expression). Every receiver
@@ -233,18 +238,18 @@ def _connectionCounts():
     QObject.receivers() wants the old SIGNAL()-encoded signature -- a "2"
     prefix in front of the normalised signal name.
 
-    `swap_teams` rather than `team1_score_up`: the score hotkeys are wired
-    to AutonaActions once for the process now (headless core Step 3), so
-    building a board no longer changes their receiver count. `swap_teams`
-    is one of the two hotkeys a board still owns, and it is a board-owned
-    connection that is what this measures.
+    `load_set` rather than `team1_score_up`: the score hotkeys are wired
+    to AutonaActions once for the process now (headless core Step 3), and
+    the swap joined them in ADR-005 S2c, so building a board no longer
+    changes their receiver count. `load_set` is the one hotkey a board still
+    owns, and it is a board-owned connection that is what this measures.
     """
     from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.AutonaHotkeys import AutonaHotkeys
 
     return (
         AutonaGameAssetManager.instance.signals.receivers("2onLoad()"),
-        AutonaHotkeys.signals.receivers("2swap_teams()"),
+        AutonaHotkeys.signals.receivers("2load_set()"),
     )
 
 
@@ -286,7 +291,6 @@ def test_a_destroyed_board_disconnects_from_the_process_wide_signals(autonaApp):
 def test_a_destroyed_board_stops_writing_its_state_subtree(autonaApp):
     """The user-visible half of the same bug: the ghost rewrites ./out."""
     from src.AutonaGameAssetManager import AutonaGameAssetManager
-    from src.AutonaHotkeys import AutonaHotkeys
 
     board = autonaApp.board(1)
     prefix = board.statePrefix
@@ -297,10 +301,10 @@ def test_a_destroyed_board_stops_writing_its_state_subtree(autonaApp):
     assert autonaApp.get(prefix) is None
 
     AutonaGameAssetManager.instance.signals.onLoad.emit()
-    # A board-owned hotkey: the score ones write score.{n} through
-    # AutonaActions whether or not a board exists, which is the point of
-    # Step 3 and would say nothing about a ghost here.
-    AutonaHotkeys.signals.swap_teams.emit()
+    # No hotkey: the score, reset, 反映 and swap ones write score.{n}
+    # through AutonaActions whether or not a board exists (Step 3, ADR-005
+    # S2c), which would say nothing about a ghost here, and the one a board
+    # still owns (load_set) opens a window rather than writing.
     autonaApp.settle()
 
     assert autonaApp.get(prefix) is None, (

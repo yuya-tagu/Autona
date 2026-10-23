@@ -84,7 +84,6 @@ class AutonaScoreboardWidgetSignals(QObject):
     StationSetsLoaded = Signal(object)
     CommandScoreChange = Signal(int, int)
     CommandTeamColor = Signal(int, str)
-    SwapTeams = Signal()
     ChangeSetData = Signal(dict)
 
 
@@ -110,20 +109,27 @@ class AutonaScoreboardWidget(QWidget):
         # another notification. Set before anything can notify us.
         self._syncingScore = False
 
-        # Which way round the two sides currently are. Declared here rather
-        # than further down (where it used to sit, after the combos) because
-        # setLoad below reads it through a callable and the state
-        # notifications that drive _SyncSetFields can arrive from the moment
-        # this widget connects to the bridge. `score.{n}.teamsSwapped`
-        # mirrors it; SwapTeams is the single place that moves both.
-        self.teamsSwapped = False
+        # The player cards render their slots from the state (ADR-005 S2a):
+        # one pass, queued by the first held save cycle of an event-loop turn
+        # (_SchedulePlayerRender), with a re-entrancy guard on the pass itself.
+        self._playerRenderPending = False
+        self._renderingPlayers = False
+
+        # The last `score.{n}.teamsSwapped` a held cycle showed this board.
+        # Which way round the sides are is the state's (ADR-005 S2c:
+        # AutonaActions.SwapTeams toggles it, from the button, the hotkey or
+        # the Web UI alike); this copy is only how _onHeldStateUpdated tells
+        # that a cycle was a swap (_NoticeSwap).
+        self._seenTeamsSwapped = False
+        # Teams whose statistics a swap / move asked to refetch, emitted
+        # once control is back in the event loop (_EmitPlayerStats).
+        self._pendingStatsTeams = set()
 
         # Set loading (Start.gg payloads, /post_data, set_route): what a
         # loaded set means for this board's state lives in core since
         # headless core Step 4b. This widget renders the result -- see
         # _SyncSetFields / _SyncScoreDisplays.
-        self.setLoad = SetLoadService(
-            self.scoreboardNumber, lambda: self.teamsSwapped)
+        self.setLoad = SetLoadService(self.scoreboardNumber)
 
         # Same skeleton AutonaScoreboardManager writes for the boards that are
         # not built yet, from the same place (headless core Step 2).
@@ -138,12 +144,13 @@ class AutonaScoreboardWidget(QWidget):
         self.signals.StationSelection.connect(self.LoadStationSetClicked)
         self.signals.ChangeSetData.connect(self.ChangeSetData)
 
-        # Only the two hotkeys that drive a *panel* are still connected here.
-        # The score / reset / 反映 hotkeys were moved to AutonaHotkeys ->
-        # AutonaActions (headless core Step 3): connected per board, they
-        # answered from every board that happened to be built -- both of them
-        # after a singles/team switch, and none at all when the saved format
-        # was crew.
+        # Only the hotkey that drives a *panel* (the set-selection window) is
+        # still connected here. The score / reset / 反映 hotkeys were moved
+        # to AutonaHotkeys -> AutonaActions (headless core Step 3), and the
+        # swap joined them in ADR-005 S2c: connected per board, they answered
+        # from every board that happened to be built -- both of them after a
+        # singles/team switch, and none at all when the saved format was
+        # crew.
         #
         # Bound methods, never lambdas: AutonaHotkeys.signals is a class-level
         # object that lives for the whole process, while a board is destroyed
@@ -152,10 +159,8 @@ class AutonaScoreboardWidget(QWidget):
         # not, and nothing ever disconnects it -- the destroyed board would
         # keep answering hotkeys and rewriting score.{n} (the "ghost board").
         AutonaHotkeys.signals.load_set.connect(self.LoadSetClicked)
-        AutonaHotkeys.signals.swap_teams.connect(self.SwapTeams)
 
         self.signals.CommandScoreChange.connect(self.CommandScoreChange)
-        self.signals.SwapTeams.connect(self.SwapTeams)
         self.signals.CommandTeamColor.connect(self.CommandTeamColor)
 
         self.stats = AutonaStatsUtil(self.scoreboardNumber, self)
@@ -784,7 +789,7 @@ class AutonaScoreboardWidget(QWidget):
         # broadcast/export pipeline until 反映 commits them. Everything Set
         # during construction above was published normally, so the committed
         # baseline matches the widgets' initial values.
-        StateManager.HoldSubtree(self.statePrefix, exempt=schema.STATS_KEYS)
+        schema.HoldBoard(self.scoreboardNumber)
         StateManagerBridge.instance.held_dirty_changed.connect(
             self._onHeldDirtyChanged)
         # The score is written by AutonaActions now, not by these spinboxes
@@ -829,13 +834,14 @@ class AutonaScoreboardWidget(QWidget):
         program_state.json is keyed by them) -- pinned by
         tests/test_objectname_keypath_contract.py.
 
-        Both widgets keep a second handler connected elsewhere, and both are
-        load-bearing: the team crest follows the name (ExportTeamLogo, below)
-        and every player widget's " [L]" suffix follows the losers flag
-        (`SetLosers`, connected per player in `_setPlayersPerTeamImpl`).
-        Neither moved to core, so neither may be replaced by a state
-        notification -- `_SyncSetFields` sets these two widgets with their
-        signals blocked precisely because it is the render side.
+        The name keeps a second handler, and it is load-bearing: the team
+        crest follows the name (ExportTeamLogo, below). It did not move to
+        core, so it may not be replaced by a state notification --
+        `_SyncSetFields` sets these two widgets with their signals blocked
+        precisely because it is the render side. The losers box used to have
+        one too (every player card's `SetLosers`, re-exporting its name with
+        the " [L]" suffix); since ADR-005 S2b that is part of
+        `AutonaActions.SetTeamLosers`, so the box has a single handler.
 
         The initial emit seeds the two keys, as it always did: a board starts
         with an empty name and an unchecked losers box, and the overlays read
@@ -928,8 +934,61 @@ class AutonaScoreboardWidget(QWidget):
         # Live-but-unpublished data under a held prefix changed. Only this
         # board's own subtree is of interest here.
         if prefix == self.statePrefix:
+            # First: it only queues, and a sync below that raises must not
+            # leave the cards behind the state.
+            self._SchedulePlayerRender()
+            swapped = self._NoticeSwap()
             self._SyncSetFields()
-            self._SyncScoreDisplays()
+            # A swap exchanged the scores and mirrored the game rows in the
+            # same cycle (AutonaActions.SwapTeams): the rows already show the
+            # new scores, so the tracker is not told about the transition.
+            self._SyncScoreDisplays(followStages=not swapped)
+
+    def _SchedulePlayerRender(self):
+        """Have every player card show its slot, once control is back in
+        the event loop (ADR-005 S2a).
+
+        Deferred, unlike the two syncs in _onHeldStateUpdated, and that is
+        the point rather than an optimisation. The player slots are still
+        written by the cards themselves, an operation at a time, and an
+        operation can take several save cycles -- a country pick publishes
+        the rebuilt region before the country, SetData and Clear publish
+        field by field. In
+        between, the card is legitimately ahead of the state; a render run
+        right there would put the old country back on the combo, and the
+        country handler still to come would then publish *that*. Once the
+        operation has returned, card and state agree again, and a render
+        only changes what was written somewhere else.
+
+        Coalesced: however many cycles a turn produces, one pass is queued.
+        The board is the timer's context, so a board torn down first takes
+        the pending pass with it. A card also asks for a pass once the
+        operator has left a field the last one had to skip
+        (render_requested).
+        """
+        if self._playerRenderPending:
+            return
+        self._playerRenderPending = True
+        QTimer.singleShot(0, self, self._RenderPlayerCards)
+
+    def _RenderPlayerCards(self):
+        self._playerRenderPending = False
+        if self._renderingPlayers:
+            # Nothing in a pass can bring us back here (it writes nothing,
+            # agent-pitfalls #9), but a pass must never stack on another.
+            logger.warning(
+                f"{self.statePrefix}: re-entrant player render, skipping")
+            return
+        self._renderingPlayers = True
+        try:
+            for card in list(self.playerWidgets):
+                try:
+                    card.RenderFromState()
+                except Exception:
+                    logger.exception(
+                        f"{self.statePrefix}: rendering {card.path} failed")
+        finally:
+            self._renderingPlayers = False
 
     def _SyncSetFields(self):
         """Render the set-level state into the match bar and team cards.
@@ -999,7 +1058,7 @@ class AutonaScoreboardWidget(QWidget):
                 with QSignalBlocker(edit):
                     edit.setText(name)
 
-    def _SyncScoreDisplays(self):
+    def _SyncScoreDisplays(self, followStages=True):
         """Bring the two score spinboxes in line with the state.
 
         The state is the source of truth for the score since Step 3: an
@@ -1011,8 +1070,8 @@ class AutonaScoreboardWidget(QWidget):
 
         - the spinbox is updated inside a QSignalBlocker, so valueChanged
           (which still writes the score for the paths that drive the spinbox
-          directly -- set loading, ClearScore, SwapTeams) cannot fire and
-          write the value straight back;
+          directly -- ClearScore, ResetAllInputs) cannot fire and write the
+          value straight back;
         - the individual game tracker is then told about the transition
           explicitly, with the *old* spinbox value, because that is what it
           needs to decide which stage rows to award or clear. It is the one
@@ -1024,6 +1083,11 @@ class AutonaScoreboardWidget(QWidget):
         value -- indistinguishable from an external +1 unless the tracker says
         so, which is what `writingScore` is for. Without it a single click on
         "game 1: T1" also awarded game 2.
+
+        Nor is it told about a swap's (`followStages=False`, ADR-005 S2c):
+        the swap mirrored the rows along with the scores, and following the
+        exchanged scores re-awarded games on top of the mirror -- T2 T1 T1
+        (2-1) came out as T1 T2 T1.
         """
         if self._syncingScore:
             return
@@ -1049,7 +1113,7 @@ class AutonaScoreboardWidget(QWidget):
                     continue
                 with QSignalBlocker(display):
                     display.setValue(value)
-                if tracker.writingScore:
+                if tracker.writingScore or not followStages:
                     continue
                 # setValue clamps to the spinbox range, so read back what it
                 # actually took rather than assuming the state value fit.
@@ -1432,7 +1496,7 @@ class AutonaScoreboardWidget(QWidget):
         # LOSERS checkbox joins the solo player's ">>詳細" row instead,
         # right-aligned after the row's stretch. Reparenting keeps the
         # widget a descendant of its team column, so every existing
-        # findChild(QCheckBox, "losers") lookup (state export, SwapTeams,
+        # findChild(QCheckBox, "losers") lookup (state export, the render,
         # reset, SetData) keeps resolving the same instance. Safe on this
         # board because the player count is pinned to 1 — the hosting
         # player widget is never torn down by SetPlayersPerTeam.
@@ -1662,27 +1726,6 @@ class AutonaScoreboardWidget(QWidget):
         with StateManager.SaveBlock():
             self._setPlayersPerTeamImpl(number)
 
-    def _AdoptTeamLosers(self, player, team: int):
-        """Give a freshly built player card its team's current losers flag.
-
-        Closes a gap that predates the core migration: a player widget is
-        only connected to the LOSERS checkbox from the moment it is created,
-        so a set that arrives with the flag set *and* grows the roster left
-        the new cards at losers=False -- their `mergedName` lost the " [L]"
-        the thumbnail generator renders, until the next load happened to
-        flip the flag and `_ApplyLosersToPlayers` swept them up.
-
-        Read from the state rather than from the checkbox: inside
-        `ChangeSetData` the flag has already been written by
-        `SetLoadService.ApplyLosers`, but the checkbox is only re-rendered by
-        `_SyncSetFields` when the surrounding save block is released -- i.e.
-        after the entrants have been poured in.
-        """
-        value = bool(StateManager.Get(
-            f"{self.statePrefix}.team.{team}.{schema.TEAM_LOSERS_KEY}", False))
-        if player.losers != value:
-            player.SetLosers(value)
-
     def _setPlayersPerTeamImpl(self, number):
         while len(self.team1playerWidgets) < number:
             p = AutonaScoreboardPlayerWidget(
@@ -1694,14 +1737,11 @@ class AutonaScoreboardWidget(QWidget):
             self.team1column.findChild(
                 QGroupBox, "groupBox").layout().addWidget(p)
             p.SetCharactersPerPlayer(self.charNumber.value())
-            self.team1column.findChild(
-                QCheckBox, schema.TEAM_LOSERS_KEY).toggled.connect(p.SetLosers)
-            self._AdoptTeamLosers(p, 1)
 
-            p.btMoveUp.clicked.connect(lambda index, p=p: p.SwapWith(
-                self.team1playerWidgets[max(0, self.team1playerWidgets.index(p) - 1)]))
-            p.btMoveDown.clicked.connect(lambda index, p=p: p.SwapWith(
-                self.team1playerWidgets[min(len(self.team1playerWidgets) - 1, self.team1playerWidgets.index(p) + 1)]))
+            p.btMoveUp.clicked.connect(
+                lambda checked=False, p=p: self._MovePlayer(p, -1))
+            p.btMoveDown.clicked.connect(
+                lambda checked=False, p=p: self._MovePlayer(p, 1))
 
             p.instanceSignals.playerId_changed.connect(
                 self.stats.signals.RecentSetsSignal.emit)
@@ -1711,6 +1751,8 @@ class AutonaScoreboardWidget(QWidget):
                 self.stats.signals.PlayerHistoryStandingsP1Signal.emit)
             p.instanceSignals.player_seed_changed.connect(
                 self.stats.signals.UpsetFactorCalculation.emit)
+            p.instanceSignals.render_requested.connect(
+                self._SchedulePlayerRender)
 
             self.team1playerWidgets.append(p)
 
@@ -1723,14 +1765,11 @@ class AutonaScoreboardWidget(QWidget):
             self.team2column.findChild(
                 QGroupBox, "groupBox").layout().addWidget(p)
             p.SetCharactersPerPlayer(self.charNumber.value())
-            self.team2column.findChild(
-                QCheckBox, schema.TEAM_LOSERS_KEY).toggled.connect(p.SetLosers)
-            self._AdoptTeamLosers(p, 2)
 
-            p.btMoveUp.clicked.connect(lambda index, p=p: p.SwapWith(
-                self.team2playerWidgets[max(0, self.team2playerWidgets.index(p) - 1)]))
-            p.btMoveDown.clicked.connect(lambda index, p=p: p.SwapWith(
-                self.team2playerWidgets[min(len(self.team2playerWidgets) - 1, self.team2playerWidgets.index(p) + 1)]))
+            p.btMoveUp.clicked.connect(
+                lambda checked=False, p=p: self._MovePlayer(p, -1))
+            p.btMoveDown.clicked.connect(
+                lambda checked=False, p=p: self._MovePlayer(p, 1))
 
             p.instanceSignals.playerId_changed.connect(
                 self.stats.signals.RecentSetsSignal.emit)
@@ -1740,6 +1779,8 @@ class AutonaScoreboardWidget(QWidget):
                 self.stats.signals.PlayerHistoryStandingsP2Signal.emit)
             p.instanceSignals.player_seed_changed.connect(
                 self.stats.signals.UpsetFactorCalculation.emit)
+            p.instanceSignals.render_requested.connect(
+                self._SchedulePlayerRender)
 
             self.team2playerWidgets.append(p)
 
@@ -1801,51 +1842,141 @@ class AutonaScoreboardWidget(QWidget):
                 w.hide()
 
     def SwapTeams(self):
-        with StateManager.SaveBlock():
-            # Lock all player widgets
-            for p in self.playerWidgets:
-                p.dataLock.acquire()
+        """The SWAP button, and the Web UI's swap of a 1v1 / team board. The
+        operation is core's (ADR-005 S2c): it exchanges the two sides in the
+        state, and the cards, the score and the team cards follow from the
+        held cycle like any other write. The hotkey calls the same operation
+        (AutonaHotkeys._onSwapTeams), committing the field first as here."""
+        self.CommitFocusedEdit()
+        AutonaActions.instance.SwapTeams(self.scoreboardNumber)
 
-            try:
-                for i, p in enumerate(self.team1playerWidgets):
-                    p.SwapWith(self.team2playerWidgets[i])
+    def CommitFocusedEdit(self):
+        """Finish the edit in progress on this board before a swap / move.
 
-                # Scores
-                scoreLeft = self.scoreDisplay1.value()
-                self.scoreDisplay1.setValue(self.scoreDisplay2.value())
-                self.scoreDisplay2.setValue(scoreLeft)
+        The copy that used to do the swap read the fields as they stood, so
+        a tag still being typed travelled with its player. The swap now
+        exchanges the state, and a field being typed in is one the render
+        leaves alone -- the typed text would stay where it is and be
+        committed, on focus-out, into the player who arrived there. So the
+        field is left first: Qt then finishes it (editingFinished) exactly
+        as when the operator clicks elsewhere, and the text is in its
+        player's slot before the slots move. Clicking SWAP already did that
+        when the button takes the focus; the hotkey and the Web UI do not.
 
-                # Losers
-                losersLeft = self.team1column.findChild(
-                    QCheckBox, schema.TEAM_LOSERS_KEY).isChecked()
-                self.team1column.findChild(QCheckBox, schema.TEAM_LOSERS_KEY).setChecked(
-                    self.team2column.findChild(QCheckBox, schema.TEAM_LOSERS_KEY).isChecked())
-                self.team2column.findChild(
-                    QCheckBox, schema.TEAM_LOSERS_KEY).setChecked(losersLeft)
+        A field in a window of its own (a card's details dialog) counts, so
+        the parent chain is walked rather than asking isAncestorOf (which
+        stops at the window). A typed-in combo is not committed by losing
+        the focus, here as anywhere (ADR-005 S2a).
 
-                # Team Names
-                teamNameLeft = self.team1column.findChild(
-                    QLineEdit, schema.TEAM_NAME_KEY).text()
-                self.team1column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setText(
-                    self.team2column.findChild(QLineEdit, schema.TEAM_NAME_KEY).text())
-                self.team2column.findChild(
-                    QLineEdit, schema.TEAM_NAME_KEY).setText(teamNameLeft)
-                self.team1column.findChild(
-                    QLineEdit, schema.TEAM_NAME_KEY).editingFinished.emit()
-                self.team2column.findChild(
-                    QLineEdit, schema.TEAM_NAME_KEY).editingFinished.emit()
+        The field's completer popup, when it is open (the tag's candidates
+        open on focus), is closed first: losing the focus with it open
+        finishes nothing (no editingFinished) and leaves the popup on
+        screen, to complete into whoever arrives in the field. Closing it
+        picks no candidate, so the field keeps what was typed.
+        """
+        focus = QApplication.focusWidget()
+        widget = focus
+        while widget is not None and widget is not self:
+            widget = widget.parentWidget()
+        if focus is None or widget is not self:
+            return
+        popup = QApplication.activePopupWidget()
+        # popup() builds one when the completer has none yet, so it is only
+        # asked while some popup is open.
+        completer = focus.completer() if popup is not None \
+            and isinstance(focus, (QLineEdit, QComboBox)) else None
+        if completer is not None and completer.popup() is popup:
+            popup.hide()
+        focus.clearFocus()
 
-                self.individualGameTracker.SwapStageResults()
-                self.teamsSwapped = not self.teamsSwapped
-            finally:
-                # The flag itself is still this widget's (SetLoadService and
-                # WebServerActions.get_swap read the attribute); this
-                # publishes the mirror overlays render from.
-                AutonaActions.instance.SetTeamsSwapped(
-                    self.scoreboardNumber, self.teamsSwapped)
+    def _MovePlayer(self, card, step):
+        """A card's move up (-1) / move down (+1): exchange its slot with
+        the neighbouring one in the state (AutonaActions.SwapPlayers). The
+        ends of the list are not a move."""
+        team = 1 if card in self.team1playerWidgets else 2
+        widgets = self.team1playerWidgets if team == 1 \
+            else self.team2playerWidgets
+        index = widgets.index(card)
+        other = max(0, min(len(widgets) - 1, index + step))
+        if other == index:
+            return
+        self.CommitFocusedEdit()
+        if AutonaActions.instance.SwapPlayers(
+                self.scoreboardNumber, team, index + 1, other + 1):
+            if self._SlotIdsDiffer(team, (index + 1, other + 1)):
+                self._RequestPlayerStats((team,))
 
-                for p in self.playerWidgets:
-                    p.dataLock.release()
+    # Statistics after a swap / move (ADR-005 S2c). A card fetches its
+    # statistics when *it* changes the player id (ExportPlayerId). A swap or
+    # a move exchanges the ids in the state without a card being involved,
+    # so the board asks instead -- once per operation, where the widget copy
+    # that used to do the swap fired every fetch several times (for the id
+    # it dropped, for the id it restored, and once per card).
+
+    def _SlotIdsDiffer(self, team, slots):
+        """True when the given slots of `team` hold different player ids,
+        i.e. when exchanging them changed who is in each."""
+        ids = [StateManager.Get(
+            f"{self.statePrefix}.team.{team}.player.{slot}.id")
+            for slot in slots]
+        return any(value != ids[0] for value in ids[1:])
+
+    def _NoticeSwap(self):
+        """From the held cycle: was it a swap (the flag flipped)? Then show
+        the mirrored game results, and if it put other players on the
+        teams, refetch both teams' stats. True for a swap.
+
+        Read from the state rather than told by the swap, because the swap
+        has three entry points (this board's button, the hotkey, the Web UI)
+        and only the first one goes through the board.
+
+        The game results need saying: the tracker's buttons are redrawn when
+        the score moves (_SyncScoreDisplays), and a swap of a level score
+        mirrors the rows without moving it.
+        """
+        swapped = bool(StateManager.Get(
+            f"{self.statePrefix}.teamsSwapped", False))
+        if swapped == self._seenTeamsSwapped:
+            return False
+        self._seenTeamsSwapped = swapped
+        self.individualGameTracker.RenderStageResults()
+        rosters = []
+        for team in (1, 2):
+            roster = StateManager.Get(
+                f"{self.statePrefix}.team.{team}.player")
+            rosters.append(roster if isinstance(roster, dict) else {})
+        # A team swap moves slot N of one team to slot N of the other, so
+        # both teams changed exactly when some slot pair holds two ids.
+        for slot in set(rosters[0]) & set(rosters[1]):
+            ids = [roster.get(slot).get("id")
+                   if isinstance(roster.get(slot), dict) else None
+                   for roster in rosters]
+            if ids[0] != ids[1]:
+                self._RequestPlayerStats((1, 2))
+                break
+        return True
+
+    def _RequestPlayerStats(self, teams):
+        """Queue the fetches a change of player in `teams` asks for: the
+        head-to-head once, and each team's last sets / standings. Emitted
+        from the event loop (_EmitPlayerStats), never from inside the state
+        notification that noticed the change (agent-pitfalls #9)."""
+        if not self._pendingStatsTeams:
+            QTimer.singleShot(0, self, self._EmitPlayerStats)
+        self._pendingStatsTeams.update(teams)
+
+    def _EmitPlayerStats(self):
+        teams, self._pendingStatsTeams = self._pendingStatsTeams, set()
+        if not teams:
+            return
+        signals = self.stats.signals
+        signals.RecentSetsSignal.emit()
+        if 1 in teams:
+            signals.LastSetsP1Signal.emit()
+            signals.PlayerHistoryStandingsP1Signal.emit()
+        if 2 in teams:
+            signals.LastSetsP2Signal.emit()
+            signals.PlayerHistoryStandingsP2Signal.emit()
 
     def ResetScore(self):
         # One operation, one save cycle: driving the two spinboxes in turn
@@ -2100,8 +2231,8 @@ class AutonaScoreboardWidget(QWidget):
 
             # Stream URL is user-managed via the dropdown; do not overwrite
             # it when loading a set from StartGG.
+            # The flag and its team's " [L]" names, in core (ADR-005 S2b).
             service.ApplyLosers(data)
-            self._ApplyLosersToPlayers(data)
 
             if data.get("entrants"):
                 self._ApplyEntrants(data)
@@ -2114,45 +2245,6 @@ class AutonaScoreboardWidget(QWidget):
 
             if service.ApplyBracketType(data):
                 self.stats.signals.UpsetFactorCalculation.emit()
-
-    def _ApplyLosersToPlayers(self, data):
-        """Carry a loaded losers flag into the player widgets themselves.
-
-        The checkbox's `toggled` was doing two jobs at once: writing
-        `team.{t}.losers`, and running every player widget's SetLosers, which
-        re-exports `mergedName` with the " [L]" suffix the thumbnail
-        generator renders. Only the first half moved to core --
-        _SyncSetFields sets the checkbox with its signals blocked, because it
-        is the render side and may not write -- so without this the loaded
-        flag reached the state and the checkbox but not the names, and
-        `p.losers` stayed False against a checked box for the rest of the
-        session.
-
-        Called from ChangeSetData's save block, right after the write and
-        before the entrant rosters, which is where the checkbox used to fire:
-        SetData's own mergedName export then already sees the flag.
-
-        Only the widgets that exist *now*: a set that also grows the roster
-        creates its extra cards further down, after this has run. Those pick
-        the flag up from the state themselves (`_AdoptTeamLosers`, called as
-        each one is built) -- until the player instalment of Step 5 they did
-        not, and stayed unflagged until some later load moved the flag.
-        """
-        for setTeam in (1, 2):
-            value = data.get(f"team{setTeam}losers")
-            if value is None:
-                continue
-            value = bool(value)
-            team = self.setLoad.DisplayTeam(setTeam)
-            widgets = (self.team1playerWidgets if team == 1
-                       else self.team2playerWidgets)
-            for player in widgets:
-                # Only on change, because that is what `toggled` gave us:
-                # SetLosers re-exports mergedName unconditionally, so calling
-                # it for a flag that did not move would mark the board dirty
-                # and light the 反映 button on a re-load of the same set.
-                if player.losers != value:
-                    player.SetLosers(value)
 
     def _ApplyEntrants(self, data):
         """Pour a set's two entrant rosters into the player widgets."""
@@ -2287,7 +2379,7 @@ class AutonaScoreboardWidget(QWidget):
         teamInstances = [self.team1playerWidgets,
                          self.team2playerWidgets]
 
-        if self.teamsSwapped:
+        if StateManager.Get(f"{self.statePrefix}.teamsSwapped", False):
             teamInstances.reverse()
 
         playerData = AutonaPlayerDB.GetPlayerFromTag(tag)

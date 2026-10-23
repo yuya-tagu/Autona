@@ -13,6 +13,8 @@ from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
 from .core.CountryCatalog import CountryCatalog
+from .core.DictHelper import deep_clone
+from .core.PlayerService import CharacterSlot
 from .core.StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaPlayerDB import AutonaPlayerDB
@@ -75,6 +77,10 @@ class AutonaScoreboardPlayerWidgetSignals(QObject):
     player1Id_changed = Signal()
     player2Id_changed = Signal()
     player_seed_changed = Signal()
+    # A render had to leave a field alone because the operator was in it,
+    # and focus has now left it (ADR-005 S2a). The board answers with a
+    # render pass.
+    render_requested = Signal()
 
 
 
@@ -96,7 +102,17 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         self.index = index
         self.teamNumber = teamNumber
 
-        self.losers = False
+        # The slot as of the last complete RenderFromState (None: render
+        # everything next time).
+        self._renderedSlot = None
+        # The widgets the last render left alone because the operator was
+        # editing them; once focus has left all of them, the card asks for
+        # another render (_OnFocusChanged).
+        self._focusSkipped = []
+        # {field: text}: what a line edit showed when a render had to leave
+        # it alone. Finishing the edit with that very text is not an edit
+        # (_OnTextChanged).
+        self._heldBackText = {}
 
         uic.loadUi(AutonaResolve("src/layout/AutonaScoreboardPlayer.ui"), self)
         self._initBasePlayerWidget()
@@ -177,22 +193,11 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         # current theme tokens instead (Design.md §5.4 / §8 T-14).
         self.seedDisplay.setStyleSheet(self._seedDisplayStyle())
 
-        def _syncSeedDisplay(value):
-            try:
-                v = int(value or 0)
-            except (TypeError, ValueError):
-                v = 0
-            if v > 0:
-                self.seedDisplay.setText(f"Seed: {v}")
-                self.seedDisplay.setVisible(True)
-            else:
-                # Empty seed: hide the trailing slot so it stops reserving
-                # width and the GamerTag field reaches the column's right
-                # edge, staying flush with the rows below.
-                self.seedDisplay.setText("")
-                self.seedDisplay.setVisible(False)
-        seed.valueChanged.connect(_syncSeedDisplay)
-        _syncSeedDisplay(seed.value())
+        # A bound method rather than the closure it used to be: the render
+        # side (RenderFromState) sets the spinbox with its signals blocked
+        # and has to put the badge right itself.
+        seed.valueChanged.connect(self._ShowSeed)
+        self._ShowSeed(seed.value())
 
         country = self.findChild(QComboBox, schema.PLAYER_COUNTRY_KEY)
         state = self.findChild(QComboBox, schema.PLAYER_STATE_KEY)
@@ -311,12 +316,19 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
         self.lastExportedName = ""
 
+        self._WireInputs(seed)
+
+        # After _WireInputs, so on the same editingFinished the tag / sponsor
+        # reaches the state (_OnTextChanged) before the display name is
+        # published (NameChanged; ADR-005 S2b). AutonaActions.SetTeamLosers
+        # rebuilds the team's names from the state, from any thread: with
+        # NameChanged first, a flip landing between the two rebuilt the name
+        # from the previous text after the card's own publish, so " [L]" was
+        # left on the old name.
         self.findChild(QLineEdit, schema.PLAYER_TAG_KEY).editingFinished.connect(
             self.NameChanged)
         self.findChild(QLineEdit, schema.PLAYER_SPONSOR_KEY).editingFinished.connect(
             self.NameChanged)
-
-        self._WireInputs(seed)
 
         self.SetCharactersPerPlayer(1)
 
@@ -333,6 +345,10 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         # full inline form.
         if self.path.startswith("score."):
             self._buildCompactDetailsUI()
+            # Only board cards render from the state (RenderFromState), so
+            # only they have fields to come back to. A bound method: Qt drops
+            # the connection with the card.
+            QApplication.instance().focusChanged.connect(self._OnFocusChanged)
 
     def deleteLater(self):
         self._deleted = True
@@ -342,7 +358,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         """Re-home every detail field into a modal QDialog (Web UI parity).
 
         The dialog is a QObject child of this widget, so findChild /
-        findChildren lookups (eye-menu toggles, Clear, SwapWith, SetData)
+        findChildren lookups (eye-menu toggles, Clear, SetData, the render)
         keep resolving the same widget instances — only their visual home
         changes. The hidden data holders (seed spinbox, seedLabel,
         birthday) stay parented to the widget without a layout.
@@ -540,6 +556,26 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
     def _seedDisplayStyle() -> str:
         return f"color: {UI.palette()['text_secondary']};"
 
+    @staticmethod
+    def _SeedNumber(value) -> int:
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _ShowSeed(self, value):
+        """The seedDisplay badge for seed `value` (0 / none: hidden)."""
+        seed = self._SeedNumber(value)
+        if seed > 0:
+            self.seedDisplay.setText(f"Seed: {seed}")
+            self.seedDisplay.setVisible(True)
+        else:
+            # Empty seed: hide the trailing slot so it stops reserving
+            # width and the GamerTag field reaches the column's right
+            # edge, staying flush with the rows below.
+            self.seedDisplay.setText("")
+            self.seedDisplay.setVisible(False)
+
     def _WireInputs(self, seed: QSpinBox):
         """Bind the card's inputs to the operations they stand for.
 
@@ -564,9 +600,10 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
           via the `qt_spinbox_lineedit` -> parent fallback and published the
           spinbox's *text*, so a Clear() left the seed as the string "0". It
           is wired explicitly below and publishes the value, because it is
-          not redundant: `SwapWith` moves the seed through the state without
-          touching the spinbox, so the two can disagree and Clear() has to be
-          able to reset the state from a spinbox that is already at 0.
+          not redundant: a slot written in the state (a swap, ADR-005 S2c)
+          can carry a seed the spinbox does not show yet, so the two can
+          disagree and Clear() has to be able to reset the state from a
+          spinbox that is already at 0.
 
         The initial emits are kept exactly where they were: the seed, the
         birthday flag and the two location combos publish as the card is
@@ -615,24 +652,69 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                     self._OnLocationChanged(field, combo))
             combo.currentIndexChanged.emit(0)
 
+    def _StateValue(self, field):
+        return StateManager.Get(self.player.Key(field))
+
     def _OnTextChanged(self, field, text):
+        """A line edit finished an edit: publish its text, unless that text
+        is not news (ADR-005 S2a).
+
+        Compared here rather than in PlayerService, which writes whatever it
+        is handed (its module docstring). Two finishes carry nothing:
+
+        - the text the state already holds. Qt 6 fires editingFinished on a
+          focus-out whenever the text changed since its last emission, and a
+          render's setText -- signals blocked or not -- counts as a change,
+          so tabbing through a field the card was rendered into would
+          otherwise re-write it.
+        - the text a render had to leave in place because the operator was
+          in the field (_heldBackText), however it is finished: a focus-out,
+          Enter, or typing that ends where it started. The state moved on
+          underneath it; writing it back would put the old value over the
+          new one. The render the focus-out asks for (_OnFocusChanged) then
+          shows the new value. Any other text is the operator's edit and is
+          published.
+
+        An absent key is not "": a field the slot has never had is still
+        written on its first finish, as before.
+        """
+        if self._StateValue(field) == text:
+            self._heldBackText.pop(field, None)
+            return
+        if self._heldBackText.get(field) == text:
+            return
+        self._heldBackText.pop(field, None)
         self.player.SetText(field, text)
 
     def _OnNoteChanged(self):
-        self.player.SetText(
-            schema.PLAYER_NOTE_KEY, self.custom_textbox.toPlainText())
+        # textChanged, i.e. every keystroke, plus the explicit re-emits of
+        # SetData / Clear right after their setPlainText: the state already
+        # holding the text is not news (see _OnTextChanged).
+        text = self.custom_textbox.toPlainText()
+        if self._StateValue(schema.PLAYER_NOTE_KEY) == text:
+            return
+        self.player.SetText(schema.PLAYER_NOTE_KEY, text)
 
     def _OnLocationChanged(self, field, combo: QComboBox):
-        # currentData() carries the whole selected row (code, names, flag
-        # asset) or {} for the blank row every region rebuild starts on.
-        # Which row that is has just been decided by Qt (LoadStates /
-        # SetData); publishing it is core's.
-        self.player.SetLocation(field, combo.currentData())
-
-    def SetLosers(self, value):
-        with self.dataLock:
-            self.losers = value
-            self.ExportMergedName()
+        # Which row is shown has just been decided here (LoadStates /
+        # SetData / the operator); only its code leaves the widget, and
+        # PlayerService builds the published value from the country catalog
+        # (ADR-005 S1d). No code -- the blank row, a typed name that matches
+        # no row, the custom-flag separator -- publishes "no location".
+        data = combo.currentData()
+        code = data.get("code") if isinstance(data, dict) else None
+        if field == schema.PLAYER_COUNTRY_KEY:
+            self.player.SetCountry(code)
+        else:
+            # The region index points into the rows LoadStates built, so the
+            # code is resolved against the country it built them for -- not
+            # the one the country combo shows, which can differ while
+            # SetData runs (its Clear() empties the country with the
+            # signals blocked and leaves the rows alone). The one region
+            # publish LoadStates makes itself, before it records the code,
+            # is the blank row, which needs no country.
+            self.player.SetRegion(
+                getattr(self, "_loadedStatesCountryCode", None), code)
 
     def NameChanged(self):
         # Skip during bulk SetData; will be called once at the end
@@ -664,15 +746,432 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                     else:
                         self.instanceSignals.player2Id_changed.emit()
 
-    def _swapRestoreTail(self, data):
-        # Scoreboard restores the player id directly (NameChanged would reset
-        # it to None).
-        self.ExportPlayerId(data["id"])
-        # ...and the avatar, which SwapWith saved for exactly this. It used to
-        # be wiped from both widgets as a side effect of NameChanged; now that
-        # ExportPlayerImages leaves it alone by default it would otherwise
-        # stay behind and show the swapped-away player's face.
-        self.ExportPlayerImages(data["online_avatar"])
+    # ── render: the slot, from the state (ADR-005 S2a) ───────────────────
+    #
+    # The other direction from everything above. ADR-005 S2 makes the state
+    # the source of truth for a player slot -- the swap and clear operations
+    # become core operations that never touch a widget -- so the card has to
+    # be able to show a slot it did not write. RenderFromState is that, and
+    # it is held to one rule: it WRITES NOTHING. Every widget it changes is
+    # changed with its signals blocked, because each of them is still
+    # connected to the PlayerService write it stands for (an operator's
+    # edit). tests/test_player_card_render.py pins both halves: the card
+    # shows its slot after every board operation, and rendering makes no
+    # state write at all.
+    #
+    # The board calls it (AutonaScoreboardWidget._RenderPlayerCards), once
+    # control is back in the event loop after a held save cycle -- never in
+    # the middle of an operation, when the card can legitimately be ahead of
+    # the state (a country pick publishes the region before the country).
+    #
+    # Two more rules, both for the operator's sake:
+    #
+    # - a field being edited is left alone (a notification must not yank
+    #   text out from under the caret -- the rule _SyncSetFields follows).
+    #   Once focus has left every such field the card asks for another pass
+    #   (_OnFocusChanged), and a focus-out that merely finishes the text the
+    #   render left behind writes nothing (_OnTextChanged).
+    # - what to show is decided before a widget is touched. A value no row
+    #   of a combo reproduces changes nothing at all, so a card is never
+    #   left half-way between its old slot and the new one; the next pass
+    #   tries again.
+
+    # The leaves this card displays. The rest of the slot is derived
+    # (mergedName / mergedOnlyName, avatar, sponsor crests, mains) or has no
+    # input on the card (id, city, online_avatar).
+    RENDERED_KEYS = schema.PLAYER_INPUT_KEYS + ("character",)
+
+    def RenderFromState(self) -> bool:
+        """Show what the state holds for this card's slot. Writes nothing.
+
+        True when the card now shows the whole slot. False when something
+        was left alone -- a field the operator is editing, or a value no row
+        of a combo reproduces -- and the next pass tries again.
+
+        A slot that has not changed since the last complete render is not
+        looked at again: the card can only have moved since by an edit,
+        and every edit publishes.
+        """
+        if self._deleted or self.player.BoardNumber() is None:
+            # Board cards only. The PLAYERS panel's editor (player_editor.1)
+            # is a draft the operator types into, and nothing else writes it.
+            return True
+        slot = self._ReadRenderedSlot()
+        if slot == self._renderedSlot:
+            return True
+
+        self._focusSkipped = []
+        sponsor = self._w(schema.PLAYER_SPONSOR_KEY, QLineEdit)
+        tag = self._w(schema.PLAYER_TAG_KEY, QLineEdit)
+        shownName = (sponsor.text(), tag.text())
+        with self.dataLock:
+            results = [self._RenderText(field, slot.get(field))
+                       for field in schema.PLAYER_TEXT_KEYS]
+            results.append(
+                self._RenderSeed(slot.get(schema.PLAYER_SEED_KEY)))
+            results.append(
+                self._RenderBirthday(slot.get(schema.PLAYER_BIRTHDAY_KEY)))
+            results.append(self._RenderLocation(
+                slot.get(schema.PLAYER_COUNTRY_KEY),
+                slot.get(schema.PLAYER_STATE_KEY)))
+            results.append(self._RenderCharacters(slot.get("character")))
+            if (sponsor.text(), tag.text()) != shownName:
+                # The name now shown is one the slot already has: NameChanged
+                # compares against this to tell a new player in the slot (it
+                # then re-derives the images and drops the id) from a
+                # focus-out that changed nothing.
+                self.lastExportedName = sponsor.text() + " " + tag.text()
+
+        complete = all(results)
+        self._renderedSlot = slot if complete else None
+        return complete
+
+    def _ReadRenderedSlot(self) -> dict:
+        """A copy of the rendered leaves of this slot, read in one go."""
+        with StateManager.lock:
+            slot = StateManager.Get(self.path)
+            if not isinstance(slot, dict):
+                return {}
+            return {key: deep_clone(slot[key])
+                    for key in self.RENDERED_KEYS if key in slot}
+
+    @staticmethod
+    def _Editing(widget) -> bool:
+        """The operator is in `widget`: it has focus, or -- a combo -- its
+        line edit has, or its drop-down is open."""
+        if widget.hasFocus():
+            return True
+        if not isinstance(widget, QComboBox):
+            return False
+        edit = widget.lineEdit()
+        if edit is not None and edit.hasFocus():
+            return True
+        view = widget.view()
+        return view is not None and view.isVisible()
+
+    def _LeaveForFocus(self, *widgets):
+        """Note widgets a render left alone because they were being edited."""
+        for widget in widgets:
+            if widget not in self._focusSkipped:
+                self._focusSkipped.append(widget)
+
+    def _OnFocusChanged(self, old, new):
+        """QApplication.focusChanged: once the operator has left every field
+        the last render had to skip, ask the board for the pass that shows
+        them. The pass is the board's to schedule (deferred and coalesced),
+        so nothing is redrawn inside the focus change (agent-pitfalls #9)."""
+        if self._deleted or not self._focusSkipped:
+            return
+        skipped = [w for w in self._focusSkipped if Shiboken.isValid(w)]
+        if any(self._Editing(w) for w in skipped):
+            self._focusSkipped = skipped
+            return
+        self._focusSkipped = []
+        self.instanceSignals.render_requested.emit()
+
+    def _RenderText(self, field, value) -> bool:
+        # A field the card has never published is absent, and shows empty.
+        text = "" if value is None else str(value)
+        note = field == schema.PLAYER_NOTE_KEY
+        widget = self.custom_textbox if note else self._w(field, QLineEdit)
+        if widget is None:
+            return True
+        shown = widget.toPlainText() if note else widget.text()
+        if shown == text:
+            self._heldBackText.pop(field, None)
+            return True
+        if self._Editing(widget):
+            self._LeaveForFocus(widget)
+            if not note:
+                self._heldBackText[field] = shown
+            return False
+        self._heldBackText.pop(field, None)
+        with QSignalBlocker(widget):
+            if note:
+                widget.setPlainText(text)
+            else:
+                widget.setText(text)
+        return True
+
+    def _RenderSeed(self, value) -> bool:
+        seed = self._SeedNumber(value)
+        spin = self._w(schema.PLAYER_SEED_KEY, QSpinBox)
+        if spin is not None and spin.value() != seed:
+            with QSignalBlocker(spin):
+                spin.setValue(seed)
+        # The badge from the state's number, not the spinbox's: the spinbox
+        # clamps, and its valueChanged (which normally drives the badge) is
+        # what was just blocked.
+        if self.seedDisplay.text() != (f"Seed: {seed}" if seed > 0 else ""):
+            self._ShowSeed(seed)
+        return True
+
+    def _RenderBirthday(self, value) -> bool:
+        check = self._w(schema.PLAYER_BIRTHDAY_KEY, QCheckBox)
+        if check is not None and check.isChecked() != bool(value):
+            with QSignalBlocker(check):
+                check.setChecked(bool(value))
+        return True
+
+    @staticmethod
+    def _ComboCode(combo):
+        data = combo.currentData()
+        return data.get("code") if isinstance(data, dict) else None
+
+    @staticmethod
+    def _RowWithCode(combo, code):
+        """The first row whose data carries `code` -- for no code, the blank
+        row (data without a code: {}). None when the combo has no such row.
+        Rows without data (the custom-flag separator, a typed name) are
+        never picked."""
+        model = combo.model()
+        for row in range(model.rowCount() if model is not None else 0):
+            data = model.index(row, 0).data(Qt.ItemDataRole.UserRole)
+            if isinstance(data, dict) and data.get("code") == code:
+                return row
+        return None
+
+    def _RenderLocation(self, countryValue, regionValue) -> bool:
+        """The country and region, by code. Both values are what
+        PlayerService.CountryValue / RegionValue built from a code, so the
+        code is the whole of what has to be shown."""
+        countryCode = countryValue.get("code") \
+            if isinstance(countryValue, dict) else None
+        regionCode = regionValue.get("code") \
+            if isinstance(regionValue, dict) else None
+        country = self._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
+        region = self._w(schema.PLAYER_STATE_KEY, QComboBox)
+        rowsFor = getattr(self, "_loadedStatesCountryCode", None)
+        if (self._ComboCode(country) == countryCode and rowsFor == countryCode
+                and self._ComboCode(region) == regionCode):
+            return True
+        editing = [combo for combo in (country, region)
+                   if self._Editing(combo)]
+        if editing:
+            self._LeaveForFocus(*editing)
+            return False
+
+        # Both rows are settled before either combo changes.
+        countryRow = None
+        if self._ComboCode(country) != countryCode:
+            countryRow = self._RowWithCode(country, countryCode)
+            if countryRow is None:
+                logger.debug(f"{self.path}: no country row for {countryCode!r}")
+                return False
+        refill = rowsFor != countryCode
+        if refill:
+            # The rows a refill builds: the blank one, and the catalog's
+            # regions of that country (_FillStateRows).
+            reproducible = regionCode is None or CountryCatalog.instance \
+                .State(countryCode, regionCode).get("code") == regionCode
+        else:
+            reproducible = self._ComboCode(region) == regionCode \
+                or self._RowWithCode(region, regionCode) is not None
+        if not reproducible:
+            logger.debug(f"{self.path}: no region row for "
+                         f"{countryCode!r}/{regionCode!r}")
+            return False
+
+        if countryRow is not None:
+            with QSignalBlocker(country):
+                country.setCurrentIndex(countryRow)
+        if refill:
+            # The region rows belong to the country shown. A pick rebuilds
+            # them through LoadStates, which also publishes the blank region;
+            # this is the same refill without that publish.
+            self._FillStateRows(countryCode)
+            self._loadedStatesCountryCode = countryCode
+        if self._ComboCode(region) != regionCode:
+            row = self._RowWithCode(region, regionCode)
+            if row is None:
+                # The catalog said the refill would have it.
+                logger.warning(f"{self.path}: region {regionCode!r} of "
+                               f"{countryCode!r} is not among the rows built")
+                return False
+            with QSignalBlocker(region):
+                region.setCurrentIndex(row)
+        return True
+
+    def _ShownCharacter(self, character, color, variant) -> dict:
+        """What the slot holds for what these three combos show -- the value
+        a pick would publish (PlayerService builds it from the identifiers,
+        ADR-005 S1d)."""
+        return self.player.CharacterValue(
+            self._CharacterSlot(character, color, variant))
+
+    def _RenderCharacters(self, characters) -> bool:
+        # The number of slots is still the board's (charNumber), not the
+        # state's: a slot the card has no combos for is not shown, and a
+        # combo row the state has no slot for (an emptied player) shows the
+        # blank slot -- what an empty row publishes.
+        if not isinstance(characters, dict):
+            characters = {}
+        blank = None
+        complete = True
+        for index, element in enumerate(self.character_elements):
+            value = characters.get(index + 1, characters.get(str(index + 1)))
+            if not isinstance(value, dict):
+                if blank is None:
+                    blank = self.player.CharacterValue(CharacterSlot())
+                value = blank
+            complete = self._RenderCharacterSlot(element, value) and complete
+        return complete
+
+    def _RenderCharacterSlot(self, element, value) -> bool:
+        _element, character, color, variant = element
+        if self._ShownCharacter(character, color, variant) == value:
+            return True
+        editing = [combo for combo in (character, color, variant)
+                   if self._Editing(combo)]
+        if editing:
+            self._LeaveForFocus(*editing)
+            return False
+
+        plan = self._CharacterPlan(character, color, variant, value)
+        if plan is None:
+            logger.debug(f"{self.path}: no combo rows reproduce {value!r}")
+            return False
+        row, skin, variantRow = plan
+        with QSignalBlocker(character), QSignalBlocker(color), \
+                QSignalBlocker(variant):
+            before = character.currentIndex()
+            if row is None:
+                # Not a row of the loaded game: the name as typed.
+                character.setCurrentIndex(-1)
+                character.setEditText(value.get("name") or "")
+            elif before != row:
+                character.setCurrentIndex(row)
+            if character.currentIndex() != before:
+                # The skin rows are the character's; the pick handler
+                # rebinds them the same way (unblocked, so it publishes).
+                self.LoadSkinOptions(character, color)
+            color.setCurrentIndex(skin)
+            variant.setCurrentIndex(variantRow)
+
+        if self._ShownCharacter(character, color, variant) == value:
+            return True
+        # _CharacterPlan said these rows show the value and they do not:
+        # the plan and the combos disagree, which is a bug here.
+        logger.warning(f"{self.path}: rendering {value!r} did not "
+                       f"reproduce it")
+        return False
+
+    def _CharacterPlan(self, character, color, variant, value):
+        """The rows that make one slot's three combos show `value`, as
+        (character row -- None for a typed name --, skin row, variant row),
+        or None when no rows do.
+
+        Worked out from the models alone, before anything changes, and
+        checked with the value builder a pick publishes through: the
+        identifiers these rows would hand `_CharacterSlot` must build
+        `value` itself.
+        """
+        variantRow = self._VariantRowFor(variant, value.get("variant"))
+        if variantRow is None:
+            return None
+        skin = value.get("skin")
+        if not isinstance(skin, int) or isinstance(skin, bool):
+            skin = -1
+
+        row = self._CharacterRowFor(character, value)
+        if row is None:
+            data, text, index = None, value.get("name") or "", -1
+        else:
+            item = character.model().index(row, 0)
+            data = item.data(Qt.ItemDataRole.UserRole)
+            text = item.data(Qt.ItemDataRole.DisplayRole) or ""
+            index = row
+        picked = data if isinstance(data, dict) else None
+        if picked is not None and picked.get("name"):
+            text = picked.get("name")
+
+        # The skin rows the color combo will offer: its own if the
+        # character stays, else the ones LoadSkinOptions binds.
+        skinRows = color.count() if index == character.currentIndex() \
+            else self._SkinRowCount(data)
+        if skin != -1 and not 0 <= skin < skinRows:
+            return None
+
+        variantData = variant.model().index(variantRow, 0).data(
+            Qt.ItemDataRole.UserRole) if variantRow >= 0 else None
+        slot = CharacterSlot(
+            character=picked.get("en_name") if picked is not None else None,
+            skin=skin,
+            variant=(variantData.get("en_name")
+                     if isinstance(variantData, dict) else None),
+            text=text)
+        if self.player.CharacterValue(slot) != value:
+            return None
+        return row, skin, variantRow
+
+    @staticmethod
+    def _SkinRowCount(characterData) -> int:
+        """How many rows LoadSkinOptions gives the skin combo for a
+        character row's data."""
+        if not characterData:
+            return 0
+        model = AutonaGameAssetManager.instance.skinModels.get(
+            characterData.get("en_name"))
+        return model.rowCount() if model is not None else 0
+
+    def _CharacterRowFor(self, combo, value):
+        """The character combo's row for a slot value, None for a name that
+        is not a row (typed, or the blank row of an empty roster).
+
+        Matched through the value itself rather than its `en_name`: a skin
+        that is a different character (Dr. Mario) puts that character's
+        name and en_name into the slot over the picked row's. `codename` is
+        the row's own, so the rows sharing it (or, without one, the en_name)
+        are the candidates, and the one whose value is the slot's wins.
+        """
+        model = combo.model()
+        rows = model.rowCount() if model is not None else 0
+        if "en_name" not in value:
+            if value.get("name"):
+                return None
+            for row in range(rows):
+                if not isinstance(
+                        model.index(row, 0).data(Qt.ItemDataRole.UserRole),
+                        dict):
+                    return row      # the blank first row
+            return None
+
+        variantValue = value.get("variant")
+        variantName = variantValue.get("en_name") \
+            if isinstance(variantValue, dict) else None
+        skin = value.get("skin")
+        candidates = []
+        for row in range(rows):
+            data = model.index(row, 0).data(Qt.ItemDataRole.UserRole)
+            if not isinstance(data, dict):
+                continue
+            if ("codename" in value
+                    and data.get("codename") == value.get("codename")) \
+                    or data.get("en_name") == value.get("en_name"):
+                candidates.append((row, data))
+        for row, data in candidates:
+            slot = CharacterSlot(
+                character=data.get("en_name"),
+                skin=skin if isinstance(skin, int) else -1,
+                variant=variantName, text=data.get("name") or "")
+            if self.player.CharacterValue(slot) == value:
+                return row
+        return candidates[0][0] if candidates else None
+
+    @staticmethod
+    def _VariantRowFor(combo, value):
+        """The variant combo's row for a slot's `variant` ({} = none: the
+        blank first row, -1 without one). None when no row has it."""
+        model = combo.model()
+        rows = model.rowCount() if model is not None else 0
+        name = value.get("en_name") if isinstance(value, dict) else None
+        if not name:
+            return 0 if rows else -1
+        for row in range(rows):
+            data = model.index(row, 0).data(Qt.ItemDataRole.UserRole)
+            if isinstance(data, dict) and data.get("en_name") == name:
+                return row
+        return None
 
     def SetIndex(self, index: int, team: int):
         self.findChild(QWidget, "title").setText(
@@ -872,6 +1371,10 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
         logger.debug(f"Setting data for {self.path}: {data}")
 
+        # True when Clear() below emptied the country without telling anyone
+        # (see there); settled after the country_code step.
+        country_cleared_silently = False
+
         try:
             if clear:
                 # Block country signals during Clear: Clear() calls
@@ -883,14 +1386,19 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 country_element = self._w(
                     schema.PLAYER_COUNTRY_KEY, QComboBox)
                 country_was_blocked = False
+                country_before = None
                 if country_element is not None:
                     country_was_blocked = country_element.signalsBlocked()
+                    country_before = country_element.currentIndex()
                     country_element.blockSignals(True)
                 try:
                     self.Clear(no_mains=no_mains)
                 finally:
                     if country_element is not None:
                         country_element.blockSignals(country_was_blocked)
+                country_cleared_silently = (
+                    country_element is not None and not country_was_blocked
+                    and country_element.currentIndex() != country_before)
 
             # Load player data from DB; will be overwriten by incoming data
             if not dontLoadFromDB:
@@ -960,6 +1468,19 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                             break
                 if countryElement.currentIndex() != countryIndex:
                     countryElement.setCurrentIndex(countryIndex)
+
+            if country_cleared_silently:
+                countryElement = self._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
+                if countryElement.currentIndex() == 0:
+                    # The blocked Clear() above relied on a country_code
+                    # following and announcing itself. None did (or it named
+                    # no known country), so the emptying is announced here,
+                    # once: the regions are rebuilt for "no country" and the
+                    # state stops naming the previous player's country --
+                    # which it used to keep, under the new player's name,
+                    # while the card showed none (and a state_code would be
+                    # looked up among that country's regions).
+                    countryElement.currentIndexChanged.emit(0)
 
             if data.get("state_code"):
                 countryElement: QComboBox = self._w(

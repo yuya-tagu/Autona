@@ -22,10 +22,12 @@ from unittest.mock import patch
 
 import pytest
 
+from qtpy.QtCore import Qt
 from qtpy.QtGui import QStandardItem, QStandardItemModel
 from qtpy.QtWidgets import QComboBox, QLineEdit, QSpinBox
 
 from src.core.CountryCatalog import CountryCatalog
+from src.core.PlayerService import CharacterSlot
 from src.core.StateManager import StateManager
 
 
@@ -125,6 +127,35 @@ def test_set_data_takes_a_state_iso2_as_is(autonaApp):
     assert autonaApp.get(f"{player.path}.state").get("original_code") == "13"
 
 
+def test_loading_a_player_without_a_country_drops_the_previous_one(
+        autonaApp):
+    """SetData's Clear() empties the country combo with its signals
+    blocked, so a player loaded without a country_code used to keep the
+    previous player's flag on the overlay (found while recording the
+    ADR-005 S1d golden). The emptying is announced now, in SetData's own
+    save cycle: no region, then no country."""
+    player = _player(autonaApp)
+
+    player.SetData({"gamerTag": "FIRST", "country_code": "JP",
+                    "state_code": "13"}, dontLoadFromDB=True)
+    autonaApp.settle()
+    assert autonaApp.get(f"{player.path}.country").get("code") == "JP"
+    assert autonaApp.get(f"{player.path}.state").get("code") == "13"
+
+    player.SetData({"gamerTag": "SECOND"}, dontLoadFromDB=True)
+    autonaApp.settle()
+
+    assert autonaApp.get(f"{player.path}.country") == {}
+    assert autonaApp.get(f"{player.path}.state") == {}
+
+    # A third player with a country is not disturbed by the fix.
+    player.SetData({"gamerTag": "THIRD", "country_code": "US",
+                    "state_code": "CA"}, dontLoadFromDB=True)
+    autonaApp.settle()
+    assert autonaApp.get(f"{player.path}.country").get("code") == "US"
+    assert autonaApp.get(f"{player.path}.state").get("code") == "CA"
+
+
 def test_loading_a_second_player_replaces_the_first(autonaApp):
     """SetData(clear=True) is how a set load overwrites the previous match."""
     player = _player(autonaApp)
@@ -155,16 +186,28 @@ def test_clear_empties_the_published_player_fields(autonaApp):
 
 
 def test_the_losers_flag_is_appended_to_the_merged_name(autonaApp):
+    """A name the card publishes carries its team's flag from the state.
+
+    The card has no copy of the flag since ADR-005 S2b (it had `losers`,
+    kept in step by a per-card SetLosers); PlayerService reads
+    `team.{t}.losers` when the card publishes.
+    """
+    from src.core.Actions import AutonaActions
+
     player = _player(autonaApp)
+    AutonaActions.instance.SetTeamLosers(1, player.teamNumber, True)
+    try:
+        player.SetData({"gamerTag": "TAG", "prefix": "SPONSOR"},
+                       dontLoadFromDB=True)
+        autonaApp.settle()
 
-    player.SetData({"gamerTag": "TAG", "prefix": "SPONSOR"},
-                   dontLoadFromDB=True)
-    player.losers = True
-    player.ExportMergedName()
-    autonaApp.settle()
-
-    assert autonaApp.get(f"{player.path}.mergedName") == "SPONSOR | TAG [L]"
-    assert autonaApp.get(f"{player.path}.mergedOnlyName") == "TAG [L]"
+        assert not hasattr(player, "losers")
+        assert autonaApp.get(
+            f"{player.path}.mergedName") == "SPONSOR | TAG [L]"
+        assert autonaApp.get(f"{player.path}.mergedOnlyName") == "TAG [L]"
+    finally:
+        AutonaActions.instance.SetTeamLosers(1, player.teamNumber, False)
+        autonaApp.settle()
 
 
 # ── character slots ──────────────────────────────────────────────────────
@@ -277,6 +320,46 @@ def test_loading_a_player_without_mains_clears_the_previous_characters(
     assert _names(autonaApp, player) == {1: "", 2: ""}
 
 
+def test_a_slot_hands_over_identifiers_and_a_name_to_fall_back_on(autonaApp):
+    """What CharactersChanged hands PlayerService for one slot (ADR-005 S1d).
+
+    The fallback name only matters when the game catalog has no row for the
+    pick. For a typed name that is the typed text. For a picked row it is
+    the row's own name: that happens between a game load and the combos'
+    rebind, and the combo's text there is its "display name / en_name"
+    label, which no overlay ever showed as a name.
+    """
+    from src.AutonaBasePlayerWidget import AutonaBasePlayerWidget
+
+    def combo(rows):
+        box = QComboBox()
+        box.setEditable(True)
+        model = QStandardItemModel(box)
+        for text, data in rows:
+            item = QStandardItem(text)
+            item.setData(data, Qt.ItemDataRole.UserRole)
+            model.appendRow(item)
+        box.setModel(model)
+        return box
+
+    character = combo([("", None), ("マリオ / Mario",
+                                    {"en_name": "Mario", "name": "マリオ"})])
+    color = combo([("0", {"assets": {}}), ("1", {"assets": {}})])
+    variant = combo([("", {}), ("EX", {"en_name": "EX", "name": "EX"})])
+
+    character.setCurrentIndex(1)
+    color.setCurrentIndex(1)
+    variant.setCurrentIndex(1)
+    assert AutonaBasePlayerWidget._CharacterSlot(character, color, variant) \
+        == CharacterSlot("Mario", 1, "EX", "マリオ")
+
+    character.setCurrentIndex(0)
+    character.setEditText("Typed Name")
+    variant.setCurrentIndex(0)
+    assert AutonaBasePlayerWidget._CharacterSlot(character, color, variant) \
+        == CharacterSlot(None, 1, None, "Typed Name")
+
+
 def test_swapping_two_character_slots_exchanges_the_published_names(
         autonaApp):
     player = _player(autonaApp)
@@ -295,16 +378,26 @@ def test_swapping_two_character_slots_exchanges_the_published_names(
 
 
 # ── swapping two players ─────────────────────────────────────────────────
+#
+# A swap exchanges the two slots in the state (AutonaActions.SwapTeams,
+# ADR-005 S2c) and each card renders its own; it used to be a copy from one
+# card into the other (SwapWith). `left` / `right` are slot 1 of the two
+# teams of board 1, i.e. exactly the pair a team swap exchanges.
 
-def test_swap_with_exchanges_the_published_names(autonaApp):
+def _swap(app):
+    from src.core.Actions import AutonaActions
+    assert AutonaActions.instance.SwapTeams(1) is True
+    app.settle()
+
+
+def test_a_swap_exchanges_the_published_names(autonaApp):
     left, right = _players(autonaApp)
 
     left.SetData({"gamerTag": "LEFT", "prefix": "LS"}, dontLoadFromDB=True)
     right.SetData({"gamerTag": "RIGHT", "prefix": "RS"}, dontLoadFromDB=True)
     autonaApp.settle()
 
-    left.SwapWith(right)
-    autonaApp.settle()
+    _swap(autonaApp)
 
     assert autonaApp.get(f"{left.path}.name") == "RIGHT"
     assert autonaApp.get(f"{left.path}.team") == "RS"
@@ -314,19 +407,20 @@ def test_swap_with_exchanges_the_published_names(autonaApp):
     assert autonaApp.get(f"{right.path}.mergedName") == "LS | LEFT"
 
 
-def test_swapping_a_player_with_itself_is_a_no_op(autonaApp):
-    # Reachable from the move-up/move-down buttons at the ends of a team.
+def test_moving_the_top_player_up_is_a_no_op(autonaApp):
+    # The move-up / move-down buttons at the ends of a team.
     player = _player(autonaApp)
 
     player.SetData({"gamerTag": "TAG", "prefix": "SPONSOR"},
                    dontLoadFromDB=True)
     autonaApp.settle()
+    before = autonaApp.get(player.path)
 
-    player.SwapWith(player)
+    player.btMoveUp.click()
+    player.btMoveDown.click()
     autonaApp.settle()
 
-    assert autonaApp.get(f"{player.path}.name") == "TAG"
-    assert autonaApp.get(f"{player.path}.team") == "SPONSOR"
+    assert autonaApp.get(player.path) == before
 
 
 # ── seed ─────────────────────────────────────────────────────────────────
@@ -415,11 +509,15 @@ def test_the_seed_survives_a_player_swap(autonaApp):
     right.SetData({"gamerTag": "UNSEEDED"}, dontLoadFromDB=True)
     autonaApp.settle()
 
-    left.SwapWith(right)
-    autonaApp.settle()
+    _swap(autonaApp)
 
     assert int(autonaApp.get(f"{left.path}.seed")) == 0
     assert autonaApp.get(f"{right.path}.seed") == 3
+    # The badges follow too. The copy typed the seed into the spinbox with
+    # the badge's update blocked, so the card that lost its seed kept
+    # showing it.
+    assert right.seedDisplay.text() == "Seed: 3"
+    assert left.seedDisplay.text() == ""
 
 
 # ── the boards the widgets actually live on ──────────────────────────────
@@ -593,7 +691,8 @@ def test_the_avatar_follows_a_player_swap(autonaApp):
     Before the fix both avatars were wiped instead, as a side effect of the
     same defaulting bug; with the parameter left alone they would stay on
     the widget and end up under the other player's name, which is worse.
-    The widget restores it explicitly (_swapRestoreTail).
+    The swap moves the slot's `online_avatar` with the rest of it
+    (AutonaActions.SwapTeams; the card copy had to restore it by hand).
     """
     left, right = _players(autonaApp)
 
@@ -601,8 +700,7 @@ def test_the_avatar_follows_a_player_swap(autonaApp):
     right.SetData({"gamerTag": "RIGHT"}, dontLoadFromDB=True)
     autonaApp.settle()
 
-    left.SwapWith(right)
-    autonaApp.settle()
+    _swap(autonaApp)
 
     assert autonaApp.get(f"{left.path}.online_avatar") is None
     assert autonaApp.get(f"{right.path}.online_avatar") == AVATAR
@@ -720,6 +818,32 @@ def test_the_state_combo_keeps_one_model_for_its_lifetime(autonaApp):
         f"the state combo is holding {len(held)} distinct models. A model it "
         "is handed is not reliably released, so setModel() may only be called "
         "once, when the combo is built.")
+
+
+def test_a_card_without_a_character_keeps_one_empty_skin_model(autonaApp):
+    """LoadSkinOptions handed the skin combo a fresh QStandardItemModel each
+    time a card lost its character. Since the swap is a state operation
+    (ADR-005 S2c), the card's render does that on every swap that brings it
+    a slot with no character -- so the empty model is made once per card and
+    handed back (agent-pitfalls #13: reuse rather than replace)."""
+    left, right = _players(autonaApp)
+    left.SetData({"gamerTag": "LEFT",
+                  "mains": {"harness_game": [["Mario", 0]]}},
+                 dontLoadFromDB=True)
+    right.SetData({"gamerTag": "RIGHT"}, dontLoadFromDB=True)
+    autonaApp.settle()
+    # Warm up: both cards have now been without a character once.
+    _swap(autonaApp)
+    _swap(autonaApp)
+    models, _ = _liveCounts()
+
+    for _ in range(6):
+        _swap(autonaApp)
+
+    assert _liveCounts()[0] == models
+    skins = right.character_elements[0][2]
+    assert autonaApp.get(f"{right.path}.name") == "RIGHT"
+    assert skins.model() is right._emptySkinModel
 
 
 def test_refilled_states_still_resolve(autonaApp):
