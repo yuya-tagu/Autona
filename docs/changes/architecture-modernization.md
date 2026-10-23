@@ -453,7 +453,7 @@ Tauri / Electron 移行 / core の別プロセス常駐（ヘッドレス起動�
   - 選択時の地域の publish（`_OnLocationChanged`）は、今も `_loadedStatesCountryCode` で解いている。S1d の残課題のうち、描画側だけが解消した
   - 描画は GUI スレッドで `StateManager.lock` を短時間取る（スロットの描画対象キーを 1 回で複製する間だけ）。その後で `dataLock` を取るので、`dataLock` → `lock` の既存の順序とは入れ子にならない。line edit の確定時の比較は `StateManager.Get` で 1 キー読むだけ
 
-#### S2b losers → mergedName を core へ（2026-10-23・PR 未作成）
+#### S2b losers → mergedName を core へ（2026-10-23・PR #223）
 
 LOSERS フラグと、そのチームの選手名に付く ` [L]`（`mergedName` / `mergedOnlyName`）を、フラグの書き手（core）が 1 保存サイクルで書くようにした。カードはフラグのコピーを持たない。
 
