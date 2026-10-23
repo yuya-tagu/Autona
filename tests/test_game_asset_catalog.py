@@ -27,7 +27,7 @@ import pytest
 
 from src.core.DictHelper import deep_clone
 from src.core.GameAssetCatalog import (
-    GameAssetCatalog, GameAssetSnapshot, _utf16_sorted)
+    GameAssetCatalog, GameAssetSnapshot, _qvariantmap_copy, _utf16_sorted)
 from src.core.StateManager import StateManager as SM
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "game_assets"
@@ -170,6 +170,10 @@ def test_a_load_matches_the_recording(catalog, label):
         assert _norm(actual) == payloads[name], name
         # Socket.IO keeps the order, so it is part of the contract.
         assert list(actual) == list(payloads[name]), name
+        # ...at every level (S1b): the bytes SocketioJson (json.dumps, in
+        # insertion order) sends. The recording's nested dicts are in
+        # QVariantMap order, having been read back out of the Qt models.
+        assert json.dumps(actual) == json.dumps(payloads[name]), name
 
     state = SM.Get(PREFIX)
     assert state == golden["state"]
@@ -199,6 +203,36 @@ def test_the_combo_order_is_qt_s_utf16_order():
     rows = [("ｚｅｌｄａ", 1), (None, 2), ("𝓖host", 3), ("Bowser", 4)]
     assert [r[1] for r in _utf16_sorted(rows)] == [4, 3, 1, 2]
     assert sorted(["ｚｅｌｄａ", "𝓖host"]) == ["ｚｅｌｄａ", "𝓖host"]
+
+
+def test_the_payload_key_order_is_qvariantmap_s():
+    """The Web payloads keep the nested key order a round trip through a
+    QStandardItem's UserRole (QVariantMap) gave them (S1b). Expected values
+    recorded from PySide6: keys in UTF-16 order at every level, lists kept,
+    and a dict with a non-str key is no QVariantMap, nor a tuple a
+    QVariantList -- they stay as they were, nested dicts included."""
+    value = {"ｚ": 1, "𝓖": 2, "B": {"b": 1, "a": 2},
+             "a": [{"y": 1, "x": 2}], "Ä": None, "10": 1.0, "2": True}
+    copied = _qvariantmap_copy(value)
+    assert json.dumps(copied) == json.dumps(
+        {"10": 1.0, "2": True, "B": {"a": 2, "b": 1}, "a": [{"x": 2, "y": 1}],
+         "Ä": None, "𝓖": 2, "ｚ": 1})
+    copied["B"]["a"] = -1
+    assert value["B"]["a"] == 2
+
+    notAMap = {"outer": {1: "int key", "s": {"b": 1, "a": 2}}}
+    assert json.dumps(_qvariantmap_copy(notAMap)) == json.dumps(notAMap)
+
+    # PySide6 hands a tuple back as the same tuple, inner dicts untouched,
+    # also inside a list (which it does convert).
+    tuples = {"b": ({"y": 1, "x": 2}, {"d": 1, "c": 2}),
+              "l": [({"y": 1, "x": 2},)], "a": 1}
+    copied = _qvariantmap_copy(tuples)
+    assert json.dumps(copied) == json.dumps(
+        {"a": 1, "b": [{"y": 1, "x": 2}, {"d": 1, "c": 2}],
+         "l": [[{"y": 1, "x": 2}]]})
+    copied["b"][0]["y"] = -1
+    assert tuples["b"][0]["y"] == 1
 
 
 # ── skip rules ──────────────────────────────────────────────────────────

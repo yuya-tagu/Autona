@@ -52,7 +52,6 @@ PROCESS_WIDE_SENDERS = (
 # connection can never outlive it:
 #
 # - Autona.py            -- Window, the QMainWindow itself.
-# - AutonaApiV1.py       -- a module-level bookkeeping object, no widget.
 # - AutonaThumbnailSettingsWidget.py
 #                        -- Window.thumbnailSetting, one instance created by
 #                           Window.__init__ and never replaced.
@@ -69,7 +68,6 @@ ALLOWED_LAMBDA_CONNECTIONS = {
     ("Autona.py",
      "AutonaTournamentDataProvider.instance.signals.tournament_changed"),
     ("Autona.py", "AutonaGameAssetManager.instance.signals.onLoad"),
-    ("AutonaApiV1.py", "AutonaGameAssetManager.instance.signals.onLoad"),
     ("AutonaThumbnailSettingsWidget.py",
      "AutonaGameAssetManager.instance.signals.onLoad"),
 }

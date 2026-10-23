@@ -76,7 +76,7 @@ WS 列は対応する Socket.IO イベントの有無。
 | 15 | `GET /games` | R | ✅ `games` | `get_games` | ゲーム一覧 |
 | 16 | `GET /current-game` | R | ✅ `current_game` | `get_current_game` | 現在ゲーム |
 | 17 | `GET /match-names` | R | ✅ `match_names` | `get_match_names` | match/phase 名候補 |
-| 18 | `GET /characters` | R | ✅ `characters` | `get_characters` | キャラ一覧（GUI スレッド） |
+| 18 | `GET /characters` | R | ✅ `characters` | `get_characters` | キャラ一覧（ゲームアセットカタログを直接読む。GUI スレッドを経由しない。ADR-005 S1b） |
 | 19 | `GET /variants` | R | ✅ `variants` | `get_variants` | バリアント一覧 |
 | 20 | `GET /controllers` | R | — | — | ~~コントローラ一覧~~（機能ごと削除済み） |
 | 21 | `GET /scoreboard<N>-swap-teams` | W | ✅ `swap_teams` | `swap_teams` | チーム左右入替 |

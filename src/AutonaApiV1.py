@@ -30,6 +30,7 @@ from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
 from .core import StateSchema as schema
 from .core import LayoutCatalog
+from .core.GameAssetCatalog import GameAssetCatalog
 # Import order mirrors the singleton init order (agent-pitfalls #2): the asset
 # manager must be importable before the tournament data provider. By the time
 # this module loads both singletons already exist (WebServerActions imported
@@ -299,15 +300,17 @@ _idem = _IdempotencyCache()
 class _HeavyOpGuard:
     """Rejects concurrent duplicate heavy operations with 409 CONFLICT.
 
-    The flag is held until a completion signal clears it (see
-    _connect_completion_signals) and auto-expires after ``ttl`` as a safety
-    net so a missed completion never sticks the flag forever. Completion is
-    authoritatively observed by clients via WS revision progress (spec §2.8).
+    The flag is held until the operation's own task clears it when it is
+    over, whichever way it went (the GUI-thread task for tournament /
+    bracket, the asset loader's ``done`` for the game), and auto-expires
+    after ``ttl`` as a safety net so a missed completion never sticks the
+    flag forever. Completion is authoritatively observed by clients via WS
+    revision progress (spec §2.8).
 
     ``ttl`` is a generous backstop, not the primary clear: a full game asset
     reload can take ~60-70s, so it must comfortably exceed the slowest heavy
-    op or the flag would expire mid-operation and the completion signal
-    (onLoad, for the game) would never be the effective clear.
+    op or the flag would expire mid-operation and the completion (the
+    loader's ``done``, for the game) would never be the effective clear.
     """
 
     def __init__(self, ttl=120.0):
@@ -334,28 +337,13 @@ _heavy = _HeavyOpGuard()
 
 # ── Initialization (called from AutonaWebServer.__init__) ────────────────
 def init_api_v1(actions):
-    """Bind the live WebServerActions and wire completion signals.
+    """Bind the live WebServerActions.
 
-    Runs on the GUI thread (WebServer is constructed there), so connecting Qt
-    signals here is safe.
+    Every heavy op releases its in-progress flag itself (see
+    _HeavyOpGuard), so there are no completion signals to wire here.
     """
     global _actions
     _actions = actions
-    _connect_completion_signals()
-
-
-def _connect_completion_signals():
-    # Clear the game flag when the async asset load finishes. The signal also
-    # fires for UI-triggered loads; end() is a harmless no-op when the flag
-    # isn't set, and loads are serialized upstream so this can't clear a
-    # different in-flight API op. (tournament / bracket release their flags
-    # themselves, at the end of the GUI-thread task that runs them.)
-    try:
-        AutonaGameAssetManager.instance.signals.onLoad.connect(
-            lambda: _heavy.end("game")
-        )
-    except Exception:
-        logger.error(traceback.format_exc())
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -911,26 +899,42 @@ def game_set():
     if not codename or not isinstance(codename, str):
         raise ApiError(INVALID_ARGUMENT, "codename is required", 400)
     mods_active = _truthy(body.get("modsActive", False))
-    games = AutonaGameAssetManager.instance.games
-    if codename not in games:
+    if codename not in GameAssetCatalog.instance.GameCodenames():
         raise ApiError(NOT_FOUND, f"unknown game codename: {codename}", 404)
-    index = list(games.keys()).index(codename)  # 0-based; LoadGameAssets is 1-based
     if not _heavy.try_begin("game"):
         raise ApiError(CONFLICT, "game load already in progress", 409)
+
+    def _release():
+        _heavy.end("game")
+
+    def _run():
+        # Loaded by codename, not by its position in the scan: the position
+        # was read here and the load ran later, so a rescan in between could
+        # load another game. `done` releases the flag once the attempt is
+        # over whichever way it went -- loaded, skipped by the catalog (the
+        # codename was dropped by a rescan meanwhile) or failed. It used to
+        # wait for onLoad, which only a load that happened emits, so the
+        # other two held it for the guard's full TTL (and a UI-started load
+        # finishing meanwhile released it early).
+        try:
+            AutonaGameAssetManager.instance.LoadGameByCodename(
+                codename,
+                async_mode=True,
+                mods_active=mods_active,
+                mods_reload_mode=True,
+                done=_release,
+            )
+        except Exception:
+            logger.error(traceback.format_exc())
+            _release()
+
     try:
         # The sync set_game action blocks on a synchronous asset reload
         # (@gui_thread_sync + async_mode=False). For 202 we start the async
         # load path instead. The worker QThread must be created on the GUI
         # thread (its parent lives there), so dispatch fire-and-forget via the
-        # GUI executor (spec §14.3). Completion clears the flag via onLoad.
-        AutonaQtHelper.gui_executor(
-            lambda: AutonaGameAssetManager.instance.LoadGameAssets(
-                index + 1,
-                async_mode=True,
-                mods_active=mods_active,
-                mods_reload_mode=True,
-            )
-        )
+        # GUI executor (spec §14.3).
+        AutonaQtHelper.gui_executor(_run)
     except Exception:
         _heavy.end("game")
         raise

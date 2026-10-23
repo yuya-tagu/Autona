@@ -102,7 +102,7 @@
 ### 2.8 重い操作の非同期受付（202・D7）
 - **重い操作**（`POST /tournament`・`POST /game`・`POST /bracket:refresh`）は**同期完了を待たず
   `202 Accepted` を返す（MUST）**。理由: 委譲先が同期ブロックしうる（例: `set_game` は
-  `@gui_thread_sync` ＋ `LoadGameAssets(async_mode=False)` で**アセット再ロード完了までブロック**、
+  `@gui_thread_sync` ＋ `LoadGameByCodename(async_mode=False)` で**アセット再ロード完了までブロック**、
   [AutonaWebServerActions.py:202](../../src/AutonaWebServerActions.py)）。同期で返すと HTTP がタイムアウトする。
 - **完了確認はクライアントが WS 購読（§4）で行う**（`program_state_update` の `revision` 進行を観測）。
   202 レスポンスは受付のみを示し、`revision` は未確定（省略可）。
@@ -515,7 +515,7 @@ HTTP/1.1 409 Conflict
 | `GET /health` | （新規） | — | `out` 未生成時の getmtime → ファイル無ガード | 内部で握り潰し |
 | `GET /scoreboards/{n}` | `get_scoreboard` | ✕ | n 不正→`GetScoreboard()`=None→`None.scoreboardNumber` で **AttributeError** | `INVALID_ARGUMENT`（n 事前検証） |
 | `GET /scoreboards/{n}`(swap) | `get_swap` | ✕ | 同上（`None.teamsSwapped`） | `INVALID_ARGUMENT` |
-| `GET /games`他マスタ | `get_games`等 | 一部✓ | アセット未ロードで空。致命例外は低 | — |
+| `GET /games`他マスタ | `get_games`等 | ✕ | アセット未ロードで空。致命例外は低。ADR-005 S1b からゲームアセットカタログを直接読む（GUI スレッドを経由しない） | — |
 | `GET /sets` | `get_sets` | ✕ | provider null は **✓ガード済→[]**。ただし `provider.GetMatches()` は**同期 Start.gg 呼び**で例外/タイムアウト | `UPSTREAM_TIMEOUT`（要 try/except） |
 | `GET /sets/{id}` | `get_match` | ✕ | **provider null 未チェック→AttributeError**／`int(setId)` 失敗→ValueError／同期 Start.gg 呼び | `NOT_READY`/`INVALID_ARGUMENT`/`UPSTREAM_TIMEOUT` |
 | `POST .../score:adjust` | `team_scoreup/down` | ✕ | n/t 不正→`GetScoreboard()`=None→**AttributeError** | `INVALID_ARGUMENT` |
@@ -550,6 +550,9 @@ HTTP/1.1 409 Conflict
   **`@gui_thread_sync` を介さずに**起動する必要がある（例: `gui_thread_async` 系で投げっぱなしにする、
   または `LoadGameAssets(..., async_mode=True)` 相当の非同期経路を使う）。
   実装時に既存の非同期ロード経路（`AutonaGameAssetManager` の onLoad シグナル）を辿って確定する。
+  → 実装済み（ADR-005 S1b で改訂）: `LoadGameByCodename(codename, async_mode=True, done=...)` を GUI executor で起動し、
+  フラグはロード試行の終了時（成功・スキップ・例外のいずれでも）に呼ばれる `done` で解放する。onLoad は実際に
+  ロードされたときしか来ないため、解放には使わない。
 - 実行中フラグは操作キー（`tournament`/`game`/`bracket`）ごとに持ち、`threading.Lock` で保護（§2.10）。
 
 ### 14.4 CORS 判断

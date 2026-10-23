@@ -4,13 +4,23 @@ These tests capture the current behavior of ParseMatchDataNewApi,
 ParseMatchDataOldApi, and ProcessEntrantData so that refactoring
 can be verified against known-good outputs.
 
-Strategy: the provider's own dependencies (game assets, player DB, workers,
-qtpy) are stubbed via sys.modules while the module is exec'd, so the parse
-functions can be exercised as pure data transforms with deterministic
-character/stage lookups. The stubs are removed again immediately afterwards
--- they are an isolation device for this module only and must never be
-visible to another test module (src.* imports normally these days).
+Strategy: the provider's own dependencies (player DB, workers, qtpy, ...)
+are stubbed via sys.modules while the module is exec'd, so the parse
+functions can be exercised as pure data transforms. The stubs are removed
+again immediately afterwards -- they are an isolation device for this module
+only and must never be visible to another test module (src.* imports
+normally these days).
+
+Character and stage lookups are NOT stubbed: since ADR-005 S1b the provider
+resolves start.gg ids through the Qt-free core GameAssetCatalog, and these
+tests hand it a real one with the synthetic game of
+tests/fixtures/game_assets (the S1a golden fixture) loaded. Its start.gg
+tables: characters 1 Mario / 2 Luigi / 3 Bowser (4 Ryu exists only in the
+other game, 5 in no pack at all), stages 311 Battlefield / 328 Final
+Destination (codename "fd") / 484 Smashville.
 """
+import os
+import shutil
 import sys
 import types
 from collections import Counter
@@ -20,11 +30,15 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# 1. The real deep_get (no Qt dependency) backs the stubbed dict helper
+# 1. The real deep_get (no Qt dependency) backs the stubbed dict helper, and
+#    the real (Qt-free) game asset catalog is what the provider resolves
+#    start.gg ids against
 # ---------------------------------------------------------------------------
 from src.core.DictHelper import deep_get
+from src.core.GameAssetCatalog import GameAssetCatalog, GameAssetSnapshot
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+GAME_ASSETS = PROJECT_ROOT / "tests" / "fixtures" / "game_assets"
 
 
 # ---------------------------------------------------------------------------
@@ -90,35 +104,6 @@ class _MockStatusManager:
         pass
 
 
-# --- AutonaGameAssetManager ---
-class _MockGameAssetManagerInstance:
-    selectedGame = {"codename": "ssbu"}
-
-    @staticmethod
-    def GetCharacterFromStartGGId(char_id):
-        char_map = {
-            1: ("mario", {"name": "Mario", "codename": "mario"}),
-            2: ("fox", {"name": "Fox", "codename": "fox"}),
-            3: ("pikachu", {"name": "Pikachu", "codename": "pikachu"}),
-        }
-        return char_map.get(char_id)
-
-    @staticmethod
-    def GetStageFromStartGGId(stage_id):
-        stage_map = {
-            100: (0, {"codename": "battlefield", "name": "Battlefield"}),
-            101: (1, {"codename": "final_destination", "name": "Final Destination"}),
-            102: (2, {"codename": "smashville", "name": "Smashville"}),
-            103: (3, {"codename": "pokemon_stadium2", "name": "Pokemon Stadium 2"}),
-            104: (4, {"codename": "kalos", "name": "Kalos"}),
-        }
-        return stage_map.get(stage_id)
-
-
-class _MockAutonaGameAssetManager:
-    instance = _MockGameAssetManagerInstance()
-
-
 # --- Minimal QObject mock ---
 class _MockQObject:
     def __init__(self, *args, **kwargs):
@@ -155,6 +140,12 @@ def _setup_mock_modules():
             "src.core.DictHelper",
             {"deep_get": deep_get},
         ),
+        # The real class: the tests below set its `instance` to a catalog
+        # with the fixture game loaded.
+        "src.core.GameAssetCatalog": _make_mock_module(
+            "src.core.GameAssetCatalog",
+            {"GameAssetCatalog": GameAssetCatalog},
+        ),
         "src.Helpers.AutonaDirHelper": _make_mock_module(
             "src.Helpers.AutonaDirHelper",
             {"AutonaResolve": lambda x: x},
@@ -170,10 +161,6 @@ def _setup_mock_modules():
         "src.Helpers.AutonaStatusManager": _make_mock_module(
             "src.Helpers.AutonaStatusManager",
             {"AutonaStatusManager": _MockStatusManager},
-        ),
-        "src.AutonaGameAssetManager": _make_mock_module(
-            "src.AutonaGameAssetManager",
-            {"AutonaGameAssetManager": _MockAutonaGameAssetManager},
         ),
         "src.AutonaPlayerDB": _make_mock_module(
             "src.AutonaPlayerDB",
@@ -260,6 +247,53 @@ def _make_provider(**kwargs):
     p.player_seeds = kwargs.get("player_seeds", {})
     p.numEntrants = kwargs.get("numEntrants", 0)
     return p
+
+
+# ---------------------------------------------------------------------------
+# 5. The game asset catalog the provider resolves start.gg ids against
+# ---------------------------------------------------------------------------
+@pytest.fixture(scope="module")
+def _fixtureCatalog(tmp_path_factory):
+    """A real GameAssetCatalog with the fixture game "tgame" loaded.
+
+    Built through the production writers (scan, start.gg table, load) under
+    the default locale, in a throwaway CWD: they read ./user_data and write
+    ./out/css, and the load publishes `game` into the global StateManager,
+    which is put back afterwards. Everything the provider asks it later is
+    in memory, so the tests themselves need neither.
+    """
+    from src.core.DictHelper import deep_clone
+    from src.core.StateManager import StateManager as SM
+
+    work = tmp_path_factory.mktemp("startgg_catalog")
+    (work / "out").mkdir()
+    shutil.copytree(GAME_ASSETS / "games", work / "user_data" / "games")
+    shutil.copy(GAME_ASSETS / "characters.json",
+                work / "user_data" / "characters.json")
+    previousDir = os.getcwd()
+    with SM.lock:
+        saved = (deep_clone(SM.state), deep_clone(SM.lastSavedState),
+                 SM.revision, list(SM.changedKeys))
+    os.chdir(work)
+    try:
+        catalog = GameAssetCatalog()
+        catalog.ScanGames()
+        catalog.ReloadStartGGCharacters()
+        assert catalog.SelectGame("tgame") is not None
+    finally:
+        if SM._export_thread is not None:
+            SM._export_thread.join()
+        with SM.lock:
+            SM.state, SM.lastSavedState, SM.revision, SM.changedKeys = saved
+        os.chdir(previousDir)
+    return catalog
+
+
+@pytest.fixture(autouse=True)
+def _catalog(_fixtureCatalog, monkeypatch):
+    """Every test resolves against the fixture catalog (put back after)."""
+    monkeypatch.setattr(GameAssetCatalog, "instance", _fixtureCatalog)
+    return _fixtureCatalog
 
 
 # ===========================================================================
@@ -458,7 +492,7 @@ def _old_api_response_with_char_selection():
             "metadata": {
                 "charSelections": {
                     "5001": [1],  # Mario
-                    "5002": [2],  # Fox
+                    "5002": [2],  # Luigi
                 }
             },
         }
@@ -480,7 +514,7 @@ def _old_api_response_with_report_selections():
                         {
                             "selectionType": "character",
                             "entrantId": 5001,
-                            "selectionValue": 3,  # Pikachu
+                            "selectionValue": 3,  # Bowser
                         },
                         {
                             "selectionType": "character",
@@ -512,12 +546,12 @@ def _old_api_response_with_stage_strike():
             "action": "setup_strike",
             "active": False,
             "metadata": {
-                "strikeStages": [100, 101, 102, 103, 104],
+                "strikeStages": [311, 328, 484],
                 "strikeList": {
-                    "100": 5001,  # P1 strikes Battlefield
-                    "103": 5002,  # P2 strikes Pokemon Stadium 2
+                    "311": 5001,  # P1 strikes Battlefield
+                    "328": 5002,  # P2 strikes Final Destination
                 },
-                "stageSelection": 102,  # Smashville selected
+                "stageSelection": 484,  # Smashville selected
                 "stageWins": {},
                 "useDSR": False,
                 "useMDSR": False,
@@ -681,7 +715,7 @@ class TestParseMatchDataNewApi:
         result = provider.ParseMatchDataNewApi(data)
         p1 = result["entrants"][0][0]
         assert p1.get("startggMain") == 1  # Mario (most common)
-        assert p1.get("mains") == "mario"
+        assert p1.get("mains") == "Mario"
 
     def test_player_seeds_from_provider(self):
         """player_seeds dict is checked, but p{N}_seed in setData takes priority."""
@@ -969,9 +1003,9 @@ class TestParseMatchDataOldApi:
         )
         entrants = result["entrants"]
         # P1 picked Mario (id=1)
-        assert entrants[0][0]["mains"] == ["mario", 0]
-        # P2 picked Fox (id=2)
-        assert entrants[1][0]["mains"] == ["fox", 0]
+        assert entrants[0][0]["mains"] == ["Mario", 0]
+        # P2 picked Luigi (id=2)
+        assert entrants[1][0]["mains"] == ["Luigi", 0]
 
     def test_character_selection_from_report(self):
         """Characters from report task selections."""
@@ -980,9 +1014,9 @@ class TestParseMatchDataOldApi:
             _old_api_response_with_report_selections()
         )
         entrants = result["entrants"]
-        # P1: Pikachu (id=3), P2: Mario (id=1)
-        assert entrants[0][0]["mains"] == ["pikachu", 0]
-        assert entrants[1][0]["mains"] == ["mario", 0]
+        # P1: Bowser (id=3), P2: Mario (id=1)
+        assert entrants[0][0]["mains"] == ["Bowser", 0]
+        assert entrants[1][0]["mains"] == ["Mario", 0]
 
     def test_stage_strike_data(self):
         """Stage strike state from setup_strike task."""
@@ -992,9 +1026,9 @@ class TestParseMatchDataOldApi:
         )
         ss = result["stage_strike"]
         assert ss["selectedStage"] == "smashville"
-        # P1 struck Battlefield, P2 struck Pokemon Stadium 2
+        # P1 struck Battlefield, P2 struck Final Destination
         assert "battlefield" in ss["strikedBy"][0]
-        assert "pokemon_stadium2" in ss["strikedBy"][1]
+        assert "fd" in ss["strikedBy"][1]
         assert ss["currGame"] == 5  # 3 + 2
 
     def test_stage_strike_neutral_stages(self):
@@ -1006,7 +1040,7 @@ class TestParseMatchDataOldApi:
         rs = result["ruleset"]
         codenames = [s["codename"] for s in rs["neutralStages"]]
         assert "battlefield" in codenames
-        assert "final_destination" in codenames
+        assert "fd" in codenames
         assert "smashville" in codenames
         assert rs["useDSR"] is False
         assert rs["useMDSR"] is False
@@ -1014,13 +1048,13 @@ class TestParseMatchDataOldApi:
     def test_empty_char_fallback_to_characterIds(self):
         """When no selection data, fall back to entrantXCharacterIds."""
         resp = _old_api_response_basic()
-        resp["entities"]["sets"]["entrant1CharacterIds"] = [2]  # Fox
-        resp["entities"]["sets"]["entrant2CharacterIds"] = [3]  # Pikachu
+        resp["entities"]["sets"]["entrant1CharacterIds"] = [2]  # Luigi
+        resp["entities"]["sets"]["entrant2CharacterIds"] = [3]  # Bowser
         provider = _make_provider()
         result = provider.ParseMatchDataOldApi(resp)
         entrants = result["entrants"]
-        assert entrants[0][0]["mains"] == ["fox", 0]
-        assert entrants[1][0]["mains"] == ["pikachu", 0]
+        assert entrants[0][0]["mains"] == ["Luigi", 0]
+        assert entrants[1][0]["mains"] == ["Bowser", 0]
 
 
 # ===========================================================================
@@ -1116,7 +1150,7 @@ class TestProcessEntrantData:
                     {
                         "selections": [
                             {
-                                "selectionValue": 2,  # Fox
+                                "selectionValue": 2,  # Luigi
                                 "entrant": {
                                     "participants": [
                                         {"player": {"id": 1001}}
@@ -1130,10 +1164,10 @@ class TestProcessEntrantData:
         ]
         result = StartGGDataProvider.ProcessEntrantData(entrant, set_data)
         assert result.get("startggMains") is not None
-        # Most common character = Fox (id=2)
+        # Most common character = Luigi (id=2)
         assert result["startggMains"][0][0] == 2
-        # Mains should be resolved via GameAssetManager
-        assert result["mains"] == {"ssbu": [["fox"]]}
+        # Resolved through the game asset catalog, keyed by the loaded game
+        assert result["mains"] == {"tgame": [["Luigi"]]}
 
 
 # ===========================================================================
@@ -1318,15 +1352,15 @@ class TestGetMatchesPagination:
 # Tests: unknown character ids in the legacy half (LIVE-BUG-3)
 # ===========================================================================
 
-# The mocked asset manager at the top of this module maps ids 1..3, so any
-# other id is an unknown character by construction.
+# Neither the fixture's start.gg table nor any installed pack knows this id,
+# so it is an unknown character by construction.
 _UNKNOWN_CHARACTER_ID = 9999
 
 
 class TestOldApiUnknownCharacterIds:
     """A character the installed assets do not know must cost only itself.
 
-    GetCharacterFromStartGGId returns None for any start.gg character id no
+    CharacterFromStartGGId returns None for any start.gg character id no
     installed game pack maps -- no pack installed at all, a modded roster, a
     character start.gg added since the pack was built.
     _build_entrants_old_api subscripted that None with [0], so one
@@ -1341,7 +1375,7 @@ class TestOldApiUnknownCharacterIds:
         resp = _old_api_response_with_char_selection()
         resp["entities"]["setTask"][0]["metadata"]["charSelections"] = {
             "5001": [_UNKNOWN_CHARACTER_ID],
-            "5002": [2],  # Fox
+            "5002": [2],  # Luigi
         }
         provider = _make_provider()
 
@@ -1355,7 +1389,7 @@ class TestOldApiUnknownCharacterIds:
         assert result["team2losers"] is False
         assert "currPlayer" in result
         # ...and the entrant that *was* recognised still has its character.
-        assert result["entrants"][1][0]["mains"] == ["fox", 0]
+        assert result["entrants"][1][0]["mains"] == ["Luigi", 0]
 
     def test_the_unknown_character_is_skipped_not_faked(self):
         resp = _old_api_response_with_char_selection()
@@ -1374,7 +1408,7 @@ class TestOldApiUnknownCharacterIds:
     def test_a_known_and_an_unknown_selection_for_one_entrant(self):
         resp = _old_api_response_with_char_selection()
         resp["entities"]["setTask"][0]["metadata"]["charSelections"] = {
-            "5001": [1, _UNKNOWN_CHARACTER_ID, 3],  # Mario, ???, Pikachu
+            "5001": [1, _UNKNOWN_CHARACTER_ID, 3],  # Mario, ???, Bowser
             "5002": [2],
         }
         provider = _make_provider()
@@ -1382,7 +1416,7 @@ class TestOldApiUnknownCharacterIds:
         result = provider.ParseMatchDataOldApi(resp)
 
         assert [e["mains"] for e in result["entrants"][0]] == [
-            ["mario", 0], ["pikachu", 0]]
+            ["Mario", 0], ["Bowser", 0]]
 
     def test_an_unknown_id_in_the_characterIds_fallback(self):
         """The same guard on the fallback path, which had a bare except.
@@ -1394,11 +1428,124 @@ class TestOldApiUnknownCharacterIds:
         resp = _old_api_response_basic()
         resp["entities"]["sets"]["entrant1CharacterIds"] = [
             _UNKNOWN_CHARACTER_ID]
-        resp["entities"]["sets"]["entrant2CharacterIds"] = [3]  # Pikachu
+        resp["entities"]["sets"]["entrant2CharacterIds"] = [3]  # Bowser
         provider = _make_provider()
 
         result = provider.ParseMatchDataOldApi(resp)
 
         assert result["entrants"][0] == []
-        assert result["entrants"][1][0]["mains"] == ["pikachu", 0]
+        assert result["entrants"][1][0]["mains"] == ["Bowser", 0]
         assert result["bestOf"] == 5
+
+
+# Not a stage of the fixture game.
+_UNKNOWN_STAGE_ID = 9999
+
+
+class TestOldApiUnknownStageIds:
+    """The same guard for the stages an entrant already won on.
+
+    _scan_stage_strike_tasks subscripted StageFromStartGGId(...) with [1]
+    for every stageWins id, so one stage the loaded game does not know took
+    the legacy half down exactly as an unknown character did.
+    """
+
+    def test_an_unknown_stage_win_keeps_the_rest_of_the_set(self):
+        resp = _old_api_response_with_stage_strike()
+        resp["entities"]["setTask"][1]["metadata"]["stageWins"] = {
+            "5001": [311, _UNKNOWN_STAGE_ID],  # Battlefield, ???
+            "5002": [_UNKNOWN_STAGE_ID],
+        }
+        provider = _make_provider()
+
+        result = provider.ParseMatchDataOldApi(resp)
+
+        assert result["bestOf"] == 5
+        assert result["team1losers"] is False
+        assert "currPlayer" in result
+        ss = result["stage_strike"]
+        # Skipped, not faked: the known win stays, the unknown ones go.
+        assert ss["stagesWon"] == [["battlefield"], []]
+        assert ss["selectedStage"] == "smashville"
+        assert ss["strikedBy"] == [["battlefield"], ["fd"]]
+        assert [s["codename"] for s in result["ruleset"]["neutralStages"]] \
+            == ["battlefield", "fd", "smashville"]
+
+
+# ===========================================================================
+# Tests: one parse, one game asset snapshot (ADR-005 S1b)
+# ===========================================================================
+
+@pytest.fixture
+def loadLandsMidParse(_catalog, monkeypatch):
+    """A game load lands right after the first start.gg id lookup.
+
+    Both resolvers are wrapped so that every lookup, once answered, replaces
+    the catalog's current snapshot with an empty one -- what a load of
+    another game does to a parse running on a start.gg worker thread. A
+    lookup that went back to Current() instead of the snapshot its parse
+    took would come back None from then on.
+    """
+    for name in ("CharacterFromStartGGId", "StageFromStartGGId"):
+        real = getattr(GameAssetCatalog, name)
+
+        def swapping(self, smashgg_id, snapshot=None, _real=real):
+            result = _real(self, smashgg_id, snapshot)
+            self._current = GameAssetSnapshot()
+            return result
+
+        monkeypatch.setattr(GameAssetCatalog, name, swapping)
+    # Registers the loaded snapshot for restoring at teardown: the fixture
+    # catalog is shared by the whole module.
+    monkeypatch.setattr(_catalog, "_current", _catalog.Current())
+
+
+class TestOneSnapshotPerParse:
+
+    def test_the_old_api_parse(self, loadLandsMidParse):
+        resp = _old_api_response_with_stage_strike()
+        resp["entities"]["setTask"][1]["metadata"]["charSelections"] = {
+            "5001": [1],  # Mario
+            "5002": [2],  # Luigi
+        }
+
+        result = _make_provider().ParseMatchDataOldApi(resp)
+
+        ss = result["stage_strike"]
+        assert ss["selectedStage"] == "smashville"
+        assert ss["strikedBy"] == [["battlefield"], ["fd"]]
+        assert [s["codename"] for s in result["ruleset"]["neutralStages"]] \
+            == ["battlefield", "fd", "smashville"]
+        assert [e["mains"] for team in result["entrants"] for e in team] \
+            == [["Mario", 0], ["Luigi", 0]]
+
+    def test_the_new_api_parse(self, loadLandsMidParse):
+        data = _new_api_set_with_character_selections()
+        data["slots"][1]["entrant"]["participants"][0]["player"]["sets"] = {
+            "nodes": [{"games": [{"selections": [{
+                "selectionValue": 2,  # Luigi
+                "entrant": {"participants": [{"player": {"id": 1002}}]},
+            }]}]}]}
+
+        result = _make_provider().ParseMatchDataNewApi(data)
+
+        assert [team[0].get("mains") for team in result["entrants"]] \
+            == ["Mario", "Luigi"]
+
+    def test_an_entrant(self, loadLandsMidParse):
+        entrant = {
+            "player": {"id": 1001, "prefix": None, "gamerTag": "P1",
+                       "name": None},
+            "user": {"id": 2001, "authorizations": [], "images": []},
+        }
+        selections = [
+            {"selectionValue": value,
+             "entrant": {"participants": [{"player": {"id": 1001}}]}}
+            for value in (1, 1, 3)]  # Mario twice, Bowser once
+        setData = [{"games": [{"selections": selections}]}]
+
+        result = StartGGDataProvider.ProcessEntrantData(entrant, setData)
+
+        # The game the mains are keyed under and the mains themselves come
+        # from the same snapshot.
+        assert result["mains"] == {"tgame": [["Mario"], ["Bowser"]]}

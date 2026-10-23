@@ -44,6 +44,10 @@ from unittest.mock import patch
 import pytest
 
 from src.core.SettingsManager import SettingsManager
+# goldenGames / onLoadCount are fixtures: the S1a fixture games installed
+# into the harness, and the count of onLoad emissions.
+from tests.test_game_asset_manager_models import (
+    GOLDEN, SCENARIOS, _load, _waitForLoader, goldenGames, onLoadCount)
 from tests.test_scoreboard_operations import (
     _restoredDisplayOption, _setPlayerName)
 
@@ -532,6 +536,139 @@ def test_the_web_ui_calls_leave_the_same_state_on_v1(
         prepare=prepare,
         changes=changes,
     )
+
+
+# ── GET /games, /characters, /variants (ADR-005 S1b) ─────────────────────
+# Read from the game asset catalog since S1b instead of the Qt models (and
+# no longer on the GUI thread). Both routes must still answer what the
+# pre-S1a recording holds (tests/fixtures/game_assets/golden.json).
+
+@pytest.mark.parametrize("label", sorted(SCENARIOS))
+def test_the_game_asset_reads_return_the_recorded_payloads(
+        client, goldenGames, label):
+    codename, modsActive, reload = SCENARIOS[label]
+    _load(goldenGames, codename, modsActive, reload)
+    payloads = GOLDEN["scenarios"][label]["payloads"]
+
+    for name in ("games", "characters", "variants"):
+        legacy = client.get(f"/{name}")
+        v1 = client.get(f"/api/v1/{name}")
+
+        assert legacy.status_code == v1.status_code == 200, name
+        assert v1.get_json()["ok"] is True, name
+        assert v1.get_json()["data"] == payloads[name], name
+        assert legacy.get_json() == payloads[name], name
+
+
+# ── POST /game (legacy POST /update-game) ────────────────────────────────
+# Both load the game by codename. They used to look its position in the
+# scan up and load by position, which the load re-read later, so a rescan
+# in between loaded another game. And the v1 in-progress flag waited for
+# onLoad, which a load that did not happen never emits.
+
+@pytest.fixture
+def gameFlag():
+    """The v1 "game" in-progress flag, released whatever the test did."""
+    from src import AutonaApiV1
+
+    yield AutonaApiV1._heavy
+    AutonaApiV1._heavy.end("game")
+
+
+def _aGameIsAddedAfterTheFirstRead(m):
+    """A rescan lands right after the request first reads the scan: every
+    later read has one more game, in front."""
+    from src.core.GameAssetCatalog import GameAssetCatalog
+
+    real = GameAssetCatalog.GameCodenames
+    reads = []
+
+    def codenames(self):
+        reads.append(1)
+        names = real(self)
+        return names if len(reads) == 1 else ["aaa_added"] + names
+
+    m.setattr(GameAssetCatalog, "GameCodenames", codenames)
+
+
+def test_game_set_loads_the_requested_game_despite_a_rescan(
+        client, goldenGames, autonaApp, gameFlag, monkeypatch):
+    _load(goldenGames, "tgame")
+
+    with monkeypatch.context() as m:
+        _aGameIsAddedAfterTheFirstRead(m)
+        response = client.post("/api/v1/game", json={"codename": "game2"})
+        assert response.status_code == 202, response.get_data(as_text=True)
+        _waitForLoader(goldenGames)
+    autonaApp.settle()
+
+    assert autonaApp.get("game.codename") == "game2"
+    assert not gameFlag._inflight
+
+
+def test_update_game_loads_the_requested_game_despite_a_rescan(
+        client, goldenGames, autonaApp, monkeypatch):
+    _load(goldenGames, "tgame")
+
+    with monkeypatch.context() as m:
+        _aGameIsAddedAfterTheFirstRead(m)
+        response = client.post("/update-game", json={"codename": "game2"})
+    autonaApp.settle()
+
+    assert response.get_data(as_text=True) == "OK"
+    assert autonaApp.get("game.codename") == "game2"
+
+
+def test_an_unknown_game_is_still_rejected(client, goldenGames, gameFlag):
+    _assertRejected(
+        client.post("/api/v1/game", json={"codename": "nope"}),
+        "NOT_FOUND", 404)
+    assert not gameFlag._inflight
+    response = client.post("/update-game", json={"codename": "nope"})
+    assert response.get_data(as_text=True) == "Could not find game nope"
+
+
+@pytest.mark.parametrize("how", ["skipped", "failed"])
+def test_a_game_load_that_does_not_happen_releases_the_flag(
+        client, goldenGames, autonaApp, gameFlag, onLoadCount, monkeypatch,
+        how):
+    """No onLoad, yet no 409 for the guard's TTL either.
+
+    skipped: the codename passed the request's check, then a rescan dropped
+    it, so the catalog skips the load. failed: the load raised.
+    """
+    _load(goldenGames, "tgame")
+    onLoadCount.clear()
+
+    with monkeypatch.context() as m:
+        if how == "skipped":
+            from src.core.GameAssetCatalog import GameAssetCatalog
+
+            real = GameAssetCatalog.GameCodenames
+            m.setattr(GameAssetCatalog, "GameCodenames",
+                      lambda self: real(self) + ["dropped"])
+            codename = "dropped"
+        else:
+            def broken(*args, **kwargs):
+                raise RuntimeError("the load failed")
+
+            m.setattr(goldenGames, "_Load", broken)
+            codename = "game2"
+        response = client.post("/api/v1/game", json={"codename": codename})
+        assert response.status_code == 202, response.get_data(as_text=True)
+        _waitForLoader(goldenGames)
+
+    assert onLoadCount == []
+    assert not gameFlag._inflight
+    assert autonaApp.get("game.codename") == "tgame"
+
+    # The next request is accepted, not answered 409.
+    response = client.post("/api/v1/game", json={"codename": "game2"})
+    assert response.status_code == 202, response.get_data(as_text=True)
+    _waitForLoader(goldenGames)
+    autonaApp.settle()
+    assert autonaApp.get("game.codename") == "game2"
+    assert not gameFlag._inflight
 
 
 # ── GET /countries/{code}/states (legacy GET /states?countryCode=) ───────
