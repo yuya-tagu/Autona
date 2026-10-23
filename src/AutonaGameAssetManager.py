@@ -206,8 +206,19 @@ class AutonaGameAssetManager(QObject):
                                 mods_active=mods_active,
                                 mods_reload_mode=mods_reload_mode)
 
-    def LoadGameByCodename(self, codename, async_mode=True, mods_active=False, mods_reload_mode=False):
+    def LoadGameByCodename(self, codename, async_mode=True, mods_active=False, mods_reload_mode=False, done=None):
+        """Load `codename`, on the loader thread unless `async_mode` is off.
+
+        `done()`, if given, is called once the attempt is over however it
+        went -- loaded, skipped by the catalog (an unknown codename, e.g. one
+        a rescan dropped meanwhile; the same game without reload) or failed
+        -- on the loader thread for an async load. onLoad fires only for a
+        load that happened, so whoever holds something until "the load is
+        over" (the /api/v1 in-progress flag) releases it here.
+        """
         if not codename:
+            if done is not None:
+                done()
             return
 
         class AssetsLoaderThread(QThread):
@@ -217,6 +228,7 @@ class AutonaGameAssetManager(QObject):
                 self.lock = None
                 self.mods_active = False
                 self.mods_reload_mode = False
+                self.done = None
 
             def run(self):
                 from .Helpers.AutonaStatusManager import AutonaStatusManager
@@ -235,9 +247,13 @@ class AutonaGameAssetManager(QObject):
                 except Exception:
                     logger.error(traceback.format_exc())
                 finally:
-                    manager.threadpool.waitForDone()
-                    self.lock.unlock()
-                    AutonaStatusManager.pop(status.get("token"))
+                    try:
+                        manager.threadpool.waitForDone()
+                        self.lock.unlock()
+                        AutonaStatusManager.pop(status.get("token"))
+                    finally:
+                        if self.done is not None:
+                            self.done()
 
         if async_mode:
             self.assetsLoaderThread = AssetsLoaderThread(self)
@@ -245,6 +261,7 @@ class AutonaGameAssetManager(QObject):
             self.assetsLoaderThread.lock = self.assetsLoaderLock
             self.assetsLoaderThread.mods_active = mods_active
             self.assetsLoaderThread.mods_reload_mode = mods_reload_mode
+            self.assetsLoaderThread.done = done
             self.assetsLoaderThread.start(QThread.Priority.HighestPriority)
         else:
             try:
@@ -253,6 +270,9 @@ class AutonaGameAssetManager(QObject):
                            lambda fn: fn())
             except Exception:
                 logger.error(traceback.format_exc())
+            finally:
+                if done is not None:
+                    done()
 
     def _Load(self, codename, mods_active, mods_reload_mode, run_models,
               progress=None):
@@ -731,9 +751,3 @@ class AutonaGameAssetManager(QObject):
 
     def GetCharacterAssets(self, characterCodename: str, skin: int, assetpack: str = None):
         return self.catalog.CharacterAssets(characterCodename, skin, assetpack)
-
-    def GetCharacterFromStartGGId(self, smashgg_id: int):
-        return self.catalog.CharacterFromStartGGId(smashgg_id)
-
-    def GetStageFromStartGGId(self, smashgg_id: int):
-        return self.catalog.StageFromStartGGId(smashgg_id)

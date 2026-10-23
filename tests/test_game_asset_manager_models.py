@@ -5,7 +5,9 @@ catalog's snapshot rows instead of sorting its own items. These tests load
 the golden fixture games through the production synchronous path (the one
 WebServerActions.set_game takes) and read the models back the way the
 recording did -- DisplayRole text plus UserRole data, row by row -- and the
-payloads through the unchanged WebServerActions readers that walk them.
+payloads through the WebServerActions readers. Those walked the models (on
+the GUI thread) until S1b; they read the catalog now, on whatever thread
+asks, and the same recording pins that their output did not move.
 
 They also pin the two lifetime rules of the rebuild: every model of the
 previous generation, the per-game tracker's stage model included, is retired
@@ -19,6 +21,7 @@ its restore at startup, and forgetting the pick when the URL is cleared.
 import ast
 import json
 import shutil
+import threading
 import time
 from pathlib import Path
 
@@ -77,11 +80,9 @@ def goldenGames(autonaApp, monkeypatch):
 
 def _load(manager, codename, modsActive=False, reload=False):
     from qtpy.QtWidgets import QApplication
-    from src.core.GameAssetCatalog import GameAssetCatalog
 
-    index = GameAssetCatalog.instance.GameCodenames().index(codename) + 1
-    manager.LoadGameAssets(index, async_mode=False, mods_active=modsActive,
-                           mods_reload_mode=reload)
+    manager.LoadGameByCodename(codename, async_mode=False,
+                               mods_active=modsActive, mods_reload_mode=reload)
     manager.threadpool.waitForDone()
     QApplication.processEvents()
 
@@ -111,13 +112,72 @@ def test_the_models_match_the_recording(goldenGames, autonaApp, label):
         == models["skins"]
     assert autonaApp.get("game") == golden["state"]
 
-    # The S1b readers still walk the models; their payloads must not move.
+    # The Web readers (catalog-backed since S1b): what they send must not
+    # move.
     actions = autonaApp.actions()
     for name, actual in (("characters", actions.get_characters()),
                          ("variants", actions.get_variants()),
                          ("games", actions.get_games())):
         assert actual == golden["payloads"][name], name
         assert list(actual) == list(golden["payloads"][name]), name
+        # Byte for byte as Socket.IO sends it (SocketioJson = json.dumps,
+        # insertion order), nested key order included.
+        assert json.dumps(actual) == json.dumps(golden["payloads"][name]), name
+
+
+# ── the Web readers off the GUI thread (ADR-005 S1b) ────────────────────
+
+# WebServerActions method -> golden payload name.
+WEB_READERS = {
+    "get_games": "games",
+    "get_characters": "characters",
+    "get_variants": "variants",
+}
+
+
+def test_the_web_readers_read_the_catalog_without_a_gui_hop():
+    """S1's completion condition (docs/changes/architecture-modernization.md
+    §4.4): get_games / get_characters / get_variants carry no
+    @gui_thread_sync, and read the catalog rather than the Qt models."""
+    root = Path(__file__).resolve().parent.parent
+    tree = ast.parse((root / "src" / "AutonaWebServerActions.py").read_text(
+        encoding="utf-8"))
+    actionsClass = next(node for node in tree.body
+                        if isinstance(node, ast.ClassDef)
+                        and node.name == "WebServerActions")
+    methods = {node.name: node for node in actionsClass.body
+               if isinstance(node, ast.FunctionDef)}
+
+    for name in WEB_READERS:
+        decorators = [ast.unparse(d) for d in methods[name].decorator_list]
+        assert not any("gui_thread_sync" in d for d in decorators), \
+            f"{name} hops to the GUI thread again: {decorators}"
+        body = ast.unparse(methods[name])
+        assert "GameAssetCatalog.instance" in body, name
+        assert "AutonaGameAssetManager" not in body, name
+
+
+def test_the_web_readers_answer_on_a_worker_thread(goldenGames, autonaApp):
+    """The way the Flask / Socket.IO threads call them -- and with this (the
+    GUI) thread NOT spinning the event loop meanwhile. A reader that still
+    marshalled onto the GUI thread would wait in run_sync until the join
+    below times out."""
+    _load(goldenGames, "tgame")
+    actions = autonaApp.actions()
+    results = {}
+
+    def work():
+        for name in WEB_READERS:
+            results[name] = getattr(actions, name)()
+
+    worker = threading.Thread(target=work, daemon=True)
+    worker.start()
+    worker.join(timeout=10)
+
+    assert not worker.is_alive(), "a reader waited for the GUI thread"
+    payloads = GOLDEN["scenarios"]["tgame"]["payloads"]
+    for name, payload in WEB_READERS.items():
+        assert json.dumps(results[name]) == json.dumps(payloads[payload]), name
 
 
 def test_every_model_of_the_previous_generation_is_retired(goldenGames):

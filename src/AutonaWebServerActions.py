@@ -13,6 +13,7 @@ from .core.Actions import AutonaActions
 from .core.SettingsManager import SettingsManager
 from loguru import logger
 from .AutonaGameAssetManager import AutonaGameAssetManager
+from .core.GameAssetCatalog import GameAssetCatalog
 from .AutonaPlayerDB import AutonaPlayerDB
 from .AutonaScoreboardWidget import AutonaScoreboardWidget
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
@@ -275,34 +276,28 @@ class WebServerActions(QObject):
         # Not actually sure if this needs to be in the GUI thread but the asset manager is complex enough that it seems
         # worthwhile to dispatch it like this.
         set_codename = data.get("codename")
-        found_game = False
-        for i, codename in enumerate(AutonaGameAssetManager.instance.games.keys()):
-            if codename == set_codename:
-                # AutonaGameAssetManager.instance.selectedGame = AutonaGameAssetManager.instance.games[codename]
-                # self.parent().SetGame()
-                AutonaGameAssetManager.instance.LoadGameAssets(i+1, async_mode=False, mods_active=data.get("mods_active", False), mods_reload_mode=True)
-                found_game = True
-                break
-
-        if not found_game:
+        if set_codename not in GameAssetCatalog.instance.GameCodenames():
             return f"Could not find game {set_codename}"
+
+        # By codename, not by its position in the scan, which the load would
+        # re-read: a rescan in between could load another game.
+        AutonaGameAssetManager.instance.LoadGameByCodename(
+            set_codename, async_mode=False,
+            mods_active=data.get("mods_active", False), mods_reload_mode=True)
 
         return "OK"
 
-    def get_games(self):
-        data = {}
-        for key in AutonaGameAssetManager.instance.games.keys():
-            data[key] = {
-                "name": AutonaGameAssetManager.instance.games[key].get("name"),
-                "locale": AutonaGameAssetManager.instance.games[key].get("locale"),
-                "smashgg_game_id": AutonaGameAssetManager.instance.games[key].get("smashgg_game_id"),
-                "has_stages": bool(AutonaGameAssetManager.instance.games[key].get("stage_to_codename")),
-                "has_variants": bool(AutonaGameAssetManager.instance.games[key].get("variant_to_codename")),
-                "has_colors": bool(AutonaGameAssetManager.instance.games[key].get("preset_colors"))
-            }
+    # ── Game asset readers (ADR-005 S1b) ──────────────────────────────
+    # Read the Qt-free catalog, not the Qt models, so no @gui_thread_sync:
+    # they answer on the calling (Flask / Socket.IO) thread. Each payload is
+    # built from one reference the catalog takes once (the scan for games,
+    # the loaded snapshot for characters / variants), so a load or rescan
+    # landing mid-request cannot mix two of them -- get_games used to
+    # re-read the scan per key, so a rescan in between could raise KeyError.
 
-        return data
-    
+    def get_games(self):
+        return GameAssetCatalog.instance.GamesPayload()
+
     def get_current_game(self):
         return StateManager.Get("game")
     
@@ -313,35 +308,11 @@ class WebServerActions(QObject):
         }
         return response
 
-    @gui_thread_sync
     def get_characters(self):
-        data = {}
-        for row in range(AutonaGameAssetManager.instance.characterModel.rowCount()):
-            item: QStandardItem = AutonaGameAssetManager.instance.characterModel.index(
-                row, 0)
-            item_data = item.data(Qt.ItemDataRole.UserRole)
+        return GameAssetCatalog.instance.CharactersPayload()
 
-            if item_data is not None:
-                skin_models = AutonaGameAssetManager.instance.skinModels.get(item_data.get("en_name"))
-                item_data["skins"] = []
-                if skin_models is not None:
-                    for skindex in range(skin_models.rowCount()):
-                        item_data["skins"].append(skin_models.index(skindex, 0).data(Qt.ItemDataRole.UserRole))
-                data[item_data.get("name")] = item_data
-
-        return data
-
-    @gui_thread_sync
     def get_variants(self):
-        data = {}
-        for row in range(AutonaGameAssetManager.instance.variantModel.rowCount()):
-            item: QStandardItem = AutonaGameAssetManager.instance.variantModel.index(
-                row, 0)
-            item_data = item.data(Qt.ItemDataRole.UserRole)
-
-            if item_data is not None:
-                data[item_data.get("name")] = item_data
-        return data
+        return GameAssetCatalog.instance.VariantsPayload()
 
     def swap_teams(self, scoreboard):
         self.scoreboard.GetScoreboard(scoreboard).signals.SwapTeams.emit()

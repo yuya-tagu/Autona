@@ -109,6 +109,36 @@ def _utf16_sorted(rows):
     return tuple(sorted(rows, key=_utf16_key))
 
 
+def _qvariantmap_copy(value):
+    """A deep copy of `value` with every dict's keys in QVariantMap order.
+
+    The Web readers (get_characters / get_variants) used to read their
+    payloads back out of the Qt models, so every dict in them had made a
+    round trip through QVariantMap, i.e. a QMap: keys sorted by UTF-16 code
+    unit, at every level. Socket.IO serialises in insertion order, so that
+    order is on the wire; the payload readers reproduce it to keep the
+    bytes unchanged (ADR-005 S1b). Lists keep their order, and come back as
+    lists, as deep_clone's do.
+
+    Only a str-keyed dict and a list convert (to QVariantMap / QVariantList).
+    A dict with any other key, and a tuple, PySide6 keeps as an opaque
+    Python object, so nothing inside them is reordered: they are copied as
+    is (deep_clone -- a tuple comes back as a list, the same JSON).
+    """
+    if isinstance(value, dict):
+        if all(isinstance(key, str) for key in value):
+            return {key: _qvariantmap_copy(value[key])
+                    for key in sorted(value, key=lambda k: k.encode("utf-16-be"))}
+        # Not a QVariantMap candidate: copied as is.
+        return deep_clone(value)
+    if isinstance(value, tuple):
+        # Not a QVariantList either (PySide6 6.11, measured): copied as is.
+        return deep_clone(value)
+    if isinstance(value, list):
+        return [_qvariantmap_copy(item) for item in value]
+    return value
+
+
 @dataclass(frozen=True)
 class GameAssetSnapshot:
     """One loaded game, immutable once published.
@@ -406,22 +436,26 @@ class GameAssetCatalog:
     def CharactersPayload(self) -> dict:
         """The legacy `get_characters` payload: the character combo's rows
         (in display order, modded ones only when mods are active), each with
-        its skin list, keyed by export name."""
+        its skin list, keyed by export name. Nested key order is the one the
+        model-backed reader produced (see _qvariantmap_copy), with `skins`
+        appended last as it did."""
         snap = self._current
         data = {}
         for _text, row in snap.characterRows:
-            item = deep_clone(row)
-            item["skins"] = [deep_clone(skinData) for _skin, _label, skinData
+            item = _qvariantmap_copy(row)
+            item["skins"] = [_qvariantmap_copy(skinData)
+                             for _skin, _label, skinData
                              in snap.skinRows.get(item.get("en_name"), ())]
             data[item.get("name")] = item
         return data
 
     def VariantsPayload(self) -> dict:
-        """The legacy `get_variants` payload, keyed by export name."""
+        """The legacy `get_variants` payload, keyed by export name (nested
+        key order as in CharactersPayload)."""
         snap = self._current
         data = {}
         for _text, row in snap.variantRows:
-            data[row.get("name")] = deep_clone(row)
+            data[row.get("name")] = _qvariantmap_copy(row)
         return data
 
     def Character(self, en_name):
@@ -461,22 +495,32 @@ class GameAssetCatalog:
     def StockIconPath(self, en_name, skin=0):
         return self._current.stockIconPaths.get(en_name, {}).get(skin)
 
-    def CharacterFromStartGGId(self, smashgg_id):
-        """(en_name, character) for a start.gg character id, or None."""
+    def CharacterFromStartGGId(self, smashgg_id, snapshot=None):
+        """(en_name, character) for a start.gg character id, or None.
+
+        `snapshot` (default: the current one) is for a reader resolving
+        several ids into one result: it takes `Current()` once and passes
+        it to every lookup, so a load landing meanwhile cannot mix two
+        games into that result. The same holds for StageFromStartGGId.
+        The start.gg id -> name table (`_startggCharacters`) is not part of
+        the snapshot; it does not depend on the game, so reading the live
+        one is harmless."""
+        snap = snapshot if snapshot is not None else self._current
         startggcharacter = self._startggCharacters.get(str(smashgg_id))
         if startggcharacter:
             character = next(
-                (c for c in self._current.characters.items()
+                (c for c in snap.characters.items()
                  if c[1].get("smashgg_name") == startggcharacter.get("name")),
                 None)
             if character:
                 return (character[0], deep_clone(character[1]))
         return None
 
-    def StageFromStartGGId(self, smashgg_id):
+    def StageFromStartGGId(self, smashgg_id, snapshot=None):
         """(stage key, stage) for a start.gg stage id, or None."""
+        snap = snapshot if snapshot is not None else self._current
         stage = next(
-            (s for s in self._current.stages.items()
+            (s for s in snap.stages.items()
              if str(s[1].get("smashgg_id")) == str(smashgg_id)),
             None)
         if stage:

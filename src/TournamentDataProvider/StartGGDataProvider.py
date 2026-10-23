@@ -9,7 +9,7 @@ from loguru import logger
 from ..Helpers.AutonaCountryHelper import AutonaCountryHelper
 from ..core.DictHelper import deep_get
 from ..Helpers.AutonaDirHelper import AutonaResolve
-from ..AutonaGameAssetManager import AutonaGameAssetManager
+from ..core.GameAssetCatalog import GameAssetCatalog
 from ..AutonaPlayerDB import AutonaPlayerDB
 from .TournamentDataProvider import TournamentDataProvider
 import orjson
@@ -996,8 +996,11 @@ class StartGGDataProvider(TournamentDataProvider):
             "round": _set.get("round")
         }
 
-    def _parse_participant_new_api(self, entrant, teamIndex, setData):
-        """Parse a single participant from a new API entrant dict."""
+    def _parse_participant_new_api(self, entrant, teamIndex, setData, snap):
+        """Parse a single participant from a new API entrant dict.
+
+        `snap` is the game asset snapshot the whole set resolves against
+        (ParseMatchDataNewApi takes it once)."""
         player = entrant.get("player")
         user = entrant.get("user")
 
@@ -1090,8 +1093,8 @@ class StartGGDataProvider(TournamentDataProvider):
                     playerData["city"] = city_raw
 
             if playerData.get("startggMain"):
-                main = AutonaGameAssetManager.instance.GetCharacterFromStartGGId(
-                    playerData.get("startggMain"))
+                main = GameAssetCatalog.instance.CharacterFromStartGGId(
+                    playerData.get("startggMain"), snap)
                 if main:
                     playerData["mains"] = main[0]
 
@@ -1118,6 +1121,10 @@ class StartGGDataProvider(TournamentDataProvider):
 
             setData = self._build_set_metadata(_set, p1, p2)
 
+            # One game asset snapshot for every lookup of this set: a game
+            # load landing mid-parse must not mix two games (ADR-005 S1b).
+            snap = GameAssetCatalog.instance.Current()
+
             players = [[], []]
 
             entrants = [
@@ -1131,7 +1138,8 @@ class StartGGDataProvider(TournamentDataProvider):
 
             for i, team in enumerate(entrants):
                 for j, entrant in enumerate(team):
-                    playerData = self._parse_participant_new_api(entrant, i, setData)
+                    playerData = self._parse_participant_new_api(
+                        entrant, i, setData, snap)
                     players[i].append(playerData)
 
             setData["entrants"] = players
@@ -1192,11 +1200,13 @@ class StartGGDataProvider(TournamentDataProvider):
         return None
 
     @staticmethod
-    def _parse_stage_strike(tasks, entrant1Id, entrant2Id, latestWinner, scores):
+    def _parse_stage_strike(tasks, entrant1Id, entrant2Id, latestWinner, scores, snap):
         """Parse stage strike state from set tasks (old API format).
 
         Thin orchestrator: compute the last-winner slot, reverse-scan the tasks
         for raw strike state, then resolve IDs and build the result dicts.
+        Every stage id resolves against `snap`, the set's one game asset
+        snapshot (ParseMatchDataOldApi takes it).
 
         Returns (stageStrikeState, rulesetState, strikedBy, currPlayer, lastWinnerSlot).
         """
@@ -1209,22 +1219,23 @@ class StartGGDataProvider(TournamentDataProvider):
 
         (allStages, strikedStages, selectedStage, stageWins, dsr, mdsr,
          strikedBy, currPlayer) = StartGGDataProvider._scan_stage_strike_tasks(
-            tasks, entrant1Id, entrant2Id, latestWinner)
+            tasks, entrant1Id, entrant2Id, latestWinner, snap)
 
         stageStrikeState, rulesetState, strikedBy, currPlayer = \
             StartGGDataProvider._build_stage_strike_dicts(
                 allStages, strikedStages, selectedStage, stageWins, dsr, mdsr,
-                strikedBy, currPlayer, lastWinnerSlot, scores)
+                strikedBy, currPlayer, lastWinnerSlot, scores, snap)
 
         return stageStrikeState, rulesetState, strikedBy, currPlayer, lastWinnerSlot
 
     @staticmethod
-    def _scan_stage_strike_tasks(tasks, entrant1Id, entrant2Id, latestWinner):
+    def _scan_stage_strike_tasks(tasks, entrant1Id, entrant2Id, latestWinner, snap):
         """Reverse-scan set tasks to extract raw stage-strike state.
 
         Returns (allStages, strikedStages, selectedStage, stageWins, dsr, mdsr,
         strikedBy, currPlayer).
         """
+        catalog = GameAssetCatalog.instance
         allStages = None
         strikedStages = None
         strikedBy = [[], []]
@@ -1266,8 +1277,18 @@ class StartGGDataProvider(TournamentDataProvider):
                         stages = []
 
                         for stageCode in stageCodes:
-                            stages.append(AutonaGameAssetManager.instance.GetStageFromStartGGId(
-                                int(stageCode))[1].get("codename"))
+                            # A stage the loaded game does not know costs
+                            # only itself: subscripting the None raised
+                            # TypeError out of the whole legacy parse, which
+                            # the caller turns into {} (the LIVE-BUG-3 shape).
+                            stage = catalog.StageFromStartGGId(
+                                int(stageCode), snap)
+                            if stage is None:
+                                logger.warning(
+                                    f"No loaded stage matches start.gg id"
+                                    f" {stageCode}; skipping its stage win")
+                                continue
+                            stages.append(stage[1].get("codename"))
 
                         if str(entrantId) == entrant1Id:
                             stageWins[0] = stages
@@ -1281,8 +1302,8 @@ class StartGGDataProvider(TournamentDataProvider):
 
                 if base.get("strikeList"):
                     for stage_code, entrant in base.get("strikeList").items():
-                        stage = AutonaGameAssetManager.instance.GetStageFromStartGGId(
-                            int(stage_code))
+                        stage = catalog.StageFromStartGGId(
+                            int(stage_code), snap)
 
                         if stage:
                             codename = stage[1].get("codename")
@@ -1303,8 +1324,8 @@ class StartGGDataProvider(TournamentDataProvider):
                         for stage_code in base.get("banList"):
                             if stage_code == None:
                                 continue
-                            stage = AutonaGameAssetManager.instance.GetStageFromStartGGId(
-                                int(stage_code))
+                            stage = catalog.StageFromStartGGId(
+                                int(stage_code), snap)
                             if stage:
                                 codename = stage[1].get("codename")
                                 strikedBy[banPlayer].append(codename)
@@ -1336,32 +1357,31 @@ class StartGGDataProvider(TournamentDataProvider):
         return allStages, strikedStages, selectedStage, stageWins, dsr, mdsr, strikedBy, currPlayer
 
     @staticmethod
-    def _build_stage_strike_dicts(allStages, strikedStages, selectedStage, stageWins, dsr, mdsr, strikedBy, currPlayer, lastWinnerSlot, scores):
+    def _build_stage_strike_dicts(allStages, strikedStages, selectedStage, stageWins, dsr, mdsr, strikedBy, currPlayer, lastWinnerSlot, scores, snap):
         """Resolve stage IDs to codenames and build the stage-strike and ruleset
         dicts. On any resolution error, reset the strike state to empty.
 
         Returns (stageStrikeState, rulesetState, strikedBy, currPlayer).
         """
+        catalog = GameAssetCatalog.instance
         try:
             allStagesFinal = []
             for st in allStages:
-                stage = AutonaGameAssetManager.instance.GetStageFromStartGGId(
-                    st)
+                stage = catalog.StageFromStartGGId(st, snap)
                 if stage:
                     allStagesFinal.append(stage[1])
 
             striked = []
             if strikedStages is not None:
                 for stage in strikedStages:
-                    stage = AutonaGameAssetManager.instance.GetStageFromStartGGId(
-                        stage)
+                    stage = catalog.StageFromStartGGId(stage, snap)
                     if stage:
                         striked.append(stage[1].get("codename"))
 
             selected = ""
             if selectedStage is not None:
-                selectedStage = AutonaGameAssetManager.instance.GetStageFromStartGGId(
-                    int(selectedStage))
+                selectedStage = catalog.StageFromStartGGId(
+                    int(selectedStage), snap)
                 if selectedStage:
                     selected = selectedStage[1].get("codename")
 
@@ -1390,22 +1410,25 @@ class StartGGDataProvider(TournamentDataProvider):
         return stageStrikeState, rulesetState, strikedBy, currPlayer
 
     @staticmethod
-    def _build_entrants_old_api(selectedChars, sets):
-        """Build entrant character data from old API char selections."""
+    def _build_entrants_old_api(selectedChars, sets, snap):
+        """Build entrant character data from old API char selections.
+
+        Every character id resolves against `snap` (see _parse_stage_strike).
+        """
         entrants = [[], []]
 
         def mainFor(char):
             """["<character key>", skin] for a start.gg character id, or None.
 
-            GetCharacterFromStartGGId returns None for every id the installed
+            CharacterFromStartGGId returns None for every id the installed
             game assets do not know -- no asset pack installed, a modded
             roster, a character start.gg added since. Subscripting that None
             raised TypeError out of the whole legacy half, and the caller
             swallows it into an empty dict: one unrecognised character cost
             the set its bestOf, stage_strike, losers flags and currPlayer too.
             """
-            character = AutonaGameAssetManager.instance.GetCharacterFromStartGGId(
-                char)
+            character = GameAssetCatalog.instance.CharacterFromStartGGId(
+                char, snap)
             if character is None:
                 logger.warning(
                     f"No installed character matches start.gg id {char};"
@@ -1446,11 +1469,17 @@ class StartGGDataProvider(TournamentDataProvider):
         selectedChars = self._extract_char_selections(tasks, entrant1Id, entrant2Id)
         latestWinner = self._find_latest_winner(tasks)
 
+        # One game asset snapshot for every stage and character id of this
+        # set: a game load landing mid-parse must not mix two games into the
+        # result (ADR-005 S1b).
+        snap = GameAssetCatalog.instance.Current()
+
         scores = (sets.get("entrant1Score", 0), sets.get("entrant2Score", 0))
         stageStrikeState, rulesetState, strikedBy, currPlayer, lastWinnerSlot = \
-            self._parse_stage_strike(tasks, entrant1Id, entrant2Id, latestWinner, scores)
+            self._parse_stage_strike(
+                tasks, entrant1Id, entrant2Id, latestWinner, scores, snap)
 
-        entrants = self._build_entrants_old_api(selectedChars, sets)
+        entrants = self._build_entrants_old_api(selectedChars, sets, snap)
 
         team1losers = False
         team2losers = False
@@ -2148,15 +2177,18 @@ class StartGGDataProvider(TournamentDataProvider):
                         playerData["state_code"] = resolved
 
             if playerData.get("startggMains"):
-                if AutonaGameAssetManager.instance.selectedGame:
-                    gameCodename = AutonaGameAssetManager.instance.selectedGame.get(
-                        "codename")
+                # One snapshot: the codename the mains are keyed under and
+                # the mains themselves come from the same game (ADR-005 S1b).
+                catalog = GameAssetCatalog.instance
+                snap = catalog.Current()
+                if snap.game:
+                    gameCodename = snap.game.get("codename")
 
                     mains = []
 
                     for sggmain in playerData.get("startggMains"):
-                        main = AutonaGameAssetManager.instance.GetCharacterFromStartGGId(
-                            sggmain[0])
+                        main = catalog.CharacterFromStartGGId(
+                            sggmain[0], snap)
                         if main:
                             mains.append([main[0]])
 

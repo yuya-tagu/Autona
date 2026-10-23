@@ -200,7 +200,7 @@ Start.gg の entrant → Autona の playerData に変換する中核。**全て�
 | `country_code` | `user.location.country` を `AutonaCountryHelper` で en_name → ISO コード変換 | |
 | `state_code` | `user.location.state` を**そのまま使う** | city からの推測は削除済（[StartGGDataProvider.py:847-855](src/TournamentDataProvider/StartGGDataProvider.py:847)） |
 | `city` | `user.location.city` | new API のみ |
-| `mains` / `startggMains` | `player.sets.nodes[].games.selections` を集計 | `Counter` で出現頻度順。`AutonaGameAssetManager.GetCharacterFromStartGGId` でキャラコード解決 |
+| `mains` / `startggMains` | `player.sets.nodes[].games.selections` を集計 | `Counter` で出現頻度順。`GameAssetCatalog.CharacterFromStartGGId` でキャラコード解決（1 エントラント / 1 セットの解決は `Current()` を 1 回取った同じスナップショットで行う。ADR-005 S1b） |
 | `seed` | `EntrantsQuery` の `initialSeedNum` から `player_seeds` キャッシュ参照 | クラス変数 `player_seeds = {playerId: seed}` |
 
 ### 4.2 ラウンド名翻訳 `TranslateRoundName` ([StartGGDataProvider.py:714](src/TournamentDataProvider/StartGGDataProvider.py:714))
@@ -297,7 +297,7 @@ Start.gg の `fullRoundText`（"Winners Round 1" 等）を `AutonaLocaleHelper.m
 | 20 秒タイムアウトで `{}` が返る | レスポンス 1 MB 超 | フィールド削減 or 別クエリに分割 |
 | ブラケットの slot.{N} が選手とずれる | seedNum を position として使った | `seeds[seedNum-1]` 方式でプレースホルダー埋め |
 | GF Reset が GF と同じ列に表示 | round 分離処理を忘れた | [StartGGDataProvider.py:372-378](src/TournamentDataProvider/StartGGDataProvider.py:372) パターンをコピー |
-| `mains` が空 | `selectedGame` が未設定 / キャラコード未対応 | `AutonaGameAssetManager.GetCharacterFromStartGGId` の戻り値を null チェック |
+| `mains` が空 | ゲーム未選択（`GameAssetCatalog.Current().game` が空）/ キャラコード未対応 | `GameAssetCatalog.CharacterFromStartGGId` の戻り値を null チェック |
 | `country_code` が空 | Start.gg 側が国名英語表記でない | `AutonaCountryHelper.countries` の en_name と完全一致しないとマッチしない |
 
 ---

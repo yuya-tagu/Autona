@@ -90,7 +90,9 @@ PdM 方針（2026-08-28）「Qt ウィジェットが書き込み経路の主役
   既存パターンを標準とする）。各ステップの検証項目に「同一操作で delta が 1 回だけ出る」を含める
 - **GUI スレッド境界はアダプタに集約**: 現在 `@gui_thread_sync` 19 箇所が担う
   「Flask スレッド → GUI スレッド同期ブロック」は、書き込みが core 化されるほど不要になる。
-  残るのは Qt モデル読取り（`get_characters` 等）とウィンドウ操作（`open_sets` 等）のみ
+  残るのはウィンドウ操作（`open_sets` 等）など Qt に触れる処理のみ（Qt モデル読取りだった
+  `get_characters` / `get_variants` は ADR-005 S1b でゲームアセットカタログの直読みになり、
+  `@gui_thread_sync` が外れた）
 - **外部契約は不変**: legacy REST / Socket.IO の台帳（44 ルート + 39 イベント、
   `test_webserver_routes.py` で pin）と v1 API の封筒仕様は変えない
 
