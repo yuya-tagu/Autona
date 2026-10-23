@@ -234,7 +234,8 @@ PLAYER_LINE_EDIT_KEYS = (
 # Every free-text input, i.e. what PlayerService.SetText accepts.
 PLAYER_TEXT_KEYS = PLAYER_LINE_EDIT_KEYS + (PLAYER_NOTE_KEY,)
 # The two combos whose selected row is published whole (a dict carrying the
-# code, the display name and the flag asset) -- PlayerService.SetLocation.
+# code, the display name and the flag asset). The card names the row by its
+# code; PlayerService.SetCountry / SetRegion build the dict (ADR-005 S1d).
 PLAYER_LOCATION_KEYS = (PLAYER_COUNTRY_KEY, PLAYER_STATE_KEY)
 
 PLAYER_INPUT_KEYS = PLAYER_TEXT_KEYS + (
@@ -569,6 +570,27 @@ def SeedBoard(number):
     StateManager.Set(f"{prefix}.history_sets.1", {})
     StateManager.Set(f"{prefix}.history_sets.2", {})
     StateManager.Set(f"{prefix}.station_queue", {})
+
+
+def HoldBoard(number):
+    """Put a 1v1 / team board's ``score.{number}`` behind the 反映 gate.
+
+    Edits under a held prefix stay in the live state but are not published
+    until ``StateManager.CommitHeld`` (the 反映 button, ``ApplyChanges``);
+    ``STATS_KEYS`` are fetched data, not edits, and publish at once.
+
+    Called by the board's constructor, after its ``SeedBoard()`` -- a
+    registration made first would hold back the skeleton itself. A board
+    that is not built is not held: nothing would ever apply its edits (the
+    反映 button is on the board, and the Web UI has none), and the seed
+    written when the board is built would wipe them. Holding the unbuilt
+    board from startup was ADR-005 S2 decision 7, withdrawn in S2c for that
+    reason; the routes that edit a board widget-side build it first.
+
+    Idempotent (``HoldSubtree`` keeps a set). Board 3 (crew) is not held:
+    the crew board publishes as it goes.
+    """
+    StateManager.HoldSubtree(f"{SCORE_ROOT}.{number}", exempt=STATS_KEYS)
 
 
 def PublishDisplayOptions():

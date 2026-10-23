@@ -8,10 +8,12 @@ AutonaScoreboardPlayerWidget is now the only subclass.
 
 Since the player instalment of headless core Step 5 this class no longer
 writes the state itself: `self.player` is a `core.PlayerService` bound to
-this widget's path, and the methods below read Qt (combo rows, line-edit
-text, the losers flag) and hand the answer to it. What each of them decided
--- how a display name is merged, where an avatar file is looked for, the
-shape of a character slot -- lives in that service.
+this widget's path, and the methods below read Qt (line-edit text, which
+combo rows are picked) and hand the answer to it. What
+each of them decided -- how a display name is merged, where an avatar file
+is looked for, what a character slot holds -- lives in that service. Since
+ADR-005 S1d a combo pick leaves the widget as identifiers only (en_name,
+skin row, codes); the service builds the published value from the catalogs.
 
 Subclasses are responsible for:
 - __init__ (own .ui file, own widget setup)
@@ -19,8 +21,12 @@ Subclasses are responsible for:
 - SetData, SetCharactersPerPlayer, ReloadCharacters, SetIndex,
   SetupAutocomplete (widget-specific: .ui widgets, icon sizes, fonts,
   proxy models — kept per-subclass)
-- _swapRestoreTail / _styleCountryStateWidgets (small hooks that customise
-  the otherwise-shared SwapWith / _WireCountryState defined here)
+- _styleCountryStateWidgets (a small hook that customises the otherwise
+  shared _WireCountryState defined here)
+
+Swapping two players is not a widget operation any more (ADR-005 S2c): the
+slots are exchanged in the state (AutonaActions.SwapTeams / SwapPlayers)
+and each card renders its own (AutonaScoreboardPlayerWidget.RenderFromState).
 """
 import threading
 import traceback
@@ -32,7 +38,8 @@ from qtpy.QtCore import *
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .core import StateSchema as schema
 from .core.CountryCatalog import CountryCatalog
-from .core.PlayerService import KEEP_ONLINE_AVATAR, PlayerService
+from .core.PlayerService import (
+    KEEP_ONLINE_AVATAR, CharacterSlot, PlayerService)
 from .core.StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from loguru import logger
@@ -61,6 +68,8 @@ class AutonaBasePlayerWidget(QGroupBox):
         # Lazy widget cache — populated by _w(); avoids O(n) findChild walks
         # on hot paths (SetData, ExportMergedName, ExportPlayerImages...).
         self._widget_cache = {}
+        # The skin combos' model while no character is picked (LoadSkinOptions).
+        self._emptySkinModel = None
 
     def _w(self, name, klass=QWidget):
         """Cached findChild. Same lookup name always returns the same
@@ -85,45 +94,45 @@ class AutonaBasePlayerWidget(QGroupBox):
             return
 
         with self.dataLock:
-            characters = {}
+            self.player.PublishCharacterSlots(
+                [self._CharacterSlot(character, color, variant)
+                 for _element, character, color, variant
+                 in self.character_elements],
+                includeMains)
 
-            for i, (element, character, color, variant) in enumerate(self.character_elements):
-                data = character.currentData()
+    @staticmethod
+    def _CharacterSlot(character, color, variant) -> CharacterSlot:
+        """What one slot's three combos picked, as identifiers (ADR-005 S1d).
 
-                if data == None:
-                    data = {}
+        Only the keys of the picked rows leave the widget; what the state
+        holds for them -- the names, the asset paths, the variant -- is
+        PlayerService's to build from the game catalog. The skin is the
+        skin combo's row, which is what the slot has always published.
 
-                if character.currentData() == None:
-                    data = {"name": character.currentText()}
-
-                if color.currentData() and color.currentData().get("name", ""):
-                    data["name"] = color.currentData().get("name", "")
-
-                if color.currentData() and color.currentData().get("en_name", ""):
-                    data["en_name"] = color.currentData().get("en_name", "")
-
-                if color.currentData() and character.currentData():
-                    data["assets"] = color.currentData().get("assets", {})
-
-                if data.get("assets") == None:
-                    data["assets"] = {}
-
-                data["skin"] = color.currentIndex()
-                if variant.currentData():
-                    data["variant"] = variant.currentData()
-                else:
-                    data["variant"] = {}
-
-                characters[i+1] = data
-
-            self.player.PublishCharacters(characters, includeMains)
+        `text` is only used when the catalog has no row for the pick: the
+        typed text when nothing is picked, else the picked row's own name.
+        A picked row the catalog lacks is the moment between a game load
+        and the combos' rebind, and the combo's text is then the "display
+        name / en_name" label, not a name (CharacterSlot).
+        """
+        data = character.currentData()
+        variantData = variant.currentData()
+        picked = data if isinstance(data, dict) else None
+        return CharacterSlot(
+            character=picked.get("en_name") if picked is not None else None,
+            skin=color.currentIndex(),
+            variant=(variantData.get("en_name")
+                     if isinstance(variantData, dict) else None),
+            text=(picked.get("name") if picked is not None
+                  and picked.get("name") else character.currentText()))
 
     def ExportMergedName(self):
         with self.dataLock:
+            # The " [L]" suffix is the service's: it reads the team's
+            # losers flag from the state (ADR-005 S2b).
             self.player.PublishMergedName(
                 self._w(schema.PLAYER_SPONSOR_KEY, QLineEdit).text(),
-                self._w(schema.PLAYER_TAG_KEY, QLineEdit).text(),
-                self.losers)
+                self._w(schema.PLAYER_TAG_KEY, QLineEdit).text())
 
     def ExportPlayerImages(self, onlineAvatar=KEEP_ONLINE_AVATAR):
         """Re-publish the image state derived from the player's name.
@@ -226,6 +235,26 @@ class AutonaBasePlayerWidget(QGroupBox):
         if hasattr(self, "_loadedStatesCountryCode") and self._loadedStatesCountryCode == new_code:
             return
 
+        self._FillStateRows(new_code)
+        # The one publish this makes: the region the refill left selected,
+        # i.e. the blank row. (The render side refills without it -- see
+        # AutonaScoreboardPlayerWidget._RenderLocation.)
+        state: QComboBox = self._w(schema.PLAYER_STATE_KEY, QComboBox)
+        state.currentIndexChanged.emit(state.currentIndex())
+
+        # Last: a country whose rebuild raised half-way must not be recorded as
+        # loaded, or the guard above would keep serving the broken list.
+        self._loadedStatesCountryCode = new_code
+
+    def _FillStateRows(self, new_code):
+        """Refill the region combo with `new_code`'s regions, blank row
+        selected, without announcing it.
+
+        Split out of LoadStates (ADR-005 S2a) so that a card rendering its
+        slot from the state can rebuild the rows for the country it is about
+        to show without publishing the blank region a pick would publish.
+        The caller records `_loadedStatesCountryCode` once this returns.
+        """
         # A fresh dict per region with its flag `asset` already resolved
         # (the catalog checks the disk). This used to write `asset` into the
         # shared country table itself, so what the Web's get_states returned
@@ -263,21 +292,16 @@ class AutonaBasePlayerWidget(QGroupBox):
         # the discarded models used to. appendRow() on the model does not.
         #
         # Signals stay blocked for the whole clear + refill so consumers see a
-        # single index change for the rebuild, exactly as they did when a
-        # finished model was attached with setModel(). NOTE: the old setModel()
-        # path also emitted currentTextChanged/editTextChanged; nothing is
-        # connected to either on this combo, so only currentIndexChanged is
-        # replayed here.
+        # single index change for the rebuild (LoadStates replays it), exactly
+        # as they did when a finished model was attached with setModel().
+        # NOTE: the old setModel() path also emitted
+        # currentTextChanged/editTextChanged; nothing is connected to either
+        # on this combo, so only currentIndexChanged is replayed.
         with QSignalBlocker(state):
             stateModel.clear()
             for item in rows:
                 stateModel.appendRow(item)
             state.setCurrentIndex(0)
-        state.currentIndexChanged.emit(state.currentIndex())
-
-        # Last: a country whose rebuild raised half-way must not be recorded as
-        # loaded, or the guard above would keep serving the broken list.
-        self._loadedStatesCountryCode = new_code
 
     def LoadSkinOptions(self, element, target):
         characterData = element.currentData()
@@ -286,7 +310,17 @@ class AutonaBasePlayerWidget(QGroupBox):
             target.setModel(AutonaGameAssetManager.instance.skinModels.get(
                 characterData.get("en_name")))
         else:
-            target.setModel(QStandardItemModel())
+            # No character, no skins: one empty model per card, made once.
+            # A fresh QStandardItemModel per call (as this used to be) left
+            # one more model behind every time a slot lost its character --
+            # which the render (RenderFromState) now does on every swap that
+            # moves a typed name or a blank row onto the card. Nothing ever
+            # adds a row to it, so the card's combos can share it, and
+            # handing a combo the model it already has changes nothing
+            # (agent-pitfalls #13: reuse a model rather than replace it).
+            if self._emptySkinModel is None:
+                self._emptySkinModel = QStandardItemModel(self)
+            target.setModel(self._emptySkinModel)
 
     def GetCurrentPlayerTag(self):
         gamerTag = self._w(schema.PLAYER_TAG_KEY).text()
@@ -329,67 +363,6 @@ class AutonaBasePlayerWidget(QGroupBox):
                         continue  # only executed if the inner loop DID break
                 else:
                     c.setCurrentIndex(0)
-
-    def SwapWith(self, other):
-        """Swap all field values + seed/city/avatar/id state between this
-        widget and another. The per-widget restore action after the fields are
-        copied differs by subclass (see _swapRestoreTail)."""
-        if self == other:
-            logger.info("Swapping player with themselves")
-            return
-        try:
-            StateManager.BlockSaving()
-            with self.dataLock:
-                with other.dataLock:
-                    tmpData = []
-
-                    # Save state
-                    for w in [self, other]:
-                        data = {}
-                        for widget in w.findChildren(QWidget):
-                            if type(widget) == QLineEdit:
-                                data[widget.objectName()] = widget.text()
-                            if type(widget) == QComboBox:
-                                data[widget.objectName()] = widget.currentIndex()
-                            if type(widget) == QPlainTextEdit:
-                                data[widget.objectName()] = widget.toPlainText()
-                        data["online_avatar"] = StateManager.Get(
-                            f"{w.path}.online_avatar")
-                        data["id"] = StateManager.Get(
-                            f"{w.path}.id")
-                        data["seed"] = StateManager.Get(
-                            f"{w.path}.seed")
-                        data["city"] = StateManager.Get(
-                            f"{w.path}.city")
-                        tmpData.append(data)
-
-                    # Load state
-                    for i, w in enumerate([other, self]):
-                        for objName in tmpData[i]:
-                            widget = w.findChild(QWidget, objName)
-                            if widget:
-                                if type(widget) == QLineEdit:
-                                    widget.setText(tmpData[i][objName])
-                                    widget.editingFinished.emit()
-                                if type(widget) == QComboBox:
-                                    widget.setCurrentIndex(tmpData[i][objName])
-                                if type(widget) == QPlainTextEdit:
-                                    widget.setPlainText(tmpData[i][objName])
-                        w._swapRestoreTail(tmpData[i])
-                        # Neither field is a widget value the loop above
-                        # could have carried across: the seed spinbox is not
-                        # one of the three copied types and the city has no
-                        # input at all, so both are moved through the state
-                        # they were read from.
-                        w.player.SetSeed(tmpData[i]["seed"])
-                        w.player.SetCity(tmpData[i]["city"])
-        finally:
-            StateManager.ReleaseSaving()
-
-    def _swapRestoreTail(self, data):
-        """Subclass hook: per-widget restore action run after fields are copied
-        and before seed/city are re-set. Default: no-op."""
-        pass
 
     def _WireCountryState(self):
         """One-time wiring of the country / region pair. Subclasses call this

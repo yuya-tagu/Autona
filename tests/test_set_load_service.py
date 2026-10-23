@@ -76,23 +76,27 @@ def _isolated_state():
 
 
 class _Swap:
-    """A settable stand-in for the board's teamsSwapped attribute."""
+    """Which way round the board is: `score.{n}.teamsSwapped`, the flag
+    AutonaActions.SwapTeams toggles (ADR-005 S2c; it used to be read from
+    the board's attribute through a callable)."""
 
-    def __init__(self, value=False):
-        self.value = value
+    @property
+    def value(self):
+        return SM.Get(f"{PREFIX}.teamsSwapped", False)
 
-    def __call__(self):
-        return self.value
+    @value.setter
+    def value(self, swapped):
+        SM.Set(f"{PREFIX}.teamsSwapped", swapped)
 
 
 @pytest.fixture
 def swap():
-    return _Swap(False)
+    return _Swap()
 
 
 @pytest.fixture
 def service(swap):
-    return SetLoadService(BOARD, swap)
+    return SetLoadService(BOARD)
 
 
 def _score(team):
@@ -219,6 +223,43 @@ def test_a_missing_losers_flag_is_left_alone(service):
     assert SM.Get(f"{PREFIX}.team.2.losers") is True
 
 
+def _named(team, tag):
+    path = f"{PREFIX}.team.{team}.player.1"
+    SM.Set(f"{path}.name", tag)
+    SM.Set(f"{path}.team", "")
+    return path
+
+
+def test_a_loaded_losers_flag_takes_its_teams_names_along(service, swap):
+    """The " [L]" lands on the display team the flag landed on, in the
+    flag's own save cycle (ADR-005 S2b) -- the board's per-card
+    _ApplyLosersToPlayers used to do this half."""
+    left = _named(1, "LEFT")
+    right = _named(2, "RIGHT")
+    swap.value = True
+    deltas = []
+    SM.observers.state_updated.subscribe(deltas.append)
+    try:
+        assert service.ApplyLosers({"team1losers": True}) is True
+    finally:
+        SM.observers.state_updated.unsubscribe(deltas.append)
+
+    assert SM.Get(f"{right}.mergedName") == "RIGHT [L]"
+    assert SM.Get(f"{right}.mergedOnlyName") == "RIGHT [L]"
+    assert SM.Get(f"{left}.mergedName") is None
+    assert len(deltas) == 1
+
+
+def test_an_unchanged_losers_flag_leaves_the_names_alone(service):
+    named = _named(1, "ALPHA")
+    service.ApplyLosers({"team1losers": True})
+    SM.Set(f"{named}.mergedName", "kept")
+
+    assert service.ApplyLosers({"team1losers": True}) is False
+
+    assert SM.Get(f"{named}.mergedName") == "kept"
+
+
 # ── team name and crest ──────────────────────────────────────────────────
 
 def test_team_name_follows_the_swap(service, swap):
@@ -289,6 +330,20 @@ def test_clearing_the_tracking_forgets_all_three_keys(service):
     assert SM.Get(f"{PREFIX}.set_id") is None
     assert SM.Get(f"{PREFIX}.auto_update") is None
     assert SM.Get(f"{PREFIX}.station") is None
+
+
+def test_the_set_loaded_last_is_kept_outside_the_state(service):
+    """ADR-005 S2 decision 4: the set the board skips re-loading lives here
+    (it was a board attribute), not in the state -- a clear forgets it, and
+    making `set_id` its home would publish a null for every clear."""
+    assert service.lastSetSelected is None
+    service.lastSetSelected = "12345"
+    service.BeginSet("12345", "set", None)
+    assert "lastSetSelected" not in (SM.Get(PREFIX) or {})
+
+    service.ClearSetTracking()
+
+    assert service.lastSetSelected is None
 
 
 def test_the_station_queue_is_published(service):

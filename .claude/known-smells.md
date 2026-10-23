@@ -539,6 +539,8 @@ GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src
   match バーを消す（`match_en` は作らない）
 - スコアだけのリセット（スコアリセット ボタン / `reset_scores` / `Ctrl+Shift+R` /
   `/api/v1 score:reset` = `AutonaActions.ResetScore`）は対象外のまま（match バーは残る）
+- ADR-005 S2d（2026-10-23）から、2 つの実体は `AutonaActions.ClearScore` / `ResetMatch`（core）。
+  ボードの同名メソッドと Web の `reset_match` / `clear_all` はそれを呼ぶ（分け方は上と同じ）
 
 **回帰テスト**: `tests/test_scoreboard_operations.py::test_a_reset_clears_the_match_bar`（board 1/2 ×
 3 経路）/ `::test_a_set_without_a_round_name_keeps_the_previous_one` /

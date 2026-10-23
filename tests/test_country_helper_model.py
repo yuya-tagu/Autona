@@ -98,6 +98,7 @@ class _RegionCombo(QObject):
     """Just enough of a player widget to run the real LoadStates: the
     recording drove the old one through the same two combos."""
     _EnsureStateModel = AutonaBasePlayerWidget._EnsureStateModel
+    _FillStateRows = AutonaBasePlayerWidget._FillStateRows
     LoadStates = AutonaBasePlayerWidget.LoadStates
 
     def __init__(self):
@@ -270,8 +271,8 @@ def test_a_reload_publishes_nothing_from_top8(countries, autonaApp):
 def test_a_reload_leaves_a_player_card_and_its_state_alone(
         countries, autonaApp):
     """The same reload under a live player card: nothing is published
-    (each index change used to reach SetLocation, blanking the country and
-    the region), and the card still shows what the state holds."""
+    (each index change used to reach the location publish, blanking the
+    country and the region), and the card still shows what the state holds."""
     countries("en")
     player = autonaApp.board(1).team1playerWidgets[0]
     player.SetData({"gamerTag": "TAG", "country_code": "JP",
@@ -284,12 +285,15 @@ def test_a_reload_leaves_a_player_card_and_its_state_alone(
     assert before[schema.PLAYER_COUNTRY_KEY]["code"] == "JP"
     assert before[schema.PLAYER_STATE_KEY]["original_code"] == "13"
 
-    with patch.object(player.player, "SetLocation",
-                      wraps=player.player.SetLocation) as setLocation:
+    with patch.object(player.player, "SetCountry",
+                      wraps=player.player.SetCountry) as setCountry, \
+            patch.object(player.player, "SetRegion",
+                         wraps=player.player.SetRegion) as setRegion:
         countries("ja")
         autonaApp.settle()
 
-        assert setLocation.call_count == 0
+        assert setCountry.call_count == 0
+        assert setRegion.call_count == 0
         assert {key: autonaApp.get(f"{player.path}.{key}")
                 for key in schema.PLAYER_LOCATION_KEYS} == before
         assert _code(country) == "JP"
@@ -303,7 +307,9 @@ def test_a_reload_leaves_a_player_card_and_its_state_alone(
 
     assert autonaApp.get(
         f"{player.path}.{schema.PLAYER_COUNTRY_KEY}")["code"] == "US"
-    assert setLocation.call_count == 2  # the region (blank), the country
+    # The region (blank), then the country.
+    assert setRegion.call_count == 1
+    assert setCountry.call_count == 1
 
 
 def test_country_updates_do_not_stack_connections(autonaApp):
