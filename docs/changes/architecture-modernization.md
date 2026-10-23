@@ -284,7 +284,7 @@ Tauri / Electron 移行 / core の別プロセス常駐（ヘッドレス起動�
 - **features.md を実態に同期**（存在しない機能の削除・実況 12 枠・サイドバー構成・ホットキー・BOARD/Designer/Figma/統計表示設定の追記・既定ポート 5107）
 - 残置: `PlayerService` 内の inline ガード（unconditional writes が意図的な領域）
 
-### S1a ゲームアセットカタログの抽出とアダプタ委譲（2026-10-23・PR #___ 未作成）
+### S1a ゲームアセットカタログの抽出とアダプタ委譲（2026-10-23・PR #218）
 
 - **`src/core/GameAssetCatalog.py` を新設**（Qt 非依存・import 副作用ゼロ。`test_core_qt_free` が自動で対象に含める）。ゲーム・キャラ・スキン・バリアント・カラー・ステージ・アセット索引・Start.gg ID 表を、不変の `GameAssetSnapshot`（純 dict）として持つ。ロードは別スナップショットを組んで参照を 1 回で差し替えるので、リーダーは `Current()` を 1 回取れば 2 ゲームが混ざらない。
   書き手（`ResetGameState` / `ScanGames` / `SelectGame` / `ForgetSelection` / `ReloadStartGGCharacters`）は `threading.Lock` 1 本で直列化。ロック保持中に `run_sync`・Qt シグナル・observer を呼ばない（`SaveBlock` はロックの外で開く。ロック順は catalog → `StateManager.lock`）。
