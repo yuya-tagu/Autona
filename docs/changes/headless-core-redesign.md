@@ -917,6 +917,13 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
 | `src/AutonaGameAssetManager.py`（3） | `game` / `game.has_modded_content` | provider / asset 層の `QObject` シングルトン | 操作者入力ではなく「読み込んだゲームの publish」。Actions を通すべき *操作* が存在しない。書き込みはアセットローダースレッドがモデル再構築と同じ `SaveBlock` 内で行っており（agent-pitfalls #13 の当該領域）、経路を増やす利得が無い |
 | `src/AutonaTournamentDataProvider.py`（1） | `provider_videogame` | 同上 | provider が選んだ videogame id のミラー |
 
+> **2026-10-23 更新（ADR-005 S1a）**: `game.*` の書き手は Qt-free の
+> `src/core/GameAssetCatalog.py` に移った（`SelectGame()` / `ResetGameState()`。
+> キー・順序・回数は旧実装と同一で、`abbreviation` を `StateSchema.GAME_KEYS` に追記）。
+> `AutonaGameAssetManager` は Qt アダプタ（モデル構築・スレッド・選択ゲームの永続化）になり
+> state を書かない。**`src/core` 外の書き手は `AutonaTournamentDataProvider` の 1 つだけ**で、
+> 台帳テスト（`STATE_WRITERS_OUTSIDE_CORE`）もこの 1 ファイルを pin する。
+
 core 側の書き手（= 正本）は以下。**キー族ごとに所有者が 1 つ**であることが本再設計の到達点:
 
 | キー族 | 所有者 |
@@ -932,7 +939,8 @@ core 側の書き手（= 正本）は以下。**キー族ごとに所有者が 1
 | `top8.*` | `core/Top8Service.py` |
 | `commentary` / `result_players` / `stream.{url,title}` / `layout_options.*` / `display_options.*` | `core/Actions.py` |
 | シード・サブツリーのライフサイクル（`SeedBoard` / `SeedPanelState` / `ResetScoreRoot` / `ClearPlayerEditor` / `PublishDisplayOptions` / `PublishAssetVersion`） | `core/StateSchema.py` |
-| `game.*` / `provider_videogame` | **上表の 2 ファイル（残置）** |
+| `game.*` | `core/GameAssetCatalog.py`（ADR-005 S1a で移動） |
+| `provider_videogame` | **上表の `AutonaTournamentDataProvider`（残置）** |
 
 ### ステップ間の依存
 

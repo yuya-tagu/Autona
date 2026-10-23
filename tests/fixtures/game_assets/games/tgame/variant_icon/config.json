@@ -1,0 +1,21 @@
+{
+  "type": [
+    "variant_icon"
+  ],
+  "prefix": "var_",
+  "postfix": "",
+  "image_sizes": {
+    "ex": {
+      "null": [
+        32,
+        32
+      ]
+    },
+    "alt": {
+      "null": [
+        8,
+        8
+      ]
+    }
+  }
+}

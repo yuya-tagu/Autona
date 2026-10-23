@@ -1,0 +1,11 @@
+{
+  "name": "Second Game",
+  "abbreviation": "SG",
+  "smashgg_game_id": 43868,
+  "character_to_codename": {
+    "Ryu": {
+      "codename": "ryu",
+      "smashgg_name": "Ryu"
+    }
+  }
+}

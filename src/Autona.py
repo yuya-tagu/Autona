@@ -181,6 +181,7 @@ from .LayoutOptions.AutonaLayoutOptionsWindow import AutonaLayoutOptionsWindow
 from .AutonaHotkeys import AutonaHotkeys
 from .AutonaCommentaryWidget import AutonaCommentaryWidget
 from .AutonaGameAssetManager import AutonaGameAssetManager
+from .core.GameAssetCatalog import GameAssetCatalog
 from .AutonaTop8Widget import AutonaTop8Widget
 from .AutonaBoardWidget import AutonaBoardWidget
 from .core.ColorService import SeedColorState
@@ -1277,7 +1278,7 @@ class Window(QMainWindow):
                 action.setChecked(False)
             self.gameSelect.setText(
                 QApplication.translate("app", "Select game title"))
-            AutonaGameAssetManager.instance.selectedGame = {}
+            GameAssetCatalog.instance.ForgetSelection()
             self._SetPulldownAttention(self.gameSelect, True)
 
     def HideSidebar(self):

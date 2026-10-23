@@ -9,6 +9,7 @@ from typing import List
 from .Helpers.AutonaDirHelper import AutonaResolve
 from .Helpers.AutonaVersionHelper import add_beta_label
 from .Helpers.AutonaNetworkHelper import GetWebServerHost
+from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 
 from . import ui_constants as UI
 from . import ui_layout as L
@@ -874,6 +875,9 @@ class AutonaScoreboardWidget(QWidget):
 
     def _onGameAssetsLoaded(self):
         # AutonaGameAssetManager.signals.onLoad handler.
+        # First, while nothing below can have raised: the asset manager
+        # replaced its models, so no stage row may stay on the retired one.
+        self.individualGameTracker.RebindStageModel()
         self.SetDefaultsFromAssets()
         self.bestOfSpin.valueChanged.emit(self.bestOfSpin.value())
         # A game (re)load rewrites characters/defaults wholesale; publish the

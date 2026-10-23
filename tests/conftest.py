@@ -13,7 +13,9 @@ This module also hosts the widget-level harness (`autonaApp`): a real,
 bootstrapped singleton layer plus real scoreboard widgets, running offscreen
 inside a throwaway working directory. See the section at the bottom.
 """
+import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -87,6 +89,11 @@ _LINKED_TREES = [
 # own writable roots; `tmp` is where AutonaResolve() puts render scratch.
 _RUNTIME_DIRS = ["out", "user_data", "user_data/games", "layout", "tmp"]
 
+# The synthetic game loadCharacters() installs into the runtime
+# user_data/games (and dropAllBoards() removes again).
+HARNESS_GAME = "harness_game"
+HARNESS_GAME_NAME = "Harness Game"
+
 
 def _link_tree(link: Path, target: Path):
     """Point `link` at `target` without copying or needing admin rights.
@@ -110,11 +117,9 @@ class _AutonaHarness:
 
     def __init__(self, directory: Path):
         self.dir = directory
-        # Saved AutonaGameAssetManager fields, restored by dropAllBoards()
-        # when a test asked for a synthetic roster (see loadCharacters).
-        self._assetBackup = None
-        # Kept alive one generation past a model swap (agent-pitfalls #13).
-        self._retiredAssetModels = None
+        # True while HARNESS_GAME is installed and loaded (loadCharacters);
+        # dropAllBoards() uninstalls it.
+        self._gameInstalled = False
 
     # -- state ------------------------------------------------------------
 
@@ -202,79 +207,79 @@ class _AutonaHarness:
         self.settle()
 
     def loadCharacters(self, names=("Mario", "Luigi", "Peach"), skins=3):
-        """Give the asset manager a small synthetic character roster.
+        """Install and load a small synthetic game, HARNESS_GAME.
 
         The harness has no game installed (its user_data/games is empty), so
         AutonaGameAssetManager.characterModel has zero rows: every character
         combo can only ever sit at index -1, and any assertion about *which*
-        character a slot ended up on is vacuous. This loads the manager's own
-        data structures and rebuilds the model through the production
-        UpdateCharacterModel().
+        character a slot ended up on is vacuous. This writes a real game pack
+        -- one stock-icon PNG per character and skin -- into the runtime
+        user_data/games and loads it through the production path: the
+        catalog's scan and load, then the Qt adapter's model rebuild.
 
-        The per-character skin models are the one thing built here rather than
-        by UpdateSkinModel(): that fans out to thread-pool workers decoding
-        PNGs the harness does not have, and those workers must not outlive the
-        CWD. Their item payload matches what UpdateSkinModel writes for an
-        ordinary skin ({"assets": ...}, no name override).
+        What it leaves out is the onLoad broadcast that ends a real load, so
+        widgets other tests left alive do not react to it. Existing combos
+        only rebind on onLoad: call this before building the widgets that
+        should see the roster.
 
-        Call before building the widgets that should see the roster --
-        existing combos only rebind on AutonaGameAssetManager's onLoad.
+        The icon workers the rebuild starts are waited out here: they must
+        not outlive the CWD.
         """
-        from qtpy.QtCore import Qt
-        from qtpy.QtGui import QStandardItem, QStandardItemModel
+        from PIL import Image
+        from qtpy.QtWidgets import QApplication
 
         from src.AutonaGameAssetManager import AutonaGameAssetManager
+        from src.core.GameAssetCatalog import GameAssetCatalog
 
-        manager = AutonaGameAssetManager.instance
-        if self._assetBackup is None:
-            self._assetBackup = {
-                name: getattr(manager, name)
-                for name in ("characters", "characterModel", "skinModels",
-                             "selectedGame", "stockIcons", "_iconCache")}
-
-        manager.characters = {
-            name: {
-                "export_name": name,
-                "display_name": name,
-                "codename": name.lower(),
-                "en_name": name,
-                "modded": False,
-            }
-            for name in names
-        }
-        manager.stockIcons = {}
-        manager._iconCache = {}
-        # Retire rather than drop the outgoing model: combos and proxies of
-        # widgets built earlier still point at it (agent-pitfalls #13).
-        self._retiredAssetModels = [manager.characterModel, manager.skinModels]
-        manager.UpdateCharacterModel()
-
-        manager.skinModels = {}
+        game = self.dir / "user_data" / "games" / HARNESS_GAME
+        if game.exists():
+            shutil.rmtree(game)
+        icons = game / "base_files" / "icon"
+        icons.mkdir(parents=True)
+        (game / "base_files" / "config.json").write_text(json.dumps({
+            "name": HARNESS_GAME_NAME,
+            "character_to_codename": {
+                name: {"codename": name.lower()} for name in names},
+        }), encoding="utf-8")
+        (icons / "config.json").write_text(json.dumps(
+            {"type": ["icon"], "prefix": "", "postfix": "_"}),
+            encoding="utf-8")
         for name in names:
-            model = QStandardItemModel()
             for skin in range(skins):
-                item = QStandardItem()
-                item.setData(str(skin), Qt.ItemDataRole.EditRole)
-                item.setData({"assets": {}}, Qt.ItemDataRole.UserRole)
-                model.appendRow(item)
-            manager.skinModels[name] = model
+                Image.new("RGBA", (8, 8), (200, 30, 30, 255)).save(
+                    icons / f"{name.lower()}_{skin}.png")
 
-        manager.selectedGame = {
-            "codename": "harness_game", "name": "Harness Game"}
+        catalog = GameAssetCatalog.instance
+        catalog.ScanGames()
+        catalog.SelectGame(HARNESS_GAME, reload=True)
+        manager = AutonaGameAssetManager.instance
+        manager._RebuildModels()
+        manager.threadpool.waitForDone()
+        QApplication.processEvents()
+        self._gameInstalled = True
         return manager
 
     def _restoreAssets(self):
-        if self._assetBackup is None:
+        """Uninstall HARNESS_GAME and go back to the no-game models."""
+        if not self._gameInstalled:
             return
+        from qtpy.QtWidgets import QApplication
+
         from src.AutonaGameAssetManager import AutonaGameAssetManager
+        from src.core.GameAssetCatalog import GameAssetCatalog
 
         manager = AutonaGameAssetManager.instance
-        # Keep the synthetic generation alive one more cycle for the same
-        # reason loadCharacters() retires the previous one.
-        self._retiredAssetModels = [manager.characterModel, manager.skinModels]
-        for name, value in self._assetBackup.items():
-            setattr(manager, name, value)
-        self._assetBackup = None
+        manager.threadpool.waitForDone()
+        QApplication.processEvents()
+        shutil.rmtree(self.dir / "user_data" / "games" / HARNESS_GAME,
+                      ignore_errors=True)
+        catalog = GameAssetCatalog.instance
+        catalog.ScanGames()
+        # The empty snapshot rebuilds the empty models of a fresh start; the
+        # synthetic generation is retired, not dropped (agent-pitfalls #13).
+        catalog.ResetGameState()
+        manager._RebuildModels()
+        self._gameInstalled = False
 
     def dropAllBoards(self):
         for number in self.manager.BOARD_NUMBERS:

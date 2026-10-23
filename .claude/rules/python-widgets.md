@@ -86,8 +86,9 @@ state になる）。`Window._SeedPanelState()` はその起動時の呼び出�
 - ウィジェットの役割は「値を組み立てて操作を依頼する」「state を読んで描画する」の 2 つだけ。
   Qt モデル（国コンボ・キャラスロット・スキン行）から値を解決する処理は**ウィジェット側に残す**
   のが正しい（core は Qt を import しない）
-- `src/core` 外で state を書いてよいのは `AutonaGameAssetManager`（`game.*`）と
-  `AutonaTournamentDataProvider`（`provider_videogame`）の 2 つだけ。
+- `src/core` 外で state を書いてよいのは `AutonaTournamentDataProvider`
+  （`provider_videogame`）の 1 つだけ（`game.*` は ADR-005 S1a で
+  `core/GameAssetCatalog.py` へ移動）。
   `tests/test_objectname_keypath_contract.py` の書き手台帳テストが集合ごと pin している
 
 ## StateManager シグナル

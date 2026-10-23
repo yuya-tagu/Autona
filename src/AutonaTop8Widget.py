@@ -32,6 +32,7 @@ from loguru import logger
 
 from .core.StateManager import StateManager
 from .core.SettingsManager import SettingsManager
+from .core.DictHelper import deep_clone
 from .core import LayoutCatalog
 from .AutonaLayoutPreview import AutonaLayoutPreview, ObsUrl
 from .AutonaGameAssetManager import AutonaGameAssetManager
@@ -661,7 +662,9 @@ class AutonaTop8Widget(QDockWidget):
                 if val.get("codename") == char_codename:
                     char_entry = val
                     break
-        return char_entry or {}
+        # A copy: the entry is the asset catalog's own dict, and this one
+        # goes into the state (top8.*.characters).
+        return deep_clone(char_entry) if char_entry else {}
 
     # ── State -> UI ──────────────────────────────────────────────────
     def _loadFromState(self):

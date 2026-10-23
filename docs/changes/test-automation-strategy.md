@@ -364,11 +364,15 @@ board 2（team）は `AutonaScoreboardWidget(singlePlayer=False)` であり、
 ハーネスの `user_data/games` は空なので
 `AutonaGameAssetManager.characterModel` は 0 行。キャラコンボは index -1 から
 動かせず、「どのスロットに誰が入ったか」の assert が全て自明に通ってしまう。
-`_AutonaHarness.loadCharacters()` で最小限のロスター（`characters` /
-`stockIcons` を差し込み、モデル自体は production の `UpdateCharacterModel()` で構築）
-を流し込む。スキンモデルだけは手組み — `UpdateSkinModel()` は PNG をデコードする
-スレッドプールワーカーへ展開され、CWD 復元をまたいで走らせられないため。
-差し替えた世代は `agent-pitfalls #13` に従い 1 世代 retire し、テスト後に復元する。
+`_AutonaHarness.loadCharacters()` は最小限の**実ゲームパック**（`harness_game`、
+キャラ × スキンごとに 1 枚のアイコン PNG）をランタイムの `user_data/games` に書き出し、
+production の経路（`GameAssetCatalog.ScanGames()` / `SelectGame()` → アダプタの
+`_RebuildModels()`）で読み込む（ADR-005 S1a 以降。旧版は属性を直接差し込んでいた）。
+本物のロードとの違いは最後の `onLoad` を emit しないことだけ — 他のテストが残した
+ウィジェットを反応させないため。既存のコンボは `onLoad` でしか再バインドしないので、
+ロスターを見せたいウィジェットより先に呼ぶ。アイコンワーカーは CWD 復元をまたがないよう
+その場で待ち合わせる。テスト後（`dropAllBoards()`）はパックを削除して
+`ResetGameState()` → 空モデルへ戻す（旧世代は `agent-pitfalls #13` に従い 1 世代 retire）。
 
 #### 未修正の細かい歪み（今回は触っていない）
 

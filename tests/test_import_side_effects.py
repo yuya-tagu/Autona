@@ -103,6 +103,10 @@ core_state = importlib.import_module("src.core.StateManager").StateManager
 # the Qt-side ones, so the same rule applies: bootstrap_core() creates it,
 # importing the module must not.
 core_actions = importlib.import_module("src.core.Actions").AutonaActions
+# The game asset catalog (ADR-005 S1a): the Qt-free half of what used to be
+# AutonaGameAssetManager, a singleton created by bootstrap_core() as well.
+game_catalog = importlib.import_module(
+    "src.core.GameAssetCatalog").GameAssetCatalog
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -163,6 +167,7 @@ from qtpy.QtWidgets import QApplication
 
 assert QApplication.instance() is None, "import created a QApplication"
 assert core_actions.instance is None, "import created AutonaActions.instance"
+assert game_catalog.instance is None, "import created GameAssetCatalog.instance"
 assert hotkeys.instance is None, "import created AutonaHotkeys.instance"
 assert not hotkeys._actions_connected, \
     "import wired the hotkeys to AutonaActions"
@@ -256,12 +261,23 @@ core_actions.instance.SetDisplayOption("show_seed", False)
 assert core_state.Get("display_options.show_seed") is False, \
     "AutonaActions could not write the state headlessly"
 
-# Same for the GameAssetManager: its ./user_data/games guarantee moved from
-# module level into __init__. StateManager.Initialize() has to run first --
-# the constructor writes the "game" state key.
-game_assets.instance = game_assets()
+# Same for the game asset catalog and its Qt adapter (ADR-005 S1a). The
+# ./user_data/games guarantee travels with the scan that lists it
+# (ScanGames()), and the empty "game" state is published by
+# ResetGameState() -- which is why StateManager.Initialize() has to run
+# first. Constructing either object touches neither.
+game_catalog.instance = game_catalog()
+assert not os.path.exists("./user_data/games"), \
+    "GameAssetCatalog() created ./user_data/games"
+game_catalog.instance.ResetGameState()
+assert core_state.Get("game") == {}, \
+    "GameAssetCatalog.ResetGameState() did not publish an empty game"
+game_assets.instance = game_assets(game_catalog.instance)
+assert not os.path.exists("./user_data/games"), \
+    "AutonaGameAssetManager() created ./user_data/games"
+game_catalog.instance.ScanGames()
 assert os.path.isdir("./user_data/games"), \
-    "AutonaGameAssetManager() did not create ./user_data/games"
+    "GameAssetCatalog.ScanGames() did not create ./user_data/games"
 
 # Same for AutonaAlertNotification: MarkNotificationRed() needs the file, so
 # the guarantee moved from module level into __init__. No QApplication is

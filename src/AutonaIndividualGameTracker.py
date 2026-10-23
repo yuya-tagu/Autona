@@ -162,6 +162,34 @@ class AutonaIndividualGameTracker(QWidget):
             team2.setChecked(winner == TEAM_2)
             tie.setChecked(winner == TIE)
 
+    @assert_gui_thread
+    def RebindStageModel(self):
+        """Point every row's stage combo at the current stage model.
+
+        The asset manager replaces its models on every game load and keeps
+        the previous generation alive for one more load only
+        (agent-pitfalls #13). The board normally rebuilds the rows on the
+        same onLoad (bestOf re-emit -> SetStageCount), but a row that
+        survived it would be left bound to a model that the next load
+        deletes. Signals are blocked: this is not a stage selection, and
+        must not write score.{n}.stages.*.
+
+        Called from the board's onLoad handler rather than connected here:
+        this widget sits in the board's score column, which is parentless
+        and outlives a destroyed board, so a connection of its own would
+        keep answering onLoad as a ghost (tests/test_signal_lifetime.py).
+        """
+        model = AutonaGameAssetManager.instance.stageModelWithBlank
+        for index, row in enumerate(self.stage_widget_list):
+            combo = row.findChild(QComboBox, f"stageMenu_{index}")
+            if combo is None or combo.model() is model:
+                continue
+            text = combo.currentText()
+            with QSignalBlocker(combo):
+                combo.setModel(model)
+                found = combo.findText(text) if text else -1
+                combo.setCurrentIndex(found if found >= 0 else 0)
+
     # ── handlers ─────────────────────────────────────────────────────────
 
     @assert_gui_thread
