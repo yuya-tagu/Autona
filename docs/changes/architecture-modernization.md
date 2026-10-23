@@ -665,7 +665,7 @@ LOSERS フラグと、そのチームの選手名に付く ` [L]`（`mergedName`
   - トラッカー ON で勝敗を付けてからマッチリセット: ステージボタンが全部未報告に戻り、スコアが 0-0
   - Start.gg の選手でクリアしたとき、統計が 1 回だけ取り直される
 
-#### S2e best_of を state 主導へ（2026-10-24・PR 未作成）
+#### S2e best_of を state 主導へ（2026-10-24・PR #226）
 
 セットの長さ（BEST OF）の正本を、ボードのスピンボックスから state にした。旧実装では、スピンボックスの `valueChanged` が 1 SaveBlock で `AutonaActions.SetBestOf`（6 キー）→ `individualGameTracker.SetStageCount` を呼んでいた。ほかの入口（セット読込の `ChangeSetData`、Web の `set_route` / `reset_match` / `clear_all`、v1 の `PATCH set`、ゲームのロード、すべての入力値をリセット）は、どれもそのスピンボックスを動かしていた。新しい `AutonaActions.SetBestOf(board, n)` は 6 キーとステージ行を 1 SaveBlock で書く。スピンボックスとステージ行は held サイクルから state を描画する（S2a と同じ形）。
 
