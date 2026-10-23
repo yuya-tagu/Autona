@@ -86,6 +86,16 @@ GOLDEN = None if RECORD else json.loads(
 SWAP_GOLDEN_PATH = GOLDEN_PATH.parent / "swap_golden.json"
 SWAP_GOLDEN = None if RECORD or not SWAP_GOLDEN_PATH.exists() else json.loads(
     SWAP_GOLDEN_PATH.read_text(encoding="utf-8"))
+# The clear operations (score, match, players, the whole board) from every
+# entry point -- the board's buttons, a set load's pre-pass and the Web
+# actions -- on a board holding everything a clear has to empty: one section
+# for the team board ("operations"), one for the singles board ("singles")
+# and one for the set load's pre-pass with game rows recorded ("prepass").
+# Recorded on the last pre-S2d tree (2045c973) with `-k clear_operations`;
+# each test writes its own section.
+CLEAR_GOLDEN_PATH = GOLDEN_PATH.parent / "clear_golden.json"
+CLEAR_GOLDEN = None if RECORD or not CLEAR_GOLDEN_PATH.exists() \
+    else json.loads(CLEAR_GOLDEN_PATH.read_text(encoding="utf-8"))
 # The key order of every dict of the board subtree after each step of both
 # step lists, recorded on the last pre-S2c tree (6a6f04cc):
 #
@@ -109,11 +119,12 @@ PREFIX = f"score.{BOARD}"
 class _Cycles:
     """held_state_updated notifications for the board, i.e. save cycles."""
 
-    def __init__(self):
+    def __init__(self, prefix=PREFIX):
         self.count = 0
+        self._prefix = prefix
 
     def _onHeld(self, prefix):
-        if prefix == PREFIX:
+        if prefix == self._prefix:
             self.count += 1
 
     def __enter__(self):
@@ -241,9 +252,9 @@ def _digestAssets(value):
     return value
 
 
-def _boardState(app):
+def _boardState(app, prefix=PREFIX):
     with StateManager.lock:
-        value = deep_clone(StateManager.Get(PREFIX) or {})
+        value = deep_clone(StateManager.Get(prefix) or {})
     exact = _normalise(encode(value), app)
     readable = json.loads(_normalise(orjson.dumps(
         _digestAssets(value),
@@ -271,9 +282,9 @@ def _keyOrders(value, path=""):
     return orders
 
 
-def _boardKeyOrder():
+def _boardKeyOrder(prefix=PREFIX):
     with StateManager.lock:
-        return _keyOrders(deep_clone(StateManager.Get(PREFIX) or {}))
+        return _keyOrders(deep_clone(StateManager.Get(prefix) or {}))
 
 
 # ── the operations ───────────────────────────────────────────────────────
@@ -458,23 +469,222 @@ def _swapSteps(board):
     ]
 
 
+# ── the clear operations (ADR-005 S2d) ───────────────────────────────────
+
+_SET_MATCH_BAR = {"round_name": "Winners Final",
+                  "round_name_en": "Winners Final",
+                  "tournament_phase": "Top 8", "tournament_pool": "Pool A"}
+
+
+def _fillBoth(board):
+    _fillFrom(board, 1, SWAP_PLAYERS)
+    _fillFrom(board, 2, SWAP_PLAYERS)
+
+
+def _everything(board, teamNames=True):
+    """A board holding everything a clear empties: two filled teams with
+    names (one with a crest), a match bar, a score and a losers side.
+    `teamNames=False` for the singles board, which shows none."""
+    _fillBoth(board)
+    if teamNames:
+        _teamName(board, 1, "Alpha")
+        _teamName(board, 2, "Bravo")
+    board.ChangeSetData(dict(_SET_MATCH_BAR))
+    board.CommandScoreChange(0, 1)
+    board.CommandScoreChange(1, 2)
+    _losers(board, 2).setChecked(True)
+
+
+def _clearSteps(board, app):
+    """Every clear, from every entry point, on a team board that has
+    something for each of them to empty -- ids, a city, an online avatar,
+    notes, regions, variants, mains, seeds, team names and a crest, a match
+    bar, the game tracker on -- refilled in between."""
+    actions = app.actions()
+    return [
+        ("two players, two characters", lambda: (
+            board.playerNumber.setValue(2), board.charNumber.setValue(2))),
+        ("tracker on, best of 5",
+         lambda: _withTracker(lambda: board.bestOfSpin.setValue(5))),
+        ("fill both teams", lambda: _fillBoth(board)),
+        ("team names", lambda: (_teamName(board, 1, "Alpha"),
+                                _teamName(board, 2, "Bravo"))),
+        ("a match bar", lambda: board.ChangeSetData(dict(_SET_MATCH_BAR))),
+        # T2, T1, T1: 2-1 on the rows and on the score.
+        ("stage results", lambda: (_stageButton(board, 1, 2).click(),
+                                   _stageButton(board, 2, 1).click(),
+                                   _stageButton(board, 3, 1).click())),
+        ("losers", lambda: _losers(board, 2).setChecked(True)),
+        ("clear the score", board.ClearScore),
+        ("score and losers again", lambda: (
+            board.CommandScoreChange(0, 1), board.CommandScoreChange(1, 2),
+            _losers(board, 1).setChecked(True))),
+        ("reset match", board.ResetMatch),
+        ("a set with a match bar, a score and losers",
+         lambda: board.ChangeSetData(dict(
+             _SET_MATCH_BAR, team1score=2, team2score=1, team1losers=True))),
+        ("web reset match", lambda: actions.reset_match(BOARD)),
+        ("tracker on, best of 3",
+         lambda: _withTracker(lambda: board.bestOfSpin.setValue(3))),
+        ("web set route", lambda: actions.set_route(
+            BOARD, phase="Bracket", pool="Pool B", match="Grand Final",
+            losers="true", team="2")),
+        ("web team name", lambda: actions.set_route(
+            BOARD, team="1", teamName="Charlie")),
+        ("web team name unchanged", lambda: actions.set_route(
+            BOARD, team="1", teamName="Charlie")),
+        ("swap teams", board.SwapTeams),
+        # Set-shaped: team 1 of the set is the right column now.
+        ("web losers while swapped", lambda: actions.set_route(
+            BOARD, losers="false", team="1")),
+        ("web team name while swapped", lambda: actions.set_route(
+            BOARD, team="2", teamName="Delta")),
+        ("swap teams back", board.SwapTeams),
+        ("web empty match", lambda: actions.set_route(BOARD, match="")),
+        ("clear players keeping mains",
+         lambda: board.CommandClearAll(no_mains=True)),
+        ("fill both teams again", lambda: _fillBoth(board)),
+        ("one character", lambda: board.charNumber.setValue(1)),
+        ("clear players keeping mains with one character",
+         lambda: board.CommandClearAll(no_mains=True)),
+        ("two characters and refill", lambda: (
+            board.charNumber.setValue(2), _fillBoth(board))),
+        ("clear players", board.CommandClearAll),
+        ("refill", lambda: _fillBoth(board)),
+        ("web reset players", lambda: actions.reset_players(BOARD)),
+        ("refill everything", lambda: _everything(board)),
+        ("web clear all", lambda: actions.clear_all(BOARD)),
+        ("two players, two characters, best of 5 and refill everything",
+         lambda: (board.playerNumber.setValue(2),
+                  board.charNumber.setValue(2),
+                  _withTracker(lambda: board.bestOfSpin.setValue(5)),
+                  _everything(board))),
+        ("reset all inputs", lambda: _confirmed(board.ResetAllInputs)),
+        ("refill everything again", lambda: _everything(board)),
+        # A set load's pre-pass: players (keeping the mains) and the score,
+        # not the match bar. The follow timers are stopped in the same step
+        # so that none fires during the steps that follow.
+        ("follow a set", lambda: (
+            board.NewSetSelected({"id": "999", "auto_update": "set",
+                                  "no_mains": True}),
+            board.StopAutonaUpdate())),
+    ]
+
+
+def _stageResults(board):
+    # T2, T1, T1: 2-1 on the rows and on the score.
+    _stageButton(board, 1, 2).click()
+    _stageButton(board, 2, 1).click()
+    _stageButton(board, 3, 1).click()
+
+
+def _follow(board, setId, noMains):
+    """A set chosen to follow, as the set / station / stream windows do;
+    the follow timers stopped at once so that none fires later."""
+    board.NewSetSelected({"id": setId, "auto_update": "set",
+                          "no_mains": noMains})
+    board.StopAutonaUpdate()
+
+
+def _singlesClearSteps(board, app):
+    """The clears of `_clearSteps` on the singles board (board 1, the
+    shipped default): one player a side, no team names, the LOSERS boxes
+    on the players' detail rows."""
+    actions = app.actions()
+    number = board.scoreboardNumber
+    return [
+        ("two characters", lambda: board.charNumber.setValue(2)),
+        ("tracker on, best of 5",
+         lambda: _withTracker(lambda: board.bestOfSpin.setValue(5))),
+        ("fill both players", lambda: _fillBoth(board)),
+        ("a match bar", lambda: board.ChangeSetData(dict(_SET_MATCH_BAR))),
+        ("stage results", lambda: _stageResults(board)),
+        ("losers", lambda: _losers(board, 2).setChecked(True)),
+        ("clear the score", board.ClearScore),
+        ("score and losers again", lambda: (
+            board.CommandScoreChange(0, 1), board.CommandScoreChange(1, 2),
+            _losers(board, 1).setChecked(True))),
+        ("reset match", board.ResetMatch),
+        ("a set with a match bar, a score and losers",
+         lambda: board.ChangeSetData(dict(
+             _SET_MATCH_BAR, team1score=2, team2score=1, team1losers=True))),
+        ("web reset match", lambda: actions.reset_match(number)),
+        ("clear players keeping mains",
+         lambda: board.CommandClearAll(no_mains=True)),
+        ("fill both players again", lambda: _fillBoth(board)),
+        ("one character", lambda: board.charNumber.setValue(1)),
+        ("clear players keeping mains with one character",
+         lambda: board.CommandClearAll(no_mains=True)),
+        ("two characters and refill", lambda: (
+            board.charNumber.setValue(2), _fillBoth(board))),
+        ("clear players", board.CommandClearAll),
+        ("refill", lambda: _fillBoth(board)),
+        ("web reset players", lambda: actions.reset_players(number)),
+        ("refill everything",
+         lambda: _everything(board, teamNames=False)),
+        ("web clear all", lambda: actions.clear_all(number)),
+        ("two characters, best of 5 and refill everything", lambda: (
+            board.charNumber.setValue(2),
+            _withTracker(lambda: board.bestOfSpin.setValue(5)),
+            _everything(board, teamNames=False))),
+        ("reset all inputs", lambda: _confirmed(board.ResetAllInputs)),
+        ("refill everything again",
+         lambda: _everything(board, teamNames=False)),
+        ("follow a set without keeping mains",
+         lambda: _follow(board, "999", False)),
+    ]
+
+
+def _prepassSteps(board):
+    """A set load's pre-pass (the players, then the score) on a team board
+    whose game tracker has rows recorded -- without keeping the mains, then
+    keeping them -- and the set followed already chosen again, which skips
+    it."""
+    return [
+        ("two players, two characters", lambda: (
+            board.playerNumber.setValue(2), board.charNumber.setValue(2))),
+        ("tracker on, best of 5",
+         lambda: _withTracker(lambda: board.bestOfSpin.setValue(5))),
+        ("fill both teams", lambda: _fillBoth(board)),
+        ("team names", lambda: (_teamName(board, 1, "Alpha"),
+                                _teamName(board, 2, "Bravo"))),
+        ("a match bar", lambda: board.ChangeSetData(dict(_SET_MATCH_BAR))),
+        ("stage results", lambda: _stageResults(board)),
+        ("losers", lambda: _losers(board, 2).setChecked(True)),
+        ("follow a set without keeping mains",
+         lambda: _follow(board, "999", False)),
+        ("refill, stage results and losers", lambda: (
+            _fillBoth(board), _stageResults(board),
+            _losers(board, 1).setChecked(True))),
+        ("follow another set keeping mains",
+         lambda: _follow(board, "1000", True)),
+        ("refill and stage results", lambda: (
+            _fillBoth(board), _stageResults(board))),
+        ("follow the same set again", lambda: _follow(board, "1000", True)),
+    ]
+
+
 def _runSteps(app, board, afterEach=None, steps=None, stats=False,
               keyOrders=None):
+    # The board's own subtree: the team board's everywhere but the singles
+    # clears (ADR-005 S2d review).
+    prefix = board.statePrefix
     recorded = []
     for name, step in (steps if steps is not None else _steps(board)):
-        with _Cycles() as cycles, _StatsTriggers(board) as triggers:
+        with _Cycles(prefix) as cycles, _StatsTriggers(board) as triggers:
             step()
             app.settle()
         entry = {"step": name, "cycles": cycles.count}
         if stats:
             entry["stats"] = triggers.counts
-        entry.update(_boardState(app))
+        entry.update(_boardState(app, prefix))
         if keyOrders is not None:
-            keyOrders.append({"step": name, "keyOrder": _boardKeyOrder()})
+            keyOrders.append({"step": name,
+                              "keyOrder": _boardKeyOrder(prefix)})
         if afterEach is not None:
             afterEach(name)
         with _Published() as published:
-            StateManager.CommitHeld(PREFIX)
+            StateManager.CommitHeld(prefix)
             app.settle()
         entry["published"] = [len(published.deltas), published.bigChanges,
                               digest(_normalise(published.encoded(), app))]
@@ -611,6 +821,84 @@ S2C_SWAP_CHANGES = {
         "stateDigest": "f129ff86c1afb141"},
 }
 
+# What ADR-005 S2d changed on purpose. The clears were the board's widgets
+# driven back to empty -- each player card's Clear() a save cycle of its
+# own, the score spinboxes' valueChanged writing the score and, with the
+# game tracker on, clearing the stage rows inside that same write. They are
+# core operations on the state now (AutonaActions.ClearScore / ResetMatch /
+# ClearPlayers / ClearBoard): the state, its key order and what 反映
+# publishes are the recording's at every step, and so is what every card
+# shows. What differs:
+#
+# - `cycles`: clearing the players is one save cycle (it was one per card).
+#   The score is written in one cycle, and the stage rows follow it from the
+#   board's held cycle like after every other core score write (ResetScore,
+#   a +1): one cycle per row cleared. So with the tracker on and games
+#   recorded, a clear of the score takes 1 + one per recorded game -- fewer
+#   than before for ClearScore (each score and each row was a cycle), more
+#   for ResetMatch (its block used to cover the rows too). Tracker off (the
+#   shipped default), it is one.
+# - `stats`: the statistics are fetched once per clear that dropped player
+#   ids, for the teams it dropped them on (the board, from the state), not
+#   once per card; the upset factor is recalculated by the operation.
+# - a team name set from the Web is one cycle (it was the name, then the
+#   crest).
+_CLEAR_STATS = {
+    "RecentSetsSignal": 1, "LastSetsP1Signal": 1, "LastSetsP2Signal": 1,
+    "PlayerHistoryStandingsP1Signal": 1, "PlayerHistoryStandingsP2Signal": 1,
+    "UpsetFactorCalculation": 0}
+
+S2D_CLEAR_CHANGES = {
+    "clear the score": {"cycles": 4},
+    "reset match": {"cycles": 4},
+    "web reset match": {"cycles": 5},
+    "web team name": {"cycles": 1},
+    "clear players keeping mains": {"cycles": 1, "stats": _CLEAR_STATS},
+    "clear players keeping mains with one character": {
+        "cycles": 1, "stats": _CLEAR_STATS},
+    "clear players": {"cycles": 1, "stats": _CLEAR_STATS},
+    "web reset players": {"cycles": 1, "stats": _CLEAR_STATS},
+    # The reset's 1 + 3 game rows, the best of, the two counts (3) and the
+    # players (1; it was 2 cards).
+    "web clear all": {"cycles": 9, "stats": _CLEAR_STATS},
+    "reset all inputs": {"stats": _CLEAR_STATS},
+    "follow a set": {"stats": _CLEAR_STATS},
+}
+
+# The same on the first recording: its players' clear (no ids, tracker off).
+S2D_CHANGES = {
+    "clear players": {"cycles": 1},
+}
+
+# The singles board (ADR-005 S2d review): the same differences, with one
+# card a side -- the players' clear was 2 cycles (a card each) and fetched
+# the recent sets and recalculated the upset factor once per card.
+S2D_SINGLES_CHANGES = {
+    "clear the score": {"cycles": 4},
+    "reset match": {"cycles": 4},
+    "web reset match": {"cycles": 5},
+    "clear players keeping mains": {"cycles": 1, "stats": _CLEAR_STATS},
+    "clear players keeping mains with one character": {
+        "cycles": 1, "stats": _CLEAR_STATS},
+    "clear players": {"cycles": 1, "stats": _CLEAR_STATS},
+    "web reset players": {"cycles": 1, "stats": _CLEAR_STATS},
+    # No game rows by then (the Web reset took the best of): the players'
+    # clear is the one cycle less.
+    "web clear all": {"cycles": 4, "stats": _CLEAR_STATS},
+    "reset all inputs": {"stats": _CLEAR_STATS},
+    "follow a set without keeping mains": {"stats": _CLEAR_STATS},
+}
+
+# A set load's pre-pass with game rows recorded: the set load's block used
+# to cover the rows too (the score spinboxes cleared them on the way); now
+# they follow the cleared score from the held cycle, one cycle each -- the
+# same as ResetMatch above. The state each step leaves is unchanged.
+S2D_PREPASS_CHANGES = {
+    "follow a set without keeping mains": {"cycles": 4,
+                                           "stats": _CLEAR_STATS},
+    "follow another set keeping mains": {"cycles": 4, "stats": _CLEAR_STATS},
+}
+
 
 def _travelled(state, reference):
     """`state` with every player's mains and character variants taken from
@@ -695,8 +983,9 @@ def test_board_operations_publish_the_recorded_state(board, autonaApp):
             encoding="utf-8")
         return
     recording = GOLDEN["operations"]
-    golden = [_withChanges(_withChanges(entry, S2B_CHANGES, recording),
-                           S2C_CHANGES, recording)
+    golden = [_withChanges(_withChanges(_withChanges(
+        entry, S2B_CHANGES, recording), S2C_CHANGES, recording),
+        S2D_CHANGES, recording)
               for entry in recording]
     assert [e["step"] for e in recorded] == [e["step"] for e in golden]
     for actual, expected in zip(recorded, golden):
@@ -799,6 +1088,84 @@ def test_swap_operations_publish_the_recorded_state(
     assert mismatches == {step: {} for step in mismatches}
 
 
+def _recordClearGolden(section, recorded):
+    # Read now, not at import: the clear recordings share the file, one
+    # section per test.
+    golden = json.loads(CLEAR_GOLDEN_PATH.read_text(encoding="utf-8")) \
+        if CLEAR_GOLDEN_PATH.exists() else {}
+    golden[section] = recorded
+    CLEAR_GOLDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CLEAR_GOLDEN_PATH.write_text(json.dumps(
+        golden, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def _replayClears(app, board, steps, section, keyOrderSection, changes):
+    """`steps` against the pre-S2d recording `section` of clear_golden.json:
+    the same state (key order included), cycles, publication and
+    statistics fetches, apart from `changes` -- and every card showing its
+    slot after every step."""
+    mismatches = {}
+
+    def check(step):
+        if not (RECORD or RECORD_KEY_ORDER):
+            mismatches[step] = _cardMismatches(board)
+            mismatches[step].update(_losersMismatches(board))
+
+    keyOrders = []
+    recorded = _runSteps(app, board, afterEach=check, steps=steps,
+                         stats=True, keyOrders=keyOrders)
+
+    if RECORD_KEY_ORDER:
+        _recordKeyOrder(keyOrderSection, keyOrders)
+        return
+    if RECORD:
+        _recordClearGolden(section, recorded)
+        return
+    assert CLEAR_GOLDEN is not None and section in CLEAR_GOLDEN, (
+        f"{CLEAR_GOLDEN_PATH} has no {section!r}: it is recorded on the "
+        "pre-S2d tree (2045c973) with AUTONA_RECORD_BOARD_OPERATIONS=1 "
+        "-k clear_operations")
+    recording = CLEAR_GOLDEN[section]
+    golden = [_withChanges(entry, changes, recording)
+              for entry in recording]
+    assert [e["step"] for e in recorded] == [e["step"] for e in golden]
+    for actual, expected in zip(recorded, golden):
+        assert actual["state"] == expected["state"], actual["step"]
+    _assertKeyOrder(keyOrderSection, keyOrders)
+    for actual, expected in zip(recorded, golden):
+        assert actual == expected, actual["step"]
+    assert mismatches == {step: {} for step in mismatches}
+
+
+def test_clear_operations_publish_the_recorded_state(
+        board, autonaApp, teamLogo):
+    """Every clear from every entry point on the team board."""
+    _replayClears(autonaApp, board, _clearSteps(board, autonaApp),
+                  "operations", "clear operations", S2D_CLEAR_CHANGES)
+
+
+@pytest.fixture
+def singlesBoard(slotEnv, autonaApp):
+    slotEnv("tgame")
+    return autonaApp.board(1)
+
+
+def test_singles_clear_operations_publish_the_recorded_state(
+        singlesBoard, autonaApp):
+    """The same clears on the singles board."""
+    _replayClears(autonaApp, singlesBoard,
+                  _singlesClearSteps(singlesBoard, autonaApp),
+                  "singles", "singles clear operations",
+                  S2D_SINGLES_CHANGES)
+
+
+def test_set_load_prepass_clear_operations_publish_the_recorded_state(
+        board, autonaApp, teamLogo):
+    """A set load's pre-pass with game rows recorded, both ways."""
+    _replayClears(autonaApp, board, _prepassSteps(board),
+                  "prepass", "set load pre-pass", S2D_PREPASS_CHANGES)
+
+
 # ── the card shows its slot ──────────────────────────────────────────────
 #
 # Read straight off the widgets and compared with the state, through the
@@ -877,7 +1244,8 @@ def _losersMismatches(board):
     for team in (1, 2):
         shown = _losers(board, team).isChecked()
         flag = bool(StateManager.Get(
-            f"{PREFIX}.team.{team}.{schema.TEAM_LOSERS_KEY}", False))
+            f"{board.statePrefix}.team.{team}.{schema.TEAM_LOSERS_KEY}",
+            False))
         if shown != flag:
             result[f"team.{team}.{schema.TEAM_LOSERS_KEY}"] = (shown, flag)
     return result
@@ -904,7 +1272,8 @@ def _cardMismatches(board):
 # copy between cards (inside the board's SaveBlock) and are one as the core
 # operation (AutonaActions.SwapTeams / SwapPlayers).
 ONE_CYCLE_STEPS = ("losers", "swap teams", "move a player down",
-                   "swap teams back", "reset match", "load a set",
+                   "swap teams back", "reset match", "clear players",
+                   "load a set",
                    "reset all inputs", "losers on a filled team",
                    "grow the roster on a losers team", "back to one player",
                    "load a losers set that grows the roster",
@@ -922,7 +1291,7 @@ def test_a_single_operation_is_a_single_save_cycle(board, autonaApp):
 
 # ── a slot written in the state reaches its card ─────────────────────────
 #
-# What S2c's core swap does and S2d's core clear will do: write the slot
+# What S2c's core swap and S2d's core clear do: write the slot
 # without going through the card. Nothing below touches a widget before
 # asserting on it.
 
@@ -1559,3 +1928,173 @@ def test_a_tag_being_typed_with_its_candidates_open_travels_too(
             assert _cardMismatches(board) == {}
     finally:
         completer.setModel(original)
+
+
+# ── a clear while a field is being typed in (ADR-005 S2d) ──────────────
+#
+# The clears empty the slots in the state now, and a focused field is one
+# the render leaves alone: without the board finishing the field first,
+# the typed text stayed on the card -- and was committed into the emptied
+# slot on focus-out. Each card's Clear() used to empty its own fields.
+
+def _clearFrom(entry, board, app):
+    if entry == "players":
+        board.CommandClearAll()
+    elif entry == "reset all inputs":
+        _confirmed(board.ResetAllInputs)
+    elif entry == "web reset players":
+        assert app.actions().reset_players(BOARD) == "OK"
+    elif entry == "follow a set":
+        # The set load's pre-pass: the focus leaves the board's field here
+        # too, whenever the set followed changes (ADR-005 S2d review).
+        _follow(board, "999", True)
+    else:
+        assert app.actions().clear_all(BOARD) == "OK"
+
+
+@pytest.mark.parametrize("entry", [
+    "players", "reset all inputs", "web reset players", "web clear all",
+    "follow a set"])
+def test_a_tag_being_typed_is_cleared_with_the_rest(board, autonaApp, entry):
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    card = board.team1playerWidgets[0]
+    PlayerService(card.path).SetText(schema.PLAYER_TAG_KEY, "LEFT")
+    autonaApp.settle()
+    tag = card._w(schema.PLAYER_TAG_KEY, QLineEdit)
+    sponsor = card._w(schema.PLAYER_SPONSOR_KEY, QLineEdit)
+    key = f"{card.path}.{schema.PLAYER_TAG_KEY}"
+
+    with _onScreen(board, autonaApp):
+        _focus(tag, autonaApp)
+        QTest.keyClicks(tag, "!")
+        assert autonaApp.get(key) == "LEFT", "typing committed by itself"
+
+        _clearFrom(entry, board, autonaApp)
+        autonaApp.settle()
+
+        assert autonaApp.get(key) == ""
+        assert tag.text() == ""
+        # Leaving the field later writes nothing into the emptied slot.
+        _focus(sponsor, autonaApp)
+        assert autonaApp.get(key) == ""
+        assert autonaApp.get(f"{card.path}.mergedName") == ""
+        assert _cardMismatches(board) == {}
+
+
+# ── a team name the Web writes while the operator is in its field ──────
+#
+# The field is left alone by the render while it has the focus
+# (_SyncSetFields); finishing the edit used to write the field's text
+# back over the Web's name. The board remembers what it left there, as a
+# player card does (ADR-005 S2d review).
+
+def _teamNameEdit(board, team):
+    column = board.team1column if team == 1 else board.team2column
+    return column.findChild(QLineEdit, schema.TEAM_NAME_KEY)
+
+
+@pytest.fixture
+def teamBoard(board, autonaApp):
+    board.playerNumber.setValue(2)
+    autonaApp.settle()
+    return board
+
+
+def test_a_web_team_name_survives_leaving_the_field(
+        teamBoard, autonaApp, teamLogo):
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    board = teamBoard
+    edit, other = _teamNameEdit(board, 1), _teamNameEdit(board, 2)
+    key = f"{PREFIX}.team.1.{schema.TEAM_NAME_KEY}"
+
+    with _onScreen(board, autonaApp):
+        _focus(edit, autonaApp)
+        QTest.keyClicks(edit, "Typed")
+        assert autonaApp.get(key) == "", "typing committed by itself"
+
+        assert autonaApp.actions().set_route(
+            BOARD, team="1", teamName="Alpha") == "OK"
+        autonaApp.settle()
+        assert autonaApp.get(key) == "Alpha"
+        # Not yanked from under the caret...
+        assert edit.text() == "Typed"
+
+        # ...and not written back over the Web's name when left.
+        _focus(other, autonaApp)
+        assert autonaApp.get(key) == "Alpha"
+        assert autonaApp.get(f"{PREFIX}.team.1.logo") \
+            == "./user_data/team_logo/alpha.png"
+        assert edit.text() == "Alpha"
+
+        # The field is the operator's again afterwards.
+        _focus(edit, autonaApp)
+        QTest.keyClicks(edit, "2")
+        _focus(other, autonaApp)
+        assert autonaApp.get(key) == "Alpha2"
+
+
+def test_typing_after_a_web_team_name_wins(teamBoard, autonaApp, teamLogo):
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    board = teamBoard
+    edit, other = _teamNameEdit(board, 1), _teamNameEdit(board, 2)
+    key = f"{PREFIX}.team.1.{schema.TEAM_NAME_KEY}"
+
+    with _onScreen(board, autonaApp):
+        _focus(edit, autonaApp)
+        autonaApp.actions().set_route(BOARD, team="1", teamName="Alpha")
+        autonaApp.settle()
+        assert autonaApp.get(key) == "Alpha"
+        assert edit.text() == ""
+
+        QTest.keyClicks(edit, "Bravo")
+        _focus(other, autonaApp)
+
+        assert autonaApp.get(key) == "Bravo"
+        assert autonaApp.get(f"{PREFIX}.team.1.logo") is None
+        assert edit.text() == "Bravo"
+
+
+# ── a card's own Clear and the core clear (ADR-005 S2d review) ──────────
+#
+# A card still empties itself through its widgets -- its Clear button and
+# the Clear() at the start of every SetData -- until S2f moves SetData to
+# core. For a filled slot it must publish what AutonaActions._ClearSlot
+# does, or the two clears drift apart unnoticed.
+
+@pytest.mark.parametrize("characters", [1, 2])
+@pytest.mark.parametrize("no_mains", [False, True])
+def test_a_cards_own_clear_publishes_what_the_core_clear_does(
+        board, autonaApp, teamLogo, no_mains, characters):
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    from src.core.Actions import AutonaActions
+
+    board.playerNumber.setValue(2)
+    board.charNumber.setValue(characters)
+    _fillBoth(board)
+    autonaApp.settle()
+    with StateManager.lock:
+        before = deep_clone(StateManager.Get(PREFIX))
+
+    for card in board.playerWidgets:
+        card.Clear(no_mains)
+    autonaApp.settle()
+    with StateManager.lock:
+        viaCards = deep_clone(StateManager.Get(PREFIX))
+
+    # The same filled board again, and the cards showing it.
+    StateManager.Set(PREFIX, deep_clone(before))
+    autonaApp.settle()
+    assert _cardMismatches(board) == {}
+    AutonaActions.instance.ClearPlayers(BOARD, no_mains)
+    autonaApp.settle()
+    with StateManager.lock:
+        viaCore = deep_clone(StateManager.Get(PREFIX))
+
+    assert viaCore != before
+    assert viaCore == viaCards
+    assert _keyOrders(viaCore) == _keyOrders(viaCards)
+    assert _cardMismatches(board) == {}

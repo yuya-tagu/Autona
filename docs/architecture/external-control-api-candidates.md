@@ -223,7 +223,7 @@ WS 列は対応する Socket.IO イベントの有無。
 ### 5.2 全消去 `clear-all`（B）
 
 - **UI 導線**: スコアボードのクリア操作
-- **関連コード**: `clear_all`（`@gui_thread_sync`）→ `ClearScore` + best_of=0 + 人数/キャラ=1 + `CommandClearAll`（[AutonaWebServerActions.py:363](../../src/AutonaWebServerActions.py)）
+- **関連コード**: `clear_all`（`@gui_thread_sync`）→ `AutonaActions.ResetMatch`（スコア・LOSERS・match バー）+ best_of=0 + 人数/キャラ=1 + `CommandClearAll`（= `AutonaActions.ClearPlayers`。ADR-005 S2d）（[AutonaWebServerActions.py](../../src/AutonaWebServerActions.py)）。デスクトップの「すべての入力値をリセット」（`AutonaActions.ClearBoard`）とは意図して違い、人数・キャラ数を戻し、チーム名は人数を 1 に減らす場合だけ消える（ADR-005 S2 判断 3）
 - **状態**: `score.{N}` 配下を広範に初期化
 - **副作用**: 盤面全消去 → OBS に即反映
 - **本番リスク**: **高**（配信中に押すと表示が空になる）

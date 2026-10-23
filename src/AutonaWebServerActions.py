@@ -170,29 +170,17 @@ class WebServerActions(QObject):
         # Phase argument
         # phase=<Phase Name>
         if phase is not None:
-            self.scoreboard.GetScoreboard(scoreboard).signals.ChangeSetData.emit(
-                orjson.loads(
-                    orjson.dumps({'tournament_phase': phase})
-                )
-            )
+            self._apply_set_fields(scoreboard, {'tournament_phase': phase})
 
         # Pool argument
         # pool=<Pool Name>
         if pool is not None:
-            self.scoreboard.GetScoreboard(scoreboard).signals.ChangeSetData.emit(
-                orjson.loads(
-                    orjson.dumps({'tournament_pool': pool})
-                )
-            )
+            self._apply_set_fields(scoreboard, {'tournament_pool': pool})
 
         # Match argument
         # match=<Match Name>
         if match is not None:
-            self.scoreboard.GetScoreboard(scoreboard).signals.ChangeSetData.emit(
-                orjson.loads(
-                    orjson.dumps({'round_name': match})
-                )
-            )
+            self._apply_set_fields(scoreboard, {'round_name': match})
 
         # Players argument
         # players=<Amount of Players>
@@ -206,28 +194,46 @@ class WebServerActions(QObject):
 
         # Losers argument
         # losers=<True/False>&team=<Team Number>
+        # Set-shaped: `team` is the set's team, which a swap moves to the
+        # other column (SetLoadService.ApplyLosers).
         if losers is not None:
-            self.scoreboard.GetScoreboard(scoreboard).signals.ChangeSetData.emit(
-                orjson.loads(
-                    orjson.dumps({'team' + str(team) + 'losers': False if losers.lower() == 'false' else True})
-                )
-            )
+            self._apply_set_fields(scoreboard, {
+                'team' + str(team) + 'losers':
+                    False if losers.lower() == 'false' else True})
 
         # Team name argument (team-mode boards)
         # teamName=<Name>&team=<Team Number>
-        # Drives the Qt QLineEdit like the set-load path does, so the widget,
-        # StateManager and the broadcast all stay in sync.
+        # The literal column (no swap flip), as the operator typing the name
+        # into it: the name and the crest that follows it, written only when
+        # the name changes. Boards 1/2 only -- the crew board has never had
+        # the column this addressed.
         if teamName is not None and team is not None:
-            sb = self.scoreboard.GetScoreboard(scoreboard)
-            columns = [getattr(sb, "team1column", None),
-                       getattr(sb, "team2column", None)]
-            idx = int(team) - 1
-            if 0 <= idx < len(columns) and columns[idx] is not None:
-                edit = columns[idx].findChild(QLineEdit, "teamName")
-                if edit is not None and edit.text() != teamName:
-                    edit.setText(teamName)
-                    edit.editingFinished.emit()
+            board = self.scoreboard.EnsureScoreboard(scoreboard)
+            idx = int(team)
+            if idx in (1, 2) and int(scoreboard) in AutonaActions.SCORE_BOARDS:
+                with StateManager.SaveBlock():
+                    if AutonaActions.instance.SetTeamName(
+                            scoreboard, idx, teamName):
+                        board.setLoad.PublishTeamLogo(idx, teamName)
         return "OK"
+
+    def _apply_set_fields(self, scoreboard, payload):
+        """One set_route field, as the set payload it has always been.
+
+        On boards 1/2 that payload is applied by core (ADR-005 S2d), as the
+        board's ChangeSetData applied it: the match bar fields and the
+        English round text (blanked by every payload that carries none --
+        SetLoadService.ApplyMatchInfo), and a losers flag (ApplyLosers). The
+        board is built first, as GetScoreboard() did, so the write waits for
+        反映 like any other. The crew board's ChangeSetData is its own.
+        """
+        board = self.scoreboard.EnsureScoreboard(scoreboard)
+        if int(scoreboard) not in AutonaActions.SCORE_BOARDS:
+            board.signals.ChangeSetData.emit(payload)
+            return
+        with StateManager.SaveBlock():
+            board.setLoad.ApplyMatchInfo(payload)
+            board.setLoad.ApplyLosers(payload)
 
     def set_team_data(self, scoreboard, team, player, data):
         self.scoreboard.GetScoreboard(scoreboard).signals.ChangeSetData.emit({
@@ -489,41 +495,61 @@ class WebServerActions(QObject):
         AutonaActions.instance.ApplyChanges(scoreboard)
         return "OK"
 
-    def _reset_best_of(self, scoreboard):
+    def _reset_best_of(self, board):
         # The best_of QSpinBox is reparented out of `scoreColumn` while the
         # 1v1 / team board is built (AutonaScoreboardWidget moves it into the
         # score bar), so the historical scoreColumn.findChild(...) lookup
         # returns None there and raised AttributeError. Prefer the reference
         # the widget already stores; fall back to findChild for any board that
         # still nests the spinbox under scoreColumn (crew uses `_bestOfSpin`).
-        sb = self.scoreboard.GetScoreboard(scoreboard)
-        best_of = (getattr(sb, "bestOfSpin", None)
-                   or getattr(sb, "_bestOfSpin", None)
-                   or sb.scoreColumn.findChild(QSpinBox, "best_of"))
+        # Still the spinbox: it is the best of's entry point until S2e.
+        best_of = (getattr(board, "bestOfSpin", None)
+                   or getattr(board, "_bestOfSpin", None)
+                   or board.scoreColumn.findChild(QSpinBox, "best_of"))
         if best_of is not None:
             best_of.setValue(0)
 
-    # reset_match / clear_all are operator resets, so they go through the
-    # board's ResetMatch (scores + losers flags + round name / phase / pool),
-    # not the set-load pre-pass ClearScore, which keeps the match bar (S-17).
+    # The clears are core operations (ADR-005 S2d); the crew board (3)
+    # answers False to them and keeps its own. Every one of these builds the
+    # board first, as the GetScoreboard() they used to start with did: an
+    # unbuilt board is not held, so a clear made there would be published at
+    # once and then wiped by the seed that builds it -- and the best of /
+    # counts below are still the board's spinboxes. Kept on the GUI thread
+    # until S2f, like swap_teams: a player card's edit is two writes there
+    # (the field, then the merged name), and a clear must not land between.
+    #
+    # reset_match / clear_all are operator resets (scores + losers flags +
+    # round name / phase / pool), not the set-load pre-pass ClearScore,
+    # which keeps the match bar (S-17).
     @gui_thread_sync
     def reset_match(self, scoreboard):
-        self.scoreboard.GetScoreboard(scoreboard).ResetMatch()
-        self._reset_best_of(scoreboard)
+        board = self.scoreboard.EnsureScoreboard(scoreboard)
+        if not AutonaActions.instance.ResetMatch(scoreboard):
+            board.ResetMatch()
+        self._reset_best_of(board)
         return "OK"
 
     @gui_thread_sync
     def reset_players(self, scoreboard):
-        self.scoreboard.GetScoreboard(scoreboard).CommandClearAll()
+        # The board's CommandClearAll is AutonaActions.ClearPlayers plus what
+        # the board owns around it (the field being typed in, the set loaded
+        # last, the statistics) -- the crew's is its own clear.
+        self.scoreboard.EnsureScoreboard(scoreboard).CommandClearAll()
         return "OK"
 
     @gui_thread_sync
     def clear_all(self, scoreboard):
-        self.scoreboard.GetScoreboard(scoreboard).ResetMatch()
-        self._reset_best_of(scoreboard)
-        self.scoreboard.GetScoreboard(scoreboard).playerNumber.setValue(1)
-        self.scoreboard.GetScoreboard(scoreboard).charNumber.setValue(1)
-        self.scoreboard.GetScoreboard(scoreboard).CommandClearAll()
+        # Not AutonaActions.ClearBoard (the desktop's reset-all): this keeps
+        # the team names, and the player / character counts (still the
+        # board's spinboxes, S2g) change between the reset and the players'
+        # clear -- in this order, which decides what the mains end up as.
+        board = self.scoreboard.EnsureScoreboard(scoreboard)
+        if not AutonaActions.instance.ResetMatch(scoreboard):
+            board.ResetMatch()
+        self._reset_best_of(board)
+        board.playerNumber.setValue(1)
+        board.charNumber.setValue(1)
+        board.CommandClearAll()
         return "OK"
 
     @gui_thread_sync
@@ -579,11 +605,18 @@ class WebServerActions(QObject):
     def get_comms(self):
         return StateManager.Get("commentary")
 
+    # On the GUI thread now that it builds the board itself (EnsureScoreboard
+    # is GUI-thread only); it was built before through GetScoreboard, which
+    # marshals the build. The set is the board's SetLoadService's (ADR-005
+    # S2d); the crew board has none, and raises as it did.
+    @gui_thread_sync
     def get_set(self, scoreboard):
-        if self.scoreboard.GetScoreboard(scoreboard).lastSetSelected is None:
+        lastSet = self.scoreboard.EnsureScoreboard(
+            scoreboard).setLoad.lastSetSelected
+        if lastSet is None:
             return "0"
         else:
-            return str(self.scoreboard.GetScoreboard(scoreboard).lastSetSelected)
+            return str(lastSet)
 
     def get_sets(self, args):
         provider = AutonaTournamentDataProvider.instance.GetProvider()

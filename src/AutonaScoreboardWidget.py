@@ -124,6 +124,13 @@ class AutonaScoreboardWidget(QWidget):
         # Teams whose statistics a swap / move asked to refetch, emitted
         # once control is back in the event loop (_EmitPlayerStats).
         self._pendingStatsTeams = set()
+        # {team: text}: what a team-name field showed when _SyncSetFields
+        # had to leave it alone because the operator was in it. Finishing
+        # the edit with that very text is not an edit (_OnTeamNameFinished),
+        # and once the focus has left the field it is rendered from the
+        # state (_OnTeamNameFocusChanged) -- the player cards' rule
+        # (AutonaScoreboardPlayerWidget._heldBackText).
+        self._heldBackTeamName = {}
 
         # Set loading (Start.gg payloads, /post_data, set_route): what a
         # loaded set means for this board's state lives in core since
@@ -165,7 +172,8 @@ class AutonaScoreboardWidget(QWidget):
 
         self.stats = AutonaStatsUtil(self.scoreboardNumber, self)
 
-        self.lastSetSelected = None
+        # (The set loaded last is self.setLoad.lastSetSelected since ADR-005
+        # S2d: the clears that forget it are core's.)
 
         self.lastStationSelected = None
 
@@ -463,6 +471,9 @@ class AutonaScoreboardWidget(QWidget):
         team2HeaderRow.layout().addSpacing(UI.SPACE_MD)
 
         self._WireTeamColumn(self.team2column, 2)
+        # A bound method: Qt drops the connection with the board.
+        QApplication.instance().focusChanged.connect(
+            self._OnTeamNameFocusChanged)
 
         # A restored program_state.json can carry a roster from a session
         # that ran with more players per team; drop both before the first
@@ -834,11 +845,11 @@ class AutonaScoreboardWidget(QWidget):
         program_state.json is keyed by them) -- pinned by
         tests/test_objectname_keypath_contract.py.
 
-        The name keeps a second handler, and it is load-bearing: the team
-        crest follows the name (ExportTeamLogo, below). It did not move to
-        core, so it may not be replaced by a state notification --
-        `_SyncSetFields` sets these two widgets with their signals blocked
-        precisely because it is the render side. The losers box used to have
+        The name's handler also publishes the team crest that follows it
+        (ExportTeamLogo, via _OnTeamNameFinished), and that is load-bearing:
+        it may not be replaced by a state notification -- `_SyncSetFields`
+        sets these two widgets with their signals blocked precisely because
+        it is the render side. The losers box used to have
         one too (every player card's `SetLosers`, re-exporting its name with
         the " [L]" suffix); since ADR-005 S2b that is part of
         `AutonaActions.SetTeamLosers`, so the box has a single handler.
@@ -851,14 +862,7 @@ class AutonaScoreboardWidget(QWidget):
         if name is not None:
             name.editingFinished.connect(
                 lambda team=team, edit=name:
-                    AutonaActions.instance.SetTeamName(
-                        self.scoreboardNumber, team, edit.text()))
-            # Second handler, kept in the order it used to be connected in
-            # (name first, crest after): a set load writes the pair together
-            # through SetLoadService.ApplyTeamName.
-            name.editingFinished.connect(
-                lambda team=team, edit=name:
-                    self.ExportTeamLogo(team, edit.text()))
+                    self._OnTeamNameFinished(team, edit))
             name.editingFinished.emit()
 
         losers = column.findChild(QCheckBox, schema.TEAM_LOSERS_KEY)
@@ -874,6 +878,45 @@ class AutonaScoreboardWidget(QWidget):
                 f"{schema.TEAM_NAME_KEY!r} / {schema.TEAM_LOSERS_KEY!r}; "
                 f"score.{self.scoreboardNumber}.team.{team} will be "
                 "incomplete")
+
+    def _OnTeamNameFinished(self, team, edit):
+        """A team-name field finished an edit: the name, then the crest
+        that follows it (ExportTeamLogo), in the order the two used to be
+        connected in -- a set load writes the pair together through
+        SetLoadService.ApplyTeamName.
+
+        Unless the text is the one a render had to leave in the field while
+        the operator was in it (_heldBackTeamName) and the state has moved
+        on since: the Web / API wrote a name underneath the edit, and
+        finishing it -- the focus-out, Enter -- would put the old text back
+        over it. Any other text is the operator's edit and is written. The
+        name and the crest are each written only when they change
+        (SetTeamName / PublishTeamLogo), so re-finishing the name the state
+        holds writes nothing.
+        """
+        text = edit.text()
+        held = self._heldBackTeamName.get(team)
+        if held is not None and held == text and StateManager.Get(
+                f"{self.statePrefix}.team.{team}.{schema.TEAM_NAME_KEY}",
+                None) != text:
+            return
+        self._heldBackTeamName.pop(team, None)
+        AutonaActions.instance.SetTeamName(self.scoreboardNumber, team, text)
+        self.ExportTeamLogo(team, text)
+
+    def _OnTeamNameFocusChanged(self, old, new):
+        """QApplication.focusChanged: once the operator has left a team-name
+        field a render had to skip, show the state in it. Deferred, so that
+        nothing is redrawn inside the focus change (agent-pitfalls #9) and
+        the field's own editingFinished has run first."""
+        if not self._heldBackTeamName:
+            return
+        for team in self._heldBackTeamName:
+            column = self.team1column if team == 1 else self.team2column
+            edit = column.findChild(QLineEdit, schema.TEAM_NAME_KEY)
+            if edit is not None and edit.hasFocus():
+                return
+        QTimer.singleShot(0, self, self._SyncSetFields)
 
     def ApplyChanges(self):
         # 反映 button: publish every pending edit on this board at once.
@@ -1013,7 +1056,11 @@ class AutonaScoreboardWidget(QWidget):
 
         A field the operator currently has focus in is left alone: a
         notification arriving mid-edit must not yank the text out from under
-        the caret. Same rule as _syncDisplayTournamentNameEdit.
+        the caret. Same rule as _syncDisplayTournamentNameEdit. A team name
+        left alone is also remembered (_heldBackTeamName): finishing the
+        edit with that text does not write it back over the newer name, and
+        the field shows the state once the focus has left it -- as a player
+        card's fields do (ADR-005 S2d review).
         """
         for combo, key in ((self.matchCombo, schema.MATCH_KEY),
                            (self.phaseCombo, schema.PHASE_KEY),
@@ -1053,8 +1100,17 @@ class AutonaScoreboardWidget(QWidget):
             name = StateManager.Get(
                 f"{self.statePrefix}.team.{team}.{schema.TEAM_NAME_KEY}", None)
             edit = column.findChild(QLineEdit, schema.TEAM_NAME_KEY)
-            if (isinstance(name, str) and edit is not None
-                    and edit.text() != name and not edit.hasFocus()):
+            if not isinstance(name, str) or edit is None:
+                continue
+            if edit.text() == name:
+                self._heldBackTeamName.pop(team, None)
+            elif edit.hasFocus():
+                # Left alone, and remembered: finishing the edit with this
+                # text must not write it back over the newer name
+                # (_OnTeamNameFinished).
+                self._heldBackTeamName[team] = edit.text()
+            else:
+                self._heldBackTeamName.pop(team, None)
                 with QSignalBlocker(edit):
                     edit.setText(name)
 
@@ -1069,9 +1125,9 @@ class AutonaScoreboardWidget(QWidget):
         Two things make this safe to run on every held notification:
 
         - the spinbox is updated inside a QSignalBlocker, so valueChanged
-          (which still writes the score for the paths that drive the spinbox
-          directly -- ClearScore, ResetAllInputs) cannot fire and write the
-          value straight back;
+          (which still writes the score for the one path that drives the
+          spinbox directly -- a number typed into it) cannot fire and write
+          the value straight back;
         - the individual game tracker is then told about the transition
           explicitly, with the *old* spinbox value, because that is what it
           needs to decide which stage rows to award or clear. It is the one
@@ -1185,10 +1241,13 @@ class AutonaScoreboardWidget(QWidget):
 
     def ResetAllInputs(self):
         # すべての入力値をリセット: clear players, scores, round name / phase /
-        # pool, BEST OF and team names in one shot (mirrors the Web UI
-        # "全クリア" action). Values only — the team-mode player-count layout
-        # is kept. The cleared state still goes through the 反映 gate like
-        # any edit.
+        # pool, BEST OF and team names in one shot. Values only — the
+        # team-mode player-count layout is kept. The Web UI's "全クリア"
+        # (WebServerActions.clear_all) is its counterpart but differs on
+        # purpose: it resets the player / character counts and keeps the
+        # team names unless that shrinks the roster to one player (ADR-005
+        # S2 decision 3). The cleared state still goes through the 反映 gate
+        # like any edit.
         answer = QMessageBox.question(
             self,
             QApplication.translate("app", "すべての入力値をリセット"),
@@ -1198,14 +1257,13 @@ class AutonaScoreboardWidget(QWidget):
             QMessageBox.StandardButton.No)
         if answer != QMessageBox.StandardButton.Yes:
             return
+        # The clear is core's (AutonaActions.ClearBoard, ADR-005 S2d). The
+        # BEST OF spinbox is still the best of's entry point, so it joins the
+        # same save cycle from here.
         with StateManager.SaveBlock():
-            self.CommandClearAll()
-            self.ResetMatch()
+            self._ClearingPlayers(lambda: AutonaActions.instance.ClearBoard(
+                self.scoreboardNumber))
             self.bestOfSpin.setValue(0)
-            for column in (self.team1column, self.team2column):
-                teamName = column.findChild(QLineEdit, schema.TEAM_NAME_KEY)
-                teamName.setText("")
-                teamName.editingFinished.emit()
 
     def _onHeldDirtyChanged(self, prefix: str, dirty: bool):
         if prefix == self.statePrefix:
@@ -1815,6 +1873,9 @@ class AutonaScoreboardWidget(QWidget):
             self.team1column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setVisible(True)
             self.team2column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setVisible(True)
         else:
+            # The names are emptied here, not finished by the operator: a
+            # text a render left in a field must not hold the clear back.
+            self._heldBackTeamName.clear()
             self.team1column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setVisible(False)
             self.team1column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setText("")
             self.team1column.findChild(
@@ -1851,7 +1912,8 @@ class AutonaScoreboardWidget(QWidget):
         AutonaActions.instance.SwapTeams(self.scoreboardNumber)
 
     def CommitFocusedEdit(self):
-        """Finish the edit in progress on this board before a swap / move.
+        """Finish the edit in progress on this board before a swap / move
+        / a players' clear (_ClearingPlayers).
 
         The copy that used to do the swap read the fields as they stood, so
         a tag still being typed travelled with its player. The swap now
@@ -2053,19 +2115,24 @@ class AutonaScoreboardWidget(QWidget):
         try:
             AutonaTournamentDataProvider.instance.GetStreamQueue()
 
-            if data.get("id") != None and data.get("id") != self.lastSetSelected:
+            if data.get("id") != None and \
+                    data.get("id") != self.setLoad.lastSetSelected:
                 # Clear previous scores
                 # Important because when we receive scores as 0 we don't update based on that
                 # Otherwise an offline set which is only updated after it's complete would reset the score
                 # all the time since it would be 0-0 until then
                 # ClearScore, not ResetMatch: the round name / phase / pool
                 # stay until the new set brings its own (S-17).
+                # Both are core operations (ADR-005 S2d), written inside the
+                # BlockSaving above, so they reach the board in the one save
+                # cycle the set load ends with; the clear forgets the set
+                # loaded last, which is why it is recorded only after it.
                 self.CommandClearAll(no_mains=data.get(
                     "no_mains") if data.get("no_mains") != None else False)
                 self.ClearScore()
 
                 # A new set was loaded
-                self.lastSetSelected = data.get("id")
+                self.setLoad.lastSetSelected = data.get("id")
 
                 # Which set this board is following, and how (id, auto
                 # update type, station/stream identifier).
@@ -2099,8 +2166,8 @@ class AutonaScoreboardWidget(QWidget):
             self.timeLeftTimer = None
 
         if clear_variables:
-            self.lastSetSelected = None
             self.lastStationSelected = None
+            # Forgets the set loaded last too.
             self.setLoad.ClearSetTracking()
 
         self.timerLayout.setVisible(False)
@@ -2117,7 +2184,7 @@ class AutonaScoreboardWidget(QWidget):
         self.selectSetWindow.show()
 
     def LoadStationSets(self, station):
-        self.lastSetSelected = None
+        self.setLoad.lastSetSelected = None
         self.lastStationSelected = station
         AutonaTournamentDataProvider.instance.LoadStationSets(self)
 
@@ -2136,13 +2203,59 @@ class AutonaScoreboardWidget(QWidget):
             self.scoreboardNumber, team + 1, change)
 
     def CommandClearAll(self, no_mains=False):
-        for t, team in enumerate([self.team1playerWidgets, self.team2playerWidgets]):
-            for i, p in enumerate(team):
-                p.Clear(no_mains)
-        self.lastSetSelected = None
+        """Empty every player of the board (AutonaActions.ClearPlayers).
+
+        The clear is core's since ADR-005 S2d -- one save cycle, where each
+        card used to empty its own fields (a cycle per card) -- and the
+        cards show the emptied slots from the held cycle. What stays here
+        is the board's part of it, for every entry point (the set load's
+        pre-pass, the Web's reset_players / clear_all; ResetAllInputs does
+        the same around ClearBoard): see _ClearingPlayers.
+        """
+        self._ClearingPlayers(lambda: AutonaActions.instance.ClearPlayers(
+            self.scoreboardNumber, no_mains))
+
+    def _ClearingPlayers(self, clear):
+        """Run `clear` (a core operation that empties the players) with what
+        the board adds to it:
+
+        - the field being typed in is finished first (CommitFocusedEdit),
+          so that a card's typed text is cleared with the rest instead of
+          being left on the card, to be committed into the emptied slot on
+          focus-out (the render skips a focused field). That holds for the
+          player fields only: a match bar / team name / score field being
+          typed in is committed when it loses the focus, as it was before
+          S2d -- after the clear, unless the clear itself empties it
+          (ClearBoard does the team names and the match bar). Text typed
+          into a character / country combo is not committed by losing the
+          focus at all (CommitFocusedEdit) and may stay on the combo after
+          the clear -- unverified, recorded in the S2d ledger;
+        - the set loaded last is forgotten, so loading it again does load
+          it (NewSetSelected skips the set it already has);
+        - the statistics are fetched again for each team whose player ids
+          the clear dropped -- once per operation. A card used to ask for
+          them when its own Clear() dropped its id (ExportPlayerId), once
+          per card; the upset factor is recalculated by the operation.
+        """
+        self.CommitFocusedEdit()
+        before = {team: self._TeamPlayerIds(team) for team in (1, 2)}
+        clear()
+        self.setLoad.lastSetSelected = None
+        changed = [team for team in (1, 2)
+                   if self._TeamPlayerIds(team) != before[team]]
+        if changed:
+            self._RequestPlayerStats(changed)
+
+    def _TeamPlayerIds(self, team):
+        roster = StateManager.Get(f"{self.statePrefix}.team.{team}.player")
+        if not isinstance(roster, dict):
+            return {}
+        return {slot: value.get("id") for slot, value in roster.items()
+                if isinstance(value, dict)}
 
     def ClearScore(self):
-        """Zero both scores and both losers flags -- and nothing else.
+        """Zero both scores and both losers flags -- and nothing else
+        (AutonaActions.ClearScore).
 
         This is the clear NewSetSelected runs before a new set arrives, so it
         must leave the match bar alone: SetLoadService.ApplyMatchInfo keeps
@@ -2150,29 +2263,23 @@ class AutonaScoreboardWidget(QWidget):
         them here would wipe the round mid-stream for exactly those sets. The
         operator's reset is ResetMatch(), which adds the match bar (S-17).
 
-        (It used to start with a loop over scoreColumn's combos, which has
-        matched nothing since the three were re-homed into the score bar.)
+        The spinboxes, the losers boxes and the stage rows follow from the
+        held cycle (ADR-005 S2d; they used to be driven to 0 / unchecked
+        here, a save cycle per score and per stage row).
         """
-        self.scoreDisplay1.setValue(0)
-        self.scoreDisplay2.setValue(0)
-
-        self.team1column.findChild(QCheckBox, schema.TEAM_LOSERS_KEY).setChecked(False)
-        self.team2column.findChild(QCheckBox, schema.TEAM_LOSERS_KEY).setChecked(False)
+        AutonaActions.instance.ClearScore(self.scoreboardNumber)
 
     def ResetMatch(self):
         """The operator's reset: ClearScore plus the match bar (S-17).
+        AutonaActions.ResetMatch, one save cycle.
 
-        Every reset entry point comes here -- the すべての入力値をリセット
-        button (ResetAllInputs) and WebServerActions' reset_match / clear_all
-        (legacy REST, Socket.IO and /api/v1 :reset-match / :clear). A set
-        load does not: see ClearScore.
-
-        The match bar is cleared in the state; the combos follow through
-        _SyncSetFields like they do for a loaded set. One save cycle.
+        Behind the すべての入力値をリセット button (ResetAllInputs, through
+        AutonaActions.ClearBoard) and WebServerActions' reset_match /
+        clear_all (legacy REST, Socket.IO and /api/v1 :reset-match /
+        :clear), which call the operation directly. A set load does not: see
+        ClearScore.
         """
-        with StateManager.SaveBlock():
-            self.ClearScore()
-            AutonaActions.instance.ClearMatchInfo(self.scoreboardNumber)
+        AutonaActions.instance.ResetMatch(self.scoreboardNumber)
 
     def CommandTeamColor(self, team: int, color, force_opponent=False):
         # Resolving a game's preset color *index* to a hex string stays here:
@@ -2362,7 +2469,7 @@ class AutonaScoreboardWidget(QWidget):
     def UpdateSetData(self, data):
         # An empty payload, or one answering for a set the operator has
         # already navigated away from (an in-flight fetch resolving late).
-        if SetLoadService.IsStaleUpdate(data, self.lastSetSelected):
+        if SetLoadService.IsStaleUpdate(data, self.setLoad.lastSetSelected):
             return
 
         if SettingsManager.Get("general.disable_overwrite", False):

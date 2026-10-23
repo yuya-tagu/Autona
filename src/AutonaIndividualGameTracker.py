@@ -246,9 +246,10 @@ class AutonaIndividualGameTracker(QWidget):
     def UpdateScore(self, team, new_value):
         """Responds to the score being modified in a non-per-game context.
 
-        The score spinbox's valueChanged handler: ClearScore and
-        ResetAllInputs drive the widget, and this publishes the result and
-        moves the rows to match.
+        The score spinbox's valueChanged handler. Only a number typed into
+        the score display drives the spinbox now (the clears write the state
+        since ADR-005 S2d); this publishes the result and moves the rows to
+        match.
         """
         self.service.UpdateScore(team, new_value)
         self._SyncStageButtons()

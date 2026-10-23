@@ -332,6 +332,20 @@ def test_clearing_the_tracking_forgets_all_three_keys(service):
     assert SM.Get(f"{PREFIX}.station") is None
 
 
+def test_the_set_loaded_last_is_kept_outside_the_state(service):
+    """ADR-005 S2 decision 4: the set the board skips re-loading lives here
+    (it was a board attribute), not in the state -- a clear forgets it, and
+    making `set_id` its home would publish a null for every clear."""
+    assert service.lastSetSelected is None
+    service.lastSetSelected = "12345"
+    service.BeginSet("12345", "set", None)
+    assert "lastSetSelected" not in (SM.Get(PREFIX) or {})
+
+    service.ClearSetTracking()
+
+    assert service.lastSetSelected is None
+
+
 def test_the_station_queue_is_published(service):
     service.SetStationQueue([{"id": 1}])
     assert SM.Get(f"{PREFIX}.station_queue") == [{"id": 1}]

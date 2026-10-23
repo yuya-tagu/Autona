@@ -820,6 +820,285 @@ def test_what_is_not_a_player_move(actions, heldBoard, spy,
     assert spy.held_updates == []
 
 
+# ── clearing (ADR-005 S2d) ───────────────────────────────────────────────
+#
+# The clears were the board's widgets driven back to empty: the score
+# spinboxes set to 0, the losers boxes unchecked, every player card's
+# Clear() emptying its fields so their handlers would publish -- a save
+# cycle per card. They write the state from the state now, one cycle per
+# operation; what a card's Clear() published is reproduced slot by slot.
+
+BLANK_CHARACTER = {"name": "", "assets": {}, "skin": -1, "variant": {}}
+
+
+class _NoGame:
+    """GameAssetCatalog with no game loaded: the blank character slot is
+    all a clear asks it for (`CharacterValue(CharacterSlot())`)."""
+
+    def Current(self):
+        return None
+
+
+@pytest.fixture
+def noGame(monkeypatch):
+    from src.core.GameAssetCatalog import GameAssetCatalog
+    monkeypatch.setattr(GameAssetCatalog, "instance", _NoGame())
+
+
+def test_clear_score_zeroes_the_scores_and_the_losers_in_one_cycle(
+        actions, heldBoard, spy):
+    one = _named(2, 1, "", "DELTA")
+    SM.Set(f"{PREFIX}.team.1.score", 2)
+    SM.Set(f"{PREFIX}.team.2.score", 1)
+    actions.SetTeamLosers(BOARD, 2, True)
+    actions.SetMatchField(BOARD, "match", "Grand Final")
+    assert SM.Get(f"{one}.mergedName") == "DELTA [L]"
+    spy.held_updates.clear()
+
+    assert actions.ClearScore(BOARD) is True
+
+    assert SM.Get(f"{PREFIX}.team.1.score") == 0
+    assert SM.Get(f"{PREFIX}.team.2.score") == 0
+    assert SM.Get(f"{PREFIX}.team.1.losers") is False
+    assert SM.Get(f"{PREFIX}.team.2.losers") is False
+    # The flag takes its " [L]" with it, in the same cycle.
+    assert SM.Get(f"{one}.mergedName") == "DELTA"
+    # The set load's pre-pass: the round stays until the next set's (S-17).
+    assert SM.Get(f"{PREFIX}.match") == "Grand Final"
+    assert spy.held_updates_for(PREFIX) == [PREFIX]
+    assert SM.HasPendingChanges(PREFIX) is True
+
+
+def test_reset_match_adds_the_match_bar_in_the_same_cycle(
+        actions, heldBoard, spy):
+    SM.Set(f"{PREFIX}.team.1.score", 2)
+    actions.SetTeamLosers(BOARD, 1, True)
+    for field, value in (("phase", "Bracket"), ("pool", "Pool A"),
+                         ("match", "Winners Final")):
+        actions.SetMatchField(BOARD, field, value)
+    SM.Set(f"{PREFIX}.match_en", "Winners Final")
+    spy.held_updates.clear()
+
+    assert actions.ResetMatch(BOARD) is True
+
+    assert SM.Get(f"{PREFIX}.team.1.score") == 0
+    assert SM.Get(f"{PREFIX}.team.1.losers") is False
+    for field in schema.SCORE_MATCH_FIELDS:
+        assert SM.Get(f"{PREFIX}.{field}") == ""
+    assert SM.Get(f"{PREFIX}.match_en") == ""
+    assert spy.held_updates_for(PREFIX) == [PREFIX]
+
+
+def test_clearing_a_clear_score_does_not_light_the_apply_button(
+        actions, heldBoard, spy):
+    """What the spinboxes and the checkboxes did: neither emits for the
+    value it already has."""
+    for team in (1, 2):
+        actions.SetTeamLosers(BOARD, team, False)
+    for field in schema.SCORE_MATCH_FIELDS:
+        actions.SetMatchField(BOARD, field, "")
+    actions.ApplyChanges(BOARD)
+    spy.held_updates.clear()
+    spy.dirty_events.clear()
+
+    assert actions.ClearScore(BOARD) is True
+    assert actions.ResetMatch(BOARD) is True
+
+    assert spy.held_updates == []
+    assert spy.dirty_events == []
+    assert SM.HasPendingChanges(PREFIX) is False
+
+
+def _clearedSides(actions):
+    """`_sides` plus what only some slots have: the other text fields, a
+    note, a region, an unnamed slot carrying an id."""
+    before = _sides(actions)
+    _player(1, 1, real_name="Taro", twitter="@alpha",
+            custom_textbox="note", birthday=True,
+            state={"code": "13", "name": "Tokyo"},
+            online_avatar="https://example.invalid/alpha.png")
+    _player(2, 2, state={"code": "27", "name": "Osaka"})
+    _player(2, 3, id=[505, 5505], seed=0)
+    return before
+
+
+def test_clear_players_empties_every_slot_in_one_cycle(
+        actions, heldBoard, spy, noGame):
+    _clearedSides(actions)
+    spy.held_updates.clear()
+
+    assert actions.ClearPlayers(BOARD) is True
+
+    assert spy.held_updates_for(PREFIX) == [PREFIX]
+    alpha = SM.Get(f"{PREFIX}.team.1.player.1")
+    for field in schema.PLAYER_TEXT_KEYS:
+        assert alpha[field] == ""
+    assert alpha["mergedName"] == "" and alpha["mergedOnlyName"] == ""
+    assert alpha["avatar"] is None
+    assert alpha["online_avatar"] is None
+    assert "sponsor_logo" not in alpha
+    assert alpha["id"] is None
+    assert alpha["seed"] == 0
+    assert alpha["country"] == {} and alpha["state"] == {}
+    assert list(alpha["character"].values()) == [BLANK_CHARACTER]
+    # What Clear() never reset: the birthday, the city (ADR-005 S2
+    # decision 5 -- recorded, not fixed) and the mains.
+    assert alpha["birthday"] is True
+    assert alpha["city"] == "Shibuya"
+    assert alpha["mains"]["1"]["en_name"] == "Dr. Mario"
+
+    beta = SM.Get(f"{PREFIX}.team.1.player.2")
+    # A field that held no text is not written at all.
+    assert "real_name" not in beta and "custom_textbox" not in beta
+    assert beta["name"] == "" and beta["seed"] == 0
+
+    delta = SM.Get(f"{PREFIX}.team.2.player.2")
+    # A region without a country is emptied on its own.
+    assert delta["state"] == {} and "country" not in delta
+    assert delta["id"] is None and delta["city"] == "Osaka"
+    # A slot with no name keeps its id: no name field re-published it.
+    unnamed = SM.Get(f"{PREFIX}.team.2.player.3")
+    assert unnamed["id"] == [505, 5505]
+    assert unnamed["seed"] == 0 and unnamed["online_avatar"] is None
+    assert "mergedName" not in unnamed
+    # Nothing else on the board moved.
+    assert SM.Get(f"{PREFIX}.team.1.score") == 2
+    assert SM.Get(f"{PREFIX}.team.1.teamName") == "Alpha"
+    assert SM.Get(f"{PREFIX}.team.2.losers") is True
+
+
+def test_a_cleared_slot_publishes_the_seed_as_a_number(actions, heldBoard):
+    """The seed line edit's text used to be published: a Clear() wrote
+    the string "0" (PlayerService.SetSeed)."""
+    _player(1, 1, name="ALPHA", seed="3")
+
+    actions.ClearPlayers(BOARD)
+
+    assert SM.Get(f"{PREFIX}.team.1.player.1.seed") == 0
+
+
+@pytest.mark.parametrize("rows, no_mains, keepsCharacters, keepsLocation", [
+    (1, False, False, False),
+    (1, True, True, False),     # the one case no_mains kept the characters
+    (2, True, False, False),    # every row reset by the other rows' pass
+    (0, True, None, True),      # no rows: the location combos kept too
+    (0, False, None, False),
+])
+def test_keeping_the_mains_has_the_old_clears_limits(
+        actions, heldBoard, noGame, rows, no_mains, keepsCharacters,
+        keepsLocation):
+    character = {str(i): {"name": f"C{i}", "en_name": f"C{i}",
+                          "assets": {}, "skin": 0, "variant": {}}
+                 for i in range(1, rows + 1)}
+    leaves = dict(name="ALPHA", country={"code": "JP"},
+                  state={"code": "13"})
+    if rows:
+        leaves["character"] = character
+    path = _player(1, 1, **leaves)
+
+    actions.ClearPlayers(BOARD, no_mains=no_mains)
+
+    slot = SM.Get(path)
+    assert slot["name"] == ""
+    if keepsCharacters is None:
+        assert "character" not in slot
+    elif keepsCharacters:
+        assert slot["character"] == character
+    else:
+        assert list(slot["character"].values()) == [BLANK_CHARACTER] * rows
+    if keepsLocation:
+        assert slot["country"] == {"code": "JP"}
+        assert slot["state"] == {"code": "13"}
+    else:
+        assert slot["country"] == {} and slot["state"] == {}
+
+
+def test_blank_characters_are_not_published_again(
+        actions, heldBoard, noGame, monkeypatch):
+    path = _player(1, 1, character={1: dict(BLANK_CHARACTER)})
+    written = []
+    original = SM.Set
+
+    def recording(key, value, *args, **kwargs):
+        written.append(key)
+        return original(key, value, *args, **kwargs)
+
+    monkeypatch.setattr(SM, "Set", recording)
+    actions.ClearPlayers(BOARD)
+
+    assert f"{path}.character" not in written
+    assert f"{path}.seed" in written
+
+
+@pytest.mark.parametrize("seed, recalculated", [(4, True), (0, False)])
+def test_the_upset_factor_follows_a_cleared_seed(
+        actions, heldBoard, seed, recalculated):
+    """As the seed spinbox's change used to ask for it: only when a seed
+    went. The upset factor is a statistic (not held)."""
+    _player(1, 1, name="ALPHA", seed=seed)
+    _player(2, 1, name="GAMMA", seed=seed)
+    SM.Set(f"{PREFIX}.upset_factor", -1)
+
+    actions.ClearPlayers(BOARD)
+
+    assert SM.Get(f"{PREFIX}.upset_factor") == (0 if recalculated else -1)
+
+
+def test_clear_board_takes_the_team_names_too_in_one_cycle(
+        actions, heldBoard, spy, noGame):
+    _sides(actions)
+    for field, value in (("phase", "Bracket"), ("match", "Winners Final")):
+        actions.SetMatchField(BOARD, field, value)
+    actions.ApplyChanges(BOARD)
+    spy.held_updates.clear()
+
+    assert actions.ClearBoard(BOARD) is True
+
+    assert spy.held_updates_for(PREFIX) == [PREFIX]
+    board = SM.Get(PREFIX)
+    for team in ("1", "2"):
+        assert board["team"][team]["teamName"] == ""
+        # No crest for no name; a side that had none gets no key for it
+        # (SetLoadService.PublishTeamLogo writes only a change).
+        assert board["team"][team].get("logo") is None
+        assert board["team"][team]["score"] == 0
+        assert board["team"][team]["losers"] is False
+        assert board["team"][team]["player"]["1"]["name"] == ""
+    assert board["phase"] == "" and board["match"] == ""
+    # The colours are the sides' settings, not inputs.
+    assert board["team"]["1"]["color"] == "#ff0000"
+    assert SM.HasPendingChanges(PREFIX) is True
+
+
+def test_clear_board_on_a_clear_board_writes_nothing(actions, heldBoard, spy):
+    for team in (1, 2):
+        actions.SetTeamName(BOARD, team, "")
+        actions.SetTeamLosers(BOARD, team, False)
+    for field in schema.SCORE_MATCH_FIELDS:
+        actions.SetMatchField(BOARD, field, "")
+    actions.ApplyChanges(BOARD)
+    spy.held_updates.clear()
+    spy.dirty_events.clear()
+
+    assert actions.ClearBoard(BOARD) is True
+
+    assert spy.held_updates == []
+    assert spy.dirty_events == []
+
+
+@pytest.mark.parametrize("operation", [
+    "ClearScore", "ResetMatch", "ClearPlayers", "ClearBoard"])
+def test_the_crew_board_clears_itself(actions, operation):
+    """Board 3's members and stocks are the crew widget's; the caller
+    falls back to it on False."""
+    SM.Set("score.3", {"team": {"1": {"score": 4, "teamName": "Crew"}}})
+
+    assert getattr(actions, operation)(3) is False
+
+    assert SM.Get("score.3") == {
+        "team": {"1": {"score": 4, "teamName": "Crew"}}}
+
+
 # ── best of ──────────────────────────────────────────────────────────────
 
 def test_set_best_of_publishes_every_derived_key_in_one_cycle(

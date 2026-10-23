@@ -95,7 +95,16 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
   **ADR-005 S2c で追加**: `SwapTeams`（board 1,2。選手スロット・スコア・LOSERS・チーム名・
   ロゴ・ゲームトラッカーの勝敗（鏡映）を 1 保存サイクルで入れ替え、`score.{n}.teamsSwapped` を
   反転。チームカラーは入れ替えない。board 3 は False を返し、呼び出し側がクルーウィジェットに
-  委ねる）/ `SwapPlayers`（同じチームの 2 スロットを入れ替え。カードの上下移動）
+  委ねる）/ `SwapPlayers`（同じチームの 2 スロットを入れ替え。カードの上下移動）/
+  **ADR-005 S2d で追加**: `ClearScore`（スコア 0・LOSERS False。match バーは残す = セット読込の前処理）/
+  `ResetMatch`（`ClearScore` + `ClearMatchInfo`）/ `ClearPlayers(board, no_mains)`（両チームの全スロットを
+  旧カードの `Clear()` と同じ内容で空にする。birthday・city・mains は残る）/ `ClearBoard`（すべての入力値をリセット =
+  選手 + `ResetMatch` + チーム名・ロゴ）。いずれも board 1,2 だけで 1 保存サイクル、board 3 は False
+- **クリアは state の書き換え**（S2d）。旧実装はボードのウィジェットを空に戻していた（カード 1 枚ごとに 1 サイクル）。
+  ボードに残るのは `AutonaScoreboardWidget._ClearingPlayers` の 3 つ: 入力中の欄の確定（`CommitFocusedEdit`。打ちかけの文字がクリアで消えるのは選手欄だけで、match / チーム名 / スコア欄の打ちかけは旧実装どおりフォーカスアウトで確定する。セット読込の前処理でもフォーカスが外れる）・
+  追跡中セットを忘れる（同じセットの再読込が効くように）・id が変わったチームの統計を 1 回取り直す。
+  Web の `clear_all` は `ClearBoard` ではなく、旧順序（`ResetMatch` → best_of → 人数・キャラ数 → 選手）で呼ぶ
+  （チーム名を残し、人数・キャラ数の変更が mains を決める順を保つ。ADR-005 S2 判断 3）
 - **スワップは state の入れ替え**（S2c）。旧実装は選手カード間の値コピー（`SwapWith`、削除済み）で、
   キャラのバリアントと mains を落とし、ゲームトラッカー ON で勝敗の並びを崩していた。
   スロットは**キー単位**で入れ替える（両方にあるキーは各 dict 内の位置を保つ = `program_state.json` /
@@ -128,9 +137,9 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
   （`TournamentInfoService.formatEventDate` と同じ形）。未注入時は英語既定にフォールバック
 - `score.{n}.team.{t}.score` の書き手は **core 内に 3 系統**（`AutonaActions`、
   ステージ集計の `GameTrackerService.PublishStageResults` / `UpdateScore`、
-  セット読込の `SetLoadService.ApplyScores`。`AutonaActions` の書き手は `SetScore` / `AdjustScore` / `ResetScore` と、S2c からの `SwapTeams`）。
-  加えて**未移行の Qt 側経路**（`ClearScore` / `ResetAllInputs`）がスコアスピンボックスを
-  駆動し、その `valueChanged` が `GameTrackerService.UpdateScore` を呼ぶ形で書く。
+  セット読込の `SetLoadService.ApplyScores`。`AutonaActions` の書き手は `SetScore` / `AdjustScore` / `ResetScore` と、S2c からの `SwapTeams`、S2d からのクリア）。
+  加えて**スコア欄への数値の手入力**だけがスコアスピンボックスを駆動し、その `valueChanged` が
+  `GameTrackerService.UpdateScore` を呼ぶ形で書く（`ClearScore` / `ResetAllInputs` は S2d で core 操作になった）。
   **core の外から直接 `Set` する経路は残っていない**（`StageResultsToScore` の
   再 Set は検収レビューで削除済み。表示更新のみ）。すべて state 経由で
   のみ噛み合う。ステージ集計側は自分が書いている区間を
@@ -142,7 +151,10 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
   WebServerActions メソッドからは `@gui_thread_sync` を外す。例外は `swap_teams`（S2c）で、
   S2f まで GUI スレッドで同期実行する（選手カードの入力確定が GUI スレッド上で「フィールド → 合成名」の
   2 書き込みに分かれており、その間にスワップが割り込むと合成名が反対のスロットに残るため。入力中の欄の確定も
-  GUI スレッドで行う）。未構築のボードは従来どおり構築してから入れ替える（`get_swap` も構築する）
+  GUI スレッドで行う）。未構築のボードは従来どおり構築してから入れ替える（`get_swap` も構築する）。
+  S2d のクリア（`reset_match` / `reset_players` / `clear_all`）・`get_set`・`set_route` の
+  phase / pool / match / losers / teamName も同じ理由で GUI スレッドに残し、未構築ボードを `EnsureScoreboard` で
+  構築してから書く（best_of / 人数 / キャラ数はまだボードのスピンボックス。S2e / S2g）
 - **SaveBlock は複数キーを 1 サイクルにまとめる時だけ**使う（単一キーなら不要）。
   かつては「空 `changedKeys` の SaveState = `include_paths=[]` = フィルタなし =
   全 state 差分」という地雷があったが、**Step 4a で `SaveState` 側が空 `changedKeys`
@@ -174,7 +186,7 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
 |---------|--------|------|
 | `src/core/StatsService.py` | `AutonaScoreboardWidget.stats.service` | 統計の取得可否判断・アップセット計算・`last_sets`/`history_sets`/`recent_sets`/`upset_factor` の書き込み |
 | `src/core/GameTrackerService.py` | `AutonaIndividualGameTracker.service` | ステージ勝敗の記録（`score.{n}.stages.*`）・ステージ⇔スコアの相互整合・`writingScore` ガード |
-| `src/core/SetLoadService.py` | `AutonaScoreboardWidget.setLoad` | セット読込の正規化（ラウンド/フェーズ/プール・スコア・敗者フラグ・チーム名とロゴ・`bracket_type`・追従中セット）。スワップ後の面の解決は `DisplayTeam()` が唯一の正本（`score.{n}.teamsSwapped` を読む。S2c までボード属性を callable で注入していた） |
+| `src/core/SetLoadService.py` | `AutonaScoreboardWidget.setLoad` | セット読込の正規化（ラウンド/フェーズ/プール・スコア・敗者フラグ・チーム名とロゴ・`bracket_type`・追従中セット）。最後に読んだセット `lastSetSelected` も持つ（state の外。ADR-005 S2d でボード属性から移動。クリアと `ClearSetTracking()` で忘れるので、同じセットを選び直すと再読込される。`get_set` と stale 判定が読む）。スワップ後の面の解決は `DisplayTeam()` が唯一の正本（`score.{n}.teamsSwapped` を読む。S2c までボード属性を callable で注入していた） |
 | `src/core/TournamentInfoService.py` | `TournamentInfoService.instance`（`bootstrap_core()` 生成） | `tournamentInfo.*` の書き込み全部（provider ペイロードの適用・**EVENT タブ入力欄の `Set{Text,Number,Date}Field`**・表示大会名の 3 系統の上書き規則・`logoVersion`・起動時シード）。EVENT パネル不在でも動くことが遅延構築の前提。**両方向が同じ 3 操作を通る**（provider 側の `_ApplyKey` も入力側と同じメソッドを呼ぶ）。ただし `themeColor`/`accentColor` の 2 キーだけは **`core/ColorService.py` の持ち物**で本サービスを通らない（歴史的にこのプレフィックスなだけで、意味はカラー機能側）。**表示大会名の入力欄は SCORE パネルとクルーボードの 2 箇所にあり、どちらも `SetDisplayName` を呼ぶ**（クルー側は Step 5 第 4 弾で合流） |
 | `src/core/PlayerService.py` | `AutonaBasePlayerWidget.player`（選手ウィジェット 1 枚につき 1 個。path に束縛）。加えて**一時インスタンス**: モジュール関数 `RepublishTeamMergedNames(board, team)` が、state にあるそのチームの各スロットの path で 1 個ずつ作って使い捨てる（カードを経由しない） | 選手スロット配下の書き込み全部（入力フィールド・seed/birthday・国/州・`mergedName`/`mergedOnlyName`・アバターとスポンサーロゴ・キャラスロット・`city`/`id`・スロット削除）。`BoardNumber()` が `score.{N}` と `player_editor.1` を見分ける。**`mergedName` / `mergedOnlyName` の ` [L]` は state のチームの `losers` から付ける**（`PublishMergedName(sponsor, tag)` が `TeamLosersKey()` を読む。ADR-005 S2b）。フラグの書き手は同じ SaveBlock で `RepublishTeamMergedNames` を呼び、チーム全員の名前を state の `team` / `name` から作り直す: `AutonaActions.SetTeamLosers`（LOSERS チェックボックス・v1 `PATCH set` の `WebServerActions.set_team_losers`）と `SetLoadService.ApplyLosers`（セット読込・legacy `-set?losers=` の `ChangeSetData`。`DisplayTeam` で解いたチーム）。どちらもフラグが変わったときだけ。カードは名前確定で `_OnTextChanged`（state に書く）→ `NameChanged`（publish）の順に走るので、作り直しがどのスレッドから割り込んでも同じ名前になる。**国/州とキャラスロットはカードから識別子だけを受け取り、値はここで組む**（ADR-005 S1d）: `SetCountry(code)` / `SetRegion(countryCode, regionCode)` は `CountryCatalog.CountryByCode` / `State` から、`PublishCharacterSlots([CharacterSlot(en_name, skin 行, variant en_name, フォールバック名), ...])` は `GameAssetCatalog.CharacterRow` / `SkinRow` / `VariantRow` から（1 回の publish は `Current()` 1 回のスナップショットで解決）。入れ子のキー順は旧実装が Qt モデル経由で出していた QVariantMap 順を `DictHelper.qvariantmap_copy` で再現する（`program_state.json` と Socket.IO delta のバイト互換。`tests/test_player_slot_publish.py` と `tests/test_player_service.py` が移行前の golden と照合）。カタログが知らない識別子は、キャラなら `{"name": フォールバック名}`（手入力テキスト、または選ばれた行自身の `name`。コンボの「表示名 / en_name」ラベルは使わない）、国/州なら `{}`。カタログは `games=` / `countries=` で差し替え可能（既定は呼び出し時の `.instance`） |
 | `src/core/CrewBattleService.py` | `AutonaCrewBattleWidget.crew` | クルーボード（board 3）の書き込み全部（起動シード・メンバー名/ストック・`memberNum`/`activeMember`・**クルー合計の算出**（名前が入った表示中メンバーの stock 合計 → `team.{t}.score`）・crew 版のセットデータ正規化・`best_of`（raw のみ）・スワップ/リセット/クリア後の全体 publish）。合計は**state から算出**する（旧実装はウィジェットの値を合計していた） |

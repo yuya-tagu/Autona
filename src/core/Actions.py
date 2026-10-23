@@ -30,19 +30,21 @@ docs/changes/headless-core-redesign.md). ADR-005 S2c then moved the swap
 (`SwapTeams` / `SwapPlayers`): since S2a the player cards render their slot
 from the state, so a swap exchanges the slots here instead of copying field
 values from one card into another, and `score.{n}.teamsSwapped` became the
-flag itself rather than the mirror of a board attribute. What is still
-outside:
+flag itself rather than the mirror of a board attribute. S2d moved the
+clears (`ClearScore` / `ResetMatch` / `ClearPlayers` / `ClearBoard`), which
+used to drive the board's widgets back to empty -- the score spinboxes, the
+losers boxes, every player card's Clear() -- a save cycle per widget. What
+is still outside:
 
 - **The spinbox-driven half of the score.** `AdjustScore` / `ResetScore`
   below are not yet the *only* writers of `score.{n}.team.{t}.score`. Three
   writers live inside core now -- this class (`SetScore` / `AdjustScore` /
-  `ResetScore`, and `SwapTeams` since S2c), the stage tally in
-  `GameTrackerService.UpdateScore` / `PublishStageResults`, and a loaded
-  set's `SetLoadService.ApplyScores` (Step 4b) --
-  plus the paths that have not moved at all: `ClearScore` and
-  `ResetAllInputs` still drive the score spinbox, whose valueChanged runs
-  the tracker's `UpdateScore`. So the *implementation* is core in every
-  case; what is still outside is those two entry points.
+  `ResetScore`, `SwapTeams` since S2c and the clears since S2d), the stage
+  tally in `GameTrackerService.UpdateScore` / `PublishStageResults`, and a
+  loaded set's `SetLoadService.ApplyScores` (Step 4b) -- plus the one
+  path that has not moved: a number typed into the score display, whose
+  valueChanged runs the tracker's `UpdateScore`. So the *implementation* is
+  core in every case; what is still outside is that entry point.
   The writers coordinate through the state rather than through each
   other; a board reconciles its display in
   `AutonaScoreboardWidget._SyncScoreDisplays`, and tells them apart with
@@ -76,7 +78,8 @@ from loguru import logger
 from . import StateSchema as schema
 from .GameTrackerService import GameTrackerService
 from .LayoutOptionsManager import LayoutOptionsManager
-from .PlayerService import RepublishTeamMergedNames
+from .PlayerService import (CharacterSlot, PlayerService,
+                            RepublishTeamMergedNames)
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 from .StatsService import StatsService
@@ -233,7 +236,7 @@ class AutonaActions:
     # core writer). Why it matters here: every write under a board's held
     # prefix marks it dirty and lights the 反映 button, and the field writes
     # below are reached from paths that deliberately re-assert values
-    # (ClearScore, ResetAllInputs, a re-loaded set) -- the Qt path got the
+    # (the clears, a re-loaded set) -- the Qt path got the
     # guard for free from `setChecked` / `setValue` / `setCurrentText`.
     # Board 3 (crew) is not held, but `SetMatchField` / `SetTeamName` land
     # here for it too, and there the guard saves a wasted save cycle (an
@@ -614,6 +617,199 @@ class AutonaActions:
             roster = StateManager.Get(f"score.{board}.team.1.player")
             return len(roster) if isinstance(roster, dict) else 0
         StatsService(board, playersPerTeam).UpdateUpsetFactor()
+
+    # ── clearing (ADR-005 S2d) ────────────────────────────────────────────
+    #
+    # The clears used to be the board's widgets being driven back to empty:
+    # the score spinboxes set to 0 (their valueChanged wrote the score), the
+    # losers boxes unchecked, and every player card's Clear() emptying its
+    # fields one by one so that their handlers would publish -- a save cycle
+    # per card. The operations below write the same state from the state,
+    # one save cycle each, and the cards / spinboxes / boxes follow from the
+    # held cycle (S2a). What a card's Clear() published is reproduced key by
+    # key in `_ClearSlot`, including what it left alone.
+    #
+    # Board 3 (crew) is not one of these boards: each returns False there,
+    # and the caller hands the operation to the crew widget (decision 6).
+
+    def ClearScore(self, board) -> bool:
+        """Zero both scores and both losers flags. True if it applied.
+
+        The clear a set load runs before the next set arrives
+        (`AutonaScoreboardWidget.NewSetSelected`), and the first half of an
+        operator's reset (`ResetMatch`). It leaves the match bar alone:
+        `SetLoadService.ApplyMatchInfo` keeps the round name for a payload
+        that carries none, so blanking it here would wipe the round
+        mid-stream (S-17).
+
+        Only what changes is written, as the spinboxes and the checkboxes
+        did (neither emits for its current value). A losers flag that goes
+        takes its team's " [L]" with it (`SetTeamLosers`). The game
+        tracker's rows follow the score from the board's held cycle, as
+        they do for `ResetScore`.
+        """
+        board = self._asInt(board, 0)
+        if board not in self.SCORE_BOARDS:
+            logger.debug(f"ClearScore: board {board} is not a score board")
+            return False
+        with StateManager.SaveBlock():
+            for team in (1, 2):
+                self._SetIfChanged(
+                    f"score.{board}.team.{team}.score", self.SCORE_MIN)
+            for team in (1, 2):
+                self.SetTeamLosers(board, team, False)
+        return True
+
+    def ResetMatch(self, board) -> bool:
+        """The operator's reset of the match: `ClearScore` plus the match
+        bar (`ClearMatchInfo`), in one save cycle. True if it applied.
+
+        Behind the すべての入力値をリセット button (`ClearBoard`) and the
+        Web's reset_match / clear_all. The best of is not part of it yet:
+        the BEST OF spinbox is still its entry point (module docstring), so
+        the callers reset it themselves.
+        """
+        board = self._asInt(board, 0)
+        if board not in self.SCORE_BOARDS:
+            logger.debug(f"ResetMatch: board {board} is not a score board")
+            return False
+        with StateManager.SaveBlock():
+            self.ClearScore(board)
+            self.ClearMatchInfo(board)
+        return True
+
+    def ClearPlayers(self, board, no_mains=False) -> bool:
+        """Empty every player slot of both teams in one save cycle. True if
+        it applied.
+
+        What each slot loses is what a player card's Clear() emptied
+        (`_ClearSlot`); the birthday, the city and the mains stay, as they
+        did -- the city is a known gap (ADR-005 S2 decision 5), recorded
+        rather than fixed. `no_mains` keeps the characters, with the old
+        clear's limits (see `_ClearSlot`). The upset factor is recalculated
+        when a seed went, as the seed spinbox's change used to ask for.
+
+        Every slot the state carries for the two teams, which on a built
+        board is one per player card (the roster is trimmed to the cards).
+        """
+        board = self._asInt(board, 0)
+        if board not in self.SCORE_BOARDS:
+            logger.debug(f"ClearPlayers: board {board} is not a score board")
+            return False
+        seedsChanged = False
+        with StateManager.SaveBlock():
+            with StateManager.lock:
+                for team in (1, 2):
+                    prefix = f"score.{board}.team.{team}.player"
+                    roster = StateManager.Get(prefix)
+                    if not isinstance(roster, dict):
+                        continue
+                    for slot, value in list(roster.items()):
+                        if isinstance(value, dict):
+                            seedsChanged |= self._ClearSlot(
+                                f"{prefix}.{slot}", value, no_mains)
+                if seedsChanged:
+                    self._UpdateUpsetFactor(board)
+        return True
+
+    @staticmethod
+    def _ClearSlot(path, slot, no_mains) -> bool:
+        """Empty one player slot as a player card's Clear() did; True when
+        its seed changed. Caller holds the lock and the block.
+
+        Clear() emptied the card's widgets and let their handlers publish,
+        so what it wrote depended on what each widget showed -- which, since
+        S2a, is the slot itself:
+
+        - `online_avatar`: always None (it stated that outright).
+        - the four line edits and the note: emptied when they held text.
+        - the display name, the images and the id: re-published for an
+          empty name when the sponsor or the tag held text (the name
+          fields' NameChanged); a slot with an id but no name keeps it.
+        - the seed: always written, as 0 (its line edit's editingFinished).
+        - the country and the region: emptied when shown (a country takes
+          its region with it, the region going first, as LoadStates
+          publishes it).
+        - the characters: all of the card's slots blank, when one of them
+          was not -- the card has as many as `character` holds, since every
+          slot-count change republishes it.
+
+        `no_mains` kept the characters by skipping the combos of the card's
+        character rows, in a loop that only did so for a card with a single
+        row: with two or more, every row's combos were reset by the others'
+        pass, and with none, the country and region combos were not reset
+        either. Reproduced as it was -- a set load with `no_mains` publishes
+        this state until the set arrives (and its SetData clears the same
+        way).
+        """
+        service = PlayerService(path)
+        # Read before the first write: `slot` is the live dict.
+        slot = dict(slot)
+
+        def text(key):
+            value = slot.get(key)
+            return "" if value is None else str(value)
+
+        named = bool(text(schema.PLAYER_SPONSOR_KEY)
+                     or text(schema.PLAYER_TAG_KEY))
+        seedChanged = AutonaActions._asInt(
+            slot.get(schema.PLAYER_SEED_KEY), 0) > 0
+        characters = slot.get("character")
+        rows = len(characters) if isinstance(characters, dict) else 0
+
+        service.SetOnlineAvatar(None)
+
+        for field in schema.PLAYER_LINE_EDIT_KEYS:
+            if text(field):
+                service.SetText(field, "")
+        if named:
+            service.PublishMergedName("", "")
+            service.PublishImages("", "")
+            service.SetPlayerId(None)
+
+        service.SetSeed(0)
+
+        if text(schema.PLAYER_NOTE_KEY):
+            service.SetText(schema.PLAYER_NOTE_KEY, "")
+
+        if not (no_mains and rows == 0):
+            if slot.get(schema.PLAYER_COUNTRY_KEY):
+                service.SetRegion(None, None)
+                service.SetCountry(None)
+            elif slot.get(schema.PLAYER_STATE_KEY):
+                service.SetRegion(None, None)
+
+        if rows and not (no_mains and rows == 1):
+            blank = service.CharacterValue(CharacterSlot())
+            if any(value != blank for value in characters.values()):
+                service.PublishCharacterSlots([CharacterSlot()] * rows)
+        return seedChanged
+
+    def ClearBoard(self, board) -> bool:
+        """The すべての入力値をリセット button: the players, the score, the
+        losers flags, the match bar and the team names (with their crests),
+        in one save cycle. True if it applied.
+
+        The best of is reset by the board in the same block (see
+        `ResetMatch`), and the player / character counts stay as they are.
+        The Web's clear_all is not this: it has always kept the team names
+        (unless it shrinks the roster to one player) and changes the counts
+        between the reset and the players' clear, so it calls those
+        operations in its own order (ADR-005 S2 decision 3).
+        """
+        board = self._asInt(board, 0)
+        if board not in self.SCORE_BOARDS:
+            logger.debug(f"ClearBoard: board {board} is not a score board")
+            return False
+        with StateManager.SaveBlock():
+            self.ClearPlayers(board)
+            self.ResetMatch(board)
+            for team in (1, 2):
+                self.SetTeamName(board, team, "")
+                # The crest of no name: what SetLoadService.PublishTeamLogo
+                # resolves for an empty one.
+                self._SetIfChanged(f"score.{board}.team.{team}.logo", None)
+        return True
 
     # ── the team roster (how many player slots a team has) ────────────────
     #

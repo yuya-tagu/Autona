@@ -545,3 +545,122 @@ LOSERS フラグと、そのチームの選手名に付く ` [L]`（`mergedName`
   - チーム形式を表示中にホットキーで swap したとき、1v1 ボードは入れ替わらない。クルー形式ではホットキーの swap が何もしない（クルーの swap はボタンと Web から）
   - 1v1 表示中に Web の `/team` ページから swap: チームボードが構築されて入れ替わり、形式をチームに切り替えると入替が残っている
   - Start.gg の選手で swap したとき、統計（直近の対戦・戦績）が 1 回だけ取り直される
+
+#### S2d clear 系を core へ（2026-10-23・PR 未作成）
+
+スコア・選手・ボード全体のクリアを、ボードのウィジェットを空に戻す実装から、state を直接書く core 操作にした。旧実装は、スコアのスピンボックスを 0 にして `valueChanged` にスコアを書かせ、LOSERS のチェックを外し、選手カードごとの `Clear()` で欄を 1 つずつ空にしてハンドラに publish させていた（カード 1 枚ごとに 1 保存サイクル）。新しい操作は 1 操作 = 1 SaveBlock で、カード・スピンボックス・チェックボックス・ステージボタンは held サイクルから追従する（S2a）。
+
+- **`AutonaActions` に 4 操作**（board 1/2。board 3 は `False` を返し、呼び出し側がクルーウィジェットに委ねる = 決定 6）
+  - `ClearScore(board)`: 両チームのスコアを 0、LOSERS を False にする（`SetTeamLosers` 経由で ` [L]` も外す）。変わる値だけを書く。match バーは残す（セット読込の前処理。S-17）
+  - `ResetMatch(board)`: `ClearScore` + `ClearMatchInfo`（オペレーターのリセット）
+  - `ClearPlayers(board, no_mains=False)`: 両チームの全スロットを、旧カードの `Clear()` が publish していた内容どおりに空にする（`_ClearSlot`）。seed が変わったスロットがあれば、アップセット係数を core 内で計算し直す
+  - `ClearBoard(board)`: 「すべての入力値をリセット」。`ClearPlayers` + `ResetMatch` + チーム名 `""` + ロゴ None（変わるときだけ）
+- **`_ClearSlot` は旧 `Clear()` の出力を再現する**。旧実装はウィジェットを空にしてハンドラに書かせていたので、何が書かれるかは表示中の値（S2a 以降はスロットの中身）で決まっていた
+  - 常に書くもの: `online_avatar` = None、seed = int 0（旧 `SetSeed` の正規化）
+  - 文字が入っていたときだけ `""` にするもの: テキスト 4 欄とメモ
+  - スポンサーかタグに文字があったときだけ、空の名前で publish し直すもの: 合成名・画像・id。名前の無いスロットの id は残る
+  - 国があれば地域 → 国の順で `{}`、地域だけなら地域だけ
+  - キャラは、どれかの行が空でなければ全行を空にする
+  - birthday・city・mains は残す
+  - **`no_mains` の癖も再現した**: キャラが残るのはキャラ行が 1 のときだけ（2 行以上では、他の行のループが全行のコンボをリセットしていた）。0 行のときは国・地域も残る。`no_mains` でセットを追従すると、セットが届くまでこの state が publish される
+- **判断 3（Web `clear_all` とデスクトップ `ResetAllInputs` の差）は揃えていない**。ただし「`ClearBoard` にチーム名のオプションを持たせる」形は採らなかった
+  - 理由: Web の `clear_all` は「`ResetMatch` → best_of 0 → 人数 1・キャラ数 1 → 選手のクリア」の順で、この順が mains を決める（キャラ数の変更が `SetCharactersPerPlayer` で mains を publish し直す）。オプション付きの `ClearBoard` で選手のクリアを人数・キャラ数より前にすると、mains が変わる
+  - 実装: `clear_all` は旧順序のまま、`AutonaActions.ResetMatch` と `board.CommandClearAll()`（= `ClearPlayers`）を呼ぶ。`ClearBoard` は `ResetAllInputs` 専用でオプションは無い
+  - チーム名は旧実装どおり Web では残る（人数を 1 に減らす場合は、人数変更の処理で消える）
+  - 人数・キャラ数のリセットは S2g まで、best_of は S2e まで、ボードのスピンボックスのまま
+- **判断 4（`lastSetSelected`）**: ボード属性から `SetLoadService.lastSetSelected`（state の外）へ移した
+  - クリア（`_ClearingPlayers`）と `ClearSetTracking()` で忘れるので、同じセットの再読込が効く
+  - `NewSetSelected` は `BlockSaving` の中で `CommandClearAll` → `ClearScore` → `lastSetSelected = id` の順に実行する（クリアが忘れるので、記録はその後）
+  - `UpdateSetData` の stale 判定、`LoadStationSets`、Web の `get_set` もここを読む
+- **ボードに残る部分（`AutonaScoreboardWidget._ClearingPlayers`）**: 入力中の欄の確定（`CommitFocusedEdit`）→ クリア → 追跡セットを忘れる → id が変わったチームの統計を 1 回取り直す（`_RequestPlayerStats`。`QTimer.singleShot(0)`）
+  - 全入口で通る: `CommandClearAll`・`ResetAllInputs`・Web の `reset_players` / `clear_all`・セット読込の前処理
+  - 確定しないと、描画がフォーカス中の欄を飛ばすので打ちかけの文字がカードに残り、フォーカスアウトで空にしたスロットへ書かれる（S2c と同じ問題）
+  - 打ちかけの文字が消えるのは**選手欄だけ**。match / phase / pool / チーム名 / スコア欄の入力中の文字は、旧実装と同じくフォーカスアウト時に確定する（回帰ではない）。`ResetAllInputs` だけは確定の後に `ClearBoard` がチーム名と match バーを空にするので、その 2 つも残らない
+  - `ResetAllInputs` は確認ダイアログをデスクトップに残し、`ClearBoard` と best_of 0 を 1 SaveBlock で行う
+  - ボードの `ClearScore()` / `ResetMatch()` は Actions を呼ぶだけになった
+- **Web**: `reset_match` / `reset_players` / `clear_all` / `get_set` と、`set_route` の phase / pool / match / losers / teamName から `GetScoreboard(` を除いた
+  - 未構築ボードは `EnsureScoreboard` で構築する（旧挙動を維持）。理由は S2c の swap と同じ: 未構築ボードは held でなく、書き込みは即時公開されたうえ、構築時の `SeedBoard` で消える。best_of / 人数 / キャラ数もまだボードのスピンボックス
+  - いずれも `@gui_thread_sync`（S2f まで。カード入力の確定が「フィールド → 合成名」の 2 書き込みに分かれており、その間に割り込ませない）。`get_set` はボードを構築するので新たに付けた（旧は `GetScoreboard` が構築を GUI スレッドへ渡していた）
+  - クルーボードは各ボードのメソッドに fallback する。`get_set(3)` は旧実装どおり AttributeError
+  - `set_route` の phase / pool / match / losers は `SetLoadService.ApplyMatchInfo` + `ApplyLosers`（core）で適用する。旧 `ChangeSetData` と同じ挙動で、英語のラウンド名を空にし、losers は set 側のチーム（swap 後は反対の列）に付く
+  - teamName は `SetTeamName` + `PublishTeamLogo` を 1 SaveBlock で書く（旧 2 サイクル）。クルーボードは `ChangeSetData` のまま
+  - `set_route` の bestOf / players / characters と `_reset_best_of` はスピンボックスのまま（S2e / S2g）
+- **Web / v1 のチーム名と入力中の欄（レビュー指摘）**: デスクトップでチーム名欄を入力中に Web / v1 から teamName を書くと、フォーカスアウト時の `editingFinished` が欄の文字で Web の名前を上書きしていた。選手カードと同じ held-back ガードを入れた
+  - `_SyncSetFields` は、フォーカス中で描画を飛ばした時点の欄の文字を `_heldBackTeamName` に記録する
+  - 確定（`_OnTeamNameFinished`）は、欄の文字がその記録と同じで state の値と違う（= その後オペレーターが何も打っていない）なら書かない。フォーカスが外れたら state から描画し直す（`_OnTeamNameFocusChanged` → `_SyncSetFields`）
+  - Web の書き込みの後にオペレーターが打った場合は、打った文字が勝つ（後勝ち）
+- **判断 5**: Clear で city が消えない問題は直していない（記録のみ。`test_a_clear_keeps_the_city` が現状を pin）
+- **golden**
+  - `clear_golden.json` を移行前の 2045c973 で記録した（35 ステップ）
+    - 準備: 2 人 × 2 キャラ、トラッカー ON（BO5、T2 T1 T1）、両チームの id / seed、チーム名、match バー、losers
+    - 対象: `ClearScore` / `ResetMatch` / Web `reset_match` / Web `set_route`（phase / pool / match・losers・teamName。swap 中を含む）/ `ClearPlayers`（`no_mains`、キャラ 1・2 行）/ Web `reset_players` / Web `clear_all` / `ResetAllInputs` / セット追従の前処理
+    - 統計シグナルの発火数も記録した
+    - `key_order.json` に「clear operations」節を追加した（既存の節は不変）
+  - レビュー後に同じ 2045c973 で 2 節を追加録画した（`clear_golden.json` の `singles` / `prepass`、`key_order.json` の「singles clear operations」/「set load pre-pass」。既存の節は不変）
+    - `singles`（1v1 ボード、25 ステップ）: 上と同じクリアを 1 人ずつで行う。チーム名なし。最後のセット追従は `no_mains=False`
+    - `prepass`（チームボード、12 ステップ）: トラッカー ON で 3 ゲーム記録した状態のセット読込の前処理を、`no_mains=False` と `True` の両方で行う。追従中のセットを選び直すと前処理は飛ぶ（0 サイクル）
+  - **全ステップで、state・キー順・反映 delta・カード表示が移行前と一致した**。意図した差分は保存サイクル数と統計の発火数だけで、`S2D_CLEAR_CHANGES` に列挙した
+    - 選手のクリア: カード数ぶん → 1（4 → 1）
+    - Web のチーム名: 2 → 1
+    - トラッカー ON で 3 ゲーム記録した状態のスコアのクリア: `ClearScore` 6 → 4、`ResetMatch` 1 → 4、Web `reset_match` 2 → 5、Web `clear_all` 7 → 9
+      - スコアは 1 サイクルで書き、ステージ行はボードの held サイクルから 1 行 1 サイクルで追従する（`ResetScore` / +1 と同じ既存の形）
+      - トラッカー OFF（既定）ではどれも 1 サイクル
+      - ボードは held なので、途中のサイクルは OBS / Web に出ない（反映 delta は同じ）
+    - 統計: クリアごとに、id が変わったチームの分を 1 回取得する。旧はカードごとで Recent 3・LastSets P1 1 / P2 2・`UpsetFactorCalculation` 3、新は各 1・`UpsetFactorCalculation` 0
+  - 既存の golden（`golden.json`）の「clear players」は 4 → 1 サイクル（`S2D_CHANGES`）
+  - 追加の 2 節も全ステップで state・キー順・反映 delta・カード表示が一致した。差分は `S2D_SINGLES_CHANGES` / `S2D_PREPASS_CHANGES`
+    - 1v1: 選手のクリア 2 → 1、Web `clear_all` 5 → 4。スコアのクリアはチームボードと同じ（6 → 4 / 1 → 4 / 2 → 5）。統計はクリアごとに 1 回（旧は Recent 2・`UpsetFactorCalculation` 2）
+    - 行のある状態のセット読込の前処理: 1 → 4。旧はセット読込の block の中で、スピンボックスがステージ行も消していた。今は行がスコアに held サイクルで追従する（`ResetMatch` と同じ形）
+- **pin**
+  - core（`test_actions.py`）
+    - `ClearScore` / `ResetMatch` / `ClearPlayers` / `ClearBoard` が held 1 サイクル
+    - 何も変わらないクリアは反映を点灯させない
+    - スロットの空け方: テキスト・合成名・画像・id、名前の無いスロットの id は残る、地域だけのスロット、seed は常に int、空のキャラは publish し直さない
+    - birthday・city・mains は残る
+    - `no_mains` の 5 通り（parametrize）
+    - アップセット係数は seed が変わったときだけ計算し直す
+    - `ClearBoard` はチーム名とロゴを消し、カラーを残す
+    - クルーは 4 操作とも `False`
+  - ボード / Web（`test_scoreboard_operations.py`）
+    - `CommandClearAll` / `ResetAllInputs` が 1 サイクルで、カードが追従する
+    - `ResetAllInputs` はチーム名を消し、人数を残す
+    - 4 入口の統計が 1 回（id あり）/ 0 回（id なし）
+    - 4 入口とも、クリア後に同じセットを再読込できる（`get_set` が `"0"` に戻る）
+    - Web の 5 経路が未構築ボードを構築し、`set_route` の書き込みは反映待ちになる
+    - Web のチーム名は 1 サイクルで、同じ名前は書かない
+    - city が残る（記録）
+    - 既存の `lastSetSelected` テストは `setLoad` を読むように追従させた
+  - `test_player_card_render.py`
+    - 上記 golden とキー順の照合
+    - 各ステップ後のカード表示 == state
+    - 入力中のタグがクリアされる（5 入口。セット読込の前処理を含む。オフスクリーンで実際にフォーカスして打鍵する）
+    - カード自身の Clear（`clear_bt` = `AutonaBasePlayerWidget.Clear`）と `ClearPlayers` が、埋まったスロットに同じ state を出す（`no_mains` 両方 × キャラ 1・2 行。キー順も）
+    - Web のチーム名: 入力中の欄に Web が書く → 欄から外れる → Web の名前（とロゴ）が残る。Web の後に打った文字は勝つ
+  - ボード / Web の補強: Web のチーム名が 1 サイクルでロゴも書く、Web の 5 経路のクリア後の state
+  - mutation で確認したこと: 次のどれを外しても該当テストが落ちる
+    - 追跡セットを忘れる処理
+    - 統計の取得
+    - `CommitFocusedEdit`
+    - `no_mains` の 2 つの条件
+    - 「seed が変わったときだけ」の条件
+    - 「名前があったときだけ」の条件
+- 残置 / リスク
+  - トラッカー ON のスコアのクリアは、ステージ行の数だけ保存サイクルが増える（上記）。追従を 1 サイクルにまとめる変更は `ResetScore` / `AdjustScore` / `ApplyScores` にも効くので、S2d では行わない（S2e の候補）
+  - トラッカー ON で `ResetAllInputs` を行うと、`DecrementScore` の警告ログ（`Failed to decrement score`）がチームごとに出る。S2d で新たに出るのはここだけ。同じ block の best_of 0 で行が消えた後に、スコア 0 への追従が held サイクルで走るため。書き込みは無く、state は同じ
+    - Web `clear_all` では出ない。`ResetMatch` の block を抜けた時点のスコア 0 への追従が行を消し、best_of 0 はその後になるため
+    - 行の無い状態でスコアが下がるときの同じ警告（セット追従の前処理、1v1 の Web `clear_all`）は、移行前の 2045c973 でも出る
+  - クリアの前に入力中の欄を確定するので、カーソルが欄から外れる（S2c と同じ UX の変化）。Web からのクリアでも、デスクトップで入力中の欄が確定される
+  - セット読込の前処理（`NewSetSelected` → `_ClearingPlayers` → `CommitFocusedEdit`）でも、そのボードの入力中の欄からフォーカスが外れる（UX の変化）。station / stream の自動追従では、追従先のセットが切り替わるたびに起きる（5 秒ごとのポーリングで同じセットのままなら起きない）
+  - 編集可能コンボ（キャラ・国）に打ちかけの文字があると、クリア後もその文字が残る可能性がある（未検証）。コンボの打鍵はフォーカスアウトで確定せず、描画もフォーカス中の欄を飛ばすため。直していない。S2f でカードの `Clear` を廃止するときに解消する予定
+  - 性能面の注意: `ClearPlayers` は全スロットの書き込みとアップセット係数の再計算の間、`StateManager.lock` を保持する（旧はカードごとの書き込みで短く取っていた）。他スレッド（Web・書き出し）の待ちが少し長くなりうる（実測なし）
+  - カード自身の Clear（`clear_bt`・`SetData` 内の `Clear`）はウィジェット主導のまま（S2f）
+  - Web の `get_set` が GUI スレッドでの同期実行になった（Web UI は呼んでいない。外部マクロ向けの legacy 経路）
+- 実機確認（オーナー）
+  - 1v1・チームの両形式で、選手情報のクリア（Web の reset_players）・すべての入力値をリセット・Web の全クリア / マッチリセット: 選手名・キャラ・国 / 地域・seed バッジ・アバター・スコア・LOSERS・match バーが空になり、反映後に OBS が空になる
+  - すべての入力値をリセットではチーム名が消える。Web の全クリアでは、人数が 2 人以上だったときだけ（人数を 1 に戻す処理で）消える。どちらもチームカラーは残る
+  - タグを打っている途中で各クリア: 打ちかけの文字も消え、フォーカスを外しても戻らない（選手欄だけ。match / チーム名 / スコア欄の打ちかけはフォーカスアウトで確定する = 旧実装どおり）
+  - チーム名欄を打っている途中に Web からチーム名を変え、欄からフォーカスを外す: Web の名前（とロゴ）が残る。そのあと欄に打てば打った文字になる
+  - Start.gg の station / stream を追従中に別の欄を打っていて、次のセットに切り替わる: 欄からフォーカスが外れる（前処理の確定。UX の変化として許容できるか）
+  - Start.gg のセットを追従中にクリアしてから同じセットを選び直すと、もう一度読み込まれる
+  - トラッカー ON で勝敗を付けてからマッチリセット: ステージボタンが全部未報告に戻り、スコアが 0-0
+  - Start.gg の選手でクリアしたとき、統計が 1 回だけ取り直される
