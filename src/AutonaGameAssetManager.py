@@ -82,6 +82,12 @@ class AutonaGameAssetManager(QObject):
         self.assetsLoaderThread = None
         self.threadpool = QThreadPool()
         self.workers = []
+        # Generation of the stage / skin models the icon workers decode for.
+        # Bumped whenever UpdateStageModel / UpdateSkinModel replace those
+        # models; a worker result carrying an older value belongs to a retired
+        # generation and is dropped instead of being applied to its items.
+        self._stageIconGeneration = 0
+        self._skinIconGeneration = 0
 
         # Startup restore of the last-used game (see _RestoreSelectedGame).
         # Armed by UiMounted() so a later LoadGames() rescan — "Add game
@@ -809,6 +815,8 @@ class AutonaGameAssetManager(QObject):
         # TODO: Make modded content disabled by default
         # TODO: Add checkbox on game bar to enable / disable modded content
         try:
+            self._stageIconGeneration += 1
+            generation = self._stageIconGeneration
             self.stageModel = QStandardItemModel()
             self.stageModelWithBlank = QStandardItemModel()
             # Add blank
@@ -872,17 +880,24 @@ class AutonaGameAssetManager(QObject):
                     self.stageModel.appendRow(item)
                     self.stageModelWithBlank.appendRow(item_with_blank)
 
-                worker = Worker(self.LoadStageImage, *[stage[1], item])
-                worker_blank = Worker(self.LoadStageImage, *[stage[1], item_with_blank])
-                worker.signals.result.connect(self.LoadStageImageComplete)
-                worker_blank.signals.result.connect(self.LoadStageImageComplete)
+                worker = Worker(self.LoadStageImage, *[stage[1], item, generation])
+                worker_blank = Worker(self.LoadStageImage, *[stage[1], item_with_blank, generation])
+                # Queued: the worker stops at QImage; the QPixmap / QIcon
+                # conversion and setIcon run in the slot on the GUI thread.
+                worker.signals.result.connect(
+                    self.LoadStageImageComplete, Qt.ConnectionType.QueuedConnection)
+                worker_blank.signals.result.connect(
+                    self.LoadStageImageComplete, Qt.ConnectionType.QueuedConnection)
                 self.threadpool.start(worker)
                 self.threadpool.start(worker_blank)
             self.stageModelWithBlank.sort(0)
         except:
             logger.error(traceback.format_exc())
 
-    def LoadStageImage(self, stage, item, progress_callback, cancel_event):
+    def LoadStageImage(self, stage, item, generation, progress_callback, cancel_event):
+        # Runs on a QThreadPool worker. QPixmap / QIcon are GUI-thread only, so
+        # this stops at a QImage; LoadStageImageComplete converts it on the GUI
+        # thread. A None image asks the slot for the fallback (cancel) icon.
         try:
             if stage.get("path") and os.path.exists(stage.get("path")):
                 img = Image.open(stage.get("path"))
@@ -901,21 +916,30 @@ class AutonaGameAssetManager(QObject):
                 data = img.tobytes("raw", "RGBA")
                 qimg = QImage(
                     data, img.size[0], img.size[1], QImage.Format.Format_RGBA8888)
-                pix = QPixmap.fromImage(qimg)
-                icon = QIcon(pix)
 
-                return ([item, icon])
+                # copy(): the QImage above only wraps `data`, which does not
+                # outlive this call; the GUI thread gets one owning its pixels.
+                return (generation, item, qimg.copy())
         except Exception as e:
-            img = QPixmap("./assets/icons/cancel.svg").scaled(32, 32)
-            icon = QIcon(img)
             logger.error(traceback.format_exc())
-            return ([item, icon])
+            return (generation, item, None)
 
     def LoadStageImageComplete(self, result):
+        # GUI thread (queued from the LoadStageImage worker).
         try:
-            if result is not None:
-                if result[0] and result[1]:
-                    result[0].setIcon(result[1])
+            if result is None:
+                return
+            generation, item, image = result
+            if generation != self._stageIconGeneration:
+                # The stage models were rebuilt while this worker ran: its
+                # item belongs to a retired generation.
+                return
+            if image is None:
+                icon = QIcon(QPixmap("./assets/icons/cancel.svg").scaled(32, 32))
+            else:
+                icon = QIcon(QPixmap.fromImage(image))
+            if not icon.isNull():
+                item.setIcon(icon)
         except Exception as e:
             logger.error(traceback.format_exc())
             return (None)
@@ -1070,6 +1094,8 @@ class AutonaGameAssetManager(QObject):
 
     def UpdateSkinModel(self):
         self.skinModels = {}
+        self._skinIconGeneration += 1
+        generation = self._skinIconGeneration
 
         self.workers = []
 
@@ -1140,8 +1166,11 @@ class AutonaGameAssetManager(QObject):
                 allAssetData.append(assetData)
 
             worker = Worker(self.LoadSkinImages, *
-                            [allAssetData, allItem, skinModel])
-            worker.signals.result.connect(self.LoadSkinImagesComplete)
+                            [allAssetData, allItem, skinModel, generation])
+            # Queued: the worker stops at QImage; the QPixmap / QIcon
+            # conversion and setIcon run in the slot on the GUI thread.
+            worker.signals.result.connect(
+                self.LoadSkinImagesComplete, Qt.ConnectionType.QueuedConnection)
             self.workers.append(worker)
 
             self.skinModels[key] = skinModel
@@ -1149,9 +1178,12 @@ class AutonaGameAssetManager(QObject):
         for w in self.workers:
             self.threadpool.start(w)
 
-    def LoadSkinImages(self, allAssetData, allItem, skinModel, progress_callback, cancel_event):
+    def LoadSkinImages(self, allAssetData, allItem, skinModel, generation, progress_callback, cancel_event):
+        # Runs on a QThreadPool worker: stops at QImage (see LoadStageImage);
+        # LoadSkinImagesComplete builds the icons on the GUI thread.
+        # skinModel is unused: passed only to keep the model alive while the worker runs.
         try:
-            icons = []
+            images = []
 
             for i in range(len(allAssetData)):
                 assetData = allAssetData[i]
@@ -1288,22 +1320,29 @@ class AutonaGameAssetManager(QObject):
                 data = img.tobytes("raw", "RGBA")
                 qimg = QImage(
                     data, img.size[0], img.size[1], QImage.Format.Format_RGBA8888)
-                pix = QPixmap.fromImage(qimg)
-                icon = QIcon(pix)
 
-                icons.append(icon)
+                # copy(): own the pixels, `data` does not outlive this call.
+                images.append(qimg.copy())
 
-            return ([(allItem[i], icons[i]) for i in range(len(allItem))])
+            return (generation, [(allItem[i], images[i]) for i in range(len(allItem))])
         except Exception as e:
             logger.error(traceback.format_exc())
             return (None)
 
-    def LoadSkinImagesComplete(self, results):
+    def LoadSkinImagesComplete(self, result):
+        # GUI thread (queued from the LoadSkinImages worker).
         try:
-            for result in results:
-                if result is not None:
-                    if result[0] and result[1]:
-                        result[0].setIcon(result[1])
+            if result is None:
+                return
+            generation, pairs = result
+            if generation != self._skinIconGeneration:
+                # The skin models were rebuilt while this worker ran: its
+                # items belong to a retired generation.
+                return
+            for item, image in pairs:
+                icon = QIcon(QPixmap.fromImage(image))
+                if not icon.isNull():
+                    item.setIcon(icon)
         except Exception as e:
             logger.error(traceback.format_exc())
             return (None)
