@@ -364,7 +364,7 @@ TOP8_KEYS = (
     TOP8_PHASE_LABEL_KEY,
     "players.{I}.name",
     "players.{I}.sponsor",
-    "players.{I}.country",          # {code, asset} -- AutonaCountryHelper form
+    "players.{I}.country",          # {code, asset} -- CountryCatalog.BasicCountryInfo form
     "players.{I}.characters.{K}",
     "matches.{ID}.name",
     "matches.{ID}.slots",           # [int, int]; 0 = TBD, derived by Recompute

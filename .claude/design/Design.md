@@ -370,7 +370,7 @@ top8
 ├── players.{1..8}                   W R   (スロット位置固定: 1/2=WSF1, 3/4=WSF2,
 │   │                                       5/6=LR1A, 7/8=LR1B)
 │   ├── name / sponsor               W R
-│   ├── country                      W R   ({code, asset} — AutonaCountryHelper 形式)
+│   ├── country                      W R   ({code, asset} — CountryCatalog.BasicCountryInfo 形式)
 │   └── characters.{K}               W R   (charData: assets 込み)
 └── matches.{wsf1|wsf2|wf|lr1a|lr1b|lqf1|lqf2|lsf|lf|gf|gf_reset}
     ├── name                         W R   (ラウンド表示名)
@@ -618,6 +618,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | 選手 DB | `./user_data/local_players.json` | JSON 配列 | `AutonaPlayerDB` | PyQt の Player List + 直接 JSON 編集 |
 | ルールセット（キャッシュ） | `./user_data/rulesets.json` | JSON | tournament provider | API 取得時に自動更新 |
 | ゲームアセット定義 | `./user_data/games/{game}/{asset_type}/config.json` | JSON | `core/GameAssetCatalog`（Qt 側は `AutonaGameAssetManager` がモデル化） | アセット追加時に手動編集 |
+| 国・地域マスタ / カスタム国旗 | `./assets/countries+states.json`・`./assets/city_to_state.json`・`./user_data/additional_flag/*` | JSON / 画像 | `core/CountryCatalog`（Qt 側は `AutonaCountryHelper` が国モデル化） | 同梱データ（都市→地域表は `scripts/gen_city_to_state.py` で生成）。カスタム国旗は画像を置くだけ |
 | サムネテンプレ定義 | `./assets/thumbnail_base/thumbnail_types/{id}.json` | JSON | （定義のみ） | テンプレ追加時に手動作成 |
 | OBS テンプレのグローバル設定 | `./layout/settings.json` | JSON | OBS layout runtime | テンプレ提供者または運用者が編集 |
 | OBS テンプレのローカル設定 | `./layout/{template}/settings.json` | JSON | OBS layout runtime | テンプレ提供者または運用者が編集 |

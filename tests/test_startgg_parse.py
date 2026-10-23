@@ -18,6 +18,10 @@ tests/fixtures/game_assets (the S1a golden fixture) loaded. Its start.gg
 tables: characters 1 Mario / 2 Luigi / 3 Bowser (4 Ryu exists only in the
 other game, 5 in no pack at all), stages 311 Battlefield / 328 Final
 Destination (codename "fd") / 484 Smashville.
+
+Neither are country and region lookups (ADR-005 S1c): the provider reads the
+Qt-free core CountryCatalog, and these tests hand it a real one loaded from
+the shipped assets/ (country names, regions and the city -> region table).
 """
 import os
 import shutil
@@ -34,8 +38,10 @@ import pytest
 #    the real (Qt-free) game asset catalog is what the provider resolves
 #    start.gg ids against
 # ---------------------------------------------------------------------------
+from src.core.CountryCatalog import CountryCatalog, state_flag_path
 from src.core.DictHelper import deep_get
 from src.core.GameAssetCatalog import GameAssetCatalog, GameAssetSnapshot
+from tests.conftest import _link_tree
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 GAME_ASSETS = PROJECT_ROOT / "tests" / "fixtures" / "game_assets"
@@ -55,20 +61,6 @@ def _make_mock_module(name, attrs=None, is_package=False):
         for k, v in attrs.items():
             setattr(mod, k, v)
     return mod
-
-
-# --- AutonaCountryHelper ---
-class _MockAutonaCountryHelper:
-    countries = {
-        "JP": {"code": "JP", "en_name": "Japan"},
-        "US": {"code": "US", "en_name": "United States"},
-    }
-
-    @staticmethod
-    def FindState(country_code, city):
-        if country_code == "JP" and city == "Tokyo":
-            return "13"  # Tokyo prefecture code
-        return None
 
 
 # --- AutonaLocaleHelper ---
@@ -131,11 +123,13 @@ def _setup_mock_modules():
     mocks = {
         "src": _make_mock_module("src", is_package=True),
         "src.Helpers": _make_mock_module("src.Helpers", is_package=True),
-        "src.Helpers.AutonaCountryHelper": _make_mock_module(
-            "src.Helpers.AutonaCountryHelper",
-            {"AutonaCountryHelper": _MockAutonaCountryHelper},
-        ),
         "src.core": _make_mock_module("src.core", is_package=True),
+        # The real class: the tests below set its `instance` to a catalog
+        # loaded from the shipped assets.
+        "src.core.CountryCatalog": _make_mock_module(
+            "src.core.CountryCatalog",
+            {"CountryCatalog": CountryCatalog},
+        ),
         "src.core.DictHelper": _make_mock_module(
             "src.core.DictHelper",
             {"deep_get": deep_get},
@@ -290,10 +284,35 @@ def _fixtureCatalog(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
-def _catalog(_fixtureCatalog, monkeypatch):
-    """Every test resolves against the fixture catalog (put back after)."""
+def _catalog(_fixtureCatalog, _fixtureCountries, monkeypatch):
+    """Every test resolves against the fixture catalogs (put back after)."""
     monkeypatch.setattr(GameAssetCatalog, "instance", _fixtureCatalog)
+    monkeypatch.setattr(CountryCatalog, "instance", _fixtureCountries)
     return _fixtureCatalog
+
+
+@pytest.fixture(scope="module")
+def _fixtureCountries(tmp_path_factory):
+    """A real CountryCatalog loaded from the shipped country data.
+
+    Loaded in a throwaway CWD with assets/ linked in, because a load also
+    guarantees ./user_data/additional_flag. The city -> region table is
+    read here as well (FindState reads it on first use); after that every
+    answer the provider asks for is in memory.
+    """
+    work = tmp_path_factory.mktemp("startgg_countries")
+    _link_tree(work / "assets", PROJECT_ROOT / "assets")
+    previousDir = os.getcwd()
+    os.chdir(work)
+    try:
+        catalog = CountryCatalog()
+        assert catalog.Load() is True
+        assert catalog.FindState("JP", "Tokyo") == "13"
+    finally:
+        os.chdir(previousDir)
+        # The junction is removed by hand, never followed (see conftest).
+        os.rmdir(work / "assets")
+    return catalog
 
 
 # ===========================================================================
@@ -690,7 +709,7 @@ class TestParseMatchDataNewApi:
         assert p1["id"] == [1001, 2001]
 
     def test_entrant_country_lookup(self):
-        """Country name -> code lookup from AutonaCountryHelper."""
+        """Country name -> code lookup from the country catalog."""
         provider = _make_provider()
         result = provider.ParseMatchDataNewApi(_new_api_set_basic())
         p2 = result["entrants"][1][0]
@@ -1058,6 +1077,68 @@ class TestParseMatchDataOldApi:
 
 
 # ===========================================================================
+# Tests: ProcessFutureSet (the next-set preview) -- player locations (S1c)
+# ===========================================================================
+
+def _future_player(result, team):
+    return result["team"][str(team)]["player"]["1"]
+
+
+class TestProcessFutureSetLocations:
+    """Where a next-set preview's players come from. It used to hand out the
+    country table's own region dict with `asset` written into it, so what
+    the Web's get_states returned depended on which sets had been looked at
+    (ADR-005 S1c)."""
+
+    def test_country_and_region_come_with_their_flags(self):
+        catalog = CountryCatalog.instance
+        result = _make_provider().ProcessFutureSet(_new_api_set_basic(), "")
+        p2 = _future_player(result, 2)
+
+        assert p2["country"] == catalog.BasicCountryInfo("JP")
+        assert p2["country"]["code"] == "JP" and p2["country"]["asset"]
+        # City "Tokyo" resolves to the region the state combo keys as 13,
+        # and the region's flag is resolved on the way out.
+        assert p2["state"] == catalog.State("JP", "13")
+        assert p2["state"]["original_code"] == "13"
+        assert p2["state"]["asset"] == state_flag_path("JP", "13")
+
+    def test_a_raw_region_the_table_does_not_know_is_empty(self):
+        """ProcessEntrantData passes an unresolvable Start.gg state through
+        verbatim; it is not a key of the region table, so the preview gets
+        {} rather than a lookup error or the raw string."""
+        _set = _new_api_set_basic()
+        location = (_set["slots"][1]["entrant"]["participants"][0]
+                    ["user"]["location"])
+        location.update({"state": "Atlantis", "city": None})
+
+        p2 = _future_player(_make_provider().ProcessFutureSet(_set, ""), 2)
+
+        assert p2["state"] == {}
+        assert p2["country"]["code"] == "JP"
+
+    def test_the_answer_is_a_copy_of_the_catalog(self):
+        snap = CountryCatalog.instance.Current()
+        provider = _make_provider()
+        p2 = _future_player(
+            provider.ProcessFutureSet(_new_api_set_basic(), ""), 2)
+
+        assert p2["country"] is not snap.basicInfo["JP"]
+        assert p2["state"] is not snap.countries["JP"]["states"]["13"]
+        # Nothing was written into the table on the way out...
+        assert "asset" not in snap.countries["JP"]["states"]["13"]
+        # ...and a caller editing its answer changes no later answer.
+        p2["country"]["name"] = "CHANGED"
+        p2["state"]["name"] = "CHANGED"
+        p2["state"]["extra"] = 1
+        again = _future_player(
+            provider.ProcessFutureSet(_new_api_set_basic(), ""), 2)
+        assert again["country"]["name"] != "CHANGED"
+        assert again["state"]["name"] != "CHANGED"
+        assert "extra" not in again["state"]
+
+
+# ===========================================================================
 # Tests: ProcessEntrantData
 # ===========================================================================
 
@@ -1116,7 +1197,7 @@ class TestProcessEntrantData:
         result = StartGGDataProvider.ProcessEntrantData(entrant)
         assert result["country_code"] == "JP"
         # No direct state field, so the city falls back through
-        # AutonaCountryHelper.FindState and resolves to the prefecture iso2.
+        # CountryCatalog.FindState and resolves to the prefecture iso2.
         assert result["state_code"] == "13"
 
     def test_no_user_gives_zero_id(self):

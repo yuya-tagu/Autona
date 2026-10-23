@@ -3,7 +3,7 @@
 Qt-free and import-inert like the rest of src/core. One definition so the
 folding these lookups depend on cannot drift between copies: the bad-word
 filter folds both its word lists and the tested name with it, and the
-Start.gg city -> state fallback (AutonaCountryHelper.FindState) folds the
+Start.gg city -> state fallback (CountryCatalog.FindState) folds the
 lookup input the way scripts/gen_city_to_state.py folded the table keys.
 """
 import unicodedata

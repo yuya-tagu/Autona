@@ -12,6 +12,7 @@ from shiboken6 import Shiboken
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
+from .core.CountryCatalog import CountryCatalog
 from .core.StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaPlayerDB import AutonaPlayerDB
@@ -233,9 +234,9 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             # group box padding above.
             self.character_container.layout().setContentsMargins(0, 0, 0, 0)
 
-        self.LoadCountries()
-
-        AutonaCountryHelper.signals.countriesUpdated.connect(self.LoadCountries)
+        # Once: completer, country model, country -> regions link, and the
+        # countriesAboutToReload / countriesUpdated connections.
+        self._WireCountryState()
 
         self.character_elements = []
 
@@ -499,7 +500,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         TypeUserData and the process dies with an access violation in
         whatever widget happened to be under construction. In this codebase
         that landed, run after run, on the QCompleter built by
-        AutonaBasePlayerWidget.LoadCountries one or two player widgets later.
+        AutonaBasePlayerWidget.LoadCountries (now _WireCountryState) one or
+        two player widgets later.
 
         So the layout is never handed back to Qt: removeItem() leaves Python
         the owner, and dropping the last Python reference makes PySide do the
@@ -978,7 +980,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 # this runs inside dataLock + BlockSaving on the GUI thread, so
                 # the normal path must never pay for it.
                 if stateIndex == 0 and data.get("country_code"):
-                    resolved = AutonaCountryHelper.FindState(
+                    resolved = CountryCatalog.instance.FindState(
                         data.get("country_code"), data.get("state_code"))
                     if resolved:
                         for i in range(stateElement.model().rowCount()):

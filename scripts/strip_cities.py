@@ -1,9 +1,11 @@
 """Generate a slim country+states JSON by stripping out city arrays.
 
-Autona only uses country and state information at startup; the city-level
-reverse lookup in AutonaCountryHelper.cities is rarely exercised and gates
-a ~5 s JSON parse on every launch (source file ≈ 46 MB). Dropping cities
-shrinks the file by roughly an order of magnitude.
+Autona only uses country and state information at startup
+(src/core/CountryCatalog.py); parsing the city arrays would gate a ~5 s
+JSON parse on every launch (source file ≈ 46 MB). Dropping cities
+shrinks the file by roughly an order of magnitude. The city -> region
+lookup reads its own pre-computed table instead
+(assets/city_to_state.json, scripts/gen_city_to_state.py).
 
 Run once:
     python scripts/strip_cities.py

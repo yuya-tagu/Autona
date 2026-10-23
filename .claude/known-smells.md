@@ -138,7 +138,7 @@ pronoun 撤去）。現行挙動に合わせ修復し **62件グリーン化済�
 > 削除理由（起動時 46MB JSON パース＋エントラント毎の線形スキャン）は、
 > `scripts/gen_city_to_state.py` がビルド時に `assets/city_to_state.json`
 > （`{国コード: {正規化キー: 州 iso2}}` 約 2.5MB）を事前計算し、
-> `AutonaCountryHelper.FindState` が初回参照時に遅延ロードして O(1) で引く形で解消した。
+> `AutonaCountryHelper.FindState`（2026-10-23 ADR-005 S1c で `core/CountryCatalog.FindState` へ移動）が初回参照時に遅延ロードして O(1) で引く形で解消した。
 > 複数県にまたがる曖昧な市名（Kawasaki / Ota / Minato 等、JP 69 キー・全世界 7,568 キー）は
 > **表に載せず未解決**にする（配信では誤った地域表示が空欄より悪い）。
 > テストは `tests/test_find_state.py`、StartGG 側の挙動 pin は `tests/test_startgg_parse.py`。
@@ -461,6 +461,12 @@ grep -rEn "open\([^,]+,\s*['\"](w|wb|a)|json\.dump|shutil\.copy|\.save\(|os\.ren
 > 存在しない）ため、本項目の対象は `AutonaCountryHelper.LoadCountries` のみ。呼び出し位置も
 > `AutonaCountryHelper.instance.init()`（`Window.__init__` の前半・GUI 同期）に変わっている
 > （旧 `src/Autona.py:258/259` の 2 箇所ではない。重複呼び出しは起動再設計 Step 2 で解消）。
+>
+> **2026-10-23 更新（ADR-005 S1c）**: データ準備（JSON パース・国表・カスタム国旗の listdir）は
+> Qt 非依存の `core/CountryCatalog.Load()` に分かれ、`AutonaCountryHelper.LoadCountries` は
+> 「`Load()` を呼んで国モデルを埋める」だけになった。cities 逆引きは死にデータとして削除。
+> 下の対策案は「`Load()` を Worker で、モデル構築を GUI で」とそのまま書ける形になったが未着手
+> （障害 1 の同期フォールバックは残っている）。
 
 **根拠**: 2026-06-29「ゲームアセット起動フリーズ」修正（アセット情報の単一真実源化, PR #82）の横展開調査。
 GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src/ で洗った際に発見。
@@ -471,16 +477,16 @@ GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src
 
 | 箇所 | 欠陥 | コンテキスト |
 |------|------|------------|
-| `AutonaCountryHelper.LoadCountries`（[src/Helpers/AutonaCountryHelper.py:77-216](src/Helpers/AutonaCountryHelper.py)） | JSON ロード/パース（slim ~2MB / full ~46MB フォールバック）+ countries dict 構築 + cities 逆引き + additional_flag listdir。※`QIcon(path)` は遅延デコードなので画像自体は軽い | `Window.__init__` 前半の `AutonaCountryHelper.instance.init()` で GUI 同期 |
+| `CountryCatalog.Load`（[src/core/CountryCatalog.py](src/core/CountryCatalog.py)）← `AutonaCountryHelper.LoadCountries`（[src/Helpers/AutonaCountryHelper.py](src/Helpers/AutonaCountryHelper.py)） | `Load()`: JSON ロード/パース（slim ~2MB / full ~46MB フォールバック）+ 国表・国コンボ行の構築 + additional_flag listdir。アダプタ: 国モデルの QStandardItem 構築。※`QIcon(path)` は遅延デコードなので画像自体は軽い | `Window.__init__` 前半の `AutonaCountryHelper.instance.init()` で GUI 同期 |
 | ~~`AutonaControllerHelper.BuildControllerTree`~~ | — | 機能ごと削除済み（2026-07。対象外） |
 
 **対策案（データ準備を Worker へ、モデル構築のみ GUI へ）**:
-- CountryHelper: JSON ロード/パース・dict・cities・additional_flag listdir を Worker 側、`countryModel` の
+- CountryHelper: `CountryCatalog.Load()`（JSON ロード/パース・国表・additional_flag listdir）を Worker 側、`countryModel` の
   QStandardItem/`QIcon(path)` 構築のみ GUI 側で実行し `countriesUpdated.emit()`。
 
 **実装前確認で判明した障害（S3 たる所以・2026-06-29）**:
-1. **同期フォールバックとの二重ビルド**: [src/AutonaBasePlayerWidget.py:355-356](src/AutonaBasePlayerWidget.py)
-   が「`countryModel` が None なら自前で同期 `LoadCountries()` を実行」する。非同期化すると起動時に
+1. **同期フォールバックとの二重ビルド**: `AutonaBasePlayerWidget.LoadCountries`（[src/AutonaBasePlayerWidget.py](src/AutonaBasePlayerWidget.py)）
+   が「`countryModel` が None なら自前で同期 `AutonaCountryHelper.LoadCountries()` を実行」する。非同期化すると起動時に
    選手ウィジェットが先行した場合 GUI スレッドで二重ビルドが起きる。回避には同期フォールバックの無効化が必要。
 2. **コストが症状ではない**: 一回限り・上限ありの起動コスト（Country は slim JSON で軽量）。
 

@@ -28,7 +28,7 @@ worse than the blank field this restores. The unambiguous full name
 Exact names and aliases are weighed together, because "Ota" is both a city
 in Gunma and what Tokyo's "Ōta-ku" reduces to.
 
-The country key is the same code AutonaCountryHelper.LoadCountries derives
+The country key is the same code CountryCatalog.Load (src/core) derives
 (iso2, or the initials of the country name when iso2 is numeric), because
 that is what ends up in playerData["country_code"].
 
@@ -52,7 +52,7 @@ DST = Path("assets/city_to_state.json")
 
 # Japanese municipality/prefecture suffixes. Stripping them turns
 # "Shibuya-ku" into "Shibuya" and "Fukuoka-ken" into "Fukuoka", which is
-# what users actually type / what Start.gg stores. AutonaCountryHelper
+# what users actually type / what Start.gg stores. CountryCatalog
 # applies the same pattern at lookup time; tests/test_find_state.py pins
 # that the two stay identical. "to"/"fu"/"do" are deliberately absent --
 # two-letter suffixes strip real name fragments far too eagerly.
@@ -114,7 +114,7 @@ JP_PREFECTURES = {
 
 def normalize(value: str) -> str:
     """Same normalization as remove_accents_lower (src/core/TextHelper.py,
-    which AutonaCountryHelper.FindState uses).
+    which CountryCatalog.FindState uses).
 
     Kept as a local copy so this build-time tool never imports src. The two
     must stay identical: the runtime looks up keys produced here.
@@ -130,7 +130,7 @@ def normalize(value: str) -> str:
 
 
 def country_code(country: dict) -> str | None:
-    """The code LoadCountries puts in playerData["country_code"]."""
+    """The code CountryCatalog.Load derives (playerData["country_code"])."""
     iso2 = country.get("iso2")
     if not iso2:
         return None

@@ -9,7 +9,8 @@ from the 46 MB countries+states+cities.json, and was removed for that cost
 
 It is back as a build-time table: scripts/gen_city_to_state.py precomputes
 {country code: {normalized key: state iso2}} into assets/city_to_state.json,
-and AutonaCountryHelper.FindState loads it lazily on first use for an O(1)
+and CountryCatalog.FindState (src/core, ADR-005 S1c; formerly
+AutonaCountryHelper.FindState) loads it lazily on first use for an O(1)
 lookup. Two halves are covered here -- how the table is built, and how the
 runtime reads it -- because a mismatch between the two normalizations
 (generator-side vs remove_accents_lower) or between the two copies of the
@@ -30,8 +31,8 @@ from pathlib import Path
 import orjson
 import pytest
 
-from src.Helpers import AutonaCountryHelper as country_helper_module
-from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
+from src.core import CountryCatalog as country_catalog_module
+from src.core.CountryCatalog import CountryCatalog
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TABLE_PATH = PROJECT_ROOT / "assets" / "city_to_state.json"
@@ -50,14 +51,10 @@ def _load_generator():
 gen = _load_generator()
 
 
-@pytest.fixture
-def cityToStateCache():
-    """Restore AutonaCountryHelper's lazy cache around a test that clears it."""
-    saved = AutonaCountryHelper._cityToState
-    try:
-        yield
-    finally:
-        AutonaCountryHelper._cityToState = saved
+# The lookup needs no country data: only the city table, which it reads on
+# the first call (cwd-relative, so these run from the project root). One
+# catalog for the module, so the 2.5 MB table is parsed once.
+_catalog = CountryCatalog()
 
 
 # ── the generator ────────────────────────────────────────────────────────
@@ -91,7 +88,7 @@ _US_FIXTURE = {
                 "cities": [{"name": "Los Angeles"}]}],
 }
 
-# iso2 is numeric, so LoadCountries derives the code from the name's
+# iso2 is numeric, so CountryCatalog.Load derives the code from the name's
 # initials -- and playerData["country_code"] carries that derived code, so
 # the table has to be keyed the same way.
 _NUMERIC_ISO2_FIXTURE = {
@@ -199,7 +196,7 @@ def test_the_two_copies_of_the_suffix_pattern_agree():
     literals (the generator must not import src), and a drift between them
     fails silently as "no match" rather than as an error."""
     assert (gen.SUFFIX_RE.pattern
-            == country_helper_module._STATE_SUFFIX_RE.pattern)
+            == country_catalog_module._STATE_SUFFIX_RE.pattern)
 
 
 # ── the runtime lookup ───────────────────────────────────────────────────
@@ -237,75 +234,74 @@ def test_all_47_prefectures_resolve_from_their_japanese_name():
 
 
 def test_find_state_resolves_a_city_name():
-    assert AutonaCountryHelper.FindState("JP", "Shibuya") == "13"
+    assert _catalog.FindState("JP", "Shibuya") == "13"
 
 
 def test_find_state_resolves_a_composite_location_string():
-    assert AutonaCountryHelper.FindState("JP", "Shibuya-ku, Tokyo") == "13"
+    assert _catalog.FindState("JP", "Shibuya-ku, Tokyo") == "13"
 
 
 def test_find_state_resolves_japanese_prefecture_names():
-    assert AutonaCountryHelper.FindState("JP", "東京") == "13"
-    assert AutonaCountryHelper.FindState("JP", "東京都") == "13"
+    assert _catalog.FindState("JP", "東京") == "13"
+    assert _catalog.FindState("JP", "東京都") == "13"
 
 
 def test_find_state_resolves_a_prefecture_written_in_romaji():
-    assert AutonaCountryHelper.FindState("JP", "Osaka") == "27"
+    assert _catalog.FindState("JP", "Osaka") == "27"
 
 
 def test_find_state_strips_a_prefecture_suffix_off_the_lookup():
     """These forms are not keys in the table; the runtime pattern is what
     reduces them to one."""
-    assert AutonaCountryHelper.FindState("JP", "Fukuoka-ken") == "40"
-    assert AutonaCountryHelper.FindState("JP", "Kanagawa Prefecture") == "14"
+    assert _catalog.FindState("JP", "Fukuoka-ken") == "40"
+    assert _catalog.FindState("JP", "Kanagawa Prefecture") == "14"
 
 
 def test_find_state_resolves_a_state_code_verbatim():
-    assert AutonaCountryHelper.FindState("US", "CA") == "CA"
+    assert _catalog.FindState("US", "CA") == "CA"
 
 
 def test_find_state_leaves_ambiguous_city_names_unresolved():
     """The real-data counterpart of the build-time drop. "Kawasaki" is a
     city in six prefectures; the widely known one (Kanagawa) is only
     reachable by writing the name out."""
-    assert AutonaCountryHelper.FindState("JP", "Kawasaki") is None
-    assert AutonaCountryHelper.FindState("JP", "Ota") is None
-    assert AutonaCountryHelper.FindState("JP", "Minato") is None
-    assert AutonaCountryHelper.FindState("JP", "Kawasaki-shi") == "14"
+    assert _catalog.FindState("JP", "Kawasaki") is None
+    assert _catalog.FindState("JP", "Ota") is None
+    assert _catalog.FindState("JP", "Minato") is None
+    assert _catalog.FindState("JP", "Kawasaki-shi") == "14"
 
 
 def test_find_state_returns_none_for_an_unknown_place():
-    assert AutonaCountryHelper.FindState("JP", "存在しない地名XYZ") is None
+    assert _catalog.FindState("JP", "存在しない地名XYZ") is None
 
 
 def test_find_state_tolerates_a_missing_country_code():
     """SetData and the Start.gg parser both call this before knowing whether
     the country resolved, so a None country must not raise."""
-    assert AutonaCountryHelper.FindState(None, "Tokyo") is None
-    assert AutonaCountryHelper.FindState("JP", None) is None
-    assert AutonaCountryHelper.FindState("ZZ", "Tokyo") is None
+    assert _catalog.FindState(None, "Tokyo") is None
+    assert _catalog.FindState("JP", None) is None
+    assert _catalog.FindState("ZZ", "Tokyo") is None
 
 
 def test_find_state_caches_a_missing_table_instead_of_retrying(
-        tmp_path, monkeypatch, cityToStateCache):
-    """The table is read cwd-relatively. When it is absent the helper must
+        tmp_path, monkeypatch):
+    """The table is read cwd-relatively. When it is absent the catalog must
     degrade to "no state" and remember that, rather than stat-ing the file
     once per entrant."""
-    AutonaCountryHelper._cityToState = None
+    catalog = CountryCatalog()
     monkeypatch.chdir(tmp_path)
 
-    assert AutonaCountryHelper.FindState("JP", "Tokyo") is None
-    assert AutonaCountryHelper._cityToState == {}
+    assert catalog.FindState("JP", "Tokyo") is None
+    assert catalog._cityToState == {}
 
 
-def test_find_state_survives_a_corrupt_table(
-        tmp_path, monkeypatch, cityToStateCache):
+def test_find_state_survives_a_corrupt_table(tmp_path, monkeypatch):
     """SetData has no exception handling around FindState, so a truncated
     or hand-edited file must not take a whole set load down."""
-    AutonaCountryHelper._cityToState = None
+    catalog = CountryCatalog()
     (tmp_path / "assets").mkdir()
     (tmp_path / "assets" / "city_to_state.json").write_bytes(b'["not", "a map"]')
     monkeypatch.chdir(tmp_path)
 
-    assert AutonaCountryHelper.FindState("JP", "Tokyo") is None
-    assert AutonaCountryHelper._cityToState == {}
+    assert catalog.FindState("JP", "Tokyo") is None
+    assert catalog._cityToState == {}

@@ -2,11 +2,10 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 import requests
-import os
 import time
 import traceback
 from loguru import logger
-from ..Helpers.AutonaCountryHelper import AutonaCountryHelper
+from ..core.CountryCatalog import CountryCatalog
 from ..core.DictHelper import deep_get
 from ..Helpers.AutonaDirHelper import AutonaResolve
 from ..core.GameAssetCatalog import GameAssetCatalog
@@ -1056,11 +1055,10 @@ class StartGGDataProvider(TournamentDataProvider):
             if user.get("location"):
                 # Country to country code
                 if user.get("location").get("country"):
-                    for country in AutonaCountryHelper.countries.values():
-                        if user.get("location").get("country") == country.get("en_name"):
-                            playerData["country_code"] = country.get(
-                                "code")
-                            break
+                    countryCode = CountryCatalog.instance.CountryCodeFromEnName(
+                        user.get("location").get("country"))
+                    if countryCode is not None:
+                        playerData["country_code"] = countryCode
 
                 # State. The city fallback is back, now that it costs an
                 # O(1) lookup in the pre-computed table
@@ -1080,13 +1078,13 @@ class StartGGDataProvider(TournamentDataProvider):
                     # matches on. When it resolves to nothing -- a region this
                     # dataset has no entry for -- the city gets a turn before
                     # the raw string is published as a last resort.
-                    resolved = AutonaCountryHelper.FindState(
+                    resolved = CountryCatalog.instance.FindState(
                         country, state_raw) or (
-                        AutonaCountryHelper.FindState(country, city_raw)
+                        CountryCatalog.instance.FindState(country, city_raw)
                         if city_raw else None)
                     playerData["state_code"] = resolved or state_raw
                 elif city_raw and country:
-                    resolved = AutonaCountryHelper.FindState(country, city_raw)
+                    resolved = CountryCatalog.instance.FindState(country, city_raw)
                     if resolved:
                         playerData["state_code"] = resolved
                 if city_raw:
@@ -1575,30 +1573,17 @@ class StartGGDataProvider(TournamentDataProvider):
                     countryCode = playerData.get(
                         "country_code", "")
                     stateCode = playerData.get("state_code", "")
-                    countryData = AutonaCountryHelper.countries.get(
-                        countryCode)
-                    stateData = {}
-                    if countryData:
-                        states = countryData.get("states")
-                        # .get(), not [...]: state_code can be a raw Start.gg
-                        # string the country's state table has no entry for
-                        # (ProcessEntrantData publishes the raw value when
-                        # FindState cannot resolve it), and a KeyError here
-                        # would take the whole standings load down.
-                        if states and stateCode:
-                            stateData = states.get(stateCode) or {}
-
-                        if stateData:
-                            path = f'./assets/state_flag/{countryCode}/{"_CON" if stateCode == "CON" else stateCode}.png'
-                            if not os.path.exists(path):
-                                path = None
-
-                            stateData.update({
-                                "asset": path
-                            })
+                    # A new dict with its flag `asset` resolved, or {} --
+                    # state_code can be a raw Start.gg string the country's
+                    # region table has no entry for (ProcessEntrantData
+                    # publishes the raw value when FindState cannot resolve
+                    # it). This used to hand out the shared region dict
+                    # itself, with `asset` written into it (ADR-005 S1c).
+                    stateData = CountryCatalog.instance.State(
+                        countryCode, stateCode)
 
                     playerData = {
-                        "country": AutonaCountryHelper.GetBasicCountryInfo(countryCode),
+                        "country": CountryCatalog.instance.BasicCountryInfo(countryCode),
                         "state": stateData,
                         "name": playerName,
                         "team": team,
@@ -2154,11 +2139,10 @@ class StartGGDataProvider(TournamentDataProvider):
             if user.get("location"):
                 # Country to country code
                 if user.get("location").get("country"):
-                    for country in AutonaCountryHelper.countries.values():
-                        if user.get("location").get("country") == country.get("en_name"):
-                            playerData["country_code"] = country.get(
-                                "code")
-                            break
+                    countryCode = CountryCatalog.instance.CountryCodeFromEnName(
+                        user.get("location").get("country"))
+                    if countryCode is not None:
+                        playerData["country_code"] = countryCode
 
                 # State — same table-backed resolution as above. This call
                 # site never published "city", so it still doesn't.
@@ -2166,13 +2150,13 @@ class StartGGDataProvider(TournamentDataProvider):
                 city_raw = user.get("location").get("city")
                 country = playerData.get("country_code")
                 if state_raw:
-                    resolved = AutonaCountryHelper.FindState(
+                    resolved = CountryCatalog.instance.FindState(
                         country, state_raw) or (
-                        AutonaCountryHelper.FindState(country, city_raw)
+                        CountryCatalog.instance.FindState(country, city_raw)
                         if city_raw else None)
                     playerData["state_code"] = resolved or state_raw
                 elif city_raw and country:
-                    resolved = AutonaCountryHelper.FindState(country, city_raw)
+                    resolved = CountryCatalog.instance.FindState(country, city_raw)
                     if resolved:
                         playerData["state_code"] = resolved
 

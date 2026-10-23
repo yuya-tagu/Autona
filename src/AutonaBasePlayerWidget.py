@@ -20,9 +20,8 @@ Subclasses are responsible for:
   SetupAutocomplete (widget-specific: .ui widgets, icon sizes, fonts,
   proxy models — kept per-subclass)
 - _swapRestoreTail / _styleCountryStateWidgets (small hooks that customise
-  the otherwise-shared SwapWith / LoadCountries defined here)
+  the otherwise-shared SwapWith / _WireCountryState defined here)
 """
-import os
 import threading
 import traceback
 
@@ -32,6 +31,7 @@ from qtpy.QtCore import *
 
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .core import StateSchema as schema
+from .core.CountryCatalog import CountryCatalog
 from .core.PlayerService import KEEP_ONLINE_AVATAR, PlayerService
 from .core.StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
@@ -226,12 +226,16 @@ class AutonaBasePlayerWidget(QGroupBox):
         if hasattr(self, "_loadedStatesCountryCode") and self._loadedStatesCountryCode == new_code:
             return
 
-        countryData = {}
+        # A fresh dict per region with its flag `asset` already resolved
+        # (the catalog checks the disk). This used to write `asset` into the
+        # shared country table itself, so what the Web's get_states returned
+        # depended on which countries some player widget had shown (S1c).
+        states = None
         if new_code is not None:
-            countryData = AutonaCountryHelper.countries.get(new_code, {})
+            states = CountryCatalog.instance.States(new_code)
 
         # Build the rows first, then put them into the live model in one
-        # blocked stretch (see below) — the flag lookups below touch the disk
+        # blocked stretch (see below) — the flag lookups above touch the disk
         # and have no business happening between two model notifications.
         rows = []
 
@@ -239,25 +243,13 @@ class AutonaBasePlayerWidget(QGroupBox):
         noState.setData({}, Qt.ItemDataRole.UserRole)
         rows.append(noState)
 
-        states = countryData.get("states")
-
         if states is not None:
-            for i, state_code in enumerate(states.keys()):
+            for state_code, stateData in states.items():
                 item = QStandardItem()
-                # Windows has some weird thing with files named CON.png. In case a state code is CON,
-                # we try to load _CON.png instead
-                path = f'./assets/state_flag/{countryData.get("code")}/{"_CON" if state_code == "CON" else state_code}.png'
-
-                if not os.path.exists(path):
-                    path = None
-
-                states[state_code].update({
-                    "asset": path
-                })
-                item.setIcon(QIcon(path))
-                item.setData(states[state_code], Qt.ItemDataRole.UserRole)
+                item.setIcon(QIcon(stateData["asset"]))
+                item.setData(stateData, Qt.ItemDataRole.UserRole)
                 item.setData(
-                    f'{states[state_code]["name"]} ({state_code})', Qt.ItemDataRole.EditRole)
+                    f'{stateData["name"]} ({state_code})', Qt.ItemDataRole.EditRole)
                 rows.append(item)
 
         stateModel = self._EnsureStateModel()
@@ -399,23 +391,34 @@ class AutonaBasePlayerWidget(QGroupBox):
         and before seed/city are re-set. Default: no-op."""
         pass
 
-    def LoadCountries(self):
+    def _WireCountryState(self):
+        """One-time wiring of the country / region pair. Subclasses call this
+        exactly once, from __init__.
+
+        Everything here is a connection or a widget that must exist once per
+        card: the country completer, the country -> LoadStates link, the
+        region combo's lifetime model, and the two country-model signals.
+        Repeating any of it used to happen on every `countriesUpdated` (the
+        old LoadCountries did all of this and was also that signal's slot),
+        which stacked one more LoadStates connection per emit.
+        """
         try:
-            if AutonaCountryHelper.countryModel == None:
-                AutonaCountryHelper.LoadCountries()
-
-            countryCompleter = QCompleter(
-                AutonaCountryHelper.countryModel)
-
             country: QComboBox = self._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
-            country.setCompleter(countryCompleter)
+            # QCompleter() + setModel(), not QCompleter(model): the
+            # constructor form keeps no Python reference to the model
+            # (agent-pitfalls #15). The model is attached in LoadCountries.
+            self._countryCompleter = QCompleter()
+            country.setCompleter(self._countryCompleter)
             country.completer().setFilterMode(Qt.MatchFlag.MatchContains)
             country.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-            country.completer().setFilterMode(Qt.MatchFlag.MatchContains)
             country.view().setMinimumWidth(60)
             country.completer().setCompletionMode(QCompleter.PopupCompletion)
             country.completer().popup().setMinimumWidth(300)
-            country.setModel(AutonaCountryHelper.countryModel)
+
+            # Attach the shared model before LoadStates is connected, as the
+            # construction order always was: the index change that setModel()
+            # causes here is not a user's choice and must not rebuild regions.
+            self.LoadCountries()
 
             country.currentIndexChanged.connect(self.LoadStates)
 
@@ -428,16 +431,99 @@ class AutonaBasePlayerWidget(QGroupBox):
             self._EnsureStateModel()
             state.completer().setFilterMode(Qt.MatchFlag.MatchContains)
             state.completer().setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-            state.completer().setFilterMode(Qt.MatchFlag.MatchContains)
             state.view().setMinimumWidth(60)
             state.completer().setCompletionMode(QCompleter.PopupCompletion)
             state.completer().popup().setMinimumWidth(300)
 
             self._styleCountryStateWidgets(country, state)
 
+            signals = AutonaCountryHelper.signals
+            signals.countriesAboutToReload.connect(
+                self._OnCountriesAboutToReload)
+            # Kept for the fallback below: a card built while the model is
+            # still None gets it attached when the first load lands.
+            signals.countriesUpdated.connect(self.LoadCountries)
+
         except Exception as e:
             logger.error(traceback.format_exc())
             exit()
+
+    def LoadCountries(self):
+        """Attach the shared country model to this card. Idempotent.
+
+        Runs once from _WireCountryState and then on every
+        `countriesUpdated`. When the combo already shows the shared model
+        there is nothing to attach (the model is never swapped, only refilled
+        -- see AutonaCountryHelper); the one thing left to do then is to
+        finish a reload this card held (_OnCountriesAboutToReload).
+        """
+        try:
+            if AutonaCountryHelper.countryModel is None:
+                # Fallback: the window loads the countries before any card is
+                # built, so this only runs when that load did not happen or
+                # failed. If it fails again the model stays None and the
+                # countriesUpdated connection attaches it later.
+                AutonaCountryHelper.LoadCountries()
+
+            model = AutonaCountryHelper.countryModel
+            country: QComboBox = self._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
+            if model is not None and country.model() is not model:
+                self._countryCompleter.setModel(model)
+                country.setModel(model)
+
+            self._FinishCountryReload(country)
+
+        except Exception as e:
+            logger.error(traceback.format_exc())
+            exit()
+
+    def _OnCountriesAboutToReload(self):
+        """The shared model is about to be cleared and refilled in place.
+
+        The country combo would report that as -1 and then the first row,
+        and each report goes on to LoadStates and to the state (the country
+        and region of this slot published as blank). A reload is not a
+        choice anyone made, so the combo is silenced until LoadCountries puts
+        it back on the country it showed. The region combo is not touched:
+        its rows belong to that same country.
+
+        Idempotent: a second notice before the reload finishes (e.g. a load
+        that failed after announcing itself, then another) keeps the first
+        record. Recording again would capture the combo as already blocked
+        and leave it blocked for good once the reload finished.
+        """
+        if "_countryReload" in self.__dict__:
+            return
+        country: QComboBox = self._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
+        data = country.currentData(Qt.ItemDataRole.UserRole)
+        code = data.get("code") if isinstance(data, dict) else None
+        self._countryReload = (code, country.blockSignals(True))
+
+    def _FinishCountryReload(self, country: QComboBox):
+        pending = self.__dict__.pop("_countryReload", None)
+        if pending is None:
+            return
+        code, wasBlocked = pending
+        index = 0
+        found = code is None
+        try:
+            model = country.model()
+            if code is not None:
+                for i in range(model.rowCount()):
+                    data = model.index(i, 0).data(Qt.ItemDataRole.UserRole)
+                    if isinstance(data, dict) and data.get("code") == code:
+                        index, found = i, True
+                        break
+            country.setCurrentIndex(index)
+        finally:
+            # Whatever happened above, the combo must not stay silenced.
+            country.blockSignals(wasBlocked)
+        if not found and not wasBlocked:
+            # The country this card showed is gone from the reloaded data.
+            # The combo now shows the blank row; let that through as the
+            # ordinary change it is, so the state does not keep naming a
+            # country the card no longer shows.
+            country.currentIndexChanged.emit(index)
 
     def _styleCountryStateWidgets(self, country, state):
         """Subclass hook: per-skin styling of the country/state combos

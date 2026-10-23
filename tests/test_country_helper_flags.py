@@ -21,6 +21,7 @@ load is never at the mercy of the optional add-on.
 import shutil
 
 from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
+from src.core.CountryCatalog import CountryCatalog
 
 ADDITIONAL_FLAG_DIR = "./user_data/additional_flag"
 
@@ -63,7 +64,7 @@ def test_standard_flag_lookup_works_without_additional_flag_dir(autonaApp):
 
     AutonaCountryHelper.LoadCountries()
 
-    info = AutonaCountryHelper.GetBasicCountryInfo("JP")
+    info = CountryCatalog.instance.BasicCountryInfo("JP")
     assert info.get("en_name") == "Japan"
     assert info.get("code") == "JP"
 
