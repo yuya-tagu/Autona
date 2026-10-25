@@ -228,6 +228,26 @@ class AutonaBasePlayerWidget(QGroupBox):
         if hasattr(self, "_loadedStatesCountryCode") and self._loadedStatesCountryCode == new_code:
             return
 
+        self._FillStateRows(new_code)
+        # The one publish this makes: the region the refill left selected,
+        # i.e. the blank row. (The render side refills without it -- see
+        # AutonaScoreboardPlayerWidget._RenderLocation.)
+        state: QComboBox = self._w(schema.PLAYER_STATE_KEY, QComboBox)
+        state.currentIndexChanged.emit(state.currentIndex())
+
+        # Last: a country whose rebuild raised half-way must not be recorded as
+        # loaded, or the guard above would keep serving the broken list.
+        self._loadedStatesCountryCode = new_code
+
+    def _FillStateRows(self, new_code):
+        """Refill the region combo with `new_code`'s regions, blank row
+        selected, without announcing it.
+
+        Split out of LoadStates (ADR-005 S2a) so that a card rendering its
+        slot from the state can rebuild the rows for the country it is about
+        to show without publishing the blank region a pick would publish.
+        The caller records `_loadedStatesCountryCode` once this returns.
+        """
         # A fresh dict per region with its flag `asset` already resolved
         # (the catalog checks the disk). This used to write `asset` into the
         # shared country table itself, so what the Web's get_states returned
@@ -265,21 +285,16 @@ class AutonaBasePlayerWidget(QGroupBox):
         # the discarded models used to. appendRow() on the model does not.
         #
         # Signals stay blocked for the whole clear + refill so consumers see a
-        # single index change for the rebuild, exactly as they did when a
-        # finished model was attached with setModel(). NOTE: the old setModel()
-        # path also emitted currentTextChanged/editTextChanged; nothing is
-        # connected to either on this combo, so only currentIndexChanged is
-        # replayed here.
+        # single index change for the rebuild (LoadStates replays it), exactly
+        # as they did when a finished model was attached with setModel().
+        # NOTE: the old setModel() path also emitted
+        # currentTextChanged/editTextChanged; nothing is connected to either
+        # on this combo, so only currentIndexChanged is replayed.
         with QSignalBlocker(state):
             stateModel.clear()
             for item in rows:
                 stateModel.appendRow(item)
             state.setCurrentIndex(0)
-        state.currentIndexChanged.emit(state.currentIndex())
-
-        # Last: a country whose rebuild raised half-way must not be recorded as
-        # loaded, or the guard above would keep serving the broken list.
-        self._loadedStatesCountryCode = new_code
 
     def LoadSkinOptions(self, element, target):
         characterData = element.currentData()

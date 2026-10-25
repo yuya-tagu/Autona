@@ -98,6 +98,7 @@ class _RegionCombo(QObject):
     """Just enough of a player widget to run the real LoadStates: the
     recording drove the old one through the same two combos."""
     _EnsureStateModel = AutonaBasePlayerWidget._EnsureStateModel
+    _FillStateRows = AutonaBasePlayerWidget._FillStateRows
     LoadStates = AutonaBasePlayerWidget.LoadStates
 
     def __init__(self):

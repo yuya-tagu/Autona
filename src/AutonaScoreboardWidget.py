@@ -110,6 +110,12 @@ class AutonaScoreboardWidget(QWidget):
         # another notification. Set before anything can notify us.
         self._syncingScore = False
 
+        # The player cards render their slots from the state (ADR-005 S2a):
+        # one pass, queued by the first held save cycle of an event-loop turn
+        # (_SchedulePlayerRender), with a re-entrancy guard on the pass itself.
+        self._playerRenderPending = False
+        self._renderingPlayers = False
+
         # Which way round the two sides currently are. Declared here rather
         # than further down (where it used to sit, after the combos) because
         # setLoad below reads it through a callable and the state
@@ -928,8 +934,57 @@ class AutonaScoreboardWidget(QWidget):
         # Live-but-unpublished data under a held prefix changed. Only this
         # board's own subtree is of interest here.
         if prefix == self.statePrefix:
+            # First: it only queues, and a sync below that raises must not
+            # leave the cards behind the state.
+            self._SchedulePlayerRender()
             self._SyncSetFields()
             self._SyncScoreDisplays()
+
+    def _SchedulePlayerRender(self):
+        """Have every player card show its slot, once control is back in
+        the event loop (ADR-005 S2a).
+
+        Deferred, unlike the two syncs in _onHeldStateUpdated, and that is
+        the point rather than an optimisation. The player slots are still
+        written by the cards themselves, an operation at a time, and an
+        operation can take several save cycles -- a country pick publishes
+        the rebuilt region before the country, SetData and Clear publish
+        field by field. In
+        between, the card is legitimately ahead of the state; a render run
+        right there would put the old country back on the combo, and the
+        country handler still to come would then publish *that*. Once the
+        operation has returned, card and state agree again, and a render
+        only changes what was written somewhere else.
+
+        Coalesced: however many cycles a turn produces, one pass is queued.
+        The board is the timer's context, so a board torn down first takes
+        the pending pass with it. A card also asks for a pass once the
+        operator has left a field the last one had to skip
+        (render_requested).
+        """
+        if self._playerRenderPending:
+            return
+        self._playerRenderPending = True
+        QTimer.singleShot(0, self, self._RenderPlayerCards)
+
+    def _RenderPlayerCards(self):
+        self._playerRenderPending = False
+        if self._renderingPlayers:
+            # Nothing in a pass can bring us back here (it writes nothing,
+            # agent-pitfalls #9), but a pass must never stack on another.
+            logger.warning(
+                f"{self.statePrefix}: re-entrant player render, skipping")
+            return
+        self._renderingPlayers = True
+        try:
+            for card in list(self.playerWidgets):
+                try:
+                    card.RenderFromState()
+                except Exception:
+                    logger.exception(
+                        f"{self.statePrefix}: rendering {card.path} failed")
+        finally:
+            self._renderingPlayers = False
 
     def _SyncSetFields(self):
         """Render the set-level state into the match bar and team cards.
@@ -1711,6 +1766,8 @@ class AutonaScoreboardWidget(QWidget):
                 self.stats.signals.PlayerHistoryStandingsP1Signal.emit)
             p.instanceSignals.player_seed_changed.connect(
                 self.stats.signals.UpsetFactorCalculation.emit)
+            p.instanceSignals.render_requested.connect(
+                self._SchedulePlayerRender)
 
             self.team1playerWidgets.append(p)
 
@@ -1740,6 +1797,8 @@ class AutonaScoreboardWidget(QWidget):
                 self.stats.signals.PlayerHistoryStandingsP2Signal.emit)
             p.instanceSignals.player_seed_changed.connect(
                 self.stats.signals.UpsetFactorCalculation.emit)
+            p.instanceSignals.render_requested.connect(
+                self._SchedulePlayerRender)
 
             self.team2playerWidgets.append(p)
 
