@@ -287,6 +287,17 @@ class TournamentInfoService:
 
     # ── the provider payload ─────────────────────────────────────────────
 
+    def ApplyProviderPayload(self, data) -> bool:
+        """Everything a tournament_data_updated payload does, in either
+        shell (ADR-005 S3c): the payload, then the display-name override
+        whether or not it applied -- the two connections the EVENT panel
+        used to have, in their order. False when the payload failed (see
+        ApplyTournamentData); telling the operator is the shell's.
+        """
+        applied = self.ApplyTournamentData(data)
+        self.ApplyDisplayNameFromSelection(data)
+        return applied
+
     def ApplyTournamentData(self, data) -> bool:
         """Publish a tournament_data_updated payload. False on failure.
 

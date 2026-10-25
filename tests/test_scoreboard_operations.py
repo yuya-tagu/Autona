@@ -8,8 +8,9 @@ point (see docs/changes/test-automation-strategy.md §2), and none of them
 had a test.
 
 Nothing is stubbed: `autonaApp.board(n)` is the production
-AutonaScoreboardWidget / AutonaCrewBattleWidget, and `autonaApp.actions()`
-is the WebServerActions object every HTTP route delegates to.
+AutonaScoreboardWidget / AutonaCrewBattleWidget, and `autonaApp.web()`
+is the web operations module the HTTP routes delegate to
+(src/AutonaWebOperations.py).
 
 The assertions read StateManager rather than the widgets, because
 StateManager is what OBS overlays and the Web UI actually consume -- a
@@ -415,7 +416,7 @@ def test_a_failing_match_text_does_not_stop_what_sets_the_best_of(
         assert _playerName(autonaApp, 1) == "AAA"
         assert _playerName(autonaApp, 2) == "BBB"
 
-        assert autonaApp.actions().set_route(1, bestOf=7) == "OK"
+        assert autonaApp.web().set_route(1, bestOf=7) == "OK"
         autonaApp.settle()
         assert autonaApp.get("score.1.first_to_text") == "First to 4"
 
@@ -638,7 +639,7 @@ def test_a_web_swap_is_done_when_it_answers(autonaApp):
     _setPlayerName(board, 1, "LEFT")
     _setPlayerName(board, 2, "RIGHT")
     autonaApp.settle()
-    actions = autonaApp.actions()
+    actions = autonaApp.web()
 
     assert actions.swap_teams("1") == "OK"
     assert actions.get_swap("1") == "True"
@@ -659,7 +660,7 @@ def test_a_web_swap_builds_the_board_first(autonaApp):
     autonaApp.dropAllBoards()
     StateManager.Unset("score.2")
     autonaApp.settle()
-    actions = autonaApp.actions()
+    actions = autonaApp.web()
     try:
         assert actions.swap_teams(2) == "OK"
         autonaApp.settle()
@@ -689,7 +690,7 @@ def test_reading_the_swap_flag_builds_the_board(autonaApp):
     StateManager.Unset("score.2")
     autonaApp.settle()
     try:
-        assert autonaApp.actions().get_swap(2) == "False"
+        assert autonaApp.web().get_swap(2) == "False"
         assert autonaApp.manager.scoreboards.get(2) is not None
     finally:
         autonaApp.dropAllBoards()
@@ -728,7 +729,7 @@ def test_reset_score_zeroes_scores_and_keeps_players(autonaApp):
 @pytest.mark.parametrize("boardNumber", [1, 2])
 def test_reset_match_clears_score_and_best_of(autonaApp, boardNumber):
     board = autonaApp.board(boardNumber)
-    actions = autonaApp.actions()
+    actions = autonaApp.web()
 
     board.CommandScoreChange(0, 2)
     board.bestOfSpin.setValue(5)
@@ -760,7 +761,7 @@ def test_reset_match_restores_full_stocks_on_the_crew_board(autonaApp):
     assert autonaApp.get("score.3.team.2.player.2.stock") == DEFAULT_STOCK - 1
     assert autonaApp.get("score.3.team.1.activeMember") == "1"
 
-    autonaApp.actions().reset_match(3)
+    autonaApp.web().reset_match(3)
     autonaApp.settle()
 
     for team in (1, 2):
@@ -804,7 +805,7 @@ def test_reset_match_clears_best_of_on_the_crew_board(autonaApp):
     board.ChangeSetData({"bestOf": 5})
     autonaApp.settle()
 
-    autonaApp.actions().reset_match(3)
+    autonaApp.web().reset_match(3)
     autonaApp.settle()
 
     assert autonaApp.get("score.3.best_of") == 0
@@ -817,7 +818,7 @@ def test_clear_all_clears_best_of_on_the_crew_board(autonaApp):
     board.ChangeSetData({"bestOf": 5})
     autonaApp.settle()
 
-    autonaApp.actions().clear_all(3)
+    autonaApp.web().clear_all(3)
     autonaApp.settle()
 
     assert autonaApp.get("score.3.best_of") == 0
@@ -826,7 +827,7 @@ def test_clear_all_clears_best_of_on_the_crew_board(autonaApp):
 @pytest.mark.parametrize("boardNumber", [1, 2])
 def test_clear_all_resets_scores_best_of_and_players(autonaApp, boardNumber):
     board = autonaApp.board(boardNumber)
-    actions = autonaApp.actions()
+    actions = autonaApp.web()
 
     board.CommandScoreChange(0, 2)
     board.bestOfSpin.setValue(5)
@@ -844,7 +845,7 @@ def test_clear_all_resets_scores_best_of_and_players(autonaApp, boardNumber):
 
 def test_reset_scores_action_leaves_players_alone(autonaApp):
     board = autonaApp.board(1)
-    actions = autonaApp.actions()
+    actions = autonaApp.web()
 
     board.CommandScoreChange(0, 2)
     _setPlayerName(board, 1, "KEEP ME")
@@ -859,7 +860,7 @@ def test_reset_scores_action_leaves_players_alone(autonaApp):
 
 def test_score_up_action_matches_the_widget(autonaApp):
     autonaApp.board(1)
-    actions = autonaApp.actions()
+    actions = autonaApp.web()
 
     actions.team_scoreup(1, 1)
     actions.team_scoreup(1, 2)
@@ -878,7 +879,7 @@ def test_score_up_action_matches_the_widget(autonaApp):
 def test_team_color_action_reaches_the_state(autonaApp):
     autonaApp.board(1)
 
-    autonaApp.actions().team_color(1, 2, "#123456")
+    autonaApp.web().team_color(1, 2, "#123456")
     autonaApp.settle()
 
     assert autonaApp.get("score.1.team.2.color") == "#123456"
@@ -917,7 +918,7 @@ def test_the_board_display_follows_the_published_score(autonaApp):
 
     # Straight to the state, as a hotkey or an API call now does -- no
     # spinbox involved.
-    autonaApp.actions().team_scoreup(1, 1)
+    autonaApp.web().team_scoreup(1, 1)
     autonaApp.settle()
 
     assert board.scoreDisplay1.value() == 1, (
@@ -1053,7 +1054,7 @@ def test_a_remote_display_option_reaches_a_built_board(autonaApp):
     board = autonaApp.board(1)
     autonaApp.settle()
     with _restoredDisplayOption("show_seed"):
-        autonaApp.actions().set_display_option(
+        autonaApp.web().set_display_option(
             {"option": "show_seed", "value": False})
         autonaApp.settle()
 
@@ -1063,7 +1064,7 @@ def test_a_remote_display_option_reaches_a_built_board(autonaApp):
 
 def test_an_unknown_display_option_is_still_rejected(autonaApp):
     autonaApp.board(1)
-    result = autonaApp.actions().set_display_option(
+    result = autonaApp.web().set_display_option(
         {"option": "show_nothing", "value": True})
 
     assert result.startswith("ERROR")
@@ -1287,8 +1288,8 @@ def _confirmed(method):
 
 _RESETS = {
     "ResetAllInputs": lambda app, board, n: _confirmed(board.ResetAllInputs),
-    "reset_match": lambda app, board, n: app.actions().reset_match(n),
-    "clear_all": lambda app, board, n: app.actions().clear_all(n),
+    "reset_match": lambda app, board, n: app.web().reset_match(n),
+    "clear_all": lambda app, board, n: app.web().clear_all(n),
 }
 
 
@@ -2024,8 +2025,8 @@ def test_swapping_teams_carries_the_losers_names_across(autonaApp):
 _CLEARS = {
     "CommandClearAll": lambda app, board, n: board.CommandClearAll(),
     "ResetAllInputs": lambda app, board, n: _confirmed(board.ResetAllInputs),
-    "reset_players": lambda app, board, n: app.actions().reset_players(n),
-    "clear_all": lambda app, board, n: app.actions().clear_all(n),
+    "reset_players": lambda app, board, n: app.web().reset_players(n),
+    "clear_all": lambda app, board, n: app.web().clear_all(n),
 }
 
 
@@ -2109,7 +2110,7 @@ def test_the_same_set_loads_again_after_a_clear(autonaApp, clear):
     from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
 
     board = autonaApp.board(1)
-    actions = autonaApp.actions()
+    actions = autonaApp.web()
     provider = AutonaTournamentDataProvider.instance
     with patch.object(provider, "GetMatch") as fetched:
         try:
@@ -2150,7 +2151,7 @@ def test_a_web_clear_builds_the_board_first(autonaApp, route):
     autonaApp.dropAllBoards()
     StateManager.Unset("score.2")
     autonaApp.settle()
-    actions = autonaApp.actions()
+    actions = autonaApp.web()
     try:
         answer = _WEB_CLEARS[route](actions)
         autonaApp.settle()
@@ -2205,10 +2206,10 @@ def test_a_web_team_name_is_one_save_cycle_with_its_crest(autonaApp):
 
         seen, unsubscribe = _heldUpdateSpy("score.2")
         try:
-            autonaApp.actions().set_route(2, team="1", teamName="Alpha")
+            autonaApp.web().set_route(2, team="1", teamName="Alpha")
             autonaApp.settle()
             # The same name again writes nothing.
-            autonaApp.actions().set_route(2, team="1", teamName="Alpha")
+            autonaApp.web().set_route(2, team="1", teamName="Alpha")
             autonaApp.settle()
         finally:
             unsubscribe()
@@ -2221,7 +2222,7 @@ def test_a_web_team_name_is_one_save_cycle_with_its_crest(autonaApp):
         # A name without a crest takes the crest away, in the same cycle.
         seen, unsubscribe = _heldUpdateSpy("score.2")
         try:
-            autonaApp.actions().set_route(2, team="1", teamName="Bravo")
+            autonaApp.web().set_route(2, team="1", teamName="Bravo")
             autonaApp.settle()
         finally:
             unsubscribe()

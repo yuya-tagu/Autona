@@ -333,11 +333,20 @@ def _windowTokens():
 
 
 def test_the_window_wires_the_tournament_writer():
-    assert ("signals.tournament_data_updated.connect(self."
-            "_OnTournamentDataUpdated)") in _windowTokens(), (
+    # Through the wiring the headless shell makes too (ADR-005 S3c): the
+    # window hands it the failure dialog, and the wiring connects the
+    # payload writer.
+    assert ("wire_tournament_data(on_failure=self."
+            "_ReportTournamentLoadFailure)") in _windowTokens(), (
         "Window no longer routes tournament_data_updated into "
         "TournamentInfoService; tournamentInfo.* would stop being written "
         "whenever the EVENT page is not built")
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    wiring = "".join(
+        (root / "src" / "bootstrap.py").read_text(encoding="utf-8").split())
+    assert "signals.tournament_data_updated.connect(apply)" in wiring
+    assert "TournamentInfoService.instance.ApplyProviderPayload(data)" in wiring
 
 
 def test_the_window_seeds_the_tournament_service():

@@ -1,10 +1,12 @@
 """External Control API (`/api/v1/`).
 
 A thin, structured HTTP namespace added to the existing Flask + SocketIO
-server (ADR-001 D3). Every handler delegates to the existing
-``WebServerActions`` so state logic is never duplicated; state always flows
-``WebServerActions`` -> Qt signal -> ``StateManager`` (D4). Existing routes
-(``/score``, ``/scoreboard<N>-...``) and Socket.IO events are left untouched.
+server (ADR-001 D3). Every handler delegates to the operations the legacy
+routes use, so state logic is never duplicated: ``AutonaWebOperations`` for
+what is core's (both shells), ``WebServerActions`` for what still needs a
+board or panel widget (the desktop only -- headless, those answer 503
+UNAVAILABLE, ADR-005 S3c). Existing routes (``/score``,
+``/scoreboard<N>-...``) and Socket.IO events are left untouched.
 
 Spec (source of truth): ``.claude/design/external-control-api.md``.
 
@@ -36,9 +38,10 @@ from .core.CountryCatalog import CountryCatalog
 # manager must be importable before the tournament data provider. By the time
 # this module loads both singletons already exist (WebServerActions imported
 # them first), so this is only defensive.
-from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers import AutonaQtHelper
+from . import AutonaWebOperations as WebOps
+from .AutonaWebOperations import NotAvailable
 
 # ── Blueprint ────────────────────────────────────────────────────────────
 api_v1 = Blueprint("api_v1", __name__, url_prefix="/api/v1")
@@ -49,7 +52,10 @@ _oplog = logger.bind(channel="api_v1_ops")
 
 # Reference to the live WebServerActions instance, injected at registration
 # time so this module never imports AutonaWebServer (avoids a circular import).
+# None after init_api_v1(None): the headless shell, which has no board-
+# dependent operations (see _actions_ref).
 _actions = None
+_initialized = False
 
 _version_cache = None
 
@@ -62,6 +68,9 @@ CONFLICT = "CONFLICT"                         # 409
 NOT_READY = "NOT_READY"                       # 409
 UPSTREAM_TIMEOUT = "UPSTREAM_TIMEOUT"         # 504
 INTERNAL = "INTERNAL"                         # 500
+# A board-dependent operation in the headless shell (ADR-005 S3c): the
+# server runs, the operation needs a widget it does not have. Not retryable.
+UNAVAILABLE = "UNAVAILABLE"                   # 503
 
 
 class ApiError(Exception):
@@ -172,7 +181,14 @@ def current_revision():
 
 
 def _actions_ref():
+    """The board-dependent operations (WebServerActions).
+
+    NOT_READY before the server has initialized the API; NotAvailable (503
+    UNAVAILABLE) when it did so without them -- the headless shell.
+    """
     if _actions is None:
+        if _initialized:
+            raise NotAvailable()
         raise ApiError(NOT_READY, "API not initialized", 409)
     return _actions
 
@@ -198,6 +214,8 @@ def api_handler(fn):
             return fn(*args, **kwargs)
         except ApiError as e:
             return err(e.code, e.message, e.status)
+        except NotAvailable as e:
+            return err(UNAVAILABLE, e.message, 503)
         except Exception:
             logger.error(traceback.format_exc())
             return err(INTERNAL, "internal error", 500)
@@ -243,6 +261,12 @@ def write_op(operation, log_keys_only=False):
                     f"op={operation} params={params} -> {e.status} {e.code}"
                 )
                 return err(e.code, e.message, e.status)
+            except NotAvailable as e:
+                _oplog.info(
+                    f"{request.remote_addr} {request.method} {request.path} "
+                    f"op={operation} params={params} -> 503 {UNAVAILABLE}"
+                )
+                return err(UNAVAILABLE, e.message, 503)
             except Exception:
                 logger.error(traceback.format_exc())
                 _oplog.info(
@@ -337,13 +361,14 @@ _heavy = _HeavyOpGuard()
 
 # ── Initialization (called from AutonaWebServer.__init__) ────────────────
 def init_api_v1(actions):
-    """Bind the live WebServerActions.
+    """Bind the live WebServerActions (None in the headless shell).
 
     Every heavy op releases its in-progress flag itself (see
     _HeavyOpGuard), so there are no completion signals to wire here.
     """
-    global _actions
+    global _actions, _initialized
     _actions = actions
+    _initialized = True
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -352,7 +377,7 @@ def init_api_v1(actions):
 @api_v1.route("/state")
 @api_handler
 def state():
-    full = _actions_ref().program_state()  # {'state','revision','delta_index'}
+    full = WebOps.program_state()  # {'state','revision','delta_index'}
     return ok(data=full.get("state"), revision=full.get("revision"))
 
 
@@ -388,15 +413,14 @@ def health():
 @api_handler
 def get_scoreboard(n):
     validate_scoreboard(n)
-    actions = _actions_ref()
-    board_state = actions.get_scoreboard(n)
+    board_state = WebOps.get_scoreboard(n)
     data = dict(board_state) if isinstance(board_state, dict) else {"state": board_state}
     # The live swap flag (score.{n}.teamsSwapped for boards 1/2 -- not the
     # committed view above; the crew widget's own flag for board 3), read
-    # through the legacy action so both routes answer the same. Tolerate a
-    # board that cannot answer.
+    # through the legacy operation so both routes answer the same. Tolerate
+    # a board that cannot answer (the crew board, headless).
     try:
-        data["swapped"] = actions.get_swap(n) == "True"
+        data["swapped"] = WebOps.get_swap(n) == "True"
     except Exception:
         pass
     return ok(data=data, revision=current_revision())
@@ -405,31 +429,31 @@ def get_scoreboard(n):
 @api_v1.route("/games")
 @api_handler
 def get_games():
-    return ok(data=_actions_ref().get_games())
+    return ok(data=WebOps.get_games())
 
 
 @api_v1.route("/games/current")
 @api_handler
 def get_current_game():
-    return ok(data=_actions_ref().get_current_game())
+    return ok(data=WebOps.get_current_game())
 
 
 @api_v1.route("/match-names")
 @api_handler
 def get_match_names():
-    return ok(data=_actions_ref().get_match_names())
+    return ok(data=WebOps.get_match_names())
 
 
 @api_v1.route("/characters")
 @api_handler
 def get_characters():
-    return ok(data=_actions_ref().get_characters())
+    return ok(data=WebOps.get_characters())
 
 
 @api_v1.route("/variants")
 @api_handler
 def get_variants():
-    return ok(data=_actions_ref().get_variants())
+    return ok(data=WebOps.get_variants())
 
 
 @api_v1.route("/sets")
@@ -442,7 +466,7 @@ def get_sets():
     if want_finished is not None and str(want_finished).lower() not in ("0", "false", "no"):
         args = {"getFinished": True}
     try:
-        return ok(data=_actions_ref().get_sets(args))
+        return ok(data=WebOps.get_sets(args))
     except ApiError:
         raise
     except Exception:
@@ -458,7 +482,7 @@ def get_match(setId):
     if provider is None:
         raise ApiError(NOT_READY, "no tournament loaded", 409)
     try:
-        return ok(data=_actions_ref().get_match(sid))
+        return ok(data=WebOps.get_match(sid))
     except ApiError:
         raise
     except Exception:
@@ -469,7 +493,7 @@ def get_match(setId):
 @api_v1.route("/commentary")
 @api_handler
 def get_commentary():
-    return ok(data=_actions_ref().get_comms())
+    return ok(data=WebOps.get_comms())
 
 
 @api_v1.route("/countries/<code>/states")
@@ -484,7 +508,7 @@ def get_country_states(code):
     code = code.upper()
     # The legacy /states?countryCode= answers an unknown code with None,
     # which Flask turns into a 500; here it is a 404.
-    states = _actions_ref().get_states(code)
+    states = WebOps.get_states(code)
     if states is None:
         raise ApiError(NOT_FOUND, f"unknown country code: {code}", 404)
     return ok(data=states)
@@ -522,7 +546,6 @@ def score_adjust(n, t):
     if "delta" not in body:
         raise ApiError(INVALID_ARGUMENT, "delta is required", 400)
     delta = _require_int(body.get("delta"), "delta")
-    actions = _actions_ref()
 
     def apply():
         # |delta| single-step adjustments (spec §6.1). Synchronous since
@@ -532,10 +555,10 @@ def score_adjust(n, t):
         # score does not move until 反映 (R-Sync-11).
         if delta >= 0:
             for _ in range(delta):
-                actions.team_scoreup(n, t)
+                WebOps.team_scoreup(n, t)
         else:
             for _ in range(-delta):
-                actions.team_scoredown(n, t)
+                WebOps.team_scoredown(n, t)
 
     key = request.headers.get("Idempotency-Key")
     if key:
@@ -562,7 +585,7 @@ def score_reset(n):
     # below is therefore the last published one and does not move until 反映
     # -- same as score:adjust above, not the "accurate after the GUI hop"
     # case the crew path would have been.
-    _actions_ref().reset_scores(n)
+    WebOps.reset_scores(n)
     return ok(revision=current_revision())
 
 
@@ -583,7 +606,7 @@ def stats_refresh(n):
 @write_op("swap-teams")
 def swap_teams(n):
     require_board_12(n)
-    _actions_ref().swap_teams(n)
+    WebOps.swap_teams(n)
     return ok(revision=current_revision())
 
 
@@ -591,7 +614,7 @@ def swap_teams(n):
 @write_op("apply")
 def apply_changes(n):
     require_board_12(n)
-    _actions_ref().apply_changes(n)  # synchronous core write -> accurate
+    WebOps.apply_changes(n)  # synchronous core write -> accurate
     return ok(revision=current_revision())
 
 
@@ -604,7 +627,7 @@ def team_color(n, t):
     color = body.get("color")
     if not isinstance(color, str) or not _COLOR_RE.match(color):
         raise ApiError(INVALID_ARGUMENT, "color must be a hex string like #FF0000", 400)
-    _actions_ref().team_color(n, t, color)
+    WebOps.team_color(n, t, color)
     return ok(revision=current_revision())
 
 
@@ -642,7 +665,6 @@ def set_update(n):
         if not isinstance(value, str):
             raise ApiError(INVALID_ARGUMENT, "teamName.value must be a string", 400)
         team_name = (named_team, value)
-    actions = _actions_ref()
 
     def apply():
         # Every v1 team parameter names the *state* team (the column the
@@ -656,16 +678,21 @@ def set_update(n):
         #
         # Applied in the order the legacy queries apply them: the rest, then
         # the losers flag, then the team name. That order is why the name
-        # goes in a call of its own. One GUI-thread task, so nothing slips
-        # in between.
+        # goes in a call of its own. One task through the board host, so no
+        # other board operation (a swap, a clear, another PATCH set) lands
+        # between the calls: the desktop runs it on the GUI thread, the
+        # headless host under its re-entrant lock (the calls inside run
+        # there again). Core-direct writes (score:adjust, a colour) are not
+        # board operations and can land in between in either shell, as
+        # they always could.
         if kwargs or (losers is None and team_name is None):
-            actions.set_route(n, **kwargs)  # @gui_thread_sync -> revision accurate
+            WebOps.set_route(n, **kwargs)  # synchronous -> revision accurate
         if losers is not None:
-            actions.set_team_losers(n, *losers)  # @gui_thread_sync
+            WebOps.set_team_losers(n, *losers)
         if team_name is not None:
-            actions.set_route(n, team=team_name[0], teamName=team_name[1])
+            WebOps.set_route(n, team=team_name[0], teamName=team_name[1])
 
-    AutonaQtHelper.gui_thread_sync(apply)()
+    WebOps.boardHost.Run(apply)
     return ok(revision=current_revision())
 
 
@@ -684,7 +711,7 @@ def score_set(n):
     # set-shaped write that flips the teams on a swapped board, obeys
     # general.disable_scoreupdate and blanks match_en. This writes the two
     # *state* teams (AutonaActions.SetScore), clamped, in one save cycle.
-    _actions_ref().set_scores(n, team1, team2)
+    WebOps.set_scores(n, team1, team2)
     # Held subtree, like score:adjust: the revision is the last published one.
     return ok(revision=current_revision())
 
@@ -786,9 +813,8 @@ def display_options_update():
             INVALID_ARGUMENT,
             f"display option values must be true or false: {', '.join(notBool)}",
             400)
-    actions = _actions_ref()
     for key, value in body.items():
-        result = actions.set_display_option({"option": key, "value": value})
+        result = WebOps.set_display_option({"option": key, "value": value})
         if result != "OK":
             raise ApiError(INVALID_ARGUMENT, str(result), 400)
     # display_options is not held: the write is published synchronously.
@@ -811,7 +837,7 @@ def _require_confirm(body):
 def clear(n):
     require_board_12(n)
     _require_confirm(_json_body())
-    _actions_ref().clear_all(n)  # @gui_thread_sync
+    WebOps.clear_all(n)
     return ok(revision=current_revision())
 
 
@@ -820,7 +846,7 @@ def clear(n):
 def reset_players(n):
     require_board_12(n)
     _require_confirm(_json_body())
-    _actions_ref().reset_players(n)
+    WebOps.reset_players(n)
     return ok(revision=current_revision())
 
 
@@ -829,7 +855,7 @@ def reset_players(n):
 def reset_match(n):
     require_board_12(n)
     _require_confirm(_json_body())
-    _actions_ref().reset_match(n)
+    WebOps.reset_match(n)
     return ok(revision=current_revision())
 
 
@@ -867,7 +893,6 @@ def tournament_load():
         )
     if not _heavy.try_begin("tournament"):
         raise ApiError(CONFLICT, "tournament load already in progress", 409)
-    actions = _actions_ref()
 
     def _run():
         # load_tournament normalizes the URL and emits tournament_url_update.
@@ -881,7 +906,7 @@ def tournament_load():
         # the guard's full TTL and every retry got 409. Empty url clears the
         # tournament.
         try:
-            actions.load_tournament(url if url else None)
+            WebOps.load_tournament(url if url else None)
         except Exception:
             logger.error(traceback.format_exc())
         finally:
@@ -922,13 +947,9 @@ def game_set():
         # other two held it for the guard's full TTL (and a UI-started load
         # finishing meanwhile released it early).
         try:
-            AutonaGameAssetManager.instance.LoadGameByCodename(
-                codename,
-                async_mode=True,
-                mods_active=mods_active,
-                mods_reload_mode=True,
-                done=_release,
-            )
+            # The shell's loader: the asset adapter on the desktop, the
+            # catalog-only loader headless (ADR-005 S3c).
+            WebOps.load_game(codename, mods_active=mods_active, done=_release)
         except Exception:
             logger.error(traceback.format_exc())
             _release()
@@ -949,6 +970,9 @@ def game_set():
 @api_v1.route("/bracket:refresh", methods=["POST"])
 @write_op("bracket.refresh")
 def bracket_refresh():
+    # The Top 8 panel's (board-dependent): headless answers 503 before the
+    # flag is taken.
+    actions = _actions_ref()
     provider = AutonaTournamentDataProvider.instance.GetProvider()
     if provider is None:
         raise ApiError(NOT_READY, "no tournament loaded", 409)
@@ -960,7 +984,7 @@ def bracket_refresh():
         # start.gg call. Wrap (don't modify the existing action) so failures
         # are logged and the flag is always released (spec §14.2 / §14.3).
         try:
-            _actions_ref().update_bracket()
+            actions.update_bracket()
         except Exception:
             logger.error(traceback.format_exc())
         finally:

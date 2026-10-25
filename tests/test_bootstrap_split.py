@@ -14,8 +14,12 @@ bootstrap_gui() adds the desktop's Qt adapters on top. These tests pin:
   in_gui_thread() answers for the QCoreApplication's thread;
 - that bootstrap_gui() builds the adapters, wires the provider to the game
   asset adapter -- its slot on onLoadAssets running before the adapter's
-  own startup restore, on a real emit -- and still drops the persisted
-  `score` subtree;
+  own startup restore, on a real emit -- registers the desktop's board host
+  and game loader for the web operations, switches the player DB model on,
+  and still drops the persisted `score` subtree;
+- that the wiring both shells make (bootstrap.wire_tournament_data /
+  wire_web_server) is what the window and src/headless.py both call, and
+  that neither makes those connections itself;
 - that the web server, now a plain thread, serves, stops and frees its port,
   and reports a failed start through its callback.
 
@@ -78,6 +82,12 @@ def _steps(function_name):
                 continue
             if target.attr == "instance" and isinstance(target.value, ast.Name):
                 steps.append(f"{target.value.id}()")
+            elif isinstance(statement.value, ast.Call):
+                args = ", ".join(
+                    _dotted(arg) or "..." for arg in statement.value.args)
+                steps.append(
+                    f"{_dotted(target)} = "
+                    f"{_dotted(statement.value.func)}({args})")
             else:
                 steps.append(
                     f"{_dotted(target)} = {_dotted(statement.value)}")
@@ -118,8 +128,10 @@ def test_bootstrap_core_steps_and_their_order():
 def test_bootstrap_gui_steps_and_their_order():
     # bootstrap_core() first. The relative order of the constructions is the
     # one they had inside the old single bootstrap_core(); the provider and
-    # PlayerDB wirings follow the adapter they connect to, and the hotkeys
-    # are routed to AutonaActions right after they exist.
+    # PlayerDB wirings follow the adapter they connect to (the model switched
+    # on before the first SetupModel), and the hotkeys are routed to
+    # AutonaActions right after they exist. The web operations' desktop
+    # registrations come last, after the dock and the adapter they point at.
     assert _steps("bootstrap_gui") == [
         "bootstrap_core()",
         "AutonaHotkeys()",
@@ -129,13 +141,62 @@ def test_bootstrap_gui_steps_and_their_order():
         " = AutonaGameAssetManager.instance.SetGameFromStartGGId",
         "AutonaGameAssetManager.instance.signals.onLoadAssets.connect("
         "AutonaTournamentDataProvider.instance.SetGameFromProvider)",
+        "AutonaPlayerDB.EnableModel()",
         "AutonaGameAssetManager.instance.signals.onLoad.connect("
         "AutonaPlayerDB.SetupModel)",
         "AutonaAlertNotification()",
         "AutonaUpdater()",
         "AutonaCountryHelper()",
         "AutonaScoreboardManager()",
+        "AutonaWebOperations.boardHost = AutonaWebOperations.DesktopBoardHost("
+        "AutonaScoreboardManager.instance)",
+        "AutonaWebOperations.loadGameByCodename"
+        " = AutonaGameAssetManager.instance.LoadGameByCodename",
     ]
+
+
+# ── The wiring both shells make ─────────────────────────────────────────
+
+# The connections that used to be the window's alone. Each is made by one
+# shared function now, so the desktop and the headless shell cannot drift.
+_SHARED_WIRING = {
+    "wire_tournament_data": [
+        "signals.tournament_data_updated.connect(apply)",
+        "signals.tournament_url_update.connect(forget_cleared)",
+    ],
+    "wire_web_server": [
+        "game_changed.connect(webserver.ws_game_changed)",
+        "AutonaPlayerDB.signals.db_updated.connect(webserver.ws_playerdb)",
+    ],
+}
+
+
+def test_the_shared_wiring_steps():
+    for name, steps in _SHARED_WIRING.items():
+        assert _steps(name) == steps, name
+
+
+def _calls(path):
+    tree = ast.parse((PROJECT_ROOT / path).read_text(encoding="utf-8"))
+    return [ast.unparse(node) for node in ast.walk(tree)
+            if isinstance(node, ast.Call)]
+
+
+def test_both_shells_make_the_shared_wiring_and_only_through_it():
+    for shell in ("src/Autona.py", "src/headless.py"):
+        calls = _calls(shell)
+        for name in _SHARED_WIRING:
+            assert sum(call.startswith(f"{name}(") for call in calls) == 1, (
+                f"{shell} must call {name}() exactly once")
+        # What they connect is theirs only: no shell reaches the payload
+        # writer, the forgetting or the web server's pushes on its own (the
+        # window's readers of tournamentInfo.* stay its own business).
+        for call in calls:
+            for target in ("ApplyProviderPayload", "ApplyTournamentData",
+                           "ForgetSelection", "ws_program_state",
+                           "ws_get_characters", "ws_game_changed",
+                           "ws_playerdb"):
+                assert target not in call, f"{shell}: {call}"
 
 
 # ── Real boots in a subprocess ──────────────────────────────────────────
@@ -219,9 +280,11 @@ app = QCoreApplication([])
 from src.bootstrap import bootstrap_core
 bootstrap_core()
 
+from src import AutonaWebOperations
 from src.AutonaAlertNotification import AutonaAlertNotification
 from src.AutonaGameAssetManager import AutonaGameAssetManager
 from src.AutonaHotkeys import AutonaHotkeys
+from src.AutonaPlayerDB import AutonaPlayerDB
 from src.AutonaScoreboardManager import AutonaScoreboardManager
 from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from src.AutonaUpdater import AutonaUpdater
@@ -257,6 +320,9 @@ report({
     "selector_registered":
         AutonaTournamentDataProvider.instance.selectGameFromStartGGId
         is not None,
+    "board_host": type(AutonaWebOperations.boardHost).__name__,
+    "game_loader": AutonaWebOperations.loadGameByCodename is not None,
+    "player_db_model": AutonaPlayerDB.modelEnabled,
     "in_gui_thread_main": in_gui_thread(),
     "in_gui_thread_worker": on_worker(in_gui_thread),
 })
@@ -271,6 +337,11 @@ def test_bootstrap_core_runs_under_a_bare_qcoreapplication(tmp_path):
     assert not any(result["gui"].values()), result["gui"]
     # Nothing is wired to the (absent) game asset adapter.
     assert result["selector_registered"] is False
+    # The web operations' defaults: no board, no game loader (the headless
+    # shell registers its own), and no player DB model (QtGui).
+    assert result["board_host"] == "BoardHost"
+    assert result["game_loader"] is False
+    assert result["player_db_model"] is False
     # The QCoreApplication's thread is "the GUI thread" for GuiExecutor's
     # purposes: the headless shell's event loop runs there.
     assert result["in_gui_thread_main"] is True
@@ -295,6 +366,8 @@ before = StateManager.Get("score")
 bootstrap_gui()
 bootstrap_gui()  # idempotent
 
+from src import AutonaWebOperations
+from src.AutonaPlayerDB import AutonaPlayerDB
 from src.AutonaGameAssetManager import AutonaGameAssetManager
 from src.AutonaHotkeys import AutonaHotkeys
 from src.AutonaScoreboardManager import AutonaScoreboardManager
@@ -338,6 +411,12 @@ report({
     "country_helper": AutonaCountryHelper.instance is not None,
     "scoreboard": AutonaScoreboardManager.instance is not None,
     "slot_order": order,
+    "board_host": type(AutonaWebOperations.boardHost).__name__,
+    "board_host_manager": AutonaWebOperations.boardHost.manager
+        is AutonaScoreboardManager.instance,
+    "game_loader": AutonaWebOperations.loadGameByCodename
+        == adapter.LoadGameByCodename,
+    "player_db_model": AutonaPlayerDB.modelEnabled,
     "in_gui_thread_main": in_gui_thread(),
     "in_gui_thread_worker": on_worker(in_gui_thread),
 })
@@ -353,6 +432,10 @@ def test_bootstrap_gui_builds_the_adapters_and_resets_the_score_root(
     assert result["hotkeys"] and result["actions_connected"]
     assert result["country_helper"] and result["scoreboard"]
     assert result["slot_order"] == ["provider:1386", "restore"]
+    assert result["board_host"] == "DesktopBoardHost"
+    assert result["board_host_manager"] is True
+    assert result["game_loader"] is True
+    assert result["player_db_model"] is True
     assert result["in_gui_thread_main"] is True
     assert result["in_gui_thread_worker"] is False
 
@@ -400,7 +483,7 @@ SettingsManager.Set("general.webserver_listen_lan", False)
 from src.AutonaWebServer import WebServer
 
 failures = []
-server = WebServer(parent=None, on_start_failed=failures.append)
+server = WebServer(on_start_failed=failures.append)
 server.start()
 
 health = None
@@ -433,7 +516,7 @@ except OSError:
     after_restart = "refused"
 
 # 192.0.2.1 (TEST-NET-1) is never a local address: the bind fails.
-failing = WebServer(parent=None, on_start_failed=failures.append)
+failing = WebServer(on_start_failed=failures.append)
 failing.host_name = "192.0.2.1"
 failing.start()
 deadline = time.monotonic() + 15

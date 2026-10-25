@@ -107,6 +107,7 @@
 | `CONFLICT` | 409 | 重い操作が実行中（多重起動ガード・§2.8） |
 | `NOT_READY` | 409 | 前提未充足（大会/試合未ロードで provider 不在 等・§3） |
 | `UPSTREAM_TIMEOUT` | 504 | Start.gg 等の外部依存がタイムアウト（agent-pitfalls #11） |
+| `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、ボード / パネルのウィジェットが要る操作（選手の編集・`:load-set`・`:pull-stream`・`stats:refresh`・`bracket:refresh`・`PATCH set` の `players` / `characters` 等）。message は `not available in headless`。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。legacy / Socket.IO ではクルーボード（board 3）の操作もこれになるが、v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
 | `INTERNAL` | 500 | 想定外の内部例外 |
 
 ### 2.7 操作ログ（D7・A-1）
@@ -195,7 +196,7 @@
 |---------------|------------|--------------|-----------|
 | `GET /api/v1/state` | 全状態（フル） | `program_state` | #1 |
 | `GET /api/v1/health` | §5.1 参照（新規） | 新規 | — |
-| `GET /api/v1/scoreboards/{n}` | スコアボード n の状態（`swapped` 含む。`swapped` はボード 1/2 では `score.{n}.teamsSwapped` のライブ値（反映前でも入替を返す。ADR-005 S2c〜）、ボード 3 はクルーウィジェットのフラグ） | `get_scoreboard`(+`get_swap`) | #9/#22 |
+| `GET /api/v1/scoreboards/{n}` | スコアボード n の状態（`swapped` 含む。`swapped` はボード 1/2 では `score.{n}.teamsSwapped` のライブ値（反映前でも入替を返す。ADR-005 S2c〜）、ボード 3 はクルーウィジェットのフラグ。ヘッドレス起動ではクルーウィジェットが無いので、ボード 3 は `swapped` を返さない（キーなし。ADR-005 S3c）） | `get_scoreboard`(+`get_swap`) | #9/#22 |
 | `GET /api/v1/games` | ゲーム一覧 | `get_games` | #15 |
 | `GET /api/v1/games/current` | 現在ゲーム | `get_current_game` | #16 |
 | `GET /api/v1/match-names` | match/phase 名候補 | `get_match_names` | #17 |

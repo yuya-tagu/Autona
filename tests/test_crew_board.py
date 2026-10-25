@@ -246,8 +246,8 @@ def test_a_remote_team_score_command_does_not_crash_or_alter_the_total(
     _nameMember(board, 0, 1, "Alpha")
     autonaApp.settle()
 
-    autonaApp.actions().team_scoreup(BOARD, "1")
-    autonaApp.actions().team_scoredown(BOARD, "1")
+    autonaApp.web().team_scoreup(BOARD, "1")
+    autonaApp.web().team_scoredown(BOARD, "1")
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 1, "score") == DEFAULT_STOCK
@@ -301,7 +301,7 @@ def test_a_remote_colour_change_reaches_the_crew_board(autonaApp):
     autonaApp.settle()
 
     revision = StateManager.revision
-    autonaApp.actions().team_color(BOARD, "1", "#abcdef")
+    autonaApp.web().team_color(BOARD, "1", "#abcdef")
     autonaApp.settle()
 
     assert _get(autonaApp, "team", 1, "color") == "#abcdef"
@@ -462,7 +462,7 @@ def test_a_reset_clears_the_crew_match_bar(autonaApp, reset):
     _typeCombo(board.matchCombo, "Winners Final")
     autonaApp.settle()
 
-    getattr(autonaApp.actions(), reset)(BOARD)
+    getattr(autonaApp.web(), reset)(BOARD)
     autonaApp.settle()
 
     assert _get(autonaApp, "phase") == ""

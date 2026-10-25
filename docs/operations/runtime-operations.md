@@ -39,6 +39,40 @@
 > - Autona は**多重起動しない**（named mutex）。起動済みの状態で再度 exe を実行すると、既存
 >   ウィンドウが前面化するだけで 2 個目のプロセスは何も表示せず終了する。
 
+### ヘッドレス起動（`python main.py --headless`）✅
+
+ウィンドウを出さずに、state・大会データ・Web サーバーだけを動かす起動方法（ADR-005 S3c）。
+OBS のオーバーレイと `/web`（ブラウザ版）から操作する。**ソースから起動する `python main.py` 専用**で、
+`Autona.exe` はまだ対応していない（`Autona.exe --headless` はメッセージボックスを出して起動しない）。
+
+- 起動: プロジェクトのディレクトリで `python main.py --headless`。スプラッシュもウィンドウも出ない。
+  ログはコンソール（INFO 以上）と `logs/autona.log` に出る。`headless: serving http://...` の行が出たら
+  OBS から取得できる
+- 設定はデスクトップ版と同じ `user_data/settings.json` を読む。起動時に残るもの・消えるものもデスクトップ版と同じ
+  - 前回の内容（`user_data/state.json`）のうち、大会情報・実況・Top 8・カラーなどは残る
+  - **スコアボード（`score.*`。スコア・選手・チーム名・match バー）は起動のたびに消える**
+  - ゲームは `settings.json` の `SELECTED_GAME_CODENAME`（最後に選んだゲーム）から、起動時のスキャンのあとで
+    ロードし直す。大会 URL（`TOURNAMENT_URL`）も読み直す
+  - ゲームの追加や大会 URL の設定は、先にデスクトップ版で済ませておくか、`/web` / API から行う
+- **確認ダイアログは出ない**。設定値で決まり、ログに出るだけ
+  - LAN 公開: `general.webserver_listen_lan`（未設定ならこの PC のみ。ログに案内が出る）
+  - ポート: `general.webserver_port`。他のプロセスが使っていればログに warning（PID 付き）。
+    bind できなければ `The web server could not start` を出して終了する（終了コード 1）
+- **反映ボタンが無いので、書き込みはすぐ公開される**（ボードを作らないため held にならない）
+- 動く操作: スコア・反映・チームカラー・表示トグル・Swap・各種リセット / クリア（選手の中身を空にする）・
+  best of・match バー（phase / pool / round）・チーム名・LOSERS・大会情報・大会 URL・ゲームの切り替え。
+  オーバーレイ・`/web`・`out/` の出力・Socket.IO の配信は今までどおり
+- **ボードやパネルの画面が要る操作は 503 `UNAVAILABLE`（`not available in headless`）を返す**:
+  選手の編集（`PATCH .../players/...`・`update-team`）・legacy の `POST /score`・セット読込 / 次のセット・統計・
+  サムネイル・Top 8 の取り込み・実況の更新・タグからの選手 / 実況者の読込（`load-player-from-tag`・
+  `load-commentator-from-tag`）・クルーボード（board 3）の操作（legacy / Socket.IO。v1 は起動形態によらず
+  400 `INVALID_ARGUMENT`）・選手数 / キャラ数の変更
+- 停止: **Ctrl+C / Ctrl+Break / コンソールの閉じるボタン**。`out/` と `user_data/state.json` を書き終えてから終了する。
+  タスクマネージャーでの強制終了は書き出しを待たない（直前 1〜5 秒の変更が `state.json` に残らないことがある）
+- デスクトップ版とヘッドレス版は**同時に起動できない**（ポートと書き込み先が同じため）。
+  - ヘッドレスを 2 つ目として起動すると、`Autona is already running ...` をエラー出力に出して終了する（終了コード 1）
+  - ヘッドレスの稼働中にデスクトップ版を起動すると、何も表示せずに終了する（ヘッドレス側のログに 1 行出る）
+
 ## Pre-event checklist
 
 本番前の確認項目（暫定。PdM/現場で確定要）:

@@ -66,7 +66,7 @@ class AutonaCrewBattleWidget(QWidget):
         super().__init__(*args)
         self.scoreboardNumber = scoreboardNumber
 
-        # Compat flag read by WebServerActions.get_swap / SwapTeams logic.
+        # Compat flag read by AutonaWebOperations.get_swap / SwapTeams logic.
         self.teamsSwapped = False
 
         # Every score.3 write this widget makes goes through here (headless
@@ -103,7 +103,7 @@ class AutonaCrewBattleWidget(QWidget):
         # of truth for score.3.best_of (boards 1/2's is AutonaActions.SetBestOf
         # since ADR-005 S2e): every writer (ChangeSetData / set_route) goes
         # through setValue, and the generic reset
-        # (WebServerActions._reset_best_of -> setValue(0)) therefore clears
+        # (AutonaWebOperations._reset_match -> setValue(0)) therefore clears
         # state instead of leaving a stale BO on the overlay.
         self._bestOfSpin = QSpinBox(self.scoreColumn)
         self._bestOfSpin.setObjectName("best_of")

@@ -29,7 +29,13 @@ LAN_HOST_2 = "10.8.0.2"    # ... and a second one (a VPN adapter)
 
 
 class FakeActions:
-    """The WebServerActions calls the routes below make, recorded."""
+    """The web operations the routes below call, recorded.
+
+    They are src/AutonaWebOperations.py's (the core-direct ones, ADR-005
+    S3c); the fixture puts these in their place there, and hands the object
+    to the server as its board-dependent actions too, so a route that
+    reached for one of those would fail here rather than pass unnoticed.
+    """
 
     def __init__(self):
         self.calls = []
@@ -66,11 +72,15 @@ def settings(monkeypatch):
 def server(settings, monkeypatch, tmp_path):
     """The real app + Socket.IO server, the actions faked, cwd = tmp_path."""
     from src import AutonaApiV1
+    from src import AutonaWebOperations
     from src.AutonaApiV1 import api_v1
     from src.AutonaWebServer import WebServer, _build_web_app
 
     monkeypatch.chdir(tmp_path)
     actions = FakeActions()
+    for name in ("program_state", "team_scoreup", "reset_scores",
+                 "get_games", "get_playerdb"):
+        monkeypatch.setattr(AutonaWebOperations, name, getattr(actions, name))
     monkeypatch.setattr(WebServer, "actions", actions)
     monkeypatch.setattr(AutonaApiV1, "_actions", actions)
     monkeypatch.setattr(WebServer, "_lan_hosts", (LAN_HOST, LAN_HOST_2))

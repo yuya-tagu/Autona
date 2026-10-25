@@ -45,6 +45,7 @@ CLAUDE.md は要点のみ。詳細は以下を**必要時に参照**する（常
 
 ```bash
 python main.py                                        # 開発時の実行（オーナーが実行）
+python main.py --headless                             # ウィンドウなし（state + Web サーバーのみ。exe は未対応）→ docs/operations/runtime-operations.md
 cd web && npm run build                              # Web UI（exe ビルド前に実行）
 pyinstaller dependencies/autona.spec --noconfirm     # exe（配布前のみ）→ dist/Autona/
 rm -rf ./_internal && cp -r dist/Autona/_internal ./_internal   # 成果物を直下へ

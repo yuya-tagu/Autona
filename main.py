@@ -82,6 +82,22 @@ if getattr(sys, "frozen", False):
         _focus_install_window()
         sys.exit(0)
 
+# `python main.py --headless`: no window -- the core, the tournament provider
+# and the web server on a QCoreApplication (ADR-005 S3c, src/headless.py).
+# The desktop and the headless shell share the gate below: they would share
+# the web server port and the files they write too.
+_HEADLESS = "--headless" in sys.argv[1:]
+_FROZEN = bool(getattr(sys, "frozen", False))
+
+# Autona.exe does not run headless (no console to log to or to stop it
+# from; the spec and the updater are not set up for it): say so and leave
+# BEFORE the gate below -- holding the mutex, even briefly, would make the
+# app double-clicked next exit as a second launch, silently.
+if _HEADLESS and _FROZEN:
+    from src.headless import refuse_frozen_headless
+    refuse_frozen_headless()
+    sys.exit(1)
+
 # ── Stage 0: single-instance gate ────────────────────────────────────────
 # Autona owns exclusive resources (the web server port, out/ state files,
 # global hotkeys, the OBS overlay), so a second launch must not start a
@@ -89,8 +105,21 @@ if getattr(sys, "frozen", False):
 # without showing anything. A Win32 named mutex is used rather than a lock
 # file because the OS releases it when the process dies, so a crash can
 # never leave a stale lock behind that blocks the next launch.
-_MUTEX_NAME = "taguyan.Autona.SingleInstance"
-_IPC_SERVER_NAME = "taguyan.Autona.ipc"
+# AUTONA_INSTANCE_TAG suffixes both names, for the tests that start a
+# headless process (tests/test_headless_smoke.py) beside an Autona the
+# owner may have running: without it, the test would be the second launch.
+# Not a way to run two instances for real -- they would still share
+# user_data/ unless started in different directories. Read from source only
+# (never by Autona.exe), letters, digits and hyphens only:
+# src/headless.py instance_tag.
+_INSTANCE_TAG = ""
+if "AUTONA_INSTANCE_TAG" in os.environ:
+    from src.headless import instance_tag
+    _INSTANCE_TAG = instance_tag(os.environ, frozen=_FROZEN)
+_MUTEX_NAME = "taguyan.Autona.SingleInstance" + (
+    f".{_INSTANCE_TAG}" if _INSTANCE_TAG else "")
+_IPC_SERVER_NAME = "taguyan.Autona.ipc" + (
+    f".{_INSTANCE_TAG}" if _INSTANCE_TAG else "")
 _ERROR_ALREADY_EXISTS = 183
 
 # Held for the lifetime of the process on purpose: the mutex lives as long
@@ -151,8 +180,70 @@ def _activate_running_instance():
 
 
 if not _acquire_single_instance():
+    if _HEADLESS:
+        # Nobody to show a window to, and whoever started this wants to know
+        # it is not running: say so, and fail.
+        sys.stderr.write(
+            "Autona is already running (the desktop app or another headless "
+            "instance); not starting.\n")
+        sys.exit(1)
     _activate_running_instance()
     sys.exit(0)
+
+# ── Stage 0 (cont.): serve activation requests from later launches ───────
+# The server is started by each shell below, once it has an application
+# object; what an activation does is the shell's.
+_ipcServer = None
+_onActivate = None
+
+
+def _on_ipc_connection():
+    conn = _ipcServer.nextPendingConnection()
+    if conn is None:
+        return
+    if conn.bytesAvailable() or conn.waitForReadyRead(500):
+        if bytes(conn.readAll()).startswith(b"activate"):
+            _onActivate()
+    conn.disconnectFromServer()
+    conn.deleteLater()
+
+
+def _start_ipc_server(on_activate):
+    global _ipcServer, _onActivate
+    from PySide6.QtNetwork import QLocalServer
+    # A hard kill leaves the named pipe/socket behind; clearing it first
+    # keeps listen() from failing after a crash.
+    QLocalServer.removeServer(_IPC_SERVER_NAME)
+    server = QLocalServer()
+    if not server.listen(_IPC_SERVER_NAME):
+        # Non-fatal: without it a second launch simply exits without
+        # raising this window, which still beats a second process.
+        return
+    # Published before connecting the signal: the handler reads these.
+    _onActivate = on_activate
+    _ipcServer = server
+    server.newConnection.connect(_on_ipc_connection)
+
+
+if _HEADLESS:
+    # No splash, no QApplication, no window: a QCoreApplication (QtCore
+    # only) runs the event loop the core's Qt plumbing needs -- the state
+    # bridge, the GUI executor, the provider's thread pool, the IPC server.
+    from PySide6.QtCore import QCoreApplication
+    App = QCoreApplication(sys.argv)
+
+    def _log_activation():
+        # A second launch of the desktop app while this runs: it has been
+        # told to step aside (the gate above), there is nothing to raise.
+        from loguru import logger
+        logger.info(
+            "headless: another launch was refused (Autona is already "
+            "running headless)")
+
+    _start_ipc_server(_log_activation)
+    # src/headless.py is side-effect free to import; run() is the assembly.
+    from src import headless
+    sys.exit(headless.run(App))
 
 import autona_splash
 
@@ -179,8 +270,7 @@ autona_splash.create_splash()
 App.processEvents()
 autona_splash.log_startup_phase("splash")
 
-# ── Stage 0 (cont.): serve activation requests from later launches ───────
-_ipcServer = None
+# ── Stage 0 (cont.): activation, for the desktop ──────────────────────────
 _activationPending = False
 _activationTarget = None
 
@@ -209,34 +299,7 @@ def _set_activation_target(window):
         _bring_to_front(window)
 
 
-def _on_ipc_connection():
-    conn = _ipcServer.nextPendingConnection()
-    if conn is None:
-        return
-    if conn.bytesAvailable() or conn.waitForReadyRead(500):
-        if bytes(conn.readAll()).startswith(b"activate"):
-            _request_activation()
-    conn.disconnectFromServer()
-    conn.deleteLater()
-
-
-def _start_ipc_server():
-    global _ipcServer
-    from PySide6.QtNetwork import QLocalServer
-    # A hard kill leaves the named pipe/socket behind; clearing it first
-    # keeps listen() from failing after a crash.
-    QLocalServer.removeServer(_IPC_SERVER_NAME)
-    server = QLocalServer()
-    if not server.listen(_IPC_SERVER_NAME):
-        # Non-fatal: without it a second launch simply exits without
-        # raising this window, which still beats a second process.
-        return
-    # Published before connecting the signal: the handler reads this global.
-    _ipcServer = server
-    server.newConnection.connect(_on_ipc_connection)
-
-
-_start_ipc_server()
+_start_ipc_server(_request_activation)
 
 # The heavy import: `src` itself is an empty package (importing it does
 # nothing), so the application assembly module is named explicitly. This line

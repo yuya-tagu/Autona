@@ -291,12 +291,23 @@ class _AutonaHarness:
     def actions(self):
         """A WebServerActions bound to the real manager (never started).
 
-        This is the object every HTTP route and Socket.IO event delegates to,
-        so driving it exercises the same code path as a request without
-        binding a port.
+        The board-dependent operations (player edits, set loading, stats,
+        ...): what the HTTP routes and Socket.IO events that need a widget
+        delegate to, so driving it exercises the same code path as a request
+        without binding a port.
         """
         from src.AutonaWebServerActions import WebServerActions
         return WebServerActions(parent=None, scoreboard=self.manager)
+
+    def web(self):
+        """The web operations every route reaches without a widget of its
+        own (src/AutonaWebOperations.py, ADR-005 S3c): the core-direct ones
+        and the S2 operations. Here they run through the desktop's board
+        host (bootstrap_gui() registered it on the real manager), as in the
+        app. A module, called like the actions object: web().swap_teams(1).
+        """
+        from src import AutonaWebOperations
+        return AutonaWebOperations
 
     # -- scheduling -------------------------------------------------------
 
@@ -384,8 +395,8 @@ def _autonaRuntime(qapp, tmp_path_factory):
             AutonaQtHelper.init_gui_executor()
 
         # bootstrap_core() deliberately stops short of the per-run locale
-        # (it needs a QGuiApplication for the QTranslator), so Window.__init__
-        # does these two. The harness has to as well: without them
+        # (that is the shell's: Window.__init__ or src/headless.py), so the
+        # harness does these two as well: without them
         # AutonaLocaleHelper.matchNames is empty, and the best_of handler --
         # which formats "Best of {}" out of it -- raises halfway through,
         # leaving first_to and friends unwritten. That is a harness artifact,

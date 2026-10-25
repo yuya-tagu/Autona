@@ -518,7 +518,7 @@ def test_a_player_widget_showing_a_country_changes_no_payload(
     """Through a real player card: what the Web is sent for a country does
     not depend on whether the desktop has shown it (it used to)."""
     catalog = countries("en")
-    actions = autonaApp.actions()
+    actions = autonaApp.web()
     before = json.dumps(actions.get_states("JP"))
     table = digest(catalog.Current().countries)
 
@@ -537,7 +537,7 @@ def test_a_player_widget_showing_a_country_changes_no_payload(
 def test_get_states_returns_the_recorded_payload(countries, autonaApp):
     golden = GOLDEN["states"]
     countries("en")
-    actions = autonaApp.actions()
+    actions = autonaApp.web()
 
     assert {code: digest(actions.get_states(code))
             for code in golden["afterDigests"]} == golden["afterDigests"]
@@ -548,13 +548,11 @@ def test_get_states_returns_the_recorded_payload(countries, autonaApp):
 
 def test_get_states_reads_the_catalog_without_a_gui_hop():
     """S1c's share of the S1 completion condition: the last country reader
-    of the Web server carries no @gui_thread_sync and reads the catalog."""
-    tree = ast.parse((PROJECT_ROOT / "src" / "AutonaWebServerActions.py")
+    of the Web server carries no @gui_thread_sync and reads the catalog.
+    It is a web operation of both shells since ADR-005 S3c."""
+    tree = ast.parse((PROJECT_ROOT / "src" / "AutonaWebOperations.py")
                      .read_text(encoding="utf-8"))
-    actionsClass = next(node for node in tree.body
-                        if isinstance(node, ast.ClassDef)
-                        and node.name == "WebServerActions")
-    method = next(node for node in actionsClass.body
+    method = next(node for node in tree.body
                   if isinstance(node, ast.FunctionDef)
                   and node.name == "get_states")
 
@@ -571,7 +569,7 @@ def test_get_states_answers_on_a_worker_thread(countries, autonaApp):
     marshalled onto the GUI thread would wait in run_sync until the join
     below times out."""
     countries("en")
-    actions = autonaApp.actions()
+    actions = autonaApp.web()
     results = {}
 
     def work():

@@ -172,6 +172,12 @@ scoreboard_manager = importlib.import_module(
 # either -- AutonaApiV1 only declares its Blueprint, which is inert until
 # WebServer.__init__ registers it on the app.
 web_server = importlib.import_module("src.AutonaWebServer").WebServer
+# The web operations of both shells (ADR-005 S3c). The desktop's board host
+# and game loader are registered by bootstrap_gui(), never on import.
+web_operations = importlib.import_module("src.AutonaWebOperations")
+# The headless shell's assembly: its run() configures the logs and builds
+# everything; importing it must do neither.
+headless = importlib.import_module("src.headless")
 # The Qt adapter for the state layer. Imported last on purpose: everything
 # above already pulled it in (every widget that listens to state does), so
 # if any of them built one at import time this assertion catches it.
@@ -207,6 +213,9 @@ assert bridge.instance is None, "import created StateManagerBridge.instance"
 assert web_server.app is None, "import built WebServer.app (Flask)"
 assert web_server.socketio is None, "import built WebServer.socketio"
 assert web_server.actions is None, "import built WebServer.actions"
+assert type(web_operations.boardHost) is web_operations.BoardHost,     "import registered a board host for the web operations"
+assert web_operations.loadGameByCodename is None,     "import registered a game loader for the web operations"
+assert not player_db.modelEnabled, "import switched the player DB model on"
 
 # The core state layer comes up empty, and -- the point of importing the
 # whole widget tree above -- with nobody wired to its channels. Only
@@ -243,6 +252,7 @@ for name in queryAttrs:
 
 assert not os.path.exists("./out"), "import created ./out"
 assert not os.path.exists("./user_data"), "import created ./user_data"
+assert not os.path.exists("./logs"), "import created ./logs"
 
 # Positive control: the work simply moved to the explicit entry point, so
 # the test cannot pass just because the code stopped working.

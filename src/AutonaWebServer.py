@@ -22,8 +22,7 @@ from loguru import logger
 
 from .core.StateManager import StateManager
 from .StateManagerBridge import StateManagerBridge
-from .AutonaWebServerActions import WebServerActions
-from .AutonaScoreboardManager import AutonaScoreboardManager
+from . import AutonaWebOperations as WebOps
 from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 from .core import WebAccess
 from .Helpers.AutonaNetworkHelper import GetLocalIPs
@@ -36,6 +35,10 @@ import traceback
 import logging
 log = logging.getLogger('socketio.server')
 log.setLevel(logging.ERROR)
+# werkzeug's per-request access log (OBS polls many times a second). Set
+# here, beside the server it belongs to: it used to sit in
+# AutonaWebServerActions, which the headless shell never imports (S3c).
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 class SocketioJson:
     def default(obj):
@@ -67,6 +70,13 @@ def _build_web_app():
     stay WebServer attributes because other code reaches them by name; they
     are registered here explicitly. tests/test_webserver_routes.py pins both
     the resulting route/event ledger and that class-attribute contract.
+
+    Since ADR-005 S3c the handlers call the shared operations
+    (src/AutonaWebOperations.py, `WebOps`) for everything that is core's, and
+    the board-dependent rest through WebServer._board_actions(): the desktop
+    shell's WebServerActions, or -- in the headless shell, which has none --
+    NotAvailable, answered 503 here (the routes) and as the event's ack (the
+    Socket.IO events).
     """
     # No Flask static folder (ADR-005 S3a): it served every file below the
     # working directory under /./, beside file_request. file_request is the
@@ -90,13 +100,16 @@ def _build_web_app():
     # than socketio.on() (ADR-005 S3a): a WRITE / PLAYERDB event
     # (WebAccess.EVENT_ACCESS) is wrapped in WebServer._ws_guard, which
     # refuses it on a connection that was not let in to write. Read events
-    # register unchanged. Returns the handler itself, like socketio.on().
+    # register unchanged. Every event also answers an operation this shell
+    # cannot run with the 503 body as its ack (WebServer._ws_unavailable,
+    # ADR-005 S3c). Returns the handler itself, like socketio.on().
     def ws_on(event):
         def register(handler):
+            served = WebServer._ws_unavailable(event, handler)
             if WebAccess.EventAccess(event) in WebAccess.GUARDED:
-                socketio.on(event)(WebServer._ws_guard(event, handler))
+                socketio.on(event)(WebServer._ws_guard(event, served))
             else:
-                socketio.on(event)(handler)
+                socketio.on(event)(served)
             return handler
         return register
 
@@ -118,6 +131,15 @@ def _build_web_app():
         logger.debug(f"[FLASK] ← {request.method} {request.path} [{response.status_code}]")
         return response
 
+    # A board-dependent operation in the headless shell (ADR-005 S3c): 503 in
+    # the /api/v1 error shape, from every legacy route. /api/v1 answers it
+    # itself (its wrappers turn every exception into an envelope first).
+    @app.errorhandler(WebOps.NotAvailable)
+    def not_available(error):
+        response = jsonify(WebServer.UnavailableBody(error))
+        response.status_code = 503
+        return response
+
     # ------------------------------------------------------------------
     # DEPRECATED legacy routes (/program-state, /score, /scoreboard<N>-*,
     # /update-*, /get-*, /load-*, ... down to /states below).
@@ -130,7 +152,7 @@ def _build_web_app():
     # ------------------------------------------------------------------
     @app.route('/program-state')
     def program_state():
-        return WebServer.actions.program_state()
+        return WebOps.program_state()
 
     @ws_on('program-state-update')
     def ws_program_state_update(message):
@@ -158,80 +180,80 @@ def _build_web_app():
 
     @app.route('/score', methods=['POST'])
     def post_score():
-        return WebServer.actions.post_score(request.get_data())
+        return WebServer._board_actions().post_score(request.get_data())
 
     @ws_on('score')
     def ws_post_score(message):
-        WebServer.ws_emit('score', WebServer.actions.post_score(message))
+        WebServer.ws_emit('score', WebServer._board_actions().post_score(message))
 
     # Ticks score of Team specified up by 1 point
     @app.route('/scoreboard<scoreboardNumber>-team<team>-scoreup')
     def team_scoreup(scoreboardNumber, team):
-        return WebServer.actions.team_scoreup(scoreboardNumber, team)
+        return WebOps.team_scoreup(scoreboardNumber, team)
 
     @ws_on('team_scoreup')
     def ws_team_scoreup(message):
         info = orjson.loads(message)
         WebServer.ws_emit('team_scoreup',
-             WebServer.actions.team_scoreup(info.get("scoreboardNumber", "1"), info.get("team")))
+             WebOps.team_scoreup(info.get("scoreboardNumber", "1"), info.get("team")))
 
     # Ticks score of Team specified down by 1 point
     @app.route('/scoreboard<scoreboardNumber>-team<team>-scoredown')
     def team_scoredown(scoreboardNumber, team):
-        return WebServer.actions.team_scoredown(scoreboardNumber, team)
+        return WebOps.team_scoredown(scoreboardNumber, team)
 
     @ws_on('team_scoredown')
     def ws_team_scoredown(message):
         info = orjson.loads(message)
         WebServer.ws_emit('team_scoredown',
-             WebServer.actions.team_scoredown(info.get("scoreboardNumber", "1"), info.get("team")))
+             WebOps.team_scoredown(info.get("scoreboardNumber", "1"), info.get("team")))
 
     # Set color of team
     @app.route('/scoreboard<scoreboardNumber>-team<team>-color-<color>')
     def team_color(scoreboardNumber, team, color):
-        return WebServer.actions.team_color(scoreboardNumber, team, "#" + color)
+        return WebOps.team_color(scoreboardNumber, team, "#" + color)
 
     @ws_on('team_color')
     def ws_team_color(message):
         info = orjson.loads(message)
         WebServer.ws_emit('team_scoredown',
-             WebServer.actions.team_color(info.get("scoreboardNumber", "1"), info.get("team"), "#" + info.get("color")))
+             WebOps.team_color(info.get("scoreboardNumber", "1"), info.get("team"), "#" + info.get("color")))
 
     # ── Crewbattle (board 3) member controls ──
     # Bump a crew member's remaining stock up/down by 1.
     @app.route('/scoreboard<scoreboardNumber>-crew-member<team>-<member>-stockup')
     def crew_member_stockup(scoreboardNumber, team, member):
-        return WebServer.actions.crew_member_stock(scoreboardNumber, team, member, 1)
+        return WebServer._board_actions().crew_member_stock(scoreboardNumber, team, member, 1)
 
     @app.route('/scoreboard<scoreboardNumber>-crew-member<team>-<member>-stockdown')
     def crew_member_stockdown(scoreboardNumber, team, member):
-        return WebServer.actions.crew_member_stock(scoreboardNumber, team, member, -1)
+        return WebServer._board_actions().crew_member_stock(scoreboardNumber, team, member, -1)
 
     @ws_on('crew_member_stock')
     def ws_crew_member_stock(message):
         info = orjson.loads(message)
         WebServer.ws_emit('crew_member_stock',
-             WebServer.actions.crew_member_stock(
+             WebServer._board_actions().crew_member_stock(
                  info.get("scoreboardNumber", "3"), info.get("team"),
                  info.get("member"), info.get("change", 1)))
 
     # Set which crew member is currently in (0 = none).
     @app.route('/scoreboard<scoreboardNumber>-crew-active<team>-<member>')
     def crew_set_active(scoreboardNumber, team, member):
-        return WebServer.actions.crew_set_active(scoreboardNumber, team, member)
+        return WebServer._board_actions().crew_set_active(scoreboardNumber, team, member)
 
     @ws_on('crew_set_active')
     def ws_crew_set_active(message):
         info = orjson.loads(message)
         WebServer.ws_emit('crew_set_active',
-             WebServer.actions.crew_set_active(
+             WebServer._board_actions().crew_set_active(
                  info.get("scoreboardNumber", "3"), info.get("team"),
                  info.get("member")))
 
 
     @app.route('/scoreboard<scoreboardNumber>-get')
     def get_route(scoreboardNumber):
-        return WebServer.actions.get_scoreboard(scoreboardNumber)
+        return WebOps.get_scoreboard(scoreboardNumber)
 
     # Dynamic endpoint to allow flexible sets of information
     # Ex. http://192.168.1.2:5107/set?best-of=5
@@ -240,7 +262,7 @@ def _build_web_app():
     # Ex. http://192.168.4.34:5107/set?best-of=5&phase=Top 32&match=Winners Finals
     @app.route('/scoreboard<scoreboardNumber>-set')
     def set_route(scoreboardNumber):
-        return WebServer.actions.set_route(
+        return WebOps.set_route(
             scoreboardNumber,
             bestOf=request.args.get('best-of'),
             phase=request.args.get('phase'),
@@ -258,13 +280,13 @@ def _build_web_app():
     # desktop eye menu into SettingsManager + StateManager on every board.
     @app.post('/display-option')
     def post_display_option():
-        return WebServer.actions.set_display_option(
+        return WebOps.set_display_option(
             orjson.loads(request.get_data()))
 
     @ws_on('set')
     def ws_set_route(message):
         parsed = orjson.loads(message)
-        WebServer.ws_emit('set', WebServer.actions.set_route(
+        WebServer.ws_emit('set', WebOps.set_route(
             parsed.get("scoreboardNumber", "1"),
             bestOf=parsed.get('best_of'),
             phase=parsed.get('phase'),
@@ -280,13 +302,13 @@ def _build_web_app():
     @app.post('/scoreboard<scoreboardNumber>-update-team-<team>-<player>')
     def set_team_data(scoreboardNumber, team, player):
         data = request.get_json()
-        return WebServer.actions.set_team_data(scoreboardNumber, team, player, data)
+        return WebServer._board_actions().set_team_data(scoreboardNumber, team, player, data)
 
     @ws_on('update_team')
     def ws_set_team_data(message):
         data = orjson.loads(message)
         WebServer.ws_emit('update_team',
-             WebServer.actions.set_team_data(
+             WebServer._board_actions().set_team_data(
                  data.get("scoreboardNumber", "1"),
                  data.get("team"),
                  data.get("player"),
@@ -296,13 +318,13 @@ def _build_web_app():
     @app.post('/update-commentary-<caster>')
     def set_commentary_data(caster):
         data = request.get_json()
-        return WebServer.actions.set_commentary_data(caster, data)
+        return WebServer._board_actions().set_commentary_data(caster, data)
 
     @ws_on('update_commentary')
     def ws_set_commentary_data(message):
         data = orjson.loads(message)
         WebServer.ws_emit('update_commentary',
-            WebServer.actions.set_commentary_data(
+            WebServer._board_actions().set_commentary_data(
                 data.get("commentator"),
                 data
             ))
@@ -311,7 +333,7 @@ def _build_web_app():
     @app.post('/update-game')
     def set_game():
         data = request.get_json()
-        return WebServer.actions.set_game(data)
+        return WebOps.set_game(data)
     
     @ws_on('update_game')
     def ws_set_game_data(message):
@@ -321,192 +343,192 @@ def _build_web_app():
             data = message
 
         WebServer.ws_emit('update_game',
-            WebServer.actions.set_game(
+            WebOps.set_game(
                 data
             ))
 
     # Get games
     @app.route('/games')
     def get_games():
-        return WebServer.actions.get_games()
+        return WebOps.get_games()
 
     @ws_on('games')
     def ws_get_games(message):
-        WebServer.ws_emit('games', WebServer.actions.get_games(), json=True)
+        WebServer.ws_emit('games', WebOps.get_games(), json=True)
 
     # Get current game
     @app.route('/current-game')
     def get_current_game():
-        return WebServer.actions.get_current_game()
+        return WebOps.get_current_game()
 
     @ws_on('current_game')
     def ws_get_current_game(message):
-        WebServer.ws_emit('get_current_game', WebServer.actions.get_current_game(), json=True)
+        WebServer.ws_emit('get_current_game', WebOps.get_current_game(), json=True)
 
     # Get match and phase names
     @app.route('/match-names')
     def get_match_names():
-        return WebServer.actions.get_match_names()
+        return WebOps.get_match_names()
 
     @ws_on('match_names')
     def ws_get_match_names(message):
-        WebServer.ws_emit('match_names', WebServer.actions.get_match_names(), json=True)
+        WebServer.ws_emit('match_names', WebOps.get_match_names(), json=True)
 
     # Get characters
     @app.route('/characters')
     def get_characters():
-        return WebServer.actions.get_characters()
+        return WebOps.get_characters()
 
-    # Stays on the class: Autona.py connects Window.signals.GameChanged to
-    # self.webserver.ws_get_characters, i.e. by attribute on the instance.
+    # Stays on the class: ws_game_changed (which the shells connect to their
+    # game-change signal, bootstrap.wire_web_server) calls it by name.
     ws_on('characters')(WebServer.ws_get_characters)
 
     # Get variants
     @app.route('/variants')
     def get_variants():
-        return WebServer.actions.get_variants()
+        return WebOps.get_variants()
 
     @ws_on('variants')
     def ws_get_variants(message):
-        WebServer.ws_emit('variants', WebServer.actions.get_variants(), json=True)
+        WebServer.ws_emit('variants', WebOps.get_variants(), json=True)
 
     # Swaps teams
     @app.route('/scoreboard<scoreboardNumber>-swap-teams')
     def swap_teams(scoreboardNumber):
-        return WebServer.actions.swap_teams(scoreboardNumber)
+        return WebOps.swap_teams(scoreboardNumber)
 
     @ws_on('swap_teams')
     def ws_swap_teams(message):
         info = orjson.loads(message)
-        WebServer.ws_emit('swap_teams', WebServer.actions.swap_teams(
+        WebServer.ws_emit('swap_teams', WebOps.swap_teams(
             info.get("scoreboardNumber", "1")))
 
     # Are the teams currently swapped?
     @app.route('/scoreboard<scoreboardNumber>-get-swap')
     def get_swap(scoreboardNumber):
-        return WebServer.actions.get_swap(scoreboardNumber)
+        return WebOps.get_swap(scoreboardNumber)
 
     @ws_on('get_swap')
     def ws_get_swap(message):
         info = orjson.loads(message)
-        WebServer.ws_emit('get_swap', WebServer.actions.get_swap(
+        WebServer.ws_emit('get_swap', WebOps.get_swap(
             info.get("scoreboardNumber", "1")))
 
     # Opens Set Selector Window
     @app.route('/scoreboard<scoreboardNumber>-open-set')
     def open_sets(scoreboardNumber):
-        return WebServer.actions.open_sets(scoreboardNumber)
+        return WebServer._board_actions().open_sets(scoreboardNumber)
 
     @ws_on('open_set')
     def ws_open_sets(message):
         info = orjson.loads(message)
-        WebServer.ws_emit('open_set', WebServer.actions.open_sets(
+        WebServer.ws_emit('open_set', WebServer._board_actions().open_sets(
             info.get("scoreboardNumber", "1")))
 
     # Pulls Current Stream Set
     @app.route('/scoreboard<scoreboardNumber>-pull-stream')
     def pull_stream_set(scoreboardNumber):
-        return WebServer.actions.pull_stream_set(scoreboardNumber)
+        return WebServer._board_actions().pull_stream_set(scoreboardNumber)
 
     @ws_on('pull_stream')
     def ws_pull_stream_set(message):
         info = orjson.loads(message)
-        WebServer.ws_emit('pull_stream', WebServer.actions.pull_stream_set(
+        WebServer.ws_emit('pull_stream', WebServer._board_actions().pull_stream_set(
             info.get("scoreboardNumber", "1")))
 
     # Resubmits Call for Recent Sets
     @app.route('/scoreboard<scoreboardNumber>-stats-recent-sets')
     def stats_recent_sets(scoreboardNumber):
-        return WebServer.actions.stats_recent_sets(scoreboardNumber)
+        return WebServer._board_actions().stats_recent_sets(scoreboardNumber)
 
     @ws_on('stats_recent_sets')
     def ws_stats_recent_sets(message):
         info = orjson.loads(message)
         WebServer.ws_emit('stats_recent_sets',
-             WebServer.actions.stats_recent_sets(info.get("scoreboardNumber", "1")))
+             WebServer._board_actions().stats_recent_sets(info.get("scoreboardNumber", "1")))
 
     # Resubmits Call for Upset Factor
     @app.route('/scoreboard<scoreboardNumber>-stats-upset-factor')
     def stats_upset_factor(scoreboardNumber):
-        return WebServer.actions.stats_upset_factor(scoreboardNumber)
+        return WebServer._board_actions().stats_upset_factor(scoreboardNumber)
 
     @ws_on('stats_upset_factor')
     def ws_stats_upset_factor(message):
         info = orjson.loads(message)
         WebServer.ws_emit('stats_upset_factor',
-             WebServer.actions.stats_upset_factor(info.get("scoreboardNumber", "1")))
+             WebServer._board_actions().stats_upset_factor(info.get("scoreboardNumber", "1")))
 
     # Resubmits Call for Last Sets
     @app.route('/scoreboard<scoreboardNumber>-stats-last-sets-<player>')
     def stats_last_sets(scoreboardNumber, player):
-        return WebServer.actions.stats_last_sets(scoreboardNumber, player)
+        return WebServer._board_actions().stats_last_sets(scoreboardNumber, player)
 
     @ws_on('stats_last_sets')
     def ws_stats_last_sets(message):
         info = orjson.loads(message)
         WebServer.ws_emit('stats_last_sets',
-             WebServer.actions.stats_last_sets(info.get("scoreboardNumber", "1"), info.get("player")))
+             WebServer._board_actions().stats_last_sets(info.get("scoreboardNumber", "1"), info.get("player")))
 
    # Resubmits Call for History Sets
     @app.route('/scoreboard<scoreboardNumber>-stats-history-sets-<player>')
     def stats_history_sets(scoreboardNumber, player):
-        return WebServer.actions.stats_history_sets(scoreboardNumber, player)
+        return WebServer._board_actions().stats_history_sets(scoreboardNumber, player)
 
     @ws_on('stats_history_sets')
     def ws_stats_history_sets(message):
         info = orjson.loads(message)
         WebServer.ws_emit('stats_history_sets',
-             WebServer.actions.stats_history_sets(info.get("scoreboardNumber", "1"), info.get("player")))
+             WebServer._board_actions().stats_history_sets(info.get("scoreboardNumber", "1"), info.get("player")))
 
     # Resets scores
     @app.route('/scoreboard<scoreboardNumber>-reset-scores')
     def reset_scores(scoreboardNumber):
-        return WebServer.actions.reset_scores(scoreboardNumber)
+        return WebOps.reset_scores(scoreboardNumber)
 
     @ws_on('reset_scores')
     def ws_reset_scores(message):
         info = orjson.loads(message)
         WebServer.ws_emit('reset_scores',
-             WebServer.actions.reset_scores(info.get("scoreboardNumber", "1")))
+             WebOps.reset_scores(info.get("scoreboardNumber", "1")))
 
     # Resets scores, match, phase, and losers status
     @app.route('/scoreboard<scoreboardNumber>-reset-match')
     def reset_match(scoreboardNumber):
-        return WebServer.actions.reset_match(scoreboardNumber)
+        return WebOps.reset_match(scoreboardNumber)
 
     @ws_on('reset_match')
     def ws_reset_match(message):
         info = orjson.loads(message)
         WebServer.ws_emit('reset_match',
-             WebServer.actions.reset_match(info.get("scoreboardNumber", "1")))
+             WebOps.reset_match(info.get("scoreboardNumber", "1")))
 
     # Resets scores, match, phase, and losers status
     @app.route('/scoreboard<scoreboardNumber>-reset-players')
     def reset_players(scoreboardNumber):
-        return WebServer.actions.reset_players(scoreboardNumber)
+        return WebOps.reset_players(scoreboardNumber)
 
     @ws_on('reset_players')
     def ws_reset_players(message):
         info = orjson.loads(message)
         WebServer.ws_emit('reset_players',
-             WebServer.actions.reset_players(info.get("scoreboardNumber", "1")))
+             WebOps.reset_players(info.get("scoreboardNumber", "1")))
 
     # Resets all values
     @app.route('/scoreboard<scoreboardNumber>-clear-all')
     def clear_all(scoreboardNumber):
-        return WebServer.actions.clear_all(scoreboardNumber)
+        return WebOps.clear_all(scoreboardNumber)
 
     @ws_on('clear_all')
     def ws_clear_all(message):
         info = orjson.loads(message)
         WebServer.ws_emit('clear_all',
-             WebServer.actions.clear_all(info.get("scoreboardNumber", "1")))
+             WebOps.clear_all(info.get("scoreboardNumber", "1")))
         
     # Get thumbnail
     @app.route('/scoreboard<scoreboardNumber>-get-thumbnail-<fileFormat>')
     def get_thumbnail(scoreboardNumber, fileFormat):
         if fileFormat.lower() in ["png", "jpg"]:
-            result = WebServer.actions.get_thumbnail(scoreboardNumber, fileFormat.lower())
+            result = WebServer._board_actions().get_thumbnail(scoreboardNumber, fileFormat.lower())
             if result:
                 return send_file(result, mimetype=f"image/{fileFormat.lower()}")
             else:
@@ -517,76 +539,76 @@ def _build_web_app():
     # Get the sets to be played
     @app.route('/get-sets')
     def get_sets():
-        return WebServer.actions.get_sets(request.args)
+        return WebOps.get_sets(request.args)
 
     @ws_on('get_sets')
     def ws_get_sets(message):
-        WebServer.ws_emit('get_sets', WebServer.actions.get_sets(orjson.loads(message)))
+        WebServer.ws_emit('get_sets', WebOps.get_sets(orjson.loads(message)))
         
     # Loads info on a match
     @app.route('/get-match-<setId>')
     def get_match(setId):
-        return WebServer.actions.get_match(setId)
+        return WebOps.get_match(setId)
 
     @ws_on('get_match')
     def ws_get_match(message):
         info = orjson.loads(message)
-        WebServer.ws_emit('get_match', WebServer.actions.get_match(info.get("setId")))
+        WebServer.ws_emit('get_match', WebOps.get_match(info.get("setId")))
 
     # Get the commentators
     @app.route('/get-comms')
     def get_comms():
-        return WebServer.actions.get_comms()
+        return WebOps.get_comms()
 
     @ws_on('get_comms')
     def ws_get_comms():
-        WebServer.ws_emit('get_comms', WebServer.actions.get_comms())
+        WebServer.ws_emit('get_comms', WebOps.get_comms())
 
     # Loads a set remotely by providing a set ID to pull from the data provider
     @app.route('/scoreboard<scoreboardNumber>-load-set')
     def load_set(scoreboardNumber):
         if request.args.get('no-mains') is not None:
-            return WebServer.actions.load_set(scoreboardNumber, request.args.get("set"), no_mains=True)
+            return WebServer._board_actions().load_set(scoreboardNumber, request.args.get("set"), no_mains=True)
         else:
-            return WebServer.actions.load_set(scoreboardNumber, request.args.get("set"))
+            return WebServer._board_actions().load_set(scoreboardNumber, request.args.get("set"))
 
     @ws_on('load_set')
     def ws_load_set(message):
         info = orjson.loads(message)
         if info.get('no-mains') is not None:
-            WebServer.ws_emit('load_set', WebServer.actions.load_set(
+            WebServer.ws_emit('load_set', WebServer._board_actions().load_set(
                 info.get("scoreboardNumber", "1"), info.get("set"), no_mains=True))
         else:
-            WebServer.ws_emit('load_set', WebServer.actions.load_set(
+            WebServer.ws_emit('load_set', WebServer._board_actions().load_set(
                 info.get("scoreboardNumber", "1"), info.get("set")))
 
     # Loads a set remotely by providing a set ID to pull from the data provider
     @app.route('/scoreboard<scoreboardNumber>-get-set')
     def get_set(scoreboardNumber):
-        return WebServer.actions.get_set(scoreboardNumber)
+        return WebOps.get_set(scoreboardNumber)
 
     @ws_on('get_set')
     def ws_get_set(message):
-        WebServer.ws_emit('get_set', WebServer.actions.get_set(
+        WebServer.ws_emit('get_set', WebOps.get_set(
             orjson.loads(message).get('scoreboardNumber', '1')))
         
     @app.route('/playerdb')
     def playerdb():
-        return WebServer.actions.get_playerdb()
+        return WebOps.get_playerdb()
 
-    # Stays on the class: Autona.py connects AutonaPlayerDB.signals.db_updated
-    # to self.webserver.ws_playerdb, i.e. by attribute on the instance.
+    # Stays on the class: bootstrap.wire_web_server connects
+    # AutonaPlayerDB.signals.db_updated to the instance's ws_playerdb.
     ws_on('playerdb')(WebServer.ws_playerdb)
 
 
     # Update bracket
     @app.route('/update-bracket')
     def update_bracket():
-        return WebServer.actions.update_bracket()
+        return WebServer._board_actions().update_bracket()
 
     @ws_on('update_bracket')
     def ws_update_bracket(message):
-        WebServer.ws_emit('update_bracket', WebServer.actions.update_bracket())
+        WebServer.ws_emit('update_bracket', WebServer._board_actions().update_bracket())
 
     # Load player from tag
     @app.route('/scoreboard<scoreboardNumber>-load-player-from-tag-<team>-<player>')
@@ -594,7 +616,7 @@ def _build_web_app():
         if request.args.get('tag') is None:
             return "No tag provided"
         no_mains = request.args.get('no-mains') is not None
-        return WebServer.actions.load_player_from_tag(scoreboardNumber, html.unescape(request.args.get('tag')), team, player, no_mains)
+        return WebServer._board_actions().load_player_from_tag(scoreboardNumber, html.unescape(request.args.get('tag')), team, player, no_mains)
 
     @ws_on('load_player_from_tag')
     def ws_load_player_from_tag(message):
@@ -606,7 +628,7 @@ def _build_web_app():
         team = args.get('team')
         player = args.get('player')
         scoreboardNumber = args.get('scoreboardNumber', '1')
-        WebServer.ws_emit('load_player_from_tag', WebServer.actions.load_player_from_tag(
+        WebServer.ws_emit('load_player_from_tag', WebServer._board_actions().load_player_from_tag(
             scoreboardNumber, html.unescape(args.get('tag')), team, player, no_mains))
 
     @app.route('/load-commentator-from-tag-<caster>')
@@ -614,7 +636,7 @@ def _build_web_app():
         if request.args.get('tag') is None:
             return "No tag provided"
         no_mains = request.args.get('no-mains') is not None
-        return WebServer.actions.load_commentator_from_tag(caster, html.unescape(request.args.get('tag')), no_mains)
+        return WebServer._board_actions().load_commentator_from_tag(caster, html.unescape(request.args.get('tag')), no_mains)
 
     @ws_on('load_commentator_from_tag')
     def ws_load_commentator_from_tag(message):
@@ -624,16 +646,16 @@ def _build_web_app():
             return
         no_mains = args.get('no-mains') is not None
         caster = args.get('commentator')
-        WebServer.ws_emit('load_commentator_from_tag', WebServer.actions.load_commentator_from_tag(caster, html.unescape(args.get('tag')), no_mains))
+        WebServer.ws_emit('load_commentator_from_tag', WebServer._board_actions().load_commentator_from_tag(caster, html.unescape(args.get('tag')), no_mains))
 
     # Update bracket
     @app.route('/set-tournament')
     def set_tournament():
-        return WebServer.actions.load_tournament(request.args.get('url'))
+        return WebOps.load_tournament(request.args.get('url'))
 
     @ws_on('set_tournament')
     def ws_set_tournament(message):
-        WebServer.ws_emit('set_tournament', WebServer.actions.load_tournament(request.args.get('url')))
+        WebServer.ws_emit('set_tournament', WebOps.load_tournament(request.args.get('url')))
 
     @app.route('/states')
     def get_states():
@@ -641,13 +663,13 @@ def _build_web_app():
         if not countryCode:
             abort(400, "countryCode not specified")
 
-        return WebServer.actions.get_states(countryCode)
+        return WebOps.get_states(countryCode)
 
 
     @ws_on('states')
     def ws_get_states(message):
         args = orjson.loads(message)
-        return WebServer.actions.get_states(args.get('countryCode', ''))
+        return WebOps.get_states(args.get('countryCode', ''))
 
     # ── Desktop Scoreboard Designer ────────────────────────────────
     # These endpoints are intentionally local-only and require the
@@ -853,9 +875,11 @@ class WebServer:
     # every existing caller once __init__ has run.
     app = None
     socketio = None
+    # The board-dependent operations (WebServerActions), handed in by the
+    # desktop shell; None in the headless shell (see _board_actions).
     actions = None
 
-    def __init__(self, parent=None, on_start_failed=None) -> None:
+    def __init__(self, on_start_failed=None, actions=None) -> None:
         self._on_start_failed = on_start_failed
         self._serve_lock = threading.Lock()
         self._server = None
@@ -869,13 +893,11 @@ class WebServer:
         if WebServer.app is None:
             WebServer.app, WebServer.socketio = _build_web_app()
 
-        # `parent` is the main window: WebServerActions reaches back through
-        # it to build the lazily-created panels an API call may need
-        # (startup Step 4b-2).
-        WebServer.actions = WebServerActions(
-            parent=parent,
-            scoreboard=AutonaScoreboardManager.instance,
-        )
+        # The desktop window builds its WebServerActions (bound to itself,
+        # for the lazily-built panels, and to the scoreboard dock) and hands
+        # it in; the headless shell has no widget to answer them and passes
+        # nothing (ADR-005 S3c). The server itself no longer knows the dock.
+        WebServer.actions = actions
 
         # Through the bridge rather than subscribing to the core channels
         # directly. Both handlers are plain functions, and PySide6 still
@@ -891,9 +913,10 @@ class WebServer:
             WebServer.ws_program_state)
 
         # External Control API (/api/v1/). Added as a thin Blueprint that
-        # reuses WebServer.actions; existing routes/events are untouched
-        # (ADR-001 D3 / .claude/design/external-control-api.md §9). Imported
-        # lazily here to keep singleton init order intact (agent-pitfalls #2).
+        # reuses the same operations (AutonaWebOperations) and board actions;
+        # existing routes/events are untouched (ADR-001 D3 /
+        # .claude/design/external-control-api.md §9). Imported lazily here to
+        # keep singleton init order intact (agent-pitfalls #2).
         from .AutonaApiV1 import api_v1, init_api_v1
         if "api_v1" not in WebServer.app.blueprints:
             WebServer.app.register_blueprint(api_v1)
@@ -1006,20 +1029,29 @@ class WebServer:
     # ── SocketIO handlers that are also referenced by name ───────────
     # These three are registered on the socketio server by _build_web_app(),
     # but they cannot live there as closures: each is additionally reached
-    # through a name -- WebServer.ws_program_state() internally, and
-    # self.webserver.ws_get_characters / .ws_playerdb from Autona.py, which
-    # connects them to Qt signals (GameChanged / db_updated). Keeping them as
-    # plain class-body functions preserves that access, including the bound
-    # call with the instance standing in for `message`.
+    # through a name -- WebServer.ws_program_state() internally and from the
+    # bridge, ws_get_characters from ws_game_changed below, and the
+    # instance's ws_playerdb, which bootstrap.wire_web_server connects to
+    # AutonaPlayerDB.signals.db_updated. Keeping them as plain class-body
+    # functions preserves that access, including the bound call with the
+    # instance standing in for `message`.
     def ws_program_state(message=None):
-        WebServer.ws_emit('program_state', WebServer.actions.program_state())
+        WebServer.ws_emit('program_state', WebOps.program_state())
 
     def ws_get_characters(message):
-        WebServer.ws_emit('characters', WebServer.actions.get_characters(), json=True)
+        WebServer.ws_emit('characters', WebOps.get_characters(), json=True)
+
+    def ws_game_changed(message=None):
+        """A game was loaded: every client gets the full state and the new
+        character list, in that order. What the shells connect their
+        game-change signal to (bootstrap.wire_web_server): the window's
+        GameChanged on the desktop, the headless loader's (ADR-005 S3c)."""
+        WebServer.ws_program_state()
+        WebServer.ws_get_characters(None)
 
     def ws_playerdb(message):
         logger.debug("Emitting playerdb info.")
-        data = WebServer.actions.get_playerdb()
+        data = WebOps.get_playerdb()
         if flask.has_request_context():
             # Asked for over Socket.IO: answered to the asker alone, whom
             # _ws_guard has already let through.
@@ -1044,6 +1076,41 @@ class WebServer:
             if 'json' in kwargs:
                 del kwargs['json']
             WebServer.socketio.emit(event, *args, **kwargs)
+
+    # ── Board-dependent operations (ADR-005 S3c) ─────────────────────
+
+    @staticmethod
+    def _board_actions():
+        """The board-dependent operations (WebServerActions), or
+        NotAvailable when this shell has no board / panel widget to run
+        them (headless) -- a 503 from the routes, the ack of an event."""
+        actions = WebServer.actions
+        if actions is None:
+            raise WebOps.NotAvailable()
+        return actions
+
+    @staticmethod
+    def UnavailableBody(error=None):
+        """The 503 body, in the /api/v1 error shape (WebAccess.ErrorBody)."""
+        message = getattr(error, "message", None) or WebOps.NOT_AVAILABLE_MESSAGE
+        return {"ok": False,
+                "error": {"code": "UNAVAILABLE", "message": message}}
+
+    @staticmethod
+    def _ws_unavailable(event, handler):
+        """``handler`` answering NotAvailable with the 503 body as the
+        event's ack (ws_on) -- python-socketio sends a handler's return
+        value to the client's callback, as for _ws_guard's refusals."""
+        @functools.wraps(handler)
+        def served(*args):
+            try:
+                return handler(*args)
+            except WebOps.NotAvailable as error:
+                logger.debug(
+                    f"webserver: Socket.IO event {event!r} is not available "
+                    "in this shell")
+                return WebServer.UnavailableBody(error)
+        return served
 
     # ── Access guard (ADR-005 S3a) ───────────────────────────────────
     # The policy is src/core/WebAccess.py; these only feed it the request.
@@ -1357,7 +1424,8 @@ class WebServer:
 # upstream now by the single-instance mutex in main.py (startup Step 1), so
 # what is left to detect here is a *foreign* listener on our port. The check
 # runs from Window._StartWebServer(), i.e. after the window is on screen
-# (startup Step 4c) — not during startup as it originally did.
+# (startup Step 4c) — not during startup as it originally did. The headless
+# shell runs the same probe and only logs it (log_webserver_port).
 
 def _port_is_free(port: int, host: str) -> bool:
     """True when we can bind `host:port` ourselves right now.
@@ -1526,4 +1594,30 @@ def check_webserver_port(port: int, parent=None, host: str = "127.0.0.1") -> boo
             "Failed to free port {port}. Please terminate the conflicting process manually.",
         ).replace("{port}", str(port)),
     )
+    return False
+
+
+def log_webserver_port(port: int, host: str = "127.0.0.1") -> bool:
+    """The headless shell's port check (ADR-005 S3c): the probe
+    check_webserver_port() runs, reported to the log instead of a dialog.
+
+    Nothing is terminated -- there is nobody to ask -- and the server is
+    started either way, as on the desktop (a real bind failure is reported
+    through its start-failure callback). Returns True when the port is free
+    or no other listener holds it.
+    """
+    if _port_is_free(port, host):
+        return True
+
+    conflicts = _netstat_listeners(port)
+    if not conflicts:
+        logger.warning(
+            f"Port {port} could not be bound but no listening process was found")
+        return True
+
+    details = ', '.join(f"{pid} ({_process_name(pid)})" for pid in sorted(conflicts))
+    logger.warning(
+        f"Port {port} already held by PIDs: {details}. Windows may route "
+        "connections to that process instead of this one; stop it, or change "
+        "general.webserver_port in user_data/settings.json and restart.")
     return False

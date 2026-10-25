@@ -17,8 +17,13 @@ Two stages (ADR-005 S3c):
   serves. The headless shell (main.py --headless) stops here.
 - bootstrap_gui(): the desktop shell's Qt adapters on top of it -- the
   hotkeys, the game asset / country models, the player DB model wiring, the
-  alert and updater objects and the scoreboard dock. src/Autona.py runs both,
-  in that order, before the Window is built.
+  alert and updater objects and the scoreboard dock, and the registrations
+  that make the web operations run through that dock. src/Autona.py runs
+  both, in that order, before the Window is built.
+
+Below them, the wiring both shells make once their own pieces exist
+(wire_tournament_data / wire_web_server): the window and src/headless.py
+call the same functions, so the two cannot drift apart.
 
 Rules for editing this file:
 
@@ -79,8 +84,9 @@ def bootstrap_core():
     # only fill class attributes. They are placed this early because the
     # data is read from all over the widget tree at runtime and there is no
     # reason to make later steps care about the ordering. (The per-run
-    # locale itself -- LoadLocale/LoadRoundNames -- still runs from
-    # Window.__init__: it needs a QGuiApplication for the QTranslator.)
+    # locale itself -- LoadLocale/LoadRoundNames -- is the shell's:
+    # Window.__init__ or src/headless.py. Its QTranslator is QtCore, so it
+    # only needs the application object, of either kind.)
     from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
     AutonaLocaleHelper.Initialize()
 
@@ -278,7 +284,13 @@ def bootstrap_gui():
     # including TournamentDataProvider and StartGGDataProvider, which both do.
     # PlayerDB is a static class, so there is no instance to create here, only
     # this wiring.
+    # ORDER CONSTRAINT: the model (QStandardItemModel + QIcons, i.e. QtGui)
+    # is the desktop's, so it is switched on here, before the first
+    # SetupModel() -- the window's LoadDB(). Without it SetupModel only emits
+    # db_updated: the headless shell, where a start.gg entrants fetch still
+    # updates the DB from a worker thread (ADR-005 S3c).
     from .AutonaPlayerDB import AutonaPlayerDB
+    AutonaPlayerDB.EnableModel()
     AutonaGameAssetManager.instance.signals.onLoad.connect(
         AutonaPlayerDB.SetupModel)
 
@@ -326,4 +338,73 @@ def bootstrap_gui():
     if AutonaScoreboardManager.instance is None:
         AutonaScoreboardManager.instance = AutonaScoreboardManager()
 
+    # ORDER CONSTRAINT: the web operations' desktop registrations, after the
+    # two objects they point at (the scoreboard dock and the asset adapter,
+    # both above). The S2 operations run through the dock -- the board built
+    # first and held for 反映, on the GUI thread, the field being typed in
+    # committed, the crew board's own operations -- and a game is loaded
+    # through the adapter, so its Qt models follow. The defaults are the
+    # headless shell's (no board; no loader until it registers its own).
+    # Before the web server exists (Window._StartWebServer), so no request
+    # can reach the defaults on the desktop (ADR-005 S3c).
+    from . import AutonaWebOperations
+    AutonaWebOperations.boardHost = AutonaWebOperations.DesktopBoardHost(
+        AutonaScoreboardManager.instance)
+    AutonaWebOperations.loadGameByCodename = (
+        AutonaGameAssetManager.instance.LoadGameByCodename)
+
     logger.debug("bootstrap_gui complete")
+
+
+def wire_tournament_data(on_failure=None):
+    """Connect the tournament provider to the state, as both shells need it.
+
+    - tournament_data_updated -> TournamentInfoService.ApplyProviderPayload,
+      the tournamentInfo.* writer. `on_failure(data)` is called when a
+      payload did not apply: the desktop shows a dialog, the headless shell
+      logs. The caller decides where in its own wiring this goes -- the
+      window connects the readers of tournamentInfo.* after it.
+    - tournament_url_update with an empty URL (the tournament was unset) ->
+      GameAssetCatalog.ForgetSelection: the game stays loaded, but is no
+      longer the selected one, so selecting it again loads it again.
+
+    Was the window's alone until ADR-005 S3c; the headless shell has the
+    same provider and needs the same writes. Call once, after
+    bootstrap_core().
+    """
+    from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
+    from .core.GameAssetCatalog import GameAssetCatalog
+    from .core.TournamentInfoService import TournamentInfoService
+
+    def apply(data):
+        if TournamentInfoService.instance.ApplyProviderPayload(data):
+            return
+        if on_failure is not None:
+            on_failure(data)
+
+    def forget_cleared(url):
+        if url == "":
+            GameAssetCatalog.instance.ForgetSelection()
+
+    signals = AutonaTournamentDataProvider.instance.signals
+    signals.tournament_data_updated.connect(apply)
+    signals.tournament_url_update.connect(forget_cleared)
+
+
+def wire_web_server(webserver, game_changed):
+    """Connect what the web server pushes on its own, as both shells need it.
+
+    - `game_changed` (a Qt signal: the window's GameChanged, the headless
+      loader's) -> webserver.ws_game_changed: the full state and the new
+      character list to every client.
+    - AutonaPlayerDB.signals.db_updated -> webserver.ws_playerdb: the player
+      DB to the connections allowed to read it.
+
+    Connected after the server exists, i.e. after LoadDB(): nothing is lost,
+    clients pull both on (re)connect. Was the window's alone until ADR-005
+    S3c.
+    """
+    from .AutonaPlayerDB import AutonaPlayerDB
+
+    game_changed.connect(webserver.ws_game_changed)
+    AutonaPlayerDB.signals.db_updated.connect(webserver.ws_playerdb)

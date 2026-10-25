@@ -543,7 +543,7 @@ GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src
   `match_en`（同じラウンド名の英語版。YouTube タイトルが読む）もキーがある board なら空にする。
   combo は `_SyncSetFields` が state から描画する
 - リセット全経路が `ResetMatch` を通る: すべての入力値をリセット（`ResetAllInputs`）/
-  `WebServerActions.reset_match` / `clear_all`（legacy REST・Socket.IO・`/api/v1 :reset-match`・
+  `AutonaWebOperations.reset_match` / `clear_all`（legacy REST・Socket.IO・`/api/v1 :reset-match`・
   `:clear` はすべてここへ委譲）。board 3 も同名の `AutonaCrewBattleWidget.ResetMatch` で
   match バーを消す（`match_en` は作らない）
 - スコアだけのリセット（スコアリセット ボタン / `reset_scores` / `Ctrl+Shift+R` /

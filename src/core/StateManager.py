@@ -250,6 +250,31 @@ class StateManager:
                 thread.join(max(0.0, deadline - time.monotonic()))
         return not any(t.is_alive() for t in threads)
 
+    @staticmethod
+    def JoinExports(timeout=None):
+        """Wait until the export writer has written every save cycle queued
+        so far; True if it did.
+
+        The interpreter's shutdown join does this for a process that exits
+        normally. A shell that is ended from outside once its handler
+        returns -- the headless shell on a console close (ADR-005 S3c) --
+        calls it first. A writer started while waiting is waited for too.
+        `timeout` is the total budget.
+        """
+        deadline = None if timeout is None else time.monotonic() + timeout
+        previous = None
+        while True:
+            thread = StateManager._export_thread
+            if thread is None or thread is previous:
+                return True
+            if deadline is None:
+                thread.join()
+            else:
+                thread.join(max(0.0, deadline - time.monotonic()))
+            if thread.is_alive():
+                return False
+            previous = thread
+
     @contextlib.contextmanager
     def SaveBlock():
         StateManager.BlockSaving()

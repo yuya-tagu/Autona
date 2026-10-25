@@ -500,7 +500,7 @@ def _clearSteps(board, app):
     something for each of them to empty -- ids, a city, an online avatar,
     notes, regions, variants, mains, seeds, team names and a crest, a match
     bar, the game tracker on -- refilled in between."""
-    actions = app.actions()
+    actions = app.web()
     return [
         ("two players, two characters", lambda: (
             board.playerNumber.setValue(2), board.charNumber.setValue(2))),
@@ -590,7 +590,7 @@ def _singlesClearSteps(board, app):
     """The clears of `_clearSteps` on the singles board (board 1, the
     shipped default): one player a side, no team names, the LOSERS boxes
     on the players' detail rows."""
-    actions = app.actions()
+    actions = app.web()
     number = board.scoreboardNumber
     return [
         ("two characters", lambda: board.charNumber.setValue(2)),
@@ -1287,7 +1287,7 @@ def _bestOfSteps(board, app, client):
     query string), /api/v1's PATCH set, a game load, the Web's resets and
     the reset-all button -- with game results recorded in between, so that
     a step that rebuilt the rows (or did not) shows."""
-    actions = app.actions()
+    actions = app.web()
     number = board.scoreboardNumber
 
     def spin(value):
@@ -1413,7 +1413,7 @@ def test_best_of_operations_on_an_unbuilt_board_publish_the_recorded_state(
     反映), so the state, the cycles and what is published while it is
     built and then on 反映 are the old ones."""
     slotEnv("tgame")
-    actions = autonaApp.actions()
+    actions = autonaApp.web()
     steps = [
         ("web best of on an unbuilt team board", 2,
          lambda: _withTracker(lambda: actions.set_route(2, bestOf=5))),
@@ -2124,7 +2124,7 @@ def _swapFrom(entry, board, app):
                           return_value=BOARD):
             AutonaHotkeys.signals.swap_teams.emit()
     else:
-        assert app.actions().swap_teams(BOARD) == "OK"
+        assert app.web().swap_teams(BOARD) == "OK"
 
 
 @pytest.mark.parametrize("entry", ["button", "hotkey", "web"])
@@ -2247,13 +2247,13 @@ def _clearFrom(entry, board, app):
     elif entry == "reset all inputs":
         _confirmed(board.ResetAllInputs)
     elif entry == "web reset players":
-        assert app.actions().reset_players(BOARD) == "OK"
+        assert app.web().reset_players(BOARD) == "OK"
     elif entry == "follow a set":
         # The set load's pre-pass: the focus leaves the board's field here
         # too, whenever the set followed changes (ADR-005 S2d review).
         _follow(board, "999", True)
     else:
-        assert app.actions().clear_all(BOARD) == "OK"
+        assert app.web().clear_all(BOARD) == "OK"
 
 
 @pytest.mark.parametrize("entry", [
@@ -2318,7 +2318,7 @@ def test_a_web_team_name_survives_leaving_the_field(
         QTest.keyClicks(edit, "Typed")
         assert autonaApp.get(key) == "", "typing committed by itself"
 
-        assert autonaApp.actions().set_route(
+        assert autonaApp.web().set_route(
             BOARD, team="1", teamName="Alpha") == "OK"
         autonaApp.settle()
         assert autonaApp.get(key) == "Alpha"
@@ -2348,7 +2348,7 @@ def test_typing_after_a_web_team_name_wins(teamBoard, autonaApp, teamLogo):
 
     with _onScreen(board, autonaApp):
         _focus(edit, autonaApp)
-        autonaApp.actions().set_route(BOARD, team="1", teamName="Alpha")
+        autonaApp.web().set_route(BOARD, team="1", teamName="Alpha")
         autonaApp.settle()
         assert autonaApp.get(key) == "Alpha"
         assert edit.text() == ""
@@ -2380,7 +2380,7 @@ def test_a_web_best_of_shows_once_the_operator_leaves_the_spinbox(
         autonaApp.settle()
         assert autonaApp.get(key) == 1 and spin.value() == 1
 
-        _withTracker(lambda: autonaApp.actions().set_route(BOARD, bestOf=5))
+        _withTracker(lambda: autonaApp.web().set_route(BOARD, bestOf=5))
         autonaApp.settle()
         assert autonaApp.get(key) == 5
         # Not changed under the operator's hands; the rows are the state's.
@@ -2417,7 +2417,7 @@ def test_return_in_the_spinbox_keeps_a_web_best_of_held_back(
         autonaApp.settle()
         assert autonaApp.get(key) == 1
 
-        autonaApp.actions().set_route(BOARD, bestOf=5)
+        autonaApp.web().set_route(BOARD, bestOf=5)
         autonaApp.settle()
         assert spin.value() == 1
 
@@ -2437,10 +2437,10 @@ def test_return_in_the_spinbox_keeps_a_web_best_of_held_back(
         assert board._heldBackBestOf is None
 
         # A value the operator does choose while held back is theirs.
-        autonaApp.actions().set_route(BOARD, bestOf=3)
+        autonaApp.web().set_route(BOARD, bestOf=3)
         autonaApp.settle()
         _focus(spin, autonaApp)
-        autonaApp.actions().set_route(BOARD, bestOf=7)
+        autonaApp.web().set_route(BOARD, bestOf=7)
         autonaApp.settle()
         assert spin.value() == 3 and board._heldBackBestOf == 3
         QTest.keyClick(spin, Qt.Key.Key_Up)

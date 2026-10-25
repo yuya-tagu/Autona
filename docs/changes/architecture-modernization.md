@@ -1428,3 +1428,119 @@ S3c（ヘッドレス起動）を 2 つの PR に分けた（指示書の規模�
   - 大会 URL を設定するとゲームが自動で切り替わる（provider → アダプタの結線）。ゲームを追加して再スキャンした後も、大会のゲームが選ばれたまま
   - ホットキー（スコア +/-、反映）が今までどおり効く
   - 他のプロセスが使っているポートを設定したときの警告ダイアログ（ポート衝突）が今までどおり出る
+
+#### S3c-2 ヘッドレス起動（`main.py --headless`）（2026-10-26・PR 未作成）
+
+S3c の後半。ウィンドウを出さずに state・大会データ・Web サーバーを動かす `python main.py --headless` を足した。Web の操作をデスクトップとヘッドレスで同じ関数に通し（`src/AutonaWebOperations.py`）、ボードやパネルのウィジェットが要る操作だけを `WebServerActions` に残した。ヘッドレスでは残りが 503 を返す。S3c-1 のレビューで出た前提 3 点（PlayerDB の Qt モデル・`WebServer.__init__` のスコアボード・ヘッドレスのゲーム選択関数）もここで片付けた。
+
+- **実装**
+  - `main.py`
+    - `--headless`（`sys.argv` に含まれるか）。単一インスタンスの判定はデスクトップと共通（同時に起動させない）
+    - ヘッドレスが 2 つ目の起動なら、エラー出力に `Autona is already running ...` を出して終了コード 1。デスクトップ版の 2 つ目は従来どおり既存ウィンドウを前面化して 0
+    - IPC サーバー（`_start_ipc_server(on_activate)`）を分岐の手前に移し、前面化の処理をシェルが渡す形にした。ヘッドレスは「他の起動を断った」とログに出すだけ
+    - ヘッドレスの分岐: QCoreApplication → IPC サーバー → `src.headless.run(App)` → その戻り値で `sys.exit`。スプラッシュ・QApplication・qasync・AppID ショートカットは通らない
+    - `AUTONA_INSTANCE_TAG` 環境変数: mutex と IPC の名前に付ける接尾辞。スモークテストが、開発者の起動中の Autona と衝突せずに（2 つ目扱いにも、前面化の送信元にもならずに）ヘッドレスを起動するため。運用の機能ではない（コメントに明記）。ソースからの起動でだけ読み（`Autona.exe` は読まない）、英数字とハイフン以外を含む値は warning を出して無視する（`src/headless.py` の `instance_tag`）
+    - `Autona.exe --headless`（frozen）は起動を拒否する。コンソールが無いのでメッセージボックス（`MessageBoxW`）で「exe はヘッドレス非対応、`python main.py --headless` を使う」と伝えて終了コード 1。単一インスタンスの判定（mutex）より前で終わる（`refuse_frozen_headless`）
+  - `src/headless.py`（新規。import の副作用ゼロ）
+    - `Assemble(app)`: GuiExecutor → `bootstrap_core()` → `LoadLocale` / `LoadRoundNames` → `out/`・`user_data/games`・`layout/logo.png` の用意（Window と同じ）→ `CountryCatalog.Load()` 直 → 1 保存サイクルで `ResetScoreRoot` + `SeedBoard(1..3)` + `SeedPanelState` + `TournamentInfoService.Seed` + `SeedColorState` → ゲームの選択関数とローダーの登録 → `wire_tournament_data` → `LoadDB` → `WebServer(actions=None)` + `wire_web_server` → 大会 URL の復元（`provider.UiMounted()`）→ ゲームのスキャン（`HeadlessGames.Start()`）→ LAN 公開の案内とポートの確認をログに → `webserver.start()`
+    - `HeadlessGames`: `GameAssetCatalog` を直接使うゲームのローダー（Qt モデルなし）。アダプタ（`AutonaGameAssetManager`）と同じ順で動く: 起動時の start.gg キャラ表の更新とスキャン → スキャンのたびに provider のゲームを適用し直す（`SetGameFromProvider`）→ 初回だけ前回のゲーム（`SELECTED_GAME_CODENAME`）を復元。ロードは専用スレッドで 1 つずつ（`ReloadStartGGCharacters` → `SaveBlock` 内で `SelectGame`）、`done=` は成否を問わず 1 回。ロード後はメインスレッドで選択を保存し、`gameChanged` を出す（Web サーバーの push と PlayerDB の更新が受ける）
+    - 登録: `provider.selectGameFromStartGGId = games.SelectGameFromStartGGId`、`AutonaWebOperations.loadGameByCodename = games.LoadGameByCodename`
+    - Web サーバーが起動できなければ（bind 失敗）エラーをログに出して終了コード 1（`app.exit(1)`）
+    - 停止: Windows は `SetConsoleCtrlHandler`（Ctrl+C・Ctrl+Break・閉じるボタン・ログオフ・シャットダウン）。閉じるボタン等は、ハンドラが戻るとプロセスが終わるため、停止処理の完了を最大 4.5 秒待ってから戻る。併せて Python の `SIGINT` / `SIGTERM` / `SIGBREAK` ハンドラと、それを動かすための 250 ms のタイマー
+    - 停止ハンドラは組み立て（`Assemble`）の**前**に入れる。組み立て中に来た停止要求は `HeadlessShell.stopRequested` に残り、組み立てが終わったらイベントループを回さずに同じ停止処理へ進む（Windows の既定動作で組み立て途中のまま終わらない）。イベントループの終了は `QMetaObject.invokeMethod(app, "quit", QueuedConnection)`（メインスレッドからでも queued。ループ開始前の直接の `quit()` は捨てられるため）
+    - `Shutdown()`: `webserver.stop(2.0)` → `StateManager.JoinExports(10)`（`out/`）→ `StatePersistence.Flush(10)`（`user_data/state.json`）→ コンソール制御ハンドラの登録解除（`SetConsoleCtrlHandler(routine, False)`）→ 完了イベント。Web サーバーを作る前の停止でも書き出しは行う
+    - ログ: コンソール（INFO 以上。ヘッドレスでは運用者が見る唯一の画面のため）・`logs/autona.log`・`logs/tsh-error.log`・`logs/tsh-crash.log`（faulthandler）
+  - `src/AutonaWebOperations.py`（新規）: Web の操作のうち、ボードのウィジェットが要らないもの（モジュール関数）
+    - core 直結: `program_state` / `team_scoreup` / `team_scoredown` / `team_color` / `set_display_option` / `set_scores` / `apply_changes` / `get_games` / `get_current_game` / `get_match_names` / `get_characters` / `get_variants` / `get_comms` / `get_states` / `get_sets` / `get_match` / `get_playerdb` / `load_tournament` / `set_game` / `load_game`（新規。v1 `game` が使う）
+    - S2 で core 化した操作: `set_route`（+ `_apply_set_fields`）/ `set_team_losers` / `swap_teams` / `get_swap` / `get_scoreboard` / `reset_scores` / `reset_match`（旧 `_reset_best_of` は `_reset_match` に統合）/ `reset_players` / `clear_all` / `get_set`
+    - ボードの周りの仕事はシェルが登録する `boardHost` が受け持つ。`BoardHost`（既定 = ヘッドレス）: 呼び出し元のスレッドで、1 本の再入可能ロック（`RLock`）の下で 1 つずつ実行・何も構築しない・ウィジェットが要るもの（board 3 の操作・人数 / キャラ数）は `NotAvailable`。`DesktopBoardHost`（`bootstrap_gui()` が登録）: GUI スレッドで同期実行・未構築ボードを構築・入力中の欄の確定・board 3 はウィジェットへ・`CommandClearAll`・人数 / キャラ数を 1 に・最後に読んだセット
+    - `NotAvailable`（message `not available in headless`）
+  - `src/AutonaWebServerActions.py`: ボード依存の操作だけに縮めた（下の表）。werkzeug のアクセスログ抑制は `AutonaWebServer.py` へ移した（ヘッドレスはこのモジュールを import しないため）
+  - `src/AutonaWebServer.py`
+    - ルートと Socket.IO イベントは `WebOps.*` か `WebServer._board_actions().*` を呼ぶ。`_board_actions()` は `WebServer.actions` が None なら `NotAvailable`
+    - 503: legacy は `@app.errorhandler(NotAvailable)`、Socket.IO は `ws_on` が全ハンドラを `_ws_unavailable` で包んで ack に本文を返す。本文は v1 のエラー形 `{"ok": false, "error": {"code": "UNAVAILABLE", "message": "not available in headless"}}`
+    - `WebServer(on_start_failed=None, actions=None)`: `parent` 引数を削除し、ボード依存の操作はシェルが渡す（前提 2。サーバーはスコアボードを知らなくなった）
+    - `ws_game_changed()`（新規）: `ws_program_state` + `ws_get_characters` をまとめたもの（`GameChanged` の受け口）
+    - `log_webserver_port(port, host)`（新規）: `check_webserver_port` と同じ確認をして、ダイアログの代わりにログに出す（何も終了させない）
+  - `src/AutonaApiV1.py`
+    - `UNAVAILABLE`（503）を追加。`api_handler` / `write_op` が `NotAvailable` をこのコードに変える（操作ログにも残る）
+    - `_actions_ref()`: `init_api_v1(None)` 後（= ヘッドレス）は `NotAvailable`、初期化前は従来どおり `NOT_READY`
+    - core の操作は `WebOps` を呼ぶ。`PATCH set` は 1 つのタスクを `WebOps.boardHost.Run` で実行。`game` は `WebOps.load_game`。`bracket:refresh` は provider の確認より先にボード依存の確認をする
+  - `src/bootstrap.py`
+    - `bootstrap_gui()`: `AutonaPlayerDB.EnableModel()`（`SetupModel` の結線の前）。最後に `AutonaWebOperations.boardHost = DesktopBoardHost(AutonaScoreboardManager.instance)` と `loadGameByCodename = AutonaGameAssetManager.instance.LoadGameByCodename`
+    - `wire_tournament_data(on_failure)`（新規）: `tournament_data_updated` → `TournamentInfoService.ApplyProviderPayload`（失敗時 `on_failure`）、`tournament_url_update("")` → `GameAssetCatalog.ForgetSelection`
+    - `wire_web_server(webserver, game_changed)`（新規）: `game_changed` → `ws_game_changed`、`db_updated` → `ws_playerdb`
+  - `src/Autona.py`: 上の 2 つの結線関数を呼ぶ（Window の `_OnTournamentDataUpdated` は失敗ダイアログだけの `_ReportTournamentLoadFailure` に、`Signal_GameChange` からは `ForgetSelection` を外した）。`WebServer(..., actions=WebServerActions(parent=self, scoreboard=...))`
+  - `src/AutonaPlayerDB.py`（前提 1）: `modelEnabled`（既定 False）と `EnableModel()`。`SetupModel()` はモデルが無効なら `db_updated` を出すだけ。モデルの構築は `_BuildModel()` に分けた。start.gg の entrants 取得はヘッドレスでも DB を更新し、`SetupModel()`（GUI スレッドへ marshal）で QtGui を作らない
+  - `src/core/TournamentInfoService.py`: `ApplyProviderPayload(data)`（ペイロードの適用 + 表示大会名の上書き。2 つのシェルが同じ順で呼ぶ）
+  - `src/core/StateManager.py`: `JoinExports(timeout)`（それまでに積まれた `out/` の書き出しを待つ。閉じるボタンで外から終わらされるヘッドレスが使う）
+  - `src/Helpers/AutonaLocaleHelper.py`: `LoadLocale` の翻訳の差し替えを `QCoreApplication` の static で行う（QTranslator は QtCore。ヘッドレスでも同じ経路）
+  - `src/AutonaApiInfoWindow.py`: エラーコードの凡例に `UNAVAILABLE` を足した
+  - コメント追従: `src/AutonaCrewBattleWidget.py`、`src/core/SetLoadService.py`
+- **ヘッドレスで動くもの / 503 になるもの**
+
+  | 区分 | 操作（legacy / Socket.IO / v1） | ヘッドレス |
+  |---|---|---|
+  | 表示 | OBS オーバーレイ・`/web`・`out/` の出力・Socket.IO の state / delta 配信・state / カタログ / 選手 DB の読み取り | 動く |
+  | core 直結 | スコア ±・スコアの設定・スコアリセット（board 1/2）・反映・チームカラー・表示トグル・ゲームの一覧 / 切り替え・国 / 地域・セット一覧 / 詳細・大会 URL | 動く（即時公開） |
+  | S2 の操作（board 1/2） | swap（`get_swap` 含む）・リセット / クリア（選手の中身を空にする）・best of・phase / pool / match・LOSERS・チーム名・`PATCH set`・`get_scoreboard`・`get_set`（常に `"0"`） | 動く（即時公開） |
+  | ウィジェットが要る S2 の部分（legacy / Socket.IO） | クルーボード（board 3）の swap / `get_swap` / リセット / クリア / set フィールド、`set_route` の `players` / `characters`（人数・キャラ数） | 503（何も書かない） |
+  | ボード依存（`WebServerActions`） | 選手の編集（`update-team`・`PATCH players`）・`POST /score`（と Socket.IO の `score`）・セット選択 / 読込 / 次のセット（`open-set`・`load-set`・`pull-stream`）・統計（各 `stats-*`・`stats:refresh`）・サムネイル・Top 8 の取り込み（`update-bracket`・`bracket:refresh`）・実況の更新・タグからの選手 / 実況者の読込（`load-player-from-tag`・`load-commentator-from-tag`）・クルーのストック / アクティブ | 503 |
+
+  v1 のクルーボード（board 3）への書き込みは、起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（v1 の初期範囲外。変更なし）。上の表の「クルーボードの 503」は legacy ルートと Socket.IO だけの話。v1 の `PATCH set` の `players` / `characters` はボード 1/2 宛てなので、ヘッドレスでは 503 `UNAVAILABLE` になる
+
+- **`WebServerActions` に残したもの（ボード依存・S3e で廃止）**: `post_score` / `crew_member_stock` / `crew_set_active` / `set_team_data` / `update_player` / `set_commentary_data` / `open_sets` / `pull_stream_set` / `stats_recent_sets` / `stats_upset_factor` / `stats_last_sets` / `stats_history_sets` / `refresh_stats` / `get_thumbnail` / `update_bracket` / `load_set` / `load_player_from_tag` / `load_commentator_from_tag`（公開 18 本）と `_ensure_panel`。設計時の見積り「残る 26 本」はルート単位の数え方で、メソッドでは 18 本（同じ操作を受けるルート / イベントが複数ある）
+- **判断と理由**
+  1. **Web の操作は 2 つのシェルで同じ関数を通し、違いは 1 つのオブジェクト（ボードホスト）に閉じ込めた**
+     - S2 の操作は core の呼び出し自体は同じで、デスクトップが周りに足すもの（GUI スレッド・未構築ボードの構築・入力中の欄の確定・クルーボード）だけが違う。操作ごとに `if headless` を書くと 2 つの経路がずれていくので、その差をホストの 6 メソッドに集めた
+     - `tests/test_web_operations.py` が、10 種の操作で「デスクトップ（ボード構築・held）とヘッドレス（ボードなし・即時公開）が同じ値を書く」ことを確かめる
+  2. **503 の本文は v1 のエラー形に揃えた**（legacy / Socket.IO / v1 で同じ）。S3a の拒否（401 / 403）と同じ形なので、クライアントは 1 つの形だけを見ればよい
+  3. **`players_per_team` と `RepublishBestOf` はヘッドレスでは要らない**
+     - デスクトップはゲームのロード時に、ボードがゲームの既定の人数を適用し、best of の文言を新しいロケールで出し直す（S2g / S2e。構築済みボードの反応）
+     - ヘッドレスにはボードが無く、人数はボードのスピンボックスにしか無い（S2g で core 化するまで、ヘッドレスは人数を変えない）。best of の文言はゲームではなく起動時のロケールで決まり、ヘッドレス中にロケールは変わらない。行（`stages`）のリセットはトラッカー（ボードが登録する）の仕事で、ヘッドレスには行が無い
+  4. **ヘッドレスの `clear_all` は人数・キャラ数を変えない**（ボードが無い。S2g）。チーム名は従来どおり残す
+  5. **ヘッドレスの選手 DB は mains の正規化をしない**。デスクトップはモデルの構築のついでに、ロード中のゲームの mains を 3 要素に揃えて DB に書き戻している（QtGui の構築の中にある）。ヘッドレスでは `/playerdb` が保存されたままの mains を返す
+  6. **`set_route` の `players` / `characters` はヘッドレスでは最初に断る**（他のフィールドを書く前に 503）。一部だけ書いて 503 を返すと、クライアントからは何が適用されたか分からないため
+  7. **`get_set` はヘッドレスでは常に `"0"`**（読み込んだセットが無い = 旧実装の「無し」の答え）。クルーボードも同じ（デスクトップのクルーボードは `setLoad` が無く例外になるが、ヘッドレスでは聞く相手がいない）
+  8. **LAN 公開とポートは設定値で決め、ログに出すだけにした**（設計どおり）。`general.webserver_listen_lan` が未設定ならこの PC のみで待ち受け、案内をログに出す。Web サーバーが起動できなければ終了コード 1 で終わる（待ち受けていないのに単一インスタンスのロックを握り続けるのを避ける）
+  9. **ヘッドレスの 2 つ目の起動は終了コード 1**。デスクトップ版は 2 つ目を黙って前面化で済ませるが、ヘッドレスを起動したスクリプトやサービスには「起動しなかった」が伝わる必要がある
+  10. **`load_tournament` の死にコード（結果を使っていない `QRegularExpression` のループ）を削除した**。core 直結の関数に移すにあたって QtCore への依存だけが残るため
+  11. **大会 URL を消したときの `ForgetSelection` は共通の結線（`wire_tournament_data`）に移した**。Window の `Signal_GameChange` はゲームボタンの表示だけを戻す。接続順は Window の読み手より前のまま
+  12. **ヘッドレスの S2 の操作は 1 本のロックで直列化した**（S3c-2 レビュー）。デスクトップは GUI スレッドに並べるので、`clear_all`（4 保存サイクル）や v1 の `PATCH set`（1 タスクで最大 3 呼び出し）の途中に別の要求のボード操作が入らない。ヘッドレスはリクエストのスレッドで直接走るので、ロックが無いと混ざる。`RLock` にしたのは、`PATCH set` のタスクがその中で `set_route` を呼び、`set_route` も `Run` を通るため。ロックを取るのは Web のリクエストのスレッドだけで、`StateManager.lock` を持ったまま取る経路も、ロックの中でメインスレッドを待つ経路も無い（ヘッドレスでは何もメインスレッドへ marshal しない）ので、常に一番外側のロックでデッドロックしない。core 直結の書き込み（`score:adjust`・色）はボード操作ではないので、両シェルとも従来どおり途中に入りうる
+  13. **`Autona.exe --headless` は拒否し、mutex を取る前に終わる**（S3c-2 レビュー）。exe は GUI サブシステムでコンソールが無く、黙って起動するとログも停止手段も無いプロセスが mutex を握り、後からダブルクリックした GUI が「2 つ目の起動」として無言で終わる。メッセージボックスで伝えるだけにした
+  14. **`AUTONA_INSTANCE_TAG` はソースからの起動でだけ読み、英数字とハイフンに限った**（S3c-2 レビュー）。配布版に環境変数が残っていても、インストール済みの Autona が 2 つ目を通すことがないように。値は mutex 名とパイプ名の一部になるので文字を絞る
+  15. **停止ハンドラは組み立ての前に入れた**（S3c-2 レビュー）。組み立て中の Ctrl+Break を、Windows の既定動作（その場で終了）ではなく、組み立て後の同じ停止処理（書き出しを待つ）で受けるため
+- **外部から見える変化**
+  - `python main.py --headless` が使えるようになった（運用手順は [runtime-operations.md](../operations/runtime-operations.md) の「ヘッドレス起動」）
+  - デスクトップ版の挙動・Web の契約は変わらない。v1 に `UNAVAILABLE`（503）が増えたが、デスクトップ版では返らない
+  - Window の大会読込失敗のダイアログ・ゲームボタンのリセットは従来どおり
+  - v1 の `GET /scoreboards/3` の `swapped` は、ヘッドレスでは返らない（キーが無い。デスクトップはクルーウィジェットのフラグを返す）。ボード 1/2 はどちらのシェルでも state の `score.{n}.teamsSwapped` を返す（受容。`external-control-api.md` §5）
+- **pin**
+  - `tests/test_web_operations.py`（新規・38 件）: 2 つのホストが同じ state を書く（10 操作。デスクトップ側は反映待ちになる）。ヘッドレスの書き込みが即時公開・選手のクリア・`get_set` が `"0"`・ウィジェットが要る操作（9 種）が `NotAvailable` で何も書かない。legacy ルートの 503・Socket.IO の ack・v1 の `UNAVAILABLE`（`bracket:refresh` / `:load-set` / `:pull-stream` / `stats:refresh` / `PATCH players`）・`_board_actions()`。Web 操作自身が投げる `NotAvailable`（クルーボードの swap / `get_swap`・人数）も legacy は 503、Socket.IO は ack。ヘッドレスのボードホストが 1 つずつ実行する（入れ子は再入できる）・`clear_all` の途中に来た swap は clear の後に走る（ロックを外すと両方落ちることを確認済み）
+  - `tests/test_headless.py`（新規・22 件）: 別プロセスで `headless.Assemble()` を実際に動かす。ゲームの選択関数・ローダー・ボードホストの登録（**選択関数の登録漏れの pin**）。デスクトップのアダプタを作らない。PlayerDB のモデルを作らない。スキャン → 前回のゲームの復元 → カタログ経由のロード → 選択の保存 → `gameChanged` / `db_updated`。再スキャンで provider のゲームを適用し直す（復元は初回だけ）。大会ペイロードの書き込みと URL を消したときの `ForgetSelection`。停止で `state.json` が書かれる。`Assemble` の中で、登録と結線が `UiMounted` / スキャン / サーバー起動より前（AST）。停止まわり: 停止要求は queued の `quit` で、ループ前の要求も残る・停止ハンドラが組み立ての前・組み立て中の停止でループを回さずに停止処理へ・`Shutdown()` が書き出しの後でハンドラを解除する・Web サーバーを作る前の停止でも書き出す。起動時チェック: `AUTONA_INSTANCE_TAG` の検証（英数字とハイフン / それ以外は warning で無視 / frozen では読まない）・`Autona.exe --headless` の拒否（`sys.frozen` を立てて `main.py` を実行し、メッセージボックスを差し替えて確認。単一インスタンスの判定に届かず、`logs/`・`user_data/`・`out/` を作らない）
+  - `tests/test_headless_smoke.py`（新規・1 件）: `python main.py --headless` を実際に起動（tmp CWD・空きポート・`AUTONA_INSTANCE_TAG`）。health・Socket.IO（polling）で state と delta・`score:adjust` の即時公開・503・転送ヘッダ付きの書き込みが 401・2 つ目の起動が終了コード 1・Ctrl+Break で終了コード 0・`state.json` と `program_state.json` に値が残る。プロセスは PID でのみ止める
+  - `tests/test_bootstrap_split.py`: `bootstrap_gui()` の手順に `EnableModel`・ボードホスト・ローダーの登録を追加。共通の結線の手順と、Window とヘッドレスがどちらも 1 回ずつ呼び、自分では結線しないこと（AST）。core / GUI の各段のボードホスト・ローダー・PlayerDB のモデルの状態
+  - `tests/test_import_side_effects.py`: `AutonaWebOperations` / `headless` の import が何も登録せず、`logs/` も作らない
+  - 既存テストの追従: core に移った操作の呼び出しを `autonaApp.web()`（新規の harness アクセサ）へ（`test_scoreboard_operations` / `test_crew_board` / `test_player_card_render` / `test_country_helper_model` / `test_game_asset_manager_models`）。AST の pin を新しい場所へ（`test_tournament_info_panel` / `test_stats_util` / `test_country_helper_model` / `test_game_asset_manager_models`）。`test_web_access` の偽の操作を `AutonaWebOperations` に差し込む
+- **残置 / リスク**
+  - **exe でのヘッドレスは対象外**（PyInstaller の spec・自動更新は触っていない）。`Autona.exe --headless` は拒否する（判断 13）。exe で動かすには、GUI サブシステムの exe なのでコンソールが無く、ログも停止手段も別に考える必要がある
+  - **ヘッドレスの `set_game`（legacy の `POST /update-game` と Socket.IO の `update_game`）はロードの間メインループを止める**（受容）。`@gui_thread_sync` でメインスレッドに渡し、同期でロードするのが旧ルートの契約（ロード完了後に `"OK"`）のため。その間は delta の配送と停止要求の処理が止まる。デスクトップもロードの間 GUI が固まる点では同じ。v1 の `POST /game` は非同期（202）なので止めない
+  - **停止時、`run_sync` で GUI スレッドを待っているリクエストのスレッドは待ち続ける**（既存の構図。デスクトップも同じ）。イベントループが止まった後は誰も実行しないが、werkzeug のリクエストのスレッドは daemon なのでプロセスの終了は妨げない（そのリクエストには応答が返らない）
+  - ヘッドレスのボードは skeleton（デスクトップの未構築ボードと同じ）。選手スロット・`losers` などのキーは最初の書き込みで現れる。オーバーレイは未定義を空として扱う前提
+  - Web UI（`/web`）は 503 を専用に扱っていない（一般のエラーとして出る）。ボード依存の操作のボタンをヘッドレスで隠すのは S4 の UI 側の仕事
+  - コンソールの閉じるボタンで止めたときの書き出しは、Windows の猶予（約 5 秒）の中で終わる前提（通常は 1 秒未満）。タスクマネージャーでの強制終了は書き出しを待たない
+  - Windows の `SIGTERM`（`os.kill` / `taskkill /F`）は TerminateProcess で捕まえられない。サービス化するなら `taskkill`（/F なし）ではなく Ctrl+Break を送る仕組みが要る
+  - pytest 全量は実装担当では回していない（レビュー時の全量は 1909 passed。レビュー修正後の全量は verify 担当）
+- **実機確認（オーナー）**
+  - デスクトップ版（`python main.py`）
+    - 起動して OBS のオーバーレイ・`/web`・API Tester が今までどおり動く。Web からの swap / リセット / クリア / チーム名 / best of / LOSERS が今までどおり（反映待ちになる）
+    - 大会 URL を設定するとゲームが切り替わる。URL を消してから同じゲームを選び直すとロードされる
+    - 大会 URL の読込に失敗するとダイアログが出る
+    - 閉じるとプロセスがすぐ終わる
+  - ヘッドレス（`python main.py --headless`。デスクトップ版は閉じておく）
+    - コンソールに `headless: serving http://127.0.0.1:5107/` が出て、OBS のオーバーレイと `/web` が表示される。前回のゲーム・大会情報が出ている
+    - `/web` からスコア ± / swap / リセット / チーム名を操作するとオーバーレイがすぐ変わる
+    - `/web` の選手編集・セット読込は失敗する（503）。アプリが落ちない
+    - Ctrl+C で止まる。もう一度起動すると、大会情報と前回のゲームは残り、スコア（スコアボード）は消えている（デスクトップ版と同じ）。Ctrl+Break・コンソールの閉じるボタンでも同じ
+    - （次に exe をビルドしたとき）`Autona.exe --headless` を実行するとメッセージボックスが出て起動せず、続けて普通にダブルクリックした `Autona.exe` は通常どおり起動する
+    - ヘッドレス稼働中にもう 1 つ `python main.py --headless` を起動すると「already running」で終わる。デスクトップ版を起動すると何も出ずに終わる
