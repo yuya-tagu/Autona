@@ -10,6 +10,7 @@ from ..core.DictHelper import deep_get
 from ..Helpers.AutonaDirHelper import AutonaResolve
 from ..core.GameAssetCatalog import GameAssetCatalog
 from ..AutonaPlayerDB import AutonaPlayerDB
+from ..core.PlayerDB import PlayerDB
 from .TournamentDataProvider import TournamentDataProvider
 import orjson
 from ..Helpers.AutonaLocaleHelper import AutonaLocaleHelper
@@ -1997,7 +1998,7 @@ class StartGGDataProvider(TournamentDataProvider):
             players = []
             # Reset top_entrants cache at the start of a fresh fetch
             self.top_entrants = []
-            # DB tags of every participant, handed to AutonaPlayerDB at
+            # DB tags of every participant, handed to the player DB at
             # the end so completers only offer this tournament's players.
             # The previous tournament's set stays active until then.
             entrant_tags = set()
@@ -2037,7 +2038,7 @@ class StartGGDataProvider(TournamentDataProvider):
                         self.player_seeds[playerData["id"]
                                           [0]] = playerData["seed"]
                         players.append(playerData)
-                        entrant_tags.add(AutonaPlayerDB.PlayerTag(playerData))
+                        entrant_tags.add(PlayerDB.PlayerTag(playerData))
                     # Capture entry-level info for stream title generation
                     # (one record per team/entrant, using first participant's
                     # gamerTag without sponsor prefix)
@@ -2049,20 +2050,21 @@ class StartGGDataProvider(TournamentDataProvider):
                             "gamerTag": gamerTag
                         })
 
-                # Defer SaveDB/SetupModel per page — each call is O(full DB)
-                # and rebuilds the QStandardItemModel on the GUI thread. We
-                # flush once after all pages are done below.
-                AutonaPlayerDB.AddPlayers(players, deferRefresh=True)
+                # Defer SaveDB / the change announcement per page — each is
+                # O(full DB), and the announcement rebuilds the completer
+                # model on the GUI thread. We flush once after all pages are
+                # done below.
+                PlayerDB.instance.AddPlayers(players, deferRefresh=True)
                 players = []
 
                 page += 1
 
-            # Persist + rebuild the model once for the whole fetch. The
-            # entrant set is installed first so the rebuilt completer
-            # proxy filters correctly from the start.
-            AutonaPlayerDB.SaveDB()
+            # Persist + announce (model rebuild, db_updated) once for the
+            # whole fetch. The entrant set is installed first so the rebuilt
+            # completer proxy filters correctly from the start.
+            PlayerDB.instance.SaveDB()
             AutonaPlayerDB.SetTournamentPlayers(entrant_tags)
-            AutonaPlayerDB.SetupModel()
+            PlayerDB.instance.NotifyChanged()
 
             # Sort by seed (ascending); unseeded entries fall to the bottom
             self.top_entrants.sort(key=lambda e: e["seed"])

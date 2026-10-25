@@ -121,6 +121,14 @@ web_access = importlib.import_module("src.core.WebAccess")
 state_persistence = importlib.import_module(
     "src.core.StatePersistence").StatePersistence
 state_migrations = importlib.import_module("src.core.StateMigrations")
+# The bad-word filter and the player DB (ADR-005 S3e-1): the Qt-free halves
+# of AutonaBadWordFilter / AutonaPlayerDB, singletons created by
+# bootstrap_core(). The filter reads the ngword lists and creates
+# ./user_data/badword_*.txt in Initialize(); the DB reads and writes
+# ./user_data/local_players.json in LoadDB().
+core_bad_words = importlib.import_module(
+    "src.core.BadWordFilter").BadWordFilter
+core_player_db = importlib.import_module("src.core.PlayerDB").PlayerDB
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -142,12 +150,14 @@ game_assets = importlib.import_module(
 # PlayerDB is imported explicitly, and before the provider that pulls it in
 # anyway, because its module tail used to reach into
 # AutonaGameAssetManager.instance.signals -- an import-time dependency on
-# another module's singleton. That wiring now lives in bootstrap_core().
+# another module's singleton. That wiring now lives in bootstrap_gui(), and
+# the relay to the core DB in bootstrap_core() (Attach).
 player_db = importlib.import_module("src.AutonaPlayerDB").AutonaPlayerDB
 # The three static-data modules. Their tails used to read the shipped
 # language/ngword/GraphQL files -- and, for the bad-word lists, to *create*
 # ./user_data/badword_{white,black}list.txt -- as a side effect of being
-# pulled into the chain by something else.
+# pulled into the chain by something else. The bad-word one is a front for
+# the core filter now (ADR-005 S3e-1), imported to keep it inert too.
 locale_helper = importlib.import_module(
     "src.Helpers.AutonaLocaleHelper").AutonaLocaleHelper
 bad_words = importlib.import_module(
@@ -216,6 +226,10 @@ assert web_server.actions is None, "import built WebServer.actions"
 assert type(web_operations.boardHost) is web_operations.BoardHost,     "import registered a board host for the web operations"
 assert web_operations.loadGameByCodename is None,     "import registered a game loader for the web operations"
 assert not player_db.modelEnabled, "import switched the player DB model on"
+assert player_db._attachedTo is None, \
+    "import attached the player DB relay"
+assert core_player_db.instance is None, "import created PlayerDB.instance"
+assert core_bad_words.instance is None, "import created BadWordFilter.instance"
 
 # The core state layer comes up empty, and -- the point of importing the
 # whole widget tree above -- with nobody wired to its channels. Only
@@ -237,10 +251,6 @@ assert locale_helper.countryToLanguage == {}, \
     "import loaded data_countries.json"
 assert locale_helper.countryToContinent == {}, \
     "import loaded data_countries.json"
-assert not bad_words.patterns, "import built the bad-word patterns"
-assert not bad_words.badWordTries, "import built the bad-word tries"
-assert bad_words.whiteList == [], "import loaded the bad-word whitelist"
-assert bad_words.blackList == [], "import loaded the bad-word blacklist"
 # Every GraphQL query attribute, found by name so a newly added query is
 # covered without touching this test.
 queryAttrs = [n for n in vars(startgg) if n.endswith("Query")]
@@ -268,13 +278,31 @@ assert locale_helper.languages, \
 assert locale_helper.countryToLanguage, \
     "AutonaLocaleHelper.Initialize() did not load data_countries.json"
 
-bad_words.Initialize()
-assert bad_words.patterns, \
-    "AutonaBadWordFilter.Initialize() did not build the patterns"
+# Constructing the filter reads nothing; Initialize() is the load.
+core_bad_words.instance = core_bad_words()
+assert not core_bad_words.instance.patterns, \
+    "BadWordFilter() built the bad-word patterns"
+assert not os.path.exists("./user_data/badword_whitelist.txt"), \
+    "BadWordFilter() created badword_whitelist.txt"
+core_bad_words.instance.Initialize()
+assert core_bad_words.instance.patterns, \
+    "BadWordFilter.Initialize() did not build the patterns"
 assert os.path.isfile("./user_data/badword_whitelist.txt"), \
-    "AutonaBadWordFilter.Initialize() did not create badword_whitelist.txt"
+    "BadWordFilter.Initialize() did not create badword_whitelist.txt"
 assert os.path.isfile("./user_data/badword_blacklist.txt"), \
-    "AutonaBadWordFilter.Initialize() did not create badword_blacklist.txt"
+    "BadWordFilter.Initialize() did not create badword_blacklist.txt"
+assert bad_words.Censor(None) is None, \
+    "AutonaBadWordFilter no longer forwards to BadWordFilter.instance"
+
+# Same for the player DB: the file is read (and created on a first run)
+# by LoadDB(), never by the construction.
+core_player_db.instance = core_player_db()
+assert not os.path.exists("./user_data/local_players.json"), \
+    "PlayerDB() created local_players.json"
+core_player_db.instance.LoadDB()
+with open("./user_data/local_players.json", encoding="utf-8") as f:
+    assert f.read() == "[]", \
+        "PlayerDB.LoadDB() did not create an empty local_players.json"
 
 startgg.Initialize()
 for name in queryAttrs:

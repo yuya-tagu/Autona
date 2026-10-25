@@ -1,0 +1,2053 @@
+{
+ "scenarios": [
+  {
+   "name": "load_then_save",
+   "files": {
+    "local_players.json": "[{\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"Alpha Real\", \"twitter\": \"alpha_tw\", \"country_code\": \"JP\", \"state_code\": \"13\", \"mains\": {\"ssbu\": [[\"mario\", 2], [\"luigi\", 0, \"alt\"]]}, \"custom_textbox\": \"\", \"seed\": 3, \"avatar\": \"http://x/a.png\", \"id\": [1, 2]}, {\"prefix\": \"\", \"gamerTag\": \"Bravo\", \"name\": \"\", \"mains\": {\"ssbu\": [[\"peach\", \"1\"]], \"sf6\": [[\"ryu\", 0]]}}, {\"gamerTag\": \"Charlie\"}, {\"prefix\": null, \"gamerTag\": \"Delta\", \"name\": \"デルタ\", \"country_code\": \"US\", \"mains\": {}}, {\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"duplicate, ignored\"}, {\"gamerTag\": \"Echo\", \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"}]"
+   },
+   "steps": [
+    {
+     "op": "load"
+    },
+    {
+     "op": "save"
+    }
+   ],
+   "after": [
+    {
+     "file": "[{\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"Alpha Real\", \"twitter\": \"alpha_tw\", \"country_code\": \"JP\", \"state_code\": \"13\", \"mains\": {\"ssbu\": [[\"mario\", 2], [\"luigi\", 0, \"alt\"]]}, \"custom_textbox\": \"\", \"seed\": 3, \"avatar\": \"http://x/a.png\", \"id\": [1, 2]}, {\"prefix\": \"\", \"gamerTag\": \"Bravo\", \"name\": \"\", \"mains\": {\"ssbu\": [[\"peach\", \"1\"]], \"sf6\": [[\"ryu\", 0]]}}, {\"gamerTag\": \"Charlie\"}, {\"prefix\": null, \"gamerTag\": \"Delta\", \"name\": \"デルタ\", \"country_code\": \"US\", \"mains\": {}}, {\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"duplicate, ignored\"}, {\"gamerTag\": \"Echo\", \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"}]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Real",
+       "twitter": "alpha_tw",
+       "country_code": "JP",
+       "state_code": "13",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "luigi",
+          0,
+          "alt"
+         ]
+        ]
+       },
+       "custom_textbox": "",
+       "seed": 3,
+       "avatar": "http://x/a.png",
+       "id": [
+        1,
+        2
+       ]
+      },
+      "Bravo": {
+       "prefix": "",
+       "gamerTag": "Bravo",
+       "name": "",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": "{}"
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": "{\"ssbu\": [[\"kirby\", 1]]}"
+      }
+     }
+    },
+    {
+     "file": "[\n  {\n    \"prefix\": \"SPN\",\n    \"gamerTag\": \"Alpha\",\n    \"name\": \"Alpha Real\",\n    \"twitter\": \"alpha_tw\",\n    \"country_code\": \"JP\",\n    \"state_code\": \"13\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          2\n        ],\n        [\n          \"luigi\",\n          0,\n          \"alt\"\n        ]\n      ]\n    },\n    \"custom_textbox\": \"\"\n  },\n  {\n    \"prefix\": \"\",\n    \"gamerTag\": \"Bravo\",\n    \"name\": \"\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"peach\",\n          \"1\"\n        ]\n      ],\n      \"sf6\": [\n        [\n          \"ryu\",\n          0\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Charlie\",\n    \"mains\": \"{}\"\n  },\n  {\n    \"prefix\": null,\n    \"gamerTag\": \"Delta\",\n    \"name\": \"\\u30c7\\u30eb\\u30bf\",\n    \"country_code\": \"US\",\n    \"mains\": {}\n  },\n  {\n    \"gamerTag\": \"Echo\",\n    \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"\n  }\n]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Real",
+       "twitter": "alpha_tw",
+       "country_code": "JP",
+       "state_code": "13",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "luigi",
+          0,
+          "alt"
+         ]
+        ]
+       },
+       "custom_textbox": "",
+       "seed": 3,
+       "avatar": "http://x/a.png",
+       "id": [
+        1,
+        2
+       ]
+      },
+      "Bravo": {
+       "prefix": "",
+       "gamerTag": "Bravo",
+       "name": "",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": "{}"
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": "{\"ssbu\": [[\"kirby\", 1]]}"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "add",
+   "files": {
+    "local_players.json": "[{\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"Alpha Real\", \"twitter\": \"alpha_tw\", \"country_code\": \"JP\", \"state_code\": \"13\", \"mains\": {\"ssbu\": [[\"mario\", 2], [\"luigi\", 0, \"alt\"]]}, \"custom_textbox\": \"\", \"seed\": 3, \"avatar\": \"http://x/a.png\", \"id\": [1, 2]}, {\"prefix\": \"\", \"gamerTag\": \"Bravo\", \"name\": \"\", \"mains\": {\"ssbu\": [[\"peach\", \"1\"]], \"sf6\": [[\"ryu\", 0]]}}, {\"gamerTag\": \"Charlie\"}, {\"prefix\": null, \"gamerTag\": \"Delta\", \"name\": \"デルタ\", \"country_code\": \"US\", \"mains\": {}}, {\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"duplicate, ignored\"}, {\"gamerTag\": \"Echo\", \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"}]"
+   },
+   "steps": [
+    {
+     "op": "load"
+    },
+    {
+     "op": "add",
+     "players": [
+      {
+       "gamerTag": "Foxtrot",
+       "prefix": "NEW",
+       "seed": 5,
+       "mains": {
+        "ssbu": [
+         [
+          "mario"
+         ],
+         [
+          "luigi",
+          3
+         ]
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "op": "add",
+     "players": [
+      {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Updated",
+       "mains": {
+        "ssbu": [
+         [
+          "mario"
+         ],
+         [
+          "wario"
+         ]
+        ],
+        "sf6": [
+         [
+          "ken"
+         ]
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "op": "add",
+     "disable_overwrite": true,
+     "players": [
+      {
+       "gamerTag": "Bravo",
+       "prefix": "",
+       "name": "Bravo New",
+       "twitter": "bravo_tw"
+      }
+     ]
+    },
+    {
+     "op": "add",
+     "overwrite": true,
+     "players": [
+      {
+       "gamerTag": "Charlie",
+       "mains": {
+        "ssbu": [
+         [
+          "pit",
+          1
+         ]
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "op": "add",
+     "overwrite": true,
+     "players": [
+      {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Overwritten",
+       "mains": {
+        "sf6": [
+         [
+          "guile",
+          2
+         ]
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "op": "add",
+     "players": [
+      null,
+      {
+       "gamerTag": "Golf"
+      }
+     ]
+    },
+    {
+     "op": "add",
+     "players": [
+      {
+       "gamerTag": "Echo",
+       "mains": {
+        "ssbu": [
+         [
+          "kirby"
+         ]
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "op": "add",
+     "deferRefresh": true,
+     "players": [
+      {
+       "gamerTag": "Hotel",
+       "mains": {
+        "ssbu": [
+         [
+          "ness"
+         ]
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "op": "save"
+    }
+   ],
+   "after": [
+    {
+     "file": "[{\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"Alpha Real\", \"twitter\": \"alpha_tw\", \"country_code\": \"JP\", \"state_code\": \"13\", \"mains\": {\"ssbu\": [[\"mario\", 2], [\"luigi\", 0, \"alt\"]]}, \"custom_textbox\": \"\", \"seed\": 3, \"avatar\": \"http://x/a.png\", \"id\": [1, 2]}, {\"prefix\": \"\", \"gamerTag\": \"Bravo\", \"name\": \"\", \"mains\": {\"ssbu\": [[\"peach\", \"1\"]], \"sf6\": [[\"ryu\", 0]]}}, {\"gamerTag\": \"Charlie\"}, {\"prefix\": null, \"gamerTag\": \"Delta\", \"name\": \"デルタ\", \"country_code\": \"US\", \"mains\": {}}, {\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"duplicate, ignored\"}, {\"gamerTag\": \"Echo\", \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"}]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Real",
+       "twitter": "alpha_tw",
+       "country_code": "JP",
+       "state_code": "13",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "luigi",
+          0,
+          "alt"
+         ]
+        ]
+       },
+       "custom_textbox": "",
+       "seed": 3,
+       "avatar": "http://x/a.png",
+       "id": [
+        1,
+        2
+       ]
+      },
+      "Bravo": {
+       "prefix": "",
+       "gamerTag": "Bravo",
+       "name": "",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": "{}"
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": "{\"ssbu\": [[\"kirby\", 1]]}"
+      }
+     }
+    },
+    {
+     "file": "[\n  {\n    \"prefix\": \"SPN\",\n    \"gamerTag\": \"Alpha\",\n    \"name\": \"Alpha Real\",\n    \"twitter\": \"alpha_tw\",\n    \"country_code\": \"JP\",\n    \"state_code\": \"13\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          2\n        ],\n        [\n          \"luigi\",\n          0,\n          \"alt\"\n        ]\n      ]\n    },\n    \"custom_textbox\": \"\"\n  },\n  {\n    \"prefix\": \"\",\n    \"gamerTag\": \"Bravo\",\n    \"name\": \"\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"peach\",\n          \"1\"\n        ]\n      ],\n      \"sf6\": [\n        [\n          \"ryu\",\n          0\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Charlie\",\n    \"mains\": \"{}\"\n  },\n  {\n    \"prefix\": null,\n    \"gamerTag\": \"Delta\",\n    \"name\": \"\\u30c7\\u30eb\\u30bf\",\n    \"country_code\": \"US\",\n    \"mains\": {}\n  },\n  {\n    \"gamerTag\": \"Echo\",\n    \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"\n  },\n  {\n    \"gamerTag\": \"Foxtrot\",\n    \"prefix\": \"NEW\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          0\n        ],\n        [\n          \"luigi\",\n          3\n        ]\n      ]\n    }\n  }\n]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Real",
+       "twitter": "alpha_tw",
+       "country_code": "JP",
+       "state_code": "13",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "luigi",
+          0,
+          "alt"
+         ]
+        ]
+       },
+       "custom_textbox": "",
+       "seed": 3,
+       "avatar": "http://x/a.png",
+       "id": [
+        1,
+        2
+       ]
+      },
+      "Bravo": {
+       "prefix": "",
+       "gamerTag": "Bravo",
+       "name": "",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": "{}"
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": "{\"ssbu\": [[\"kirby\", 1]]}"
+      },
+      "NEW Foxtrot": {
+       "gamerTag": "Foxtrot",
+       "prefix": "NEW",
+       "seed": 5,
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ],
+         [
+          "luigi",
+          3
+         ]
+        ]
+       }
+      }
+     }
+    },
+    {
+     "file": "[\n  {\n    \"prefix\": \"SPN\",\n    \"gamerTag\": \"Alpha\",\n    \"name\": \"Alpha Updated\",\n    \"twitter\": \"alpha_tw\",\n    \"country_code\": \"JP\",\n    \"state_code\": \"13\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          2\n        ],\n        [\n          \"wario\",\n          0\n        ],\n        [\n          \"ken\",\n          0\n        ]\n      ],\n      \"sf6\": [\n        [\n          \"mario\",\n          2\n        ],\n        [\n          \"wario\",\n          0\n        ],\n        [\n          \"ken\",\n          0\n        ]\n      ]\n    },\n    \"custom_textbox\": \"\"\n  },\n  {\n    \"prefix\": \"\",\n    \"gamerTag\": \"Bravo\",\n    \"name\": \"\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"peach\",\n          \"1\"\n        ]\n      ],\n      \"sf6\": [\n        [\n          \"ryu\",\n          0\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Charlie\",\n    \"mains\": \"{}\"\n  },\n  {\n    \"prefix\": null,\n    \"gamerTag\": \"Delta\",\n    \"name\": \"\\u30c7\\u30eb\\u30bf\",\n    \"country_code\": \"US\",\n    \"mains\": {}\n  },\n  {\n    \"gamerTag\": \"Echo\",\n    \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"\n  },\n  {\n    \"gamerTag\": \"Foxtrot\",\n    \"prefix\": \"NEW\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          0\n        ],\n        [\n          \"luigi\",\n          3\n        ]\n      ]\n    }\n  }\n]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Updated",
+       "twitter": "alpha_tw",
+       "country_code": "JP",
+       "state_code": "13",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "wario",
+          0
+         ],
+         [
+          "ken",
+          0
+         ]
+        ],
+        "sf6": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "wario",
+          0
+         ],
+         [
+          "ken",
+          0
+         ]
+        ]
+       },
+       "custom_textbox": "",
+       "seed": 3,
+       "avatar": "http://x/a.png",
+       "id": [
+        1,
+        2
+       ]
+      },
+      "Bravo": {
+       "prefix": "",
+       "gamerTag": "Bravo",
+       "name": "",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": "{}"
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": "{\"ssbu\": [[\"kirby\", 1]]}"
+      },
+      "NEW Foxtrot": {
+       "gamerTag": "Foxtrot",
+       "prefix": "NEW",
+       "seed": 5,
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ],
+         [
+          "luigi",
+          3
+         ]
+        ]
+       }
+      }
+     }
+    },
+    {
+     "file": "[\n  {\n    \"prefix\": \"SPN\",\n    \"gamerTag\": \"Alpha\",\n    \"name\": \"Alpha Updated\",\n    \"twitter\": \"alpha_tw\",\n    \"country_code\": \"JP\",\n    \"state_code\": \"13\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          2\n        ],\n        [\n          \"wario\",\n          0\n        ],\n        [\n          \"ken\",\n          0\n        ]\n      ],\n      \"sf6\": [\n        [\n          \"mario\",\n          2\n        ],\n        [\n          \"wario\",\n          0\n        ],\n        [\n          \"ken\",\n          0\n        ]\n      ]\n    },\n    \"custom_textbox\": \"\"\n  },\n  {\n    \"gamerTag\": \"Bravo\",\n    \"prefix\": \"\",\n    \"name\": \"\",\n    \"twitter\": \"bravo_tw\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"peach\",\n          \"1\"\n        ]\n      ],\n      \"sf6\": [\n        [\n          \"ryu\",\n          0\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Charlie\",\n    \"mains\": \"{}\"\n  },\n  {\n    \"prefix\": null,\n    \"gamerTag\": \"Delta\",\n    \"name\": \"\\u30c7\\u30eb\\u30bf\",\n    \"country_code\": \"US\",\n    \"mains\": {}\n  },\n  {\n    \"gamerTag\": \"Echo\",\n    \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"\n  },\n  {\n    \"gamerTag\": \"Foxtrot\",\n    \"prefix\": \"NEW\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          0\n        ],\n        [\n          \"luigi\",\n          3\n        ]\n      ]\n    }\n  }\n]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Updated",
+       "twitter": "alpha_tw",
+       "country_code": "JP",
+       "state_code": "13",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "wario",
+          0
+         ],
+         [
+          "ken",
+          0
+         ]
+        ],
+        "sf6": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "wario",
+          0
+         ],
+         [
+          "ken",
+          0
+         ]
+        ]
+       },
+       "custom_textbox": "",
+       "seed": 3,
+       "avatar": "http://x/a.png",
+       "id": [
+        1,
+        2
+       ]
+      },
+      "Bravo": {
+       "gamerTag": "Bravo",
+       "prefix": "",
+       "name": "",
+       "twitter": "bravo_tw",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": "{}"
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": "{\"ssbu\": [[\"kirby\", 1]]}"
+      },
+      "NEW Foxtrot": {
+       "gamerTag": "Foxtrot",
+       "prefix": "NEW",
+       "seed": 5,
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ],
+         [
+          "luigi",
+          3
+         ]
+        ]
+       }
+      }
+     }
+    },
+    {
+     "file": "[\n  {\n    \"prefix\": \"SPN\",\n    \"gamerTag\": \"Alpha\",\n    \"name\": \"Alpha Updated\",\n    \"twitter\": \"alpha_tw\",\n    \"country_code\": \"JP\",\n    \"state_code\": \"13\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          2\n        ],\n        [\n          \"wario\",\n          0\n        ],\n        [\n          \"ken\",\n          0\n        ]\n      ],\n      \"sf6\": [\n        [\n          \"mario\",\n          2\n        ],\n        [\n          \"wario\",\n          0\n        ],\n        [\n          \"ken\",\n          0\n        ]\n      ]\n    },\n    \"custom_textbox\": \"\"\n  },\n  {\n    \"gamerTag\": \"Bravo\",\n    \"prefix\": \"\",\n    \"name\": \"\",\n    \"twitter\": \"bravo_tw\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"peach\",\n          \"1\"\n        ]\n      ],\n      \"sf6\": [\n        [\n          \"ryu\",\n          0\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Charlie\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"pit\",\n          1\n        ]\n      ]\n    }\n  },\n  {\n    \"prefix\": null,\n    \"gamerTag\": \"Delta\",\n    \"name\": \"\\u30c7\\u30eb\\u30bf\",\n    \"country_code\": \"US\",\n    \"mains\": {}\n  },\n  {\n    \"gamerTag\": \"Echo\",\n    \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"\n  },\n  {\n    \"gamerTag\": \"Foxtrot\",\n    \"prefix\": \"NEW\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          0\n        ],\n        [\n          \"luigi\",\n          3\n        ]\n      ]\n    }\n  }\n]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Updated",
+       "twitter": "alpha_tw",
+       "country_code": "JP",
+       "state_code": "13",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "wario",
+          0
+         ],
+         [
+          "ken",
+          0
+         ]
+        ],
+        "sf6": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "wario",
+          0
+         ],
+         [
+          "ken",
+          0
+         ]
+        ]
+       },
+       "custom_textbox": "",
+       "seed": 3,
+       "avatar": "http://x/a.png",
+       "id": [
+        1,
+        2
+       ]
+      },
+      "Bravo": {
+       "gamerTag": "Bravo",
+       "prefix": "",
+       "name": "",
+       "twitter": "bravo_tw",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": {
+        "ssbu": [
+         [
+          "pit",
+          1
+         ]
+        ]
+       }
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": "{\"ssbu\": [[\"kirby\", 1]]}"
+      },
+      "NEW Foxtrot": {
+       "gamerTag": "Foxtrot",
+       "prefix": "NEW",
+       "seed": 5,
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ],
+         [
+          "luigi",
+          3
+         ]
+        ]
+       }
+      }
+     }
+    },
+    {
+     "file": "[\n  {\n    \"prefix\": \"SPN\",\n    \"gamerTag\": \"Alpha\",\n    \"name\": \"Alpha Overwritten\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          2\n        ],\n        [\n          \"wario\",\n          0\n        ],\n        [\n          \"ken\",\n          0\n        ]\n      ],\n      \"sf6\": [\n        [\n          \"guile\",\n          2\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Bravo\",\n    \"prefix\": \"\",\n    \"name\": \"\",\n    \"twitter\": \"bravo_tw\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"peach\",\n          \"1\"\n        ]\n      ],\n      \"sf6\": [\n        [\n          \"ryu\",\n          0\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Charlie\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"pit\",\n          1\n        ]\n      ]\n    }\n  },\n  {\n    \"prefix\": null,\n    \"gamerTag\": \"Delta\",\n    \"name\": \"\\u30c7\\u30eb\\u30bf\",\n    \"country_code\": \"US\",\n    \"mains\": {}\n  },\n  {\n    \"gamerTag\": \"Echo\",\n    \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"\n  },\n  {\n    \"gamerTag\": \"Foxtrot\",\n    \"prefix\": \"NEW\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          0\n        ],\n        [\n          \"luigi\",\n          3\n        ]\n      ]\n    }\n  }\n]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Overwritten",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "wario",
+          0
+         ],
+         [
+          "ken",
+          0
+         ]
+        ],
+        "sf6": [
+         [
+          "guile",
+          2
+         ]
+        ]
+       }
+      },
+      "Bravo": {
+       "gamerTag": "Bravo",
+       "prefix": "",
+       "name": "",
+       "twitter": "bravo_tw",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": {
+        "ssbu": [
+         [
+          "pit",
+          1
+         ]
+        ]
+       }
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": "{\"ssbu\": [[\"kirby\", 1]]}"
+      },
+      "NEW Foxtrot": {
+       "gamerTag": "Foxtrot",
+       "prefix": "NEW",
+       "seed": 5,
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ],
+         [
+          "luigi",
+          3
+         ]
+        ]
+       }
+      }
+     }
+    },
+    {
+     "file": "[\n  {\n    \"prefix\": \"SPN\",\n    \"gamerTag\": \"Alpha\",\n    \"name\": \"Alpha Overwritten\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          2\n        ],\n        [\n          \"wario\",\n          0\n        ],\n        [\n          \"ken\",\n          0\n        ]\n      ],\n      \"sf6\": [\n        [\n          \"guile\",\n          2\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Bravo\",\n    \"prefix\": \"\",\n    \"name\": \"\",\n    \"twitter\": \"bravo_tw\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"peach\",\n          \"1\"\n        ]\n      ],\n      \"sf6\": [\n        [\n          \"ryu\",\n          0\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Charlie\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"pit\",\n          1\n        ]\n      ]\n    }\n  },\n  {\n    \"prefix\": null,\n    \"gamerTag\": \"Delta\",\n    \"name\": \"\\u30c7\\u30eb\\u30bf\",\n    \"country_code\": \"US\",\n    \"mains\": {}\n  },\n  {\n    \"gamerTag\": \"Echo\",\n    \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"\n  },\n  {\n    \"gamerTag\": \"Foxtrot\",\n    \"prefix\": \"NEW\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          0\n        ],\n        [\n          \"luigi\",\n          3\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Golf\"\n  }\n]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Overwritten",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "wario",
+          0
+         ],
+         [
+          "ken",
+          0
+         ]
+        ],
+        "sf6": [
+         [
+          "guile",
+          2
+         ]
+        ]
+       }
+      },
+      "Bravo": {
+       "gamerTag": "Bravo",
+       "prefix": "",
+       "name": "",
+       "twitter": "bravo_tw",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": {
+        "ssbu": [
+         [
+          "pit",
+          1
+         ]
+        ]
+       }
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": "{\"ssbu\": [[\"kirby\", 1]]}"
+      },
+      "NEW Foxtrot": {
+       "gamerTag": "Foxtrot",
+       "prefix": "NEW",
+       "seed": 5,
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ],
+         [
+          "luigi",
+          3
+         ]
+        ]
+       }
+      },
+      "Golf": {
+       "gamerTag": "Golf"
+      }
+     }
+    },
+    {
+     "file": "[\n  {\n    \"prefix\": \"SPN\",\n    \"gamerTag\": \"Alpha\",\n    \"name\": \"Alpha Overwritten\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          2\n        ],\n        [\n          \"wario\",\n          0\n        ],\n        [\n          \"ken\",\n          0\n        ]\n      ],\n      \"sf6\": [\n        [\n          \"guile\",\n          2\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Bravo\",\n    \"prefix\": \"\",\n    \"name\": \"\",\n    \"twitter\": \"bravo_tw\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"peach\",\n          \"1\"\n        ]\n      ],\n      \"sf6\": [\n        [\n          \"ryu\",\n          0\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Charlie\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"pit\",\n          1\n        ]\n      ]\n    }\n  },\n  {\n    \"prefix\": null,\n    \"gamerTag\": \"Delta\",\n    \"name\": \"\\u30c7\\u30eb\\u30bf\",\n    \"country_code\": \"US\",\n    \"mains\": {}\n  },\n  {\n    \"gamerTag\": \"Echo\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"kirby\",\n          1\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Foxtrot\",\n    \"prefix\": \"NEW\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          0\n        ],\n        [\n          \"luigi\",\n          3\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Golf\"\n  }\n]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Overwritten",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "wario",
+          0
+         ],
+         [
+          "ken",
+          0
+         ]
+        ],
+        "sf6": [
+         [
+          "guile",
+          2
+         ]
+        ]
+       }
+      },
+      "Bravo": {
+       "gamerTag": "Bravo",
+       "prefix": "",
+       "name": "",
+       "twitter": "bravo_tw",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": {
+        "ssbu": [
+         [
+          "pit",
+          1
+         ]
+        ]
+       }
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": {
+        "ssbu": [
+         [
+          "kirby",
+          1
+         ]
+        ]
+       }
+      },
+      "NEW Foxtrot": {
+       "gamerTag": "Foxtrot",
+       "prefix": "NEW",
+       "seed": 5,
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ],
+         [
+          "luigi",
+          3
+         ]
+        ]
+       }
+      },
+      "Golf": {
+       "gamerTag": "Golf"
+      }
+     }
+    },
+    {
+     "file": "[\n  {\n    \"prefix\": \"SPN\",\n    \"gamerTag\": \"Alpha\",\n    \"name\": \"Alpha Overwritten\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          2\n        ],\n        [\n          \"wario\",\n          0\n        ],\n        [\n          \"ken\",\n          0\n        ]\n      ],\n      \"sf6\": [\n        [\n          \"guile\",\n          2\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Bravo\",\n    \"prefix\": \"\",\n    \"name\": \"\",\n    \"twitter\": \"bravo_tw\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"peach\",\n          \"1\"\n        ]\n      ],\n      \"sf6\": [\n        [\n          \"ryu\",\n          0\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Charlie\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"pit\",\n          1\n        ]\n      ]\n    }\n  },\n  {\n    \"prefix\": null,\n    \"gamerTag\": \"Delta\",\n    \"name\": \"\\u30c7\\u30eb\\u30bf\",\n    \"country_code\": \"US\",\n    \"mains\": {}\n  },\n  {\n    \"gamerTag\": \"Echo\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"kirby\",\n          1\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Foxtrot\",\n    \"prefix\": \"NEW\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          0\n        ],\n        [\n          \"luigi\",\n          3\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Golf\"\n  }\n]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Overwritten",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "wario",
+          0
+         ],
+         [
+          "ken",
+          0
+         ]
+        ],
+        "sf6": [
+         [
+          "guile",
+          2
+         ]
+        ]
+       }
+      },
+      "Bravo": {
+       "gamerTag": "Bravo",
+       "prefix": "",
+       "name": "",
+       "twitter": "bravo_tw",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": {
+        "ssbu": [
+         [
+          "pit",
+          1
+         ]
+        ]
+       }
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": {
+        "ssbu": [
+         [
+          "kirby",
+          1
+         ]
+        ]
+       }
+      },
+      "NEW Foxtrot": {
+       "gamerTag": "Foxtrot",
+       "prefix": "NEW",
+       "seed": 5,
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ],
+         [
+          "luigi",
+          3
+         ]
+        ]
+       }
+      },
+      "Golf": {
+       "gamerTag": "Golf"
+      },
+      "Hotel": {
+       "gamerTag": "Hotel",
+       "mains": {
+        "ssbu": [
+         [
+          "ness",
+          0
+         ]
+        ]
+       }
+      }
+     }
+    },
+    {
+     "file": "[\n  {\n    \"prefix\": \"SPN\",\n    \"gamerTag\": \"Alpha\",\n    \"name\": \"Alpha Overwritten\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          2\n        ],\n        [\n          \"wario\",\n          0\n        ],\n        [\n          \"ken\",\n          0\n        ]\n      ],\n      \"sf6\": [\n        [\n          \"guile\",\n          2\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Bravo\",\n    \"prefix\": \"\",\n    \"name\": \"\",\n    \"twitter\": \"bravo_tw\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"peach\",\n          \"1\"\n        ]\n      ],\n      \"sf6\": [\n        [\n          \"ryu\",\n          0\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Charlie\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"pit\",\n          1\n        ]\n      ]\n    }\n  },\n  {\n    \"prefix\": null,\n    \"gamerTag\": \"Delta\",\n    \"name\": \"\\u30c7\\u30eb\\u30bf\",\n    \"country_code\": \"US\",\n    \"mains\": {}\n  },\n  {\n    \"gamerTag\": \"Echo\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"kirby\",\n          1\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Foxtrot\",\n    \"prefix\": \"NEW\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          0\n        ],\n        [\n          \"luigi\",\n          3\n        ]\n      ]\n    }\n  },\n  {\n    \"gamerTag\": \"Golf\"\n  },\n  {\n    \"gamerTag\": \"Hotel\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"ness\",\n          0\n        ]\n      ]\n    }\n  }\n]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Overwritten",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "wario",
+          0
+         ],
+         [
+          "ken",
+          0
+         ]
+        ],
+        "sf6": [
+         [
+          "guile",
+          2
+         ]
+        ]
+       }
+      },
+      "Bravo": {
+       "gamerTag": "Bravo",
+       "prefix": "",
+       "name": "",
+       "twitter": "bravo_tw",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": {
+        "ssbu": [
+         [
+          "pit",
+          1
+         ]
+        ]
+       }
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": {
+        "ssbu": [
+         [
+          "kirby",
+          1
+         ]
+        ]
+       }
+      },
+      "NEW Foxtrot": {
+       "gamerTag": "Foxtrot",
+       "prefix": "NEW",
+       "seed": 5,
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          0
+         ],
+         [
+          "luigi",
+          3
+         ]
+        ]
+       }
+      },
+      "Golf": {
+       "gamerTag": "Golf"
+      },
+      "Hotel": {
+       "gamerTag": "Hotel",
+       "mains": {
+        "ssbu": [
+         [
+          "ness",
+          0
+         ]
+        ]
+       }
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "delete",
+   "files": {
+    "local_players.json": "[{\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"Alpha Real\", \"twitter\": \"alpha_tw\", \"country_code\": \"JP\", \"state_code\": \"13\", \"mains\": {\"ssbu\": [[\"mario\", 2], [\"luigi\", 0, \"alt\"]]}, \"custom_textbox\": \"\", \"seed\": 3, \"avatar\": \"http://x/a.png\", \"id\": [1, 2]}, {\"prefix\": \"\", \"gamerTag\": \"Bravo\", \"name\": \"\", \"mains\": {\"ssbu\": [[\"peach\", \"1\"]], \"sf6\": [[\"ryu\", 0]]}}, {\"gamerTag\": \"Charlie\"}, {\"prefix\": null, \"gamerTag\": \"Delta\", \"name\": \"デルタ\", \"country_code\": \"US\", \"mains\": {}}, {\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"duplicate, ignored\"}, {\"gamerTag\": \"Echo\", \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"}]"
+   },
+   "steps": [
+    {
+     "op": "load"
+    },
+    {
+     "op": "delete",
+     "tag": "Bravo"
+    },
+    {
+     "op": "delete",
+     "tag": "Nobody"
+    }
+   ],
+   "after": [
+    {
+     "file": "[{\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"Alpha Real\", \"twitter\": \"alpha_tw\", \"country_code\": \"JP\", \"state_code\": \"13\", \"mains\": {\"ssbu\": [[\"mario\", 2], [\"luigi\", 0, \"alt\"]]}, \"custom_textbox\": \"\", \"seed\": 3, \"avatar\": \"http://x/a.png\", \"id\": [1, 2]}, {\"prefix\": \"\", \"gamerTag\": \"Bravo\", \"name\": \"\", \"mains\": {\"ssbu\": [[\"peach\", \"1\"]], \"sf6\": [[\"ryu\", 0]]}}, {\"gamerTag\": \"Charlie\"}, {\"prefix\": null, \"gamerTag\": \"Delta\", \"name\": \"デルタ\", \"country_code\": \"US\", \"mains\": {}}, {\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"duplicate, ignored\"}, {\"gamerTag\": \"Echo\", \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"}]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Real",
+       "twitter": "alpha_tw",
+       "country_code": "JP",
+       "state_code": "13",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "luigi",
+          0,
+          "alt"
+         ]
+        ]
+       },
+       "custom_textbox": "",
+       "seed": 3,
+       "avatar": "http://x/a.png",
+       "id": [
+        1,
+        2
+       ]
+      },
+      "Bravo": {
+       "prefix": "",
+       "gamerTag": "Bravo",
+       "name": "",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": "{}"
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": "{\"ssbu\": [[\"kirby\", 1]]}"
+      }
+     }
+    },
+    {
+     "file": "[\n  {\n    \"prefix\": \"SPN\",\n    \"gamerTag\": \"Alpha\",\n    \"name\": \"Alpha Real\",\n    \"twitter\": \"alpha_tw\",\n    \"country_code\": \"JP\",\n    \"state_code\": \"13\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          2\n        ],\n        [\n          \"luigi\",\n          0,\n          \"alt\"\n        ]\n      ]\n    },\n    \"custom_textbox\": \"\"\n  },\n  {\n    \"gamerTag\": \"Charlie\",\n    \"mains\": \"{}\"\n  },\n  {\n    \"prefix\": null,\n    \"gamerTag\": \"Delta\",\n    \"name\": \"\\u30c7\\u30eb\\u30bf\",\n    \"country_code\": \"US\",\n    \"mains\": {}\n  },\n  {\n    \"gamerTag\": \"Echo\",\n    \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"\n  }\n]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Real",
+       "twitter": "alpha_tw",
+       "country_code": "JP",
+       "state_code": "13",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "luigi",
+          0,
+          "alt"
+         ]
+        ]
+       },
+       "custom_textbox": "",
+       "seed": 3,
+       "avatar": "http://x/a.png",
+       "id": [
+        1,
+        2
+       ]
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": "{}"
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": "{\"ssbu\": [[\"kirby\", 1]]}"
+      }
+     }
+    },
+    {
+     "file": "[\n  {\n    \"prefix\": \"SPN\",\n    \"gamerTag\": \"Alpha\",\n    \"name\": \"Alpha Real\",\n    \"twitter\": \"alpha_tw\",\n    \"country_code\": \"JP\",\n    \"state_code\": \"13\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          2\n        ],\n        [\n          \"luigi\",\n          0,\n          \"alt\"\n        ]\n      ]\n    },\n    \"custom_textbox\": \"\"\n  },\n  {\n    \"gamerTag\": \"Charlie\",\n    \"mains\": \"{}\"\n  },\n  {\n    \"prefix\": null,\n    \"gamerTag\": \"Delta\",\n    \"name\": \"\\u30c7\\u30eb\\u30bf\",\n    \"country_code\": \"US\",\n    \"mains\": {}\n  },\n  {\n    \"gamerTag\": \"Echo\",\n    \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"\n  }\n]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Real",
+       "twitter": "alpha_tw",
+       "country_code": "JP",
+       "state_code": "13",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "luigi",
+          0,
+          "alt"
+         ]
+        ]
+       },
+       "custom_textbox": "",
+       "seed": 3,
+       "avatar": "http://x/a.png",
+       "id": [
+        1,
+        2
+       ]
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": "{}"
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": "{\"ssbu\": [[\"kirby\", 1]]}"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "first_run",
+   "files": {},
+   "steps": [
+    {
+     "op": "load"
+    },
+    {
+     "op": "add",
+     "players": [
+      {
+       "gamerTag": "India"
+      }
+     ]
+    }
+   ],
+   "after": [
+    {
+     "file": "[]",
+     "csv_exists": false,
+     "database": {}
+    },
+    {
+     "file": "[\n  {\n    \"gamerTag\": \"India\"\n  }\n]",
+     "csv_exists": false,
+     "database": {
+      "India": {
+       "gamerTag": "India"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "legacy_csv_import",
+   "files": {
+    "local_players.csv": "prefix,gamerTag,name,twitter,country_code,state_code,mains,custom_textbox,extra\nSPN,Juliet,Juliet Real,jt,BR,,'{\"ssbu\": [[\"mario\", 1]]}',,dropped on save\n,Kilo,,,,,not json,,\nSPN,Juliet,'second row, ignored',,,,{},,\n"
+   },
+   "steps": [
+    {
+     "op": "load"
+    }
+   ],
+   "after": [
+    {
+     "file": "[\n  {\n    \"prefix\": \"SPN\",\n    \"gamerTag\": \"Juliet\",\n    \"name\": \"Juliet Real\",\n    \"twitter\": \"jt\",\n    \"country_code\": \"BR\",\n    \"state_code\": \"\",\n    \"mains\": {\n      \"ssbu\": [\n        [\n          \"mario\",\n          1\n        ]\n      ]\n    },\n    \"custom_textbox\": \"\"\n  },\n  {\n    \"prefix\": \"\",\n    \"gamerTag\": \"Kilo\",\n    \"name\": \"\",\n    \"twitter\": \"\",\n    \"country_code\": \"\",\n    \"state_code\": \"\",\n    \"mains\": {},\n    \"custom_textbox\": \"\"\n  }\n]",
+     "csv_exists": false,
+     "database": {
+      "SPN Juliet": {
+       "prefix": "SPN",
+       "gamerTag": "Juliet",
+       "name": "Juliet Real",
+       "twitter": "jt",
+       "country_code": "BR",
+       "state_code": "",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          1
+         ]
+        ]
+       },
+       "custom_textbox": "",
+       "extra": "dropped on save"
+      },
+      "Kilo": {
+       "prefix": "",
+       "gamerTag": "Kilo",
+       "name": "",
+       "twitter": "",
+       "country_code": "",
+       "state_code": "",
+       "mains": {},
+       "custom_textbox": "",
+       "extra": ""
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "legacy_csv_ignored_next_to_json",
+   "files": {
+    "local_players.json": "[{\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"Alpha Real\", \"twitter\": \"alpha_tw\", \"country_code\": \"JP\", \"state_code\": \"13\", \"mains\": {\"ssbu\": [[\"mario\", 2], [\"luigi\", 0, \"alt\"]]}, \"custom_textbox\": \"\", \"seed\": 3, \"avatar\": \"http://x/a.png\", \"id\": [1, 2]}, {\"prefix\": \"\", \"gamerTag\": \"Bravo\", \"name\": \"\", \"mains\": {\"ssbu\": [[\"peach\", \"1\"]], \"sf6\": [[\"ryu\", 0]]}}, {\"gamerTag\": \"Charlie\"}, {\"prefix\": null, \"gamerTag\": \"Delta\", \"name\": \"デルタ\", \"country_code\": \"US\", \"mains\": {}}, {\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"duplicate, ignored\"}, {\"gamerTag\": \"Echo\", \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"}]",
+    "local_players.csv": "prefix,gamerTag,name,twitter,country_code,state_code,mains,custom_textbox,extra\nSPN,Juliet,Juliet Real,jt,BR,,'{\"ssbu\": [[\"mario\", 1]]}',,dropped on save\n,Kilo,,,,,not json,,\nSPN,Juliet,'second row, ignored',,,,{},,\n"
+   },
+   "steps": [
+    {
+     "op": "load"
+    }
+   ],
+   "after": [
+    {
+     "file": "[{\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"Alpha Real\", \"twitter\": \"alpha_tw\", \"country_code\": \"JP\", \"state_code\": \"13\", \"mains\": {\"ssbu\": [[\"mario\", 2], [\"luigi\", 0, \"alt\"]]}, \"custom_textbox\": \"\", \"seed\": 3, \"avatar\": \"http://x/a.png\", \"id\": [1, 2]}, {\"prefix\": \"\", \"gamerTag\": \"Bravo\", \"name\": \"\", \"mains\": {\"ssbu\": [[\"peach\", \"1\"]], \"sf6\": [[\"ryu\", 0]]}}, {\"gamerTag\": \"Charlie\"}, {\"prefix\": null, \"gamerTag\": \"Delta\", \"name\": \"デルタ\", \"country_code\": \"US\", \"mains\": {}}, {\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"duplicate, ignored\"}, {\"gamerTag\": \"Echo\", \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"}]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Real",
+       "twitter": "alpha_tw",
+       "country_code": "JP",
+       "state_code": "13",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "luigi",
+          0,
+          "alt"
+         ]
+        ]
+       },
+       "custom_textbox": "",
+       "seed": 3,
+       "avatar": "http://x/a.png",
+       "id": [
+        1,
+        2
+       ]
+      },
+      "Bravo": {
+       "prefix": "",
+       "gamerTag": "Bravo",
+       "name": "",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": "{}"
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": "{\"ssbu\": [[\"kirby\", 1]]}"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "name": "get_player_from_tag",
+   "files": {
+    "local_players.json": "[{\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"Alpha Real\", \"twitter\": \"alpha_tw\", \"country_code\": \"JP\", \"state_code\": \"13\", \"mains\": {\"ssbu\": [[\"mario\", 2], [\"luigi\", 0, \"alt\"]]}, \"custom_textbox\": \"\", \"seed\": 3, \"avatar\": \"http://x/a.png\", \"id\": [1, 2]}, {\"prefix\": \"\", \"gamerTag\": \"Bravo\", \"name\": \"\", \"mains\": {\"ssbu\": [[\"peach\", \"1\"]], \"sf6\": [[\"ryu\", 0]]}}, {\"gamerTag\": \"Charlie\"}, {\"prefix\": null, \"gamerTag\": \"Delta\", \"name\": \"デルタ\", \"country_code\": \"US\", \"mains\": {}}, {\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"duplicate, ignored\"}, {\"gamerTag\": \"Echo\", \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"}]"
+   },
+   "steps": [
+    {
+     "op": "load"
+    },
+    {
+     "op": "get",
+     "tag": "alpha"
+    },
+    {
+     "op": "get",
+     "tag": "SPN Alpha"
+    },
+    {
+     "op": "get",
+     "tag": "zulu"
+    },
+    {
+     "op": "get",
+     "tag": "DELTA"
+    }
+   ],
+   "after": [
+    {
+     "file": "[{\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"Alpha Real\", \"twitter\": \"alpha_tw\", \"country_code\": \"JP\", \"state_code\": \"13\", \"mains\": {\"ssbu\": [[\"mario\", 2], [\"luigi\", 0, \"alt\"]]}, \"custom_textbox\": \"\", \"seed\": 3, \"avatar\": \"http://x/a.png\", \"id\": [1, 2]}, {\"prefix\": \"\", \"gamerTag\": \"Bravo\", \"name\": \"\", \"mains\": {\"ssbu\": [[\"peach\", \"1\"]], \"sf6\": [[\"ryu\", 0]]}}, {\"gamerTag\": \"Charlie\"}, {\"prefix\": null, \"gamerTag\": \"Delta\", \"name\": \"デルタ\", \"country_code\": \"US\", \"mains\": {}}, {\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"duplicate, ignored\"}, {\"gamerTag\": \"Echo\", \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"}]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Real",
+       "twitter": "alpha_tw",
+       "country_code": "JP",
+       "state_code": "13",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "luigi",
+          0,
+          "alt"
+         ]
+        ]
+       },
+       "custom_textbox": "",
+       "seed": 3,
+       "avatar": "http://x/a.png",
+       "id": [
+        1,
+        2
+       ]
+      },
+      "Bravo": {
+       "prefix": "",
+       "gamerTag": "Bravo",
+       "name": "",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": "{}"
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": "{\"ssbu\": [[\"kirby\", 1]]}"
+      }
+     }
+    },
+    {
+     "file": "[{\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"Alpha Real\", \"twitter\": \"alpha_tw\", \"country_code\": \"JP\", \"state_code\": \"13\", \"mains\": {\"ssbu\": [[\"mario\", 2], [\"luigi\", 0, \"alt\"]]}, \"custom_textbox\": \"\", \"seed\": 3, \"avatar\": \"http://x/a.png\", \"id\": [1, 2]}, {\"prefix\": \"\", \"gamerTag\": \"Bravo\", \"name\": \"\", \"mains\": {\"ssbu\": [[\"peach\", \"1\"]], \"sf6\": [[\"ryu\", 0]]}}, {\"gamerTag\": \"Charlie\"}, {\"prefix\": null, \"gamerTag\": \"Delta\", \"name\": \"デルタ\", \"country_code\": \"US\", \"mains\": {}}, {\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"duplicate, ignored\"}, {\"gamerTag\": \"Echo\", \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"}]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Real",
+       "twitter": "alpha_tw",
+       "country_code": "JP",
+       "state_code": "13",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "luigi",
+          0,
+          "alt"
+         ]
+        ]
+       },
+       "custom_textbox": "",
+       "seed": 3,
+       "avatar": "http://x/a.png",
+       "id": [
+        1,
+        2
+       ]
+      },
+      "Bravo": {
+       "prefix": "",
+       "gamerTag": "Bravo",
+       "name": "",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": "{}"
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": "{\"ssbu\": [[\"kirby\", 1]]}"
+      }
+     },
+     "result": {
+      "value": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Real",
+       "twitter": "alpha_tw",
+       "country_code": "JP",
+       "state_code": "13",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "luigi",
+          0,
+          "alt"
+         ]
+        ]
+       },
+       "custom_textbox": "",
+       "seed": 3,
+       "avatar": "http://x/a.png",
+       "id": [
+        1,
+        2
+       ]
+      }
+     }
+    },
+    {
+     "file": "[{\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"Alpha Real\", \"twitter\": \"alpha_tw\", \"country_code\": \"JP\", \"state_code\": \"13\", \"mains\": {\"ssbu\": [[\"mario\", 2], [\"luigi\", 0, \"alt\"]]}, \"custom_textbox\": \"\", \"seed\": 3, \"avatar\": \"http://x/a.png\", \"id\": [1, 2]}, {\"prefix\": \"\", \"gamerTag\": \"Bravo\", \"name\": \"\", \"mains\": {\"ssbu\": [[\"peach\", \"1\"]], \"sf6\": [[\"ryu\", 0]]}}, {\"gamerTag\": \"Charlie\"}, {\"prefix\": null, \"gamerTag\": \"Delta\", \"name\": \"デルタ\", \"country_code\": \"US\", \"mains\": {}}, {\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"duplicate, ignored\"}, {\"gamerTag\": \"Echo\", \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"}]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Real",
+       "twitter": "alpha_tw",
+       "country_code": "JP",
+       "state_code": "13",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "luigi",
+          0,
+          "alt"
+         ]
+        ]
+       },
+       "custom_textbox": "",
+       "seed": 3,
+       "avatar": "http://x/a.png",
+       "id": [
+        1,
+        2
+       ]
+      },
+      "Bravo": {
+       "prefix": "",
+       "gamerTag": "Bravo",
+       "name": "",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": "{}"
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": "{\"ssbu\": [[\"kirby\", 1]]}"
+      }
+     },
+     "result": {
+      "value": null
+     }
+    },
+    {
+     "file": "[{\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"Alpha Real\", \"twitter\": \"alpha_tw\", \"country_code\": \"JP\", \"state_code\": \"13\", \"mains\": {\"ssbu\": [[\"mario\", 2], [\"luigi\", 0, \"alt\"]]}, \"custom_textbox\": \"\", \"seed\": 3, \"avatar\": \"http://x/a.png\", \"id\": [1, 2]}, {\"prefix\": \"\", \"gamerTag\": \"Bravo\", \"name\": \"\", \"mains\": {\"ssbu\": [[\"peach\", \"1\"]], \"sf6\": [[\"ryu\", 0]]}}, {\"gamerTag\": \"Charlie\"}, {\"prefix\": null, \"gamerTag\": \"Delta\", \"name\": \"デルタ\", \"country_code\": \"US\", \"mains\": {}}, {\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"duplicate, ignored\"}, {\"gamerTag\": \"Echo\", \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"}]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Real",
+       "twitter": "alpha_tw",
+       "country_code": "JP",
+       "state_code": "13",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "luigi",
+          0,
+          "alt"
+         ]
+        ]
+       },
+       "custom_textbox": "",
+       "seed": 3,
+       "avatar": "http://x/a.png",
+       "id": [
+        1,
+        2
+       ]
+      },
+      "Bravo": {
+       "prefix": "",
+       "gamerTag": "Bravo",
+       "name": "",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": "{}"
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": "{\"ssbu\": [[\"kirby\", 1]]}"
+      }
+     },
+     "result": {
+      "value": null
+     }
+    },
+    {
+     "file": "[{\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"Alpha Real\", \"twitter\": \"alpha_tw\", \"country_code\": \"JP\", \"state_code\": \"13\", \"mains\": {\"ssbu\": [[\"mario\", 2], [\"luigi\", 0, \"alt\"]]}, \"custom_textbox\": \"\", \"seed\": 3, \"avatar\": \"http://x/a.png\", \"id\": [1, 2]}, {\"prefix\": \"\", \"gamerTag\": \"Bravo\", \"name\": \"\", \"mains\": {\"ssbu\": [[\"peach\", \"1\"]], \"sf6\": [[\"ryu\", 0]]}}, {\"gamerTag\": \"Charlie\"}, {\"prefix\": null, \"gamerTag\": \"Delta\", \"name\": \"デルタ\", \"country_code\": \"US\", \"mains\": {}}, {\"prefix\": \"SPN\", \"gamerTag\": \"Alpha\", \"name\": \"duplicate, ignored\"}, {\"gamerTag\": \"Echo\", \"mains\": \"{\\\"ssbu\\\": [[\\\"kirby\\\", 1]]}\"}]",
+     "csv_exists": false,
+     "database": {
+      "SPN Alpha": {
+       "prefix": "SPN",
+       "gamerTag": "Alpha",
+       "name": "Alpha Real",
+       "twitter": "alpha_tw",
+       "country_code": "JP",
+       "state_code": "13",
+       "mains": {
+        "ssbu": [
+         [
+          "mario",
+          2
+         ],
+         [
+          "luigi",
+          0,
+          "alt"
+         ]
+        ]
+       },
+       "custom_textbox": "",
+       "seed": 3,
+       "avatar": "http://x/a.png",
+       "id": [
+        1,
+        2
+       ]
+      },
+      "Bravo": {
+       "prefix": "",
+       "gamerTag": "Bravo",
+       "name": "",
+       "mains": {
+        "ssbu": [
+         [
+          "peach",
+          "1"
+         ]
+        ],
+        "sf6": [
+         [
+          "ryu",
+          0
+         ]
+        ]
+       }
+      },
+      "Charlie": {
+       "gamerTag": "Charlie",
+       "mains": "{}"
+      },
+      "Delta": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      },
+      "Echo": {
+       "gamerTag": "Echo",
+       "mains": "{\"ssbu\": [[\"kirby\", 1]]}"
+      }
+     },
+     "result": {
+      "value": {
+       "prefix": null,
+       "gamerTag": "Delta",
+       "name": "デルタ",
+       "country_code": "US",
+       "mains": {}
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

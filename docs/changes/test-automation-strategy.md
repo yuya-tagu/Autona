@@ -251,7 +251,7 @@ pin: `tests/test_harness_isolation.py` の
 #### 運用注意: ハーネス外から設定・選手 DB の保存系を呼ばない
 
 `autonaApp` fixture の外（= CWD がプロジェクトルート）で `SettingsManager.Set()` や
-`AutonaPlayerDB` の保存系を呼ぶと、**実運用の `user_data/settings.json` /
+`PlayerDB.instance` の保存系（ADR-005 S3e-1 まで `AutonaPlayerDB`）を呼ぶと、**実運用の `user_data/settings.json` /
 `user_data/local_players.json` を上書きする**。ユーザーの API トークン・ポート・
 ホットキー設定が消える。
 

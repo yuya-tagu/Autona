@@ -80,18 +80,29 @@ def bootstrap_core():
 
     # Static asset data with no dependency on anything constructed here:
     # LocaleHelper reads the shipped language tables (src/i18n/mapping.json
-    # and assets/data_countries.json), BadWordFilter the ngword lists. Both
-    # only fill class attributes. They are placed this early because the
-    # data is read from all over the widget tree at runtime and there is no
-    # reason to make later steps care about the ordering. (The per-run
-    # locale itself -- LoadLocale/LoadRoundNames -- is the shell's:
-    # Window.__init__ or src/headless.py. Its QTranslator is QtCore, so it
-    # only needs the application object, of either kind.)
+    # and assets/data_countries.json), BadWordFilter the ngword lists. They
+    # are placed this early because the data is read from all over the
+    # widget tree at runtime and there is no reason to make later steps care
+    # about the ordering. (The per-run locale itself --
+    # LoadLocale/LoadRoundNames -- is the shell's: Window.__init__ or
+    # src/headless.py. Its QTranslator is QtCore, so it only needs the
+    # application object, of either kind.)
     from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
     AutonaLocaleHelper.Initialize()
 
-    from .Helpers.AutonaBadWordFilter import AutonaBadWordFilter
-    AutonaBadWordFilter.Initialize()
+    # The bad-word filter is core (Qt-free, ADR-005 S3e-1): the program
+    # locale and the country -> languages / continent tables it selects the
+    # word lists by are AutonaLocaleHelper's, so they are injected as
+    # callables -- read at each censor, i.e. after the shell's LoadLocale(),
+    # the same deferred-read pattern as the catalogs below. Only the lists
+    # themselves are read here.
+    from .core.BadWordFilter import BadWordFilter
+    if BadWordFilter.instance is None:
+        BadWordFilter.instance = BadWordFilter(
+            programLocale=lambda: AutonaLocaleHelper.programLocale,
+            countryLanguages=AutonaLocaleHelper.GetCountrySpokenLanguages,
+            countryContinent=AutonaLocaleHelper.GetCountryContinent)
+        BadWordFilter.instance.Initialize()
 
     # StateManager next: it owns ./out and loads the persisted program
     # state, and every widget built later reads through it.
@@ -148,6 +159,24 @@ def bootstrap_core():
                              AutonaLocaleHelper.exportLocale),
             remap=AutonaLocaleHelper.GetRemaps)
         GameAssetCatalog.instance.ResetGameState()
+
+    # ORDER CONSTRAINT: the player DB (core, ADR-005 S3e-1) before its
+    # writers and readers: the tournament provider below, whose start.gg
+    # entrants worker adds players to it, the widgets, the web server and
+    # the shells' LoadDB(). It reads nothing here (LoadDB is the shell's) and
+    # needs only SettingsManager, read when players are merged.
+    # The Qt relay is attached right away, in this stage, because both shells
+    # need it: every change the DB announces becomes SetupModel(), i.e.
+    # db_updated on the GUI thread, which is what the web server's player DB
+    # push listens to (wire_web_server) -- the StateManagerBridge
+    # arrangement. The relay is QtCore only (a QObject signal marshalled
+    # through the GUI executor, which the shells start before LoadDB); the
+    # model it can also rebuild is QtGui and switched on by bootstrap_gui().
+    from .core.PlayerDB import PlayerDB
+    from .AutonaPlayerDB import AutonaPlayerDB
+    if PlayerDB.instance is None:
+        PlayerDB.instance = PlayerDB()
+    AutonaPlayerDB.Attach()
 
     # ORDER CONSTRAINT: the GraphQL query texts must be on the class before
     # the first Start.gg request. Loading them here, right above the
@@ -282,13 +311,15 @@ def bootstrap_gui():
     # effect at the bottom of AutonaPlayerDB, which silently required
     # GameAssetManager.instance to exist before *anything* imported PlayerDB --
     # including TournamentDataProvider and StartGGDataProvider, which both do.
-    # PlayerDB is a static class, so there is no instance to create here, only
-    # this wiring.
+    # The data and its change relay are bootstrap_core()'s (core/PlayerDB +
+    # AutonaPlayerDB.Attach, ADR-005 S3e-1); the Qt adapter is a static
+    # class, so there is no instance to create here, only this wiring.
     # ORDER CONSTRAINT: the model (QStandardItemModel + QIcons, i.e. QtGui)
     # is the desktop's, so it is switched on here, before the first
-    # SetupModel() -- the window's LoadDB(). Without it SetupModel only emits
-    # db_updated: the headless shell, where a start.gg entrants fetch still
-    # updates the DB from a worker thread (ADR-005 S3c).
+    # SetupModel() -- the window's LoadDB(), whose change announcement the
+    # relay turns into one. Without it SetupModel only emits db_updated: the
+    # headless shell, where a start.gg entrants fetch still updates the DB
+    # from a worker thread (ADR-005 S3c).
     from .AutonaPlayerDB import AutonaPlayerDB
     AutonaPlayerDB.EnableModel()
     AutonaGameAssetManager.instance.signals.onLoad.connect(

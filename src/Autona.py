@@ -192,7 +192,7 @@ from .AutonaSidebar import AutonaSidebar
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaAlertNotification import AutonaAlertNotification
 from .AutonaUpdater import AutonaUpdater, CleanupUpdateLeftovers
-from .AutonaPlayerDB import AutonaPlayerDB
+from .core.PlayerDB import PlayerDB
 from .Workers import *
 from .core.StateManager import StateManager
 from .core import StateSchema as schema
@@ -828,7 +828,7 @@ class Window(QMainWindow):
             self.RefreshTop8PhaseGroup)
         # NOTE: AutonaPlayerDB.signals.db_updated -> webserver.ws_playerdb is
         # wired in _StartWebServer(); there is no server to push to yet here.
-        AutonaPlayerDB.LoadDB()
+        PlayerDB.instance.LoadDB()
 
         # Footer status bar — surfaces the current long-running task
         # (Start.gg fetches, asset reloads, etc.) so the user can tell

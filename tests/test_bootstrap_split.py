@@ -104,19 +104,25 @@ def _steps(function_name):
 
 def test_bootstrap_core_steps_and_their_order():
     # Everything here runs under a bare QCoreApplication (see the subprocess
-    # test below). StartGG's query texts are loaded right above the provider
-    # that owns them; the Designer migration is last (before anything can
-    # serve or list designs, which the shells start afterwards).
+    # test below). The bad-word filter is built right after the locale
+    # tables its injected lookups read; the player DB and its db_updated
+    # relay come before the provider whose entrants worker writes to it
+    # (ADR-005 S3e-1). StartGG's query texts are loaded right above the
+    # provider that owns them; the Designer migration is last (before
+    # anything can serve or list designs, which the shells start afterwards).
     assert _steps("bootstrap_core") == [
         "SettingsManager.Initialize()",
         "LayoutOptionsManager.Initialize()",
         "AutonaLocaleHelper.Initialize()",
-        "AutonaBadWordFilter.Initialize()",
+        "BadWordFilter()",
+        "BadWordFilter.instance.Initialize()",
         "StateManager.Initialize()",
         "StateManagerBridge()",
         "AutonaActions()",
         "GameAssetCatalog()",
         "GameAssetCatalog.instance.ResetGameState()",
+        "PlayerDB()",
+        "AutonaPlayerDB.Attach()",
         "StartGGDataProvider.Initialize()",
         "AutonaTournamentDataProvider()",
         "TournamentInfoService()",
@@ -292,21 +298,40 @@ from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
 from src.Helpers.AutonaQtHelper import in_gui_thread
 from src.StateManagerBridge import StateManagerBridge
 from src.core.Actions import AutonaActions
+from src.core.BadWordFilter import BadWordFilter
 from src.core.CountryCatalog import CountryCatalog
 from src.core.GameAssetCatalog import GameAssetCatalog
+from src.core.PlayerDB import PlayerDB
 from src.core.TournamentInfoService import TournamentInfoService
+from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+
+# The filter reads the program locale through the injected callable, at
+# censor time: a locale loaded after the bootstrap is the one it sees.
+AutonaLocaleHelper.programLocale = "ja"
+filter_locale = BadWordFilter.instance._programLocale()
 
 report({
     "app_type": type(QCoreApplication.instance()).__name__,
     "core": {
         "StateManagerBridge": StateManagerBridge.instance is not None,
         "AutonaActions": AutonaActions.instance is not None,
+        "BadWordFilter": BadWordFilter.instance is not None,
         "GameAssetCatalog": GameAssetCatalog.instance is not None,
+        "PlayerDB": PlayerDB.instance is not None,
         "AutonaTournamentDataProvider":
             AutonaTournamentDataProvider.instance is not None,
         "TournamentInfoService": TournamentInfoService.instance is not None,
         "CountryCatalog": CountryCatalog.instance is not None,
     },
+    "bad_words_loaded": bool(BadWordFilter.instance.patterns),
+    "filter_locale": filter_locale,
+    "filter_country_languages":
+        BadWordFilter.instance._countryLanguages("JP"),
+    "filter_country_continent":
+        BadWordFilter.instance._countryContinent("BR"),
+    # The relay is the core stage's: the headless shell's web push needs it.
+    "player_db_relay": AutonaPlayerDB._attachedTo is PlayerDB.instance
+        and PlayerDB.instance.changed.subscriber_count() == 1,
     "gui": {
         "AutonaHotkeys": AutonaHotkeys.instance is not None,
         "AutonaGameAssetManager": AutonaGameAssetManager.instance is not None,
@@ -342,6 +367,13 @@ def test_bootstrap_core_runs_under_a_bare_qcoreapplication(tmp_path):
     assert result["board_host"] == "BoardHost"
     assert result["game_loader"] is False
     assert result["player_db_model"] is False
+    # The core bad-word filter got AutonaLocaleHelper's locale and country
+    # tables (ADR-005 S3e-1), and the player DB its db_updated relay.
+    assert result["bad_words_loaded"] is True
+    assert result["filter_locale"] == "ja"
+    assert result["filter_country_languages"] == ["ja"]
+    assert result["filter_country_continent"] == "SA"
+    assert result["player_db_relay"] is True
     # The QCoreApplication's thread is "the GUI thread" for GuiExecutor's
     # purposes: the headless shell's event loop runs there.
     assert result["in_gui_thread_main"] is True

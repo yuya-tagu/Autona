@@ -624,7 +624,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | ホットキー（デフォルト定義） | `src/AutonaHotkeys.py` のクラス定数 | Python | `AutonaHotkeys` | コード変更のみ |
 | ウィンドウ位置・サイズ | QSettings（Windows レジストリ） | バイナリ | `Window` | 自動保存 |
 | サイドバー選択・折りたたみ | QSettings（`sidebarIndex_v{STATE_VERSION}` / `sidebarCollapsed_v{STATE_VERSION}`） | バイナリ | `Window` | 自動保存 |
-| 選手 DB | `./user_data/local_players.json` | JSON 配列 | `AutonaPlayerDB` | PyQt の Player List + 直接 JSON 編集 |
+| 選手 DB | `./user_data/local_players.json` | JSON 配列 | `core/PlayerDB`（Qt 側は `AutonaPlayerDB` が補完モデル化。ADR-005 S3e-1） | PyQt の Player List + 直接 JSON 編集 |
 | 前回の内容（state。大会情報・配信設定・実況・Top 8・表示トグル等。`score` / `game` は起動時に破棄） | `./user_data/state.json`（`{"state_version": N, "state": {...}}`） | JSON | `core/StatePersistence`（版の移行は `core/StateMigrations`） | 自動保存（`StateManager.SaveState` の公開ごとに間引いて書く。最後の変更から 1 秒・最大 5 秒。終了時に書き切る。ADR-005 S3b） |
 | ルールセット（キャッシュ） | `./user_data/rulesets.json` | JSON | tournament provider | API 取得時に自動更新 |
 | ゲームアセット定義 | `./user_data/games/{game}/{asset_type}/config.json` | JSON | `core/GameAssetCatalog`（Qt 側は `AutonaGameAssetManager` がモデル化） | アセット追加時に手動編集 |
@@ -721,7 +721,7 @@ QSettings に保存された最後の選択に依存し、初期値は先頭ペ�
 | 5 | `Scoreboard` | `AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget` | board1=1v1、board2=team、board3=crew のスコア入力・選手編集・セット読み込み | `score.{N}.*` | `score.{N}.*`, `game.*` | ✓ |
 | 6 | `Commentary` | `AutonaCommentaryWidget` | 実況・解説者 12 スロットの編集（役割・コメント・表示トグル）、OBS 用 URL 案内・プレビュー。`commentary` の書き込みは `AutonaActions.PublishCommentary` | `commentary.{1..12}.*` | `commentary.{1..12}.*`, `tournamentInfo.*` | ✓ |
 | 7 | `Statistics` | `AutonaStatsWidget` | 内部 `QTabWidget` で複数ビューを集約（下記 §4.1.0） | （read-only） | `score.{N}.recent_sets`, `last_sets`, `upset_factor` ほか | ✓ |
-| 8 | `Players` | `AutonaPlayerBrowserWidget` | 選手一覧（2タブ）: トーナメント出場選手（provider.top_entrants ＋ ローカルDB 突き合わせ、シード順、P1/P2 セット）／登録済み選手（ローカル選手DB の閲覧・検索・新規登録・編集・削除） | `player_editor.1.*`（編集ダイアログの一時パス、close で `StateSchema.ClearPlayerEditor()`） | `AutonaPlayerDB.database`, `provider.top_entrants`（state 非依存） | ✓ |
+| 8 | `Players` | `AutonaPlayerBrowserWidget` | 選手一覧（2タブ）: トーナメント出場選手（provider.top_entrants ＋ ローカルDB 突き合わせ、シード順、P1/P2 セット）／登録済み選手（ローカル選手DB の閲覧・検索・新規登録・編集・削除） | `player_editor.1.*`（編集ダイアログの一時パス、close で `StateSchema.ClearPlayerEditor()`） | `PlayerDB.instance`（core）, `provider.top_entrants`（state 非依存） | ✓ |
 
 > **NOTE タブ（`AutonaNotesWidget`）は廃止**。`ANLYSE`（`AutonaAnalysisWidget`）は**トップレベルのドックではなく**、`Statistics` ドック内の `QTabWidget` のサブタブとして埋め込まれている（`QDockWidget` → `QWidget` パネルに降格）。
 > 旧 `PLAYERS`（`AutonaPlayerListWidget`、Top-8 順位ロスター編集）は機能ごと削除された。

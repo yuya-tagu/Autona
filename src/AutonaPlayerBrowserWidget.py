@@ -8,6 +8,7 @@ from qtpy.QtWidgets import *
 from loguru import logger
 
 from .core import StateSchema as schema
+from .core.PlayerDB import PlayerDB
 from .AutonaPlayerDB import AutonaPlayerDB
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
@@ -390,7 +391,7 @@ class AutonaPlayerBrowserWidget(QDockWidget):
                 tag = entrant.get("gamerTag") or ""
                 seed = entrant.get("seed")
                 seedText = "-" if not seed or seed >= _UNSEEDED else str(seed)
-                player = AutonaPlayerDB.GetPlayerFromTag(tag) if tag else None
+                player = PlayerDB.instance.GetPlayerFromTag(tag) if tag else None
                 player = player or {}
                 charIcon, charText = self._CharacterItems(player)
                 self.entrantsModel.appendRow([
@@ -425,7 +426,7 @@ class AutonaPlayerBrowserWidget(QDockWidget):
         ])
 
         for fullTag, player in sorted(
-                AutonaPlayerDB.database.items(), key=lambda kv: kv[0].lower()):
+                PlayerDB.instance.Items(), key=lambda kv: kv[0].lower()):
             if player is None:
                 continue
             try:
@@ -496,7 +497,7 @@ class AutonaPlayerBrowserWidget(QDockWidget):
         # merges every entrant into the DB, but fall back to a bare record if
         # the player somehow isn't there yet. Saving writes back to the DB
         # (overwrite=True) and db_updated refreshes both tabs.
-        player = AutonaPlayerDB.GetPlayerFromTag(tag) or {"gamerTag": tag}
+        player = PlayerDB.instance.GetPlayerFromTag(tag) or {"gamerTag": tag}
         dialog = _PlayerEditorDialog(self, playerData=player)
         dialog.exec()
 
@@ -508,7 +509,7 @@ class AutonaPlayerBrowserWidget(QDockWidget):
         fullTag = self._SelectedRegisteredTag()
         if not fullTag:
             return
-        player = AutonaPlayerDB.database.get(fullTag)
+        player = PlayerDB.instance.Get(fullTag)
         if player is None:
             logger.warning(f"Player Browser: stale row, '{fullTag}' not in DB")
             return
@@ -527,4 +528,4 @@ class AutonaPlayerBrowserWidget(QDockWidget):
             + f"\n\n{fullTag}",
         )
         if answer == QMessageBox.StandardButton.Yes:
-            AutonaPlayerDB.DeletePlayer(fullTag)
+            PlayerDB.instance.DeletePlayer(fullTag)

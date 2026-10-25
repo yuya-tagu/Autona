@@ -18,6 +18,7 @@ from .core.PlayerService import CharacterSlot
 from .core.StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaPlayerDB import AutonaPlayerDB
+from .core.PlayerDB import PlayerDB
 from .Helpers.AutonaDirHelper import AutonaResolve
 from .Helpers.AutonaQtHelper import NoIconProxyModel
 from . import ui_constants as UI
@@ -1405,7 +1406,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 tag = data.get(
                     "prefix")+" "+data.get("gamerTag") if data.get("prefix") else data.get("gamerTag")
 
-                dbPlayer = AutonaPlayerDB.database.get(tag)
+                dbPlayer = PlayerDB.instance.Get(tag)
                 if dbPlayer is not None:
                     self.SetData(dbPlayer, dontLoadFromDB=True,
                                  clear=False, no_mains=no_mains)
@@ -1673,14 +1674,14 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 schema.PLAYER_STATE_KEY,
                 QComboBox).currentData(Qt.ItemDataRole.UserRole).get("code")
 
-        AutonaPlayerDB.AddPlayers([playerData], overwrite=True)
+        PlayerDB.instance.AddPlayers([playerData], overwrite=True)
 
         self.CharactersChanged(includeMains=True)
 
     def ManageSavePlayerToDBText(self):
         tag = self.GetCurrentPlayerTag()
 
-        if tag in AutonaPlayerDB.database:
+        if PlayerDB.instance.Contains(tag):
             self.save_bt.setText(
                 QApplication.translate("app", "Update player"))
         else:
@@ -1690,12 +1691,12 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
     def ManageDeletePlayerFromDBActive(self):
         tag = self.GetCurrentPlayerTag()
 
-        if tag in AutonaPlayerDB.database:
+        if PlayerDB.instance.Contains(tag):
             self.delete_bt.setEnabled(True)
         else:
             self.delete_bt.setEnabled(False)
 
     def DeletePlayerFromDB(self):
         tag = self.GetCurrentPlayerTag()
-        AutonaPlayerDB.DeletePlayer(tag)
+        PlayerDB.instance.DeletePlayer(tag)
 
