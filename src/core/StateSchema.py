@@ -234,7 +234,8 @@ PLAYER_LINE_EDIT_KEYS = (
 # Every free-text input, i.e. what PlayerService.SetText accepts.
 PLAYER_TEXT_KEYS = PLAYER_LINE_EDIT_KEYS + (PLAYER_NOTE_KEY,)
 # The two combos whose selected row is published whole (a dict carrying the
-# code, the display name and the flag asset) -- PlayerService.SetLocation.
+# code, the display name and the flag asset). The card names the row by its
+# code; PlayerService.SetCountry / SetRegion build the dict (ADR-005 S1d).
 PLAYER_LOCATION_KEYS = (PLAYER_COUNTRY_KEY, PLAYER_STATE_KEY)
 
 PLAYER_INPUT_KEYS = PLAYER_TEXT_KEYS + (

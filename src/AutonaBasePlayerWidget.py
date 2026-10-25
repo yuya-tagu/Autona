@@ -8,10 +8,12 @@ AutonaScoreboardPlayerWidget is now the only subclass.
 
 Since the player instalment of headless core Step 5 this class no longer
 writes the state itself: `self.player` is a `core.PlayerService` bound to
-this widget's path, and the methods below read Qt (combo rows, line-edit
-text, the losers flag) and hand the answer to it. What each of them decided
--- how a display name is merged, where an avatar file is looked for, the
-shape of a character slot -- lives in that service.
+this widget's path, and the methods below read Qt (line-edit text, the
+losers flag, which combo rows are picked) and hand the answer to it. What
+each of them decided -- how a display name is merged, where an avatar file
+is looked for, what a character slot holds -- lives in that service. Since
+ADR-005 S1d a combo pick leaves the widget as identifiers only (en_name,
+skin row, codes); the service builds the published value from the catalogs.
 
 Subclasses are responsible for:
 - __init__ (own .ui file, own widget setup)
@@ -32,7 +34,8 @@ from qtpy.QtCore import *
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .core import StateSchema as schema
 from .core.CountryCatalog import CountryCatalog
-from .core.PlayerService import KEEP_ONLINE_AVATAR, PlayerService
+from .core.PlayerService import (
+    KEEP_ONLINE_AVATAR, CharacterSlot, PlayerService)
 from .core.StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from loguru import logger
@@ -85,38 +88,37 @@ class AutonaBasePlayerWidget(QGroupBox):
             return
 
         with self.dataLock:
-            characters = {}
+            self.player.PublishCharacterSlots(
+                [self._CharacterSlot(character, color, variant)
+                 for _element, character, color, variant
+                 in self.character_elements],
+                includeMains)
 
-            for i, (element, character, color, variant) in enumerate(self.character_elements):
-                data = character.currentData()
+    @staticmethod
+    def _CharacterSlot(character, color, variant) -> CharacterSlot:
+        """What one slot's three combos picked, as identifiers (ADR-005 S1d).
 
-                if data == None:
-                    data = {}
+        Only the keys of the picked rows leave the widget; what the state
+        holds for them -- the names, the asset paths, the variant -- is
+        PlayerService's to build from the game catalog. The skin is the
+        skin combo's row, which is what the slot has always published.
 
-                if character.currentData() == None:
-                    data = {"name": character.currentText()}
-
-                if color.currentData() and color.currentData().get("name", ""):
-                    data["name"] = color.currentData().get("name", "")
-
-                if color.currentData() and color.currentData().get("en_name", ""):
-                    data["en_name"] = color.currentData().get("en_name", "")
-
-                if color.currentData() and character.currentData():
-                    data["assets"] = color.currentData().get("assets", {})
-
-                if data.get("assets") == None:
-                    data["assets"] = {}
-
-                data["skin"] = color.currentIndex()
-                if variant.currentData():
-                    data["variant"] = variant.currentData()
-                else:
-                    data["variant"] = {}
-
-                characters[i+1] = data
-
-            self.player.PublishCharacters(characters, includeMains)
+        `text` is only used when the catalog has no row for the pick: the
+        typed text when nothing is picked, else the picked row's own name.
+        A picked row the catalog lacks is the moment between a game load
+        and the combos' rebind, and the combo's text is then the "display
+        name / en_name" label, not a name (CharacterSlot).
+        """
+        data = character.currentData()
+        variantData = variant.currentData()
+        picked = data if isinstance(data, dict) else None
+        return CharacterSlot(
+            character=picked.get("en_name") if picked is not None else None,
+            skin=color.currentIndex(),
+            variant=(variantData.get("en_name")
+                     if isinstance(variantData, dict) else None),
+            text=(picked.get("name") if picked is not None
+                  and picked.get("name") else character.currentText()))
 
     def ExportMergedName(self):
         with self.dataLock:
