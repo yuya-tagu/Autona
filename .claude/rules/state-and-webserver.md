@@ -281,7 +281,29 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
     `src/core/LayoutCatalog.py` を直接呼ぶ。state を読み書きせず、パネル（Board /
     Commentary / Top 8）と同じ関数を呼ぶこと自体が一本化なので、`WebServerActions` に
     中継メソッドを足しても経路が増えるだけになる。state を書く操作はこの例外に入らない
-- CORS は Flask-CORS で全オリジン許可済み。**例外: `/api/designer/imports`** は Origin を `null` / figma.com に限定し、ペアリングコード（`X-Autona-Pairing` ヘッダ）が必須
+- **公開面の判定は `src/core/WebAccess.py` が正本**（ADR-005 S3a）。サーバー側は `before_request`（`_guard_http_request`）と
+  Socket.IO の `ws_on()` 登録（書き込みイベントを `_ws_guard` で包む）から問い合わせるだけ
+  - **新しいルート / Socket.IO イベントは `ROUTE_ACCESS` / `EVENT_ACCESS` に分類を足す**（READ / WRITE / PLAYERDB / DESIGNER / STATIC）。
+    台帳テスト（`tests/test_webserver_routes.py`）が「全 endpoint・全イベントが分類済み」と分類規則（v1 の GET = READ、それ以外 = WRITE 等）を pin する。
+    分類のない名前は WRITE 扱い（開かない側に倒れる）。GET でも状態を変える legacy ルートは WRITE（効果で分類する）
+  - Socket.IO のハンドラは `socketio.on` ではなく `ws_on` で登録する（`socketio.on` で直接登録すると判定を素通りする）
+  - WRITE / PLAYERDB: この PC（ループバックか、この PC の LAN IP。`GetLocalIPs()` を初回に引いて保持）からはトークン不要、
+    LAN の他端末はトークン必須（`X-Autona-Token` / `Authorization: Bearer` / `?token=`。Socket.IO は接続時の `auth: {token}`）。
+    トークンなしで通すのは次をすべて満たすときだけ（`WebAccess._AmbientRefusal`）:
+    転送ヘッダ（`X-Forwarded-For` / `Forwarded` / `X-Real-IP`）が無い（ローカルのプロキシ・トンネルの中継は他端末扱い）、
+    `Host` がこのサーバーの名前と待ち受けポート（DNS rebinding 対策）、`Sec-Fetch-Site` が無いか `same-origin` / `none`、
+    `Origin` が無いか自分のオリジン（`null` は不可）。
+    拒否は v1 のエラーエンベロープ（401 `UNAUTHENTICATED` / 403 `FORBIDDEN`。Socket.IO はイベントの ack）
+  - トークンは `WebAccess.Token()` が初回に読み（無ければ発行）、以後メモリに持つ。変えるのは `RegenerateToken()` だけ。
+    settings.json を読めなかった（`SettingsManager.loadFailed`）・値が壊れているときは発行せず `""`（LAN の書き込みは全部拒否）
+  - Socket.IO は接続を全部受け入れて state を配る（OBS の file:// オーバーレイのため）。書き込み可かどうかは接続時（handshake の
+    要求のヘッダ）に決めて `request.environ` に持つ。トークンなしで通れる接続はトークンを送ってきても ambient 扱いで、再発行で切れない。
+    トークンで入った接続だけを世代で切る。選手 DB の broadcast は信頼済みの room にだけ送る
+  - 静的配信は `StaticPath()` の許可リストだけ（`layout/`・`assets/`・`web/build/`・`out/`・`user_data/` の画像フォルダ・
+    `tournament_banner.png`）。Flask の `static_folder` は無効。許可リスト外は 404 + 種類ごとに初回 warning
+  - Web UI の開発サーバー（`npm start`、localhost:3100）は別オリジンなので、書き込みには `?token=<token>` 付きで開く
+- CORS は Flask-CORS で全オリジン許可のまま（読み取りは別オリジンからも読める）。**例外: `/api/designer/imports`** は Origin を `null` / figma.com に限定し、ペアリングコード（`X-Autona-Pairing` ヘッダ）が必須。
+  `/api/designer/*` は Designer トークン（ループバック限定）とペアリングコードの独自ガードのままで、S3a の判定は通さない（DESIGNER）
 
 ## Helpers
 

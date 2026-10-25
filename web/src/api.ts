@@ -1,4 +1,5 @@
 import {BASE_URL} from "./env";
+import {withToken} from "./autonaToken";
 
 // Thin fetch wrapper for the desktop app's REST endpoints.
 // Non-2xx responses and timeouts reject, so callers (useApiAction /
@@ -23,6 +24,10 @@ async function request(path: string, init?: RequestInit, opts?: ApiOptions): Pro
     const resp = await fetch(`${BASE_URL}${path}`, {
         signal: AbortSignal.timeout(opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS),
         ...init,
+        // The access token when this page was opened with one (ADR-005 S3a):
+        // from another computer, writes need it. None on this PC. Merged
+        // through Headers, so the caller's headers survive in any form.
+        headers: withToken(init?.headers),
     });
     if (!resp.ok) {
         throw new Error(`${init?.method ?? "GET"} ${path} failed: HTTP ${resp.status}`);

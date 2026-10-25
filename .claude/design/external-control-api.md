@@ -37,10 +37,25 @@
 - 既存ルート（`/score`・`/scoreboard<N>-...` 等）とは**パス空間が衝突しない**（`/api/` 前缀）。既存契約は不変（D3）。
 - **正本は `/api/v1`。旧ルートは deprecated（v2.0 で削除予定。それまで挙動不変）**（ADR-001 Addendum 2026-10-21）。
 
-### 2.2 認証・ネットワーク（D5）
-- **認証なし**。LAN 内運用を信頼境界とする前提を引き継ぐ。
-- バインドは既存通り `0.0.0.0`、CORS は既存通り全許可。
-- ⚠️ **無認証で破壊的操作まで叩ける**。緩和は confirm（§7）と操作ログ（§2.7）のみ。LAN 外運用が発生したら ADR-001 を Revisit。
+### 2.2 認証・ネットワーク（D5 → ADR-005 S3a で改定・2026-10-25）
+- バインドは既定 `127.0.0.1`。設定の「LAN 上の他のデバイスからのアクセスを許可」で `0.0.0.0`。
+- **LAN の他端末からの書き込み（POST / PATCH）はアクセストークン必須**。読み取り（GET）はトークン不要のまま。
+  同じ PC（同じ PC の Companion・ASS・curl）はトークン不要（今と同じ）。「同じ PC」は接続元がループバックか、この PC の LAN IP のどれか
+  （LAN IP の URL を同じ PC で使っていても通る）。ただし転送ヘッダ（`X-Forwarded-For` / `Forwarded` / `X-Real-IP`）が付いた要求は、
+  ローカルのリバースプロキシ・トンネルの中継とみなし、他の端末と同じ扱い（トークン必須）
+  - トークンは `user_data/settings.json` の `general.webserver_token`（初回起動時に生成。API設定ウィンドウで表示・コピー・再発行）
+  - 渡し方（どれか 1 つ）: `X-Autona-Token: <token>` / `Authorization: Bearer <token>` / クエリ `?token=<token>`（すでにクエリがあれば `&token=<token>`）
+  - 無い・誤り → `401 UNAUTHENTICATED`（`WWW-Authenticate: Bearer realm="Autona"` 付き）
+- **DNS rebinding 対策**（同じ PC にも適用）: トークンなしの書き込みは、`Host` がこのサーバーの名前
+  （`127.0.0.1|localhost|[::1]|<この PC の LAN IP>:<待ち受けポート>`）のときだけ。それ以外の `Host` は `401 UNAUTHENTICATED`
+  （`http://<PC 名>:5107` のようなホスト名も該当）
+- **ブラウザ経由の CSRF 対策**（同じ PC にも適用）: トークンなしの書き込みで、`Sec-Fetch-Site` が付いていて `same-origin` / `none` 以外
+  （`cross-site`・`same-site`）、または自分のオリジン（上と同じ名前とポート）以外の `Origin`（`null` を含む）が付いていたら
+  `403 FORBIDDEN`。Companion・ASS・curl・`requests` はこれらのヘッダを付けないので影響しない。正しいトークン付きの要求は Host・CSRF の判定も免除
+- 判定の正本は `src/core/WebAccess.py`（ルート・イベントの分類表 `ROUTE_ACCESS` / `EVENT_ACCESS`。分類のない endpoint は書き込み扱い）。
+  legacy ルートも同じ判定を通り、拒否時だけ v1 と同じエラーエンベロープを返す（成功時の `"OK"` 等は不変）
+- CORS（`Access-Control-Allow-Origin: *`）は残る。読み取りは別オリジンのページからも読める（OBS の file:// オーバーレイのため）
+- ⚠️ トークンは平文 HTTP で流れ、全端末で 1 つを共有する。緩和は confirm（§7）・操作ログ（§2.7）・再発行。LAN 外運用が発生したら ADR-001 を Revisit。
 
 ### 2.3 Content-Type
 - リクエストボディは `application/json`（**SHOULD**）。サーバーは `get_json(force=True)` で
@@ -85,6 +100,8 @@
 | code | HTTP | 意味・用途 |
 |------|------|-----------|
 | `INVALID_ARGUMENT` | 400 | パラメータ不正（範囲外の team/scoreboard、型不一致 等） |
+| `UNAUTHENTICATED` | 401 | 書き込みにトークンが要るのに、無い・誤り（LAN の他端末・転送ヘッダ付きの中継・このサーバーの名前以外の `Host` 宛て。§2.2。ADR-005 S3a） |
+| `FORBIDDEN` | 403 | トークンなしの書き込みが、別サイト・同一サイトの別オリジン・別オリジンのブラウザページから来た（§2.2 CSRF 対策） |
 | `NOT_FOUND` | 404 | 存在しないリソース（未知の set ID 等） |
 | `CONFIRMATION_REQUIRED` | 409 | 破壊的操作で `confirm:true` が無い（§7.2） |
 | `CONFLICT` | 409 | 重い操作が実行中（多重起動ガード・§2.8） |
@@ -96,7 +113,7 @@
 - **書き込み操作（§6・§7）は INFO で専用ロガーに記録（MUST）**: 時刻・送信元 IP（`request.remote_addr`）・
   メソッド・パス・主要パラメータ・結果（ok/error code）。
 - 読み取り（§5）は**記録しない**（or DEBUG）。既存 `before_request`/`after_request`（DEBUG・パスのみ）とは別建て。
-- ⚠️ 無認証のため操作主体は **IP 粒度まで**（D5 の帰結）。ボディに認証情報や PII を含めない（CLAUDE.md 機密ルール）。
+- ⚠️ トークンは全端末で 1 つを共有するため、操作主体は **IP 粒度まで**（D5 の帰結。S3a 以降も同じ）。トークンはログに出さない（拒否のログもパスのみで、クエリ文字列を含めない）。ボディに認証情報や PII を含めない（CLAUDE.md 機密ルール）。
   - 選手データを運ぶ `PATCH .../players/{p}`（§6.8）は**ボディのキー名だけ**を記録し、値（タグ・本名・SNS）は記録しない。
 
 ### 2.8 重い操作の非同期受付（202・D7）

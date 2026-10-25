@@ -1,3 +1,4 @@
+import functools
 import html
 import json
 import os
@@ -24,6 +25,8 @@ from .StateManagerBridge import StateManagerBridge
 from .AutonaWebServerActions import WebServerActions
 from .AutonaScoreboardManager import AutonaScoreboardManager
 from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
+from .core import WebAccess
+from .Helpers.AutonaNetworkHelper import GetLocalIPs
 from .AutonaDesignerService import (
     AutonaDesignerService,
     DesignerProjectError,
@@ -71,10 +74,16 @@ def _build_web_app():
     are registered here explicitly. tests/test_webserver_routes.py pins both
     the resulting route/event ledger and that class-attribute contract.
     """
-    app = Flask(__name__, static_folder=os.path.curdir)
+    # No Flask static folder (ADR-005 S3a): it served every file below the
+    # working directory under /./, beside file_request. file_request is the
+    # one file route now, and it serves only WebAccess.StaticPath()'s list.
+    app = Flask(__name__, static_folder=None)
     CORS(app)
     socketio = SocketIO(
         app,
+        # Any page may still connect and receive the state (OBS loads local
+        # files from file:// and http://absolute). What a connection may do
+        # beyond reading is decided per connection in ws_connect.
         cors_allowed_origins='*',
         # Uncomment to enable SocketIO logging (As logging is unuseful, we'll make this a dev flag)
         # logger=logger,
@@ -83,11 +92,32 @@ def _build_web_app():
     )
     app.config['CORS_HEADERS'] = 'Content-Type'
 
+    # Every Socket.IO handler below is registered through ws_on() rather
+    # than socketio.on() (ADR-005 S3a): a WRITE / PLAYERDB event
+    # (WebAccess.EVENT_ACCESS) is wrapped in WebServer._ws_guard, which
+    # refuses it on a connection that was not let in to write. Read events
+    # register unchanged. Returns the handler itself, like socketio.on().
+    def ws_on(event):
+        def register(handler):
+            if WebAccess.EventAccess(event) in WebAccess.GUARDED:
+                socketio.on(event)(WebServer._ws_guard(event, handler))
+            else:
+                socketio.on(event)(handler)
+            return handler
+        return register
+
     @app.before_request
     def log_request():
         # Debug level: OBS / Web UI poll dozens of endpoints per second.
         # At INFO this dominates the log file and stdout, drowning real signal.
         logger.debug(f"[FLASK] → {request.method} {request.path} from {request.remote_addr}")
+
+    # Writes and the player DB need the token from another computer, and a
+    # browser page that is not this server's own (ADR-005 S3a). Registered
+    # after log_request, so a refused request is still logged as arriving.
+    @app.before_request
+    def guard_request():
+        return WebServer._guard_http_request()
 
     @app.after_request
     def log_response(response):
@@ -108,12 +138,17 @@ def _build_web_app():
     def program_state():
         return WebServer.actions.program_state()
 
-    @socketio.on('program-state-update')
+    @ws_on('program-state-update')
     def ws_program_state_update(message):
         WebServer.ws_emit('program_state_update', {})
 
-    @socketio.on('connect')
+    # `message` is the client's `auth` payload here (flask_socketio passes
+    # it to the connect handler). The connection is told what it may do
+    # once, now: reading always; writing and the player DB only when
+    # Authorize lets it in (ADR-005 S3a).
+    @ws_on('connect')
     def ws_connect(message):
+        WebServer._authorize_ws_connection(message)
         WebServer.ws_program_state(message)
 
     # `ws_program_state` cannot become a closure-local: it is also connected to
@@ -121,7 +156,7 @@ def _build_web_app():
     # WebServer.ws_program_state() from _flush_pending_deltas / ws_connect.
     # It stays on the class and is registered for the same event here.
     # Same for ws_get_characters / ws_playerdb further below.
-    socketio.on('program_state')(WebServer.ws_program_state)
+    ws_on('program_state')(WebServer.ws_program_state)
 
     @socketio.on_error_default
     def ws_on_error(e):
@@ -131,7 +166,7 @@ def _build_web_app():
     def post_score():
         return WebServer.actions.post_score(request.get_data())
 
-    @socketio.on('score')
+    @ws_on('score')
     def ws_post_score(message):
         WebServer.ws_emit('score', WebServer.actions.post_score(message))
 
@@ -140,7 +175,7 @@ def _build_web_app():
     def team_scoreup(scoreboardNumber, team):
         return WebServer.actions.team_scoreup(scoreboardNumber, team)
 
-    @socketio.on('team_scoreup')
+    @ws_on('team_scoreup')
     def ws_team_scoreup(message):
         info = orjson.loads(message)
         WebServer.ws_emit('team_scoreup',
@@ -151,7 +186,7 @@ def _build_web_app():
     def team_scoredown(scoreboardNumber, team):
         return WebServer.actions.team_scoredown(scoreboardNumber, team)
 
-    @socketio.on('team_scoredown')
+    @ws_on('team_scoredown')
     def ws_team_scoredown(message):
         info = orjson.loads(message)
         WebServer.ws_emit('team_scoredown',
@@ -162,7 +197,7 @@ def _build_web_app():
     def team_color(scoreboardNumber, team, color):
         return WebServer.actions.team_color(scoreboardNumber, team, "#" + color)
 
-    @socketio.on('team_color')
+    @ws_on('team_color')
     def ws_team_color(message):
         info = orjson.loads(message)
         WebServer.ws_emit('team_scoredown',
@@ -178,7 +213,7 @@ def _build_web_app():
     def crew_member_stockdown(scoreboardNumber, team, member):
         return WebServer.actions.crew_member_stock(scoreboardNumber, team, member, -1)
 
-    @socketio.on('crew_member_stock')
+    @ws_on('crew_member_stock')
     def ws_crew_member_stock(message):
         info = orjson.loads(message)
         WebServer.ws_emit('crew_member_stock',
@@ -191,7 +226,7 @@ def _build_web_app():
     def crew_set_active(scoreboardNumber, team, member):
         return WebServer.actions.crew_set_active(scoreboardNumber, team, member)
 
-    @socketio.on('crew_set_active')
+    @ws_on('crew_set_active')
     def ws_crew_set_active(message):
         info = orjson.loads(message)
         WebServer.ws_emit('crew_set_active',
@@ -232,7 +267,7 @@ def _build_web_app():
         return WebServer.actions.set_display_option(
             orjson.loads(request.get_data()))
 
-    @socketio.on('set')
+    @ws_on('set')
     def ws_set_route(message):
         parsed = orjson.loads(message)
         WebServer.ws_emit('set', WebServer.actions.set_route(
@@ -253,7 +288,7 @@ def _build_web_app():
         data = request.get_json()
         return WebServer.actions.set_team_data(scoreboardNumber, team, player, data)
 
-    @socketio.on('update_team')
+    @ws_on('update_team')
     def ws_set_team_data(message):
         data = orjson.loads(message)
         WebServer.ws_emit('update_team',
@@ -269,7 +304,7 @@ def _build_web_app():
         data = request.get_json()
         return WebServer.actions.set_commentary_data(caster, data)
 
-    @socketio.on('update_commentary')
+    @ws_on('update_commentary')
     def ws_set_commentary_data(message):
         data = orjson.loads(message)
         WebServer.ws_emit('update_commentary',
@@ -284,7 +319,7 @@ def _build_web_app():
         data = request.get_json()
         return WebServer.actions.set_game(data)
     
-    @socketio.on('update_game')
+    @ws_on('update_game')
     def ws_set_game_data(message):
         if type(message) in {str, bytes}:
             data = orjson.loads(message)
@@ -301,7 +336,7 @@ def _build_web_app():
     def get_games():
         return WebServer.actions.get_games()
 
-    @socketio.on('games')
+    @ws_on('games')
     def ws_get_games(message):
         WebServer.ws_emit('games', WebServer.actions.get_games(), json=True)
 
@@ -310,7 +345,7 @@ def _build_web_app():
     def get_current_game():
         return WebServer.actions.get_current_game()
 
-    @socketio.on('current_game')
+    @ws_on('current_game')
     def ws_get_current_game(message):
         WebServer.ws_emit('get_current_game', WebServer.actions.get_current_game(), json=True)
 
@@ -319,7 +354,7 @@ def _build_web_app():
     def get_match_names():
         return WebServer.actions.get_match_names()
 
-    @socketio.on('match_names')
+    @ws_on('match_names')
     def ws_get_match_names(message):
         WebServer.ws_emit('match_names', WebServer.actions.get_match_names(), json=True)
 
@@ -330,14 +365,14 @@ def _build_web_app():
 
     # Stays on the class: Autona.py connects Window.signals.GameChanged to
     # self.webserver.ws_get_characters, i.e. by attribute on the instance.
-    socketio.on('characters')(WebServer.ws_get_characters)
+    ws_on('characters')(WebServer.ws_get_characters)
 
     # Get variants
     @app.route('/variants')
     def get_variants():
         return WebServer.actions.get_variants()
 
-    @socketio.on('variants')
+    @ws_on('variants')
     def ws_get_variants(message):
         WebServer.ws_emit('variants', WebServer.actions.get_variants(), json=True)
 
@@ -346,7 +381,7 @@ def _build_web_app():
     def swap_teams(scoreboardNumber):
         return WebServer.actions.swap_teams(scoreboardNumber)
 
-    @socketio.on('swap_teams')
+    @ws_on('swap_teams')
     def ws_swap_teams(message):
         info = orjson.loads(message)
         WebServer.ws_emit('swap_teams', WebServer.actions.swap_teams(
@@ -357,7 +392,7 @@ def _build_web_app():
     def get_swap(scoreboardNumber):
         return WebServer.actions.get_swap(scoreboardNumber)
 
-    @socketio.on('get_swap')
+    @ws_on('get_swap')
     def ws_get_swap(message):
         info = orjson.loads(message)
         WebServer.ws_emit('get_swap', WebServer.actions.get_swap(
@@ -368,7 +403,7 @@ def _build_web_app():
     def open_sets(scoreboardNumber):
         return WebServer.actions.open_sets(scoreboardNumber)
 
-    @socketio.on('open_set')
+    @ws_on('open_set')
     def ws_open_sets(message):
         info = orjson.loads(message)
         WebServer.ws_emit('open_set', WebServer.actions.open_sets(
@@ -379,7 +414,7 @@ def _build_web_app():
     def pull_stream_set(scoreboardNumber):
         return WebServer.actions.pull_stream_set(scoreboardNumber)
 
-    @socketio.on('pull_stream')
+    @ws_on('pull_stream')
     def ws_pull_stream_set(message):
         info = orjson.loads(message)
         WebServer.ws_emit('pull_stream', WebServer.actions.pull_stream_set(
@@ -390,7 +425,7 @@ def _build_web_app():
     def stats_recent_sets(scoreboardNumber):
         return WebServer.actions.stats_recent_sets(scoreboardNumber)
 
-    @socketio.on('stats_recent_sets')
+    @ws_on('stats_recent_sets')
     def ws_stats_recent_sets(message):
         info = orjson.loads(message)
         WebServer.ws_emit('stats_recent_sets',
@@ -401,7 +436,7 @@ def _build_web_app():
     def stats_upset_factor(scoreboardNumber):
         return WebServer.actions.stats_upset_factor(scoreboardNumber)
 
-    @socketio.on('stats_upset_factor')
+    @ws_on('stats_upset_factor')
     def ws_stats_upset_factor(message):
         info = orjson.loads(message)
         WebServer.ws_emit('stats_upset_factor',
@@ -412,7 +447,7 @@ def _build_web_app():
     def stats_last_sets(scoreboardNumber, player):
         return WebServer.actions.stats_last_sets(scoreboardNumber, player)
 
-    @socketio.on('stats_last_sets')
+    @ws_on('stats_last_sets')
     def ws_stats_last_sets(message):
         info = orjson.loads(message)
         WebServer.ws_emit('stats_last_sets',
@@ -423,7 +458,7 @@ def _build_web_app():
     def stats_history_sets(scoreboardNumber, player):
         return WebServer.actions.stats_history_sets(scoreboardNumber, player)
 
-    @socketio.on('stats_history_sets')
+    @ws_on('stats_history_sets')
     def ws_stats_history_sets(message):
         info = orjson.loads(message)
         WebServer.ws_emit('stats_history_sets',
@@ -434,7 +469,7 @@ def _build_web_app():
     def reset_scores(scoreboardNumber):
         return WebServer.actions.reset_scores(scoreboardNumber)
 
-    @socketio.on('reset_scores')
+    @ws_on('reset_scores')
     def ws_reset_scores(message):
         info = orjson.loads(message)
         WebServer.ws_emit('reset_scores',
@@ -445,7 +480,7 @@ def _build_web_app():
     def reset_match(scoreboardNumber):
         return WebServer.actions.reset_match(scoreboardNumber)
 
-    @socketio.on('reset_match')
+    @ws_on('reset_match')
     def ws_reset_match(message):
         info = orjson.loads(message)
         WebServer.ws_emit('reset_match',
@@ -456,7 +491,7 @@ def _build_web_app():
     def reset_players(scoreboardNumber):
         return WebServer.actions.reset_players(scoreboardNumber)
 
-    @socketio.on('reset_players')
+    @ws_on('reset_players')
     def ws_reset_players(message):
         info = orjson.loads(message)
         WebServer.ws_emit('reset_players',
@@ -467,7 +502,7 @@ def _build_web_app():
     def clear_all(scoreboardNumber):
         return WebServer.actions.clear_all(scoreboardNumber)
 
-    @socketio.on('clear_all')
+    @ws_on('clear_all')
     def ws_clear_all(message):
         info = orjson.loads(message)
         WebServer.ws_emit('clear_all',
@@ -490,7 +525,7 @@ def _build_web_app():
     def get_sets():
         return WebServer.actions.get_sets(request.args)
 
-    @socketio.on('get_sets')
+    @ws_on('get_sets')
     def ws_get_sets(message):
         WebServer.ws_emit('get_sets', WebServer.actions.get_sets(orjson.loads(message)))
         
@@ -499,7 +534,7 @@ def _build_web_app():
     def get_match(setId):
         return WebServer.actions.get_match(setId)
 
-    @socketio.on('get_match')
+    @ws_on('get_match')
     def ws_get_match(message):
         info = orjson.loads(message)
         WebServer.ws_emit('get_match', WebServer.actions.get_match(info.get("setId")))
@@ -509,7 +544,7 @@ def _build_web_app():
     def get_comms():
         return WebServer.actions.get_comms()
 
-    @socketio.on('get_comms')
+    @ws_on('get_comms')
     def ws_get_comms():
         WebServer.ws_emit('get_comms', WebServer.actions.get_comms())
 
@@ -521,7 +556,7 @@ def _build_web_app():
         else:
             return WebServer.actions.load_set(scoreboardNumber, request.args.get("set"))
 
-    @socketio.on('load_set')
+    @ws_on('load_set')
     def ws_load_set(message):
         info = orjson.loads(message)
         if info.get('no-mains') is not None:
@@ -536,7 +571,7 @@ def _build_web_app():
     def get_set(scoreboardNumber):
         return WebServer.actions.get_set(scoreboardNumber)
 
-    @socketio.on('get_set')
+    @ws_on('get_set')
     def ws_get_set(message):
         WebServer.ws_emit('get_set', WebServer.actions.get_set(
             orjson.loads(message).get('scoreboardNumber', '1')))
@@ -547,7 +582,7 @@ def _build_web_app():
 
     # Stays on the class: Autona.py connects AutonaPlayerDB.signals.db_updated
     # to self.webserver.ws_playerdb, i.e. by attribute on the instance.
-    socketio.on('playerdb')(WebServer.ws_playerdb)
+    ws_on('playerdb')(WebServer.ws_playerdb)
 
 
     # Update bracket
@@ -555,7 +590,7 @@ def _build_web_app():
     def update_bracket():
         return WebServer.actions.update_bracket()
 
-    @socketio.on('update_bracket')
+    @ws_on('update_bracket')
     def ws_update_bracket(message):
         WebServer.ws_emit('update_bracket', WebServer.actions.update_bracket())
 
@@ -567,7 +602,7 @@ def _build_web_app():
         no_mains = request.args.get('no-mains') is not None
         return WebServer.actions.load_player_from_tag(scoreboardNumber, html.unescape(request.args.get('tag')), team, player, no_mains)
 
-    @socketio.on('load_player_from_tag')
+    @ws_on('load_player_from_tag')
     def ws_load_player_from_tag(message):
         args = orjson.loads(message)
         if args.get('tag') is None:
@@ -587,7 +622,7 @@ def _build_web_app():
         no_mains = request.args.get('no-mains') is not None
         return WebServer.actions.load_commentator_from_tag(caster, html.unescape(request.args.get('tag')), no_mains)
 
-    @socketio.on('load_commentator_from_tag')
+    @ws_on('load_commentator_from_tag')
     def ws_load_commentator_from_tag(message):
         args = orjson.loads(message)
         if args.get('tag') is None:
@@ -602,7 +637,7 @@ def _build_web_app():
     def set_tournament():
         return WebServer.actions.load_tournament(request.args.get('url'))
 
-    @socketio.on('set_tournament')
+    @ws_on('set_tournament')
     def ws_set_tournament(message):
         WebServer.ws_emit('set_tournament', WebServer.actions.load_tournament(request.args.get('url')))
 
@@ -615,7 +650,7 @@ def _build_web_app():
         return WebServer.actions.get_states(countryCode)
 
 
-    @socketio.on('states')
+    @ws_on('states')
     def ws_get_states(message):
         args = orjson.loads(message)
         return WebServer.actions.get_states(args.get('countryCode', ''))
@@ -755,11 +790,22 @@ def _build_web_app():
         return send_file(os.path.join(os.path.abspath('.'), 'web/build/index.html'))
 
 
-    @app.route('/<path:filename>', methods=['GET', 'POST'])
+    # GET only (ADR-005 S3a). The route also took POST, inherited from the
+    # upstream TSH fork's first commit: nothing here posts to a file, and a
+    # POST only read the file back -- or answered 404 instead of 405 to a
+    # POST aimed at a route that has no POST.
+    @app.route('/<path:filename>')
     @cross_origin()
     def file_request(filename):
+        # Only the overlays', the Web UI's and the state's files: settings,
+        # the player DB and the rest of the working directory are not
+        # served. A refusal answers like a missing file.
+        served = WebAccess.StaticPath(filename)
+        if served is None:
+            WebServer._log_static_refusal(filename)
+            return "File not found", 404
+        filename = served
         try:
-            filename = filename or 'web/build/index.html'
             mimetype = None
             if filename.endswith('.js'):
                 mimetype = "text/javascript"
@@ -768,7 +814,7 @@ def _build_web_app():
 
             # Case-insensitive: the Windows filesystem serves
             # /Layout/Custom/... too, and it must not be cached either.
-            is_designer_file = filename.replace("\\", "/").lower().startswith(
+            is_designer_file = filename.lower().startswith(
                 ("layout/custom/", "layout/designer_runtime/"))
             response = send_from_directory(
                 os.path.abspath('.'),
@@ -841,8 +887,13 @@ class WebServer(QThread):
 
         self.signals = WebServerSignals()
 
+        # Issue the access token on the first launch (saved to settings.json),
+        # so API Settings and "ブラウザ版を開く" have it before anyone asks
+        # (ADR-005 S3a). Later launches just read it.
+        WebAccess.Token()
+
         # LAN exposure is opt-in (ADR-001 D5 revisit): default to loopback so
-        # a fresh install never exposes the unauthenticated control surface.
+        # a fresh install never exposes the control surface to the LAN.
         self.listen_lan = SettingsManager.Get("general.webserver_listen_lan", False)
         self.host_name = "0.0.0.0" if self.listen_lan else "127.0.0.1"
         self.port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
@@ -956,7 +1007,17 @@ class WebServer(QThread):
 
     def ws_playerdb(message):
         logger.debug("Emitting playerdb info.")
-        WebServer.ws_emit('playerdb', WebServer.actions.get_playerdb())
+        data = WebServer.actions.get_playerdb()
+        if flask.has_request_context():
+            # Asked for over Socket.IO: answered to the asker alone, whom
+            # _ws_guard has already let through.
+            WebServer.ws_emit('playerdb', data)
+        else:
+            # The DB changed (AutonaPlayerDB.signals.db_updated): sent only
+            # to the connections let in to read it, not to every client
+            # (OBS, a read-only LAN page) as before (ADR-005 S3a).
+            WebServer.socketio.emit(
+                'playerdb', data, to=WebServer._ws_trusted_rooms())
 
     # Don't override the QObject emit() method
     def ws_emit(event, *args, **kwargs):
@@ -971,6 +1032,162 @@ class WebServer(QThread):
             if 'json' in kwargs:
                 del kwargs['json']
             WebServer.socketio.emit(event, *args, **kwargs)
+
+    # ── Access guard (ADR-005 S3a) ───────────────────────────────────
+    # The policy is src/core/WebAccess.py; these only feed it the request.
+    # Kept on the class next to the Designer guards below.
+
+    # Where a Socket.IO connection's verdict is kept: in its environ, which
+    # python-socketio keeps for the connection's lifetime and hands back as
+    # flask.request.environ for each of its events -- so it goes away with
+    # the connection, no disconnect handler needed.
+    WS_GRANT_KEY = "autona.ws_grant"
+    WS_REFUSAL_KEY = "autona.ws_refusal"
+    # The rooms the player DB is broadcast to: connections let in without a
+    # token (loopback, this server's own page) and those let in with the
+    # current token. A regenerated token starts a new room, so connections
+    # that proved the old one stop receiving it.
+    WS_AMBIENT_ROOM = "autona:trusted"
+
+    _refusals = WebAccess.RefusalLog()
+    # This PC's LAN addresses: a request from one of them is from this PC,
+    # and a page under one of them is this server's own (OwnOrigins). Looked
+    # up on first use and kept (an address that appears later is not one).
+    _lan_hosts = None
+
+    @staticmethod
+    def _ws_token_room(generation):
+        return f"autona:token:{generation}"
+
+    @staticmethod
+    def _ws_trusted_rooms():
+        return [WebServer.WS_AMBIENT_ROOM,
+                WebServer._ws_token_room(WebAccess.TokenGeneration())]
+
+    @staticmethod
+    def _local_addresses():
+        if WebServer._lan_hosts is None:
+            WebServer._lan_hosts = GetLocalIPs()
+        return WebServer._lan_hosts
+
+    @staticmethod
+    def _authorize(auth=None):
+        """WebAccess.Authorize() for the current request / connection."""
+        localAddresses = WebServer._local_addresses()
+        # SERVER_PORT is the port the server listens on (not the client's
+        # Host header, which is checked against it): what this server's own
+        # pages have as their origin.
+        return WebAccess.Authorize(
+            remoteAddr=request.remote_addr,
+            tokens=WebAccess.SuppliedTokens(request.headers, request.args, auth),
+            origin=request.headers.get("Origin"),
+            fetchSite=request.headers.get("Sec-Fetch-Site"),
+            host=request.headers.get("Host"),
+            ownOrigins=WebAccess.OwnOrigins(
+                request.environ.get("SERVER_PORT"), localAddresses),
+            localAddresses=localAddresses,
+            forwarded=WebAccess.IsForwarded(request.headers),
+        )
+
+    @staticmethod
+    def _log_refusal(key, what, refusal):
+        # The path only, never the query string: it may hold the token.
+        message = (f"webserver: refused {what} from {request.remote_addr}: "
+                   f"{refusal.reason}")
+        if WebServer._refusals.First(key):
+            logger.warning(message)
+        else:
+            logger.debug(message)
+
+    # Asked for by browsers and tools on their own, not by a layout: a
+    # refusal of these is not worth a warning.
+    _QUIET_STATIC = ("favicon.ico", ".well-known/")
+
+    @staticmethod
+    def _log_static_refusal(filename):
+        message = (f"webserver: not serving {filename!r} to "
+                   f"{request.remote_addr} (outside the served folders)")
+        folded = filename.replace("\\", "/").lstrip("/").lower()
+        if folded.startswith(WebServer._QUIET_STATIC):
+            logger.debug(message)
+        elif WebServer._refusals.First(("static", filename.lower())):
+            logger.warning(message)
+        else:
+            logger.debug(message)
+
+    @staticmethod
+    def _guard_http_request():
+        """None to let the request through, else the refusal to send.
+
+        Only WRITE / PLAYERDB endpoints are checked. A preflight (OPTIONS)
+        passes: it carries no token and runs no handler. An unmatched URL
+        (endpoint None) is left to Flask's 404 / 405.
+        """
+        if request.method == "OPTIONS" or request.endpoint is None:
+            return None
+        if WebAccess.RouteAccess(request.endpoint) not in WebAccess.GUARDED:
+            return None
+        _grant, refusal = WebServer._authorize()
+        if refusal is None:
+            return None
+        WebServer._log_refusal(
+            (request.endpoint, request.remote_addr, refusal.reason),
+            f"{request.method} {request.path}", refusal)
+        response = jsonify(WebAccess.ErrorBody(refusal))
+        response.status_code = refusal.status
+        if refusal.status == 401:
+            response.headers["WWW-Authenticate"] = 'Bearer realm="Autona"'
+        return response
+
+    @staticmethod
+    def _authorize_ws_connection(auth):
+        """Record what a new Socket.IO connection may do (see ws_connect).
+
+        Every connection is accepted and receives the state. One that
+        Authorize lets in also gets the guarded events and the player DB
+        broadcast; any other is read-only, and _ws_guard refuses its writes.
+        """
+        # Read before authorizing: if the token is regenerated meanwhile, the
+        # grant carries the old generation and fails closed. A connection that
+        # qualifies without the token gets the ambient grant even when it
+        # also sent the token (Authorize), so regenerating does not cut off
+        # this PC's own pages -- only the token was keeping the others in.
+        generation = WebAccess.TokenGeneration()
+        grant, refusal = WebServer._authorize(
+            auth if isinstance(auth, dict) else None)
+        environ = request.environ
+        if grant == WebAccess.GRANT_TOKEN:
+            environ[WebServer.WS_GRANT_KEY] = (grant, generation)
+            flask_socketio.join_room(WebServer._ws_token_room(generation))
+        elif grant == WebAccess.GRANT_AMBIENT:
+            environ[WebServer.WS_GRANT_KEY] = (grant, None)
+            flask_socketio.join_room(WebServer.WS_AMBIENT_ROOM)
+        else:
+            # Normal for OBS on another PC and for file:// overlays, which
+            # only read; their writes are what gets logged (_ws_guard).
+            environ[WebServer.WS_GRANT_KEY] = None
+            environ[WebServer.WS_REFUSAL_KEY] = refusal
+            logger.debug(
+                f"webserver: Socket.IO connection from {request.remote_addr} "
+                f"is read-only ({refusal.reason})")
+
+    @staticmethod
+    def _ws_guard(event, handler):
+        """``handler`` behind the connection's verdict (ws_on)."""
+        @functools.wraps(handler)
+        def guarded(*args):
+            grant = request.environ.get(WebServer.WS_GRANT_KEY)
+            if WebAccess.GrantStillValid(grant):
+                return handler(*args)
+            refusal = (request.environ.get(WebServer.WS_REFUSAL_KEY)
+                       or WebAccess.TOKEN_REPLACED)
+            WebServer._log_refusal(
+                ("ws", event, request.remote_addr, refusal.reason),
+                f"Socket.IO event {event!r}", refusal)
+            # Returned as the event's ack (python-socketio sends a handler's
+            # return value to the client's callback), in the v1 error shape.
+            return WebAccess.ErrorBody(refusal)
+        return guarded
 
     # Called by the /api/designer/* routes in _build_web_app(); kept on the
     # class so the guard has one obvious home next to the rest of the state.

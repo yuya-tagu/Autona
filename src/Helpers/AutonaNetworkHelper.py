@@ -22,6 +22,25 @@ def GetLocalIP():
     return ip
 
 
+def GetLocalIPs():
+    """Every IPv4 address of this machine that is not the loopback.
+
+    GetLocalIP() (the outgoing interface) first, then the rest the host name
+    resolves to (a second network card, a VPN / virtual adapter). Used by the
+    web server to recognise a request from this PC that arrives on one of
+    them (ADR-005 S3a). Best effort: whatever cannot be resolved is left out.
+    """
+    found = [GetLocalIP()]
+    try:
+        infos = socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)
+    except OSError:
+        infos = []
+    for info in infos:
+        found.append(info[4][0])
+    return tuple(dict.fromkeys(
+        ip for ip in found if ip and not ip.startswith("127.")))
+
+
 def GetWebServerHost():
     """Host to advertise in user-facing URLs. Matches the server bind:
     loopback unless LAN access is enabled (general.webserver_listen_lan).

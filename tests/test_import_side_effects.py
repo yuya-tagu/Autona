@@ -111,6 +111,9 @@ game_catalog = importlib.import_module(
 # AutonaCountryHelper, likewise created by bootstrap_core().
 country_catalog = importlib.import_module(
     "src.core.CountryCatalog").CountryCatalog
+# The web server's access policy (ADR-005 S3a). It reads -- or issues and
+# saves to settings.json -- the access token on first use, never on import.
+web_access = importlib.import_module("src.core.WebAccess")
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -173,6 +176,8 @@ assert QApplication.instance() is None, "import created a QApplication"
 assert core_actions.instance is None, "import created AutonaActions.instance"
 assert game_catalog.instance is None, "import created GameAssetCatalog.instance"
 assert country_catalog.instance is None,     "import created CountryCatalog.instance"
+assert web_access._token is None, "import read or issued the access token"
+assert web_access._tokenGeneration == 0, "import issued an access token"
 assert hotkeys.instance is None, "import created AutonaHotkeys.instance"
 assert not hotkeys._actions_connected, \
     "import wired the hotkeys to AutonaActions"

@@ -28,10 +28,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = PROJECT_ROOT / "src"
 
 # (rule, endpoint, comma-joined sorted methods)
+#
+# ADR-005 S3a changed two rows on purpose: the Flask static folder (which
+# served the whole working directory under /./) is gone, and file_request no
+# longer takes POST (nothing posted to a file; see the route's comment).
 EXPECTED_ROUTES = [
     ('/', 'web_index', 'GET,HEAD,OPTIONS'),
-    ('/./<path:filename>', 'static', 'GET,HEAD,OPTIONS'),
-    ('/<path:filename>', 'file_request', 'GET,HEAD,OPTIONS,POST'),
+    ('/<path:filename>', 'file_request', 'GET,HEAD,OPTIONS'),
     ('/api/designer/projects', 'designer_list_projects', 'GET,HEAD,OPTIONS'),
     ('/api/designer/projects', 'designer_save_project', 'OPTIONS,POST'),
     ('/api/designer/projects/<slug>', 'designer_delete_project', 'DELETE,OPTIONS'),
@@ -177,7 +180,8 @@ EXPECTED_EVENTS = [
 
 # Everything the factory configures besides the rules themselves. CORS
 # installs `cors_after_request`; `log_request` / `log_response` are the
-# before/after hooks that used to carry a redundant @staticmethod.
+# before/after hooks that used to carry a redundant @staticmethod;
+# `guard_request` is the ADR-005 S3a access guard (src/core/WebAccess.py).
 EXPECTED_CLASS_HANDLERS = {
     # SocketIO handlers that must stay reachable as WebServer attributes,
     # because something outside the factory reaches them by name:
@@ -196,19 +200,25 @@ EXPECTED_CLASS_HANDLERS = {
     "on_program_state_update",
     "_authorize_designer_request",
     "_authorize_designer_import_request",
+    # The ADR-005 S3a guard, reached from guard_request / ws_on / ws_connect
+    # / file_request inside the factory.
+    "_guard_http_request",
+    "_authorize_ws_connection",
+    "_ws_guard",
+    "_log_static_refusal",
     "_flush_pending_deltas",
     "_adaptive_debounce_sec",
 }
 
 EXPECTED_EXTRA = {
     "blueprints": [],
-    "static_url_path": "/.",
-    "static_folder_tail": ".",
+    "static_url_path": None,
+    "static_folder_tail": "None",
     "config_CORS_HEADERS": "Content-Type",
     "socketio_async_mode": "threading",
     "socketio_default_exception_handler": "ws_on_error",
     "socketio_exception_handlers": [],
-    "before_request_funcs": {"None": ["log_request"]},
+    "before_request_funcs": {"None": ["guard_request", "log_request"]},
     "after_request_funcs": {"None": ["cors_after_request", "log_response"]},
 }
 
@@ -370,3 +380,76 @@ def test_api_v1_route_ledger():
         "/api/v1 routes changed.\n"
         f"missing: {sorted(set(EXPECTED_API_V1_ROUTES) - set(routes))}\n"
         f"unexpected: {sorted(set(routes) - set(EXPECTED_API_V1_ROUTES))}")
+
+
+# ── Access classification (ADR-005 S3a) ──────────────────────────────────
+# src/core/WebAccess.py classifies every endpoint and event as READ / WRITE /
+# PLAYERDB / DESIGNER / STATIC; the server guards WRITE and PLAYERDB. The
+# ledgers above are pinned against the live app, so comparing the tables to
+# them covers every route and event the server really registers: a new one
+# fails here until it is classified (an unclassified one would be guarded
+# like a write, but silently).
+
+
+def _ledger_endpoints():
+    return ({endpoint for _rule, endpoint, _methods in EXPECTED_ROUTES}
+            | {endpoint for _rule, endpoint, _methods in EXPECTED_API_V1_ROUTES})
+
+
+def test_every_route_is_classified():
+    from src.core import WebAccess
+
+    endpoints = _ledger_endpoints()
+    assert set(WebAccess.ROUTE_ACCESS) == endpoints, (
+        f"unclassified: {sorted(endpoints - set(WebAccess.ROUTE_ACCESS))}; "
+        f"stale:{sorted(set(WebAccess.ROUTE_ACCESS) - endpoints)}")
+
+
+def test_every_event_is_classified():
+    from src.core import WebAccess
+
+    events = set(EXPECTED_EVENTS)
+    assert set(WebAccess.EVENT_ACCESS) == events, (
+        f"unclassified: {sorted(events - set(WebAccess.EVENT_ACCESS))}; "
+        f"stale:{sorted(set(WebAccess.EVENT_ACCESS) - events)}")
+
+
+def test_the_classification_follows_the_rules():
+    from src.core import WebAccess
+
+    access = WebAccess.ROUTE_ACCESS
+    # /api/v1: the method says it (spec: GET reads, POST / PATCH operate).
+    for _rule, endpoint, methods in EXPECTED_API_V1_ROUTES:
+        expected = WebAccess.READ if "GET" in methods.split(",") else WebAccess.WRITE
+        assert access[endpoint] == expected, endpoint
+    # A legacy route that takes a body changes something.
+    for _rule, endpoint, methods in EXPECTED_ROUTES:
+        if "POST" in methods.split(",") and not endpoint.startswith("designer_"):
+            assert access[endpoint] == WebAccess.WRITE, endpoint
+        if endpoint.startswith("designer_"):
+            assert access[endpoint] == WebAccess.DESIGNER, endpoint
+    # The player DB is personal data on both channels.
+    assert access["playerdb"] == WebAccess.PLAYERDB
+    assert WebAccess.EVENT_ACCESS["playerdb"] == WebAccess.PLAYERDB
+    # A Socket.IO event and the legacy route it mirrors agree, where both
+    # exist under one name.
+    for event, kind in WebAccess.EVENT_ACCESS.items():
+        if event in access and not event.startswith("get_"):
+            assert access[event] == kind, event
+    # The counts the S3a inventory found (legacy 29 writes of 43, Socket.IO
+    # 26 of 41, v1 18 of 31). A change here is a change of the policy.
+    legacy = [e for _r, e, _m in EXPECTED_ROUTES
+              if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
+    assert len(legacy) == 43
+    assert sum(access[e] == WebAccess.WRITE for e in legacy) == 29
+    assert sum(k == WebAccess.WRITE
+               for k in WebAccess.EVENT_ACCESS.values()) == 26
+    assert sum(access[e] == WebAccess.WRITE
+               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 18
+
+
+def test_an_unknown_endpoint_or_event_is_guarded():
+    from src.core import WebAccess
+
+    assert WebAccess.RouteAccess("not_a_route") == WebAccess.WRITE
+    assert WebAccess.EventAccess("not_an_event") == WebAccess.WRITE

@@ -89,6 +89,10 @@ _GUIDE = {
         "Paste the request URL from the table below. For POST, set the "
         "body to the JSON shown and add the header "
         "Content-Type: application/json.",
+        # ADR-005 S3a: from another computer, writes need the access token.
+        "If Companion runs on another PC (LAN access), also add the header "
+        "X-Autona-Token with the access token as its value. Copy the token "
+        "from Help & Settings → API Settings → Open reference & tester.",
         "Optionally set the button text, then press the key to test.",
     ],
 }

@@ -21,6 +21,7 @@ from .AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
 from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 from .core.StateManager import StateManager
 from .core import StateSchema as schema
+from .core import WebAccess
 from .core.Actions import AutonaActions
 from .core.SetLoadService import SetLoadService
 from .core.TournamentInfoService import TournamentInfoService
@@ -248,7 +249,8 @@ class AutonaScoreboardWidget(QWidget):
         self.webScoreboardUrl = f"http://{GetWebServerHost()}:{SettingsManager.Get('general.webserver_port', DEFAULT_WEBSERVER_PORT)}/{webScoreboardPath}"
         self.btOpenWebScoreboard = QPushButton("ブラウザ版を開く")
         self.btOpenWebScoreboard.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-        self.btOpenWebScoreboard.clicked.connect(lambda: webbrowser.open(self.webScoreboardUrl))
+        self.btOpenWebScoreboard.clicked.connect(
+            lambda: webbrowser.open(self._WebScoreboardOpenUrl()))
 
         # The eye (field-visibility) menu was removed from the desktop UI:
         # the details dialog always shows every field. Nothing adds these
@@ -947,6 +949,23 @@ class AutonaScoreboardWidget(QWidget):
     def ApplyChanges(self):
         # 反映 button: publish every pending edit on this board at once.
         AutonaActions.instance.ApplyChanges(self.scoreboardNumber)
+
+    def _WebScoreboardOpenUrl(self):
+        """The "ブラウザ版を開く" URL (ADR-005 S3a).
+
+        With LAN access on, it carries the access token, so the same URL
+        also works when copied to another device (the page takes the token
+        off the address bar: web/src/autonaToken.ts). Read at click time, so
+        a regenerated token is the one sent. With LAN access off it has
+        none: a page on this PC needs none, and one opened without it is not
+        cut off when the token is regenerated.
+        """
+        token = WebAccess.Token()
+        if not token or not SettingsManager.Get(
+                "general.webserver_listen_lan", False):
+            return self.webScoreboardUrl
+        return (f"{self.webScoreboardUrl}?"
+                + urllib.parse.urlencode({"token": token}))
 
     def _onGameAssetsLoaded(self):
         # AutonaGameAssetManager.signals.onLoad handler.

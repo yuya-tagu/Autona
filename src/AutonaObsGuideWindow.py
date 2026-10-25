@@ -204,9 +204,14 @@ class AutonaObsGuideWindow(QDialog):
         self.outDirField.setText(self._outDir())
         self.portLabel.setText(_tr("Port") + f": {port}")
         if SettingsManager.Get("general.webserver_listen_lan", False):
+            # ADR-005 S3a: from another PC, these operations need the token;
+            # ?token= works whatever headers the HTTP action can set.
             self.lanNoteLabel.setText(_tr(
                 "OBS must run on this PC. For OBS on another PC on the same "
-                "LAN, replace 127.0.0.1 with this PC's IP address."))
+                "LAN, replace 127.0.0.1 with this PC's IP address and add "
+                "?token=<access token> to the end of the URL (&token=<access "
+                "token> if the URL already has a ?; copy the token from API "
+                "Settings → Open reference & tester)."))
         else:
             self.lanNoteLabel.setText(_tr(
                 "LAN access: disabled — OBS must run on this PC. To use OBS on "

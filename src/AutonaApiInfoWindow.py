@@ -27,6 +27,7 @@ from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 
 from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
+from .core import WebAccess
 from .Workers import Worker
 from .Helpers.AutonaNetworkHelper import GetWebServerHost
 
@@ -100,6 +101,9 @@ _ERROR_CODES = [
     ("NOT_READY", "409", "Precondition unmet"),
     ("UPSTREAM_TIMEOUT", "504", "Upstream (start.gg) timed out"),
     ("INTERNAL", "500", "Unexpected internal error"),
+    # The access guard (ADR-005 S3a, src/core/WebAccess.py).
+    ("UNAUTHENTICATED", "401", "Token missing or wrong (writes from another device)"),
+    ("FORBIDDEN", "403", "Refused browser page (cross-site / another origin)"),
 ]
 
 
@@ -163,13 +167,38 @@ class AutonaApiInfoWindow(QDialog):
         self.portLabel = QLabel()
         form.addWidget(self.portLabel, 1, 0, 1, 2)
 
-        # No-auth LAN warning (spec §2.2 / D5). Emphasised so the operator
-        # understands every endpoint — including destructive ones — is open.
-        # Text is swapped in _refreshBaseUrl() when LAN access is disabled.
+        # The access token (ADR-005 S3a): what another device sends to write.
+        # Masked until asked for; copied and replaced from here.
+        form.addWidget(QLabel(_tr("Access token") + ":"), 2, 0)
+        self.tokenField = QLineEdit()
+        self.tokenField.setReadOnly(True)
+        self.tokenField.setEchoMode(QLineEdit.Password)
+        form.addWidget(self.tokenField, 2, 1)
+
+        tokenButtons = QHBoxLayout()
+        btShowToken = QPushButton(_tr("Show"))
+        btShowToken.setCheckable(True)
+        btShowToken.toggled.connect(
+            lambda shown: self.tokenField.setEchoMode(
+                QLineEdit.Normal if shown else QLineEdit.Password))
+        tokenButtons.addWidget(btShowToken)
+        btCopyToken = QPushButton(_tr("Copy"))
+        btCopyToken.clicked.connect(
+            lambda: QApplication.clipboard().setText(WebAccess.Token()))
+        tokenButtons.addWidget(btCopyToken)
+        btRegenerateToken = QPushButton(_tr("Regenerate"))
+        btRegenerateToken.clicked.connect(self._regenerateToken)
+        tokenButtons.addWidget(btRegenerateToken)
+        form.addLayout(tokenButtons, 2, 2, 1, 2)
+
+        # What LAN access means (spec §2.2): from another device, writes need
+        # the token. Emphasised so the operator sets the token up on each
+        # device. Text is swapped in _refreshBaseUrl() when LAN access is
+        # disabled.
         self.warningLabel = QLabel()
         self.warningLabel.setWordWrap(True)
         self.warningLabel.setStyleSheet("color: #e2574c;")
-        form.addWidget(self.warningLabel, 2, 0, 1, 4)
+        form.addWidget(self.warningLabel, 3, 0, 1, 4)
 
         form.setColumnStretch(1, 1)
         group.setLayout(form)
@@ -179,14 +208,31 @@ class AutonaApiInfoWindow(QDialog):
         port = SettingsManager.Get("general.webserver_port", DEFAULT_WEBSERVER_PORT)
         self.baseUrlField.setText(self._baseUrl())
         self.portLabel.setText(_tr("Port") + f": {port}")
+        self.tokenField.setText(WebAccess.Token())
         if SettingsManager.Get("general.webserver_listen_lan", False):
             self.warningLabel.setText("⚠ " + _tr(
-                "No authentication. Anyone on the LAN can call every operation, "
-                "including destructive ones."))
+                "From other devices on the LAN, every operation that changes "
+                "something (and the player list) needs the access token: send "
+                "the header X-Autona-Token: <token> (or Authorization: Bearer "
+                "<token>, or add ?token=<token> to the URL). Reading the state "
+                "and the overlays needs no token."))
         else:
             self.warningLabel.setText(_tr(
                 "LAN access is disabled; the API is reachable from this PC only. "
                 "Enable it under Settings → General (restart required)."))
+
+    def _regenerateToken(self):
+        # Button context, so the confirm is a top-level modal, not a nested
+        # one (CLAUDE.md / agent-pitfalls #9) -- same as the tester's.
+        answer = QMessageBox.question(
+            self,
+            _tr("Regenerate access token"),
+            _tr("Issue a new access token? Devices that use the current one "
+                "(Companion, Stream Deck, a browser on another PC) can no "
+                "longer change anything until they are given the new token."))
+        if answer != QMessageBox.Yes:
+            return
+        self.tokenField.setText(WebAccess.RegenerateToken())
 
     def _openSettings(self):
         # The Settings dialog (with the Webserver Port field) lives on the
@@ -294,6 +340,12 @@ class AutonaApiInfoWindow(QDialog):
         method, path, _desc, body, _destructive, _logged, _confirm = ep
         url = self._baseUrl() + _concrete_path(path)
         parts = [f'curl -X {method} "{url}"']
+        # The Base URL is the LAN address when LAN access is on, i.e. the
+        # command is meant for another device: give it the token a write
+        # needs there (ADR-005 S3a).
+        if method != "GET" and SettingsManager.Get(
+                "general.webserver_listen_lan", False):
+            parts.append(f'-H "{WebAccess.TOKEN_HEADER}: {WebAccess.Token()}"')
         if body is not None:
             parts.append('-H "Content-Type: application/json"')
             parts.append("-d '" + json.dumps(body, ensure_ascii=False) + "'")

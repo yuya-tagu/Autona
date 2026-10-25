@@ -251,7 +251,7 @@ core が状態とドメインの唯一の正本で、すべての UI（デスク
 | **S0 掃除** | `_SetIfChanged` 等の重複統合 / `Pipfile` 廃止・`asyncio` 依存削除 / core→src 逆依存（Top8Model・CommentaryModel・DictHelper）を core へ移設 / `features.md` を実態に同期 | 重複ゼロ・依存定義 1 本・core が src 直下を import しない（pin 追加） |
 | **S1 アセットカタログの core 化**（R2） | `AutonaGameAssetManager` を `core/GameAssetCatalog`（純 dict + パス解決 + Start.gg ID 対応）と Qt アダプタ（dict→`QStandardItemModel` の一方向構築）に分割 | カタログが `test_core_qt_free` に載る。`get_characters` / `get_variants` / `get_games` から `@gui_thread_sync` が消える。`PlayerService` がキャラ/スキン/国を自分で解決できる |
 | **S2 選手スロットの正本を state へ**（R1） | `SwapWith` / `ClearScore` / `ResetAllInputs` / `CommandClearAll` を `Actions.SwapTeams(board)` / `ClearBoard(board)` へ。選手カードは state から描画。残りのホットキー 3 本も Actions へ | `WebServerActions` の `GetScoreboard(` が board 1/2 でゼロ。`teamsSwapped` 属性削除。swap を Qt なしでテスト。「1 操作で delta 1 回」検証 |
-| **S3 ヘッドレス起動と永続化分離**（R3・R4） | `main.py --headless`（QApplication なしで core + WebServer）。正本を `user_data/state.json` へ（初回は `out/program_state.json` から移行）。`state_version` + 移行関数 1 本目。`WebServerActions` 廃止 | ヘッドレスで OBS オーバーレイ + `/web` が動く（Playwright E2E）。`@gui_thread_sync` の残りは thumbnail/result とウィンドウ操作のみ |
+| **S3 ヘッドレス起動と永続化分離**（R3・R4） | `main.py --headless`（QCoreApplication + イベントループ。QtGui なしで core + WebServer）。正本を `user_data/state.json` へ（初回は `out/program_state.json` から移行）。`state_version` + 移行関数 1 本目。Web の公開面を締める（静的配信の許可リスト + LAN トークン認証 + CSRF 対策）。`WebServerActions` を core 直結分だけ縮める（2026-10-25 改定。§5 S3 設計） | ヘッドレスで OBS オーバーレイと `/web` の表示、core 直結の操作が動く（スモーク + Playwright）。LAN の書き込みはトークン必須。正本は `user_data/state.json`。**`WebServerActions` 廃止と「`@gui_thread_sync` の残りは thumbnail/result とウィンドウ操作のみ」は S3e へ移動** |
 | **S4〜 パネル単位の React 化**（R6） | `QStackedWidget` の各ページを `QWebEngineView(/web/<panel>)` に差し替え。順序: Commentary（**IME 実機ゲート**）→ Stream → Event → Top8 → Stats → PlayerDB → Result/Thumbnail（設定 UI のみ）→ Board → SCORE（Crew 含む）→ Settings | パネルごとに Qt 版削除 + 手動チェックリスト該当節通過 |
 | **S-final シェル化** | Window = WebEngineView 1 枚 + トレイ + ホットキー。i18n を i18next に一本化。WebView2 化の要否を判断 | Qt Widgets パネル 0 |
 
@@ -810,3 +810,397 @@ LOSERS フラグと、そのチームの選手名に付く ` [L]`（`mergedName`
   - Start.gg のセットを読み込む（bestOf 付き）: BEST OF と行がセットの値になり、スコアの分だけ行に勝ちが付く
   - トラッカー ON で 2-1 からマッチリセット: 行が全部未報告に戻り、スコアが 0-0（判断 6 の対象）
   - クルーボードの BEST OF を Web から変える: 従来どおり変わる
+
+### S3 ヘッドレス起動・永続化分離・LAN トークン認証 — 設計（2026-10-25・オーナー承認済み）
+
+オーナー判断（2026-10-25）: LAN トークン認証は S3 と同時に入れる（§4.6-3 の推奨案）。下記の設計と完了条件の改定を承認。S3a〜S3d は自走で進め、S3e の前で止める。
+
+#### 棚卸しで分かったこと（前提）
+
+- **§4.4 の S3 完了条件「`WebServerActions` 廃止」は、S3 だけでは届かない**。50 メソッドのうち core 直結は 15 本。残り 26 本は、選手データ（S2f）、人数・キャラ数（S2g）、統計のトリガー、セット読込と station / stream の追従ポーリングがボードのウィジェットに残っていることに依存している。ヘッドレスではボードが無いので、これらは何も起きない
+- **「QApplication なし」は QCoreApplication + イベントループで満たすのが現実解**。Bridge の delta 配送、`run_sync`、Worker の結果受け渡しはすべてイベントループ前提で、ループが無いと `run_sync` が永久に待つ。完全に Qt なしにするには Bridge・Worker・アセットアダプタ・PlayerDB・Provider の置き換えが要り、§4.3 の Executor 統一と同じ作業になる（S3 の外）
+- **起動経路**: `src/Autona.py` の import が QApplication を作る。`bootstrap_core()` が QDockWidget（`AutonaScoreboardManager`）を作る。大会データの適用、`GameChanged` → Socket.IO 配信、URL・ゲームの復元は Window が配線している
+- **セキュリティの既存問題**: 静的配信ルート（`/<path:filename>` と static_folder=`.`）が CWD 以下の全ファイルを返し、CORS は全許可。`user_data/settings.json`（Figma ペアリングコードを含む）や `local_players.json` が、LAN 公開時は LAN 内の誰からでも読める。ループバックでも、ブラウザで開いた任意のサイトから読める可能性がある。さらに legacy は GET で書き込め、v1 は `force=True` で text/plain の本文も受けるので、ブラウザ経由の CSRF が成立する
+- **永続化の現状**: 起動時に `out/program_state.json` の全量を読み戻す。そのうえで、`score` は `ResetScoreRoot` が、`game` は `ResetGameState` が消し、`SeedPanelState` が正規化する。マイグレーション層は無い（実質的な移行は `RETIRED_ROOTS` / `STALE_KEYS` / `NormalizeState` の 3 つ）。`out/program_state.json` の場所・形式・`timestamp` / `revision` は、layout の file:// ポーリングと ASS の契約に縛られている
+- **自動更新**: ルートは PURGE せずに上書きするので、git 管理外の `user_data/` は更新後も残る。ヘルパーには手を入れずに済む
+
+#### 方針
+
+S3 を 4 つの PR に分ける（各 PR は独立に revert 可能）。順序は、既存の穴を先に塞ぐ → 永続化 → ヘッドレス → E2E。
+
+**S3a Web の公開面を締める（静的配信の許可リスト + LAN トークン認証 + ブラウザ CSRF 対策）**
+
+- 静的配信を許可リスト化する
+  - 返すもの: `layout/`、`assets/`、`web/build/`、`out/`、`user_data/` の画像系ディレクトリ（`games/`、`team_logo/`、`sponsor_logo/`、`player_avatar/`、`additional_flag/`、`tournament_banner.png`）
+  - `user_data/*.json` などの設定・選手 DB は 404 にする
+  - 許可リスト外の要求はログに出す（既存のカスタムレイアウトが参照していたら気づけるように）
+- トークン
+  - `secrets.token_urlsafe(24)` を `user_data/settings.json`（git 管理外。S3a 以降は HTTP から読めない）の `general.webserver_token` に保存する。初回起動時に生成する
+  - API 設定ウィンドウに、表示・コピー・再発行を置く（LAN 無認証の赤い警告をここで差し替える）
+- 判定（どの要求にトークンを求めるか）
+
+  | 接続元 | 読み取り（静的配信・state・カタログ・Socket.IO の受信） | 書き込み（legacy の書き込み・v1 の POST/PATCH・Socket.IO の書き込みイベント）と選手 DB（`playerdb`） |
+  |---|---|---|
+  | ループバック | 不要（今と同じ） | 不要（今と同じ）。ただしブラウザからのクロスサイト要求は拒否（下記） |
+  | LAN | 不要 | **トークン必須** |
+
+  - 理由
+    - 既存の OBS の URL（外部契約 §2.8）を壊さないため、ループバックと読み取りは免除する。2 PC 配信で、配信 PC の OBS が LAN 越しにレイアウトを読む構成も、そのまま動く
+    - 書き込みと選手 DB だけを守れば、LAN 内の第三者による操作と個人データの読み出しは止まる
+  - トークンの渡し方: `Authorization: Bearer <token>`、`X-Autona-Token` ヘッダ、`?token=` クエリのいずれでもよい。クエリを許すのは、legacy の GET URL を貼る Stream Deck と、Web UI の初回オープンのため
+  - Socket.IO は接続時の `auth` でトークンを受け、接続ごとに「書き込み可」を持つ。書き込み可でない接続の書き込みイベントは拒否する
+- ブラウザ経由の CSRF 対策（ループバック含む全接続）
+  - 書き込みで `Sec-Fetch-Site: cross-site` の要求は拒否する
+  - `Origin` が付いていて自分のオリジン（`http://127.0.0.1:{port}` / `localhost` / LAN IP）でない書き込みも拒否する
+  - Stream Deck・Companion・curl・`requests` はこれらのヘッダを付けないので影響しない。OBS のブラウザソースは同一オリジンか file://（書き込まない）
+- クライアントの追従
+  - Web UI: `api.ts` と `websocketConnection.ts` の 2 箇所。初回の `?token=` を sessionStorage に保存してヘッダと `auth` で送る
+  - 「ブラウザ版を開く」の URL にトークンを載せる
+  - Companion ガイドと API 設定に、ヘッダを追加する手順を書く
+  - アプリ内 API Tester はループバックなので変更不要
+- Designer のトークン（ループバック限定・ウィンドウを閉じると失効）とペアリングコードは別の仕組みとして残す（用途が違う）
+- **外部から見える変化**: LAN 越しの Companion / Stream Deck / ASS の書き込みにトークンが必要になる。リリースノートで告知し、API 設定にコピー手順を置く。無効化スイッチは作らない（LAN 公開をやめればループバックで今と同じに使える）
+
+**S3b 永続化の分離（`user_data/state.json` + `state_version` + 移行関数 1 本目）**
+
+- 正本を `user_data/state.json` にする
+  - 中身は公開済みの state（held を巻き戻したもの = 今 `program_state.json` に書いている内容）から `timestamp` / `revision` を除き、`state_version` を足したもの
+  - 書き込みはアトミック（SettingsManager と同じ mkstemp → os.replace）
+  - 書き出しスレッドで、`out/` とは独立に間引いて書く（例: 最後の変更から 1 秒）。`disable_export` の影響を受けない。終了時は書き切る
+- 起動時の読み込み
+  - `state.json` があればそれを読む。無ければ `out/program_state.json` から移行する（`timestamp` / `revision` を落とす）
+  - 起動時の `score` / `game` の消去と `SeedPanelState` の正規化は今と同じ（引き継ぐ範囲は変えない）
+- `out/program_state.json` は、今と同じ場所・形式・書き込み順で書き続ける（外部契約）。export のロジックはモジュールを分けるだけで変えない
+- `state_version` = 1。移行関数 1 本目（v0 → v1）は、既存の 3 つ（`RETIRED_ROOTS` / `STALE_KEYS` / commentary の `NormalizeState`）を取り込む
+  - 前方一方向のみ。今より新しい版の `state.json` を読んだら、`state.json.v{N}.bak` に退避して空から始め、警告を出す（ダウングレードした場合）
+  - 旧版に戻したユーザーは、旧版が `out/program_state.json` を読むので困らない
+- `.gitignore` に `user_data/state.json` を足す（git 管理下に入ると、更新のたびに上書きされる）。zip 検証にも、配布物に含まれないことを足す
+- S-14（スキーマ版の不在）はこれで解消扱いにする
+
+**S3c ヘッドレス起動（`main.py --headless`）**
+
+- QCoreApplication + `exec()` で動かす。QtGui（QIcon / QStandardItemModel / QTranslator）は使わない
+  - Bridge・GuiExecutor・Worker・QThread・QTimer はそのまま動く
+  - 単一インスタンスの IPC（QLocalServer）もそのまま使い、GUI 版とヘッドレス版を同時に起動させない（ポートと書き込み先が同じため）
+- 組み立てを分ける
+  - `bootstrap_core()` から `AutonaScoreboardManager` の生成を GUI 側へ出す
+  - ヘッドレスの組み立て（`src/headless.py`）が担うもの
+    - `ResetScoreRoot` + `SeedBoard(1..3)` + `SeedPanelState`
+    - `CountryCatalog.Load()` の直接呼び出し
+    - `LoadRoundNames`
+    - 大会データの適用と `GameChanged` → Socket.IO の配線（Window から移す）
+    - URL とゲームの復元
+    - Web サーバーの起動
+    - Ctrl+C / コンソールの閉じるボタン / SIGTERM での停止
+  - ゲームのロードは、アダプタ（Qt モデル）を通さず `GameAssetCatalog` を直接使う
+  - `in_gui_thread()` は QCoreApplication を見るように直す
+- Web サーバーを `threading.Thread` に置き換える。失敗通知はコールバックにする。LAN 公開とポート衝突の確認は、ヘッドレスでは設定値で決めて、ログに出すだけにする
+- **ヘッドレスで動く範囲（S3 の完了条件）**
+  - OBS オーバーレイと `/web` の表示
+  - core 直結の操作（スコア、反映、カラー、表示トグル、swap、クリア、best_of、match バー、チーム名、losers、大会情報、ゲームの切り替え）
+  - ボードが無いので held にはならず、書き込みは即時公開される（ヘッドレスには反映ボタンが無いので、これが正しい）
+  - ボードが要る操作（選手の編集・セット読込・追従・統計・人数の変更・Top 8 の取り込み・実況のパネル経由の更新）は、ヘッドレスでは 503（`not available in headless`）を返す
+- `WebServerActions` を縮める
+  - core 直結の 15 本と、S2 で core 化した操作は、v1 / legacy のルートから core を直接呼ぶ形に移す。GUI でもヘッドレスでも同じ経路を通る
+  - 残る 26 本は「ボード依存」として台帳に列挙する
+- 廃止は S3e（S2f / S2g / 統計・セット読込・ポーリングの core 化の後）へ送る（**§4.4 の完了条件を変える**）
+- `pull_stream_set` は、どこにも接続されておらず常に空振りしている（v1 `:pull-stream` も同じ）。S3c で直すか外すかを判断する（推奨: 次のセットを引く core 操作として直す。ただし追従の core 化と同時なので S3e）
+
+**S3d E2E**
+
+- まず Python のスモークテストを 1 本作る。ヘッドレスを subprocess で起動し、health、Socket.IO 接続、`score:adjust`、delta の受信、トークンなしの LAN 書き込みの拒否、`state.json` の書き出しを確かめる。現状の API テストは GUI スレッドで inline 実行されるので、`run_sync` が止まる問題を検出できない。その防波堤にする
+- Playwright（`web/` の devDependency）で `/web` と、オーバーレイ 1 枚の表示を確かめる。CI への組み込みは S3d の中で決める
+
+#### §4.4 の S3 完了条件の改定（承認済み）
+
+- 旧: ヘッドレスで OBS オーバーレイと `/web` が動く（Playwright E2E）。`@gui_thread_sync` の残りは thumbnail / result とウィンドウ操作のみ。`WebServerActions` 廃止
+- 新: ヘッドレスで OBS オーバーレイと `/web` の表示、core 直結の操作が動く（スモーク + Playwright）。LAN の書き込みはトークン必須。正本は `user_data/state.json`（`state_version` 付き）
+  - `WebServerActions` 廃止と「`@gui_thread_sync` の残りは thumbnail / result / ウィンドウ操作のみ」は S3e へ移す
+
+#### 外部契約への影響
+
+- 変わらないもの: `out/program_state.json` の場所・形式・書き込み順、Socket.IO のイベント名と payload、v1 の形（追加のみ）、settings.json の形式（キーの追加のみ）、自動更新（ヘルパー・zip 構造には触らない）
+- 変わるもの: LAN 越しの書き込みにトークンが要る（S3a。オーナー判断済み）。CWD 以下の任意ファイルの配信を止める（S3a。許可リスト外を参照するカスタムレイアウトがあれば、壊れてログに出る）
+
+#### S3a Web の公開面を締める（2026-10-25・PR 未作成）
+
+Web サーバーの公開面を 3 つ締めた。1 つ目は静的配信で、許可リストに載ったファイルだけを返す。2 つ目は LAN の他端末で、書き込みと選手 DB にトークンを要求する。3 つ目はブラウザ経由の CSRF と DNS rebinding で、トークンを持たない書き込みは「この PC から・このサーバーの名前宛て・自分のページから」のときだけ受ける。どの要求に何を求めるかは、新しい core モジュール `src/core/WebAccess.py` が決める（Qt なし・Flask なし・import 副作用なし）。サーバーはそこに要求の情報を渡して答えを聞くだけにした。
+
+- **実装**
+  - `src/core/WebAccess.py`（新規）
+    - 分類表
+      - `ROUTE_ACCESS`: Flask の全 endpoint（legacy 43・designer 9・入口 / ファイル 2・v1 31）を `READ` / `WRITE` / `PLAYERDB` / `DESIGNER` / `STATIC` に分ける
+      - `EVENT_ACCESS`: Socket.IO の全イベント（41）を同じクラスに分ける
+      - 表に無い名前は `RouteAccess` / `EventAccess` が `WRITE` として返す。分類し忘れても、開く側ではなく守る側に倒れる
+      - 判定の対象（`GUARDED`）は `WRITE` と `PLAYERDB`
+    - 静的配信: `StaticPath(filename)` が、配信してよいパスを正規化して返す（配信しないものは None）
+      - 許可するのは `STATIC_DIRECTORIES`（`layout/`・`assets/`・`web/build/`・`out/`・`user_data/{games,team_logo,sponsor_logo,player_avatar,additional_flag}/`）と `STATIC_FILES`（`user_data/tournament_banner.png`）
+      - `\` は区切りとして読む
+      - NUL・`:`（ドライブ名・NTFS ストリーム）・先頭の `/`・`..` の区間は、比較の前に拒否する
+      - 大文字小文字は区別しない（Windows では `/User_Data/...` でも同じファイルが返るため）
+    - トークン
+      - `Token()`: 初回の使用時に settings.json から読み、以後はメモリに持つ。変えるのは `RegenerateToken()` だけ
+      - 発行するのは、settings.json を読めたうえで `general.webserver_token` が本当に無いときだけ（初回起動・S3a 前からの更新）。`secrets.token_urlsafe(24)` を作って保存し、info ログを出す
+      - 次の 2 つの場合は発行せず、使えるトークン無し（`""`）として扱う。警告を出し、LAN からの書き込みは再発行するまで全部拒否する
+        - settings.json はあるが読めなかった（`SettingsManager.loadFailed`）。空に見えるだけで、利用者の機器が持っているトークンはその中にある
+        - 保存値が `[A-Za-z0-9_-]{16,256}` に合わない
+      - `RegenerateToken()`: 作り直す。旧トークンはその場で使えなくなる。`TokenGeneration()` は発行のたびに 1 つ進む
+      - 受け取る場所は `Authorization: Bearer` / `X-Autona-Token` / `?token=` / Socket.IO の `auth.token`（`SuppliedTokens`）
+      - 比較は bytes の `hmac.compare_digest` で行う。512 文字を超える値は比較しない
+    - 判定: `Authorize(remoteAddr, tokens, origin, fetchSite, host, ownOrigins, localAddresses, forwarded)`
+      - まず「トークンなしで通れるか」（`_AmbientRefusal`）を上から順に見る。どれかに当たったら拒否の理由とし、当たらなければ `GRANT_AMBIENT`
+        1. 転送ヘッダ（`X-Forwarded-For` / `Forwarded` / `X-Real-IP`）がある、または接続元が「この PC」（`IsThisComputer`: ループバック、またはこの PC の LAN アドレスのどれか）でない → 401 `UNAUTHENTICATED`（`forwarded` / `token_required`）
+        2. `Host` がこのサーバーの名前（`http://<Host>` が `OwnOrigins` に入る = ループバック名 3 つかこの PC の LAN アドレスで、待ち受けポート）でない → 401（`foreign_host`）
+        3. `Sec-Fetch-Site` が付いていて `same-origin` / `none` 以外 → 403 `FORBIDDEN`（`cross_site` / `same_site` / `fetch_site`）
+        4. `Origin` が付いていて自分のオリジンでない（`null` を含む） → 403（`foreign_origin`）
+      - トークンなしで通れなければ、トークンが一致すれば `GRANT_TOKEN`。一致しなければ、上の拒否を返す（401 のときは `invalid_token` にする）
+      - 拒否の本文は v1 のエラーエンベロープ（`ErrorBody`）
+      - `NormalizeOrigin` は `scheme://host[:port]` だけを受ける。userinfo・パス・クエリ・フラグメントが付いていれば None（`evil@127.0.0.1:5107` を自分と読まない）
+    - `RefusalLog`: 拒否の種類ごとに、最初の 1 回だけ warning を出す（以降は debug。上限 256 種）
+  - `src/Helpers/AutonaNetworkHelper.py`: `GetLocalIPs()` を追加した。この PC の IPv4 アドレスを全部返す（`GetLocalIP()` の外向き 1 つと、ホスト名が引けるもの。別 NIC・VPN）
+  - `src/core/SettingsManager.py`: `loadFailed` を追加した。settings.json を読めなかったとき True になる（読み込みの挙動は変えていない）
+  - `src/AutonaWebServer.py`
+    - HTTP
+      - `Flask(static_folder=None)`。旧 `static_folder='.'` は `/./` の下で CWD 以下の全ファイルを返していた
+      - `file_request` は `StaticPath` を通す。許可リスト外は `"File not found", 404` で、パスを warning に出す（`favicon.ico` と `.well-known/` はブラウザ・ツールが自分から取りに来るものなので debug）
+      - `file_request` の POST を外した（GET のみ。HEAD は Flask が付ける）
+      - `before_request` の `guard_request` → `_guard_http_request`
+        - `GUARDED` の endpoint だけを判定する（HEAD も GET と同じく判定される）
+        - OPTIONS（プリフライト）と、どのルートにも当たらない URL は素通しにする（Flask の 404 / 405 に任せる）
+        - 401 には `WWW-Authenticate: Bearer realm="Autona"` を付ける
+      - `_authorize` が渡すもの:
+        - 自分のオリジンは `SERVER_PORT`（待ち受けポート）と `_lan_hosts`（`GetLocalIPs()` を初回に 1 回だけ引いて保持）から作る
+        - `Host` は `request.headers` の値
+        - 転送ヘッダの有無は `IsForwarded(request.headers)`
+    - Socket.IO
+      - 全ハンドラを `ws_on(event)` で登録する。`GUARDED` のイベントだけを `_ws_guard` で包む
+      - `ws_connect` は最初に `_authorize_ws_connection(auth)` を呼ぶ
+        - 接続はすべて受け入れ、これまでどおり state を送る
+        - 判定は handshake の要求（polling なら最初の GET、websocket なら upgrade の GET）の Host / Origin / Sec-Fetch-Site / 転送ヘッダで行う
+        - 判定の結果（`(GRANT_AMBIENT, None)` / `(GRANT_TOKEN, 世代)` / None + 拒否理由）を、その接続の `request.environ` に置く。python-socketio は接続の生存中この environ を保持するので、切断時の後始末は要らない
+        - 書き込み可の接続は room に入れる（トークンなしは `autona:trusted`、トークンは `autona:token:{世代}`）
+      - `_ws_guard`
+        - 判定がまだ有効なら（`GrantStillValid`。トークンの接続は世代が同じ間だけ）ハンドラを呼ぶ
+        - 無効なら、ハンドラを呼ばずにエラーエンベロープを ack として返す。再発行で切れた接続は `TOKEN_REPLACED`
+    - `ws_playerdb`
+      - Socket.IO で要求されたとき: 要求した接続だけに返す（`_ws_guard` を通った後）
+      - DB の更新（`db_updated`、リクエストの外）: 信頼済みの room（`autona:trusted` と今の世代のトークン room）にだけ送る。旧実装は全接続に送っていた
+    - `WebServer.__init__` で `WebAccess.Token()` を呼び、初回起動でトークンを作る
+  - Web UI
+    - `web/src/autonaToken.ts`（新規）
+      - `captureTokenFromUrl()`: URL の `?token=` を sessionStorage（使えなければメモリ）に入れ、`history.replaceState` でアドレスバーから消す。`desktop=1` の URL（Designer）は触らない
+      - `tokenHeaders()` / `withToken(headers)` / `socketAuth()`
+    - `index.js`: 描画の前に `captureTokenFromUrl()` を呼ぶ
+    - `api.ts`: ヘッダを `withToken(init?.headers)` で組む。`new Headers(...)` に `set` するので、呼び出し側のヘッダがオブジェクト・Headers・配列のどの形でも落ちない
+    - `websocketConnection.ts`: `auth: (cb) => cb(socketAuth())`。再接続のたびに読み直す
+  - デスクトップ
+    - 「ブラウザ版を開く」（`AutonaScoreboardWidget._WebScoreboardOpenUrl`）: LAN アクセスが有効で、使えるトークンがあるときだけ、クリック時のトークンを `?token=` に載せて開く（URL を別の端末にコピーしても使えるように）。LAN アクセスが無効なら付けない（この PC のページなので要らない）。`webScoreboardUrl` 属性はトークンなしのまま
+    - API 設定ウィンドウ（`AutonaApiInfoWindow`。Qt の既存ダイアログへの行の追加。新規パネルではない）
+      - 接続グループに「アクセストークン」行を置く。既定は伏せ字で、表示・コピー・再発行ができる
+      - 再発行はボタンのクリックから確認ダイアログを出す（入れ子のモーダルにならない）
+      - 赤い警告「LAN では無認証」を、トークンの渡し方の説明に差し替えた
+      - エラーコード表に `UNAUTHENTICATED` / `FORBIDDEN` を足した
+      - LAN が有効なとき、「curl をコピー」の書き込みに `-H "X-Autona-Token: ..."` を付ける
+      - アプリ内 API Tester は変えていない（127.0.0.1 宛てでヘッダなし = この PC からとして通る）
+    - Companion ガイド（`AutonaIntegrationGuideWindow`）: 「別 PC の Companion はヘッダ `X-Autona-Token` を足す」手順を 1 つ足した
+    - OBS ガイド（`AutonaObsGuideWindow`）: LAN 有効時の注記に「別 PC の OBS（ASS の HTTP アクション）は URL 末尾に `?token=`（すでに `?` があれば `&token=`）を付ける」を足した（ガイドの v1 リクエストは書き込みのため）
+    - 翻訳: `.ts` を手で編集し（置き換え 2・追加 8、api コンテキスト）、`scripts/compile_translations.ps1` で `.qm` を作り直した
+- **判断と理由**
+  1. **許可リストは「HTTP で実際に読まれているもの」だけ**
+     - オーバーレイが読むもの: `layout/`。file:// の場合は `out/program_state.json` を読む
+     - Web UI が読むもの: `web/build/`。`assets/` のフォントとアイコン、`assets/data_countries.json` も読む
+     - state の画像パスが指す先: `./assets/...`・`./user_data/games/...`、チーム / スポンサーのロゴ、アバター、カスタム国旗、大会バナー
+     - `user_data/` のうち JSON（`settings.json`・`local_players.json`・`layout_options.json`・`characters.json`・`alerts_red.json`・`tournament_terms.json`）は、すべて Python がファイルとして読んでいる。HTTP の参照はコードにもレイアウトにも無いので、外した
+     - 許可リスト外の要求には 404（ファイルが無いときと同じ）を返し、ログには残す（カスタムレイアウトが参照していれば気づける）
+  2. **Flask の static_folder を無効にした**: `/./<path>` が許可リストの抜け道になるため。`file_request` を唯一のファイルのルートにした
+  3. **`/<path:filename>` の POST を外した**: 上流 TSH フォークの最初のコミットから残っていたもので、ファイルを読み返すだけだった。POST の無いルート宛ての POST に 405 ではなく 404 を返す原因にもなっていた
+  4. **「この PC」はループバックとこの PC の LAN アドレス**: この PC の LAN アドレスから来たパケットは、この PC が送ったもの。同じ PC の Companion・ブラウザが LAN の IP の URL を使っていても（LAN を有効にすると、アプリ自身が LAN の IP の URL を案内する）、今までどおりトークンなしで動く
+  5. **転送ヘッダが付いた要求は「この PC」としない**: ローカルのリバースプロキシやトンネルは、他の端末の要求をループバックから中継する。転送ヘッダを付けないプロキシでは判定が外れるので、運用文書で注意を書いた（runtime-operations.md）
+  6. **トークンなしの書き込みは `Host` がこのサーバーの名前のときだけ（DNS rebinding 対策）**: rebinding されたページは攻撃者のドメインのまま 127.0.0.1 に届き、そのページから見ると要求は same-origin で、`Origin` もそのドメインになる。`Host` は URL のホストからブラウザが付けるので、ページ側では偽れない。読み取りは承認済み設計どおり免除のまま
+  7. **`Sec-Fetch-Site` は許可リスト（無い・`same-origin`・`none`）**: `same-site`（この PC の別ポートのページなど）も拒否する。理由は、同じ PC の別ポートのページからの no-cors GET（`<img src=".../scoreboard1-team1-scoreup">`）を防ぐため。この GET には `Origin` が付かない。正当な利用は影響を受けない（自分のページは `same-origin`、Companion などはヘッダを付けない）
+  8. **正しいトークンは CSRF・Host の判定も免除する**: トークンは cookie ではないので、ブラウザが自分で付けることはない。トークンを送ってくるページは、利用者からそれを渡されている。だから偽造ではない（rebinding されたページはトークンを知らない）
+  9. **`Origin: null` はトークンなしでは拒否する**
+     - `null` を出すのは、file:// のページ、sandbox の iframe、data: の URL など、出どころを確かめられないページ
+     - file:// のオーバーレイが送るのは `program_state`（読み取り）だけで、書き込みは送らない
+     - Figma の取り込み（`/api/designer/imports`、`null` を受ける）は `DESIGNER` に分類しているので、この判定を通らない
+  10. **自分のオリジンは待ち受けポート（`SERVER_PORT`）から作る**: `Host` ヘッダからは作らない（`Host` は判定 6 で照合する側）
+  11. **Socket.IO は全接続を受け入れ、書き込み可かどうかを接続ごとに持つ**
+      - 接続そのものを拒否すると、OBS の file:// オーバーレイや別 PC の OBS（トークンを持たない）が state を受け取れなくなる（外部契約 §2.8）
+      - 判定は接続時に 1 回だけ行う。Socket.IO のイベントには `Origin` が付かないため、handshake で見るしかない
+      - 拒否は ack で返す。Socket.IO には HTTP のステータスが無く、ack を受け取らないクライアントには何も起きない（旧と同じ）
+  12. **トークンなしで通れる接続は、トークンを送ってきても `GRANT_AMBIENT` にする**: この PC の自分のページは、トークンの再発行で切れない。トークンで入った接続（別端末・別オリジン）だけが、世代で切れる
+      - HTTP: 次の要求からすぐ拒否される
+      - トークンで入った Socket.IO 接続: 次のイベントで拒否される（`TOKEN_REPLACED`）。選手 DB の broadcast も、世代ごとの room なので届かなくなる
+  13. **トークンはメモリに持ち、黙って作り直さない**: settings.json を一時的に読めなかったときに作り直すと、新しいトークンが保存され、ファイル全体がほぼ空で上書きされる。利用者の機器はすべて使えなくなる
+      - 読めなかったときと値が壊れているときは、使えるトークン無しで fail closed にした（LAN の書き込みを拒否する。この PC からは今までどおり）
+      - API 設定の再発行で直る。読めなかっただけなら、再起動しても直る
+  14. **legacy の GET でも、状態を変えるものは `WRITE`**（Stream Deck が URL を貼るため、メソッドではなく効果で分類した）
+      - 例: `scoreboard1-team1-scoreup`・`-reset-*`・`-stats-*`・`load_set`・`set_tournament`
+      - `get_thumbnail` もボードを描画して `out/` に画像を書くので `WRITE`
+      - ボードを構築して読むだけのもの（`get_route` / `get_swap` / `get_set`、v1 の `get_scoreboard`）と、start.gg を引いて返すもの（`get_sets` / `get_match`）は `READ`（残置 / リスク参照）
+  15. **「ブラウザ版を開く」のトークンは LAN アクセスが有効なときだけ**: 無効なら、この PC のページなので要らない。付けると、そのタブだけが再発行の影響を受ける形になる
+  16. **Designer のトークン（`?desktop=1&token=...`）とペアリングコードは触らない**
+      - 承認済み設計のとおり、別の仕組みとして残す
+      - Web UI の取り込みは `desktop=1` の URL を飛ばす。`desktopApi.ts` はその `token` を毎回アドレスバーから読むので、消すと Designer が壊れる
+  17. **拒否のログにはパスだけを書く**: クエリ文字列（`?token=`）は書かない。トークンの値はどこにも出さない
+- **外部から見える変化**
+  - LAN の他端末からの書き込み（v1 の POST / PATCH・legacy の書き込み URL・Socket.IO の書き込みイベント）と選手 DB（`/playerdb`・`playerdb` イベント）に、トークンが必要になる
+    - 無い・誤り: HTTP は 401 `{"ok": false, "error": {"code": "UNAUTHENTICATED", ...}}`
+    - Socket.IO: 同じ形の ack を返し、処理しない
+  - この PC からは、ループバックの URL でも、この PC の LAN の IP の URL でも、今までどおりトークン不要
+    - ただし、転送ヘッダの付いた中継（ローカルのリバースプロキシ・トンネル）は他の端末と同じ扱いになる
+    - このサーバーの名前（127.0.0.1 / localhost / [::1] / この PC の LAN IP と待ち受けポート）以外の `Host` 宛ても、他の端末と同じ扱いになる（例: `http://<PC 名>:5107`）
+  - トークンなしの書き込みは、ブラウザの別サイト・同一サイトの別オリジン・別オリジンのページからだと 403 `FORBIDDEN` になる
+    - Companion・Stream Deck・ASS・curl・`requests` は、これらのヘッダを付けないので変わらない
+    - Web UI の開発サーバー（`npm start`、localhost:3100）は別オリジンなので、書き込むには `?token=<token>` 付きで開く
+  - 読み取りは変わらない（オーバーレイ・`/web`・state・カタログ・Socket.IO の受信。LAN からもトークン不要）
+  - 許可リスト外のファイルは 404 になる
+    - 例: `user_data/settings.json`・`local_players.json`、`src/`、`tmp/`、`logs/`
+    - 拒否された要求は `webserver: not serving ...` の warning で出る
+  - `file_request` 宛ての POST は 405 になる（旧はファイルを返していた）
+  - legacy の書き込みが拒否されたときは JSON の本文を返す（成功時の `"OK"` などは変わらない）
+  - 選手 DB の更新の broadcast は、書き込み可の接続にだけ届く（OBS や、トークンを持たない LAN のページには届かない）
+  - `settings.json` に `general.webserver_token` が増える（キーの追加のみ）
+- **pin**
+  - `tests/test_web_access.py`（新規・254 件。実際の Flask アプリと Socket.IO サーバーを使い、Actions は偽物に差し替える）
+    - `StaticPath`: 許可するもの、拒否するもの（`..`・絶対パス・`\`・ドライブ名・ストリーム・NUL・大文字小文字・`layout.` などの別名）
+    - HTTP の静的配信
+      - `settings.json` などは 404 で、warning は 1 回
+      - `favicon.ico` / `.well-known/` は warning にしない
+      - POST は 405。`/./` は無い
+    - トークン
+      - 初回だけ発行し、info ログを出す（値は出さない）
+      - 再発行ができる
+      - メモリに持つ（settings を空にしても書き換えても変わらない）
+      - settings.json を読めなかったら何も発行・保存せず、何とも一致しない。LAN の書き込みは再発行まで 401
+      - 壊れた保存値は使わず、作り直しもしない（再発行で直る）
+      - 手で設定した正しい形の値はそのまま使う
+      - 3 つの場所すべてで受け取る
+    - アドレスとオリジン
+      - ループバック / この PC（2 つの LAN アドレス）/ 転送ヘッダの判定
+      - オリジンの正規化（userinfo・パスなどは None）と自分のオリジン
+    - HTTP の書き込み
+      - ループバックは書ける。LAN は読める。LAN の書き込みと選手 DB は 401 で、`WWW-Authenticate` が付く
+      - Bearer・ヘッダ・クエリで通る
+      - 誤ったトークンは 401 で、値はログに出ない
+      - 再発行した直後から旧トークンは通らない
+      - プリフライトは通る。拒否のログは種類ごとに 1 回
+      - legacy の書き込みへの HEAD も、GET と同じく判定される
+    - CSRF
+      - 拒否（403）: cross-site、same-site、未知の値、別オリジン、`null`、localhost:3000、ポート違い、https。GET / HEAD / POST / playerdb のそれぞれで確かめる
+      - 通す: ヘッダなし、same-origin、`none`、自分のオリジン、`Host` が `127.0.0.1` / `[::1]`
+      - トークンがあれば免除。読み取りは止めない
+    - この PC の LAN アドレス
+      - 2 つとも、トークンなしで書ける（`Host` / `Origin` がその LAN アドレス）
+      - 同じ判定が掛かる（別オリジン・cross-site・same-site は 403、rebinding・転送ヘッダは 401）
+      - 他の LAN アドレスは「この PC」にならない
+    - DNS rebinding: `Host` が `evil.example:5107` / `evil.example`（same-origin・同名の Origin 付きを含む）/ `localhost.` / ポート違いのとき、GET の書き込み・v1 の POST・`/playerdb` は 401。読み取りは通る
+    - プロキシ: `X-Forwarded-For` / `Forwarded` / `X-Real-IP` の付いたループバックの要求は 401 で、トークンがあれば通る
+    - Socket.IO（テストクライアント）
+      - どの接続も `program_state` を受け取る。ループバックは書ける
+      - この PC の LAN アドレスのページは書ける
+      - LAN のトークンなしは読み取りだけになる（ack が `UNAUTHENTICATED`、選手 DB も拒否）
+      - auth・クエリ・ヘッダのトークンで書ける
+      - 別オリジン（`null`・`http://absolute` を含む）は接続できるが、書くと `FORBIDDEN`
+      - rebinding の `Host`・転送ヘッダ・same-site の接続は読み取りだけ
+      - 自分のオリジンは書ける
+      - 再発行で切れるのは、トークンで入った接続だけ
+        - ループバックで自分のページの接続は、トークンを送っていても切れない（選手 DB の broadcast も届き続ける）
+        - 別オリジンでトークンを使っていた接続は切れる
+      - 選手 DB の broadcast は信頼済みの room にだけ届き、再発行の後は旧トークンの接続に届かない
+      - `GUARDED` の全イベント（27）が、読み取りだけの接続で同じ拒否の ack になる。ハンドラが `_ws_guard` なしで登録されていれば、ここで落ちる
+      - AST: このモジュールで `socketio.on` を呼ぶのは `ws_on` の中だけ
+    - Socket.IO（Engine.IO の polling で handshake から）
+      - この PC からの接続は書ける。LAN からはトークン付きで書ける
+      - 次の handshake では、書き込みと選手 DB が拒否される
+        - rebinding の `Host`（same-origin 付きを含む）: 401
+        - 転送ヘッダ: 401
+        - LAN のトークンなし: 401
+        - 別オリジン: 403
+    - API 設定ウィンドウ（オフスクリーン）
+      - トークンは伏せ字で、表示で見える
+      - 再発行は確認で Yes のときだけ
+      - curl のトークンは LAN の書き込みだけに付く
+    - 「ブラウザ版を開く」の URL: LAN 有効のときだけトークンが付き、使えるトークンが無いときは付かない
+  - `tests/test_webserver_routes.py`
+    - 全 endpoint と全イベントが分類済み（台帳との集合一致）
+    - 分類規則: v1 の GET は READ でそれ以外は WRITE、legacy の POST は WRITE、designer は DESIGNER、playerdb は PLAYERDB
+    - 件数: legacy 43 / WRITE 29、イベントの WRITE 26、v1 の WRITE 18
+    - 表に無い名前は守られる
+    - 台帳の更新: `static` ルートを削除、`file_request` は GET のみ、`static_folder` は None、`before_request` に `guard_request` を追加、クラス属性に guard 4 つを追加
+  - `tests/test_import_side_effects.py`: `src.core.WebAccess` を足した。import でトークンを読まない・発行しない
+  - `web/src/autonaToken.test.js`（新規・12 件）
+    - 取り込み・アドレスバーからの削除・再読込後も残る
+    - トークンなし
+    - Designer の URL は触らない
+    - ストレージが使えない場合
+    - api のヘッダ（あり / なし）
+    - `withToken`: オブジェクト・Headers・配列のヘッダが落ちない。同名の古いヘッダは置き換える。トークンなしならそのまま
+    - socket の auth 関数
+- **残置 / リスク**
+  - **読み取りは開いたまま**（承認済み設計）
+    - LAN の誰でも、state（選手名・本名を含みうる `score.*`）とカタログを読める
+    - CORS は `*` のままなので、この PC で開いた任意のサイトからも state を読める
+    - DNS rebinding で読み取りを奪う経路も、読み取りについては残る（書き込みは `Host` の判定で止まる）
+    - 読み取りも守るなら、`Host` の検査を読み取りにも広げ、CORS を絞る必要がある（OBS の file:// オーバーレイのため、慎重に行う）
+  - **READ のルートに、状態を作る副作用がある**
+    - 該当するもの
+      - `get_route` / `get_swap` / `get_set`・v1 `get_scoreboard`: 未構築のボードを構築し、そのサブツリーを書く
+      - `get_sets` / `get_match`: start.gg を引く
+    - 受容した理由
+      - どちらも利用者のデータ（スコア・選手・設定）を変えない。構築は、そのボードを開いたときと同じ初期化になる
+      - 外部の OBS・Web UI が読み取りの経路として使っている
+    - そのため分類方針（「効果で分類する」）の例外として READ に残した。LAN の誰でも、未構築ボードの構築と start.gg への問い合わせを起こせる
+  - `designer_import_received` / `designer_project_saved` の通知は、今も全接続に broadcast される（中身は project 名と取り込み ID。S3a の範囲外）
+  - **LAN からの legacy の GET 書き込みにトークンが要る**
+    - 例: `scoreboard1-stats-*`・`-get-thumbnail`・`update_bracket`
+    - 別 PC の Stream Deck が URL を貼っていたら、`?token=`（すでにクエリがあれば `&token=`）を足す必要がある（リリースノートで告知）
+  - **この PC の LAN アドレスは、初回の判定で 1 回だけ調べて保持する**
+    - 起動中に IP が変わる（DHCP の更新・Wi-Fi の切り替え）と、新しい IP は「この PC」にならない
+    - そのため、新しい IP の URL を使う同じ PC の Companion・ページは、再起動まで 401 になる（トークンを付けていれば通る）
+  - **この PC から、このサーバーの名前以外のホスト名で書いていた場合は 401 になる**
+    - 例: `http://<PC 名>:5107`・mDNS 名・hosts に足した名前
+    - rebinding と区別できないため。127.0.0.1 / localhost / LAN の IP に替えるか、トークンを付ける
+  - 転送ヘッダを付けないプロキシ・トンネルを、この PC で LAN の外へ公開すると、その経路では認証が外れる（運用文書で注意。Autona 側では見分けられない）
+  - トークンは平文の HTTP で流れ、全端末で 1 つを共有する。操作ログは今も IP 単位
+  - トークンの再発行は、API 設定を開いている間しかできない（設定画面には出していない）
+  - settings.json を読めなかった回の起動では、LAN の書き込みが全部拒否される
+    - 再起動で読めれば元に戻る。再発行すれば、その場で新しいトークンになる
+    - ただし、そのとき settings.json は空の内容で上書きされる。これは既存の SettingsManager の挙動で、どの設定の保存でも同じ
+  - 古いブラウザ（`Sec-Fetch-*` が無い）の no-cors GET は、`Origin` も付かないので CSRF の判定をすり抜ける（`Host` の判定は掛かる）。OBS（CEF）・Chrome・Edge・Firefox・Safari の現行版は `Sec-Fetch-Site` を付ける
+  - 既存の未翻訳: API 設定のエンドポイントの説明文・エラーコードの説明（例: 「Full state + revision」）は、HEAD の時点で `.ts` に無かった。今回は自分で足した文言だけを翻訳した
+  - `AutonaStatsPreviewWidget` の「Companion マクロ」カードは、LAN の URL を表示するがヘッダの説明は無い（Companion ガイドへのボタンがあり、ガイドには手順を足した）
+- **実機確認（オーナー）**
+  - LAN オフ
+    - この PC のブラウザで `/scoreboard` を開き、スコア・チーム名・反映を操作できる
+    - 「ブラウザ版を開く」の URL に `?token=` が付かない
+  - LAN オン・この PC
+    - 「ブラウザ版を開く」（URL は LAN の IP で `?token=` 付き）で開いたページから操作できる。アドレスバーから `token` が消え、再読込しても操作できる
+    - 同じ URL を `?token=` なしで開いても操作できる（この PC から）
+    - 同じ PC の Companion が LAN の IP の URL のままでも、ヘッダなしで動く
+  - LAN オン・別端末（スマホ）
+    - トークンなしで `http://<IP>:5107/scoreboard` を開く: 表示は追従する。スコアを押しても変わらない（デスクトップのログに `refused` の warning が 1 回出る）
+    - API 設定からコピーしたトークンを `?token=` に付けて開き直す: 操作できる
+  - 別 PC の Companion: ヘッダ `X-Autona-Token` なしでは押しても変わらない。足すと動く
+  - 別 PC の ASS: 書き込みの URL に `?token=`（クエリがある URL は `&token=`）を付けると動く
+  - OBS のオーバーレイ（http://127.0.0.1 と、ローカルファイル（file://）の両方）が今までどおり更新される。別 PC の OBS（LAN の IP の URL）も更新される
+  - Chrome と OBS（CEF）のブラウザソースで開いた Web UI で、選手名の補完（playerdb の WebSocket 受信）が効く。WebSocket の handshake に付く `Sec-Fetch-Site` が `same-origin` で通ることの確認
+  - アプリ内のプレビュー（BOARD タブ・レイアウトのプレビュー）と Designer（保存・読込）が動く。Figma プラグインからの取り込みが届く
+  - API 設定
+    - トークンが伏せ字で出る。表示で見える。コピーできる
+    - 再発行は確認が出て、No では変わらない
+    - Tester の書き込み（`score:adjust` など）が LAN オン / オフどちらでも通る
+  - 再発行の後
+    - 旧トークンで開いていた別端末のページは操作できなくなり、新しいトークンで開き直すと戻る
+    - この PC で開いていたページは、そのまま操作できる
+  - ログ: `http://127.0.0.1:5107/user_data/settings.json` を開くと 404 になり、warning が 1 回出る
+- **リリースノート案**
+  > **LAN の他の端末からの操作にアクセストークンが必要になりました**
+  > 「LAN 上の他のデバイスからのアクセスを許可」をオンにして、別の PC やスマホから Autona を操作している場合（Companion / Stream Deck / Advanced Scene Switcher / ブラウザ）、操作の要求にアクセストークンが必要になりました。トークンは「ヘルプ＆設定 → API設定 → リファレンス・テスターを開く」で表示・コピーできます。
+  > - Companion などの HTTP 要求: ヘッダ `X-Autona-Token: <トークン>`（または `Authorization: Bearer <トークン>`）を追加するか、URL の末尾に `?token=<トークン>` を付けてください（URL にすでに `?` があるときは `&token=<トークン>`）
+  > - ブラウザ版: 「ブラウザ版を開く」から開けば、トークンは自動で渡されます。別の端末では、URL の末尾に `?token=<トークン>` を付けて開いてください
+  > - 表示（OBS のオーバーレイ・ブラウザ版の表示）にはトークンは不要です
+  > - Autona を動かしている PC からの操作は、これまでどおりトークンなしで使えます（`127.0.0.1` の URL でも、その PC の LAN の IP の URL でも）。LAN アクセスがオフの場合も変わりません
+  > - トークンが漏れたときは、同じ画面の「再発行」で作り直せます（古いトークンはすぐに使えなくなります）
+  >
+  > あわせて、Web サーバーが配信するファイルをオーバーレイ・ブラウザ版・画像に限定しました。`user_data/settings.json` や選手 DB はブラウザから読めなくなります。独自のレイアウトが `layout/` `assets/` `out/` と `user_data/` の画像フォルダ以外のファイルを読んでいた場合は表示されなくなり、ログに `not serving` が出ます。

@@ -16,6 +16,11 @@ DEFAULT_WEBSERVER_PORT = 5107
 class SettingsManager:
     settings = {}
     _initialized = False
+    # True when settings.json exists but LoadSettings() could not read it, so
+    # `settings` is an empty stand-in rather than what the user saved. Lets a
+    # reader tell "not set yet" from "unknown" (WebAccess.Token() does not
+    # issue a new access token over one it could not read).
+    loadFailed = False
     # Set() is called from the GUI thread and from Flask threads (e.g. Figma
     # pairing code issue/regenerate). Re-entrant because Set -> SaveSettings
     # both take it. Creating a lock has no side effect at import time.
@@ -67,8 +72,10 @@ class SettingsManager:
             try:
                 with open("./user_data/settings.json", 'rb') as file:
                     SettingsManager.settings = orjson.loads(file.read())
+                SettingsManager.loadFailed = False
             except:
                 SettingsManager.settings = {}
+                SettingsManager.loadFailed = True
 
     def Set(key: str, value):
         with SettingsManager.lock:
