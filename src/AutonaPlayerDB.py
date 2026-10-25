@@ -49,6 +49,12 @@ class AutonaPlayerDB:
     # DB tags (see PlayerTag) of the loaded tournament's entrants.
     # Empty set = no tournament loaded -> completers show the whole DB.
     tournamentTags = set()
+    # Whether SetupModel builds the Qt model (QStandardItemModel + QIcons,
+    # i.e. QtGui). Switched on by the desktop shell (bootstrap_gui ->
+    # EnableModel); the headless shell has no completer to feed and no
+    # QGuiApplication to build icons with, so there a refresh only tells the
+    # listeners (ADR-005 S3c).
+    modelEnabled = False
     modelLock = Lock()
     fieldnames = ["prefix", "gamerTag", "name", "twitter",
                 "country_code", "state_code", "mains", "custom_textbox"] # Used for filtering what we save locally
@@ -215,8 +221,32 @@ class AutonaPlayerDB:
         return None
 
     @staticmethod
+    def EnableModel():
+        """Have SetupModel build the Qt model from now on. The desktop
+        shell's switch (bootstrap_gui), called before the first LoadDB()."""
+        AutonaPlayerDB.modelEnabled = True
+
+    @staticmethod
     @gui_thread_sync
     def SetupModel():
+        """Refresh what the DB's consumers see after it changed.
+
+        On the desktop: rebuild the completer model (below), which also
+        normalises the loaded game's mains in place, then emit db_updated.
+        Without the model (the headless shell, see `modelEnabled`): emit
+        db_updated only -- the web server's player DB push is what listens
+        there, and it reads `database` itself. Either way on the GUI thread,
+        where the emit has always come from.
+        """
+        if not AutonaPlayerDB.modelEnabled:
+            AutonaPlayerDB.signals.db_updated.emit()
+            return
+        AutonaPlayerDB._BuildModel()
+
+    @staticmethod
+    def _BuildModel():
+        # GUI thread only (QStandardItemModel / QIcon): reached through
+        # SetupModel, which marshals there.
         with AutonaPlayerDB.modelLock:
             # Retire — don't delete — the outgoing source model. Dropping the
             # last Python reference here destroys the C++ model while it is

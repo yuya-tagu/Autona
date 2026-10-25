@@ -114,7 +114,7 @@ def test_the_models_match_the_recording(goldenGames, autonaApp, label):
 
     # The Web readers (catalog-backed since S1b): what they send must not
     # move.
-    actions = autonaApp.actions()
+    actions = autonaApp.web()
     for name, actual in (("characters", actions.get_characters()),
                          ("variants", actions.get_variants()),
                          ("games", actions.get_games())):
@@ -139,13 +139,11 @@ def test_the_web_readers_read_the_catalog_without_a_gui_hop():
     """S1's completion condition (docs/changes/architecture-modernization.md
     §4.4): get_games / get_characters / get_variants carry no
     @gui_thread_sync, and read the catalog rather than the Qt models."""
+    # Web operations of both shells since ADR-005 S3c (module functions).
     root = Path(__file__).resolve().parent.parent
-    tree = ast.parse((root / "src" / "AutonaWebServerActions.py").read_text(
+    tree = ast.parse((root / "src" / "AutonaWebOperations.py").read_text(
         encoding="utf-8"))
-    actionsClass = next(node for node in tree.body
-                        if isinstance(node, ast.ClassDef)
-                        and node.name == "WebServerActions")
-    methods = {node.name: node for node in actionsClass.body
+    methods = {node.name: node for node in tree.body
                if isinstance(node, ast.FunctionDef)}
 
     for name in WEB_READERS:
@@ -163,7 +161,7 @@ def test_the_web_readers_answer_on_a_worker_thread(goldenGames, autonaApp):
     marshalled onto the GUI thread would wait in run_sync until the join
     below times out."""
     _load(goldenGames, "tgame")
-    actions = autonaApp.actions()
+    actions = autonaApp.web()
     results = {}
 
     def work():
@@ -449,21 +447,34 @@ def test_clearing_the_tournament_url_forgets_the_pick(goldenGames):
     from src.core.GameAssetCatalog import GameAssetCatalog
 
     # Source-level half: Window cannot be built in this harness (importing
-    # src/Autona.py is the startup sequence -- agent-pitfalls #1).
+    # src/Autona.py is the startup sequence -- agent-pitfalls #1). The
+    # forgetting is bootstrap.wire_tournament_data's since ADR-005 S3c (both
+    # shells call it; tests/test_bootstrap_split.py pins that they do), and
+    # the window's Signal_GameChange only resets its game button.
     root = Path(__file__).resolve().parent.parent
-    tree = ast.parse((root / "src" / "Autona.py").read_text(encoding="utf-8"))
-    handler = next(node for node in ast.walk(tree)
-                   if isinstance(node, ast.FunctionDef)
-                   and node.name == "Signal_GameChange")
-    cleared = next(node for node in ast.walk(handler)
+    bootstrap = ast.parse(
+        (root / "src" / "bootstrap.py").read_text(encoding="utf-8"))
+    wiring = next(node for node in bootstrap.body
+                  if isinstance(node, ast.FunctionDef)
+                  and node.name == "wire_tournament_data")
+    forget = next(node for node in ast.walk(wiring)
+                  if isinstance(node, ast.FunctionDef)
+                  and node.name == "forget_cleared")
+    cleared = next(node for node in ast.walk(forget)
                    if isinstance(node, ast.If)
                    and ast.unparse(node.test) == "url == ''")
     calls = {ast.unparse(node.func)
              for statement in cleared.body for node in ast.walk(statement)
              if isinstance(node, ast.Call)}
     assert "GameAssetCatalog.instance.ForgetSelection" in calls, (
-        "Signal_GameChange('') no longer forgets the selected game; picking "
-        "the same game again after clearing the URL would be skipped")
+        "a cleared tournament URL no longer forgets the selected game; "
+        "picking the same game again after clearing the URL would be skipped")
+    assert "signals.tournament_url_update.connect(forget_cleared)" in (
+        ast.unparse(wiring))
+    tree = ast.parse((root / "src" / "Autona.py").read_text(encoding="utf-8"))
+    handler = next(node for node in ast.walk(tree)
+                   if isinstance(node, ast.FunctionDef)
+                   and node.name == "Signal_GameChange")
     assert "selectedGame" not in ast.unparse(handler), (
         "the adapter's selectedGame is a read-only view since S1a")
 

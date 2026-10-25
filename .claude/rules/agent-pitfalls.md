@@ -14,17 +14,20 @@ globs:
 新しい原則:
 
 - **`src.*` の import は副作用ゼロ**（QApplication 生成なし・シングルトン生成なし・ファイル読み書きなし）。テストからは `from src.XXX import YYY` の**通常 import でよい**
-- **唯一の例外は `src/Autona.py`**（アプリ組み立てモジュール）。この import 自体が起動シーケンス（logger 構成 → `bootstrap_core()` → Window 定義）なので、テストや調査スクリプトから import しない。`main.py` の `from src import Autona` だけがこれを行う
+- **唯一の例外は `src/Autona.py`**（アプリ組み立てモジュール）。この import 自体が起動シーケンス（logger 構成 → `bootstrap_core()` → `bootstrap_gui()` → Window 定義）なので、テストや調査スクリプトから import しない。`main.py` の `from src import Autona` だけがこれを行う
 - 新しいモジュールを足すとき、**module level で「作る／読む／書く」をしない**。生成は `Initialize()` / `__init__` / `bootstrap.py` 側へ置く
 - この原則は `tests/test_import_side_effects.py` が subprocess で pin している（`import src` 自体の inert 検査＋主要モジュール群の副作用検査）。ここが落ちたら実装側を直す。テスト側を緩めない
 
-## 2. シングルトン初期化順序の正本は `src/bootstrap.py`（2026-07-29 Step 3 完了により更新）
+## 2. シングルトン初期化順序の正本は `src/bootstrap.py`（2026-10-25 ADR-005 S3c で 2 段に分割）
 
-旧来は `Autona.py` の **import 順序**が生成順序を決めていたが、現在は `src/bootstrap.py` の `bootstrap_core()` に**明示的な生成順として集約**されている。import 順序は順序を決めない。
+旧来は `Autona.py` の **import 順序**が生成順序を決めていたが、現在は `src/bootstrap.py` に**明示的な生成順として集約**されている。import 順序は順序を決めない。生成は 2 段:
 
-- 順序を変えるときは `bootstrap.py` の `ORDER CONSTRAINT:` コメントを必ず読む。制約の理由（誰が誰の `instance.signals` に connect するか、QApplication 必須か、`StateManager.Initialize()` 後でなければならないか等）がその場に書いてある
-- **絶対に守る**: `AutonaGameAssetManager` の生成は `AutonaTournamentDataProvider` より前（`AutonaTournamentDataProvider.__init__` が `AutonaGameAssetManager.instance.signals` に connect する）。そのさらに前に、アダプタが包む `GameAssetCatalog`（core）を生成して `ResetGameState()` する（ADR-005 S1a）
-- 新しいシングルトンは `bootstrap_core()` に追加する。モジュール末尾で `instance = XXX()` を書かない（#1 に違反する）
+- `bootstrap_core()` — どのシェルにも要るもの（設定・state 層と Bridge・`AutonaActions`・Qt 非依存カタログ・大会 provider・`TournamentInfoService` 等）。**`QCoreApplication` だけで動くこと**（QtGui / QtWidgets のオブジェクトを作らない）。ヘッドレス起動はここで止まる
+- `bootstrap_gui()` — デスクトップの Qt アダプタ（ホットキー・ゲームアセット／国モデル・PlayerDB のモデル結線・Alert / Updater・スコアボード dock）。先頭で `bootstrap_core()` を呼ぶ。`src/Autona.py` が両方をこの順で呼ぶ。テストハーネス（`tests/conftest.py`）も両方呼ぶ
+
+- 順序を変えるときは `bootstrap.py` の `ORDER CONSTRAINT:` コメントを必ず読む。制約の理由（誰が誰の `instance.signals` に connect するか、QApplication 必須か、`StateManager.Initialize()` 後でなければならないか等）がその場に書いてある。各段の手順（生成・結線・`Initialize()`・Designer の移行）とその順は `tests/test_bootstrap_split.py` が AST で、`onLoadAssets` のスロット順（provider → アダプタの `_RestoreSelectedGame`）は実際の emit で pin している
+- **絶対に守る**: `GameAssetCatalog`（core）を生成して `ResetGameState()` してから、それを包む `AutonaGameAssetManager`（`bootstrap_gui()`）を作る（ADR-005 S1a）。`AutonaTournamentDataProvider` はもうアダプタに connect しない: ゲーム選択のフック `selectGameFromStartGGId` と `onLoadAssets` → `SetGameFromProvider` の結線はシェル側（`bootstrap_gui()`）が行う。`AutonaScoreboardManager`（`ResetScoreRoot`）は `bootstrap_gui()` の最後で、Window より前
+- 新しいシングルトンは、QCoreApplication で作れて全シェルが使うなら `bootstrap_core()`、QtGui / QtWidgets が要るかデスクトップだけが使うなら `bootstrap_gui()` に追加する。モジュール末尾で `instance = XXX()` を書かない（#1 に違反する）
 
 ## 3. StateManager のキーパスはドット区切り文字列
 

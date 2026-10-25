@@ -113,7 +113,7 @@ class AutonaStreamSettingsWidget(QDockWidget):
             self._onStreamChannelChanged)
 
         # Restore the saved selection rather than exporting the combo's empty
-        # default — stream.url is persisted in program_state.json, so the
+        # default — stream.url is persisted (user_data/state.json), so the
         # destination outlives the session.
         self._syncStreamDestinationCombo()
         self._updateEditStreamChannelBtn()

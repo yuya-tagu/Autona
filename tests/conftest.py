@@ -291,12 +291,23 @@ class _AutonaHarness:
     def actions(self):
         """A WebServerActions bound to the real manager (never started).
 
-        This is the object every HTTP route and Socket.IO event delegates to,
-        so driving it exercises the same code path as a request without
-        binding a port.
+        The board-dependent operations (player edits, set loading, stats,
+        ...): what the HTTP routes and Socket.IO events that need a widget
+        delegate to, so driving it exercises the same code path as a request
+        without binding a port.
         """
         from src.AutonaWebServerActions import WebServerActions
         return WebServerActions(parent=None, scoreboard=self.manager)
+
+    def web(self):
+        """The web operations every route reaches without a widget of its
+        own (src/AutonaWebOperations.py, ADR-005 S3c): the core-direct ones
+        and the S2 operations. Here they run through the desktop's board
+        host (bootstrap_gui() registered it on the real manager), as in the
+        app. A module, called like the actions object: web().swap_teams(1).
+        """
+        from src import AutonaWebOperations
+        return AutonaWebOperations
 
     # -- scheduling -------------------------------------------------------
 
@@ -312,6 +323,14 @@ class _AutonaHarness:
         the join. So this loops until a pass leaves the same thread (or none)
         behind.
 
+        The persisted store (user_data/state.json, ADR-005 S3b) has a writer
+        of its own that waits for the state to be quiet for a second. It is
+        flushed too, so no write is left in flight when a test ends and a
+        second process started in the same directory
+        (tests/live/restart_probe.py) reads a current store. Its path is
+        fixed when StateManager.Initialize() runs, so unlike ./out it cannot
+        follow a CWD change.
+
         The image downloads come last because the export thread is what
         spawns them (CreateFilesDict, for any state value that is an http
         .png/.jpg URL -- avatars and character art). They write
@@ -321,6 +340,7 @@ class _AutonaHarness:
         """
         from qtpy.QtWidgets import QApplication
         from src.core.StateManager import StateManager
+        from src.core.StatePersistence import StatePersistence
 
         previous = object()
         while True:
@@ -331,6 +351,8 @@ class _AutonaHarness:
                 break
             thread.join()
             previous = thread
+
+        assert StatePersistence.Flush(30), "state.json writer did not finish"
 
         StateManager.JoinDownloads()
 
@@ -360,9 +382,12 @@ def _autonaRuntime(qapp, tmp_path_factory):
 
     try:
         from src.Helpers import AutonaQtHelper
-        from src.bootstrap import bootstrap_core
+        from src.bootstrap import bootstrap_core, bootstrap_gui
 
+        # Both stages, as src/Autona.py runs them: the harness builds desktop
+        # widgets (boards, panels), which need the Qt adapters.
         bootstrap_core()
+        bootstrap_gui()
         # Normally done by src/Autona.py at import time. WebServerActions'
         # @gui_thread_sync methods raise without it, and that module is the
         # one thing tests must not import (agent-pitfalls #1).
@@ -370,8 +395,8 @@ def _autonaRuntime(qapp, tmp_path_factory):
             AutonaQtHelper.init_gui_executor()
 
         # bootstrap_core() deliberately stops short of the per-run locale
-        # (it needs a QGuiApplication for the QTranslator), so Window.__init__
-        # does these two. The harness has to as well: without them
+        # (that is the shell's: Window.__init__ or src/headless.py), so the
+        # harness does these two as well: without them
         # AutonaLocaleHelper.matchNames is empty, and the best_of handler --
         # which formats "Best of {}" out of it -- raises halfway through,
         # leaving first_to and friends unwritten. That is a harness artifact,

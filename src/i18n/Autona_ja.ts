@@ -592,16 +592,16 @@
         <translation>OBS / Advanced Scene Switcher</translation>
     </message>
     <message>
-        <source>No authentication. Anyone on the LAN can call every operation, including destructive ones.</source>
-        <translation>認証はありません。LAN 上の誰でも、破壊的な操作を含むすべての操作を実行できます。</translation>
+        <source>From other devices on the LAN, every operation that changes something (and the player list) needs the access token: send the header X-Autona-Token: &lt;token&gt; (or Authorization: Bearer &lt;token&gt;, or add ?token=&lt;token&gt; to the URL). Reading the state and the overlays needs no token.</source>
+        <translation>LAN 上の他のデバイスから状態を変更する操作（と選手リストの取得）には、アクセストークンが必要です。ヘッダ X-Autona-Token: &lt;トークン&gt; を付けて送ってください（Authorization: Bearer &lt;トークン&gt; や、URL 末尾の ?token=&lt;トークン&gt; でも可）。状態の読み取りとオーバーレイの表示にはトークンは不要です。</translation>
     </message>
     <message>
         <source>LAN access is disabled; the API is reachable from this PC only. Enable it under Settings → General (restart required).</source>
         <translation>LAN アクセスは無効です。API にはこの PC からのみ接続できます。有効にするには 設定 → 一般 で設定してください（要再起動）。</translation>
     </message>
     <message>
-        <source>OBS must run on this PC. For OBS on another PC on the same LAN, replace 127.0.0.1 with this PC's IP address.</source>
-        <translation>OBS はこの PC で実行してください。同一 LAN 上の別 PC の OBS から使う場合は、127.0.0.1 をこの PC の IP アドレスに置き換えてください。</translation>
+        <source>OBS must run on this PC. For OBS on another PC on the same LAN, replace 127.0.0.1 with this PC's IP address and add ?token=&lt;access token&gt; to the end of the URL (&amp;token=&lt;access token&gt; if the URL already has a ?; copy the token from API Settings → Open reference &amp; tester).</source>
+        <translation>OBS はこの PC で実行してください。同一 LAN 上の別 PC の OBS から使う場合は、127.0.0.1 をこの PC の IP アドレスに置き換え、URL の末尾に ?token=&lt;アクセストークン&gt; を付けてください（URL にすでに ? があるときは &amp;token=&lt;アクセストークン&gt;。トークンは API設定 → リファレンス・テスターを開く からコピーできます）。</translation>
     </message>
     <message>
         <source>LAN access: disabled — OBS must run on this PC. To use OBS on another PC, enable it under Settings → General (restart required).</source>
@@ -962,6 +962,38 @@
     <message>
         <source>optional</source>
         <translation>任意</translation>
+    </message>
+    <message>
+        <source>Access token</source>
+        <translation>アクセストークン</translation>
+    </message>
+    <message>
+        <source>Show</source>
+        <translation>表示</translation>
+    </message>
+    <message>
+        <source>Regenerate</source>
+        <translation>再発行</translation>
+    </message>
+    <message>
+        <source>Regenerate access token</source>
+        <translation>アクセストークンの再発行</translation>
+    </message>
+    <message>
+        <source>Issue a new access token? Devices that use the current one (Companion, Stream Deck, a browser on another PC) can no longer change anything until they are given the new token.</source>
+        <translation>アクセストークンを再発行しますか？今のトークンを使っている機器（Companion、Stream Deck、別 PC のブラウザ）は、新しいトークンを設定し直すまで操作できなくなります。</translation>
+    </message>
+    <message>
+        <source>Token missing or wrong (writes from another device)</source>
+        <translation>トークンがない・誤り（他のデバイスからの書き込み）</translation>
+    </message>
+    <message>
+        <source>Refused browser page (cross-site / another origin)</source>
+        <translation>拒否されたブラウザのページ（クロスサイト・別オリジン）</translation>
+    </message>
+    <message>
+        <source>If Companion runs on another PC (LAN access), also add the header X-Autona-Token with the access token as its value. Copy the token from Help &amp; Settings → API Settings → Open reference &amp; tester.</source>
+        <translation>Companion を別の PC で動かす場合（LAN アクセス）は、ヘッダ X-Autona-Token も追加し、値にアクセストークンを入れてください。トークンは ヘルプ＆設定 → API設定 → リファレンス・テスターを開く からコピーできます。</translation>
     </message>
 </context><context>
     <name>app</name>

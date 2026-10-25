@@ -26,6 +26,7 @@ from loguru import logger
 from .DictHelper import deep_get, deep_set, deep_unset, deep_clone
 from .Observable import ObserverChannel
 from .SettingsManager import SettingsManager
+from .StatePersistence import StatePersistence
 
 # Sentinel telling "key absent" apart from a stored None.
 _MISSING = object()
@@ -190,12 +191,16 @@ class StateManager:
 
     @staticmethod
     def Initialize():
-        """Create ./out and load the persisted state.
+        """Create ./out, load the persisted state and open its store.
 
         Used to run at import time; it is now called explicitly from
         src/bootstrap.py so that importing this module has no side effect.
         Idempotent: later calls are a no-op (re-running LoadState() would
         discard in-memory state that has not been exported yet).
+
+        The store (user_data/state.json, ADR-005 S3b) is opened by
+        LoadState() at the path below this call's working directory, and
+        only then: a process that never loaded it never writes it.
         """
         if StateManager._initialized:
             return
@@ -244,6 +249,31 @@ class StateManager:
             else:
                 thread.join(max(0.0, deadline - time.monotonic()))
         return not any(t.is_alive() for t in threads)
+
+    @staticmethod
+    def JoinExports(timeout=None):
+        """Wait until the export writer has written every save cycle queued
+        so far; True if it did.
+
+        The interpreter's shutdown join does this for a process that exits
+        normally. A shell that is ended from outside once its handler
+        returns -- the headless shell on a console close (ADR-005 S3c) --
+        calls it first. A writer started while waiting is waited for too.
+        `timeout` is the total budget.
+        """
+        deadline = None if timeout is None else time.monotonic() + timeout
+        previous = None
+        while True:
+            thread = StateManager._export_thread
+            if thread is None or thread is previous:
+                return True
+            if deadline is None:
+                thread.join()
+            else:
+                thread.join(max(0.0, deadline - time.monotonic()))
+            if thread.is_alive():
+                return False
+            previous = thread
 
     @contextlib.contextmanager
     def SaveBlock():
@@ -540,6 +570,14 @@ class StateManager:
                     old_state = StateManager.lastSavedState
                     StateManager.lastSavedState = state_snapshot
 
+                    # The store of record (user_data/state.json, ADR-005
+                    # S3b) gets the same published snapshot. Its own writer
+                    # debounces it, independent of the export below and of
+                    # general.disable_export. Never blocks or raises here:
+                    # it only takes its own lock, briefly (lock order:
+                    # StateManager.lock -> the store's, never the reverse).
+                    StatePersistence.Schedule(state_snapshot)
+
                     StateManager._QueueExport(
                         state_snapshot, old_state, diff, StateManager.revision)
 
@@ -701,17 +739,30 @@ class StateManager:
         jobs.clear()
 
     def LoadState():
-        try:
-            with open("./out/program_state.json", 'rb') as file:
-                StateManager.state = orjson.loads(file.read())
-                StateManager.observers.state_big_change.notify()
-        except FileNotFoundError:
-            pass
-        except Exception as e:
-            logger.error(traceback.format_exc())
-            StateManager.state = {}
+        """Load the state this launch starts from and open its store.
+
+        user_data/state.json when it is usable; otherwise -- or when
+        out/program_state.json is newer, as after a crash -- a migration of
+        out/program_state.json (StatePersistence.Load has every branch);
+        otherwise {}. Since ADR-005 S3b
+        out/program_state.json is only an export again -- written exactly as
+        before, read here only to migrate from it.
+
+        The loaded state never carries program_state.json's `timestamp` /
+        `revision` stamps. They describe that file, and left in the state
+        they rode along in every full snapshot (GetFullState) as the
+        previous session's values.
+
+        What a launch keeps is unchanged: score and game are dropped
+        afterwards (StateSchema.ResetScoreRoot / GameAssetCatalog
+        .ResetGameState) and StateSchema.SeedPanelState normalises the rest.
+        `revision` is not read from any file (it starts at 0), and
+        state_big_change fires whenever a file was found, as it always did.
+        """
+        state, found = StatePersistence.Load()
+        StateManager.state = state
+        if found:
             StateManager.observers.state_big_change.notify()
-            StateManager.SaveState()
 
     def Set(key: str, value):
         # import inspect

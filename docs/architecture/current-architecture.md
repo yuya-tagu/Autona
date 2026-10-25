@@ -45,7 +45,7 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
 
 | 経路 | 入口 | 設計上の含意 |
 |------|------|-------------|
-| HTTP / WebSocket | [AutonaWebServer.py](../../src/AutonaWebServer.py)（QThread, Flask+SocketIO） | 既存の制御面（下記）。新 API はここに同居させるのが自然 |
+| HTTP / WebSocket | [AutonaWebServer.py](../../src/AutonaWebServer.py)（threading.Thread 上の werkzeug サーバー。ADR-005 S3c までは QThread。Flask+SocketIO） | 既存の制御面（下記）。新 API はここに同居させるのが自然 |
 | 状態書き込み | [StateManager.py](../../src/StateManager.py) `Set(keypath, value)` | **状態変更の単一経路。外部からの書き込みも必ずここを通す（バイパス禁止）** |
 | 配信出力 | `out/` ファイル群 + WS デルタ配信 | OBS ブラウザソース／既存クライアントが直接依存。出力契約を壊さない |
 
@@ -125,7 +125,7 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
 1. **AutonaWebServer / AutonaWebServerActions** — 既存制御面。新 API はここに同居 or 競合する
 2. **StateManager** — 状態変更の単一経路。外部からの書き込みは必ずここを通す（バイパス禁止）
 3. **シングルトン生成順** — 新サービス（外部制御リスナ等）は [src/bootstrap.py](../../src/bootstrap.py) の `bootstrap_core()` に追加する。順序制約の理由は同ファイルの `ORDER CONSTRAINT:` コメント（agent-pitfalls #2）
-4. **スレッド境界** — WebServer は QThread。外部 API も別スレッドなら StateManager のロックを尊重
+4. **スレッド境界** — WebServer は専用の `threading.Thread`（ADR-005 S3c。旧 QThread）。外部 API も別スレッドなら StateManager のロックを尊重
 5. **ポート/ルーティング** — `/api/v1/` と既存ルートの衝突回避、既定ポート `5107` の運用影響
 
 > 具体的な影響整理は [../changes/external-control-impact-analysis.md](../changes/external-control-impact-analysis.md)、

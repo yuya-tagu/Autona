@@ -256,7 +256,7 @@ class SetLoadService:
         so it is treated as a set-team write and flips with the board's
         swap state. The neighboring `teamName=` query, by contrast, drives
         the QLineEdit in the literal `team{N}column` slot and does not flip
-        (see AutonaWebServerActions.set_route), and neither does
+        (see AutonaWebOperations.set_route), and neither does
         `set_team_data`, whose caller names the team it means.
 
         That inconsistency predates this file (the old code reversed

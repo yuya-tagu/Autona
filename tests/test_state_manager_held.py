@@ -10,7 +10,9 @@ Importing the module is side-effect free, but StateManager.Initialize() does
 file I/O relative to the CWD (./out), so it runs once inside a temp working
 directory.
 """
+import atexit
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -22,6 +24,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = PROJECT_ROOT / "src"
 
 _WORK_DIR = tempfile.mkdtemp(prefix="autona_sm_test_")
+# Usually the first Initialize() of the run, so the persisted store
+# (user_data/state.json, ADR-005 S3b) lives here for the whole session.
+# Removed at exit: atexit runs after the interpreter has joined the export
+# and store writers (both non-daemon), so nothing writes here any more.
+atexit.register(shutil.rmtree, _WORK_DIR, ignore_errors=True)
 _ORIGINAL_CWD = os.getcwd()
 
 

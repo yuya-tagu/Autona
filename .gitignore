@@ -8,6 +8,12 @@ user_data/badword_whitelist.txt
 user_data/characters.json
 user_data/characters.json.tmp
 user_data/alerts_red.json
+# Persisted state (ADR-005 S3b) and the copies set aside when it was corrupt
+# or written by a newer build. Never tracked: a tracked copy would ship in the
+# release zip and overwrite every installation's saved state on update
+# (scripts/validate_release_zip.ps1 rejects a zip that carries one).
+user_data/state.json
+user_data/state.json.*.bak
 user_data/player_avatar/*
 !user_data/player_avatar/*.txt
 user_data/sponsor_logo/*

@@ -124,9 +124,13 @@ def test_socketio_stats_handlers_pass_only_the_board_number():
 
     source = inspect.getsource(AutonaWebServer)
     for handler in ("stats_recent_sets", "stats_upset_factor"):
+        # The board-dependent actions are reached through _board_actions()
+        # (503 in the headless shell, ADR-005 S3c).
         calls = re.findall(
-            r"WebServer\.actions\.%s\((.*?)\)\)" % handler, source)
-        assert calls, f"no WebServer.actions.{handler}(...) call found"
+            r"WebServer\._board_actions\(\)\.%s\((.*?)\)\)" % handler,
+            source)
+        assert calls, (
+            f"no WebServer._board_actions().{handler}(...) call found")
         for arguments in calls:
             assert "player" not in arguments, (
                 f"{handler} takes only the board number, got: {arguments}")

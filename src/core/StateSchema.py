@@ -12,8 +12,10 @@ exactly the same state a GUI launch does.
 
 One thing it deliberately is *not*:
 
-- **Not a migration layer.** There is none: a renamed ``objectName`` still
-  breaks an existing ``out/program_state.json`` silently. The static key
+- **Not the migration layer.** That is ``src/core/StateMigrations.py``
+  (ADR-005 S3b): the persisted state (``user_data/state.json``) carries a
+  ``state_version``, and a renamed key needs a step there -- a renamed
+  ``objectName`` alone still breaks the saved state silently. The static key
   families below were introduced without renaming a single string precisely
   so none was owed; if one ever is, this catalog is the anchor listing the
   *old* names to read from, which is why it is written against the keys as
@@ -131,8 +133,10 @@ DEFAULT_ACCENT_COLOR = "#f0a500"
 PLAYER_EDITOR_ROOT = "player_editor"
 
 # Whole subtrees dropped at every launch. All three belong to features that
-# were removed, and all three are restored from out/program_state.json until
-# something unsets them.
+# were removed, and all three are restored from the persisted state until
+# something unsets them. StateMigrations' v0 -> v1 step drops a frozen copy
+# of this list too (and of STALE_KEYS below); SeedPanelState() keeps doing
+# it at every launch -- see the note there.
 RETIRED_ROOTS = (
     "bracket",        # legacy full bracket, replaced by top8.* (2026-07)
     "player_list",    # retired PLAYERS roster editor
@@ -177,10 +181,10 @@ TOP8_MATCH_IDS = tuple(top8.MATCH_IDS)
 # AutonaScoreboardWidget looks its widgets up *by* them instead of reading
 # them back off the widgets.
 #
-# The strings are unchanged on purpose. An existing out/program_state.json
-# holds keys named after the old objectNames and there is still no migration
-# layer, so renaming one here (or in the .ui) is the same compatibility break
-# it always was -- tests/test_objectname_keypath_contract.py now pins that the
+# The strings are unchanged on purpose. The persisted state holds keys named
+# after the old objectNames, so renaming one here (or in the .ui) without a
+# StateMigrations step is the same compatibility break it always was --
+# tests/test_objectname_keypath_contract.py now pins that the
 # two spellings agree.
 
 # The match bar's three editable combos (src/layout/AutonaScoreboardScore.ui
@@ -669,9 +673,25 @@ def SeedPanelState():
     commentary slots straight away.
 
     Runs after StateManager.LoadState(), so what is normalised here is the
-    restored program_state.json rather than an empty state. The caller wraps
-    it in a StateManager.SaveBlock() so the whole pass is one save cycle;
+    restored state (user_data/state.json, already migrated to the current
+    state_version) rather than an empty state. The caller wraps it in a
+    StateManager.SaveBlock() so the whole pass is one save cycle;
     Window._SeedPanelState is that caller.
+
+    Three steps below -- the commentary normalisation, RETIRED_ROOTS and
+    STALE_KEYS -- are also the v0 -> v1 migration (StateMigrations), and are
+    kept here on purpose rather than moved there:
+
+    - ``player_editor`` is not only legacy. The current build writes it
+      while the editor dialog is open, so a crashed session leaves it in a
+      v1 state.json, which no v0 -> v1 step ever sees again. Only a
+      per-launch pass removes it.
+    - The commentary pass is also the seed: it builds the 12 empty slots
+      when the subtree is missing (a fresh install), which a migration of
+      existing data does not do.
+    - Running both is harmless. NormalizeState is idempotent, Unset of an
+      absent root changes nothing (inside the caller's SaveBlock it adds no
+      save cycle), and STALE_KEYS are only unset when present.
     """
     # Tournament-wide colors (EVENT tab). The per-feature overrides are
     # expanded separately by core/ColorService.SeedColorState(), which the

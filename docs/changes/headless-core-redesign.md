@@ -175,7 +175,7 @@ Step 6 以降は 1 PR = 1 ウィジェット単位に分割する。
     ステージ行も作り直す。ロケールテーブルの core 移動が前提
   - あわせて **クルーボード（board 3）のスコアリセット**も対象外。チーム合計が
     メンバーストックの派生値で、リセット = 全員ストック満タン復元というウィジェット側の意味
-- **ホットキー**: `AutonaHotkeys.ConnectActions()`（`bootstrap_core()` から 1 回）が
+- **ホットキー**: `AutonaHotkeys.ConnectActions()`（`bootstrap_core()` から 1 回。※2026-10-25 ADR-005 S3c-1 で `bootstrap_gui()` へ移動）が
   スコア ±4 本 / `reset_scores` / `apply_changes` を `AutonaActions` に直結。
   ボードは `AutonaActions.ActiveBoard()` = `SettingsManager.scoreboard.battle_format`
   で解決する。**挙動変化（意図した修正）**: 従来は「構築済みの全ボードが応答」だったため、

@@ -245,7 +245,7 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 
 #### 禁止事項
 
-- **無秩序な機能重複は禁止**。両方で扱う場合は本書に「両方で扱う理由・正本となるレイヤー・競合時の優先順位」を明記する。例: トーナメント設定は PyQt 専有、スコア操作は両方（正本: StateManager、書き込みは AutonaWebServerActions に集約、PyQt と React の同時操作時は最後の書き込みが勝つ）。
+- **無秩序な機能重複は禁止**。両方で扱う場合は本書に「両方で扱う理由・正本となるレイヤー・競合時の優先順位」を明記する。例: トーナメント設定は PyQt 専有、スコア操作は両方（正本: StateManager、Web からの書き込みは AutonaWebOperations に集約、PyQt と React の同時操作時は最後の書き込みが勝つ）。
 - **OBS HTML から状態を書き換えない**。クリエイティブ領域は read-only。
 - **WebEngine 画像生成テンプレを OBS Browser Source として直接使わない**。配信用は OBS HTML、画像出力用は WebEngine と分ける（同じ HTML を兼用しない）。
 
@@ -386,9 +386,10 @@ top8
 実況・解説機能の全面リワーク（2026-07）でスキーマ刷新。スロット固定 12 名・
 欠番概念なし（旧「Unset 時に詰める」運用は廃止）。正規化・表示選択ルールの
 正本は `src/core/CommentaryModel.py`。旧スキーマ（seed / country / character /
-mains / custom_textbox 等）は起動時の `NormalizeState` でマイグレーションされる
-（custom_textbox → note、その他は破棄）。呼び出しは `Window._SeedPanelState()`
-（パネルが lazy 構築のため。§4.1.1）。状態は再起動をまたいで永続化される。
+mains / custom_textbox 等）は `NormalizeState` でマイグレーションされる
+（custom_textbox → note、その他は破棄）。呼び出しは保存済み state の v0 → v1 移行
+（`core/StateMigrations`。§3.3.5）と、起動ごとの `Window._SeedPanelState()`（シードを兼ねる。
+パネルが lazy 構築のため。§4.1.1）。状態は再起動をまたいで永続化される（`user_data/state.json`）。
 
 ```
 commentary
@@ -522,11 +523,12 @@ Step 5（T-19）で順に静的化し、**全族が完了**（`StateSchema.DYNAM
 │ AutonaActions (src/core, Qt-free)│
 │  移行済み操作の唯一の書き手      │
 │  (R-Sync-1b)                    │
-│ AutonaWebServerActions          │
-│  Web/外部の入口。移行済みは      │
-│  Actions へ委譲、残りは従来どおり │
-│  ウィジェットへのリモコン        │
-│  PyQt は未移行分のみ直接 Set     │
+│ AutonaWebOperations             │
+│  Web/外部の入口（両シェル共通）  │
+│  core 直結 + S2 で core 化した操作│
+│ WebServerActions（ボード依存）   │
+│  ウィジェットへのリモコンの残り  │
+│  デスクトップのみ。ヘッドレス503 │
 └────────────┬────────────────────┘
              │ StateManager.Set / Unset / SaveBlock
              ▼
@@ -552,11 +554,18 @@ OBS HTML / React Web UI / WebEngine 画像生成      PyQt UI
 (Socket.IO + revision 検証)                      (Bridge 経由で接続)
 ```
 
+**ヘッドレス起動**（`python main.py --headless`、ADR-005 S3c。`src/headless.py`）では、右下の PyQt UI が無い。
+QCoreApplication の上で `bootstrap_core()` までを組み、大会データの適用・ゲームのロード（`GameAssetCatalog` 直。
+Qt モデルなし）・Web サーバーを動かす。デスクトップと共通の結線は `bootstrap.wire_tournament_data` /
+`wire_web_server`、Web 操作のボード周りの違いは `AutonaWebOperations.boardHost`（デスクトップは
+`DesktopBoardHost`、ヘッドレスは既定の `BoardHost`）が吸収する。ボードが無いので held にならず、
+書き込みは即時公開される。ボード / パネルのウィジェットが要る操作は 503 `UNAVAILABLE`。
+
 #### 3.2.2 書き込み規約
 
 | ルール | 内容 |
 |------|------|
-| **R-Sync-1** | 書き込み経路の規約: <br>① React Web UI / 外部システムからの書き込みは **必ず AutonaWebServerActions 経由**。<br>② OBS HTML は原則 **read-only**。例外的に書き込みを許可する場合も AutonaWebServerActions 経由とする。<br>③ **PyQt Widget は `StateManager.Set` / `Unset` を直接呼ばない**（2026-09-03、headless core Step 5 完了で暫定許可を撤廃）。書き込みは `AutonaActions` か core のドメインサービスを通す。`tests/test_objectname_keypath_contract.py` の書き手台帳テストが `src/core` 外の書き手集合を pin する。<br>④ 新規の複合操作・正規化を伴う操作は Actions 層へ実装する。<br>⑤ PyQt のドメイン状態書き込みは `src/core/Actions.py` の **`AutonaActions`** と core のドメインサービスへ**移行済み**（ADR-004 D2 / [headless-core-redesign.md](../../docs/changes/headless-core-redesign.md) の「Step 5 完了時点の書き手台帳」）。`src/core` 外に残る書き手は `AutonaTournamentDataProvider`（`provider_videogame`）の 1 つだけで、Qt ウィジェットではない provider 層（`game.*` は 2026-10-23 の ADR-005 S1a で `src/core/GameAssetCatalog.py` へ移動）。<br>⑥ state 変更通知の Qt シグナルは `StateManagerBridge.instance` が提供する。core（`src/core/`）に Qt シグナルを追加しない。 |
+| **R-Sync-1** | 書き込み経路の規約: <br>① React Web UI / 外部システムからの書き込みは **必ず Web 操作経由**（`AutonaWebOperations`。ボード依存の残りは `WebServerActions`。ADR-005 S3c）。<br>② OBS HTML は原則 **read-only**。例外的に書き込みを許可する場合も Web 操作経由とする。<br>③ **PyQt Widget は `StateManager.Set` / `Unset` を直接呼ばない**（2026-09-03、headless core Step 5 完了で暫定許可を撤廃）。書き込みは `AutonaActions` か core のドメインサービスを通す。`tests/test_objectname_keypath_contract.py` の書き手台帳テストが `src/core` 外の書き手集合を pin する。<br>④ 新規の複合操作・正規化を伴う操作は Actions 層へ実装する。<br>⑤ PyQt のドメイン状態書き込みは `src/core/Actions.py` の **`AutonaActions`** と core のドメインサービスへ**移行済み**（ADR-004 D2 / [headless-core-redesign.md](../../docs/changes/headless-core-redesign.md) の「Step 5 完了時点の書き手台帳」）。`src/core` 外に残る書き手は `AutonaTournamentDataProvider`（`provider_videogame`）の 1 つだけで、Qt ウィジェットではない provider 層（`game.*` は 2026-10-23 の ADR-005 S1a で `src/core/GameAssetCatalog.py` へ移動）。<br>⑥ state 変更通知の Qt シグナルは `StateManagerBridge.instance` が提供する。core（`src/core/`）に Qt シグナルを追加しない。 |
 | **R-Sync-1b** | **Actions へ移行済みの操作**: スコア増減 / スコアリセット / チーム色 / `display_options` トグル / 反映（`CommitHeld`）（Step 3）、match バー 3 combo / チーム名 / LOSERS / `teamsSwapped` / `best_of`（Step 5 第 1 弾）、チームの選手スロット数（第 2 弾）、レイアウトオプション / 配信 URL・タイトル / 実況スロット / リザルト順位（第 5 弾）、**チームスワップ（`SwapTeams`）・選手カードの上下移動（`SwapPlayers`）**（ADR-005 S2c。選手スロット・スコア・LOSERS・チーム名・ロゴ・ステージ記録（鏡映）を 1 保存サイクルで入れ替え、`teamsSwapped` を反転。チームカラーは入れ替えない。正本は state で、ボード属性は廃止）、**クリア（`ClearScore` / `ResetMatch` / `ClearPlayers` / `ClearBoard`）**（ADR-005 S2d。スコア・LOSERS・match バー・選手スロット・チーム名をそれぞれ 1 保存サイクルで空にする。旧実装はウィジェットを空に戻し、カード 1 枚ごとに 1 サイクルだった）、**セットの長さ（`SetBestOf` / ゲームのロードの `RepublishBestOf`）**（ADR-005 S2e。`best_of` の 6 キーとステージ行を 1 保存サイクルで書く。行はボードが登録したトラッカーに操作の中で作り直させ、BEST OF のスピンボックスと行は state を描画する。旧実装はスピンボックス主導だった）。**これらの操作の入口は `AutonaActions.instance` に一本化**され、Qt ウィジェット・REST v1・legacy REST / Socket.IO・グローバルホットキーはすべてそこを呼ぶ。ウィジェットは state 通知（`held_state_updated` / `state_updated`）を受けて表示だけを更新し、更新中は `QSignalBlocker` で囲んで書き戻さない（エコーループ抑止）。<br>**ステージ集計は core へ移行済み**（Step 4a）: `score.{n}.stages.*` の記録とステージ⇔スコアの相互整合は `src/core/GameTrackerService.py` が持ち、`AutonaIndividualGameTracker` は行の生成とボタン描画だけを行う（**state が記録・ボタンは表示**。行数は S2e から `AutonaActions.SetBestOf` が決め、ウィジェットはサービスの `rowsVersion` を見てボタンを作り直す）。`writingScore` フラグの所有者もサービス側で、ウィジェットは property で委譲する。<br>**書き込みの実装はすべて core にある**（Step 5 完了）が、*入口* が Actions に一本化されていない操作は残る: クルーボードのスコアリセット・スワップ・全消し・`best_of`（チーム合計がメンバーストックの派生値で、入口はウィジェット）/ **スコア欄への数値の手入力**（スピンボックスの `valueChanged` が `GameTrackerService.UpdateScore` を呼ぶ。`ClearScore` / `ResetAllInputs` は S2d で core 操作になった）。<br>**したがって `score.{n}.team.{t}.score` の書き手は core 内に 3 系統**（`AutonaActions`（`SetScore` / `AdjustScore` / `ResetScore`、S2c からの `SwapTeams`、S2d からのクリア）/ ステージ集計の `GameTrackerService` / セット読込の `SetLoadService`）で、「唯一の書き手」ではない。呼び出し口が Actions に一本化されていないためで、**core の外から直接 `Set` する経路は残っていない**。3 者は state 経由でのみ噛み合い、ステージ集計側は書き込み区間を `GameTrackerService.writingScore` で公開して `_SyncScoreDisplays` の二重加算を防ぐ。 |
 | **R-Sync-2** | バッチ書き込みは `with StateManager.SaveBlock():` を使う。`BlockSaving()` / `ReleaseSaving()` の手動ペアは避ける（例外時の漏れリスク） |
 | **R-Sync-3** | 同一トランザクション内の複数 `Set` は SaveBlock で囲み、delta を 1 回にまとめる |
@@ -585,7 +594,7 @@ OBS HTML / React Web UI / WebEngine 画像生成      PyQt UI
 | StateManager → OBS HTML（degraded poll） | 200ms（debounce）+ 64ms（poll 周期） |
 | StateManager → React Web UI | 単発操作: **~0ms**（leading-edge flush + 到着駆動適用）/ バースト: 200ms（debounce 上限） |
 | StateManager → WebEngine 画像生成 | 0ms（prepare_data 時の snapshot） |
-| React → StateManager | **目標値 ~50ms**（API/Socket → AutonaWebServerActions → Set）。実値はネットワーク依存で、無線・低速 LAN では大きくなる。スコア±は楽観的更新（R-React-8）により**表示は 0ms** |
+| React → StateManager | **目標値 ~50ms**（API/Socket → AutonaWebOperations → AutonaActions → Set）。実値はネットワーク依存で、無線・低速 LAN では大きくなる。スコア±は楽観的更新（R-React-8）により**表示は 0ms** |
 
 **注**: 旧実装の React 側 100ms 固定バッチは到着駆動化により廃止（§2.2 R-React-6、2026-07 Web UI 刷新 Phase 3）。
 
@@ -616,12 +625,15 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | ウィンドウ位置・サイズ | QSettings（Windows レジストリ） | バイナリ | `Window` | 自動保存 |
 | サイドバー選択・折りたたみ | QSettings（`sidebarIndex_v{STATE_VERSION}` / `sidebarCollapsed_v{STATE_VERSION}`） | バイナリ | `Window` | 自動保存 |
 | 選手 DB | `./user_data/local_players.json` | JSON 配列 | `AutonaPlayerDB` | PyQt の Player List + 直接 JSON 編集 |
+| 前回の内容（state。大会情報・配信設定・実況・Top 8・表示トグル等。`score` / `game` は起動時に破棄） | `./user_data/state.json`（`{"state_version": N, "state": {...}}`） | JSON | `core/StatePersistence`（版の移行は `core/StateMigrations`） | 自動保存（`StateManager.SaveState` の公開ごとに間引いて書く。最後の変更から 1 秒・最大 5 秒。終了時に書き切る。ADR-005 S3b） |
 | ルールセット（キャッシュ） | `./user_data/rulesets.json` | JSON | tournament provider | API 取得時に自動更新 |
 | ゲームアセット定義 | `./user_data/games/{game}/{asset_type}/config.json` | JSON | `core/GameAssetCatalog`（Qt 側は `AutonaGameAssetManager` がモデル化） | アセット追加時に手動編集 |
 | 国・地域マスタ / カスタム国旗 | `./assets/countries+states.json`・`./assets/city_to_state.json`・`./user_data/additional_flag/*` | JSON / 画像 | `core/CountryCatalog`（Qt 側は `AutonaCountryHelper` が国モデル化） | 同梱データ（都市→地域表は `scripts/gen_city_to_state.py` で生成）。カスタム国旗は画像を置くだけ |
 | サムネテンプレ定義 | `./assets/thumbnail_base/thumbnail_types/{id}.json` | JSON | （定義のみ） | テンプレ追加時に手動作成 |
 | OBS テンプレのグローバル設定 | `./layout/settings.json` | JSON | OBS layout runtime | テンプレ提供者または運用者が編集 |
 | OBS テンプレのローカル設定 | `./layout/{template}/settings.json` | JSON | OBS layout runtime | テンプレ提供者または運用者が編集 |
+
+> `out/program_state.json` は永続化ではなく**出力**（OBS の file:// ポーリングと ASS の契約。場所・形式・`timestamp` / `revision`・書き込み順は不変）。S3b 以降、起動時に読むのは `user_data/state.json` が無い・使えない・それより新しいときの移行だけ（§3.3.5）。
 
 #### 3.3.2 設定の正本（Single Source of Truth）
 
@@ -675,6 +687,12 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
   - パネル（ナビ項目）の追加・削除・並び順変更
   - `.ui` ファイルの `objectName` 変更（state 互換が壊れる時）
 - 同 `STATE_VERSION` 内では既存 state との互換性を維持する
+- **state のスキーマ版（`state_version`、ADR-005 S3b）は `Window.STATE_VERSION` とは別物**。`user_data/state.json` の封筒に入る版で、`src/core/StateMigrations.CURRENT_VERSION`（現在 1）が正本
+  - 保存済み state のキー名・形を変えるときは、移行 step（前方一方向・出荷後は凍結）を足して `CURRENT_VERSION` を上げる。v0（S3b 前の `out/program_state.json`）→ v1 は `RETIRED_ROOTS` / `STALE_KEYS` / commentary の `NormalizeState`
+  - 版は state の木に入れない（Socket.IO の payload と `out/program_state.json` に漏れるため）
+  - 移行 step は冪等（すでに移行先の形のデータを受けても壊さない）。`out/program_state.json` は版を持たないので常に v0 として移行されるが、中身は書いたビルドの形になっているため
+  - 新しい版の `state.json` を古いビルドで開くと `state.json.v{N}.<日時>.bak` に退避し、`out/program_state.json` から移行して起動する。壊れた `state.json` は `state.json.corrupt-<日時>.bak` に退避して同じく移行する（どちらも上書きしない。退避できなければ触らず、その起動は保存しない）
+  - `out/program_state.json` が `state.json` より新しい（mtime）ときもそちらから移行する（クラッシュで間引き中の変更を失わない・旧版を使った後の復帰）
 
 ---
 
@@ -737,7 +755,7 @@ QSettings に保存された最後の選択に依存し、初期値は先頭ペ�
 
 - 追加・削除時は `STATE_VERSION` を **必ずインクリメント**する
 - **objectName は内部 ID として固定**する。i18n の対象は `setWindowTitle` などの**表示名のみ**で、objectName は不変
-- objectName を変更する場合は `STATE_VERSION` インクリメントに加えて、必要に応じて**保存済み state / QSettings のマイグレーション処理を実装**する
+- objectName を変更する場合は `STATE_VERSION` インクリメントに加えて、必要に応じて**保存済み state / QSettings のマイグレーション処理を実装**する（state は `src/core/StateMigrations.py` に移行 step を足す。§3.3.5）
 - `Autona.py` の `self._navSections` に `(panel, 'icon.svg')` を表示順で追加する
   （ナビ項目ラベルは `panel.windowTitle()`、アイコンは `assets/icons/`）
   - `_navSections` はカテゴリ付き構造 `[(カテゴリ見出し or None, [(パネル, アイコン名), ...]), ...]`。
@@ -1353,7 +1371,7 @@ const themeColor = fc.themeColor || ti.themeColor;
 | **R-Hotkey-4** | アクション通知は `AutonaHotkeysSignals` の Signal 経由（PyQt の signal/slot） |
 | **R-Hotkey-5** | デフォルトのモディファイアは **`Ctrl+Shift+`** プレフィックス（標準ショートカット `Ctrl+S`/`Ctrl+O`/`Ctrl+P`/`Ctrl+R` の食い合いを避けるため） |
 | **R-Hotkey-6** | `SettingsManager.hotkeys.hotkeys_enabled = false` でグローバル無効化できる |
-| **R-Hotkey-7** | **state を書くだけのアクションは `AutonaHotkeys.ConnectActions()` が `AutonaActions` に直結する**（`bootstrap_core()` から 1 回・プロセス寿命）。対象ボードは `AutonaActions.ActiveBoard()`（= `SettingsManager.scoreboard.battle_format`）で解決するため、パネル未構築でも動き、作用するのは常に 1 面だけ。パネル操作を伴うアクション（`load_set` はボード、`refresh_phase_group` は Window）だけがウィジェット側に接続を持つ（headless core Step 3 / ADR-004 D2。`swap_teams` は ADR-005 S2c で Actions 直結へ移った。それまでは構築済みの全ボードが受けており、形式切替後は両ボードが入れ替わった。クルー形式ではスワップのホットキーは何もしない。アクティブボードが未構築のときも、旧実装どおり何もしない） |
+| **R-Hotkey-7** | **state を書くだけのアクションは `AutonaHotkeys.ConnectActions()` が `AutonaActions` に直結する**（`bootstrap_gui()` から 1 回・プロセス寿命。ADR-005 S3c までは `bootstrap_core()`）。対象ボードは `AutonaActions.ActiveBoard()`（= `SettingsManager.scoreboard.battle_format`）で解決するため、パネル未構築でも動き、作用するのは常に 1 面だけ。パネル操作を伴うアクション（`load_set` はボード、`refresh_phase_group` は Window）だけがウィジェット側に接続を持つ（headless core Step 3 / ADR-004 D2。`swap_teams` は ADR-005 S2c で Actions 直結へ移った。それまでは構築済みの全ボードが受けており、形式切替後は両ボードが入れ替わった。クルー形式ではスワップのホットキーは何もしない。アクティブボードが未構築のときも、旧実装どおり何もしない） |
 
 ### 6.2 デフォルトホットキー一覧
 

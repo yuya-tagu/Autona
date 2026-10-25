@@ -854,9 +854,9 @@ class AutonaActions:
         """Drop every player slot of one team. True if it applied.
 
         Run once per team while a board is built, before the first player
-        widget is created: a restored program_state.json can carry a roster
-        from a session that ran with more players per team, and nothing else
-        would ever remove the surplus.
+        widget is created: the restored state (user_data/state.json) can
+        carry a roster from a session that ran with more players per team,
+        and nothing else would ever remove the surplus.
         """
         team = self._asInt(team, 0)
         if team not in (1, 2):

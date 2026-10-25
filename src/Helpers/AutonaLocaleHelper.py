@@ -72,8 +72,11 @@ class AutonaLocaleHelper(QObject):
         oldTranslator = AutonaLocaleHelper.translator
         i18n_dir = AutonaResolve('src/i18n')
 
+        # QTranslator and its installation are QtCore: through the base
+        # class's static, so the headless shell (a QCoreApplication) loads
+        # the locale the same way as the desktop (ADR-005 S3c).
         if oldTranslator:
-            QGuiApplication.instance().removeTranslator(oldTranslator)
+            QCoreApplication.removeTranslator(oldTranslator)
 
         AutonaLocaleHelper.translator = QTranslator()
         localeFound = False
@@ -96,7 +99,7 @@ class AutonaLocaleHelper(QObject):
                         localeFound = True
                         break
 
-        QGuiApplication.instance().installTranslator(AutonaLocaleHelper.translator)
+        QCoreApplication.installTranslator(AutonaLocaleHelper.translator)
 
         if settingsExportLocale and settingsExportLocale != "default":
             AutonaLocaleHelper.exportLocale = settingsExportLocale

@@ -101,6 +101,35 @@ def test_exercising_the_app_leaves_the_real_out_and_user_data_untouched(autonaAp
     assert _fileSnapshot(PROJECT_ROOT / "layout" / "logo.png") == logo
 
 
+def test_the_persisted_state_store_is_not_the_real_one(autonaApp):
+    """user_data/state.json is the store of record (ADR-005 S3b).
+
+    Its path is fixed by the first StateManager.Initialize() of the process
+    -- the harness's, or an earlier test module's, always in a throwaway
+    directory -- and every later save cycle in the session writes there,
+    whatever the CWD is by then. If that first call ever ran in the project
+    root, the whole suite would be overwriting the developer's saved state.
+    """
+    from src.core.StatePersistence import StatePersistence
+
+    autonaApp.state.Set("harness_store_probe.value", "probe")
+    autonaApp.settle()
+    try:
+        store = StatePersistence.Path()
+        assert store is not None, "the harness never opened the store"
+        store = Path(store).resolve()
+        assert store.is_file(), "settle() did not get the store written"
+        # Compared with the real store itself, not "anywhere under the
+        # project": a --basetemp inside the repo is a throwaway directory too.
+        real = (PROJECT_ROOT / "user_data" / "state.json").resolve()
+        assert store != real, f"the suite writes the real store: {store}"
+        assert store.parent.parent != PROJECT_ROOT.resolve(), (
+            f"the store's runtime directory is the project root: {store}")
+    finally:
+        autonaApp.state.Unset("harness_store_probe")
+        autonaApp.settle()
+
+
 def test_the_working_directory_is_restored_afterwards():
     # No autonaApp fixture here: by the time this runs, any earlier widget
     # test must have put the CWD back.

@@ -403,8 +403,26 @@ production の経路（`GameAssetCatalog.ScanGames()` / `SelectGame()` → ア�
 | **L3 HTTP 契約** ★新設 | Flask `test_client()` | 44 routes + 38 events + 26 api/v1 | 〜15 秒 |
 | **L4 起動スモーク** ★新設 | サブプロセスで実起動 | 起動 → 出力 → HTTP 応答 → ERROR ゼロ | 〜30 秒 |
 | **L5 Web UI** | Jest + RTL（既存） | redux + ScoreboardPage | 〜60 秒 |
+| **L6 ブラウザ E2E**（2026-10-26 新設・ADR-005 S3d） | Playwright（Chromium）+ `python main.py --headless` の実起動 | `/web` と OBS オーバーレイ 1 枚（文言・DOM・state で確認。スクリーンショット比較はしない） | 〜20 秒（起動込み） |
 
 合計 3 分以内。1 コマンド（`pytest` と `npm test`）で Claude が自走実行できることを要件とする。
+**L6（ブラウザ E2E）はこの要件の例外**: 先に `npm run build` が要り、Windows 専用で、初回は Chromium の取得も要る
+（`pytest` / `npm test` には含まれない。下の L6 節）。
+
+### L6: ブラウザ E2E（2026-10-26 新設）
+
+`web/e2e/`（`playwright.config.ts` は `web/` 直下）。`cd web && npm run build && npm run test:e2e`。
+Windows 専用・Python の依存（`dependencies/requirements.txt` + pytest）が要る。初回は `npx playwright install chromium`。
+
+- global setup（`web/e2e/global-setup.ts`）がヘルパー `web/e2e/headless_server.py` を起動し、ヘルパーが
+  L4 のヘッドレススモーク（`tests/test_headless_smoke.py`）と同じ隔離（tmp の作業ディレクトリ・空きポート・
+  `AUTONA_INSTANCE_TAG`）でヘッドレスを起動する。開発者の `user_data/` `out/` `logs/` と起動中の Autona には触れない。
+  停止は Ctrl+Break（起動した PID だけ）
+- jest（`src/` だけを集める）と pytest（`tests/test_*.py` だけを集める）には拾われない
+- CI は `ci.yml` の `e2e` ジョブ（windows-latest）。失敗時は HTML レポートと trace、ヘッドレスのコンソールログを artifact に上げる
+- 導入時に見つかった問題（ヘッドレスの `/web` が真っ白・スコア系オーバーレイが描画しない）とその修正は
+  `docs/changes/architecture-modernization.md` の「S3d E2E」。ヘッドレスのボードがデスクトップの空ボードと
+  同じ選手スロットを持つことは L4 の `tests/test_headless_seed.py` が pin する
 
 ### L-live: 実運用ライブテスト（2026-08-03 新設）
 
@@ -476,7 +494,7 @@ autonaApp (session)
 ### L4 の設計
 
 `main.py` は単一インスタンスミューテックスを持つため、実機で Autona が起動中だとテストが素通りする。
-L4 は `main.py` を使わず、サブプロセス内で `QApplication` → `bootstrap_core()` → `Autona.Window()` を
+L4 は `main.py` を使わず、サブプロセス内で `QApplication` → `bootstrap_core()` → `bootstrap_gui()` → `Autona.Window()` を
 使い捨て cwd で組み立て、以下を検証する:
 
 - `STARTUP phase=` ログが所定の段階まで出る

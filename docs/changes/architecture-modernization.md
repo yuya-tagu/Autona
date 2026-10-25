@@ -121,6 +121,7 @@ Actions は「どのスレッドから呼んでもよい」設計で、observer 
 ### 2.7 永続化
 
 `user_data/settings.json`（トップキー 17・旧値残留あり）/ `layout_options.json` / `local_players.json` + `.csv` / `characters.json` / `games/`（アセットパック）/ ロゴ・アバター類 / QSettings（サイドバー状態）/ `out/program_state.json`（起動時に LoadState）。
+（注: S3b（2026-10-25）で state の正本は `user_data/state.json`（`state_version` 付き）へ移った。`out/program_state.json` は出力に戻り、起動時に読むのは移行のときだけ。下の S3b 節）
 
 ### 2.8 維持すべき外部契約
 
@@ -251,7 +252,7 @@ core が状態とドメインの唯一の正本で、すべての UI（デスク
 | **S0 掃除** | `_SetIfChanged` 等の重複統合 / `Pipfile` 廃止・`asyncio` 依存削除 / core→src 逆依存（Top8Model・CommentaryModel・DictHelper）を core へ移設 / `features.md` を実態に同期 | 重複ゼロ・依存定義 1 本・core が src 直下を import しない（pin 追加） |
 | **S1 アセットカタログの core 化**（R2） | `AutonaGameAssetManager` を `core/GameAssetCatalog`（純 dict + パス解決 + Start.gg ID 対応）と Qt アダプタ（dict→`QStandardItemModel` の一方向構築）に分割 | カタログが `test_core_qt_free` に載る。`get_characters` / `get_variants` / `get_games` から `@gui_thread_sync` が消える。`PlayerService` がキャラ/スキン/国を自分で解決できる |
 | **S2 選手スロットの正本を state へ**（R1） | `SwapWith` / `ClearScore` / `ResetAllInputs` / `CommandClearAll` を `Actions.SwapTeams(board)` / `ClearBoard(board)` へ。選手カードは state から描画。残りのホットキー 3 本も Actions へ | `WebServerActions` の `GetScoreboard(` が board 1/2 でゼロ。`teamsSwapped` 属性削除。swap を Qt なしでテスト。「1 操作で delta 1 回」検証 |
-| **S3 ヘッドレス起動と永続化分離**（R3・R4） | `main.py --headless`（QApplication なしで core + WebServer）。正本を `user_data/state.json` へ（初回は `out/program_state.json` から移行）。`state_version` + 移行関数 1 本目。`WebServerActions` 廃止 | ヘッドレスで OBS オーバーレイ + `/web` が動く（Playwright E2E）。`@gui_thread_sync` の残りは thumbnail/result とウィンドウ操作のみ |
+| **S3 ヘッドレス起動と永続化分離**（R3・R4） | `main.py --headless`（QCoreApplication + イベントループ。QtGui なしで core + WebServer）。正本を `user_data/state.json` へ（初回は `out/program_state.json` から移行）。`state_version` + 移行関数 1 本目。Web の公開面を締める（静的配信の許可リスト + LAN トークン認証 + CSRF 対策）。`WebServerActions` を core 直結分だけ縮める（2026-10-25 改定。§5 S3 設計） | ヘッドレスで OBS オーバーレイと `/web` の表示、core 直結の操作が動く（スモーク + Playwright）。LAN の書き込みはトークン必須。正本は `user_data/state.json`。**`WebServerActions` 廃止と「`@gui_thread_sync` の残りは thumbnail/result とウィンドウ操作のみ」は S3e へ移動** |
 | **S4〜 パネル単位の React 化**（R6） | `QStackedWidget` の各ページを `QWebEngineView(/web/<panel>)` に差し替え。順序: Commentary（**IME 実機ゲート**）→ Stream → Event → Top8 → Stats → PlayerDB → Result/Thumbnail（設定 UI のみ）→ Board → SCORE（Crew 含む）→ Settings | パネルごとに Qt 版削除 + 手動チェックリスト該当節通過 |
 | **S-final シェル化** | Window = WebEngineView 1 枚 + トレイ + ホットキー。i18n を i18next に一本化。WebView2 化の要否を判断 | Qt Widgets パネル 0 |
 
@@ -810,3 +811,807 @@ LOSERS フラグと、そのチームの選手名に付く ` [L]`（`mergedName`
   - Start.gg のセットを読み込む（bestOf 付き）: BEST OF と行がセットの値になり、スコアの分だけ行に勝ちが付く
   - トラッカー ON で 2-1 からマッチリセット: 行が全部未報告に戻り、スコアが 0-0（判断 6 の対象）
   - クルーボードの BEST OF を Web から変える: 従来どおり変わる
+
+### S3 ヘッドレス起動・永続化分離・LAN トークン認証 — 設計（2026-10-25・オーナー承認済み）
+
+オーナー判断（2026-10-25）: LAN トークン認証は S3 と同時に入れる（§4.6-3 の推奨案）。下記の設計と完了条件の改定を承認。S3a〜S3d は自走で進め、S3e の前で止める。
+
+#### 棚卸しで分かったこと（前提）
+
+- **§4.4 の S3 完了条件「`WebServerActions` 廃止」は、S3 だけでは届かない**。50 メソッドのうち core 直結は 15 本。残り 26 本は、選手データ（S2f）、人数・キャラ数（S2g）、統計のトリガー、セット読込と station / stream の追従ポーリングがボードのウィジェットに残っていることに依存している。ヘッドレスではボードが無いので、これらは何も起きない
+- **「QApplication なし」は QCoreApplication + イベントループで満たすのが現実解**。Bridge の delta 配送、`run_sync`、Worker の結果受け渡しはすべてイベントループ前提で、ループが無いと `run_sync` が永久に待つ。完全に Qt なしにするには Bridge・Worker・アセットアダプタ・PlayerDB・Provider の置き換えが要り、§4.3 の Executor 統一と同じ作業になる（S3 の外）
+- **起動経路**: `src/Autona.py` の import が QApplication を作る。`bootstrap_core()` が QDockWidget（`AutonaScoreboardManager`）を作る。大会データの適用、`GameChanged` → Socket.IO 配信、URL・ゲームの復元は Window が配線している
+- **セキュリティの既存問題**: 静的配信ルート（`/<path:filename>` と static_folder=`.`）が CWD 以下の全ファイルを返し、CORS は全許可。`user_data/settings.json`（Figma ペアリングコードを含む）や `local_players.json` が、LAN 公開時は LAN 内の誰からでも読める。ループバックでも、ブラウザで開いた任意のサイトから読める可能性がある。さらに legacy は GET で書き込め、v1 は `force=True` で text/plain の本文も受けるので、ブラウザ経由の CSRF が成立する
+- **永続化の現状**: 起動時に `out/program_state.json` の全量を読み戻す。そのうえで、`score` は `ResetScoreRoot` が、`game` は `ResetGameState` が消し、`SeedPanelState` が正規化する。マイグレーション層は無い（実質的な移行は `RETIRED_ROOTS` / `STALE_KEYS` / `NormalizeState` の 3 つ）。`out/program_state.json` の場所・形式・`timestamp` / `revision` は、layout の file:// ポーリングと ASS の契約に縛られている
+- **自動更新**: ルートは PURGE せずに上書きするので、git 管理外の `user_data/` は更新後も残る。ヘルパーには手を入れずに済む
+
+#### 方針
+
+S3 を 4 つの PR に分ける（各 PR は独立に revert 可能）。順序は、既存の穴を先に塞ぐ → 永続化 → ヘッドレス → E2E。
+
+**S3a Web の公開面を締める（静的配信の許可リスト + LAN トークン認証 + ブラウザ CSRF 対策）**
+
+- 静的配信を許可リスト化する
+  - 返すもの: `layout/`、`assets/`、`web/build/`、`out/`、`user_data/` の画像系ディレクトリ（`games/`、`team_logo/`、`sponsor_logo/`、`player_avatar/`、`additional_flag/`、`tournament_banner.png`）
+  - `user_data/*.json` などの設定・選手 DB は 404 にする
+  - 許可リスト外の要求はログに出す（既存のカスタムレイアウトが参照していたら気づけるように）
+- トークン
+  - `secrets.token_urlsafe(24)` を `user_data/settings.json`（git 管理外。S3a 以降は HTTP から読めない）の `general.webserver_token` に保存する。初回起動時に生成する
+  - API 設定ウィンドウに、表示・コピー・再発行を置く（LAN 無認証の赤い警告をここで差し替える）
+- 判定（どの要求にトークンを求めるか）
+
+  | 接続元 | 読み取り（静的配信・state・カタログ・Socket.IO の受信） | 書き込み（legacy の書き込み・v1 の POST/PATCH・Socket.IO の書き込みイベント）と選手 DB（`playerdb`） |
+  |---|---|---|
+  | ループバック | 不要（今と同じ） | 不要（今と同じ）。ただしブラウザからのクロスサイト要求は拒否（下記） |
+  | LAN | 不要 | **トークン必須** |
+
+  - 理由
+    - 既存の OBS の URL（外部契約 §2.8）を壊さないため、ループバックと読み取りは免除する。2 PC 配信で、配信 PC の OBS が LAN 越しにレイアウトを読む構成も、そのまま動く
+    - 書き込みと選手 DB だけを守れば、LAN 内の第三者による操作と個人データの読み出しは止まる
+  - トークンの渡し方: `Authorization: Bearer <token>`、`X-Autona-Token` ヘッダ、`?token=` クエリのいずれでもよい。クエリを許すのは、legacy の GET URL を貼る Stream Deck と、Web UI の初回オープンのため
+  - Socket.IO は接続時の `auth` でトークンを受け、接続ごとに「書き込み可」を持つ。書き込み可でない接続の書き込みイベントは拒否する
+- ブラウザ経由の CSRF 対策（ループバック含む全接続）
+  - 書き込みで `Sec-Fetch-Site: cross-site` の要求は拒否する
+  - `Origin` が付いていて自分のオリジン（`http://127.0.0.1:{port}` / `localhost` / LAN IP）でない書き込みも拒否する
+  - Stream Deck・Companion・curl・`requests` はこれらのヘッダを付けないので影響しない。OBS のブラウザソースは同一オリジンか file://（書き込まない）
+- クライアントの追従
+  - Web UI: `api.ts` と `websocketConnection.ts` の 2 箇所。初回の `?token=` を sessionStorage に保存してヘッダと `auth` で送る
+  - 「ブラウザ版を開く」の URL にトークンを載せる
+  - Companion ガイドと API 設定に、ヘッダを追加する手順を書く
+  - アプリ内 API Tester はループバックなので変更不要
+- Designer のトークン（ループバック限定・ウィンドウを閉じると失効）とペアリングコードは別の仕組みとして残す（用途が違う）
+- **外部から見える変化**: LAN 越しの Companion / Stream Deck / ASS の書き込みにトークンが必要になる。リリースノートで告知し、API 設定にコピー手順を置く。無効化スイッチは作らない（LAN 公開をやめればループバックで今と同じに使える）
+
+**S3b 永続化の分離（`user_data/state.json` + `state_version` + 移行関数 1 本目）**
+
+- 正本を `user_data/state.json` にする
+  - 中身は公開済みの state（held を巻き戻したもの = 今 `program_state.json` に書いている内容）から `timestamp` / `revision` を除き、`state_version` を足したもの
+  - 書き込みはアトミック（SettingsManager と同じ mkstemp → os.replace）
+  - 書き出しスレッドで、`out/` とは独立に間引いて書く（例: 最後の変更から 1 秒）。`disable_export` の影響を受けない。終了時は書き切る
+- 起動時の読み込み
+  - `state.json` があればそれを読む。無ければ `out/program_state.json` から移行する（`timestamp` / `revision` を落とす）
+  - 起動時の `score` / `game` の消去と `SeedPanelState` の正規化は今と同じ（引き継ぐ範囲は変えない）
+- `out/program_state.json` は、今と同じ場所・形式・書き込み順で書き続ける（外部契約）。export のロジックはモジュールを分けるだけで変えない
+- `state_version` = 1。移行関数 1 本目（v0 → v1）は、既存の 3 つ（`RETIRED_ROOTS` / `STALE_KEYS` / commentary の `NormalizeState`）を取り込む
+  - 前方一方向のみ。今より新しい版の `state.json` を読んだら、`state.json.v{N}.<日時>.bak` に退避して `out/program_state.json` から移行し、警告を出す（ダウングレードした場合）
+    - 当初案は「空から始め」だった。S3b の実装時に移行に改めた（2026-10-25・採用）。理由: 運用者にとっては大会情報が消えない方が有利で、`program_state.json` は直前まで動いていた新しい版が書いたものなので、空より実際の状態に近い。移行関数は冪等なので、新しい形のデータに掛けても壊さない
+  - 旧版に戻したユーザーは、旧版が `out/program_state.json` を読むので困らない
+- `.gitignore` に `user_data/state.json` を足す（git 管理下に入ると、更新のたびに上書きされる）。zip 検証にも、配布物に含まれないことを足す
+- S-14（スキーマ版の不在）はこれで解消扱いにする
+
+**S3c ヘッドレス起動（`main.py --headless`）**
+
+- QCoreApplication + `exec()` で動かす。QtGui（QIcon / QStandardItemModel / QTranslator）は使わない
+  - Bridge・GuiExecutor・Worker・QThread・QTimer はそのまま動く
+  - 単一インスタンスの IPC（QLocalServer）もそのまま使い、GUI 版とヘッドレス版を同時に起動させない（ポートと書き込み先が同じため）
+- 組み立てを分ける
+  - `bootstrap_core()` から `AutonaScoreboardManager` の生成を GUI 側へ出す
+  - ヘッドレスの組み立て（`src/headless.py`）が担うもの
+    - `ResetScoreRoot` + `SeedBoard(1..3)` + `SeedPanelState`
+    - `CountryCatalog.Load()` の直接呼び出し
+    - `LoadRoundNames`
+    - 大会データの適用と `GameChanged` → Socket.IO の配線（Window から移す）
+    - URL とゲームの復元
+    - Web サーバーの起動
+    - Ctrl+C / コンソールの閉じるボタン / SIGTERM での停止
+  - ゲームのロードは、アダプタ（Qt モデル）を通さず `GameAssetCatalog` を直接使う
+  - `in_gui_thread()` は QCoreApplication を見るように直す
+- Web サーバーを `threading.Thread` に置き換える。失敗通知はコールバックにする。LAN 公開とポート衝突の確認は、ヘッドレスでは設定値で決めて、ログに出すだけにする
+- **ヘッドレスで動く範囲（S3 の完了条件）**
+  - OBS オーバーレイと `/web` の表示
+  - core 直結の操作（スコア、反映、カラー、表示トグル、swap、クリア、best_of、match バー、チーム名、losers、大会情報、ゲームの切り替え）
+  - ボードが無いので held にはならず、書き込みは即時公開される（ヘッドレスには反映ボタンが無いので、これが正しい）
+  - ボードが要る操作（選手の編集・セット読込・追従・統計・人数の変更・Top 8 の取り込み・実況のパネル経由の更新）は、ヘッドレスでは 503（`not available in headless`）を返す
+- `WebServerActions` を縮める
+  - core 直結の 15 本と、S2 で core 化した操作は、v1 / legacy のルートから core を直接呼ぶ形に移す。GUI でもヘッドレスでも同じ経路を通る
+  - 残る 26 本は「ボード依存」として台帳に列挙する
+- 廃止は S3e（S2f / S2g / 統計・セット読込・ポーリングの core 化の後）へ送る（**§4.4 の完了条件を変える**）
+- `pull_stream_set` は、どこにも接続されておらず常に空振りしている（v1 `:pull-stream` も同じ）。S3c で直すか外すかを判断する（推奨: 次のセットを引く core 操作として直す。ただし追従の core 化と同時なので S3e）
+
+**S3d E2E**
+
+- まず Python のスモークテストを 1 本作る。ヘッドレスを subprocess で起動し、health、Socket.IO 接続、`score:adjust`、delta の受信、トークンなしの LAN 書き込みの拒否、`state.json` の書き出しを確かめる。現状の API テストは GUI スレッドで inline 実行されるので、`run_sync` が止まる問題を検出できない。その防波堤にする
+- Playwright（`web/` の devDependency）で `/web` と、オーバーレイ 1 枚の表示を確かめる。CI への組み込みは S3d の中で決める
+
+#### §4.4 の S3 完了条件の改定（承認済み）
+
+- 旧: ヘッドレスで OBS オーバーレイと `/web` が動く（Playwright E2E）。`@gui_thread_sync` の残りは thumbnail / result とウィンドウ操作のみ。`WebServerActions` 廃止
+- 新: ヘッドレスで OBS オーバーレイと `/web` の表示、core 直結の操作が動く（スモーク + Playwright）。LAN の書き込みはトークン必須。正本は `user_data/state.json`（`state_version` 付き）
+  - `WebServerActions` 廃止と「`@gui_thread_sync` の残りは thumbnail / result / ウィンドウ操作のみ」は S3e へ移す
+
+#### 外部契約への影響
+
+- 変わらないもの: `out/program_state.json` の場所・形式・書き込み順、Socket.IO のイベント名と payload、v1 の形（追加のみ）、settings.json の形式（キーの追加のみ）、自動更新（ヘルパー・zip 構造には触らない）
+- 変わるもの: LAN 越しの書き込みにトークンが要る（S3a。オーナー判断済み）。CWD 以下の任意ファイルの配信を止める（S3a。許可リスト外を参照するカスタムレイアウトがあれば、壊れてログに出る）
+
+#### S3a Web の公開面を締める（2026-10-25・PR #227）
+
+Web サーバーの公開面を 3 つ締めた。1 つ目は静的配信で、許可リストに載ったファイルだけを返す。2 つ目は LAN の他端末で、書き込みと選手 DB にトークンを要求する。3 つ目はブラウザ経由の CSRF と DNS rebinding で、トークンを持たない書き込みは「この PC から・このサーバーの名前宛て・自分のページから」のときだけ受ける。どの要求に何を求めるかは、新しい core モジュール `src/core/WebAccess.py` が決める（Qt なし・Flask なし・import 副作用なし）。サーバーはそこに要求の情報を渡して答えを聞くだけにした。
+
+- **実装**
+  - `src/core/WebAccess.py`（新規）
+    - 分類表
+      - `ROUTE_ACCESS`: Flask の全 endpoint（legacy 43・designer 9・入口 / ファイル 2・v1 31）を `READ` / `WRITE` / `PLAYERDB` / `DESIGNER` / `STATIC` に分ける
+      - `EVENT_ACCESS`: Socket.IO の全イベント（41）を同じクラスに分ける
+      - 表に無い名前は `RouteAccess` / `EventAccess` が `WRITE` として返す。分類し忘れても、開く側ではなく守る側に倒れる
+      - 判定の対象（`GUARDED`）は `WRITE` と `PLAYERDB`
+    - 静的配信: `StaticPath(filename)` が、配信してよいパスを正規化して返す（配信しないものは None）
+      - 許可するのは `STATIC_DIRECTORIES`（`layout/`・`assets/`・`web/build/`・`out/`・`user_data/{games,team_logo,sponsor_logo,player_avatar,additional_flag}/`）と `STATIC_FILES`（`user_data/tournament_banner.png`）
+      - `\` は区切りとして読む
+      - NUL・`:`（ドライブ名・NTFS ストリーム）・先頭の `/`・`..` の区間は、比較の前に拒否する
+      - 大文字小文字は区別しない（Windows では `/User_Data/...` でも同じファイルが返るため）
+    - トークン
+      - `Token()`: 初回の使用時に settings.json から読み、以後はメモリに持つ。変えるのは `RegenerateToken()` だけ
+      - 発行するのは、settings.json を読めたうえで `general.webserver_token` が本当に無いときだけ（初回起動・S3a 前からの更新）。`secrets.token_urlsafe(24)` を作って保存し、info ログを出す
+      - 次の 2 つの場合は発行せず、使えるトークン無し（`""`）として扱う。警告を出し、LAN からの書き込みは再発行するまで全部拒否する
+        - settings.json はあるが読めなかった（`SettingsManager.loadFailed`）。空に見えるだけで、利用者の機器が持っているトークンはその中にある
+        - 保存値が `[A-Za-z0-9_-]{16,256}` に合わない
+      - `RegenerateToken()`: 作り直す。旧トークンはその場で使えなくなる。`TokenGeneration()` は発行のたびに 1 つ進む
+      - 受け取る場所は `Authorization: Bearer` / `X-Autona-Token` / `?token=` / Socket.IO の `auth.token`（`SuppliedTokens`）
+      - 比較は bytes の `hmac.compare_digest` で行う。512 文字を超える値は比較しない
+    - 判定: `Authorize(remoteAddr, tokens, origin, fetchSite, host, ownOrigins, localAddresses, forwarded)`
+      - まず「トークンなしで通れるか」（`_AmbientRefusal`）を上から順に見る。どれかに当たったら拒否の理由とし、当たらなければ `GRANT_AMBIENT`
+        1. 転送ヘッダ（`X-Forwarded-For` / `Forwarded` / `X-Real-IP`）がある、または接続元が「この PC」（`IsThisComputer`: ループバック、またはこの PC の LAN アドレスのどれか）でない → 401 `UNAUTHENTICATED`（`forwarded` / `token_required`）
+        2. `Host` がこのサーバーの名前（`http://<Host>` が `OwnOrigins` に入る = ループバック名 3 つかこの PC の LAN アドレスで、待ち受けポート）でない → 401（`foreign_host`）
+        3. `Sec-Fetch-Site` が付いていて `same-origin` / `none` 以外 → 403 `FORBIDDEN`（`cross_site` / `same_site` / `fetch_site`）
+        4. `Origin` が付いていて自分のオリジンでない（`null` を含む） → 403（`foreign_origin`）
+      - トークンなしで通れなければ、トークンが一致すれば `GRANT_TOKEN`。一致しなければ、上の拒否を返す（401 のときは `invalid_token` にする）
+      - 拒否の本文は v1 のエラーエンベロープ（`ErrorBody`）
+      - `NormalizeOrigin` は `scheme://host[:port]` だけを受ける。userinfo・パス・クエリ・フラグメントが付いていれば None（`evil@127.0.0.1:5107` を自分と読まない）
+    - `RefusalLog`: 拒否の種類ごとに、最初の 1 回だけ warning を出す（以降は debug。上限 256 種）
+  - `src/Helpers/AutonaNetworkHelper.py`: `GetLocalIPs()` を追加した。この PC の IPv4 アドレスを全部返す（`GetLocalIP()` の外向き 1 つと、ホスト名が引けるもの。別 NIC・VPN）
+  - `src/core/SettingsManager.py`: `loadFailed` を追加した。settings.json を読めなかったとき True になる（読み込みの挙動は変えていない）
+  - `src/AutonaWebServer.py`
+    - HTTP
+      - `Flask(static_folder=None)`。旧 `static_folder='.'` は `/./` の下で CWD 以下の全ファイルを返していた
+      - `file_request` は `StaticPath` を通す。許可リスト外は `"File not found", 404` で、パスを warning に出す（`favicon.ico` と `.well-known/` はブラウザ・ツールが自分から取りに来るものなので debug）
+      - `file_request` の POST を外した（GET のみ。HEAD は Flask が付ける）
+      - `before_request` の `guard_request` → `_guard_http_request`
+        - `GUARDED` の endpoint だけを判定する（HEAD も GET と同じく判定される）
+        - OPTIONS（プリフライト）と、どのルートにも当たらない URL は素通しにする（Flask の 404 / 405 に任せる）
+        - 401 には `WWW-Authenticate: Bearer realm="Autona"` を付ける
+      - `_authorize` が渡すもの:
+        - 自分のオリジンは `SERVER_PORT`（待ち受けポート）と `_lan_hosts`（`GetLocalIPs()` を初回に 1 回だけ引いて保持）から作る
+        - `Host` は `request.headers` の値
+        - 転送ヘッダの有無は `IsForwarded(request.headers)`
+    - Socket.IO
+      - 全ハンドラを `ws_on(event)` で登録する。`GUARDED` のイベントだけを `_ws_guard` で包む
+      - `ws_connect` は最初に `_authorize_ws_connection(auth)` を呼ぶ
+        - 接続はすべて受け入れ、これまでどおり state を送る
+        - 判定は handshake の要求（polling なら最初の GET、websocket なら upgrade の GET）の Host / Origin / Sec-Fetch-Site / 転送ヘッダで行う
+        - 判定の結果（`(GRANT_AMBIENT, None)` / `(GRANT_TOKEN, 世代)` / None + 拒否理由）を、その接続の `request.environ` に置く。python-socketio は接続の生存中この environ を保持するので、切断時の後始末は要らない
+        - 書き込み可の接続は room に入れる（トークンなしは `autona:trusted`、トークンは `autona:token:{世代}`）
+      - `_ws_guard`
+        - 判定がまだ有効なら（`GrantStillValid`。トークンの接続は世代が同じ間だけ）ハンドラを呼ぶ
+        - 無効なら、ハンドラを呼ばずにエラーエンベロープを ack として返す。再発行で切れた接続は `TOKEN_REPLACED`
+    - `ws_playerdb`
+      - Socket.IO で要求されたとき: 要求した接続だけに返す（`_ws_guard` を通った後）
+      - DB の更新（`db_updated`、リクエストの外）: 信頼済みの room（`autona:trusted` と今の世代のトークン room）にだけ送る。旧実装は全接続に送っていた
+    - `WebServer.__init__` で `WebAccess.Token()` を呼び、初回起動でトークンを作る
+  - Web UI
+    - `web/src/autonaToken.ts`（新規）
+      - `captureTokenFromUrl()`: URL の `?token=` を sessionStorage（使えなければメモリ）に入れ、`history.replaceState` でアドレスバーから消す。`desktop=1` の URL（Designer）は触らない
+      - `tokenHeaders()` / `withToken(headers)` / `socketAuth()`
+    - `index.js`: 描画の前に `captureTokenFromUrl()` を呼ぶ
+    - `api.ts`: ヘッダを `withToken(init?.headers)` で組む。`new Headers(...)` に `set` するので、呼び出し側のヘッダがオブジェクト・Headers・配列のどの形でも落ちない
+    - `websocketConnection.ts`: `auth: (cb) => cb(socketAuth())`。再接続のたびに読み直す
+  - デスクトップ
+    - 「ブラウザ版を開く」（`AutonaScoreboardWidget._WebScoreboardOpenUrl`）: LAN アクセスが有効で、使えるトークンがあるときだけ、クリック時のトークンを `?token=` に載せて開く（URL を別の端末にコピーしても使えるように）。LAN アクセスが無効なら付けない（この PC のページなので要らない）。`webScoreboardUrl` 属性はトークンなしのまま
+    - API 設定ウィンドウ（`AutonaApiInfoWindow`。Qt の既存ダイアログへの行の追加。新規パネルではない）
+      - 接続グループに「アクセストークン」行を置く。既定は伏せ字で、表示・コピー・再発行ができる
+      - 再発行はボタンのクリックから確認ダイアログを出す（入れ子のモーダルにならない）
+      - 赤い警告「LAN では無認証」を、トークンの渡し方の説明に差し替えた
+      - エラーコード表に `UNAUTHENTICATED` / `FORBIDDEN` を足した
+      - LAN が有効なとき、「curl をコピー」の書き込みに `-H "X-Autona-Token: ..."` を付ける
+      - アプリ内 API Tester は変えていない（127.0.0.1 宛てでヘッダなし = この PC からとして通る）
+    - Companion ガイド（`AutonaIntegrationGuideWindow`）: 「別 PC の Companion はヘッダ `X-Autona-Token` を足す」手順を 1 つ足した
+    - OBS ガイド（`AutonaObsGuideWindow`）: LAN 有効時の注記に「別 PC の OBS（ASS の HTTP アクション）は URL 末尾に `?token=`（すでに `?` があれば `&token=`）を付ける」を足した（ガイドの v1 リクエストは書き込みのため）
+    - 翻訳: `.ts` を手で編集し（置き換え 2・追加 8、api コンテキスト）、`scripts/compile_translations.ps1` で `.qm` を作り直した
+- **判断と理由**
+  1. **許可リストは「HTTP で実際に読まれているもの」だけ**
+     - オーバーレイが読むもの: `layout/`。file:// の場合は `out/program_state.json` を読む
+     - Web UI が読むもの: `web/build/`。`assets/` のフォントとアイコン、`assets/data_countries.json` も読む
+     - state の画像パスが指す先: `./assets/...`・`./user_data/games/...`、チーム / スポンサーのロゴ、アバター、カスタム国旗、大会バナー
+     - `user_data/` のうち JSON（`settings.json`・`local_players.json`・`layout_options.json`・`characters.json`・`alerts_red.json`・`tournament_terms.json`）は、すべて Python がファイルとして読んでいる。HTTP の参照はコードにもレイアウトにも無いので、外した
+     - 許可リスト外の要求には 404（ファイルが無いときと同じ）を返し、ログには残す（カスタムレイアウトが参照していれば気づける）
+  2. **Flask の static_folder を無効にした**: `/./<path>` が許可リストの抜け道になるため。`file_request` を唯一のファイルのルートにした
+  3. **`/<path:filename>` の POST を外した**: 上流 TSH フォークの最初のコミットから残っていたもので、ファイルを読み返すだけだった。POST の無いルート宛ての POST に 405 ではなく 404 を返す原因にもなっていた
+  4. **「この PC」はループバックとこの PC の LAN アドレス**: この PC の LAN アドレスから来たパケットは、この PC が送ったもの。同じ PC の Companion・ブラウザが LAN の IP の URL を使っていても（LAN を有効にすると、アプリ自身が LAN の IP の URL を案内する）、今までどおりトークンなしで動く
+  5. **転送ヘッダが付いた要求は「この PC」としない**: ローカルのリバースプロキシやトンネルは、他の端末の要求をループバックから中継する。転送ヘッダを付けないプロキシでは判定が外れるので、運用文書で注意を書いた（runtime-operations.md）
+  6. **トークンなしの書き込みは `Host` がこのサーバーの名前のときだけ（DNS rebinding 対策）**: rebinding されたページは攻撃者のドメインのまま 127.0.0.1 に届き、そのページから見ると要求は same-origin で、`Origin` もそのドメインになる。`Host` は URL のホストからブラウザが付けるので、ページ側では偽れない。読み取りは承認済み設計どおり免除のまま
+  7. **`Sec-Fetch-Site` は許可リスト（無い・`same-origin`・`none`）**: `same-site`（この PC の別ポートのページなど）も拒否する。理由は、同じ PC の別ポートのページからの no-cors GET（`<img src=".../scoreboard1-team1-scoreup">`）を防ぐため。この GET には `Origin` が付かない。正当な利用は影響を受けない（自分のページは `same-origin`、Companion などはヘッダを付けない）
+  8. **正しいトークンは CSRF・Host の判定も免除する**: トークンは cookie ではないので、ブラウザが自分で付けることはない。トークンを送ってくるページは、利用者からそれを渡されている。だから偽造ではない（rebinding されたページはトークンを知らない）
+  9. **`Origin: null` はトークンなしでは拒否する**
+     - `null` を出すのは、file:// のページ、sandbox の iframe、data: の URL など、出どころを確かめられないページ
+     - file:// のオーバーレイが送るのは `program_state`（読み取り）だけで、書き込みは送らない
+     - Figma の取り込み（`/api/designer/imports`、`null` を受ける）は `DESIGNER` に分類しているので、この判定を通らない
+  10. **自分のオリジンは待ち受けポート（`SERVER_PORT`）から作る**: `Host` ヘッダからは作らない（`Host` は判定 6 で照合する側）
+  11. **Socket.IO は全接続を受け入れ、書き込み可かどうかを接続ごとに持つ**
+      - 接続そのものを拒否すると、OBS の file:// オーバーレイや別 PC の OBS（トークンを持たない）が state を受け取れなくなる（外部契約 §2.8）
+      - 判定は接続時に 1 回だけ行う。Socket.IO のイベントには `Origin` が付かないため、handshake で見るしかない
+      - 拒否は ack で返す。Socket.IO には HTTP のステータスが無く、ack を受け取らないクライアントには何も起きない（旧と同じ）
+  12. **トークンなしで通れる接続は、トークンを送ってきても `GRANT_AMBIENT` にする**: この PC の自分のページは、トークンの再発行で切れない。トークンで入った接続（別端末・別オリジン）だけが、世代で切れる
+      - HTTP: 次の要求からすぐ拒否される
+      - トークンで入った Socket.IO 接続: 次のイベントで拒否される（`TOKEN_REPLACED`）。選手 DB の broadcast も、世代ごとの room なので届かなくなる
+  13. **トークンはメモリに持ち、黙って作り直さない**: settings.json を一時的に読めなかったときに作り直すと、新しいトークンが保存され、ファイル全体がほぼ空で上書きされる。利用者の機器はすべて使えなくなる
+      - 読めなかったときと値が壊れているときは、使えるトークン無しで fail closed にした（LAN の書き込みを拒否する。この PC からは今までどおり）
+      - API 設定の再発行で直る。読めなかっただけなら、再起動しても直る
+  14. **legacy の GET でも、状態を変えるものは `WRITE`**（Stream Deck が URL を貼るため、メソッドではなく効果で分類した）
+      - 例: `scoreboard1-team1-scoreup`・`-reset-*`・`-stats-*`・`load_set`・`set_tournament`
+      - `get_thumbnail` もボードを描画して `out/` に画像を書くので `WRITE`
+      - ボードを構築して読むだけのもの（`get_route` / `get_swap` / `get_set`、v1 の `get_scoreboard`）と、start.gg を引いて返すもの（`get_sets` / `get_match`）は `READ`（残置 / リスク参照）
+  15. **「ブラウザ版を開く」のトークンは LAN アクセスが有効なときだけ**: 無効なら、この PC のページなので要らない。付けると、そのタブだけが再発行の影響を受ける形になる
+  16. **Designer のトークン（`?desktop=1&token=...`）とペアリングコードは触らない**
+      - 承認済み設計のとおり、別の仕組みとして残す
+      - Web UI の取り込みは `desktop=1` の URL を飛ばす。`desktopApi.ts` はその `token` を毎回アドレスバーから読むので、消すと Designer が壊れる
+  17. **拒否のログにはパスだけを書く**: クエリ文字列（`?token=`）は書かない。トークンの値はどこにも出さない
+- **外部から見える変化**
+  - LAN の他端末からの書き込み（v1 の POST / PATCH・legacy の書き込み URL・Socket.IO の書き込みイベント）と選手 DB（`/playerdb`・`playerdb` イベント）に、トークンが必要になる
+    - 無い・誤り: HTTP は 401 `{"ok": false, "error": {"code": "UNAUTHENTICATED", ...}}`
+    - Socket.IO: 同じ形の ack を返し、処理しない
+  - この PC からは、ループバックの URL でも、この PC の LAN の IP の URL でも、今までどおりトークン不要
+    - ただし、転送ヘッダの付いた中継（ローカルのリバースプロキシ・トンネル）は他の端末と同じ扱いになる
+    - このサーバーの名前（127.0.0.1 / localhost / [::1] / この PC の LAN IP と待ち受けポート）以外の `Host` 宛ても、他の端末と同じ扱いになる（例: `http://<PC 名>:5107`）
+  - トークンなしの書き込みは、ブラウザの別サイト・同一サイトの別オリジン・別オリジンのページからだと 403 `FORBIDDEN` になる
+    - Companion・Stream Deck・ASS・curl・`requests` は、これらのヘッダを付けないので変わらない
+    - Web UI の開発サーバー（`npm start`、localhost:3100）は別オリジンなので、書き込むには `?token=<token>` 付きで開く
+  - 読み取りは変わらない（オーバーレイ・`/web`・state・カタログ・Socket.IO の受信。LAN からもトークン不要）
+  - 許可リスト外のファイルは 404 になる
+    - 例: `user_data/settings.json`・`local_players.json`、`src/`、`tmp/`、`logs/`
+    - 拒否された要求は `webserver: not serving ...` の warning で出る
+  - `file_request` 宛ての POST は 405 になる（旧はファイルを返していた）
+  - legacy の書き込みが拒否されたときは JSON の本文を返す（成功時の `"OK"` などは変わらない）
+  - 選手 DB の更新の broadcast は、書き込み可の接続にだけ届く（OBS や、トークンを持たない LAN のページには届かない）
+  - `settings.json` に `general.webserver_token` が増える（キーの追加のみ）
+- **pin**
+  - `tests/test_web_access.py`（新規・254 件。実際の Flask アプリと Socket.IO サーバーを使い、Actions は偽物に差し替える）
+    - `StaticPath`: 許可するもの、拒否するもの（`..`・絶対パス・`\`・ドライブ名・ストリーム・NUL・大文字小文字・`layout.` などの別名）
+    - HTTP の静的配信
+      - `settings.json` などは 404 で、warning は 1 回
+      - `favicon.ico` / `.well-known/` は warning にしない
+      - POST は 405。`/./` は無い
+    - トークン
+      - 初回だけ発行し、info ログを出す（値は出さない）
+      - 再発行ができる
+      - メモリに持つ（settings を空にしても書き換えても変わらない）
+      - settings.json を読めなかったら何も発行・保存せず、何とも一致しない。LAN の書き込みは再発行まで 401
+      - 壊れた保存値は使わず、作り直しもしない（再発行で直る）
+      - 手で設定した正しい形の値はそのまま使う
+      - 3 つの場所すべてで受け取る
+    - アドレスとオリジン
+      - ループバック / この PC（2 つの LAN アドレス）/ 転送ヘッダの判定
+      - オリジンの正規化（userinfo・パスなどは None）と自分のオリジン
+    - HTTP の書き込み
+      - ループバックは書ける。LAN は読める。LAN の書き込みと選手 DB は 401 で、`WWW-Authenticate` が付く
+      - Bearer・ヘッダ・クエリで通る
+      - 誤ったトークンは 401 で、値はログに出ない
+      - 再発行した直後から旧トークンは通らない
+      - プリフライトは通る。拒否のログは種類ごとに 1 回
+      - legacy の書き込みへの HEAD も、GET と同じく判定される
+    - CSRF
+      - 拒否（403）: cross-site、same-site、未知の値、別オリジン、`null`、localhost:3000、ポート違い、https。GET / HEAD / POST / playerdb のそれぞれで確かめる
+      - 通す: ヘッダなし、same-origin、`none`、自分のオリジン、`Host` が `127.0.0.1` / `[::1]`
+      - トークンがあれば免除。読み取りは止めない
+    - この PC の LAN アドレス
+      - 2 つとも、トークンなしで書ける（`Host` / `Origin` がその LAN アドレス）
+      - 同じ判定が掛かる（別オリジン・cross-site・same-site は 403、rebinding・転送ヘッダは 401）
+      - 他の LAN アドレスは「この PC」にならない
+    - DNS rebinding: `Host` が `evil.example:5107` / `evil.example`（same-origin・同名の Origin 付きを含む）/ `localhost.` / ポート違いのとき、GET の書き込み・v1 の POST・`/playerdb` は 401。読み取りは通る
+    - プロキシ: `X-Forwarded-For` / `Forwarded` / `X-Real-IP` の付いたループバックの要求は 401 で、トークンがあれば通る
+    - Socket.IO（テストクライアント）
+      - どの接続も `program_state` を受け取る。ループバックは書ける
+      - この PC の LAN アドレスのページは書ける
+      - LAN のトークンなしは読み取りだけになる（ack が `UNAUTHENTICATED`、選手 DB も拒否）
+      - auth・クエリ・ヘッダのトークンで書ける
+      - 別オリジン（`null`・`http://absolute` を含む）は接続できるが、書くと `FORBIDDEN`
+      - rebinding の `Host`・転送ヘッダ・same-site の接続は読み取りだけ
+      - 自分のオリジンは書ける
+      - 再発行で切れるのは、トークンで入った接続だけ
+        - ループバックで自分のページの接続は、トークンを送っていても切れない（選手 DB の broadcast も届き続ける）
+        - 別オリジンでトークンを使っていた接続は切れる
+      - 選手 DB の broadcast は信頼済みの room にだけ届き、再発行の後は旧トークンの接続に届かない
+      - `GUARDED` の全イベント（27）が、読み取りだけの接続で同じ拒否の ack になる。ハンドラが `_ws_guard` なしで登録されていれば、ここで落ちる
+      - AST: このモジュールで `socketio.on` を呼ぶのは `ws_on` の中だけ
+    - Socket.IO（Engine.IO の polling で handshake から）
+      - この PC からの接続は書ける。LAN からはトークン付きで書ける
+      - 次の handshake では、書き込みと選手 DB が拒否される
+        - rebinding の `Host`（same-origin 付きを含む）: 401
+        - 転送ヘッダ: 401
+        - LAN のトークンなし: 401
+        - 別オリジン: 403
+    - API 設定ウィンドウ（オフスクリーン）
+      - トークンは伏せ字で、表示で見える
+      - 再発行は確認で Yes のときだけ
+      - curl のトークンは LAN の書き込みだけに付く
+    - 「ブラウザ版を開く」の URL: LAN 有効のときだけトークンが付き、使えるトークンが無いときは付かない
+  - `tests/test_webserver_routes.py`
+    - 全 endpoint と全イベントが分類済み（台帳との集合一致）
+    - 分類規則: v1 の GET は READ でそれ以外は WRITE、legacy の POST は WRITE、designer は DESIGNER、playerdb は PLAYERDB
+    - 件数: legacy 43 / WRITE 29、イベントの WRITE 26、v1 の WRITE 18
+    - 表に無い名前は守られる
+    - 台帳の更新: `static` ルートを削除、`file_request` は GET のみ、`static_folder` は None、`before_request` に `guard_request` を追加、クラス属性に guard 4 つを追加
+  - `tests/test_import_side_effects.py`: `src.core.WebAccess` を足した。import でトークンを読まない・発行しない
+  - `web/src/autonaToken.test.js`（新規・12 件）
+    - 取り込み・アドレスバーからの削除・再読込後も残る
+    - トークンなし
+    - Designer の URL は触らない
+    - ストレージが使えない場合
+    - api のヘッダ（あり / なし）
+    - `withToken`: オブジェクト・Headers・配列のヘッダが落ちない。同名の古いヘッダは置き換える。トークンなしならそのまま
+    - socket の auth 関数
+- **残置 / リスク**
+  - **読み取りは開いたまま**（承認済み設計）
+    - LAN の誰でも、state（選手名・本名を含みうる `score.*`）とカタログを読める
+    - CORS は `*` のままなので、この PC で開いた任意のサイトからも state を読める
+    - DNS rebinding で読み取りを奪う経路も、読み取りについては残る（書き込みは `Host` の判定で止まる）
+    - 読み取りも守るなら、`Host` の検査を読み取りにも広げ、CORS を絞る必要がある（OBS の file:// オーバーレイのため、慎重に行う）
+  - **READ のルートに、状態を作る副作用がある**
+    - 該当するもの
+      - `get_route` / `get_swap` / `get_set`・v1 `get_scoreboard`: 未構築のボードを構築し、そのサブツリーを書く
+      - `get_sets` / `get_match`: start.gg を引く
+    - 受容した理由
+      - どちらも利用者のデータ（スコア・選手・設定）を変えない。構築は、そのボードを開いたときと同じ初期化になる
+      - 外部の OBS・Web UI が読み取りの経路として使っている
+    - そのため分類方針（「効果で分類する」）の例外として READ に残した。LAN の誰でも、未構築ボードの構築と start.gg への問い合わせを起こせる
+  - `designer_import_received` / `designer_project_saved` の通知は、今も全接続に broadcast される（中身は project 名と取り込み ID。S3a の範囲外）
+  - **LAN からの legacy の GET 書き込みにトークンが要る**
+    - 例: `scoreboard1-stats-*`・`-get-thumbnail`・`update_bracket`
+    - 別 PC の Stream Deck が URL を貼っていたら、`?token=`（すでにクエリがあれば `&token=`）を足す必要がある（リリースノートで告知）
+  - **この PC の LAN アドレスは、初回の判定で 1 回だけ調べて保持する**
+    - 起動中に IP が変わる（DHCP の更新・Wi-Fi の切り替え）と、新しい IP は「この PC」にならない
+    - そのため、新しい IP の URL を使う同じ PC の Companion・ページは、再起動まで 401 になる（トークンを付けていれば通る）
+  - **この PC から、このサーバーの名前以外のホスト名で書いていた場合は 401 になる**
+    - 例: `http://<PC 名>:5107`・mDNS 名・hosts に足した名前
+    - rebinding と区別できないため。127.0.0.1 / localhost / LAN の IP に替えるか、トークンを付ける
+  - 転送ヘッダを付けないプロキシ・トンネルを、この PC で LAN の外へ公開すると、その経路では認証が外れる（運用文書で注意。Autona 側では見分けられない）
+  - トークンは平文の HTTP で流れ、全端末で 1 つを共有する。操作ログは今も IP 単位
+  - トークンの再発行は、API 設定を開いている間しかできない（設定画面には出していない）
+  - settings.json を読めなかった回の起動では、LAN の書き込みが全部拒否される
+    - 再起動で読めれば元に戻る。再発行すれば、その場で新しいトークンになる
+    - ただし、そのとき settings.json は空の内容で上書きされる。これは既存の SettingsManager の挙動で、どの設定の保存でも同じ
+  - 古いブラウザ（`Sec-Fetch-*` が無い）の no-cors GET は、`Origin` も付かないので CSRF の判定をすり抜ける（`Host` の判定は掛かる）。OBS（CEF）・Chrome・Edge・Firefox・Safari の現行版は `Sec-Fetch-Site` を付ける
+  - 既存の未翻訳: API 設定のエンドポイントの説明文・エラーコードの説明（例: 「Full state + revision」）は、HEAD の時点で `.ts` に無かった。今回は自分で足した文言だけを翻訳した
+  - `AutonaStatsPreviewWidget` の「Companion マクロ」カードは、LAN の URL を表示するがヘッダの説明は無い（Companion ガイドへのボタンがあり、ガイドには手順を足した）
+- **実機確認（オーナー）**
+  - LAN オフ
+    - この PC のブラウザで `/scoreboard` を開き、スコア・チーム名・反映を操作できる
+    - 「ブラウザ版を開く」の URL に `?token=` が付かない
+  - LAN オン・この PC
+    - 「ブラウザ版を開く」（URL は LAN の IP で `?token=` 付き）で開いたページから操作できる。アドレスバーから `token` が消え、再読込しても操作できる
+    - 同じ URL を `?token=` なしで開いても操作できる（この PC から）
+    - 同じ PC の Companion が LAN の IP の URL のままでも、ヘッダなしで動く
+  - LAN オン・別端末（スマホ）
+    - トークンなしで `http://<IP>:5107/scoreboard` を開く: 表示は追従する。スコアを押しても変わらない（デスクトップのログに `refused` の warning が 1 回出る）
+    - API 設定からコピーしたトークンを `?token=` に付けて開き直す: 操作できる
+  - 別 PC の Companion: ヘッダ `X-Autona-Token` なしでは押しても変わらない。足すと動く
+  - 別 PC の ASS: 書き込みの URL に `?token=`（クエリがある URL は `&token=`）を付けると動く
+  - OBS のオーバーレイ（http://127.0.0.1 と、ローカルファイル（file://）の両方）が今までどおり更新される。別 PC の OBS（LAN の IP の URL）も更新される
+  - Chrome と OBS（CEF）のブラウザソースで開いた Web UI で、選手名の補完（playerdb の WebSocket 受信）が効く。WebSocket の handshake に付く `Sec-Fetch-Site` が `same-origin` で通ることの確認
+  - アプリ内のプレビュー（BOARD タブ・レイアウトのプレビュー）と Designer（保存・読込）が動く。Figma プラグインからの取り込みが届く
+  - API 設定
+    - トークンが伏せ字で出る。表示で見える。コピーできる
+    - 再発行は確認が出て、No では変わらない
+    - Tester の書き込み（`score:adjust` など）が LAN オン / オフどちらでも通る
+  - 再発行の後
+    - 旧トークンで開いていた別端末のページは操作できなくなり、新しいトークンで開き直すと戻る
+    - この PC で開いていたページは、そのまま操作できる
+  - ログ: `http://127.0.0.1:5107/user_data/settings.json` を開くと 404 になり、warning が 1 回出る
+- **リリースノート案**
+  > **LAN の他の端末からの操作にアクセストークンが必要になりました**
+  > 「LAN 上の他のデバイスからのアクセスを許可」をオンにして、別の PC やスマホから Autona を操作している場合（Companion / Stream Deck / Advanced Scene Switcher / ブラウザ）、操作の要求にアクセストークンが必要になりました。トークンは「ヘルプ＆設定 → API設定 → リファレンス・テスターを開く」で表示・コピーできます。
+  > - Companion などの HTTP 要求: ヘッダ `X-Autona-Token: <トークン>`（または `Authorization: Bearer <トークン>`）を追加するか、URL の末尾に `?token=<トークン>` を付けてください（URL にすでに `?` があるときは `&token=<トークン>`）
+  > - ブラウザ版: 「ブラウザ版を開く」から開けば、トークンは自動で渡されます。別の端末では、URL の末尾に `?token=<トークン>` を付けて開いてください
+  > - 表示（OBS のオーバーレイ・ブラウザ版の表示）にはトークンは不要です
+  > - Autona を動かしている PC からの操作は、これまでどおりトークンなしで使えます（`127.0.0.1` の URL でも、その PC の LAN の IP の URL でも）。LAN アクセスがオフの場合も変わりません
+  > - トークンが漏れたときは、同じ画面の「再発行」で作り直せます（古いトークンはすぐに使えなくなります）
+  >
+  > あわせて、Web サーバーが配信するファイルをオーバーレイ・ブラウザ版・画像に限定しました。`user_data/settings.json` や選手 DB はブラウザから読めなくなります。独自のレイアウトが `layout/` `assets/` `out/` と `user_data/` の画像フォルダ以外のファイルを読んでいた場合は表示されなくなり、ログに `not serving` が出ます。
+
+#### S3b 永続化の分離（2026-10-25・PR #228）
+
+state の正本を `out/program_state.json` から `user_data/state.json` に移した。`program_state.json` は OBS の file:// オーバーレイと ASS が読む出力で、場所・形式・`timestamp` / `revision` が外部契約に縛られ、版も持てなかった（S-14）。正本は版付きの `state.json` にし、`program_state.json` は今までどおり書き出すだけの出力に戻した（読むのは移行のときだけ）。保存は新しい core モジュール `src/core/StatePersistence.py`、版の移行は `src/core/StateMigrations.py` が持つ（どちらも Qt なし・import 副作用なし）。
+
+- **実装**
+  - `src/core/StateMigrations.py`（新規）
+    - `CURRENT_VERSION = 1`。`Migrate(state, version)` が前方一方向に 1 段ずつ上げる（`_STEPS`）。int でない版・負の版・`CURRENT_VERSION` より新しい版は例外
+    - v0（S3b 前の `program_state.json`）→ v1
+      - `RETIRED_ROOTS`（`bracket` / `player_list` / `player_editor`）を落とす
+      - `STALE_KEYS`（`tournamentInfo.streamTitleEdit` / `streamUrl`）を落とす
+      - `commentary` があれば `CommentaryModel.NormalizeState` を掛ける。無ければ作らない（シードは `SeedPanelState` の仕事）
+    - 出荷した移行関数は凍結する。名前は `StateSchema` の定数を読まず、書いた時点のコピーを持つ（定数が後で変わると、古いデータへの処理が黙って変わるため）。`StateSchema` を import しないのは循環を避けるためでもある（StateSchema → StateManager → StatePersistence → StateMigrations）
+  - `src/core/StatePersistence.py`（新規）
+    - 形式: `{"state_version": 1, "state": {...}}`。`state` は公開済みの state（held を巻き戻したもの = `program_state.json` と同じ内容）から `timestamp` / `revision` を除いたもの。orjson（`OPT_NON_STR_KEYS`、インデントなし）
+    - 書き込み
+      - `SaveState` が公開のたびに `Schedule(snapshot)` を呼ぶ（`lastSavedState` を差し替えた直後、export をキューに積む前）
+      - 専用の書き出しスレッド（`AutonaStatePersist`、非 daemon）が、最後の変更から 1 秒（`WRITE_DELAY`）静かになったら最新の 1 つだけを書く。変更が続いても、最初の未保存の変更から 5 秒（`MAX_WRITE_DELAY`）で書く
+      - mkstemp → `os.replace`。replace の失敗は 4 回まで待って再試行する。`program_state.json` と違い、直接上書きへのフォールバックは無い（このファイルをポーリングする読み手はいないので、途中まで書いたファイルより古いファイルの方がよい）
+      - `out/` と `general.disable_export` からは独立（export の書き出しスレッドとは別）
+    - 終了時: 非 daemon なので、インタプリタ終了時の join が待つ。メインスレッドが終わったら（`threading.main_thread().is_alive()` が False）、待ち時間を切り上げてすぐ書く（0.1 秒ごとに確認）
+    - `Flush(timeout)`: 待ち時間を飛ばして、書き切るまで待つ。テストと harness の `settle()` 用で、アプリは終了時の join に任せる
+    - 書き込みの失敗: error ログは連続する失敗の 1 回目だけ出す（以降は debug。成功すると戻る）。スレッドを起動できない（終了処理中など）ときは snapshot を残し、次の `Schedule` / `Flush` で書く
+    - `Load()`: 起動時の読み込み（下表）。パスはこの時点の CWD で絶対パスに固定する。`Load()` していないプロセス（`Initialize()` を呼ばないスクリプト・テスト）では `Schedule` が何もしない
+  - 起動時の分岐（`StatePersistence.Load`）
+
+    | `user_data/state.json` | 動作 |
+    |---|---|
+    | 使える | その版から `Migrate` して読む。書き直さない |
+    | 使えるが、`out/program_state.json` の方が新しい（mtime） | `program_state.json` を v0 から移行して読み、info ログに理由を出して**その場で `state.json` を書き直す**。`program_state.json` が読めない・オブジェクトでない・移行が例外を出すときは `state.json` のまま |
+    | 無い | `out/program_state.json` を読み、`timestamp` / `revision` を落として v0 から移行し、**その場で `state.json` を書く**（以後は `out/` を消しても残る）。`program_state.json` は触らない |
+    | 壊れている（JSON でない・オブジェクトでない・版が int でない・負の版・`state` が無い・移行が例外を出す） | `state.json.corrupt-YYYYmmdd-HHMMSS.bak` に移して warning。以後は「無い」と同じ（同じ秒に複数あれば `-2`, `-3`…）。**移せなければ触らず（証拠を残す）、このセッションは `state.json` を書かない**（error ログ） |
+    | 新しい版（ダウングレード） | `state.json.v{N}.YYYYmmdd-HHMMSS.bak` に移して warning（既存の bak は上書きしない）。以後は「無い」と同じ。移せなければ触らず、このセッションは `state.json` を書かない（error ログ） |
+    | 読めない（ロックなどの OSError） | 0.1 秒おきに 3 回まで読み直す。それでも読めなければ触らず、**このセッションは `state.json` を書かない**（error ログ）。読み込み元は `program_state.json` |
+
+    - どちらのファイルも無ければ `{}`。`program_state.json` が壊れていれば error ログを出して `{}`（従来と同じ）
+    - 起動時に、`user_data/` に残った書きかけの一時ファイル（`state.*.tmp`）のうち 1 時間以上前のものを消す（失敗しても無視して debug ログ）
+  - `src/core/StateManager.py`
+    - `LoadState()` は `StatePersistence.Load()` を呼ぶだけになった。どちらかのファイルがあれば `state_big_change` を出す（従来どおり。どちらも無ければ出さない）。`revision` はファイルから読まず 0 から始める（従来どおり）
+    - 読み込んだ state に `timestamp` / `revision` は残らない。従来は前回の値が state の根に残り、`GetFullState` の全量 snapshot に乗っていた
+    - `SaveState()` が公開の直後に `StatePersistence.Schedule(state_snapshot)` を呼ぶ
+      - ロック順は `StateManager.lock` → 保存側の lock の一方向。保存側の lock の中では I/O をしない。書き出しスレッドは `StateManager.lock` を取らず、Qt に触らない
+      - snapshot はコピーしない（公開後に変更されないのは、export の書き出しと同じ前提）
+    - export（`_WriteExports`。text の出力と `program_state.json`）は変えていない
+  - `src/core/StateSchema.py`: docstring とコメントのみ。「マイグレーション層は無い」の記述を StateMigrations へ向けた。`SeedPanelState` に重複して残す理由を書いた（判断 2）
+  - `.gitignore`: `user_data/state.json` と `user_data/state.json.*.bak`（mkstemp の一時ファイルは既存の `*.tmp` で除外済み）
+  - `scripts/validate_release_zip.ps1`: 4 つ目の検査。zip に `Autona/user_data/state.json` か `state.json.*.bak` があれば失敗する。git 管理ファイルの検査より前に置き、誤ってコミットされた場合でも止まる
+  - `tests/conftest.py`: harness の `settle()` が `StatePersistence.Flush(30)` まで待つ
+- **判断と理由**
+  1. **ファイル形式は封筒（`{"state_version", "state"}`）にした**
+     - 版を state の根に置くと、Socket.IO の payload と `program_state.json` に漏れる（外部契約）。読み込みと書き込みのたびに抜き差しするより、ファイルのメタデータとして分ける方が漏れようがない
+     - 読み込んだ `state` の中に `timestamp` / `revision` があっても落とす（`program_state.json` を手で `state.json` に戻した場合）
+  2. **`SeedPanelState` の 3 処理（`RETIRED_ROOTS`・`STALE_KEYS`・commentary の正規化）は残し、v0 → v1 と二重に掛ける**
+     - `player_editor` は旧データだけのものではない。選手 DB エディタを開いている間は今のビルドも書くので、そのまま落ちたセッションは v1 の `state.json` に残す。v0 → v1 はもう走らないので、起動ごとの掃除でしか消えない
+     - commentary の処理はシードを兼ねる（新規インストールで 12 枠を作る）。既存データの移行では作らない
+     - 二重でも害がない。`NormalizeState` は冪等、無いルートの `Unset` は何も変えない（呼び出し側の SaveBlock の中なので保存サイクルも増えない）、`STALE_KEYS` はあるときだけ消す。`test_the_launch_cleanup_has_nothing_left_to_do_after_the_migration` が pin
+     - 移行関数の側は凍結コピーを持つ。`StateSchema` の定数が今後変わっても、v0 データへの処理は変わらない（`test_the_v1_step_is_frozen` が、凍結値と、現時点で定数と一致していることを pin）
+  3. **export のモジュール分離（StateExport.py）はしなかった**
+     - 既存テスト（`test_state_manager_export_isolation.py` / `test_state_manager_image_export.py` / `test_state_manager_save_cost.py` ほか）が、`StateManager` の `_WriteExports` / `_atomic_write_bytes` / `ExportText` などをモジュールのパス経由で monkeypatch・呼び出ししている。分けると、テストの書き換えか再 export の shim が要る
+     - 今回の目的（正本を分ける）には要らない。外部契約を pin しているテストを同じ PR で動かすのは、リスクの割に得るものが無い
+     - export のコードは変えていないので、分離は後で単独の PR にできる
+  4. **新しい版の `state.json` は退避し、`program_state.json` から移行する**（S3 設計の当初案「空から始め」を改め、設計節も更新した。採用済み）
+     - 運用者にとっては大会情報が消えない方が有利。`program_state.json` は直前まで動いていた新しい版が書いたもので、空より実際の状態に近い
+     - 移行関数は冪等（すでに移行先の形のデータを受けても壊さない）を規則にした（`StateMigrations` の docstring）。`program_state.json` は版を持たないので常に v0 として移行するが、中身は書いたビルドの形になっているため
+     - 退避は日時付きの名前にして上書きしない。移せないときに上書きしない（`state.json` を閉じたままにする）のは、新しい版に戻したときにデータを残すため
+  5. **間引きに上限（5 秒）を足した**。最後の変更から 1 秒だけだと、ゲームトラッカーの操作や大会データの取り込みのように変更が続く間、いつまでも書かれない
+  6. **パスは `Initialize()`（`Load()`）の時点で絶対パスに固定する**
+     - 書き込みは遅れて走るので、後で CWD が変わっても（テストの tmp CWD）別の場所に書かない
+     - `Load()` していないプロセスは書かない。スクリプトから state を触ったときに、利用者の保存を部分的な state で上書きしない
+  7. **壊れた `program_state.json` のときの `SaveState()` 呼び出しをやめた**。旧実装は `{}` にしてから `SaveState()` を呼んでいたが、`{}` と `lastSavedState`（`{}`）に差分は無く、何もしていなかった
+  8. **fsync はしない**（settings.json と同じ）。電源断で `state.json` が失われても、次の起動は `program_state.json` から移行する
+  9. **`program_state.json` の方が新しければ、そちらを採用する**（レビュー指摘で追加）
+     - export は保存サイクルのたびにすぐ書き、`state.json` は 1〜5 秒待ってから書く。クラッシュ・強制終了では、その間の変更が `program_state.json` にだけ残る。間引きは変えずに、起動時に mtime で拾う
+     - S3b 前の版に戻して使った後の復帰も、同じ規則で救える（旧版は `program_state.json` だけを書くので、そちらが新しくなる）
+     - 正常終了の直後は、`state.json` の方が新しいか、同時刻なら `state.json` を使う。たまたま `program_state.json` が後になっても、中身は同じ snapshot で、移行は冪等なので結果は変わらない
+  10. **読めない・退避できない `state.json` は上書きしない**（レビュー指摘で追加）。そのセッションは保存を止め、error ログを出す。中身が正しいかもしれないファイルや、壊れた原因の証拠を、部分的な保存で消さないため
+- **外部から見える変化**
+  - `user_data/state.json` ができる（初回の起動で `program_state.json` から作る）。以後、起動時に読むのはこちら
+    - `out/` を消しても、OBS の出力先を変えても、前回の state（大会情報・配信設定・実況・Top 8・表示トグルなど）が戻る。`score` と `game` は従来どおり起動時に消える
+  - Socket.IO の全量 snapshot（`program_state` イベント・v1 の `GET state`）の `state` から、前回のセッションの `timestamp` / `revision` が消える
+    - payload の形（`revision` / `delta_index`）は変わらない
+    - 読む側は無い。オーバーレイの `data.timestamp` は、file:// のポーリングで `program_state.json` を読むときだけ使う。そのファイルには今までどおり付く
+  - `program_state.json` の根のキー順: `timestamp` / `revision` が常に最後になる。従来は 2 回目以降の起動で、起動後に足される `score` などより前に来ていた。JSON として読む側には影響しない
+  - ダウングレード: 旧版は `program_state.json` を読むので困らない。旧版で使ってから戻すと、旧版が書いた `program_state.json` の方が新しいので、そちらから移行して続きになる
+  - 手で `state.json` をバックアップから戻すときは、`out/program_state.json` も消す（コピーは更新時刻を保つので、`program_state.json` の方が新しいと見なされ、そちらが採用される）。`docs/operations/runtime-operations.md` に書いた
+- **pin**
+  - `tests/test_state_persistence.py`（新規・69 件）
+    - 移行
+      - v0 → v1 の 3 処理。commentary が無ければ作らない
+      - 形の崩れたデータでも落ちない
+      - 凍結値。全ての版に step がある。現行版の state は触らない
+      - 範囲外の版・int でない版・dict でない state は例外
+      - 移行の後に `SeedPanelState` の掃除が何もしない
+      - v0 → v1 を v1 の形のデータに掛けても同値（冪等）
+    - 読み込み
+      - 使える store（書き直さない）。v0 の store
+      - 初回の移行（すぐ書く・`program_state.json` は触らない）。どちらも無い
+      - 壊れた store 9 種。壊れた store で `program_state.json` も無い。bak が衝突しない
+      - 新しい版。同じ秒の bak も上書きしない。退避できない新しい版は書かない
+      - `program_state.json` が読めない / オブジェクトでない
+      - store の中の刻印を落とす
+      - `program_state.json` の方が新しければ採用して書き直す（クラッシュ）。ダウングレードからの復帰。同時刻なら store。新しくても読めない / オブジェクトでない / 移行が例外なら store のまま
+      - store の移行が例外 → 壊れた扱い。`program_state.json` の移行が例外 → `{}` で store を作らない
+      - 壊れた store を退避できない → 書かない
+      - 読み続けて失敗（OSError）→ 3 回試して書かない。1 回だけの失敗 → 読み直して通常どおり
+      - 古い一時ファイルを消す（新しいもの・他の store のものは残す）。消せなくても起動は続く
+    - 書き出し
+      - 静かになるまで待つ。変更が続いても上限で書く。Flush は待たない
+      - 封筒に刻印が無く、snapshot を変えない
+      - アトミック（一時ファイルが残らない）。閉じた store は書かない
+      - 失敗のログは 1 回で、その後回復する
+      - daemon でない。スレッドを起動できないとき snapshot が残る
+      - 諦めた Flush（タイムアウト・スレッド起動失敗）が要求を残さない（次の snapshot は間引かれる）
+      - `_Run` の finally: 書き込み中に BaseException で落ちたら snapshot を戻し、次の Flush で書ける
+    - StateManager
+      - 公開のたびに store に届き、`program_state.json` の刻印は残る
+      - `disable_export` でも store は書かれる
+      - held の編集は、反映するまで store に入らない
+    - 別プロセス
+      - S3b 前のインストールからの起動: `state_big_change` 1 回・revision 0・state と `GetFullState` に刻印と退役キーが無い・store が v1・出力の revision 1 と timestamp・終了時に flush なしで最後の値が store にある
+      - `WRITE_DELAY` 600 秒でも、終了時に書く
+      - クラッシュ（`os._exit`）で store が書かれなくても、次の起動が `program_state.json` から最後の値を戻す
+  - `tests/test_import_side_effects.py`: 2 モジュールを追加。import では store を開かず、スレッドを作らない。`Initialize()` でパスが決まり、書くまでファイルは無い
+  - `tests/test_harness_isolation.py`: harness の store がリポジトリの `user_data/state.json` ではない（`--basetemp` に依存しない判定）
+  - `tests/test_state_manager_held.py`: import 時の mkdtemp を終了時に消す（このプロセスの store がここに来ることが多い）
+  - `tests/test_web_access.py`: `user_data/state.json` と `.bak` を配信しない
+  - `tests/test_core_qt_free.py`: 2 モジュールを自動で対象にする（変更なし）
+  - export の場所・形式・刻印・書き込み順は、既存の `test_state_manager_save_cost.py` ほかがそのまま pin する（変更なし）
+- **残置 / リスク**
+  - **fsync なし**: `os.replace` なので途中まで書いたファイルにはならないが、電源断で直前の内容に戻ることはある。壊れていれば `.corrupt` に退避して `program_state.json` から移行する。戻っただけなら、`program_state.json` の方が新しければそちらを使う
+  - **クラッシュ・強制終了で失うのは、`program_state.json` にも出ていない分だけ**（export は保存サイクルのたびにすぐ書く）。`program_state.json` も消えていれば、`state.json` の時点（最大 5 秒前）に戻る
+  - **mtime の比較に頼る**: 時計を戻した・`program_state.json` を手で触った・バックアップを戻したときは、新しい方の判定が運用者の意図とずれることがある（バックアップの戻し方は運用文書に書いた）
+  - **`state.json` を読めない・退避できないとき、そのセッションは保存しない**（error ログ）。`program_state.json` の出力は続くので、次の起動はそちらの方が新しければそこから戻る
+  - **終了時の `webserver.terminate()` と `_cond` / `_export_cond`**（2026-10-25 S3c-1 で訂正）
+    - 当初は「`Schedule()` の中（`_cond` 保持中）で Web サーバーのスレッドが止められると、`_cond` が解放されず、書き出しスレッド（非 daemon）を待つ終了処理が止まる。`_export_cond` も同じ」と書いたが、この経路は実在しなかった。`terminate()` が止めていたのは accept ループのスレッド（`serve_forever()`）だけで、このスレッドは `_cond` も `_export_cond` も取らない。要求の処理（`SaveState` → `Schedule()` を呼びうる側）は werkzeug の daemon の要求スレッドで動いており、terminate の対象ではなかった
+    - 実在したのは別の危険。`terminate()`（Windows の `TerminateThread`）は相手が何を持っているかを見ずに止めるので、accept ループが GIL や CRT / インタプリタ内部のロックを持った瞬間に止めると、プロセスが終了処理で固まりうる（通常は `select()` の待ちで GIL を放しているので、まれ）。S3c-1 で `terminate()` をやめ、`shutdown()` で止めるようにしたので、この危険は**解消**した
+    - daemon の要求スレッドは今も止めずに終了する。インタプリタは、非 daemon スレッド（書き出しスレッド 2 本）の join が終わってから daemon スレッドを凍結するので、要求スレッドが `_cond` / `_export_cond` を持ったまま凍結されて書き出しを妨げることはない
+  - 終了の遅れ: 書き込み待ちがあると、終了が最大 0.1 秒 + 書き込み 1 回ぶん遅れる
+  - テストのプロセスでは、どれかのモジュールが `Initialize()` を呼んだ後は保存が有効になる（パスは tmp。harness の `settle()` が待つ）。`Initialize()` を呼ぶテストを足すときは tmp CWD で呼ぶ
+  - 2 つ同時に起動すると、同じ `state.json` を書き合う。単一インスタンスの IPC で防いでいる前提は、従来の `program_state.json` と同じ
+  - pytest 全量と live のテスト（start.gg など）は、実装の中では回していない（全量は別担当）
+- **実機確認（オーナー）**
+  - 更新後の初回の起動で `user_data/state.json` ができ、ログに `Migrated ... to ...` が出る
+  - 再起動すると、大会情報・配信設定・実況・表示トグルが戻り、スコアは今までどおり空になっている
+  - `out/` を消して起動しても、前回の state が戻る
+  - アプリを閉じる直前（1 秒以内）に変えた値が、次の起動で戻る
+  - 値を変えた直後にタスクマネージャーで Autona を強制終了しても、次の起動で戻る（ログに `is newer than` が出る）
+  - `state.json` を壊して（例: 先頭に `x` を足す）起動すると、`state.json.corrupt-<日時>.bak` ができて warning が出て、`program_state.json` の内容で起動する
+  - OBS のオーバーレイ（http と file://）と ASS が、今までどおり更新される
+  - S3b 前の exe に戻しても起動し、前回の state が戻る（`program_state.json` を読む）。そこで値を変えてから新しい exe に戻すと、その値が残っている
+- **リリースノート案**
+  > **前回の内容の保存先が変わりました**
+  > 大会情報・配信設定などの前回の内容を、`user_data/state.json` に保存するようになりました（これまでは `out/program_state.json` から読み戻していました）。更新後の初回の起動で自動的に引き継がれます。`out/` フォルダを消しても、前回の内容が戻ります。バックアップや別の PC への移行のときは、`user_data/state.json` もコピーしてください。
+  > 開発者向け: `GET /api/v1/state` と Socket.IO の全量 snapshot（`program_state`）の `state` に、前回のセッションの `timestamp` / `revision` が残らなくなりました（`out/program_state.json` の `timestamp` / `revision` と、payload の `revision` は従来どおり）。
+
+#### S3c-1 組み立ての 2 段化と Web サーバーのスレッド化（2026-10-25・PR #229）
+
+S3c（ヘッドレス起動）を 2 つの PR に分けた（指示書の規模ルール）。S3c-1 はヘッドレスの前提になる土台で、GUI の挙動は変えない。組み立て（`src/bootstrap.py`）をどのシェルにも要る段と、デスクトップの Qt アダプタの段に分けた。Web サーバーは QThread をやめて、止められる普通のスレッドにした。`in_gui_thread()` は QCoreApplication を見る。`--headless`・`src/headless.py`・ルートの移行・503・スモークテストは S3c-2 で行う。
+
+- **実装**
+  - `src/bootstrap.py`
+    - `bootstrap_core()`: どのシェルにも要るものだけを作る。QCoreApplication だけで動く（QtGui / QtWidgets のオブジェクトを作らない）。生成順は Settings → LayoutOptions → Locale / BadWord の `Initialize()` → StateManager → Bridge → Actions → GameAssetCatalog（+ `ResetGameState`）→ StartGG のクエリ → 大会 provider → TournamentInfoService → CountryCatalog → Designer の移行
+    - `bootstrap_gui()`（新規）: 先頭で `bootstrap_core()` を呼び（冪等）、デスクトップの Qt アダプタを作る。順は Hotkeys（+ `ConnectActions`）→ `AutonaGameAssetManager` → provider の結線 → PlayerDB の `SetupModel` 結線 → AlertNotification → Updater → `AutonaCountryHelper` → `AutonaScoreboardManager`（`ResetScoreRoot`）。再入ガードは段ごと
+    - 各ブロックの `ORDER CONSTRAINT:` を書き直した（新しい段の規則「QtGui / QtWidgets が要るか、デスクトップだけが使うなら `bootstrap_gui()`」も docstring に書いた）
+  - `src/AutonaTournamentDataProvider.py`: Qt アダプタ（`AutonaGameAssetManager`）への依存を外した
+    - `__init__` で `onLoadAssets` に connect していたのをやめ、`selectGameFromStartGGId`（start.gg の videogame ID でゲームを選ぶ関数）をシェルが登録する属性にした。未登録なら warning ログを出して何もしない
+    - `bootstrap_gui()` が `selectGameFromStartGGId = adapter.SetGameFromStartGGId` を登録し、`onLoadAssets` → `SetGameFromProvider` を結線する
+    - `SetTournament` の URL が空のときの `LoadGameAssets(0)` を削除した。2026-10-23 の PdM 判断で no-op になっていた（`test_an_empty_codename_keeps_what_is_loaded`）
+  - `src/Autona.py`
+    - `bootstrap_core()` の直後に `bootstrap_gui()` を呼ぶ
+    - `_StartWebServer`: `WebServer(parent=self, on_start_failed=...)`。コールバックはサーバーのスレッドから呼ばれるので、`gui_executor` で GUI スレッドに渡してから `OnWebServerStartFailed`（非モーダルのダイアログ）を出す。旧 queued シグナルと同じ届き方
+    - `closeEvent`: `terminate()` + `wait(10000)` を `webserver.stop(10.0)` に替えた。どこからも設定されていなかった `WERKZEUG_SOCKET_FD` を閉じるブロック（死にコード）と、それだけが使っていた `import socket` を削除した
+  - `src/AutonaWebServer.py`
+    - `WebServer` は QThread を継承しない素のクラスになった。`WebServerSignals`（`start_failed`）を削除し、コンストラクタの `on_start_failed(error: str)` コールバックに替えた
+    - `start()`: daemon の `threading.Thread`（`AutonaWebServer`）で `make_server(host, port, app, threaded=True).serve_forever()` を回す。旧 `socketio.run()` が threading モードで組むもの（`Flask.run` → `run_simple` → `make_server`）と同じサーバーで、開発サーバー向けの付属物（バナー表示・`.env` 読み込み・リローダー用の `WERKZEUG_SERVER_FD`）だけを省いた。2 回目の呼び出しと `stop()` 後の呼び出しは何もしない
+    - `stop(timeout)`: `shutdown()` で `serve_forever()` を抜けさせ、スレッドを join して socket を閉じる。止まったら True。`shutdown()` は補助スレッドで呼び、ループが固まっていても呼び出し側（ウィンドウの close）を timeout より長く止めない。処理中の接続は待たない（werkzeug の要求スレッドは daemon）
+    - bind の失敗: werkzeug は OSError を stderr に出して `sys.exit(1)` する。これを捕まえ、元の OSError を添えた `could not listen on host:port: ...` でコールバックに通知する
+  - `src/Helpers/AutonaQtHelper.py`: `in_gui_thread()` が `QCoreApplication.instance()` を見る。QtWidgets の import を外した
+  - `tests/conftest.py`（harness）と `tests/live/restart_probe.py`: `bootstrap_gui()` も呼ぶ（ボード・パネルを作るため / `score` を落とすのはスコアボード dock なので）
+  - コメントの追従: `src/AutonaHotkeys.py`（`ConnectActions` の冪等の理由）、`tests/test_scoreboard_operations.py`、`tests/test_import_side_effects.py`、`tests/test_designer_service.py`
+- **判断と理由**
+  1. **provider とアダプタの結線をシェルへ移した**
+     - provider の `__init__` がアダプタの `signals` に connect していたため、「アダプタ → provider」が生成順の制約になり、アダプタ（QStandardItemModel・QIcon を持つ）がどのシェルにも要った。ヘッドレスはアダプタを作らない（ゲームのロードは `GameAssetCatalog` を直接使う。S3c-2）
+     - `onLoadAssets` のスロットの順は変わらない。provider（`bootstrap_gui()`）→ Window の `ReloadGames`（`Window.__init__`）→ EVENT パネルのゲーム一覧（起動時に EVENT ページを建てたとき）→ アダプタ自身の `_RestoreSelectedGame`（アダプタの `UiMounted()` が、最初のスキャンの直前に connect）。provider がゲームを適用し直した後に、保存したゲームの復元が走るのも従来どおり。provider → `_RestoreSelectedGame` の順は、`tests/test_bootstrap_split.py` が実際の emit で確かめる
+  2. **`bootstrap_gui()` へ移した 7 つの生成は、互いの相対順を保ち、core の生成の後ろにまとめただけにした**
+     - core の生成（Actions 以降の GameAssetCatalog・StartGG・provider・TIS・CountryCatalog・Designer の移行）はどれも移した 7 つを参照しない。移した側は core の生成物だけを参照する
+     - `AutonaScoreboardManager`（`ResetScoreRoot`）は Designer の移行より後になったが、Designer の移行は state を書かない。Window より前（= `score.*` の最初のシードより前）であることは変わらない
+     - 段ごとの手順（生成・provider / PlayerDB / ホットキーの結線・`Initialize()`・Designer の移行）と、その順を `tests/test_bootstrap_split.py` が AST で pin する
+  3. **Web サーバーは `socketio.run()` を呼ばず、werkzeug のサーバーを自分で作る**
+     - `socketio.run()` は戻らず、止める手段が無い。旧実装は終了時に `QThread.terminate()`（Windows の `TerminateThread`）で accept ループのスレッドを殺していた。要求の処理は werkzeug の daemon の要求スレッドで動いていたので、殺されていたのは要求ではなく accept ループ
+     - 危険は、そのスレッドが GIL や CRT / インタプリタ内部のロックを持った瞬間に止めると、プロセスが終了処理で固まりうること（通常は `select()` の待ちで GIL を放しているので、まれ）。`shutdown()` で止めるので、この危険は無くなった。S3b の残置に書いた `_cond` / `_export_cond` の経路は実在しなかった（S3b 節を訂正した）
+     - 中身は `socketio.run()`（threading モード）が組むものと同じ。Socket.IO のミドルウェアは `app.wsgi_app` に巻かれており、WebSocket は simple-websocket がこのサーバー上で upgrade する
+  4. **起動失敗の通知はコールバックにし、GUI スレッドへの受け渡しはシェルが行う**。Web サーバーを Qt に依存させないため（ヘッドレスはログに出すだけ）
+  5. **daemon スレッドにした**。止め忘れ（クラッシュ・テスト）でプロセスが残らないように。正常終了ではどちらのシェルも `stop()` を呼ぶ
+- **外部から見える変化**
+  - 無い（GUI の起動順序・画面・Web の契約は変わらない）
+  - 例外として、**bind に失敗したとき、「Web サーバーを起動できません」のダイアログが出るようになる**。旧実装では werkzeug の `sys.exit(1)`（SystemExit）が `except Exception` を素通りし、ダイアログは出ず Web サーバーだけが黙って止まっていた（`check_webserver_port` の事前確認はそのまま）
+  - ポートを他のプロセスが握っているときは、`check_webserver_port` の衝突警告に続けて、bind が失敗すれば起動失敗のダイアログも出る（2 つ続けて出うる。Windows では SO_REUSEADDR で bind が通ることが多く、その場合は警告だけ）
+  - 終了時の Web サーバーの停止が、強制終了から通常の停止になった（10 秒の猶予は同じ。通常は 0.5 秒以内）
+- **pin**
+  - `tests/test_bootstrap_split.py`（新規・6 件）
+    - 段ごとの全手順とその順（AST）。生成に加えて、provider の結線（`selectGameFromStartGGId` と `onLoadAssets` → `SetGameFromProvider`）・PlayerDB の結線・`ConnectActions` が `bootstrap_gui()` のどこにあるか、`StartGGDataProvider.Initialize()` と Designer の移行が `bootstrap_core()` のどこにあるか。`bootstrap_gui()` の最初の手順が `bootstrap_core()`
+    - 別プロセス・tmp CWD で、QCoreApplication の上で `bootstrap_core()` が通る。デスクトップのシングルトンを作らない。provider にゲームの選択関数が登録されていない。`in_gui_thread()` がメインで True・ワーカーで False
+    - QApplication の上で `bootstrap_gui()` が前回の `score` を落とす。2 回呼んでも同じ。Hotkeys の `ConnectActions` 済み。登録されるのはアダプタの `SetGameFromStartGGId`
+    - `onLoadAssets` のスロット順: アダプタの `UiMounted()` で実際に connect させてから emit し、provider（ゲームを登録された関数へ渡す）が `_RestoreSelectedGame` より先に走る
+    - Web サーバーのスレッド: 空きポートで `/api/v1/health` が 200。`stop()` が 5 秒以内に True を返し、ポートが閉じる。`stop()` 後の `start()` は何もしない。bind できないアドレス（192.0.2.1）でコールバックが 1 回呼ばれる。サーバーのスレッドが残らない
+  - `tests/test_gui_executor.py`: QApplication の上で `in_gui_thread()` がメインで True・ワーカーで False
+- **残置 / リスク**
+  - **ヘッドレス起動そのものは S3c-2**（`main.py --headless`、`src/headless.py`、`WebServerActions` の縮小と 503、PlayerDB の `SetupModel` と `LoadLocale` の QTranslator を QtGui なしで避けること、Socket.IO 経由のスモークテスト）
+  - `check_webserver_port`（QMessageBox）と LAN 公開の初回確認は Window のまま。ヘッドレスでは設定値で決めてログに出す（S3c-2）
+  - **S3c-2 の前提として片付けるもの**
+    - `StartGGDataProvider` が entrants の取得の最後（2065 行目付近）で `AutonaPlayerDB.SetupModel()` を呼ぶ。QStandardItemModel / QIcon を作るので、ヘッドレスで大会を読み込むと QtGui が無くて落ちる
+    - `WebServer.__init__` が `WebServerActions(scoreboard=AutonaScoreboardManager.instance)` を渡している。ヘッドレスでは None
+    - `selectGameFromStartGGId` が未登録だと、大会のゲームは適用されない。黙って無視されないよう、ログを warning にした（S3c-1。ヘッドレスは S3c-2 で GameAssetCatalog を使う関数を登録する）
+  - 停止時に処理中の接続（WebSocket を含む）は待たない。旧実装も待っていなかった
+  - pytest 全量は回していない（全量は別担当）
+- **実機確認（オーナー）**
+  - 起動して、OBS のオーバーレイ（http）・`/web`・API 設定の API Tester が今までどおり動く
+  - 閉じると、プロセスが残らずにすぐ終わる（タスクマネージャーで `python` / `Autona` が消える）。閉じる直前に変えた値が次の起動で戻る
+  - 大会 URL を設定するとゲームが自動で切り替わる（provider → アダプタの結線）。ゲームを追加して再スキャンした後も、大会のゲームが選ばれたまま
+  - ホットキー（スコア +/-、反映）が今までどおり効く
+  - 他のプロセスが使っているポートを設定したときの警告ダイアログ（ポート衝突）が今までどおり出る
+
+#### S3c-2 ヘッドレス起動（`main.py --headless`）（2026-10-26・PR #230）
+
+S3c の後半。ウィンドウを出さずに state・大会データ・Web サーバーを動かす `python main.py --headless` を足した。Web の操作をデスクトップとヘッドレスで同じ関数に通し（`src/AutonaWebOperations.py`）、ボードやパネルのウィジェットが要る操作だけを `WebServerActions` に残した。ヘッドレスでは残りが 503 を返す。S3c-1 のレビューで出た前提 3 点（PlayerDB の Qt モデル・`WebServer.__init__` のスコアボード・ヘッドレスのゲーム選択関数）もここで片付けた。
+
+- **実装**
+  - `main.py`
+    - `--headless`（`sys.argv` に含まれるか）。単一インスタンスの判定はデスクトップと共通（同時に起動させない）
+    - ヘッドレスが 2 つ目の起動なら、エラー出力に `Autona is already running ...` を出して終了コード 1。デスクトップ版の 2 つ目は従来どおり既存ウィンドウを前面化して 0
+    - IPC サーバー（`_start_ipc_server(on_activate)`）を分岐の手前に移し、前面化の処理をシェルが渡す形にした。ヘッドレスは「他の起動を断った」とログに出すだけ
+    - ヘッドレスの分岐: QCoreApplication → IPC サーバー → `src.headless.run(App)` → その戻り値で `sys.exit`。スプラッシュ・QApplication・qasync・AppID ショートカットは通らない
+    - `AUTONA_INSTANCE_TAG` 環境変数: mutex と IPC の名前に付ける接尾辞。スモークテストが、開発者の起動中の Autona と衝突せずに（2 つ目扱いにも、前面化の送信元にもならずに）ヘッドレスを起動するため。運用の機能ではない（コメントに明記）。ソースからの起動でだけ読み（`Autona.exe` は読まない）、英数字とハイフン以外を含む値は warning を出して無視する（`src/headless.py` の `instance_tag`）
+    - `Autona.exe --headless`（frozen）は起動を拒否する。コンソールが無いのでメッセージボックス（`MessageBoxW`）で「exe はヘッドレス非対応、`python main.py --headless` を使う」と伝えて終了コード 1。単一インスタンスの判定（mutex）より前で終わる（`refuse_frozen_headless`）
+  - `src/headless.py`（新規。import の副作用ゼロ）
+    - `Assemble(app)`: GuiExecutor → `bootstrap_core()` → `LoadLocale` / `LoadRoundNames` → `out/`・`user_data/games`・`layout/logo.png` の用意（Window と同じ）→ `CountryCatalog.Load()` 直 → 1 保存サイクルで `ResetScoreRoot` + `SeedBoard(1..3)` + `SeedPanelState` + `TournamentInfoService.Seed` + `SeedColorState` → ゲームの選択関数とローダーの登録 → `wire_tournament_data` → `LoadDB` → `WebServer(actions=None)` + `wire_web_server` → 大会 URL の復元（`provider.UiMounted()`）→ ゲームのスキャン（`HeadlessGames.Start()`）→ LAN 公開の案内とポートの確認をログに → `webserver.start()`
+    - `HeadlessGames`: `GameAssetCatalog` を直接使うゲームのローダー（Qt モデルなし）。アダプタ（`AutonaGameAssetManager`）と同じ順で動く: 起動時の start.gg キャラ表の更新とスキャン → スキャンのたびに provider のゲームを適用し直す（`SetGameFromProvider`）→ 初回だけ前回のゲーム（`SELECTED_GAME_CODENAME`）を復元。ロードは専用スレッドで 1 つずつ（`ReloadStartGGCharacters` → `SaveBlock` 内で `SelectGame`）、`done=` は成否を問わず 1 回。ロード後はメインスレッドで選択を保存し、`gameChanged` を出す（Web サーバーの push と PlayerDB の更新が受ける）
+    - 登録: `provider.selectGameFromStartGGId = games.SelectGameFromStartGGId`、`AutonaWebOperations.loadGameByCodename = games.LoadGameByCodename`
+    - Web サーバーが起動できなければ（bind 失敗）エラーをログに出して終了コード 1（`app.exit(1)`）
+    - 停止: Windows は `SetConsoleCtrlHandler`（Ctrl+C・Ctrl+Break・閉じるボタン・ログオフ・シャットダウン）。閉じるボタン等は、ハンドラが戻るとプロセスが終わるため、停止処理の完了を最大 4.5 秒待ってから戻る。併せて Python の `SIGINT` / `SIGTERM` / `SIGBREAK` ハンドラと、それを動かすための 250 ms のタイマー
+    - 停止ハンドラは組み立て（`Assemble`）の**前**に入れる。組み立て中に来た停止要求は `HeadlessShell.stopRequested` に残り、組み立てが終わったらイベントループを回さずに同じ停止処理へ進む（Windows の既定動作で組み立て途中のまま終わらない）。イベントループの終了は `QMetaObject.invokeMethod(app, "quit", QueuedConnection)`（メインスレッドからでも queued。ループ開始前の直接の `quit()` は捨てられるため）
+    - `Shutdown()`: `webserver.stop(2.0)` → `StateManager.JoinExports(10)`（`out/`）→ `StatePersistence.Flush(10)`（`user_data/state.json`）→ コンソール制御ハンドラの登録解除（`SetConsoleCtrlHandler(routine, False)`）→ 完了イベント。Web サーバーを作る前の停止でも書き出しは行う
+    - ログ: コンソール（INFO 以上。ヘッドレスでは運用者が見る唯一の画面のため）・`logs/autona.log`・`logs/tsh-error.log`・`logs/tsh-crash.log`（faulthandler）
+  - `src/AutonaWebOperations.py`（新規）: Web の操作のうち、ボードのウィジェットが要らないもの（モジュール関数）
+    - core 直結: `program_state` / `team_scoreup` / `team_scoredown` / `team_color` / `set_display_option` / `set_scores` / `apply_changes` / `get_games` / `get_current_game` / `get_match_names` / `get_characters` / `get_variants` / `get_comms` / `get_states` / `get_sets` / `get_match` / `get_playerdb` / `load_tournament` / `set_game` / `load_game`（新規。v1 `game` が使う）
+    - S2 で core 化した操作: `set_route`（+ `_apply_set_fields`）/ `set_team_losers` / `swap_teams` / `get_swap` / `get_scoreboard` / `reset_scores` / `reset_match`（旧 `_reset_best_of` は `_reset_match` に統合）/ `reset_players` / `clear_all` / `get_set`
+    - ボードの周りの仕事はシェルが登録する `boardHost` が受け持つ。`BoardHost`（既定 = ヘッドレス）: 呼び出し元のスレッドで、1 本の再入可能ロック（`RLock`）の下で 1 つずつ実行・何も構築しない・ウィジェットが要るもの（board 3 の操作・人数 / キャラ数）は `NotAvailable`。`DesktopBoardHost`（`bootstrap_gui()` が登録）: GUI スレッドで同期実行・未構築ボードを構築・入力中の欄の確定・board 3 はウィジェットへ・`CommandClearAll`・人数 / キャラ数を 1 に・最後に読んだセット
+    - `NotAvailable`（message `not available in headless`）
+  - `src/AutonaWebServerActions.py`: ボード依存の操作だけに縮めた（下の表）。werkzeug のアクセスログ抑制は `AutonaWebServer.py` へ移した（ヘッドレスはこのモジュールを import しないため）
+  - `src/AutonaWebServer.py`
+    - ルートと Socket.IO イベントは `WebOps.*` か `WebServer._board_actions().*` を呼ぶ。`_board_actions()` は `WebServer.actions` が None なら `NotAvailable`
+    - 503: legacy は `@app.errorhandler(NotAvailable)`、Socket.IO は `ws_on` が全ハンドラを `_ws_unavailable` で包んで ack に本文を返す。本文は v1 のエラー形 `{"ok": false, "error": {"code": "UNAVAILABLE", "message": "not available in headless"}}`
+    - `WebServer(on_start_failed=None, actions=None)`: `parent` 引数を削除し、ボード依存の操作はシェルが渡す（前提 2。サーバーはスコアボードを知らなくなった）
+    - `ws_game_changed()`（新規）: `ws_program_state` + `ws_get_characters` をまとめたもの（`GameChanged` の受け口）
+    - `log_webserver_port(port, host)`（新規）: `check_webserver_port` と同じ確認をして、ダイアログの代わりにログに出す（何も終了させない）
+  - `src/AutonaApiV1.py`
+    - `UNAVAILABLE`（503）を追加。`api_handler` / `write_op` が `NotAvailable` をこのコードに変える（操作ログにも残る）
+    - `_actions_ref()`: `init_api_v1(None)` 後（= ヘッドレス）は `NotAvailable`、初期化前は従来どおり `NOT_READY`
+    - core の操作は `WebOps` を呼ぶ。`PATCH set` は 1 つのタスクを `WebOps.boardHost.Run` で実行。`game` は `WebOps.load_game`。`bracket:refresh` は provider の確認より先にボード依存の確認をする
+  - `src/bootstrap.py`
+    - `bootstrap_gui()`: `AutonaPlayerDB.EnableModel()`（`SetupModel` の結線の前）。最後に `AutonaWebOperations.boardHost = DesktopBoardHost(AutonaScoreboardManager.instance)` と `loadGameByCodename = AutonaGameAssetManager.instance.LoadGameByCodename`
+    - `wire_tournament_data(on_failure)`（新規）: `tournament_data_updated` → `TournamentInfoService.ApplyProviderPayload`（失敗時 `on_failure`）、`tournament_url_update("")` → `GameAssetCatalog.ForgetSelection`
+    - `wire_web_server(webserver, game_changed)`（新規）: `game_changed` → `ws_game_changed`、`db_updated` → `ws_playerdb`
+  - `src/Autona.py`: 上の 2 つの結線関数を呼ぶ（Window の `_OnTournamentDataUpdated` は失敗ダイアログだけの `_ReportTournamentLoadFailure` に、`Signal_GameChange` からは `ForgetSelection` を外した）。`WebServer(..., actions=WebServerActions(parent=self, scoreboard=...))`
+  - `src/AutonaPlayerDB.py`（前提 1）: `modelEnabled`（既定 False）と `EnableModel()`。`SetupModel()` はモデルが無効なら `db_updated` を出すだけ。モデルの構築は `_BuildModel()` に分けた。start.gg の entrants 取得はヘッドレスでも DB を更新し、`SetupModel()`（GUI スレッドへ marshal）で QtGui を作らない
+  - `src/core/TournamentInfoService.py`: `ApplyProviderPayload(data)`（ペイロードの適用 + 表示大会名の上書き。2 つのシェルが同じ順で呼ぶ）
+  - `src/core/StateManager.py`: `JoinExports(timeout)`（それまでに積まれた `out/` の書き出しを待つ。閉じるボタンで外から終わらされるヘッドレスが使う）
+  - `src/Helpers/AutonaLocaleHelper.py`: `LoadLocale` の翻訳の差し替えを `QCoreApplication` の static で行う（QTranslator は QtCore。ヘッドレスでも同じ経路）
+  - `src/AutonaApiInfoWindow.py`: エラーコードの凡例に `UNAVAILABLE` を足した
+  - コメント追従: `src/AutonaCrewBattleWidget.py`、`src/core/SetLoadService.py`
+- **ヘッドレスで動くもの / 503 になるもの**
+
+  | 区分 | 操作（legacy / Socket.IO / v1） | ヘッドレス |
+  |---|---|---|
+  | 表示 | OBS オーバーレイ・`/web`・`out/` の出力・Socket.IO の state / delta 配信・state / カタログ / 選手 DB の読み取り | 動く |
+  | core 直結 | スコア ±・スコアの設定・スコアリセット（board 1/2）・反映・チームカラー・表示トグル・ゲームの一覧 / 切り替え・国 / 地域・セット一覧 / 詳細・大会 URL | 動く（即時公開） |
+  | S2 の操作（board 1/2） | swap（`get_swap` 含む）・リセット / クリア（選手の中身を空にする）・best of・phase / pool / match・LOSERS・チーム名・`PATCH set`・`get_scoreboard`・`get_set`（常に `"0"`） | 動く（即時公開） |
+  | ウィジェットが要る S2 の部分（legacy / Socket.IO） | クルーボード（board 3）の swap / `get_swap` / リセット / クリア / set フィールド、`set_route` の `players` / `characters`（人数・キャラ数） | 503（何も書かない） |
+  | ボード依存（`WebServerActions`） | 選手の編集（`update-team`・`PATCH players`）・`POST /score`（と Socket.IO の `score`）・セット選択 / 読込 / 次のセット（`open-set`・`load-set`・`pull-stream`）・統計（各 `stats-*`・`stats:refresh`）・サムネイル・Top 8 の取り込み（`update-bracket`・`bracket:refresh`）・実況の更新・タグからの選手 / 実況者の読込（`load-player-from-tag`・`load-commentator-from-tag`）・クルーのストック / アクティブ | 503 |
+
+  v1 のクルーボード（board 3）への書き込みは、起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（v1 の初期範囲外。変更なし）。上の表の「クルーボードの 503」は legacy ルートと Socket.IO だけの話。v1 の `PATCH set` の `players` / `characters` はボード 1/2 宛てなので、ヘッドレスでは 503 `UNAVAILABLE` になる
+
+- **`WebServerActions` に残したもの（ボード依存・S3e で廃止）**: `post_score` / `crew_member_stock` / `crew_set_active` / `set_team_data` / `update_player` / `set_commentary_data` / `open_sets` / `pull_stream_set` / `stats_recent_sets` / `stats_upset_factor` / `stats_last_sets` / `stats_history_sets` / `refresh_stats` / `get_thumbnail` / `update_bracket` / `load_set` / `load_player_from_tag` / `load_commentator_from_tag`（公開 18 本）と `_ensure_panel`。設計時の見積り「残る 26 本」はルート単位の数え方で、メソッドでは 18 本（同じ操作を受けるルート / イベントが複数ある）
+- **判断と理由**
+  1. **Web の操作は 2 つのシェルで同じ関数を通し、違いは 1 つのオブジェクト（ボードホスト）に閉じ込めた**
+     - S2 の操作は core の呼び出し自体は同じで、デスクトップが周りに足すもの（GUI スレッド・未構築ボードの構築・入力中の欄の確定・クルーボード）だけが違う。操作ごとに `if headless` を書くと 2 つの経路がずれていくので、その差をホストの 6 メソッドに集めた
+     - `tests/test_web_operations.py` が、10 種の操作で「デスクトップ（ボード構築・held）とヘッドレス（ボードなし・即時公開）が同じ値を書く」ことを確かめる
+  2. **503 の本文は v1 のエラー形に揃えた**（legacy / Socket.IO / v1 で同じ）。S3a の拒否（401 / 403）と同じ形なので、クライアントは 1 つの形だけを見ればよい
+  3. **`players_per_team` と `RepublishBestOf` はヘッドレスでは要らない**
+     - デスクトップはゲームのロード時に、ボードがゲームの既定の人数を適用し、best of の文言を新しいロケールで出し直す（S2g / S2e。構築済みボードの反応）
+     - ヘッドレスにはボードが無く、人数はボードのスピンボックスにしか無い（S2g で core 化するまで、ヘッドレスは人数を変えない）。best of の文言はゲームではなく起動時のロケールで決まり、ヘッドレス中にロケールは変わらない。行（`stages`）のリセットはトラッカー（ボードが登録する）の仕事で、ヘッドレスには行が無い
+  4. **ヘッドレスの `clear_all` は人数・キャラ数を変えない**（ボードが無い。S2g）。チーム名は従来どおり残す
+  5. **ヘッドレスの選手 DB は mains の正規化をしない**。デスクトップはモデルの構築のついでに、ロード中のゲームの mains を 3 要素に揃えて DB に書き戻している（QtGui の構築の中にある）。ヘッドレスでは `/playerdb` が保存されたままの mains を返す
+  6. **`set_route` の `players` / `characters` はヘッドレスでは最初に断る**（他のフィールドを書く前に 503）。一部だけ書いて 503 を返すと、クライアントからは何が適用されたか分からないため
+  7. **`get_set` はヘッドレスでは常に `"0"`**（読み込んだセットが無い = 旧実装の「無し」の答え）。クルーボードも同じ（デスクトップのクルーボードは `setLoad` が無く例外になるが、ヘッドレスでは聞く相手がいない）
+  8. **LAN 公開とポートは設定値で決め、ログに出すだけにした**（設計どおり）。`general.webserver_listen_lan` が未設定ならこの PC のみで待ち受け、案内をログに出す。Web サーバーが起動できなければ終了コード 1 で終わる（待ち受けていないのに単一インスタンスのロックを握り続けるのを避ける）
+  9. **ヘッドレスの 2 つ目の起動は終了コード 1**。デスクトップ版は 2 つ目を黙って前面化で済ませるが、ヘッドレスを起動したスクリプトやサービスには「起動しなかった」が伝わる必要がある
+  10. **`load_tournament` の死にコード（結果を使っていない `QRegularExpression` のループ）を削除した**。core 直結の関数に移すにあたって QtCore への依存だけが残るため
+  11. **大会 URL を消したときの `ForgetSelection` は共通の結線（`wire_tournament_data`）に移した**。Window の `Signal_GameChange` はゲームボタンの表示だけを戻す。接続順は Window の読み手より前のまま
+  12. **ヘッドレスの S2 の操作は 1 本のロックで直列化した**（S3c-2 レビュー）。デスクトップは GUI スレッドに並べるので、`clear_all`（4 保存サイクル）や v1 の `PATCH set`（1 タスクで最大 3 呼び出し）の途中に別の要求のボード操作が入らない。ヘッドレスはリクエストのスレッドで直接走るので、ロックが無いと混ざる。`RLock` にしたのは、`PATCH set` のタスクがその中で `set_route` を呼び、`set_route` も `Run` を通るため。ロックを取るのは Web のリクエストのスレッドだけで、`StateManager.lock` を持ったまま取る経路も、ロックの中でメインスレッドを待つ経路も無い（ヘッドレスでは何もメインスレッドへ marshal しない）ので、常に一番外側のロックでデッドロックしない。core 直結の書き込み（`score:adjust`・色）はボード操作ではないので、両シェルとも従来どおり途中に入りうる
+  13. **`Autona.exe --headless` は拒否し、mutex を取る前に終わる**（S3c-2 レビュー）。exe は GUI サブシステムでコンソールが無く、黙って起動するとログも停止手段も無いプロセスが mutex を握り、後からダブルクリックした GUI が「2 つ目の起動」として無言で終わる。メッセージボックスで伝えるだけにした
+  14. **`AUTONA_INSTANCE_TAG` はソースからの起動でだけ読み、英数字とハイフンに限った**（S3c-2 レビュー）。配布版に環境変数が残っていても、インストール済みの Autona が 2 つ目を通すことがないように。値は mutex 名とパイプ名の一部になるので文字を絞る
+  15. **停止ハンドラは組み立ての前に入れた**（S3c-2 レビュー）。組み立て中の Ctrl+Break を、Windows の既定動作（その場で終了）ではなく、組み立て後の同じ停止処理（書き出しを待つ）で受けるため
+- **外部から見える変化**
+  - `python main.py --headless` が使えるようになった（運用手順は [runtime-operations.md](../operations/runtime-operations.md) の「ヘッドレス起動」）
+  - デスクトップ版の挙動・Web の契約は変わらない。v1 に `UNAVAILABLE`（503）が増えたが、デスクトップ版では返らない
+  - Window の大会読込失敗のダイアログ・ゲームボタンのリセットは従来どおり
+  - v1 の `GET /scoreboards/3` の `swapped` は、ヘッドレスでは返らない（キーが無い。デスクトップはクルーウィジェットのフラグを返す）。ボード 1/2 はどちらのシェルでも state の `score.{n}.teamsSwapped` を返す（受容。`external-control-api.md` §5）
+- **pin**
+  - `tests/test_web_operations.py`（新規・38 件）: 2 つのホストが同じ state を書く（10 操作。デスクトップ側は反映待ちになる）。ヘッドレスの書き込みが即時公開・選手のクリア・`get_set` が `"0"`・ウィジェットが要る操作（9 種）が `NotAvailable` で何も書かない。legacy ルートの 503・Socket.IO の ack・v1 の `UNAVAILABLE`（`bracket:refresh` / `:load-set` / `:pull-stream` / `stats:refresh` / `PATCH players`）・`_board_actions()`。Web 操作自身が投げる `NotAvailable`（クルーボードの swap / `get_swap`・人数）も legacy は 503、Socket.IO は ack。ヘッドレスのボードホストが 1 つずつ実行する（入れ子は再入できる）・`clear_all` の途中に来た swap は clear の後に走る（ロックを外すと両方落ちることを確認済み）
+  - `tests/test_headless.py`（新規・22 件）: 別プロセスで `headless.Assemble()` を実際に動かす。ゲームの選択関数・ローダー・ボードホストの登録（**選択関数の登録漏れの pin**）。デスクトップのアダプタを作らない。PlayerDB のモデルを作らない。スキャン → 前回のゲームの復元 → カタログ経由のロード → 選択の保存 → `gameChanged` / `db_updated`。再スキャンで provider のゲームを適用し直す（復元は初回だけ）。大会ペイロードの書き込みと URL を消したときの `ForgetSelection`。停止で `state.json` が書かれる。`Assemble` の中で、登録と結線が `UiMounted` / スキャン / サーバー起動より前（AST）。停止まわり: 停止要求は queued の `quit` で、ループ前の要求も残る・停止ハンドラが組み立ての前・組み立て中の停止でループを回さずに停止処理へ・`Shutdown()` が書き出しの後でハンドラを解除する・Web サーバーを作る前の停止でも書き出す。起動時チェック: `AUTONA_INSTANCE_TAG` の検証（英数字とハイフン / それ以外は warning で無視 / frozen では読まない）・`Autona.exe --headless` の拒否（`sys.frozen` を立てて `main.py` を実行し、メッセージボックスを差し替えて確認。単一インスタンスの判定に届かず、`logs/`・`user_data/`・`out/` を作らない）
+  - `tests/test_headless_smoke.py`（新規・1 件）: `python main.py --headless` を実際に起動（tmp CWD・空きポート・`AUTONA_INSTANCE_TAG`）。health・Socket.IO（polling）で state と delta・`score:adjust` の即時公開・503・転送ヘッダ付きの書き込みが 401・2 つ目の起動が終了コード 1・Ctrl+Break で終了コード 0・`state.json` と `program_state.json` に値が残る。プロセスは PID でのみ止める
+  - `tests/test_bootstrap_split.py`: `bootstrap_gui()` の手順に `EnableModel`・ボードホスト・ローダーの登録を追加。共通の結線の手順と、Window とヘッドレスがどちらも 1 回ずつ呼び、自分では結線しないこと（AST）。core / GUI の各段のボードホスト・ローダー・PlayerDB のモデルの状態
+  - `tests/test_import_side_effects.py`: `AutonaWebOperations` / `headless` の import が何も登録せず、`logs/` も作らない
+  - 既存テストの追従: core に移った操作の呼び出しを `autonaApp.web()`（新規の harness アクセサ）へ（`test_scoreboard_operations` / `test_crew_board` / `test_player_card_render` / `test_country_helper_model` / `test_game_asset_manager_models`）。AST の pin を新しい場所へ（`test_tournament_info_panel` / `test_stats_util` / `test_country_helper_model` / `test_game_asset_manager_models`）。`test_web_access` の偽の操作を `AutonaWebOperations` に差し込む
+- **残置 / リスク**
+  - **exe でのヘッドレスは対象外**（PyInstaller の spec・自動更新は触っていない）。`Autona.exe --headless` は拒否する（判断 13）。exe で動かすには、GUI サブシステムの exe なのでコンソールが無く、ログも停止手段も別に考える必要がある
+  - **ヘッドレスの `set_game`（legacy の `POST /update-game` と Socket.IO の `update_game`）はロードの間メインループを止める**（受容）。`@gui_thread_sync` でメインスレッドに渡し、同期でロードするのが旧ルートの契約（ロード完了後に `"OK"`）のため。その間は delta の配送と停止要求の処理が止まる。デスクトップもロードの間 GUI が固まる点では同じ。v1 の `POST /game` は非同期（202）なので止めない
+  - **停止時、`run_sync` で GUI スレッドを待っているリクエストのスレッドは待ち続ける**（既存の構図。デスクトップも同じ）。イベントループが止まった後は誰も実行しないが、werkzeug のリクエストのスレッドは daemon なのでプロセスの終了は妨げない（そのリクエストには応答が返らない）
+  - ヘッドレスのボードは skeleton（デスクトップの未構築ボードと同じ）。選手スロット・`losers` などのキーは最初の書き込みで現れる。オーバーレイは未定義を空として扱う前提 **→ S3d で訂正**: この前提は成り立っておらず（スコア系オーバーレイは選手スロットが無いと描画しない）、S3d でヘッドレスがデスクトップの空ボードと同じ選手スロットをシードするようにした
+  - Web UI（`/web`）は 503 を専用に扱っていない（一般のエラーとして出る）。ボード依存の操作のボタンをヘッドレスで隠すのは S4 の UI 側の仕事
+  - コンソールの閉じるボタンで止めたときの書き出しは、Windows の猶予（約 5 秒）の中で終わる前提（通常は 1 秒未満）。タスクマネージャーでの強制終了は書き出しを待たない
+  - Windows の `SIGTERM`（`os.kill` / `taskkill /F`）は TerminateProcess で捕まえられない。サービス化するなら `taskkill`（/F なし）ではなく Ctrl+Break を送る仕組みが要る
+  - pytest 全量は実装担当では回していない（レビュー時の全量は 1909 passed。レビュー修正後の全量は verify 担当）
+- **実機確認（オーナー）**
+  - デスクトップ版（`python main.py`）
+    - 起動して OBS のオーバーレイ・`/web`・API Tester が今までどおり動く。Web からの swap / リセット / クリア / チーム名 / best of / LOSERS が今までどおり（反映待ちになる）
+    - 大会 URL を設定するとゲームが切り替わる。URL を消してから同じゲームを選び直すとロードされる
+    - 大会 URL の読込に失敗するとダイアログが出る
+    - 閉じるとプロセスがすぐ終わる
+  - ヘッドレス（`python main.py --headless`。デスクトップ版は閉じておく）
+    - コンソールに `headless: serving http://127.0.0.1:5107/` が出て、OBS のオーバーレイと `/web` が表示される。前回のゲーム・大会情報が出ている
+    - `/web` からスコア ± / swap / リセット / チーム名を操作するとオーバーレイがすぐ変わる
+    - `/web` の選手編集・セット読込は失敗する（503）。アプリが落ちない
+    - Ctrl+C で止まる。もう一度起動すると、大会情報と前回のゲームは残り、スコア（スコアボード）は消えている（デスクトップ版と同じ）。Ctrl+Break・コンソールの閉じるボタンでも同じ
+    - （次に exe をビルドしたとき）`Autona.exe --headless` を実行するとメッセージボックスが出て起動せず、続けて普通にダブルクリックした `Autona.exe` は通常どおり起動する
+    - ヘッドレス稼働中にもう 1 つ `python main.py --headless` を起動すると「already running」で終わる。デスクトップ版を起動すると何も出ずに終わる
+
+#### S3d E2E（2026-10-26・PR #231）
+
+S3 の最後。ヘッドレスの実プロセスに対して、Python のスモークの穴を埋め、ブラウザの E2E（Playwright・Chromium）を足した。E2E は `/web` とオーバーレイ 1 枚を開き、Web からのスコア +1 が state とオーバーレイに届くことを確かめる。**この E2E で、ヘッドレスの `/web` とスコア系オーバーレイが実際には使えないことが分かり、同じ S3d で直した**（下の「E2E で見つかった問題と修正」。`/web` のガードと、ヘッドレスが core でデスクトップの空ボードと同じ選手スロットをシードする）。
+
+- **実装**
+  - `tests/test_headless_smoke.py`: 設計の確認項目（health・Socket.IO 接続・`score:adjust`・delta・トークンなしの LAN 書き込みの拒否・`state.json`）のうち、拒否は HTTP の 1 件だけだった。Socket.IO でも拒否されること（中継された接続の書き込みイベント `team_scoreup` が ack で `UNAUTHENTICATED`、state は変わらない）と、初回起動で発行されたトークン（tmp の `settings.json`）を付けると同じ中継の書き込みが通ることを足した
+  - `web/e2e/`（新規）
+    - `headless_server.py`: ヘッドレスの起動・停止を受け持つヘルパー（テストではない。pytest は `tests/test_*.py` しか集めない）。スモークと同じ隔離を、スモークの関数をそのまま import して使う: `_runtime()`（tmp の作業ディレクトリ + junction）・`_free_port()`・`_launch()`（`AUTONA_INSTANCE_TAG`・`CREATE_NEW_PROCESS_GROUP`）・`_wait_until_serving()`・settings（ポートと `webserver_listen_lan: false`）。その上に、ブラウザが読む `web/build`・`layout/include`・`layout/scoreboard_simple` を junction で、`layout/main.css`・`layout/settings.json` をコピーで足す（読むだけ）
+      - stdout に 1 行ずつ: `AUTONA_E2E_READY {url, pid, dir}` / `AUTONA_E2E_FAILED ...`（コンソールの末尾付き）/ `AUTONA_E2E_STOPPED {exit, killed}`。ヘルパー自身の終了コードは正常停止（exit 0・kill なし）のときだけ 0
+      - READY の後は stdin の `stop` か EOF を待つ（呼び出し側が落ちて stdin が閉じても止まる）。止めるのは Ctrl+Break（起動したプロセスグループだけ）、60 秒で終わらなければその PID だけ kill。`poll()` と Ctrl+Break の間に終わっていた場合（送信が `OSError`）は、終了済みなら正常停止として扱い、まだ動いていれば kill する
+      - 後始末: 足した junction を外し、`_runtime()` が自分の junction を外してから tmp を消す。junction が 1 つでも残っていたら tmp を消さない（`rmtree` が junction の先の `web/build`・`assets/` に降りないように）。ヘッドレスのコンソールログは `web/test-results/headless-console.txt` にコピーする
+    - `global-setup.ts`: `web/build/index.html` が無ければ「先に `npm run build`」で止める。ヘルパーを起動して READY を待ち（150 秒）、URL を `AUTONA_E2E_BASE_URL` でテストに渡す。teardown（global setup の戻り値）は `stop` を送って 90 秒待つ。終わらなければ、ヘルパーと、ヘルパーが報告したヘッドレスの 2 つの PID だけを kill して失敗にする。終わっても、`AUTONA_E2E_STOPPED` が `{"exit": 0, "killed": false}` でない・ヘルパーの終了コードが 0 でないときは失敗にする（teardown の例外で Playwright の run は exit 1 になることを確認済み）。ヘルパーの stdin には `error` ハンドラを付け、閉じたパイプへの書き込み（EPIPE）で落ちない
+    - `server.ts`: URL の組み立て・外部ホストへの要求の遮断（`/web` と オーバーレイが読む Google Fonts）・state の読み取り・ボード 1 を 0-0 にする（`score:set`。下の判断 4）
+    - `web-and-overlay.spec.ts`（2 件）
+      - (a) `/web` が開き（タイトル・Swap Teams・Clear All・+1 が 2 つ）、+1 を押すと state のスコアが `[1, 0]` になる
+      - (b) `layout/scoreboard_simple` を開いて Socket.IO の接続を待ち、`/web` で +1 → オーバーレイの `.p1 .score` が `1`、`.p2 .score` が `0`
+      - `/web` とオーバーレイの未捕捉の例外（`pageerror`）は afterEach で失敗にする（React は例外 1 つでページ全体を消し、オーバーレイは例外でそのイベントの描画を止めるので、原因をそのまま出す）
+  - `web/playwright.config.ts`（新規）: `testDir: e2e`・Chromium のみ・workers 1（サーバーと state を共有）・retries 0・trace は失敗時だけ残す・HTML レポート・`locale: en-US`（Web UI はブラウザの言語で文言を選ぶ）
+  - `web/package.json`: devDependency `@playwright/test` **1.62.1**（exact。2026-07-30 公開。最新の 1.64.1 は 2026-10-14 で 2 週間未満）、スクリプト `test:e2e`（`playwright test`）。`package-lock.json` の差分は `@playwright/test`・`playwright`・`playwright-core`・`fsevents`（darwin 用の optional）の追加だけ
+  - `web/.gitignore`: `/test-results/`・`/playwright-report/`
+  - `.github/workflows/ci.yml`: `e2e` ジョブ（windows-latest・20 分）。Python 3.12 + `requirements.txt` + pytest → Node 20 → `npm ci` → `npm run build`（`CI=false`）→ `npx playwright install chromium` → `npm run test:e2e`（`CI=true`）。失敗時は `web/playwright-report/` と `web/test-results/`（trace とヘッドレスのコンソールログ）を artifact に上げる（7 日）。既存の python / web ジョブは変えていない
+  - `tests/` は `web/e2e/` を集めず、`react-scripts test`（jest の roots は `src/`）も `web/e2e/` を集めない（`--listTests` と `pytest --collect-only` で確認）。`tsconfig.json` の `include` は `./src` のままなので、`npm run build` の型検査にも入らない（Playwright が自分で TypeScript を変換する）
+  - E2E で見つかった問題の修正（下の「E2E で見つかった問題と修正」）
+    - `web/src/ScoreboardPage/Team.jsx`: `Object.keys(team.player ?? {})`。`ScoreboardPage/` で `team.player` を `Object.keys/entries/values` に渡すのはここだけだった（`CurrentSet.jsx` は直前の `if (!team?.player)` で、`ScoreControlBar.jsx` は `team.player || {}` で守られている）。`Team.test.js`（新規・1 件）: `player` の無いチームでも列（`1P`・チェックボックス）が描画される
+    - `src/core/PlayerService.py`: `SeedEmpty()`（1 スロットを空のカードが publish するのと同じ内容で書く: seed 0・birthday False・country `{}`・state `{}`・キャラ 3 枠と mains。既存の setter をデスクトップのカードと同じ順で呼ぶので、キーと値の形・キー順が同じになる）、モジュール関数 `SeedEmptyRoster(board, players=None, characters=3)`（両チームの 1..players を書く。スロット順・チーム順はデスクトップの構築順）、`DefaultPlayersPerTeam()`（`game.defaults.players_per_team`、`game.defaults` が無ければ 1）と `DEFAULT_CHARACTERS_PER_PLAYER = 3`
+    - `src/core/CrewBattleService.py`: `DefaultTeams()`（既定色 2 チーム・メンバー 9 人・名前空・ストック 3）と `SeedDefaults()`（`SeedBoardState(DefaultTeams(), DEFAULT_MEMBER_NUM, 0)` = クルーボードの起動時の書き込み）
+    - `src/headless.py`: `_SeedBoards()`（`ResetScoreRoot` → `SeedBoard(1..3)` → `SeedEmptyRoster(1)` / `SeedEmptyRoster(2)` → `CrewBattleService(3).SeedDefaults()`）。`_SeedState()` の 1 つの `SaveBlock` の中で、パネルのシードの前に呼ぶ（= 1 保存サイクル）。モジュールの docstring も実態に合わせた
+    - `src/AutonaScoreboardWidget.py`: `SetDefaultsFromAssets` の人数・キャラ数を core の `DefaultPlayersPerTeam()` / `DEFAULT_CHARACTERS_PER_PLAYER` から取る。構築時のキャラ数の `setValue(3)` 2 箇所（スピンボックス生成時と、選手カード生成前の再設定）も `DEFAULT_CHARACTERS_PER_PLAYER` にした（挙動は同じ。既定値の出どころを 1 つにした）
+    - `tests/test_headless_seed.py`（新規・4 件）: デスクトップの空ボード（`autonaApp.board(1..3)` が publish した state）と `_SeedBoards()` の publish を比べる。board 1/2 は各チームの `player` サブツリー、board 3 はボード全体を、値とキー順（`json.dumps` の一致）で照合。ゲームなし（1 人）と `players_per_team: 2` の 2 通り。加えて、シードが `ResetScoreRoot` の後であること（復元された余分なスロットが残らない）と、人数・キャラ数の明示指定
+    - `web/e2e/web-and-overlay.spec.ts`: (b) の `test.fail` を外し、普通に検査する
+- **判断と理由**
+  1. **起動・停止は Python のヘルパーにした（Playwright の `webServer` ではなく）**
+     - スモークの隔離（junction の一覧・tmp の作り方・起動の仕方）を import で共有でき、TypeScript に同じ一覧を書き直さずに済む
+     - 正規の停止（Ctrl+Break。書き出しを待って終了コード 0）は Node から送れない
+     - `webServer` の停止は Windows では `taskkill /T /F` で、ヘルパーの後始末（junction を外す）が走らない。junction が残った tmp を誰かが再帰削除すると、リポジトリの `web/build`・`assets/` に降りる
+     - stdin の EOF で止まるので、Playwright が途中で落ちてもヘッドレスが残らない
+  2. **LAN 側の IP からの拒否は、実際の LAN では再現しない**: 1 台の PC では他端末の送信元 IP を作れない（自 PC の LAN IP 宛ては「この PC」として免除される）。実プロセスでは中継ヘッダ（`X-Forwarded-For`）で「他端末扱い」の同じ拒否の経路を通し、アドレスの判定そのものは `tests/test_web_access.py` が Flask の test client の `REMOTE_ADDR` で担保している（`test_lan_writes_and_the_player_db_need_the_token`・`test_another_lan_address_is_not_this_pc`・`test_this_pc_under_its_lan_address_needs_no_token`・`test_a_lan_connection_without_the_token_is_read_only`・`test_the_token_lets_a_lan_connection_write`）
+  3. **オーバーレイは `scoreboard_simple`**（1v1 の素のスコアボード）。スコア系のオーバーレイ（`scoreboard_simple` / `scoreboard_Universal` / `scoreboard_team` / `scoreboard_topleft`）はどれもチーム 1 の選手スロットを前提にしていて、下の問題 2 は共通
+  4. **各テストの前にボード 1 を API（`score:set`）で 0-0 にする**。ヘッドレスのシードは選手スロットまでで、スコアは書かない（デスクトップではスコアのスピンボックスが publish する。下の判断 9）。2 件のテストが 1 つのヘッドレスを共有するので、前のテストの +1 を持ち越さないためにも要る
+  5. **(b) は普通に検査する**。修正前は `test.fail(条件)`（ボード 1 のチーム 1 に選手スロットが無い）で既知の失敗として固定していたが、シードを入れたので外した
+  6. **外部への要求は遮断した**（Google Fonts）。オフラインでも CI のネットワークが遅くても結果が変わらないように
+  7. **スクリーンショット比較はしない**（指示どおり）。文言・DOM・state だけを見る
+  8. **CI は Windows**（配布と同じ OS。ヘルパーの Ctrl+Break も Windows のコンソールにしか無い）。Playwright のブラウザはキャッシュしない（毎回ダウンロード。必要になったら足す）
+  9. **シードするのは「デスクトップの空ボードが publish する選手スロット」まで**（メインの判断。形の正本はデスクトップの空ボードの `score.N.team.T.player.M.*`）。board 1/2 のチーム単位のキー（color・teamName・losers・score）とボード単位のキー（match バー・best_of の文言・stages）はボードのウィジェットが publish するもので、シードしない（オーバーレイと `/web` が描画に要るのは選手スロット。チーム単位の値は最初の操作で書かれる）。クルーボード（board 3）はボード全体をシードする（デスクトップでも起動時の書き込みが core の 1 呼び出し = `CrewBattleService.SeedBoardState` なので、同じ呼び出しで同じ state になる）
+  10. **3 面ともシードする**。デスクトップは表示した面だけを構築し、未構築の面は skeleton のまま（構築時にシードで上書きされる）。ヘッドレスは面を構築しないので、起動時に 3 面とも構築直後の形にする。人数・キャラ数は `ResetScoreRoot` の後・ゲームの復元の前に決まる（起動時の `game` は空なので 1 人 / 3 枠。デスクトップもボード構築時点では同じで、ゲームのロード後に人数を変えるのはボード側の反応 = S2g）
+  11. **既定値の出どころは core の 1 箇所**。デスクトップの `SetDefaultsFromAssets` も `DefaultPlayersPerTeam()` / `DEFAULT_CHARACTERS_PER_PLAYER` を読むようにした（挙動は同じ。片方だけ既定値を変えて形がずれないように）。デスクトップの書き込み経路（カードが publish する）は変えていない。同等性は `tests/test_headless_seed.py` が pin する
+- **E2E で見つかった問題と修正**
+  1. **`/web` が真っ白になる**（`TypeError: Cannot convert undefined or null to object`）→ **修正済み**
+     - 起きる条件: ボードに 2 チームあり、選手スロット（`team.{t}.player`）が無い。ヘッドレスでは（シード前は）スコアを 1 回書いた時点でこうなった
+     - 原因: `web/src/ScoreboardPage/Team.jsx` の `Object.keys(team.player)`。React は例外 1 つでページ全体を消す
+     - デスクトップでも起きうる: 未構築のボード（1v1 のときの board 2）に v1 の `score:set` を送ってから `/team` を開く。シードとは別に、Web UI 側でガードした
+  2. **ヘッドレスではスコア系のオーバーレイが何も描画しない** → **修正済み**（ヘッドレスのシード）
+     - 原因: オーバーレイはチーム 1 の選手スロットが無いと描画を始めない（`if (... || !sb.team["1"].player) return;`）。選手スロットを作るのはデスクトップの選手カードだけで、ヘッドレスのボードには無く、ヘッドレスで作る API も無い（`PATCH players` は 503、クリア系は既存のスロットしか触らない）
+     - S3c-2 の「残置」にある「オーバーレイは未定義を空として扱う前提」は成り立っていなかった
+  - 修正後、`npm run test:e2e` は 2 件とも通る。**S3 の完了条件「ヘッドレスで OBS オーバーレイと `/web` の表示、core 直結の操作が動く」を E2E で確認できた**（自動テストの範囲。実機は下の確認項目）
+- **残置 / リスク**
+  - **CI での実行は未確認**（手元の Windows でだけ回した）。CI ランナーのコンソールで Ctrl+Break が届くことは、python ジョブの `test_headless_smoke.py` と同じ前提
+  - Windows 専用（ヘルパーは Windows 以外では `AUTONA_E2E_FAILED` で止まる）
+  - ヘルパーは `tests/` の関数（`_runtime`・`_free_port`・`_link_tree`・`_LINKED_TREES`・`_launch`・`_wait_until_serving`）に依存する。名前を変えると E2E が起動しなくなる（`_launch` / `_wait_until_serving` の共有はスモークの docstring に書いた）。この import のため e2e ジョブにも pytest を入れている
+  - ヘッドレスのコンソールに、ブラウザが WebSocket を閉じたときの werkzeug の `AssertionError: write() before start_response` が出る（既存のノイズ。テストの結果には影響しない）
+  - ヘルパー自身が強制終了された場合（Playwright の teardown が 90 秒で諦めたとき以外）は、ヘッドレスが残りうる。teardown が諦めたときは報告済みの 2 つの PID を kill する
+  - 同じくヘルパーが強制終了されると、junction 付きの `%TEMP%\autona-e2e-*` が残りうる（junction の先はリポジトリの `web/build`・`layout/`・`assets/` など）。**junction を辿るクリーナー（`rm -rf`・`shutil.rmtree`・エクスプローラーの削除など）で消すと、リポジトリ側の中身まで消える危険がある**。先に中の junction を `rmdir`（junction だけを外し、先は消さない）で外してから、残ったディレクトリを消す
+  - teardown は正常停止でなければ run を失敗にする（ヘルパーの `AUTONA_E2E_STOPPED {"exit": 0, "killed": false}` と、ヘルパー自身の終了コード 0 の両方を確認。kill になった・終了コードが 0 以外なら失敗）
+  - ヘッドレスの人数は起動時の 1 人 / チームのまま。2v2 のゲームを読んでもスロットは増えない（ゲームのロードへのボードの反応 = S2g はヘッドレスに無い。S3c-2 判断 3 の残置と同じ）。人数を変える Web の入口（ボードのスピンボックス相当）もヘッドレスでは 503
+  - board 1/2 のチーム単位・ボード単位のキーはシードしないので、ヘッドレスの起動直後の state はデスクトップの空ボードより少ない（判断 9）。それを前提にしたオーバーレイは、最初の操作まで描画が欠ける。スコア系 4 枚はスコアが無ければ 0 と描く（`scoreboard_topleft` だけ `String(team.score)` で `undefined` と出ていたので、ほかの 3 枚と同じ `?? 0` にそろえた。デスクトップはボードがスコア 0 を publish するので元から出ない）
+  - シードは起動時の 1 回だけ。ヘッドレスで `PATCH players` 相当がなく、クリア系は既存のスロットしか触らないので、スロットを消す経路も増やす経路も無い（シードで入ったスロットが残り続ける）
+- **実機確認（オーナー）**
+  - ヘッドレス（`python main.py --headless`）を起動し、OBS で `layout/scoreboard_simple` を開く → 起動直後から空のスコアボード（名前空・スコア 0-0）が描画される
+  - その状態で `/web` を開く → 真っ白にならず、両チームの列（1P）とスコア操作が出る。+1 / −1 を押すとオーバーレイがすぐ変わる（S3c-2 の実機確認と同じ操作）
+  - デスクトップ（`python main.py`）は挙動が変わらないこと: 起動直後のボードの選手カード数（ゲーム未選択で 1・2v2 のゲームで 2）とキャラ枠 3、スコアボードのオーバーレイの表示

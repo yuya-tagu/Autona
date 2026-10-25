@@ -21,7 +21,10 @@ from .AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
 from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 from .core.StateManager import StateManager
 from .core import StateSchema as schema
+from .core import WebAccess
 from .core.Actions import AutonaActions
+from .core.PlayerService import (
+    DEFAULT_CHARACTERS_PER_PLAYER, DefaultPlayersPerTeam)
 from .core.SetLoadService import SetLoadService
 from .core.TournamentInfoService import TournamentInfoService
 from .StateManagerBridge import StateManagerBridge
@@ -248,7 +251,8 @@ class AutonaScoreboardWidget(QWidget):
         self.webScoreboardUrl = f"http://{GetWebServerHost()}:{SettingsManager.Get('general.webserver_port', DEFAULT_WEBSERVER_PORT)}/{webScoreboardPath}"
         self.btOpenWebScoreboard = QPushButton("ブラウザ版を開く")
         self.btOpenWebScoreboard.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
-        self.btOpenWebScoreboard.clicked.connect(lambda: webbrowser.open(self.webScoreboardUrl))
+        self.btOpenWebScoreboard.clicked.connect(
+            lambda: webbrowser.open(self._WebScoreboardOpenUrl()))
 
         # The eye (field-visibility) menu was removed from the desktop UI:
         # the details dialog always shows every field. Nothing adds these
@@ -378,11 +382,12 @@ class AutonaScoreboardWidget(QWidget):
         # PLAYERS tab that used to drive it was removed). The spinbox is no
         # longer user-facing — it survives as a hidden data holder because
         # external WebServer actions still poke self.charNumber.value()/
-        # setValue() and SetDefaultsFromAssets re-asserts it. Default is 3.
+        # setValue() and SetDefaultsFromAssets re-asserts it. Default:
+        # core's DEFAULT_CHARACTERS_PER_PLAYER (the headless seed's too).
         self.charNumber = QSpinBox(self)
         self.charNumber.setMaximum(100)
         self.charNumber.valueChanged.connect(self.SetCharacterNumber)
-        self.charNumber.setValue(3)
+        self.charNumber.setValue(DEFAULT_CHARACTERS_PER_PLAYER)
         self.charNumber.setVisible(False)
 
         self.playerNumber = QSpinBox()
@@ -480,16 +485,16 @@ class AutonaScoreboardWidget(QWidget):
         QApplication.instance().focusChanged.connect(
             self._OnTeamNameFocusChanged)
 
-        # A restored program_state.json can carry a roster from a session
-        # that ran with more players per team; drop both before the first
-        # player widget is built, so the slots that come back are the ones
-        # this board actually has.
+        # The restored state (user_data/state.json) can carry a roster from
+        # a session that ran with more players per team; drop both before
+        # the first player widget is built, so the slots that come back are
+        # the ones this board actually has.
         for team in (1, 2):
             AutonaActions.instance.ClearTeamRoster(self.scoreboardNumber, team)
         self.playerNumber.setValue(1)
         # Re-assert the characters-per-player default so the freshly-built
         # player widgets pick it up instead of getting pinned to 1.
-        self.charNumber.setValue(3)
+        self.charNumber.setValue(DEFAULT_CHARACTERS_PER_PLAYER)
 
         self._applyScoreboardMode(self.singlePlayer)
 
@@ -947,6 +952,23 @@ class AutonaScoreboardWidget(QWidget):
     def ApplyChanges(self):
         # 反映 button: publish every pending edit on this board at once.
         AutonaActions.instance.ApplyChanges(self.scoreboardNumber)
+
+    def _WebScoreboardOpenUrl(self):
+        """The "ブラウザ版を開く" URL (ADR-005 S3a).
+
+        With LAN access on, it carries the access token, so the same URL
+        also works when copied to another device (the page takes the token
+        off the address bar: web/src/autonaToken.ts). Read at click time, so
+        a regenerated token is the one sent. With LAN access off it has
+        none: a page on this PC needs none, and one opened without it is not
+        cut off when the token is regenerated.
+        """
+        token = WebAccess.Token()
+        if not token or not SettingsManager.Get(
+                "general.webserver_listen_lan", False):
+            return self.webScoreboardUrl
+        return (f"{self.webScoreboardUrl}?"
+                + urllib.parse.urlencode({"token": token}))
 
     def _onGameAssetsLoaded(self):
         # AutonaGameAssetManager.signals.onLoad handler.
@@ -2568,11 +2590,9 @@ class AutonaScoreboardWidget(QWidget):
     def SetDefaultsFromAssets(self):
         # Propagate the game's default players-per-team; characters-per-player
         # is forced back to its default (3) regardless of game asset config.
-        if StateManager.Get('game.defaults'):
-            players = StateManager.Get('game.defaults.players_per_team', 1)
-        else:
-            players = 1
-        self.playerNumber.setValue(players)
-        self.charNumber.setValue(3)
+        # Both come from core, where the headless shell's launch seed reads
+        # them too (PlayerService.SeedEmptyRoster, ADR-005 S3d).
+        self.playerNumber.setValue(DefaultPlayersPerTeam())
+        self.charNumber.setValue(DEFAULT_CHARACTERS_PER_PLAYER)
 
     pass

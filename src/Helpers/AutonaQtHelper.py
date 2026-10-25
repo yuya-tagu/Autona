@@ -4,7 +4,6 @@ import threading
 
 from loguru import logger
 from qtpy.QtCore import *
-from qtpy.QtWidgets import QApplication
 
 
 _STRICT_THREAD_ASSERT = os.environ.get("AUTONA_STRICT_THREAD_ASSERT", 0)
@@ -83,8 +82,15 @@ def gui_thread_sync(fn):
 
 _app = None
 def in_gui_thread() -> bool:
+    # "The GUI thread" is the thread that owns the application object, i.e.
+    # the one running the event loop GuiExecutor delivers to. That is a
+    # QCoreApplication in the headless shell and a QApplication (a subclass)
+    # on the desktop, so ask the base class (ADR-005 S3c). PySide6 happens to
+    # answer the same through QApplication.instance() -- it is the inherited
+    # static -- but this helper should not need QtWidgets to say so, nor
+    # depend on what a binding returns for a subclass's instance().
     global _app
-    if _app is None and (_app := QApplication.instance()) is None:
+    if _app is None and (_app := QCoreApplication.instance()) is None:
         return False
 
     return _app.thread().isCurrentThread()

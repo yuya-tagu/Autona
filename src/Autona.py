@@ -13,7 +13,6 @@ import orjson
 import traceback
 import time
 import os
-import socket
 import sys
 import qtpy
 from qtpy.QtGui import *
@@ -168,8 +167,13 @@ def catchtime(msg = ''):
 # what implicitly created
 # AutonaHotkeys.instance. Running bootstrap_core() here keeps the effective
 # initialization order identical to the old import-time side effects.
-from .bootstrap import bootstrap_core
+# bootstrap_gui() adds the desktop's Qt adapters (hotkeys, asset / country
+# models, scoreboard dock ...) on top; the headless shell runs only the first
+# (ADR-005 S3c).
+from .bootstrap import (
+    bootstrap_core, bootstrap_gui, wire_tournament_data, wire_web_server)
 bootstrap_core()
+bootstrap_gui()
 
 # autopep8: off
 from .Settings.AutonaSettingsWindow import AutonaSettingsWindow
@@ -181,7 +185,6 @@ from .LayoutOptions.AutonaLayoutOptionsWindow import AutonaLayoutOptionsWindow
 from .AutonaHotkeys import AutonaHotkeys
 from .AutonaCommentaryWidget import AutonaCommentaryWidget
 from .AutonaGameAssetManager import AutonaGameAssetManager
-from .core.GameAssetCatalog import GameAssetCatalog
 from .AutonaTop8Widget import AutonaTop8Widget
 from .AutonaBoardWidget import AutonaBoardWidget
 from .core.ColorService import SeedColorState
@@ -204,6 +207,7 @@ from .AutonaStatsPreviewWidget import AutonaStatsPreviewWidget
 from .AutonaAnalysisWidget import AutonaAnalysisWidget
 from .AutonaPlayerBrowserWidget import AutonaPlayerBrowserWidget
 from src.AutonaWebServer import WebServer, check_webserver_port
+from .AutonaWebServerActions import WebServerActions
 from .AutonaLayoutPreview import MarkWebServerReady
 # autopep8: on
 
@@ -603,9 +607,11 @@ class Window(QMainWindow):
         # UpdateTournamentButton hooks below, because the button reads
         # tournamentInfo.tournamentName out of the state — the EVENT panel
         # used to provide that ordering by being constructed earlier in this
-        # method, and it is lazy now (headless core Step 4b).
-        AutonaTournamentDataProvider.instance.signals.tournament_data_updated.connect(
-            self._OnTournamentDataUpdated)
+        # method, and it is lazy now (headless core Step 4b). The wiring is
+        # the one the headless shell makes too (ADR-005 S3c): the payload
+        # writer, and the selected game forgotten when the URL is cleared
+        # (ahead of Signal_GameChange below, which resets the game button).
+        wire_tournament_data(on_failure=self._ReportTournamentLoadFailure)
         AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
             self.UpdateTournamentButton)
         AutonaTournamentDataProvider.instance.signals.tournament_url_update.connect(
@@ -895,20 +901,29 @@ class Window(QMainWindow):
             if self._shuttingDown:
                 return
 
-        self.webserver = WebServer(parent=self)
-        self.webserver.signals.start_failed.connect(self.OnWebServerStartFailed)
+        # The failure callback runs on the server thread; the dialog belongs
+        # on the GUI thread, which is where the old queued start_failed
+        # signal delivered it too. The board-dependent operations are the
+        # window's to hand in: they reach the scoreboard dock and, through
+        # this window, the lazily-built panels (startup Step 4b-2); the
+        # headless shell has none (ADR-005 S3c).
+        self.webserver = WebServer(
+            on_start_failed=lambda error: AutonaQtHelper.gui_executor(
+                lambda: self.OnWebServerStartFailed(error)),
+            actions=WebServerActions(
+                parent=self, scoreboard=AutonaScoreboardManager.instance))
         # Probe the very interface the server will bind (LAN vs loopback).
         check_webserver_port(
             self.webserver.port, parent=self, host=self.webserver.host_name)
         self.webserver.start()
-        self.signals.GameChanged.connect(self.webserver.ws_program_state)
-        self.signals.GameChanged.connect(self.webserver.ws_get_characters)
-        # Moved here together with the server: at its old place in __init__
-        # there is no webserver instance to bind to. Nothing is lost by
-        # connecting after LoadDB() — clients pull the player DB on demand
-        # (GET /playerdb, socket 'playerdb') and none can be connected before
-        # the server is listening anyway.
-        AutonaPlayerDB.signals.db_updated.connect(self.webserver.ws_playerdb)
+        # GameChanged -> program_state + characters, db_updated -> the player
+        # DB: the wiring the headless shell makes too. Here, together with
+        # the server: at its old place in __init__ there is no webserver
+        # instance to bind to. Nothing is lost by connecting after LoadDB()
+        # — clients pull the player DB on demand (GET /playerdb, socket
+        # 'playerdb') and none can be connected before the server is
+        # listening anyway.
+        wire_web_server(self.webserver, self.signals.GameChanged)
 
         # Release the overlay previews (Board / Commentary / Top 8 / Stats),
         # which fetch their HTML from this server: a panel restored as the
@@ -932,7 +947,8 @@ class Window(QMainWindow):
         Called from __init__ before any panel is built, and necessarily after
         StateManager.LoadState() — which ran inside bootstrap_core(), i.e.
         while this module was imported — so what is normalised here is the
-        restored program_state.json, not an empty state.
+        restored state (user_data/state.json, ADR-005 S3b), not an empty
+        state.
         """
         with StateManager.SaveBlock():
             schema.SeedPanelState()
@@ -1272,13 +1288,14 @@ class Window(QMainWindow):
         button.style().polish(button)
 
     def Signal_GameChange(self, url):
+        # The game button only: forgetting the selected game itself is
+        # wire_tournament_data's, connected ahead of this (both shells).
         if url == "":
             self._currentGameIndex = 0
             for action in self._gameActions.values():
                 action.setChecked(False)
             self.gameSelect.setText(
                 QApplication.translate("app", "Select game title"))
-            GameAssetCatalog.instance.ForgetSelection()
             self._SetPulldownAttention(self.gameSelect, True)
 
     def HideSidebar(self):
@@ -1292,22 +1309,15 @@ class Window(QMainWindow):
         self.sidebar.show()
         self.sidebarExpandButton.hide()
 
-    def _OnTournamentDataUpdated(self, data):
-        """Publish a tournament payload, and report a load failure.
+    def _ReportTournamentLoadFailure(self, data):
+        """Tell the operator that a tournament payload did not load.
 
         The Qt half of core/TournamentInfoService: the writing is the
-        service's, and this is here for the one thing it cannot do -- tell
-        the operator that the URL did not load. Owned by the window rather
-        than the EVENT panel because the panel may never be built.
-
-        The display-name override runs after the payload either way, exactly
-        as the two separate connections on the panel used to.
+        service's (ApplyProviderPayload, connected by wire_tournament_data,
+        which calls this when it failed), and this is the one thing it
+        cannot do. Owned by the window rather than the EVENT panel because
+        the panel may never be built.
         """
-        service = TournamentInfoService.instance
-        applied = service.ApplyTournamentData(data)
-        service.ApplyDisplayNameFromSelection(data)
-        if applied:
-            return
         message = (
             QApplication.translate(
                 "app", "The tournament URL could not be loaded.") + "\n"
@@ -1339,7 +1349,8 @@ class Window(QMainWindow):
             self.sidebar.tournamentButton, not hasTournament)
 
     def OnWebServerStartFailed(self, error: str):
-        # Delivered via queued signal from the webserver QThread. Use show()
+        # Marshalled here from the web server thread through gui_executor
+        # (see _StartWebServer). Use show()
         # (non-blocking) instead of exec() per the no-nested-modal rule; keep
         # a reference so the box is not garbage-collected while visible.
         box = QMessageBox(self)
@@ -1399,27 +1410,18 @@ class Window(QMainWindow):
             pass
 
         # --- Mandatory teardown ------------------------------------------
-        # For whatever reason, the webserver thread won't respond to the quit() signal nicely.
-        # This is usually unsafe, but there's no easy way to terminate the flask server,
-        # so we hard-kill its thread as we're shutting down to prevent exit-crashes.
-        #
-        # Given that this webserver is local in scope, it's reasonable to not do any
-        # connection-draining process.
-        try:
-            web_socket_fd = os.environ.get('WERKZEUG_SOCKET_FD', None)
-            if web_socket_fd:
-                sock = socket.socket(fileno=int(web_socket_fd))
-                sock.close()
-        except Exception:
-            logger.opt(exception=True).warning("Error closing web socket on shutdown")
-
+        # The web server is stoppable since ADR-005 S3c: werkzeug's
+        # shutdown() ends its accept loop, where QThread.terminate() used to
+        # kill that thread (TerminateThread, which can catch it holding the
+        # GIL or a CRT / interpreter lock and hang the exit). Requests run on
+        # werkzeug's daemon request threads and are not drained, as before:
+        # the server is local and the process is on its way out.
         try:
             # None when the window is closed before the deferred start ran.
             if self.webserver is not None:
-                self.webserver.terminate()
-                self.webserver.wait(10000)  # 10 seconds grace period.
+                self.webserver.stop(10.0)  # 10 seconds grace period.
         except Exception:
-            logger.opt(exception=True).error("Error terminating web server on shutdown")
+            logger.opt(exception=True).error("Error stopping web server on shutdown")
 
         try:
             # allWindows() returns QWindow, not QWidget: comparing against

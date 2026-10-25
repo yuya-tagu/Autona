@@ -8,6 +8,10 @@ import {autonaStore} from "./redux/store";
 import {Provider} from "react-redux";
 import ThemeShell from "./ThemeShell";
 import ScoreboardDesigner from "./ScoreboardDesigner";
+import {captureTokenFromUrl} from "./autonaToken";
+
+// Before the router reads the URL: take the access token off it (ADR-005 S3a).
+captureTokenFromUrl();
 
 const WebPage = () => (
     new URLSearchParams(window.location.search).get("view") === "designer"

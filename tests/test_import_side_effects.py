@@ -104,13 +104,23 @@ core_state = importlib.import_module("src.core.StateManager").StateManager
 # importing the module must not.
 core_actions = importlib.import_module("src.core.Actions").AutonaActions
 # The game asset catalog (ADR-005 S1a): the Qt-free half of what used to be
-# AutonaGameAssetManager, a singleton created by bootstrap_core() as well.
+# AutonaGameAssetManager, a singleton created by bootstrap_core() as well
+# (the adapter itself by bootstrap_gui()).
 game_catalog = importlib.import_module(
     "src.core.GameAssetCatalog").GameAssetCatalog
 # The country catalog (ADR-005 S1c): the Qt-free half of what used to be
-# AutonaCountryHelper, likewise created by bootstrap_core().
+# AutonaCountryHelper, likewise created by bootstrap_core() (the adapter by
+# bootstrap_gui()).
 country_catalog = importlib.import_module(
     "src.core.CountryCatalog").CountryCatalog
+# The web server's access policy (ADR-005 S3a). It reads -- or issues and
+# saves to settings.json -- the access token on first use, never on import.
+web_access = importlib.import_module("src.core.WebAccess")
+# The persisted state store and its migrations (ADR-005 S3b). The store is
+# read, opened and written only from StateManager.Initialize() onwards.
+state_persistence = importlib.import_module(
+    "src.core.StatePersistence").StatePersistence
+state_migrations = importlib.import_module("src.core.StateMigrations")
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -162,6 +172,12 @@ scoreboard_manager = importlib.import_module(
 # either -- AutonaApiV1 only declares its Blueprint, which is inert until
 # WebServer.__init__ registers it on the app.
 web_server = importlib.import_module("src.AutonaWebServer").WebServer
+# The web operations of both shells (ADR-005 S3c). The desktop's board host
+# and game loader are registered by bootstrap_gui(), never on import.
+web_operations = importlib.import_module("src.AutonaWebOperations")
+# The headless shell's assembly: its run() configures the logs and builds
+# everything; importing it must do neither.
+headless = importlib.import_module("src.headless")
 # The Qt adapter for the state layer. Imported last on purpose: everything
 # above already pulled it in (every widget that listens to state does), so
 # if any of them built one at import time this assertion catches it.
@@ -173,6 +189,12 @@ assert QApplication.instance() is None, "import created a QApplication"
 assert core_actions.instance is None, "import created AutonaActions.instance"
 assert game_catalog.instance is None, "import created GameAssetCatalog.instance"
 assert country_catalog.instance is None,     "import created CountryCatalog.instance"
+assert web_access._token is None, "import read or issued the access token"
+assert web_access._tokenGeneration == 0, "import issued an access token"
+assert state_persistence.Path() is None, "import opened the state store"
+assert state_persistence._thread is None, "import started the store writer"
+assert state_persistence._pending is None, "import queued a store write"
+assert state_migrations.CURRENT_VERSION >= 1
 assert hotkeys.instance is None, "import created AutonaHotkeys.instance"
 assert not hotkeys._actions_connected, \
     "import wired the hotkeys to AutonaActions"
@@ -191,6 +213,9 @@ assert bridge.instance is None, "import created StateManagerBridge.instance"
 assert web_server.app is None, "import built WebServer.app (Flask)"
 assert web_server.socketio is None, "import built WebServer.socketio"
 assert web_server.actions is None, "import built WebServer.actions"
+assert type(web_operations.boardHost) is web_operations.BoardHost,     "import registered a board host for the web operations"
+assert web_operations.loadGameByCodename is None,     "import registered a game loader for the web operations"
+assert not player_db.modelEnabled, "import switched the player DB model on"
 
 # The core state layer comes up empty, and -- the point of importing the
 # whole widget tree above -- with nobody wired to its channels. Only
@@ -227,6 +252,7 @@ for name in queryAttrs:
 
 assert not os.path.exists("./out"), "import created ./out"
 assert not os.path.exists("./user_data"), "import created ./user_data"
+assert not os.path.exists("./logs"), "import created ./logs"
 
 # Positive control: the work simply moved to the explicit entry point, so
 # the test cannot pass just because the code stopped working.
@@ -257,6 +283,11 @@ for name in queryAttrs:
 
 state_manager.Initialize()
 assert os.path.isdir("./out"), "Initialize() did not create ./out"
+# Initialize() opens the store; with nothing to migrate it writes nothing.
+assert state_persistence.Path() == os.path.abspath("./user_data/state.json"), \
+    "Initialize() did not open user_data/state.json"
+assert not os.path.exists("./user_data/state.json"), \
+    "Initialize() wrote state.json with nothing to migrate"
 
 # The actions layer needs both managers above, which is why bootstrap_core()
 # creates it here rather than at import. Its positive control is that it can
@@ -265,6 +296,10 @@ core_actions.instance = core_actions()
 core_actions.instance.SetDisplayOption("show_seed", False)
 assert core_state.Get("display_options.show_seed") is False, \
     "AutonaActions could not write the state headlessly"
+# ...and that published write reaches the store.
+assert state_persistence.Flush(30), "the store writer did not finish"
+assert os.path.isfile("./user_data/state.json"), \
+    "a published save cycle did not write user_data/state.json"
 
 # Same for the game asset catalog and its Qt adapter (ADR-005 S1a). The
 # ./user_data/games guarantee travels with the scan that lists it

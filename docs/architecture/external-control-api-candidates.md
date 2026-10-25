@@ -39,7 +39,7 @@
 | 状態変更は単一経路 | Actions は **Qt Signal を emit → 各ウィジェット → StateManager.Set** で状態変更。直接 dict 書き込みなし。多くが `@gui_thread_sync` で GUI スレッドに直列化 | 同上 / [src/StateManager.py](../../src/StateManager.py) |
 | 既定ポート | `SettingsManager.Get("general.webserver_port", 5000)` = **5000**（設定で変更可） | [AutonaWebServer.py:71](../../src/AutonaWebServer.py) |
 | バインド先 | `host = "0.0.0.0"` — **localhost 限定ではなく全 NIC で待ち受け** | [AutonaWebServer.py:70](../../src/AutonaWebServer.py) |
-| 認証 | **なし**。CORS は `cors_allowed_origins='*'` / Flask-CORS 全許可 | [AutonaWebServer.py:47-56](../../src/AutonaWebServer.py) |
+| 認証 | 調査時点は**なし**（CORS 全許可）。**2026-10-25 ADR-005 S3a で改定**: LAN の他端末からの書き込みと選手 DB はアクセストークン必須、この PC（ループバック・この PC の LAN IP）と読み取りは免除。トークンなしの書き込みは、このサーバーの名前宛て（DNS rebinding 対策）・自分のページから（CSRF 対策）・転送ヘッダなしのときだけ。CORS 全許可は残る（詳細は spec §2.2） | [src/core/WebAccess.py](../../src/core/WebAccess.py) |
 | Web UI ルート | `/`・`/scoreboard`・`/team`・`/web` が React UI（`web/build/index.html`）を配信。CLAUDE.md の記述と一致 | [AutonaWebServer.py:717-723](../../src/AutonaWebServer.py) |
 | スコアボード番号 | ルートは `<scoreboardNumber>` を取る。現行は board1=1v1、board2=team、board3=crew を常時生成し、表示形式で切替。`/api/v1/` は board1/2 用操作を board3 へ投げる場合は拒否 | [src/AutonaScoreboardManager.py](../../src/AutonaScoreboardManager.py) / [src/AutonaApiV1.py](../../src/AutonaApiV1.py) |
 | X / Bluesky 投稿 | **UI ボタン専用**。`PostToX` / `PostToBsky` はスコアボードウィジェット内。**HTTP/WS にもホットキーにも露出していない** | [AutonaScoreboardWidget.py:1114-1243](../../src/AutonaScoreboardWidget.py) |
@@ -49,6 +49,9 @@
 > ⚠️ **セキュリティ上の含意（要 PdM 判断）**: 現状の制御面は `0.0.0.0` + 認証なし + CORS 全許可。
 > 既に「LAN 内の誰でも全操作を叩ける」状態。外部 API を**新規追加するわけではなく、この前提を引き継ぐ**。
 > 外部コントローラ追加を機に認証/バインド方針を見直すかは ADR-001 の論点。
+>
+> **（2026-10-25 追記）** 既定バインドは後に `127.0.0.1` へ変わり（LAN 公開はオプトイン）、ADR-005 S3a で
+> LAN の書き込みにトークン認証が入った。現行仕様は [../../.claude/design/external-control-api.md](../../.claude/design/external-control-api.md) §2.2。
 
 ---
 
@@ -362,6 +365,7 @@ WS 列は対応する Socket.IO イベントの有無。
 
 - パスで分離（`GET /api/v1/...` = 読み取り、`POST/PATCH ...:action` = 操作）。
 - 将来認証を入れる場合、**読み取りと操作で権限スコープを分けられる**設計にしておく（初回は実装しないが境界だけ用意）。
+  - → ADR-005 S3a（2026-10-25）でこの境界どおりに実装した: GET = 読み取り（トークン不要）、POST/PATCH = 操作（LAN からはトークン必須）。
 
 ---
 
@@ -433,7 +437,7 @@ WS 列は対応する Socket.IO イベントの有無。
 - `set_team_data` の payload スキーマ（必須キー）は？（E / 要コード追読）
 - scoreboardNumber の有効値と board2/board3 の現行扱いは？（E）
 - 配信中/非配信中を Autona が判定する手段はあるか？（誤操作ガードの前提・`TBD`）
-- 認証を入れるか／バインドを localhost に絞るか（現状 `0.0.0.0` + 認証なし）→ ADR-001
+- ~~認証を入れるか／バインドを localhost に絞るか（現状 `0.0.0.0` + 認証なし）→ ADR-001~~ → 解決: 既定 `127.0.0.1`（LAN はオプトイン）+ LAN の書き込みはトークン必須（ADR-005 S3a・2026-10-25）
 - 重い操作の多重実行を現状どう防いでいるか（実行中フラグの有無）→ コード追読（E）
 - X / Bluesky を将来 API 化するか（外部送信・機密）→ ADR-001 / E
 - `assets/rulesets.json`（ステージストライク残置）は外部 API と無関係か → 別件で整理

@@ -146,7 +146,7 @@ class AutonaHotkeys(QObject):
         is in crew format. The swap hotkey is ignored there too: the crew
         board never listened to it (its SWAP button and the Web UI swap it).
 
-        Idempotent -- the guard matters because bootstrap_core() can run more
+        Idempotent -- the guard matters because bootstrap_gui() can run more
         than once in a process (the test harness bootstraps its own runtime,
         and any re-bootstrap re-checks this), and a second connect would
         apply every score hotkey twice per key press.

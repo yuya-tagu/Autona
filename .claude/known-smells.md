@@ -285,13 +285,20 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, b
 
 > **現状（結論を先に）**: 動的キー族は 4 族すべて静的化され、`StateSchema.DYNAMIC_KEY_FAMILIES`
 > は空。**ただし `.ui` の objectName ↔ キー名の一致は今も要件**（`findChild` の引数として
-> 使われ、かつ既存 `program_state.json` のキーそのもの）なので、下の「保護対象」表と
+> 使われ、かつ保存済み state のキーそのもの）なので、下の「保護対象」表と
 > 運用ルールは有効なまま。以下は経緯の記録。
+>
+> **2026-10-25（ADR-005 S3b）: スキーマ版の不在も解消**。state の正本は
+> `user_data/state.json`（`{"state_version": N, "state": {...}}`）になり、移行層は
+> `src/core/StateMigrations.py`（`CURRENT_VERSION` + 前方一方向の `Migrate`。v0 → v1 は
+> `RETIRED_ROOTS` / `STALE_KEYS` / commentary の `NormalizeState`）。`out/program_state.json` は
+> 出力に戻り、起動時に読むのは初回の移行と `state.json` が使えないときだけ。キー名を変えるときは
+> 移行 step を足せば既存の保存データを持ち越せる（下の運用ルール）。
 
 **根拠**: state-keys.md「要注意事項 #2」
 
 **2026-06-24 検証**: 記述どおり現存。`element.objectName()` をキーパスに使用しているのは **5ファイル**:
-`AutonaScoreboardWidget.py`, `AutonaTournamentInfoWidget.py`, `AutonaScoreboardPlayerWidget.py`, `AutonaTeamPlayerWidget.py`（`AutonaBasePlayerWidget.py` は `objectName() != ""` の検査のみでキーパス用途ではない）。※ かつて該当した `AutonaNotesWidget.py` は NOTE タブ廃止に伴い 2026-07-01 削除。`.ui` の objectName 変更でキーパスが壊れ、既存 `program_state.json` との互換が失われるリスクが継続（`STATE_VERSION` はサイドバーのナビ構成用で、state スキーマのマイグレーション層は無い）。
+`AutonaScoreboardWidget.py`, `AutonaTournamentInfoWidget.py`, `AutonaScoreboardPlayerWidget.py`, `AutonaTeamPlayerWidget.py`（`AutonaBasePlayerWidget.py` は `objectName() != ""` の検査のみでキーパス用途ではない）。※ かつて該当した `AutonaNotesWidget.py` は NOTE タブ廃止に伴い 2026-07-01 削除。`.ui` の objectName 変更でキーパスが壊れ、既存 `program_state.json` との互換が失われるリスクが継続（`STATE_VERSION` はサイドバーのナビ構成用で、state スキーマのマイグレーション層は無い）。※ 2026-10-25（ADR-005 S3b）で正本は `user_data/state.json` になり、移行層（`StateMigrations`）もできた。現状は冒頭の「現状」を参照。
 
 **2026-06-27 ガード導入（ランタイム不変・zero-risk）**: フル移行（明示キーのマッピング層＋データマイグレーション）は S3 で「低リスク」条件から外れるため見送り。代わりに**実行時の挙動を一切変えず**、契約を破る変更を検知する `tests/test_objectname_keypath_contract.py`（3テスト）を追加:
 - `.ui` の入力ウィジェット objectName 集合をスナップショット固定（リネーム/削除を検知）
@@ -312,7 +319,7 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, b
 | AutonaTournamentInfo.ui | tournamentName, eventName, gameTitleCombo, numEntrants, startAt, address, streamTitleEdit | `tournamentInfo.{name}` |
 | （プログラム的） | notes_widget_{N}, custom_textbox | `notes.{name}.{title\|contents}` / `{self.path}.custom_textbox` |
 
-**運用ルール**: 上表の objectName を変更/削除する場合は、**先に StateManager のマイグレーション層を追加**してから `tests/test_objectname_keypath_contract.py` の `EXPECTED` を更新する（= S-14 フル移行を将来やる際の入口）。
+**運用ルール**: 上表の objectName を変更/削除する場合は、**先に `src/core/StateMigrations.py` に移行 step を足して `CURRENT_VERSION` を上げ**（旧キー → 新キー。出荷した step は凍結）、`StateSchema` の定数・`.ui`・`tests/test_objectname_keypath_contract.py` の `EXPECTED` を同時に更新する（2026-10-25 S3b で移行層ができた。それまでは「マイグレーション層を追加してから」だった）。
 
 > **2026-09-01（Headless Core Step 5 第 1 弾）**: `AutonaScoreboardWidget` の 2 族
 > （`AutonaScoreboardTeam.ui` の teamName/losers、`AutonaScoreboardScore.ui` の
@@ -370,6 +377,7 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, b
 
 **対策案（フル移行・将来）**:
 objectName → 明示的なキー名マッピング＋`program_state.json` のスキーマ版管理＋ロード時マイグレーション。工数大・後方互換要注意。
+→ **完了**: キー名マッピングは Headless Core Step 5（2026-09-02、`StateSchema` の定数）、スキーマ版管理とロード時マイグレーションは ADR-005 S3b（2026-10-25、`user_data/state.json` の `state_version` + `StateMigrations`）。版は `program_state.json` ではなく正本の `state.json` に持たせた（`program_state.json` は外部契約の出力のため）。
 
 **影響範囲**: 5〜6ファイル + .ui ファイル群 + 既存の保存データ
 
@@ -409,7 +417,7 @@ objectName → 明示的なキー名マッピング＋`program_state.json` の�
 |----|------|------|------|
 | S-03 | Window __init__ | 影響範囲広い。慎重に | 🔴 未着手 |
 | S-10 | シングルトン遅延初期化 | 全ファイルに影響（11クラス）。フェーズ3以降 | 🔴 未着手 |
-| S-14 | objectName 依存 | 契約テストでリネーム/削除を検知（2026-06-27）→ Headless Core Step 5 で 4 族すべて静的化 | ✅ 解消（2026-09-02、動的生成は解消。objectName ↔ キー名の一致要件は継続） |
+| S-14 | objectName 依存 | 契約テストでリネーム/削除を検知（2026-06-27）→ Headless Core Step 5 で 4 族すべて静的化 → ADR-005 S3b でスキーマ版（`user_data/state.json` の `state_version`）と移行層（`StateMigrations`） | ✅ 解消（2026-09-02 動的生成、2026-10-25 スキーマ版。objectName ↔ キー名の一致要件は継続） |
 
 ---
 
@@ -535,7 +543,7 @@ GUI スレッド上で重い同期 I/O・JSON パースを行う箇所を全 src
   `match_en`（同じラウンド名の英語版。YouTube タイトルが読む）もキーがある board なら空にする。
   combo は `_SyncSetFields` が state から描画する
 - リセット全経路が `ResetMatch` を通る: すべての入力値をリセット（`ResetAllInputs`）/
-  `WebServerActions.reset_match` / `clear_all`（legacy REST・Socket.IO・`/api/v1 :reset-match`・
+  `AutonaWebOperations.reset_match` / `clear_all`（legacy REST・Socket.IO・`/api/v1 :reset-match`・
   `:clear` はすべてここへ委譲）。board 3 も同名の `AutonaCrewBattleWidget.ResetMatch` で
   match バーを消す（`match_en` は作らない）
 - スコアだけのリセット（スコアリセット ボタン / `reset_scores` / `Ctrl+Shift+R` /
