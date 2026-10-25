@@ -70,6 +70,15 @@ class SetLoadService:
 
     def __init__(self, scoreboardNumber):
         self.scoreboardNumber = scoreboardNumber
+        # The provider id of the set this board last loaded, or None (ADR-005
+        # S2d; it was the board's own attribute). Outside the state on
+        # purpose: `score.{n}.set_id` says which set is *followed* and stays
+        # through a clear, while this is forgotten by every clear of the
+        # players, so that loading the same set again loads it again
+        # (NewSetSelected skips a set it already has). It is also what an
+        # async refresh is checked against (IsStaleUpdate) and what the Web's
+        # get_set answers.
+        self.lastSetSelected = None
 
     # ── key paths ────────────────────────────────────────────────────────
 
@@ -315,7 +324,9 @@ class SetLoadService:
             StateManager.Set(f"{self.prefix}.station", station)
 
     def ClearSetTracking(self):
-        """Forget the followed set (the timer's cancel button)."""
+        """Forget the followed set (the timer's cancel button), and the set
+        loaded last with it."""
+        self.lastSetSelected = None
         with StateManager.SaveBlock():
             StateManager.Set(f"{self.prefix}.auto_update", None)
             StateManager.Set(f"{self.prefix}.set_id", None)

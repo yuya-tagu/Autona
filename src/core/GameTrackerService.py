@@ -310,10 +310,11 @@ class GameTrackerService:
     def UpdateScore(self, team, new_value):
         """Publish a score set from outside, and follow it with the stages.
 
-        Still the entry point for the paths that drive the score spinbox
-        directly (ClearScore, ResetAllInputs): the widget
+        Still the entry point for the one path that drives the score
+        spinbox directly (a number typed into it): the widget
         changes, and this writes the result. The paths that write the state
-        first -- AutonaActions.AdjustScore / ResetScore, and a loaded set's
+        first -- AutonaActions.AdjustScore / ResetScore and the clears
+        (ADR-005 S2d), and a loaded set's
         SetLoadService.ApplyScores -- instead call SyncStagesToScore() with
         the transition, which is why the two halves are separate methods
         (headless core Step 3; set loading joined them in Step 4b).

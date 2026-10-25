@@ -1601,7 +1601,7 @@ def test_following_a_set_records_which_set_it_is(autonaApp):
 
     assert autonaApp.get("score.1.set_id") == "999"
     assert autonaApp.get("score.1.auto_update") == "set"
-    assert board.lastSetSelected == "999"
+    assert board.setLoad.lastSetSelected == "999"
 
 
 def test_cancelling_the_follow_forgets_the_set(autonaApp):
@@ -1614,13 +1614,13 @@ def test_cancelling_the_follow_forgets_the_set(autonaApp):
 
     assert autonaApp.get("score.1.set_id") is None
     assert autonaApp.get("score.1.auto_update") is None
-    assert board.lastSetSelected is None
+    assert board.setLoad.lastSetSelected is None
 
 
 def test_a_stale_async_refresh_is_dropped(autonaApp):
     """An in-flight fetch answering after the operator moved on."""
     board = autonaApp.board(1)
-    board.lastSetSelected = "999"
+    board.setLoad.lastSetSelected = "999"
     board.ChangeSetData({"round_name": "Winners Final"})
     autonaApp.settle()
 
@@ -1794,6 +1794,243 @@ def test_swapping_teams_carries_the_losers_names_across(autonaApp):
     assert autonaApp.get("score.1.team.2.player.1.mergedName") == "AAA"
     assert _losers(board, 1).isChecked() is True
     assert _losers(board, 2).isChecked() is False
+
+
+# ── clearing (ADR-005 S2d) ───────────────────────────────────────────────
+#
+# The clears are core operations (AutonaActions.ClearScore / ResetMatch /
+# ClearPlayers / ClearBoard): one save cycle each, where the board used to
+# drive its widgets back to empty -- a cycle per player card, per score
+# spinbox and per losers box. What a board still adds is checked here:
+# the cards follow, the set loaded last is forgotten, the statistics are
+# fetched once, and the Web builds the board first.
+
+_CLEARS = {
+    "CommandClearAll": lambda app, board, n: board.CommandClearAll(),
+    "ResetAllInputs": lambda app, board, n: _confirmed(board.ResetAllInputs),
+    "reset_players": lambda app, board, n: app.actions().reset_players(n),
+    "clear_all": lambda app, board, n: app.actions().clear_all(n),
+}
+
+
+@pytest.mark.parametrize("clear", ["CommandClearAll", "ResetAllInputs"])
+def test_a_clear_is_one_save_cycle_and_the_cards_show_it(autonaApp, clear):
+    board = autonaApp.board(2)
+    _setPlayerName(board, 1, "LEFT")
+    _setPlayerName(board, 2, "RIGHT")
+    board.CommandScoreChange(0, 2)
+    autonaApp.settle()
+
+    seen, unsubscribe = _heldUpdateSpy("score.2")
+    try:
+        _CLEARS[clear](autonaApp, board, 2)
+        autonaApp.settle()
+    finally:
+        unsubscribe()
+
+    assert seen == ["score.2"]
+    for card in board.playerWidgets:
+        assert card.findChild(QLineEdit, "name").text() == ""
+    assert not _playerName(autonaApp, 1, board=2)
+    expectedScore = 0 if clear == "ResetAllInputs" else 2
+    assert _score(autonaApp, 1, board=2) == expectedScore
+    assert board.scoreDisplay1.value() == expectedScore
+
+
+def test_a_board_reset_takes_the_team_names_and_keeps_the_counts(autonaApp):
+    """すべての入力値をリセット: values only. The Web's clear_all keeps the
+    names instead (unless it shrinks the roster to one player) and resets
+    the counts -- the two differ, as they always have (ADR-005 S2
+    decision 3)."""
+    board = autonaApp.board(2)
+    board.playerNumber.setValue(2)
+    autonaApp.settle()
+    for team in (1, 2):
+        edit = _teamName(board, team)
+        edit.setText(f"Team {team}")
+        edit.editingFinished.emit()
+    autonaApp.settle()
+
+    _confirmed(board.ResetAllInputs)
+    autonaApp.settle()
+
+    assert autonaApp.get("score.2.team.1.teamName") == ""
+    assert autonaApp.get("score.2.team.2.teamName") == ""
+    assert _teamName(board, 1).text() == ""
+    assert board.playerNumber.value() == 2
+    assert len(autonaApp.get("score.2.team.1.player")) == 2
+
+
+@pytest.mark.parametrize("clear", sorted(_CLEARS))
+@pytest.mark.parametrize("ids, fetches", [
+    (([101, 1101], [303, 3303]), 1),    # players gone from both sides: once
+    ((None, None), 0),                  # no ids went, nothing to fetch for
+])
+def test_a_clear_refetches_the_stats_once(autonaApp, clear, ids, fetches):
+    """A card used to ask for the statistics when its own Clear() dropped
+    its id (one fetch per card); the board asks once per clear now, and
+    the upset factor is recalculated by the operation."""
+    board = autonaApp.board(1)
+    for card, value in zip((board.team1playerWidgets[0],
+                            board.team2playerWidgets[0]), ids):
+        card.player.SetPlayerId(value)
+        card.player.SetText("name", "SOMEONE")
+    autonaApp.settle()
+
+    with _statsFetches(board) as counts:
+        _CLEARS[clear](autonaApp, board, 1)
+        autonaApp.settle()
+
+    assert autonaApp.get("score.1.team.1.player.1.id") is None
+    assert counts == dict(dict.fromkeys(_STATS_SIGNALS, fetches),
+                          UpsetFactorCalculation=0)
+
+
+@pytest.mark.parametrize("clear", sorted(_CLEARS))
+def test_the_same_set_loads_again_after_a_clear(autonaApp, clear):
+    """NewSetSelected skips the set the board already follows; a clear
+    forgets it (it lives in SetLoadService now, not in the state)."""
+    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
+
+    board = autonaApp.board(1)
+    actions = autonaApp.actions()
+    provider = AutonaTournamentDataProvider.instance
+    with patch.object(provider, "GetMatch") as fetched:
+        try:
+            board.NewSetSelected({"id": "999", "auto_update": "set"})
+            board.NewSetSelected({"id": "999", "auto_update": "set"})
+            autonaApp.settle()
+            assert fetched.call_count == 1
+            assert actions.get_set(1) == "999"
+
+            _CLEARS[clear](autonaApp, board, 1)
+            autonaApp.settle()
+            assert actions.get_set(1) == "0"
+
+            board.NewSetSelected({"id": "999", "auto_update": "set"})
+            autonaApp.settle()
+            assert fetched.call_count == 2
+        finally:
+            board.StopAutonaUpdate(clear_variables=True)
+            autonaApp.settle()
+
+
+_WEB_CLEARS = {
+    "reset_match": lambda actions: actions.reset_match(2),
+    "reset_players": lambda actions: actions.reset_players(2),
+    "clear_all": lambda actions: actions.clear_all(2),
+    "get_set": lambda actions: actions.get_set(2),
+    "set_route": lambda actions: actions.set_route(2, match="Grand Final"),
+}
+
+
+@pytest.mark.parametrize("route", sorted(_WEB_CLEARS))
+def test_a_web_clear_builds_the_board_first(autonaApp, route):
+    """As GetScoreboard() did before S2d: an unbuilt board is not held,
+    and building it seeds its subtree afresh, so the route builds it and
+    the write waits for 反映 there."""
+    from src.core.StateManager import StateManager
+
+    autonaApp.dropAllBoards()
+    StateManager.Unset("score.2")
+    autonaApp.settle()
+    actions = autonaApp.actions()
+    try:
+        answer = _WEB_CLEARS[route](actions)
+        autonaApp.settle()
+
+        board = autonaApp.manager.scoreboards.get(2)
+        assert board is not None
+        assert autonaApp.manager.GetScoreboard(2) is board
+        state = autonaApp.get("score.2")
+        if route in ("reset_match", "clear_all"):
+            for team in ("1", "2"):
+                assert state["team"][team]["score"] == 0
+                assert state["team"][team]["losers"] is False
+            assert (state["match"], state["phase"], state["pool"])                 == ("", "", "")
+            assert state["best_of"] == 0
+        if route in ("reset_players", "clear_all"):
+            for team in ("1", "2"):
+                for slot in state["team"][team]["player"].values():
+                    # A fresh slot has no text keys; the clear adds none.
+                    assert not slot.get("name") and not slot.get("team")
+                    assert slot["seed"] == 0
+                    assert slot["online_avatar"] is None
+            assert all(not card.findChild(QLineEdit, "name").text()
+                       for card in board.playerWidgets)
+        if route == "clear_all":
+            assert len(state["team"]["1"]["player"]) == 1
+            assert board.playerNumber.value() == 1
+        if route == "get_set":
+            assert answer == "0"
+        if route == "set_route":
+            assert autonaApp.get("score.2.match") == "Grand Final"
+            assert StateManager.HasPendingChanges("score.2") is True
+            assert StateManager.GetCommitted("score.2.match") \
+                != "Grand Final"
+            assert board.matchCombo.currentText() == "Grand Final"
+    finally:
+        autonaApp.dropAllBoards()
+        StateManager.Unset("score.2")
+        autonaApp.settle()
+
+
+def test_a_web_team_name_is_one_save_cycle_with_its_crest(autonaApp):
+    """set_route's teamName= writes the literal column, as the operator
+    typing into it: the name, and the crest that follows it."""
+    # A crest for "Alpha" only (SetLoadService.PublishTeamLogo looks it up
+    # by the lower-cased name).
+    crest = autonaApp.dir / "user_data" / "team_logo" / "alpha.png"
+    crest.parent.mkdir(parents=True, exist_ok=True)
+    crest.write_bytes(b"")
+    try:
+        board = autonaApp.board(2)
+        autonaApp.settle()
+
+        seen, unsubscribe = _heldUpdateSpy("score.2")
+        try:
+            autonaApp.actions().set_route(2, team="1", teamName="Alpha")
+            autonaApp.settle()
+            # The same name again writes nothing.
+            autonaApp.actions().set_route(2, team="1", teamName="Alpha")
+            autonaApp.settle()
+        finally:
+            unsubscribe()
+
+        assert seen == ["score.2"]
+        assert autonaApp.get("score.2.team.1.teamName") == "Alpha"
+        assert autonaApp.get("score.2.team.1.logo")             == "./user_data/team_logo/alpha.png"
+        assert _teamName(board, 1).text() == "Alpha"
+
+        # A name without a crest takes the crest away, in the same cycle.
+        seen, unsubscribe = _heldUpdateSpy("score.2")
+        try:
+            autonaApp.actions().set_route(2, team="1", teamName="Bravo")
+            autonaApp.settle()
+        finally:
+            unsubscribe()
+        assert seen == ["score.2"]
+        assert autonaApp.get("score.2.team.1.teamName") == "Bravo"
+        assert autonaApp.get("score.2.team.1.logo") is None
+    finally:
+        crest.unlink(missing_ok=True)
+
+
+def test_a_clear_keeps_the_city(autonaApp):
+    """Known gap, recorded rather than fixed (ADR-005 S2 decision 5): no
+    player card's Clear() ever emptied the city, so the clear does not
+    either. A player loaded from start.gg leaves theirs behind."""
+    board = autonaApp.board(1)
+    card = board.team1playerWidgets[0]
+    card.player.SetCity("Shibuya")
+    card.player.SetText("name", "SOMEONE")
+    autonaApp.settle()
+
+    board.CommandClearAll()
+    autonaApp.settle()
+
+    assert autonaApp.get("score.1.team.1.player.1.name") == ""
+    assert autonaApp.get("score.1.team.1.player.1.city") == "Shibuya"
 
 
 # ── the player card's write path (headless core Step 5, instalment 2) ────
