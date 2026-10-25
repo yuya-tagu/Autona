@@ -76,23 +76,27 @@ def _isolated_state():
 
 
 class _Swap:
-    """A settable stand-in for the board's teamsSwapped attribute."""
+    """Which way round the board is: `score.{n}.teamsSwapped`, the flag
+    AutonaActions.SwapTeams toggles (ADR-005 S2c; it used to be read from
+    the board's attribute through a callable)."""
 
-    def __init__(self, value=False):
-        self.value = value
+    @property
+    def value(self):
+        return SM.Get(f"{PREFIX}.teamsSwapped", False)
 
-    def __call__(self):
-        return self.value
+    @value.setter
+    def value(self, swapped):
+        SM.Set(f"{PREFIX}.teamsSwapped", swapped)
 
 
 @pytest.fixture
 def swap():
-    return _Swap(False)
+    return _Swap()
 
 
 @pytest.fixture
 def service(swap):
-    return SetLoadService(BOARD, swap)
+    return SetLoadService(BOARD)
 
 
 def _score(team):

@@ -167,7 +167,8 @@ pin: `tests/test_save_block_symmetry.py`
 `test_no_hand_paired_block_saving_left_in_autona_py`。`src/Autona.py` は import 自体が
 起動シーケンスでテストから import できないため、`ast` によるソース静的検査で書いている）。
 `AutonaScoreboardPlayerWidget.SetData` / `AutonaTeamPlayerWidget.SetData` /
-`AutonaBasePlayerWidget.SwapWith` は try/finally 済み。
+`AutonaBasePlayerWidget.SwapWith` は try/finally 済み（`SwapWith` は ADR-005 S2c で削除。
+スワップは `AutonaActions.SwapTeams` の 1 SaveBlock になった）。
 
 #### BUG-4: crew ボードの `reset_match` が best_of を state からクリアしない 🟡 **[修正済み]**
 

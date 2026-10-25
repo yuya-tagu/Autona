@@ -28,8 +28,19 @@ the writers are unchanged -- so it is pinned two ways:
   recording is still the *pre*-migration truth: what S2b changed on purpose
   is listed step by step in ``S2B_CHANGES`` and applied to it before the
   comparison, so every other field of every step still has to match.
+
+  S2c (the swap and the player moves became core operations on the state)
+  did the same with ``S2C_CHANGES``, and added a second recording made on
+  the last pre-S2c tree (6a6f04cc, ``swap_golden.json``): a board with
+  everything a swap carries -- ids, a city on one side only, distinct
+  mains, a team crest, the game tracker on -- swapped, its players moved,
+  and swapped back, with the statistics fetches each step started. What S2c
+  changed there on purpose is ``S2C_SWAP_CHANGES``. The key order of every
+  dict after every step of both lists is recorded on that tree too
+  (``key_order.json``), so the order stays pinned where S2c changed values
+  and the state digest is this tree's own.
 - **the card shows its slot after every one of those steps**, and a slot
-  written straight into the state -- which is what S2c's core swap will do --
+  written straight into the state -- which is what the core swap does --
   reaches the card without a single write on the way back.
 
 The fixture world (games, custom flags, locale) is the S1d recording's
@@ -45,16 +56,18 @@ from unittest.mock import patch
 import orjson
 import pytest
 
-from qtpy.QtCore import QCoreApplication, QEvent, QSignalBlocker, Qt
+from qtpy.QtCore import (QCoreApplication, QEvent, QSignalBlocker,
+                         QStringListModel, Qt)
 from qtpy.QtTest import QTest
-from qtpy.QtWidgets import (QCheckBox, QComboBox, QLineEdit, QMessageBox,
-                            QWidget)
+from qtpy.QtWidgets import (QApplication, QCheckBox, QComboBox, QLineEdit,
+                            QMessageBox, QPushButton, QWidget)
 from shiboken6 import Shiboken
 
 from src.AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
 from src.core import StateSchema as schema
 from src.core.DictHelper import deep_clone
 from src.core.PlayerService import CharacterSlot, PlayerService
+from src.core.SettingsManager import SettingsManager
 from src.core.StateManager import StateManager
 # The S1d world: the fixture games under the recording's locale. Imported so
 # both recordings are made in exactly the same one.
@@ -66,6 +79,26 @@ GOLDEN_PATH = (Path(__file__).resolve().parent / "fixtures"
                / "board_operations" / "golden.json")
 GOLDEN = None if RECORD else json.loads(
     GOLDEN_PATH.read_text(encoding="utf-8"))
+# The swap / move operations with everything they move set up (ids, a city,
+# an avatar, distinct mains, a team crest, the game tracker on). Recorded on
+# the last pre-S2c tree (6a6f04cc) with `-k swap_operations`; golden.json
+# above is still the pre-S2b recording, so the two are recorded separately.
+SWAP_GOLDEN_PATH = GOLDEN_PATH.parent / "swap_golden.json"
+SWAP_GOLDEN = None if RECORD or not SWAP_GOLDEN_PATH.exists() else json.loads(
+    SWAP_GOLDEN_PATH.read_text(encoding="utf-8"))
+# The key order of every dict of the board subtree after each step of both
+# step lists, recorded on the last pre-S2c tree (6a6f04cc):
+#
+#     AUTONA_RECORD_KEY_ORDER=1 python -m pytest tests/test_player_card_render.py -k recorded_state
+#
+# The state digest pins the key order only where the state is unchanged;
+# this pins it where S2c changed values on purpose too (the swap exchanges
+# the slots key by key so that each dict keeps the order the old copy left
+# it in -- program_state.json and the Socket.IO delta keep their order).
+RECORD_KEY_ORDER = os.environ.get("AUTONA_RECORD_KEY_ORDER") == "1"
+KEY_ORDER_PATH = GOLDEN_PATH.parent / "key_order.json"
+KEY_ORDER = None if not KEY_ORDER_PATH.exists() else json.loads(
+    KEY_ORDER_PATH.read_text(encoding="utf-8"))
 
 BOARD = 2   # the team board: two players a side, team names, move up/down
 PREFIX = f"score.{BOARD}"
@@ -132,6 +165,38 @@ class _Published:
             default=lambda o: getattr(o, "__name__", repr(o))).decode()
 
 
+class _StatsTriggers:
+    """How often each of the board's statistics triggers fired.
+
+    The triggers are the board's AutonaStatsUtil signals; each one runs a
+    Start.gg fetch (or a local recalculation), so firing one twice for one
+    operation is a wasted request and not firing it leaves the previous
+    pairing's numbers on screen.
+    """
+
+    NAMES = ("RecentSetsSignal", "LastSetsP1Signal", "LastSetsP2Signal",
+             "PlayerHistoryStandingsP1Signal",
+             "PlayerHistoryStandingsP2Signal", "UpsetFactorCalculation")
+
+    def __init__(self, board):
+        self._signals = board.stats.signals
+        self.counts = {name: 0 for name in self.NAMES}
+        self._slots = {}
+
+    def __enter__(self):
+        for name in self.NAMES:
+            def count(*_args, name=name):
+                self.counts[name] += 1
+            self._slots[name] = count
+            getattr(self._signals, name).connect(count)
+        return self
+
+    def __exit__(self, *exc):
+        for name, slot in self._slots.items():
+            getattr(self._signals, name).disconnect(slot)
+        return False
+
+
 @contextmanager
 def _noWrites():
     """Every state write attempted inside the block, as (operation, key)."""
@@ -184,6 +249,31 @@ def _boardState(app):
         _digestAssets(value),
         option=orjson.OPT_NON_STR_KEYS | orjson.OPT_SORT_KEYS).decode(), app))
     return {"state": readable, "stateDigest": digest(exact)}
+
+
+# Values whose contents are not walked for the key order: the asset tables
+# (the state digest covers them byte for byte) and what S2c makes travel
+# with a player instead of staying on the card -- a character's variant
+# (the old copy left it empty) and the mains. Their keys in the dict around
+# them still count.
+_KEY_ORDER_OPAQUE = frozenset(("assets", "variant", "mains"))
+
+
+def _keyOrders(value, path=""):
+    """{dot path: [keys in insertion order]} for every dict in `value`."""
+    orders = {}
+    if isinstance(value, dict):
+        orders[path] = [str(key) for key in value]
+        for key, item in value.items():
+            if key not in _KEY_ORDER_OPAQUE:
+                orders.update(_keyOrders(
+                    item, f"{path}.{key}" if path else str(key)))
+    return orders
+
+
+def _boardKeyOrder():
+    with StateManager.lock:
+        return _keyOrders(deep_clone(StateManager.Get(PREFIX) or {}))
 
 
 # ── the operations ───────────────────────────────────────────────────────
@@ -289,14 +379,98 @@ def _steps(board):
     ]
 
 
-def _runSteps(app, board, afterEach=None):
+# ── the swap / move operations (ADR-005 S2c) ─────────────────────────────
+
+# PLAYERS plus what a swap has to carry across that the first recording's
+# players do not have: provider ids (the statistics fetches hang off them)
+# and a city on a player whose partner has none.
+SWAP_PLAYERS = {
+    (1, 0): dict(PLAYERS[(1, 0)], id=[101, 1101]),
+    (1, 1): dict(PLAYERS[(1, 1)]),
+    (2, 0): dict(PLAYERS[(2, 0)], id=[303, 3303]),
+    (2, 1): dict(PLAYERS[(2, 1)], id=[404, 4404], city="Osaka"),
+}
+
+# A crest for team "Alpha" only (SetLoadService.PublishTeamLogo looks it up
+# by the lower-cased name), so one side has a logo and the other has none.
+TEAM_LOGO = Path("user_data") / "team_logo" / "alpha.png"
+
+_realSettingsGet = SettingsManager.Get
+
+
+def _trackerEnabled(key, default=None):
+    # The individual game tracker ships disabled; patched rather than
+    # written, as in tests/test_scoreboard_operations.py.
+    if key == "general.disable_individual_game_tracker":
+        return False
+    return _realSettingsGet(key, default)
+
+
+def _withTracker(operation):
+    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
+        operation()
+
+
+def _stageButton(board, game, team):
+    """The T1 / T2 result button on one stage row. `game` is 1-based."""
+    index = game - 1
+    row = board.individualGameTracker.stage_widget_list[index]
+    return row.findChild(QPushButton, f"stageTeam{team}Check_{index}")
+
+
+def _fillFrom(board, team, players):
+    widgets = board.team1playerWidgets if team == 1 \
+        else board.team2playerWidgets
+    for index, card in enumerate(widgets):
+        card.SetData(dict(players[(team, index)]), dontLoadFromDB=True)
+
+
+def _swapSteps(board):
+    """A team board set up with everything a swap moves, then swapped,
+    its players moved, and swapped back."""
+    return [
+        ("two players, two characters", lambda: (
+            board.playerNumber.setValue(2), board.charNumber.setValue(2))),
+        ("tracker on, best of 5",
+         lambda: _withTracker(lambda: board.bestOfSpin.setValue(5))),
+        ("fill team 1", lambda: _fillFrom(board, 1, SWAP_PLAYERS)),
+        ("fill team 2", lambda: _fillFrom(board, 2, SWAP_PLAYERS)),
+        # A character-count change republishes every slot's characters as
+        # its mains, so the four slots' mains differ from here on.
+        ("three characters", lambda: board.charNumber.setValue(3)),
+        ("team names", lambda: (_teamName(board, 1, "Alpha"),
+                                _teamName(board, 2, "Bravo"))),
+        # T2, T1, T1: 2-1, and an order a swap has to keep (mirrored).
+        ("stage results", lambda: (_stageButton(board, 1, 2).click(),
+                                   _stageButton(board, 2, 1).click(),
+                                   _stageButton(board, 3, 1).click())),
+        ("losers", lambda: _losers(board, 2).setChecked(True)),
+        ("swap teams", board.SwapTeams),
+        ("move a player down",
+         lambda: board.team1playerWidgets[0].btMoveDown.click()),
+        ("move a player up",
+         lambda: board.team2playerWidgets[1].btMoveUp.click()),
+        ("move the top player up",
+         lambda: board.team1playerWidgets[0].btMoveUp.click()),
+        ("a point with the tracker on",
+         lambda: board.CommandScoreChange(1, 1)),
+        ("swap teams back", board.SwapTeams),
+    ]
+
+
+def _runSteps(app, board, afterEach=None, steps=None, stats=False,
+              keyOrders=None):
     recorded = []
-    for name, step in _steps(board):
-        with _Cycles() as cycles:
+    for name, step in (steps if steps is not None else _steps(board)):
+        with _Cycles() as cycles, _StatsTriggers(board) as triggers:
             step()
             app.settle()
         entry = {"step": name, "cycles": cycles.count}
+        if stats:
+            entry["stats"] = triggers.counts
         entry.update(_boardState(app))
+        if keyOrders is not None:
+            keyOrders.append({"step": name, "keyOrder": _boardKeyOrder()})
         if afterEach is not None:
             afterEach(name)
         with _Published() as published:
@@ -357,9 +531,124 @@ S2B_CHANGES = {
 }
 
 
-def _afterS2b(entry):
-    """A recorded step with S2B_CHANGES applied."""
-    change = S2B_CHANGES.get(entry["step"])
+# What ADR-005 S2c changed on purpose. The swap and the player moves were a
+# copy from card to card (SwapWith); they exchange the slots in the state
+# now (AutonaActions.SwapTeams / SwapPlayers), which fixed what the copy
+# lost on the way:
+#
+# - `travel`: a player's mains and character variants go where the player
+#   goes. The copy re-picked each character by its en_name and dropped the
+#   variant (Dr. Mario "EX" arrived as plain Dr. Mario), and it never moved
+#   the mains at all -- they stayed on the card, under the next player's
+#   name. The value is the step whose state says where every player's were;
+#   only a character the player still has keeps its variant.
+# - `stages`: with the game tracker on, the mirrored rows match the swapped
+#   score. The copy's score change re-awarded rows on top of the mirror, so
+#   T2 T1 T1 (2-1) came out as T1 T2 T1 -- 1-2 on the score, 2-1 on the rows.
+# - `stats`: the statistics are fetched once per swap / move, not once per
+#   card the copy rewrote (and the upset factor is recalculated by the
+#   operation, not by a seed spinbox the copy typed into).
+#
+# The digests follow from those; `published` turns into a whole-state
+# change (more than 100 rows) where a move now carries the mains along.
+#
+# Changed on purpose but invisible here: the birthday travels with its
+# player too (the copy left the hidden checkbox on the card; every player in
+# these steps has birthday false), and the seed is always written as an int
+# on both slots, as SetSeed did (pinned in tests/test_actions.py).
+S2C_CHANGES = {
+    "swap teams": {"travel": "losers",
+                   "stateDigest": "82e1ee0a06fda06b"},
+    "move a player down": {"travel": "losers",
+                           "stateDigest": "4a0a0849a8ce31d7"},
+    "swap teams back": {"travel": "losers",
+                        "stateDigest": "6ff0aa17538c4e6c"},
+    "pick a character": {"travel": "losers",
+                         "stateDigest": "9caeb95f5a26109c"},
+    "reset match": {"travel": "losers",
+                    "stateDigest": "cb954b6e189e0039"},
+    # The state is the recording's; what 反映 publishes now also takes the
+    # two variants the swap kept off the overlays.
+    "clear players": {"published": [1, 0, "ee9f778f6f33304e"],
+                      "publishedRows": "16c902f8950f4403"},
+}
+
+# Every statistic once: the head-to-head, and each side's last sets and
+# standings -- both sides for a swap, the moving team's for a move.
+_SWAP_STATS = {
+    "RecentSetsSignal": 1, "LastSetsP1Signal": 1, "LastSetsP2Signal": 1,
+    "PlayerHistoryStandingsP1Signal": 1, "PlayerHistoryStandingsP2Signal": 1,
+    "UpsetFactorCalculation": 0}
+
+S2C_SWAP_CHANGES = {
+    "swap teams": {
+        "travel": "losers", "stages": ("T1", "T2", "T2", "-", "-"),
+        "stats": _SWAP_STATS,
+        "stateDigest": "b115e92c30acde89"},
+    "move a player down": {
+        "travel": "losers", "stages": ("T1", "T2", "T2", "-", "-"),
+        "stats": dict(_SWAP_STATS, LastSetsP2Signal=0,
+                      PlayerHistoryStandingsP2Signal=0),
+        "stateDigest": "490df9db64929ca2",
+        "published": [1, 0, "8d2b9cc3ecfbdb4a"],
+        "publishedRows": "2c1c7f9209c534b3"},
+    "move a player up": {
+        "travel": "losers", "stages": ("T1", "T2", "T2", "-", "-"),
+        "stats": dict(_SWAP_STATS, LastSetsP1Signal=0,
+                      PlayerHistoryStandingsP1Signal=0),
+        "stateDigest": "6423979a92d3fe2e",
+        "published": [0, 1, "b3283bf184bb082f"],
+        "publishedRows": "b3283bf184bb082f"},
+    "move the top player up": {
+        "travel": "losers", "stages": ("T1", "T2", "T2", "-", "-"),
+        "stateDigest": "6423979a92d3fe2e"},
+    "a point with the tracker on": {
+        "travel": "losers", "stages": ("T1", "T2", "T2", "T2", "-"),
+        "stateDigest": "953693a4d02018b3"},
+    "swap teams back": {
+        "travel": "losers", "stages": ("T2", "T1", "T1", "T1", "-"),
+        "stats": _SWAP_STATS,
+        "stateDigest": "f129ff86c1afb141"},
+}
+
+
+def _travelled(state, reference):
+    """`state` with every player's mains and character variants taken from
+    where that player (by tag) was in `reference`."""
+    were = {player.get(schema.PLAYER_TAG_KEY): player
+            for team in reference.get("team", {}).values()
+            for player in team.get("player", {}).values()}
+    for team in state.get("team", {}).values():
+        for player in team.get("player", {}).values():
+            before = were.get(player.get(schema.PLAYER_TAG_KEY))
+            if before is None:
+                continue
+            if "mains" in before:
+                player["mains"] = deep_clone(before["mains"])
+            else:
+                player.pop("mains", None)
+            for index, character in player.get("character", {}).items():
+                was = before.get("character", {}).get(index)
+                if was is not None \
+                        and was.get("en_name") == character.get("en_name"):
+                    character["variant"] = deep_clone(was.get("variant", {}))
+
+
+def _withStages(state, results):
+    """`state` with the game tracker's rows holding `results` ("T1" / "T2"
+    / "-" per game, in order)."""
+    for number, result in enumerate(results, start=1):
+        row = state["stages"][str(number)]
+        row["t1_win"] = result == "T1"
+        row["t2_win"] = result == "T2"
+        row["tie"] = False
+
+
+def _withChanges(entry, changes, recording):
+    """A recorded step with what a migration changed on purpose applied:
+    `dropped` paths out of its state, `travel` / `stages` (S2c) into it, and
+    every other listed field replaced."""
+    change = changes.get(entry["step"])
     if change is None:
         return entry
     expected = json.loads(json.dumps(entry))
@@ -369,35 +658,143 @@ def _afterS2b(entry):
         for key in parents:
             node = node[key]
         del node[leaf]
+    if "travel" in change:
+        reference = next(e["state"] for e in recording
+                         if e["step"] == change["travel"])
+        _travelled(expected["state"], reference)
+    if "stages" in change:
+        _withStages(expected["state"], change["stages"])
     expected.update({field: value for field, value in change.items()
-                     if field != "dropped"})
+                     if field not in ("dropped", "travel", "stages")})
     return expected
 
 
 def test_board_operations_publish_the_recorded_state(board, autonaApp):
     """The state after every operation, its save cycles and what 反映 then
     published are what the pre-migration tree produced, apart from what S2b
-    changed on purpose -- and every card shows its slot after every one of
-    them."""
+    and S2c changed on purpose -- and every card shows its slot after every
+    one of them."""
     mismatches = {}
 
     def check(step):
-        if not RECORD:
+        if not (RECORD or RECORD_KEY_ORDER):
             mismatches[step] = _cardMismatches(board)
             mismatches[step].update(_losersMismatches(board))
 
-    recorded = _runSteps(autonaApp, board, afterEach=check)
+    keyOrders = []
+    recorded = _runSteps(autonaApp, board, afterEach=check,
+                         keyOrders=keyOrders)
 
+    if RECORD_KEY_ORDER:
+        _recordKeyOrder("board operations", keyOrders)
+        return
     if RECORD:
         GOLDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
         GOLDEN_PATH.write_text(json.dumps(
             {"operations": recorded}, ensure_ascii=False, indent=1),
             encoding="utf-8")
         return
-    golden = [_afterS2b(entry) for entry in GOLDEN["operations"]]
+    recording = GOLDEN["operations"]
+    golden = [_withChanges(_withChanges(entry, S2B_CHANGES, recording),
+                           S2C_CHANGES, recording)
+              for entry in recording]
     assert [e["step"] for e in recorded] == [e["step"] for e in golden]
     for actual, expected in zip(recorded, golden):
         assert actual["state"] == expected["state"], actual["step"]
+    # Before the digests: where S2c changed a step's values, its digest is
+    # this tree's own, and only the recorded key order can say the order
+    # is still the old one.
+    _assertKeyOrder("board operations", keyOrders)
+    for actual, expected in zip(recorded, golden):
+        assert actual == expected, actual["step"]
+    assert mismatches == {step: {} for step in mismatches}
+
+
+def _recordKeyOrder(section, keyOrders):
+    # Read now, not at import: the other section may have been written by
+    # the test that ran just before.
+    recorded = json.loads(KEY_ORDER_PATH.read_text(encoding="utf-8")) \
+        if KEY_ORDER_PATH.exists() else {}
+    recorded[section] = keyOrders
+    KEY_ORDER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    KEY_ORDER_PATH.write_text(json.dumps(
+        recorded, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def _assertKeyOrder(section, keyOrders):
+    """Every dict of the board subtree has the keys, in the order, the
+    pre-S2c tree left after the same step -- the swap / move steps whose
+    values S2c changed on purpose included."""
+    assert KEY_ORDER is not None and section in KEY_ORDER, (
+        f"{KEY_ORDER_PATH} has no {section!r}: record it on the pre-S2c "
+        "tree (see KEY_ORDER_PATH above)")
+    recording = KEY_ORDER[section]
+    assert [e["step"] for e in keyOrders] == [e["step"] for e in recording]
+    differences = {}
+    for actual, expected in zip(keyOrders, recording):
+        paths = set(actual["keyOrder"]) | set(expected["keyOrder"])
+        changed = {path: (actual["keyOrder"].get(path),
+                          expected["keyOrder"].get(path))
+                   for path in sorted(paths)
+                   if actual["keyOrder"].get(path)
+                   != expected["keyOrder"].get(path)}
+        if changed:
+            differences[actual["step"]] = changed
+    assert differences == {}
+
+
+@pytest.fixture
+def teamLogo(autonaApp):
+    path = autonaApp.dir / TEAM_LOGO
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"")
+    try:
+        yield path
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def test_swap_operations_publish_the_recorded_state(
+        board, autonaApp, teamLogo):
+    """The swap and the player moves, against the pre-S2c recording: the
+    same state, cycles and publication apart from what S2c changed on
+    purpose (S2C_SWAP_CHANGES), the statistics fetched once per operation,
+    and every card showing its slot after every step."""
+    mismatches = {}
+
+    def check(step):
+        if not (RECORD or RECORD_KEY_ORDER):
+            mismatches[step] = _cardMismatches(board)
+            mismatches[step].update(_losersMismatches(board))
+
+    keyOrders = []
+    recorded = _runSteps(autonaApp, board, afterEach=check,
+                         steps=_swapSteps(board), stats=True,
+                         keyOrders=keyOrders)
+
+    if RECORD_KEY_ORDER:
+        _recordKeyOrder("swap operations", keyOrders)
+        return
+    if RECORD:
+        SWAP_GOLDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SWAP_GOLDEN_PATH.write_text(json.dumps(
+            {"operations": recorded}, ensure_ascii=False, indent=1),
+            encoding="utf-8")
+        return
+    assert SWAP_GOLDEN is not None, (
+        f"{SWAP_GOLDEN_PATH} is missing: it is recorded on the pre-S2c tree "
+        "(6a6f04cc) with AUTONA_RECORD_BOARD_OPERATIONS=1 -k swap_operations")
+    recording = SWAP_GOLDEN["operations"]
+    golden = [_withChanges(entry, S2C_SWAP_CHANGES, recording)
+              for entry in recording]
+    assert [e["step"] for e in recorded] == [e["step"] for e in golden]
+    for actual, expected in zip(recorded, golden):
+        assert actual["state"] == expected["state"], actual["step"]
+    # Before the digests: where S2c changed a step's values, its digest is
+    # this tree's own, and only the recorded key order can say the order
+    # is still the old one.
+    _assertKeyOrder("swap operations", keyOrders)
+    for actual, expected in zip(recorded, golden):
         assert actual == expected, actual["step"]
     assert mismatches == {step: {} for step in mismatches}
 
@@ -501,9 +898,11 @@ def _cardMismatches(board):
 
 # The steps that are one operation in one save cycle today. The others are
 # still a widget writing field by field (a SetData per card, a Clear per
-# card): S2c/S2d move those writers into core, where an operation is one save
-# block. The losers flag became one in S2b -- it was the flag plus one cycle
-# per player card.
+# card): S2d onwards moves those writers into core, where an operation is one
+# save block. The losers flag became one in S2b -- it was the flag plus one
+# cycle per player card. The swap and the moves were already one cycle as a
+# copy between cards (inside the board's SaveBlock) and are one as the core
+# operation (AutonaActions.SwapTeams / SwapPlayers).
 ONE_CYCLE_STEPS = ("losers", "swap teams", "move a player down",
                    "swap teams back", "reset match", "load a set",
                    "reset all inputs", "losers on a filled team",
@@ -523,9 +922,9 @@ def test_a_single_operation_is_a_single_save_cycle(board, autonaApp):
 
 # ── a slot written in the state reaches its card ─────────────────────────
 #
-# What S2c's core swap and S2d's core clear will do: write the slot without
-# going through the card. Nothing below touches a widget before asserting
-# on it.
+# What S2c's core swap does and S2d's core clear will do: write the slot
+# without going through the card. Nothing below touches a widget before
+# asserting on it.
 
 def _publishSlot(path, name, sponsor, country, region, seed, characters):
     """Write a whole slot the way core will: PlayerService, one block."""
@@ -1032,3 +1431,131 @@ def test_a_card_removed_before_the_pass_is_not_rendered(board, autonaApp):
                 if any(card is gone for gone in removed)]
     assert {id(card) for card in rendered} \
         == {id(card) for card in board.playerWidgets}
+
+
+# ── a swap / move while a field is being typed in (ADR-005 S2c) ─────────
+#
+# The copy that used to swap read the fields as they stood, so a tag still
+# being typed went along with its player. The swap exchanges the state now,
+# and a field being typed in is one the render leaves alone: without the
+# board finishing the field first, the text stayed on the card and was
+# committed, on focus-out, into the player who had arrived there.
+
+def _swapFrom(entry, board, app):
+    if entry == "button":
+        board.SwapTeams()
+    elif entry == "hotkey":
+        from src.AutonaHotkeys import AutonaHotkeys
+        from src.core.Actions import AutonaActions
+        with patch.object(AutonaActions.instance, "ActiveBoard",
+                          return_value=BOARD):
+            AutonaHotkeys.signals.swap_teams.emit()
+    else:
+        assert app.actions().swap_teams(BOARD) == "OK"
+
+
+@pytest.mark.parametrize("entry", ["button", "hotkey", "web"])
+def test_a_tag_being_typed_travels_with_its_player(board, autonaApp, entry):
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    left, right = board.team1playerWidgets[0], board.team2playerWidgets[0]
+    PlayerService(left.path).SetText(schema.PLAYER_TAG_KEY, "LEFT")
+    PlayerService(right.path).SetText(schema.PLAYER_TAG_KEY, "RIGHT")
+    autonaApp.settle()
+    tag = left._w(schema.PLAYER_TAG_KEY, QLineEdit)
+    sponsor = left._w(schema.PLAYER_SPONSOR_KEY, QLineEdit)
+    leftTag = f"{left.path}.{schema.PLAYER_TAG_KEY}"
+    rightTag = f"{right.path}.{schema.PLAYER_TAG_KEY}"
+
+    with _onScreen(board, autonaApp):
+        _focus(tag, autonaApp)
+        QTest.keyClicks(tag, "!")
+        assert autonaApp.get(leftTag) == "LEFT", "typing committed by itself"
+
+        _swapFrom(entry, board, autonaApp)
+        autonaApp.settle()
+
+        assert autonaApp.get(rightTag) == "LEFT!"
+        assert "LEFT!" in autonaApp.get(f"{right.path}.mergedName")
+        assert autonaApp.get(leftTag) == "RIGHT"
+        # Leaving the field later writes nothing over the newcomer.
+        _focus(sponsor, autonaApp)
+        assert autonaApp.get(leftTag) == "RIGHT"
+        assert tag.text() == "RIGHT"
+        assert _cardMismatches(board) == {}
+
+
+def test_a_tag_being_typed_moves_with_its_player(board, autonaApp):
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    board.playerNumber.setValue(2)
+    autonaApp.settle()
+    top, below = board.team1playerWidgets
+    PlayerService(top.path).SetText(schema.PLAYER_TAG_KEY, "TOP")
+    PlayerService(below.path).SetText(schema.PLAYER_TAG_KEY, "BELOW")
+    autonaApp.settle()
+    tag = top._w(schema.PLAYER_TAG_KEY, QLineEdit)
+    sponsor = top._w(schema.PLAYER_SPONSOR_KEY, QLineEdit)
+
+    with _onScreen(board, autonaApp):
+        _focus(tag, autonaApp)
+        QTest.keyClicks(tag, "!")
+        top.btMoveDown.click()
+        autonaApp.settle()
+
+        assert autonaApp.get(f"{below.path}.{schema.PLAYER_TAG_KEY}") \
+            == "TOP!"
+        assert autonaApp.get(f"{top.path}.{schema.PLAYER_TAG_KEY}") \
+            == "BELOW"
+        _focus(sponsor, autonaApp)
+        assert autonaApp.get(f"{top.path}.{schema.PLAYER_TAG_KEY}") \
+            == "BELOW"
+        assert _cardMismatches(board) == {}
+
+
+def test_a_tag_being_typed_with_its_candidates_open_travels_too(
+        board, autonaApp):
+    """The tag's completer popup open on the field (it opens on focus, and
+    while typing whenever a DB player matches): losing the focus with it
+    open finished nothing -- the typed text stayed on the card and the
+    popup stayed up over the player who arrived."""
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    left, right = board.team1playerWidgets[0], board.team2playerWidgets[0]
+    PlayerService(left.path).SetText(schema.PLAYER_TAG_KEY, "LEFT")
+    PlayerService(right.path).SetText(schema.PLAYER_TAG_KEY, "RIGHT")
+    autonaApp.settle()
+    tag = left._w(schema.PLAYER_TAG_KEY, QLineEdit)
+    sponsor = left._w(schema.PLAYER_SPONSOR_KEY, QLineEdit)
+    completer = tag.completer()
+    assert completer is not None, "the tag has no completer to open"
+    # Candidates the typed text matches, in place of the harness's empty
+    # player DB; the card's own model goes back afterwards.
+    original = completer.model()
+    candidates = QStringListModel(["LEFT!ONE", "LEFT!TWO"])
+    completer.setModel(candidates)
+    try:
+        with _onScreen(board, autonaApp):
+            _focus(tag, autonaApp)
+            QTest.keyClicks(tag, "!")
+            autonaApp.settle()
+            popup = completer.popup()
+            assert popup.isVisible() \
+                and QApplication.activePopupWidget() is popup, \
+                "the harness could not open the candidates"
+
+            _swapFrom("hotkey", board, autonaApp)
+            autonaApp.settle()
+
+            assert not popup.isVisible()
+            assert autonaApp.get(f"{right.path}.{schema.PLAYER_TAG_KEY}") \
+                == "LEFT!"
+            assert autonaApp.get(f"{left.path}.{schema.PLAYER_TAG_KEY}") \
+                == "RIGHT"
+            _focus(sponsor, autonaApp)
+            assert autonaApp.get(f"{left.path}.{schema.PLAYER_TAG_KEY}") \
+                == "RIGHT"
+            assert tag.text() == "RIGHT"
+            assert _cardMismatches(board) == {}
+    finally:
+        completer.setModel(original)

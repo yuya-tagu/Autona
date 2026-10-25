@@ -61,21 +61,15 @@ TEAM_LOGO_DIR = "./user_data/team_logo"
 class SetLoadService:
     """The set-loading rules of one board. Bound to ``score.{number}``.
 
-    ``teamsSwapped`` is a callable telling whether the operator has swapped
-    the two sides. The flag is mirrored into ``score.{n}.teamsSwapped``, but
-    the authority is still the board's own attribute -- the swap itself is a
-    widget-to-widget copy of player *field values*
-    (``AutonaBasePlayerWidget.SwapWith``) that Step 3 explicitly left behind,
-    and it stays there for as long as those values live in the widgets
-    rather than in the state (see the note in ``Actions.py``), so the flag
-    moves here with it. Injecting it follows
-    ``StatsService.playersPerTeam``: core reads no Qt object, and the two
-    answers cannot drift because there is still only one of them.
+    Which way round the two sides are is read from the state,
+    ``score.{n}.teamsSwapped``, which ``AutonaActions.SwapTeams`` toggles
+    (ADR-005 S2c). Until then the swap was a widget-to-widget copy of the
+    player fields and the board's own ``teamsSwapped`` attribute was the
+    authority, handed in here as a callable; the key was only its mirror.
     """
 
-    def __init__(self, scoreboardNumber, teamsSwapped):
+    def __init__(self, scoreboardNumber):
         self.scoreboardNumber = scoreboardNumber
-        self._teamsSwapped = teamsSwapped
 
     # ── key paths ────────────────────────────────────────────────────────
 
@@ -97,7 +91,7 @@ class SetLoadService:
         on the right, so it writes ``team.2``.
         """
         setTeam = 1 if int(setTeam) == 1 else 2
-        if self._teamsSwapped():
+        if StateManager.Get(f"{self.prefix}.teamsSwapped", False):
             return 3 - setTeam
         return setTeam
 

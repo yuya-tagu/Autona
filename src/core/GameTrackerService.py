@@ -311,7 +311,7 @@ class GameTrackerService:
         """Publish a score set from outside, and follow it with the stages.
 
         Still the entry point for the paths that drive the score spinbox
-        directly (ClearScore, SwapTeams, ResetAllInputs): the widget
+        directly (ClearScore, ResetAllInputs): the widget
         changes, and this writes the result. The paths that write the state
         first -- AutonaActions.AdjustScore / ResetScore, and a loaded set's
         SetLoadService.ApplyScores -- instead call SyncStagesToScore() with

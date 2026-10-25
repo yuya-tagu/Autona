@@ -21,8 +21,12 @@ Subclasses are responsible for:
 - SetData, SetCharactersPerPlayer, ReloadCharacters, SetIndex,
   SetupAutocomplete (widget-specific: .ui widgets, icon sizes, fonts,
   proxy models — kept per-subclass)
-- _swapRestoreTail / _styleCountryStateWidgets (small hooks that customise
-  the otherwise-shared SwapWith / _WireCountryState defined here)
+- _styleCountryStateWidgets (a small hook that customises the otherwise
+  shared _WireCountryState defined here)
+
+Swapping two players is not a widget operation any more (ADR-005 S2c): the
+slots are exchanged in the state (AutonaActions.SwapTeams / SwapPlayers)
+and each card renders its own (AutonaScoreboardPlayerWidget.RenderFromState).
 """
 import threading
 import traceback
@@ -64,6 +68,8 @@ class AutonaBasePlayerWidget(QGroupBox):
         # Lazy widget cache — populated by _w(); avoids O(n) findChild walks
         # on hot paths (SetData, ExportMergedName, ExportPlayerImages...).
         self._widget_cache = {}
+        # The skin combos' model while no character is picked (LoadSkinOptions).
+        self._emptySkinModel = None
 
     def _w(self, name, klass=QWidget):
         """Cached findChild. Same lookup name always returns the same
@@ -304,7 +310,17 @@ class AutonaBasePlayerWidget(QGroupBox):
             target.setModel(AutonaGameAssetManager.instance.skinModels.get(
                 characterData.get("en_name")))
         else:
-            target.setModel(QStandardItemModel())
+            # No character, no skins: one empty model per card, made once.
+            # A fresh QStandardItemModel per call (as this used to be) left
+            # one more model behind every time a slot lost its character --
+            # which the render (RenderFromState) now does on every swap that
+            # moves a typed name or a blank row onto the card. Nothing ever
+            # adds a row to it, so the card's combos can share it, and
+            # handing a combo the model it already has changes nothing
+            # (agent-pitfalls #13: reuse a model rather than replace it).
+            if self._emptySkinModel is None:
+                self._emptySkinModel = QStandardItemModel(self)
+            target.setModel(self._emptySkinModel)
 
     def GetCurrentPlayerTag(self):
         gamerTag = self._w(schema.PLAYER_TAG_KEY).text()
@@ -347,67 +363,6 @@ class AutonaBasePlayerWidget(QGroupBox):
                         continue  # only executed if the inner loop DID break
                 else:
                     c.setCurrentIndex(0)
-
-    def SwapWith(self, other):
-        """Swap all field values + seed/city/avatar/id state between this
-        widget and another. The per-widget restore action after the fields are
-        copied differs by subclass (see _swapRestoreTail)."""
-        if self == other:
-            logger.info("Swapping player with themselves")
-            return
-        try:
-            StateManager.BlockSaving()
-            with self.dataLock:
-                with other.dataLock:
-                    tmpData = []
-
-                    # Save state
-                    for w in [self, other]:
-                        data = {}
-                        for widget in w.findChildren(QWidget):
-                            if type(widget) == QLineEdit:
-                                data[widget.objectName()] = widget.text()
-                            if type(widget) == QComboBox:
-                                data[widget.objectName()] = widget.currentIndex()
-                            if type(widget) == QPlainTextEdit:
-                                data[widget.objectName()] = widget.toPlainText()
-                        data["online_avatar"] = StateManager.Get(
-                            f"{w.path}.online_avatar")
-                        data["id"] = StateManager.Get(
-                            f"{w.path}.id")
-                        data["seed"] = StateManager.Get(
-                            f"{w.path}.seed")
-                        data["city"] = StateManager.Get(
-                            f"{w.path}.city")
-                        tmpData.append(data)
-
-                    # Load state
-                    for i, w in enumerate([other, self]):
-                        for objName in tmpData[i]:
-                            widget = w.findChild(QWidget, objName)
-                            if widget:
-                                if type(widget) == QLineEdit:
-                                    widget.setText(tmpData[i][objName])
-                                    widget.editingFinished.emit()
-                                if type(widget) == QComboBox:
-                                    widget.setCurrentIndex(tmpData[i][objName])
-                                if type(widget) == QPlainTextEdit:
-                                    widget.setPlainText(tmpData[i][objName])
-                        w._swapRestoreTail(tmpData[i])
-                        # Neither field is a widget value the loop above
-                        # could have carried across: the seed spinbox is not
-                        # one of the three copied types and the city has no
-                        # input at all, so both are moved through the state
-                        # they were read from.
-                        w.player.SetSeed(tmpData[i]["seed"])
-                        w.player.SetCity(tmpData[i]["city"])
-        finally:
-            StateManager.ReleaseSaving()
-
-    def _swapRestoreTail(self, data):
-        """Subclass hook: per-widget restore action run after fields are copied
-        and before seed/city are re-set. Default: no-op."""
-        pass
 
     def _WireCountryState(self):
         """One-time wiring of the country / region pair. Subclasses call this

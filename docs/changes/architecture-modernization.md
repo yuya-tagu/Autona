@@ -394,7 +394,8 @@ Tauri / Electron 移行 / core の別プロセス常駐（ヘッドレス起動�
 4. **追跡中セット（`lastSetSelected`）は `SetLoadService` に置く**（state の外）。state の `set_id` を正本にすると、クリアで `set_id` が null になる外部差分が出るため
 5. **既存バグの扱い**: 明らかなバグ（mains が選手と一緒に動かない / seed バッジが古いまま / tracker ON でステージ順が崩れる / swap で地域が落ちる＝golden で確認できた場合）は直してテストで pin し、golden 差分としてここに明記する。「Clear で city が消えない」は直さず記録のみ。バリアントのコンボ名衝突は内容次第（直すなら同様に pin）
 6. **クルー（board 3）の `teamsSwapped` は対象外**（属性を残し、`get_swap(3)` は属性を読み続ける）
-7. **未構築ボードの `HoldSubtree` 登録を `bootstrap`（`SeedBoard` 直後）へ移すのは S2c で可**（ORDER CONSTRAINT を更新する）。理由: 今は登録がボードの `__init__` にしかなく、Web 操作が core 直行になると、未構築ボードへの操作が「構築して hold」から「hold なしで即 publish」に変わる（既存の `Actions.AdjustScore` は既にこの挙動）
+7. ~~**未構築ボードの `HoldSubtree` 登録を `bootstrap`（`SeedBoard` 直後）へ移すのは S2c で可**~~ → **撤回（S2c の review、2026-10-23）**。理由: Web UI には反映ボタンが無く（`web/src` に `:apply` の呼び出しが無い）、デスクトップの反映は表示中のボードだけに効く。起動時から held にすると、形式と食い違う面への書き込み（例: 1v1 表示中に Web の `/team` ページから board 2 へ `score:set` / reset / swap / カラー）が OBS にも Web にも出ないまま、そのボードを構築したときの `SeedBoard` で消える。さらに held が残り続け、保存サイクルごとに state 全量の複製が走る。未構築ボードへの core 直結の書き込みは従来どおり即時公開し、ボードを構築してから操作していた Web の swap / `get_swap` は構築を維持する（下記 S2c）
+   - 当初の理由（今は登録がボードの `__init__` にしかなく、Web 操作が core 直行になると、未構築ボードへの操作が「構築して hold」から「hold なしで即 publish」に変わる）は、swap の Web 経路が構築を続けることで解消した
 8. **swap 後のスロット内キー順の変化は golden で確認し、変わるなら挿入順を保つ実装を優先する**（外部契約の安全側）。swap の delta が 1 回になるのは意図した改善として扱う。
    実測（S2a の golden）: 現行の `SwapTeams` は既に 1 SaveBlock = held 1 サイクルで、反映時は delta が 100 行を超えるため `state_big_change` として送られている。設計案で書いた「複数サイクル → 1 回」は swap については誤りで、複数サイクルになっているのは losers（3）・選手のクリア（カード数）・`SetData`（カード数）・キャラ選択（2）などウィジェット主導の操作のほう
 
@@ -467,7 +468,7 @@ LOSERS フラグと、そのチームの選手名に付く ` [L]`（`mergedName`
   - S1d の書き込み列 golden（`test_player_slot_publish.py`）では、「clear」ステップ（ボード・エディタとも）で `name` の書き込みが名前の組と画像より前に来る（`Clear()` がタグ欄の `editingFinished` を通るため）。書き込みの集合と保存サイクル（1）は同じで、キーはそろっているので state のキー順と delta も同じ。`_expectedOperations` に意図した差分として足した
   - pin: `test_a_losers_flip_from_another_thread_mid_name_edit_keeps_the_new_name`（カードの publish の直後に実スレッドから `SetTeamLosers` を走らせる。旧順では `OLD [L]` が残って落ちることを確認した）
 - **`/api/v1` `PATCH set` の `losers`**: `set_route` に渡してスワップ時にチーム番号を反転させる経路をやめ、状態側のチームで新設の `WebServerActions.set_team_losers(n, team, value)`（`@gui_thread_sync`）を呼ぶ。中身は `AutonaActions.SetTeamLosers` と、下記の旧経路の副作用。ルートはこれを呼ぶだけで、旧クエリと同じ適用順（他のキー → losers → `teamName`）を守るため 1 つの GUI タスク内で順に呼ぶ（`teamName` を別呼び出しにしているのもこの順のため）。legacy の `-set?losers=` は変えていない（set 形式・スワップで反転・`match_en` を空にする）
-  - **旧経路の副作用は外部挙動として維持した**（S2 の方針）。旧経路は `ChangeSetData` ペイロードだったので、(1) `match_en` を空にしていた（`ApplyMatchInfo` は `round_name_en` の無いペイロードで空にする。フラグが変わらなくても空にする）、(2) 未構築のボードを構築していた（`set_route` / `get_swap` → `GetScoreboard`。構築で `score.{n}` が held 登録され、書き込みは反映待ちになる）。`set_team_losers` は、ボードを構築（`EnsureScoreboard`）し、そのボードの `setLoad.ApplyMatchInfo({})` と `SetTeamLosers` を 1 SaveBlock で適用する（旧経路と同じく held 1 サイクル）。当初はルート（`AutonaApiV1`）が `SetLoadService` をその場で組んでいたが、review で層の逸脱とされ、構築済みボードの `setLoad` を使う `WebServerActions` 側へ移した。(2) は decision 7（未構築ボードの held 登録を bootstrap へ）を実施すれば不要になる
+  - **旧経路の副作用は外部挙動として維持した**（S2 の方針）。旧経路は `ChangeSetData` ペイロードだったので、(1) `match_en` を空にしていた（`ApplyMatchInfo` は `round_name_en` の無いペイロードで空にする。フラグが変わらなくても空にする）、(2) 未構築のボードを構築していた（`set_route` / `get_swap` → `GetScoreboard`。構築で `score.{n}` が held 登録され、書き込みは反映待ちになる）。`set_team_losers` は、ボードを構築（`EnsureScoreboard`）し、そのボードの `setLoad.ApplyMatchInfo({})` と `SetTeamLosers` を 1 SaveBlock で適用する（旧経路と同じく held 1 サイクル）。当初はルート（`AutonaApiV1`）が `SetLoadService` をその場で組んでいたが、review で層の逸脱とされ、構築済みボードの `setLoad` を使う `WebServerActions` 側へ移した。(2) は decision 7（未構築ボードの held 登録を bootstrap へ）を実施すれば不要になる、としていたが、decision 7 は S2c で撤回したので (2) の構築は残る
   - losers だけの PATCH で `set_route` を呼ばなくなったが、上の 2 つ以外に `ChangeSetData` が losers だけのペイロードでしていたことは無い（`ApplyScores` は該当キーが無く何もしない。エントラント・単独選手の分岐にも入らず、`ApplyBracketType` の前に戻る）
   - pin: `test_set_patch_losers_still_blanks_the_english_round_text`（空にする・同じフラグの再送でも空にする・held 1 サイクル）、`test_set_patch_losers_on_a_board_not_built_yet_still_waits_for_apply`。legacy と同じ state になることを見る比較（3 テスト・4 ケース。`players`（人数増）と `losers` を 1 PATCH で送る `test_set_patch_players_and_losers_together_match_legacy_query` を含む）は `match_en` も含めて一致する。`set_team_losers` の構築と `ApplyMatchInfo` を外すと 6 ケースが落ち、ルートが losers を `players` より先に適用すると人数増のケースが落ちることを確認した。仕様書 `.claude/design/external-control-api.md` §6.5 を更新した
 - **golden**: 移行前（76a740fb）で 8 ステップを追加し、記録し直した（既存の 14 ステップは bd0fa50b の記録と完全に一致）。追加したステップは、2 人に戻して両チームを `SetData` / 埋まったチームに losers / losers のチームで名前を手入力 / losers のチームで 3 人に増やす / 1 人に戻す / losers 付きのセット読込で人数が増える / losers 側があるまま swap / スワップ中に losers だけのセット読込。各ステップに、反映 delta をキー順を除いて比べる digest（`publishedRows`）も足した。golden は移行前の記録のまま残し、意図した差分を `S2B_CHANGES`（`tests/test_player_card_render.py`）に列挙して適用してから比較する（列挙していないフィールドはすべて一致を要求する）
@@ -485,3 +486,62 @@ LOSERS フラグと、そのチームの選手名に付く ` [L]`（`mergedName`
   - 名前の確定（`NameChanged`）はウィジェットのテキストで publish し、作り直しは state の `team` / `name` を使う。確定のたびに両者は一致する（同じ `editingFinished` で state に入る）。フォーカス中で未確定の打鍵は、旧実装（カードのテキストで作る）と違って作り直しに入らない。state と一致する側に寄った
   - `SetTeamLosers` は core なので GUI スレッド以外からも呼べる（今の呼び出しはすべて GUI スレッド: チェックボックス・`ChangeSetData`・v1 の `set_team_losers`）。カードの名前確定との競合は、上記の接続順の変更で解消した
   - ボード構築時の `losers.toggled.emit(False)` も `SetTeamLosers` を通るが、作り直す対象は無い。`__init__` の `SeedBoard` がサブツリーを skeleton に戻した後（`_WireTeamColumn`）で、選手カードを作る（`playerNumber.setValue(1)`）より前なので、state にそのチームのスロットが無い。skeleton にフラグのキーが無いので `False` の書き込みだけは起きる（旧経路と同じ）
+
+#### S2c swap を core へ（2026-10-23・PR #224）
+
+チームスワップと選手カードの上下移動を、カード間の値コピー（`SwapWith`）から state の入れ替え（`AutonaActions.SwapTeams` / `SwapPlayers`）にした。カードは S2a の描画で追従する。
+
+- **`AutonaActions.SwapTeams(board)`**（board 1/2。board 3 は `False` を返し、呼び出し側がクルーウィジェット自身の入替に委ねる = 決定 6）: 1 SaveBlock・`StateManager.lock` 下で、両チームにある選手スロット・スコア・LOSERS・チーム名・ロゴ・ステージ記録（`GameTrackerService.SwapStageResults` で鏡映）を入れ替え、`score.{n}.teamsSwapped` を反転し、アップセット係数を計算し直す。**チームカラーは入れ替えない**（列の色。旧実装も入れ替えていない）
+- **`AutonaActions.SwapPlayers(board, team, first, second)`**: 同じチームの 2 スロットを入れ替える（カードの上下移動）。同じスロット同士（先頭の上・末尾の下）は何もしない
+- **入れ替えはキー単位**（スロットの dict ごと差し替えない）。理由: 両側にあるキーは各 dict 内の位置を保つので、`program_state.json` と Socket.IO delta のキー順が旧実装と一致する（決定 8・外部契約の安全側）。片側にしか無いキーも旧実装の出力に合わせた
+  - 空欄に当たる既定値を入れる（`SLOT_DEFAULTS`。テキストは `""`、seed は `0`）。既定値の無いキー（birthday・国・キャラ・mains・スポンサー画像など）は有無ごと動く
+  - テキスト欄・合成名・アバター 2 キー・seed は両側に必ず書く（`SLOT_ALWAYS`。旧実装が両カードで無条件に publish していた。seed は旧 `SetSeed` と同じく常に int（`SLOT_CONVERT`）
+  - `id` / `city` は None のためにキーを作らない（`SLOT_NONE_ABSENT`。`PlayerService.SetCity` / `SetPlayerId` のガードと同じ）。S2a で記録した「city を持つ選手と持たない選手を swap すると、持っていた側に `city: null` が残る」は旧実装どおり
+  - 新しいキーは旧実装の書き込み順（`SLOT_ORDER`）で末尾に足す。チーム側は `TEAM_SWAP_ORDER` の 4 キー（スコア・LOSERS・チーム名・ロゴ）だけ
+  - **チーム入替は両チームにあるスロットだけ**を入れ替える。片側だけのスロット（カードの無いスロットを state が持っている場合）は動かさない（旧実装はカードを組にして入れ替えていた）
+- **`teamsSwapped` の正本を state にした**: ボード属性と `AutonaActions.SetTeamsSwapped`（ミラーの publish）を削除。`SetLoadService.DisplayTeam` は `score.{n}.teamsSwapped` を読む（callable の注入をやめ `SetLoadService(scoreboardNumber)`）。`WebServerActions.get_swap` もボード 1/2 は state を読む（ボードの構築は従来どおり）。クルー（board 3）は属性のまま（決定 6）
+- **入口**: SWAP ボタン → `board.SwapTeams()`、上下移動ボタン → `board._MovePlayer` → `SwapPlayers`。ホットキー `swap_teams` は `AutonaHotkeys.ConnectActions` が結線し、`ActiveBoard()` を入れ替える（決定 2。旧: 構築済みの全ボードが受けていて、形式を切り替えた後は両ボードが入れ替わった。クルー形式では何もしない）。アクティブボードが未構築なら何もしない（旧実装どおり。未構築ボードは held でないので、入れ替えると即時公開され、構築時のシードで消える）。Web（legacy REST / Socket.IO / v1 `:swap-teams`）は `WebServerActions.swap_teams` が**ボードを構築してから** `board.SwapTeams()` を呼ぶ（決定 7 の撤回により、構築は旧経路と同じく維持。構築前に入れ替えると即時公開されたうえ、構築時の `SeedBoard` で消える）
+  - **Web の `swap_teams` は `@gui_thread_sync` を残した**（S2f まで）。理由: カードの入力確定は GUI スレッドで「フィールド → 合成名」の 2 書き込みに分かれている（`_OnTextChanged` → `NameChanged`）。別スレッドの swap がその間に入ると、合成名が反対のスロットに残る（S2b の losers と同じ形）。結果として、Web の swap は応答時点で完了している（旧: queued シグナルで、入替前に `OK` を返していた）
+  - **入力中の欄は入替・移動の前に確定する**（`AutonaScoreboardWidget.CommitFocusedEdit`）。旧実装は欄の表示をそのまま読んでいたので、打ちかけのタグは選手と一緒に動いていた。新実装は state を入れ替え、描画はフォーカス中の欄を飛ばすので、何もしないと打ちかけの文字がカードに残り、フォーカスアウトで「入ってきた選手」に書かれる。そこで、そのボード内（詳細ダイアログ含む）にフォーカスがあればフォーカスを外し、Qt に確定（`editingFinished`）させてから入れ替える。オペレーターが別の場所をクリックしたときと同じ確定で、文字はその選手のスロットに入ってから動く。SWAP ボタン・上下移動・ホットキー（構築済みのアクティブボード）・Web の全入口で行う。欄の補完ポップアップ（タグの候補。フォーカスで開く）が開いていれば先に閉じる（開いたままフォーカスを外すと `editingFinished` が出ず、ポップアップも入ってきた選手の欄に残る。閉じても候補は選ばれない）。編集可能コンボの未確定の打鍵はフォーカスアウトで確定しない（S2a と同じ）
+  - `get_scoreboard` の未構築ボード構築は残した（応答の形を変えない安全側）
+- **カード・スコア・ステージは held サイクルから追従する**: カードは描画の予約（S2a）、スコアはスピンボックスの同期（`_SyncScoreDisplays`）。ステージボタンは、ボードの `_NoticeSwap`（held サイクルでフラグの反転を検知）が `individualGameTracker.RenderStageResults()` で描き直す（同点の swap ではスコアが動かず、`_SyncScoreDisplays` が描かないため）。トラッカーの使われていなかった `SwapStageResults`（ウィジェット側）は `RenderStageResults` に置き換えた
+  - **入替サイクルでは、ボードがトラッカーにスコアの変化を伝えない**（`_SyncScoreDisplays(followStages=False)`。`_NoticeSwap` が入替を検知したサイクルだけ）。理由: 入替は記録の鏡映とスコアの交換を同じサイクルで済ませている。旧実装はそこで記録を付け直して並びを崩していた（T2 T1 T1 → T1 T2 T1。スコアは 1-2 なのに記録は 2-1）。当初は `GameTrackerService.SyncStagesToScore` に「集計と一致していれば書き換えない」ガードを置いたが、review で他の経路（`AdjustScore` / `ResetScore` / `ApplyScores` / `UpdateScore`）でも、記録とスコアがずれている状態（タイの解除後など）で挙動が変わると指摘されたため、swap 経路に限定した（`GameTrackerService` は HEAD のまま）
+- **統計の再取得は操作ごとに 1 回**: カードは自分が id を変えたとき（`ExportPlayerId`）にしか取得しないので、ボードが出す。チーム入替は `_NoticeSwap` が、両チームにあるスロット対のどこかで id が違えば両チーム分。上下移動は `_MovePlayer` が、2 スロットの id が違えば動かしたチーム分。発火は `QTimer.singleShot(0)` でイベントループに戻ってから（#9）。入口が複数あるので、state から検知する
+- **アップセット係数は操作が core 内で計算し直す**（`_UpdateUpsetFactor` → `StatsService.UpdateUpsetFactor`。人数は state のスロット数）。S2a の残置「seed の描画では upset_factor が再計算されない」への手当て。係数は held 対象外の統計キーなので即時公開される。Web の swap はボードを構築してから行うので、旧実装（カードの seed 経由で同じキーを書いていた）と同じく構築済みボードでの即時公開になる
+- **`LoadSkinOptions` の空モデルを使い回す**（S2a の残置への判断）: キャラ無しのときに毎回新しい空の `QStandardItemModel` を作っていたのを、カードごとに 1 個（`_emptySkinModel`。カードを親にして初回だけ作る）にした。描画が実際に走る S2c 以降、空になるたびにモデルが増えるのを防ぐ（#13 の「差し替えずに使い回す」）
+- **削除**: `AutonaBasePlayerWidget.SwapWith` と `_swapRestoreTail`（基底・スコアボードカード）、ボードの `SwapTeams` シグナル・`teamsSwapped` 属性・swap ホットキーの接続、`AutonaActions.SetTeamsSwapped`、トラッカーウィジェットの `SwapStageResults`
+- **golden**
+  - 既存の 22 ステップ（`golden.json`）は記録し直していない。意図した差分を `S2C_CHANGES` に列挙して適用してから比較する（S2b と同じ方式）。差分は 6 ステップ
+    - 「swap teams」「move a player down」「swap teams back」「pick a character」「reset match」: 選手と一緒にバリアントと mains が動くぶん state が変わる（`travel`。各選手のバリアント・mains を「losers」ステップ時点のその選手のものに置き換えて期待値を作る。バリアントは同じキャラのままのときだけ）
+    - 「clear players」: state は同じ。反映 delta に、swap で残るようになった 2 つのバリアントの削除が加わる
+    - 保存サイクル数は全ステップで不変
+  - **swap golden を追加した**（`swap_golden.json`、移行前の 6a6f04cc で 14 ステップを記録）: id・片側だけの city・選手ごとに違う mains・片チームだけのロゴ・トラッカー ON（best of 5、T2 T1 T1）・losers を揃えたボードで、swap / 下へ / 上へ / 先頭の上（何もしない）/ トラッカー ON で 1 点 / swap 戻し。各ステップで統計シグナルの発火数も記録した。意図した差分（`S2C_SWAP_CHANGES`）
+    - mains とバリアントが選手と一緒に動く（`travel`）
+    - ステージの並びが鏡映になる（swap 後 T1 T2 T2。旧は T1 T2 T1）。以降のステップもこの並びを引き継ぐ
+    - 統計は操作ごとに 1 回: swap は 5 シグナル各 1（旧: Recent 6・LastSets / Standings 各 3）、移動は Recent と動かしたチームの 2 つが各 1（旧: 各 4 または 2）。`UpsetFactorCalculation` シグナルは 0（旧: 2〜4。core が直接計算する）
+    - 「下へ」は反映 delta が変わる（mains が動く分）。「上へ」は反映が 100 行を超えて `state_big_change` になる（旧: delta）
+    - 保存サイクル数（swap・移動とも 1）は不変。地域・ロゴ・city・id は旧実装と同じ state
+  - **キー順の録画を追加した**（`key_order.json`。6a6f04cc で、上の 2 つのステップ列の各ステップ後に、ボードのサブツリーの全 dict のキーの挿入順を記録。`assets` / `variant` / `mains` の中身は値が意図して変わるので辿らず、親の dict での位置だけを見る）。state digest は値が変わったステップでは新実装自身のものに置き換えているのでキー順を守れない。このため、キー順はこの録画と全ステップで照合する。**36 ステップすべてで旧実装と一致**（片側にしか無いキーを足す順を含む）。`SLOT_ORDER` の 2 キーを入れ替えると落ちることを確認した。照合範囲はチームボード（board 2）の `score.2` サブツリーの state の挿入順だけ（1v1 ボードは録画していない。入替のコードは共通）。反映 delta の行順は、値が変わらないステップでだけ golden の `publishedRows` が見る
+  - 意図した差分で golden に現れないもの: **birthday が選手と一緒に動く**（旧実装は隠しチェックボックスを読まず、カードに残っていた。golden の選手は全員 false）、**seed は常に int で両側に書く**（旧 `SetSeed` と同じ。golden の選手は全員 seed を持つ）。どちらも `test_actions.py` で pin
+- **pin**
+  - core（Qt なし。`test_actions.py`）: 両面の入替が held 1 サイクル / バリアントと mains が選手と動く / 片側だけのキー / None のために city・id を作らない / seed は常に int（片側に無ければ 0・文字列は数値に）/ birthday が選手と動く / 片チームだけのスロットは動かない / スロットのキー順 / 2 回で元に戻る / ステージの鏡映 / アップセット係数の再計算 / 選手のいないボード / クルーは `False` / 上下移動と、移動にならない引数（parametrize）
+  - `test_set_load_service.py`: `DisplayTeam` が state のフラグを読む
+  - ボード（`test_scoreboard_operations.py`）: SWAP 1 回 = held 1 サイクルでカードが追従 / 1v1 の swap で統計が 1 回（id が違うとき）・0 回（両方 id 無し）/ ホットキーはアクティブボードだけ / アクティブボードが未構築ならホットキーは何もしない / Web の swap は応答時点で完了 / Web の swap は未構築ボードを構築してから入れ替え、入替は反映待ちで、その後の `GetScoreboard` 経路でも残る / `get_swap` もボードを構築する / トラッカー ON の swap でステージの行とボタンが鏡映（parametrize）
+  - カード（`test_player_widgets.py`）: 既存の swap テストを Actions 経由に移植（seed バッジの追従を追加）/ 先頭の上移動は何もしない / キャラ無しのカードは空のスキンモデルを 1 個だけ使う
+  - `test_player_card_render.py`: 上記 2 つの golden とキー順の照合、各ステップ後のカード表示 == state、**入力中のタグが選手と一緒に動く**（ボタン・ホットキー・Web の 3 入口と上下移動。オフスクリーンで実際にフォーカスして打鍵する。確定を外すと 4 ケースとも落ちることを確認した）/ 補完ポップアップが開いたままのホットキー swap でも同じ（ポップアップを閉じる処理を外すと落ちることを確認した）
+- **テストの追従**: `test_signal_lifetime.py`（ボードの swap シグナル・ホットキー接続が無くなった）、`test_objectname_keypath_contract.py`（docstring）
+- 残置 / リスク
+  - 入力中の欄の確定はフォーカスを外して行う。ホットキー・Web の swap では、オペレーターが打っていた欄からカーソルが外れる（旧実装はカーソルを残したまま、欄の表示を相手の値に書き換えていた）
+  - 別の人が Web UI から swap すると、デスクトップで打っている途中の欄からもカーソルが外れ、打ちかけの文字はその時点で確定してその選手と一緒に動く（UX の変化。旧実装は欄の表示ごと入れ替え、カーソルは残っていた）
+  - Web の `score:adjust`（別スレッド）と GUI の swap がほぼ同時に来て、ボードが両方の書き込みを 1 回の held 通知で受けると、入替を検知したサイクルは `followStages=False` で同期するので、+1 のステージ追従（トラッカー ON 時の勝敗行の追加）が落ちる。スコアは正しく、勝敗行が 1 つ足りない（以後の追従は差分なので自然には戻らない。ステージボタンで直せる）
+  - Web の swap が GUI スレッドでの同期実行になったので、GUI が詰まっている間は Web の応答も待つ（他の `@gui_thread_sync` と同じ）
+  - 統計の発火は、ボードが held サイクルで state から推定する。1 サイクル内で 2 回 swap される（フラグが元に戻る）と検知できないが、swap は 1 SaveBlock = 1 サイクルなので今の入口では起きない。ボードの無い swap（テストハーネスでホットキーを押した場合）では統計は出ない
+  - 描画のコスト（S2a の残置）は計測していない。swap では全カードが描画対象になる
+- 実機確認（オーナー）
+  - 1v1・チームの両形式で、SWAP ボタン・ホットキー（Ctrl+Shift+S）・Web UI の swap: 選手名・キャラ（バリアント含む）・国 / 地域・seed バッジ・アバター・スコア・LOSERS・チーム名・ロゴが入れ替わり、チームカラーは残る。反映後に OBS のオーバーレイが入れ替わる
+  - タグを打っている途中で SWAP / ホットキー / 上下移動: 打ちかけの文字がその選手と一緒に動き、入ってきた選手の名前を上書きしない
+  - トラッカー ON で勝敗を付けてから swap / swap 戻し: ステージボタンの並びが鏡映になり、スコアと一致する
+  - 選手カードの上下移動（キャラ・mains が選手と一緒に動く）
+  - チーム形式を表示中にホットキーで swap したとき、1v1 ボードは入れ替わらない。クルー形式ではホットキーの swap が何もしない（クルーの swap はボタンと Web から）
+  - 1v1 表示中に Web の `/team` ページから swap: チームボードが構築されて入れ替わり、形式をチームに切り替えると入替が残っている
+  - Start.gg の選手で swap したとき、統計（直近の対戦・戦績）が 1 回だけ取り直される
