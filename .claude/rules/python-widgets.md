@@ -62,8 +62,8 @@ state になる）。`Window._SeedPanelState()` はその起動時の呼び出�
 
 - `.ui` の入力ウィジェット（QLineEdit / QSpinBox / QComboBox / QCheckBox / QDateEdit 等）の
   objectName は、そのまま StateManager のキーパスになる（例: `score.{N}.team.{T}.teamName`）。
-  **objectName を変更/削除すると既存ユーザーの `program_state.json` との互換が壊れる**
-  （state スキーマのマイグレーション層は無い。S-14）
+  **objectName を変更/削除すると既存ユーザーの保存済み state（`user_data/state.json`）との互換が壊れる**
+  （移行 step を足さない限り。S-14）
 - **方向は「schema → widget」**（Headless Core Step 5 で反転済み）。キー名は
   `src/core/StateSchema.py` の定数が正本で、ウィジェットはそれを `findChild` の
   **引数として**使う。`findChildren()` で拾ったウィジェットに `objectName()` を聞いて
@@ -71,7 +71,8 @@ state になる）。`Window._SeedPanelState()` はその起動時の呼び出�
   （`tests/test_objectname_keypath_contract.py` が AST で検知する）
 - 新しい入力欄を足すときは **先に `StateSchema` にキー定数を置き**、`.ui` の objectName を
   それに合わせる
-- 変更が必要な場合は **先に StateManager のマイグレーション層を追加**してから、
+- 変更が必要な場合は **先に `src/core/StateMigrations.py` に移行 step を足して `CURRENT_VERSION` を
+  上げ**（ADR-005 S3b。旧キー → 新キー）、
   `StateSchema` の定数と `tests/test_objectname_keypath_contract.py` の `EXPECTED` を
   **同時に**更新する（片方だけ直すと `findChild` が解決できず無言で書き込みが止まる）
 - 保護対象 objectName ↔ キーパスの一覧は `.claude/known-smells.md` S-14 の対応表を参照

@@ -3,7 +3,7 @@
     Validate a release-windows.zip before it may be published.
 
 .DESCRIPTION
-    Two checks, each born from a shipped incident:
+    Four checks. The first three were each born from a shipped incident:
 
     1. Separator check: every zip entry name must contain '/' separators.
        The installed update helper (assets/apply_update.ps1) strips the
@@ -25,6 +25,14 @@
        runtime.css must be in the zip. Every Designer design's index.html
        is a stub that loads them, so a release without them would render
        every user design blank in OBS.
+
+    4. Persisted-state check: user_data/state.json (the operator's saved
+       state, ADR-005 S3b) and its set-aside copies (state.json.*.bak) must
+       never be in the zip. The update helper copies the zip over the
+       install without asking, so one shipped copy would replace every
+       installation's saved state with the build machine's. Check 2 already
+       rejects them while they stay untracked; this one also holds if one
+       is ever committed by mistake.
 
     Run automatically by gen_release.ps1 and publish_release.ps1. When
     publishing manually with `gh release create` (release runbook step 8),
@@ -64,6 +72,18 @@ try {
         if ($badSep.Count -gt 0) {
             throw ("release zip has {0} entries without '/' separators (update helper would skip them), e.g. '{1}'" `
                 -f $badSep.Count, $badSep[0].FullName)
+        }
+
+        # Check 4 runs before the tracked-file check so a leaked store is
+        # reported as what it is. Independent of git tracking (see the
+        # header); -match is case-insensitive, as Windows resolves the names.
+        $persisted = @($entries | Where-Object {
+                $_.FullName -match "^Autona/user_data/state\.json($|\..*\.bak$)"
+            })
+        if ($persisted.Count -gt 0) {
+            $sample = ($persisted | Select-Object -First 5 | ForEach-Object { $_.FullName }) -join ", "
+            throw ("release zip ships the persisted state (would overwrite every installation's saved state): {0}" `
+                -f $sample)
         }
 
         # Skip directory placeholder entries (trailing '/').

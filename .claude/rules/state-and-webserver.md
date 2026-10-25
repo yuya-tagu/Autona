@@ -23,6 +23,28 @@ paths:
 - スレッドセーフ: `StateManager.lock`（RLock）を使用。直接 state dict を操作しない
 - **core は Qt を import しない**（`tests/test_core_qt_free.py` が subprocess で pin）。
   Qt が要る処理はアダプタ（`src/StateManagerBridge.py` が実例）へ出す
+- **永続化の正本は `user_data/state.json`**（ADR-005 S3b。`src/core/StatePersistence.py`）。
+  形式は `{"state_version": N, "state": {...}}`。`out/program_state.json` は出力に戻った
+  （場所・形式・`timestamp` / `revision`・書き込み順は外部契約のまま。起動時に読むのは、
+  `state.json` が無い・使えない・それより新しいときの移行だけ）
+  - `SaveState` が公開のたびに `StatePersistence.Schedule(snapshot)` を呼び、専用の書き出しスレッド
+    （非 daemon）が最後の変更から 1 秒・最大 5 秒で最新の 1 つを書く（mkstemp → `os.replace`）。
+    `out/` と `general.disable_export` からは独立。終了時はインタプリタの join で書き切る
+  - **ロック順は `StateManager.lock` → 保存側の lock の一方向**。`Schedule` は `StateManager.lock`
+    保持中に呼ばれるので I/O をしない。書き出しスレッドは `StateManager.lock` を取らず、Qt に触らない
+  - 起動時: `StateManager.LoadState()` → `StatePersistence.Load()`。使える `state.json` を読む → 無ければ、
+    または `program_state.json` の方が新しければ（mtime。クラッシュで間引き中の変更を拾う）そちらから移行して
+    すぐ `state.json` を書く。壊れた / 新しい版の `state.json` は `.corrupt-<日時>.bak` / `.v{N}.<日時>.bak` に
+    退避して移行に倒す（上書きしない）。読めない（OSError が 3 回続く）・退避できない `state.json` は触らず、
+    そのセッションは store を閉じる（書かない）。読み込んだ state に `timestamp` / `revision` は残さない。
+    パスは `Load()` 時点の CWD で固定し、`Load()` していないプロセスは書かない
+  - **版は封筒にだけ持つ**。state の木に `state_version` を入れない（Socket.IO と `program_state.json` に漏れる）
+  - 保存済み state のキー名・形を変えるときは、`src/core/StateMigrations.py` に step を足して
+    `CURRENT_VERSION` を上げる（前方一方向・出荷した step は凍結・**冪等**・`StateSchema` を import しない）。
+    今のビルド自身が残しうるものの起動ごとの掃除（`player_editor` など）は移行ではなく
+    `StateSchema.SeedPanelState()` に置く
+  - テスト: harness の `settle()` は `StatePersistence.Flush()` まで待つ。`StateManager.Initialize()` を
+    呼ぶテストは tmp CWD で呼ぶ（そこで store のパスが決まる）
 
 ## StateSchema（キー定義とシードの正本）
 
@@ -46,7 +68,7 @@ paths:
   `AutonaScoreboardWidget` / `AutonaScoreboardPlayerWidget` /
   `AutonaTournamentInfoWidget` は `findChild` の**引数として**使う
   （objectName から作らない）。**文字列は .ui の objectName と一致していなければ
-  ならない**（既存 `program_state.json` の互換に加えて、eye メニューの表示トグルも
+  ならない**（保存済み state（`user_data/state.json`）の互換に加えて、eye メニューの表示トグルも
   同じ名前で widget を引く）。`tests/test_objectname_keypath_contract.py` が
   一致・「objectName() 非使用」・「選手ウィジェット / EVENT パネルは StateManager を
   直接書かない」を pin

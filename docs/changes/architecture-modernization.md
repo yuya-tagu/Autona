@@ -121,6 +121,7 @@ Actions は「どのスレッドから呼んでもよい」設計で、observer 
 ### 2.7 永続化
 
 `user_data/settings.json`（トップキー 17・旧値残留あり）/ `layout_options.json` / `local_players.json` + `.csv` / `characters.json` / `games/`（アセットパック）/ ロゴ・アバター類 / QSettings（サイドバー状態）/ `out/program_state.json`（起動時に LoadState）。
+（注: S3b（2026-10-25）で state の正本は `user_data/state.json`（`state_version` 付き）へ移った。`out/program_state.json` は出力に戻り、起動時に読むのは移行のときだけ。下の S3b 節）
 
 ### 2.8 維持すべき外部契約
 
@@ -872,7 +873,8 @@ S3 を 4 つの PR に分ける（各 PR は独立に revert 可能）。順序�
   - 起動時の `score` / `game` の消去と `SeedPanelState` の正規化は今と同じ（引き継ぐ範囲は変えない）
 - `out/program_state.json` は、今と同じ場所・形式・書き込み順で書き続ける（外部契約）。export のロジックはモジュールを分けるだけで変えない
 - `state_version` = 1。移行関数 1 本目（v0 → v1）は、既存の 3 つ（`RETIRED_ROOTS` / `STALE_KEYS` / commentary の `NormalizeState`）を取り込む
-  - 前方一方向のみ。今より新しい版の `state.json` を読んだら、`state.json.v{N}.bak` に退避して空から始め、警告を出す（ダウングレードした場合）
+  - 前方一方向のみ。今より新しい版の `state.json` を読んだら、`state.json.v{N}.<日時>.bak` に退避して `out/program_state.json` から移行し、警告を出す（ダウングレードした場合）
+    - 当初案は「空から始め」だった。S3b の実装時に移行に改めた（2026-10-25・採用）。理由: 運用者にとっては大会情報が消えない方が有利で、`program_state.json` は直前まで動いていた新しい版が書いたものなので、空より実際の状態に近い。移行関数は冪等なので、新しい形のデータに掛けても壊さない
   - 旧版に戻したユーザーは、旧版が `out/program_state.json` を読むので困らない
 - `.gitignore` に `user_data/state.json` を足す（git 管理下に入ると、更新のたびに上書きされる）。zip 検証にも、配布物に含まれないことを足す
 - S-14（スキーマ版の不在）はこれで解消扱いにする
@@ -1204,3 +1206,154 @@ Web サーバーの公開面を 3 つ締めた。1 つ目は静的配信で、�
   > - トークンが漏れたときは、同じ画面の「再発行」で作り直せます（古いトークンはすぐに使えなくなります）
   >
   > あわせて、Web サーバーが配信するファイルをオーバーレイ・ブラウザ版・画像に限定しました。`user_data/settings.json` や選手 DB はブラウザから読めなくなります。独自のレイアウトが `layout/` `assets/` `out/` と `user_data/` の画像フォルダ以外のファイルを読んでいた場合は表示されなくなり、ログに `not serving` が出ます。
+
+#### S3b 永続化の分離（2026-10-25・PR 未作成）
+
+state の正本を `out/program_state.json` から `user_data/state.json` に移した。`program_state.json` は OBS の file:// オーバーレイと ASS が読む出力で、場所・形式・`timestamp` / `revision` が外部契約に縛られ、版も持てなかった（S-14）。正本は版付きの `state.json` にし、`program_state.json` は今までどおり書き出すだけの出力に戻した（読むのは移行のときだけ）。保存は新しい core モジュール `src/core/StatePersistence.py`、版の移行は `src/core/StateMigrations.py` が持つ（どちらも Qt なし・import 副作用なし）。
+
+- **実装**
+  - `src/core/StateMigrations.py`（新規）
+    - `CURRENT_VERSION = 1`。`Migrate(state, version)` が前方一方向に 1 段ずつ上げる（`_STEPS`）。int でない版・負の版・`CURRENT_VERSION` より新しい版は例外
+    - v0（S3b 前の `program_state.json`）→ v1
+      - `RETIRED_ROOTS`（`bracket` / `player_list` / `player_editor`）を落とす
+      - `STALE_KEYS`（`tournamentInfo.streamTitleEdit` / `streamUrl`）を落とす
+      - `commentary` があれば `CommentaryModel.NormalizeState` を掛ける。無ければ作らない（シードは `SeedPanelState` の仕事）
+    - 出荷した移行関数は凍結する。名前は `StateSchema` の定数を読まず、書いた時点のコピーを持つ（定数が後で変わると、古いデータへの処理が黙って変わるため）。`StateSchema` を import しないのは循環を避けるためでもある（StateSchema → StateManager → StatePersistence → StateMigrations）
+  - `src/core/StatePersistence.py`（新規）
+    - 形式: `{"state_version": 1, "state": {...}}`。`state` は公開済みの state（held を巻き戻したもの = `program_state.json` と同じ内容）から `timestamp` / `revision` を除いたもの。orjson（`OPT_NON_STR_KEYS`、インデントなし）
+    - 書き込み
+      - `SaveState` が公開のたびに `Schedule(snapshot)` を呼ぶ（`lastSavedState` を差し替えた直後、export をキューに積む前）
+      - 専用の書き出しスレッド（`AutonaStatePersist`、非 daemon）が、最後の変更から 1 秒（`WRITE_DELAY`）静かになったら最新の 1 つだけを書く。変更が続いても、最初の未保存の変更から 5 秒（`MAX_WRITE_DELAY`）で書く
+      - mkstemp → `os.replace`。replace の失敗は 4 回まで待って再試行する。`program_state.json` と違い、直接上書きへのフォールバックは無い（このファイルをポーリングする読み手はいないので、途中まで書いたファイルより古いファイルの方がよい）
+      - `out/` と `general.disable_export` からは独立（export の書き出しスレッドとは別）
+    - 終了時: 非 daemon なので、インタプリタ終了時の join が待つ。メインスレッドが終わったら（`threading.main_thread().is_alive()` が False）、待ち時間を切り上げてすぐ書く（0.1 秒ごとに確認）
+    - `Flush(timeout)`: 待ち時間を飛ばして、書き切るまで待つ。テストと harness の `settle()` 用で、アプリは終了時の join に任せる
+    - 書き込みの失敗: error ログは連続する失敗の 1 回目だけ出す（以降は debug。成功すると戻る）。スレッドを起動できない（終了処理中など）ときは snapshot を残し、次の `Schedule` / `Flush` で書く
+    - `Load()`: 起動時の読み込み（下表）。パスはこの時点の CWD で絶対パスに固定する。`Load()` していないプロセス（`Initialize()` を呼ばないスクリプト・テスト）では `Schedule` が何もしない
+  - 起動時の分岐（`StatePersistence.Load`）
+
+    | `user_data/state.json` | 動作 |
+    |---|---|
+    | 使える | その版から `Migrate` して読む。書き直さない |
+    | 使えるが、`out/program_state.json` の方が新しい（mtime） | `program_state.json` を v0 から移行して読み、info ログに理由を出して**その場で `state.json` を書き直す**。`program_state.json` が読めない・オブジェクトでない・移行が例外を出すときは `state.json` のまま |
+    | 無い | `out/program_state.json` を読み、`timestamp` / `revision` を落として v0 から移行し、**その場で `state.json` を書く**（以後は `out/` を消しても残る）。`program_state.json` は触らない |
+    | 壊れている（JSON でない・オブジェクトでない・版が int でない・負の版・`state` が無い・移行が例外を出す） | `state.json.corrupt-YYYYmmdd-HHMMSS.bak` に移して warning。以後は「無い」と同じ（同じ秒に複数あれば `-2`, `-3`…）。**移せなければ触らず（証拠を残す）、このセッションは `state.json` を書かない**（error ログ） |
+    | 新しい版（ダウングレード） | `state.json.v{N}.YYYYmmdd-HHMMSS.bak` に移して warning（既存の bak は上書きしない）。以後は「無い」と同じ。移せなければ触らず、このセッションは `state.json` を書かない（error ログ） |
+    | 読めない（ロックなどの OSError） | 0.1 秒おきに 3 回まで読み直す。それでも読めなければ触らず、**このセッションは `state.json` を書かない**（error ログ）。読み込み元は `program_state.json` |
+
+    - どちらのファイルも無ければ `{}`。`program_state.json` が壊れていれば error ログを出して `{}`（従来と同じ）
+    - 起動時に、`user_data/` に残った書きかけの一時ファイル（`state.*.tmp`）のうち 1 時間以上前のものを消す（失敗しても無視して debug ログ）
+  - `src/core/StateManager.py`
+    - `LoadState()` は `StatePersistence.Load()` を呼ぶだけになった。どちらかのファイルがあれば `state_big_change` を出す（従来どおり。どちらも無ければ出さない）。`revision` はファイルから読まず 0 から始める（従来どおり）
+    - 読み込んだ state に `timestamp` / `revision` は残らない。従来は前回の値が state の根に残り、`GetFullState` の全量 snapshot に乗っていた
+    - `SaveState()` が公開の直後に `StatePersistence.Schedule(state_snapshot)` を呼ぶ
+      - ロック順は `StateManager.lock` → 保存側の lock の一方向。保存側の lock の中では I/O をしない。書き出しスレッドは `StateManager.lock` を取らず、Qt に触らない
+      - snapshot はコピーしない（公開後に変更されないのは、export の書き出しと同じ前提）
+    - export（`_WriteExports`。text の出力と `program_state.json`）は変えていない
+  - `src/core/StateSchema.py`: docstring とコメントのみ。「マイグレーション層は無い」の記述を StateMigrations へ向けた。`SeedPanelState` に重複して残す理由を書いた（判断 2）
+  - `.gitignore`: `user_data/state.json` と `user_data/state.json.*.bak`（mkstemp の一時ファイルは既存の `*.tmp` で除外済み）
+  - `scripts/validate_release_zip.ps1`: 4 つ目の検査。zip に `Autona/user_data/state.json` か `state.json.*.bak` があれば失敗する。git 管理ファイルの検査より前に置き、誤ってコミットされた場合でも止まる
+  - `tests/conftest.py`: harness の `settle()` が `StatePersistence.Flush(30)` まで待つ
+- **判断と理由**
+  1. **ファイル形式は封筒（`{"state_version", "state"}`）にした**
+     - 版を state の根に置くと、Socket.IO の payload と `program_state.json` に漏れる（外部契約）。読み込みと書き込みのたびに抜き差しするより、ファイルのメタデータとして分ける方が漏れようがない
+     - 読み込んだ `state` の中に `timestamp` / `revision` があっても落とす（`program_state.json` を手で `state.json` に戻した場合）
+  2. **`SeedPanelState` の 3 処理（`RETIRED_ROOTS`・`STALE_KEYS`・commentary の正規化）は残し、v0 → v1 と二重に掛ける**
+     - `player_editor` は旧データだけのものではない。選手 DB エディタを開いている間は今のビルドも書くので、そのまま落ちたセッションは v1 の `state.json` に残す。v0 → v1 はもう走らないので、起動ごとの掃除でしか消えない
+     - commentary の処理はシードを兼ねる（新規インストールで 12 枠を作る）。既存データの移行では作らない
+     - 二重でも害がない。`NormalizeState` は冪等、無いルートの `Unset` は何も変えない（呼び出し側の SaveBlock の中なので保存サイクルも増えない）、`STALE_KEYS` はあるときだけ消す。`test_the_launch_cleanup_has_nothing_left_to_do_after_the_migration` が pin
+     - 移行関数の側は凍結コピーを持つ。`StateSchema` の定数が今後変わっても、v0 データへの処理は変わらない（`test_the_v1_step_is_frozen` が、凍結値と、現時点で定数と一致していることを pin）
+  3. **export のモジュール分離（StateExport.py）はしなかった**
+     - 既存テスト（`test_state_manager_export_isolation.py` / `test_state_manager_image_export.py` / `test_state_manager_save_cost.py` ほか）が、`StateManager` の `_WriteExports` / `_atomic_write_bytes` / `ExportText` などをモジュールのパス経由で monkeypatch・呼び出ししている。分けると、テストの書き換えか再 export の shim が要る
+     - 今回の目的（正本を分ける）には要らない。外部契約を pin しているテストを同じ PR で動かすのは、リスクの割に得るものが無い
+     - export のコードは変えていないので、分離は後で単独の PR にできる
+  4. **新しい版の `state.json` は退避し、`program_state.json` から移行する**（S3 設計の当初案「空から始め」を改め、設計節も更新した。採用済み）
+     - 運用者にとっては大会情報が消えない方が有利。`program_state.json` は直前まで動いていた新しい版が書いたもので、空より実際の状態に近い
+     - 移行関数は冪等（すでに移行先の形のデータを受けても壊さない）を規則にした（`StateMigrations` の docstring）。`program_state.json` は版を持たないので常に v0 として移行するが、中身は書いたビルドの形になっているため
+     - 退避は日時付きの名前にして上書きしない。移せないときに上書きしない（`state.json` を閉じたままにする）のは、新しい版に戻したときにデータを残すため
+  5. **間引きに上限（5 秒）を足した**。最後の変更から 1 秒だけだと、ゲームトラッカーの操作や大会データの取り込みのように変更が続く間、いつまでも書かれない
+  6. **パスは `Initialize()`（`Load()`）の時点で絶対パスに固定する**
+     - 書き込みは遅れて走るので、後で CWD が変わっても（テストの tmp CWD）別の場所に書かない
+     - `Load()` していないプロセスは書かない。スクリプトから state を触ったときに、利用者の保存を部分的な state で上書きしない
+  7. **壊れた `program_state.json` のときの `SaveState()` 呼び出しをやめた**。旧実装は `{}` にしてから `SaveState()` を呼んでいたが、`{}` と `lastSavedState`（`{}`）に差分は無く、何もしていなかった
+  8. **fsync はしない**（settings.json と同じ）。電源断で `state.json` が失われても、次の起動は `program_state.json` から移行する
+  9. **`program_state.json` の方が新しければ、そちらを採用する**（レビュー指摘で追加）
+     - export は保存サイクルのたびにすぐ書き、`state.json` は 1〜5 秒待ってから書く。クラッシュ・強制終了では、その間の変更が `program_state.json` にだけ残る。間引きは変えずに、起動時に mtime で拾う
+     - S3b 前の版に戻して使った後の復帰も、同じ規則で救える（旧版は `program_state.json` だけを書くので、そちらが新しくなる）
+     - 正常終了の直後は、`state.json` の方が新しいか、同時刻なら `state.json` を使う。たまたま `program_state.json` が後になっても、中身は同じ snapshot で、移行は冪等なので結果は変わらない
+  10. **読めない・退避できない `state.json` は上書きしない**（レビュー指摘で追加）。そのセッションは保存を止め、error ログを出す。中身が正しいかもしれないファイルや、壊れた原因の証拠を、部分的な保存で消さないため
+- **外部から見える変化**
+  - `user_data/state.json` ができる（初回の起動で `program_state.json` から作る）。以後、起動時に読むのはこちら
+    - `out/` を消しても、OBS の出力先を変えても、前回の state（大会情報・配信設定・実況・Top 8・表示トグルなど）が戻る。`score` と `game` は従来どおり起動時に消える
+  - Socket.IO の全量 snapshot（`program_state` イベント・v1 の `GET state`）の `state` から、前回のセッションの `timestamp` / `revision` が消える
+    - payload の形（`revision` / `delta_index`）は変わらない
+    - 読む側は無い。オーバーレイの `data.timestamp` は、file:// のポーリングで `program_state.json` を読むときだけ使う。そのファイルには今までどおり付く
+  - `program_state.json` の根のキー順: `timestamp` / `revision` が常に最後になる。従来は 2 回目以降の起動で、起動後に足される `score` などより前に来ていた。JSON として読む側には影響しない
+  - ダウングレード: 旧版は `program_state.json` を読むので困らない。旧版で使ってから戻すと、旧版が書いた `program_state.json` の方が新しいので、そちらから移行して続きになる
+  - 手で `state.json` をバックアップから戻すときは、`out/program_state.json` も消す（コピーは更新時刻を保つので、`program_state.json` の方が新しいと見なされ、そちらが採用される）。`docs/operations/runtime-operations.md` に書いた
+- **pin**
+  - `tests/test_state_persistence.py`（新規・69 件）
+    - 移行
+      - v0 → v1 の 3 処理。commentary が無ければ作らない
+      - 形の崩れたデータでも落ちない
+      - 凍結値。全ての版に step がある。現行版の state は触らない
+      - 範囲外の版・int でない版・dict でない state は例外
+      - 移行の後に `SeedPanelState` の掃除が何もしない
+      - v0 → v1 を v1 の形のデータに掛けても同値（冪等）
+    - 読み込み
+      - 使える store（書き直さない）。v0 の store
+      - 初回の移行（すぐ書く・`program_state.json` は触らない）。どちらも無い
+      - 壊れた store 9 種。壊れた store で `program_state.json` も無い。bak が衝突しない
+      - 新しい版。同じ秒の bak も上書きしない。退避できない新しい版は書かない
+      - `program_state.json` が読めない / オブジェクトでない
+      - store の中の刻印を落とす
+      - `program_state.json` の方が新しければ採用して書き直す（クラッシュ）。ダウングレードからの復帰。同時刻なら store。新しくても読めない / オブジェクトでない / 移行が例外なら store のまま
+      - store の移行が例外 → 壊れた扱い。`program_state.json` の移行が例外 → `{}` で store を作らない
+      - 壊れた store を退避できない → 書かない
+      - 読み続けて失敗（OSError）→ 3 回試して書かない。1 回だけの失敗 → 読み直して通常どおり
+      - 古い一時ファイルを消す（新しいもの・他の store のものは残す）。消せなくても起動は続く
+    - 書き出し
+      - 静かになるまで待つ。変更が続いても上限で書く。Flush は待たない
+      - 封筒に刻印が無く、snapshot を変えない
+      - アトミック（一時ファイルが残らない）。閉じた store は書かない
+      - 失敗のログは 1 回で、その後回復する
+      - daemon でない。スレッドを起動できないとき snapshot が残る
+      - 諦めた Flush（タイムアウト・スレッド起動失敗）が要求を残さない（次の snapshot は間引かれる）
+      - `_Run` の finally: 書き込み中に BaseException で落ちたら snapshot を戻し、次の Flush で書ける
+    - StateManager
+      - 公開のたびに store に届き、`program_state.json` の刻印は残る
+      - `disable_export` でも store は書かれる
+      - held の編集は、反映するまで store に入らない
+    - 別プロセス
+      - S3b 前のインストールからの起動: `state_big_change` 1 回・revision 0・state と `GetFullState` に刻印と退役キーが無い・store が v1・出力の revision 1 と timestamp・終了時に flush なしで最後の値が store にある
+      - `WRITE_DELAY` 600 秒でも、終了時に書く
+      - クラッシュ（`os._exit`）で store が書かれなくても、次の起動が `program_state.json` から最後の値を戻す
+  - `tests/test_import_side_effects.py`: 2 モジュールを追加。import では store を開かず、スレッドを作らない。`Initialize()` でパスが決まり、書くまでファイルは無い
+  - `tests/test_harness_isolation.py`: harness の store がリポジトリの `user_data/state.json` ではない（`--basetemp` に依存しない判定）
+  - `tests/test_state_manager_held.py`: import 時の mkdtemp を終了時に消す（このプロセスの store がここに来ることが多い）
+  - `tests/test_web_access.py`: `user_data/state.json` と `.bak` を配信しない
+  - `tests/test_core_qt_free.py`: 2 モジュールを自動で対象にする（変更なし）
+  - export の場所・形式・刻印・書き込み順は、既存の `test_state_manager_save_cost.py` ほかがそのまま pin する（変更なし）
+- **残置 / リスク**
+  - **fsync なし**: `os.replace` なので途中まで書いたファイルにはならないが、電源断で直前の内容に戻ることはある。壊れていれば `.corrupt` に退避して `program_state.json` から移行する。戻っただけなら、`program_state.json` の方が新しければそちらを使う
+  - **クラッシュ・強制終了で失うのは、`program_state.json` にも出ていない分だけ**（export は保存サイクルのたびにすぐ書く）。`program_state.json` も消えていれば、`state.json` の時点（最大 5 秒前）に戻る
+  - **mtime の比較に頼る**: 時計を戻した・`program_state.json` を手で触った・バックアップを戻したときは、新しい方の判定が運用者の意図とずれることがある（バックアップの戻し方は運用文書に書いた）
+  - **`state.json` を読めない・退避できないとき、そのセッションは保存しない**（error ログ）。`program_state.json` の出力は続くので、次の起動はそちらの方が新しければそこから戻る
+  - **`StatePersistence._cond` も QThread.terminate に弱い**: 終了時の `webserver.terminate()` が、`Schedule()` の中（`_cond` 保持中）で Web サーバーのスレッドを止めると、`_cond` が解放されず、書き出しスレッド（非 daemon）を待つ終了処理が止まる。既存の `_export_cond` と同じ種類の危険で、今回は直さない
+  - 終了の遅れ: 書き込み待ちがあると、終了が最大 0.1 秒 + 書き込み 1 回ぶん遅れる
+  - テストのプロセスでは、どれかのモジュールが `Initialize()` を呼んだ後は保存が有効になる（パスは tmp。harness の `settle()` が待つ）。`Initialize()` を呼ぶテストを足すときは tmp CWD で呼ぶ
+  - 2 つ同時に起動すると、同じ `state.json` を書き合う。単一インスタンスの IPC で防いでいる前提は、従来の `program_state.json` と同じ
+  - pytest 全量と live のテスト（start.gg など）は、実装の中では回していない（全量は別担当）
+- **実機確認（オーナー）**
+  - 更新後の初回の起動で `user_data/state.json` ができ、ログに `Migrated ... to ...` が出る
+  - 再起動すると、大会情報・配信設定・実況・表示トグルが戻り、スコアは今までどおり空になっている
+  - `out/` を消して起動しても、前回の state が戻る
+  - アプリを閉じる直前（1 秒以内）に変えた値が、次の起動で戻る
+  - 値を変えた直後にタスクマネージャーで Autona を強制終了しても、次の起動で戻る（ログに `is newer than` が出る）
+  - `state.json` を壊して（例: 先頭に `x` を足す）起動すると、`state.json.corrupt-<日時>.bak` ができて warning が出て、`program_state.json` の内容で起動する
+  - OBS のオーバーレイ（http と file://）と ASS が、今までどおり更新される
+  - S3b 前の exe に戻しても起動し、前回の state が戻る（`program_state.json` を読む）。そこで値を変えてから新しい exe に戻すと、その値が残っている
+- **リリースノート案**
+  > **前回の内容の保存先が変わりました**
+  > 大会情報・配信設定などの前回の内容を、`user_data/state.json` に保存するようになりました（これまでは `out/program_state.json` から読み戻していました）。更新後の初回の起動で自動的に引き継がれます。`out/` フォルダを消しても、前回の内容が戻ります。バックアップや別の PC への移行のときは、`user_data/state.json` もコピーしてください。
+  > 開発者向け: `GET /api/v1/state` と Socket.IO の全量 snapshot（`program_state`）の `state` に、前回のセッションの `timestamp` / `revision` が残らなくなりました（`out/program_state.json` の `timestamp` / `revision` と、payload の `revision` は従来どおり）。

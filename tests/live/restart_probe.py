@@ -9,9 +9,9 @@ stdout, prefixed with a marker so loguru's stderr chatter cannot be mistaken
 for it.
 
 Why a subprocess: bootstrap_core() is guarded against re-entry and
-StateManager.Initialize() loads ./out/program_state.json exactly once per
-process, so "start again and see what comes back" is not something the
-test process can do to itself.
+StateManager.Initialize() loads the persisted state (./user_data/state.json,
+ADR-005 S3b) exactly once per process, so "start again and see what comes
+back" is not something the test process can do to itself.
 """
 import json
 import os
@@ -42,10 +42,21 @@ def main():
     result = {}
 
     # What the previous process actually persisted, read before anything in
-    # src can touch it.
+    # src can touch it: the store's envelope, {"state_version", "state"}.
+    # The store's path is fixed by the first StateManager.Initialize() of the
+    # test process, so when that ran in another directory (a full-suite run)
+    # there is none here -- and the restart below then migrates from
+    # ./out/program_state.json, exactly as the app does, so read that.
+    persisted = {}
     try:
-        with open("./out/program_state.json", "rb") as handle:
-            persisted = json.loads(handle.read())
+        try:
+            with open("./user_data/state.json", "rb") as handle:
+                persisted = json.loads(handle.read())["state"]
+            result["persisted_source"] = "user_data/state.json"
+        except FileNotFoundError:
+            with open("./out/program_state.json", "rb") as handle:
+                persisted = json.loads(handle.read())
+            result["persisted_source"] = "out/program_state.json"
     except Exception as error:
         persisted = {}
         result["persisted_read_error"] = f"{type(error).__name__}: {error}"
@@ -110,8 +121,9 @@ def main():
 
     # SetTournament also kicked off the entrant fetch, and a QThreadPool
     # joins its running tasks when it is destroyed. Nothing left is doing
-    # work that matters (program_state.json is written atomically), so leave
-    # rather than wait out a page-by-page entrant download.
+    # work that matters (program_state.json and the store are written
+    # atomically), so leave rather than wait out a page-by-page entrant
+    # download.
     os._exit(0)
 
 

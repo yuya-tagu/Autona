@@ -482,10 +482,10 @@ class AutonaScoreboardWidget(QWidget):
         QApplication.instance().focusChanged.connect(
             self._OnTeamNameFocusChanged)
 
-        # A restored program_state.json can carry a roster from a session
-        # that ran with more players per team; drop both before the first
-        # player widget is built, so the slots that come back are the ones
-        # this board actually has.
+        # The restored state (user_data/state.json) can carry a roster from
+        # a session that ran with more players per team; drop both before
+        # the first player widget is built, so the slots that come back are
+        # the ones this board actually has.
         for team in (1, 2):
             AutonaActions.instance.ClearTeamRoster(self.scoreboardNumber, team)
         self.playerNumber.setValue(1)

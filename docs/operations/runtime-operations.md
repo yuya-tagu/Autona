@@ -111,6 +111,8 @@
 - Advanced Scene Switcher など OBS 側ツールから Autona を制御する場合は、実装済みの `/api/v1/` を HTTP で叩く ✅
 - Autona 再起動時、ブラウザソースは再読込が必要な場合がある（`TBD`: 自動再接続の有無）
 - `out/program_state.json` と個別テキストファイルは状態変更ごとに更新される ✅
+  （`general.disable_export` オンで止まるのは個別テキスト・画像だけで、`program_state.json` は書かれ続ける。
+  前回の内容の保存は `user_data/state.json` で、出力とは別 ✅）
 
 ## Scoreboard operation
 
@@ -122,12 +124,44 @@
 
 ## Recovery procedure
 
-⚠️ 大半が `TBD`。現状で言えること:
+⚠️ 一部 `TBD`。現状で言えること:
 
-- Autona がクラッシュした場合、再起動でレイアウト/状態は保存値から復元される（STATE_VERSION）✅
-- `TBD`: セッション途中の状態（スコア等）がどこまで永続化され、再起動で戻るか → 確認要
-- `TBD`: 自動バックアップ/スナップショットは**現状なし**（ROADMAP に提案あり、未実装）📄
+- Autona を再起動すると、前回の内容が `user_data/state.json` から戻る ✅（ADR-005 S3b）
+  - 戻るもの: 大会情報（EVENT）・配信設定・実況・Top 8・表示トグル・カラーなど、state のうち下記以外
+  - **戻らないもの: スコアボード（`score.*`。選手・スコア・match バー）と `game.*`**。起動のたびに空にする（従来どおり）
+  - 保存は変更の約 1 秒後（変更が続いても 5 秒以内）。正常終了では最後の変更まで書き切る。
+    クラッシュ・強制終了でその数秒が `state.json` に入らなくても、`out/program_state.json`（変更のたびに
+    すぐ書かれる）の方が新しければ、次の起動はそちらから戻す（ログに `is newer than`）✅
+  - `state.json` を読めない（ロック等）・壊れていて退避できないときは、そのファイルを上書きしない。
+    その起動は保存しないので（ログに error）、原因（ウイルス対策ソフト・同期ソフト・権限）を取り除いて再起動する
+  - サイドバーの選択・折りたたみは QSettings（`STATE_VERSION`）で、別に復元される ✅
+- `TBD`: 自動バックアップ / 世代管理は**現状なし**（ROADMAP に提案あり、未実装）。手動の手順は下記 📄
 - Web UI 側が状態を見失った場合、ページ再読込で `program_state` 全受信からやり直せる ✅
+
+### 前回の内容（`user_data/state.json`）のバックアップと復元
+
+- `user_data/state.json` が前回の内容の正本（`{"state_version": N, "state": {...}}`）。
+  `out/program_state.json` は OBS / ASS 向けの出力で、起動時に読むのは `state.json` が無い・使えないとき、
+  または `state.json` より新しいとき（クラッシュの後・旧版を使った後）だけ ✅
+  - `out/` を消しても、前回の内容は戻る
+  - アップデートでは上書きされない（git 管理外でリリース zip に入らない。zip 検証が拒否する）✅
+- **バックアップ**: Autona を終了してから `user_data/state.json` をコピーする（起動中のコピーには、
+  直前の数秒の変更が入っていないことがある）。別 PC へ移すときも同じ（`settings.json` などと一緒に
+  `user_data/` ごと持っていくのが確実）
+- **復元**: Autona を終了 → バックアップを `user_data/state.json` に戻し、**`out/program_state.json` を消す** → 起動
+  （コピーは元の更新時刻を保つので、`program_state.json` を残すと「そちらの方が新しい」と判定されて採用される）
+- **前回の内容を捨てて始める**: Autona を終了 → `user_data/state.json` と `out/program_state.json` の
+  **両方**を消す（`state.json` だけ消すと `program_state.json` から戻る）→ 起動
+- 起動時に自動で退避されるファイル（ログに warning が出る。不要なら消してよい）:
+  - `state.json.corrupt-<日時>.bak`: `state.json` が壊れていた。`out/program_state.json` の内容で起動する
+    （それも無ければ空）
+  - `state.json.v<N>.<日時>.bak`: 新しいバージョンの Autona が書いた `state.json` を、古いバージョンで開いた
+    （ダウングレード）。`out/program_state.json` の内容で起動する。新しいバージョンに戻したあと、
+    退避した時点の内容に戻したいときは、上の「復元」と同じ手順でこのファイルを `state.json` に戻す
+  - どちらも上書きされない（同じ秒に複数あれば `-2`, `-3`… が付く）
+- **ダウングレード**: `state.json` 導入前のバージョンは `state.json` を読まず、`out/program_state.json` を読むので、
+  そのまま使える。旧版で使ってから新しいバージョンに戻すと、旧版が書いた `out/program_state.json` の方が
+  新しいので、そちらから続きになる（作業は不要）✅
 
 ### Designer デザインのロールバック（共通ランタイム導入前の exe に戻す場合）
 
@@ -176,7 +210,7 @@
 
 スタッフが復旧できる最終手段（暫定）:
 
-1. Autona を再起動（状態は保存値から復元）✅
+1. Autona を再起動（前回の内容は `user_data/state.json` から戻る。スコアボードは空になる）✅
 2. OBS のブラウザソースを再読込 📄
 3. Web リモートが不調ならデスクトップ UI / ホットキーで操作継続 ✅
 4. `TBD`: Start.gg 連携不調時に手入力でスコアボードを進める手順の明文化

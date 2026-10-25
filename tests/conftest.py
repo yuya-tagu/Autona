@@ -312,6 +312,14 @@ class _AutonaHarness:
         the join. So this loops until a pass leaves the same thread (or none)
         behind.
 
+        The persisted store (user_data/state.json, ADR-005 S3b) has a writer
+        of its own that waits for the state to be quiet for a second. It is
+        flushed too, so no write is left in flight when a test ends and a
+        second process started in the same directory
+        (tests/live/restart_probe.py) reads a current store. Its path is
+        fixed when StateManager.Initialize() runs, so unlike ./out it cannot
+        follow a CWD change.
+
         The image downloads come last because the export thread is what
         spawns them (CreateFilesDict, for any state value that is an http
         .png/.jpg URL -- avatars and character art). They write
@@ -321,6 +329,7 @@ class _AutonaHarness:
         """
         from qtpy.QtWidgets import QApplication
         from src.core.StateManager import StateManager
+        from src.core.StatePersistence import StatePersistence
 
         previous = object()
         while True:
@@ -331,6 +340,8 @@ class _AutonaHarness:
                 break
             thread.join()
             previous = thread
+
+        assert StatePersistence.Flush(30), "state.json writer did not finish"
 
         StateManager.JoinDownloads()
 

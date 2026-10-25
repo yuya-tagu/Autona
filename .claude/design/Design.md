@@ -386,9 +386,10 @@ top8
 実況・解説機能の全面リワーク（2026-07）でスキーマ刷新。スロット固定 12 名・
 欠番概念なし（旧「Unset 時に詰める」運用は廃止）。正規化・表示選択ルールの
 正本は `src/core/CommentaryModel.py`。旧スキーマ（seed / country / character /
-mains / custom_textbox 等）は起動時の `NormalizeState` でマイグレーションされる
-（custom_textbox → note、その他は破棄）。呼び出しは `Window._SeedPanelState()`
-（パネルが lazy 構築のため。§4.1.1）。状態は再起動をまたいで永続化される。
+mains / custom_textbox 等）は `NormalizeState` でマイグレーションされる
+（custom_textbox → note、その他は破棄）。呼び出しは保存済み state の v0 → v1 移行
+（`core/StateMigrations`。§3.3.5）と、起動ごとの `Window._SeedPanelState()`（シードを兼ねる。
+パネルが lazy 構築のため。§4.1.1）。状態は再起動をまたいで永続化される（`user_data/state.json`）。
 
 ```
 commentary
@@ -616,12 +617,15 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | ウィンドウ位置・サイズ | QSettings（Windows レジストリ） | バイナリ | `Window` | 自動保存 |
 | サイドバー選択・折りたたみ | QSettings（`sidebarIndex_v{STATE_VERSION}` / `sidebarCollapsed_v{STATE_VERSION}`） | バイナリ | `Window` | 自動保存 |
 | 選手 DB | `./user_data/local_players.json` | JSON 配列 | `AutonaPlayerDB` | PyQt の Player List + 直接 JSON 編集 |
+| 前回の内容（state。大会情報・配信設定・実況・Top 8・表示トグル等。`score` / `game` は起動時に破棄） | `./user_data/state.json`（`{"state_version": N, "state": {...}}`） | JSON | `core/StatePersistence`（版の移行は `core/StateMigrations`） | 自動保存（`StateManager.SaveState` の公開ごとに間引いて書く。最後の変更から 1 秒・最大 5 秒。終了時に書き切る。ADR-005 S3b） |
 | ルールセット（キャッシュ） | `./user_data/rulesets.json` | JSON | tournament provider | API 取得時に自動更新 |
 | ゲームアセット定義 | `./user_data/games/{game}/{asset_type}/config.json` | JSON | `core/GameAssetCatalog`（Qt 側は `AutonaGameAssetManager` がモデル化） | アセット追加時に手動編集 |
 | 国・地域マスタ / カスタム国旗 | `./assets/countries+states.json`・`./assets/city_to_state.json`・`./user_data/additional_flag/*` | JSON / 画像 | `core/CountryCatalog`（Qt 側は `AutonaCountryHelper` が国モデル化） | 同梱データ（都市→地域表は `scripts/gen_city_to_state.py` で生成）。カスタム国旗は画像を置くだけ |
 | サムネテンプレ定義 | `./assets/thumbnail_base/thumbnail_types/{id}.json` | JSON | （定義のみ） | テンプレ追加時に手動作成 |
 | OBS テンプレのグローバル設定 | `./layout/settings.json` | JSON | OBS layout runtime | テンプレ提供者または運用者が編集 |
 | OBS テンプレのローカル設定 | `./layout/{template}/settings.json` | JSON | OBS layout runtime | テンプレ提供者または運用者が編集 |
+
+> `out/program_state.json` は永続化ではなく**出力**（OBS の file:// ポーリングと ASS の契約。場所・形式・`timestamp` / `revision`・書き込み順は不変）。S3b 以降、起動時に読むのは `user_data/state.json` が無い・使えない・それより新しいときの移行だけ（§3.3.5）。
 
 #### 3.3.2 設定の正本（Single Source of Truth）
 
@@ -675,6 +679,12 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
   - パネル（ナビ項目）の追加・削除・並び順変更
   - `.ui` ファイルの `objectName` 変更（state 互換が壊れる時）
 - 同 `STATE_VERSION` 内では既存 state との互換性を維持する
+- **state のスキーマ版（`state_version`、ADR-005 S3b）は `Window.STATE_VERSION` とは別物**。`user_data/state.json` の封筒に入る版で、`src/core/StateMigrations.CURRENT_VERSION`（現在 1）が正本
+  - 保存済み state のキー名・形を変えるときは、移行 step（前方一方向・出荷後は凍結）を足して `CURRENT_VERSION` を上げる。v0（S3b 前の `out/program_state.json`）→ v1 は `RETIRED_ROOTS` / `STALE_KEYS` / commentary の `NormalizeState`
+  - 版は state の木に入れない（Socket.IO の payload と `out/program_state.json` に漏れるため）
+  - 移行 step は冪等（すでに移行先の形のデータを受けても壊さない）。`out/program_state.json` は版を持たないので常に v0 として移行されるが、中身は書いたビルドの形になっているため
+  - 新しい版の `state.json` を古いビルドで開くと `state.json.v{N}.<日時>.bak` に退避し、`out/program_state.json` から移行して起動する。壊れた `state.json` は `state.json.corrupt-<日時>.bak` に退避して同じく移行する（どちらも上書きしない。退避できなければ触らず、その起動は保存しない）
+  - `out/program_state.json` が `state.json` より新しい（mtime）ときもそちらから移行する（クラッシュで間引き中の変更を失わない・旧版を使った後の復帰）
 
 ---
 
@@ -737,7 +747,7 @@ QSettings に保存された最後の選択に依存し、初期値は先頭ペ�
 
 - 追加・削除時は `STATE_VERSION` を **必ずインクリメント**する
 - **objectName は内部 ID として固定**する。i18n の対象は `setWindowTitle` などの**表示名のみ**で、objectName は不変
-- objectName を変更する場合は `STATE_VERSION` インクリメントに加えて、必要に応じて**保存済み state / QSettings のマイグレーション処理を実装**する
+- objectName を変更する場合は `STATE_VERSION` インクリメントに加えて、必要に応じて**保存済み state / QSettings のマイグレーション処理を実装**する（state は `src/core/StateMigrations.py` に移行 step を足す。§3.3.5）
 - `Autona.py` の `self._navSections` に `(panel, 'icon.svg')` を表示順で追加する
   （ナビ項目ラベルは `panel.windowTitle()`、アイコンは `assets/icons/`）
   - `_navSections` はカテゴリ付き構造 `[(カテゴリ見出し or None, [(パネル, アイコン名), ...]), ...]`。

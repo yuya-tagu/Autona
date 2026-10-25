@@ -146,7 +146,8 @@ class TournamentInfoService:
         # (an empty QLineEdit emitting editingFinished wrote ""), so a fresh
         # install had the keys even with no tournament loaded. A lazy panel
         # does not, and the overlays read them. Missing keys only: a value
-        # restored from program_state.json must not be blanked.
+        # restored from the persisted state (user_data/state.json) must not
+        # be blanked.
         for field in self.TEXT_FIELDS:
             path = self.Key(field)
             if StateManager.Get(path, None) is None:

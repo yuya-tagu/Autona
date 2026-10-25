@@ -136,6 +136,9 @@ def test_the_served_folders_are_served(path):
     "user_data/local_players.csv",
     "user_data/layout_options.json",
     "user_data/characters.json",
+    "user_data/state.json",                  # the persisted state (S3b)
+    "user_data/state.json.v2.20261025-120000.bak",
+    "user_data/state.json.corrupt-20261025-120000.bak",
     "user_data/games",                       # the folder itself
     "user_data/games_extra/x.png",           # a prefix is not a folder
     "user_data/tournament_banner.png.bak",

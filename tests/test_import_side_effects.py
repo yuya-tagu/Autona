@@ -114,6 +114,11 @@ country_catalog = importlib.import_module(
 # The web server's access policy (ADR-005 S3a). It reads -- or issues and
 # saves to settings.json -- the access token on first use, never on import.
 web_access = importlib.import_module("src.core.WebAccess")
+# The persisted state store and its migrations (ADR-005 S3b). The store is
+# read, opened and written only from StateManager.Initialize() onwards.
+state_persistence = importlib.import_module(
+    "src.core.StatePersistence").StatePersistence
+state_migrations = importlib.import_module("src.core.StateMigrations")
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -178,6 +183,10 @@ assert game_catalog.instance is None, "import created GameAssetCatalog.instance"
 assert country_catalog.instance is None,     "import created CountryCatalog.instance"
 assert web_access._token is None, "import read or issued the access token"
 assert web_access._tokenGeneration == 0, "import issued an access token"
+assert state_persistence.Path() is None, "import opened the state store"
+assert state_persistence._thread is None, "import started the store writer"
+assert state_persistence._pending is None, "import queued a store write"
+assert state_migrations.CURRENT_VERSION >= 1
 assert hotkeys.instance is None, "import created AutonaHotkeys.instance"
 assert not hotkeys._actions_connected, \
     "import wired the hotkeys to AutonaActions"
@@ -262,6 +271,11 @@ for name in queryAttrs:
 
 state_manager.Initialize()
 assert os.path.isdir("./out"), "Initialize() did not create ./out"
+# Initialize() opens the store; with nothing to migrate it writes nothing.
+assert state_persistence.Path() == os.path.abspath("./user_data/state.json"), \
+    "Initialize() did not open user_data/state.json"
+assert not os.path.exists("./user_data/state.json"), \
+    "Initialize() wrote state.json with nothing to migrate"
 
 # The actions layer needs both managers above, which is why bootstrap_core()
 # creates it here rather than at import. Its positive control is that it can
@@ -270,6 +284,10 @@ core_actions.instance = core_actions()
 core_actions.instance.SetDisplayOption("show_seed", False)
 assert core_state.Get("display_options.show_seed") is False, \
     "AutonaActions could not write the state headlessly"
+# ...and that published write reaches the store.
+assert state_persistence.Flush(30), "the store writer did not finish"
+assert os.path.isfile("./user_data/state.json"), \
+    "a published save cycle did not write user_data/state.json"
 
 # Same for the game asset catalog and its Qt adapter (ADR-005 S1a). The
 # ./user_data/games guarantee travels with the scan that lists it

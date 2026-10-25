@@ -16,8 +16,8 @@ from . import ui_constants as UI
 
 # StateManager base path the editor dialog writes to while it is open
 # (StateSchema.PLAYER_EDITOR_ROOT). It is unset again when the dialog closes,
-# and the launch seed purges it in case a crash left a stale subtree in
-# program_state.json.
+# and the launch seed purges it in case a crash left a stale subtree in the
+# persisted state (user_data/state.json).
 _EDITOR_PATH = f"{schema.PLAYER_EDITOR_ROOT}.1"
 
 # Seed value GetEntrantsWorker assigns to unseeded entrants.
@@ -75,7 +75,7 @@ class _PlayerEditorDialog(QDialog):
 
     def done(self, result):
         # The editor mirrors every field into player_editor.* — scrub the
-        # temporary subtree so it doesn't linger in program_state.json.
+        # temporary subtree so it doesn't linger in the persisted state.
         schema.ClearPlayerEditor()
         # _deleted flag stops the widget's global-signal handlers
         # (db_updated / onLoad) from touching a dying C++ object.

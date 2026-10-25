@@ -932,7 +932,8 @@ class Window(QMainWindow):
         Called from __init__ before any panel is built, and necessarily after
         StateManager.LoadState() — which ran inside bootstrap_core(), i.e.
         while this module was imported — so what is normalised here is the
-        restored program_state.json, not an empty state.
+        restored state (user_data/state.json, ADR-005 S3b), not an empty
+        state.
         """
         with StateManager.SaveBlock():
             schema.SeedPanelState()
