@@ -35,7 +35,8 @@ from src.core import StateSchema as schema
 from src.core.CountryCatalog import CountryCatalog
 from src.core.GameAssetCatalog import GameAssetCatalog
 from src.core.PlayerService import (
-    KEEP_ONLINE_AVATAR, CharacterSlot, PlayerService)
+    KEEP_ONLINE_AVATAR, CharacterSlot, PlayerService,
+    RepublishTeamMergedNames)
 from src.core.DictHelper import deep_clone
 from src.core.StateManager import StateManager as SM
 from tests.conftest import _link_tree
@@ -126,7 +127,7 @@ def test_every_write_stays_under_the_slot_it_was_given(path):
     service.SetText(schema.PLAYER_TAG_KEY, "TAG")
     service.SetSeed(4)
     service.SetCity("Tokyo")
-    service.PublishMergedName("SPONSOR", "TAG", losers=False)
+    service.PublishMergedName("SPONSOR", "TAG")
 
     assert SM.Get(f"{path}.{schema.PLAYER_TAG_KEY}") == "TAG"
     assert SM.Get(f"{path}.{schema.PLAYER_SEED_KEY}") == 4
@@ -299,7 +300,10 @@ def test_an_empty_location_is_published_rather_than_skipped():
 ])
 def test_the_merged_name_spellings(player, sponsor, tag, losers, merged,
                                    nameOnly):
-    player.PublishMergedName(sponsor, tag, losers)
+    # The flag is the team's, read from the state (ADR-005 S2b).
+    SM.Set(f"score.1.team.1.{schema.TEAM_LOSERS_KEY}", losers)
+
+    player.PublishMergedName(sponsor, tag)
 
     assert SM.Get(f"{BOARD_PATH}.mergedName") == merged
     # The compact overlays render this one; it must never pick the sponsor up.
@@ -315,13 +319,77 @@ def test_the_two_name_spellings_are_one_save_cycle(player):
     SM.HoldSubtree(PREFIX)
     seen, unsubscribe = _heldSpy()
     try:
-        player.PublishMergedName("SPONSOR", "TAG", losers=False)
+        player.PublishMergedName("SPONSOR", "TAG")
     finally:
         unsubscribe()
         SM.heldPrefixes.discard(PREFIX)
 
     assert seen == [PREFIX], (
         f"publishing the display name produced {len(seen)} save cycles")
+
+
+def test_the_suffix_is_the_slots_own_team_flag():
+    """Each slot reads its own team's flag; the editor has no team."""
+    SM.Set(f"score.1.team.2.{schema.TEAM_LOSERS_KEY}", True)
+
+    PlayerService("score.1.team.1.player.1").PublishMergedName("", "ONE")
+    PlayerService("score.1.team.2.player.1").PublishMergedName("", "TWO")
+    PlayerService("score.2.team.2.player.1").PublishMergedName("", "OTHER")
+    PlayerService(EDITOR_PATH).PublishMergedName("", "DRAFT")
+
+    assert SM.Get("score.1.team.1.player.1.mergedName") == "ONE"
+    assert SM.Get("score.1.team.2.player.1.mergedName") == "TWO [L]"
+    assert SM.Get("score.2.team.2.player.1.mergedName") == "OTHER"
+    assert SM.Get(f"{EDITOR_PATH}.mergedName") == "DRAFT"
+    assert PlayerService(EDITOR_PATH).TeamLosersKey() is None
+
+
+# ── the team's names, rebuilt from the state (ADR-005 S2b) ───────────────
+
+def _slot(team, number, sponsor, tag):
+    path = f"score.1.team.{team}.player.{number}"
+    SM.Set(f"{path}.{schema.PLAYER_SPONSOR_KEY}", sponsor)
+    SM.Set(f"{path}.{schema.PLAYER_TAG_KEY}", tag)
+    return path
+
+
+def test_a_team_rebuild_republishes_every_slot_from_its_state():
+    one = _slot(1, 1, "SP", "ALPHA")
+    two = _slot(1, 2, "", "BETA")
+    # A slot holding no name yet still gets the suffix, as every card did.
+    SM.Set("score.1.team.1.player.3.seed", 0)
+    other = _slot(2, 1, "", "GAMMA")
+    SM.Set(f"score.1.team.1.{schema.TEAM_LOSERS_KEY}", True)
+
+    rebuilt = RepublishTeamMergedNames(1, 1)
+
+    assert rebuilt == ["1", "2", "3"]
+    assert SM.Get(f"{one}.mergedName") == "SP | ALPHA [L]"
+    assert SM.Get(f"{one}.mergedOnlyName") == "ALPHA [L]"
+    assert SM.Get(f"{two}.mergedName") == "BETA [L]"
+    assert SM.Get("score.1.team.1.player.3.mergedName") == " [L]"
+    assert SM.Get(f"{other}.mergedName") is None, "the other team was touched"
+
+
+def test_a_team_rebuild_is_one_save_cycle():
+    _slot(1, 1, "SP", "ALPHA")
+    _slot(1, 2, "", "BETA")
+    SM.Set(f"score.1.team.1.{schema.TEAM_LOSERS_KEY}", True)
+    SM.HoldSubtree(PREFIX)
+    seen, unsubscribe = _heldSpy()
+    try:
+        RepublishTeamMergedNames(1, 1)
+    finally:
+        unsubscribe()
+        SM.heldPrefixes.discard(PREFIX)
+
+    assert seen == [PREFIX]
+
+
+def test_a_team_without_a_roster_rebuilds_nothing():
+    with patch.object(SM, "Set", wraps=SM.Set) as written:
+        assert RepublishTeamMergedNames(1, 1) == []
+    assert written.call_count == 0
 
 
 # ── the images ───────────────────────────────────────────────────────────
@@ -593,7 +661,7 @@ def test_the_player_id_reports_whether_the_slot_changed_hands(player):
 
 def test_unset_drops_the_whole_slot(player):
     player.SetText(schema.PLAYER_TAG_KEY, "TAG")
-    player.PublishMergedName("", "TAG", losers=False)
+    player.PublishMergedName("", "TAG")
     assert SM.Get(BOARD_PATH) is not None
 
     player.Unset()

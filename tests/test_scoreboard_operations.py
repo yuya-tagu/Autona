@@ -777,31 +777,90 @@ def test_leaving_a_team_name_unchanged_does_not_light_the_apply_button(
 
 
 def test_the_losers_checkbox_writes_the_flag_and_the_player_names(autonaApp):
-    """The checkbox's two jobs, only one of which moved to core.
+    """The flag and the " [L]" the thumbnail generator renders, together.
 
-    `toggled` writes team.{t}.losers (AutonaActions now) *and* runs every
-    player widget's SetLosers, which re-exports mergedName with the " [L]"
-    the thumbnail generator renders. The second connection is made per player
-    in _setPlayersPerTeamImpl and must keep firing after the first one was
-    rerouted -- the set-load path needs _ApplyLosersToPlayers precisely
-    because it does not have this signal.
+    Both are AutonaActions.SetTeamLosers since ADR-005 S2b, in one save
+    cycle. The suffix used to be the checkbox's second handler -- every
+    player card's SetLosers, connected per card -- so the set-load path
+    needed its own copy (_ApplyLosersToPlayers) because it does not have
+    this signal; now the two paths share the core half.
     """
+    from src.core.StateManager import StateManager
+
     board = autonaApp.board(1)
     _setPlayerName(board, 1, "AAA")
     autonaApp.settle()
 
-    _losers(board, 1).setChecked(True)
-    autonaApp.settle()
+    cycles = []
+    StateManager.observers.held_state_updated.subscribe(cycles.append)
+    try:
+        _losers(board, 1).setChecked(True)
+        autonaApp.settle()
+    finally:
+        StateManager.observers.held_state_updated.unsubscribe(cycles.append)
 
     assert autonaApp.get("score.1.team.1.losers") is True
     assert autonaApp.get("score.1.team.1.player.1.mergedName") == "AAA [L]"
-    assert board.team1playerWidgets[0].losers is True
+    assert autonaApp.get("score.1.team.1.player.1.mergedOnlyName") == "AAA [L]"
+    assert cycles.count("score.1") == 1
 
     _losers(board, 1).setChecked(False)
     autonaApp.settle()
 
     assert autonaApp.get("score.1.team.1.losers") is False
     assert autonaApp.get("score.1.team.1.player.1.mergedName") == "AAA"
+
+
+def test_a_losers_flip_from_another_thread_mid_name_edit_keeps_the_new_name(
+        autonaApp):
+    """AutonaActions.SetTeamLosers is core and may run on any thread.
+
+    It rebuilds the team's display names from the slots' state. A name edit
+    is two handlers of one editingFinished: the tag reaching the state
+    (_OnTextChanged) and the display name being published (NameChanged).
+    With the publish first, a flip landing right after it rebuilt the name
+    from the previous tag -- "OLD [L]" next to name "NEW" -- and nothing
+    published it again. The tag goes first since ADR-005 S2b; the flip is
+    run here, on a real second thread, at exactly that point.
+    """
+    import threading
+
+    from src.core import StateSchema as schema
+    from src.core.Actions import AutonaActions
+
+    board = autonaApp.board(1)
+    _setPlayerName(board, 1, "OLD")
+    autonaApp.settle()
+    card = board.team1playerWidgets[0]
+    service = card.player
+    publish = service.PublishMergedName
+    flips = []
+
+    def publishThenFlip(sponsor, tag):
+        merged = publish(sponsor, tag)
+        if not flips:
+            worker = threading.Thread(
+                target=lambda: flips.append(
+                    AutonaActions.instance.SetTeamLosers(1, 1, True)))
+            worker.start()
+            worker.join(timeout=10)
+            assert not worker.is_alive()
+        return merged
+
+    service.PublishMergedName = publishThenFlip
+    try:
+        edit = card._w(schema.PLAYER_TAG_KEY, QLineEdit)
+        edit.setText("NEW")
+        edit.editingFinished.emit()
+        autonaApp.settle()
+    finally:
+        del service.PublishMergedName
+
+    assert flips == [True]
+    assert autonaApp.get("score.1.team.1.player.1.name") == "NEW"
+    assert autonaApp.get("score.1.team.1.player.1.mergedName") == "NEW [L]"
+    assert autonaApp.get(
+        "score.1.team.1.player.1.mergedOnlyName") == "NEW [L]"
 
 
 def test_typing_in_the_match_bar_reaches_the_state(autonaApp):
@@ -1440,14 +1499,13 @@ def test_a_reset_set_load_does_not_reshuffle_recorded_games(
 def test_a_loaded_losers_flag_reaches_the_player_names(autonaApp):
     """The " [L]" suffix the thumbnail generator renders.
 
-    The losers checkbox's `toggled` was doing two jobs: writing
-    `team.{t}.losers`, and running every player widget's SetLosers, which
-    re-exports mergedName with the suffix. Only the first half moved to core
-    -- _SyncSetFields sets the checkbox with its signals blocked, because it
-    is the render side and may not write -- so ChangeSetData has to carry
-    the flag into the widgets itself. Without that the state and the
-    checkbox said "losers" while the exported name did not, and `p.losers`
-    stayed False against a checked box for the rest of the session.
+    The checkbox is only rendered by a set load (_SyncSetFields sets it with
+    its signals blocked, because it is the render side and may not write),
+    so the names cannot come from its `toggled`: SetLoadService.ApplyLosers
+    writes the flag and its team's names together (ADR-005 S2b). Before
+    that the board carried the flag into each card by hand
+    (_ApplyLosersToPlayers), and without it the state and the checkbox said
+    "losers" while the exported name did not.
     """
     board = autonaApp.board(1)
     board.ChangeSetData({
@@ -1459,11 +1517,11 @@ def test_a_loaded_losers_flag_reaches_the_player_names(autonaApp):
     assert autonaApp.get("score.1.team.2.mergedName") is None  # team-level
     assert autonaApp.get("score.1.team.2.player.1.mergedName") == "BBB [L]"
     assert autonaApp.get("score.1.team.1.player.1.mergedName") == "AAA"
-    # The three carriers of the same fact must agree.
+    # The carriers of the same fact must agree.
+    assert autonaApp.get("score.1.team.2.losers") is True
     assert _losers(board, 2).isChecked() is True
-    assert board.team2playerWidgets[0].losers is True
+    assert autonaApp.get("score.1.team.1.losers") is False
     assert _losers(board, 1).isChecked() is False
-    assert board.team1playerWidgets[0].losers is False
 
 
 def test_a_loaded_losers_flag_follows_the_swap(autonaApp):
@@ -1480,34 +1538,34 @@ def test_a_loaded_losers_flag_follows_the_swap(autonaApp):
     # The set's first entrant is on the right after a swap, so its flag and
     # its player both belong to state team 2.
     assert autonaApp.get("score.1.team.2.player.1.mergedName") == "AAA [L]"
-    assert board.team2playerWidgets[0].losers is True
-    assert board.team1playerWidgets[0].losers is False
+    assert autonaApp.get("score.1.team.2.losers") is True
+    assert autonaApp.get("score.1.team.1.player.1.mergedName") == "BBB"
+    assert autonaApp.get("score.1.team.1.losers") is False
 
 
 def test_clearing_the_score_still_clears_the_losers_names(autonaApp):
-    """ClearScore drives the checkbox directly (no blocker), so its
-
-    `toggled` still runs SetLosers -- the path this step did not touch, kept
-    honest here because ChangeSetData now applies the same flag by hand.
-    """
+    """ClearScore drives the checkbox directly (no blocker), so the names
+    lose their suffix through its `toggled` -- AutonaActions.SetTeamLosers,
+    the same core half a set load uses (SetLoadService.ApplyLosers)."""
     board = autonaApp.board(1)
     board.ChangeSetData({
         "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]],
         "team2losers": True, "overwrite": True,
     })
     autonaApp.settle()
-    assert board.team2playerWidgets[0].losers is True
+    assert autonaApp.get("score.1.team.2.player.1.mergedName") == "BBB [L]"
 
     board.ClearScore()
     autonaApp.settle()
 
-    assert board.team2playerWidgets[0].losers is False
+    assert autonaApp.get("score.1.team.2.losers") is False
     assert autonaApp.get("score.1.team.2.player.1.mergedName") == "BBB"
     assert _losers(board, 2).isChecked() is False
 
 
 def test_swapping_teams_carries_the_losers_names_across(autonaApp):
-    """SwapTeams exchanges the checkboxes, whose toggled re-exports both."""
+    """SwapTeams exchanges the checkboxes, whose toggled re-publishes both
+    teams' names (AutonaActions.SetTeamLosers)."""
     board = autonaApp.board(1)
     board.ChangeSetData({
         "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]],
@@ -1518,8 +1576,8 @@ def test_swapping_teams_carries_the_losers_names_across(autonaApp):
     board.SwapTeams()
     autonaApp.settle()
 
-    assert board.team1playerWidgets[0].losers is True
-    assert board.team2playerWidgets[0].losers is False
+    assert autonaApp.get("score.1.team.1.losers") is True
+    assert autonaApp.get("score.1.team.2.losers") is False
     assert autonaApp.get("score.1.team.1.player.1.mergedName") == "BBB [L]"
     assert autonaApp.get("score.1.team.2.player.1.mergedName") == "AAA"
 
@@ -1633,14 +1691,16 @@ def test_shrinking_the_roster_takes_the_player_slots_with_it(autonaApp):
 
 
 def test_a_roster_that_grows_with_a_loaded_losers_flag_is_flagged(autonaApp):
-    """The gap the player instalment closed.
+    """The gap the player instalment closed, closed for good by S2b.
 
-    A player widget is only connected to the LOSERS checkbox from the moment
-    it is created, so a set that arrives with the flag set *and* more
-    entrants than the board currently shows left the new cards at
-    losers=False: their mergedName lost the " [L]" the thumbnail generator
-    renders, and stayed wrong until some later load happened to move the
-    flag. The cards read the flag out of the state as they are built now.
+    A set that arrives with the flag set *and* more entrants than the board
+    currently shows used to leave the new cards at losers=False -- they were
+    connected to the LOSERS checkbox only from the moment they were created
+    -- so their mergedName lost the " [L]" the thumbnail generator renders.
+    The player instalment had the new cards read the flag as they were built
+    (_AdoptTeamLosers); since ADR-005 S2b there is no per-card flag at all:
+    a card publishes its name with the flag it finds in the state, which
+    SetLoadService.ApplyLosers has written before the entrants are poured in.
     """
     board = autonaApp.board(2)
     autonaApp.settle()
@@ -1654,12 +1714,11 @@ def test_a_roster_that_grows_with_a_loaded_losers_flag_is_flagged(autonaApp):
     autonaApp.settle()
 
     assert len(board.team1playerWidgets) == 2
-    assert [p.losers for p in board.team1playerWidgets] == [True, True]
-    assert autonaApp.get(
-        "score.2.team.1.player.2.mergedName") == "A2 [L]"
+    assert [autonaApp.get(f"score.2.team.1.player.{m}.mergedName")
+            for m in (1, 2)] == ["A1 [L]", "A2 [L]"]
     # ...and the team that did not come out of losers stays unflagged.
-    assert [p.losers for p in board.team2playerWidgets] == [False, False]
-    assert autonaApp.get("score.2.team.2.player.2.mergedName") == "B2"
+    assert [autonaApp.get(f"score.2.team.2.player.{m}.mergedName")
+            for m in (1, 2)] == ["B1", "B2"]
 
 
 def test_the_details_dialog_apply_button_commits_the_board(autonaApp):

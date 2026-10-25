@@ -151,6 +151,18 @@ class PlayerService:
         except (TypeError, ValueError):
             return None
 
+    def TeamLosersKey(self):
+        """``score.{N}.team.{T}.losers`` for a board slot, None otherwise.
+
+        The flag the slot's display name carries as " [L]". The editor's
+        ``player_editor.1`` belongs to no team, so it never has the suffix.
+        """
+        parts = self.path.split(".")
+        if (len(parts) != 6 or parts[0] != "score" or parts[2] != "team"
+                or parts[4] != "player"):
+            return None
+        return ".".join(parts[:4] + [schema.TEAM_LOSERS_KEY])
+
     @staticmethod
     def _asInt(value, default=0) -> int:
         try:
@@ -242,7 +254,7 @@ class PlayerService:
 
     # ── derived: the display name ────────────────────────────────────────
 
-    def PublishMergedName(self, sponsor, tag, losers) -> str:
+    def PublishMergedName(self, sponsor, tag) -> str:
         """Publish the two display-name spellings overlays render.
 
         ``mergedName`` carries the sponsor prefix, ``mergedOnlyName`` never
@@ -250,15 +262,30 @@ class PlayerService:
         the losers bracket (the thumbnail generator reads it). One save cycle,
         because they are one fact -- the pair used to be two bare Sets, so a
         board could notify twice for a single name edit.
+
+        The losers flag is read from the state (``TeamLosersKey``) since
+        ADR-005 S2b. The card used to hand it over from a copy of its own
+        (``self.losers``, kept in step by the checkbox's second handler and
+        two board helpers), which is what made " [L]" a per-card write; the
+        flag's writers now re-publish the team's names themselves
+        (``RepublishTeamMergedNames``). `sponsor` / `tag` still come from the
+        caller (the card's text). On a name edit the card has written that
+        text to the state already (``_OnTextChanged`` runs before
+        ``NameChanged``), so a team rebuild landing in between, from any
+        thread, builds the same name.
         """
-        merged = f"{sponsor} | {tag}" if sponsor else f"{tag}"
-        nameOnly = f"{tag}"
-        if losers:
-            merged += " [L]"
-            nameOnly += " [L]"
-        with StateManager.SaveBlock():
-            StateManager.Set(self.Key("mergedName"), merged)
-            StateManager.Set(self.Key("mergedOnlyName"), nameOnly)
+        with StateManager.lock:
+            losersKey = self.TeamLosersKey()
+            losers = bool(StateManager.Get(losersKey, False)) \
+                if losersKey else False
+            merged = f"{sponsor} | {tag}" if sponsor else f"{tag}"
+            nameOnly = f"{tag}"
+            if losers:
+                merged += " [L]"
+                nameOnly += " [L]"
+            with StateManager.SaveBlock():
+                StateManager.Set(self.Key("mergedName"), merged)
+                StateManager.Set(self.Key("mergedOnlyName"), nameOnly)
         return merged
 
     # ── derived: the images ──────────────────────────────────────────────
@@ -410,3 +437,33 @@ class PlayerService:
         shows two.
         """
         StateManager.Unset(self.path)
+
+
+def RepublishTeamMergedNames(board, team) -> list:
+    """Re-publish the display names of every slot of one team, from the state.
+
+    The other half of a losers-flag write (ADR-005 S2b): the flag's writers
+    -- ``AutonaActions.SetTeamLosers`` and ``SetLoadService.ApplyLosers`` --
+    call this in the save block of the flag itself, so flipping it is one
+    save cycle instead of one per player card. Each slot's name is rebuilt
+    from what it holds (``team`` / ``name``) through ``PublishMergedName``,
+    which reads the new flag.
+
+    Every slot the state carries for the team, named or not -- the per-card
+    handler this replaces re-exported every card's name, the blank ones
+    included. Returns the slot keys re-published.
+    """
+    prefix = f"score.{board}.team.{team}.player"
+    with StateManager.lock:
+        players = StateManager.Get(prefix)
+        if not isinstance(players, dict):
+            return []
+        names = [(slot, value.get(schema.PLAYER_SPONSOR_KEY) or "",
+                  value.get(schema.PLAYER_TAG_KEY) or "")
+                 for slot, value in list(players.items())
+                 if isinstance(value, dict)]
+        with StateManager.SaveBlock():
+            for slot, sponsor, tag in names:
+                PlayerService(f"{prefix}.{slot}").PublishMergedName(
+                    sponsor, tag)
+    return [slot for slot, _sponsor, _tag in names]

@@ -385,17 +385,33 @@ def _expectedLocations(golden):
 
 
 def _expectedOperations(golden):
-    """SetData for a player without a country used to leave the previous
+    """The recording, with the changes made on purpose since.
+
+    SetData for a player without a country used to leave the previous
     player's country in the state (its Clear() empties the combo with the
     signals blocked). The emptying is announced now: the regions are
     rebuilt for no country, then the country is published, inside the same
-    save cycle."""
+    save cycle.
+
+    ADR-005 S2b: on the tag's editingFinished the card writes the text to
+    the state (_OnTextChanged) before it publishes the display name
+    (NameChanged), so a team rebuild of the names cannot land between the
+    two and leave " [L]" on the old name. Clear() goes through that signal,
+    so its emptied `name` now comes ahead of the name pair (and the images
+    published with it). Same writes, same save cycle; the slot already has
+    every key there, so the state's key order does not move either."""
     golden = json.loads(json.dumps(golden))
     for side in ("board", "editor"):
         step = next(s for s in golden[side]
                     if s["step"] == "set data without a country")
         at = step["calls"].index(["name", '"NOWHERE"']) + 1
         step["calls"][at:at] = [["state", "{}"], ["country", "{}"]]
+
+        calls = next(s for s in golden[side] if s["step"] == "clear")["calls"]
+        name = next(call for call in calls if call[0] == "name")
+        calls.remove(name)
+        calls.insert(calls.index(
+            next(call for call in calls if call[0] == "mergedName")), name)
     return golden
 
 

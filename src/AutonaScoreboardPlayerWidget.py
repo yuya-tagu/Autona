@@ -102,8 +102,6 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         self.index = index
         self.teamNumber = teamNumber
 
-        self.losers = False
-
         # The slot as of the last complete RenderFromState (None: render
         # everything next time).
         self._renderedSlot = None
@@ -318,12 +316,19 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
         self.lastExportedName = ""
 
+        self._WireInputs(seed)
+
+        # After _WireInputs, so on the same editingFinished the tag / sponsor
+        # reaches the state (_OnTextChanged) before the display name is
+        # published (NameChanged; ADR-005 S2b). AutonaActions.SetTeamLosers
+        # rebuilds the team's names from the state, from any thread: with
+        # NameChanged first, a flip landing between the two rebuilt the name
+        # from the previous text after the card's own publish, so " [L]" was
+        # left on the old name.
         self.findChild(QLineEdit, schema.PLAYER_TAG_KEY).editingFinished.connect(
             self.NameChanged)
         self.findChild(QLineEdit, schema.PLAYER_SPONSOR_KEY).editingFinished.connect(
             self.NameChanged)
-
-        self._WireInputs(seed)
 
         self.SetCharactersPerPlayer(1)
 
@@ -709,11 +714,6 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             # is the blank row, which needs no country.
             self.player.SetRegion(
                 getattr(self, "_loadedStatesCountryCode", None), code)
-
-    def SetLosers(self, value):
-        with self.dataLock:
-            self.losers = value
-            self.ExportMergedName()
 
     def NameChanged(self):
         # Skip during bulk SetData; will be called once at the end

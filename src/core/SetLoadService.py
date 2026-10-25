@@ -49,6 +49,7 @@ import os
 from loguru import logger
 
 from .Actions import AutonaActions
+from .PlayerService import RepublishTeamMergedNames
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 
@@ -236,18 +237,33 @@ class SetLoadService:
         Making it so is a semantics change to a legacy REST route with no
         test coverage, on the one query an operator may already be using
         while swapped -- a product call, not a refactor, so it is recorded
-        here rather than taken.
+        here rather than taken. (/api/v1's ``PATCH set`` no longer goes
+        through here for its losers flag: it names the state team and calls
+        ``AutonaActions.SetTeamLosers``, ADR-005 S2b.)
+
+        A flag that changes takes its team's display names with it, in the
+        same save cycle -- the " [L]" suffix, rebuilt from the slots' state by
+        ``PlayerService.RepublishTeamMergedNames`` exactly as
+        ``AutonaActions.SetTeamLosers`` does. The board used to do that half
+        per player card (``_ApplyLosersToPlayers`` / ``_AdoptTeamLosers``).
+        Slots a set load creates afterwards (a roster that grows) need
+        nothing: their name is published once their entrant is in, and that
+        reads the flag written here.
         """
         if not isinstance(data, dict):
             return False
         written = False
-        for setTeam in (1, 2):
-            value = data.get(f"team{setTeam}losers")
-            if value is None:
-                continue
-            written |= self._SetIfChanged(
-                self._teamKey(self.DisplayTeam(setTeam), "losers"), bool(value))
-        return bool(written)
+        with StateManager.SaveBlock():
+            for setTeam in (1, 2):
+                value = data.get(f"team{setTeam}losers")
+                if value is None:
+                    continue
+                team = self.DisplayTeam(setTeam)
+                if self._SetIfChanged(
+                        self._teamKey(team, "losers"), bool(value)):
+                    RepublishTeamMergedNames(self.scoreboardNumber, team)
+                    written = True
+        return written
 
     # ── team name and its crest ──────────────────────────────────────────
 
