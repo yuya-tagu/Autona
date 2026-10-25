@@ -1207,7 +1207,7 @@ Web サーバーの公開面を 3 つ締めた。1 つ目は静的配信で、�
   >
   > あわせて、Web サーバーが配信するファイルをオーバーレイ・ブラウザ版・画像に限定しました。`user_data/settings.json` や選手 DB はブラウザから読めなくなります。独自のレイアウトが `layout/` `assets/` `out/` と `user_data/` の画像フォルダ以外のファイルを読んでいた場合は表示されなくなり、ログに `not serving` が出ます。
 
-#### S3b 永続化の分離（2026-10-25・PR 未作成）
+#### S3b 永続化の分離（2026-10-25・PR #228）
 
 state の正本を `out/program_state.json` から `user_data/state.json` に移した。`program_state.json` は OBS の file:// オーバーレイと ASS が読む出力で、場所・形式・`timestamp` / `revision` が外部契約に縛られ、版も持てなかった（S-14）。正本は版付きの `state.json` にし、`program_state.json` は今までどおり書き出すだけの出力に戻した（読むのは移行のときだけ）。保存は新しい core モジュール `src/core/StatePersistence.py`、版の移行は `src/core/StateMigrations.py` が持つ（どちらも Qt なし・import 副作用なし）。
 
