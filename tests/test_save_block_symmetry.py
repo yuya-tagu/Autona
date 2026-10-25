@@ -39,13 +39,17 @@ def _probeFile(app):
 
 
 def _breakBestOfFormatting(monkeypatch):
-    """Make the best_of handler raise partway through, the way BUG-3 did.
+    """Break the best_of texts the way BUG-3's trigger did.
 
     An empty table is what AutonaLocaleHelper actually holds before
     LoadLocale() runs, so this is the real failure and not an injected one:
     matchNames.get("best_of") returns None and the .format() call on it
     raises AttributeError -- after best_of has been written and before
-    first_to is.
+    first_to is. Since ADR-005 S2e core catches it and publishes the
+    English default (AutonaActions._matchText), so the tests below pin that
+    the broken locale still leaves saving unblocked;
+    test_a_raising_write_inside_the_best_of_block_leaves_saving_unblocked
+    makes something inside the block really raise.
     """
     monkeypatch.setattr(AutonaLocaleHelper, "matchNames", {})
 
@@ -68,9 +72,10 @@ def test_a_failing_best_of_handler_leaves_saving_unblocked(
     board = autonaApp.board(1)
     _breakBestOfFormatting(monkeypatch)
 
-    # PySide6 reports an exception raised inside a slot and carries on, so
-    # setValue() returns normally here and the traceback goes to stderr --
+    # PySide6 reported the exception this raised inside the slot and carried
+    # on, so setValue() returned normally and the traceback went to stderr --
     # which is precisely why the leaked counter was invisible in production.
+    # Core falls back to the English texts since ADR-005 S2e.
     board.bestOfSpin.setValue(5)
     autonaApp.settle()
 
@@ -128,6 +133,34 @@ def test_the_widget_survives_a_failing_best_of_handler(autonaApp, monkeypatch):
     assert autonaApp.state.saveBlocked == 0
 
 
+def test_a_raising_write_inside_the_best_of_block_leaves_saving_unblocked(
+        autonaApp):
+    """The formatter's failure no longer raises (see _breakBestOfFormatting),
+    so the block is tested with a write inside it that does: the stage rows'
+    rebuild. The exception reaches the caller -- SetBestOf is called
+    directly now -- and the counter is back at zero on the way out."""
+    from unittest.mock import patch
+
+    from src.core.Actions import AutonaActions
+    from src.core.GameTrackerService import GameTrackerService
+
+    autonaApp.board(1)
+    state = autonaApp.state
+    try:
+        with patch.object(GameTrackerService, "SetStageCount",
+                          side_effect=RuntimeError("rows")):
+            with pytest.raises(RuntimeError):
+                AutonaActions.instance.SetBestOf(1, 5)
+        assert state.saveBlocked == 0
+
+        state.Set(PROBE_KEY, "after")
+        autonaApp.settle()
+        assert _probeFile(autonaApp).read_text(encoding="utf-8") == "after"
+    finally:
+        state.Unset(PROBE_KEY)
+        autonaApp.settle()
+
+
 # ── the structural rule, so the shape cannot come back ───────────────────
 
 def test_the_best_of_handler_is_a_method_not_a_lambda_chain(autonaApp):
@@ -136,21 +169,30 @@ def test_the_best_of_handler_is_a_method_not_a_lambda_chain(autonaApp):
     A lambda returning `[BlockSaving(), Set(...), ..., ReleaseSaving()]` has
     no place to put a finally, so the pairing is only as safe as the code
     between the brackets. Pinning the handler as a real method keeps the
-    `with StateManager.SaveBlock():` in AutonaScoreboardWidget the only way
-    to write it.
+    `with StateManager.SaveBlock():` the only way to write it -- in core
+    since ADR-005 S2e, where the six keys and the stage rows are written
+    (AutonaActions.SetBestOf / RepublishBestOf); the spinbox's handler only
+    asks for the change.
     """
     import inspect
 
     from src.AutonaScoreboardWidget import AutonaScoreboardWidget
+    from src.core.Actions import AutonaActions
 
-    source = inspect.getsource(AutonaScoreboardWidget._onBestOfChanged)
-    # Comments in there talk about the two calls by name; only real code counts.
-    code = "\n".join(line for line in source.splitlines()
-                     if not line.lstrip().startswith("#"))
+    def code(function):
+        # Comments in there talk about the two calls by name; only real
+        # code counts.
+        return "\n".join(line for line in
+                         inspect.getsource(function).splitlines()
+                         if not line.lstrip().startswith("#"))
 
-    assert "with StateManager.SaveBlock():" in code
-    assert "BlockSaving()" not in code
-    assert "ReleaseSaving()" not in code
+    for function in (AutonaActions.SetBestOf, AutonaActions.RepublishBestOf):
+        assert "with StateManager.SaveBlock():" in code(function), function
+    for function in (AutonaActions.SetBestOf, AutonaActions.RepublishBestOf,
+                     AutonaActions._PublishBestOf,
+                     AutonaScoreboardWidget._onBestOfChanged):
+        assert "BlockSaving()" not in code(function), function
+        assert "ReleaseSaving()" not in code(function), function
 
 
 @pytest.mark.parametrize("boardNumber", [1, 2])

@@ -645,7 +645,7 @@ LOSERS フラグと、そのチームの選手名に付く ` [L]`（`mergedName`
     - 「seed が変わったときだけ」の条件
     - 「名前があったときだけ」の条件
 - 残置 / リスク
-  - トラッカー ON のスコアのクリアは、ステージ行の数だけ保存サイクルが増える（上記）。追従を 1 サイクルにまとめる変更は `ResetScore` / `AdjustScore` / `ApplyScores` にも効くので、S2d では行わない（S2e の候補）
+  - トラッカー ON のスコアのクリアは、ステージ行の数だけ保存サイクルが増える（上記）。追従を 1 サイクルにまとめる変更は `ResetScore` / `AdjustScore` / `ApplyScores` にも効くので、S2d では行わない（S2e の候補）→ **S2e で実施**（追従は両チーム分で 1 サイクル。下記 S2e の判断 6）
   - トラッカー ON で `ResetAllInputs` を行うと、`DecrementScore` の警告ログ（`Failed to decrement score`）がチームごとに出る。S2d で新たに出るのはここだけ。同じ block の best_of 0 で行が消えた後に、スコア 0 への追従が held サイクルで走るため。書き込みは無く、state は同じ
     - Web `clear_all` では出ない。`ResetMatch` の block を抜けた時点のスコア 0 への追従が行を消し、best_of 0 はその後になるため
     - 行の無い状態でスコアが下がるときの同じ警告（セット追従の前処理、1v1 の Web `clear_all`）は、移行前の 2045c973 でも出る
@@ -664,3 +664,149 @@ LOSERS フラグと、そのチームの選手名に付く ` [L]`（`mergedName`
   - Start.gg のセットを追従中にクリアしてから同じセットを選び直すと、もう一度読み込まれる
   - トラッカー ON で勝敗を付けてからマッチリセット: ステージボタンが全部未報告に戻り、スコアが 0-0
   - Start.gg の選手でクリアしたとき、統計が 1 回だけ取り直される
+
+#### S2e best_of を state 主導へ（2026-10-24・PR #226）
+
+セットの長さ（BEST OF）の正本を、ボードのスピンボックスから state にした。旧実装では、スピンボックスの `valueChanged` が 1 SaveBlock で `AutonaActions.SetBestOf`（6 キー）→ `individualGameTracker.SetStageCount` を呼んでいた。ほかの入口（セット読込の `ChangeSetData`、Web の `set_route` / `reset_match` / `clear_all`、v1 の `PATCH set`、ゲームのロード、すべての入力値をリセット）は、どれもそのスピンボックスを動かしていた。新しい `AutonaActions.SetBestOf(board, n)` は 6 キーとステージ行を 1 SaveBlock で書く。スピンボックスとステージ行は held サイクルから state を描画する（S2a と同じ形）。
+
+- **`AutonaActions` の操作**（board 1/2。board 3 は `False` を返す。クルーの best_of は今もクルーウィジェット → `CrewBattleService`）
+  - `SetBestOf(board, value)`
+    - 0〜99 に丸める（`BEST_OF_MIN` / `BEST_OF_MAX` = スピンボックスの範囲。旧実装でも Web の 150 はスピンボックスで 99 になっていた）。`"7"` は 7
+    - int にできない値（`"seven"`・None・dict など）は警告を出して何も書かず `False` を返す（0 として読むと best_of をクリアしてしまう。`SetLoadService` の「警告して捨てる」に合わせた。レビュー指摘）
+    - 値が変わらないときは何も書かず `False` を返す。旧 `valueChanged` も変化時だけ発火していたので、同じ値でステージ行がリセットされないのは旧挙動と同じ
+    - 6 キーは旧と同じ順に `SetIfChanged` で書く。そのあと同じ block で、登録されたトラッカーの `SetStageCount(ResolveStageCount(value))` を呼ぶ
+    - 文言の整形（注入された `formatMatchText`）が例外を出したら、警告を出して英語既定の文言（`DEFAULT_MATCH_TEXTS`）で書く（`_matchText`。レビュー指摘）。行の作り直しと他のキーはそのまま書くので、例外はどの入口にも伝わらない
+  - `RepublishBestOf(board)`: ゲームのロード（`_onGameAssetsLoaded`）用。旧実装はここで `valueChanged` を再発火し、新しいゲーム・ロケールで文言を作り直したうえで、同じ行数でステージ行をリセットしていた。それを core で行う
+  - `RegisterGameTracker(board, tracker)` / `UnregisterGameTracker(board, tracker)`
+    - ボードは構築時（トラッカーのサービスを作った直後）に登録する
+    - 外すのはボードの `destroyed` から（lambda は番号とサービスだけを捕まえ、ボード自身は捕まえない）。外すのは、登録がまだそのサービスのときだけ（作り直したボードの新しい登録は残す）
+    - 未構築ボードへの `SetBestOf` はキーだけを書く。行はボードの構築が作る（構築時に `SetBestOf(n, 0)` → `_SyncBestOf()`。旧は `valueChanged.emit(0)`）
+  - `ClearBoard` は最後に、同じ block で `SetBestOf(board, 0)` を行う。`ResetAllInputs` の「`ClearBoard` と best_of 0 を 1 SaveBlock」（S2d）はこれで満たす。`ResetMatch` は best_of を含まない（Web の 2 経路は、旧実装どおり自分のサイクルで best_of を 0 にする）
+- **`GameTrackerService.rowsVersion`**: `SetStageCount` を呼ぶたびに（同じ行数でも）1 増える。ボードの `AutonaIndividualGameTracker.RenderStageRows()` は、版か行数が変わったときだけボタンを作り直す。何も書かない（旧 `SetStageCount` はウィジェットからサービスを書いていた）
+- **ボード**
+  - `_SyncBestOf()`: held サイクルで `_SyncSetFields` の後、`_SyncScoreDisplays` の前に呼ぶ
+    - セット読込は best_of とスコアを 1 サイクルで書く。行を先に描画しておくと、スコアの変化を新しい行に追従させられる（旧実装でスピンボックスが書き込みの中で行を作り直していたのと同じ順）
+    - スピンボックスは `QSignalBlocker` で描画する。オペレーターが入力中なら飛ばして、そのとき表示していた値を記録し（`_heldBackBestOf`）、`editingFinished` で `QTimer.singleShot(0)` から描画し直す（`_SyncSetFields` のフォーカス規則と同じ。Web の後にオペレーターが打った値は、`valueChanged` が先に書くので打った値が勝つ）
+    - Return は Qt が今の値のまま `valueChanged` を出す（`AlwaysEmit`）。記録した値と同じ `valueChanged` は書かない（チーム名の `_OnTeamNameFinished` と同じ規則）。書くと、オペレーターが変えていない値が Web の新しい値を上書きする（レビューの追加テストで発見）。Return の後もフォーカスは残るので、保持は続く
+    - ステージ行は、フォーカスに関係なく state に従う
+  - `_onBestOfChanged` は `AutonaActions.SetBestOf` を呼ぶだけになった。ボードは `SetStageCount` を呼ばない
+- **入口**
+  - セット読込（`ChangeSetData`）: `SetLoadService.BestOfFromSetData(data)` → `SetBestOf`
+    - 旧の `if data.get("bestOf")` をそのまま残した。0・空・None は運ばない
+    - 数値の文字列（`"7"`）は数値にする。数値でない値は警告を出してそのキーだけを捨てる（`ApplyScores` と同じ規則。旧はスピンボックスの `setValue` が `TypeError` を出し、セット読込の残り（losers・選手）を捨てていた。golden の対象外）
+  - Web `set_route` の bestOf: `_apply_set_fields({'bestOf': int(bestOf)})`。phase / pool / match と同じ経路（`ApplyMatchInfo` → `BestOfFromSetData` → `SetBestOf` → `ApplyLosers` を 1 SaveBlock）。英語のラウンド名が空になるのは旧 `ChangeSetData` と同じ。v1 の `PATCH set` もここを通る
+  - Web `reset_match` / `clear_all` の `_reset_best_of`: board 1/2 は `SetBestOf(n, 0)`。クルーはスピンボックスのまま
+  - 未構築ボードは、S2c / S2d と同じ理由で `EnsureScoreboard` で構築してから書く
+- **判断**
+  1. **行の作り直しは操作の block の中で行う**（通知ハンドラの中で書かない）。旧ルール（state-and-webserver.md）が state 先行にしなかった理由は「行の作り直し（= state の書き込み）が通知ハンドラに入り、再入と 2 サイクルになる」だった。トラッカーを `AutonaActions` に登録し、操作がそのトラッカーを呼ぶことで解消した。ウィジェットは描画だけを行う。1 サイクルは維持した
+  2. **トラッカーは登録制**（操作のたびに `GameTrackerService` を作らない）。`writingScore` のガードと行の版はボードが読むインスタンスの状態なので、別インスタンスで書くとボードに伝わらない
+  3. **変化時だけ書き、ゲームのロードは `RepublishBestOf`**: 旧 `valueChanged` の発火条件（変化時だけ）と、onLoad の再発火（必ず作り直す）の 2 つを、そのまま 2 つの操作に分けた
+  4. **丸めは core**: スピンボックスのない入口（core を直接呼ぶ側）でも、同じ値になる
+  5. **`ClearBoard` に best_of を含めた**: `ClearBoard` は `ResetAllInputs` 専用（S2d 判断 3）。旧は外側の SaveBlock で ClearBoard と best_of 0 をまとめていた
+  6. **スコアへの行の追従を 1 サイクルにした**（S2d の残置）。`_SyncScoreDisplays` は、両チームの `SyncStagesToScore` を 1 つの SaveBlock の中で呼ぶ
+     - 安全だと判断した理由:
+       - 追従はもともと held ハンドラの中で行ごとに SaveBlock を作って書いていた。外側の block はそれを 1 回にまとめるだけ
+       - block を抜けたときの通知は、旧の行ごとの通知と同じく `_syncingScore` のガードで止まる
+       - 何も追従しなければ書かないので、サイクルは増えない（トラッカー OFF・+1 は不変）
+       - held なので途中のサイクルは OBS / Web に出ない。held 通知の購読者はボードと統計パネルだけ
+     - 効く操作: `ClearScore` / `ResetMatch` / `ResetScore`（3 ゲーム記録済み）、`ApplyScores`（セット読込のスコア）、`AdjustScore` の +2。スコアの書き込み 1 + 行の追従 1 = 2 サイクルになる
+     - 行もスコアの操作の block で書く「1 サイクル」は行わなかった。スコアから行への追従を core のスコア操作（`AdjustScore` / `ResetScore` / `ClearScore` / `ApplyScores` / `SwapTeams`）へ移す必要があり、2 つの書き手の協調（`writingScore`・スワップの `followStages=False`・スコア欄の手入力の経路）の作り直しになるため。スコア欄の手入力を core へ移すときの候補
+  7. **存在しない行への書き込みは core が断る**（レビュー指摘）。別スレッド（Web / API）の `SetBestOf` は行をすぐ作り直すが、ボタンの作り直しは held サイクルが GUI スレッドに届いてから。その間に消えた行のボタンを押すと、旧ガードなしでは `stages.5` が書き戻され、行の並びが崩れていた
+     - `GameTrackerService.SetStageResult` / `SetStageAsset` は `StateManager.lock` の中で `0 <= index < StageCount()` を確かめ、範囲外なら警告を出して `False` を返す。「行数を決めるのは `SetStageCount` だけ」という不変条件を core が守る
+     - ウィジェットの `_StageResultClicked` は、断られたクリックからスコアを集計しない（集計すると、作り直した行からスコアが 0 に戻る）
+- **golden**
+  - `best_of_golden.json` を移行前の 79da38bf で記録した。節は 3 つ
+    - `operations`（チームボード、43 ステップ）/ `singles`（1v1、43 ステップ）
+      - スピンボックスでの変更（同じ値・0・範囲外の 150 を含む）
+      - トラッカー ON / OFF
+      - ステージ結果を記録した状態での行数の変更
+      - `ResetScore`、スコア付きのセット読込
+      - Web `set_route` の bestOf（数値・文字列・0・範囲外）、v1 `PATCH set`（bestOf 単独・phase / match 付き・0）
+      - bestOf 付き・同じ bestOf・bestOf 0 のセット読込、ゲームのロード
+      - Web `reset_match` / `clear_all`、`ResetAllInputs` を 2 回、best_of の無いゲームのロード
+    - `unbuilt`（2 ステップ）: 未構築のチームボードへの Web `set_route` bestOf と、未構築の 1v1 ボードへの v1 `PATCH set`。構築中と反映時の公開内容も記録した
+    - `key_order.json` に「best of operations」/「singles best of operations」/「unbuilt best of operations」の 3 節を追加した（既存の節は不変）
+    - 移行前のツリーで録画をそのまま再生し、一致することを確かめてから移行した
+  - 各ステップの後に照合したこと: スピンボックスの値 == `best_of`、行数 == `stages` の数、各行のボタン == state の勝敗、行が無いときトラッカーが隠れる
+  - **best_of の移行そのものは、全ステップで意図した差分ゼロ**（state・キー順・保存サイクル・反映 delta・統計の発火数・表示）。3 節とも同じ
+  - 判断 6 による差分は保存サイクル数だけ（state・キー順・反映 delta は同じ）。テストでは S2d の差分に重ねて書いた（`_layered`）
+    - `clear_golden.json`（`S2E_CLEAR_CHANGES`）
+      - スコアのクリア: `ClearScore` 4 → 2、`ResetMatch` 4 → 2
+      - Web: `reset_match` 5 → 3、`clear_all` 9 → 7（S2d 前の 7 に戻った）
+      - スコア付きのセット読込: 4 → 2
+      - +2 を含む準備ステップ: 6 → 5 / 12 → 11 / 20 → 19
+    - 1v1（`S2E_SINGLES_CLEAR_CHANGES`）: 同じ差分。ただし Web `clear_all` は不変（4。行が無い状態のため）。+2 を含む準備ステップは 6 → 5 / 12 → 11
+    - セット読込の前処理（`S2E_PREPASS_CHANGES`）: 4 → 2（2 通りとも）
+    - `best_of_golden.json`（`S2E_CHANGES`。1v1 も同じ）: トラッカー ON の `ResetScore` 4 → 2、スコア付きのセット読込 4 → 2、Web `reset_match` 5 → 3、Web `clear_all` 8 → 6
+    - `golden.json` / `swap_golden.json` は差分なし（+1 は行 1 つなので変わらない）
+- **pin**
+  - core（`test_actions.py`）
+    - 同じ best_of は書き込みにならない
+    - 丸め（150 → 99、-3 → 0、`"7"` → 7）
+    - int にできない値（`"seven"`・None・`""`・dict・list）は何も書かない
+    - 整形が例外を出す（空の表・`.format()` が通らない独自用語）と英語既定で書き、行も作り直す。`saveBlocked` は 0 に戻る
+    - クルーは `False`
+    - 登録された行が同じサイクルで作り直され、キー順も旧と同じ
+    - トラッカー OFF では行が `{}`
+    - 同じ best_of では記録済みのゲームが残る
+    - `RepublishBestOf` は行を作り直し（版 +1、1 サイクル）、文言を作り直す
+    - 未構築ボードはキーだけ
+    - 登録の解除は新しいトラッカーを残す
+    - `ClearBoard` は best_of 0 も行う
+  - `test_game_tracker_service.py`
+    - 作り直しのたびに版が進む（同じ行数でも）
+    - 存在しない行（5・7・-1、縮めた後の旧最終行）への結果・ステージは書かない（判断 7）
+  - `test_set_load_service.py`: `BestOfFromSetData`（数値・`"7"`・空白付き・負・範囲外はそのまま、0 / None / 空 / キーなし / dict でない入力は None、数値でない値は警告して None）
+  - ボード（`test_scoreboard_operations.py`）
+    - core の `SetBestOf` が 1 サイクルでスピンボックスと行に届く（別スレッドからも）
+    - ゲームのロードで、同じ行数のまま行が作り直される
+    - 破棄したボードは登録を外す
+    - 3 ゲーム記録済みの `ResetScore` と +2 は 2 サイクル（判断 6）
+    - 別スレッドの `SetBestOf` の後、作り直し前の古い行のボタンを押す: 行は増えず、スコアも動かない（判断 7）
+    - `matchNames` が空でも、セット読込（losers と選手が入る）・`set_route` の bestOf（`"OK"`）・ゲームのロード（`CommitHeld` される）が最後まで進む
+    - 数値でない bestOf のセット読込でも、losers と選手が入る
+  - `test_player_card_render.py`
+    - 上記 golden とキー順の照合
+    - 入力中のスピンボックスに Web が書く: 欄から外れると Web の値が出る（オフスクリーンで実際にフォーカスして打鍵する）
+    - 保持中に Return で確定する: フォーカスが残るので保持が続き、表示中の値は Web の値の上に書き戻されない。欄から外れると Web の値が出る
+  - `test_save_block_symmetry.py`
+    - SaveBlock の検査対象を `AutonaActions.SetBestOf` / `RepublishBestOf` に移した
+    - 整形の失敗は例外にならなくなったので、block の中で実際に例外を出す検査（行の作り直しが例外を出す）を足した。例外は呼び出し側に届き、`saveBlocked` は 0 に戻る
+- **テスト追従**
+  - `test_clear_board_on_a_clear_board_writes_nothing`: 準備で best_of を 0 にした（合成ボードには best_of が無く、`ClearBoard` が 0 を書くため）
+  - `test_clear_board_takes_the_team_names_too_in_one_cycle`: best_of 0 も確認するようにした
+  - `test_a_tracker_row_is_rebound_to_the_new_stage_model`: ウィジェットの `SetStageCount` を削除したので、core の `SetBestOf` で行を作るようにした
+- **S2 の完了条件**（判断 1 で絞った「swap・clear・best_of・set_route の該当箇所で `GetScoreboard(` ゼロ」）
+  - clear（`reset_match` / `reset_players` / `clear_all` / `get_set`）・best_of（`_reset_best_of`）・`set_route` の phase / pool / match / losers / teamName / bestOf: **ゼロ**（`EnsureScoreboard` で構築して core を呼ぶ）
+  - swap: `swap_teams` は `EnsureScoreboard` にした（`@gui_thread_sync` の中なので `GetScoreboard` と同じ動き。書き込みは `board.SwapTeams()` → `CommitFocusedEdit` → `AutonaActions.SwapTeams` で core）
+    - **`get_swap` は `GetScoreboard` のまま残す**。理由: GUI スレッド外（Flask）から呼ばれ、`GetScoreboard` が構築を GUI スレッドへ渡す正しい形になっている。`EnsureScoreboard` は GUI スレッド専用なので、置き換えるには `@gui_thread_sync` を足すことになり、やっているのは state の読み取りだけなので、経路が変わるだけになる
+  - board 1/2 で残る `GetScoreboard(`（26 箇所。コメント 2 行を除く）
+    - 選手データ: `post_score` / `set_team_data` / `update_player` / `load_player_from_tag` → S2f
+    - 人数・キャラ数: `set_route` の `players` / `characters` → S2g
+    - stats: `stats_*` / `refresh_stats` の 11 箇所
+    - ウィンドウ操作: `open_sets` / `pull_stream_set`
+    - サムネイル: `get_thumbnail`
+    - provider 取得: `load_set`
+    - 構築して読むだけ: `get_scoreboard`（構築でサブツリー全体が書かれるため）
+    - `get_swap`（上記）
+    - board 3 だけの経路（条件の対象外）: `crew_member_stock` / `crew_set_active` / `reset_scores` の fallback
+- 残置 / リスク
+  - 登録の解除はボードの `destroyed` に頼る。届かずにボードが消えると、`SetBestOf` が state の行を作り直し続ける（そのボードは未構築に戻っており、行は次の構築の `SeedBoard` で消える）。作り直したボードは新しい登録で上書きする
+  - 登録は `AutonaActions.instance` の中にあり、プロセス全体で共有される（テストではボードの破棄で外れることを pin した）
+  - セット読込の数値でない bestOf は、例外ではなく警告になり、セット読込の残りが適用されるようになった（上記。旧の例外はバグとして扱った）
+  - 文言の整形（`best_of_text` の注入関数）が例外を出すと、警告を出して英語既定の文言で書く。その間ずっと英語の BO 表記になる（ロケールの表が読み込まれた後の次のゲームのロード / best_of の変更で直る）
+    - 旧はスピンボックスのスロット内の例外を PySide6 が握りつぶしていたので、呼び出し側は先へ進めていた。ただし 6 キーは途中で止まり、行も作り直されなかった
+    - core 化した直後（レビュー前）は例外がそのまま上がり、セット読込の残り（losers・選手）・`set_route` の応答・ゲームのロードの `CommitHeld` が止まっていた。フォールバックで解消した
+  - 性能の注意: 行の作り直し（`SetStageCount`）が `StateManager.lock` を持ったまま走るようになった（`SetBestOf` が lock の中で `_PublishBestOf` を呼ぶ）。スピンボックスからなら GUI スレッドで走るので、その間は Web・書き出しのスレッドが待つ（行は最大 99 × 3 キー。実測なし）
+  - 既存リスクの頻度: `_SyncScoreDisplays` の SaveBlock（判断 6）で、held 通知のたびに SaveBlock が 1 つ増える。`saveBlocked` の増減はスレッド間で atomic でない（既存の問題）ので、競合の機会がその分増える（何も書かないときは SaveState が早期 return する）
+  - クルーボード（board 3）の best_of はスピンボックス主導のまま
+  - トラッカー ON の `ResetAllInputs` で出る `DecrementScore` の警告（S2d の残置）は変わらない
+- 実機確認（オーナー）
+  - BEST OF のスピンボックスを 3 → 5 → 0: トラッカー ON でステージ行が 3 → 5 → 消える。OFF では行が出ず、BO 表記だけが変わる
+  - トラッカー ON で勝敗を付けてから BEST OF を変える: 行が新しい数で全部未報告に戻る。同じ値を打ち直しても、記録は消えない
+  - Web / v1 から bestOf を変える: デスクトップのスピンボックスと行が追従し、反映後に OBS の BO 表記が変わる。スピンボックスを入力中に Web から変えると、欄から外れたときに Web の値が出る
+  - ゲームを切り替える / 言語を変える: BO 表記がその言語になり、ステージ行は同じ数で未報告に戻る
+  - Web のマッチリセット・全クリア・すべての入力値をリセット: BEST OF が 0 になり、行が消える
+  - Start.gg のセットを読み込む（bestOf 付き）: BEST OF と行がセットの値になり、スコアの分だけ行に勝ちが付く
+  - トラッカー ON で 2-1 からマッチリセット: 行が全部未報告に戻り、スコアが 0-0（判断 6 の対象）
+  - クルーボードの BEST OF を Web から変える: 従来どおり変わる

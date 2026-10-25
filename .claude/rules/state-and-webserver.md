@@ -128,13 +128,22 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
   `AutonaActions` を呼ぶ。`AdjustScore` / `ResetScore` は board 3 では今も no-op で、
   クルーの「リセット」= 全員ストック満タン復元はウィジェットが入口
   （`WebServerActions.reset_scores` の `@gui_thread_sync` はそのために残っている）
-- **`SetBestOf` はスピンボックス主導のまま**（state 先行に反転していない）。
-  `AutonaScoreboardWidget._onBestOfChanged` が 1 つの `SaveBlock` で
-  `SetBestOf` → `individualGameTracker.SetStageCount(value)` を呼ぶ。反転すると
-  ステージ行の再構築（= state 書き込み）が通知ハンドラ内に入り、再入 + 2 サイクルになる
+- **best_of は state 主導**（ADR-005 S2e）。`SetBestOf(board, n)`（board 1,2。board 3 は False で、
+  クルーはスピンボックス → `CrewBattleService`）が 6 キーとステージ行を 1 `SaveBlock` で書く。
+  0〜99 に丸め、値が変わらなければ何も書かない（旧 `valueChanged` と同じ。同じ値でゲームの記録は消えない）。
+  ゲームのロードは `RepublishBestOf(board)`（文言を作り直し、同じ行数で行をリセット）。
+  行はボードが構築時に `RegisterGameTracker(board, tracker)` で登録したトラッカーに、操作の block の中で
+  `SetStageCount` させる（通知ハンドラの中で書かない = 再入しない。解除はボードの `destroyed` から。未構築ボードは
+  キーだけ）。スピンボックスと行は held サイクルの `_SyncBestOf` が描画する（`_SyncSetFields` の後、
+  `_SyncScoreDisplays` の前。入力中のスピンボックスは飛ばし、`editingFinished` で描画し直す）。
+  入口はすべてこの操作: スピンボックス（`_onBestOfChanged`）・セット読込（`SetLoadService.BestOfFromSetData`。
+  0・空は運ばない）・Web `set_route` の bestOf（v1 `PATCH set` 含む）・`_reset_best_of`・`ClearBoard`（最後に 0）
 - **ローカライズ文字列は callable で注入**する。`best_of_text` / `first_to_text` は
   `AutonaLocaleHelper.FormatMatchText` を `bootstrap_core()` が `AutonaActions` に渡す
-  （`TournamentInfoService.formatEventDate` と同じ形）。未注入時は英語既定にフォールバック
+  （`TournamentInfoService.formatEventDate` と同じ形）。未注入時と、注入関数が例外を出したとき
+  （ロケール未ロードの空の表・`.format()` が通らない独自用語）は英語既定にフォールバックする
+  （後者は警告を出す。`SetBestOf` は入口から直接呼ばれるので、例外を上げるとセット読込の残りや
+  ゲームのロードの `CommitHeld` が止まる。ADR-005 S2e）。int にできない best_of は警告して何も書かない
 - `score.{n}.team.{t}.score` の書き手は **core 内に 3 系統**（`AutonaActions`、
   ステージ集計の `GameTrackerService.PublishStageResults` / `UpdateScore`、
   セット読込の `SetLoadService.ApplyScores`。`AutonaActions` の書き手は `SetScore` / `AdjustScore` / `ResetScore` と、S2c からの `SwapTeams`、S2d からのクリア）。
@@ -145,7 +154,9 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
   のみ噛み合う。ステージ集計側は自分が書いている区間を
   `GameTrackerService.writingScore` で公開し（ウィジェットは property で委譲）、
   `_SyncScoreDisplays` はその間 `SyncStagesToScore` を呼ばない（呼ぶと 1 クリックで
-  次のゲームまで勝ちになる）。完全一本化は Step 5
+  次のゲームまで勝ちになる）。完全一本化は Step 5。
+  スコアへの行の追従は両チーム分を 1 つの `SaveBlock` で書く（ADR-005 S2e。旧は 1 行 1 サイクル）ので、
+  トラッカー ON で何ゲーム分動いても「スコア 1 + 追従 1」サイクル
 - 呼び出し側は Qt ウィジェット・`AutonaWebServerActions`・`AutonaHotkeys` の 3 つ。
   **どのスレッドから呼んでもよい**（Qt に触れないのが層の定義）。委譲した
   WebServerActions メソッドからは `@gui_thread_sync` を外す。例外は `swap_teams`（S2c）で、
@@ -153,8 +164,8 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
   2 書き込みに分かれており、その間にスワップが割り込むと合成名が反対のスロットに残るため。入力中の欄の確定も
   GUI スレッドで行う）。未構築のボードは従来どおり構築してから入れ替える（`get_swap` も構築する）。
   S2d のクリア（`reset_match` / `reset_players` / `clear_all`）・`get_set`・`set_route` の
-  phase / pool / match / losers / teamName も同じ理由で GUI スレッドに残し、未構築ボードを `EnsureScoreboard` で
-  構築してから書く（best_of / 人数 / キャラ数はまだボードのスピンボックス。S2e / S2g）
+  phase / pool / match / losers / teamName / bestOf（S2e）も同じ理由で GUI スレッドに残し、未構築ボードを
+  `EnsureScoreboard` で構築してから書く（人数 / キャラ数はまだボードのスピンボックス。S2g）
 - **SaveBlock は複数キーを 1 サイクルにまとめる時だけ**使う（単一キーなら不要）。
   かつては「空 `changedKeys` の SaveState = `include_paths=[]` = フィルタなし =
   全 state 差分」という地雷があったが、**Step 4a で `SaveState` 側が空 `changedKeys`
@@ -185,7 +196,7 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
 | サービス | 所有者 | 責務 |
 |---------|--------|------|
 | `src/core/StatsService.py` | `AutonaScoreboardWidget.stats.service` | 統計の取得可否判断・アップセット計算・`last_sets`/`history_sets`/`recent_sets`/`upset_factor` の書き込み |
-| `src/core/GameTrackerService.py` | `AutonaIndividualGameTracker.service` | ステージ勝敗の記録（`score.{n}.stages.*`）・ステージ⇔スコアの相互整合・`writingScore` ガード |
+| `src/core/GameTrackerService.py` | `AutonaIndividualGameTracker.service`（ボードが `AutonaActions.RegisterGameTracker` で登録する。ADR-005 S2e） | ステージ勝敗の記録（`score.{n}.stages.*`）・ステージ⇔スコアの相互整合・`writingScore` ガード・行の作り直し（`SetStageCount`。呼ぶのは `AutonaActions.SetBestOf` / `RepublishBestOf` だけで、`rowsVersion` が作り直しのたびに進み、ウィジェットの `RenderStageRows` がそれを見てボタンを作り直す）。存在しない行への `SetStageResult` / `SetStageAsset` は lock の中で断る（警告して False。別スレッドの `SetBestOf` で行が消えた後、作り直し前の古いボタンが押されても行を書き戻さない） |
 | `src/core/SetLoadService.py` | `AutonaScoreboardWidget.setLoad` | セット読込の正規化（ラウンド/フェーズ/プール・スコア・敗者フラグ・チーム名とロゴ・`bracket_type`・追従中セット）。最後に読んだセット `lastSetSelected` も持つ（state の外。ADR-005 S2d でボード属性から移動。クリアと `ClearSetTracking()` で忘れるので、同じセットを選び直すと再読込される。`get_set` と stale 判定が読む）。スワップ後の面の解決は `DisplayTeam()` が唯一の正本（`score.{n}.teamsSwapped` を読む。S2c までボード属性を callable で注入していた） |
 | `src/core/TournamentInfoService.py` | `TournamentInfoService.instance`（`bootstrap_core()` 生成） | `tournamentInfo.*` の書き込み全部（provider ペイロードの適用・**EVENT タブ入力欄の `Set{Text,Number,Date}Field`**・表示大会名の 3 系統の上書き規則・`logoVersion`・起動時シード）。EVENT パネル不在でも動くことが遅延構築の前提。**両方向が同じ 3 操作を通る**（provider 側の `_ApplyKey` も入力側と同じメソッドを呼ぶ）。ただし `themeColor`/`accentColor` の 2 キーだけは **`core/ColorService.py` の持ち物**で本サービスを通らない（歴史的にこのプレフィックスなだけで、意味はカラー機能側）。**表示大会名の入力欄は SCORE パネルとクルーボードの 2 箇所にあり、どちらも `SetDisplayName` を呼ぶ**（クルー側は Step 5 第 4 弾で合流） |
 | `src/core/PlayerService.py` | `AutonaBasePlayerWidget.player`（選手ウィジェット 1 枚につき 1 個。path に束縛）。加えて**一時インスタンス**: モジュール関数 `RepublishTeamMergedNames(board, team)` が、state にあるそのチームの各スロットの path で 1 個ずつ作って使い捨てる（カードを経由しない） | 選手スロット配下の書き込み全部（入力フィールド・seed/birthday・国/州・`mergedName`/`mergedOnlyName`・アバターとスポンサーロゴ・キャラスロット・`city`/`id`・スロット削除）。`BoardNumber()` が `score.{N}` と `player_editor.1` を見分ける。**`mergedName` / `mergedOnlyName` の ` [L]` は state のチームの `losers` から付ける**（`PublishMergedName(sponsor, tag)` が `TeamLosersKey()` を読む。ADR-005 S2b）。フラグの書き手は同じ SaveBlock で `RepublishTeamMergedNames` を呼び、チーム全員の名前を state の `team` / `name` から作り直す: `AutonaActions.SetTeamLosers`（LOSERS チェックボックス・v1 `PATCH set` の `WebServerActions.set_team_losers`）と `SetLoadService.ApplyLosers`（セット読込・legacy `-set?losers=` の `ChangeSetData`。`DisplayTeam` で解いたチーム）。どちらもフラグが変わったときだけ。カードは名前確定で `_OnTextChanged`（state に書く）→ `NameChanged`（publish）の順に走るので、作り直しがどのスレッドから割り込んでも同じ名前になる。**国/州とキャラスロットはカードから識別子だけを受け取り、値はここで組む**（ADR-005 S1d）: `SetCountry(code)` / `SetRegion(countryCode, regionCode)` は `CountryCatalog.CountryByCode` / `State` から、`PublishCharacterSlots([CharacterSlot(en_name, skin 行, variant en_name, フォールバック名), ...])` は `GameAssetCatalog.CharacterRow` / `SkinRow` / `VariantRow` から（1 回の publish は `Current()` 1 回のスナップショットで解決）。入れ子のキー順は旧実装が Qt モデル経由で出していた QVariantMap 順を `DictHelper.qvariantmap_copy` で再現する（`program_state.json` と Socket.IO delta のバイト互換。`tests/test_player_slot_publish.py` と `tests/test_player_service.py` が移行前の golden と照合）。カタログが知らない識別子は、キャラなら `{"name": フォールバック名}`（手入力テキスト、または選ばれた行自身の `name`。コンボの「表示名 / en_name」ラベルは使わない）、国/州なら `{}`。カタログは `games=` / `countries=` で差し替え可能（既定は呼び出し時の `.instance`） |
@@ -200,10 +211,10 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
 `bootstrap_core()` が作るのは、ボードごとに要る／台帳を持つもの（`SetLoadService` /
 `TournamentInfoService` / `PlayerService` / `CrewBattleService` / `AutonaActions`）だけ。
 
-- **`SetLoadService` はステージ行を書かない**。行数と `stage_widget_list` の長さを
-  一致させているのは `GameTrackerService.SetStageCount()` だけなので、読み込んだ
-  スコアは `team.{t}.score` を書いて `_SyncScoreDisplays` → `SyncStagesToScore()` に
-  渡す（+1 と同じ経路）。`stages` を直接足す経路を作らない
+- **`SetLoadService` はステージ行を書かない**。行数を決めるのは `GameTrackerService.SetStageCount()`
+  だけで（呼ぶのは `AutonaActions.SetBestOf`。セットの bestOf は `BestOfFromSetData` で読んで
+  `SetBestOf` に渡す）、読み込んだスコアは `team.{t}.score` を書いて `_SyncScoreDisplays` →
+  `SyncStagesToScore()` に渡す（+1 と同じ経路）。`stages` を直接足す経路を作らない
 - **held 配下は「同値なら書かない」**（実装は `StateManager.SetIfChanged` の 1 つ。
   `AutonaActions` / `SetLoadService` / `TournamentInfoService` / `CrewBattleService` が
   それぞれ `_SetIfChanged` として束ねている）。同値でも

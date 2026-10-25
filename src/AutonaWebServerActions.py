@@ -161,11 +161,7 @@ class WebServerActions(QObject):
         # Best Of argument
         # best-of=<Best Of Amount>
         if bestOf is not None:
-            self.scoreboard.GetScoreboard(scoreboard).signals.ChangeSetData.emit(
-                orjson.loads(
-                    orjson.dumps({'bestOf': int(bestOf)})
-                )
-            )
+            self._apply_set_fields(scoreboard, {'bestOf': int(bestOf)})
 
         # Phase argument
         # phase=<Phase Name>
@@ -223,9 +219,12 @@ class WebServerActions(QObject):
         On boards 1/2 that payload is applied by core (ADR-005 S2d), as the
         board's ChangeSetData applied it: the match bar fields and the
         English round text (blanked by every payload that carries none --
-        SetLoadService.ApplyMatchInfo), and a losers flag (ApplyLosers). The
-        board is built first, as GetScoreboard() did, so the write waits for
-        反映 like any other. The crew board's ChangeSetData is its own.
+        SetLoadService.ApplyMatchInfo), a best of (AutonaActions.SetBestOf,
+        S2e; 0 is not carried -- SetLoadService.BestOfFromSetData) and a
+        losers flag (ApplyLosers). The board is built first, as
+        GetScoreboard() did, so the write waits for 反映 like any other and
+        a best of resizes the board's game rows with it. The crew board's
+        ChangeSetData is its own.
         """
         board = self.scoreboard.EnsureScoreboard(scoreboard)
         if int(scoreboard) not in AutonaActions.SCORE_BOARDS:
@@ -233,6 +232,9 @@ class WebServerActions(QObject):
             return
         with StateManager.SaveBlock():
             board.setLoad.ApplyMatchInfo(payload)
+            bestOf = board.setLoad.BestOfFromSetData(payload)
+            if bestOf is not None:
+                AutonaActions.instance.SetBestOf(scoreboard, bestOf)
             board.setLoad.ApplyLosers(payload)
 
     def set_team_data(self, scoreboard, team, player, data):
@@ -383,8 +385,9 @@ class WebServerActions(QObject):
         # It also makes the swap synchronous -- the old queued signal
         # answered "OK" before anything had moved -- and lets the board
         # finish a field being typed in first (SwapTeams ->
-        # CommitFocusedEdit).
-        board = self.scoreboard.GetScoreboard(scoreboard)
+        # CommitFocusedEdit). Built first, as the clears are: on the GUI
+        # thread already, so EnsureScoreboard is what GetScoreboard did.
+        board = self.scoreboard.EnsureScoreboard(scoreboard)
         if int(scoreboard) in AutonaActions.SCORE_BOARDS:
             board.SwapTeams()
         else:
@@ -495,16 +498,15 @@ class WebServerActions(QObject):
         AutonaActions.instance.ApplyChanges(scoreboard)
         return "OK"
 
-    def _reset_best_of(self, board):
-        # The best_of QSpinBox is reparented out of `scoreColumn` while the
-        # 1v1 / team board is built (AutonaScoreboardWidget moves it into the
-        # score bar), so the historical scoreColumn.findChild(...) lookup
-        # returns None there and raised AttributeError. Prefer the reference
-        # the widget already stores; fall back to findChild for any board that
-        # still nests the spinbox under scoreColumn (crew uses `_bestOfSpin`).
-        # Still the spinbox: it is the best of's entry point until S2e.
-        best_of = (getattr(board, "bestOfSpin", None)
-                   or getattr(board, "_bestOfSpin", None)
+    def _reset_best_of(self, scoreboard, board):
+        # Boards 1/2: the operation, rows included (ADR-005 S2e), in a cycle
+        # of its own after the reset as the spinbox's was. The crew board's
+        # spinbox is still its best of's entry point; it nests under
+        # `scoreColumn` as `_bestOfSpin`.
+        if int(scoreboard) in AutonaActions.SCORE_BOARDS:
+            AutonaActions.instance.SetBestOf(scoreboard, 0)
+            return
+        best_of = (getattr(board, "_bestOfSpin", None)
                    or board.scoreColumn.findChild(QSpinBox, "best_of"))
         if best_of is not None:
             best_of.setValue(0)
@@ -513,8 +515,8 @@ class WebServerActions(QObject):
     # answers False to them and keeps its own. Every one of these builds the
     # board first, as the GetScoreboard() they used to start with did: an
     # unbuilt board is not held, so a clear made there would be published at
-    # once and then wiped by the seed that builds it -- and the best of /
-    # counts below are still the board's spinboxes. Kept on the GUI thread
+    # once and then wiped by the seed that builds it -- and the counts below
+    # are still the board's spinboxes. Kept on the GUI thread
     # until S2f, like swap_teams: a player card's edit is two writes there
     # (the field, then the merged name), and a clear must not land between.
     #
@@ -526,7 +528,7 @@ class WebServerActions(QObject):
         board = self.scoreboard.EnsureScoreboard(scoreboard)
         if not AutonaActions.instance.ResetMatch(scoreboard):
             board.ResetMatch()
-        self._reset_best_of(board)
+        self._reset_best_of(scoreboard, board)
         return "OK"
 
     @gui_thread_sync
@@ -546,7 +548,7 @@ class WebServerActions(QObject):
         board = self.scoreboard.EnsureScoreboard(scoreboard)
         if not AutonaActions.instance.ResetMatch(scoreboard):
             board.ResetMatch()
-        self._reset_best_of(board)
+        self._reset_best_of(scoreboard, board)
         board.playerNumber.setValue(1)
         board.charNumber.setValue(1)
         board.CommandClearAll()

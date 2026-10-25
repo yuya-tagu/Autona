@@ -151,6 +151,7 @@ pin: `tests/test_save_block_symmetry.py`
 `test_state_still_exports_after_a_failing_best_of_handler` の 2 件は
 修正前のコードで実際に失敗することを確認済み。
 `test_the_best_of_handler_is_a_method_not_a_lambda_chain` が構造の再発を止める）。
+ADR-005 S2e で書き込みが core の `AutonaActions.SetBestOf` / `RepublishBestOf` に移り、構造の検査対象も core へ移した（整形の失敗は英語既定へフォールバックするので、block 内で実際に例外を出す検査は `test_a_raising_write_inside_the_best_of_block_leaves_saving_unblocked` が担う）。
 
 同じファイルの他の `BlockSaving()` 対（`NewSetSelected` / `ChangeSetData`）は
 いずれも `try/finally` で `ReleaseSaving()` を保証しており、同型ではない。

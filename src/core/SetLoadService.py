@@ -29,17 +29,18 @@ What deliberately did NOT move (and why):
   (since ADR-005 S1d as identifiers -- character en_name, skin row, country
   and region code -- which PlayerService turns into the published values
   from the core catalogs).
-- **Best of.** ``best_of_text`` / ``first_to_text`` are formatted from
-  ``AutonaLocaleHelper.matchNames`` and the same handler resizes the stage
-  rows; Step 3 left it on the Qt side and this step does not change that.
+Best of: what a payload carries is read here (``BestOfFromSetData``), and
+written by ``AutonaActions.SetBestOf`` -- the operation every entry point of
+the set length shares since ADR-005 S2e (it was the BEST OF spinbox, which
+the board drove from a set load).
 
 INVARIANT -- stage rows. Nothing here writes ``score.{n}.stages.*``. The row
-count is kept equal to the widget's ``stage_widget_list`` by
-``GameTrackerService.SetStageCount()`` alone (see its ``StageCount()``
-docstring), and a set load that grew the rows on its own would leave rows
-nothing renders. A loaded score reaches the stages the same way a +1 does:
-this class writes ``team.{t}.score`` and the board's ``_SyncScoreDisplays``
-hands the transition to ``GameTrackerService.SyncStagesToScore``.
+count is resized by ``GameTrackerService.SetStageCount()`` alone, reached
+from ``AutonaActions.SetBestOf`` (see ``StageCount()``), and a set load that
+grew the rows on its own would leave rows nothing renders. A loaded score
+reaches the stages the same way a +1 does: this class writes
+``team.{t}.score`` and the board's ``_SyncScoreDisplays`` hands the
+transition to ``GameTrackerService.SyncStagesToScore``.
 
 Import side effects: none (agent-pitfalls #1). One instance per board,
 created by that board's AutonaScoreboardWidget.
@@ -170,6 +171,31 @@ class SetLoadService:
                 f"{self.prefix}.pool", data.get("tournament_pool") or "")
 
         return bool(written)
+
+    # ── best of ───────────────────────────────────────────────────────────
+
+    @classmethod
+    def BestOfFromSetData(cls, data):
+        """The set length a payload carries, or None when it carries none.
+
+        Truthiness, which is how boards 1/2 have always read it
+        (``if data.get("bestOf")`` in front of the spinbox): ``bestOf: 0``
+        is "not carried" here, so set_route's / /api/v1's ``bestOf=0`` has
+        never cleared it -- the resets do (``AutonaActions.SetBestOf(n,
+        0)``). The crew board reads it with ``is not None``
+        (``CrewBattleService.BestOfFromSetData``). A value that is not a
+        number is dropped with a warning, where setValue() raised inside the
+        set load.
+        """
+        if not isinstance(data, dict):
+            return None
+        raw = data.get("bestOf")
+        if not raw:
+            return None
+        value = cls._asInt(raw)
+        if value is None:
+            logger.warning(f"Set load: ignoring non-numeric bestOf {raw!r}")
+        return value
 
     # ── score ────────────────────────────────────────────────────────────
 

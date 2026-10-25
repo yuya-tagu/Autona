@@ -33,8 +33,10 @@ values from one card into another, and `score.{n}.teamsSwapped` became the
 flag itself rather than the mirror of a board attribute. S2d moved the
 clears (`ClearScore` / `ResetMatch` / `ClearPlayers` / `ClearBoard`), which
 used to drive the board's widgets back to empty -- the score spinboxes, the
-losers boxes, every player card's Clear() -- a save cycle per widget. What
-is still outside:
+losers boxes, every player card's Clear() -- a save cycle per widget. S2e
+made the set length the state's (`SetBestOf`): it was the BEST OF spinbox's,
+whose valueChanged published it and rebuilt the game tracker's rows, and
+every other entry point drove that spinbox. What is still outside:
 
 - **The spinbox-driven half of the score.** `AdjustScore` / `ResetScore`
   below are not yet the *only* writers of `score.{n}.team.{t}.score`. Three
@@ -51,13 +53,14 @@ is still outside:
   `GameTrackerService.writingScore`. Nothing outside core re-Sets the score:
   `StageResultsToScore` used to echo the published value back and no longer
   does.
-- **`best_of` as an inversion.** `SetBestOf` owns the six derived keys, but
-  the board's BEST OF spinbox is still the *entry point*: its `valueChanged`
-  calls here and then resizes the stage rows, in one save cycle. Making the
-  state lead instead would put `GameTrackerService.SetStageCount` (which
-  writes) inside the notification for the write that triggered it, i.e. a
-  second held cycle per BO change and a re-entrant one. Left as it is
-  deliberately.
+
+(`best_of` used to be listed here as an inversion left on purpose: making
+the state lead would have put `GameTrackerService.SetStageCount`, which
+writes, inside the notification for the write that triggered it -- a second,
+re-entrant held cycle per change. S2e resolved it the other way round: the
+rows are resized *here*, in the same block as the set length, through the
+built board's registered tracker (`RegisterGameTracker`), and the board only
+renders the result. The notification writes nothing.)
 
 Import side effects: none (agent-pitfalls #1). `bootstrap_core()` creates the
 single instance; nothing is created here at module level.
@@ -163,6 +166,10 @@ class AutonaActions:
     # drift apart.
     SCORE_MIN = 0
     SCORE_MAX = 99
+    # The same for the set length: the BEST OF spinbox's range (Qt's default
+    # 0..99) was what clamped a Web or set-load value before ADR-005 S2e.
+    BEST_OF_MIN = 0
+    BEST_OF_MAX = 99
 
     # Fallback for the two localized round texts below when nothing injected
     # a formatter -- i.e. a headless run. Verbatim from the shipped English
@@ -181,6 +188,10 @@ class AutonaActions:
         # may not (tests/test_core_qt_free.py). bootstrap_core() passes
         # AutonaLocaleHelper.FormatMatchText.
         self._formatMatchText = formatMatchText
+        # {board: GameTrackerService} of the boards that are built: the rows
+        # SetBestOf resizes (RegisterGameTracker). A board that is not built
+        # has no rows to keep in step -- building it reseeds its subtree.
+        self._gameTrackers = {}
 
     # ── helpers ──────────────────────────────────────────────────────────
 
@@ -244,8 +255,24 @@ class AutonaActions:
     _SetIfChanged = staticmethod(StateManager.SetIfChanged)
 
     def _matchText(self, key, number) -> str:
+        """The localized set-length text, or the English default.
+
+        The default stands in for a formatter that raises, too -- the Qt one
+        does while the locale tables are not loaded (an empty matchNames),
+        and a custom term file can carry a template .format() rejects. Until
+        ADR-005 S2e that raised inside the spinbox's slot, where PySide6
+        reported it and the caller carried on; SetBestOf is called directly
+        now (a set load, the Web's set_route, a game load), and an exception
+        here would abandon the rest of the caller's work -- the set's losers
+        and players, the HTTP answer, the game load's commit.
+        """
         if self._formatMatchText is not None:
-            return self._formatMatchText(key, number)
+            try:
+                return self._formatMatchText(key, number)
+            except Exception as error:
+                logger.warning(
+                    f"Match text {key!r} for {number} failed ({error!r}); "
+                    "using the English default")
         return self.DEFAULT_MATCH_TEXTS[key].format(number)
 
     # ── score ────────────────────────────────────────────────────────────
@@ -664,10 +691,11 @@ class AutonaActions:
         """The operator's reset of the match: `ClearScore` plus the match
         bar (`ClearMatchInfo`), in one save cycle. True if it applied.
 
-        Behind the すべての入力値をリセット button (`ClearBoard`) and the
-        Web's reset_match / clear_all. The best of is not part of it yet:
-        the BEST OF spinbox is still its entry point (module docstring), so
-        the callers reset it themselves.
+        Behind the board's reset-match button, the すべての入力値をリセット
+        button (`ClearBoard`) and the Web's reset_match / clear_all. The best
+        of is not part of it: the reset-match button has never reset it, the
+        Web's two set it to 0 after this in a cycle of their own
+        (`SetBestOf`), as they did, and `ClearBoard` does in its block.
         """
         board = self._asInt(board, 0)
         if board not in self.SCORE_BOARDS:
@@ -787,11 +815,12 @@ class AutonaActions:
 
     def ClearBoard(self, board) -> bool:
         """The すべての入力値をリセット button: the players, the score, the
-        losers flags, the match bar and the team names (with their crests),
-        in one save cycle. True if it applied.
+        losers flags, the match bar, the team names (with their crests) and
+        the best of, in one save cycle. True if it applied.
 
-        The best of is reset by the board in the same block (see
-        `ResetMatch`), and the player / character counts stay as they are.
+        The best of comes last, as the board's spinbox reset it after the
+        rest until ADR-005 S2e; the player / character counts stay as they
+        are.
         The Web's clear_all is not this: it has always kept the team names
         (unless it shrinks the roster to one player) and changes the counts
         between the reset and the players' clear, so it calls those
@@ -809,6 +838,7 @@ class AutonaActions:
                 # The crest of no name: what SetLoadService.PublishTeamLogo
                 # resolves for an empty one.
                 self._SetIfChanged(f"score.{board}.team.{team}.logo", None)
+            self.SetBestOf(board, 0)
         return True
 
     # ── the team roster (how many player slots a team has) ────────────────
@@ -920,41 +950,119 @@ class AutonaActions:
 
     # ── best of ──────────────────────────────────────────────────────────
 
-    def SetBestOf(self, board, value):
-        """Publish a set length and everything derived from it.
+    def RegisterGameTracker(self, board, tracker):
+        """Have `SetBestOf` resize `tracker`'s rows (a GameTrackerService)
+        along with board `board`'s set length.
 
-        Six keys, one save cycle, because they are one fact: the raw
-        `best_of`, the short forms overlays use in tight spaces (`BO5` /
-        `FT3`), and the localized long forms. 0 means "not set", and the long
-        forms are then blank rather than "Best of 0".
+        The board registers its tracker while it is built and unregisters it
+        when it is destroyed (AutonaScoreboardWidget). What is held here is
+        the core service, never the widget: a registration that outlived the
+        board would only go on resizing `score.{n}.stages` -- the write a
+        built board makes -- with nothing answering for a Qt object.
+        """
+        self._gameTrackers[self._asInt(board, 0)] = tracker
 
-        The caller is expected to resize the individual game tracker's stage
-        rows in the same cycle -- `GameTrackerService.SetStageCount()` is the
-        only thing allowed to, and `AutonaScoreboardWidget._onBestOfChanged`
-        wraps both in one `SaveBlock`. See the module docstring for why the
-        spinbox is still the entry point.
+    def UnregisterGameTracker(self, board, tracker):
+        """Undo `RegisterGameTracker`, if `tracker` is still the one
+        registered (a board built again in its place has replaced it)."""
+        board = self._asInt(board, 0)
+        if self._gameTrackers.get(board) is tracker:
+            del self._gameTrackers[board]
 
-        Raises whatever the injected formatter raises (the Qt one throws when
-        the locale tables have not been loaded yet), inside the block rather
-        than around it, so a failure cannot leave `saveBlocked` positive --
-        which would freeze ./out and the WebSocket feed for the rest of the
-        session (agent-pitfalls #6).
+    def SetBestOf(self, board, value) -> bool:
+        """Set a board's set length. True if it changed.
+
+        The six derived keys and, on a built board, the game tracker's rows
+        (one unreported row per game, none with the tracker switched off),
+        in one save cycle -- see `_PublishBestOf`. The board's BEST OF
+        spinbox and its rows render the result from the held cycle (ADR-005
+        S2e); every entry point comes here: the spinbox, a set load, the
+        Web's set_route / reset_match / clear_all, /api/v1's PATCH set and
+        the reset-all button (`ClearBoard`).
+
+        A value the board already has is not a write, and it does not reset
+        the rows: the spinbox's valueChanged, which all of those used to go
+        through, does not fire for its current value. A game load re-asserts
+        it on purpose (`RepublishBestOf`). Clamped to the spinbox's range, as
+        setValue() clamped it; a value that is not a number at all is
+        refused with a warning rather than read as 0, which would clear the
+        set length (the rule SetLoadService applies to a set's numbers).
+        Boards 1/2 only: the crew board's set length is its own
+        (CrewBattleService.SetBestOf).
         """
         board = self._asInt(board, 0)
-        value = self._asInt(value, 0)
+        if board not in self.SCORE_BOARDS:
+            logger.debug(f"SetBestOf: board {board} is not a score board")
+            return False
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            logger.warning(f"SetBestOf: ignoring non-numeric best of {value!r}")
+            return False
+        value = max(self.BEST_OF_MIN, min(self.BEST_OF_MAX, number))
+        with StateManager.SaveBlock():
+            with StateManager.lock:
+                if StateManager.Get(f"score.{board}.best_of", None) == value:
+                    return False
+                self._PublishBestOf(board, value)
+        return True
+
+    def RepublishBestOf(self, board) -> bool:
+        """Publish a board's current set length again, rows included. True
+        if it applied.
+
+        What a game load does (AutonaScoreboardWidget._onGameAssetsLoaded),
+        as the spinbox's re-emitted valueChanged did: the localized texts are
+        derived again (a reload can be a locale change) and the rows start
+        over -- they recorded games of the previous game's stages, and
+        whether the tracker is on is read again.
+        """
+        board = self._asInt(board, 0)
+        if board not in self.SCORE_BOARDS:
+            logger.debug(
+                f"RepublishBestOf: board {board} is not a score board")
+            return False
+        with StateManager.SaveBlock():
+            with StateManager.lock:
+                self._PublishBestOf(board, self._asInt(
+                    StateManager.Get(f"score.{board}.best_of", 0), 0))
+        return True
+
+    def _PublishBestOf(self, board, value):
+        """Write a set length and everything derived from it. Caller holds
+        the block.
+
+        Six keys, because they are one fact: the raw `best_of`, the short
+        forms overlays use in tight spaces (`BO5` / `FT3`), and the
+        localized long forms. 0 means "not set", and the long forms are then
+        blank rather than "Best of 0". Then the rows, after the keys as the
+        spinbox handler wrote them: `GameTrackerService.SetStageCount()` is
+        the only thing allowed to resize them, and it is reached here through
+        the board's registered tracker -- a board that is not built has none
+        (the six keys alone, as before; building it reseeds the subtree).
+
+        A formatter that raises gets the English default instead
+        (`_matchText`), so the rows and the other keys are written all the
+        same. Anything else that raises does so inside the caller's block
+        rather than around it, so a failure cannot leave `saveBlocked`
+        positive -- which would freeze ./out and the WebSocket feed for the
+        rest of the session (agent-pitfalls #6).
+        """
         firstTo = math.ceil(value / 2)
         prefix = f"score.{board}"
-        with StateManager.SaveBlock():
-            self._SetIfChanged(f"{prefix}.best_of", value)
-            self._SetIfChanged(f"{prefix}.best_of_short_text", f"BO{value}")
-            self._SetIfChanged(
-                f"{prefix}.best_of_text",
-                self._matchText("best_of", value) if value > 0 else "")
-            self._SetIfChanged(f"{prefix}.first_to", firstTo)
-            self._SetIfChanged(f"{prefix}.first_to_short_text", f"FT{firstTo}")
-            self._SetIfChanged(
-                f"{prefix}.first_to_text",
-                self._matchText("first_to", firstTo) if value > 0 else "")
+        self._SetIfChanged(f"{prefix}.best_of", value)
+        self._SetIfChanged(f"{prefix}.best_of_short_text", f"BO{value}")
+        self._SetIfChanged(
+            f"{prefix}.best_of_text",
+            self._matchText("best_of", value) if value > 0 else "")
+        self._SetIfChanged(f"{prefix}.first_to", firstTo)
+        self._SetIfChanged(f"{prefix}.first_to_short_text", f"FT{firstTo}")
+        self._SetIfChanged(
+            f"{prefix}.first_to_text",
+            self._matchText("first_to", firstTo) if value > 0 else "")
+        tracker = self._gameTrackers.get(board)
+        if tracker is not None:
+            tracker.SetStageCount(tracker.ResolveStageCount(value))
 
     # ── display options ──────────────────────────────────────────────────
 

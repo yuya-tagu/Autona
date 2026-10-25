@@ -263,6 +263,189 @@ def test_the_replaced_stage_list_is_destroyed(autonaApp):
             "still writing score.1.stages.*")
 
 
+# The set length is the state's since ADR-005 S2e: AutonaActions.SetBestOf
+# writes it and resizes a built board's rows, from whichever entry point,
+# and the spinbox and the rows render it from the board's held cycle.
+
+def test_a_best_of_set_in_core_reaches_the_spinbox_and_the_rows(autonaApp):
+    """The way the Web, /api/v1 and a set load set it: not through the
+    spinbox. One save cycle -- the render writes nothing."""
+    from src.core.Actions import AutonaActions
+
+    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
+        board = autonaApp.board(1)
+        tracker = board.individualGameTracker
+        seen, unsubscribe = _heldUpdateSpy("score.1")
+        try:
+            AutonaActions.instance.SetBestOf(1, 7)
+            autonaApp.settle()
+        finally:
+            unsubscribe()
+
+    assert seen == ["score.1"]
+    assert board.bestOfSpin.value() == 7
+    assert len(tracker.stage_widget_list) == 7
+    assert len(autonaApp.get("score.1.stages")) == 7
+    assert not tracker.isHidden()
+
+
+def test_a_best_of_set_from_another_thread_reaches_the_board(autonaApp):
+    """AutonaActions may be called from any thread; the board renders on
+    its own, from the held cycle Qt queues across."""
+    import threading
+
+    from src.core.Actions import AutonaActions
+
+    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
+        board = autonaApp.board(1)
+        worker = threading.Thread(
+            target=lambda: AutonaActions.instance.SetBestOf(1, 5))
+        worker.start()
+        worker.join()
+        autonaApp.settle()
+
+    assert autonaApp.get("score.1.best_of") == 5
+    assert board.bestOfSpin.value() == 5
+    assert len(board.individualGameTracker.stage_widget_list) == 5
+
+
+def test_a_game_load_starts_the_rows_over_at_the_same_length(autonaApp):
+    """The rows recorded games of the previous game's stages: the buttons
+    are built again, unchecked, though their number does not change."""
+    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
+        board = autonaApp.board(1)
+        tracker = board.individualGameTracker
+        board.bestOfSpin.setValue(3)
+        autonaApp.settle()
+        _stageButton(board, game=1, team=1).click()
+        autonaApp.settle()
+        rows = tracker.stage_order_list_widget
+
+        board._onGameAssetsLoaded()
+        autonaApp.settle()
+
+    assert tracker.stage_order_list_widget is not rows
+    assert len(tracker.stage_widget_list) == 3
+    assert _wonGames(autonaApp, 1) == []
+    assert not _stageButton(board, game=1, team=1).isChecked()
+
+
+def test_a_dropped_board_unregisters_its_game_rows(autonaApp):
+    """The registration ends with the board: a set length set afterwards is
+    the six keys alone, as on any board that is not built."""
+    from src.core.Actions import AutonaActions
+
+    actions = AutonaActions.instance
+    board = autonaApp.board(1)
+    assert actions._gameTrackers.get(1) is board.individualGameTracker.service
+    del board
+
+    autonaApp._dropBoard(1)
+
+    assert 1 not in actions._gameTrackers
+    try:
+        with patch.object(SettingsManager, "Get",
+                          side_effect=_trackerEnabled):
+            actions.SetBestOf(1, 5)
+        autonaApp.settle()
+        assert autonaApp.get("score.1.best_of") == 5
+        assert autonaApp.get("score.1.stages") is None
+    finally:
+        autonaApp.state.Unset("score.1")
+        autonaApp.settle()
+
+
+def test_a_click_on_a_game_the_set_no_longer_has_is_refused(autonaApp):
+    """A set length set from another thread resizes the rows at once; the
+    buttons are rebuilt when the held cycle reaches the GUI thread. A click
+    in between on a row that is gone records nothing -- no stray
+    `stages.5` -- and the score is not summed from it."""
+    import threading
+
+    from src.core.Actions import AutonaActions
+
+    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
+        board = autonaApp.board(1)
+        tracker = board.individualGameTracker
+        board.bestOfSpin.setValue(5)
+        autonaApp.settle()
+        stale = _stageButton(board, game=5, team=1)
+
+        worker = threading.Thread(
+            target=lambda: AutonaActions.instance.SetBestOf(1, 3))
+        worker.start()
+        worker.join()
+        assert len(tracker.stage_widget_list) == 5, (
+            "precondition: the buttons are not rebuilt yet")
+
+        stale.click()
+        assert sorted(autonaApp.get("score.1.stages")) == ["1", "2", "3"]
+        assert _score(autonaApp, 1) == 0
+
+        autonaApp.settle()
+
+    assert len(tracker.stage_widget_list) == 3
+    assert sorted(autonaApp.get("score.1.stages")) == ["1", "2", "3"]
+    assert _score(autonaApp, 1) == 0 and _wonGames(autonaApp, 1) == []
+
+
+def test_a_failing_match_text_does_not_stop_what_sets_the_best_of(
+        autonaApp, monkeypatch):
+    """An empty matchNames (the locale tables not loaded) makes the Qt
+    formatter raise. The set length is published with the English texts,
+    and the callers that reach it directly since ADR-005 S2e go on: a set
+    load applies its losers and players, the Web answers, a game load
+    commits."""
+    from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+    from src.core.StateManager import StateManager
+
+    with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
+        board = autonaApp.board(1)
+        monkeypatch.setattr(AutonaLocaleHelper, "matchNames", {})
+
+        board.ChangeSetData({
+            "bestOf": 5, "team1losers": True, "overwrite": True,
+            "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]]})
+        autonaApp.settle()
+
+        assert autonaApp.get("score.1.best_of") == 5
+        assert autonaApp.get("score.1.best_of_text") == "Best of 5"
+        assert len(board.individualGameTracker.stage_widget_list) == 5
+        assert autonaApp.get("score.1.team.1.losers") is True
+        assert _playerName(autonaApp, 1) == "AAA"
+        assert _playerName(autonaApp, 2) == "BBB"
+
+        assert autonaApp.actions().set_route(1, bestOf=7) == "OK"
+        autonaApp.settle()
+        assert autonaApp.get("score.1.first_to_text") == "First to 4"
+
+        board._onGameAssetsLoaded()
+        autonaApp.settle()
+
+    assert StateManager.HasPendingChanges("score.1") is False
+    assert StateManager.GetCommitted("score.1.best_of_text") == "Best of 7"
+    assert autonaApp.state.saveBlocked == 0
+
+
+def test_a_set_with_a_best_of_that_is_not_a_number_still_loads(autonaApp):
+    """The one key is refused (a warning) and the rest of the set applies;
+    the spinbox's TypeError used to abandon the losers and the players."""
+    board = autonaApp.board(1)
+    board.bestOfSpin.setValue(3)
+    autonaApp.settle()
+
+    board.ChangeSetData({
+        "bestOf": "five", "team1losers": True, "overwrite": True,
+        "entrants": [[{"gamerTag": "AAA"}], [{"gamerTag": "BBB"}]]})
+    autonaApp.settle()
+
+    assert autonaApp.get("score.1.best_of") == 3
+    assert board.bestOfSpin.value() == 3
+    assert autonaApp.get("score.1.team.1.losers") is True
+    assert _playerName(autonaApp, 1) == "AAA"
+    assert _playerName(autonaApp, 2) == "BBB"
+
+
 # ── swap ─────────────────────────────────────────────────────────────────
 
 def test_swap_exchanges_scores_players_and_flags(autonaApp):
@@ -1203,10 +1386,11 @@ def test_clearing_the_score_still_zeroes_the_score_and_the_losers_flags(
 def test_a_best_of_change_is_exactly_one_save_cycle(autonaApp):
     """The six derived keys and the stage rows are one operation.
 
-    AutonaActions.SetBestOf opens its own block for the six keys and
-    _onBestOfChanged wraps that plus GameTrackerService.SetStageCount in
-    another, so the whole change is a single export. Tracker off here, which
-    is the shipped default; with it on the row rebuild joins the same cycle.
+    AutonaActions.SetBestOf writes the six keys and, through the board's
+    registered tracker, GameTrackerService.SetStageCount in one block, so
+    the whole change is a single export (ADR-005 S2e; the spinbox's handler
+    wrapped the two before). Tracker off here, which is the shipped default;
+    with it on the rows join the same cycle.
     """
     board = autonaApp.board(1)
     autonaApp.settle()
@@ -1421,6 +1605,38 @@ def test_a_score_reset_with_the_tracker_on_clears_every_stage(
     assert _score(autonaApp, 1) == 0 and _score(autonaApp, 2) == 0
     assert _wonGames(autonaApp, 1) == []
     assert _wonGames(autonaApp, 2) == []
+
+
+def test_a_score_moving_several_games_is_followed_in_one_cycle(
+        autonaApp, trackedBoard):
+    """Three recorded games cleared by one reset: the score, then every row
+    of both teams in one more cycle -- not one cycle a row (ADR-005 S2e).
+    The same follow serves a +2, a loaded set's score and the clears."""
+    trackedBoard.CommandScoreChange(0, 2)
+    trackedBoard.CommandScoreChange(1, 1)
+    autonaApp.settle()
+
+    seen, unsubscribe = _heldUpdateSpy("score.1")
+    try:
+        trackedBoard.ResetScore()
+        autonaApp.settle()
+    finally:
+        unsubscribe()
+
+    assert _wonGames(autonaApp, 1) == [] and _wonGames(autonaApp, 2) == []
+    assert seen == ["score.1", "score.1"], (
+        f"a reset of three recorded games produced {len(seen)} save cycles "
+        "instead of 2")
+
+    seen, unsubscribe = _heldUpdateSpy("score.1")
+    try:
+        trackedBoard.CommandScoreChange(0, 2)
+        autonaApp.settle()
+    finally:
+        unsubscribe()
+
+    assert _wonGames(autonaApp, 1) == [1, 2]
+    assert seen == ["score.1", "score.1"]
 
 
 # ── lifecycle ────────────────────────────────────────────────────────────

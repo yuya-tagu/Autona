@@ -207,6 +207,48 @@ def test_a_numeric_string_score_is_accepted(service):
     assert _score(1) == 3
 
 
+# ── best of ──────────────────────────────────────────────────────────────
+#
+# Read here, written by AutonaActions.SetBestOf (ADR-005 S2e), which also
+# clamps it to 0..99 -- so a negative or an oversized one passes through.
+
+@pytest.mark.parametrize("data, expected", [
+    ({"bestOf": 5}, 5),
+    ({"bestOf": "7"}, 7),
+    ({"bestOf": " 3 "}, 3),
+    ({"bestOf": -3}, -3),
+    ({"bestOf": 150}, 150),
+    # Not carried, as the old `if data.get("bestOf")` did not: 0 is "not
+    # set" there, not "clear it".
+    ({"bestOf": 0}, None),
+    ({"bestOf": None}, None),
+    ({"bestOf": ""}, None),
+    ({}, None),
+    (None, None),
+    ("bestOf=5", None),
+    ([("bestOf", 5)], None),
+])
+def test_the_best_of_read_from_a_set(data, expected):
+    assert SetLoadService.BestOfFromSetData(data) == expected
+
+
+@pytest.mark.parametrize("raw", ["five", "5.5", [5], {"n": 5}])
+def test_a_best_of_that_is_not_a_number_is_dropped_with_a_warning(raw):
+    """It used to reach QSpinBox.setValue, whose TypeError abandoned the
+    rest of the set load; now it is the one key refused, like a score."""
+    from loguru import logger
+
+    lines = []
+    sink = logger.add(lambda message: lines.append(str(message)),
+                      level="WARNING")
+    try:
+        assert SetLoadService.BestOfFromSetData({"bestOf": raw}) is None
+    finally:
+        logger.remove(sink)
+
+    assert any("bestOf" in line for line in lines), lines
+
+
 # ── losers flags ─────────────────────────────────────────────────────────
 
 def test_losers_flags_follow_the_swap(service, swap):
