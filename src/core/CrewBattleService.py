@@ -347,3 +347,22 @@ class CrewBattleService:
             StateManager.Set(f"{self.prefix}.{schema.MATCH_KEY}", "")
             self.SetBestOf(bestOf)
             return self.PublishBoard(teams, memberNum)
+
+    @classmethod
+    def DefaultTeams(cls) -> list:
+        """The two crews a freshly built crew board shows: no names, the
+        default colours, every row at DEFAULT_STOCK, nobody active."""
+        return [
+            CrewTeam(name="", color=color, members=tuple(
+                CrewMember(name="", stock=cls.DEFAULT_STOCK, active=False)
+                for _ in range(cls.MAX_MEMBERS)))
+            for color in cls.DEFAULT_COLORS]
+
+    def SeedDefaults(self) -> list:
+        """The launch write of a freshly built crew board, without the
+        widget: ``SeedBoardState`` with the rows it is built with
+        (``DefaultTeams``), the default member count and no best of. For a
+        shell that builds no crew widget (the headless one, ADR-005 S3d);
+        tests/test_headless_seed.py pins it against a desktop board."""
+        return self.SeedBoardState(
+            self.DefaultTeams(), self.DEFAULT_MEMBER_NUM, 0)

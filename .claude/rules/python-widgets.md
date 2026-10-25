@@ -49,6 +49,10 @@ WebEngine プレビュー等で重いパネルは **遅延構築**にする（�
 state になる）。`Window._SeedPanelState()` はその起動時の呼び出し口で、3 つのシード
 （`StateSchema.SeedPanelState()` / `TournamentInfoService.Seed()` /
 `core.ColorService.SeedColorState()`）を 1 SaveBlock に束ねる役目だけを持つ。
+ボードの選手スロットとクルーボードの起動時の中身は、デスクトップではボードのウィジェットが
+publish し、ヘッドレスは同じものを core の `PlayerService.SeedEmpty()` / `SeedEmptyRoster()` と
+`CrewBattleService.SeedDefaults()` でシードする（ADR-005 S3d。既定の人数・キャラ数は
+`PlayerService.DefaultPlayersPerTeam()` / `DEFAULT_CHARACTERS_PER_PLAYER` が正本で、ボードもこれを読む）。
 グローバルシグナル接続は Window 側に寄せる。外部から構築を強制したい場合は
 `EnsureXxxPanel()` アクセサを足す。
 

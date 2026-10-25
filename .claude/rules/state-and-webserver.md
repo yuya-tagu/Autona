@@ -57,6 +57,11 @@ paths:
   (`SeedBoard` / `SeedPanelState`) はここが正本。ウィジェット側に同じ定義を置き直さない
 - `SeedBoard(n)` は「埋める」ではなく **サブツリーを skeleton に戻す**。生きているボードに
   対して呼ばない（未構築ボードのプレースホルダと、遅延構築時の再シードが用途）
+- **構築直後のボードの中身（選手スロット・クルーボード）のシードはドメインサービス側**（ADR-005 S3d）:
+  `core/PlayerService.SeedEmpty()`（1 スロットを空のカードと同じ内容で）/ `SeedEmptyRoster(board)`
+  （両チームの `DefaultPlayersPerTeam()` 人分）、`core/CrewBattleService.SeedDefaults()`（クルーボードの
+  起動時の書き込み）。デスクトップではボードのウィジェットが同じ内容を publish するので、使うのは
+  ヘッドレス（`src/headless._SeedBoards()`）。形はデスクトップの空ボードと `tests/test_headless_seed.py` が照合する
 - `KEY_CATALOG` / `DYNAMIC_KEY_FAMILIES` は基本的に**列挙のみ**（マイグレーション層の
   アンカー）。新しい state キーを足したらここにも書く（テストで強制できないため
   ベストエフォート運用。**PR レビュー時に KEY_CATALOG との差分を確認する**）

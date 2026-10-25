@@ -6,7 +6,8 @@ directory on a free port (ADR-005 S3c; the first of S3d's smoke checks):
 - it serves: /api/v1/health, the state over Socket.IO, a core write
   (score:adjust) reaching the state and the Socket.IO delta stream;
 - what needs a board answers 503 UNAVAILABLE (/api/v1 and a legacy route);
-- a write relayed from elsewhere (a forwarded request) needs the token;
+- a write relayed from elsewhere (a forwarded request) needs the token, over
+  HTTP and Socket.IO alike, and goes in with it;
 - a second launch is refused (exit 1, a message on stderr) instead of
   starting a second server;
 - Ctrl+Break stops it cleanly (exit 0), with user_data/state.json and
@@ -15,6 +16,9 @@ directory on a free port (ADR-005 S3c; the first of S3d's smoke checks):
 AUTONA_INSTANCE_TAG gives the process its own single-instance names, so an
 Autona the developer has open is neither a "second launch" for it nor
 activated by it. The process is stopped by its PID only, whatever happens.
+
+_launch() and _wait_until_serving() also start the headless app for the
+Playwright E2E (web/e2e/headless_server.py, ADR-005 S3d).
 """
 import json
 import os
@@ -164,10 +168,37 @@ def test_main_headless_serves_refuses_a_second_launch_and_stops(tmp_path):
             assert (status, body["error"]["code"]) == (503, "UNAVAILABLE")
 
             # A relayed write is another computer's: the token is required.
+            # (A real LAN client cannot be made from this one PC: its own LAN
+            # address counts as this computer. The address rules themselves
+            # are tests/test_web_access.py's, through the Flask test client.)
+            relayed = {"X-Forwarded-For": "192.168.1.20"}
             status, body = _request(
                 port, "/api/v1/scoreboards/1/teams/1/score:adjust", "POST",
-                {"delta": 1}, headers={"X-Forwarded-For": "192.168.1.20"})
+                {"delta": 1}, headers=relayed)
             assert (status, body["error"]["code"]) == (401, "UNAUTHENTICATED")
+            # The same over Socket.IO: the connection is let in to read only.
+            relayedClient = socketio.Client(reconnection=False)
+            relayedClient.connect(f"http://127.0.0.1:{port}", headers=relayed,
+                                  transports=["polling"], wait_timeout=10)
+            try:
+                ack = relayedClient.call(
+                    "team_scoreup",
+                    json.dumps({"scoreboardNumber": "1", "team": "1"}),
+                    timeout=10)
+            finally:
+                relayedClient.disconnect()
+            assert ack["error"]["code"] == "UNAUTHENTICATED", ack
+            status, body = _request(port, "/api/v1/state")
+            assert body["data"]["score"]["1"]["team"]["1"]["score"] == 2
+            # With the token issued at the first launch, it goes in.
+            token = json.loads((cwd / "user_data" / "settings.json").read_text(
+                encoding="utf-8"))["general"]["webserver_token"]
+            status, body = _request(
+                port, "/api/v1/scoreboards/1/teams/1/score:adjust", "POST",
+                {"delta": 1}, headers={**relayed, "X-Autona-Token": token})
+            assert (status, body["ok"]) == (200, True), body
+            status, body = _request(port, "/api/v1/state")
+            assert body["data"]["score"]["1"]["team"]["1"]["score"] == 3
 
             # Ctrl+Break: a clean stop that writes everything first.
             os.kill(process.pid, signal.CTRL_BREAK_EVENT)
@@ -186,7 +217,7 @@ def test_main_headless_serves_refuses_a_second_launch_and_stops(tmp_path):
         assert process.poll() is not None
         saved = json.loads((cwd / "user_data" / "state.json").read_text(
             encoding="utf-8"))
-        assert saved["state"]["score"]["1"]["team"]["1"]["score"] == 2
+        assert saved["state"]["score"]["1"]["team"]["1"]["score"] == 3
         exported = json.loads((cwd / "out" / "program_state.json").read_text(
             encoding="utf-8"))
-        assert exported["score"]["1"]["team"]["1"]["score"] == 2
+        assert exported["score"]["1"]["team"]["1"]["score"] == 3

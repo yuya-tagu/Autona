@@ -54,7 +54,10 @@ export default function Team({teamId, autonaTeamId, team, scoreboardNumber}) {
         }));
     };
 
-    const playerWidgets = Object.keys(team.player).sort().map((playerKey) => (
+    // A team can have no player slots: a board no player card has written
+    // (an unbuilt desktop board, written to through the API) carries only
+    // the keys written so far. One throw here would blank the whole page.
+    const playerWidgets = Object.keys(team.player ?? {}).sort().map((playerKey) => (
         <Player
             key={`${teamId}-p-${playerKey}`}
             teamId={teamId}

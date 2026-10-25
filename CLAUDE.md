@@ -41,12 +41,13 @@ CLAUDE.md は要点のみ。詳細は以下を**必要時に参照**する（常
 
 ## ビルド
 
-**実機の動作確認はオーナーが `python main.py` で行う**（Claude・サブエージェントはアプリを起動せず、pytest までを担う → [.claude/orchestration.md](.claude/orchestration.md)。exe ビルドは 3〜5 分かかり反復速度を損なう。main.py と exe は同じコードを実行）。exe ビルドは「配布前の最終確認」「PyInstaller 固有挙動の検証」「凍結後の挙動を疑うバグ調査」のときだけ、かつユーザーから明示的に「ビルドして」「exe で確認」と言われた時のみ実行する。詳細（onedir/WebEngine/font/翻訳/配布）は [.claude/rules/build-and-release.md](.claude/rules/build-and-release.md)。
+**実機の動作確認はオーナーが `python main.py` で行う**（Claude・サブエージェントはアプリを起動せず、pytest までを担う → [.claude/orchestration.md](.claude/orchestration.md)。禁止は開発者の作業ディレクトリでのアプリ本体（デスクトップ / exe / ヘッドレス）の起動で、隔離ディレクトリでヘッドレスを起動するテスト（スモーク・`npm run test:e2e`）は実行してよい。exe ビルドは 3〜5 分かかり反復速度を損なう。main.py と exe は同じコードを実行）。exe ビルドは「配布前の最終確認」「PyInstaller 固有挙動の検証」「凍結後の挙動を疑うバグ調査」のときだけ、かつユーザーから明示的に「ビルドして」「exe で確認」と言われた時のみ実行する。詳細（onedir/WebEngine/font/翻訳/配布）は [.claude/rules/build-and-release.md](.claude/rules/build-and-release.md)。
 
 ```bash
 python main.py                                        # 開発時の実行（オーナーが実行）
 python main.py --headless                             # ウィンドウなし（state + Web サーバーのみ。exe は未対応）→ docs/operations/runtime-operations.md
 cd web && npm run build                              # Web UI（exe ビルド前に実行）
+cd web && npm run test:e2e                           # ブラウザ E2E（要 build。ヘッドレスを tmp で起動 → docs/changes/test-automation-strategy.md L6）
 pyinstaller dependencies/autona.spec --noconfirm     # exe（配布前のみ）→ dist/Autona/
 rm -rf ./_internal && cp -r dist/Autona/_internal ./_internal   # 成果物を直下へ
 cp dist/Autona/Autona.exe ./Autona.exe

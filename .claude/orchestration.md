@@ -44,6 +44,9 @@ Hivee の運用（`30_Products/Hivee/.claude/orchestration.md`）を Autona 向�
 - **pytest はエージェントが回す**。impl / patch は影響範囲のテストだけ、全量は verify が回す
 - **`python main.py` / exe の起動・GUI 操作はエージェントもメインもしない**。実機確認はオーナーが行い、
   PR の Test Plan に未チェックで明記する
+  - 禁止しているのは、**開発者の作業ディレクトリでアプリ本体（デスクトップ版 / exe / ヘッドレス）を起動すること**。
+    隔離ディレクトリ（tmp の作業ディレクトリ・空きポート・専用の `AUTONA_INSTANCE_TAG`）でヘッドレスを起動するテスト
+    （`tests/test_headless_smoke.py` などのスモーク・`cd web && npm run test:e2e`）はエージェントが実行してよい
 - exe ビルドは明示指示があるときだけメインで実行する
 
 ## モデル運用

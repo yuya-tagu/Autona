@@ -12,9 +12,10 @@ widget answers 503 "not available in headless" (src/AutonaWebOperations.py).
 What the window does at startup and this shell does too, in its own words:
 
 - the per-run locale and the round names;
-- the score subtree reset, the three boards' skeletons and the panel seeds,
-  in one save cycle (the window's ScoreboardManager / CreateScoreboard /
-  _SeedPanelState);
+- the score subtree reset, the three boards as freshly built desktop boards
+  publish them (skeleton, the empty player cards' slots, the crew board's
+  launch write) and the panel seeds, in one save cycle (the window's
+  ScoreboardManager / CreateScoreboard / the board widgets / _SeedPanelState);
 - the country catalog, loaded directly (the window loads it through its Qt
   adapter);
 - the tournament provider's wiring (bootstrap.wire_tournament_data, the
@@ -32,7 +33,8 @@ What the window does at startup and this shell does too, in its own words:
 
 Not here: the board-level reactions to a game load (the players per team a
 game sets, the best of re-published in the new locale) -- they are a built
-board's (S2g), and a headless run has none.
+board's (S2g), and a headless run has none. So the boards keep the player
+slots seeded at launch, before any game is restored: one per team.
 
 Importing this module does nothing (agent-pitfalls #1): main.py calls run(),
 and before its single-instance gate the launch checks (instance_tag,
@@ -345,19 +347,37 @@ def _ConfigureLogging():
                level="ERROR", rotation="20 MB", retention=5)
 
 
+def _SeedBoards():
+    """The boards as the desktop's freshly built ones publish them.
+
+    The score subtree reset (the scoreboard dock's construction) and every
+    board's skeleton come first, as on the desktop. Then what a built board's
+    widgets add to it (ADR-005 S3d): the player slots its empty cards
+    publish -- the score overlays draw nothing until team 1 has one -- and
+    the crew board's launch write. The desktop builds a board only when it
+    is shown; this shell builds none and serves all three, so all three get
+    the seed. tests/test_headless_seed.py pins it against desktop boards.
+    """
+    from .core import StateSchema as schema
+    from .core.CrewBattleService import CrewBattleService
+    from .core.PlayerService import SeedEmptyRoster
+    schema.ResetScoreRoot()
+    for number in (1, 2, 3):
+        schema.SeedBoard(number)
+    for number in (1, 2):
+        SeedEmptyRoster(number)
+    CrewBattleService(3).SeedDefaults()
+
+
 def _SeedState():
-    """The state a desktop launch starts from, in one save cycle: the score
-    subtree reset (the scoreboard dock's construction), every board's
-    skeleton (CreateScoreboard seeds the boards it does not build -- here
-    that is all three) and the panel seeds (Window._SeedPanelState)."""
+    """The state a desktop launch starts from, in one save cycle: the boards
+    (_SeedBoards) and the panel seeds (Window._SeedPanelState)."""
     from .core import StateSchema as schema
     from .core.ColorService import SeedColorState
     from .core.StateManager import StateManager
     from .core.TournamentInfoService import TournamentInfoService
     with StateManager.SaveBlock():
-        schema.ResetScoreRoot()
-        for number in (1, 2, 3):
-            schema.SeedBoard(number)
+        _SeedBoards()
         schema.SeedPanelState()
         TournamentInfoService.instance.Seed()
         SeedColorState()

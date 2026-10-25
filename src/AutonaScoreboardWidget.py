@@ -23,6 +23,8 @@ from .core.StateManager import StateManager
 from .core import StateSchema as schema
 from .core import WebAccess
 from .core.Actions import AutonaActions
+from .core.PlayerService import (
+    DEFAULT_CHARACTERS_PER_PLAYER, DefaultPlayersPerTeam)
 from .core.SetLoadService import SetLoadService
 from .core.TournamentInfoService import TournamentInfoService
 from .StateManagerBridge import StateManagerBridge
@@ -380,11 +382,12 @@ class AutonaScoreboardWidget(QWidget):
         # PLAYERS tab that used to drive it was removed). The spinbox is no
         # longer user-facing — it survives as a hidden data holder because
         # external WebServer actions still poke self.charNumber.value()/
-        # setValue() and SetDefaultsFromAssets re-asserts it. Default is 3.
+        # setValue() and SetDefaultsFromAssets re-asserts it. Default:
+        # core's DEFAULT_CHARACTERS_PER_PLAYER (the headless seed's too).
         self.charNumber = QSpinBox(self)
         self.charNumber.setMaximum(100)
         self.charNumber.valueChanged.connect(self.SetCharacterNumber)
-        self.charNumber.setValue(3)
+        self.charNumber.setValue(DEFAULT_CHARACTERS_PER_PLAYER)
         self.charNumber.setVisible(False)
 
         self.playerNumber = QSpinBox()
@@ -491,7 +494,7 @@ class AutonaScoreboardWidget(QWidget):
         self.playerNumber.setValue(1)
         # Re-assert the characters-per-player default so the freshly-built
         # player widgets pick it up instead of getting pinned to 1.
-        self.charNumber.setValue(3)
+        self.charNumber.setValue(DEFAULT_CHARACTERS_PER_PLAYER)
 
         self._applyScoreboardMode(self.singlePlayer)
 
@@ -2587,11 +2590,9 @@ class AutonaScoreboardWidget(QWidget):
     def SetDefaultsFromAssets(self):
         # Propagate the game's default players-per-team; characters-per-player
         # is forced back to its default (3) regardless of game asset config.
-        if StateManager.Get('game.defaults'):
-            players = StateManager.Get('game.defaults.players_per_team', 1)
-        else:
-            players = 1
-        self.playerNumber.setValue(players)
-        self.charNumber.setValue(3)
+        # Both come from core, where the headless shell's launch seed reads
+        # them too (PlayerService.SeedEmptyRoster, ADR-005 S3d).
+        self.playerNumber.setValue(DefaultPlayersPerTeam())
+        self.charNumber.setValue(DEFAULT_CHARACTERS_PER_PLAYER)
 
     pass

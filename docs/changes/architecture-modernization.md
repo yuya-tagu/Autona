@@ -1526,7 +1526,7 @@ S3c の後半。ウィンドウを出さずに state・大会データ・Web サ
   - **exe でのヘッドレスは対象外**（PyInstaller の spec・自動更新は触っていない）。`Autona.exe --headless` は拒否する（判断 13）。exe で動かすには、GUI サブシステムの exe なのでコンソールが無く、ログも停止手段も別に考える必要がある
   - **ヘッドレスの `set_game`（legacy の `POST /update-game` と Socket.IO の `update_game`）はロードの間メインループを止める**（受容）。`@gui_thread_sync` でメインスレッドに渡し、同期でロードするのが旧ルートの契約（ロード完了後に `"OK"`）のため。その間は delta の配送と停止要求の処理が止まる。デスクトップもロードの間 GUI が固まる点では同じ。v1 の `POST /game` は非同期（202）なので止めない
   - **停止時、`run_sync` で GUI スレッドを待っているリクエストのスレッドは待ち続ける**（既存の構図。デスクトップも同じ）。イベントループが止まった後は誰も実行しないが、werkzeug のリクエストのスレッドは daemon なのでプロセスの終了は妨げない（そのリクエストには応答が返らない）
-  - ヘッドレスのボードは skeleton（デスクトップの未構築ボードと同じ）。選手スロット・`losers` などのキーは最初の書き込みで現れる。オーバーレイは未定義を空として扱う前提
+  - ヘッドレスのボードは skeleton（デスクトップの未構築ボードと同じ）。選手スロット・`losers` などのキーは最初の書き込みで現れる。オーバーレイは未定義を空として扱う前提 **→ S3d で訂正**: この前提は成り立っておらず（スコア系オーバーレイは選手スロットが無いと描画しない）、S3d でヘッドレスがデスクトップの空ボードと同じ選手スロットをシードするようにした
   - Web UI（`/web`）は 503 を専用に扱っていない（一般のエラーとして出る）。ボード依存の操作のボタンをヘッドレスで隠すのは S4 の UI 側の仕事
   - コンソールの閉じるボタンで止めたときの書き出しは、Windows の猶予（約 5 秒）の中で終わる前提（通常は 1 秒未満）。タスクマネージャーでの強制終了は書き出しを待たない
   - Windows の `SIGTERM`（`os.kill` / `taskkill /F`）は TerminateProcess で捕まえられない。サービス化するなら `taskkill`（/F なし）ではなく Ctrl+Break を送る仕組みが要る
@@ -1544,3 +1544,74 @@ S3c の後半。ウィンドウを出さずに state・大会データ・Web サ
     - Ctrl+C で止まる。もう一度起動すると、大会情報と前回のゲームは残り、スコア（スコアボード）は消えている（デスクトップ版と同じ）。Ctrl+Break・コンソールの閉じるボタンでも同じ
     - （次に exe をビルドしたとき）`Autona.exe --headless` を実行するとメッセージボックスが出て起動せず、続けて普通にダブルクリックした `Autona.exe` は通常どおり起動する
     - ヘッドレス稼働中にもう 1 つ `python main.py --headless` を起動すると「already running」で終わる。デスクトップ版を起動すると何も出ずに終わる
+
+#### S3d E2E（2026-10-26・PR 未作成）
+
+S3 の最後。ヘッドレスの実プロセスに対して、Python のスモークの穴を埋め、ブラウザの E2E（Playwright・Chromium）を足した。E2E は `/web` とオーバーレイ 1 枚を開き、Web からのスコア +1 が state とオーバーレイに届くことを確かめる。**この E2E で、ヘッドレスの `/web` とスコア系オーバーレイが実際には使えないことが分かり、同じ S3d で直した**（下の「E2E で見つかった問題と修正」。`/web` のガードと、ヘッドレスが core でデスクトップの空ボードと同じ選手スロットをシードする）。
+
+- **実装**
+  - `tests/test_headless_smoke.py`: 設計の確認項目（health・Socket.IO 接続・`score:adjust`・delta・トークンなしの LAN 書き込みの拒否・`state.json`）のうち、拒否は HTTP の 1 件だけだった。Socket.IO でも拒否されること（中継された接続の書き込みイベント `team_scoreup` が ack で `UNAUTHENTICATED`、state は変わらない）と、初回起動で発行されたトークン（tmp の `settings.json`）を付けると同じ中継の書き込みが通ることを足した
+  - `web/e2e/`（新規）
+    - `headless_server.py`: ヘッドレスの起動・停止を受け持つヘルパー（テストではない。pytest は `tests/test_*.py` しか集めない）。スモークと同じ隔離を、スモークの関数をそのまま import して使う: `_runtime()`（tmp の作業ディレクトリ + junction）・`_free_port()`・`_launch()`（`AUTONA_INSTANCE_TAG`・`CREATE_NEW_PROCESS_GROUP`）・`_wait_until_serving()`・settings（ポートと `webserver_listen_lan: false`）。その上に、ブラウザが読む `web/build`・`layout/include`・`layout/scoreboard_simple` を junction で、`layout/main.css`・`layout/settings.json` をコピーで足す（読むだけ）
+      - stdout に 1 行ずつ: `AUTONA_E2E_READY {url, pid, dir}` / `AUTONA_E2E_FAILED ...`（コンソールの末尾付き）/ `AUTONA_E2E_STOPPED {exit, killed}`。ヘルパー自身の終了コードは正常停止（exit 0・kill なし）のときだけ 0
+      - READY の後は stdin の `stop` か EOF を待つ（呼び出し側が落ちて stdin が閉じても止まる）。止めるのは Ctrl+Break（起動したプロセスグループだけ）、60 秒で終わらなければその PID だけ kill。`poll()` と Ctrl+Break の間に終わっていた場合（送信が `OSError`）は、終了済みなら正常停止として扱い、まだ動いていれば kill する
+      - 後始末: 足した junction を外し、`_runtime()` が自分の junction を外してから tmp を消す。junction が 1 つでも残っていたら tmp を消さない（`rmtree` が junction の先の `web/build`・`assets/` に降りないように）。ヘッドレスのコンソールログは `web/test-results/headless-console.txt` にコピーする
+    - `global-setup.ts`: `web/build/index.html` が無ければ「先に `npm run build`」で止める。ヘルパーを起動して READY を待ち（150 秒）、URL を `AUTONA_E2E_BASE_URL` でテストに渡す。teardown（global setup の戻り値）は `stop` を送って 90 秒待つ。終わらなければ、ヘルパーと、ヘルパーが報告したヘッドレスの 2 つの PID だけを kill して失敗にする。終わっても、`AUTONA_E2E_STOPPED` が `{"exit": 0, "killed": false}` でない・ヘルパーの終了コードが 0 でないときは失敗にする（teardown の例外で Playwright の run は exit 1 になることを確認済み）。ヘルパーの stdin には `error` ハンドラを付け、閉じたパイプへの書き込み（EPIPE）で落ちない
+    - `server.ts`: URL の組み立て・外部ホストへの要求の遮断（`/web` と オーバーレイが読む Google Fonts）・state の読み取り・ボード 1 を 0-0 にする（`score:set`。下の判断 4）
+    - `web-and-overlay.spec.ts`（2 件）
+      - (a) `/web` が開き（タイトル・Swap Teams・Clear All・+1 が 2 つ）、+1 を押すと state のスコアが `[1, 0]` になる
+      - (b) `layout/scoreboard_simple` を開いて Socket.IO の接続を待ち、`/web` で +1 → オーバーレイの `.p1 .score` が `1`、`.p2 .score` が `0`
+      - `/web` とオーバーレイの未捕捉の例外（`pageerror`）は afterEach で失敗にする（React は例外 1 つでページ全体を消し、オーバーレイは例外でそのイベントの描画を止めるので、原因をそのまま出す）
+  - `web/playwright.config.ts`（新規）: `testDir: e2e`・Chromium のみ・workers 1（サーバーと state を共有）・retries 0・trace は失敗時だけ残す・HTML レポート・`locale: en-US`（Web UI はブラウザの言語で文言を選ぶ）
+  - `web/package.json`: devDependency `@playwright/test` **1.62.1**（exact。2026-07-30 公開。最新の 1.64.1 は 2026-10-14 で 2 週間未満）、スクリプト `test:e2e`（`playwright test`）。`package-lock.json` の差分は `@playwright/test`・`playwright`・`playwright-core`・`fsevents`（darwin 用の optional）の追加だけ
+  - `web/.gitignore`: `/test-results/`・`/playwright-report/`
+  - `.github/workflows/ci.yml`: `e2e` ジョブ（windows-latest・20 分）。Python 3.12 + `requirements.txt` + pytest → Node 20 → `npm ci` → `npm run build`（`CI=false`）→ `npx playwright install chromium` → `npm run test:e2e`（`CI=true`）。失敗時は `web/playwright-report/` と `web/test-results/`（trace とヘッドレスのコンソールログ）を artifact に上げる（7 日）。既存の python / web ジョブは変えていない
+  - `tests/` は `web/e2e/` を集めず、`react-scripts test`（jest の roots は `src/`）も `web/e2e/` を集めない（`--listTests` と `pytest --collect-only` で確認）。`tsconfig.json` の `include` は `./src` のままなので、`npm run build` の型検査にも入らない（Playwright が自分で TypeScript を変換する）
+  - E2E で見つかった問題の修正（下の「E2E で見つかった問題と修正」）
+    - `web/src/ScoreboardPage/Team.jsx`: `Object.keys(team.player ?? {})`。`ScoreboardPage/` で `team.player` を `Object.keys/entries/values` に渡すのはここだけだった（`CurrentSet.jsx` は直前の `if (!team?.player)` で、`ScoreControlBar.jsx` は `team.player || {}` で守られている）。`Team.test.js`（新規・1 件）: `player` の無いチームでも列（`1P`・チェックボックス）が描画される
+    - `src/core/PlayerService.py`: `SeedEmpty()`（1 スロットを空のカードが publish するのと同じ内容で書く: seed 0・birthday False・country `{}`・state `{}`・キャラ 3 枠と mains。既存の setter をデスクトップのカードと同じ順で呼ぶので、キーと値の形・キー順が同じになる）、モジュール関数 `SeedEmptyRoster(board, players=None, characters=3)`（両チームの 1..players を書く。スロット順・チーム順はデスクトップの構築順）、`DefaultPlayersPerTeam()`（`game.defaults.players_per_team`、`game.defaults` が無ければ 1）と `DEFAULT_CHARACTERS_PER_PLAYER = 3`
+    - `src/core/CrewBattleService.py`: `DefaultTeams()`（既定色 2 チーム・メンバー 9 人・名前空・ストック 3）と `SeedDefaults()`（`SeedBoardState(DefaultTeams(), DEFAULT_MEMBER_NUM, 0)` = クルーボードの起動時の書き込み）
+    - `src/headless.py`: `_SeedBoards()`（`ResetScoreRoot` → `SeedBoard(1..3)` → `SeedEmptyRoster(1)` / `SeedEmptyRoster(2)` → `CrewBattleService(3).SeedDefaults()`）。`_SeedState()` の 1 つの `SaveBlock` の中で、パネルのシードの前に呼ぶ（= 1 保存サイクル）。モジュールの docstring も実態に合わせた
+    - `src/AutonaScoreboardWidget.py`: `SetDefaultsFromAssets` の人数・キャラ数を core の `DefaultPlayersPerTeam()` / `DEFAULT_CHARACTERS_PER_PLAYER` から取る。構築時のキャラ数の `setValue(3)` 2 箇所（スピンボックス生成時と、選手カード生成前の再設定）も `DEFAULT_CHARACTERS_PER_PLAYER` にした（挙動は同じ。既定値の出どころを 1 つにした）
+    - `tests/test_headless_seed.py`（新規・4 件）: デスクトップの空ボード（`autonaApp.board(1..3)` が publish した state）と `_SeedBoards()` の publish を比べる。board 1/2 は各チームの `player` サブツリー、board 3 はボード全体を、値とキー順（`json.dumps` の一致）で照合。ゲームなし（1 人）と `players_per_team: 2` の 2 通り。加えて、シードが `ResetScoreRoot` の後であること（復元された余分なスロットが残らない）と、人数・キャラ数の明示指定
+    - `web/e2e/web-and-overlay.spec.ts`: (b) の `test.fail` を外し、普通に検査する
+- **判断と理由**
+  1. **起動・停止は Python のヘルパーにした（Playwright の `webServer` ではなく）**
+     - スモークの隔離（junction の一覧・tmp の作り方・起動の仕方）を import で共有でき、TypeScript に同じ一覧を書き直さずに済む
+     - 正規の停止（Ctrl+Break。書き出しを待って終了コード 0）は Node から送れない
+     - `webServer` の停止は Windows では `taskkill /T /F` で、ヘルパーの後始末（junction を外す）が走らない。junction が残った tmp を誰かが再帰削除すると、リポジトリの `web/build`・`assets/` に降りる
+     - stdin の EOF で止まるので、Playwright が途中で落ちてもヘッドレスが残らない
+  2. **LAN 側の IP からの拒否は、実際の LAN では再現しない**: 1 台の PC では他端末の送信元 IP を作れない（自 PC の LAN IP 宛ては「この PC」として免除される）。実プロセスでは中継ヘッダ（`X-Forwarded-For`）で「他端末扱い」の同じ拒否の経路を通し、アドレスの判定そのものは `tests/test_web_access.py` が Flask の test client の `REMOTE_ADDR` で担保している（`test_lan_writes_and_the_player_db_need_the_token`・`test_another_lan_address_is_not_this_pc`・`test_this_pc_under_its_lan_address_needs_no_token`・`test_a_lan_connection_without_the_token_is_read_only`・`test_the_token_lets_a_lan_connection_write`）
+  3. **オーバーレイは `scoreboard_simple`**（1v1 の素のスコアボード）。スコア系のオーバーレイ（`scoreboard_simple` / `scoreboard_Universal` / `scoreboard_team` / `scoreboard_topleft`）はどれもチーム 1 の選手スロットを前提にしていて、下の問題 2 は共通
+  4. **各テストの前にボード 1 を API（`score:set`）で 0-0 にする**。ヘッドレスのシードは選手スロットまでで、スコアは書かない（デスクトップではスコアのスピンボックスが publish する。下の判断 9）。2 件のテストが 1 つのヘッドレスを共有するので、前のテストの +1 を持ち越さないためにも要る
+  5. **(b) は普通に検査する**。修正前は `test.fail(条件)`（ボード 1 のチーム 1 に選手スロットが無い）で既知の失敗として固定していたが、シードを入れたので外した
+  6. **外部への要求は遮断した**（Google Fonts）。オフラインでも CI のネットワークが遅くても結果が変わらないように
+  7. **スクリーンショット比較はしない**（指示どおり）。文言・DOM・state だけを見る
+  8. **CI は Windows**（配布と同じ OS。ヘルパーの Ctrl+Break も Windows のコンソールにしか無い）。Playwright のブラウザはキャッシュしない（毎回ダウンロード。必要になったら足す）
+  9. **シードするのは「デスクトップの空ボードが publish する選手スロット」まで**（メインの判断。形の正本はデスクトップの空ボードの `score.N.team.T.player.M.*`）。board 1/2 のチーム単位のキー（color・teamName・losers・score）とボード単位のキー（match バー・best_of の文言・stages）はボードのウィジェットが publish するもので、シードしない（オーバーレイと `/web` が描画に要るのは選手スロット。チーム単位の値は最初の操作で書かれる）。クルーボード（board 3）はボード全体をシードする（デスクトップでも起動時の書き込みが core の 1 呼び出し = `CrewBattleService.SeedBoardState` なので、同じ呼び出しで同じ state になる）
+  10. **3 面ともシードする**。デスクトップは表示した面だけを構築し、未構築の面は skeleton のまま（構築時にシードで上書きされる）。ヘッドレスは面を構築しないので、起動時に 3 面とも構築直後の形にする。人数・キャラ数は `ResetScoreRoot` の後・ゲームの復元の前に決まる（起動時の `game` は空なので 1 人 / 3 枠。デスクトップもボード構築時点では同じで、ゲームのロード後に人数を変えるのはボード側の反応 = S2g）
+  11. **既定値の出どころは core の 1 箇所**。デスクトップの `SetDefaultsFromAssets` も `DefaultPlayersPerTeam()` / `DEFAULT_CHARACTERS_PER_PLAYER` を読むようにした（挙動は同じ。片方だけ既定値を変えて形がずれないように）。デスクトップの書き込み経路（カードが publish する）は変えていない。同等性は `tests/test_headless_seed.py` が pin する
+- **E2E で見つかった問題と修正**
+  1. **`/web` が真っ白になる**（`TypeError: Cannot convert undefined or null to object`）→ **修正済み**
+     - 起きる条件: ボードに 2 チームあり、選手スロット（`team.{t}.player`）が無い。ヘッドレスでは（シード前は）スコアを 1 回書いた時点でこうなった
+     - 原因: `web/src/ScoreboardPage/Team.jsx` の `Object.keys(team.player)`。React は例外 1 つでページ全体を消す
+     - デスクトップでも起きうる: 未構築のボード（1v1 のときの board 2）に v1 の `score:set` を送ってから `/team` を開く。シードとは別に、Web UI 側でガードした
+  2. **ヘッドレスではスコア系のオーバーレイが何も描画しない** → **修正済み**（ヘッドレスのシード）
+     - 原因: オーバーレイはチーム 1 の選手スロットが無いと描画を始めない（`if (... || !sb.team["1"].player) return;`）。選手スロットを作るのはデスクトップの選手カードだけで、ヘッドレスのボードには無く、ヘッドレスで作る API も無い（`PATCH players` は 503、クリア系は既存のスロットしか触らない）
+     - S3c-2 の「残置」にある「オーバーレイは未定義を空として扱う前提」は成り立っていなかった
+  - 修正後、`npm run test:e2e` は 2 件とも通る。**S3 の完了条件「ヘッドレスで OBS オーバーレイと `/web` の表示、core 直結の操作が動く」を E2E で確認できた**（自動テストの範囲。実機は下の確認項目）
+- **残置 / リスク**
+  - **CI での実行は未確認**（手元の Windows でだけ回した）。CI ランナーのコンソールで Ctrl+Break が届くことは、python ジョブの `test_headless_smoke.py` と同じ前提
+  - Windows 専用（ヘルパーは Windows 以外では `AUTONA_E2E_FAILED` で止まる）
+  - ヘルパーは `tests/` の関数（`_runtime`・`_free_port`・`_link_tree`・`_LINKED_TREES`・`_launch`・`_wait_until_serving`）に依存する。名前を変えると E2E が起動しなくなる（`_launch` / `_wait_until_serving` の共有はスモークの docstring に書いた）。この import のため e2e ジョブにも pytest を入れている
+  - ヘッドレスのコンソールに、ブラウザが WebSocket を閉じたときの werkzeug の `AssertionError: write() before start_response` が出る（既存のノイズ。テストの結果には影響しない）
+  - ヘルパー自身が強制終了された場合（Playwright の teardown が 90 秒で諦めたとき以外）は、ヘッドレスが残りうる。teardown が諦めたときは報告済みの 2 つの PID を kill する
+  - 同じくヘルパーが強制終了されると、junction 付きの `%TEMP%\autona-e2e-*` が残りうる（junction の先はリポジトリの `web/build`・`layout/`・`assets/` など）。**junction を辿るクリーナー（`rm -rf`・`shutil.rmtree`・エクスプローラーの削除など）で消すと、リポジトリ側の中身まで消える危険がある**。先に中の junction を `rmdir`（junction だけを外し、先は消さない）で外してから、残ったディレクトリを消す
+  - teardown は正常停止でなければ run を失敗にする（ヘルパーの `AUTONA_E2E_STOPPED {"exit": 0, "killed": false}` と、ヘルパー自身の終了コード 0 の両方を確認。kill になった・終了コードが 0 以外なら失敗）
+  - ヘッドレスの人数は起動時の 1 人 / チームのまま。2v2 のゲームを読んでもスロットは増えない（ゲームのロードへのボードの反応 = S2g はヘッドレスに無い。S3c-2 判断 3 の残置と同じ）。人数を変える Web の入口（ボードのスピンボックス相当）もヘッドレスでは 503
+  - board 1/2 のチーム単位・ボード単位のキーはシードしないので、ヘッドレスの起動直後の state はデスクトップの空ボードより少ない（判断 9）。それを前提にしたオーバーレイは、最初の操作まで描画が欠ける。スコア系 4 枚はスコアが無ければ 0 と描く（`scoreboard_topleft` だけ `String(team.score)` で `undefined` と出ていたので、ほかの 3 枚と同じ `?? 0` にそろえた。デスクトップはボードがスコア 0 を publish するので元から出ない）
+  - シードは起動時の 1 回だけ。ヘッドレスで `PATCH players` 相当がなく、クリア系は既存のスロットしか触らないので、スロットを消す経路も増やす経路も無い（シードで入ったスロットが残り続ける）
+- **実機確認（オーナー）**
+  - ヘッドレス（`python main.py --headless`）を起動し、OBS で `layout/scoreboard_simple` を開く → 起動直後から空のスコアボード（名前空・スコア 0-0）が描画される
+  - その状態で `/web` を開く → 真っ白にならず、両チームの列（1P）とスコア操作が出る。+1 / −1 を押すとオーバーレイがすぐ変わる（S3c-2 の実機確認と同じ操作）
+  - デスクトップ（`python main.py`）は挙動が変わらないこと: 起動直後のボードの選手カード数（ゲーム未選択で 1・2v2 のゲームで 2）とキャラ枠 3、スコアボードのオーバーレイの表示

@@ -133,7 +133,7 @@ LoadEverything().then(() => {
 
             let score = [data.score[window.scoreboardNumber].score_left, data.score[window.scoreboardNumber].score_right];
 
-            SetInnerHtml($(`.p${t + 1}.container .score`), String(team.score));
+            SetInnerHtml($(`.p${t + 1}.container .score`), String(team.score ?? 0));
 
             SetInnerHtml(
               $(`.p${t + 1}.container .sponsor-container`),
@@ -220,7 +220,7 @@ LoadEverything().then(() => {
 
         let score = [data.score[window.scoreboardNumber].score_left, data.score[window.scoreboardNumber].score_right];
 
-        SetInnerHtml($(`.p${t + 1}.container .score`), String(team.score));
+        SetInnerHtml($(`.p${t + 1}.container .score`), String(team.score ?? 0));
 
         SetInnerHtml(
           $(`.p${t + 1}.container .sponsor-container`),
