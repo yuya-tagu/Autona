@@ -50,12 +50,6 @@ class SocketioJson:
         return json.loads(*args, **kwargs)
 
 
-class WebServerSignals(QObject):
-    # str = human-readable error summary. Emitted from the QThread's run();
-    # Qt queues the delivery onto the GUI thread automatically.
-    start_failed = Signal(str)
-
-
 def _build_web_app():
     """Create the Flask app + SocketIO server and register every route/event.
 
@@ -838,7 +832,22 @@ def _build_web_app():
     return app, socketio
 
 
-class WebServer(QThread):
+class WebServer:
+    """The Flask/SocketIO server, served from a plain Python thread.
+
+    It used to be a QThread running socketio.run(), which could not be
+    stopped -- the window hard-killed its accept loop with
+    QThread.terminate() on close (TerminateThread, which can catch the
+    thread holding the GIL or a CRT / interpreter lock and hang the exit;
+    requests themselves ran on werkzeug's daemon request threads). It is
+    shell-agnostic now (ADR-005 S3c): start() serves werkzeug's threaded server -- the one
+    socketio.run() builds in threading mode -- from a threading.Thread, stop()
+    shuts it down cleanly, and a start failure is reported to the
+    `on_start_failed(error: str)` callback, called on the server thread (the
+    shell marshals it where it needs to: the desktop to its GUI thread for a
+    dialog, the headless shell only logs).
+    """
+
     # Built by _build_web_app() on the first instantiation (Step 3e). Class
     # level access -- WebServer.app / WebServer.socketio -- keeps working for
     # every existing caller once __init__ has run.
@@ -846,8 +855,13 @@ class WebServer(QThread):
     socketio = None
     actions = None
 
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
+    def __init__(self, parent=None, on_start_failed=None) -> None:
+        self._on_start_failed = on_start_failed
+        self._serve_lock = threading.Lock()
+        self._server = None
+        self._thread = None
+        self._stopping = False
+
         # Idempotent, same shape as the existing singleton guards: the Flask
         # app and its route/event handlers are registered exactly once, no
         # matter how many WebServer instances get built. Must run before the
@@ -884,8 +898,6 @@ class WebServer(QThread):
         if "api_v1" not in WebServer.app.blueprints:
             WebServer.app.register_blueprint(api_v1)
         init_api_v1(WebServer.actions)
-
-        self.signals = WebServerSignals()
 
         # Issue the access token on the first launch (saved to settings.json),
         # so API Settings and "ブラウザ版を開く" have it before anyone asks
@@ -1240,13 +1252,100 @@ class WebServer(QThread):
             }), 401
         return None
 
-    def run(self):
+    # ── Serving thread ───────────────────────────────────────────
+
+    def start(self):
+        """Start serving on a daemon thread. Returns immediately.
+
+        Daemon, so a server that is never stopped (a crash, a test) cannot
+        keep the process alive; the shells stop it on the way out anyway.
+        A second call, or a call after stop(), does nothing.
+        """
+        with self._serve_lock:
+            if self._thread is not None or self._stopping:
+                return
+            self._thread = threading.Thread(
+                target=self._Serve, name="AutonaWebServer", daemon=True)
+            self._thread.start()
+
+    def _Serve(self):
+        # What socketio.run() does in threading mode, minus what only a
+        # command-line dev server wants (the banner, .env loading, the
+        # reloader's WERKZEUG_SERVER_FD): Flask.run() -> werkzeug's
+        # run_simple() -> make_server(threaded=True).serve_forever(). The
+        # Socket.IO middleware is already wrapped around app.wsgi_app, and
+        # simple-websocket upgrades the WebSocket transport on this server,
+        # so the wire behaviour is the same. Building the server ourselves is
+        # what makes it stoppable: serve_forever() returns on shutdown().
+        from werkzeug.serving import make_server
         try:
-            self.socketio.run(app=self.app, host=self.host_name, port=self.port,
-                              debug=False, use_reloader=False, allow_unsafe_werkzeug=True)
+            try:
+                server = make_server(
+                    self.host_name, self.port, self.app, threaded=True)
+            except SystemExit as exit_:
+                # werkzeug reports a bind failure by printing the OSError to
+                # stderr and calling sys.exit(1) -- from this thread that
+                # never reached the old `except Exception`, so the failure
+                # was silent. The OSError is the exit's context.
+                reason = exit_.__context__ or exit_
+                raise OSError(
+                    f"could not listen on {self.host_name}:{self.port}: "
+                    f"{reason}") from None
+            with self._serve_lock:
+                if self._stopping:
+                    server.server_close()
+                    return
+                self._server = server
+            logger.info(
+                f"Web server listening on {self.host_name}:{self.port}")
+            server.serve_forever()
         except Exception as e:
             logger.error(traceback.format_exc())
-            self.signals.start_failed.emit(str(e))
+            with self._serve_lock:
+                stopping = self._stopping
+            if stopping or self._on_start_failed is None:
+                return
+            try:
+                self._on_start_failed(str(e))
+            except Exception:
+                logger.opt(exception=True).error(
+                    "web server start-failure callback raised")
+
+    def stop(self, timeout: float = 10.0) -> bool:
+        """Stop serving and wait up to `timeout` seconds for the thread.
+
+        Returns True when the server thread is gone (or never started).
+        Connections already being handled run on werkzeug's daemon request
+        threads and are not drained -- the server is local, and the process
+        is on its way out (the old terminate() did not drain them either: it
+        only killed the accept loop).
+        """
+        with self._serve_lock:
+            self._stopping = True
+            server = self._server
+            thread = self._thread
+        deadline = time.monotonic() + timeout
+        if server is not None:
+            # shutdown() blocks until serve_forever() has returned; run it
+            # on a helper so a wedged loop cannot hold the caller (the
+            # window's close) beyond the timeout.
+            stopper = threading.Thread(
+                target=server.shutdown, name="AutonaWebServerStop",
+                daemon=True)
+            stopper.start()
+            stopper.join(timeout)
+        if thread is not None:
+            thread.join(max(0.0, deadline - time.monotonic()))
+        if server is not None:
+            try:
+                server.server_close()
+            except Exception:
+                logger.opt(exception=True).warning(
+                    "error closing the web server socket")
+        stopped = thread is None or not thread.is_alive()
+        if not stopped:
+            logger.warning(f"web server thread still alive after {timeout}s")
+        return stopped
 
 
 # ── Port collision guard ─────────────────────────────────────────
@@ -1354,8 +1453,8 @@ def check_webserver_port(port: int, parent=None, host: str = "127.0.0.1") -> boo
     single-instance guard removed self-collisions, that is now genuinely rare.
 
     NOTE: the return value is advisory — the only caller starts the server
-    either way and surfaces a genuine bind failure through the `start_failed`
-    signal. Answering "No" therefore does not stop the server: on Windows it
+    either way and surfaces a genuine bind failure through the server's
+    start-failure callback. Answering "No" therefore does not stop the server: on Windows it
     can still bind the already-held port (Werkzeug sets SO_REUSEADDR), which
     is why the dialog asks the user to change the port and restart.
     """
@@ -1367,7 +1466,8 @@ def check_webserver_port(port: int, parent=None, host: str = "127.0.0.1") -> boo
         # Bind failed but no other TCP listener owns the port (a socket in
         # TIME_WAIT, or a holder netstat can't attribute). There is nothing
         # to offer terminating — let the server start and report a real
-        # bind error through start_failed if it still can't listen.
+        # bind error through its start-failure callback if it still can't
+        # listen.
         logger.warning(
             f"Port {port} could not be bound but no listening process was found")
         return True

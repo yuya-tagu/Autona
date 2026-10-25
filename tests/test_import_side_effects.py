@@ -104,11 +104,13 @@ core_state = importlib.import_module("src.core.StateManager").StateManager
 # importing the module must not.
 core_actions = importlib.import_module("src.core.Actions").AutonaActions
 # The game asset catalog (ADR-005 S1a): the Qt-free half of what used to be
-# AutonaGameAssetManager, a singleton created by bootstrap_core() as well.
+# AutonaGameAssetManager, a singleton created by bootstrap_core() as well
+# (the adapter itself by bootstrap_gui()).
 game_catalog = importlib.import_module(
     "src.core.GameAssetCatalog").GameAssetCatalog
 # The country catalog (ADR-005 S1c): the Qt-free half of what used to be
-# AutonaCountryHelper, likewise created by bootstrap_core().
+# AutonaCountryHelper, likewise created by bootstrap_core() (the adapter by
+# bootstrap_gui()).
 country_catalog = importlib.import_module(
     "src.core.CountryCatalog").CountryCatalog
 # The web server's access policy (ADR-005 S3a). It reads -- or issues and

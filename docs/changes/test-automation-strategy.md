@@ -476,7 +476,7 @@ autonaApp (session)
 ### L4 の設計
 
 `main.py` は単一インスタンスミューテックスを持つため、実機で Autona が起動中だとテストが素通りする。
-L4 は `main.py` を使わず、サブプロセス内で `QApplication` → `bootstrap_core()` → `Autona.Window()` を
+L4 は `main.py` を使わず、サブプロセス内で `QApplication` → `bootstrap_core()` → `bootstrap_gui()` → `Autona.Window()` を
 使い捨て cwd で組み立て、以下を検証する:
 
 - `STARTUP phase=` ログが所定の段階まで出る

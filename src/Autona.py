@@ -13,7 +13,6 @@ import orjson
 import traceback
 import time
 import os
-import socket
 import sys
 import qtpy
 from qtpy.QtGui import *
@@ -168,8 +167,12 @@ def catchtime(msg = ''):
 # what implicitly created
 # AutonaHotkeys.instance. Running bootstrap_core() here keeps the effective
 # initialization order identical to the old import-time side effects.
-from .bootstrap import bootstrap_core
+# bootstrap_gui() adds the desktop's Qt adapters (hotkeys, asset / country
+# models, scoreboard dock ...) on top; the headless shell runs only the first
+# (ADR-005 S3c).
+from .bootstrap import bootstrap_core, bootstrap_gui
 bootstrap_core()
+bootstrap_gui()
 
 # autopep8: off
 from .Settings.AutonaSettingsWindow import AutonaSettingsWindow
@@ -895,8 +898,13 @@ class Window(QMainWindow):
             if self._shuttingDown:
                 return
 
-        self.webserver = WebServer(parent=self)
-        self.webserver.signals.start_failed.connect(self.OnWebServerStartFailed)
+        # The failure callback runs on the server thread; the dialog belongs
+        # on the GUI thread, which is where the old queued start_failed
+        # signal delivered it too.
+        self.webserver = WebServer(
+            parent=self,
+            on_start_failed=lambda error: AutonaQtHelper.gui_executor(
+                lambda: self.OnWebServerStartFailed(error)))
         # Probe the very interface the server will bind (LAN vs loopback).
         check_webserver_port(
             self.webserver.port, parent=self, host=self.webserver.host_name)
@@ -1340,7 +1348,8 @@ class Window(QMainWindow):
             self.sidebar.tournamentButton, not hasTournament)
 
     def OnWebServerStartFailed(self, error: str):
-        # Delivered via queued signal from the webserver QThread. Use show()
+        # Marshalled here from the web server thread through gui_executor
+        # (see _StartWebServer). Use show()
         # (non-blocking) instead of exec() per the no-nested-modal rule; keep
         # a reference so the box is not garbage-collected while visible.
         box = QMessageBox(self)
@@ -1400,27 +1409,18 @@ class Window(QMainWindow):
             pass
 
         # --- Mandatory teardown ------------------------------------------
-        # For whatever reason, the webserver thread won't respond to the quit() signal nicely.
-        # This is usually unsafe, but there's no easy way to terminate the flask server,
-        # so we hard-kill its thread as we're shutting down to prevent exit-crashes.
-        #
-        # Given that this webserver is local in scope, it's reasonable to not do any
-        # connection-draining process.
-        try:
-            web_socket_fd = os.environ.get('WERKZEUG_SOCKET_FD', None)
-            if web_socket_fd:
-                sock = socket.socket(fileno=int(web_socket_fd))
-                sock.close()
-        except Exception:
-            logger.opt(exception=True).warning("Error closing web socket on shutdown")
-
+        # The web server is stoppable since ADR-005 S3c: werkzeug's
+        # shutdown() ends its accept loop, where QThread.terminate() used to
+        # kill that thread (TerminateThread, which can catch it holding the
+        # GIL or a CRT / interpreter lock and hang the exit). Requests run on
+        # werkzeug's daemon request threads and are not drained, as before:
+        # the server is local and the process is on its way out.
         try:
             # None when the window is closed before the deferred start ran.
             if self.webserver is not None:
-                self.webserver.terminate()
-                self.webserver.wait(10000)  # 10 seconds grace period.
+                self.webserver.stop(10.0)  # 10 seconds grace period.
         except Exception:
-            logger.opt(exception=True).error("Error terminating web server on shutdown")
+            logger.opt(exception=True).error("Error stopping web server on shutdown")
 
         try:
             # allWindows() returns QWindow, not QWidget: comparing against

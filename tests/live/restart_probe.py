@@ -2,7 +2,8 @@
 
 Usage: python restart_probe.py <runtime_dir> <project_root>
 
-Boots the app the way main.py does -- QApplication, then bootstrap_core() --
+Boots the app the way main.py does -- QApplication, then bootstrap_core() and
+bootstrap_gui() --
 inside the *same* working directory a previous run left behind, and reports
 what survived. Everything it needs to answer lives in one JSON blob on
 stdout, prefixed with a marker so loguru's stderr chatter cannot be mistaken
@@ -69,8 +70,11 @@ def main():
         .get(team, {}).get("player", {}).get("1", {}).get("name")
         for team in ("1", "2")]
 
-    from src.bootstrap import bootstrap_core
+    from src.bootstrap import bootstrap_core, bootstrap_gui
     bootstrap_core()
+    # The desktop's half too: (b) below is AutonaScoreboardManager's doing,
+    # and the scoreboard dock is built by bootstrap_gui() (ADR-005 S3c).
+    bootstrap_gui()
 
     from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
     from src.core.SettingsManager import SettingsManager

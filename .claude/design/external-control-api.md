@@ -139,7 +139,7 @@
 - **絶対値設定**（`score:reset`・`score:set`・`PATCH set`・`PATCH .../players/{p}`・`PATCH /display-options`・`:swap-teams`）は本質的に冪等寄りのため必須ではない。
 
 ### 2.10 スレッド安全性（実行中フラグ・冪等キャッシュ）
-- WebServer は QThread ＋ Flask `async_mode='threading'` ＝ **複数リクエストスレッドが並行**しうる。
+- WebServer は `threading.Thread` 上の werkzeug threaded サーバー（ADR-005 S3c。旧 QThread）＋ Flask `async_mode='threading'` ＝ **複数リクエストスレッドが並行**しうる。
 - §2.8 の**実行中フラグ**と §2.9 の**冪等キャッシュ**は、本 API 層が持つ新規共有状態であり、
   **`threading.Lock` で保護する（MUST）**。粒度（操作種別ごと / グローバル）は実装フェーズで確定（§13）。
 - これらは Qt のスレッド境界とは独立した「HTTP 受付層の状態」。`StateManager.lock`（RLock）とは別管理。

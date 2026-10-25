@@ -21,7 +21,7 @@ class HotkeyCaptureEdit(QKeySequenceEdit):
     """
 
     def _hotkeys(self):
-        # Null-safe: no bootstrap_core() means no instance to suspend.
+        # Null-safe: no bootstrap_gui() means no instance to suspend.
         return AutonaHotkeys.instance
 
     def focusInEvent(self, event):

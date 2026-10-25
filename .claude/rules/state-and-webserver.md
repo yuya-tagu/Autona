@@ -197,7 +197,7 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
   プログラム的更新は必ず `QSignalBlocker` で囲む（囲まないと `valueChanged` 等が
   発火して書き戻し = エコーループ）。再入ガードの実例は
   `AutonaScoreboardWidget._SyncScoreDisplays`
-- ホットキーは `AutonaHotkeys.ConnectActions()` が `bootstrap_core()` から 1 回だけ結線する。
+- ホットキーは `AutonaHotkeys.ConnectActions()` が `bootstrap_gui()` から 1 回だけ結線する（ADR-005 S3c でデスクトップ側の段へ移動。ヘッドレスにはホットキーが無い）。
   対象ボードは `AutonaActions.ActiveBoard()`（`SettingsManager.scoreboard.battle_format`）。
   `swap_teams` も S2c からここ（旧: 構築済みの全ボードに接続しており、形式切替後は両ボードが入れ替わった）。
   ただし `swap_teams` だけは、アクティブボードが未構築なら何もしない（旧実装どおり。スコアのホットキーは
@@ -293,7 +293,7 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
 
 ## Web サーバー（Flask + SocketIO）
 
-- `AutonaWebServer` は QThread として別スレッドで動作
+- `AutonaWebServer.WebServer` は素の Python クラスで、`start()` が `threading.Thread`（daemon）で werkzeug の threaded サーバー（`make_server(threaded=True).serve_forever()`。旧 `socketio.run()` が threading モードで組むものと同じ）を回す（ADR-005 S3c。旧: QThread）。`stop(timeout)` が `shutdown()` で止める（旧 `QThread.terminate()` の強制終了は廃止）。起動失敗（bind 不能など）はコンストラクタの `on_start_failed(error: str)` コールバックにサーバースレッドから通知する（デスクトップは `gui_executor` で GUI スレッドへ渡してダイアログ表示）。ポート衝突の事前確認 `check_webserver_port()` は QMessageBox を出すのでデスクトップ専用
 - Flask アプリと SocketIO インスタンスは static 変数
 - ルートハンドラは `AutonaWebServerActions` に集約
 - Web UI からの POST リクエスト → Actions → StateManager 更新 → WebSocket 配信の流れ

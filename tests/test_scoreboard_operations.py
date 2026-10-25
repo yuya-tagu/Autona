@@ -989,7 +989,7 @@ def test_the_score_hotkey_is_routed_exactly_once(autonaApp):
 
     `signals` is class-level and outlives every instance, so a second connect
     would leave each score hotkey applying its delta twice -- invisible until
-    an operator's +1 came out as +2. bootstrap_core() can run more than once
+    an operator's +1 came out as +2. bootstrap_gui() can run more than once
     in a process (this harness bootstraps its own runtime), which is what the
     guard inside ConnectActions is there for.
     """

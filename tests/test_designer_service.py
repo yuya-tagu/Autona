@@ -1610,7 +1610,9 @@ sys.path.insert(0, sys.argv[1])
 
 from qtpy.QtWidgets import QApplication
 
-# AutonaScoreboardManager (built by bootstrap_core) is a QWidget.
+# bootstrap_core() itself needs no QApplication since ADR-005 S3c (the
+# QWidget singletons moved to bootstrap_gui()); one is kept so the probe boots
+# the way the desktop does.
 app = QApplication([])
 
 from src.bootstrap import bootstrap_core

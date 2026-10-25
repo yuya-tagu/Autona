@@ -371,9 +371,12 @@ def _autonaRuntime(qapp, tmp_path_factory):
 
     try:
         from src.Helpers import AutonaQtHelper
-        from src.bootstrap import bootstrap_core
+        from src.bootstrap import bootstrap_core, bootstrap_gui
 
+        # Both stages, as src/Autona.py runs them: the harness builds desktop
+        # widgets (boards, panels), which need the Qt adapters.
         bootstrap_core()
+        bootstrap_gui()
         # Normally done by src/Autona.py at import time. WebServerActions'
         # @gui_thread_sync methods raise without it, and that module is the
         # one thing tests must not import (agent-pitfalls #1).

@@ -1339,7 +1339,10 @@ state の正本を `out/program_state.json` から `user_data/state.json` に移
   - **クラッシュ・強制終了で失うのは、`program_state.json` にも出ていない分だけ**（export は保存サイクルのたびにすぐ書く）。`program_state.json` も消えていれば、`state.json` の時点（最大 5 秒前）に戻る
   - **mtime の比較に頼る**: 時計を戻した・`program_state.json` を手で触った・バックアップを戻したときは、新しい方の判定が運用者の意図とずれることがある（バックアップの戻し方は運用文書に書いた）
   - **`state.json` を読めない・退避できないとき、そのセッションは保存しない**（error ログ）。`program_state.json` の出力は続くので、次の起動はそちらの方が新しければそこから戻る
-  - **`StatePersistence._cond` も QThread.terminate に弱い**: 終了時の `webserver.terminate()` が、`Schedule()` の中（`_cond` 保持中）で Web サーバーのスレッドを止めると、`_cond` が解放されず、書き出しスレッド（非 daemon）を待つ終了処理が止まる。既存の `_export_cond` と同じ種類の危険で、今回は直さない
+  - **終了時の `webserver.terminate()` と `_cond` / `_export_cond`**（2026-10-25 S3c-1 で訂正）
+    - 当初は「`Schedule()` の中（`_cond` 保持中）で Web サーバーのスレッドが止められると、`_cond` が解放されず、書き出しスレッド（非 daemon）を待つ終了処理が止まる。`_export_cond` も同じ」と書いたが、この経路は実在しなかった。`terminate()` が止めていたのは accept ループのスレッド（`serve_forever()`）だけで、このスレッドは `_cond` も `_export_cond` も取らない。要求の処理（`SaveState` → `Schedule()` を呼びうる側）は werkzeug の daemon の要求スレッドで動いており、terminate の対象ではなかった
+    - 実在したのは別の危険。`terminate()`（Windows の `TerminateThread`）は相手が何を持っているかを見ずに止めるので、accept ループが GIL や CRT / インタプリタ内部のロックを持った瞬間に止めると、プロセスが終了処理で固まりうる（通常は `select()` の待ちで GIL を放しているので、まれ）。S3c-1 で `terminate()` をやめ、`shutdown()` で止めるようにしたので、この危険は**解消**した
+    - daemon の要求スレッドは今も止めずに終了する。インタプリタは、非 daemon スレッド（書き出しスレッド 2 本）の join が終わってから daemon スレッドを凍結するので、要求スレッドが `_cond` / `_export_cond` を持ったまま凍結されて書き出しを妨げることはない
   - 終了の遅れ: 書き込み待ちがあると、終了が最大 0.1 秒 + 書き込み 1 回ぶん遅れる
   - テストのプロセスでは、どれかのモジュールが `Initialize()` を呼んだ後は保存が有効になる（パスは tmp。harness の `settle()` が待つ）。`Initialize()` を呼ぶテストを足すときは tmp CWD で呼ぶ
   - 2 つ同時に起動すると、同じ `state.json` を書き合う。単一インスタンスの IPC で防いでいる前提は、従来の `program_state.json` と同じ
@@ -1357,3 +1360,71 @@ state の正本を `out/program_state.json` から `user_data/state.json` に移
   > **前回の内容の保存先が変わりました**
   > 大会情報・配信設定などの前回の内容を、`user_data/state.json` に保存するようになりました（これまでは `out/program_state.json` から読み戻していました）。更新後の初回の起動で自動的に引き継がれます。`out/` フォルダを消しても、前回の内容が戻ります。バックアップや別の PC への移行のときは、`user_data/state.json` もコピーしてください。
   > 開発者向け: `GET /api/v1/state` と Socket.IO の全量 snapshot（`program_state`）の `state` に、前回のセッションの `timestamp` / `revision` が残らなくなりました（`out/program_state.json` の `timestamp` / `revision` と、payload の `revision` は従来どおり）。
+
+#### S3c-1 組み立ての 2 段化と Web サーバーのスレッド化（2026-10-25・PR 未作成）
+
+S3c（ヘッドレス起動）を 2 つの PR に分けた（指示書の規模ルール）。S3c-1 はヘッドレスの前提になる土台で、GUI の挙動は変えない。組み立て（`src/bootstrap.py`）をどのシェルにも要る段と、デスクトップの Qt アダプタの段に分けた。Web サーバーは QThread をやめて、止められる普通のスレッドにした。`in_gui_thread()` は QCoreApplication を見る。`--headless`・`src/headless.py`・ルートの移行・503・スモークテストは S3c-2 で行う。
+
+- **実装**
+  - `src/bootstrap.py`
+    - `bootstrap_core()`: どのシェルにも要るものだけを作る。QCoreApplication だけで動く（QtGui / QtWidgets のオブジェクトを作らない）。生成順は Settings → LayoutOptions → Locale / BadWord の `Initialize()` → StateManager → Bridge → Actions → GameAssetCatalog（+ `ResetGameState`）→ StartGG のクエリ → 大会 provider → TournamentInfoService → CountryCatalog → Designer の移行
+    - `bootstrap_gui()`（新規）: 先頭で `bootstrap_core()` を呼び（冪等）、デスクトップの Qt アダプタを作る。順は Hotkeys（+ `ConnectActions`）→ `AutonaGameAssetManager` → provider の結線 → PlayerDB の `SetupModel` 結線 → AlertNotification → Updater → `AutonaCountryHelper` → `AutonaScoreboardManager`（`ResetScoreRoot`）。再入ガードは段ごと
+    - 各ブロックの `ORDER CONSTRAINT:` を書き直した（新しい段の規則「QtGui / QtWidgets が要るか、デスクトップだけが使うなら `bootstrap_gui()`」も docstring に書いた）
+  - `src/AutonaTournamentDataProvider.py`: Qt アダプタ（`AutonaGameAssetManager`）への依存を外した
+    - `__init__` で `onLoadAssets` に connect していたのをやめ、`selectGameFromStartGGId`（start.gg の videogame ID でゲームを選ぶ関数）をシェルが登録する属性にした。未登録なら warning ログを出して何もしない
+    - `bootstrap_gui()` が `selectGameFromStartGGId = adapter.SetGameFromStartGGId` を登録し、`onLoadAssets` → `SetGameFromProvider` を結線する
+    - `SetTournament` の URL が空のときの `LoadGameAssets(0)` を削除した。2026-10-23 の PdM 判断で no-op になっていた（`test_an_empty_codename_keeps_what_is_loaded`）
+  - `src/Autona.py`
+    - `bootstrap_core()` の直後に `bootstrap_gui()` を呼ぶ
+    - `_StartWebServer`: `WebServer(parent=self, on_start_failed=...)`。コールバックはサーバーのスレッドから呼ばれるので、`gui_executor` で GUI スレッドに渡してから `OnWebServerStartFailed`（非モーダルのダイアログ）を出す。旧 queued シグナルと同じ届き方
+    - `closeEvent`: `terminate()` + `wait(10000)` を `webserver.stop(10.0)` に替えた。どこからも設定されていなかった `WERKZEUG_SOCKET_FD` を閉じるブロック（死にコード）と、それだけが使っていた `import socket` を削除した
+  - `src/AutonaWebServer.py`
+    - `WebServer` は QThread を継承しない素のクラスになった。`WebServerSignals`（`start_failed`）を削除し、コンストラクタの `on_start_failed(error: str)` コールバックに替えた
+    - `start()`: daemon の `threading.Thread`（`AutonaWebServer`）で `make_server(host, port, app, threaded=True).serve_forever()` を回す。旧 `socketio.run()` が threading モードで組むもの（`Flask.run` → `run_simple` → `make_server`）と同じサーバーで、開発サーバー向けの付属物（バナー表示・`.env` 読み込み・リローダー用の `WERKZEUG_SERVER_FD`）だけを省いた。2 回目の呼び出しと `stop()` 後の呼び出しは何もしない
+    - `stop(timeout)`: `shutdown()` で `serve_forever()` を抜けさせ、スレッドを join して socket を閉じる。止まったら True。`shutdown()` は補助スレッドで呼び、ループが固まっていても呼び出し側（ウィンドウの close）を timeout より長く止めない。処理中の接続は待たない（werkzeug の要求スレッドは daemon）
+    - bind の失敗: werkzeug は OSError を stderr に出して `sys.exit(1)` する。これを捕まえ、元の OSError を添えた `could not listen on host:port: ...` でコールバックに通知する
+  - `src/Helpers/AutonaQtHelper.py`: `in_gui_thread()` が `QCoreApplication.instance()` を見る。QtWidgets の import を外した
+  - `tests/conftest.py`（harness）と `tests/live/restart_probe.py`: `bootstrap_gui()` も呼ぶ（ボード・パネルを作るため / `score` を落とすのはスコアボード dock なので）
+  - コメントの追従: `src/AutonaHotkeys.py`（`ConnectActions` の冪等の理由）、`tests/test_scoreboard_operations.py`、`tests/test_import_side_effects.py`、`tests/test_designer_service.py`
+- **判断と理由**
+  1. **provider とアダプタの結線をシェルへ移した**
+     - provider の `__init__` がアダプタの `signals` に connect していたため、「アダプタ → provider」が生成順の制約になり、アダプタ（QStandardItemModel・QIcon を持つ）がどのシェルにも要った。ヘッドレスはアダプタを作らない（ゲームのロードは `GameAssetCatalog` を直接使う。S3c-2）
+     - `onLoadAssets` のスロットの順は変わらない。provider（`bootstrap_gui()`）→ Window の `ReloadGames`（`Window.__init__`）→ EVENT パネルのゲーム一覧（起動時に EVENT ページを建てたとき）→ アダプタ自身の `_RestoreSelectedGame`（アダプタの `UiMounted()` が、最初のスキャンの直前に connect）。provider がゲームを適用し直した後に、保存したゲームの復元が走るのも従来どおり。provider → `_RestoreSelectedGame` の順は、`tests/test_bootstrap_split.py` が実際の emit で確かめる
+  2. **`bootstrap_gui()` へ移した 7 つの生成は、互いの相対順を保ち、core の生成の後ろにまとめただけにした**
+     - core の生成（Actions 以降の GameAssetCatalog・StartGG・provider・TIS・CountryCatalog・Designer の移行）はどれも移した 7 つを参照しない。移した側は core の生成物だけを参照する
+     - `AutonaScoreboardManager`（`ResetScoreRoot`）は Designer の移行より後になったが、Designer の移行は state を書かない。Window より前（= `score.*` の最初のシードより前）であることは変わらない
+     - 段ごとの手順（生成・provider / PlayerDB / ホットキーの結線・`Initialize()`・Designer の移行）と、その順を `tests/test_bootstrap_split.py` が AST で pin する
+  3. **Web サーバーは `socketio.run()` を呼ばず、werkzeug のサーバーを自分で作る**
+     - `socketio.run()` は戻らず、止める手段が無い。旧実装は終了時に `QThread.terminate()`（Windows の `TerminateThread`）で accept ループのスレッドを殺していた。要求の処理は werkzeug の daemon の要求スレッドで動いていたので、殺されていたのは要求ではなく accept ループ
+     - 危険は、そのスレッドが GIL や CRT / インタプリタ内部のロックを持った瞬間に止めると、プロセスが終了処理で固まりうること（通常は `select()` の待ちで GIL を放しているので、まれ）。`shutdown()` で止めるので、この危険は無くなった。S3b の残置に書いた `_cond` / `_export_cond` の経路は実在しなかった（S3b 節を訂正した）
+     - 中身は `socketio.run()`（threading モード）が組むものと同じ。Socket.IO のミドルウェアは `app.wsgi_app` に巻かれており、WebSocket は simple-websocket がこのサーバー上で upgrade する
+  4. **起動失敗の通知はコールバックにし、GUI スレッドへの受け渡しはシェルが行う**。Web サーバーを Qt に依存させないため（ヘッドレスはログに出すだけ）
+  5. **daemon スレッドにした**。止め忘れ（クラッシュ・テスト）でプロセスが残らないように。正常終了ではどちらのシェルも `stop()` を呼ぶ
+- **外部から見える変化**
+  - 無い（GUI の起動順序・画面・Web の契約は変わらない）
+  - 例外として、**bind に失敗したとき、「Web サーバーを起動できません」のダイアログが出るようになる**。旧実装では werkzeug の `sys.exit(1)`（SystemExit）が `except Exception` を素通りし、ダイアログは出ず Web サーバーだけが黙って止まっていた（`check_webserver_port` の事前確認はそのまま）
+  - ポートを他のプロセスが握っているときは、`check_webserver_port` の衝突警告に続けて、bind が失敗すれば起動失敗のダイアログも出る（2 つ続けて出うる。Windows では SO_REUSEADDR で bind が通ることが多く、その場合は警告だけ）
+  - 終了時の Web サーバーの停止が、強制終了から通常の停止になった（10 秒の猶予は同じ。通常は 0.5 秒以内）
+- **pin**
+  - `tests/test_bootstrap_split.py`（新規・6 件）
+    - 段ごとの全手順とその順（AST）。生成に加えて、provider の結線（`selectGameFromStartGGId` と `onLoadAssets` → `SetGameFromProvider`）・PlayerDB の結線・`ConnectActions` が `bootstrap_gui()` のどこにあるか、`StartGGDataProvider.Initialize()` と Designer の移行が `bootstrap_core()` のどこにあるか。`bootstrap_gui()` の最初の手順が `bootstrap_core()`
+    - 別プロセス・tmp CWD で、QCoreApplication の上で `bootstrap_core()` が通る。デスクトップのシングルトンを作らない。provider にゲームの選択関数が登録されていない。`in_gui_thread()` がメインで True・ワーカーで False
+    - QApplication の上で `bootstrap_gui()` が前回の `score` を落とす。2 回呼んでも同じ。Hotkeys の `ConnectActions` 済み。登録されるのはアダプタの `SetGameFromStartGGId`
+    - `onLoadAssets` のスロット順: アダプタの `UiMounted()` で実際に connect させてから emit し、provider（ゲームを登録された関数へ渡す）が `_RestoreSelectedGame` より先に走る
+    - Web サーバーのスレッド: 空きポートで `/api/v1/health` が 200。`stop()` が 5 秒以内に True を返し、ポートが閉じる。`stop()` 後の `start()` は何もしない。bind できないアドレス（192.0.2.1）でコールバックが 1 回呼ばれる。サーバーのスレッドが残らない
+  - `tests/test_gui_executor.py`: QApplication の上で `in_gui_thread()` がメインで True・ワーカーで False
+- **残置 / リスク**
+  - **ヘッドレス起動そのものは S3c-2**（`main.py --headless`、`src/headless.py`、`WebServerActions` の縮小と 503、PlayerDB の `SetupModel` と `LoadLocale` の QTranslator を QtGui なしで避けること、Socket.IO 経由のスモークテスト）
+  - `check_webserver_port`（QMessageBox）と LAN 公開の初回確認は Window のまま。ヘッドレスでは設定値で決めてログに出す（S3c-2）
+  - **S3c-2 の前提として片付けるもの**
+    - `StartGGDataProvider` が entrants の取得の最後（2065 行目付近）で `AutonaPlayerDB.SetupModel()` を呼ぶ。QStandardItemModel / QIcon を作るので、ヘッドレスで大会を読み込むと QtGui が無くて落ちる
+    - `WebServer.__init__` が `WebServerActions(scoreboard=AutonaScoreboardManager.instance)` を渡している。ヘッドレスでは None
+    - `selectGameFromStartGGId` が未登録だと、大会のゲームは適用されない。黙って無視されないよう、ログを warning にした（S3c-1。ヘッドレスは S3c-2 で GameAssetCatalog を使う関数を登録する）
+  - 停止時に処理中の接続（WebSocket を含む）は待たない。旧実装も待っていなかった
+  - pytest 全量は回していない（全量は別担当）
+- **実機確認（オーナー）**
+  - 起動して、OBS のオーバーレイ（http）・`/web`・API 設定の API Tester が今までどおり動く
+  - 閉じると、プロセスが残らずにすぐ終わる（タスクマネージャーで `python` / `Autona` が消える）。閉じる直前に変えた値が次の起動で戻る
+  - 大会 URL を設定するとゲームが自動で切り替わる（provider → アダプタの結線）。ゲームを追加して再スキャンした後も、大会のゲームが選ばれたまま
+  - ホットキー（スコア +/-、反映）が今までどおり効く
+  - 他のプロセスが使っているポートを設定したときの警告ダイアログ（ポート衝突）が今までどおり出る

@@ -69,3 +69,16 @@ def test_run_sync_from_gui_thread_runs_inline(qapp):
     # AutoConnection on the GUI thread is a direct call — no event loop
     # pumping needed, and no deadlock.
     assert helper.gui_executor.run_sync(lambda: 42) == 42
+
+
+def test_in_gui_thread_answers_for_the_application_thread(qapp):
+    # The desktop case (a QApplication). The headless one, a bare
+    # QCoreApplication, needs its own process: tests/test_bootstrap_split.py.
+    seen = {}
+    thread = threading.Thread(
+        target=lambda: seen.update(worker=helper.in_gui_thread()))
+    thread.start()
+    thread.join(5.0)
+
+    assert helper.in_gui_thread() is True
+    assert seen == {"worker": False}

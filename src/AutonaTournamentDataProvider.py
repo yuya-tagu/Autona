@@ -5,7 +5,6 @@ from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from .core.SettingsManager import SettingsManager
 from .core.StateManager import StateManager
-from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaPlayerDB import AutonaPlayerDB
 from .TournamentDataProvider.TournamentDataProvider import TournamentDataProvider
 from .TournamentDataProvider.StartGGDataProvider import StartGGDataProvider
@@ -43,8 +42,12 @@ class AutonaTournamentDataProvider(QObject):
         self.signals.game_changed.connect(self.GameChanged)
         self.signals.tournament_url_update.connect(self.SetTournamentSignal)
 
-        AutonaGameAssetManager.instance.signals.onLoadAssets.connect(
-            self.SetGameFromProvider)
+        # How a start.gg videogame id becomes the loaded game. Registered by
+        # the shell (bootstrap_gui() points it at the game asset adapter,
+        # which also re-applies the provider's game after every scan); the
+        # provider no longer knows the adapter, so it can be built without
+        # one (ADR-005 S3c).
+        self.selectGameFromStartGGId = None
 
         self.setLoadingWorker = None
 
@@ -60,8 +63,15 @@ class AutonaTournamentDataProvider(QObject):
             return
 
         if "start.gg" in self.provider.url:
-            AutonaGameAssetManager.instance.SetGameFromStartGGId(
-                self.provider.videogame)
+            if self.selectGameFromStartGGId is None:
+                # A shell that loads tournaments must register one; silence
+                # here would mean "the tournament's game never loads" with
+                # nothing in the log.
+                logger.warning(
+                    "no game selector registered; provider game "
+                    f"{self.provider.videogame} not applied")
+                return
+            self.selectGameFromStartGGId(self.provider.videogame)
         else:
             logger.error("Unsupported provider...")
 
@@ -99,7 +109,9 @@ class AutonaTournamentDataProvider(QObject):
             AutonaTournamentDataProvider.instance.signals.tournament_phases_updated.emit([
             ])
             AutonaTournamentDataProvider.instance.signals.tournament_changed.emit()
-            AutonaGameAssetManager.instance.LoadGameAssets(0)
+            # (No game change: a cleared URL keeps whatever game is loaded.
+            # The old LoadGameAssets(0) here had been a no-op since the
+            # PdM decision of 2026-10-23, see GameAssetCatalog.SelectGame.)
 
     def SetTournamentSignal(self, url, initialLoading=False):
         if self.provider and self.provider.url == url:

@@ -161,8 +161,8 @@ autona_splash.log_startup_phase("gate")
 
 # ── Stage 1: early feedback ──────────────────────────────────────────────
 # QApplication and the splash are built HERE, before `from src import Autona`:
-# that import chain assembles the whole app (bootstrap_core() constructs every
-# singleton) and takes tens of seconds, and until this change nothing at all
+# that import chain assembles the whole app (bootstrap_core() and
+# bootstrap_gui() construct every singleton) and takes tens of seconds, and until this change nothing at all
 # was drawn while it ran — the dead window after a double click is what drove
 # users to click again (and start a second process).
 from PySide6.QtCore import Qt

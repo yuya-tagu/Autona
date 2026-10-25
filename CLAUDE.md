@@ -60,7 +60,7 @@ cp dist/Autona/Autona.exe ./Autona.exe
 
 読み始める場所:
 
-- `src/bootstrap.py` — composition root。**シングルトン生成順の正本**（`bootstrap_core()`）
+- `src/bootstrap.py` — composition root。**シングルトン生成順の正本**（全シェル共通の `bootstrap_core()` ＋ デスクトップの Qt アダプタを足す `bootstrap_gui()`）
 - `src/Autona.py` — QMainWindow。サイドバー + `QStackedWidget` で全パネル管理。**この import 自体が起動シーケンス**なので、テストや調査スクリプトから import しない
 - `src/core/StateManager.py` — グローバル状態（nested dict）。deepdiff でデルタ算出、ファイル出力 + WebSocket 配信。**core は Qt を import しない**（`tests/test_core_qt_free.py` が pin）。Qt シグナルはアダプタ `src/StateManagerBridge.py` が提供する。
 
