@@ -2237,7 +2237,7 @@ Start.gg からの Top 8 の取り込みを、Top 8 パネルから core の `To
     - legacy / Socket.IO の `load_player_from_tag` → DB の選手が入る
   - 悪語フィルタ ON: 不適切語を含む選手を読み込む → 表示は伏せ字になる。別の選手を保存した後も、`local_players.json` のその選手の元の名前が変わっていない
 
-#### S3e-4 選手系 Web 操作の移設（2026-10-26・PR 未作成）
+#### S3e-4 選手系 Web 操作の移設（2026-10-26・PR #237）
 
 Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket.IO `update_team`）とタグからの選手の読込（legacy `load-player-from-tag`・Socket.IO `load_player_from_tag`）を、`WebServerActions` から `AutonaWebOperations` + `boardHost` へ移した。どちらのシェルでも core の `PlayerService.ApplyData` を呼び、ヘッドレスでも state にある選手欄に対して動く（それまでは 503）。スロットの範囲とスワップは state で判断する。デスクトップの応答の本文・ack・v1 の形・`program_state.json` のキー順は変えていない。あわせて、S3e-3 で報告した配信事故の不具合（Web UI で選手名を書き換えても、前の選手の id・city・統計が残る）を、オーナーの規則で直した（判断 1）。`DesktopBoardHost.Run` は GUI スレッドでの実行を維持した（判断 2）。レビューで、ヘッドレスの `savePlayerToDb` がボードホストのロックを持ったままメインスレッドを待っていたのを直し、ロックの外へ出した DB への保存に順番の番号を付けた（判断 6）。途中の例外で前の選手の id が残る穴も塞いだ（判断 7）。別の選手で online_avatar と seed も空にする案は、2 回目のレビューで取り消した（判断 1。オーナー判断待ちに記録）。
 
