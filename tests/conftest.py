@@ -60,8 +60,13 @@ def _freshStatistics():
     delivered -- would swallow the next one's on that board. The fetcher
     bootstrap registered stays. The numbers come from one counter, so an
     answer still in flight from an earlier test never passes for a new
-    request's."""
-    from src.core.StatsService import StatsService  # no side effects
+    request's. A run that never imported the service (the Web UI job's
+    contract tests, without the app's requirements) has nothing to reset."""
+    module = sys.modules.get("src.core.StatsService")
+    if module is None:
+        yield
+        return
+    StatsService = module.StatsService
 
     def reset():
         with StatsService._queueLock:
