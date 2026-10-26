@@ -1941,7 +1941,7 @@ S3 の最後。ヘッドレスの実プロセスに対して、Python のスモ�
   - ヘッドレス（`python main.py --headless`）
     - 上のクルーの Web 操作と `/update-commentary-<N>` が 503 にならず、オーバーレイが変わる
 
-#### S3e-8 Top 8 取り込みの core 化（2026-10-26・PR 未作成）
+#### S3e-8 Top 8 取り込みの core 化（2026-10-26・PR #235）
 
 Start.gg からの Top 8 の取り込みを、Top 8 パネルから core の `Top8Service` へ移した。パネルのボタン・ホットキー（`refresh_phase_group`）・legacy `/update-bracket`・Socket.IO `update_bracket`・v1 `bracket:refresh` が同じ関数を呼び、パネルを構築せず、ヘッドレスでも動く。パネルは state を描画するだけになった（S3e-2 の実況パネルと同じ型）。外部契約の形（legacy の本文 `"OK"`・Socket.IO の ack・v1 の 202 / 409 のエンベロープとエラーコード・`program_state.json` のキー順・Socket.IO の delta の形）は変えていない。変わったのは応答が出る条件（409 `CONFLICT` が出る期間など）と、ゲームの切り替えで Top 8 のキャラが空になること（下の「外から見える変化」）。移す前の木（cff44408）でパネルのボタン経由の取り込みを録り（Start.gg はモック）、core 版と照合している。
 
