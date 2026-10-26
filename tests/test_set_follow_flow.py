@@ -32,7 +32,8 @@ Record (on the pre-S3e-7 tree only):
 Determinism: the provider's thread pool runs one job at a time while a
 scenario runs, so the jobs answer in the order they were started; the
 5-second timer is pushed an hour away after every step and ticked by the
-test (its `timeout`), never by the clock.
+test (its `timeout`), never by the clock. Every scenario runs under the
+locale the recording ran under, not the machine's (`recordedLocale`).
 
 Not recorded here, because they change on purpose (each has its own test
 on the current tree, tests/test_set_follow.py): `pull_stream` (it did
@@ -358,6 +359,51 @@ def _check(name, recorded):
 
 
 # ── fixtures ─────────────────────────────────────────────────────────────
+
+# The locale the golden was recorded under: the recording machine's first
+# UI language, which LoadLocale() falls back to when the settings name none.
+RECORDED_LOCALE = "ja-Jpan-JP"
+LOCALE_SETTINGS = ("program_language", "game_asset_language",
+                   "fg_term_language")
+
+
+@pytest.fixture(autouse=True)
+def recordedLocale(autonaApp):
+    """Every scenario under the recording's locale, whatever the machine's.
+
+    The harness loads the locale as the app does -- with no language in the
+    settings, the OS's UI language -- and two things recorded here follow
+    it: the follow row's label is translated ("自動更新" / "Auto update")
+    and a loaded player's country carries its names in the program and
+    export locales ("日本" / "Japan"). The golden was recorded on a Japanese
+    Windows; an English runner replayed every step with the other label and
+    every load with the other names. Pinned the way the harness loads it at
+    start-up (LoadLocale, LoadRoundNames), with the countries reloaded under
+    it (the first card built loads them under whatever locale is current);
+    afterwards all three are loaded again under the harness's own settings.
+    No board is built on either side: autonaApp drops them after every
+    test, and `provider` drops them before this is undone.
+    """
+    from src.core.SettingsManager import SettingsManager
+    from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
+    from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+
+    def load():
+        AutonaLocaleHelper.LoadLocale()
+        AutonaLocaleHelper.LoadRoundNames()
+        AutonaCountryHelper.LoadCountries()
+        autonaApp.settle()
+
+    realGet = SettingsManager.Get
+    with patch.object(SettingsManager, "Get", lambda key, default=None: (
+            RECORDED_LOCALE if key in LOCALE_SETTINGS
+            else realGet(key, default))):
+        load()
+    try:
+        yield
+    finally:
+        load()
+
 
 @pytest.fixture
 def settings(monkeypatch):

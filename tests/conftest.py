@@ -61,8 +61,13 @@ def _freshStatistics():
     delivered -- would swallow the next one's on that board. The fetcher
     bootstrap registered stays. The numbers come from one counter, so an
     answer still in flight from an earlier test never passes for a new
-    request's."""
-    from src.core.StatsService import StatsService  # no side effects
+    request's. A run that never imported the service (the Web UI job's
+    contract tests, without the app's requirements) has nothing to reset."""
+    module = sys.modules.get("src.core.StatsService")
+    if module is None:
+        yield
+        return
+    StatsService = module.StatsService
 
     def reset():
         with StatsService._queueLock:
@@ -80,8 +85,13 @@ def _freshSetFollow():
     board: what the set follow keeps (SetFollowService, ADR-005 S3e-7) and
     the set each board loaded last (SetLoadService) are process-wide, and
     were a built board's own until then. A poll timer left running by one
-    test is stopped. The fetcher bootstrap registered stays."""
-    from src.core.SetFollowService import SetFollowService  # no side effects
+    test is stopped. The fetcher bootstrap registered stays. A run that never
+    imported the service has nothing to forget."""
+    module = sys.modules.get("src.core.SetFollowService")
+    if module is None:
+        yield
+        return
+    SetFollowService = module.SetFollowService
 
     SetFollowService.ForgetBoard()
     yield
