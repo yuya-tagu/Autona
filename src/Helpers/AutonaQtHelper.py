@@ -132,3 +132,76 @@ class NoIconProxyModel(QSortFilterProxyModel):
             return None
         return super().data(index, role)
 
+
+class HeldBackText:
+    """Which finished edits of a text field are the operator's, for a widget
+    that renders its fields from the state (ADR-005 S2a, S3e-2).
+
+    A render never redraws a field the operator is in. What it leaves there
+    is *held back* -- finishing the field with it (a focus-out, Enter,
+    typing that ends where it started) writes nothing, and the field shows
+    the state once it is left -- in two cases:
+
+    - it is the text the field last showed in step with the state (rendered,
+      or the field's own edit as written), and the state has moved on from
+      it: writing it would put the old value back over the new one.
+    - the operator was typing it when the field's own value was written
+      elsewhere (the Web, a set load). That write wins over the typing in
+      progress (ADR-005 S2d). Only the first render to see that write holds
+      the typing back; what the operator types after it is theirs.
+
+    Anything else the operator typed is their edit, written when they finish
+    it, however many renders ran meanwhile -- a render that left the field's
+    own value where it was (a point scored, another field written) changes
+    nothing about it. Until S3e-2 the player cards and the team names held
+    any typing back, so such a render lost what the operator had typed.
+
+    Not `isModified()`: typing that ends where it started is a keystroke,
+    and would write the old value back (S2a).
+
+    One rule for the player cards, the boards' team names, the crew board
+    and the commentary panel. Keyed by whatever names a field to its owner
+    (the widget, the field's state key, the team); a field never shown is
+    taken to have shown nothing.
+    """
+
+    def __init__(self):
+        self._shown = {}
+        self._heldBack = {}
+        # The field's state value as the last render that left it alone saw
+        # it: a write of the field is "seen" once.
+        self._seenState = {}
+
+    def Shown(self, key, text):
+        """The field shows `text` in step with the state: a render set it or
+        found it there, or the field's own edit of it was written."""
+        self._heldBack.pop(key, None)
+        self._seenState.pop(key, None)
+        self._shown[key] = text
+
+    def LeftAlone(self, key, text, stateText):
+        """A render left `text` in the field because the operator was in it;
+        the state holds `stateText` for it."""
+        shown = self._shown.get(key, "")
+        if text == shown:
+            self._heldBack[key] = text
+        elif stateText != shown and stateText != self._seenState.get(key):
+            self._heldBack[key] = text
+        self._seenState[key] = stateText
+
+    def IsHeldBack(self, key, text) -> bool:
+        """`text` is what a render left in the field over a newer value."""
+        return key in self._heldBack and self._heldBack[key] == text
+
+    def IsEdit(self, key, text, stateHolds) -> bool:
+        """Whether finishing the field with `text` is the operator's edit, to
+        be written now (True records it as shown). `stateHolds`: the state
+        already holds `text` -- nothing to write either."""
+        if stateHolds:
+            self.Shown(key, text)
+            return False
+        if self.IsHeldBack(key, text):
+            return False
+        self.Shown(key, text)
+        return True
+

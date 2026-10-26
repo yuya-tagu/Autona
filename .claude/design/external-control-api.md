@@ -107,7 +107,7 @@
 | `CONFLICT` | 409 | 重い操作が実行中（多重起動ガード・§2.8） |
 | `NOT_READY` | 409 | 前提未充足（大会/試合未ロードで provider 不在 等・§3） |
 | `UPSTREAM_TIMEOUT` | 504 | Start.gg 等の外部依存がタイムアウト（agent-pitfalls #11） |
-| `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、ボード / パネルのウィジェットが要る操作（選手の編集・`:load-set`・`:pull-stream`・`stats:refresh`・`bracket:refresh`・`PATCH set` の `players` / `characters` 等）。message は `not available in headless`。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。legacy / Socket.IO ではクルーボード（board 3）の操作もこれになるが、v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
+| `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、ボード / パネルのウィジェットが要る操作（選手の編集・`:load-set`・`:pull-stream`・`stats:refresh`・`bracket:refresh`・`PATCH set` の `players` / `characters` 等）。message は `not available in headless`。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
 | `INTERNAL` | 500 | 想定外の内部例外 |
 
 ### 2.7 操作ログ（D7・A-1）
@@ -196,7 +196,7 @@
 |---------------|------------|--------------|-----------|
 | `GET /api/v1/state` | 全状態（フル） | `program_state` | #1 |
 | `GET /api/v1/health` | §5.1 参照（新規） | 新規 | — |
-| `GET /api/v1/scoreboards/{n}` | スコアボード n の状態（`swapped` 含む。`swapped` はボード 1/2 では `score.{n}.teamsSwapped` のライブ値（反映前でも入替を返す。ADR-005 S2c〜）、ボード 3 はクルーウィジェットのフラグ。ヘッドレス起動ではクルーウィジェットが無いので、ボード 3 は `swapped` を返さない（キーなし。ADR-005 S3c）） | `get_scoreboard`(+`get_swap`) | #9/#22 |
+| `GET /api/v1/scoreboards/{n}` | スコアボード n の状態（`swapped` 含む。`swapped` はボード 1/2 では `score.{n}.teamsSwapped` のライブ値（反映前でも入替を返す。ADR-005 S2c〜）、ボード 3 は `CrewBattleService` が持つフラグ（state には無い）。ADR-005 S3e-2 からヘッドレス起動でもボード 3 の `swapped` を返す（S3c〜S3e-1 のヘッドレスでは、クルーウィジェットが無いのでキーなしだった）） | `get_scoreboard`(+`get_swap`) | #9/#22 |
 | `GET /api/v1/games` | ゲーム一覧 | `get_games` | #15 |
 | `GET /api/v1/games/current` | 現在ゲーム | `get_current_game` | #16 |
 | `GET /api/v1/match-names` | match/phase 名候補 | `get_match_names` | #17 |
@@ -298,8 +298,8 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
   入力中の欄があれば先に確定する（フォーカスを外して Qt に確定させる。打ちかけの文字はその選手と一緒に動く。旧実装と同じ）。
 - 未構築のボードは従来どおり構築してから入れ替える（未構築ボードは held 登録されていないので、構築前に入れ替えると
   即時公開されたうえ、構築時のシードで消える）。held 対象（反映待ち）。
-- 旧ルート `/scoreboard{n}-swap-teams` / Socket.IO `swap_teams` も同じ Action。ボード 3 は旧ルートではクルーウィジェット自身の
-  入替に委譲（v1 は `require_board_12` で拒否）。
+- 旧ルート `/scoreboard{n}-swap-teams` / Socket.IO `swap_teams` も同じ Action。ボード 3 は旧ルートでは `CrewBattleService.SwapTeams`
+  （ADR-005 S3e-2。それまではクルーウィジェット自身の入替。v1 は `require_board_12` で拒否）。
 
 ### 6.4 チームカラー `POST /api/v1/scoreboards/{n}/teams/{t}/color`
 - body: `{ "color": "#FF0000" }`（`#` 付き hex）
@@ -570,7 +570,7 @@ HTTP/1.1 409 Conflict
    （agent-pitfalls #11）。→ 全て try/except で `UPSTREAM_TIMEOUT` に変換し、**読み取りでもタイムアウトしうる**旨を
    クライアントに通知。将来はキャッシュ/非同期化を検討（§12）。
 4. **エラー文字列を返す Action**（`set_game`=`"Could not find game X"`、`load_player_from_tag`=`"ERROR"`、
-   `load_commentator_from_tag`=`"ERROR : ..."`）。初回スコープでは `set_game` のみ該当 → ラッパで判定し `NOT_FOUND` に。
+   `load_commentator_from_tag`=`"ERROR : ..."`、DB に無いタグは `"ERROR"`。成功時は ADR-005 S3e-2 から `"OK"`（それまでは None）・範囲は 1..12）。初回スコープでは `set_game` のみ該当 → ラッパで判定し `NOT_FOUND` に。
 5. **`update_bracket` は堅牢性が低い**（複数の未ガード添字/属性アクセス）。202 化に加え、受付前の `NOT_READY` 判定と
    全体 try/except を本 API 層で被せる。
 

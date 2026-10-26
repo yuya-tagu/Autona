@@ -23,7 +23,8 @@ field writes (`SetMatchField` / `SetTeamName` / `SetTeamLosers` /
 operations below (`ClearTeamRoster` / `TrimTeamRoster`) alongside the player
 subtree's own writer, `core/PlayerService.py`. The final instalment added the
 operations of the panels that are not a scoreboard at all -- `SetLayoutOption`,
-`SetStreamUrl` / `SetStreamTitle`, `PublishCommentary` /
+`SetStreamUrl` / `SetStreamTitle`, `PublishCommentary` (moved to
+core/CommentaryService.py by ADR-005 S3e-2) /
 `PublishResultPlayers` -- which is what took the last `StateManager.Set` out
 of a Qt widget (the ledger of what remains is in
 docs/changes/headless-core-redesign.md). ADR-005 S2c then moved the swap
@@ -1132,20 +1133,18 @@ class AutonaActions:
         return self._SetIfChanged(
             f"{schema.STREAM_ROOT}.{schema.STREAM_TITLE_KEY}", title or "")
 
-    # ── whole-subtree publishes (commentary / result rosters) ─────────────
+    # ── whole-subtree publishes (result rosters) ──────────────────────────
     #
-    # Both panels hold their data in Qt inputs and republish the whole subtree
-    # on every edit, which is the shape of the operation rather than an
-    # accident: an overlay reads one dict of slots, and a partial write would
-    # leave it rendering a mix of two edits. What moved here is the key and
-    # the fact that the write happens at all; assembling the dict stays with
-    # the panel, because the values come out of combos whose rows are Qt
+    # The RESULT panel holds its data in Qt inputs and republishes the whole
+    # subtree on every edit, which is the shape of the operation rather than
+    # an accident: an overlay reads one dict of slots, and a partial write
+    # would leave it rendering a mix of two edits. What moved here is the key
+    # and the fact that the write happens at all; assembling the dict stays
+    # with the panel, because the values come out of combos whose rows are Qt
     # models (the line the player card drew too, until ADR-005 S1d moved its
-    # values into PlayerService; these two panels follow with S4).
-
-    def PublishCommentary(self, slots):
-        """Publish the caster line-up (`commentary.{slot}.*`)."""
-        StateManager.Set(schema.COMMENTARY_ROOT, slots)
+    # values into PlayerService; the panel follows with S4). The caster
+    # line-up had the same operation until ADR-005 S3e-2, when its writes
+    # moved to core/CommentaryService.py.
 
     def PublishResultPlayers(self, players):
         """Publish the RESULT panel's placement list (`result_players.*`).

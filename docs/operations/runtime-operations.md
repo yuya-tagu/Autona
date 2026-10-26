@@ -64,13 +64,15 @@ OBS のオーバーレイと `/web`（ブラウザ版）から操作する。**�
     bind できなければ `The web server could not start` を出して終了する（終了コード 1）
 - **反映ボタンが無いので、書き込みはすぐ公開される**（ボードを作らないため held にならない）
 - 動く操作: スコア・反映・チームカラー・表示トグル・Swap・各種リセット / クリア（選手の中身を空にする）・
-  best of・match バー（phase / pool / round）・チーム名・LOSERS・大会情報・大会 URL・ゲームの切り替え。
+  best of・match バー（phase / pool / round）・チーム名・LOSERS・大会情報・大会 URL・ゲームの切り替え・
+  実況の更新とタグからの実況者の読込（`update-commentary-<N>`・`load-commentator-from-tag-<N>`）・
+  クルーボード（board 3）の操作（ストック・出場中のメンバー・人数・Swap・リセット / クリア。legacy / Socket.IO。
+  v1 のボード 3 への書き込みは起動形態によらず 400 `INVALID_ARGUMENT`）。
   オーバーレイ・`/web`・`out/` の出力・Socket.IO の配信は今までどおり
 - **ボードやパネルの画面が要る操作は 503 `UNAVAILABLE`（`not available in headless`）を返す**:
   選手の編集（`PATCH .../players/...`・`update-team`）・legacy の `POST /score`・セット読込 / 次のセット・統計・
-  サムネイル・Top 8 の取り込み・実況の更新・タグからの選手 / 実況者の読込（`load-player-from-tag`・
-  `load-commentator-from-tag`）・クルーボード（board 3）の操作（legacy / Socket.IO。v1 は起動形態によらず
-  400 `INVALID_ARGUMENT`）・選手数 / キャラ数の変更
+  サムネイル・Top 8 の取り込み・タグからの選手の読込（`load-player-from-tag`）・
+  ボード 1 / 2 の選手数 / キャラ数の変更
 - 停止: **Ctrl+C / Ctrl+Break / コンソールの閉じるボタン**。`out/` と `user_data/state.json` を書き終えてから終了する。
   タスクマネージャーでの強制終了は書き出しを待たない（直前 1〜5 秒の変更が `state.json` に残らないことがある）
 - デスクトップ版とヘッドレス版は**同時に起動できない**（ポートと書き込み先が同じため）。

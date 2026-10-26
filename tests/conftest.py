@@ -156,6 +156,16 @@ class _AutonaHarness:
     def _dropBoard(self, number):
         from qtpy.QtCore import QCoreApplication, QEvent
 
+        from src.core.CrewBattleService import CrewBattleService
+
+        # The crew board's swap flag is core's, kept outside the state (see
+        # CrewBattleService._swapped), so the Unset below does not take it.
+        # In the app only the board's launch write clears it (SeedBoardState),
+        # and a test that swaps board 3 without building it (the headless
+        # board host) builds nothing that would: drop it here, built board or
+        # not, so the next test does not start swapped.
+        CrewBattleService._swapped.pop(number, None)
+
         manager = self.manager
         board = manager.scoreboards.pop(number, None)
         if board is None:

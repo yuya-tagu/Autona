@@ -744,18 +744,16 @@ def test_reset_match_clears_score_and_best_of(autonaApp, boardNumber):
 
 
 def test_reset_match_restores_full_stocks_on_the_crew_board(autonaApp):
-    # Board 3 has no best-of UI; it carries a hidden spinbox purely so the
-    # generic actions can poke it without an AttributeError. Reaching it at
-    # all used to be the whole point of this test, but "did not raise" would
-    # also pass on a reset_match that did nothing: for crew, ClearScore ->
-    # ResetScore means every member back to full stocks and nobody active.
+    # "Did not raise" would also pass on a reset_match that did nothing: for
+    # crew, the reset means every member back to full stocks and nobody
+    # active (CrewBattleService.ResetStocks since ADR-005 S3e-2).
     from src.AutonaCrewBattleWidget import DEFAULT_STOCK
 
     board = autonaApp.board(3)
 
-    board.CommandMemberStock(0, 1, -2)
-    board.CommandMemberStock(1, 2, -1)
-    board.SetActiveMember(0, 1)
+    board.crew.AdjustMemberStock(1, 1, -2)
+    board.crew.AdjustMemberStock(2, 2, -1)
+    board.crew.SelectActiveMember(1, 1)
     autonaApp.settle()
     assert autonaApp.get("score.3.team.1.player.1.stock") == DEFAULT_STOCK - 2
     assert autonaApp.get("score.3.team.2.player.2.stock") == DEFAULT_STOCK - 1
@@ -784,8 +782,6 @@ def test_change_set_data_publishes_best_of_on_the_crew_board(autonaApp):
     autonaApp.settle()
 
     assert autonaApp.get("score.3.best_of") == 5
-    # The hidden compat spinbox is the source of truth, like boards 1/2.
-    assert board._bestOfSpin.value() == 5
 
 
 def test_crew_board_seeds_best_of_at_construction(autonaApp):
@@ -809,7 +805,6 @@ def test_reset_match_clears_best_of_on_the_crew_board(autonaApp):
     autonaApp.settle()
 
     assert autonaApp.get("score.3.best_of") == 0
-    assert board._bestOfSpin.value() == 0
 
 
 def test_clear_all_clears_best_of_on_the_crew_board(autonaApp):

@@ -10,6 +10,7 @@ from .Helpers.AutonaDirHelper import AutonaResolve
 from .Helpers.AutonaVersionHelper import add_beta_label
 from .Helpers.AutonaNetworkHelper import GetWebServerHost
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+from .Helpers.AutonaQtHelper import HeldBackText
 
 from . import ui_constants as UI
 from . import ui_layout as L
@@ -127,13 +128,15 @@ class AutonaScoreboardWidget(QWidget):
         # Teams whose statistics a swap / move asked to refetch, emitted
         # once control is back in the event loop (_EmitPlayerStats).
         self._pendingStatsTeams = set()
-        # {team: text}: what a team-name field showed when _SyncSetFields
-        # had to leave it alone because the operator was in it. Finishing
-        # the edit with that very text is not an edit (_OnTeamNameFinished),
-        # and once the focus has left the field it is rendered from the
-        # state (_OnTeamNameFocusChanged) -- the player cards' rule
-        # (AutonaScoreboardPlayerWidget._heldBackText).
-        self._heldBackTeamName = {}
+        # The teams whose name field _SyncSetFields had to leave alone
+        # because the operator was in it: rendered from the state once the
+        # focus has left it (_OnTeamNameFocusChanged). And, by team, what
+        # each field last showed in step with the state and the text a
+        # render held back in it: finishing the edit with that text is not
+        # an edit (_OnTeamNameFinished) -- the player cards' rule
+        # (HeldBackText; ADR-005 S3e-2 split the two, which were one dict).
+        self._teamNameSkipped = set()
+        self._teamNameHeldBack = HeldBackText()
         # The value _SyncBestOf left on the BEST OF spinbox because the
         # operator was in it (None when it left nothing): shown once they
         # leave it, and not written back over the newer one meanwhile
@@ -916,22 +919,24 @@ class AutonaScoreboardWidget(QWidget):
         connected in -- a set load writes the pair together through
         SetLoadService.ApplyTeamName.
 
-        Unless the text is the one a render had to leave in the field while
-        the operator was in it (_heldBackTeamName) and the state has moved
-        on since: the Web / API wrote a name underneath the edit, and
-        finishing it -- the focus-out, Enter -- would put the old text back
-        over it. Any other text is the operator's edit and is written. The
-        name and the crest are each written only when they change
-        (SetTeamName / PublishTeamLogo), so re-finishing the name the state
-        holds writes nothing.
+        Unless the text is held back -- a render had to leave it in the
+        field while the operator was in it (HeldBackText) -- and the state
+        has moved on since: the Web / API wrote a name underneath the edit,
+        and finishing it -- the focus-out, Enter -- would put the old text
+        back over it. Any other text is the operator's edit and is written,
+        renders or not (a point scored from the Web while they typed used to
+        hold the typing back, and lost it; ADR-005 S3e-2). The name and the
+        crest are each written only when they change (SetTeamName /
+        PublishTeamLogo), so re-finishing the name the state holds writes
+        nothing.
         """
         text = edit.text()
-        held = self._heldBackTeamName.get(team)
-        if held is not None and held == text and StateManager.Get(
+        if self._teamNameHeldBack.IsHeldBack(team, text) and StateManager.Get(
                 f"{self.statePrefix}.team.{team}.{schema.TEAM_NAME_KEY}",
                 None) != text:
             return
-        self._heldBackTeamName.pop(team, None)
+        self._teamNameSkipped.discard(team)
+        self._teamNameHeldBack.Shown(team, text)
         AutonaActions.instance.SetTeamName(self.scoreboardNumber, team, text)
         self.ExportTeamLogo(team, text)
 
@@ -940,9 +945,9 @@ class AutonaScoreboardWidget(QWidget):
         field a render had to skip, show the state in it. Deferred, so that
         nothing is redrawn inside the focus change (agent-pitfalls #9) and
         the field's own editingFinished has run first."""
-        if not self._heldBackTeamName:
+        if not self._teamNameSkipped:
             return
-        for team in self._heldBackTeamName:
+        for team in self._teamNameSkipped:
             column = self.team1column if team == 1 else self.team2column
             edit = column.findChild(QLineEdit, schema.TEAM_NAME_KEY)
             if edit is not None and edit.hasFocus():
@@ -1116,10 +1121,11 @@ class AutonaScoreboardWidget(QWidget):
         A field the operator currently has focus in is left alone: a
         notification arriving mid-edit must not yank the text out from under
         the caret. Same rule as _syncDisplayTournamentNameEdit. A team name
-        left alone is also remembered (_heldBackTeamName): finishing the
-        edit with that text does not write it back over the newer name, and
-        the field shows the state once the focus has left it -- as a player
-        card's fields do (ADR-005 S2d review).
+        left alone is shown once the focus has left it (_teamNameSkipped),
+        and its text is held back by the player cards' rule
+        (_teamNameHeldBack, HeldBackText; ADR-005 S2d review, S3e-2):
+        finishing the edit with it does not write it back over the newer
+        name.
         """
         for combo, key in ((self.matchCombo, schema.MATCH_KEY),
                            (self.phaseCombo, schema.PHASE_KEY),
@@ -1162,16 +1168,21 @@ class AutonaScoreboardWidget(QWidget):
             if not isinstance(name, str) or edit is None:
                 continue
             if edit.text() == name:
-                self._heldBackTeamName.pop(team, None)
+                self._teamNameSkipped.discard(team)
+                self._teamNameHeldBack.Shown(team, name)
             elif edit.hasFocus():
-                # Left alone, and remembered: finishing the edit with this
-                # text must not write it back over the newer name
-                # (_OnTeamNameFinished).
-                self._heldBackTeamName[team] = edit.text()
+                # Left alone, to be shown once the focus has left it; what
+                # it holds is held back (finishing it must not write it over
+                # the newer name, _OnTeamNameFinished) only as HeldBackText
+                # says -- typing that no write of the name met is the
+                # operator's.
+                self._teamNameSkipped.add(team)
+                self._teamNameHeldBack.LeftAlone(team, edit.text(), name)
             else:
-                self._heldBackTeamName.pop(team, None)
+                self._teamNameSkipped.discard(team)
                 with QSignalBlocker(edit):
                     edit.setText(name)
+                self._teamNameHeldBack.Shown(team, name)
 
     def _SyncBestOf(self):
         """Render the set length: the BEST OF spinbox and the game
@@ -1967,7 +1978,9 @@ class AutonaScoreboardWidget(QWidget):
         else:
             # The names are emptied here, not finished by the operator: a
             # text a render left in a field must not hold the clear back.
-            self._heldBackTeamName.clear()
+            self._teamNameSkipped.clear()
+            for team in (1, 2):
+                self._teamNameHeldBack.Shown(team, "")
             self.team1column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setVisible(False)
             self.team1column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setText("")
             self.team1column.findChild(

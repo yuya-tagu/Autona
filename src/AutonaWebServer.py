@@ -223,30 +223,30 @@ def _build_web_app():
     # Bump a crew member's remaining stock up/down by 1.
     @app.route('/scoreboard<scoreboardNumber>-crew-member<team>-<member>-stockup')
     def crew_member_stockup(scoreboardNumber, team, member):
-        return WebServer._board_actions().crew_member_stock(scoreboardNumber, team, member, 1)
+        return WebOps.crew_member_stock(scoreboardNumber, team, member, 1)
 
     @app.route('/scoreboard<scoreboardNumber>-crew-member<team>-<member>-stockdown')
     def crew_member_stockdown(scoreboardNumber, team, member):
-        return WebServer._board_actions().crew_member_stock(scoreboardNumber, team, member, -1)
+        return WebOps.crew_member_stock(scoreboardNumber, team, member, -1)
 
     @ws_on('crew_member_stock')
     def ws_crew_member_stock(message):
         info = orjson.loads(message)
         WebServer.ws_emit('crew_member_stock',
-             WebServer._board_actions().crew_member_stock(
+             WebOps.crew_member_stock(
                  info.get("scoreboardNumber", "3"), info.get("team"),
                  info.get("member"), info.get("change", 1)))
 
     # Set which crew member is currently in (0 = none).
     @app.route('/scoreboard<scoreboardNumber>-crew-active<team>-<member>')
     def crew_set_active(scoreboardNumber, team, member):
-        return WebServer._board_actions().crew_set_active(scoreboardNumber, team, member)
+        return WebOps.crew_set_active(scoreboardNumber, team, member)
 
     @ws_on('crew_set_active')
     def ws_crew_set_active(message):
         info = orjson.loads(message)
         WebServer.ws_emit('crew_set_active',
-             WebServer._board_actions().crew_set_active(
+             WebOps.crew_set_active(
                  info.get("scoreboardNumber", "3"), info.get("team"),
                  info.get("member")))
 
@@ -318,13 +318,13 @@ def _build_web_app():
     @app.post('/update-commentary-<caster>')
     def set_commentary_data(caster):
         data = request.get_json()
-        return WebServer._board_actions().set_commentary_data(caster, data)
+        return WebOps.set_commentary_data(caster, data)
 
     @ws_on('update_commentary')
     def ws_set_commentary_data(message):
         data = orjson.loads(message)
         WebServer.ws_emit('update_commentary',
-            WebServer._board_actions().set_commentary_data(
+            WebOps.set_commentary_data(
                 data.get("commentator"),
                 data
             ))
@@ -636,7 +636,7 @@ def _build_web_app():
         if request.args.get('tag') is None:
             return "No tag provided"
         no_mains = request.args.get('no-mains') is not None
-        return WebServer._board_actions().load_commentator_from_tag(caster, html.unescape(request.args.get('tag')), no_mains)
+        return WebOps.load_commentator_from_tag(caster, html.unescape(request.args.get('tag')), no_mains)
 
     @ws_on('load_commentator_from_tag')
     def ws_load_commentator_from_tag(message):
@@ -646,7 +646,7 @@ def _build_web_app():
             return
         no_mains = args.get('no-mains') is not None
         caster = args.get('commentator')
-        WebServer.ws_emit('load_commentator_from_tag', WebServer._board_actions().load_commentator_from_tag(caster, html.unescape(args.get('tag')), no_mains))
+        WebServer.ws_emit('load_commentator_from_tag', WebOps.load_commentator_from_tag(caster, html.unescape(args.get('tag')), no_mains))
 
     # Update bracket
     @app.route('/set-tournament')

@@ -1,0 +1,336 @@
+{
+ "baseline": "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}",
+ "scenarios": {
+  "full": {
+   "sets": [
+    [
+     "commentary",
+     "{\"1\":{\"name\":\"Ada\",\"team\":\"TeamA\",\"twitter\":\"ada\",\"role\":\"\",\"icon\":\"\",\"note\":\"note\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+    ]
+   ],
+   "deltas": [
+    "[{\"path\": [\"commentary\", \"1\", \"name\"], \"action\": \"values_changed\", \"value\": \"Ada\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"commentary\", \"1\", \"team\"], \"action\": \"values_changed\", \"value\": \"TeamA\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"commentary\", \"1\", \"twitter\"], \"action\": \"values_changed\", \"value\": \"ada\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"commentary\", \"1\", \"note\"], \"action\": \"values_changed\", \"value\": \"note\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+   ],
+   "bigChanges": 0,
+   "result": "OK",
+   "raises": null,
+   "censor": [
+    [
+     "Ada",
+     null
+    ],
+    [
+     "TeamA",
+     null
+    ],
+    [
+     "@ada",
+     null
+    ],
+    [
+     "note",
+     null
+    ]
+   ],
+   "commentary": "{\"1\":{\"name\":\"Ada\",\"team\":\"TeamA\",\"twitter\":\"ada\",\"role\":\"\",\"icon\":\"\",\"note\":\"note\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+  },
+  "partial keeps role icon display": {
+   "sets": [
+    [
+     "commentary",
+     "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"New\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+    ]
+   ],
+   "deltas": [
+    "[{\"path\": [\"commentary\", \"2\", \"name\"], \"action\": \"values_changed\", \"value\": \"New\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+   ],
+   "bigChanges": 0,
+   "result": "OK",
+   "raises": null,
+   "censor": [
+    [
+     "New",
+     null
+    ]
+   ],
+   "commentary": "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"New\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+  },
+  "strip and non-strings": {
+   "sets": [
+    [
+     "commentary",
+     "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Spaced\",\"team\":\"T\",\"twitter\":\"x\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+    ]
+   ],
+   "deltas": [
+    "[{\"path\": [\"commentary\", \"2\", \"name\"], \"action\": \"values_changed\", \"value\": \"Spaced\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"commentary\", \"2\", \"twitter\"], \"action\": \"values_changed\", \"value\": \"x\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+   ],
+   "bigChanges": 0,
+   "result": "OK",
+   "raises": null,
+   "censor": [
+    [
+     "  Spaced  ",
+     null
+    ],
+    [
+     " @@x ",
+     null
+    ]
+   ],
+   "commentary": "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Spaced\",\"team\":\"T\",\"twitter\":\"x\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+  },
+  "last slot, socket payload": {
+   "sets": [
+    [
+     "commentary",
+     "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Last\",\"team\":\"\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+    ]
+   ],
+   "deltas": [
+    "[{\"path\": [\"commentary\", \"12\", \"name\"], \"action\": \"values_changed\", \"value\": \"Last\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"commentary\", \"12\", \"team\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+   ],
+   "bigChanges": 0,
+   "result": "OK",
+   "raises": null,
+   "censor": [
+    [
+     "Last",
+     null
+    ],
+    [
+     "",
+     null
+    ]
+   ],
+   "commentary": "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Last\",\"team\":\"\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+  },
+  "censored": {
+   "sets": [
+    [
+     "commentary",
+     "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"*** word\",\"team\":\"ok\",\"twitter\":\"***\",\"role\":\"\",\"icon\":\"\",\"note\":\"***\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+    ]
+   ],
+   "deltas": [
+    "[{\"path\": [\"commentary\", \"3\", \"name\"], \"action\": \"values_changed\", \"value\": \"*** word\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"commentary\", \"3\", \"team\"], \"action\": \"values_changed\", \"value\": \"ok\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"commentary\", \"3\", \"twitter\"], \"action\": \"values_changed\", \"value\": \"***\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"commentary\", \"3\", \"note\"], \"action\": \"values_changed\", \"value\": \"***\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+   ],
+   "bigChanges": 0,
+   "result": "OK",
+   "raises": null,
+   "censor": [
+    [
+     "qbad word",
+     null
+    ],
+    [
+     "ok",
+     null
+    ],
+    [
+     "@qbad",
+     null
+    ],
+    [
+     "qbad",
+     null
+    ]
+   ],
+   "commentary": "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"*** word\",\"team\":\"ok\",\"twitter\":\"***\",\"role\":\"\",\"icon\":\"\",\"note\":\"***\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+  },
+  "unchanged": {
+   "sets": [
+    [
+     "commentary",
+     "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+    ]
+   ],
+   "deltas": [],
+   "bigChanges": 0,
+   "result": "OK",
+   "raises": null,
+   "censor": [
+    [
+     "Same",
+     null
+    ]
+   ],
+   "commentary": "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+  },
+  "empty data": {
+   "sets": [
+    [
+     "commentary",
+     "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+    ]
+   ],
+   "deltas": [],
+   "bigChanges": 0,
+   "result": "OK",
+   "raises": null,
+   "censor": [],
+   "commentary": "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+  },
+  "not a dict": {
+   "sets": [],
+   "deltas": [],
+   "bigChanges": 0,
+   "result": "OK",
+   "raises": null,
+   "censor": [],
+   "commentary": "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+  },
+  "above the slots": {
+   "sets": [],
+   "deltas": [],
+   "bigChanges": 0,
+   "result": "ERROR : index must be 1..12",
+   "raises": null,
+   "censor": [],
+   "commentary": "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+  },
+  "below the slots": {
+   "sets": [],
+   "deltas": [],
+   "bigChanges": 0,
+   "result": "ERROR : index must be 1..12",
+   "raises": null,
+   "censor": [],
+   "commentary": "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+  },
+  "not a number": {
+   "sets": [],
+   "deltas": [],
+   "bigChanges": 0,
+   "result": null,
+   "raises": "ValueError",
+   "censor": [],
+   "commentary": "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+  },
+  "load": {
+   "sets": [
+    [
+     "commentary",
+     "{\"1\":{\"name\":\"Ada\",\"team\":\"P\",\"twitter\":\"a\",\"role\":\"\",\"icon\":\"\",\"note\":\"c\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+    ]
+   ],
+   "deltas": [
+    "[{\"path\": [\"commentary\", \"1\", \"name\"], \"action\": \"values_changed\", \"value\": \"Ada\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"commentary\", \"1\", \"team\"], \"action\": \"values_changed\", \"value\": \"P\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"commentary\", \"1\", \"twitter\"], \"action\": \"values_changed\", \"value\": \"a\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"commentary\", \"1\", \"note\"], \"action\": \"values_changed\", \"value\": \"c\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+   ],
+   "bigChanges": 0,
+   "result": null,
+   "raises": null,
+   "censor": [
+    [
+     "Ada",
+     null
+    ],
+    [
+     "P",
+     null
+    ],
+    [
+     "@a",
+     null
+    ],
+    [
+     "c",
+     null
+    ]
+   ],
+   "commentary": "{\"1\":{\"name\":\"Ada\",\"team\":\"P\",\"twitter\":\"a\",\"role\":\"\",\"icon\":\"\",\"note\":\"c\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+  },
+  "load the last old slot": {
+   "sets": [
+    [
+     "commentary",
+     "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"Ada\",\"team\":\"P\",\"twitter\":\"a\",\"role\":\"\",\"icon\":\"\",\"note\":\"c\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+    ]
+   ],
+   "deltas": [
+    "[{\"path\": [\"commentary\", \"8\", \"name\"], \"action\": \"values_changed\", \"value\": \"Ada\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"commentary\", \"8\", \"team\"], \"action\": \"values_changed\", \"value\": \"P\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"commentary\", \"8\", \"twitter\"], \"action\": \"values_changed\", \"value\": \"a\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"commentary\", \"8\", \"note\"], \"action\": \"values_changed\", \"value\": \"c\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+   ],
+   "bigChanges": 0,
+   "result": null,
+   "raises": null,
+   "censor": [
+    [
+     "Ada",
+     null
+    ],
+    [
+     "P",
+     null
+    ],
+    [
+     "@a",
+     null
+    ],
+    [
+     "c",
+     null
+    ]
+   ],
+   "commentary": "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"Ada\",\"team\":\"P\",\"twitter\":\"a\",\"role\":\"\",\"icon\":\"\",\"note\":\"c\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+  },
+  "load censored": {
+   "sets": [
+    [
+     "commentary",
+     "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"*** guy\",\"team\":\"***team\",\"twitter\":\"x\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+    ]
+   ],
+   "deltas": [
+    "[{\"path\": [\"commentary\", \"3\", \"name\"], \"action\": \"values_changed\", \"value\": \"*** guy\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"commentary\", \"3\", \"team\"], \"action\": \"values_changed\", \"value\": \"***team\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"commentary\", \"3\", \"twitter\"], \"action\": \"values_changed\", \"value\": \"x\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+   ],
+   "bigChanges": 0,
+   "result": null,
+   "raises": null,
+   "censor": [
+    [
+     "qbad guy",
+     null
+    ],
+    [
+     "qbadteam",
+     null
+    ],
+    [
+     "x",
+     null
+    ]
+   ],
+   "commentary": "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"*** guy\",\"team\":\"***team\",\"twitter\":\"x\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+  },
+  "load non-strings": {
+   "sets": [
+    [
+     "commentary",
+     "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Partial\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+    ]
+   ],
+   "deltas": [
+    "[{\"path\": [\"commentary\", \"2\", \"name\"], \"action\": \"values_changed\", \"value\": \"Partial\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+   ],
+   "bigChanges": 0,
+   "result": null,
+   "raises": null,
+   "censor": [
+    [
+     "Partial",
+     null
+    ]
+   ],
+   "commentary": "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Partial\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+  },
+  "load unknown": {
+   "sets": [],
+   "deltas": [],
+   "bigChanges": 0,
+   "result": null,
+   "raises": null,
+   "censor": [],
+   "commentary": "{\"1\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"2\":{\"name\":\"Old\",\"team\":\"T\",\"twitter\":\"old\",\"role\":\"解説\",\"icon\":\"mic\",\"note\":\"n\",\"display\":1},\"3\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"4\":{\"name\":\"Same\",\"team\":\"\",\"twitter\":\"\",\"role\":\"実況\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"5\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"6\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"7\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"8\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"9\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"10\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"11\":{\"name\":\"\",\"team\":\"\",\"twitter\":\"\",\"role\":\"\",\"icon\":\"\",\"note\":\"\",\"display\":0},\"12\":{\"name\":\"Twelve\",\"team\":\"TT\",\"twitter\":\"tw\",\"role\":\"MC\",\"icon\":\"phone\",\"note\":\"last\",\"display\":1}}"
+  }
+ }
+}

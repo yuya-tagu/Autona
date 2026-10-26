@@ -1825,3 +1825,118 @@ S3 の最後。ヘッドレスの実プロセスに対して、Python のスモ�
   - ヘッドレス（`python main.py --headless`）
     - `/playerdb` の内容がデスクトップと同じ
     - start.gg の取り込み後、Web UI の選手候補が更新される
+
+#### S3e-2 実況とクルーの core 化（2026-10-26・PR 未作成）
+
+実況（`commentary.*`）とクルーボード（`score.3`）の書き込みを、パネル / ボードのウィジェットから core のサービスへ移した。Web の操作はどちらのシェルでも同じ core を呼び、パネルとボードは state を描画するだけになった。外から見える挙動（Socket.IO のイベント名と ack・legacy の本文・`program_state.json` のキー順・Socket.IO の delta）は、`load_commentator_from_tag` の修正（下記）を除いて変えていない。移す前の木（8aa8c33b）でウィジェット経由の Set 列・保存サイクル・delta・結果を録り、core 版と照合している。
+
+- **実装**
+  - `src/core/CommentaryService.py`（新規・モジュール関数）
+    - `ApplyPlayerData(slot, data)`: PlayerDB の形の dict（Web の `update_commentary`・補完の選択・DB 引き）で 1 枠を上書きする。state から 12 枠を読み、文字列の値だけを悪語フィルタ（`BadWordFilter.instance`）→ 正規化（`FieldValue`。前後の空白を落とし、Twitter は先頭の `@` を落とす）して 1 枠にマージし、ルートごと 1 回 `Set` する（旧パネル経由と同じ Set）。role・icon・display は触らない
+    - `LoadFromTag(slot, tag)`: `PlayerDB.instance.GetPlayerFromTag` → `ApplyPlayerData`。見つからなければ何も書かない
+    - `SetField(slot, field, value)`: パネルの 1 欄の編集。その 1 キーだけを、値が変わったときだけ書く。表示は `MAX_DISPLAY`（4）人まで（超える ON は断る）
+    - `Reorder(order)`: パネルのドラッグ。12 枠の並べ替えを 1 回の `Set` で書く
+  - `src/core/CrewBattleService.py`: 操作を state から読むようにした（旧実装はウィジェットの行を受け取っていた）
+    - 追加: `AdjustMemberStock` / `SetMemberStock`（0〜99）、`SelectActiveMember`（1 チーム 1 人。0 以下 = 不在）/ `ReleaseActiveMember`（印が付いているメンバーのときだけ外す）、`SetMemberCount`（1〜9。変わらなければ書かない）、`ApplyBestOf`（0〜99。変わらなければ書かない）/ `ApplySetData`、`SwapTeams` / `ResetStocks` / `ClearCrew`（両チームを読んで 1 サイクルで publish）、読み出し（`MemberNum` / `Stocks` / `ActiveMember` / `ReadTeam`）
+    - `SetMemberName` / `SetMemberNum` のストック列は省略すると state から読む
+    - スワップのフラグ（`teamsSwapped`）をクラス属性 `_swapped`（ボード番号ごと）に持つ。`SeedBoardState`（ボードの起動時の書き込み）で消す
+  - `src/AutonaWebOperations.py`: `set_commentary_data` / `load_commentator_from_tag` / `crew_member_stock` / `crew_set_active` を追加した。クルーボードの swap / `get_swap` / reset / clear / `set_route`（人数・キャラ数・match バー・best of）は board 3 では `CrewBattleService` を呼ぶ（ボードホストの `Widget()` を使わない）
+    - 実況はリクエストのスレッドで core を呼ぶ（パネルを構築しない）
+    - クルーはボードホストの `Run` を通す（デスクトップは GUI スレッドで、未構築なら構築してから。swap・`reset_players`・`clear_all` は、ボード 1 / 2 と同じく入力中の欄を確定してから。`clear_all` はリセットより前に確定するので、match バーの打ちかけも一緒に消える）
+  - `src/AutonaWebServer.py`: 上の 4 操作のルート / イベントを `WebOps` へ向けた
+  - `src/AutonaWebServerActions.py`: 上の 4 メソッドと `_ensure_panel` を削除した（残りは公開 14 本）。`update_bracket` は `EnsureTop8Panel` を直接呼ぶ
+  - `src/AutonaCommentaryWidget.py`: 書き込みを `CommentaryService` に向け、state を描画するようにした
+    - 削除: `ChangeCommDataSignal` / `LoadCommFromTagSignal` / `SetData` / `LoadCommentatorFromTag` / `_syncToState`（入力欄からルートを組み直す全量 publish）/ `_loadFromState` / `_updating`
+    - 入力欄の確定 → `SetField`（1 欄だけ）。アイコンは識別子（stem）だけを渡す。ドラッグ → `Reorder`。補完の選択 → `ApplyPlayerData`
+    - 「配信に表示」の ON が上限で断られたら、チェックをシグナルを止めて state の値に戻してから、無効化する数を数える（`_refreshDisplayLocks`。断られたチェックを数えると、他の欄の無効化とこの欄の有効化を、state に無い数から決めてしまう）
+    - `_RenderFromState`: Bridge の `state_updated`（`['commentary'` を含む delta）/ `state_big_change` で `singleShot(0)` に 1 回にまとめ、`QSignalBlocker` で描画する。入力中の欄は飛ばし、離れたら描画する（`focusChanged`）
+  - `src/AutonaCrewBattleWidget.py`: 同じ形にした
+    - 削除: `CommandMemberStock` / `SetActiveMember` / `CommandScoreChange` / `CommandTeamColor` / `ClearScore` / `ResetMatch` / `CommandClearAll` / `_flushAllState` / `_snapshotTeams` とシグナル、Web の汎用操作のためだけにあった隠しウィジェット（`_bestOfSpin` / `charNumber` / `scoreColumn`）
+    - 入力（ストックのスピン・出場中のラジオ・人数のスピン・名前・チーム名・色・match バー）→ core の操作。SWAP / リセットのボタンも core
+    - `_RenderFromState`: `['score', '3'` を含む delta と `state_big_change` で、上と同じ規則で描画する。表示大会名の欄は従来どおり
+    - 人数が減って、打っている行が隠れるとき: 隠すと Qt が描画の中でその欄を確定する（`editingFinished`）。描画中の確定は書かない（`_Finished`。「描画は何も書かない」に例外を作らない）。打ちかけは捨て、同じ描画で隠れた欄に state の値を出す
+  - `src/Autona.py`: `EnsureCommentaryPanel()` を削除した（呼び出し元が無くなった）
+  - `src/core/Actions.py`: `PublishCommentary` を削除した（呼び出し元が無くなった）
+  - `src/Helpers/AutonaQtHelper.py`: `HeldBackText`（新規）。入力中の欄に描画が残した文字を書き戻さない判定（判断 3）を 1 つにまとめ、選手カード・ボード 1 / 2 のチーム名・クルーボード・実況パネルが共有する（`Shown` / `LeftAlone` / `IsHeldBack` / `IsEdit`）
+  - `src/AutonaScoreboardPlayerWidget.py`: 選手カードの既存の不具合（下記）を直した。`_heldBackText` を `HeldBackText` に置き換え、描画後の `lastExportedName` は「残した文字」の欄だけ欄の文字、それ以外は slot の値から組むようにした（打っていた文字は新しい名前なので、確定で合成名・画像を publish する）。名前の欄を飛ばした描画でも組み直す（残した文字の確定で合成名を publish しない）
+  - `src/AutonaScoreboardWidget.py`: チーム名の欄の既存の不具合（下記）を直した。`_heldBackTeamName`（1 つの dict が「離れたら描画し直す欄」の印と残した文字を兼ねていた）を、印の `_teamNameSkipped`（チームの集合）と判定の `_teamNameHeldBack`（`HeldBackText`）に分けた
+- **判断と理由**
+  1. **Web の実況はルートごと無条件に 1 回 `Set` する**（「1 枠ずつマージ」= state から読んで 1 枠を変えて publish）。旧パネル経由の Set 列（変化なしでも 1 Set・delta なし）と一致させるため。`SetIfChanged` にすると Set 列が変わる
+  2. **パネルの編集は 1 欄だけ書く**（`SetField`）。旧 `_syncToState` は確定のたびに全 12 枠を入力欄から組み直して publish しており、パネルがまだ描画していない変更（Web からの更新）を古い値で上書きしえた。Socket.IO の delta は葉の単位で出るので、パネルの編集の delta の形は変わらない（変化なしの確定は何も書かなくなった）
+  3. **入力中の欄の扱いは選手カードの規則に揃え、1 点だけ直した**（S2a の `_OnTextChanged`）。描画は入力中の欄を飛ばし、そのとき欄に残った文字は、確定しても書き戻さない（state が先に進んでいるため）。打ち直した文字は書く。補完の選択だけは、選んだ名前を入力中の欄にも描画する（操作者自身の操作）。スピンボックス・ラジオ・チェックボックス・アイコンのコンボは常に描画する
+     - 直した点: 残った文字として扱うのは次の 2 つだけにした。(a) **その欄が最後に表示した（または書いた）文字のまま**で、state が先に進んだ。(b) 打っている途中に、**その欄自身の値が別の所（Web・セット読込）で書かれた**（S2d のチーム名の規則: その書き込みが打ちかけに勝つ）。(b) はその書き込みを最初に見た描画だけが判定し、そのあと打った文字は書く。それ以外の打った文字は、描画が何回走っても確定で書く。S2a の選手カードと S2d のチーム名は、打っている途中の文字を無条件に残った文字として扱っていたため、打っている間に描画が 1 回でも走ると（同じボードのスコア +1 でも）、Enter / フォーカスアウトで打った文字が書かれずに消えていた（下の「既存の不具合」）。ボードと実況パネルは、関係する delta のたびに全体を描画するので、そのままだと Web の操作 1 回で打っていた名前が消える
+     - (a) で残した文字のあとに打ち足した文字は、操作者の編集として書く。つまり外の書き込みが届いたときに欄に**いるだけ**（打っていない）だった場合、そのあと打ち足すと**打った側が勝ち**、外の書き込みは上書きされる（打ち足した文字は「欄が表示した文字のまま」ではないため。(b) で外の書き込みが勝つのは、打っている途中に届いた場合だけ）。レビューで確認し、この挙動のまま受け入れた
+     - 判定は `HeldBackText`（`src/Helpers/AutonaQtHelper.py`）にまとめ、選手カード・ボード 1 / 2 のチーム名・クルーボード・実況パネルの 4 つが同じものを使う。(b) を残したのは、S2d の既存テスト（`test_a_web_team_name_survives_leaving_the_field`: 打ちかけの間に Web が書いたチーム名が、欄を離れても残る）と、直す前の選手カードの挙動を、その場合について変えないため。`isModified()` にしない理由は S2a と同じ（打って消して元に戻すと打鍵ありになる）。一度も表示していない欄は空を表示していたものとして扱う（新しいカードの入力欄は空で、state にキーが無い = 空と同じ）
+  4. **`load_commentator_from_tag` を直した**（既存バグ。台帳の S3e 棚卸し参照）。成功は `"OK"`、DB に無いタグは `"ERROR"`（`load_player_from_tag` と同じ）、範囲は 1..12（旧 1..8）。番号でない値は旧実装どおり例外（legacy は 500）
+  5. **クルーのスワップのフラグは state に入れない**。score.3 にキーを足すと `program_state.json` の中身が変わる（外部契約）。旧実装もウィジェットの属性で、再起動で消えた（同じ）。core がボード番号ごとに持ち、Web はウィジェット無しで読める。その結果、**ヘッドレスの v1 `GET /scoreboards/3` が `swapped` を返すようになった**（S3c〜S3e-1 はキーなし。デスクトップの形にそろった）
+  6. **クルーの操作はボードホストを通す**。デスクトップでは GUI スレッドで同期実行し、応答の時点で書き込みは終わっている（旧実装は queued シグナルで、反映前に `"OK"` を返していた。実況も同じく、今は書いてから返す）。未構築のボードは構築してから書く（S2c 判断 7 と同じ理由）
+  7. **board 3 以外への `crew_*` は旧実装どおり「構築して何もせず `"OK"`」**。番号の解釈もクルーボードのときだけ行う（旧実装はシグナルが無いボードでは `int()` しなかった）
+  8. **アクティブの解除は「そのメンバーに印があるときだけ」**。描画が追いついていないラジオを外しても、state が先に進めた別のメンバーを消さない
+  9. **ボードの隠しウィジェットを消した**。`_bestOfSpin` / `charNumber` / `scoreColumn` は、Web の汎用操作が board 3 でも属性を突けるようにするためだけにあった。Web の操作が board 3 を明示的に分けたので要らない
+- **pin**
+  - `tests/test_commentary_service.py`（新規）
+    - golden（`tests/fixtures/commentary/golden.json`、16 シナリオ: 全項目・部分・空白と非文字列・12 枠目・検閲・変化なし・空・dict でない・範囲外 2・番号でない・DB 引き 5）を、パネル未構築・パネル構築済み・ヘッドレスのボードホストの 3 形態で再生する（Set 列・delta・big change・結果・検閲の呼び出し・ルート全体）。`load_*` の結果だけ修正後の値で照合する。パネルを構築したときは、パネルが何も書かず、表示が state と一致することも見る
+    - 12 枠すべてに読めること、範囲外・DB に無いタグの応答
+    - `SetField` の 1 キー書き込みと表示の上限、`Reorder`
+    - パネル: core の書き込みに追従する（何も書かない）・`state_big_change` に追従する・未描画の変更があるときの編集が他の枠を戻さない・上限を超えた ON が戻る（描画を待たずにその場で戻り、無効化も state の数で決まる。何も書かない）・アイコンのコンボが stem の 1 キーだけを書く・ドラッグが 1 回の `Set` で並べ替える・入力中の欄を飛ばし、離れると新しい値が出る・打っている途中に別の枠が Web で変わっても、打った文字が Enter / フォーカスアウトで書かれる・名前の補完の選択が枠を埋め、入力中の欄にも保存した名前（補完の文字と違う検閲後の名前）が出て、離れても何も書かない（実フォーカス）
+  - `tests/test_crew_operations.py`（新規）
+    - golden（`tests/fixtures/crew_operations/golden.json`、33 シナリオ: ストック 9・アクティブ 8・swap・reset 3・clear・get_swap・`set_route` 10）を、デスクトップ（ボード構築済み）とヘッドレスのボードホスト（ボード無し・`_SeedBoards` 済み）の両方で再生する（Set 列・delta・結果・ボード全体・スワップのフラグ）
+    - ヘッドレスでクルーの操作が動くこと
+    - ボード: core の書き込みと Web の全体操作に追従する（何も書かない）・`state_big_change` に追従する・未描画の変更があるときのストックと名前の編集が他の行を戻さない・アクティブが 1 チーム 1 人で、追いついていないラジオの解除が別のメンバーを消さない・人数のスピン・入力中の名前を飛ばし、離れると新しい値が出る・打っている途中に別のメンバーのストックが Web で変わっても、打った名前が Enter / フォーカスアウトで書かれる・SWAP で打ちかけの名前が運ばれる（実フォーカス）
+    - 空の行に打ちかけのまま Web の `reset_players` / `clear_all` → 打った文字が state にも欄にも残らない（直す前に失敗することを確認した）
+    - 人数が減って打ちかけの行が隠れる → 描画が何も書かず、人数を戻すと state の値が出る（直す前に失敗することを確認した）
+    - 判断 3 の (b): 打っている途中に同じメンバー名が別の所で書かれると、その書き込みが勝ち、そのあと打った文字は書かれる。match バーのコンボも、いるだけの欄に Web から書かれた値を、離れたときに書き戻さない
+    - ヘッドレスで swap したフラグを、ハーネスのボード破棄が消す（`tests/conftest.py`）
+  - `tests/test_held_back_text.py`（新規・Qt 非依存）: `HeldBackText` の規則そのもの（(a)・(a) のあとの打ち足し・(b)・(b) は最初の描画だけ・他の欄の描画中の打鍵・`Shown` で消えること・欄ごとに独立）
+  - `tests/test_player_card_render.py`（選手カードの不具合の修正。直す前に失敗することを確認した）
+    - 打っている途中にカードの描画が走っても、打った文字が Enter / フォーカスアウトで state に入り、欄に残り、合成名（`mergedName`）にも出る。描画のきっかけは Web のスコア +1 と、同じカードの別の欄の更新の 2 通り（実フォーカス）
+    - 残した文字のあとに打ち足した文字は、もう 1 回描画が走っても書かれる
+    - 残した選手名の横でスポンサーが描画されても、欄を離れたときに選手名も合成名も書かない（`lastExportedName` の変更で壊れていないこと）
+    - 打っている途中に同じ選手名が別の所で書かれると、その書き込みが勝つ（確定しても何も書かない。後の描画が走っても同じ）。そのあと打った文字は書かれる
+    - `player_editor.1`（agent-pitfalls #7）は描画されないので何も残さず、確定した文字はボードの描画があっても書かれる
+    - チーム名: 打っている途中に Web からスコア +1 → Enter / フォーカスアウトで、打ったチーム名が state に入り、欄に残り、ロゴも付く
+    - 既存の golden（`tests/fixtures/board_operations/*`・`tests/fixtures/player_slots/*`）と S2d のチーム名のテストは変更なしで通る
+  - `tests/fixtures/write_recording.py`（新規）: 録画と再生で共用する Set / delta の記録（Qt 非依存）
+  - `tests/conftest.py`: ボードの破棄（`_dropBoard`）でクルーのスワップのフラグ（`CrewBattleService._swapped`）も消す。ボードが未構築でも消す（ヘッドレスのボードホストで swap したテストが、次のテストにスワップ済みのボードを渡さない）。アプリ側では起動時の書き込み（`SeedBoardState`）だけが消せば足りる（score.3 を消すのは起動時の `ResetScoreRoot` だけで、その時点でフラグは空）ので、専用の関数は足していない
+  - `tests/test_web_operations.py`: クルーの操作を 503 の一覧から外し、ヘッドレスでクルーと実況のルートが応答することを足した（503 の一覧は、ボード 1 / 2 の人数・キャラ数だけになった）
+  - `tests/test_crew_board.py` / `tests/test_scoreboard_operations.py`: 削除したウィジェットのメソッドを `board.crew` の core 操作に置き換えた
+  - `tests/test_actions.py`: `PublishCommentary` のテストを削除した
+- **残置 / リスク**
+  - スピンボックス（ストック・人数）とラジオ・チェックボックス・アイコンのコンボは、操作中でも描画で上書きされる（テキスト欄とクルーの match バーのコンボだけが入力中に飛ばされる）。数字を打ち込んでいる最中に Web が同じメンバーのストックを変えると、打っていた値が消える
+  - 実況パネルとクルーボードは、関係する delta のたびに 1 回描画する（`singleShot(0)` でまとめる）。描画のたびに実況の 12 枠を deep copy する。`str(delta)` の判定はボード 1 / 2 と同じ
+  - クルーのスワップのフラグは state の外なので、再起動で `False` に戻る（旧実装と同じ。中身はスワップされたまま）
+  - `ws_crew_member_stock` などに `team` / `member` が無いと、旧実装どおり例外（ログ）で ack は返らない
+  - 実況パネルを開いていないときの Web の更新は、パネルの構築を待たずに書く。構築時の描画で state が出る
+  - クルーボードで人数が減って打ちかけの行が隠れると、打ちかけは書かれずに捨てられる（行が無くなるので確定しない扱い）
+- **既存の不具合（修正済み）**
+  - 選手カード（S2a〜）で選手名などを打っている途中に、そのカードの描画が走る（同じボードのスコア +1・同じカードの別の欄の更新など。Web / Stream Deck からでも）と、Enter / フォーカスアウトで打った文字が書かれず、欄も空（state の値）に戻っていた。配信中に起こりうるので S3e-2 で直した
+  - 原因は判断 3 の「直した点」と同じ（`_RenderText` が入力中の欄の現在の文字を無条件に `_heldBackText` に入れていた）。判断 3 と同じ規則（`HeldBackText`）に置き換えた
+  - もう 1 つ、描画がスポンサーなどを書き換えたときに `lastExportedName` を欄の文字（打っていた選手名を含む）で組んでいたため、打った選手名を確定しても合成名（OBS に出る名前）が publish されなかった。残した文字の欄以外は slot の値で組むようにした。逆に、打ちかけの選手名が別の所の書き込みで残った文字になったときは、確定で古い合成名を publish して id を落としていた（名前の欄を飛ばした描画では組み直していなかった）。これも直した
+  - ボード 1 / 2 のチーム名の欄（S2d の `_heldBackTeamName`）も同じ規則だった。チーム名を打っている途中に Web からスコア +1 → Enter / フォーカスアウトで、打ったチーム名が書かれず、欄も空に戻っていた。印と判定を分け、判定を `HeldBackText` にした
+- **リリースノート案**
+  - `load-commentator-from-tag` が成功時に `OK` を返すようになった（従来は 500 エラー。Socket.IO は null）。9〜12 人目の実況者にも読み込める。選手 DB に無いタグは `ERROR`
+  - スコアボードで選手名などを打っている途中に、Web / Stream Deck からスコアを変えたり同じ選手の別の欄が変わったりすると、打った文字が確定されずに消えていた不具合を直した
+  - チーム戦のスコアボードでチーム名を打っている途中に、Web / Stream Deck からスコアを変えると、打ったチーム名が確定されずに消えていた不具合を直した
+  - ヘッドレス起動（`--headless`）で、クルーボードの操作（ストック・出場中のメンバー・人数・Swap・リセット / クリア）と実況の更新・タグからの読込が使えるようになった（従来は 503）
+- **実機確認（オーナー）**
+  - デスクトップ・クルーボード
+    - ストックの ± とスピンへの数字入力・出場中のラジオ（別のメンバーに付け替えると前の印が外れる）・人数のスピン・メンバー名・チーム名・色・Phase / Pool / Match・表示大会名が、今までどおり反映され、合計が合う
+    - SWAP（名前を打ちかけのまま押すと、その名前が相手側に運ばれる）・ストックのリセット・X 投稿
+    - Web / Stream Deck から `crew-member…-stockup/down`・`crew-active…`・`swap-teams`・`reset-scores`・`clear-all`・`set?players=` を送る → ボードの表示がすぐ追従し、OBS のクルーオーバーレイも変わる
+    - メンバー名を打っている最中に Web から同じメンバーのストックを変える → 名前欄は打っている文字のまま、ストックと合計は変わる。欄を離れても打っていた文字が消えない
+    - 空の行に名前を打ちかけのまま Web から `/scoreboard3-reset-players` / `/scoreboard3-clear-all` → 打った名前が消え、欄を離れても戻らない
+    - 5 行目に名前を打ちかけのまま Web から `set?players=3` → 5 行目が隠れる。人数を 5 に戻すと 5 行目は空
+  - デスクトップ・実況パネル
+    - 各欄の入力・役割の補完・アイコン・「配信に表示」（4 人で残りが無効になる）・≡ のドラッグ並べ替え・名前の補完（選手 DB）が今までどおり反映される
+    - 4 人を「配信に表示」にすると、5 人目以降のチェックが無効になり、表示中の 4 枚のカードだけが明るくなる。1 人外すと、残りのチェックが押せるようになる
+    - パネルを開いたまま `/update-commentary-3` を送る → 3 番のカードがすぐ変わる。続けて 1 番の名前を編集しても、3 番が古い内容に戻らない
+    - 3 番の名前欄を編集中に `/update-commentary-3` を送る → 欄は打っている文字のまま。欄を離れると送った名前が出る（打っていた文字は書き戻されない）
+    - `/load-commentator-from-tag-12?tag=<DB にいるタグ>` → `OK` が返り、12 番に入る。DB に無いタグは `ERROR`
+    - パネルを一度も開かずに `/update-commentary-1` を送る → OBS の実況オーバーレイが変わり、あとでパネルを開くとその内容が出る
+  - デスクトップ・スコアボード（選手カード）
+    - 選手名を打っている途中に Web / Stream Deck からスコア +1 → Enter → 打った名前が欄に残り、OBS の名前にも出る（フォーカスアウトで確定しても同じ）
+    - 選手名の欄にいるだけ（打たない）のときに Web から名前が変わる → 欄は前の名前のまま。離れると新しい名前が出て、前の名前は書き戻されない（従来どおり）
+    - 選手 DB エディタ（PLAYERS）で名前を打って確定すると、今までどおり反映される
+    - チーム戦（2 人以上）でチーム名を打っている途中に Web / Stream Deck からスコア +1 → Enter → 打ったチーム名が欄に残り、OBS のチーム名（とロゴ）にも出る
+  - ヘッドレス（`python main.py --headless`）
+    - 上のクルーの Web 操作と `/update-commentary-<N>` が 503 にならず、オーバーレイが変わる
