@@ -57,11 +57,14 @@ class _PlayerEditorDialog(QDialog):
 
         if playerData is not None:
             # playerData IS the DB record — skip the redundant DB lookup.
+            # The load also syncs the Save/Update button label and Delete
+            # enablement with the tag it brings (the card's
+            # _ShowOwnOperation, ADR-005 S3e-3).
             self.editor.SetData(playerData, dontLoadFromDB=True, clear=True)
-        # Sync the Save/Update button label and Delete enablement with the
-        # current tag (SetData only wires these to editingFinished).
-        self.editor.ManageSavePlayerToDBText()
-        self.editor.ManageDeletePlayerFromDBActive()
+        else:
+            # A new player: the buttons for no tag yet.
+            self.editor.ManageSavePlayerToDBText()
+            self.editor.ManageDeletePlayerFromDBActive()
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)

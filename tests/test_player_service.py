@@ -23,6 +23,8 @@ Two properties get most of the attention:
 Isolation follows tests/test_actions.py: temp CWD, and the shared
 StateManager / SettingsManager handed back untouched.
 """
+import copy
+import json
 import os
 import shutil
 import tempfile
@@ -40,6 +42,7 @@ from src.core.PlayerService import (
 from src.core.DictHelper import deep_clone
 from src.core.StateManager import StateManager as SM
 from tests.conftest import _link_tree
+from tests.fixtures.player_apply import scenarios as applyScenarios
 from tests.fixtures.player_slots import recording
 
 _WORK_DIR = tempfile.mkdtemp(prefix="autona_player_service_test_")
@@ -804,3 +807,482 @@ def test_every_recorded_country_and_region_is_rebuilt_byte_for_byte(
         == golden["regionSamples"]["GB.CON"]
     assert {code: _digest(regionPicks(code)) for code in golden["regions"]} \
         == golden["regions"]
+
+
+# ── loading a player: the S3e-3 recording, through the service alone ─────
+#
+# ADR-005 S3e-3 moved the card's SetData / Clear / SavePlayerToDB into this
+# class (ApplyData / ClearSlot / SavePlayerToDB). tests/test_player_apply.py
+# replays tests/fixtures/player_apply/golden.json -- recorded through the
+# widget implementation -- through the card and the board; this replays
+# every scenario that needs nothing but a slot (`core` not False) through
+# PlayerService with no widget at all, the way a headless shell loads a
+# player. Compared: each slot's exact value (key order included), every
+# write under each slot (a load's runs collapsed, as the card replay
+# compares them), the save cycles, local_players.json, the outcome, and the
+# SlotChange each operation returns against the statistics triggers the
+# board fired. A step that is the card's own pick or a board's slot count
+# is reproduced from its result (the slot's value afterwards).
+
+APPLY_GOLDEN = json.loads(
+    (Path(__file__).resolve().parent / "fixtures" / "player_apply"
+     / "golden.json").read_text(encoding="utf-8"))
+CORE_SCENARIOS = [s for s in applyScenarios.SCENARIOS
+                  if s.get("core", True)]
+
+
+@pytest.fixture
+def applyWorld(recordedCatalogs, recordingDir, tmp_path, monkeypatch):
+    """Yields `run(scenario)` -> its record, from fresh slots, a player
+    database of the scenario's players and its bad-word filter."""
+    from src.core.BadWordFilter import BadWordFilter
+    from src.core.PlayerDB import PlayerDB
+    from src.core.SettingsManager import SettingsManager
+
+    games, countries = recordedCatalogs
+    codename, modsActive, reload = recording.GAME_SCENARIOS["tgame"]
+    games.SelectGame(codename, modsActive=modsActive, reload=reload)
+    # The filter's switch, on as the recording had it (and as it defaults).
+    assert SettingsManager.Get("general.profanity_filter", True) is True
+
+    def run(scenario, number):
+        work = tmp_path / f"scenario{number}"
+        work.mkdir()
+        db = PlayerDB(path=str(work / "local_players.json"),
+                      legacyCsvPath=str(work / "local_players.csv"))
+        db.database = {tag: copy.deepcopy(applyScenarios.DB_PLAYERS[tag])
+                       for tag in scenario["db"]}
+        db.SaveDB()
+        monkeypatch.setattr(PlayerDB, "instance", db)
+        ngword = work / "ngword"
+        ngword.mkdir()
+        if scenario.get("words"):
+            (ngword / "common.txt").write_text(
+                "\n".join(scenario["words"]), encoding="utf-16")
+        badWords = BadWordFilter(ngwordDir=str(ngword),
+                                 userDataDir=str(work / "user_data"))
+        badWords.Initialize()
+        monkeypatch.setattr(BadWordFilter, "instance", badWords)
+        return _ApplyReplay(scenario, games, countries, db,
+                            recordingDir).run()
+
+    return run
+
+
+class _ApplyReplay:
+    def __init__(self, scenario, games, countries, db, directory):
+        self.scenario = scenario
+        self.games = games
+        self.countries = countries
+        self.db = db
+        self.directory = directory
+        board = scenario["board"]
+        if board is None:
+            self.root = EDITOR_PATH
+            self.paths = [EDITOR_PATH]
+        else:
+            self.root = f"score.{board}"
+            players = scenario.get("players", 1)
+            # The board's card order: team 1's, then team 2's, per index.
+            self.paths = [f"{self.root}.team.{team}.player.{slot}"
+                          for slot in range(1, players + 1)
+                          for team in (1, 2)]
+
+    def service(self, path):
+        return PlayerService(path, games=self.games,
+                             countries=self.countries)
+
+    def slotPath(self, slot):
+        if slot == "editor":
+            return EDITOR_PATH
+        team, player = slot
+        return f"{self.root}.team.{team}.player.{player}"
+
+    def seed(self):
+        """The slots a fresh board's cards (or the editor) publish."""
+        with SM.SaveBlock():
+            for path in self.paths:
+                self.service(path).SeedEmpty(3)
+        if self.scenario["board"] is not None:
+            schema.HoldBoard(self.scenario["board"])
+
+    def snapshot(self):
+        slots = {}
+        for path in self.paths:
+            with SM.lock:
+                value = deep_clone(SM.Get(path) or {})
+            slots[path] = _digest(applyScenarios.normalise(
+                _encode(value), self.directory))
+        dbPath = Path(self.db.path)
+        text = dbPath.read_bytes().decode("utf-8").replace("\r\n", "\n") \
+            if dbPath.exists() else None
+        return {"slots": slots, "db": text}
+
+    def step(self, step):
+        """(result, SlotChange or None) of one step."""
+        op = step["op"]
+        if op == "update":
+            path = self.slotPath([step["team"], step["player"]])
+            if SM.Get(path) is None:
+                # The board's roster check (ApplyPlayerData).
+                return False, None
+            service = self.service(path)
+            data = copy.deepcopy(step["data"])
+            with SM.SaveBlock():
+                change = service.ApplyData(data, True, False)
+                if data.get("savePlayerToDb", False):
+                    service.SavePlayerToDB()
+            return True, change
+        if op == "chars":
+            # Every card gets the new number of character rows, the new
+            # ones blank, and republishes its slots with the mains.
+            for path in self.paths:
+                service = self.service(path)
+                snap = self.games.Current()
+                slots = service._CharacterSlots(
+                    SM.Get(service.Key("character")), snap)
+                slots = (slots + [CharacterSlot()] * step["count"])[
+                    :step["count"]]
+                with SM.SaveBlock():
+                    service.PublishCharacterSlots(slots, includeMains=True)
+            return None, None
+        service = self.service(self.slotPath(step["slot"]))
+        if op == "set":
+            data = step["data"]
+            data = self.db.Get(data) if isinstance(data, str) \
+                else copy.deepcopy(data)
+            return None, service.ApplyData(
+                data, step["loadFromDB"], step["clear"], step["no_mains"])
+        if op == "clear":
+            return None, service.ClearSlot(step["no_mains"])
+        if op == "save":
+            service.SavePlayerToDB()
+            return None, None
+        if op == "typed":
+            with SM.SaveBlock():
+                service.PublishCharacterSlots(
+                    [CharacterSlot(**slot) for slot in step["slots"]])
+            return None, None
+        if op == "pick":
+            snap = self.games.Current()
+            slots = service._CharacterSlots(
+                SM.Get(service.Key("character")), snap)
+            row = self.games.CharacterRow(step["character"], snapshot=snap)
+            slots[step["index"] - 1] = CharacterSlot(
+                step["character"], step["skin"], step["variant"],
+                row.get("name") or "")
+            with SM.SaveBlock():
+                service.PublishCharacterSlots(slots)
+            return None, None
+        raise AssertionError(f"no service step for {op!r}")
+
+    # The operations that answer with a SlotChange.
+    SLOT_OPS = ("set", "clear", "update")
+
+    def run(self):
+        self.seed()
+        record = {"initial": self.snapshot(), "steps": []}
+        for step in self.scenario["steps"]:
+            change = None
+            if step["op"] in self.SLOT_OPS:
+                slot = step.get("slot") or [step["team"], step["player"]]
+                watched = self.service(self.slotPath(slot))
+                before = watched.Identity()
+            with applyScenarios.Cycles(self.root) as cycles, \
+                    applyScenarios.Writes(self.root) as writes:
+                try:
+                    result, returned = self.step(step)
+                except Exception as e:
+                    result, returned = {"raises": type(e).__name__}, None
+            if step["op"] in self.SLOT_OPS:
+                # Measured, as the board does around a call: a load that
+                # raised half-way has still changed what it wrote.
+                change = watched.ChangeSince(before)
+                if returned is not None:
+                    assert returned == change, step
+            entry = {"op": step["op"], "result": result, "change": change,
+                     "cycles": cycles.count,
+                     "calls": applyScenarios.compact(writes.calls)}
+            entry.update(self.snapshot())
+            record["steps"].append(entry)
+        return record
+
+
+def _desktopMains(text):
+    """local_players.json with the loaded game's mains as the desktop holds
+    them: [character, skin as a number, variant or ""].
+
+    The desktop's completer model rewrites them so in place on every
+    database change (AutonaPlayerDB._BuildModel, S3c-2 decision 5), and the
+    next save writes them out; the service alone (a headless shell) leaves
+    a record's mains as they were stored. S3e-3 kept that in the adapter: a
+    load reads both spellings alike (PlayerService._ApplyMains), and moving
+    it would change the headless shell's local_players.json and /playerdb.
+    Applied to both sides, so only this difference is excused."""
+    if text is None:
+        return None
+    players = json.loads(text)
+    for player in players:
+        mains = player.get("mains")
+        if not isinstance(mains, dict):
+            continue
+        for main in mains.get("tgame") or []:
+            if not isinstance(main, list) or len(main) not in (2, 3):
+                continue
+            while len(main) < 3:
+                main.append("")
+            try:
+                main[1] = int(main[1])
+            except (TypeError, ValueError):
+                main[1] = 0
+    return json.dumps(players, indent=2, ensure_ascii=False)
+
+
+# The steps the service reproduces by their result only: the operator's
+# pick on the card's combos (a write per combo) and the board's slot count
+# (a write per card).
+BY_RESULT_OPS = ("pick", "chars")
+
+
+def _assertServiceStep(name, index, actual, expected, board):
+    where = (name, index, expected["op"])
+    expected = applyScenarios.Expected(name, index, expected)
+    assert actual["slots"] == expected["slots"], where
+    assert _desktopMains(actual["db"]) == _desktopMains(expected["db"]), where
+    assert actual["result"] == expected["result"], where
+    if expected["op"] in BY_RESULT_OPS:
+        return
+    assert actual["cycles"] == expected["cycles"], where
+
+    def calls(step):
+        grouped = applyScenarios.byPlayer(step["calls"])
+        if board is not None:
+            # The board's own keys are the statistics' writes.
+            grouped.pop("", None)
+        return grouped
+
+    if expected.get("callsByEffect"):
+        assert {path: applyScenarios.effect(c)
+                for path, c in calls(actual).items()} \
+            == {path: applyScenarios.effect(c)
+                for path, c in calls(expected).items()}, where
+    else:
+        assert {path: applyScenarios.collapsed(c)
+                for path, c in calls(actual).items()} \
+            == {path: applyScenarios.collapsed(c)
+                for path, c in calls(expected).items()}, where
+
+    if board is None:
+        return
+    stats = expected["stats"]
+    change = actual["change"]
+    if change is None:
+        assert not any(stats.values()), where
+        return
+    # One slot per step: its id moving is the recent sets and its team's
+    # last sets / standings, its seed moving the upset factor.
+    assert change.idChanged == (stats["RecentSetsSignal"] > 0), where
+    assert change.seedChanged == (stats["UpsetFactorCalculation"] > 0), where
+
+
+@pytest.mark.parametrize("scenario", CORE_SCENARIOS,
+                         ids=[s["name"] for s in CORE_SCENARIOS])
+def test_recorded_player_loads_are_reproduced_by_the_service_alone(
+        applyWorld, scenario):
+    record = applyWorld(scenario, CORE_SCENARIOS.index(scenario))
+    expected = APPLY_GOLDEN[scenario["name"]]
+    assert record["initial"]["slots"] == expected["initial"]["slots"]
+    assert _desktopMains(record["initial"]["db"]) \
+        == _desktopMains(expected["initial"]["db"])
+    assert [s["op"] for s in record["steps"]] \
+        == [s["op"] for s in expected["steps"]]
+    for index, (actual, wanted) in enumerate(
+            zip(record["steps"], expected["steps"])):
+        _assertServiceStep(scenario["name"], index, actual, wanted,
+                           scenario["board"])
+
+
+def test_a_load_leaves_its_data_and_the_database_record_alone(
+        recordedCatalogs, tmp_path, monkeypatch):
+    """The card's SetData censored the data it was handed in place -- the
+    caller's dict, and the database's own record when that was what it
+    loaded (the PLAYERS editor hands over the record itself). The service
+    censors copies: what reaches the slot is censored, what it was given is
+    not touched."""
+    from src.core.BadWordFilter import BadWordFilter
+    from src.core.PlayerDB import PlayerDB
+
+    games, countries = recordedCatalogs
+    codename, modsActive, reload = recording.GAME_SCENARIOS["tgame"]
+    games.SelectGame(codename, modsActive=modsActive, reload=reload)
+    db = PlayerDB(path=str(tmp_path / "local_players.json"),
+                  legacyCsvPath=str(tmp_path / "local_players.csv"))
+    db.database = {"BAD": {"gamerTag": "BAD", "name": "so nasty",
+                           "mains": {"tgame": [["Mario", 1]]}}}
+    monkeypatch.setattr(PlayerDB, "instance", db)
+    ngword = tmp_path / "ngword"
+    ngword.mkdir()
+    (ngword / "common.txt").write_text("nasty", encoding="utf-16")
+    badWords = BadWordFilter(ngwordDir=str(ngword),
+                             userDataDir=str(tmp_path / "user_data"))
+    badWords.Initialize()
+    monkeypatch.setattr(BadWordFilter, "instance", badWords)
+
+    service = PlayerService(BOARD_PATH, games=games, countries=countries)
+    service.SeedEmpty(3)
+    data = {"gamerTag": "BAD", "twitter": "nasty one"}
+    given = copy.deepcopy(data)
+    stored = copy.deepcopy(db.database["BAD"])
+    service.ApplyData(data)
+
+    assert data == given
+    assert db.database["BAD"] == stored
+    assert "nasty" not in SM.Get(f"{BOARD_PATH}.{schema.PLAYER_REAL_NAME_KEY}")
+    assert "nasty" not in SM.Get(f"{BOARD_PATH}.{schema.PLAYER_TWITTER_KEY}")
+    assert SM.Get(f"{BOARD_PATH}.character")[1]["en_name"] == "Mario"
+
+
+# ── what a load no longer keeps or raises (S3e-3 review) ─────────────────
+
+@pytest.fixture
+def loadWorld(recordedCatalogs, tmp_path, monkeypatch):
+    """`service(path)` over the recorded catalogs, a seeded board slot at
+    BOARD_PATH, an empty player database (`db`) and a filter of no words."""
+    from types import SimpleNamespace
+
+    from src.core.BadWordFilter import BadWordFilter
+    from src.core.PlayerDB import PlayerDB
+
+    games, countries = recordedCatalogs
+    codename, modsActive, reload = recording.GAME_SCENARIOS["tgame"]
+    games.SelectGame(codename, modsActive=modsActive, reload=reload)
+    db = PlayerDB(path=str(tmp_path / "local_players.json"),
+                  legacyCsvPath=str(tmp_path / "local_players.csv"))
+    monkeypatch.setattr(PlayerDB, "instance", db)
+    ngword = tmp_path / "ngword"
+    ngword.mkdir()
+    badWords = BadWordFilter(ngwordDir=str(ngword),
+                             userDataDir=str(tmp_path / "user_data"))
+    badWords.Initialize()
+    monkeypatch.setattr(BadWordFilter, "instance", badWords)
+
+    def service(path=BOARD_PATH):
+        return PlayerService(path, games=games, countries=countries)
+
+    service().SeedEmpty(3)
+    return SimpleNamespace(service=service, db=db)
+
+
+@pytest.fixture
+def warnings():
+    from loguru import logger
+
+    messages = []
+    handler = logger.add(lambda message: messages.append(str(message)),
+                         level="WARNING", format="{message}")
+    try:
+        yield messages
+    finally:
+        logger.remove(handler)
+
+
+def test_a_load_without_an_id_or_a_city_leaves_neither_behind(loadWorld):
+    """The clear a load starts with kept the previous player's id and city
+    (the card ran it with its name handlers held back), so a player loaded
+    without them -- a tag from the local database, a set's entrant without
+    a start.gg account -- carried the one before's: the statistics, keyed
+    by the id, kept showing the previous player under the new name. The
+    clear empties both now, and the id moving asks for the statistics."""
+    service = loadWorld.service()
+    service.ApplyData({"gamerTag": "FIRST", "id": 101, "city": "Kyoto"})
+
+    change = service.ApplyData({"gamerTag": "SECOND"})
+
+    assert SM.Get(f"{BOARD_PATH}.id") is None
+    assert SM.Get(f"{BOARD_PATH}.city") is None
+    assert change.idChanged
+
+
+def test_a_load_that_brings_its_id_and_city_writes_each_once(loadWorld):
+    """Emptied only when the load does not bring them: one that does writes
+    its own over the previous player's, never None first -- and the same
+    player loaded again writes neither (the guard the statistics need)."""
+    service = loadWorld.service()
+    service.ApplyData({"gamerTag": "FIRST", "id": 101, "city": "Kyoto"})
+
+    with applyScenarios.Writes(BOARD_PATH) as writes:
+        change = service.ApplyData(
+            {"gamerTag": "FIRST", "id": 101, "city": "Kyoto"})
+    assert [key for key, _value in writes.calls
+            if key in ("id", "city")] == []
+    assert not change.idChanged
+
+    with applyScenarios.Writes(BOARD_PATH) as writes:
+        change = service.ApplyData(
+            {"gamerTag": "OTHER", "id": 202, "city": "Osaka"})
+    assert [key for key, _value in writes.calls
+            if key in ("id", "city")] == ["id", "city"]
+    assert (SM.Get(f"{BOARD_PATH}.id"), SM.Get(f"{BOARD_PATH}.city")) \
+        == (202, "Osaka")
+    assert change.idChanged
+
+
+def test_an_update_without_a_clear_keeps_the_id_and_the_city(loadWorld):
+    """A load without the clear (the Web's player edit) changes the fields
+    it brings: the slot is still the same player."""
+    service = loadWorld.service()
+    service.ApplyData({"gamerTag": "FIRST", "id": 101, "city": "Kyoto"})
+
+    change = service.ApplyData({"twitter": "tw"}, clear=False)
+
+    assert (SM.Get(f"{BOARD_PATH}.id"), SM.Get(f"{BOARD_PATH}.city")) \
+        == (101, "Kyoto")
+    assert not change.idChanged
+
+
+def test_a_sponsor_without_a_tag_loads_without_the_database(loadWorld):
+    """The database is keyed by sponsor + tag, and a sponsor alone named no
+    record: the lookup raised (PlayerDB.PlayerTag), after the clear, and the
+    sponsor was never written. Without a tag there is nothing to look up."""
+    loadWorld.db.database = {"ONLY": {"gamerTag": "ONLY", "name": "Wrong"}}
+    service = loadWorld.service()
+
+    service.ApplyData({"prefix": "ONLY"}, loadFromDB=True)
+
+    assert SM.Get(f"{BOARD_PATH}.{schema.PLAYER_SPONSOR_KEY}") == "ONLY"
+    assert SM.Get(f"{BOARD_PATH}.{schema.PLAYER_REAL_NAME_KEY}") != "Wrong"
+
+
+@pytest.mark.parametrize("skin", ["x", None, ""])
+def test_a_main_whose_skin_is_not_a_number_is_its_first_skin(
+        loadWorld, warnings, skin):
+    """A `mains` entry's skin is a row number. One that is not raised
+    (ValueError, the characters unwritten) -- in the data handed over, and
+    on a headless shell in a database record too, which the desktop's
+    completer model rewrites to 0 before anything reads it
+    (AutonaPlayerDB._BuildModel). The first skin, as that rewrite, with a
+    warning: both shells load the same characters."""
+    loaded = loadWorld.service()
+    reference = loadWorld.service("score.1.team.2.player.1")
+    reference.SeedEmpty(3)
+    reference.ApplyData({"gamerTag": "REF", "mains": {"tgame": [
+        ["Mario", 0], ["Luigi", 0, "EX"]]}})
+
+    loaded.ApplyData({"gamerTag": "K", "mains": {"tgame": [
+        ["Mario", skin], ["Luigi", skin, "EX"]]}})
+
+    assert SM.Get(f"{BOARD_PATH}.character") \
+        == SM.Get("score.1.team.2.player.1.character")
+    assert SM.Get(f"{BOARD_PATH}.character")[1]["en_name"] == "Mario"
+    assert any("skin" in message for message in warnings)
+
+
+def test_a_database_record_whose_skin_is_not_a_number_loads_too(loadWorld):
+    loadWorld.db.database = {"REC": {"gamerTag": "REC", "mains": {
+        "tgame": [["Luigi", "x"]]}}}
+    service = loadWorld.service()
+
+    service.ApplyData({"gamerTag": "REC"}, loadFromDB=True)
+
+    value = SM.Get(f"{BOARD_PATH}.character")[1]
+    assert (value["en_name"], value["skin"]) == ("Luigi", 0)

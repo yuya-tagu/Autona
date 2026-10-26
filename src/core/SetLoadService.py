@@ -19,16 +19,13 @@ combo.
 
 What deliberately did NOT move (and why):
 
-- **Player data.** ``AutonaScoreboardPlayerWidget.SetData`` resolves country
-  and state combos, character/skin/variant model rows and the bad-word
-  filter -- all of it against Qt models, and all of it still there. What
-  moved here is the *addressing* (which entrant lands on which team once the
-  teams have been swapped, see ``DisplayTeam``) and the team name that comes
-  with it; the player subtree's own writes went to ``core/PlayerService.py``
-  in the next instalment, which is what SetData now hands its picks to
-  (since ADR-005 S1d as identifiers -- character en_name, skin row, country
-  and region code -- which PlayerService turns into the published values
-  from the core catalogs).
+- **Player data.** A player slot is ``core/PlayerService.py``'s: the board
+  loads each entrant with ``PlayerService.ApplyData`` (ADR-005 S3e-3; it was
+  ``AutonaScoreboardPlayerWidget.SetData``, which resolved the country,
+  region, character, skin and variant against Qt models), the database
+  merge, the bad-word filter and the catalogs included. What is here is the
+  *addressing* (which entrant lands on which team once the teams have been
+  swapped, see ``DisplayTeam``) and the team name that comes with it.
 Best of: what a payload carries is read here (``BestOfFromSetData``), and
 written by ``AutonaActions.SetBestOf`` -- the operation every entry point of
 the set length shares since ADR-005 S2e (it was the BEST OF spinbox, which

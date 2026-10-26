@@ -25,7 +25,7 @@ from .core import StateSchema as schema
 from .core import WebAccess
 from .core.Actions import AutonaActions
 from .core.PlayerService import (
-    DEFAULT_CHARACTERS_PER_PLAYER, DefaultPlayersPerTeam)
+    DEFAULT_CHARACTERS_PER_PLAYER, DefaultPlayersPerTeam, SlotChange)
 from .core.SetLoadService import SetLoadService
 from .core.TournamentInfoService import TournamentInfoService
 from .StateManagerBridge import StateManagerBridge
@@ -1056,11 +1056,11 @@ class AutonaScoreboardWidget(QWidget):
         the event loop (ADR-005 S2a).
 
         Deferred, unlike the two syncs in _onHeldStateUpdated, and that is
-        the point rather than an optimisation. The player slots are still
-        written by the cards themselves, an operation at a time, and an
-        operation can take several save cycles -- a country pick publishes
-        the rebuilt region before the country, SetData and Clear publish
-        field by field. In
+        the point rather than an optimisation. A card's own edits are
+        written by its handlers, an edit at a time, and an edit can take
+        several save cycles -- a country pick publishes the rebuilt region
+        before the country. (A load and a clear are one core write since
+        ADR-005 S3e-3.) In
         between, the card is legitimately ahead of the state; a render run
         right there would put the old country back on the combo, and the
         country handler still to come would then publish *that*. Once the
@@ -2212,9 +2212,6 @@ class AutonaScoreboardWidget(QWidget):
             else:
                 self.labelAutonaUpdate.setText(QApplication.translate("app", "Auto update"))
 
-        # Lock all player widgets
-        for p in self.playerWidgets:
-            p.dataLock.acquire()
         StateManager.BlockSaving()
 
         try:
@@ -2258,8 +2255,6 @@ class AutonaScoreboardWidget(QWidget):
                     self.autoUpdateTimer.timeout.connect(
                         lambda setId=data: AutonaTournamentDataProvider.instance.LoadStationSets(self))
         finally:
-            for p in self.playerWidgets:
-                p.dataLock.release()
             StateManager.ReleaseSaving()
 
     def StopAutonaUpdate(self, clear_variables=False):
@@ -2333,8 +2328,9 @@ class AutonaScoreboardWidget(QWidget):
           S2d -- after the clear, unless the clear itself empties it
           (ClearBoard does the team names and the match bar). Text typed
           into a character / country combo is not committed by losing the
-          focus at all (CommitFocusedEdit) and may stay on the combo after
-          the clear -- unverified, recorded in the S2d ledger;
+          focus at all (CommitFocusedEdit); the cards discard it after the
+          clear (DiscardTypedText, ADR-005 S3e-3), where it used to stay on
+          a combo that already showed the emptied row;
         - the set loaded last is forgotten, so loading it again does load
           it (NewSetSelected skips the set it already has);
         - the statistics are fetched again for each team whose player ids
@@ -2345,6 +2341,8 @@ class AutonaScoreboardWidget(QWidget):
         self.CommitFocusedEdit()
         before = {team: self._TeamPlayerIds(team) for team in (1, 2)}
         clear()
+        for card in self.playerWidgets:
+            card.DiscardTypedText()
         self.setLoad.lastSetSelected = None
         changed = [team for team in (1, 2)
                    if self._TeamPlayerIds(team) != before[team]]
@@ -2423,11 +2421,13 @@ class AutonaScoreboardWidget(QWidget):
 
         The best of is AutonaActions.SetBestOf's since ADR-005 S2e (it was
         the BEST OF spinbox driven from here), the rows it resizes included.
-        What is still done here is what still needs Qt: **player data**,
-        which SetData resolves against the country, character and skin
-        models (Step 5). Which team an entrant lands on is core's answer
-        (SetLoadService.DisplayTeam), so the swap rule is stated once
-        instead of four times.
+        The players are core's since ADR-005 S3e-3 (PlayerService.ApplyData;
+        they were the cards' SetData, resolving the country, character and
+        skin models): what is still the board's is the roster size it sets
+        for a set's entrants (playerNumber) and the statistics a change of
+        player asks for (_ApplyPlayer). Which team an entrant lands on is
+        core's answer (SetLoadService.DisplayTeam), so the swap rule is
+        stated once instead of four times.
 
         One save cycle for the whole payload, as before.
         """
@@ -2445,8 +2445,9 @@ class AutonaScoreboardWidget(QWidget):
             # The flag and its team's " [L]" names, in core (ADR-005 S2b).
             service.ApplyLosers(data)
 
+            upsetStale = False
             if data.get("entrants"):
-                self._ApplyEntrants(data)
+                upsetStale = self._ApplyEntrants(data)
             elif not self._ApplySinglePlayerData(data):
                 # Neither entrants nor a team/player target: nothing to
                 # apply, and the old code returned here -- before
@@ -2454,17 +2455,27 @@ class AutonaScoreboardWidget(QWidget):
                 # type always carries entrants too.
                 return
 
-            if service.ApplyBracketType(data):
+            if service.ApplyBracketType(data) or upsetStale:
                 self.stats.signals.UpsetFactorCalculation.emit()
 
-    def _ApplyEntrants(self, data):
-        """Pour a set's two entrant rosters into the player widgets."""
-        entrants = data.get("entrants")
-        self.playerNumber.setValue(len(max(entrants, key=lambda x: len(x))))
+    def _ApplyEntrants(self, data) -> bool:
+        """Pour a set's two entrant rosters into the player slots.
 
-        # Lock all player widgets
-        for p in self.playerWidgets:
-            p.dataLock.acquire()
+        True when the upset factor is left to recalculate: the roster went
+        from one player a side to several or back -- the factor is the
+        seeds' distance in singles and 0 otherwise (StatsService.IsSingles)
+        -- and no player's seed moved, which would have recalculated it
+        already (AnnounceChange). The cards' SetData cleared every seed and
+        put it back, so it was recalculated on every load (S3e-3 判断 3);
+        the core load does not when the seeds are the same, and a change
+        between singles and teams left the previous pairing's factor
+        (S3e-3 review).
+        """
+        entrants = data.get("entrants")
+        wasSingles = self.stats.service.IsSingles()
+        self.playerNumber.setValue(len(max(entrants, key=lambda x: len(x))))
+        singlesChanged = self.stats.service.IsSingles() != wasSingles
+        seedMoved = False
 
         try:
             # Kept exactly as it was, `!=` included: no_mains reaches here
@@ -2487,21 +2498,23 @@ class AutonaScoreboardWidget(QWidget):
                         t + 1, data.get(f"p{t + 1}_name"))
 
                 for p, player in enumerate(team):
+                    change = SlotChange()
                     if data.get("overwrite"):
                         # Overwrite path already applies mains via the full
                         # player dict; the old code followed this with a
-                        # redundant mains-only SetData that doubled the
+                        # redundant mains-only load that doubled the
                         # per-player cost on set load. Using elif so the
                         # mains-only path only runs in the non-overwrite case.
-                        teamInstance[p].SetData(player, False, True, noMains)
+                        change = self._ApplyPlayer(
+                            teamInstance[p], player, True, True, noMains)
                     elif data.get("has_selection_data") and noMains != True:
-                        teamInstance[p].SetData(
-                            {"mains": player.get("mains")}, True, False)
+                        change = self._ApplyPlayer(
+                            teamInstance[p], {"mains": player.get("mains")},
+                            False, False)
+                    seedMoved = seedMoved or change.seedChanged
         except Exception as e:
             logger.error(f"Error while setting entrants: {e}")
-        finally:
-            for p in self.playerWidgets:
-                p.dataLock.release()
+        return singlesChanged and not seedMoved
 
     def ApplyPlayerData(self, team, player, data):
         """Apply one player's fields from a remote client (/api/v1 PATCH).
@@ -2552,23 +2565,47 @@ class AutonaScoreboardWidget(QWidget):
 
     def _WritePlayerSlot(self, team, player, data):
         """Write one player slot (1-based team/player). Raises on failure."""
-        for p in self.playerWidgets:
-            p.dataLock.acquire()
+        team = int(team) - 1
+        player = int(player) - 1
 
-        try:
-            team = int(team) - 1
-            player = int(player) - 1
+        teamInstances = [self.team1playerWidgets,
+                         self.team2playerWidgets]
+        card = teamInstances[team][player]
 
-            teamInstances = [self.team1playerWidgets,
-                             self.team2playerWidgets]
-            teamInstance = teamInstances[team]
+        self._ApplyPlayer(card, data, True, False)
+        if data.get("savePlayerToDb", False):
+            card.player.SavePlayerToDB()
 
-            teamInstance[player].SetData(data, False, False)
-            if data.get("savePlayerToDb", False):
-                teamInstance[player].SavePlayerToDB()
-        finally:
-            for p in self.playerWidgets:
-                p.dataLock.release()
+    def _ApplyPlayer(self, card, data, loadFromDB, clear,
+                     no_mains=False) -> SlotChange:
+        """Load a player into `card`'s slot (PlayerService.ApplyData,
+        ADR-005 S3e-3) and ask for the statistics the change calls for,
+        in one save cycle; the change is returned. The card shows the slot
+        from the held cycle (_SchedulePlayerRender), like any write it did
+        not make: a field the operator is typing in shows the load once they
+        leave it, and the text they were typing is held back (HeldBackText)
+        -- where the card's SetData used to put the new text under the
+        caret.
+
+        A load that clears also discards the text typed into the card's
+        combos and never picked (DiscardTypedText), but for the combo the
+        operator is in: the card's SetData started with its Clear(), which
+        put every combo back on its row, and the render only moves a combo
+        whose row is wrong -- the typed text stayed, and the next pick on
+        the card published it (S3e-3 review).
+        """
+        service = card.player
+        change = SlotChange()
+        with StateManager.SaveBlock():
+            before = service.Identity()
+            try:
+                service.ApplyData(data, loadFromDB, clear, no_mains)
+            finally:
+                change = service.ChangeSince(before)
+                card.AnnounceChange(change)
+                if clear:
+                    card.DiscardTypedText(notEditing=True)
+        return change
 
     def UpdateSetData(self, data):
         # An empty payload, or one answering for a set the operator has
@@ -2595,8 +2632,8 @@ class AutonaScoreboardWidget(QWidget):
 
         playerData = PlayerDB.instance.GetPlayerFromTag(tag)
         if playerData:
-            teamInstances[team][player].SetData(
-                    playerData, False, True, no_mains)
+            self._ApplyPlayer(teamInstances[team][player], playerData, True,
+                              True, no_mains)
             return True
         return False
 

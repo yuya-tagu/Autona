@@ -283,6 +283,23 @@ def test_find_state_tolerates_a_missing_country_code():
     assert _catalog.FindState("ZZ", "Tokyo") is None
 
 
+def test_the_table_is_read_with_the_countries_not_on_the_first_lookup(
+        monkeypatch):
+    """The first lookup can come from a player load, which resolves a
+    region under StateManager.lock (PlayerService.ApplyData, ADR-005
+    S3e-3): reading the table there held every other writer up. Load()
+    reads it up front, once -- a lookup after it touches no file."""
+    catalog = CountryCatalog()
+    assert catalog._cityToState is None
+
+    assert catalog.Load() is True
+    assert catalog._cityToState
+
+    monkeypatch.setattr(country_catalog_module, "CITY_TO_STATE_PATH",
+                        "./no/such/table.json")
+    assert catalog.FindState("JP", "Shibuya") == "13"
+
+
 def test_find_state_caches_a_missing_table_instead_of_retrying(
         tmp_path, monkeypatch):
     """The table is read cwd-relatively. When it is absent the catalog must

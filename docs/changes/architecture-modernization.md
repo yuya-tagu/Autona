@@ -2037,3 +2037,200 @@ Start.gg からの Top 8 の取り込みを、Top 8 パネルから core の `To
     - Top 8 にキャラが入った状態で、ゲームを別のゲームに切り替える → パネルを開いていてもいなくても、8 枠のキャラが空になり、OBS の Top 8 のアイコンも消える。同じゲームを選び直す・アプリを再起動する → キャラは残る
   - Web / Stream Deck: `/update-bracket`・Socket.IO `update_bracket` が `OK` を返して取り込む。v1 `POST /api/v1/bracket:refresh` が 202、取り込み中の 2 回目は 409 `CONFLICT`、大会なしは 409 `NOT_READY`
   - ヘッドレス（`python main.py --headless`）: 大会を読み込んで `/update-bracket` または `bracket:refresh` → `top8.*` が書かれ、OBS の Top 8 オーバーレイが変わる。`POST /api/v1/game` で別のゲームに切り替える → Top 8 のキャラが空になる
+
+#### S3e-3 S2f: 選手データの core 化（2026-10-26・PR 未作成）
+
+選手データの読込（カードの `SetData`）・カードのクリア・DB への保存を、選手カードから core の `PlayerService` へ移した。セットの entrants・Web の選手編集（`update_player` / `set_team_data`）・タグからの読込（`load_player_from_tag`）・補完の選択・PLAYERS エディタ・カードのクリアボタンが同じ操作を呼び、カードは操作を依頼して state を描画するだけになった。外部契約（`program_state.json` のキー順・delta、Socket.IO / legacy / v1 の応答、`local_players.json` の形式）は変えていない。移す前の木（ae922c24）でカード・ボードの入口から 11 シナリオを録り、カード経由と core だけの両方で照合している。レビューで、既存の不具合 3 件（読込で前の選手の id・city が残る・スポンサーだけの読込の例外・数値でないスキンの例外）を直し、都市→地域表の読込を `CountryCatalog.Load()` へ移し、互換層 `src/Helpers/AutonaBadWordFilter.py` を削除した（判断 10〜12）。2 回目のレビューで、読込が打ちかけのコンボの文字を残す・メモ欄が描画の残した文字を書き戻す・singles ⇔ チームのセット読込でアップセット係数が古いまま、の 3 件（どれもこの移行で入ったもの）を直した（判断 3・4・9）。Web の 3 入口の `WebServerActions` からの移設は S3e-4 の範囲で、今回は従来の経路のまま core を呼ぶ。
+
+- **実装**
+  - `src/core/PlayerService.py`
+    - `ApplyData(data, loadFromDB=True, clear=True, no_mains=False)`: 旧カードの `SetData` が出していた書き込みを state だけから再現する。1 保存サイクル。順序は、クリア（`_Clear(forLoad=True)`）→ DB の記録 → `data`。後ろの 2 つはそれぞれ `_ApplyFields`（名前 3 欄 → avatar → id → city → twitter → メモ → 国 → 地域 → mains → seed）。最後に合成名と画像を出す（途中で例外が出ても `finally` で出す）。DB の記録は `PlayerDB.lock` の中でコピーし、そのロックを離してから `StateManager.lock` を取る（入れ子にしない）
+    - 旧カードが書かなかったものは書かない。テキストは state と違うときだけ書く（旧カードの `setText` + `editingFinished` は同じ文字なら何も出さなかった）。国・地域・キャラも、旧カードがコンボを動かさなかったものは書かない（表示中の国と、地域の行がどの国のものかを `location` で追う）
+    - 悪語フィルタは `data` と DB の記録の**コピー**にかける（旧実装は呼び出し元の dict と、メモリ上の DB の記録そのものを書き換えていた）
+    - DB の照合は、タグがあるときだけ行う（スポンサーだけでは記録を引けない。旧実装は `PlayerDB.PlayerTag` が `TypeError` を出した）
+    - mains のスキンが数値でなければ、最初のスキン（0）として読み、warning を出す（`_SkinNumber`。判断 7）
+    - 地域の行は `CountryCatalog.StateCodes()` で引く（code と original_code だけ。`States()` は地域ごとに旗のファイルを確かめるので、`StateManager.lock` の中では使わない。判断 11）
+    - `SlotChange(idChanged, seedChanged)` / `Identity()` / `ChangeSince()`: 操作の前後の (id, seed) を比べる。統計のトリガー用
+    - `SlotFromValue(value)` / `_CharacterSlots()`: スロットの `character` の値から、カードが表示する選択（en_name・スキン行・バリアント）を逆引きする（`CharacterValue` の逆）。キャラ数は、S3e-6 までは `character` のキー数で決める（無ければ既定の 3）
+    - `ClearSlot(no_mains)` / `_Clear()`: カードのクリアボタン（旧 `Clear()`）。`AutonaActions._ClearSlot` をここへ移し、`ClearPlayers` も各スロットの `ClearSlot` を呼ぶ。`forLoad` を足した。これは読込の先頭のクリアで、合成名・画像を出さず、国は state に残して隠すだけにする（後に国が来なければ空を出す）。id・city は、読込が持ってこなければ空にする（`keep`。判断 10）
+    - `SavePlayerToDB()`: state から `PlayerDB.fieldnames` の形を組んで `AddPlayers(overwrite=True)` を呼び、キャラスロットを mains 込みで publish し直す（旧カードと同じ）
+  - `src/AutonaScoreboardPlayerWidget.py`
+    - `SetData` / `Clear`: 1 SaveBlock で `ApplyData` / `ClearSlot` → `AnnounceChange` → `_ShowOwnOperation` を行う。`_ShowOwnOperation` は、打ちかけのコンボの文字を捨て、入力中の欄も含めて描画する（エディタは Save / Update のラベルと Delete の有効化も更新する）。モデルの走査・`setText`・`editingFinished` の emit は無くなった
+    - `SavePlayerToDB` は `self.player.SavePlayerToDB()` を呼ぶだけ。補完の選択は `_OnCompleterPick` → `SetData`
+    - `AnnounceChange(SlotChange)`: 統計のシグナル（`playerId_changed` / `player1Id_changed` / `player2Id_changed` / `player_seed_changed`）を出す。旧実装は id・seed のウィジェットのハンドラが、値が動くたびに出していた
+    - `RenderFromState` は `_RenderSlot(over=False)` を呼ぶ（ボードの held サイクル）。`over=True` はカード自身の操作の後で、入力中の欄も描画する（`_LeftAlone`）
+    - `DiscardTypedText(notEditing=False)`: 編集可能なコンボ（国・地域・キャラ / スキン / バリアント）に、選択行と違う打ちかけの文字があれば、シグナルを止めて選択行の文字に戻す（何も書かない）。`notEditing=True` は、入力中のコンボを飛ばす（ボードの読込用。判断 9）
+    - `_OnNoteChanged`: メモ欄も `HeldBackText` で判定する（描画が残した文字に戻る変更は書かない。判断 4）。描画は、入力中のメモ欄を飛ばすとき `LeftAlone` を記録する
+    - `NameChanged` の一括読込ガードを削除した（読込が欄を経由しなくなったため）。`AutonaCountryHelper` / `AutonaBadWordFilter` の import も削除した
+  - `src/AutonaBasePlayerWidget.py`: `dataLock`・`ExportPlayerCity`・ウィジェットの `Clear` を削除した
+  - `src/AutonaScoreboardWidget.py`
+    - `_ApplyPlayer(card, data, loadFromDB, clear, no_mains)`: カードの `player` の `ApplyData` を 1 SaveBlock で呼び、前後の比較で `card.AnnounceChange` を呼ぶ。クリアする読込の後は `card.DiscardTypedText(notEditing=True)` を呼ぶ（判断 9）。`SlotChange` を返す
+      - 呼ぶのは `_ApplyEntrants`・`_WritePlayerSlot`・`LoadPlayerFromTag`。カードの `SetData` は経由しない
+      - `_WritePlayerSlot` は、`savePlayerToDb` があれば続けて `card.player.SavePlayerToDB()` を呼ぶ
+      - `playerNumber.setValue` は残した（S3e-6 の範囲）
+      - `_ApplyEntrants` は、人数が singles ⇔ チームで変わり、どの選手の seed も動かなかったとき True を返し、`ChangeSetData` がアップセット係数を 1 回計算させる（`bracket_type` の変化と合わせて 1 回。判断 3）
+    - `NewSetSelected` / `_ApplyEntrants` / `_WritePlayerSlot` から `dataLock` を削除した
+    - `_ClearingPlayers`: クリアの後に、各カードの `DiscardTypedText()` を呼ぶ
+  - `src/AutonaWebServerActions.py`: `update_player` のコメントだけ変えた（書き込みは core。GUI スレッドに渡すのは、ロスターの確認と統計のため）
+  - `src/core/CountryCatalog.py`: `Load()` が都市→地域表も 1 回読む。旗を解かないリーダー `StateCodes()` を足した（判断 11）
+  - `src/AutonaPlayerBrowserWidget.py`: エディタの読込の後の Save / Update ラベル・Delete の更新の重複を削除した（読込の `_ShowOwnOperation` が行う。新規登録のときだけ呼ぶ）
+  - コメント・docs の追随: `AutonaSelectSetWindow.py`・`core/SetLoadService.py`・`core/CountryCatalog.py`・`.claude/known-smells.md`（S-01）・`docs/tasks/implement-startup-step3f-data-side-effects.md`
+  - `src/Helpers/AutonaBadWordFilter.py` を削除した（判断 12）
+- **判断と理由**
+  1. **読込を state への 1 操作にし、カードはそれを描画する**（設計どおり）
+     - 旧 `SetData` は、フォームに入力してハンドラに書かせる形だった。そのため Set 列がウィジェットの状態（どのコンボがどの行を出しているか）で決まっていた
+     - `ApplyData` は「旧カードが何を書いたか」を state から再現し、書かなかったものは書かない
+     - 録画との照合では、Set 列・保存サイクル・統計のトリガー・最終の state（キー順込み）・カードの表示・`local_players.json` のバイトが一致する。意図した差分は判断 2・3 と、エディタのクリアの順序（下の pin）だけ
+  2. **同じキーへの連続した書き込みは 1 回にまとめた**
+     - 旧カードは、コンボが 1 つ動くたびにキャラスロット全体を publish していた（3 行が動けば 3 回）
+     - delta は前回の保存との差分なので、まとめても `program_state.json` と Socket.IO の delta は変わらない
+     - 照合では、その区間だけ連続を 1 つにして比べる（`tests/test_player_slot_publish.py` も同じ）
+  3. **統計は、正味の変化 1 回につき 1 回だけ取り直す**
+     - 旧実装は、seed のスピンボックスが動くたびにアップセット係数を計算し直していた。読込の先頭のクリアで 0 になり、読込で元の値に戻る
+     - そのため、同じ seed の選手を上書きすると（同じ選手の読み直し・セットの再読込）、変わっていない seed のためにカード 1 枚あたり 2 回計算していた
+     - 今は操作の前後で比べる（`SlotChange`）。seed も id も変わらなければ何も出さない
+     - ただし係数は singles のときだけ seed の差で、チームでは 0（`StatsService.IsSingles`）。旧実装は読込のたびに計算していたので、seed が同じでもセット読込で singles ⇔ チームが変われば計算し直されていた。今は、人数がそう変わり、どの seed も動かなかったセット読込で 1 回計算する（2 回目のレビュー指摘。それまでは前の組み合わせの係数が残った）。他の場面の回数は変えない
+  4. **読込は、入力中の欄を上書きしない**（S3e-2 までに確立した HeldBackText の規則 (b)）
+     - セットの entrants・Web の選手編集・タグからの読込は、カードから見れば「別の所からの書き込み」になった。カードは、他の書き込みと同じく held サイクルで描画する
+     - 入力中の欄は描画で飛ばし、欄を離れると読込の値が出る。打っていた文字は書かない（その欄の値が別の所で書かれたので、その書き込みが勝つ）
+     - 旧実装は、打っている欄の文字をカーソルの下で読込の値に置き換えていた
+     - メモ欄（`custom_textbox`）も同じ規則にした（2 回目のレビュー指摘）。メモ欄はキーごとに書くので、描画が残した文字に戻る変更（選択した 1 文字を同じ文字で打ち直す等）で、読込の上に古いメモを書き戻していた。今はそれを書かず、欄を離れると読込の値が出る。打ち足した文字は書く
+  5. **カード自身の操作（補完の選択・クリアボタン・エディタの読込）の後は、入力中の欄も含めて描画する**。補完は、操作者が入力中のタグ欄から選ぶので、選んだ選手がその欄にすぐ出なければならない。描画の後に欄を離れても何も書かない（欄の文字が state と同じため）
+  6. **`dataLock` を削除した**。`SetData` とカードのハンドラを直列にするためのロックだった。使い手はすべて GUI スレッドにいて（Web の選手編集も `@gui_thread_sync` / queued シグナルで GUI スレッドに渡る）、読込は `StateManager.lock` の中の 1 操作になったので不要
+  7. **mains の正規化はデスクトップのアダプタに残す**（委任時の論点。S3c-2 判断 5 のまま）
+     - `AutonaPlayerDB._BuildModel` は、読み込んだゲームの mains をその場で `[キャラ, スキン（数値）, バリアント or ""]` に揃える。次の保存で、その形が `local_players.json` に出る
+     - core に移すと、ヘッドレスの `local_players.json` と `/playerdb` の出力が変わる（外部契約）
+     - 読込（`_ApplyMains`）は両方の綴り（長さ 2 / 3・数字の文字列のスキン）を同じに読むので、state はシェルによらず同じになる
+     - 数値でないスキンは、読込（`_SkinNumber`）もアダプタと同じく 0 として読み、warning を出す（レビューで追加。それまでは、ヘッドレスでは DB の記録でも `ValueError` になり、キャラが書かれなかった）。これで読込の結果にシェル間の差は無い。違いは `local_players.json` に保存される綴りだけ（デスクトップは揃えた形、ヘッドレスは保存されていた形のまま）
+  8. **エディタ（`player_editor.1`）は、自分の操作の後だけ描画する**
+     - `RenderFromState` は `score.*` 以外では何もしない（エディタは held サイクルを持たない）。そのため `SetData` / `Clear` の後に `_ShowOwnOperation` で描画する
+     - `SavePlayerToDB` は state から組むので、ダイアログを閉じるたびに `player_editor.*` を消す既存の処理（`done()` → `StateSchema.ClearPlayerEditor()`）が前提になる。accept / reject / ×のどれも `done()` を通ることを確認した。消さないと、次の「新規登録」に前の選手の欄が混ざる
+  9. **S2d で未確認だった「コンボに打ちかけた文字が、クリアの後も残る」を確かめ、直した**
+     - 描画は、行が違うコンボしか動かさない。そのため、空の行を出しているコンボに打った名前は、クリアの後も空のスロットの上に残っていた（直す前にテストが失敗することを確認した）
+     - ボードのクリア（`_ClearingPlayers`）とカードのクリアボタンの後に、`DiscardTypedText()` で捨てる（何も書かない）
+     - クリアする読込（セットの entrants・タグからの読込）の後も捨てる（2 回目のレビュー指摘）。旧カードの `SetData` は `Clear()` で全コンボを行に戻していたが、core の読込は描画に任せるので、行が正しいコンボの打ちかけの文字が残り、カードで別のコンボを選ぶと、その文字がキャラとして state に書かれ OBS に出た。ただし入力中のコンボは飛ばす（判断 4 と同じく、別の所からの書き込みは打っている文字を取らない）。クリアしない読込（Web の選手編集）は対象外
+  10. **読込の先頭のクリアは、読込が持ってこない id・city も空にする**（レビューでのオーケストレータ判断。既存の不具合の修正）
+     - 旧カードのクリアは名前のハンドラを止めて走るので、id・city を消さなかった。そのため id を持たない選手（ローカル DB からのタグ読込・補完の選択・start.gg のアカウントが無い entrant）を読むと、前の選手の id・city が残り、id で引く統計が前の選手のまま出続けた
+     - 空にするのは、読込が持ってこないときだけ。持ってくるなら読込がそのまま上書きする（None を挟んで 2 回書かない）。同じ選手の読み直しは id も city も書かないので、統計を取り直さない。結果の state は「空にしてから読む」と同じで、この形にしたのは、録画の他のステップの Set 列を変えないため
+     - id が変わる（None になる場合も含む）ので、統計が取り直される（`SlotChange`）
+     - クリアしない読込（Web の選手編集 `update_player`）は対象外。部分更新なので id・city は残る（旧実装と同じ。下の「既存の不具合」）
+  11. **都市→地域表は `CountryCatalog.Load()` で読む**（レビュー指摘）
+     - 最初の `FindState` が選手の読込から来ると、表（約 2.6 MB）の初回の読込が `StateManager.lock` の中で走り、その間、他スレッドの書き込みと delta の送出が待った
+     - 起動時の国データの読込（`Load()`。デスクトップは `AutonaCountryHelper.init()`、ヘッドレスは `src/headless.py`）で 1 回だけ読む（実測で約 20 ms）。ロケールで変わらないので、再ロードでは読み直さない。`Load()` していないカタログ（テスト）は、従来どおり最初の照会で読む。import の副作用はゼロのまま
+     - 地域の照合は、旗のパスを解かない `StateCodes()` で行う（2 回目のレビュー指摘。`States()` は地域の数だけ `os.path.exists` を呼んでいた）
+     - アバター・スポンサーロゴのディスクの確認は、`StateManager.lock` の中に残る（下の「残置」。受け入れ済み）
+  12. **互換層 `src/Helpers/AutonaBadWordFilter.py` を削除した**（レビュー指摘）。`src` からの呼び出しが無くなったため。テストは core の `BadWordFilter.instance` に向け直し、`tests/test_import_side_effects.py` がこのモジュールの復活を検知する
+- **外から見える変化**
+  - 入力中の欄に読込（セットの読込・Web の選手編集・タグからの読込）が来ても、打っている文字はそのまま残る。欄を離れると読込の値が出て、打っていた文字は書かれない（判断 4。旧実装は、打っている欄の文字が読込の値に置き換わった）
+  - 国・キャラのコンボに打ちかけた文字（行を選んでいないもの）は、クリアと、セット・タグからの読込で消える（入力中のコンボは残る。判断 9）
+  - メモ欄に入力中に読込が来ても、離れると読込のメモが出る（打ち足した文字は書く。判断 4）
+  - 同じ seed・同じ id の選手を上書きしても（同じ選手の読み直し・セットの再読込）、アップセット係数を計算し直さない（判断 3。値は同じなので state は変わらない）。singles ⇔ チームが変わるセット読込では 1 回計算する
+  - 悪語フィルタが ON のとき、読み込んだ選手の伏せ字が `local_players.json` に保存されることが無くなった（下の「修正済み」）
+  - id を持たない選手を別の選手の上に読み込むと（クリアあり）、id と city が空になり、統計が取り直される（判断 10。旧実装は前の選手の id・city・統計が残った）
+  - スポンサーだけ（タグ無し）の選手データの読込が、例外にならずにスポンサーを入れる（DB の照合はしない）
+  - mains に数値でないスキンがあっても例外にならず、最初のスキンで入る（warning のログ）
+  - 起動時に都市→地域表を読む（約 20 ms。判断 11）
+  - 上の不具合の修正で値が変わる場合を除き、`program_state.json`・Socket.IO の delta・legacy / v1 の応答・`local_players.json` のバイトは変わらない
+- **pin**
+  - `tests/test_player_apply.py`（新規）
+    - golden（`tests/fixtures/player_apply/golden.json`）を、ae922c24 でカード・ボードの入口から録画した。記録したのは、結果・保存サイクル・統計のトリガー・Set 列・サブツリー全体とキー順・カードの表示・`local_players.json`
+    - シナリオは 11（`tests/fixtures/player_apply/scenarios.py`）
+      - DB とのマージ
+      - 選手の上書き（id・seed・city の持ち越しを含む）
+      - no_mains（キャラが 1 行のときと複数行のとき）
+      - 国と地域（未知の国・未知の地域・自由記述の地域名・カスタム国旗）
+      - キャラ（旧形式の mains・範囲外のスキン・未知のキャラ / バリアント・他のゲームの mains）
+      - DB への保存
+      - PLAYERS エディタ
+      - 悪語フィルタ ON
+      - タグからの読込
+      - Web の選手編集（`savePlayerToDb` を含む）
+      - セットの entrants
+    - 同じ入口で再生して照合する。意図した差分は `scenarios.CHANGES` に置いた（2 ステップ）
+      - 判断 3 の 1 ステップ（「a set's entrants」の 2。もう 1 ステップの「a player over another」の 1 は、下の録り直しに含めた）
+      - エディタのクリアの Set の順序（1 ステップ）。ボードのクリアと同じ順になった。1 サイクルの中の既存キーの上書きなので観測できず、各キーの最終値で比べる
+    - レビューの修正（判断 10、スポンサーだけの読込）で変わったステップは、S3e-3 の木で録り直した（golden の該当ステップに `rerecorded` の印。他のステップは ae922c24 の録画のまま）。変わったキーは次のとおり（どれもボード 1）
+      - 「a player over another」（スロット 1-1）
+        - 1（id 303・city なしの NEXT を、id 101・city Kyoto の TAG の上に）: `city` が "Kyoto" → null（Set 列に `city` = null が増える）。統計の `UpsetFactorCalculation` が 2 → 0（判断 3。それまで `CHANGES` で当てていたもの）
+        - 2（id なしの THIRD）: `id` が 303 → null（Set 列に `id` = null が増える）。統計の `RecentSetsSignal` / `LastSetsP1Signal` / `PlayerHistoryStandingsP1Signal` が 0 → 1。`city` は前のステップから null
+        - 3（クリアしない部分更新）: Set 列は同じ。state の `id` / `city` が null のまま（前のステップの続き）
+        - 4（クリアしない・id 303・city Kyoto）: 最終の state は録画と同じ。Set 列に `id` = 303 と `city` = "Kyoto" が増え、統計の 3 種が 0 → 1
+      - 「load with the database」の 2（スポンサー "ONLY" だけを、DB 照合付きで、id 202・国 US の LEG がいるスロット 2-1 に）
+        - 結果: `TypeError` → 例外なし
+        - `team`（スポンサー）に "ONLY" が書かれる。このスロットに無かったキーなので、dict の末尾に足される（keyOrder が変わる）
+        - `mergedName` が "" → "ONLY | "、`id` が 202 → null、`country` が US → `{}`（旧実装は例外で「国なし」の公開が飛ばされ、表示は空なのに state に US が残っていた）
+        - 統計の `RecentSetsSignal` / `LastSetsP2Signal` / `PlayerHistoryStandingsP2Signal` が 0 → 1
+    - AST
+      - カードの `SetData` / `Clear` / `SavePlayerToDB` / `_OnCompleterPick` / `_ShowOwnOperation` に、モデルの走査・値の設定（`setText` など）・`emit` が無い
+      - カードが `AutonaCountryHelper` / `AutonaBadWordFilter` を import しない
+      - ボードの 3 入口がカードの `SetData` を呼ばない
+      - `dataLock` が残っていない
+    - エディタの読込・保存・クリアが `score` を 1 つも書かず、ボードのカードの表示も変えない（pitfalls #7）
+  - `tests/test_player_service.py`
+    - 同じ golden のうち、ボードの操作を使わない 9 シナリオを `PlayerService` だけで（Qt なしで）再生する
+    - `local_players.json` は、デスクトップの mains の正規化を両側に当てて比べる（判断 7）
+    - `ApplyData` が、渡された dict と DB の記録を書き換えない
+    - レビューの修正（どれも直す前に失敗することを確認した）
+      - id・city を持たない選手の読込で、両方が空になり、`idChanged` になる
+      - スポンサーだけの読込が例外にならず、DB の記録を引かない
+      - dict 形式の mains の数値でないスキン（`"x"` / None / `""`）と、DB の記録の数値でないスキンが、スキン 0 で入り、warning が出る
+    - id・city を持ってくる読込は、それぞれ 1 回だけ書き（None を挟まない）、同じ選手の読み直しは書かない。クリアしない読込は id・city を残す
+  - `tests/test_find_state.py`: `Load()` が都市→地域表を読み、その後の照会はファイルに触れない（直す前に失敗することを確認した）
+  - `tests/test_bad_word_filter.py`: 互換層の転送のテストを、core の `BadWordFilter.instance` の 3 つの入口のテストにした。`tests/test_import_side_effects.py`: 互換層の import を外し、互換層が戻ってきたら失敗する
+  - `tests/test_player_card_render.py`
+    - 入力中のタグ欄に Web の選手編集が来ても、打っている文字が残る。離れると読込の値が出て、何も書かず、id も残る
+    - 補完の選択が、入力中の欄にすぐ出る
+    - ボードのクリアとカードのクリアボタンが、コンボの打ちかけの文字を捨てる（直す前に失敗することを確認した）
+    - 2 回目のレビューの修正（どれも直す前に失敗することを確認した）
+      - 国とキャラ 2 行目に打って選ばずに離れ、セット読込・タグからの読込をすると、文字が消え、別のスキンを選んでも打った名前が state に入らない
+      - 入力中の国のコンボは、読込の後も打っている文字が残る（詳細ダイアログを実際に表示してフォーカスする）
+      - メモ欄に入力中に Web の選手編集が来る → 選択した 1 文字の打ち直しは何も書かない → 離れると読込のメモが出る → 打ち足すと書く
+      - singles ⇔ チームのセット読込で、アップセット係数の計算が 1 回だけ出て値が合う。同じセットの読み直しでは出ない
+  - `tests/test_country_catalog.py`: `StateCodes()` が `States()` の code / original_code と同じで、ディスクに触れず、コピーを返す
+    - ボード操作の録画（`tests/fixtures/board_operations/golden.json`）のうち、判断 10 で変わったステップを `S3E3_CHANGES` に置いた（`_withChanges` に、state の値を差し替える `values` を足した）。どれもボード 1 で、id は関わらない（この録画の選手は id を持たない）
+      - 「load a set」「load a losers set that grows the roster」（city の無い E1・L1 を、ALPHA（city Shibuya）がいたスロットに読む）: `team.1.player.1.city` が "Shibuya" → null。`stateDigest` と反映の delta も変わる
+      - その後の「reset all inputs」（クリアは city を消さない）と、スワップ後の「swap teams with a losers side」「load the losers flags while swapped」（`team.2.player.1.city`）も null のまま
+      - 「two players again」: state は録画と同じ。ALPHA を入れ直して city が戻る分だけ、反映の delta が変わる
+      - cycles とキー順は録画のまま（`city` のキーは前からあった）
+  - `tests/test_player_slot_publish.py`: 「set data」系のステップは、同じキーへの連続を 1 つにして比べる（判断 2）
+- **残置 / リスク**
+  - アバター・スポンサーロゴのディスクの確認が、`StateManager.lock` の中で走るようになった（旧実装は GUI スレッドで、state のロックの外だった）。都市→地域表の初回の読込は `Load()` へ移し、地域の照合は旗を確かめない `StateCodes()` にした（判断 11）。残るのは選手 1 人あたりアバター・ロゴの数回で、受け入れた
+  - seed のスピンボックスの上限（100000）での丸めが無くなった。state にはそのまま入り、カードの表示は 100000 で止まる。実データでは起きない値
+  - `update_player` / `set_team_data` / `load_player_from_tag` は、従来どおり `WebServerActions` 経由で GUI スレッドに渡る（S3e-4 の範囲）。`DesktopBoardHost` が GUI スレッドで実行する理由（手入力の確定がフィールド → 合成名の 2 書き込みに分かれる）も残っている
+- **既存の不具合（報告のみ・未修正）**
+  - **クリアしない読込で選手名を別の選手に書き換えても、id と city が残る（配信事故の可能性）**
+    - 起きる場面: Web UI の選手欄の確定。Web UI は確定のたびに、id を含まない選手データを `PATCH .../players/{p}`（`update_player`）で送り、core はクリアせずに上書きする（部分更新）
+    - デスクトップのカードは、名前の手入力で id を空にする（`NameChanged` → `ExportPlayerId(None)`）ので、2 つの入口で挙動が違う。旧実装も同じ
+    - 直すなら、部分更新でスポンサー・タグが変わったときに id・city を空にする（Web の入口を移す S3e-4 で扱うのが自然）
+  - 選手のクリア（カードのクリアボタン・ボードの選手のクリア・全リセット）は city を消さない。名前の無いスロットに前の選手の city が残る（旧実装も同じ。オーバーレイは city を読まないので、表示は変わらない。次の読込が city を持ってこなければ、今は空にする。配信事故にはならない）
+  - `general.disable_overwrite` のときの `UpdateSetData` には 3 つの問題がある
+    - DB との照合を、タグだけ（スポンサー抜き）で、各 entrant の 1 人目にしか行わない
+    - 受け取ったペイロードを書き換える
+    - 配信事故にはならない
+- **既存の不具合（修正済み）**
+  - 読込の先頭のクリアが id・city を消さず、id を持たない選手を読むと、前の選手の id・city と統計が残った（判断 10。配信事故につながるもの）
+  - スポンサーだけでタグが無い選手データを DB 照合付きで読むと `TypeError` になり、クリアの後で読込が止まった（スロットは空になり、スポンサーは入らず、表示は空なのに state に前の選手の国が残った）。タグが無ければ照合しない
+  - mains が dict 形式でスキンが数値でないと `ValueError` になり、キャラが書かれなかった（ヘッドレスでは DB の記録でも起きた）。最初のスキンとして読み、warning を出す
+  - 悪語フィルタが、呼び出し元の dict とメモリ上の DB の記録を書き換えていた。悪語フィルタが ON のときに DB の選手を読み込むと、その記録の名前などが伏せ字になり、次の DB の保存（別の選手の保存・entrants の取り込み）で、伏せ字が `local_players.json` に書かれた
+  - コンボに打ちかけた文字が、クリアの後も残っていた（判断 9。S2d の残置）
+- **リリースノート案**
+  - 選手名などを入力している途中にセットの読込や Web からの選手編集が来ても、入力中の文字が勝手に置き換わらなくなった（欄を離れると、読み込んだ内容が表示される）
+  - クリアすると、国・キャラ欄に入力しかけていた文字も消えるようになった
+  - 不適切語フィルタが有効なとき、伏せ字にした名前が選手 DB に保存されることがある問題を修正した
+  - スコアボードに選手を読み込んだとき（選手 DB から読み込んだ選手・Start.gg のアカウントが無い選手など）、前の選手の戦績・直近の対戦が残って表示されることがある問題を修正した
+- **実機確認（オーナー）**
+  - デスクトップ・スコアボード
+    - 選手名欄に打ち、補完候補から選ぶ → その場でスポンサー・タグ・国・キャラが埋まり、反映後に OBS にも出る
+    - Start.gg のセットを読み込む → 両チームの選手・国・キャラが今までどおり入り、統計（直近の対戦・戦績・アップセット係数）が出る。同じセットを読み直しても表示は変わらない
+    - 選手名欄に打っている途中に、Web UI からその選手を編集する（またはセットを読み込む）→ 欄は打っている文字のまま。欄を離れると読み込んだ名前が出て、打っていた文字は反映されない
+    - 国かキャラのコンボに文字を打ち、候補を選ばずにカードのクリア・全クリアを押す → 文字が消える
+    - カードのクリアボタン → 今までどおり空になる（誕生日は残る）
+    - Start.gg のセットで選手を入れた後、同じ枠に選手 DB の選手を読み込む（補完で選ぶ、または `load_player_from_tag`）→ 統計（直近の対戦・戦績）が前の選手のまま残らない
+  - PLAYERS（選手リスト）のエディタ
+    - 「新規登録」で名前・国・キャラを入れて Save new player → 一覧に出る。閉じてからもう一度「新規登録」を開く → 空で、前の選手の欄が残っていない
+    - 既存の選手を編集で開く → 欄が埋まっている。キャラを変えて Update player → `local_players.json` に反映され、スコアボードの選手は変わらない
+    - エディタのクリア → スコアボードは変わらない
+  - Web / Stream Deck
+    - Web UI の選手編集（名前・国・キャラ、`savePlayerToDb` 付き）→ スコアボードと DB に入る
+    - legacy / Socket.IO の `load_player_from_tag` → DB の選手が入る
+  - 悪語フィルタ ON: 不適切語を含む選手を読み込む → 表示は伏せ字になる。別の選手を保存した後も、`local_players.json` のその選手の元の名前が変わっていない

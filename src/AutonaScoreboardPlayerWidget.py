@@ -9,12 +9,11 @@ from qtpy import uic
 # PySide6-only, and the binding is pinned (CLAUDE.md / build-and-release.md).
 # Used by _releaseLayoutItemWrappers below; see tests/test_wrapper_lifetime.py.
 from shiboken6 import Shiboken
-from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
 from .core.CountryCatalog import CountryCatalog
 from .core.DictHelper import deep_clone
-from .core.PlayerService import CharacterSlot
+from .core.PlayerService import CharacterSlot, SlotChange
 from .core.StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaPlayerDB import AutonaPlayerDB
@@ -26,7 +25,6 @@ from . import ui_layout as L
 from .Workers import Worker
 from .AutonaBasePlayerWidget import AutonaBasePlayerWidget
 import threading
-from .Helpers.AutonaBadWordFilter import AutonaBadWordFilter
 from loguru import logger
 
 
@@ -91,8 +89,6 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
     characterModel = None
     _deleted = False
 
-    # dataLock is set per-instance in _initBasePlayerWidget(); see base class.
-
     def __init__(self, index=0, teamNumber=0, path="", *args):
         super().__init__(*args)
 
@@ -106,14 +102,19 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         # The slot as of the last complete RenderFromState (None: render
         # everything next time).
         self._renderedSlot = None
+        # True while a render shows the slot in the fields the operator is
+        # in as well: a load the operator asked this card for (SetData) or
+        # its clear button.
+        self._renderingOver = False
         # The widgets the last render left alone because the operator was
         # editing them; once focus has left all of them, the card asks for
         # another render (_OnFocusChanged).
         self._focusSkipped = []
-        # By field: the text each line edit last showed in step with the
-        # state, and the text a render had to leave in one the operator was
-        # in. Finishing the edit with the latter is not an edit
-        # (_OnTextChanged); text typed since is (HeldBackText).
+        # By field: the text each line edit (and the note) last showed in
+        # step with the state, and the text a render had to leave in one the
+        # operator was in. Finishing the edit with the latter is not an edit
+        # (_OnTextChanged / _OnNoteChanged); text typed since is
+        # (HeldBackText).
         self._heldBack = HeldBackText()
 
         uic.loadUi(AutonaResolve("src/layout/AutonaScoreboardPlayer.ui"), self)
@@ -686,64 +687,78 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             self.player.SetText(field, text)
 
     def _OnNoteChanged(self):
-        # textChanged, i.e. every keystroke, plus the explicit re-emits of
-        # SetData / Clear right after their setPlainText: the state already
-        # holding the text is not news (see _OnTextChanged).
+        # textChanged, i.e. every keystroke (a render's setPlainText is
+        # blocked), under _OnTextChanged's rule: the state already holding
+        # the text is not news, and neither is the text a render left in
+        # the note while the operator was in it (HeldBackText) -- a change
+        # that ends on it (a selected character typed over with itself)
+        # used to put the old note back over a load. Typing on is theirs
+        # (ADR-005 S3e-3 review).
         text = self.custom_textbox.toPlainText()
-        if self._StateValue(schema.PLAYER_NOTE_KEY) == text:
-            return
-        self.player.SetText(schema.PLAYER_NOTE_KEY, text)
+        field = schema.PLAYER_NOTE_KEY
+        if self._heldBack.IsEdit(field, text, self._StateValue(field) == text):
+            self.player.SetText(field, text)
 
     def _OnLocationChanged(self, field, combo: QComboBox):
-        # Which row is shown has just been decided here (LoadStates /
-        # SetData / the operator); only its code leaves the widget, and
-        # PlayerService builds the published value from the country catalog
-        # (ADR-005 S1d). No code -- the blank row, a typed name that matches
-        # no row, the custom-flag separator -- publishes "no location".
+        # Which row is shown has just been decided here (LoadStates / the
+        # operator); only its code leaves the widget, and PlayerService
+        # builds the published value from the country catalog (ADR-005
+        # S1d). No code -- the blank row, a typed name that matches no row,
+        # the custom-flag separator -- publishes "no location".
         data = combo.currentData()
         code = data.get("code") if isinstance(data, dict) else None
         if field == schema.PLAYER_COUNTRY_KEY:
             self.player.SetCountry(code)
         else:
-            # The region index points into the rows LoadStates built, so the
-            # code is resolved against the country it built them for -- not
-            # the one the country combo shows, which can differ while
-            # SetData runs (its Clear() empties the country with the
-            # signals blocked and leaves the rows alone). The one region
+            # The region index points into the rows LoadStates (or a render)
+            # built, so the code is resolved against the country they were
+            # built for, which is what the index means. The one region
             # publish LoadStates makes itself, before it records the code,
             # is the blank row, which needs no country.
             self.player.SetRegion(
                 getattr(self, "_loadedStatesCountryCode", None), code)
 
     def NameChanged(self):
-        # Skip during bulk SetData; will be called once at the end
-        if getattr(self, '_bulk_updating', False):
-            return
-        with self.dataLock:
-            team = self.findChild(
-                QLineEdit, schema.PLAYER_SPONSOR_KEY).text()
-            name = self.findChild(QLineEdit, schema.PLAYER_TAG_KEY).text()
-            merged = team + " " + name
+        # The operator finished the sponsor or the tag. A load no longer
+        # comes through here (SetData is core's since ADR-005 S3e-3 and
+        # sets no field), so there is no load to wait for.
+        team = self.findChild(
+            QLineEdit, schema.PLAYER_SPONSOR_KEY).text()
+        name = self.findChild(QLineEdit, schema.PLAYER_TAG_KEY).text()
+        merged = team + " " + name
 
-            if merged != self.lastExportedName:
-                self.ExportMergedName()
-                self.ExportPlayerImages()
-                self.ExportPlayerId()
+        if merged != self.lastExportedName:
+            self.ExportMergedName()
+            self.ExportPlayerImages()
+            self.ExportPlayerId()
 
-            self.lastExportedName = merged
+        self.lastExportedName = merged
 
     def ExportPlayerId(self, id=None):
-        with self.dataLock:
-            # The service reports whether the slot actually changed hands;
-            # the statistics fetches below must not re-run for a re-asserted
-            # id (that guard used to be the `if` around the write itself).
-            if self.player.SetPlayerId(id):
-                if "score" in self.path:
-                    self.instanceSignals.playerId_changed.emit()
-                    if "team.1" in self.path:
-                        self.instanceSignals.player1Id_changed.emit()
-                    else:
-                        self.instanceSignals.player2Id_changed.emit()
+        # The service reports whether the slot actually changed hands; the
+        # statistics fetches must not re-run for a re-asserted id (that
+        # guard used to be the `if` around the write itself).
+        self.AnnounceChange(
+            SlotChange(idChanged=self.player.SetPlayerId(id)))
+
+    def AnnounceChange(self, change: SlotChange):
+        """Ask for the statistics a change of this slot calls for: the
+        recent sets and the team's last sets / standings when another
+        player is in it, the upset factor when its seed moved. The board
+        relays the card's signals to its statistics.
+
+        Emitted inside the save block of the write that changed it, as the
+        widget handlers that used to emit them were: the statistics write
+        `recent_sets` / `upset_factor` synchronously, into the same cycle.
+        """
+        if change.idChanged and "score" in self.path:
+            self.instanceSignals.playerId_changed.emit()
+            if "team.1" in self.path:
+                self.instanceSignals.player1Id_changed.emit()
+            else:
+                self.instanceSignals.player2Id_changed.emit()
+        if change.seedChanged:
+            self.instanceSignals.player_seed_changed.emit()
 
     # ── render: the slot, from the state (ADR-005 S2a) ───────────────────
     #
@@ -793,7 +808,19 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         """
         if self._deleted or self.player.BoardNumber() is None:
             # Board cards only. The PLAYERS panel's editor (player_editor.1)
-            # is a draft the operator types into, and nothing else writes it.
+            # is a draft the operator types into, and only the editor itself
+            # writes it -- its loads (SetData) and its clear show what they
+            # wrote themselves (_RenderSlot).
+            return True
+        return self._RenderSlot()
+
+    def _RenderSlot(self, over=False) -> bool:
+        """RenderFromState for any card, the editor included. `over`: show
+        the slot in the fields the operator is in too -- for an operation
+        the operator ran on this card (a name picked from the completer
+        while still in the tag field, the clear button), whose result is
+        what they asked to see."""
+        if self._deleted:
             return True
         slot = self._ReadRenderedSlot()
         if slot == self._renderedSlot:
@@ -803,7 +830,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         sponsor = self._w(schema.PLAYER_SPONSOR_KEY, QLineEdit)
         tag = self._w(schema.PLAYER_TAG_KEY, QLineEdit)
         shownName = (sponsor.text(), tag.text())
-        with self.dataLock:
+        self._renderingOver = over
+        try:
             results = [self._RenderText(field, slot.get(field))
                        for field in schema.PLAYER_TEXT_KEYS]
             results.append(
@@ -814,20 +842,22 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 slot.get(schema.PLAYER_COUNTRY_KEY),
                 slot.get(schema.PLAYER_STATE_KEY)))
             results.append(self._RenderCharacters(slot.get("character")))
-            if ((sponsor.text(), tag.text()) != shownName
-                    or sponsor in self._focusSkipped
-                    or tag in self._focusSkipped):
-                # The name the slot already has a display name for:
-                # NameChanged compares against this to tell a new player in
-                # the slot (it then re-derives the images and drops the id)
-                # from a focus-out that changed nothing -- and a name field
-                # left with held-back text in it from one that must publish
-                # nothing either.
-                self.lastExportedName = (
-                    self._ExportedNameText(
-                        schema.PLAYER_SPONSOR_KEY, sponsor, slot)
-                    + " "
-                    + self._ExportedNameText(schema.PLAYER_TAG_KEY, tag, slot))
+        finally:
+            self._renderingOver = False
+        if ((sponsor.text(), tag.text()) != shownName
+                or sponsor in self._focusSkipped
+                or tag in self._focusSkipped):
+            # The name the slot already has a display name for:
+            # NameChanged compares against this to tell a new player in
+            # the slot (it then re-derives the images and drops the id)
+            # from a focus-out that changed nothing -- and a name field
+            # left with held-back text in it from one that must publish
+            # nothing either.
+            self.lastExportedName = (
+                self._ExportedNameText(
+                    schema.PLAYER_SPONSOR_KEY, sponsor, slot)
+                + " "
+                + self._ExportedNameText(schema.PLAYER_TAG_KEY, tag, slot))
 
         complete = all(results)
         self._renderedSlot = slot if complete else None
@@ -869,6 +899,11 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         view = widget.view()
         return view is not None and view.isVisible()
 
+    def _LeftAlone(self, widget) -> bool:
+        """The render in progress leaves `widget` alone: the operator is in
+        it, and the render is not one over their fields (_RenderSlot)."""
+        return not self._renderingOver and self._Editing(widget)
+
     def _LeaveForFocus(self, *widgets):
         """Note widgets a render left alone because they were being edited."""
         for widget in widgets:
@@ -900,12 +935,9 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         if shown == text:
             self._heldBack.Shown(field, text)
             return True
-        if self._Editing(widget):
+        if self._LeftAlone(widget):
             self._LeaveForFocus(widget)
-            if not note:
-                # The note publishes every keystroke, so nothing of it is
-                # ever left to finish.
-                self._heldBack.LeftAlone(field, shown, text)
+            self._heldBack.LeftAlone(field, shown, text)
             return False
         with QSignalBlocker(widget):
             if note:
@@ -968,7 +1000,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 and self._ComboCode(region) == regionCode):
             return True
         editing = [combo for combo in (country, region)
-                   if self._Editing(combo)]
+                   if self._LeftAlone(combo)]
         if editing:
             self._LeaveForFocus(*editing)
             return False
@@ -1044,7 +1076,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         if self._ShownCharacter(character, color, variant) == value:
             return True
         editing = [combo for combo in (character, color, variant)
-                   if self._Editing(combo)]
+                   if self._LeftAlone(combo)]
         if editing:
             self._LeaveForFocus(*editing)
             return False
@@ -1372,8 +1404,11 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         if AutonaPlayerDB.model:
             name_edit = self._w(schema.PLAYER_TAG_KEY, QLineEdit)
             name_edit.setCompleter(QCompleter())
+            # Queued: the completer finishes putting its own text into the
+            # field before the pick is loaded over it. A bound method: Qt
+            # drops the connection with the card.
             name_edit.completer().activated[QModelIndex].connect(
-                lambda x: self.SetData(x.data(Qt.ItemDataRole.UserRole)) if x is not None else None, Qt.QueuedConnection)
+                self._OnCompleterPick, Qt.QueuedConnection)
             name_edit.completer().setCaseSensitivity(
                 Qt.CaseSensitivity.CaseInsensitive)
             name_edit.completer().setFilterMode(Qt.MatchFlag.MatchContains)
@@ -1385,319 +1420,112 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             self.ManageSavePlayerToDBText()
             self.ManageDeletePlayerFromDBActive()
 
+    def _OnCompleterPick(self, index):
+        """A player picked from the name completer: loaded into this slot
+        (SetData), the tag field the operator is still in included."""
+        data = index.data(Qt.ItemDataRole.UserRole) \
+            if index is not None else None
+        if isinstance(data, dict):
+            self.SetData(data)
+
     def SetData(self, data, dontLoadFromDB=False, clear=True, no_mains=False):
-        self.dataLock.acquire()
-        StateManager.BlockSaving()
-        was_bulk = getattr(self, '_bulk_updating', False)
-        self._bulk_updating = True
+        """Load a player into this card's slot, and show it.
 
+        The load is core's since ADR-005 S3e-3 (PlayerService.ApplyData):
+        it used to be this method filling the card in like a form -- the
+        line edits' text set and their editingFinished emitted, rows picked
+        on the country / region / character / skin / variant combos by
+        scanning their models -- and the handlers publishing what it had
+        filled in. Now the slot is written from the data alone, and the
+        card renders what was written (over the field the operator is in:
+        this is the load they asked for, from the name completer or the
+        PLAYERS panel). The board's own loads -- a set's entrants, the
+        Web's player edit, a tag lookup -- call the core without the card
+        and the card follows from the held cycle like any other write.
+        """
         logger.debug(f"Setting data for {self.path}: {data}")
-
-        # True when Clear() below emptied the country without telling anyone
-        # (see there); settled after the country_code step.
-        country_cleared_silently = False
-
         try:
-            if clear:
-                # Block country signals during Clear: Clear() calls
-                # setCurrentIndex(0) on every QComboBox, which would trigger
-                # a LoadStates rebuild for the empty-country state. That
-                # rebuild is immediately discarded by the subsequent
-                # country_code assignment, so suppressing it saves one
-                # LoadStates pass per SetData.
-                country_element = self._w(
-                    schema.PLAYER_COUNTRY_KEY, QComboBox)
-                country_was_blocked = False
-                country_before = None
-                if country_element is not None:
-                    country_was_blocked = country_element.signalsBlocked()
-                    country_before = country_element.currentIndex()
-                    country_element.blockSignals(True)
+            with StateManager.SaveBlock():
+                before = self.player.Identity()
                 try:
-                    self.Clear(no_mains=no_mains)
+                    self.player.ApplyData(data, not dontLoadFromDB, clear,
+                                          no_mains)
                 finally:
-                    if country_element is not None:
-                        country_element.blockSignals(country_was_blocked)
-                country_cleared_silently = (
-                    country_element is not None and not country_was_blocked
-                    and country_element.currentIndex() != country_before)
-
-            # Load player data from DB; will be overwriten by incoming data
-            if not dontLoadFromDB:
-                tag = data.get(
-                    "prefix")+" "+data.get("gamerTag") if data.get("prefix") else data.get("gamerTag")
-
-                dbPlayer = PlayerDB.instance.Get(tag)
-                if dbPlayer is not None:
-                    self.SetData(dbPlayer, dontLoadFromDB=True,
-                                 clear=False, no_mains=no_mains)
-
-            name = self._w(schema.PLAYER_TAG_KEY)
-            if data.get("gamerTag") and data.get("gamerTag") != name.text():
-                data["gamerTag"] = AutonaBadWordFilter.Censor(
-                    data["gamerTag"], data.get("country_code"))
-                name.setText(f'{data.get("gamerTag")}')
-                name.editingFinished.emit()
-
-            team = self._w(schema.PLAYER_SPONSOR_KEY)
-            if data.get("prefix") and data.get("prefix") != team.text():
-                data["prefix"] = AutonaBadWordFilter.Censor(
-                    data["prefix"], data.get("country_code"))
-                team.setText(f'{data.get("prefix")}')
-                team.editingFinished.emit()
-
-            real_name = self._w(schema.PLAYER_REAL_NAME_KEY)
-            if data.get("name") and data.get("name") != real_name.text():
-                data["name"] = AutonaBadWordFilter.Censor(
-                    data["name"], data.get("country_code"))
-                real_name.setText(f'{data.get("name")}')
-                real_name.editingFinished.emit()
-
-            if data.get("avatar"):
-                self.ExportPlayerImages(data.get("avatar"))
-
-            if data.get("id"):
-                self.ExportPlayerId(data.get("id"))
-
-            if data.get("city"):
-                self.ExportPlayerCity(data.get("city"))
-
-            twitter = self._w(schema.PLAYER_TWITTER_KEY)
-            if data.get("twitter") and data.get("twitter") != twitter.text():
-                data["twitter"] = AutonaBadWordFilter.Censor(
-                    data["twitter"], data.get("country_code"))
-                twitter.setText(
-                    f'{data.get("twitter")}')
-                twitter.editingFinished.emit()
-            
-            if data.get("custom_textbox") and data.get("custom_textbox") != self.custom_textbox.toPlainText():
-                data["custom_textbox"] = AutonaBadWordFilter.Censor(
-                    data["custom_textbox"], data.get("country_code"))
-                self.custom_textbox.setPlainText(
-                    f'{data.get("custom_textbox")}'.replace("\\n", "\n"))
-                self.custom_textbox.textChanged.emit()
-
-            if data.get("country_code"):
-                countryElement: QComboBox = self._w(
-                    schema.PLAYER_COUNTRY_KEY, QComboBox)
-                countryIndex = 0
-                for i in range(AutonaCountryHelper.countryModel.rowCount()):
-                    item = AutonaCountryHelper.countryModel.item(
-                        i).data(Qt.ItemDataRole.UserRole)
-                    if item:
-                        if data.get("country_code") == item.get("code"):
-                            countryIndex = i
-                            break
-                if countryElement.currentIndex() != countryIndex:
-                    countryElement.setCurrentIndex(countryIndex)
-
-            if country_cleared_silently:
-                countryElement = self._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
-                if countryElement.currentIndex() == 0:
-                    # The blocked Clear() above relied on a country_code
-                    # following and announcing itself. None did (or it named
-                    # no known country), so the emptying is announced here,
-                    # once: the regions are rebuilt for "no country" and the
-                    # state stops naming the previous player's country --
-                    # which it used to keep, under the new player's name,
-                    # while the card showed none (and a state_code would be
-                    # looked up among that country's regions).
-                    countryElement.currentIndexChanged.emit(0)
-
-            if data.get("state_code"):
-                countryElement: QComboBox = self._w(
-                    schema.PLAYER_COUNTRY_KEY, QComboBox)
-                stateElement: QComboBox = self._w(
-                    schema.PLAYER_STATE_KEY, QComboBox)
-                stateIndex = 0
-                for i in range(stateElement.model().rowCount()):
-                    item = stateElement.model().item(i).data(Qt.ItemDataRole.UserRole)
-                    if item:
-                        if data.get("state_code") == item.get("original_code"):
-                            stateIndex = i
-                            break
-                # Only when the value is not already an iso2 the combo knows:
-                # a state_code stored by an older build (or typed by hand) can
-                # be a free-form name like "Tokyo". FindState is what resolves
-                # it -- but its first call parses the pre-computed table, and
-                # this runs inside dataLock + BlockSaving on the GUI thread, so
-                # the normal path must never pay for it.
-                if stateIndex == 0 and data.get("country_code"):
-                    resolved = CountryCatalog.instance.FindState(
-                        data.get("country_code"), data.get("state_code"))
-                    if resolved:
-                        for i in range(stateElement.model().rowCount()):
-                            item = stateElement.model().item(i).data(
-                                Qt.ItemDataRole.UserRole)
-                            if item and resolved == item.get("original_code"):
-                                stateIndex = i
-                                break
-                if stateElement.currentIndex() != stateIndex:
-                    stateElement.setCurrentIndex(stateIndex)
-
-            if data.get("mains") and no_mains != True:
-                if type(data.get("mains")) == list:
-                    # Legacy old-API single-character format: ["Mario", skin].
-                    # Only slot 0 should receive it — the previous code
-                    # iterated *all* character_elements and set every slot
-                    # to mains[0], so a 3-character UI would show the same
-                    # character three times.
-                    main_list = data.get("mains")
-                    if main_list and self.character_elements:
-                        main_name = main_list[0]
-                        try:
-                            main_skin = int(main_list[1]) if len(main_list) > 1 else 0
-                        except (TypeError, ValueError):
-                            main_skin = 0
-                        character_element = self.character_elements[0][1]
-                        color_element = self.character_elements[0][2]
-                        characterIndex = 0
-                        for j in range(character_element.model().rowCount()):
-                            item = character_element.model().data(
-                                character_element.model().index(j, 0), Qt.ItemDataRole.UserRole)
-                            if item and item.get("en_name") == main_name:
-                                characterIndex = j
-                                break
-                        if character_element.currentIndex() != characterIndex:
-                            character_element.setCurrentIndex(characterIndex)
-                        if color_element.currentIndex() != main_skin:
-                            color_element.setCurrentIndex(main_skin)
-                elif type(data.get("mains")) == dict:
-                    mains = data.get("mains").get(
-                        AutonaGameAssetManager.instance.selectedGame.get("codename"), [])
-
-                    for i, main in enumerate(mains):
-                        if i < len(self.character_elements):
-                            character_element = self.character_elements[i][1]
-                            color_element = self.character_elements[i][2]
-                            variant_element = self.character_elements[i][3]
-                            characterIndex = 0
-                            for i in range(character_element.model().rowCount()):
-                                item = character_element.model().data(
-                                    character_element.model().index(i, 0), Qt.ItemDataRole.UserRole)
-                                if item:
-                                    if item.get("en_name") == main[0]:
-                                        characterIndex = i
-                                        break
-                            if character_element.currentIndex() != characterIndex:
-                                character_element.setCurrentIndex(
-                                    characterIndex)
-                            if len(main) > 1:
-                                if color_element.currentIndex() != int(main[1]):
-                                    color_element.setCurrentIndex(int(main[1]))
-                            else:
-                                if color_element.currentIndex() != 0:
-                                    color_element.setCurrentIndex(0)
-                            
-                            variantIndex = 0
-                            if variant_element:
-                                for i in range(variant_element.model().rowCount()):
-                                    item = variant_element.model().data(
-                                        variant_element.model().index(i, 0), Qt.ItemDataRole.UserRole)
-                                    if item:
-                                        if len(main) >= 3 :
-                                            if item.get("en_name") == main[2]:
-                                                variantIndex = i
-                                                break
-                                        else:
-                                            variantIndex = 0
-                                            break
-                            else:
-                                variantIndex = 0
-                            if variant_element.currentIndex() != variantIndex:
-                                variant_element.setCurrentIndex(variantIndex)
-
-            if "seed" in data:
-                # Normalize: providers hand back None (unseeded tournament,
-                # initialSeedNum null), 0 (key absent upstream) or a numeric
-                # string depending on the path. Anything that isn't a
-                # positive int means "no seed info" and must CLEAR the
-                # previous player's seed — the old is-not-None guard skipped
-                # None entirely and left a stale seed in state.
-                try:
-                    seed = int(data.get("seed") or 0)
-                except (TypeError, ValueError):
-                    seed = 0
-                if seed > 0:
-                    self.player.SetSeed(seed)
-                    self._w(schema.PLAYER_SEED_KEY, QSpinBox).setValue(seed)
-                else:
-                    # setValue(0) alone does not emit valueChanged when the
-                    # spinbox is already 0, so write the state explicitly.
-                    self._w(schema.PLAYER_SEED_KEY, QSpinBox).setValue(0)
-                    self.player.SetSeed(0)
-            if data.get("city"):
-                self.player.SetCity(data.get("city"))
+                    # Also for a load that raised half-way: what it wrote
+                    # is published, and its statistics with it.
+                    self.AnnounceChange(self.player.ChangeSince(before))
         finally:
-            self._bulk_updating = was_bulk
-            if not was_bulk:
-                # Deferred: run name exports once.
-                # ExportPlayerId is handled directly above; calling
-                # NameChanged here would reset the id to None.
-                # No argument = keep online_avatar: it was either written
-                # above from data["avatar"] or cleared by Clear(). Passing
-                # None here (the old default) undid the write and left every
-                # start.gg set with no avatar at all.
-                self.ExportMergedName()
-                self.ExportPlayerImages()
-                team = self._w(schema.PLAYER_SPONSOR_KEY, QLineEdit).text()
-                name = self._w(schema.PLAYER_TAG_KEY, QLineEdit).text()
-                self.lastExportedName = team + " " + name
-            StateManager.ReleaseSaving()
-            self.dataLock.release()
+            self._ShowOwnOperation()
+
+    def Clear(self, no_mains=False):
+        """The card's clear button: empty the slot (PlayerService.ClearSlot,
+        as the board's clear does; ADR-005 S3e-3) and show it."""
+        try:
+            with StateManager.SaveBlock():
+                self.AnnounceChange(self.player.ClearSlot(no_mains))
+        finally:
+            self._ShowOwnOperation()
+
+    def _ShowOwnOperation(self):
+        """Show what an operation the operator ran on this card wrote: the
+        slot, over the fields they are in (_RenderSlot), with no name typed
+        into a combo left over it (DiscardTypedText)."""
+        self.DiscardTypedText()
+        self._renderedSlot = None
+        self._RenderSlot(over=True)
+        # The name the slot now has a display name for, whether or not the
+        # render had to change the fields: a name finished afterwards is
+        # compared against it (NameChanged), and a stale one would re-derive
+        # the images and drop the id the load just wrote.
+        self.lastExportedName = (
+            self._w(schema.PLAYER_SPONSOR_KEY, QLineEdit).text() + " "
+            + self._w(schema.PLAYER_TAG_KEY, QLineEdit).text())
+        if not self.path.startswith("score."):
+            # The editor's buttons follow its tag, which used to be
+            # announced by the tag's editingFinished.
+            self.ManageSavePlayerToDBText()
+            self.ManageDeletePlayerFromDBActive()
+
+    def DiscardTypedText(self, notEditing=False):
+        """Put back, on every editable combo of the card, the text of the
+        row it shows over a name typed into it and never picked.
+
+        Typing into a combo publishes nothing until a row is picked, and a
+        render only moves a combo whose row is wrong -- so after an
+        operation that empties the slot, text typed into a combo that
+        already showed the right row (the blank one, typically) used to
+        stay on the card over the emptied slot (ADR-005 S2d). Writes
+        nothing: the text is the combo's own, put back with its signals
+        blocked. A slot's typed character (no row, index -1) is its value,
+        and is left to the render.
+
+        `notEditing`: leave the combo the operator is in alone -- for a
+        load that came from elsewhere (the board's, ADR-005 S3e-3 review),
+        which does not take what they are typing, as a render does not.
+        """
+        combos = [self._w(field, QComboBox)
+                  for field in schema.PLAYER_LOCATION_KEYS]
+        for _element, character, color, variant in self.character_elements:
+            combos += [character, color, variant]
+        for combo in combos:
+            if combo is None or not combo.isEditable():
+                continue
+            if notEditing and self._Editing(combo):
+                continue
+            index = combo.currentIndex()
+            if index < 0:
+                continue
+            text = combo.itemText(index)
+            if combo.currentText() != text:
+                with QSignalBlocker(combo):
+                    combo.setEditText(text)
 
     def SavePlayerToDB(self):
-        tag = self.GetCurrentPlayerTag()
-
-        playerData = {
-            "prefix": self._w(schema.PLAYER_SPONSOR_KEY).text(),
-            "gamerTag": self._w(schema.PLAYER_TAG_KEY).text(),
-            "name": self._w(schema.PLAYER_REAL_NAME_KEY).text(),
-            "twitter": self._w(schema.PLAYER_TWITTER_KEY).text(),
-            "custom_textbox": "\\n".join(self.custom_textbox.toPlainText().splitlines())
-        }
-
-        if AutonaGameAssetManager.instance.selectedGame.get("codename"):
-            mains = []
-
-            for i, (element, character, color, variant) in enumerate(self.character_elements):
-                data = {}
-
-                if character.currentData() is not None:
-                    data["name"] = character.currentData().get("en_name")
-                else:
-                    data["name"] = ""
-
-                data["skin"] = color.currentIndex()
-
-                if data["skin"] == None:
-                    data["skin"] = 0
-                    
-                if variant.currentData():
-                    data["variant"] = variant.currentData().get("en_name", "")
-                else:
-                    data["variant"] = ""
-
-                if data["name"] != "":
-                    mains.append([data.get("name"), data.get("skin"), data.get("variant")])
-
-            playerData["mains"] = {
-                AutonaGameAssetManager.instance.selectedGame.get("codename"): mains
-            }
-
-        if self._w(schema.PLAYER_COUNTRY_KEY, QComboBox).currentData(Qt.ItemDataRole.UserRole):
-            playerData["country_code"] = self._w(
-                schema.PLAYER_COUNTRY_KEY,
-                QComboBox).currentData(Qt.ItemDataRole.UserRole).get("code")
-
-        if self._w(schema.PLAYER_STATE_KEY, QComboBox).currentData(Qt.ItemDataRole.UserRole):
-            playerData["state_code"] = self._w(
-                schema.PLAYER_STATE_KEY,
-                QComboBox).currentData(Qt.ItemDataRole.UserRole).get("code")
-
-        PlayerDB.instance.AddPlayers([playerData], overwrite=True)
-
-        self.CharactersChanged(includeMains=True)
+        """The editor's save button (and a Web player edit's
+        savePlayerToDb): the slot as the database stores it,
+        PlayerService.SavePlayerToDB (ADR-005 S3e-3) -- read from the state,
+        where it used to be read off the card's fields and combos."""
+        self.player.SavePlayerToDB()
 
     def ManageSavePlayerToDBText(self):
         tag = self.GetCurrentPlayerTag()

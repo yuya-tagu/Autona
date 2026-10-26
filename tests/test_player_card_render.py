@@ -66,6 +66,7 @@ from shiboken6 import Shiboken
 from src.AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
 from src.core import StateSchema as schema
 from src.core.DictHelper import deep_clone
+from src.core.PlayerDB import PlayerDB
 from src.core.PlayerService import CharacterSlot, PlayerService
 from src.core.SettingsManager import SettingsManager
 from src.core.StateManager import StateManager
@@ -870,6 +871,41 @@ S2D_CHANGES = {
     "clear players": {"cycles": 1},
 }
 
+# What the S3e-3 review changed on purpose on the first recording: a load
+# empties the city (and the id) its player does not bring. ALPHA is the only
+# player here with one (Shibuya); the players' clear and the reset keep a
+# city (they did and do), so the set loaded over the cleared slot -- E1, then
+# L1, both without a city -- used to carry ALPHA's onto the overlays. Now
+# their slot's city is None, and stays so through the reset and the swap
+# that follow, until ALPHA is filled in again ("two players again", whose
+# 反映 now publishes the city coming back). No id is involved: nobody here
+# has one. Key order and cycles are the recording's (`city` was there).
+_LOADED_WITHOUT_CITY = {"team.1.player.1.city": None}
+_SWAPPED_WITHOUT_CITY = {"team.2.player.1.city": None}
+S3E3_CHANGES = {
+    "load a set": {"values": _LOADED_WITHOUT_CITY,
+                   "stateDigest": "5512f4278e8680e9",
+                   "published": [1, 0, "c720b65c91d82f4a"],
+                   "publishedRows": "36352a38814765a4"},
+    "reset all inputs": {"values": _LOADED_WITHOUT_CITY,
+                         "stateDigest": "edbbd9b0db4c6ed0"},
+    "two players again": {"published": [1, 0, "32191436f2a81ba5"],
+                          "publishedRows": "21f19cada23d2128"},
+    "load a losers set that grows the roster": {
+        "values": _LOADED_WITHOUT_CITY,
+        "stateDigest": "f82b4610534ef381",
+        "published": [1, 0, "698940506e604a8b"],
+        "publishedRows": "5a1cb15a7bcefc5a"},
+    "swap teams with a losers side": {
+        "values": _SWAPPED_WITHOUT_CITY,
+        "stateDigest": "6ce6ed70026d354c",
+        "published": [1, 0, "eabab7e92c573fe1"],
+        "publishedRows": "ea04b81f72c965ed"},
+    "load the losers flags while swapped": {
+        "values": _SWAPPED_WITHOUT_CITY,
+        "stateDigest": "263b37a06735b137"},
+}
+
 # The singles board (ADR-005 S2d review): the same differences, with one
 # card a side -- the players' clear was 2 cycles (a card each) and fetched
 # the recent sets and recalculated the upset factor once per card.
@@ -977,8 +1013,9 @@ def _withStages(state, results):
 
 def _withChanges(entry, changes, recording):
     """A recorded step with what a migration changed on purpose applied:
-    `dropped` paths out of its state, `travel` / `stages` (S2c) into it, and
-    every other listed field replaced."""
+    `dropped` paths out of its state, `values` (path -> value, S3e-3) and
+    `travel` / `stages` (S2c) into it, and every other listed field
+    replaced."""
     change = changes.get(entry["step"])
     if change is None:
         return entry
@@ -989,6 +1026,13 @@ def _withChanges(entry, changes, recording):
         for key in parents:
             node = node[key]
         del node[leaf]
+    for path, value in change.get("values", {}).items():
+        *parents, leaf = path.split(".")
+        node = expected["state"]
+        for key in parents:
+            node = node[key]
+        assert leaf in node, path    # a value changed, not a key added
+        node[leaf] = value
     if "travel" in change:
         reference = next(e["state"] for e in recording
                          if e["step"] == change["travel"])
@@ -996,7 +1040,8 @@ def _withChanges(entry, changes, recording):
     if "stages" in change:
         _withStages(expected["state"], change["stages"])
     expected.update({field: value for field, value in change.items()
-                     if field not in ("dropped", "travel", "stages")})
+                     if field not in ("dropped", "values", "travel",
+                                      "stages")})
     return expected
 
 
@@ -1026,9 +1071,9 @@ def test_board_operations_publish_the_recorded_state(board, autonaApp):
             encoding="utf-8")
         return
     recording = GOLDEN["operations"]
-    golden = [_withChanges(_withChanges(_withChanges(
+    golden = [_withChanges(_withChanges(_withChanges(_withChanges(
         entry, S2B_CHANGES, recording), S2C_CHANGES, recording),
-        S2D_CHANGES, recording)
+        S2D_CHANGES, recording), S3E3_CHANGES, recording)
               for entry in recording]
     assert [e["step"] for e in recorded] == [e["step"] for e in golden]
     for actual, expected in zip(recorded, golden):
@@ -2699,10 +2744,11 @@ def test_return_in_the_spinbox_keeps_a_web_best_of_held_back(
 
 # ── a card's own Clear and the core clear (ADR-005 S2d review) ──────────
 #
-# A card still empties itself through its widgets -- its Clear button and
-# the Clear() at the start of every SetData -- until S2f moves SetData to
-# core. For a filled slot it must publish what AutonaActions._ClearSlot
-# does, or the two clears drift apart unnoticed.
+# A card emptied itself through its widgets -- its Clear button and the
+# Clear() at the start of every SetData -- until S3e-3 (S2f) moved both to
+# core: the button is PlayerService.ClearSlot, the clear a load starts with
+# is ApplyData's. Kept as the pin that the button and the board's clear
+# (AutonaActions.ClearPlayers) publish the same.
 
 @pytest.mark.parametrize("characters", [1, 2])
 @pytest.mark.parametrize("no_mains", [False, True])
@@ -2738,3 +2784,296 @@ def test_a_cards_own_clear_publishes_what_the_core_clear_does(
     assert viaCore == viaCards
     assert _keyOrders(viaCore) == _keyOrders(viaCards)
     assert _cardMismatches(board) == {}
+
+
+# ── loads are core's (ADR-005 S3e-3) ─────────────────────────────────────
+#
+# A load (a set's entrants, the Web's player edit, a tag lookup) used to be
+# the card's SetData, which set the line edits' text -- the one the operator
+# was typing in included. It is PlayerService.ApplyData now, and the card
+# follows like it follows any write it did not make.
+
+def test_a_load_while_the_tag_is_typed_wins_once_the_field_is_left(
+        board, autonaApp):
+    """The load is not put under the caret. The typing is held back
+    (HeldBackText rule (b)): leaving the field writes neither it nor a
+    display name made from it -- nor drops the id the load wrote -- and the
+    loaded tag is shown."""
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    card = board.team1playerWidgets[0]
+    tag = card._w(schema.PLAYER_TAG_KEY, QLineEdit)
+    sponsor = card._w(schema.PLAYER_SPONSOR_KEY, QLineEdit)
+
+    with _onScreen(board, autonaApp):
+        _focus(tag, autonaApp)
+        QTest.keyClicks(tag, "TYPED")
+        assert board.ApplyPlayerData(1, 1, {
+            "gamerTag": "LOADED", "prefix": "SP", "id": 77}) is True
+        autonaApp.settle()
+        assert tag.text() == "TYPED"
+        assert sponsor.text() == "SP"
+
+        with _noWrites() as attempts:
+            _focus(sponsor, autonaApp)
+        assert attempts == []
+        assert tag.text() == "LOADED"
+        assert autonaApp.get(f"{card.path}.{schema.PLAYER_TAG_KEY}") \
+            == "LOADED"
+        assert autonaApp.get(f"{card.path}.mergedName") == "SP | LOADED"
+        assert autonaApp.get(f"{card.path}.id") == 77
+        assert _cardMismatches(board) == {}
+
+
+def test_a_name_picked_from_the_completer_shows_in_the_field_being_typed(
+        board, autonaApp):
+    """The completer's pick is the operator's own load, made from the tag
+    field they are still in: the card shows it there at once, and leaving
+    the field afterwards writes nothing (the id the pick loaded stays)."""
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    from qtpy.QtGui import QStandardItem, QStandardItemModel
+
+    card = board.team1playerWidgets[0]
+    tag = card._w(schema.PLAYER_TAG_KEY, QLineEdit)
+    sponsor = card._w(schema.PLAYER_SPONSOR_KEY, QLineEdit)
+    model = QStandardItemModel()
+    item = QStandardItem("PK PICKED")
+    item.setData({"gamerTag": "PICKED", "prefix": "PK", "id": 88},
+                 Qt.ItemDataRole.UserRole)
+    model.appendRow(item)
+
+    with _onScreen(board, autonaApp):
+        _focus(tag, autonaApp)
+        QTest.keyClicks(tag, "PIC")
+        card._OnCompleterPick(model.index(0, 0))
+        assert tag.hasFocus()
+        assert (sponsor.text(), tag.text()) == ("PK", "PICKED")
+        autonaApp.settle()
+
+        with _noWrites() as attempts:
+            _focus(sponsor, autonaApp)
+        assert attempts == []
+        assert autonaApp.get(f"{card.path}.id") == 88
+        assert autonaApp.get(f"{card.path}.mergedName") == "PK | PICKED"
+        assert _cardMismatches(board) == {}
+
+
+def _typeInto(combo, text):
+    """Text typed into an editable combo, no row picked: what the operator
+    leaves behind by clicking elsewhere (a combo publishes only a pick)."""
+    with _noWrites() as attempts:
+        combo.setEditText(text)
+    assert attempts == []
+    assert combo.currentText() == text
+
+
+@pytest.mark.parametrize("clear", ["the board's", "the card's own"])
+def test_a_clear_takes_text_typed_into_a_combo_with_it(
+        board, autonaApp, clear):
+    """ADR-005 S2d left this open: a name typed into a combo that already
+    showed the emptied row (the blank one) stayed on the card over the
+    cleared slot -- the render only moves a combo whose row is wrong. A
+    clear discards it (DiscardTypedText), writing nothing for it."""
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    card = board.team1playerWidgets[0]
+    country = card._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
+    character = card.character_elements[0][1]
+    assert country.currentIndex() == 0 and character.currentIndex() == 0
+    _typeInto(country, "Atlan")
+    _typeInto(character, "Typed Hero")
+
+    if clear == "the board's":
+        board.CommandClearAll()
+    else:
+        card.Clear()
+    autonaApp.settle()
+
+    assert country.currentText() == ""
+    assert character.currentText() == ""
+    assert autonaApp.get(f"{card.path}.country") == {}
+    assert _cardMismatches(board) == {}
+
+
+# A load that clears (a set's entrants, a tag lookup) used to start with the
+# card's Clear(), which put every combo back on its row -- text typed into a
+# combo and never picked went with it. The load is core's now, and the
+# card follows from the held cycle, whose render only moves a combo whose
+# row is wrong: the typed text stayed, and the next pick on the card
+# published it as a character (S3e-3 review). The board discards it after
+# the load, on the combos the operator is not in.
+
+_LOADED_E1 = {"gamerTag": "E1", "mains": {"tgame": [["Mario", 0]]}}
+
+
+def _loadClearing(board, how):
+    if how == "a set's entrants":
+        board.ChangeSetData({"overwrite": True, "entrants": [
+            [dict(_LOADED_E1)], [{"gamerTag": "E2"}]]})
+    else:
+        with patch.object(PlayerDB.instance, "GetPlayerFromTag",
+                          return_value=dict(_LOADED_E1)):
+            assert board.LoadPlayerFromTag("E1", 1, 1) is True
+
+
+@pytest.mark.parametrize("how", ["a set's entrants", "a tag lookup"])
+def test_a_load_takes_text_typed_into_a_combo_with_it(board, autonaApp, how):
+    """The country and the second character typed into and left without a
+    pick, then a load: the text is gone, and picking a skin on the card
+    afterwards (which publishes every character row) writes no typed name."""
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    card = board.team1playerWidgets[0]
+    country = card._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
+    character = card.character_elements[1][1]
+    _typeInto(country, "Atlan")
+    _typeInto(character, "Typed Hero")
+
+    _loadClearing(board, how)
+    autonaApp.settle()
+
+    assert country.currentText() == ""
+    assert character.currentText() == ""
+    assert _cardMismatches(board) == {}
+
+    loaded = deep_clone(autonaApp.get(f"{card.path}.character"))
+    card.character_elements[0][2].setCurrentIndex(1)
+    autonaApp.settle()
+    assert autonaApp.get(f"{card.path}.character") != loaded
+    assert "Typed Hero" not in json.dumps(
+        autonaApp.get(f"{card.path}.character"))
+    assert autonaApp.get(f"{card.path}.country") == {}
+
+
+@contextmanager
+def _inDetails(board, card, app):
+    """The card's details dialog (where the location, the characters and
+    the note are typed) shown and active, over the board's window."""
+    dialog = card.detailsDialog
+    with _onScreen(board, app):
+        dialog.show()
+        dialog.activateWindow()
+        app.settle()
+        try:
+            yield
+        finally:
+            # Activation back to the board's window before the dialog is
+            # hidden, for the reason _onScreen gives.
+            board.window().activateWindow()
+            app.settle()
+            dialog.hide()
+            app.settle()
+
+
+def test_a_load_leaves_the_combo_being_typed_in_alone(board, autonaApp):
+    """The combo the operator is in keeps what they are typing, as any
+    field being edited does when a write comes from elsewhere (S3e-3,
+    判断 4); the combos they are not in lose theirs."""
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    card = board.team1playerWidgets[0]
+    country = card._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
+    character = card.character_elements[1][1]
+
+    with _inDetails(board, card, autonaApp):
+        _typeInto(character, "Typed Hero")
+        _focus(country.lineEdit(), autonaApp)
+        _typeInto(country, "Atlan")
+        _loadClearing(board, "a set's entrants")
+        autonaApp.settle()
+        assert country.lineEdit().hasFocus()
+        assert country.currentText() == "Atlan"
+        assert character.currentText() == ""
+
+
+# The note publishes every keystroke (textChanged), and a render leaves it
+# alone while the operator is in it. Until the S3e-3 review it published
+# whatever text it then held as soon as it changed at all, so a change that
+# ended on the text the render had left there put the old note back over
+# the load. It follows the other text fields' rule now (HeldBackText).
+
+def test_a_load_while_the_note_is_typed_wins_once_it_is_left(
+        board, autonaApp):
+    """A load writes the note while it is typed into: retyping a selected
+    character (one change that ends where it started) writes nothing,
+    leaving the note shows the load, and typing on is the operator's edit."""
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    card = board.team1playerWidgets[0]
+    note = card.custom_textbox
+    noteKey = f"{card.path}.{schema.PLAYER_NOTE_KEY}"
+
+    with _inDetails(board, card, autonaApp):
+        _focus(note, autonaApp)
+        QTest.keyClicks(note, "TYPED")
+        assert autonaApp.get(noteKey) == "TYPED"
+        assert board.ApplyPlayerData(1, 1, {
+            "gamerTag": "LOADED", "custom_textbox": "LOADED NOTE"}) is True
+        autonaApp.settle()
+        assert note.toPlainText() == "TYPED"
+
+        changes = []
+        note.textChanged.connect(lambda: changes.append(note.toPlainText()))
+        with _noWrites() as attempts:
+            QTest.keyClick(note, Qt.Key.Key_End)
+            QTest.keyClick(note, Qt.Key.Key_Left,
+                           Qt.KeyboardModifier.ShiftModifier)
+            QTest.keyClicks(note, "D")
+        assert changes == ["TYPED"]
+        assert attempts == []
+        assert autonaApp.get(noteKey) == "LOADED NOTE"
+
+        _focus(card._w(schema.PLAYER_TWITTER_KEY, QLineEdit), autonaApp)
+        assert note.toPlainText() == "LOADED NOTE"
+
+        _focus(note, autonaApp)
+        QTest.keyClick(note, Qt.Key.Key_End)
+        QTest.keyClicks(note, "!")
+        assert autonaApp.get(noteKey) == "LOADED NOTE!"
+        assert _cardMismatches(board) == {}
+
+
+# The upset factor is the seeds' distance, and only for singles
+# (StatsService.IsSingles). A load recalculates it when a seed moves
+# (SlotChange) -- and, since the S3e-3 review, when a set changes the board
+# from one player a side to several or back: the old load cleared and
+# re-set every seed on the way, the core load does not when they are the
+# same, and the previous pairing's number stayed.
+
+def _seededSet(players):
+    return {"overwrite": True, "entrants": [
+        [{"gamerTag": f"A{p}", "seed": 3 if p == 1 else 0}
+         for p in range(1, players + 1)],
+        [{"gamerTag": f"B{p}", "seed": 12 if p == 1 else 0}
+         for p in range(1, players + 1)]]}
+
+
+@pytest.mark.parametrize("before, after", [(1, 2), (2, 1)])
+def test_a_set_between_singles_and_teams_recalculates_the_upset_factor(
+        board, autonaApp, before, after):
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    from src.core.StatsService import StatsService
+
+    singles = abs(StatsService.CalculatePlacementMath("DOUBLE_ELIMINATION", 3)
+                  - StatsService.CalculatePlacementMath(
+                      "DOUBLE_ELIMINATION", 12))
+    assert singles > 0
+    upset = f"{PREFIX}.upset_factor"
+
+    board.ChangeSetData(_seededSet(before))
+    autonaApp.settle()
+    assert autonaApp.get(upset) == (singles if before == 1 else 0)
+
+    with _StatsTriggers(board) as triggers:
+        board.ChangeSetData(_seededSet(after))
+        autonaApp.settle()
+    assert triggers.counts["UpsetFactorCalculation"] == 1
+    assert autonaApp.get(upset) == (singles if after == 1 else 0)
+
+    # The same set again: nothing to recalculate.
+    with _StatsTriggers(board) as triggers:
+        board.ChangeSetData(_seededSet(after))
+        autonaApp.settle()
+    assert triggers.counts["UpsetFactorCalculation"] == 0

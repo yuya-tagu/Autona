@@ -117,7 +117,8 @@ def test_set_data_resolves_a_free_form_state_name(autonaApp):
 def test_set_data_takes_a_state_iso2_as_is(autonaApp):
     """The normal path: Start.gg already gave us the iso2, so the direct
     match wins and FindState is never consulted (its first call parses the
-    pre-computed table, and this runs on the GUI thread under dataLock)."""
+    pre-computed table, and a load runs on the GUI thread under the state's
+    lock -- PlayerService.ApplyData since ADR-005 S3e-3)."""
     player = _player(autonaApp)
 
     player.SetData({"gamerTag": "TAG", "country_code": "JP",
