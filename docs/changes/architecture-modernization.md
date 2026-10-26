@@ -1826,7 +1826,7 @@ S3 の最後。ヘッドレスの実プロセスに対して、Python のスモ�
     - `/playerdb` の内容がデスクトップと同じ
     - start.gg の取り込み後、Web UI の選手候補が更新される
 
-#### S3e-2 実況とクルーの core 化（2026-10-26・PR 未作成）
+#### S3e-2 実況とクルーの core 化（2026-10-26・PR #234）
 
 実況（`commentary.*`）とクルーボード（`score.3`）の書き込みを、パネル / ボードのウィジェットから core のサービスへ移した。Web の操作はどちらのシェルでも同じ core を呼び、パネルとボードは state を描画するだけになった。外から見える挙動（Socket.IO のイベント名と ack・legacy の本文・`program_state.json` のキー順・Socket.IO の delta）は、`load_commentator_from_tag` の修正（下記）を除いて変えていない。移す前の木（8aa8c33b）でウィジェット経由の Set 列・保存サイクル・delta・結果を録り、core 版と照合している。
 
