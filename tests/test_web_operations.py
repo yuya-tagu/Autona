@@ -7,15 +7,17 @@ Pinned here:
 - the S2 operations write the same state whichever host runs them -- the
   desktop's (the board built, the write held for 反映) and the headless one
   (no board, published at once);
-- headless, what a widget answers -- the player / character counts of
-  boards 1/2, the board-dependent actions (WebServerActions) -- is refused
-  with NotAvailable, and the server turns that into 503 in the /api/v1
-  error shape: legacy routes, Socket.IO acks, /api/v1 (UNAVAILABLE). The
-  crew board's operations and the caster line-up's are core's since
-  ADR-005 S3e-2 and answer in both shells (their recordings:
-  tests/test_crew_operations.py, tests/test_commentary_service.py), and so
-  are the player slots' -- the Web's player edit and the tag lookup -- since
-  S3e-4 (pinned below; the board's recording: tests/test_player_apply.py);
+- headless, what a widget answers -- the board-dependent actions
+  (WebServerActions) -- is refused with NotAvailable, and the server turns
+  that into 503 in the /api/v1 error shape: legacy routes, Socket.IO acks,
+  /api/v1 (UNAVAILABLE). The crew board's operations and the caster
+  line-up's are core's since ADR-005 S3e-2 and answer in both shells (their
+  recordings: tests/test_crew_operations.py,
+  tests/test_commentary_service.py), and so are the player slots' -- the
+  Web's player edit and the tag lookup -- since S3e-4 (pinned below; the
+  board's recording: tests/test_player_apply.py), and the player /
+  character counts of boards 1/2 since S3e-6 (pinned below; the board's
+  recording: tests/test_roster_flow.py);
 - headless, the S2 operations run one at a time (the host's re-entrant
   lock), so a composite one (clear_all) is not interleaved with another
   request.
@@ -135,9 +137,12 @@ def test_both_hosts_write_the_same_state(autonaApp, monkeypatch, name):
     # Held for 反映 there, as every write to a built board is.
     assert _state().HasPendingChanges(f"score.{BOARD}")
 
-    # Headless: no board, the write published at once.
+    # Headless: no board, the write published at once. The player slots
+    # the headless shell seeds, as the desktop board has its own: clear_all
+    # sets the roster (ADR-005 S3e-6), and a roster that goes to one player
+    # from any other count empties the team names.
     try:
-        _goHeadless(autonaApp, monkeypatch)
+        _goHeadlessWithSlots(autonaApp, monkeypatch)
         _prepare(BOARD)
         autonaApp.settle()
         operation(BOARD)
@@ -690,26 +695,140 @@ def test_headless_has_no_last_set(headless):
     assert WebOps.get_swap(1) == "False"
 
 
-# What only a widget answers: the player / character counts of boards 1/2
-# (the crew board's member count is core's, S3e-2). Refused before anything
-# is written.
-REFUSED = {
-    "player count": lambda: WebOps.set_route(1, players=2, match="Final"),
-    "character count": lambda: WebOps.set_route(1, characters=2),
-    "team board's player count": lambda: WebOps.set_route(2, players=3),
+# The player / character counts of boards 1/2 were the board's spinboxes
+# and answered NotAvailable (503) headless until ADR-005 S3e-6. They are the
+# state's now (AutonaActions.SetRoster): both hosts write the same roster --
+# the slots, their character slots, the team names and crests a roster of
+# one empties -- byte for byte (what the board's cards follow:
+# tests/test_roster_flow.py).
+ROSTER_OPERATIONS = {
+    "players and a match": lambda n: WebOps.set_route(
+        n, players=2, match="Final"),
+    "characters": lambda n: WebOps.set_route(n, characters=2),
+    "players and characters": lambda n: WebOps.set_route(
+        n, players=3, characters=1),
+    "back to one player": lambda n: (WebOps.set_route(n, players=2),
+                                     WebOps.set_route(n, players=1)),
+    "no players, then two": lambda n: (WebOps.set_route(n, players=0),
+                                       WebOps.set_route(n, players=2)),
+    "clear all": lambda n: (WebOps.set_route(n, players=3, characters=2),
+                            WebOps.clear_all(n)),
+    # A board with no player left keeps a characters per player for the
+    # next ones, as its spinbox did: the one asked for meanwhile, else the
+    # one it had (BoardHost.EmptyRosterCharacters).
+    "no players, two characters, then two players": lambda n: (
+        WebOps.set_route(n, players=0), WebOps.set_route(n, characters=2),
+        WebOps.set_route(n, players=2)),
+    "four characters, no players, then two": lambda n: (
+        WebOps.set_route(n, characters=4), WebOps.set_route(n, players=0),
+        WebOps.set_route(n, players=2)),
 }
 
 
-@pytest.mark.parametrize("name", list(REFUSED))
-def test_headless_refuses_what_needs_a_widget(headless, name):
-    before = json.dumps(headless.get("score"), sort_keys=True)
+def _prepareRoster(n):
+    """Team names and a match bar, the same on both hosts. Both LOSERS flags
+    are written as they stand (False) straight into the state: a built
+    board seeds team 1's and the headless skeleton neither, and the first
+    write of one through core (_prepare's, or clear_all's reset) republishes
+    that team's player names -- on one host only."""
+    from src.core.Actions import AutonaActions
+    actions = AutonaActions.instance
+    with _state().SaveBlock():
+        for team in (1, 2):
+            _state().Set(f"score.{n}.team.{team}.losers", False)
+        actions.SetTeamName(n, 1, "Alpha")
+        actions.SetTeamName(n, 2, "Bravo")
+        actions.SetMatchField(n, "match", "Winners Final")
 
-    with pytest.raises(NotAvailable) as refused:
-        REFUSED[name]()
+
+def _roster(app, n):
+    def get(key):
+        return app.get(f"score.{n}.{key}")
+    return {"teams": {team: {key: get(f"team.{team}.{key}")
+                             for key in ("player", "teamName", "logo")}
+                      for team in ("1", "2")},
+            "match": get("match")}
+
+
+@pytest.mark.parametrize("name", list(ROSTER_OPERATIONS))
+def test_both_hosts_write_the_same_roster(autonaApp, monkeypatch, name):
+    operation = ROSTER_OPERATIONS[name]
+
+    board = autonaApp.board(BOARD)
+    _prepareRoster(BOARD)
+    autonaApp.settle()
+    WebOps.apply_changes(BOARD)
+    autonaApp.settle()
+    operation(BOARD)
+    autonaApp.settle()
+    desktop = json.dumps(_roster(autonaApp, BOARD), ensure_ascii=False)
+    # The board's cards follow the slots.
+    roster = _roster(autonaApp, BOARD)["teams"]
+    assert [len(board.team1playerWidgets), len(board.team2playerWidgets)] \
+        == [len(roster["1"]["player"] or {}), len(roster["2"]["player"] or {})]
+
+    try:
+        _goHeadlessWithSlots(autonaApp, monkeypatch)
+        _prepareRoster(BOARD)
+        autonaApp.settle()
+        operation(BOARD)
+        autonaApp.settle()
+        headless = json.dumps(_roster(autonaApp, BOARD), ensure_ascii=False)
+        assert not _state().HasPendingChanges(f"score.{BOARD}")
+    finally:
+        _dropHeadlessBoards(autonaApp)
+
+    assert headless == desktop
+
+
+@pytest.mark.parametrize("host", ["desktop", "headless"])
+def test_an_emptied_board_gives_its_next_players_the_characters_it_keeps(
+        autonaApp, monkeypatch, host):
+    """players=0, characters=2, players=2: two players a team with two
+    characters each -- and the characters a board had when its last player
+    went, when nothing was asked for since -- as the two spinboxes had it.
+    SetRoster alone would give them the default (3)."""
+    if host == "desktop":
+        autonaApp.board(BOARD)
+    else:
+        _goHeadlessWithSlots(autonaApp, monkeypatch)
+    try:
+        def counts():
+            autonaApp.settle()
+            return [len(slot["character"]) for team in (1, 2)
+                    for slot in (autonaApp.get(
+                        f"score.{BOARD}.team.{team}.player") or {}).values()]
+
+        WebOps.set_route(BOARD, players=0)
+        assert counts() == []
+        WebOps.set_route(BOARD, characters=2)
+        assert counts() == []
+        WebOps.set_route(BOARD, players=2)
+        assert counts() == [2, 2, 2, 2]
+
+        WebOps.set_route(BOARD, characters=5)
+        WebOps.set_route(BOARD, players=0)
+        WebOps.set_route(BOARD, players=1)
+        assert counts() == [5, 5]
+    finally:
+        if host == "headless":
+            _dropHeadlessBoards(autonaApp)
+
+
+def test_headless_answers_the_counts_without_a_board(headless):
+    # The headless fixture's boards have no slot yet: two players a side,
+    # with the characters per player a new player gets on a board that has
+    # none (core's default), then two characters each.
+    assert WebOps.set_route(1, players=2, match="Final") == "OK"
     headless.settle()
-
-    assert refused.value.message == "not available in headless"
-    assert json.dumps(headless.get("score"), sort_keys=True) == before
+    assert sorted(headless.get("score.1.team.1.player")) == ["1", "2"]
+    assert sorted(headless.get("score.1.team.2.player")) == ["1", "2"]
+    assert headless.get("score.1.match") == "Final"
+    assert WebOps.set_route(1, characters=2) == "OK"
+    headless.settle()
+    assert [len(headless.get(f"score.1.team.{team}.player.{slot}.character"))
+            for team in (1, 2) for slot in (1, 2)] == [2, 2, 2, 2]
+    assert not _state().HasPendingChanges("score.1")
 
 
 def test_the_headless_host_runs_one_operation_at_a_time():
@@ -847,26 +966,110 @@ def test_a_socketio_event_acks_the_503_body(server):
     assert ws.get_received() == []
 
 
-# What a web operation itself refuses headless (the board host's
-# NotAvailable, not WebServer._board_actions()): the same 503.
-REFUSED_ROUTES = [
-    "/scoreboard1-set?players=2",
-    "/scoreboard2-set?characters=2",
-]
-
-
-@pytest.mark.parametrize("path", REFUSED_ROUTES)
+# What a web operation itself refuses headless -- the board host's
+# NotAvailable, from host.Widget() (not WebServer._board_actions()): the
+# same 503, as a route's answer and as an event's ack. The board that only
+# a widget could serve is one that is neither 1/2 nor the crew board; the
+# player / character counts of boards 1/2 were it until ADR-005 S3e-6
+# (core's now: test_the_roster_routes_answer_headless below).
 def test_a_legacy_route_a_web_operation_refuses_answers_503(
-        server, monkeypatch, path):
+        server, monkeypatch):
     monkeypatch.setattr(WebOps, "boardHost", BoardHost())
     app, _ = server
     client = app.test_client()
     client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
 
-    response = client.get(path)
+    response = client.get("/scoreboard4-swap-teams")
 
     assert response.status_code == 503
     assert response.get_json() == UNAVAILABLE_BODY
+
+
+def test_a_socketio_event_a_web_operation_refuses_acks_the_503_body(
+        server, monkeypatch):
+    monkeypatch.setattr(WebOps, "boardHost", BoardHost())
+    app, socketio = server
+    flask_client = app.test_client()
+    flask_client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
+    ws = socketio.test_client(app, flask_test_client=flask_client)
+    ws.get_received()
+
+    ack = ws.emit("set", json.dumps({"scoreboardNumber": "4",
+                                     "match": "Final"}), callback=True)
+
+    assert ack == UNAVAILABLE_BODY
+    assert ws.get_received() == []
+
+
+# The counts of a board that has none -- neither 1/2 nor the crew board:
+# refused before anything is written, as when the counts were the board's
+# widgets, rather than answered OK having changed nothing. Nor does the
+# board host remember characters for one.
+def test_the_counts_of_a_board_without_any_answer_503(server, monkeypatch):
+    host = BoardHost()
+    monkeypatch.setattr(WebOps, "boardHost", host)
+    app, socketio = server
+    client = app.test_client()
+    client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
+
+    for path in ("/scoreboard4-set?players=2",
+                 "/scoreboard4-set?characters=2",
+                 "/scoreboard4-set?players=0&match=Final",
+                 "/scoreboard0-set?characters=1"):
+        response = client.get(path)
+        assert response.status_code == 503, path
+        assert response.get_json() == UNAVAILABLE_BODY, path
+    ws = socketio.test_client(app, flask_test_client=client)
+    ws.get_received()
+    ack = ws.emit("set", json.dumps({"scoreboardNumber": "4",
+                                     "players": 2}), callback=True)
+    assert ack == UNAVAILABLE_BODY
+    assert _state().Get("score.4") is None
+    assert _state().Get("score.0") is None
+
+    host.KeepEmptyRosterCharacters(4, 2)
+    host.KeepEmptyRosterCharacters(3, 2)
+    assert host._emptyCharacters == {}
+    host.KeepEmptyRosterCharacters(2, 5)
+    assert host._emptyCharacters == {2: 5}
+
+
+# What answered 503 until ADR-005 S3e-6 (the board host's NotAvailable):
+# the player / character counts of boards 1/2, through every route. Core's
+# now (test_both_hosts_write_the_same_roster above).
+def test_the_roster_routes_answer_headless(server, autonaApp, monkeypatch):
+    app, socketio = server
+    client = app.test_client()
+    client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
+    _goHeadlessWithSlots(autonaApp, monkeypatch)
+    try:
+        for path in ("/scoreboard1-set?players=2",
+                     "/scoreboard2-set?characters=2"):
+            response = client.get(path)
+            assert response.status_code == 200, path
+            assert response.get_data(as_text=True) == "OK", path
+        response = client.patch("/api/v1/scoreboards/2/set",
+                                json={"players": 3})
+        assert response.status_code == 200, response.get_json()
+        ws = socketio.test_client(app, flask_test_client=client)
+        ws.get_received()
+        ws.emit("set", json.dumps({"scoreboardNumber": "1",
+                                   "characters": 1}))
+        answers = [event["args"] for event in ws.get_received()
+                   if event["name"] == "set"]
+        autonaApp.settle()
+
+        assert answers == [["OK"]]
+        assert sorted(autonaApp.get("score.1.team.1.player")) == ["1", "2"]
+        assert [len(slot["character"]) for team in (1, 2) for slot
+                in autonaApp.get(f"score.1.team.{team}.player").values()] \
+            == [1, 1, 1, 1]
+        assert sorted(autonaApp.get("score.2.team.2.player")) \
+            == ["1", "2", "3"]
+        assert [len(autonaApp.get(f"score.2.team.1.player.{slot}.character"))
+                for slot in (1, 2, 3)] == [2, 2, 2]
+    finally:
+        _dropHeadlessBoards(autonaApp)
 
 
 # What answered 503 until ADR-005 S3e-2: the crew board's operations and the
@@ -905,25 +1108,6 @@ def test_the_crew_and_caster_routes_answer_headless(server, headless):
     assert headless.get("score.3.team.1.memberNum") == 4
     assert headless.get("score.3.match") == "Final"
     assert headless.get("commentary.3.name") == "Cast"
-
-
-@pytest.mark.parametrize("event,body", [
-    ("set", {"scoreboardNumber": "1", "players": 2}),
-    ("set", {"scoreboardNumber": "2", "characters": 2}),
-])
-def test_a_socketio_event_a_web_operation_refuses_acks_the_503_body(
-        server, monkeypatch, event, body):
-    monkeypatch.setattr(WebOps, "boardHost", BoardHost())
-    app, socketio = server
-    flask_client = app.test_client()
-    flask_client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
-    ws = socketio.test_client(app, flask_test_client=flask_client)
-    ws.get_received()
-
-    ack = ws.emit(event, json.dumps(body), callback=True)
-
-    assert ack == UNAVAILABLE_BODY
-    assert ws.get_received() == []
 
 
 # /api/v1/bracket:refresh answered 503 until ADR-005 S3e-8 (the Top 8

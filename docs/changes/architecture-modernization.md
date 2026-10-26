@@ -1498,9 +1498,12 @@ S3c の後半。ウィンドウを出さずに state・大会データ・Web サ
   3. **`players_per_team` と `RepublishBestOf` はヘッドレスでは要らない**
      - デスクトップはゲームのロード時に、ボードがゲームの既定の人数を適用し、best of の文言を新しいロケールで出し直す（S2g / S2e。構築済みボードの反応）
      - ヘッドレスにはボードが無く、人数はボードのスピンボックスにしか無い（S2g で core 化するまで、ヘッドレスは人数を変えない）。best of の文言はゲームではなく起動時のロケールで決まり、ヘッドレス中にロケールは変わらない。行（`stages`）のリセットはトラッカー（ボードが登録する）の仕事で、ヘッドレスには行が無い
+       - → S3e-6 で、ゲームのロードの既定人数は両シェル共通の結線（`bootstrap.wire_game_roster`）になり、ヘッドレスも追従する
   4. **ヘッドレスの `clear_all` は人数・キャラ数を変えない**（ボードが無い。S2g）。チーム名は従来どおり残す
+     - → S3e-6 で、両シェルとも 1 人・1 キャラに戻すようになった（`AutonaActions.SetRoster`）
   5. **ヘッドレスの選手 DB は mains の正規化をしない**。デスクトップはモデルの構築のついでに、ロード中のゲームの mains を 3 要素に揃えて DB に書き戻している（QtGui の構築の中にある）。ヘッドレスでは `/playerdb` が保存されたままの mains を返す
   6. **`set_route` の `players` / `characters` はヘッドレスでは最初に断る**（他のフィールドを書く前に 503）。一部だけ書いて 503 を返すと、クライアントからは何が適用されたか分からないため
+     - → S3e-6 で core の操作になり、ヘッドレスでも効く（503 にならない）
   7. **`get_set` はヘッドレスでは常に `"0"`**（読み込んだセットが無い = 旧実装の「無し」の答え）。クルーボードも同じ（デスクトップのクルーボードは `setLoad` が無く例外になるが、ヘッドレスでは聞く相手がいない）
   8. **LAN 公開とポートは設定値で決め、ログに出すだけにした**（設計どおり）。`general.webserver_listen_lan` が未設定ならこの PC のみで待ち受け、案内をログに出す。Web サーバーが起動できなければ終了コード 1 で終わる（待ち受けていないのに単一インスタンスのロックを握り続けるのを避ける）
   9. **ヘッドレスの 2 つ目の起動は終了コード 1**。デスクトップ版は 2 つ目を黙って前面化で済ませるが、ヘッドレスを起動したスクリプトやサービスには「起動しなかった」が伝わる必要がある
@@ -1609,6 +1612,7 @@ S3 の最後。ヘッドレスの実プロセスに対して、Python のスモ�
   - 同じくヘルパーが強制終了されると、junction 付きの `%TEMP%\autona-e2e-*` が残りうる（junction の先はリポジトリの `web/build`・`layout/`・`assets/` など）。**junction を辿るクリーナー（`rm -rf`・`shutil.rmtree`・エクスプローラーの削除など）で消すと、リポジトリ側の中身まで消える危険がある**。先に中の junction を `rmdir`（junction だけを外し、先は消さない）で外してから、残ったディレクトリを消す
   - teardown は正常停止でなければ run を失敗にする（ヘルパーの `AUTONA_E2E_STOPPED {"exit": 0, "killed": false}` と、ヘルパー自身の終了コード 0 の両方を確認。kill になった・終了コードが 0 以外なら失敗）
   - ヘッドレスの人数は起動時の 1 人 / チームのまま。2v2 のゲームを読んでもスロットは増えない（ゲームのロードへのボードの反応 = S2g はヘッドレスに無い。S3c-2 判断 3 の残置と同じ）。人数を変える Web の入口（ボードのスピンボックス相当）もヘッドレスでは 503
+    - → S3e-6 で閉じた（ゲームのロードと Web の人数・キャラ数の変更が、ヘッドレスでも効く）
   - board 1/2 のチーム単位・ボード単位のキーはシードしないので、ヘッドレスの起動直後の state はデスクトップの空ボードより少ない（判断 9）。それを前提にしたオーバーレイは、最初の操作まで描画が欠ける。スコア系 4 枚はスコアが無ければ 0 と描く（`scoreboard_topleft` だけ `String(team.score)` で `undefined` と出ていたので、ほかの 3 枚と同じ `?? 0` にそろえた。デスクトップはボードがスコア 0 を publish するので元から出ない）
   - シードは起動時の 1 回だけ。ヘッドレスで `PATCH players` 相当がなく、クリア系は既存のスロットしか触らないので、スロットを消す経路も増やす経路も無い（シードで入ったスロットが残り続ける）
 - **実機確認（オーナー）**
@@ -2068,6 +2072,7 @@ Start.gg からの Top 8 の取り込みを、Top 8 パネルから core の `To
       - 呼ぶのは `_ApplyEntrants`・`_WritePlayerSlot`・`LoadPlayerFromTag`。カードの `SetData` は経由しない
       - `_WritePlayerSlot` は、`savePlayerToDb` があれば続けて `card.player.SavePlayerToDB()` を呼ぶ
       - `playerNumber.setValue` は残した（S3e-6 の範囲）
+        - → S3e-6 で `AutonaActions.SetRoster` に替えた。`_ApplyPlayer` はカードではなく state のスロット（チーム, 番号）を受ける
       - `_ApplyEntrants` は、人数が singles ⇔ チームで変わり、どの選手の seed も動かなかったとき True を返し、`ChangeSetData` がアップセット係数を 1 回計算させる（`bracket_type` の変化と合わせて 1 回。判断 3）
     - `NewSetSelected` / `_ApplyEntrants` / `_WritePlayerSlot` から `dataLock` を削除した
     - `_ClearingPlayers`: クリアの後に、各カードの `DiscardTypedText()` を呼ぶ
@@ -2351,9 +2356,9 @@ Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket
   - `post_score` の 1 人分のペイロード（`_ApplySinglePlayerData` / `_WritePlayerSlot`）は、まだボードのカードから読込先を決める（S3e-7 で `post_score` を移すときに揃える）。下の「既存の不具合」のとおり、不正な番号は別のスロットに書く
   - `DesktopBoardHost.Run` が GUI スレッドのままなので、GUI スレッドが詰まると Web の選手操作も待つ（判断 2。`update_player` / `load_player_from_tag` は従来どおり）
   - 別の選手の判定は完全一致なので、Web UI でタグの綴りを直しただけでも id が消える（start.gg の id で引く統計が取れなくなる）。デスクトップの手入力と同じで、オーナーの規則どおり。顔写真と seed は残る
-  - 本当に別の選手を名前だけで入れたときは、前の選手の顔写真と seed がその名前の横に残る（判断 1。下の「オーナー判断待ち」）
-- **オーナー判断待ち**
-  - 別の選手の名前を書いたとき、前の選手の顔写真（online_avatar）と seed も空にするよう、デスクトップのカードと Web UI の両方で揃えて広げるか（広げると LIVE-BUG-1「タグを直しても顔写真は消えない」の固定と逆になる）
+  - 本当に別の選手を名前だけで入れたときは、前の選手の顔写真と seed がその名前の横に残る（判断 1。下の「オーナー判断」で、このまま残すと決定）
+- **オーナー判断（2026-10-27 決定）**
+  - 別の選手の名前を書いたときに空にするのは id・city だけで、顔写真（online_avatar）と seed は空にしない。デスクトップのカードと Web UI のどちらも広げない（オーナー: 「タグの綴りを直しても顔写真は消さない」。LIVE-BUG-1 の固定を優先する）
 - **残課題（review で見送り・記録のみ）**
   - Web UI の打ちかけ保護が古い名前を送り、新しい選手の id を消す（S4 の Web UI 側で扱う）
   - legacy の `update-team` の DB 照合キー（body のスポンサー + タグ）が、スロットのスポンサーとずれる（body がタグだけなら、スロットにスポンサーがあってもタグだけで引く）
@@ -2579,3 +2584,196 @@ Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket
   - ヘッドレス（Start.gg の大会を読み込んだ状態）
     - `/web` で選手を編集・スワップ・クリアする → オーバーレイの統計が取り直される（503 にならない）
     - 上の統計のルートが `OK` / 200 を返し、state に結果が入る
+
+#### S3e-6 選手数・キャラ数の state 駆動化（2026-10-27・PR 未作成）
+
+人数（1 チームの選手数）とキャラ数（1 選手のキャラ枠の数）を state 主導にした（S2g）。それまでは、ボード 1 / 2 の 2 つのスピンボックス（`playerNumber` / `charNumber`）が正本だった。入口 6 か所（ボードの構築・シングルスモード・ゲームのロード・セットの entrants・Web の `set_route`・`clear_all`）はスピンボックスを動かし、スロットはカードの生成・破棄で publish / unset されていた。今は state のスロット数と、スロットの `character` の数が正本になる。入口 6 か所はすべて core の `AutonaActions.SetRoster` を呼び、ボードは held サイクルの中でカードを state に合わせる。人数のキーは足していない（S3e 決定 1: スロット数が人数）。
+
+ヘッドレスでも、`set_route` の `players` / `characters`、`clear_all` の人数・キャラ数のリセット、ゲームのロードの既定人数が効く（それまでは 503 / 何もしない）。
+
+デスクトップの外部挙動は、移す前の木 7169efd5 で録った golden（`tests/test_roster_flow.py`）と、既存の録画（`tests/test_player_card_render.py` / `tests/fixtures/player_apply/scenarios.py`）で照合した。意図して変えたものは「外から見える変化」に書いた。
+
+- **実装**
+  - `src/core/Actions.py`
+    - `SetRoster(board, players=None, characters=None, forgetPicks=False) -> bool`
+      - 1 保存サイクル（`SaveBlock` + `StateManager.lock`）で、次の順に書く
+        1. 人数を超えるスロットを、両チームとも切り詰める（`TrimTeamRoster`。カードの無い復元済みスロットも）
+        2. 残すスロットでキャラ枠の数が違うものは、枠を増減して mains と一緒に publish し直す（`PlayerService.PublishCharacterSlots(..., includeMains=True)`）。先頭の選択は残し、増えた枠は空
+        3. 足りないスロットを `PlayerService.SeedEmpty(characters)` で作る（index ごとに、チーム 1 → 2 の順。カードの生成順と同じ）
+        4. ほかの人数から 1 人以下になるときは、両チームのチーム名とロゴを空にする
+      - `None` は今の値。人数が `None`（キャラ数だけの要求）なら、スロットは増やしも減らしもせず、チーム名も触らず、両チームにあるすべてのスロットのキャラ枠だけを増減する（欠番のあるロスター・人数の違うチームでもスロットを消さない。再レビュー対応 4）。キャラ数が `None` なら最初のスロットの枠数（スロットが無ければ既定の 3。入口が知っているときは渡す: スピンボックス・ボードホストの `EmptyRosterCharacters`）
+      - 「1 人以下になるときのチーム名」の判定に使う今の人数は、両チームのうち多い方（どちらも `RosterCount` = 1 から連続して数える。ボードがカードを数えるのと同じ関数）
+      - 範囲はスピンボックスと同じ（人数 0〜99・キャラ数 0〜100）
+      - 人数もキャラ枠も今と同じなら、何も書かない
+      - `forgetPicks`: 残すスロットすべての選択と mains を、キャラ数によらず空にする（すでに空のスロットは書かない）。ゲームの切り替え用（判断 4）
+      - キャラ枠の解決と値の組み立ては、同じゲームのスナップショット 1 つで行う（`PublishCharacterSlots(..., snapshot=)`）
+    - `ApplyGameRoster(replaced=None)`: 選手スロットを持つボード（1 / 2）を、ゲームの `players_per_team` と既定のキャラ数 3 にする（1 保存サイクル）。`replaced`（そのロードが返したスナップショットの `GameAssetSnapshot.replaced`。シェルが渡す）があれば `forgetPicks=True`。カタログの `Current()` は読まない（再レビュー対応 1）。スロットの無いボード（デスクトップで未構築）は、構築時にゲームの人数になる
+  - `src/core/GameAssetCatalog.py`: スナップショットに `replaced`（置き換えた前のゲームの codename。起動時の最初のロード・同じゲームの再ロード・`ForgetSelection` の後は None）を足した。`SelectGame` の Top 8 のキャラの消去も、この値で判定する
+  - `src/AutonaGameAssetManager.py` / `src/headless.py`: ローダーに `gameLoaded = Signal(object)` を足した。ロードが返したスナップショットを持ち、`onLoad` / `gameChanged` の直前に出る（ヘッドレスは、ローダーのスレッドからメインスレッドへスナップショットを運ぶ）
+  - `src/bootstrap.py`
+    - `wire_game_roster(game_loaded)` を足した。`gameLoaded` のスナップショットを受け、ボードホストの `Run` で `ApplyGameRoster(snapshot.replaced)` を呼ぶ
+    - `bootstrap_gui()` の最後で、アセットアダプタの `gameLoaded` に繋ぐ（ORDER CONSTRAINT のコメント付き）。`onLoad` の直前に出るので、カードの `ReloadCharacters` とボードの `_onGameAssetsLoaded` より先に走る
+  - `src/headless.py`: `games.signals.gameLoaded` に `wire_game_roster` を繋ぐ（`games.Start()` のゲームの復元より前）
+  - `src/AutonaWebOperations.py`
+    - `set_route` の `players` / `characters`: `host.Prepare` の後で `SetRoster` を呼ぶ。人数とキャラ数は別々の保存サイクル（スピンボックス 2 つのときと同じ）
+      - キャラ枠の無いボードでは、新しい選手のキャラ数をボードホストに聞く（`EmptyRosterCharacters`。デスクトップは `charNumber`、ヘッドレスは覚えた値か 3）。キャラ枠の無いボードへの `characters` と、最後の選手を消したときのキャラ数は、ホストが覚える（`KeepEmptyRosterCharacters`。ボード 1 / 2 だけ）。旧実装と同じく、`players=0` → `characters=2` → `players=2` で 2 キャラになる
+      - ボード 1 / 2 / 3 以外の `players` / `characters` は、何も書く前に `NotAvailable`（503）で断る（再レビュー対応 2）
+    - `BoardHost.ResetCounts` は `SetRoster(board, 1, 1)`（`DesktopBoardHost.ResetCounts` は削除）
+    - ヘッドレスの 503 から外れた
+  - `src/AutonaScoreboardWidget.py`
+    - スピンボックスの `valueChanged`（`SetPlayersPerTeam` / `SetCharacterNumber`）・構築・シングルスモード・`SetDefaultsFromAssets`・`_ApplyEntrants` は `SetRoster` を呼ぶだけ。スピンボックスは state を表示する（`_SyncRosterSpins`。シグナルを止めて）。`SetPlayersPerTeam` は、新しい選手のキャラ数に `charNumber` の値を渡す（人数 0 のボードでも、表示していた値）
+    - カードの追従（`_SyncPlayerCards`。held サイクルの中で同期。再入ガード付き）
+      - スロットごとにカードを作る（`_AddCard`）。作るときは何も書かない
+      - 消えたスロットのカードは退役させる（`_RetireCard` → カードの `Retire`）。リストから外し、隠して書き込みを止める
+      - 破棄は `QTimer.singleShot(0, self, _DestroyRetiredCards)` で、イベントループに戻ってから行う（カードの `Destroy`）
+      - チーム名欄・カードのタイトル・上下移動ボタンの表示は、カードの数に合わせる（`_FollowCards`）
+    - 構築・ゲームのロード（`_onGameAssetsLoaded`）・`SetDefaultsFromAssets` は、`_SyncPlayerCards` を自分で呼ぶ。同じブロックの `CommitHeld` が held の通知を捨てるため。反映（`held_dirty_changed(False)`）でも合わせる（レビュー対応 5）。どれも `_FollowRoster` 経由で、例外はログに出して後続（`CommitHeld` 等）を止めない
+    - `_ApplyEntrants` の選手の書き込みは、state のスロット宛て（`_ApplyPlayer(team, slot, ...)`）。人数を同じ保存ブロックで変えるので、カードはまだ無い
+    - `_WritePlayerSlot`（legacy `POST /score` の 1 人分）と `LoadPlayerFromTag`（PLAYERS パネル）も state のスロット宛て。番号の解き方はカードのリストと同じ（S3e-4 の既存不具合「`"0"` で別のスロットに書く」もそのまま。S3e-7 で直す）
+  - `src/AutonaScoreboardPlayerWidget.py`
+    - ボードのカード（`_onBoard`）は構築時に何も書かない（`_WireInputs(publish=False)`。スロットは `SetRoster` がシード済み）
+    - キャラ行は `SyncCharacterRows` が、スロットの `character` の数に合わせる。何も書かない。構築時・ボードの held サイクル・描画・ゲームのロードの再結線（`ReloadCharacters`）で合わせる
+    - 行を減らすときは、隠してリストから外す。破棄は `QTimer.singleShot(0)` で行う（`_DestroyRemovedRows`。行の item の wrapper を先に invalidate する）
+    - `Retire` / `Destroy`: `Destroy` は、カード自身・子のレイアウト・親の列のレイアウトの item の wrapper を invalidate してから（pitfalls #14）、`setParent(None)` → `deleteLater` する
+    - `_MayWrite()`: 退役後・削除中は書かない。ボードのカードは、state にスロットがあるときだけ書く。入力欄・seed・誕生日・国 / 地域・名前・補完の選択・キャラの各ハンドラで見る
+  - `src/AutonaBasePlayerWidget.py`: `_quietCharacters`（行を作る間に、コンボが行に落ち着くのを選択として書かない）と `_MayWrite` を足した
+  - コメント・docs の追随: `src/core/PlayerService.py`・`.claude/rules/state-and-webserver.md`・`.claude/rules/python-widgets.md`・`.claude/design/Design.md`・`.claude/design/external-control-api.md`・`docs/operations/runtime-operations.md`
+- **判断と理由**
+  1. **カードの作成・退役は held サイクルの中で同期、破棄はイベントループに戻ってから**
+     - 通知の中でレイアウトを同期で壊さない（pitfalls #9 / #10 / #14 と同じ理由）
+     - 退役から破棄までの間は、隠して書き込みを止める。人数の変更はスロットを消してから held サイクルでカードを退役させるので、その間にフォーカスアウトや queued の補完の選択で確定した編集が、スロットを書き戻しうる（ゴーストスロット）。`_MayWrite` は state のスロットの有無も見る
+  2. **カードは作るときに何も書かない**
+     - 旧実装では、カードの構築がスロットを publish していた。今はスロットが先に state にあり（`SetRoster` が `SeedEmpty` で作る）、カードはそれを描画する。ボードの構築がシードを書き直さないので、構築の前後で state が変わらない（`test_a_board_card_writes_nothing_as_it_is_built`）
+  3. **ゲームのロードの既定人数は、両シェル共通の結線（`wire_game_roster`）に移した**
+     - 旧実装は、構築済みのボードの `onLoad` ハンドラ（`SetDefaultsFromAssets`）だった。そのため、ヘッドレスのボードはゲームのロードに追従しなかった
+     - デスクトップでは、ボードの構築より前に繋ぐ。同じ `onLoad` で、カードの `ReloadCharacters`（選択を新しいゲームのものとして空にする。その前に、この結線が書いたキャラ枠の数を取る）とボードの `_onGameAssetsLoaded`（`CommitHeld` で公開する）より先に走る
+     - 非同期のロード（GAME メニュー）では、ローダーのスレッドからシグナルが出る。結線は素の関数への接続なので、GUI スレッド（ヘッドレスはメインスレッド）にキューされ、ロードが終わった後に走る。そのため、切り替えかどうかはロードが返したスナップショットをシグナルで受け取って決める（再レビュー対応 1）。`test_a_threaded_game_load_publishes_the_recorded_roster` が、同期のロードの録画と同じ state になることを確かめる
+  4. **ゲームが別のゲームに変わったロードでは、全スロットの選択と mains を空にする**（`forgetPicks`。レビュー対応 4 で改定。当初はキャラ数が変わるスロットだけを空にしていた）
+     - 判定は `game.codename` の変化で、Top 8 の `ForgetCharacters` と同じ規則・同じ値（スナップショットの `replaced`）。起動時の復元（`game` が空）と同じゲームの再ロードでは空にしない。キャラ数が変わらなくても空にする
+     - 理由: 前のゲームのキャラ名が配信に出る事故を防ぐ。ボードは held なので、空にしないと次の反映で前のゲームのキャラ名が出る。ヘッドレスにはカードの `ReloadCharacters` が無く、同じキャラ数のゲームに切り替えると前のゲームのキャラ名が残っていた
+     - 同じゲームの再ロードで枠数が変わるスロットは、先頭の選択を残して枠を増減する（カードの枠数変更と同じ）。録画（`tests/test_player_card_render.py` のゲームのロード。同じゲームのロード）とはこれで一致し、当初の `blankPicks` / `blankMains` の差分表は不要になった
+     - デスクトップでは、どのロードでもカードの `ReloadCharacters`（モデルの張り替え）が選択を空にする（S3e-6 の前から）。そのため、同じゲームの再ロードではデスクトップだけ選択が空になり、mains は両シェルとも残る（残置 / リスク）
+  5. **人数とキャラ数を同時に指定した `set_route` は、従来どおり別々の保存サイクル**（人数 → キャラ数。held の中なので、反映で配信される内容は同じ）
+  6. **スロットが外から Unset されたら、そのカードは退役する**
+     - 人数は state のスロット数なので、カードも合わせる
+     - 旧実装はカードが残り、空のスロットとして表示し、次の編集でスロットを書き戻していた
+- **外から見える変化**
+  - ヘッドレス（`python main.py --headless`）
+    - ボード 1 / 2 の人数・キャラ数の変更（legacy `scoreboard<n>-set` の `players` / `characters`・Socket.IO・v1 `PATCH set`）が効く（それまでは 503 `UNAVAILABLE`）
+    - ゲームのロードで、ゲームの既定人数になる（キャラ数は 3）。それまでは、起動時の 1 人のままだった
+    - `clear_all` が、人数・キャラ数を 1 人・1 キャラに戻す。それまでは変えなかった
+  - 両シェル
+    - ほかの人数から 1 人以下にすると、チーム名とロゴが空になる。デスクトップでは、チーム名欄が隠れるときに空にしていたので、同じ結果になる。ヘッドレスでは新しい挙動
+    - **別のゲームに切り替えるロードで、ボード 1 / 2 の全スロットのキャラと mains が空になる**（判断 4。キャラ数によらない。起動時の復元・同じゲームの再ロードでは空にしない）。旧実装は、デスクトップでは選択だけをカードが空にし、mains は残っていた。ヘッドレスは何も空にしなかった
+  - デスクトップ
+    - キャラ数の変更は 1 保存サイクルになった（それまではカード 1 枚ごとに 1 サイクル）。`clear_all` の人数・キャラ数のリセットも 1 サイクル。どれも held の中なので、反映で配信される内容は同じ
+    - 人数 0 のボードに Web から人数を入れると、新しい選手のキャラ数は `charNumber` の値（従来どおり。レビュー対応 6。当初は既定の 3 になっていた）
+    - シングルスのボードの LOSERS チェックボックスは、選手カードの「>>詳細」の行ではなく、カードの下の専用の行に出る（レビュー対応 1。見た目の変化。右寄せ）
+    - state のスロットが外から Unset されると、そのカードが消える（判断 6）
+  - 上記以外は変わらない: デスクトップの state・キー順・反映で配信される delta・カードの数と表示・スピンボックスの表示・ルートの応答
+- **pin**
+  - `tests/test_roster_flow.py` + `tests/fixtures/roster/golden.json`: 7169efd5 で、公開された入口だけを通して録った 3 シナリオを、新しい経路で照合する。`AUTONA_RECORD_ROSTER=1` で録り直す（移す前の木でだけ）
+    - チームのボード: スピンボックス・Web・スワップ・上下移動・セットの entrants（2v2 / 3v3 / 1v1）・`clear_all`・人数 0・キャラ数 0・リセット
+    - ゲームのロード: 2 人のゲーム・1 人のゲーム・読み直し・ロードの後に作ったシングルスのボード
+    - ボードの構築（ゲームの前と後）
+    - 1 ステップごとに: `score.{n}` の state（orjson。キー順込み）・反映待ちの有無・反映で配信された delta・各チームのカードの数・キャラ行・タグ・タイトルの表示・スピンボックス・チーム名欄の表示・ルートの応答
+  - `tests/test_roster_flow.py` のカードの寿命のテスト
+    - `test_the_cards_follow_repeated_roster_changes`: 21 の操作（スピンボックス・Web・スワップ・上下移動・セットの entrants・ゲームのロード・`clear_all`・人数 0・キャラ数 0・core 直）を 4 周する。毎ステップ、次を確かめる
+      - カードがスロットごとに 1 枚、行がキャラ枠ごとに 1 つある
+      - 退役したカードは、入力欄の確定・queued の補完の選択・キャラの確定のどれでも書かない
+      - 退役したカードと外した行は、イベントループで削除される
+      - state にゴーストスロットが無い
+    - `test_a_board_card_writes_nothing_as_it_is_built`
+    - `test_a_shrink_destroys_from_the_event_loop_and_releases_the_items`: held サイクルの中では何も壊さず、イベントループで外し、item の wrapper を invalidate してから削除する（pitfalls #14。テストが wrapper を握った状態で確かめる）
+    - `test_a_card_retired_mid_edit_does_not_write_its_slot_back`: スロットが消えてからカードが退役するまでの確定と、同じ番号のスロットが新しいカードで戻った後の確定
+    - `test_a_threaded_game_load_publishes_the_recorded_roster`: ローダーのスレッドでのロードが、録画（同期のロード）と同じになる
+    - 書き込みのガードを外す・破棄を同期にする・wrapper の invalidate を外す、の 3 つで落ちることを確かめた
+  - `tests/test_player_card_render.py`
+    - 録画との差分を `S3E6_*` の変更表に書いた（保存サイクルの数だけ。レビュー対応 4 で、ゲームのロードの空の選択の差分は無くなった）
+    - `test_an_unset_slot_retires_its_card` を足した。`test_an_emptied_slot_shows_a_blank_card` は `{}` だけにした
+  - `tests/fixtures/player_apply/scenarios.py`: 「mains を残す」の 2 シナリオのキャラ数の変更を 1 サイクルにした
+  - `tests/test_web_operations.py`
+    - 両シェルで人数・キャラ数の Web 操作が同じ state を書く（`test_both_hosts_write_the_same_roster`）
+    - ヘッドレスがボード無しで人数を答える。legacy / Socket.IO / v1 の人数のルートがヘッドレスで答える
+    - 503 のテストから人数・キャラ数を外した
+  - `tests/test_bootstrap_split.py`
+    - `bootstrap_gui()` の手順に `wire_game_roster` を足した
+    - `test_both_shells_follow_a_game_load_with_the_same_roster`: 両シェルがこの 1 関数で繋ぐ。ボードの `_onGameAssetsLoaded` は人数を書かない
+  - `tests/test_player_widgets.py`: カードの構築元は 2 種類のまま。ボードの path の形
+- **残置 / リスク**
+  - `CommitHeld` は、同じ保存ブロックの held の通知を捨てる（`_heldTouched.discard`）。カードは反映（`held_dirty_changed(False)`）でも state に合わせるので、ずれは残らない。ただしボードの held ハンドラのほかの追従（スコア表示・ステージ行・セットの欄）は反映では走らない。別スレッドの保存ブロックの書き込みが同じ反映で捨てられると、次の編集まで表示が遅れうる（S3e-6 の前から同じ）
+  - 同じゲームの再ロード（MOD の再読込など）では、デスクトップだけカードの `ReloadCharacters` が選択を空にする（判断 4）。ヘッドレスは残す。カードの再結線が書く形は S3e-6 の前からで、直していない
+  - ゲームのロードは、操作者が決めたキャラ数を既定の 3 に戻す（従来どおり）
+- **直した既存の不具合**（レビュー対応 1）
+  - **シングルスのボード（board 1）を Web から人数 0 にすると、LOSERS チェックボックスがデスクトップから消え、戻らなかった**
+    - チェックボックスは、選手カードの「>>詳細」の行に移してあった（`_placeLosersOnDetailsRow`）。人数 0（legacy `scoreboard1-set?players=0` 等）でそのカードが破棄されると、チェックボックスも一緒に破棄されていた（旧実装でも、スピンボックス経由で同じ）
+    - 今はチームカラムの専用の行（`losersRow`。groupBox の直下）に置く。カードの寿命と切り離した。移すのはボードの構築時の 1 回だけで、held サイクルの中では移さない（pitfalls #14。移す前にヘッダ行の item の wrapper を release する）
+- **リリースノート案**
+  - ヘッドレス起動（`python main.py --headless`）で、Web UI / API からボード 1 / 2 の選手数・キャラ数を変えられるようになった。2v2 などのゲームを読み込むと、選手欄がゲームの人数に増える。「すべてクリア」で選手数・キャラ数も 1 に戻る
+  - ゲームを別のゲームに切り替えると、スコアボードの選手のキャラクターとメインキャラが空になるようになった（前のゲームのキャラ名が配信に出ないように。同じゲームの再読み込みでは残る）
+  - シングルスのスコアボードで、Web から選手数を 0 にすると LOSERS のチェックボックスが消えてしまう不具合を直した。チェックボックスは選手欄の下の行に表示される
+- **実機確認（オーナー）**
+  - デスクトップ（チーム戦のボード）
+    - 人数のスピンボックスを 1 → 3 → 2 → 1 と変える → カードが増減し、1 人でチーム名欄が隠れて空になる。反映で OBS に出る
+    - Web UI / Stream Deck から `scoreboard2-set?players=3&characters=2` → カードが 3 人・キャラ 2 枠になる
+    - 3v3 / 2v2 / 1v1 のセットを続けて読み込む → カードの数がセットに合わせて増減し、選手が入る
+    - 2 人のゲーム（`players_per_team` が 2）を GAME メニューで読み込む → チーム戦のボードが 2 人・キャラ 3 枠になる。キャラの選択は空
+    - 選手の名前欄に打っている途中に、Web から人数を減らしてそのカードを消す → 落ちない。消えたカードの名前が state に戻らない（反映後の OBS にも出ない）
+    - カードの詳細ダイアログを開いたまま、Web から人数を減らしてそのカードを消す → ダイアログが閉じ、落ちない
+    - 人数とキャラ数を何度も上下させ、セットの読込・スワップ・上下移動を繰り返す → 落ちない・遅くならない
+    - キャラを選んで反映した後、GAME メニューで別のゲームを読み込む → 全員のキャラが空になる（反映後の OBS に前のゲームのキャラ名が出ない）。同じゲームを読み直す → mains は残る
+    - Web から `scoreboard2-set?players=0` → `scoreboard2-set?characters=2` → `scoreboard2-set?players=2` → 2 人・キャラ 2 枠になる
+  - デスクトップ（シングルスのボード）
+    - Web から `scoreboard1-set?characters=2` → キャラ 2 枠になる
+    - LOSERS のチェックボックスが選手欄の下の行に右寄せで出る（「>>詳細」の行ではなくなった）。見た目に問題が無いか
+    - Web から `scoreboard1-set?players=0` → `players=1` → `players=0` → `players=1` → LOSERS のチェックボックスが残っていて、押すと反映後の OBS に [L] が付く
+  - ヘッドレス（`python main.py --headless`）
+    - `/web` または `scoreboard2-set?players=2` → オーバーレイの選手欄が 2 人になる（503 にならない）
+    - `/web` で 2 人のゲームを選ぶ → 選手欄が 2 人になる
+    - `/web` の「すべてクリア」→ 選手数・キャラ数が 1 に戻る
+- **レビュー対応（2026-10-27）**
+  1. シングルスの LOSERS チェックボックスをカードの外（チームカラムの `losersRow`）へ移した（上の「直した既存の不具合」）。pin: `test_the_singles_losers_box_outlives_the_players`（人数 0 → 1 → 0 → 1 で同じチェックボックスが残り、押すと state に書く）
+  2. **カードの構築が `StateManager.lock` を持ったまま走る件: lock の中で構築することを許容し、lock の中で別スレッドを待たないことを pin した**（再レビューで方針を変えた）
+     - 採らなかった案 (a): held の通知を lock の外で出す（`StateManager.lock` を、最後の release の後に通知を出す再入可能な lock に差し替える）。一度実装したが取り消した。理由: held ハンドラ全体が `StateManager.lock` の中で走ることが暗黙の原子性になっていて、外へ出すと新しい競合が入る（例: ステージボタンの `PublishStageResults`（`writingScore` が立っている）の held ハンドラの途中に、Flask スレッドの `score:adjust` が割り込むと、スコアは +1 されるのにステージ行に勝ちが付かず、ずれたまま配信される）。lock の差し替えはプロセス全体の並行性の基盤に関わり、S3e-6 の範囲を超える。得られるもの（カードの構築の数 ms のあいだ Flask が待たずに済む）がリスクに見合わない（CLAUDE.md 開発原則 1）
+     - 採らなかった案 (b): カードの同期だけを `singleShot(0)` で lock の外へ出す。同じ held サイクルの後続ハンドラ（スワップの描画・セット読込の直後の描画など）がカードの無い状態を見る
+     - 採った形: `StateManager.lock` は元の `threading.RLock` と通知の位置のまま。held 通知と `state_updated` のハンドラは lock の中で（GUI スレッドで書いた変更では direct に）走り、カードの構築もそこで行う。その中では別スレッドを待たない（`gui_thread_sync` / `run_sync` / `QDialog.exec` / `processEvents` をしない）。`.claude/rules/agent-pitfalls.md` の #17 に書いた
+     - pin: `tests/test_roster_flow.py` の `test_no_thread_is_waited_on_inside_a_held_cycle`（lock を持ったままの `SetRoster`・保存ブロック・Web・非同期のゲームのロード・反映で、`run_sync` がどのスレッドからも、lock を持ったまま・通知の中で呼ばれない）。カードの同期の中に `run_sync` を足すと落ちることを確かめた
+     - (a) に付随して入れたもの（`tests/test_state_manager_held.py` の 4 本・`tests/test_state_manager_save_cost.py` の lock の差し替え・`GameTrackerService` のコメント・旧 pin `test_no_card_is_built_and_no_thread_waited_on_under_the_state_lock`）は戻した。レビュー対応 5（反映でのカードの同期）は lock を戻した後も `test_a_commit_inside_another_save_block_leaves_no_card_behind` で通る
+  3. `BoardHost._lock` のコメントを実態に直した: ヘッドレスではメインスレッドも取る（ゲームのロードの `wire_game_roster`）。「`Run` の中でメインスレッドを待たない」を不変条件として書いた
+  4. ゲームのロードの空化を `game.codename` の変化で判定するようにした（判断 4 を改定）。スナップショットの `replaced` を足し、Top 8 と同じ値を使う。golden の差分: `tests/test_player_card_render.py` の `S3E6_BEST_OF_CHANGES` / `S3E6_SINGLES_BEST_OF_CHANGES` から空の選択（`blankPicks` / `blankMains`・`stateDigest`・反映の delta）を外し、保存サイクルの数だけにした。録画のロードは同じゲームのロードなので、先頭の選択を残す今の挙動が録画どおり。`tests/test_roster_flow.py` の録画のゲームのロード（別のゲームへの切り替え）は、もともと選択が空のステップしか無く、差分は出ない。pin: `test_a_game_switch_forgets_every_pick_a_reload_keeps_them`（起動時の復元・同じゲームの選び直し / 再ロードで残り、切り替えで全スロットの選択と mains が空、空なら書かない）
+  5. `CommitHeld` が `_heldTouched` を捨てる件: ボードの `_onHeldDirtyChanged(False)` でもカードを state に合わせるようにした（捨てない形にはしなかった: 反映のたびに held ハンドラ全体が 1 回多く走り、ボードの構築中の `CommitHeld` でもハンドラが走るため）。pin: `test_a_commit_inside_another_save_block_leaves_no_card_behind`。直す前の形で落ちることを確かめた
+  6. 人数 0 → n のキャラ数を入口で揃えた（上の `set_route`）。pin: `tests/test_web_operations.py` の `test_an_emptied_board_gives_its_next_players_the_characters_it_keeps`（両シェル）と、`test_both_hosts_write_the_same_roster` の 2 シナリオ
+  7. 人数の数え方を `AutonaActions.RosterCount`（1 から連続して数える）の 1 つにした。ボードの `_RosterCount` もこれを呼ぶ。同じ人数・キャラ数では何も書かない（`test_the_same_roster_writes_nothing`）。`_ResizedPicks` と `PublishCharacterSlots` は同じスナップショットを使う
+  8. 小さな防御: カードの `Clear()` に `_MayWrite` のガード（`_poke` に足して pin）。`_DestroyRetiredCards` は `Exception` も捕まえて残りの破棄を続ける。`_SyncPlayerCards` の呼び出しは `_FollowRoster` 経由にし、例外が出ても `CommitHeld` が走る（`test_a_board_card_that_fails_to_go_does_not_keep_the_others`）。`Retire` で開いているポップアップ（補完の一覧・コンボの一覧）を閉じる（コンボの一覧は再レビュー対応 3 で直した）
+  9. `host.Widget()` が出す `NotAvailable` → legacy 503 / Socket.IO の ack を、別の入口で pin し直した（`/scoreboard4-swap-teams` と、`set` イベントの `scoreboardNumber: "4"`。ボード 1 / 2 でもクルーでもないボードは、まだウィジェットにしか答えられない）
+  10. `.claude/rules/state-and-webserver.md` の StateSchema 節（選手スロットのシード）を直した。呼び出し元の無くなった `PlayerService.Unset` を削除した（参照は `tests/test_player_service.py` の 1 本だけで、それも削除。`docs/changes/headless-core-redesign.md` の過去の記録は書き換えていない）
+  - 記録だけのもの（未修正）
+    - 指摘 8: `LoadPlayerFromTag` は、番号 0 で `IndexError` になる（正しい方向）。`_WritePlayerSlot`（legacy `POST /score`）の同じ問題（`"0"` で最後のスロットに書く）は S3e-7 で直す
+    - 指摘 11: 外から Unset されて 1 人になったとき、state のチーム名が残る（ボードはチーム名欄を隠すだけで、書かない。`SetRoster` を通る減り方なら空になる）
+    - 指摘 14: ヘッドレスの v1 のゲームのロードで、完了フラグ（ロード中の 409）がロスターの適用より先に解除される（`done` はローダーのスレッド、`gameLoaded` → `ApplyGameRoster` はメインスレッド）。その間に来た要求は、ロスター適用前の人数を見る
+    - 指摘 15: `saveBlocked` はプロセス全体のカウンタで、別スレッドの保存ブロックが開いている間は、このスレッドの `SaveState` も保留される（既存の race）。同じ理由で、別スレッドのブロックの中で `CommitHeld` が走ると、反映ボタンの有効・無効がそのブロックの終わりまで古いまま残りうる
+- **再レビュー対応（2026-10-27）**
+  1. **ゲームのロードの切り替えの判定を、ロードが返したスナップショットで行う**
+     - 問題: `ApplyGameRoster` が実行時の `Current().replaced` を読んでいた。結線のスロットは GUI スレッド（ヘッドレスはメインスレッド）にキューされ、ロードが終わった後に走る。別のゲームへの切り替えの直後に同じゲームを再ロードすると、2 つのスロットがどちらも再ロードのスナップショット（`replaced` は None）を読み、前のゲームのキャラが残った
+     - 直し方: 両シェルのローダーに `gameLoaded = Signal(object)`（ロードが返したスナップショット）を足し、`wire_game_roster` はそれに繋いで `ApplyGameRoster(snapshot.replaced)` を呼ぶ。既存の `onLoad` / `gameChanged` は引数を変えない（購読者が多い）。`gameLoaded` はその直前に出るので、カードの `ReloadCharacters`・ボードの `_onGameAssetsLoaded`・Web のプッシュより先に走る順序は変わらない（ヘッドレスでは選手 DB の `SetupModel` より前になった。依存は無い）
+     - `ForgetSelection` が `replaced` を引き継いでいたので、None に戻すようにした
+     - pin: `test_a_switch_followed_by_a_reload_forgets_the_previous_picks[desktop / headless]`（両シェルのローダーの経路で、切り替え → 再ロードの 2 つのスロットがどちらもロードの後に走っても、前のゲームのキャラと mains が空になる）、`test_a_game_switch_forgets_every_pick_a_reload_keeps_them` に `ForgetSelection` を足した。`Current()` を読む形に戻すと両シェルとも落ち、`ForgetSelection` を戻すと落ちることを確かめた
+  2. **ボード 1 / 2 / 3 以外の人数 / キャラ数を 503 で断る**
+     - 問題: S3e-6 で `set_route` の人数 / キャラ数が core を呼ぶようになり、ヘッドレスの `/scoreboard4-set?players=N` / `characters=N` が、何も変えずに 200 OK を返していた（S3e-6 の前は 503。デスクトップは前から `Widget()` が None で 500）
+     - 直し方: `set_route` で、人数 / キャラ数の指定があり、ボードが 1 / 2 でもクルーボードでもないとき、何も書く前に `NotAvailable` を出す。両シェルとも 503（legacy・Socket.IO の ack・v1 は同じ本文）。`KeepEmptyRosterCharacters` はボード 1 / 2 以外を覚えない
+     - pin: `tests/test_web_operations.py` の `test_the_counts_of_a_board_without_any_answer_503`（legacy 4 ルート・Socket.IO の `set`、何も書かない、ホストが覚えない）
+  3. **`_ClosePopups` のコンボの分岐が効いていなかった**
+     - 問題: コンボの一覧はコンボを親とするポップアップのウィンドウで、`isAncestorOf()` はウィンドウの境で止まるので、カードの持ち物と判定されず閉じなかった
+     - 直し方: ポップアップ（補完の一覧はフォーカスプロキシの入力欄）から `parentWidget()` を辿ってカードに着くかで判定する（ウィンドウの境を越える。詳細ダイアログもカードの子なので同じ判定で済む）。コンボの一覧はコンボの `hidePopup()` で閉じ、補完の一覧は `hide()` する
+     - pin: `tests/test_roster_flow.py` の `test_a_retired_card_closes_its_open_combo_list`（キャラのコンボの一覧を開いたままカードを退役させると、その場で閉じる）。`isAncestorOf` の判定に戻す・`hidePopup` を外す、のどちらでも落ちることを確かめた
+  4. **`SetRoster(players=None)` が人数を切り詰めていた**
+     - 問題: 人数を指定しない要求（キャラ数のスピンボックス・Web の `characters=N`）でも、チーム 1 の連続した人数に両チームを切り詰めていた。チーム 2 の方が多い・チーム 1 に `"1"` が無く `"2"` だけある、のような state ではスロットが消えた
+     - 直し方: 人数が `None` なら、切り詰め・シード・チーム名のクリアをせず、両チームにあるすべてのスロットのキャラ枠だけを増減する。人数を指定したときの「今の人数」（チーム名のクリアの判定）は、両チームのうち多い方
+     - pin: `test_a_request_for_the_characters_leaves_the_players_as_they_are`（欠番のあるチーム 1・人数の違うチーム 2 で、キャラ数だけを変えるとスロットが残りチーム名も残る。人数を指定すると欠番が埋まる）。切り詰める形に戻すと落ちることを確かめた
+  - 外から見える変化（この再レビューで足したもの）
+    - ボード 1 / 2 / 3 以外の人数 / キャラ数（legacy `scoreboard<n>-set`・Socket.IO `set`）は、両シェルとも 503 で何も書かない。デスクトップはそれまで 500（`Widget()` が None）。本文の message はヘッドレスと同じ `not available in headless`
+    - 別のゲームへの切り替えの直後に再ロードしても、前のゲームのキャラと mains が空になる
+  - 実機確認（オーナー。上の「実機確認」に加えて）
+    - キャラを選んで反映した後、GAME メニューで別のゲームを読み込み、すぐ同じゲームを読み直す（または Web の `set_game` を続けて 2 回送る）→ キャラと mains が空のまま（前のゲームのキャラ名が OBS に出ない）
+    - 選手カードのキャラのコンボの一覧を開いたまま、Web から人数を減らしてそのカードを消す → 一覧が画面に残らない
+    - Web から `scoreboard4-set?players=2` → 503 が返り、どのボードも変わらない

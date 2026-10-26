@@ -149,6 +149,15 @@ class GameAssetSnapshot:
     variantIconIndex: dict = field(default_factory=dict)
     biggestCompletePack: Optional[str] = None
     hasModdedContent: bool = False
+    # The game this load replaced, when it replaced a different one; None
+    # on the first load of a session (`game` is empty then:
+    # ResetGameState), on a reload of the same game, and once the selection
+    # is forgotten (ForgetSelection). What that switch empties elsewhere is
+    # decided from it: the Top 8 players' characters (SelectGame) and the
+    # boards' character picks (AutonaActions.ApplyGameRoster, which the
+    # shell runs after the load with the snapshot that load returned --
+    # never with a later Current()).
+    replaced: Optional[str] = None
 
 
 def _localized(table, locale, remap, split):
@@ -576,7 +585,9 @@ class GameAssetCatalog:
         A later SelectGame() of the same game therefore loads it again
         instead of being skipped."""
         with self._lock:
-            self._current = replace(self._current, game={}, codename=None)
+            # Nor is it a load: what the last one replaced goes with it.
+            self._current = replace(self._current, game={}, codename=None,
+                                    replaced=None)
 
     def ReloadStartGGCharacters(self):
         """Re-read the start.gg character table (runtime copy, else seed)."""
@@ -751,9 +762,11 @@ class GameAssetCatalog:
                 # but leaves `game` -- and what was picked for it -- as is.
                 previous = StateManager.Get(f"{schema.GAME_ROOT}.codename")
                 snapshot = self._Build(codename, config, modsActive, progress)
+                if previous and previous != codename:
+                    snapshot = replace(snapshot, replaced=previous)
                 self._current = snapshot
                 self._Publish(snapshot)
-            if previous and previous != codename:
+            if snapshot.replaced:
                 # Outside the writer lock (only the catalog's own work runs
                 # under it), inside the save block: one cycle with the
                 # switch. Imported here because Top8Service imports this

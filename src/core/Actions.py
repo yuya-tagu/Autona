@@ -20,7 +20,8 @@ that are self-evident state edits; Step 5 added the SCORE panel's remaining
 field writes (`SetMatchField` / `SetTeamName` / `SetTeamLosers` /
 `SetBestOf`), which is what took the last
 `StateManager.Set` out of `AutonaScoreboardWidget`, and then the team roster
-operations below (`ClearTeamRoster` / `TrimTeamRoster`) alongside the player
+operations below (`ClearTeamRoster` / `TrimTeamRoster`; the count itself,
+`SetRoster`, since ADR-005 S3e-6) alongside the player
 subtree's own writer, `core/PlayerService.py`. The final instalment added the
 operations of the panels that are not a scoreboard at all -- `SetLayoutOption`,
 `SetStreamUrl` / `SetStreamTitle`, `PublishCommentary` (moved to
@@ -82,8 +83,11 @@ from loguru import logger
 from . import StateSchema as schema
 from .DictHelper import deep_clone
 from .GameTrackerService import GameTrackerService
+from .GameAssetCatalog import GameAssetCatalog
 from .LayoutOptionsManager import LayoutOptionsManager
-from .PlayerService import PlayerService, RepublishTeamMergedNames
+from .PlayerService import (
+    DEFAULT_CHARACTERS_PER_PLAYER, CharacterSlot, DefaultPlayersPerTeam,
+    PlayerService, RepublishTeamMergedNames)
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 from .StatsService import StatsService
@@ -802,12 +806,236 @@ class AutonaActions:
 
     # ── the team roster (how many player slots a team has) ────────────────
     #
-    # The player slots themselves are `PlayerService`'s (one instance per
-    # player widget); what belongs here is the *count* -- an operation on the
-    # board, reached from the PLAYERS-per-team spinbox and from a set load
-    # whose entrants are more numerous than the current roster. Both used to
-    # be bare `StateManager.Unset` calls inside
-    # `AutonaScoreboardWidget._setPlayersPerTeamImpl`.
+    # The player slots themselves are `PlayerService`'s; what belongs here
+    # is the *count* -- how many slots a team has, and how many character
+    # slots a player has. Since ADR-005 S3e-6 the count is the state's: the
+    # slots themselves, set by `SetRoster` from every entry point (the
+    # board's two spinboxes, its construction and singles mode, a game
+    # load's players-per-team, a set's entrants, the Web's set_route /
+    # clear_all), and a board builds and removes player cards to follow it.
+    # It used to be the board's spinboxes (playerNumber / charNumber), whose
+    # cards published the slots as they were built and unset them as they
+    # were torn down -- which a shell without the board could not do at all.
+
+    # The bounds of the two counts: the ranges the board's spinboxes had
+    # (a QSpinBox's default maximum, and charNumber's).
+    MAX_PLAYERS_PER_TEAM = 99
+    MAX_CHARACTERS_PER_PLAYER = 100
+
+    def SetRoster(self, board, players=None, characters=None,
+                  forgetPicks=False) -> bool:
+        """Give each team of board `board` `players` player slots, and each
+        player `characters` character slots, in one save cycle. True if it
+        applied (boards 1/2).
+
+        None keeps a count. `players` None leaves the slots as they are --
+        none goes, none is added, the team names stay -- and only resizes
+        the character slots of every slot each team has (a roster with a
+        gap, or teams of different sizes, included: a request for the
+        characters is not one for the players). `characters` None keeps the
+        character slots of the first slot there is (the default, 3, on a
+        board with none -- the entry points that know better pass it: the
+        board's spinbox, the Web's remembered value,
+        BoardHost.EmptyRosterCharacters). Both are clamped to the ranges the
+        board's spinboxes had. What it writes is what the board's cards
+        wrote:
+
+        - the slots above `players` go (both teams; a slot the state
+          carries without a card -- a restored roster -- included);
+        - a kept slot whose character slots are another number republishes
+          them, and its mains with them (PlayerService.PublishCharacterSlots,
+          as a card's slot-count change did): its first picks kept, blank
+          ones after;
+        - with `forgetPicks` (a game load that replaced another game:
+          ApplyGameRoster), every kept slot's characters and mains are
+          republished blank instead, whatever their number -- unless they
+          already are;
+        - a missing slot is seeded as an empty card seeded it
+          (PlayerService.SeedEmpty), one index at a time, team 1 first;
+        - going from another count (the larger team's, counted as the board
+          counts its cards: RosterCount) to one player a team (or none)
+          empties the team names and their crests, as the board's team-name
+          fields did when they were hidden.
+
+        The same counts as before, without `forgetPicks`, write nothing.
+        """
+        board = self._asInt(board, 0)
+        if board not in self.SCORE_BOARDS:
+            logger.debug(f"SetRoster: board {board} is not a score board")
+            return False
+        with StateManager.SaveBlock():
+            with StateManager.lock:
+                rosters = {team: self._Roster(board, team) for team in (1, 2)}
+                current = max(self._Contiguous(rosters[team])
+                              for team in (1, 2))
+                target = None if players is None else max(
+                    0, min(self._asInt(players, current),
+                           self.MAX_PLAYERS_PER_TEAM))
+                count = self._CharacterCount(rosters) if characters is None \
+                    else max(0, min(self._asInt(
+                        characters, DEFAULT_CHARACTERS_PER_PLAYER),
+                        self.MAX_CHARACTERS_PER_PLAYER))
+
+                if target is not None:
+                    for team in (1, 2):
+                        self.TrimTeamRoster(board, team, target)
+
+                # The slots kept: 1..target, or -- the players kept --
+                # every one each team has, in order.
+                keys = {team: [str(index) for index in range(1, target + 1)]
+                        if target is not None else sorted(
+                            rosters[team], key=lambda key: self._asInt(key, 0))
+                        for team in (1, 2)}
+
+                # One game for every slot: what a pick is resolved against
+                # is what its value is built from.
+                snap = GameAssetCatalog.instance.Current()
+                for position in range(max(len(keys[1]), len(keys[2]))):
+                    for team in (1, 2):
+                        if position >= len(keys[team]):
+                            continue
+                        key = keys[team][position]
+                        slot = rosters[team].get(key)
+                        if not isinstance(slot, dict):
+                            continue
+                        service = PlayerService(
+                            f"score.{board}.team.{team}.player.{key}")
+                        picks = slot.get("character")
+                        if forgetPicks:
+                            if self._IsBlank(service, slot, count, snap):
+                                continue
+                            slots = [CharacterSlot()] * count
+                        elif isinstance(picks, dict) and len(picks) == count:
+                            continue
+                        else:
+                            slots = self._ResizedPicks(
+                                service, picks, count, snap)
+                        service.PublishCharacterSlots(
+                            slots, includeMains=True, snapshot=snap)
+
+                for index in range(1, (target or 0) + 1):
+                    for team in (1, 2):
+                        if not isinstance(
+                                rosters[team].get(str(index)), dict):
+                            PlayerService(
+                                f"score.{board}.team.{team}.player.{index}"
+                            ).SeedEmpty(count)
+
+                if target is not None and target != current and target <= 1:
+                    for team in (1, 2):
+                        self.SetTeamName(board, team, "")
+                        # The crest of no name, as in ClearBoard.
+                        self._SetIfChanged(
+                            f"score.{board}.team.{team}.logo", None)
+        return True
+
+    def ApplyGameRoster(self, replaced=None) -> list:
+        """A game was loaded: every 1v1 / team board that has a roster goes
+        to the game's players-per-team (`game.defaults`) and the default
+        characters per player, in one save cycle. Returns the boards it
+        applied to.
+
+        `replaced`: the game that load replaced -- the `replaced` of the
+        snapshot the load itself returned (GameAssetSnapshot), which the
+        shell passes on. Not read here from the catalog's Current(): run
+        after the load is over (queued), that can be a later load's. When
+        it is set, every slot's characters and mains are emptied too,
+        whatever their number (SetRoster's `forgetPicks`): the previous
+        game's picks mean nothing in the new one, and left in the slots
+        they would go out with the next 反映. Not on the first load of a
+        session, nor on a reload of the same game -- the rule the Top 8
+        players' characters are emptied by (Top8Service.ForgetCharacters,
+        from the same snapshot field).
+
+        What each built board did on the asset adapter's onLoad
+        (SetDefaultsFromAssets) until ADR-005 S3e-6, and what the headless
+        shell did not do at all. Both shells run it on a game load, through
+        the same wiring (bootstrap.wire_game_roster). A board without a
+        roster -- one the desktop has not built -- has nothing to follow:
+        it gets the game's count when it is built.
+        """
+        forget = bool(replaced)
+        applied = []
+        with StateManager.SaveBlock():
+            for board in self.SCORE_BOARDS:
+                if not isinstance(StateManager.Get(
+                        f"score.{board}.team.1.player"), dict):
+                    continue
+                self.SetRoster(board, DefaultPlayersPerTeam(),
+                               DEFAULT_CHARACTERS_PER_PLAYER,
+                               forgetPicks=forget)
+                applied.append(board)
+        return applied
+
+    @classmethod
+    def RosterCount(cls, board, team) -> int:
+        """The players team `team` of board `board` has: its slots counted
+        from 1 up to the first one missing (a card stands for slot 1..n).
+        The one count of a roster -- SetRoster's and the board's."""
+        return cls._Contiguous(cls._Roster(cls._asInt(board, 0), team))
+
+    @staticmethod
+    def _Contiguous(roster) -> int:
+        count = 0
+        while isinstance(roster.get(str(count + 1)), dict):
+            count += 1
+        return count
+
+    @staticmethod
+    def _Roster(board, team) -> dict:
+        """{slot: value} of one team's player slots ({} for none)."""
+        roster = StateManager.Get(f"score.{board}.team.{team}.player")
+        return dict(roster) if isinstance(roster, dict) else {}
+
+    def _CharacterCount(self, rosters) -> int:
+        """The character slots the board's players have: those of its first
+        slot, the default for a board with none."""
+        count = self._FirstCharacterSlots(rosters)
+        return DEFAULT_CHARACTERS_PER_PLAYER if count is None else count
+
+    def CharacterSlots(self, board):
+        """The character slots each player of board `board` has -- the
+        count SetRoster keeps when it is not given one -- or None on a board
+        with none, where SetRoster falls back to the default and an entry
+        point may know better (BoardHost.EmptyRosterCharacters)."""
+        board = self._asInt(board, 0)
+        return self._FirstCharacterSlots(
+            {team: self._Roster(board, team) for team in (1, 2)})
+
+    def _FirstCharacterSlots(self, rosters):
+        for team in (1, 2):
+            for slot in sorted(rosters[team],
+                               key=lambda key: self._asInt(key, 0)):
+                value = rosters[team][slot]
+                if isinstance(value, dict) and isinstance(
+                        value.get("character"), dict):
+                    return len(value["character"])
+        return None
+
+    @staticmethod
+    def _ResizedPicks(service, characters, count, snap) -> list:
+        """The `count` character slots of a slot that had `characters`:
+        its first picks, blank ones after."""
+        if not isinstance(characters, dict):
+            return [CharacterSlot()] * count
+        picks = [service.SlotFromValue(
+                     characters.get(index, characters.get(str(index))), snap)
+                 for index in range(1, min(len(characters), count) + 1)]
+        return picks + [CharacterSlot()] * (count - len(picks))
+
+    @staticmethod
+    def _IsBlank(service, slot, count, snap) -> bool:
+        """Whether a slot's characters and mains already are `count` blank
+        character slots (keys compared as text: a restored state has them
+        as strings)."""
+        blank = {str(index): service.CharacterValue(CharacterSlot(), snap)
+                 for index in range(1, count + 1)}
+        for key in ("character", "mains"):
+            value = slot.get(key)
+            if not isinstance(value, dict) or {
+                    str(k): v for k, v in value.items()} != blank:
+                return False
+        return True
 
     def ClearTeamRoster(self, board, team) -> bool:
         """Drop every player slot of one team. True if it applied.
@@ -828,10 +1056,11 @@ class AutonaActions:
     def TrimTeamRoster(self, board, team, count) -> list:
         """Drop the player slots numbered above `count`; returns their keys.
 
-        The caller has already torn the surplus *widgets* down (each one
-        unsets its own slot through `PlayerService.Unset`); this is the pass
-        that also catches slots the state carries without a widget -- a
-        restored roster, or a board that shrank while it was not built.
+        SetRoster's first step (ADR-005 S3e-6). It used to be the pass after
+        the board had torn its surplus cards down (each unsetting its own
+        slot), for the slots the state carried without a card; since the
+        count is the state's, it is the removal itself, and the board's
+        cards follow it.
 
         Null-safe where the loop it replaced was not: that one read
         `team.{t}.player` as a dict whenever `team.{t}` was truthy at all, so

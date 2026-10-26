@@ -49,8 +49,9 @@ WebEngine プレビュー等で重いパネルは **遅延構築**にする（�
 state になる）。`Window._SeedPanelState()` はその起動時の呼び出し口で、3 つのシード
 （`StateSchema.SeedPanelState()` / `TournamentInfoService.Seed()` /
 `core.ColorService.SeedColorState()`）を 1 SaveBlock に束ねる役目だけを持つ。
-ボードの選手スロットとクルーボードの起動時の中身は、デスクトップではボードのウィジェットが
-publish し、ヘッドレスは同じものを core の `PlayerService.SeedEmpty()` / `SeedEmptyRoster()` と
+ボードの選手スロットは、デスクトップではボードの構築時に `AutonaActions.SetRoster` が書き（ADR-005 S3e-6。
+それまではボードのウィジェットが publish していた）、クルーボードの起動時の中身はボードのウィジェットが
+publish する。ヘッドレスは同じものを core の `PlayerService.SeedEmpty()` / `SeedEmptyRoster()` と
 `CrewBattleService.SeedDefaults()` でシードする（ADR-005 S3d。既定の人数・キャラ数は
 `PlayerService.DefaultPlayersPerTeam()` / `DEFAULT_CHARACTERS_PER_PLAYER` が正本で、ボードもこれを読む）。
 グローバルシグナル接続は Window 側に寄せる。外部から構築を強制したい場合は
@@ -100,6 +101,11 @@ publish し、ヘッドレスは同じものを core の `PlayerService.SeedEmpt
   読み出してそのまま publish すると、値の形とキー順（QVariantMap 順 = 外部契約）が
   Qt に縛られ、Qt なしでは同じ state を作れなくなる
   - どの行を表示するか（Qt モデルの走査・手入力）はウィジェット側に残る
+  - **カードの数も state に従う**（ADR-005 S3e-6）: 人数・キャラ数は `AutonaActions.SetRoster` が
+    スロットとキャラ枠を増減し、ボードは held サイクルの中でカード・キャラ行を作る / 退役させる
+    （作るときは何も書かない。退役したカードは隠して書き込みを止める）。破棄は `QTimer.singleShot(0)` で
+    イベントループに戻ってから、pitfalls #14 の invalidate を通して行う。シグナルハンドラの中で
+    レイアウトを同期で壊さない（`tests/test_roster_flow.py` が pin）
   - **選手データ dict の読込も同じ**（ADR-005 S3e-3）。カードの `SetData` は
     `PlayerService.ApplyData`（DB とのマージ・悪語フィルタ・国 / 地域 / キャラの解決は core）を
     呼んで描画するだけで、コンボの行を探して選ぶ・`editingFinished` を emit して

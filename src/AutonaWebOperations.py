@@ -20,8 +20,9 @@ Two kinds live here:
   then wiped by the seed the build writes), runs on the GUI thread (a player
   card still commits a typed name in two writes there; see
   DesktopBoardHost.Run), lets
-  the field being typed in finish first, and answers for the player /
-  character counts of boards 1/2, which are still its spinboxes' (S2g).
+  the field being typed in finish first. The player / character counts of
+  boards 1/2 are core's too since S3e-6 (AutonaActions.SetRoster; they were
+  the board's spinboxes, and a shell without the board refused them).
 
   That difference is one object the shell registers, `boardHost`: the
   headless default (`BoardHost`) runs the operation on the calling thread,
@@ -66,7 +67,7 @@ from .core.GameAssetCatalog import GameAssetCatalog
 from .core.SettingsManager import SettingsManager
 from .core.SetLoadService import SetLoadService
 from .core.PlayerDB import PlayerDB
-from .core.PlayerService import PlayerService
+from .core.PlayerService import DEFAULT_CHARACTERS_PER_PLAYER, PlayerService
 from .core.StatsService import StatsService
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
@@ -94,8 +95,7 @@ class BoardHost:
     shell, and the default until a shell registers another).
 
     The operation runs on the calling thread; nothing is built, so the write
-    is not held. What only a widget can do -- the player / character counts
-    of boards 1/2 -- raises NotAvailable.
+    is not held. What only a widget can do raises NotAvailable.
     """
 
     def __init__(self):
@@ -104,13 +104,25 @@ class BoardHost:
         # calls in one task); the desktop queues them on its GUI thread, and
         # with none, two requests' threads would interleave them. Re-entrant:
         # an operation run here runs others here (PATCH set's task calls
-        # set_route). Taken only by the web layer's request threads, never
-        # with StateManager.lock held, and nothing run under it waits for
-        # the main thread: it is always the outermost lock, so it cannot
-        # close a cycle. What would wait is kept out of it -- the player
-        # database's write, whose change relay runs on the main thread
-        # (`_save_record`, ADR-005 S3e-4 review).
+        # set_route).
+        #
+        # Taken by the web layer's request threads and, headless, by the
+        # main thread too: a game load's roster runs here
+        # (bootstrap.wire_game_roster, ADR-005 S3e-6). Never with
+        # StateManager.lock held -- it is always the outermost lock, so it
+        # cannot close a cycle with that one. INVARIANT: nothing run under
+        # it waits for the main thread (a gui_thread_sync, a queued call
+        # waited on, a join of something that needs it). The main thread
+        # may be the one waiting for this lock, so such a wait never ends.
+        # What would wait is kept out of it -- the player database's write,
+        # whose change relay runs on the main thread (`_save_record`,
+        # ADR-005 S3e-4 review).
         self._lock = threading.RLock()
+        # The characters per player a board with no character slot gives
+        # the players it gets next ({board: count}): what the Web asked for
+        # while it had none, else what it had when it lost its last player
+        # (EmptyRosterCharacters).
+        self._emptyCharacters = {}
 
     def Run(self, op):
         """Run `op()` where this shell runs board operations."""
@@ -133,12 +145,35 @@ class BoardHost:
             raise NotAvailable()
         AutonaActions.instance.ClearPlayers(board, no_mains)
 
+    def EmptyRosterCharacters(self, board):
+        """The characters per player the next players of board `board` get
+        while it has no character slot (SetRoster would give them the
+        default). The desktop's is the board's spinbox; with no board, what
+        KeepEmptyRosterCharacters kept, else the default."""
+        return self._emptyCharacters.get(
+            _board(board), DEFAULT_CHARACTERS_PER_PLAYER)
+
+    def KeepEmptyRosterCharacters(self, board, count):
+        """Remember `count` as board `board`'s characters per player for
+        the players it gets next: asked for while it has no character slot,
+        or what it had when its last player went -- what the board's
+        spinbox kept, the desktop's in both cases. Boards 1/2 only: no
+        other board has a roster to give it to."""
+        if _board(board) not in AutonaActions.SCORE_BOARDS:
+            return
+        self._emptyCharacters[_board(board)] = max(0, min(
+            AutonaActions._asInt(count, DEFAULT_CHARACTERS_PER_PLAYER),
+            AutonaActions.MAX_CHARACTERS_PER_PLAYER))
+
     def ResetCounts(self, board):
         """Back to one player per team and one character per player.
 
-        The counts are still a built board's spinboxes (ADR-005 S2g); with
-        no board there is nothing to reset, and the roster stays as it is.
+        Core's in both shells (AutonaActions.SetRoster, ADR-005 S3e-6): the
+        desktop's board follows the state. Until then the counts were a
+        built board's spinboxes, which the desktop's host drove, and with no
+        board the roster stayed as it was.
         """
+        AutonaActions.instance.SetRoster(board, 1, 1)
 
     def LastSet(self, board):
         """The provider id of the set board `board` loaded last, or None.
@@ -188,6 +223,12 @@ class DesktopBoardHost(BoardHost):
     def Widget(self, board):
         return self._Board(board)
 
+    def EmptyRosterCharacters(self, board):
+        return self._Board(board).EmptyRosterCharacters()
+
+    def KeepEmptyRosterCharacters(self, board, count):
+        self._Board(board).KeepEmptyRosterCharacters(count)
+
     def CommitEdit(self, board):
         self._Board(board).CommitFocusedEdit()
 
@@ -198,11 +239,6 @@ class DesktopBoardHost(BoardHost):
         # ADR-005 S3e-5). Boards 1/2: the crew board's clear is core's
         # (`_clear_players`).
         self._Board(board).CommandClearAll(no_mains)
-
-    def ResetCounts(self, board):
-        widget = self._Board(board)
-        widget.playerNumber.setValue(1)
-        widget.charNumber.setValue(1)
 
     def LastSet(self, board):
         # The crew board has no SetLoadService, and raises as it did.
@@ -487,16 +523,22 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
     host = boardHost
 
     def run():
-        # The counts of boards 1/2 are a board's (S2g): asked for first, so
-        # a shell with no board refuses the request before anything else is
-        # written. The crew board's member count is core's (S3e-2).
+        # The counts are core's in both shells: boards 1/2's roster
+        # (AutonaActions.SetRoster, ADR-005 S3e-6 -- the board's two
+        # spinboxes until then, so a shell with no board refused them), the
+        # crew board's member count (S3e-2). The desktop's board is built
+        # first, as before, so the change is held for 反映 rather than
+        # published and then wiped by the seed the build writes.
         crew = _is_crew(scoreboard)
-        widget = None
         if players is not None or characters is not None:
-            if crew:
-                host.Prepare(scoreboard)
-            else:
-                widget = host.Widget(scoreboard)
+            # Boards 1/2 and the crew board have counts; any other is
+            # refused before anything is written, as it was when the counts
+            # were the board's widgets (503, legacy / Socket.IO / v1 alike)
+            # -- not answered OK having changed nothing.
+            if not crew and _board(scoreboard) \
+                    not in AutonaActions.SCORE_BOARDS:
+                raise NotAvailable()
+            host.Prepare(scoreboard)
 
         # best-of=<Best Of Amount>
         if bestOf is not None:
@@ -514,19 +556,20 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
         if match is not None:
             _apply_set_fields(host, scoreboard, {'round_name': match})
 
-        # players=<Amount of Players> (the crew board: its member count)
+        # players=<Amount of Players> (the crew board: its member count).
+        # Each count is a save cycle of its own, as each spinbox's was.
         if players is not None:
             if crew:
                 CrewBattleService(CREW_BOARD).SetMemberCount(int(players))
             else:
-                widget.playerNumber.setValue(int(players))
+                _set_players(host, scoreboard, int(players))
 
         # characters=<Amount of Characters> (none on the crew board; the
         # number is still parsed, as the board's spinbox parsed it)
         if characters is not None:
             count = int(characters)
             if not crew:
-                widget.charNumber.setValue(count)
+                _set_characters(host, scoreboard, count)
 
         # losers=<True/False>&team=<Team Number>
         # Set-shaped: `team` is the set's team, which a swap moves to the
@@ -553,6 +596,34 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
         return "OK"
 
     return host.Run(run)
+
+
+def _set_players(host, scoreboard, players):
+    """set_route's players on board 1/2, with the characters per player the
+    board's spinbox gave them: a board with no character slot left takes
+    its count from the host (EmptyRosterCharacters) rather than the
+    default, and one that loses its last player keeps the count it had
+    there for the next ones. As the two spinboxes did: players=0, then
+    characters=2, then players=2 is two players a team with two characters
+    each."""
+    actions = AutonaActions.instance
+    current = actions.CharacterSlots(scoreboard)
+    characters = None
+    if current is None:
+        characters = host.EmptyRosterCharacters(scoreboard)
+    elif players <= 0:
+        host.KeepEmptyRosterCharacters(scoreboard, current)
+    actions.SetRoster(scoreboard, players=players, characters=characters)
+
+
+def _set_characters(host, scoreboard, count):
+    """set_route's characters on board 1/2: the character slots of every
+    player, or -- on a board with none -- the count its next players get
+    (KeepEmptyRosterCharacters), as the spinbox kept it."""
+    actions = AutonaActions.instance
+    if actions.CharacterSlots(scoreboard) is None:
+        host.KeepEmptyRosterCharacters(scoreboard, count)
+    actions.SetRoster(scoreboard, characters=count)
 
 
 def _apply_set_fields(host, scoreboard, payload):
@@ -717,7 +788,7 @@ def _clear_players(host, scoreboard):
 
 def _reset_counts(host, scoreboard):
     # Back to one member a crew (core's, S3e-2), or one player a team and
-    # one character a player (a built board's spinboxes, S2g).
+    # one character a player (core's since S3e-6, through the host).
     if _is_crew(scoreboard):
         CrewBattleService(CREW_BOARD).SetMemberCount(1)
         return
@@ -747,8 +818,9 @@ def reset_players(scoreboard):
 
 def clear_all(scoreboard):
     # Not AutonaActions.ClearBoard (the desktop's reset-all): this keeps the
-    # team names, and the player / character counts (a built board's
-    # spinboxes, S2g) change between the reset and the players' clear -- in
+    # team names (unless the roster shrinks to one player: SetRoster), and
+    # the player / character counts change between the reset and the
+    # players' clear -- in
     # this order, which decides what the mains end up as. On the crew board
     # the field being typed in finishes before anything is reset (see
     # `_clear_players`), so the match bar's reset takes its text too.

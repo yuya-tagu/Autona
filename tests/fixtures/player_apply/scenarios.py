@@ -427,8 +427,9 @@ def _byEffect(step):
     step["callsByEffect"] = True
 
 
-# What S3e-3 changed on purpose, by (scenario, step index): applied to the
-# recorded step before the comparison (Expected).
+# What S3e-3 (and S3e-6: the characters per player in one cycle) changed on
+# purpose, by (scenario, step index): applied to the recorded step before
+# the comparison (Expected).
 #
 # Two changes from the S3e-3 review went into golden.json itself instead:
 # the steps they move were recorded again, on the S3e-3 tree, and carry a
@@ -442,9 +443,21 @@ def _byEffect(step):
 # step is still the ae922c24 recording. Step 1 of "a player over another"
 # was listed here as _upsetFactorOnce; its new recording has that change in
 # it.
+def _oneCycle(step):
+    """The board's characters per player is one save cycle: the count is
+    the state's (AutonaActions.SetRoster, ADR-005 S3e-6), every slot
+    resized in one block. Each card published its own rows when it was the
+    spinbox's, a cycle per card (the singles board has two). The writes,
+    their order and the state are the recording's."""
+    step["cycles"] = 1
+
+
 CHANGES = {
     ("a set's entrants", 2): _upsetFactorOnce,
     ("the editor", 4): _byEffect,
+    # ADR-005 S3e-6.
+    ("keeping the mains", 3): _oneCycle,
+    ("keeping the mains", 6): _oneCycle,
 }
 
 

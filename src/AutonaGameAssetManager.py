@@ -34,6 +34,11 @@ from .Workers import Worker
 class AutonaGameAssetManagerSignals(QObject):
     onLoad = Signal()
     onLoadAssets = Signal()
+    # The GameAssetSnapshot a load published, emitted just before onLoad
+    # (bootstrap.wire_game_roster). Its own: a slot queued onto the GUI
+    # thread from the loader's runs after the load is over, by when the
+    # catalog's Current() can be a later load's.
+    gameLoaded = Signal(object)
 
 
 class AutonaGameAssetManager(QObject):
@@ -290,6 +295,7 @@ class AutonaGameAssetManager(QObject):
             if snapshot is None:
                 return
             run_models(self._RebuildModels)
+            self.signals.gameLoaded.emit(snapshot)
             self.signals.onLoad.emit()
 
     @staticmethod

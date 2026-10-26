@@ -660,19 +660,6 @@ def test_the_player_id_reports_whether_the_slot_changed_hands(player):
     assert SM.Get(f"{BOARD_PATH}.id") == "456"
 
 
-# ── the slot's lifetime ──────────────────────────────────────────────────
-
-def test_unset_drops_the_whole_slot(player):
-    player.SetText(schema.PLAYER_TAG_KEY, "TAG")
-    player.PublishMergedName("", "TAG")
-    assert SM.Get(BOARD_PATH) is not None
-
-    player.Unset()
-
-    assert SM.Get(BOARD_PATH) is None, (
-        "a torn-down player widget left its name on the overlay")
-
-
 # ── the recording: the old card's bytes, without a widget (S1d) ──────────
 #
 # tests/fixtures/player_slots/golden.json holds what the card published

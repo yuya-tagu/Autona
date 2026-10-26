@@ -118,6 +118,17 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
         uic.loadUi(AutonaResolve("src/layout/AutonaScoreboardPlayer.ui"), self)
         self._initBasePlayerWidget()
+        # A board's card (score.{n}.team.{t}.player.{m}), as opposed to the
+        # PLAYERS editor's (player_editor.1). Since ADR-005 S3e-6 a board
+        # builds its cards for slots the state already has
+        # (AutonaActions.SetRoster seeded them), and tears them down after
+        # the state dropped theirs, so a board card publishes nothing as it
+        # is built (_WireInputs, SyncCharacterRows) and writes nothing once
+        # its slot is gone (_MayWrite).
+        self._onBoard = self.player.BoardNumber() is not None
+        # Character rows taken off the card, destroyed once control is back
+        # in the event loop (_DestroyRemovedRows).
+        self._removedRows = []
 
         # Apply grid spacing from UI constants
         grid = self.layout()
@@ -318,7 +329,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
         self.lastExportedName = ""
 
-        self._WireInputs(seed)
+        self._WireInputs(seed, publish=not self._onBoard)
 
         # After _WireInputs, so on the same editingFinished the tag / sponsor
         # reaches the state (_OnTextChanged) before the display name is
@@ -332,7 +343,12 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         self.findChild(QLineEdit, schema.PLAYER_SPONSOR_KEY).editingFinished.connect(
             self.NameChanged)
 
-        self.SetCharactersPerPlayer(1)
+        if self._onBoard:
+            # As many rows as the slot has character slots, published by
+            # nobody: the slot already holds them.
+            self.SyncCharacterRows()
+        else:
+            self.SetCharactersPerPlayer(1)
 
         AutonaPlayerDB.signals.db_updated.connect(
             self.SetupAutocomplete)
@@ -355,6 +371,83 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
     def deleteLater(self):
         self._deleted = True
         super().deleteLater()
+
+    # ── the board's roster (ADR-005 S3e-6) ───────────────────────────────
+
+    def Retire(self):
+        """The board dropped this card: its slot is gone from the state.
+        Hidden and silenced now; destroyed later (Destroy), from the event
+        loop rather than from the held cycle that noticed the slot go.
+
+        From here on the card writes nothing (_deleted, as after
+        deleteLater): a field of it finished by the focus leaving it -- the
+        hide below does that -- would otherwise write the slot back. An open
+        popup of its fields (a completer's list, a combo's) is closed: it is
+        a window of its own, and would stay on screen over a card that is
+        gone."""
+        self._deleted = True
+        if getattr(self, "detailsDialog", None) is not None \
+                and self.detailsDialog.isVisible():
+            self.detailsDialog.reject()
+        self._ClosePopups()
+        self.hide()
+
+    def _ClosePopups(self):
+        # The open popups only (asking a completer or a combo for its popup
+        # would build one), and only this card's -- its details dialog's
+        # included, a window parented to the card. Owned is looked up
+        # through parentWidget(), which goes on where isAncestorOf() stops
+        # at a window: a combo's list is in a popup window whose parent is
+        # the combo, and a completer's list has no parent at all (its focus
+        # proxy is the field it completes). A combo's is closed through the
+        # combo (hidePopup, as a click outside closes it), a completer's by
+        # hiding it.
+        for _attempt in range(4):
+            popup = QApplication.activePopupWidget()
+            if popup is None:
+                return
+            owner = popup.focusProxy() or popup.parentWidget()
+            while owner is not None and owner is not self:
+                owner = owner.parentWidget()
+            if owner is None:
+                return
+            combo = popup.parentWidget()
+            if isinstance(combo, QComboBox):
+                combo.hidePopup()
+            else:
+                popup.hide()
+
+    def Destroy(self):
+        """Tear a retired card down: out of the board's layout, and deleted.
+
+        Every layout item that goes with it is released from PySide first
+        (agent-pitfalls #14): the slot of the board's layout that held the
+        card, and the card's own layouts -- its rows, its details dialog's,
+        its character rows'. QWidgetItems are not QObjects, so a wrapper
+        left registered for one of them would outlive it. Called by the
+        board outside any signal handler (_DestroyRetiredCards)."""
+        layouts = [self.layout()] + self.findChildren(QLayout)
+        parent = self.parentWidget()
+        if parent is not None:
+            layouts.append(parent.layout())
+        for layout in layouts:
+            if layout is not None:
+                _releaseLayoutItemWrappers(layout)
+        self.setParent(None)
+        self.deleteLater()
+
+    def _MayWrite(self) -> bool:
+        """Whether this card's own edits may still be written.
+
+        Not once it is retired or being deleted, and -- a board card -- only
+        into a slot the state has: a roster change drops the slot before the
+        board's held cycle retires the card, and an edit finished in between
+        (a focus-out, a queued completer pick) would write a ghost slot back
+        into the state."""
+        if self._deleted:
+            return False
+        return not self._onBoard or isinstance(
+            StateManager.Get(self.path), dict)
 
     def _buildCompactDetailsUI(self):
         """Re-home every detail field into a modal QDialog (Web UI parity).
@@ -578,7 +671,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             self.seedDisplay.setText("")
             self.seedDisplay.setVisible(False)
 
-    def _WireInputs(self, seed: QSpinBox):
+    def _WireInputs(self, seed: QSpinBox, publish=True):
         """Bind the card's inputs to the operations they stand for.
 
         This used to be three loops over `findChildren`, each connecting a
@@ -614,6 +707,13 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         with `seed`, `birthday`, `country` and `state` and gains the rest as
         it is filled -- unchanged, and relied on by the overlays that read
         the location from launch.
+
+        Not for a board card (`publish` False, ADR-005 S3e-6): its slot is
+        seeded before the card is built (AutonaActions.SetRoster, with
+        PlayerService.SeedEmpty -- these same four writes), and a card built
+        in the held cycle of a set load would otherwise put them over the
+        player just loaded. What the emits did to the widgets themselves is
+        done here without them; the render shows the slot.
         """
         for field in schema.PLAYER_LINE_EDIT_KEYS:
             edit = self._w(field, QLineEdit)
@@ -631,20 +731,29 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         # when it was a signal the board connected afterwards.
         self._seedAnnounces = False
         seed.valueChanged.connect(
-            lambda value: self.player.SetSeed(
+            lambda value: self._MayWrite() and self.player.SetSeed(
                 value, announce=self._seedAnnounces))
         seedEdit = seed.lineEdit()
         if seedEdit is not None:
             seedEdit.editingFinished.connect(
-                lambda seed=seed: self.player.SetSeed(seed.value()))
+                lambda seed=seed: self._MayWrite()
+                and self.player.SetSeed(seed.value()))
 
-        seed.setValue(0)
-        seed.valueChanged.emit(seed.value())
+        if publish:
+            seed.setValue(0)
+            seed.valueChanged.emit(seed.value())
+        else:
+            with QSignalBlocker(seed):
+                seed.setValue(0)
+            self._ShowSeed(0)
         self._seedAnnounces = True
 
         birthday = self._w(schema.PLAYER_BIRTHDAY_KEY, QCheckBox)
-        birthday.toggled.connect(self.player.SetBirthday)
-        birthday.toggled.emit(False)
+        birthday.toggled.connect(
+            lambda checked: self._MayWrite()
+            and self.player.SetBirthday(checked))
+        if publish:
+            birthday.toggled.emit(False)
 
         for field in schema.PLAYER_LOCATION_KEYS:
             combo = self._w(field, QComboBox)
@@ -656,7 +765,13 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             combo.currentIndexChanged.connect(
                 lambda index, field=field, combo=combo:
                     self._OnLocationChanged(field, combo))
-            combo.currentIndexChanged.emit(0)
+            if publish:
+                combo.currentIndexChanged.emit(0)
+        if not publish:
+            # The country's emit refilled the region rows for no country
+            # (LoadStates) before publishing both.
+            self._FillStateRows(None)
+            self._loadedStatesCountryCode = None
 
     def _StateValue(self, field):
         return StateManager.Get(self.player.Key(field))
@@ -686,6 +801,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         An absent key is not "": a field the slot has never had is still
         written on its first finish, as before.
         """
+        if not self._MayWrite():
+            return
         if self._heldBack.IsEdit(field, text, self._StateValue(field) == text):
             self.player.SetText(field, text)
 
@@ -697,6 +814,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         # that ends on it (a selected character typed over with itself)
         # used to put the old note back over a load. Typing on is theirs
         # (ADR-005 S3e-3 review).
+        if not self._MayWrite():
+            return
         text = self.custom_textbox.toPlainText()
         field = schema.PLAYER_NOTE_KEY
         if self._heldBack.IsEdit(field, text, self._StateValue(field) == text):
@@ -708,6 +827,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         # builds the published value from the country catalog (ADR-005
         # S1d). No code -- the blank row, a typed name that matches no row,
         # the custom-flag separator -- publishes "no location".
+        if not self._MayWrite():
+            return
         data = combo.currentData()
         code = data.get("code") if isinstance(data, dict) else None
         if field == schema.PLAYER_COUNTRY_KEY:
@@ -725,6 +846,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         # The operator finished the sponsor or the tag. A load no longer
         # comes through here (SetData is core's since ADR-005 S3e-3 and
         # sets no field), so there is no load to wait for.
+        if not self._MayWrite():
+            return
         team = self.findChild(
             QLineEdit, schema.PLAYER_SPONSOR_KEY).text()
         name = self.findChild(QLineEdit, schema.PLAYER_TAG_KEY).text()
@@ -1036,10 +1159,11 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             self._CharacterSlot(character, color, variant))
 
     def _RenderCharacters(self, characters) -> bool:
-        # The number of slots is still the board's (charNumber), not the
-        # state's: a slot the card has no combos for is not shown, and a
-        # combo row the state has no slot for (an emptied player) shows the
-        # blank slot -- what an empty row publishes.
+        # One row per character slot of the slot (ADR-005 S3e-6: the count
+        # is the state's; it was the board's charNumber). A row the state
+        # has no slot for -- a slot without `character` -- shows the blank
+        # slot, what an empty row publishes.
+        self.SyncCharacterRows()
         if not isinstance(characters, dict):
             characters = {}
         blank = None
@@ -1216,7 +1340,40 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         self.teamNumber = team
 
     def SetCharactersPerPlayer(self, number):
-        # logger.info(f"AutonaScoreboardPlayerWidget#SetCharactersPerPlayer({number})")
+        """`number` character rows, then what they pick published as the
+        slot's characters and mains -- the PLAYERS editor's (a board card's
+        rows follow its slot instead: SyncCharacterRows)."""
+        self._SetCharacterRows(number)
+        self.CharactersChanged(includeMains=True)
+
+    def SyncCharacterRows(self) -> bool:
+        """A board card's character rows: one per character slot its slot
+        has (ADR-005 S3e-6 -- the count is the state's, set by
+        AutonaActions.SetRoster; it used to be the board's charNumber,
+        pushed into every card). Writes nothing: a new row shows the blank
+        pick until the render shows the slot's. True if rows came or went.
+
+        Run as the card is built, by the board's held cycle for every card,
+        by the render and by a game load's rebind (ReloadCharacters)."""
+        if self._deleted or not self._onBoard:
+            return False
+        characters = StateManager.Get(self.player.Key("character"))
+        if (not isinstance(characters, dict)
+                or len(characters) == len(self.character_elements)):
+            return False
+        self._quietCharacters = True
+        try:
+            self._SetCharacterRows(len(characters))
+        finally:
+            self._quietCharacters = False
+        self._renderedSlot = None
+        return True
+
+    def _SetCharacterRows(self, number):
+        """Build or take off character rows until the card has `number`.
+        A row taken off is hidden now and destroyed from the event loop
+        (_DestroyRemovedRows): this runs inside a held cycle's
+        notification, among other places, where nothing is torn down."""
         while len(self.character_elements) < number:
             character_element = QWidget()
             character_element.setLayout(QHBoxLayout())
@@ -1331,8 +1488,11 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 f"character_color_{len(self.character_elements)}")
 
         while len(self.character_elements) > number:
-            self.character_elements[-1][0].setParent(None)
-            self.character_elements.pop()
+            row = self.character_elements.pop()[0]
+            row.hide()
+            if not self._removedRows:
+                QTimer.singleShot(0, self, self._DestroyRemovedRows)
+            self._removedRows.append(row)
 
         if self.character_container.findChild(QComboBox, "variants") is not None:
             if len(AutonaGameAssetManager.instance.variants) <= 0:
@@ -1348,7 +1508,17 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                     if "character_color_" in container.objectName():
                         container.setMaximumWidth(120)
 
-        self.CharactersChanged(includeMains=True)
+    def _DestroyRemovedRows(self):
+        """Destroy the character rows _SetCharacterRows took off, their
+        layout items released from PySide first (agent-pitfalls #14): the
+        rows' slots in the character list, and each row's own."""
+        rows, self._removedRows = self._removedRows, []
+        _releaseLayoutItemWrappers(self.character_container.layout())
+        for row in rows:
+            if row.layout() is not None:
+                _releaseLayoutItemWrappers(row.layout())
+            row.setParent(None)
+            row.deleteLater()
 
     def _styleCountryStateWidgets(self, country, state):
         # Editable combos select the blank first model row (index 0), so the
@@ -1362,6 +1532,13 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             state.lineEdit().setPlaceholderText(state.placeholderText())
 
     def ReloadCharacters(self):
+        if self._deleted:
+            return
+        # A board card first takes its slot's character slots: the game
+        # load's roster (AutonaActions.ApplyGameRoster) ran ahead of this on
+        # the same onLoad, before the board's held cycle could, and the
+        # rebind below publishes what every row picks.
+        self.SyncCharacterRows()
         if len(AutonaGameAssetManager.instance.variants) <= 0:
             for container in self.findChildren(QComboBox, "variants"):
                 container.setVisible(False)
@@ -1407,7 +1584,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         (SetData), the tag field the operator is still in included."""
         data = index.data(Qt.ItemDataRole.UserRole) \
             if index is not None else None
-        if isinstance(data, dict):
+        # Queued: the card may have been retired since (_MayWrite).
+        if isinstance(data, dict) and self._MayWrite():
             self.SetData(data)
 
     def SetData(self, data, dontLoadFromDB=False, clear=True, no_mains=False):
@@ -1435,7 +1613,10 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
     def Clear(self, no_mains=False):
         """The card's clear button: empty the slot (PlayerService.ClearSlot,
-        as the board's clear does; ADR-005 S3e-3) and show it."""
+        as the board's clear does; ADR-005 S3e-3) and show it. Not once the
+        slot is gone (_MayWrite): a clear would seed it back."""
+        if not self._MayWrite():
+            return
         try:
             self.player.ClearSlot(no_mains)
         finally:

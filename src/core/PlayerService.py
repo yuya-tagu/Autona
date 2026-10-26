@@ -112,9 +112,10 @@ _NAME_FIELDS = (
     (schema.PLAYER_REAL_NAME_KEY, "name"),
 )
 
-# Character slots per player card on a freshly built board: the board
-# forces its charNumber back to this whatever the game says
-# (AutonaScoreboardWidget.SetDefaultsFromAssets).
+# Character slots per player on a freshly built board, and on every board
+# after a game load, whatever the game says (AutonaActions.SetRoster from
+# AutonaScoreboardWidget.SetDefaultsFromAssets and ApplyGameRoster; it was
+# the board forcing its charNumber back to this, until ADR-005 S3e-6).
 DEFAULT_CHARACTERS_PER_PLAYER = 3
 
 
@@ -122,8 +123,9 @@ def DefaultPlayersPerTeam() -> int:
     """Player cards per team on a freshly built 1v1 / team board.
 
     The loaded game's ``game.defaults.players_per_team``, 1 without one --
-    what AutonaScoreboardWidget.SetDefaultsFromAssets applies to a board
-    right after building it, and again on each game load.
+    what AutonaActions.SetRoster gives a board right after it is built
+    (AutonaScoreboardWidget.SetDefaultsFromAssets), and every board on each
+    game load (AutonaActions.ApplyGameRoster, both shells).
     """
     if StateManager.Get("game.defaults"):
         return StateManager.Get("game.defaults.players_per_team", 1)
@@ -478,16 +480,20 @@ class PlayerService:
         value["variant"] = qvariantmap_copy(variant) if variant else {}
         return value
 
-    def PublishCharacterSlots(self, slots, includeMains=False):
+    def PublishCharacterSlots(self, slots, includeMains=False,
+                              snapshot=None):
         """Publish the card's character slots (`character`, keyed by 1-based
         slot number), built from what each slot picked.
 
         `includeMains` additionally republishes them as the player's mains,
         which is what a slot-count change does -- one save cycle for the two
         keys, since they are written from the same read (and, as before, the
-        same dict).
+        same dict). `snapshot` is the GameAssetCatalog.Current() the slots
+        were resolved against, when the caller took one (a resize keeps
+        picks read from the state: AutonaActions.SetRoster).
         """
-        snap = self._GameCatalog().Current()
+        snap = snapshot if snapshot is not None \
+            else self._GameCatalog().Current()
         characters = {index + 1: self.CharacterValue(slot, snap)
                       for index, slot in enumerate(slots)}
         if not includeMains:
@@ -1056,13 +1062,15 @@ class PlayerService:
     def SeedEmpty(self, characters=DEFAULT_CHARACTERS_PER_PLAYER):
         """Publish what an empty player card publishes as it is built.
 
-        The card's construction writes the seed, the birthday flag and the
+        The card's construction wrote the seed, the birthday flag and the
         two location combos (_WireInputs), then its character slots and
-        mains once the board sets the slot count -- every one of them empty,
+        mains once the board set the slot count -- every one of them empty,
         in that order. The line edits write nothing until an edit. This is
-        that write without the card, in one save cycle, for a shell that has
-        no player cards (the headless one, ADR-005 S3d): the overlays draw a
-        board only once its team 1 has a player slot.
+        that write without the card, in one save cycle: for a shell that has
+        no player cards (the headless one, ADR-005 S3d: the overlays draw a
+        board only once its team 1 has a player slot), and since ADR-005
+        S3e-6 for every new slot of a roster (AutonaActions.SetRoster) --
+        a board card is built on a seeded slot and writes nothing as it is.
         tests/test_headless_seed.py pins it against a desktop board.
         """
         with StateManager.SaveBlock():
@@ -1169,16 +1177,6 @@ class PlayerService:
                 self.PublishCharacterSlots([CharacterSlot()] * rows)
         return locationCleared
 
-    def Unset(self):
-        """Drop this slot's whole subtree.
-
-        Called when a player widget is torn down by a players-per-team
-        change. The state has to go with the widget: a leftover
-        ``player.3`` keeps a third name on the overlay of a board that only
-        shows two.
-        """
-        StateManager.Unset(self.path)
-
 
 def RepublishTeamMergedNames(board, team) -> list:
     """Re-publish the display names of every slot of one team, from the state.
@@ -1213,20 +1211,20 @@ def RepublishTeamMergedNames(board, team) -> list:
 def SeedEmptyRoster(board, players=None,
                     characters=DEFAULT_CHARACTERS_PER_PLAYER) -> int:
     """Seed both teams of a 1v1 / team board with empty player slots, as a
-    freshly built board's player cards publish them; returns the slots per
-    team. One save cycle.
+    freshly built board gets them (AutonaActions.SetRoster); returns the
+    slots per team. One save cycle.
 
     `players` defaults to DefaultPlayersPerTeam(), the count the desktop
     gives a board it has just built. A launch seed (the headless shell's,
     after ``StateSchema.ResetScoreRoot`` / ``SeedBoard``): never for a live
-    board, whose cards own their slots.
+    board, whose roster is AutonaActions.SetRoster's.
     """
     if players is None:
         players = DefaultPlayersPerTeam()
     players = PlayerService._asInt(players, 1)
     with StateManager.SaveBlock():
-        # The order the board builds its cards in: team 1's, then team 2's,
-        # one index at a time (AutonaScoreboardWidget._setPlayersPerTeamImpl).
+        # The order a roster grows in: team 1's, then team 2's, one index
+        # at a time (AutonaActions.SetRoster, as the board built its cards).
         for slot in range(1, players + 1):
             for team in (1, 2):
                 PlayerService(

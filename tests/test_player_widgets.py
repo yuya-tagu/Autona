@@ -955,9 +955,15 @@ def test_the_player_widget_is_only_built_on_two_kinds_of_path():
     assert files == [
         "AutonaPlayerBrowserWidget.py", "AutonaScoreboardWidget.py"], (
         f"a player widget is now built somewhere new: {files}")
-    # Both scoreboard sites build an f-string keyed by board/team/index; the
-    # browser passes the module-level editor constant.
-    assert len(sites) == 3, f"construction sites changed: {sites}"
+    # The board builds its cards in one place (one per slot of the state's
+    # roster, either team: _AddCard, ADR-005 S3e-6; it was a site per team)
+    # from an f-string keyed by board/team/index; the browser passes the
+    # module-level editor constant.
+    assert len(sites) == 2, f"construction sites changed: {sites}"
+    board = next(path for name, path in sites
+                 if name == "AutonaScoreboardWidget.py")
+    assert ("statePrefix" in board and "'.team.'" in board
+            and "'.player.'" in board), board
 
 
 def test_the_editor_path_publishes_outside_every_board(autonaApp):
