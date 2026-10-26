@@ -2038,7 +2038,7 @@ Start.gg からの Top 8 の取り込みを、Top 8 パネルから core の `To
   - Web / Stream Deck: `/update-bracket`・Socket.IO `update_bracket` が `OK` を返して取り込む。v1 `POST /api/v1/bracket:refresh` が 202、取り込み中の 2 回目は 409 `CONFLICT`、大会なしは 409 `NOT_READY`
   - ヘッドレス（`python main.py --headless`）: 大会を読み込んで `/update-bracket` または `bracket:refresh` → `top8.*` が書かれ、OBS の Top 8 オーバーレイが変わる。`POST /api/v1/game` で別のゲームに切り替える → Top 8 のキャラが空になる
 
-#### S3e-3 S2f: 選手データの core 化（2026-10-26・PR 未作成）
+#### S3e-3 S2f: 選手データの core 化（2026-10-26・PR #236）
 
 選手データの読込（カードの `SetData`）・カードのクリア・DB への保存を、選手カードから core の `PlayerService` へ移した。セットの entrants・Web の選手編集（`update_player` / `set_team_data`）・タグからの読込（`load_player_from_tag`）・補完の選択・PLAYERS エディタ・カードのクリアボタンが同じ操作を呼び、カードは操作を依頼して state を描画するだけになった。外部契約（`program_state.json` のキー順・delta、Socket.IO / legacy / v1 の応答、`local_players.json` の形式）は変えていない。移す前の木（ae922c24）でカード・ボードの入口から 11 シナリオを録り、カード経由と core だけの両方で照合している。レビューで、既存の不具合 3 件（読込で前の選手の id・city が残る・スポンサーだけの読込の例外・数値でないスキンの例外）を直し、都市→地域表の読込を `CountryCatalog.Load()` へ移し、互換層 `src/Helpers/AutonaBadWordFilter.py` を削除した（判断 10〜12）。2 回目のレビューで、読込が打ちかけのコンボの文字を残す・メモ欄が描画の残した文字を書き戻す・singles ⇔ チームのセット読込でアップセット係数が古いまま、の 3 件（どれもこの移行で入ったもの）を直した（判断 3・4・9）。Web の 3 入口の `WebServerActions` からの移設は S3e-4 の範囲で、今回は従来の経路のまま core を呼ぶ。
 
