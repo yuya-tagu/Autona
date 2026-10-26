@@ -2784,7 +2784,7 @@ Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket
     - 選手カードのキャラのコンボの一覧を開いたまま、Web から人数を減らしてそのカードを消す → 一覧が画面に残らない
     - Web から `scoreboard4-set?players=2` → 503 が返り、どのボードも変わらない
 
-#### S3e-7 セット読込と追従の core 化（2026-10-27・PR 未作成）
+#### S3e-7 セット読込と追従の core 化（2026-10-27・PR #240）
 
 セット読込（セット選択ウィンドウ・Web の `load-set`）と追従（5 秒ごとの取り直し・ステーション / 配信の追従）、セットのペイロードの適用（`ChangeSetData`・`POST /score`）を core の `SetFollowService` に移した。それまではボードのウィジェット（`NewSetSelected`・QTimer 2 本・`QueueSetsCache`・`StationSetsLoaded` / `UpdateSetData` / `StreamSetSelection` のシグナル）と、provider アダプタの Worker（`LoadStationSets` / `GetMatch` / `GetStreamQueue`。答えを Worker 自身のシグナルで返す）が持っていた。`load_set` / `post_score` / `pull_stream_set` は `AutonaWebOperations` へ移し、ヘッドレスでも動く（それまでは 503）。`pull_stream_set` は論点 3 のとおり直した。
 
