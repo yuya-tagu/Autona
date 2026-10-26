@@ -2,11 +2,11 @@
 
 A thin, structured HTTP namespace added to the existing Flask + SocketIO
 server (ADR-001 D3). Every handler delegates to the operations the legacy
-routes use, so state logic is never duplicated: ``AutonaWebOperations`` for
-what is core's (both shells), ``WebServerActions`` for what still needs a
-board or panel widget (the desktop only -- headless, those answer 503
-UNAVAILABLE, ADR-005 S3c). Existing routes (``/score``,
-``/scoreboard<N>-...``) and Socket.IO events are left untouched.
+routes use, so state logic is never duplicated: ``AutonaWebOperations``,
+the same in both shells (ADR-005 S3c; every operation since S3e-9 -- none
+of the two shell operations, which only the desktop registers, is a v1
+one). Existing routes (``/score``, ``/scoreboard<N>-...``) and Socket.IO
+events are left untouched.
 
 Spec (source of truth): ``.claude/design/external-control-api.md``.
 
@@ -35,10 +35,8 @@ from .core import LayoutCatalog
 from .core import Top8Service
 from .core.GameAssetCatalog import GameAssetCatalog
 from .core.CountryCatalog import CountryCatalog
-# Import order mirrors the singleton init order (agent-pitfalls #2): the asset
-# manager must be importable before the tournament data provider. By the time
-# this module loads both singletons already exist (WebServerActions imported
-# them first), so this is only defensive.
+# Importing these builds nothing (agent-pitfalls #1): their singletons
+# (`.instance`) are created by src/bootstrap.py and read per request.
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers import AutonaQtHelper
 from . import AutonaWebOperations as WebOps
@@ -51,15 +49,6 @@ api_v1 = Blueprint("api_v1", __name__, url_prefix="/api/v1")
 # logged here. Bound so the channel can be filtered downstream.
 _oplog = logger.bind(channel="api_v1_ops")
 
-# Reference to the live WebServerActions instance, injected at registration
-# time so this module never imports AutonaWebServer (avoids a circular import).
-# None after init_api_v1(None): the headless shell, which has no board-
-# dependent operations (see _actions_ref). No route calls it since ADR-005
-# S3e-7 (load-set and pull-stream, the last two, are core's); S3e-9 removes
-# it along with init_api_v1's argument.
-_actions = None
-_initialized = False
-
 _version_cache = None
 
 
@@ -71,8 +60,11 @@ CONFLICT = "CONFLICT"                         # 409
 NOT_READY = "NOT_READY"                       # 409
 UPSTREAM_TIMEOUT = "UPSTREAM_TIMEOUT"         # 504
 INTERNAL = "INTERNAL"                         # 500
-# A board-dependent operation in the headless shell (ADR-005 S3c): the
-# server runs, the operation needs a widget it does not have. Not retryable.
+# An operation this shell cannot run (ADR-005 S3c): the server runs, the
+# operation needs what the shell does not have. Not retryable. No v1
+# operation raises it since ADR-005 S3e-7 (the only ones left are the
+# desktop's two shell operations, which v1 does not have); the mapping
+# stays, as the error code is part of the contract.
 UNAVAILABLE = "UNAVAILABLE"                   # 503
 
 
@@ -181,19 +173,6 @@ _STARTGG_RE = re.compile(r"start\.gg/tournament/[^/]+/event[s]?/[^/]+")
 def current_revision():
     """Best-effort current state revision (spec §14.1 / §14.1a)."""
     return StateManager.revision
-
-
-def _actions_ref():
-    """The board-dependent operations (WebServerActions).
-
-    NOT_READY before the server has initialized the API; NotAvailable (503
-    UNAVAILABLE) when it did so without them -- the headless shell.
-    """
-    if _actions is None:
-        if _initialized:
-            raise NotAvailable()
-        raise ApiError(NOT_READY, "API not initialized", 409)
-    return _actions
 
 
 def _app_version():
@@ -364,17 +343,14 @@ class _HeavyOpGuard:
 
 _heavy = _HeavyOpGuard()
 
-
-# ── Initialization (called from AutonaWebServer.__init__) ────────────────
-def init_api_v1(actions):
-    """Bind the live WebServerActions (None in the headless shell).
-
-    Every heavy op releases its in-progress flag itself (see
-    _HeavyOpGuard), so there are no completion signals to wire here.
-    """
-    global _actions, _initialized
-    _actions = actions
-    _initialized = True
+# No initialization step: WebServer.__init__ registers the blueprint and
+# nothing else. The handlers call AutonaWebOperations, which the shell has
+# filled in before the server starts (bootstrap_gui() / src/headless.py),
+# and every heavy op releases its in-progress flag itself (_HeavyOpGuard).
+# init_api_v1(actions) -- the desktop's actions object and the 409
+# NOT_READY "API not initialized" it answered before it was bound -- went
+# with that object in ADR-005 S3e-9: no route used it since S3e-7, and no
+# request could reach the blueprint before it was bound.
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -525,7 +501,7 @@ def get_country_states(code):
 def get_layouts():
     # The layout catalog the Board / Commentary / Top 8 tabs and the Designer
     # list from (src/core/LayoutCatalog.py). Not state, so no revision and
-    # no WebServerActions hop: the catalog is already the single reader.
+    # no web-operation hop: the catalog is already the single reader.
     # ?kind= takes one kind, a comma-separated list, or a repeated parameter.
     kinds = [kind.strip() for raw in request.args.getlist("kind")
              for kind in raw.split(",") if kind.strip()]

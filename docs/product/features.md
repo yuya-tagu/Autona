@@ -318,7 +318,7 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 
 ## 20. Web API エンドポイント
 
-[src/AutonaWebServer.py](../../src/AutonaWebServer.py) / [src/AutonaApiV1.py](../../src/AutonaApiV1.py) / [src/AutonaWebServerActions.py](../../src/AutonaWebServerActions.py)。
+[src/AutonaWebServer.py](../../src/AutonaWebServer.py) / [src/AutonaApiV1.py](../../src/AutonaApiV1.py) / [src/AutonaWebOperations.py](../../src/AutonaWebOperations.py)。
 
 - 既存制御面: スコア操作 / セット管理 / 統計取得 / 選手情報 / 大会データロード / マスタデータ（characters・variants・match-names）など HTTP ルート + Socket.IO。
 - 外部制御 API: `/api/v1/` 名前空間で実装済み。読み取り、スコア操作、set 情報更新、破壊的操作の `confirm:true`、重い操作の `202 Accepted` + 多重起動ガードに対応。

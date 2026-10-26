@@ -5,7 +5,9 @@ directory on a free port (ADR-005 S3c; the first of S3d's smoke checks):
 
 - it serves: /api/v1/health, the state over Socket.IO, a core write
   (score:adjust) reaching the state and the Socket.IO delta stream;
-- what needs a board answers 503 UNAVAILABLE (/api/v1 and a legacy route);
+- the two shell operations, the desktop's alone (ADR-005 S3e-9: the set
+  selection window and the thumbnail), answer 503 UNAVAILABLE; the Top 8
+  import, core's, is refused only for want of a tournament;
 - a write relayed from elsewhere (a forwarded request) needs the token, over
   HTTP and Socket.IO alike, and goes in with it;
 - a second launch is refused (exit 1, a message on stderr) instead of
@@ -165,9 +167,12 @@ def test_main_headless_serves_refuses_a_second_launch_and_stops(tmp_path):
             status, body = _request(port, "/api/v1/bracket:refresh", "POST",
                                     {})
             assert (status, body["error"]["code"]) == (409, "NOT_READY")
-            # What needs a board.
-            status, body = _request(port, "/scoreboard1-open-set")
-            assert (status, body["error"]["code"]) == (503, "UNAVAILABLE")
+            # The shell operations (ADR-005 S3e-9): the only 503s left.
+            for path in ("/scoreboard1-open-set",
+                         "/scoreboard1-get-thumbnail-png"):
+                status, body = _request(port, path)
+                assert (status, body["error"]["code"]) == (
+                    503, "UNAVAILABLE"), path
 
             # A relayed write is another computer's: the token is required.
             # (A real LAN client cannot be made from this one PC: its own LAN

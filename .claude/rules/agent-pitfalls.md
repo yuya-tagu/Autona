@@ -28,6 +28,7 @@ globs:
 - 順序を変えるときは `bootstrap.py` の `ORDER CONSTRAINT:` コメントを必ず読む。制約の理由（誰が誰の `instance.signals` に connect するか、QApplication 必須か、`StateManager.Initialize()` 後でなければならないか等）がその場に書いてある。各段の手順（生成・結線・`Initialize()`・Designer の移行）とその順は `tests/test_bootstrap_split.py` が AST で、`onLoadAssets` のスロット順（provider → アダプタの `_RestoreSelectedGame`）は実際の emit で pin している
 - **絶対に守る**: `GameAssetCatalog`（core）を生成して `ResetGameState()` してから、それを包む `AutonaGameAssetManager`（`bootstrap_gui()`）を作る（ADR-005 S1a）。`AutonaTournamentDataProvider` はもうアダプタに connect しない: ゲーム選択のフック `selectGameFromStartGGId` と `onLoadAssets` → `SetGameFromProvider` の結線はシェル側（`bootstrap_gui()`）が行う。`AutonaScoreboardManager`（`ResetScoreRoot`）は `bootstrap_gui()` の最後で、Window より前
 - 新しいシングルトンは、QCoreApplication で作れて全シェルが使うなら `bootstrap_core()`、QtGui / QtWidgets が要るかデスクトップだけが使うなら `bootstrap_gui()` に追加する。モジュール末尾で `instance = XXX()` を書かない（#1 に違反する）
+- Web 操作のシェルごとの違いは `AutonaWebOperations` への登録だけ（ADR-005 S3c / S3e-9）: デスクトップは `bootstrap_gui()` がボードホスト（`DesktopBoardHost`）・`loadGameByCodename`・シェル操作 2 本（`openSetSelection` / `renderThumbnail`）を登録し、ヘッドレスは `src/headless.py` がローダーだけを登録する。`WebServer` に操作を渡す経路は無い（`WebServerActions` は S3e-9 で削除）。シェル操作を増やさず、新しい Web 操作は core に置く。シェル操作を除き `@gui_thread_sync` を新しく足さない（残っているものの分類は `docs/changes/architecture-modernization.md` の S3e-9 節）
 
 ## 3. StateManager のキーパスはドット区切り文字列
 

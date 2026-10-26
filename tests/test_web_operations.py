@@ -7,35 +7,43 @@ Pinned here:
 - the S2 operations write the same state whichever host runs them -- the
   desktop's (the board built, the write held for 反映) and the headless one
   (no board, published at once);
-- headless, what a widget answers -- the board-dependent actions
-  (WebServerActions) -- is refused with NotAvailable, and the server turns
-  that into 503 in the /api/v1 error shape: legacy routes, Socket.IO acks,
-  /api/v1 (UNAVAILABLE). The crew board's operations and the caster
-  line-up's are core's since ADR-005 S3e-2 and answer in both shells (their
+- headless, only the two shell operations (ADR-005 S3e-9) -- opening the
+  set selection window and the thumbnail, which the desktop registers --
+  are refused with NotAvailable, and the server turns that into 503 in the
+  /api/v1 error shape: legacy routes, Socket.IO acks (/api/v1 has neither;
+  its UNAVAILABLE stays the contract). Every other route and event answers
+  in both shells (pinned below by walking the route table): the crew
+  board's operations and the caster line-up's since ADR-005 S3e-2 (their
   recordings: tests/test_crew_operations.py,
-  tests/test_commentary_service.py), and so are the player slots' -- the
-  Web's player edit and the tag lookup -- since S3e-4 (pinned below; the
-  board's recording: tests/test_player_apply.py), and the player /
-  character counts of boards 1/2 since S3e-6 (pinned below; the board's
-  recording: tests/test_roster_flow.py), and set loading and following --
-  load-set, POST /score, pull-stream -- since S3e-7
-  (tests/test_set_follow.py; the board's recording:
-  tests/test_set_follow_flow.py);
+  tests/test_commentary_service.py), the player slots' -- the Web's player
+  edit and the tag lookup -- since S3e-4 (pinned below; the board's
+  recording: tests/test_player_apply.py), the player / character counts of
+  boards 1/2 since S3e-6 (pinned below; the board's recording:
+  tests/test_roster_flow.py), and set loading and following -- load-set,
+  POST /score, pull-stream -- since S3e-7 (tests/test_set_follow.py; the
+  board's recording: tests/test_set_follow_flow.py);
 - headless, the S2 operations run one at a time (the host's re-entrant
   lock), so a composite one (clear_all) is not interleaved with another
   request.
 """
 import copy
 import json
+import os
+import shutil
+import sys
 import threading
 import time
 import types
+from pathlib import Path
 
 import pytest
 
 from src import AutonaWebOperations as WebOps
 from src.AutonaWebOperations import BoardHost, NotAvailable
 from tests.fixtures.stats.spies import StatsTriggers
+from tests.test_designer_service import make_project
+from tests.test_webserver_routes import (
+    EXPECTED_API_V1_ROUTES, EXPECTED_EVENTS, EXPECTED_ROUTES)
 
 BOARD = 2   # the team board: every S2 field (team names included) applies
 
@@ -919,9 +927,8 @@ def test_get_set_is_zero_headless_rather_than_refused(headless):
 
 @pytest.fixture
 def server(monkeypatch, tmp_path):
-    """The real Flask app + Socket.IO server with no board-dependent actions
-    (the headless shell's WebServer(actions=None)), cwd = tmp_path."""
-    from src import AutonaApiV1
+    """The real Flask app + Socket.IO server with no shell operations
+    registered (the headless shell's, ADR-005 S3e-9), cwd = tmp_path."""
     from src.AutonaApiV1 import api_v1
     from src.AutonaWebServer import WebServer, _build_web_app
     from src.core import WebAccess
@@ -932,9 +939,8 @@ def server(monkeypatch, tmp_path):
     monkeypatch.setattr(SettingsManager, "loadFailed", False)
     monkeypatch.setattr(WebAccess, "_token", None)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(WebServer, "actions", None)
-    monkeypatch.setattr(AutonaApiV1, "_actions", None)
-    monkeypatch.setattr(AutonaApiV1, "_initialized", True)
+    monkeypatch.setattr(WebOps, "openSetSelection", None)
+    monkeypatch.setattr(WebOps, "renderThumbnail", None)
     monkeypatch.setattr(WebServer, "_lan_hosts", ())
     monkeypatch.setattr(WebServer, "_refusals", WebAccess.RefusalLog())
 
@@ -970,11 +976,11 @@ def test_a_socketio_event_acks_the_503_body(server):
 
 
 # What a web operation itself refuses headless -- the board host's
-# NotAvailable, from host.Widget() (not WebServer._board_actions()): the
-# same 503, as a route's answer and as an event's ack. The board that only
-# a widget could serve is one that is neither 1/2 nor the crew board; the
-# player / character counts of boards 1/2 were it until ADR-005 S3e-6
-# (core's now: test_the_roster_routes_answer_headless below).
+# NotAvailable, from host.Widget(): the same 503, as a route's answer and
+# as an event's ack. The board that only a widget could serve is one that
+# is neither 1/2 nor the crew board (no shell has one: the desktop answers
+# 500 for it); the player / character counts of boards 1/2 were it until
+# ADR-005 S3e-6 (core's now: test_the_roster_routes_answer_headless below).
 def test_a_legacy_route_a_web_operation_refuses_answers_503(
         server, monkeypatch):
     monkeypatch.setattr(WebOps, "boardHost", BoardHost())
@@ -1432,10 +1438,524 @@ def test_headless_statistics_from_a_request_thread_to_the_state(
         _dropHeadlessBoards(autonaApp)
 
 
-def test_the_board_actions_are_refused_without_a_shell_that_has_them(
+# ── the shell operations (ADR-005 S3e-9) ────────────────────────────────
+#
+# Opening a board's set selection window and rendering its thumbnail are
+# the desktop's windows' work: the desktop registers its scoreboard dock's
+# (bootstrap_gui()), the headless shell nothing, and the operation answers
+# NotAvailable (503). They were the web server's actions class until then,
+# handed in by the desktop window and None headless.
+
+def test_the_shell_operations_are_refused_without_a_shell_that_has_them(
         monkeypatch):
-    from src.AutonaWebServer import WebServer
-    monkeypatch.setattr(WebServer, "actions", None)
+    monkeypatch.setattr(WebOps, "openSetSelection", None)
+    monkeypatch.setattr(WebOps, "renderThumbnail", None)
 
     with pytest.raises(NotAvailable):
-        WebServer._board_actions()
+        WebOps.open_sets("1")
+    with pytest.raises(NotAvailable):
+        WebOps.get_thumbnail("1", "png")
+
+    calls = []
+    monkeypatch.setattr(WebOps, "openSetSelection",
+                        lambda n: calls.append(("open", n)) or "OK")
+    monkeypatch.setattr(WebOps, "renderThumbnail",
+                        lambda n, f: calls.append(("thumb", n, f)) or "/t.jpg")
+    assert WebOps.open_sets("2") == "OK"
+    assert WebOps.get_thumbnail("1", "jpg") == "/t.jpg"
+    assert calls == [("open", "2"), ("thumb", "1", "jpg")]
+
+
+def test_the_desktop_shell_operations_run_on_the_gui_thread(autonaApp,
+                                                            monkeypatch):
+    """What bootstrap_gui() registered: the scoreboard dock's, run on the
+    GUI thread while the request's thread waits for the answer -- the
+    window opened before "OK" (it used to be queued for later: the
+    request's thread emitted the board's signal), the thumbnail's absolute
+    path (its .jpg sibling for "jpg"), None when none was made."""
+    from src.AutonaScoreboardManager import AutonaScoreboardManager
+    from src.Helpers.AutonaQtHelper import in_gui_thread
+    manager = AutonaScoreboardManager.instance
+    assert WebOps.openSetSelection == manager.OpenSetSelection
+    assert WebOps.renderThumbnail == manager.RenderThumbnail
+    board = autonaApp.board(1)
+    window = board.selectSetWindow
+    calls = []
+    monkeypatch.setattr(window, "PrepareForDisplay",
+                        lambda: calls.append(("prepare", in_gui_thread())))
+    monkeypatch.setattr(window, "show",
+                        lambda: calls.append(("show", in_gui_thread())))
+    thumbnail = os.path.join("out", "thumbnails", "board.png")
+
+    def generate(quiet_mode=False, disable_msgbox=False):
+        calls.append(("thumbnail", in_gui_thread(), quiet_mode,
+                      disable_msgbox))
+        return thumbnail
+
+    monkeypatch.setattr(board, "GenerateThumbnail", generate)
+
+    answers = []
+
+    def request():
+        answers.append(WebOps.open_sets("1"))
+        answers.append(len(calls))   # opened before the answer
+        answers.append(WebOps.get_thumbnail("1", "png"))
+        answers.append(WebOps.get_thumbnail("1", "jpg"))
+
+    worker = threading.Thread(target=request)
+    worker.start()
+    deadline = time.monotonic() + 10
+    while worker.is_alive() and time.monotonic() < deadline:
+        autonaApp.settle()
+        time.sleep(0.01)
+    worker.join(1)
+
+    assert not worker.is_alive()
+    assert answers == [
+        "OK", 2, os.path.abspath(thumbnail),
+        os.path.abspath(os.path.join("out", "thumbnails", "board.jpg"))]
+    assert calls == [("prepare", True), ("show", True),
+                     ("thumbnail", True, True, True),
+                     ("thumbnail", True, True, True)]
+
+    monkeypatch.setattr(board, "GenerateThumbnail", lambda **kwargs: None)
+    assert WebOps.get_thumbnail("1", "png") is None
+
+
+# The desktop's shell operations as the Web reaches them: the routes'
+# answers (the thumbnail sent as the image it is, under the type the route
+# names), the Socket.IO event's emitted "OK", and what has no window or
+# thumbnail -- the crew board, a board that is none -- the 500 it always
+# was.
+def test_the_desktop_shell_operations_answer_through_the_routes(
+        server, autonaApp, monkeypatch, tmp_path):
+    from src.AutonaScoreboardManager import AutonaScoreboardManager
+    manager = AutonaScoreboardManager.instance
+    monkeypatch.setattr(WebOps, "openSetSelection", manager.OpenSetSelection)
+    monkeypatch.setattr(WebOps, "renderThumbnail", manager.RenderThumbnail)
+    app, socketio = server
+    client = app.test_client()
+    client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
+    board = autonaApp.board(1)
+    window = board.selectSetWindow
+    opened = []
+    monkeypatch.setattr(window, "PrepareForDisplay",
+                        lambda: opened.append("prepare"))
+    monkeypatch.setattr(window, "show", lambda: opened.append("show"))
+    png = tmp_path / "thumbnails" / "board.png"
+    png.parent.mkdir()
+    png.write_bytes(b"\x89PNG\r\n\x1a\n-the-png")
+    jpg = png.with_suffix(".jpg")
+    jpg.write_bytes(b"\xff\xd8\xff-the-jpg")
+    monkeypatch.setattr(board, "GenerateThumbnail",
+                        lambda quiet_mode=False, disable_msgbox=False:
+                        str(png))
+
+    response = client.get("/scoreboard1-open-set")
+    assert (response.status_code, response.get_data(as_text=True)) == (
+        200, "OK")
+    assert opened == ["prepare", "show"]
+
+    for fileFormat, image in (("png", png), ("jpg", jpg)):
+        response = client.get(f"/scoreboard1-get-thumbnail-{fileFormat}")
+        try:
+            assert response.status_code == 200
+            assert response.headers["Content-Type"] == f"image/{fileFormat}"
+            assert response.get_data() == image.read_bytes()
+        finally:
+            response.close()
+
+    ws = socketio.test_client(app, flask_test_client=client)
+    ws.get_received()
+    ack = ws.emit("open_set", json.dumps({"scoreboardNumber": "1"}),
+                  callback=True)
+    assert ack != UNAVAILABLE_BODY
+    assert [(item["name"], item["args"]) for item in ws.get_received()] == [
+        ("open_set", ["OK"])]
+    assert opened == ["prepare", "show"] * 2
+    ws.disconnect()
+
+    for path in ("/scoreboard3-open-set", "/scoreboard3-get-thumbnail-png",
+                 "/scoreboard4-open-set", "/scoreboard4-get-thumbnail-png"):
+        assert client.get(path).status_code == 500, path
+    autonaApp.settle()
+
+
+# Opening the window never failed the request: it was queued until S3e-9
+# (the request's thread emitted the board's signal), so what it raised was
+# reported and the answer was "OK" -- still. PySide6 hands a slot's
+# exception to sys.excepthook (the app logs it as uncaught) rather than
+# raising it into emit(); OpenSetSelection logs one a binding would raise
+# there. Either way it is reported once.
+def test_a_set_selection_window_that_fails_to_open_still_answers_ok(
+        autonaApp, monkeypatch):
+    from loguru import logger
+    from src.AutonaScoreboardManager import AutonaScoreboardManager
+    monkeypatch.setattr(WebOps, "openSetSelection",
+                        AutonaScoreboardManager.instance.OpenSetSelection)
+    board = autonaApp.board(1)
+
+    def fail():
+        raise RuntimeError("the window failed")
+
+    monkeypatch.setattr(board.selectSetWindow, "PrepareForDisplay", fail)
+    hooked = []
+    monkeypatch.setattr(sys, "excepthook",
+                        lambda kind, error, trace: hooked.append(error))
+    logged = []
+    sink = logger.add(lambda message: logged.append(message.record),
+                      level="ERROR")
+    try:
+        assert WebOps.open_sets("1") == "OK"
+    finally:
+        logger.remove(sink)
+
+    reported = [str(error) for error in hooked] + [
+        str(record["exception"].value) for record in logged
+        if record["exception"] is not None]
+    assert reported == ["the window failed"]
+
+
+# ── every route and event answers headless (ADR-005 S3e-9) ───────────────
+#
+# §4.4's completion condition, walked off the route table rather than
+# listed, so a route or event added later is walked too. Headless and with
+# no tournament loaded, every legacy route, /api/v1 route and Socket.IO
+# event is sent what gets it past its own argument checks and guards (the
+# Designer window's token and the Figma pairing code included), and what
+# comes back is pinned:
+#
+# - every route's status: 200, but for the answers _NOT_200 lists, each the
+#   operation's own (a shell operation's 503, what the crew board does not
+#   have, no tournament loaded, a name that names nothing). A route that
+#   fell over somewhere new answers something else;
+# - every event: no exception in its handler (python-socketio's handler
+#   for those, ws_on_error, is swapped for a recorder) but the one
+#   _EVENT_RAISES lists, and what it emits back: its own name, but for
+#   _EVENT_REPLIES;
+# - the two shell operations are the only ones refused (503, the
+#   UNAVAILABLE ack).
+#
+# What is not pinned: a 200's body (a legacy route answers its errors as
+# 200 strings: "ERROR" for a tag the player DB does not have, ...). The
+# 500s are the desktop's too
+# (test_what_answers_500_headless_answers_500_on_the_desktop).
+
+SHELL_ENDPOINTS = {"open_sets", "get_thumbnail"}
+SHELL_EVENTS = {"open_set"}
+
+# A value for each URL argument of the rules; the board ones are walked.
+# A slug, file name and import id that name nothing (a well-formed id).
+_URL_VALUES = {"team": "1", "player": "1", "member": "1", "caster": "1",
+               "color": "ff0000", "fileFormat": "png", "setId": "1", "t": 1,
+               "p": 1, "code": "JP", "slug": "x", "import_id": "0" * 32,
+               "filename": "x"}
+_BOARD_ARGUMENTS = ("scoreboardNumber", "n")
+
+# What a route needs besides its URL to get to its operation rather than
+# stop at a missing argument: a query string, or the JSON body of a write.
+_QUERIES = {"set_route": "?match=Final", "load_set": "?set=1",
+            "load_player_from_tag": "?tag=Nobody",
+            "load_commentator_from_tag": "?tag=Nobody",
+            "get_states": "?countryCode=JP"}
+_DISPLAY_OPTION = "show_real_name"
+_DESIGN = {"project": make_project("Walk", with_image=False), "assets": {}}
+_BODIES = {
+    "post_score": {"scoreboardNumber": "1"},
+    "post_display_option": {"option": _DISPLAY_OPTION, "value": True},
+    "set_team_data": {"gamerTag": "ALPHA"},
+    "set_commentary_data": {"gamerTag": "Cast"},
+    "set_game": {"codename": "no_such_game"},
+    "designer_save_project": _DESIGN,
+    "designer_receive_import": _DESIGN,
+    "api_v1.score_adjust": {"delta": 1},
+    "api_v1.score_set": {"team1": 1, "team2": 0},
+    "api_v1.team_color": {"color": "#ff0000"},
+    "api_v1.set_update": {"match": "Final"},
+    "api_v1.player_update": {"gamerTag": "ALPHA"},
+    "api_v1.display_options_update": {_DISPLAY_OPTION: True},
+    "api_v1.clear": {"confirm": True},
+    "api_v1.reset_players": {"confirm": True},
+    "api_v1.reset_match": {"confirm": True},
+    "api_v1.load_set": {"setId": 1},
+    "api_v1.game_set": {"codename": "no_such_game"},
+}
+
+# Every route that answers anything but 200 here, by (endpoint, board),
+# and what.
+_NOT_200 = {
+    # The shell operations (ADR-005 S3e-9).
+    **{(endpoint, board): 503 for endpoint in SHELL_ENDPOINTS
+       for board in (1, 2, 3)},
+    # What the crew board does not have -- set loading, player slots,
+    # statistics: core's ValueError, the legacy routes' 500; /api/v1's
+    # 400 INVALID_ARGUMENT (every board operation of its but the crew's).
+    **{(endpoint, 3): 500 for endpoint in (
+        "load_set", "pull_stream_set", "load_player_from_tag",
+        "stats_recent_sets", "stats_upset_factor", "stats_last_sets",
+        "stats_history_sets")},
+    **{(f"api_v1.{name}", 3): 400 for name in (
+        "score_adjust", "score_reset", "score_set", "team_color",
+        "set_update", "player_update", "swap_teams", "apply_changes",
+        "stats_refresh", "clear", "reset_players", "reset_match",
+        "load_set", "pull_stream")},
+    # No tournament loaded: the legacy set lookup raises (its provider is
+    # None -- the desktop's too), /api/v1 answers 409 NOT_READY.
+    ("get_match", None): 500,
+    ("api_v1.get_match", None): 409,
+    ("api_v1.load_set", 1): 409, ("api_v1.load_set", 2): 409,
+    ("api_v1.pull_stream", 1): 409, ("api_v1.pull_stream", 2): 409,
+    ("api_v1.bracket_refresh", None): 409,
+    # Accepted, and run in the background.
+    ("api_v1.tournament_load", None): 202,
+    # A name that names nothing: no such file, design, import or game.
+    ("file_request", None): 404,
+    ("designer_load_project", None): 404,
+    ("designer_delete_project", None): 404,
+    ("designer_get_import", None): 404,
+    ("api_v1.game_set", None): 404,
+}
+
+# The Socket.IO events' messages (the routes' arguments). "connect" is the
+# connection itself; () is an event that takes no message.
+_EVENT_MESSAGES = {
+    "connect": None,
+    "get_comms": (),
+    "update_game": {"codename": "no_such_game"},
+    "update_team": {"scoreboardNumber": "1", "team": "1", "player": "1",
+                    "gamerTag": "ALPHA"},
+    "update_commentary": {"commentator": "1", "gamerTag": "Cast"},
+    "load_player_from_tag": {"scoreboardNumber": "1", "team": "1",
+                             "player": "1", "tag": "Nobody"},
+    "load_commentator_from_tag": {"commentator": "1", "tag": "Nobody"},
+    "crew_member_stock": {"scoreboardNumber": "3", "team": "1",
+                          "member": "1", "change": 1},
+    "crew_set_active": {"scoreboardNumber": "3", "team": "1",
+                        "member": "1"},
+    "states": {"countryCode": "JP"},
+    "get_match": {"setId": "1"},
+    "load_set": {"scoreboardNumber": "1", "set": "1"},
+    "set": {"scoreboardNumber": "1", "match": "Final"},
+    "team_color": {"scoreboardNumber": "1", "team": "1",
+                   "color": "ff0000"},
+}
+_EVENT_DEFAULT = {"scoreboardNumber": "1", "team": "1", "player": "1"}
+
+# What an event emits back when it is not one event of its own name.
+_EVENT_REPLIES = {
+    "current_game": ["get_current_game"],
+    "program-state-update": ["program_state_update"],
+    # An old slip, kept: the emitted name is the contract (the S3e residue
+    # in docs/changes/architecture-modernization.md).
+    "team_color": ["team_scoredown"],
+    # Answered as the ack instead.
+    "open_set": [],
+    "states": [],
+    # Raises (_EVENT_RAISES).
+    "get_match": [],
+}
+
+# The events whose handler raises here: the set lookup with no tournament
+# loaded, as its route (500) and on the desktop alike. Logged
+# (ws_on_error), nothing acked or emitted.
+_EVENT_RAISES = {"get_match": AttributeError}
+
+
+def _walk_routes(app):
+    """(endpoint, board, method, url) for every rule and method the app
+    has, the board arguments walked over 1, 2 and 3 (board None: a rule
+    that takes none)."""
+    for rule in app.url_map.iter_rules():
+        boards = [name for name in _BOARD_ARGUMENTS if name in rule.arguments]
+        for board in ((1, 2, 3) if boards else (None,)):
+            values = {name: _URL_VALUES[name] for name in rule.arguments
+                      if name not in _BOARD_ARGUMENTS}
+            values.update({name: board for name in boards})
+            _, url = rule.build(values)
+            for method in sorted(rule.methods - {"HEAD", "OPTIONS"}):
+                yield (rule.endpoint, board, method,
+                       url + _QUERIES.get(rule.endpoint, ""))
+
+
+def test_every_route_and_event_answers_headless_but_the_shell_operations(
+        server, autonaApp, monkeypatch, playerDB, tmp_path):
+    from src.AutonaDesignerService import AutonaDesignerService as designer
+    from src.AutonaTournamentDataProvider import (
+        AutonaTournamentDataProvider)
+    from src.core.CountryCatalog import CountryCatalog
+    from src.core.CrewBattleService import CrewBattleService
+    app, socketio = server
+    client = app.test_client()
+    client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
+    # No tournament: nothing reaches start.gg (its routes answer for "none
+    # loaded"), and loading "none" changes nothing.
+    monkeypatch.setattr(AutonaTournamentDataProvider.instance, "provider",
+                        None)
+    # The country data, which the window (or a player card) loads: loaded,
+    # whatever ran before, and put back afterwards.
+    catalog = CountryCatalog.instance
+    monkeypatch.setattr(catalog, "_current", catalog._current)
+    if not catalog.IsLoaded():
+        assert catalog.Load()
+    # The Designer's routes past their guards -- the window's token, the
+    # Figma plugin's pairing code -- onto designs kept under tmp_path.
+    runtime = tmp_path / "designer_runtime"
+    runtime.mkdir()
+    for name in designer.RUNTIME_FILES:
+        (runtime / name).write_bytes(b"/* shared runtime */")
+    monkeypatch.setattr(designer, "ROOT", tmp_path / "designs")
+    monkeypatch.setattr(designer, "RUNTIME_ROOT", runtime)
+    monkeypatch.setattr(designer, "_tokens", set())
+    monkeypatch.setattr(designer, "_imports", {})
+    monkeypatch.setattr(designer, "_latest_import", None)
+    monkeypatch.setattr(designer, "_pairing_failures", 0)
+    monkeypatch.setattr(designer, "_pairing_locked_until", 0.0)
+    token = designer.issue_token()
+    # The web page the routes serve, which the test's runtime has no build
+    # of: a stand-in, in the directory they read it from (removed after).
+    web = Path(os.path.abspath(".")) / "web"
+    assert web.parent == Path(autonaApp.dir) and not web.exists()
+    (web / "build").mkdir(parents=True)
+    (web / "build" / "index.html").write_text("<!doctype html>",
+                                              encoding="utf-8")
+    raised = []
+    monkeypatch.setattr(socketio, "default_exception_handler", raised.append)
+    kept = {root: copy.deepcopy(value)
+            for root, value in _state().state.items() if root != "score"}
+    _goHeadlessWithSlots(autonaApp, monkeypatch)
+    CrewBattleService(3).SeedDefaults()
+    autonaApp.settle()
+    answers = []
+    events = {}
+    try:
+        for endpoint, board, method, url in _walk_routes(app):
+            body = _BODIES.get(endpoint)
+            # The pairing code read per request: the walk regenerates it.
+            headers = {"X-Autona-Designer-Token": token,
+                       designer.PAIRING_HEADER: designer.pairing_code()}
+            if body is None and method == "GET":
+                response = client.open(url, method=method, headers=headers)
+            else:
+                response = client.open(url, method=method, json=body or {},
+                                       headers=headers)
+            answers.append((endpoint, board, method, url,
+                            response.status_code,
+                            response.get_json(silent=True)))
+            response.close()
+            autonaApp.settle()
+
+        ws = socketio.test_client(app, flask_test_client=client)
+        ws.get_received()
+        for event in sorted(socketio.server.handlers["/"]):
+            message = _EVENT_MESSAGES.get(event, _EVENT_DEFAULT)
+            if message is None:
+                continue
+            before = len(raised)
+            if message == ():
+                ack = ws.emit(event, callback=True)
+            else:
+                ack = ws.emit(event, json.dumps(message), callback=True)
+            events[event] = (ack, [item["name"] for item in ws.get_received()],
+                             [type(error) for error in raised[before:]])
+            autonaApp.settle()
+            ws.get_received()
+        ws.disconnect()
+    finally:
+        shutil.rmtree(web)
+        _dropHeadlessBoards(autonaApp)
+        with _state().SaveBlock():
+            for root in set(_state().state) - set(kept) - {"score"}:
+                _state().Unset(root)
+            for root, value in kept.items():
+                if _state().Get(root) != value:
+                    _state().Set(root, value)
+        autonaApp.settle()
+
+    # Every route and event of the ledger was walked
+    # (tests/test_webserver_routes.py: the legacy routes and /api/v1's).
+    assert {endpoint for endpoint, *_ in answers} == {
+        endpoint for _, endpoint, _
+        in EXPECTED_ROUTES + EXPECTED_API_V1_ROUTES}
+    assert set(events) | {"connect"} == set(EXPECTED_EVENTS)
+    # The shell operations, and only they, are refused.
+    assert [(endpoint, board, method, url, status) for
+            endpoint, board, method, url, status, body in answers
+            if (status == 503) != (endpoint in SHELL_ENDPOINTS)] == []
+    assert [(endpoint, board, body) for endpoint, board, _, _, _, body
+            in answers if endpoint in SHELL_ENDPOINTS
+            and body != UNAVAILABLE_BODY] == []
+    assert sorted(event for event, (ack, _, _) in events.items()
+                  if ack == UNAVAILABLE_BODY) == sorted(SHELL_EVENTS)
+    # Each route answered what its operation answers.
+    assert set(_NOT_200) <= {(endpoint, board)
+                             for endpoint, board, *_ in answers}
+    assert [(endpoint, board, method, url, status) for
+            endpoint, board, method, url, status, _ in answers
+            if status != _NOT_200.get((endpoint, board), 200)] == []
+    # Each event reached its operation: nothing raised but the set lookup,
+    # and each answered as it does.
+    assert {event: kinds for event, (_, _, kinds) in events.items()
+            if kinds} == {event: [kind]
+                          for event, kind in _EVENT_RAISES.items()}
+    assert {event: names for event, (_, names, _) in events.items()
+            if names != [event]} == _EVENT_REPLIES
+    assert events["states"][0] == WebOps.get_states("JP")
+    assert events["states"][0]
+
+
+# The set lookup headless, with a tournament: the route and the event
+# reach the provider (the walk above has none, so both stop at it).
+def test_the_set_lookup_answers_headless_with_a_tournament(
+        server, headless, monkeypatch):
+    from src.AutonaTournamentDataProvider import (
+        AutonaTournamentDataProvider)
+    asked = []
+    provider = types.SimpleNamespace(
+        GetMatch=lambda setId: asked.append(setId) or {"id": setId})
+    monkeypatch.setattr(AutonaTournamentDataProvider.instance, "provider",
+                        provider)
+    app, socketio = server
+    client = app.test_client()
+    client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
+
+    response = client.get("/get-match-7")
+    assert (response.status_code, response.get_json()) == (200, {"id": 7})
+
+    ws = socketio.test_client(app, flask_test_client=client)
+    ws.get_received()
+    ws.emit("get_match", json.dumps({"setId": "8"}), callback=True)
+    assert [(item["name"], item["args"]) for item in ws.get_received()] == [
+        ("get_match", [{"id": 8}])]
+    ws.disconnect()
+    assert asked == [7, 8]
+
+
+# What answers 500 in the walk is not the headless shell's: the desktop's
+# board host answers it alike -- the crew board's checks come before a
+# board is built, and the set lookup has no provider in either shell.
+def test_what_answers_500_headless_answers_500_on_the_desktop(
+        server, autonaApp, monkeypatch, playerDB):
+    from src.AutonaTournamentDataProvider import (
+        AutonaTournamentDataProvider)
+    from src.AutonaWebOperations import DesktopBoardHost
+    assert isinstance(WebOps.boardHost, DesktopBoardHost)
+    monkeypatch.setattr(AutonaTournamentDataProvider.instance, "provider",
+                        None)
+    app, _ = server
+    client = app.test_client()
+    client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
+    answered = {key for key, status in _NOT_200.items() if status == 500}
+    walked = [(endpoint, board, method, url)
+              for endpoint, board, method, url in _walk_routes(app)
+              if (endpoint, board) in answered]
+    assert {(endpoint, board) for endpoint, board, _, _ in walked} \
+        == answered
+
+    statuses = []
+    for endpoint, board, method, url in walked:
+        statuses.append((endpoint, board,
+                         client.open(url, method=method).status_code))
+        autonaApp.settle()
+
+    assert statuses == [(endpoint, board, 500)
+                        for endpoint, board, _, _ in walked]

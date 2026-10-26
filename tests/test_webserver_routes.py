@@ -235,7 +235,9 @@ WebServer = mod.WebServer
 # The whole point of Step 3e: importing the module builds nothing.
 assert WebServer.app is None, "import built WebServer.app"
 assert WebServer.socketio is None, "import built WebServer.socketio"
-assert WebServer.actions is None, "import built WebServer.actions"
+# ADR-005 S3e-9: the desktop's actions object is gone; the shell operations
+# are AutonaWebOperations' registrations.
+assert not hasattr(WebServer, "actions"), "WebServer.actions is back"
 
 from qtpy.QtWidgets import QApplication
 assert QApplication.instance() is None, "import created a QApplication"

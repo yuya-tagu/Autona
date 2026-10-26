@@ -1,3 +1,5 @@
+import os
+
 from qtpy.QtCore import *
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
@@ -155,10 +157,12 @@ class AutonaScoreboardManager(QDockWidget):
             return scoreboard
 
         # Not built yet (only the active format's board is built at startup).
-        # Build it here so every caller — the ~40 web server actions, the REST
-        # API, the desktop panels — keeps working unchanged. Construction is
-        # GUI-thread only, so calls arriving on the Flask thread are
-        # marshalled to it (gui_thread_sync).
+        # Build it here so every caller — the web operations' desktop board
+        # host (AutonaWebOperations.DesktopBoardHost), the shell operations
+        # below, the desktop panels — gets a board. Construction is
+        # GUI-thread only, so calls arriving on the Flask thread (the board
+        # host's Prepare / Widget outside its Run: get_swap, get_scoreboard)
+        # are marshalled to it (gui_thread_sync).
         try:
             if in_gui_thread():
                 scoreboard = self.EnsureScoreboard(number)
@@ -173,3 +177,46 @@ class AutonaScoreboardManager(QDockWidget):
             logger.error(
                 f"Scoreboard Manager - Scoreboard {number} not available")
         return scoreboard
+
+    # ── The web layer's shell operations (ADR-005 S3e-9) ─────────────────
+    # What only the desktop's windows answer. bootstrap_gui() registers them
+    # as AutonaWebOperations.openSetSelection / renderThumbnail; the headless
+    # shell has neither, and the web layer answers them 503. On the GUI
+    # thread, where the boards and their windows live (an unbuilt board is
+    # built there first); the request waits for the answer. Moved unchanged
+    # from the web server's former actions class, apart from the window
+    # being opened on the GUI thread itself instead of through a signal
+    # queued from the request's thread (what opening it raises is still
+    # only logged: OpenSetSelection).
+
+    @gui_thread_sync
+    def OpenSetSelection(self, number):
+        """Open board `number`'s set selection window: "OK". Another board
+        than 1/2 has none and raises (the legacy route's 500, as before).
+
+        Opening the window itself never fails the request: until S3e-9 it
+        was queued from the request's thread, so what it raised was only
+        reported and the answer was "OK". It still is. PySide6 hands a
+        slot's exception to sys.excepthook (logged as uncaught) instead of
+        raising it into emit(); one a binding raises here is logged."""
+        selection = self.GetScoreboard(number).signals.SetSelection
+        try:
+            selection.emit()
+        except Exception:
+            logger.opt(exception=True).error(
+                f"Scoreboard Manager - The set selection of scoreboard "
+                f"{number} did not open")
+        return "OK"
+
+    @gui_thread_sync
+    def RenderThumbnail(self, number, file_format):
+        """Render board `number`'s thumbnail (quietly: no message box): the
+        image's absolute path -- its .jpg sibling for "jpg" -- or None when
+        it failed."""
+        thumbnailPath = self.GetScoreboard(number).GenerateThumbnail(
+            quiet_mode=True, disable_msgbox=True)
+        if thumbnailPath:
+            if file_format == "jpg":
+                thumbnailPath = thumbnailPath.replace(".png", ".jpg")
+            return os.path.abspath(thumbnailPath)
+        return None

@@ -78,10 +78,12 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
 > 新 API はこれと重複・競合・二重管理になりうる。
 
 - HTTP ルートと Socket.IO イベントが**対で**定義される（同じ操作を両方で提供）✅
-- 実処理は [src/AutonaWebServerActions.py](../../src/AutonaWebServerActions.py) に委譲 ✅
+- 実処理は [src/AutonaWebOperations.py](../../src/AutonaWebOperations.py)（両シェル共通の Web 操作）に委譲 ✅
+  （旧 `AutonaWebServerActions.py` は ADR-005 S3e-9 で削除。デスクトップだけの操作 2 本＝セット選択ウィンドウ・
+  サムネイルはシェルが登録し、ヘッドレスは 503）
 - ⚠️ **HTTP ルートと WS イベントが二重定義**のため、片方だけ直すと不整合になる — 制御面拡張で要注意 ✅
 - 外部制御 API は **`/api/v1/` として実装済み**。既存 Flask+SocketIO サーバーに Blueprint を登録し、
-  既存ルートを壊さず `WebServerActions` を再利用する ✅
+  既存ルートを壊さず同じ Web 操作（`AutonaWebOperations`）を再利用する ✅
   - 実装: [src/AutonaApiV1.py](../../src/AutonaApiV1.py)
   - 登録: [src/AutonaWebServer.py](../../src/AutonaWebServer.py)
 - 既存ルート群（抜粋・確認済）:
@@ -124,7 +126,7 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
 
 外部制御 API / 連携追加時に**先に影響調査が必要**な領域:
 
-1. **AutonaWebServer / AutonaWebServerActions** — 既存制御面。新 API はここに同居 or 競合する
+1. **AutonaWebServer / AutonaApiV1 / AutonaWebOperations** — 既存制御面（ルートと Socket.IO・`/api/v1`・両シェル共通の Web 操作）。新 API はここに同居 or 競合する
 2. **StateManager** — 状態変更の単一経路。外部からの書き込みは必ずここを通す（バイパス禁止）
 3. **シングルトン生成順** — 新サービス（外部制御リスナ等）は [src/bootstrap.py](../../src/bootstrap.py) の `bootstrap_core()` に追加する。順序制約の理由は同ファイルの `ORDER CONSTRAINT:` コメント（agent-pitfalls #2）
 4. **スレッド境界** — WebServer は専用の `threading.Thread`（ADR-005 S3c。旧 QThread）。外部 API も別スレッドなら StateManager のロックを尊重

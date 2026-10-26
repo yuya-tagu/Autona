@@ -280,7 +280,7 @@ pronoun 撤去）。現行挙動に合わせ修復し **62件グリーン化済�
 **対策案**:
 Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, bracket 等。stage_strike は除外）。
 
-**影響範囲**: `AutonaWebServer.py`, `AutonaWebServerActions.py`
+**影響範囲**: `AutonaWebServer.py`, `AutonaWebOperations.py`（旧 `AutonaWebServerActions.py` は ADR-005 S3e-9 で削除）
 
 ---
 

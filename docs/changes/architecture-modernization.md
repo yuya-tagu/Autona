@@ -252,7 +252,7 @@ core が状態とドメインの唯一の正本で、すべての UI（デスク
 | **S0 掃除** | `_SetIfChanged` 等の重複統合 / `Pipfile` 廃止・`asyncio` 依存削除 / core→src 逆依存（Top8Model・CommentaryModel・DictHelper）を core へ移設 / `features.md` を実態に同期 | 重複ゼロ・依存定義 1 本・core が src 直下を import しない（pin 追加） |
 | **S1 アセットカタログの core 化**（R2） | `AutonaGameAssetManager` を `core/GameAssetCatalog`（純 dict + パス解決 + Start.gg ID 対応）と Qt アダプタ（dict→`QStandardItemModel` の一方向構築）に分割 | カタログが `test_core_qt_free` に載る。`get_characters` / `get_variants` / `get_games` から `@gui_thread_sync` が消える。`PlayerService` がキャラ/スキン/国を自分で解決できる |
 | **S2 選手スロットの正本を state へ**（R1） | `SwapWith` / `ClearScore` / `ResetAllInputs` / `CommandClearAll` を `Actions.SwapTeams(board)` / `ClearBoard(board)` へ。選手カードは state から描画。残りのホットキー 3 本も Actions へ | `WebServerActions` の `GetScoreboard(` が board 1/2 でゼロ。`teamsSwapped` 属性削除。swap を Qt なしでテスト。「1 操作で delta 1 回」検証 |
-| **S3 ヘッドレス起動と永続化分離**（R3・R4） | `main.py --headless`（QCoreApplication + イベントループ。QtGui なしで core + WebServer）。正本を `user_data/state.json` へ（初回は `out/program_state.json` から移行）。`state_version` + 移行関数 1 本目。Web の公開面を締める（静的配信の許可リスト + LAN トークン認証 + CSRF 対策）。`WebServerActions` を core 直結分だけ縮める（2026-10-25 改定。§5 S3 設計） | ヘッドレスで OBS オーバーレイと `/web` の表示、core 直結の操作が動く（スモーク + Playwright）。LAN の書き込みはトークン必須。正本は `user_data/state.json`。**`WebServerActions` 廃止と「`@gui_thread_sync` の残りは thumbnail/result とウィンドウ操作のみ」は S3e へ移動** |
+| **S3 ヘッドレス起動と永続化分離**（R3・R4） | `main.py --headless`（QCoreApplication + イベントループ。QtGui なしで core + WebServer）。正本を `user_data/state.json` へ（初回は `out/program_state.json` から移行）。`state_version` + 移行関数 1 本目。Web の公開面を締める（静的配信の許可リスト + LAN トークン認証 + CSRF 対策）。`WebServerActions` を core 直結分だけ縮める（2026-10-25 改定。§5 S3 設計） | ヘッドレスで OBS オーバーレイと `/web` の表示、core 直結の操作が動く（スモーク + Playwright）。LAN の書き込みはトークン必須。正本は `user_data/state.json`。**`WebServerActions` 廃止と「`@gui_thread_sync` の残りは thumbnail/result とウィンドウ操作のみ」は S3e へ移動**（S3e-9 で廃止。完了条件の確認は §5「S3e 全体の完了報告」） |
 | **S4〜 パネル単位の React 化**（R6） | `QStackedWidget` の各ページを `QWebEngineView(/web/<panel>)` に差し替え。順序: Commentary（**IME 実機ゲート**）→ Stream → Event → Top8 → Stats → PlayerDB → Result/Thumbnail（設定 UI のみ）→ Board → SCORE（Crew 含む）→ Settings | パネルごとに Qt 版削除 + 手動チェックリスト該当節通過 |
 | **S-final シェル化** | Window = WebEngineView 1 枚 + トレイ + ホットキー。i18n を i18next に一本化。WebView2 化の要否を判断 | Qt Widgets パネル 0 |
 
@@ -1657,7 +1657,7 @@ S3 の最後。ヘッドレスの実プロセスに対して、Python のスモ�
 | **S3e-5 統計の core 化** | `StatsService.Refresh(kind, team)` を入口にする。取得は `bootstrap_core()` が注入する fetcher（既存の provider と QThreadPool を使う）に任せる。トリガーは core 操作（id / seed の変化・`ApplyBracketType`・クリア）から出す。人数は state のスロット数に統一する。`AutonaStatsUtil` を縮小し、`stats_*` / `refresh_stats` を移す | ヘッドレスで state に結果が書かれる（Start.gg はモック）。取り直しの回数が今と同じ。古い結果は捨てる | 中 | 3 |
 | **S3e-6 S2g: 人数・キャラ数を state 主導へ** | `SetRoster(board, players, characters)` を作る（スロットとキャラ枠の増減、1 人になるときのチーム名のクリアを、1 保存サイクルで行う）。入口 6 か所をすべてこれにする（ゲームのロード時の既定値は、両シェル共通の結線へ移す）。ボードは held サイクルの中でカードの数を state に合わせる。カードの破棄は `singleShot` に逃がし、pitfalls #14 の invalidate を通す | ヘッドレスで `set_route players` と 2v2 ゲームのロードによりスロットが増える。デスクトップの起動直後のカード数が変わらない。`test_wrapper_lifetime` / `test_signal_lifetime` が通る | **高** | 3 |
 | **S3e-7 セット読込と追従の core 化** | ボードごとの追従サービスを Qt 非依存で作る。中身は `LoadSet`（`NewSetSelected` の論理）、5 秒ポーリング（タイマー 1 本）、station / stream の追従、`ApplySetPayload`（`ChangeSetData` の core 版）。ボードのラベルとカウントダウンは state を読むだけにする。`load_set` / `post_score` / `pull_stream_set` を移す | ヘッドレスで `:load-set` と追従が動き、停止・クリアで止まる。古いペイロードを捨てる。セット選択と station のウィンドウは今どおり | **高** | 3・5・6 |
-| **S3e-9 シェル操作の登録と廃止** | `get_thumbnail` と `open_sets` を、シェルが登録する操作にする（デスクトップは `@gui_thread_sync`、ヘッドレスは 503）。`AutonaWebServerActions.py`・`_board_actions`・`init_api_v1(actions)` を削除する。残った `@gui_thread_sync` を棚卸しして台帳に記録する | `grep WebServerActions` が 0 件。ルート台帳と 503 のテストを更新する | 低〜中 | 全部 |
+| **S3e-9 シェル操作の登録と廃止** | `get_thumbnail` と `open_sets` を、シェルが登録する操作にする（デスクトップは `@gui_thread_sync`、ヘッドレスは 503）。`AutonaWebServerActions.py`・`_board_actions`・`init_api_v1(actions)` を削除する。残った `@gui_thread_sync` を棚卸しして台帳に記録する | `src/` と `main.py` のソースに `WebServerActions` が 0 件（docs・テストの経緯説明は残る）。ルート台帳と 503 のテストを更新する | 低〜中 | 全部 |
 
 - 並行処理: S3e では Executor への統一（§4.3）はしない。core を呼ぶのは werkzeug のリクエスト・provider のワーカー・追従のタイマー・GUI のスレッドで、ボード操作は必ず `boardHost.Run` を通して直列化する（`clear_all` の途中に割り込ませない）
 - デスクトップは、未構築のボードに書く前に構築する（`boardHost.Prepare`。構築時のシードで書き込みが消えるため。S2c 判断 7）
@@ -3011,3 +3011,155 @@ Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket
   - ヘッドレス（`python main.py --headless`）
     - 大会を読み込んだ後、`/web` または `scoreboard1-load-set?set=<id>` → オーバーレイに選手が出る（503 にならない）
     - `scoreboard1-pull-stream` → 配信中のセットが入る
+
+#### S3e-9 `WebServerActions` の廃止（2026-10-27・PR 未作成）
+
+ボード依存の最後の 2 本（セット選択ウィンドウを開く `open_sets`・サムネイル `get_thumbnail`）を、シェルが `AutonaWebOperations` に登録する「シェル操作」にして、`WebServerActions` を削除した。Web の操作の入口は `AutonaWebOperations` の 1 本になり、両シェルの違いは登録だけになった（ボードホスト・ゲームのローダー・シェル操作 2 本）。`WebServer` はシェルを知らない。
+
+外部契約（legacy の本文・Socket.IO の ack・v1 の形とキー順）は変えていない。ヘッドレスで 503 を返すのはシェル操作 2 本だけで、ほかのルート・イベントはすべて答える（ルート台帳を歩くテストで pin）。
+
+- **実装**
+  - `src/AutonaWebOperations.py`
+    - シェル操作の登録口 `openSetSelection` / `renderThumbnail` を足した（既定 None）
+    - それを呼ぶ `open_sets(scoreboard)` / `get_thumbnail(scoreboard, file_format)` を足した。未登録なら `NotAvailable`（503）
+  - `src/AutonaScoreboardManager.py`: `OpenSetSelection(number)` / `RenderThumbnail(number, file_format)` を足した（`@gui_thread_sync`）。中身は旧 `WebServerActions.open_sets` / `get_thumbnail` と同じ。ただし `OpenSetSelection` は、ウィンドウを開く処理の例外をログして `"OK"` を返す（判断 3）
+  - `src/bootstrap.py`: `bootstrap_gui()` が、ボードホストとローダーの直後に 2 本を登録する。ヘッドレス（`src/headless.py`）は何も登録しない
+  - `src/AutonaWebServer.py`
+    - `open_sets` / `ws_open_sets` / `get_thumbnail` は `AutonaWebOperations` を呼ぶ
+    - 削除: `WebServer.actions`・`__init__` の `actions` 引数・`_board_actions()`
+    - 残したもの: `UnavailableBody` / `_ws_unavailable` / `NotAvailable` の errorhandler（シェル操作の 503 と、ボード 1〜3 以外の `NotAvailable` が使う）
+  - `src/AutonaApiV1.py`: `_actions` / `_initialized` / `_actions_ref()` / `init_api_v1()` を削除した。`WebServer.__init__` は blueprint を登録するだけ
+  - `src/Autona.py`: `WebServerActions` の import と生成を削除した。`WebServer(on_start_failed=...)` だけを渡す
+  - 削除: `src/AutonaWebServerActions.py`
+  - コメント・docstring の追従: `AutonaScoreboardWidget.py` / `core/Actions.py` / `core/StateSchema.py` / `headless.py` / `AutonaApiInfoWindow.py`
+- **判断と理由**
+  1. **v1 の初期化前の 409 `NOT_READY`（`API not initialized`）は、初期化フラグで残さずに削除した**
+     - これを返していたのは `_actions_ref()` だけで、S3e-7 から呼ぶ v1 のルートが無い（S3e-4 で `player_update`、S3e-7 で `:load-set` / `:pull-stream` が外れた）
+     - 本番では到達しない。`WebServer.__init__` が blueprint の登録と同じ場所で初期化しており、リクエストが来るのは `start()` の後
+     - 仕様（`external-control-api.md`）に記載が無い。Web UI も見ていない。外部クライアントが前提にできる応答ではない
+     - フラグで残すと、どのルートも呼ばないコードと、テストの monkeypatch（`_initialized`）だけが残る
+  2. **シェル操作はボードホストに足さず、別の登録口にした**
+     - ボードホストは「S2 の操作の周りのボードの仕事」（構築・入力中の欄の確定・直列化）の抽象で、ヘッドレスにも実装がある
+     - シェル操作は「ヘッドレスに実装が無い」ことが本質なので、None なら 503、という登録口の方が意味が合う（`loadGameByCodename` と同じ形）
+     - 実体はスコアボード dock（`AutonaScoreboardManager`）に置いた。`DesktopBoardHost` が包んでいるのも同じ dock で、ボードとそのウィンドウの持ち主が 1 つになる
+  3. **`open_sets` を GUI スレッドでの同期実行にした**（挙動の変化。応答は `"OK"` のまま）
+     - 旧: リクエストのスレッドで `GetScoreboard`（未構築なら GUI スレッドへ marshal して構築）→ ボードのシグナルを emit → queued でウィンドウが開く。`"OK"` はウィンドウが開く前に返っていた
+     - 新: `@gui_thread_sync` で GUI スレッドに渡し、ウィンドウを開いてから `"OK"` を返す。`get_thumbnail`（旧実装から `@gui_thread_sync`）と揃え、「シェル操作 = GUI スレッドの仕事」を 1 つの形にした
+     - 待つのは短い。ウィンドウは `show()` だけで開く（モーダルなし）。`PrepareForDisplay` はキャッシュ済みの一覧を戻すだけで、取得はしない
+     - ボード 1 / 2 以外（クルーボード・4 以上）は旧実装どおり例外（legacy は 500）
+     - ウィンドウを開く処理の例外では、リクエストを失敗させない（応答は `"OK"` のまま）。旧実装は queued だったので、例外は報告されるだけで `"OK"` が返っていた
+       - PySide6（6.11 で確認）は、direct 接続のスロットの例外を emit に返さず、`sys.excepthook` に渡す（アプリは uncaught としてログする）。なので今も `"OK"` が返る
+       - バインディングが例外を emit に返す場合に備えて、`emit()` を try で囲んでログする。ボードとシグナルの取得は try の外に置いたので、クルーボードや存在しないボードは従来どおり 500
+  4. **`BoardHost.Widget()` は残した**
+     - 呼ばれるのは、ボード 1〜3 以外（どのシェルにも無いボード）への swap / get_swap / reset 系だけ
+     - ヘッドレスは 503、デスクトップは `GetScoreboard` が None で 500。どちらも何も書かない（既存の差。下の残課題）
+  5. **§4.4 の完了条件は、ルート台帳を機械的に歩いて確かめる**
+     - 条件: ヘッドレス（ボードなし・`BoardHost`・シェル操作の登録なし）、大会なし
+     - Flask の全ルール（legacy と `/api/v1`）を、全メソッド・ボード 1 / 2 / 3 で叩く。Socket.IO の全イベントを emit する
+     - 各ルートには、引数の検査とガードを越えるものを渡す
+       - クエリ・書き込みの JSON 本文（表示オプションも有効な本文）
+       - Designer ウィンドウのトークンと Figma のペアリングコード（テスト用に発行し、デザインは tmp に置く）
+       - 国データの読込（先に走ったテストに依らない）
+       - Web ページの代役（`web/build/index.html`）
+     - ルートは、ステータスを全部 pin する
+       - 200 以外は、表（`_NOT_200`）にあるものだけ。表にあるのは、どれも操作自身の答え（シェル操作の 503・クルーボードに無いものの 500 / 400・大会未読込の 500 / 409・受付の 202・何も指さない名前の 404）
+       - 新しくどこかで落ちれば、別のステータスになって気づく
+     - イベントは、ハンドラの例外を記録して確かめる（python-socketio の例外ハンドラ `ws_on_error` を記録用に差し替える）
+       - 例外が出るのは、大会未読込の `get_match` だけ（下の残置）
+       - 何を emit したかも pin する。自分の名前で 1 つ emit するのが基本で、違うものは表（`_EVENT_REPLIES`）にある
+     - 503 はシェル操作 2 本（`open_sets` / `get_thumbnail`）だけで、本文は `UNAVAILABLE`。ack が `UNAVAILABLE` になるのは `open_set` だけ
+     - 500 はデスクトップでも同じ答え: デスクトップのボードホストで同じルートを叩くテストで確かめる。クルーボードの検査はボードの構築より前にあり、セットの照会はどちらのシェルでも provider が無い
+     - pin しないもの: 200 の本文。legacy は誤りも 200 の文字列で返す（例: 選手 DB に無いタグは `ERROR`）
+     - 歩いたルートとイベントが、ルート台帳（`tests/test_webserver_routes.py` の `EXPECTED_ROUTES` / `EXPECTED_API_V1_ROUTES` / `EXPECTED_EVENTS`）と一致することも確かめる。ルートを足せば自動で歩く
+- **`@gui_thread_sync` / `run_sync` の棚卸し**（§4.4 の完了条件の 3 種類との対応）
+
+  | # | 箇所 | 何を GUI スレッドに渡すか | 分類 |
+  |---|------|------------------------|------|
+  | 1 | `AutonaScoreboardManager.OpenSetSelection` / `RenderThumbnail` | セット選択ウィンドウを開く・サムネイルの描画（QApplication + オフスクリーンの WebEngine） | ① シェル操作 |
+  | 2 | `AutonaPlayerDB.SetupModel` / `SetTournamentPlayers` / `ClearTournamentPlayers` | 選手 DB の補完モデルの作り直し・フィルタの掛け直し（`PlayerDB.changed` と entrants のワーカーから来る） | ② Qt アダプタのモデルの marshal |
+  | 3 | `AutonaGameAssetManager` のローダースレッドの `gui_executor.run_sync`（`_Load` に渡す） | ゲームのロード後の Qt モデルの作り直し（QPixmap / QIcon は GUI スレッドでしか作れない） | ② Qt アダプタのモデルの marshal |
+  | 4 | `AutonaWebOperations.set_game` | legacy `/update-game`・Socket.IO `update_game` の同期ロード（`"OK"` はロードの後） | ③ `set_game` の同期ロード |
+  | 5 | `DesktopBoardHost.Run`（`gui_thread_sync(op)()`） | デスクトップの S2 以降のボード操作すべて（`boardHost.Run` を通るもの） | **3 種類の外**（残す） |
+  | 6 | `AutonaScoreboardManager.GetScoreboard` の `gui_thread_sync(self.EnsureScoreboard)` | GUI スレッドの外から来た、未構築ボードの構築 | **3 種類の外**（残す） |
+  | — | `Helpers/AutonaQtHelper.py` の `GuiExecutor.run_sync` / `gui_thread_sync` | 仕組みそのもの | — |
+
+  - 5 を残す理由: S3e-4 判断 2（見直して維持）。選手カードの手入力の確定が、GUI スレッドの上で「フィールド → 合成名」の 2 書き込みに分かれている。別スレッドの操作がその間に割り込むと、合成名が反対のスロットに残る。GUI スレッドに並べれば、操作はイベントの間にしか走らない。カードの入力が core の 1 操作になる（S4 でボードを React 化する）と要らなくなる
+  - 6 を残す理由: ボードのウィジェットの構築は GUI スレッドでしかできない。呼び手は、ボードホストの `Run` の外で `Prepare` / `Widget` を呼ぶ `get_swap` / `get_scoreboard`（`Run` の中は 5 で GUI スレッド上）。ボードのウィジェットが無くなる S4 で消える
+  - 1〜4 は決定どおり、S3f（Executor 1 本化）で棚卸しする
+  - 非同期の `gui_executor(fn)`（待たない）は対象外: v1 の `tournament_load` / `game_set`（202）・デスクトップの Web サーバー起動失敗の通知・ヘッドレスの数か所（スキャン完了・ロード完了・起動失敗の終了）
+- **pin（テスト）**
+  - `tests/test_web_operations.py`
+    - `test_every_route_and_event_answers_headless_but_the_shell_operations`（新規）: 上の判断 5
+    - `test_the_shell_operations_are_refused_without_a_shell_that_has_them`: 未登録なら `NotAvailable`、登録すればそれを呼ぶ（旧 `_board_actions()` のテストを置き換えた）
+    - `test_the_desktop_shell_operations_run_on_the_gui_thread`（新規）: デスクトップが登録したものはスコアボード dock のもの。リクエストのスレッドから呼ぶと GUI スレッドで走る。ウィンドウは `"OK"` の前に開く。サムネイルは絶対パス（`jpg` は `.jpg` の兄弟）、作れなければ None
+    - `test_the_desktop_shell_operations_answer_through_the_routes`（新規）: デスクトップで、ルートと Socket.IO から
+      - `/scoreboard1-open-set` は `OK`。`open_set` は `OK` を emit する
+      - サムネイルは、その画像を `image/png` / `image/jpg` で返す
+      - クルーボードと存在しないボードは 500
+    - `test_a_set_selection_window_that_fails_to_open_still_answers_ok`（新規）: ウィンドウを開く処理が例外を出しても `"OK"`。例外は 1 回だけ報告される（判断 3）
+    - `test_what_answers_500_headless_answers_500_on_the_desktop`（新規）: 歩いたテストで 500 のルートは、デスクトップのボードホストでも 500（判断 5）
+    - `test_the_set_lookup_answers_headless_with_a_tournament`（新規）: 大会があれば、ヘッドレスでもセットの照会（ルートとイベント）が provider に届く
+  - `tests/test_bootstrap_split.py`: `bootstrap_gui()` の手順に 2 本の登録を足した。`bootstrap_core()` だけでは登録されず、`bootstrap_gui()` では dock のメソッドが登録される
+  - `tests/test_headless.py`: ヘッドレスの組み立てはシェル操作を登録しない（旧: `webserver.actions is None`）
+  - `tests/test_headless_smoke.py`: 実プロセスで `/scoreboard1-open-set` と `/scoreboard1-get-thumbnail-png` が 503 `UNAVAILABLE`
+  - `tests/test_import_side_effects.py`: import がシェル操作を登録しない（旧: `WebServer.actions` の検査）
+  - `tests/test_webserver_routes.py`: `WebServer` に `actions` が無いことを確かめる（旧: `None` の検査）。ルート台帳は変えていない
+  - 追従: `tests/conftest.py`（`actions()` を削除）・`tests/test_api_v1.py`・`tests/test_set_follow.py`・`tests/test_web_access.py`（サーバーに何も渡さない）
+  - 録画の木で動く必要があるテスト（`tests/test_set_follow_flow.py` / `tests/test_stats_flow.py`）は、ハーネスに `actions()` があるとき（移行前の木で録り直すとき）だけ渡す
+- **残置 / リスク**
+  - デスクトップの `open-set` は、ウィンドウが開くまでリクエストが待つ（判断 3）。GUI スレッドが詰まっていると、そのぶん応答が遅れる（`get_thumbnail` は旧実装から同じ）
+  - ボード 1〜3 以外への swap / get_swap / reset 系は、デスクトップが 500、ヘッドレスが 503（判断 4。どちらも何も書かない）
+  - v1 の `UNAVAILABLE`（503）は、返す v1 の操作がもう無い。エラーコードの表は契約なので残した
+  - 既存の不具合（報告のみ・未修正。直すと外部契約が変わる）
+    - Socket.IO の `team_color` が、答えを `team_scoredown` の名前で emit する
+    - 大会未読込のセットの照会: legacy `/get-match-<id>` は 500、Socket.IO `get_match` は例外をログするだけで何も返さない（provider が None。両シェル同じ。v1 は 409 `NOT_READY`）
+- **実機確認（オーナー）**
+  - デスクトップ
+    - Web UI / Stream Deck から `scoreboard1-open-set`（または Socket.IO `open_set`）→ セット選択ウィンドウが開き、`OK` が返る。ボード 2（チーム戦）も同じ
+    - `http://127.0.0.1:5107/scoreboard1-get-thumbnail-png` と `-jpg` → サムネイル画像が返る
+    - 起動・終了が今までどおり（Web サーバーの起動、API 設定画面のテスター）
+  - ヘッドレス（`python main.py --headless`）
+    - 上の 2 本が 503 `UNAVAILABLE`（`not available in headless`）
+    - ほかの操作（スコア・セット読込・選手の編集など）が動く
+
+#### S3e 全体の完了報告（2026-10-27）
+
+S3e（`WebServerActions` の廃止）の 9 PR が揃った。§4.4 の完了条件（S3e 改定版）の確認:
+
+- **`WebServerActions` を廃止する** ✅: `src/AutonaWebServerActions.py` を削除した。`src/` と `main.py` に `WebServerActions` / `_board_actions` / `_actions_ref` / `WebServer.actions` は残っていない（docstring の歴史の記述を除く）
+- **ヘッドレスで、シェル操作 2 本を除くすべての Web 操作が動く** ✅: ルート台帳を歩くテスト（S3e-9 判断 5）と、実プロセスのスモーク（`tests/test_headless_smoke.py`）で確かめた
+- **`@gui_thread_sync` の残りは 3 種類だけ** △: ①〜③ の 3 種類のほかに、デスクトップのボードホストの直列化（`DesktopBoardHost.Run`）と、ボードの構築の marshal（`GetScoreboard`）の 2 つが残る。どちらも理由を S3e-9 の棚卸しに記録した。ボードのウィジェットが無くなる S4 で消える
+
+| 段 | 内容 | PR |
+|----|------|----|
+| S3e-1 | Qt 非依存部品の抽出（悪語フィルタ・選手 DB） | #233 |
+| S3e-2 | 実況とクルーの core 化 | #234 |
+| S3e-8 | Top 8 取り込みの core 化 | #235 |
+| S3e-3 | S2f: 選手データの core 化 | #236 |
+| S3e-4 | 選手系 Web 操作の移設 | #237 |
+| S3e-5 | 統計の core 化 | #238 |
+| S3e-6 | S2g: 選手数・キャラ数の state 駆動化 | #239 |
+| S3e-7 | セット読込と追従の core 化 | #240 |
+| S3e-9 | `WebServerActions` の廃止 | 未作成 |
+
+**残課題（S3f 以降へ回すもの）**
+
+- S3f（Executor 1 本化。S3e 決定 4）
+  - Executor への統一と、QThreadPool / Worker / qasync / `threading.Timer` の廃止
+  - provider アダプタの Worker 経由の取得（大会データ・フェーズ・フェーズグループ・セット一覧・ステーション一覧・順位）は、Worker が GC で回収されると答えが届かないことがある（S3e-7 の既存の不具合）
+  - `@gui_thread_sync` の ①〜③ の棚卸し（S3e-9）
+- S4（パネルの React 化）
+  - `DesktopBoardHost.Run` の GUI スレッドでの直列化と、`GetScoreboard` の構築の marshal（S3e-9 の棚卸しの 5・6）。ボードの React 化で、カードの入力が core の 1 操作になれば消える
+  - Web UI の 503 の専用表示（S3e「やらないこと」）
+  - Top 8・リザルトのパネルが、コンボの行 dict から値を組んでいる（`python-widgets.md`）
+- 運用・挙動（必要になったら個別に起票）
+  - ヘッドレスには、取り直し（5 秒の自動更新）を止める Web 操作が無い（S3e-7 判断 1。`general.disable_autoupdate` を `false` にしたときだけ）
+  - ボード 1〜3 以外への swap / get_swap / reset 系の答えがシェルで違う（デスクトップ 500・ヘッドレス 503。S3e-9 判断 4）
+  - ボードの `ToggleAutonaUpdate` がどこにも接続されていない（S3e-7）
+  - thumbnail / result のヘッドレス描画はしない（S3e「やらないこと」）
+- 記録済みで未修正の既存の不具合（各節の「報告のみ・未修正」。S3e では扱っていない）
+  - 選手のクリアは city を消さない（S3e-3）
+  - `general.disable_overwrite` のときのセットの DB 照合が、タグだけ・各 entrant の 1 人目だけで、受け取ったペイロードを書き換える（S3e-3。S3e-7 は同じ論理を core に移した）
+  - 1 回の保存サイクルで新しいトップレベルのキーが 2 つ以上増えると、DeepDiff が root の `values_changed` を delta に出す（S3e-5）
+  - Grand Final のリセットの選手が、Start.gg の slot に `seedNum` が無いと解決されないことがある。スキンを選んだ Top 8 のキャラは、パネルの作り直しでコンボが空になる（S3e-8）
+  - Socket.IO の `team_color` が、答えを `team_scoredown` の名前で emit する。大会未読込のセットの照会が、legacy で 500・Socket.IO で無応答（S3e-9）

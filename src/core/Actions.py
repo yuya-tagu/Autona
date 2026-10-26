@@ -1,7 +1,8 @@
 """Domain operations: where a write to the state originates.
 
 Until now the answer to "who changes the score?" was "whichever Qt widget
-owns the spinbox". `AutonaWebServerActions` looked like a write hub but never
+owns the spinbox". The web server's actions class (deleted in ADR-005 S3e-9)
+looked like a write hub but never
 touched `StateManager` once -- it emitted signals into a board, and the board
 did the writing -- and the global hotkeys skipped even that, calling bound
 methods on whatever boards happened to be built. Four entry points, one

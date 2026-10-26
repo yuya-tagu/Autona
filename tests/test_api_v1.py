@@ -64,19 +64,12 @@ def webApp():
 
 
 @pytest.fixture
-def client(autonaApp, webApp, monkeypatch):
-    """A test client whose legacy and v1 routes share one real actions object.
-
-    The legacy handlers reach the actions through the WebServer class
-    attribute, the v1 blueprint through its module global; both are what
-    WebServer.__init__ sets in the app, and both are put back afterwards.
+def client(autonaApp, webApp):
+    """A test client for the legacy and v1 routes. Both reach the same web
+    operations (src/AutonaWebOperations.py) through what bootstrap_gui()
+    registered on the real manager -- nothing to hand the server since
+    ADR-005 S3e-9 (it used to take the board's actions object).
     """
-    from src import AutonaApiV1
-    from src.AutonaWebServer import WebServer
-
-    actions = autonaApp.actions()
-    monkeypatch.setattr(WebServer, "actions", actions)
-    monkeypatch.setattr(AutonaApiV1, "_actions", actions)
     return webApp.test_client()
 
 

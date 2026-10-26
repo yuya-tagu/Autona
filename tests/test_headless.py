@@ -108,7 +108,9 @@ result = {
         == games.SelectGameFromStartGGId,
     "loader": WebOps.loadGameByCodename == games.LoadGameByCodename,
     "board_host": type(WebOps.boardHost).__name__,
-    "board_actions": shell.webserver.actions,
+    # The shell operations (ADR-005 S3e-9): the desktop's alone.
+    "shell_operations": [WebOps.openSetSelection is not None,
+                         WebOps.renderThumbnail is not None],
     "desktop": [name for name, cls in (
         ("AutonaGameAssetManager", AutonaGameAssetManager),
         ("AutonaScoreboardManager", AutonaScoreboardManager),
@@ -171,7 +173,7 @@ def test_the_headless_shell_assembles_and_runs(tmp_path):
     assert result["selector"] is True
     assert result["loader"] is True
     assert result["board_host"] == "BoardHost"
-    assert result["board_actions"] is None
+    assert result["shell_operations"] == [False, False]
     assert result["desktop"] == []
     assert all(result["seeded"].values()), result["seeded"]
 
