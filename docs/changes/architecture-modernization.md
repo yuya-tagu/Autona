@@ -3012,7 +3012,7 @@ Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket
     - 大会を読み込んだ後、`/web` または `scoreboard1-load-set?set=<id>` → オーバーレイに選手が出る（503 にならない）
     - `scoreboard1-pull-stream` → 配信中のセットが入る
 
-#### S3e-9 `WebServerActions` の廃止（2026-10-27・PR 未作成）
+#### S3e-9 `WebServerActions` の廃止（2026-10-27・PR #241）
 
 ボード依存の最後の 2 本（セット選択ウィンドウを開く `open_sets`・サムネイル `get_thumbnail`）を、シェルが `AutonaWebOperations` に登録する「シェル操作」にして、`WebServerActions` を削除した。Web の操作の入口は `AutonaWebOperations` の 1 本になり、両シェルの違いは登録だけになった（ボードホスト・ゲームのローダー・シェル操作 2 本）。`WebServer` はシェルを知らない。
 
@@ -3140,7 +3140,7 @@ S3e（`WebServerActions` の廃止）の 9 PR が揃った。§4.4 の完了条�
 | S3e-5 | 統計の core 化 | #238 |
 | S3e-6 | S2g: 選手数・キャラ数の state 駆動化 | #239 |
 | S3e-7 | セット読込と追従の core 化 | #240 |
-| S3e-9 | `WebServerActions` の廃止 | 未作成 |
+| S3e-9 | `WebServerActions` の廃止 | #241 |
 
 **残課題（S3f 以降へ回すもの）**
 
