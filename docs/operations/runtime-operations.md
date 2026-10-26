@@ -67,11 +67,12 @@ OBS のオーバーレイと `/web`（ブラウザ版）から操作する。**�
   best of・match バー（phase / pool / round）・チーム名・LOSERS・大会情報・大会 URL・ゲームの切り替え・
   実況の更新とタグからの実況者の読込（`update-commentary-<N>`・`load-commentator-from-tag-<N>`）・
   クルーボード（board 3）の操作（ストック・出場中のメンバー・人数・Swap・リセット / クリア。legacy / Socket.IO。
-  v1 のボード 3 への書き込みは起動形態によらず 400 `INVALID_ARGUMENT`）。
+  v1 のボード 3 への書き込みは起動形態によらず 400 `INVALID_ARGUMENT`）・
+  Top 8 の Start.gg からの取り込み（`update-bracket`・v1 `bracket:refresh`。大会の読込が先に要る）。
   オーバーレイ・`/web`・`out/` の出力・Socket.IO の配信は今までどおり
 - **ボードやパネルの画面が要る操作は 503 `UNAVAILABLE`（`not available in headless`）を返す**:
   選手の編集（`PATCH .../players/...`・`update-team`）・legacy の `POST /score`・セット読込 / 次のセット・統計・
-  サムネイル・Top 8 の取り込み・タグからの選手の読込（`load-player-from-tag`）・
+  サムネイル・タグからの選手の読込（`load-player-from-tag`）・
   ボード 1 / 2 の選手数 / キャラ数の変更
 - 停止: **Ctrl+C / Ctrl+Break / コンソールの閉じるボタン**。`out/` と `user_data/state.json` を書き終えてから終了する。
   タスクマネージャーでの強制終了は書き出しを待たない（直前 1〜5 秒の変更が `state.json` に残らないことがある）

@@ -107,7 +107,7 @@
 | `CONFLICT` | 409 | 重い操作が実行中（多重起動ガード・§2.8） |
 | `NOT_READY` | 409 | 前提未充足（大会/試合未ロードで provider 不在 等・§3） |
 | `UPSTREAM_TIMEOUT` | 504 | Start.gg 等の外部依存がタイムアウト（agent-pitfalls #11） |
-| `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、ボード / パネルのウィジェットが要る操作（選手の編集・`:load-set`・`:pull-stream`・`stats:refresh`・`bracket:refresh`・`PATCH set` の `players` / `characters` 等）。message は `not available in headless`。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
+| `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、ボード / パネルのウィジェットが要る操作（選手の編集・`:load-set`・`:pull-stream`・`stats:refresh`・`PATCH set` の `players` / `characters` 等）。message は `not available in headless`。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。Top 8 の取り込み（`bracket:refresh`・legacy `/update-bracket`・Socket.IO `update_bracket`）も ADR-005 S3e-8 から core の操作（`Top8Service.RefreshFromProvider`）で、どちらの起動形態でも動く。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
 | `INTERNAL` | 500 | 想定外の内部例外 |
 
 ### 2.7 操作ログ（D7・A-1）
@@ -392,7 +392,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 | `POST /api/v1/scoreboards/{n}:pull-user` | （confirm 推奨） | `pull_user_set` | #25 |
 | `POST /api/v1/tournament` | 実行中フラグ | `load_tournament` | #44 |
 | `POST /api/v1/game` | 実行中フラグ | `set_game` | #14 |
-| `POST /api/v1/bracket:refresh` | 実行中フラグ | `update_bracket` | #41 |
+| `POST /api/v1/bracket:refresh` | 実行中フラグ | `update_bracket`（`AutonaWebOperations` → `Top8Service.RefreshFromProvider`。ADR-005 S3e-8） | #41 |
 
 ### 7.2 確認フラグ（C-2 / D7）
 - **破壊的操作**（`:clear`・`:reset-players`・`:reset-match`）は body に **`"confirm": true` 必須（MUST）**。
@@ -414,6 +414,11 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - `POST /api/v1/game`: `{ "codename": "ssbu", "modsActive": false }`
   - 未知 codename は受付前に判定できれば `404 NOT_FOUND`。アセット再ロードで重い → 202 + 実行中フラグ。
 - `POST /api/v1/bracket:refresh`: body なし。provider 不在は受付前に `409 NOT_READY`。それ以外は 202 + 実行中フラグ。
+  - 実行中フラグは core（`Top8Service`）の 1 つを、Top 8 パネル・ホットキー・legacy `/update-bracket`・Socket.IO `update_bracket` と共有する。
+    取り込みの終了（取得・組み立て・書き込みが終わったとき。空の結果・失敗を含む）まで立ったまま。実行中は `409 CONFLICT`
+    （legacy / Socket.IO は `"OK"` のまま何もしない）。ADR-005 S3e-8。それまではこのルート専用のフラグで、
+    パネルに取得を頼んだ時点で下ろしていた（取得中の 2 回目も 202 になり、取得が 2 本走った）
+  - 受付後に結果が空（決勝のダブルエリミのグループが無い・Start.gg の失敗）なら何も書かない（ログのみ）
 
 > **注**: 旧 `POST /api/v1/ui/theme`（ライト/ダーク切替）は廃止。テーマはダーク固定（[Design.md §5.4](Design.md)）。
 
@@ -561,7 +566,7 @@ HTTP/1.1 409 Conflict
 | `POST .../:pull-stream/:pull-user` | `pull_stream_set`/`pull_user_set` | ✕ | n 不正→None→AttributeError | `INVALID_ARGUMENT` |
 | `POST /tournament` | `load_tournament` | ✕ | url 検証は緩い（start.gg 以外でも Set される）／重い（非同期ロード） | 202 受付 |
 | `POST /game` | `set_game` | ✓ | 未知 codename→**文字列 `"Could not find game X"` を返す**（非構造）／**同期アセット再ロードでブロック** | `NOT_FOUND`／202 化要（§14.3） |
-| `POST /bracket:refresh` | `update_bracket` | ✓ | **`.provider` null 未チェック**／`GetTournamentPhases()[0]` **IndexError**／`.get("groups")[0]` 空で **TypeError/IndexError**／同期 Start.gg | `NOT_READY`/`UPSTREAM_TIMEOUT`（要堅牢化） |
+| `POST /bracket:refresh` | `update_bracket` | ✓ | **`.provider` null 未チェック**／`GetTournamentPhases()[0]` **IndexError**／`.get("groups")[0]` 空で **TypeError/IndexError**／同期 Start.gg | `NOT_READY`/`UPSTREAM_TIMEOUT`（要堅牢化）→ ADR-005 S3e-8 で解消（provider の確認・空の phase / グループの扱いを core に置き、取得は provider のワーカーで非同期。失敗は何も書かずログ） |
 
 **横断的な発見:**
 1. **最頻の失敗は `GetScoreboard(n)`=None 後の AttributeError**。→ `{1,2,3}` 事前検証（§2.12）で大半を予防できる。
@@ -571,7 +576,7 @@ HTTP/1.1 409 Conflict
    クライアントに通知。将来はキャッシュ/非同期化を検討（§12）。
 4. **エラー文字列を返す Action**（`set_game`=`"Could not find game X"`、`load_player_from_tag`=`"ERROR"`、
    `load_commentator_from_tag`=`"ERROR : ..."`、DB に無いタグは `"ERROR"`。成功時は ADR-005 S3e-2 から `"OK"`（それまでは None）・範囲は 1..12）。初回スコープでは `set_game` のみ該当 → ラッパで判定し `NOT_FOUND` に。
-5. **`update_bracket` は堅牢性が低い**（複数の未ガード添字/属性アクセス）。202 化に加え、受付前の `NOT_READY` 判定と
+5. **`update_bracket` は堅牢性が低い**（複数の未ガード添字/属性アクセス。ADR-005 S3e-8 で core の `Top8Service` 側を堅牢化した）。202 化に加え、受付前の `NOT_READY` 判定と
    全体 try/except を本 API 層で被せる。
 
 ### 14.3 重い操作の 202 化メモ
@@ -584,7 +589,8 @@ HTTP/1.1 409 Conflict
   → 実装済み（ADR-005 S1b で改訂）: `LoadGameByCodename(codename, async_mode=True, done=...)` を GUI executor で起動し、
   フラグはロード試行の終了時（成功・スキップ・例外のいずれでも）に呼ばれる `done` で解放する。onLoad は実際に
   ロードされたときしか来ないため、解放には使わない。
-- 実行中フラグは操作キー（`tournament`/`game`/`bracket`）ごとに持ち、`threading.Lock` で保護（§2.10）。
+- 実行中フラグは操作キー（`tournament`/`game`）ごとに持ち、`threading.Lock` で保護（§2.10）。`bracket` のフラグは
+  ADR-005 S3e-8 から core の `Top8Service` が持つ（全入口で共有し、取り込みの終了まで立つ）。
 
 ### 14.4 CORS 判断
 - 既存は `CORS(app)`（flask_cors・全体適用）＋ `app.config['CORS_HEADERS']='Content-Type'`（[AutonaWebServer.py:47-56](../../src/AutonaWebServer.py)）。

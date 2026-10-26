@@ -295,6 +295,108 @@ def test_reset_publishes_an_empty_game(catalog):
     assert catalog.Current().generation > loaded.generation
 
 
+# ── a switch to another game empties the Top 8 characters (S3e-8) ───────
+
+TOP8_CHARACTERS = {"2": {"1": {"en_name": "Mario", "assets": {}}},
+                   "6": {"1": {"en_name": "Luigi"}}}
+
+
+def _top8WithCharacters():
+    from src.core import Top8Model as top8
+    players = {slot: top8.DefaultPlayer() for slot in top8.PLAYER_SLOTS}
+    for slot, characters in TOP8_CHARACTERS.items():
+        players[slot]["characters"] = deep_clone(characters)
+    players["2"]["name"] = "Alice"
+    SM.Set("top8.players", players)
+
+
+def _top8Characters():
+    players = SM.Get("top8.players") or {}
+    return {slot: player["characters"] for slot, player in players.items()
+            if player.get("characters")}
+
+
+def _cyclesDuring(action):
+    """The deltas published while `action` ran, one per save cycle."""
+    deltas = []
+
+    def onUpdate(payload):
+        deltas.append(payload["delta"])
+
+    SM.observers.state_updated.subscribe(onUpdate)
+    try:
+        action()
+    finally:
+        SM.observers.state_updated.unsubscribe(onUpdate)
+    return deltas
+
+
+def _paths(delta):
+    return {".".join(str(part) for part in row["path"]) for row in delta}
+
+
+def test_the_first_load_of_a_session_keeps_the_top8_characters(catalog):
+    """`game` is empty at startup (ResetGameState): the load of the last
+    pick restores a game, it does not switch away from one, and the Top 8
+    saved with its characters keeps them."""
+    _top8WithCharacters()
+    assert SM.Get(PREFIX) == {}
+    catalog.SelectGame("tgame")
+    assert _top8Characters() == TOP8_CHARACTERS
+
+
+def test_a_switch_to_another_game_empties_the_top8_characters(catalog):
+    catalog.SelectGame("tgame")
+    _top8WithCharacters()
+
+    cycles = _cyclesDuring(lambda: catalog.SelectGame("game2"))
+
+    assert _top8Characters() == {}
+    assert SM.Get("top8.players.2.name") == "Alice"
+    # One save cycle with the switch, and only the slots that had one.
+    assert len(cycles) == 1
+    top8Paths = {path for path in _paths(cycles[0])
+                 if path.startswith("top8")}
+    assert top8Paths == {"top8.players.2.characters.1",
+                         "top8.players.6.characters.1"}
+    assert "game.codename" in _paths(cycles[0])
+
+
+def test_the_same_game_again_keeps_the_top8_characters(catalog):
+    catalog.SelectGame("tgame")
+    _top8WithCharacters()
+
+    assert catalog.SelectGame("tgame") is None              # skipped
+    catalog.SelectGame("tgame", modsActive=True, reload=True)
+    catalog.ForgetSelection()                                # URL cleared
+    assert catalog.SelectGame("tgame") is not None          # loaded again
+
+    assert _top8Characters() == TOP8_CHARACTERS
+
+
+def test_a_switch_after_the_selection_was_forgotten_still_empties(catalog):
+    """A cleared tournament URL forgets the selection but leaves `game`:
+    the characters were picked for that game, so another one empties
+    them."""
+    catalog.SelectGame("tgame")
+    _top8WithCharacters()
+    catalog.ForgetSelection()
+
+    catalog.SelectGame("game2")
+
+    assert _top8Characters() == {}
+
+
+def test_a_load_that_does_not_happen_keeps_the_top8_characters(catalog):
+    catalog.SelectGame("tgame")
+    _top8WithCharacters()
+
+    for codename in ("", None, "nope"):
+        assert catalog.SelectGame(codename) is None
+
+    assert _top8Characters() == TOP8_CHARACTERS
+
+
 # ── snapshot isolation ──────────────────────────────────────────────────
 
 def test_snapshots_are_not_written_through(catalog):

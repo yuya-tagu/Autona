@@ -32,6 +32,7 @@ from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
 from .core import StateSchema as schema
 from .core import LayoutCatalog
+from .core import Top8Service
 from .core.GameAssetCatalog import GameAssetCatalog
 from .core.CountryCatalog import CountryCatalog
 # Import order mirrors the singleton init order (agent-pitfalls #2): the asset
@@ -325,8 +326,8 @@ class _HeavyOpGuard:
     """Rejects concurrent duplicate heavy operations with 409 CONFLICT.
 
     The flag is held until the operation's own task clears it when it is
-    over, whichever way it went (the GUI-thread task for tournament /
-    bracket, the asset loader's ``done`` for the game), and auto-expires
+    over, whichever way it went (the GUI-thread task for the tournament,
+    the asset loader's ``done`` for the game), and auto-expires
     after ``ttl`` as a safety net so a missed completion never sticks the
     flag forever. Completion is authoritatively observed by clients via WS
     revision progress (spec §2.8).
@@ -335,6 +336,9 @@ class _HeavyOpGuard:
     reload can take ~60-70s, so it must comfortably exceed the slowest heavy
     op or the flag would expire mid-operation and the completion (the
     loader's ``done``, for the game) would never be the effective clear.
+
+    Not the bracket refresh's: since ADR-005 S3e-8 the Top 8 import keeps
+    its own in-progress flag in core (Top8Service), shared by every way in.
     """
 
     def __init__(self, ttl=120.0):
@@ -913,7 +917,7 @@ def tournament_load():
             _heavy.end("tournament")
 
     try:
-        # Fire-and-forget on the GUI thread, like bracket:refresh.
+        # Fire-and-forget on the GUI thread so the request returns 202.
         AutonaQtHelper.gui_executor(_run)
     except Exception:
         _heavy.end("tournament")
@@ -970,30 +974,18 @@ def game_set():
 @api_v1.route("/bracket:refresh", methods=["POST"])
 @write_op("bracket.refresh")
 def bracket_refresh():
-    # The Top 8 panel's (board-dependent): headless answers 503 before the
-    # flag is taken.
-    actions = _actions_ref()
-    provider = AutonaTournamentDataProvider.instance.GetProvider()
-    if provider is None:
+    # The Top 8 import is core's (Top8Service, ADR-005 S3e-8), so this works
+    # in either shell. Its in-progress flag is the import's own, held until
+    # the import is over (fetches, build and write, on the provider's
+    # worker) and shared with every other way in -- the panel, the hotkey,
+    # the legacy route. It used to be this route's, released as soon as the
+    # panel had been asked to fetch.
+    if AutonaTournamentDataProvider.instance.GetProvider() is None:
         raise ApiError(NOT_READY, "no tournament loaded", 409)
-    if not _heavy.try_begin("bracket"):
+    started = WebOps.update_bracket()
+    if started == Top8Service.BUSY:
         raise ApiError(CONFLICT, "bracket refresh already in progress", 409)
-
-    def _run():
-        # update_bracket is @gui_thread_sync with weak guards and a synchronous
-        # start.gg call. Wrap (don't modify the existing action) so failures
-        # are logged and the flag is always released (spec §14.2 / §14.3).
-        try:
-            actions.update_bracket()
-        except Exception:
-            logger.error(traceback.format_exc())
-        finally:
-            _heavy.end("bracket")
-
-    try:
-        # Fire-and-forget on the GUI thread so the HTTP request returns 202.
-        AutonaQtHelper.gui_executor(_run)
-    except Exception:
-        _heavy.end("bracket")
-        raise
+    if started == Top8Service.NO_TOURNAMENT:
+        # Cleared between the check above and the start.
+        raise ApiError(NOT_READY, "no tournament loaded", 409)
     return ok(data={"accepted": True, "operation": "bracket.refresh"}, status=202)

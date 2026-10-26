@@ -114,7 +114,7 @@ def test_recompute_preserves_custom_round_name():
 # ── FromBracket (Start.gg extraction) ────────────────────────────────
 
 def _bs(pids, score=(0, 0), finished=False):
-    """Duck-typed stand-in for AutonaBracket.BracketSet."""
+    """Duck-typed stand-in for core.Bracket.BracketSet."""
     return types.SimpleNamespace(
         playerIds=list(pids), score=list(score), finished=finished,
         winNext=None, loseNext=None)

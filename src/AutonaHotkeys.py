@@ -7,6 +7,7 @@ from loguru import logger
 
 from .core.SettingsManager import SettingsManager
 from .core.Actions import AutonaActions
+from .core import Top8Service
 from .core.DictHelper import deep_clone
 
 # Win32 constants
@@ -120,9 +121,10 @@ class AutonaHotkeys(QObject):
 
     @classmethod
     def ConnectActions(cls):
-        """Route the board-independent hotkeys to AutonaActions.
+        """Route the board-independent hotkeys to core (AutonaActions, and
+        the Top 8 import to Top8Service).
 
-        These seven used to be connected by AutonaScoreboardWidget.__init__ to
+        The score ones used to be connected by AutonaScoreboardWidget to
         its own bound methods, which made the answer to "what does
         Ctrl+Shift+1 do" depend on which boards were built: nothing at all
         when the saved battle format was crew, and *both* boards after a
@@ -134,10 +136,13 @@ class AutonaHotkeys(QObject):
         (AutonaActions.SwapTeams) instead of a copy between the player
         widgets.
 
-        Not moved, and not state operations: `load_set` opens the board's
-        set-selection window and `refresh_phase_group` refetches the bracket
-        on the window -- both are shell / panel commands, so they stay with
-        the Qt side that owns those panels.
+        `refresh_phase_group` joined them in ADR-005 S3e-8: the Top 8 import
+        is core's (Top8Service.RefreshFromProvider), so the hotkey imports
+        whether or not the Top 8 panel was ever built (it used to be the
+        window's, which built the panel to ask it).
+
+        Not moved: `load_set` opens the board's set-selection window -- a
+        panel command, so it stays with the board that owns the window.
 
         Not applicable to board 3: a crew battle's team score is the sum of
         its members' remaining stocks, so there is no team-level score to
@@ -161,6 +166,7 @@ class AutonaHotkeys(QObject):
         cls.signals.reset_scores.connect(cls._onResetScores)
         cls.signals.apply_changes.connect(cls._onApplyChanges)
         cls.signals.swap_teams.connect(cls._onSwapTeams)
+        cls.signals.refresh_phase_group.connect(cls._onRefreshTop8)
         logger.debug("Hotkeys routed to AutonaActions")
 
     @classmethod
@@ -184,6 +190,7 @@ class AutonaHotkeys(QObject):
         cls.signals.reset_scores.disconnect(cls._onResetScores)
         cls.signals.apply_changes.disconnect(cls._onApplyChanges)
         cls.signals.swap_teams.disconnect(cls._onSwapTeams)
+        cls.signals.refresh_phase_group.disconnect(cls._onRefreshTop8)
 
     # The slots are plain functions rather than bound methods on purpose:
     # `signals` outlives any instance, and these targets are meant to live as
@@ -256,6 +263,12 @@ class AutonaHotkeys(QObject):
             # is about to move.
             board.CommitFocusedEdit()
         actions.SwapTeams(number)
+
+    @staticmethod
+    def _onRefreshTop8():
+        # The import runs on the provider's worker, not on the GUI thread
+        # (a second press while one runs is dropped).
+        Top8Service.RefreshFromProvider()
 
     def __init__(self) -> None:
         super().__init__()

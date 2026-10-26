@@ -125,6 +125,8 @@ def test_bootstrap_core_steps_and_their_order():
         "AutonaPlayerDB.Attach()",
         "StartGGDataProvider.Initialize()",
         "AutonaTournamentDataProvider()",
+        "Top8Service.fetcher"
+        " = AutonaTournamentDataProvider.instance.RunWithProvider",
         "TournamentInfoService()",
         "CountryCatalog()",
         "AutonaDesignerService.MigrateLegacyProjects()",

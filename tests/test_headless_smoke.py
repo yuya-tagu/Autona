@@ -160,10 +160,12 @@ def test_main_headless_serves_refuses_a_second_launch_and_stops(tmp_path):
             status, body = _request(port, "/api/v1/state")
             assert body["data"]["score"]["1"]["team"]["1"]["score"] == 2
 
-            # What needs a board.
+            # The Top 8 import is core's (ADR-005 S3e-8): headless it is
+            # refused only for want of a tournament.
             status, body = _request(port, "/api/v1/bracket:refresh", "POST",
                                     {})
-            assert (status, body["error"]["code"]) == (503, "UNAVAILABLE")
+            assert (status, body["error"]["code"]) == (409, "NOT_READY")
+            # What needs a board.
             status, body = _request(port, "/scoreboard1-open-set")
             assert (status, body["error"]["code"]) == (503, "UNAVAILABLE")
 

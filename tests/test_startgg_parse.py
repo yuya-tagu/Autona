@@ -165,10 +165,6 @@ def _setup_mock_modules():
             "src.core.PlayerDB",
             {"PlayerDB": MagicMock()},
         ),
-        "src.AutonaBracket": _make_mock_module(
-            "src.AutonaBracket",
-            {"is_power_of_two": lambda x: x & (x - 1) == 0 and x > 0},
-        ),
         "src.Workers": _make_mock_module(
             "src.Workers",
             {"Worker": MagicMock()},

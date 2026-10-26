@@ -25,7 +25,8 @@ from qtpy.QtWidgets import *
 from loguru import logger
 
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
-from .AutonaBracket import Bracket, BracketSet
+from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+from .core.Bracket import Bracket, BracketSet
 from . import ui_constants as UI
 
 
@@ -318,7 +319,10 @@ class AutonaAnalysisWidget(QWidget):
                 empty_pgs += 1
                 continue
             try:
-                bracket = Bracket(data)
+                # The round names its rows are labelled with (GetRoundName)
+                # are the locale's, handed in (core.Bracket is Qt-free).
+                bracket = Bracket(
+                    data, matchNames=AutonaLocaleHelper.matchNames)
             except Exception:
                 logger.opt(exception=True).warning(
                     f"Analysis: Bracket build failed for PG {pg_id}")

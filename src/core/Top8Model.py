@@ -179,15 +179,15 @@ def Recompute(matches):
 
 
 def FromBracket(bracket, entrants):
-    """Extract the final 8 of a double-elimination ``AutonaBracket.Bracket``
+    """Extract the final 8 of a double-elimination ``core.Bracket.Bracket``
     into the fixed Top 8 topology.
 
     Returns ``(players, matches)`` or ``None`` when the phase group's shape
     cannot be mapped (no grand final, wrong set counts, ...).
 
     * ``players``: slot(str 1..8) -> {name, sponsor, country_code, mains}.
-      Country/character resolution against Qt models is left to the caller
-      so this module stays Qt-free.
+      Country/character resolution is left to the caller
+      (Top8Service.ResolveImportedPlayer, against the core catalogs).
     * ``matches``: same shape as ``DefaultState()["matches"]``, with scores
       oriented to our slot layout and slots re-derived via Recompute.
     """

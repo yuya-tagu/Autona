@@ -601,14 +601,18 @@ def _build_web_app():
     ws_on('playerdb')(WebServer.ws_playerdb)
 
 
-    # Update bracket
+    # Re-import the Top 8 from Start.gg (core since ADR-005 S3e-8, so it
+    # works headless too). Answers "OK" whether the import started, one was
+    # already running or no tournament is loaded -- as it always did.
     @app.route('/update-bracket')
     def update_bracket():
-        return WebServer._board_actions().update_bracket()
+        WebOps.update_bracket()
+        return "OK"
 
     @ws_on('update_bracket')
     def ws_update_bracket(message):
-        WebServer.ws_emit('update_bracket', WebServer._board_actions().update_bracket())
+        WebOps.update_bracket()
+        WebServer.ws_emit('update_bracket', "OK")
 
     # Load player from tag
     @app.route('/scoreboard<scoreboardNumber>-load-player-from-tag-<team>-<player>')

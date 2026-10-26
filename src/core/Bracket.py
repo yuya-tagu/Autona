@@ -3,11 +3,18 @@
 The old Bracket dock rendering (AutonaBracketView / AutonaBracketWidget)
 was removed with the Top 8 rework; this module stays as the pure
 topology/propagation model consumed by AutonaAnalysisWidget (multi phase
-group table) and core.Top8Model.FromBracket (Top 8 extraction).
+group table) and core.Top8Model.FromBracket (Top 8 extraction, which
+core.Top8Service runs in either shell).
+
+Core since ADR-005 S3e-8 (was src/AutonaBracket.py). The one thing it read
+from the Qt side, the localized round names GetRoundName falls back to
+(self.matchNames), is handed in by whoever builds the bracket
+(`matchNames=`); the Top 8 import never asks for a round name.
+
+Import side effects: none (agent-pitfalls #1). Qt-free, like everything under
+``src/core``.
 """
-from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from loguru import logger
-import traceback
 
 
 class BracketSet():
@@ -51,7 +58,12 @@ class Bracket():
     losers, max(positive) = grand final, max(positive)+1 = GF reset.
     """
 
-    def __init__(self, phaseGroupData=None):
+    def __init__(self, phaseGroupData=None, matchNames=None):
+        # The localized round names GetRoundName falls back to (the
+        # "match" terms of the round-name tables, AutonaLocaleHelper
+        # .matchNames on the Qt side). None: no names -- GetRoundName then
+        # answers as it did with the tables not loaded yet.
+        self.matchNames = matchNames if matchNames is not None else {}
         self.rounds = {}  # roundKey(str) -> list[BracketSet]
         self.setsById = {}  # Start.gg set id -> BracketSet
         self.entrantCount = 0
@@ -301,23 +313,23 @@ class Bracket():
 
         if roundNumber > 0:
             if hasGfReset and roundNumber == maxPos:
-                return AutonaLocaleHelper.matchNames.get("grand_final_reset")
+                return self.matchNames.get("grand_final_reset")
             if gfsRound is not None and roundNumber == gfsRound:
-                return AutonaLocaleHelper.matchNames.get("grand_final")
+                return self.matchNames.get("grand_final")
             if gfsRound is not None and roundNumber == gfsRound - 1:
-                return AutonaLocaleHelper.matchNames.get("winners_final")
+                return self.matchNames.get("winners_final")
             if gfsRound is not None and roundNumber == gfsRound - 2:
-                return AutonaLocaleHelper.matchNames.get("winners_semi_final")
+                return self.matchNames.get("winners_semi_final")
             if gfsRound is not None and roundNumber == gfsRound - 3:
-                return AutonaLocaleHelper.matchNames.get("winners_quarter_final")
+                return self.matchNames.get("winners_quarter_final")
             num = displayIdx if displayIdx is not None else roundNumber
-            return AutonaLocaleHelper.matchNames.get("winners_round").format(num)
+            return self.matchNames.get("winners_round").format(num)
 
         if hasLosersFinal and roundNumber == lastLosers:
-            return AutonaLocaleHelper.matchNames.get("losers_final")
+            return self.matchNames.get("losers_final")
         if hasLosersFinal and roundNumber == lastLosers + 1:
-            return AutonaLocaleHelper.matchNames.get("losers_semi_final")
+            return self.matchNames.get("losers_semi_final")
         if hasLosersFinal and roundNumber == lastLosers + 2:
-            return AutonaLocaleHelper.matchNames.get("losers_quarter_final")
+            return self.matchNames.get("losers_quarter_final")
         num = displayIdx if displayIdx is not None else abs(roundNumber)
-        return AutonaLocaleHelper.matchNames.get("losers_round").format(num)
+        return self.matchNames.get("losers_round").format(num)

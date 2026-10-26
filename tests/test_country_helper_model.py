@@ -10,7 +10,7 @@ AutonaCountryHelper before the move by record_golden.py next to it):
   and that a reload refills that one model instead of swapping in a new
   one (agent-pitfalls #13 / #15);
 - what that reload does to the model's two consumers, the TOP 8 panel and
-  the player cards: nothing is published and the combos keep showing the
+  the player cards: nothing is written and the combos keep showing the
   state; that a card's country wiring is done once (countriesUpdated no
   longer stacks connections); and the fallback for a card built before
   the first load;
@@ -31,7 +31,7 @@ from unittest.mock import patch
 import pytest
 
 from qtpy.QtCore import SIGNAL, QObject, Qt
-from qtpy.QtWidgets import QApplication, QComboBox, QLineEdit
+from qtpy.QtWidgets import QApplication, QComboBox
 
 from src.AutonaBasePlayerWidget import AutonaBasePlayerWidget
 from src.AutonaTop8Widget import AutonaTop8Widget
@@ -182,85 +182,63 @@ def _code(combo):
     return data.get("code") if isinstance(data, dict) else None
 
 
-class _Top8Countries(QObject):
-    """The TOP 8 panel's country half, on the panel's real methods.
-
-    The panel itself owns a QWebEngineView (its live preview), which keeps
-    it out of the widget harness. What is borrowed here is the whole path
-    between the shared country model and Top8Service.PublishPlayers: the
-    combos as the panel makes them, its handlers, and its two
-    country-model slots, connected the way its __init__ connects them.
-    """
-    _makeCountryCombo = AutonaTop8Widget._makeCountryCombo
-    _onCountriesAboutToReload = AutonaTop8Widget._onCountriesAboutToReload
-    _rebindCountryModels = AutonaTop8Widget._rebindCountryModels
-    _selectCountry = staticmethod(AutonaTop8Widget._selectCountry)
-    _onPlayerComboChanged = AutonaTop8Widget._onPlayerComboChanged
-    _syncPlayersToState = AutonaTop8Widget._syncPlayersToState
-    _resolveCharData = AutonaTop8Widget._resolveCharData
-
-    def __init__(self):
-        super().__init__()
-        self._updating = False
-        self._heldForCountryReload = False
-        self.playerInputs = {}
-        for slot in top8.PLAYER_SLOTS:
-            country = self._makeCountryCombo()
-            country.currentIndexChanged.connect(self._onPlayerComboChanged)
-            self.playerInputs[slot] = {
-                "name": QLineEdit(), "sponsor": QLineEdit(),
-                "country": country, "char": QComboBox(), "color": QComboBox(),
-            }
-        signals = AutonaCountryHelper.signals
-        signals.countriesAboutToReload.connect(self._onCountriesAboutToReload)
-        signals.countriesUpdated.connect(self._rebindCountryModels)
-
-    def _refreshMatchRows(self, matches, update_scores=True):
-        """The match table; it renders names, not countries."""
-
-    def close(self):
-        signals = AutonaCountryHelper.signals
-        signals.countriesAboutToReload.disconnect(
-            self._onCountriesAboutToReload)
-        signals.countriesUpdated.disconnect(self._rebindCountryModels)
+def _top8Panel(app):
+    """The TOP 8 panel itself (its live preview loads only when it is
+    shown, which the harness never does)."""
+    panel = AutonaTop8Widget()
+    app.settle()
+    return panel
 
 
-def test_a_reload_publishes_nothing_from_top8(countries, autonaApp):
+def _dropTop8Panel(app, panel):
+    from qtpy.QtCore import QCoreApplication, QEvent
+    if AutonaTop8Widget.instance is panel:
+        AutonaTop8Widget.instance = None
+    panel.setParent(None)
+    panel.deleteLater()
+    QCoreApplication.sendPostedEvents(panel, QEvent.Type.DeferredDelete)
+    app.settle()
+
+
+def test_a_reload_writes_nothing_from_top8(countries, autonaApp):
     """A reload clears the model under every TOP 8 country combo and
-    refills it. Each index change on the way used to reach
-    _syncPlayersToState and publish all eight slots with blank countries.
-    The state must come out as it went in, and the combos show it."""
+    refills it. Each index change on the way used to reach the panel's
+    publish of all eight slots, with blank countries; since ADR-005 S3e-8
+    each would write its own slot's country. The state must come out as it
+    went in, and the combos show it."""
     countries("en")
     saved = deep_clone(StateManager.Get(Top8Service.PLAYERS_PATH))
-    panel = _Top8Countries()
+    panel = _top8Panel(autonaApp)
     try:
         chosen = {"1": "JP", "2": "US"}
         for slot, code in chosen.items():
             combo = panel.playerInputs[slot]["country"]
-            combo.setCurrentIndex(_row(combo.model(), code))  # publishes
+            combo.setCurrentIndex(_row(combo.model(), code))  # writes
         autonaApp.settle()
         before = deep_clone(StateManager.Get(Top8Service.PLAYERS_PATH))
         assert before["1"]["country"]["code"] == "JP"
         assert before["2"]["country"]["code"] == "US"
 
-        with patch.object(Top8Service, "PublishPlayers",
-                          wraps=Top8Service.PublishPlayers) as publish:
+        with patch.object(Top8Service, "SetPlayerCountry",
+                          wraps=Top8Service.SetPlayerCountry) as write:
             countries("ja")
             autonaApp.settle()
 
-        assert publish.call_count == 0
+        assert write.call_count == 0
         assert StateManager.Get(Top8Service.PLAYERS_PATH) == before
-        assert {slot: _code(w["country"])
-                for slot, w in panel.playerInputs.items()} \
-            == {slot: chosen.get(slot) for slot in top8.PLAYER_SLOTS}
-        # Released: the next real choice is published again.
-        assert panel._updating is False
+        stored = {slot: ((before.get(slot) or {}).get("country") or {})
+                  .get("code") for slot in top8.PLAYER_SLOTS}
+        shown = {slot: _code(w["country"])
+                 for slot, w in panel.playerInputs.items()}
+        assert shown == stored
+        # Released: the next real choice is written again.
+        assert panel._holdCountryWrites is False
         combo = panel.playerInputs["3"]["country"]
         combo.setCurrentIndex(_row(combo.model(), "FR"))
         assert StateManager.Get(
             Top8Service.PLAYERS_PATH)["3"]["country"]["code"] == "FR"
     finally:
-        panel.close()
+        _dropTop8Panel(autonaApp, panel)
         if saved is None:
             StateManager.Unset(Top8Service.PLAYERS_PATH)
         else:

@@ -115,7 +115,8 @@ PyInstaller の `--distpath .` オプションで直下に出力している。
 access violation を起こす。
 
 - widget レイアウト解決後に何かしたいときは `QTimer.singleShot(0, fn)` で defer
-- `UpdatePhaseGroup` のような長時間走るハンドラには再入ガードを置く:
+- 長時間走るハンドラには再入ガードを置く（旧 Top 8 パネルの `UpdatePhaseGroup` が実例だった。
+  ADR-005 S3e-8 で取り込みが core の `Top8Service` に移り、パネルからは消えた）:
   ```python
   if self._updatingPhaseGroup:
       logger.warning("re-entrant call, skipping")

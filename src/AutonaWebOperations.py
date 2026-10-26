@@ -34,6 +34,9 @@ Two kinds live here:
   desktop builds the board first and runs them on its GUI thread); the
   line-up has no board and is written on the calling thread. The board and
   the Commentary panel render what was written.
+- the Top 8 import (ADR-005 S3e-8): core's Top8Service, in both shells. It
+  runs on the tournament provider's worker; the Top 8 panel, built or not,
+  renders what it wrote.
 
 Imports nothing that builds anything; the registrations are plain module
 attributes, filled in by the shell (agent-pitfalls #1).
@@ -47,6 +50,7 @@ from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
 from .core import CommentaryModel as comms
 from .core import CommentaryService
+from .core import Top8Service
 from .core.CountryCatalog import CountryCatalog
 from .core.CrewBattleService import CrewBattleService
 from .core.GameAssetCatalog import GameAssetCatalog
@@ -385,6 +389,19 @@ def load_tournament(url=None):
     SettingsManager.Set("TOURNAMENT_URL", url)
     AutonaTournamentDataProvider.instance.signals.tournament_url_update.emit(url)
     return "OK"
+
+
+def update_bracket(done=None):
+    """Re-import the Top 8 from Start.gg (core: Top8Service, ADR-005 S3e-8).
+
+    Starts the import on the provider's worker and returns at once, in
+    either shell, whether or not the Top 8 panel was ever built. Answers
+    what RefreshFromProvider answers (``Top8Service.STARTED`` / ``BUSY`` /
+    ``NO_TOURNAMENT``): /api/v1 maps it to 202 / 409; the legacy route and
+    the Socket.IO event answer "OK" whichever it was, as they always did.
+    `done()` as in RefreshFromProvider.
+    """
+    return Top8Service.RefreshFromProvider(done=done)
 
 
 # ── the game ─────────────────────────────────────────────────────────────
