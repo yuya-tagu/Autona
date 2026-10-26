@@ -2379,7 +2379,7 @@ Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket
     - `/web` で選手を DB 保存付きで確定する（タグがあるとき）→ 応答が返り（固まらない）、`user_data/local_players.json` に入る。続けて別の操作（スコアの変更など）もすぐ通る
     - `/scoreboard1-load-player-from-tag-1-1?tag=<DB のタグ>` → `OK` で入る。DB に無いタグは `ERROR`
 
-#### S3e-5 統計の core 化（2026-10-26・PR 未作成）
+#### S3e-5 統計の core 化（2026-10-26・PR #238）
 
 統計（`recent_sets` / `last_sets` / `history_sets` / `upset_factor`）を core の `StatsService` へ移した。それまではボードの `AutonaStatsUtil`（ボード 1 枚に 1 個）がカードのシグナルを中継していた。いつ取り直すか（トリガー）・何を取りに行くか・遅れて届いた答えを書くかは core が決める。取得そのものは `bootstrap_core()` が注入する fetcher（`AutonaStatsUtil`）に任せる。fetcher は要求を provider の QThreadPool に渡し、答えをメインスレッドで返す。
 
