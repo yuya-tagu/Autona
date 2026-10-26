@@ -76,6 +76,7 @@ from tests.test_player_slot_publish import slotEnv  # noqa: F401  (fixture)
 # /api/v1 through the real route table, for the best-of recordings (S2e).
 from tests.test_api_v1 import client, webApp  # noqa: F401  (fixtures)
 from tests.fixtures.player_slots.recording import digest, encode
+from tests.fixtures.stats.spies import StatsTriggers
 
 RECORD = os.environ.get("AUTONA_RECORD_BOARD_OPERATIONS") == "1"
 GOLDEN_PATH = (Path(__file__).resolve().parent / "fixtures"
@@ -177,36 +178,13 @@ class _Published:
             default=lambda o: getattr(o, "__name__", repr(o))).decode()
 
 
-class _StatsTriggers:
-    """How often each of the board's statistics triggers fired.
-
-    The triggers are the board's AutonaStatsUtil signals; each one runs a
-    Start.gg fetch (or a local recalculation), so firing one twice for one
-    operation is a wasted request and not firing it leaves the previous
-    pairing's numbers on screen.
-    """
-
-    NAMES = ("RecentSetsSignal", "LastSetsP1Signal", "LastSetsP2Signal",
-             "PlayerHistoryStandingsP1Signal",
-             "PlayerHistoryStandingsP2Signal", "UpsetFactorCalculation")
-
-    def __init__(self, board):
-        self._signals = board.stats.signals
-        self.counts = {name: 0 for name in self.NAMES}
-        self._slots = {}
-
-    def __enter__(self):
-        for name in self.NAMES:
-            def count(*_args, name=name):
-                self.counts[name] += 1
-            self._slots[name] = count
-            getattr(self._signals, name).connect(count)
-        return self
-
-    def __exit__(self, *exc):
-        for name, slot in self._slots.items():
-            getattr(self._signals, name).disconnect(slot)
-        return False
+# How often each of the board's statistics triggers fired. Each one runs a
+# Start.gg fetch (or a local recalculation), so firing one twice for one
+# operation is a wasted request and not firing it leaves the previous
+# pairing's numbers on screen. The recordings name the board's old
+# AutonaStatsUtil signals; since ADR-005 S3e-5 they are core's
+# StatsService.Refresh, which the spy counts under those names.
+_StatsTriggers = StatsTriggers
 
 
 @contextmanager

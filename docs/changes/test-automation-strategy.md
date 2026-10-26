@@ -216,6 +216,11 @@ pin: `tests/test_scoreboard_operations.py::test_close_without_a_loaded_set_does_
 （シングルトン再導入禁止を docstring に明記）。外部 API（URL・イベント名・戻り値）は不変。
 pin: `tests/test_stats_util.py`。
 
+> 2026-10-26（ADR-005 S3e-5）: ボードごとの stats util（`GetScoreboard(n).stats`）は廃止した。
+> ルートは `AutonaWebOperations.stats_*` → core の `StatsService` で、取得は `bootstrap_core()` が
+> 1 個登録する `StatsService.fetcher`（`AutonaStatsUtil`。`instance` は今も持たない）。
+> 上の「正本パターン」は当時のもの。pin は同じ `tests/test_stats_util.py`。
+
 同経路の派生 2 件も同時に修正:
 - Socket.IO の `ws_stats_recent_sets` / `ws_stats_upset_factor` が 1 引数メソッドに
   `info.get("player")` を余分に渡していた TypeError（`stats_last_sets` からのコピペ痕）

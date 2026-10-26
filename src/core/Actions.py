@@ -80,6 +80,7 @@ from types import MappingProxyType
 from loguru import logger
 
 from . import StateSchema as schema
+from .DictHelper import deep_clone
 from .GameTrackerService import GameTrackerService
 from .LayoutOptionsManager import LayoutOptionsManager
 from .PlayerService import PlayerService, RepublishTeamMergedNames
@@ -530,6 +531,14 @@ class AutonaActions:
                 GameTrackerService(board).SwapStageResults()
                 StateManager.Set(f"{prefix}.teamsSwapped", not bool(
                     StateManager.Get(f"{prefix}.teamsSwapped", False)))
+                # A slot pair holding two ids: both teams have other
+                # players now.
+                moved = any(
+                    StateManager.Get(f"{prefix}.team.1.player.{slot}.id")
+                    != StateManager.Get(f"{prefix}.team.2.player.{slot}.id")
+                    for slot in slots)
+        if moved:
+            StatsService(board).TeamsChanged((1, 2))
         return True
 
     def SwapPlayers(self, board, team, first, second) -> bool:
@@ -556,6 +565,10 @@ class AutonaActions:
             with StateManager.lock:
                 self._ExchangeSlots(f"{prefix}.{first}", f"{prefix}.{second}")
                 self._UpdateUpsetFactor(board)
+                moved = (StateManager.Get(f"{prefix}.{first}.id")
+                         != StateManager.Get(f"{prefix}.{second}.id"))
+        if moved:
+            StatsService(board).TeamsChanged((team,))
         return True
 
     def _ExchangeSlots(self, first, second):
@@ -637,13 +650,11 @@ class AutonaActions:
 
         The card's seed spinbox used to trigger it (`player_seed_changed`)
         when the copy typed the other player's seed into it; a slot the
-        state exchanges has no such edit. The roster size is the state's:
-        a swap does not change it, and core has no card list to count.
+        state exchanges has no such edit. Recalculated in the operation's
+        save cycle, where the other statistics a swap asks for come after
+        it (StatsService.TeamsChanged).
         """
-        def playersPerTeam():
-            roster = StateManager.Get(f"score.{board}.team.1.player")
-            return len(roster) if isinstance(roster, dict) else 0
-        StatsService(board, playersPerTeam).UpdateUpsetFactor()
+        StatsService(board).UpdateUpsetFactor()
 
     # ── clearing (ADR-005 S2d) ────────────────────────────────────────────
     #
@@ -716,7 +727,11 @@ class AutonaActions:
         5), recorded rather than fixed. `no_mains` keeps the characters,
         with the old clear's limits (see `PlayerService._Clear`). The upset
         factor is recalculated when a seed went, as the seed spinbox's
-        change used to ask for.
+        change used to ask for; the other statistics are fetched again for
+        each team whose player ids the clear changed, once for the whole
+        clear (StatsService.TeamsChanged) -- a card used to ask for them
+        when its own Clear() dropped its id, once per card, and the board
+        asked once per clear since ADR-005 S2d.
 
         Every slot the state carries for the two teams, which on a built
         board is one per player card (the roster is trimmed to the cards).
@@ -726,6 +741,7 @@ class AutonaActions:
             logger.debug(f"ClearPlayers: board {board} is not a score board")
             return False
         seedsChanged = False
+        changedTeams = []
         with StateManager.SaveBlock():
             with StateManager.lock:
                 for team in (1, 2):
@@ -733,14 +749,28 @@ class AutonaActions:
                     roster = StateManager.Get(prefix)
                     if not isinstance(roster, dict):
                         continue
+                    before = self._TeamPlayerIds(prefix)
                     for slot, value in list(roster.items()):
                         if isinstance(value, dict):
                             seedsChanged |= PlayerService(
                                 f"{prefix}.{slot}").ClearSlot(
-                                no_mains).seedChanged
+                                no_mains, announce=False).seedChanged
+                    if self._TeamPlayerIds(prefix) != before:
+                        changedTeams.append(team)
                 if seedsChanged:
                     self._UpdateUpsetFactor(board)
+        if changedTeams:
+            StatsService(board).TeamsChanged(changedTeams)
         return True
+
+    @staticmethod
+    def _TeamPlayerIds(prefix):
+        """{slot: id} of the team whose player roster is at `prefix`."""
+        roster = StateManager.Get(prefix)
+        if not isinstance(roster, dict):
+            return {}
+        return {slot: deep_clone(value.get("id"))
+                for slot, value in roster.items() if isinstance(value, dict)}
 
     def ClearBoard(self, board) -> bool:
         """The すべての入力値をリセット button: the players, the score, the

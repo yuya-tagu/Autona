@@ -54,6 +54,7 @@ from src.core.StateManager import StateManager
 # The S1d world: the fixture games under the slot recording's locale.
 from tests.test_player_slot_publish import slotEnv  # noqa: F401  (fixture)
 from tests.fixtures.player_slots.recording import digest, encode
+from tests.fixtures.stats.spies import StatsTriggers
 from tests.fixtures.player_apply.scenarios import (
     DB_PLAYERS, SCENARIOS, Cycles, Expected, Writes, byPlayer, collapsed,
     compact, effect, normalise)
@@ -64,35 +65,12 @@ GOLDEN_PATH = (Path(__file__).resolve().parent / "fixtures" / "player_apply"
 GOLDEN = None if RECORD or not GOLDEN_PATH.exists() else json.loads(
     GOLDEN_PATH.read_text(encoding="utf-8"))
 
-STATS = ("RecentSetsSignal", "LastSetsP1Signal", "LastSetsP2Signal",
-         "PlayerHistoryStandingsP1Signal", "PlayerHistoryStandingsP2Signal",
-         "UpsetFactorCalculation")
-
-
 # ── observing a step ─────────────────────────────────────────────────────
 
-class _StatsTriggers:
-    """How often each of the board's statistics triggers fired."""
-
-    def __init__(self, board):
-        self._signals = board.stats.signals if board is not None else None
-        self.counts = {name: 0 for name in STATS}
-        self._slots = {}
-
-    def __enter__(self):
-        if self._signals is None:
-            return self
-        for name in STATS:
-            def count(*_args, name=name):
-                self.counts[name] += 1
-            self._slots[name] = count
-            getattr(self._signals, name).connect(count)
-        return self
-
-    def __exit__(self, *exc):
-        for name, slot in self._slots.items():
-            getattr(self._signals, name).disconnect(slot)
-        return False
+# How often each of the board's statistics triggers fired: the recording's
+# names are the board's old AutonaStatsUtil signals, which core's
+# StatsService.Refresh replaced in ADR-005 S3e-5 (the spy maps them).
+_StatsTriggers = StatsTriggers
 
 
 def _digestAssets(value):

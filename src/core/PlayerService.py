@@ -23,6 +23,8 @@ it can be produced without a widget. Since ADR-005 S3e-3 (S2f) so is loading
 a whole player -- the database merge, the bad-word filter, the location and
 character lookups (``ApplyData``) -- and the card's clear and save
 (``ClearSlot`` / ``SavePlayerToDB``): the card asks, then renders the slot.
+And since ADR-005 S3e-5 the statistics a change of player or seed calls
+for are asked for here too (``Announce``), not by the card's signals.
 
 The values are byte-compatible with what the card used to publish. A Qt
 model hands its dicts out as QVariantMaps -- the keys of every nested dict in
@@ -155,11 +157,12 @@ class SlotChange(NamedTuple):
     """What a write did to the two facts the board's statistics hang off:
     who is in the slot (`id`) and their seed.
 
-    The board fires its statistics triggers from it (the recent sets and
-    the last sets / standings for an id, the upset factor for a seed); the
-    player card's own signals used to, one per widget change. A change is
-    the slot's value after the operation against the one before, so a load
-    that empties the seed and puts the same one back changes nothing.
+    `PlayerService.Announce` asks the statistics for it (the recent sets
+    and the last sets / standings for an id, the upset factor for a seed;
+    ADR-005 S3e-5); the player card's own signals used to, one per widget
+    change. A change is the slot's value after the operation against the
+    one before, so a load that empties the seed and puts the same one back
+    changes nothing.
     """
     idChanged: bool = False
     seedChanged: bool = False
@@ -220,6 +223,37 @@ class PlayerService:
         except (TypeError, ValueError):
             return None
 
+    def TeamNumber(self):
+        """The team (1 / 2) this slot belongs to on its board, or None."""
+        parts = self.path.split(".")
+        if (len(parts) != 6 or parts[0] != "score" or parts[2] != "team"
+                or parts[4] != "player"):
+            return None
+        team = self._asInt(parts[3], 0)
+        return team if team in (1, 2) else None
+
+    def Announce(self, change: SlotChange):
+        """Ask the board's statistics for what `change` calls for
+        (StatsService.PlayerChanged): another player in the slot, another
+        seed. Into the caller's save cycle, as the card's signals did.
+
+        Only a board's slot has statistics -- the editor's
+        ``player_editor.1`` has none. A failure is logged, not raised: the
+        write that changed the slot has been made, and its own error (if
+        any) is the one that propagates.
+        """
+        board = self.BoardNumber()
+        team = self.TeamNumber()
+        if board is None or team is None or not (
+                change.idChanged or change.seedChanged):
+            return
+        # Imported here: StatsService reads this module's roster default.
+        from .StatsService import StatsService
+        try:
+            StatsService(board).PlayerChanged(team, change)
+        except Exception:
+            logger.exception(f"{self.path}: asking for the statistics failed")
+
     def TeamLosersKey(self):
         """``score.{N}.team.{T}.losers`` for a board slot, None otherwise.
 
@@ -258,8 +292,9 @@ class PlayerService:
         StateManager.Set(self.Key(field), "" if value is None else str(value))
         return True
 
-    def SetSeed(self, value) -> bool:
-        """Publish the seed as a number.
+    def SetSeed(self, value, announce=False) -> bool:
+        """Publish the seed as a number; with `announce`, recalculate the
+        upset factor too (the card's seed spinbox: Announce).
 
         Three callers used to write it in two different types: the spinbox's
         ``valueChanged`` and ``SetData`` wrote an int, while the spinbox's
@@ -271,6 +306,8 @@ class PlayerService:
         """
         StateManager.Set(
             self.Key(schema.PLAYER_SEED_KEY), self._asInt(value, 0))
+        if announce:
+            self.Announce(SlotChange(seedChanged=True))
         return True
 
     def SetBirthday(self, value) -> bool:
@@ -474,16 +511,19 @@ class PlayerService:
         StateManager.Set(self.Key("city"), city)
         return True
 
-    def SetPlayerId(self, value) -> bool:
+    def SetPlayerId(self, value, announce=False) -> bool:
         """Set the provider's player id. True when the state changed.
 
-        The caller uses the return value: the board's statistics fetches hang
-        off "the player in this slot is now someone else", so they must fire
-        on a change and not on a re-assertion.
+        With `announce` (the card's renamed player: NameChanged), a change
+        asks for the statistics (Announce): they hang off "the player in
+        this slot is now someone else", so they are asked for on a change
+        and not on a re-assertion.
         """
         if StateManager.Get(self.Key("id")) == value:
             return False
         StateManager.Set(self.Key("id"), value)
+        if announce:
+            self.Announce(SlotChange(idChanged=True))
         return True
 
     def SetOnlineAvatar(self, value):
@@ -627,7 +667,11 @@ class PlayerService:
         review). The display name and the images are re-derived last, from
         what the slot ends up holding, even when a step raised -- and an
         error emptying the id there is logged rather than raised over the
-        step's own. Returns what changed for the statistics (SlotChange).
+        step's own. Returns what changed (SlotChange), which it has asked
+        the statistics for (Announce) -- after a load that raised half-way
+        too, for what it did write: inside its save cycle, outside the lock
+        (a fetch is started there). An error working out what changed
+        there is logged rather than raised over the step's own, too.
         """
         if not isinstance(data, dict):
             raise TypeError(f"player data for {self.path} is not a dict")
@@ -653,63 +697,84 @@ class PlayerService:
         brings = {key for key in ("id", "city")
                   if data.get(key) or (record or {}).get(key)}
 
+        change = before = None
+        loadFailed = False
         with StateManager.SaveBlock():
-            with StateManager.lock:
-                before = self.Identity()
-                slot = self._Slot()
-                country = slot.get(schema.PLAYER_COUNTRY_KEY)
-                region = slot.get(schema.PLAYER_STATE_KEY)
-                shown = country.get("code") \
-                    if isinstance(country, dict) else None
-                # The card's location: the country it shows, the country
-                # its region rows are for (the same, until a load hides the
-                # country without telling), the region it shows.
-                location = {
-                    "shown": shown, "rowsFor": shown,
-                    "region": region.get("code")
-                    if isinstance(region, dict) else None}
-                hidden = False
-                # Of the id and the city, those this load wrote.
-                wrote = set()
-                failed = False
-                try:
-                    if clear and self._Clear(slot, no_mains, forLoad=True,
-                                             keep=brings):
-                        hidden = location["shown"] is not None
-                        location["shown"] = None
-                        location["region"] = None
-                    if record:
-                        self._ApplyFields(record, no_mains, location,
-                                          wrote=wrote)
-                    self._ApplyFields(data, no_mains, location, hidden,
-                                      wrote=wrote)
-                except BaseException:
-                    failed = True
-                    raise
-                finally:
-                    sponsor = self._Text(schema.PLAYER_SPONSOR_KEY)
-                    tag = self._Text(schema.PLAYER_TAG_KEY)
-                    dropError = None
+            try:
+                with StateManager.lock:
+                    before = self.Identity()
+                    slot = self._Slot()
+                    country = slot.get(schema.PLAYER_COUNTRY_KEY)
+                    region = slot.get(schema.PLAYER_STATE_KEY)
+                    shown = country.get("code") \
+                        if isinstance(country, dict) else None
+                    # The card's location: the country it shows, the country
+                    # its region rows are for (the same, until a load hides the
+                    # country without telling), the region it shows.
+                    location = {
+                        "shown": shown, "rowsFor": shown,
+                        "region": region.get("code")
+                        if isinstance(region, dict) else None}
+                    hidden = False
+                    # Of the id and the city, those this load wrote.
+                    wrote = set()
+                    failed = False
                     try:
-                        # Also when a later step raised: the name is
-                        # written. After a clear this only finds what the
-                        # clear left for the load to write and it never did
-                        # (a step raised).
-                        if clear or self._NamesAnotherPlayer(slot, sponsor,
-                                                             tag):
-                            self._DropIdentity(keep=wrote)
+                        if clear and self._Clear(slot, no_mains, forLoad=True,
+                                                 keep=brings):
+                            hidden = location["shown"] is not None
+                            location["shown"] = None
+                            location["region"] = None
+                        if record:
+                            self._ApplyFields(record, no_mains, location,
+                                              wrote=wrote)
+                        self._ApplyFields(data, no_mains, location, hidden,
+                                          wrote=wrote)
+                    except BaseException:
+                        failed = True
+                        raise
+                    finally:
+                        sponsor = self._Text(schema.PLAYER_SPONSOR_KEY)
+                        tag = self._Text(schema.PLAYER_TAG_KEY)
+                        dropError = None
+                        try:
+                            # Also when a later step raised: the name is
+                            # written. After a clear this only finds what the
+                            # clear left for the load to write and it never did
+                            # (a step raised).
+                            if clear or self._NamesAnotherPlayer(slot, sponsor,
+                                                                 tag):
+                                self._DropIdentity(keep=wrote)
+                        except Exception as e:
+                            dropError = e
+                        self.PublishMergedName(sponsor, tag)
+                        self.PublishImages(sponsor, tag)
+                        if dropError is not None:
+                            if not failed:
+                                raise dropError
+                            # The step's own exception is what propagates.
+                            logger.opt(exception=dropError).error(
+                                f"{self.path}: the previous player's id was "
+                                f"not emptied after a failed load")
+                    change = self.ChangeSince(before)
+            except BaseException:
+                loadFailed = True
+                raise
+            finally:
+                if before is not None:
+                    try:
+                        if change is None:
+                            change = self.ChangeSince(before)
+                        self.Announce(change)
                     except Exception as e:
-                        dropError = e
-                    self.PublishMergedName(sponsor, tag)
-                    self.PublishImages(sponsor, tag)
-                    if dropError is not None:
-                        if not failed:
-                            raise dropError
-                        # The step's own exception is what propagates.
-                        logger.opt(exception=dropError).error(
-                            f"{self.path}: the previous player's id was "
-                            f"not emptied after a failed load")
-                return self.ChangeSince(before)
+                        if not loadFailed:
+                            raise
+                        # As emptying the id above: the load's own
+                        # exception is what propagates (S3e-5 review).
+                        logger.opt(exception=e).error(
+                            f"{self.path}: the statistics were not asked "
+                            f"for after a failed load")
+        return change
 
     @staticmethod
     def _NamesAnotherPlayer(slot, sponsor, tag) -> bool:
@@ -1008,14 +1073,19 @@ class PlayerService:
             self.PublishCharacterSlots(
                 [CharacterSlot()] * characters, includeMains=True)
 
-    def ClearSlot(self, no_mains=False) -> SlotChange:
+    def ClearSlot(self, no_mains=False, announce=True) -> SlotChange:
         """Empty the slot as the card's clear button did (`_Clear`). One
-        save cycle; returns what changed for the statistics."""
+        save cycle; returns what changed, which it asks the statistics for
+        unless told not to (`AutonaActions.ClearPlayers` asks once for the
+        whole board instead)."""
         with StateManager.SaveBlock():
             with StateManager.lock:
                 before = self.Identity()
                 self._Clear(self._Slot(), no_mains)
-                return self.ChangeSince(before)
+                change = self.ChangeSince(before)
+            if announce:
+                self.Announce(change)
+        return change
 
     def _Clear(self, slot, no_mains, forLoad=False, keep=()) -> bool:
         """Empty the slot as the card's Clear() did; `slot` is a copy of it

@@ -205,6 +205,19 @@ def bootstrap_core():
     from .core import Top8Service
     Top8Service.fetcher = AutonaTournamentDataProvider.instance.RunWithProvider
 
+    # ORDER CONSTRAINT: the statistics' fetcher (ADR-005 S3e-5) hands its
+    # requests to the provider above and connects to its stream queue
+    # signal, so it is built after it; and before anything that can ask for
+    # a statistic -- a player load, a swap, a web route, the STATS panel --
+    # all of which are the shell's, after this function returns. Its
+    # QObject must live on the main thread (the answers are queued to it),
+    # which is where this runs. Without it the statistics are only cleared,
+    # never fetched.
+    from .AutonaStatsUtil import AutonaStatsUtil
+    from .core.StatsService import StatsService
+    if StatsService.fetcher is None:
+        StatsService.fetcher = AutonaStatsUtil()
+
     # ORDER CONSTRAINT: the tournament metadata writer must exist before the
     # provider above ever emits tournament_data_updated, and before anything
     # that *reads* tournamentInfo.* connects to that signal -- the sidebar

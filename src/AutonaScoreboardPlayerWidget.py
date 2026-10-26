@@ -13,7 +13,7 @@ from .core import StateSchema as schema
 from .core.Actions import AutonaActions
 from .core.CountryCatalog import CountryCatalog
 from .core.DictHelper import deep_clone
-from .core.PlayerService import CharacterSlot, SlotChange
+from .core.PlayerService import CharacterSlot
 from .core.StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaPlayerDB import AutonaPlayerDB
@@ -71,11 +71,10 @@ class AutonaScoreboardPlayerWidgetSignals(QObject):
     # `dataChanged` used to sit here and was emitted from the three input
     # handlers below. Nothing ever connected to it -- the state delta is how
     # a change reaches anything interested -- so it went with the write path
-    # it was announcing (headless core Step 5, instalment 3).
-    playerId_changed = Signal()
-    player1Id_changed = Signal()
-    player2Id_changed = Signal()
-    player_seed_changed = Signal()
+    # it was announcing (headless core Step 5, instalment 3). The four
+    # statistics triggers (playerId_changed, player{1,2}Id_changed,
+    # player_seed_changed) went with ADR-005 S3e-5: the statistics are
+    # asked for by core (PlayerService.Announce).
     # A render had to leave a field alone because the operator was in it,
     # and focus has now left it (ADR-005 S2a). The board answers with a
     # render pass.
@@ -627,10 +626,13 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 lambda field=field, edit=edit: self._OnTextChanged(
                     field, edit.text()))
 
-        seed.valueChanged.connect(self.player.SetSeed)
+        # A changed seed recalculates the upset factor (announce) -- not the
+        # publish of the card being built just below, which nothing heard
+        # when it was a signal the board connected afterwards.
+        self._seedAnnounces = False
         seed.valueChanged.connect(
-            lambda value: self.instanceSignals.player_seed_changed.emit()
-        )
+            lambda value: self.player.SetSeed(
+                value, announce=self._seedAnnounces))
         seedEdit = seed.lineEdit()
         if seedEdit is not None:
             seedEdit.editingFinished.connect(
@@ -638,6 +640,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
         seed.setValue(0)
         seed.valueChanged.emit(seed.value())
+        self._seedAnnounces = True
 
         birthday = self._w(schema.PLAYER_BIRTHDAY_KEY, QCheckBox)
         birthday.toggled.connect(self.player.SetBirthday)
@@ -735,30 +738,9 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         self.lastExportedName = merged
 
     def ExportPlayerId(self, id=None):
-        # The service reports whether the slot actually changed hands; the
-        # statistics fetches must not re-run for a re-asserted id (that
-        # guard used to be the `if` around the write itself).
-        self.AnnounceChange(
-            SlotChange(idChanged=self.player.SetPlayerId(id)))
-
-    def AnnounceChange(self, change: SlotChange):
-        """Ask for the statistics a change of this slot calls for: the
-        recent sets and the team's last sets / standings when another
-        player is in it, the upset factor when its seed moved. The board
-        relays the card's signals to its statistics.
-
-        Emitted inside the save block of the write that changed it, as the
-        widget handlers that used to emit them were: the statistics write
-        `recent_sets` / `upset_factor` synchronously, into the same cycle.
-        """
-        if change.idChanged and "score" in self.path:
-            self.instanceSignals.playerId_changed.emit()
-            if "team.1" in self.path:
-                self.instanceSignals.player1Id_changed.emit()
-            else:
-                self.instanceSignals.player2Id_changed.emit()
-        if change.seedChanged:
-            self.instanceSignals.player_seed_changed.emit()
+        # The service asks for the statistics when the slot actually
+        # changed hands (announce), not for a re-asserted id.
+        self.player.SetPlayerId(id, announce=True)
 
     # ── render: the slot, from the state (ADR-005 S2a) ───────────────────
     #
@@ -1445,15 +1427,9 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         """
         logger.debug(f"Setting data for {self.path}: {data}")
         try:
-            with StateManager.SaveBlock():
-                before = self.player.Identity()
-                try:
-                    self.player.ApplyData(data, not dontLoadFromDB, clear,
-                                          no_mains)
-                finally:
-                    # Also for a load that raised half-way: what it wrote
-                    # is published, and its statistics with it.
-                    self.AnnounceChange(self.player.ChangeSince(before))
+            # The load asks for its statistics itself (ApplyData), also
+            # when it raised half-way, for what it did write.
+            self.player.ApplyData(data, not dontLoadFromDB, clear, no_mains)
         finally:
             self._ShowOwnOperation()
 
@@ -1461,8 +1437,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         """The card's clear button: empty the slot (PlayerService.ClearSlot,
         as the board's clear does; ADR-005 S3e-3) and show it."""
         try:
-            with StateManager.SaveBlock():
-                self.AnnounceChange(self.player.ClearSlot(no_mains))
+            self.player.ClearSlot(no_mains)
         finally:
             self._ShowOwnOperation()
 

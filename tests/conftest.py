@@ -52,6 +52,27 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
+@pytest.fixture(autouse=True)
+def _freshStatistics():
+    """Every test starts with the statistics' class state empty: the request
+    numbers and the queued team refreshes (StatsService, ADR-005 S3e-5) are
+    process-wide, and a refresh left queued by one test -- its Later never
+    delivered -- would swallow the next one's on that board. The fetcher
+    bootstrap registered stays. The numbers come from one counter, so an
+    answer still in flight from an earlier test never passes for a new
+    request's."""
+    from src.core.StatsService import StatsService  # no side effects
+
+    def reset():
+        with StatsService._queueLock:
+            StatsService._queuedTeams.clear()
+        StatsService._generations.clear()
+
+    reset()
+    yield
+    reset()
+
+
 # ── Widget-level harness (L2) ────────────────────────────────────────────
 #
 # Everything below builds a real, bootstrapped Autona -- the same singletons
@@ -301,8 +322,9 @@ class _AutonaHarness:
     def actions(self):
         """A WebServerActions bound to the real manager (never started).
 
-        The board-dependent operations (set loading, stats, the thumbnail,
-        ...): what the HTTP routes and Socket.IO events that need a widget
+        The board-dependent operations (set loading, the thumbnail, ...;
+        the statistics are web() since ADR-005 S3e-5): what the HTTP routes
+        and Socket.IO events that need a widget
         delegate to, so driving it exercises the same code path as a request
         without binding a port.
         """

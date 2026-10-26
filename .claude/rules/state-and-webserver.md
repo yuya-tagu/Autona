@@ -132,8 +132,9 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
   旧カードの `Clear()` と同じ内容で空にする。birthday・city・mains は残る）/ `ClearBoard`（すべての入力値をリセット =
   選手 + `ResetMatch` + チーム名・ロゴ）。いずれも board 1,2 だけで 1 保存サイクル、board 3 は False
 - **クリアは state の書き換え**（S2d）。旧実装はボードのウィジェットを空に戻していた（カード 1 枚ごとに 1 サイクル）。
-  ボードに残るのは `AutonaScoreboardWidget._ClearingPlayers` の 3 つ: 入力中の欄の確定（`CommitFocusedEdit`。打ちかけの文字がクリアで消えるのは選手欄だけで、match / チーム名 / スコア欄の打ちかけは旧実装どおりフォーカスアウトで確定する。セット読込の前処理でもフォーカスが外れる）・
-  追跡中セットを忘れる（同じセットの再読込が効くように）・id が変わったチームの統計を 1 回取り直す。
+  ボードに残るのは `AutonaScoreboardWidget._ClearingPlayers` の 2 つ: 入力中の欄の確定（`CommitFocusedEdit`。打ちかけの文字がクリアで消えるのは選手欄だけで、match / チーム名 / スコア欄の打ちかけは旧実装どおりフォーカスアウトで確定する。セット読込の前処理でもフォーカスが外れる）・
+  追跡中セットを忘れる（同じセットの再読込が効くように）。id が変わったチームの統計の取り直しは操作の仕事
+  （`ClearPlayers` → `StatsService.TeamsChanged`。ADR-005 S3e-5。それまではボードが出していた）。
   Web の `clear_all` は `ClearBoard` ではなく、旧順序（`ResetMatch` → best_of → 人数・キャラ数 → 選手）で呼ぶ
   （チーム名を残し、人数・キャラ数の変更が mains を決める順を保つ。ADR-005 S2 判断 3）
 - **スワップは state の入れ替え**（S2c）。旧実装は選手カード間の値コピー（`SwapWith`、削除済み）で、
@@ -146,8 +147,9 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
   値が意図して変わったステップも含む）。
   **`teamsSwapped` の正本は state**（ボード属性は廃止）。`SetLoadService.DisplayTeam` と
   `AutonaWebOperations.get_swap` は state を読む。スワップ後のカード・スコア・チームカード・ステージボタンは
-  held サイクルからの描画で追従し、統計の再取得はボードが held サイクルでフラグの反転（チーム入替）を検知して
-  1 回だけ出す（上下移動は `_MovePlayer` が出す）。アップセット係数は操作が core 内で再計算する。
+  held サイクルからの描画で追従する。統計の再取得は操作が出す（`SwapTeams` / `SwapPlayers` → `StatsService.TeamsChanged`。
+  イベントループに戻ってから 1 回。ADR-005 S3e-5。それまではボードが held サイクルでフラグの反転を検知して出していた）。
+  アップセット係数は操作が core 内で再計算する。
   入替サイクルではボードがゲームトラッカーにスコアの変化を伝えない（`_SyncScoreDisplays(followStages=False)`。
   記録は入替が鏡映済み）。**入力中の欄は入替・移動の前に確定する**（`AutonaScoreboardWidget.CommitFocusedEdit`
   がそのボード内のフォーカスを外し、Qt に `editingFinished` を出させる。欄の補完ポップアップが開いていれば
@@ -198,13 +200,14 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
   （Flask / Socket.IO）のスレッドで core を呼び、`@gui_thread_sync` を持たない。
   S2 で core 化した操作（`swap_teams`・S2d のクリア `reset_match` / `reset_players` / `clear_all`・`get_set`・
   `get_swap`・`set_route` の phase / pool / match / losers / teamName / bestOf・`set_team_losers`・`reset_scores`）と、
-  S3e-4 で移した選手の Web 操作（`update_player` / `set_team_data` / `load_player_from_tag`。`PlayerService.ApplyData`）は
+  S3e-4 で移した選手の Web 操作（`update_player` / `set_team_data` / `load_player_from_tag`。`PlayerService.ApplyData`）と、
+  S3e-5 で移した統計（`stats_*` 4 本・`refresh_stats`。`StatsService`）は
   どちらのシェルでも core を呼び、**その周りのボードの仕事をシェルが登録するボードホスト
   （`AutonaWebOperations.boardHost`）が受け持つ**:
   - デスクトップ（`DesktopBoardHost`。`bootstrap_gui()` が登録）: GUI スレッドで同期実行する（選手カードの入力確定が
     GUI スレッド上で「フィールド → 合成名」の 2 書き込みに分かれており、その間に割り込むと合成名が反対のスロットに
     残るため。選手の読込を core にした S3e-3 の後も、手入力の確定はこの 2 書き込みのまま。S3e-4 で見直して維持した。
-    選手の Web 操作の後のカードの仕事（統計の依頼・打ちかけのコンボの文字を捨てる。`PlayerLoaded`）も GUI スレッドの仕事）。未構築ボードを `EnsureScoreboard` で構築してから書く（未構築ボードは held でなく、
+    選手の Web 操作の後のカードの仕事（打ちかけのコンボの文字を捨てる。`PlayerLoaded`）も GUI スレッドの仕事）。未構築ボードを `EnsureScoreboard` で構築してから書く（未構築ボードは held でなく、
     書き込みが即時公開されたあと構築時のシードで消えるため）。入力中の欄を確定する。ボード 1 / 2 の
     人数 / キャラ数（ボードのスピンボックス。S2g）はウィジェットに委ねる（クルーボードの操作は S3e-2 から core）
   - ヘッドレス（`BoardHost`。既定）: 呼び出し元のスレッドで core を呼ぶ。1 本の再入可能ロック（`RLock`）で 1 つずつ
@@ -212,7 +215,7 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
     ロックの中でメインスレッドを待たない・`StateManager.lock` を持ったまま取らない。待つもの（`savePlayerToDb` の選手 DB への
     書き込み: `PlayerDB.changed` → `AutonaPlayerDB.SetupModel` がメインスレッドで走る）は `Run` を抜けてから行う。S3e-4 レビュー）。ボードが無いので held にならず即時公開
     （反映ボタンが無いのでこれが正しい）。ウィジェットが要るもの（ボード 1 / 2 の人数 / キャラ数）は
-    `NotAvailable`（503）。選手の Web 操作の後の統計は取り直さない（`PlayerLoaded` は何もしない。S3e-5 で core へ）
+    `NotAvailable`（503）。統計は両シェルとも core が取り直す（ADR-005 S3e-5。`PlayerLoaded` は何もしない）
 - **SaveBlock は複数キーを 1 サイクルにまとめる時だけ**使う（単一キーなら不要）。
   かつては「空 `changedKeys` の SaveState = `include_paths=[]` = フィルタなし =
   全 state 差分」という地雷があったが、**Step 4a で `SaveState` 側が空 `changedKeys`
@@ -243,11 +246,11 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
 
 | サービス | 所有者 | 責務 |
 |---------|--------|------|
-| `src/core/StatsService.py` | `AutonaScoreboardWidget.stats.service` | 統計の取得可否判断・アップセット計算・`last_sets`/`history_sets`/`recent_sets`/`upset_factor` の書き込み |
+| `src/core/StatsService.py` | なし（`StatsService(n)` を呼ぶたびに作る。取得の `fetcher`（`AutonaStatsUtil`。`bootstrap_core()` が登録）と要求番号はクラスの持ち物） | 統計のすべて（ADR-005 S3e-5）: いつ取り直すか（`PlayerChanged` = 選手の読込・クリア・カードの手入力の id / seed の変化。`PlayerService.Announce` が書き込みの保存ブロックの中で呼ぶ / `TeamsChanged` = スワップ・上下移動・クリア。`AutonaActions` が操作の後に呼び、`fetcher.Later` でイベントループに戻ってからボードごとに 1 回 / `Refresh` / `RefreshAll` = Web のルートと STATS パネル）・取得可否の判断・アップセット計算・`last_sets`/`history_sets`/`recent_sets`/`upset_factor` の書き込み。人数は state のスロット数（0 なら `DefaultPlayersPerTeam()`）。**遅れた答えは捨てる**: 要求ごとに（ボード, 統計, チーム）の番号を `StateManager.lock` の中で振り、答えはメインスレッドで、番号が最新かつスロットが要求したときの選手のままのときだけ書く。番号は 1 つのカウンタから出す（キーをまたいで重ならない）。取得の開始はロックの外。**取得の失敗は統計ごとにログに残して次へ進む**（`RefreshQuietly`。いくつも依頼する入口と Web のルートはこれを呼び、ルートは `"OK"` のまま。旧実装は統計ごとの Qt シグナルだった）。ボードの構築・シェルによらず動く |
 | `src/core/GameTrackerService.py` | `AutonaIndividualGameTracker.service`（ボードが `AutonaActions.RegisterGameTracker` で登録する。ADR-005 S2e） | ステージ勝敗の記録（`score.{n}.stages.*`）・ステージ⇔スコアの相互整合・`writingScore` ガード・行の作り直し（`SetStageCount`。呼ぶのは `AutonaActions.SetBestOf` / `RepublishBestOf` だけで、`rowsVersion` が作り直しのたびに進み、ウィジェットの `RenderStageRows` がそれを見てボタンを作り直す）。存在しない行への `SetStageResult` / `SetStageAsset` は lock の中で断る（警告して False。別スレッドの `SetBestOf` で行が消えた後、作り直し前の古いボタンが押されても行を書き戻さない） |
 | `src/core/SetLoadService.py` | `AutonaScoreboardWidget.setLoad` | セット読込の正規化（ラウンド/フェーズ/プール・スコア・敗者フラグ・チーム名とロゴ・`bracket_type`・追従中セット）。最後に読んだセット `lastSetSelected` も持つ（state の外。ADR-005 S2d でボード属性から移動。クリアと `ClearSetTracking()` で忘れるので、同じセットを選び直すと再読込される。`get_set` と stale 判定が読む）。スワップ後の面の解決は `DisplayTeam()` が唯一の正本（`score.{n}.teamsSwapped` を読む。S2c までボード属性を callable で注入していた） |
 | `src/core/TournamentInfoService.py` | `TournamentInfoService.instance`（`bootstrap_core()` 生成） | `tournamentInfo.*` の書き込み全部（provider ペイロードの適用・**EVENT タブ入力欄の `Set{Text,Number,Date}Field`**・表示大会名の 3 系統の上書き規則・`logoVersion`・起動時シード）。EVENT パネル不在でも動くことが遅延構築の前提。**両方向が同じ 3 操作を通る**（provider 側の `_ApplyKey` も入力側と同じメソッドを呼ぶ）。ただし `themeColor`/`accentColor` の 2 キーだけは **`core/ColorService.py` の持ち物**で本サービスを通らない（歴史的にこのプレフィックスなだけで、意味はカラー機能側）。**表示大会名の入力欄は SCORE パネルとクルーボードの 2 箇所にあり、どちらも `SetDisplayName` を呼ぶ**（クルー側は Step 5 第 4 弾で合流） |
-| `src/core/PlayerService.py` | `AutonaBasePlayerWidget.player`（選手ウィジェット 1 枚につき 1 個。path に束縛）。加えて**一時インスタンス**: モジュール関数 `RepublishTeamMergedNames(board, team)` が、state にあるそのチームの各スロットの path で 1 個ずつ作って使い捨てる（カードを経由しない） | 選手スロット配下の書き込み全部（入力フィールド・seed/birthday・国/州・`mergedName`/`mergedOnlyName`・アバターとスポンサーロゴ・キャラスロット・`city`/`id`・スロット削除）。**選手の読込（`ApplyData(data, loadFromDB, clear, no_mains)`）・カードのクリア（`ClearSlot`）・DB への保存（`SavePlayerToDB` = state 側の `PrepareSaveToDB`（番号付きの記録を返す）+ DB 側の `SaveRecordToDB`。Web の操作は DB 側をボードホストの外で呼ぶ: `PlayerDB.changed` の受け手 `AutonaPlayerDB.SetupModel` がメインスレッドを待つため。外へ出したので、同じ DB キーにもっと新しい番号の記録が保存済みなら古い方を捨てる。ADR-005 S3e-4 レビュー）もここ**（ADR-005 S3e-3）: 読込は DB の記録とのマージ・悪語フィルタ（コピーに対して。呼び出し側の dict と DB の記録は書き換えない）・国 / 地域（code と `FindState`）・mains → キャラスロット・seed・合成名と画像を 1 保存サイクルで書き、旧カードの `SetData` と同じ Set 列を出す（`tests/test_player_apply.py` / `tests/test_player_service.py` が ae922c24 の録画と照合）。戻り値の `SlotChange`（操作の前後で id / seed が変わったか）で、呼び出し側（カード・ボードの `_ApplyPlayer`・Web の選手操作（`AutonaWebOperations._load_player` → ボードホストの `PlayerLoaded`））が統計を 1 回だけ取り直す。**クリアしない読込（Web の選手編集・legacy `update-team`）で、書き込み後のスポンサー + タグの組が前と違えば別の選手として扱い、読込が書かない id・city を空にする**（`_NamesAnotherPlayer`。ADR-005 S3e-4。同じ組なら残す。残すかは読込が実際に書いたかで決めるので、途中の例外でも前の選手の id が残らない。online_avatar・seed は残す: カードの手入力の `NameChanged` と同じで、LIVE-BUG-1「タグを直しても顔写真は消えない」を守る）。保存はウィジェットではなく state から組む。`AutonaActions.ClearPlayers` も各スロットの `ClearSlot` を呼ぶ。`BoardNumber()` が `score.{N}` と `player_editor.1` を見分ける。**`mergedName` / `mergedOnlyName` の ` [L]` は state のチームの `losers` から付ける**（`PublishMergedName(sponsor, tag)` が `TeamLosersKey()` を読む。ADR-005 S2b）。フラグの書き手は同じ SaveBlock で `RepublishTeamMergedNames` を呼び、チーム全員の名前を state の `team` / `name` から作り直す: `AutonaActions.SetTeamLosers`（LOSERS チェックボックス・v1 `PATCH set` の `AutonaWebOperations.set_team_losers`）と `SetLoadService.ApplyLosers`（セット読込・legacy `-set?losers=` の `ChangeSetData`。`DisplayTeam` で解いたチーム）。どちらもフラグが変わったときだけ。カードは名前確定で `_OnTextChanged`（state に書く）→ `NameChanged`（publish）の順に走るので、作り直しがどのスレッドから割り込んでも同じ名前になる。**国/州とキャラスロットはカードから識別子だけを受け取り、値はここで組む**（ADR-005 S1d）: `SetCountry(code)` / `SetRegion(countryCode, regionCode)` は `CountryCatalog.CountryByCode` / `State` から、`PublishCharacterSlots([CharacterSlot(en_name, skin 行, variant en_name, フォールバック名), ...])` は `GameAssetCatalog.CharacterRow` / `SkinRow` / `VariantRow` から（1 回の publish は `Current()` 1 回のスナップショットで解決）。入れ子のキー順は旧実装が Qt モデル経由で出していた QVariantMap 順を `DictHelper.qvariantmap_copy` で再現する（`program_state.json` と Socket.IO delta のバイト互換。`tests/test_player_slot_publish.py` と `tests/test_player_service.py` が移行前の golden と照合）。カタログが知らない識別子は、キャラなら `{"name": フォールバック名}`（手入力テキスト、または選ばれた行自身の `name`。コンボの「表示名 / en_name」ラベルは使わない）、国/州なら `{}`。カタログは `games=` / `countries=` で差し替え可能（既定は呼び出し時の `.instance`） |
+| `src/core/PlayerService.py` | `AutonaBasePlayerWidget.player`（選手ウィジェット 1 枚につき 1 個。path に束縛）。加えて**一時インスタンス**: モジュール関数 `RepublishTeamMergedNames(board, team)` が、state にあるそのチームの各スロットの path で 1 個ずつ作って使い捨てる（カードを経由しない） | 選手スロット配下の書き込み全部（入力フィールド・seed/birthday・国/州・`mergedName`/`mergedOnlyName`・アバターとスポンサーロゴ・キャラスロット・`city`/`id`・スロット削除）。**選手の読込（`ApplyData(data, loadFromDB, clear, no_mains)`）・カードのクリア（`ClearSlot`）・DB への保存（`SavePlayerToDB` = state 側の `PrepareSaveToDB`（番号付きの記録を返す）+ DB 側の `SaveRecordToDB`。Web の操作は DB 側をボードホストの外で呼ぶ: `PlayerDB.changed` の受け手 `AutonaPlayerDB.SetupModel` がメインスレッドを待つため。外へ出したので、同じ DB キーにもっと新しい番号の記録が保存済みなら古い方を捨てる。ADR-005 S3e-4 レビュー）もここ**（ADR-005 S3e-3）: 読込は DB の記録とのマージ・悪語フィルタ（コピーに対して。呼び出し側の dict と DB の記録は書き換えない）・国 / 地域（code と `FindState`）・mains → キャラスロット・seed・合成名と画像を 1 保存サイクルで書き、旧カードの `SetData` と同じ Set 列を出す（`tests/test_player_apply.py` / `tests/test_player_service.py` が ae922c24 の録画と照合）。操作の前後で id / seed が変わったか（`SlotChange`。戻り値でもある）で、読込自身が統計を 1 回だけ依頼する（`Announce` → `StatsService.PlayerChanged`。ボードのスロットだけ。`SetSeed` / `SetPlayerId` は `announce=True` のときにカードの手入力として依頼する。ADR-005 S3e-5。それまでは呼び出し側のカード・ボード・ボードホストが依頼していた）。**クリアしない読込（Web の選手編集・legacy `update-team`）で、書き込み後のスポンサー + タグの組が前と違えば別の選手として扱い、読込が書かない id・city を空にする**（`_NamesAnotherPlayer`。ADR-005 S3e-4。同じ組なら残す。残すかは読込が実際に書いたかで決めるので、途中の例外でも前の選手の id が残らない。online_avatar・seed は残す: カードの手入力の `NameChanged` と同じで、LIVE-BUG-1「タグを直しても顔写真は消えない」を守る）。保存はウィジェットではなく state から組む。`AutonaActions.ClearPlayers` も各スロットの `ClearSlot` を呼ぶ。`BoardNumber()` が `score.{N}` と `player_editor.1` を見分ける。**`mergedName` / `mergedOnlyName` の ` [L]` は state のチームの `losers` から付ける**（`PublishMergedName(sponsor, tag)` が `TeamLosersKey()` を読む。ADR-005 S2b）。フラグの書き手は同じ SaveBlock で `RepublishTeamMergedNames` を呼び、チーム全員の名前を state の `team` / `name` から作り直す: `AutonaActions.SetTeamLosers`（LOSERS チェックボックス・v1 `PATCH set` の `AutonaWebOperations.set_team_losers`）と `SetLoadService.ApplyLosers`（セット読込・legacy `-set?losers=` の `ChangeSetData`。`DisplayTeam` で解いたチーム）。どちらもフラグが変わったときだけ。カードは名前確定で `_OnTextChanged`（state に書く）→ `NameChanged`（publish）の順に走るので、作り直しがどのスレッドから割り込んでも同じ名前になる。**国/州とキャラスロットはカードから識別子だけを受け取り、値はここで組む**（ADR-005 S1d）: `SetCountry(code)` / `SetRegion(countryCode, regionCode)` は `CountryCatalog.CountryByCode` / `State` から、`PublishCharacterSlots([CharacterSlot(en_name, skin 行, variant en_name, フォールバック名), ...])` は `GameAssetCatalog.CharacterRow` / `SkinRow` / `VariantRow` から（1 回の publish は `Current()` 1 回のスナップショットで解決）。入れ子のキー順は旧実装が Qt モデル経由で出していた QVariantMap 順を `DictHelper.qvariantmap_copy` で再現する（`program_state.json` と Socket.IO delta のバイト互換。`tests/test_player_slot_publish.py` と `tests/test_player_service.py` が移行前の golden と照合）。カタログが知らない識別子は、キャラなら `{"name": フォールバック名}`（手入力テキスト、または選ばれた行自身の `name`。コンボの「表示名 / en_name」ラベルは使わない）、国/州なら `{}`。カタログは `games=` / `countries=` で差し替え可能（既定は呼び出し時の `.instance`） |
 | `src/core/CrewBattleService.py` | `AutonaCrewBattleWidget.crew`。Web（`AutonaWebOperations`）は呼び出しごとに 1 個作る | クルーボード（board 3）の書き込み全部（起動シード・メンバー名・ストック（`AdjustMemberStock` / `SetMemberStock`。0〜99）・人数（`SetMemberCount`。1〜9）・出場中のメンバー（`SelectActiveMember` / `ReleaseActiveMember`。1 チーム 1 人）・**クルー合計の算出**（名前が入った表示中メンバーの stock 合計 → `team.{t}.score`）・crew 版のセットデータ正規化（`ApplySetData`）・`best_of`（raw のみ・0〜99）・スワップ / ストックのリセット / クリア（`SwapTeams` / `ResetStocks` / `ClearCrew`。両チームを 1 サイクルで publish）・スワップのフラグ（`teamsSwapped`。state の外）。**操作は state を読んで書く**（ADR-005 S3e-2。旧実装はウィジェットの行を受け取っていた）。合計も state から算出する |
 | `src/core/CommentaryService.py` | なし（モジュール関数） | `commentary.*` の書き込み全部（ADR-005 S3e-2）: 選手データでの 1 枠の上書き（`ApplyPlayerData`。Web と補完の選択。悪語フィルタ → 正規化 → 1 枠をマージしてルートごと 1 回 publish = 旧パネル経由と同じ Set）・タグからの読込（`LoadFromTag`。`PlayerDB`）・パネルの 1 欄の編集（`SetField`。値が変わったときだけ。表示は `MAX_DISPLAY` 人まで）・並べ替え（`Reorder`）。実況パネルは state を描画するだけ（入力中の欄は飛ばし、held-back の規則で古い文字を書き戻さない） |
 | `src/core/Top8Service.py` | なし（モジュール関数） | `top8.*` の書き込み全部（パネルの 1 欄の編集 `SetPlayerText` / `SetPlayerCountry` / `SetPlayerCharacter`（その 1 キーだけを、変わったときだけ）・表示ラベルの既定値・反映（staged スコアのマージ + `Recompute`）・全リセット・Start.gg 取り込み）。**取り込みの入口は `RefreshFromProvider()` の 1 つ**（ADR-005 S3e-8。パネル・ホットキー・legacy / Socket.IO / v1 が同じ関数を呼び、ヘッドレスでも動く）: 大会の最後の phase のダブルエリミのグループ（`TargetPhaseGroup`）→ 取得 → `core/Bracket` → `Top8Model.FromBracket` → 選手を `GameAssetCatalog` / `CountryCatalog` で解決 → `ImportBracket`。取得は `bootstrap_core()` が注入する `fetcher`（provider の `RunWithProvider`。provider のワーカースレッドで走る）。実行中フラグは取り込み全体（取得〜書き込み）で 1 つ、全入口が共有し、実行中の要求は `BUSY` で捨てる（キューしない）。選手の解決と書き込みは `StateManager.lock` の中（ゲームの切り替えとの競合で前のゲームのキャラが残らない）。空・失敗の結果は何も書かない。**ゲームが別のゲームに変わったときのキャラの消去 `ForgetCharacters()`** も持つ（キャラがある枠だけ・1 保存サイクル。呼ぶのは `GameAssetCatalog.SelectGame` だけ）。Top 8 パネルは操作を依頼し、state を描画するだけ（実況パネルと同じ型）。トポロジ自体は Qt-free の `src/core/Top8Model.py` が正本 |
@@ -280,8 +283,8 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
 - **state が記録、ウィジェットは表示**。ステージ結果は `score.{n}.stages.{i}` が正本で、
   ボタンはそれを描画するだけ（`_SyncStageButtons`）。`setChecked()` は `toggled` しか
   出さず `clicked` は出ないので、この再描画はエコーループにならない
-- Qt 依存が避けられない値（選手数 = `team1playerWidgets` の長さ）は**呼び出し可能オブジェクトで
-  注入**する。core 側が Qt を import しないことが層の定義（`tests/test_core_qt_free.py`）
+- Qt 依存が避けられないもの（統計の取得 = `StatsService.fetcher`、ローカライズ文字列など）は**呼び出し可能オブジェクトで
+  注入**する（選手数は注入しない: state のスロット数。ADR-005 S3e-5）。core 側が Qt を import しないことが層の定義（`tests/test_core_qt_free.py`）
 - **サービスは observer を購読しない**。購読すると所有ウィジェットと同じゴースト問題を
   core 側に持ち込むことになる。サービスは「呼ばれる」だけの存在にする
 
@@ -328,8 +331,8 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
     シェルが登録する `loadGameByCodename`（デスクトップはアセットアダプタ、ヘッドレスは `src/headless.py` の
     カタログ直のローダー）
   - **`WebServerActions`（ボード依存）**: ボード / パネルのウィジェットがまだ答える操作だけ（`post_score`・
-    セット読込と追従・統計・サムネイルの 10 メソッド。実況とクルーは S3e-2、Top 8 の取り込みは S3e-8、選手の編集とタグからの
-    選手の読込は S3e-4 で `AutonaWebOperations` へ移った）。デスクトップの Window が作って
+    セット読込と追従・サムネイルの 5 メソッド。実況とクルーは S3e-2、Top 8 の取り込みは S3e-8、選手の編集とタグからの
+    選手の読込は S3e-4、統計は S3e-5 で `AutonaWebOperations` へ移った）。デスクトップの Window が作って
     `WebServer(actions=...)` に渡す。ルートは `WebServer._board_actions()` 経由で呼び、ヘッドレス
     （`actions=None`）では `NotAvailable` → **503 `UNAVAILABLE`（`not available in headless`）**。legacy は
     errorhandler、Socket.IO は ack（`_ws_unavailable`）、v1 は `_actions_ref()` / wrapper が同じ形で返す。

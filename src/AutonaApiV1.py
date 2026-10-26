@@ -596,13 +596,14 @@ def score_reset(n):
 @api_v1.route("/scoreboards/<int:n>/stats:refresh", methods=["POST"])
 @write_op("stats.refresh")
 def stats_refresh(n):
-    # Board 3 (crew) has no stats util at all, so it is rejected like every
-    # other board1/2-only operation rather than silently doing nothing.
+    # Board 3 (crew) has no statistics, so it is rejected like every other
+    # board1/2-only operation rather than silently doing nothing.
     require_board_12(n)
-    # @gui_thread_sync, but the start.gg fetches it kicks off are async: the
-    # revision here only covers the synchronous part (spec §14.1a) — clients
-    # observe the finished stats via the WS delta stream.
-    _actions_ref().refresh_stats(n)
+    # Core's (StatsService, ADR-005 S3e-5), in both shells. The start.gg
+    # fetches it kicks off are async: the revision here only covers the
+    # synchronous part (spec §14.1a) — clients observe the finished stats
+    # via the WS delta stream.
+    WebOps.refresh_stats(n)
     return ok(revision=current_revision())
 
 

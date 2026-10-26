@@ -419,11 +419,22 @@ class AutonaTournamentDataProvider(QObject):
         ])
         self.threadPool.start(worker)
 
+    @staticmethod
+    def _ProviderPlayerId(playerId):
+        """The provider's player id out of a slot's `id`: a Start.gg entrant
+        is [player id, user id]; anything else (a scalar from the local
+        database or the Web, say) is the id itself. Indexing a scalar
+        raised TypeError here, on the caller's thread -- so a statistic
+        request stopped the ones after it (ADR-005 S3e-5 review)."""
+        if isinstance(playerId, (list, tuple)):
+            return playerId[0] if playerId else None
+        return playerId
+
     def GetLastSets(self, callback, playerId, playerNumber):
         if self.provider is None:
             return
         worker = Worker(self.provider.GetLastSets, **{
-            "playerID": playerId[0],
+            "playerID": self._ProviderPlayerId(playerId),
             "playerNumber": playerNumber,
             "callback": callback
         })
@@ -433,7 +444,7 @@ class AutonaTournamentDataProvider(QObject):
         if self.provider is None:
             return
         worker = Worker(self.provider.GetPlayerHistoryStandings, **{
-            "playerID": playerId[0],
+            "playerID": self._ProviderPlayerId(playerId),
             "playerNumber": playerNumber,
             "gameType": gameType,
             "callback": callback

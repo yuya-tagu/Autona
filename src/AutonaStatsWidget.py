@@ -3,6 +3,7 @@ from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 
 from .core.StateManager import StateManager
+from .core.StatsService import StatsService
 from .StateManagerBridge import StateManagerBridge
 from . import ui_constants as UI
 from loguru import logger
@@ -192,16 +193,12 @@ class AutonaStatsWidget(QDockWidget):
         table.setFixedHeight(total)
 
     def _refresh(self):
-        """Trigger stats recalculation via AutonaStatsUtil signals."""
+        """Fetch board 1's statistics again (core's StatsService.RefreshAll,
+        as the web's refresh does; ADR-005 S3e-5). The board is built first,
+        as the button always did."""
         from .AutonaScoreboardManager import AutonaScoreboardManager
-        sb = AutonaScoreboardManager.instance.GetScoreboard(1)
-        if hasattr(sb, "stats") and sb.stats:
-            sb.stats.signals.RecentSetsSignal.emit()
-            sb.stats.signals.LastSetsP1Signal.emit()
-            sb.stats.signals.LastSetsP2Signal.emit()
-            sb.stats.signals.PlayerHistoryStandingsP1Signal.emit()
-            sb.stats.signals.PlayerHistoryStandingsP2Signal.emit()
-            sb.stats.signals.UpsetFactorCalculation.emit()
+        if AutonaScoreboardManager.instance.GetScoreboard(1) is not None:
+            StatsService(1).RefreshAll()
 
     def _onStateChanged(self):
         try:

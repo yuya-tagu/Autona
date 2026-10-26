@@ -1670,7 +1670,7 @@ React Web UI 側はオペレーターが手元デバイスから操作する用�
 
 | # | ファイル | 内容 |
 |---|---------|------|
-| 1 | `src/core/StatsService.py` | 算出ロジック・state 書き込みを追加（headless core Step 4a で core へ移行。`AutonaStatsUtil` はシグナル中継のみの Qt アダプタ） |
+| 1 | `src/core/StatsService.py` | 算出ロジック・state 書き込み・取り直しのトリガー（`PlayerChanged` / `TeamsChanged` / `RefreshAll`）を追加（headless core Step 4a で算出と書き込み、ADR-005 S3e-5 でトリガーと取得の判断が core へ移行。`AutonaStatsUtil` は取得の輸送だけの Qt アダプタ = `StatsService.fetcher`。取得が要るなら fetcher に 1 メソッド足す） |
 | 2 | `AutonaStatsWidget` または `AutonaAnalysisWidget` | 表示 UI を追加 |
 | 3 | `Design.md` §3.1.2 | State に保存する場合のみキーパスを追記 |
 

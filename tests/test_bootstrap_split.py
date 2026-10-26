@@ -127,6 +127,7 @@ def test_bootstrap_core_steps_and_their_order():
         "AutonaTournamentDataProvider()",
         "Top8Service.fetcher"
         " = AutonaTournamentDataProvider.instance.RunWithProvider",
+        "StatsService.fetcher = AutonaStatsUtil()",
         "TournamentInfoService()",
         "CountryCatalog()",
         "AutonaDesignerService.MigrateLegacyProjects()",
