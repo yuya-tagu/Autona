@@ -35,15 +35,6 @@ DEFAULT_COLORS = CrewBattleService.DEFAULT_COLORS
 ACCENT_GOLD = "#f0a500"
 
 
-class AutonaCrewBattleWidgetSignals(QObject):
-    # A set payload for board 3: the board-dependent web action that still
-    # emits into whichever board it addresses (post_score) lands here. Every
-    # other operation of this board is core's (CrewBattleService, ADR-005
-    # S3e-2), called by the Web directly -- set_team_data's payload too
-    # since S3e-4 (AutonaWebOperations._apply_set_fields).
-    ChangeSetData = Signal(dict)
-
-
 class AutonaCrewBattleWidget(QWidget):
     """Dedicated SCORE widget for the Crewbattle (board 3) format.
 
@@ -86,9 +77,6 @@ class AutonaCrewBattleWidget(QWidget):
         # this and AutonaScoreboardManager's placeholder stay identical
         # (headless core Step 2).
         schema.SeedBoard(self.scoreboardNumber)
-
-        self.signals = AutonaCrewBattleWidgetSignals()
-        self.signals.ChangeSetData.connect(self.ChangeSetData)
 
         # Per-team widget registries (index 0 = team 1, 1 = team 2).
         self.teamNameEdits: list[QLineEdit] = []
@@ -619,7 +607,7 @@ class AutonaCrewBattleWidget(QWidget):
             popup.hide()
         focus.clearFocus()
 
-    # ── Board operations (the buttons, and the set payload signal) ─────
+    # ── Board operations (the buttons, and a set payload) ─────────────
 
     def SwapTeams(self):
         self.CommitFocusedEdit()
@@ -630,12 +618,14 @@ class AutonaCrewBattleWidget(QWidget):
         self.crew.ResetStocks()
 
     def ChangeSetData(self, data):
-        # post_score() can route a set payload here. Crew
-        # has no set-loading UI: the generic fields are persisted if present
-        # and the rest is ignored -- tolerant by design so generic callers
-        # don't crash board 3. The rules are CrewBattleService's, and they
-        # are deliberately NOT SetLoadService's (see that module's
-        # docstring).
+        # A set payload for this board. The app's -- POST /score, the
+        # Web's set fields -- go to CrewBattleService directly (ADR-005
+        # S3e-2 / S3e-4 / S3e-7); this is the board's own entry, which the
+        # widget tests drive. Crew has no set-loading UI: the generic fields
+        # are persisted if present and the rest is ignored -- tolerant by
+        # design so generic callers don't crash board 3. The rules are
+        # CrewBattleService's, and they are deliberately NOT SetLoadService's
+        # (see that module's docstring).
         self.crew.ApplySetData(data)
 
     # ── X (Twitter) post ───────────────────────────────────────────────

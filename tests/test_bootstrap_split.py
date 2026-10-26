@@ -128,6 +128,10 @@ def test_bootstrap_core_steps_and_their_order():
         "Top8Service.fetcher"
         " = AutonaTournamentDataProvider.instance.RunWithProvider",
         "StatsService.fetcher = AutonaStatsUtil()",
+        # The set follow (ADR-005 S3e-7): after the provider and the
+        # statistics' stream queue relay; the board host is read when used.
+        "SetFollowService.fetcher = AutonaSetFollowUtil()",
+        "SetFollowService.boardHost = AutonaWebOperations.current_board_host",
         "TournamentInfoService()",
         "CountryCatalog()",
         "AutonaDesignerService.MigrateLegacyProjects()",

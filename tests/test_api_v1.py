@@ -32,8 +32,7 @@ Both requests go through Flask's test client against the real route tables --
 the legacy ``_build_web_app()`` factory plus the v1 blueprint registered the
 way ``WebServer.__init__`` registers it -- so nothing between the URL and the
 action is stubbed. Requests run on the test thread, which is the GUI thread,
-so ``@gui_thread_sync`` and the queued ``ChangeSetData`` signal both execute
-inline.
+so ``@gui_thread_sync`` executes inline.
 """
 import copy
 import json

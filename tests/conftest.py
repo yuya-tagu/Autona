@@ -13,6 +13,7 @@ This module also hosts the widget-level harness (`autonaApp`): a real,
 bootstrapped singleton layer plus real scoreboard widgets, running offscreen
 inside a throwaway working directory. See the section at the bottom.
 """
+import contextlib
 import json
 import os
 import shutil
@@ -71,6 +72,39 @@ def _freshStatistics():
     reset()
     yield
     reset()
+
+
+@pytest.fixture(autouse=True)
+def _freshSetFollow():
+    """Every test starts with no set loaded, followed or polled on any
+    board: what the set follow keeps (SetFollowService, ADR-005 S3e-7) and
+    the set each board loaded last (SetLoadService) are process-wide, and
+    were a built board's own until then. A poll timer left running by one
+    test is stopped. The fetcher bootstrap registered stays."""
+    from src.core.SetFollowService import SetFollowService  # no side effects
+
+    SetFollowService.ForgetBoard()
+    yield
+    SetFollowService.ForgetBoard()
+
+
+@contextlib.contextmanager
+def tournamentLoaded():
+    """A tournament loaded that answers nothing: a set load goes through --
+    the board's clears, the set recorded as followed, the poll -- and its
+    set's fetch is in flight for good (the other fetches start nothing). A
+    set loads only with a tournament (ADR-005 S3e-7 review: with none,
+    nothing could be fetched and nothing is cleared), and a set whose fetch
+    could not start is not recorded as loaded (S3e-7 re-review); the board
+    tests that load a set without the fake provider
+    (tests/test_set_follow_flow.py) load it under this."""
+    from unittest.mock import patch
+    from src.core.SetFollowService import SetFollowService
+
+    fetcher = SetFollowService.fetcher
+    with patch.object(fetcher, "Available", return_value=True), \
+            patch.object(fetcher, "Match", return_value=True):
+        yield
 
 
 # ── Widget-level harness (L2) ────────────────────────────────────────────
@@ -186,6 +220,10 @@ class _AutonaHarness:
         # board host) builds nothing that would: drop it here, built board or
         # not, so the next test does not start swapped.
         CrewBattleService._swapped.pop(number, None)
+        # The set the board loaded and what it follows are core's since
+        # ADR-005 S3e-7 (they were the board's, and went with it).
+        from src.core.SetFollowService import SetFollowService
+        SetFollowService.ForgetBoard(number)
 
         manager = self.manager
         board = manager.scoreboards.pop(number, None)

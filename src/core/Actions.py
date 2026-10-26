@@ -678,7 +678,7 @@ class AutonaActions:
         """Zero both scores and both losers flags. True if it applied.
 
         The clear a set load runs before the next set arrives
-        (`AutonaScoreboardWidget.NewSetSelected`), and the first half of an
+        (`SetFollowService.LoadSet`, ADR-005 S3e-7), and the first half of an
         operator's reset (`ResetMatch`). It leaves the match bar alone:
         `SetLoadService.ApplyMatchInfo` keeps the round name for a payload
         that carries none, so blanking it here would wipe the round

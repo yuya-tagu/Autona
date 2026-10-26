@@ -39,8 +39,10 @@ reaches the stages the same way a +1 does: this class writes
 ``team.{t}.score`` and the board's ``_SyncScoreDisplays`` hands the
 transition to ``GameTrackerService.SyncStagesToScore``.
 
-Import side effects: none (agent-pitfalls #1). One instance per board,
-created by that board's AutonaScoreboardWidget.
+Import side effects: none (agent-pitfalls #1). An instance is bound to one
+board and holds nothing of its own (the set loaded last is class-level, by
+board), so anyone may make one: the board, the web operations and the set
+follow (core/SetFollowService, ADR-005 S3e-7) do.
 """
 import os
 
@@ -66,17 +68,46 @@ class SetLoadService:
     authority, handed in here as a callable; the key was only its mirror.
     """
 
+    # The provider id of the set each board last loaded ({board: id}; no
+    # entry: none). Class-level since ADR-005 S3e-7: the board, the web
+    # operations and the set follow (core/SetFollowService) each make their
+    # own instance and must see the same one -- it was the board's instance
+    # attribute, so with no board there was none.
+    _lastSets = {}
+
     def __init__(self, scoreboardNumber):
         self.scoreboardNumber = scoreboardNumber
-        # The provider id of the set this board last loaded, or None (ADR-005
-        # S2d; it was the board's own attribute). Outside the state on
-        # purpose: `score.{n}.set_id` says which set is *followed* and stays
-        # through a clear, while this is forgotten by every clear of the
-        # players, so that loading the same set again loads it again
-        # (NewSetSelected skips a set it already has). It is also what an
-        # async refresh is checked against (IsStaleUpdate) and what the Web's
-        # get_set answers.
-        self.lastSetSelected = None
+
+    @property
+    def lastSetSelected(self):
+        """The provider id of the set this board last loaded, or None
+        (ADR-005 S2d; it was the board's own attribute). Outside the state
+        on purpose: `score.{n}.set_id` says which set is *followed* and stays
+        through a clear, while this is forgotten by every clear of the
+        players, so that loading the same set again loads it again
+        (SetFollowService.LoadSet skips a set it already has). It is also
+        what an async refresh is checked against (IsStaleUpdate) and what
+        the Web's get_set answers."""
+        return SetLoadService._lastSets.get(self._boardKey())
+
+    @lastSetSelected.setter
+    def lastSetSelected(self, value):
+        if value is None:
+            SetLoadService._lastSets.pop(self._boardKey(), None)
+        else:
+            SetLoadService._lastSets[self._boardKey()] = value
+
+    def _boardKey(self):
+        return AutonaActions._asInt(self.scoreboardNumber,
+                                    self.scoreboardNumber)
+
+    @classmethod
+    def ForgetLastSets(cls, board=None):
+        """Forget the set board `board` (every board: None) loaded last."""
+        if board is None:
+            cls._lastSets.clear()
+        else:
+            cls._lastSets.pop(AutonaActions._asInt(board, board), None)
 
     # ── key paths ────────────────────────────────────────────────────────
 
@@ -246,8 +277,9 @@ class SetLoadService:
     def ApplyLosers(self, data) -> bool:
         """Write the loaded losers flag onto the display team it belongs to.
 
-        Unlike ``_ApplySinglePlayerData``, which addresses the state teams
-        directly because its caller already resolved the swap, this goes
+        Unlike a one-player payload (``SetFollowService._ApplySinglePlayer``),
+        which addresses the state teams directly because its caller names
+        the side it is looking at, this goes
         through ``DisplayTeam(setTeam)`` -- the web `set_route?losers=`
         query reuses the same `team{N}losers` payload shape as a set load,
         so it is treated as a set-team write and flips with the board's
@@ -354,9 +386,6 @@ class SetLoadService:
             StateManager.Set(f"{self.prefix}.auto_update", None)
             StateManager.Set(f"{self.prefix}.set_id", None)
             StateManager.Set(f"{self.prefix}.station", None)
-
-    def SetStationQueue(self, queue):
-        StateManager.Set(f"{self.prefix}.station_queue", queue)
 
     @staticmethod
     def IsStaleUpdate(data, lastSetSelected) -> bool:

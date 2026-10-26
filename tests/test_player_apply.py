@@ -483,11 +483,21 @@ def test_a_cards_load_clear_and_save_only_ask_the_core():
 
 def test_the_board_loads_players_through_the_core():
     methods = _methods("AutonaScoreboardWidget.py", "AutonaScoreboardWidget")
-    for name in ("_ApplyEntrants", "_WritePlayerSlot", "LoadPlayerFromTag"):
-        calls = _attributeCalls(methods[name])
-        assert "SetData" not in calls, name
-        assert "SavePlayerToDB" not in calls or name == "_WritePlayerSlot"
+    calls = _attributeCalls(methods["LoadPlayerFromTag"])
+    assert "SetData" not in calls
+    assert "SavePlayerToDB" not in calls
     assert "ApplyData" in _attributeCalls(methods["_ApplyPlayer"])
+    # A set's entrants and a one-player payload are core's since ADR-005
+    # S3e-7 (SetFollowService): the board's ChangeSetData hands it over.
+    assert not {"_ApplyEntrants", "_ApplySinglePlayerData",
+                "_WritePlayerSlot"} & set(methods)
+    assert "ApplySetPayload" in _attributeCalls(methods["ChangeSetData"])
+    follow = _methods("core/SetFollowService.py", "SetFollowService")
+    for name in ("_ApplyEntrants", "_ApplySinglePlayer"):
+        calls = _attributeCalls(follow[name])
+        assert "SetData" not in calls, name
+        assert "SavePlayerToDB" not in calls, name
+    assert "ApplyData" in _attributeCalls(follow["_ApplyPlayer"])
 
 
 def test_no_card_lock_is_left():

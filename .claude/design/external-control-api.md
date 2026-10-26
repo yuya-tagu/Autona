@@ -107,7 +107,7 @@
 | `CONFLICT` | 409 | 重い操作が実行中（多重起動ガード・§2.8） |
 | `NOT_READY` | 409 | 前提未充足（大会/試合未ロードで provider 不在 等・§3） |
 | `UPSTREAM_TIMEOUT` | 504 | Start.gg 等の外部依存がタイムアウト（agent-pitfalls #11） |
-| `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、ボード / パネルのウィジェットが要る操作（`:load-set`・`:pull-stream` 等）。message は `not available in headless`。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。Top 8 の取り込み（`bracket:refresh`・legacy `/update-bracket`・Socket.IO `update_bracket`）も ADR-005 S3e-8 から core の操作（`Top8Service.RefreshFromProvider`）で、どちらの起動形態でも動く。選手の編集（`PATCH .../players/{p}`・legacy `update-team`・Socket.IO `update_team`）とタグからの選手の読込（legacy `load-player-from-tag`・Socket.IO `load_player_from_tag`）も ADR-005 S3e-4 から core の操作（`PlayerService.ApplyData`）で、どちらの起動形態でも、state にあるスロットに対して動く。統計（`stats:refresh`・legacy `/scoreboard<n>-stats-*`・Socket.IO `stats_*`）も ADR-005 S3e-5 から core の操作（`StatsService`）で、どちらの起動形態でも動く。ボード 1 / 2 の人数 / キャラ数（`PATCH set` の `players` / `characters`・legacy `scoreboard<n>-set`・Socket.IO、`:clear` の人数・キャラ数のリセット）も ADR-005 S3e-6 から core の操作（`AutonaActions.SetRoster`）で、どちらの起動形態でも動く（それまではヘッドレスでこれだった）。ボード 1 / 2 / 3 以外の人数 / キャラ数（legacy `scoreboard<n>-set`・Socket.IO `set`）は、起動形態によらずこの 503 で、何も書かずに断る（それまでデスクトップは 500）。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
+| `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、ボード / パネルのウィジェットが要る操作。v1 にはもう無く（`:load-set`・`:pull-stream` は ADR-005 S3e-7 まで）、legacy / Socket.IO のセット選択ウィンドウを開く操作（`scoreboard<n>-open-set`・`open_set`）とサムネイルだけ。message は `not available in headless`。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。セット読込（`:load-set`・legacy `load-set`・Socket.IO `load_set`）・配信中のセットの取り込み（`:pull-stream`・legacy `pull-stream`・Socket.IO `pull_stream`）・legacy `POST /score`（Socket.IO `score`）も ADR-005 S3e-7 から core の操作（`SetFollowService`）で、どちらの起動形態でも動く。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。Top 8 の取り込み（`bracket:refresh`・legacy `/update-bracket`・Socket.IO `update_bracket`）も ADR-005 S3e-8 から core の操作（`Top8Service.RefreshFromProvider`）で、どちらの起動形態でも動く。選手の編集（`PATCH .../players/{p}`・legacy `update-team`・Socket.IO `update_team`）とタグからの選手の読込（legacy `load-player-from-tag`・Socket.IO `load_player_from_tag`）も ADR-005 S3e-4 から core の操作（`PlayerService.ApplyData`）で、どちらの起動形態でも、state にあるスロットに対して動く。統計（`stats:refresh`・legacy `/scoreboard<n>-stats-*`・Socket.IO `stats_*`）も ADR-005 S3e-5 から core の操作（`StatsService`）で、どちらの起動形態でも動く。ボード 1 / 2 の人数 / キャラ数（`PATCH set` の `players` / `characters`・legacy `scoreboard<n>-set`・Socket.IO、`:clear` の人数・キャラ数のリセット）も ADR-005 S3e-6 から core の操作（`AutonaActions.SetRoster`）で、どちらの起動形態でも動く（それまではヘッドレスでこれだった）。ボード 1 / 2 / 3 以外の人数 / キャラ数（legacy `scoreboard<n>-set`・Socket.IO `set`）は、起動形態によらずこの 503 で、何も書かずに断る（それまでデスクトップは 500）。同じボードへの set フィールド（phase / pool / match / best of / losers。legacy `scoreboard<n>-set`・`update-team`・Socket.IO）も ADR-005 S3e-7 から同じ 503（それまでデスクトップは 500）。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
 | `INTERNAL` | 500 | 想定外の内部例外 |
 
 ### 2.7 操作ログ（D7・A-1）
@@ -406,6 +406,19 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 | `POST /api/v1/game` | 実行中フラグ | `set_game` | #14 |
 | `POST /api/v1/bracket:refresh` | 実行中フラグ | `update_bracket`（`AutonaWebOperations` → `Top8Service.RefreshFromProvider`。ADR-005 S3e-8） | #41 |
 
+- `:load-set` / `:pull-stream`（ADR-005 S3e-7 から core の `SetFollowService`。どちらの起動形態でも動く）: 取得は provider のワーカーで
+  非同期で、応答は受付時点の `revision`。大会が読み込まれていなければ **409 `NOT_READY`**（`no tournament loaded`）で、ボードに何も
+  書かない（legacy `load-set` / `pull-stream`・Socket.IO `load_set` / `pull_stream` は何もせず `OK`。それまでのデスクトップは選手と
+  スコアを消してから、取得できずに終わっていた）
+- `:pull-stream`: 設定 `twitch_username` のチャンネルが次に配信するセットを読み込み、そのチャンネルを追従する（セット選択ウィンドウの
+  「配信」と同じ）。**すでにそのチャンネルを追従していれば、今のセットを照会し直すだけ**で、チャンネルのセットが変わったときだけ
+  読み直す（同じセットのあいだはクリアも取得もしない。Web UI の「自動更新」スイッチが数秒ごとに送るため）。追従を始める最初の
+  1 回も、ボードが最後に読んだセットがチャンネルのセットと同じならクリアしない（手で読んだセットの上で自動更新をオンにしたとき）。
+  照会が逆順に返っても、後から出した照会の答えだけを使う。セットの取得に失敗した（Start.gg の失敗・セットの無い答え）ら、
+  次の `:pull-stream`・同じセットの `:load-set` で読み直す。チャンネル未設定は
+  **409 `NOT_READY`**（`twitch_username is not set`。legacy / Socket.IO は何もせず `OK`）。それまではボードのシグナルを出すだけで、
+  何も接続されておらず何も起きなかった（ADR-005 S3e 論点 3）
+
 ### 7.2 確認フラグ（C-2 / D7）
 - **破壊的操作**（`:clear`・`:reset-players`・`:reset-match`）は body に **`"confirm": true` 必須（MUST）**。
   無い/false なら **`409 CONFIRMATION_REQUIRED`**（状態は変更しない）。
@@ -574,8 +587,8 @@ HTTP/1.1 409 Conflict
 | `POST .../:clear` | `clear_all` | ✓ | n 不正→None→AttributeError | `INVALID_ARGUMENT`（+ confirm 検証） |
 | `POST .../:reset-players` | `reset_players` | ✓ | 同上 | `INVALID_ARGUMENT`/confirm |
 | `POST .../:reset-match` | `reset_match` | ✓ | 同上 | `INVALID_ARGUMENT`/confirm |
-| `POST .../:load-set` | `load_set` | ✓ | n 不正→None。set 非 str は `'0'` にフォールバック（既存） | `INVALID_ARGUMENT` |
-| `POST .../:pull-stream/:pull-user` | `pull_stream_set`/`pull_user_set` | ✕ | n 不正→None→AttributeError | `INVALID_ARGUMENT` |
+| `POST .../:load-set` | `load_set` | ✓ | n 不正→None。set 非 str は `'0'` にフォールバック（既存） | `INVALID_ARGUMENT` / `NOT_READY`（大会未読込。ADR-005 S3e-7） |
+| `POST .../:pull-stream/:pull-user` | `pull_stream_set`/`pull_user_set` | ✕ | n 不正→None→AttributeError | `INVALID_ARGUMENT` → ADR-005 S3e-7 で `:pull-stream` は core の操作（大会未読込・チャンネル未設定は `NOT_READY`）。`:pull-user` は未実装のまま |
 | `POST /tournament` | `load_tournament` | ✕ | url 検証は緩い（start.gg 以外でも Set される）／重い（非同期ロード） | 202 受付 |
 | `POST /game` | `set_game` | ✓ | 未知 codename→**文字列 `"Could not find game X"` を返す**（非構造）／**同期アセット再ロードでブロック** | `NOT_FOUND`／202 化要（§14.3） |
 | `POST /bracket:refresh` | `update_bracket` | ✓ | **`.provider` null 未チェック**／`GetTournamentPhases()[0]` **IndexError**／`.get("groups")[0]` 空で **TypeError/IndexError**／同期 Start.gg | `NOT_READY`/`UPSTREAM_TIMEOUT`（要堅牢化）→ ADR-005 S3e-8 で解消（provider の確認・空の phase / グループの扱いを core に置き、取得は provider のワーカーで非同期。失敗は何も書かずログ） |

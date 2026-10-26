@@ -47,6 +47,10 @@ Two kinds live here:
 - the Top 8 import (ADR-005 S3e-8): core's Top8Service, in both shells. It
   runs on the tournament provider's worker; the Top 8 panel, built or not,
   renders what it wrote.
+- set loading and following (ADR-005 S3e-7): load-set, POST /score and
+  pull-stream -- core's SetFollowService, through the board host like the
+  S2 ones, in both shells. The fetches and the 5-second poll are the
+  shell's (SetFollowService.fetcher) and answer into the state later.
 
 Imports nothing that builds anything; the registrations are plain module
 attributes, filled in by the shell (agent-pitfalls #1).
@@ -54,6 +58,7 @@ attributes, filled in by the shell (agent-pitfalls #1).
 import re
 import threading
 
+import orjson
 from loguru import logger
 
 from .core.StateManager import StateManager
@@ -63,8 +68,10 @@ from .core import CommentaryService
 from .core import Top8Service
 from .core.CountryCatalog import CountryCatalog
 from .core.CrewBattleService import CrewBattleService
+from .core.DictHelper import qvariantmap_copy
 from .core.GameAssetCatalog import GameAssetCatalog
 from .core.SettingsManager import SettingsManager
+from .core.SetFollowService import SaveRecord, SetFollowService
 from .core.SetLoadService import SetLoadService
 from .core.PlayerDB import PlayerDB
 from .core.PlayerService import DEFAULT_CHARACTERS_PER_PLAYER, PlayerService
@@ -140,10 +147,13 @@ class BoardHost:
         """Finish the field being typed in on board `board`."""
 
     def ClearPlayers(self, board, no_mains=False):
-        """Empty every player slot of board `board`."""
+        """Empty every player slot of board `board`, and forget the set it
+        loaded last -- loading it again loads it again, as the desktop's
+        board clear does (ADR-005 S3e-7: a set loads here too)."""
         if AutonaActions._asInt(board, 0) not in AutonaActions.SCORE_BOARDS:
             raise NotAvailable()
         AutonaActions.instance.ClearPlayers(board, no_mains)
+        SetLoadService(_board(board)).lastSetSelected = None
 
     def EmptyRosterCharacters(self, board):
         """The characters per player the next players of board `board` get
@@ -177,8 +187,11 @@ class BoardHost:
 
     def LastSet(self, board):
         """The provider id of the set board `board` loaded last, or None.
-        Kept by the board's SetLoadService; no board, no set."""
-        return None
+        Kept by SetLoadService, by board (ADR-005 S3e-7: it was the board's
+        and there was none here); only boards 1/2 load sets."""
+        if _board(board) not in AutonaActions.SCORE_BOARDS:
+            return None
+        return SetLoadService(_board(board)).lastSetSelected
 
     def PlayerLoaded(self, board, team, player, cleared):
         """A player was loaded into slot `player` of state team `team` on
@@ -256,6 +269,13 @@ class DesktopBoardHost(BoardHost):
 # Where the S2 operations run: BoardHost (no board) unless the desktop
 # registered its DesktopBoardHost (bootstrap_gui()).
 boardHost = BoardHost()
+
+
+def current_board_host():
+    """The board host registered now -- what core's set follow runs its
+    board operations through (SetFollowService.boardHost, bootstrap_core();
+    read when used, as the desktop registers its own afterwards)."""
+    return boardHost
 
 # How a game is loaded by codename, with the asset adapter's signature:
 # (codename, async_mode=True, mods_active=False, mods_reload_mode=False,
@@ -520,6 +540,16 @@ def load_game(codename, mods_active=False, done=None):
 def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
               players=None, characters=None, losers=None, team=None,
               teamName=None):
+    """The legacy scoreboard<n>-set route and the Socket.IO set event (and
+    /api/v1's PATCH set): each field given, in the order below, on boards
+    1/2 -- the crew board where it has the field. "OK".
+
+    A board other than 1/2/3 has none of them: its set fields (best of,
+    phase, pool, match, losers) and counts are refused before anything is
+    written (NotAvailable: 503, legacy / Socket.IO / v1 alike), and a team
+    name for it writes nothing, as before. The board is not asked for
+    either: the desktop's host would log an unknown scoreboard.
+    """
     host = boardHost
 
     def run():
@@ -585,9 +615,10 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
         # the name changes. Boards 1/2 only -- the crew board has never had
         # the column this addressed.
         if teamName is not None and team is not None:
-            host.Prepare(scoreboard)
-            idx = int(team)
             board = _board(scoreboard)
+            if crew or board in AutonaActions.SCORE_BOARDS:
+                host.Prepare(scoreboard)
+            idx = int(team)
             if idx in (1, 2) and board in AutonaActions.SCORE_BOARDS:
                 with StateManager.SaveBlock():
                     if AutonaActions.instance.SetTeamName(
@@ -637,15 +668,18 @@ def _apply_set_fields(host, scoreboard, payload):
     (ApplyLosers). The board is prepared first, so on the desktop the write
     waits for 反映 like any other and a best of resizes the board's game rows
     with it. The crew board reads the payload by its own rules
-    (CrewBattleService.ApplySetData, S3e-2).
+    (CrewBattleService.ApplySetData, S3e-2). Any other board has none to
+    apply it to: refused before anything is written (NotAvailable), as the
+    counts are. It was emitted on that board's signal: the headless host
+    refused it the same way, and the desktop failed on the board it does
+    not have (500).
     """
-    host.Prepare(scoreboard)
     board = _board(scoreboard)
-    if board not in AutonaActions.SCORE_BOARDS:
-        if board == CREW_BOARD:
-            CrewBattleService(CREW_BOARD).ApplySetData(payload)
-            return
-        host.Widget(scoreboard).signals.ChangeSetData.emit(payload)
+    if board not in AutonaActions.SCORE_BOARDS and board != CREW_BOARD:
+        raise NotAvailable()
+    host.Prepare(scoreboard)
+    if board == CREW_BOARD:
+        CrewBattleService(CREW_BOARD).ApplySetData(payload)
         return
     setLoad = SetLoadService(board)
     with StateManager.SaveBlock():
@@ -958,7 +992,7 @@ def _save_record(prepared):
 def set_team_data(scoreboard, team, player, data):
     """The legacy update-team route and the Socket.IO update_team event: a
     set payload carrying one player, `{"team", "player", "data"}`, applied
-    as the board's ChangeSetData applied it.
+    as a set payload is (SetFollowService.ApplySetPayload).
 
     Its set half on boards 1/2 is the match information, which blanks
     match_en (the payload never carries round_name_en) -- kept, as visible
@@ -970,6 +1004,11 @@ def set_team_data(scoreboard, team, player, data):
     update_player's). A slot the state does not have, or a load or a save
     that raises, is logged and ignored: "OK" whatever happened, as the
     route always answered. One save cycle.
+
+    A board other than 1/2/3 has no set fields to apply the payload to: it
+    is refused before anything is written and before the board is asked
+    for (NotAvailable: 503, as `_apply_set_fields` refuses it; the
+    desktop's host would log an unknown scoreboard).
     """
     host = boardHost
     payload = {"team": team, "player": player, "data": data}
@@ -980,6 +1019,8 @@ def set_team_data(scoreboard, team, player, data):
 
     def run():
         board = _board(scoreboard)
+        if board not in AutonaActions.SCORE_BOARDS and board != CREW_BOARD:
+            raise NotAvailable()
         record = None
         # Built before the save block opens: the build is what holds the
         # board for 反映 (S2c 判断 7).
@@ -1152,10 +1193,136 @@ def refresh_stats(scoreboard):
 
 
 def get_set(scoreboard):
-    # The set the board loaded last (its SetLoadService's, ADR-005 S2d).
-    # Headless there is none: "0", the answer for no set.
+    # The set the board loaded last (its SetLoadService's, ADR-005 S2d; kept
+    # by board, headless too, since S3e-7), or "0", the answer for no set.
     host = boardHost
     lastSet = host.Run(lambda: host.LastSet(scoreboard))
     if lastSet is None:
         return "0"
     return str(lastSet)
+
+
+# ── set loading and following (ADR-005 S3e-7) ────────────────────────────
+# Core's (SetFollowService), run where the board operations run: the
+# desktop builds the board first and runs them on its GUI thread, as the
+# board's own set window does. The set is fetched, and followed, from the
+# provider's worker and the shell's clock; what they answer lands in the
+# state later, which is all the routes ever waited for. Only boards 1/2
+# load sets: another board raises (ValueError: the legacy route's 500, as
+# the board's missing signal did) without being built.
+
+def _set_board(host, scoreboard):
+    board = _board(scoreboard)
+    if board not in AutonaActions.SCORE_BOARDS:
+        raise ValueError(f"scoreboard {scoreboard} does not load sets")
+    host.Prepare(board)
+    return SetFollowService(board)
+
+
+def load_set(scoreboard, set=None, no_mains=False):
+    """Load set `set` (a provider id) onto board 1/2, as the set window
+    does (SetFollowService.LoadSet: the clears, the set recorded as
+    followed, the fetch, the poll). "OK"; nothing happens without a set or
+    without a tournament loaded (/api/v1 answers NOT_READY for the latter),
+    and a set that is not a str is set '0', as the route always did."""
+    if set is None:
+        return "OK"
+    if not isinstance(set, str):
+        set = '0'
+    # Through JSON and back, as the board's signal was handed it.
+    data = orjson.loads(orjson.dumps({
+        'id': set,
+        'auto_update': "set",
+        'no_mains': no_mains
+    }))
+    host = boardHost
+
+    def run():
+        _set_board(host, scoreboard).LoadSet(data)
+        return "OK"
+
+    return host.Run(run)
+
+
+def post_score(data):
+    """POST /score and the Socket.IO score event: a set payload (JSON) for
+    board `scoreboard` (1 if the payload names none, or a board that is not
+    a number), with both scores reset first (`reset_score`).
+
+    Boards 1/2 apply it as a fetched set is applied
+    (SetFollowService.ApplySetPayload: the match information, the scores,
+    the set length, the losers flags, the entrants or one player, the
+    bracket type), the crew board by its own rules
+    (CrewBattleService.ApplySetData). The payload is the copy the boards'
+    `dict` signal handed them (DictHelper.qvariantmap_copy: every object's
+    keys in QVariantMap order), so what lands in the state is unchanged.
+    A payload the board fails to apply is logged and answered "OK", as
+    when it was the board's slot; a one-player payload's `savePlayerToDb`
+    reaches the player database after the host (`SaveRecord`). One save
+    cycle.
+    """
+    score = orjson.loads(data)
+    scoreboard_number = 1
+
+    if "scoreboard" in score:
+        try:
+            scoreboard_number = int(score["scoreboard"])
+        except ValueError:
+            logger.warning(f"Couldn't parse scoreboard [${score['scoreboard']}] from /post_data as int, falling back to scoreboard 1")
+            scoreboard_number = 1
+
+    score.update({"reset_score": True})
+    payload = qvariantmap_copy(score)
+    host = boardHost
+
+    def run():
+        if scoreboard_number == CREW_BOARD:
+            host.Prepare(CREW_BOARD)
+            try:
+                CrewBattleService(CREW_BOARD).ApplySetData(payload)
+            except Exception:
+                logger.exception("post_score: the crew board's payload "
+                                 "was not applied")
+            return None
+        follow = _set_board(host, scoreboard_number)
+        try:
+            return follow.ApplySetPayload(payload)
+        except Exception:
+            logger.exception(f"post_score: scoreboard {scoreboard_number}'s "
+                             "payload was not applied")
+            return None
+
+    record = host.Run(run)
+    try:
+        SaveRecord(record)
+    except Exception:
+        logger.exception("post_score: the player was not saved")
+    return "OK"
+
+
+def stream_channel():
+    """The streamer's channel the stream follow reads (`twitch_username`),
+    or None when it is not set."""
+    return SettingsManager.Get("twitch_username") or None
+
+
+def pull_stream_set(scoreboard):
+    """Load the set the streamer's channel is showing next onto board 1/2
+    and follow the stream (SetFollowService.PullStream): "OK". The Web's
+    auto-update switch repeats it every few seconds, so a pull while the
+    board follows the channel only looks its set up again -- the set shown
+    stays unless the channel moved on. It emitted a board signal nothing
+    was connected to until ADR-005 S3e-7 (論点 3). With no channel set, or
+    no tournament loaded, there is nothing to follow: "OK" all the same
+    (/api/v1 answers NOT_READY)."""
+    host = boardHost
+
+    def run():
+        follow = _set_board(host, scoreboard)
+        channel = stream_channel()
+        if channel is None:
+            return "OK"
+        follow.PullStream(channel)
+        return "OK"
+
+    return host.Run(run)

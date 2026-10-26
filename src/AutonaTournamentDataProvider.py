@@ -232,7 +232,8 @@ class AutonaTournamentDataProvider(QObject):
 
     def RunWithProvider(self, job, status=None):
         """Run `job(provider)` on the provider's thread pool: the core's way
-        to the tournament (Top8Service.fetcher, ADR-005 S3e-8).
+        to the tournament (Top8Service.fetcher, ADR-005 S3e-8; the set
+        loads and follows of AutonaSetFollowUtil, S3e-7).
 
         The provider is the one loaded now, read once here. `status`, when
         given, is shown in the footer while the job runs. True if the job
@@ -333,73 +334,6 @@ class AutonaTournamentDataProvider(QObject):
         ])
         self.threadPool.start(worker)
 
-    def LoadStationSets(self, mainWindow):
-        if mainWindow.lastStationSelected:
-            worker = Worker(
-                AutonaTournamentDataProvider.instance.LoadStationSetsDo,
-                **{"mainWindow": mainWindow}
-            )
-            self.threadPool.start(worker)
-
-    def LoadStationSetsDo(self, mainWindow, progress_callback=None, cancel_event=None):
-        if AutonaTournamentDataProvider.instance.provider is None:
-            return
-        stationSet = None
-
-        if mainWindow.lastStationSelected.get("type") == "stream":
-            stationSet = AutonaTournamentDataProvider.instance.provider.GetStreamMatchId(
-                mainWindow.lastStationSelected.get("identifier"))
-        else:
-            stationSets = AutonaTournamentDataProvider.instance.provider.GetStationMatchsId(
-                mainWindow.lastStationSelected.get("id")
-            )
-
-            if stationSets is not None and len(stationSets) > 0:
-                stationSet = stationSets[0]
-
-                queueCache = mainWindow.stationQueueCache
-                logger.info(
-                    f"Station follow: queue={len(getattr(queueCache, 'queue', None) or [])} "
-                    f"stationSets={len(stationSets)}")
-                if queueCache and not queueCache.CheckQueue(stationSets):
-                    queueCache.UpdateQueue(stationSets)
-
-                    AutonaTournamentDataProvider.instance.GetStationMatches(
-                        stationSets, mainWindow)
-
-        if not stationSet:
-            stationSet = {}
-
-        stationSet["auto_update"] = mainWindow.lastStationSelected.get(
-            "type")
-
-        mainWindow.signals.NewSetSelected.emit(stationSet)
-
-    # omits the first one (loaded through NewSetSelected)
-    def GetStationMatches(self, matchesId, mainWindow):
-        if self.provider is None:
-            return
-        matchesId = matchesId[1:]
-
-        worker = Worker(self.provider.GetFutureMatchesList, **{
-            "setsId": matchesId
-        })
-        worker.signals.result.connect(
-            lambda sets: mainWindow.signals.StationSetsLoaded.emit(sets)
-        )
-        self.threadPool.start(worker)
-
-    def GetMatch(self, mainWindow, setId, overwrite=True, no_mains=False):
-        if self.provider is None:
-            return
-        worker = Worker(self.provider.GetMatch, **
-                        {"setId": setId})
-        worker.signals.result.connect(lambda data: [
-            data.update({"overwrite": overwrite, "no_mains": no_mains}),
-            mainWindow.signals.UpdateSetData.emit(data)
-        ])
-        self.threadPool.start(worker)
-
     def GetRecentSets(self, callback, id1, id2, videogame):
         if self.provider is None:
             return
@@ -449,16 +383,6 @@ class AutonaTournamentDataProvider(QObject):
             "gameType": gameType,
             "callback": callback
         })
-        self.threadPool.start(worker)
-
-    def GetStreamQueue(self):
-        if self.provider is None:
-            return
-        worker = Worker(self.provider.GetStreamQueue)
-        worker.signals.result.connect(lambda streamQueue: [
-            AutonaTournamentDataProvider.instance.signals.stream_queue_loaded.emit(
-                streamQueue)
-        ])
         self.threadPool.start(worker)
 
     def UiMounted(self):

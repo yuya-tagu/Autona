@@ -907,6 +907,7 @@ S3 を 4 つの PR に分ける（各 PR は独立に revert 可能）。順序�
   - 残る 26 本は「ボード依存」として台帳に列挙する
 - 廃止は S3e（S2f / S2g / 統計・セット読込・ポーリングの core 化の後）へ送る（**§4.4 の完了条件を変える**）
 - `pull_stream_set` は、どこにも接続されておらず常に空振りしている（v1 `:pull-stream` も同じ）。S3c で直すか外すかを判断する（推奨: 次のセットを引く core 操作として直す。ただし追従の core 化と同時なので S3e）
+  - → S3e-7 で直した（`twitch_username` のチャンネルの今のセットを読んで追従する。S3e 論点 3）
 
 **S3d E2E**
 
@@ -2354,6 +2355,7 @@ Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket
     - → S3e-5 で閉じた
   - ボードの `LoadPlayerFromTag`（PLAYERS パネル）は、カードの並びとボード属性から読込先を決める。Web の `load_player_from_tag` は state から決める。結果は同じ（`test_player_apply.py` の 2 つの再生で照合）だが、解決の書き方が 2 つある。パネルの React 化（S4）で片方になる
   - `post_score` の 1 人分のペイロード（`_ApplySinglePlayerData` / `_WritePlayerSlot`）は、まだボードのカードから読込先を決める（S3e-7 で `post_score` を移すときに揃える）。下の「既存の不具合」のとおり、不正な番号は別のスロットに書く
+    - → S3e-7 で core（`SetFollowService._ApplySinglePlayer`）へ移した。読込先は state のスロットで決め、state に無いスロットは書かない
   - `DesktopBoardHost.Run` が GUI スレッドのままなので、GUI スレッドが詰まると Web の選手操作も待つ（判断 2。`update_player` / `load_player_from_tag` は従来どおり）
   - 別の選手の判定は完全一致なので、Web UI でタグの綴りを直しただけでも id が消える（start.gg の id で引く統計が取れなくなる）。デスクトップの手入力と同じで、オーナーの規則どおり。顔写真と seed は残る
   - 本当に別の選手を名前だけで入れたときは、前の選手の顔写真と seed がその名前の横に残る（判断 1。下の「オーナー判断」で、このまま残すと決定）
@@ -2366,6 +2368,7 @@ Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket
   - v1 の `player_update` が `NOT_READY`（409 "API not initialized"。サーバーがアクションを登録する前）を返さなくなった（`_actions_ref()` を通らず、`AutonaWebOperations` を直接呼ぶため）
 - **既存の不具合（報告のみ・未修正）**
   - legacy の `POST /score` に 1 人分のペイロード（`team` / `player` / `data`）を送り、team か player が `"0"` だと、負の添字で別のスロット（チーム 2・最後の選手）に書く（`_WritePlayerSlot`。S3e-7 の範囲）。正しい要求では起きないので、配信事故にはならない
+    - → S3e-7 で直した（S3e-7 判断 6）
 - **リリースノート案**
   - デスクトップ版: Web UI（スマホ・タブレット）や Stream Deck から選手名を別の選手に書き換えたとき、前の選手の戦績・直近の対戦が残って配信に出ることがある問題を修正した（名前を変えると、前の選手の Start.gg の情報と地域（市区町村）が消え、統計が取り直される）。顔写真とシードは、デスクトップで名前を直したときと同じく残る
   - ヘッドレス起動（`python main.py --headless`）で、Web UI からの選手の編集と、選手 DB からのタグ読込ができるようになった。ただし統計（直近の対戦・戦績・アップセット係数）の取り直しはまだで、選手を書き換えても前の選手の統計が残る（今後のバージョンで対応）
@@ -2490,6 +2493,7 @@ Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket
      - 依頼するかの判断は「ブラケット種別を書いた or singles ⇔ チームが切り替わった」の 1 つ。後半を決めるのは、カードのスピンボックスで人数を決める `_ApplyEntrants`（S3e-6 / S3e-7 の範囲のボードの仕事）
      - 前半だけ core に移すと、1 つの判断が 2 層に割れ、回数がずれる（録画では 1 回）
      - 依頼先は core（`StatsService.RefreshQuietly(UPSET_FACTOR)`）。セット読込自体がヘッドレスでは 503（S3e-7）なので、ヘッドレスで取りこぼすものは無い
+     - → S3e-7 で `ChangeSetData` ごと core（`SetFollowService.ApplySetPayload`）へ移した。依頼の判断は 1 か所のままで、セット読込がヘッドレスでも動くので、両シェルで依頼する
   7. **golden は移す前の木（9e8841d5）で、公開された入口だけを通して録った**（`tests/test_stats_flow.py`）
      - Start.gg は provider のメソッドを差し替えたモックで、実ネットワークに出ない
      - 答えは「各統計の最新の要求だけ」に返す。古い要求への答えは判断 3 で意図して変えたので録画には含めず、別のテストで pin した
@@ -2630,6 +2634,7 @@ Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket
     - 構築・ゲームのロード（`_onGameAssetsLoaded`）・`SetDefaultsFromAssets` は、`_SyncPlayerCards` を自分で呼ぶ。同じブロックの `CommitHeld` が held の通知を捨てるため。反映（`held_dirty_changed(False)`）でも合わせる（レビュー対応 5）。どれも `_FollowRoster` 経由で、例外はログに出して後続（`CommitHeld` 等）を止めない
     - `_ApplyEntrants` の選手の書き込みは、state のスロット宛て（`_ApplyPlayer(team, slot, ...)`）。人数を同じ保存ブロックで変えるので、カードはまだ無い
     - `_WritePlayerSlot`（legacy `POST /score` の 1 人分）と `LoadPlayerFromTag`（PLAYERS パネル）も state のスロット宛て。番号の解き方はカードのリストと同じ（S3e-4 の既存不具合「`"0"` で別のスロットに書く」もそのまま。S3e-7 で直す）
+      - → S3e-7 で `_WritePlayerSlot` を削除した。`SetFollowService._ApplySinglePlayer` が、state に無いスロットを書かない
   - `src/AutonaScoreboardPlayerWidget.py`
     - ボードのカード（`_onBoard`）は構築時に何も書かない（`_WireInputs(publish=False)`。スロットは `SetRoster` がシード済み）
     - キャラ行は `SyncCharacterRows` が、スロットの `character` の数に合わせる。何も書かない。構築時・ボードの held サイクル・描画・ゲームのロードの再結線（`ReloadCharacters`）で合わせる
@@ -2749,6 +2754,7 @@ Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket
   10. `.claude/rules/state-and-webserver.md` の StateSchema 節（選手スロットのシード）を直した。呼び出し元の無くなった `PlayerService.Unset` を削除した（参照は `tests/test_player_service.py` の 1 本だけで、それも削除。`docs/changes/headless-core-redesign.md` の過去の記録は書き換えていない）
   - 記録だけのもの（未修正）
     - 指摘 8: `LoadPlayerFromTag` は、番号 0 で `IndexError` になる（正しい方向）。`_WritePlayerSlot`（legacy `POST /score`）の同じ問題（`"0"` で最後のスロットに書く）は S3e-7 で直す
+      - → `_WritePlayerSlot` の件は S3e-7 で直した（S3e-7 判断 6）
     - 指摘 11: 外から Unset されて 1 人になったとき、state のチーム名が残る（ボードはチーム名欄を隠すだけで、書かない。`SetRoster` を通る減り方なら空になる）
     - 指摘 14: ヘッドレスの v1 のゲームのロードで、完了フラグ（ロード中の 409）がロスターの適用より先に解除される（`done` はローダーのスレッド、`gameLoaded` → `ApplyGameRoster` はメインスレッド）。その間に来た要求は、ロスター適用前の人数を見る
     - 指摘 15: `saveBlocked` はプロセス全体のカウンタで、別スレッドの保存ブロックが開いている間は、このスレッドの `SaveState` も保留される（既存の race）。同じ理由で、別スレッドのブロックの中で `CommitHeld` が走ると、反映ボタンの有効・無効がそのブロックの終わりまで古いまま残りうる
@@ -2777,3 +2783,231 @@ Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket
     - キャラを選んで反映した後、GAME メニューで別のゲームを読み込み、すぐ同じゲームを読み直す（または Web の `set_game` を続けて 2 回送る）→ キャラと mains が空のまま（前のゲームのキャラ名が OBS に出ない）
     - 選手カードのキャラのコンボの一覧を開いたまま、Web から人数を減らしてそのカードを消す → 一覧が画面に残らない
     - Web から `scoreboard4-set?players=2` → 503 が返り、どのボードも変わらない
+
+#### S3e-7 セット読込と追従の core 化（2026-10-27・PR 未作成）
+
+セット読込（セット選択ウィンドウ・Web の `load-set`）と追従（5 秒ごとの取り直し・ステーション / 配信の追従）、セットのペイロードの適用（`ChangeSetData`・`POST /score`）を core の `SetFollowService` に移した。それまではボードのウィジェット（`NewSetSelected`・QTimer 2 本・`QueueSetsCache`・`StationSetsLoaded` / `UpdateSetData` / `StreamSetSelection` のシグナル）と、provider アダプタの Worker（`LoadStationSets` / `GetMatch` / `GetStreamQueue`。答えを Worker 自身のシグナルで返す）が持っていた。`load_set` / `post_score` / `pull_stream_set` は `AutonaWebOperations` へ移し、ヘッドレスでも動く（それまでは 503）。`pull_stream_set` は論点 3 のとおり直した。
+
+デスクトップの外部挙動は、移す前の木 41e92c4c で録った golden（`tests/test_set_follow_flow.py` + `tests/fixtures/set_follow/golden.json`）と差分なしで一致する。意図して変えたものは golden に入れず、`tests/test_set_follow.py` で pin した。
+
+- **実装**
+  - `src/core/SetFollowService.py`（新規。Qt 非依存）
+    - `SetFollowService(n)`（ボード 1 / 2）。呼ぶたびに作る。次のものはボード番号ごとにクラスが持ち、ボード・Web の操作・時計の tick が同じものを見る
+      - 何を追従しているか（`_polls`）・ステーション（`_stations`）・ステーションのキュー（`_queues`。メモリだけ）
+      - 照会番号（`_lookups`）・全読込の要求番号（`_loads`）・ステーションのキューの要求番号（`_queueAsks`）。番号はすべて 1 本の単調増加の列から振る
+    - `LoadSet(data)`: 旧 `NewSetSelected` の論理
+      - 大会が読み込まれていなければ何もしない（判断 9）
+      - 読んでいないセットなら、次の順に行う: 照会番号を進める（判断 15）→ ボードホストの `ClearPlayers`（デスクトップはボードの `CommandClearAll`）→ `ClearScore` → 最後に読んだセットの記録 → `BeginSet` → 取得
+      - 答えは `UpdateSetData` に渡す（要求番号 → `IsStaleUpdate` → `general.disable_overwrite` の DB マージ → `ApplySetPayload`）
+      - 取得が失敗したら（セットの無い答え・例外・取得できない）、最後に読んだセットを忘れる（`_LoadFailed`。判断 14）
+    - `ApplySetPayload(data)`: 旧 `ChangeSetData`
+      - 1 保存サイクルで書く: match 情報・スコア・best of・LOSERS・entrants（`SetRoster` + 各スロットの `PlayerService.ApplyData`）または 1 人分・ブラケット種別・アップセット係数の依頼
+      - 1 人分の `savePlayerToDb` は、準備した記録を返す。呼び出し側がロックの外で保存する（`SaveRecord`。S3e-4 と同じ形）
+    - `FollowStation(station)`: ステーション / 配信の今のセットを引いて読む。ステーションでは後続のセットも取り、メモリ（`_queues`）にだけ持つ（判断 11）
+    - `PullStream(channel)`: Web の `pull-stream`。追従中なら tick と同じく照会し直すだけ。まだそのチャンネルを追従していなければ追従を始める（最後に読んだセットは忘れない。判断 10）
+    - `Tick()` / `StopFollowing(forget)` / `Following()` / `SecondsLeft()` / `PollGeneration()`
+    - 判定（照会番号・要求番号）と、それを変える操作（読込・追従・キャンセル・tick）は、すべてボードホストの `Run` の中で行う（判断 4）
+    - 取り直しは、`general.disable_autoupdate` が `false` のときだけ行う（キーが無ければ取り直さない。判断 1）
+  - `src/AutonaSetFollowUtil.py`（新規。QtCore だけ）: `SetFollowService.fetcher` の実体。次のものを持つ
+    - provider への取得（`RunWithProvider`）と、大会が読み込まれているか（`Available()`）。取得が例外を出したら、その例外を `onError` でメインスレッドに渡す（セットの取得。判断 14）
+    - 答えをメインスレッドに渡す、アプリ寿命の QObject（`answered = Signal(object, object)`。queued）
+    - ボードごとの 5 秒の QTimer（`Poll(board)` で、`PollGeneration` に合わせて開始・再開・停止する。別スレッドからはメインスレッドに渡す）。アプリの `aboutToQuit` で全部止め、以後は動かさない
+    - ボードへの通知（`followChanged`）
+  - `src/bootstrap.py`: `bootstrap_core()` が `SetFollowService.fetcher` と `boardHost` を登録する
+    - `boardHost` は `AutonaWebOperations.current_board_host`。デスクトップのホストは `bootstrap_gui()` が後から登録するので、使うときに読む
+  - `src/core/SetLoadService.py`: `lastSetSelected` を、ボード番号ごとにクラスが持つようにした（property）。ボードのインスタンスとヘッドレスが同じ値を読む。テスト用に `ForgetLastSets()` を足した。呼び手が無くなった `SetStationQueue` を削除した
+  - `src/AutonaScoreboardWidget.py`
+    - `NewSetSelected` / `StopAutonaUpdate` / `LoadStationSets` / `ChangeSetData` は、`self.setFollow` を呼ぶだけになった
+    - 削除: `AutonaUpdate` / `StationSetsLoaded` / `_ApplyEntrants` / `_ApplySinglePlayerData` / `_WritePlayerSlot` / `UpdateSetData`・QTimer 2 本・`QueueSetsCache`・シグナル 4 本（`ChangeSetData` を含む）
+    - タイマー行の表示 / 非表示とラベルは、`followChanged` で決める。カウントダウン（100ms の表示用の時計）は `SecondsLeft()` を読む
+    - `closeEvent` で追従を止める
+  - `src/AutonaCrewBattleWidget.py`: 発火元が無くなった `ChangeSetData` シグナル（と、それだけを持っていたシグナルクラス）を削除した
+  - `src/AutonaTournamentDataProvider.py`: `LoadStationSets` / `LoadStationSetsDo` / `GetStationMatches` / `GetMatch` / `GetStreamQueue` を削除した
+  - `src/AutonaWebOperations.py`
+    - `load_set` / `post_score` / `stream_channel` / `pull_stream_set` を足した
+      - 対象はボード 1 / 2。それ以外は `ValueError`（legacy 500）
+      - `post_score` のクルーボードは `CrewBattleService.ApplySetData`
+    - ヘッドレスの `BoardHost.ClearPlayers` は、最後に読んだセットも忘れる。`LastSet` はそのセットを答える
+    - `set_route` の set フィールド（`_apply_set_fields`）と `set_team_data`（legacy `update-team`・Socket.IO `update_team`）は、ボード 1 / 2 / 3 以外なら何も書かずに `NotAvailable`。ボード番号はボードホストの `Prepare` より前に確かめる（判断 8）
+  - `src/AutonaWebServer.py` / `src/AutonaApiV1.py`: ルートとイベントは `AutonaWebOperations` を呼ぶ。v1 の `:load-set` / `:pull-stream` は大会未読込なら 409 `NOT_READY`（`no tournament loaded`）、`:pull-stream` はチャンネル未設定でも 409 `NOT_READY`
+  - `src/AutonaWebServerActions.py`: 残りは `open_sets` / `get_thumbnail` の 2 本（S3e-9 でシェルの操作にする）
+- **判断と理由**
+  1. **取り直し（5 秒のポーリング）は、`general.disable_autoupdate` が明示的に `false` のときだけ**
+     - デスクトップは、ボードを構築するたびにこの設定を `true` にする（ボード上の自動更新トグルは UI から消えた）。ただし設定画面の「Disable automatic set updating for the scoreboard」チェックボックスは残っていて、外すと次のボード構築（通常は次の起動）まで取り直す。ここは旧実装と同じ。golden の「following」シナリオは設定を `false` にして録り、取り直しの経路も一致する
+     - ヘッドレスには、取り直しを止める Web 操作が無い。キーが無いときに取り直すと止められないので、キーが無いときは取り直さない（旧実装の既定は「取り直す」だったが、デスクトップでは構築時に必ずキーを書くので差は出ない）
+     - 完了条件の「停止・クリアで止まる」はこう満たす
+       - キャンセル（`StopFollowing(forget=True)`）で、時計と追従を止める
+       - クリアで、最後に読んだセットを忘れる。取り直した答えは `IsStaleUpdate` で捨てる
+       - ステーション / 配信の追従は、次の照会で今のセットを読み直す
+       - 時計自体はクリアでは止めない（旧実装どおり。golden で確認した）
+  2. **遅れた答えは、3 つの番号で捨てる**（完了条件「古いペイロードを捨てる」）
+     - 読んだセットでない答え: 従来の `IsStaleUpdate`
+     - 取り直し（update）が返る前に、同じセットの全読込が始まった答え: 要求番号（`_loads`）。セット id では区別できない
+     - ステーション / 配信の照会の答え: 照会番号（`_lookups`）。照会のたびに番号を振り（pull・tick・追従の開始で 1 列）、答えは「すでに使った番号より新しい」ときだけ使う。手動 / Web の読込・別のステーション・キャンセルも番号を進めるので、その前に出した照会の答えは捨てる
+       - 旧実装は、照会の答えで手動のセットを上書きしていた
+       - 再レビューで指摘: 番号を「追従を決めた回」だけで持つと、同じ追従の中の照会（自動更新の pull・tick）が逆順に返ったとき、古い照会の答え（前のセット）で新しいセットを上書きした
+     - ステーションの後続セットは、追従しているステーションが変わったとき・取り直したとき（新しい要求の答えだけを使う。`_queueAsks`）・追従をやめたとき（キャンセル・取り直しの停止）に捨てる
+     - テストのハーネスがボードを捨てる `ForgetBoard` は、照会番号と要求番号を消さずに進める（0 に戻すと、前のテストの照会の答えが通る）
+  3. **答えは、アプリ寿命の QObject のシグナルでメインスレッドに渡す**（Worker 自身のシグナルにしない）
+     - 録画の途中で、旧経路の答えが消える現象を観測した。原因は 2 つ
+       - プールが走らせ終えた Worker（とそのシグナルの QObject）が GC で回収されると、キューに入った答えが届かない（セット読込が何もしない）
+       - プールのスレッドで作った Worker は、答えの lambda がイベントループの無いプールのスレッドに渡り、届かない。ステーションの後続セットが一度も書かれなかった原因はこれ
+     - golden は、すべての Worker をシナリオの終わりまで保持し、ジョブを 1 つずつ走らせるプール（`_SteppedPool`）で録った。コードが意図した動作を録るため
+  4. **判定と書き込みはボードホストの `Run` の中で、取得はロックの外で行う**
+     - デスクトップは GUI スレッド（S3e-4 判断 2 と同じ理由）、ヘッドレスは `BoardHost` の RLock で直列化する
+     - 答えの判定（照会番号・取り直しの要求番号・ステーションのキューの要求番号と比較）は、`Run` の中の最初に行う。番号を進める操作（読込・追従・キャンセル・tick）と、取り直しを始めるか（`_StartPoll`）の判断も `Run` の中で行う
+       - レビューで指摘: 判定を `Run` の外で行うと、判定の直後に別スレッドの Web の `load-set` が割り込み、照会の答えが Web のセットを上書きした（ヘッドレス）。今は Web の読込が、照会の読込の終わりを待ってから上書きする
+     - 取得は開始するだけで、待たない
+     - `SetFollowService._lock` を持ったまま外を呼ばない。`StateManager.lock` を持ったまま待たない（pitfalls #17）
+  5. **`post_score` のペイロードは、`qvariantmap_copy` に通してから適用する**
+     - 旧実装はボードの `Signal(dict)` で渡していたので、入れ子のキーが QVariantMap 順に並び替わっていた。そのまま適用すると、state のキー順（外部契約）が変わる
+     - 適用の例外はログに出し、`"OK"` を返す（旧実装でも例外はスロットの中で起き、応答は `"OK"` だった）
+  6. **1 人分の `POST /score` は、state に無いスロットを書かない**（S3e-4 の既存不具合を直した）
+     - チームは 1 / 2、選手は 1〜`RosterCount`
+     - それ以外（`"0"`・負の数・範囲外・数でないもの）は、ログに出して何も書かない。legacy `update-team` と同じ形で、応答は `"OK"` のまま
+  7. **タイマー行のラベルは、state ではなく `Following()` を読む**
+     - 取り直しているかどうかは state に無い。キーを足すと `program_state.json` と Socket.IO に出る（外部契約）ので、足さなかった
+     - タイマー行は、取り直しているときだけ出る（設定画面で自動更新を有効にしたとき。従来どおり）
+  8. **ボード 1 / 2 以外のセット読込・`pull-stream`・`POST /score`（クルーを除く）は、ボードを構築せずに 500 を返す**（統計の S3e-5 判断 5 と同じ扱い）
+     - v1 は `require_board_12` の 400 のまま
+     - `set_route` の set フィールド（phase / pool / match / best of / losers。legacy `scoreboard<n>-set`・Socket.IO `set`・`update-team`）は、ボード 1 / 2 / 3 以外なら何も書かずに 503 `UNAVAILABLE`。それまではそのボードのウィジェットの `ChangeSetData` シグナルに出していたが、そのボードは無いので、ヘッドレスは 503・デスクトップは `None` の属性エラーで 500 だった。人数 / キャラ数（S3e-6）と同じ扱いに揃えた
+     - ボード番号は、ボードホストの `Prepare` より前に確かめる（`update-team` と `set_route` のチーム名）。デスクトップのホストは、無いボードを求められると「Unknown scoreboard」のエラーをログに出していた。ボード 4 へのチーム名は、従来どおり何も書かずに `"OK"`
+  9. **大会が読み込まれていなければ、セット読込は何もしない**（レビュー指摘 4）
+     - 取得できないのに、選手とスコアだけが消えていた（旧デスクトップ。Web の `load-set` でも起きた）。今はボードに何も書かない
+     - legacy / Socket.IO の応答は従来どおり `"OK"`。v1 の `:load-set` / `:pull-stream` は 409 `NOT_READY`（`no tournament loaded`。ほかの操作と同じ）
+     - `pull-stream` も、大会が無ければ追従を始めない
+  10. **追従中のチャンネルへの `pull-stream` は、tick と同じく照会し直すだけ**（レビュー指摘 1・重大）
+      - Web UI の「自動更新」スイッチ（`Header.jsx`）は、オンの間 `:pull-stream` を数秒ごと（既定 10 秒）に送る。毎回追従をやり直す（`FollowStation`：最後に読んだセットを忘れ、照会番号を進める）と、同じセットでも毎回クリア → スコア 0 → 取得し直しになり、応答が遅いとその間ボードが空になった
+      - 今は、同じチャンネル（同じ追従先）を追従中なら、最後に読んだセットも照会番号もそのままで照会だけし、チャンネルのセットが変わったときだけ読み直す。別のチャンネル・ステーションを追従中、または未追従のときだけ追従を始める
+      - 追従を始める最初の 1 回も、最後に読んだセットは忘れない。チャンネルのセットが最後に読んだセットと同じなら、クリアせず、取得もせず、追従だけを始める（state に何も書かない。`score.{n}.auto_update` / `station` は前の読込のまま）。照会の答えの id は数で、Web の読込は文字列なので、照会の答えだけは文字列にして比べる（再レビュー指摘 3）
+        - 「同じセット」の基準は最後に読んだセット（`lastSetSelected`。メモリ）で、state の `score.{n}.set_id` は使わない。`set_id` はクリアの後も残る（追従中のセットの記録）ので、クリア後・取得失敗後の空のボードを「表示中」と取り違えて読み直さなくなる
+        - 再起動の後: 起動時に `score` のサブツリーを消す（`StateSchema.ResetScoreRoot`）ので、ボードは空で、守るものが無い。最初の 1 回で読む
+        - キャンセルの後: キャンセルは最後に読んだセットも `set_id` も忘れる（同じセットを選び直すと読み直すため。旧実装どおり）。ボードには前のセットが残るが、それを示す記録が無いので、最初の 1 回でクリアして読み直す（スコアは 0 から。実機確認とリリースノート案に書いた）。記録を足すと state のキーが増える（外部契約）ので足さなかった
+      - セット選択ウィンドウの「配信」（`FollowStation`）は従来どおり、選ぶたびに読み直す（golden）
+  11. **ステーションの後続セットは、メモリにだけ持つ**（レビュー指摘 2・5）
+      - `score.{n}.station_queue` には書かない（旧実装と同じく `{}` のまま）。外部契約を変えないため。書くと反映待ち（held）になり、反映の後に届いた答えが反映ボタンを点け直していた
+      - 取得は続ける（golden の provider 呼び出しのため）。キューの記憶（`_queues`）は答えが届いてから更新し、`StopFollowing` で消す。答えが届かなかったキューと、キャンセル後に選び直したステーションのキューは、取り直す
+  12. **呼び手が無くなったコードを消した**（レビュー指摘 8）
+      - 両ボードの `ChangeSetData` シグナル、ボードの `UpdateSetData`、`SetLoadService.SetStationQueue`
+      - 両ボードの `ChangeSetData` メソッドは残した。アプリからは呼ばれないが、ウィジェットのテスト（8 ファイル・約 80 か所）がボードへのペイロードの入口として使う。消すにはテストの入口の作り直しが要る
+  13. **アプリ終了時に 5 秒の時計を止める**（レビュー指摘 9）: `aboutToQuit` で全ボードの QTimer を止め、以後は `Poll` が来ても動かさない
+  14. **全読込の取得が失敗したら、最後に読んだセットを「確定していない」に戻す**（再レビュー指摘 2）
+      - 失敗: セットの無い答え（Start.gg の要求が失敗すると `GetMatch` は id の無い dict を返す）・例外（`AutonaSetFollowUtil` が `onError` でメインスレッドに渡す。それまでは provider のジョブのログに出るだけで、答えが来なかった）・取得を始められない（大会が無い）
+      - ボードは読込の前にクリア済みで、何も出ていない。それまでは最後に読んだセットとして記録が残り、次の pull・照会は「表示中のセット」として読み飛ばし、取り直しの update は直すセットが無く、ボードが空のまま戻らなかった（配信のセットが次へ移った直後に起きる）
+      - 今は記録を消すので、次の pull・照会・同じセットの選び直しで読み直す。取り直し中（`disable_autoupdate` が `false`）は、次の tick が update ではなく読込をやり直す（その回の照会はしない）
+      - 失敗した要求が最新の全読込で、最後に読んだセットがまだそのセットのときだけ（後から読んだ・クリアしたなら何もしない）。update の失敗は何もしない（ボードには前の答えが出ている）
+      - 取得の答えがいつまでも来ない場合は扱わない。provider の要求は 20 秒で打ち切られ、`GetMatch` は待ち時間の上限つきで必ず返る
+  15. **`LoadSet` は、実際に読み込むときだけ照会番号を進める**（再レビュー指摘 4）
+      - 大会が無い・表示中のセットを選び直した（何も読まない）ときは、追従は変わらない。それまでは番号を進めていたので、その前に出した照会（自動更新の pull）の答えを捨て、次のセットを読み損ねた
+- **外から見える変化**
+  - ヘッドレス（`python main.py --headless`）
+    - 次の操作が動く（それまでは 503 `UNAVAILABLE`）。反映ボタンが無いので、すぐ公開される
+      - セット読込（legacy `scoreboard<n>-load-set`・Socket.IO `load_set`・v1 `:load-set`）
+      - `POST /score`（Socket.IO `score`）
+      - `pull-stream`
+    - `get-set` は読んだセットを答える（それまでは常に `"0"`）
+  - 両シェル
+    - **`pull-stream`（legacy・Socket.IO・v1）が、設定 `twitch_username` のチャンネルの今のセットを読み、配信の追従を始める**（論点 3。それまでは何も起きなかった）
+      - 追従中のチャンネルに送り直しても、チャンネルのセットが変わるまで何も書かない（Web UI の「自動更新」スイッチが動くようになった）
+      - 追従を始める最初の 1 回も、最後に読んだセットと同じセットならクリアしない（手で読んだセットの上で自動更新をオンにしたとき）。キャンセルの後は、同じセットでもクリアして読み直す（判断 10）
+      - ステーション・別のチャンネルを追従中でも、このチャンネルの追従に切り替わる。`twitch_username` を変えると、次の 1 回で新しいチャンネルに切り替わる
+      - 未設定なら、legacy / Socket.IO は何もせず `"OK"`、v1 は 409 `NOT_READY`
+    - **大会が読み込まれていないときのセット読込は、何もしない**（それまではデスクトップで選手とスコアが消えた）。v1 の `:load-set` / `:pull-stream` は 409 `NOT_READY`
+    - ステーション / 配信の照会が、手動 / Web の読込・キャンセルの後に返っても、そのセットを読まない（旧実装は上書きした）。照会が逆順に返っても、前のセットで上書きしない
+    - **セットの取得が失敗しても、次の取り込み・照会・同じセットの選び直し・取り直しの tick で読み直す**（それまではデスクトップでも、空のボードのまま戻らなかった。判断 14）
+    - 取り直しの答えが、同じセットの読み直しの後に返っても書かない
+    - 1 人分の `POST /score` で、存在しないスロット（`"0"`・負の数を含む）を指すと何も書かない（旧実装は別のスロットに書いた）
+      - 数でない番号は従来どおり、ログに出して何も書かず、ブラケット種別とアップセット係数の依頼は走る（旧実装も `_WritePlayerSlot` の例外を握ってログに出し、先へ進んでいた）
+    - ボード 1 / 2 / 3 以外への `set_route` の set フィールドは 503（デスクトップはそれまで 500。判断 8）。`update-team` も 503 のまま、デスクトップは「Unknown scoreboard」のエラーをログに出さなくなった
+  - 上記以外は変わらない: デスクトップの state・キー順・delta・統計の依頼の数・反映ボタン・ルートの応答・セット選択 / ステーションのウィンドウ・`score.{n}.station_queue`（`{}` のまま）
+- **pin**
+  - `tests/test_set_follow_flow.py` + `tests/fixtures/set_follow/golden.json`
+    - 41e92c4c で、公開された入口だけを通して録った 3 シナリオ（Web からのセット読込・セット / ステーション / 配信の追従・`POST /score`）
+    - 1 ステップごとに照合する: provider の呼び出し・state の書き込み列（キー順込み）・delta・応答・DB への保存・ボードの表示・反映待ち
+    - `AUTONA_RECORD_SET_FOLLOW=1` で録り直す（移す前の木でだけ）
+    - 意図した差分は無い（全ステップ一致）
+  - `tests/test_set_follow.py`（新規）
+    - ヘッドレス
+      - legacy / Socket.IO / v1 の読込・同じセット・クリア後の再読込・チームのセット
+      - 取り直し（時計の tick）・配信の追従とクリア後の読み直し・キャンセル・設定が無いと取り直さない
+      - `POST /score`（entrants・1 人分の DB 保存・クルー・ボード 4）
+    - `pull-stream`
+      - チャンネル未設定（両シェル。legacy / Socket.IO は `"OK"`、v1 は 409）、デスクトップでの追従（held になる）
+      - 追従中のチャンネルへの送り直し（両シェル）: 答えが返る前に何度送っても、照会が増えるだけで、`score.1.*` に 1 件も書かず、スコアが残り、反映待ちにならない。チャンネルのセットが変わると読み直す
+      - 照会の答えが逆順に返る（pull → pull、tick → pull）: 新しい照会のセットが残り、古い照会の答えは読まない
+      - 最初の 1 回（両シェル）: Web で読んだ同じセット（文字列の id）の上で、`score.1.*` に 1 件も書かず、スコアが残り、追従を始める。キャンセルの後は読み直す（判断 10 の制約）
+      - ステーションを追従中（取り直しの照会が残っている）・別のチャンネルを追従中・`twitch_username` を変えた後の pull: このチャンネルに切り替わり、前の追従の照会の答えは読まない
+    - 取得の失敗（両シェル × 例外 / セットの無い答え）: ボードは空・`get-set` は `"0"`。次の pull・同じセットの選び直し・取り直しの tick で読み直す
+    - 大会未読込（両シェル）: legacy / Socket.IO の読込と `pull-stream` は `"OK"` で何も書かず取得もしない、v1 は 409
+    - 1 人分の `POST /score`: 不正な番号 7 通り（両シェル）と、正しい番号
+    - ボード 4 への `update-team`（legacy・Socket.IO）と set フィールドは 503、チーム名は `"OK"`。どれもボードを求めない（「Scoreboard Manager」のエラーログが出ない。両シェル）
+    - 遅れた答え: 手動の読込の後・キャンセルの後・`ForgetBoard` の後の照会、追従をやめた後・取り直した後の後続セット、読み直しの後の取り直し
+    - 何も読まない読込（表示中のセットの選び直し・大会が無い）の後も、その前の照会は次のセットを読む
+    - ステーションのキュー: メモリにだけ持ち、`station_queue` は `{}` のまま。キャンセル後に選び直すと取り直す。反映の後に届いた答えで反映待ちにならない
+    - スレッド: ヘッドレスの適用はホストのロックの中で走る。照会の判定の直後に別スレッドの Web の `load-set` が来ると、照会の読込が終わるまで待ち、Web のセットが残る。デスクトップでは、どのスレッドも `StateManager.lock` を持ったまま GUI スレッドを待たない
+    - 素の QCoreApplication（サブプロセス）で、読込と時計の tick が動き、`aboutToQuit` で止まって動き直さない
+    - 各ガード（同じチャンネルの判定・`Run` の中の判定・`ForgetBoard` の番号・キャンセルのキュー消去・大会の確認・`aboutToQuit`・照会番号の順序・取得失敗の記録の消去と `onError` と tick のやり直し・最初の 1 回の忘れない / 文字列での比較・読み込むときだけの番号・キューの要求番号・`Prepare` 前のボード番号）を外すと落ちることを確かめた
+  - `tests/test_scoreboard_operations.py`: ボードを閉じると、追従と表示の時計が止まる。ボードのセット読込のテストは「大会が読み込まれている」状態で走らせる（`tests/conftest.py` の `tournamentLoaded()`。セットの取得は始まったまま答えず、ほかの取得は何も始めない）
+  - `tests/test_player_card_render.py`: 同じく、セットを選ぶ手順を `tournamentLoaded()` の中で行う
+  - `tests/test_player_apply.py`: 選手の書き込みは core が行う（`SetFollowService._ApplyEntrants` / `_ApplySinglePlayer` → `_ApplyPlayer` → `ApplyData`）。ボードに旧メソッドが残っていない
+  - `tests/test_bootstrap_split.py`: `bootstrap_core()` の手順に `fetcher` / `boardHost` の登録を足した
+  - `tests/test_import_side_effects.py`: `AutonaSetFollowUtil` と `SetFollowService` の import が何も登録・生成しない
+  - `tests/test_web_operations.py`: v1 の 503 のテストを外した（v1 に 503 を返す操作はもう無い）
+  - `tests/test_set_load_service.py`: `SetStationQueue` のテストを外した
+  - `tests/conftest.py`: テストごとに追従の状態を消す（`_freshSetFollow`）。ボードを捨てるときも消す
+- **残置 / リスク**
+  - ヘッドレスには、取り直しを止める Web 操作が無い（判断 1。`disable_autoupdate` を `false` にしたときだけの話）
+  - provider アダプタのほかの取得は、まだ Worker 自身のシグナルで答えを返す。判断 3 の消失は、そちらでも起こりうる（下の「既存の不具合」）
+  - v1 の `:load-set` / `:pull-stream` は `_actions_ref()` を通らなくなった
+    - 初期化前の 409（`API not initialized`）を返さない（S3e-4 の `player_update` と同じ）
+    - `_actions_ref()` を呼ぶ v1 のルートは無くなった（S3e-9 で消す）
+  - 配信の追従は、チャンネルの今のセット（`GetStreamMatchId`）を引く。配信キュー（`streamQueue`）の 2 番目以降は見ない（旧ステーションウィンドウの「配信」と同じ）
+  - 追従中のチャンネルへの `pull-stream` は、照会の答えが返るまで重なりうる（自動更新の間隔より照会が遅いとき）。同じセットなら何も書かないので、照会の数が増えるだけ
+  - ステーションのキューは、答えが返るまでに次の tick が来ると、もう一度取る（記憶を答えの後に更新するため）。取得が 5 秒を超えるときだけ
+  - キャンセルの後の最初の pull は、表示中と同じセットでもクリアして読み直す（判断 10。表示中のセットを示す記録が残らないため。スコアは 0 から）
+  - 最初の pull が同じセットでクリアしなかったとき、`score.{n}.auto_update` / `station` は前の読込の値のまま（state に書かないため。読む側は無い）
+  - 取得の答えがいつまでも返らない場合は扱わない（判断 14。provider の打ち切りに頼る）
+- **既存の不具合（報告のみ・未修正）**
+  - provider アダプタの Worker 経由の取得（大会データ・フェーズ・フェーズグループ・セット一覧・ステーション一覧・順位）は、Worker が GC で回収されると答えが届かないことがある（判断 3）
+    - 何も起きないだけで、誤った値は出ない。配信に誤表示は出ない（操作者がやり直せば取れる）
+    - S3f（Executor 1 本化）で扱う
+  - ボードの `ToggleAutonaUpdate` はどこにも接続されていない（自動更新トグルが UI から消えた名残）。範囲外のため残した
+- **リリースノート案**
+  - Web UI / API の「配信中のセットを取り込む」（`pull-stream`）と、Web UI の「自動更新」スイッチが動くようになった
+    - 設定の Twitch ユーザー名のチャンネルで次に配信されるセットを読み込み、そのチャンネルを追従する（それまでは何も起きなかった）
+    - 自動更新がオンの間は、チャンネルのセットが変わったときだけ読み込む。同じセットのあいだはスコアや手入力を消さない
+    - 手で読み込んだセットの上で自動更新をオンにしても、配信のセットが同じならスコアや手入力を消さない。ただし、タイマー行のキャンセルの後に自動更新をオンにすると、同じセットでも読み直す（スコアは 0 に戻る）
+    - Start.gg からセットを取得できなかったときは、次の自動更新・同じセットの選び直しで読み直す（それまでは空のボードのままだった）
+    - Twitch ユーザー名が未設定なら何もしない（API は 409 `NOT_READY`）
+  - 大会を読み込んでいないときにセットの読込を送っても、選手とスコアを消さないようにした（API は 409 `NOT_READY`）
+  - ステーションの照会中にセットを手で選ぶと、照会の結果でセットが上書きされることがある問題を直した
+  - `POST /score` で選手 1 人分を送るとき、チームや選手の番号に 0 を指定すると別の選手欄に書き込まれる問題を直した
+  - ヘッドレス起動（`python main.py --headless`）で、セットの読込（`load-set`）・`POST /score`・配信中のセットの取り込みができるようになった
+- **実機確認（オーナー）**
+  - デスクトップ
+    - セット選択ウィンドウ（Ctrl+Shift+O）でセットを選ぶ
+      - 選手・ラウンド・スコアが入り、反映で OBS に出る
+      - 同じセットを選び直しても、何も変わらない。クリアの後に同じセットを選ぶと、読み直す
+    - ステーションウィンドウでステーションを選ぶ → そのステーションの今のセットが入る（`out/program_state.json` の `score.1.station_queue` は `{}` のまま）
+    - ステーションウィンドウで「配信」を選ぶ → `twitch_username` のチャンネルの今のセットが入る
+    - ステーションを選んだ直後（照会の結果が出る前）に、セット選択ウィンドウで別のセットを選ぶ → 手で選んだセットのまま変わらない
+    - Web UI（`/web`）の「自動更新」スイッチをオンにする（`twitch_username` の設定あり）
+      - 最初の 1 回で配信中のセットが入る。反映する
+      - スコアを手で変えて反映し、数回分（既定 10 秒ごと）待つ → スコアも選手も消えず、反映ボタンも点かない
+      - 配信のセットが次に移ると、新しいセットが入る
+      - 先にセット選択ウィンドウ（または `/web` のセット一覧）で配信中と同じセットを読んでスコアを変え、反映してから自動更新をオンにする → スコアも選手も消えない
+      - 既知の制約: タイマー行のキャンセル（設定画面で自動更新を有効にしたときだけ出る）の後に自動更新をオンにすると、同じセットでも 1 回クリアして読み直す（スコアは 0 から）
+      - 取得の失敗からの回復（任意。失敗の起き方は Start.gg 次第で、確実には再現できない）: 自動更新オンの間にネットワークを一時的に切って戻す → 次の自動更新で、その時点の配信中のセットが入る（空のボードのまま残らない）
+    - `twitch_username` を別のチャンネルに変えて自動更新を続ける → 次の 1 回で新しいチャンネルのセットに切り替わる
+    - ステーションを追従中に Web UI の自動更新をオンにする → 配信の追従に切り替わる（配信中のセットがステーションのセットと同じなら、クリアされない）
+    - Web UI / Stream Deck から `scoreboard1-pull-stream` を送る
+      - `twitch_username` の設定あり: 配信中のセットが入る
+      - 設定なし: 何も変わらない
+    - 大会を読み込まずに `scoreboard1-load-set?set=<id>` を送る → 選手とスコアが消えない
+    - `POST /score`（Web UI の旧スコア送信・Stream Deck）
+      - スコアと match バーが入る
+      - 1 人分（`team` / `player` / `data`）で `team: "0"` を送ると、何も書かれない
+    - タイマー行（自動更新の表示）が出ない（設定画面で「Disable automatic set updating」を外したときだけ出る。従来どおり）
+  - ヘッドレス（`python main.py --headless`）
+    - 大会を読み込んだ後、`/web` または `scoreboard1-load-set?set=<id>` → オーバーレイに選手が出る（503 にならない）
+    - `scoreboard1-pull-stream` → 配信中のセットが入る

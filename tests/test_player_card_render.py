@@ -71,6 +71,7 @@ from src.core.PlayerDB import PlayerDB
 from src.core.PlayerService import CharacterSlot, PlayerService
 from src.core.SettingsManager import SettingsManager
 from src.core.StateManager import StateManager
+from tests.conftest import tournamentLoaded
 # The S1d world: the fixture games under the recording's locale. Imported so
 # both recordings are made in exactly the same one.
 from tests.test_player_slot_publish import slotEnv  # noqa: F401  (fixture)
@@ -554,10 +555,7 @@ def _clearSteps(board, app):
         # A set load's pre-pass: players (keeping the mains) and the score,
         # not the match bar. The follow timers are stopped in the same step
         # so that none fires during the steps that follow.
-        ("follow a set", lambda: (
-            board.NewSetSelected({"id": "999", "auto_update": "set",
-                                  "no_mains": True}),
-            board.StopAutonaUpdate())),
+        ("follow a set", lambda: _follow(board, "999", True)),
     ]
 
 
@@ -569,10 +567,12 @@ def _stageResults(board):
 
 
 def _follow(board, setId, noMains):
-    """A set chosen to follow, as the set / station / stream windows do;
+    """A set chosen to follow, as the set / station / stream windows do,
+    with a tournament loaded that answers nothing (a set loads only then);
     the follow timers stopped at once so that none fires later."""
-    board.NewSetSelected({"id": setId, "auto_update": "set",
-                          "no_mains": noMains})
+    with tournamentLoaded():
+        board.NewSetSelected({"id": setId, "auto_update": "set",
+                              "no_mains": noMains})
     board.StopAutonaUpdate()
 
 

@@ -17,7 +17,10 @@ Pinned here:
   Web's player edit and the tag lookup -- since S3e-4 (pinned below; the
   board's recording: tests/test_player_apply.py), and the player /
   character counts of boards 1/2 since S3e-6 (pinned below; the board's
-  recording: tests/test_roster_flow.py);
+  recording: tests/test_roster_flow.py), and set loading and following --
+  load-set, POST /score, pull-stream -- since S3e-7
+  (tests/test_set_follow.py; the board's recording:
+  tests/test_set_follow_flow.py);
 - headless, the S2 operations run one at a time (the host's re-entrant
   lock), so a composite one (clear_all) is not interleaved with another
   request.
@@ -1110,24 +1113,13 @@ def test_the_crew_and_caster_routes_answer_headless(server, headless):
     assert headless.get("commentary.3.name") == "Cast"
 
 
-# /api/v1/bracket:refresh answered 503 until ADR-005 S3e-8 (the Top 8
-# import is core's now: tests/test_top8_refresh.py), and
-# /api/v1/scoreboards/{n}/stats:refresh until S3e-5 (the statistics are
-# core's: test_the_stats_routes_answer_headless below).
-@pytest.mark.parametrize("path,body", [
-    ("/api/v1/scoreboards/1:load-set", {"setId": "1"}),
-    ("/api/v1/scoreboards/1:pull-stream", None),
-])
-def test_a_v1_operation_answers_unavailable(server, path, body):
-    app, _ = server
-    client = app.test_client()
-    client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
-
-    response = client.post(path, json=body or {})
-
-    assert response.status_code == 503, response.get_json()
-    assert response.get_json()["ok"] is False
-    assert response.get_json()["error"]["code"] == "UNAVAILABLE"
+# No /api/v1 operation answers 503 any more. /api/v1/bracket:refresh did
+# until ADR-005 S3e-8 (the Top 8 import is core's now:
+# tests/test_top8_refresh.py), /api/v1/scoreboards/{n}/stats:refresh until
+# S3e-5 (the statistics are core's: test_the_stats_routes_answer_headless
+# below), and :load-set / :pull-stream until S3e-7 (set loading and
+# following are core's: tests/test_set_follow.py, where :pull-stream
+# without a channel answers NOT_READY).
 
 
 def _headlessPlayers(autonaApp, monkeypatch, playerDB):

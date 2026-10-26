@@ -388,11 +388,6 @@ def test_the_set_loaded_last_is_kept_outside_the_state(service):
     assert service.lastSetSelected is None
 
 
-def test_the_station_queue_is_published(service):
-    service.SetStationQueue([{"id": 1}])
-    assert SM.Get(f"{PREFIX}.station_queue") == [{"id": 1}]
-
-
 # ── stale async refreshes ────────────────────────────────────────────────
 
 @pytest.mark.parametrize("data", [None, {}, {"id": None}, {"entrants": []}])

@@ -28,6 +28,7 @@ from qtpy.QtWidgets import (
 from shiboken6 import Shiboken
 
 from src.core.SettingsManager import SettingsManager
+from tests.conftest import tournamentLoaded
 from tests.fixtures.stats.spies import StatsTriggers
 
 # The individual game tracker ships disabled, so the stage rows it rebuilds on
@@ -1305,7 +1306,17 @@ def test_a_reset_clears_the_match_bar(autonaApp, boardNumber, reset):
     assert autonaApp.get(f"{prefix}.team.2.losers") is False
 
 
-def test_a_set_without_a_round_name_keeps_the_previous_one(autonaApp):
+@pytest.fixture
+def tournament():
+    """A tournament loaded that answers nothing: a set loads only with one
+    (SetFollowService, ADR-005 S3e-7 review). The tests here drive the
+    board's part of a load, and the answer by hand."""
+    with tournamentLoaded():
+        yield
+
+
+def test_a_set_without_a_round_name_keeps_the_previous_one(autonaApp,
+                                                           tournament):
     """The set-load pre-pass (NewSetSelected -> ClearScore) is not a reset.
 
     A payload carrying no round_name / tournament_phase / tournament_pool
@@ -1320,7 +1331,8 @@ def test_a_set_without_a_round_name_keeps_the_previous_one(autonaApp):
     # The pre-pass alone must not have touched it either.
     assert autonaApp.get("score.1.match") == "Winners Final"
 
-    board.UpdateSetData({"id": "1001", "team1score": 1, "team2score": 0})
+    board.setFollow.UpdateSetData(
+        {"id": "1001", "team1score": 1, "team2score": 0})
     autonaApp.settle()
 
     assert autonaApp.get("score.1.match") == "Winners Final"
@@ -1330,14 +1342,15 @@ def test_a_set_without_a_round_name_keeps_the_previous_one(autonaApp):
     assert (_score(autonaApp, 1), _score(autonaApp, 2)) == (1, 0)
 
 
-def test_a_set_with_a_round_name_overwrites_the_previous_one(autonaApp):
+def test_a_set_with_a_round_name_overwrites_the_previous_one(autonaApp,
+                                                             tournament):
     board = autonaApp.board(1)
     board.ChangeSetData(dict(_SET))
     autonaApp.settle()
 
     board.NewSetSelected({"id": "1002", "auto_update": "set"})
     autonaApp.settle()
-    board.UpdateSetData({
+    board.setFollow.UpdateSetData({
         "id": "1002",
         "round_name": "Losers Final",
         "round_name_en": "Losers Final",
@@ -1630,38 +1643,50 @@ def test_a_score_moving_several_games_is_followed_in_one_cycle(
 # ── lifecycle ────────────────────────────────────────────────────────────
 
 def test_close_without_a_loaded_set_does_not_raise(autonaApp):
-    """BUG-5: autoUpdateTimer / timeLeftTimer stay None until NewSetSelected()
-    creates them, but closeEvent used to call .stop() on both unconditionally.
-    Closing a board that never had a set loaded raised AttributeError -- Qt
-    swallows exceptions from event handlers, so it was silent in production.
-    Calling closeEvent() directly (rather than .close()) makes a regression
-    fail loudly instead of vanishing into Qt's exception hook again.
+    """BUG-5: the board's timers stayed None until a set was loaded, but
+    closeEvent used to call .stop() on both unconditionally. Closing a board
+    that never had a set loaded raised AttributeError -- Qt swallows
+    exceptions from event handlers, so it was silent in production. The poll
+    is core's since ADR-005 S3e-7; the board keeps only the countdown's
+    clock, None until the timer row is first shown. Calling closeEvent()
+    directly (rather than .close()) makes a regression fail loudly instead
+    of vanishing into Qt's exception hook again.
     """
     from qtpy.QtGui import QCloseEvent
 
     board = autonaApp.board(1)
-    assert board.autoUpdateTimer is None
-    assert board.timeLeftTimer is None
+    assert board._followClock is None
 
     board.closeEvent(QCloseEvent())  # must not raise
 
 
-def test_close_with_a_loaded_set_still_stops_the_timers(autonaApp):
-    """The None guard must not break the ordinary path where NewSetSelected
-    already built real timers."""
-    from qtpy.QtCore import QTimer
+def test_close_while_following_stops_the_poll_and_the_countdown(
+        autonaApp, monkeypatch, tournament):
+    """The None guard must not break the ordinary path: closing a board
+    that is polling stops the poll (core's) and the countdown (the
+    board's), as stopping the board's own two timers did."""
     from qtpy.QtGui import QCloseEvent
 
+    from src.core.SetFollowService import SetFollowService
+    from src.core.SettingsManager import SettingsManager
+
     board = autonaApp.board(1)
-    board.autoUpdateTimer = QTimer()
-    board.autoUpdateTimer.start(5000)
-    board.timeLeftTimer = QTimer()
-    board.timeLeftTimer.start(100)
+    realGet = SettingsManager.Get
+    monkeypatch.setattr(SettingsManager, "Get", lambda key, default=None: (
+        False if key == "general.disable_autoupdate"
+        else realGet(key, default)))
+    board.NewSetSelected({"id": "999", "auto_update": "set"})
+    autonaApp.settle()
+    timer = SetFollowService.fetcher._timers[1]
+    assert timer.isActive()
+    assert board._followClock.isActive()
+    assert not board.timerLayout.isHidden()
 
     board.closeEvent(QCloseEvent())
 
-    assert not board.autoUpdateTimer.isActive()
-    assert not board.timeLeftTimer.isActive()
+    assert not timer.isActive()
+    assert not board._followClock.isActive()
+    assert SetFollowService(1).Following() is None
 
 
 # ── set loading (headless core Step 4b) ──────────────────────────────────
@@ -1798,7 +1823,7 @@ def test_a_loaded_team_name_reaches_the_line_edit(autonaApp):
     assert _teamName(board, 2).text() == "Bravo"
 
 
-def test_following_a_set_records_which_set_it_is(autonaApp):
+def test_following_a_set_records_which_set_it_is(autonaApp, tournament):
     board = autonaApp.board(1)
     board.NewSetSelected({"id": "999", "auto_update": "set"})
     autonaApp.settle()
@@ -1808,7 +1833,7 @@ def test_following_a_set_records_which_set_it_is(autonaApp):
     assert board.setLoad.lastSetSelected == "999"
 
 
-def test_cancelling_the_follow_forgets_the_set(autonaApp):
+def test_cancelling_the_follow_forgets_the_set(autonaApp, tournament):
     board = autonaApp.board(1)
     board.NewSetSelected({"id": "999", "auto_update": "set"})
     autonaApp.settle()
@@ -1828,8 +1853,9 @@ def test_a_stale_async_refresh_is_dropped(autonaApp):
     board.ChangeSetData({"round_name": "Winners Final"})
     autonaApp.settle()
 
-    board.UpdateSetData({"id": "111", "round_name": "Losers Round 1",
-                         "entrants": []})
+    board.setFollow.UpdateSetData({"id": "111",
+                                   "round_name": "Losers Round 1",
+                                   "entrants": []})
     autonaApp.settle()
 
     assert autonaApp.get("score.1.match") == "Winners Final"
@@ -2092,15 +2118,16 @@ def test_a_clear_refetches_the_stats_once(autonaApp, clear, ids, fetches):
 
 
 @pytest.mark.parametrize("clear", sorted(_CLEARS))
-def test_the_same_set_loads_again_after_a_clear(autonaApp, clear):
+def test_the_same_set_loads_again_after_a_clear(autonaApp, clear,
+                                                tournament):
     """NewSetSelected skips the set the board already follows; a clear
-    forgets it (it lives in SetLoadService now, not in the state)."""
-    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
+    forgets it (it lives in SetLoadService now, not in the state). The
+    fetch is the set follow's (SetFollowService.fetcher, ADR-005 S3e-7)."""
+    from src.core.SetFollowService import SetFollowService
 
     board = autonaApp.board(1)
     actions = autonaApp.web()
-    provider = AutonaTournamentDataProvider.instance
-    with patch.object(provider, "GetMatch") as fetched:
+    with patch.object(SetFollowService.fetcher, "Match") as fetched:
         try:
             board.NewSetSelected({"id": "999", "auto_update": "set"})
             board.NewSetSelected({"id": "999", "auto_update": "set"})

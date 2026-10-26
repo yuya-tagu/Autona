@@ -185,6 +185,13 @@ web_server = importlib.import_module("src.AutonaWebServer").WebServer
 # The web operations of both shells (ADR-005 S3c). The desktop's board host
 # and game loader are registered by bootstrap_gui(), never on import.
 web_operations = importlib.import_module("src.AutonaWebOperations")
+# The set follow (ADR-005 S3e-7): core's service and the Qt transport that
+# bootstrap_core() registers on it. Importing either registers, builds and
+# starts nothing -- no fetcher, no signals object, no clock.
+set_follow_util = importlib.import_module(
+    "src.AutonaSetFollowUtil").AutonaSetFollowUtil
+set_follow = importlib.import_module(
+    "src.core.SetFollowService").SetFollowService
 # The headless shell's assembly: its run() configures the logs and builds
 # everything; importing it must do neither.
 headless = importlib.import_module("src.headless")
@@ -224,6 +231,11 @@ assert web_server.app is None, "import built WebServer.app (Flask)"
 assert web_server.socketio is None, "import built WebServer.socketio"
 assert web_server.actions is None, "import built WebServer.actions"
 assert type(web_operations.boardHost) is web_operations.BoardHost,     "import registered a board host for the web operations"
+assert set_follow.fetcher is None,     "import registered the set follow's fetcher"
+assert set_follow.boardHost is None,     "import registered the set follow's board host"
+assert (set_follow._polls, set_follow._stations, set_follow._queues,
+        set_follow._queueAsks, set_follow._lookups,
+        set_follow._loads) == ({}, {}, {}, {}, {}, {}),     "import started following a set"
 assert web_operations.loadGameByCodename is None,     "import registered a game loader for the web operations"
 assert not player_db.modelEnabled, "import switched the player DB model on"
 assert player_db._attachedTo is None, \
