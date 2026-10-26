@@ -2516,37 +2516,11 @@ class AutonaScoreboardWidget(QWidget):
             logger.error(f"Error while setting entrants: {e}")
         return singlesChanged and not seedMoved
 
-    def ApplyPlayerData(self, team, player, data):
-        """Apply one player's fields from a remote client (/api/v1 PATCH).
-
-        Just the player half of ChangeSetData. Run through ChangeSetData (as
-        the legacy update-team route does), a player edit also went through
-        the set-level writers, and `SetLoadService.ApplyMatchInfo` writes
-        `match_en` unconditionally -- so every remote player edit blanked
-        the English round text. Same SaveBlock, same player write, nothing
-        else.
-
-        Unlike the legacy path, a failure is reported instead of logged and
-        swallowed: False when the team has no such slot (`player` is 1-based
-        and must be within the team's current roster -- checked here, on the
-        GUI thread, against the widgets that actually exist), and an
-        exception from the write itself propagates. True when applied.
-        GUI thread only (the player widgets are written).
-        """
-        team = int(team)
-        player = int(player)
-        if team not in (1, 2):
-            return False
-        widgets = (self.team1playerWidgets if team == 1
-                   else self.team2playerWidgets)
-        if not 1 <= player <= len(widgets):
-            return False
-        with StateManager.SaveBlock():
-            self._WritePlayerSlot(team, player, data)
-        return True
-
     def _ApplySinglePlayerData(self, data):
-        """Apply a one-player payload (set_team_data). False if it had none.
+        """Apply a one-player payload (a POST /score carrying `team` /
+        `player` / `data`; the legacy update-team route's is core's since
+        ADR-005 S3e-4, AutonaWebOperations.set_team_data). False if it had
+        none.
 
         Unlike the entrants path this addresses the state teams directly:
         the caller names the team it means, and a swap has already been
@@ -2602,10 +2576,29 @@ class AutonaScoreboardWidget(QWidget):
                 service.ApplyData(data, loadFromDB, clear, no_mains)
             finally:
                 change = service.ChangeSince(before)
-                card.AnnounceChange(change)
-                if clear:
-                    card.DiscardTypedText(notEditing=True)
+                self._CardLoaded(card, change, clear)
         return change
+
+    def PlayerLoaded(self, team, player, change, cleared):
+        """A web operation loaded a player into slot `player` of state team
+        `team` (AutonaWebOperations, ADR-005 S3e-4: the load is core's and
+        the slot is the state's): the card showing that slot does what it
+        does after the board's own loads (_CardLoaded). Called by the
+        desktop's board host inside the load's save block, on the GUI
+        thread."""
+        cards = (self.team1playerWidgets if int(team) == 1
+                 else self.team2playerWidgets)
+        if 1 <= int(player) <= len(cards):
+            self._CardLoaded(cards[int(player) - 1], change, cleared)
+
+    @staticmethod
+    def _CardLoaded(card, change, cleared):
+        # The statistics the change asks for (the card relays them to this
+        # board's stats util), and the text typed into combos the operator
+        # is not in, after a load that cleared (see _ApplyPlayer).
+        card.AnnounceChange(change)
+        if cleared:
+            card.DiscardTypedText(notEditing=True)
 
     def UpdateSetData(self, data):
         # An empty payload, or one answering for a set the operator has
@@ -2622,6 +2615,9 @@ class AutonaScoreboardWidget(QWidget):
         self.ChangeSetData(data)
 
     def LoadPlayerFromTag(self, tag, team, player, no_mains=False):
+        # The PLAYERS panel's "set to P1 / P2". The Web's tag lookup is
+        # AutonaWebOperations.load_player_from_tag since ADR-005 S3e-4 (the
+        # same load, the slot resolved from the state).
         team = int(team)-1
         player = int(player)-1
         teamInstances = [self.team1playerWidgets,

@@ -32509,6 +32509,10 @@
       "\"solo\""
      ],
      [
+      "team.1.player.2.id",
+      "null"
+     ],
+     [
       "team.1.player.2.mergedName",
       "\"SOLO\""
      ],
@@ -32527,13 +32531,17 @@
      [
       "team.1.player.2.sponsor_logos",
       null
+     ],
+     [
+      "recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
      ]
     ],
     "stats": {
-     "RecentSetsSignal": 0,
-     "LastSetsP1Signal": 0,
+     "RecentSetsSignal": 1,
+     "LastSetsP1Signal": 1,
      "LastSetsP2Signal": 0,
-     "PlayerHistoryStandingsP1Signal": 0,
+     "PlayerHistoryStandingsP1Signal": 1,
      "PlayerHistoryStandingsP2Signal": 0,
      "UpsetFactorCalculation": 0
     },
@@ -32647,7 +32655,7 @@
           }
          },
          "country": {},
-         "id": 102,
+         "id": null,
          "mains": {
           "1": {
            "assets": "44136fa355b3678a",
@@ -32828,7 +32836,7 @@
      },
      "upset_factor": 0
     },
-    "stateDigest": "aad813a3952e9cef",
+    "stateDigest": "3bef698cd5743402",
     "keyOrder": {
      "": [
       "team",
@@ -33198,7 +33206,7 @@
     "slots": {
      "score.2.team.1.player.1": "d7cd69cf58644cdb",
      "score.2.team.2.player.1": "5ff668937f1faf73",
-     "score.2.team.1.player.2": "c19f11539481eda7",
+     "score.2.team.1.player.2": "b1a3dc7edc1948f8",
      "score.2.team.2.player.2": "9eee5f69dfe55e1e"
     },
     "shown": {
@@ -33323,7 +33331,8 @@
       ]
      }
     },
-    "db": "[\n  {\n    \"gamerTag\": \"LEG\",\n    \"country_code\": \"US\",\n    \"state_code\": \"CA\",\n    \"mains\": {\n      \"tgame\": [\n        [\n          \"Peach\"\n        ]\n      ]\n    }\n  }\n]"
+    "db": "[\n  {\n    \"gamerTag\": \"LEG\",\n    \"country_code\": \"US\",\n    \"state_code\": \"CA\",\n    \"mains\": {\n      \"tgame\": [\n        [\n          \"Peach\"\n        ]\n      ]\n    }\n  }\n]",
+    "rerecorded": "S3e-4: an update naming another player empties the id and the city it does not bring"
    }
   ]
  }

@@ -1,13 +1,12 @@
 """The web layer's board-dependent operations (ADR-005 S3c).
 
-What is left here needs a board or panel *widget* to answer: the player
-cards (update_player, load_player_from_tag), the set payloads a board's
-ChangeSetData applies (post_score, set_team_data), the set selection and
+What is left here needs a board or panel *widget* to answer: the set
+payload a board's ChangeSetData applies (post_score), the set selection and
 stream-set follow (open_sets, pull_stream_set, load_set), the statistics
 and the thumbnail. Every operation that is core's moved to
 src/AutonaWebOperations.py, which both shells share (the crew board's
 members and the caster line-up with ADR-005 S3e-2, the Top 8 import with
-S3e-8); this object
+S3e-8, the player edits and the tag lookup with S3e-4); this object
 exists only in the desktop shell (the window hands it to the WebServer), and
 in the headless shell the routes behind it answer 503
 (AutonaWebOperations.NotAvailable). It goes in S3e, once these are core
@@ -43,33 +42,6 @@ class WebServerActions(QObject):
         score.update({"reset_score": True})
         self.scoreboard.GetScoreboard(scoreboard_number).signals.ChangeSetData.emit(score)
         return "OK"
-
-    def set_team_data(self, scoreboard, team, player, data):
-        self.scoreboard.GetScoreboard(scoreboard).signals.ChangeSetData.emit({
-            "team": team,
-            "player": player,
-            "data": data
-        })
-        return "OK"
-
-    # ── /api/v1 only (Web UI migration, ADR-001 Addendum 2026-10-21) ──
-    # The v1 counterpart of `set_team_data` (score:set's, set_scores, and
-    # set_team_losers are core's: AutonaWebOperations). The legacy route
-    # keeps the method above unchanged; this addresses the *state* team and
-    # skips the set-payload side effect it carries (match_en being blanked
-    # by ChangeSetData).
-
-    @gui_thread_sync
-    def update_player(self, scoreboard, team, player, data):
-        # The write is core's (PlayerService.ApplyData, ADR-005 S3e-3), but
-        # the roster it checks and the statistics it asks for are still the
-        # board's, so this runs on the GUI thread -- and
-        # synchronously, unlike set_team_data's queued signal, so the caller
-        # gets the outcome: False when the team has no such player slot (the
-        # roster is checked on the GUI thread, against the live widgets);
-        # an exception from the write propagates to the caller.
-        return self.scoreboard.GetScoreboard(scoreboard).ApplyPlayerData(
-            team, player, data)
 
     def open_sets(self, scoreboard):
         self.scoreboard.GetScoreboard(scoreboard).signals.SetSelection.emit()
@@ -174,11 +146,3 @@ class WebServerActions(QObject):
                 )
             )
         return "OK"
-
-    @gui_thread_sync
-    def load_player_from_tag(self, scoreboard, tag, team, player, no_mains=False):
-        result = self.scoreboard.GetScoreboard(scoreboard).LoadPlayerFromTag(str(tag), int(team), int(player), no_mains)
-        if result == True:
-            return "OK"
-        else:
-            return "ERROR"

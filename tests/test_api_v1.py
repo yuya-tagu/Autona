@@ -357,7 +357,8 @@ def test_set_patch_losers_on_a_board_not_built_yet_still_waits_for_apply(
 def test_player_patch_keeps_the_english_round_text(autonaApp, client):
     """The legacy route ran a player edit through all of ChangeSetData, whose
     match-info writer blanks match_en for any payload without one. The v1
-    route applies only the player half (AutonaScoreboardWidget.ApplyPlayerData).
+    route applies only the player half (AutonaWebOperations.update_player
+    since ADR-005 S3e-4; the board's ApplyPlayerData before).
     """
     autonaApp.board(1)
     autonaApp.state.Set("score.1.match_en", "Winners Final")
@@ -370,6 +371,82 @@ def test_player_patch_keeps_the_english_round_text(autonaApp, client):
 
     assert autonaApp.get("score.1.team.1.player.1.name") == "Alpha"
     assert autonaApp.get("score.1.match_en") == "Winners Final"
+
+
+def test_player_patch_answers_404_for_a_slot_the_team_does_not_have(
+        autonaApp, client):
+    """The roster is the state's slots (ADR-005 S3e-4; it was the board's
+    cards, which publish exactly those): a player beyond it is 404, with
+    nothing written -- the set payload's match_en included, which only the
+    legacy route carries."""
+    board = autonaApp.board(2)
+    board.playerNumber.setValue(2)
+    autonaApp.state.Set("score.2.match_en", "Winners Final")
+    autonaApp.settle()
+    before = _boardState(autonaApp, 2)
+
+    for path in ("/api/v1/scoreboards/2/teams/1/players/3",
+                 "/api/v1/scoreboards/2/teams/2/players/9"):
+        _assertRejected(client.patch(path, json={"gamerTag": "Nobody"}),
+                        "NOT_FOUND", 404)
+    autonaApp.settle()
+    assert _boardState(autonaApp, 2) == before
+
+    response = client.patch("/api/v1/scoreboards/2/teams/2/players/2",
+                            json={"gamerTag": "Second"})
+    assert response.status_code == 200
+    autonaApp.settle()
+    assert autonaApp.get("score.2.team.2.player.2.name") == "Second"
+
+
+def test_player_patch_on_a_board_not_built_yet_waits_for_apply(
+        autonaApp, client):
+    """As every board operation (ADR-005 S2c 判断 7): the board is built
+    first -- which is what writes its slots -- so the edit is held for 反映
+    rather than published at once and wiped by the build's seed."""
+    autonaApp._dropBoard(1)
+    assert 1 not in autonaApp.manager.scoreboards
+
+    response = client.patch("/api/v1/scoreboards/1/teams/2/players/1",
+                            json={"gamerTag": "Later"})
+    assert response.status_code == 200, response.get_json()
+    autonaApp.settle()
+
+    assert 1 in autonaApp.manager.scoreboards
+    assert autonaApp.get("score.1.team.2.player.1.name") == "Later"
+    assert autonaApp.state.HasPendingChanges("score.1") is True
+    card = autonaApp.manager.scoreboards[1].team2playerWidgets[0]
+    from qtpy.QtWidgets import QLineEdit
+    assert card.findChild(QLineEdit, "name").text() == "Later"
+
+
+def test_the_legacy_player_routes_answer_as_before(autonaApp, client):
+    """Their bodies (ADR-005 S3e-4 moved them, not their answers): update-team
+    "OK" whatever it wrote, the tag lookup "OK" / "ERROR" / "No tag
+    provided"."""
+    from src.core.PlayerDB import PlayerDB
+
+    autonaApp.board(1)
+    assert client.post("/scoreboard1-update-team-1-1",
+                       json={"gamerTag": "Alpha"}).get_data(
+        as_text=True) == "OK"
+    assert client.post("/scoreboard1-update-team-1-4",
+                       json={"gamerTag": "Nowhere"}).get_data(
+        as_text=True) == "OK"
+    with patch.object(PlayerDB.instance, "GetPlayerFromTag",
+                      side_effect=lambda tag: {"gamerTag": "Found"}
+                      if tag == "found" else None):
+        for path, answer in (
+                ("/scoreboard1-load-player-from-tag-2-1?tag=found", "OK"),
+                ("/scoreboard1-load-player-from-tag-2-1?tag=lost", "ERROR"),
+                ("/scoreboard1-load-player-from-tag-2-1", "No tag provided")):
+            response = client.get(path)
+            assert response.status_code == 200, path
+            assert response.get_data(as_text=True) == answer, path
+    autonaApp.settle()
+
+    assert autonaApp.get("score.1.team.1.player.1.name") == "Alpha"
+    assert autonaApp.get("score.1.team.2.player.1.name") == "Found"
 
 
 @pytest.mark.parametrize("path, body", [

@@ -924,14 +924,19 @@ class _ApplyReplay:
         if op == "update":
             path = self.slotPath([step["team"], step["player"]])
             if SM.Get(path) is None:
-                # The board's roster check (ApplyPlayerData).
+                # The Web's roster check (the slot is in the state:
+                # AutonaWebOperations.update_player, ADR-005 S3e-4).
                 return False, None
             service = self.service(path)
             data = copy.deepcopy(step["data"])
+            prepared = None
             with SM.SaveBlock():
                 change = service.ApplyData(data, True, False)
                 if data.get("savePlayerToDb", False):
-                    service.SavePlayerToDB()
+                    prepared = service.PrepareSaveToDB()
+            # The database write after the board host (S3e-4 review).
+            if prepared is not None:
+                service.SaveRecordToDB(prepared)
             return True, change
         if op == "chars":
             # Every card gets the new number of character rows, the new
@@ -1237,6 +1242,305 @@ def test_an_update_without_a_clear_keeps_the_id_and_the_city(loadWorld):
 
     assert (SM.Get(f"{BOARD_PATH}.id"), SM.Get(f"{BOARD_PATH}.city")) \
         == (101, "Kyoto")
+    assert not change.idChanged
+
+
+# ── an update that names another player (S3e-4) ──────────────────────────
+#
+# The Web UI commits every field of its player card as an update without
+# the clear (PATCH .../players/{p}), and never sends the id: writing another
+# player's name over the slot kept the previous player's id and city, and
+# the statistics -- keyed by the id -- went on showing the previous player
+# under the new name. The rule is the desktop card's (NameChanged): the
+# sponsor or the tag changing is another player.
+
+def _identity():
+    return (SM.Get(f"{BOARD_PATH}.id"), SM.Get(f"{BOARD_PATH}.city"))
+
+
+def test_an_update_that_names_another_player_leaves_no_id_or_city(
+        loadWorld):
+    service = loadWorld.service()
+    service.ApplyData({"gamerTag": "FIRST", "prefix": "SP", "id": 101,
+                       "city": "Kyoto"})
+
+    # What the Web UI sends: the whole card, the new tag in it, no id.
+    change = service.ApplyData({
+        "gamerTag": "SECOND", "prefix": "SP", "twitter": "tw",
+        "country_code": "JP"}, clear=False)
+
+    assert SM.Get(f"{BOARD_PATH}.{schema.PLAYER_TAG_KEY}") == "SECOND"
+    assert _identity() == (None, None)
+    assert change.idChanged
+
+
+def test_another_sponsor_is_another_player(loadWorld):
+    """The sponsor and the tag together name a player -- the local
+    database's key (PlayerDB.PlayerTag), and what the desktop card compares
+    before it drops the id (NameChanged)."""
+    service = loadWorld.service()
+    service.ApplyData({"gamerTag": "SAME", "prefix": "OLD", "id": 101,
+                       "city": "Kyoto"})
+
+    change = service.ApplyData({"gamerTag": "SAME", "prefix": "NEW"},
+                               clear=False)
+
+    assert _identity() == (None, None)
+    assert change.idChanged
+
+
+@pytest.mark.parametrize("data", [
+    {"gamerTag": "FIRST", "prefix": "SP", "twitter": "edited"},
+    {"gamerTag": "FIRST"},
+    {"prefix": "SP"},
+    # Blank fields are not carried (a blank value leaves the current one).
+    {"gamerTag": "", "prefix": "", "name": "Real"},
+    {"mains": {"tgame": [["Luigi", 0]]}},
+], ids=["the whole card", "the tag again", "the sponsor again", "blank names",
+        "characters only"])
+def test_an_update_of_the_same_player_keeps_the_id_and_the_city(
+        loadWorld, data):
+    service = loadWorld.service()
+    service.ApplyData({"gamerTag": "FIRST", "prefix": "SP", "id": 101,
+                       "city": "Kyoto"})
+
+    with applyScenarios.Writes(BOARD_PATH) as writes:
+        change = service.ApplyData(data, clear=False)
+
+    assert _identity() == (101, "Kyoto")
+    assert [key for key, _value in writes.calls
+            if key in ("id", "city")] == []
+    assert not change.idChanged
+
+
+def test_an_update_that_names_another_player_with_an_id_writes_it_once(
+        loadWorld):
+    """What the update brings is written over the previous player's, never
+    None first; what it does not bring is emptied."""
+    service = loadWorld.service()
+    service.ApplyData({"gamerTag": "FIRST", "id": 101, "city": "Kyoto"})
+
+    with applyScenarios.Writes(BOARD_PATH) as writes:
+        change = service.ApplyData({"gamerTag": "SECOND", "id": 202},
+                                   clear=False)
+
+    assert [call for call in writes.calls if call[0] in ("id", "city")] \
+        == [["id", "202"], ["city", "null"]]
+    assert _identity() == (202, None)
+    assert change.idChanged
+
+
+def test_an_update_that_names_a_player_the_database_knows_takes_theirs(
+        loadWorld):
+    """The database's record of the new player (a tournament's entrant
+    carries a start.gg id) is the player's own: kept, not emptied."""
+    loadWorld.db.database = {"SECOND": {"gamerTag": "SECOND", "id": 202,
+                                        "city": "Osaka"}}
+    service = loadWorld.service()
+    service.ApplyData({"gamerTag": "FIRST", "id": 101, "city": "Kyoto"})
+
+    change = service.ApplyData({"gamerTag": "SECOND"}, loadFromDB=True,
+                               clear=False)
+
+    assert _identity() == (202, "Osaka")
+    assert change.idChanged
+
+
+# The online avatar and the seed stay (S3e-4 review). The Web UI sends the
+# whole card, its name included, so a typo fixed in the tag or a sponsor
+# added is "another player" too -- and LIVE-BUG-1 is that fixing a typo must
+# not cost the player a face. Only the id and the city are emptied, as the
+# desktop card's NameChanged does: both terminals end the same. Widening it
+# on both is the owner's call (docs/changes/architecture-modernization.md).
+
+OTHER_AVATAR = "https://cdn.example.invalid/avatar/def456"
+
+
+def _previousPlayer(service):
+    service.ApplyData({"gamerTag": "FRIST", "id": 101, "city": "Kyoto",
+                       "seed": 5, "avatar": AVATAR})
+
+
+def _ownFields():
+    return {key: SM.Get(f"{BOARD_PATH}.{key}")
+            for key in ("id", "city", "online_avatar", "seed")}
+
+
+@pytest.mark.parametrize("data", [
+    # What the Web UI sends: the whole card, the edited name in it.
+    {"gamerTag": "FRIST", "prefix": "SP", "name": "", "twitter": "",
+     "country_code": "", "state_code": ""},
+    {"gamerTag": "FIRST", "prefix": "", "name": "", "twitter": "",
+     "country_code": "", "state_code": ""},
+], ids=["a sponsor added", "a typo fixed in the tag"])
+def test_an_update_that_names_another_player_keeps_the_face_and_the_seed(
+        loadWorld, data):
+    service = loadWorld.service()
+    _previousPlayer(service)
+
+    with applyScenarios.Writes(BOARD_PATH) as writes:
+        change = service.ApplyData(data, clear=False)
+
+    assert _ownFields() == {"id": None, "city": None,
+                            "online_avatar": AVATAR, "seed": 5}
+    assert [call for call in writes.calls
+            if call[0] in ("online_avatar", "seed")] == []
+    assert change.idChanged and not change.seedChanged
+
+
+def _failAtTheAvatar(monkeypatch):
+    """The avatar step (after the name, before the id) raises."""
+    publish = PlayerService.PublishImages
+
+    def failing(self, sponsor, tag, onlineAvatar=KEEP_ONLINE_AVATAR):
+        if onlineAvatar is not KEEP_ONLINE_AVATAR:
+            raise RuntimeError("the avatar step")
+        return publish(self, sponsor, tag)
+
+    monkeypatch.setattr(PlayerService, "PublishImages", failing)
+
+
+@pytest.mark.parametrize("clear", [True, False], ids=["load", "update"])
+def test_a_load_that_raises_before_the_id_leaves_no_previous_id(
+        loadWorld, monkeypatch, clear):
+    """The new name is written and a later step raises before the id it
+    carries: the previous player's id and city must not stay under the new
+    name. What the load wrote decides it, not what it carries (S3e-4
+    review) -- the clear leaves the id it carries for the load to write
+    over. The face and the seed are the clear's to empty (a load), and an
+    update's to keep."""
+    service = loadWorld.service()
+    _previousPlayer(service)
+    _failAtTheAvatar(monkeypatch)
+
+    with pytest.raises(RuntimeError):
+        service.ApplyData({"gamerTag": "SECOND", "prefix": "SP",
+                           "avatar": OTHER_AVATAR, "id": 202,
+                           "city": "Osaka", "seed": 3}, clear=clear)
+
+    assert SM.Get(f"{BOARD_PATH}.{schema.PLAYER_TAG_KEY}") == "SECOND"
+    assert SM.Get(f"{BOARD_PATH}.mergedName") == "SP | SECOND"
+    assert _ownFields() == {
+        "id": None, "city": None,
+        "online_avatar": None if clear else AVATAR, "seed": 0 if clear else 5}
+
+
+def _failToEmptyTheId(monkeypatch):
+    setId = PlayerService.SetPlayerId
+
+    def failing(self, value):
+        if value is None:
+            raise ValueError("emptying the id")
+        return setId(self, value)
+
+    monkeypatch.setattr(PlayerService, "SetPlayerId", failing)
+
+
+def test_a_failure_to_empty_the_id_does_not_hide_the_loads_own(
+        loadWorld, monkeypatch, warnings):
+    """Emptying the id runs in the load's `finally`: raising there would
+    put its exception in place of the step's own. The step's propagates,
+    the other is logged, and the name is still published (S3e-4 review)."""
+    service = loadWorld.service()
+    _previousPlayer(service)
+    _failAtTheAvatar(monkeypatch)
+    _failToEmptyTheId(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="the avatar step"):
+        service.ApplyData({"gamerTag": "SECOND", "avatar": OTHER_AVATAR},
+                          clear=False)
+
+    assert SM.Get(f"{BOARD_PATH}.mergedName") == "SECOND"
+    assert any("not emptied" in message for message in warnings)
+
+
+def test_a_failure_to_empty_the_id_alone_is_raised(loadWorld, monkeypatch):
+    """With no step failing, emptying the id failing is the load's error --
+    raised after the name is published."""
+    service = loadWorld.service()
+    _previousPlayer(service)
+    _failToEmptyTheId(monkeypatch)
+
+    with pytest.raises(ValueError, match="emptying the id"):
+        service.ApplyData({"gamerTag": "SECOND"}, clear=False)
+
+    assert SM.Get(f"{BOARD_PATH}.mergedName") == "SECOND"
+
+
+# ── the database saves' order (S3e-4 review) ─────────────────────────────
+#
+# The Web's edits write the database after their board host let go
+# (AutonaWebOperations._save_record), so two saves of one player can reach
+# it in the other order. Each record is numbered as its slot is read; one
+# read before the record saved last under its key is dropped.
+
+def _databaseFile(db):
+    """{database key: player} of the database's file."""
+    from src.core.PlayerDB import PlayerDB
+    return {PlayerDB.PlayerTag(player): player
+            for player in json.loads(Path(db.path).read_text("utf-8"))}
+
+
+def test_a_save_read_before_the_one_saved_last_is_dropped(loadWorld):
+    service = loadWorld.service()
+    other = loadWorld.service("score.1.team.2.player.1")
+    other.SeedEmpty(3)
+    service.ApplyData({"gamerTag": "TAG", "name": "Old"})
+    other.ApplyData({"gamerTag": "OTHER", "name": "Other"})
+    older = service.PrepareSaveToDB()
+    otherOlder = other.PrepareSaveToDB()
+    service.ApplyData({"name": "New"}, clear=False)
+    newer = service.PrepareSaveToDB()
+    assert older.sequence < otherOlder.sequence < newer.sequence
+
+    # The newer read reaches the database first.
+    assert PlayerService.SaveRecordToDB(newer) is True
+    assert PlayerService.SaveRecordToDB(older) is False
+    # Another player's key is its own.
+    assert PlayerService.SaveRecordToDB(otherOlder) is True
+
+    assert loadWorld.db.Get("TAG")["name"] == "New"
+    saved = _databaseFile(loadWorld.db)
+    assert (saved["TAG"]["name"], saved["OTHER"]["name"]) == ("New", "Other")
+
+
+def test_saves_in_the_order_they_were_read_are_all_written(loadWorld):
+    service = loadWorld.service()
+    service.ApplyData({"gamerTag": "TAG", "name": "First"})
+    service.SavePlayerToDB()
+    assert loadWorld.db.Get("TAG")["name"] == "First"
+
+    service.ApplyData({"name": "Second"}, clear=False)
+    first = service.PrepareSaveToDB()
+    service.ApplyData({"name": "Third"}, clear=False)
+    second = service.PrepareSaveToDB()
+    assert PlayerService.SaveRecordToDB(first) is True
+    assert PlayerService.SaveRecordToDB(second) is True
+
+    assert _databaseFile(loadWorld.db)["TAG"]["name"] == "Third"
+
+
+def test_an_update_whose_tag_is_censored_to_the_name_shown_is_the_same_player(
+        loadWorld, tmp_path, monkeypatch):
+    """The slot holds the censored tag; the Web UI sends back the tag as
+    the operator typed it. Compared as written, it is the same name."""
+    from src.core.BadWordFilter import BadWordFilter
+
+    ngword = tmp_path / "words"
+    ngword.mkdir()
+    (ngword / "common.txt").write_text("nasty", encoding="utf-16")
+    badWords = BadWordFilter(ngwordDir=str(ngword),
+                             userDataDir=str(tmp_path / "words_user_data"))
+    badWords.Initialize()
+    monkeypatch.setattr(BadWordFilter, "instance", badWords)
+    service = loadWorld.service()
+    service.ApplyData({"gamerTag": "nasty", "id": 101, "city": "Kyoto"})
+    assert SM.Get(f"{BOARD_PATH}.{schema.PLAYER_TAG_KEY}") != "nasty"
+
+    change = service.ApplyData({"gamerTag": "nasty", "twitter": "tw"},
+                               clear=False)
+
+    assert _identity() == (101, "Kyoto")
     assert not change.idChanged
 
 
