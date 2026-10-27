@@ -104,10 +104,10 @@ def liveEvent(_autonaRuntime):
     from src.TournamentDataProvider.StartGGDataProvider import (
         StartGGDataProvider)
 
-    # No pool given: the provider falls back to Qt's global QThreadPool, as
-    # the app's adapter does since ADR-005 S3f-2. GetMatch fans out to two
-    # Workers on it and blocks until both land.
-    provider = StartGGDataProvider(EVENT_URL, None, None)
+    # GetMatch fans its two APIs out to the session's task executor and
+    # blocks until both land (ADR-005 S3f-3): the provider has no pool of
+    # its own.
+    provider = StartGGDataProvider(EVENT_URL, None)
 
     # Order matters: GetTournamentData caches numEntrants on the provider,
     # and that headcount anchors the TOP-N round naming every later set

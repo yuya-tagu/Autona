@@ -925,7 +925,6 @@ def test_a_station_lookup_after_a_set_loaded_by_hand_is_dropped(
 
     assert _calls(provider, "GetStationMatchsId") == [[77]]
     assert _calls(provider, "GetMatch") == [[1002]]
-    assert _calls(provider, "GetFutureMatchesList") == []
     assert autonaApp.get("score.1.set_id") == 1002
     assert autonaApp.get("score.1.team.1.player.1.name") == "CHARLIE"
 
@@ -944,29 +943,60 @@ def test_a_station_lookup_after_the_cancel_button_is_dropped(
     assert board.setLoad.lastSetSelected is None
 
 
-def test_the_station_queue_is_kept_in_memory_only(autonaApp, desktop,
-                                                  provider):
-    """The sets queued behind the station are fetched and kept for the
-    follow; they are not written (the recorded tree lost them, and
-    `score.{n}.station_queue` stays the `{}` it always was). A queue
-    answering after the board stopped following the station is dropped,
-    and so is the set its lookup loaded. Following the station again after
-    the cancel fetches its queue again."""
+def test_following_a_station_fetches_its_current_set_only(
+        autonaApp, desktop, provider, settings, monkeypatch):
+    """Following a station looks its sets up and fetches the first one --
+    on the follow and on every tick, the queue behind it moved or not. The
+    sets queued behind it are not fetched (ADR-005 S3f-3): nothing showed
+    them -- `score.{n}.station_queue` stays the `{}` it always was, the
+    recorded tree's fetch never answered -- so they only added start.gg
+    requests. Stopping the poll keeps the station."""
+    from loguru import logger
     from src.core.SetFollowService import SetFollowService
 
     board, _, _ = desktop
+    monkeypatch.setattr(SetFollowService, "POLL_MS", 3600 * 1000)
+    settings["general.disable_autoupdate"] = False
+    provider.stations["77"] = [_node(3001), _node(3002, (3, 4))]
+    failed = []
+    sink = logger.add(lambda message: failed.append(str(message)),
+                      level="ERROR")
+    try:
+        board.signals.StationSelected.emit(dict(_STATION))
+        _drain(autonaApp)
+        provider.stations["77"] = [_node(3001), _node(1003)]
+        _tick(1)
+        _drain(autonaApp)
+        board.StopAutonaUpdate(clear_variables=False)
+        autonaApp.settle()
+    finally:
+        logger.remove(sink)
+
+    assert failed == []
+    assert _calls(provider, "GetStationMatchsId") == [[77], [77]]
+    assert _calls(provider, "GetMatch") == [[3001], [3001]]
+    assert {call[0] for call in provider.calls} == {
+        "GetStationMatchsId", "GetMatch", "GetStreamQueue", "GetLastSets",
+        "GetPlayerHistoryStandings", "GetRecentSets"}
+    assert autonaApp.get("score.1.station_queue") == {}
+    assert autonaApp.get("score.1.set_id") == 3001
+    assert SetFollowService(1).Station() is not None
+    board.StopAutonaUpdate(clear_variables=True)
+
+
+def test_a_station_set_answering_after_the_cancel_is_dropped(
+        autonaApp, desktop, provider):
+    """Another station's lookup answers -- its set cleared the board and
+    is asked for -- then the operator cancels before the set answers: the
+    set is dropped, and nothing is followed."""
+    board, _, _ = desktop
     provider.stations["77"] = [_node(3001), _node(3002, (3, 4))]
     provider.stations["78"] = [_node(1001), _node(1003)]
-    queued = {"1": {"id": 3002, "p1_name": "P3002", "p2_name": "Q"}}
 
     board.signals.StationSelected.emit(dict(_STATION))
     _drain(autonaApp)
-    assert SetFollowService._queues[1]["queued"] == queued
-    assert autonaApp.get("score.1.station_queue") == {}
     assert autonaApp.get("score.1.set_id") == 3001
 
-    # Station 78's lookup answers (asking for its queue and its set), then
-    # the operator cancels before either answers.
     board.signals.StationSelected.emit(
         dict(_STATION, id=78, identifier="5"))
     for _ in range(3):
@@ -977,97 +1007,13 @@ def test_the_station_queue_is_kept_in_memory_only(autonaApp, desktop,
     board.timerCancelBt.click()
     _drain(autonaApp)
 
-    assert _calls(provider, "GetFutureMatchesList") == [[[3002]], [[1003]]]
     assert _calls(provider, "GetMatch") == [[3001], [1001]]
-    assert 1 not in SetFollowService._queues
     assert autonaApp.get("score.1.station_queue") == {}
     assert autonaApp.get("score.1.set_id") is None
     # Station 78's set cleared the board before the cancel; its players
     # never arrived.
     assert autonaApp.get("score.1.team.1.player.1.name") in ("", None)
     assert board.setLoad.lastSetSelected is None
-
-    # Station 77 again, its queue as it was: asked for again.
-    board.signals.StationSelected.emit(dict(_STATION))
-    _drain(autonaApp)
-    assert _calls(provider, "GetFutureMatchesList") == [
-        [[3002]], [[1003]], [[3002]]]
-    assert SetFollowService._queues[1]["queued"] == queued
-    board.StopAutonaUpdate(clear_variables=True)
-
-
-def test_a_queue_answering_after_apply_leaves_nothing_to_apply(
-        autonaApp, desktop, provider):
-    """The station's queue is the follow's own: its answer arriving after
-    the operator applied the station's set does not light 反映 again."""
-    from src.core.SetFollowService import SetFollowService
-
-    board, client, _ = desktop
-    provider.stations["77"] = [_node(3001), _node(3002, (3, 4))]
-    answers = []
-
-    def held(setIds, onResult):
-        answers.append(onResult)
-        return True
-
-    with patch.object(SetFollowService.fetcher, "FutureSets", held):
-        board.signals.StationSelected.emit(dict(_STATION))
-        _drain(autonaApp)
-    assert autonaApp.get("score.1.set_id") == 3001
-    assert _v1(client, "/api/v1/scoreboards/1:apply") == (200, None)
-    assert not _state().HasPendingChanges("score.1")
-
-    answers[0]({"1": {"id": 3002}})     # the queue, late, on the main thread
-    autonaApp.settle()
-
-    assert not _state().HasPendingChanges("score.1")
-    assert autonaApp.get("score.1.station_queue") == {}
-    assert SetFollowService._queues[1]["queued"] == {"1": {"id": 3002}}
-    board.StopAutonaUpdate(clear_variables=True)
-
-
-def test_a_queue_answering_after_the_follow_stopped_is_dropped(
-        autonaApp, desktop, provider, settings, monkeypatch):
-    """The station's queue is kept from the fetch the board waits for: an
-    older fetch answering after a newer one is dropped, and so is one
-    answering after the poll stopped -- the station kept (it was written
-    back, the station being the same)."""
-    from src.core.SetFollowService import SetFollowService
-
-    board, _, _ = desktop
-    monkeypatch.setattr(SetFollowService, "POLL_MS", 3600 * 1000)
-    settings["general.disable_autoupdate"] = False
-    provider.stations["77"] = [_node(3001), _node(3002, (3, 4))]
-    answers = []
-
-    def held(setIds, onResult):
-        answers.append(onResult)
-        return True
-
-    with patch.object(SetFollowService.fetcher, "FutureSets", held):
-        board.signals.StationSelected.emit(dict(_STATION))
-        _drain(autonaApp)
-        _tick(1)                # its queue not there yet: asked for again
-        _drain(autonaApp)
-        assert len(answers) == 2
-        answers[1]({"1": {"id": 3002, "p1_name": "NEWER"}})
-        answers[0]({"1": {"id": 3002, "p1_name": "OLDER"}})
-        assert SetFollowService._queues[1]["queued"] == {
-            "1": {"id": 3002, "p1_name": "NEWER"}}
-
-        # The queue moved: asked for again, then the poll stops.
-        provider.stations["77"] = [_node(3001), _node(1003)]
-        _tick(1)
-        _drain(autonaApp)
-        assert len(answers) == 3
-        board.StopAutonaUpdate(clear_variables=False)
-        autonaApp.settle()
-        assert SetFollowService(1).Station() is not None
-        answers[2]({"1": {"id": 1003}})
-
-    assert 1 not in SetFollowService._queues
-    assert autonaApp.get("score.1.station_queue") == {}
-    board.StopAutonaUpdate(clear_variables=True)
 
 
 def test_a_load_that_loads_nothing_leaves_a_lookup_to_answer(

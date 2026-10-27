@@ -1380,7 +1380,7 @@ def test_headless_statistics_from_a_request_thread_to_the_state(
         autonaApp.settle()
 
         startgg = StartGGDataProvider(
-            "https://www.start.gg/tournament/t/event/e", None, adapter)
+            "https://www.start.gg/tournament/t/event/e", adapter)
         queries = []
 
         def query(url=None, type=None, headers={}, jsonParams=None,

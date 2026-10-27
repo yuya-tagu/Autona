@@ -1,21 +1,16 @@
-from qtpy.QtCore import QObject, QThreadPool
+from qtpy.QtCore import QObject
 
 
 class TournamentDataProvider(QObject):
-    def __init__(self, url, threadpool, tshTdp) -> None:
+    # The requests a fetch makes in parallel run on the task executor's
+    # fan-out lane (ADR-005 S3f-3): a provider has no pool of its own.
+    def __init__(self, url, tshTdp) -> None:
         super().__init__(None)
 
         self.name = ""
         self.url = url
         self.entrants = []
         self.tournamentData = {}
-        # Where the provider's own nested Workers run (GetMatch's two APIs,
-        # GetRecentSets' pages) until ADR-005 S3f-3 moves them to the task
-        # executor's fan-out lane and removes this argument. The adapter
-        # passes None since S3f-2, when its jobs moved to the executor's job
-        # lane: Qt's global pool, apart from the lane whose jobs wait on it.
-        self.threadpool = (threadpool if threadpool is not None
-                           else QThreadPool.globalInstance())
         self.videogame = None
         self.tshTdp = tshTdp
 
@@ -65,11 +60,4 @@ class TournamentDataProvider(QObject):
         pass
 
     def GetStandings(self, playerNumber):
-        pass
-
-    def GetFutureMatch(self, progrss_callback=None):
-        pass
-
-    # give me a list of objects that contain a "id" property
-    def GetFutureMatchesList(self, sets: object, progress_callback=None, cancel_event=None):
         pass

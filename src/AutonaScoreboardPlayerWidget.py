@@ -22,7 +22,6 @@ from .Helpers.AutonaDirHelper import AutonaResolve
 from .Helpers.AutonaQtHelper import HeldBackText, NoIconProxyModel
 from . import ui_constants as UI
 from . import ui_layout as L
-from .Workers import Worker
 from .AutonaBasePlayerWidget import AutonaBasePlayerWidget
 import threading
 from loguru import logger

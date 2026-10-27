@@ -193,7 +193,6 @@ from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaAlertNotification import AutonaAlertNotification
 from .AutonaUpdater import AutonaUpdater, CleanupUpdateLeftovers
 from .core.PlayerDB import PlayerDB
-from .Workers import *
 from .core.StateManager import StateManager
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions

@@ -10,8 +10,8 @@ For every step of a scenario the recording holds
 
 - the provider calls, in order (the tournament provider is faked at its
   own interface, `AutonaTournamentDataProvider.instance.provider`: the
-  set fetches, the stream queue, the station / stream lookups, the future
-  sets -- and the statistics' fetches, which a load asks for);
+  set fetches, the stream queue, the station / stream lookups -- and the
+  statistics' fetches, which a load asks for);
 - every StateManager.Set / Unset, in order, with its value as
   program_state.json holds it (orjson: the key order is compared too);
 - every published save cycle (the Socket.IO deltas, encoded as a client
@@ -42,11 +42,14 @@ team / player "0" (it wrote another slot: the S3e-4 bug), an answer that
 arrives after the board moved on (single-threaded, none does), and a set
 load with no tournament loaded (it cleared the board).
 
-The sets queued behind a followed station: the recorded tree fetched them
-from the station lookup's own pool thread, so their answer was posted back
-to that thread -- which runs no event loop -- and never arrived;
-`score.{n}.station_queue` stayed `{}`. The current tree's answer arrives
-and is kept in memory, and the state is as it was: replayed exactly.
+The sets queued behind a followed station: the recorded tree asked for
+them from the station lookup's own pool thread, whose answer never arrived
+(and Start.gg's fetch of them failed before it sent anything), so
+`score.{n}.station_queue` stayed `{}`. Since ADR-005 S3f-3 they are not
+asked for at all (nothing showed them), so the two station steps that
+asked ("station window: station 4", "the station moves on") no longer list
+that request (`GetFutureMatchesList`) among their calls; everything else
+-- the writes, the deltas, the board -- is replayed exactly.
 """
 import copy
 import json
@@ -163,13 +166,6 @@ class _FakeProvider:
     def GetStationMatchsId(self, stationId):
         self._record("GetStationMatchsId", stationId)
         return copy.deepcopy(self.stations.get(str(stationId), []))
-
-    def GetFutureMatchesList(self, setsId, progress_callback=None,
-                             cancel_event=None):
-        self._record("GetFutureMatchesList", [s.get("id") for s in setsId])
-        return {str(index): {"id": s.get("id"), "p1_name": f"P{s.get('id')}",
-                             "p2_name": "Q"}
-                for index, s in enumerate(setsId, start=1)}
 
     # The statistics a load asks for: recorded, never answered.
     def GetRecentSets(self, id1, id2, videogame, **kwargs):

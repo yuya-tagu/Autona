@@ -60,9 +60,17 @@ marshal without a timeout). A job must not do that.
 Waiting on the Futures: ``result()`` / ``exception()`` /
 ``add_done_callback`` and ``map_fanout`` see a cancellation at once.
 ``concurrent.futures.wait`` / ``as_completed`` do not see one the shutdown
-made (CPython wakes them only when a worker picks the cancelled task up,
-and the shutdown drops the queued ones), so do not wait on these Futures
-with them.
+made (CPython wakes them only when a worker picks the cancelled task up
+(set_running_or_notify_cancel), and the shutdown's cancel_futures drops the
+queued ones without that), so do not wait on these Futures with them: a job
+waiting on its fan-out would sit out its whole timeout. ``map_fanout``
+waits on the executor's own condition, which every settle notifies.
+
+``map_fanout``'s deadline is each call's own, counted from when the call
+starts running, and the whole wait has a cap (``FANOUT_CAP_FACTOR``
+timeouts): the fan-out lane is shared, and a deadline that counted the time
+a call spent queued behind other fetches' requests was used up before the
+call ran (S3f-3 review).
 
 Test seams:
 
@@ -110,6 +118,9 @@ class TaskExecutor:
 
     JOB_WORKERS = 4
     FANOUT_WORKERS = 8
+    # map_fanout's cap on the whole wait, in timeouts (each call's own
+    # deadline excludes its queue time; this bounds the queue time).
+    FANOUT_CAP_FACTOR = 3
 
     def __init__(self, jobWorkers=JOB_WORKERS, fanoutWorkers=FANOUT_WORKERS,
                  stepped=False):
@@ -176,35 +187,73 @@ class TaskExecutor:
 
     def map_fanout(self, calls, timeout, *, task_name, default=None):
         """Run every zero-argument callable in ``calls`` on the fan-out
-        lane, wait for them (at most ``timeout`` seconds in all; None waits
-        for ever) and return their results in the same order.
+        lane, wait for them and return their results in the same order.
+
+        ``timeout`` is each call's own, counted from when the call starts
+        running: the lane is shared, and the time a call waits queued
+        behind other fetches' requests is not the call's (it was, until the
+        S3f-3 review, and a busy lane used up a fetch's deadline before its
+        requests ran). The whole wait is capped at ``FANOUT_CAP_FACTOR``
+        timeouts, queue time included, so calls the lane never gets to do
+        not hold the caller for ever. None: no deadline and no cap.
 
         A call that raised (logged once, by the lane), was cancelled (the
-        executor shut down) or had not finished by the deadline is
-        ``default`` in the list. One that had not started by then is
-        cancelled; one that had is abandoned (its result is dropped).
+        executor shut down: the wait sees that at once), ran past its own
+        deadline (abandoned: its result is dropped) or had not started by
+        the cap (cancelled) is ``default`` in the list.
         """
-        futures = [self.submit_fanout(call, task_name=f"{task_name}[{index}]")
+        startedAt = [None] * len(calls)
+
+        def run(index, call):
+            with self._cond:
+                startedAt[index] = _clock()
+                self._cond.notify_all()
+            return call()
+
+        futures = [self.submit_fanout(run, index, call,
+                                      task_name=f"{task_name}[{index}]")
                    for index, call in enumerate(calls)]
-        # Waited for through done callbacks, not concurrent.futures.wait():
-        # see _WaitAll.
-        _WaitAll(futures, timeout)
+        cap = None if timeout is None else timeout * self.FANOUT_CAP_FACTOR
+        # Waited for on the executor's condition, which every start (run)
+        # and every settle (_Settled, a cancel included) notifies -- not
+        # with concurrent.futures.wait() (see the module docstring).
+        with self._cond:
+            capAt = None if cap is None else _clock() + cap
+            while True:
+                now = _clock()
+                # Still worth waiting for: not done, and not started yet or
+                # within its own deadline.
+                live = [index for index, future in enumerate(futures)
+                        if not future.done() and (
+                            timeout is None or startedAt[index] is None
+                            or now < startedAt[index] + timeout)]
+                if not live or (capAt is not None and now >= capAt):
+                    break
+                wakeAt = None if capAt is None else min(
+                    [capAt] + [startedAt[index] + timeout for index in live
+                               if startedAt[index] is not None])
+                self._cond.wait(None if wakeAt is None else wakeAt - now)
+            ranOver = sum(1 for index, future in enumerate(futures)
+                          if not future.done()
+                          and startedAt[index] is not None)
+            notStarted = [future for index, future in enumerate(futures)
+                          if not future.done() and startedAt[index] is None]
+        # Outside the condition: a cancel runs the done callbacks.
+        for future in notStarted:
+            future.cancel()
+        if ranOver or notStarted:
+            logger.warning(
+                f"TaskExecutor: {FANOUT} '{task_name}': "
+                f"{ranOver + len(notStarted)} of {len(futures)} did not "
+                f"finish: {ranOver} ran past {timeout} s, {len(notStarted)} "
+                f"did not start within {cap} s")
         results = []
-        late = []
         for future in futures:
-            if not future.done():
-                late.append(future)
-                results.append(default)
-            elif future.cancelled() or future.exception() is not None:
+            if not future.done() or future.cancelled() \
+                    or future.exception() is not None:
                 results.append(default)
             else:
                 results.append(future.result())
-        if late:
-            for future in late:
-                future.cancel()
-            logger.warning(
-                f"TaskExecutor: {FANOUT} '{task_name}': {len(late)} of "
-                f"{len(futures)} did not finish within {timeout} s")
         return results
 
     # ── stopping and waiting ─────────────────────────────────────────────
@@ -407,27 +456,7 @@ def _Deliver(callback, value, lane, taskName, what):
             f"TaskExecutor: {lane} '{taskName}': {what} failed")
 
 
-def _WaitAll(futures, timeout):
-    """Wait until every Future in `futures` is done or cancelled, at most
-    `timeout` seconds (None: for ever).
-
-    Not concurrent.futures.wait() / as_completed(): they only see a
-    cancellation once a worker has picked the cancelled task up
-    (set_running_or_notify_cancel), and the shutdown's cancel_futures drops
-    the queued tasks without that -- a job waiting on its fan-out would sit
-    out its whole timeout. A done callback runs on cancel()."""
-    if not futures:
-        return
-    lock = threading.Lock()
-    remaining = [len(futures)]
-    settled = threading.Event()
-
-    def onDone(_future):
-        with lock:
-            remaining[0] -= 1
-            if remaining[0] == 0:
-                settled.set()
-
-    for future in futures:
-        future.add_done_callback(onDone)
-    settled.wait(timeout)
+def _clock():
+    # map_fanout's clock: the starts and the deadlines it compares. A test
+    # seam (tests/test_task_executor.py moves it by hand).
+    return time.monotonic()

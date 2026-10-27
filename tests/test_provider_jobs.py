@@ -24,6 +24,15 @@ silently lost. Pinned here:
   (gui_thread_async), so a job never does;
 - neither the adapter nor the EVENT panel refers to a Worker or a
   QThreadPool any more (source-level).
+
+And since S3f-3, the Start.gg provider's own parallel requests:
+
+- they go to the fan-out lane, so fetches filling every job thread still
+  finish (they were Workers on the pool those fetches ran on);
+- nothing fetches the sets queued at a station any more: the fetch never
+  ran, and nothing showed what it would have answered;
+- the provider package has no Worker, pool or wait of its own, and only the
+  asset manager and the API window still use src/Workers.py (S3f-4).
 """
 import ast
 import copy
@@ -35,7 +44,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.core.TaskExecutor import JOB_THREAD_PREFIX, TaskExecutor
+from src.core.TaskExecutor import (
+    FANOUT_THREAD_PREFIX, JOB_THREAD_PREFIX, TaskExecutor)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -400,7 +410,7 @@ URL = "https://www.start.gg/tournament/t/event/e"
 def startgg(autonaApp):
     from src.TournamentDataProvider.StartGGDataProvider import (
         StartGGDataProvider)
-    return StartGGDataProvider(URL, None, None)
+    return StartGGDataProvider(URL, None)
 
 
 def test_the_entrants_fetch_is_a_job(startgg, executor, monkeypatch):
@@ -500,6 +510,47 @@ def test_the_entrants_fetch_stops_without_saving_or_announcing(
         assert done == []
 
 
+def test_the_parallel_requests_finish_with_the_job_lane_full(
+        startgg, executor, monkeypatch):
+    """Every job thread runs a fetch that makes requests in parallel (a
+    set's two APIs, a head-to-head's ten pages), and they all finish: the
+    requests go to the fan-out lane (ADR-005 S3f-3). Until then they were
+    Workers queued on the pool the fetches themselves ran on, which a full
+    pool never ran -- and the head-to-head waited for them with no bound."""
+    jobs = executor()
+    full = threading.Barrier(TaskExecutor.JOB_WORKERS, timeout=WAIT)
+    sentFrom = []
+
+    def query(url=None, type=None, headers={}, jsonParams=None, params=None):
+        sentFrom.append(threading.current_thread().name)
+        return {}
+
+    monkeypatch.setattr(startgg, "QueryRequests", query)
+    answers = []
+
+    def fetch(kind):
+        full.wait()  # every job thread is one of these fetches now
+        if kind == "set":
+            return startgg.GetMatch(setId=1)
+        startgg.GetRecentSets([1, 10], [2, 20], 1386,
+                              SimpleNamespace(emit=answers.append), 7,
+                              None, None)
+
+    kinds = ["set", "recent sets"] * (TaskExecutor.JOB_WORKERS // 2)
+    futures = [jobs.submit(fetch, kind, task_name=f"test {kind}")
+               for kind in kinds]
+    assert jobs.drain(WAIT)
+
+    assert [future.exception() for future in futures] == [None] * len(kinds)
+    assert all(isinstance(future.result(), dict)
+               for future, kind in zip(futures, kinds) if kind == "set")
+    assert answers == [{"sets": [], "request_time": 7}] * kinds.count(
+        "recent sets")
+    assert len(sentFrom) == 2 * kinds.count("set") \
+        + 10 * kinds.count("recent sets")
+    assert all(name.startswith(FANOUT_THREAD_PREFIX) for name in sentFrom)
+
+
 def test_loading_another_tournament_cancels_the_entrants_fetch(
         adapter, executor, monkeypatch):
     """Each tournament's entrants fetch has a cancel event of its own, set
@@ -584,9 +635,8 @@ def test_the_player_db_relay_never_waits_for_the_gui_thread():
 FORBIDDEN = {"Worker", "Workers", "QThreadPool", "threadPool"}
 
 
-@pytest.mark.parametrize("path", ["src/AutonaTournamentDataProvider.py",
-                                  "src/AutonaTournamentInfoWidget.py"])
-def test_the_adapter_and_the_event_panel_use_no_worker_or_pool(path):
+def _names(path):
+    """Every name, attribute and imported name or module part in `path`."""
     tree = ast.parse((PROJECT_ROOT / path).read_text(encoding="utf-8"))
     used = set()
     for node in ast.walk(tree):
@@ -597,7 +647,70 @@ def test_the_adapter_and_the_event_panel_use_no_worker_or_pool(path):
         elif isinstance(node, ast.ImportFrom):
             used.update((node.module or "").split("."))
             used.update(alias.name for alias in node.names)
-    assert not used & FORBIDDEN
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                used.update(alias.name.split("."))
+    return used
+
+
+@pytest.mark.parametrize("path", ["src/AutonaTournamentDataProvider.py",
+                                  "src/AutonaTournamentInfoWidget.py"])
+def test_the_adapter_and_the_event_panel_use_no_worker_or_pool(path):
+    assert not _names(path) & FORBIDDEN
+
+
+# The provider package has no pool of its own: the requests a fetch makes
+# in parallel go to the task executor's fan-out lane (ADR-005 S3f-3).
+PROVIDER_FORBIDDEN = FORBIDDEN | {
+    "QRunnable", "wait_for_all", "ThreadPoolExecutor", "as_completed",
+    "threadpool", "getStationMatchesThreadPool"}
+
+
+@pytest.mark.parametrize("path", sorted(
+    path.relative_to(PROJECT_ROOT).as_posix()
+    for path in (PROJECT_ROOT / "src" / "TournamentDataProvider").glob("*.py")))
+def test_the_provider_package_has_no_worker_or_pool(path):
+    assert not _names(path) & PROVIDER_FORBIDDEN
+
+
+# The sets queued behind a station's current one are not fetched (ADR-005
+# S3f-3): the fetch never ran, and nothing showed what it would have
+# answered (`score.{n}.station_queue` stays {}), so making it work only
+# added start.gg requests. It went with its callers and its query.
+FUTURE_SETS = {"FutureSets", "GetFutureMatchesList", "GetFutureMatch",
+               "FutureSetQuery"}
+
+
+def test_nothing_fetches_the_sets_queued_at_a_station():
+    """No file of src/ calls, defines or sends (as an operation name) the
+    future-set fetch, and its query file is gone."""
+    named = set()
+    for path in sorted((PROJECT_ROOT / "src").rglob("*.py")):
+        relative = path.relative_to(PROJECT_ROOT).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        defined = {node.name for node in ast.walk(tree)
+                   if isinstance(node, (ast.FunctionDef,
+                                        ast.AsyncFunctionDef, ast.ClassDef))}
+        strings = {node.value for node in ast.walk(tree)
+                   if isinstance(node, ast.Constant)
+                   and isinstance(node.value, str)}
+        if (_names(relative) | defined | strings) & FUTURE_SETS:
+            named.add(relative)
+    assert named == set()
+    assert not (PROJECT_ROOT / "src" / "TournamentDataProvider"
+                / "StartGGFutureSetQuery.txt").exists()
+
+
+def test_only_the_asset_manager_and_the_api_window_still_use_workers():
+    """src/Workers.py's last users: S3f-4 moves them to the executor and
+    deletes the module. No new one."""
+    users = set()
+    for path in sorted((PROJECT_ROOT / "src").rglob("*.py")):
+        relative = path.relative_to(PROJECT_ROOT).as_posix()
+        if relative != "src/Workers.py" and "Workers" in _names(relative):
+            users.add(relative)
+    assert users == {"src/AutonaApiInfoWindow.py",
+                     "src/AutonaGameAssetManager.py"}
 
 
 def test_what_the_app_reads_on_the_adapter_exists(autonaApp):
