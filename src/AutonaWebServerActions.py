@@ -4,12 +4,13 @@ What is left here needs a board or panel *widget* to answer: the player
 cards (update_player, load_player_from_tag), the set payloads a board's
 ChangeSetData applies (post_score, set_team_data), the set selection and
 stream-set follow (open_sets, pull_stream_set, load_set), the statistics,
-the thumbnail, the crew board's members, and the Commentary / Top 8 panels.
-Every operation that is core's moved to src/AutonaWebOperations.py, which
-both shells share; this object exists only in the desktop shell (the window
-hands it to the WebServer), and in the headless shell the routes behind it
-answer 503 (AutonaWebOperations.NotAvailable). It goes in S3e, once these
-are core operations too.
+the thumbnail, and the Top 8 panel. Every operation that is core's moved to
+src/AutonaWebOperations.py, which both shells share (the crew board's
+members and the caster line-up last, with ADR-005 S3e-2); this object
+exists only in the desktop shell (the window hands it to the WebServer), and
+in the headless shell the routes behind it answer 503
+(AutonaWebOperations.NotAvailable). It goes in S3e, once these are core
+operations too.
 """
 import os
 from qtpy.QtGui import *
@@ -20,35 +21,12 @@ import orjson
 from .Helpers.AutonaQtHelper import gui_thread_sync
 from loguru import logger
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
-from .AutonaCommentaryWidget import AutonaCommentaryWidget
-from .core import CommentaryModel as comms
 
 
 class WebServerActions(QObject):
     def __init__(self, parent=None, scoreboard=None) -> None:
         super().__init__(parent)
         self.scoreboard = scoreboard
-
-    # ── Lazily-built panels (startup Step 4b-2) ──────────────────────
-    # The Commentary and Top 8 panels are constructed the first time their
-    # sidebar page is revealed, so an API call can arrive while they do not
-    # exist yet. The class `instance` attribute is the fast path; when it is
-    # None the main window is asked to build the panel. `parent` is that
-    # window (see Window._StartWebServer).
-
-    @gui_thread_sync
-    def _ensure_panel(self, accessor):
-        """Build a lazy main-window panel by accessor name; return it.
-
-        Dispatched to the GUI thread because it may construct widgets.
-        Returns None when the window has no such accessor (nothing to do
-        but log — the caller reports an error to the client).
-        """
-        ensure = getattr(self.parent(), accessor, None)
-        if ensure is None:
-            logger.warning(f"[WebServer] {accessor} is not available")
-            return None
-        return ensure()
 
     @gui_thread_sync
     def post_score(self, data):
@@ -64,24 +42,6 @@ class WebServerActions(QObject):
 
         score.update({"reset_score": True})
         self.scoreboard.GetScoreboard(scoreboard_number).signals.ChangeSetData.emit(score)
-        return "OK"
-
-    # ── Crewbattle (board 3) ──────────────────────────────────────────
-    # Crew members each hold their own remaining-stock count; the team total
-    # is auto-summed by the widget. These actions only make sense for the
-    # crew board, so they no-op gracefully on boards that lack the signals.
-    def crew_member_stock(self, scoreboard, team, member, change):
-        sb = self.scoreboard.GetScoreboard(scoreboard)
-        sig = getattr(sb, "signals", None)
-        if sig is not None and hasattr(sig, "CommandMemberStock"):
-            sig.CommandMemberStock.emit(int(team) - 1, int(member), int(change))
-        return "OK"
-
-    def crew_set_active(self, scoreboard, team, member):
-        sb = self.scoreboard.GetScoreboard(scoreboard)
-        sig = getattr(sb, "signals", None)
-        if sig is not None and hasattr(sig, "SetActiveMember"):
-            sig.SetActiveMember.emit(int(team) - 1, int(member))
         return "OK"
 
     def set_team_data(self, scoreboard, team, player, data):
@@ -109,20 +69,6 @@ class WebServerActions(QObject):
         # an exception from the write propagates to the caller.
         return self.scoreboard.GetScoreboard(scoreboard).ApplyPlayerData(
             team, player, data)
-
-    def set_commentary_data(self, index, data):
-        # Caster slots are fixed (core.CommentaryModel.SLOTS); the old
-        # auto-grow behavior is gone.
-        index = int(index) - 1
-        if not 0 <= index < len(comms.SLOTS):
-            return f"ERROR : index must be 1..{len(comms.SLOTS)}"
-        widget = (AutonaCommentaryWidget.instance
-                  or self._ensure_panel("EnsureCommentaryPanel"))
-        if widget is None:
-            return "ERROR : commentary panel unavailable"
-        widget.ChangeCommDataSignal.emit(index, data)
-
-        return "OK"
 
     def open_sets(self, scoreboard):
         self.scoreboard.GetScoreboard(scoreboard).signals.SetSelection.emit()
@@ -225,9 +171,17 @@ class WebServerActions(QObject):
         # does — the raw fetch below emits tournament_phasegroup_updated,
         # which with no Top 8 panel listening updates nothing. The fallback
         # stays for the case where the panel cannot be built at all.
+        #
+        # `parent` is the main window (Window._StartWebServer); this runs on
+        # the GUI thread, where the build has to happen.
         from .AutonaTop8Widget import AutonaTop8Widget
-        panel = (AutonaTop8Widget.instance
-                 or self._ensure_panel("EnsureTop8Panel"))
+        panel = AutonaTop8Widget.instance
+        if panel is None:
+            ensure = getattr(self.parent(), "EnsureTop8Panel", None)
+            if ensure is None:
+                logger.warning("[WebServer] EnsureTop8Panel is not available")
+            else:
+                panel = ensure()
         if panel is not None:
             panel.RefreshPhaseGroup()
             return "OK"
@@ -259,13 +213,3 @@ class WebServerActions(QObject):
             return "OK"
         else:
             return "ERROR"
-
-    def load_commentator_from_tag(self, index, tag, no_mains=False):
-        index = int(index) - 1
-        if not 0 <= index < 8:
-            return "ERROR : index must be 1..8"
-        widget = (AutonaCommentaryWidget.instance
-                  or self._ensure_panel("EnsureCommentaryPanel"))
-        if widget is None:
-            return "ERROR : commentary panel unavailable"
-        widget.LoadCommFromTagSignal.emit(index, tag, no_mains)

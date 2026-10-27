@@ -1648,17 +1648,6 @@ def test_the_stream_setters_normalise_none_to_an_empty_string(actions):
     assert actions.SetStreamTitle("") is False
 
 
-def test_publishing_the_commentary_lineup_writes_the_whole_root(actions):
-    slots = {"1": {"name": "Ada", "display": 1}, "2": {"name": "", "display": 0}}
-    revision = SM.revision
-
-    actions.PublishCommentary(slots)
-
-    assert SM.Get("commentary.1.name") == "Ada"
-    assert SM.Get("commentary") == slots
-    assert SM.revision == revision + 1
-
-
 def test_publishing_the_result_placements_writes_the_whole_root(actions):
     players = {"1": {"rank": 1, "name": "Ada", "characters": []}}
     revision = SM.revision

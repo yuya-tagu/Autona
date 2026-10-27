@@ -65,7 +65,8 @@ out/ files (OBS用)            Web UI (React) / 外部HTTPクライアント
 未構築のまま外部から呼ばれる経路には、既に構築を強制する入口がある。**新しい制御を足すときは
 同じ経路を使う**（パネル/board を直接参照して `None` を掘らない）:
 
-- パネル: `WebServerActions._ensure_panel` → `Window.EnsureTop8Panel()` / `EnsureCommentaryPanel()`
+- パネル: `Window.EnsureTop8Panel()`（`WebServerActions.update_bracket` が使う）。実況は ADR-005 S3e-2 から
+  `core/CommentaryService` が state を書くのでパネルを構築しない（`EnsureCommentaryPanel()` は削除）
 - board: `AutonaScoreboardManager.GetScoreboard(N)`（GUI スレッドへ marshal して構築）
 - state: パネル未構築でも読める初期値は `Window._SeedPanelState()`（theme/accent・`top8` 正規化・
   `commentary` 正規化・`stream.org*Version`）と `CreateScoreboard()`（`score.{N}` スケルトン）が書く

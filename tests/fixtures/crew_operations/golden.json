@@ -1,0 +1,2107 @@
+{
+ "stock down": {
+  "sets": [
+   [
+    "score.3.team.1.player.1.stock",
+    "1"
+   ],
+   [
+    "score.3.team.1.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.score",
+    "4"
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"team\", \"1\", \"player\", \"1\", \"stock\"], \"action\": \"values_changed\", \"value\": 1, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"score\"], \"action\": \"values_changed\", \"value\": 4, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":1},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":4},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "stock up, route strings": {
+  "sets": [
+   [
+    "score.3.team.2.player.1.stock",
+    "4"
+   ],
+   [
+    "score.3.team.2.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.score",
+    "4"
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"team\", \"2\", \"player\", \"1\", \"stock\"], \"action\": \"values_changed\", \"value\": 4, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"score\"], \"action\": \"values_changed\", \"value\": 4, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":4},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":4}}}",
+  "swapped": "False"
+ },
+ "stock clamps at 99": {
+  "sets": [
+   [
+    "score.3.team.1.player.1.stock",
+    "2"
+   ],
+   [
+    "score.3.team.1.player.2.stock",
+    "99"
+   ],
+   [
+    "score.3.team.1.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.score",
+    "101"
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"team\", \"1\", \"player\", \"2\", \"stock\"], \"action\": \"values_changed\", \"value\": 99, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"score\"], \"action\": \"values_changed\", \"value\": 101, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":99},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":101},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "stock clamps at 0": {
+  "sets": [
+   [
+    "score.3.team.1.player.1.stock",
+    "2"
+   ],
+   [
+    "score.3.team.1.player.2.stock",
+    "0"
+   ],
+   [
+    "score.3.team.1.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.score",
+    "2"
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"team\", \"1\", \"player\", \"2\", \"stock\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"score\"], \"action\": \"values_changed\", \"value\": 2, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":0},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":2},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "stock unchanged": {
+  "sets": [],
+  "deltas": [],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "stock of a hidden member": {
+  "sets": [
+   [
+    "score.3.team.1.player.1.stock",
+    "2"
+   ],
+   [
+    "score.3.team.1.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.7.stock",
+    "2"
+   ],
+   [
+    "score.3.team.1.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.score",
+    "5"
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"team\", \"1\", \"player\", \"7\", \"stock\"], \"action\": \"values_changed\", \"value\": 2, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":2},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "stock team out of range": {
+  "sets": [],
+  "deltas": [],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "stock member out of range": {
+  "sets": [],
+  "deltas": [],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "stock member zero": {
+  "sets": [],
+  "deltas": [],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "active": {
+  "sets": [
+   [
+    "score.3.team.1.activeMember",
+    "\"2\""
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"team\", \"1\", \"activeMember\"], \"action\": \"values_changed\", \"value\": \"2\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"2\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "active again": {
+  "sets": [],
+  "deltas": [],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "active nobody": {
+  "sets": [
+   [
+    "score.3.team.2.activeMember",
+    "\"0\""
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"team\", \"2\", \"activeMember\"], \"action\": \"values_changed\", \"value\": \"0\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "active nobody, already": {
+  "sets": [],
+  "deltas": [],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "active negative": {
+  "sets": [
+   [
+    "score.3.team.2.activeMember",
+    "\"0\""
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"team\", \"2\", \"activeMember\"], \"action\": \"values_changed\", \"value\": \"0\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "active out of range": {
+  "sets": [],
+  "deltas": [],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "active team out of range": {
+  "sets": [],
+  "deltas": [],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "active, route strings": {
+  "sets": [
+   [
+    "score.3.team.1.activeMember",
+    "\"3\""
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"team\", \"1\", \"activeMember\"], \"action\": \"values_changed\", \"value\": \"3\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"3\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "swap": {
+  "sets": [
+   [
+    "score.3.team.1.teamName",
+    "\"Bravo\""
+   ],
+   [
+    "score.3.team.1.color",
+    "\"#222222\""
+   ],
+   [
+    "score.3.team.1.memberNum",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.1.name",
+    "\"B1\""
+   ],
+   [
+    "score.3.team.1.player.1.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.2.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.3.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.4.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.5.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.6.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.7.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.8.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.9.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.activeMember",
+    "\"1\""
+   ],
+   [
+    "score.3.team.1.score",
+    "3"
+   ],
+   [
+    "score.3.team.2.teamName",
+    "\"Alpha\""
+   ],
+   [
+    "score.3.team.2.color",
+    "\"#111111\""
+   ],
+   [
+    "score.3.team.2.memberNum",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.1.name",
+    "\"A1\""
+   ],
+   [
+    "score.3.team.2.player.1.stock",
+    "2"
+   ],
+   [
+    "score.3.team.2.player.2.name",
+    "\"A2\""
+   ],
+   [
+    "score.3.team.2.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.3.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.4.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.5.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.6.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.7.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.8.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.9.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.activeMember",
+    "\"0\""
+   ],
+   [
+    "score.3.team.2.score",
+    "5"
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"team\", \"1\", \"teamName\"], \"action\": \"values_changed\", \"value\": \"Bravo\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"color\"], \"action\": \"values_changed\", \"value\": \"#222222\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"player\", \"1\", \"name\"], \"action\": \"values_changed\", \"value\": \"B1\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"player\", \"1\", \"stock\"], \"action\": \"values_changed\", \"value\": 3, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"player\", \"2\", \"name\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"activeMember\"], \"action\": \"values_changed\", \"value\": \"1\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"score\"], \"action\": \"values_changed\", \"value\": 3, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"teamName\"], \"action\": \"values_changed\", \"value\": \"Alpha\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"color\"], \"action\": \"values_changed\", \"value\": \"#111111\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"player\", \"1\", \"name\"], \"action\": \"values_changed\", \"value\": \"A1\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"player\", \"1\", \"stock\"], \"action\": \"values_changed\", \"value\": 2, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"player\", \"2\", \"name\"], \"action\": \"values_changed\", \"value\": \"A2\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"activeMember\"], \"action\": \"values_changed\", \"value\": \"0\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"score\"], \"action\": \"values_changed\", \"value\": 5, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3},\"2\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5}}}",
+  "swapped": "True"
+ },
+ "reset scores": {
+  "sets": [
+   [
+    "score.3.team.1.teamName",
+    "\"Alpha\""
+   ],
+   [
+    "score.3.team.1.color",
+    "\"#111111\""
+   ],
+   [
+    "score.3.team.1.memberNum",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.1.name",
+    "\"A1\""
+   ],
+   [
+    "score.3.team.1.player.1.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.2.name",
+    "\"A2\""
+   ],
+   [
+    "score.3.team.1.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.3.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.4.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.5.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.6.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.7.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.8.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.9.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.activeMember",
+    "\"0\""
+   ],
+   [
+    "score.3.team.1.score",
+    "6"
+   ],
+   [
+    "score.3.team.2.teamName",
+    "\"Bravo\""
+   ],
+   [
+    "score.3.team.2.color",
+    "\"#222222\""
+   ],
+   [
+    "score.3.team.2.memberNum",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.1.name",
+    "\"B1\""
+   ],
+   [
+    "score.3.team.2.player.1.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.2.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.3.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.4.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.5.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.6.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.7.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.8.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.9.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.activeMember",
+    "\"0\""
+   ],
+   [
+    "score.3.team.2.score",
+    "3"
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"team\", \"1\", \"player\", \"1\", \"stock\"], \"action\": \"values_changed\", \"value\": 3, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"score\"], \"action\": \"values_changed\", \"value\": 6, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"activeMember\"], \"action\": \"values_changed\", \"value\": \"0\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":3},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":6},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "reset match": {
+  "sets": [
+   [
+    "score.3.team.1.teamName",
+    "\"Alpha\""
+   ],
+   [
+    "score.3.team.1.color",
+    "\"#111111\""
+   ],
+   [
+    "score.3.team.1.memberNum",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.1.name",
+    "\"A1\""
+   ],
+   [
+    "score.3.team.1.player.1.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.2.name",
+    "\"A2\""
+   ],
+   [
+    "score.3.team.1.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.3.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.4.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.5.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.6.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.7.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.8.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.9.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.activeMember",
+    "\"0\""
+   ],
+   [
+    "score.3.team.1.score",
+    "6"
+   ],
+   [
+    "score.3.team.2.teamName",
+    "\"Bravo\""
+   ],
+   [
+    "score.3.team.2.color",
+    "\"#222222\""
+   ],
+   [
+    "score.3.team.2.memberNum",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.1.name",
+    "\"B1\""
+   ],
+   [
+    "score.3.team.2.player.1.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.2.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.3.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.4.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.5.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.6.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.7.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.8.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.9.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.activeMember",
+    "\"0\""
+   ],
+   [
+    "score.3.team.2.score",
+    "3"
+   ],
+   [
+    "score.3.phase",
+    "\"\""
+   ],
+   [
+    "score.3.pool",
+    "\"\""
+   ],
+   [
+    "score.3.match",
+    "\"\""
+   ],
+   [
+    "score.3.best_of",
+    "0"
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"pool\"], \"action\": \"dictionary_item_added\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"phase\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"match\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"player\", \"1\", \"stock\"], \"action\": \"values_changed\", \"value\": 3, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"score\"], \"action\": \"values_changed\", \"value\": 6, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"activeMember\"], \"action\": \"values_changed\", \"value\": \"0\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+   "[{\"path\": [\"score\", \"3\", \"best_of\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"\",\"match\":\"\",\"best_of\":0,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":3},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":6},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":3}},\"pool\":\"\"}",
+  "swapped": "False"
+ },
+ "reset players": {
+  "sets": [
+   [
+    "score.3.team.1.teamName",
+    "\"Alpha\""
+   ],
+   [
+    "score.3.team.1.color",
+    "\"#111111\""
+   ],
+   [
+    "score.3.team.1.memberNum",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.1.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.1.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.2.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.3.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.4.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.5.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.6.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.7.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.8.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.9.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.activeMember",
+    "\"0\""
+   ],
+   [
+    "score.3.team.1.score",
+    "0"
+   ],
+   [
+    "score.3.team.2.teamName",
+    "\"Bravo\""
+   ],
+   [
+    "score.3.team.2.color",
+    "\"#222222\""
+   ],
+   [
+    "score.3.team.2.memberNum",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.1.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.1.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.2.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.3.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.4.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.5.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.6.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.7.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.8.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.9.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.activeMember",
+    "\"0\""
+   ],
+   [
+    "score.3.team.2.score",
+    "0"
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"team\", \"1\", \"player\", \"1\", \"name\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"player\", \"1\", \"stock\"], \"action\": \"values_changed\", \"value\": 3, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"player\", \"2\", \"name\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"score\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"player\", \"1\", \"name\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"activeMember\"], \"action\": \"values_changed\", \"value\": \"0\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"score\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":0},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":0}}}",
+  "swapped": "False"
+ },
+ "clear all": {
+  "sets": [
+   [
+    "score.3.team.1.teamName",
+    "\"Alpha\""
+   ],
+   [
+    "score.3.team.1.color",
+    "\"#111111\""
+   ],
+   [
+    "score.3.team.1.memberNum",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.1.name",
+    "\"A1\""
+   ],
+   [
+    "score.3.team.1.player.1.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.2.name",
+    "\"A2\""
+   ],
+   [
+    "score.3.team.1.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.3.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.4.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.5.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.6.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.7.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.8.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.9.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.activeMember",
+    "\"0\""
+   ],
+   [
+    "score.3.team.1.score",
+    "6"
+   ],
+   [
+    "score.3.team.2.teamName",
+    "\"Bravo\""
+   ],
+   [
+    "score.3.team.2.color",
+    "\"#222222\""
+   ],
+   [
+    "score.3.team.2.memberNum",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.1.name",
+    "\"B1\""
+   ],
+   [
+    "score.3.team.2.player.1.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.2.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.3.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.4.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.5.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.6.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.7.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.8.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.9.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.activeMember",
+    "\"0\""
+   ],
+   [
+    "score.3.team.2.score",
+    "3"
+   ],
+   [
+    "score.3.phase",
+    "\"\""
+   ],
+   [
+    "score.3.pool",
+    "\"\""
+   ],
+   [
+    "score.3.match",
+    "\"\""
+   ],
+   [
+    "score.3.best_of",
+    "0"
+   ],
+   [
+    "score.3.team.1.memberNum",
+    "1"
+   ],
+   [
+    "score.3.team.1.player.1.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.score",
+    "3"
+   ],
+   [
+    "score.3.team.2.memberNum",
+    "1"
+   ],
+   [
+    "score.3.team.2.player.1.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.score",
+    "3"
+   ],
+   [
+    "score.3.team.1.teamName",
+    "\"Alpha\""
+   ],
+   [
+    "score.3.team.1.color",
+    "\"#111111\""
+   ],
+   [
+    "score.3.team.1.memberNum",
+    "1"
+   ],
+   [
+    "score.3.team.1.player.1.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.1.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.2.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.3.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.4.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.5.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.6.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.7.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.8.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.9.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.1.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.activeMember",
+    "\"0\""
+   ],
+   [
+    "score.3.team.1.score",
+    "0"
+   ],
+   [
+    "score.3.team.2.teamName",
+    "\"Bravo\""
+   ],
+   [
+    "score.3.team.2.color",
+    "\"#222222\""
+   ],
+   [
+    "score.3.team.2.memberNum",
+    "1"
+   ],
+   [
+    "score.3.team.2.player.1.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.1.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.2.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.3.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.4.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.5.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.6.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.7.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.8.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.9.name",
+    "\"\""
+   ],
+   [
+    "score.3.team.2.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.activeMember",
+    "\"0\""
+   ],
+   [
+    "score.3.team.2.score",
+    "0"
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"pool\"], \"action\": \"dictionary_item_added\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"phase\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"match\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"player\", \"1\", \"stock\"], \"action\": \"values_changed\", \"value\": 3, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"score\"], \"action\": \"values_changed\", \"value\": 6, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"activeMember\"], \"action\": \"values_changed\", \"value\": \"0\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+   "[{\"path\": [\"score\", \"3\", \"best_of\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+   "[{\"path\": [\"score\", \"3\", \"team\", \"1\", \"memberNum\"], \"action\": \"values_changed\", \"value\": 1, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"score\"], \"action\": \"values_changed\", \"value\": 3, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"memberNum\"], \"action\": \"values_changed\", \"value\": 1, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+   "[{\"path\": [\"score\", \"3\", \"team\", \"1\", \"player\", \"1\", \"name\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"player\", \"2\", \"name\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"1\", \"score\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"player\", \"1\", \"name\"], \"action\": \"values_changed\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"score\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"\",\"match\":\"\",\"best_of\":0,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":1,\"player\":{\"1\":{\"name\":\"\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":0},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":1,\"player\":{\"1\":{\"name\":\"\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":0}},\"pool\":\"\"}",
+  "swapped": "False"
+ },
+ "get swap": {
+  "sets": [],
+  "deltas": [],
+  "bigChanges": 0,
+  "result": "False",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "set fields": {
+  "sets": [
+   [
+    "score.3.best_of",
+    "3"
+   ],
+   [
+    "score.3.phase",
+    "\"Top 8\""
+   ],
+   [
+    "score.3.pool",
+    "\"\""
+   ],
+   [
+    "score.3.match",
+    "\"GF\""
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"best_of\"], \"action\": \"values_changed\", \"value\": 3, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+   "[{\"path\": [\"score\", \"3\", \"phase\"], \"action\": \"values_changed\", \"value\": \"Top 8\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+   "[{\"path\": [\"score\", \"3\", \"pool\"], \"action\": \"dictionary_item_added\", \"value\": \"\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+   "[{\"path\": [\"score\", \"3\", \"match\"], \"action\": \"values_changed\", \"value\": \"GF\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Top 8\",\"match\":\"GF\",\"best_of\":3,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}},\"pool\":\"\"}",
+  "swapped": "False"
+ },
+ "set best of clamps": {
+  "sets": [
+   [
+    "score.3.best_of",
+    "99"
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"best_of\"], \"action\": \"values_changed\", \"value\": 99, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":99,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "set the same best of": {
+  "sets": [],
+  "deltas": [],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "set players": {
+  "sets": [
+   [
+    "score.3.team.1.memberNum",
+    "5"
+   ],
+   [
+    "score.3.team.1.player.1.stock",
+    "2"
+   ],
+   [
+    "score.3.team.1.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.score",
+    "5"
+   ],
+   [
+    "score.3.team.2.memberNum",
+    "5"
+   ],
+   [
+    "score.3.team.2.player.1.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.score",
+    "3"
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"team\", \"1\", \"memberNum\"], \"action\": \"values_changed\", \"value\": 5, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"memberNum\"], \"action\": \"values_changed\", \"value\": 5, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":5,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":5,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "set players clamps": {
+  "sets": [
+   [
+    "score.3.team.1.memberNum",
+    "9"
+   ],
+   [
+    "score.3.team.1.player.1.stock",
+    "2"
+   ],
+   [
+    "score.3.team.1.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.score",
+    "5"
+   ],
+   [
+    "score.3.team.2.memberNum",
+    "9"
+   ],
+   [
+    "score.3.team.2.player.1.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.score",
+    "3"
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"team\", \"1\", \"memberNum\"], \"action\": \"values_changed\", \"value\": 9, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"memberNum\"], \"action\": \"values_changed\", \"value\": 9, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":9,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":9,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "set the same players": {
+  "sets": [],
+  "deltas": [],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "set characters": {
+  "sets": [],
+  "deltas": [],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "set losers": {
+  "sets": [],
+  "deltas": [],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "set team name": {
+  "sets": [],
+  "deltas": [],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"Pools\",\"match\":\"WF\",\"best_of\":5,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":3,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}}}",
+  "swapped": "False"
+ },
+ "set everything": {
+  "sets": [
+   [
+    "score.3.best_of",
+    "1"
+   ],
+   [
+    "score.3.phase",
+    "\"P\""
+   ],
+   [
+    "score.3.pool",
+    "\"A\""
+   ],
+   [
+    "score.3.match",
+    "\"M\""
+   ],
+   [
+    "score.3.team.1.memberNum",
+    "2"
+   ],
+   [
+    "score.3.team.1.player.1.stock",
+    "2"
+   ],
+   [
+    "score.3.team.1.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.1.score",
+    "5"
+   ],
+   [
+    "score.3.team.2.memberNum",
+    "2"
+   ],
+   [
+    "score.3.team.2.player.1.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.2.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.3.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.4.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.5.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.6.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.7.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.8.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.player.9.stock",
+    "3"
+   ],
+   [
+    "score.3.team.2.score",
+    "3"
+   ]
+  ],
+  "deltas": [
+   "[{\"path\": [\"score\", \"3\", \"best_of\"], \"action\": \"values_changed\", \"value\": 1, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+   "[{\"path\": [\"score\", \"3\", \"phase\"], \"action\": \"values_changed\", \"value\": \"P\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+   "[{\"path\": [\"score\", \"3\", \"pool\"], \"action\": \"dictionary_item_added\", \"value\": \"A\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+   "[{\"path\": [\"score\", \"3\", \"match\"], \"action\": \"values_changed\", \"value\": \"M\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+   "[{\"path\": [\"score\", \"3\", \"team\", \"1\", \"memberNum\"], \"action\": \"values_changed\", \"value\": 2, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"3\", \"team\", \"2\", \"memberNum\"], \"action\": \"values_changed\", \"value\": 2, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+  ],
+  "bigChanges": 0,
+  "result": "OK",
+  "raises": null,
+  "board": "{\"phase\":\"P\",\"match\":\"M\",\"best_of\":1,\"team\":{\"1\":{\"teamName\":\"Alpha\",\"color\":\"#111111\",\"memberNum\":2,\"player\":{\"1\":{\"name\":\"A1\",\"stock\":2},\"2\":{\"name\":\"A2\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"0\",\"score\":5},\"2\":{\"teamName\":\"Bravo\",\"color\":\"#222222\",\"memberNum\":2,\"player\":{\"1\":{\"name\":\"B1\",\"stock\":3},\"2\":{\"name\":\"\",\"stock\":3},\"3\":{\"name\":\"\",\"stock\":3},\"4\":{\"name\":\"\",\"stock\":3},\"5\":{\"name\":\"\",\"stock\":3},\"6\":{\"name\":\"\",\"stock\":3},\"7\":{\"name\":\"\",\"stock\":3},\"8\":{\"name\":\"\",\"stock\":3},\"9\":{\"name\":\"\",\"stock\":3}},\"activeMember\":\"1\",\"score\":3}},\"pool\":\"A\"}",
+  "swapped": "False"
+ }
+}

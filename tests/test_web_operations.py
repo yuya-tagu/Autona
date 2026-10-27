@@ -7,10 +7,13 @@ Pinned here:
 - the S2 operations write the same state whichever host runs them -- the
   desktop's (the board built, the write held for 反映) and the headless one
   (no board, published at once);
-- headless, what a widget answers -- the crew board's operations, the
-  player / character counts, the board-dependent actions (WebServerActions)
-  -- is refused with NotAvailable, and the server turns that into 503 in the
-  /api/v1 error shape: legacy routes, Socket.IO acks, /api/v1 (UNAVAILABLE);
+- headless, what a widget answers -- the player / character counts of
+  boards 1/2, the board-dependent actions (WebServerActions) -- is refused
+  with NotAvailable, and the server turns that into 503 in the /api/v1
+  error shape: legacy routes, Socket.IO acks, /api/v1 (UNAVAILABLE). The
+  crew board's operations and the caster line-up's are core's since
+  ADR-005 S3e-2 and answer in both shells (their recordings:
+  tests/test_crew_operations.py, tests/test_commentary_service.py);
 - headless, the S2 operations run one at a time (the host's re-entrant
   lock), so a composite one (clear_all) is not interleaved with another
   request.
@@ -182,18 +185,13 @@ def test_headless_has_no_last_set(headless):
     assert WebOps.get_swap(1) == "False"
 
 
-# What only a widget answers: the crew board's own operations, the player /
-# character counts. Refused before anything is written.
+# What only a widget answers: the player / character counts of boards 1/2
+# (the crew board's member count is core's, S3e-2). Refused before anything
+# is written.
 REFUSED = {
-    "crew swap": lambda: WebOps.swap_teams(3),
-    "crew swap flag": lambda: WebOps.get_swap(3),
-    "crew reset scores": lambda: WebOps.reset_scores(3),
-    "crew reset match": lambda: WebOps.reset_match(3),
-    "crew reset players": lambda: WebOps.reset_players(3),
-    "crew clear all": lambda: WebOps.clear_all(3),
-    "crew set fields": lambda: WebOps.set_route(3, match="Grand Final"),
     "player count": lambda: WebOps.set_route(1, players=2, match="Final"),
     "character count": lambda: WebOps.set_route(1, characters=2),
+    "team board's player count": lambda: WebOps.set_route(2, players=3),
 }
 
 
@@ -347,9 +345,8 @@ def test_a_socketio_event_acks_the_503_body(server):
 # What a web operation itself refuses headless (the board host's
 # NotAvailable, not WebServer._board_actions()): the same 503.
 REFUSED_ROUTES = [
-    "/scoreboard3-swap-teams",
-    "/scoreboard3-get-swap",
     "/scoreboard1-set?players=2",
+    "/scoreboard2-set?characters=2",
 ]
 
 
@@ -367,9 +364,47 @@ def test_a_legacy_route_a_web_operation_refuses_answers_503(
     assert response.get_json() == UNAVAILABLE_BODY
 
 
+# What answered 503 until ADR-005 S3e-2: the crew board's operations and the
+# caster line-up's are core's now, and answer headless through the routes
+# too (what they write: tests/test_crew_operations.py and
+# tests/test_commentary_service.py, against the widgets' recordings).
+ANSWERED_ROUTES = [
+    ("/scoreboard3-crew-member1-1-stockdown", "OK"),
+    ("/scoreboard3-crew-active2-3", "OK"),
+    ("/scoreboard3-swap-teams", "OK"),
+    ("/scoreboard3-get-swap", "True"),
+    ("/scoreboard3-set?players=4&match=Final", "OK"),
+    ("/scoreboard3-reset-scores", "OK"),
+    ("/load-commentator-from-tag-12?tag=Nobody", "ERROR"),
+]
+
+
+def test_the_crew_and_caster_routes_answer_headless(server, headless):
+    from src.core.CrewBattleService import CrewBattleService
+    CrewBattleService(3).SeedDefaults()
+    headless.settle()
+    app, _ = server
+    client = app.test_client()
+    client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
+
+    for path, answer in ANSWERED_ROUTES:
+        response = client.get(path)
+        assert response.status_code == 200, path
+        assert response.get_data(as_text=True) == answer, path
+    response = client.post("/update-commentary-3", json={"gamerTag": "Cast"})
+    assert response.get_data(as_text=True) == "OK"
+    headless.settle()
+
+    assert headless.get("score.3.team.2.player.1.stock") == 3   # reset
+    assert headless.get("score.3.team.1.activeMember") == "0"
+    assert headless.get("score.3.team.1.memberNum") == 4
+    assert headless.get("score.3.match") == "Final"
+    assert headless.get("commentary.3.name") == "Cast"
+
+
 @pytest.mark.parametrize("event,body", [
-    ("swap_teams", {"scoreboardNumber": "3"}),
     ("set", {"scoreboardNumber": "1", "players": 2}),
+    ("set", {"scoreboardNumber": "2", "characters": 2}),
 ])
 def test_a_socketio_event_a_web_operation_refuses_acks_the_503_body(
         server, monkeypatch, event, body):

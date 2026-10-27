@@ -14,18 +14,20 @@ Full rework mirroring AutonaTop8Widget's list + live-preview pattern:
   overlay, and the browser-source URL.
 
 State contract: everything under ``commentary.{1..12}`` (see
-src/core/CommentaryModel.py). The write goes through
-``AutonaActions.PublishCommentary`` — this panel assembles the slot dict out
-of its cards and renders the state, but does not write it (headless core
-Step 5, instalment 5). The state persists
+src/core/CommentaryModel.py). Every write goes through
+``core/CommentaryService.py`` (ADR-005 S3e-2): an input asks it for the one
+field it edits (``SetField``), a drag for the new order (``Reorder``), a
+completer pick for the player's fields (``ApplyPlayerData``), and the cards
+show the state as it is (``_RenderFromState``), whoever wrote it -- the
+Web's ``/update-commentary-<N>`` and ``/load-commentator-from-tag-<N>`` call
+the same service with or without this panel. A field the operator is in is
+left alone until they leave it, and finishing it does not put back the text
+a render had to leave there -- what the operator typed is their edit, and is
+written, unless that very field was written elsewhere meanwhile (the player
+cards' rule, Helpers.AutonaQtHelper.HeldBackText). The state persists
 across restarts; Window._SeedPanelState() normalizes whatever LoadState
 restored (including the legacy pre-rework schema) at launch, before this
 panel is built.
-
-ChangeCommDataSignal / LoadCommFromTagSignal keep their historical names
-and signatures: AutonaWebServerActions emits them for the
-``/update-commentary-<N>`` and ``/load-commentator-from-tag-<N>`` routes
-(index arrives 0-based, already converted from the 1-based route).
 """
 
 from qtpy.QtGui import *
@@ -33,17 +35,20 @@ from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from loguru import logger
 
+from shiboken6 import Shiboken
+
 from .core.StateManager import StateManager
 from .core.SettingsManager import SettingsManager
 from .core import LayoutCatalog
 from .AutonaPlayerDB import AutonaPlayerDB
-from .core.PlayerDB import PlayerDB
 from .AutonaLayoutPreview import AutonaLayoutPreview, ObsUrl
-from .Helpers.AutonaBadWordFilter import AutonaBadWordFilter
 from .AutonaFeatureColors import FEATURE_COMMENTARY, MakeFeatureColorCard
+from .StateManagerBridge import StateManagerBridge
+from .Helpers.AutonaQtHelper import HeldBackText
 from .core import StateSchema as schema
-from .core.Actions import AutonaActions
+from .core import CommentaryService
 from .core import CommentaryModel as comms
+from .core.DictHelper import deep_clone
 from . import ui_constants as UI
 from . import ui_layout as L
 
@@ -55,29 +60,25 @@ DEFAULT_DESIGN = "commentators"
 
 CASTER_CARD_WIDTH = 280
 
-# card field <- PlayerDB-shaped dict key (completer pick, web SetData and
-# load-from-tag all deliver this shape; see core.PlayerDB.fieldnames).
-PLAYERDB_FIELD_MAP = [
-    ("name", "gamerTag"),
-    ("team", "prefix"),
-    ("twitter", "twitter"),
-    ("note", "custom_textbox"),
-]
-
 
 class AutonaCommentaryWidget(QDockWidget):
     instance: "AutonaCommentaryWidget" = None
-
-    ChangeCommDataSignal = Signal(int, object)
-    LoadCommFromTagSignal = Signal(int, str, bool)
 
     def __init__(self, *args):
         super().__init__(*args)
         self.setWindowTitle(QApplication.translate("app", "Commentary"))
 
-        # _updating suppresses input handlers while the UI is being
-        # repopulated from state (same guard pattern as AutonaTop8Widget).
-        self._updating = False
+        # State -> cards (_RenderFromState): one pass queued at a time; by
+        # field, what each field last showed in step with the state and the
+        # text a pass had to leave in one the operator was in
+        # (HeldBackText); the fields it left, to come back to once they are
+        # left; the fields the next pass renders even though they have the
+        # focus (a completer pick: the operator's own action).
+        self._renderPending = False
+        self._rendering = False
+        self._heldBack = HeldBackText()
+        self._focusSkipped = []
+        self._forceRender = set()
         self._previewLoaded = False
         self._designs = LayoutCatalog.Layouts([LAYOUT_KIND])
 
@@ -85,7 +86,7 @@ class AutonaCommentaryWidget(QDockWidget):
         # Window._SeedPanelState() (startup Step 4b-2). This panel is built on
         # first reveal now, and the overlay / the external control API read
         # commentary.* from launch, so the state must be normalised whether or
-        # not the panel is ever opened. _loadFromState() below reads it.
+        # not the panel is ever opened. _RenderFromState() below reads it.
 
         # Build the design selector (and then the preview) first: the OBS
         # group below reads the selected design for its URL field.
@@ -131,10 +132,13 @@ class AutonaCommentaryWidget(QDockWidget):
         panesLayout.addWidget(rightScroll, 1)
         self.setWidget(panes)
 
-        self._loadFromState()
+        self._RenderFromState()
 
-        self.ChangeCommDataSignal.connect(self.SetData)
-        self.LoadCommFromTagSignal.connect(self.LoadCommentatorFromTag)
+        # Bound methods: Qt drops the connections with the panel.
+        StateManagerBridge.instance.state_updated.connect(self._onStateDelta)
+        StateManagerBridge.instance.state_big_change.connect(
+            self._ScheduleRender)
+        QApplication.instance().focusChanged.connect(self._onFocusChanged)
 
         AutonaPlayerDB.signals.db_updated.connect(self._rebindCompleters)
         self._rebindCompleters()
@@ -230,10 +234,6 @@ class AutonaCommentaryWidget(QDockWidget):
             role_completer.setFilterMode(Qt.MatchFlag.MatchContains)
             role_edit.setCompleter(role_completer)
             L.attach_popup_on_focus(role_edit)
-            # Queued: let the completer finish its own text insertion
-            # before we read the field (player-name pattern).
-            role_completer.activated.connect(
-                self._onFieldChanged, Qt.QueuedConnection)
 
             # Icon: pulldown, stored as the stem ("" = no icon). No
             # fixed height — the global QSS min-height (26px) keeps it
@@ -272,12 +272,6 @@ class AutonaCommentaryWidget(QDockWidget):
 
             self.casterCardList.addCard(card)
 
-            for edit in (name_edit, team_edit, role_edit,
-                         twitter_edit, note_edit):
-                edit.editingFinished.connect(self._syncToState)
-            icon_combo.currentIndexChanged.connect(self._onFieldChanged)
-            display_check.toggled.connect(self._onFieldChanged)
-
             widgets = {
                 "card": card,
                 "header": header,
@@ -293,45 +287,81 @@ class AutonaCommentaryWidget(QDockWidget):
             self._cardWidgets[card] = widgets
             self.casterInputs[slot] = widgets
 
+            # The widget dict (not the slot) is captured: the card's slot
+            # changes when it is drag-reordered.
+            for field in comms.TEXT_FIELDS:
+                widgets[field].editingFinished.connect(
+                    lambda w=widgets, f=field: self._onTextFinished(w, f))
+            # Queued: let the completer finish its own text insertion
+            # before we read the field (player-name pattern).
+            role_completer.activated.connect(
+                lambda _text, w=widgets: self._onTextFinished(w, "role"),
+                Qt.QueuedConnection)
+            icon_combo.currentIndexChanged.connect(
+                lambda _index, w=widgets: self._onIconChanged(w))
+            display_check.toggled.connect(
+                lambda checked, w=widgets: self._onDisplayToggled(w, checked))
+
         return group
 
-    def _onFieldChanged(self, *_args):
-        self._syncToState()
+    def _slotOf(self, w):
+        return next((slot for slot, card in self.casterInputs.items()
+                     if card is w), None)
+
+    def _onTextFinished(self, w, field):
+        """A caster field finished an edit: write that one field, unless the
+        text is not news -- what the state already holds, or the text a
+        render had to leave in the field while the operator was in it (the
+        state moved on underneath it, and writing it back would put the old
+        value over the new one). The player cards' rule (HeldBackText)."""
+        slot = self._slotOf(w)
+        if slot is None:
+            return
+        edit = w[field]
+        text = edit.text()
+        stored = StateManager.Get(f"{schema.COMMENTARY_ROOT}.{slot}.{field}")
+        if self._heldBack.IsEdit(
+                edit, text, stored == CommentaryService.FieldValue(field, text)):
+            CommentaryService.SetField(slot, field, text)
+
+    def _onIconChanged(self, w):
+        slot = self._slotOf(w)
+        if slot is not None and not CommentaryService.SetField(
+                slot, "icon", w["icon"].currentData() or ""):
+            self._ScheduleRender()
+
+    def _onDisplayToggled(self, w, checked):
+        slot = self._slotOf(w)
+        if slot is not None and not CommentaryService.SetField(
+                slot, "display", 1 if checked else 0):
+            # Refused (the overlay shows MAX_DISPLAY at most): the box goes
+            # back to what the state holds before the locks are counted --
+            # counted with the refused tick still in it, the boxes would be
+            # locked (and this one left enabled) from a count the state does
+            # not have. Its signals are blocked: putting it back is not an
+            # edit.
+            stored = StateManager.Get(
+                f"{schema.COMMENTARY_ROOT}.{slot}.display")
+            with QSignalBlocker(w["display"]):
+                w["display"].setChecked(bool(stored))
+        self._refreshDisplayLocks()
 
     def _onCardsReordered(self):
         """DragCardList drop handler: the visual order changed. Slot =
-        position, so remap the slot bindings, renumber the headers and
-        rewrite the whole state (the data travels with the cards)."""
+        position, so remap the slot bindings, renumber the headers and move
+        the casters between slots in the state (the data travels with the
+        cards)."""
+        previous = {id(w): slot for slot, w in self.casterInputs.items()}
         self._cards = [self._cardWidgets[card]
                        for card in self.casterCardList.cards()]
         self._remapSlots()
-        self._syncToState()
+        CommentaryService.Reorder([previous[id(w)] for w in self._cards])
 
     def _remapSlots(self):
         self.casterInputs = {
             str(i + 1): w for i, w in enumerate(self._cards)}
         for slot, w in self.casterInputs.items():
             w["header"].setText(slot)
-
-    def _syncToState(self):
-        if self._updating:
-            return
-        # Fresh dicts on purpose: StateManager.Get returns a live
-        # reference, and mutating it in place would make DeepDiff see no
-        # change (no delta broadcast).
-        slots = {}
-        for slot, w in self.casterInputs.items():
-            slots[slot] = {
-                "name": w["name"].text().strip(),
-                "team": w["team"].text().strip(),
-                "twitter": w["twitter"].text().strip().lstrip("@"),
-                "role": w["role"].text().strip(),
-                "icon": w["icon"].currentData() or "",
-                "note": w["note"].text().strip(),
-                "display": 1 if w["display"].isChecked() else 0,
-            }
-        AutonaActions.instance.PublishCommentary(slots)
-        self._refreshDisplayLocks()
 
     def _refreshDisplayLocks(self):
         """Once MAX_DISPLAY toggles are ON, disable the unchecked ones
@@ -350,23 +380,86 @@ class AutonaCommentaryWidget(QDockWidget):
                 card.style().polish(card)
 
     # ── State -> UI ──────────────────────────────────────────────────
-    def _loadFromState(self):
-        state = StateManager.Get(schema.COMMENTARY_ROOT) or {}
-        self._updating = True
+    def _onStateDelta(self, payload):
+        # A flat delta renders its key path as a Python list, so the line-up's
+        # changes contain "['commentary'" verbatim.
+        if "['commentary'" in str(payload):
+            self._ScheduleRender()
+
+    def _ScheduleRender(self):
+        """Queue one render pass. Deferred, so nothing is redrawn inside the
+        notification or the edit that caused it (agent-pitfalls #9), and
+        coalesced. The panel is the timer's context, so a panel torn down
+        first takes the pending pass with it."""
+        if self._renderPending:
+            return
+        self._renderPending = True
+        QTimer.singleShot(0, self, self._RenderFromState)
+
+    def _RenderFromState(self):
+        """Show the line-up as the state holds it. Writes nothing: every
+        input is set with its signals blocked. A field the operator is in
+        is left alone (see _RenderText) and shown once they leave it."""
+        self._renderPending = False
+        if self._rendering:
+            return
+        self._rendering = True
         try:
+            self._focusSkipped = []
+            with StateManager.lock:
+                state = deep_clone(
+                    StateManager.Get(schema.COMMENTARY_ROOT) or {})
             for slot, w in self.casterInputs.items():
-                data = state.get(slot) or comms.DefaultSlot()
-                w["name"].setText(data.get("name", ""))
-                w["team"].setText(data.get("team", ""))
-                w["twitter"].setText(data.get("twitter", ""))
-                w["note"].setText(data.get("note", ""))
-                w["role"].setText(data.get("role", ""))
-                index = w["icon"].findData(data.get("icon", ""))
-                w["icon"].setCurrentIndex(max(index, 0))
-                w["display"].setChecked(bool(data.get("display")))
+                data = state.get(slot) if isinstance(state, dict) else None
+                data = data if isinstance(data, dict) else comms.DefaultSlot()
+                for field in comms.TEXT_FIELDS:
+                    value = data.get(field, "")
+                    self._RenderText(
+                        w[field], value if isinstance(value, str) else "")
+                index = max(w["icon"].findData(data.get("icon", "")), 0)
+                if w["icon"].currentIndex() != index:
+                    with QSignalBlocker(w["icon"]):
+                        w["icon"].setCurrentIndex(index)
+                shown = bool(data.get("display"))
+                if w["display"].isChecked() != shown:
+                    with QSignalBlocker(w["display"]):
+                        w["display"].setChecked(shown)
         finally:
-            self._updating = False
+            self._forceRender.clear()
+            self._rendering = False
         self._refreshDisplayLocks()
+
+    def _RenderText(self, edit, text):
+        if edit.text() == text:
+            self._heldBack.Shown(edit, text)
+            return
+        if edit.hasFocus() and edit not in self._forceRender:
+            # Left as it is while the operator is in it. Its text is held
+            # back -- not written back when the field is finished -- if it
+            # is still what the field last showed (the value the state has
+            # moved on from), or if this field's own value was just written
+            # elsewhere while they typed (HeldBackText). Any other typing is
+            # their edit, written when they finish it.
+            self._heldBack.LeftAlone(edit, edit.text(), text)
+            if edit not in self._focusSkipped:
+                self._focusSkipped.append(edit)
+            return
+        with QSignalBlocker(edit):
+            edit.setText(text)
+        self._heldBack.Shown(edit, text)
+
+    def _onFocusChanged(self, old, new):
+        """QApplication.focusChanged: once the operator has left every field
+        the last pass had to skip, show the state in them (deferred: the
+        field's own editingFinished runs first)."""
+        if not self._focusSkipped:
+            return
+        skipped = [w for w in self._focusSkipped if Shiboken.isValid(w)]
+        if any(w.hasFocus() for w in skipped):
+            self._focusSkipped = skipped
+            return
+        self._focusSkipped = []
+        self._ScheduleRender()
 
     # ── PlayerDB autocomplete / external data ────────────────────────
     def _rebindCompleters(self):
@@ -396,45 +489,15 @@ class AutonaCommentaryWidget(QDockWidget):
         if model_index is None:
             return
         player = model_index.data(Qt.ItemDataRole.UserRole)
-        if player:
-            self._applyPlayerData(w, player)
-
-    def _applyPlayerData(self, w, player):
-        """Fill one card (widget dict) from a PlayerDB-shaped dict. Only
-        string fields present in the dict are written; role/icon/display
-        are left alone."""
-        self._updating = True
-        try:
-            for field, source in PLAYERDB_FIELD_MAP:
-                value = player.get(source)
-                if isinstance(value, str):
-                    w[field].setText(AutonaBadWordFilter.Censor(value) or "")
-        finally:
-            self._updating = False
-        self._syncToState()
-
-    def SetData(self, index, data):
-        """ChangeCommDataSignal handler (web /update-commentary-<N>).
-        index is 0-based — AutonaWebServerActions already converted the
-        1-based caster number."""
-        slot = str(index + 1)
-        if slot not in self.casterInputs or not isinstance(data, dict):
-            logger.warning(
-                f"Commentary: ignoring SetData for slot {index + 1}")
+        slot = self._slotOf(w)
+        if not player or slot is None:
             return
-        self._applyPlayerData(self.casterInputs[slot], data)
-
-    def LoadCommentatorFromTag(self, index, tag, no_mains=False):
-        """LoadCommFromTagSignal handler. no_mains is accepted for
-        signature compatibility; casters no longer carry characters."""
-        slot = str(index + 1)
-        if slot not in self.casterInputs:
-            return False
-        player = PlayerDB.instance.GetPlayerFromTag(str(tag))
-        if not player:
-            return False
-        self._applyPlayerData(self.casterInputs[slot], player)
-        return True
+        CommentaryService.ApplyPlayerData(slot, player)
+        # The name the pick stored is shown in the field the operator is
+        # still in: the pick is their own edit (the completer had put its
+        # own text there).
+        self._forceRender.add(w["name"])
+        self._ScheduleRender()
 
     # ── Preview ──────────────────────────────────────────────────────
     def _buildDesignSelector(self):

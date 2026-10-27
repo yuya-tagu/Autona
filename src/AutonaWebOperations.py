@@ -19,14 +19,21 @@ Two kinds live here:
   unbuilt board is not held, so the write would be published at once and
   then wiped by the seed the build writes), runs on the GUI thread (a player
   card still publishes a typed edit in two writes there, ADR-005 S2f), lets
-  the field being typed in finish first, and answers for the crew board's
-  operations, which are still its widget's.
+  the field being typed in finish first, and answers for the player /
+  character counts of boards 1/2, which are still its spinboxes' (S2g).
 
   That difference is one object the shell registers, `boardHost`: the
   headless default (`BoardHost`) runs the operation on the calling thread,
   one at a time, with no board -- the write is published at once, which is
   right there: there is no 反映 button -- and raises `NotAvailable` for
   what only a widget can do. bootstrap_gui() registers `DesktopBoardHost`.
+- the crew board's operations (its members' stocks and active member, and
+  its swap / resets / clears / set fields) and the caster line-up's
+  (ADR-005 S3e-2): core's CrewBattleService and CommentaryService, in both
+  shells. The crew ones go through the board host like the S2 ones (the
+  desktop builds the board first and runs them on its GUI thread); the
+  line-up has no board and is written on the calling thread. The board and
+  the Commentary panel render what was written.
 
 Imports nothing that builds anything; the registrations are plain module
 attributes, filled in by the shell (agent-pitfalls #1).
@@ -38,7 +45,10 @@ from loguru import logger
 
 from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
+from .core import CommentaryModel as comms
+from .core import CommentaryService
 from .core.CountryCatalog import CountryCatalog
+from .core.CrewBattleService import CrewBattleService
 from .core.GameAssetCatalog import GameAssetCatalog
 from .core.SettingsManager import SettingsManager
 from .core.SetLoadService import SetLoadService
@@ -69,8 +79,8 @@ class BoardHost:
     shell, and the default until a shell registers another).
 
     The operation runs on the calling thread; nothing is built, so the write
-    is not held. What only a widget can do -- the crew board's own
-    operations, the player / character counts -- raises NotAvailable.
+    is not held. What only a widget can do -- the player / character counts
+    of boards 1/2 -- raises NotAvailable.
     """
 
     def __init__(self):
@@ -98,7 +108,7 @@ class BoardHost:
         raise NotAvailable()
 
     def CommitEdit(self, board):
-        """Finish the field being typed in on board `board` (1/2)."""
+        """Finish the field being typed in on board `board`."""
 
     def ClearPlayers(self, board, no_mains=False):
         """Empty every player slot of board `board`."""
@@ -150,7 +160,8 @@ class DesktopBoardHost(BoardHost):
     def ClearPlayers(self, board, no_mains=False):
         # The board's clear: AutonaActions.ClearPlayers plus what the board
         # owns around it (the field being typed in, the set loaded last,
-        # the statistics) -- the crew's is its own clear.
+        # the statistics). Boards 1/2: the crew board's clear is core's
+        # (`_clear_players`).
         self._Board(board).CommandClearAll(no_mains)
 
     def ResetCounts(self, board):
@@ -179,6 +190,14 @@ loadGameByCodename = None
 
 def _board(scoreboard):
     return AutonaActions._asInt(scoreboard, 0)
+
+
+# The crew battle board: its operations are CrewBattleService's.
+CREW_BOARD = 3
+
+
+def _is_crew(scoreboard):
+    return _board(scoreboard) == CREW_BOARD
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -308,6 +327,44 @@ def get_playerdb():
     return PlayerDB.instance.TournamentPlayers()
 
 
+# ── the caster line-up (ADR-005 S3e-2) ───────────────────────────────────
+# core's CommentaryService, on the calling thread: no panel is built to
+# serve them (the Commentary panel renders the state when it exists). The
+# caster number arrives 1-based, as the route has it.
+
+def _caster_slot(index):
+    """The caster slot for a 1-based caster number, or None. A number that
+    is not one raises (ValueError), as the operations always did."""
+    slot = int(index)
+    if not 1 <= slot <= len(comms.SLOTS):
+        return None
+    return str(slot)
+
+
+def set_commentary_data(index, data):
+    slot = _caster_slot(index)
+    if slot is None:
+        return f"ERROR : index must be 1..{len(comms.SLOTS)}"
+    # A `data` that is not a dict is ignored (logged), and still "OK": the
+    # answer has never depended on it.
+    CommentaryService.ApplyPlayerData(slot, data)
+    return "OK"
+
+
+def load_commentator_from_tag(index, tag, no_mains=False):
+    # `no_mains` is accepted for the route's sake; casters carry no
+    # characters. "OK" once the caster is filled, "ERROR" when the local
+    # player DB has no such tag -- until S3e-2 both answered None (the
+    # legacy route a 500, the Socket.IO ack null), and the range checked
+    # was 1..8 against twelve slots.
+    slot = _caster_slot(index)
+    if slot is None:
+        return f"ERROR : index must be 1..{len(comms.SLOTS)}"
+    if not CommentaryService.LoadFromTag(slot, tag):
+        return "ERROR"
+    return "OK"
+
+
 # ── the tournament ───────────────────────────────────────────────────────
 
 def load_tournament(url=None):
@@ -376,11 +433,16 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
     host = boardHost
 
     def run():
-        # The counts are a board's (S2g): asked for first, so a shell with
-        # no board refuses the request before anything else is written.
+        # The counts of boards 1/2 are a board's (S2g): asked for first, so
+        # a shell with no board refuses the request before anything else is
+        # written. The crew board's member count is core's (S3e-2).
+        crew = _is_crew(scoreboard)
         widget = None
         if players is not None or characters is not None:
-            widget = host.Widget(scoreboard)
+            if crew:
+                host.Prepare(scoreboard)
+            else:
+                widget = host.Widget(scoreboard)
 
         # best-of=<Best Of Amount>
         if bestOf is not None:
@@ -398,13 +460,19 @@ def set_route(scoreboard, bestOf=None, phase=None, pool=None, match=None,
         if match is not None:
             _apply_set_fields(host, scoreboard, {'round_name': match})
 
-        # players=<Amount of Players>
+        # players=<Amount of Players> (the crew board: its member count)
         if players is not None:
-            widget.playerNumber.setValue(int(players))
+            if crew:
+                CrewBattleService(CREW_BOARD).SetMemberCount(int(players))
+            else:
+                widget.playerNumber.setValue(int(players))
 
-        # characters=<Amount of Characters>
+        # characters=<Amount of Characters> (none on the crew board; the
+        # number is still parsed, as the board's spinbox parsed it)
         if characters is not None:
-            widget.charNumber.setValue(int(characters))
+            count = int(characters)
+            if not crew:
+                widget.charNumber.setValue(count)
 
         # losers=<True/False>&team=<Team Number>
         # Set-shaped: `team` is the set's team, which a swap moves to the
@@ -443,11 +511,15 @@ def _apply_set_fields(host, scoreboard, payload):
     0 is not carried -- SetLoadService.BestOfFromSetData) and a losers flag
     (ApplyLosers). The board is prepared first, so on the desktop the write
     waits for 反映 like any other and a best of resizes the board's game rows
-    with it. The crew board's ChangeSetData is its widget's.
+    with it. The crew board reads the payload by its own rules
+    (CrewBattleService.ApplySetData, S3e-2).
     """
     host.Prepare(scoreboard)
     board = _board(scoreboard)
     if board not in AutonaActions.SCORE_BOARDS:
+        if board == CREW_BOARD:
+            CrewBattleService(CREW_BOARD).ApplySetData(payload)
+            return
         host.Widget(scoreboard).signals.ChangeSetData.emit(payload)
         return
     setLoad = SetLoadService(board)
@@ -488,16 +560,22 @@ def set_team_losers(scoreboard, team, value):
 
 def swap_teams(scoreboard):
     # A 1v1 / team board's swap is a state operation (AutonaActions.SwapTeams,
-    # ADR-005 S2c) and its flag is `score.{n}.teamsSwapped`; the board lets
-    # the field being typed in finish first. The crew board still swaps
-    # itself, through its widget.
+    # ADR-005 S2c) and its flag is `score.{n}.teamsSwapped`; the crew board's
+    # is CrewBattleService.SwapTeams (S3e-2), its flag kept by core outside
+    # the state. Either way the board lets the field being typed in finish
+    # first, so the text travels with the swap as it did when the widget
+    # swapped its rows.
     host = boardHost
 
     def run():
-        if _board(scoreboard) in AutonaActions.SCORE_BOARDS:
+        board = _board(scoreboard)
+        if board in AutonaActions.SCORE_BOARDS or board == CREW_BOARD:
             host.Prepare(scoreboard)
             host.CommitEdit(scoreboard)
-            AutonaActions.instance.SwapTeams(scoreboard)
+            if board == CREW_BOARD:
+                CrewBattleService(CREW_BOARD).SwapTeams()
+            else:
+                AutonaActions.instance.SwapTeams(scoreboard)
         else:
             host.Widget(scoreboard).signals.SwapTeams.emit()
         return "OK"
@@ -510,9 +588,12 @@ def get_swap(scoreboard):
     # publishes it. The board is prepared first, as the route always did.
     host = boardHost
     host.Prepare(scoreboard)
-    if _board(scoreboard) in AutonaActions.SCORE_BOARDS:
+    board = _board(scoreboard)
+    if board in AutonaActions.SCORE_BOARDS:
         return str(bool(StateManager.Get(
-            f"score.{_board(scoreboard)}.teamsSwapped", False)))
+            f"score.{board}.teamsSwapped", False)))
+    if board == CREW_BOARD:
+        return str(CrewBattleService(CREW_BOARD).teamsSwapped)
     return str(host.Widget(scoreboard).teamsSwapped)
 
 
@@ -529,11 +610,15 @@ def get_scoreboard(scoreboard):
 
 def reset_scores(scoreboard):
     # Boards 1/2 go through Actions; a crew board's "reset score" restores
-    # every member's stocks -- widget-owned state (see core/Actions.py).
+    # every member's stocks (CrewBattleService.ResetStocks, S3e-2).
     host = boardHost
 
     def run():
         if AutonaActions.instance.ResetScore(scoreboard):
+            return "OK"
+        if _is_crew(scoreboard):
+            host.Prepare(scoreboard)
+            CrewBattleService(CREW_BOARD).ResetStocks()
             return "OK"
         host.Widget(scoreboard).ResetScore()
         return "OK"
@@ -545,16 +630,44 @@ def _reset_match(host, scoreboard):
     # The operator's reset (scores + losers flags + round name / phase /
     # pool, ADR-005 S2d), not the set-load pre-pass ClearScore, which keeps
     # the match bar (S-17); then the best of, in a cycle of its own as the
-    # spinbox's was. The crew board (3) answers False to the core operation
-    # and keeps its own reset and best of spinbox.
+    # spinbox's was. The crew board (3) answers False to the core operation:
+    # its reset is full stocks and nobody playing plus the same match bar,
+    # in one cycle, then its raw best of (S3e-2).
     if AutonaActions.instance.ResetMatch(scoreboard):
         AutonaActions.instance.SetBestOf(scoreboard, 0)
         return
-    widget = host.Widget(scoreboard)
-    widget.ResetMatch()
-    best_of = getattr(widget, "_bestOfSpin", None)
-    if best_of is not None:
-        best_of.setValue(0)
+    if _is_crew(scoreboard):
+        crew = CrewBattleService(CREW_BOARD)
+        with StateManager.SaveBlock():
+            crew.ResetStocks()
+            AutonaActions.instance.ClearMatchInfo(scoreboard)
+        crew.ApplyBestOf(0)
+        return
+    host.Widget(scoreboard).ResetMatch()
+
+
+def _clear_players(host, scoreboard):
+    # Every member row of the crew board emptied (core's, S3e-2); a 1v1 /
+    # team board's players through its host (the board owns what goes
+    # around the clear on the desktop). The field being typed in finishes
+    # first, as boards 1/2's clear finishes it (CommandClearAll): the clear
+    # then takes the typed text with it, instead of leaving it in the field
+    # to be written once the operator leaves it.
+    if _is_crew(scoreboard):
+        host.Prepare(scoreboard)
+        host.CommitEdit(scoreboard)
+        CrewBattleService(CREW_BOARD).ClearCrew()
+        return
+    host.ClearPlayers(scoreboard)
+
+
+def _reset_counts(host, scoreboard):
+    # Back to one member a crew (core's, S3e-2), or one player a team and
+    # one character a player (a built board's spinboxes, S2g).
+    if _is_crew(scoreboard):
+        CrewBattleService(CREW_BOARD).SetMemberCount(1)
+        return
+    host.ResetCounts(scoreboard)
 
 
 def reset_match(scoreboard):
@@ -572,7 +685,7 @@ def reset_players(scoreboard):
     host = boardHost
 
     def run():
-        host.ClearPlayers(scoreboard)
+        _clear_players(host, scoreboard)
         return "OK"
 
     return host.Run(run)
@@ -582,14 +695,54 @@ def clear_all(scoreboard):
     # Not AutonaActions.ClearBoard (the desktop's reset-all): this keeps the
     # team names, and the player / character counts (a built board's
     # spinboxes, S2g) change between the reset and the players' clear -- in
-    # this order, which decides what the mains end up as.
+    # this order, which decides what the mains end up as. On the crew board
+    # the field being typed in finishes before anything is reset (see
+    # `_clear_players`), so the match bar's reset takes its text too.
     host = boardHost
 
     def run():
         host.Prepare(scoreboard)
+        if _is_crew(scoreboard):
+            host.CommitEdit(scoreboard)
         _reset_match(host, scoreboard)
-        host.ResetCounts(scoreboard)
-        host.ClearPlayers(scoreboard)
+        _reset_counts(host, scoreboard)
+        _clear_players(host, scoreboard)
+        return "OK"
+
+    return host.Run(run)
+
+
+# ── the crew board's members (ADR-005 S3e-2) ─────────────────────────────
+# Core's (CrewBattleService), run where the board operations run: on the
+# desktop the board is built first and the write made on the GUI thread,
+# as the board's own inputs make theirs. Another board has no members, and
+# answers "OK" having done nothing, as it always did (after being built,
+# on the desktop, as asking for it always did -- and without reading the
+# numbers). `team` and `member` are 1-based; on the crew board a number
+# that is not one raises (ValueError), as the board's signal did.
+
+def crew_member_stock(scoreboard, team, member, change):
+    host = boardHost
+
+    def run():
+        host.Prepare(scoreboard)
+        if _is_crew(scoreboard):
+            CrewBattleService(CREW_BOARD).AdjustMemberStock(
+                int(team), int(member), int(change))
+        return "OK"
+
+    return host.Run(run)
+
+
+def crew_set_active(scoreboard, team, member):
+    # 0 (or less) marks nobody as playing.
+    host = boardHost
+
+    def run():
+        host.Prepare(scoreboard)
+        if _is_crew(scoreboard):
+            CrewBattleService(CREW_BOARD).SelectActiveMember(
+                int(team), int(member))
         return "OK"
 
     return host.Run(run)

@@ -416,9 +416,9 @@ def get_scoreboard(n):
     board_state = WebOps.get_scoreboard(n)
     data = dict(board_state) if isinstance(board_state, dict) else {"state": board_state}
     # The live swap flag (score.{n}.teamsSwapped for boards 1/2 -- not the
-    # committed view above; the crew widget's own flag for board 3), read
-    # through the legacy operation so both routes answer the same. Tolerate
-    # a board that cannot answer (the crew board, headless).
+    # committed view above; CrewBattleService's for board 3, in both shells
+    # since ADR-005 S3e-2), read through the legacy operation so both routes
+    # answer the same. Tolerate a board that cannot answer.
     try:
         data["swapped"] = WebOps.get_swap(n) == "True"
     except Exception:

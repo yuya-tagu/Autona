@@ -7,13 +7,16 @@ from qtpy.QtCore import *
 from loguru import logger
 
 from .AutonaColorButton import AutonaColorButton
+from shiboken6 import Shiboken
+
 from .core.StateManager import StateManager
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
-from .core.CrewBattleService import CrewBattleService, CrewMember, CrewTeam
+from .core.CrewBattleService import CrewBattleService
 from .core.TournamentInfoService import TournamentInfoService
 from .StateManagerBridge import StateManagerBridge
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
+from .Helpers.AutonaQtHelper import HeldBackText
 from . import ui_constants as UI
 from . import ui_layout as L
 
@@ -33,16 +36,11 @@ ACCENT_GOLD = "#f0a500"
 
 
 class AutonaCrewBattleWidgetSignals(QObject):
-    # Names are deliberately kept compatible with AutonaScoreboardWidget so
-    # the WebServer's generic team_* actions can emit into board 3 without
-    # special-casing the widget type.
-    CommandScoreChange = Signal(int, int)      # team(0/1), change (no-op for crew)
-    CommandTeamColor = Signal(int, str)        # team(0/1), color hex
-    SwapTeams = Signal()
+    # A set payload for board 3: the board-dependent web actions that still
+    # emit into whichever board they address (post_score / set_team_data)
+    # land here. Every other operation of this board is core's
+    # (CrewBattleService, ADR-005 S3e-2), called by the Web directly.
     ChangeSetData = Signal(dict)
-    # Crew-specific.
-    CommandMemberStock = Signal(int, int, int)  # team(0/1), member(1-based), change
-    SetActiveMember = Signal(int, int)          # team(0/1), member(1-based; 0 = none)
 
 
 class AutonaCrewBattleWidget(QWidget):
@@ -56,37 +54,40 @@ class AutonaCrewBattleWidget(QWidget):
 
     Deliberately NOT derived from AutonaScoreboardWidget: crew needs neither
     Start.gg pulls nor character UI, so a focused widget keeps boards 1/2
-    untouched. A handful of attributes/methods are intentionally name-shaped
-    after AutonaScoreboardWidget so the generic WebServer actions (clear_all,
-    reset_match, swap_teams, set_route, ...) don't break if they land on
-    board 3.
+    untouched.
+
+    The board writes nothing itself and keeps nothing the state does not
+    (ADR-005 S3e-2): every input asks CrewBattleService (or AutonaActions,
+    for what board 3 shares with boards 1/2) for the change, and the rows
+    show score.3 as it is (_RenderFromState), whoever wrote it -- an input
+    here, the Web, the headless shell's twin of the same call. A field the
+    operator is typing in is left alone until they leave it, and finishing
+    it does not put back the text a render had to leave there -- what the
+    operator typed is their edit, and is written, unless that very field
+    was written elsewhere meanwhile. The player cards' and the commentary
+    panel's rule (HeldBackText).
     """
 
     def __init__(self, scoreboardNumber=3, *args):
         super().__init__(*args)
         self.scoreboardNumber = scoreboardNumber
 
-        # Compat flag read by AutonaWebOperations.get_swap / SwapTeams logic.
-        self.teamsSwapped = False
-
-        # Every score.3 write this widget makes goes through here (headless
-        # core Step 5, instalment 4). One instance per board, like
-        # AutonaScoreboardWidget's SetLoadService.
+        # Every score.3 write this board asks for goes through here (headless
+        # core Step 5, instalment 4; the operations read the board from the
+        # state since ADR-005 S3e-2). The service is per board, like
+        # AutonaScoreboardWidget's SetLoadService; the Web makes its own for
+        # the same board, which is the same thing (only the swap flag is
+        # kept outside the state, and it is the board's, not the instance's).
         self.crew = CrewBattleService(self.scoreboardNumber)
 
-        # Board 3's skeleton is just the subtree root; the rest is written by
-        # _writeInitialState() below. Seeded through the shared schema helper
-        # so this and AutonaScoreboardManager's placeholder stay identical
+        # Board 3's skeleton is just the subtree root; the rest is the
+        # launch write below. Seeded through the shared schema helper so
+        # this and AutonaScoreboardManager's placeholder stay identical
         # (headless core Step 2).
         schema.SeedBoard(self.scoreboardNumber)
 
         self.signals = AutonaCrewBattleWidgetSignals()
-        self.signals.CommandScoreChange.connect(self.CommandScoreChange)
-        self.signals.CommandTeamColor.connect(self.CommandTeamColor)
-        self.signals.SwapTeams.connect(self.SwapTeams)
         self.signals.ChangeSetData.connect(self.ChangeSetData)
-        self.signals.CommandMemberStock.connect(self.CommandMemberStock)
-        self.signals.SetActiveMember.connect(self.SetActiveMember)
 
         # Per-team widget registries (index 0 = team 1, 1 = team 2).
         self.teamNameEdits: list[QLineEdit] = []
@@ -95,38 +96,32 @@ class AutonaCrewBattleWidget(QWidget):
         # memberRows[team] -> list of {"row","active","name","stock"} dicts.
         self.memberRows: list[list[dict]] = [[], []]
 
-        # Hidden compat widgets so generic WebServer actions that poke a
-        # scoreboard's internals don't AttributeError on board 3.
-        self.scoreColumn = QWidget(self)
-        self.scoreColumn.setVisible(False)
-        # Crew has no best-of UI, but the spinbox is still the single source
-        # of truth for score.3.best_of (boards 1/2's is AutonaActions.SetBestOf
-        # since ADR-005 S2e): every writer (ChangeSetData / set_route) goes
-        # through setValue, and the generic reset
-        # (AutonaWebOperations._reset_match -> setValue(0)) therefore clears
-        # state instead of leaving a stale BO on the overlay.
-        self._bestOfSpin = QSpinBox(self.scoreColumn)
-        self._bestOfSpin.setObjectName("best_of")
-        self._bestOfSpin.valueChanged.connect(self._onBestOfChanged)
-        self.charNumber = QSpinBox(self)          # crew has no characters
-        self.charNumber.setVisible(False)
+        # State -> widgets (_RenderFromState): one pass queued at a time;
+        # by field, what each field last showed in step with the state and
+        # the text a pass had to leave in one the operator was in
+        # (HeldBackText); the fields it left, to come back to once they are
+        # left.
+        self._renderPending = False
+        self._rendering = False
+        self._heldBack = HeldBackText()
+        self._focusSkipped = []
 
         self._building = True
         self._buildUi()
         self._building = False
 
-        self._writeInitialState()
+        # The launch write: the board as freshly built rows show it, which
+        # is the defaults (CrewBattleService.SeedDefaults -- the headless
+        # shell writes the same, tests/test_headless_seed.py).
+        self.crew.SeedDefaults()
+        self._RenderFromState()
 
-        # A flat delta renders its key path as a Python list, so
-        # str(delta) contains "['score', '3', 'team', '1', 'color']"
-        # verbatim -- an exact containment test with no false positives.
-        # Matching plain "color" instead also caught colors.{feature}.*,
-        # tournamentInfo's themeColor and the *other* boards' team colours,
-        # any of which made this board re-read its colour buttons for nothing.
-        self._colorPathMarkers = tuple(
-            str(["score", str(self.scoreboardNumber), "team", str(team),
-                 "color"])
-            for team in (1, 2))
+        # A flat delta renders its key path as a Python list, so str(delta)
+        # contains "['score', '3', ..." verbatim for every change under
+        # score.3 -- an exact containment test, which a plain "score" (every
+        # board) or "color" (colors.{feature}.*, the other boards' teams)
+        # would not be.
+        self._boardPathMarker = str(["score", str(self.scoreboardNumber)])[:-1]
 
         # tournamentInfo.* lives outside score.{N}, so EVENT tab edits and
         # edits made on boards 1/2 arrive here as regular state_updated
@@ -136,6 +131,15 @@ class AutonaCrewBattleWidget(QWidget):
             self._onStateDelta)
         StateManagerBridge.instance.state_big_change.connect(
             self._onStateBigChange)
+        # The fields a render had to skip are shown once the operator leaves
+        # them. A bound method: Qt drops the connection with the board.
+        QApplication.instance().focusChanged.connect(self._onFocusChanged)
+
+    @property
+    def teamsSwapped(self) -> bool:
+        """Whether the crews are shown swapped (core's, see
+        CrewBattleService._swapped)."""
+        return self.crew.teamsSwapped
 
     # ── UI construction ────────────────────────────────────────────────
 
@@ -148,7 +152,6 @@ class AutonaCrewBattleWidget(QWidget):
         # Shared controls: member count + swap + reset.
         controls = QHBoxLayout()
         controls.addWidget(QLabel(QApplication.translate("app", "Members")))
-        # Named `playerNumber` for WebServer compat (set_route players=, clear_all).
         self.playerNumber = QSpinBox()
         self.playerNumber.setRange(1, MAX_MEMBERS)
         self.playerNumber.setValue(DEFAULT_MEMBER_NUM)
@@ -206,6 +209,8 @@ class AutonaCrewBattleWidget(QWidget):
 
         # Phase / round inputs (editable; written to score.3.phase / .match).
         # The OBS crew overlay shows these next to the tournament name.
+        # field -> its combo, for the render.
+        self._matchCombos = {}
         phaseRow = QHBoxLayout()
         phaseRow.addWidget(QLabel(QApplication.translate("app", "Phase")))
         self.phaseCombo = self._makePhaseCombo(
@@ -239,8 +244,6 @@ class AutonaCrewBattleWidget(QWidget):
         outer.addLayout(columns)
         outer.addStretch(1)
 
-        self._onMemberNumChanged(self.playerNumber.value())
-
     def _buildTeamColumn(self, side: int) -> QWidget:
         team_no = side + 1
         group = L.make_card(
@@ -254,7 +257,7 @@ class AutonaCrewBattleWidget(QWidget):
         nameEdit.setPlaceholderText(
             QApplication.translate("app", "Team {0}").format(team_no))
         nameEdit.editingFinished.connect(
-            lambda s=side: self._onTeamNameChanged(s))
+            lambda s=side: self._onTeamNameFinished(s))
         self.teamNameEdits.append(nameEdit)
         header.addWidget(nameEdit, 1)
 
@@ -295,7 +298,7 @@ class AutonaCrewBattleWidget(QWidget):
             name.setPlaceholderText(
                 QApplication.translate("app", "Member {0}").format(m))
             name.editingFinished.connect(
-                lambda s=side, mm=m: self._onMemberNameChanged(s, mm))
+                lambda s=side, mm=m: self._onMemberNameFinished(s, mm))
             row.addWidget(name, 1)
 
             stock = QSpinBox()
@@ -303,7 +306,7 @@ class AutonaCrewBattleWidget(QWidget):
             stock.setValue(DEFAULT_STOCK)
             stock.setFixedWidth(56)
             stock.valueChanged.connect(
-                lambda _v, s=side: self._recalcTotal(s))
+                lambda value, s=side, mm=m: self._onStockChanged(s, mm, value))
             row.addWidget(stock)
 
             container = QWidget()
@@ -352,10 +355,10 @@ class AutonaCrewBattleWidget(QWidget):
 
         def write():
             if not self._building:
-                AutonaActions.instance.SetMatchField(
-                    self.scoreboardNumber, field, combo.currentText())
+                self._onMatchFieldFinished(field, combo)
         combo.lineEdit().editingFinished.connect(write)
         combo.currentIndexChanged.connect(lambda _i: write())
+        self._matchCombos[field] = combo
         return combo
 
     # ── State helpers ──────────────────────────────────────────────────
@@ -369,30 +372,12 @@ class AutonaCrewBattleWidget(QWidget):
         text = str(delta)
         if "tournamentInfo" in text:
             self._syncDisplayTournamentNameEdit()
-        if any(marker in text for marker in self._colorPathMarkers):
-            self._SyncTeamColors()
-
-    def _SyncTeamColors(self):
-        """Follow score.{n}.team.{t}.color into the two colour buttons.
-
-        The team colour is written by AutonaActions now (headless core
-        Step 3) rather than by CommandTeamColor poking this button, so an
-        /api/v1 or legacy colour change reaches the board here. Signals are
-        blocked: colorChanged is what writes the state on a local pick, and
-        letting it fire would echo the value straight back.
-        """
-        for side, button in enumerate(self.colorButtons):
-            value = StateManager.Get(self._key("team", side + 1, "color"), None)
-            if not isinstance(value, str) or not value:
-                continue
-            if button.color() == value:
-                continue
-            with QSignalBlocker(button):
-                button.setColor(value)
+        if self._boardPathMarker in text:
+            self._ScheduleRender()
 
     def _onStateBigChange(self):
         self._syncDisplayTournamentNameEdit()
-        self._SyncTeamColors()
+        self._ScheduleRender()
 
     def _syncDisplayTournamentNameEdit(self):
         # Reflect other-board / EVENT-tab edits to displayTournamentName into
@@ -407,79 +392,161 @@ class AutonaCrewBattleWidget(QWidget):
         if edit.text() != value:
             edit.setText(value)
 
-    def _onBestOfChanged(self, value):
-        # _bestOfSpin.valueChanged handler. The spinbox stays the entry point
-        # (same arrangement as boards 1/2); what gets written is the
-        # service's business — and for crew that is the raw key only. See
-        # CrewBattleService.SetBestOf for why the derived texts are omitted.
-        self.crew.SetBestOf(value)
+    # ── State -> widgets ───────────────────────────────────────────────
 
-    def _writeInitialState(self):
-        # The launch write is the same pass as _flushAllState plus the
-        # board-level fields, so a fresh board and a just-cleared board
-        # cannot drift apart. Everything below is read off the freshly built
-        # rows, i.e. the defaults they were constructed with.
-        self._applyTotals(
-            self.crew.SeedBoardState(
-                self._snapshotTeams(), self.playerNumber.value(),
-                self._bestOfSpin.value()))
-
-    def _snapshotTeams(self) -> list:
-        """The two crews exactly as the rows currently show them.
-
-        Resolving the widget values is the Qt half; deciding what that means
-        in the state (which stocks count, what the team total is) is
-        CrewBattleService's.
-        """
-        return [
-            CrewTeam(
-                name=self.teamNameEdits[side].text(),
-                color=self.colorButtons[side].color() or "",
-                members=tuple(
-                    CrewMember(
-                        name=rows["name"].text(),
-                        stock=rows["stock"].value(),
-                        active=rows["active"].isChecked())
-                    for rows in self.memberRows[side]))
-            for side in range(2)]
-
-    def _stocks(self, side: int) -> list:
-        return [rows["stock"].value() for rows in self.memberRows[side]]
-
-    def _applyTotals(self, totals):
-        for side, total in enumerate(totals):
-            self.totalLabels[side].setText(str(total))
-
-    def _recalcTotal(self, side: int):
-        # Stock spinbox handler: publish the column and render the total the
-        # service computed from it.
-        if self._building:
-            # Unreachable today — every stock spinbox is given its default
-            # before its valueChanged is connected — but kept as the
-            # no-broadcast counterpart of the branch below.
-            self.totalLabels[side].setText(
-                str(self.crew.PublishTotal(side + 1)))
+    def _ScheduleRender(self):
+        """Queue one render pass. Deferred, so nothing is redrawn inside the
+        notification or in the middle of the operation that caused it
+        (agent-pitfalls #9), and coalesced: however many cycles a turn
+        produces, one pass runs. The board is the timer's context, so a
+        board torn down first takes the pending pass with it."""
+        if self._renderPending:
             return
-        self.totalLabels[side].setText(
-            str(self.crew.PublishStocks(side + 1, self._stocks(side))))
+        self._renderPending = True
+        QTimer.singleShot(0, self, self._RenderFromState)
+
+    def _RenderFromState(self):
+        """Show score.3 as the state holds it. Writes nothing.
+
+        Every widget is set with its signals blocked, so no handler runs and
+        nothing is echoed back. A field the operator is in is left alone --
+        its text held back if they have not changed it (_LeaveForFocus) --
+        and the pass is asked for again once they leave it (_onFocusChanged).
+        """
+        self._renderPending = False
+        if self._rendering:
+            return
+        self._rendering = True
+        try:
+            self._focusSkipped = []
+            with StateManager.lock:
+                teams = [self.crew.ReadTeam(team) for team in (1, 2)]
+                memberNum = self.crew.MemberNum()
+                totals = [StateManager.Get(self._key("team", team, "score"), 0)
+                          for team in (1, 2)]
+                matchBar = {field: StateManager.Get(self._key(field), "")
+                            for field in self._matchCombos}
+
+            with QSignalBlocker(self.playerNumber):
+                self.playerNumber.setValue(memberNum)
+            shown = self.playerNumber.value()
+            for side, crew in enumerate(teams):
+                self._RenderText(self.teamNameEdits[side], crew.name)
+                button = self.colorButtons[side]
+                if crew.color and button.color() != crew.color:
+                    with QSignalBlocker(button):
+                        button.setColor(crew.color)
+                for index, member in enumerate(crew.members):
+                    rows = self.memberRows[side][index]
+                    rows["row"].setVisible(index < shown)
+                    self._RenderText(rows["name"], member.name)
+                    if rows["stock"].value() != member.stock:
+                        with QSignalBlocker(rows["stock"]):
+                            rows["stock"].setValue(member.stock)
+                    if rows["active"].isChecked() != member.active:
+                        with QSignalBlocker(rows["active"]):
+                            rows["active"].setChecked(member.active)
+                self.totalLabels[side].setText(str(totals[side] or 0))
+            for field, combo in self._matchCombos.items():
+                value = matchBar[field]
+                self._RenderCombo(combo, "" if value is None else str(value))
+        finally:
+            self._rendering = False
+
+    @staticmethod
+    def _Editing(widget) -> bool:
+        """The operator is in `widget`: it has focus, or -- a combo -- its
+        line edit has, or its drop-down is open."""
+        if widget.hasFocus():
+            return True
+        if not isinstance(widget, QComboBox):
+            return False
+        edit = widget.lineEdit()
+        if edit is not None and edit.hasFocus():
+            return True
+        view = widget.view()
+        return view is not None and view.isVisible()
+
+    def _LeaveForFocus(self, widget, current, text):
+        """Leave `widget` as it is while the operator is in it (the state
+        holds `text`). Its text is held back -- not to be written back when
+        the field is finished -- if it is still what the field last showed
+        (the value the state has moved on from), or if this field's own
+        value was just written elsewhere while they typed (HeldBackText).
+        Any other typing is their edit, and is written when they finish it,
+        as any edit is."""
+        self._heldBack.LeftAlone(widget, current, text)
+        if widget not in self._focusSkipped:
+            self._focusSkipped.append(widget)
+
+    def _RenderText(self, edit, text):
+        if edit.text() == text:
+            self._heldBack.Shown(edit, text)
+            return
+        if self._Editing(edit):
+            self._LeaveForFocus(edit, edit.text(), text)
+            return
+        with QSignalBlocker(edit):
+            edit.setText(text)
+        self._heldBack.Shown(edit, text)
+
+    def _RenderCombo(self, combo, text):
+        if combo.currentText() == text:
+            self._heldBack.Shown(combo, text)
+            return
+        if self._Editing(combo):
+            self._LeaveForFocus(combo, combo.currentText(), text)
+            return
+        with QSignalBlocker(combo), QSignalBlocker(combo.lineEdit()):
+            combo.setCurrentText(text)
+        self._heldBack.Shown(combo, text)
+
+    def _onFocusChanged(self, old, new):
+        """QApplication.focusChanged: once the operator has left every field
+        the last pass had to skip, show the state in them (deferred: the
+        field's own editingFinished runs first)."""
+        if not self._focusSkipped:
+            return
+        skipped = [w for w in self._focusSkipped if Shiboken.isValid(w)]
+        if any(self._Editing(w) for w in skipped):
+            self._focusSkipped = skipped
+            return
+        self._focusSkipped = []
+        self._ScheduleRender()
+
+    def _Finished(self, widget, text, stateValue) -> bool:
+        """Whether a finished edit of `widget` is the operator's: not the
+        text the state already holds, and not the text a render had to
+        leave in the field over a newer value (finishing that -- a
+        focus-out, Enter -- would put the old value back). The player
+        cards' rule (HeldBackText).
+
+        Nor a field the render itself finished: hiding a member row the
+        operator is typing in (the member count dropped) moves the focus out
+        of it, and Qt finishes it there and then. The render writes nothing,
+        so the typed text is not written; the same pass shows the state in
+        the hidden field."""
+        if self._rendering:
+            return False
+        return self._heldBack.IsEdit(widget, text, stateValue == text)
 
     # ── UI signal handlers ─────────────────────────────────────────────
 
     def _onMemberNumChanged(self, value: int):
-        value = int(value)
-        for side in range(2):
-            for m in range(MAX_MEMBERS):
-                self.memberRows[side][m]["row"].setVisible(m < value)
-        if not self._building:
-            self._applyTotals(
-                self.crew.SetMemberNum(
-                    value, [self._stocks(side) for side in range(2)]))
+        if self._building:
+            return
+        if not self.crew.SetMemberCount(value):
+            self._ScheduleRender()
 
-    def _onTeamNameChanged(self, side: int):
+    def _onTeamNameFinished(self, side: int):
         # The shared operation: score.{n}.team.{t}.teamName means the same
         # thing on all three boards.
-        AutonaActions.instance.SetTeamName(
-            self.scoreboardNumber, side + 1, self.teamNameEdits[side].text())
+        edit = self.teamNameEdits[side]
+        text = edit.text()
+        if self._Finished(edit, text, StateManager.Get(
+                self._key("team", side + 1, schema.TEAM_NAME_KEY))):
+            AutonaActions.instance.SetTeamName(
+                self.scoreboardNumber, side + 1, text)
 
     def _onColorChanged(self, side: int, color):
         if self._building:
@@ -487,170 +554,88 @@ class AutonaCrewBattleWidget(QWidget):
         AutonaActions.instance.SetTeamColor(
             self.scoreboardNumber, side + 1, color)
 
-    def _onMemberNameChanged(self, side: int, member: int):
+    def _onMemberNameFinished(self, side: int, member: int):
         # Naming/clearing a slot changes which stocks count toward the team
         # total; the service owns that pairing.
-        self.totalLabels[side].setText(
-            str(self.crew.SetMemberName(
-                side + 1, member,
-                self.memberRows[side][member - 1]["name"].text(),
-                self._stocks(side))))
+        edit = self.memberRows[side][member - 1]["name"]
+        text = edit.text()
+        if self._Finished(edit, text, StateManager.Get(
+                self._key("team", side + 1, "player", member,
+                          schema.PLAYER_TAG_KEY))):
+            self.crew.SetMemberName(side + 1, member, text)
+
+    def _onStockChanged(self, side: int, member: int, value: int):
+        if self._building:
+            return
+        if not self.crew.SetMemberStock(side + 1, member, value):
+            self._ScheduleRender()
 
     def _onActiveToggled(self, side: int, member: int, checked: bool):
+        # One member per crew is playing (CrewBattleService): marking one
+        # replaces whoever was, and the render unmarks them. Turning the
+        # marker off means nobody is in.
         if self._building:
             return
         if checked:
-            # Enforce single active member per team (manual, so the active
-            # radio can also be toggled back off to mean "no one in").
-            for j, rows in enumerate(self.memberRows[side]):
-                if j + 1 != member and rows["active"].isChecked():
-                    rows["active"].blockSignals(True)
-                    rows["active"].setChecked(False)
-                    rows["active"].blockSignals(False)
-            active = member
+            written = self.crew.SelectActiveMember(side + 1, member)
         else:
-            active = 0
-        self.crew.SetActiveMember(side + 1, active)
+            written = self.crew.ReleaseActiveMember(side + 1, member)
+        if not written:
+            self._ScheduleRender()
 
-    # ── Crew command slots ─────────────────────────────────────────────
+    def _onMatchFieldFinished(self, field, combo):
+        # `field` is one of StateSchema.SCORE_MATCH_FIELDS -- the same three
+        # keys the 1v1 / team boards' match bar writes, through the same
+        # operation, so board 3 is not a second reading of what "phase" means.
+        text = combo.currentText()
+        if self._Finished(combo, text, StateManager.Get(self._key(field))):
+            AutonaActions.instance.SetMatchField(
+                self.scoreboardNumber, field, text)
 
-    def CommandMemberStock(self, side: int, member: int, change: int):
-        if side not in (0, 1) or not (1 <= member <= MAX_MEMBERS):
+    def CommitFocusedEdit(self):
+        """Finish the edit in progress on this board before a swap (the
+        SWAP button, and the Web's through the board host).
+
+        The swap exchanges the state, and a field being typed in is one the
+        render leaves alone -- the typed text would stay where it is. So the
+        field is left first: Qt then finishes it (editingFinished) exactly as
+        when the operator clicks elsewhere, and the text is in its member's
+        slot before the crews move, as when the board swapped its rows (and
+        what AutonaScoreboardWidget.CommitFocusedEdit does for boards 1/2).
+        An open completer popup is closed first: losing the focus with it
+        open finishes nothing.
+        """
+        focus = QApplication.focusWidget()
+        widget = focus
+        while widget is not None and widget is not self:
+            widget = widget.parentWidget()
+        if focus is None or widget is not self:
             return
-        spin = self.memberRows[side][member - 1]["stock"]
-        spin.setValue(spin.value() + change)  # valueChanged -> _recalcTotal
+        popup = QApplication.activePopupWidget()
+        completer = focus.completer() if popup is not None \
+            and isinstance(focus, (QLineEdit, QComboBox)) else None
+        if completer is not None and completer.popup() is popup:
+            popup.hide()
+        focus.clearFocus()
 
-    def SetActiveMember(self, side: int, member: int):
-        if side not in (0, 1):
-            return
-        if member <= 0:
-            # Clear active for this team.
-            for rows in self.memberRows[side]:
-                if rows["active"].isChecked():
-                    rows["active"].setChecked(False)
-            return
-        if 1 <= member <= MAX_MEMBERS:
-            self.memberRows[side][member - 1]["active"].setChecked(True)
-
-    # ── AutonaScoreboardWidget-compatible slots (used by WebServer) ─────
-
-    def CommandScoreChange(self, team: int, change: int):
-        # Team-level score is derived from member stocks in crew mode, so a
-        # generic team score nudge has no meaningful target. Kept as a safe
-        # no-op so /scoreboard3-teamN-scoreup never crashes board 3.
-        logger.debug(
-            "Crewbattle: ignoring team-level CommandScoreChange "
-            f"(team={team}, change={change}); crew score is auto-summed")
-
-    def CommandTeamColor(self, team: int, color, force_opponent=False):
-        if team in (0, 1) and isinstance(color, str) and color:
-            self.colorButtons[team].setColor(color)  # colorChanged -> state
+    # ── Board operations (the buttons, and the set payload signal) ─────
 
     def SwapTeams(self):
-        with StateManager.SaveBlock():
-            for side in (0, 1):
-                self.colorButtons[side].blockSignals(True)
-            try:
-                # Team names.
-                t0, t1 = self.teamNameEdits
-                t0v, t1v = t0.text(), t1.text()
-                t0.setText(t1v)
-                t1.setText(t0v)
-                # Colors.
-                c0, c1 = self.colorButtons[0].color(), self.colorButtons[1].color()
-                self.colorButtons[0].setColor(c1)
-                self.colorButtons[1].setColor(c0)
-                # Member rows (name + stock + active).
-                for m in range(MAX_MEMBERS):
-                    r0 = self.memberRows[0][m]
-                    r1 = self.memberRows[1][m]
-                    n0, n1 = r0["name"].text(), r1["name"].text()
-                    r0["name"].setText(n1)
-                    r1["name"].setText(n0)
-                    s0, s1 = r0["stock"].value(), r1["stock"].value()
-                    r0["stock"].blockSignals(True)
-                    r1["stock"].blockSignals(True)
-                    r0["stock"].setValue(s1)
-                    r1["stock"].setValue(s0)
-                    r0["stock"].blockSignals(False)
-                    r1["stock"].blockSignals(False)
-                    a0, a1 = r0["active"].isChecked(), r1["active"].isChecked()
-                    for rr, av in ((r0, a1), (r1, a0)):
-                        rr["active"].blockSignals(True)
-                        rr["active"].setChecked(av)
-                        rr["active"].blockSignals(False)
-                self.teamsSwapped = not self.teamsSwapped
-            finally:
-                for side in (0, 1):
-                    self.colorButtons[side].blockSignals(False)
-                # Persist the swapped state in one shot.
-                self._flushAllState()
+        self.CommitFocusedEdit()
+        self.crew.SwapTeams()
 
     def ResetScore(self):
-        # Restore every member to full stocks and clear the active markers.
-        with StateManager.SaveBlock():
-            for side in range(2):
-                for rows in self.memberRows[side]:
-                    rows["stock"].blockSignals(True)
-                    rows["stock"].setValue(DEFAULT_STOCK)
-                    rows["stock"].blockSignals(False)
-                    rows["active"].blockSignals(True)
-                    rows["active"].setChecked(False)
-                    rows["active"].blockSignals(False)
-            self._flushAllState()
-
-    def ClearScore(self):
-        # Mirrors AutonaScoreboardWidget.ClearScore (reset live scores). For
-        # crew that means full stocks + no active member.
-        self.ResetScore()
-
-    def ResetMatch(self):
-        # Mirrors AutonaScoreboardWidget.ResetMatch: the reset that
-        # WebServerActions' reset_match / clear_all run, i.e. ClearScore plus
-        # the match bar (S-17). The three keys are the ones board 3 shares
-        # with boards 1/2, so they are cleared by the same operation.
-        with StateManager.SaveBlock():
-            self.ClearScore()
-            AutonaActions.instance.ClearMatchInfo(self.scoreboardNumber)
-            # Nothing renders score.3.{phase,pool,match} back into these
-            # combos, so they are blanked here -- silenced, because their
-            # handlers would only write the value just written above.
-            for combo in (self.phaseCombo, self.poolCombo, self.matchCombo):
-                with QSignalBlocker(combo), QSignalBlocker(combo.lineEdit()):
-                    combo.setCurrentText("")
-
-    def CommandClearAll(self, no_mains=False):
-        # Mirrors AutonaScoreboardWidget.CommandClearAll (wipe player data).
-        with StateManager.SaveBlock():
-            for side in range(2):
-                for rows in self.memberRows[side]:
-                    rows["name"].setText("")
-                    rows["stock"].blockSignals(True)
-                    rows["stock"].setValue(DEFAULT_STOCK)
-                    rows["stock"].blockSignals(False)
-                    rows["active"].blockSignals(True)
-                    rows["active"].setChecked(False)
-                    rows["active"].blockSignals(False)
-            self._flushAllState()
+        # Every member back to full stocks and nobody playing.
+        self.crew.ResetStocks()
 
     def ChangeSetData(self, data):
-        # set_route() / post_score() can route best-of/phase/match here. Crew
-        # has no set-loading UI, so the generic fields are persisted if
-        # present and the rest is ignored — tolerant by design so generic
-        # callers don't crash board 3.
-        #
-        # The rules are CrewBattleService's, and they are deliberately NOT
-        # SetLoadService's: see that module's docstring for the five readings
-        # that differ and why unifying them would be a silent change. A
-        # payload carrying nothing board 3 understands (a set load's
-        # entrants, a score) leaves the block empty, which costs no cycle.
-        with StateManager.SaveBlock():
-            self.crew.ApplyMatchInfo(data)
-            bestOf = self.crew.BestOfFromSetData(data)
-            if bestOf is not None:
-                # Route through the spinbox (boards 1/2 do the same) so it
-                # stays in sync and a later reset actually clears the value.
-                self._bestOfSpin.setValue(bestOf)
+        # post_score() / set_team_data() can route a set payload here. Crew
+        # has no set-loading UI: the generic fields are persisted if present
+        # and the rest is ignored -- tolerant by design so generic callers
+        # don't crash board 3. The rules are CrewBattleService's, and they
+        # are deliberately NOT SetLoadService's (see that module's
+        # docstring).
+        self.crew.ApplySetData(data)
 
     # ── X (Twitter) post ───────────────────────────────────────────────
 
@@ -730,14 +715,3 @@ class AutonaCrewBattleWidget(QWidget):
             webbrowser.open(url)
         except Exception as e:
             logger.error(f"PostToX error: {e}")
-
-    # ── internal ───────────────────────────────────────────────────────
-
-    def _flushAllState(self):
-        # Hand the finished board to the service after a bulk operation
-        # (swap / reset / clear) rearranged the rows with their signals
-        # blocked. One broadcast, so a swap never puts a half-swapped board
-        # on the stream.
-        self._applyTotals(
-            self.crew.PublishBoard(
-                self._snapshotTeams(), self.playerNumber.value()))

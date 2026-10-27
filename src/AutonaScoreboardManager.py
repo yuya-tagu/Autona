@@ -158,7 +158,7 @@ class AutonaScoreboardManager(QDockWidget):
         # Build it here so every caller — the ~40 web server actions, the REST
         # API, the desktop panels — keeps working unchanged. Construction is
         # GUI-thread only, so calls arriving on the Flask thread are
-        # marshalled the same way WebServerActions._ensure_panel does it.
+        # marshalled to it (gui_thread_sync).
         try:
             if in_gui_thread():
                 scoreboard = self.EnsureScoreboard(number)

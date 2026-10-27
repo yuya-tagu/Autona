@@ -20,7 +20,7 @@ from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaPlayerDB import AutonaPlayerDB
 from .core.PlayerDB import PlayerDB
 from .Helpers.AutonaDirHelper import AutonaResolve
-from .Helpers.AutonaQtHelper import NoIconProxyModel
+from .Helpers.AutonaQtHelper import HeldBackText, NoIconProxyModel
 from . import ui_constants as UI
 from . import ui_layout as L
 from .Workers import Worker
@@ -110,10 +110,11 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         # editing them; once focus has left all of them, the card asks for
         # another render (_OnFocusChanged).
         self._focusSkipped = []
-        # {field: text}: what a line edit showed when a render had to leave
-        # it alone. Finishing the edit with that very text is not an edit
-        # (_OnTextChanged).
-        self._heldBackText = {}
+        # By field: the text each line edit last showed in step with the
+        # state, and the text a render had to leave in one the operator was
+        # in. Finishing the edit with the latter is not an edit
+        # (_OnTextChanged); text typed since is (HeldBackText).
+        self._heldBack = HeldBackText()
 
         uic.loadUi(AutonaResolve("src/layout/AutonaScoreboardPlayer.ui"), self)
         self._initBasePlayerWidget()
@@ -669,23 +670,20 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
           so tabbing through a field the card was rendered into would
           otherwise re-write it.
         - the text a render had to leave in place because the operator was
-          in the field (_heldBackText), however it is finished: a focus-out,
-          Enter, or typing that ends where it started. The state moved on
-          underneath it; writing it back would put the old value over the
-          new one. The render the focus-out asks for (_OnFocusChanged) then
-          shows the new value. Any other text is the operator's edit and is
-          published.
+          in the field, if it is still what the field last showed
+          (HeldBackText), however it is finished: a focus-out, Enter, or
+          typing that ends where it started. The state moved on underneath
+          it; writing it back would put the old value over the new one. The
+          render the focus-out asks for (_OnFocusChanged) then shows the new
+          value. Any other text is the operator's edit and is published --
+          what they typed before a render came is theirs too (ADR-005
+          S3e-2; it used to be held back, and was lost).
 
         An absent key is not "": a field the slot has never had is still
         written on its first finish, as before.
         """
-        if self._StateValue(field) == text:
-            self._heldBackText.pop(field, None)
-            return
-        if self._heldBackText.get(field) == text:
-            return
-        self._heldBackText.pop(field, None)
-        self.player.SetText(field, text)
+        if self._heldBack.IsEdit(field, text, self._StateValue(field) == text):
+            self.player.SetText(field, text)
 
     def _OnNoteChanged(self):
         # textChanged, i.e. every keystroke, plus the explicit re-emits of
@@ -816,16 +814,37 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 slot.get(schema.PLAYER_COUNTRY_KEY),
                 slot.get(schema.PLAYER_STATE_KEY)))
             results.append(self._RenderCharacters(slot.get("character")))
-            if (sponsor.text(), tag.text()) != shownName:
-                # The name now shown is one the slot already has: NameChanged
-                # compares against this to tell a new player in the slot (it
-                # then re-derives the images and drops the id) from a
-                # focus-out that changed nothing.
-                self.lastExportedName = sponsor.text() + " " + tag.text()
+            if ((sponsor.text(), tag.text()) != shownName
+                    or sponsor in self._focusSkipped
+                    or tag in self._focusSkipped):
+                # The name the slot already has a display name for:
+                # NameChanged compares against this to tell a new player in
+                # the slot (it then re-derives the images and drops the id)
+                # from a focus-out that changed nothing -- and a name field
+                # left with held-back text in it from one that must publish
+                # nothing either.
+                self.lastExportedName = (
+                    self._ExportedNameText(
+                        schema.PLAYER_SPONSOR_KEY, sponsor, slot)
+                    + " "
+                    + self._ExportedNameText(schema.PLAYER_TAG_KEY, tag, slot))
 
         complete = all(results)
         self._renderedSlot = slot if complete else None
         return complete
+
+    def _ExportedNameText(self, field, edit, slot) -> str:
+        """One half of the name the slot has a display name for, after a
+        render. A field the render left alone counts with the text it held
+        back there -- finishing that publishes nothing -- and otherwise with
+        the slot's value: what the operator typed before the render came is
+        a new name, published (with its images, the id dropped) when they
+        finish it (ADR-005 S3e-2). A rendered field shows the slot's value."""
+        text = edit.text()
+        if self._heldBack.IsHeldBack(field, text):
+            return text
+        value = slot.get(field)
+        return "" if value is None else str(value)
 
     def _ReadRenderedSlot(self) -> dict:
         """A copy of the rendered leaves of this slot, read in one go."""
@@ -879,19 +898,21 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             return True
         shown = widget.toPlainText() if note else widget.text()
         if shown == text:
-            self._heldBackText.pop(field, None)
+            self._heldBack.Shown(field, text)
             return True
         if self._Editing(widget):
             self._LeaveForFocus(widget)
             if not note:
-                self._heldBackText[field] = shown
+                # The note publishes every keystroke, so nothing of it is
+                # ever left to finish.
+                self._heldBack.LeftAlone(field, shown, text)
             return False
-        self._heldBackText.pop(field, None)
         with QSignalBlocker(widget):
             if note:
                 widget.setPlainText(text)
             else:
                 widget.setText(text)
+        self._heldBack.Shown(field, text)
         return True
 
     def _RenderSeed(self, value) -> bool:

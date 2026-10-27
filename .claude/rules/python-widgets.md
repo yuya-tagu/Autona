@@ -86,7 +86,7 @@ publish し、ヘッドレスは同じものを core の `PlayerService.SeedEmpt
 - **`StateManager.Set` / `Unset` を Qt ウィジェットから呼ばない**。書き込みは
   `src/core/Actions.py` の `AutonaActions` か、core のドメインサービス
   （`PlayerService` / `SetLoadService` / `CrewBattleService` / `TournamentInfoService` /
-  `Top8Service` / `ColorService` / `StatsService` / `GameTrackerService`）を通す。
+  `Top8Service` / `ColorService` / `StatsService` / `GameTrackerService` / `CommentaryService`）を通す。
   サブツリーのシード・破棄は `src/core/StateSchema.py`
 - ウィジェットの役割は「操作を依頼する」「state を読んで描画する」の 2 つだけ。
   **ウィジェット同士で値をコピーして操作を実現しない**（ADR-005 S2c で選手カードの `SwapWith` を削除し、
@@ -100,7 +100,8 @@ publish し、ヘッドレスは同じものを core の `PlayerService.SeedEmpt
   読み出してそのまま publish すると、値の形とキー順（QVariantMap 順 = 外部契約）が
   Qt に縛られ、Qt なしでは同じ state を作れなくなる
   - どの行を表示するか（Qt モデルの走査・手入力）はウィジェット側に残る
-  - Top 8・実況・リザルトの各パネルは、まだコンボの行 dict から値を組んでいる（S4 で置き換え）。
+  - Top 8・リザルトの各パネルは、まだコンボの行 dict から値を組んでいる（S4 で置き換え）。
+    実況パネルは ADR-005 S3e-2 で、アイコンの識別子（stem）だけを `CommentaryService.SetField` に渡すようになった。
     新しく同じ形を書かない
 - `src/core` 外で state を書いてよいのは `AutonaTournamentDataProvider`
   （`provider_videogame`）の 1 つだけ（`game.*` は ADR-005 S1a で

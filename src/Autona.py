@@ -1176,15 +1176,6 @@ class Window(QMainWindow):
         self._EnsurePanelAt(self._panelIndexes["top8"])
         return AutonaTop8Widget.instance
 
-    def EnsureCommentaryPanel(self):
-        """Build the Commentary panel if it has not been revealed yet.
-
-        Entry point for the external control API (/update-commentary-N,
-        /load-commentator-from-tag-N), which drives the panel's signals.
-        """
-        self._EnsurePanelAt(self._panelIndexes["commentary"])
-        return AutonaCommentaryWidget.instance
-
     def RefreshTop8PhaseGroup(self):
         """Ctrl+Shift+P: reload the Top 8 from Start.gg, building it first."""
         panel = self.EnsureTop8Panel()

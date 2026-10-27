@@ -1943,6 +1943,215 @@ def test_typing_back_to_the_left_behind_text_is_not_an_edit(
         assert tag.text() == "AFTER"
 
 
+@pytest.mark.parametrize("finish", ["enter", "focus-out"])
+@pytest.mark.parametrize("trigger", ["score", "same card"])
+def test_text_typed_before_a_render_is_written_when_finished(
+        board, autonaApp, trigger, finish):
+    """A render that runs while the operator is typing leaves the field as
+    it is -- and what they typed is still their edit. Only the text the
+    field last showed is held back (ADR-005 S3e-2): the typed text used to
+    be held back too, so finishing it wrote nothing and the focus-out then
+    emptied the field. Any render of the card did it, from the Web or a
+    Stream Deck as much as from the board: a point on the board (a fresh
+    card, rendered on every pass) or another field of the same card."""
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    card = board.team1playerWidgets[0]
+    tag = card._w(schema.PLAYER_TAG_KEY, QLineEdit)
+    sponsor = card._w(schema.PLAYER_SPONSOR_KEY, QLineEdit)
+    tagKey = f"{card.path}.{schema.PLAYER_TAG_KEY}"
+    finished = _finishes(tag)
+
+    with _onScreen(board, autonaApp):
+        _focus(tag, autonaApp)
+        QTest.keyClicks(tag, "TYPED")
+        rendered = []
+        original = AutonaScoreboardPlayerWidget.RenderFromState
+
+        def spy(rendering):
+            if rendering is card:
+                rendered.append(tag.text())
+            return original(rendering)
+
+        with patch.object(AutonaScoreboardPlayerWidget, "RenderFromState",
+                          autospec=True, side_effect=spy):
+            if trigger == "score":
+                assert autonaApp.web().team_scoreup(BOARD, 1) == "OK"
+            else:
+                PlayerService(card.path).SetText(
+                    schema.PLAYER_SPONSOR_KEY, "SPONSOR")
+            autonaApp.settle()
+        assert rendered, "no render reached the card"
+        assert tag.text() == "TYPED", "the field being typed in was redrawn"
+        assert autonaApp.get(tagKey) in (None, ""), "typing committed itself"
+
+        if finish == "enter":
+            QTest.keyClick(tag, Qt.Key.Key_Return)
+            autonaApp.settle()
+            assert autonaApp.get(tagKey) == "TYPED"
+        _focus(sponsor, autonaApp)
+
+    assert finished == ["TYPED"]
+    assert autonaApp.get(tagKey) == "TYPED"
+    assert tag.text() == "TYPED"
+    assert "TYPED" in autonaApp.get(f"{card.path}.mergedName")
+    if trigger == "same card":
+        assert sponsor.text() == "SPONSOR"
+    assert _cardMismatches(board) == {}
+
+
+def test_text_typed_after_a_held_back_render_is_written(board, autonaApp):
+    """The held-back text is the one the field showed when the state moved
+    on. A second render, with the operator's typing in the field by then,
+    does not make that typing a held-back text: it is written."""
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    card = board.team1playerWidgets[0]
+    service = PlayerService(card.path)
+    tag = card._w(schema.PLAYER_TAG_KEY, QLineEdit)
+    sponsor = card._w(schema.PLAYER_SPONSOR_KEY, QLineEdit)
+    tagKey = f"{card.path}.{schema.PLAYER_TAG_KEY}"
+    service.SetText(schema.PLAYER_TAG_KEY, "BEFORE")
+    autonaApp.settle()
+
+    with _onScreen(board, autonaApp):
+        _focus(tag, autonaApp)
+        service.SetText(schema.PLAYER_TAG_KEY, "AFTER")   # held back
+        autonaApp.settle()
+        QTest.keyClicks(tag, "!")
+        service.SetText(schema.PLAYER_SPONSOR_KEY, "SPONSOR")
+        autonaApp.settle()
+        assert tag.text() == "BEFORE!"
+        QTest.keyClick(tag, Qt.Key.Key_Return)
+        autonaApp.settle()
+        assert autonaApp.get(tagKey) == "BEFORE!"
+        _focus(sponsor, autonaApp)
+
+    assert autonaApp.get(tagKey) == "BEFORE!"
+    assert tag.text() == "BEFORE!"
+    assert _cardMismatches(board) == {}
+
+
+@pytest.mark.parametrize("finish", ["enter", "focus-out"])
+def test_a_tag_written_elsewhere_while_it_is_typed_wins(
+        board, autonaApp, finish):
+    """The one render that holds typed text back: the slot's tag itself was
+    written elsewhere (the Web, a set load) while the operator was typing
+    it. That write wins, as the team name's does (ADR-005 S2d): finishing
+    the typing writes nothing, and the new tag is shown once the field is
+    left. What the operator types after that render is theirs again."""
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    card = board.team1playerWidgets[0]
+    service = PlayerService(card.path)
+    tag = card._w(schema.PLAYER_TAG_KEY, QLineEdit)
+    sponsor = card._w(schema.PLAYER_SPONSOR_KEY, QLineEdit)
+    tagKey = f"{card.path}.{schema.PLAYER_TAG_KEY}"
+
+    with _onScreen(board, autonaApp):
+        _focus(tag, autonaApp)
+        QTest.keyClicks(tag, "TYPED")
+        service.SetText(schema.PLAYER_TAG_KEY, "ELSEWHERE")
+        autonaApp.settle()
+        # A later pass (a point scored) changes nothing about that.
+        assert autonaApp.web().team_scoreup(BOARD, 1) == "OK"
+        autonaApp.settle()
+        assert tag.text() == "TYPED"
+
+        with _noWrites() as attempts:
+            if finish == "enter":
+                QTest.keyClick(tag, Qt.Key.Key_Return)
+                autonaApp.settle()
+            _focus(sponsor, autonaApp)
+        assert attempts == []
+        assert autonaApp.get(tagKey) == "ELSEWHERE"
+        assert tag.text() == "ELSEWHERE"
+
+        _focus(tag, autonaApp)
+        QTest.keyClicks(tag, "!")
+        _focus(sponsor, autonaApp)
+        assert autonaApp.get(tagKey) == "ELSEWHERE!"
+        assert _cardMismatches(board) == {}
+
+
+def test_a_held_back_tag_next_to_a_rendered_sponsor_publishes_nothing(
+        board, autonaApp):
+    """The render shows the slot's new sponsor while the tag the operator
+    sits in is held back: leaving the tag writes neither it nor a display
+    name made from it (NameChanged), and the new tag is shown after."""
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    card = board.team1playerWidgets[0]
+    service = PlayerService(card.path)
+    tag = card._w(schema.PLAYER_TAG_KEY, QLineEdit)
+    sponsor = card._w(schema.PLAYER_SPONSOR_KEY, QLineEdit)
+    tagKey = f"{card.path}.{schema.PLAYER_TAG_KEY}"
+    service.SetText(schema.PLAYER_TAG_KEY, "BEFORE")
+    autonaApp.settle()
+    finished = _finishes(tag)
+
+    with _onScreen(board, autonaApp):
+        _focus(tag, autonaApp)
+        with StateManager.SaveBlock():
+            service.SetText(schema.PLAYER_TAG_KEY, "AFTER")
+            service.SetText(schema.PLAYER_SPONSOR_KEY, "SPONSOR")
+        autonaApp.settle()
+        assert (sponsor.text(), tag.text()) == ("SPONSOR", "BEFORE")
+
+        with _noWrites() as attempts:
+            _focus(sponsor, autonaApp)
+        assert finished == ["BEFORE"]
+        assert attempts == []
+        assert autonaApp.get(tagKey) == "AFTER"
+        assert tag.text() == "AFTER"
+        assert _cardMismatches(board) == {}
+
+
+def test_the_player_editor_writes_what_is_typed(board, autonaApp):
+    """player_editor.1 (agent-pitfalls #7) is never rendered, so nothing is
+    ever held back on it: every finished edit that is not what the state
+    holds is written, board passes or not."""
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    editorPath = f"{schema.PLAYER_EDITOR_ROOT}.1"
+    editor = AutonaScoreboardPlayerWidget(index=1, teamNumber=1,
+                                          path=editorPath)
+    tagKey = f"{editorPath}.{schema.PLAYER_TAG_KEY}"
+    try:
+        tag = editor._w(schema.PLAYER_TAG_KEY, QLineEdit)
+        editor.SetData({"gamerTag": "DRAFT"}, dontLoadFromDB=True)
+        autonaApp.settle()
+        assert autonaApp.get(tagKey) == "DRAFT"
+
+        with patch.object(tag, "hasFocus", return_value=True):
+            tag.setText("TYPED")
+            # A board pass and a write elsewhere in the editor's slot.
+            PlayerService(board.team1playerWidgets[0].path).SetText(
+                schema.PLAYER_TAG_KEY, "ON THE BOARD")
+            PlayerService(editorPath).SetText(
+                schema.PLAYER_SPONSOR_KEY, "SPONSOR")
+            autonaApp.settle()
+            tag.editingFinished.emit()
+        assert autonaApp.get(tagKey) == "TYPED"
+
+        # Finishing what the state holds writes nothing; the next edit does.
+        with _noWrites() as attempts:
+            tag.editingFinished.emit()
+        assert attempts == []
+        tag.setText("DRAFT")
+        tag.editingFinished.emit()
+        assert autonaApp.get(tagKey) == "DRAFT"
+        assert board.team1playerWidgets[0]._w(
+            schema.PLAYER_TAG_KEY, QLineEdit).text() == "ON THE BOARD"
+    finally:
+        editor.setParent(None)
+        editor.deleteLater()
+        # Reaped here: pytest runs no event loop (see test_player_widgets).
+        QCoreApplication.sendPostedEvents(editor, QEvent.Type.DeferredDelete)
+        StateManager.Unset(schema.PLAYER_EDITOR_ROOT)
+        autonaApp.settle()
+
+
 # ── what a render must not do ────────────────────────────────────────────
 
 def _widgetState(card):
@@ -2359,6 +2568,45 @@ def test_typing_after_a_web_team_name_wins(teamBoard, autonaApp, teamLogo):
         assert autonaApp.get(key) == "Bravo"
         assert autonaApp.get(f"{PREFIX}.team.1.logo") is None
         assert edit.text() == "Bravo"
+
+
+@pytest.mark.parametrize("finish", ["enter", "focus-out"])
+def test_a_team_name_typed_before_a_render_is_written_when_finished(
+        teamBoard, autonaApp, teamLogo, finish):
+    """A render of the board while the operator types a team name -- a point
+    scored from the Web, which writes no name -- leaves the field alone, and
+    what they typed is still their edit: nothing wrote the name underneath
+    it. It used to be held back as if something had, so finishing it wrote
+    nothing and the focus-out emptied the field (ADR-005 S3e-2)."""
+    if RECORD or RECORD_KEY_ORDER:
+        pytest.skip("not part of the recording")
+    board = teamBoard
+    edit, other = _teamNameEdit(board, 1), _teamNameEdit(board, 2)
+    key = f"{PREFIX}.team.1.{schema.TEAM_NAME_KEY}"
+
+    with _onScreen(board, autonaApp):
+        _focus(edit, autonaApp)
+        QTest.keyClicks(edit, "Alpha")
+        with patch.object(board, "_SyncSetFields",
+                          wraps=board._SyncSetFields) as render:
+            assert autonaApp.web().team_scoreup(BOARD, 1) == "OK"
+            autonaApp.settle()
+        assert render.called, "no render reached the team name"
+        assert edit.text() == "Alpha", "the field being typed in was redrawn"
+        assert autonaApp.get(key) == "", "typing committed itself"
+
+        if finish == "enter":
+            QTest.keyClick(edit, Qt.Key.Key_Return)
+            autonaApp.settle()
+            assert autonaApp.get(key) == "Alpha"
+        _focus(other, autonaApp)
+        autonaApp.settle()
+
+    assert autonaApp.get(key) == "Alpha"
+    assert autonaApp.get(f"{PREFIX}.team.1.logo") \
+        == "./user_data/team_logo/alpha.png"
+    assert edit.text() == "Alpha"
+    assert autonaApp.get(f"{PREFIX}.team.1.score") == 1
 
 
 # ── a best of the Web writes while the operator is in the spinbox ──────
