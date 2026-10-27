@@ -79,6 +79,10 @@ GAMES_DIR = "./user_data/games/"
 CHARACTERS_SEED_PATH = './assets/characters.json'
 CHARACTERS_RUNTIME_PATH = './user_data/characters.json'
 STARTGG_CHARACTERS_URL = 'https://api.start.gg/characters'
+# requests' timeout for that download (connect, and each read): the
+# provider's request timeout. It runs as a TaskExecutor job on the desktop,
+# whose thread the interpreter's exit joins (ADR-005 S3f-4).
+STARTGG_CHARACTERS_TIMEOUT_SECS = 20
 
 # Stock icon used for a character without any icon file. Stored as a path:
 # the image itself is decoded by the Qt adapter.
@@ -608,12 +612,15 @@ class GameAssetCatalog:
         """Refresh user_data/characters.json from the start.gg API. Blocking.
 
         Touches the file only, never the catalog's memory, so it takes no
-        lock: a slow or hung request (there is no timeout) must not hold up
-        a game load. The table is picked up by the next
-        ReloadStartGGCharacters()."""
+        lock: a slow request must not hold up a game load. A hung one gives
+        up after STARTGG_CHARACTERS_TIMEOUT_SECS (there was no timeout until
+        ADR-005 S3f-4: on a QThread nothing waited for it, but the
+        TaskExecutor job it is now holds the interpreter's exit). The table
+        is picked up by the next ReloadStartGGCharacters()."""
         tmp_path = CHARACTERS_RUNTIME_PATH + '.tmp'
         try:
-            r = requests.get(STARTGG_CHARACTERS_URL, allow_redirects=True)
+            r = requests.get(STARTGG_CHARACTERS_URL, allow_redirects=True,
+                             timeout=STARTGG_CHARACTERS_TIMEOUT_SECS)
             r_json = orjson.dumps(orjson.loads(
                 r.text), option=orjson.OPT_INDENT_2)
 

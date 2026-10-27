@@ -230,13 +230,27 @@ class HeadlessGames:
                 args=(codename, mods_active, mods_reload_mode, done),
                 name="AutonaGameLoader", daemon=True).start()
         else:
-            self._Load(codename, mods_active, mods_reload_mode, done)
+            self._Load(codename, mods_active, mods_reload_mode, done,
+                       wait=True)
 
-    def _Load(self, codename, modsActive, reload, done):
+    def _Load(self, codename, modsActive, reload, done, wait=False):
+        # `wait`: a synchronous load, over once what follows it has run on
+        # the main thread -- right here on the main thread, waited for from
+        # another (set_game's request thread since ADR-005 S3f-4: "OK" once
+        # loaded, as when set_game ran on the main thread).
         from .core.StateManager import StateManager
         from .Helpers import AutonaQtHelper
+        from .Helpers.AutonaQtHelper import GuiMarshalAborted
         try:
             with self._lock:
+                # Not once the app is shutting down (the adapter's check,
+                # ADR-005 S3f-4 review): what follows the load -- the pick
+                # persisted -- would not run on the main thread, and the
+                # selection alone would reach state.json without it.
+                reason = AutonaQtHelper.gui_unavailable_reason()
+                if reason is not None:
+                    logger.info(f"Game load of {codename} not run: {reason}")
+                    return
                 # The adapter's _Load without the Qt models: the start.gg
                 # character table re-read, then the selection in one save
                 # cycle. Skipped (None) for an unknown codename or the same
@@ -248,7 +262,19 @@ class HeadlessGames:
                 if snapshot is None:
                     return
             logger.info(f"Game loaded: {codename}")
-            AutonaQtHelper.gui_executor(lambda: self._OnLoaded(snapshot))
+            try:
+                if wait:
+                    AutonaQtHelper.gui_executor.run_sync(
+                        lambda: self._OnLoaded(snapshot))
+                elif (reason := AutonaQtHelper.gui_unavailable_reason()):
+                    # Queued now, it would never run.
+                    raise GuiMarshalAborted(reason)
+                else:
+                    AutonaQtHelper.gui_executor(
+                        lambda: self._OnLoaded(snapshot))
+            except GuiMarshalAborted as aborted:
+                logger.info(f"Game load of {codename} stopped: {aborted}")
+                self._SettleStopped(snapshot)
         except Exception:
             logger.error(traceback.format_exc())
         finally:
@@ -259,13 +285,32 @@ class HeadlessGames:
         # The pick persisted (the adapter's _PersistSelectedGame), then the
         # listeners: the boards' roster (the load's own snapshot), the
         # player DB refresh and the web server's push.
+        self._PersistPick()
+        self.signals.gameLoaded.emit(snapshot)
+        self.signals.gameChanged.emit()
+
+    def _SettleStopped(self, snapshot):
+        # The shutdown came after the selection (published): what the main
+        # thread would have written after it is written here, so state.json
+        # holds one game -- the desktop adapter's _SettleUnannounced (ADR-005
+        # S3f-4 review). The roster the load asks for (gameLoaded ->
+        # bootstrap.wire_game_roster: the previous game's picks emptied),
+        # through the board host as there, then the pick persisted. The web
+        # push and the player DB refresh are left: the app is going away.
+        from . import AutonaWebOperations
+        from .core.Actions import AutonaActions
+        replaced = getattr(snapshot, "replaced", None)
+        AutonaWebOperations.boardHost.Run(
+            lambda: AutonaActions.instance.ApplyGameRoster(replaced))
+        self._PersistPick()
+
+    @staticmethod
+    def _PersistPick():
         from .core.SettingsManager import SettingsManager
         from .core.StateManager import StateManager
         SettingsManager.Set(
             "SELECTED_GAME_CODENAME",
             StateManager.Get("game.codename", "") or "")
-        self.signals.gameLoaded.emit(snapshot)
-        self.signals.gameChanged.emit()
 
 
 class HeadlessShell:

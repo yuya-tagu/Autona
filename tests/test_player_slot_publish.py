@@ -41,6 +41,7 @@ from qtpy.QtWidgets import QApplication, QComboBox
 from src.core.StateManager import StateManager
 # The scenarios, the custom flags, the locale and the encoding are shared
 # with tests/test_player_service.py, which replays the same recording.
+from tests.conftest import drain_tasks
 from tests.fixtures.player_slots.recording import (
     CUSTOM_FLAGS, GAME_FIXTURE, GAME_SCENARIOS, GAMES, GOLDEN_PATH, LOCALE,
     digest, encode, loadGolden)
@@ -158,17 +159,15 @@ def slotEnv(autonaApp):
 
     def load(label):
         codename, modsActive, reload = GAME_SCENARIOS[label]
-        manager.LoadGameByCodename(codename, async_mode=False,
-                                   mods_active=modsActive,
+        # The load job, this (the GUI) thread pumped while it runs.
+        manager.LoadGameByCodename(codename, mods_active=modsActive,
                                    mods_reload_mode=reload)
-        manager.threadpool.waitForDone()
-        QApplication.processEvents()
+        drain_tasks()
 
     try:
         yield load
     finally:
-        manager.threadpool.waitForDone()
-        QApplication.processEvents()
+        drain_tasks()
         autonaApp.dropAllBoards()
         for name in GAMES:
             shutil.rmtree(games / name, ignore_errors=True)

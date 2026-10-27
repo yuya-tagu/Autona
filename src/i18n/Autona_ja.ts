@@ -948,6 +948,10 @@
         <translation>これは破壊的な操作です。送信しますか？</translation>
     </message>
     <message>
+        <source>The app is shutting down</source>
+        <translation>アプリを終了しています</translation>
+    </message>
+    <message>
         <source>Trigger OBS from Autona state</source>
         <translation>Autona の状態から OBS をトリガーする</translation>
     </message>

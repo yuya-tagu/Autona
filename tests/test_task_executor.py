@@ -20,8 +20,9 @@ Pinned:
   lane thread, None waits for ever;
 - the test seams: drain() waits for what tasks submit while running and for
   their deliveries, and a stepped executor runs its jobs only through
-  run_next(), in order (or the newest first), never after a shutdown took
-  its queue, and counts them (queued());
+  run_next(), in order (or the newest first), one at a time even once a
+  run_next() timed out on a step still running, never after a shutdown
+  took its queue, and counts them (queued());
 - both shells shut it down after the web server and before the flush, and
   the window's unused QThreadPool is gone.
 
@@ -761,6 +762,42 @@ def test_a_stepped_executor_never_runs_a_job_after_the_shutdown(make):
     assert queued.cancelled()
     assert executor.run_next() is False
     assert ran == []
+
+
+def test_a_step_that_outlived_its_run_next_is_waited_for_before_the_next(
+        make):
+    """ADR-005 S3f-4 review: drain_tasks retries run_next() with a short
+    timeout while it pumps the GUI thread. A step that timed out is still
+    running; the retry waits for it -- raising TimeoutError again while it
+    runs -- and starts the next step only once it is over."""
+    executor = make(stepped=True)
+    release = threading.Event()
+    running = []
+
+    def first():
+        running.append("first")
+        release.wait(WAIT)
+        running.remove("first")
+
+    def second():
+        running.append("second")
+        return list(running)
+
+    executor.submit(first, task_name="first")
+    later = executor.submit(second, task_name="second")
+
+    with pytest.raises(TimeoutError):
+        executor.run_next(0.05)            # first, still running
+    with pytest.raises(TimeoutError):
+        executor.run_next(0.05)            # waits for first; not second
+    assert running == ["first"] and executor.queued() == 1
+    assert executor.drain(0.05) is False   # the same wait, as drain() has it
+    assert not later.done()
+
+    release.set()
+    assert executor.run_next(WAIT) is True
+    assert later.result(0) == ["second"]   # never alongside first
+    assert executor.drain(WAIT) is True
 
 
 def test_run_next_is_for_a_stepped_executor_only(make):

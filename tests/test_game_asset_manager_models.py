@@ -2,8 +2,9 @@
 
 Since S1a AutonaGameAssetManager builds its QStandardItemModels from the
 catalog's snapshot rows instead of sorting its own items. These tests load
-the golden fixture games through the production synchronous path (the one
-WebServerActions.set_game takes) and read the models back the way the
+the golden fixture games through the load job every load takes (ADR-005
+S3f-4: the GUI thread's synchronous path it had until then had no
+production caller left, and is gone) and read the models back the way the
 recording did -- DisplayRole text plus UserRole data, row by row -- and the
 payloads through the WebServerActions readers. Those walked the models (on
 the GUI thread) until S1b; they read the catalog now, on whatever thread
@@ -14,20 +15,22 @@ previous generation, the per-game tracker's stage model included, is retired
 rather than dropped (agent-pitfalls #13), and a tracker row that outlives a
 rebuild is rebound without writing the state.
 
-The last block drives the threaded load -- the path every pick in the UI
-takes -- and what hangs off it: the footer status, the persisted pick and
+The last block drives the load job (a TaskExecutor job since ADR-005 S3f-4;
+a QThread until then) -- the path every pick in the UI takes -- and what
+hangs off it: the footer status, the persisted pick and
 its restore at startup, and forgetting the pick when the URL is cleared.
 """
 import ast
 import json
 import shutil
 import threading
-import time
 from pathlib import Path
 
 import pytest
 
 from qtpy.QtCore import Qt
+
+from tests.conftest import drain_tasks
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "game_assets"
 GOLDEN = json.loads((FIXTURE / "golden.json").read_text(encoding="utf-8"))
@@ -44,8 +47,6 @@ def _rows(model):
 def goldenGames(autonaApp, monkeypatch):
     """The fixture games installed into the harness, under the recording's
     locale. Uninstalled afterwards, back to the no-game models."""
-    from qtpy.QtWidgets import QApplication
-
     from src.AutonaGameAssetManager import AutonaGameAssetManager
     from src.core.GameAssetCatalog import GameAssetCatalog
     from src.core.SettingsManager import SettingsManager
@@ -67,8 +68,7 @@ def goldenGames(autonaApp, monkeypatch):
 
     yield manager
 
-    manager.threadpool.waitForDone()
-    QApplication.processEvents()
+    drain_tasks()
     for name in GAMES:
         shutil.rmtree(games / name, ignore_errors=True)
     catalog.ScanGames()
@@ -79,12 +79,11 @@ def goldenGames(autonaApp, monkeypatch):
 
 
 def _load(manager, codename, modsActive=False, reload=False):
-    from qtpy.QtWidgets import QApplication
-
-    manager.LoadGameByCodename(codename, async_mode=False,
-                               mods_active=modsActive, mods_reload_mode=reload)
-    manager.threadpool.waitForDone()
-    QApplication.processEvents()
+    # The load job, run to the end with this (the GUI) thread pumped: it
+    # marshals the models onto it.
+    manager.LoadGameByCodename(codename, mods_active=modsActive,
+                               mods_reload_mode=reload)
+    drain_tasks()
 
 
 SCENARIOS = {
@@ -208,7 +207,8 @@ def test_reloading_the_same_generation_rebuilds_nothing(goldenGames):
     assert manager.characterModel is model
 
 
-def test_a_model_takes_icons_and_pack_from_its_own_snapshot(goldenGames):
+def test_a_model_takes_icons_and_pack_from_its_own_snapshot(
+        goldenGames, monkeypatch):
     """Rows, stock icons and the skin icons' pack all come from the snapshot
     the model is built from -- not from Current(), which a load landing
     meanwhile may already have moved to another game."""
@@ -221,12 +221,20 @@ def test_a_model_takes_icons_and_pack_from_its_own_snapshot(goldenGames):
     assert GameAssetCatalog.instance.Current().biggestCompletePack \
         != tgame.biggestCompletePack
 
-    manager.UpdateSkinModel(tgame)
-    manager.UpdateCharacterModel(tgame)
+    packs = []
+    decode = manager.LoadSkinImages
 
-    assert manager.workers
-    assert all(worker.args[4] == tgame.biggestCompletePack
-               for worker in manager.workers)
+    def recordPack(allAssetData, allItem, skinModel, generation, pack):
+        packs.append(pack)
+        return decode(allAssetData, allItem, skinModel, generation, pack)
+
+    monkeypatch.setattr(manager, "LoadSkinImages", recordPack)
+    decodes = manager.UpdateSkinModel(tgame)
+    manager.UpdateCharacterModel(tgame)
+    drain_tasks()
+
+    assert decodes and len(packs) == len(decodes)
+    assert all(pack == tgame.biggestCompletePack for pack in packs)
     model = manager.characterModel
     mario = next(
         row for row in range(model.rowCount())
@@ -286,22 +294,14 @@ def test_a_tracker_row_is_rebound_to_the_new_stage_model(
 LOADER_TIMEOUT_SECS = 30
 
 
-def _waitForLoader(manager):
-    """Wait for the asset loader thread while pumping this (GUI) thread.
+def _waitForLoader(manager=None):
+    """Wait for the load job while pumping this (GUI) thread.
 
-    The loader marshals the model rebuild onto the GUI thread (run_sync),
-    so blocking in QThread.wait() here would deadlock it."""
-    from qtpy.QtWidgets import QApplication
-
-    thread = manager.assetsLoaderThread
-    deadline = time.monotonic() + LOADER_TIMEOUT_SECS
-    while not thread.isFinished():
-        assert time.monotonic() < deadline, "the asset loader did not finish"
-        QApplication.processEvents()
-        time.sleep(0.005)
-    manager.threadpool.waitForDone()
-    # What the thread queued on its way out: onLoad's receivers here.
-    QApplication.processEvents()
+    The job marshals the model rebuild (and the signals that follow it) onto
+    the GUI thread (run_sync), so blocking on its Future here would deadlock
+    it. drain_tasks also runs what the GUI thread is handed meanwhile (the
+    v1 route's dispatch, a scan's onLoadAssets slots, the icons)."""
+    drain_tasks(LOADER_TIMEOUT_SECS)
 
 
 @pytest.fixture
@@ -422,9 +422,9 @@ def test_the_last_pick_is_persisted_and_restored(goldenGames, autonaApp):
     assert SettingsManager.Get("SELECTED_GAME_CODENAME", "") == "game2"
 
     # Armed once: a later rescan ("Add game assets") keeps the user's pick.
-    thread = manager.assetsLoaderThread
+    generation = manager._loadGeneration
     manager._RestoreSelectedGame()
-    assert manager.assetsLoaderThread is thread
+    assert manager._loadGeneration == generation  # nothing asked for
 
 
 def test_a_last_pick_that_is_no_longer_installed_is_not_restored(
@@ -433,12 +433,12 @@ def test_a_last_pick_that_is_no_longer_installed_is_not_restored(
 
     manager = goldenGames
     SettingsManager.Set("SELECTED_GAME_CODENAME", "uninstalled")
-    thread = manager.assetsLoaderThread
+    generation = manager._loadGeneration
 
     manager._pendingSelectedGameRestore = True
     manager._RestoreSelectedGame()
 
-    assert manager.assetsLoaderThread is thread
+    assert manager._loadGeneration == generation  # nothing asked for
     assert manager._pendingSelectedGameRestore is False
     assert not autonaApp.get("game.codename")
 

@@ -1,14 +1,15 @@
-"""Icon workers of AutonaGameAssetManager stay off QPixmap / QIcon.
+"""Icon decodes of AutonaGameAssetManager stay off QPixmap / QIcon.
 
-UpdateStageModel / UpdateSkinModel fan out to QThreadPool workers that decode
-the stage and skin images. QPixmap (and the QIcon built on it) is GUI-thread
-only per the Qt docs, so the workers must stop at QImage and leave the
-QPixmap / QIcon conversion -- and the setIcon on the model item -- to the
-queued completion slot on the GUI thread.
+UpdateStageModel / UpdateSkinModel fan out decodes of the stage and skin
+images to the TaskExecutor's fan-out lane (ADR-005 S3f-4; QThreadPool workers
+until then). QPixmap (and the QIcon built on it) is GUI-thread only per the
+Qt docs, so a decode must stop at QImage and leave the QPixmap / QIcon
+conversion -- and the setIcon on the model item -- to the completion it
+hands to the GUI thread.
 
 These tests drive the production rebuilds against a tiny synthetic game on
 disk, with the module's QPixmap / QIcon swapped for spies that record which
-thread built them. They also pin the generation check: a worker result that
+thread built them. They also pin the generation check: a decode result that
 lands after its model was rebuilt (retired) must not be applied.
 """
 import json
@@ -16,6 +17,8 @@ import shutil
 import threading
 
 import pytest
+
+from tests.conftest import deliver_decodes
 
 
 class _ThreadLog:
@@ -55,7 +58,7 @@ def pixmapThreads(monkeypatch):
             super().__init__(*args)
 
     # The module does `from qtpy.QtGui import *`, so its globals are what the
-    # workers and the completion slots resolve these names through.
+    # decodes and the completions resolve these names through.
     monkeypatch.setattr(module, "QPixmap", SpyPixmap)
     monkeypatch.setattr(module, "QIcon", SpyIcon)
     return log
@@ -106,18 +109,17 @@ def syntheticGame(autonaApp):
     (stages / "config.json").write_text(json.dumps(
         {"type": ["stage_icon"], "prefix": "", "postfix": ""}))
     _png(stages / "battlefield.png", "green", size=(80, 45))
-    # Exists but does not decode: the worker's fallback (cancel icon) path.
+    # Exists but does not decode: the decode's fallback (cancel icon) path.
     (stages / "broken.png").write_bytes(b"not an image")
 
     catalog.ScanGames()
     catalog.SelectGame(ICON_GAME, reload=True)
-    manager._RebuildModels()
-    _deliver(manager)
+    deliver_decodes(manager._RebuildModels())
 
     yield manager
 
-    # No worker may outlive the test (and the harness CWD).
-    manager.threadpool.waitForDone()
+    # No decode may outlive the test (and the harness CWD).
+    _finishDecodes()
     # Results still queued on the GUI thread target this test's items;
     # retire their generation so a later processEvents() discards them
     # instead of calling setIcon on them.
@@ -130,28 +132,37 @@ def syntheticGame(autonaApp):
     manager._RebuildModels()
 
 
-def _deliver(manager):
-    """Finish the workers, then run their queued completion slots."""
-    from qtpy.QtWidgets import QApplication
+def _finishDecodes():
+    """Wait for every decode, without running what they handed to the GUI
+    thread (their icons stay queued there)."""
+    from src.core.TaskExecutor import TaskExecutor
 
-    manager.threadpool.waitForDone()
-    QApplication.processEvents()
+    assert TaskExecutor.instance.drain(30), "an icon decode did not finish"
 
 
 def _rows(model):
     return [model.item(row) for row in range(model.rowCount())]
 
 
-def test_icon_workers_build_no_pixmap_off_the_gui_thread(
-        syntheticGame, pixmapThreads):
+def test_icon_decodes_build_no_pixmap_off_the_gui_thread(
+        syntheticGame, pixmapThreads, monkeypatch):
     manager = syntheticGame
     assert threading.current_thread() is threading.main_thread()
+    decodeThreads = []
+    for name in ("LoadSkinImages", "LoadStageImage"):
+        def spy(*args, _decode=getattr(manager, name)):
+            decodeThreads.append(threading.current_thread().name)
+            return _decode(*args)
+        monkeypatch.setattr(manager, name, spy)
 
-    manager.UpdateSkinModel()
-    manager.UpdateStageModel()
-    _deliver(manager)
+    decodes = manager.UpdateSkinModel() + manager.UpdateStageModel()
+    deliver_decodes(decodes)
 
     assert pixmapThreads.offGui == []
+    # One decode per character and one per stage row of each of the two
+    # stage models (1 + 2 * 2), each on the fan-out lane.
+    assert len(decodes) == len(decodeThreads) == 5
+    assert all(name.startswith("AutonaFanout") for name in decodeThreads)
 
     # Not vacuous: the icons were built (on the GUI thread) and applied.
     assert pixmapThreads.onGui > 0
@@ -168,21 +179,20 @@ def test_icon_workers_build_no_pixmap_off_the_gui_thread(
     assert [item.icon().isNull() for item in withBlank].count(False) == 2
 
 
-def test_worker_payload_is_a_qimage(syntheticGame):
+def test_decode_payload_is_a_qimage(syntheticGame):
     from qtpy.QtGui import QImage, QStandardItem
 
     manager = syntheticGame
     stage = manager.stages["Battlefield"]
     item = QStandardItem()
 
-    generation, returnedItem, image = manager.LoadStageImage(
-        stage, item, 7, progress_callback=None, cancel_event=None)
+    generation, returnedItem, image = manager.LoadStageImage(stage, item, 7)
 
     assert generation == 7
     assert returnedItem is item
     assert isinstance(image, QImage)
     # Scaled to 64px on the long edge, with the source pixels intact. (This
-    # does not prove the image owns its buffer -- the copy() in the worker
+    # does not prove the image owns its buffer -- the copy() in the decode
     # cannot be observed deterministically from here.)
     assert (image.width(), image.height()) == (64, 36)
     assert image.pixelColor(10, 10).green() == 128
@@ -192,8 +202,7 @@ def test_worker_payload_is_a_qimage(syntheticGame):
     allItem = [QStandardItem(), QStandardItem()]
     generation, pairs = manager.LoadSkinImages(
         allAssetData, allItem, None, 3,
-        manager.catalog.Current().biggestCompletePack,
-        progress_callback=None, cancel_event=None)
+        manager.catalog.Current().biggestCompletePack)
 
     assert generation == 3
     assert [pair[0] for pair in pairs] == allItem
@@ -208,11 +217,11 @@ def test_results_for_a_retired_skin_model_are_dropped(syntheticGame):
     manager.UpdateSkinModel()
     retired = manager.skinModels["Mario"]
     # Its results are now queued on the GUI thread but not yet delivered...
-    manager.threadpool.waitForDone()
+    _finishDecodes()
     # ...when the models are rebuilt.
-    manager.UpdateSkinModel()
+    decodes = manager.UpdateSkinModel()
     current = manager.skinModels["Mario"]
-    _deliver(manager)
+    deliver_decodes(decodes)
 
     assert current is not retired
     assert all(item.icon().isNull() for item in _rows(retired))
@@ -225,9 +234,8 @@ def test_results_for_a_retired_stage_model_are_dropped(syntheticGame):
     manager.UpdateStageModel()
     retired = manager.stageModel
     retiredWithBlank = manager.stageModelWithBlank
-    manager.threadpool.waitForDone()
-    manager.UpdateStageModel()
-    _deliver(manager)
+    _finishDecodes()
+    deliver_decodes(manager.UpdateStageModel())
 
     assert manager.stageModel is not retired
     assert all(item.icon().isNull() for item in _rows(retired))
@@ -237,7 +245,7 @@ def test_results_for_a_retired_stage_model_are_dropped(syntheticGame):
 
 def test_a_skin_without_an_asset_gets_the_fallback_icon(syntheticGame):
     """One asset-less skin used to drop the icons of the whole character:
-    the worker opened cancel.svg with PIL (which cannot read SVG) and the
+    the decode opened cancel.svg with PIL (which cannot read SVG) and the
     resulting exception discarded every image of that character."""
     from qtpy.QtGui import QImage, QStandardItem
 
@@ -248,12 +256,11 @@ def test_a_skin_without_an_asset_gets_the_fallback_icon(syntheticGame):
 
     generation, pairs = manager.LoadSkinImages(
         allAssetData, allItem, None, manager._skinIconGeneration,
-        manager.catalog.Current().biggestCompletePack,
-        progress_callback=None, cancel_event=None)
+        manager.catalog.Current().biggestCompletePack)
 
     assert pairs[0][1] is None
     assert isinstance(pairs[1][1], QImage)
 
-    # The GUI-thread slot gives the asset-less skin the cancel icon.
+    # The GUI-thread completion gives the asset-less skin the cancel icon.
     manager.LoadSkinImagesComplete((generation, pairs))
     assert all(not item.icon().isNull() for item in allItem)

@@ -946,6 +946,10 @@
         <translation>This is a destructive operation. Send it?</translation>
     </message>
     <message>
+        <source>The app is shutting down</source>
+        <translation>The app is shutting down</translation>
+    </message>
+    <message>
         <source>Trigger OBS from Autona state</source>
         <translation>Trigger OBS from Autona state</translation>
     </message>
