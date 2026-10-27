@@ -421,8 +421,9 @@ def test_a_socketio_event_a_web_operation_refuses_acks_the_503_body(
     assert ws.get_received() == []
 
 
+# /api/v1/bracket:refresh answered 503 until ADR-005 S3e-8 (the Top 8
+# import is core's now: tests/test_top8_refresh.py).
 @pytest.mark.parametrize("path,body", [
-    ("/api/v1/bracket:refresh", None),
     ("/api/v1/scoreboards/1:load-set", {"setId": "1"}),
     ("/api/v1/scoreboards/1:pull-stream", None),
     ("/api/v1/scoreboards/1/stats:refresh", None),

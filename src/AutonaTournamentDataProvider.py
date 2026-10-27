@@ -22,7 +22,6 @@ class AutonaTournamentDataProviderSignals(QObject):
     get_sets_finished = Signal(list)
     get_stations_finished = Signal(list)
     tournament_phases_updated = Signal(list)
-    tournament_phasegroup_updated = Signal(dict)
     game_changed = Signal(int)
     stream_queue_loaded = Signal(dict)
     sets_data_updated = Signal(dict)
@@ -231,22 +230,55 @@ class AutonaTournamentDataProvider(QObject):
         ])
         self.threadPool.start(worker)
 
-    def GetTournamentPhaseGroup(self, id):
-        if self.provider is None:
-            return
-        worker = Worker(self.provider.GetTournamentPhaseGroup, **{"id": id})
-        worker.signals.result.connect(lambda phaseGroupData: [
-            AutonaTournamentDataProvider.instance.signals.tournament_phasegroup_updated.emit(
-                phaseGroupData)
-        ])
-        self.threadPool.start(worker)
+    def RunWithProvider(self, job, status=None):
+        """Run `job(provider)` on the provider's thread pool: the core's way
+        to the tournament (Top8Service.fetcher, ADR-005 S3e-8).
+
+        The provider is the one loaded now, read once here. `status`, when
+        given, is shown in the footer while the job runs. True if the job
+        was started; False, running nothing, when no tournament is loaded.
+        A started job is always called, exactly once: the status is only a
+        display, and a failure to show it must not skip the job (the Top 8
+        import releases its in-progress flag there, and nothing else
+        would). The job runs off the GUI thread and touches no widget; its
+        errors are logged here.
+        """
+        provider = self.provider
+        if provider is None:
+            return False
+
+        def run():
+            statusManager = token = None
+            try:
+                # Imported here, not at module level: the status manager
+                # builds its signal QObject on import (agent-pitfalls #1).
+                from .Helpers.AutonaStatusManager import AutonaStatusManager
+                statusManager = AutonaStatusManager
+                if status:
+                    token = statusManager.push(status)
+            except Exception:
+                logger.exception("could not show a provider job's status")
+            try:
+                job(provider)
+            except Exception:
+                logger.exception("a tournament provider job failed")
+            finally:
+                if token is not None:
+                    try:
+                        statusManager.pop(token)
+                    except Exception:
+                        logger.exception(
+                            "could not clear a provider job's status")
+
+        self.threadPool.start(run)
+        return True
 
     def GetAnalysisPhaseGroup(self, id, onResult):
         """Analysis-dock-only fetch. Uses the lightweight query so Start.gg
         responses stay well under the timeout budget, and routes the result
-        to a caller-supplied callback instead of the shared
-        tournament_phasegroup_updated signal — this keeps the Bracket dock
-        and StateManager untouched by cross-phase-group probes."""
+        to a caller-supplied callback -- nothing else sees it, and the
+        state (top8.*, which only the core Top 8 import writes) is
+        untouched by cross-phase-group probes."""
         if self.provider is None:
             onResult(None)
             return

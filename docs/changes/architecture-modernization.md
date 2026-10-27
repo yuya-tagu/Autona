@@ -1940,3 +1940,100 @@ S3 の最後。ヘッドレスの実プロセスに対して、Python のスモ�
     - チーム戦（2 人以上）でチーム名を打っている途中に Web / Stream Deck からスコア +1 → Enter → 打ったチーム名が欄に残り、OBS のチーム名（とロゴ）にも出る
   - ヘッドレス（`python main.py --headless`）
     - 上のクルーの Web 操作と `/update-commentary-<N>` が 503 にならず、オーバーレイが変わる
+
+#### S3e-8 Top 8 取り込みの core 化（2026-10-26・PR #235）
+
+Start.gg からの Top 8 の取り込みを、Top 8 パネルから core の `Top8Service` へ移した。パネルのボタン・ホットキー（`refresh_phase_group`）・legacy `/update-bracket`・Socket.IO `update_bracket`・v1 `bracket:refresh` が同じ関数を呼び、パネルを構築せず、ヘッドレスでも動く。パネルは state を描画するだけになった（S3e-2 の実況パネルと同じ型）。外部契約の形（legacy の本文 `"OK"`・Socket.IO の ack・v1 の 202 / 409 のエンベロープとエラーコード・`program_state.json` のキー順・Socket.IO の delta の形）は変えていない。変わったのは応答が出る条件（409 `CONFLICT` が出る期間など）と、ゲームの切り替えで Top 8 のキャラが空になること（下の「外から見える変化」）。移す前の木（cff44408）でパネルのボタン経由の取り込みを録り（Start.gg はモック）、core 版と照合している。
+
+- **実装**
+  - `src/core/Top8Service.py`
+    - `RefreshFromProvider(done=None)`: 取り込みの唯一の入口。すぐに `STARTED`（provider のワーカーで走る）/ `BUSY`（実行中。この要求は捨てる）/ `NO_TOURNAMENT`（大会が無い・fetcher が無い）を返す。`done` は試行の終了時に 1 回（フラグを下ろした後。`BUSY` では呼ばない）
+    - `fetcher`（モジュール属性。`fetcher(job, status)` → 始めたら True）: core は `src` を import しないので、provider への道はシェルが入れる。`bootstrap_core()` が `AutonaTournamentDataProvider.instance.RunWithProvider` を入れる
+    - `ImportFromProvider(provider)`: phases を取得 → `TargetPhaseGroup`（最後の phase のダブルエリミのグループのうち最初の 1 つ。旧パネルの `_resolveTargetPhaseGroup` と同じ規則。id が無ければ None）→ `GetTournamentPhaseGroup` → `ImportPhaseGroup`
+    - `ImportPhaseGroup(data, games=None, countries=None)`: `core/Bracket` → `Top8Model.FromBracket` → 選手ごとに `ResolveImportedPlayer`（国は `CountryCatalog.BasicCountryInfo`、キャラは `GameAssetCatalog.Current()` 1 回のスナップショットから、ゲームの mains の先頭を en_name か codename で引いてコピー）→ `ImportBracket`。解決と書き込みは `StateManager.lock` の中（判断 8 の競合対策）。dict でない・写せないグループは何も書かない
+    - `ForgetCharacters()`: 8 枠のキャラ（スキンはキャラの値に含まれる）を空にする。キャラがある枠だけを、1 保存サイクルで書く。呼ぶのは `GameAssetCatalog.SelectGame` だけ（判断 8）
+    - パネルの編集用に `SetPlayerText(slot, field, text)`（name / sponsor。前後の空白を落とす）/ `SetPlayerCountry` / `SetPlayerCharacter` を足した。どれもその 1 キーだけを、変わったときだけ書く（`StateManager.lock` の中で `SetIfChanged`）。`PublishPlayers`（8 枠の全量 publish）は削除した
+  - `src/core/GameAssetCatalog.py`: `SelectGame` が、state の `game.codename` が空でなく新しい codename と違うときに、writer lock を離した後・自分の `SaveBlock` の中で `Top8Service.ForgetCharacters()` を呼ぶ（判断 8）
+  - `src/core/Bracket.py`（`src/AutonaBracket.py` から移動）: ラウンド名（`matchNames`）を引数で受ける。読んでいた `AutonaLocaleHelper.matchNames` は呼び出し側（`AutonaAnalysisWidget`）が渡す。Top 8 の取り込みはラウンド名を使わない（渡さない）
+  - `src/AutonaTournamentDataProvider.py`: `RunWithProvider(job, status)` を足した（今の provider を 1 回読み、無ければ False。provider のスレッドプールで `job(provider)` を走らせ、その間フッターに `status` を出す。フッターの表示に失敗しても job は必ず 1 回呼ぶ（判断 9）。例外はログ）。Top 8 専用だった `GetTournamentPhaseGroup` ラッパーと `tournament_phasegroup_updated` シグナルを削除した（受け手が無くなった）
+  - `src/AutonaHotkeys.py`: `ConnectActions()` が `refresh_phase_group` を `Top8Service.RefreshFromProvider` に直結する
+  - `src/Autona.py`: `EnsureTop8Panel()` と `RefreshTop8PhaseGroup()`、ホットキーの接続を削除した
+  - `src/AutonaWebOperations.py`: `update_bracket(done=None)` を足した（`RefreshFromProvider` を呼んで答えを返す）
+  - `src/AutonaWebServer.py`: `/update-bracket` と `update_bracket` イベントを `WebOps.update_bracket()` に向けた（本文と ack は旧実装どおり常に `"OK"`）
+  - `src/AutonaApiV1.py`: `bracket:refresh` は provider が無ければ 409 `NOT_READY`、`BUSY` なら 409 `CONFLICT`、始まれば 202。`_HeavyOpGuard` の `bracket` キーは使わなくなった（`tournament` / `game` だけ）
+  - `src/AutonaWebServerActions.py`: `update_bracket` を削除した（残りは公開 13 本）
+  - `src/AutonaTop8Widget.py`: state を描画するパネルにした
+    - 削除: phases のキャッシュ（`_phases` / `_loadQueuedOnPhases` / `UpdatePhases`）・`RefreshPhaseGroup` / `UpdatePhaseGroup`・組み立てのワーカー・`_resolveImportedPlayer`・`_loadFromState` / `_syncPlayersToState`（入力欄から 8 枠を組み直す全量 publish）・`_updating` / `_updatingPhaseGroup`・provider のシグナルの接続
+    - 読み込みボタン → `RefreshFromProvider`。name / sponsor の確定 → `SetPlayerText`（`HeldBackText` の規則で、描画が残した文字は書き戻さない）。国・キャラ・スキン → `SetPlayerCountry` / `SetPlayerCharacter`。表示ラベル・反映・全リセットは従来どおり `Top8Service`
+    - `_RenderFromState`: Bridge の `state_updated`（`['top8'` を含む delta）/ `state_big_change` で `singleShot(0)` に 1 回にまとめ、`QSignalBlocker` で描画する。入力中の欄（テキスト・国 / キャラのコンボ）は飛ばし、離れたら描画する（`focusChanged`）。試合のスコアのスピンは、試合（`top8.matches`）が変わったときだけ描画する（未反映のスコアを選手の編集で消さない）。キャラは、state のキャラがコンボの選択から組めるものと同じなら触らない（選んだスキンを保つ）
+    - 表示ラベルの欄は state の値を文字で出す（既定の「TOP 8」も。旧実装どおり）。操作者が空にして確定した欄だけは空のまま（判断 10）
+    - ゲームの切り替え（`_onGameChanged`）はコンボをシグナルを止めて空にし、描画を予約するだけ（何も書かない。キャラを空にするのは core。判断 8）。国の再ロード（`countriesAboutToReload`）の間は国の書き込みを止め、`countriesUpdated` で state から選び直す
+- **判断と理由**
+  1. **実行中フラグは取り込み 1 回に 1 つで、全入口が共有する**。取り込み全体（phases の取得・グループの取得・組み立て・書き込み）が終わるまで立ち、`finally` で下ろす。実行中の要求はキューせず捨てる（同じものを取りに行くだけなので）。旧 v1 はこのルート専用のフラグで、パネルに取得を頼んだ時点で下ろしていた（取得中に 2 回目を送ると 202 になり取得が 2 本走った。パネルのボタン・ホットキーにはガードが無かった）。TTL は持たない（Start.gg の取得は 1 回 20 秒・指数バックオフで有限に終わり、例外でも `finally` で下ろすため。旧 `_HeavyOpGuard` の TTL 120 秒は「完了の合図が来ない」場合の保険だった）
+  2. **v1 の応答**: provider が無ければ受付前に 409 `NOT_READY`（従来どおり）、実行中は 409 `CONFLICT`、始まれば 202。legacy / Socket.IO は実行中・大会なしでも従来どおり `"OK"`（本文を変えない）
+  3. **phases は毎回取得する**（1 回の取り込みで Start.gg に 2 リクエスト）。旧パネルは大会の読込時に届いた phases をキャッシュしていたため、読込後にできた phase（決勝の phase を後から作る大会）を拾えなかった。core はキャッシュを持たないことで、大会の切り替えや phase の追加で古い対象を引かない
+  4. **Top 8 の取り込みは `tournament_phases_updated` を出さなくなった**。旧パネルは phases が未キャッシュのとき provider のラッパー経由で取得し、そのシグナルでスコアボードの pool 候補・セット選択・分析パネルにも phases を配っていた。これらは大会の読込時に同じシグナルを受け取っているので、取り込みのたびに配り直す必要は無い
+  5. **パネルの編集は 1 欄だけ書く**（S3e-2 判断 2 と同じ）。旧 `_syncPlayersToState` は確定のたびに 8 枠を入力欄から組み直して `top8.players` を丸ごと `Set` しており、パネルがまだ描画していない変更（Web からの取り込み）を古い値で上書きしえた。Socket.IO の delta は葉の単位で出るので形は変わらない（変化なしの確定は何も書かなくなった）。Set のキーは `top8.players` から `top8.players.{N}.{field}` に変わる（`program_state.json` のキー順は既存のキーの上書きなので変わらない）
+  6. **パネルは取り込みでもホットキーでも構築しない**（`EnsureTop8Panel` を削除）。core が state を書き、パネルは開いたときに state を描画する
+  7. **`Bracket` のラウンド名は注入にした**。core は `AutonaLocaleHelper` を読めない。Top 8 の取り込みは `FromBracket` がトポロジだけを読むので名前は要らず、分析パネルだけが渡す
+  8. **ゲームが別のゲームに変わったら、core が Top 8 のキャラを空にする**（2026-10-26 のレビューでのオーケストレータ判断）。理由: 別のゲームのキャラは意味を持たない。パネルを開いていたときの旧挙動とリザルトパネルの挙動に揃う。パネルの表示と state のずれ（コンボは空なのにオーバーレイに前のゲームのアイコンが残る）が根本から無くなる
+     - 条件: state の `game.codename` が空でなく、新しい codename と違うときだけ。選択（catalog の `Current().codename`）ではなく state を見る（大会 URL を消すと選択は忘れるが `game` は残り、キャラはそのゲームのもの）。起動時は `ResetGameState` で `game` が空なので、前回のゲームの復元では消さない（`state.json` に保存した Top 8 は再起動後も残る）。同じゲームの選び直し（スキップ）・mods の再ロードでも消さない
+     - 結線: `game.*` の唯一の書き手 `GameAssetCatalog.SelectGame` から呼ぶ。デスクトップのアセットアダプタとヘッドレスのローダーはどちらもここを通るので、両シェルで同じ挙動になる。切り替えと同じ 1 保存サイクルで、キャラがある枠だけを書く（delta が最小）。observer は使わない（pitfalls #16 も「サービスは observer を購読しない」も踏まない）。catalog の writer は呼ばない。呼ぶのは writer lock を離した後なので、ロックは catalog lock → `StateManager.lock` の一方向のまま（`_Publish` と同じ）。`Top8Service` が catalog を import しているので、catalog は関数の中で import する
+     - 取り込みとの競合: 取り込みは選手の解決と書き込みを `StateManager.lock` の中で行う。切り替えはスナップショットを差し替えてから `ForgetCharacters`（同じロックを取る）を呼ぶので、取り込みが前のゲームで解決していれば、その書き込みの後で空になる。前のゲームのキャラが新しいゲームに残ることはない
+  9. **`RunWithProvider` は、フッターの表示に失敗しても job を必ず 1 回呼ぶ**（レビュー指摘）。この PR の最初の形は、`AutonaStatusManager` の import / `push` が job の前の try の外にあり、そこで例外が出ると job が呼ばれず、Top 8 の実行中フラグが下りないまま、以後の要求がすべて `BUSY`（v1 は 409）になった。表示は表示にすぎないので、失敗はログだけにして job を呼ぶ
+  10. **表示ラベルの欄は、state の値を文字で出す**（レビュー指摘。既定の「TOP 8」も文字で入れる旧実装に戻した）。この PR の最初の形は、state が既定値で欄が空なら空のまま（プレースホルダ）にしており、パネルを開いた直後の欄が空だった。操作者が欄を空にして確定したときだけは、旧実装どおり空のまま（プレースホルダで TOP 8）にする
+- **外から見える変化**（形は同じで、出る条件が変わったもの）
+  - v1 `bracket:refresh` の 409 `CONFLICT` が、取り込みが終わるまで（取得・組み立て・書き込み。Start.gg が遅いと数十秒）返る。旧実装はこのルート専用のフラグを、GUI スレッドがパネルに取得を頼んだ直後に下ろしていたので、409 が出るのは受付からその瞬間までだけで、取得中の 2 回目は 202 になって取得が 2 本走った。フラグを共有するので、パネル・ホットキー・legacy で始めた取り込みの最中も 409 になる
+  - v1 の受付前の確認のあとで大会が外れていた場合は 409 `NOT_READY`（旧実装は 202 を返して何もしなかった）
+  - ヘッドレス: v1 は 503 `UNAVAILABLE` → 202 / 409。legacy `/update-bracket` と Socket.IO `update_bracket` は 503 → `"OK"`
+  - legacy / Socket.IO の `"OK"` は GUI スレッドを待たずに返る（旧実装は `@gui_thread_sync` で、パネルが取得を頼むまで待った）。取り込み中・大会なしでも `"OK"` で、何もしない。旧実装でパネルを構築できなかったときの直接取得（例外で 500 になりえた）は無くなった
+  - パネルのボタンとホットキーは、取り込み中は何もしない（旧実装は押すたびに取得が走った）
+  - ゲームを別のゲームに切り替えると、Top 8 の 8 枠のキャラ（スキン）が空になる。パネルを開いているか、どちらのシェルかによらない（旧実装はパネルを構築しているときだけ空になり、未構築なら前のゲームのキャラが残った。判断 8）
+  - Top 8 の取り込みは `tournament_phases_updated` を出さない（判断 4）
+- **pin**
+  - `tests/test_top8_refresh.py`（新規）
+    - golden（`tests/fixtures/top8_refresh/golden.json`、10 シナリオ: リセットありの完了・seed あり・進行中・敗者側未配線・最後の DE phase の最初の DE グループ・ゲーム未ロード・人数不足・空のグループ・DE phase なし・phases なし）を cff44408 のパネルのボタン経由で録画した（取得した phase / グループ・国の照会・Set 列・delta・big change・`top8` 全体）
+    - 同じ golden を、core 直・パネルのボタン（取り込み後のパネルの表示が state と一致することも）・ホットキー（パネル未構築）・ヘッドレスの legacy `/update-bracket`・Socket.IO `update_bracket`・v1 `bracket:refresh` で再生する
+    - 2 回目の要求: 取り込み中は `BUSY`、v1 は 409 `CONFLICT`、legacy は `"OK"`、ホットキーは無視され、取り込みは 1 回・`done` は 1 回だけ。終わればまた始められる
+    - provider の例外・`None` を返す取得 → 何も書かずにフラグを下ろす。大会なし・fetcher なし → `NO_TOURNAMENT`、v1 は 409 `NOT_READY`、legacy は `"OK"`
+    - `TargetPhaseGroup` の規則（最後の DE phase の最初の DE グループ・id なし・list でない）
+    - パネル: 編集がその 1 欄だけを書く・描画（`_onGameChanged`・big change を含む）は何も書かない・キャラとスキンを保つ・未反映のスコアが選手の編集で消えずに反映される・表示ラベルを空にすると既定値の扱い（他の描画でも空のまま）・新しいパネルは既定の表示ラベルを文字で出す（直す前に失敗することを確認した）・実フォーカスで、入力中の欄にその欄自身の取り込みが勝ち、他の欄の描画では打った文字が残る
+    - フッターの表示（`AutonaStatusManager` の import / `push`）が失敗しても、取り込みが走り、フラグが下り、次の要求が始まる（直す前に失敗することを確認した）
+    - ゲームの切り替え: デスクトップのアセットアダプタとヘッドレスのローダーの両方で、起動時の復元・同じゲームの選び直し・再ロードでは残り、別のゲームで空になる（キャラがある枠だけ・切り替えと同じ 1 サイクル）。開いているパネルは空のキャラを表示し、自分では何も書かない
+  - `tests/test_top8_service.py`: `PublishPlayers` のテストを、1 欄ずつの操作のテストに置き換えた（そのキーだけ・空白を落とす・変化なしは書かない・不明な枠 / 欄は何もしない・国・キャラ）。`ForgetCharacters`（キャラがある枠だけ・1 サイクル・何も無ければ書かない）
+  - `tests/test_game_asset_catalog.py`: catalog 単体で判断 8 の規則（起動時の復元・同じゲーム・mods の再ロード・選択を忘れた後の同じゲーム・ロードしない codename では残る／別のゲーム・選択を忘れた後の別のゲームで空になる／切り替えと同じ 1 サイクルで、キャラがある枠の delta だけ）
+  - `tests/test_signal_lifetime.py`: 破棄した Top 8 パネルに、予約済みの描画・delta・big change・`onLoad`・国の再ロードが届かない（接続数が元に戻り、描画は走らず、何も書かず、例外も出ない）
+  - `tests/test_country_helper_model.py`: Top 8 の代役を実パネルに置き換えた（国の再ロードで Top 8 が何も書かず、コンボが state の国を指す）
+  - `tests/test_bootstrap_split.py`: `bootstrap_core()` の手順に `Top8Service.fetcher = ...RunWithProvider` を足した（provider の生成の直後）
+  - `tests/test_core_qt_free.py`: `src.core.Bracket` を core の部品として pin した
+  - `tests/test_web_operations.py` / `tests/test_headless_smoke.py`: `bracket:refresh` を 503 の一覧から外した（ヘッドレスで provider が無ければ 409 `NOT_READY`）
+- **残置 / リスク**
+  - 取り込み中に大会を切り替えると、古い大会の結果が書かれる（取り込みは始めた時点の provider を使う。旧実装も同じ）
+  - 1 回の取り込みで Start.gg へのリクエストが常に 2 本になった（phases を毎回取る。旧実装は phases をキャッシュ済みなら 1 本。判断 3）
+  - ゲームを別のゲームに切り替えると Top 8 のキャラは空になる（判断 8）。最後に選んだゲームと大会のゲームが違うと、起動時に 2 回ロードされ（前回のゲーム → 大会のゲーム）、2 回目で空になる（規則どおり。大会を読み込むとゲームは大会のゲームになる）
+  - 切り替えのスナップショットの差し替えから `ForgetCharacters` までの間（数 µs〜ms）に取り込みが新しいゲームで解決して書くと、そのキャラも空になる（ずれは残らないが、取り込んだキャラが消える。取り込み直せば入る）
+  - キーが欠けた枠（壊れた保存データ）に 1 欄書くと、そのキーは dict の末尾に足される（旧実装は全量 publish で並びを作り直していた）。今のビルドが書く枠は常に全キーを持つ
+  - パネルは `top8` の delta のたびに `top8` を deep copy して描画する（8 枠と試合 11 件で小さい）
+  - スピン（試合のスコア）は、試合が変わると入力中でも描画で上書きされる（未反映のスコアは取り込み・反映・全リセットで消える。旧実装と同じ）
+- **既存の不具合（報告のみ・未修正）**
+  - `Bracket.UpdateBracket` は winners を losers より先に処理するので、Start.gg の slot に `seedNum` が無いと Grand Final のリセットの選手が解決されないことがある（実データは `seedNum` を持つので影響は小さい。配信事故にはならない）
+  - スキンを選んだキャラは、パネルを作り直す（再起動を含む）とキャラのコンボが空になる（スキンのデータに `en_name` が無く、コンボの行に戻せない。表示だけで state とオーバーレイは正しい）
+- **既存の不具合（修正済み）**
+  - パネルで 1 欄を確定するたびに 8 枠を入力欄から publish していたため、パネルが描画していない Web からの取り込みを古い入力で上書きしえた（判断 5）
+  - パネルの描画（`_loadFromState`）がスキンを毎回先頭に戻していた（今は state のスキンを選ぶ）
+- **リリースノート案**
+  - ヘッドレス起動（`--headless`）で、Top 8 の Start.gg からの取り込み（`/update-bracket`・API の `bracket:refresh`）が使えるようになった（従来は 503）
+  - Top 8 の取り込み中に、もう一度取り込みを要求しても二重に取得しなくなった（API は 409 `CONFLICT`）
+  - Top 8 の取り込みが、大会の読込後に作られた決勝の phase も拾うようになった
+  - ゲームを切り替えると Top 8 のキャラは空になる（Top 8 パネルを開いていなくても。同じゲームを選び直したとき・再起動したときは残る）
+- **実機確認（オーナー）**
+  - デスクトップ・Top 8 パネル
+    - 大会を読み込んで「Start.gg から読み込む」→ フッターに「TOP 8 を構築中...」が出て、8 枠・試合・OBS の Top 8 オーバーレイが埋まる
+    - パネルを一度も開かずに Ctrl+Shift+P → オーバーレイが埋まり、あとでパネルを開くとその内容が出る
+    - 選手名・スポンサー・国・キャラ・スキンの編集、試合スコアの入力 → 反映・全リセット・表示ラベル（空にすると TOP 8）が今までどおり
+    - 選手名を打っている途中に Web から `/update-bracket` → 欄は打っている文字のまま。欄を離れると取り込んだ名前が出る（打っていた文字は書き戻されない）
+    - スキンを選んだあと別の欄を編集・取り込み → スキンが先頭に戻らない
+    - パネルを開くと、表示ラベルの欄に「TOP 8」（または設定した文字）が入っている
+    - Top 8 にキャラが入った状態で、ゲームを別のゲームに切り替える → パネルを開いていてもいなくても、8 枠のキャラが空になり、OBS の Top 8 のアイコンも消える。同じゲームを選び直す・アプリを再起動する → キャラは残る
+  - Web / Stream Deck: `/update-bracket`・Socket.IO `update_bracket` が `OK` を返して取り込む。v1 `POST /api/v1/bracket:refresh` が 202、取り込み中の 2 回目は 409 `CONFLICT`、大会なしは 409 `NOT_READY`
+  - ヘッドレス（`python main.py --headless`）: 大会を読み込んで `/update-bracket` または `bracket:refresh` → `top8.*` が書かれ、OBS の Top 8 オーバーレイが変わる。`POST /api/v1/game` で別のゲームに切り替える → Top 8 のキャラが空になる

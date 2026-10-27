@@ -318,3 +318,92 @@ def test_a_destroyed_board_stops_writing_its_state_subtree(autonaApp):
     assert autonaApp.get(prefix) is None, (
         "a destroyed board rewrote its state subtree: its connections to the "
         "process-wide singletons were never disconnected")
+
+
+def test_a_destroyed_top8_panel_goes_quiet(autonaApp, monkeypatch):
+    """The Top 8 panel follows the state (ADR-005 S3e-8): it listens to the
+    bridge, the asset adapter, the country helper and the application's
+    focus, and queues its renders on a zero timer. Destroyed with a render
+    still queued, none of that may reach it any more: every connection is
+    gone, the queued pass never runs, nothing is written and nothing
+    raises."""
+    import sys
+
+    from qtpy.QtCore import QCoreApplication, QEvent
+    from qtpy.QtWidgets import QApplication
+
+    from src.AutonaGameAssetManager import AutonaGameAssetManager
+    from src.AutonaTop8Widget import AutonaTop8Widget
+    from src.core import Top8Service
+    from src.core.DictHelper import deep_clone
+    from src.core.StateManager import StateManager
+    from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
+    from src.StateManagerBridge import StateManagerBridge
+    from tests.fixtures.write_recording import WriteRecorder
+
+    bridge = StateManagerBridge.instance
+
+    def counts():
+        return (
+            AutonaGameAssetManager.instance.signals.receivers("2onLoad()"),
+            AutonaCountryHelper.signals.receivers(
+                "2countriesAboutToReload()"),
+            AutonaCountryHelper.signals.receivers("2countriesUpdated()"),
+            bridge.receivers("2state_updated(QVariantMap)"),
+            bridge.receivers("2state_big_change()"),
+            QApplication.instance().receivers(
+                "2focusChanged(QWidget*,QWidget*)"),
+        )
+
+    # The render pass, recorded. Only this one is wrapped: it is reached
+    # through the panel-scoped timer, never through a connection. A wrapped
+    # *connected* slot is not a method Qt can tie to the panel, so it
+    # would stay connected for a reason of the test's own making.
+    renders = []
+    real = AutonaTop8Widget._RenderFromState
+
+    def render(self):
+        renders.append(self)
+        return real(self)
+
+    monkeypatch.setattr(AutonaTop8Widget, "_RenderFromState", render)
+    # A slot that raises does not fail the test by itself: Qt hands the
+    # exception to sys.excepthook.
+    raised = []
+    monkeypatch.setattr(sys, "excepthook",
+                        lambda *exc: raised.append(exc[1]))
+
+    saved = deep_clone(StateManager.Get("top8"))
+    baseline = counts()
+    panel = AutonaTop8Widget()
+    autonaApp.settle()
+    assert all(live > before for live, before in zip(counts(), baseline)), (
+        "the panel was expected to connect to every one of these signals")
+    try:
+        panel._ScheduleRender()               # a pass queued, not yet run
+        if AutonaTop8Widget.instance is panel:
+            AutonaTop8Widget.instance = None
+        panel.setParent(None)
+        panel.deleteLater()
+        QCoreApplication.sendPostedEvents(panel, QEvent.Type.DeferredDelete)
+        del panel
+        renders.clear()
+        assert counts() == baseline
+
+        with WriteRecorder() as recorder:
+            Top8Service.SetPlayerText("1", "name", "After the panel")
+            bridge.state_big_change.emit()
+            AutonaGameAssetManager.instance.signals.onLoad.emit()
+            AutonaCountryHelper.signals.countriesAboutToReload.emit()
+            AutonaCountryHelper.signals.countriesUpdated.emit()
+            autonaApp.settle()
+
+        assert renders == [], "a destroyed Top 8 panel still rendered"
+        assert raised == []
+        assert [key for key, _ in recorder.sets if key.startswith("top8")]             == ["top8.players.1.name"]
+    finally:
+        if saved is None:
+            StateManager.Unset("top8")
+        else:
+            StateManager.Set("top8", saved)
+        autonaApp.settle()

@@ -42,7 +42,10 @@ Locking rules
   call a catalog writer from a state observer.
 - The catalog has no observer channel of its own and must not grow one
   (core services are called, they do not subscribe or publish events --
-  the Qt adapter's `onLoad` signal is the notification).
+  the Qt adapter's `onLoad` signal is the notification). What a switch to
+  another game invalidates elsewhere in the state is called directly by
+  `SelectGame`, outside the writer lock and inside its save block: the
+  Top 8 players' characters (`Top8Service.ForgetCharacters`).
 
 Construction is side-effect free; bootstrap_core() calls `ResetGameState()`
 to publish the empty `game` state, and the Qt adapter drives `ScanGames()`.
@@ -723,6 +726,12 @@ class GameAssetCatalog:
         `progress(done, total)` is called once with done=0 when the load
         actually starts, then per character in two passes. It runs under the
         writer lock (see the module docstring).
+
+        A load that replaces one game with a different one also empties the
+        Top 8 players' characters (``Top8Service.ForgetCharacters``), in the
+        same save cycle. Not on the first load of a session -- `game` is
+        empty then (``ResetGameState``) and the saved Top 8 keeps its
+        characters -- nor on a reload of the same game.
         """
         with StateManager.SaveBlock():
             with self._lock:
@@ -737,10 +746,21 @@ class GameAssetCatalog:
                     logger.warning(f"Unknown game codename: {codename}")
                     return None
 
+                # The game the state shows, not the selection: a cleared
+                # tournament URL forgets the selection (ForgetSelection)
+                # but leaves `game` -- and what was picked for it -- as is.
+                previous = StateManager.Get(f"{schema.GAME_ROOT}.codename")
                 snapshot = self._Build(codename, config, modsActive, progress)
                 self._current = snapshot
                 self._Publish(snapshot)
-                return snapshot
+            if previous and previous != codename:
+                # Outside the writer lock (only the catalog's own work runs
+                # under it), inside the save block: one cycle with the
+                # switch. Imported here because Top8Service imports this
+                # module.
+                from . import Top8Service
+                Top8Service.ForgetCharacters()
+            return snapshot
 
     def _Publish(self, snapshot):
         # Same two writes, in the same order, as the old asset loader.

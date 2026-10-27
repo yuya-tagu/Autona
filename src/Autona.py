@@ -820,12 +820,9 @@ class Window(QMainWindow):
         if getattr(sys, "frozen", False):
             AutonaUpdater.instance.CheckForUpdates(silent=True)
         AutonaHotkeys.instance.UiMounted(self)
-        # Ctrl+Shift+P used to be connected inside AutonaTop8Widget.__init__,
-        # which made the hotkey silently dead until that panel existed. The
-        # panel is lazy now (Step 4b-2), so the connection lives here — the
-        # single owner — and builds the panel on demand.
-        AutonaHotkeys.signals.refresh_phase_group.connect(
-            self.RefreshTop8PhaseGroup)
+        # NOTE: Ctrl+Shift+P (refresh_phase_group) is routed to the core Top 8
+        # import by AutonaHotkeys.ConnectActions() (bootstrap_gui(), ADR-005
+        # S3e-8); it no longer builds the Top 8 panel.
         # NOTE: AutonaPlayerDB.signals.db_updated -> webserver.ws_playerdb is
         # wired in _StartWebServer(); there is no server to push to yet here.
         PlayerDB.instance.LoadDB()
@@ -1164,23 +1161,6 @@ class Window(QMainWindow):
         if current != index and current in self._lazyPanels:
             self._EnsurePanelAt(current)
         return panel
-
-    def EnsureTop8Panel(self):
-        """Build the Top 8 panel if it has not been revealed yet.
-
-        Entry point for the consumers that drive the panel without the user
-        having opened it: the Ctrl+Shift+P hotkey and /bracket:refresh. The
-        class instance is what is returned (None if the build failed), so a
-        caller never gets handed the placeholder widget.
-        """
-        self._EnsurePanelAt(self._panelIndexes["top8"])
-        return AutonaTop8Widget.instance
-
-    def RefreshTop8PhaseGroup(self):
-        """Ctrl+Shift+P: reload the Top 8 from Start.gg, building it first."""
-        panel = self.EnsureTop8Panel()
-        if panel is not None:
-            panel.RefreshPhaseGroup()
 
     # ── Lazy settings / guide dialogs (startup Step 4a) ──────────────────
     # Each of these five dialogs is only reachable from a menu entry, so

@@ -173,8 +173,10 @@ def test_the_extracted_parts_are_checked_as_core_modules():
     # check keeps covering them. ADR-005 S3e-1: the bad-word filter (was
     # Helpers/AutonaBadWordFilter, Qt through AutonaLocaleHelper) and the
     # player DB's data (was AutonaPlayerDB, next to its QStandardItemModel).
-    assert {"src.core.BadWordFilter", "src.core.PlayerDB"} <= set(
-        _core_modules())
+    # ADR-005 S3e-8: the Start.gg bracket model (was src/AutonaBracket, its
+    # round names read from AutonaLocaleHelper -- injected now).
+    assert {"src.core.BadWordFilter", "src.core.PlayerDB",
+            "src.core.Bracket"} <= set(_core_modules())
 
 
 def test_no_core_module_mentions_a_qt_binding():

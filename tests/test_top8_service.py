@@ -87,17 +87,117 @@ def test_the_paths_are_built_from_the_schema():
 
 # ── players ──────────────────────────────────────────────────────────────
 
-def test_publishing_players_writes_the_whole_subtree_in_one_cycle():
+def _seedPlayers():
+    SM.Set(Top8Service.PLAYERS_PATH,
+           {slot: top8.DefaultPlayer() for slot in top8.PLAYER_SLOTS})
+    _settle()
+
+
+def _setsDuring(action):
+    """The keys StateManager.Set was called with while `action` ran."""
+    from unittest.mock import patch
+    keys = []
+    real = SM.Set
+
+    def spy(key, value=None, *args, **kwargs):
+        keys.append(key)
+        return real(key, value, *args, **kwargs)
+
+    with patch.object(SM, "Set", spy):
+        result = action()
+    _settle()
+    return keys, result
+
+
+def test_a_text_edit_writes_only_that_field_trimmed():
+    # Per field since ADR-005 S3e-8: the panel used to republish all eight
+    # players from its inputs on every edit.
+    _seedPlayers()
+    SM.Set("top8.players.2.name", "Bob")
     _settle()
     before = SM.revision
-    players = {slot: top8.DefaultPlayer() for slot in top8.PLAYER_SLOTS}
-    players["1"]["name"] = "Alice"
 
-    Top8Service.PublishPlayers(players)
+    keys, written = _setsDuring(
+        lambda: Top8Service.SetPlayerText("1", "name", "  Alice  "))
 
+    assert written is True
+    assert keys == ["top8.players.1.name"]
     assert SM.Get("top8.players.1.name") == "Alice"
-    assert set(SM.Get(Top8Service.PLAYERS_PATH)) == set(top8.PLAYER_SLOTS)
+    assert SM.Get("top8.players.2.name") == "Bob"
     assert SM.revision == before + 1
+
+
+def test_an_unchanged_field_is_not_written():
+    _seedPlayers()
+    SM.Set("top8.players.1.sponsor", "AA")
+    _settle()
+    keys, written = _setsDuring(
+        lambda: Top8Service.SetPlayerText(1, "sponsor", " AA"))
+    assert written is False and keys == []
+
+
+def test_an_unknown_slot_or_field_writes_nothing():
+    _seedPlayers()
+    keys, _ = _setsDuring(lambda: (
+        Top8Service.SetPlayerText("9", "name", "X"),
+        Top8Service.SetPlayerText("1", "country", "X"),
+        Top8Service.SetPlayerCountry("0", {"code": "JP"}),
+        Top8Service.SetPlayerCharacter("x", {"en_name": "Mario"})))
+    assert keys == []
+
+
+def test_a_country_edit_writes_only_that_slots_country():
+    _seedPlayers()
+    country = {"name": "Japan", "code": "JP"}
+    keys, written = _setsDuring(
+        lambda: Top8Service.SetPlayerCountry("3", country))
+    assert written is True
+    assert keys == ["top8.players.3.country"]
+    assert SM.Get("top8.players.3.country") == country
+    keys, _ = _setsDuring(lambda: Top8Service.SetPlayerCountry("3", None))
+    assert SM.Get("top8.players.3.country") == {}
+
+
+def test_a_character_is_stored_as_the_first_character_slot():
+    _seedPlayers()
+    char = {"en_name": "Mario", "assets": {}}
+    keys, _ = _setsDuring(lambda: Top8Service.SetPlayerCharacter("8", char))
+    assert keys == ["top8.players.8.characters"]
+    assert SM.Get("top8.players.8.characters") == {"1": char}
+    Top8Service.SetPlayerCharacter("8", {})
+    assert SM.Get("top8.players.8.characters") == {}
+
+
+def test_forgetting_the_characters_writes_only_slots_that_have_one():
+    """A game switch: every character goes (the skin with it), in one save
+    cycle, and a slot without one is not written (the smallest delta)."""
+    _seedPlayers()
+    mario = {"en_name": "Mario", "assets": {"icon": "mario_2.png"}}
+    Top8Service.SetPlayerCharacter("2", mario)
+    Top8Service.SetPlayerCharacter("7", {"en_name": "Luigi"})
+    Top8Service.SetPlayerText("2", "name", "Alice")
+    _settle()
+    before = SM.revision
+
+    keys, slots = _setsDuring(Top8Service.ForgetCharacters)
+
+    assert slots == ["2", "7"]
+    assert keys == ["top8.players.2.characters", "top8.players.7.characters"]
+    assert SM.revision == before + 1
+    assert all(SM.Get(f"top8.players.{slot}.characters") == {}
+               for slot in top8.PLAYER_SLOTS)
+    assert SM.Get("top8.players.2.name") == "Alice"
+
+    # Nothing left to forget: no write, no cycle.
+    keys, slots = _setsDuring(Top8Service.ForgetCharacters)
+    assert (keys, slots) == ([], [])
+    assert SM.revision == before + 1
+
+
+def test_forgetting_the_characters_of_a_missing_bracket_writes_nothing():
+    keys, slots = _setsDuring(Top8Service.ForgetCharacters)
+    assert (keys, slots) == ([], [])
+    assert SM.Get(Top8Service.PLAYERS_PATH) is None
 
 
 # ── the phase caption ────────────────────────────────────────────────────

@@ -196,6 +196,15 @@ def bootstrap_core():
     if AutonaTournamentDataProvider.instance is None:
         AutonaTournamentDataProvider.instance = AutonaTournamentDataProvider()
 
+    # ORDER CONSTRAINT: the Top 8 import (core, ADR-005 S3e-8) reaches the
+    # tournament through the provider's thread pool, so it is registered
+    # right after the provider exists and before anything can ask for an
+    # import -- the panel's button, the hotkeys and the web server are all
+    # the shell's, after this function returns. The catalogs the import
+    # resolves players against are read when it runs, not here.
+    from .core import Top8Service
+    Top8Service.fetcher = AutonaTournamentDataProvider.instance.RunWithProvider
+
     # ORDER CONSTRAINT: the tournament metadata writer must exist before the
     # provider above ever emits tournament_data_updated, and before anything
     # that *reads* tournamentInfo.* connects to that signal -- the sidebar

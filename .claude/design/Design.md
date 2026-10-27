@@ -365,8 +365,13 @@ game
 `Window._SeedPanelState()` が起動時に行う（パネルが lazy 構築のため、旧 `AutonaTop8Widget.__init__`
 から移動。§4.1.1）。トポロジーと進出伝播の正本は
 `src/core/Top8Model.py`（FGC 標準ダブルエリミ: Winners 4 名 + Losers 4 名）、
-**`top8.*` への書き込みの正本は `src/core/Top8Service.py`**（headless core Step 5 第 5 弾。
-パネルは選手カードの組み立てと描画のみ）。
+**`top8.*` への書き込みの正本は `src/core/Top8Service.py`**（headless core Step 5 第 5 弾）。
+Start.gg からの取り込み（大会の最後の phase のダブルエリミのグループ → `core/Bracket` → 選手の解決 →
+`ImportBracket`）も `Top8Service.RefreshFromProvider()` が行い、パネル・ホットキー・Web が同じ関数を呼ぶ
+（ADR-005 S3e-8。ヘッドレスでも動く）。パネルは操作を依頼し、state を描画するだけ（入力中の欄は飛ばす）。
+ゲームが別のゲームに変わると、`GameAssetCatalog.SelectGame` が切り替えと同じ保存サイクルで
+`Top8Service.ForgetCharacters()` を呼び、`players.*.characters` を `{}` にする（キャラがある枠だけ。
+起動時の前回ゲームの復元・同じゲームの選び直しでは消さない。両シェル共通）。
 
 ```
 top8
@@ -375,7 +380,7 @@ top8
 │   │                                       5/6=LR1A, 7/8=LR1B)
 │   ├── name / sponsor               W R
 │   ├── country                      W R   ({code, asset} — CountryCatalog.BasicCountryInfo 形式)
-│   └── characters.{K}               W R   (charData: assets 込み)
+│   └── characters.{K}               W R   (charData: assets 込み。別のゲームへの切り替えで {} になる)
 └── matches.{wsf1|wsf2|wf|lr1a|lr1b|lqf1|lqf2|lsf|lf|gf|gf_reset}
     ├── name                         W R   (ラウンド表示名)
     ├── slots                        W R   ([int,int] 選手スロット 1..8 / 0=TBD。
@@ -721,7 +726,7 @@ QSettings に保存された最後の選択に依存し、初期値は先頭ペ�
 | 1.5 | `Stream Settings` | `AutonaStreamSettingsWidget` | 配信先・配信タイトル・配信団体アイコン / サムネイルの登録・配信サムネイル生成。`stream.url` / `title` の書き込みは `AutonaActions.SetStreamUrl` / `SetStreamTitle`（同値なら書かない） | `stream.*` | `stream.*`, `tournamentInfo.*` | — |
 | 2 | `Thumbnail Settings` | `AutonaThumbnailSettingsWidget` | サムネイルテンプレ選択・背景指定・プレビュー・PNG/JPG 保存・クリップボードコピー | `thumbnail_config.*`（SettingsManager） | `score.*`, `tournamentInfo.*`, `thumbnail_config.*` | ✓（条件付き） |
 | 3 | `Result Settings` | `AutonaResultSettingsWidget` | リザルトレイアウト選択・選手入力・プレビュー・PNG/JPG 保存・クリップボードコピー。`result_players` の書き込みは `AutonaActions.PublishResultPlayers` | `result_config.*`, `result_players` | `tournamentInfo.*`, `result_players` | ✓ |
-| 4 | `Top8` | `AutonaTop8Widget` | Top 8 ダブルエリミの選手・試合スコア編集、Start.gg 読み込み、OBS 用 URL 案内・プレビュー。**書き込みの正本は `src/core/Top8Service.py`** | `top8.*` | `top8.*`, `tournamentInfo.*` | ✓ |
+| 4 | `Top8` | `AutonaTop8Widget` | Top 8 ダブルエリミの選手・試合スコア編集、Start.gg 読み込み、OBS 用 URL 案内・プレビュー。**書き込みの正本は `src/core/Top8Service.py`**（Start.gg の取り込みも。パネルは state を描画するだけ。ADR-005 S3e-8） | `top8.*` | `top8.*`, `tournamentInfo.*` | ✓ |
 | 5 | `Scoreboard` | `AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget` | board1=1v1、board2=team、board3=crew のスコア入力・選手編集・セット読み込み | `score.{N}.*` | `score.{N}.*`, `game.*` | ✓ |
 | 6 | `Commentary` | `AutonaCommentaryWidget` | 実況・解説者 12 スロットの編集（役割・コメント・表示トグル）、OBS 用 URL 案内・プレビュー。`commentary` の書き込みは `core/CommentaryService`（Web も同じ。パネルは state を描画するだけ。ADR-005 S3e-2） | `commentary.{1..12}.*` | `commentary.{1..12}.*`, `tournamentInfo.*` | ✓ |
 | 7 | `Statistics` | `AutonaStatsWidget` | 内部 `QTabWidget` で複数ビューを集約（下記 §4.1.0） | （read-only） | `score.{N}.recent_sets`, `last_sets`, `upset_factor` ほか | ✓ |
@@ -1375,7 +1380,7 @@ const themeColor = fc.themeColor || ti.themeColor;
 | **R-Hotkey-4** | アクション通知は `AutonaHotkeysSignals` の Signal 経由（PyQt の signal/slot） |
 | **R-Hotkey-5** | デフォルトのモディファイアは **`Ctrl+Shift+`** プレフィックス（標準ショートカット `Ctrl+S`/`Ctrl+O`/`Ctrl+P`/`Ctrl+R` の食い合いを避けるため） |
 | **R-Hotkey-6** | `SettingsManager.hotkeys.hotkeys_enabled = false` でグローバル無効化できる |
-| **R-Hotkey-7** | **state を書くだけのアクションは `AutonaHotkeys.ConnectActions()` が `AutonaActions` に直結する**（`bootstrap_gui()` から 1 回・プロセス寿命。ADR-005 S3c までは `bootstrap_core()`）。対象ボードは `AutonaActions.ActiveBoard()`（= `SettingsManager.scoreboard.battle_format`）で解決するため、パネル未構築でも動き、作用するのは常に 1 面だけ。パネル操作を伴うアクション（`load_set` はボード、`refresh_phase_group` は Window）だけがウィジェット側に接続を持つ（headless core Step 3 / ADR-004 D2。`swap_teams` は ADR-005 S2c で Actions 直結へ移った。それまでは構築済みの全ボードが受けており、形式切替後は両ボードが入れ替わった。クルー形式ではスワップのホットキーは何もしない。アクティブボードが未構築のときも、旧実装どおり何もしない） |
+| **R-Hotkey-7** | **state を書くだけのアクションは `AutonaHotkeys.ConnectActions()` が `AutonaActions` に直結する**（`bootstrap_gui()` から 1 回・プロセス寿命。ADR-005 S3c までは `bootstrap_core()`）。対象ボードは `AutonaActions.ActiveBoard()`（= `SettingsManager.scoreboard.battle_format`）で解決するため、パネル未構築でも動き、作用するのは常に 1 面だけ。パネル操作を伴うアクション（`load_set` はボード）だけがウィジェット側に接続を持つ（`refresh_phase_group` は ADR-005 S3e-8 から `ConnectActions()` が `Top8Service.RefreshFromProvider` に直結する。それまでは Window が Top 8 パネルを構築して呼んでいた。headless core Step 3 / ADR-004 D2。`swap_teams` は ADR-005 S2c で Actions 直結へ移った。それまでは構築済みの全ボードが受けており、形式切替後は両ボードが入れ替わった。クルー形式ではスワップのホットキーは何もしない。アクティブボードが未構築のときも、旧実装どおり何もしない） |
 
 ### 6.2 デフォルトホットキー一覧
 
@@ -1389,7 +1394,7 @@ const themeColor = fc.themeColor || ti.themeColor;
 | `reset_scores` | `Ctrl+Shift+R` | `reset_scores` | スコアリセット | Actions |
 | `apply_changes` | `Ctrl+Shift+L` | `apply_changes` | 反映（保留中の編集を配信へ公開） | Actions |
 | `swap_teams` | `Ctrl+Shift+S` | `swap_teams` | チーム入れ替え | Actions（構築済みのアクティブボード。S2c〜） |
-| `refresh_phase_group` | `Ctrl+Shift+P` | `refresh_phase_group` | Top 8 の選択中フェーズグループを Start.gg から再取得 | Window |
+| `refresh_phase_group` | `Ctrl+Shift+P` | `refresh_phase_group` | Top 8 を Start.gg から取り込み直す（大会の最後の phase のダブルエリミのグループ） | Top8Service（S3e-8〜。パネル未構築でも動く） |
 
 ### 6.3 命名規約
 

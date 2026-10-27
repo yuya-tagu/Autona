@@ -3,10 +3,11 @@
 What is left here needs a board or panel *widget* to answer: the player
 cards (update_player, load_player_from_tag), the set payloads a board's
 ChangeSetData applies (post_score, set_team_data), the set selection and
-stream-set follow (open_sets, pull_stream_set, load_set), the statistics,
-the thumbnail, and the Top 8 panel. Every operation that is core's moved to
+stream-set follow (open_sets, pull_stream_set, load_set), the statistics
+and the thumbnail. Every operation that is core's moved to
 src/AutonaWebOperations.py, which both shells share (the crew board's
-members and the caster line-up last, with ADR-005 S3e-2); this object
+members and the caster line-up with ADR-005 S3e-2, the Top 8 import with
+S3e-8); this object
 exists only in the desktop shell (the window hands it to the WebServer), and
 in the headless shell the routes behind it answer 503
 (AutonaWebOperations.NotAvailable). It goes in S3e, once these are core
@@ -20,7 +21,6 @@ import orjson
 
 from .Helpers.AutonaQtHelper import gui_thread_sync
 from loguru import logger
-from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 
 
 class WebServerActions(QObject):
@@ -157,38 +157,6 @@ class WebServerActions(QObject):
             return os.path.abspath(thumbnailPath)
         else:
             return None
-
-    @gui_thread_sync
-    def update_bracket(self):
-        # /bracket:refresh — kept for external-macro compatibility. The Top 8
-        # panel resolves the fixed target (the tournament's final double
-        # elimination phase) and re-fetches it, queuing behind a phases fetch
-        # when needed.
-        #
-        # The panel is built on demand rather than left to the fallback below
-        # (startup Step 4b-2): before that step it always existed, so taking
-        # the fallback for an unopened panel would change what this route
-        # does — the raw fetch below emits tournament_phasegroup_updated,
-        # which with no Top 8 panel listening updates nothing. The fallback
-        # stays for the case where the panel cannot be built at all.
-        #
-        # `parent` is the main window (Window._StartWebServer); this runs on
-        # the GUI thread, where the build has to happen.
-        from .AutonaTop8Widget import AutonaTop8Widget
-        panel = AutonaTop8Widget.instance
-        if panel is None:
-            ensure = getattr(self.parent(), "EnsureTop8Panel", None)
-            if ensure is None:
-                logger.warning("[WebServer] EnsureTop8Panel is not available")
-            else:
-                panel = ensure()
-        if panel is not None:
-            panel.RefreshPhaseGroup()
-            return "OK"
-        id = AutonaTournamentDataProvider.instance.provider.GetTournamentPhases()[0].get("groups")[0].get("id")
-        data = AutonaTournamentDataProvider.instance.provider.GetTournamentPhaseGroup(id)
-        AutonaTournamentDataProvider.instance.signals.tournament_phasegroup_updated.emit(data)
-        return "OK"
 
     @gui_thread_sync
     def load_set(self, scoreboard, set=None, no_mains=False):
