@@ -87,8 +87,9 @@ OBS のオーバーレイと `/web`（ブラウザ版）から操作する。**�
   `false` のときだけ行う（キーが無ければ行わない。止める Web 操作は無いので、止めるにはヘッドレスを終了する。選手のクリアの
   後は、取り直した答えは書かれない）。
   オーバーレイ・`/web`・`out/` の出力・Socket.IO の配信は今までどおり
-- **ボードやパネルの画面が要る操作は 503 `UNAVAILABLE`（`not available in headless`）を返す**:
-  セット選択ウィンドウを開く（`scoreboard<N>-open-set`・Socket.IO `open_set`）・サムネイル
+- **503 `UNAVAILABLE`（`not available in headless`）を返すのは、デスクトップの画面が要る 2 つの操作だけ**:
+  セット選択ウィンドウを開く（`scoreboard<N>-open-set`・Socket.IO `open_set`）と、サムネイル
+  （`scoreboard<N>-get-thumbnail-png|jpg`）。ほかの Web 操作（legacy・Socket.IO・`/api/v1`）はすべて動く（ADR-005 S3e-9）
 - 停止: **Ctrl+C / Ctrl+Break / コンソールの閉じるボタン**。`out/` と `user_data/state.json` を書き終えてから終了する。
   タスクマネージャーでの強制終了は書き出しを待たない（直前 1〜5 秒の変更が `state.json` に残らないことがある）
 - デスクトップ版とヘッドレス版は**同時に起動できない**（ポートと書き込み先が同じため）。

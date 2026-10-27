@@ -36,8 +36,8 @@ import logging
 log = logging.getLogger('socketio.server')
 log.setLevel(logging.ERROR)
 # werkzeug's per-request access log (OBS polls many times a second). Set
-# here, beside the server it belongs to: it used to sit in
-# AutonaWebServerActions, which the headless shell never imports (S3c).
+# here, beside the server it belongs to: it used to sit in the web server's
+# actions module, which the headless shell never imported (S3c).
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 class SocketioJson:
@@ -71,12 +71,12 @@ def _build_web_app():
     are registered here explicitly. tests/test_webserver_routes.py pins both
     the resulting route/event ledger and that class-attribute contract.
 
-    Since ADR-005 S3c the handlers call the shared operations
-    (src/AutonaWebOperations.py, `WebOps`) for everything that is core's, and
-    the board-dependent rest through WebServer._board_actions(): the desktop
-    shell's WebServerActions, or -- in the headless shell, which has none --
-    NotAvailable, answered 503 here (the routes) and as the event's ack (the
-    Socket.IO events).
+    The handlers call the shared operations (src/AutonaWebOperations.py,
+    `WebOps`), the same in both shells (ADR-005 S3c; every one since
+    S3e-9). An operation this shell cannot run -- a shell operation it did
+    not register, which is the headless shell's set selection window and
+    thumbnail -- raises NotAvailable, answered 503 here (the routes) and as
+    the event's ack (the Socket.IO events).
     """
     # No Flask static folder (ADR-005 S3a): it served every file below the
     # working directory under /./, beside file_request. file_request is the
@@ -131,9 +131,10 @@ def _build_web_app():
         logger.debug(f"[FLASK] ← {request.method} {request.path} [{response.status_code}]")
         return response
 
-    # A board-dependent operation in the headless shell (ADR-005 S3c): 503 in
-    # the /api/v1 error shape, from every legacy route. /api/v1 answers it
-    # itself (its wrappers turn every exception into an envelope first).
+    # An operation this shell cannot run (ADR-005 S3c; a shell operation the
+    # headless shell did not register, S3e-9): 503 in the /api/v1 error
+    # shape, from every legacy route. /api/v1 answers it itself (its
+    # wrappers turn every exception into an envelope first).
     @app.errorhandler(WebOps.NotAvailable)
     def not_available(error):
         response = jsonify(WebServer.UnavailableBody(error))
@@ -414,15 +415,16 @@ def _build_web_app():
         WebServer.ws_emit('get_swap', WebOps.get_swap(
             info.get("scoreboardNumber", "1")))
 
-    # Opens Set Selector Window
+    # Opens Set Selector Window (a shell operation: the desktop's, 503
+    # headless -- ADR-005 S3e-9)
     @app.route('/scoreboard<scoreboardNumber>-open-set')
     def open_sets(scoreboardNumber):
-        return WebServer._board_actions().open_sets(scoreboardNumber)
+        return WebOps.open_sets(scoreboardNumber)
 
     @ws_on('open_set')
     def ws_open_sets(message):
         info = orjson.loads(message)
-        WebServer.ws_emit('open_set', WebServer._board_actions().open_sets(
+        WebServer.ws_emit('open_set', WebOps.open_sets(
             info.get("scoreboardNumber", "1")))
 
     # Pulls Current Stream Set
@@ -524,11 +526,12 @@ def _build_web_app():
         WebServer.ws_emit('clear_all',
              WebOps.clear_all(info.get("scoreboardNumber", "1")))
         
-    # Get thumbnail
+    # Get thumbnail (a shell operation: the desktop's, 503 headless --
+    # ADR-005 S3e-9)
     @app.route('/scoreboard<scoreboardNumber>-get-thumbnail-<fileFormat>')
     def get_thumbnail(scoreboardNumber, fileFormat):
         if fileFormat.lower() in ["png", "jpg"]:
-            result = WebServer._board_actions().get_thumbnail(scoreboardNumber, fileFormat.lower())
+            result = WebOps.get_thumbnail(scoreboardNumber, fileFormat.lower())
             if result:
                 return send_file(result, mimetype=f"image/{fileFormat.lower()}")
             else:
@@ -879,11 +882,8 @@ class WebServer:
     # every existing caller once __init__ has run.
     app = None
     socketio = None
-    # The board-dependent operations (WebServerActions), handed in by the
-    # desktop shell; None in the headless shell (see _board_actions).
-    actions = None
 
-    def __init__(self, on_start_failed=None, actions=None) -> None:
+    def __init__(self, on_start_failed=None) -> None:
         self._on_start_failed = on_start_failed
         self._serve_lock = threading.Lock()
         self._server = None
@@ -897,11 +897,10 @@ class WebServer:
         if WebServer.app is None:
             WebServer.app, WebServer.socketio = _build_web_app()
 
-        # The desktop window builds its WebServerActions (bound to itself,
-        # for the lazily-built panels, and to the scoreboard dock) and hands
-        # it in; the headless shell has no widget to answer them and passes
-        # nothing (ADR-005 S3c). The server itself no longer knows the dock.
-        WebServer.actions = actions
+        # The server knows no shell: what differs between the desktop and
+        # the headless shell is registered on AutonaWebOperations by the
+        # shell (the board host, the game loader, the shell operations;
+        # ADR-005 S3c / S3e-9), so both build it the same way.
 
         # Through the bridge rather than subscribing to the core channels
         # directly. Both handlers are plain functions, and PySide6 still
@@ -917,14 +916,15 @@ class WebServer:
             WebServer.ws_program_state)
 
         # External Control API (/api/v1/). Added as a thin Blueprint that
-        # reuses the same operations (AutonaWebOperations) and board actions;
-        # existing routes/events are untouched (ADR-001 D3 /
+        # reuses the same operations (AutonaWebOperations); existing
+        # routes/events are untouched (ADR-001 D3 /
         # .claude/design/external-control-api.md §9). Imported lazily here to
-        # keep singleton init order intact (agent-pitfalls #2).
-        from .AutonaApiV1 import api_v1, init_api_v1
+        # keep singleton init order intact (agent-pitfalls #2). Nothing to
+        # hand it: it calls the operations the shell registered on, and no
+        # request can reach it before start() (ADR-005 S3e-9).
+        from .AutonaApiV1 import api_v1
         if "api_v1" not in WebServer.app.blueprints:
             WebServer.app.register_blueprint(api_v1)
-        init_api_v1(WebServer.actions)
 
         # Issue the access token on the first launch (saved to settings.json),
         # so API Settings and "ブラウザ版を開く" have it before anyone asks
@@ -1081,17 +1081,7 @@ class WebServer:
                 del kwargs['json']
             WebServer.socketio.emit(event, *args, **kwargs)
 
-    # ── Board-dependent operations (ADR-005 S3c) ─────────────────────
-
-    @staticmethod
-    def _board_actions():
-        """The board-dependent operations (WebServerActions), or
-        NotAvailable when this shell has no board / panel widget to run
-        them (headless) -- a 503 from the routes, the ack of an event."""
-        actions = WebServer.actions
-        if actions is None:
-            raise WebOps.NotAvailable()
-        return actions
+    # ── Operations this shell cannot run (ADR-005 S3c / S3e-9) ────────
 
     @staticmethod
     def UnavailableBody(error=None):

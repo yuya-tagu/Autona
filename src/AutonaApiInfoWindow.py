@@ -104,7 +104,7 @@ _ERROR_CODES = [
     # The access guard (ADR-005 S3a, src/core/WebAccess.py).
     ("UNAUTHENTICATED", "401", "Token missing or wrong (writes from another device)"),
     ("FORBIDDEN", "403", "Refused browser page (cross-site / another origin)"),
-    # A board-dependent operation in the headless shell (ADR-005 S3c).
+    # A desktop shell operation in the headless shell (ADR-005 S3c / S3e-9).
     ("UNAVAILABLE", "503", "Not available in headless (needs the desktop window)"),
 ]
 

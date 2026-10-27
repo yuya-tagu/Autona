@@ -207,7 +207,6 @@ from .AutonaStatsPreviewWidget import AutonaStatsPreviewWidget
 from .AutonaAnalysisWidget import AutonaAnalysisWidget
 from .AutonaPlayerBrowserWidget import AutonaPlayerBrowserWidget
 from src.AutonaWebServer import WebServer, check_webserver_port
-from .AutonaWebServerActions import WebServerActions
 from .AutonaLayoutPreview import MarkWebServerReady
 # autopep8: on
 
@@ -900,15 +899,13 @@ class Window(QMainWindow):
 
         # The failure callback runs on the server thread; the dialog belongs
         # on the GUI thread, which is where the old queued start_failed
-        # signal delivered it too. The board-dependent operations are the
-        # window's to hand in: they reach the scoreboard dock and, through
-        # this window, the lazily-built panels (startup Step 4b-2); the
-        # headless shell has none (ADR-005 S3c).
+        # signal delivered it too. Nothing else to hand in: the desktop's
+        # side of the web operations (the board host, the game loader, the
+        # shell operations) was registered by bootstrap_gui() (ADR-005
+        # S3e-9).
         self.webserver = WebServer(
             on_start_failed=lambda error: AutonaQtHelper.gui_executor(
-                lambda: self.OnWebServerStartFailed(error)),
-            actions=WebServerActions(
-                parent=self, scoreboard=AutonaScoreboardManager.instance))
+                lambda: self.OnWebServerStartFailed(error)))
         # Probe the very interface the server will bind (LAN vs loopback).
         check_webserver_port(
             self.webserver.port, parent=self, host=self.webserver.host_name)

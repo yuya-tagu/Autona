@@ -32,9 +32,7 @@ class FakeActions:
     """The web operations the routes below call, recorded.
 
     They are src/AutonaWebOperations.py's (the core-direct ones, ADR-005
-    S3c); the fixture puts these in their place there, and hands the object
-    to the server as its board-dependent actions too, so a route that
-    reached for one of those would fail here rather than pass unnoticed.
+    S3c); the fixture puts these in their place there.
     """
 
     def __init__(self):
@@ -70,8 +68,8 @@ def settings(monkeypatch):
 
 @pytest.fixture
 def server(settings, monkeypatch, tmp_path):
-    """The real app + Socket.IO server, the actions faked, cwd = tmp_path."""
-    from src import AutonaApiV1
+    """The real app + Socket.IO server, the web operations it reaches
+    faked, cwd = tmp_path."""
     from src import AutonaWebOperations
     from src.AutonaApiV1 import api_v1
     from src.AutonaWebServer import WebServer, _build_web_app
@@ -81,8 +79,6 @@ def server(settings, monkeypatch, tmp_path):
     for name in ("program_state", "team_scoreup", "reset_scores",
                  "get_games", "get_playerdb"):
         monkeypatch.setattr(AutonaWebOperations, name, getattr(actions, name))
-    monkeypatch.setattr(WebServer, "actions", actions)
-    monkeypatch.setattr(AutonaApiV1, "_actions", actions)
     monkeypatch.setattr(WebServer, "_lan_hosts", (LAN_HOST, LAN_HOST_2))
     monkeypatch.setattr(WebServer, "_refusals", WebAccess.RefusalLog())
 

@@ -6,8 +6,10 @@ OBS overlays and the browser UI (/web) work as they do beside the window,
 and so does every operation that is core's (scores, 反映, colours, display
 options, swap, the clears, best of, the match bar, team names, losers, the
 tournament, the game). With no board, nothing is held: a write is published
-at once -- there is no 反映 button to wait for. What needs a board or panel
-widget answers 503 "not available in headless" (src/AutonaWebOperations.py).
+at once -- there is no 反映 button to wait for. Every web operation runs here
+but the desktop's two shell operations -- the set selection window and the
+thumbnail, which this shell does not register -- and those answer 503 "not
+available in headless" (src/AutonaWebOperations.py, ADR-005 S3e-9).
 
 What the window does at startup and this shell does too, in its own words:
 

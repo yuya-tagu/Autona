@@ -349,9 +349,12 @@ def http(autonaApp, monkeypatch):
 
     app, _socketio = _build_web_app()
     app.register_blueprint(api_v1)
-    actions = autonaApp.actions()
-    monkeypatch.setattr(WebServer, "actions", actions)
-    monkeypatch.setattr(AutonaApiV1, "_actions", actions)
+    if hasattr(autonaApp, "actions"):
+        # The recording tree (before ADR-005 S3e-9) handed the server the
+        # board's actions object; the current one has none to hand.
+        actions = autonaApp.actions()
+        monkeypatch.setattr(WebServer, "actions", actions, raising=False)
+        monkeypatch.setattr(AutonaApiV1, "_actions", actions, raising=False)
     return app.test_client()
 
 

@@ -367,24 +367,12 @@ class _AutonaHarness:
 
     # -- web layer --------------------------------------------------------
 
-    def actions(self):
-        """A WebServerActions bound to the real manager (never started).
-
-        The board-dependent operations (set loading, the thumbnail, ...;
-        the statistics are web() since ADR-005 S3e-5): what the HTTP routes
-        and Socket.IO events that need a widget
-        delegate to, so driving it exercises the same code path as a request
-        without binding a port.
-        """
-        from src.AutonaWebServerActions import WebServerActions
-        return WebServerActions(parent=None, scoreboard=self.manager)
-
     def web(self):
-        """The web operations every route reaches without a widget of its
-        own (src/AutonaWebOperations.py, ADR-005 S3c): the core-direct ones
-        and the S2 operations. Here they run through the desktop's board
-        host (bootstrap_gui() registered it on the real manager), as in the
-        app. A module, called like the actions object: web().swap_teams(1).
+        """The web operations every route reaches (src/AutonaWebOperations
+        .py, ADR-005 S3c; all of them since S3e-9). Here they run through
+        what bootstrap_gui() registered on the real manager -- the desktop's
+        board host and its two shell operations -- as in the app. A module:
+        web().swap_teams(1).
         """
         from src import AutonaWebOperations
         return AutonaWebOperations
@@ -468,9 +456,10 @@ def _autonaRuntime(qapp, tmp_path_factory):
         # widgets (boards, panels), which need the Qt adapters.
         bootstrap_core()
         bootstrap_gui()
-        # Normally done by src/Autona.py at import time. WebServerActions'
-        # @gui_thread_sync methods raise without it, and that module is the
-        # one thing tests must not import (agent-pitfalls #1).
+        # Normally done by src/Autona.py at import time. The @gui_thread_sync
+        # operations (the desktop board host, the shell operations, set_game)
+        # raise without it, and that module is the one thing tests must not
+        # import (agent-pitfalls #1).
         if AutonaQtHelper.gui_executor is None:
             AutonaQtHelper.init_gui_executor()
 

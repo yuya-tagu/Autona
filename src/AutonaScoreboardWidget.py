@@ -239,7 +239,7 @@ class AutonaScoreboardWidget(QWidget):
         #
         # The keys, their defaults and the fields each one hides live in
         # StateSchema.DISPLAY_OPTIONS (headless core Step 2) — they used to be
-        # spelled out here and again in WebServerActions. Only the labels are
+        # spelled out here and again in the web layer. Only the labels are
         # Qt's business, so only they stay. They stay *translated* despite
         # never being rendered because most of these source strings also
         # label visible UI elsewhere (player browser columns, commentary,
@@ -1335,7 +1335,7 @@ class AutonaScoreboardWidget(QWidget):
         # すべての入力値をリセット: clear players, scores, round name / phase /
         # pool, BEST OF and team names in one shot. Values only — the
         # team-mode player-count layout is kept. The Web UI's "全クリア"
-        # (WebServerActions.clear_all) is its counterpart but differs on
+        # (AutonaWebOperations.clear_all) is its counterpart but differs on
         # purpose: it resets the player / character counts and keeps the
         # team names unless that shrinks the roster to one player (ADR-005
         # S2 decision 3). The cleared state still goes through the 反映 gate
@@ -2352,7 +2352,7 @@ class AutonaScoreboardWidget(QWidget):
         AutonaActions.ResetMatch, one save cycle.
 
         Behind the すべての入力値をリセット button (ResetAllInputs, through
-        AutonaActions.ClearBoard) and WebServerActions' reset_match /
+        AutonaActions.ClearBoard) and AutonaWebOperations' reset_match /
         clear_all (legacy REST, Socket.IO and /api/v1 :reset-match /
         :clear), which call the operation directly. A set load does not: see
         ClearScore.

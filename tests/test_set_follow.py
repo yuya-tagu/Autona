@@ -143,18 +143,18 @@ def _goHeadless(app, monkeypatch):
     return host
 
 
-def _server(monkeypatch, actions):
+def _server(monkeypatch, headless):
     """The legacy routes, /api/v1 and Socket.IO as the app registers them;
-    `actions` None is the headless shell's."""
-    from src import AutonaApiV1
+    `headless` takes the desktop's shell operations away (ADR-005 S3e-9:
+    the headless shell registers none)."""
     from src.AutonaApiV1 import api_v1
     from src.AutonaWebServer import WebServer, _build_web_app
 
     app, socketio = _build_web_app()
     app.register_blueprint(api_v1)
-    monkeypatch.setattr(WebServer, "actions", actions)
-    monkeypatch.setattr(AutonaApiV1, "_actions", actions)
-    monkeypatch.setattr(AutonaApiV1, "_initialized", True)
+    if headless:
+        monkeypatch.setattr(WebOps, "openSetSelection", None)
+        monkeypatch.setattr(WebOps, "renderThumbnail", None)
     monkeypatch.setattr(WebServer, "socketio", socketio)
     client = app.test_client()
     client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
@@ -166,7 +166,7 @@ def _server(monkeypatch, actions):
 @pytest.fixture
 def headless(autonaApp, monkeypatch, settings, provider, playerDB):
     host = _goHeadless(autonaApp, monkeypatch)
-    client, ws = _server(monkeypatch, None)
+    client, ws = _server(monkeypatch, headless=True)
     try:
         yield host, client, ws
     finally:
@@ -179,7 +179,7 @@ def headless(autonaApp, monkeypatch, settings, provider, playerDB):
 def desktop(autonaApp, monkeypatch, settings, provider, playerDB):
     board = autonaApp.board(1)
     autonaApp.settle()
-    client, ws = _server(monkeypatch, autonaApp.actions())
+    client, ws = _server(monkeypatch, headless=False)
     return board, client, ws
 
 

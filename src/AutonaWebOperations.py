@@ -1,13 +1,14 @@
-"""The web layer's operations that do not need a board widget (ADR-005 S3c).
+"""The web layer's operations (ADR-005 S3c), the same in both shells.
 
 What the legacy routes, the Socket.IO events and /api/v1 call for every
-operation that is core's. They used to be methods of `WebServerActions`
-(which needed the scoreboard dock to exist); that class keeps only the
-operations a board or panel widget still answers -- the "board-dependent"
-ones, listed in docs/changes/architecture-modernization.md (S3c-2) and
-removed in S3e.
+operation. They used to be methods of the web server's actions class, which
+needed the scoreboard dock to exist; ADR-005 S3c moved what was core's here,
+S3e-1..8 moved the rest as it became core's ("board-dependent" in
+docs/changes/architecture-modernization.md, S3c-2), and S3e-9 deleted the
+class. What is left of the desktop's is two shell operations, which the
+shell registers (the last item below).
 
-Two kinds live here:
+These kinds live here:
 
 - core-direct: read or write core on the calling (Flask / Socket.IO) thread,
   the same in both shells -- the scores, 反映, the colours, the display
@@ -51,6 +52,13 @@ Two kinds live here:
   pull-stream -- core's SetFollowService, through the board host like the
   S2 ones, in both shells. The fetches and the 5-second poll are the
   shell's (SetFollowService.fetcher) and answer into the state later.
+- the shell operations (ADR-005 S3e-9): opening a board's set selection
+  window and rendering its thumbnail. Not core's: one opens a window, the
+  other renders with the board's WebEngine, so they need the desktop's
+  QApplication and widgets. The desktop registers its scoreboard dock's
+  (`openSetSelection` / `renderThumbnail`, bootstrap_gui(); run on its GUI
+  thread), the headless shell registers none, and they raise NotAvailable:
+  503. No other operation needs a shell.
 
 Imports nothing that builds anything; the registrations are plain module
 attributes, filled in by the shell (agent-pitfalls #1).
@@ -85,7 +93,9 @@ NOT_AVAILABLE_MESSAGE = "not available in headless"
 
 
 class NotAvailable(Exception):
-    """The operation needs a board or panel widget, and this shell has none.
+    """This shell cannot run the operation: a shell operation it did not
+    register (the headless shell, ADR-005 S3e-9), or a board other than
+    1/2/3, which no shell has.
 
     The web server answers it with 503 in the /api/v1 error shape (the
     legacy routes and the Socket.IO acks too); /api/v1 maps it to its
@@ -283,6 +293,15 @@ def current_board_host():
 # (bootstrap_gui()), the headless shell its catalog-only loader
 # (src/headless.py). None: nothing can load a game.
 loadGameByCodename = None
+
+# The shell operations (ADR-005 S3e-9; see open_sets / get_thumbnail): the
+# desktop registers its scoreboard dock's (bootstrap_gui()), the headless
+# shell none. None: the operation answers NotAvailable (503).
+# Open board `scoreboard`'s set selection window: (scoreboard) -> "OK".
+openSetSelection = None
+# Render board `scoreboard`'s thumbnail: (scoreboard, file_format) -> the
+# image's absolute path, or None when it failed.
+renderThumbnail = None
 
 
 def _board(scoreboard):
@@ -1326,3 +1345,27 @@ def pull_stream_set(scoreboard):
         return "OK"
 
     return host.Run(run)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# The shell operations (ADR-005 S3e-9)
+# ═══════════════════════════════════════════════════════════════════════
+# What only the desktop's windows do (see the module docstring), through
+# what the shell registered (openSetSelection / renderThumbnail). With
+# nothing registered -- the headless shell -- NotAvailable: the legacy
+# routes' 503, the 503 body as the Socket.IO event's ack. /api/v1 has
+# neither operation.
+
+def open_sets(scoreboard):
+    """Open board `scoreboard`'s set selection window: "OK"."""
+    if openSetSelection is None:
+        raise NotAvailable()
+    return openSetSelection(scoreboard)
+
+
+def get_thumbnail(scoreboard, file_format):
+    """Render board `scoreboard`'s thumbnail as `file_format` ("png" /
+    "jpg"): the image's absolute path, or None when it failed."""
+    if renderThumbnail is None:
+        raise NotAvailable()
+    return renderThumbnail(scoreboard, file_format)

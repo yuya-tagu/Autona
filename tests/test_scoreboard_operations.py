@@ -710,14 +710,15 @@ def test_reset_score_zeroes_scores_and_keeps_players(autonaApp):
     assert _playerName(autonaApp, 1) == "KEEP ME"
 
 
-# ── the WebServerActions layer ───────────────────────────────────────────
+# ── the web operations layer ─────────────────────────────────────────────
 #
-# clear_all / reset_match reach for the best_of spinbox, which the 1v1 and
+# clear_all / reset_match reached for the best_of spinbox, which the 1v1 and
 # team boards reparent out of `scoreColumn` while they are built. Looking it
 # up with scoreColumn.findChild() therefore returned None and raised
 # AttributeError -- an HTTP 500 on /scoreboard<N>-clear-all and on the API's
-# :clear / :reset-match (fixed in 019d85f9). These run through the real
-# actions object so that regression cannot come back unnoticed.
+# :clear / :reset-match (fixed in 019d85f9). These run through the real web
+# operations (AutonaWebOperations; the web server's actions class until
+# ADR-005 S3c / S3e-9) so that regression cannot come back unnoticed.
 
 @pytest.mark.parametrize("boardNumber", [1, 2])
 def test_reset_match_clears_score_and_best_of(autonaApp, boardNumber):
@@ -1258,7 +1259,7 @@ def test_a_match_bar_edit_is_exactly_one_save_cycle(autonaApp):
 # ── the match bar: an operator's reset vs. a set load's pre-pass (S-17) ──
 #
 # Two clears that used to be one function. The reset entry points -- the
-# すべての入力値をリセット button, and WebServerActions' reset_match /
+# すべての入力値をリセット button, and the web operations' reset_match /
 # clear_all, which every legacy route, Socket.IO event and /api/v1
 # :reset-match / :clear delegates to -- blank round name / phase / pool.
 # The clear NewSetSelected runs before a new set arrives must not:

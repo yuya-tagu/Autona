@@ -413,8 +413,10 @@ def bootstrap_gui():
     # both above). The S2 operations run through the dock -- the board built
     # first and held for 反映, on the GUI thread, the field being typed in
     # committed, the crew board's own operations -- and a game is loaded
-    # through the adapter, so its Qt models follow. The defaults are the
-    # headless shell's (no board; no loader until it registers its own).
+    # through the adapter, so its Qt models follow. The two shell operations
+    # (the set selection window, the thumbnail) are the dock's too (ADR-005
+    # S3e-9). The defaults are the headless shell's (no board; no loader
+    # until it registers its own; no shell operation: 503).
     # Before the web server exists (Window._StartWebServer), so no request
     # can reach the defaults on the desktop (ADR-005 S3c).
     from . import AutonaWebOperations
@@ -422,6 +424,10 @@ def bootstrap_gui():
         AutonaScoreboardManager.instance)
     AutonaWebOperations.loadGameByCodename = (
         AutonaGameAssetManager.instance.LoadGameByCodename)
+    AutonaWebOperations.openSetSelection = (
+        AutonaScoreboardManager.instance.OpenSetSelection)
+    AutonaWebOperations.renderThumbnail = (
+        AutonaScoreboardManager.instance.RenderThumbnail)
 
     # ORDER CONSTRAINT: a game load's roster (players per team, characters
     # per player), the wiring the headless shell makes too. On gameLoaded,

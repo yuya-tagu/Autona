@@ -3,8 +3,8 @@
 Until now the answer to "what is in the state?" lived in whichever widget
 happened to write a key first: the held-subtree exemption list was a class
 attribute of ``AutonaScoreboardWidget``, the display-option key set was
-spelled out twice (once as that widget's ``elements``, once as
-``WebServerActions._DISPLAY_OPTION_KEYS``), and the launch seeds were split
+spelled out twice (once as that widget's ``elements``, once in the web
+server's actions class), and the launch seeds were split
 between two widget constructors and their manager. This module is the single
 place those definitions live now (ADR-004 D3, headless core Step 2), and like
 everything under ``src/core`` it must stay Qt-free -- so a headless run seeds

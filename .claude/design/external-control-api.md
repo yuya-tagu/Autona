@@ -9,7 +9,7 @@
 - 操作棚卸し・分類: [../../docs/architecture/external-control-api-candidates.md](../../docs/architecture/external-control-api-candidates.md)
 - 同期/リビジョン規約の正本: [Design.md §3.2 同期経路の規約](Design.md)
 - API 実装本体: [../../src/AutonaApiV1.py](../../src/AutonaApiV1.py)
-- 既存ルート実装: [../../src/AutonaWebServer.py](../../src/AutonaWebServer.py) / [../../src/AutonaWebServerActions.py](../../src/AutonaWebServerActions.py)
+- 既存ルート実装: [../../src/AutonaWebServer.py](../../src/AutonaWebServer.py) / [../../src/AutonaWebOperations.py](../../src/AutonaWebOperations.py)（両シェル共通の Web 操作。旧 `AutonaWebServerActions.py` は ADR-005 S3e-9 で削除）
 
 > 凡例: **MUST**/**SHOULD**/**MAY**（RFC2119 相当）。`TBD` は実装フェーズで確定。
 
@@ -20,9 +20,11 @@
 - Autona の操作を外部コントローラ（Companion / Stream Deck / その他）から**安全に**呼び出すための汎用 API（ADR-001 D1）。
 - 外部コントローラは**薄いクライアント**。状態ロジックを持たず本 API を叩くだけ（D2）。
 - 本 API は既存 Flask+SocketIO サーバーに **`/api/v1/` 名前空間として薄く追加**し、内部は
-  **既存 `WebServerActions` を再利用**する（D3）。新サーバー/プロセスは作らない。
-- 状態変更は**必ず `WebServerActions` → Qt Signal → `StateManager` の単一経路**を通す（D4・不変条件）。
-  StateManager をバイパスしない。GUI スレッド直列化（`@gui_thread_sync`）を尊重する。
+  **既存ルートと同じ Web 操作（`AutonaWebOperations`）を再利用**する（D3。ADR-005 S3c までは `WebServerActions`）。
+  新サーバー/プロセスは作らない。
+- 状態変更は**必ず Web 操作 → core（`AutonaActions` / ドメインサービス）→ `StateManager` の単一経路**を通す
+  （D4・不変条件。ADR-005 で Qt Signal の中継は無くなった）。StateManager をバイパスしない。デスクトップの
+  ボードホストが GUI スレッドに直列化する操作（ADR-005 S3c）はそれを尊重する。
 
 ### 1.1 初回スコープ（D6）
 - 読み取り（§5）/ 安全操作（§6）/ 危険操作（§7・ガード必須）を**初回から一括提供**。
@@ -81,7 +83,7 @@
 ### 2.4a 状態の二重書き込み（SettingsManager 併用・許容）
 - D4 の不変条件「状態変更は `StateManager` 単一経路」は **`score.*` 等のランタイム状態**に適用される。
 - 一部の Action は **`SettingsManager` にも書く**ことを**許容する**（PdM 確認済）:
-  - `load_tournament` → `SettingsManager.Set("TOURNAMENT_URL")` ＋ シグナル emit（[:447](../../src/AutonaWebServerActions.py)）
+  - `load_tournament` → `SettingsManager.Set("TOURNAMENT_URL")` ＋ シグナル emit（[`AutonaWebOperations.load_tournament`](../../src/AutonaWebOperations.py)）
 - 本 API はこれらも**既存 Action へ委譲するだけ**（新たに Settings/State を直接書かない）。
   「StateManager をバイパスして state を直接書かない」原則は維持される。
 
@@ -107,7 +109,7 @@
 | `CONFLICT` | 409 | 重い操作が実行中（多重起動ガード・§2.8） |
 | `NOT_READY` | 409 | 前提未充足（大会/試合未ロードで provider 不在 等・§3） |
 | `UPSTREAM_TIMEOUT` | 504 | Start.gg 等の外部依存がタイムアウト（agent-pitfalls #11） |
-| `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、ボード / パネルのウィジェットが要る操作。v1 にはもう無く（`:load-set`・`:pull-stream` は ADR-005 S3e-7 まで）、legacy / Socket.IO のセット選択ウィンドウを開く操作（`scoreboard<n>-open-set`・`open_set`）とサムネイルだけ。message は `not available in headless`。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。セット読込（`:load-set`・legacy `load-set`・Socket.IO `load_set`）・配信中のセットの取り込み（`:pull-stream`・legacy `pull-stream`・Socket.IO `pull_stream`）・legacy `POST /score`（Socket.IO `score`）も ADR-005 S3e-7 から core の操作（`SetFollowService`）で、どちらの起動形態でも動く。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。Top 8 の取り込み（`bracket:refresh`・legacy `/update-bracket`・Socket.IO `update_bracket`）も ADR-005 S3e-8 から core の操作（`Top8Service.RefreshFromProvider`）で、どちらの起動形態でも動く。選手の編集（`PATCH .../players/{p}`・legacy `update-team`・Socket.IO `update_team`）とタグからの選手の読込（legacy `load-player-from-tag`・Socket.IO `load_player_from_tag`）も ADR-005 S3e-4 から core の操作（`PlayerService.ApplyData`）で、どちらの起動形態でも、state にあるスロットに対して動く。統計（`stats:refresh`・legacy `/scoreboard<n>-stats-*`・Socket.IO `stats_*`）も ADR-005 S3e-5 から core の操作（`StatsService`）で、どちらの起動形態でも動く。ボード 1 / 2 の人数 / キャラ数（`PATCH set` の `players` / `characters`・legacy `scoreboard<n>-set`・Socket.IO、`:clear` の人数・キャラ数のリセット）も ADR-005 S3e-6 から core の操作（`AutonaActions.SetRoster`）で、どちらの起動形態でも動く（それまではヘッドレスでこれだった）。ボード 1 / 2 / 3 以外の人数 / キャラ数（legacy `scoreboard<n>-set`・Socket.IO `set`）は、起動形態によらずこの 503 で、何も書かずに断る（それまでデスクトップは 500）。同じボードへの set フィールド（phase / pool / match / best of / losers。legacy `scoreboard<n>-set`・`update-team`・Socket.IO）も ADR-005 S3e-7 から同じ 503（それまでデスクトップは 500）。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
+| `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、デスクトップの画面が要るシェル操作 2 本だけ（ADR-005 S3e-9）: legacy / Socket.IO のセット選択ウィンドウを開く操作（`scoreboard<n>-open-set`・`open_set`）とサムネイル（`scoreboard<n>-get-thumbnail-png|jpg`）。v1 にはもう無い（`:load-set`・`:pull-stream` は ADR-005 S3e-7 まで）が、コードは契約として残す。message は `not available in headless`。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。セット読込（`:load-set`・legacy `load-set`・Socket.IO `load_set`）・配信中のセットの取り込み（`:pull-stream`・legacy `pull-stream`・Socket.IO `pull_stream`）・legacy `POST /score`（Socket.IO `score`）も ADR-005 S3e-7 から core の操作（`SetFollowService`）で、どちらの起動形態でも動く。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。Top 8 の取り込み（`bracket:refresh`・legacy `/update-bracket`・Socket.IO `update_bracket`）も ADR-005 S3e-8 から core の操作（`Top8Service.RefreshFromProvider`）で、どちらの起動形態でも動く。選手の編集（`PATCH .../players/{p}`・legacy `update-team`・Socket.IO `update_team`）とタグからの選手の読込（legacy `load-player-from-tag`・Socket.IO `load_player_from_tag`）も ADR-005 S3e-4 から core の操作（`PlayerService.ApplyData`）で、どちらの起動形態でも、state にあるスロットに対して動く。統計（`stats:refresh`・legacy `/scoreboard<n>-stats-*`・Socket.IO `stats_*`）も ADR-005 S3e-5 から core の操作（`StatsService`）で、どちらの起動形態でも動く。ボード 1 / 2 の人数 / キャラ数（`PATCH set` の `players` / `characters`・legacy `scoreboard<n>-set`・Socket.IO、`:clear` の人数・キャラ数のリセット）も ADR-005 S3e-6 から core の操作（`AutonaActions.SetRoster`）で、どちらの起動形態でも動く（それまではヘッドレスでこれだった）。ボード 1 / 2 / 3 以外の人数 / キャラ数（legacy `scoreboard<n>-set`・Socket.IO `set`）は、起動形態によらずこの 503 で、何も書かずに断る（それまでデスクトップは 500）。同じボードへの set フィールド（phase / pool / match / best of / losers。legacy `scoreboard<n>-set`・`update-team`・Socket.IO）も ADR-005 S3e-7 から同じ 503（それまでデスクトップは 500）。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
 | `INTERNAL` | 500 | 想定外の内部例外 |
 
 ### 2.7 操作ログ（D7・A-1）
@@ -121,7 +123,7 @@
 - **重い操作**（`POST /tournament`・`POST /game`・`POST /bracket:refresh`）は**同期完了を待たず
   `202 Accepted` を返す（MUST）**。理由: 委譲先が同期ブロックしうる（例: `set_game` は
   `@gui_thread_sync` ＋ `LoadGameByCodename(async_mode=False)` で**アセット再ロード完了までブロック**、
-  [AutonaWebServerActions.py:202](../../src/AutonaWebServerActions.py)）。同期で返すと HTTP がタイムアウトする。
+  [`AutonaWebOperations.set_game`](../../src/AutonaWebOperations.py)）。同期で返すと HTTP がタイムアウトする。
 - **完了確認はクライアントが WS 購読（§4）で行う**（`program_state_update` の `revision` 進行を観測）。
   202 レスポンスは受付のみを示し、`revision` は未確定（省略可）。
   ```json
@@ -317,7 +319,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - `teamName`（2026-10-21 追加・Web UI 移行用）: 旧 `-set?teamName=&team=` 相当。`teamName` は別呼び出しで最後に適用する
   （他のキー → `losers` → `teamName`。旧クエリと同じ適用順）。
   チーム名は**状態側のチーム**（`team{t}column`）に書く。
-- `losers` も**状態側のチーム**。`set_route` には渡さず `WebServerActions.set_team_losers` → `AutonaActions.SetTeamLosers` を呼ぶ（ADR-005 S2b〜。
+- `losers` も**状態側のチーム**。`set_route` には渡さず `AutonaWebOperations.set_team_losers` → `AutonaActions.SetTeamLosers` を呼ぶ（ADR-005 S2b〜。
   それ以前は set 形式の `set_route` の losers をスワップ状態で補正して委譲していた）。フラグとそのチームの選手名の
   ` [L]`（`mergedName` / `mergedOnlyName`）を書く。旧経路（`ChangeSetData` ペイロード）の副作用は外部挙動として維持する:
   `match_en` を空にする（`SetLoadService.ApplyMatchInfo({})` をフラグと同じ保存サイクルで適用。フラグが変わらなくても空にする）、
@@ -486,9 +488,12 @@ HTTP/1.1 409 Conflict
 
 ## 9. 実装ガイド（既存パターン遵守）
 
-- **配置**: `/api/v1` ルート定義は既存 `AutonaWebServer.WebServer` に追加し、内部は `WebServer.actions.*`（既存 `WebServerActions`）を呼ぶ。
+- **配置**: `/api/v1` ルート定義は既存 `AutonaWebServer.WebServer` に Blueprint で追加し、内部は既存ルートと同じ
+  `AutonaWebOperations` のモジュール関数を呼ぶ（ADR-005 S3c。それまでは `WebServer.actions.*` = `WebServerActions`。
+  S3e-9 で削除し、`init_api_v1(actions)` も無くなった）。
   状態ロジックを新規に書かない（D4）。エンベロープ整形は本 API 層の薄いヘルパーに集約。
-- **GUI スレッド**: 委譲先 Action の多くは `@gui_thread_sync`。本 API も既存同様 QThread 上で呼べばよい（既存 Web ルートと同じ呼び方）。
+- **スレッド**: Web 操作はリクエストのスレッドから呼べばよい（既存 Web ルートと同じ呼び方）。GUI スレッドが要るもの
+  （デスクトップのボードホスト・シェル操作・`set_game`）は操作の側が marshal する。
 - **既存ルートを壊さない**: 既存ハンドラ・Socket.IO イベントは変更しない（regression 禁止・docs/product/features.md「リグレッション禁止リスト」）。
 - **二重定義に追従不要**: 本 API は HTTP のみ提供（WS フィードバックは §4 の既存購読で足りる）。Socket.IO 側に `/api/v1` 相当は作らない。
 - **ポート**: 既存 `general.webserver_port`（既定 5000）を共有。新ポートは開かない。

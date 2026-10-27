@@ -144,9 +144,11 @@ def test_bootstrap_gui_steps_and_their_order():
     # PlayerDB wirings follow the adapter they connect to (the model switched
     # on before the first SetupModel), and the hotkeys are routed to
     # AutonaActions right after they exist. The web operations' desktop
-    # registrations come after the dock and the adapter they point at, and
-    # the game load's roster last: ahead of every board and its cards, run
-    # through the board host registered just above (ADR-005 S3e-6).
+    # registrations (the board host, the game loader, and the two shell
+    # operations -- ADR-005 S3e-9) come after the dock and the adapter they
+    # point at, and the game load's roster last: ahead of every board and
+    # its cards, run through the board host registered just above (ADR-005
+    # S3e-6).
     assert _steps("bootstrap_gui") == [
         "bootstrap_core()",
         "AutonaHotkeys()",
@@ -167,6 +169,10 @@ def test_bootstrap_gui_steps_and_their_order():
         "AutonaScoreboardManager.instance)",
         "AutonaWebOperations.loadGameByCodename"
         " = AutonaGameAssetManager.instance.LoadGameByCodename",
+        "AutonaWebOperations.openSetSelection"
+        " = AutonaScoreboardManager.instance.OpenSetSelection",
+        "AutonaWebOperations.renderThumbnail"
+        " = AutonaScoreboardManager.instance.RenderThumbnail",
         "wire_game_roster(AutonaGameAssetManager.instance.signals.gameLoaded)",
     ]
 
@@ -391,6 +397,8 @@ report({
         is not None,
     "board_host": type(AutonaWebOperations.boardHost).__name__,
     "game_loader": AutonaWebOperations.loadGameByCodename is not None,
+    "shell_operations": [AutonaWebOperations.openSetSelection is not None,
+                         AutonaWebOperations.renderThumbnail is not None],
     "player_db_model": AutonaPlayerDB.modelEnabled,
     "in_gui_thread_main": in_gui_thread(),
     "in_gui_thread_worker": on_worker(in_gui_thread),
@@ -407,9 +415,11 @@ def test_bootstrap_core_runs_under_a_bare_qcoreapplication(tmp_path):
     # Nothing is wired to the (absent) game asset adapter.
     assert result["selector_registered"] is False
     # The web operations' defaults: no board, no game loader (the headless
-    # shell registers its own), and no player DB model (QtGui).
+    # shell registers its own), no shell operation (the desktop's alone,
+    # ADR-005 S3e-9), and no player DB model (QtGui).
     assert result["board_host"] == "BoardHost"
     assert result["game_loader"] is False
+    assert result["shell_operations"] == [False, False]
     assert result["player_db_model"] is False
     # The core bad-word filter got AutonaLocaleHelper's locale and country
     # tables (ADR-005 S3e-1), and the player DB its db_updated relay.
@@ -492,6 +502,11 @@ report({
         is AutonaScoreboardManager.instance,
     "game_loader": AutonaWebOperations.loadGameByCodename
         == adapter.LoadGameByCodename,
+    "shell_operations": [
+        AutonaWebOperations.openSetSelection
+        == AutonaScoreboardManager.instance.OpenSetSelection,
+        AutonaWebOperations.renderThumbnail
+        == AutonaScoreboardManager.instance.RenderThumbnail],
     "player_db_model": AutonaPlayerDB.modelEnabled,
     "in_gui_thread_main": in_gui_thread(),
     "in_gui_thread_worker": on_worker(in_gui_thread),
@@ -511,6 +526,7 @@ def test_bootstrap_gui_builds_the_adapters_and_resets_the_score_root(
     assert result["board_host"] == "DesktopBoardHost"
     assert result["board_host_manager"] is True
     assert result["game_loader"] is True
+    assert result["shell_operations"] == [True, True]
     assert result["player_db_model"] is True
     assert result["in_gui_thread_main"] is True
     assert result["in_gui_thread_worker"] is False

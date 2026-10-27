@@ -4,7 +4,6 @@ paths:
   - "src/StateManager.py"
   - "src/StateManagerBridge.py"
   - "src/AutonaWebServer.py"
-  - "src/AutonaWebServerActions.py"
   - "src/AutonaWebOperations.py"
   - "src/headless.py"
   - "src/Helpers/**"
@@ -221,7 +220,8 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
     実行する（GUI スレッドに並ばないので、`clear_all` や v1 `PATCH set` の途中に別の要求が混ざらないように。
     ロックの中でメインスレッドを待たない・`StateManager.lock` を持ったまま取らない。待つもの（`savePlayerToDb` の選手 DB への
     書き込み: `PlayerDB.changed` → `AutonaPlayerDB.SetupModel` がメインスレッドで走る）は `Run` を抜けてから行う。S3e-4 レビュー）。ボードが無いので held にならず即時公開
-    （反映ボタンが無いのでこれが正しい）。ウィジェットが要るものは `NotAvailable`（503）。ボード 1 / 2 の
+    （反映ボタンが無いのでこれが正しい）。ウィジェットが要るもの（`Widget()`。ボード 1〜3 以外 = どのシェルにも無いボード。
+    デスクトップはそこで 500）は `NotAvailable`（503）。ボード 1 / 2 の
     人数 / キャラ数（`set_route` の `players` / `characters`・`clear_all`）とゲームのロードの既定人数も、
     S3e-6 からは両シェルで同じ core の操作（ゲームのロードは `bootstrap.wire_game_roster`）。統計は両シェルとも
     core が取り直す（ADR-005 S3e-5。`PlayerLoaded` は何もしない）
@@ -335,20 +335,21 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
 
 - `AutonaWebServer.WebServer` は素の Python クラスで、`start()` が `threading.Thread`（daemon）で werkzeug の threaded サーバー（`make_server(threaded=True).serve_forever()`。旧 `socketio.run()` が threading モードで組むものと同じ）を回す（ADR-005 S3c。旧: QThread）。`stop(timeout)` が `shutdown()` で止める（旧 `QThread.terminate()` の強制終了は廃止）。起動失敗（bind 不能など）はコンストラクタの `on_start_failed(error: str)` コールバックにサーバースレッドから通知する（デスクトップは `gui_executor` で GUI スレッドへ渡してダイアログ表示）。ポート衝突の事前確認 `check_webserver_port()` は QMessageBox を出すのでデスクトップ専用
 - Flask アプリと SocketIO インスタンスは static 変数
-- ルートハンドラの行き先は 2 つ（ADR-005 S3c）
-  - **`src/AutonaWebOperations.py`（モジュール関数）**: core 直結の操作と S2 で core 化した操作。デスクトップと
-    ヘッドレスが同じ関数を通る（違いはボードホストだけ。上の AutonaActions 節）。ゲームのロードは
-    シェルが登録する `loadGameByCodename`（デスクトップはアセットアダプタ、ヘッドレスは `src/headless.py` の
+- ルートハンドラの行き先は **`src/AutonaWebOperations.py`（モジュール関数）の 1 つだけ**（ADR-005 S3c。S3e-9 で
+  ボード依存の `WebServerActions` を削除して 1 本になった）。デスクトップとヘッドレスが同じ関数を通り、違いは
+  シェルが `AutonaWebOperations` に登録するものだけ（`WebServer` 自身はシェルを知らない。コンストラクタは
+  `on_start_failed` だけを取る）:
+  - `boardHost`（ボードホスト。上の AutonaActions 節）
+  - `loadGameByCodename`（ゲームのロード。デスクトップはアセットアダプタ、ヘッドレスは `src/headless.py` の
     カタログ直のローダー）
-  - **`WebServerActions`（ボード依存）**: ボード / パネルのウィジェットがまだ答える操作だけ（セット選択ウィンドウを
-    開く `open_sets`・サムネイルの 2 メソッド。実況とクルーは S3e-2、Top 8 の取り込みは S3e-8、選手の編集とタグからの
-    選手の読込は S3e-4、統計は S3e-5、`post_score` とセット読込・追従は S3e-7 で `AutonaWebOperations` へ移った）。
-    デスクトップの Window が作って
-    `WebServer(actions=...)` に渡す。ルートは `WebServer._board_actions()` 経由で呼び、ヘッドレス
-    （`actions=None`）では `NotAvailable` → **503 `UNAVAILABLE`（`not available in headless`）**。legacy は
-    errorhandler、Socket.IO は ack（`_ws_unavailable`）が同じ形で返す（v1 にはもうこの操作が無い。`_actions_ref()` は
-    S3e-9 で消す）。
-    **ここに新しい操作を足さない**（S3e で廃止する）
+  - **シェル操作** `openSetSelection` / `renderThumbnail`（セット選択ウィンドウを開く `open_sets`・サムネイル
+    `get_thumbnail`。デスクトップのウィンドウだけが答える操作）。デスクトップは `bootstrap_gui()` がスコアボード dock の
+    `OpenSetSelection` / `RenderThumbnail`（GUI スレッドで同期実行）を登録し、ヘッドレスは何も登録しない。未登録なら
+    `NotAvailable` → **503 `UNAVAILABLE`（`not available in headless`）**。legacy は errorhandler、Socket.IO は ack
+    （`_ws_unavailable`）が同じ形で返す（v1 にこの 2 本は無い。v1 の UNAVAILABLE は契約として残す）。
+    ヘッドレスで 503 を返すのはこの 2 本だけで、ほかのルート・イベントはすべて答える（`tests/test_web_operations.py` の
+    `test_every_route_and_event_answers_headless_but_the_shell_operations` がルート台帳を歩いて pin）。
+    **シェル操作を増やさない**: 新しい操作は core に置き、どちらのシェルでも動くようにする
 - Web UI からの POST リクエスト → Web 操作 → core（StateManager 更新）→ WebSocket 配信の流れ
 - 新しいエンドポイントの操作は core に置き、ルートからは `AutonaWebOperations` 経由で呼ぶ
   - 例外: **読み取り専用のカタログ系エンドポイントは Actions を経由しない**
