@@ -175,8 +175,11 @@ def test_the_extracted_parts_are_checked_as_core_modules():
     # player DB's data (was AutonaPlayerDB, next to its QStandardItemModel).
     # ADR-005 S3e-8: the Start.gg bracket model (was src/AutonaBracket, its
     # round names read from AutonaLocaleHelper -- injected now).
+    # ADR-005 S3f-1: the task executor, new rather than extracted, which
+    # replaces the QThreadPools step by step -- so the headless shell's
+    # jobs run without Qt.
     assert {"src.core.BadWordFilter", "src.core.PlayerDB",
-            "src.core.Bracket"} <= set(_core_modules())
+            "src.core.Bracket", "src.core.TaskExecutor"} <= set(_core_modules())
 
 
 def test_no_core_module_mentions_a_qt_binding():

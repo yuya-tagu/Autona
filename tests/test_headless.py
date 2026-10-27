@@ -17,11 +17,14 @@ network) stubbed out. Pinned:
   server's / player DB's listeners told;
 - the shared wiring is live: a tournament payload is written, a cleared URL
   forgets the selected game;
-- the shutdown stops the server and writes user_data/state.json.
+- the shutdown stops the server, stops the task executor (running jobs told
+  to stop, queued ones cancelled; ADR-005 S3f-1) and writes
+  user_data/state.json.
 
 And in this process: the stop handlers come before the assembly (a stop
 asked for during it ends the run once assembled, with no loop), the
-shutdown writes first and removes the console handler last; main.py's
+shutdown stops the server, then the task executor, then writes, and
+removes the console handler last; main.py's
 launch checks -- AUTONA_INSTANCE_TAG (read from source only; letters,
 digits and hyphens) and Autona.exe refusing --headless before its
 single-instance gate (simulated: sys.frozen set, the message box answered).
@@ -158,9 +161,35 @@ result["selected_before_clear"] = catalog.Current().codename
 provider.signals.tournament_url_update.emit("")
 result["selected_after_clear"] = catalog.Current().codename
 
+# Jobs queued behind a full job lane when the shell stops (ADR-005 S3f-1):
+# the running ones are told to stop, the queued ones never run.
+from src.core.TaskExecutor import TaskExecutor
+executor = TaskExecutor.instance
+started = threading.Semaphore(0)
+def blocking():
+    started.release()
+    executor.stopping.wait(30)
+    return "stopped"
+ran = []
+running = [executor.submit(blocking, task_name=f"probe-running-{i}")
+           for i in range(TaskExecutor.JOB_WORKERS)]
+# Every lane thread busy before the next submits, so those are queued.
+lane_full = all([started.acquire(timeout=10) for _ in running])
+queued = [executor.submit(lambda: ran.append("queued"),
+                          task_name=f"probe-{i}")
+          for i in range(2)]
+
 shell.Shutdown()
 result["stopped"] = shell.stopped.is_set()
 result["state_json"] = os.path.isfile(StatePersistence.Path() or "")
+result["executor"] = {
+    "lane_full": lane_full,
+    "stopping": executor.stopping.is_set(),
+    "running": [f.result(5) for f in running],
+    "queued_ran": ran,
+    "queued_cancelled": sum(f.cancelled() for f in queued),
+    "after": executor.submit(lambda: None, task_name="late").cancelled(),
+}
 report(result)
 '''
 
@@ -194,6 +223,16 @@ def test_the_headless_shell_assembles_and_runs(tmp_path):
 
     assert result["stopped"] is True
     assert result["state_json"] is True
+    # The shutdown stopped the task executor: the running jobs were told to
+    # stop and finished, the queued ones were cancelled, and a later submit
+    # is cancelled at once (ADR-005 S3f-1).
+    executor = result["executor"]
+    assert executor["lane_full"] is True
+    assert executor["stopping"] is True
+    assert executor["running"] == ["stopped"] * len(executor["running"])
+    assert executor["queued_ran"] == []
+    assert executor["queued_cancelled"] == 2
+    assert executor["after"] is True
 
 
 def _assemble_steps():
@@ -299,16 +338,38 @@ def test_a_stop_asked_for_while_assembling_ends_without_a_loop(monkeypatch):
     assert code == 0
 
 
-def test_the_shutdown_writes_first_and_removes_the_console_handler_last(
-        monkeypatch):
-    from src import headless
+class _FakeExecutor:
+    """TaskExecutor.instance, recording its shutdown (the session's real
+    one must stay usable for the tests after this one)."""
+
+    def __init__(self, order, finished=True, raises=False):
+        self.order = order
+        self.finished = finished
+        self.raises = raises
+
+    def shutdown(self, timeout):
+        self.order.append(("tasks", timeout))
+        if self.raises:
+            raise RuntimeError("probe")
+        return self.finished
+
+
+def _record_the_flush(monkeypatch, order):
     from src.core.StateManager import StateManager
     from src.core.StatePersistence import StatePersistence
-    order = []
     monkeypatch.setattr(StateManager, "JoinExports", staticmethod(
         lambda timeout=None: order.append("out") or True))
     monkeypatch.setattr(StatePersistence, "Flush", staticmethod(
         lambda timeout=None: order.append("state.json") or True))
+
+
+def test_the_shutdown_writes_first_and_removes_the_console_handler_last(
+        monkeypatch):
+    from src import headless
+    from src.core.TaskExecutor import TaskExecutor
+    order = []
+    _record_the_flush(monkeypatch, order)
+    monkeypatch.setattr(TaskExecutor, "instance", _FakeExecutor(order))
 
     class Server:
         def stop(self, timeout):
@@ -320,7 +381,11 @@ def test_the_shutdown_writes_first_and_removes_the_console_handler_last(
 
     shell.Shutdown()
 
-    assert order == ["server", "out", "state.json", ("handler removed", False)]
+    # The background tasks after the server (no request can queue one any
+    # more) and before the flush (ADR-005 S3f-1), with a short wait: a
+    # console close leaves about five seconds in all.
+    assert order == ["server", ("tasks", 1.0), "out", "state.json",
+                     ("handler removed", False)]
     assert shell.stopped.is_set()
     assert shell._removeConsoleHandler is None
 
@@ -328,18 +393,37 @@ def test_the_shutdown_writes_first_and_removes_the_console_handler_last(
 def test_a_shutdown_before_the_web_server_was_made_still_writes(monkeypatch):
     # An assembly that failed early, or a stop before the server exists.
     from src import headless
-    from src.core.StateManager import StateManager
-    from src.core.StatePersistence import StatePersistence
+    from src.core.TaskExecutor import TaskExecutor
     order = []
-    monkeypatch.setattr(StateManager, "JoinExports", staticmethod(
-        lambda timeout=None: order.append("out") or True))
-    monkeypatch.setattr(StatePersistence, "Flush", staticmethod(
-        lambda timeout=None: order.append("state.json") or True))
+    _record_the_flush(monkeypatch, order)
+    monkeypatch.setattr(TaskExecutor, "instance", _FakeExecutor(order))
 
     shell = headless.HeadlessShell(app=None)
     shell.Shutdown()
 
-    assert order == ["out", "state.json"]
+    assert order == [("tasks", 1.0), "out", "state.json"]
+    assert shell.stopped.is_set()
+
+
+@pytest.mark.parametrize("executor", [
+    "none", "still running", "raises"])
+def test_the_flush_runs_whatever_the_task_executor_does(monkeypatch, executor):
+    # Not built (a bootstrap that failed before it), tasks that did not stop
+    # in time, or an error: ./out and state.json are written all the same.
+    from src import headless
+    from src.core.TaskExecutor import TaskExecutor
+    order = []
+    _record_the_flush(monkeypatch, order)
+    monkeypatch.setattr(TaskExecutor, "instance", {
+        "none": None,
+        "still running": _FakeExecutor(order, finished=False),
+        "raises": _FakeExecutor(order, raises=True),
+    }[executor])
+
+    shell = headless.HeadlessShell(app=None)
+    shell.Shutdown()
+
+    assert order[-2:] == ["out", "state.json"]
     assert shell.stopped.is_set()
 
 

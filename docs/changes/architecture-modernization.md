@@ -3163,3 +3163,186 @@ S3e（`WebServerActions` の廃止）の 9 PR が揃った。§4.4 の完了条�
   - 1 回の保存サイクルで新しいトップレベルのキーが 2 つ以上増えると、DeepDiff が root の `values_changed` を delta に出す（S3e-5）
   - Grand Final のリセットの選手が、Start.gg の slot に `seedNum` が無いと解決されないことがある。スキンを選んだ Top 8 のキャラは、パネルの作り直しでコンボが空になる（S3e-8）
   - Socket.IO の `team_color` が、答えを `team_scoredown` の名前で emit する。大会未読込のセットの照会が、legacy で 500・Socket.IO で無応答（S3e-9）
+
+### S3f Executor 1 本化 — 設計（2026-10-28・オーナー承認済み）
+
+オーナー判断（2026-10-28）: 下記の設計を承認。論点 1〜4 は推奨案どおり。S3f-1 → 5 → 2 → 3 → 4 → 6 の順に自走で進める（コミット・push・PR 作成まで）。
+
+§4.3「並行処理」の原則（長時間処理は core 内の Executor 1 本・`QThreadPool+Worker` / `threading.Timer` / qasync を廃止・Qt への配送は Bridge だけ）を実装する段。S3e 決定 4 で S3e から切り出した。
+
+#### 棚卸しで分かったこと（2026-10-28・コード実測）
+
+| 仕組み | 数 | 主な場所 |
+|-------|----|---------|
+| `QThreadPool()` | 4 | provider アダプタ（`AutonaTournamentDataProvider.py:39`）・`AutonaGameAssetManager.py:72`・`AutonaApiInfoWindow.py:122`・`Autona.py:321`（**未使用**） |
+| `Worker(` の生成 | 18 | provider アダプタ 9・`StartGGDataProvider` 5・アセット 2・大会情報ウィジェット 1・API 情報ウィンドウ 1 |
+| `Worker.wait_for_all`（0.1 秒ポーリング） | 3 | `StartGGDataProvider.py:542`（`GetMatch`）・`1873`（`GetRecentSets`・**タイムアウト無し**）・`2292`（`GetFutureMatchesList`） |
+| `ThreadPoolExecutor` | 1 | `StartGGDataProvider.py:681`（ページの並列取得。呼ぶたびに 4 本作る） |
+| `threading.Timer` | 1 | `AutonaWebServer.py:1028`（delta の debounce。daemon・停止時に取り消さない） |
+| `threading.Thread` | 8 | Web サーバー 2・export 書き手・永続化の書き手・画像 DL・ヘッドレスのローダー 3 |
+| `QThread` サブクラス | 7 | アセット 3（DL・ゲーム一覧・アセット読込）・アセットガイド 2・アップデーター 2 |
+| qasync | 1 | `main.py:313-364` のみ。コルーチンは Window を作って終了の Future を待つだけで、実質 `app.exec()` |
+
+- **Worker の答えが届かない不具合（S3e-7 で記録）の機構**: `WorkerSignals` は親の無い QObject で、`Worker.signals` からしか参照されない。呼び手は lambda を context 無しで connect し、Worker を保持しない。PySide の autoDelete と GC で、queued の配送より先に `signals` が消えると答えが黙って失われる。該当は provider アダプタの `GetTournamentData`・`GetTournamentPhases`・`GetAnalysisPhaseGroup`・`LoadStations`・`GetStandings` と、大会情報ウィジェットのアイコン／バナー取得、アセットのステージアイコン。`RunWithProvider`（core の fetcher の唯一の入口）と統計の 3 本は長寿命の QObject で答えるので安全
+- **入れ子の submit**: `GetMatch` と `GetRecentSets` は、provider のプールのジョブの中から同じプールに Worker を積んで待つ。プールの上限（理想スレッド数）まで同時に来ると飢餓になり、`GetRecentSets` は待ちにタイムアウトが無いのでデッドロックし得る
+- **`GetFutureMatchesList` は壊れている**: 存在しない `self.getStationMatchesThreadPool` を参照して AttributeError、仮に通っても `GetFutureMatch(setId, None)` が `cancel_event` を欠いて TypeError。`AutonaSetFollowUtil.FutureSets` から呼ばれ、例外は `_Fetch` がログするだけ（今は「次のセット一覧」が常に空）
+- **終了処理**: デスクトップ（`Autona.closeEvent`）もヘッドレス（`headless.Shutdown`）も、どのプールも待たず取り消さない。export と永続化の書き手（非 daemon）だけが interpreter の join で流れる
+- **ヘッドレスでも QtGui を import している**: `Workers.py:2-3`（`QtGui` / `QtWidgets` の `*`）と、provider アダプタ（`SetStartggEventSlug` の QDialog）。QCoreApplication で動いてはいるが、§4.3 の「core は Qt import ゼロ」とヘッドレスの軽さに反する
+- **テストの継ぎ目**: `adapter.threadPool`（`_SteppedPool` で差し替え・`waitForDone`）と `manager.threadpool.waitForDone()` を、20 か所以上のテストが使う。qasync・`threading.Timer`・`ThreadPoolExecutor` を直接 pin するテストは無い（delta の debounce の間隔も pin されていない）
+
+#### 方針
+
+- core に `core/TaskExecutor.py` を置く（Qt 非依存・`test_core_qt_free` の対象）
+  - 中身は名前付きの `ThreadPoolExecutor` 2 レーン: **ジョブ用**（provider の取得・アセットの読込・画像のデコード。上限 4）と **fan-out 用**（ジョブの中からの並列取得専用。上限 8）。ジョブの中からジョブ用レーンに submit することを禁止し（実行中のレーンをスレッドローカルで判定して例外）、入れ子の飢餓を構造で潰す
+  - `submit(fn, *, name) -> Future`・`map_fanout(fns, timeout)`・`shutdown(timeout)`（`cancel_futures=True`）。ジョブの例外は Future に載せ、`name` 付きで 1 回だけログする
+  - 生成は `bootstrap_core()`。両シェルの終了処理で `shutdown` を呼ぶ（export / 永続化の flush より前）
+- Qt への配送は既存の `gui_executor(fn)`（非同期・長寿命）に一本化する。Worker の `signals` のような使い捨て QObject を経由しないので、GC で答えが消える不具合はこれで根治する。アダプタの公開シグナル（`tournament_data_updated` 等）は変えない
+- 取り消しは `threading.Event` + 世代番号（`LoadSets` の「前の Worker を cancel してシグナルを止める」を置き換える）
+- 6 つの PR に分ける。各 PR は単独でリリースできる
+
+| 段 | 内容 | 完了条件 | リスク | 依存 |
+|----|------|---------|-------|------|
+| **S3f-1 Executor と終了処理** | `core/TaskExecutor` を作り `bootstrap_core()` で生成、両シェルの終了で `shutdown`。テスト用の継ぎ目（同期実行・`drain()`）を用意する。未使用の `Autona.py:321` のプールを消す | Executor が `test_core_qt_free` に載る。両シェルの終了でジョブが取り消され、export / 永続化の flush は今どおり流れる | 低 | なし |
+| **S3f-2 provider アダプタの移行** | provider アダプタの Worker 9 本・`RunWithProvider`・大会情報ウィジェットのアイコン取得を Executor + `gui_executor` に移す。`adapter.threadPool` のテストの継ぎ目を Executor の継ぎ目に置き換える | アダプタに `Worker` / `QThreadPool` が 0。答えの配送が GC に依存しない（Worker を保持しない形で答えが届くことを pin）。シグナルの名前・引数・発火回数が変わらない | 中 | 1 |
+| **S3f-3 Start.gg provider の内部** | 入れ子の Worker と `wait_for_all` 3 本、呼ぶたびの `ThreadPoolExecutor` を fan-out レーンに置き換える。`GetRecentSets` の待ちにタイムアウトを付ける（`_request_timeout_secs`）。`GetFutureMatchesList` を直す（論点 2）。provider の `threadpool` 引数を消し、`src/Workers.py` を削除する | `src/` に `Worker` / `QRunnable` が 0。ジョブ用レーンを埋めた状態で `GetMatch` / `GetRecentSets` が完了する（飢餓の pin）。`test_startgg_parse` の取得結果が変わらない | 中 | 2 |
+| **S3f-4 アセットと API 情報ウィンドウ** | アセットのアイコンのデコード 2 本と `waitForDone` を Executor に移す。ローダーの QThread 3 本も Executor のジョブにする（論点 3）。`run_sync` のモデルの marshal（棚卸し ②）は GUI スレッドで待つまま残す。API 情報ウィンドウの送信を移す。`manager.threadpool.waitForDone()` を使うテストを `drain()` に置き換える | `src/` に `QThreadPool` が 0。`test_game_asset_icon_threading` / `test_wrapper_lifetime` / `test_signal_lifetime` が通る。ゲームのロードの `onLoadAssets` の順序（pitfalls #2）が変わらない | 中〜高 | 1 |
+| **S3f-5 delta の debounce** | `threading.Timer` を、Web サーバーが持つ 1 本の flusher（`threading.Condition` で待つ）に置き換え、`WebServer.stop` で join する。先に現行の間隔（先頭 0・50 / 100 / 200 ms）を pin するテストを書く | `src/` に `threading.Timer` が 0。間隔のテストが移行前後で通る。Socket.IO の delta の内容と revision は不変 | 中 | なし |
+| **S3f-6 qasync の削除と棚卸しの確定** | `main.py` を `sys.exit(App.exec())` にし、`requirements.txt`・`licenses/python-packages.txt`・README・`current-architecture.md` から qasync を消す。ヘッドレスのローダー 3 本を Executor へ。`@gui_thread_sync` の ①〜③ を最終の形で台帳に記録する。`src/` に `QThreadPool` / `QRunnable` / `threading.Timer` / qasync が無いことを AST で pin する | 起動・終了が今どおり（オーナー実機）。pin テストが通る。ヘッドレスで QtGui / QtWidgets が import されない（pin。provider アダプタの QDialog を遅延 import にする） | 低〜中 | 2〜5 |
+
+- 順序: 1 → 5 → 2 → 3 → 4 → 6（5 は独立で低リスクなので早めに入れる）
+- 残す並行処理（S3f の対象外）
+  - Web サーバーのスレッド 2 本・export の書き手・永続化の書き手・画像 DL（セマフォ 3）。どれも「1 本の長寿命スレッド」か「数を絞った専用スレッド」で、Executor に載せると flush の順序（`out/` の書き込み順契約）に触れる
+  - アップデーターの QThread 2 本（§4.4「自動更新には一切触らない」）とアセットガイドの QThread 2 本（デスクトップのウィンドウ専用。S4 で消える）
+  - 追従の 5 秒タイマー（`QTimer`）とヘッドレスの 250 ms ハートビート。イベントループの時計であって長時間処理ではない
+  - thumbnail / result の同期描画の `QEventLoop`（シェル操作 ①）
+
+#### 論点と決定（2026-10-28 オーナー承認・すべて推奨案どおり）
+
+1. **Executor を 1 本にするか、ジョブ用と fan-out 用の 2 レーンにするか** → 推奨: **2 レーン（1 モジュール・1 つの shutdown）**
+   - 1 本だと、ジョブの中からの並列取得が同じプールを待つ入れ子が残り、今の飢餓・デッドロックがそのまま移る。「fan-out はジョブの中からしか呼ばない・ジョブ用には入れ子で積まない」を構造で守れるのは 2 レーン
+   - §4.3 の「1 本」は「仕組みを 1 つにする」の意味で読む（生成・取り消し・終了・ログが 1 か所）
+2. **壊れている `GetFutureMatchesList` を直すか** → 推奨: **S3f-3 で直す**
+   - 今は「次のセット一覧」（`FutureSets`）が常に空。直すと、追従のステーションで次のセットが出るようになる（挙動の変化なのでリリースノートに書く）
+   - 直さない場合は、呼び手ごと削除する（壊れたまま残さない）
+3. **アセットのローダーの QThread 3 本を Executor に移すか** → 推奨: **移す（S3f-4）**
+   - ゲームのロードは `set_game` の同期ロード（棚卸し ③）とヘッドレスのローダーと同じ処理で、シェルごとにスレッドの作り方が違うのが今の複雑さの元。Executor に揃えると、③ は「リクエストのスレッドが Executor の Future を待つ」になり、GUI スレッドを経由しない
+   - リスクは pitfalls #2（`onLoadAssets` のスロット順）と #13（モデルの差し替え）。モデルの再構築は今どおり GUI スレッドで行い、順序はテストで pin されている
+4. **`@gui_thread_sync` の ② ③ の扱い** → 推奨: **② のうち entrants の取得からの `SetTournamentPlayers` は非同期（`gui_executor`）にし、プールのスレッドが GUI を待たないようにする。モデルの marshal そのもの（`SetupModel` と、アセットの `run_models`）は S4 まで残す**
+   - QPixmap / QIcon / コンプリータのモデルは GUI スレッドでしか作れない。消えるのは Qt モデルが要らなくなるとき（S4）
+   - ③ `set_game` は論点 3 の結果、GUI スレッドを待たなくなる（`"OK"` がロードの後という契約は維持）
+
+#### やらないこと
+
+- アップデーター・アセットガイドのスレッド、export / 永続化 / Web サーバーのスレッドの置き換え
+- asyncio の導入（qasync の削除だけ。async な provider にはしない）
+- provider の GQL クエリ・タイムアウト値・バックオフの変更（pitfalls #11）
+- `out/` の書き込み順・Socket.IO の payload・保存形式・自動更新の変更
+
+#### 規模の見積り
+
+- 6 つの PR の合計で、+1,500 / −1,000 行程度（テストの継ぎ目の置き換えが半分）
+- 高めのリスクは S3f-4（アセットのロード。Qt のライフサイクルに触れる）
+
+#### S3f-1 Executor と終了処理（2026-10-28）
+
+core に `TaskExecutor` を置き、`bootstrap_core()` で作り、両シェルの終了で止めるようにした。まだ誰も仕事を渡していない（S3f-2 以降で移す）。未使用だった Window の `QThreadPool` を削除した。
+
+- **実装**
+  - `src/core/TaskExecutor.py`（新規・Qt 非依存）
+    - 2 レーン: ジョブ用 `submit(fn, *args, task_name, then=None, on_error=None, **kwargs)`（4 本・スレッド名 `AutonaJob_*`）と fan-out 用 `submit_fanout(fn, *args, task_name, **kwargs)`（8 本・`AutonaFanout_*`）。戻り値は `concurrent.futures.Future`
+    - `map_fanout(calls, timeout, *, task_name, default=None)`: 引数なしの callable の列を fan-out で走らせ、入力順の結果のリストを返す
+      - 失敗・取り消し・期限切れは `default`。期限切れは、未開始なら取り消し、実行中なら放置して警告 1 行。`timeout` は全体の期限（None は無期限）
+      - S3f-3 の `Worker.wait_for_all` の置き換え先（`GetMatch` は `default={}`、`GetRecentSets` は `None` を読み飛ばす）
+    - 入れ子の規則（`NestedSubmitError`）: ジョブ用レーンのスレッドでは `submit` 禁止。fan-out のスレッドでは `submit` / `submit_fanout` / `map_fanout` すべて禁止。どのレーンのスレッドでも `drain` / `shutdown` / `run_next` は禁止（自分を待つ）
+      - レーンは**スレッドの一生の属性**（`ThreadPoolExecutor(initializer=...)`、ステップ実行のスレッドも同じ）。タスク本体・`then` / `on_error`・そのスレッドで走る done callback のどれも同じ規則に従う（判断 7）
+      - 待ちの向きが「ジョブ → fan-out」だけになり、fan-out は何も待たない。だからジョブ用レーンが埋まっていても必ず終わる
+    - 答えの配送: `then(result)` / `on_error(error)`（判断 8）
+      - レーンのスレッドで、タスクの中で、Future が settle する前に走る。だから `drain()` / `shutdown()` が待つ
+      - 自分の例外はタスク名付きで 1 回だけ loguru に出し、Future はタスクの結果のまま
+      - 取り消されたタスク（終了時）はどちらも走らせない
+    - 例外: レーンが `task_name` 付きで 1 回だけ `logger.error`（トレースバック付き）し、Future に載せる。読む側は再ログしない
+    - `shutdown(timeout)`: 受付を閉じる → 待ち行列を取り消す（`cancel_futures=True`）→ `stopping`（`threading.Event`）を立てる → 実行中を `timeout` 秒待つ（None は無期限）
+      - 戻り値は「全部終わったか」。何度呼んでもよい
+      - 以後の submit は、取り消し済みの Future を返す（例外にしない。判断 2）
+    - テストの継ぎ目
+      - `drain(timeout)`: 実行中のタスクが投げた分と `then` / `on_error` も含めて、全部終わるまで待つ（None は無期限）。Qt のイベントは回さない
+      - `TaskExecutor(stepped=True)` + `run_next()`: ジョブ用レーンだけ、投入順に 1 本ずつ専用スレッドで走らせる（`tests/test_set_follow_flow.py` の `_SteppedPool` の置き換え先）。`drain()` は残りを順に走らせる。待ち行列で取り消されたものは飛ばす
+    - スレッドは最初の submit で作る（import・生成では作らない）
+  - `src/bootstrap.py`: `bootstrap_core()` が `BadWordFilter` の直後・`StateManager.Initialize()` の前に `TaskExecutor.instance` を作る（依存なし。仕事を渡しうるものすべてより前）
+  - `src/headless.py` `HeadlessShell.Shutdown()`: Web サーバーの停止の後、`JoinExports` / `Flush` の前に `shutdown(1.0)`。例外・未終了はログして flush へ進む
+  - `src/Autona.py`
+    - `closeEvent`: Web サーバーの停止の直後に `shutdown(1.0)`（独立の try）。デスクトップの flush は、その後のインタプリタ終了時の join（今どおり）
+    - 未使用の `self.threadpool = QThreadPool()` を削除した（`src/` と `tests/` に参照なし）
+- **判断と理由**
+  1. **待ちは両シェルとも 1 秒**
+     - ヘッドレスのコンソールの閉じるは、全体で約 5 秒（Web サーバー 2 秒 + flush）
+     - 待つ意味は「期限内に終わったジョブの書き込みが flush に入る」だけで、長く待つ理由がない。デスクトップも同じ値（ウィンドウがすぐ閉じる）
+  2. **停止後の submit は、例外にせず取り消し済みの Future を返す**
+     - 終了の途中でも、タイマーや遅れた答えが submit しうる。例外にすると、スロットの uncaught になる
+     - 入れ子の違反（プログラムの誤り）は例外のまま
+  3. **`stopping` は待ち行列の取り消しの後に立てる**: 先に立てると、止まったジョブのスレッドが空いて、取り消す前の待ち行列のタスクを拾う
+  4. **`map_fanout` は `concurrent.futures.wait` で待たない**
+     - CPython の `wait` / `as_completed` は、取り消されたタスクをワーカーが拾ったとき（`set_running_or_notify_cancel`）にしか起きない。`cancel_futures=True` は待ち行列から落とすだけなので、終了時に fan-out を待つジョブが期限まで返らない（実測: 期限の 10 秒まで返らなかった）
+     - done callback（`cancel()` でも走る）で待つ
+     - S3f-3 で `as_completed` を使っている `GetSets` のページ取得を移すときも、この Future を `wait` / `as_completed` で待たない（モジュールの docstring に記載）
+  5. **fan-out はジョブの外（GUI スレッド・Web リクエスト）からも呼べる**（設計の「ジョブの中から専用」からの逸脱）
+     - レーンのスレッドを持たない呼び手は飢餓を起こさない
+     - 禁止すると、provider のメソッドを直接呼ぶテスト（`test_startgg_parse` の `GetRecentSets`・live の `GetMatch`）がすべて executor 経由になる
+     - 待つ間は呼び手が止まるので、GUI スレッドからは呼ばない（docstring）
+  6. **テストの「同期実行」は、呼び手のスレッドでの即実行にせず、ステップ実行にした**
+     - 即実行だと、呼び手が `StateManager.lock` を持っていればジョブもその中で走り（pitfalls #17）、スレッドの境界が本番と変わる
+     - 既存の `_SteppedPool` と同じ「1 本ずつ・専用スレッド・投入順」にした
+     - `run_next()` は、`shutdown()` が受付を閉じるのと同じロックの中で、ジョブを取り出して running にする。だから、取り出したジョブは終了がその完了を待ち（プールのスレッドが拾ったタスクと同じ）、取り出していないジョブは終了が取り消す。終了が待ち行列を取った後にジョブが走ることはない（レビュー指摘 7。初版は取り出しをロックの外で行い、その間の終了で取り消されないジョブが走りえた）
+  7. **レーンの判定はスレッドの一生にわたる**（レビュー指摘 1）
+     - 初版はタスクの実行中だけスレッドローカルを立て、`finally` で消していた
+     - ところが `ThreadPoolExecutor` は、その後で同じスレッドの上で `set_result` → done callback を呼ぶ。だから callback からの `submit(...).result()` や `map_fanout` が判定をすり抜け、入れ子の飢餓が戻りえた
+     - プールの `initializer` でスレッドに一度だけ印を付け、消さないようにした（ステップ実行のスレッドも同じ）
+  8. **答えの配送は `then=` / `on_error=` で行い、`add_done_callback` は配送の経路にしない**（レビュー指摘 2・4）
+     - done callback は Future が settle した後に走るので、`drain()` が先に返る。S3f-2 で `waitForDone` を `drain()` に置き換えるテストが、答えの届く前に進んでしまう
+     - done callback の例外は、stdlib の `concurrent.futures` のロガーに出て、loguru のログ（`logs/`）に残らない
+     - `then` / `on_error` はタスクの中で settle の前に走るので、`drain()` に含まれ、例外は loguru に 1 回出る
+     - **S3f-2 以降の答えの配送は `then=`（中で `gui_executor(...)` に渡す）を使う**。fan-out には `then` を設けない（答えは待っているジョブが読む）
+  9. **executor のラベルは `task_name=`**（レビュー指摘 8）: 初版の `name=` は、`fn` 自身の `name=` 引数と衝突して渡せなかった
+  10. **`shutdown()` もレーンのスレッドからは拒否する**（レビュー指摘 5）: 自分のタスクの完了を期限まで待ってしまう。`drain` / `run_next` と同じく、何もせずに `NestedSubmitError` を出す
+  11. **`shutdown(None)` / `drain(None)` は無期限**（レビュー指摘 6）。`map_fanout` と揃えた
+- **pin（テスト）**
+  - `tests/test_task_executor.py`（新規）。スレッドのスケジュールに依存しない（起きたことはイベントで待ち、`map_fanout` の期限はテストが `_WaitAll` を差し替えて決める。レビュー指摘 9）
+    - レーン: スレッド名と上限、生成時にスレッド 0、`fn` 自身の `name=` 引数が渡る
+    - 入れ子の拒否: ジョブ → ジョブ、fan-out → すべて、レーンのスレッドからの `drain` / `shutdown`。ジョブ・fan-out・ステップ実行のスレッドで走る done callback も同じ規則（判断 7）
+    - 飢餓: ジョブ用レーンを埋めたジョブが全部 fan-out しても終わる
+    - `map_fanout`: 順序、`default`、期限切れの取り消しと警告 1 行
+    - 例外のログは 1 回（task_name とトレースバック付き）
+    - 配送: `then` / `on_error` はレーンのスレッドで settle の前に走る。その例外は 1 回ログされ、Future はタスクの結果のまま。`then` からの `submit` も拒否される。`drain` は `then` を待つ。取り消されたタスクの `then` / `on_error` は走らない
+    - shutdown: 待ち行列は走らない、実行中は `stopping` で終わる、期限切れの報告と 2 回目の呼び出し、停止後の submit は取り消し、fan-out を待つジョブがすぐ返る（判断 4）、None は無期限
+    - `drain`: 実行中に投げた分まで待つ、期限で False、None は無期限
+    - ステップ実行: `run_next` まで走らない、投入順、`drain` が残りを走らせる、待ち行列で取り消されたものは飛ばす、取り出し済みのジョブは終了が待ち、それ以外は取り消され、終了後の `run_next` は何も走らせない（判断 6）
+    - 両シェルの終了の順序（AST）: Web サーバーの停止 → `shutdown` → flush。デスクトップの `closeEvent` は flush しない
+    - Window に `QThreadPool` が無い
+  - `tests/test_bootstrap_split.py`: `bootstrap_core()` の手順に `TaskExecutor()`（`BadWordFilter` の後・`StateManager.Initialize()` の前）。QCoreApplication での実起動で instance があり、レーンのスレッドが 0
+  - `tests/test_headless.py`
+    - `Shutdown()` の順序: サーバー → タスク（1.0 秒）→ out → state.json → コンソールハンドラ
+    - executor が無い・未終了・例外でも flush する
+    - 実プロセスの組み立て: レーンが埋まったことを確かめてから積んだ 2 本は取り消され、レーンを埋めたジョブは `stopping` で終わり、停止後の submit は取り消し
+  - `tests/test_import_side_effects.py`: import で instance もスレッドも作らない。生成でもスレッド 0、submit で走り、shutdown 後の submit は取り消し
+  - `tests/test_core_qt_free.py`: `src.core.TaskExecutor` が検査対象にあること（発見は自動）
+- **残置 / リスク**
+  - まだ誰も submit しない。終了処理の追加は空の executor を止めるだけで、挙動は変わらない
+  - `shutdown` の期限を過ぎても走っているジョブは、インタプリタ終了時の join（`concurrent.futures` の atexit）が待つ。stdlib のプールのスレッドは daemon にできない（旧 QThreadPool のスレッドは Python に join されなかった）
+    - S3f-2 以降で移すジョブ（provider の取得: 1 リクエスト最大 20 秒 + バックオフ）は、リクエストの合間に `stopping` を見ること。見ないと、終了がその分遅れる
+    - ヘッドレスのコンソールの閉じるでは、その前に OS がプロセスを終わらせる
+  - **S3f-4 の前提条件（レビュー指摘 3）: ジョブは期限なしの `run_sync` をしない**
+    - `AutonaQtHelper.GuiExecutor.run_sync`（`@gui_thread_sync` も同じ）は、GUI スレッドの完了を期限なしの `done.wait()` で待つ
+    - イベントループが止まった後（終了処理の後）にジョブがそこで待つと、二度と起きない。インタプリタ終了時の join がそのジョブを永久に待ち、プロセスが残る（ゾンビ）
+    - 旧 QThread / QThreadPool のスレッドは Python に join されなかったので、この問題は表に出ていなかった
+    - 今回は `run_sync` を変えていない。今そこへ入るのは、まだ executor に載っていないスレッドだけ
+      - アセットのローダーの QThread（`run_models`。棚卸し ②）
+      - provider の QThreadPool の entrants の取得から来る `AutonaPlayerDB.SetupModel`（`PlayerDB.changed` の中継）/ `SetTournamentPlayers` / `ClearTournamentPlayers`
+    - **S3f-4 でアセットのロードをジョブにするときは、marshal が executor の `stopping` か、イベントループの終了で抜けるようにし、それを pin するテストを書く**
+    - **それまでは、ジョブから `run_sync` / `@gui_thread_sync` に入る経路を作らない**
+      - S3f-2 も対象。entrants の取得をジョブにすると、上の `AutonaPlayerDB` の 3 本がジョブの中で待つことになる
+      - 論点 4 の `SetTournamentPlayers` の非同期化だけでは足りない。`PlayerDB.changed` → `SetupModel` の中継もジョブを待たせないこと
+  - `drain()` は Qt のイベントループを回さない。`then` が `gui_executor` に渡した答えは、テスト側でイベントを処理したときに届く。GUI スレッド経由で次のジョブを積む流れは、イベントを処理してから再度 `drain()` する
+  - `add_done_callback` で答えを配る呼び手を作らない（判断 8）。`drain()` に含まれず、例外が loguru に出ない
+- **実機確認（オーナー）**
+  - デスクトップ: 起動・終了が今どおり（終了で固まらない。`logs/` に `Background tasks were still running` / `Error stopping background tasks` が出ない）
+  - ヘッドレス（`python main.py --headless`）: Ctrl+C / コンソールの × で今どおり止まり、`user_data/state.json` が書かれる
