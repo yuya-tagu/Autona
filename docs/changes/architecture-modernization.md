@@ -1615,3 +1615,213 @@ S3 の最後。ヘッドレスの実プロセスに対して、Python のスモ�
   - ヘッドレス（`python main.py --headless`）を起動し、OBS で `layout/scoreboard_simple` を開く → 起動直後から空のスコアボード（名前空・スコア 0-0）が描画される
   - その状態で `/web` を開く → 真っ白にならず、両チームの列（1P）とスコア操作が出る。+1 / −1 を押すとオーバーレイがすぐ変わる（S3c-2 の実機確認と同じ操作）
   - デスクトップ（`python main.py`）は挙動が変わらないこと: 起動直後のボードの選手カード数（ゲーム未選択で 1・2v2 のゲームで 2）とキャラ枠 3、スコアボードのオーバーレイの表示
+
+### S3e `WebServerActions` の廃止（S2f / S2g・統計・セット読込・追従の core 化）— 設計（2026-10-26・オーナー承認済み）
+
+オーナー判断（2026-10-26）: 下記の設計を承認。論点 1〜4 は推奨案どおり。S3e-1 から順に自走で進める（コミット・push・PR 作成まで）。
+
+#### 棚卸しで分かったこと（前提）
+
+- `WebServerActions` に残る 18 メソッド（S3c-2 判断の一覧）の依存は 6 つに分かれる
+  - **選手データ**（`post_score` の entrants / `set_team_data` / `update_player` / `load_player_from_tag`）: カードの `SetData`（`AutonaScoreboardPlayerWidget.py:1366`）が、DB とのマージ、悪語フィルタ、国・キャラのコンボの行の走査、`editingFinished` 経由の書き込みを全部持っている（S2f）
+  - **人数・キャラ数**: 正本はボードのスピンボックスで、スロット数として暗黙に表れる。書き手は 6 か所（構築・single モード・ゲームのロード・セットの entrants・`set_route`・`clear_all`）。統計は人数をウィジェットの数で、`Actions._UpdateUpsetFactor` は state のスロット数で数えており、2 系統が併存している（S2g）
+  - **統計**: 判断と書き込みは `core/StatsService.py` にあるが、トリガーと結果の運び役（`AutonaStatsUtil` のシグナル）と出し手（カードの `instanceSignals`・ボード・STATS パネル）が Qt 側にある
+  - **セット読込と追従**: `NewSetSelected`（`AutonaScoreboardWidget.py:2177`）が `QTimer` 2 本・ラベル・カードの `dataLock` を持つ。station / stream の追従は、**ワーカースレッドがボードのウィジェットを直接読んでいる**。`pull_stream_set` は接続先が無く、常に空振りしている
+  - **実況と Top 8**: 遅延構築のパネルが書き手で、**state に追従しない**（構築時に 1 回 `_loadFromState` するだけ）。core が書いた後にパネルで編集すると、古い値で上書きされる
+  - **シェルの操作**: `get_thumbnail`（QApplication + オフスクリーンの WebEngine）と `open_sets`（ウィンドウ）
+- Qt に依存しない部品の抽出が先に要る
+  - 悪語フィルタの Qt 依存は `AutonaLocaleHelper` の import 1 本だけ
+  - `AutonaPlayerDB` はデータ（`database`・Load / Add / Get / Save）とモデル（QStandardItemModel）が同じクラスにある。`database` は entrants のワーカーからも書かれるのに、dict にロックが無い
+- golden（`tests/fixtures/player_slots/golden.json` ほか）が、`SetData` を含む操作の Set 列と保存サイクルを固定している。core 版も同じ列を出す必要がある（キー順は外部契約）
+- 既存バグ: `load_commentator_from_tag` は成功時に None を返す（legacy は 500、Socket.IO の ack は null）。範囲の確認が 1..8 で、実際の枠数 12（`CommentaryModel.SLOTS`）と合っていない
+
+#### 方針
+
+- S3e は、次の 9 つの PR に分ける。各 PR は単独でリリースできる
+- 順序: 1 → 2 → 8 → 3 → 4 → 5 → 6 → 7 → 9
+  - 依存の無いものと、リスクの低いものから進める
+  - パネルを state に追従させる型は、実況・クルー・Top 8 で先に確立し、そのあと選手カード（S2f）に当てる
+
+| 段 | 内容 | 完了条件 | リスク | 依存 |
+|----|------|---------|-------|------|
+| **S3e-1 Qt 非依存部品の抽出** | `core/BadWordFilter`（ロケールと国の言語表を注入）と `core/PlayerDB`（`database`・Load / Add / Delete / Get / Save・`tournamentTags`・変更通知の callback・dict のロック・保存のアトミック化）を作る。`AutonaPlayerDB` はモデルと `db_updated` だけの Qt アダプタにする | 両方とも `test_core_qt_free` の対象になる。`local_players.json` がバイト一致する。`db_updated` の発火回数が変わらない | 低〜中 | なし |
+| **S3e-2 実況とクルーの core 化** | 実況: `CommentaryService.ApplyPlayerData` / `LoadFromTag`（1 枠ずつマージして publish）。クルー: `CrewBattleService.AdjustMemberStock` と、アクティブを 1 人に限る規則を core に移す。実況パネルとクルーのウィジェットを、Bridge 経由で state に追従させる。`set_commentary_data` / `load_commentator_from_tag` / `crew_*` を `AutonaWebOperations` へ移し、`_ensure_panel` を削除する。クルーボードの swap / reset / clear（`BoardHost.Widget` 経由で 503）も同じ追従の上で core 化する | ヘッドレスで動き、両シェルの state が一致する。パネルが未構築でも動く。パネルの編集が古い値で上書きしない。`load_commentator_from_tag` が `"OK"` を返し、範囲は 1..12 | 中 | 1 |
+| **S3e-8 Top 8 取り込みの core 化** | `Top8Service.RefreshFromProvider()`（phases → 決勝グループの解決 → 取得 → `FromBracket` → `GameAssetCatalog` / `CountryCatalog` で選手を解決 → `ImportBracket`）。`Bracket` は core へ移す（ラウンド名は注入）。パネル・ホットキー・`update_bracket` が同じ関数を呼ぶ。v1 の 202 と実行中フラグは維持する | ヘッドレスで `bracket:refresh` が `top8.*` を書く。デスクトップの取り込み結果が golden で一致する | 中 | 1（2 と並行可） |
+| **S3e-3 S2f: 選手データの core 化** | `PlayerService.ApplyData(data, loadFromDB, clear, no_mains)` を作る（`_ClearSlot` を流用、DB マージ → 悪語フィルタ → テキスト → id / avatar / city → 国 / 地域 → mains → seed → 合成名と画像。順序は golden に合わせる）。カードの `SetData` は、これを呼んで `RenderFromState` するだけにする。`SavePlayerToDB` を state から組む。id / seed が変わったかを戻り値で返す（統計のトリガー用）。キャラ数は、S3e-6 まではスロットの `character` の数で決める | golden の Set 列と保存サイクルが、core だけの再生とカード経由の再生の両方で一致する。カードに国 / キャラのモデル走査が残らない。`player_editor.1` の経路（pitfalls #7）が両方で動く | **高** | 1 |
+| **S3e-4 選手系 Web 操作の移設** | `update_player` / `set_team_data` / `load_player_from_tag` を `AutonaWebOperations` + `boardHost` へ移す（スロットの範囲と `teamsSwapped` は state で判断）。`DesktopBoardHost` が GUI スレッドで実行する必要があるかを見直す | ヘッドレスで、既存のスロットに対して動く。デスクトップの応答の本文は変わらない | 中 | 3 |
+| **S3e-5 統計の core 化** | `StatsService.Refresh(kind, team)` を入口にする。取得は `bootstrap_core()` が注入する fetcher（既存の provider と QThreadPool を使う）に任せる。トリガーは core 操作（id / seed の変化・`ApplyBracketType`・クリア）から出す。人数は state のスロット数に統一する。`AutonaStatsUtil` を縮小し、`stats_*` / `refresh_stats` を移す | ヘッドレスで state に結果が書かれる（Start.gg はモック）。取り直しの回数が今と同じ。古い結果は捨てる | 中 | 3 |
+| **S3e-6 S2g: 人数・キャラ数を state 主導へ** | `SetRoster(board, players, characters)` を作る（スロットとキャラ枠の増減、1 人になるときのチーム名のクリアを、1 保存サイクルで行う）。入口 6 か所をすべてこれにする（ゲームのロード時の既定値は、両シェル共通の結線へ移す）。ボードは held サイクルの中でカードの数を state に合わせる。カードの破棄は `singleShot` に逃がし、pitfalls #14 の invalidate を通す | ヘッドレスで `set_route players` と 2v2 ゲームのロードによりスロットが増える。デスクトップの起動直後のカード数が変わらない。`test_wrapper_lifetime` / `test_signal_lifetime` が通る | **高** | 3 |
+| **S3e-7 セット読込と追従の core 化** | ボードごとの追従サービスを Qt 非依存で作る。中身は `LoadSet`（`NewSetSelected` の論理）、5 秒ポーリング（タイマー 1 本）、station / stream の追従、`ApplySetPayload`（`ChangeSetData` の core 版）。ボードのラベルとカウントダウンは state を読むだけにする。`load_set` / `post_score` / `pull_stream_set` を移す | ヘッドレスで `:load-set` と追従が動き、停止・クリアで止まる。古いペイロードを捨てる。セット選択と station のウィンドウは今どおり | **高** | 3・5・6 |
+| **S3e-9 シェル操作の登録と廃止** | `get_thumbnail` と `open_sets` を、シェルが登録する操作にする（デスクトップは `@gui_thread_sync`、ヘッドレスは 503）。`AutonaWebServerActions.py`・`_board_actions`・`init_api_v1(actions)` を削除する。残った `@gui_thread_sync` を棚卸しして台帳に記録する | `grep WebServerActions` が 0 件。ルート台帳と 503 のテストを更新する | 低〜中 | 全部 |
+
+- 並行処理: S3e では Executor への統一（§4.3）はしない。core を呼ぶのは werkzeug のリクエスト・provider のワーカー・追従のタイマー・GUI のスレッドで、ボード操作は必ず `boardHost.Run` を通して直列化する（`clear_all` の途中に割り込ませない）
+- デスクトップは、未構築のボードに書く前に構築する（`boardHost.Prepare`。構築時のシードで書き込みが消えるため。S2c 判断 7）
+- 維持する既存の挙動
+  - `set_team_data` / `post_score` の `match_en` 空化
+  - `clear_all` でキャラ数を 1 にすること
+  - Socket.IO の ack と legacy の本文の文字列
+
+#### 論点と決定（2026-10-26 オーナー承認・すべて推奨案どおり）
+
+1. **人数・キャラ数を state のキーで持つか** → 推奨: **キーを足さず、スロット数を正本にする**
+   - オーバーレイ 4 種と Web UI は、既にスロット数とキャラのキー数を人数として読んでいる。キーを足すと正本が 2 つになり、食い違ったときに外部の表示が割れる
+   - スロットが 0 の場合は `DefaultPlayersPerTeam()` で補う
+2. **ヘッドレスでの thumbnail と `open_sets`** → 推奨: **シェルの操作として残し、ヘッドレスは 503 のまま**
+   - 目標は「18 操作」から「16 操作 + デスクトップ専用のシェル操作 2 本」に改める
+   - thumbnail は QApplication と WebEngine が必須（§4.2 で renderer の GUI 依存は認めている）
+3. **`pull_stream_set` を直すか** → 推奨: **S3e-7 で直す**
+   - `twitch_username` の配信キューから次のセットを読み、stream の追従を始める
+   - 未設定のときは、legacy は `"OK"` のまま、v1 は 409 `NOT_READY`（エラーの追加）
+   - 「何も起きない」が「次のセットが読まれる」に変わるので、リリースノートに書く
+4. **Executor 1 本化を S3e に含めるか** → 推奨: **含めず、S3f に分ける**
+   - ヘッドレスは QCoreApplication のイベントループで Worker の結果を受け取れるので、S3e の完了条件に Executor は要らない
+   - 含めると、provider の入れ子 Worker・qasync・delta の `threading.Timer` まで範囲が広がり、S3e-7 のリスクと重なる
+
+#### §4.4 の完了条件の改定（承認済み）
+
+- 旧（S3 から移したもの）: `WebServerActions` を廃止する。`@gui_thread_sync` の残りは thumbnail / result とウィンドウ操作だけ
+- 新: `WebServerActions` を廃止する。ヘッドレスで、シェル操作 2 本を除くすべての Web 操作が動く。`@gui_thread_sync` の残りは次の 3 種類だけ
+  - シェルの操作（thumbnail / result / ウィンドウ）
+  - Qt アダプタ内部のモデルの marshal（`AutonaPlayerDB` / `GameAssetManager`）
+  - `set_game` の同期ロード
+- 残りの 3 種類は S3f（Executor 1 本化）で棚卸しする
+
+#### やらないこと
+
+- Executor への統一と、QThreadPool / Worker / qasync / `threading.Timer` の廃止（S3f）
+- パネルの React 化と、Web UI の 503 の専用表示（S4）
+- thumbnail / result のヘッドレス描画
+- legacy ルートの削除（v2.0）
+- `local_players.json` の形式変更
+- 自動更新の構造の変更
+
+#### 規模の見積り
+
+- 9 つの PR の合計で、+4,000 / −2,000 行程度
+- 高リスクは S3e-3（S2f）・S3e-6（S2g）・S3e-7（セット読込と追従）の 3 つ。どれも Qt のライフサイクルか golden に触れる
+
+#### S3e-1 Qt 非依存部品の抽出（2026-10-26・PR #233）
+
+悪語フィルタと選手 DB のデータ側を core に移した。外から見える挙動（`local_players.json` のバイト・ヘッドレスの `/playerdb`・Socket.IO / v1 の応答・`db_updated` の回数・検閲結果）は変えていない。どちらも旧実装で録った golden で照合している。
+
+- **実装**
+  - `src/core/BadWordFilter.py`（新規）: `Helpers/AutonaBadWordFilter.py` の Trie・正規表現・言語の選び方・白黒リスト・`Censor` / `CensorString` / `CensorDict` をそのまま移した
+    - インスタンス化した（`BadWordFilter.instance`）
+    - プログラムのロケール（`programLocale`）、国 → 話者言語（`countryLanguages`）、国 → 大陸（`countryContinent`）をコンストラクタで callable として受け取る。呼ぶのは `CensorString` のたび
+    - 単語リストの場所も引数にした。既定は従来どおり CWD 相対の `./assets/ngword/` と `./user_data`
+    - `Initialize()` は冪等
+  - `src/Helpers/AutonaBadWordFilter.py`: `BadWordFilter.instance` に転送するだけの互換層にした（`Censor` / `CensorString` / `CensorDict`）。呼び出し側（選手カード・実況）は変えていない。`AutonaLocaleHelper` を import しなくなった
+  - `src/core/PlayerDB.py`（新規）: `AutonaPlayerDB` のデータ側を移した。対象は `database`・`fieldnames`・`PlayerTag`・`LoadDB`（旧 CSV の取り込みを含む）・`AddPlayers`（mains のマージ）・`DeletePlayer`・`GetPlayerFromTag`・`SaveDB`・`tournamentTags`。インスタンスは `PlayerDB.instance`
+    - `database` を `lock`（RLock）で守る。外からは次で読む
+      - `Get` / `Contains`
+      - `Items`（リストのスナップショット）
+      - `GetPlayerFromTag`
+      - `TournamentPlayers`（Web に出す用。ロックの中で選手 dict ごと深いコピーを取る。`/playerdb` と `ws_playerdb` はこのコピーをシリアライズする）
+      - `Get` / `GetPlayerFromTag` / `Items` が返す選手 dict は生のまま（GUI 側の呼び出し元用。旧実装どおり）。ロックの外で書き換えないことを docstring に書いた
+    - 変更は `changed`（`ObserverChannel`）で通知する。複数の購読者に同期で渡し、購読者ごとに例外を隔離する
+      - 通知は LoadDB / AddPlayers（`deferRefresh` のとき以外）/ DeletePlayer / `NotifyChanged()` で 1 回ずつ
+      - 必ずロックの外で出す
+    - `SaveDB` はアトミックにした
+      - ロックの中ではシリアライズ（JSON の文字列化）だけを行い、書き込み・置き換え・再試行はロックの外で行う
+      - 書き込みどうしは保存専用のロック（`_saveLock`）で直列化する。スナップショットに番号を振り、古いスナップショットが新しいものの後に書かれないようにした
+      - 同じディレクトリに mkstemp で書いてから `os.replace` する。Windows の共有違反に備えて 4 回試行する（再試行 3 回。間隔は 20 / 40 / 80 ms）
+      - 4 回とも置き換えに失敗したとき、または一時ファイルを作れないときは、旧実装と同じ上書き（truncate → write）にフォールバックする。旧実装で保存できていた環境で、保存できなくなることはない
+      - 一時ファイルは成否にかかわらずその場で消す。`LoadDB` のときに、クラッシュで残った古い `local_players.*.tmp` を掃除する
+      - テキストモードで書くので、バイトは旧実装の `open(path, 'wt')`（改行は `os.linesep`）と同じ。初回の `[]` も同じ経路で書く
+    - `tournamentTags` の操作は `SetTournamentTags` / `ClearTournamentTags`（消すものが無ければ False を返す）
+  - `src/AutonaPlayerDB.py`: Qt アダプタにした
+    - 残したもの: `model`、`completerModel`（`_TournamentEntrantsProxy` は `PlayerDB.instance.tournamentTags` を読む）、`_retiredModel`、`modelEnabled`、`EnableModel()`、`SetupModel`、`_BuildModel`、`GetCompleterModel`、`SetTournamentPlayers`、`ClearTournamentPlayers`、`signals.db_updated`
+    - `Attach()`（新規）が `SetupModel` を `PlayerDB.instance.changed` に購読させる（冪等）。`PlayerDB.instance` が差し替わっていたら、古い DB の購読を外してから新しい DB に付け替える
+    - `_BuildModel` は `modelLock` → `db.lock` の順にロックを取る。本体（mains の正規化を含む）は旧実装のまま。`db_updated` の emit は両方のロックを放してから行う
+  - `src/bootstrap.py`
+    - `bootstrap_core()` で `BadWordFilter.instance` を作って `Initialize()` する。位置は旧 `AutonaBadWordFilter.Initialize()` と同じ（`AutonaLocaleHelper.Initialize()` の後）
+    - `GameAssetCatalog.ResetGameState()` の後、StartGG の前で `PlayerDB.instance` を作り、`AutonaPlayerDB.Attach()` を呼ぶ
+    - `bootstrap_gui()` の手順（`EnableModel()` と onLoad → `SetupModel`）は変えていない
+    - `ORDER CONSTRAINT:` コメントを更新した
+  - 呼び出し側のデータの操作を `PlayerDB.instance` へ向けた。モデルと `db_updated` の使い方はそのまま
+    - StartGG: `PlayerTag`、`AddPlayers(deferRefresh=True)`、最後に `SaveDB()` → `AutonaPlayerDB.SetTournamentPlayers()` → `NotifyChanged()`
+    - 選手カード: Get / AddPlayers(overwrite) / Contains / DeletePlayer
+    - 実況: GetPlayerFromTag
+    - 選手ブラウザ: GetPlayerFromTag / Items / Get / DeletePlayer
+    - RESULT: AddPlayers / Get
+    - スコアボード: UpdateSetData の DB マージ / GetPlayerFromTag
+    - `AutonaWebOperations.get_playerdb`: `TournamentPlayers()`
+    - `Autona.py` / `headless.py`: `LoadDB()`
+- **判断と理由**
+  1. **国の言語表は core でロードせず、注入にした**
+     - `data_countries.json` は、両シェルで `bootstrap_core()` の `AutonaLocaleHelper.Initialize()` がすでに読んでいる。core でもう一度読むと、読み手が 2 つになる
+     - 注入は `AutonaActions.formatMatchText`・`TournamentInfoService.formatEventDate`・カタログの `locales=` と同じ形
+     - callable は検閲のたびに呼ぶので、`bootstrap_core()` の後に走る `LoadLocale()` の結果も反映される
+     - `GetCountrySpokenLanguages` / `GetCountryContinent` を読むのはこのフィルタだけ。表ごと core へ移すのは、必要になった段でできる
+  2. **中継（`AutonaPlayerDB.Attach()`）は `bootstrap_gui()` ではなく `bootstrap_core()` に置いた**
+     - ヘッドレスでも `db_updated` → Web サーバーの `ws_playerdb` が要る。発火元は entrants の取得の終わり（`NotifyChanged`）・追加・削除
+     - 中継が使うのは QtCore だけ（`gui_thread_sync` と Signal）。`StateManagerBridge` と同じ配置
+     - `AutonaPlayerDB.py` を `tests/test_signal_lifetime.py` の購読許可リストに足した。process と同じ寿命の static クラスなので、強参照の購読が受け手より長く残ることはない
+  3. **呼び出し側は `PlayerDB.instance` を直接呼ぶ。`AutonaPlayerDB.database` などの互換プロパティは作らない**
+     - dict を直接読ませると、ロックを素通りする
+     - 悪語フィルタは呼び出し側が多いので、範囲を広げないために互換層を残した
+  4. **`db_updated` の回数は変えない**
+     - 旧実装が `SetupModel()` を呼んでいた箇所（LoadDB / AddPlayers（defer 以外）/ DeletePlayer / entrants 取得の終わり）で、core が 1 回ずつ通知する
+     - ゲームのロードは従来どおり `SetupModel` に直結している
+     - emit はロックを放した後にした。スロットの中にモデルを作り直すものは無い（`modelLock` は再入できない）
+  5. **通知はロックの外で出す**
+     - アダプタの購読者は、ワーカーから呼ばれると GUI スレッドに渡して待つ。GUI スレッドのモデル構築は `db.lock` を取る。ロック中に通知すると、ワーカーと GUI スレッドが互いを待つ
+     - ロック順は `modelLock` → `db.lock` → `SettingsManager.lock`（`_AddPlayer` が `disable_overwrite` を読む）
+     - `SaveDB` もロックを持ったまま待たない。ロックの中はシリアライズだけで、書き込みは保存専用のロックで直列化する（ロック順は `db.lock` → `_saveLock` の一方向）
+  6. **既存バグは直さず、golden で固定した**（範囲外）
+     - 悪語フィルタのログ行（`logger.info(value, "->", newString)`）が、`{name}` を含む値で `KeyError` を出す
+     - `AddPlayers` のマージで、`newMains` のリストが複数のゲームで共有される
+     - overwrite での mains の更新は、DB 側の mains が文字列 `"{}"` だと失敗する（ログだけ）
+     - 濁点・半濁点を含む語（例: 「ほげ」）は一致しない。`remove_accents_lower` で検査する文字列の側だけ濁点が落ちるため
+     - `CensorDict` は list の中を検閲しない
+  7. **mains の正規化はアダプタに残した**（S3c-2 判断 5 のまま。core に移すかは S3e-3 で決める）
+- **エラー時だけの変化**
+  - `AddPlayers` / `DeletePlayer` の中で `SetupModel` が例外を出したとき、旧実装では呼び出し元に例外が伝わった
+  - 今は `ObserverChannel` がログに出して握る（保存は済んでいる）
+- **pin**
+  - `tests/test_bad_word_filter.py`（新規）
+    - 旧実装で録った `tests/fixtures/bad_word_filter/golden.json` を、新しいクラスで再生する
+      - 中身は、合成の単語リストで 10 ロケール × 11 国 × 33 値と、dict・None・設定オフの結果
+      - 録り方は同じフォルダの `record_golden.py`
+    - loguru のシンクを付けて、ログ行の `KeyError` も再現する
+    - callable を渡さないときの既定値と、互換層の転送も見る
+  - `tests/test_player_db.py`（新規）
+    - 旧実装で録った `tests/fixtures/player_db/golden.json` で照合する
+      - シナリオは 7 つ: ロード → 保存、追加の全分岐、削除、初回起動、旧 CSV の取り込みと無視、`GetPlayerFromTag`
+      - 各ステップの後に、ファイルのバイト、CSV の有無、メモリ上の DB（ソートしない `json.dumps` で比べ、選手の並びと各選手のキー順も固定）、`TournamentPlayers()`（= `/playerdb` の中身）を見る
+    - 通知: 回数、全購読者に届くこと、ロックの外で出ること、購読者の例外
+    - 保存
+      - 置き換えが成功するまで元のファイルは変わらない。一時ファイルは残らない
+      - 一時的な失敗は再試行する。4 回とも失敗したとき・一時ファイルを作れないときは上書きで保存される
+      - 書き込みはロックの外で行い、古いスナップショットは新しいものの後に書かれない
+      - `LoadDB` が古い一時ファイルを消し、ほかのファイルは消さない
+    - 読み手とワーカーの並行（`TournamentPlayers()` の JSON 化を含む）、大会での絞り込み、Web に出すコピーが深いこと
+    - start.gg の entrants 取得の終わりが `SaveDB` → `SetTournamentPlayers` → `NotifyChanged` の順であること（`StartGGDataProvider.py` を AST で読む）
+    - アダプタ経由
+      - `db_updated` が操作ごとに 1 回、GUI スレッドで出る
+      - ワーカーからの entrants 取得の形でも詰まらず、`db_updated` が 1 回出る
+      - モデル構築が mains を正規化する
+      - `Attach()` が差し替わった instance へ購読を移す
+      - fixture は終わりに、セッションの DB への中継と `model` / `completerModel` / `_retiredModel` を元に戻す
+  - `tests/test_core_qt_free.py`: 2 モジュールが core の検査対象に入っていることを pin する
+  - `tests/test_import_side_effects.py`: 2 モジュールの import に副作用が無いこと。構築・`Initialize()`・`LoadDB()` の陽性対照も足した
+  - `tests/test_bootstrap_split.py`
+    - 手順の並び
+    - 注入した callable がロケールと国の表を読むこと
+    - 中継の購読が 1 本だけであること
+- **残置 / リスク**
+  - `Get()` / `GetPlayerFromTag()` / `Items()` は生の選手 dict を返す（GUI 側の呼び出し元用。旧実装どおり）。ロックの外で書き換えない約束は docstring だけで、強制はしていない
+  - `TournamentPlayers()` は呼ぶたびに DB 全体（大会中は出場者分）を深いコピーする。`db_updated` ごとに 1 回で、3,000 人で約 9 ms（手元の計測。その間 DB のロックを持つ）
+  - 上書きへのフォールバックは旧実装と同じく、書き込みの途中で落ちると壊れたファイルが残りうる（置き換えが 4 回とも失敗したときだけの経路）
+  - `AutonaPlayerDB.modelLock` は `multiprocessing.Lock` のまま（既存）
+- **実機確認（オーナー）**
+  - デスクトップ
+    - 選手カードで選手を保存 / 上書き保存 / 削除する → `user_data/local_players.json` に反映され、形式（インデント・並び・項目）が変わらない。名前欄の補完にも出る
+    - 選手ブラウザ（PLAYERS）で一覧・検索・編集・削除ができる
+    - ゲームを切り替えた後、補完のアイコン（メインキャラ）が出る
+    - start.gg の大会を読み込む → 補完候補が出場者に絞られる。大会 URL を消すと全員に戻る
+    - RESULT の取り込みで、選手が DB に入る
+    - 悪語フィルタ（設定 ON）: 名前に NG ワードを入れると `***` になる（日本語 UI、海外選手の国）
+  - ヘッドレス（`python main.py --headless`）
+    - `/playerdb` の内容がデスクトップと同じ
+    - start.gg の取り込み後、Web UI の選手候補が更新される

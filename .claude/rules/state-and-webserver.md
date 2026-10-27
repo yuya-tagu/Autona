@@ -359,4 +359,16 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
 - `AutonaCountryHelper` / `AutonaLocaleHelper` はシグナルを持つ。変更通知が必要な場面で使う
   （`AutonaCountryHelper` は ADR-005 S1c 以降、国モデル `countryModel` と `countriesAboutToReload` / `countriesUpdated` だけを持つ
   Qt アダプタ。国・地域のデータは `core/CountryCatalog` を読む）
-- `AutonaBadWordFilter` は Trie ベース。パフォーマンスに配慮されている
+- 悪語フィルタの正本は `core/BadWordFilter.py`（Trie ベース。ADR-005 S3e-1）。`BadWordFilter.instance` は `bootstrap_core()` が作り、
+  プログラムのロケールと国 → 言語 / 大陸の表を `AutonaLocaleHelper` から callable で注入する（呼ぶたびに読む）。
+  `Helpers/AutonaBadWordFilter` は呼び出し側（選手カード・実況）を変えないための転送だけの互換層
+- 選手 DB の正本は `core/PlayerDB.py`（`PlayerDB.instance`。ADR-005 S3e-1）。`database` は `lock`（RLock）で守り、外からは
+  `Get` / `Contains` / `Items` / `GetPlayerFromTag` / `TournamentPlayers` で読む（dict を直接回さない。entrants のワーカーが書いている）。
+  `Get` 系が返す選手 dict は生（GUI 側用。ロックの外で書き換えない）。プロセスの外へ出すもの（`/playerdb`・`ws_playerdb`）は
+  `TournamentPlayers()` の深いコピーをシリアライズする。保存はロックの中で JSON 文字列にするだけで、書き込みはロックの外
+  （保存専用のロックと世代番号で直列化。mkstemp → `os.replace` を 4 回試行し、だめなら旧実装と同じ上書き。`local_players.json` の
+  バイトは旧実装と同じ）。変更は `changed`（ObserverChannel）で
+  **ロックの外から**通知する。`AutonaPlayerDB` は補完モデルと `signals.db_updated` だけの Qt アダプタで、`bootstrap_core()` の
+  `Attach()` が `changed` → `SetupModel`（GUI スレッドで `db_updated`）を中継する（process 寿命の static クラスなので
+  `tests/test_signal_lifetime.py` の購読許可リストに入っている）。選手データの読み書きは `PlayerDB.instance` を呼び、
+  `AutonaPlayerDB` にデータの操作を足さない

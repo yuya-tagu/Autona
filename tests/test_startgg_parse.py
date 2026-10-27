@@ -160,6 +160,11 @@ def _setup_mock_modules():
             "src.AutonaPlayerDB",
             {"AutonaPlayerDB": MagicMock()},
         ),
+        # The entrants worker's DB writes (ADR-005 S3e-1); not exercised here.
+        "src.core.PlayerDB": _make_mock_module(
+            "src.core.PlayerDB",
+            {"PlayerDB": MagicMock()},
+        ),
         "src.AutonaBracket": _make_mock_module(
             "src.AutonaBracket",
             {"is_power_of_two": lambda x: x & (x - 1) == 0 and x > 0},

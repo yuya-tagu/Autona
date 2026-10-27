@@ -167,6 +167,16 @@ def test_the_core_package_imports_without_qt(tmp_path):
     assert "OK" in result.stdout
 
 
+def test_the_extracted_parts_are_checked_as_core_modules():
+    # The discovery above covers every module under src/core; this only
+    # pins that the parts lifted out of Qt classes stay there, so the import
+    # check keeps covering them. ADR-005 S3e-1: the bad-word filter (was
+    # Helpers/AutonaBadWordFilter, Qt through AutonaLocaleHelper) and the
+    # player DB's data (was AutonaPlayerDB, next to its QStandardItemModel).
+    assert {"src.core.BadWordFilter", "src.core.PlayerDB"} <= set(
+        _core_modules())
+
+
 def test_no_core_module_mentions_a_qt_binding():
     """Fast structural check, run before the subprocess pays for a fork.
 

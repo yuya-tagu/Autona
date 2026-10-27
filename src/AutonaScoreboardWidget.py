@@ -31,7 +31,7 @@ from .StateManagerBridge import StateManagerBridge
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaStatsUtil import AutonaStatsUtil
 from .AutonaHotkeys import AutonaHotkeys
-from .AutonaPlayerDB import AutonaPlayerDB
+from .core.PlayerDB import PlayerDB
 
 from .thumbnail import main_generate_thumbnail as thumbnail
 from .AutonaThumbnailSettingsWidget import *
@@ -2565,9 +2565,9 @@ class AutonaScoreboardWidget(QWidget):
 
         if SettingsManager.Get("general.disable_overwrite", False):
             for entrant in data.get("entrants"):
-                if (entrant[0].get("gamerTag") in AutonaPlayerDB.database):
-                    entrant[0] = entrant[0] | AutonaPlayerDB.database[entrant[0].get(
-                        "gamerTag")]
+                dbPlayer = PlayerDB.instance.Get(entrant[0].get("gamerTag"))
+                if dbPlayer is not None:
+                    entrant[0] = entrant[0] | dbPlayer
 
         self.ChangeSetData(data)
 
@@ -2580,7 +2580,7 @@ class AutonaScoreboardWidget(QWidget):
         if StateManager.Get(f"{self.statePrefix}.teamsSwapped", False):
             teamInstances.reverse()
 
-        playerData = AutonaPlayerDB.GetPlayerFromTag(tag)
+        playerData = PlayerDB.instance.GetPlayerFromTag(tag)
         if playerData:
             teamInstances[team][player].SetData(
                     playerData, False, True, no_mains)

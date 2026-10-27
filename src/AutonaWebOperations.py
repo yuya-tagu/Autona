@@ -42,7 +42,7 @@ from .core.CountryCatalog import CountryCatalog
 from .core.GameAssetCatalog import GameAssetCatalog
 from .core.SettingsManager import SettingsManager
 from .core.SetLoadService import SetLoadService
-from .AutonaPlayerDB import AutonaPlayerDB
+from .core.PlayerDB import PlayerDB
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaQtHelper import gui_thread_sync, in_gui_thread
@@ -301,13 +301,11 @@ def get_match(setId=None):
 def get_playerdb():
     # Same rule as the desktop name completers: only the loaded
     # tournament's entrants when one is loaded, the whole DB otherwise.
-    # Clients receive this on (re)connect.
-    tags = AutonaPlayerDB.tournamentTags
-    if tags:
-        return {tag: player
-                for tag, player in AutonaPlayerDB.database.items()
-                if tag in tags}
-    return AutonaPlayerDB.database
+    # Clients receive this on (re)connect and on every db_updated. A deep
+    # copy taken under the DB's lock: the entrants worker and the model
+    # build change player dicts in place, and this is serialised (Flask /
+    # Socket.IO) after the lock is released.
+    return PlayerDB.instance.TournamentPlayers()
 
 
 # ── the tournament ───────────────────────────────────────────────────────

@@ -420,6 +420,7 @@ def Assemble(app, shell=None):
 
     from . import AutonaWebOperations
     from .AutonaPlayerDB import AutonaPlayerDB
+    from .core.PlayerDB import PlayerDB
     from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
     from .AutonaWebServer import WebServer, log_webserver_port
     from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
@@ -450,7 +451,7 @@ def Assemble(app, shell=None):
 
     wire_tournament_data(on_failure=_OnTournamentLoadFailed)
 
-    AutonaPlayerDB.LoadDB()
+    PlayerDB.instance.LoadDB()
 
     def onStartFailed(error):
         # Serving is all this shell does: a process that cannot is ended

@@ -345,7 +345,7 @@ Header / CurrentSet / Team / Player / SetScore / CharSelector / UpcomingSets / C
 
 ## 22. ローカル選手 DB
 
-[src/AutonaPlayerDB.py](../../src/AutonaPlayerDB.py)。
+[src/core/PlayerDB.py](../../src/core/PlayerDB.py)（データ。Qt の補完モデルは [src/AutonaPlayerDB.py](../../src/AutonaPlayerDB.py)）。
 
 - 保存先: `user_data/local_players.json`
 - 項目: prefix / gamerTag / name / twitter / country_code / state_code / mains / pronoun / custom_textbox
@@ -457,7 +457,7 @@ Help & Settings メニュー。
 - ISO 国コード / 米国州コードの国旗マスタ
 
 ### 下品表現フィルター
-[src/Helpers/AutonaBadWordFilter.py](../../src/Helpers/AutonaBadWordFilter.py)。
+[src/core/BadWordFilter.py](../../src/core/BadWordFilter.py)。
 - タグ・本名の NG ワード警告・差し替え
 
 ### Twitch ユーザー名設定

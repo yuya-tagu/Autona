@@ -82,10 +82,18 @@ ALLOWED_LAMBDA_CONNECTIONS = {
 # once by bootstrap_core(), lives for the whole process, and refuses a second
 # construction, so its four subscriptions can never be stale or duplicated.
 #
+#
+# The player DB's Qt adapter is the same arrangement for the core PlayerDB
+# (ADR-005 S3e-1): a static class, alive for the whole process, whose
+# Attach() -- called once by bootstrap_core(), idempotent -- subscribes its
+# SetupModel to PlayerDB.changed so the core's announcements become
+# db_updated on the GUI thread.
+#
 # Do not add a widget here. A widget cannot hold this kind of subscription
 # safely -- see the module docstring -- and the fix is always the same:
-# connect to StateManagerBridge.instance instead.
-ALLOWED_OBSERVER_SUBSCRIBERS = {"StateManagerBridge.py"}
+# connect to StateManagerBridge.instance (or AutonaPlayerDB.signals)
+# instead.
+ALLOWED_OBSERVER_SUBSCRIBERS = {"StateManagerBridge.py", "AutonaPlayerDB.py"}
 
 
 def _lambda_connections():

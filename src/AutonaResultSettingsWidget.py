@@ -13,7 +13,7 @@ from .core.SettingsManager import SettingsManager
 from .core.StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
-from .AutonaPlayerDB import AutonaPlayerDB
+from .core.PlayerDB import PlayerDB
 from .Helpers.AutonaDirHelper import AutonaResolve
 from .Helpers.AutonaQtHelper import NoIconProxyModel
 from .AutonaFeatureColors import FEATURE_RESULT, MakeFeatureColorCard
@@ -674,7 +674,7 @@ class AutonaResultSettingsWidget(QDockWidget):
         if not records:
             return 0
 
-        AutonaPlayerDB.AddPlayers(records, overwrite=False)
+        PlayerDB.instance.AddPlayers(records, overwrite=False)
         logger.info(f"RESULT: saved {len(records)} player(s) to the local DB")
         return len(records)
 
@@ -1265,8 +1265,8 @@ class AutonaResultSettingsWidget(QDockWidget):
                 raw = twitter_map.get(name, "")
             if not raw and name:
                 key = f"{sponsor} {name}".strip() if sponsor else name
-                rec = (AutonaPlayerDB.database.get(key)
-                       or AutonaPlayerDB.database.get(name) or {})
+                rec = (PlayerDB.instance.Get(key)
+                       or PlayerDB.instance.Get(name) or {})
                 raw = rec.get("twitter", "") or ""
             handle = raw.lstrip("@").strip()
             return f" @{handle}" if handle else ""

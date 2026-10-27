@@ -37,6 +37,7 @@ from .core.StateManager import StateManager
 from .core.SettingsManager import SettingsManager
 from .core import LayoutCatalog
 from .AutonaPlayerDB import AutonaPlayerDB
+from .core.PlayerDB import PlayerDB
 from .AutonaLayoutPreview import AutonaLayoutPreview, ObsUrl
 from .Helpers.AutonaBadWordFilter import AutonaBadWordFilter
 from .AutonaFeatureColors import FEATURE_COMMENTARY, MakeFeatureColorCard
@@ -55,7 +56,7 @@ DEFAULT_DESIGN = "commentators"
 CASTER_CARD_WIDTH = 280
 
 # card field <- PlayerDB-shaped dict key (completer pick, web SetData and
-# load-from-tag all deliver this shape; see AutonaPlayerDB.fieldnames).
+# load-from-tag all deliver this shape; see core.PlayerDB.fieldnames).
 PLAYERDB_FIELD_MAP = [
     ("name", "gamerTag"),
     ("team", "prefix"),
@@ -429,7 +430,7 @@ class AutonaCommentaryWidget(QDockWidget):
         slot = str(index + 1)
         if slot not in self.casterInputs:
             return False
-        player = AutonaPlayerDB.GetPlayerFromTag(str(tag))
+        player = PlayerDB.instance.GetPlayerFromTag(str(tag))
         if not player:
             return False
         self._applyPlayerData(self.casterInputs[slot], player)

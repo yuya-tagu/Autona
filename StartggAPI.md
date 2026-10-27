@@ -250,7 +250,7 @@ Start.gg の `fullRoundText`（"Winners Round 1" 等）を `AutonaLocaleHelper.m
 
 | クエリ | perPage | 注意 |
 |-------|---------|------|
-| EventEntrantsListQuery | 64 | 全ページ走査必須。`AutonaPlayerDB.AddPlayers(deferRefresh=True)` で各ページ累積 → 最後に 1 回 `SaveDB()` + `SetupModel()` ([StartGGDataProvider.py:1929-1937](src/TournamentDataProvider/StartGGDataProvider.py:1929)) |
+| EventEntrantsListQuery | 64 | 全ページ走査必須。`PlayerDB.instance.AddPlayers(deferRefresh=True)` で各ページ累積 → 最後に 1 回 `PlayerDB.instance.SaveDB()` → `AutonaPlayerDB.SetTournamentPlayers(entrant_tags)` → `PlayerDB.instance.NotifyChanged()`（補完モデルの作り直しと `db_updated`）([StartGGDataProvider.py:2057-2067](src/TournamentDataProvider/StartGGDataProvider.py:2057)。順序は `tests/test_player_db.py` が pin) |
 | EventMatchListQuery (SetsQuery) | 64 | キャンセル可能（`cancel_event.is_set()` 監視） |
 | TournamentPhaseGroupQuery seeds | 500 | 1 ページ固定。500 超 の bracket は未対応 |
 | TournamentPhaseGroupQuery sets | 9999 | 1 ページ固定 |
