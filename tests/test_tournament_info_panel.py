@@ -379,3 +379,67 @@ def test_the_game_combo_catches_up_on_the_assets_already_loaded(
              for i in range(panel.gameTitleCombo.count())]
 
     assert "Harness Game" in texts
+
+
+@pytest.mark.parametrize("executorUp", [True, False],
+                         ids=["fetched", "the app is quitting"])
+def test_the_media_download_gives_the_button_back_and_clears_its_status(
+        autonaApp, panel, monkeypatch, executorUp):
+    """ADR-005 S3f-2: the icon / banner download is a job of the task
+    executor whose answer reaches the panel through the GUI executor. It used
+    to come back through a Worker's signals, which the garbage collector
+    could take first: the button then stayed disabled and the footer status
+    stayed up. Nothing of the call is kept here, and a collection runs while
+    the job is in flight. When the executor has shut down nothing runs and
+    the button is given back at once."""
+    import gc
+    import threading
+    from types import SimpleNamespace
+
+    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
+    from src.core.TaskExecutor import TaskExecutor
+    from src.Helpers.AutonaStatusManager import AutonaStatusManager
+
+    if not executorUp:
+        assert TaskExecutor.instance.drain(10)
+        stopped = TaskExecutor()
+        stopped.shutdown(10)
+        monkeypatch.setattr(TaskExecutor, "instance", stopped)
+
+    gate = threading.Event()
+
+    def noUrl():
+        assert gate.wait(10)
+        return None  # no icon / banner: nothing is requested
+
+    monkeypatch.setattr(AutonaTournamentDataProvider.instance, "provider",
+                        SimpleNamespace(GetIconURL=noUrl, GetBannerURL=noUrl))
+    statuses = []
+    push, pop = AutonaStatusManager.push, AutonaStatusManager.pop
+    monkeypatch.setattr(
+        AutonaStatusManager, "push",
+        lambda message, *args: statuses.append(("push", push(message, *args)))
+        or statuses[-1][1])
+    monkeypatch.setattr(AutonaStatusManager, "pop",
+                        lambda token: (statuses.append(("pop", token)),
+                                       pop(token)))
+
+    panel._OnDownloadMedia()
+    if not executorUp:
+        assert panel.btDownloadMedia.isEnabled()
+        assert statuses == []
+        return
+    assert not panel.btDownloadMedia.isEnabled()
+
+    gc.collect()
+    gate.set()
+    assert TaskExecutor.instance.drain(10)
+    gc.collect()
+    deadline = time.monotonic() + 10
+    while (not panel.btDownloadMedia.isEnabled()
+           and time.monotonic() < deadline):
+        QCoreApplication.processEvents()
+
+    assert panel.btDownloadMedia.isEnabled()
+    assert [kind for kind, _token in statuses] == ["push", "pop"]
+    assert statuses[0][1] == statuses[1][1]

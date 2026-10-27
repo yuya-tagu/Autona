@@ -93,8 +93,9 @@ def main():
     result["settings_url"] = SettingsManager.Get("TOURNAMENT_URL")
 
     # (d) UiMounted() re-fetches from the live API on that URL. The result
-    # arrives on a queued connection from a QThreadPool worker, so it needs
-    # a running event loop to be delivered.
+    # is handed from a task executor job to the GUI thread through a queued
+    # connection (the gui executor), so it needs a running event loop to be
+    # delivered.
     received = {}
     loop = QEventLoop()
 
@@ -123,8 +124,8 @@ def main():
     sys.stdout.flush()
     sys.stderr.flush()
 
-    # SetTournament also kicked off the entrant fetch, and a QThreadPool
-    # joins its running tasks when it is destroyed. Nothing left is doing
+    # SetTournament also kicked off the entrant fetch, and the task
+    # executor's job threads are joined at interpreter exit. Nothing left is doing
     # work that matters (program_state.json and the store are written
     # atomically), so leave rather than wait out a page-by-page entrant
     # download.

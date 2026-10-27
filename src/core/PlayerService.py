@@ -990,8 +990,9 @@ class PlayerService:
 
         Called with no lock held -- a board host's included: the database
         announces the change (PlayerDB.changed), and its relay rebuilds the
-        completer model on the main thread and waits for it
-        (AutonaPlayerDB.SetupModel, both shells; ADR-005 S3e-4 review).
+        completer model on the main thread (AutonaPlayerDB.SetupModel, both
+        shells; ADR-005 S3e-4 review), which until ADR-005 S3f-2 also waited
+        for it.
 
         Saves of one player can therefore reach here out of the order their
         slots were read in (two Web edits, each saved after its board host

@@ -6,10 +6,9 @@ ask; this file used to be one object per board, owning the trigger signals
 the player cards drove). What is left is the transport, registered once by
 bootstrap_core() as `StatsService.fetcher`:
 
-- a request goes to the tournament provider (`AutonaTournamentDataProvider`,
-  whose Worker / QThreadPool machinery is unchanged: the fetch runs on its
-  thread pool, as before);
-- its answer comes back on the main thread. The provider's worker calls
+- a request goes to the tournament provider (`AutonaTournamentDataProvider`;
+  the fetch runs as a job of the core task executor since ADR-005 S3f-2);
+- its answer comes back on the main thread. The provider's job calls
   `callback.emit(data)` from its own thread; the callback handed to it here
   re-emits that on `answered`, a queued signal to a QObject living on the
   main thread. The payload crosses as the `dict` it always crossed as --

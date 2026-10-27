@@ -1358,12 +1358,13 @@ def test_headless_statistics_from_a_request_thread_to_the_state(
     """All the way, headless, with only the network faked: a request on a
     thread of its own (the server's) asks through the route, WebOps and
     StatsService; the fetcher bootstrap registered (AutonaStatsUtil) hands
-    it to the tournament provider's thread pool, where the real Start.gg
-    provider queries and parses; the answer is written on the main thread
-    (ADR-005 S3e-5 review)."""
+    it to the tournament provider adapter, whose job (the task executor's,
+    ADR-005 S3f-2) runs the real Start.gg provider's query and parse; the
+    answer is written on the main thread (ADR-005 S3e-5 review)."""
     from src.AutonaStatsUtil import AutonaStatsUtil
     from src.AutonaTournamentDataProvider import         AutonaTournamentDataProvider
     from src.core.StatsService import StatsService
+    from src.core.TaskExecutor import TaskExecutor
     from src.TournamentDataProvider.StartGGDataProvider import         StartGGDataProvider
 
     assert isinstance(StatsService.fetcher, AutonaStatsUtil)
@@ -1379,8 +1380,7 @@ def test_headless_statistics_from_a_request_thread_to_the_state(
         autonaApp.settle()
 
         startgg = StartGGDataProvider(
-            "https://www.start.gg/tournament/t/event/e", adapter.threadPool,
-            adapter)
+            "https://www.start.gg/tournament/t/event/e", None, adapter)
         queries = []
 
         def query(url=None, type=None, headers={}, jsonParams=None,
@@ -1416,7 +1416,7 @@ def test_headless_statistics_from_a_request_thread_to_the_state(
         while not writes and time.monotonic() < deadline:
             autonaApp.settle()
             time.sleep(0.02)
-        assert adapter.threadPool.waitForDone(10000)
+        assert TaskExecutor.instance.drain(10)
         autonaApp.settle()
 
         assert [(name, variables) for _, name, variables in queries] == [
@@ -1434,7 +1434,7 @@ def test_headless_statistics_from_a_request_thread_to_the_state(
             "player_name": "ONE", "oponent_score": 1, "oponent_seed": 4,
             "oponent_team": None, "oponent_name": "THREE"}
     finally:
-        adapter.threadPool.waitForDone(10000)
+        TaskExecutor.instance.drain(10)
         _dropHeadlessBoards(autonaApp)
 
 

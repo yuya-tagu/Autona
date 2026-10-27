@@ -3404,3 +3404,124 @@ Socket.IO の delta の送出を、バッチごとの `threading.Timer` から�
 - **実機確認（オーナー）**
   - デスクトップ: スコア +1 などの単発操作が OBS / Web UI に即時反映される。セット読込などのまとまった変更が今どおり反映される（Web UI が全量を取り直し続けない）
   - デスクトップ・ヘッドレス: 終了が今どおり（固まらない。`logs/` に `delta flusher still sending` が出ない）
+
+#### S3f-2 provider アダプタの移行（2026-10-28）
+
+provider アダプタ（`AutonaTournamentDataProvider`）の取得 9 本・`RunWithProvider`・EVENT パネルのアイコン / バナー取得を、`TaskExecutor` のジョブと `gui_executor` での配送に移した。アダプタと EVENT パネルの `Worker` / `QThreadPool` は 0。公開シグナルの名前・引数・回数・発火スレッドは変えていない。
+
+- **実装**
+  - `src/AutonaTournamentDataProvider.py`
+    - `_Fetch(taskName, fetch, then, **kwargs)`: provider のメソッドを Worker と同じ引数（`progress_callback` / `cancel_event`）でジョブとして呼び、`then` から `gui_executor` で GUI スレッドへ渡す
+      - 答えを配るもの: `GetTournamentData` / `GetTournamentPhases` / `GetAnalysisPhaseGroup` / `LoadSets` / `LoadStations` / `GetStandings`
+      - provider が `callback.emit` を自分で呼ぶもの: `GetRecentSets` / `GetLastSets` / `GetPlayerHistoryStandings`
+    - `RunWithProvider`: ジョブとして走らせる。停止後は取り消し済みの Future が返るので False
+    - `LoadSets`: 前の読込の cancel event を立て、世代番号を進める。進捗と一覧は、世代が最新のときだけ GUI スレッドで出す。同じ GUI executor のキューを通るので、進捗 → 一覧の順になる
+    - `CancelSetLoad()`: 読込中のセット一覧を止める（cancel event を立てて世代を進める）。セット選択ウィンドウの `LoadSelectedSet` が、旧 `setLoadingWorker` の取り消しの代わりに呼ぶ。自分の読込だったら、ボタンを戻して待ちの状態を捨てる（今どおり）
+    - entrants の取得に大会ごとの cancel event を持たせた（`_StartEntrants` / `_CancelEntrants`）。`SetTournament`（別の大会・強制再読込・クリア）が、前の取得の event を立ててから次へ進む
+    - 停止後の答えを配らない（`_Stopping`）。`_Fetch` の `then` からの配送と、provider が自分で emit する統計の `callback`（`_UnlessStopping` で包む）の両方
+    - `self.threadPool` と `setLoadingWorker` を削除した。provider は `StartGGDataProvider(url, None, self)` で作る
+  - `src/TournamentDataProvider/TournamentDataProvider.py`: `threadpool` が None なら `QThreadPool.globalInstance()` を使う（S3f-3 で引数ごと消す）
+  - `src/TournamentDataProvider/StartGGDataProvider.py`
+    - `GetEntrants(cancel_event=None)`: ジョブにした（`start.gg entrants`）
+    - `QueryRequests`: 各試行の前に `stopping` を見て、立っていれば `{}` を返す。バックオフは `stopping.wait` で待ち、終了で打ち切る（間隔・タイムアウト値は不変。pitfalls #11）
+    - `GetEntrantsWorker`: ページの間と、ループの後で `stopping` と大会の cancel event を見て、保存・通知をせずに終わる（打ち切られたリクエストは `{}` = 0 ページに見えるため、ループの後でも見る）。ステータスは今どおり finally で消す
+  - `src/AutonaTournamentInfoWidget.py`: アイコン / バナー取得をジョブにした
+    - ステータスは、ジョブの中で push し、finally で pop する
+    - 答えと例外は `then` / `on_error` から GUI スレッドへ渡す
+    - リクエストの間で `stopping` を見る
+    - 停止後（Future が取り消し済み）は、すぐ `on_finished` を呼ぶ
+  - `src/Helpers/AutonaQtHelper.py`: `gui_thread_async`（待たない版の `gui_thread_sync`）を足した
+  - `src/AutonaPlayerDB.py`: `SetupModel` / `SetTournamentPlayers` / `ClearTournamentPlayers` を `gui_thread_async` に替えた。`SetTournamentPlayers(tags, cancel_event)` は、GUI スレッドで走る時点で event が立っていればタグを捨てる
+  - `src/AutonaSelectSetWindow.py`: `LoadSelectedSet` が `CancelSetLoad()` を呼ぶ（上記）
+  - `src/AutonaAnalysisWidget.py`: 同時取得数 `_PARALLEL_FETCHES` を 4 → 2（判断 7）
+  - `src/core/SetFollowService.py`: `Tick` は、前の tick の更新が答えるまで何も取得しない（判断 8）
+  - `src/AutonaSetFollowUtil.py`: 停止後の答えを配らない（判断 9）
+  - `src/core/Top8Service.py`: `RunWithProvider` が終了のために False を返したときは、「大会が無い」ではなく終了中としてログに残す
+  - `src/core/TaskExecutor.py`: テストの継ぎ目に 2 つ足した（`test_set_follow.py` がステップ実行の pool の待ち行列を直接触っていた `_runLast`（`queue.pop()`）/ `len(queue)` の置き換え先）
+    - `run_next(newest=True)`: 最後に積んだジョブから走らせる
+    - `queued()`: ステップ実行の待ち行列の数
+- **判断と理由**
+  1. **答えは `then` → `gui_executor` で配る**（S3f-1 判断 8 どおり）。呼び出しごとの QObject を作らないので、GC で答えが消える機構そのものが無くなる
+  2. **provider の `threadpool` 引数は残し、アダプタは None を渡す**
+     - S3f-3 で消すまでの間、アダプタに `QThreadPool` を残さないための形。None なら基底クラスが Qt の global pool を使う
+     - provider の入れ子の Worker（`GetMatch` / `GetRecentSets`）は、ジョブ用レーンとは別の pool で走る。待ちの向きは「ジョブ → global pool」だけなので、レーンどうしの飢餓は起きない（global pool 側の待ちは残置 / リスクを参照）
+     - `GetFutureMatchesList` は入れ子の Worker を作る前に落ちる。定義の無い `self.getStationMatchesThreadPool` を読んで AttributeError になり、セット追従の取得がログに残して終わる。このため、ステーションの後続セットは一度も取得されていない。この不具合は S3f-2 より前からあり（`git log -S` でも定義した履歴が無い）、S3f-3 で直す
+     - fan-out レーンへの仮の付け替え（`start()` → `submit_fanout`）は採らなかった。終了で取り消された fan-out は Worker の完了印が立たないので、`GetRecentSets` のタイムアウト無しの `wait_for_all` が永久に待ち、インタプリタ終了の join を止める
+  3. **選手 DB の中継 3 本を非同期にした**（論点 4 を広げた。S3f-1 の残置の条件）
+     - entrants の取得がジョブになると、`SetTournamentPlayers` と `PlayerDB.changed` → `SetupModel` の中継が、ジョブの中で GUI スレッドを待つ。イベントループが止まった後は戻らず、終了の join がそのジョブを待ち続ける
+     - GUI スレッドからの呼び出しは、今どおりその場で走る（`db_updated` の回数・順は不変。`test_player_db.py` の既存 pin がそのまま通る）
+     - 別スレッドからの呼び出しは同じキューに積まれるので、「タグ → モデルの再構築」の順は保たれる
+     - Web の選手保存（`SaveRecordToDB`）も待たなくなった。DB の記録は同期で書かれ、補完モデルと `db_updated` が後から追従する
+  4. **`LoadSets` の世代番号は、旧 `blockSignals` より厳しい**: 旧実装では、前の Worker のシグナルを止める前にキューへ入った答えが届きえた。今は GUI スレッドで世代を照合するので、キュー済みの答えも捨てる
+  5. **EVENT パネルのステータスは、ジョブの中で push / pop する**
+     - 旧実装は呼び出し時に push し、答えの配送で pop していた。配送が GC で消えると、ステータスが残った
+     - 今は同じジョブの finally で必ず対になる。代わりに、ジョブが待ち行列にいる間は出ない
+  6. **終了時に打ち切るのはリクエストの間だけ**: 実行中の 1 リクエスト（最大 20 秒）は止められない（requests に中断が無い）。リトライとバックオフは打ち切る
+  7. **分析タブの同時取得は 2 本**（レビュー指摘）
+     - 4 本だと job レーン（4 本。承認済みの設計どおり変えない）を全部使い切り、その間はセット一覧・追従・統計・entrants が 1 本も走れない
+     - 2 本なら、分析の実行中も 2 本が空く。分析の所要時間は伸びうるが、配信中の操作を止めない方を採った
+  8. **追従の tick は、前の更新が答えるまで何も取得しない**（レビュー指摘）
+     - start.gg が遅いと、5 秒ごとの tick が 2〜3 本ずつジョブを積み、待ち行列が伸び続けていた
+     - 印（`poll["fetching"]`）は tick の更新の要求番号。答え・失敗・開始できなかったときに消す。stream queue と照会は更新と同じ tick で出るので、まとめて止める
+     - 印は poll の dict に持つ。新しい poll（読込・追従のし直し）は印なしで始まり、`StopFollowing` で poll ごと消えるので、印が残り続けることはない。遅れた答えを要求番号で捨てる仕組みはそのまま
+  9. **停止後の答えは配らない**（レビュー指摘）
+     - 停止後は `QueryRequests` が `{}` を返し、それが「空の答え」として配られて、デスクトップの終了の 1 秒の間に空の `tournamentInfo` / `last_sets` を state に書きうる
+     - 停止の後に出た答えは、打ち切られたリクエストのものである。そこで、配る直前に job レーンのスレッドで `stopping` を見て捨てる: アダプタの `_Fetch` の `then` と統計の `callback`、セット追従の取得
+     - EVENT パネルの画像取得には足していない。停止後はリクエストせず、答えは (None, None) で、何も適用しない
+  10. **entrants の取得は大会ごとに取り消す**（レビュー指摘）
+      - 置き換えられた大会の取得がページを読み続け、最後に古いタグで `SetTournamentPlayers` を呼んで、新しい大会の絞り込み（または `ClearTournamentPlayers`）を上書きしていた
+      - event は GUI スレッドで、次の大会の絞り込みに触る前に立つ。そのため、GUI スレッドで走る `SetTournamentPlayers` が event を見れば、競合なく捨てられる。ジョブはページの間とループの後でも見て、早めにやめる
+- **pin（テスト）**
+  - `tests/test_provider_jobs.py`（新規）
+    - GC: 6 種の取得（大会データ・フェーズ・分析・ステーション・順位・セット一覧）が、GUI スレッドに 1 回だけ届く。呼び出し側は何も保持せず、ジョブの実行中と後に `gc.collect()` を挟む
+      - provider のメソッドは job レーンで、Worker と同じ引数で呼ばれる
+      - セット一覧は、進捗 → 一覧の順に届く
+    - `LoadSets`: 前の読込の答えがキュー済みでも、新しい読込の後には捨てられ、前の cancel event が立つ。`CancelSetLoad()` でも同じく捨てられ、event が立つ
+    - 統計 3 本: job レーンで、`callback` と Worker の引数付きで呼ばれる
+    - 停止後の答え: アダプタの取得・統計・セット追従の取得のどれも、停止の後に出た答えは GUI スレッドに届かない（`test_an_answer_made_after_the_stop_is_dropped`）
+    - `RunWithProvider`: job レーンで走り、ステータスが push / pop される。provider が無いとき・停止後は False を返し、何も走らない
+    - Start.gg の provider
+      - `GetEntrants` はジョブになる
+      - 停止後の `QueryRequests` はリクエストしない。失敗中に停止すると、バックオフが 1 秒未満で終わる
+      - entrants の取得は、ページの間・リクエストの打ち切り・別の大会の読込のどれで止まっても、保存・通知しない（止めない対照ケースは、保存 → タグ → 通知 → emit の順）。ステータスは必ず消える
+    - entrants の大会ごとの取り消し
+      - 別の大会・強制再読込・クリアで、前の取得の event が立つ。同じ大会の再設定では立たない
+      - 立った event のタグは、GUI スレッドで捨てられる
+    - `AutonaPlayerDB` の 3 本が `gui_thread_async` で、`gui_thread_sync` を import しない（AST）
+    - アダプタと EVENT パネルに `Worker` / `Workers` / `QThreadPool` / `threadPool` が無い（AST）
+    - `src` が `AutonaTournamentDataProvider.instance.<属性>` で読む属性が、すべて実在する（AST）。消した `setLoadingWorker` を読む旧 `AutonaSelectSetWindow` は、これで落ちることを確認した
+  - `tests/test_select_set_cache.py`
+    - アダプタのスタブに、実物のアダプタに無い公開メンバーが無い（スタブが API のずれを隠さない）
+    - 一覧の読込中にセットを選ぶと、`CancelSetLoad()` が 1 回呼ばれ、ボタンが戻る
+  - `tests/test_set_follow.py`: 前の tick の更新が答えるまで、tick は何も積まない。答え・例外・セットの無い答えのどれでも、次の tick は取得する（ガードを外すと 3 ケースとも落ちることを確認した）
+  - `tests/test_tournament_info_panel.py`
+    - アイコン / バナーの取得が、何も保持せず GC を挟んでも、ボタンを戻し、ステータスを push / pop する
+    - 停止後は、すぐボタンを戻す
+  - `tests/test_player_db.py`: `test_a_worker_change_reaches_db_updated_on_the_gui_thread` を書き換えた
+    - 旧テストは「ワーカーが終わるまで GUI のイベントを回す」形で、同期の待ちを前提にしていた
+    - 今は 2 段で pin する: イベントを回さなくてもワーカーが終わる（待たない）。イベントを回すと `db_updated` が 1 回出て、タグと補完の絞り込みが反映される
+  - `tests/test_task_executor.py`: `queued()` と `run_next(newest=True)`
+  - 継ぎ目の置き換え
+    - `test_set_follow_flow.py`: `_SteppedPool` → `TaskExecutor(stepped=True)`
+    - `test_set_follow.py`: `_pool()` → `_jobs()`、`_runLast` の `queue.pop()` → `run_next(newest=True)`。時計のスクリプトの `waitForDone` → `drain`
+    - `test_web_operations.py` / `test_top8_refresh.py`: `waitForDone` → `drain`
+    - `test_stats_util.py`: 即実行の pool → ステップ実行の executor
+    - `tests/live/conftest.py`: pool を渡さない
+    - `test_startgg_parse.py`: `sys.modules` の差し替えに `src.core.TaskExecutor` を足した
+- **残置 / リスク**
+  - job レーンは 4 本（旧 pool は理想スレッド数）。大会の読込でデータ・フェーズ・entrants（・アイコン）が同時に走り、entrants はページ数ぶん長く居座る。その間、セット一覧・追従・統計は後ろに並びうる
+  - 終了時、実行中のリクエストがインタプリタ終了の join で、プロセスの終わりを最大 20 秒遅らせうる（リトライとバックオフは打ち切る）
+  - provider の入れ子の Worker（`GetMatch` / `GetRecentSets`）は、S3f-3 まで Qt の global pool で走る（一時的に受け入れる）
+    - global pool が他の仕事で埋まっていると、Worker が走り出すまでの待ちが `GetMatch` の `wait_for_all` の 20 秒に含まれ、タイムアウトを食いうる
+    - その場合、セットの取得は id の無い答えになる。全読込なら「読込失敗」として次の tick・照会で読み直し、更新なら捨てて次の tick で取り直す
+  - `GetFutureMatchesList` は S3f-3 まで動かない（判断 2）
+  - 分析タブ・リザルトのコールバックは、ウィジェットの寿命で守っていない（旧実装と同じ。どちらも長寿命のパネル）
+- **実機確認（オーナー）**
+  - 大会 URL を設定する: EVENT タブに大会情報が出て、選手名の補完が大会の参加者に絞られ、フッターの「参加者情報を取得中」が消える
+  - セット選択ウィンドウ: 一覧の進捗と一覧が出る。読込中に「終了済みを表示」を切り替えても、前の一覧が混ざらない
+  - セット選択ウィンドウ: 一覧の読込中にセットを選んで読み込める（エラーにならない）。次に開いたとき、取得ボタンが押せる
+  - 大会 URL を続けて切り替える（A → B、またはクリア）: 選手名の補完が、最後に設定した大会の参加者（クリアなら DB 全体）になる
+  - 追従中に start.gg が遅い・切れている: 待ち行列が伸びず、復旧後に更新が戻る。`logs/` に「this tick fetches nothing」が出ることがある
+  - 次の操作が今どおり動く: ステーション追従・セット読込・統計（直近の対戦・過去の成績）・Top 8 の取り込み・分析タブ・リザルトの順位読込
+  - EVENT タブの「アイコン / バナーを取得」と「大会から読み込む」: 画像が反映され、ボタンが戻り、フッターのステータスが消える
+  - 終了: 大会の読込直後（参加者の取得中）に閉じても固まらない。`logs/` に `Entrants fetch stopped: shutting down` が出ることがある

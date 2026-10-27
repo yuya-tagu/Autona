@@ -20,9 +20,10 @@ tournament's entrant tags) into src/core/PlayerDB.py. Pinned here:
 - the start.gg entrants fetch ends with SaveDB -> SetTournamentPlayers ->
   NotifyChanged, in that order (read from the provider's source);
 - through the Qt adapter, db_updated fires once per announcement, from a
-  worker as well (the adapter marshals to the GUI thread and the core does
-  not hold its lock meanwhile), and the model build still normalises the
-  loaded game's mains in place.
+  worker as well (the adapter queues to the GUI thread and the core does
+  not hold its lock meanwhile; since ADR-005 S3f-2 the worker does not wait
+  for the GUI thread), and the model build still normalises the loaded
+  game's mains in place.
 """
 import ast
 import json
@@ -157,8 +158,9 @@ def test_a_failed_load_is_not_announced(tmp_path, settings):
 
 
 def test_announcements_are_made_outside_the_lock(tmp_path, settings):
-    # The Qt adapter's subscriber waits for the GUI thread, whose model build
-    # takes this lock: announcing under it would deadlock against a worker.
+    # The Qt adapter's model build on the GUI thread takes this lock. Until
+    # ADR-005 S3f-2 its subscriber also waited for that build, so announcing
+    # under the lock deadlocked a worker; a subscriber may still take it.
     db = _db(tmp_path)
     acquired = []
 
@@ -517,11 +519,18 @@ def test_a_worker_change_reaches_db_updated_on_the_gui_thread(
 
     thread = threading.Thread(target=entrants_fetch, daemon=True)
     thread.start()
+    # The GUI thread is not pumped here: the worker queues its GUI-thread
+    # work and goes on (ADR-005 S3f-2). It used to wait for the GUI thread,
+    # which kept a task executor job -- and the interpreter's exit, which
+    # joins it -- hanging once the event loop had stopped.
+    thread.join(10)
+    assert not thread.is_alive(), "the worker waits for the GUI thread"
+    assert emitted == []
+
     deadline = time.monotonic() + 10
-    while thread.is_alive() and time.monotonic() < deadline:
+    while not emitted and time.monotonic() < deadline:
         QCoreApplication.processEvents()
-        thread.join(0.01)
-    assert not thread.is_alive(), "the worker is stuck (lock held across the hop?)"
+    QCoreApplication.processEvents()
 
     assert emitted == [True]
     assert db.tournamentTags == {"E1", "E2"}

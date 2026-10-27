@@ -71,9 +71,10 @@ Test seams:
   finished. It does not run the Qt event loop: an answer ``then`` hands to
   the GUI thread is delivered when the test processes the events.
 - ``TaskExecutor(stepped=True)``: job-lane tasks are queued and run only by
-  ``run_next()``, one at a time and in submission order, each on a thread
-  of its own; the fan-out lane runs as usual. One schedule, the same on
-  every run.
+  ``run_next()``, one at a time and in submission order (``newest=True``:
+  the last one first), each on a thread of its own; ``queued()`` counts
+  them; the fan-out lane runs as usual. One schedule, the same on every
+  run.
 
 Threads are created on the first submit to a lane (ThreadPoolExecutor), not
 by the constructor. ``TaskExecutor.instance`` is created by
@@ -262,11 +263,12 @@ class TaskExecutor:
                 return idle
             # A job was queued while waiting (stepped mode): run it too.
 
-    def run_next(self, timeout=30.0):
+    def run_next(self, timeout=30.0, *, newest=False):
         """Stepped mode: run the oldest queued job on a thread of its own and
         wait for it to finish (``timeout`` seconds; None: for ever). False
         when no job is queued or the executor is shut down; TimeoutError if
-        it did not finish in time."""
+        it did not finish in time. ``newest``: the newest queued job instead
+        (a test making a later answer overtake an earlier one)."""
         if not self._stepped:
             raise RuntimeError("run_next() is for a stepped TaskExecutor")
         if self._Lane() is not None:
@@ -279,7 +281,8 @@ class TaskExecutor:
                 # never run after the shutdown took the queue.
                 if self._closed or not self._steps:
                     return False
-                future, runner = self._steps.popleft()
+                future, runner = (self._steps.pop() if newest
+                                  else self._steps.popleft())
                 taskName = self._pending.get(future)
                 # False: cancelled while queued (it has settled); next one.
                 if future.set_running_or_notify_cancel():
@@ -294,6 +297,14 @@ class TaskExecutor:
                 f"TaskExecutor: {JOB} '{taskName}' did not finish within "
                 f"{timeout} s")
         return True
+
+    def queued(self):
+        """Stepped mode: how many jobs wait for ``run_next()`` (one cancelled
+        while queued included, until a step skips it)."""
+        if not self._stepped:
+            raise RuntimeError("queued() is for a stepped TaskExecutor")
+        with self._cond:
+            return len(self._steps)
 
     # ── internals ────────────────────────────────────────────────────────
 

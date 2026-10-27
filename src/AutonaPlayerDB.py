@@ -5,7 +5,7 @@ from qtpy.QtCore import *
 import traceback
 from loguru import logger
 
-from .Helpers.AutonaQtHelper import gui_thread_sync
+from .Helpers.AutonaQtHelper import gui_thread_async
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .core.PlayerDB import PlayerDB
 
@@ -38,6 +38,16 @@ class AutonaPlayerDB:
     player DB push listen to. Attach() relays every change the core
     announces to SetupModel(), i.e. to db_updated on the GUI thread, exactly
     where the old class called SetupModel() itself.
+
+    Everything here runs on the GUI thread, and nothing waits for it there
+    (gui_thread_async, ADR-005 S3f-2): called on the GUI thread it runs at
+    once, called from another thread -- the start.gg entrants job, a web
+    request's database save -- it is queued and the caller goes on. Those
+    callers used to wait for the GUI thread (gui_thread_sync); a job of the
+    core executor must not, since that wait never returns once the event
+    loop has stopped. Queued from one thread, the calls run in the order
+    they were made (SetTournamentPlayers before the announcement's
+    SetupModel, so the rebuilt proxy filters by the new entrants).
     """
     signals = AutonaPlayerDBSignals()
     model: QStandardItemModel = None
@@ -88,7 +98,7 @@ class AutonaPlayerDB:
         AutonaPlayerDB.modelEnabled = True
 
     @staticmethod
-    @gui_thread_sync
+    @gui_thread_async
     def SetupModel():
         """Refresh what the DB's consumers see after it changed.
 
@@ -97,7 +107,8 @@ class AutonaPlayerDB:
         Without the model (the headless shell, see `modelEnabled`): emit
         db_updated only -- the web server's player DB push is what listens
         there, and it reads the core DB itself. Either way on the GUI thread,
-        where the emit has always come from.
+        where the emit has always come from; a caller on another thread does
+        not wait for it (see the class docstring).
 
         Reached from the core's change announcements (Attach) and from a game
         load (the asset adapter's onLoad on the desktop, the headless
@@ -216,17 +227,26 @@ class AutonaPlayerDB:
         return AutonaPlayerDB.completerModel
 
     @staticmethod
-    @gui_thread_sync
-    def SetTournamentPlayers(tags):
+    @gui_thread_async
+    def SetTournamentPlayers(tags, cancel_event=None):
         """Restrict the completer candidates to the given DB tags (the
-        loaded tournament's entrants). Called from the entrants fetch
-        worker; marshalled to the GUI thread for the proxy refilter."""
+        loaded tournament's entrants). Called from the entrants fetch job;
+        queued to the GUI thread for the proxy refilter, not waited for.
+
+        `cancel_event`: the fetch's. Set by the time this runs, another
+        tournament (or none) was loaded meanwhile -- it is set on the GUI
+        thread before that tournament's filter is touched -- and the tags
+        are dropped (ADR-005 S3f-2 review)."""
+        if cancel_event is not None and cancel_event.is_set():
+            logger.info("Tournament players of a replaced tournament: "
+                        "dropped")
+            return
         PlayerDB.instance.SetTournamentTags(tags)
         if AutonaPlayerDB.completerModel is not None:
             AutonaPlayerDB.completerModel.invalidateFilter()
 
     @staticmethod
-    @gui_thread_sync
+    @gui_thread_async
     def ClearTournamentPlayers():
         """Back to the whole DB as completer candidates (no tournament
         loaded)."""

@@ -5,7 +5,7 @@ Everything a set load decides and writes is `src/core/SetFollowService.py`.
 What is left here is the transport, registered once by bootstrap_core() as
 `SetFollowService.fetcher`:
 
-- a fetch runs on the tournament provider's thread pool
+- a fetch runs as a job of the core task executor (ADR-005 S3f-2)
   (`AutonaTournamentDataProvider.RunWithProvider`, the provider read once
   when it starts; nothing is started when no tournament is loaded), and its
   answer comes back on the main thread through `answered`, a queued signal
@@ -39,6 +39,7 @@ from loguru import logger
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaQtHelper import in_gui_thread
 from .core.SetFollowService import SetFollowService
+from .core.TaskExecutor import TaskExecutor
 
 
 def _noProgress(*args):
@@ -95,11 +96,14 @@ class AutonaSetFollowUtil:
         return AutonaTournamentDataProvider.instance
 
     def _Fetch(self, call, onResult, onError=None):
-        """Run `call(provider)` on the provider's pool and hand its result
-        to `onResult` on the main thread -- or, when it raises, the error to
-        `onError` (logged either way; no answer without one). False when no
-        tournament is loaded (nothing is called)."""
+        """Run `call(provider)` as a provider job and hand its result to
+        `onResult` on the main thread -- or, when it raises, the error to
+        `onError` (logged either way; no answer without one). No answer
+        either once the task executor is stopping. False when no tournament
+        is loaded or the app is quitting (nothing is called)."""
         signals = self.signals
+
+        executor = TaskExecutor.instance
 
         def job(provider):
             try:
@@ -108,6 +112,13 @@ class AutonaSetFollowUtil:
                 logger.exception("Set follow: a fetch failed")
                 if onError is not None:
                     signals.answered.emit(onError, error)
+                return
+            if executor.stopping.is_set():
+                # The app is quitting: a request the shutdown cut short
+                # answered {} -- no stream queue, no set -- which is no
+                # answer to write (ADR-005 S3f-2 review).
+                logger.info("Set follow: a fetch answered while the app is "
+                            "quitting: dropped")
                 return
             if onResult is not None:
                 signals.answered.emit(onResult, result)

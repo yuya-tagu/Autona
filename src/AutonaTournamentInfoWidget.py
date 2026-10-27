@@ -11,6 +11,8 @@ from .AutonaGameAssetManager import AutonaGameAssetManager
 from .core import StateSchema as schema
 from .core.TournamentInfoService import (
     TournamentInfoService, TOURNAMENT_LOGO_PATH)
+from .core.TaskExecutor import TaskExecutor
+from .Helpers import AutonaQtHelper
 from .Helpers.AutonaDirHelper import AutonaResolve
 from .AutonaFeatureColors import MakeTournamentColorCard
 from . import ui_layout as L
@@ -445,32 +447,25 @@ class AutonaTournamentInfoWidget(QDockWidget):
         self._DownloadIconAndBannerAsync(on_finished=_finished)
 
     def _DownloadIconAndBannerAsync(self, on_finished=None):
-        from .Workers import Worker
+        """Fetch the tournament's icon and banner as a job of the task
+        executor and apply them on the GUI thread; `on_finished` there once
+        it is over, whichever way it went (ADR-005 S3f-2: until then a
+        Worker on the provider adapter's pool, whose answer the garbage
+        collector could take -- the button stayed disabled and the status
+        stayed up).
+
+        The status is the job's own: shown while it runs and cleared when it
+        ends, in the job, so it is always cleared once shown (a job the
+        shutdown cancels while queued never shows it)."""
         from .Helpers.AutonaStatusManager import AutonaStatusManager
 
-        status_token = AutonaStatusManager.push(
-            "大会アイコン / バナーを取得中...")
-
-        def _fetch(progress_callback=None, cancel_event=None):
-            provider = AutonaTournamentDataProvider.instance.provider
-            iconBytes = bannerBytes = None
-            if provider is None:
-                return (None, None)
+        def _fetch():
+            status_token = AutonaStatusManager.push(
+                "大会アイコン / バナーを取得中...")
             try:
-                iconUrl = provider.GetIconURL()
-                if iconUrl:
-                    iconBytes = requests.get(
-                        iconUrl, headers=self._imageHeaders(), timeout=20).content
-            except Exception:
-                logger.error(traceback.format_exc())
-            try:
-                bannerUrl = provider.GetBannerURL()
-                if bannerUrl:
-                    bannerBytes = requests.get(
-                        bannerUrl, headers=self._imageHeaders(), timeout=20).content
-            except Exception:
-                logger.error(traceback.format_exc())
-            return (iconBytes, bannerBytes)
+                return self._FetchIconAndBanner()
+            finally:
+                AutonaStatusManager.pop(status_token)
 
         def _apply(result):
             try:
@@ -486,19 +481,52 @@ class AutonaTournamentInfoWidget(QDockWidget):
                     except Exception:
                         logger.error(traceback.format_exc())
             finally:
-                AutonaStatusManager.pop(status_token)
                 if on_finished:
                     on_finished()
 
         def _onError(_err):
-            AutonaStatusManager.pop(status_token)
             if on_finished:
                 on_finished()
 
-        worker = Worker(_fetch)
-        worker.signals.result.connect(_apply)
-        worker.signals.error.connect(_onError)
-        AutonaTournamentDataProvider.instance.threadPool.start(worker)
+        future = TaskExecutor.instance.submit(
+            _fetch, task_name="tournament icon and banner",
+            then=lambda result: AutonaQtHelper.gui_executor(
+                lambda: _apply(result)),
+            on_error=lambda error: AutonaQtHelper.gui_executor(
+                lambda: _onError(error)))
+        if future.cancelled() and on_finished:
+            # The app is quitting (the executor has shut down): nothing will
+            # run, so give the button back now.
+            on_finished()
+
+    @staticmethod
+    def _FetchIconAndBanner():
+        """(icon bytes, banner bytes) of the loaded tournament, each None
+        when it has none or could not be fetched. On a job's thread; stops
+        between requests once the app is shutting down."""
+        provider = AutonaTournamentDataProvider.instance.provider
+        iconBytes = bannerBytes = None
+        if provider is None:
+            return (None, None)
+        stopping = TaskExecutor.instance.stopping
+        headers = AutonaTournamentInfoWidget._imageHeaders()
+        try:
+            iconUrl = provider.GetIconURL()
+            if iconUrl and not stopping.is_set():
+                iconBytes = requests.get(
+                    iconUrl, headers=headers, timeout=20).content
+        except Exception:
+            logger.error(traceback.format_exc())
+        if stopping.is_set():
+            return (iconBytes, None)
+        try:
+            bannerUrl = provider.GetBannerURL()
+            if bannerUrl and not stopping.is_set():
+                bannerBytes = requests.get(
+                    bannerUrl, headers=headers, timeout=20).content
+        except Exception:
+            logger.error(traceback.format_exc())
+        return (iconBytes, bannerBytes)
 
     def _applyIconBytes(self, data: bytes):
         # GUI thread: convert bytes → QPixmap, scale, persist, refresh label.

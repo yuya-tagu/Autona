@@ -20,9 +20,10 @@ What changed in the move, and what did not:
   never races a writer.
 - Changes are announced on `changed` (an ObserverChannel: several
   subscribers, synchronous, each one's exception isolated), always *outside*
-  `lock`. The Qt adapter's subscriber marshals to the GUI thread and waits
-  for it, and the model build there takes `lock`; announcing under the lock
-  would deadlock a worker against the GUI thread. One announcement per
+  `lock`. The Qt adapter's subscriber marshals to the GUI thread, and the
+  model build there takes `lock`; until ADR-005 S3f-2 the subscriber also
+  waited for it, and announcing under the lock deadlocked a worker against
+  the GUI thread. A subscriber may still take the lock. One announcement per
   LoadDB / AddPlayers (unless deferRefresh) / DeletePlayer, and one per
   explicit NotifyChanged() -- the points where the old code called
   SetupModel(), so db_updated fires as often as it did.
