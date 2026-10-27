@@ -28,6 +28,7 @@ from .core.Actions import AutonaActions
 from .core.PlayerService import (
     DEFAULT_CHARACTERS_PER_PLAYER, DefaultPlayersPerTeam, PlayerService,
     SlotChange)
+from .core.SetFollowService import SaveRecord, SetFollowService
 from .core.SetLoadService import SetLoadService
 from .core.StatsService import StatsService
 from .core.TournamentInfoService import TournamentInfoService
@@ -40,61 +41,16 @@ from .thumbnail import main_generate_thumbnail as thumbnail
 from .AutonaThumbnailSettingsWidget import *
 
 
-empty = {}
-
-
-class QueueSetsCache:
-    queue = []
-
-    def UpdateQueue(self, q):
-        self.queue = q
-
-    def CheckQueue(self, q):
-        logger.info("----------------- CHECKING QUEUES -------------------")
-        if q is None:
-            return False
-
-        if len(self.queue) != len(q):
-            return False
-
-        for i in range(len(q)):
-            savedSet = self.queue[i]
-            incSet = q[i]
-
-            if savedSet.get("id") != incSet.get("id"):
-                return False
-
-            if savedSet.get("state") != incSet.get("state"):
-                return False
-
-            savedSlots = savedSet.get("slots", [empty, empty])
-            incSlots = incSet.get("slots", [empty, empty])
-
-            if deep_get(savedSlots[0], "entrant.id") != deep_get(incSlots[0], "entrant.id"):
-                return False
-
-            if deep_get(savedSlots[1], "entrant.id") != deep_get(incSlots[1], "entrant.id"):
-                return False
-
-        logger.info("----------------- QUEUES CHECK OK -------------------")
-        return True
-
-
 class AutonaScoreboardWidgetSignals(QObject):
-    UpdateSetData = Signal(object)
     NewSetSelected = Signal(object)
     SetSelection = Signal()
-    StreamSetSelection = Signal()
     StationSelection = Signal()
     StationSelected = Signal(object)
-    StationSetsLoaded = Signal(object)
     CommandScoreChange = Signal(int, int)
     CommandTeamColor = Signal(int, str)
-    ChangeSetData = Signal(dict)
 
 
 class AutonaScoreboardWidget(QWidget):
-    stationQueueCache = QueueSetsCache()
 
     def __init__(self, scoreboardNumber=1, singlePlayer=True, *args):
         super().__init__(*args)
@@ -161,13 +117,10 @@ class AutonaScoreboardWidget(QWidget):
         schema.SeedBoard(self.scoreboardNumber)
 
         self.signals = AutonaScoreboardWidgetSignals()
-        self.signals.UpdateSetData.connect(self.UpdateSetData)
         self.signals.NewSetSelected.connect(self.NewSetSelected)
-        self.signals.StationSetsLoaded.connect(self.StationSetsLoaded)
         self.signals.SetSelection.connect(self.LoadSetClicked)
         self.signals.StationSelected.connect(self.LoadStationSets)
         self.signals.StationSelection.connect(self.LoadStationSetClicked)
-        self.signals.ChangeSetData.connect(self.ChangeSetData)
 
         # Only the hotkey that drives a *panel* (the set-selection window) is
         # still connected here. The score / reset / 反映 hotkeys were moved
@@ -195,10 +148,15 @@ class AutonaScoreboardWidget(QWidget):
         # (The set loaded last is self.setLoad.lastSetSelected since ADR-005
         # S2d: the clears that forget it are core's.)
 
-        self.lastStationSelected = None
-
-        self.autoUpdateTimer: QTimer = None
-        self.timeLeftTimer: QTimer = None
+        # Loading a set, following a station / stream and the 5-second poll
+        # are core's since ADR-005 S3e-7 (SetFollowService, whose clock is
+        # the shell's AutonaSetFollowUtil): this board asks for them (the set
+        # and station windows, the timer row's cancel button) and shows what
+        # it follows (the timer row: _OnFollowChanged). The station followed
+        # and the two QTimers were this board's until then. `_followClock`
+        # redraws the countdown while the row is shown (None until then).
+        self.setFollow = SetFollowService(self.scoreboardNumber)
+        self._followClock: QTimer = None
 
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setLayout(QVBoxLayout())
@@ -441,6 +399,12 @@ class AutonaScoreboardWidget(QWidget):
             lambda: self.StopAutonaUpdate(clear_variables=True))
         self.timerLayout.layout().addWidget(self.timerCancelBt)
         self.timerLayout.setVisible(False)
+        # What the board follows is core's: the row follows its
+        # announcements. A bound method, so the connection dies with the
+        # board (the fetcher lives as long as the app).
+        if SetFollowService.fetcher is not None:
+            SetFollowService.fetcher.signals.followChanged.connect(
+                self._OnFollowChanged)
 
         self.team1column = uic.loadUi(AutonaResolve("src/layout/AutonaScoreboardTeam.ui"))
         self.team1column.setMinimumWidth(0)
@@ -1633,14 +1597,15 @@ class AutonaScoreboardWidget(QWidget):
             self.scoreDisplay2.setValue(team_2_score)
 
     def closeEvent(self, event):
-        # Both timers stay None until NewSetSelected() creates them (BUG-5:
-        # closing a board that never had a set loaded used to raise
-        # AttributeError here; Qt swallows exceptions from event handlers so
-        # it was silent, but it is still an unhandled exception on the path).
-        if self.autoUpdateTimer is not None:
-            self.autoUpdateTimer.stop()
-        if self.timeLeftTimer is not None:
-            self.timeLeftTimer.stop()
+        # Closing the board stops its poll (core's since ADR-005 S3e-7) and
+        # the countdown, as stopping the board's own two timers did. The
+        # clock stays None until the row is first shown (BUG-5: closing a
+        # board that never had a set loaded used to raise AttributeError
+        # here; Qt swallows exceptions from event handlers so it was silent,
+        # but it is still an unhandled exception on the path).
+        self.setFollow.StopFollowing()
+        if self._followClock is not None:
+            self._followClock.stop()
 
     def _applyScoreboardMode(self, singlePlayer: bool):
         # Toggle team-centric UI. In single-player mode, collapse team naming
@@ -2251,108 +2216,52 @@ class AutonaScoreboardWidget(QWidget):
         # the section title label + separator, not a card frame.
         return f"QFrame#{object_name} {{ background: transparent; border: none; }}"
 
-    def AutonaUpdate(self, data):
-        AutonaTournamentDataProvider.instance.GetMatch(
-            self, data.get("id"), overwrite=False)
-        AutonaTournamentDataProvider.instance.GetStreamQueue()
-
-    def StationSetsLoaded(self, data):
-        # Ici peut être lancer le chargement des sets voire même trigger un autre signal ?
-
-        logger.info("STATION SETS LOADED -----------------------------")
-        logger.info(
-            f"Station sets: {len(data) if data is not None and hasattr(data, '__len__') else 0} items")
-        self.setLoad.SetStationQueue(data)
-
     def NewSetSelected(self, data):
-        if not SettingsManager.Get("general.disable_autoupdate", False):
-            self.StopAutonaUpdate()
-            self.autoUpdateTimer = QTimer()
-            self.autoUpdateTimer.start(5000)
-            self.timeLeftTimer = QTimer()
-            self.timeLeftTimer.start(100)
-            self.timeLeftTimer.timeout.connect(self.UpdateTimeLeftTimer)
-            self.timerLayout.setVisible(True)
-
-            if data.get("auto_update") == "set":
-                self.labelAutonaUpdate.setText(
-                    QApplication.translate("app", "Auto update (Set)")
-                    )
-            elif data.get("auto_update") == "stream":
-                self.labelAutonaUpdate.setText(
-                    QApplication.translate("app", "Auto update (Stream [{0}])").format(self.lastStationSelected.get('identifier'))
-                    )
-            elif data.get("auto_update") == "station":
-                self.labelAutonaUpdate.setText(
-                    QApplication.translate("app", "Auto update (Station [{0}])").format(self.lastStationSelected.get('identifier'))
-                    )
-            else:
-                self.labelAutonaUpdate.setText(QApplication.translate("app", "Auto update"))
-
-        StateManager.BlockSaving()
-
-        try:
-            AutonaTournamentDataProvider.instance.GetStreamQueue()
-
-            if data.get("id") != None and \
-                    data.get("id") != self.setLoad.lastSetSelected:
-                # Clear previous scores
-                # Important because when we receive scores as 0 we don't update based on that
-                # Otherwise an offline set which is only updated after it's complete would reset the score
-                # all the time since it would be 0-0 until then
-                # ClearScore, not ResetMatch: the round name / phase / pool
-                # stay until the new set brings its own (S-17).
-                # Both are core operations (ADR-005 S2d), written inside the
-                # BlockSaving above, so they reach the board in the one save
-                # cycle the set load ends with; the clear forgets the set
-                # loaded last, which is why it is recorded only after it.
-                self.CommandClearAll(no_mains=data.get(
-                    "no_mains") if data.get("no_mains") != None else False)
-                self.ClearScore()
-
-                # A new set was loaded
-                self.setLoad.lastSetSelected = data.get("id")
-
-                # Which set this board is following, and how (id, auto
-                # update type, station/stream identifier).
-                self.setLoad.BeginSet(
-                    data.get("id"),
-                    data.get("auto_update"),
-                    self.lastStationSelected.get('identifier')
-                    if self.lastStationSelected else None)
-
-                AutonaTournamentDataProvider.instance.GetMatch(
-                    self, data["id"], overwrite=True, no_mains=data.get("no_mains") if data.get("no_mains") != None else False)
-
-            if not SettingsManager.Get("general.disable_autoupdate", False):
-                self.autoUpdateTimer.timeout.connect(
-                    lambda setId=data: self.AutonaUpdate(data))
-
-                if data.get("auto_update") in ("stream", "station"):
-                    self.autoUpdateTimer.timeout.connect(
-                        lambda setId=data: AutonaTournamentDataProvider.instance.LoadStationSets(self))
-        finally:
-            StateManager.ReleaseSaving()
+        """A set to show: the set window's (its `auto_update` is "set").
+        Core's since ADR-005 S3e-7 (SetFollowService.LoadSet: the clears,
+        the set recorded as followed, the fetch, the poll); the timer row
+        follows what it starts (_OnFollowChanged)."""
+        self.setFollow.LoadSet(data)
 
     def StopAutonaUpdate(self, clear_variables=False):
-        if self.autoUpdateTimer != None:
-            self.autoUpdateTimer.stop()
-            self.autoUpdateTimer = None
-        if self.timeLeftTimer != None:
-            self.timeLeftTimer.stop()
-            self.timeLeftTimer = None
+        """Stop polling; the cancel button (`clear_variables`) also forgets
+        the station and the followed set (SetFollowService.StopFollowing)."""
+        self.setFollow.StopFollowing(forget=clear_variables)
 
-        if clear_variables:
-            self.lastStationSelected = None
-            # Forgets the set loaded last too.
-            self.setLoad.ClearSetTracking()
-
-        self.timerLayout.setVisible(False)
+    def _OnFollowChanged(self, board):
+        """What a board follows changed (SetFollowService): this board's
+        timer row shows its poll -- what it follows and the countdown -- or
+        hides. The label is left as it was when the row hides, as before."""
+        if board != self.scoreboardNumber:
+            return
+        following = self.setFollow.Following()
+        if following is None:
+            if self._followClock is not None:
+                self._followClock.stop()
+            self.timerLayout.setVisible(False)
+            return
+        mode, identifier = following
+        if mode == "set":
+            label = QApplication.translate("app", "Auto update (Set)")
+        elif mode == "stream":
+            label = QApplication.translate(
+                "app", "Auto update (Stream [{0}])").format(identifier)
+        elif mode == "station":
+            label = QApplication.translate(
+                "app", "Auto update (Station [{0}])").format(identifier)
+        else:
+            label = QApplication.translate("app", "Auto update")
+        self.labelAutonaUpdate.setText(label)
+        self.timerLayout.setVisible(True)
+        if self._followClock is None:
+            self._followClock = QTimer(self)
+            self._followClock.timeout.connect(self.UpdateTimeLeftTimer)
+        self._followClock.start(100)
 
     def UpdateTimeLeftTimer(self):
-        if self.autoUpdateTimer:
-            self.timerTime.setText(
-                str(int(self.autoUpdateTimer.remainingTime()/1000)))
+        seconds = self.setFollow.SecondsLeft()
+        if seconds is not None:
+            self.timerTime.setText(str(seconds))
 
     def LoadSetClicked(self):
         # Restores the cached set list; fetching is the operator's call from
@@ -2361,9 +2270,9 @@ class AutonaScoreboardWidget(QWidget):
         self.selectSetWindow.show()
 
     def LoadStationSets(self, station):
-        self.setLoad.lastSetSelected = None
-        self.lastStationSelected = station
-        AutonaTournamentDataProvider.instance.LoadStationSets(self)
+        """The station window's station or stream: followed by core
+        (SetFollowService.FollowStation), which loads its current set."""
+        self.setFollow.FollowStation(station)
 
     def LoadStationSetClicked(self):
         self.selectStationWindow.LoadStations()
@@ -2409,7 +2318,7 @@ class AutonaScoreboardWidget(QWidget):
           clear (DiscardTypedText, ADR-005 S3e-3), where it used to stay on
           a combo that already showed the emptied row;
         - the set loaded last is forgotten, so loading it again does load
-          it (NewSetSelected skips the set it already has).
+          it (SetFollowService.LoadSet skips the set it already has).
 
         The statistics the clear calls for are the operation's
         (AutonaActions.ClearPlayers, ADR-005 S3e-5; this board asked for
@@ -2425,8 +2334,9 @@ class AutonaScoreboardWidget(QWidget):
         """Zero both scores and both losers flags -- and nothing else
         (AutonaActions.ClearScore).
 
-        This is the clear NewSetSelected runs before a new set arrives, so it
-        must leave the match bar alone: SetLoadService.ApplyMatchInfo keeps
+        The same clear a set load runs before a new set arrives
+        (SetFollowService.LoadSet -> AutonaActions.ClearScore), so it must
+        leave the match bar alone: SetLoadService.ApplyMatchInfo keeps
         the round name / phase for a payload that carries none, and blanking
         them here would wipe the round mid-stream for exactly those sets. The
         operator's reset is ResetMatch(), which adds the match bar (S-17).
@@ -2472,166 +2382,22 @@ class AutonaScoreboardWidget(QWidget):
             self.scoreboardNumber, team + 1, value)
 
 
-    # Modifies the current set data. Does not check for id, so do not call this with data that may lead to another hbox incident
     def ChangeSetData(self, data):
-        """Apply a set payload to this board.
+        """Apply a set payload to this board: core's
+        SetFollowService.ApplySetPayload since ADR-005 S3e-7 -- the match
+        information, the scores, the set length, the losers flags, the
+        roster and the players of the entrants (or one player), the bracket
+        type and the upset factor they call for, in one save cycle. The
+        widgets follow the state (_SyncSetFields / _SyncScoreDisplays / the
+        cards). A one-player payload's `savePlayerToDb` reaches the player
+        database here, once the save cycle is over.
 
-        The 140 lines this used to be were a form being poked: a combo's
-        text set so its editingFinished lambda would write the round name,
-        the score spinboxes driven so their valueChanged would write the
-        score, each of them re-deriving "which side is which after a swap"
-        from its own reversed list. All of that is core/SetLoadService since
-        headless core Step 4b, and the widgets follow the state through
-        _SyncSetFields / _SyncScoreDisplays.
-
-        The best of is AutonaActions.SetBestOf's since ADR-005 S2e (it was
-        the BEST OF spinbox driven from here), the rows it resizes included.
-        The players are core's since ADR-005 S3e-3 (PlayerService.ApplyData;
-        they were the cards' SetData, resolving the country, character and
-        skin models), and so is the roster size a set's entrants set
-        (AutonaActions.SetRoster, ADR-005 S3e-6; it was the playerNumber
-        spinbox driven from here): what is still the board's is the upset
-        factor a new bracket type or roster size asks for (below, until
-        ADR-005 S3e-7);
-        the statistics a change of player asks for are the load's own
-        (PlayerService.Announce, ADR-005 S3e-5). Which team an entrant
-        lands on is core's answer (SetLoadService.DisplayTeam), so the swap
-        rule is stated once instead of four times.
-
-        One save cycle for the whole payload, as before.
+        Does not check which set the payload is for
+        (SetFollowService.UpdateSetData does). The app's payloads -- a
+        fetched set, POST /score -- go to core directly; this is the
+        board's own entry, which the widget tests drive.
         """
-        with StateManager.SaveBlock():
-            service = self.setLoad
-            service.ApplyMatchInfo(data)
-            service.ApplyScores(data)
-
-            bestOf = service.BestOfFromSetData(data)
-            if bestOf is not None:
-                AutonaActions.instance.SetBestOf(self.scoreboardNumber, bestOf)
-
-            # Stream URL is user-managed via the dropdown; do not overwrite
-            # it when loading a set from StartGG.
-            # The flag and its team's " [L]" names, in core (ADR-005 S2b).
-            service.ApplyLosers(data)
-
-            upsetStale = False
-            if data.get("entrants"):
-                upsetStale = self._ApplyEntrants(data)
-            elif not self._ApplySinglePlayerData(data):
-                # Neither entrants nor a team/player target: nothing to
-                # apply, and the old code returned here -- before
-                # bracket_type. Kept as it was; a payload carrying a bracket
-                # type always carries entrants too.
-                return
-
-            # The upset factor of the bracket type / roster this set
-            # brought: core's statistic, asked for here until the set
-            # payload itself is core's (ApplySetPayload, ADR-005 S3e-7).
-            if service.ApplyBracketType(data) or upsetStale:
-                StatsService(self.scoreboardNumber).RefreshQuietly(
-                    StatsService.UPSET_FACTOR)
-
-    def _ApplyEntrants(self, data) -> bool:
-        """Pour a set's two entrant rosters into the player slots.
-
-        True when the upset factor is left to recalculate: the roster went
-        from one player a side to several or back -- the factor is the
-        seeds' distance in singles and 0 otherwise (StatsService.IsSingles)
-        -- and no player's seed moved, which would have recalculated it
-        already (PlayerService.Announce). The cards' SetData cleared every seed and
-        put it back, so it was recalculated on every load (S3e-3 判断 3);
-        the core load does not when the seeds are the same, and a change
-        between singles and teams left the previous pairing's factor
-        (S3e-3 review).
-        """
-        entrants = data.get("entrants")
-        stats = StatsService(self.scoreboardNumber)
-        wasSingles = stats.IsSingles()
-        # The roster the larger side needs (AutonaActions.SetRoster, ADR-005
-        # S3e-6), new players with the characters per player charNumber
-        # shows. The cards follow once the set's save block is over; the
-        # players are loaded into the state's slots, not into cards.
-        AutonaActions.instance.SetRoster(
-            self.scoreboardNumber, len(max(entrants, key=lambda x: len(x))),
-            self.charNumber.value())
-        singlesChanged = stats.IsSingles() != wasSingles
-        seedMoved = False
-
-        try:
-            # Kept exactly as it was, `!=` included: no_mains reaches here
-            # from a provider payload, and `1 != True` is False in Python --
-            # an `is True` here would quietly change how a non-bool truthy
-            # value behaves in the two branches below.
-            noMains = data.get("no_mains")
-            if noMains is None:
-                noMains = False
-            for t, team in enumerate(entrants):
-                stateTeam = self.setLoad.DisplayTeam(t + 1)
-
-                if len(team) > 1:
-                    # The team name and the crest that follows from it are
-                    # written together by the service; the QLineEdit picks
-                    # the name up from _SyncSetFields.
-                    self.setLoad.ApplyTeamName(
-                        t + 1, data.get(f"p{t + 1}_name"))
-
-                for p, player in enumerate(team):
-                    change = SlotChange()
-                    if data.get("overwrite"):
-                        # Overwrite path already applies mains via the full
-                        # player dict; the old code followed this with a
-                        # redundant mains-only load that doubled the
-                        # per-player cost on set load. Using elif so the
-                        # mains-only path only runs in the non-overwrite case.
-                        change = self._ApplyPlayer(
-                            stateTeam, p + 1, player, True, True, noMains)
-                    elif data.get("has_selection_data") and noMains != True:
-                        change = self._ApplyPlayer(
-                            stateTeam, p + 1, {"mains": player.get("mains")},
-                            False, False)
-                    seedMoved = seedMoved or change.seedChanged
-        except Exception as e:
-            logger.error(f"Error while setting entrants: {e}")
-        return singlesChanged and not seedMoved
-
-    def _ApplySinglePlayerData(self, data):
-        """Apply a one-player payload (a POST /score carrying `team` /
-        `player` / `data`; the legacy update-team route's is core's since
-        ADR-005 S3e-4, AutonaWebOperations.set_team_data). False if it had
-        none.
-
-        Unlike the entrants path this addresses the state teams directly:
-        the caller names the team it means, and a swap has already been
-        applied to what it is looking at. A failed write -- an out-of-range
-        slot included -- is logged and ignored, which is what the legacy
-        update-team route has always answered "OK" to.
-        """
-        if not data.get("team") or not data.get("player"):
-            return False
-        try:
-            self._WritePlayerSlot(
-                data.get("team"), data.get("player"), data.get("data"))
-        except Exception as e:
-            logger.error(f"Error while setting entrants: {e}")
-        return True
-
-    def _WritePlayerSlot(self, team, player, data):
-        """Write one player slot (1-based state team/player). Raises on
-        failure.
-
-        The slots are the state's since ADR-005 S3e-6, indexed as the card
-        lists were: a number past the roster raises, and a "0" -- a
-        negative index -- lands on team 2 / the last player. That is the
-        bug S3e-4 recorded for a legacy POST /score payload, left as it is
-        for S3e-7 to fix along with post_score."""
-        stateTeam = [1, 2][int(team) - 1]
-        slots = list(range(1, self._RosterCount(stateTeam) + 1))
-        slot = slots[int(player) - 1]
-        path = f"{self.statePrefix}.team.{stateTeam}.player.{slot}"
-
-        self._ApplyPlayer(stateTeam, slot, data, True, False)
-        if data.get("savePlayerToDb", False):
-            PlayerService(path).SavePlayerToDB()
+        SaveRecord(self.setFollow.ApplySetPayload(data))
 
     def _PlayerSlotPath(self, team, player):
         """The path of slot `player` of state team `team` (ints), or None
@@ -2694,20 +2460,6 @@ class AutonaScoreboardWidget(QWidget):
         # own (PlayerService.Announce, ADR-005 S3e-5).
         if cleared:
             card.DiscardTypedText(notEditing=True)
-
-    def UpdateSetData(self, data):
-        # An empty payload, or one answering for a set the operator has
-        # already navigated away from (an in-flight fetch resolving late).
-        if SetLoadService.IsStaleUpdate(data, self.setLoad.lastSetSelected):
-            return
-
-        if SettingsManager.Get("general.disable_overwrite", False):
-            for entrant in data.get("entrants"):
-                dbPlayer = PlayerDB.instance.Get(entrant[0].get("gamerTag"))
-                if dbPlayer is not None:
-                    entrant[0] = entrant[0] | dbPlayer
-
-        self.ChangeSetData(data)
 
     def LoadPlayerFromTag(self, tag, team, player, no_mains=False):
         # The PLAYERS panel's "set to P1 / P2". The Web's tag lookup is

@@ -77,9 +77,18 @@ OBS のオーバーレイと `/web`（ブラウザ版）から操作する。**�
   v1 `PATCH set`）と `clear_all` による人数・キャラ数のリセット（各チーム 1 人・1 キャラ）も動く。
   統計（直近の対戦・戦績・大会履歴・アップセット係数）は、選手の編集・読込・Swap・クリアの後に取り直される。統計のルート
   （`scoreboard<N>-stats-*`・v1 `stats:refresh`。ボード 1 / 2）も動く（Start.gg の大会の読込が先に要る。無ければ空になるだけ）。
+  ボード 1 / 2 のセット読込（`scoreboard<N>-load-set`・Socket.IO `load_set`・v1 `:load-set`）・配信中のセットの取り込み
+  （`scoreboard<N>-pull-stream`・Socket.IO `pull_stream`・v1 `:pull-stream`。`settings.json` の `twitch_username` の
+  チャンネルの今のセットを読む。未設定なら何もせず、legacy / Socket.IO は `OK`、v1 は 409 `NOT_READY`。追従中のチャンネルに
+  送り直すと、セットが変わったときだけ読み直す。最後に読んだセットと同じなら、最初の 1 回もクリアしない。セットの取得に
+  失敗したら、次の取り込み・同じセットの読込で読み直す）・`POST /score`（Socket.IO `score`。クルーボード宛ても）も動く（ADR-005 S3e-7）。
+  セット読込と取り込みは大会の読込が先に要る（無ければ何もせずボードを消さない。legacy / Socket.IO は `OK`、v1 は 409 `NOT_READY`）。
+  読み込んだセットは 1 回取り込むだけで、5 秒ごとの取り直し（自動更新）は `settings.json` の `general.disable_autoupdate` が
+  `false` のときだけ行う（キーが無ければ行わない。止める Web 操作は無いので、止めるにはヘッドレスを終了する。選手のクリアの
+  後は、取り直した答えは書かれない）。
   オーバーレイ・`/web`・`out/` の出力・Socket.IO の配信は今までどおり
 - **ボードやパネルの画面が要る操作は 503 `UNAVAILABLE`（`not available in headless`）を返す**:
-  legacy の `POST /score`・セット読込 / 次のセット・サムネイル
+  セット選択ウィンドウを開く（`scoreboard<N>-open-set`・Socket.IO `open_set`）・サムネイル
 - 停止: **Ctrl+C / Ctrl+Break / コンソールの閉じるボタン**。`out/` と `user_data/state.json` を書き終えてから終了する。
   タスクマネージャーでの強制終了は書き出しを待たない（直前 1〜5 秒の変更が `state.json` に残らないことがある）
 - デスクトップ版とヘッドレス版は**同時に起動できない**（ポートと書き込み先が同じため）。

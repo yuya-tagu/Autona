@@ -180,11 +180,11 @@ def _build_web_app():
 
     @app.route('/score', methods=['POST'])
     def post_score():
-        return WebServer._board_actions().post_score(request.get_data())
+        return WebOps.post_score(request.get_data())
 
     @ws_on('score')
     def ws_post_score(message):
-        WebServer.ws_emit('score', WebServer._board_actions().post_score(message))
+        WebServer.ws_emit('score', WebOps.post_score(message))
 
     # Ticks score of Team specified up by 1 point
     @app.route('/scoreboard<scoreboardNumber>-team<team>-scoreup')
@@ -428,12 +428,12 @@ def _build_web_app():
     # Pulls Current Stream Set
     @app.route('/scoreboard<scoreboardNumber>-pull-stream')
     def pull_stream_set(scoreboardNumber):
-        return WebServer._board_actions().pull_stream_set(scoreboardNumber)
+        return WebOps.pull_stream_set(scoreboardNumber)
 
     @ws_on('pull_stream')
     def ws_pull_stream_set(message):
         info = orjson.loads(message)
-        WebServer.ws_emit('pull_stream', WebServer._board_actions().pull_stream_set(
+        WebServer.ws_emit('pull_stream', WebOps.pull_stream_set(
             info.get("scoreboardNumber", "1")))
 
     # Resubmits Call for Recent Sets
@@ -568,18 +568,18 @@ def _build_web_app():
     @app.route('/scoreboard<scoreboardNumber>-load-set')
     def load_set(scoreboardNumber):
         if request.args.get('no-mains') is not None:
-            return WebServer._board_actions().load_set(scoreboardNumber, request.args.get("set"), no_mains=True)
+            return WebOps.load_set(scoreboardNumber, request.args.get("set"), no_mains=True)
         else:
-            return WebServer._board_actions().load_set(scoreboardNumber, request.args.get("set"))
+            return WebOps.load_set(scoreboardNumber, request.args.get("set"))
 
     @ws_on('load_set')
     def ws_load_set(message):
         info = orjson.loads(message)
         if info.get('no-mains') is not None:
-            WebServer.ws_emit('load_set', WebServer._board_actions().load_set(
+            WebServer.ws_emit('load_set', WebOps.load_set(
                 info.get("scoreboardNumber", "1"), info.get("set"), no_mains=True))
         else:
-            WebServer.ws_emit('load_set', WebServer._board_actions().load_set(
+            WebServer.ws_emit('load_set', WebOps.load_set(
                 info.get("scoreboardNumber", "1"), info.get("set")))
 
     # Loads a set remotely by providing a set ID to pull from the data provider

@@ -54,7 +54,9 @@ _oplog = logger.bind(channel="api_v1_ops")
 # Reference to the live WebServerActions instance, injected at registration
 # time so this module never imports AutonaWebServer (avoids a circular import).
 # None after init_api_v1(None): the headless shell, which has no board-
-# dependent operations (see _actions_ref).
+# dependent operations (see _actions_ref). No route calls it since ADR-005
+# S3e-7 (load-set and pull-stream, the last two, are core's); S3e-9 removes
+# it along with init_api_v1's argument.
 _actions = None
 _initialized = False
 
@@ -875,15 +877,27 @@ def load_set(n):
     if set_id is None:
         raise ApiError(INVALID_ARGUMENT, "setId is required", 400)
     no_mains = _truthy(body.get("noMains", False))
-    _actions_ref().load_set(n, str(set_id), no_mains=no_mains)  # @gui_thread_sync
+    # Core's since ADR-005 S3e-7 (SetFollowService), in both shells. With
+    # no tournament there is nothing to load, and the board is left as it
+    # is (the legacy route answers "OK").
+    if AutonaTournamentDataProvider.instance.GetProvider() is None:
+        raise ApiError(NOT_READY, "no tournament loaded", 409)
+    WebOps.load_set(n, str(set_id), no_mains=no_mains)
     return ok(revision=current_revision())
 
 
 @api_v1.route("/scoreboards/<int:n>:pull-stream", methods=["POST"])
 @write_op("pull-stream")
 def pull_stream(n):
+    # The streamer's channel's next set, followed (ADR-005 S3e-7 論点 3:
+    # it did nothing). Without a tournament or a channel there is nothing
+    # to follow -- NOT_READY here, where the legacy route answers "OK".
     require_board_12(n)
-    _actions_ref().pull_stream_set(n)
+    if AutonaTournamentDataProvider.instance.GetProvider() is None:
+        raise ApiError(NOT_READY, "no tournament loaded", 409)
+    if WebOps.stream_channel() is None:
+        raise ApiError(NOT_READY, "twitch_username is not set", 409)
+    WebOps.pull_stream_set(n)
     return ok(revision=current_revision())
 
 

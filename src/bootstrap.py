@@ -218,6 +218,23 @@ def bootstrap_core():
     if StatsService.fetcher is None:
         StatsService.fetcher = AutonaStatsUtil()
 
+    # ORDER CONSTRAINT: set loading and following (ADR-005 S3e-7). Its
+    # fetcher hands the set / station / stream fetches to the provider
+    # above, and the stream queue it asks for answers into the statistics'
+    # relay (StatsService.UpdateStreamQueue), so it comes after both; and
+    # before anything that can load a set -- the board's set and station
+    # windows, the web server's load-set / score / pull-stream -- all of
+    # which are the shell's, after this function returns. Its QObject and
+    # its poll timers live on the main thread, which is where this runs.
+    # The board operations run through the shell's board host, read when
+    # used: the desktop registers its own in bootstrap_gui(), after this.
+    from . import AutonaWebOperations
+    from .AutonaSetFollowUtil import AutonaSetFollowUtil
+    from .core.SetFollowService import SetFollowService
+    if SetFollowService.fetcher is None:
+        SetFollowService.fetcher = AutonaSetFollowUtil()
+    SetFollowService.boardHost = AutonaWebOperations.current_board_host
+
     # ORDER CONSTRAINT: the tournament metadata writer must exist before the
     # provider above ever emits tournament_data_updated, and before anything
     # that *reads* tournamentInfo.* connects to that signal -- the sidebar
