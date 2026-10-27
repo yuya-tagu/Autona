@@ -396,10 +396,12 @@ def _expectedOperations(golden):
     ADR-005 S2b: on the tag's editingFinished the card writes the text to
     the state (_OnTextChanged) before it publishes the display name
     (NameChanged), so a team rebuild of the names cannot land between the
-    two and leave " [L]" on the old name. Clear() goes through that signal,
-    so its emptied `name` now comes ahead of the name pair (and the images
+    two and leave " [L]" on the old name. Clear() went through that signal,
+    so its emptied `name` came ahead of the name pair (and the images
     published with it). Same writes, same save cycle; the slot already has
-    every key there, so the state's key order does not move either."""
+    every key there, so the state's key order does not move either. Since
+    ADR-005 S3e-3 SetData and Clear are core's (PlayerService.ApplyData /
+    ClearSlot), which publish these same sequences without the widgets."""
     golden = json.loads(json.dumps(golden))
     for side in ("board", "editor"):
         step = next(s for s in golden[side]
@@ -511,11 +513,33 @@ def test_whole_operations_publish_the_recorded_writes(slotEnv, autonaApp):
     _assertOperations(recorded, _expectedOperations(GOLDEN["operations"]))
 
 
+def _collapsed(calls):
+    """The writes with every run of consecutive writes to one key reduced
+    to its last."""
+    result = []
+    for call in calls:
+        if result and result[-1][0] == call[0]:
+            result[-1] = call
+        else:
+            result.append(call)
+    return result
+
+
 def _assertOperations(recorded, golden):
+    """Every step's writes and save cycles as recorded -- the loads' runs
+    of writes to one key collapsed: a load is PlayerService.ApplyData since
+    ADR-005 S3e-3, which writes `character` once where the card's SetData
+    wrote it once per combo it moved. A run is unobservable from outside the
+    save cycle (the delta is the state against the last saved one, and a key
+    keeps the place its first write gave it); tests/test_player_apply.py
+    compares the loads the same way."""
     for side in ("board", "editor"):
         assert [s["step"] for s in recorded[side]] \
             == [s["step"] for s in golden[side]]
         for actual, expected in zip(recorded[side], golden[side]):
+            if actual["step"].startswith("set data"):
+                actual = dict(actual, calls=_collapsed(actual["calls"]))
+                expected = dict(expected, calls=_collapsed(expected["calls"]))
             assert actual == expected, (side, actual["step"])
 
 

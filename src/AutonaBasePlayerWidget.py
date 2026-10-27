@@ -18,9 +18,10 @@ skin row, codes); the service builds the published value from the catalogs.
 Subclasses are responsible for:
 - __init__ (own .ui file, own widget setup)
 - NameChanged, and wiring the card's inputs to `self.player`
-- SetData, SetCharactersPerPlayer, ReloadCharacters, SetIndex,
-  SetupAutocomplete (widget-specific: .ui widgets, icon sizes, fonts,
-  proxy models — kept per-subclass)
+- SetData / Clear (which call the core: PlayerService.ApplyData /
+  ClearSlot since ADR-005 S3e-3, then render), SetCharactersPerPlayer,
+  ReloadCharacters, SetIndex, SetupAutocomplete (widget-specific: .ui
+  widgets, icon sizes, fonts, proxy models — kept per-subclass)
 - _styleCountryStateWidgets (a small hook that customises the otherwise
   shared _WireCountryState defined here)
 
@@ -28,7 +29,6 @@ Swapping two players is not a widget operation any more (ADR-005 S2c): the
 slots are exchanged in the state (AutonaActions.SwapTeams / SwapPlayers)
 and each card renders its own (AutonaScoreboardPlayerWidget.RenderFromState).
 """
-import threading
 import traceback
 
 from qtpy.QtGui import *
@@ -52,21 +52,19 @@ class AutonaBasePlayerWidget(QGroupBox):
     characterModel = None
     _deleted = False
 
-    # NOTE: dataLock is now an *instance* attribute initialised in
-    # _initBasePlayerWidget(). Keeping it as a class attribute meant every
-    # player widget shared a single RLock — bulk SetData calls on different
-    # players serialised on the same lock for no good reason.
+    # No per-card lock (`dataLock`, removed in ADR-005 S3e-3): everything
+    # here runs on the GUI thread, and what a load writes is serialised by
+    # the state's own lock (PlayerService.ApplyData).
 
     def _initBasePlayerWidget(self):
         """Subclasses MUST call this from their __init__ after uic.loadUi.
-        Initialises per-instance lock + findChild cache + state service."""
-        self.dataLock = threading.RLock()
+        Initialises the findChild cache + state service."""
         # Everything this widget publishes goes through here (headless core
         # Step 5). Bound to self.path, which the subclass sets before
         # uic.loadUi and never rewrites.
         self.player = PlayerService(self.path)
         # Lazy widget cache — populated by _w(); avoids O(n) findChild walks
-        # on hot paths (SetData, ExportMergedName, ExportPlayerImages...).
+        # on hot paths (the render, ExportMergedName, ExportPlayerImages...).
         self._widget_cache = {}
         # The skin combos' model while no character is picked (LoadSkinOptions).
         self._emptySkinModel = None
@@ -93,12 +91,11 @@ class AutonaBasePlayerWidget(QGroupBox):
             logger.warning(f"CharactersChanged called on deleted widget for {self.path}")
             return
 
-        with self.dataLock:
-            self.player.PublishCharacterSlots(
-                [self._CharacterSlot(character, color, variant)
-                 for _element, character, color, variant
-                 in self.character_elements],
-                includeMains)
+        self.player.PublishCharacterSlots(
+            [self._CharacterSlot(character, color, variant)
+             for _element, character, color, variant
+             in self.character_elements],
+            includeMains)
 
     @staticmethod
     def _CharacterSlot(character, color, variant) -> CharacterSlot:
@@ -127,12 +124,11 @@ class AutonaBasePlayerWidget(QGroupBox):
                   and picked.get("name") else character.currentText()))
 
     def ExportMergedName(self):
-        with self.dataLock:
-            # The " [L]" suffix is the service's: it reads the team's
-            # losers flag from the state (ADR-005 S2b).
-            self.player.PublishMergedName(
-                self._w(schema.PLAYER_SPONSOR_KEY, QLineEdit).text(),
-                self._w(schema.PLAYER_TAG_KEY, QLineEdit).text())
+        # The " [L]" suffix is the service's: it reads the team's losers
+        # flag from the state (ADR-005 S2b).
+        self.player.PublishMergedName(
+            self._w(schema.PLAYER_SPONSOR_KEY, QLineEdit).text(),
+            self._w(schema.PLAYER_TAG_KEY, QLineEdit).text())
 
     def ExportPlayerImages(self, onlineAvatar=KEEP_ONLINE_AVATAR):
         """Re-publish the image state derived from the player's name.
@@ -142,15 +138,10 @@ class AutonaBasePlayerWidget(QGroupBox):
         online_avatar semantics (published / cleared / left alone) and the
         LIVE-BUG-1 history behind them.
         """
-        with self.dataLock:
-            self.player.PublishImages(
-                self._w(schema.PLAYER_SPONSOR_KEY, QLineEdit).text(),
-                self._w(schema.PLAYER_TAG_KEY, QLineEdit).text(),
-                onlineAvatar=onlineAvatar)
-
-    def ExportPlayerCity(self, city=None):
-        with self.dataLock:
-            self.player.SetCity(city)
+        self.player.PublishImages(
+            self._w(schema.PLAYER_SPONSOR_KEY, QLineEdit).text(),
+            self._w(schema.PLAYER_TAG_KEY, QLineEdit).text(),
+            onlineAvatar=onlineAvatar)
 
     def SwapCharacters(self, index1: int, index2: int):
         with StateManager.SaveBlock():
@@ -326,43 +317,6 @@ class AutonaBasePlayerWidget(QGroupBox):
         gamerTag = self._w(schema.PLAYER_TAG_KEY).text()
         prefix = self._w(schema.PLAYER_SPONSOR_KEY).text()
         return prefix+" "+gamerTag if prefix else gamerTag
-
-    def Clear(self, no_mains=False):
-        with StateManager.SaveBlock(), self.dataLock:
-            # online_avatar belongs to whoever was in this slot, and nothing
-            # below derives it: the fields are what get emptied here, and the
-            # avatar came from the provider, not from them. Clearing it used
-            # to fall out of NameChanged -> ExportPlayerImages() defaulting to
-            # None, which is exactly the accident that also wiped avatars that
-            # were supposed to stay. Now it is stated where it is meant.
-            self.player.SetOnlineAvatar(None)
-
-            for c in self.findChildren(QLineEdit):
-                if c.objectName() != "" and c.objectName() != 'qt_spinbox_lineedit':
-                    if c.text() != "":
-                        c.setText("")
-                        c.editingFinished.emit()
-
-            for c in self.findChildren(QSpinBox):
-                c.setValue(0)
-                c.lineEdit().editingFinished.emit()
-
-            for c in self.findChildren(QPlainTextEdit):
-                if c.toPlainText() != "":
-                    c.clear()
-                    c.textChanged.emit()
-
-            for c in self.findChildren(QComboBox):
-                if (no_mains):
-                    for charelem in self.character_elements:
-                        for i in range(len(charelem)):
-                            if charelem[i] == c:
-                                break
-                        else:
-                            c.setCurrentIndex(0)
-                        continue  # only executed if the inner loop DID break
-                else:
-                    c.setCurrentIndex(0)
 
     def _WireCountryState(self):
         """One-time wiring of the country / region pair. Subclasses call this

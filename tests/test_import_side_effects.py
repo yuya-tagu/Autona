@@ -4,7 +4,7 @@ Step 3 of the startup redesign moves every singleton construction -- and
 every static data load -- out of module level and into src/bootstrap.py.
 This test pins down what has already been migrated: importing
 SettingsManager / StateManager / AutonaHotkeys / AutonaGameAssetManager /
-AutonaPlayerDB / AutonaLocaleHelper / AutonaBadWordFilter /
+AutonaPlayerDB / AutonaLocaleHelper /
 StartGGDataProvider / AutonaTournamentDataProvider / AutonaAlertNotification
 / AutonaUpdater / AutonaCountryHelper / AutonaScoreboardManager /
 AutonaWebServer must not build a QApplication, must not create any of those
@@ -122,7 +122,7 @@ state_persistence = importlib.import_module(
     "src.core.StatePersistence").StatePersistence
 state_migrations = importlib.import_module("src.core.StateMigrations")
 # The bad-word filter and the player DB (ADR-005 S3e-1): the Qt-free halves
-# of AutonaBadWordFilter / AutonaPlayerDB, singletons created by
+# of the old AutonaBadWordFilter / AutonaPlayerDB, singletons created by
 # bootstrap_core(). The filter reads the ngword lists and creates
 # ./user_data/badword_*.txt in Initialize(); the DB reads and writes
 # ./user_data/local_players.json in LoadDB().
@@ -136,8 +136,10 @@ core_player_db = importlib.import_module("src.core.PlayerDB").PlayerDB
 settings_manager = core_settings
 state_manager = core_state
 # The old src/SettingsManager.py / src/StateManager.py compat shims are gone;
-# nothing may bring a second copy of the state layer back.
-for _shim in ("src.SettingsManager", "src.StateManager"):
+# nothing may bring a second copy of the state layer back. Nor the bad-word
+# filter's forwarding front (ADR-005 S3e-3: its last callers went to core).
+for _shim in ("src.SettingsManager", "src.StateManager",
+              "src.Helpers.AutonaBadWordFilter"):
     try:
         importlib.import_module(_shim)
     except ModuleNotFoundError:
@@ -153,15 +155,13 @@ game_assets = importlib.import_module(
 # another module's singleton. That wiring now lives in bootstrap_gui(), and
 # the relay to the core DB in bootstrap_core() (Attach).
 player_db = importlib.import_module("src.AutonaPlayerDB").AutonaPlayerDB
-# The three static-data modules. Their tails used to read the shipped
+# The static-data modules. Their tails used to read the shipped
 # language/ngword/GraphQL files -- and, for the bad-word lists, to *create*
 # ./user_data/badword_{white,black}list.txt -- as a side effect of being
-# pulled into the chain by something else. The bad-word one is a front for
-# the core filter now (ADR-005 S3e-1), imported to keep it inert too.
+# pulled into the chain by something else. The bad-word one moved to core
+# (ADR-005 S3e-1, core_bad_words above); its forwarding front went in S3e-3.
 locale_helper = importlib.import_module(
     "src.Helpers.AutonaLocaleHelper").AutonaLocaleHelper
-bad_words = importlib.import_module(
-    "src.Helpers.AutonaBadWordFilter").AutonaBadWordFilter
 startgg = importlib.import_module(
     "src.TournamentDataProvider.StartGGDataProvider").StartGGDataProvider
 tdp = importlib.import_module(
@@ -291,8 +291,6 @@ assert os.path.isfile("./user_data/badword_whitelist.txt"), \
     "BadWordFilter.Initialize() did not create badword_whitelist.txt"
 assert os.path.isfile("./user_data/badword_blacklist.txt"), \
     "BadWordFilter.Initialize() did not create badword_blacklist.txt"
-assert bad_words.Censor(None) is None, \
-    "AutonaBadWordFilter no longer forwards to BadWordFilter.instance"
 
 # Same for the player DB: the file is read (and created on a first run)
 # by LoadDB(), never by the construction.

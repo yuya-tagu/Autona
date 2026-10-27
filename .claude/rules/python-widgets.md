@@ -100,6 +100,12 @@ publish し、ヘッドレスは同じものを core の `PlayerService.SeedEmpt
   読み出してそのまま publish すると、値の形とキー順（QVariantMap 順 = 外部契約）が
   Qt に縛られ、Qt なしでは同じ state を作れなくなる
   - どの行を表示するか（Qt モデルの走査・手入力）はウィジェット側に残る
+  - **選手データ dict の読込も同じ**（ADR-005 S3e-3）。カードの `SetData` は
+    `PlayerService.ApplyData`（DB とのマージ・悪語フィルタ・国 / 地域 / キャラの解決は core）を
+    呼んで描画するだけで、コンボの行を探して選ぶ・`editingFinished` を emit して
+    ハンドラに書かせる、という「フォームに入力して書かせる」読込を書かない
+    （`tests/test_player_apply.py` が AST で pin）。カード自身の操作（補完の選択・クリア・
+    エディタの読込）の後は、入力中の欄も含めて描画する（`_RenderSlot(over=True)`）
   - Top 8・リザルトの各パネルは、まだコンボの行 dict から値を組んでいる（S4 で置き換え）。
     実況パネルは ADR-005 S3e-2 で、アイコンの識別子（stem）だけを `CommentaryService.SetField` に渡すようになった。
     新しく同じ形を書かない

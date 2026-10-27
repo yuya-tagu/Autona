@@ -9,10 +9,10 @@ branch (see record_golden.py there); this replays it on the new class, wired
 the way bootstrap_core() wires it -- AutonaLocaleHelper's country lookups and
 a program locale read at each call.
 
-Also pinned: the old module's name still censors (it forwards to
-BadWordFilter.instance), and a filter built without the callables behaves as
-the old one did before the locale was loaded ("en-US", no country
-languages).
+Also pinned: the shared instance's three entry points (the old module kept
+forwarding to them until S3e-3 removed it, its callers gone), and a filter
+built without the callables behaves as the old one did before the locale
+was loaded ("en-US", no country languages).
 """
 import json
 from pathlib import Path
@@ -165,18 +165,20 @@ def test_without_the_callables_a_region_or_country_adds_nothing(
                 for value in GOLDEN["values"]] == want
 
 
-def test_the_old_module_forwards_to_the_core_instance(
+def test_the_shared_instance_censors_values_strings_and_dicts(
         word_lists, country_tables, log_sink, enabled, monkeypatch):
-    from src.Helpers.AutonaBadWordFilter import AutonaBadWordFilter
-
+    # What the old module's three static methods forwarded to. Its callers
+    # (the player card, the commentary panel) call core now (S3e-2 / S3e-3),
+    # and the module itself is gone.
     monkeypatch.setattr(BadWordFilter, "instance",
                         _filter(word_lists, {"value": "pt-BR"}, country_tables))
+    censor = BadWordFilter.instance
     want = next(outputs for program_locale, country, outputs
                 in GOLDEN["results"]
                 if program_locale == "pt-BR" and country == "MX")
-    assert [_outcome(lambda: AutonaBadWordFilter.Censor(value, "MX"))
+    assert [_outcome(lambda: censor.Censor(value, "MX"))
             for value in GOLDEN["values"]] == want
-    assert AutonaBadWordFilter.CensorString("qblack") == "***"
+    assert censor.CensorString("qblack") == "***"
     value = {"a": "qcommon", "b": {"c": "qcommon x"}}
-    AutonaBadWordFilter.CensorDict(value)
+    censor.CensorDict(value)
     assert value == {"a": "***", "b": {"c": "*** x"}}

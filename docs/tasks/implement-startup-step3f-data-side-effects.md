@@ -13,7 +13,7 @@
 | 1 | [src/SettingsManager.py](../../src/SettingsManager.py) 末尾 | `settings.json` 初回作成 + `LoadSettings()` |
 | 2 | [src/Helpers/AutonaLocaleHelper.py](../../src/Helpers/AutonaLocaleHelper.py) 末尾 | `LoadLanguages()` + `LoadCountryToLanguage()`（i18n/mapping.json 等の読み込み・失敗時例外） |
 | 3 | [src/TournamentDataProvider/StartGGDataProvider.py](../../src/TournamentDataProvider/StartGGDataProvider.py) 末尾 | GQL クエリ 18 ファイルをクラス属性へ読み込み |
-| 4 | [src/Helpers/AutonaBadWordFilter.py](../../src/Helpers/AutonaBadWordFilter.py) 末尾 | `assets/ngword/` 読み込み + `user_data/badword_*.txt` 作成 |
+| 4 | `src/Helpers/AutonaBadWordFilter.py` 末尾（ADR-005 S3e-1 で [src/core/BadWordFilter.py](../../src/core/BadWordFilter.py) へ移動、S3e-3 で削除） | `assets/ngword/` 読み込み + `user_data/badword_*.txt` 作成 |
 
 ## 実装内容
 

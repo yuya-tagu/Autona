@@ -82,8 +82,7 @@ from loguru import logger
 from . import StateSchema as schema
 from .GameTrackerService import GameTrackerService
 from .LayoutOptionsManager import LayoutOptionsManager
-from .PlayerService import (CharacterSlot, PlayerService,
-                            RepublishTeamMergedNames)
+from .PlayerService import PlayerService, RepublishTeamMergedNames
 from .SettingsManager import SettingsManager
 from .StateManager import StateManager
 from .StatsService import StatsService
@@ -655,7 +654,7 @@ class AutonaActions:
     # per card. The operations below write the same state from the state,
     # one save cycle each, and the cards / spinboxes / boxes follow from the
     # held cycle (S2a). What a card's Clear() published is reproduced key by
-    # key in `_ClearSlot`, including what it left alone.
+    # key in `PlayerService._Clear`, including what it left alone.
     #
     # Board 3 (crew) is not one of these boards: each returns False there,
     # and the caller hands the operation to the crew widget (decision 6).
@@ -712,11 +711,12 @@ class AutonaActions:
         it applied.
 
         What each slot loses is what a player card's Clear() emptied
-        (`_ClearSlot`); the birthday, the city and the mains stay, as they
-        did -- the city is a known gap (ADR-005 S2 decision 5), recorded
-        rather than fixed. `no_mains` keeps the characters, with the old
-        clear's limits (see `_ClearSlot`). The upset factor is recalculated
-        when a seed went, as the seed spinbox's change used to ask for.
+        (`PlayerService.ClearSlot`); the birthday, the city and the mains
+        stay, as they did -- the city is a known gap (ADR-005 S2 decision
+        5), recorded rather than fixed. `no_mains` keeps the characters,
+        with the old clear's limits (see `PlayerService._Clear`). The upset
+        factor is recalculated when a seed went, as the seed spinbox's
+        change used to ask for.
 
         Every slot the state carries for the two teams, which on a built
         board is one per player card (the roster is trimmed to the cards).
@@ -735,84 +735,12 @@ class AutonaActions:
                         continue
                     for slot, value in list(roster.items()):
                         if isinstance(value, dict):
-                            seedsChanged |= self._ClearSlot(
-                                f"{prefix}.{slot}", value, no_mains)
+                            seedsChanged |= PlayerService(
+                                f"{prefix}.{slot}").ClearSlot(
+                                no_mains).seedChanged
                 if seedsChanged:
                     self._UpdateUpsetFactor(board)
         return True
-
-    @staticmethod
-    def _ClearSlot(path, slot, no_mains) -> bool:
-        """Empty one player slot as a player card's Clear() did; True when
-        its seed changed. Caller holds the lock and the block.
-
-        Clear() emptied the card's widgets and let their handlers publish,
-        so what it wrote depended on what each widget showed -- which, since
-        S2a, is the slot itself:
-
-        - `online_avatar`: always None (it stated that outright).
-        - the four line edits and the note: emptied when they held text.
-        - the display name, the images and the id: re-published for an
-          empty name when the sponsor or the tag held text (the name
-          fields' NameChanged); a slot with an id but no name keeps it.
-        - the seed: always written, as 0 (its line edit's editingFinished).
-        - the country and the region: emptied when shown (a country takes
-          its region with it, the region going first, as LoadStates
-          publishes it).
-        - the characters: all of the card's slots blank, when one of them
-          was not -- the card has as many as `character` holds, since every
-          slot-count change republishes it.
-
-        `no_mains` kept the characters by skipping the combos of the card's
-        character rows, in a loop that only did so for a card with a single
-        row: with two or more, every row's combos were reset by the others'
-        pass, and with none, the country and region combos were not reset
-        either. Reproduced as it was -- a set load with `no_mains` publishes
-        this state until the set arrives (and its SetData clears the same
-        way).
-        """
-        service = PlayerService(path)
-        # Read before the first write: `slot` is the live dict.
-        slot = dict(slot)
-
-        def text(key):
-            value = slot.get(key)
-            return "" if value is None else str(value)
-
-        named = bool(text(schema.PLAYER_SPONSOR_KEY)
-                     or text(schema.PLAYER_TAG_KEY))
-        seedChanged = AutonaActions._asInt(
-            slot.get(schema.PLAYER_SEED_KEY), 0) > 0
-        characters = slot.get("character")
-        rows = len(characters) if isinstance(characters, dict) else 0
-
-        service.SetOnlineAvatar(None)
-
-        for field in schema.PLAYER_LINE_EDIT_KEYS:
-            if text(field):
-                service.SetText(field, "")
-        if named:
-            service.PublishMergedName("", "")
-            service.PublishImages("", "")
-            service.SetPlayerId(None)
-
-        service.SetSeed(0)
-
-        if text(schema.PLAYER_NOTE_KEY):
-            service.SetText(schema.PLAYER_NOTE_KEY, "")
-
-        if not (no_mains and rows == 0):
-            if slot.get(schema.PLAYER_COUNTRY_KEY):
-                service.SetRegion(None, None)
-                service.SetCountry(None)
-            elif slot.get(schema.PLAYER_STATE_KEY):
-                service.SetRegion(None, None)
-
-        if rows and not (no_mains and rows == 1):
-            blank = service.CharacterValue(CharacterSlot())
-            if any(value != blank for value in characters.values()):
-                service.PublishCharacterSlots([CharacterSlot()] * rows)
-        return seedChanged
 
     def ClearBoard(self, board) -> bool:
         """The すべての入力値をリセット button: the players, the score, the

@@ -39,6 +39,7 @@
 **意図的に分岐のため統合しない2つ（残すのが正解）**:
 - `SetCharactersPerPlayer`: アイコンサイズ(16 vs 48)・フォント・`NoIconProxyModel` 有無・move ボタン非表示・幅調整が全面的に相違。1v1 と team battle で別設定の UI ビルダー。
 - `SetData`: real_name/custom_textbox/controller/seed フィールドの有無、`ExportPlayerId`、**mains-list 処理が別実装**（Scoreboard はバグ修正済・Team は旧挙動）、proxy vs 直接モデルアクセス。
+  - 2026-10-26（ADR-005 S3e-3）: 選手の読込は core の `PlayerService.ApplyData` へ移り、カードの `SetData` はそれを呼んで描画するだけになった（モデルの走査・mains の解決はもうカードに無い）。この行は経緯の記録。
 - これらは「重複」ではなく意図的差分。フック多数での統合は可読性を下げ、テスト網の無い中核 UI でリグレッションを招くため**統合しない**判断（PdM 承認済）。
 
 **影響範囲**: `AutonaBasePlayerWidget.py`, `AutonaScoreboardPlayerWidget.py`, `AutonaTeamPlayerWidget.py`

@@ -101,6 +101,20 @@ Step 5（第 1〜3 弾、2026-09-01/02）で**全ウィジェット静的化完�
 - 書き込みは `self.player`（`src/core/PlayerService.py`、path に束縛された
   1 インスタンス）が唯一の経路。ボード番号が要る処理は `PlayerService.BoardNumber()`
   を使う（`player_editor` では `None` を返す）
+- **選手の読込・クリア・DB 保存も core**（ADR-005 S3e-3）: カードの `SetData` /
+  `Clear` / `SavePlayerToDB` は `self.player.ApplyData` / `ClearSlot` /
+  `SavePlayerToDB` を呼んで描画するだけ。ボード（`AutonaScoreboardWidget._ApplyPlayer`）は
+  カードの `SetData` を経由せず、カードの `player` を直接呼ぶ。どちらも 1 枚のカードの
+  path に束縛されたサービスなので、エディタの読込・保存は `player_editor.1` しか書かない
+  （`tests/test_player_apply.py` の
+  `test_the_editor_loads_clears_and_saves_without_touching_a_board` が pin）。
+  `SavePlayerToDB` は**ウィジェットではなく state から**組むので、エディタの
+  `player_editor.*` はダイアログを閉じるたびに消す（`_PlayerEditorDialog.done` →
+  `StateSchema.ClearPlayerEditor()`。残すと次の「新規登録」に前の選手の欄が混ざる）
+- 統計のトリガー（`playerId_changed` / `player_seed_changed`）はカードの
+  `AnnounceChange(SlotChange)` が出す。`SlotChange` は操作の前後の state の
+  （id, seed）の比較（id の通知は旧実装どおり `score.*` の path だけ。エディタの
+  カードの通知は誰も受けていない）
 
 ## 8. Autona.exe はプロジェクト直下
 

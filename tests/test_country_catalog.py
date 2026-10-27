@@ -176,6 +176,27 @@ def test_state_resolves_one_region_or_nothing(inCountryDir):
     assert catalog.State("XX-NOPE", "13") == {}
 
 
+def test_state_codes_are_the_regions_codes_off_the_disk(
+        inCountryDir, monkeypatch):
+    """What a player load matches a region by, under StateManager.lock
+    (ADR-005 S3e-3 review): the regions' codes, as States() keys and
+    orders them, without the flag lookup States() makes per region."""
+    catalog = _loaded("en")
+    expected = {code: {"code": state["code"],
+                       "original_code": state["original_code"]}
+                for code, state in catalog.States("JP").items()}
+
+    def noDisk(path):
+        raise AssertionError(f"looked at {path}")
+
+    monkeypatch.setattr(os.path, "exists", noDisk)
+    codes = catalog.StateCodes("JP")
+    assert json.dumps(codes) == json.dumps(expected)
+    codes["13"]["code"] = "changed"
+    assert catalog.StateCodes("JP")["13"]["code"] == "13"
+    assert catalog.StateCodes("XX-NOPE") is None
+
+
 # ── lookups (the S1d readers) ────────────────────────────────────────────
 
 def test_country_by_code_searches_countries_then_custom_flags(inCountryDir):

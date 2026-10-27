@@ -17,9 +17,12 @@ its combos' rows in Qt and hand the whole row dicts over; since ADR-005 S1d
 the card hands over **identifiers only** -- which character (en_name), which
 skin row, which variant (en_name), which country code, which region code --
 and this class builds the values from the Qt-free catalogs
-(``GameAssetCatalog`` / ``CountryCatalog``). Which row a combo shows (and the
-bad-word filter) is still the card's business; what the state holds for that
-pick is decided here, so it can be produced without a widget.
+(``GameAssetCatalog`` / ``CountryCatalog``). Which row a combo shows is still
+the card's business; what the state holds for that pick is decided here, so
+it can be produced without a widget. Since ADR-005 S3e-3 (S2f) so is loading
+a whole player -- the database merge, the bad-word filter, the location and
+character lookups (``ApplyData``) -- and the card's clear and save
+(``ClearSlot`` / ``SavePlayerToDB``): the card asks, then renders the slot.
 
 The values are byte-compatible with what the card used to publish. A Qt
 model hands its dicts out as QVariantMaps -- the keys of every nested dict in
@@ -49,7 +52,9 @@ already changed -- a combo whose index moved, a line edit whose text
 changed -- and two of them (the region combo's rebuild, the character slots)
 legitimately publish the same empty value twice in a row as part of one set
 load, which a guard would swallow. The two that *were* guarded in the widget
-(``city`` and ``id``) keep their guards below.
+(``city`` and ``id``) keep their guards below, and a load (``ApplyData``)
+skips what the card's SetData skipped -- a text, a location, a character
+row it would not have moved -- so it writes what SetData wrote.
 
 Import side effects: none (agent-pitfalls #1). Qt-free, like everything under
 ``src/core`` -- including ``SponsorHelper``, which is imported for the crest
@@ -57,17 +62,20 @@ lookup and which moved into core alongside this module's own instalment
 (Step 5-5) precisely because this was its only caller
 (``tests/test_core_qt_free.py`` pins both).
 """
+import copy
 import os
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import NamedTuple, Optional
 
 from loguru import logger
 
 from . import StateSchema as schema
+from .BadWordFilter import BadWordFilter
 from .CountryCatalog import CountryCatalog
-from .DictHelper import qvariantmap_copy
+from .DictHelper import deep_clone, qvariantmap_copy
 from .GameAssetCatalog import GameAssetCatalog
+from .PlayerDB import PlayerDB
 from .SponsorHelper import AutonaSponsorHelper
 from .StateManager import StateManager
 
@@ -87,6 +95,19 @@ AVATAR_DIR = "./user_data/player_avatar"
 # name. Verbatim from the widget (the sponsor helper keeps its own copy for
 # the crest lookup, which splits on a slightly wider set).
 _FILENAME_UNSAFE = re.compile(r"[,/|;:<>\\?*]")
+
+# The line breaks the card's note box (a QPlainTextEdit) turned into "\n" on
+# the way to the state: a note loaded into a slot is stored as the box would
+# have handed it over.
+_LINE_BREAKS = re.compile("\r\n|[\r\u2028\u2029]")
+
+# A loaded player's fields, PlayerDB-shaped key -> slot key, in the order
+# they were set (the gamer tag, the sponsor, the real name).
+_NAME_FIELDS = (
+    (schema.PLAYER_TAG_KEY, "gamerTag"),
+    (schema.PLAYER_SPONSOR_KEY, "prefix"),
+    (schema.PLAYER_REAL_NAME_KEY, "name"),
+)
 
 # Character slots per player card on a freshly built board: the board
 # forces its charNumber back to this whatever the game says
@@ -127,6 +148,20 @@ class CharacterSlot:
     skin: int = -1
     variant: Optional[str] = None
     text: str = ""
+
+
+class SlotChange(NamedTuple):
+    """What a write did to the two facts the board's statistics hang off:
+    who is in the slot (`id`) and their seed.
+
+    The board fires its statistics triggers from it (the recent sets and
+    the last sets / standings for an id, the upset factor for a seed); the
+    player card's own signals used to, one per widget change. A change is
+    the slot's value after the operation against the one before, so a load
+    that empties the seed and puts the same one back changes nothing.
+    """
+    idChanged: bool = False
+    seedChanged: bool = False
 
 
 class PlayerService:
@@ -443,6 +478,384 @@ class PlayerService:
         """
         StateManager.Set(self.Key("online_avatar"), value)
 
+    # ── what the slot holds ──────────────────────────────────────────────
+
+    def _Slot(self) -> dict:
+        """A copy of the slot ({} for none). Caller holds the lock."""
+        slot = StateManager.Get(self.path)
+        return deep_clone(slot) if isinstance(slot, dict) else {}
+
+    def _Text(self, field) -> str:
+        """A text field as the card shows it ("" for none). Caller holds
+        the lock."""
+        value = StateManager.Get(self.Key(field))
+        return "" if value is None else str(value)
+
+    def Identity(self) -> tuple:
+        """(id, seed) of the slot: what SlotChange compares."""
+        with StateManager.lock:
+            return (deep_clone(StateManager.Get(self.Key("id"))),
+                    self._asInt(StateManager.Get(
+                        self.Key(schema.PLAYER_SEED_KEY)), 0))
+
+    def ChangeSince(self, identity) -> SlotChange:
+        """What changed since `identity` (an earlier Identity())."""
+        playerId, seed = self.Identity()
+        return SlotChange(idChanged=playerId != identity[0],
+                          seedChanged=seed != identity[1])
+
+    def SlotFromValue(self, value, snapshot=None) -> CharacterSlot:
+        """The identifiers that build `value`, one slot of `character`: the
+        inverse of CharacterValue, i.e. the pick a card shows for it.
+
+        Matched through the value rather than its `en_name`: a skin that is
+        a different character (Dr. Mario) puts that character's name and
+        en_name into the slot over the picked row's. `codename` is the row's
+        own, so the rows sharing it (or, without one, the en_name) are the
+        candidates, and the one that builds the value wins -- else the
+        first. A value without an `en_name` is a typed name (or nothing).
+        The skin is the value's own row number; the variant its en_name when
+        the game has that variant.
+        """
+        if not isinstance(value, dict):
+            return CharacterSlot()
+        games = self._GameCatalog()
+        snap = snapshot if snapshot is not None else games.Current()
+        skin = value.get("skin")
+        if not isinstance(skin, int) or isinstance(skin, bool):
+            skin = -1
+        variantValue = value.get("variant")
+        variant = variantValue.get("en_name") \
+            if isinstance(variantValue, dict) else None
+        if variant is not None and games.VariantRow(variant, snap) is None:
+            variant = None
+        name = value.get("name")
+        name = "" if name is None else str(name)
+        if "en_name" not in value:
+            return CharacterSlot(None, skin, variant, name)
+        candidates = [
+            data for _text, data in snap.characterRows
+            if ("codename" in value
+                and data.get("codename") == value.get("codename"))
+            or data.get("en_name") == value.get("en_name")]
+        for data in candidates:
+            slot = CharacterSlot(data.get("en_name"), skin, variant,
+                                 data.get("name") or "")
+            if self.CharacterValue(slot, snap) == value:
+                return slot
+        if candidates:
+            data = candidates[0]
+            return CharacterSlot(data.get("en_name"), skin, variant,
+                                 data.get("name") or "")
+        return CharacterSlot(None, skin, variant, name)
+
+    def _CharacterSlots(self, characters, snap) -> list:
+        """The slot's character slots as picks, one per entry of
+        `character` (the card's character rows; the default count when the
+        slot has none yet). Keys are 1-based numbers, or their strings for
+        a state read back from the store."""
+        if not isinstance(characters, dict) or not characters:
+            return [CharacterSlot()] * DEFAULT_CHARACTERS_PER_PLAYER
+        return [self.SlotFromValue(
+                    characters.get(index, characters.get(str(index))), snap)
+                for index in range(1, len(characters) + 1)]
+
+    # ── loading a player (ADR-005 S3e-3, S2f) ────────────────────────────
+    #
+    # The card's SetData was this, written as a form being filled: it set
+    # the line edits' text and emitted their editingFinished, picked rows on
+    # the country / region / character / skin / variant combos, and let the
+    # handlers publish. What it published -- the writes, their order, the
+    # save cycle -- is reproduced here from the state alone, so a set's
+    # entrants, the Web's player edit, a tag lookup, the name completer and
+    # the PLAYERS editor load a player without a widget.
+    # tests/test_player_apply.py pins it against a recording of the widget
+    # implementation (ae922c24); runs of writes to one key that the combos
+    # made one per moved combo are one write here. Two of its bugs were
+    # fixed in the S3e-3 review (the id and the city a load's clear kept, a
+    # sponsor without a tag), and the steps they move were recorded again.
+
+    def ApplyData(self, data, loadFromDB=True, clear=True,
+                  no_mains=False) -> SlotChange:
+        """Load the player in `data` (PlayerDB-shaped: gamerTag, prefix,
+        name, twitter, custom_textbox, country_code, state_code, mains, plus
+        a provider's id, seed, city, avatar) into the slot. One save cycle.
+
+        - `clear` empties the slot first as a load did (`_Clear`): no
+          display name, and the country hidden rather than published -- it
+          is announced as gone only if no country follows. The id and the
+          city are emptied too unless the load brings its own (S3e-3
+          review: the card's clear kept the previous player's).
+        - `loadFromDB` applies the local database's record for the player's
+          tag (sponsor + gamer tag) first, then `data` over it -- when there
+          is a tag to look up. `data` and the record are copies: the
+          bad-word filter never edits either.
+        - every text is censored for the player's country, and written only
+          when it differs from the slot's (a field a load does not carry is
+          left alone).
+        - `no_mains` keeps the characters (of a card with one row; see
+          `_Clear` for the old clear's limits) and ignores `mains`.
+
+        The display name and the images are re-derived last, from what the
+        slot ends up holding, even when a step raised. Returns what changed
+        for the statistics (SlotChange).
+        """
+        if not isinstance(data, dict):
+            raise TypeError(f"player data for {self.path} is not a dict")
+        data = copy.deepcopy(data)
+        record = None
+        if loadFromDB and data.get("gamerTag"):
+            # The database is keyed by sponsor + tag (PlayerDB.PlayerTag):
+            # without a tag, a sponsor names no record. The lookup used to
+            # raise on one (after the clear), and the load stopped there.
+            try:
+                tag = PlayerDB.PlayerTag(data)
+            except TypeError:
+                logger.warning(
+                    f"{self.path}: no database lookup for "
+                    f"{data.get('prefix')!r} {data.get('gamerTag')!r}")
+            else:
+                db = PlayerDB.instance
+                if db is not None:
+                    with db.lock:
+                        record = copy.deepcopy(db.Get(tag))
+        # What the load writes over the previous player's own: the clear
+        # leaves those to it rather than emptying them first.
+        brings = {key for key in ("id", "city")
+                  if data.get(key) or (record or {}).get(key)}
+
+        with StateManager.SaveBlock():
+            with StateManager.lock:
+                before = self.Identity()
+                slot = self._Slot()
+                country = slot.get(schema.PLAYER_COUNTRY_KEY)
+                region = slot.get(schema.PLAYER_STATE_KEY)
+                shown = country.get("code") \
+                    if isinstance(country, dict) else None
+                # The card's location: the country it shows, the country
+                # its region rows are for (the same, until a load hides the
+                # country without telling), the region it shows.
+                location = {
+                    "shown": shown, "rowsFor": shown,
+                    "region": region.get("code")
+                    if isinstance(region, dict) else None}
+                hidden = False
+                try:
+                    if clear and self._Clear(slot, no_mains, forLoad=True,
+                                             keep=brings):
+                        hidden = location["shown"] is not None
+                        location["shown"] = None
+                        location["region"] = None
+                    if record:
+                        self._ApplyFields(record, no_mains, location)
+                    self._ApplyFields(data, no_mains, location, hidden)
+                finally:
+                    sponsor = self._Text(schema.PLAYER_SPONSOR_KEY)
+                    tag = self._Text(schema.PLAYER_TAG_KEY)
+                    self.PublishMergedName(sponsor, tag)
+                    self.PublishImages(sponsor, tag)
+                return self.ChangeSince(before)
+
+    def _ApplyFields(self, source, no_mains, location, hidden=False):
+        """One player dict's fields into the slot, in the order the card
+        set them. `hidden`: a clear hid the country, which is announced
+        (as no country) after the country step unless one was shown since.
+        Caller holds the lock and the block."""
+        countryCode = source.get("country_code")
+        badWords = BadWordFilter.instance
+
+        def censor(value):
+            return badWords.Censor(value, countryCode) \
+                if badWords is not None else value
+
+        def text(field, raw):
+            if not raw or raw == StateManager.Get(self.Key(field)):
+                return
+            value = str(censor(raw))
+            if value != self._Text(field):
+                self.SetText(field, value)
+
+        for field, key in _NAME_FIELDS:
+            text(field, source.get(key))
+
+        if source.get("avatar"):
+            self.PublishImages(self._Text(schema.PLAYER_SPONSOR_KEY),
+                               self._Text(schema.PLAYER_TAG_KEY),
+                               onlineAvatar=source.get("avatar"))
+        if source.get("id"):
+            self.SetPlayerId(source.get("id"))
+        if source.get("city"):
+            self.SetCity(source.get("city"))
+
+        text(schema.PLAYER_TWITTER_KEY, source.get("twitter"))
+
+        note = source.get("custom_textbox")
+        if note and note != StateManager.Get(self.Key(schema.PLAYER_NOTE_KEY)):
+            # Stored with its line breaks escaped (PlayerDB, SavePlayerToDB).
+            value = _LINE_BREAKS.sub(
+                "\n", f"{censor(note)}".replace("\\n", "\n"))
+            if value != self._Text(schema.PLAYER_NOTE_KEY):
+                self.SetText(schema.PLAYER_NOTE_KEY, value)
+
+        if countryCode:
+            # A code the catalog does not know shows no country.
+            target = countryCode \
+                if self._CountryCatalog().CountryByCode(countryCode) else None
+            if target != location["shown"]:
+                self._ShowCountry(target, location)
+        if hidden and location["shown"] is None:
+            self._ShowCountry(None, location)
+
+        stateCode = source.get("state_code")
+        if stateCode:
+            catalog = self._CountryCatalog()
+            # The codes only: States() resolves every region's flag on disk,
+            # under the state lock here.
+            rows = catalog.StateCodes(location["rowsFor"]) \
+                if location["rowsFor"] else None
+            target = self._RegionRow(rows, stateCode)
+            if target is None and countryCode:
+                # A free-form name (an older build's, or typed): the city
+                # table resolves it, whose first read parses a file -- so
+                # only when the code is not a region's own.
+                resolved = catalog.FindState(countryCode, stateCode)
+                if resolved:
+                    target = self._RegionRow(rows, resolved)
+            if target != location["region"]:
+                self.SetRegion(location["rowsFor"], target)
+                location["region"] = target
+
+        mains = source.get("mains")
+        if mains and no_mains != True:
+            self._ApplyMains(mains)
+
+        if "seed" in source:
+            # None (unseeded), 0, a numeric string: anything but a positive
+            # number is no seed, and clears the previous player's.
+            seed = self._asInt(source.get("seed") or 0, 0)
+            self.SetSeed(seed if seed > 0 else 0)
+
+    def _ShowCountry(self, code, location):
+        """Show country `code` (None: none) as a pick did: the region rows
+        are rebuilt for it first when they are another country's, which
+        publishes the blank region."""
+        if code != location["rowsFor"]:
+            self.SetRegion(None, None)
+            location["rowsFor"] = code
+            location["region"] = None
+        self.SetCountry(code)
+        location["shown"] = code
+
+    @staticmethod
+    def _RegionRow(rows, originalCode):
+        """The code of the first region row whose `original_code` is
+        `originalCode`, or None."""
+        for row in (rows or {}).values():
+            if row and row.get("original_code") == originalCode:
+                return row.get("code")
+        return None
+
+    def _MainSlot(self, name, skin, variant, snap) -> CharacterSlot:
+        """The pick a `mains` entry makes: the character row named `name`
+        (none: the blank row), its skin row `skin` (none past the rows, or
+        without a character), the variant as given."""
+        row = self._GameCatalog().CharacterRow(name, snapshot=snap)
+        if row is None:
+            return CharacterSlot(None, -1, variant, "")
+        skins = len(snap.skinRows.get(name, ()))
+        return CharacterSlot(name, skin if 0 <= skin < skins else -1,
+                             variant, row.get("name") or "")
+
+    def _ApplyMains(self, mains):
+        """The characters a player's `mains` name: the legacy list
+        (["Mario", skin]) for the first row only, the current game's list
+        of [name, skin, variant] from the first row on. Rows past the list
+        keep what they had. `character` is written once, if it changed."""
+        games = self._GameCatalog()
+        snap = games.Current()
+        existing = StateManager.Get(self.Key("character"))
+        slots = self._CharacterSlots(existing, snap)
+        if type(mains) == list:
+            if slots:
+                skin = self._SkinNumber(mains[1], mains[0]) \
+                    if len(mains) > 1 else 0
+                slots[0] = self._MainSlot(mains[0], skin, slots[0].variant,
+                                          snap)
+        elif type(mains) == dict:
+            picked = mains.get((snap.game or {}).get("codename"), [])
+            for index, main in enumerate(picked):
+                if index >= len(slots):
+                    continue
+                skin = self._SkinNumber(main[1], main[0]) \
+                    if len(main) > 1 else 0
+                variant = main[2] if len(main) >= 3 \
+                    and games.VariantRow(main[2], snap) is not None else None
+                slots[index] = self._MainSlot(main[0], skin, variant, snap)
+        else:
+            return
+        characters = {index + 1: self.CharacterValue(slot, snap)
+                      for index, slot in enumerate(slots)}
+        current = {}
+        if isinstance(existing, dict):
+            current = {self._asInt(key, key): value
+                       for key, value in existing.items()}
+        if characters != current:
+            StateManager.Set(self.Key("character"), characters)
+
+    def _SkinNumber(self, value, character) -> int:
+        """A `mains` entry's skin row, or the first skin (0) for one that is
+        not a number -- with a warning. The desktop's completer model
+        rewrites a stored record's mains so (AutonaPlayerDB._BuildModel,
+        S3c-2 decision 5) before anything loads it; reading them alike here
+        gives both shells the same characters, a headless one included,
+        where the record is loaded as stored. A dict main used to raise on
+        it (ValueError, its characters unwritten)."""
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            logger.warning(
+                f"{self.path}: the skin of main {character!r} is not a "
+                f"number ({value!r}); using the first skin")
+            return 0
+
+    def SavePlayerToDB(self):
+        """The card's save button: the slot as the local player database
+        stores a player (PlayerDB.fieldnames' shape, the current game's
+        characters as its mains), then the characters re-published as the
+        slot's mains too. The record keeps the database's other games'
+        mains (PlayerDB.AddPlayers overwrite)."""
+        snap = self._GameCatalog().Current()
+        with StateManager.lock:
+            slot = self._Slot()
+
+        def text(field):
+            value = slot.get(field)
+            return "" if value is None else str(value)
+
+        player = {
+            "prefix": text(schema.PLAYER_SPONSOR_KEY),
+            "gamerTag": text(schema.PLAYER_TAG_KEY),
+            "name": text(schema.PLAYER_REAL_NAME_KEY),
+            "twitter": text(schema.PLAYER_TWITTER_KEY),
+            # One line in the file: the line breaks escaped.
+            "custom_textbox": "\\n".join(
+                text(schema.PLAYER_NOTE_KEY).splitlines()),
+        }
+        slots = self._CharacterSlots(slot.get("character"), snap)
+        codename = (snap.game or {}).get("codename")
+        if codename:
+            player["mains"] = {codename: [
+                [pick.character, pick.skin, pick.variant or ""]
+                for pick in slots if pick.character]}
+        for key, field in (("country_code", schema.PLAYER_COUNTRY_KEY),
+                           ("state_code", schema.PLAYER_STATE_KEY)):
+            value = slot.get(field)
+            if isinstance(value, dict) and value:
+                player[key] = value.get("code")
+
+        PlayerDB.instance.AddPlayers([player], overwrite=True)
+        self.PublishCharacterSlots(slots, includeMains=True)
+
     # ── slot lifecycle ───────────────────────────────────────────────────
 
     def SeedEmpty(self, characters=DEFAULT_CHARACTERS_PER_PLAYER):
@@ -464,6 +877,99 @@ class PlayerService:
             self.SetRegion(None, None)
             self.PublishCharacterSlots(
                 [CharacterSlot()] * characters, includeMains=True)
+
+    def ClearSlot(self, no_mains=False) -> SlotChange:
+        """Empty the slot as the card's clear button did (`_Clear`). One
+        save cycle; returns what changed for the statistics."""
+        with StateManager.SaveBlock():
+            with StateManager.lock:
+                before = self.Identity()
+                self._Clear(self._Slot(), no_mains)
+                return self.ChangeSince(before)
+
+    def _Clear(self, slot, no_mains, forLoad=False, keep=()) -> bool:
+        """Empty the slot as the card's Clear() did; `slot` is a copy of it
+        read before the first write. Caller holds the lock and the block.
+        True when the location was cleared (see `no_mains` below).
+
+        Clear() emptied the card's widgets and let their handlers publish,
+        so what it wrote depended on what each widget showed -- which, since
+        S2a, is the slot itself:
+
+        - `online_avatar`: always None (it stated that outright).
+        - the four line edits and the note: emptied when they held text.
+        - the display name, the images and the id: re-published for an
+          empty name when the sponsor or the tag held text (the name
+          fields' NameChanged); a slot with an id but no name keeps it.
+        - the seed: always written, as 0 (its line edit's editingFinished).
+        - the country and the region: emptied when shown (a country takes
+          its region with it, the region going first, as LoadStates
+          publishes it).
+        - the characters: all of the card's slots blank, when one of them
+          was not -- the card has as many as `character` holds, since every
+          slot-count change republishes it.
+
+        `no_mains` kept the characters by skipping the combos of the card's
+        character rows, in a loop that only did so for a card with a single
+        row: with two or more, every row's combos were reset by the others'
+        pass, and with none, the country and region combos were not reset
+        either. Reproduced as it was -- a set load with `no_mains` publishes
+        this state until the set arrives (and its load clears the same
+        way).
+
+        `forLoad` is the clear a load starts with (ApplyData), which the
+        card ran with its name handlers held back and its country combo
+        silenced: no display name or images, and the country left in the
+        state (hidden; ApplyData announces it gone if no country follows).
+        Its region rows stayed too, so only a shown region is published as
+        emptied. It kept the id and the city as well, so a player loaded
+        without them carried the previous one's -- and the statistics,
+        keyed by the id, stayed the previous player's (S3e-3 review). Both
+        are emptied now, after the name fields, unless they are in `keep`:
+        what the load brings itself and writes over them.
+        """
+        def text(key):
+            value = slot.get(key)
+            return "" if value is None else str(value)
+
+        named = bool(text(schema.PLAYER_SPONSOR_KEY)
+                     or text(schema.PLAYER_TAG_KEY))
+        characters = slot.get("character")
+        rows = len(characters) if isinstance(characters, dict) else 0
+
+        self.SetOnlineAvatar(None)
+
+        for field in schema.PLAYER_LINE_EDIT_KEYS:
+            if text(field):
+                self.SetText(field, "")
+        if named and not forLoad:
+            self.PublishMergedName("", "")
+            self.PublishImages("", "")
+            self.SetPlayerId(None)
+        if forLoad:
+            if "id" not in keep:
+                self.SetPlayerId(None)
+            if "city" not in keep:
+                self.SetCity(None)
+
+        self.SetSeed(0)
+
+        if text(schema.PLAYER_NOTE_KEY):
+            self.SetText(schema.PLAYER_NOTE_KEY, "")
+
+        locationCleared = not (no_mains and rows == 0)
+        if locationCleared:
+            if slot.get(schema.PLAYER_COUNTRY_KEY) and not forLoad:
+                self.SetRegion(None, None)
+                self.SetCountry(None)
+            elif slot.get(schema.PLAYER_STATE_KEY):
+                self.SetRegion(None, None)
+
+        if rows and not (no_mains and rows == 1):
+            blank = self.CharacterValue(CharacterSlot())
+            if any(value != blank for value in characters.values()):
+                self.PublishCharacterSlots([CharacterSlot()] * rows)
+        return locationCleared
 
     def Unset(self):
         """Drop this slot's whole subtree.

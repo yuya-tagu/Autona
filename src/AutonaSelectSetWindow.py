@@ -439,11 +439,12 @@ class AutonaSelectSetWindow(QDialog):
             setId["auto_update"] = "set"
             # Defer past the double-click signal delivery: the set-load
             # cascade (NewSetSelected: the board's focused field finished,
-            # the core clear of the players and the score, the cards
-            # rendering it, then each card's SetData -> Clear -> LoadStates
-            # rebuilding its region list) is too heavy to run re-entrantly
-            # inside the table view's signal emission (agent-pitfalls #9;
-            # 2026-07-12 crash, which was a setModel() swap back then).
+            # the core clear of the players and the score, then each
+            # entrant's core load (PlayerService.ApplyData, ADR-005 S3e-3)
+            # and the cards rendering the slots, their region lists rebuilt
+            # for a new country) is too heavy to run re-entrantly inside the
+            # table view's signal emission (agent-pitfalls #9; 2026-07-12
+            # crash, which was a setModel() swap back then).
             scoreboard = self.parent()
             QTimer.singleShot(
                 0, lambda: scoreboard.signals.NewSetSelected.emit(setId))

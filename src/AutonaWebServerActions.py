@@ -61,8 +61,9 @@ class WebServerActions(QObject):
 
     @gui_thread_sync
     def update_player(self, scoreboard, team, player, data):
-        # The player widgets are the writers here (SetData resolves country,
-        # character and skin models), so this runs on the GUI thread -- and
+        # The write is core's (PlayerService.ApplyData, ADR-005 S3e-3), but
+        # the roster it checks and the statistics it asks for are still the
+        # board's, so this runs on the GUI thread -- and
         # synchronously, unlike set_team_data's queued signal, so the caller
         # gets the outcome: False when the team has no such player slot (the
         # roster is checked on the GUI thread, against the live widgets);
