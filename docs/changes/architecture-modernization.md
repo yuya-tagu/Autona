@@ -2248,11 +2248,14 @@ Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket
     - `load_player_from_tag(scoreboard, tag, team, player, no_mains)`: 選手 DB からタグで引いて、クリアして読む。`team` はセットのチームで、`SetLoadService.DisplayTeam` が state の `teamsSwapped` から state のチームに直す（従来どおり）。順序も従来どおり: 数字にならない番号は例外、DB に無いタグは `"ERROR"`、見つかったタグでスロットが無ければ例外（legacy の 500）
     - `_player_path` / `_load_player`: スロットの判定（team が 1 / 2、player が 1 以上、`score.{n}.team.{t}.player.{p}` が state にある）と、読込 + ボードホストへの通知（読込の SaveBlock の中で `host.PlayerLoaded(board, team, player, change, cleared)`。読込が例外を出しても通知する）
     - ボードホスト: `BoardHost.PlayerLoaded` は何もしない（ヘッドレスは統計を取り直さない。S3e-5）。`DesktopBoardHost.PlayerLoaded` はボードの `PlayerLoaded` を呼ぶ
+      - → S3e-5 で、統計は読込自身（`PlayerService.Announce`）が両シェルで依頼するようになった。`PlayerLoaded` から `change` を外した
   - `src/AutonaScoreboardWidget.py`
     - `ApplyPlayerData` を削除した（v1 の入口だった）
     - `PlayerLoaded(team, player, change, cleared)`: Web の読込の後に、そのスロットのカードで `_CardLoaded` を行う。`_CardLoaded` は `_ApplyPlayer` と共有する（`AnnounceChange` で統計を依頼し、クリアした読込なら打ちかけのコンボの文字を捨てる。S3e-3 判断 9）
+      - → S3e-5 で `AnnounceChange` を削除し、`PlayerLoaded(team, player, cleared)` / `_CardLoaded(card, cleared)` は打ちかけの文字を捨てるだけになった
     - `LoadPlayerFromTag`（PLAYERS パネルの「P1 / P2 にセット」）と `_ApplySinglePlayerData` / `_WritePlayerSlot`（`post_score` の 1 人分のペイロード）は残した（下の「残置」）
   - `src/AutonaWebServerActions.py`: 3 メソッドを削除した（残りは公開 10 本: `post_score`・`open_sets`・`pull_stream_set`・`stats_*` 4 本・`refresh_stats`・`get_thumbnail`・`load_set`）
+    - → S3e-5 で `stats_*` 4 本と `refresh_stats` も `AutonaWebOperations` へ移した（残り 5 本）
   - `src/AutonaWebServer.py`: legacy の 2 ルートと Socket.IO の 2 イベントを `AutonaWebOperations` に向けた（`_board_actions()` を通らないので、ヘッドレスでも 503 にならない）。`"No tag provided"` の扱いは変えていない
   - `src/AutonaApiV1.py`: v1 の選手編集を `AutonaWebOperations.update_player` に向けた（`_actions_ref()` を通らない）。False を 404 `NOT_FOUND` にするのは従来どおり
   - `src/core/PlayerService.py`
@@ -2292,6 +2295,7 @@ Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket
   5. **統計のトリガーは、デスクトップでは今までどおり出す。ヘッドレスでは出さない**
      - デスクトップ: `ApplyData` の戻り値（`SlotChange`）を、ボードホストの `PlayerLoaded` → ボードの `PlayerLoaded` → カードの `AnnounceChange` に渡す。ボード自身の読込（`_ApplyPlayer`）と同じ経路・同じ回数（読込の SaveBlock の中）
      - ヘッドレス: ボードも統計の util も無いので、取り直さない（統計の取得は S3e-5 で core へ移す）。それまでは、ヘッドレスで選手を入れ替えても、直近の対戦・戦績・アップセット係数は前の値のまま（統計のルートは 503）
+     - → S3e-5 で core へ移した。トリガーは両シェルとも `PlayerService.Announce`（回数は従来のデスクトップと同じ）
   6. **`savePlayerToDb` の DB への書き込みは、ボードホストの外で行う**（レビューの指摘）
      - 問題: ヘッドレスの `BoardHost.Run` はロック（RLock）を持って操作を走らせる。その中の `SavePlayerToDB` → `PlayerDB.AddPlayers` → `changed` の通知 → `AutonaPlayerDB.SetupModel`（`@gui_thread_sync`）が、メインスレッドで走るのを待っていた。この受け手は `bootstrap_core()` が両シェルで繋ぐ（`src/bootstrap.py`。ヘッドレスは `db_updated` を出すだけだが、`init_gui_executor` でメインスレッドへ渡す）。「ロックの中でメインスレッドを待たない」という不変条件に反する。メインスレッドが詰まる・止まる（終了処理中など）と、ロックを持ったまま待ち続けて、他の要求のボード操作もすべて止まる。メインスレッド側の処理がボード操作を呼べばデッドロックになる
      - 直し方: `SavePlayerToDB` を state 側（`PrepareSaveToDB`: スロットから記録を組み、キャラを mains として出し直す）と DB 側（`SaveRecordToDB`）に分けた。state 側は読込と同じ保存サイクル・同じロックの中、DB 側は `host.Run` が返ってから（`_save_record`）。デスクトップも同じ順（GUI スレッドで state 側、呼び出し元のスレッドで DB 側。`SetupModel` は GUI スレッドへ渡して待つ。ロックは持っていない）
@@ -2307,6 +2311,7 @@ Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket
     - state の値の変化: 該当スロットの `id` → null、`city` → null（キーは消さない。キー順は変わらない）。続けてデスクトップでは統計のキー（`recent_sets` など）が書き直される
     - 顔写真（`online_avatar`）と `seed` は残る（デスクトップのカードで名前を手入力したときと同じ。判断 1）
     - ヘッドレスでは統計を取り直さない（判断 5）。id は空になるが、統計のキー（`recent_sets` など）は S3e-5 まで書き直されない（前の選手の値が入っていれば、そのまま残る）
+      - → S3e-5 で、ヘッドレスでも統計を取り直すようになった
   - ヘッドレスで、選手の編集（v1・legacy・Socket.IO）とタグからの選手の読込が動く（それまでは 503 `UNAVAILABLE`）。対象は state にある選手欄（起動直後は各チーム 1 人）。統計は取り直さない（判断 5）
   - legacy の `update-team` は、書き込みが終わってから `"OK"` を返す（判断 4）
   - `savePlayerToDb` の DB への書き込みは、state の保存サイクルの後（同じ要求の中で、応答の前）。保存する中身は変わらない。同じ選手への保存が前後して届いたときは、後に読んだ方が残る（判断 6）
@@ -2341,6 +2346,7 @@ Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket
   - `tests/test_player_card_render.py`: `ApplyPlayerData` の呼び出しを Web の `update_player` にした。打ちかけのコンボの文字を捨てるテストに、Web のタグからの読込を足した
 - **残置 / リスク**
   - ヘッドレスでは、選手の読込の後に統計を取り直さない（判断 5。S3e-5）
+    - → S3e-5 で閉じた
   - ボードの `LoadPlayerFromTag`（PLAYERS パネル）は、カードの並びとボード属性から読込先を決める。Web の `load_player_from_tag` は state から決める。結果は同じ（`test_player_apply.py` の 2 つの再生で照合）だが、解決の書き方が 2 つある。パネルの React 化（S4）で片方になる
   - `post_score` の 1 人分のペイロード（`_ApplySinglePlayerData` / `_WritePlayerSlot`）は、まだボードのカードから読込先を決める（S3e-7 で `post_score` を移すときに揃える）。下の「既存の不具合」のとおり、不正な番号は別のスロットに書く
   - `DesktopBoardHost.Run` が GUI スレッドのままなので、GUI スレッドが詰まると Web の選手操作も待つ（判断 2。`update_player` / `load_player_from_tag` は従来どおり）
@@ -2372,3 +2378,204 @@ Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket
     - `/web` で選手を編集する → すぐオーバーレイに出る（503 にならない）
     - `/web` で選手を DB 保存付きで確定する（タグがあるとき）→ 応答が返り（固まらない）、`user_data/local_players.json` に入る。続けて別の操作（スコアの変更など）もすぐ通る
     - `/scoreboard1-load-player-from-tag-1-1?tag=<DB のタグ>` → `OK` で入る。DB に無いタグは `ERROR`
+
+#### S3e-5 統計の core 化（2026-10-26・PR #238）
+
+統計（`recent_sets` / `last_sets` / `history_sets` / `upset_factor`）を core の `StatsService` へ移した。それまではボードの `AutonaStatsUtil`（ボード 1 枚に 1 個）がカードのシグナルを中継していた。いつ取り直すか（トリガー）・何を取りに行くか・遅れて届いた答えを書くかは core が決める。取得そのものは `bootstrap_core()` が注入する fetcher（`AutonaStatsUtil`）に任せる。fetcher は要求を provider の QThreadPool に渡し、答えをメインスレッドで返す。
+
+トリガーは、選手を変える core の操作（読込・クリア・id / seed の変化・スワップ・上下移動）から出る。そのため、ボードが未構築でもヘッドレスでも統計が取り直される（S3e-4 の残置「ヘッドレスは統計を取り直さない」を閉じた）。Web の `stats_*` 4 本と `refresh_stats` は `WebServerActions` から `AutonaWebOperations` へ移し、ヘッドレスでも答える（それまでは 503）。
+
+デスクトップの外部挙動は変えていない（取得の回数と順・書き込みの順と保存サイクル・state のキーと順序・ルートの応答）。移す前の木 9e8841d5 で録り、新しい経路で照合した。意図して変えたのは次の 2 つ。
+
+- 古い答えを捨てる（判断 3）
+- クルーボードへの統計のルートがボードを構築しなくなった（判断 5）
+
+レビュー（1 回目）で、ほかに次を直した（判断 8）。
+
+- 1 つの取得の例外で、残りの統計の依頼が止まっていた
+- 既存不具合: 直近の対戦が、片方の選手の大会履歴からしか集まっていなかった（`GetRecentSets`）
+
+- **実装**
+  - `src/core/StatsService.py`
+    - 入口は 4 つ
+      - `Refresh(kind, team)`: `kind` は `RECENT_SETS` / `LAST_SETS` / `HISTORY_SETS` / `UPSET_FACTOR`
+      - `RefreshAll()`: STATS パネルのボタンと v1 `stats:refresh` と同じ順（直近の対戦 → 戦績 1・2 → 履歴 1・2 → アップセット係数）
+      - `PlayerChanged(team, change)`: id が変われば直近の対戦とそのチームの戦績・履歴、seed が変わればアップセット係数。呼び出し側の保存サイクルの中で今すぐ取り直す
+      - `TeamsChanged(teams)`: スワップ・上下移動・クリア用。ボードごとに 1 つにまとめ、`fetcher.Later` でイベントループに戻ってから、直近の対戦を 1 回とチームごとの戦績・履歴を取り直す。id はその時点で読む。fetcher が無ければ今すぐ
+    - 取得: クラス属性 `fetcher`（`IsStartGG()` / `RecentSets` / `LastSets` / `HistorySets` / `Later`）。fetcher が無ければ取りに行かず、クリアだけする。直近の対戦と履歴は Start.gg のときだけ、戦績はどの provider でも取る（従来どおり）
+    - 古い答え: 要求ごとに（ボード, 統計, チーム）の番号を `StateManager.lock` の中で振る（`_Ask`）。番号は 1 つのカウンタ（`_counter`）から出すので、キーをまたいでも重ならない（表を空にしても、飛んでいる答えが新しい要求の番号と一致しない）。答え（`_Answer`）はメインスレッドで `StateManager.lock` を取り、次の 2 つを満たすときだけ書く。それ以外は debug ログを出して捨てる
+      - 番号が最新
+      - スロットが、要求したときの選手のまま（直近の対戦は両チーム）
+    - 直近の対戦の `request_time` の比較（旧来のガード）は残した
+    - ロックの中で行うのは、要求の番号付けと「取得中」/ クリアの書き込みだけ。取得はロックの外で始める（I/O をロックの中でしない）
+    - シングルスでない・id が無い・Start.gg でない（履歴）ときも番号は進める。要求し直したときに、飛んでいる答えを捨てるため（要求し直さないうちは捨てない。判断 3）
+    - 取得の失敗: `RefreshAll` / `PlayerChanged` / `TeamsChanged` の実行は、統計を 1 つずつ `RefreshQuietly`（`Refresh` の例外をログに残して返る）で依頼する。1 つが例外を出しても残りは依頼し、Web のルートも `"OK"` を返す（判断 8）
+    - `TeamsChanged` で `fetcher.Later` が例外を出したら、そのボードのキューを取り除いてログに残す（残すと、以後そのボードの `TeamsChanged` が二度と走らない）
+    - 人数は state のスロット数（`score.{n}.team.1.player` の数。0 なら `DefaultPlayersPerTeam()`。S3e 決定 1）。`playersPerTeam` の注入は廃止した
+    - `UpdateStreamQueue` は static にした（ボードに依らず、fetcher が 1 回だけ中継する）
+  - `src/AutonaStatsUtil.py`: 輸送だけの Qt アダプタに縮めた
+    - `bootstrap_core()` が 1 個作って `StatsService.fetcher` に登録する（`instance` は持たない）
+    - provider のワーカーは自分のスレッドで `callback.emit(data)` を出す。それを、メインスレッドの QObject への queued シグナル `answered(onResult, dict)` で返す
+    - `Later(fn)` も queued シグナル。同じスレッドから呼んでも「今」ではなく「イベントループに戻ってから」走る
+    - スロットの例外はログに残す
+    - provider の `stream_queue_loaded` の中継もここ。それまでは構築済みのボードの数だけ同じ 2 キーを書いていた
+    - QtCore だけなので、ヘッドレスにもある
+  - `src/bootstrap.py`: `bootstrap_core()` の provider の後で `StatsService.fetcher = AutonaStatsUtil()` を呼ぶ（ORDER CONSTRAINT のコメント付き）。`tests/test_bootstrap_split.py` の手順にも足した
+  - `src/core/PlayerService.py`
+    - `Announce(change)`: ボードのスロット（`score.{n}.team.{t}.player.{m}`）でだけ `StatsService(n).PlayerChanged(t, change)` を呼ぶ（エディタの `player_editor.1` には統計が無い）。例外はログに残し、書き込み自身の例外を隠さない
+    - `ApplyData` は自分の保存サイクルの中で、前後の `SlotChange` を `Announce` する。途中で例外が出ても、書いた分は依頼する（カードの `SetData` と同じ）
+    - `ClearSlot(no_mains, announce=True)` も同じ。`AutonaActions.ClearPlayers` は `announce=False` で呼び、まとめて `TeamsChanged` する
+    - `SetSeed(value, announce=False)` / `SetPlayerId(value, announce=False)`: `announce` を付けると、カードの手入力の依頼を出す（seed のスピンボックスと、名前の変更で id が空になる `ExportPlayerId`）。id は実際に変わったときだけ依頼する
+    - `TeamNumber()` を足した
+  - `src/core/Actions.py`
+    - `SwapTeams`・`SwapPlayers`・`ClearPlayers` は、操作の保存ブロックを抜けた後で `StatsService(board).TeamsChanged(...)` を呼ぶ
+      - `SwapTeams`: どこかのスロットの組で id が違うとき
+      - `SwapPlayers`: 2 スロットの id が違うとき
+      - `ClearPlayers`: id が変わったチーム
+    - アップセット係数は従来どおり操作の中で再計算する（`StatsService(board).UpdateUpsetFactor()`。人数は state から）
+  - `src/AutonaScoreboardWidget.py`
+    - 削除: `self.stats`・カードの統計シグナルの中継・`_RequestPlayerStats` / `_EmitPlayerStats` / `_SlotIdsDiffer` / `_TeamPlayerIds` / `_pendingStatsTeams`
+    - `_NoticeSwap` はゲームの勝敗の描画だけ、`_ClearingPlayers` は統計を扱わない
+    - `_ApplyPlayer` / `PlayerLoaded(team, player, cleared)` / `_CardLoaded(card, cleared)` は、打ちかけのコンボの文字を捨てるだけ（統計は `ApplyData` 自身が依頼する）
+    - `ChangeSetData` のアップセット係数の依頼（`ApplyBracketType`、または singles ⇔ チームの切り替え）は、`StatsService(n).RefreshQuietly(UPSET_FACTOR)` を直接呼ぶ（判断 6）
+  - `src/AutonaScoreboardPlayerWidget.py`
+    - 統計のシグナル 4 本（`playerId_changed` / `player1Id_changed` / `player2Id_changed` / `player_seed_changed`）と `AnnounceChange` を削除した
+    - seed のスピンボックスは `SetSeed(v, announce=...)`。構築時の 1 回目の emit は依頼しない（従来も、ボードが繋ぐ前の emit だった）
+    - `ExportPlayerId` は `SetPlayerId(id, announce=True)`
+    - `SetData` / `Clear` は core を呼んで描画するだけ
+  - `src/AutonaStatsWidget.py`: 「統計情報を取得する」は、ボード 1 を構築してから `StatsService(1).RefreshAll()` を呼ぶ（従来どおりボード 1）
+  - `src/AutonaWebOperations.py`
+    - `stats_recent_sets` / `stats_upset_factor` / `stats_last_sets` / `stats_history_sets` / `refresh_stats` を足した
+    - どれもボードホストの `Run` の中で `Prepare` → `StatsService` の順に呼ぶ。デスクトップの `Prepare` は未構築のボードを構築する（従来も `GetScoreboard` が構築していた）
+    - player が 1 / 2 / both でなければ、ボードを見る前にログに残して `"OK"` を返す（従来どおり）
+    - `BoardHost.PlayerLoaded` の `change` 引数を削除した
+  - `src/AutonaWebServer.py`: legacy の 4 ルートと Socket.IO の 4 イベントを `AutonaWebOperations` に向けた。`_board_actions()` を通らないので、ヘッドレスでも 503 にならない
+  - `src/AutonaApiV1.py`: v1 `stats:refresh` を `AutonaWebOperations.refresh_stats` に向けた（`require_board_12` は従来どおり）
+  - `src/AutonaWebServerActions.py`: `stats_*` 4 本と `refresh_stats` を削除した。残りは `post_score`・`open_sets`・`pull_stream_set`・`get_thumbnail`・`load_set` の 5 本
+  - コメントの追随: `src/core/TournamentInfoService.py`
+  - レビュー（1 回目）で足したもの（判断 8）
+    - `src/AutonaTournamentDataProvider.py`: `GetLastSets` / `GetPlayerHistoryStandings` の `playerId[0]` を `_ProviderPlayerId` に替えた。Start.gg の `[player id, user id]` は先頭を、スカラー（Web から入れた id など）はそのまま provider に渡す。従来はスカラーで `TypeError` を呼び出し側のスレッドで出していた
+    - `src/TournamentDataProvider/StartGGDataProvider.py`: `GetRecentSets` が両方向のワーカーを待って読むようにした（既存不具合の修正。下記）
+    - `src/core/PlayerService.py`: `ApplyData` の外側の `finally`（何が変わったかを求めて `Announce` する）の例外は、読込が失敗していればログに残して、読込の元の例外を上げる。S3e-4 の「id を空にする」処理と同じ扱い
+    - `src/AutonaWebOperations.py` の `stats_*` 4 本と、ボードの `ChangeSetData` のアップセット係数の依頼は `RefreshQuietly` を呼ぶ
+    - `tests/conftest.py`: `StatsService` のクラスの状態（`_generations` / `_queuedTeams`）をテストごとに空にする（autouse）
+- **判断と理由**
+  1. **トリガーの置き場所とタイミングは、移す前と同じにした**
+     - 選手の読込・クリア・カードの手入力（id / seed）: 書き込みの保存ブロックの中で、今すぐ依頼する（`PlayerService.Announce`）。`recent_sets` の「取得中」や `upset_factor` は同じ保存サイクルに入る。カードのシグナルも直接接続で、同じブロックの中で書いていた
+     - スワップ・上下移動・クリア: 操作の後、イベントループに戻ってから、ボードごとに 1 回依頼する（`TeamsChanged` → `fetcher.Later`）。ボードの `_RequestPlayerStats`（`QTimer.singleShot(0)`）と同じ。書き込みはそれぞれ自分の保存サイクルになる（golden のとおり、クリアは 6 サイクル）
+     - 回数は録画どおり。直近の対戦は 1 操作 1 回、戦績・履歴は変わったチームごとに 1 回
+  2. **取得は非同期のまま、スレッドモデルは変えない**
+     - 取得は従来どおり provider の `Worker` を `QThreadPool` で走らせる
+     - 答えは provider のワーカーが `callback.emit` し、fetcher が queued シグナルでメインスレッドへ渡して書く。従来はボードの stats util のシグナル `Signal(dict)` が同じことをしていた。payload の dict の変換も同じなので、`recent_sets` のキー順は変わらない
+     - `StateManager.lock` の中で I/O しない。ロックの中は要求の番号付けと「取得中」/ クリアの書き込みだけで、取得はロックの外で始める（`tests/test_stats_service.py` が別スレッドからロックを試して pin）
+     - Executor への統一は S3f（S3e 決定 4）
+  3. **古い答えは捨てる**（意図した変更）
+     - 従来は、遅れて届いた答えがそのまま書かれた。戦績・履歴にはガードが無く、直近の対戦は provider の要求時刻を比べるだけだった。選手 A を入れてすぐ B に替えると、A の戦績が B の欄に出ることがあった
+     - 今は、答えを書くときに `StateManager.lock` の中で 2 つを確かめる: （ボード, 統計, チーム）ごとの要求番号と、スロットの選手（id）。どちらかが違えば捨てる。ボード・スレッドをまたいでも、前の選手の答えが次の選手に載らない
+     - 速いボードの切り替え: 番号はボードごとなので、ボード 1 の答えはボード 1 に、ボード 2 の答えはボード 2 に書かれる（従来どおり、宛先の `score.{n}` はサービスのボード番号）
+     - 捨てるのは「もっと新しい要求があった」か「選手が替わった」ときだけ。答えが届くまでにボードがチーム戦になった・Start.gg でない provider に替わったが、要求し直していない、というときの答えは書く（旧実装と同じ）。答えを書く時点で人数と provider も見る案は採らなかった: 要求し直しが無いので、直近の対戦が「取得中」のまま残る。要求し直せば（チーム戦の直近の対戦は「done」の空、履歴は番号が進むので）古い答えは捨てられる
+  4. **人数は state のスロット数**（S3e 決定 1）
+     - 構築済みのボードではカードの数と同じ（スロットはカードに合わせて切り詰められる）
+     - 0 なら `DefaultPlayersPerTeam()`
+  5. **統計のルートは board 1 / 2 だけ**
+     - board 3（クルー）や存在しない番号は例外（legacy は 500）
+     - 従来もデスクトップは board 3 を構築してから `AttributeError` で 500、ヘッドレスは 503 だった。今はどちらも 500 で、ボードを構築しない
+     - `refresh_stats` は従来どおりエラー文字列（`ERROR: scoreboard 3 does not support stats`）を返す。v1 は `require_board_12` の 400
+  6. **セット読込のアップセット係数の依頼（`ApplyBracketType`）は、S3e-7 までボードの `ChangeSetData` に残した**（計画からの差分）
+     - 依頼するかの判断は「ブラケット種別を書いた or singles ⇔ チームが切り替わった」の 1 つ。後半を決めるのは、カードのスピンボックスで人数を決める `_ApplyEntrants`（S3e-6 / S3e-7 の範囲のボードの仕事）
+     - 前半だけ core に移すと、1 つの判断が 2 層に割れ、回数がずれる（録画では 1 回）
+     - 依頼先は core（`StatsService.RefreshQuietly(UPSET_FACTOR)`）。セット読込自体がヘッドレスでは 503（S3e-7）なので、ヘッドレスで取りこぼすものは無い
+  7. **golden は移す前の木（9e8841d5）で、公開された入口だけを通して録った**（`tests/test_stats_flow.py`）
+     - Start.gg は provider のメソッドを差し替えたモックで、実ネットワークに出ない
+     - 答えは「各統計の最新の要求だけ」に返す。古い要求への答えは判断 3 で意図して変えたので録画には含めず、別のテストで pin した
+     - 録画の中身（1 ステップごと）
+       - 取得の回数・順・引数
+       - 統計のキーの書き込みの順と値
+       - delta の数と中身
+       - ルートの応答
+       - `score.{n}` のキー順と統計の値
+  8. **レビュー（1 回目）で直したもの**
+     - **1 つの取得の例外で、残りの統計の依頼が止まった。** 旧実装は統計ごとに Qt のシグナルだったので、1 つのスロットの例外は、ほかの統計にも、操作やルートにも届かなかった。core から続けて呼ぶ形にしたので、1 つの例外で後ろが止まり、Web のルートは 500 になっていた。統計を 1 つずつ `RefreshQuietly` で依頼して揃えた
+       - 根本の原因は provider のアダプタの `playerId[0]`（id がリストでないと `TypeError`）。id の形によらず受けるようにした
+       - Web のルートは従来どおり `"OK"` / 200 を返す（失敗はログ）。board 3 などボードの番号の誤りは従来どおり例外（判断 5）
+     - **`_queuedTeams` の残留**: `Later` が例外を出したらキューを取り除く。テストはクラスの状態を毎回空にする。番号は 1 つのカウンタから出すので、空にしても前のテストの答えが通らない
+     - **`ApplyData` の `finally` の例外**: 読込の元の例外を上書きしないようにした（S3e-4 と同じ扱い）
+     - **`GetRecentSets` の既存不具合**: 下の「既存不具合の修正」
+- **外から見える変化**
+  - **ヘッドレス（`python main.py --headless`）で統計が動く**
+    - 選手の読込・編集・クリア・スワップの後に取り直し、アップセット係数を再計算する
+    - legacy の 4 ルート・Socket.IO の 4 イベント・v1 `stats:refresh` が答える（それまでは 503 `UNAVAILABLE`）
+    - Start.gg の大会が読み込まれていることが前提。無ければ従来のデスクトップと同じく、直近の対戦は空の「done」で、戦績・履歴は取らない
+  - 遅れて届いた古い答えは書かれない（判断 3。デスクトップも）
+  - クルーボード（board 3）への統計の legacy ルートは、ボードを構築せずに 500 を返す（判断 5）
+  - デスクトップの legacy の 4 ルートは、要求を出し終えてから `"OK"` を返す。従来は Flask のスレッドからシグナルを queued で GUI スレッドへ投げ、要求を出す前に返していた。本文は同じで、取得の答えは従来どおり後から state に届く
+  - provider の配信キュー（`streamQueue` / `currentStream`）の中継が 1 回になった。従来は構築済みのボードの数だけ同じ値を書いていた（delta は同じ）
+  - レビュー（1 回目）から（判断 8）
+    - 直近の対戦が、両方の選手の大会履歴から集まる（既存不具合の修正。デスクトップも）
+    - id がリストでない選手（Web から入れたスカラーの id など）でも、戦績・大会履歴を provider に問い合わせる。従来は `TypeError` で問い合わせなかった（デスクトップは、統計ごとのシグナルだったので、ほかの統計は取れていた）
+    - 取得の 1 つが例外を出しても、残りの統計は依頼され、Web のルートは `"OK"` / 200 を返す（旧実装と同じ。失敗はログに残る）
+  - 上記以外は変わらない: デスクトップの取得回数・順・書き込み・保存サイクル・キー順、本文・ack・v1 の形、`program_state.json` のキー順
+- **pin**
+  - `tests/test_stats_flow.py` + `tests/fixtures/stats/golden.json`: 9e8841d5 で録った 3 シナリオを、新しい経路で照合する。`AUTONA_RECORD_STATS=1` で録り直す
+    - シングルスのボード: セット読込・カードの手入力・クリア・seed・STATS パネル・Web の選手操作・スワップ 2 種・legacy / v1 のルート・クリア 4 種・配信キュー・大会なし
+    - チームのボード: 2v2 の読込・上下移動・スワップ・クリア
+    - 未構築のボードへのルート
+  - `tests/test_stats_service.py`: core だけ（fake fetcher）
+    - 人数（スロット数・既定値）と `RefreshAll` の順
+    - id / seed の変化で依頼するもの。Start.gg でないとき・チームのボード・選手のいないスロットのクリア
+    - 答えを捨てる場合: 古い要求・別の選手・クリア後・チームのボードや Start.gg でない provider で要求し直した後（要求し直していなければ書く。旧実装と同じ。判断 3）
+    - ボードとチームの番号は独立。番号の表を空にしても前の答えが通らない。取得の開始はロックの外（`ApplyData` → `Announce` の経路も）
+    - 取得の例外: `RefreshAll` / `PlayerChanged` / キューした取り直しは残りを依頼する。`Later` の例外でキューが残らない
+    - `TeamsChanged`: 何回呼んでも 1 回・id は実行時に読む・ボードごと・fetcher が無ければ今すぐ
+    - `PlayerService` の `announce`: 再設定では依頼しない・エディタには統計が無い・読込の 1 サイクルに入る
+  - `tests/test_stats_util.py`
+    - ルート（`AutonaWebOperations.stats_*`）。board 3 はボードを構築せずに例外 / エラー文字列
+    - fetcher は 1 個で、ボードは持たない。provider への引数
+    - ワーカースレッドの答えはメインスレッドで書かれる。`Later` はイベントループに戻ってから
+    - デスクトップで、選手を替えた後に届いた前の選手の答え / スワップ前の要求の答えを捨てる
+    - provider のアダプタは、id がリスト・int・str のどれでも provider に渡す。取得が例外を出してもルートは `"OK"` で、残りを依頼する
+  - `tests/test_web_operations.py`
+    - Web の読込の統計の依頼が、両シェルで同じ回数
+    - ヘッドレスでスワップ・クリアの後に依頼し（操作の中ではなく後で）、係数を再計算する
+    - ヘッドレスで legacy / v1 / Socket.IO の統計のルートが答える。503 のテストから v1 `stats:refresh` を外した
+    - ヘッドレスの通し（`test_headless_statistics_from_a_request_thread_to_the_state`）: 別スレッドの legacy ルート → `AutonaWebOperations` → `StatsService` → 本物の `AutonaStatsUtil` → 本物の provider のアダプタと `StartGGDataProvider`（ネットワークの `QueryRequests` だけ差し替え）→ QThreadPool のワーカーで解析 → メインスレッドで書き込み
+  - `tests/test_startgg_parse.py`: `GetRecentSets` が両方向のワーカーを待って読み、両方が見つけたセットは 2 方向目のものを残す
+  - `tests/test_player_service.py`: `ApplyData` の `finally` で何が変わったかを求められなくても、読込の元の例外が上がる（読込が成功していれば、その例外を上げる）
+  - `tests/fixtures/stats/spies.py`
+    - `StatsService.Refresh` を旧シグナル名で数える spy。`test_player_apply.py` / `test_player_card_render.py` / `test_scoreboard_operations.py` の録画の統計の回数は、そのまま一致する
+    - fake fetcher
+- **残置 / リスク**
+  - ヘッドレスの `TeamsChanged` はメインスレッドのイベントループで走り、ボードホストのロックの外にある。そのため、別の要求の操作と前後しうる。state は `StateManager.lock` と要求番号で整合するので、最悪でも取り直しが 1 回早い / 遅いだけで、古い答えは捨てられる
+  - `fetcher.Later` が例外を出したときはキューを取り除く（判断 8）。残るのは、`Later` が受け付けたのに配達されないとき（終了処理でイベントループが止まった後など）だけで、そのボードの `TeamsChanged` が再投入されない（再起動で戻る）。通常の運用では起きない
+  - provider（`StartGGDataProvider`）とその Worker / QThreadPool は変えていない（S3f）。直したのは `GetRecentSets` の待ち方だけ（下記）
+  - レビュー（1 回目）の指摘で、記録だけするもの
+    - 答えを捨てるときの debug ログは `StateManager.lock` の中で出している（`_Answer`）。ログのシンクがファイルに書くなら、ロックの中の I/O になる（捨てる答え 1 つにつき 1 行）
+    - デスクトップの legacy の統計ルートは、GUI スレッドでの実行を待ってから答える（`DesktopBoardHost.Run` = `gui_thread_sync`。他の S2 の操作と同じ）。従来はシグナルを投げてすぐ返していた。GUI スレッドが重い処理の最中だと、そのぶん応答が遅れる
+- **既存不具合の修正**
+  - `StartGGDataProvider.GetRecentSets` の `Worker.wait_for_all(workers)` が、2 方向（id1→id2 / id2→id1）のループの外にあった
+    - `workers` はループごとに作り直されるので、待って結果を集めるのは 2 方向目の 5 本だけだった。1 方向目の要求は走るが、結果は捨てられていた
+    - 直近の対戦が一部欠けて表示されえた（誤った選手の情報が出るわけではない）
+    - 両方向のワーカーを待ち、両方の結果を使う。両方が見つけたセットは、従来どおり 2 方向目の内容と位置を残し、1 方向目だけが見つけたセットを足す（同じ日付のセットの並びは、従来の分が先）
+    - golden は変わらない（`tests/test_stats_flow.py` は provider のアダプタの入口を差し替えるので、`StartGGDataProvider.GetRecentSets` を通らない）。録り直していない
+- **既存の不具合（報告のみ・未修正）**
+  - 1 回の保存サイクルで新しいトップレベルのキーが 2 つ以上増えると、DeepDiff が root の `values_changed`（state 全体）を delta に出す
+    - 例: 起動後最初の配信キューの読込（`streamQueue` と `currentStream`）
+    - Socket.IO の受け手は全体を 1 行で受け取る（表示は壊れないが重い）
+- **リリースノート案**
+  - ヘッドレス起動（`python main.py --headless`）で、統計（直近の対戦・戦績・大会履歴・アップセット係数）が、選手の入れ替え・スワップ・クリアの後に取り直されるようになった。統計の取得ルート（`/scoreboard{n}-stats-*`・`POST /api/v1/scoreboards/{n}/stats:refresh`）もヘッドレスで使える
+  - 選手をすばやく入れ替えたとき、前の選手の戦績が後から届いて新しい選手の欄に出ることがある問題を修正した
+  - 直近の対戦（head-to-head）が、片方の選手の大会履歴からしか集まらず、一部欠けることがある問題を修正した
+- **実機確認（オーナー）**
+  - デスクトップ（Start.gg の大会を読み込んだ状態）
+    - 1v1 のセットを読み込む → 直近の対戦・両選手の戦績・大会履歴・アップセット係数が出る（従来どおり）
+    - 対戦の多い 2 人のセットを読み込む → 直近の対戦が、従来より欠けずに出る（両方の選手の大会履歴から集まる。既存不具合の修正）
+    - SWAP → 統計が左右入れ替わって取り直される
+    - カードの上下移動（チーム戦のボード）・「選手をクリア」・「すべての入力値をリセット」→ 統計が空になる
+    - 選手名を手入力で別の選手にする → 戦績が消える（id が空になる）
+    - seed を変える → アップセット係数が変わる
+    - 選手 A を読み込んですぐ選手 B を読み込む（補完やセットの切り替えを素早く）→ B の戦績だけが出る（A の戦績が後から上書きしない）
+    - STATS パネルの「統計情報を取得する」→ 取り直される
+    - Web UI / Stream Deck から `/scoreboard1-stats-recent-sets`・`-stats-last-sets-both`・`-stats-history-sets-1`・`-stats-upset-factor` と `POST /api/v1/scoreboards/1/stats:refresh` を呼ぶ → `OK` / 200 で取り直される
+  - ヘッドレス（Start.gg の大会を読み込んだ状態）
+    - `/web` で選手を編集・スワップ・クリアする → オーバーレイの統計が取り直される（503 にならない）
+    - 上の統計のルートが `OK` / 200 を返し、state に結果が入る

@@ -30,6 +30,7 @@ import pytest
 
 from src import AutonaWebOperations as WebOps
 from src.AutonaWebOperations import BoardHost, NotAvailable
+from tests.fixtures.stats.spies import StatsTriggers
 
 BOARD = 2   # the team board: every S2 field (team names included) applies
 
@@ -546,53 +547,49 @@ def test_a_save_from_a_request_thread_finishes(
         assert list(realPlayerDB.database) == ["SP ALPHA"]
 
 
-STATS = ("RecentSetsSignal", "LastSetsP1Signal", "LastSetsP2Signal",
-         "PlayerHistoryStandingsP1Signal", "PlayerHistoryStandingsP2Signal",
-         "UpsetFactorCalculation")
-
-
-def test_a_web_load_asks_the_desktop_board_for_the_statistics(
-        autonaApp, playerDB):
+@pytest.mark.parametrize("host", ["desktop", "headless"])
+def test_a_web_load_asks_for_the_statistics(autonaApp, monkeypatch,
+                                            playerDB, host):
     """The statistics a load calls for (another player in the slot: the
     recent sets and that team's last sets / standings; a seed that moved:
-    the upset factor) are still the built board's: the operation hands its
-    change to the board's card (DesktopBoardHost.PlayerLoaded), as the
-    board's own loads do. Headless nothing fetches them (ADR-005 S3e-5)."""
+    the upset factor) are the load's own since ADR-005 S3e-5
+    (PlayerService.Announce), in both shells. Until then the built board's
+    card asked for them (DesktopBoardHost.PlayerLoaded), and headless
+    nothing did."""
     playerDB.players["SP ALPHA"] = dict(_PLAYER)
-    board = autonaApp.board(1)
-    counts = dict.fromkeys(STATS, 0)
-    signals = board.stats.signals
-    slots = {}
-    for name in STATS:
-        def count(*_args, name=name):
-            counts[name] += 1
-        slots[name] = count
-        getattr(signals, name).connect(count)
+    if host == "desktop":
+        autonaApp.board(1)
+    else:
+        _goHeadlessWithSlots(autonaApp, monkeypatch)
     try:
-        assert WebOps.update_player(1, 2, 1, dict(_PLAYER)) is True
-        autonaApp.settle()
-        afterUpdate = dict(counts)
-        # The same player again: nothing changed, nothing asked for.
-        assert WebOps.set_team_data(1, "2", "1", {
-            "gamerTag": "ALPHA", "prefix": "SP"}) == "OK"
-        autonaApp.settle()
-        afterSame = dict(counts)
-        # Another player through the tag lookup, on team 1.
-        assert WebOps.load_player_from_tag(1, "alpha", 1, 1) == "OK"
-        autonaApp.settle()
+        with StatsTriggers(1) as triggers:
+            assert WebOps.update_player(1, 2, 1, dict(_PLAYER)) is True
+            autonaApp.settle()
+            afterUpdate = dict(triggers.counts)
+            # The same player again: nothing changed, nothing asked for.
+            assert WebOps.set_team_data(1, "2", "1", {
+                "gamerTag": "ALPHA", "prefix": "SP"}) == "OK"
+            autonaApp.settle()
+            afterSame = dict(triggers.counts)
+            # Another player through the tag lookup, on team 1.
+            assert WebOps.load_player_from_tag(1, "alpha", 1, 1) == "OK"
+            autonaApp.settle()
+        upset = autonaApp.get("score.1.upset_factor")
     finally:
-        for name, slot in slots.items():
-            getattr(signals, name).disconnect(slot)
+        if host == "headless":
+            _dropHeadlessBoards(autonaApp)
 
     assert afterUpdate == {
         "RecentSetsSignal": 1, "LastSetsP1Signal": 0, "LastSetsP2Signal": 1,
         "PlayerHistoryStandingsP1Signal": 0,
         "PlayerHistoryStandingsP2Signal": 1, "UpsetFactorCalculation": 1}
     assert afterSame == afterUpdate
-    assert counts == {
+    assert triggers.counts == {
         "RecentSetsSignal": 2, "LastSetsP1Signal": 1, "LastSetsP2Signal": 1,
         "PlayerHistoryStandingsP1Signal": 1,
         "PlayerHistoryStandingsP2Signal": 1, "UpsetFactorCalculation": 2}
+    # Both players seeded 2: no upset (recalculated, not left unset).
+    assert upset == 0
 
 
 def test_a_load_names_the_state_team_or_the_set_team(autonaApp, playerDB):
@@ -930,11 +927,12 @@ def test_a_socketio_event_a_web_operation_refuses_acks_the_503_body(
 
 
 # /api/v1/bracket:refresh answered 503 until ADR-005 S3e-8 (the Top 8
-# import is core's now: tests/test_top8_refresh.py).
+# import is core's now: tests/test_top8_refresh.py), and
+# /api/v1/scoreboards/{n}/stats:refresh until S3e-5 (the statistics are
+# core's: test_the_stats_routes_answer_headless below).
 @pytest.mark.parametrize("path,body", [
     ("/api/v1/scoreboards/1:load-set", {"setId": "1"}),
     ("/api/v1/scoreboards/1:pull-stream", None),
-    ("/api/v1/scoreboards/1/stats:refresh", None),
 ])
 def test_a_v1_operation_answers_unavailable(server, path, body):
     app, _ = server
@@ -1033,6 +1031,228 @@ def test_the_player_events_emit_their_answer_headless(
         assert autonaApp.get("score.1.team.1.player.1.name") == "SOCKET"
         assert autonaApp.get("score.1.team.2.player.1.name") == "ALPHA"
     finally:
+        _dropHeadlessBoards(autonaApp)
+
+
+# ── the statistics headless (ADR-005 S3e-5) ──────────────────────────────
+
+def _twoPlayers():
+    """Board 1's two sides, loaded through the Web's player edit."""
+    assert WebOps.update_player(1, 1, 1, {
+        "gamerTag": "ONE", "id": [1, 10], "seed": 1}) is True
+    assert WebOps.update_player(1, 2, 1, {
+        "gamerTag": "TWO", "id": [2, 20], "seed": 5}) is True
+
+
+def test_headless_asks_for_the_statistics_a_swap_and_a_clear_call_for(
+        autonaApp, monkeypatch, playerDB):
+    """What the desktop's board asked for after a swap / move / clear --
+    once the event loop was back, once per operation -- is the operation's
+    since ADR-005 S3e-5, so the headless shell asks too; the upset factor
+    is recalculated inside the operation, as on the desktop."""
+    from src.core.StatsService import StatsService
+    from tests.fixtures.stats.spies import FakeFetcher
+    fetcher = FakeFetcher()
+    monkeypatch.setattr(StatsService, "fetcher", fetcher)
+    _goHeadlessWithSlots(autonaApp, monkeypatch)
+    videogame = autonaApp.get("provider_videogame")
+    _state().Set("provider_videogame", {"id": 1386, "name": "G"})
+    try:
+        _twoPlayers()
+        autonaApp.settle()
+        assert autonaApp.get("score.1.upset_factor") == 4
+        assert autonaApp.get("score.1.recent_sets") == {
+            "state": "loading", "sets": []}
+        fetcher.requests.clear()
+
+        assert WebOps.swap_teams(1) == "OK"
+        autonaApp.settle()
+        assert fetcher.asked() == []          # not inside the operation
+        fetcher.runLater()
+        assert fetcher.asked() == [
+            ("recent_sets", ([2, 20], [1, 10], 1386)),
+            ("last_sets", ([2, 20], 1)),
+            ("history_sets", ([2, 20], 1, 1386)),
+            ("last_sets", ([1, 10], 2)),
+            ("history_sets", ([1, 10], 2, 1386)),
+        ]
+        assert autonaApp.get("score.1.upset_factor") == 4
+        # The head-to-head answers: written (the same two players).
+        fetcher.answer(0, {"request_time": 7, "sets": ["H2H"]})
+        assert autonaApp.get("score.1.recent_sets.sets") == ["H2H"]
+        fetcher.requests.clear()
+
+        # A clear: no player left to fetch for -- the statistics are
+        # emptied rather than left showing the previous pairing.
+        assert WebOps.clear_all(1) == "OK"
+        fetcher.runLater()
+        autonaApp.settle()
+        assert fetcher.asked() == []
+        assert autonaApp.get("score.1.recent_sets") == {
+            "state": "done", "sets": []}
+        assert autonaApp.get("score.1.last_sets") == {"1": {}, "2": {}}
+        assert autonaApp.get("score.1.history_sets") == {"1": {}, "2": {}}
+        assert autonaApp.get("score.1.upset_factor") == 0
+    finally:
+        if videogame is None:
+            _state().Unset("provider_videogame")
+        else:
+            _state().Set("provider_videogame", videogame)
+        _dropHeadlessBoards(autonaApp)
+
+
+STATS_ROUTES = [
+    "/scoreboard1-stats-recent-sets",
+    "/scoreboard1-stats-upset-factor",
+    "/scoreboard1-stats-last-sets-both",
+    "/scoreboard1-stats-history-sets-1",
+]
+
+
+def test_the_stats_routes_answer_headless(server, autonaApp, monkeypatch,
+                                          playerDB):
+    """They answered 503 until ADR-005 S3e-5 (and v1's stats:refresh too).
+    No tournament is loaded here: the head-to-head settles as "done", the
+    upset factor is the seeds' -- the bodies are the desktop's."""
+    app, socketio = server
+    client = app.test_client()
+    client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
+    _goHeadlessWithSlots(autonaApp, monkeypatch)
+    try:
+        _twoPlayers()
+        autonaApp.settle()
+        _state().Set("score.1.upset_factor", None)
+        _state().Set("score.1.recent_sets", None)
+
+        for path in STATS_ROUTES:
+            response = client.get(path)
+            assert response.status_code == 200, path
+            assert response.get_data(as_text=True) == "OK", path
+        autonaApp.settle()
+        assert autonaApp.get("score.1.upset_factor") == 4
+        assert autonaApp.get("score.1.recent_sets") == {
+            "state": "done", "sets": []}
+
+        _state().Set("score.1.upset_factor", None)
+        response = client.post("/api/v1/scoreboards/1/stats:refresh",
+                               json={})
+        assert response.status_code == 200, response.get_json()
+        assert response.get_json()["ok"] is True
+        assert autonaApp.get("score.1.upset_factor") == 4
+
+        ws = socketio.test_client(
+            app, flask_test_client=client)
+        ws.get_received()
+        ws.emit("stats_upset_factor", json.dumps({"scoreboardNumber": "1"}))
+        answers = [event["args"] for event in ws.get_received()
+                   if event["name"] == "stats_upset_factor"]
+        assert answers == [["OK"]]
+
+        # The crew board has no statistics: the legacy routes' 500, v1's
+        # 400 (require_board_12), as on the desktop.
+        assert client.get(
+            "/scoreboard3-stats-recent-sets").status_code == 500
+        response = client.post("/api/v1/scoreboards/3/stats:refresh",
+                               json={})
+        assert response.status_code == 400
+    finally:
+        _dropHeadlessBoards(autonaApp)
+
+
+_LAST_SET = {
+    "winnerId": 1, "fullRoundText": "Winners Final",
+    "entrant1Score": 3, "entrant2Score": 1,
+    "phaseGroup": {"displayIdentifier": "1", "phase": {"name": "Top 8"}},
+    "slots": [
+        {"initialSeedNum": 1, "entrant": {"participants": [{"player": {
+            "id": 1, "prefix": "SP", "gamerTag": "ONE"}}]}},
+        {"initialSeedNum": 4, "entrant": {"participants": [{"player": {
+            "id": 3, "prefix": None, "gamerTag": "THREE"}}]}},
+    ]}
+
+
+def test_headless_statistics_from_a_request_thread_to_the_state(
+        server, autonaApp, monkeypatch, playerDB):
+    """All the way, headless, with only the network faked: a request on a
+    thread of its own (the server's) asks through the route, WebOps and
+    StatsService; the fetcher bootstrap registered (AutonaStatsUtil) hands
+    it to the tournament provider's thread pool, where the real Start.gg
+    provider queries and parses; the answer is written on the main thread
+    (ADR-005 S3e-5 review)."""
+    from src.AutonaStatsUtil import AutonaStatsUtil
+    from src.AutonaTournamentDataProvider import         AutonaTournamentDataProvider
+    from src.core.StatsService import StatsService
+    from src.TournamentDataProvider.StartGGDataProvider import         StartGGDataProvider
+
+    assert isinstance(StatsService.fetcher, AutonaStatsUtil)
+    app, _ = server
+    client = app.test_client()
+    client.environ_base["REMOTE_ADDR"] = "127.0.0.1"
+    _goHeadlessWithSlots(autonaApp, monkeypatch)
+    adapter = AutonaTournamentDataProvider.instance
+    try:
+        # The players first, with no tournament loaded: nothing is fetched.
+        monkeypatch.setattr(adapter, "provider", None)
+        _twoPlayers()
+        autonaApp.settle()
+
+        startgg = StartGGDataProvider(
+            "https://www.start.gg/tournament/t/event/e", adapter.threadPool,
+            adapter)
+        queries = []
+
+        def query(url=None, type=None, headers={}, jsonParams=None,
+                  params=None):
+            # The network: the one thing faked.
+            queries.append((threading.current_thread(),
+                            jsonParams.get("operationName"),
+                            jsonParams.get("variables")))
+            if jsonParams.get("operationName") != "PlayerLastSetsQuery":
+                return {}
+            return {"data": {"event": {"sets": {"nodes": [_LAST_SET]}}}}
+
+        monkeypatch.setattr(startgg, "QueryRequests", query)
+        monkeypatch.setattr(adapter, "provider", startgg)
+        writes = []
+        update = StatsService.UpdateLastSets
+
+        def recording(self, data):
+            writes.append(threading.current_thread())
+            return update(self, data)
+
+        monkeypatch.setattr(StatsService, "UpdateLastSets", recording)
+
+        answers = []
+        request = threading.Thread(target=lambda: answers.append(
+            client.get("/scoreboard1-stats-last-sets-1")))
+        request.start()
+        request.join(10)
+        assert [(r.status_code, r.get_data(as_text=True))
+                for r in answers] == [(200, "OK")]
+
+        deadline = time.monotonic() + 10
+        while not writes and time.monotonic() < deadline:
+            autonaApp.settle()
+            time.sleep(0.02)
+        assert adapter.threadPool.waitForDone(10000)
+        autonaApp.settle()
+
+        assert [(name, variables) for _, name, variables in queries] == [
+            ("PlayerLastSetsQuery",
+             {"eventSlug": "tournament/t/event/e", "playerID": 1})]
+        worker = queries[0][0]
+        assert worker not in (threading.main_thread(), request)
+        assert writes == [threading.main_thread()]
+        sets = autonaApp.get("score.1.last_sets.1")
+        assert list(sets) == ["1"]
+        assert {key: value for key, value in sets["1"].items()
+                if key != "round_name"} == {
+            "phase_id": "", "phase_name": "Top 8",
+            "player_score": 3, "player_seed": 1, "player_team": "SP",
+            "player_name": "ONE", "oponent_score": 1, "oponent_seed": 4,
+            "oponent_team": None, "oponent_name": "THREE"}
+    finally:
+        adapter.threadPool.waitForDone(10000)
         _dropHeadlessBoards(autonaApp)
 
 

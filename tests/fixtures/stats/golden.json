@@ -1,0 +1,2999 @@
+{
+ "singles": {
+  "steps": [
+   {
+    "step": "load set A",
+    "fetches": [
+     [
+      "last_sets",
+      [
+       [
+        11,
+        110
+       ],
+       "1"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        11,
+        110
+       ],
+       "1",
+       1386
+      ]
+     ],
+     [
+      "recent_sets",
+      [
+       [
+        11,
+        110
+       ],
+       [
+        22,
+        220
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        22,
+        220
+       ],
+       "2"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        22,
+        220
+       ],
+       "2",
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "4"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "4"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\"], \"action\": \"values_changed\", \"value\": {\"last_sets\": {\"1\": {}, \"2\": {}}, \"history_sets\": {\"1\": {}, \"2\": {}}, \"station_queue\": {}, \"team\": {\"1\": {\"color\": \"#fe3636\", \"teamName\": \"\", \"losers\": false, \"player\": {\"1\": {\"seed\": 0, \"birthday\": false, \"country\": {}, \"state\": {}, \"character\": {\"1\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"2\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"3\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}}, \"mains\": {\"1\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"2\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"3\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}}}}, \"score\": 0}, \"2\": {\"color\": \"#2e89ff\", \"teamName\": \"\", \"losers\": false, \"player\": {\"1\": {\"seed\": 0, \"birthday\": false, \"country\": {}, \"state\": {}, \"character\": {\"1\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"2\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"3\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}}, \"mains\": {\"1\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"2\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"3\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}}}}, \"score\": 0}}, \"phase\": \"\", \"pool\": \"\", \"match\": \"\", \"best_of\": 0, \"best_of_short_text\": \"BO0\", \"best_of_text\": \"\", \"first_to\": 0, \"first_to_short_text\": \"FT0\", \"first_to_text\": \"\", \"stages\": {}, \"recent_sets\": {\"state\": \"loading\", \"sets\": []}, \"upset_factor\": 4}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "answer set A",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.last_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.1.1",
+      "{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R1\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P1\",\"oponent_score\":1,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O1\"}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1.1",
+      "{\"placement\":2,\"event_name\":\"E2\",\"tournament_name\":\"T2\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[{\"id\":\"S3\",\"score\":[2,0],\"timestamp\":5003,\"tournament\":\"T3\",\"winner\":0}],\"request_time\":1001}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.2.1",
+      "{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R4\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P4\",\"oponent_score\":1,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O4\"}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2.1",
+      "{\"placement\":5,\"event_name\":\"E5\",\"tournament_name\":\"T5\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\"], \"action\": \"dictionary_item_added\", \"value\": {\"phase_id\": \"A1\", \"phase_name\": \"Pools\", \"round_name\": \"R1\", \"player_score\": 2, \"player_seed\": 1, \"player_team\": \"\", \"player_name\": \"P1\", \"oponent_score\": 1, \"oponent_seed\": 8, \"oponent_team\": \"X\", \"oponent_name\": \"O1\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"history_sets\", \"1\", \"1\"], \"action\": \"dictionary_item_added\", \"value\": {\"placement\": 2, \"event_name\": \"E2\", \"tournament_name\": \"T2\", \"entrants\": 64, \"event_date_month\": \"November\", \"event_date_day\": \"15\", \"event_date_year\": \"2023\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"request_time\"], \"action\": \"dictionary_item_added\", \"value\": 1001, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"done\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"sets\", 0], \"action\": \"iterable_item_added\", \"value\": {\"id\": \"S3\", \"score\": [2, 0], \"timestamp\": 5003, \"tournament\": \"T3\", \"winner\": 0}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\"], \"action\": \"dictionary_item_added\", \"value\": {\"phase_id\": \"A1\", \"phase_name\": \"Pools\", \"round_name\": \"R4\", \"player_score\": 2, \"player_seed\": 1, \"player_team\": \"\", \"player_name\": \"P4\", \"oponent_score\": 1, \"oponent_seed\": 8, \"oponent_team\": \"X\", \"oponent_name\": \"O4\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"history_sets\", \"2\", \"1\"], \"action\": \"dictionary_item_added\", \"value\": {\"placement\": 5, \"event_name\": \"E5\", \"tournament_name\": \"T5\", \"entrants\": 64, \"event_date_month\": \"November\", \"event_date_day\": \"15\", \"event_date_year\": \"2023\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "load set B",
+    "fetches": [
+     [
+      "recent_sets",
+      [
+       [
+        33,
+        330
+       ],
+       [
+        22,
+        220
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        33,
+        330
+       ],
+       "1"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        33,
+        330
+       ],
+       "1",
+       1386
+      ]
+     ],
+     [
+      "recent_sets",
+      [
+       [
+        33,
+        330
+       ],
+       [
+        44,
+        440
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        44,
+        440
+       ],
+       "2"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        44,
+        440
+       ],
+       "2",
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "3"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "5"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "3"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"request_time\"], \"action\": \"dictionary_item_removed\", \"value\": 1001, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"bracket_type\"], \"action\": \"values_changed\", \"value\": \"SINGLE_ELIMINATION\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"loading\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"upset_factor\"], \"action\": \"values_changed\", \"value\": 3, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"sets\", 0], \"action\": \"iterable_item_removed\", \"value\": {\"id\": \"S3\", \"score\": [2, 0], \"timestamp\": 5003, \"tournament\": \"T3\", \"winner\": 0}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "load set C",
+    "fetches": [
+     [
+      "recent_sets",
+      [
+       [
+        55,
+        550
+       ],
+       [
+        44,
+        440
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        55,
+        550
+       ],
+       "1"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        55,
+        550
+       ],
+       "1",
+       1386
+      ]
+     ],
+     [
+      "recent_sets",
+      [
+       [
+        55,
+        550
+       ],
+       [
+        66,
+        660
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        66,
+        660
+       ],
+       "2"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        66,
+        660
+       ],
+       "2",
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "2"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "1"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"bracket_type\"], \"action\": \"values_changed\", \"value\": \"DOUBLE_ELIMINATION\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"upset_factor\"], \"action\": \"values_changed\", \"value\": 1, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "answer set C",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.last_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.1.1",
+      "{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R13\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P13\",\"oponent_score\":1,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O13\"}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1.1",
+      "{\"placement\":14,\"event_name\":\"E14\",\"tournament_name\":\"T14\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[{\"id\":\"S15\",\"score\":[2,0],\"timestamp\":5015,\"tournament\":\"T15\",\"winner\":0}],\"request_time\":1005}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.2.1",
+      "{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R16\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P16\",\"oponent_score\":1,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O16\"}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2.1",
+      "{\"placement\":17,\"event_name\":\"E17\",\"tournament_name\":\"T17\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\", \"round_name\"], \"action\": \"values_changed\", \"value\": \"R13\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\", \"player_name\"], \"action\": \"values_changed\", \"value\": \"P13\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\", \"oponent_name\"], \"action\": \"values_changed\", \"value\": \"O13\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"history_sets\", \"1\", \"1\", \"placement\"], \"action\": \"values_changed\", \"value\": 14, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"history_sets\", \"1\", \"1\", \"event_name\"], \"action\": \"values_changed\", \"value\": \"E14\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"history_sets\", \"1\", \"1\", \"tournament_name\"], \"action\": \"values_changed\", \"value\": \"T14\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"request_time\"], \"action\": \"dictionary_item_added\", \"value\": 1005, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"done\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"sets\", 0], \"action\": \"iterable_item_added\", \"value\": {\"id\": \"S15\", \"score\": [2, 0], \"timestamp\": 5015, \"tournament\": \"T15\", \"winner\": 0}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\", \"round_name\"], \"action\": \"values_changed\", \"value\": \"R16\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\", \"player_name\"], \"action\": \"values_changed\", \"value\": \"P16\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\", \"oponent_name\"], \"action\": \"values_changed\", \"value\": \"O16\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"history_sets\", \"2\", \"1\", \"placement\"], \"action\": \"values_changed\", \"value\": 17, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"history_sets\", \"2\", \"1\", \"event_name\"], \"action\": \"values_changed\", \"value\": \"E17\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"history_sets\", \"2\", \"1\", \"tournament_name\"], \"action\": \"values_changed\", \"value\": \"T17\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "same set again",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.upset_factor",
+      "1"
+     ]
+    ],
+    "deltas": [],
+    "responses": []
+   },
+   {
+    "step": "card tag edit",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1",
+      "{}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"request_time\"], \"action\": \"dictionary_item_removed\", \"value\": 1005, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"sets\", 0], \"action\": \"iterable_item_removed\", \"value\": {\"id\": \"S15\", \"score\": [2, 0], \"timestamp\": 5015, \"tournament\": \"T15\", \"winner\": 0}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\"], \"action\": \"dictionary_item_removed\", \"value\": {\"phase_id\": \"A1\", \"phase_name\": \"Pools\", \"round_name\": \"R13\", \"player_score\": 2, \"player_seed\": 1, \"player_team\": \"\", \"player_name\": \"P13\", \"oponent_score\": 1, \"oponent_seed\": 8, \"oponent_team\": \"X\", \"oponent_name\": \"O13\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"history_sets\", \"1\", \"1\"], \"action\": \"dictionary_item_removed\", \"value\": {\"placement\": 14, \"event_name\": \"E14\", \"tournament_name\": \"T14\", \"entrants\": 64, \"event_date_month\": \"November\", \"event_date_day\": \"15\", \"event_date_year\": \"2023\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "card pick",
+    "fetches": [
+     [
+      "recent_sets",
+      [
+       [
+        77,
+        770
+       ],
+       [
+        66,
+        660
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        77,
+        770
+       ],
+       "1"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        77,
+        770
+       ],
+       "1",
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "1"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"loading\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "card clear",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "0"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\"], \"action\": \"dictionary_item_removed\", \"value\": {\"phase_id\": \"A1\", \"phase_name\": \"Pools\", \"round_name\": \"R16\", \"player_score\": 2, \"player_seed\": 1, \"player_team\": \"\", \"player_name\": \"P16\", \"oponent_score\": 1, \"oponent_seed\": 8, \"oponent_team\": \"X\", \"oponent_name\": \"O16\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"history_sets\", \"2\", \"1\"], \"action\": \"dictionary_item_removed\", \"value\": {\"placement\": 17, \"event_name\": \"E17\", \"tournament_name\": \"T17\", \"entrants\": 64, \"event_date_month\": \"November\", \"event_date_day\": \"15\", \"event_date_year\": \"2023\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"done\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"upset_factor\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "card seed spinbox",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.upset_factor",
+      "0"
+     ]
+    ],
+    "deltas": [],
+    "responses": []
+   },
+   {
+    "step": "card pick again",
+    "fetches": [
+     [
+      "recent_sets",
+      [
+       [
+        77,
+        770
+       ],
+       [
+        88,
+        880
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        88,
+        880
+       ],
+       "2"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        88,
+        880
+       ],
+       "2",
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "6"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"loading\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"upset_factor\"], \"action\": \"values_changed\", \"value\": 6, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "answer all",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.last_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.1.1",
+      "{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R19\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P19\",\"oponent_score\":1,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O19\"}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1.1",
+      "{\"placement\":20,\"event_name\":\"E20\",\"tournament_name\":\"T20\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[{\"id\":\"S21\",\"score\":[2,0],\"timestamp\":5021,\"tournament\":\"T21\",\"winner\":0}],\"request_time\":1007}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.2.1",
+      "{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R22\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P22\",\"oponent_score\":1,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O22\"}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2.1",
+      "{\"placement\":23,\"event_name\":\"E23\",\"tournament_name\":\"T23\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\"], \"action\": \"dictionary_item_added\", \"value\": {\"phase_id\": \"A1\", \"phase_name\": \"Pools\", \"round_name\": \"R19\", \"player_score\": 2, \"player_seed\": 1, \"player_team\": \"\", \"player_name\": \"P19\", \"oponent_score\": 1, \"oponent_seed\": 8, \"oponent_team\": \"X\", \"oponent_name\": \"O19\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"history_sets\", \"1\", \"1\"], \"action\": \"dictionary_item_added\", \"value\": {\"placement\": 20, \"event_name\": \"E20\", \"tournament_name\": \"T20\", \"entrants\": 64, \"event_date_month\": \"November\", \"event_date_day\": \"15\", \"event_date_year\": \"2023\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"request_time\"], \"action\": \"dictionary_item_added\", \"value\": 1007, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"done\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"sets\", 0], \"action\": \"iterable_item_added\", \"value\": {\"id\": \"S21\", \"score\": [2, 0], \"timestamp\": 5021, \"tournament\": \"T21\", \"winner\": 0}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\"], \"action\": \"dictionary_item_added\", \"value\": {\"phase_id\": \"A1\", \"phase_name\": \"Pools\", \"round_name\": \"R22\", \"player_score\": 2, \"player_seed\": 1, \"player_team\": \"\", \"player_name\": \"P22\", \"oponent_score\": 1, \"oponent_seed\": 8, \"oponent_team\": \"X\", \"oponent_name\": \"O22\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"history_sets\", \"2\", \"1\"], \"action\": \"dictionary_item_added\", \"value\": {\"placement\": 23, \"event_name\": \"E23\", \"tournament_name\": \"T23\", \"entrants\": 64, \"event_date_month\": \"November\", \"event_date_day\": \"15\", \"event_date_year\": \"2023\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "stats panel refresh",
+    "fetches": [
+     [
+      "recent_sets",
+      [
+       [
+        77,
+        770
+       ],
+       [
+        88,
+        880
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        77,
+        770
+       ],
+       "1"
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        88,
+        880
+       ],
+       "2"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        77,
+        770
+       ],
+       "1",
+       1386
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        88,
+        880
+       ],
+       "2",
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "6"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"request_time\"], \"action\": \"dictionary_item_removed\", \"value\": 1007, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"loading\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"sets\", 0], \"action\": \"iterable_item_removed\", \"value\": {\"id\": \"S21\", \"score\": [2, 0], \"timestamp\": 5021, \"tournament\": \"T21\", \"winner\": 0}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "web update player (another)",
+    "fetches": [
+     [
+      "recent_sets",
+      [
+       [
+        77,
+        770
+       ],
+       [
+        99,
+        990
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        99,
+        990
+       ],
+       "2"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        99,
+        990
+       ],
+       "2",
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "1"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"upset_factor\"], \"action\": \"values_changed\", \"value\": 1, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "web update player (same)",
+    "fetches": [],
+    "writes": [],
+    "deltas": [],
+    "responses": []
+   },
+   {
+    "step": "web set team data",
+    "fetches": [
+     [
+      "recent_sets",
+      [
+       [
+        12,
+        120
+       ],
+       [
+        99,
+        990
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        12,
+        120
+       ],
+       "1"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        12,
+        120
+       ],
+       "1",
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "3"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"upset_factor\"], \"action\": \"values_changed\", \"value\": 3, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "web load from tag",
+    "fetches": [
+     [
+      "recent_sets",
+      [
+       [
+        12,
+        120
+       ],
+       [
+        70,
+        700
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        70,
+        700
+       ],
+       "2"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        70,
+        700
+       ],
+       "2",
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "1"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"upset_factor\"], \"action\": \"values_changed\", \"value\": 1, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "answer web",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.last_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.1.1",
+      "{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R33\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P33\",\"oponent_score\":0,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O33\"}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1.1",
+      "{\"placement\":34,\"event_name\":\"E34\",\"tournament_name\":\"T34\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[{\"id\":\"S35\",\"score\":[2,2],\"timestamp\":5035,\"tournament\":\"T35\",\"winner\":0}],\"request_time\":1011}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.2.1",
+      "{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R36\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P36\",\"oponent_score\":0,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O36\"}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2.1",
+      "{\"placement\":37,\"event_name\":\"E37\",\"tournament_name\":\"T37\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\", \"round_name\"], \"action\": \"values_changed\", \"value\": \"R33\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\", \"player_name\"], \"action\": \"values_changed\", \"value\": \"P33\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\", \"oponent_score\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\", \"oponent_name\"], \"action\": \"values_changed\", \"value\": \"O33\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"history_sets\", \"1\", \"1\", \"placement\"], \"action\": \"values_changed\", \"value\": 34, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"history_sets\", \"1\", \"1\", \"event_name\"], \"action\": \"values_changed\", \"value\": \"E34\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"history_sets\", \"1\", \"1\", \"tournament_name\"], \"action\": \"values_changed\", \"value\": \"T34\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"request_time\"], \"action\": \"dictionary_item_added\", \"value\": 1011, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"done\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"sets\", 0], \"action\": \"iterable_item_added\", \"value\": {\"id\": \"S35\", \"score\": [2, 2], \"timestamp\": 5035, \"tournament\": \"T35\", \"winner\": 0}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\", \"round_name\"], \"action\": \"values_changed\", \"value\": \"R36\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\", \"player_name\"], \"action\": \"values_changed\", \"value\": \"P36\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\", \"oponent_score\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\", \"oponent_name\"], \"action\": \"values_changed\", \"value\": \"O36\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"history_sets\", \"2\", \"1\", \"placement\"], \"action\": \"values_changed\", \"value\": 37, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"history_sets\", \"2\", \"1\", \"event_name\"], \"action\": \"values_changed\", \"value\": \"E37\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"history_sets\", \"2\", \"1\", \"tournament_name\"], \"action\": \"values_changed\", \"value\": \"T37\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "web swap",
+    "fetches": [
+     [
+      "recent_sets",
+      [
+       [
+        70,
+        700
+       ],
+       [
+        12,
+        120
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        70,
+        700
+       ],
+       "1"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        70,
+        700
+       ],
+       "1",
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        12,
+        120
+       ],
+       "2"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        12,
+        120
+       ],
+       "2",
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.1.upset_factor",
+      "1"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"request_time\"], \"action\": \"dictionary_item_removed\", \"value\": 1011, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"loading\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"sets\", 0], \"action\": \"iterable_item_removed\", \"value\": {\"id\": \"S35\", \"score\": [2, 2], \"timestamp\": 5035, \"tournament\": \"T35\", \"winner\": 0}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "board swap",
+    "fetches": [
+     [
+      "recent_sets",
+      [
+       [
+        12,
+        120
+       ],
+       [
+        70,
+        700
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        12,
+        120
+       ],
+       "1"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        12,
+        120
+       ],
+       "1",
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        70,
+        700
+       ],
+       "2"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        70,
+        700
+       ],
+       "2",
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.1.upset_factor",
+      "1"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ]
+    ],
+    "deltas": [],
+    "responses": []
+   },
+   {
+    "step": "hotkey-style swap",
+    "fetches": [
+     [
+      "recent_sets",
+      [
+       [
+        70,
+        700
+       ],
+       [
+        12,
+        120
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        70,
+        700
+       ],
+       "1"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        70,
+        700
+       ],
+       "1",
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        12,
+        120
+       ],
+       "2"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        12,
+        120
+       ],
+       "2",
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.1.upset_factor",
+      "1"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ]
+    ],
+    "deltas": [],
+    "responses": []
+   },
+   {
+    "step": "answer swaps",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[{\"id\":\"S48\",\"score\":[2,0],\"timestamp\":5048,\"tournament\":\"T48\",\"winner\":0}],\"request_time\":1014}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.1.1",
+      "{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R49\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P49\",\"oponent_score\":1,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O49\"}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1.1",
+      "{\"placement\":50,\"event_name\":\"E50\",\"tournament_name\":\"T50\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.2.1",
+      "{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R51\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P51\",\"oponent_score\":0,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O51\"}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2.1",
+      "{\"placement\":52,\"event_name\":\"E52\",\"tournament_name\":\"T52\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"request_time\"], \"action\": \"dictionary_item_added\", \"value\": 1014, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"done\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"sets\", 0], \"action\": \"iterable_item_added\", \"value\": {\"id\": \"S48\", \"score\": [2, 0], \"timestamp\": 5048, \"tournament\": \"T48\", \"winner\": 0}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\", \"round_name\"], \"action\": \"values_changed\", \"value\": \"R49\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\", \"player_name\"], \"action\": \"values_changed\", \"value\": \"P49\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\", \"oponent_score\"], \"action\": \"values_changed\", \"value\": 1, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\", \"oponent_name\"], \"action\": \"values_changed\", \"value\": \"O49\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"history_sets\", \"1\", \"1\", \"placement\"], \"action\": \"values_changed\", \"value\": 50, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"history_sets\", \"1\", \"1\", \"event_name\"], \"action\": \"values_changed\", \"value\": \"E50\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"history_sets\", \"1\", \"1\", \"tournament_name\"], \"action\": \"values_changed\", \"value\": \"T50\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\", \"round_name\"], \"action\": \"values_changed\", \"value\": \"R51\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\", \"player_name\"], \"action\": \"values_changed\", \"value\": \"P51\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\", \"oponent_name\"], \"action\": \"values_changed\", \"value\": \"O51\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"history_sets\", \"2\", \"1\", \"placement\"], \"action\": \"values_changed\", \"value\": 52, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"history_sets\", \"2\", \"1\", \"event_name\"], \"action\": \"values_changed\", \"value\": \"E52\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"history_sets\", \"2\", \"1\", \"tournament_name\"], \"action\": \"values_changed\", \"value\": \"T52\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "legacy recent",
+    "fetches": [
+     [
+      "recent_sets",
+      [
+       [
+        70,
+        700
+       ],
+       [
+        12,
+        120
+       ],
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"request_time\"], \"action\": \"dictionary_item_removed\", \"value\": 1014, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"loading\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"sets\", 0], \"action\": \"iterable_item_removed\", \"value\": {\"id\": \"S48\", \"score\": [2, 0], \"timestamp\": 5048, \"tournament\": \"T48\", \"winner\": 0}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": [
+     [
+      "/scoreboard1-stats-recent-sets",
+      200,
+      "OK"
+     ]
+    ]
+   },
+   {
+    "step": "legacy upset",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.upset_factor",
+      "1"
+     ]
+    ],
+    "deltas": [],
+    "responses": [
+     [
+      "/scoreboard1-stats-upset-factor",
+      200,
+      "OK"
+     ]
+    ]
+   },
+   {
+    "step": "legacy last 1",
+    "fetches": [
+     [
+      "last_sets",
+      [
+       [
+        70,
+        700
+       ],
+       "1"
+      ]
+     ]
+    ],
+    "writes": [],
+    "deltas": [],
+    "responses": [
+     [
+      "/scoreboard1-stats-last-sets-1",
+      200,
+      "OK"
+     ]
+    ]
+   },
+   {
+    "step": "legacy history 1",
+    "fetches": [
+     [
+      "history_sets",
+      [
+       [
+        70,
+        700
+       ],
+       "1",
+       1386
+      ]
+     ]
+    ],
+    "writes": [],
+    "deltas": [],
+    "responses": [
+     [
+      "/scoreboard1-stats-history-sets-1",
+      200,
+      "OK"
+     ]
+    ]
+   },
+   {
+    "step": "legacy last 2",
+    "fetches": [
+     [
+      "last_sets",
+      [
+       [
+        12,
+        120
+       ],
+       "2"
+      ]
+     ]
+    ],
+    "writes": [],
+    "deltas": [],
+    "responses": [
+     [
+      "/scoreboard1-stats-last-sets-2",
+      200,
+      "OK"
+     ]
+    ]
+   },
+   {
+    "step": "legacy history 2",
+    "fetches": [
+     [
+      "history_sets",
+      [
+       [
+        12,
+        120
+       ],
+       "2",
+       1386
+      ]
+     ]
+    ],
+    "writes": [],
+    "deltas": [],
+    "responses": [
+     [
+      "/scoreboard1-stats-history-sets-2",
+      200,
+      "OK"
+     ]
+    ]
+   },
+   {
+    "step": "legacy last both",
+    "fetches": [
+     [
+      "last_sets",
+      [
+       [
+        70,
+        700
+       ],
+       "1"
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        12,
+        120
+       ],
+       "2"
+      ]
+     ]
+    ],
+    "writes": [],
+    "deltas": [],
+    "responses": [
+     [
+      "/scoreboard1-stats-last-sets-both",
+      200,
+      "OK"
+     ]
+    ]
+   },
+   {
+    "step": "legacy history both",
+    "fetches": [
+     [
+      "history_sets",
+      [
+       [
+        70,
+        700
+       ],
+       "1",
+       1386
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        12,
+        120
+       ],
+       "2",
+       1386
+      ]
+     ]
+    ],
+    "writes": [],
+    "deltas": [],
+    "responses": [
+     [
+      "/scoreboard1-stats-history-sets-both",
+      200,
+      "OK"
+     ]
+    ]
+   },
+   {
+    "step": "legacy last x",
+    "fetches": [],
+    "writes": [],
+    "deltas": [],
+    "responses": [
+     [
+      "/scoreboard1-stats-last-sets-x",
+      200,
+      "OK"
+     ]
+    ]
+   },
+   {
+    "step": "legacy history x",
+    "fetches": [],
+    "writes": [],
+    "deltas": [],
+    "responses": [
+     [
+      "/scoreboard1-stats-history-sets-x",
+      200,
+      "OK"
+     ]
+    ]
+   },
+   {
+    "step": "v1 refresh",
+    "fetches": [
+     [
+      "recent_sets",
+      [
+       [
+        70,
+        700
+       ],
+       [
+        12,
+        120
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        70,
+        700
+       ],
+       "1"
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        12,
+        120
+       ],
+       "2"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        70,
+        700
+       ],
+       "1",
+       1386
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        12,
+        120
+       ],
+       "2",
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "1"
+     ]
+    ],
+    "deltas": [],
+    "responses": [
+     [
+      "/api/v1/scoreboards/1/stats:refresh",
+      200,
+      true,
+      null
+     ]
+    ]
+   },
+   {
+    "step": "v1 refresh crew board",
+    "fetches": [],
+    "writes": [],
+    "deltas": [],
+    "responses": [
+     [
+      "/api/v1/scoreboards/3/stats:refresh",
+      400,
+      false,
+      "INVALID_ARGUMENT"
+     ]
+    ]
+   },
+   {
+    "step": "answer routes",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[{\"id\":\"S62\",\"score\":[2,2],\"timestamp\":5062,\"tournament\":\"T62\",\"winner\":0}],\"request_time\":1016}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.1.1",
+      "{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R63\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P63\",\"oponent_score\":0,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O63\"}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.2.1",
+      "{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R64\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P64\",\"oponent_score\":1,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O64\"}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1.1",
+      "{\"placement\":65,\"event_name\":\"E65\",\"tournament_name\":\"T65\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2.1",
+      "{\"placement\":66,\"event_name\":\"E66\",\"tournament_name\":\"T66\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"request_time\"], \"action\": \"dictionary_item_added\", \"value\": 1016, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"done\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"sets\", 0], \"action\": \"iterable_item_added\", \"value\": {\"id\": \"S62\", \"score\": [2, 2], \"timestamp\": 5062, \"tournament\": \"T62\", \"winner\": 0}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\", \"round_name\"], \"action\": \"values_changed\", \"value\": \"R63\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\", \"player_name\"], \"action\": \"values_changed\", \"value\": \"P63\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\", \"oponent_score\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\", \"oponent_name\"], \"action\": \"values_changed\", \"value\": \"O63\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\", \"round_name\"], \"action\": \"values_changed\", \"value\": \"R64\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\", \"player_name\"], \"action\": \"values_changed\", \"value\": \"P64\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\", \"oponent_score\"], \"action\": \"values_changed\", \"value\": 1, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\", \"oponent_name\"], \"action\": \"values_changed\", \"value\": \"O64\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"history_sets\", \"1\", \"1\", \"placement\"], \"action\": \"values_changed\", \"value\": 65, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"history_sets\", \"1\", \"1\", \"event_name\"], \"action\": \"values_changed\", \"value\": \"E65\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"history_sets\", \"1\", \"1\", \"tournament_name\"], \"action\": \"values_changed\", \"value\": \"T65\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"history_sets\", \"2\", \"1\", \"placement\"], \"action\": \"values_changed\", \"value\": 66, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"history_sets\", \"2\", \"1\", \"event_name\"], \"action\": \"values_changed\", \"value\": \"E66\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"history_sets\", \"2\", \"1\", \"tournament_name\"], \"action\": \"values_changed\", \"value\": \"T66\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "board clear",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2",
+      "{}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"upset_factor\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"request_time\"], \"action\": \"dictionary_item_removed\", \"value\": 1016, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"sets\", 0], \"action\": \"iterable_item_removed\", \"value\": {\"id\": \"S62\", \"score\": [2, 2], \"timestamp\": 5062, \"tournament\": \"T62\", \"winner\": 0}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\"], \"action\": \"dictionary_item_removed\", \"value\": {\"phase_id\": \"A1\", \"phase_name\": \"Pools\", \"round_name\": \"R63\", \"player_score\": 2, \"player_seed\": 1, \"player_team\": \"\", \"player_name\": \"P63\", \"oponent_score\": 0, \"oponent_seed\": 8, \"oponent_team\": \"X\", \"oponent_name\": \"O63\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"history_sets\", \"1\", \"1\"], \"action\": \"dictionary_item_removed\", \"value\": {\"placement\": 65, \"event_name\": \"E65\", \"tournament_name\": \"T65\", \"entrants\": 64, \"event_date_month\": \"November\", \"event_date_day\": \"15\", \"event_date_year\": \"2023\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\"], \"action\": \"dictionary_item_removed\", \"value\": {\"phase_id\": \"A1\", \"phase_name\": \"Pools\", \"round_name\": \"R64\", \"player_score\": 2, \"player_seed\": 1, \"player_team\": \"\", \"player_name\": \"P64\", \"oponent_score\": 1, \"oponent_seed\": 8, \"oponent_team\": \"X\", \"oponent_name\": \"O64\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"history_sets\", \"2\", \"1\"], \"action\": \"dictionary_item_removed\", \"value\": {\"placement\": 66, \"event_name\": \"E66\", \"tournament_name\": \"T66\", \"entrants\": 64, \"event_date_month\": \"November\", \"event_date_day\": \"15\", \"event_date_year\": \"2023\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "load set D",
+    "fetches": [
+     [
+      "last_sets",
+      [
+       [
+        13,
+        130
+       ],
+       "2"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        13,
+        130
+       ],
+       "2",
+       1386
+      ]
+     ],
+     [
+      "recent_sets",
+      [
+       [
+        14,
+        140
+       ],
+       [
+        13,
+        130
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        14,
+        140
+       ],
+       "1"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        14,
+        140
+       ],
+       "1",
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "3"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "3"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"loading\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"upset_factor\"], \"action\": \"values_changed\", \"value\": 3, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "web reset players",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2",
+      "{}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"upset_factor\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"done\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "load set E",
+    "fetches": [
+     [
+      "last_sets",
+      [
+       [
+        15,
+        150
+       ],
+       "2"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        15,
+        150
+       ],
+       "2",
+       1386
+      ]
+     ],
+     [
+      "recent_sets",
+      [
+       [
+        16,
+        160
+       ],
+       [
+        15,
+        150
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        16,
+        160
+       ],
+       "1"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        16,
+        160
+       ],
+       "1",
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "3"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "3"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"loading\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"upset_factor\"], \"action\": \"values_changed\", \"value\": 3, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "web clear all",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2",
+      "{}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"upset_factor\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"done\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "load set F",
+    "fetches": [
+     [
+      "last_sets",
+      [
+       [
+        17,
+        170
+       ],
+       "2"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        17,
+        170
+       ],
+       "2",
+       1386
+      ]
+     ],
+     [
+      "recent_sets",
+      [
+       [
+        18,
+        180
+       ],
+       [
+        17,
+        170
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        18,
+        180
+       ],
+       "1"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        18,
+        180
+       ],
+       "1",
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "3"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "3"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"loading\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"upset_factor\"], \"action\": \"values_changed\", \"value\": 3, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "reset all inputs",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2",
+      "{}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"upset_factor\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"done\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "load set G",
+    "fetches": [
+     [
+      "last_sets",
+      [
+       [
+        19,
+        190
+       ],
+       "2"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        19,
+        190
+       ],
+       "2",
+       1386
+      ]
+     ],
+     [
+      "recent_sets",
+      [
+       [
+        20,
+        200
+       ],
+       [
+        19,
+        190
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        20,
+        200
+       ],
+       "1"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        20,
+        200
+       ],
+       "1",
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "3"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "3"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"loading\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"upset_factor\"], \"action\": \"values_changed\", \"value\": 3, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "answer the rest",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.last_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.2.1",
+      "{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R82\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P82\",\"oponent_score\":1,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O82\"}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.2.1",
+      "{\"placement\":83,\"event_name\":\"E83\",\"tournament_name\":\"T83\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[{\"id\":\"S84\",\"score\":[2,0],\"timestamp\":5084,\"tournament\":\"T84\",\"winner\":0}],\"request_time\":1020}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.last_sets.1.1",
+      "{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R85\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P85\",\"oponent_score\":1,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O85\"}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.1.history_sets.1.1",
+      "{\"placement\":86,\"event_name\":\"E86\",\"tournament_name\":\"T86\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"last_sets\", \"2\", \"1\"], \"action\": \"dictionary_item_added\", \"value\": {\"phase_id\": \"A1\", \"phase_name\": \"Pools\", \"round_name\": \"R82\", \"player_score\": 2, \"player_seed\": 1, \"player_team\": \"\", \"player_name\": \"P82\", \"oponent_score\": 1, \"oponent_seed\": 8, \"oponent_team\": \"X\", \"oponent_name\": \"O82\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"history_sets\", \"2\", \"1\"], \"action\": \"dictionary_item_added\", \"value\": {\"placement\": 83, \"event_name\": \"E83\", \"tournament_name\": \"T83\", \"entrants\": 64, \"event_date_month\": \"November\", \"event_date_day\": \"15\", \"event_date_year\": \"2023\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"request_time\"], \"action\": \"dictionary_item_added\", \"value\": 1020, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"done\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"sets\", 0], \"action\": \"iterable_item_added\", \"value\": {\"id\": \"S84\", \"score\": [2, 0], \"timestamp\": 5084, \"tournament\": \"T84\", \"winner\": 0}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"last_sets\", \"1\", \"1\"], \"action\": \"dictionary_item_added\", \"value\": {\"phase_id\": \"A1\", \"phase_name\": \"Pools\", \"round_name\": \"R85\", \"player_score\": 2, \"player_seed\": 1, \"player_team\": \"\", \"player_name\": \"P85\", \"oponent_score\": 1, \"oponent_seed\": 8, \"oponent_team\": \"X\", \"oponent_name\": \"O85\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"1\", \"history_sets\", \"1\", \"1\"], \"action\": \"dictionary_item_added\", \"value\": {\"placement\": 86, \"event_name\": \"E86\", \"tournament_name\": \"T86\", \"entrants\": 64, \"event_date_month\": \"November\", \"event_date_day\": \"15\", \"event_date_year\": \"2023\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "stream queue",
+    "fetches": [],
+    "writes": [],
+    "deltas": [
+     "[{\"path\": [\"streamQueue\", \"stream\", \"1\"], \"action\": \"dictionary_item_added\", \"value\": {\"id\": 9, \"p1_name\": \"singles\", \"p2_name\": \"Q2\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"currentStream\"], \"action\": \"values_changed\", \"value\": \"harness_channel\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "tournament closed",
+    "fetches": [],
+    "writes": [],
+    "deltas": [],
+    "responses": []
+   },
+   {
+    "step": "legacy recent, no tournament",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"1\", \"recent_sets\", \"request_time\"], \"action\": \"dictionary_item_removed\", \"value\": 1020, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"1\", \"recent_sets\", \"sets\", 0], \"action\": \"iterable_item_removed\", \"value\": {\"id\": \"S84\", \"score\": [2, 0], \"timestamp\": 5084, \"tournament\": \"T84\", \"winner\": 0}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": [
+     [
+      "/scoreboard1-stats-recent-sets",
+      200,
+      "OK"
+     ]
+    ]
+   },
+   {
+    "step": "v1 refresh, no tournament",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "3"
+     ]
+    ],
+    "deltas": [],
+    "responses": [
+     [
+      "/api/v1/scoreboards/1/stats:refresh",
+      200,
+      true,
+      null
+     ]
+    ]
+   },
+   {
+    "step": "load set H, no tournament",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.1.upset_factor",
+      "3"
+     ]
+    ],
+    "deltas": [],
+    "responses": []
+   }
+  ],
+  "boards": {
+   "1": {
+    "keys": [
+     "last_sets",
+     "history_sets",
+     "station_queue",
+     "team",
+     "phase",
+     "pool",
+     "match",
+     "best_of",
+     "best_of_short_text",
+     "best_of_text",
+     "first_to",
+     "first_to_short_text",
+     "first_to_text",
+     "stages",
+     "match_en",
+     "recent_sets",
+     "upset_factor",
+     "teamsSwapped"
+    ],
+    "stats": {
+     "recent_sets": "{\"state\":\"done\",\"sets\":[]}",
+     "last_sets": "{\"1\":{\"1\":{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R85\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P85\",\"oponent_score\":1,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O85\"}},\"2\":{\"1\":{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R82\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P82\",\"oponent_score\":1,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O82\"}}}",
+     "history_sets": "{\"1\":{\"1\":{\"placement\":86,\"event_name\":\"E86\",\"tournament_name\":\"T86\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}},\"2\":{\"1\":{\"placement\":83,\"event_name\":\"E83\",\"tournament_name\":\"T83\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}}}",
+     "upset_factor": "3"
+    }
+   }
+  }
+ },
+ "team": {
+  "steps": [
+   {
+    "step": "load a 2v2 set",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.2.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.2.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.2.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.2.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"2\"], \"action\": \"values_changed\", \"value\": {\"last_sets\": {\"1\": {}, \"2\": {}}, \"history_sets\": {\"1\": {}, \"2\": {}}, \"station_queue\": {}, \"team\": {\"1\": {\"color\": \"#fe3636\", \"teamName\": \"\", \"losers\": false, \"player\": {\"1\": {\"seed\": 0, \"birthday\": false, \"country\": {}, \"state\": {}, \"character\": {\"1\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"2\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"3\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}}, \"mains\": {\"1\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"2\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"3\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}}}}, \"score\": 0}, \"2\": {\"color\": \"#2e89ff\", \"teamName\": \"\", \"losers\": false, \"player\": {\"1\": {\"seed\": 0, \"birthday\": false, \"country\": {}, \"state\": {}, \"character\": {\"1\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"2\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"3\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}}, \"mains\": {\"1\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"2\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"3\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}}}}, \"score\": 0}}, \"phase\": \"\", \"pool\": \"\", \"match\": \"\", \"best_of\": 0, \"best_of_short_text\": \"BO0\", \"best_of_text\": \"\", \"first_to\": 0, \"first_to_short_text\": \"FT0\", \"first_to_text\": \"\", \"stages\": {}, \"recent_sets\": {\"state\": \"done\", \"sets\": []}, \"upset_factor\": 0}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "move a player down",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.2.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ]
+    ],
+    "deltas": [],
+    "responses": []
+   },
+   {
+    "step": "move it back up",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.2.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ]
+    ],
+    "deltas": [],
+    "responses": []
+   },
+   {
+    "step": "web swap",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.2.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ]
+    ],
+    "deltas": [],
+    "responses": []
+   },
+   {
+    "step": "board clear",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.2.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ]
+    ],
+    "deltas": [],
+    "responses": []
+   },
+   {
+    "step": "load a 1v1 set",
+    "fetches": [
+     [
+      "last_sets",
+      [
+       [
+        51,
+        510
+       ],
+       "2"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        51,
+        510
+       ],
+       "2",
+       1386
+      ]
+     ],
+     [
+      "recent_sets",
+      [
+       [
+        52,
+        520
+       ],
+       [
+        51,
+        510
+       ],
+       1386
+      ]
+     ],
+     [
+      "last_sets",
+      [
+       [
+        52,
+        520
+       ],
+       "1"
+      ]
+     ],
+     [
+      "history_sets",
+      [
+       [
+        52,
+        520
+       ],
+       "1",
+       1386
+      ]
+     ]
+    ],
+    "writes": [
+     [
+      "set",
+      "score.2.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.2.recent_sets",
+      "{\"state\":\"loading\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.2.upset_factor",
+      "5"
+     ],
+     [
+      "set",
+      "score.2.upset_factor",
+      "5"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"2\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"loading\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"upset_factor\"], \"action\": \"values_changed\", \"value\": 5, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "answer",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.2.last_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.2.last_sets.2.1",
+      "{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R1\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P1\",\"oponent_score\":1,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O1\"}"
+     ],
+     [
+      "set",
+      "score.2.history_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.2.history_sets.2.1",
+      "{\"placement\":2,\"event_name\":\"E2\",\"tournament_name\":\"T2\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}"
+     ],
+     [
+      "set",
+      "score.2.recent_sets",
+      "{\"state\":\"done\",\"sets\":[{\"id\":\"S3\",\"score\":[2,0],\"timestamp\":5003,\"tournament\":\"T3\",\"winner\":0}],\"request_time\":1001}"
+     ],
+     [
+      "set",
+      "score.2.last_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.2.last_sets.1.1",
+      "{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R4\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P4\",\"oponent_score\":1,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O4\"}"
+     ],
+     [
+      "set",
+      "score.2.history_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.2.history_sets.1.1",
+      "{\"placement\":5,\"event_name\":\"E5\",\"tournament_name\":\"T5\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"2\", \"last_sets\", \"2\", \"1\"], \"action\": \"dictionary_item_added\", \"value\": {\"phase_id\": \"A1\", \"phase_name\": \"Pools\", \"round_name\": \"R1\", \"player_score\": 2, \"player_seed\": 1, \"player_team\": \"\", \"player_name\": \"P1\", \"oponent_score\": 1, \"oponent_seed\": 8, \"oponent_team\": \"X\", \"oponent_name\": \"O1\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"2\", \"history_sets\", \"2\", \"1\"], \"action\": \"dictionary_item_added\", \"value\": {\"placement\": 2, \"event_name\": \"E2\", \"tournament_name\": \"T2\", \"entrants\": 64, \"event_date_month\": \"November\", \"event_date_day\": \"15\", \"event_date_year\": \"2023\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"2\", \"recent_sets\", \"request_time\"], \"action\": \"dictionary_item_added\", \"value\": 1001, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"recent_sets\", \"state\"], \"action\": \"values_changed\", \"value\": \"done\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"recent_sets\", \"sets\", 0], \"action\": \"iterable_item_added\", \"value\": {\"id\": \"S3\", \"score\": [2, 0], \"timestamp\": 5003, \"tournament\": \"T3\", \"winner\": 0}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"2\", \"last_sets\", \"1\", \"1\"], \"action\": \"dictionary_item_added\", \"value\": {\"phase_id\": \"A1\", \"phase_name\": \"Pools\", \"round_name\": \"R4\", \"player_score\": 2, \"player_seed\": 1, \"player_team\": \"\", \"player_name\": \"P4\", \"oponent_score\": 1, \"oponent_seed\": 8, \"oponent_team\": \"X\", \"oponent_name\": \"O4\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"2\", \"history_sets\", \"1\", \"1\"], \"action\": \"dictionary_item_added\", \"value\": {\"placement\": 5, \"event_name\": \"E5\", \"tournament_name\": \"T5\", \"entrants\": 64, \"event_date_month\": \"November\", \"event_date_day\": \"15\", \"event_date_year\": \"2023\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "load a 2v2 set again",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.2.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.2.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.2.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.2.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"2\", \"recent_sets\", \"request_time\"], \"action\": \"dictionary_item_removed\", \"value\": 1001, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"upset_factor\"], \"action\": \"values_changed\", \"value\": 0, \"old_value\": \"unknown___\", \"type\": \"<class 'int'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"score\", \"2\", \"recent_sets\", \"sets\", 0], \"action\": \"iterable_item_removed\", \"value\": {\"id\": \"S3\", \"score\": [2, 0], \"timestamp\": 5003, \"tournament\": \"T3\", \"winner\": 0}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   },
+   {
+    "step": "load the same 2v2 roster without seeds",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ],
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ]
+    ],
+    "deltas": [],
+    "responses": []
+   },
+   {
+    "step": "legacy recent",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.2.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ]
+    ],
+    "deltas": [],
+    "responses": [
+     [
+      "/scoreboard2-stats-recent-sets",
+      200,
+      "OK"
+     ]
+    ]
+   },
+   {
+    "step": "legacy last both",
+    "fetches": [],
+    "writes": [],
+    "deltas": [],
+    "responses": [
+     [
+      "/scoreboard2-stats-last-sets-both",
+      200,
+      "OK"
+     ]
+    ]
+   },
+   {
+    "step": "legacy history both",
+    "fetches": [],
+    "writes": [],
+    "deltas": [],
+    "responses": [
+     [
+      "/scoreboard2-stats-history-sets-both",
+      200,
+      "OK"
+     ]
+    ]
+   },
+   {
+    "step": "legacy upset",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ]
+    ],
+    "deltas": [],
+    "responses": [
+     [
+      "/scoreboard2-stats-upset-factor",
+      200,
+      "OK"
+     ]
+    ]
+   },
+   {
+    "step": "v1 refresh",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.2.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ],
+     [
+      "set",
+      "score.2.upset_factor",
+      "0"
+     ]
+    ],
+    "deltas": [],
+    "responses": [
+     [
+      "/api/v1/scoreboards/2/stats:refresh",
+      200,
+      true,
+      null
+     ]
+    ]
+   },
+   {
+    "step": "stream queue, two boards",
+    "fetches": [],
+    "writes": [],
+    "deltas": [
+     "[{\"path\": [\"streamQueue\", \"stream\", \"1\"], \"action\": \"dictionary_item_added\", \"value\": {\"id\": 9, \"p1_name\": \"team\", \"p2_name\": \"Q2\"}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}, {\"path\": [\"currentStream\"], \"action\": \"values_changed\", \"value\": \"harness_channel\", \"old_value\": \"unknown___\", \"type\": \"<class 'str'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": []
+   }
+  ],
+  "boards": {
+   "1": {
+    "keys": [
+     "last_sets",
+     "history_sets",
+     "station_queue",
+     "team",
+     "phase",
+     "pool",
+     "match",
+     "best_of",
+     "best_of_short_text",
+     "best_of_text",
+     "first_to",
+     "first_to_short_text",
+     "first_to_text",
+     "stages"
+    ],
+    "stats": {
+     "last_sets": "{\"1\":{},\"2\":{}}",
+     "history_sets": "{\"1\":{},\"2\":{}}"
+    }
+   },
+   "2": {
+    "keys": [
+     "last_sets",
+     "history_sets",
+     "station_queue",
+     "team",
+     "phase",
+     "pool",
+     "match",
+     "best_of",
+     "best_of_short_text",
+     "best_of_text",
+     "first_to",
+     "first_to_short_text",
+     "first_to_text",
+     "stages",
+     "match_en",
+     "recent_sets",
+     "upset_factor",
+     "teamsSwapped"
+    ],
+    "stats": {
+     "recent_sets": "{\"state\":\"done\",\"sets\":[]}",
+     "last_sets": "{\"1\":{\"1\":{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R4\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P4\",\"oponent_score\":1,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O4\"}},\"2\":{\"1\":{\"phase_id\":\"A1\",\"phase_name\":\"Pools\",\"round_name\":\"R1\",\"player_score\":2,\"player_seed\":1,\"player_team\":\"\",\"player_name\":\"P1\",\"oponent_score\":1,\"oponent_seed\":8,\"oponent_team\":\"X\",\"oponent_name\":\"O1\"}}}",
+     "history_sets": "{\"1\":{\"1\":{\"placement\":5,\"event_name\":\"E5\",\"tournament_name\":\"T5\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}},\"2\":{\"1\":{\"placement\":2,\"event_name\":\"E2\",\"tournament_name\":\"T2\",\"entrants\":64,\"event_date_month\":\"November\",\"event_date_day\":\"15\",\"event_date_year\":\"2023\"}}}",
+     "upset_factor": "0"
+    }
+   }
+  }
+ },
+ "unbuilt board": {
+  "steps": [
+   {
+    "step": "legacy recent on board 2",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.2.last_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.2.last_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.2.history_sets.1",
+      "{}"
+     ],
+     [
+      "set",
+      "score.2.history_sets.2",
+      "{}"
+     ],
+     [
+      "set",
+      "score.2.recent_sets",
+      "{\"state\":\"done\",\"sets\":[]}"
+     ]
+    ],
+    "deltas": [
+     "[{\"path\": [\"score\", \"2\"], \"action\": \"dictionary_item_added\", \"value\": {\"last_sets\": {\"1\": {}, \"2\": {}}, \"history_sets\": {\"1\": {}, \"2\": {}}, \"station_queue\": {}, \"team\": {\"1\": {\"color\": \"#fe3636\", \"teamName\": \"\", \"losers\": false, \"player\": {\"1\": {\"seed\": 0, \"birthday\": false, \"country\": {}, \"state\": {}, \"character\": {\"1\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"2\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"3\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}}, \"mains\": {\"1\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"2\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"3\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}}}}, \"score\": 0}, \"2\": {\"color\": \"#2e89ff\", \"teamName\": \"\", \"losers\": false, \"player\": {\"1\": {\"seed\": 0, \"birthday\": false, \"country\": {}, \"state\": {}, \"character\": {\"1\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"2\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"3\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}}, \"mains\": {\"1\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"2\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}, \"3\": {\"name\": \"\", \"assets\": {}, \"skin\": -1, \"variant\": {}}}}}, \"score\": 0}}, \"phase\": \"\", \"pool\": \"\", \"match\": \"\", \"best_of\": 0, \"best_of_short_text\": \"BO0\", \"best_of_text\": \"\", \"first_to\": 0, \"first_to_short_text\": \"FT0\", \"first_to_text\": \"\", \"stages\": {}}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]",
+     "[{\"path\": [\"score\", \"2\", \"recent_sets\"], \"action\": \"dictionary_item_added\", \"value\": {\"state\": \"done\", \"sets\": []}, \"old_value\": \"unknown___\", \"type\": \"<class 'dict'>\", \"old_type\": \"unknown___\", \"new_path\": null, \"t1_from_index\": null, \"t1_to_index\": null, \"t2_from_index\": null, \"t2_to_index\": null}]"
+    ],
+    "responses": [
+     [
+      "/scoreboard2-stats-recent-sets",
+      200,
+      "OK"
+     ]
+    ]
+   },
+   {
+    "step": "legacy last 1 on board 2",
+    "fetches": [],
+    "writes": [
+     [
+      "set",
+      "score.2.last_sets.1",
+      "{}"
+     ]
+    ],
+    "deltas": [],
+    "responses": [
+     [
+      "/scoreboard2-stats-last-sets-1",
+      200,
+      "OK"
+     ]
+    ]
+   }
+  ],
+  "boards": {
+   "2": {
+    "keys": [
+     "last_sets",
+     "history_sets",
+     "station_queue",
+     "team",
+     "phase",
+     "pool",
+     "match",
+     "best_of",
+     "best_of_short_text",
+     "best_of_text",
+     "first_to",
+     "first_to_short_text",
+     "first_to_text",
+     "stages",
+     "recent_sets"
+    ],
+    "stats": {
+     "recent_sets": "{\"state\":\"done\",\"sets\":[]}",
+     "last_sets": "{\"1\":{},\"2\":{}}",
+     "history_sets": "{\"1\":{},\"2\":{}}"
+    }
+   }
+  }
+ }
+}

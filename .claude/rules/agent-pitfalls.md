@@ -111,8 +111,11 @@ Step 5（第 1〜3 弾、2026-09-01/02）で**全ウィジェット静的化完�
   `SavePlayerToDB` は**ウィジェットではなく state から**組むので、エディタの
   `player_editor.*` はダイアログを閉じるたびに消す（`_PlayerEditorDialog.done` →
   `StateSchema.ClearPlayerEditor()`。残すと次の「新規登録」に前の選手の欄が混ざる）
-- 統計のトリガー（`playerId_changed` / `player_seed_changed`）はカードの
-  `AnnounceChange(SlotChange)` が出す。`SlotChange` は操作の前後の state の
+- 統計の依頼は core（ADR-005 S3e-5）: `PlayerService.Announce(SlotChange)` が
+  ボードのスロット（`score.*`）でだけ `StatsService.PlayerChanged` を呼ぶ（読込・クリアは
+  自分の保存ブロックの中で、カードの手入力は `SetSeed` / `SetPlayerId` の `announce=True`）。
+  カードの統計シグナル（`playerId_changed` / `player_seed_changed` ほか）と `AnnounceChange` は
+  削除済み。`SlotChange` は操作の前後の state の
   （id, seed）の比較（id の通知は旧実装どおり `score.*` の path だけ。エディタの
   カードの通知は誰も受けていない）
 

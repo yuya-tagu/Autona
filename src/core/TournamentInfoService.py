@@ -27,7 +27,7 @@ The Qt side keeps two things and no more:
   stores and formats);
 - the short-date *format*, which is a QLocale question. It is injected as
   ``formatEventDate`` rather than imported, for the same reason
-  ``StatsService.playersPerTeam`` is: core must not import Qt
+  ``StatsService.fetcher`` is: core must not import Qt
   (tests/test_core_qt_free.py). Without one the platform short date is used,
   so a headless run still publishes the key.
 

@@ -1848,10 +1848,10 @@ class StartGGDataProvider(TournamentDataProvider):
             id1 = [str(id1[0]), str(id1[1])]
             id2 = [str(id2[0]), str(id2[1])]
 
-            recentSets = []
-
             logger.info("Get recent sets start")
 
+            # One list of workers per direction (each player's events).
+            directions = []
             for _id1, _id2, inverted in [[id1, id2, False], [id2, id1, True]]:
                 workers = []
                 for i in range(5):
@@ -1864,14 +1864,26 @@ class StartGGDataProvider(TournamentDataProvider):
                     })
                     workers.append(worker)
                     self.threadpool.start(worker)
+                directions.append(workers)
 
-            Worker.wait_for_all(workers)
+            # Both directions' workers: only the second's used to be waited
+            # for and read (the list was the last loop's), so the sets only
+            # the first player's events held were dropped (ADR-005 S3e-5
+            # review).
+            Worker.wait_for_all(
+                [worker for workers in directions for worker in workers])
 
-            for worker in workers:
-                if worker.result is not None:
-                    recentSets.extend(worker.result)
+            def results(workers):
+                for worker in workers:
+                    if worker.result is not None:
+                        yield from worker.result
 
-            byId = {_set.get("id"): _set for _set in recentSets}
+            # The second direction's sets as before -- a set both found
+            # keeps its entry and its place among the sets of one date --
+            # then those only the first found.
+            byId = {_set.get("id"): _set for _set in results(directions[1])}
+            for _set in results(directions[0]):
+                byId.setdefault(_set.get("id"), _set)
             recentSets = list(byId.values())
             recentSets.sort(key=lambda s: s.get("timestamp"), reverse=True)
             logger.info("Recent sets size: " + str(len(recentSets)))

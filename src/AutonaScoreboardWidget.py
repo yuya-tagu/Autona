@@ -27,10 +27,10 @@ from .core.Actions import AutonaActions
 from .core.PlayerService import (
     DEFAULT_CHARACTERS_PER_PLAYER, DefaultPlayersPerTeam, SlotChange)
 from .core.SetLoadService import SetLoadService
+from .core.StatsService import StatsService
 from .core.TournamentInfoService import TournamentInfoService
 from .StateManagerBridge import StateManagerBridge
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
-from .AutonaStatsUtil import AutonaStatsUtil
 from .AutonaHotkeys import AutonaHotkeys
 from .core.PlayerDB import PlayerDB
 
@@ -125,9 +125,6 @@ class AutonaScoreboardWidget(QWidget):
         # the Web UI alike); this copy is only how _onHeldStateUpdated tells
         # that a cycle was a swap (_NoticeSwap).
         self._seenTeamsSwapped = False
-        # Teams whose statistics a swap / move asked to refetch, emitted
-        # once control is back in the event loop (_EmitPlayerStats).
-        self._pendingStatsTeams = set()
         # The teams whose name field _SyncSetFields had to leave alone
         # because the operator was in it: rendered from the state once the
         # focus has left it (_OnTeamNameFocusChanged). And, by team, what
@@ -181,7 +178,9 @@ class AutonaScoreboardWidget(QWidget):
         self.signals.CommandScoreChange.connect(self.CommandScoreChange)
         self.signals.CommandTeamColor.connect(self.CommandTeamColor)
 
-        self.stats = AutonaStatsUtil(self.scoreboardNumber, self)
+        # (The statistics are core's since ADR-005 S3e-5: StatsService,
+        # asked for by the operations that change a player -- this board
+        # used to own a stats util relaying its cards' signals.)
 
         # (The set loaded last is self.setLoad.lastSetSelected since ADR-005
         # S2d: the clears that forget it are core's.)
@@ -1904,14 +1903,6 @@ class AutonaScoreboardWidget(QWidget):
             p.btMoveDown.clicked.connect(
                 lambda checked=False, p=p: self._MovePlayer(p, 1))
 
-            p.instanceSignals.playerId_changed.connect(
-                self.stats.signals.RecentSetsSignal.emit)
-            p.instanceSignals.player1Id_changed.connect(
-                self.stats.signals.LastSetsP1Signal.emit)
-            p.instanceSignals.player1Id_changed.connect(
-                self.stats.signals.PlayerHistoryStandingsP1Signal.emit)
-            p.instanceSignals.player_seed_changed.connect(
-                self.stats.signals.UpsetFactorCalculation.emit)
             p.instanceSignals.render_requested.connect(
                 self._SchedulePlayerRender)
 
@@ -1932,14 +1923,6 @@ class AutonaScoreboardWidget(QWidget):
             p.btMoveDown.clicked.connect(
                 lambda checked=False, p=p: self._MovePlayer(p, 1))
 
-            p.instanceSignals.playerId_changed.connect(
-                self.stats.signals.RecentSetsSignal.emit)
-            p.instanceSignals.player2Id_changed.connect(
-                self.stats.signals.LastSetsP2Signal.emit)
-            p.instanceSignals.player2Id_changed.connect(
-                self.stats.signals.PlayerHistoryStandingsP2Signal.emit)
-            p.instanceSignals.player_seed_changed.connect(
-                self.stats.signals.UpsetFactorCalculation.emit)
             p.instanceSignals.render_requested.connect(
                 self._SchedulePlayerRender)
 
@@ -2058,8 +2041,9 @@ class AutonaScoreboardWidget(QWidget):
 
     def _MovePlayer(self, card, step):
         """A card's move up (-1) / move down (+1): exchange its slot with
-        the neighbouring one in the state (AutonaActions.SwapPlayers). The
-        ends of the list are not a move."""
+        the neighbouring one in the state (AutonaActions.SwapPlayers, which
+        also asks for the statistics when other players moved: ADR-005
+        S3e-5). The ends of the list are not a move."""
         team = 1 if card in self.team1playerWidgets else 2
         widgets = self.team1playerWidgets if team == 1 \
             else self.team2playerWidgets
@@ -2068,30 +2052,13 @@ class AutonaScoreboardWidget(QWidget):
         if other == index:
             return
         self.CommitFocusedEdit()
-        if AutonaActions.instance.SwapPlayers(
-                self.scoreboardNumber, team, index + 1, other + 1):
-            if self._SlotIdsDiffer(team, (index + 1, other + 1)):
-                self._RequestPlayerStats((team,))
-
-    # Statistics after a swap / move (ADR-005 S2c). A card fetches its
-    # statistics when *it* changes the player id (ExportPlayerId). A swap or
-    # a move exchanges the ids in the state without a card being involved,
-    # so the board asks instead -- once per operation, where the widget copy
-    # that used to do the swap fired every fetch several times (for the id
-    # it dropped, for the id it restored, and once per card).
-
-    def _SlotIdsDiffer(self, team, slots):
-        """True when the given slots of `team` hold different player ids,
-        i.e. when exchanging them changed who is in each."""
-        ids = [StateManager.Get(
-            f"{self.statePrefix}.team.{team}.player.{slot}.id")
-            for slot in slots]
-        return any(value != ids[0] for value in ids[1:])
+        AutonaActions.instance.SwapPlayers(
+            self.scoreboardNumber, team, index + 1, other + 1)
 
     def _NoticeSwap(self):
         """From the held cycle: was it a swap (the flag flipped)? Then show
-        the mirrored game results, and if it put other players on the
-        teams, refetch both teams' stats. True for a swap.
+        the mirrored game results. True for a swap. (The statistics a swap
+        asks for are the operation's since ADR-005 S3e-5.)
 
         Read from the state rather than told by the swap, because the swap
         has three entry points (this board's button, the hotkey, the Web UI)
@@ -2107,43 +2074,7 @@ class AutonaScoreboardWidget(QWidget):
             return False
         self._seenTeamsSwapped = swapped
         self.individualGameTracker.RenderStageResults()
-        rosters = []
-        for team in (1, 2):
-            roster = StateManager.Get(
-                f"{self.statePrefix}.team.{team}.player")
-            rosters.append(roster if isinstance(roster, dict) else {})
-        # A team swap moves slot N of one team to slot N of the other, so
-        # both teams changed exactly when some slot pair holds two ids.
-        for slot in set(rosters[0]) & set(rosters[1]):
-            ids = [roster.get(slot).get("id")
-                   if isinstance(roster.get(slot), dict) else None
-                   for roster in rosters]
-            if ids[0] != ids[1]:
-                self._RequestPlayerStats((1, 2))
-                break
         return True
-
-    def _RequestPlayerStats(self, teams):
-        """Queue the fetches a change of player in `teams` asks for: the
-        head-to-head once, and each team's last sets / standings. Emitted
-        from the event loop (_EmitPlayerStats), never from inside the state
-        notification that noticed the change (agent-pitfalls #9)."""
-        if not self._pendingStatsTeams:
-            QTimer.singleShot(0, self, self._EmitPlayerStats)
-        self._pendingStatsTeams.update(teams)
-
-    def _EmitPlayerStats(self):
-        teams, self._pendingStatsTeams = self._pendingStatsTeams, set()
-        if not teams:
-            return
-        signals = self.stats.signals
-        signals.RecentSetsSignal.emit()
-        if 1 in teams:
-            signals.LastSetsP1Signal.emit()
-            signals.PlayerHistoryStandingsP1Signal.emit()
-        if 2 in teams:
-            signals.LastSetsP2Signal.emit()
-            signals.PlayerHistoryStandingsP2Signal.emit()
 
     def ResetScore(self):
         # One operation, one save cycle: driving the two spinboxes in turn
@@ -2332,29 +2263,17 @@ class AutonaScoreboardWidget(QWidget):
           clear (DiscardTypedText, ADR-005 S3e-3), where it used to stay on
           a combo that already showed the emptied row;
         - the set loaded last is forgotten, so loading it again does load
-          it (NewSetSelected skips the set it already has);
-        - the statistics are fetched again for each team whose player ids
-          the clear dropped -- once per operation. A card used to ask for
-          them when its own Clear() dropped its id (ExportPlayerId), once
-          per card; the upset factor is recalculated by the operation.
+          it (NewSetSelected skips the set it already has).
+
+        The statistics the clear calls for are the operation's
+        (AutonaActions.ClearPlayers, ADR-005 S3e-5; this board asked for
+        them here until then).
         """
         self.CommitFocusedEdit()
-        before = {team: self._TeamPlayerIds(team) for team in (1, 2)}
         clear()
         for card in self.playerWidgets:
             card.DiscardTypedText()
         self.setLoad.lastSetSelected = None
-        changed = [team for team in (1, 2)
-                   if self._TeamPlayerIds(team) != before[team]]
-        if changed:
-            self._RequestPlayerStats(changed)
-
-    def _TeamPlayerIds(self, team):
-        roster = StateManager.Get(f"{self.statePrefix}.team.{team}.player")
-        if not isinstance(roster, dict):
-            return {}
-        return {slot: value.get("id") for slot, value in roster.items()
-                if isinstance(value, dict)}
 
     def ClearScore(self):
         """Zero both scores and both losers flags -- and nothing else
@@ -2424,10 +2343,12 @@ class AutonaScoreboardWidget(QWidget):
         The players are core's since ADR-005 S3e-3 (PlayerService.ApplyData;
         they were the cards' SetData, resolving the country, character and
         skin models): what is still the board's is the roster size it sets
-        for a set's entrants (playerNumber) and the statistics a change of
-        player asks for (_ApplyPlayer). Which team an entrant lands on is
-        core's answer (SetLoadService.DisplayTeam), so the swap rule is
-        stated once instead of four times.
+        for a set's entrants (playerNumber) and the upset factor a new
+        bracket type or roster size asks for (below, until ADR-005 S3e-7);
+        the statistics a change of player asks for are the load's own
+        (PlayerService.Announce, ADR-005 S3e-5). Which team an entrant
+        lands on is core's answer (SetLoadService.DisplayTeam), so the swap
+        rule is stated once instead of four times.
 
         One save cycle for the whole payload, as before.
         """
@@ -2455,8 +2376,12 @@ class AutonaScoreboardWidget(QWidget):
                 # type always carries entrants too.
                 return
 
+            # The upset factor of the bracket type / roster this set
+            # brought: core's statistic, asked for here until the set
+            # payload itself is core's (ApplySetPayload, ADR-005 S3e-7).
             if service.ApplyBracketType(data) or upsetStale:
-                self.stats.signals.UpsetFactorCalculation.emit()
+                StatsService(self.scoreboardNumber).RefreshQuietly(
+                    StatsService.UPSET_FACTOR)
 
     def _ApplyEntrants(self, data) -> bool:
         """Pour a set's two entrant rosters into the player slots.
@@ -2465,16 +2390,17 @@ class AutonaScoreboardWidget(QWidget):
         from one player a side to several or back -- the factor is the
         seeds' distance in singles and 0 otherwise (StatsService.IsSingles)
         -- and no player's seed moved, which would have recalculated it
-        already (AnnounceChange). The cards' SetData cleared every seed and
+        already (PlayerService.Announce). The cards' SetData cleared every seed and
         put it back, so it was recalculated on every load (S3e-3 判断 3);
         the core load does not when the seeds are the same, and a change
         between singles and teams left the previous pairing's factor
         (S3e-3 review).
         """
         entrants = data.get("entrants")
-        wasSingles = self.stats.service.IsSingles()
+        stats = StatsService(self.scoreboardNumber)
+        wasSingles = stats.IsSingles()
         self.playerNumber.setValue(len(max(entrants, key=lambda x: len(x))))
-        singlesChanged = self.stats.service.IsSingles() != wasSingles
+        singlesChanged = stats.IsSingles() != wasSingles
         seedMoved = False
 
         try:
@@ -2553,8 +2479,9 @@ class AutonaScoreboardWidget(QWidget):
     def _ApplyPlayer(self, card, data, loadFromDB, clear,
                      no_mains=False) -> SlotChange:
         """Load a player into `card`'s slot (PlayerService.ApplyData,
-        ADR-005 S3e-3) and ask for the statistics the change calls for,
-        in one save cycle; the change is returned. The card shows the slot
+        ADR-005 S3e-3, which also asks for the statistics the change calls
+        for: S3e-5), in one save cycle; the change is returned. The card
+        shows the slot
         from the held cycle (_SchedulePlayerRender), like any write it did
         not make: a field the operator is typing in shows the load once they
         leave it, and the text they were typing is held back (HeldBackText)
@@ -2568,18 +2495,14 @@ class AutonaScoreboardWidget(QWidget):
         whose row is wrong -- the typed text stayed, and the next pick on
         the card published it (S3e-3 review).
         """
-        service = card.player
-        change = SlotChange()
         with StateManager.SaveBlock():
-            before = service.Identity()
             try:
-                service.ApplyData(data, loadFromDB, clear, no_mains)
+                return card.player.ApplyData(
+                    data, loadFromDB, clear, no_mains)
             finally:
-                change = service.ChangeSince(before)
-                self._CardLoaded(card, change, clear)
-        return change
+                self._CardLoaded(card, clear)
 
-    def PlayerLoaded(self, team, player, change, cleared):
+    def PlayerLoaded(self, team, player, cleared):
         """A web operation loaded a player into slot `player` of state team
         `team` (AutonaWebOperations, ADR-005 S3e-4: the load is core's and
         the slot is the state's): the card showing that slot does what it
@@ -2589,14 +2512,13 @@ class AutonaScoreboardWidget(QWidget):
         cards = (self.team1playerWidgets if int(team) == 1
                  else self.team2playerWidgets)
         if 1 <= int(player) <= len(cards):
-            self._CardLoaded(cards[int(player) - 1], change, cleared)
+            self._CardLoaded(cards[int(player) - 1], cleared)
 
     @staticmethod
-    def _CardLoaded(card, change, cleared):
-        # The statistics the change asks for (the card relays them to this
-        # board's stats util), and the text typed into combos the operator
-        # is not in, after a load that cleared (see _ApplyPlayer).
-        card.AnnounceChange(change)
+    def _CardLoaded(card, cleared):
+        # The text typed into combos the operator is not in, after a load
+        # that cleared (see _ApplyPlayer). The statistics are the load's
+        # own (PlayerService.Announce, ADR-005 S3e-5).
         if cleared:
             card.DiscardTypedText(notEditing=True)
 

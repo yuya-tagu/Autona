@@ -439,46 +439,46 @@ def _build_web_app():
     # Resubmits Call for Recent Sets
     @app.route('/scoreboard<scoreboardNumber>-stats-recent-sets')
     def stats_recent_sets(scoreboardNumber):
-        return WebServer._board_actions().stats_recent_sets(scoreboardNumber)
+        return WebOps.stats_recent_sets(scoreboardNumber)
 
     @ws_on('stats_recent_sets')
     def ws_stats_recent_sets(message):
         info = orjson.loads(message)
         WebServer.ws_emit('stats_recent_sets',
-             WebServer._board_actions().stats_recent_sets(info.get("scoreboardNumber", "1")))
+             WebOps.stats_recent_sets(info.get("scoreboardNumber", "1")))
 
     # Resubmits Call for Upset Factor
     @app.route('/scoreboard<scoreboardNumber>-stats-upset-factor')
     def stats_upset_factor(scoreboardNumber):
-        return WebServer._board_actions().stats_upset_factor(scoreboardNumber)
+        return WebOps.stats_upset_factor(scoreboardNumber)
 
     @ws_on('stats_upset_factor')
     def ws_stats_upset_factor(message):
         info = orjson.loads(message)
         WebServer.ws_emit('stats_upset_factor',
-             WebServer._board_actions().stats_upset_factor(info.get("scoreboardNumber", "1")))
+             WebOps.stats_upset_factor(info.get("scoreboardNumber", "1")))
 
     # Resubmits Call for Last Sets
     @app.route('/scoreboard<scoreboardNumber>-stats-last-sets-<player>')
     def stats_last_sets(scoreboardNumber, player):
-        return WebServer._board_actions().stats_last_sets(scoreboardNumber, player)
+        return WebOps.stats_last_sets(scoreboardNumber, player)
 
     @ws_on('stats_last_sets')
     def ws_stats_last_sets(message):
         info = orjson.loads(message)
         WebServer.ws_emit('stats_last_sets',
-             WebServer._board_actions().stats_last_sets(info.get("scoreboardNumber", "1"), info.get("player")))
+             WebOps.stats_last_sets(info.get("scoreboardNumber", "1"), info.get("player")))
 
    # Resubmits Call for History Sets
     @app.route('/scoreboard<scoreboardNumber>-stats-history-sets-<player>')
     def stats_history_sets(scoreboardNumber, player):
-        return WebServer._board_actions().stats_history_sets(scoreboardNumber, player)
+        return WebOps.stats_history_sets(scoreboardNumber, player)
 
     @ws_on('stats_history_sets')
     def ws_stats_history_sets(message):
         info = orjson.loads(message)
         WebServer.ws_emit('stats_history_sets',
-             WebServer._board_actions().stats_history_sets(info.get("scoreboardNumber", "1"), info.get("player")))
+             WebOps.stats_history_sets(info.get("scoreboardNumber", "1"), info.get("player")))
 
     # Resets scores
     @app.route('/scoreboard<scoreboardNumber>-reset-scores')

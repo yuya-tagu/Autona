@@ -107,7 +107,7 @@
 | `CONFLICT` | 409 | 重い操作が実行中（多重起動ガード・§2.8） |
 | `NOT_READY` | 409 | 前提未充足（大会/試合未ロードで provider 不在 等・§3） |
 | `UPSTREAM_TIMEOUT` | 504 | Start.gg 等の外部依存がタイムアウト（agent-pitfalls #11） |
-| `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、ボード / パネルのウィジェットが要る操作（`:load-set`・`:pull-stream`・`stats:refresh`・`PATCH set` の `players` / `characters` 等）。message は `not available in headless`。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。Top 8 の取り込み（`bracket:refresh`・legacy `/update-bracket`・Socket.IO `update_bracket`）も ADR-005 S3e-8 から core の操作（`Top8Service.RefreshFromProvider`）で、どちらの起動形態でも動く。選手の編集（`PATCH .../players/{p}`・legacy `update-team`・Socket.IO `update_team`）とタグからの選手の読込（legacy `load-player-from-tag`・Socket.IO `load_player_from_tag`）も ADR-005 S3e-4 から core の操作（`PlayerService.ApplyData`）で、どちらの起動形態でも、state にあるスロットに対して動く。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
+| `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、ボード / パネルのウィジェットが要る操作（`:load-set`・`:pull-stream`・`PATCH set` の `players` / `characters` 等）。message は `not available in headless`。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。Top 8 の取り込み（`bracket:refresh`・legacy `/update-bracket`・Socket.IO `update_bracket`）も ADR-005 S3e-8 から core の操作（`Top8Service.RefreshFromProvider`）で、どちらの起動形態でも動く。選手の編集（`PATCH .../players/{p}`・legacy `update-team`・Socket.IO `update_team`）とタグからの選手の読込（legacy `load-player-from-tag`・Socket.IO `load_player_from_tag`）も ADR-005 S3e-4 から core の操作（`PlayerService.ApplyData`）で、どちらの起動形態でも、state にあるスロットに対して動く。統計（`stats:refresh`・legacy `/scoreboard<n>-stats-*`・Socket.IO `stats_*`）も ADR-005 S3e-5 から core の操作（`StatsService`）で、どちらの起動形態でも動く。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
 | `INTERNAL` | 500 | 想定外の内部例外 |
 
 ### 2.7 操作ログ（D7・A-1）
@@ -365,8 +365,8 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - **別の選手の名前にした部分更新は id と city を空にする**（ADR-005 S3e-4）: 書き込み後のスポンサー + タグの組が書き込み前と
   違い、body が `id` / `city` を持ってこない（DB の記録も持っていない）とき。同じスポンサー + タグなら残る。
   デスクトップのカードで名前を手入力したときと同じ規則（Web UI は id を送らないので、名前を書き換えると前の選手の
-  id・city と統計が残っていた）。id が変わるので、デスクトップでは統計が取り直される（ヘッドレスは ADR-005 S3e-5 まで
-  取り直さない）。`online_avatar` と `seed` は残る（デスクトップの手入力と同じ。タグの typo の修正やスポンサーの追記でも
+  id・city と統計が残っていた）。id が変わるので、統計が取り直される（ヘッドレスでも。ADR-005 S3e-5 から。それまでは
+  デスクトップだけ）。`online_avatar` と `seed` は残る（デスクトップの手入力と同じ。タグの typo の修正やスポンサーの追記でも
   別の選手と判定されるため。LIVE-BUG-1）。
 - `savePlayerToDb` の選手 DB への書き込みは、state の書き込み（同じ保存サイクル）の後、応答の前に行う
   （ボードホストのロックの外。保存する中身は書き込み直後のスロット）。同じ選手への保存が前後して届いたときは、

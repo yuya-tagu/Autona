@@ -28,6 +28,7 @@ from qtpy.QtWidgets import (
 from shiboken6 import Shiboken
 
 from src.core.SettingsManager import SettingsManager
+from tests.fixtures.stats.spies import StatsTriggers
 
 # The individual game tracker ships disabled, so the stage rows it rebuilds on
 # every best-of change are not built at all by default. Patching the lookup
@@ -541,26 +542,16 @@ def test_a_swap_is_one_save_cycle_and_the_cards_show_it(autonaApp):
 # first, as it always did (an unbuilt board is not held).
 
 
-_STATS_SIGNALS = ("RecentSetsSignal", "LastSetsP1Signal", "LastSetsP2Signal",
-                  "PlayerHistoryStandingsP1Signal",
-                  "PlayerHistoryStandingsP2Signal", "UpsetFactorCalculation")
+_STATS_SIGNALS = StatsTriggers.NAMES
 
 
 @contextlib.contextmanager
 def _statsFetches(board):
-    """How often each of the board's statistics triggers fired."""
-    counts = dict.fromkeys(_STATS_SIGNALS, 0)
-    slots = []
-    for name in _STATS_SIGNALS:
-        def slot(name=name):
-            counts[name] += 1
-        getattr(board.stats.signals, name).connect(slot)
-        slots.append((name, slot))
-    try:
-        yield counts
-    finally:
-        for name, slot in slots:
-            getattr(board.stats.signals, name).disconnect(slot)
+    """How often each of the board's statistics triggers fired (named after
+    the board's old AutonaStatsUtil signals; core's StatsService.Refresh
+    since ADR-005 S3e-5)."""
+    with StatsTriggers(board) as triggers:
+        yield triggers.counts
 
 
 @pytest.mark.parametrize("ids, fetches", [
@@ -569,7 +560,8 @@ def _statsFetches(board):
 ])
 def test_a_1v1_swap_refetches_the_stats_once(autonaApp, ids, fetches):
     """The swap exchanges the ids in the state with no card involved, so
-    the board asks for the statistics itself (_NoticeSwap): once per swap,
+    the operation asks for the statistics itself (StatsService.TeamsChanged;
+    the board did, from _NoticeSwap, until ADR-005 S3e-5): once per swap,
     and only when it put other players on the sides. The upset factor is
     recalculated by the operation, not through the trigger."""
     board = autonaApp.board(1)
@@ -2080,8 +2072,9 @@ def test_a_board_reset_takes_the_team_names_and_keeps_the_counts(autonaApp):
 ])
 def test_a_clear_refetches_the_stats_once(autonaApp, clear, ids, fetches):
     """A card used to ask for the statistics when its own Clear() dropped
-    its id (one fetch per card); the board asks once per clear now, and
-    the upset factor is recalculated by the operation."""
+    its id (one fetch per card); the clear asks once now (the board did
+    until ADR-005 S3e-5, the operation since: AutonaActions.ClearPlayers),
+    and the upset factor is recalculated by the operation."""
     board = autonaApp.board(1)
     for card, value in zip((board.team1playerWidgets[0],
                             board.team2playerWidgets[0]), ids):

@@ -38,8 +38,11 @@ Two kinds live here:
 - the player slots' (ADR-005 S3e-4): the Web's player edit (v1's PATCH
   players and the legacy update-team) and the tag lookup -- core's
   PlayerService.ApplyData, through the board host like the S2 ones. The
-  desktop's host adds what the board's cards do around a load (the
-  statistics, the typed combo text).
+  desktop's host adds what the board's cards do around a load (the typed
+  combo text).
+- the statistics of boards 1/2 (ADR-005 S3e-5): core's StatsService,
+  through the board host like the S2 ones, in both shells. The fetches are
+  the shell's (StatsService.fetcher) and answer into the state later.
 - the Top 8 import (ADR-005 S3e-8): core's Top8Service, in both shells. It
   runs on the tournament provider's worker; the Top 8 panel, built or not,
   renders what it wrote.
@@ -64,6 +67,7 @@ from .core.SettingsManager import SettingsManager
 from .core.SetLoadService import SetLoadService
 from .core.PlayerDB import PlayerDB
 from .core.PlayerService import PlayerService
+from .core.StatsService import StatsService
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaQtHelper import gui_thread_sync, in_gui_thread
@@ -141,15 +145,12 @@ class BoardHost:
         Kept by the board's SetLoadService; no board, no set."""
         return None
 
-    def PlayerLoaded(self, board, team, player, change, cleared):
+    def PlayerLoaded(self, board, team, player, cleared):
         """A player was loaded into slot `player` of state team `team` on
-        board `board` (1/2): `change` is what it did to the slot's id and
-        seed (PlayerService.SlotChange), `cleared` whether the load cleared
-        the slot first. Called inside the load's save block.
-
-        The statistics a change asks for are fetched by a built board (its
-        cards relay the change to its stats util); with no board, nothing
-        fetches them -- the statistics are core's in ADR-005 S3e-5.
+        board `board` (1/2); `cleared`: whether the load cleared the slot
+        first. Called inside the load's save block. With no board there is
+        no card to tidy up. (The statistics the load calls for are its own
+        -- PlayerService.Announce, ADR-005 S3e-5 -- in both shells.)
         """
 
 
@@ -192,8 +193,9 @@ class DesktopBoardHost(BoardHost):
 
     def ClearPlayers(self, board, no_mains=False):
         # The board's clear: AutonaActions.ClearPlayers plus what the board
-        # owns around it (the field being typed in, the set loaded last,
-        # the statistics). Boards 1/2: the crew board's clear is core's
+        # owns around it (the field being typed in, the set loaded last).
+        # The statistics are the operation's (StatsService.TeamsChanged,
+        # ADR-005 S3e-5). Boards 1/2: the crew board's clear is core's
         # (`_clear_players`).
         self._Board(board).CommandClearAll(no_mains)
 
@@ -206,11 +208,11 @@ class DesktopBoardHost(BoardHost):
         # The crew board has no SetLoadService, and raises as it did.
         return self._Board(board).setLoad.lastSetSelected
 
-    def PlayerLoaded(self, board, team, player, change, cleared):
-        # The slot's card asks for the statistics and, after a load that
-        # cleared, drops the text typed into its combos -- what the board
-        # does around its own loads (AutonaScoreboardWidget._ApplyPlayer).
-        self._Board(board).PlayerLoaded(team, player, change, cleared)
+    def PlayerLoaded(self, board, team, player, cleared):
+        # After a load that cleared, the slot's card drops the text typed
+        # into its combos -- what the board does around its own loads
+        # (AutonaScoreboardWidget._ApplyPlayer).
+        self._Board(board).PlayerLoaded(team, player, cleared)
 
 
 # ── Registrations (filled in by the shell) ───────────────────────────────
@@ -823,17 +825,16 @@ def _player_path(board, team, player):
 def _load_player(host, board, team, player, data, loadFromDB, clear,
                  no_mains=False):
     """Load `data` into the slot (an existing one: _player_path) and tell
-    the host, inside the load's save block -- the statistics write
-    `recent_sets` / `upset_factor` into the same cycle, as the cards' did.
+    the host, inside the load's save block. The load asks for its
+    statistics itself (PlayerService.Announce): `recent_sets` /
+    `upset_factor` are written into the same cycle, as the cards' were.
     Raises what the load raises (the host is told all the same)."""
     service = PlayerService(_player_path(board, team, player))
     with StateManager.SaveBlock():
-        before = service.Identity()
         try:
             service.ApplyData(data, loadFromDB, clear, no_mains)
         finally:
-            host.PlayerLoaded(board, team, player,
-                              service.ChangeSince(before), clear)
+            host.PlayerLoaded(board, team, player, clear)
 
 
 def update_player(scoreboard, team, player, data):
@@ -967,6 +968,112 @@ def load_player_from_tag(scoreboard, tag, team, player, no_mains=False):
                 f"scoreboard {board} team {team} has no player {player}")
         _load_player(host, board, team_, player_, playerData, True, True,
                      no_mains)
+        return "OK"
+
+    return host.Run(run)
+
+
+# ── the statistics of boards 1/2 (ADR-005 S3e-5) ─────────────────────────
+# Core's (StatsService), run where the board operations run: the desktop
+# builds the board first, as asking its stats util for them always did.
+# A statistic is fetched or recalculated now; a fetch answers into the
+# state later (the provider's worker), which is all the routes ever waited
+# for. "OK" whatever there was to fetch -- a fetch that raised included
+# (logged: StatsService.RefreshQuietly), as when the routes only emitted
+# the board's signals. Only boards 1/2 have statistics:
+# another board raises (ValueError: the legacy route's 500, as its missing
+# stats util did), without being built; a board number that is not a
+# number raises too.
+
+def _stats_board(host, scoreboard):
+    board = int(scoreboard)
+    if board not in AutonaActions.SCORE_BOARDS:
+        raise ValueError(f"scoreboard {scoreboard} has no statistics")
+    host.Prepare(board)
+    return StatsService(board)
+
+
+def stats_recent_sets(scoreboard):
+    host = boardHost
+
+    def run():
+        _stats_board(host, scoreboard).RefreshQuietly(
+            StatsService.RECENT_SETS)
+        return "OK"
+
+    return host.Run(run)
+
+
+def stats_upset_factor(scoreboard):
+    host = boardHost
+
+    def run():
+        _stats_board(host, scoreboard).RefreshQuietly(
+            StatsService.UPSET_FACTOR)
+        return "OK"
+
+    return host.Run(run)
+
+
+def _stats_players(player, what):
+    """The teams `player` ("1", "2" or "both") names, or None (logged)."""
+    if str(player) == "1":
+        return (1,)
+    if str(player) == "2":
+        return (2,)
+    if player == "both":
+        return (1, 2)
+    logger.error(f"[{what}] Unable to find player defined. "
+                 "Allowed values are: 1, 2, or both")
+    return None
+
+
+def stats_last_sets(scoreboard, player):
+    # A player that is none of the three is logged and answered "OK",
+    # before the board is looked at, as it always was.
+    teams = _stats_players(player, "Last Sets")
+    if teams is None:
+        return "OK"
+    host = boardHost
+
+    def run():
+        stats = _stats_board(host, scoreboard)
+        for team in teams:
+            stats.RefreshQuietly(StatsService.LAST_SETS, team)
+        return "OK"
+
+    return host.Run(run)
+
+
+def stats_history_sets(scoreboard, player):
+    teams = _stats_players(player, "History Standings")
+    if teams is None:
+        return "OK"
+    host = boardHost
+
+    def run():
+        stats = _stats_board(host, scoreboard)
+        for team in teams:
+            stats.RefreshQuietly(StatsService.HISTORY_SETS, team)
+        return "OK"
+
+    return host.Run(run)
+
+
+def refresh_stats(scoreboard):
+    """Every statistic of a board, as the STATS panel's button asks for
+    them (StatsService.RefreshAll). The fetches are async: this returns
+    once they are started, and the results land in the state a moment
+    later. A board other than 1/2 answers an error string (not built)."""
+    host = boardHost
+
+    def run():
+        board = int(scoreboard)
+        if board not in AutonaActions.SCORE_BOARDS:
+            logger.warning(f"[Stats] scoreboard {scoreboard} has no stats")
+            return f"ERROR: scoreboard {scoreboard} does not support stats"
+        host.Prepare(board)
+        StatsService(board).RefreshAll()
         return "OK"
 
     return host.Run(run)

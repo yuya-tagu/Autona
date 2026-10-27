@@ -195,7 +195,9 @@ pronoun 撤去）。現行挙動に合わせ修復し **62件グリーン化済�
 **現状（解消済・2026-06-24 再確認）**:
 `AutonaStatsUtil.py` の `GetSetUpsetFactor`（174行・177行）は両分岐とも `score.{self.scoreboardNumber}.upset_factor` を Set する形に統一済み。番号なし版（`score.upset_factor`）は存在しない。
 
-**影響範囲**: `AutonaStatsUtil.py`
+> 2026-10-26 更新: 計算と書き込みは core の `src/core/StatsService.py`（`UpdateUpsetFactor`）に移った（headless core Step 4a、ADR-005 S3e-5 で依頼も core へ）。キーは同じ `score.{n}.upset_factor` だけ。`AutonaStatsUtil.py` は取得の輸送だけで、state を書かない。
+
+**影響範囲**: `src/core/StatsService.py`（旧 `AutonaStatsUtil.py`）
 
 ---
 

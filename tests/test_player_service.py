@@ -1467,6 +1467,43 @@ def test_a_failure_to_empty_the_id_alone_is_raised(loadWorld, monkeypatch):
     assert SM.Get(f"{BOARD_PATH}.mergedName") == "SECOND"
 
 
+def _failToTellWhatChanged(monkeypatch):
+    def failing(self, identity):
+        raise ValueError("what changed")
+
+    monkeypatch.setattr(PlayerService, "ChangeSince", failing)
+
+
+def test_a_failure_to_tell_what_changed_does_not_hide_the_loads_own(
+        loadWorld, monkeypatch, warnings):
+    """After a step raised, the load's `finally` works out what changed (to
+    ask for the statistics, Announce): raising there would put its
+    exception in place of the step's own. The step's propagates, the other
+    is logged -- as emptying the id (S3e-5 review)."""
+    service = loadWorld.service()
+    _previousPlayer(service)
+    _failAtTheAvatar(monkeypatch)
+    _failToTellWhatChanged(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="the avatar step"):
+        service.ApplyData({"gamerTag": "SECOND", "avatar": OTHER_AVATAR},
+                          clear=False)
+
+    assert SM.Get(f"{BOARD_PATH}.mergedName") == "SECOND"
+    assert any("statistics were not asked for" in message
+               for message in warnings)
+
+
+def test_a_failure_to_tell_what_changed_alone_is_raised(loadWorld,
+                                                        monkeypatch):
+    service = loadWorld.service()
+    _previousPlayer(service)
+    _failToTellWhatChanged(monkeypatch)
+
+    with pytest.raises(ValueError, match="what changed"):
+        service.ApplyData({"gamerTag": "SECOND"}, clear=False)
+
+
 # ── the database saves' order (S3e-4 review) ─────────────────────────────
 #
 # The Web's edits write the database after their board host let go

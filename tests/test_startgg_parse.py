@@ -1631,3 +1631,73 @@ class TestOneSnapshotPerParse:
         # The game the mains are keyed under and the mains themselves come
         # from the same snapshot.
         assert result["mains"] == {"tgame": [["Mario"], ["Bowser"]]}
+
+
+# ===========================================================================
+# Tests: the head-to-head asks both players' events (ADR-005 S3e-5 review)
+# ===========================================================================
+
+class _PoolWorker:
+    """src.Workers.Worker as GetRecentSets uses it, run by `_Pool` at
+    once; wait_for_all records which workers it was asked to wait for."""
+    waitedFor = []
+
+    def __init__(self, fn, **kwargs):
+        self.fn = fn
+        self.kwargs = kwargs
+        self.result = None
+        self.completed = False
+
+    def run(self):
+        self.result = self.fn(progress_callback=None, cancel_event=None,
+                              **self.kwargs)
+        self.completed = True
+
+    @staticmethod
+    def wait_for_all(workers, timeout=None):
+        _PoolWorker.waitedFor.append(list(workers))
+        return all(worker.completed for worker in workers)
+
+
+class TestRecentSets:
+
+    def test_both_directions_are_waited_for_and_read(self, monkeypatch):
+        """The workers of the first direction (the first player's events)
+        were started but neither waited for nor read: the list was the last
+        loop's, so the sets only that player's events held were missing. A
+        set both directions found keeps the second's entry, as before."""
+        monkeypatch.setattr(_startgg_mod, "Worker", _PoolWorker)
+        monkeypatch.setattr(_PoolWorker, "waitedFor", [])
+        found = {
+            (False, 1): [{"id": "A", "timestamp": 300, "seen": "first"},
+                         {"id": "B", "timestamp": 100, "seen": "first"}],
+            (True, 1): [{"id": "B", "timestamp": 100, "seen": "second"},
+                        {"id": "C", "timestamp": 200, "seen": "second"}],
+        }
+        asked = []
+
+        def worker(id1, id2, page, videogame, inverted, progress_callback,
+                   cancel_event):
+            asked.append((id1, id2, page, inverted))
+            return found.get((inverted, page), [])
+
+        provider = _make_provider()
+        provider.threadpool = types.SimpleNamespace(
+            start=lambda worker: worker.run())
+        provider.GetRecentSetsWorker = worker
+        answers = []
+
+        provider.GetRecentSets(
+            [1, 10], [2, 20], 1386,
+            types.SimpleNamespace(emit=answers.append), 7, None, None)
+
+        assert answers == [{"request_time": 7, "sets": [
+            {"id": "A", "timestamp": 300, "seen": "first"},
+            {"id": "C", "timestamp": 200, "seen": "second"},
+            {"id": "B", "timestamp": 100, "seen": "second"},
+        ]}]
+        assert [len(workers) for workers in _PoolWorker.waitedFor] == [10]
+        assert sorted(asked) == sorted(
+            [(["1", "10"], ["2", "20"], page, False) for page in range(1, 6)]
+            + [(["2", "20"], ["1", "10"], page, True)
+               for page in range(1, 6)])
