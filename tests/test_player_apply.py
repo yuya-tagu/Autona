@@ -43,6 +43,7 @@ import pytest
 from qtpy.QtCore import QCoreApplication, QEvent, Qt
 from qtpy.QtWidgets import QApplication, QLineEdit
 
+from src import AutonaWebOperations as WebOps
 from src.core import StateSchema as schema
 from src.core.BadWordFilter import BadWordFilter
 from src.core.DictHelper import deep_clone
@@ -247,8 +248,10 @@ def _row(combo, enName):
     raise AssertionError(f"no row for {enName!r}")
 
 
-def _run(world, step):
-    """One step of a scenario, through the entry point it names."""
+def _run(world, step, web=False):
+    """One step of a scenario, through the entry point it names. `web`: a
+    tag lookup through the Web's operation instead of the board's (the
+    PLAYERS panel's), its "OK" / "ERROR" read as the board's True / False."""
     op = step["op"]
     board = world.board
     if op == "set":
@@ -281,12 +284,20 @@ def _run(world, step):
         board.charNumber.setValue(step["count"])
         return None
     if op == "tag":
+        if web:
+            answer = WebOps.load_player_from_tag(
+                board.scoreboardNumber, step["tag"], step["team"],
+                step["player"], step.get("no_mains", False))
+            return {"OK": True, "ERROR": False}[answer]
         return board.LoadPlayerFromTag(step["tag"], step["team"],
                                        step["player"],
                                        step.get("no_mains", False))
     if op == "update":
-        return board.ApplyPlayerData(step["team"], step["player"],
-                                     copy.deepcopy(step["data"]))
+        # /api/v1's player PATCH: the board's ApplyPlayerData when this was
+        # recorded, the Web's operation since ADR-005 S3e-4.
+        return WebOps.update_player(board.scoreboardNumber, step["team"],
+                                    step["player"],
+                                    copy.deepcopy(step["data"]))
     if op == "setdata":
         return board.ChangeSetData(copy.deepcopy(step["payload"]))
     if op == "swap":
@@ -303,8 +314,8 @@ def _outcome(call):
 
 @pytest.fixture
 def playerWorld(slotEnv, autonaApp, tmp_path, monkeypatch):
-    """Yields `run(scenario)`, which plays one scenario from a fresh board
-    and returns its record. The player database, the bad-word filter and
+    """Yields `run(scenario, web=False)`, which plays one scenario from a
+    fresh board and returns its record (`web`: see _run). The player database, the bad-word filter and
     the profanity setting are each scenario's own and put back afterwards."""
     slotEnv("tgame")
     db = PlayerDB.instance
@@ -327,7 +338,7 @@ def playerWorld(slotEnv, autonaApp, tmp_path, monkeypatch):
         result.Initialize()
         return result
 
-    def run(scenario):
+    def run(scenario, web=False):
         with db.lock:
             db.database = {tag: copy.deepcopy(DB_PLAYERS[tag])
                            for tag in scenario["db"]}
@@ -344,7 +355,7 @@ def playerWorld(slotEnv, autonaApp, tmp_path, monkeypatch):
                 with Cycles(world.root) as cycles, \
                         _StatsTriggers(world.board) as stats, \
                         Writes(world.root) as writes:
-                    result = _outcome(lambda: _run(world, step))
+                    result = _outcome(lambda: _run(world, step, web))
                     autonaApp.settle()
                 entry = {"op": step["op"], "result": result,
                          "cycles": cycles.count,
@@ -421,6 +432,23 @@ def test_recorded_player_loads_publish_the_recorded_state(
     assert initial == expected["initial"], scenario["name"]
     assert [s["op"] for s in record["steps"]] \
         == [s["op"] for s in expected["steps"]]
+    for index, (actual, wanted) in enumerate(
+            zip(record["steps"], expected["steps"])):
+        _assertStep(scenario["name"], index, actual, wanted)
+
+
+def test_the_webs_tag_lookup_publishes_what_the_boards_does(playerWorld):
+    """The Web's tag lookup (legacy load_player_from_tag / Socket.IO) is
+    AutonaWebOperations' since ADR-005 S3e-4; it was the board's
+    LoadPlayerFromTag, which the recording went through. Same state, same
+    save cycles, same statistics triggers -- the swap step included (the
+    slot is resolved from the state's teamsSwapped)."""
+    if RECORD:
+        pytest.skip("recording")
+    scenario = next(s for s in SCENARIOS if s["name"] == "load from a tag")
+    record = playerWorld(scenario, web=True)
+    expected = GOLDEN[scenario["name"]]
+    assert record["initial"] == expected["initial"]
     for index, (actual, wanted) in enumerate(
             zip(record["steps"], expected["steps"])):
         _assertStep(scenario["name"], index, actual, wanted)

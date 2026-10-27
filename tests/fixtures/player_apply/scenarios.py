@@ -32,7 +32,12 @@ Steps (`op`):
                 on the card's combos (`index` 1-based; rows by en_name)
 - ``chars``  -- the board's character count (charNumber)
 - ``tag``    -- the board's LoadPlayerFromTag(tag, team, player, no_mains)
-- ``update`` -- the board's ApplyPlayerData(team, player, data) (/api/v1)
+                (the PLAYERS panel's; tests/test_player_apply.py replays
+                one scenario through the Web's
+                AutonaWebOperations.load_player_from_tag too)
+- ``update`` -- /api/v1's player PATCH: the board's ApplyPlayerData(team,
+                player, data) when recorded, AutonaWebOperations
+                .update_player since ADR-005 S3e-4
 - ``setdata``-- the board's ChangeSetData(payload) (a set's entrants, the
                 legacy update-team route)
 - ``swap``   -- the board's SwapTeams()
@@ -430,9 +435,13 @@ def _byEffect(step):
 # "rerecorded" note saying why -- "a player over another" 1-4 (a load's
 # clear empties the id and the city the load does not bring) and "load
 # with the database" 2 (a sponsor without a tag is loaded without the
-# database lookup). Every other step is still the ae922c24 recording. Step
-# 1 of the first was listed here as _upsetFactorOnce; its new recording
-# has that change in it.
+# database lookup). S3e-4 recorded "a set's entrants" 3 again the same way
+# (an update without a clear that names another player empties the id and
+# the city it does not bring -- WING's id under SOLO's name -- and the
+# statistics are fetched again for the slot; WING's seed stays). Every other
+# step is still the ae922c24 recording. Step 1 of "a player over another"
+# was listed here as _upsetFactorOnce; its new recording has that change in
+# it.
 CHANGES = {
     ("a set's entrants", 2): _upsetFactorOnce,
     ("the editor", 4): _byEffect,

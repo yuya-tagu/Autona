@@ -721,9 +721,10 @@ def score_set(n):
 
 
 # Player fields the player PATCH accepts: what the Web UI player card sends.
-# The action applies a field only when it is non-empty (SetData with
-# clear=False), so a blank value leaves the current one in place -- same as
-# the legacy update-team route.
+# The operation applies a field only when it is non-empty (an update:
+# PlayerService.ApplyData with clear=False), so a blank value leaves the
+# current one in place -- same as the legacy update-team route. A sponsor or
+# tag that names another player empties the id and the city (ADR-005 S3e-4).
 _PLAYER_STRING_FIELDS = (
     "gamerTag", "prefix", "name", "twitter", "custom_textbox",
     "country_code", "state_code",
@@ -784,14 +785,14 @@ def player_update(n, t, p):
         if "savePlayerToDb" in data:
             data["savePlayerToDb"] = _truthy(data["savePlayerToDb"])
         # The player write of the legacy update-team route without the rest of
-        # its ChangeSetData pass (which blanks match_en). Addresses the state
-        # team directly (no swap flip). Unlike the legacy route, which logs
-        # and answers "OK" whatever happened, the outcome comes back: a slot
-        # beyond the team's roster (checked on the GUI thread against the
-        # live widgets) is a 404, and an exception from the write itself is
-        # turned into 500 INTERNAL by write_op. @gui_thread_sync, but the
-        # subtree is held: the revision is the last published one.
-        if not _actions_ref().update_player(n, t, p, data):
+        # its set payload (which blanks match_en). Addresses the state team
+        # directly (no swap flip). Unlike the legacy route, which logs and
+        # answers "OK" whatever happened, the outcome comes back: a slot the
+        # state team does not have is a 404 (ADR-005 S3e-4: the state's
+        # slots, so headless too), and an exception from the write itself is
+        # turned into 500 INTERNAL by write_op. On the desktop the subtree is
+        # held: the revision is the last published one.
+        if not WebOps.update_player(n, t, p, data):
             raise ApiError(
                 NOT_FOUND, f"team {t} has no player {p}", 404)
     return ok(revision=current_revision())

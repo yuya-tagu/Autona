@@ -298,17 +298,17 @@ def _build_web_app():
             team=parsed.get('team')
         ))
 
-    # Set player data
+    # Set player data (core since ADR-005 S3e-4, so it works headless too)
     @app.post('/scoreboard<scoreboardNumber>-update-team-<team>-<player>')
     def set_team_data(scoreboardNumber, team, player):
         data = request.get_json()
-        return WebServer._board_actions().set_team_data(scoreboardNumber, team, player, data)
+        return WebOps.set_team_data(scoreboardNumber, team, player, data)
 
     @ws_on('update_team')
     def ws_set_team_data(message):
         data = orjson.loads(message)
         WebServer.ws_emit('update_team',
-             WebServer._board_actions().set_team_data(
+             WebOps.set_team_data(
                  data.get("scoreboardNumber", "1"),
                  data.get("team"),
                  data.get("player"),
@@ -614,13 +614,13 @@ def _build_web_app():
         WebOps.update_bracket()
         WebServer.ws_emit('update_bracket', "OK")
 
-    # Load player from tag
+    # Load player from tag (core since ADR-005 S3e-4, so it works headless)
     @app.route('/scoreboard<scoreboardNumber>-load-player-from-tag-<team>-<player>')
     def load_player_from_tag(scoreboardNumber, team, player):
         if request.args.get('tag') is None:
             return "No tag provided"
         no_mains = request.args.get('no-mains') is not None
-        return WebServer._board_actions().load_player_from_tag(scoreboardNumber, html.unescape(request.args.get('tag')), team, player, no_mains)
+        return WebOps.load_player_from_tag(scoreboardNumber, html.unescape(request.args.get('tag')), team, player, no_mains)
 
     @ws_on('load_player_from_tag')
     def ws_load_player_from_tag(message):
@@ -632,7 +632,7 @@ def _build_web_app():
         team = args.get('team')
         player = args.get('player')
         scoreboardNumber = args.get('scoreboardNumber', '1')
-        WebServer.ws_emit('load_player_from_tag', WebServer._board_actions().load_player_from_tag(
+        WebServer.ws_emit('load_player_from_tag', WebOps.load_player_from_tag(
             scoreboardNumber, html.unescape(args.get('tag')), team, player, no_mains))
 
     @app.route('/load-commentator-from-tag-<caster>')

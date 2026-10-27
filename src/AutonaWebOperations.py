@@ -18,7 +18,8 @@ Two kinds live here:
   desktop adds around that call is its board: it builds the board first (an
   unbuilt board is not held, so the write would be published at once and
   then wiped by the seed the build writes), runs on the GUI thread (a player
-  card still publishes a typed edit in two writes there, ADR-005 S2f), lets
+  card still commits a typed name in two writes there; see
+  DesktopBoardHost.Run), lets
   the field being typed in finish first, and answers for the player /
   character counts of boards 1/2, which are still its spinboxes' (S2g).
 
@@ -34,6 +35,11 @@ Two kinds live here:
   desktop builds the board first and runs them on its GUI thread); the
   line-up has no board and is written on the calling thread. The board and
   the Commentary panel render what was written.
+- the player slots' (ADR-005 S3e-4): the Web's player edit (v1's PATCH
+  players and the legacy update-team) and the tag lookup -- core's
+  PlayerService.ApplyData, through the board host like the S2 ones. The
+  desktop's host adds what the board's cards do around a load (the
+  statistics, the typed combo text).
 - the Top 8 import (ADR-005 S3e-8): core's Top8Service, in both shells. It
   runs on the tournament provider's worker; the Top 8 panel, built or not,
   renders what it wrote.
@@ -57,6 +63,7 @@ from .core.GameAssetCatalog import GameAssetCatalog
 from .core.SettingsManager import SettingsManager
 from .core.SetLoadService import SetLoadService
 from .core.PlayerDB import PlayerDB
+from .core.PlayerService import PlayerService
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaQtHelper import gui_thread_sync, in_gui_thread
@@ -95,8 +102,10 @@ class BoardHost:
         # an operation run here runs others here (PATCH set's task calls
         # set_route). Taken only by the web layer's request threads, never
         # with StateManager.lock held, and nothing run under it waits for
-        # the main thread (headless, nothing marshals there): it is always
-        # the outermost lock, so it cannot close a cycle.
+        # the main thread: it is always the outermost lock, so it cannot
+        # close a cycle. What would wait is kept out of it -- the player
+        # database's write, whose change relay runs on the main thread
+        # (`_save_record`, ADR-005 S3e-4 review).
         self._lock = threading.RLock()
 
     def Run(self, op):
@@ -132,6 +141,17 @@ class BoardHost:
         Kept by the board's SetLoadService; no board, no set."""
         return None
 
+    def PlayerLoaded(self, board, team, player, change, cleared):
+        """A player was loaded into slot `player` of state team `team` on
+        board `board` (1/2): `change` is what it did to the slot's id and
+        seed (PlayerService.SlotChange), `cleared` whether the load cleared
+        the slot first. Called inside the load's save block.
+
+        The statistics a change asks for are fetched by a built board (its
+        cards relay the change to its stats util); with no board, nothing
+        fetches them -- the statistics are core's in ADR-005 S3e-5.
+        """
+
 
 class DesktopBoardHost(BoardHost):
     """The desktop's board around an S2 operation. Registered by
@@ -150,6 +170,15 @@ class DesktopBoardHost(BoardHost):
         return self.manager.GetScoreboard(board)
 
     def Run(self, op):
+        # On the GUI thread, not under the headless host's lock (reviewed in
+        # ADR-005 S3e-4, kept): a card still commits a typed sponsor / tag
+        # in two writes on that thread -- the field (_OnTextChanged), then
+        # the display name, images and id (NameChanged) -- and a swap, a
+        # clear or a load landing between the two from another thread
+        # leaves the display name on the wrong slot. Queued on the GUI
+        # thread, an operation runs between two events, never inside one.
+        # The board's own part of an operation (building it, the field
+        # being typed in, the cards after a load) is GUI work besides.
         return gui_thread_sync(op)()
 
     def Prepare(self, board):
@@ -176,6 +205,12 @@ class DesktopBoardHost(BoardHost):
     def LastSet(self, board):
         # The crew board has no SetLoadService, and raises as it did.
         return self._Board(board).setLoad.lastSetSelected
+
+    def PlayerLoaded(self, board, team, player, change, cleared):
+        # The slot's card asks for the statistics and, after a load that
+        # cleared, drops the text typed into its combos -- what the board
+        # does around its own loads (AutonaScoreboardWidget._ApplyPlayer).
+        self._Board(board).PlayerLoaded(team, player, change, cleared)
 
 
 # ── Registrations (filled in by the shell) ───────────────────────────────
@@ -760,6 +795,178 @@ def crew_set_active(scoreboard, team, member):
         if _is_crew(scoreboard):
             CrewBattleService(CREW_BOARD).SelectActiveMember(
                 int(team), int(member))
+        return "OK"
+
+    return host.Run(run)
+
+
+# ── the player slots of boards 1/2 (ADR-005 S3e-4) ───────────────────────
+# Core's (PlayerService.ApplyData, S3e-3), run where the board operations
+# run: on the desktop the board is built first and the load made on the GUI
+# thread, which is also where the board's cards are (the host's
+# PlayerLoaded). A slot is one the *state* has -- each card of a built
+# board publishes its own, and the headless shell seeds them (S3d) -- so the
+# range is checked the same way in both shells. The board's cards follow
+# the load from the held cycle, like any write they did not make (S2a).
+
+def _player_path(board, team, player):
+    """The path of player `player` of state team `team` on board `board`
+    (ints), or None when the state has no such slot."""
+    if team not in (1, 2) or player < 1:
+        return None
+    path = f"score.{board}.team.{team}.player.{player}"
+    if not isinstance(StateManager.Get(path), dict):
+        return None
+    return path
+
+
+def _load_player(host, board, team, player, data, loadFromDB, clear,
+                 no_mains=False):
+    """Load `data` into the slot (an existing one: _player_path) and tell
+    the host, inside the load's save block -- the statistics write
+    `recent_sets` / `upset_factor` into the same cycle, as the cards' did.
+    Raises what the load raises (the host is told all the same)."""
+    service = PlayerService(_player_path(board, team, player))
+    with StateManager.SaveBlock():
+        before = service.Identity()
+        try:
+            service.ApplyData(data, loadFromDB, clear, no_mains)
+        finally:
+            host.PlayerLoaded(board, team, player,
+                              service.ChangeSince(before), clear)
+
+
+def update_player(scoreboard, team, player, data):
+    """/api/v1's PATCH .../teams/{t}/players/{p}: the player write of the
+    legacy update-team route without the set payload around it (which
+    blanks match_en). `team` is the state team (no swap flip).
+
+    True when applied; False when the state team has no such slot (the
+    route's 404) -- checked after the board is built, since building it is
+    what writes its slots. An exception from the write propagates (500).
+    One save cycle, `savePlayerToDb`'s state write included; its database
+    write follows, outside the host (_save_record).
+    """
+    host = boardHost
+
+    def run():
+        board = _board(scoreboard)
+        team_, player_ = int(team), int(player)
+        if board not in AutonaActions.SCORE_BOARDS:
+            return False, None
+        host.Prepare(scoreboard)
+        path = _player_path(board, team_, player_)
+        if path is None:
+            return False, None
+        record = None
+        with StateManager.SaveBlock():
+            _load_player(host, board, team_, player_, data, True, False)
+            if data.get("savePlayerToDb", False):
+                record = PlayerService(path).PrepareSaveToDB()
+        return True, record
+
+    applied, record = host.Run(run)
+    _save_record(record)
+    return applied
+
+
+def _save_record(prepared):
+    """The player database half of `savePlayerToDb` (PlayerService
+    .SaveRecordToDB) for the record a load prepared (None: none). Out of
+    the host on purpose: the database's change relay waits for the main
+    thread, which the headless host's lock is never held across (ADR-005
+    S3e-4 review). The record is what the slot held inside the host, and
+    it is numbered there: a save that arrives after a newer one of the same
+    player is dropped."""
+    if prepared is not None:
+        PlayerService.SaveRecordToDB(prepared)
+
+
+def set_team_data(scoreboard, team, player, data):
+    """The legacy update-team route and the Socket.IO update_team event: a
+    set payload carrying one player, `{"team", "player", "data"}`, applied
+    as the board's ChangeSetData applied it.
+
+    Its set half on boards 1/2 is the match information, which blanks
+    match_en (the payload never carries round_name_en) -- kept, as visible
+    from outside; on the crew board, its own reading of a payload, which
+    finds nothing to write here (`_apply_set_fields`). The player half
+    addresses the state team (no swap flip), and only when the payload
+    names both a team and a player. Without the clear (an update), and
+    with `savePlayerToDb` (its database write after the host, as
+    update_player's). A slot the state does not have, or a load or a save
+    that raises, is logged and ignored: "OK" whatever happened, as the
+    route always answered. One save cycle.
+    """
+    host = boardHost
+    payload = {"team": team, "player": player, "data": data}
+
+    def fail(board, e):
+        logger.error(f"update-team: scoreboard {board} team {team} "
+                     f"player {player} not written: {e}")
+
+    def run():
+        board = _board(scoreboard)
+        record = None
+        # Built before the save block opens: the build is what holds the
+        # board for 反映 (S2c 判断 7).
+        host.Prepare(scoreboard)
+        with StateManager.SaveBlock():
+            _apply_set_fields(host, scoreboard, payload)
+            if board in AutonaActions.SCORE_BOARDS and team and player:
+                try:
+                    team_, player_ = int(team), int(player)
+                    path = _player_path(board, team_, player_)
+                    if path is None:
+                        raise IndexError(
+                            f"team {team} has no player {player}")
+                    _load_player(host, board, team_, player_, data, True,
+                                 False)
+                    if data.get("savePlayerToDb", False):
+                        record = PlayerService(path).PrepareSaveToDB()
+                except Exception as e:
+                    fail(board, e)
+        return board, record
+
+    board, record = host.Run(run)
+    try:
+        _save_record(record)
+    except Exception as e:
+        fail(board, e)
+    return "OK"
+
+
+def load_player_from_tag(scoreboard, tag, team, player, no_mains=False):
+    """Load the local player DB's `tag` into a slot, clearing it first:
+    "OK", or "ERROR" when the DB has no such tag.
+
+    `team` is the set's team: after a swap team 1 is shown on the right, so
+    it lands on state team 2 (SetLoadService.DisplayTeam, from the state's
+    `teamsSwapped`). As the route always did, numbers that are not numbers
+    raise before the lookup, a slot the board does not have raises after a
+    tag that was found (the legacy route's 500), and only boards 1/2 have
+    slots -- the crew board raised too (it has no player cards).
+    """
+    host = boardHost
+
+    def run():
+        board = _board(scoreboard)
+        if board not in AutonaActions.SCORE_BOARDS:
+            raise ValueError(f"scoreboard {scoreboard} has no player slots")
+        host.Prepare(scoreboard)
+        team_, player_ = int(team), int(player)
+        playerData = PlayerDB.instance.GetPlayerFromTag(str(tag))
+        if not playerData:
+            return "ERROR"
+        path = None
+        if team_ in (1, 2):
+            team_ = SetLoadService(board).DisplayTeam(team_)
+            path = _player_path(board, team_, player_)
+        if path is None:
+            raise IndexError(
+                f"scoreboard {board} team {team} has no player {player}")
+        _load_player(host, board, team_, player_, playerData, True, True,
+                     no_mains)
         return "OK"
 
     return host.Run(run)

@@ -107,7 +107,7 @@
 | `CONFLICT` | 409 | 重い操作が実行中（多重起動ガード・§2.8） |
 | `NOT_READY` | 409 | 前提未充足（大会/試合未ロードで provider 不在 等・§3） |
 | `UPSTREAM_TIMEOUT` | 504 | Start.gg 等の外部依存がタイムアウト（agent-pitfalls #11） |
-| `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、ボード / パネルのウィジェットが要る操作（選手の編集・`:load-set`・`:pull-stream`・`stats:refresh`・`PATCH set` の `players` / `characters` 等）。message は `not available in headless`。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。Top 8 の取り込み（`bracket:refresh`・legacy `/update-bracket`・Socket.IO `update_bracket`）も ADR-005 S3e-8 から core の操作（`Top8Service.RefreshFromProvider`）で、どちらの起動形態でも動く。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
+| `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、ボード / パネルのウィジェットが要る操作（`:load-set`・`:pull-stream`・`stats:refresh`・`PATCH set` の `players` / `characters` 等）。message は `not available in headless`。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。Top 8 の取り込み（`bracket:refresh`・legacy `/update-bracket`・Socket.IO `update_bracket`）も ADR-005 S3e-8 から core の操作（`Top8Service.RefreshFromProvider`）で、どちらの起動形態でも動く。選手の編集（`PATCH .../players/{p}`・legacy `update-team`・Socket.IO `update_team`）とタグからの選手の読込（legacy `load-player-from-tag`・Socket.IO `load_player_from_tag`）も ADR-005 S3e-4 から core の操作（`PlayerService.ApplyData`）で、どちらの起動形態でも、state にあるスロットに対して動く。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
 | `INTERNAL` | 500 | 想定外の内部例外 |
 
 ### 2.7 操作ログ（D7・A-1）
@@ -358,13 +358,25 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
   - 文字列キーは `null` 可。**空・`null` の値は「変更なし」**（Action が空値を適用しない。旧ルートと同じ）。
   - `mains` はゲーム codename → `[en_name, skin, ""]` 配列のオブジェクト。`savePlayerToDb: true` で選手 DB にも保存。
   - 空ボディ `{}` は何もしない（200）。
-- 委譲: `update_player` → `AutonaScoreboardWidget.ApplyPlayerData`（旧 `set_team_data` が `ChangeSetData` 経由で行う
-  選手書き込みの部分だけ）= #11。`t` は**状態側のチーム**。旧ルートと違い `match_en` を空にしない
-  （`ChangeSetData` の `ApplyMatchInfo` を通らないため）。それ以外の結果は旧ルートと同じ。
-- `p` が選手数を超える場合、Action がログに残して無視する（旧ルートと同じ。エラーは返らない）。
-- `@gui_thread_sync`（同期）。held 対象のため `revision` は最後に公開されたもの。
+- 委譲: `AutonaWebOperations.update_player` → `PlayerService.ApplyData(data, loadFromDB=True, clear=False)`
+  （ADR-005 S3e-4。旧ルートの選手書き込みの部分だけ。S3e-3 までは `AutonaScoreboardWidget.ApplyPlayerData`）= #11。
+  `t` は**状態側のチーム**。旧ルートと違い `match_en` を空にしない（セットのペイロードの `ApplyMatchInfo` を通らないため）。
+  それ以外の結果は旧ルートと同じ。デスクトップ・ヘッドレスのどちらでも動く（同じ state になる）。
+- **別の選手の名前にした部分更新は id と city を空にする**（ADR-005 S3e-4）: 書き込み後のスポンサー + タグの組が書き込み前と
+  違い、body が `id` / `city` を持ってこない（DB の記録も持っていない）とき。同じスポンサー + タグなら残る。
+  デスクトップのカードで名前を手入力したときと同じ規則（Web UI は id を送らないので、名前を書き換えると前の選手の
+  id・city と統計が残っていた）。id が変わるので、デスクトップでは統計が取り直される（ヘッドレスは ADR-005 S3e-5 まで
+  取り直さない）。`online_avatar` と `seed` は残る（デスクトップの手入力と同じ。タグの typo の修正やスポンサーの追記でも
+  別の選手と判定されるため。LIVE-BUG-1）。
+- `savePlayerToDb` の選手 DB への書き込みは、state の書き込み（同じ保存サイクル）の後、応答の前に行う
+  （ボードホストのロックの外。保存する中身は書き込み直後のスロット）。同じ選手への保存が前後して届いたときは、
+  後に読んだ記録が残る（先に読んだ方は捨てる）。
+- `p` が、そのチームの state にあるスロット（ボードのカードが出しているもの）を超える場合は 404 `NOT_FOUND`
+  （何も書かない。ヘッドレスも同じ）。旧ルートはログに残して `"OK"` を返す（今も同じ）。
+- デスクトップは未構築のボードを先に構築し（held になる）、GUI スレッドで同期実行する。held 対象のため `revision` は
+  最後に公開されたもの。ヘッドレスはすぐ公開される。
 - 操作ログはキー名のみ（§2.7）。
-- エラー: `INVALID_ARGUMENT`（n が 1/2 以外・t が 1/2 以外・p < 1・未知キー・型不正）
+- エラー: `INVALID_ARGUMENT`（n が 1/2 以外・t が 1/2 以外・p < 1・未知キー・型不正）、`NOT_FOUND`（上記）
 
 ### 6.9 表示トグル `PATCH /api/v1/display-options`（2026-10-21 追加）
 - 旧 `POST /display-option` の v1 版（Web UI の目アイコンメニュー）。ボード非依存のグローバル設定。

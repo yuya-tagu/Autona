@@ -68,11 +68,13 @@ OBS のオーバーレイと `/web`（ブラウザ版）から操作する。**�
   実況の更新とタグからの実況者の読込（`update-commentary-<N>`・`load-commentator-from-tag-<N>`）・
   クルーボード（board 3）の操作（ストック・出場中のメンバー・人数・Swap・リセット / クリア。legacy / Socket.IO。
   v1 のボード 3 への書き込みは起動形態によらず 400 `INVALID_ARGUMENT`）・
-  Top 8 の Start.gg からの取り込み（`update-bracket`・v1 `bracket:refresh`。大会の読込が先に要る）。
+  Top 8 の Start.gg からの取り込み（`update-bracket`・v1 `bracket:refresh`。大会の読込が先に要る）・
+  ボード 1 / 2 の選手の編集（`PATCH .../players/...`・`update-team`）とタグからの選手の読込（`load-player-from-tag`）。
+  選手の編集・読込は起動時にある選手欄（各チーム 1 人）に対して動き、それを超える選手番号は v1 が 404、legacy の
+  `update-team` は何もせず `OK`。統計（直近の対戦・戦績・アップセット係数）は取り直されない（統計は 503 のまま）。
   オーバーレイ・`/web`・`out/` の出力・Socket.IO の配信は今までどおり
 - **ボードやパネルの画面が要る操作は 503 `UNAVAILABLE`（`not available in headless`）を返す**:
-  選手の編集（`PATCH .../players/...`・`update-team`）・legacy の `POST /score`・セット読込 / 次のセット・統計・
-  サムネイル・タグからの選手の読込（`load-player-from-tag`）・
+  legacy の `POST /score`・セット読込 / 次のセット・統計・サムネイル・
   ボード 1 / 2 の選手数 / キャラ数の変更
 - 停止: **Ctrl+C / Ctrl+Break / コンソールの閉じるボタン**。`out/` と `user_data/state.json` を書き終えてから終了する。
   タスクマネージャーでの強制終了は書き出しを待たない（直前 1〜5 秒の変更が `state.json` に残らないことがある）

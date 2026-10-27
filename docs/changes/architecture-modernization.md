@@ -2197,11 +2197,13 @@ Start.gg からの Top 8 の取り込みを、Top 8 パネルから core の `To
   - アバター・スポンサーロゴのディスクの確認が、`StateManager.lock` の中で走るようになった（旧実装は GUI スレッドで、state のロックの外だった）。都市→地域表の初回の読込は `Load()` へ移し、地域の照合は旗を確かめない `StateCodes()` にした（判断 11）。残るのは選手 1 人あたりアバター・ロゴの数回で、受け入れた
   - seed のスピンボックスの上限（100000）での丸めが無くなった。state にはそのまま入り、カードの表示は 100000 で止まる。実データでは起きない値
   - `update_player` / `set_team_data` / `load_player_from_tag` は、従来どおり `WebServerActions` 経由で GUI スレッドに渡る（S3e-4 の範囲）。`DesktopBoardHost` が GUI スレッドで実行する理由（手入力の確定がフィールド → 合成名の 2 書き込みに分かれる）も残っている
+    - → S3e-4 で `AutonaWebOperations` へ移した。GUI スレッドでの実行は見直して維持した（S3e-4 判断 2）
 - **既存の不具合（報告のみ・未修正）**
   - **クリアしない読込で選手名を別の選手に書き換えても、id と city が残る（配信事故の可能性）**
     - 起きる場面: Web UI の選手欄の確定。Web UI は確定のたびに、id を含まない選手データを `PATCH .../players/{p}`（`update_player`）で送り、core はクリアせずに上書きする（部分更新）
     - デスクトップのカードは、名前の手入力で id を空にする（`NameChanged` → `ExportPlayerId(None)`）ので、2 つの入口で挙動が違う。旧実装も同じ
     - 直すなら、部分更新でスポンサー・タグが変わったときに id・city を空にする（Web の入口を移す S3e-4 で扱うのが自然）
+    - → S3e-4 で直した（オーナーの規則。S3e-4 判断 1）
   - 選手のクリア（カードのクリアボタン・ボードの選手のクリア・全リセット）は city を消さない。名前の無いスロットに前の選手の city が残る（旧実装も同じ。オーバーレイは city を読まないので、表示は変わらない。次の読込が city を持ってこなければ、今は空にする。配信事故にはならない）
   - `general.disable_overwrite` のときの `UpdateSetData` には 3 つの問題がある
     - DB との照合を、タグだけ（スポンサー抜き）で、各 entrant の 1 人目にしか行わない
@@ -2234,3 +2236,139 @@ Start.gg からの Top 8 の取り込みを、Top 8 パネルから core の `To
     - Web UI の選手編集（名前・国・キャラ、`savePlayerToDb` 付き）→ スコアボードと DB に入る
     - legacy / Socket.IO の `load_player_from_tag` → DB の選手が入る
   - 悪語フィルタ ON: 不適切語を含む選手を読み込む → 表示は伏せ字になる。別の選手を保存した後も、`local_players.json` のその選手の元の名前が変わっていない
+
+#### S3e-4 選手系 Web 操作の移設（2026-10-26・PR #237）
+
+Web の選手編集（v1 `PATCH .../players/{p}`・legacy `update-team`・Socket.IO `update_team`）とタグからの選手の読込（legacy `load-player-from-tag`・Socket.IO `load_player_from_tag`）を、`WebServerActions` から `AutonaWebOperations` + `boardHost` へ移した。どちらのシェルでも core の `PlayerService.ApplyData` を呼び、ヘッドレスでも state にある選手欄に対して動く（それまでは 503）。スロットの範囲とスワップは state で判断する。デスクトップの応答の本文・ack・v1 の形・`program_state.json` のキー順は変えていない。あわせて、S3e-3 で報告した配信事故の不具合（Web UI で選手名を書き換えても、前の選手の id・city・統計が残る）を、オーナーの規則で直した（判断 1）。`DesktopBoardHost.Run` は GUI スレッドでの実行を維持した（判断 2）。レビューで、ヘッドレスの `savePlayerToDb` がボードホストのロックを持ったままメインスレッドを待っていたのを直し、ロックの外へ出した DB への保存に順番の番号を付けた（判断 6）。途中の例外で前の選手の id が残る穴も塞いだ（判断 7）。別の選手で online_avatar と seed も空にする案は、2 回目のレビューで取り消した（判断 1。オーナー判断待ちに記録）。
+
+- **実装**
+  - `src/AutonaWebOperations.py`
+    - `update_player(scoreboard, team, player, data)`: v1 の選手編集。ボード 1 / 2 でなければ False。`Prepare`（デスクトップは未構築のボードを構築する。S2c 判断 7）の後に、state のチームにそのスロットがあるかを確かめる（無ければ False = v1 の 404）。`ApplyData(data, loadFromDB=True, clear=False)` と `savePlayerToDb` の state 側（`PrepareSaveToDB()`: 記録を組み、キャラを mains として出し直す）を 1 保存サイクルで行い、DB への書き込み（`SaveRecordToDB`）はボードホストを抜けてから行う（`_save_record`。判断 6）。True を返す。`team` は state のチーム（スワップで反転しない。従来どおり）
+    - `set_team_data(scoreboard, team, player, data)`: legacy の `update-team` と Socket.IO の `update_team`。`{"team", "player", "data"}` のセットのペイロードを、ボードの `ChangeSetData` と同じ順で当てる。セット側は `_apply_set_fields`（ボード 1 / 2 は match 情報で、`match_en` を空にする。クルーボードは `CrewBattleService.ApplySetData`。どちらも従来どおり）。選手側は `update_player` と同じ読込で（DB への書き込みもボードホストの外）、スロットが無い・読込や保存が例外を出したときはログに残して無視する。応答は常に `"OK"`
+    - `load_player_from_tag(scoreboard, tag, team, player, no_mains)`: 選手 DB からタグで引いて、クリアして読む。`team` はセットのチームで、`SetLoadService.DisplayTeam` が state の `teamsSwapped` から state のチームに直す（従来どおり）。順序も従来どおり: 数字にならない番号は例外、DB に無いタグは `"ERROR"`、見つかったタグでスロットが無ければ例外（legacy の 500）
+    - `_player_path` / `_load_player`: スロットの判定（team が 1 / 2、player が 1 以上、`score.{n}.team.{t}.player.{p}` が state にある）と、読込 + ボードホストへの通知（読込の SaveBlock の中で `host.PlayerLoaded(board, team, player, change, cleared)`。読込が例外を出しても通知する）
+    - ボードホスト: `BoardHost.PlayerLoaded` は何もしない（ヘッドレスは統計を取り直さない。S3e-5）。`DesktopBoardHost.PlayerLoaded` はボードの `PlayerLoaded` を呼ぶ
+  - `src/AutonaScoreboardWidget.py`
+    - `ApplyPlayerData` を削除した（v1 の入口だった）
+    - `PlayerLoaded(team, player, change, cleared)`: Web の読込の後に、そのスロットのカードで `_CardLoaded` を行う。`_CardLoaded` は `_ApplyPlayer` と共有する（`AnnounceChange` で統計を依頼し、クリアした読込なら打ちかけのコンボの文字を捨てる。S3e-3 判断 9）
+    - `LoadPlayerFromTag`（PLAYERS パネルの「P1 / P2 にセット」）と `_ApplySinglePlayerData` / `_WritePlayerSlot`（`post_score` の 1 人分のペイロード）は残した（下の「残置」）
+  - `src/AutonaWebServerActions.py`: 3 メソッドを削除した（残りは公開 10 本: `post_score`・`open_sets`・`pull_stream_set`・`stats_*` 4 本・`refresh_stats`・`get_thumbnail`・`load_set`）
+  - `src/AutonaWebServer.py`: legacy の 2 ルートと Socket.IO の 2 イベントを `AutonaWebOperations` に向けた（`_board_actions()` を通らないので、ヘッドレスでも 503 にならない）。`"No tag provided"` の扱いは変えていない
+  - `src/AutonaApiV1.py`: v1 の選手編集を `AutonaWebOperations.update_player` に向けた（`_actions_ref()` を通らない）。False を 404 `NOT_FOUND` にするのは従来どおり
+  - `src/core/PlayerService.py`
+    - 別の選手の判定 `_NamesAnotherPlayer` と、id・city を空にする `_DropIdentity`（`_Clear` と共有）を足した（判断 1）。空にしないのは、読込が実際に書いた方（`_ApplyFields` が `wrote` に集める。判断 7）。空にする処理が出した例外は、読込自身の例外を隠さない（判断 7）
+    - `SavePlayerToDB` を、state 側の `PrepareSaveToDB()`（番号付きの記録 `PreparedSave(record, sequence)` を返す）と DB 側の `SaveRecordToDB(prepared)` に分けた。カードの保存ボタン・`post_score` の 1 人分は従来どおり `SavePlayerToDB()`（2 つを続けて呼ぶ。キャラの出し直しが DB の書き込みより先になった。判断 6）
+  - コメントの追随: `src/AutonaCrewBattleWidget.py`（`set_team_data` はボードの `ChangeSetData` を通らなくなった）
+- **判断と理由**
+  1. **クリアしない読込で、スポンサー + タグの組が変わったら別の選手として扱い、id と city を空にする**（オーナーの規則の実装）
+     - 規則: 部分更新（`clear=False`）で、書き込み後のスポンサー + タグの組が書き込み前と違い、読込が id / city を書かない（body にも、DB の記録にも無い。判断 7）とき、それを空にする。同じ組なら残す
+     - 顔写真（online_avatar）と seed は残す（デスクトップのカードの手入力 `NameChanged` と同じ）。1 回目のレビューで空にする方へ広げたが、2 回目のレビューで取り消した
+       - Web UI は確定のたびに名前を含むカードの全欄を送るので、タグの typo の修正やスポンサーの追記も別の選手になる。そこで顔写真と seed まで消すと、LIVE-BUG-1（タグを直すと顔写真が消える。`tests/test_player_widgets.py` の `test_editing_the_tag_keeps_the_online_avatar` / `test_editing_the_sponsor_keeps_the_online_avatar`）を Web 側に戻すことになる
+       - 操作した端末（デスクトップのカード / Web UI）で結果が変わらないように、デスクトップの手入力に揃えた
+       - 代わりに、本当に別の選手を名前だけで入れたときは、前の選手の顔写真と seed がその名前の横に残る。両方の端末で揃えて広げるかはオーナー判断待ち（下の「オーナー判断待ち」）
+     - id・city は「持っているときだけ」書く（`SetPlayerId` / `SetCity` のガード）。キーを消さないので、キー順は変わらない
+     - 判定を「gamerTag だけ」ではなく「スポンサー + タグの組」にした理由
+       - 選手 DB のキーが「スポンサー + タグ」（`PlayerDB.PlayerTag`）で、同じタグでもスポンサーが違えば別の記録になる
+       - デスクトップのカードは、スポンサー・タグのどちらを手入力で変えても id を空にする（`NameChanged` → `ExportPlayerId(None)`）。同じ規則にすると、2 つの入口で挙動が揃う
+       - 代償: Web UI でスポンサーだけを付け替えても統計が取り直される。デスクトップの手入力と同じなので受け入れた
+     - 比べるのは「書かれた値」: 悪語フィルタ後の文字で、空の欄は運ばない（空は「変更なし」なので、組は変わらない）。完全一致で比べるので、タグの綴りの修正（大文字・小文字を含む）も別の選手になる（id が消え、統計が取り直される）。これもデスクトップの手入力と同じ
+     - 読込が持ってくる id・city は空にせず、そのまま上書きする（None を挟んで 2 回書かない。S3e-3 判断 10 と同じ形）
+     - `ApplyData` の `finally`（合成名を出す直前）で判定する。途中の手順が例外を出しても、名前が変わっていれば適用される（判断 7）
+     - 残る差: デスクトップの手入力は city を残す（id だけを空にする）。Web の部分更新は city も空にする（オーナーの規則）
+     - 置き場所は `PlayerService.ApplyData`（クリアしない読込すべて）。v1 の選手編集・legacy の `update-team`・Socket.IO の `update_team` に加え、`post_score` の 1 人分のペイロード（`_WritePlayerSlot`）にも同じ規則が効く。キャラだけの読込（セットの `has_selection_data`）は名前を運ばないので対象にならない
+     - Web UI は確定のたびに、カードの全欄（スポンサー・タグを含む）を id なしで送る。名前以外の欄（SNS・国・キャラ）の編集では組が変わらないので、id は残る
+  2. **`DesktopBoardHost.Run` は GUI スレッドでの実行を維持した**（ヘッドレスのロックによる直列化には揃えない）
+     - S3e-3 の後も、カードの手入力の確定は GUI スレッド上の 2 書き込み（`_OnTextChanged` が欄を state に書く → `NameChanged` が合成名・画像を出して id を空にする。`AutonaScoreboardPlayerWidget.py:331-334`）のまま。この間に別スレッドの読込・スワップ・クリアが割り込むと、合成名が別のスロットや別の選手の名前で残り、Web が書いた id を `NameChanged` が消す。GUI スレッドに並べれば、操作はイベントとイベントの間で走り、確定の途中には入らない
+     - Web の読込の後のカードの仕事（統計のシグナル。直接接続で、読込の SaveBlock の中で `recent_sets` などを書く。打ちかけのコンボの文字を捨てる）と、未構築ボードの構築も GUI スレッドの仕事
+     - 揃えるには、手入力の確定を core の 1 操作にまとめる必要がある。カードの入力系を作り直す規模で、S3e-6（人数・キャラ数）や S4（React 化）と重なるので、ここではやらない
+     - コスト: Web の選手操作は GUI スレッドの空きを待つ（`update_player` と `load_player_from_tag` は従来どおり。`set_team_data` は下の判断 4）
+  3. **スロットの範囲とスワップは state で判断する**
+     - v1 の 404 は、従来はボードのカードの数で決めていた。今は `score.{n}.team.{t}.player.{p}` が state にあるかで決める。デスクトップでは、ボードのカードがちょうどそのスロットを出している（構築時の `SeedEmpty`・人数の変更の `TrimTeamRoster`）ので、答えは同じ。ボードの構築がスロットを書くので、判定は `Prepare` の後
+     - タグからの読込のスワップは `SetLoadService.DisplayTeam`（state の `teamsSwapped`）。編集（v1・legacy）は従来どおり state のチームを指す
+     - team が 1 / 2 以外・player が 1 未満は、スロットが無いものとして扱う（下の「外から見える変化」）
+  4. **legacy の `update-team` は、書き込みが終わってから `"OK"` を返す**
+     - 従来はボードの `ChangeSetData` シグナルを emit して、書き込みの前に `"OK"` を返していた（Flask のスレッドから queued 接続で GUI スレッドへ）。今は `boardHost.Run` で同期に書く（ヘッドレスはロックの中）
+     - 本文は同じ。直後の読み取り（`/scoreboard1-get` など）が、書き込みの前の state を見ることは無くなった
+  5. **統計のトリガーは、デスクトップでは今までどおり出す。ヘッドレスでは出さない**
+     - デスクトップ: `ApplyData` の戻り値（`SlotChange`）を、ボードホストの `PlayerLoaded` → ボードの `PlayerLoaded` → カードの `AnnounceChange` に渡す。ボード自身の読込（`_ApplyPlayer`）と同じ経路・同じ回数（読込の SaveBlock の中）
+     - ヘッドレス: ボードも統計の util も無いので、取り直さない（統計の取得は S3e-5 で core へ移す）。それまでは、ヘッドレスで選手を入れ替えても、直近の対戦・戦績・アップセット係数は前の値のまま（統計のルートは 503）
+  6. **`savePlayerToDb` の DB への書き込みは、ボードホストの外で行う**（レビューの指摘）
+     - 問題: ヘッドレスの `BoardHost.Run` はロック（RLock）を持って操作を走らせる。その中の `SavePlayerToDB` → `PlayerDB.AddPlayers` → `changed` の通知 → `AutonaPlayerDB.SetupModel`（`@gui_thread_sync`）が、メインスレッドで走るのを待っていた。この受け手は `bootstrap_core()` が両シェルで繋ぐ（`src/bootstrap.py`。ヘッドレスは `db_updated` を出すだけだが、`init_gui_executor` でメインスレッドへ渡す）。「ロックの中でメインスレッドを待たない」という不変条件に反する。メインスレッドが詰まる・止まる（終了処理中など）と、ロックを持ったまま待ち続けて、他の要求のボード操作もすべて止まる。メインスレッド側の処理がボード操作を呼べばデッドロックになる
+     - 直し方: `SavePlayerToDB` を state 側（`PrepareSaveToDB`: スロットから記録を組み、キャラを mains として出し直す）と DB 側（`SaveRecordToDB`）に分けた。state 側は読込と同じ保存サイクル・同じロックの中、DB 側は `host.Run` が返ってから（`_save_record`）。デスクトップも同じ順（GUI スレッドで state 側、呼び出し元のスレッドで DB 側。`SetupModel` は GUI スレッドへ渡して待つ。ロックは持っていない）
+     - 保存する中身は変わらない: 記録はロックの中で、読込の直後のスロットから組んだもの（従来と同じ時点）。ロックの外で変わるのは DB に書く時刻だけで、他の試合のキャラを残すマージ（`AddPlayers` の overwrite）は従来どおり DB のロックの中
+     - 代償: DB の書き込みは state の保存サイクルの後になる（同じ要求の中で、応答の前）。カードの保存ボタンも、キャラの出し直し → DB の順になった。どちらも state と `local_players.json` の中身は同じ
+     - **保存の順序（2 回目のレビュー）**: ロックの外へ出したので、同じ選手への保存が続けて来ると、先に読んだ記録が後から DB を上書きしうる（先の要求のスレッドが後に回ったとき）。記録を組むとき（`PrepareSaveToDB`。ホストの中で直列、`StateManager.lock` の中）に単調増加の番号を振り、`SaveRecordToDB` は専用のロック（`PlayerService._saveLock`）の中で、同じ DB のキー（`PlayerDB.PlayerTag`）にもっと新しい番号の記録がもう保存されていれば捨てる（False。ログに残す）。判定とメモリ上のマージ（`AddPlayers(..., deferRefresh=True)`）を同じロックの中で行い、ファイルの書き込み（`SaveDB`）と変更通知（`NotifyChanged`）はロックの外（通知の受け手がメインスレッドを待つので、このロックの中でも待たない。`AddPlayers` が自分で行っていた順と同じ）。ファイルは `SaveDB` の世代番号で最新のスナップショットに揃う
+  7. **id・city を残すかは、読込が「実際に書いたか」で決める**（レビューの指摘）
+     - 従来は読込の前に「持ってくるか」（`brings`: body か DB の記録にあるか）で決めていた。名前を書いた後、id を書く前の手順（avatar の公開など）が例外を出すと、id は「持ってくる」扱いで空にされず、前の選手の id が新しい名前の下に残った。クリアする読込も同じで、クリアは持ってくる id を読込に任せて残すので、書かれないまま残った
+     - 今は `_ApplyFields` が書いた id・city を `wrote` に集め、`finally` で `wrote` に無いものを空にする（クリアする読込でも行う。正常に終われば、クリアが残したものはすべて書かれているので何も書かない）。クリアが前もって空にしない欄（持ってくる id・city）は従来どおり `brings` で決める（None を挟まない）
+     - 空にする処理が `finally` の中で例外を出しても、読込自身の例外を隠さない（2 回目のレビュー）。読込が例外を出していればそちらを投げ、空にする方の例外はログに残す。読込が成功していれば空にする方の例外を投げる。どちらでも合成名と画像は出し直す
+- **外から見える変化**
+  - **Web UI（v1 の選手編集）・legacy の `update-team`・Socket.IO の `update_team` で選手のスポンサーかタグを別のものに書き換えると、前の選手の id と city が空になり、デスクトップでは統計（直近の対戦・戦績）が取り直される**（判断 1。それまでは前の選手の id・city・統計が残り、別の選手の戦績が配信に出ることがあった）。同じスポンサー + タグのままなら残る。`post_score` の 1 人分のペイロードも同じ
+    - state の値の変化: 該当スロットの `id` → null、`city` → null（キーは消さない。キー順は変わらない）。続けてデスクトップでは統計のキー（`recent_sets` など）が書き直される
+    - 顔写真（`online_avatar`）と `seed` は残る（デスクトップのカードで名前を手入力したときと同じ。判断 1）
+    - ヘッドレスでは統計を取り直さない（判断 5）。id は空になるが、統計のキー（`recent_sets` など）は S3e-5 まで書き直されない（前の選手の値が入っていれば、そのまま残る）
+  - ヘッドレスで、選手の編集（v1・legacy・Socket.IO）とタグからの選手の読込が動く（それまでは 503 `UNAVAILABLE`）。対象は state にある選手欄（起動直後は各チーム 1 人）。統計は取り直さない（判断 5）
+  - legacy の `update-team` は、書き込みが終わってから `"OK"` を返す（判断 4）
+  - `savePlayerToDb` の DB への書き込みは、state の保存サイクルの後（同じ要求の中で、応答の前）。保存する中身は変わらない。同じ選手への保存が前後して届いたときは、後に読んだ方が残る（判断 6）
+  - 不正な番号の扱い（どれも正しい要求では起きない）
+    - `update-team` で team / player が `0`（や負の数）のとき、従来は Python の負の添字で別のスロット（チーム 2・最後の選手）に書いていた。今は何も書かずにログに残す（応答は `"OK"` のまま）
+    - `load-player-from-tag` で team / player が `0` のときも同じく別のスロットに読んでいた。今は 500（DB にあるタグのとき。無ければ従来どおり `"ERROR"`）
+    - クルーボード（board 3）への `load-player-from-tag` は、デスクトップでは従来も 500（ボード 3 を構築してから `AttributeError`）、ヘッドレスでは 503 だった。今はどちらも 500（ボードを構築しない）
+  - 上記以外の応答（本文・ack・v1 の形）と、`program_state.json` のキー順は変わらない
+- **pin**
+  - `tests/test_player_service.py`: 別の選手の判定（先に書いて、実装前に 3 件が失敗することを確認した）
+    - タグを変えた部分更新は id・city を空にする / スポンサーだけを変えても空にする
+    - 同じ選手の部分更新は残す（カード全体の再送・同じタグ・同じスポンサー・空の名前欄・キャラだけ）
+    - id を持ってくる部分更新は、id を 1 回だけ書く（None を挟まない）。DB の記録が持っている id・city は残る
+    - 悪語フィルタで表示中の名前と同じ文字になるタグは、同じ選手
+    - レビュー: Web UI の送り方（カード全体。スポンサーの追記 / タグの typo の修正）で別の選手になっても、顔写真と seed は残り、書き込みも出ない / 名前の後・id の前で例外が出ても、前の選手の id・city が残らない（クリアする読込と部分更新の両方。直す前は両方とも失敗する形）/ id を空にする処理の例外は読込自身の例外を隠さない（ログに残る）。読込が成功していればその例外が出る。どちらでも合成名は出る
+    - レビュー: DB への保存の順序。後に読んだ記録が先に保存されると、先に読んだ記録は捨てられる（False）。別の選手のキーは独立。読んだ順に来れば全部書かれる。メモリとファイルの両方を確かめる
+    - 録画の `update` の入口を `AutonaWebOperations.update_player` にした（「the web's player edit」は値・Set 列・保存サイクル・統計とも録画どおり）
+    - 「load from a tag」を Web の `load_player_from_tag` でも再生し、録画（ボードの `LoadPlayerFromTag`）と一致する（スワップのステップを含む）
+    - 「a set's entrants」の 3（チーム 1 の 2 人目 = id 102 の WING の上に、id の無い `{"gamerTag": "SOLO"}` をクリアせずに）を、この木で録り直した（`rerecorded` の印。判断 1）。変わったのは、Set 列に `team.1.player.2.id` = null と `recent_sets` が増え、統計の `RecentSetsSignal` / `LastSetsP1Signal` / `PlayerHistoryStandingsP1Signal` が 0 → 1、state の `id` が 102 → null（`stateDigest`・スロットの digest も）。保存サイクル・キー順は録画のまま。WING の seed（8）は残る（1 回目のレビューで seed も空にする形に録り直したが、2 回目のレビューでこの録画に戻した）
+  - `tests/test_web_operations.py`
+    - 両シェル（ボードを構築したデスクトップ / シードしたヘッドレス）で、v1 の編集・legacy の `update-team`・タグからの読込・スワップ後のタグからの読込・別の選手への書き換えが、同じ state（値とキー順）を書く。デスクトップは held、ヘッドレスは即時公開。`match_en` を空にするのは legacy だけ
+    - `savePlayerToDb` が両シェルで同じ記録を保存する（フラグが無ければ保存しない）
+    - レビュー: 実際の `PlayerDB.AddPlayers`（monkeypatch しない。DB は tmp に差し替え）を通し、DB の変更通知の時点で、ボードホストの中にいない・ボードホストのロックも state のロックも誰も持っていない・スロットには保存する選手が入っている、を両シェルで確かめる。DB と `local_players.json` の中身も確かめる（直す前の順にすると失敗することを確認した）
+    - 別の選手への書き換え・スポンサーの追記（Web UI の送り方）で id・city は空になり、seed と顔写真は残る（両シェルで同じ値・キー順）
+    - レビュー: 同じ選手への 2 つの編集の保存が逆の順で DB に届いても、後の編集の記録が残る（ヘッドレス。直す前の形にすると失敗することを確認した）
+    - レビュー: worker スレッドから `savePlayerToDb` 付きの `update_player` を呼び、10 秒以内に終わる（デスクトップ: 操作は GUI スレッドへ渡して待つ / ヘッドレス: 呼び出し元のスレッドでロックの中。どちらも DB の変更通知の受け手 `SetupModel` は GUI executor でメインスレッドへ渡り、テストのメインスレッドはその間イベントを回し続ける）。メインスレッドが待たれている間に、メインスレッドからボード操作（別の編集）を行い、ボードホストのロックが空いていて操作が通ることを確かめる（ロックはタイムアウト付きで試すので、直す前の形では固まらずに失敗する。そうなることを確認した）。ヘッドレスは `AutonaPlayerDB.modelEnabled = False`（ヘッドレスのシェルと同じく `db_updated` だけ）
+    - デスクトップで、Web の読込が統計を依頼する（別の選手: 直近の対戦とそのチームの戦績 / seed の変化: アップセット係数。同じ選手では出ない）
+    - スワップの後、編集は state のチーム、タグからの読込はセットのチームを指す
+    - state に無いスロット（player 2・0・team 3・0）は、両シェルで何も書かない（v1 は False、legacy は `"OK"`、タグからの読込は例外 / `"ERROR"`）。クルーボードには選手欄が無い
+    - ヘッドレスのルート: v1 の 200 / 404 / 空ボディ、legacy の `"OK"` / `"ERROR"` / `"No tag provided"`、Socket.IO の `update_team` / `load_player_from_tag` の応答
+  - `tests/test_api_v1.py`: v1 の 404 が state のスロットで決まる（人数 2 のチームボードで player 3 が 404・player 2 が 200）。未構築のボードへの v1 の編集はボードを構築して held になる。legacy の 2 ルートの本文
+  - `tests/test_player_card_render.py`: `ApplyPlayerData` の呼び出しを Web の `update_player` にした。打ちかけのコンボの文字を捨てるテストに、Web のタグからの読込を足した
+- **残置 / リスク**
+  - ヘッドレスでは、選手の読込の後に統計を取り直さない（判断 5。S3e-5）
+  - ボードの `LoadPlayerFromTag`（PLAYERS パネル）は、カードの並びとボード属性から読込先を決める。Web の `load_player_from_tag` は state から決める。結果は同じ（`test_player_apply.py` の 2 つの再生で照合）だが、解決の書き方が 2 つある。パネルの React 化（S4）で片方になる
+  - `post_score` の 1 人分のペイロード（`_ApplySinglePlayerData` / `_WritePlayerSlot`）は、まだボードのカードから読込先を決める（S3e-7 で `post_score` を移すときに揃える）。下の「既存の不具合」のとおり、不正な番号は別のスロットに書く
+  - `DesktopBoardHost.Run` が GUI スレッドのままなので、GUI スレッドが詰まると Web の選手操作も待つ（判断 2。`update_player` / `load_player_from_tag` は従来どおり）
+  - 別の選手の判定は完全一致なので、Web UI でタグの綴りを直しただけでも id が消える（start.gg の id で引く統計が取れなくなる）。デスクトップの手入力と同じで、オーナーの規則どおり。顔写真と seed は残る
+  - 本当に別の選手を名前だけで入れたときは、前の選手の顔写真と seed がその名前の横に残る（判断 1。下の「オーナー判断待ち」）
+- **オーナー判断待ち**
+  - 別の選手の名前を書いたとき、前の選手の顔写真（online_avatar）と seed も空にするよう、デスクトップのカードと Web UI の両方で揃えて広げるか（広げると LIVE-BUG-1「タグを直しても顔写真は消えない」の固定と逆になる）
+- **残課題（review で見送り・記録のみ）**
+  - Web UI の打ちかけ保護が古い名前を送り、新しい選手の id を消す（S4 の Web UI 側で扱う）
+  - legacy の `update-team` の DB 照合キー（body のスポンサー + タグ）が、スロットのスポンサーとずれる（body がタグだけなら、スロットにスポンサーがあってもタグだけで引く）
+  - `set_team_data` の `Prepare` が 2 回呼ばれる（`set_team_data` 自身と `_apply_set_fields`。2 回目は構築済みで何もしない）
+  - v1 の `player_update` が `NOT_READY`（409 "API not initialized"。サーバーがアクションを登録する前）を返さなくなった（`_actions_ref()` を通らず、`AutonaWebOperations` を直接呼ぶため）
+- **既存の不具合（報告のみ・未修正）**
+  - legacy の `POST /score` に 1 人分のペイロード（`team` / `player` / `data`）を送り、team か player が `"0"` だと、負の添字で別のスロット（チーム 2・最後の選手）に書く（`_WritePlayerSlot`。S3e-7 の範囲）。正しい要求では起きないので、配信事故にはならない
+- **リリースノート案**
+  - デスクトップ版: Web UI（スマホ・タブレット）や Stream Deck から選手名を別の選手に書き換えたとき、前の選手の戦績・直近の対戦が残って配信に出ることがある問題を修正した（名前を変えると、前の選手の Start.gg の情報と地域（市区町村）が消え、統計が取り直される）。顔写真とシードは、デスクトップで名前を直したときと同じく残る
+  - ヘッドレス起動（`python main.py --headless`）で、Web UI からの選手の編集と、選手 DB からのタグ読込ができるようになった。ただし統計（直近の対戦・戦績・アップセット係数）の取り直しはまだで、選手を書き換えても前の選手の統計が残る（今後のバージョンで対応）
+- **実機確認（オーナー）**
+  - デスクトップ + Web UI
+    - Start.gg のセットを読み込み、統計（直近の対戦・戦績）が出ている状態で、Web UI でその選手のタグを別の名前に書き換えて確定する → 反映後、OBS の選手名が変わり、前の選手の戦績・直近の対戦が消える（または新しい名前で取り直される）。顔写真（Start.gg のアバター）とシードは残る
+    - Web UI で選手のタグの typo を直す・スポンサーを足す → 顔写真・シードは残る（デスクトップのカードで手入力したときと同じ）
+    - Web UI の 2 台（またはスマホと PC）から、同じ選手を DB 保存付きで続けて編集する → 選手 DB には後の編集が残る
+    - 同じ選手の SNS・国・キャラだけを Web UI で変える → 戦績・直近の対戦はそのまま残る
+    - Web UI で選手を編集 → デスクトップのカードにすぐ出て（反映ボタンが点灯）、反映で OBS に出る。`savePlayerToDb` の付く確定（タグがあるとき）で選手 DB にも入る
+    - デスクトップのカードの選手名欄に打っている途中に Web UI からその選手を編集 → 欄は打っている文字のまま。離れると Web の名前が出る（S3e-3 と同じ）
+    - Swap の後に、legacy / Socket.IO の `load_player_from_tag`（Stream Deck 等）で team 1 を指定 → 右側（state のチーム 2）に入る
+    - 未表示の形式のボード（例: 1v1 表示中にチーム戦のボード）へ Web UI から選手を編集 → そのボードを開くと入っていて、反映ボタンが点灯している
+  - ヘッドレス（`python main.py --headless`）
+    - `/web` で選手を編集する → すぐオーバーレイに出る（503 にならない）
+    - `/web` で選手を DB 保存付きで確定する（タグがあるとき）→ 応答が返り（固まらない）、`user_data/local_players.json` に入る。続けて別の操作（スコアの変更など）もすぐ通る
+    - `/scoreboard1-load-player-from-tag-1-1?tag=<DB のタグ>` → `OK` で入る。DB に無いタグは `ERROR`

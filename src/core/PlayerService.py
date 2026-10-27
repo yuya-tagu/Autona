@@ -65,6 +65,7 @@ lookup and which moved into core alongside this module's own instalment
 import copy
 import os
 import re
+import threading
 from dataclasses import dataclass
 from typing import NamedTuple, Optional
 
@@ -164,8 +165,24 @@ class SlotChange(NamedTuple):
     seedChanged: bool = False
 
 
+class PreparedSave(NamedTuple):
+    """A player database record read from a slot (PrepareSaveToDB), and
+    its number in the order the slots were read -- what SaveRecordToDB
+    keeps a later save of an older read from overwriting (ADR-005 S3e-4
+    review)."""
+    record: dict
+    sequence: int
+
+
 class PlayerService:
     """The state subtree of one player slot."""
+
+    # The order of the database saves (PrepareSaveToDB / SaveRecordToDB):
+    # the last number handed out, and per database key the number of the
+    # record saved last. One lock for both; nothing is waited for under it.
+    _saveLock = threading.Lock()
+    _saveSequence = 0
+    _savedSequence = {}
 
     def __init__(self, path: str, games=None, countries=None):
         """`games` / `countries` default to the process catalogs
@@ -595,10 +612,22 @@ class PlayerService:
           left alone).
         - `no_mains` keeps the characters (of a card with one row; see
           `_Clear` for the old clear's limits) and ignores `mains`.
+        - without `clear` (an update: the Web's player edit), a load that
+          names another player -- the sponsor or the tag the slot ends up
+          with is not the one it had -- empties the id and the city it does
+          not write itself, as the clear does (`_NamesAnotherPlayer`,
+          ADR-005 S3e-4). An update of the same player keeps them. The
+          online avatar and the seed stay, as they do when the operator
+          types a name on the desktop card (NameChanged; LIVE-BUG-1: fixing
+          a typo in a tag must not cost the player a face).
 
-        The display name and the images are re-derived last, from what the
-        slot ends up holding, even when a step raised. Returns what changed
-        for the statistics (SlotChange).
+        Which of the id and the city the load wrote is what it got to, not
+        what it carries: a step that raises before the id leaves no previous
+        player's id behind the new name, after a clear or an update (S3e-4
+        review). The display name and the images are re-derived last, from
+        what the slot ends up holding, even when a step raised -- and an
+        error emptying the id there is logged rather than raised over the
+        step's own. Returns what changed for the statistics (SlotChange).
         """
         if not isinstance(data, dict):
             raise TypeError(f"player data for {self.path} is not a dict")
@@ -640,6 +669,9 @@ class PlayerService:
                     "region": region.get("code")
                     if isinstance(region, dict) else None}
                 hidden = False
+                # Of the id and the city, those this load wrote.
+                wrote = set()
+                failed = False
                 try:
                     if clear and self._Clear(slot, no_mains, forLoad=True,
                                              keep=brings):
@@ -647,20 +679,74 @@ class PlayerService:
                         location["shown"] = None
                         location["region"] = None
                     if record:
-                        self._ApplyFields(record, no_mains, location)
-                    self._ApplyFields(data, no_mains, location, hidden)
+                        self._ApplyFields(record, no_mains, location,
+                                          wrote=wrote)
+                    self._ApplyFields(data, no_mains, location, hidden,
+                                      wrote=wrote)
+                except BaseException:
+                    failed = True
+                    raise
                 finally:
                     sponsor = self._Text(schema.PLAYER_SPONSOR_KEY)
                     tag = self._Text(schema.PLAYER_TAG_KEY)
+                    dropError = None
+                    try:
+                        # Also when a later step raised: the name is
+                        # written. After a clear this only finds what the
+                        # clear left for the load to write and it never did
+                        # (a step raised).
+                        if clear or self._NamesAnotherPlayer(slot, sponsor,
+                                                             tag):
+                            self._DropIdentity(keep=wrote)
+                    except Exception as e:
+                        dropError = e
                     self.PublishMergedName(sponsor, tag)
                     self.PublishImages(sponsor, tag)
+                    if dropError is not None:
+                        if not failed:
+                            raise dropError
+                        # The step's own exception is what propagates.
+                        logger.opt(exception=dropError).error(
+                            f"{self.path}: the previous player's id was "
+                            f"not emptied after a failed load")
                 return self.ChangeSince(before)
 
-    def _ApplyFields(self, source, no_mains, location, hidden=False):
+    @staticmethod
+    def _NamesAnotherPlayer(slot, sponsor, tag) -> bool:
+        """Whether a slot that held `slot` (a copy read before the load) and
+        now holds `sponsor` / `tag` is another player (ADR-005 S3e-4).
+
+        The sponsor and the tag together name a player: they are the local
+        database's key (PlayerDB.PlayerTag), and the desktop card drops the
+        id when the operator finishes either of them with a new text
+        (NameChanged). Compared as written -- censored, a blank field not
+        carried -- and exactly: a spelling fix of the tag is another name,
+        so the id goes with it (the statistics fetched again, under the new
+        name, rather than kept for a name the slot no longer shows).
+        """
+        def text(key):
+            value = slot.get(key)
+            return "" if value is None else str(value)
+
+        return (sponsor, tag) != (text(schema.PLAYER_SPONSOR_KEY),
+                                  text(schema.PLAYER_TAG_KEY))
+
+    def _DropIdentity(self, keep=()):
+        """Empty the id and the city, but those in `keep` (what the load
+        brings itself, and writes over them). Caller holds the lock and the
+        block."""
+        if "id" not in keep:
+            self.SetPlayerId(None)
+        if "city" not in keep:
+            self.SetCity(None)
+
+    def _ApplyFields(self, source, no_mains, location, hidden=False, *,
+                     wrote):
         """One player dict's fields into the slot, in the order the card
         set them. `hidden`: a clear hid the country, which is announced
         (as no country) after the country step unless one was shown since.
-        Caller holds the lock and the block."""
+        `wrote` (a set) collects "id" / "city" once written (for
+        `_DropIdentity`'s `keep`). Caller holds the lock and the block."""
         countryCode = source.get("country_code")
         badWords = BadWordFilter.instance
 
@@ -684,8 +770,10 @@ class PlayerService:
                                onlineAvatar=source.get("avatar"))
         if source.get("id"):
             self.SetPlayerId(source.get("id"))
+            wrote.add("id")
         if source.get("city"):
             self.SetCity(source.get("city"))
+            wrote.add("city")
 
         text(schema.PLAYER_TWITTER_KEY, source.get("twitter"))
 
@@ -819,14 +907,56 @@ class PlayerService:
             return 0
 
     def SavePlayerToDB(self):
-        """The card's save button: the slot as the local player database
-        stores a player (PlayerDB.fieldnames' shape, the current game's
-        characters as its mains), then the characters re-published as the
-        slot's mains too. The record keeps the database's other games'
-        mains (PlayerDB.AddPlayers overwrite)."""
+        """The card's save button: PrepareSaveToDB, then SaveRecordToDB.
+        The caller holds no lock (see SaveRecordToDB)."""
+        self.SaveRecordToDB(self.PrepareSaveToDB())
+
+    @staticmethod
+    def SaveRecordToDB(prepared: PreparedSave) -> bool:
+        """The database half of SavePlayerToDB: the record PrepareSaveToDB
+        read into the local player database. The record keeps the
+        database's other games' mains (PlayerDB.AddPlayers overwrite).
+
+        Called with no lock held -- a board host's included: the database
+        announces the change (PlayerDB.changed), and its relay rebuilds the
+        completer model on the main thread and waits for it
+        (AutonaPlayerDB.SetupModel, both shells; ADR-005 S3e-4 review).
+
+        Saves of one player can therefore reach here out of the order their
+        slots were read in (two Web edits, each saved after its board host
+        let go). A record read before the one saved last under the same
+        database key is dropped: False. The merge is made under the save
+        lock, so the check and the write are one step; the file write and
+        the announcement come after it, as AddPlayers makes them."""
+        record, sequence = prepared
+        db = PlayerDB.instance
+        tag = PlayerDB.PlayerTag(record)
+        with PlayerService._saveLock:
+            if PlayerService._savedSequence.get(tag, 0) > sequence:
+                logger.info(f"Player DB: an older save of {tag!r} dropped "
+                            f"(a newer one is saved)")
+                return False
+            PlayerService._savedSequence[tag] = sequence
+            db.AddPlayers([record], overwrite=True, deferRefresh=True)
+        db.SaveDB()
+        db.NotifyChanged()
+        return True
+
+    def PrepareSaveToDB(self) -> PreparedSave:
+        """The state half of SavePlayerToDB: the slot as the local player
+        database stores a player (PlayerDB.fieldnames' shape, the current
+        game's characters as its mains), numbered in the order slots are
+        read and returned for SaveRecordToDB, with the characters
+        re-published as the slot's mains too. Writes the state only, so it
+        goes in the caller's save block and lock; the record is read from
+        the slot here, and whenever it is written to the database it is
+        what the slot held at this point."""
         snap = self._GameCatalog().Current()
         with StateManager.lock:
             slot = self._Slot()
+            with PlayerService._saveLock:
+                PlayerService._saveSequence += 1
+                sequence = PlayerService._saveSequence
 
         def text(field):
             value = slot.get(field)
@@ -853,8 +983,8 @@ class PlayerService:
             if isinstance(value, dict) and value:
                 player[key] = value.get("code")
 
-        PlayerDB.instance.AddPlayers([player], overwrite=True)
         self.PublishCharacterSlots(slots, includeMains=True)
+        return PreparedSave(player, sequence)
 
     # ── slot lifecycle ───────────────────────────────────────────────────
 
@@ -926,7 +1056,8 @@ class PlayerService:
         without them carried the previous one's -- and the statistics,
         keyed by the id, stayed the previous player's (S3e-3 review). Both
         are emptied now, after the name fields, unless they are in `keep`:
-        what the load brings itself and writes over them.
+        what the load brings itself and writes over them (and, should a
+        step raise before it does, ApplyData empties them after all).
         """
         def text(key):
             value = slot.get(key)
@@ -947,10 +1078,7 @@ class PlayerService:
             self.PublishImages("", "")
             self.SetPlayerId(None)
         if forLoad:
-            if "id" not in keep:
-                self.SetPlayerId(None)
-            if "city" not in keep:
-                self.SetCity(None)
+            self._DropIdentity(keep)
 
         self.SetSeed(0)
 

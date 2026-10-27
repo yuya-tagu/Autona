@@ -2808,7 +2808,7 @@ def test_a_load_while_the_tag_is_typed_wins_once_the_field_is_left(
     with _onScreen(board, autonaApp):
         _focus(tag, autonaApp)
         QTest.keyClicks(tag, "TYPED")
-        assert board.ApplyPlayerData(1, 1, {
+        assert autonaApp.web().update_player(BOARD, 1, 1, {
             "gamerTag": "LOADED", "prefix": "SP", "id": 77}) is True
         autonaApp.settle()
         assert tag.text() == "TYPED"
@@ -2914,10 +2914,18 @@ def _loadClearing(board, how):
     else:
         with patch.object(PlayerDB.instance, "GetPlayerFromTag",
                           return_value=dict(_LOADED_E1)):
-            assert board.LoadPlayerFromTag("E1", 1, 1) is True
+            if how == "the Web's tag lookup":
+                # ADR-005 S3e-4: AutonaWebOperations, the board's card
+                # hooks through the desktop board host.
+                from src import AutonaWebOperations as WebOps
+                assert WebOps.load_player_from_tag(
+                    board.scoreboardNumber, "E1", 1, 1) == "OK"
+            else:
+                assert board.LoadPlayerFromTag("E1", 1, 1) is True
 
 
-@pytest.mark.parametrize("how", ["a set's entrants", "a tag lookup"])
+@pytest.mark.parametrize("how", ["a set's entrants", "a tag lookup",
+                                 "the Web's tag lookup"])
 def test_a_load_takes_text_typed_into_a_combo_with_it(board, autonaApp, how):
     """The country and the second character typed into and left without a
     pick, then a load: the text is gone, and picking a skin on the card
@@ -3008,7 +3016,7 @@ def test_a_load_while_the_note_is_typed_wins_once_it_is_left(
         _focus(note, autonaApp)
         QTest.keyClicks(note, "TYPED")
         assert autonaApp.get(noteKey) == "TYPED"
-        assert board.ApplyPlayerData(1, 1, {
+        assert autonaApp.web().update_player(BOARD, 1, 1, {
             "gamerTag": "LOADED", "custom_textbox": "LOADED NOTE"}) is True
         autonaApp.settle()
         assert note.toPlainText() == "TYPED"

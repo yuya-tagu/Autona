@@ -301,7 +301,7 @@ class _AutonaHarness:
     def actions(self):
         """A WebServerActions bound to the real manager (never started).
 
-        The board-dependent operations (player edits, set loading, stats,
+        The board-dependent operations (set loading, stats, the thumbnail,
         ...): what the HTTP routes and Socket.IO events that need a widget
         delegate to, so driving it exercises the same code path as a request
         without binding a port.

@@ -36,10 +36,11 @@ ACCENT_GOLD = "#f0a500"
 
 
 class AutonaCrewBattleWidgetSignals(QObject):
-    # A set payload for board 3: the board-dependent web actions that still
-    # emit into whichever board they address (post_score / set_team_data)
-    # land here. Every other operation of this board is core's
-    # (CrewBattleService, ADR-005 S3e-2), called by the Web directly.
+    # A set payload for board 3: the board-dependent web action that still
+    # emits into whichever board it addresses (post_score) lands here. Every
+    # other operation of this board is core's (CrewBattleService, ADR-005
+    # S3e-2), called by the Web directly -- set_team_data's payload too
+    # since S3e-4 (AutonaWebOperations._apply_set_fields).
     ChangeSetData = Signal(dict)
 
 
@@ -629,7 +630,7 @@ class AutonaCrewBattleWidget(QWidget):
         self.crew.ResetStocks()
 
     def ChangeSetData(self, data):
-        # post_score() / set_team_data() can route a set payload here. Crew
+        # post_score() can route a set payload here. Crew
         # has no set-loading UI: the generic fields are persisted if present
         # and the rest is ignored -- tolerant by design so generic callers
         # don't crash board 3. The rules are CrewBattleService's, and they
