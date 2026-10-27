@@ -23,6 +23,8 @@ paths:
 - 一括更新時は `StateManager.SaveBlock()` コンテキストマネージャーで囲む
   - ブロック内ではファイル出力が抑制され、ブロック終了時にまとめて反映される
 - スレッドセーフ: `StateManager.lock`（RLock）を使用。直接 state dict を操作しない
+  - held 通知と `state_updated` のハンドラはこの lock の中で走る（GUI スレッドで書いた変更ではウィジェットのハンドラも
+    direct に）。その中で別スレッドを待たない（agent-pitfalls #17）
 - **core は Qt を import しない**（`tests/test_core_qt_free.py` が subprocess で pin）。
   Qt が要る処理はアダプタ（`src/StateManagerBridge.py` が実例）へ出す
 - **永続化の正本は `user_data/state.json`**（ADR-005 S3b。`src/core/StatePersistence.py`）。
@@ -57,11 +59,14 @@ paths:
   (`SeedBoard` / `SeedPanelState`) はここが正本。ウィジェット側に同じ定義を置き直さない
 - `SeedBoard(n)` は「埋める」ではなく **サブツリーを skeleton に戻す**。生きているボードに
   対して呼ばない（未構築ボードのプレースホルダと、遅延構築時の再シードが用途）
-- **構築直後のボードの中身（選手スロット・クルーボード）のシードはドメインサービス側**（ADR-005 S3d）:
+- **構築直後のボードの中身（選手スロット・クルーボード）のシードはドメインサービス側**（ADR-005 S3d / S3e-6）:
   `core/PlayerService.SeedEmpty()`（1 スロットを空のカードと同じ内容で）/ `SeedEmptyRoster(board)`
   （両チームの `DefaultPlayersPerTeam()` 人分）、`core/CrewBattleService.SeedDefaults()`（クルーボードの
-  起動時の書き込み）。デスクトップではボードのウィジェットが同じ内容を publish するので、使うのは
-  ヘッドレス（`src/headless._SeedBoards()`）。形はデスクトップの空ボードと `tests/test_headless_seed.py` が照合する
+  起動時の書き込み）。**選手スロットは両シェルとも core が書く**: ヘッドレスは `src/headless._SeedBoards()` の
+  `SeedEmptyRoster`、デスクトップはボードの構築時の `AutonaActions.SetRoster`（足りないスロットを `SeedEmpty` で
+  埋める。カードは何も書かずにスロットに従う）。クルーボードの起動時の中身はデスクトップではボードの
+  ウィジェットが publish するので、`SeedDefaults` を使うのはヘッドレスだけ。形はデスクトップの空ボードと
+  `tests/test_headless_seed.py` が照合する
 - `KEY_CATALOG` / `DYNAMIC_KEY_FAMILIES` は基本的に**列挙のみ**（マイグレーション層の
   アンカー）。新しい state キーを足したらここにも書く（テストで強制できないため
   ベストエフォート運用。**PR レビュー時に KEY_CATALOG との差分を確認する**）
@@ -209,13 +214,16 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
     残るため。選手の読込を core にした S3e-3 の後も、手入力の確定はこの 2 書き込みのまま。S3e-4 で見直して維持した。
     選手の Web 操作の後のカードの仕事（打ちかけのコンボの文字を捨てる。`PlayerLoaded`）も GUI スレッドの仕事）。未構築ボードを `EnsureScoreboard` で構築してから書く（未構築ボードは held でなく、
     書き込みが即時公開されたあと構築時のシードで消えるため）。入力中の欄を確定する。ボード 1 / 2 の
-    人数 / キャラ数（ボードのスピンボックス。S2g）はウィジェットに委ねる（クルーボードの操作は S3e-2 から core）
+    人数 / キャラ数も ADR-005 S3e-6 から core（`AutonaActions.SetRoster`。それまではボードのスピンボックスで、
+    ヘッドレスは 503。クルーボードの人数は S3e-2 から core）。カードは held サイクルで state のスロットに追従する
   - ヘッドレス（`BoardHost`。既定）: 呼び出し元のスレッドで core を呼ぶ。1 本の再入可能ロック（`RLock`）で 1 つずつ
     実行する（GUI スレッドに並ばないので、`clear_all` や v1 `PATCH set` の途中に別の要求が混ざらないように。
     ロックの中でメインスレッドを待たない・`StateManager.lock` を持ったまま取らない。待つもの（`savePlayerToDb` の選手 DB への
     書き込み: `PlayerDB.changed` → `AutonaPlayerDB.SetupModel` がメインスレッドで走る）は `Run` を抜けてから行う。S3e-4 レビュー）。ボードが無いので held にならず即時公開
-    （反映ボタンが無いのでこれが正しい）。ウィジェットが要るもの（ボード 1 / 2 の人数 / キャラ数）は
-    `NotAvailable`（503）。統計は両シェルとも core が取り直す（ADR-005 S3e-5。`PlayerLoaded` は何もしない）
+    （反映ボタンが無いのでこれが正しい）。ウィジェットが要るものは `NotAvailable`（503）。ボード 1 / 2 の
+    人数 / キャラ数（`set_route` の `players` / `characters`・`clear_all`）とゲームのロードの既定人数も、
+    S3e-6 からは両シェルで同じ core の操作（ゲームのロードは `bootstrap.wire_game_roster`）。統計は両シェルとも
+    core が取り直す（ADR-005 S3e-5。`PlayerLoaded` は何もしない）
 - **SaveBlock は複数キーを 1 サイクルにまとめる時だけ**使う（単一キーなら不要）。
   かつては「空 `changedKeys` の SaveState = `include_paths=[]` = フィルタなし =
   全 state 差分」という地雷があったが、**Step 4a で `SaveState` 側が空 `changedKeys`
@@ -255,7 +263,7 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
 | `src/core/CommentaryService.py` | なし（モジュール関数） | `commentary.*` の書き込み全部（ADR-005 S3e-2）: 選手データでの 1 枠の上書き（`ApplyPlayerData`。Web と補完の選択。悪語フィルタ → 正規化 → 1 枠をマージしてルートごと 1 回 publish = 旧パネル経由と同じ Set）・タグからの読込（`LoadFromTag`。`PlayerDB`）・パネルの 1 欄の編集（`SetField`。値が変わったときだけ。表示は `MAX_DISPLAY` 人まで）・並べ替え（`Reorder`）。実況パネルは state を描画するだけ（入力中の欄は飛ばし、held-back の規則で古い文字を書き戻さない） |
 | `src/core/Top8Service.py` | なし（モジュール関数） | `top8.*` の書き込み全部（パネルの 1 欄の編集 `SetPlayerText` / `SetPlayerCountry` / `SetPlayerCharacter`（その 1 キーだけを、変わったときだけ）・表示ラベルの既定値・反映（staged スコアのマージ + `Recompute`）・全リセット・Start.gg 取り込み）。**取り込みの入口は `RefreshFromProvider()` の 1 つ**（ADR-005 S3e-8。パネル・ホットキー・legacy / Socket.IO / v1 が同じ関数を呼び、ヘッドレスでも動く）: 大会の最後の phase のダブルエリミのグループ（`TargetPhaseGroup`）→ 取得 → `core/Bracket` → `Top8Model.FromBracket` → 選手を `GameAssetCatalog` / `CountryCatalog` で解決 → `ImportBracket`。取得は `bootstrap_core()` が注入する `fetcher`（provider の `RunWithProvider`。provider のワーカースレッドで走る）。実行中フラグは取り込み全体（取得〜書き込み）で 1 つ、全入口が共有し、実行中の要求は `BUSY` で捨てる（キューしない）。選手の解決と書き込みは `StateManager.lock` の中（ゲームの切り替えとの競合で前のゲームのキャラが残らない）。空・失敗の結果は何も書かない。**ゲームが別のゲームに変わったときのキャラの消去 `ForgetCharacters()`** も持つ（キャラがある枠だけ・1 保存サイクル。呼ぶのは `GameAssetCatalog.SelectGame` だけ）。Top 8 パネルは操作を依頼し、state を描画するだけ（実況パネルと同じ型）。トポロジ自体は Qt-free の `src/core/Top8Model.py` が正本 |
 | `src/core/ColorService.py` | なし（モジュール関数） | 大会カラー（`tournamentInfo.themeColor`/`accentColor`）と機能別カラー（`colors.{feature}.*`）の読み・書き・起動シード。**`tournamentInfo` プレフィックスだがこの族は本サービスのもの**で、`TournamentInfoService` は触らない（歴史的なキー名） |
-| `src/core/GameAssetCatalog.py` | `GameAssetCatalog.instance`（`bootstrap_core()` 生成。Qt 側は `AutonaGameAssetManager` が包む） | ゲームアセットの正本（スキャン・ロード・キャラ/スキン/ステージ/アセットパス・Start.gg ID 解決）と `game.*` の書き込み。ロード結果は不変スナップショットで差し替え、リーダーはロックを取らない。書き手のロック保持中に `run_sync` / Qt シグナル / observer を呼ばない（ADR-005 S1a）。**例外は `SelectGame` の `progress` コールバックだけ**でロック保持中に呼ばれるため、渡す側はブロックしない（queued で投げるだけ。アダプタは `AutonaStatusManager` を渡す）。observer から書き手を呼ばない（agent-pitfalls #16）。**`SelectGame` は、state の `game.codename` が空でなく新しい codename と違うとき、Top 8 のキャラを空にする**（writer lock を離した後・同じ `SaveBlock` の中で `Top8Service.ForgetCharacters()` を直接呼ぶ。observer は使わない。起動時の復元（`game` が空）・同じゲームの選び直しでは呼ばない。ADR-005 S3e-8）。**Web / Start.gg のリーダーはカタログを直接読む**（ADR-005 S1b）: `AutonaWebOperations.get_games` / `get_characters` / `get_variants` は `*Payload()` を返すだけで `@gui_thread_sync` を持たない。`StartGGDataProvider` は `CharacterFromStartGGId` / `StageFromStartGGId` で解決し、1 つの結果（1 セットのパース・1 エントラント）を組む間は `Current()` を 1 回取って `snapshot=` で渡す（start.gg の ID → 名前の表 `_startggCharacters` はスナップショット外だが、ゲーム非依存なので実害なし）。ゲームの切り替えは codename で `LoadGameByCodename` を呼ぶ（スキャン上の位置を引いてから位置でロードしない。間の再スキャンで別ゲームになる）。終了を待つ側は `done=`（成否を問わず 1 回）を使い、onLoad（実際にロードされたときだけ）で待たない。新しいリーダーをアダプタの旧プロパティ（`games` / `selectedGame` / `characters` ほか。GUI 側の残りは S4 で消える）に繋がない。ペイロードの入れ子のキー順は旧モデル経由の QVariantMap 順を再現している（Socket.IO のバイト互換。`DictHelper.qvariantmap_copy`（S1d で core 共用に移動。選手スロットの値も使う）。str キーの dict と list だけ変換し、tuple と非 str キーの dict は PySide6 と同じく並べ替えない） |
+| `src/core/GameAssetCatalog.py` | `GameAssetCatalog.instance`（`bootstrap_core()` 生成。Qt 側は `AutonaGameAssetManager` が包む） | ゲームアセットの正本（スキャン・ロード・キャラ/スキン/ステージ/アセットパス・Start.gg ID 解決）と `game.*` の書き込み。ロード結果は不変スナップショットで差し替え、リーダーはロックを取らない。書き手のロック保持中に `run_sync` / Qt シグナル / observer を呼ばない（ADR-005 S1a）。**例外は `SelectGame` の `progress` コールバックだけ**でロック保持中に呼ばれるため、渡す側はブロックしない（queued で投げるだけ。アダプタは `AutonaStatusManager` を渡す）。observer から書き手を呼ばない（agent-pitfalls #16）。**`SelectGame` は、state の `game.codename` が空でなく新しい codename と違うとき、Top 8 のキャラを空にする**（writer lock を離した後・同じ `SaveBlock` の中で `Top8Service.ForgetCharacters()` を直接呼ぶ。observer は使わない。起動時の復元（`game` が空）・同じゲームの選び直しでは呼ばない。ADR-005 S3e-8）。同じ判定はスナップショットの `replaced`（置き換えた前のゲームの codename。それ以外と `ForgetSelection` の後は None）に残り、ボードの選手のキャラと mains はロード後にシェルが走らせる `AutonaActions.ApplyGameRoster(replaced)` が空にする。値はロードが返したスナップショットのもので、ローダーの `gameLoaded`（`Signal(object)`。デスクトップはアダプタ、ヘッドレスは `HeadlessGames`。`onLoad` / `gameChanged` の直前に出る）で `bootstrap.wire_game_roster` に渡る。後から `Current()` を読まない（キューされたスロットが走る頃には、次のロードのスナップショットになりうる。ADR-005 S3e-6 レビュー）。**Web / Start.gg のリーダーはカタログを直接読む**（ADR-005 S1b）: `AutonaWebOperations.get_games` / `get_characters` / `get_variants` は `*Payload()` を返すだけで `@gui_thread_sync` を持たない。`StartGGDataProvider` は `CharacterFromStartGGId` / `StageFromStartGGId` で解決し、1 つの結果（1 セットのパース・1 エントラント）を組む間は `Current()` を 1 回取って `snapshot=` で渡す（start.gg の ID → 名前の表 `_startggCharacters` はスナップショット外だが、ゲーム非依存なので実害なし）。ゲームの切り替えは codename で `LoadGameByCodename` を呼ぶ（スキャン上の位置を引いてから位置でロードしない。間の再スキャンで別ゲームになる）。終了を待つ側は `done=`（成否を問わず 1 回）を使い、onLoad（実際にロードされたときだけ）で待たない。新しいリーダーをアダプタの旧プロパティ（`games` / `selectedGame` / `characters` ほか。GUI 側の残りは S4 で消える）に繋がない。ペイロードの入れ子のキー順は旧モデル経由の QVariantMap 順を再現している（Socket.IO のバイト互換。`DictHelper.qvariantmap_copy`（S1d で core 共用に移動。選手スロットの値も使う）。str キーの dict と list だけ変換し、tuple と非 str キーの dict は PySide6 と同じく並べ替えない） |
 | `src/core/CountryCatalog.py` | `CountryCatalog.instance`（`bootstrap_core()` 生成。Qt 側は `AutonaCountryHelper` が国モデルを作る） | 国・地域（states）・カスタム国旗・都市→地域表の正本（ADR-005 S1c）。`Load()` が唯一の書き手で不変スナップショットを差し替え、リーダーはロックを取らない。state は書かない。ロードは `Window.__init__` の `AutonaCountryHelper.instance.init()`（ヘッドレスは `src/headless.py` が `Load()` を直接呼ぶ。国名がロケール依存なので `LoadLocale()` の後。ロケールは callable 注入）。都市→地域表（`FindState`）も `Load()` が 1 回だけ読む（最初の照会は選手の読込から `StateManager.lock` の中で来うるため。ADR-005 S3e-3。`Load()` していないカタログでは最初の照会で読む）。**データを返すリーダーは必ずコピー**を返し、表に書き戻さない（旧 `LoadStates` と Start.gg の次セット解決が地域 dict に `asset` を書き込み、`get_states` の出力が「デスクトップがその国を表示したか」で揺れていた）。地域の `asset`（旗パス）は `States()` / `State()` が呼ばれた時点で解決する（地域ごとにディスクを見る。旗の要らない照合 = 選手の読込の地域コード合わせは、`StateManager.lock` の中なので `StateCodes()`（code / original_code だけ）を使う。ADR-005 S3e-3）。`AutonaWebOperations.get_states` は `States()` を返すだけで `@gui_thread_sync` を持たない。Start.gg は `CountryCodeFromEnName` / `FindState` / `State` / `BasicCountryInfo` で解決する。選手の国を code から引くのは `CountryByCode`（標準国 → カスタム国旗の順。国モデル走査と同じ答え。`PlayerService.CountryValue` が使う） |
 | `src/core/SponsorHelper.py` | なし（静的メソッド） | `...player.{M}.sponsor_logo` / `sponsor_logos.{I}` の解決と書き込み。`PlayerService.PublishImages` から呼ばれる |
 

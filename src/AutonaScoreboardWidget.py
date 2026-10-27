@@ -18,14 +18,16 @@ from .AutonaSelectSetWindow import AutonaSelectSetWindow
 from .AutonaSelectStationWindow import AutonaSelectStationWindow
 from .AutonaIndividualGameTracker import AutonaIndividualGameTracker
 
-from .AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
+from .AutonaScoreboardPlayerWidget import (
+    AutonaScoreboardPlayerWidget, _releaseLayoutItemWrappers)
 from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 from .core.StateManager import StateManager
 from .core import StateSchema as schema
 from .core import WebAccess
 from .core.Actions import AutonaActions
 from .core.PlayerService import (
-    DEFAULT_CHARACTERS_PER_PLAYER, DefaultPlayersPerTeam, SlotChange)
+    DEFAULT_CHARACTERS_PER_PLAYER, DefaultPlayersPerTeam, PlayerService,
+    SlotChange)
 from .core.SetLoadService import SetLoadService
 from .core.StatsService import StatsService
 from .core.TournamentInfoService import TournamentInfoService
@@ -118,6 +120,14 @@ class AutonaScoreboardWidget(QWidget):
         # (_SchedulePlayerRender), with a re-entrancy guard on the pass itself.
         self._playerRenderPending = False
         self._renderingPlayers = False
+        # The cards follow the roster in the state (ADR-005 S3e-6:
+        # _SyncPlayerCards builds the missing ones in the held cycle and
+        # retires the surplus, destroyed once control is back in the event
+        # loop: _DestroyRetiredCards). The players per team the chrome last
+        # followed (None before the first sync).
+        self._syncingCards = False
+        self._retiredCards = []
+        self._shownPlayerCount = None
 
         # The last `score.{n}.teamsSwapped` a held cycle showed this board.
         # Which way round the sides are is the state's (ADR-005 S2c:
@@ -380,19 +390,23 @@ class AutonaScoreboardWidget(QWidget):
         settingsRow.setContentsMargins(0, 0, 0, 0)
         settingsRow.setSpacing(UI.SPACE_SM)
 
-        # Characters-per-player is owned by the scoreboard itself (the former
-        # PLAYERS tab that used to drive it was removed). The spinbox is no
-        # longer user-facing — it survives as a hidden data holder because
-        # external WebServer actions still poke self.charNumber.value()/
-        # setValue() and SetDefaultsFromAssets re-asserts it. Default:
+        # The two counts are the state's (ADR-005 S3e-6): the player slots
+        # and their character slots, set by AutonaActions.SetRoster. These
+        # spinboxes ask for a change and show the count (_SyncRosterSpins,
+        # signals blocked); they were the counts until then, and every
+        # other entry point drove them. Characters-per-player is not
+        # user-facing (the PLAYERS tab that drove it went); the hidden
+        # spinbox keeps the count for a board that has no player slot left,
+        # whose next players get it, as its value always did. Default:
         # core's DEFAULT_CHARACTERS_PER_PLAYER (the headless seed's too).
         self.charNumber = QSpinBox(self)
-        self.charNumber.setMaximum(100)
-        self.charNumber.valueChanged.connect(self.SetCharacterNumber)
+        self.charNumber.setMaximum(AutonaActions.MAX_CHARACTERS_PER_PLAYER)
         self.charNumber.setValue(DEFAULT_CHARACTERS_PER_PLAYER)
+        self.charNumber.valueChanged.connect(self.SetCharacterNumber)
         self.charNumber.setVisible(False)
 
         self.playerNumber = QSpinBox()
+        self.playerNumber.setMaximum(AutonaActions.MAX_PLAYERS_PER_TEAM)
         self.playerNumber.setFixedWidth(120)
         self._playerNumberLabel = QLabel(QApplication.translate("app", "Players per team"))
         settingsRow.addWidget(self._playerNumberLabel)
@@ -493,10 +507,13 @@ class AutonaScoreboardWidget(QWidget):
         # the ones this board actually has.
         for team in (1, 2):
             AutonaActions.instance.ClearTeamRoster(self.scoreboardNumber, team)
-        self.playerNumber.setValue(1)
-        # Re-assert the characters-per-player default so the freshly-built
-        # player widgets pick it up instead of getting pinned to 1.
-        self.charNumber.setValue(DEFAULT_CHARACTERS_PER_PLAYER)
+        # The first roster: one player a team, the default characters (the
+        # game's players per team follows once the board is built:
+        # SetDefaultsFromAssets). Its cards now -- nothing is held yet, so
+        # no held cycle would build them.
+        AutonaActions.instance.SetRoster(
+            self.scoreboardNumber, 1, DEFAULT_CHARACTERS_PER_PLAYER)
+        self._FollowRoster()
 
         self._applyScoreboardMode(self.singlePlayer)
 
@@ -979,7 +996,13 @@ class AutonaScoreboardWidget(QWidget):
         # First, while nothing below can have raised: the asset manager
         # replaced its models, so no stage row may stay on the retired one.
         self.individualGameTracker.RebindStageModel()
-        self.SetDefaultsFromAssets()
+        # The game's roster was set by the shared wiring, connected ahead of
+        # this (bootstrap.wire_game_roster -> AutonaActions.ApplyGameRoster;
+        # it was SetDefaultsFromAssets, here, until ADR-005 S3e-6). The
+        # cards follow it now: the CommitHeld below takes the held cycle
+        # that would have built them along with it.
+        self._FollowRoster()
+        self._SchedulePlayerRender()
         # The set length again, rows included (they recorded games of the
         # previous game's stages): what re-emitting the spinbox's
         # valueChanged did, now core's. The rows are rebuilt from its held
@@ -1039,6 +1062,9 @@ class AutonaScoreboardWidget(QWidget):
             # First: it only queues, and a sync below that raises must not
             # leave the cards behind the state.
             self._SchedulePlayerRender()
+            # The cards the roster has (ADR-005 S3e-6), before anything
+            # below looks for one. Built now, destroyed later.
+            self._FollowRoster()
             swapped = self._NoticeSwap()
             self._SyncSetFields()
             # Before the score: a cycle that resized the rows (a set load's
@@ -1149,9 +1175,8 @@ class AutonaScoreboardWidget(QWidget):
 
         for team, column in ((1, self.team1column), (2, self.team2column)):
             # findChild rather than a cached reference: the losers checkbox
-            # is re-homed into the solo player's row on the singles board
-            # (_placeLosersOnDetailsRow), and a cached wrapper would outlive
-            # the C++ object if its host were ever torn down.
+            # is re-homed onto a row of its own on the singles board
+            # (_placeLosersOnOwnRow).
             losers = StateManager.Get(
                 f"{self.statePrefix}.team.{team}.{schema.TEAM_LOSERS_KEY}",
                 None)
@@ -1304,8 +1329,8 @@ class AutonaScoreboardWidget(QWidget):
         # display_options delta -- including the seven options with no desktop
         # effect at all -- so it is worth doing only when show_sponsor is the
         # option that moved. The initial application is not this method's job:
-        # _setPlayersPerTeamImpl re-asserts it whenever the player widgets are
-        # (re)built.
+        # _FollowCards re-asserts it whenever player cards are built or
+        # retired.
         if self._sponsorAction is None or not sponsorChanged:
             return
         show = self._sponsorAction.isChecked()
@@ -1374,6 +1399,15 @@ class AutonaScoreboardWidget(QWidget):
             # the commit and this slot running.
             self.btApply.setEnabled(
                 StateManager.HasPendingChanges(self.statePrefix))
+            if not dirty:
+                # A commit drops the held cycle this subtree still had owed
+                # (StateManager.CommitHeld: 反映 is not an edit), and with
+                # it any write of another thread's save block that was
+                # waiting in it -- a roster change from the Web, say. The
+                # cards are brought to the state here as well, or they
+                # would stay a slot behind it until the next edit.
+                self._SchedulePlayerRender()
+                self._FollowRoster()
 
     def _UpdateEntrantsMatchItem(self, data):
         """Keep the 'Winners TOP{entrants}' / 'Losers TOP{entrants}' candidates
@@ -1647,29 +1681,50 @@ class AutonaScoreboardWidget(QWidget):
         if getattr(self, "_bottomOptions", None) is not None:
             self._bottomOptions.setVisible(not singlePlayer)
         if singlePlayer:
-            self.playerNumber.setValue(1)
-            self._placeLosersOnDetailsRow()
+            # The singles roster: one player a team (AutonaActions.SetRoster;
+            # the board is built with one, so this changes nothing there).
+            AutonaActions.instance.SetRoster(
+                self.scoreboardNumber, 1, self.charNumber.value())
+            self._FollowRoster()
+            self._placeLosersOnOwnRow()
 
-    def _placeLosersOnDetailsRow(self):
-        # Singles board only: the card header this checkbox lived in is
-        # otherwise empty (1P/2P label and team name are hidden), so the
-        # LOSERS checkbox joins the solo player's ">>詳細" row instead,
-        # right-aligned after the row's stretch. Reparenting keeps the
-        # widget a descendant of its team column, so every existing
-        # findChild(QCheckBox, "losers") lookup (state export, the render,
-        # reset, SetData) keeps resolving the same instance. Safe on this
-        # board because the player count is pinned to 1 — the hosting
-        # player widget is never torn down by SetPlayersPerTeam.
-        for column, players in ((self.team1column, self.team1playerWidgets),
-                                (self.team2column, self.team2playerWidgets)):
+    def _placeLosersOnOwnRow(self):
+        """Singles board only: the card header the LOSERS checkbox lives in
+        is otherwise empty (1P/2P label and team name are hidden), so it
+        gets a row of its own, right-aligned, directly below the player
+        cards' group box.
+
+        A row of the team column, not of a card. It used to join the solo
+        card's ">>詳細" row, which was safe only while that card could never
+        go -- and it can (ADR-005 S3e-6: the Web takes the singles board to
+        no players at all, and the card is destroyed with its slot), and the
+        box went with it, for good. Moved once, while the board is built:
+        never inside a held cycle (agent-pitfalls #14), and the header's
+        layout items are released from PySide first, since the move frees
+        the one that held the box. It stays a descendant of its team column,
+        so every findChild(QCheckBox, "losers") lookup (the render, reset,
+        the handler wired in _WireTeamColumn) keeps resolving the same
+        instance.
+        """
+        for column in (self.team1column, self.team2column):
             losersCheck = column.findChild(QCheckBox, schema.TEAM_LOSERS_KEY)
-            if losersCheck is None or not players:
+            groupBox = column.findChild(QGroupBox, "groupBox")
+            if losersCheck is None or groupBox is None:
                 continue
-            if losersCheck.parentWidget() is players[0]:
+            if column.findChild(QHBoxLayout, "losersRow") is not None:
                 continue
-            linkRow = getattr(players[0], "linkRow", None)
-            if linkRow is not None:
-                linkRow.addWidget(losersCheck)
+            columnLayout = column.layout()
+            row = QHBoxLayout()
+            row.setObjectName("losersRow")
+            row.setContentsMargins(0, 0, 0, 0)
+            columnLayout.insertLayout(columnLayout.indexOf(groupBox) + 1, row)
+            row.addStretch()
+            header = column.findChild(QHBoxLayout, "horizontalLayout_2")
+            if header is not None:
+                _releaseLayoutItemWrappers(header)
+            row.addWidget(losersCheck)
+            # Flush with the inputs of the card above, as in the header.
+            row.addSpacing(UI.SPACE_MD)
 
     def ExportTeamLogo(self, team, value):
         # The team-name QLineEdit's editingFinished handler (a human typing).
@@ -1875,103 +1930,177 @@ class AutonaScoreboardWidget(QWidget):
             self.btSelectSet.setVisible(False)
 
     def SetCharacterNumber(self, value):
-        # logger.info(f"AutonaScoreboardWidget#SetCharacterNumber({value})")
-        for pw in self.playerWidgets:
-            pw.SetCharactersPerPlayer(value)
+        """charNumber.valueChanged: the characters per player
+        (AutonaActions.SetRoster). The cards follow from the held cycle."""
+        AutonaActions.instance.SetRoster(
+            self.scoreboardNumber, characters=value)
 
     def SetPlayersPerTeam(self, number):
-        # logger.info(f"AutonaScoreboardWidget#SetPlayersPerTeam({number})")
-        # Wrap the whole reconfiguration so player-widget construction Sets +
-        # the cleanup Unsets coalesce into one state save / WS broadcast.
-        with StateManager.SaveBlock():
-            self._setPlayersPerTeamImpl(number)
+        """playerNumber.valueChanged, the operator's PLAYERS per team: the
+        roster in one save cycle (AutonaActions.SetRoster). New players get
+        the characters per player charNumber shows -- the count of a board
+        with no player left, too, as its value always was. The cards follow
+        from the held cycle (_SyncPlayerCards)."""
+        AutonaActions.instance.SetRoster(
+            self.scoreboardNumber, number, self.charNumber.value())
 
-    def _setPlayersPerTeamImpl(self, number):
-        while len(self.team1playerWidgets) < number:
-            p = AutonaScoreboardPlayerWidget(
-                index=len(self.team1playerWidgets)+1,
-                teamNumber=1,
-                path=f'score.{self.scoreboardNumber}.team.{1}.player.{len(self.team1playerWidgets)+1}')
-            self.playerWidgets.append(p)
+    # ── the player cards follow the roster (ADR-005 S3e-6) ────────────────
+    #
+    # The roster is the state's: `score.{n}.team.{t}.player` has the slots,
+    # and each slot its `character` slots. This board used to own both
+    # counts -- its two spinboxes built and tore down the cards, and the
+    # cards published and unset the slots -- so every other entry point (a
+    # game load, a set's entrants, the Web) drove a spinbox, and a shell
+    # without the board could not change a count at all. Now every entry
+    # point calls AutonaActions.SetRoster and the board follows:
+    #
+    # - in the held cycle (_onHeldStateUpdated), synchronously: a card per
+    #   slot is built, with as many character rows as the slot has
+    #   character slots, and writes nothing as it is built (its slot is
+    #   already seeded); a card whose slot is gone is retired -- hidden,
+    #   silenced, out of the lists;
+    # - once control is back in the event loop, the retired cards are
+    #   destroyed (_DestroyRetiredCards), their layout items released from
+    #   PySide first (agent-pitfalls #14). Nothing is torn down inside the
+    #   notification that noticed the slots go.
+    #
+    # The few places whose held cycle is taken by a CommitHeld in the same
+    # block (the build, a game load) call _SyncPlayerCards themselves.
 
-            self.team1column.findChild(
-                QGroupBox, "groupBox").layout().addWidget(p)
-            p.SetCharactersPerPlayer(self.charNumber.value())
+    def _RosterCount(self, team) -> int:
+        """The player slots team `team` has, counted as SetRoster counts
+        them (AutonaActions.RosterCount): a card stands for slot 1..n."""
+        return AutonaActions.RosterCount(self.scoreboardNumber, team)
 
-            p.btMoveUp.clicked.connect(
-                lambda checked=False, p=p: self._MovePlayer(p, -1))
-            p.btMoveDown.clicked.connect(
-                lambda checked=False, p=p: self._MovePlayer(p, 1))
+    def _FollowRoster(self):
+        """_SyncPlayerCards, from a caller that goes on whatever happens
+        here (a CommitHeld after it, the rest of the held cycle): a sync
+        that raises is logged, and the next one tries again."""
+        try:
+            self._SyncPlayerCards()
+        except Exception:
+            logger.exception(
+                f"{self.statePrefix}: following the roster failed")
 
-            p.instanceSignals.render_requested.connect(
-                self._SchedulePlayerRender)
+    def EmptyRosterCharacters(self) -> int:
+        """The characters per player the next players get on a board with
+        no character slot left: what charNumber shows, as the spinbox's
+        value always was (BoardHost.EmptyRosterCharacters)."""
+        return self.charNumber.value()
 
-            self.team1playerWidgets.append(p)
+    def KeepEmptyRosterCharacters(self, value):
+        """A characters per player asked for while the board has no
+        character slot (the Web's): shown, and given to the players it gets
+        next (SetPlayersPerTeam, EmptyRosterCharacters). Signals blocked:
+        there is nothing to write."""
+        with QSignalBlocker(self.charNumber):
+            self.charNumber.setValue(int(value))
 
-            p = AutonaScoreboardPlayerWidget(
-                index=len(self.team2playerWidgets)+1,
-                teamNumber=2,
-                path=f'score.{self.scoreboardNumber}.team.{2}.player.{len(self.team2playerWidgets)+1}')
-            self.playerWidgets.append(p)
+    def _SyncPlayerCards(self):
+        """Build and retire player cards until each team has one per slot of
+        the state's roster, and show the counts. Writes nothing."""
+        if self._syncingCards:
+            # Nothing below writes, so nothing brings us back here; a sync
+            # must never stack on another all the same.
+            logger.warning(
+                f"{self.statePrefix}: re-entrant player card sync, skipping")
+            return
+        self._syncingCards = True
+        try:
+            counts = {team: self._RosterCount(team) for team in (1, 2)}
+            teams = ((1, self.team1playerWidgets),
+                     (2, self.team2playerWidgets))
+            changed = False
+            # Last first, team 1's then team 2's: the order the cards used
+            # to be torn down in.
+            for index in range(max(len(cards) for _t, cards in teams), 0, -1):
+                for team, cards in teams:
+                    if len(cards) >= index > counts[team]:
+                        self._RetireCard(cards[index - 1], cards)
+                        changed = True
+            # One index at a time, team 1's then team 2's: the order they
+            # are built in, and the order of playerWidgets.
+            for index in range(1, max(counts.values()) + 1):
+                for team, cards in teams:
+                    if len(cards) < index <= counts[team]:
+                        self._AddCard(team, cards)
+                        changed = True
+            for card in self.playerWidgets:
+                card.SyncCharacterRows()
+            if changed or self._shownPlayerCount is None:
+                self._FollowCards()
+            self._SyncRosterSpins()
+        finally:
+            self._syncingCards = False
 
-            self.team2column.findChild(
-                QGroupBox, "groupBox").layout().addWidget(p)
-            p.SetCharactersPerPlayer(self.charNumber.value())
+    def _AddCard(self, team, cards):
+        index = len(cards) + 1
+        card = AutonaScoreboardPlayerWidget(
+            index=index, teamNumber=team,
+            path=f"{self.statePrefix}.team.{team}.player.{index}")
+        column = self.team1column if team == 1 else self.team2column
+        column.findChild(QGroupBox, "groupBox").layout().addWidget(card)
 
-            p.btMoveUp.clicked.connect(
-                lambda checked=False, p=p: self._MovePlayer(p, -1))
-            p.btMoveDown.clicked.connect(
-                lambda checked=False, p=p: self._MovePlayer(p, 1))
+        card.btMoveUp.clicked.connect(
+            lambda checked=False, card=card: self._MovePlayer(card, -1))
+        card.btMoveDown.clicked.connect(
+            lambda checked=False, card=card: self._MovePlayer(card, 1))
+        card.instanceSignals.render_requested.connect(
+            self._SchedulePlayerRender)
 
-            p.instanceSignals.render_requested.connect(
-                self._SchedulePlayerRender)
+        cards.append(card)
+        self.playerWidgets.append(card)
 
-            self.team2playerWidgets.append(p)
+    def _RetireCard(self, card, cards):
+        cards.remove(card)
+        self.playerWidgets.remove(card)
+        card.Retire()
+        if not self._retiredCards:
+            QTimer.singleShot(0, self, self._DestroyRetiredCards)
+        self._retiredCards.append(card)
 
-        while len(self.team1playerWidgets) > number:
-            team1player = self.team1playerWidgets[-1]
-            team1player.player.Unset()
-            team1player.setParent(None)
-            self.playerWidgets.remove(team1player)
-            self.team1playerWidgets.remove(team1player)
-            team1player.deleteLater()
+    def _DestroyRetiredCards(self):
+        """The cards _SyncPlayerCards retired, destroyed from the event loop
+        (AutonaScoreboardPlayerWidget.Destroy releases their layout items
+        first). The board is the timer's context: a board torn down first
+        takes the retired cards with it."""
+        cards, self._retiredCards = self._retiredCards, []
+        for card in cards:
+            try:
+                card.Destroy()
+            except RuntimeError:
+                # Already gone with something else.
+                logger.debug(f"{self.statePrefix}: retired card already gone")
+            except Exception:
+                # The rest are destroyed all the same.
+                logger.exception(
+                    f"{self.statePrefix}: destroying a retired card failed")
 
-            team2player = self.team2playerWidgets[-1]
-            team2player.player.Unset()
-            team2player.setParent(None)
-            self.playerWidgets.remove(team2player)
-            self.team2playerWidgets.remove(team2player)
-            team2player.deleteLater()
-
-        # ...and the slots the state carries without a widget: a roster
-        # restored from a previous session, or one left behind by a board
-        # that shrank while it was not built.
-        for team in (1, 2):
-            AutonaActions.instance.TrimTeamRoster(
-                self.scoreboardNumber, team, number)
-
+    def _FollowCards(self):
+        """The chrome that follows the number of players: the team names
+        (shown for a team, emptied and hidden for one player -- the state's
+        names were emptied with the roster, SetRoster), the cards' titles
+        and move buttons, the sponsor field's display option and the
+        birthday, on every card."""
+        number = len(self.team1playerWidgets)
         multiPlayer = number > 1
-
-        # The card header label is always visible (text set by
-        # _applyScoreboardMode); only the team-name field follows the
-        # player count.
-        if multiPlayer:
-            self.team1column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setVisible(True)
-            self.team2column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setVisible(True)
-        else:
-            # The names are emptied here, not finished by the operator: a
-            # text a render left in a field must not hold the clear back.
-            self._teamNameSkipped.clear()
-            for team in (1, 2):
+        if number != self._shownPlayerCount:
+            self._shownPlayerCount = number
+            for team, column in ((1, self.team1column), (2, self.team2column)):
+                edit = column.findChild(QLineEdit, schema.TEAM_NAME_KEY)
+                if edit is None:
+                    continue
+                if multiPlayer:
+                    edit.setVisible(True)
+                    continue
+                # Blocked: hiding the field the operator is in finishes it,
+                # and nothing is written from the held cycle. What a render
+                # left in it is not kept for later either.
+                self._teamNameSkipped.discard(team)
                 self._teamNameHeldBack.Shown(team, "")
-            self.team1column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setVisible(False)
-            self.team1column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setText("")
-            self.team1column.findChild(
-                QLineEdit, schema.TEAM_NAME_KEY).editingFinished.emit()
-            self.team2column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setVisible(False)
-            self.team2column.findChild(QLineEdit, schema.TEAM_NAME_KEY).setText("")
-            self.team2column.findChild(
-                QLineEdit, schema.TEAM_NAME_KEY).editingFinished.emit()
+                with QSignalBlocker(edit):
+                    edit.setVisible(False)
+                    edit.setText("")
 
         for pw in self.playerWidgets:
             pw.findChild(QLabel, "title").setVisible(multiPlayer)
@@ -1989,6 +2118,23 @@ class AutonaScoreboardWidget(QWidget):
             w = pw.findChild(QWidget, 'birthday')
             if w:
                 w.hide()
+
+    def _SyncRosterSpins(self):
+        """Show the counts on the two spinboxes, signals blocked. A board
+        with no player slot keeps the characters per player it showed."""
+        players = len(self.team1playerWidgets)
+        if self.playerNumber.value() != players:
+            with QSignalBlocker(self.playerNumber):
+                self.playerNumber.setValue(players)
+        characters = None
+        for card in self.playerWidgets:
+            picks = StateManager.Get(card.player.Key("character"))
+            if isinstance(picks, dict):
+                characters = len(picks)
+                break
+        if characters is not None and self.charNumber.value() != characters:
+            with QSignalBlocker(self.charNumber):
+                self.charNumber.setValue(characters)
 
     def SwapTeams(self):
         """The SWAP button, and the Web UI's swap of a 1v1 / team board. The
@@ -2342,9 +2488,11 @@ class AutonaScoreboardWidget(QWidget):
         the BEST OF spinbox driven from here), the rows it resizes included.
         The players are core's since ADR-005 S3e-3 (PlayerService.ApplyData;
         they were the cards' SetData, resolving the country, character and
-        skin models): what is still the board's is the roster size it sets
-        for a set's entrants (playerNumber) and the upset factor a new
-        bracket type or roster size asks for (below, until ADR-005 S3e-7);
+        skin models), and so is the roster size a set's entrants set
+        (AutonaActions.SetRoster, ADR-005 S3e-6; it was the playerNumber
+        spinbox driven from here): what is still the board's is the upset
+        factor a new bracket type or roster size asks for (below, until
+        ADR-005 S3e-7);
         the statistics a change of player asks for are the load's own
         (PlayerService.Announce, ADR-005 S3e-5). Which team an entrant
         lands on is core's answer (SetLoadService.DisplayTeam), so the swap
@@ -2399,7 +2547,13 @@ class AutonaScoreboardWidget(QWidget):
         entrants = data.get("entrants")
         stats = StatsService(self.scoreboardNumber)
         wasSingles = stats.IsSingles()
-        self.playerNumber.setValue(len(max(entrants, key=lambda x: len(x))))
+        # The roster the larger side needs (AutonaActions.SetRoster, ADR-005
+        # S3e-6), new players with the characters per player charNumber
+        # shows. The cards follow once the set's save block is over; the
+        # players are loaded into the state's slots, not into cards.
+        AutonaActions.instance.SetRoster(
+            self.scoreboardNumber, len(max(entrants, key=lambda x: len(x))),
+            self.charNumber.value())
         singlesChanged = stats.IsSingles() != wasSingles
         seedMoved = False
 
@@ -2413,8 +2567,6 @@ class AutonaScoreboardWidget(QWidget):
                 noMains = False
             for t, team in enumerate(entrants):
                 stateTeam = self.setLoad.DisplayTeam(t + 1)
-                teamInstance = (self.team1playerWidgets if stateTeam == 1
-                                else self.team2playerWidgets)
 
                 if len(team) > 1:
                     # The team name and the crest that follows from it are
@@ -2432,10 +2584,10 @@ class AutonaScoreboardWidget(QWidget):
                         # per-player cost on set load. Using elif so the
                         # mains-only path only runs in the non-overwrite case.
                         change = self._ApplyPlayer(
-                            teamInstance[p], player, True, True, noMains)
+                            stateTeam, p + 1, player, True, True, noMains)
                     elif data.get("has_selection_data") and noMains != True:
                         change = self._ApplyPlayer(
-                            teamInstance[p], {"mains": player.get("mains")},
+                            stateTeam, p + 1, {"mains": player.get("mains")},
                             False, False)
                     seedMoved = seedMoved or change.seedChanged
         except Exception as e:
@@ -2464,43 +2616,64 @@ class AutonaScoreboardWidget(QWidget):
         return True
 
     def _WritePlayerSlot(self, team, player, data):
-        """Write one player slot (1-based team/player). Raises on failure."""
-        team = int(team) - 1
-        player = int(player) - 1
+        """Write one player slot (1-based state team/player). Raises on
+        failure.
 
-        teamInstances = [self.team1playerWidgets,
-                         self.team2playerWidgets]
-        card = teamInstances[team][player]
+        The slots are the state's since ADR-005 S3e-6, indexed as the card
+        lists were: a number past the roster raises, and a "0" -- a
+        negative index -- lands on team 2 / the last player. That is the
+        bug S3e-4 recorded for a legacy POST /score payload, left as it is
+        for S3e-7 to fix along with post_score."""
+        stateTeam = [1, 2][int(team) - 1]
+        slots = list(range(1, self._RosterCount(stateTeam) + 1))
+        slot = slots[int(player) - 1]
+        path = f"{self.statePrefix}.team.{stateTeam}.player.{slot}"
 
-        self._ApplyPlayer(card, data, True, False)
+        self._ApplyPlayer(stateTeam, slot, data, True, False)
         if data.get("savePlayerToDb", False):
-            card.player.SavePlayerToDB()
+            PlayerService(path).SavePlayerToDB()
 
-    def _ApplyPlayer(self, card, data, loadFromDB, clear,
+    def _PlayerSlotPath(self, team, player):
+        """The path of slot `player` of state team `team` (ints), or None
+        when the state has no such slot. The slots are the state's (ADR-005
+        S3e-6): a set's roster is written in its save block, before the
+        cards that will show it are built."""
+        if team not in (1, 2) or player < 1:
+            return None
+        path = f"{self.statePrefix}.team.{team}.player.{player}"
+        if not isinstance(StateManager.Get(path), dict):
+            return None
+        return path
+
+    def _ApplyPlayer(self, team, slot, data, loadFromDB, clear,
                      no_mains=False) -> SlotChange:
-        """Load a player into `card`'s slot (PlayerService.ApplyData,
-        ADR-005 S3e-3, which also asks for the statistics the change calls
-        for: S3e-5), in one save cycle; the change is returned. The card
-        shows the slot
-        from the held cycle (_SchedulePlayerRender), like any write it did
-        not make: a field the operator is typing in shows the load once they
-        leave it, and the text they were typing is held back (HeldBackText)
-        -- where the card's SetData used to put the new text under the
-        caret.
+        """Load a player into slot `slot` of state team `team`
+        (PlayerService.ApplyData, ADR-005 S3e-3, which also asks for the
+        statistics the change calls for: S3e-5), in one save cycle; the
+        change is returned. The slot is addressed in the state, not through
+        its card (S3e-6): a set's entrants resize the roster in the same
+        save block, and the cards follow from the held cycle after it. The
+        card shows the slot from the held cycle (_SchedulePlayerRender),
+        like any write it did not make: a field the operator is typing in
+        shows the load once they leave it, and the text they were typing is
+        held back (HeldBackText) -- where the card's SetData used to put the
+        new text under the caret.
 
         A load that clears also discards the text typed into the card's
         combos and never picked (DiscardTypedText), but for the combo the
         operator is in: the card's SetData started with its Clear(), which
         put every combo back on its row, and the render only moves a combo
         whose row is wrong -- the typed text stayed, and the next pick on
-        the card published it (S3e-3 review).
+        the card published it (S3e-3 review). A card not built yet has
+        nothing typed into it.
         """
+        service = PlayerService(
+            f"{self.statePrefix}.team.{team}.player.{slot}")
         with StateManager.SaveBlock():
             try:
-                return card.player.ApplyData(
-                    data, loadFromDB, clear, no_mains)
+                return service.ApplyData(data, loadFromDB, clear, no_mains)
             finally:
-                self._CardLoaded(card, clear)
+                self.PlayerLoaded(team, slot, clear)
 
     def PlayerLoaded(self, team, player, cleared):
         """A web operation loaded a player into slot `player` of state team
@@ -2540,27 +2713,36 @@ class AutonaScoreboardWidget(QWidget):
         # The PLAYERS panel's "set to P1 / P2". The Web's tag lookup is
         # AutonaWebOperations.load_player_from_tag since ADR-005 S3e-4 (the
         # same load, the slot resolved from the state).
-        team = int(team)-1
-        player = int(player)-1
-        teamInstances = [self.team1playerWidgets,
-                         self.team2playerWidgets]
-
-        if StateManager.Get(f"{self.statePrefix}.teamsSwapped", False):
-            teamInstances.reverse()
+        # `team` is the set's (1-based): after a swap, the other state team.
+        # The slot is the state's (ADR-005 S3e-6); one it does not have
+        # raises, as the card list's index did.
+        team = int(team) - 1
+        player = int(player)
+        swapped = StateManager.Get(f"{self.statePrefix}.teamsSwapped", False)
+        stateTeam = 2 - team if swapped else team + 1
 
         playerData = PlayerDB.instance.GetPlayerFromTag(tag)
         if playerData:
-            self._ApplyPlayer(teamInstances[team][player], playerData, True,
-                              True, no_mains)
+            if self._PlayerSlotPath(stateTeam, player) is None:
+                raise IndexError(f"{self.statePrefix} team {stateTeam} has "
+                                 f"no player {player}")
+            self._ApplyPlayer(stateTeam, player, playerData, True, True,
+                              no_mains)
             return True
         return False
 
     def SetDefaultsFromAssets(self):
-        # Propagate the game's default players-per-team; characters-per-player
-        # is forced back to its default (3) regardless of game asset config.
+        # The game's default players-per-team; characters-per-player is
+        # forced back to its default (3) regardless of game asset config.
         # Both come from core, where the headless shell's launch seed reads
-        # them too (PlayerService.SeedEmptyRoster, ADR-005 S3d).
-        self.playerNumber.setValue(DefaultPlayersPerTeam())
-        self.charNumber.setValue(DEFAULT_CHARACTERS_PER_PLAYER)
+        # them too (PlayerService.SeedEmptyRoster, ADR-005 S3d). A game load
+        # writes them for every built board (AutonaActions.ApplyGameRoster,
+        # bootstrap.wire_game_roster, ADR-005 S3e-6); this is the board's
+        # own way in, and the cards follow at once -- the caller's CommitHeld
+        # may take the held cycle that would have shown them.
+        AutonaActions.instance.SetRoster(
+            self.scoreboardNumber, DefaultPlayersPerTeam(),
+            DEFAULT_CHARACTERS_PER_PLAYER)
+        self._FollowRoster()
 
     pass

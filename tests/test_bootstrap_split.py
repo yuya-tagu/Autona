@@ -140,7 +140,9 @@ def test_bootstrap_gui_steps_and_their_order():
     # PlayerDB wirings follow the adapter they connect to (the model switched
     # on before the first SetupModel), and the hotkeys are routed to
     # AutonaActions right after they exist. The web operations' desktop
-    # registrations come last, after the dock and the adapter they point at.
+    # registrations come after the dock and the adapter they point at, and
+    # the game load's roster last: ahead of every board and its cards, run
+    # through the board host registered just above (ADR-005 S3e-6).
     assert _steps("bootstrap_gui") == [
         "bootstrap_core()",
         "AutonaHotkeys()",
@@ -161,6 +163,7 @@ def test_bootstrap_gui_steps_and_their_order():
         "AutonaScoreboardManager.instance)",
         "AutonaWebOperations.loadGameByCodename"
         " = AutonaGameAssetManager.instance.LoadGameByCodename",
+        "wire_game_roster(AutonaGameAssetManager.instance.signals.gameLoaded)",
     ]
 
 
@@ -183,6 +186,40 @@ _SHARED_WIRING = {
 def test_the_shared_wiring_steps():
     for name, steps in _SHARED_WIRING.items():
         assert _steps(name) == steps, name
+
+
+def test_both_shells_follow_a_game_load_with_the_same_roster():
+    """A game load's roster (the game's players per team, the default
+    characters per player) is AutonaActions.ApplyGameRoster, run through
+    the shell's board host. It was each built board's onLoad handler until
+    ADR-005 S3e-6, so the headless shell's boards never followed a load.
+    One function makes the connection: bootstrap_gui() for the desktop --
+    ahead of the boards, whose cards and handler follow it on the same
+    onLoad (the order: test_bootstrap_gui_steps_and_their_order) -- and the
+    headless shell for its loader. The window does not make it again."""
+    assert _steps("wire_game_roster") == ["game_loaded.connect(apply)"]
+    tree = ast.parse((PROJECT_ROOT / "src" / "bootstrap.py").read_text(
+        encoding="utf-8"))
+    apply = next(node for node in ast.walk(tree)
+                 if isinstance(node, ast.FunctionDef) and node.name == "apply"
+                 and "ApplyGameRoster" in ast.unparse(node))
+    assert "AutonaWebOperations.boardHost.Run(" in ast.unparse(apply)
+    counts = {shell: sum(call.startswith("wire_game_roster(")
+                         for call in _calls(shell))
+              for shell in ("src/bootstrap.py", "src/Autona.py",
+                            "src/headless.py")}
+    assert counts == {"src/bootstrap.py": 1, "src/Autona.py": 0,
+                      "src/headless.py": 1}
+    # ...and no board applies the game's counts on its own any more: its
+    # onLoad handler follows the roster the wiring wrote.
+    board = (PROJECT_ROOT / "src" / "AutonaScoreboardWidget.py").read_text(
+        encoding="utf-8")
+    handler = next(
+        node for node in ast.walk(ast.parse(board))
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_onGameAssetsLoaded")
+    assert "SetDefaultsFromAssets" not in ast.unparse(handler)
+    assert "SetRoster" not in ast.unparse(handler)
 
 
 def _calls(path):

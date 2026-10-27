@@ -251,3 +251,10 @@ AV は防ぐが**リークは防がない**。`AutonaBasePlayerWidget.LoadStates
 ## 16. StateManager の observer から GameAssetCatalog の writer を呼ばない（ADR-005 S1a）
 
 - StateManager の observer（Bridge の direct 接続ハンドラ含む）から `GameAssetCatalog` の writer（`SelectGame` / `ForgetSelection` / `ScanGames`）を呼ばない。catalog は「catalog lock → `StateManager.lock`」の順で取るので、`SM.lock` 保持中の observer から writer を呼ぶと順序が逆転してデッドロックする。必要なら `QTimer.singleShot(0, ...)` 等で observer の外へ出してから呼ぶ
+
+## 17. held 通知と `state_updated` のハンドラは `StateManager.lock` の中で走る。その中で別スレッドを待たない（ADR-005 S3e-6 レビュー）
+
+- `held_state_updated` / `held_dirty_changed` / `state_updated` は `StateManager.lock` の中で出る（`SaveState` の中。lock を持った呼び出し側の中で書いたときはその中）。GUI スレッドで書いた変更なら、Bridge 経由のウィジェットのハンドラも direct に、lock を持ったまま走る
+- だからハンドラの中で別スレッドを待たない: `gui_thread_sync` / `run_sync` / `QDialog.exec()` / `processEvents()` をしない。待たれたスレッドが lock を取りに来ていればデッドロックになる（`exec` / `processEvents` は再入も起こす: #9）
+- カードの構築（`AutonaScoreboardWidget._SyncPlayerCards`）は lock の中で行い、それを許容している。同じ held サイクルの後続ハンドラが、カードがあることを前提にしているため。held の通知を lock の外へ出す案は採らなかった: ハンドラ全体が lock の中で走ることが暗黙の原子性になっていて（例: ステージボタンの `PublishStageResults` の held ハンドラの途中に Flask スレッドの `score:adjust` が割り込まない）、外へ出すとその競合が入るため
+- pin: `tests/test_roster_flow.py` の `test_no_thread_is_waited_on_inside_a_held_cycle`

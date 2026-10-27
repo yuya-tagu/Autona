@@ -25,16 +25,18 @@ What the window does at startup and this shell does too, in its own words:
   scan and the last pick restored;
 - the player DB, and the web server with the window's pushes
   (bootstrap.wire_web_server);
+- a game load's roster: the 1v1 / team boards go to the game's players per
+  team (bootstrap.wire_game_roster, the desktop's too; ADR-005 S3e-6);
 - the LAN exposure and the port check decided from settings.json and only
   logged: there is nobody to ask;
 - a stop on Ctrl+C / Ctrl+Break, on the console's close button and on
   SIGTERM (where the platform delivers it), which lets ./out and
   user_data/state.json finish writing first.
 
-Not here: the board-level reactions to a game load (the players per team a
-game sets, the best of re-published in the new locale) -- they are a built
-board's (S2g), and a headless run has none. So the boards keep the player
-slots seeded at launch, before any game is restored: one per team.
+Not here: the best of re-published in the new locale on a game load -- a
+built board's reaction, and a headless run has none. The players per team a
+game sets is not one any more (ADR-005 S3e-6): the boards seeded at launch,
+one player a team, follow the game restored after them.
 
 Importing this module does nothing (agent-pitfalls #1): main.py calls run(),
 and before its single-instance gate the launch checks (instance_tag,
@@ -131,6 +133,11 @@ class HeadlessSignals(QObject):
     # A game was loaded (the headless counterpart of the window's
     # GameChanged): the web server pushes the state and the characters.
     gameChanged = Signal()
+    # The GameAssetSnapshot that load published, emitted just before
+    # gameChanged (the desktop adapter's gameLoaded; read by
+    # bootstrap.wire_game_roster). Carried from the loader's thread: the
+    # catalog's Current() can be a later load's by the time this runs.
+    gameLoaded = Signal(object)
 
 
 class HeadlessGames:
@@ -239,21 +246,23 @@ class HeadlessGames:
                 if snapshot is None:
                     return
             logger.info(f"Game loaded: {codename}")
-            AutonaQtHelper.gui_executor(self._OnLoaded)
+            AutonaQtHelper.gui_executor(lambda: self._OnLoaded(snapshot))
         except Exception:
             logger.error(traceback.format_exc())
         finally:
             if done is not None:
                 done()
 
-    def _OnLoaded(self):
+    def _OnLoaded(self, snapshot):
         # The pick persisted (the adapter's _PersistSelectedGame), then the
-        # listeners: the player DB refresh and the web server's push.
+        # listeners: the boards' roster (the load's own snapshot), the
+        # player DB refresh and the web server's push.
         from .core.SettingsManager import SettingsManager
         from .core.StateManager import StateManager
         SettingsManager.Set(
             "SELECTED_GAME_CODENAME",
             StateManager.Get("game.codename", "") or "")
+        self.signals.gameLoaded.emit(snapshot)
         self.signals.gameChanged.emit()
 
 
@@ -411,7 +420,8 @@ def Assemble(app, shell=None):
         shell = HeadlessShell(app)
     from .Helpers import AutonaQtHelper
     from .bootstrap import (
-        bootstrap_core, wire_tournament_data, wire_web_server)
+        bootstrap_core, wire_game_roster, wire_tournament_data,
+        wire_web_server)
 
     # The main thread, before anything can marshal to it.
     if AutonaQtHelper.gui_executor is None:
@@ -448,6 +458,9 @@ def Assemble(app, shell=None):
     # The player DB follows a game load, as it follows the adapter's onLoad
     # on the desktop.
     games.signals.gameChanged.connect(AutonaPlayerDB.SetupModel)
+    # ...and so do the boards' rosters (the game's players per team), with
+    # the desktop's wiring. Before games.Start() below restores a game.
+    wire_game_roster(games.signals.gameLoaded)
 
     wire_tournament_data(on_failure=_OnTournamentLoadFailed)
 

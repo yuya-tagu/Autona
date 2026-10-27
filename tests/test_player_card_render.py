@@ -65,6 +65,7 @@ from shiboken6 import Shiboken
 
 from src.AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
 from src.core import StateSchema as schema
+from src.core.Actions import AutonaActions
 from src.core.DictHelper import deep_clone
 from src.core.PlayerDB import PlayerDB
 from src.core.PlayerService import CharacterSlot, PlayerService
@@ -399,6 +400,16 @@ def _trackerEnabled(key, default=None):
 def _withTracker(operation):
     with patch.object(SettingsManager, "Get", side_effect=_trackerEnabled):
         operation()
+
+
+def _gameLoaded(board):
+    """What a game load runs for the board: the roster the shared wiring
+    writes first (bootstrap.wire_game_roster -> ApplyGameRoster; it was the
+    board's handler's SetDefaultsFromAssets until ADR-005 S3e-6), then the
+    board's own onLoad handler. The cards' character models are not
+    reloaded here, as they were not before."""
+    AutonaActions.instance.ApplyGameRoster()
+    board._onGameAssetsLoaded()
 
 
 def _stageButton(board, game, team):
@@ -946,6 +957,48 @@ S2E_PREPASS_CHANGES = {
     "follow another set keeping mains": {"cycles": 2},
 }
 
+# ADR-005 S3e-6: the players per team and the characters per player are the
+# state's (AutonaActions.SetRoster); the board's spinboxes ask for a change
+# and its cards follow the slots. What changed on purpose:
+#
+# - `cycles`: a change of the characters per player is one save cycle (each
+#   card published its own rows: one a card), and so is a change of both
+#   counts at once -- clear_all's counts were the players' cycle and a cycle
+#   a card. The players' count alone was, and is, one.
+# - the best-of recordings' game load (below, S3E6_BEST_OF_CHANGES).
+#
+# The state, its key order and what 反映 publishes are the recording's at
+# every other step.
+S3E6_CHANGES = {
+    "two players, two characters": {"cycles": 2},
+}
+
+S3E6_SWAP_CHANGES = {
+    "two players, two characters": {"cycles": 2},
+    "three characters": {"cycles": 1},
+}
+
+S3E6_CLEAR_CHANGES = {
+    "two players, two characters": {"cycles": 2},
+    "one character": {"cycles": 1},
+    "two characters and refill": {"cycles": 5},
+    "web clear all": {"cycles": 5},
+    "two players, two characters, best of 5 and refill everything": {
+        "cycles": 16},
+}
+
+S3E6_SINGLES_CLEAR_CHANGES = {
+    "two characters": {"cycles": 1},
+    "one character": {"cycles": 1},
+    "two characters and refill": {"cycles": 3},
+    "web clear all": {"cycles": 3},
+    "two characters, best of 5 and refill everything": {"cycles": 10},
+}
+
+S3E6_PREPASS_CHANGES = {
+    "two players, two characters": {"cycles": 2},
+}
+
 
 def _layered(*layers):
     """Per-step change dicts of successive migrations as one: a later
@@ -1050,8 +1103,9 @@ def test_board_operations_publish_the_recorded_state(board, autonaApp):
         return
     recording = GOLDEN["operations"]
     golden = [_withChanges(_withChanges(_withChanges(_withChanges(
-        entry, S2B_CHANGES, recording), S2C_CHANGES, recording),
-        S2D_CHANGES, recording), S3E3_CHANGES, recording)
+        _withChanges(entry, S2B_CHANGES, recording), S2C_CHANGES, recording),
+        S2D_CHANGES, recording), S3E3_CHANGES, recording), S3E6_CHANGES,
+        recording)
               for entry in recording]
     assert [e["step"] for e in recorded] == [e["step"] for e in golden]
     for actual, expected in zip(recorded, golden):
@@ -1140,7 +1194,8 @@ def test_swap_operations_publish_the_recorded_state(
         f"{SWAP_GOLDEN_PATH} is missing: it is recorded on the pre-S2c tree "
         "(6a6f04cc) with AUTONA_RECORD_BOARD_OPERATIONS=1 -k swap_operations")
     recording = SWAP_GOLDEN["operations"]
-    golden = [_withChanges(entry, S2C_SWAP_CHANGES, recording)
+    golden = [_withChanges(_withChanges(entry, S2C_SWAP_CHANGES, recording),
+                           S3E6_SWAP_CHANGES, recording)
               for entry in recording]
     assert [e["step"] for e in recorded] == [e["step"] for e in golden]
     for actual, expected in zip(recorded, golden):
@@ -1217,7 +1272,8 @@ def test_clear_operations_publish_the_recorded_state(
     """Every clear from every entry point on the team board."""
     _replayClears(autonaApp, board, _clearSteps(board, autonaApp),
                   "operations", "clear operations",
-                  _layered(S2D_CLEAR_CHANGES, S2E_CLEAR_CHANGES))
+                  _layered(S2D_CLEAR_CHANGES, S2E_CLEAR_CHANGES,
+                           S3E6_CLEAR_CHANGES))
 
 
 @pytest.fixture
@@ -1232,7 +1288,8 @@ def test_singles_clear_operations_publish_the_recorded_state(
     _replayClears(autonaApp, singlesBoard,
                   _singlesClearSteps(singlesBoard, autonaApp),
                   "singles", "singles clear operations",
-                  _layered(S2D_SINGLES_CHANGES, S2E_SINGLES_CLEAR_CHANGES))
+                  _layered(S2D_SINGLES_CHANGES, S2E_SINGLES_CLEAR_CHANGES,
+                           S3E6_SINGLES_CLEAR_CHANGES))
 
 
 def test_set_load_prepass_clear_operations_publish_the_recorded_state(
@@ -1240,7 +1297,8 @@ def test_set_load_prepass_clear_operations_publish_the_recorded_state(
     """A set load's pre-pass with game rows recorded, both ways."""
     _replayClears(autonaApp, board, _prepassSteps(board),
                   "prepass", "set load pre-pass",
-                  _layered(S2D_PREPASS_CHANGES, S2E_PREPASS_CHANGES))
+                  _layered(S2D_PREPASS_CHANGES, S2E_PREPASS_CHANGES,
+                           S3E6_PREPASS_CHANGES))
 
 
 # ── the best of (ADR-005 S2e) ────────────────────────────────────────────
@@ -1372,7 +1430,7 @@ def _bestOfSteps(board, app, client):
             {"bestOf": 5, "round_name": "Losers Final"}))),
         ("a set with best of 0", tracked(lambda: board.ChangeSetData(
             {"bestOf": 0, "round_name": "Losers Final"}))),
-        ("game load, tracker on", tracked(board._onGameAssetsLoaded)),
+        ("game load, tracker on", tracked(lambda: _gameLoaded(board))),
         ("stage results after the game load",
          lambda: _stageResults(board)),
         ("web reset match, tracker on",
@@ -1389,7 +1447,7 @@ def _bestOfSteps(board, app, client):
          tracked(lambda: _confirmed(board.ResetAllInputs))),
         ("reset all inputs again", lambda: _confirmed(board.ResetAllInputs)),
         ("game load with no best of, tracker on",
-         tracked(board._onGameAssetsLoaded)),
+         tracked(lambda: _gameLoaded(board))),
         ("tracker on, best of 3 after the resets", tracked(spin(3))),
     ]
 
@@ -1407,12 +1465,34 @@ S2E_CHANGES = {
 }
 S2E_SINGLES_CHANGES = dict(S2E_CHANGES)
 
+# ADR-005 S3e-6. The counts in one cycle (S3E6_CHANGES), and the game load:
+# its roster is the shared wiring's now (bootstrap.wire_game_roster ->
+# AutonaActions.ApplyGameRoster, _gameLoaded), written ahead of the board's
+# onLoad handler instead of from it, in one cycle with its slot-count
+# change. What it writes is the recording's: the same game again (the
+# load the recording ran), so the resized slots keep their first picks.
+# A load that replaces the game empties every pick and main instead
+# (tests/test_roster_flow.py: the game switch, and the recorded game load).
+S3E6_BEST_OF_CHANGES = {
+    "two players, two characters": {"cycles": 2},
+    "game load, tracker on": {"cycles": 2},
+    "web clear all, tracker on": {"cycles": 5},
+    "game load with no best of, tracker on": {"cycles": 2},
+}
+S3E6_SINGLES_BEST_OF_CHANGES = {
+    "two characters": {"cycles": 1},
+    "game load, tracker on": {"cycles": 2},
+    "web clear all, tracker on": {"cycles": 5},
+    "game load with no best of, tracker on": {"cycles": 2},
+}
+
 
 def test_best_of_operations_publish_the_recorded_state(
         board, autonaApp, client):
     """Every way to set the best of on the team board."""
     _replayClears(autonaApp, board, _bestOfSteps(board, autonaApp, client),
-                  "operations", "best of operations", S2E_CHANGES,
+                  "operations", "best of operations",
+                  _layered(S2E_CHANGES, S3E6_BEST_OF_CHANGES),
                   path=BEST_OF_GOLDEN_PATH, tree=BEST_OF_TREE,
                   selector="best_of_operations",
                   alsoCheck=_bestOfMismatches)
@@ -1424,7 +1504,8 @@ def test_singles_best_of_operations_publish_the_recorded_state(
     _replayClears(autonaApp, singlesBoard,
                   _bestOfSteps(singlesBoard, autonaApp, client),
                   "singles", "singles best of operations",
-                  S2E_SINGLES_CHANGES, path=BEST_OF_GOLDEN_PATH,
+                  _layered(S2E_SINGLES_CHANGES, S3E6_SINGLES_BEST_OF_CHANGES),
+                  path=BEST_OF_GOLDEN_PATH,
                   tree=BEST_OF_TREE, selector="best_of_operations",
                   alsoCheck=_bestOfMismatches)
 
@@ -2246,8 +2327,10 @@ def test_a_value_no_row_reproduces_changes_nothing(board, autonaApp, case):
     assert card._renderedSlot is None, "not marked as shown"
 
 
-@pytest.mark.parametrize("emptied", ["unset", "empty"])
-def test_an_emptied_slot_shows_a_blank_card(board, autonaApp, emptied):
+def test_an_emptied_slot_shows_a_blank_card(board, autonaApp):
+    """A slot emptied to {} is still a slot: its card stays and shows it
+    blank. (An unset slot is gone from the roster, and so is its card since
+    ADR-005 S3e-6: test_an_unset_slot_retires_its_card.)"""
     if RECORD:
         pytest.skip("not part of the recording")
     _onePlayerTwoCharacters(board, autonaApp)
@@ -2258,12 +2341,10 @@ def test_an_emptied_slot_shows_a_blank_card(board, autonaApp, emptied):
     autonaApp.settle()
 
     with _Cycles() as cycles:
-        if emptied == "unset":
-            StateManager.Unset(card.path)
-        else:
-            StateManager.Set(card.path, {})
+        StateManager.Set(card.path, {})
         autonaApp.settle()
     assert cycles.count == 1
+    assert card in board.team1playerWidgets
 
     assert _cardMismatches(board) == {}
     assert card._w(schema.PLAYER_TAG_KEY, QLineEdit).text() == ""
@@ -2272,6 +2353,44 @@ def test_an_emptied_slot_shows_a_blank_card(board, autonaApp, emptied):
     assert card._w(schema.PLAYER_STATE_KEY, QComboBox).count() == 1
     assert [element[1].currentText() for element in card.character_elements] \
         == ["", ""]
+
+
+def test_an_unset_slot_retires_its_card(board, autonaApp):
+    """An unset slot is gone from the roster -- the roster is the slots
+    since ADR-005 S3e-6 -- and its card goes with it: out of the board's
+    lists and hidden in the held cycle, writing nothing from then on, and
+    destroyed from the event loop. (It used to stay, showing the slot
+    blank, and the next edit on it wrote the slot back.)"""
+    if RECORD:
+        pytest.skip("not part of the recording")
+    board.playerNumber.setValue(2)
+    autonaApp.settle()
+    StateManager.CommitHeld(PREFIX)
+    autonaApp.settle()
+    gone = [board.team1playerWidgets[1], board.team2playerWidgets[1]]
+
+    with _Cycles() as cycles:
+        with StateManager.SaveBlock():
+            for card in gone:
+                StateManager.Unset(card.path)
+    assert cycles.count == 1
+    for card in gone:
+        assert card not in board.playerWidgets
+        assert card.isHidden()
+        tag = card._w(schema.PLAYER_TAG_KEY, QLineEdit)
+        tag.setText("BACK")
+        tag.editingFinished.emit()
+        assert StateManager.Get(card.path) is None
+    assert [len(board.team1playerWidgets), len(board.team2playerWidgets)] \
+        == [1, 1]
+    assert board.playerNumber.value() == 1
+    assert _cardMismatches(board) == {}
+
+    autonaApp.settle()
+    for card in gone:
+        if Shiboken.isValid(card):
+            QCoreApplication.sendPostedEvents(card, QEvent.Type.DeferredDelete)
+        assert not Shiboken.isValid(card)
 
 
 def test_the_player_editor_is_not_rendered(board, autonaApp):

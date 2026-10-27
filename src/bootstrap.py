@@ -406,6 +406,16 @@ def bootstrap_gui():
     AutonaWebOperations.loadGameByCodename = (
         AutonaGameAssetManager.instance.LoadGameByCodename)
 
+    # ORDER CONSTRAINT: a game load's roster (players per team, characters
+    # per player), the wiring the headless shell makes too. On gameLoaded,
+    # which the adapter emits just before onLoad, so it runs ahead of every
+    # player card's ReloadCharacters -- which blanks the card's picks for
+    # the new game, and first takes the character slots this wrote -- and
+    # of every board's _onGameAssetsLoaded, whose CommitHeld publishes what
+    # this wrote (ADR-005 S3e-6). The board host it runs through is
+    # registered just above.
+    wire_game_roster(AutonaGameAssetManager.instance.signals.gameLoaded)
+
     logger.debug("bootstrap_gui complete")
 
 
@@ -442,6 +452,41 @@ def wire_tournament_data(on_failure=None):
     signals = AutonaTournamentDataProvider.instance.signals
     signals.tournament_data_updated.connect(apply)
     signals.tournament_url_update.connect(forget_cleared)
+
+
+def wire_game_roster(game_loaded):
+    """Give the 1v1 / team boards a loaded game's roster, as both shells
+    need it.
+
+    - `game_loaded` (a Qt signal with the load's GameAssetSnapshot: the
+      asset adapter's gameLoaded on the desktop, the headless loader's) ->
+      AutonaActions.ApplyGameRoster: each board with a roster goes to the
+      game's players per team and the default characters per player, its
+      picks emptied when that load replaced another game.
+
+    The load's own snapshot, not the catalog's Current(): this slot is
+    queued onto the main thread (the loaders emit on theirs), and by the
+    time it runs a later load may have replaced the snapshot -- a switch
+    followed at once by a reload of the new game would read "no switch"
+    twice and keep the previous game's picks.
+
+    Run where the shell runs board operations (AutonaWebOperations
+    .boardHost): on the desktop that is its GUI thread, where the board's
+    cards make their own writes; headless, one operation at a time. Until
+    ADR-005 S3e-6 it was each built board's onLoad handler
+    (SetDefaultsFromAssets), so the headless shell's boards never followed
+    a game load. bootstrap_gui() makes it for the desktop (ahead of the
+    boards), src/headless.py for its shell.
+    """
+    from . import AutonaWebOperations
+    from .core.Actions import AutonaActions
+
+    def apply(snapshot):
+        replaced = getattr(snapshot, "replaced", None)
+        AutonaWebOperations.boardHost.Run(
+            lambda: AutonaActions.instance.ApplyGameRoster(replaced))
+
+    game_loaded.connect(apply)
 
 
 def wire_web_server(webserver, game_changed):

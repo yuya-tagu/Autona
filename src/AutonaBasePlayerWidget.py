@@ -51,6 +51,7 @@ class AutonaBasePlayerWidget(QGroupBox):
     countryModel = None
     characterModel = None
     _deleted = False
+    _quietCharacters = False
 
     # No per-card lock (`dataLock`, removed in ADR-005 S3e-3): everything
     # here runs on the GUI thread, and what a load writes is serialised by
@@ -86,9 +87,21 @@ class AutonaBasePlayerWidget(QGroupBox):
             cache[name] = found
         return found
 
+    def _MayWrite(self) -> bool:
+        """Whether this card's own edits may still be written (the board
+        card narrows it to a slot the state has)."""
+        return not self._deleted
+
     def CharactersChanged(self, includeMains=False):
+        if self._quietCharacters:
+            # Rows being built for character slots the state already has
+            # (AutonaScoreboardPlayerWidget.SyncCharacterRows): their
+            # combos settling on a row is not a pick.
+            return
         if self._deleted:
             logger.warning(f"CharactersChanged called on deleted widget for {self.path}")
+            return
+        if not self._MayWrite():
             return
 
         self.player.PublishCharacterSlots(
