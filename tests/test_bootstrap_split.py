@@ -598,6 +598,10 @@ while time.monotonic() < deadline:
     except Exception:
         time.sleep(0.1)
 
+# The delta flusher runs beside the server (ADR-005 S3f-5).
+flusher_while_serving = [t.name for t in threading.enumerate()
+                         if t.name == "AutonaWebServerDeltas"]
+
 started = time.monotonic()
 stopped = server.stop(10.0)
 stop_seconds = time.monotonic() - started
@@ -627,6 +631,7 @@ failing_thread_gone = failing.stop(5.0)
 
 report({
     "health": health,
+    "flusher_while_serving": flusher_while_serving,
     "stopped": stopped,
     "stop_seconds": stop_seconds,
     "after_stop": after_stop,
@@ -650,6 +655,9 @@ def test_web_server_thread_serves_stops_and_reports_a_failed_start(
     result = _probe(tmp_path, _WEBSERVER_SCRIPT, str(_free_port()))
 
     assert result["health"] == [200, "ok"]
+    assert result["flusher_while_serving"] == ["AutonaWebServerDeltas"]
+    # stop() joins the delta flusher too: no AutonaWebServer* thread is
+    # left below (server_threads).
     assert result["stopped"] is True
     # werkzeug's serve_forever polls every 0.5 s; anything near the 10 s
     # grace period means shutdown() did not reach the loop.

@@ -261,6 +261,14 @@ def lane_threads():
 
 assert lane_threads() == [], f"import started task threads: {lane_threads()}"
 
+# The web server's delta flusher (ADR-005 S3f-5) starts with the server, in
+# WebServer.start(), never on import.
+assert web_server._delta_thread is None, "import started the delta flusher"
+assert not web_server._delta_running, "import opened the delta queue"
+web_threads = [t.name for t in threading.enumerate()
+               if t.name.startswith("AutonaWebServer")]
+assert web_threads == [], f"import started web server threads: {web_threads}"
+
 # The core state layer comes up empty, and -- the point of importing the
 # whole widget tree above -- with nobody wired to its channels. Only
 # bootstrap_core() subscribes (through StateManagerBridge); a module-level

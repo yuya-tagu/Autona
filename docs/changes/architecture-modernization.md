@@ -3346,3 +3346,61 @@ core に `TaskExecutor` を置き、`bootstrap_core()` で作り、両シェル�
 - **実機確認（オーナー）**
   - デスクトップ: 起動・終了が今どおり（終了で固まらない。`logs/` に `Background tasks were still running` / `Error stopping background tasks` が出ない）
   - ヘッドレス（`python main.py --headless`）: Ctrl+C / コンソールの × で今どおり止まり、`user_data/state.json` が書かれる
+
+#### S3f-5 delta の debounce（2026-10-28）
+
+Socket.IO の delta の送出を、バッチごとの `threading.Timer` から、Web サーバーが持つ 1 本の flusher スレッド（`AutonaWebServerDeltas`・daemon・`threading.Condition` で待つ）に置き換えた。間隔・payload・revision・イベント名は変えていない。`src/` の `threading.Timer` は 0（コメントのみ）。
+
+- **実装**（`src/AutonaWebServer.py`）
+  - 状態は今どおりクラスに持つ（`on_program_state_update` は Bridge に繋がる素の関数のため）。`_delta_timer` を `_delta_due`（開いているバッチの送出時刻）に置き換え、`_delta_cond`（`_delta_lock` の Condition）・`_delta_clock`（既定 `time.monotonic`。テストの継ぎ目）・`_delta_running` / `_delta_thread` / `_delta_owner` / `_delta_generation`（flusher の世代の印）を足した
+  - `on_program_state_update`: 判定は旧実装と同じ（先頭 0・50 / 100 / 200 ms。窓は開いたときの行数で決まり、後から来た分は窓を動かさずに合流）。Timer を作る代わりに `_delta_due` を立てて notify するだけ。`_delta_running` が False（`start()` の前・`stop()` の後）なら捨てる
+  - `_flush_pending_deltas` を、lock の中でバッチを閉じる `_take_pending_deltas` と、lock の外で送る `_send_deltas` に分けた（`_flush_pending_deltas` は両方を呼ぶだけで、テストのドライバが使う）
+  - `_run_delta_flusher(generation)`: `_delta_due` まで `cond.wait(remaining)` で待つ（タイムアウトで返ったら、時計の刻みによらず送る時刻とみなす）。毎回、世代の照合とバッチの取り出しを `_delta_cond` の 1 回の保持の中で行い、送出（`ws_emit`）は lock の外。`stop()` に起こされたら、開いているバッチを窓の残りを待たずに送って終わる
+  - `_start_delta_flusher`: 新しい世代の印を立て、キューを空にしてから flusher を起こす
+  - `start()`: サーバースレッドより先に `_start_delta_flusher()`。`stop(timeout)`: サーバーの停止と join の後に `_stop_delta_flusher(残り時間。ただし最低 DELTA_STOP_MIN_SEC = 0.5 秒)`。戻り値は「サーバースレッドと flusher の両方が終わったか」
+  - `.claude/rules/state-and-webserver.md` の Web サーバーの節に、flusher の起動と join・delta を受け付ける期間・`stop()` を `StateManager.lock` の中で呼ばないことを足した
+- **判断と理由**
+  1. **stop 時の未送出バッチは送る（flush）**
+     - 旧実装: daemon の Timer は stop で取り消されず、窓の後（最大 200 ms）に送っていた。werkzeug の `shutdown()` は開いている接続（daemon のリクエストスレッド）を閉じないので、プロセスが生きていれば接続中のクライアントに届いていた
+     - 新実装は窓の残りを待たずにすぐ送る。届く先は同じで、終了前に出ることが旧実装より確実になる
+     - flusher の停止はサーバーの停止の後（停止を待つ間に処理されたリクエストの delta も最後のバッチに入る）
+  2. **`start()` の前と `stop()` の後の delta は捨てる**
+     - 前: 旧実装も送ってはいたが、サーバーが listen していないので受け手がいない。溜めて start で送ると、接続直後の `program_state` より古い delta が届きうる
+     - 後: 送るスレッドが無い。書き手のスレッドで直接送ると、`StateManager.lock` の中でソケットを待つことになる（pitfalls #17）
+     - 旧実装との違いは「stop の後、プロセスが終わるまでに書かれた delta が、まだ開いている接続に届かない」だけ（終了処理の中）
+  3. **待ちは「送出時刻 − 今」で計算する**: 旧 Timer はスレッドの起動から interval を待っていた。`time.monotonic` は Python 3.12 の Windows で 15.6 ms 刻みなので、送出が最大 1 刻みずれうる（窓の契約には影響しない）
+  4. **バッチは必ず順に出る**: 旧実装は Timer スレッドがバッチごとに別で、遅い送出の途中で次の Timer が送り始めうる（順序の逆転があり得た）。flusher は 1 本なので順に送る
+  5. **送出から戻らない flusher は、stop が期限で見捨てる。見捨てた flusher は、次の flusher のバッチに触らない**（レビュー指摘 1）
+     - join の期限を過ぎたら警告して `False` を返し、`_delta_thread` を外す（次の `start()` が新しい flusher を作れる）
+     - 初版は「`_delta_thread` が自分か None なら続ける」を lock の中で確かめ、lock を離してから `_flush_pending_deltas()` で取り出していた。その間に次の `start()` が入ると、見捨てた flusher が新しい flusher のバッチを窓の前に取り、2 本が並んで送る（順序の逆転）ことがあり得た
+     - 世代の印（`start()` ごとの `object()`）に変え、照合と取り出しを lock の 1 回の保持の中で行う。次の `start()` が無ければ、見捨てた flusher は送出から戻った後に開いているバッチを最後に送る（判断 1 と同じ）。あれば何もせずに終わる
+     - 次の `start()` はキューを空にする。見捨てた flusher が送れなかったバッチは、`start()` の前の delta と同じく捨てる（新しいサーバーの接続に、それより古い delta を送らない）
+  6. **flusher の join には最低 0.5 秒を残す**（`DELTA_STOP_MIN_SEC`。レビュー指摘 2）
+     - 初版はサーバーの停止が使い残した時間だけを渡しており、サーバーが期限を使い切ると 0 秒になって、偽の警告と最後のバッチの取りこぼしが起きえた
+     - 最後の送出は普通ミリ秒で終わる。そのため `stop()` は最悪 `timeout` + 0.5 秒かかる（サーバーが固まり、flusher も送出から戻らないとき）
+  7. **flusher はクラスに 1 本で、起こした WebServer だけが止める**（`_delta_owner`）: 状態がクラスにあるため。本番は 1 プロセス 1 サーバー
+  8. **flusher は daemon**: サーバースレッドと同じ理由（止め損ねたサーバーがプロセスを残さない）
+- **pin（テスト）**
+  - `tests/test_webserver_delta_debounce.py`（新規）
+    - 予定と payload（偽の時計・スレッドなし）。移行前に、cd6f5e58 の Timer を記録するドライバで同じシナリオと期待値が通ることを確かめてから移行し、移行後は flusher の継ぎ目（`_delta_due` / `_flush_pending_deltas`）のドライバに替えただけで通る。ドライバは誰も持たない世代の印を立てるので、ほかのテストの残った flusher が notify で起きても、そのバッチに触らない
+      - 先頭の即時送出（行数によらない）、静かな時間は直前の flush から測って 50 ms、窓は開いたときの行数（1 / 9 / 10 / 99 / 100 / 250 行）、窓は動かず伸びない
+      - revision は最大・first_revision は最初・`delta_index` は別名・キー順、`revision` → `delta_index` → -1 のフォールバック
+      - 空の変更は何もしない（空の delta は flush に数えない）、シリアライズできない payload は全量に置き換え、ほかの送出失敗はバッチを捨てる
+    - 配線: 実際の Socket.IO サーバーの test client に、イベント名・payload・キー順・順序がそのまま届く
+    - flusher（実時間・余裕のある幅。スレッドはテストが起こしたものだけを見る。プロセス全体のスレッド一覧は使わない）
+      - `start()` から `stop()` の間だけ受け付ける。1 本・daemon・名前。別のサーバーの stop では止まらない
+      - 自分のスレッドから送る。窓を実時間で待つ（50 ms と 200 ms の窓で、それぞれ 8 割以上。perf_counter で測る。200 ms の窓では、途中の到着が flusher を早く起こさない）
+      - stop は開いているバッチをすぐ送る（30 秒の窓でも 5 秒未満）
+      - 送出から戻らないときは、stop が期限で諦めて `False` を返す。次の `start()` が無ければ、戻った後に開いているバッチを送る
+      - 次の `start()` があれば、見捨てた flusher は新しい flusher のバッチに触らずに終わり、送れなかったバッチは捨てられる（判断 5。照合を外す変異で、このテストが落ちることを確認した）
+      - `StateManager.lock` を持った書き手が flusher を待たない（flusher の送出がその lock を待っている間も、書き手の次の delta は通る。pitfalls #17）
+  - `tests/test_import_side_effects.py`: import で flusher を起こさない（`_delta_thread` / `_delta_running`、`AutonaWebServer*` のスレッドが 0）
+  - `tests/test_bootstrap_split.py`: 実サーバーの start で flusher が 1 本動き、stop の後に `AutonaWebServer*` のスレッドが 0（既存のアサーションが flusher も含む）
+  - `tests/test_headless_smoke.py`（変更なし）: 実ヘッドレスのプロセスで `score:adjust` の delta が Socket.IO に届き、Ctrl+Break で止まる
+- **残置 / リスク**
+  - 状態はクラスのまま（本番は 1 プロセス 1 サーバー）
+  - stop の後に書かれた delta は送られない（判断 2）
+  - 棚卸しの「Web サーバーのスレッド」は 2 本 → 3 本（サーバー・停止のヘルパー・flusher）。S3f-6 で確定する
+- **実機確認（オーナー）**
+  - デスクトップ: スコア +1 などの単発操作が OBS / Web UI に即時反映される。セット読込などのまとまった変更が今どおり反映される（Web UI が全量を取り直し続けない）
+  - デスクトップ・ヘッドレス: 終了が今どおり（固まらない。`logs/` に `delta flusher still sending` が出ない）

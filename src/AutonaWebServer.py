@@ -944,7 +944,15 @@ class WebServer:
     # serialization + flush cost adds up and competes with OBS for
     # network/CPU. Coalesce on an adaptive interval — short for small
     # bursts (snappy UI), longer for large bursts (CPU breathing room).
+    #
+    # The batches go out from one flusher thread, started with the server
+    # and joined by stop() (ADR-005 S3f-5; it was one threading.Timer per
+    # batch, never cancelled). on_program_state_update only queues and
+    # notifies -- it may run under StateManager.lock (a GUI-thread write,
+    # delivered direct through the bridge), so it never waits on the
+    # flusher, and the flusher never holds the lock below while it sends.
     _delta_lock = threading.Lock()
+    _delta_cond = threading.Condition(_delta_lock)
     _delta_pending = []          # list of merged delta-flat-dicts
     _delta_pending_revision = -1 # latest revision in batch (Design.md §3.2.3 R-Sync-6)
     # First revision in the batch. StateManager bumps the revision on every
@@ -953,8 +961,20 @@ class WebServer:
     # range; without it every coalesced batch looked like a revision gap and
     # triggered a spurious full-snapshot refetch (Design.md §3.2.3 R-Sync-8).
     _delta_pending_first_revision = -1
-    _delta_timer = None          # threading.Timer awaiting flush
-    _delta_last_flush_ts = 0.0   # time.monotonic() of the last flush
+    _delta_due = None            # _delta_clock() the open batch goes out at
+    _delta_last_flush_ts = 0.0   # _delta_clock() of the last flush
+    # The clock of the schedule; tests swap it for a fake one.
+    _delta_clock = time.monotonic
+    # Deltas are taken only while the flusher runs (start() .. stop()):
+    # before start() no client can be connected, and after stop() there is
+    # no thread to send them.
+    _delta_running = False
+    _delta_thread = None         # the flusher thread
+    _delta_owner = None          # the WebServer whose start() started it
+    _delta_generation = None     # the token of the current flusher
+    # What stop() leaves the flusher for its final batch at least, however
+    # long the server took to stop (a send normally takes milliseconds).
+    DELTA_STOP_MIN_SEC = 0.5
 
     @staticmethod
     def _adaptive_debounce_sec(pending_count: int) -> float:
@@ -969,24 +989,39 @@ class WebServer:
 
     @staticmethod
     def _flush_pending_deltas():
-        with WebServer._delta_lock:
-            if not WebServer._delta_pending:
-                WebServer._delta_timer = None
-                return
-            # Emit both `revision` (canonical) and `delta_index` (legacy
-            # alias) so old OBS templates / not-yet-rebuilt clients keep
-            # working (Design.md §3.2.3 R-Sync-6).
-            payload = {
-                'revision': WebServer._delta_pending_revision,
-                'delta_index': WebServer._delta_pending_revision,
-                'first_revision': WebServer._delta_pending_first_revision,
-                'delta': WebServer._delta_pending,
-            }
-            WebServer._delta_pending = []
-            WebServer._delta_pending_revision = -1
-            WebServer._delta_pending_first_revision = -1
-            WebServer._delta_timer = None
-            WebServer._delta_last_flush_ts = time.monotonic()
+        """Send the open batch now (the test driver's step; the flusher
+        takes and sends in two parts, see _run_delta_flusher)."""
+        with WebServer._delta_cond:
+            payload = WebServer._take_pending_deltas()
+        if payload is not None:
+            WebServer._send_deltas(payload)
+
+    @staticmethod
+    def _take_pending_deltas():
+        """Close the open batch and return its payload (None when nothing is
+        pending). Called holding _delta_cond."""
+        WebServer._delta_due = None
+        if not WebServer._delta_pending:
+            return None
+        # Emit both `revision` (canonical) and `delta_index` (legacy
+        # alias) so old OBS templates / not-yet-rebuilt clients keep
+        # working (Design.md §3.2.3 R-Sync-6).
+        payload = {
+            'revision': WebServer._delta_pending_revision,
+            'delta_index': WebServer._delta_pending_revision,
+            'first_revision': WebServer._delta_pending_first_revision,
+            'delta': WebServer._delta_pending,
+        }
+        WebServer._delta_pending = []
+        WebServer._delta_pending_revision = -1
+        WebServer._delta_pending_first_revision = -1
+        WebServer._delta_last_flush_ts = WebServer._delta_clock()
+        return payload
+
+    @staticmethod
+    def _send_deltas(payload):
+        # Outside the lock: the send can block on a slow client, and the
+        # writers queueing behind it may hold StateManager.lock.
         try:
             WebServer.ws_emit('program_state_update', payload)
         except TypeError:
@@ -1004,7 +1039,12 @@ class WebServer:
         # `delta_index` so this stays compatible with older payloads.
         rev = changes.get('revision', changes.get('delta_index', -1))
 
-        with WebServer._delta_lock:
+        # Queues and notifies only: this can run under StateManager.lock
+        # (agent-pitfalls #17), and the flusher never holds _delta_cond
+        # while it sends, so nothing here waits on another thread.
+        with WebServer._delta_cond:
+            if not WebServer._delta_running:
+                return
             was_empty = not WebServer._delta_pending
             WebServer._delta_pending.extend(delta)
             if was_empty:
@@ -1012,23 +1052,105 @@ class WebServer:
             if rev > WebServer._delta_pending_revision:
                 WebServer._delta_pending_revision = rev
 
-            if WebServer._delta_timer is None:
+            if WebServer._delta_due is None:
                 # Leading-edge flush: a delta arriving after a quiet period
                 # (>= 50ms since the last flush) goes out immediately, so a
                 # single operation (score +1 etc.) is not held back by the
                 # debounce. Bursts keep the adaptive trailing debounce and
                 # the large-burst path (100+ -> 200ms, R-Sync-10) unchanged.
-                quiet = (time.monotonic()
-                         - WebServer._delta_last_flush_ts) >= 0.05
+                # The window is fixed here: what arrives while it is open
+                # joins it without moving it.
+                now = WebServer._delta_clock()
+                quiet = (now - WebServer._delta_last_flush_ts) >= 0.05
                 if was_empty and quiet:
                     interval = 0.0
                 else:
                     interval = WebServer._adaptive_debounce_sec(
                         len(WebServer._delta_pending))
-                WebServer._delta_timer = threading.Timer(
-                    interval, WebServer._flush_pending_deltas)
-                WebServer._delta_timer.daemon = True
-                WebServer._delta_timer.start()
+                WebServer._delta_due = now + interval
+                WebServer._delta_cond.notify_all()
+
+    @staticmethod
+    def _run_delta_flusher(generation):
+        """The flusher thread: send each batch when it is due, and the one
+        still open when stop() asks it to finish.
+
+        `generation` is the token its start() set. Every pass checks it, and
+        takes the batch, under one hold of _delta_cond: once a later start()
+        has set another (stop() gave up on this one, stuck in a send), this
+        one returns without touching a batch -- they are the new flusher's.
+        """
+        cond = WebServer._delta_cond
+        dueNow = False
+        while True:
+            with cond:
+                if WebServer._delta_generation is not generation:
+                    return
+                running = WebServer._delta_running
+                if running and not dueNow:
+                    if WebServer._delta_due is None:
+                        cond.wait()
+                        continue
+                    remaining = WebServer._delta_due - WebServer._delta_clock()
+                    if remaining > 0:
+                        # Only stop() (or a later start()) wakes this early:
+                        # an arrival that joins the open batch does not
+                        # notify. Timed out = due, whatever the clock's
+                        # resolution says.
+                        dueNow = not cond.wait(remaining)
+                        continue
+                # Due -- or stopping: then the open batch goes out at once,
+                # the way the old Timer still sent it after stop().
+                dueNow = False
+                payload = WebServer._take_pending_deltas()
+            if payload is not None:
+                WebServer._send_deltas(payload)
+            if not running:
+                return
+
+    def _start_delta_flusher(self):
+        """Start the flusher (start()). Only one runs in the process."""
+        with WebServer._delta_cond:
+            if WebServer._delta_thread is not None:
+                return
+            # A fresh queue: anything left is a batch a flusher stop() gave
+            # up on did not get to, from before this start() -- dropped like
+            # every delta outside start() .. stop().
+            WebServer._delta_pending = []
+            WebServer._delta_pending_revision = -1
+            WebServer._delta_pending_first_revision = -1
+            WebServer._delta_due = None
+            generation = object()
+            WebServer._delta_generation = generation
+            WebServer._delta_running = True
+            WebServer._delta_owner = self
+            # Daemon, like the server thread: a server never stopped (a
+            # crash, a test) cannot keep the process alive.
+            WebServer._delta_thread = threading.Thread(
+                target=WebServer._run_delta_flusher, args=(generation,),
+                name="AutonaWebServerDeltas", daemon=True)
+            WebServer._delta_thread.start()
+
+    def _stop_delta_flusher(self, timeout: float) -> bool:
+        """Stop taking deltas, send the open batch at once and join the
+        flusher for up to `timeout` seconds (stop()). True when it is gone,
+        or when this server did not start it."""
+        with WebServer._delta_cond:
+            thread = WebServer._delta_thread
+            if thread is None or WebServer._delta_owner is not self:
+                return True
+            WebServer._delta_running = False
+            WebServer._delta_cond.notify_all()
+        thread.join(timeout)
+        with WebServer._delta_cond:
+            if WebServer._delta_thread is thread:
+                WebServer._delta_thread = None
+                WebServer._delta_owner = None
+        if thread.is_alive():
+            logger.warning(
+                f"web server delta flusher still sending after {timeout}s")
+            return False
+        return True
 
     # ── SocketIO handlers that are also referenced by name ───────────
     # These three are registered on the socketio server by _build_web_app(),
@@ -1316,7 +1438,8 @@ class WebServer:
     # ── Serving thread ───────────────────────────────────────────
 
     def start(self):
-        """Start serving on a daemon thread. Returns immediately.
+        """Start serving on a daemon thread, and the delta flusher beside
+        it. Returns immediately.
 
         Daemon, so a server that is never stopped (a crash, a test) cannot
         keep the process alive; the shells stop it on the way out anyway.
@@ -1325,6 +1448,8 @@ class WebServer:
         with self._serve_lock:
             if self._thread is not None or self._stopping:
                 return
+            # First, so the deltas of the first requests are taken.
+            self._start_delta_flusher()
             self._thread = threading.Thread(
                 target=self._Serve, name="AutonaWebServer", daemon=True)
             self._thread.start()
@@ -1373,13 +1498,22 @@ class WebServer:
                     "web server start-failure callback raised")
 
     def stop(self, timeout: float = 10.0) -> bool:
-        """Stop serving and wait up to `timeout` seconds for the thread.
+        """Stop serving and wait up to `timeout` seconds for the threads.
 
-        Returns True when the server thread is gone (or never started).
-        Connections already being handled run on werkzeug's daemon request
-        threads and are not drained -- the server is local, and the process
-        is on its way out (the old terminate() did not drain them either: it
-        only killed the accept loop).
+        Returns True when the server thread and the delta flusher are gone
+        (or never started). Connections already being handled run on
+        werkzeug's daemon request threads and are not drained -- the server
+        is local, and the process is on its way out (the old terminate() did
+        not drain them either: it only killed the accept loop).
+
+        The flusher goes last: the delta batch still open then is sent at
+        once rather than at the end of its window -- to the connections
+        werkzeug leaves open -- and later deltas are not sent. It gets what
+        is left of `timeout`, but at least DELTA_STOP_MIN_SEC, so a server
+        that used the whole timeout up does not cost the final batch (stop()
+        can then take up to timeout + DELTA_STOP_MIN_SEC). Not to be called
+        holding StateManager.lock (the flusher's full-state fallback reads
+        the state).
         """
         with self._serve_lock:
             self._stopping = True
@@ -1406,7 +1540,9 @@ class WebServer:
         stopped = thread is None or not thread.is_alive()
         if not stopped:
             logger.warning(f"web server thread still alive after {timeout}s")
-        return stopped
+        flushed = self._stop_delta_flusher(max(
+            deadline - time.monotonic(), WebServer.DELTA_STOP_MIN_SEC))
+        return stopped and flushed
 
 
 # ── Port collision guard ─────────────────────────────────────────
