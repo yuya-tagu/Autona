@@ -9,8 +9,9 @@ Pinned:
   (NestedSubmitError) -- the task, its then / on_error and a done callback
   that runs there alike -- and with it, jobs that fill the job lane and all
   fan out still finish;
-- map_fanout: results in order, `default` for a call that failed or was
-  late (the late one cancelled);
+- map_fanout: results in order, `default` for a call that failed, ran past
+  its deadline (abandoned) or did not start by the cap (cancelled); a
+  call's deadline runs from its start, not from the submit (S3f-3 review);
 - a task's exception is logged once, with its name, and carried on its
   Future; then / on_error deliver on the lane thread before the Future
   settles, their own failures logged once;
@@ -27,7 +28,7 @@ Pinned:
 Pure core: no Qt, no harness. Every executor made here is shut down at the
 end of its test. Nothing here depends on how fast a thread is scheduled:
 what must have happened is waited for on an event, and a deadline that must
-have passed is the test's to set (map_fanout's, through _WaitAll).
+have passed is the test's to set (map_fanout's, through its clock: _Clock).
 """
 import ast
 import threading
@@ -289,16 +290,59 @@ def test_map_fanout_returns_the_results_in_order(make):
     assert executor.map_fanout([], WAIT, task_name="nothing") == []
 
 
-def test_map_fanout_gives_the_default_for_a_failure_and_a_late_call(
+class _Clock:
+    """map_fanout's clock (`_clock`), moved by the test: a deadline passes
+    when the test says so, however the threads were scheduled."""
+
+    def __init__(self, executor):
+        self.now = 0.0
+        self._executor = executor
+        self._reads = threading.Condition()
+        self._latest = None
+
+    def __call__(self):
+        now = self.now
+        with self._reads:
+            self._latest = now
+            self._reads.notify_all()
+        return now
+
+    def advance(self, to):
+        """Move to `to` and wake map_fanout's wait."""
+        with self._executor._cond:
+            self.now = to
+            self._executor._cond.notify_all()
+
+    def seen(self, at):
+        """Wait until the clock was read at `at` or later -- by the wait,
+        when nothing starts then -- and the wait is done with that look (it
+        holds the executor's condition from the read until it waits again
+        or returns)."""
+        with self._reads:
+            assert self._reads.wait_for(
+                lambda: self._latest is not None and self._latest >= at,
+                WAIT)
+        with self._executor._cond:
+            pass
+
+
+def _mapInThread(executor, calls, timeout, task_name, default):
+    box = {}
+    caller = threading.Thread(target=lambda: box.update(
+        results=executor.map_fanout(calls, timeout, task_name=task_name,
+                                    default=default)))
+    return caller, box
+
+
+def test_map_fanout_gives_the_default_for_a_failure_a_late_call_and_one_never_started(
         make, monkeypatch):
-    """The deadline passes when the test says so (the wait is replaced by
-    one on an event), once the two lane threads are known to be busy with
-    the slow calls -- so the first two have finished and the fifth has not
-    started, however the threads were scheduled."""
+    """The two slow calls run past their deadline once both lane threads
+    are known to be busy with them -- so the first two have finished and
+    the fifth has not started. The fifth is still waited for (it has the
+    whole timeout once it starts) until the cap, then cancelled."""
     executor = make(fanoutWorkers=2)
-    deadline = threading.Event()
-    monkeypatch.setattr(task_executor_module, "_WaitAll",
-                        lambda futures, timeout: deadline.wait(WAIT))
+    clock = _Clock(executor)
+    monkeypatch.setattr(task_executor_module, "_clock", clock)
     release = threading.Event()
     slowStarted = threading.Semaphore(0)
     ran = []
@@ -315,16 +359,16 @@ def test_map_fanout_gives_the_default_for_a_failure_and_a_late_call(
     # both threads only after those finished, the fifth waits behind them.
     calls = [lambda: "ok", fail, slow, slow,
              lambda: ran.append("queued") or "queued"]
-    box = {}
-    caller = threading.Thread(target=lambda: box.update(
-        results=executor.map_fanout(calls, 0.5, task_name="mixed",
-                                    default={})))
+    caller, box = _mapInThread(executor, calls, 10, "mixed", {})
     try:
         with _records("WARNING") as records:
             caller.start()
             for _ in range(2):
-                assert slowStarted.acquire(timeout=WAIT)
-            deadline.set()
+                assert slowStarted.acquire(timeout=WAIT)   # both at 0
+            clock.advance(11)        # past both slow calls' deadline
+            clock.seen(11)
+            assert caller.is_alive()  # the fifth could still start
+            clock.advance(30)        # the cap: 3 timeouts
             caller.join(WAIT)
     finally:
         release.set()
@@ -333,10 +377,52 @@ def test_map_fanout_gives_the_default_for_a_failure_and_a_late_call(
     # The fifth was cancelled, never run; the two slow ones were abandoned.
     assert executor.drain(WAIT)
     assert ran == []
-    late = [r for r in records if r["level"].name == "WARNING"]
+    late = [r for r in records
+            if r["level"].name == "WARNING" and "'mixed'" in r["message"]]
     assert len(late) == 1
-    assert "'mixed'" in late[0]["message"]
-    assert "3 of 5" in late[0]["message"]
+    assert "3 of 5 did not finish: 2 ran past 10 s, 1 did not start " \
+        "within 30 s" in late[0]["message"]
+
+
+def test_a_fan_out_calls_deadline_runs_from_its_start_not_its_submit(
+        make, monkeypatch):
+    """One lane thread: the second call waits behind the first for most of
+    the timeout, then runs past what is left of it -- but within its own
+    timeout from its start, so it is waited for. Until the S3f-3 review the
+    deadline counted the queue time: on a busy lane, a fetch's requests
+    expired before they ran."""
+    executor = make(fanoutWorkers=1)
+    clock = _Clock(executor)
+    monkeypatch.setattr(task_executor_module, "_clock", clock)
+    started = {name: threading.Event() for name in "ab"}
+    release = {name: threading.Event() for name in "ab"}
+
+    def call(name):
+        started[name].set()
+        release[name].wait(WAIT)
+        return name
+
+    caller, box = _mapInThread(
+        executor, [lambda: call("a"), lambda: call("b")], 100, "queued",
+        "late")
+    try:
+        with _records("WARNING") as records:
+            caller.start()
+            assert started["a"].wait(WAIT)   # at 0
+            clock.advance(90)
+            release["a"].set()
+            assert started["b"].wait(WAIT)   # at 90: its deadline is 190
+            clock.advance(150)               # 150 after the submit
+            clock.seen(150)
+            assert caller.is_alive()
+            release["b"].set()
+            caller.join(WAIT)
+    finally:
+        for event in release.values():
+            event.set()
+
+    assert box["results"] == ["a", "b"]
+    assert not [r for r in records if "'queued'" in r["message"]]
 
 
 # ── errors and delivery ──────────────────────────────────────────────────

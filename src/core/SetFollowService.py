@@ -29,10 +29,10 @@ it):
   station's current set. The clock is the shell's (``fetcher``); core keeps
   what is polled and asks the clock to follow (``Poll``).
 - ``FollowStation(station)``: the station window's station or stream:
-  its current set is looked up and loaded, and -- for a station -- the sets
-  queued behind it are fetched and kept here (``_queues``). They are not
-  written: ``score.{n}.station_queue`` stays the ``{}`` it has always been
-  (the recorded tree's answer never arrived).
+  its current set is looked up and loaded. The sets queued behind a
+  station are not fetched: nothing showed them (``score.{n}.station_queue``
+  stays the ``{}`` it has always been: the recorded tree's answer never
+  arrived), so fetching them only added start.gg requests (ADR-005 S3f-3).
 - ``PullStream(channel)``: the web's pull of the streamer's channel, which
   its auto-update switch repeats every few seconds. A pull while the board
   follows the channel is a tick -- the channel's set is looked up again and
@@ -63,11 +63,7 @@ the lookup's load to finish, and replaces it.
   by hand or from the web, another station, the cancel button
   (``_lookups``). Two lookups answering in the other order left the older
   one's set on the board; one answering after a set loaded by hand loaded
-  the station's set over the operator's;
-- the sets queued behind a station are kept only from the fetch the board
-  waits for, while it follows that station (``_queueAsks``); they are kept
-  only once they arrived (a queue whose fetch never answered is asked for
-  again) and forgotten with the poll.
+  the station's set over the operator's.
 
 A full load whose fetch fails -- an answer with no set, an error, no fetch
 -- leaves the board cleared for the set and showing none of it. The set is
@@ -86,8 +82,8 @@ joined, and no lock of this module is held while calling out (agent-pitfalls
 The fetcher's interface (``AutonaSetFollowUtil``): ``Available()`` says
 whether a tournament is loaded; ``Match(setId, onResult, onError)``,
 ``StreamQueue()``, ``StationSets(stationId, onResult)``, ``StreamSet(name,
-onResult)``, ``FutureSets(setIds, onResult)`` start a fetch (False when no
-tournament is loaded) and call ``onResult(data)`` on the main thread when
+onResult)`` start a fetch (False when no tournament is loaded) and call
+``onResult(data)`` on the main thread when
 it answers -- ``Match``'s ``onError(error)`` when it raised; ``Poll(board)``
 makes the board's clock follow
 ``PollGeneration(board)``; ``FollowChanged(board)`` tells the board what it
@@ -101,7 +97,6 @@ import threading
 from loguru import logger
 
 from .Actions import AutonaActions
-from .DictHelper import deep_get
 from .PlayerDB import PlayerDB
 from .PlayerService import PlayerService, SlotChange
 from .SetLoadService import SetLoadService
@@ -131,14 +126,6 @@ class SetFollowService:
     # {board: station dict}: the station / stream followed (the window's
     # `lastStationSelected`), kept through a set loaded by hand.
     _stations = {}
-    # {board: {"sets": [set nodes], "queued": the sets behind the first}}:
-    # the followed station's queue as last fetched, so the sets behind it
-    # are fetched only when it moved (the board's QueueSetsCache, which all
-    # boards shared). Memory only: nothing reads it from the state.
-    _queues = {}
-    # {board: int}: the request number of the queue fetch the board waits
-    # for; an answer of any other is dropped.
-    _queueAsks = {}
     # {board: int}: the request number of the newest station / stream
     # lookup taken, or of the latest decision about what the board follows
     # (a set loaded, a follow, the cancel). A lookup's answer is taken only
@@ -435,15 +422,11 @@ class SetFollowService:
 
     def StopFollowing(self, forget=False):
         """Stop polling; with `forget` (the cancel button), also forget the
-        station and the followed set -- and the set loaded last with it.
-        The station's queue is forgotten either way: following the station
-        again fetches it again."""
+        station and the followed set -- and the set loaded last with it."""
         def run():
             board = self.scoreboardNumber
             with SetFollowService._lock:
                 SetFollowService._polls.pop(board, None)
-                SetFollowService._queues.pop(board, None)
-                SetFollowService._queueAsks.pop(board, None)
                 if forget:
                     SetFollowService._stations.pop(board, None)
             self._Bump()
@@ -524,18 +507,9 @@ class SetFollowService:
         def run():
             if not self._TakeLookup(number):
                 return
-            first = None
-            if sets is not None and len(sets) > 0:
-                first = sets[0]
-                if not self._SameQueue(sets):
-                    # The sets behind the first one (it is loaded below).
-                    ask = self._Next()
-                    with SetFollowService._lock:
-                        SetFollowService._queueAsks[
-                            self.scoreboardNumber] = ask
-                    self._Fetcher().FutureSets(
-                        sets[1:], lambda queued: self._OnFutureSets(
-                            ask, station, sets, queued))
+            # Only the first set is loaded; the sets queued behind it are
+            # not fetched (see the module docstring).
+            first = sets[0] if sets is not None and len(sets) > 0 else None
             self._LoadResolved(host, station, first)
 
         host.Run(run)
@@ -555,44 +529,6 @@ class SetFollowService:
         data = dict(node) if node else {}
         data["auto_update"] = station.get("type")
         self._Load(host, data, lookedUp=True)
-
-    def _SameQueue(self, sets):
-        """Whether `sets` is the queue the station showed last: the same
-        sets, in the same order, in the same state, with the same entrants
-        (the board's QueueSetsCache.CheckQueue)."""
-        with SetFollowService._lock:
-            saved = (SetFollowService._queues.get(self.scoreboardNumber)
-                     or {}).get("sets") or []
-        if len(saved) != len(sets):
-            return False
-        for savedSet, incSet in zip(saved, sets):
-            if savedSet.get("id") != incSet.get("id"):
-                return False
-            if savedSet.get("state") != incSet.get("state"):
-                return False
-            savedSlots = savedSet.get("slots", [{}, {}])
-            incSlots = incSet.get("slots", [{}, {}])
-            for index in (0, 1):
-                if _EntrantId(savedSlots, index) != _EntrantId(
-                        incSlots, index):
-                    return False
-        return True
-
-    def _OnFutureSets(self, ask, station, sets, queued):
-        """The sets queued behind `station`'s first: kept while the board
-        still follows that station and waits for this fetch (`ask`) --
-        not once it stopped following, or asked for the queue again (memory
-        only, nothing is written)."""
-        board = self.scoreboardNumber
-        with SetFollowService._lock:
-            if SetFollowService._stations.get(board) is not station or \
-                    SetFollowService._queueAsks.get(board) != ask:
-                return
-            SetFollowService._queues[board] = {
-                "sets": sets, "queued": queued}
-        logger.info(
-            f"score.{self.scoreboardNumber}: station sets loaded: "
-            f"{len(queued) if hasattr(queued, '__len__') else 0} items")
 
     # ── a payload into the state (the board's ChangeSetData) ────────────
 
@@ -756,8 +692,7 @@ class SetFollowService:
         for it. The app never drops a board; the test harness rebuilds
         them."""
         with cls._lock:
-            for store in (cls._polls, cls._stations, cls._queues,
-                          cls._queueAsks):
+            for store in (cls._polls, cls._stations):
                 if board is None:
                     store.clear()
                 else:
@@ -788,16 +723,6 @@ def SaveRecord(prepared):
 
 def _SlotPath(board, team, player):
     return f"score.{board}.team.{team}.player.{player}"
-
-
-def _EntrantId(slots, index):
-    # A set with fewer than two slots compares as an empty one (the board's
-    # check raised there, on the worker, and the follow stopped resolving).
-    try:
-        slot = slots[index]
-    except (IndexError, KeyError, TypeError):
-        slot = None
-    return deep_get(slot, "entrant.id")
 
 
 class _CallerThread:
@@ -836,9 +761,6 @@ class _NoFetcher:
         return False
 
     def StreamSet(self, name, onResult):
-        return False
-
-    def FutureSets(self, setIds, onResult):
         return False
 
     def Poll(self, board):

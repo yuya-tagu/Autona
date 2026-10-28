@@ -3252,6 +3252,7 @@ core に `TaskExecutor` を置き、`bootstrap_core()` で作り、両シェル�
     - 2 レーン: ジョブ用 `submit(fn, *args, task_name, then=None, on_error=None, **kwargs)`（4 本・スレッド名 `AutonaJob_*`）と fan-out 用 `submit_fanout(fn, *args, task_name, **kwargs)`（8 本・`AutonaFanout_*`）。戻り値は `concurrent.futures.Future`
     - `map_fanout(calls, timeout, *, task_name, default=None)`: 引数なしの callable の列を fan-out で走らせ、入力順の結果のリストを返す
       - 失敗・取り消し・期限切れは `default`。期限切れは、未開始なら取り消し、実行中なら放置して警告 1 行。`timeout` は全体の期限（None は無期限）
+        - **S3f-3 レビューで変更**: `timeout` は 1 本ごとに走り始めてから数える（レーンの待ち時間を数えない）。全体の上限は `timeout × FANOUT_CAP_FACTOR`（3）。S3f-3 判断 7
       - S3f-3 の `Worker.wait_for_all` の置き換え先（`GetMatch` は `default={}`、`GetRecentSets` は `None` を読み飛ばす）
     - 入れ子の規則（`NestedSubmitError`）: ジョブ用レーンのスレッドでは `submit` 禁止。fan-out のスレッドでは `submit` / `submit_fanout` / `map_fanout` すべて禁止。どのレーンのスレッドでも `drain` / `shutdown` / `run_next` は禁止（自分を待つ）
       - レーンは**スレッドの一生の属性**（`ThreadPoolExecutor(initializer=...)`、ステップ実行のスレッドも同じ）。タスク本体・`then` / `on_error`・そのスレッドで走る done callback のどれも同じ規則に従う（判断 7）
@@ -3306,7 +3307,7 @@ core に `TaskExecutor` を置き、`bootstrap_core()` で作り、両シェル�
   10. **`shutdown()` もレーンのスレッドからは拒否する**（レビュー指摘 5）: 自分のタスクの完了を期限まで待ってしまう。`drain` / `run_next` と同じく、何もせずに `NestedSubmitError` を出す
   11. **`shutdown(None)` / `drain(None)` は無期限**（レビュー指摘 6）。`map_fanout` と揃えた
 - **pin（テスト）**
-  - `tests/test_task_executor.py`（新規）。スレッドのスケジュールに依存しない（起きたことはイベントで待ち、`map_fanout` の期限はテストが `_WaitAll` を差し替えて決める。レビュー指摘 9）
+  - `tests/test_task_executor.py`（新規）。スレッドのスケジュールに依存しない（起きたことはイベントで待ち、`map_fanout` の期限はテストが `_WaitAll` を差し替えて決める。レビュー指摘 9。S3f-3 レビューで `_WaitAll` は消え、テストは時計 `_clock` を差し替える）
     - レーン: スレッド名と上限、生成時にスレッド 0、`fn` 自身の `name=` 引数が渡る
     - 入れ子の拒否: ジョブ → ジョブ、fan-out → すべて、レーンのスレッドからの `drain` / `shutdown`。ジョブ・fan-out・ステップ実行のスレッドで走る done callback も同じ規則（判断 7）
     - 飢餓: ジョブ用レーンを埋めたジョブが全部 fan-out しても終わる
@@ -3525,3 +3526,112 @@ provider アダプタ（`AutonaTournamentDataProvider`）の取得 9 本・`RunW
   - 次の操作が今どおり動く: ステーション追従・セット読込・統計（直近の対戦・過去の成績）・Top 8 の取り込み・分析タブ・リザルトの順位読込
   - EVENT タブの「アイコン / バナーを取得」と「大会から読み込む」: 画像が反映され、ボタンが戻り、フッターのステータスが消える
   - 終了: 大会の読込直後（参加者の取得中）に閉じても固まらない。`logs/` に `Entrants fetch stopped: shutting down` が出ることがある
+
+#### S3f-3 Start.gg provider の内部（2026-10-28）
+
+Start.gg provider（`StartGGDataProvider`）が 1 回の取得の中で並列に出すリクエストを、`TaskExecutor` の fan-out レーンに移した。provider の入れ子の Worker・`Worker.wait_for_all` 3 本・呼ぶたびの `ThreadPoolExecutor` は 0。provider の `threadpool` 引数を消した。ステーションの後続セットの取得（壊れていた `GetFutureMatchesList`）は、直さずに呼び手ごと削除した（論点 2 の承認済みの代替案。判断 4）。`src/Workers.py` は残した（判断 1）。
+
+- **実装**
+  - `src/TournamentDataProvider/StartGGDataProvider.py`
+    - `GetMatch`: 新旧 2 つの API を 1 回の `map_fanout`（それぞれ走り始めてから `_request_timeout_secs` = 20 秒、`default={}`。判断 7）。マージの手順とキー順は変えていない
+    - `GetMatches`: 2 ページ目以降を `_FetchPages`（下記）で取る。ページ順の組み立て・重複除去・失敗ページの再取得 1 回は変えていない
+    - `_FetchPages(executor, pages, fetch, onPage, cancel_event, task_name)`（新規）: fan-out レーンに `_SETS_FETCH_WORKERS`（4）本ずつ積む sliding window
+      - 答えは done callback → `queue.SimpleQueue` で待つ（`as_completed` は使わない。S3f-1 判断 4）
+      - 答えが届くたびに、呼び手のスレッドで `onPage` を呼ぶ（進捗の通知もここ）
+      - cancel event は答えごとに見る。立っていれば残りを積まず、飛んでいるリクエストを待たずに返る（旧実装と同じ）
+    - `GetRecentSets`: 2 方向 × 5 ページの 10 本を 1 回の `map_fanout`（`_request_timeout_secs`）。答えなかったページ（`None`）が 1 つでもあれば答えない（判断 3）。並べ方と重複の扱いは変えていない
+    - `_FanOut()`（新規）: `TaskExecutor.instance` を返す。無ければ `RuntimeError`。`GetMatch` / `GetMatches` / `GetRecentSets` がリクエストを出す前に呼ぶ（判断 8）
+    - `GetFutureMatch`・`GetFutureMatchesList`・`GetMatchAndInsertInList` と、クラス属性 `FutureSetQuery`（`Initialize` での読込）を削除した。クエリファイル `StartGGFutureSetQuery.txt` も消した（判断 4）。`ProcessFutureSet` は `GetStreamQueue` が使うので残した
+    - `from ..Workers import Worker` と `concurrent.futures` の import を削除した
+  - `src/core/TaskExecutor.py`（S3f-1 の API の変更。判断 7）: `map_fanout` の期限を 1 本ごとに走り始めてから数える。全体の上限 `FANOUT_CAP_FACTOR`（3）を追加。待ちは `_WaitAll` をやめ、executor の `_cond`（開始と settle で notify）で待つ。時計 `_clock` はテストの差し替え口
+  - `src/TournamentDataProvider/TournamentDataProvider.py`: `__init__(url, tshTdp)`。`threadpool` と `QThreadPool.globalInstance()` へのフォールバックを削除した。`GetFutureMatch` / `GetFutureMatchesList` の空の定義も削除した
+  - `src/core/SetFollowService.py`: ステーションの照会の答え（`_OnStationSets`）は先頭のセットを読むだけにした。後続セットの取得と、その保持・判定（`_queues`・`_queueAsks`・`_SameQueue`・`_OnFutureSets`・`_EntrantId`・`_NoFetcher.FutureSets`）を削除した
+  - `src/AutonaSetFollowUtil.py`: `FutureSets` を削除した
+  - `src/AutonaTournamentDataProvider.py`: `StartGGDataProvider(url, self)`（2 か所）
+  - `src/Autona.py`（`from .Workers import *`）・`src/AutonaScoreboardPlayerWidget.py`（`from .Workers import Worker`）: 使っていない import を削除した
+  - `StartggAPI.md`: `GetMatch` の待ち方・並列取得（5.3）を更新し、`FutureSetQuery` と `GetFutureMatch` / `GetFutureMatchesList` の行を消した
+  - `.claude/rules/state-and-webserver.md`: `SetFollowService` の行から後続セット（`_queues`）の記述を消した
+- **判断と理由**
+  1. **`src/Workers.py` は消さず、S3f-4 で消す**（設計表からの逸脱）
+     - 残る利用者は、アセット（`AutonaGameAssetManager` のアイコンのデコード 2 本）と API 情報ウィンドウ（送信 1 本）。どちらも S3f-4 の範囲で、S3f-3 で消すにはそれらを先に移す必要がある
+     - 設計表の S3f-3 の完了条件「`src/` に `Worker` / `QRunnable` が 0」は S3f-4 の完了条件に回す。それ以外の利用者（provider と、Window・選手カードの使っていない import）は 0 にし、残りがこの 2 ファイルだけであることを pin した
+  2. **set list のページは、1 回の取得につき同時に 4 本まで**（sliding window。`map_fanout` で全ページを一度に積まない）
+     - fan-out レーンは 8 本。全ページを一度に積むと、1 つの一覧が最大 8 本を同時に飛ばし、start.gg に見える burst が旧実装（呼ぶたびの 4 本のプール）の 2 倍になる。レーンも使い切り、ほかの取得の並列リクエスト（`GetMatch` の 2 本など）を後ろに並ばせる
+     - 4 ページずつの塊を `map_fanout` する案は採らなかった。進捗が 4 ページ単位になり、cancel を塊の終わりまで見ず、塊の中の遅いページが次の塊を待たせる
+     - fan-out のタスクの中でセマフォを待つ案も採らなかった。fan-out のスレッドが待つことになり、「fan-out は何も待たない」（S3f-1）が崩れる
+     - 窓は待つ側のスレッドが回すので、進捗は旧実装と同じく 1 ページずつ、呼び手のスレッドで出る
+  3. **`GetRecentSets` は、1 ページでも答えなければ答えない**（S3f-3 レビューで変更。初版は「期限を過ぎたページを読み飛ばし、ほかのページのセットで答える」だった）
+     - 旧実装は期限が無かった。1 ページが返らないと統計の答えが来ず、プールのスレッドも 1 本埋まったままだった
+     - 初版は 10 本まとめて 20 秒で、間に合わないページを読み飛ばしていた。レビュー指摘: fan-out の 8 本は全取得で共有なので、混んでいると待ち行列の時間で期限を使い切り、走る前のページが落ちる。一部のページだけのリストが「対戦履歴の全体」として出る（旧実装は全ページを待った）
+     - 期限は 1 本ごとに走り始めてから（判断 7）にしたうえで、それでも答えのないページ（走って 20 秒を過ぎた・上限 60 秒までに始まらなかった・終了で取り消された）が残れば、答えない。消費者（`StatsService`）の既存の失敗の扱いと同じになる: 依頼時に書いた `recent_sets = {"state": "loading", "sets": []}` のまま残り、前の対戦の結果で上書きもしない。次の更新（選手の入れ替え・統計の更新）で取り直す
+     - ログ: ERROR 1 行（`GetRecentSets: N of 10 pages did not answer; ...`）。終了中は取り消しが当然なので INFO
+     - 一部だけで答える案・空（`done`・`sets: []`）で答える案は採らなかった。前者は誤った履歴、後者は「対戦なし」と区別できない
+     - リリースノート: なし（旧実装も、返らないページがあれば読み込み中のままだった。違いは、走って 20 秒を過ぎたページでも読み込み中になること）
+     - 10 本は fan-out の 8 本を超えるので、2 本は前の答えを待ってから走る（旧 global pool も理想スレッド数で同じ）。待ち時間は期限に数えない
+  4. **ステーションの後続セットの取得は、直さずに呼び手ごと削除した（論点 2 の代替案）**
+     - 論点 2 は「直すと、追従のステーションで次のセットが出るようになる」を前提に「S3f-3 で直す」を推奨し、承認時に「直さない場合は、呼び手ごと削除する」を代替案として付けていた
+     - この前提は誤りだった。取得した後続セットは `SetFollowService._queues[board]["queued"]` に入るだけで、読むコードが無かった（`_SameQueue` は `"sets"` だけを見る）。`score.{n}.station_queue` は S3e-7 判断 11 で `{}` のまま（外部契約）なので、直しても画面に出るものは無い
+     - 直すと、ステーションのキューが変わるたびに後ろのセットの数だけ FutureSetQuery が飛ぶだけになる。start.gg の負荷が増えるだけなので、承認済みの代替案（呼び手ごと削除）を採った（オーナー判断、2026-10-28）
+     - 状態に書くものは変わらない。S3e-7 のゴールデンは、後続セットの取得の呼び出し 2 件（下記）が消えただけ
+     - リリースノート: 「表示の変化なし。ステーション追従中の start.gg へのリクエストが減る（待ち行列の後続セットを取得しなくなった）」
+  5. **`GetMatch` の片方の半分が例外を出したら、その半分を `{}` として扱う**
+     - 旧実装は `Worker.result` が `None` のまま `update(None)` が TypeError になり、新 API が落ちると全体が `{}`、旧 API が落ちると新 API だけの答えになっていた
+     - どちらの半分も自分で例外を捕まえて `{}` を返すので、実際に起きうるのは旧 API の preview 経路の parse の例外くらい
+  6. **終了時は、期限を待たずに返る**: `map_fanout` は取り消された Future をすぐ default にし（取り消しの done callback が `_cond` を notify する）、`_FetchPages` は取り消しの done callback で起きる。走っているリクエストは、`QueryRequests` が試行の間で `stopping` を見る（S3f-2）。走っている呼び出しは `stopping` で見捨てず、自分の期限まで待つ（見捨てると、終わりかけの答えとの競合が入る）
+  7. **`map_fanout` の期限は、1 本ごとに走り始めてから数える。全体の上限はその 3 倍**（S3f-1 の API の変更。レビュー指摘 1・2 の根本対処）
+     - 初版（S3f-1）は「全体で `timeout`」で、待ち行列の時間も数えていた。fan-out の 8 本は全取得の共有なので、混んでいると `GetRecentSets` のページ・`GetMatch` の半分が走る前に期限切れになる。旧実装は `GetRecentSets` が全部を待ち、`GetMatch` は Qt の global pool で走っていた
+     - 各呼び出しは走り始めに開始時刻を `_cond` の下で記録して notify する。待つ側は `_cond` で「未完了で、まだ始まっていないか、始まって `timeout` 以内」のものがある間だけ待つ（`concurrent.futures.wait` は使わない: S3f-1 判断 4）
+     - 上限（`timeout × FANOUT_CAP_FACTOR`）を設けたのは、レーンが見捨てた遅いリクエストで埋まり続けたときに永久に待たないため。上限までに始まらなかったものは取り消して `default`。`timeout=None` は期限も上限も無し（従来どおり）
+     - 警告は 1 行のまま、内訳（走って期限を過ぎた数・上限までに始まらなかった数）を書く
+     - 呼び出し 1 本ごとに別の期限を待つ形（1 本ずつ `future.result(timeout)`）は採らなかった。待ち行列の時間を数えないことを、開始時刻なしには表せない
+  8. **`TaskExecutor.instance` が無ければ、fan-out する 3 つの取得は例外で失敗する（空の結果を返さない）**（レビュー指摘 3）
+     - 初版は `TaskExecutor.instance.map_fanout` の `AttributeError` が各メソッドの `except` に吸われ、空の結果（`GetMatch` は `{}`、`GetMatches` は `[]`、`GetRecentSets` は `sets: []`）になっていた
+     - `_FanOut()` が、ステータス表示・リクエストより前に `RuntimeError`（`bootstrap_core()` を経ていない、と書いたもの）を出す。`try` の外なので吸われない。ジョブで走っていれば executor が ERROR で 1 回ログし、答えは届かない。Web の `get_sets` / `get_match` は例外がそのまま返る
+     - 実行時は `bootstrap_core()` が必ず作るので、起きるのはテスト・調査スクリプトだけ。空で返す fallback は採らなかった（取れなかったことが見えなくなる）
+  9. **`GetMatches` で例外を出したページも、後の再取得の 1 回を受ける**（意図的な挙動変更。レビュー指摘 4）
+     - 旧実装はページのスレッドの例外が `GetMatches` 全体の `except` に落ち、一覧全体が `[]` だった
+     - `_FetchPages` は例外のページを `None` として渡すので、既存の「失敗ページを呼び手のスレッドで 1 回順に取り直す」に乗る。取り直しても失敗すれば、従来どおりそのページのセットが欠けた一覧と ERROR ログ・ステータス表示
+     - ページの取得は `QueryRequests` だけで、`QueryRequests` は例外を自分で捕まえて `{}` を返す（`{}` は旧実装でも再取得の対象）。だから実運用で変わるのは、`QueryRequests` の外で落ちたときだけ
+- **pin（テスト）**
+  - `tests/test_startgg_parse.py`: `fanout` fixture が、テスト専用の executor を `TaskExecutor.instance` にする。`src.Workers` の stub と `_PoolWorker` を削除した
+    - `GetMatches`: 2 ページ目以降が fan-out レーンで取られ、進捗は 1 ページずつ呼び手のスレッドで出る。同時に飛ぶのは 4 本まで（窓を 8 にすると落ちることを確認した）。cancel は次のページで返り、飛んでいるページを待たない
+    - `GetMatch`: 2 つの半分のマージの結果とキー順が旧実装どおり。期限までに返らない半分は `{}`
+    - `GetMatches`: 2 ページ目が初回に例外を出しても、呼び手のスレッドでの再取得 1 回で一覧に入る（`test_a_page_that_raised_gets_the_same_second_chance`。判断 9）
+    - `GetRecentSets`: 10 本が 1 回の `map_fanout`（期限は `_request_timeout_secs`）で、どれも fan-out レーン。返らないページが 1 つあれば答えず、ERROR で `1 of 10 pages did not answer` をログする（`test_a_page_that_does_not_answer_leaves_it_unanswered`。判断 3。一部で答える旧版に戻すと落ちることを確認した）
+    - executor が無い: `GetMatch` / `GetMatches` / `GetRecentSets` が `RuntimeError`（`no TaskExecutor.instance`）を出し、リクエストも答えも出さない（`test_without_a_task_executor_a_fetch_fails_loudly_and_asks_nothing`。判断 8。`_FanOut` を `None` を返す形に戻すと落ちることを確認した）
+    - 終了後: `GetMatch` / `GetMatches` / `GetRecentSets` が、リクエストを出さず 2 秒未満で返る（`GetRecentSets` は答えない）
+  - `tests/test_task_executor.py`（判断 7）: 時計 `_Clock` を `_clock` に差し替えて期限を決める（スレッドのスケジュールに依存しない）
+    - `test_a_fan_out_calls_deadline_runs_from_its_start_not_its_submit`: レーン 1 本で、2 本目は 1 本目の後に始まる。1 本目の投入から期限を過ぎても、2 本目は自分の開始から期限内なら待たれて答えが入る（開始時刻を投入時刻にすると落ちることを確認した）
+    - `test_map_fanout_gives_the_default_for_a_failure_a_late_call_and_one_never_started`: 失敗・走って期限切れ・上限までに始まらない、の 3 つが `default` になり、警告 1 行に内訳が出る。期限を過ぎても上限までは返らない
+  - `tests/test_provider_jobs.py`
+    - 飢餓: job レーンの 4 本すべてが `GetMatch` / `GetRecentSets` を走らせても全部終わり、リクエストはすべて fan-out レーンで出る
+    - 後続セットを取得するものが無い: `src/` のどのファイルも `FutureSets` / `GetFutureMatchesList` / `GetFutureMatch` / `FutureSetQuery` を呼ばず・定義せず・操作名として送らない（AST）。クエリファイルも無い
+    - provider パッケージ（`src/TournamentDataProvider/*.py`）に `Worker` / `Workers` / `QRunnable` / `QThreadPool` / `wait_for_all` / `ThreadPoolExecutor` / `as_completed` / `threadpool` が無い（AST）
+    - `src/Workers.py` を import するのは `AutonaGameAssetManager` と `AutonaApiInfoWindow` だけ（S3f-4 で 0 にして消す）
+  - `tests/test_set_follow.py`
+    - ステーション追従は、追従でも tick でも（キューが動いても）照会と先頭のセットの取得だけをする。取得の失敗のログが無く、`station_queue` は `{}`、取り直しを止めてもステーションは残る（`_OnStationSets` に後続セットの取得を戻すと、この pin と上の AST の pin が落ちることを確認した）
+    - 別のステーションの照会が答え、そのセットが返る前にキャンセルすると、セットは捨てられる（旧「キューはメモリだけ」のテストから、後続セットに関係しない部分を残した）
+    - 後続セットの遅れた答えの 2 本（反映の後・追従をやめた後）は、取得が無くなったので削除した
+  - `tests/test_set_follow_flow.py` とゴールデン（`tests/fixtures/set_follow/golden.json`）: 偽の provider から `GetFutureMatchesList` を消した。ゴールデンの変更は `following` シナリオの 2 ステップの `calls` から 1 件ずつ消しただけ
+    - 「station window: station 4」: `["GetFutureMatchesList", [3002]]`（ステーション 77 の 2 番目のセット）
+    - 「the station moves on」: `["GetFutureMatchesList", [1003]]`（キューが動いた後の 2 番目のセット）
+    - どちらも答えは誰にも読まれていなかった（記録時の木では答えが届かず、今の木では `_queues` に入るだけ）。`writes` / `deltas` / `responses` / `db` / `ui` / `pending` と、最後の各ボードのサブツリー・配信キューは変えていない（変更前後の JSON を比べ、違いがこの 2 件だけであることを確かめた）。ゴールデンはログを記録しない
+  - `tests/test_import_side_effects.py`: `SetFollowService` の空であるべき表から `_queues` / `_queueAsks` を外し、`StartGGDataProvider` のクエリ属性の数を 17 → 16 にした
+  - 引数の追従: `tests/test_web_operations.py`・`tests/live/conftest.py`
+- **残置 / リスク**
+  - `src/Workers.py` と、その利用者 2 つの `Worker` / `QThreadPool`（S3f-4）
+  - provider のモジュールは今も QtGui / QtWidgets を import する（`Workers.py` の分は消えた）。経路は `AutonaLocaleHelper`（`qtpy.QtGui`）と `AutonaPlayerDB`（`qtpy.QtWidgets`・`AutonaGameAssetManager`）
+    - さらに、qtpy 2.4.3 では `qtpy.QtCore` 自体が `PySide6.QtGui` を、`qtpy.QtGui` が `PySide6.QtWidgets` を import する（実測）
+    - S3f-6 の完了条件「ヘッドレスで QtGui / QtWidgets が import されない」は、アダプタの QDialog の遅延 import だけでは満たせない。pin の形は S3f-6 で決め直す
+  - 期限切れで見捨てたリクエストは、返るまで fan-out のスレッドを 1 本使う（旧 Worker も同じ）。8 本が見捨てた遅いリクエストで埋まると、ほかの取得の並列リクエストは上限（60 秒）まで待たされ、始まらなければ取り消される
+  - `GetMatch` の待ちは最悪 60 秒（上限）。旧実装は global pool で 20 秒だった。普段は待ち行列が空なので変わらない。走り始めてから 20 秒を過ぎた半分（`QueryRequests` のリトライの合計は 20 秒を超えうる）は、従来どおり `{}`
+  - `GetRecentSets` が答えないとき、レイアウトの「直近の対戦」は次の更新まで読み込み中のまま。消費者に「失敗」の状態は無い（足すならレイアウトの外部契約を決める必要があり、範囲外）
+  - 既存の取りこぼし（変えていない）: リトライを使い切ったページ（`QueryRequests` は `None` ではなく `{}` を返す）と、parse で例外を出したページ（`GetRecentSetsWorker` が捕まえて `[]` を返す）は、どちらも空のページとして答えになる。だからその場合の対戦履歴は、今も黙って一部だけになりうる（判断 3 が拾うのは、時間切れ・取り消しで答えのないページだけ）。`GetRecentSets` の `except`（並べ替え等の例外）は従来どおり空（`done`・`sets: []`）で答える
+  - S3f-2 の残置「provider の入れ子の Worker が Qt の global pool で走る」は解消した
+  - 後続セットを将来表示したくなったら、取得を戻すだけでは足りない。`station_queue` に書くなら外部契約（S3e-7 判断 11）と反映待ちの扱いを先に決める
+- **実機確認（オーナー）**
+  - セット選択ウィンドウ: 一覧が今どおり出て、進捗が 1 ページずつ進む。読込中に「終了済みを表示」を切り替えても、前の一覧が混ざらない
+  - セットの読込・ステーション / 配信の追従: 選手・スコア・キャラ（旧 API の mains）・ベストオブが今どおり入る
+  - ステーション追従: 今どおり動き、キューが動くと次のセットに移る。`logs/` に `station sets loaded` も `Set follow: a fetch failed` も出ない
+  - 統計の「直近の対戦」: 今どおり出る。セット選択ウィンドウで一覧を取得している最中に選手を入れ替えても（fan-out レーンが混んでいても）、読み込み中のまま止まらずに出る
+  - 終了: セットの読込中・一覧の取得中に閉じても固まらない

@@ -12,8 +12,9 @@ collector could take it before the queued answer was delivered (the answer
 was then silently lost).
 
 The provider methods are called as the Worker called them: with a
-`progress_callback` and a `cancel_event` (S3f-3 changes the provider's
-side). A job never waits on the GUI thread.
+`progress_callback` and a `cancel_event`. The requests a provider method
+makes in parallel go to the executor's fan-out lane (S3f-3). A job never
+waits on the GUI thread.
 """
 import re
 import threading
@@ -147,9 +148,8 @@ class AutonaTournamentDataProvider(QObject):
         self._CancelEntrants()
 
         if url is not None and "start.gg" in url:
-            # No pool of ours (None): see TournamentDataProvider.__init__.
             AutonaTournamentDataProvider.instance.provider = StartGGDataProvider(
-                url, None, self)
+                url, self)
             url = AutonaTournamentDataProvider.instance.provider.GetRealEventURL(url)
         else:
             logger.error("Unsupported provider...")
@@ -184,7 +184,7 @@ class AutonaTournamentDataProvider(QObject):
 
         if url is not None and "start.gg" in url:
             AutonaTournamentDataProvider.instance.provider = StartGGDataProvider(
-                url, None, self)
+                url, self)
         else:
             logger.error("Unsupported provider...")
             AutonaTournamentDataProvider.instance.provider = None

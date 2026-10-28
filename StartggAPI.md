@@ -76,7 +76,6 @@ GraphQL クエリは [src/TournamentDataProvider/](src/TournamentDataProvider/) 
 | `StationSetsQuery` | [StartGGStationSetsQuery.txt](src/TournamentDataProvider/StartGGStationSetsQuery.txt) | `eventSlug`, `filters` | ステーションに割り当てられたセット ID 列挙（最小フィールド） |
 | `StreamQueueQuery` | [StartGGStreamQueueQuery.txt](src/TournamentDataProvider/StartGGStreamQueueQuery.txt) | `slug` | 配信キュー全体（次セットの選手情報込み） |
 | `StreamSetsQuery` | [StartGGStreamSetsQuery.txt](src/TournamentDataProvider/StartGGStreamSetsQuery.txt) | `eventSlug` | 配信キューの最小フィールド版（先頭セット ID 取得用） |
-| `FutureSetQuery` | [StartGGFutureSetQuery.txt](src/TournamentDataProvider/StartGGFutureSetQuery.txt) | `id` | 未開始セットの詳細（ステーション切替時の先読み） |
 | `UserSetQuery` | [StartGGUserSetQuery.txt](src/TournamentDataProvider/StartGGUserSetQuery.txt) | `userSlug`, `filters` | 特定ユーザーの直近セット ID（実況者プロフィール連携） |
 | `CompletedSetsQuery` | [StartGGCompletedSetsQuery.txt](src/TournamentDataProvider/StartGGCompletedSetsQuery.txt) | `eventSlug` | 直近 10 件の終了セット（state=3） |
 | `LastSetsQuery` (`PlayerLastSetsQuery`) | [StartGGPlayerLastSetsQuery.txt](src/TournamentDataProvider/StartGGPlayerLastSetsQuery.txt) | `eventSlug`, `playerID` | 同イベント内の特定選手の直近 10 セット |
@@ -134,7 +133,7 @@ GetMatch(setId)
      └ プレイヤー情報 / フェーズ名 / ベストオブ / 配信元
 ```
 
-`Worker.wait_for_all([fetchOld, fetchNew], 20)` で 20 秒待ち、両方の結果をマージ。
+2 つを `TaskExecutor` の fan-out レーンで並列に取り（`map_fanout`。それぞれ**走り始めてから** 20 秒、レーンの待ち時間は数えない。全体の上限は 60 秒。失敗・時間切れ・上限までに始まらなかった方は `{}`）、両方の結果をマージ。
 **preview ID の場合は旧 REST をスキップ**（`gg_api.` は preview ID 非対応）([StartGGDataProvider.py:565-566](src/TournamentDataProvider/StartGGDataProvider.py:565))。
 
 #### 旧 REST `setTask` のデータ構造（重要）
@@ -156,7 +155,6 @@ GetMatch(setId)
 | `GetStationMatchsId` ([StartGGDataProvider.py:1376](src/TournamentDataProvider/StartGGDataProvider.py:1376)) | StationSetsQuery | filter `state: [1,2,4,5,6]`（pending〜in-progress）。クライアント側で `station.id` でさらに絞る |
 | `GetStreamMatchId` ([StartGGDataProvider.py:1338](src/TournamentDataProvider/StartGGDataProvider.py:1338)) | StreamSetsQuery | streamName 一致 + 同 event の最初のセットを返す |
 | `GetStreamQueue` ([StartGGDataProvider.py:1285](src/TournamentDataProvider/StartGGDataProvider.py:1285)) | StreamQueueQuery | streamName ごとに `{1:..., 2:...}` 形式で返す（Web UI 表示用） |
-| `GetFutureMatch` / `GetFutureMatchesList` ([StartGGDataProvider.py:2094](src/TournamentDataProvider/StartGGDataProvider.py:2094)) | FutureSetQuery | キュー内の各セットを並列で先読み |
 
 > ステート定数（filters.state）:
 > - 1=created, 2=active, 3=completed, 4=ready, 5=invalid, 6=called
@@ -257,9 +255,12 @@ Start.gg の `fullRoundText`（"Winners Round 1" 等）を `AutonaLocaleHelper.m
 
 ### 5.3 セット並列取得
 
-- `_GetMatchTasks` + `_GetMatchNewApi` は QThreadPool で並列実行
-- `GetRecentSetsWorker` は 5 ページ × 2 方向 = **10 ワーカー並列**
-- `GetFutureMatchesList` はキュー内のセット数だけ並列で `FutureSetQuery` を発行
+- `_GetMatchTasks` + `_GetMatchNewApi` は `TaskExecutor` の fan-out レーンで並列実行（`map_fanout`）
+- `GetRecentSetsWorker` は 5 ページ × 2 方向 = **10 本並列**（fan-out レーン）。答えなかったページが 1 つでもあれば対戦履歴は**答えない**（一部だけのリストを全体として出さない。統計は依頼時の「読み込み中」のまま、次の更新で取り直す）
+- `GetMatches` の 2 ページ目以降は 1 回の取得につき同時 4 本まで（`_SETS_FETCH_WORKERS`）。セットが取れなかったページ（例外を出した・取り消された・中身が無い）は、呼び出し元のスレッドで 1 回だけ順に取り直す（締め切りは無い）
+- `map_fanout` の締め切りは 1 本ごとに**走り始めてから** `_request_timeout_secs`（20 秒）。fan-out レーン（8 本を全取得で共有）の待ち時間は数えない。全体の上限はその 3 倍（60 秒、`TaskExecutor.FANOUT_CAP_FACTOR`）で、上限までに始まらなかったものは取り消す
+- `TaskExecutor.instance` が無い（`bootstrap_core()` 前）と、この 3 つはリクエストを出す前に `RuntimeError` で失敗する（空の結果を黙って返さない）
+- ステーションの後続セットは取得しない（ADR-005 S3f-3 で `FutureSetQuery` ごと削除。表示する箇所が無かった）
 
 → 多くの並列リクエストを発行する箇所では Start.gg 側のレート制限に注意。
 

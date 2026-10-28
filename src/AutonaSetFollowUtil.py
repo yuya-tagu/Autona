@@ -150,11 +150,6 @@ class AutonaSetFollowUtil:
         return self._Fetch(
             lambda provider: provider.GetStreamMatchId(name), onResult)
 
-    def FutureSets(self, setIds, onResult):
-        return self._Fetch(lambda provider: provider.GetFutureMatchesList(
-            setsId=setIds, progress_callback=_noProgress,
-            cancel_event=threading.Event()), onResult)
-
     # ── the clock ────────────────────────────────────────────────────────
 
     def Poll(self, board):

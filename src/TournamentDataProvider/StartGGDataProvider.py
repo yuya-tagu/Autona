@@ -1,5 +1,6 @@
-from collections import Counter
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import Counter, deque
+import functools
+import queue
 import re
 import requests
 import time
@@ -16,13 +17,9 @@ from .TournamentDataProvider import TournamentDataProvider
 import orjson
 from ..Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 
-from ..Workers import Worker
-
 
 class StartGGDataProvider(TournamentDataProvider):
     EntrantsQuery = None
-    # request for a single set with only info relevant for a set that is yet to be played
-    FutureSetQuery = None
     HistorySetsQuery = None
     LastSetsQuery = None
     RecentSetsQuery = None
@@ -68,7 +65,6 @@ class StartGGDataProvider(TournamentDataProvider):
                 return f.read()
 
         StartGGDataProvider.EntrantsQuery = readQueryFile("Entrants")
-        StartGGDataProvider.FutureSetQuery = readQueryFile("FutureSet")
         StartGGDataProvider.HistorySetsQuery = readQueryFile(
             "PlayerTournamentHistory")
         StartGGDataProvider.LastSetsQuery = readQueryFile("PlayerLastSets")
@@ -92,8 +88,8 @@ class StartGGDataProvider(TournamentDataProvider):
         StartGGDataProvider.TournamentSlugQuery = readQueryFile(
             "TournamentSlug")
 
-    def __init__(self, url, threadpool, tshTdp) -> None:
-        super().__init__(url, threadpool, tshTdp)
+    def __init__(self, url, tshTdp) -> None:
+        super().__init__(url, tshTdp)
         self.name = "StartGG"
         # In-memory cache of entrants sorted by initialSeedNum for the current
         # event, populated by GetEntrantsWorker. Each item: {"seed": int, "gamerTag": str}.
@@ -161,6 +157,82 @@ class StartGGDataProvider(TournamentDataProvider):
         on its own, in a test)."""
         executor = TaskExecutor.instance
         return None if executor is None else executor.stopping
+
+    # ── requests in parallel (ADR-005 S3f-3) ─────────────────────────────
+    #
+    # The requests one fetch makes in parallel -- a set's two APIs, the
+    # pages of the set list, a head-to-head's ten pages -- run on the task
+    # executor's fan-out lane, and the fetch waits for them. The fetch is a
+    # job (or runs on a thread of its own: a web request, a test), and a
+    # job may wait on the fan-out lane: it always drains (TaskExecutor).
+    # Until S3f-3 they were Workers queued on
+    # the pool the job itself ran on and polled with Worker.wait_for_all;
+    # with enough of those fetches running at once, every thread of the
+    # pool was a fetch waiting for requests queued behind it. Once the
+    # executor stops, the requests not started are cancelled (their answer
+    # is the default) and the ones running stop between attempts
+    # (QueryRequests).
+
+    @staticmethod
+    def _FanOut():
+        """The task executor whose fan-out lane takes the requests one
+        fetch makes in parallel. With none (bootstrap_core() has not run: a
+        script, a test that made none) the fetch fails here, before it asks
+        anything: read inside the fetch's own error handling, the missing
+        executor came back as an empty answer (S3f-3 review)."""
+        executor = TaskExecutor.instance
+        if executor is None:
+            raise RuntimeError(
+                "StartGGDataProvider: no TaskExecutor.instance "
+                "(bootstrap_core() has not run): the parallel requests have "
+                "nowhere to run")
+        return executor
+
+    # How many of one set list's pages are requested at a time: a
+    # browser-like burst the internal GQL endpoint sees from normal site
+    # usage (the official API allows 80 req/min, which even a 10-page fetch
+    # stays well under). Per list, and below the size of the fan-out lane,
+    # so a long list neither bursts wider than it did before S3f-3 nor takes
+    # the whole lane from the other fetches' requests.
+    _SETS_FETCH_WORKERS = 4
+
+    @staticmethod
+    def _FetchPages(executor, pages, fetch, onPage, cancel_event, task_name):
+        """Request `fetch(page)` for every page of `pages` on `executor`'s
+        fan-out lane, at most _SETS_FETCH_WORKERS at a time, and hand each answer to
+        `onPage(page, answer)` on this thread as it lands (in the order
+        they land; None for a request that raised or that the shutdown
+        cancelled). Once `cancel_event` is set it returns at the next
+        answer: nothing more is requested, and the requests in flight are
+        abandoned (their answers dropped) rather than waited for -- one deep
+        in its retry backoff would hold this thread for tens of seconds.
+
+        A sliding window, not map_fanout over every page: the progress
+        moves page by page and a cancel is seen at the next page, as with
+        the per-call pool it replaces, and no fan-out thread waits for a
+        slot. The answers are waited for through done callbacks, not
+        concurrent.futures.as_completed, which a cancellation by the
+        shutdown does not wake (see TaskExecutor)."""
+        waiting = deque(pages)
+        landed = queue.SimpleQueue()
+        inFlight = 0
+        while True:
+            while waiting and \
+                    inFlight < StartGGDataProvider._SETS_FETCH_WORKERS:
+                page = waiting.popleft()
+                future = executor.submit_fanout(
+                    fetch, page, task_name=f"{task_name}[{page}]")
+                future.add_done_callback(
+                    lambda done, page=page: landed.put((page, done)))
+                inFlight += 1
+            if inFlight == 0:
+                return
+            page, future = landed.get()
+            inFlight -= 1
+            failed = future.cancelled() or future.exception() is not None
+            onPage(page, None if failed else future.result())
+            if cancel_event is not None and cancel_event.is_set():
+                return
 
     def GetTournamentData(self, progress_callback=None, cancel_event=None):
         finalData = {}
@@ -541,29 +613,27 @@ class StartGGDataProvider(TournamentDataProvider):
 
     def GetMatch(self, setId, progress_callback=None, cancel_event=None):
         from ..Helpers.AutonaStatusManager import AutonaStatusManager
+        executor = self._FanOut()
         finalResult = None
         status_token = AutonaStatusManager.push("Start.gg からセット情報を取得中...")
 
         try:
             result = {}
 
-            fetchOld = Worker(self._GetMatchTasks, **{
-                "progress_callback": None,
-                "cancel_event": None,
-                "setId": setId
-            })
-            fetchNew = Worker(self._GetMatchNewApi, **{
-                "progress_callback": None,
-                "cancel_event": None,
-                "setId": setId
-            })
-            self.threadpool.start(fetchOld)
-            self.threadpool.start(fetchNew)
+            # Both APIs at once on the fan-out lane, `_request_timeout_secs`
+            # each from when it starts (the lane's queue time is not
+            # counted); a half that failed, ran past that or never started
+            # (the cap) is {} (ADR-005 S3f-3).
+            old, new = executor.map_fanout(
+                [functools.partial(self._GetMatchTasks, setId=setId,
+                                   progress_callback=None, cancel_event=None),
+                 functools.partial(self._GetMatchNewApi, setId=setId,
+                                   progress_callback=None, cancel_event=None)],
+                self._request_timeout_secs, task_name="start.gg set",
+                default={})
 
-            Worker.wait_for_all([fetchOld, fetchNew], self._request_timeout_secs)
-
-            result.update({"new": fetchNew.result if fetchNew.completed else {}})
-            result.update({"old": fetchOld.result if fetchOld.completed else {}})
+            result.update({"new": new})
+            result.update({"old": old})
 
             logger.debug(result)
 
@@ -633,13 +703,9 @@ class StartGGDataProvider(TournamentDataProvider):
             logger.error(traceback.format_exc())
             return {}
 
-    # Concurrent page fetches for the set list: a browser-like burst the
-    # internal GQL endpoint sees from normal site usage (the official API
-    # allows 80 req/min, which even a 10-page fetch stays well under).
-    _SETS_FETCH_WORKERS = 4
-
     def GetMatches(self, getFinished=False, phaseGroupIds=None, progress_callback=None, cancel_event=None):
         from ..Helpers.AutonaStatusManager import AutonaStatusManager
+        executor = self._FanOut()
         status_token = AutonaStatusManager.push(
             "Start.gg からセット一覧を取得中...")
         final_data = []
@@ -694,26 +760,22 @@ class StartGGDataProvider(TournamentDataProvider):
             pageNodes = {1: deep_get(data, "data.event.sets.nodes", None)}
             report(1, totalPages)
 
-            # Remaining pages concurrently. Network only in the pool; parsing
-            # stays on this worker thread. No context manager: on cancel we
-            # abandon in-flight requests instead of joining them (a page deep
-            # in its retry backoff would otherwise block for tens of seconds).
+            # Remaining pages concurrently, on the fan-out lane
+            # (_FetchPages). Network only there; parsing stays on this
+            # thread. On cancel, the requests in flight are abandoned.
             if totalPages > 1 and (cancel_event is None or not cancel_event.is_set()):
-                pool = ThreadPoolExecutor(
-                    max_workers=self._SETS_FETCH_WORKERS)
-                try:
-                    futures = {pool.submit(fetchPage, p): p
-                               for p in range(2, totalPages + 1)}
-                    done = 1
-                    for future in as_completed(futures):
-                        pageNodes[futures[future]] = deep_get(
-                            future.result(), "data.event.sets.nodes", None)
-                        done += 1
-                        report(done, totalPages)
-                        if cancel_event is not None and cancel_event.is_set():
-                            break
-                finally:
-                    pool.shutdown(wait=False, cancel_futures=True)
+                done = 1
+
+                def landed(page, answer):
+                    nonlocal done
+                    pageNodes[page] = deep_get(
+                        answer, "data.event.sets.nodes", None)
+                    done += 1
+                    report(done, totalPages)
+
+                self._FetchPages(executor, range(2, totalPages + 1),
+                                 fetchPage, landed, cancel_event,
+                                 "start.gg set list page")
 
             if cancel_event is not None and cancel_event.is_set():
                 return final_data
@@ -1870,39 +1932,54 @@ class StartGGDataProvider(TournamentDataProvider):
             callback.emit({"playerNumber": playerNumber, "history_sets": []})
 
     def GetRecentSets(self, id1, id2, videogame, callback, requestTime, progress_callback, cancel_event):
+        executor = self._FanOut()
         try:
             id1 = [str(id1[0]), str(id1[1])]
             id2 = [str(id2[0]), str(id2[1])]
 
             logger.info("Get recent sets start")
 
-            # One list of workers per direction (each player's events).
-            directions = []
-            for _id1, _id2, inverted in [[id1, id2, False], [id2, id1, True]]:
-                workers = []
-                for i in range(5):
-                    worker = Worker(self.GetRecentSetsWorker, **{
-                        "id1": _id1,
-                        "id2": _id2,
-                        "page": (i+1),
-                        "inverted": inverted,
-                        "videogame": videogame
-                    })
-                    workers.append(worker)
-                    self.threadpool.start(worker)
-                directions.append(workers)
+            # Five pages per direction (each player's events), all ten at
+            # once on the fan-out lane, `_request_timeout_secs` each from
+            # when it starts (ADR-005 S3f-3; there was no bound before: a
+            # page that never answered held the statistic for good).
+            pages = 5
+            calls = [
+                functools.partial(
+                    self.GetRecentSetsWorker, id1=_id1, id2=_id2,
+                    page=page + 1, inverted=inverted, videogame=videogame,
+                    progress_callback=None, cancel_event=None)
+                for _id1, _id2, inverted in [[id1, id2, False],
+                                             [id2, id1, True]]
+                for page in range(pages)]
+            answers = executor.map_fanout(
+                calls, self._request_timeout_secs,
+                task_name="start.gg recent sets")
+            missing = [index for index, answer in enumerate(answers)
+                       if answer is None]
+            if missing:
+                # A page that did not answer (ran past its deadline, never
+                # started, was cancelled): the sets of the others would read
+                # as the whole head-to-head. No answer instead, as for a
+                # fetch that raised: the statistic is left as its request
+                # left it until it is asked for again (S3f-3 review). At
+                # the shutdown that is expected (the pages not started were
+                # cancelled), and nothing would deliver an answer anyway.
+                log = (logger.info if executor.stopping.is_set()
+                       else logger.error)
+                log(f"GetRecentSets: {len(missing)} of {len(answers)} pages "
+                    "did not answer; the head-to-head is not answered")
+                return
 
-            # Both directions' workers: only the second's used to be waited
+            # Both directions' pages: only the second's used to be waited
             # for and read (the list was the last loop's), so the sets only
             # the first player's events held were dropped (ADR-005 S3e-5
             # review).
-            Worker.wait_for_all(
-                [worker for workers in directions for worker in workers])
+            directions = [answers[:pages], answers[pages:]]
 
-            def results(workers):
-                for worker in workers:
-                    if worker.result is not None:
-                        yield from worker.result
+            def results(pageAnswers):
+                for answer in pageAnswers:
+                    yield from answer
 
             # The second direction's sets as before -- a set both found
             # keeps its entry and its place among the sets of one date --
@@ -2295,59 +2372,6 @@ class StartGGDataProvider(TournamentDataProvider):
             return (teams)
         except Exception as e:
             logger.error(traceback.format_exc())
-
-    def GetFutureMatch(self, matchId, progress_callback, cancel_event):
-        data = self.QueryRequests(
-            "https://www.start.gg/api/-/gql",
-            type=requests.post,
-            jsonParams={
-                "operationName": "FutureSetQuery",
-                "variables": {
-                    "id": matchId
-                },
-                "query": StartGGDataProvider.FutureSetQuery
-            }
-        )
-
-        data = deep_get(data, "data.set", None)
-
-        if not data:
-            return {}
-
-        data = self.ProcessFutureSet(data, self.url.split("start.gg/")[1])
-
-        return data
-
-    def GetMatchAndInsertInList(self, setId, list, i, progress_callback, cancel_event):
-        set = self.GetFutureMatch(setId, None)
-
-        if set:
-            list[i] = set
-
-    def GetFutureMatchesList(self, setsId, progress_callback, cancel_event):
-        sets = []
-        pool = self.getStationMatchesThreadPool
-        i = 0
-        workers = []
-        for set in setsId:
-            sets.append(None)
-            worker = Worker(self.GetMatchAndInsertInList, **{
-                "setId": set.get("id"),
-                "list": sets,
-                "i": i
-            })
-            workers.append(worker)
-            pool.start(worker)
-
-            i += 1
-
-        Worker.wait_for_all(workers, self._request_timeout_secs)
-
-        sets_ = {}
-        for index, set in enumerate(sets):
-            sets_[str(index + 1)] = set
-
-        return sets_
 
     def GetRealEventURL(self, url):
         matches = re.match(

@@ -4,7 +4,7 @@ These tests capture the current behavior of ParseMatchDataNewApi,
 ParseMatchDataOldApi, and ProcessEntrantData so that refactoring
 can be verified against known-good outputs.
 
-Strategy: the provider's own dependencies (player DB, workers, qtpy, ...)
+Strategy: the provider's own dependencies (player DB, qtpy, ...)
 are stubbed via sys.modules while the module is exec'd, so the parse
 functions can be exercised as pure data transforms. The stubs are removed
 again immediately afterwards -- they are an isolation device for this module
@@ -23,9 +23,13 @@ Neither are country and region lookups (ADR-005 S1c): the provider reads the
 Qt-free core CountryCatalog, and these tests hand it a real one loaded from
 the shipped assets/ (country names, regions and the city -> region table).
 """
+import copy
+import json
 import os
 import shutil
 import sys
+import threading
+import time
 import types
 from collections import Counter
 from pathlib import Path
@@ -41,7 +45,7 @@ import pytest
 from src.core.CountryCatalog import CountryCatalog, state_flag_path
 from src.core.DictHelper import deep_get
 from src.core.GameAssetCatalog import GameAssetCatalog, GameAssetSnapshot
-from src.core.TaskExecutor import TaskExecutor
+from src.core.TaskExecutor import FANOUT_THREAD_PREFIX, TaskExecutor
 from tests.conftest import _link_tree
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -105,13 +109,12 @@ class _MockQObject:
 
 # --- TournamentDataProvider base class ---
 class _MockTournamentDataProvider(_MockQObject):
-    def __init__(self, url=None, threadpool=None, tshTdp=None):
+    def __init__(self, url=None, tshTdp=None):
         super().__init__()
         self.name = ""
         self.url = url
         self.entrants = []
         self.tournamentData = {}
-        self.threadpool = threadpool
         self.videogame = None
         self.tshTdp = tshTdp
 
@@ -135,8 +138,10 @@ def _setup_mock_modules():
             "src.core.DictHelper",
             {"deep_get": deep_get},
         ),
-        # The real (Qt-free) class: QueryRequests reads its `stopping`, and
-        # the entrants fetch is submitted to it (ADR-005 S3f-2).
+        # The real (Qt-free) class: QueryRequests reads its `stopping`, the
+        # entrants fetch is submitted to it (ADR-005 S3f-2), and the
+        # requests a fetch makes in parallel go to its fan-out lane (S3f-3;
+        # the `fanout` fixture below puts one in place).
         "src.core.TaskExecutor": _make_mock_module(
             "src.core.TaskExecutor",
             {"TaskExecutor": TaskExecutor},
@@ -171,10 +176,6 @@ def _setup_mock_modules():
         "src.core.PlayerDB": _make_mock_module(
             "src.core.PlayerDB",
             {"PlayerDB": MagicMock()},
-        ),
-        "src.Workers": _make_mock_module(
-            "src.Workers",
-            {"Worker": MagicMock()},
         ),
         "src.TournamentDataProvider": _make_mock_module(
             "src.TournamentDataProvider", is_package=True,
@@ -243,12 +244,32 @@ def _make_provider(**kwargs):
     p.url = ""
     p.entrants = []
     p.tournamentData = {}
-    p.threadpool = None
     p.videogame = None
     p.tshTdp = None
     p.player_seeds = kwargs.get("player_seeds", {})
     p.numEntrants = kwargs.get("numEntrants", 0)
     return p
+
+
+# What a test waits at most for something that must happen, in seconds.
+WAIT = 10
+
+
+@pytest.fixture
+def fanout(monkeypatch):
+    """A task executor of the test's own as `TaskExecutor.instance`: the
+    requests a fetch makes in parallel go to its fan-out lane (ADR-005
+    S3f-3). Shut down afterwards."""
+    executor = TaskExecutor()
+    monkeypatch.setattr(TaskExecutor, "instance", executor)
+    try:
+        yield executor
+    finally:
+        executor.shutdown(WAIT)
+
+
+def _onFanout():
+    return threading.current_thread().name.startswith(FANOUT_THREAD_PREFIX)
 
 
 # ---------------------------------------------------------------------------
@@ -1371,6 +1392,7 @@ class TestSplitGfReset:
 # Tests: GetMatches (parallel paginated set fetch)
 # ===========================================================================
 
+@pytest.mark.usefixtures("fanout")
 class TestGetMatchesPagination:
 
     def _paged_response(self, ids, totalPages):
@@ -1424,6 +1446,31 @@ class TestGetMatchesPagination:
         assert sorted(s["id"] for s in result) == [21, 22]
         assert len(page2Calls) == 2
 
+    def test_a_page_that_raised_gets_the_same_second_chance(self):
+        """A page whose request raised -- not only one that came back empty
+        -- is re-fetched once after the burst: on the fan-out lane its
+        exception is the lane's to log, and _FetchPages hands the page on as
+        failed (None). An intentional change of S3f-3: until then the
+        exception came out of the per-call pool's future, and the whole
+        list was []."""
+        provider = self._provider()
+        page2Calls = []
+
+        def fake(*a, **kw):
+            page = kw["jsonParams"]["variables"]["page"]
+            if page == 2:
+                page2Calls.append(_onFanout())
+                if len(page2Calls) == 1:
+                    raise ConnectionError("probe")
+                return self._paged_response([22], 2)
+            return self._paged_response([21], 2)
+
+        provider.QueryRequests = fake
+        result = provider.GetMatches()
+        assert sorted(s["id"] for s in result) == [21, 22]
+        # The burst on the lane, the second chance on the calling thread.
+        assert page2Calls == [True, False]
+
     def test_single_page_event(self):
         provider = self._provider()
         provider.QueryRequests = lambda *a, **kw: self._paged_response(
@@ -1435,6 +1482,254 @@ class TestGetMatchesPagination:
         provider = self._provider()
         provider.QueryRequests = lambda *a, **kw: self._paged_response([], 0)
         assert provider.GetMatches() == []
+
+    def test_the_pages_after_the_first_go_to_the_fan_out_lane(self):
+        """Page 1 on the calling thread (it says how many there are), the
+        rest on the executor's fan-out lane (ADR-005 S3f-3; a pool of its own
+        per call before). The progress moves page by page as each lands,
+        reported on the calling thread."""
+        provider = self._provider()
+        onLane = {}
+
+        def fake(*a, **kw):
+            page = kw["jsonParams"]["variables"]["page"]
+            onLane[page] = _onFanout()
+            return self._paged_response([page * 10], 5)
+
+        provider.QueryRequests = fake
+        progress = []
+        result = provider.GetMatches(
+            progress_callback=lambda done, total: progress.append(
+                (done, total, _onFanout())))
+
+        assert [s["id"] for s in result] == [10, 20, 30, 40, 50]
+        assert onLane == {1: False, 2: True, 3: True, 4: True, 5: True}
+        assert progress == [(done, 5, False) for done in range(1, 6)]
+
+    def test_at_most_four_pages_are_in_flight(self):
+        """One list asks for no more pages at a time than its own pool of
+        four used to (the fan-out lane has eight threads): the burst start.gg
+        sees is unchanged, and the lane keeps room for the other fetches."""
+        provider = self._provider()
+        lock = threading.Lock()
+        inFlight = [0]
+        most = [0]
+        four = threading.Event()
+        release = threading.Event()
+
+        def fake(*a, **kw):
+            page = kw["jsonParams"]["variables"]["page"]
+            if page == 1:
+                return self._paged_response([1], 10)
+            with lock:
+                inFlight[0] += 1
+                most[0] = max(most[0], inFlight[0])
+                if inFlight[0] == 4:
+                    four.set()
+            try:
+                release.wait(WAIT)
+            finally:
+                with lock:
+                    inFlight[0] -= 1
+            return self._paged_response([page], 10)
+
+        provider.QueryRequests = fake
+        result = []
+        fetching = threading.Thread(
+            target=lambda: result.extend(provider.GetMatches()))
+        fetching.start()
+        try:
+            assert four.wait(WAIT)
+            time.sleep(0.2)  # room for a fifth, were there no limit
+            assert most[0] == 4
+        finally:
+            release.set()
+            fetching.join(WAIT)
+
+        assert [s["id"] for s in result] == list(range(1, 11))
+        assert most[0] == 4
+
+    def test_a_cancel_returns_at_the_next_page_without_waiting_for_the_rest(
+            self):
+        """The set window asks again while the list loads: the fetch stops
+        at the next page that lands and abandons the requests in flight, as
+        it did with its own pool."""
+        provider = self._provider()
+        cancel = threading.Event()
+        stuck = threading.Event()
+        requested = []
+
+        def fake(*a, **kw):
+            page = kw["jsonParams"]["variables"]["page"]
+            requested.append(page)
+            if page == 1:
+                return self._paged_response([1], 10)
+            if page == 2:
+                cancel.set()
+                return self._paged_response([2], 10)
+            stuck.wait(WAIT)  # in flight until the test ends
+            return self._paged_response([page], 10)
+
+        provider.QueryRequests = fake
+        try:
+            started = time.monotonic()
+            assert provider.GetMatches(cancel_event=cancel) == []
+            assert time.monotonic() - started < WAIT / 2
+        finally:
+            stuck.set()
+        # Nothing was asked for after the cancel: the first window only.
+        assert set(requested) <= {1, 2, 3, 4, 5}
+
+
+# ===========================================================================
+# Tests: GetMatch (the two APIs in parallel)
+# ===========================================================================
+
+_MATCH_NEW = {"id": 5, "isOnline": False, "bestOf": 5, "p1_name": "A",
+              "entrants": [[{"gamerTag": "A"}], [{"gamerTag": "B"}]]}
+_MATCH_OLD = {"bestOf": 3, "team1score": 2,
+              "entrants": [[{"mains": ["Mario", 0]}], [{"mains": []}]]}
+
+
+@pytest.mark.usefixtures("fanout")
+class TestGetMatchInParallel:
+
+    def _provider(self, old, new):
+        provider = _make_provider()
+        onLane = []
+
+        def half(answer):
+            def fetch(setId, progress_callback, cancel_event):
+                onLane.append(_onFanout())
+                return answer()
+            return fetch
+
+        provider._GetMatchTasks = half(old)
+        provider._GetMatchNewApi = half(new)
+        return provider, onLane
+
+    def test_the_two_halves_merge_as_before(self):
+        provider, onLane = self._provider(
+            lambda: copy.deepcopy(_MATCH_OLD),
+            lambda: copy.deepcopy(_MATCH_NEW))
+
+        result = provider.GetMatch(5)
+
+        # The new API's keys, the legacy half's over them, then the
+        # entrants of the new API with the legacy mains (offline: no bestOf).
+        assert list(result) == ["id", "isOnline", "bestOf", "p1_name",
+                                "entrants", "team1score",
+                                "has_selection_data"]
+        assert result == {
+            "id": 5, "isOnline": False, "bestOf": None, "p1_name": "A",
+            "entrants": [[{"gamerTag": "A", "mains": ["Mario", 0]}],
+                         [{"gamerTag": "B"}]],
+            "team1score": 2, "has_selection_data": True,
+        }
+        assert onLane == [True, True]
+
+    def test_a_half_that_has_not_answered_in_time_is_empty(self):
+        gate = threading.Event()
+
+        def late():
+            gate.wait(WAIT)
+            return copy.deepcopy(_MATCH_OLD)
+
+        provider, _onLane = self._provider(
+            late, lambda: copy.deepcopy(_MATCH_NEW))
+        provider._request_timeout_secs = 0.2
+        try:
+            started = time.monotonic()
+            result = provider.GetMatch(5)
+            assert time.monotonic() - started < WAIT / 2
+        finally:
+            gate.set()
+
+        assert result == {
+            "id": 5, "isOnline": False, "bestOf": None, "p1_name": "A",
+            "entrants": [[{"gamerTag": "A"}], [{"gamerTag": "B"}]],
+        }
+
+
+# ===========================================================================
+# Tests: the shutdown (ADR-005 S3f-3)
+# ===========================================================================
+
+class _Answer:
+    def __init__(self, payload):
+        self.status_code = 200
+        self.text = json.dumps(payload)
+
+
+@pytest.mark.parametrize("fetch", ["set", "set list", "recent sets"])
+def test_after_the_shutdown_a_fetch_answers_at_once_and_asks_nothing(
+        fanout, monkeypatch, fetch):
+    """Once the executor stops, the parallel requests not started are
+    cancelled and the fetch takes their default at once (not at its
+    timeout), and QueryRequests sends nothing more."""
+    provider = _make_provider()
+    provider.url = "https://www.start.gg/tournament/t/event/e"
+    sent = []
+
+    def post(url, **kwargs):
+        sent.append(kwargs["json"]["variables"])
+        if fetch == "set list":
+            # The first page says there are five; the app quits now.
+            fanout.shutdown(WAIT)
+            return _Answer({"data": {"event": {"sets": {
+                "pageInfo": {"totalPages": 5}, "nodes": []}}}})
+        raise AssertionError("a request after the shutdown")
+
+    monkeypatch.setattr(_startgg_mod.requests, "post", post)
+    monkeypatch.setattr(_startgg_mod.requests, "get", post)
+    if fetch != "set list":
+        fanout.shutdown(WAIT)
+
+    started = time.monotonic()
+    if fetch == "set":
+        result = provider.GetMatch(5)
+        assert result == {"entrants": []}
+    elif fetch == "set list":
+        assert provider.GetMatches() == []
+    else:
+        # Every page cancelled: no head-to-head to answer (and nothing
+        # would deliver one now).
+        answers = []
+        provider.GetRecentSets([1, 10], [2, 20], 1386,
+                               types.SimpleNamespace(emit=answers.append),
+                               7, None, None)
+        assert answers == []
+    assert time.monotonic() - started < 2
+
+    assert len(sent) == (1 if fetch == "set list" else 0)
+
+
+@pytest.mark.parametrize("fetch", ["set", "set list", "recent sets"])
+def test_without_a_task_executor_a_fetch_fails_loudly_and_asks_nothing(
+        monkeypatch, fetch):
+    """No executor (bootstrap_core() has not run) was an AttributeError
+    that the fetch's own error handling turned into an empty answer -- a
+    set with no entrants, an empty list, a head-to-head of no sets. Now the
+    fetch raises, saying what is missing, before any request (S3f-3
+    review)."""
+    monkeypatch.setattr(TaskExecutor, "instance", None)
+    provider = _make_provider()
+    provider.url = "https://www.start.gg/tournament/t/event/e"
+    sent = []
+    provider.QueryRequests = lambda *a, **kw: sent.append(kw) or {}
+    answers = []
+
+    with pytest.raises(RuntimeError, match="no TaskExecutor.instance"):
+        if fetch == "set":
+            provider.GetMatch(5)
+        elif fetch == "set list":
+            provider.GetMatches()
+        else:
+            provider.GetRecentSets([1, 10], [2, 20], 1386,
+                                   types.SimpleNamespace(emit=answers.append),
+                                   7, None, None)
+
+    assert sent == [] and answers == []
 
 
 # ===========================================================================
@@ -1644,37 +1939,27 @@ class TestOneSnapshotPerParse:
 # Tests: the head-to-head asks both players' events (ADR-005 S3e-5 review)
 # ===========================================================================
 
-class _PoolWorker:
-    """src.Workers.Worker as GetRecentSets uses it, run by `_Pool` at
-    once; wait_for_all records which workers it was asked to wait for."""
-    waitedFor = []
-
-    def __init__(self, fn, **kwargs):
-        self.fn = fn
-        self.kwargs = kwargs
-        self.result = None
-        self.completed = False
-
-    def run(self):
-        self.result = self.fn(progress_callback=None, cancel_event=None,
-                              **self.kwargs)
-        self.completed = True
-
-    @staticmethod
-    def wait_for_all(workers, timeout=None):
-        _PoolWorker.waitedFor.append(list(workers))
-        return all(worker.completed for worker in workers)
-
-
+@pytest.mark.usefixtures("fanout")
 class TestRecentSets:
 
-    def test_both_directions_are_waited_for_and_read(self, monkeypatch):
+    def test_both_directions_are_waited_for_and_read(self, fanout,
+                                                      monkeypatch):
         """The workers of the first direction (the first player's events)
         were started but neither waited for nor read: the list was the last
         loop's, so the sets only that player's events held were missing. A
-        set both directions found keeps the second's entry, as before."""
-        monkeypatch.setattr(_startgg_mod, "Worker", _PoolWorker)
-        monkeypatch.setattr(_PoolWorker, "waitedFor", [])
+        set both directions found keeps the second's entry, as before.
+
+        All ten pages are one wait on the fan-out lane, bounded by the
+        request timeout (ADR-005 S3f-3; Workers on a pool, waited for with
+        no bound, before)."""
+        mapped = []
+        mapFanout = fanout.map_fanout
+
+        def spy(calls, timeout, **kwargs):
+            mapped.append((len(calls), timeout))
+            return mapFanout(calls, timeout, **kwargs)
+
+        monkeypatch.setattr(fanout, "map_fanout", spy)
         found = {
             (False, 1): [{"id": "A", "timestamp": 300, "seen": "first"},
                          {"id": "B", "timestamp": 100, "seen": "first"}],
@@ -1685,12 +1970,10 @@ class TestRecentSets:
 
         def worker(id1, id2, page, videogame, inverted, progress_callback,
                    cancel_event):
-            asked.append((id1, id2, page, inverted))
+            asked.append((id1, id2, page, inverted, _onFanout()))
             return found.get((inverted, page), [])
 
         provider = _make_provider()
-        provider.threadpool = types.SimpleNamespace(
-            start=lambda worker: worker.run())
         provider.GetRecentSetsWorker = worker
         answers = []
 
@@ -1703,8 +1986,48 @@ class TestRecentSets:
             {"id": "C", "timestamp": 200, "seen": "second"},
             {"id": "B", "timestamp": 100, "seen": "second"},
         ]}]
-        assert [len(workers) for workers in _PoolWorker.waitedFor] == [10]
+        assert mapped == [(10, provider._request_timeout_secs)]
         assert sorted(asked) == sorted(
-            [(["1", "10"], ["2", "20"], page, False) for page in range(1, 6)]
-            + [(["2", "20"], ["1", "10"], page, True)
+            [(["1", "10"], ["2", "20"], page, False, True)
+             for page in range(1, 6)]
+            + [(["2", "20"], ["1", "10"], page, True, True)
                for page in range(1, 6)])
+
+    def test_a_page_that_does_not_answer_leaves_it_unanswered(self):
+        """The head-to-head waited for its pages with no bound: one that
+        never answered held the statistic -- and a pool thread -- for good.
+        Now it is given up at the request timeout (ADR-005 S3f-3) -- and
+        then nothing is answered, as for a fetch that raised: the others'
+        sets alone would read as the whole head-to-head (S3f-3 review). The
+        statistic stays as its request left it until it is asked again."""
+        gate = threading.Event()
+
+        def worker(id1, id2, page, videogame, inverted, progress_callback,
+                   cancel_event):
+            if (inverted, page) == (False, 1):
+                gate.wait(WAIT)  # has not answered by the timeout
+                return [{"id": "late", "timestamp": 300}]
+            if (inverted, page) == (True, 1):
+                return [{"id": "C", "timestamp": 200}]
+            return []
+
+        provider = _make_provider()
+        provider.GetRecentSetsWorker = worker
+        provider._request_timeout_secs = 0.3
+        answers = []
+        errors = []
+        sink = _startgg_mod.logger.add(
+            lambda message: errors.append(str(message)), level="ERROR")
+        try:
+            started = time.monotonic()
+            provider.GetRecentSets(
+                [1, 10], [2, 20], 1386,
+                types.SimpleNamespace(emit=answers.append), 7, None, None)
+            assert time.monotonic() - started < WAIT / 2
+        finally:
+            _startgg_mod.logger.remove(sink)
+            gate.set()
+
+        assert answers == []
+        assert [line for line in errors
+                if "1 of 10 pages did not answer" in line]

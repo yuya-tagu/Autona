@@ -3773,12 +3773,6 @@
       77
      ],
      [
-      "GetFutureMatchesList",
-      [
-       3002
-      ]
-     ],
-     [
       "GetStreamQueue"
      ],
      [
@@ -4836,12 +4830,6 @@
      [
       "GetStationMatchsId",
       77
-     ],
-     [
-      "GetFutureMatchesList",
-      [
-       1003
-      ]
      ],
      [
       "GetStreamQueue"

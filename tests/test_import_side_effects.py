@@ -238,9 +238,8 @@ assert web_server.socketio is None, "import built WebServer.socketio"
 assert type(web_operations.boardHost) is web_operations.BoardHost,     "import registered a board host for the web operations"
 assert set_follow.fetcher is None,     "import registered the set follow's fetcher"
 assert set_follow.boardHost is None,     "import registered the set follow's board host"
-assert (set_follow._polls, set_follow._stations, set_follow._queues,
-        set_follow._queueAsks, set_follow._lookups,
-        set_follow._loads) == ({}, {}, {}, {}, {}, {}),     "import started following a set"
+assert (set_follow._polls, set_follow._stations, set_follow._lookups,
+        set_follow._loads) == ({}, {}, {}, {}),     "import started following a set"
 assert web_operations.loadGameByCodename is None,     "import registered a game loader for the web operations"
 assert web_operations.openSetSelection is None,     "import registered a shell operation (the set selection window)"
 assert web_operations.renderThumbnail is None,     "import registered a shell operation (the thumbnail)"
@@ -292,8 +291,8 @@ assert locale_helper.countryToContinent == {}, \
 # Every GraphQL query attribute, found by name so a newly added query is
 # covered without touching this test.
 queryAttrs = [n for n in vars(startgg) if n.endswith("Query")]
-assert len(queryAttrs) == 17, \
-    f"expected 17 StartGG query attributes, found {len(queryAttrs)}"
+assert len(queryAttrs) == 16, \
+    f"expected 16 StartGG query attributes, found {len(queryAttrs)}"
 for name in queryAttrs:
     assert getattr(startgg, name) is None, \
         f"import loaded StartGGDataProvider.{name}"
