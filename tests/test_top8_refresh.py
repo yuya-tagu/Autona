@@ -936,8 +936,8 @@ def _top8Characters():
 
 def _loader(shell, manager):
     """Load a game the way `shell` does: the desktop's asset adapter, or
-    the headless shell's catalog-direct loader (src/headless.py)."""
-    from qtpy.QtWidgets import QApplication
+    the headless shell's catalog-direct loader (src/headless.py). Both are
+    a job of the task executor (ADR-005 S3f-4 / S3f-6)."""
     from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
     from src.core.GameAssetCatalog import GameAssetCatalog
     from tests.conftest import drain_tasks
@@ -953,9 +953,9 @@ def _loader(shell, manager):
                           AutonaTournamentDataProvider.instance)
 
     def load(codename, reload=False):
-        games.LoadGameByCodename(codename, async_mode=False,
-                                 mods_reload_mode=reload)
-        QApplication.processEvents()        # what follows a load
+        # The load job and what follows it on this (the main) thread.
+        games.LoadGameByCodename(codename, mods_reload_mode=reload)
+        drain_tasks()
     return load
 
 

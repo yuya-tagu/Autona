@@ -6,7 +6,7 @@ AppUserModelID has its grouped taskbar button icon resolved from a registered
 Start Menu shortcut whose ``System.AppUserModel.ID`` matches that AppID. The
 per-window HICON set via ``setWindowIcon`` is only a best-effort fallback that
 Win11 latches at taskbar-button-creation time; during Autona's heavy startup
-(splash -> WebEngine/qasync/restoreState -> main window) the button is created
+(splash -> WebEngine/restoreState -> main window) the button is created
 before the HICON is in place and latches the generic icon. Giving Win11 an
 authoritative AppID -> shortcut -> icon mapping is the mechanism VS Code,
 Discord and Slack use, and the reliable fix here.

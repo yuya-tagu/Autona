@@ -1,13 +1,14 @@
 """The game assets and the API window's requests as TaskExecutor work
-(ADR-005 S3f-4).
+(ADR-005 S3f-4; the headless shell's loader, S3f-6).
 
 Until S3f-4 the asset adapter (AutonaGameAssetManager) ran its scan, load
 and start.gg download on QThreads of its own and decoded its icons on a
 QThreadPool, and the API window sent its requests as a Worker on another;
 src/Workers.py was their last user. Pinned here:
 
-- nothing in src/ has a Worker, a QRunnable or a pool any more, and
-  Workers.py is gone; the adapter and the API window start no thread;
+- the adapter and the API window start no thread (that nothing in src/
+  has a Worker, a QRunnable or a pool, and Workers.py is gone, is
+  tests/test_task_executor.py's since S3f-6);
 - GuiExecutor.run_sync gives up on a call the GUI thread has not started
   once the app is shutting down or the event loop has exited (the call then
   never runs), and still waits for one already running; a job blocked in
@@ -29,9 +30,18 @@ src/Workers.py was their last user. Pinned here:
 - a load waiting on the GUI thread is released by the shutdown, with
   nothing rebuilt or announced afterwards (its selection published with
   what goes with it: tests/test_roster_flow.py, also for a failed model
-  rebuild); one still waiting for the loader -- desktop -- or the lock --
-  headless -- writes nothing at all, nor does one whose loader the
-  shutdown cancelled while it was queued;
+  rebuild); one still waiting for the loader writes nothing at all, nor
+  does one whose loader the shutdown cancelled while it was queued;
+- the headless loader takes the desktop's design (S3f-6): the start.gg
+  download, the scan and the loads are jobs, with no thread of its own;
+  rapid requests take one job and end on the last one; a superseded
+  synchronous load answers once the newer one is in; a synchronous load
+  from the main thread is refused; one waiting for the loader does not
+  run once stopping; an asynchronous load whose marshal is given up (the
+  event loop ends while it waits: S3f-4's race) writes what follows its
+  selection itself; the shutdown waits for a load, which settles before
+  ./out and state.json are flushed; a loader cancelled while queued ends
+  its request;
 - the game change's full state goes out after the load's delta, with the
   revision of its content (the save cycle itself, one with the roster and
   published on the GUI thread: tests/test_roster_flow.py);
@@ -120,11 +130,9 @@ def ownExecutor(autonaApp, monkeypatch):
         executor.shutdown(WAIT)
 
 
-# ── no Worker, no pool ───────────────────────────────────────────────────
-
-FORBIDDEN = {"Worker", "Workers", "WorkerSignals", "QRunnable",
-             "QThreadPool", "wait_for_all", "waitForDone", "threadpool",
-             "threadPool"}
+# ── no thread of their own ───────────────────────────────────────────────
+# (Nothing in src/ has a Worker, a QRunnable or a pool:
+# tests/test_task_executor.py, since ADR-005 S3f-6.)
 
 
 def _names(path):
@@ -143,14 +151,6 @@ def _names(path):
             for alias in node.names:
                 used.update(alias.name.split("."))
     return used
-
-
-def test_nothing_in_src_has_a_worker_or_a_pool():
-    assert not (PROJECT_ROOT / "src" / "Workers.py").exists()
-    found = {path.relative_to(PROJECT_ROOT).as_posix():
-             sorted(_names(path) & FORBIDDEN)
-             for path in sorted((PROJECT_ROOT / "src").rglob("*.py"))}
-    assert {path: names for path, names in found.items() if names} == {}
 
 
 @pytest.mark.parametrize("path", ["src/AutonaGameAssetManager.py",
@@ -837,28 +837,325 @@ def test_a_loader_the_shutdown_cancels_while_queued_stops_its_request(
     assert selections == []
 
 
-def test_a_headless_load_waiting_for_the_lock_does_not_run_once_stopping(
-        goldenGames, ownExecutor, autonaApp, monkeypatch):
-    import copy
+# ── the headless loader (ADR-005 S3f-6: the desktop's design) ───────────
 
+
+def _headlessGames(monkeypatch, provider=None):
+    """A headless loader over the session's catalog, with the headless
+    board host (what follows a load the shutdown stopped writes through
+    it; the harness registered the desktop's)."""
+    from src import AutonaWebOperations as WebOps
+    from src.AutonaWebOperations import BoardHost
     from src.core.GameAssetCatalog import GameAssetCatalog
-    from src.core.StateManager import StateManager
     from src.headless import HeadlessGames
 
-    games = HeadlessGames(GameAssetCatalog.instance, provider=None)
-    selections = _selections(GameAssetCatalog.instance, monkeypatch)
-    game = copy.deepcopy(StateManager.Get("game"))
+    monkeypatch.setattr(WebOps, "boardHost", BoardHost())
+    return HeadlessGames(GameAssetCatalog.instance, provider=provider)
+
+
+def _headlessRequest(games, codename, done=None, **kwargs):
+    """A synchronous headless request (set_game's) made on another thread,
+    recorded and waiting for the loader; (thread, outcome)."""
+    generation = games._loadGeneration
+    thread, outcome = _onAnotherThread(lambda: games.LoadGameByCodename(
+        codename, async_mode=False, done=done, **kwargs))
+    _waitFor(lambda: games._loadGeneration > generation)
+    return thread, outcome
+
+
+def test_the_headless_download_scan_and_loads_are_jobs(
+        goldenGames, autonaApp, monkeypatch):
+    """No thread of the headless loader's own any more: the start.gg
+    download, the scan and the loads are jobs of the executor, which the
+    shutdown stops and waits for (each was a daemon thread)."""
+    from types import SimpleNamespace
+
+    games = _headlessGames(monkeypatch, provider=SimpleNamespace(
+        SetGameFromProvider=lambda: None))  # no tournament
+    monkeypatch.setattr(games.catalog, "DownloadStartGGCharacters",
+                        lambda: None)  # the network
+    jobs = _jobsSubmitted(monkeypatch)
+    threads = []
+    realScan = games.catalog.ScanGames
+
+    def scan():
+        threads.append(threading.current_thread().name)
+        return realScan()
+
+    monkeypatch.setattr(games.catalog, "ScanGames", scan)
+    games.Start()
+    games.LoadGameByCodename("game2")
+    drain_tasks()
+
+    assert jobs[:2] == ["start.gg characters download", "game scan"]
+    assert "game load" in jobs
+    assert threads and threads[0].startswith(JOB_THREAD_PREFIX)
+    assert not games._loaderRunning
+    tree = ast.parse((PROJECT_ROOT / "src" / "headless.py")
+                     .read_text(encoding="utf-8"))
+    started = [ast.unparse(node.func) for node in ast.walk(tree)
+               if isinstance(node, ast.Call)
+               and ast.unparse(node.func).endswith("Thread")]
+    assert started == []
+
+
+def test_rapid_headless_requests_take_one_job_and_end_on_the_last_one(
+        goldenGames, autonaApp, monkeypatch):
+    """The desktop's rule, headless: A, B, C asked for while a load runs
+    take no job of their own, only C loads, and A and B are over (done())
+    as soon as a newer request replaces them. Until S3f-6 each was a thread
+    of its own behind a lock that is not FIFO, so they could end on any."""
+    from src.core.StateManager import StateManager
+
+    games = _headlessGames(monkeypatch)
+    entered, release = _holdTheLoader(games.catalog, monkeypatch)
+    jobs = _jobsSubmitted(monkeypatch)
+    selections = _selections(games.catalog, monkeypatch)
     done = []
-    with games._lock:
-        thread, outcome = _onAnotherThread(lambda: games.LoadGameByCodename(
-            "game2", async_mode=False, done=lambda: done.append(1)))
-        time.sleep(0.1)
-        ownExecutor.stopping.set()
+    games.LoadGameByCodename("game2", done=lambda: done.append("running"))
+    assert entered.wait(WAIT)
+    for n, (codename, mods) in enumerate(
+            [("tgame", False), ("game2", False), ("tgame", True)]):
+        games.LoadGameByCodename(codename, mods_active=mods,
+                                 mods_reload_mode=True,
+                                 done=lambda n=n: done.append(n))
+    assert done == [0, 1]
+    release.set()
+    drain_tasks()
+
+    assert jobs == ["game load"]
+    assert selections == [("game2", False, False), ("tgame", True, True)]
+    assert done == [0, 1, "running", 2]
+    assert StateManager.Get("game.codename") == "tgame"
+    assert StateManager.Get("game.mods_active") is True
+    assert not games._loaderRunning and games._pendingLoad is None
+
+
+def test_a_superseded_headless_sync_load_answers_once_the_newer_one_is_in(
+        goldenGames, autonaApp, monkeypatch):
+    """set_game's wait, overtaken before the loader got to it: it answers
+    once the newer load is over -- the game asked for after it in the
+    state, what follows the load run on the main thread."""
+    from src.core.StateManager import StateManager
+
+    games = _headlessGames(monkeypatch)
+    games.LoadGameByCodename("tgame")
+    drain_tasks()
+    events = []
+    _record(games.signals.gameLoaded, events, "gameLoaded")
+    entered, release = _holdTheLoader(games.catalog, monkeypatch)
+    selections = _selections(games.catalog, monkeypatch)
+    games.LoadGameByCodename("game2")
+    assert entered.wait(WAIT)
+    done = []
+
+    def request():
+        games.LoadGameByCodename("tgame", async_mode=False,
+                                 done=lambda: done.append("sync"))
+        return list(events), StateManager.Get("game.codename")
+
+    generation = games._loadGeneration
+    thread, outcome = _onAnotherThread(request)
+    _waitFor(lambda: games._loadGeneration > generation)
+    games.LoadGameByCodename("tgame", mods_active=True, mods_reload_mode=True)
+    assert done == ["sync"]          # superseded: over, its wait is not
+    time.sleep(0.1)
+    assert thread.is_alive()
+    release.set()
+    _pumpUntil(lambda: not thread.is_alive(), timeout=30)
+
+    seen, codename = outcome["result"]
+    assert selections == [("game2", False, False), ("tgame", True, True)]
+    assert seen == [("gameLoaded", _main())] * 2
+    assert codename == "tgame"
+
+
+def test_a_headless_sync_load_on_the_main_thread_is_refused(
+        goldenGames, autonaApp, monkeypatch):
+    """The loader hands what follows a load to the main thread: waiting for
+    it there would wait for ever. Nothing is recorded; an empty codename
+    asks nothing of the loader and is over at once, there too."""
+    games = _headlessGames(monkeypatch)
+    done = []
+    with pytest.raises(RuntimeError):
+        games.LoadGameByCodename("game2", async_mode=False,
+                                 done=lambda: done.append(1))
+    assert done == [] and games._loadGeneration == 0
+    assert not games._loaderRunning
+
+    games.LoadGameByCodename("", async_mode=False, done=lambda: done.append(2))
+    games.LoadGameByCodename("", done=lambda: done.append(3))
+    assert done == [2, 3] and games._loadGeneration == 0
+
+
+def test_a_headless_load_waiting_for_the_loader_does_not_run_once_stopping(
+        goldenGames, ownExecutor, autonaApp, monkeypatch):
+    """The shutdown starts while a load waits for the one running: it
+    writes nothing, and its done() is called and its wait released."""
+    import copy
+
+    from src.core.SettingsManager import SettingsManager
+    from src.core.StateManager import StateManager
+
+    games = _headlessGames(monkeypatch)
+    games.LoadGameByCodename("tgame")
+    drain_tasks()
+    entered, release = _holdTheLoader(games.catalog, monkeypatch)
+    selections = _selections(games.catalog, monkeypatch)
+    game = copy.deepcopy(StateManager.Get("game"))
+    pick = SettingsManager.Get("SELECTED_GAME_CODENAME", "")
+    # The same game again, without reload: skipped, writing nothing.
+    games.LoadGameByCodename("tgame")
+    assert entered.wait(WAIT)
+    done = []
+    thread, outcome = _headlessRequest(games, "game2",
+                                       done=lambda: done.append(1))
+    ownExecutor.stopping.set()  # what the shutdown sets
+    release.set()
     thread.join(WAIT)  # this thread does not pump
 
     assert not thread.is_alive() and "error" not in outcome
-    assert selections == [] and done == [1]
+    assert selections == [("tgame", False, False)] and done == [1]
     assert StateManager.Get("game") == game
+    assert SettingsManager.Get("SELECTED_GAME_CODENAME", "") == pick
+    assert StateManager.saveBlocked == 0
+
+
+def _rosterRuns(monkeypatch):
+    """The threads AutonaActions.ApplyGameRoster runs on from now on."""
+    from src.core.Actions import AutonaActions
+
+    threads = []
+    actions = AutonaActions.instance
+    real = actions.ApplyGameRoster
+
+    def roster(*args, **kwargs):
+        threads.append(threading.current_thread().name)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(actions, "ApplyGameRoster", roster)
+    return threads
+
+
+def test_an_async_headless_load_whose_marshal_is_given_up_settles_its_game(
+        goldenGames, autonaApp, monkeypatch):
+    """S3f-4's race (its final review, 2): an asynchronous headless load
+    checked that the main thread still ran its calls, then queued what
+    follows the load unwaited -- an event loop ending in between lost it,
+    leaving the selection in the state and the previous pick persisted. The
+    loader now waits on the claim-based marshal for both kinds: the loop
+    ends while it waits, the call is given up and never runs, and the
+    loader writes what follows the selection itself -- the roster, the
+    pick -- so the state holds one game."""
+    from src.core.SettingsManager import SettingsManager
+    from src.core.StateManager import StateManager
+
+    games = _headlessGames(monkeypatch)
+    games.LoadGameByCodename("tgame")
+    drain_tasks()
+    assert SettingsManager.Get("SELECTED_GAME_CODENAME") != "game2"
+    exited = threading.Event()
+    monkeypatch.setattr(AutonaQtHelper, "_loopExited", exited)
+    events = []
+    _record(games.signals.gameLoaded, events, "gameLoaded")
+    rosters = _rosterRuns(monkeypatch)
+    done = []
+
+    games.LoadGameByCodename("game2", done=lambda: done.append(1))
+    # The selection is published; the loader waits on this (the main)
+    # thread, which does not pump...
+    _waitFor(lambda: StateManager.Get("game.codename") == "game2")
+    time.sleep(4 * AutonaQtHelper.MARSHAL_POLL_SECS)
+    assert done == []
+    exited.set()  # ...and its event loop ends (aboutToQuit)
+    _waitFor(lambda: done)
+
+    assert done == [1]
+    assert rosters and rosters[0].startswith(JOB_THREAD_PREFIX)
+    assert SettingsManager.Get("SELECTED_GAME_CODENAME") == "game2"
+    assert StateManager.saveBlocked == 0
+    QApplication.processEvents()
+    assert events == []  # the given-up call never runs
+    _waitFor(lambda: not games._loaderRunning)
+
+
+def test_the_headless_shutdown_waits_for_a_load_and_settles_it_first(
+        goldenGames, ownExecutor, autonaApp, monkeypatch):
+    """S3f-4's (3): the shutdown did not wait for the loader, a daemon
+    thread, so a load running then wrote the state after the flush, or was
+    cut short by the interpreter's exit. It is a job now: the shutdown's
+    executor stop releases the loader waiting for the main thread, the
+    loader writes what follows its selection, and only then are ./out and
+    state.json flushed."""
+    from src import headless
+    from src.core.SettingsManager import SettingsManager
+    from src.core.StateManager import StateManager
+    from src.core.StatePersistence import StatePersistence
+
+    games = _headlessGames(monkeypatch)
+    games.LoadGameByCodename("tgame")
+    drain_tasks()
+    order = []
+    realPick = games._PersistPick
+    monkeypatch.setattr(games, "_PersistPick",
+                        lambda: (order.append("pick"), realPick()))
+    realShutdown = ownExecutor.shutdown
+
+    def shutdown(timeout):
+        finished = realShutdown(timeout)
+        order.append(("tasks", finished))
+        return finished
+
+    monkeypatch.setattr(ownExecutor, "shutdown", shutdown)
+    monkeypatch.setattr(StateManager, "JoinExports", staticmethod(
+        lambda timeout=None: order.append("out") or True))
+    monkeypatch.setattr(StatePersistence, "Flush", staticmethod(
+        lambda timeout=None: order.append("state.json") or True))
+
+    games.LoadGameByCodename("game2", done=lambda: order.append("done"))
+    _waitFor(lambda: StateManager.Get("game.codename") == "game2")
+    time.sleep(4 * AutonaQtHelper.MARSHAL_POLL_SECS)  # in the marshal
+    assert order == []
+    started = time.monotonic()
+    headless.HeadlessShell(app=None, games=games).Shutdown()
+
+    assert time.monotonic() - started < 5
+    assert order == ["pick", "done", ("tasks", True), "out", "state.json"]
+    assert SettingsManager.Get("SELECTED_GAME_CODENAME") == "game2"
+    assert not games._loaderRunning
+
+
+def test_a_headless_loader_the_shutdown_cancels_while_queued_ends_its_request(
+        goldenGames, ownExecutor, autonaApp, monkeypatch):
+    """Every job lane is busy when a load is asked for, so the loader job is
+    queued; the shutdown cancels it. The request is over -- done() once, on
+    the shutdown's thread, its synchronous waiter released -- nothing was
+    selected, and no loader is left running."""
+    games = _headlessGames(monkeypatch)
+    selections = _selections(games.catalog, monkeypatch)
+    lanes = threading.Barrier(TaskExecutor.JOB_WORKERS + 1)
+
+    def busy():
+        lanes.wait(WAIT)
+        ownExecutor.stopping.wait(WAIT)
+
+    for _ in range(TaskExecutor.JOB_WORKERS):
+        ownExecutor.submit(busy, task_name="busy")
+    lanes.wait(WAIT)  # every job lane runs a busy job now
+    done = []
+    thread, outcome = _headlessRequest(
+        games, "game2",
+        done=lambda: done.append(threading.current_thread().name))
+    loader = games._loadFuture
+    assert games._loaderRunning and not loader.running()
+
+    assert ownExecutor.shutdown(WAIT)
+    thread.join(WAIT)
+
+    assert not thread.is_alive() and "error" not in outcome
+    assert loader.cancelled() and done == [_main()]
+    assert not games._loaderRunning and games._pendingLoad is None
+    assert selections == []
 
 
 # ── the load's save cycle and what reads it ──────────────────────────────

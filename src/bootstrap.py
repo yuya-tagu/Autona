@@ -501,7 +501,8 @@ def wire_game_roster(game_loaded):
 
     The load's own snapshot, not the catalog's Current(): this slot runs on
     the main thread, which the load hands it to (the desktop's load job
-    marshals it there since ADR-005 S3f-4; the headless loader queues it),
+    marshals it there since ADR-005 S3f-4, the headless loader since
+    S3f-6),
     and by the time it runs a later load may have replaced the snapshot --
     a switch followed at once by a reload of the new game would read "no
     switch" twice and keep the previous game's picks.

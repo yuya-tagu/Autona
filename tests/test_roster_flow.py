@@ -1014,8 +1014,12 @@ def test_a_switch_followed_by_a_reload_forgets_the_previous_picks(
     after the reload, here. Each runs with its own load's snapshot, so the
     switch still empties the previous game's picks; read from the catalog
     when it runs, both would see the reload ("no switch") and keep them.
-    Both shells' loaders, through the shared wiring
-    (bootstrap.wire_game_roster)."""
+    Both shells' loaders' signals, through the shared wiring
+    (bootstrap.wire_game_roster). Both loaders now hand each load's
+    follow-up to the main thread before they select the next one (a
+    run_sync marshal: ADR-005 S3f-4 / S3f-6), so the two emits come from
+    the test, as from a loader's thread, with the snapshots the two loads
+    published (the headless loader itself: the next test)."""
     from src import AutonaWebOperations as WebOps
     from src.core.GameAssetCatalog import GameAssetCatalog
     catalog = GameAssetCatalog.instance
@@ -1027,28 +1031,22 @@ def test_a_switch_followed_by_a_reload_forgets_the_previous_picks(
     assert StateManager.Get("game.codename") == "tgame"
 
     if shell == "desktop":
-        # The adapter's emit, with the snapshots its two loads published,
-        # from another thread (as its loader's): the wiring bootstrap_gui()
-        # made is the one that runs.
+        # The wiring bootstrap_gui() made is the one that runs.
         from src.AutonaGameAssetManager import AutonaGameAssetManager
         signals = AutonaGameAssetManager.instance.signals
-        published = [catalog.SelectGame(TEAM_GAME),
-                     catalog.SelectGame(TEAM_GAME, reload=True)]
-
-        def loads():
-            for snapshot in published:
-                signals.gameLoaded.emit(snapshot)
     else:
         from src.AutonaWebOperations import BoardHost
         from src.bootstrap import wire_game_roster
         from src.headless import HeadlessGames
         monkeypatch.setattr(WebOps, "boardHost", BoardHost())
-        games = HeadlessGames(catalog, provider=None)
-        wire_game_roster(games.signals.gameLoaded)
+        signals = HeadlessGames(catalog, provider=None).signals
+        wire_game_roster(signals.gameLoaded)
+    published = [catalog.SelectGame(TEAM_GAME),
+                 catalog.SelectGame(TEAM_GAME, reload=True)]
 
-        def loads():
-            games._Load(TEAM_GAME, False, False, None)
-            games._Load(TEAM_GAME, False, True, None)
+    def loads():
+        for snapshot in published:
+            signals.gameLoaded.emit(snapshot)
 
     worker = threading.Thread(target=loads)
     worker.start()
@@ -1056,6 +1054,69 @@ def test_a_switch_followed_by_a_reload_forgets_the_previous_picks(
     assert _picks() == picked, "the roster ran before both loads were over"
     autonaApp.settle()
     # TEAM_GAME's roster (two a team), every pick and main blank.
+    assert _picks() == {f"{team}.{slot}.{group}": ["", "", ""]
+                        for team in (1, 2) for slot in (1, 2)
+                        for group in ("character", "mains")}
+
+
+def test_the_headless_loader_hands_a_switch_and_a_reload_to_the_roster(
+        world, autonaApp, monkeypatch):
+    """The same switch and reload, asked of the headless loader itself
+    (ADR-005 S3f-6): each load's follow-up runs on the main thread, which
+    the loader hands it to and waits for (run_sync -> _OnLoaded ->
+    gameLoaded -> bootstrap.wire_game_roster), the switch's roster with the
+    game it replaced. The reload may be selected after it or supersede it
+    while queued (the latest request wins); either way the previous game's
+    picks are gone and the pick is persisted."""
+    from src import AutonaWebOperations as WebOps
+    from src.AutonaWebOperations import BoardHost
+    from src.bootstrap import wire_game_roster
+    from src.core.GameAssetCatalog import GameAssetCatalog
+    from src.core.SettingsManager import SettingsManager
+    from src.headless import HeadlessGames
+
+    actions = AutonaActions.instance
+    actions.SetRoster(2, 2, 3)
+    _fillPicks()
+    assert all(all(names) for names in _picks().values()), _picks()
+    assert StateManager.Get("game.codename") == "tgame"
+
+    monkeypatch.setattr(WebOps, "boardHost", BoardHost())
+    games = HeadlessGames(GameAssetCatalog.instance, provider=None)
+    wire_game_roster(games.signals.gameLoaded)
+    rosters = []
+    applyRoster = actions.ApplyGameRoster
+
+    def recorded(replaced):
+        rosters.append((threading.current_thread() is threading.main_thread(),
+                        replaced))
+        return applyRoster(replaced)
+
+    monkeypatch.setattr(actions, "ApplyGameRoster", recorded)
+    # Where the follow-up runs: a function slot runs on the main thread
+    # whoever emits, so the roster's thread alone would not tell.
+    followUps = []
+    onLoaded = games._OnLoaded
+
+    def followUp(snapshot):
+        followUps.append(threading.current_thread() is threading.main_thread())
+        return onLoaded(snapshot)
+
+    monkeypatch.setattr(games, "_OnLoaded", followUp)
+
+    games.LoadGameByCodename(TEAM_GAME)
+    games.LoadGameByCodename(TEAM_GAME, mods_reload_mode=True)
+    drain_tasks()
+
+    assert followUps and all(followUps), followUps
+    assert len(rosters) == len(followUps), (rosters, followUps)
+    assert all(onMain for onMain, _ in rosters), rosters
+    # The switch replaced the session's game; a reload after it replaced
+    # nothing.
+    assert rosters[0][1] == "tgame", rosters
+    assert [codename for _, codename in rosters[1:]] in ([], [None]), rosters
+    assert StateManager.Get("game.codename") == TEAM_GAME
+    assert SettingsManager.Get("SELECTED_GAME_CODENAME") == TEAM_GAME
     assert _picks() == {f"{team}.{slot}.{group}": ["", "", ""]
                         for team in (1, 2) for slot in (1, 2)
                         for group in ("character", "mains")}

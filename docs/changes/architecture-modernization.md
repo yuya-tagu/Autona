@@ -117,6 +117,7 @@ ADR-004 は「ウィジェットが `StateManager.Set` を直接呼ばない」�
 
 5 系統が併存: qasync `QEventLoop`（asyncio は実質未活用）/ `QThread` サブクラス（WebServer・Updater・AssetGuide・LayoutPreview）/ `QThreadPool + Worker(QRunnable)`（provider 系 24 箇所）/ `ThreadPoolExecutor`（Start.gg 並列フェッチ）/ `threading.Thread`・`Timer`（StateManager 出力・画像 DL・delta debounce）。
 Actions は「どのスレッドから呼んでもよい」設計で、observer はスレッド同期通知のため、Flask スレッドから呼ぶと Bridge の Qt Signal が非 GUI スレッドから emit される（AutoConnection 任せ）。
+（注: S3f（2026-10-28）で、長時間処理は core の `TaskExecutor`（ジョブ 4 本・fan-out 8 本の 2 レーン）1 つになった。qasync・`QThreadPool + Worker`・`threading.Timer`・provider の `ThreadPoolExecutor` は 0。残る専用のスレッドと QThread は下の「S3f 全体の完了報告」）
 
 ### 2.7 永続化
 
@@ -3807,3 +3808,150 @@ Start.gg provider（`StartGGDataProvider`）が 1 回の取得の中で並列に
 - **実機確認（オーナー・最終レビュー対応分）**
   - 大会 URL を消しても、読み込み済みのゲームはそのまま（空の codename）
   - 前回までの確認項目（立て続けの切り替え・ロード中の終了・失敗するゲームの `set_game`）
+
+#### S3f-6 qasync の削除と棚卸しの確定（2026-10-28）
+
+デスクトップの起動を qasync の `QEventLoop` から素の `App.exec()` に戻し、依存・ライセンス一覧・文書から qasync を消した。ヘッドレスのローダーのスレッド 3 本（start.gg キャラ表の DL・スキャン・ゲームのロード）を `TaskExecutor` のジョブにし、ゲームのロードはデスクトップ（S3f-4）と同じ「ローダーのジョブ 1 本・最新の要求が勝つ」形にした。S3f-4 から渡された 3 件（非同期ロードの marshal の競合・`Shutdown` がローダーを待たない・最新が勝つ規則が無い）はこれで解消した。ヘッドレスの Qt の pin は、字義どおりには満たせない「QtGui / QtWidgets を import しない」から、「GUI のアプリケーション・ウィジェット・ウィジェットを定義する src のモジュールが無い」に置き換えた（判断 4）。`src/`・`main.py`・スプラッシュの「executor 以外の仕組み」の pin を 1 か所にまとめ（名前と、残るスレッドの一覧との一致）、`@gui_thread_sync` / `run_sync` の棚卸しを確定した。
+
+- **実装**
+  - `main.py`
+    - qasync の `QEventLoop` / `run_until_complete(main(loop))` と、`asyncio` / `functools.partial` の import を削除した。`Autona.Window()` を作り、`_set_activation_target` の後に `App.exec()` → `sys.exit(0)`（exec の戻り値は終了コードにしない: 判断 1）
+    - `_close_on_stop_signals(window)`（新規）: Windows 以外では SIGINT / SIGTERM で `QTimer.singleShot(0, window.close)`（closeEvent が終了処理）。ハンドラを Python に届かせる 250 ms のハートビート（ヘッドレスと同じ）を置く。Windows では何もしない（旧 `add_signal_handler` は `NotImplementedError` で、デスクトップには元から無かった）
+    - コメント: binding の選択（qasync の記述）・ヘッドレスの QCoreApplication（「provider のスレッドプール」）を今の形に直した
+  - qasync の削除: `dependencies/requirements.txt`（`qasync==0.27.1`）・`licenses/python-packages.txt`（BSD の行）・`README.md`（技術スタックの表・起動の図）・`docs/architecture/current-architecture.md:26`・`src/Helpers/AutonaWindowsShortcut.py:9`（コメント）・`.claude/rules/build-and-release.md:44`。`dependencies/autona.spec` の hiddenimports は `loguru` / `engineio.async_drivers.threading` だけで、変更なし。`THIRD-PARTY-NOTICES.md` には名前が無かった
+  - `src/headless.py`（`HeadlessGames`）
+    - `Start`: DL（`start.gg characters download`）とスキャン（`game scan`）をジョブで積む。スキャンの後は今どおり `gui_executor(OnScanned)` でメインスレッドへ
+    - `LoadGameByCodename`: デスクトップのアダプタの最終形（S3f-4 最終レビュー後）と同じ。`_requestLock`（Condition）・`_loadGeneration`・`_pendingLoad`・`_loaderRunning`・`_loadFuture`・`_finishedGeneration` を持ち、ローダーはジョブ 1 本（`game load`）で、待っている最新の要求を無くなるまで順に取る。置き換えられた要求は選ばずに `done()`。同期の要求（`set_game`）は、自分か後の要求の試行が終わるまで待つ。メインスレッドからの同期の要求は RuntimeError（判断 2）。空の codename はローダーに何も頼まず、その場で `done()`。積んだ時点で取り消された（終了後の）ローダーと、積まれたまま取り消されたローダーの要求は、`done()` して終わる（`_LoaderEnded`）
+    - `_LoadRequest`（新規）: codename・mods・reload・`done`・世代。Future は持たない（判断 2）
+    - `_Load(codename, modsActive, reload)`: 終了中なら何もしない → キャラ表の読み直し → 保存ブロックの中で `SelectGame` → **非同期の要求も** `run_sync(lambda: self._OnLoaded(snapshot))` でメインスレッドに渡して待つ。見捨てられたら（`GuiMarshalAborted`）`_SettleStopped`（ロスターと選択の保存を、ローダーのスレッドで）
+    - 旧 `_lock`（`threading.Lock`。FIFO でない）と、daemon スレッド 3 種（`AutonaCharactersDownload` / `AutonaGameScan` / 要求ごとの `AutonaGameLoader`）を削除した。`Shutdown` のコメントを今の形に直した（ローダーはジョブなので `shutdown(1.0)` が止めて待つ）
+  - `src/bootstrap.py`（`wire_game_roster` の docstring）・`.claude/rules/state-and-webserver.md`（`GameAssetCatalog` の行の「ヘッドレスはメインスレッドへ積む」）を今の形に直した。`.claude/design/Design.md` に並行処理の古い記述は無かった
+- **判断と理由**
+  1. **qasync を外して `App.exec()` にする**
+     - qasync のコルーチンは Window を作って `aboutToQuit` の Future を待つだけで、asyncio を使うコードは無い（`asyncio` の import は `main.py` だけだった）
+     - Window の構築が exec の前になった（qasync では最初のループの反復の中）。`Window.__init__` が積む遅延処理（`QTimer.singleShot`・Web サーバーの起動 `_StartWebServer`・スプラッシュの終了）は、どちらでも exec が回り始めてから走る。`__init__` の中でイベントループを終わらせる経路は無い（アップデーターの `QApplication.exit()` は、起動時のチェック（QThread）の答えから開くダイアログの後で、exec の中）
+     - 終了コードは 0 に固定した（`App.exec()` の後に `sys.exit(0)`。設計表の `sys.exit(App.exec())` から変えた）。exec の戻り値は終了コードの意味を持たない: アップデーターの再起動のメッセージボックスは `finished` を `QApplication.exit` につないでいて、閉じたボタンのコード（例: 1024）でループを終わらせる。旧実装はループの戻り値を使わず（`aboutToQuit` で Future を取り消し → `CancelledError` → 0）、実質つねに 0 だった。アップデーターは触らない（自動更新は対象外）ので、main.py の側でそれを保った
+     - `Window()` の例外はトレースバック付きで 1（旧実装も `RuntimeError` 以外は同じ。`RuntimeError` だけは黙って 0 で終えていた）
+     - Windows の qasync の IOCP のポーリング用スレッド（`_EventPoller`）が無くなった
+     - シグナル: Windows は今までどおり何もしない（デスクトップはコンソールの Ctrl+C で閉じない）。Windows 以外は `signal.signal` とハートビートで、旧 `add_signal_handler` と同じ「ウィンドウを閉じる」を保った（実機では確かめていない）
+  2. **ヘッドレスのローダーは、デスクトップの形をそのまま写す（簡易な形にしない）**
+     - 立て続けの要求・同期の待ち・置き換え・終了での取り消しの扱いは、S3f-4 の 3 回のレビューで固まった。別の形にすると、`set_game` が戻る時点などがシェルで食い違う
+     - Future と結果の値（`LOADED` ほか）は持たない。ヘッドレスの `LoadGameByCodename` の戻り値を読む呼び手は無く、`done=` が唯一の完了通知
+     - メインスレッドからの同期の要求は RuntimeError（デスクトップの GUI スレッドと同じ。ローダーがメインスレッドを待つので、そこで待つと終わらない）。旧実装はその場で全部やっていた。本番の同期の呼び手は `set_game`（Flask のスレッド）だけ。テスト 2 本（`test_top8_refresh` の `_loader`・`test_roster_flow` の切り替え → 再読込）を直した
+  3. **非同期の要求も、ロード後の処理を `run_sync` で待つ**（S3f-4 最終レビュー 2 の修正）
+     - 競合の元は「判定してから積む」の 2 手だった。`run_sync` は claim（queued / running / abandoned）で、メインスレッドが始めるか、待つ側が見捨てるかのどちらか一方だけが起きる。見捨てたら `_SettleStopped` が書く
+     - 待つのはローダーのジョブで、要求した側（provider の選択・`OnScanned`・Web）は待たない。ローダーは 1 本なので、待つ間も立て続けの切り替えでジョブレーンを埋めない
+  4. **ヘッドレスの Qt の pin を置き換えた**（設計表の S3f-6 の完了条件の変更）
+     - 字義どおりの「QtGui / QtWidgets を import しない」は qtpy 2.4.3 では満たせない: `import qtpy` が `PySide6.QtDataVisualization`（→ QtGui）を読み、`qtpy.QtGui` が `PySide6.QtWidgets` を読む（S3f-3 で記録）。src は qtpy を通すので、src の import を遅延にしても PySide6 のモジュールは読まれる
+     - 守りたいのは「ヘッドレスがデスクトップの UI を作らない・持ち込まない」こと。それを直接 pin する: (a) アプリケーションが `QGuiApplication` でない、(b) `QWidget` のオブジェクトが 0、(c) QWidget のサブクラスを定義する src のモジュール（AST で導出。今は 34）を 1 つも import しない。(a) が根の保証（QApplication 無しで QWidget を作ると Qt がプロセスを落とす）、(b)(c) は持ち込みの検出
+     - 計測（組み立て → スキャン → 前回のゲームの復元 → 再スキャン → 大会データ → 終了まで）: 変更前（HEAD）と変更後で同じ。PySide6 は QtCore / QtGui / QtWidgets / QtOpenGL / QtOpenGLWidgets / QtDataVisualization（と `PySide6.support`）、src は `src` を含めて 54 モジュールで、そのうちウィジェットを定義するモジュールは 0。QWidget は 0、アプリケーションは `QCoreApplication`
+     - provider アダプタの `SetStartggEventSlug` の QDialog は遅延 import にしなかった: モジュール冒頭の `from qtpy.QtWidgets import *` は src のウィジェットのモジュールを引かず、`PySide6.QtWidgets` は qtpy が先に読むので、遅延にしても import の集合は変わらない（設計表の「遅延 import にする」は、pin の置き換えで目的を失った）
+     - 組み立てのプローブ（`tests/test_headless.py`）は、デスクトップのアダプタが作られていないことを確かめるために `AutonaScoreboardManager` などを自分で import していた（それだけでウィジェットのモジュールが 11 入る）。`sys.modules` を引く形に変えた
+  5. **executor 以外の仕組みの pin を 1 か所にまとめた**（`tests/test_task_executor.py`。レビューで 2 本に強めた）
+     - 対象は `src/**/*.py`・`main.py`・`main.py` が import するルートのモジュール（今は `autona_splash.py`。`main.py` の import から導出する）
+     - 名前の pin（`test_nothing_runs_work_but_the_executor`）: `Worker` / `Workers` / `WorkerSignals` / `QRunnable` / `QThreadPool` / `waitForDone` / `wait_for_all` / `qasync`（AST の名前・属性・import。コメントと docstring は数えない）。`src/Workers.py` が無いことも。`Timer` / `threadpool` の名前は誤検出しうるので外し、下の呼び出しの形で見る
+     - スレッドの pin（`test_the_threads_left_are_the_documented_ones`）: `Thread(` / `Timer(` / `ThreadPoolExecutor(` / `ProcessPoolExecutor(` / `QThread(` / `start_new_thread(` の呼び出し（`threading.Thread(...)` も `Thread(...)` も）・`Thread` / `QThread` を継承するクラス・`asyncio` / `qasync` / `_thread` の import を、（ファイル・始める関数かクラス・形）で集め、`THREADS_LEFT`（完了報告の「S3f の後に残る並行処理」の 12 か所）と**一致**すること。増えても、消えても・移っても落ちる（一覧と pin が食い違わない）。`QTimer` や `threadpool` という名前は拾わない
+     - S3f-3 / S3f-4 の 3 本（src 全体・アダプタと EVENT パネル・Window の未使用のプール）はこれに含まれるので削除した。provider のパッケージだけの禁止（`ThreadPoolExecutor` / `as_completed` / `getStationMatchesThreadPool`）は残した（executor 自身が `ThreadPoolExecutor` なので、src 全体には掛けられない）
+     - `asyncio` の import もスレッドの pin が禁じる（src・スプラッシュに使う箇所は無い。`main.py` の qasync とともに消えた）
+  6. **リリースノート: なし**（デスクトップの起動・終了の見た目は変わらない。ヘッドレスはソース実行専用（`Autona.exe` は `--headless` を断る））
+- **`@gui_thread_sync` / `run_sync` の棚卸し（確定）**
+
+  | # | 箇所 | 何を GUI スレッドに渡すか | 待つか | 分類 | 消える時期 |
+  |---|------|------------------------|-------|------|-----------|
+  | 1 | `AutonaScoreboardManager.OpenSetSelection` / `RenderThumbnail`（`@gui_thread_sync`。`AutonaWebOperations` の `open_sets` / `get_thumbnail` が `_on_gui_thread` で呼ぶ） | セット選択ウィンドウを開く・サムネイルの描画 | 待つ（リクエストのスレッド） | ① シェル操作 | 残す（デスクトップのウィンドウだけが答える操作） |
+  | 2 | `AutonaPlayerDB.SetupModel` / `SetTournamentPlayers` / `ClearTournamentPlayers`（`@gui_thread_async`） | 選手 DB の補完モデルの作り直し・フィルタの掛け直し | **待たない**（S3f-2） | ② Qt アダプタのモデルの marshal | S4（補完モデルが要らなくなる） |
+  | 3 | `AutonaGameAssetManager._Load` の `run_sync(_Publish)` | ロード後のモデルの作り直し → `gameLoaded` → `onLoad` → 保存サイクルを閉じる | 待つ（ローダーのジョブ） | アセットのローダーの marshal（② の一種。QPixmap / QIcon は GUI スレッドでしか作れない） | S4（Qt モデルが要らなくなる） |
+  | 4 | `headless.HeadlessGames._Load` の `run_sync(_OnLoaded)`（S3f-6 で新規） | 選択の保存 → `gameLoaded` → `gameChanged` | 待つ（ローダーのジョブ） | アセットのローダーの marshal（3 のヘッドレス版） | 見直しは S4 以降（受け手がどのスレッドでも安全なら、ローダーのスレッドで出せる） |
+  | 5 | `DesktopBoardHost.Run`（`gui_thread_sync(op)`） | デスクトップのボード操作すべて | 待つ | S3e-9 の 5（残す） | S4 |
+  | 6 | `AutonaScoreboardManager.GetScoreboard` の `gui_thread_sync(self.EnsureScoreboard)`（`DesktopBoardHost._Board` が GUI スレッドの外から呼ぶ） | 未構築ボードの構築 | 待つ | S3e-9 の 6（残す） | S4 |
+  | — | ③ `AutonaWebOperations.set_game` | — | — | S3f-4 で GUI スレッドを待たなくなった（リクエストのスレッドがローダーを待つ） | 消えた |
+  | — | `Helpers/AutonaQtHelper.py` の `GuiExecutor.run_sync` / `gui_thread_sync` / `gui_thread_async` | 仕組みそのもの | — | — | — |
+
+  - 分類の外は無い。4 は新しい箇所だが、3 と同じ「ローダーがロード後の処理を GUI（メイン）スレッドに渡して待つ」形で、ヘッドレスの受け手（ロスター・Web の全量送信・選手 DB の更新）が旧実装からメインスレッドで走っていたのを保つため
+  - 非同期の配送（`gui_executor(fn)`）は対象外: v1 の `tournament_load` / `game_set`（202）・API 情報ウィンドウの答え・アセットのアイコンのデコードの完了・デスクトップの Web サーバーの起動失敗・provider アダプタの答え（`_OnGuiThread`）・EVENT パネルのアイコン / バナー・ヘッドレスのスキャン完了と起動失敗の終了
+- **pin（テスト）**
+  - `tests/test_asset_jobs.py`（ヘッドレスのローダーの節を足した。旧 `test_a_headless_load_waiting_for_the_lock_does_not_run_once_stopping` を置き換え）
+    - `test_the_headless_download_scan_and_loads_are_jobs`（DL・スキャン・ロードがジョブで、スキャンはジョブレーンのスレッド。`src/headless.py` に `*Thread(` の呼び出しが無い）
+    - `test_rapid_headless_requests_take_one_job_and_end_on_the_last_one`（ロード中の A・B・C はジョブを増やさず、C だけを選ぶ。A・B は置き換えられた時点で `done()`）
+    - `test_a_superseded_headless_sync_load_answers_once_the_newer_one_is_in`
+    - `test_a_headless_sync_load_on_the_main_thread_is_refused`（何も記録しない。空の codename はその場で `done()`）
+    - `test_a_headless_load_waiting_for_the_loader_does_not_run_once_stopping`
+    - `test_an_async_headless_load_whose_marshal_is_given_up_settles_its_game`（S3f-4 の競合: 非同期ロードがメインスレッドを待つ間にイベントループが終わる → 呼び出しは走らず、ロスターはローダーのスレッドで書かれ、選択は保存される）
+    - `test_the_headless_shutdown_waits_for_a_load_and_settles_it_first`（順序が「選択の保存 → `done()` → executor の停止 → `./out` → `state.json`」）
+    - `test_a_headless_loader_the_shutdown_cancels_while_queued_ends_its_request`
+  - `tests/test_headless.py`: 組み立てのプローブが、実行全体の後の `qt`（GUI のアプリケーションか・QWidget の数）と `src_modules` を返す。`_widget_modules()`（QWidget のサブクラスを定義する src のモジュールを AST で導出。既知のモジュールが入っていることも確かめる）と交わらないこと
+  - `tests/test_task_executor.py`: `test_nothing_runs_work_but_the_executor` と `test_the_threads_left_are_the_documented_ones`（判断 5。旧 `test_the_window_has_no_thread_pool_of_its_own` を置き換え）。`tests/test_asset_jobs.py` の `test_nothing_in_src_has_a_worker_or_a_pool` と `tests/test_provider_jobs.py` の `test_the_adapter_and_the_event_panel_use_no_worker_or_pool` は削除した
+  - 追従: `tests/test_top8_refresh.py`（ヘッドレスの `_loader` は非同期 + `drain_tasks()`）・`tests/test_roster_flow.py`（切り替え → 再読込のヘッドレスの枝は、公開済みの 2 つのスナップショットを `HeadlessGames.signals.gameLoaded` で出す。ローダーは 1 つ目のロード後の処理がメインスレッドで済むまで次を選ばないので、旧実装のようにローダーから 2 回選んでから受け手を走らせる順序は作れない）
+  - `tests/test_roster_flow.py` の `test_the_headless_loader_hands_a_switch_and_a_reload_to_the_roster`（レビューで追加）: 同じ切り替え → 再読込を本物の `HeadlessGames` に非同期で頼み、`drain_tasks()` で回す。ロード後の処理（`_OnLoaded`）がメインスレッドで走り（`run_sync`）、その数だけロスターが走り、最初のロスターが前のゲーム（`tgame`）を `replaced` に持ち、選手のキャラが空になり、選択が保存される。再読込が切り替えを置き換えるか（積まれたまま）、後に選ばれるかはタイミングしだいなので、どちらも許す（関数のスロットは誰が emit してもメインスレッドで走るので、ロスターのスレッドではなく `_OnLoaded` のスレッドを見る）
+  - ミューテーション確認: 非同期ロードの marshal を待たない形に戻す（4 本落ちる）・最初の要求が勝つ（2 本）・ローダーを daemon スレッドに戻す（シャットダウンの順序を含む 7 本）・プローブがウィジェットのモジュールを import する（組み立てのテストが 11 モジュールを挙げて落ちる）・HEAD の `main.py`（名前の pin が `qasync`、スレッドの pin が `asyncio` / `qasync` の import を拾う）・S3f-5 前の `AutonaWebServer.py`（スレッドの pin が `Timer(` を拾う）
+  - レビュー後の追加分（作業ツリーの写しで確認）: スプラッシュに `threading.Thread(` / `ThreadPoolExecutor(`、`headless.py` に `import asyncio` / `threading.Timer(` / `QThread` のサブクラス / `QThread()` を足す → スレッドの pin が落ちる。アップデーターの `_CheckThread` を QThread でなくす → 「消えた」側で落ちる。`QTimer(` / `QTimer.singleShot` / `threadpool` という名前は通る。新しいロスターのテストは、`_OnLoaded` が `gameLoaded` を出さない形と、`run_sync` をその場の呼び出しにした形で落ちる
+- **残置 / リスク**
+  - ヘッドレスの終了: 走っている start.gg のキャラ表の DL（最大 20 秒）は `stopping` を見ないので、インタプリタ終了の join が待つ。旧実装は daemon スレッドで終了を止めなかったので、起動直後の Ctrl+C は、止まるまで最大 20 秒かかりうる（デスクトップは S3f-4 から同じ）。コンソールの × は Windows が約 5 秒で落とす（state.json は `Shutdown` の中で書き済み）
+  - `shutdown(1.0)` の時点でまだ `SelectGame` の中にいるロード: Ctrl+C / Ctrl+Break / SIGTERM の終了では、インタプリタ終了の join が待ち、その後の処理（ロスター・選択の保存）は `_SettleStopped` がローダーのスレッドで書き、永続化の書き手（非 daemon）が最後に書き切る。コンソールの × では、ハンドラが `stopped`（`Shutdown` の終わり）を見た直後に Windows がプロセスを落とすので、1 秒を超えるロードの後の処理は `state.json` に届かないことがある（ローダーが daemon スレッドだった HEAD より悪くはない）
+  - ヘッドレスの `_SettleStopped` はボードホストの RLock を通る（ロスターをボード操作として書く）。終了中に長い Web のリクエスト（ボード操作）がその lock を持っていれば、それが終わるまで待つ
+  - ヘッドレスのロード後の処理がメインスレッドを待つようになった（非同期の要求も）。メインスレッドが塞がっている間、次のロードは始まらない（最新が勝つので要求は溜まらない）
+  - デスクトップの Window の構築が exec の前になった（判断 1）。読んだ範囲で差は無いが、実機の起動で確かめる
+  - Windows 以外のシグナル処理は実機で確かめていない
+  - `done()` から別のロードを頼むことは docstring で禁じただけ（デスクトップと同じ）
+  - ヘッドレスの Qt の pin は、確かめるもの（アプリケーションが `QGuiApplication` か・`QWidget` の数・ウィジェットを定義する src のモジュール）の外の QtGui のオブジェクト（`QPixmap` / `QIcon` / Qt のモデル）の生成を検出しない
+  - デスクトップの `main.py` の起動・終了の経路（`Window()` → `App.exec()` → closeEvent → `sys.exit(0)`・シグナル）には自動テストが無い（オーナーの実機確認）
+- **実機確認（オーナー）**
+  - デスクトップ（`python main.py`）
+    - 起動: スプラッシュ → ウィンドウ、前回のゲームの復元、Web サーバーの起動（Web UI がつながる）。2 つ目の起動で既存のウィンドウが前面に出る
+    - 終了: × で閉じて固まらず、プロセスが残らない。`logs/` にエラーが無い
+    - qasync を入れていない環境（`pip uninstall qasync` の後）でも起動する
+  - ヘッドレス（`python main.py --headless`）
+    - 起動で前回のゲームが復元される
+    - Web UI / Companion からゲームを立て続けに 2〜3 回切り替える: 最後に選んだゲームで終わり、`/update-game` は `OK` を返す
+    - ゲームのロード中に Ctrl+C: 固まらずに止まり、次の起動でゲームと選手のキャラが食い違わない
+    - Ctrl+C / コンソールの × で `user_data/state.json` が書かれる
+  - 配布前の exe ビルドのとき: `Autona.exe` が起動・終了する（qasync が同梱物から消える）
+
+#### S3f 全体の完了報告（2026-10-28）
+
+S3f（Executor 1 本化）の 6 PR が揃った。設計表の完了条件の確認:
+
+- **S3f-1** ✅: `TaskExecutor` が `test_core_qt_free` に載る。両シェルの終了でジョブが取り消され、export / 永続化の flush は今どおり流れる
+- **S3f-2** ✅: provider アダプタに `Worker` / `QThreadPool` が 0。答えの配送が GC に依存しない（Worker を保持しない形で答えが届くことを pin）。公開シグナルの名前・引数・回数は不変
+- **S3f-3** ✅: 入れ子の Worker・`wait_for_all`・呼ぶたびの `ThreadPoolExecutor` は 0。ジョブレーンを埋めても `GetMatch` / `GetRecentSets` が完了する（pin）。`test_startgg_parse` は不変。`src/` の `Worker` / `QRunnable` が 0 になったのは `Workers.py` を消した S3f-4（S3f-3 判断 1）。`GetFutureMatchesList` は直さず、呼び手ごと削除した（論点 2 の承認済みの代替案）
+- **S3f-4** ✅: `src/` の `QThreadPool` が 0。アイコンのスレッド・寿命・シグナルのテストが通る。`onLoadAssets` の順序は不変
+- **S3f-5** ✅: `src/` の `threading.Timer` が 0。間隔のテストが移行前後で通る。delta の内容と revision は不変
+- **S3f-6** △: pin テストは通る。起動・終了が今どおりかはオーナーの実機確認待ち。「ヘッドレスで QtGui / QtWidgets が import されない」は qtpy のため字義どおりには満たせず、「GUI のアプリケーション・ウィジェット・ウィジェットのモジュールが無い」に置き換えて pin した（S3f-6 判断 4）
+- **§4.3「並行処理」の原則** ✅: 長時間処理は `TaskExecutor` 1 つ（2 レーン・1 つの shutdown）。`QThreadPool + Worker` / `threading.Timer` / qasync / asyncio は `src/`・`main.py`・スプラッシュに 0 で、残る専用のスレッドは下の一覧と一致する（AST で pin。S3f-6 判断 5）。Qt への配送は長寿命の `gui_executor`（S3f の方針）と Bridge
+
+| 段 | 内容 | PR |
+|----|------|----|
+| S3f-1 | Executor と終了処理 | #242 |
+| S3f-5 | delta の debounce | #243 |
+| S3f-2 | provider アダプタの移行 | #244 |
+| S3f-3 | Start.gg provider の内部 | #245 |
+| S3f-4 | アセットと API 情報ウィンドウ | #246 |
+| S3f-6 | qasync の削除と棚卸しの確定 | 本 PR |
+
+**S3f の後に残る並行処理（確定）**
+
+この一覧のスレッドと QThread は、`tests/test_task_executor.py` の `THREADS_LEFT`（ファイル・始める関数かクラス・形）と一致することを pin している。増やす・消すときは両方を直す
+
+- `TaskExecutor`: ジョブ用 4 本（`AutonaJob_*`）・fan-out 用 8 本（`AutonaFanout_*`）。段階実行（テスト用）のときは、ジョブを 1 本ずつ走らせるスレッド（`AutonaJobStep`）
+- 専用のスレッド（設計どおり対象外）: Web サーバー 3 本（サーバー・停止のヘルパー・delta の flusher `AutonaWebServerDeltas`。S3f-5 で 2 → 3）・export の書き手（`AutonaStateExport`）・永続化の書き手（`AutonaStatePersist`）・画像 DL（daemon・セマフォ 3）
+- `QThread`: アップデーター 2 本（自動更新には触らない）・アセットガイド 2 本（デスクトップのウィンドウ専用）
+- イベントループの時計: 追従の 5 秒タイマー・250 ms のハートビート（ヘッドレスと、Windows 以外のデスクトップ）。thumbnail / result の同期描画の `QEventLoop`（シェル操作 ①）
+
+**残課題（S4 以降へ回すもの）**
+
+- S4（パネルの React 化）
+  - `@gui_thread_sync` の 5・6（`DesktopBoardHost.Run` の直列化・`GetScoreboard` の構築の marshal）
+  - モデルの marshal（選手 DB の補完モデル・アセットのモデル。棚卸しの 2・3）。Qt モデルが要らなくなれば消える
+  - ヘッドレスのローダーの marshal（棚卸しの 4）の見直し
+  - アセットガイドの QThread 2 本
+- 既知のリスク（各段の残置から）
+  - 終了時、`stopping` を見ない長い処理はインタプリタ終了の join が待つ: start.gg のキャラ表の DL（最大 20 秒。両シェル）・API テスターの送信（最大 25 秒）・走っている provider のリクエスト（最大 20 秒。リトライとバックオフは打ち切る）（S3f-1 / S3f-2 / S3f-4 / S3f-6）
+  - ジョブレーンは 4 本: 大会の読込（データ・フェーズ・entrants）が走っている間、セット一覧・追従・統計は後ろに並びうる（S3f-2）
+  - fan-out レーンの 8 本は、アイコンのデコードと provider の並列リクエストが共有する。見捨てた遅いリクエストで埋まると、ほかの並列リクエストは上限（60 秒）まで待ちうる（S3f-3 / S3f-4）
+  - `stop()` の後に書かれた delta は送られない（S3f-5 判断 2）
+  - ゲームのロードの保存サイクルが開いている間（1 秒前後）、別スレッドの書き込みの公開が遅れる。同期の待ち手（`set_game`）は期限なしで待つ（S3f-4）
+  - `done()` から別のロードを頼むことは docstring で禁じただけ（S3f-4 / S3f-6）
+  - ヘッドレスをコンソールの × で閉じると、1 秒を超えて走っていたゲームのロードの後の処理は `state.json` に届かないことがある。終了中の `_SettleStopped` は、ボード操作中の長い Web のリクエストを待ちうる（S3f-6）
+  - ヘッドレスの Qt の pin は QtGui のオブジェクト（`QPixmap` / `QIcon` / Qt のモデル）の生成を見ない。デスクトップの `main.py` の起動・終了には自動テストが無い（S3f-6）
+  - `GetRecentSets` が答えないとき、「直近の対戦」は次の更新まで読み込み中のまま（S3f-3）
+- S3e から持ち越した運用・既存の不具合は、S3e 全体の完了報告のまま（S3f では扱っていない）
