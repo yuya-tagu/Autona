@@ -290,18 +290,19 @@ def bracket(autonaApp):
 
 
 def _drain(app):
-    """Let the provider's workers and what they hand the GUI thread finish
-    (a fetch, then the build, each delivered through queued signals)."""
+    """Let the provider's jobs (the task executor's, ADR-005 S3f-2) and what
+    they hand the GUI thread finish (a fetch, then the build, each delivered
+    through queued signals)."""
     from qtpy.QtCore import QCoreApplication
     from qtpy.QtWidgets import QApplication
-    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
-    pool = AutonaTournamentDataProvider.instance.threadPool
+    from src.core.TaskExecutor import TaskExecutor
+    executor = TaskExecutor.instance
     quiet = 0
     for _ in range(600):
-        idle = pool.waitForDone(20)
+        idle = executor.drain(0.02)
         QApplication.processEvents()
         QCoreApplication.sendPostedEvents()
-        quiet = quiet + 1 if idle and pool.activeThreadCount() == 0 else 0
+        quiet = quiet + 1 if idle else 0
         if quiet >= 8:
             break
     app.settle()
@@ -403,8 +404,8 @@ def _replay(app, countries, label, trigger, gameLoaded):
 
 
 def test_the_core_import_writes_what_the_panel_did(bracket, countries):
-    """Top8Service.RefreshFromProvider, through the shell's fetcher (the
-    provider's thread pool), no panel built: the recording of the panel's
+    """Top8Service.RefreshFromProvider, through the shell's fetcher (a
+    provider job on the task executor), no panel built: the recording of the panel's
     import, scenario by scenario -- what was fetched, the countries looked
     up, every Set with its key order, the deltas, the subtree."""
     from src.core import Top8Service

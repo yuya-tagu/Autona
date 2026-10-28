@@ -48,12 +48,15 @@ class _StubDataProvider:
     def __init__(self, url=TOURNAMENT_URL):
         self.signals = AutonaTournamentDataProviderSignals()
         self.provider = _StubProvider(url)
-        self.setLoadingWorker = None
         self.loadSetsCalls = []
         self.getPhasesCalls = 0
+        self.cancelSetLoadCalls = 0
 
     def LoadSets(self, showFinished, phaseGroupIds=None):
         self.loadSetsCalls.append((showFinished, phaseGroupIds))
+
+    def CancelSetLoad(self):
+        self.cancelSetLoadCalls += 1
 
     def GetTournamentPhases(self):
         self.getPhasesCalls += 1
@@ -203,3 +206,29 @@ def test_complete_pairs_filter_reuses_the_cache(window, provider):
 
     assert window.model.rowCount() == 1
     assert len(provider.loadSetsCalls) == 1
+
+
+def test_the_stub_has_only_what_the_real_adapter_has():
+    """The stub stands in for AutonaTournamentDataProvider: every method
+    the window may call on it must exist on the real adapter, or the stub
+    hides a call that fails in the app (ADR-005 S3f-2 review: the window
+    still read the adapter's removed `setLoadingWorker`)."""
+    helpers = {"FinishFetch"}
+    for name in vars(_StubDataProvider):
+        if name.startswith("_") or name in helpers:
+            continue
+        real = getattr(AutonaTournamentDataProvider, name, None)
+        assert callable(real), name
+
+
+def test_picking_a_set_cancels_the_list_still_loading(window, provider):
+    """Picking a set closes the window: the list it is still loading is
+    cancelled (CancelSetLoad) and the fetch button is given back."""
+    window.PrepareForDisplay()
+    window.btFetchSets.click()
+    assert not window.btFetchSets.isEnabled()
+
+    window.LoadSelectedSet()  # an empty table: no set to load
+
+    assert provider.cancelSetLoadCalls == 1
+    assert window.btFetchSets.isEnabled()

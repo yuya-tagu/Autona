@@ -287,21 +287,37 @@ class SetFollowService:
                     station.get("identifier") if station else None)
                 self._RequestMatch(setId, True, noMains)
 
-    def _RequestMatch(self, setId, overwrite, noMains):
+    def _RequestMatch(self, setId, overwrite, noMains, tick=False):
         """In the host: fetch set `setId`, a full load (`overwrite`) or an
-        update."""
+        update. `tick`: the poll's update, which its next tick waits for
+        (Tick)."""
         seq = self._Next()
         if overwrite:
             with SetFollowService._lock:
                 SetFollowService._loads[self.scoreboardNumber] = seq
+        if tick:
+            with SetFollowService._lock:
+                poll = SetFollowService._polls.get(self.scoreboardNumber)
+                if poll is not None:
+                    poll["fetching"] = seq
         started = self._Fetcher().Match(
             setId,
             lambda data: self._OnMatch(seq, setId, data, overwrite, noMains),
             lambda error: self._OnMatchFailed(seq, setId, error))
         if not started:
+            self._TickAnswered(seq)
             self._LoadFailed(seq, setId, "nothing to fetch it from")
 
+    def _TickAnswered(self, seq):
+        """Fetch `seq` answered (or never started): if it is the poll's
+        update its next tick waits for, that tick fetches again."""
+        with SetFollowService._lock:
+            poll = SetFollowService._polls.get(self.scoreboardNumber)
+            if poll is not None and poll.get("fetching") == seq:
+                del poll["fetching"]
+
     def _OnMatch(self, seq, setId, data, overwrite, noMains):
+        self._TickAnswered(seq)
         if not isinstance(data, dict) or data.get("id") is None:
             # No set in the answer: the provider's requests failed (it
             # answers what it has, with no id), or it knows no such set.
@@ -311,6 +327,7 @@ class SetFollowService:
         self.UpdateSetData(data, _request=seq)
 
     def _OnMatchFailed(self, seq, setId, error):
+        self._TickAnswered(seq)
         self._Host().Run(lambda: self._LoadFailed(seq, setId, error))
 
     def _LoadFailed(self, seq, setId, error):
@@ -383,20 +400,33 @@ class SetFollowService:
     def Tick(self):
         """The poll's 5 seconds are up: the set again (an update), the
         stream queue, and a station's / stream's current set. A set whose
-        load failed is loaded again instead (_LoadFailed)."""
+        load failed is loaded again instead (_LoadFailed).
+
+        Nothing is fetched while the poll's previous update has not
+        answered (ADR-005 S3f-2 review): with start.gg slow, each tick
+        queued two or three more fetches behind the ones still waiting, on
+        a job lane every tournament fetch shares, and the queue only grew.
+        Its answer lets the next tick fetch again; a new poll (a load, a
+        follow) starts without one."""
         host = self._Host()
 
         def run():
+            board = self.scoreboardNumber
             with SetFollowService._lock:
-                poll = SetFollowService._polls.get(self.scoreboardNumber)
+                poll = SetFollowService._polls.get(board)
                 retry = poll is not None and poll.pop("retry", False)
+                fetching = None if poll is None else poll.get("fetching")
             if poll is None:
                 return
             data = poll["data"]
             if retry and self.setLoad.lastSetSelected is None:
                 self._Load(host, data)
                 return
-            self._RequestMatch(data.get("id"), False, False)
+            if fetching is not None:
+                logger.info(f"score.{board}: the last poll's update has not "
+                            "answered yet; this tick fetches nothing")
+                return
+            self._RequestMatch(data.get("id"), False, False, tick=True)
             self._Fetcher().StreamQueue()
             if data.get("auto_update") in ("stream", "station"):
                 self._Resolve()

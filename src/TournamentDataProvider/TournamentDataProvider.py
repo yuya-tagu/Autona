@@ -1,4 +1,4 @@
-from qtpy.QtCore import QObject
+from qtpy.QtCore import QObject, QThreadPool
 
 
 class TournamentDataProvider(QObject):
@@ -9,7 +9,13 @@ class TournamentDataProvider(QObject):
         self.url = url
         self.entrants = []
         self.tournamentData = {}
-        self.threadpool = threadpool
+        # Where the provider's own nested Workers run (GetMatch's two APIs,
+        # GetRecentSets' pages) until ADR-005 S3f-3 moves them to the task
+        # executor's fan-out lane and removes this argument. The adapter
+        # passes None since S3f-2, when its jobs moved to the executor's job
+        # lane: Qt's global pool, apart from the lane whose jobs wait on it.
+        self.threadpool = (threadpool if threadpool is not None
+                           else QThreadPool.globalInstance())
         self.videogame = None
         self.tshTdp = tshTdp
 
@@ -19,7 +25,7 @@ class TournamentDataProvider(QObject):
     def GetBannerURL(self):
         pass
 
-    def GetEntrants(self):
+    def GetEntrants(self, cancel_event=None):
         pass
 
     def GetTournamentData(self, progress_callback=None, cancel_event=None):

@@ -80,6 +80,32 @@ def gui_thread_sync(fn):
     return wrapper
 
 
+def gui_thread_async(fn):
+    """
+    The fire-and-forget sibling of gui_thread_sync: dispatches the target function to the gui thread and returns
+    None at once, without waiting for it. On the gui thread itself the executor calls it directly, so there it still
+    runs before the call returns. Nobody waits for an exception it raises, so it is logged where it happens.
+
+    For work a background thread must not wait for: a job of the core TaskExecutor never waits on the gui thread
+    (ADR-005 S3f-2) -- once the event loop has stopped, such a wait never returns and keeps the process alive.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if gui_executor is None:
+            raise ValueError("Can't marshal action to gui thread if the gui executor has not been initialized.")
+
+        def run():
+            try:
+                fn(*args, **kwargs)
+            except Exception:
+                logger.exception(f"{fn.__qualname__} failed on the gui thread")
+
+        gui_executor(run)
+
+    return wrapper
+
+
 _app = None
 def in_gui_thread() -> bool:
     # "The GUI thread" is the thread that owns the application object, i.e.

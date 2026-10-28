@@ -33,9 +33,9 @@ recorded before the move). This file is what the golden cannot hold:
 - the poll's clock runs under a bare QCoreApplication, and stops for good
   when the app quits.
 
-The provider is faked at its own interface and its pool runs one job at a
-time when the test says so (the golden's _FakeProvider / _SteppedPool);
-nothing touches the network.
+The provider is faked at its own interface and its jobs run one at a time
+when the test says so (the golden's _FakeProvider and its `provider`
+fixture's stepped task executor); nothing touches the network.
 """
 import copy
 import json
@@ -60,9 +60,11 @@ def _state():
     return StateManager
 
 
-def _pool():
-    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
-    return AutonaTournamentDataProvider.instance.threadPool
+def _jobs():
+    """The stepped task executor the `provider` fixture runs the provider's
+    jobs on (ADR-005 S3f-2; the adapter's thread pool until then)."""
+    from src.core.TaskExecutor import TaskExecutor
+    return TaskExecutor.instance
 
 
 def _drain(app):
@@ -71,20 +73,14 @@ def _drain(app):
     while True:
         for _ in range(3):
             app.settle()
-        if not _pool().RunNext():
+        if not _jobs().run_next():
             break
 
 
 def _runLast():
     """Run the newest queued provider job, ahead of the older ones (an
     answer overtaking another), on a thread of its own."""
-    pool = _pool()
-    with pool._lock:
-        job = pool.queue.pop()
-    thread = threading.Thread(target=job.run if hasattr(job, "run") else job)
-    thread.start()
-    thread.join(30)
-    assert not thread.is_alive(), "a provider job did not finish"
+    assert _jobs().run_next(newest=True), "no provider job is queued"
 
 
 def _settle(app):
@@ -329,6 +325,38 @@ def test_headless_polling_follows_the_set_and_the_stream(
     assert len(provider.calls) == before
 
 
+@pytest.mark.parametrize("answer", ["the set", "error", "no set"])
+def test_a_tick_fetches_nothing_while_the_last_update_is_unanswered(
+        autonaApp, headless, settings, provider, monkeypatch, answer):
+    """With start.gg slow, a tick fetches nothing while the poll's previous
+    update has not answered (ADR-005 S3f-2 review: each tick used to queue
+    its fetches behind the ones still waiting, and the queue only grew).
+    Whatever that update answers -- the set, an error, no set -- the next
+    tick fetches again."""
+    host, client, _ = headless
+    settings["general.disable_autoupdate"] = False
+    client.get("/scoreboard1-load-set?set=1001")
+    _drain(autonaApp)
+    if answer != "the set":
+        _failOnce(provider, monkeypatch, "1001", answer)
+
+    _tick(1)
+    _settle(autonaApp)
+    queued = _jobs().queued()
+    assert queued >= 2   # the update and the stream queue
+    _tick(1)
+    _tick(1)
+    _settle(autonaApp)
+    assert _jobs().queued() == queued
+
+    _drain(autonaApp)
+    assert _calls(provider, "GetMatch") == [["1001"], ["1001"]]
+    _tick(1)
+    _drain(autonaApp)
+    assert _calls(provider, "GetMatch") == [["1001"], ["1001"], ["1001"]]
+    assert autonaApp.get("score.1.set_id") == "1001"
+
+
 def test_without_the_setting_a_load_does_not_poll(autonaApp, headless,
                                                   monkeypatch):
     """A shell that never wrote general.disable_autoupdate does not poll:
@@ -531,17 +559,17 @@ def test_lookups_answering_in_the_other_order_keep_the_newer_set(
         _tick(1)
         _settle(autonaApp)
         # The tick's update and stream queue: its lookup is left.
-        assert _pool().RunNext()
+        assert _jobs().run_next()
         _settle(autonaApp)
-        assert _pool().RunNext()
+        assert _jobs().run_next()
         _settle(autonaApp)
     else:
         client.get("/scoreboard1-pull-stream")
         _settle(autonaApp)
-    assert len(_pool().queue) == 1      # the older lookup
+    assert _jobs().queued() == 1      # the older lookup
     client.get("/scoreboard1-pull-stream")
     _settle(autonaApp)
-    assert len(_pool().queue) == 2      # and the newer one
+    assert _jobs().queued() == 2      # and the newer one
 
     # The newer one answers first: the channel moved on to 1002.
     provider.streams[STREAM] = _node(1002, (3, 4), state=1)
@@ -943,7 +971,7 @@ def test_the_station_queue_is_kept_in_memory_only(autonaApp, desktop,
         dict(_STATION, id=78, identifier="5"))
     for _ in range(3):
         autonaApp.settle()
-    assert _pool().RunNext()            # station 78's lookup
+    assert _jobs().run_next()            # station 78's lookup
     for _ in range(3):
         autonaApp.settle()
     board.timerCancelBt.click()
@@ -1148,7 +1176,7 @@ def test_a_web_load_right_after_a_lookup_is_checked_replaces_it(
     client.get("/scoreboard1-pull-stream")
     for _ in range(3):
         autonaApp.settle()
-    assert _pool().RunNext()            # the lookup; its answer is queued
+    assert _jobs().run_next()            # the lookup; its answer is queued
 
     real = SetFollowService._TakeLookup
     web = {}
@@ -1273,7 +1301,8 @@ stoppedOnQuit = not fetcher._timers[1].isActive()
 fetcher.Poll(1)
 stillStopped = not fetcher._timers[1].isActive()
 SetFollowService(1).StopFollowing()
-AutonaTournamentDataProvider.instance.threadPool.waitForDone(5000)
+from src.core.TaskExecutor import TaskExecutor
+TaskExecutor.instance.drain(5)
 report({
     "answer": answer,
     "fetches": len([c for c in calls if c[0] == "GetMatch"]),

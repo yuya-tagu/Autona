@@ -208,6 +208,7 @@ def test_the_provider_is_asked_for_the_player_id_of_any_shape(
     from types import SimpleNamespace
 
     from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
+    from src.core.TaskExecutor import TaskExecutor
     adapter = AutonaTournamentDataProvider.instance
     calls = []
 
@@ -219,12 +220,16 @@ def test_the_provider_is_asked_for_the_player_id_of_any_shape(
     monkeypatch.setattr(adapter, "provider", SimpleNamespace(
         name="StartGG", GetLastSets=recording("last"),
         GetPlayerHistoryStandings=recording("history")))
-    # The pool runs the worker at once, on this thread.
-    monkeypatch.setattr(adapter, "threadPool",
-                        SimpleNamespace(start=lambda worker: worker.run()))
+    # The jobs run one at a time, in the order they were asked for.
+    jobs = TaskExecutor(stepped=True)
+    monkeypatch.setattr(TaskExecutor, "instance", jobs)
 
-    StatsService.fetcher.LastSets(playerId, 1, lambda data: None)
-    StatsService.fetcher.HistorySets(playerId, 2, 1386, lambda data: None)
+    try:
+        StatsService.fetcher.LastSets(playerId, 1, lambda data: None)
+        StatsService.fetcher.HistorySets(playerId, 2, 1386, lambda data: None)
+        assert jobs.drain(10)
+    finally:
+        jobs.shutdown(5)
 
     assert calls == [("last", asked), ("history", asked)]
 

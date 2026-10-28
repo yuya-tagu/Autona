@@ -29,8 +29,8 @@ Record (on the pre-S3e-7 tree only):
 
     AUTONA_RECORD_SET_FOLLOW=1 python -m pytest tests/test_set_follow_flow.py
 
-Determinism: the provider's thread pool runs one job at a time while a
-scenario runs, so the jobs answer in the order they were started; the
+Determinism: the provider's jobs run one at a time while a scenario runs (a
+stepped task executor), so they answer in the order they were started; the
 5-second timer is pushed an hour away after every step and ticked by the
 test (its `timeout`), never by the clock. Every scenario runs under the
 locale the recording ran under, not the machine's (`recordedLocale`).
@@ -269,19 +269,18 @@ class _Recorder:
         self._responses.append(json.loads(json.dumps(answer, default=str)))
 
     def drain(self):
-        """The main thread's queue until it is empty, then the provider's
-        oldest job, and again, until neither has anything left (see
-        _SteppedPool)."""
-        from src.AutonaTournamentDataProvider import \
-            AutonaTournamentDataProvider
+        """The main thread's queue until it is empty, then the oldest
+        provider job, and again, until neither has anything left (see the
+        `provider` fixture's stepped executor)."""
+        from src.core.TaskExecutor import TaskExecutor
 
-        pool = AutonaTournamentDataProvider.instance.threadPool
+        executor = TaskExecutor.instance
         while True:
             # What one pass posts (a deferred refresh, a card torn down)
             # is run by the next.
             for _ in range(3):
                 self.app.settle()
-            if not pool.RunNext():
+            if not executor.run_next():
                 break
 
     def step(self, label, action):
@@ -422,73 +421,37 @@ def settings(monkeypatch):
     return values
 
 
-class _SteppedPool:
-    """The adapter's thread pool, run by the test: a job is queued, and
-    `RunNext` runs the oldest one on a thread of its own (the answers cross
-    to the main thread as a worker's do) once the main thread has nothing
-    left to do. One schedule, the same on every run.
-
-    Two things made the real pool's runs differ from each other:
-
-    - the order of a job's answer against what the main thread was doing
-      meanwhile (a statistics refresh the clear queued, say, landed before
-      or after the stream queue's answer);
-    - on the tree this was recorded on, a fetch answered through its own
-      Worker's signals (`worker.signals.result` -> a lambda): once the pool
-      had run and dropped the job, the Worker -- and its signals object --
-      could be collected before the main thread delivered the queued
-      answer, which was then lost (the set load did nothing). Every job is
-      kept here until the scenario ends, so every answer arrives and the
-      recording is what the code meant to do. The current tree answers
-      through an object that lives as long as the app
-      (AutonaSetFollowUtil) and does not depend on it.
-    """
-
-    def __init__(self, pool):
-        self.pool = pool
-        self.queue = []
-        self.kept = []
-        self._lock = threading.Lock()
-
-    def start(self, runnable, *args):
-        with self._lock:
-            self.queue.append(runnable)
-            self.kept.append(runnable)
-
-    def RunNext(self):
-        """Run the oldest queued job; False when there is none."""
-        with self._lock:
-            if not self.queue:
-                return False
-            job = self.queue.pop(0)
-        thread = threading.Thread(
-            target=job.run if hasattr(job, "run") else job)
-        thread.start()
-        thread.join(30)
-        assert not thread.is_alive(), "a provider job did not finish"
-        return True
-
-    def waitForDone(self, msecs=-1):
-        while self.RunNext():
-            pass
-        return True
-
-    def __getattr__(self, name):
-        return getattr(self.pool, name)
-
-
 @pytest.fixture
 def provider(autonaApp, monkeypatch):
-    """The fake tournament on the real adapter, its pool one job at a time,
-    and the state the loads read; undone afterwards."""
+    """The fake tournament on the real adapter, its jobs one at a time, and
+    the state the loads read; undone afterwards.
+
+    The jobs run on a stepped task executor (TaskExecutor(stepped=True), in
+    place of TaskExecutor.instance): a job is queued, and `run_next()` runs
+    the oldest one on a thread of its own once the main thread has nothing
+    left to do (the recorder's drain). One schedule, the same on every run:
+    with the real lanes, a job's answer landed before or after what the
+    main thread was doing meanwhile (a statistics refresh the clear queued,
+    say, against the stream queue's answer).
+
+    On the tree this was recorded on, the jobs ran on the adapter's
+    QThreadPool, stepped the same way by a stand-in that also kept every
+    Worker alive until the scenario ended: a fetch answered through its own
+    Worker's signals, which the garbage collector could take before the
+    main thread delivered the queued answer (the set load then did
+    nothing). Nothing needs keeping now: the answers cross through objects
+    that live as long as the app (AutonaSetFollowUtil, the GUI executor;
+    tests/test_provider_jobs.py pins it).
+    """
     from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
     from src.core.StateManager import StateManager
+    from src.core.TaskExecutor import TaskExecutor
 
     adapter = AutonaTournamentDataProvider.instance
     fake = _FakeProvider()
-    adapter.threadPool.waitForDone(10000)
-    monkeypatch.setattr(adapter, "threadPool",
-                        _SteppedPool(adapter.threadPool))
+    assert TaskExecutor.instance.drain(10)
+    stepped = TaskExecutor(stepped=True)
+    monkeypatch.setattr(TaskExecutor, "instance", stepped)
     monkeypatch.setattr(adapter, "provider", fake)
 
     # The same starting point whatever ran before: no board built, the
@@ -513,13 +476,16 @@ def provider(autonaApp, monkeypatch):
             timer = _followTimer(board)
             if timer is not None:
                 timer.stop()
-        adapter.threadPool.waitForDone()
+        assert stepped.drain(30)
         autonaApp.settle()
         autonaApp.dropAllBoards()
         for key in ("provider_videogame", "score.bracket_type",
                     "streamQueue", "currentStream"):
             StateManager.Unset(key)
         autonaApp.settle()
+        # What the last answers queued is dropped, as the stand-in pool
+        # dropped it.
+        stepped.shutdown(5)
 
 
 @pytest.fixture

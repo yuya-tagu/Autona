@@ -41,6 +41,7 @@ import pytest
 from src.core.CountryCatalog import CountryCatalog, state_flag_path
 from src.core.DictHelper import deep_get
 from src.core.GameAssetCatalog import GameAssetCatalog, GameAssetSnapshot
+from src.core.TaskExecutor import TaskExecutor
 from tests.conftest import _link_tree
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -133,6 +134,12 @@ def _setup_mock_modules():
         "src.core.DictHelper": _make_mock_module(
             "src.core.DictHelper",
             {"deep_get": deep_get},
+        ),
+        # The real (Qt-free) class: QueryRequests reads its `stopping`, and
+        # the entrants fetch is submitted to it (ADR-005 S3f-2).
+        "src.core.TaskExecutor": _make_mock_module(
+            "src.core.TaskExecutor",
+            {"TaskExecutor": TaskExecutor},
         ),
         # The real class: the tests below set its `instance` to a catalog
         # with the fixture game loaded.

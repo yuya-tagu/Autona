@@ -262,9 +262,11 @@ class AutonaAnalysisWidget(QWidget):
         self._dispatchMore()
 
     # Cap concurrent Start.gg requests. Each fetch hits the public GraphQL
-    # API; running too many in parallel risks rate limiting and saturates
-    # the shared Qt thread pool used elsewhere (asset loads, set fetches).
-    _PARALLEL_FETCHES = 4
+    # API; running too many in parallel risks rate limiting. Each is also a
+    # job of the task executor's job lane (ADR-005 S3f-2), whose 4 threads
+    # every tournament fetch shares: 4 here would hold the whole lane for
+    # the analysis, and a set load or a follow's tick would wait behind it.
+    _PARALLEL_FETCHES = 2
 
     def _dispatchMore(self):
         # Fill in-flight slots up to the parallelism cap. Returns

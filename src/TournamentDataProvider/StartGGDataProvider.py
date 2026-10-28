@@ -11,6 +11,7 @@ from ..Helpers.AutonaDirHelper import AutonaResolve
 from ..core.GameAssetCatalog import GameAssetCatalog
 from ..AutonaPlayerDB import AutonaPlayerDB
 from ..core.PlayerDB import PlayerDB
+from ..core.TaskExecutor import TaskExecutor
 from .TournamentDataProvider import TournamentDataProvider
 import orjson
 from ..Helpers.AutonaLocaleHelper import AutonaLocaleHelper
@@ -117,7 +118,15 @@ class StartGGDataProvider(TournamentDataProvider):
         # timeout; a short wait before retrying gives the server time to
         # settle instead of immediately hammering it again.
         max_attempts = 5
+        stopping = StartGGDataProvider._StopEvent()
         for attempt in range(max_attempts):
+            # The app is shutting down: no further request (ADR-005 S3f-2).
+            # The shutdown waits for the running jobs, and the interpreter's
+            # exit joins them, so a job still retrying would keep the process
+            # alive through the whole backoff.
+            if stopping is not None and stopping.is_set():
+                logger.info("QueryRequests: shutting down, request skipped")
+                return {}
             try:
                 data = type(
                     url,
@@ -135,11 +144,23 @@ class StartGGDataProvider(TournamentDataProvider):
                     f"QueryRequests exception on attempt {attempt+1}/{max_attempts}: {e}")
 
             if attempt < max_attempts - 1:
-                # 1s, 2s, 4s, 8s — doubles each retry
-                time.sleep(2 ** attempt)
+                # 1s, 2s, 4s, 8s — doubles each retry (cut short by a
+                # shutdown, which the next attempt then sees).
+                if stopping is not None:
+                    stopping.wait(2 ** attempt)
+                else:
+                    time.sleep(2 ** attempt)
 
         logger.error("QueryRequests: all retries exhausted")
         return {}
+
+    @staticmethod
+    def _StopEvent():
+        """The task executor's `stopping` event, set once the app shuts down
+        (ADR-005 S3f-2); None when there is no executor (a provider built
+        on its own, in a test)."""
+        executor = TaskExecutor.instance
+        return None if executor is None else executor.stopping
 
     def GetTournamentData(self, progress_callback=None, cancel_event=None):
         finalData = {}
@@ -1710,11 +1731,16 @@ class StartGGDataProvider(TournamentDataProvider):
 
         return sets
 
-    def GetEntrants(self):
-        worker = Worker(self.GetEntrantsWorker, **{
-            "eventSlug": self.url.split("start.gg/")[1]
-        })
-        self.threadpool.start(worker)
+    def GetEntrants(self, cancel_event=None):
+        # A job of the core executor (ADR-005 S3f-2), as the adapter's own
+        # fetches; nothing answers it (the DB and entrants_updated do).
+        # `cancel_event`: set once another tournament is loaded (the
+        # adapter's), the fetch stops and leaves the tournament filter alone.
+        TaskExecutor.instance.submit(
+            self.GetEntrantsWorker,
+            eventSlug=self.url.split("start.gg/")[1],
+            progress_callback=None, cancel_event=cancel_event,
+            task_name="start.gg entrants")
 
     def GetLastSets(self, playerID, playerNumber, callback, progress_callback, cancel_event):
         try:
@@ -2014,8 +2040,26 @@ class StartGGDataProvider(TournamentDataProvider):
             # the end so completers only offer this tournament's players.
             # The previous tournament's set stays active until then.
             entrant_tags = set()
+            stopping = StartGGDataProvider._StopEvent()
+
+            def stopped():
+                # The app is shutting down, or another tournament was loaded
+                # (ADR-005 S3f-2): stop between pages, saving and announcing
+                # nothing -- what the old pool thread did when the process
+                # ended mid-fetch. A replaced tournament's fetch kept paging
+                # and installed its players over the new tournament's.
+                if stopping is not None and stopping.is_set():
+                    logger.info("Entrants fetch stopped: shutting down")
+                    return True
+                if cancel_event is not None and cancel_event.is_set():
+                    logger.info("Entrants fetch stopped: another tournament "
+                                "was loaded")
+                    return True
+                return False
 
             while page <= totalPages:
+                if stopped():
+                    return
                 logger.info(str(page) + "/" + str(totalPages))
                 AutonaStatusManager.update(
                     status_token,
@@ -2071,11 +2115,19 @@ class StartGGDataProvider(TournamentDataProvider):
 
                 page += 1
 
+            # A request the shutdown cut short answers {} (no pages), which
+            # ends the loop as if the event were done: still save nothing.
+            if stopped():
+                return
+
             # Persist + announce (model rebuild, db_updated) once for the
             # whole fetch. The entrant set is installed first so the rebuilt
             # completer proxy filters correctly from the start.
             PlayerDB.instance.SaveDB()
-            AutonaPlayerDB.SetTournamentPlayers(entrant_tags)
+            # Dropped on the GUI thread if another tournament was loaded by
+            # then (its cancel event is set there, first).
+            AutonaPlayerDB.SetTournamentPlayers(
+                entrant_tags, cancel_event=cancel_event)
             PlayerDB.instance.NotifyChanged()
 
             # Sort by seed (ascending); unseeded entries fall to the bottom

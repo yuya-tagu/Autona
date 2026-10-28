@@ -19,7 +19,8 @@ Pinned:
   lane thread, None waits for ever;
 - the test seams: drain() waits for what tasks submit while running and for
   their deliveries, and a stepped executor runs its jobs only through
-  run_next(), in order, never after a shutdown took its queue;
+  run_next(), in order (or the newest first), never after a shutdown took
+  its queue, and counts them (queued());
 - both shells shut it down after the web server and before the flush, and
   the window's unused QThreadPool is gone.
 
@@ -679,6 +680,26 @@ def test_a_stepped_executor_never_runs_a_job_after_the_shutdown(make):
 def test_run_next_is_for_a_stepped_executor_only(make):
     with pytest.raises(RuntimeError):
         make().run_next()
+    with pytest.raises(RuntimeError):
+        make().queued()
+
+
+def test_a_stepped_executor_counts_its_queue_and_can_run_the_newest(make):
+    """ADR-005 S3f-2: queued() counts what waits for run_next(), and
+    run_next(newest=True) runs the last one submitted first -- a test
+    making a later answer overtake an earlier one."""
+    executor = make(stepped=True)
+    ran = []
+    for n in (1, 2, 3):
+        executor.submit(ran.append, n, task_name=f"job{n}")
+    assert executor.queued() == 3
+
+    assert executor.run_next(newest=True) is True
+    assert ran == [3] and executor.queued() == 2
+    assert executor.run_next() is True
+    assert ran == [3, 1] and executor.queued() == 1
+    assert executor.drain(WAIT) is True
+    assert ran == [3, 1, 2] and executor.queued() == 0
 
 
 # ── the shells ───────────────────────────────────────────────────────────

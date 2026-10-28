@@ -449,17 +449,15 @@ class AutonaSelectSetWindow(QDialog):
             QTimer.singleShot(
                 0, lambda: scoreboard.signals.NewSetSelected.emit(setId))
 
-        if AutonaTournamentDataProvider.instance.setLoadingWorker:
-            # If there was a previous set loading worker,
-            # block its signals
-            AutonaTournamentDataProvider.instance.setLoadingWorker.cancel()
-            AutonaTournamentDataProvider.instance.setLoadingWorker.signals.blockSignals(
-                True)
-            if self._fetchPending:
-                # That worker was ours: its result will never arrive, so drop
-                # the pending state instead of leaving the button disabled.
-                self._pendingQuery = None
-                self._SetFetching(False)
+        # A set list still loading is no longer wanted: stop it and drop
+        # its answers (ADR-005 S3f-2; it was the adapter's last set loading
+        # Worker, cancelled with its signals blocked).
+        AutonaTournamentDataProvider.instance.CancelSetLoad()
+        if self._fetchPending:
+            # That load was ours: its result will never arrive, so drop the
+            # pending state instead of leaving the button disabled.
+            self._pendingQuery = None
+            self._SetFetching(False)
 
     def _openStationSelection(self):
         self.close()

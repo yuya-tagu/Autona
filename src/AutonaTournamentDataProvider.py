@@ -1,17 +1,72 @@
+"""The tournament provider's Qt adapter: the loaded provider, its signals,
+and the fetches the app asks it for.
+
+Every fetch is a job of the core task executor (`TaskExecutor.instance`,
+ADR-005 S3f-2; until then a Worker on a QThreadPool of this class). A
+fetch's answer is handed to the GUI thread through the long-lived GUI
+executor (`AutonaQtHelper.gui_executor`) from the job's `then`, and the
+signal is emitted there -- the signals, their arguments, how often and on
+which thread they fire are what they were. Nothing per call has to live for
+the answer to arrive: a Worker's signals object did, and the garbage
+collector could take it before the queued answer was delivered (the answer
+was then silently lost).
+
+The provider methods are called as the Worker called them: with a
+`progress_callback` and a `cancel_event` (S3f-3 changes the provider's
+side). A job never waits on the GUI thread.
+"""
 import re
+import threading
 import time
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from .core.SettingsManager import SettingsManager
 from .core.StateManager import StateManager
+from .core.TaskExecutor import TaskExecutor
 from .AutonaPlayerDB import AutonaPlayerDB
+from .Helpers import AutonaQtHelper
 from .TournamentDataProvider.TournamentDataProvider import TournamentDataProvider
 from .TournamentDataProvider.StartGGDataProvider import StartGGDataProvider
 from .Helpers.AutonaVersionHelper import get_supported_providers
 from loguru import logger
 
-from .Workers import Worker
+
+def _NoProgress(*args):
+    pass
+
+
+def _OnGuiThread(fn, *args):
+    """`fn(*args)` on the GUI thread, not waited for (a job's answer)."""
+    AutonaQtHelper.gui_executor(lambda: fn(*args))
+
+
+def _Stopping(executor):
+    """Whether `executor` is stopping: the app is quitting, and a request
+    the shutdown cut short answered {} or an empty list. That is no answer
+    -- written, it would empty the tournament info or a statistic during
+    the shutdown's wait -- so a job's answer found on its own thread after
+    the stop is dropped (ADR-005 S3f-2 review). An answer made before the
+    stop is a real one and is delivered."""
+    if executor.stopping.is_set():
+        logger.info("A tournament fetch answered while the app is quitting: "
+                    "dropped")
+        return True
+    return False
+
+
+class _UnlessStopping:
+    """The `callback` (anything with an emit) a provider method answers on
+    itself, as a job hands it over: its answer is dropped once the executor
+    is stopping (see _Stopping)."""
+
+    def __init__(self, callback, executor):
+        self._callback = callback
+        self._executor = executor
+
+    def emit(self, *args):
+        if not _Stopping(self._executor):
+            self._callback.emit(*args)
 
 
 class AutonaTournamentDataProviderSignals(QObject):
@@ -36,7 +91,6 @@ class AutonaTournamentDataProvider(QObject):
         super().__init__(None)
         self.provider: TournamentDataProvider = None
         self.signals: AutonaTournamentDataProviderSignals = AutonaTournamentDataProviderSignals()
-        self.threadPool = QThreadPool()
 
         self.signals.game_changed.connect(self.GameChanged)
         self.signals.tournament_url_update.connect(self.SetTournamentSignal)
@@ -48,7 +102,16 @@ class AutonaTournamentDataProvider(QObject):
         # one (ADR-005 S3c).
         self.selectGameFromStartGGId = None
 
-        self.setLoadingWorker = None
+        # The set list load (LoadSets): only the newest one answers. Its
+        # number, and the event that tells the one before it to stop. GUI
+        # thread only (the window that asks for the list and the delivery
+        # of the answers).
+        self._setLoadGeneration = 0
+        self._setLoadCancel = None
+        # The entrants fetch of the tournament loaded now: the event that
+        # tells it to stop once another tournament (or none, or the same
+        # one again) is loaded. GUI thread only (SetTournament*).
+        self._entrantsCancel = None
 
     def GameChanged(self, videogame):
         StateManager.Set(f"provider_videogame", {
@@ -81,10 +144,12 @@ class AutonaTournamentDataProvider(QObject):
         # (used by the "Set tournament" button to refresh on demand).
         if not force and self.provider and self.provider.url == url:
             return
+        self._CancelEntrants()
 
         if url is not None and "start.gg" in url:
+            # No pool of ours (None): see TournamentDataProvider.__init__.
             AutonaTournamentDataProvider.instance.provider = StartGGDataProvider(
-                url, self.threadPool, self)
+                url, None, self)
             url = AutonaTournamentDataProvider.instance.provider.GetRealEventURL(url)
         else:
             logger.error("Unsupported provider...")
@@ -96,7 +161,7 @@ class AutonaTournamentDataProvider(QObject):
             self.GetTournamentData(initialLoading=initialLoading)
             self.GetTournamentPhases()
 
-            AutonaTournamentDataProvider.instance.provider.GetEntrants()
+            self._StartEntrants()
             AutonaTournamentDataProvider.instance.signals.tournament_changed.emit()
 
             # AutonaTournamentDataProvider.instance.SetGameFromProvider()
@@ -115,10 +180,11 @@ class AutonaTournamentDataProvider(QObject):
     def SetTournamentSignal(self, url, initialLoading=False):
         if self.provider and self.provider.url == url:
             return
+        self._CancelEntrants()
 
         if url is not None and "start.gg" in url:
             AutonaTournamentDataProvider.instance.provider = StartGGDataProvider(
-                url, self.threadPool, self)
+                url, None, self)
         else:
             logger.error("Unsupported provider...")
             AutonaTournamentDataProvider.instance.provider = None
@@ -129,7 +195,7 @@ class AutonaTournamentDataProvider(QObject):
             self.GetTournamentData(initialLoading=initialLoading)
             self.GetTournamentPhases()
 
-            AutonaTournamentDataProvider.instance.provider.GetEntrants()
+            self._StartEntrants()
             AutonaTournamentDataProvider.instance.signals.tournament_changed.emit()
         else:
             # No tournament loaded -> name completers offer the whole DB.
@@ -139,6 +205,24 @@ class AutonaTournamentDataProvider(QObject):
             AutonaTournamentDataProvider.instance.signals.tournament_phases_updated.emit([
             ])
             AutonaTournamentDataProvider.instance.signals.tournament_changed.emit()
+
+    def _StartEntrants(self):
+        """Fetch the loaded tournament's entrants (the provider's own job),
+        with a cancel event of its own. GUI thread."""
+        cancel = self._entrantsCancel = threading.Event()
+        self.provider.GetEntrants(cancel_event=cancel)
+
+    def _CancelEntrants(self):
+        """Tell the entrants fetch of the tournament loaded until now to
+        stop: it stops between pages and leaves the player DB's tournament
+        filter alone -- tags it already handed over included, which the GUI
+        thread drops (AutonaPlayerDB.SetTournamentPlayers). Otherwise a
+        replaced tournament's fetch kept paging and finally installed its
+        players over the new tournament's (or over the cleared filter).
+        GUI thread."""
+        if self._entrantsCancel is not None:
+            self._entrantsCancel.set()
+            self._entrantsCancel = None
 
     def SetStartggEventSlug(self, mainWindow):
         inp = QDialog(mainWindow)
@@ -203,13 +287,37 @@ class AutonaTournamentDataProvider(QObject):
         inp.deleteLater()
         return accepted
 
+    @staticmethod
+    def _Fetch(taskName, fetch, then=None, **kwargs):
+        """Run the provider method `fetch(**kwargs)` as a job of the task
+        executor, with the progress callback and cancel event a provider
+        method takes (unless given), and hand its result to `then` on the
+        GUI thread (ADR-005 S3f-2). A fetch that raises is logged once by
+        the executor, and `then` is not called (as a Worker's `result` was
+        not emitted); nor is it once the executor is stopping (_Stopping).
+        A provider's own `callback` is handed over the same way. The job's
+        Future."""
+        executor = TaskExecutor.instance
+        kwargs.setdefault("progress_callback", _NoProgress)
+        kwargs.setdefault("cancel_event", threading.Event())
+        if kwargs.get("callback") is not None:
+            kwargs["callback"] = _UnlessStopping(kwargs["callback"], executor)
+        deliver = None
+        if then is not None:
+            def deliver(result):
+                if not _Stopping(executor):
+                    _OnGuiThread(then, result)
+        return executor.submit(
+            fetch, task_name=taskName, then=deliver, **kwargs)
+
     def GetTournamentData(self, initialLoading=False):
         if self.provider is None:
             logger.warning("GetTournamentData called with no provider set")
             return
-        worker = Worker(self.provider.GetTournamentData)
-        worker.signals.result.connect(lambda tournamentData: self._onTournamentDataResult(tournamentData, initialLoading))
-        self.threadPool.start(worker)
+        self._Fetch(
+            "tournament data", self.provider.GetTournamentData,
+            lambda tournamentData: self._onTournamentDataResult(
+                tournamentData, initialLoading))
 
     def _onTournamentDataResult(self, tournamentData, initialLoading):
         """Handle tournament data on the main thread."""
@@ -223,26 +331,27 @@ class AutonaTournamentDataProvider(QObject):
     def GetTournamentPhases(self):
         if self.provider is None:
             return
-        worker = Worker(self.provider.GetTournamentPhases)
-        worker.signals.result.connect(lambda tournamentPhases: [
-            AutonaTournamentDataProvider.instance.signals.tournament_phases_updated.emit(
-                tournamentPhases)
-        ])
-        self.threadPool.start(worker)
+        self._Fetch(
+            "tournament phases", self.provider.GetTournamentPhases,
+            AutonaTournamentDataProvider.instance.signals
+            .tournament_phases_updated.emit)
 
     def RunWithProvider(self, job, status=None):
-        """Run `job(provider)` on the provider's thread pool: the core's way
+        """Run `job(provider)` as a job of the task executor: the core's way
         to the tournament (Top8Service.fetcher, ADR-005 S3e-8; the set
-        loads and follows of AutonaSetFollowUtil, S3e-7).
+        loads and follows of AutonaSetFollowUtil, S3e-7). On the provider's
+        thread pool until ADR-005 S3f-2.
 
         The provider is the one loaded now, read once here. `status`, when
         given, is shown in the footer while the job runs. True if the job
-        was started; False, running nothing, when no tournament is loaded.
-        A started job is always called, exactly once: the status is only a
-        display, and a failure to show it must not skip the job (the Top 8
-        import releases its in-progress flag there, and nothing else
-        would). The job runs off the GUI thread and touches no widget; its
-        errors are logged here.
+        was started; False, running nothing, when no tournament is loaded
+        or the executor has shut down (the app is quitting). A started job
+        is always called, exactly once -- unless the shutdown cancels it
+        while it is still queued: the status is only a display, and a
+        failure to show it must not skip the job (the Top 8 import releases
+        its in-progress flag there, and nothing else would). The job runs
+        off the GUI thread and touches no widget; its errors are logged
+        here.
         """
         provider = self.provider
         if provider is None:
@@ -271,8 +380,9 @@ class AutonaTournamentDataProvider(QObject):
                         logger.exception(
                             "could not clear a provider job's status")
 
-        self.threadPool.start(run)
-        return True
+        future = TaskExecutor.instance.submit(
+            run, task_name="tournament provider job")
+        return not future.cancelled()
 
     def GetAnalysisPhaseGroup(self, id, onResult):
         """Analysis-dock-only fetch. Uses the lightweight query so Start.gg
@@ -288,70 +398,90 @@ class AutonaTournamentDataProvider(QObject):
                 "Provider has no GetAnalysisPhaseGroup — skipping analysis fetch")
             onResult(None)
             return
-        worker = Worker(self.provider.GetAnalysisPhaseGroup, **{"id": id})
-        worker.signals.result.connect(onResult)
-        self.threadPool.start(worker)
+        self._Fetch("analysis phase group", self.provider.GetAnalysisPhaseGroup,
+                    onResult, id=id)
 
     def LoadSets(self, showFinished, phaseGroupIds=None):
+        """Load the set list (the set selection window). Only the newest
+        load answers: asking again tells the one before it to stop (its
+        cancel event, which GetMatches checks between pages) and drops
+        whatever it still delivers -- its progress and its list -- on the
+        GUI thread, by the load's number. Until ADR-005 S3f-2 the previous
+        Worker's signals were blocked instead, which let an answer already
+        queued through. GUI thread."""
         if self.provider is None:
             return
-        if self.setLoadingWorker:
-            # If there was a previous set loading worker,
-            # block its signals
-            self.setLoadingWorker.cancel()
-            self.setLoadingWorker.signals.blockSignals(True)
+        if self._setLoadCancel is not None:
+            self._setLoadCancel.set()
+        self._setLoadGeneration += 1
+        generation = self._setLoadGeneration
+        cancel = self._setLoadCancel = threading.Event()
 
-        worker = Worker(self.provider.GetMatches, **
-                        {"getFinished": showFinished,
-                         "phaseGroupIds": phaseGroupIds})
-        worker.signals.result.connect(lambda data: [
-            logger.info(f"Sets loaded: {len(data) if data is not None and hasattr(data, '__len__') else 0} items"),
-            self.signals.get_sets_finished.emit(data),
-            self.signals.sets_data_updated.emit({
-                "progress": 0,
-                "totalPages": 0,
-                "sets": data
-            })
-        ])
-        worker.signals.progress.connect(lambda n, t: [
-            logger.info(f"SetDataUpdated: {n}/{t}"),
-            self.signals.sets_data_updated.emit({
-                "progress": n,
-                "totalPages":t,
-                "sets": []
-            })
-        ])
-        self.setLoadingWorker = worker
-        self.threadPool.start(worker)
+        def progress(n, t):
+            # From the job's thread, page by page: delivered in order, ahead
+            # of the list (one queue, the GUI executor's).
+            _OnGuiThread(self._OnSetsProgress, generation, n, t)
+
+        self._Fetch("set list", self.provider.GetMatches,
+                    lambda data: self._OnSetsLoaded(generation, data),
+                    getFinished=showFinished, phaseGroupIds=phaseGroupIds,
+                    progress_callback=progress, cancel_event=cancel)
+
+    def CancelSetLoad(self):
+        """Stop the set list load still running, if any, and drop whatever
+        it still delivers (the set selection window, once a set is picked).
+        GUI thread."""
+        if self._setLoadCancel is not None:
+            self._setLoadCancel.set()
+            self._setLoadCancel = None
+        self._setLoadGeneration += 1
+
+    def _OnSetsProgress(self, generation, n, t):
+        if generation != self._setLoadGeneration:
+            return
+        logger.info(f"SetDataUpdated: {n}/{t}")
+        self.signals.sets_data_updated.emit({
+            "progress": n,
+            "totalPages": t,
+            "sets": []
+        })
+
+    def _OnSetsLoaded(self, generation, data):
+        if generation != self._setLoadGeneration:
+            logger.info("Sets loaded by a superseded load: dropped")
+            return
+        logger.info(f"Sets loaded: {len(data) if data is not None and hasattr(data, '__len__') else 0} items")
+        self.signals.get_sets_finished.emit(data)
+        self.signals.sets_data_updated.emit({
+            "progress": 0,
+            "totalPages": 0,
+            "sets": data
+        })
 
     def LoadStations(self):
         if self.provider is None:
             return
-        worker = Worker(self.provider.GetStations)
-        worker.signals.result.connect(lambda data: [
-            logger.info(f"Stations loaded: {len(data) if data is not None and hasattr(data, '__len__') else 0} items"),
-            self.signals.get_stations_finished.emit(data)
-        ])
-        self.threadPool.start(worker)
+        self._Fetch("stations", self.provider.GetStations,
+                    self._OnStationsLoaded)
+
+    def _OnStationsLoaded(self, data):
+        logger.info(f"Stations loaded: {len(data) if data is not None and hasattr(data, '__len__') else 0} items")
+        self.signals.get_stations_finished.emit(data)
 
     def GetRecentSets(self, callback, id1, id2, videogame):
+        # The provider answers through `callback` itself (the statistics'
+        # relay, which hands it to the GUI thread).
         if self.provider is None:
             return
-        worker = Worker(self.provider.GetRecentSets, **{
-            "id1": id1, "id2": id2, "callback": callback, "requestTime": time.time_ns(), "videogame": videogame
-        })
-        self.threadPool.start(worker)
+        self._Fetch("recent sets", self.provider.GetRecentSets,
+                    id1=id1, id2=id2, callback=callback,
+                    requestTime=time.time_ns(), videogame=videogame)
 
     def GetStandings(self, playerNumber, callback):
         if self.provider is None:
             return
-        worker = Worker(self.provider.GetStandings, **{
-            "playerNumber": playerNumber
-        })
-        worker.signals.result.connect(lambda data: [
-            callback.emit(data)
-        ])
-        self.threadPool.start(worker)
+        self._Fetch("standings", self.provider.GetStandings, callback.emit,
+                    playerNumber=playerNumber)
 
     @staticmethod
     def _ProviderPlayerId(playerId):
@@ -367,23 +497,17 @@ class AutonaTournamentDataProvider(QObject):
     def GetLastSets(self, callback, playerId, playerNumber):
         if self.provider is None:
             return
-        worker = Worker(self.provider.GetLastSets, **{
-            "playerID": self._ProviderPlayerId(playerId),
-            "playerNumber": playerNumber,
-            "callback": callback
-        })
-        self.threadPool.start(worker)
+        self._Fetch("last sets", self.provider.GetLastSets,
+                    playerID=self._ProviderPlayerId(playerId),
+                    playerNumber=playerNumber, callback=callback)
 
     def GetPlayerHistoryStandings(self, callback, playerId, playerNumber, gameType):
         if self.provider is None:
             return
-        worker = Worker(self.provider.GetPlayerHistoryStandings, **{
-            "playerID": self._ProviderPlayerId(playerId),
-            "playerNumber": playerNumber,
-            "gameType": gameType,
-            "callback": callback
-        })
-        self.threadPool.start(worker)
+        self._Fetch("player history", self.provider.GetPlayerHistoryStandings,
+                    playerID=self._ProviderPlayerId(playerId),
+                    playerNumber=playerNumber, gameType=gameType,
+                    callback=callback)
 
     def UiMounted(self):
         if SettingsManager.Get("TOURNAMENT_URL"):

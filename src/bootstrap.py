@@ -13,8 +13,8 @@ Two stages (ADR-005 S3c):
 - bootstrap_core(): what every shell needs -- the settings, the state layer
   and its Qt bridge, the domain operations, the Qt-free catalogs, the
   tournament provider. Nothing here needs a QGuiApplication: the Qt objects
-  it builds are QtCore ones (QObject, QThreadPool), which a QCoreApplication
-  serves. The headless shell (main.py --headless) stops here.
+  it builds are QtCore ones (QObject), which a QCoreApplication serves.
+  The headless shell (main.py --headless) stops here.
 - bootstrap_gui(): the desktop shell's Qt adapters on top of it -- the
   hotkeys, the game asset / country models, the player DB model wiring, the
   alert and updater objects and the scoreboard dock, and the registrations
@@ -196,7 +196,8 @@ def bootstrap_core():
     from .TournamentDataProvider.StartGGDataProvider import StartGGDataProvider
     StartGGDataProvider.Initialize()
 
-    # The tournament provider (a QObject with a QThreadPool: QtCore only).
+    # The tournament provider (a QObject; its fetches are jobs of the task
+    # executor above, ADR-005 S3f-2: QtCore only).
     # It used to connect to the game asset adapter's signals in __init__,
     # which made "adapter before provider" an ORDER CONSTRAINT and the
     # adapter a dependency of every shell. The shell wires that now: it
@@ -208,7 +209,7 @@ def bootstrap_core():
         AutonaTournamentDataProvider.instance = AutonaTournamentDataProvider()
 
     # ORDER CONSTRAINT: the Top 8 import (core, ADR-005 S3e-8) reaches the
-    # tournament through the provider's thread pool, so it is registered
+    # tournament through the provider's jobs, so it is registered
     # right after the provider exists and before anything can ask for an
     # import -- the panel's button, the hotkeys and the web server are all
     # the shell's, after this function returns. The catalogs the import

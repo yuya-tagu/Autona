@@ -52,6 +52,7 @@ from .CountryCatalog import CountryCatalog
 from .DictHelper import deep_clone
 from .GameAssetCatalog import GameAssetCatalog
 from .StateManager import StateManager
+from .TaskExecutor import TaskExecutor
 
 PLAYERS_PATH = f"{schema.TOP8_ROOT}.{schema.TOP8_PLAYERS_KEY}"
 MATCHES_PATH = f"{schema.TOP8_ROOT}.{schema.TOP8_MATCHES_KEY}"
@@ -275,6 +276,10 @@ def RefreshFromProvider(done=None):
     if not started:
         if fetcher is None:
             logger.warning("Top8: no fetcher registered, cannot import")
+        elif (TaskExecutor.instance is not None
+              and TaskExecutor.instance.stopping.is_set()):
+            # The fetcher starts nothing once the app is quitting.
+            logger.info("Top8: the app is quitting, skipping the import")
         else:
             logger.info("Top8: no tournament set, skipping the import")
         _Finish(done)
