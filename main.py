@@ -14,9 +14,9 @@ sys.dont_write_bytecode = True
 import time
 _STARTUP_T0 = time.perf_counter()
 
-# Select the Qt binding BEFORE `from src import Autona` (which imports qtpy)
-# and before qasync is imported — both resolve the binding at import time,
-# and their auto-detection prefers PyQt over PySide if both are installed.
+# Select the Qt binding BEFORE `from src import Autona` (which imports qtpy):
+# qtpy resolves the binding at import time, and its auto-detection prefers
+# PyQt over PySide if both are installed.
 # PySide6 (LGPL v3) is required because Autona is distributed under MIT;
 # PyQt6 (GPL v3) must not be used.
 import os
@@ -226,9 +226,9 @@ def _start_ipc_server(on_activate):
 
 
 if _HEADLESS:
-    # No splash, no QApplication, no window: a QCoreApplication (QtCore
-    # only) runs the event loop the core's Qt plumbing needs -- the state
-    # bridge, the GUI executor, the provider's thread pool, the IPC server.
+    # No splash, no QApplication, no window: a QCoreApplication (no GUI
+    # application object) runs the event loop the core's Qt plumbing needs
+    # -- the state bridge, the GUI executor, the IPC server.
     from PySide6.QtCore import QCoreApplication
     App = QCoreApplication(sys.argv)
 
@@ -310,37 +310,34 @@ autona_splash.log_startup_phase("import-src")
 
 import multiprocessing
 import signal
-import asyncio
-from qasync import run, QEventLoop
-from functools import partial
 from src.Helpers.AutonaWindowsShortcut import ensure_appid_shortcut
 
 
-async def main(event_loop):
-    def close_future(future, loop):
-        loop.call_later(10, future.cancel)
-        future.cancel()
+def _close_on_stop_signals(window):
+    """SIGINT / SIGTERM close the window -- its closeEvent is the shutdown --
+    where the platform delivers them to Python (not Windows: qasync's
+    add_signal_handler, which did this until ADR-005 S3f-6, raised
+    NotImplementedError there, so the desktop never had it on Windows).
 
-    future = asyncio.Future()
+    A Python signal handler runs only between bytecodes, never while the
+    event loop waits in Qt: a timer wakes the interpreter to let it run (the
+    headless shell's heartbeat, src/headless.py). The close is queued onto
+    the event loop rather than run inside the handler."""
+    if sys.platform == "win32":
+        return
+    from PySide6.QtCore import QTimer
 
-    window = Autona.Window()
-    # From here on a second launch can be answered with a real window.
-    _set_activation_target(window)
-    if hasattr(Autona.App, "aboutToQuit"):
-        getattr(Autona.App, "aboutToQuit").connect(
-            partial(close_future, future, event_loop))
+    def onSignal(signum, frame):
+        QTimer.singleShot(0, window.close)
 
-    try:
-        event_loop.add_signal_handler(signal.SIGINT, lambda: window.close())
-        event_loop.add_signal_handler(signal.SIGTERM, lambda: window.close())
-    except NotImplementedError:  # windows...
-        pass
-
-    await future
-    if isinstance(future.result(), int):
-        return future.result()
-
-    return 0
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(signum, onSignal)
+        except (ValueError, OSError):
+            pass
+    heartbeat = QTimer(window)
+    heartbeat.timeout.connect(lambda: None)
+    heartbeat.start(250)
 
 
 if __name__ == '__main__':
@@ -353,13 +350,21 @@ if __name__ == '__main__':
     # main process (after freeze_support, inside __main__).
     ensure_appid_shortcut()
 
-    try:
-        try:
-            loop = QEventLoop()
-            asyncio.set_event_loop(loop)
-            sys.exit(loop.run_until_complete(main(loop)))
-        except asyncio.exceptions.CancelledError:
-            sys.exit(0)
-    except RuntimeError:
-        sys.exit(0)
+    window = Autona.Window()
+    # From here on a second launch can be answered with a real window.
+    _set_activation_target(window)
+    _close_on_stop_signals(window)
+
+    # The Qt event loop, until the window's closeEvent quits it (ADR-005
+    # S3f-6: qasync ran this same loop around a coroutine that only built
+    # the window and waited for aboutToQuit; nothing used asyncio). The
+    # process exits 0 whatever the loop returns, as it did under qasync:
+    # the loop's code is not meant as one -- the updater's restart message
+    # box quits it with the button it was closed by (its finished signal is
+    # connected to QApplication.exit). An exception building the window
+    # still ends the process with its traceback (1). The interpreter's
+    # exit then joins what still writes -- the task executor's threads,
+    # the ./out export and user_data/state.json.
+    App.exec()
+    sys.exit(0)
 

@@ -22,8 +22,6 @@ silently lost. Pinned here:
   short, the entrants neither saved nor announced);
 - the player DB relay no longer waits for the GUI thread
   (gui_thread_async), so a job never does;
-- neither the adapter nor the EVENT panel refers to a Worker or a
-  QThreadPool any more (source-level).
 
 And since S3f-3, the Start.gg provider's own parallel requests:
 
@@ -31,8 +29,10 @@ And since S3f-3, the Start.gg provider's own parallel requests:
   finish (they were Workers on the pool those fetches ran on);
 - nothing fetches the sets queued at a station any more: the fetch never
   ran, and nothing showed what it would have answered;
-- the provider package has no Worker, pool or wait of its own. (Since
-  S3f-4 nothing in src/ has: tests/test_asset_jobs.py.)
+- the provider package has no pool or wait of its own: no
+  ThreadPoolExecutor, no as_completed. (Nothing in src/ -- the adapter and
+  the EVENT panel included -- names a Worker, a QRunnable or a QThreadPool:
+  tests/test_task_executor.py, since ADR-005 S3f-6.)
 """
 import ast
 import copy
@@ -629,10 +629,7 @@ def test_the_player_db_relay_never_waits_for_the_gui_thread():
     assert "gui_thread_sync" not in names
 
 
-# ── no Worker, no pool ───────────────────────────────────────────────────
-
-
-FORBIDDEN = {"Worker", "Workers", "QThreadPool", "threadPool"}
+# ── no pool of the provider's own ────────────────────────────────────────
 
 
 def _names(path):
@@ -653,17 +650,13 @@ def _names(path):
     return used
 
 
-@pytest.mark.parametrize("path", ["src/AutonaTournamentDataProvider.py",
-                                  "src/AutonaTournamentInfoWidget.py"])
-def test_the_adapter_and_the_event_panel_use_no_worker_or_pool(path):
-    assert not _names(path) & FORBIDDEN
-
-
 # The provider package has no pool of its own: the requests a fetch makes
-# in parallel go to the task executor's fan-out lane (ADR-005 S3f-3).
-PROVIDER_FORBIDDEN = FORBIDDEN | {
-    "QRunnable", "wait_for_all", "ThreadPoolExecutor", "as_completed",
-    "threadpool", "getStationMatchesThreadPool"}
+# in parallel go to the task executor's fan-out lane (ADR-005 S3f-3). What
+# no file of src/ may name (a Worker, a QThreadPool...) is pinned by
+# tests/test_task_executor.py; these are the provider's own (the executor
+# itself is a ThreadPoolExecutor, so they are not banned everywhere).
+PROVIDER_FORBIDDEN = {"ThreadPoolExecutor", "as_completed",
+                      "getStationMatchesThreadPool"}
 
 
 @pytest.mark.parametrize("path", sorted(

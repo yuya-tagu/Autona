@@ -23,8 +23,15 @@ Pinned:
   run_next(), in order (or the newest first), one at a time even once a
   run_next() timed out on a step still running, never after a shutdown
   took its queue, and counts them (queued());
-- both shells shut it down after the web server and before the flush, and
-  the window's unused QThreadPool is gone.
+- both shells shut it down after the web server and before the flush;
+- it is the one executor (ADR-005 S3f-6): nothing in src/, main.py or the
+  root modules main.py imports (the splash) names a Worker, a QRunnable, a
+  QThreadPool or qasync, and src/Workers.py is gone (the S3f-2..S3f-4 pins
+  of the adapter, the event panel and src/, gathered here; the provider
+  package's own extras stay in tests/test_provider_jobs.py); and the
+  threads started beside it there -- a Thread / Timer / ThreadPoolExecutor
+  / QThread call, a Thread / QThread subclass, an asyncio / qasync / _thread
+  import -- are exactly the ones the S3f completion report lists.
 
 Pure core: no Qt, no harness. Every executor made here is shut down at the
 end of its test. Nothing here depends on how fast a thread is scheduled:
@@ -865,8 +872,133 @@ def test_both_shells_stop_the_tasks_after_serving_and_before_the_flush(
         assert "StatePersistence.Flush" not in calls
 
 
-def test_the_window_has_no_thread_pool_of_its_own():
-    # Window.threadpool was never used (ADR-005 S3f inventory).
-    source = (PROJECT_ROOT / "src" / "Autona.py").read_text(encoding="utf-8")
-    assert "QThreadPool(" not in source
-    assert "self.threadpool" not in source
+# ── one executor ─────────────────────────────────────────────────────────
+
+# What ran work off the main thread before S3f, by name: src/Workers.py's
+# Worker (S3f-2..S3f-4), the QThreadPools it ran on and qasync, whose loop
+# main.py ran the desktop in (S3f-6). The delta debounce's threading.Timer
+# (S3f-5) is a call, below.
+NOT_THE_EXECUTOR = {
+    "Worker", "Workers", "WorkerSignals",
+    "QRunnable", "QThreadPool", "waitForDone", "wait_for_all",
+    "qasync",
+}
+
+# What starts a thread of its own: these calls (`threading.Thread(...)` and
+# `Thread(...)` alike), a class on these bases, an import of these modules.
+THREAD_CALLS = {"Thread", "Timer", "ThreadPoolExecutor",
+                "ProcessPoolExecutor", "QThread", "start_new_thread"}
+THREAD_BASES = {"Thread", "QThread"}
+THREAD_MODULES = {"asyncio", "qasync", "_thread"}
+
+# The threads left beside the executor -- the S3f completion report's list
+# (docs/changes/architecture-modernization.md, "S3f の後に残る並行処理"),
+# by file, the function or class they are started in and how. Adding one,
+# moving one or taking one away changes that list too.
+THREADS_LEFT = {
+    # The web server: the server, its stop helper, the delta flusher (S3f-5).
+    ("src/AutonaWebServer.py", "WebServer.start", "Thread"),
+    ("src/AutonaWebServer.py", "WebServer.stop", "Thread"),
+    ("src/AutonaWebServer.py", "WebServer._start_delta_flusher", "Thread"),
+    # The ./out export writer and the image downloads (daemon).
+    ("src/core/StateManager.py", "StateManager._QueueExport", "Thread"),
+    ("src/core/StateManager.py", "StateManager.CreateFilesDict", "Thread"),
+    # The user_data/state.json writer.
+    ("src/core/StatePersistence.py", "StatePersistence._StartWriter",
+     "Thread"),
+    # The executor itself: its two lanes and the stepped test mode's thread.
+    ("src/core/TaskExecutor.py", "TaskExecutor.__init__",
+     "ThreadPoolExecutor"),
+    ("src/core/TaskExecutor.py", "TaskExecutor._RunNextStep", "Thread"),
+    # The updater's (auto-update is not touched) and the asset guide's
+    # (a desktop window's own) QThreads.
+    ("src/AutonaUpdater.py", "_CheckThread", "class(QThread)"),
+    ("src/AutonaUpdater.py", "_DownloadThread", "class(QThread)"),
+    ("src/AutonaGameAssetGuideWindow.py", "_IndexFetchThread",
+     "class(QThread)"),
+    ("src/AutonaGameAssetGuideWindow.py", "_AssetDownloadThread",
+     "class(QThread)"),
+}
+
+
+def _scanned():
+    """main.py, the root modules it imports (the splash) and src/."""
+    main = PROJECT_ROOT / "main.py"
+    imported = set()
+    for node in ast.walk(ast.parse(main.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0:
+            imported.add((node.module or "").split(".")[0])
+    roots = sorted(PROJECT_ROOT / f"{name}.py" for name in imported
+                   if (PROJECT_ROOT / f"{name}.py").is_file())
+    return [main, *roots, *sorted((PROJECT_ROOT / "src").rglob("*.py"))]
+
+
+def _thread_sites(path):
+    """(file, where, how) of each thread `path` starts or module it imports."""
+    rel = path.relative_to(PROJECT_ROOT).as_posix()
+    sites = set()
+
+    def last(node):
+        return (node.id if isinstance(node, ast.Name)
+                else node.attr if isinstance(node, ast.Attribute) else None)
+
+    def visit(node, scope):
+        for child in ast.iter_child_nodes(node):
+            inner = scope
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                  ast.ClassDef)):
+                inner = [*scope, child.name]
+            if isinstance(child, ast.ClassDef):
+                sites.update((rel, ".".join(inner), f"class({last(base)})")
+                             for base in child.bases
+                             if last(base) in THREAD_BASES)
+            elif (isinstance(child, ast.Call)
+                  and last(child.func) in THREAD_CALLS):
+                sites.add((rel, ".".join(scope), last(child.func)))
+            elif isinstance(child, (ast.Import, ast.ImportFrom)):
+                modules = ([alias.name for alias in child.names]
+                           if isinstance(child, ast.Import)
+                           else [child.module or ""])
+                sites.update((rel, ".".join(scope), f"import {module}")
+                             for module in modules
+                             if module.split(".")[0] in THREAD_MODULES)
+            visit(child, inner)
+
+    visit(ast.parse(path.read_text(encoding="utf-8")), [])
+    return sites
+
+
+def _names(path):
+    """Every name, attribute and imported name or module part in `path`."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    used = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            used.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            used.add(node.attr)
+        elif isinstance(node, ast.ImportFrom):
+            used.update((node.module or "").split("."))
+            used.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                used.update(alias.name.split("."))
+    return used
+
+
+def test_nothing_runs_work_but_the_executor():
+    assert not (PROJECT_ROOT / "src" / "Workers.py").exists()
+    paths = _scanned()
+    assert PROJECT_ROOT / "autona_splash.py" in paths
+    found = {path.relative_to(PROJECT_ROOT).as_posix():
+             sorted(_names(path) & NOT_THE_EXECUTOR) for path in paths}
+    assert {path: names for path, names in found.items() if names} == {}
+
+
+def test_the_threads_left_are_the_documented_ones():
+    sites = set().union(*(_thread_sites(path) for path in _scanned()))
+    assert sorted(sites - THREADS_LEFT) == [], "a thread beside the executor"
+    assert sorted(THREADS_LEFT - sites) == [], (
+        "gone or moved: update THREADS_LEFT and the completion report")

@@ -44,7 +44,6 @@
 | python-dateutil    | 2.9.0       | Apache Software License; BSD License                    | https://github.com/dateutil/dateutil                                 |
 | python-engineio    | 4.13.1      | MIT                                                     | https://github.com/miguelgrinberg/python-engineio                    |
 | python-socketio    | 5.16.1      | MIT                                                     | https://github.com/miguelgrinberg/python-socketio                    |
-| qasync             | 0.27.1      | BSD License                                             | https://github.com/CabbageDevelopment/qasync                         |
 | requests           | 2.33.1      | Apache Software License                                 | https://github.com/psf/requests                                      |
 | shiboken6          | 6.11.0      | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only           | https://pyside.org                                                   |
 | simple-websocket   | 1.1.0       | MIT License                                             | https://github.com/miguelgrinberg/simple-websocket                   |

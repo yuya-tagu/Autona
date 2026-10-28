@@ -11,6 +11,10 @@ network) stubbed out. Pinned:
   loads, with only a warning in the log), the game loader the web
   operations use, the headless board host; no desktop adapter is built and
   the player DB builds no Qt model (QtGui);
+- what the run makes and imports (ADR-005 S3f-6): no GUI application
+  object, no widget, and none of the src modules that define a QWidget
+  subclass (found by AST) -- in place of "no QtGui / QtWidgets", which
+  qtpy rules out (importing it loads both);
 - the games follow the desktop's startup: the scan, the provider's game
   re-applied after every scan (selector first), the last pick restored once
   -- loaded through the catalog, with the pick persisted and the web
@@ -79,12 +83,8 @@ from src import headless
 shell = headless.Assemble(app)
 
 from src import AutonaWebOperations as WebOps
-from src.AutonaGameAssetManager import AutonaGameAssetManager
-from src.AutonaHotkeys import AutonaHotkeys
 from src.AutonaPlayerDB import AutonaPlayerDB
-from src.AutonaScoreboardManager import AutonaScoreboardManager
 from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
-from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
 from src.core.SettingsManager import SettingsManager
 from src.core.StateManager import StateManager
 from src.core.StatePersistence import StatePersistence
@@ -95,6 +95,12 @@ catalog = GameAssetCatalog.instance
 events = []
 games.signals.gameChanged.connect(lambda: events.append("gameChanged"))
 AutonaPlayerDB.signals.db_updated.connect(lambda: events.append("db_updated"))
+
+def built(module, name):
+    # Looked up, not imported: the modules the run imports are pinned
+    # (below), so the probe imports nothing the shell does not.
+    cls = getattr(sys.modules.get(module), name, None)
+    return cls is not None and cls.instance is not None
 
 def pump(done, timeout=30):
     deadline = time.monotonic() + timeout
@@ -114,11 +120,12 @@ result = {
     # The shell operations (ADR-005 S3e-9): the desktop's alone.
     "shell_operations": [WebOps.openSetSelection is not None,
                          WebOps.renderThumbnail is not None],
-    "desktop": [name for name, cls in (
-        ("AutonaGameAssetManager", AutonaGameAssetManager),
-        ("AutonaScoreboardManager", AutonaScoreboardManager),
-        ("AutonaHotkeys", AutonaHotkeys),
-        ("AutonaCountryHelper", AutonaCountryHelper)) if cls.instance],
+    "desktop": [name for module, name in (
+        ("src.AutonaGameAssetManager", "AutonaGameAssetManager"),
+        ("src.AutonaScoreboardManager", "AutonaScoreboardManager"),
+        ("src.AutonaHotkeys", "AutonaHotkeys"),
+        ("src.Helpers.AutonaCountryHelper", "AutonaCountryHelper"))
+        if built(module, name)],
     "seeded": {key: isinstance(StateManager.Get(key), dict)
                for key in ("score.1", "score.2", "score.3",
                            "tournamentInfo", "commentary")},
@@ -190,6 +197,21 @@ result["executor"] = {
     "queued_cancelled": sum(f.cancelled() for f in queued),
     "after": executor.submit(lambda: None, task_name="late").cancelled(),
 }
+
+# What the whole run made and imported (ADR-005 S3f-6). qtpy loads
+# PySide6.QtGui and PySide6.QtWidgets whatever the shell does, so those
+# are looked up, not asked for.
+import gc
+qtgui = sys.modules.get("PySide6.QtGui")
+qtwidgets = sys.modules.get("PySide6.QtWidgets")
+result["qt"] = {
+    "gui_application": qtgui is not None and isinstance(
+        QCoreApplication.instance(), qtgui.QGuiApplication),
+    "widgets": 0 if qtwidgets is None else sum(
+        isinstance(o, qtwidgets.QWidget) for o in gc.get_objects()),
+}
+result["src_modules"] = sorted(
+    name for name in sys.modules if name == "src" or name.startswith("src."))
 report(result)
 '''
 
@@ -233,6 +255,52 @@ def test_the_headless_shell_assembles_and_runs(tmp_path):
     assert executor["queued_ran"] == []
     assert executor["queued_cancelled"] == 2
     assert executor["after"] is True
+
+    # No GUI application object, no widget, no module of the desktop's
+    # widgets (ADR-005 S3f-6).
+    assert result["qt"] == {"gui_application": False, "widgets": 0}
+    imported = set(result["src_modules"])
+    assert "src.headless" in imported and "src.AutonaWebServer" in imported
+    widgetModules = _widget_modules()
+    assert imported.isdisjoint(widgetModules), sorted(
+        imported & widgetModules)
+
+
+def _widget_modules():
+    """The src modules that define a QWidget subclass, by AST: a class
+    whose base is one of PySide6.QtWidgets' widget classes, or (closed
+    over) a src class that is one. A base is matched by its last name
+    (`QDialog`, `QtWidgets.QDialog`, `AutonaBoardWidget`)."""
+    from PySide6 import QtWidgets
+    widgets = {name for name in dir(QtWidgets)
+               if isinstance(getattr(QtWidgets, name), type)
+               and issubclass(getattr(QtWidgets, name), QtWidgets.QWidget)}
+    classes = []
+    for path in sorted((PROJECT_ROOT / "src").rglob("*.py")):
+        parts = list(path.relative_to(PROJECT_ROOT).with_suffix("").parts)
+        if parts[-1] == "__init__":
+            parts.pop()
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                bases = {base.id if isinstance(base, ast.Name) else base.attr
+                         for base in node.bases
+                         if isinstance(base, (ast.Name, ast.Attribute))}
+                classes.append((".".join(parts), node.name, bases))
+    found = set()
+    while True:
+        more = {(module, name) for module, name, bases in classes
+                if bases & widgets and (module, name) not in found}
+        if not more:
+            break
+        found |= more
+        widgets |= {name for _, name in more}
+    modules = {module for module, _ in found}
+    # The derivation finds what is known to be a widget's module.
+    assert {"src.Autona", "src.AutonaScoreboardWidget",
+            "src.AutonaScoreboardPlayerWidget", "src.AutonaSelectSetWindow",
+            "src.AutonaCrewBattleWidget", "src.ui_layout"} <= modules, modules
+    return modules
 
 
 def _assemble_steps():

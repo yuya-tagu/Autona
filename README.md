@@ -30,7 +30,7 @@
 
 | レイヤー | 技術 |
 |---------|------|
-| デスクトップ GUI | Python 3.12 / PySide6 (qtpy) / qasync |
+| デスクトップ GUI | Python 3.12 / PySide6 (qtpy) |
 | Web UI | React 19 / TypeScript / Redux Toolkit / MUI 7 |
 | リアルタイム通信 | Flask-SocketIO / Socket.IO Client |
 | 状態管理 | StateManager（独自）+ deepdiff によるデルタ同期 |
@@ -90,7 +90,7 @@ scripts/gen_release.ps1
 ```
 ┌──────────────────────────────────────────────────────┐
 │                   main.py (Entry)                    │
-│              QEventLoop + asyncio                    │
+│              QApplication.exec()                     │
 └──────────────────────┬───────────────────────────────┘
                        │
 ┌──────────────────────▼───────────────────────────────┐
