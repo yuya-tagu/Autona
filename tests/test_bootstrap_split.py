@@ -110,12 +110,15 @@ def test_bootstrap_core_steps_and_their_order():
     # (ADR-005 S3e-1). StartGG's query texts are loaded right above the
     # provider that owns them; the Designer migration is last (before
     # anything can serve or list designs, which the shells start afterwards).
+    # The task executor (ADR-005 S3f-1) depends on nothing and comes before
+    # everything that can hand it work.
     assert _steps("bootstrap_core") == [
         "SettingsManager.Initialize()",
         "LayoutOptionsManager.Initialize()",
         "AutonaLocaleHelper.Initialize()",
         "BadWordFilter()",
         "BadWordFilter.instance.Initialize()",
+        "TaskExecutor()",
         "StateManager.Initialize()",
         "StateManagerBridge()",
         "AutonaActions()",
@@ -352,6 +355,7 @@ from src.core.BadWordFilter import BadWordFilter
 from src.core.CountryCatalog import CountryCatalog
 from src.core.GameAssetCatalog import GameAssetCatalog
 from src.core.PlayerDB import PlayerDB
+from src.core.TaskExecutor import TaskExecutor
 from src.core.TournamentInfoService import TournamentInfoService
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 
@@ -372,7 +376,11 @@ report({
             AutonaTournamentDataProvider.instance is not None,
         "TournamentInfoService": TournamentInfoService.instance is not None,
         "CountryCatalog": CountryCatalog.instance is not None,
+        "TaskExecutor": TaskExecutor.instance is not None,
     },
+    # Made, but no lane thread until the first submit.
+    "executor_threads": [t.name for t in threading.enumerate()
+                         if t.name.startswith(("AutonaJob", "AutonaFanout"))],
     "bad_words_loaded": bool(BadWordFilter.instance.patterns),
     "filter_locale": filter_locale,
     "filter_country_languages":
@@ -412,6 +420,7 @@ def test_bootstrap_core_runs_under_a_bare_qcoreapplication(tmp_path):
     assert result["app_type"] == "QCoreApplication"
     assert all(result["core"].values()), result["core"]
     assert not any(result["gui"].values()), result["gui"]
+    assert result["executor_threads"] == []
     # Nothing is wired to the (absent) game asset adapter.
     assert result["selector_registered"] is False
     # The web operations' defaults: no board, no game loader (the headless

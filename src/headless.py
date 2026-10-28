@@ -299,14 +299,27 @@ class HeadlessShell:
             self.app, "quit", Qt.ConnectionType.QueuedConnection)
 
     def Shutdown(self):
-        """Stop serving, then let ./out and user_data/state.json finish."""
+        """Stop serving, stop the background tasks, then let ./out and
+        user_data/state.json finish."""
         from .core.StateManager import StateManager
         from .core.StatePersistence import StatePersistence
+        from .core.TaskExecutor import TaskExecutor
         logger.info("headless: stopping")
         if self.webserver is not None:
             try:
                 # Short: a console close leaves about five seconds in all.
                 self.webserver.stop(2.0)
+            except Exception:
+                logger.error(traceback.format_exc())
+        # After the server (no request can queue a task any more), before
+        # the flush (a task that finishes in time has its writes in it).
+        # Short for the same reason as the server's: queued tasks are
+        # cancelled at once, and a running one is told to stop.
+        if TaskExecutor.instance is not None:
+            try:
+                if not TaskExecutor.instance.shutdown(1.0):
+                    logger.warning(
+                        "headless: background tasks were still running")
             except Exception:
                 logger.error(traceback.format_exc())
         if not StateManager.JoinExports(10):

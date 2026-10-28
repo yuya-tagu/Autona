@@ -104,6 +104,17 @@ def bootstrap_core():
             countryContinent=AutonaLocaleHelper.GetCountryContinent)
         BadWordFilter.instance.Initialize()
 
+    # ORDER CONSTRAINT: the background task executor (ADR-005 S3f) before
+    # anything that can hand it work -- the tournament provider and the
+    # services below, the widgets and the web server the shells build after
+    # this function returns. It depends on nothing and starts no thread
+    # until the first submit, so it is made this early. Both shells shut it
+    # down (Window.closeEvent / HeadlessShell.Shutdown) after the web server
+    # stops and before ./out and user_data/state.json are flushed.
+    from .core.TaskExecutor import TaskExecutor
+    if TaskExecutor.instance is None:
+        TaskExecutor.instance = TaskExecutor()
+
     # StateManager next: it owns ./out and loads the persisted program
     # state, and every widget built later reads through it.
     from .core.StateManager import StateManager

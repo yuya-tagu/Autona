@@ -199,6 +199,7 @@ from .core import StateSchema as schema
 from .core.Actions import AutonaActions
 from .core.TournamentInfoService import TournamentInfoService
 from .core.SettingsManager import SettingsManager
+from .core.TaskExecutor import TaskExecutor
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaStatusManager import AutonaStatusManager
 from .AutonaScoreboardManager import AutonaScoreboardManager
@@ -318,7 +319,6 @@ class Window(QMainWindow):
         app_font = QFont(UI.FONT_FAMILY, UI.FONT_SM)
         QApplication.instance().setFont(app_font)
 
-        self.threadpool = QThreadPool()
         self.saveMutex = QMutex()
 
         self.player_layouts = []
@@ -1390,6 +1390,21 @@ class Window(QMainWindow):
                 self.webserver.stop(10.0)  # 10 seconds grace period.
         except Exception:
             logger.opt(exception=True).error("Error stopping web server on shutdown")
+
+        # The background tasks (ADR-005 S3f): after the web server, so no
+        # request can queue one any more; before the interpreter's exit join
+        # flushes ./out and user_data/state.json, so a task that finishes in
+        # time has its writes in that flush. Queued tasks are cancelled at
+        # once and a running one is told to stop; the wait is short so the
+        # window still closes promptly.
+        try:
+            if TaskExecutor.instance is not None:
+                if not TaskExecutor.instance.shutdown(1.0):
+                    logger.warning(
+                        "Background tasks were still running on shutdown")
+        except Exception:
+            logger.opt(exception=True).error(
+                "Error stopping background tasks on shutdown")
 
         try:
             # allWindows() returns QWindow, not QWidget: comparing against

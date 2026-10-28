@@ -129,6 +129,11 @@ state_migrations = importlib.import_module("src.core.StateMigrations")
 core_bad_words = importlib.import_module(
     "src.core.BadWordFilter").BadWordFilter
 core_player_db = importlib.import_module("src.core.PlayerDB").PlayerDB
+# The background task executor (ADR-005 S3f-1): a singleton created by
+# bootstrap_core(). Neither the import nor the construction starts a thread;
+# the first submit to a lane does.
+task_executor = importlib.import_module(
+    "src.core.TaskExecutor").TaskExecutor
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -244,6 +249,17 @@ assert player_db._attachedTo is None, \
     "import attached the player DB relay"
 assert core_player_db.instance is None, "import created PlayerDB.instance"
 assert core_bad_words.instance is None, "import created BadWordFilter.instance"
+assert task_executor.instance is None, "import created TaskExecutor.instance"
+
+import threading
+
+
+def lane_threads():
+    return [t.name for t in threading.enumerate()
+            if t.name.startswith(("AutonaJob", "AutonaFanout"))]
+
+
+assert lane_threads() == [], f"import started task threads: {lane_threads()}"
 
 # The core state layer comes up empty, and -- the point of importing the
 # whole widget tree above -- with nobody wired to its channels. Only
@@ -315,6 +331,19 @@ core_player_db.instance.LoadDB()
 with open("./user_data/local_players.json", encoding="utf-8") as f:
     assert f.read() == "[]", \
         "PlayerDB.LoadDB() did not create an empty local_players.json"
+
+# The task executor: built without a thread, the first submit starts one,
+# and the shutdown cancels what comes after.
+task_executor.instance = task_executor()
+assert lane_threads() == [], \
+    f"TaskExecutor() started task threads: {lane_threads()}"
+assert task_executor.instance.submit(
+    lambda: 7, task_name="probe").result(10) == 7
+assert lane_threads(), "a submit did not run on a task thread"
+assert task_executor.instance.shutdown(10), "the task executor did not stop"
+assert task_executor.instance.submit(
+    lambda: 7, task_name="late").cancelled(), \
+    "a submit after the shutdown was not cancelled"
 
 startgg.Initialize()
 for name in queryAttrs:
