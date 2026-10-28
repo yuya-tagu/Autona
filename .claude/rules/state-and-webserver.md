@@ -334,6 +334,11 @@ core にあり、どちらも `bootstrap_core()` が `Initialize()` を呼ぶ（
 ## Web サーバー（Flask + SocketIO）
 
 - `AutonaWebServer.WebServer` は素の Python クラスで、`start()` が `threading.Thread`（daemon）で werkzeug の threaded サーバー（`make_server(threaded=True).serve_forever()`。旧 `socketio.run()` が threading モードで組むものと同じ）を回す（ADR-005 S3c。旧: QThread）。`stop(timeout)` が `shutdown()` で止める（旧 `QThread.terminate()` の強制終了は廃止）。起動失敗（bind 不能など）はコンストラクタの `on_start_failed(error: str)` コールバックにサーバースレッドから通知する（デスクトップは `gui_executor` で GUI スレッドへ渡してダイアログ表示）。ポート衝突の事前確認 `check_webserver_port()` は QMessageBox を出すのでデスクトップ専用
+- **Socket.IO の delta（`program_state_update`）は 1 本の flusher スレッド（`AutonaWebServerDeltas`・daemon）が送る**（ADR-005 S3f-5。旧: バッチごとの `threading.Timer`）。`start()` がサーバースレッドより先に起こし、`stop()` がサーバーの停止の後に、開いているバッチをすぐ送らせて join する（残り時間、ただし最低 `DELTA_STOP_MIN_SEC`）
+  - delta を受け付けるのは `start()` から `stop()` の間だけ。前（受け手がいない）と後（送るスレッドが無い）の delta は捨てる
+  - `on_program_state_update` は `StateManager.lock` の中で走りうるので、キューに積んで notify するだけにする。送出は flusher が lock の外で行う。ここに待ちを足さない（agent-pitfalls #17）
+  - `stop()` を `StateManager.lock` を持ったまま呼ばない（flusher の全量送信へのフォールバックが state を読むので、join が期限まで待つ）
+  - 間隔（先頭 0・50 / 100 / 200 ms）と payload は外部契約。`tests/test_webserver_delta_debounce.py` が偽の時計（`WebServer._delta_clock`）で pin している
 - Flask アプリと SocketIO インスタンスは static 変数
 - ルートハンドラの行き先は **`src/AutonaWebOperations.py`（モジュール関数）の 1 つだけ**（ADR-005 S3c。S3e-9 で
   ボード依存の `WebServerActions` を削除して 1 本になった）。デスクトップとヘッドレスが同じ関数を通り、違いは
