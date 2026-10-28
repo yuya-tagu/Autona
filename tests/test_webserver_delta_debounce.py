@@ -277,6 +277,48 @@ def test_any_other_send_failure_drops_the_batch(debounce):
         (100, _payload(2, 2, _rows(2, 1)))]
 
 
+# ── a send that follows the deltas (ADR-005 S3f-4 review) ────────────────
+# The full state of a game change carries the load's revision: sent ahead
+# of that revision's delta, still waiting in the open batch, it reaches the
+# clients first. _after_pending_deltas makes the batch due now and runs the
+# send right after it, from the one sender.
+
+
+def test_a_send_waiting_for_the_batch_makes_it_due_now(debounce, monkeypatch):
+    monkeypatch.setattr(WebServer, "_delta_after", [])
+    debounce.arrive(0, _changes(1))     # the leading edge
+    debounce.arrive(10, _changes(2))    # a window, due at 60
+    debounce.clock.now = _at(20)
+    WebServer._after_pending_deltas(
+        lambda: WebServer.ws_emit("program_state", "the full state"))
+
+    assert debounce.driver.due() == _at(20)
+    debounce._fireUntil(None)
+    assert [(ms, event, args) for ms, event, args, _kw in debounce.sent] == [
+        (0, "program_state_update", [_payload(1, 1, _rows(1, 1))]),
+        (20, "program_state_update", [_payload(2, 2, _rows(2, 1))]),
+        (20, "program_state", ["the full state"]),
+    ]
+    assert WebServer._delta_after == []
+
+
+def test_a_send_waiting_for_no_batch_goes_out_at_once(debounce, monkeypatch):
+    monkeypatch.setattr(WebServer, "_delta_after", [])
+    WebServer._after_pending_deltas(
+        lambda: WebServer.ws_emit("program_state", "the full state"))
+    debounce._fireUntil(None)
+    assert [(ms, event) for ms, event, _args, _kw in debounce.sent] == [
+        (0, "program_state")]
+
+
+def test_without_a_flusher_a_waiting_send_runs_here(debounce, monkeypatch):
+    monkeypatch.setattr(WebServer, "_delta_after", [])
+    monkeypatch.setattr(WebServer, "_delta_running", False)
+    ran = []
+    WebServer._after_pending_deltas(lambda: ran.append(1))
+    assert ran == [1] and WebServer._delta_after == []
+
+
 # ── on the wire ──────────────────────────────────────────────────────────
 
 @pytest.fixture
@@ -394,6 +436,7 @@ def flusher(monkeypatch):
     monkeypatch.setattr(WebServer, "_delta_pending_first_revision", -1)
     monkeypatch.setattr(WebServer, "_delta_last_flush_ts", 0.0)
     monkeypatch.setattr(WebServer, "_delta_due", None)
+    monkeypatch.setattr(WebServer, "_delta_after", [])
     monkeypatch.setattr(WebServer, "_delta_running", False)
     monkeypatch.setattr(WebServer, "_delta_thread", None)
     monkeypatch.setattr(WebServer, "_delta_owner", None)
@@ -438,6 +481,32 @@ def test_the_flusher_runs_from_start_to_stop_only(flusher):
     WebServer.on_program_state_update(_changes(2))
     assert (WebServer._delta_pending, WebServer._delta_due) == ([], None)
     assert flusher.payloads() == []
+
+
+def test_a_send_waiting_for_the_open_batch_follows_it_from_the_flusher(
+        flusher, monkeypatch):
+    """The open batch (a window from the frozen clock) goes out without
+    waiting the window out, and the waiting send right after it, on the
+    flusher's thread."""
+    monkeypatch.setattr(WebServer, "_delta_clock", _FrozenClock())
+    flusher.start()
+    thread = WebServer._delta_thread
+    WebServer.on_program_state_update(_changes(1))      # the leading edge
+    assert flusher.waitFor(1)
+    WebServer.on_program_state_update(_changes(2, 150))  # a 200 ms window
+    ran = []
+
+    def fullState():
+        ran.append(threading.current_thread())
+        WebServer.ws_emit("program_state", "the full state")
+
+    WebServer._after_pending_deltas(fullState)
+    assert flusher.waitFor(3)
+
+    assert [event for _t, _at, event, _p in flusher.sent] == [
+        "program_state_update", "program_state_update", "program_state"]
+    assert flusher.payloads()[1] == _payload(2, 2, _rows(2, 150))
+    assert ran == [thread] and flusher.threads()[2] is thread
 
 
 def test_a_quiet_delta_goes_out_at_once_from_the_flusher(flusher):
@@ -563,6 +632,48 @@ def test_a_flusher_stop_gave_up_on_leaves_the_next_ones_batches_alone(
     assert flusher.payloads() == [_payload(1, 1, _rows(1, 1)),
                                   _payload(3, 3, _rows(3, 1))]
     assert flusher.threads() == [abandoned, current]
+
+
+def test_what_waited_for_a_batch_a_stuck_flusher_left_runs_after_a_restart(
+        flusher, monkeypatch):
+    """A send waiting for the open batch (a game change's full state) when
+    stop() gave up on a flusher stuck in a send: the next start() drops the
+    batch, like any delta from before it, but what waited for it is not
+    dropped -- the new flusher runs it at once (ADR-005 S3f-4 review)."""
+    monkeypatch.setattr(WebServer, "_delta_clock", _FrozenClock())
+    monkeypatch.setattr(WebServer, "_adaptive_debounce_sec",
+                        staticmethod(lambda count: 30.0))
+    entered, release = threading.Event(), threading.Event()
+    flusher.during = _stuckOnce(entered, release)
+    flusher.start()
+    abandoned = WebServer._delta_thread
+    WebServer.on_program_state_update(_changes(1))
+    assert entered.wait(5)
+    WebServer.on_program_state_update(_changes(2))        # left open
+    ran = []
+    sent = threading.Event()
+
+    def push():
+        ran.append(threading.current_thread())
+        sent.set()
+
+    WebServer._after_pending_deltas(push)
+    assert flusher.stop(0.3) is False
+    assert ran == []
+
+    nextServer = types.SimpleNamespace(name="the next server")
+    WebServer._start_delta_flusher(nextServer)
+    current = WebServer._delta_thread
+    try:
+        assert sent.wait(5)
+        assert ran == [current]
+        assert WebServer._delta_after == [] and WebServer._delta_pending == []
+    finally:
+        release.set()
+        abandoned.join(5)
+        assert WebServer._stop_delta_flusher(nextServer, 5.0) is True
+    # The batch left open was dropped; the abandoned flusher took nothing.
+    assert flusher.payloads() == [_payload(1, 1, _rows(1, 1))]
 
 
 def test_a_writer_holding_the_state_lock_never_waits_on_the_flusher(

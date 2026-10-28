@@ -7,7 +7,8 @@ from loguru import logger
 
 from .AutonaScoreboardWidget import AutonaScoreboardWidget
 from .AutonaCrewBattleWidget import AutonaCrewBattleWidget
-from .Helpers.AutonaQtHelper import gui_thread_sync, in_gui_thread
+from .Helpers.AutonaQtHelper import (
+    GuiMarshalAborted, gui_thread_sync, in_gui_thread)
 from .core.StateManager import StateManager
 from .core import StateSchema as schema
 from .core.Actions import AutonaActions
@@ -162,12 +163,20 @@ class AutonaScoreboardManager(QDockWidget):
         # below, the desktop panels — gets a board. Construction is
         # GUI-thread only, so calls arriving on the Flask thread (the board
         # host's Prepare / Widget outside its Run: get_swap, get_scoreboard)
-        # are marshalled to it (gui_thread_sync).
+        # are marshalled to it (gui_thread_sync). Once the app is shutting
+        # down that marshal gives up (GuiMarshalAborted): not a failure to
+        # build, so it is raised on for the caller to answer (the board host
+        # answers 503), logged at INFO here (ADR-005 S3f-4 review).
         try:
             if in_gui_thread():
                 scoreboard = self.EnsureScoreboard(number)
             else:
                 scoreboard = gui_thread_sync(self.EnsureScoreboard)(number)
+        except GuiMarshalAborted as aborted:
+            logger.info(
+                f"Scoreboard Manager - Scoreboard {number} not built: "
+                f"{aborted}")
+            raise
         except Exception:
             logger.opt(exception=True).error(
                 f"Scoreboard Manager - Failed to create scoreboard {number}")

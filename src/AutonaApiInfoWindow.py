@@ -11,8 +11,9 @@ things:
 
 Endpoint metadata mirrors the implementation in ``AutonaApiV1.py`` (the source
 of truth); this window is purely descriptive and never duplicates state logic.
-Requests run on a worker thread because some endpoints (``/sets``, heavy ops)
-can block ~20s on a synchronous start.gg call (agent-pitfalls #11).
+Requests run as a TaskExecutor job (ADR-005 S3f-4; a Worker on a QThreadPool
+until then) because some endpoints (``/sets``, heavy ops) can block ~20s on a
+synchronous start.gg call (agent-pitfalls #11).
 
 All user-facing strings go through ``QApplication.translate("api", ...)`` so a
 single language is shown according to the app's language setting. Japanese
@@ -25,10 +26,12 @@ import requests
 from qtpy.QtCore import *
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
+from shiboken6 import Shiboken
 
 from .core.SettingsManager import SettingsManager, DEFAULT_WEBSERVER_PORT
 from .core import WebAccess
-from .Workers import Worker
+from .core.TaskExecutor import TaskExecutor
+from .Helpers import AutonaQtHelper
 from .Helpers.AutonaNetworkHelper import GetWebServerHost
 
 
@@ -119,8 +122,6 @@ def _concrete_path(path):
 class AutonaApiInfoWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent=parent)
-        self.threadpool = QThreadPool()
-        self._sendWorker = None
 
     # UI is built lazily once the app is fully up, mirroring
     # AutonaSettingsWindow (called from Window after construction).
@@ -468,14 +469,23 @@ class AutonaApiInfoWindow(QDialog):
         self.sendBtn.setEnabled(False)
         self.responseEdit.setPlainText(_tr("Sending…"))
 
-        worker = Worker(self._performRequest, method, url, body, headers)
-        worker.signals.result.connect(self._onResponse)
-        worker.signals.error.connect(self._onError)
-        self._sendWorker = worker
-        self.threadpool.start(worker)
+        # The answer (or the error) comes back on the GUI thread through the
+        # long-lived GUI executor, to this window if it still exists.
+        future = TaskExecutor.instance.submit(
+            self._performRequest, method, url, body, headers,
+            task_name="API tester request",
+            then=lambda text: AutonaQtHelper.gui_executor(
+                lambda: self._deliver(self._onResponse, text)),
+            on_error=lambda error: AutonaQtHelper.gui_executor(
+                lambda: self._deliver(self._onError, error)))
+        if future.cancelled():
+            # The app is shutting down (the executor has stopped): nothing
+            # will be sent, so give the button back now.
+            self._onError(RuntimeError(_tr("The app is shutting down")))
 
-    # Runs on a worker thread: no Qt widget access here, just return data.
-    def _performRequest(self, method, url, body, headers, **kwargs):
+    # Runs on a job-lane thread: no Qt widget access here, just return data.
+    @staticmethod
+    def _performRequest(method, url, body, headers):
         resp = requests.request(
             method, url, json=body, headers=headers, timeout=_REQUEST_TIMEOUT)
         try:
@@ -484,12 +494,17 @@ class AutonaApiInfoWindow(QDialog):
             pretty = resp.text
         return f"HTTP {resp.status_code} {resp.reason}\n\n{pretty}"
 
+    def _deliver(self, handler, value):
+        # GUI thread. The window may have been destroyed while the request
+        # ran (the Worker's signal connections were cut with it).
+        if Shiboken.isValid(self):
+            handler(value)
+
     def _onResponse(self, text):
         self.responseEdit.setPlainText(text)
         self.sendBtn.setEnabled(True)
 
-    def _onError(self, err):
-        # err = (exctype, value, traceback_str) from Worker.signals.error.
-        _exctype, value, _tb = err
-        self.responseEdit.setPlainText(_tr("Request failed") + f":\n{value}")
+    def _onError(self, error):
+        # The request's exception (logged once by the executor).
+        self.responseEdit.setPlainText(_tr("Request failed") + f":\n{error}")
         self.sendBtn.setEnabled(True)

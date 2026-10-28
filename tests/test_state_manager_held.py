@@ -414,3 +414,82 @@ def test_committing_pending_edits_still_diffs_them(monkeypatch, _heldOnlyBoard):
     assert len(diffs.calls) == 1
     assert set(diffs.calls[0]) == {"root['score']['9']['match']"}
     assert "Grand Final" in spy.delta_str()
+
+
+# ── WhenPublished (ADR-005 S3f-4 review) ─────────────────────────────────
+# A reader of the whole state that must not get ahead of the published
+# revision (the web server's game-change push) waits for the open save
+# blocks: inside one, GetFullState() already has the block's writes with
+# the revision before them.
+
+
+def _fullState():
+    full = SM.GetFullState()
+    return full["revision"], full["state"].get("game", {}).get("name")
+
+
+def test_when_published_runs_after_the_last_open_block_publishes():
+    order = []
+
+    def onDelta(payload):
+        order.append(("delta", payload["revision"]))
+
+    SM.observers.state_updated.subscribe(onDelta)
+    try:
+        with SM.SaveBlock():
+            SM.Set("game.name", "WhenPublished")
+            with SM.SaveBlock():
+                SM.WhenPublished(lambda: order.append(("full",) + _fullState()))
+            assert order == []    # the outer block is still open
+    finally:
+        SM.observers.state_updated.unsubscribe(onDelta)
+
+    (delta, revision), full = order
+    assert delta == "delta"
+    # Its revision is the one its content was published with.
+    assert full == ("full", revision, "WhenPublished")
+    assert SM.saveBlocked == 0
+
+
+def test_when_published_outside_a_block_runs_at_once():
+    ran = []
+    SM.WhenPublished(lambda: ran.append(SM.saveBlocked))
+    assert ran == [0]
+
+
+def test_a_failing_when_published_callback_does_not_stop_the_others():
+    ran = []
+
+    def failing():
+        raise RuntimeError("a callback failed")
+
+    with SM.SaveBlock():
+        SM.Set("game.name", "Callbacks")
+        SM.WhenPublished(failing)
+        SM.WhenPublished(lambda: ran.append(1))
+    assert ran == [1]
+    assert SM._afterPublish == []
+
+
+def test_a_block_opened_on_one_thread_publishes_where_it_is_closed():
+    """The game load's cycle: opened on its job's thread, closed -- and
+    published, its notifications run -- on the GUI thread."""
+    import threading
+
+    threads = []
+
+    def onDelta(payload):
+        threads.append(threading.current_thread().name)
+
+    opener = threading.Thread(target=SM.BlockSaving, name="Opener")
+    opener.start()
+    opener.join()
+    SM.observers.state_updated.subscribe(onDelta)
+    try:
+        SM.Set("game.name", "TwoThreads")
+        assert threads == []
+        SM.ReleaseSaving()
+    finally:
+        SM.observers.state_updated.unsubscribe(onDelta)
+    assert threads == [threading.current_thread().name]
+    assert SM.saveBlocked == 0

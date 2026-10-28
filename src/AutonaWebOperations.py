@@ -86,10 +86,14 @@ from .core.PlayerService import DEFAULT_CHARACTERS_PER_PLAYER, PlayerService
 from .core.StatsService import StatsService
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
-from .Helpers.AutonaQtHelper import gui_thread_sync, in_gui_thread
+from .Helpers.AutonaQtHelper import (
+    GuiMarshalAborted, gui_thread_sync, in_gui_thread)
 
 
 NOT_AVAILABLE_MESSAGE = "not available in headless"
+# What an operation that needed the GUI thread answers once that thread will
+# not run it any more (the app is shutting down; ADR-005 S3f-4 review).
+SHUTTING_DOWN_MESSAGE = "the app is shutting down"
 
 
 class NotAvailable(Exception):
@@ -105,6 +109,19 @@ class NotAvailable(Exception):
     def __init__(self, message=NOT_AVAILABLE_MESSAGE):
         super().__init__(message)
         self.message = message
+
+
+def _on_gui_thread(call, what):
+    """`call()` -- a wait for the GUI thread (gui_thread_sync, or what makes
+    one) -- or, once that thread will not run it any more (the app is
+    shutting down: GuiMarshalAborted), NotAvailable: the 503 answer, logged
+    at INFO, instead of a 500 with a traceback in the error log for a
+    request that only came late (ADR-005 S3f-4 review)."""
+    try:
+        return call()
+    except GuiMarshalAborted as aborted:
+        logger.info(f"web operations: {what} not run: {aborted}")
+        raise NotAvailable(SHUTTING_DOWN_MESSAGE) from None
 
 
 class BoardHost:
@@ -226,7 +243,8 @@ class DesktopBoardHost(BoardHost):
         # which marshals the build there.
         if in_gui_thread():
             return self.manager.EnsureScoreboard(board)
-        return self.manager.GetScoreboard(board)
+        return _on_gui_thread(lambda: self.manager.GetScoreboard(board),
+                              f"building board {board}")
 
     def Run(self, op):
         # On the GUI thread, not under the headless host's lock (reviewed in
@@ -238,7 +256,7 @@ class DesktopBoardHost(BoardHost):
         # thread, an operation runs between two events, never inside one.
         # The board's own part of an operation (building it, the field
         # being typed in, the cards after a load) is GUI work besides.
-        return gui_thread_sync(op)()
+        return _on_gui_thread(gui_thread_sync(op), "a board operation")
 
     def Prepare(self, board):
         self._Board(board)
@@ -518,11 +536,19 @@ def update_bracket(done=None):
 
 # ── the game ─────────────────────────────────────────────────────────────
 
-@gui_thread_sync
 def set_game(data):
-    # On the GUI thread, as it always was: the desktop's asset adapter
-    # builds its loader thread and models there, and the synchronous load
-    # below is the legacy route's answer ("OK" once loaded).
+    # The legacy route's answer is "OK" once the load's attempt is over: the
+    # game in the state, its models rebuilt and what follows a load
+    # (onLoad, the roster) run -- or the attempt skipped or failed (logged),
+    # answered "OK" too when this ran on the GUI thread, or not run because
+    # the app is shutting down (that wait used to hang). A newer request
+    # overtaking it: once that one's attempt is over. The synchronous load below waits on the calling thread (ADR-005
+    # S3f-4; this ran on the GUI thread until then): on the desktop the
+    # request thread waits for the asset adapter's loader, which marshals
+    # its models onto the GUI thread; headless the load runs here and hands
+    # what follows it to the main thread. Not serialized with the board
+    # operations any more: one can run between the selection and what
+    # follows it, as an async load (the GAME menu) always allowed.
     set_codename = data.get("codename")
     if set_codename not in GameAssetCatalog.instance.GameCodenames():
         return f"Could not find game {set_codename}"
@@ -539,9 +565,10 @@ def set_game(data):
 
 
 def load_game(codename, mods_active=False, done=None):
-    """Start loading `codename` (reloading it if it is the loaded one) on
-    the loader's thread. `done()` is called once the attempt is over,
-    whichever way it went (/api/v1's in-progress flag)."""
+    """Start loading `codename` (reloading it if it is the loaded one) in
+    the background (the desktop's load job, the headless loader's thread).
+    `done()` is called once the attempt is over, whichever way it went
+    (/api/v1's in-progress flag)."""
     if loadGameByCodename is None:
         logger.error(f"no game loader registered; {codename} not loaded")
         if done is not None:
@@ -1360,7 +1387,8 @@ def open_sets(scoreboard):
     """Open board `scoreboard`'s set selection window: "OK"."""
     if openSetSelection is None:
         raise NotAvailable()
-    return openSetSelection(scoreboard)
+    return _on_gui_thread(lambda: openSetSelection(scoreboard),
+                          "the set selection")
 
 
 def get_thumbnail(scoreboard, file_format):
@@ -1368,4 +1396,5 @@ def get_thumbnail(scoreboard, file_format):
     "jpg"): the image's absolute path, or None when it failed."""
     if renderThumbnail is None:
         raise NotAvailable()
-    return renderThumbnail(scoreboard, file_format)
+    return _on_gui_thread(lambda: renderThumbnail(scoreboard, file_format),
+                          "the thumbnail")

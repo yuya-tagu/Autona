@@ -940,12 +940,12 @@ def _loader(shell, manager):
     from qtpy.QtWidgets import QApplication
     from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
     from src.core.GameAssetCatalog import GameAssetCatalog
+    from tests.conftest import drain_tasks
     if shell == "desktop":
         def load(codename, reload=False):
-            manager.LoadGameByCodename(codename, async_mode=False,
-                                       mods_reload_mode=reload)
-            manager.threadpool.waitForDone()
-            QApplication.processEvents()
+            # The load job, this (the GUI) thread pumped while it runs.
+            manager.LoadGameByCodename(codename, mods_reload_mode=reload)
+            drain_tasks()
         return load
 
     from src.headless import HeadlessGames

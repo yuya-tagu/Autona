@@ -3635,3 +3635,175 @@ Start.gg provider（`StartGGDataProvider`）が 1 回の取得の中で並列に
   - ステーション追従: 今どおり動き、キューが動くと次のセットに移る。`logs/` に `station sets loaded` も `Set follow: a fetch failed` も出ない
   - 統計の「直近の対戦」: 今どおり出る。セット選択ウィンドウで一覧を取得している最中に選手を入れ替えても（fan-out レーンが混んでいても）、読み込み中のまま止まらずに出る
   - 終了: セットの読込中・一覧の取得中に閉じても固まらない
+
+#### S3f-4 アセットと API 情報ウィンドウ（2026-10-28）
+
+アセットアダプタ（`AutonaGameAssetManager`）の QThread 3 本（start.gg キャラ表の DL・ゲーム一覧のスキャン・ゲームのロード）を `TaskExecutor` のジョブに、アイコンのデコード 2 本（`QThreadPool` + `Worker`）を fan-out レーンに移した。API 情報ウィンドウの送信もジョブにし、`src/Workers.py` を削除した。`src/` に `Worker` / `QRunnable` / `QThreadPool` / `waitForDone` は 0。`GuiExecutor.run_sync` は、終了中・イベントループの終了後に、まだ始まっていない呼び出しを見捨てて `GuiMarshalAborted` を出すようにした（S3f-1 で記録した前提条件）。`set_game` は `@gui_thread_sync` をやめ、リクエストのスレッドがロードを待つ。
+
+- **実装**
+  - `src/AutonaGameAssetManager.py`
+    - `DownloadStartGGCharacters` / `LoadGames`: ジョブ（`start.gg characters download` / `game scan`）。スキャンのジョブが `onLoadAssets` を出す。受け手はすべて QObject のメソッドなので、旧 QThread と同じく GUI スレッドへ queued で、接続順に走る（pitfalls #2。順序の pin は `test_bootstrap_split` のまま）
+    - `LoadGameByCodename`: 非同期はジョブ（`game load (<codename>)`）の Future を返す。同期は同じジョブを積んで Future を待つ（GUI スレッドからは RuntimeError。初版は GUI スレッドならその場でロードしていた: レビュー対応 6）。終了後（取り消し済みの Future）はすぐ `done()` して返る
+    - `_LoadJob`: `_loadLock`（`threading.Lock`。旧 `QMutex`）で 1 本ずつ（→ 再レビュー対応 2 で、ローダーのジョブ 1 本 `_LoaderJob` が待っている最新の要求を順に取る形に変えた。`_loadLock` は削除）。モデルの作り直しを `run_sync` で GUI スレッドへ渡し、`GuiMarshalAborted` は INFO で終わる。アイコンのデコードを待ってからフッターの表示を消し、`done()` を呼ぶ（旧 `threadpool.waitForDone()` と同じ「デコードが済んだらロード完了」）
+    - `_Load` が保存サイクルを開いて `SelectGame` し、`run_sync(lambda: self._Publish(snapshot, cycle, decodes))`。`_Publish`（GUI スレッド）がモデルの作り直し → `gameLoaded` → `onLoad` を出し、最後に保存サイクルを閉じる（判断 1・レビュー対応 3）。返り値は結果（`LOADED` ほか）
+    - `_RebuildModels` / `UpdateSkinModel` / `UpdateStageModel` はデコードの Future の一覧を返す。`_DecodeIcons(decode, complete, *args, task_name)`（新規）: fan-out レーンで `decode`（QImage まで）、答えは `gui_executor` で GUI スレッドの `complete`（QPixmap / QIcon と `setIcon`）へ
+    - `LoadStageImage` / `LoadSkinImages` から `progress_callback` / `cancel_event` を削除した。世代番号の判定（退役したモデルへの答えを捨てる）はそのまま
+    - `assetsLoaderLock` / `assetsLoaderThread` / `threadpool` / `workers` を削除し、`_loadLock` / `_loadFuture`（最後に積んだロードの Future）にした（再レビュー対応後は `_requestLock`（Condition）/ `_loadGeneration` / `_pendingLoad` / `_loaderRunning` / `_loadFuture`（ローダーのジョブの Future）/ `_finishedGeneration`）
+  - `src/Helpers/AutonaQtHelper.py`: `GuiMarshalAborted(RuntimeError)`。`run_sync` は `MARSHAL_POLL_SECS`（0.05 秒）ごとに、イベントループの終了（`aboutToQuit` で立つ `_loopExited`。`init_gui_executor` が接続）・アプリ無し・`TaskExecutor.instance.stopping` を見る。GUI スレッドがまだ始めていない呼び出しは「見捨てた」印を付けて例外を出し、後で GUI スレッドに届いても走らない。走り始めた呼び出しは最後まで待つ。GUI スレッドからの呼び出しは従来どおりその場で実行（判断 2）
+  - `src/AutonaWebOperations.py`: `set_game` の `@gui_thread_sync` を削除した。`loadGameByCodename(async_mode=False)` は呼び出し元のスレッドで待つ（判断 3）
+  - `src/headless.py`: `HeadlessGames` の同期ロードは、ロード後の処理（`_OnLoaded`。選択の保存・`gameLoaded`）を `run_sync` でメインスレッドに渡して待つ。`GuiMarshalAborted` は INFO。スレッドの作り方は変えていない（S3f-6）
+  - `src/core/GameAssetCatalog.py`: start.gg のキャラ表の DL に `timeout=STARTGG_CHARACTERS_TIMEOUT_SECS`（20 秒）を付けた（判断 4）
+  - `src/AutonaApiInfoWindow.py`: 送信はジョブ（`API tester request`）。答え・例外は `then` / `on_error` から `gui_executor` で GUI スレッドへ渡し、ウィンドウが破棄済みなら捨てる（`Shiboken.isValid`）。終了後の送信はすぐボタンを戻す。`_performRequest` は staticmethod、`_onError` は例外を受け取る形にした
+  - `src/Workers.py`: 削除
+  - `src/AutonaApiV1.py`: `POST /game` の `gui_executor` での dispatch はそのまま（コメントのみ。判断 5）
+  - `src/bootstrap.py`: `wire_game_roster` の docstring（スロットがどのスレッドで走るか）を更新した
+- **判断と理由**
+  1. **`gameLoaded` / `onLoad` は、ジョブのスレッドではなく GUI スレッドの marshal の中で出す**
+     - `set_game` の `"OK"` は今まで「GUI スレッドでの同期ロードで、`onLoad` の受け手（ロスター・`SetupModel`・ウィンドウのゲーム表示など）まで走った後」だった。リクエストのスレッドがジョブを待つ形でこれを保つには、受け手がジョブの終わる前に走る必要がある
+     - 旧 QThread の経路では、受け手はロードの `SaveBlock` が閉じた後に queued で走っていた。今はどちらの経路も `SaveBlock` の中で走る（旧同期経路と同じ。1 回の切替が 1 保存サイクル）。`test_roster_flow` の threaded ロードのゴールデン（反映待ちが残らない）はそのまま通る
+     - 受け手がプレーンな関数（`wire_game_roster` の `apply`・ウィンドウの lambda・`AutonaPlayerDB.SetupModel`）でも、GUI スレッドで走るようになった
+  2. **`run_sync` の打ち切りは全呼び手に効かせる（ロードの呼び手だけにしない）**
+     - 待つ側が見捨てられるのは「GUI スレッドがまだ始めていない」ときだけ。始めた呼び出しを見捨てると、その書き込みと終了処理が競合する
+     - 見捨てた呼び出しを後で走らせないのは、デスクトップの `closeEvent` が GUI スレッドで `shutdown(1.0)` している最中に、ロードのジョブが GUI を待っていたら、の対策。GUI スレッドは待っている側なので、そのままだと期限まで待ち合う。終了後にモデルを作り直さない
+     - ポーリング（0.05 秒）は待っている間だけ。GUI スレッドの答えはイベントで即座に起きる
+  3. **`set_game` はリクエストのスレッドでロードを待つ**（論点 3・4 の ③）
+     - デスクトップ: ジョブを積んで Future を待つ。ジョブはモデルを GUI スレッドに渡すので、GUI が止まっていなければ `"OK"` まで旧実装と同じ。終了中はジョブが取り消されるか marshal を見捨て、`"OK"` で返る（固まらない。ロードはされない）
+     - ヘッドレス: ロードはリクエストのスレッドで、ロード後の処理をメインスレッドに渡して待つ。旧実装はメインスレッドで全部やっていた
+     - ~~GUI スレッドからの同期ロード（Flask test client・テスト）はその場で実行し、`_loadLock` を取らない~~ → レビュー対応 6 で削除（本番の呼び出し元が無く、テストだけがジョブと別の経路を通っていた。GUI スレッドからの同期ロードは RuntimeError）
+  4. **start.gg のキャラ表の DL に 20 秒の期限を付けた**
+     - 旧実装は期限なしで、QThread だったので終了を止めなかった。ジョブのスレッドはインタプリタ終了の join が待つので、DL が返らないと終了が止まる
+     - 20 秒は provider のリクエストの期限と同じ。失敗は今どおり ERROR ログで、前のキャラ表のまま
+  5. **`POST /api/v1/game` の dispatch（`gui_executor` 経由）は残した**
+     - QThread の親を GUI スレッドで作るための dispatch だったが、ジョブはどのスレッドからでも積める。残しても挙動は同じで、外すのは範囲外の整理になる
+  6. **ロードのスレッド優先度（`HighestPriority`）はやめた**。ジョブのスレッドは通常の優先度。旧実装でも優先度が効いていたのはローダーのスレッド（SelectGame の読み込み）だけで、デコードは通常の優先度のプール、モデル・アイコンの適用は GUI スレッドだった
+  7. **リリースノート: なし**（見た目・答えの変化は意図していない。終了時に固まりにくくなった点は内部の改善）
+- **pin（テスト）**
+  - `tests/test_asset_jobs.py`（新規）
+    - `src/` に `Worker` / `Workers` / `WorkerSignals` / `QRunnable` / `QThreadPool` / `wait_for_all` / `waitForDone` / `threadpool` が無く、`src/Workers.py` も無い。アセットアダプタと API 情報ウィンドウは `QThread` / `Thread` を作らない。`set_game` にデコレータが無い（AST）
+    - `run_sync`: 終了中・イベントループの終了後に、始まっていない呼び出しを `GuiMarshalAborted` で見捨て、後で GUI スレッドがイベントを処理しても走らない。走っている呼び出しは最後まで待って答えを返す。GUI スレッドからは終了中でもその場で実行
+    - サブプロセス: イベントループの終了後にジョブが `run_sync` に入っても、見捨てて返り、インタプリタが終了する（打ち切りを無効にすると 8 秒でタイムアウトすることを確認した）
+    - ロード: 選択はジョブのスレッド、モデルの作り直し → `gameLoaded` → `onLoad` は GUI スレッドで各 1 回、`done()` はデコードがすべて済んだ後にジョブのスレッドで。デコードは fan-out レーン
+    - GUI を待っているロードのジョブが、GUI スレッドからの `shutdown` で 2 秒未満に解放される。`done()` 1 回・フッターの表示は消え・`SaveBlock` は閉じ、その後イベントを処理してもモデルの作り直しも `onLoad` も起きない
+    - 終了後のロード（非同期・別スレッドからの同期）は待たずに `done()` して返る
+    - `set_game`: リクエストのスレッドから `"OK"`、その時点で `onLoad` が GUI スレッドで走り済み、state は新しいゲーム。終了後は GUI を回さなくても返る
+    - ヘッドレスの同期ロード: 返る前に `gameLoaded` がメインスレッドで走る。イベントループの終了後は待たずに返り、ロード後の処理は走らない
+    - start.gg のキャラ表の DL はジョブで、`timeout=20` を渡す
+    - API 情報ウィンドウ: 送信はジョブのスレッド、答えは GUI スレッドで表示されてボタンが戻る。失敗は `Request failed:` + 例外。破棄済みのウィンドウへの答えは捨てる。終了後の送信はすぐボタンを戻す
+  - `tests/conftest.py`: `drain_tasks()`（executor の `drain()` と Qt のイベント処理を交互に、両方が空になるまで。stepped の executor のジョブも走らせる）と `deliver_decodes(decodes)`（デコードの Future を待ってからイベントを処理する。手で step するテスト用）。`loadCharacters` は `deliver_decodes(_RebuildModels())`、`_restoreAssets` はイベント処理のみ
+  - `manager.threadpool.waitForDone()` の置き換え: `test_game_asset_manager_models`（`_waitForLoader` は `drain_tasks()`。`workers` の検査はデコード関数の spy に、`assetsLoaderThread` の同一性は `_loadFuture` に）・`test_game_asset_icon_threading`（待ってから配る / 配らずに待つ、を `deliver_decodes` / `TaskExecutor.instance.drain` で）・`test_player_slot_publish`・`test_roster_flow`・`test_top8_refresh`
+  - `tests/test_provider_jobs.py`: S3f-3 の暫定 pin（`Workers.py` の利用者は 2 ファイルだけ）を削除した（上の src 全体の pin に置き換え）
+- **残置 / リスク**
+  - ~~ロードのジョブは `_loadLock` を待つ間もジョブレーン（4 本）を 1 本使う。ゲームを立て続けに切り替えると、その数だけ provider の取得が後ろに並ぶ~~ → 再レビュー対応 2 で解消（ローダーは 1 本）
+  - アイコンのデコード（キャラ数 + ステージ数 × 2）は fan-out レーン（8 本）で provider の並列リクエストと共有する。大きなゲームのロード直後は、`GetMatch` / `GetRecentSets` の並列リクエストが始まるまで待たされうる（期限は走り始めてから数えるので落ちない。S3f-3 判断 7）
+  - ~~待ち行列にいた非同期ロードが終了で取り消されると、`done()` は呼ばれない~~ → 再レビュー対応 2 で解消（取り消した側のスレッドで `STOPPED` と `done()`）
+  - 終了時、走っている DL（最大 20 秒）・API テスターの送信（最大 25 秒）はインタプリタ終了の join が待つ。`stopping` を見ないため
+  - `onLoad` の受け手が GUI スレッドでロードの保存サイクルの中で走るようになった（判断 1）。受け手の書き込みはロードと同じ保存サイクルにまとまる。サイクルを閉じるのも GUI スレッド（レビュー対応 3。別スレッドの SaveBlock が開いていればそのスレッドが公開する: 再レビュー対応 4）
+  - ヘッドレスのローダーのスレッド 3 本は S3f-6
+- **実機確認（オーナー）**
+  - 起動: 前回のゲームが復元され、キャラ・スキン・ステージのアイコンが出る。フッターの「読み込み中」が消える
+  - GAME メニューでの切り替え（立て続けに 2〜3 回も）: 最後に選んだゲームになり、選手カードのキャラ欄・ステージ欄が新しいゲームのものになる。モッド付きゲームでは「Modded content」の切り替えが効く
+  - Web UI / Companion のゲーム切り替え（`/update-game`・Socket.IO `update_game`）: ロード後に `OK` が返り、画面が新しいゲームになっている
+  - アセットガイドの「ゲームアセットを追加」の後の再スキャンで、選んでいるゲームが変わらない
+  - API 設定ウィンドウの Tester: `/health` を Send すると答えが表示され、ボタンが戻る。送信中にウィンドウを閉じても落ちない
+  - 終了: ゲームのロード中に閉じても固まらない。`python main.py --headless` を Ctrl+C で止めても固まらない
+- **レビュー対応（2026-10-28。デッドロックの指摘なし、10 点）**
+  1. **終了後、ロックを待っていたロードは何も書かない**
+     - `_LoadJob` は `_loadLock` を取った直後（再レビュー対応 2 の後は、ローダーが要求を取った直後の `_RunLoad`）、書き込みの前に `AutonaQtHelper.gui_unavailable_reason()`（イベントループの終了・アプリ無し・executor の `stopping`。`run_sync` の打ち切りと同じ判定。旧 `_MarshalAbortReason` を公開した）を見て、理由があれば `STOPPED` で `done()` へ進む
+     - 初版は `SelectGame` まで走り、`game.*` と Top 8 のキャラの消去を state.json に出す一方、`SELECTED_GAME_CODENAME`（`onLoad` で保存）は保存されなかった。次の起動で前のゲームが、このロードが消したキャラの上に復元される
+     - `SelectGame` の途中で終了が来たとき（marshal を見捨てたとき）は、選択はもう state にあって保存サイクルで出るので、選択の保存（`_PersistSelectedGame`）をジョブのスレッドから行う（`SettingsManager` は自分のロックを持つ）
+     - ヘッドレスの `HeadlessGames._Load`（同期・非同期とも）も lock を取った直後に同じ判定をし、何も書かずに `done()` へ進む
+  2. **後から来た要求が勝つ（世代番号）**
+     - `_loadLock` は FIFO ではない（初版のコメントは誤り）。立て続けの A→B で A が後に lock を取ると A で終わりえた（再レビュー対応 2 で lock ごと無くした）
+     - 要求ごとに `_loadGeneration` を進め、Future と一緒に `_requestLock` の中で記録する。lock を取ったジョブは自分が最新でなければ選ばずに `SUPERSEDED` で終わる（`done()` は呼ぶ）。走り始めたロードは止めない（C を頼んだ時点で走っていた B は、終わってから C）
+     - 同期ロード（`set_game`）の `"OK"` の意味: **頼んだゲーム、またはそれより後に頼まれたゲームのロードが終わり、その後の処理（`gameLoaded` のロスター・`onLoad`）まで走った**。追い越されたら最新の Future を追って待つ（`_WaitForLoad`）。docstring（`LoadGameByCodename`）に書いた
+     - Future の結果は `LOADED` / `SKIPPED` / `SUPERSEDED` / `STOPPED` / `FAILED`（モジュール定数）
+  3. **ロードの保存サイクルの公開を GUI スレッドで行う**（指摘 3・4 を 1 つの設計で）
+     - 初版はジョブのスレッドで `SaveBlock` を閉じていた（= 公開がジョブのスレッド）。held 通知が queued になって `CommitHeld` / `held_dirty` の順がずれ、pitfalls #17 の「ハンドラ全体が lock の中」の原子性も失われていた
+     - 今: `_SaveCycle`（新規）がジョブのスレッドで `BlockSaving` を 1 回、`ReleaseSaving` を 1 回だけ呼ぶ。閉じるのは `_Publish` の finally（GUI スレッド）で、GUI が走らなかった経路（スキップ・見捨て・例外）では `_Load` の finally。SaveBlock はカウンタなので開けるスレッドと閉じるスレッドが違ってよく、#6 の対称性は全経路で保つ
+     - `StateManager.BlockSaving` / `ReleaseSaving` のカウンタの増減を `StateManager.lock` の中で行うようにした（別スレッドの開閉の競合を防ぐ）
+     - ゲームの行とロスター（`score.2` の選手）は 1 つの delta（1 保存サイクル）で、GUI スレッドから出る
+  4. **ゲームが変わったときの全量送信を、ロードの公開と delta の送信の後にする**
+     - 初版: `Window.GameChanged` → `ws_program_state` がロードの途中（サイクルが閉じる前）に全量を送った。中身は R+1 なのに revision は R で、その後に R+1 の delta が来た（Socket.IO の revision 契約違反）
+     - 今: `ws_game_changed` は `StateManager.WhenPublished(fn)`（新規。開いているブロックが無ければ今、あれば最後のブロックを閉じた公開の後に、lock の外で、閉じたスレッドで呼ぶ）に `WebServer._after_pending_deltas(push)`（新規。開いているバッチをすぐ送る予定にし、flusher がそれを送ってから `push` を呼ぶ。flusher が無ければその場で）を渡す
+     - `QTimer.singleShot(0)` にしなかった理由: GUI のイベントの順に頼ると、公開と delta の送信の両方が済んだことは保証できない。この形なら全量の送信は delta と同じ flusher のスレッドで、その delta の後に出る
+  5. **`drain_tasks` の stepped は前のステップが終わるまで次を始めない**: `TaskExecutor.run_next` が `_stepLock` と `_stepThread` で直列化し、前のステップが期限内に終わらなければ次を始めずに TimeoutError。`drain_tasks` はイベントを処理して待ち直す
+  6. **GUI スレッドの同期ロード経路を削除**: 本番の呼び出し元は無く、テストだけが通っていた（テストがジョブの経路を通っていなかった）。GUI スレッドからの同期ロードは RuntimeError。テストはジョブの経路（`async_mode=True` + `drain_tasks`）に移した: `test_game_asset_manager_models` / `test_player_slot_publish` / `test_roster_flow` / `test_top8_refresh`。`test_api_v1` のゲーム更新はリクエストを別スレッドから送り、GUI スレッドでイベントを回す。同期でなければならないテストは無かった（残る `async_mode=False` は GUI スレッド外かヘッドレス）
+  7. **終了中の `GuiMarshalAborted` を 503 / INFO にする**: `AutonaWebOperations._on_gui_thread(call, what)`（新規）が `GuiMarshalAborted` を INFO ログ + `NotAvailable(SHUTTING_DOWN_MESSAGE)`（503・`the app is shutting down`）にする。`DesktopBoardHost.Run` / GUI スレッド外からのボードの取得 / `open_sets` / `get_thumbnail`。`AutonaScoreboardManager.GetScoreboard` は ERROR を出さず INFO で再送出する
+  8. **デコードの Future は途中で失敗しても回収する**: `_RebuildModels` / `UpdateSkinModel` / `UpdateStageModel` は、渡された一覧に始めたデコードをその場で積む。作り直しが途中で例外を出しても `_Load` の finally がそれらを待ってから `done()`
+  9. **古い記述の更新**: `gui_thread_async` の docstring、`TaskExecutor` のモジュール docstring（終了時の GUI の marshal）、`.claude/design/external-control-api.md`（§2.8・§9・§14.3。`set_game` はもう `@gui_thread_sync` でない）、`.claude/known-smells.md` S-04（`AssetsLoaderThread` 削除の注記）、`.claude/rules/state-and-webserver.md` の `GameAssetCatalog` の行
+  10. **API 情報ウィンドウの「終了中」の文言を翻訳に通す**: `_tr("The app is shutting down")`（`QApplication.translate("api", ...)`。同じウィンドウのほかの文言と同じ）。`.ts` を手で編集し（ja「アプリを終了しています」/ en 同文）、`scripts/compile_translations.ps1` で `.qm` を作り直した。先に HEAD の `.ts` から HEAD の `.qm` が同じバイトで作れることを確かめたので、`.qm` の差分はこの 1 文字列だけ
+- **pin（レビュー対応）**
+  - `tests/test_asset_jobs.py`: GUI スレッドからの同期ロードは断られる / 立て続けの A→B→C は C で終わる / 追い越された同期ロードは新しいロードが入ってから返る / ロックを待っていたロードは終了中なら何も書かない（デスクトップ・ヘッドレス）/ 作り直しが途中で失敗してもデコードを待つ / ゲームの切り替えの全量送信はロードの delta の後で、revision が中身と一致する / 終了中に GUI スレッドが要る Web 操作は 503 で ERROR ログを出さない。`SelectGame` の途中の終了では選択と `SELECTED_GAME_CODENAME` が揃う
+  - `tests/test_roster_flow.py`: `test_a_game_load_and_its_roster_are_one_save_cycle_on_the_gui_thread`（delta 1 つ・GUI スレッド・`_Publish` の中、ルートは `game` と `score`、Bridge の delta と dirty の通知も GUI スレッドで direct、反映待ちが残らない）
+  - `tests/test_state_manager_held.py`: 4 本（`WhenPublished` は最後に開いていたブロックの公開の後 / ブロックが無ければ今 / 失敗したコールバックが他を止めない / あるスレッドで開けたブロックは閉じたスレッドで公開される）
+  - `tests/test_webserver_delta_debounce.py`: `_after_pending_deltas` 4 本（偽の時計で、開いているバッチをすぐ送る予定にする / バッチが無ければすぐ / flusher が無ければその場で。実の flusher で、開いているバッチの後に flusher のスレッドから走る）
+  - `tests/test_task_executor.py`: 期限切れのステップが終わるまで次のステップを始めない
+  - ミューテーション確認: 次の修正をそれぞれ戻すと、対応するテストが落ちることを確かめた（全量送信を即時に / 世代判定を無効 / lock 後の終了判定を無効（両シェル）/ 公開をジョブのスレッドに戻す / デコードの一覧を共有しない / ステップの重なり / 503 化を無効）
+- **残置 / リスク（レビュー対応後）**
+  - ロードのサイクルを閉じたときに別スレッドの SaveBlock が開いていると、公開はそのスレッドで起き、`WhenPublished` のコールバックもそこで走る。全量の revision は中身と一致するが、R+1 の delta が全量の後に届くことがある（クライアントは古い delta を捨てる）
+  - `SelectGame` の途中で終了したときは、選択が公開される（選択の保存はジョブのスレッドから行うので、次の起動で食い違わない。再レビュー対応 6・7 でロスターも揃えた）
+  - ヘッドレスのローダーの `_lock` も FIFO ではない（S3c から。最新が勝つ規則は入れていない。S3f-6 で扱う）
+  - 終了中の `set_game` は、何もロードしていなくても `"OK"` を返す（初版から）
+  - ~~flusher が固まって `start()` で作り直されると、`_after_pending_deltas` のコールバックは捨てられる~~ → 再レビュー対応 8 で解消
+  - `BlockSaving` が `StateManager.lock` を取るようになった。ロック順を見直し、新しいデッドロックは見つからなかった
+- **実機確認（オーナー・レビュー対応分）**
+  - ゲームを立て続けに 3 回切り替える（GAME メニュー・Web UI）: 最後に選んだゲームで終わる
+  - ゲームのロード中にアプリを閉じ、次の起動で、ゲームと選手カードのキャラが食い違わずに復元される
+  - Web UI / OBS オーバーレイ: ゲームを切り替えた後、新しいゲームで正しく描き直され、古い表示に戻らない
+  - 終了中に API 設定ウィンドウの Tester で Send すると、「アプリを終了しています」と出る
+  - 終了中の Web 操作は 503 で答え、ログに ERROR が出ない
+- **再レビュー対応（2026-10-28。ブロッカーなし、11 点）**
+  1. **ローダーを起こせなかった要求は何も残さない**: 初版の修正は世代番号を進めてから submit しており、submit が例外（`NestedSubmitError` など）を出すと要求が消えたまま世代だけが進み、同期の待ち手（`_WaitForLoad`）が来ない Future を探して回り続けた。今は submit が通ってから世代を進めて記録する（失敗は何も記録せず例外を返す。`done()` は呼ばない）。同期の待ち手は Condition（`_requestLock`）で `_finishedGeneration >= 自分の世代` を待つ（ポーリングしない）。要求が終わるすべての道（ローダー・取り消し・submit 時点での取り消し）がこの値を進めて notify する
+  2. **ローダーのジョブは 1 本だけ**: 初版は要求ごとにジョブを積み、`_loadLock` を待つジョブがジョブレーン（4 本）を埋めて、立て続けの切り替えの間 provider の取得が止まった。今は要求が最新の 1 つ（`_pendingLoad`・世代つき）を `_requestLock` の中で記録し、ローダーが走っていなければ 1 本だけ積む。ローダー（`_LoaderJob`）は待っている最新の要求を、無くなるまで順に取る（デコードが済むまで次を取らないのは初版と同じ）。新しい要求に置き換えられた要求は、置き換えた側のスレッドですぐ `SUPERSEDED` で終わる（`done()` もそこで）。シャットダウンで積まれたまま取り消されたローダーの要求は、取り消した側のスレッドで `STOPPED`（`done()` も呼ぶ。初版は呼ばなかった）。`LoadGameByCodename` は要求ごとの Future（結果は 5 つの定数）を返す。`_loadLock` / `_Superseded` / `_LoadJob` は削除した
+  3. **保存サイクルが開いている時間（受け入れ・記録）**: ロードのサイクルは、GUI スレッドへの marshal・モデルの作り直し・`onLoad` の受け手が走る間ずっと開いている。その間、別スレッドの書き込みの公開（と revision）はサイクルの終わりまで遅れる。モデルの作り直しはスナップショット（= 書き込みを伴う `SelectGame` の結果）が要るので、サイクルを開く前には移せない（`SelectGame` を「読む」と「書く」に分けるのはカタログの変更になり範囲外）。計測（テストハーネス・実機の SSBU アセット 299 MB をコピーして 2 回ロード）: 1 回目（ゲーム無し → SSBU）でサイクルが開いていたのは 0.75 秒（選択と marshal 待ち 0.07 秒、`_Publish` 0.69 秒。うちモデルの作り直し 0.68 秒）、2 回目（同じゲームの読み直し）は 0.08 秒。ハーネスには選手カードなどの `onLoad` の受け手がほとんど無いので、実アプリではその分（推定で数百 ms）長くなる。HEAD（358a9d2d）の threaded ロードも `SelectGame` とモデルの作り直しの間はブロックを開いていたので、増えたのは受け手が走る時間だけ
+  4. **「公開は必ず GUI スレッドで direct」は言い過ぎだった**: 閉じた時点で別スレッドの SaveBlock が開いていれば、最後に閉じたスレッドが公開する（そのときの通知はそのスレッドから）。`_SaveCycle` / `_Load` のコメントと `.claude/rules/state-and-webserver.md` を直した
+  5. **`WhenPublished` の docstring を正確にした**: 「lock の外」ではなく「`ReleaseSaving` 自身の lock を離した後」。呼び手がすでに lock（RLock）を持っていることも、state_updated / held のハンドラの中（= SaveState の中）で走ることもある。コールバックは待たない（積んで notify するだけ）こと、別スレッドの公開・コールバックとの順序は保証しないことを書いた
+  6. **デスクトップの終了経路（選択の後に marshal を見捨てた）を揃えた**: 初版の修正は選択の保存（`SELECTED_GAME_CODENAME`）だけをジョブのスレッドで行い、ロスター（`ApplyGameRoster(replaced)`: 前のゲームのキャラと mains の消去）は走らなかった。次の起動では新しいゲームが、前のゲームのキャラのまま復元された。今は `_SettleStopped`（最終レビュー対応 4 で `_SettleUnannounced` に改名し、モデルの作り直しの失敗にも使う）が、まだ開いているロードのサイクルの中で `AutonaActions.ApplyGameRoster(replaced)` → 適用したボードの `ApplyChanges`（= ボードの `onLoad` が行う `CommitHeld`）→ 選択の保存、をローダーのスレッドで行う（core の操作はどのスレッドからでもよい。ボードホストは GUI スレッドに渡すので通さない）。ステージ行（`RepublishBestOf`）は次の起動のロードが作り直すので書かない。「保存しないで巻き戻す」案は、`SelectGame` が書いた `game.*` と Top 8 のキャラの消去を戻す手段が無いので採らなかった
+  7. **ヘッドレスの終了経路も同じにした**: 同期ロードの marshal を見捨てたとき（と、非同期ロードでメインスレッドがもう使えないとき。積んでも走らないので積まない）は、`_SettleStopped` がローダーのスレッドで、ボードホスト経由の `ApplyGameRoster(replaced)` と選択の保存を行う。選択の保存は `_PersistPick` に分けて `_OnLoaded` と共有した
+  8. **flusher のやり直しで、バッチを待っていたものを捨てない**: `_start_delta_flusher` は、前の flusher が送れなかったバッチは今どおり捨てるが、それを待っていたもの（`_delta_after`。ゲーム切り替えの全量送信）は残し、新しい flusher がすぐ（期限を今にして）走らせる。捨てた delta は全量送信が覆う
+  9. **delta の窓の例外を記録した**: ゲームの切り替えでは開いている delta の窓を待たずにすぐ送る（「窓は届いた delta で動かない」の唯一の例外）。`.claude/design/external-control-api.md` §4 と `.claude/rules/state-and-webserver.md` の Web サーバー節に書いた
+  10. **`set_game` の答えは HEAD と同じ**: HEAD（358a9d2d、`@gui_thread_sync`）の同期経路は、ロードの例外をログに出して `done()` し、`"OK"` を返していた（スキップも `"OK"`）。今も `FAILED` / `SKIPPED` / `STOPPED` で `"OK"` を返す（変えない）。`"OK"` が「ロードできた」ではなく「試行が終わった」であることを `LoadGameByCodename` の docstring と `set_game` のコメントに合わせた。終了中は HEAD では GUI スレッドを待って固まりえたが、今は `"OK"` で返る
+  11. **受け入れ・記録: `set_game` は GUI スレッドで直列化されなくなった**: 選択から `_Publish` までの間に、別スレッドのボード操作（Web の `swap_teams` など）が割り込みうる。GAME メニューの非同期ロードでは初めから同じだった（ボード操作は GUI スレッドで、ロードはジョブのスレッドで選ぶ）。ボードホストの操作と `_Publish` はどちらも GUI スレッドなので、互いの途中には割り込まない
+- **pin（再レビュー対応）**
+  - `tests/test_asset_jobs.py`: 立て続けの A→B→C はジョブを 1 本しか積まず（`game load` の submit が 1 回）、C で終わる。A・B は置き換えられた時点で `SUPERSEDED` と `done()`（`test_rapid_requests_take_one_job_lane_and_end_on_the_last_one`）/ 追い越された同期ロードは、置き換えられても返らず、新しいロードが入ってから返る / ローダーを起こせなかった要求は例外を返し、世代・待ち・ローダーのどれも残さない。次の同期の要求は答える（`test_a_request_the_loader_cannot_start_for_records_nothing`）/ ローダーを待っていた要求は終了中なら何も書かない（`test_a_load_waiting_for_the_loader_does_not_run_once_stopping`）/ 終了後の要求は待たずに `STOPPED` と `done()` / 失敗したロードでも `set_game` は `"OK"`（`test_set_game_answers_ok_once_a_failed_load_is_over`）
+  - `tests/test_roster_flow.py`: `test_a_load_the_shutdown_stopped_after_its_selection_keeps_one_game[desktop / headless]`（選択の直後に終了 → 公開済みの state は新しいゲームの人数で全キャラと mains が空、デスクトップの held ボードも反映済み、`SELECTED_GAME_CODENAME` は新しいゲーム）
+  - `tests/test_webserver_delta_debounce.py`: `test_what_waited_for_a_batch_a_stuck_flusher_left_runs_after_a_restart`
+  - `tests/test_game_asset_manager_models.py`: 起動時の復元が 2 回目に何も頼まないことを、ローダーの Future の同一性ではなく世代番号で見るようにした
+  - ミューテーション確認: 世代を submit の前に進める / 要求ごとにジョブを積む / 要求を取った後の終了判定を無効 / デスクトップの終了経路でロスターを書かない / ロスターを書くが反映しない / ヘッドレスの終了経路で何もしない / flusher のやり直しで待っていたものを捨てる、の 7 つがそれぞれ対応するテストで落ちることを確かめた。前回の 6 つ（全量送信を即時に・ヘッドレスの lock 後の終了判定・公開をジョブのスレッドに・デコードの一覧・ステップの重なり・503 化）も再確認した
+- **残置 / リスク（再レビュー対応後）**
+  - 保存サイクルが開いている間（上の 3。実アプリで 1 秒前後の見込み）、別スレッドの書き込みの公開が遅れる
+  - 同期の待ち手（`set_game`）は期限なしで Condition を待つ。ローダーが GUI スレッドを待ったまま（GUI が生きていて別の処理で塞がっている）だと待ち続ける（初版・HEAD と同じ）
+  - 置き換えられた要求の `done()` は、置き換えた要求のスレッドで走る（GUI スレッドのこともある。v1 の実行中フラグの解除だけなので軽い）
+  - ヘッドレスの非同期ロードは、メインスレッドに積んだ直後にイベントループが終わると、ロード後の処理（選択の保存・ロスター）が走らない（積む前の判定と積んだ後の終了の間の競合。終了間際の非同期ロードに限られる）→ **S3f-6 の入力**（最終レビュー対応 2/3。ここでは直さない）
+  - 終了経路のロスターはステージ行を作り直さない（次の起動のロードが作り直す）
+  - ヘッドレスのローダーは S3f-6 まで要求ごとのスレッドで、最新が勝つ規則も無い
+- **実機確認（オーナー・再レビュー対応分）**
+  - ゲームを立て続けに切り替えている間も、大会の読み込み・セットの取得が止まらない（ローダーは 1 本）
+  - ゲームのロード中にアプリを閉じ、次の起動で、ゲームと選手カードのキャラ（前のゲームのキャラが残らない）が食い違わずに復元される
+  - 失敗するゲーム（壊れた config など）を Web から `set_game` すると、従来どおり `OK` が返り、ログに ERROR が残る
+- **最終レビュー対応（2026-10-28。ローダー 1 本の狭いレビュー、コアの不変条件は成立）**
+  1. **要求の Future を取り消せないようにし、世代の終了を settle から独立させた**: `LoadGameByCodename` が返す Future は呼び手が `cancel()` できた。取り消された Future に `_Settle` が `set_result` すると `InvalidStateError` で、ループの `finally` の `_Finished(世代)` に届かず、その要求（か後の要求）を待つ同期の待ち手が戻らなかった。置き換えの経路では、例外が置き換えた側の呼び手に届き、「起こせなかった要求」と見分けられないので `done()` が二重になりうる。今は `_LoadRequest` が作った時点で `set_running_or_notify_cancel()` を呼ぶ（誰が持っても `cancel()` は False）。`_Finished` は `_SettleAndFinish` の `finally` で必ず走る（ループ・`_LoaderEnded`・submit 時点での取り消しの 3 か所で共有）。`_LoaderEnded` と submit 時点での取り消しは、ループと同じく settle → 世代の終了の順に揃えた（同期の待ち手が戻った時点で、その要求の `done()` も Future の答えも済んでいる）
+  4. **モデルの作り直しの失敗（FAILED）も 1 つのゲームに揃える**: `_Publish` で `_RebuildModels` が例外を出すと、選択はサイクルの終わりで公開されるのに、`gameLoaded`（ロスター）も `onLoad`（選択の保存・ボードの反映）も走らず、STOPPED と同じ食い違いになった。今は `_Publish` が作り直しの例外を捕まえ、サイクルを閉じる前に、GUI スレッドで `_SettleUnannounced`（旧 `_SettleStopped`。ロスター・適用したボードの `ApplyChanges`・選択の保存）を呼んでから例外を返す。結果は今までどおり `FAILED`（ログに ERROR）。受け手の例外は `emit` が報告して次の受け手へ進むので、ここには来ない（PySide6 6.11 で確認）。モデルは作り直しの途中のまま残る（次のロードが作り直す）
+  5. **`done()` のスレッドと禁止事項を docstring に書いた**: `done()` は試行を終わらせたスレッドで走る。ローダーのスレッド（ジョブレーン）・置き換えた要求のスレッド（GUI スレッドのこともある）・ローダーを終わらせたスレッド（積まれたまま取り消したシャットダウンのスレッド、ループが死んだときのレーン）・呼んだスレッド（空の codename、submit 時点での取り消し）のどれか。だから短く、どのスレッドでも安全で、別のロードを頼まないこと: ローダーが走っていないときにジョブレーンのスレッドから頼む非同期の要求はローダーを起こせず（`NestedSubmitError`。`_Settle` がログに出して要求は消える）、同期の要求は自分が走っているローダーを待つ（自己デッドロック）。`_LoaderEnded` の再起動をジョブのスレッドから安全にする案は、レーンの判定（`TaskExecutor._Lane` は非公開）と GUI スレッドへの受け渡しが要り、簡単ではないので入れていない（今の `done()` の利用者は v1 の実行中フラグの解除だけ）
+  6. **空の codename も Future を返す**: 「ゲーム無し」（大会 URL のクリア）は、答えの済んだ Future（`SKIPPED`）を返し、`done()` は呼び出したスレッドで 1 回呼ぶ。ローダーには何も頼まない（世代も進めない）。GUI スレッドからの同期の空要求は今までどおり例外にしない。戻り値を使う呼び出し元は無い（`set_game` / `load_game` は使っていない）
+  7. **テストを足した**（下の pin）: 積まれたまま取り消されたローダー（`_LoaderEnded` の `job.cancelled()` の枝）・ロードの外でのローダーの死・`onLoad` の受け手からの非同期の再読み込み
+  - 2 / 3. **S3f-6 の入力として記録（ここでは直さない）**: どちらもヘッドレスのローダーを executor に載せる S3f-6 で扱う
+    - (2) ヘッドレスの非同期ロードの marshal の競合: `gui_unavailable_reason()` を見てからメインスレッドに積むまでの間にイベントループが終わると、`_OnLoaded`（選択の保存・ロスター・Web の全量送信）が走らず、state.json は新しいゲーム、`SELECTED_GAME_CODENAME` は前のゲームのまま残る
+    - (3) `HeadlessShell.Shutdown` はローダーのスレッド（`AutonaGameLoader`、daemon）を待たない。終了と同時に走っていたロードは、`StatePersistence.Flush` の後に state を書いて保存されないか、インタプリタの終了で途中で止まる。デスクトップのローダーは executor のジョブなので、`shutdown` が待つ
+- **pin（最終レビュー対応）**
+  - `tests/test_asset_jobs.py`
+    - `test_a_caller_cannot_cancel_a_load_request`（走っている・待っている・置き換えられた・終わった要求のどれも `cancel()` は False。置き換えられた同期の待ち手は戻り、`done()` は各 1 回）
+    - `test_a_settle_that_raises_still_finishes_its_generation`（新しい要求の settle が例外を出しても、それに置き換えられた同期の待ち手は戻る。ローダーは終わり、次の要求が新しいローダーを起こす）
+    - `test_a_loader_that_dies_between_loads_fails_the_request_it_left`（待っていた要求は `FAILED`・`done()` 1 回・同期の待ち手はその答えで戻る・何も選ばない。次の要求で新しいローダー）
+    - `test_a_reload_an_onload_slot_asks_for_is_served_by_the_same_loader`（GUI スレッドの `onLoad` の受け手からの再読み込みはデッドロックせず、同じローダーが続けて読む。ジョブは 1 本）
+    - `test_an_empty_codename_is_skipped_at_once`
+    - `test_a_loader_the_shutdown_cancels_while_queued_stops_its_request`（ジョブレーン 4 本を埋めてローダーを積んだままシャットダウン: 要求は `STOPPED`、`done()` はシャットダウンのスレッドで 1 回、同期の待ち手が戻る、`_loaderRunning` は False、何も選ばない）
+  - `tests/test_roster_flow.py`: `test_a_load_whose_models_fail_keeps_one_game`（デスクトップ。作り直しが GUI スレッドで失敗 → 公開済みの state は新しいゲームの人数で全キャラと mains が空、held ボードも反映済み、`SELECTED_GAME_CODENAME` は新しいゲーム、保存ブロックは 0）
+  - ミューテーション確認: Future を取り消せるまま / settle が返ったときだけ世代を終える / 作り直しの失敗で settle しない / 空の codename で None を返す / 取り残した要求を常に `STOPPED` / 常に `FAILED` / 要求ごとにジョブを積む、の 7 つがそれぞれ対応するテストで落ちることを確かめた
+- **残置 / リスク（最終レビュー対応後）**
+  - 置き換えられた同期の要求は、その Future が答えられる一瞬前に戻りうる（置き換えた側が lock を離してから settle するまでの間に、ローダーが新しい要求を読み終えた場合だけ。`set_game` は Future を読まないので影響しない）
+  - `done()` から別のロードを頼むことは docstring で禁じただけで、検出はしていない
+  - ヘッドレスの (2)・(3) は S3f-6 まで残る
+- **実機確認（オーナー・最終レビュー対応分）**
+  - 大会 URL を消しても、読み込み済みのゲームはそのまま（空の codename）
+  - 前回までの確認項目（立て続けの切り替え・ロード中の終了・失敗するゲームの `set_game`）

@@ -54,8 +54,11 @@ the shell winds down, and its done callbacks see the cancellation). A task
 still running when the wait times out keeps its thread: the interpreter's
 exit joins the pools' threads (concurrent.futures has no daemon threads),
 so it delays the exit until it returns -- for ever, if it waits on
-something that will not come once the event loop has stopped (a GUI-thread
-marshal without a timeout). A job must not do that.
+something that will not come once the event loop has stopped. A job must
+not do that: the one GUI-thread wait a job may make, the shell's marshal
+(GuiExecutor.run_sync, ADR-005 S3f-4), gives up once ``stopping`` is set or
+the event loop has exited, and a job that is about to start work ending in
+one checks for that first (the game load).
 
 Waiting on the Futures: ``result()`` / ``exception()`` /
 ``add_done_callback`` and ``map_fanout`` see a cancellation at once.
@@ -82,7 +85,8 @@ Test seams:
   ``run_next()``, one at a time and in submission order (``newest=True``:
   the last one first), each on a thread of its own; ``queued()`` counts
   them; the fan-out lane runs as usual. One schedule, the same on every
-  run.
+  run. One at a time means it: a step that outlived its ``run_next()``
+  (TimeoutError) is waited for before the next one starts.
 
 Threads are created on the first submit to a lane (ThreadPoolExecutor), not
 by the constructor. ``TaskExecutor.instance`` is created by
@@ -140,8 +144,13 @@ class TaskExecutor:
         }
         self._stepped = stepped
         # Stepped mode: the job-lane tasks run_next() has yet to run, as
-        # (future, runner), oldest first.
+        # (future, runner), oldest first; the thread of the last step it
+        # started (None before the first), which may still be running after
+        # its run_next() timed out; and the lock that has run_next() calls
+        # from several threads take their turn.
         self._steps = collections.deque()
+        self._stepThread = None
+        self._stepLock = threading.Lock()
         # Every task submitted and not finished yet (queued, stepped or
         # running): Future -> task name. drain() and shutdown() wait on it.
         self._pending = {}
@@ -317,11 +326,38 @@ class TaskExecutor:
         wait for it to finish (``timeout`` seconds; None: for ever). False
         when no job is queued or the executor is shut down; TimeoutError if
         it did not finish in time. ``newest``: the newest queued job instead
-        (a test making a later answer overtake an earlier one)."""
+        (a test making a later answer overtake an earlier one).
+
+        The steps never overlap: a step still running from a run_next() that
+        timed out is waited for first (within the same ``timeout``), and if
+        it is still running then, TimeoutError is raised again without
+        starting another -- a caller that retries (drain_tasks, pumping the
+        GUI thread between tries) gets the steps one at a time, as the
+        stepped schedule promises."""
         if not self._stepped:
             raise RuntimeError("run_next() is for a stepped TaskExecutor")
         if self._Lane() is not None:
             raise NestedSubmitError("run_next() from a lane thread")
+        deadline = _Deadline(timeout)
+        if not self._stepLock.acquire(
+                timeout=-1 if deadline is None else _Remaining(deadline)):
+            raise TimeoutError(
+                f"TaskExecutor: another run_next() kept the {JOB} steps "
+                f"for {timeout} s")
+        try:
+            return self._RunNextStep(deadline, timeout, newest)
+        finally:
+            self._stepLock.release()
+
+    def _RunNextStep(self, deadline, timeout, newest):
+        # run_next(), holding _stepLock.
+        previous = self._stepThread
+        if previous is not None and previous.is_alive():
+            previous.join(_Remaining(deadline))
+            if previous.is_alive():
+                raise TimeoutError(
+                    f"TaskExecutor: the previous {JOB} step is still "
+                    f"running after {timeout} s")
         with self._cond:
             while True:
                 # Checked under the condition shutdown() closes under: a job
@@ -339,8 +375,9 @@ class TaskExecutor:
         thread = threading.Thread(
             target=self._RunStep, args=(future, runner),
             name=f"{JOB_THREAD_PREFIX}Step", daemon=True)
+        self._stepThread = thread
         thread.start()
-        thread.join(timeout)
+        thread.join(_Remaining(deadline))
         if thread.is_alive():
             raise TimeoutError(
                 f"TaskExecutor: {JOB} '{taskName}' did not finish within "

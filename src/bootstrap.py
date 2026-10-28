@@ -499,11 +499,12 @@ def wire_game_roster(game_loaded):
       game's players per team and the default characters per player, its
       picks emptied when that load replaced another game.
 
-    The load's own snapshot, not the catalog's Current(): this slot is
-    queued onto the main thread (the loaders emit on theirs), and by the
-    time it runs a later load may have replaced the snapshot -- a switch
-    followed at once by a reload of the new game would read "no switch"
-    twice and keep the previous game's picks.
+    The load's own snapshot, not the catalog's Current(): this slot runs on
+    the main thread, which the load hands it to (the desktop's load job
+    marshals it there since ADR-005 S3f-4; the headless loader queues it),
+    and by the time it runs a later load may have replaced the snapshot --
+    a switch followed at once by a reload of the new game would read "no
+    switch" twice and keep the previous game's picks.
 
     Run where the shell runs board operations (AutonaWebOperations
     .boardHost): on the desktop that is its GUI thread, where the board's

@@ -143,7 +143,12 @@ class StateManagerObservers:
 class StateManager:
     lastSavedState = {}
     state = {}
+    # Open SaveBlocks, across all threads. Changed under `lock` (ADR-005
+    # S3f-4 review: a game load opens its block on a job thread and the GUI
+    # thread closes it).
     saveBlocked = 0
+    # WhenPublished() callbacks waiting for the open blocks to close.
+    _afterPublish = []
     # Subscribed to by StateManagerBridge (Qt) and by anything else that
     # wants notifications without Qt. Created here rather than in
     # Initialize() because subscribers may wire themselves up before the
@@ -284,12 +289,69 @@ class StateManager:
             StateManager.ReleaseSaving()
 
     def BlockSaving():
-        StateManager.saveBlocked += 1
+        with StateManager.lock:
+            StateManager.saveBlocked += 1
 
     def ReleaseSaving():
-        StateManager.saveBlocked -= 1
-        if StateManager.saveBlocked == 0:
-            StateManager.SaveState()
+        # The count and the publish under one hold of the lock (which
+        # SaveState takes for its whole body anyway): a block opened on
+        # another thread meanwhile either counts before this check or waits
+        # for the publish.
+        after = []
+        try:
+            with StateManager.lock:
+                StateManager.saveBlocked -= 1
+                if StateManager.saveBlocked != 0:
+                    return
+                try:
+                    StateManager.SaveState()
+                finally:
+                    after = StateManager._afterPublish
+                    StateManager._afterPublish = []
+        finally:
+            # After this hold of the lock (the caller may still hold it:
+            # see WhenPublished).
+            StateManager._RunAfterPublish(after)
+
+    def WhenPublished(fn):
+        """Run `fn()` once what has been written so far is published: now,
+        on this thread, when no SaveBlock is open; else right after the
+        publish that closes the last open block, on the thread that closes
+        it -- whichever thread that is (the block's opener or another).
+
+        After ReleaseSaving has let go of its own hold of StateManager.lock,
+        but not necessarily outside the lock: the lock is an RLock, and the
+        closing thread may hold it already (a caller that closes its block
+        inside `with StateManager.lock`, or a block opened and closed by a
+        state_updated / held handler, which runs inside the SaveState that
+        delivers it); called "now", it runs wherever the caller is. So `fn`
+        must not block: hand the work on (queue it and notify) and return --
+        never wait for another thread here (agent-pitfalls #17). Callbacks
+        run in the order they were registered on the thread that runs them;
+        nothing orders them against another thread's publishes or
+        callbacks.
+
+        For a reader of the whole state that must not get ahead of the
+        published revision: GetFullState() inside an open block returns the
+        block's writes with the revision before them, and a client that
+        then receives the block's delta (revision R+1) applies it on top of
+        a state that already had it. The web server's game-change push is
+        one (ADR-005 S3f-4 review: a game load's onLoad slots run inside
+        the load's block); it queues for the delta flusher, sending in
+        place only while no flusher runs (no server started)."""
+        with StateManager.lock:
+            if StateManager.saveBlocked > 0:
+                StateManager._afterPublish.append(fn)
+                return
+        StateManager._RunAfterPublish([fn])
+
+    def _RunAfterPublish(callbacks):
+        for fn in callbacks:
+            try:
+                fn()
+            except Exception:
+                logger.opt(exception=True).error(
+                    "StateManager: a WhenPublished callback failed")
 
     @staticmethod
     def _bracketPath(key: str) -> str:

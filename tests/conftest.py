@@ -53,6 +53,62 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
+TASKS_TIMEOUT_SECS = 30
+
+
+def drain_tasks(timeout=TASKS_TIMEOUT_SECS):
+    """Run the TaskExecutor's work, and what it hands to the GUI thread, to
+    the end -- in place of the QThreadPool.waitForDone() + processEvents()
+    the asset tests used until ADR-005 S3f-4.
+
+    Pumps this (the GUI) thread while it waits: a game load job marshals its
+    models onto it (run_sync), so a plain drain() would wait for the job
+    that waits for us. Done once the executor is idle after the GUI thread
+    has run what the tasks queued there (a decoded icon, the scan's
+    onLoadAssets) -- which can submit more (the restore's load), so it
+    looks again. Test harness only: src never pumps the event loop
+    (agent-pitfalls #9).
+
+    Everything means everything: a stepped executor's queued jobs run too,
+    still one at a time -- a step that is waiting for this thread (its
+    run_next() timed out after the short slice below) is waited for, with
+    the events processed in between, before the next one starts
+    (TaskExecutor.run_next). A test stepping its jobs by hand waits for icon
+    decodes with deliver_decodes() instead.
+    """
+    import time
+
+    from qtpy.QtWidgets import QApplication
+    from src.core.TaskExecutor import TaskExecutor
+
+    executor = TaskExecutor.instance
+    deadline = time.monotonic() + timeout
+    while True:
+        QApplication.processEvents()
+        if executor.drain(0.005):
+            QApplication.processEvents()
+            if executor.drain(0):
+                return
+        assert time.monotonic() < deadline, \
+            "the background tasks did not finish"
+
+
+def deliver_decodes(decodes, timeout=TASKS_TIMEOUT_SECS):
+    """Wait for icon decodes -- the Futures a model rebuild of the asset
+    adapter returned -- then run what they handed to the GUI thread (the
+    icons set on their items). Nothing else the executor runs is touched,
+    so it suits a test whose jobs are stepped by hand."""
+    from concurrent.futures import CancelledError
+
+    from qtpy.QtWidgets import QApplication
+
+    for future in decodes:
+        # TimeoutError fails the test; a decode's own error was logged.
+        with contextlib.suppress(CancelledError):
+            future.exception(timeout)
+    QApplication.processEvents()
+
+
 @pytest.fixture(autouse=True)
 def _freshStatistics():
     """Every test starts with the statistics' class state empty: the request
@@ -301,11 +357,10 @@ class _AutonaHarness:
         only rebind on onLoad: call this before building the widgets that
         should see the roster.
 
-        The icon workers the rebuild starts are waited out here: they must
+        The icon decodes the rebuild starts are waited out here: they must
         not outlive the CWD.
         """
         from PIL import Image
-        from qtpy.QtWidgets import QApplication
 
         from src.AutonaGameAssetManager import AutonaGameAssetManager
         from src.core.GameAssetCatalog import GameAssetCatalog
@@ -332,14 +387,17 @@ class _AutonaHarness:
         catalog.ScanGames()
         catalog.SelectGame(HARNESS_GAME, reload=True)
         manager = AutonaGameAssetManager.instance
-        manager._RebuildModels()
-        manager.threadpool.waitForDone()
-        QApplication.processEvents()
+        deliver_decodes(manager._RebuildModels())
         self._gameInstalled = True
         return manager
 
     def _restoreAssets(self):
-        """Uninstall HARNESS_GAME and go back to the no-game models."""
+        """Uninstall HARNESS_GAME and go back to the no-game models.
+
+        The icon decodes of loadCharacters' rebuild were waited for there,
+        and a game load a test ran in between is waited for by the test
+        (drain_tasks): the decodes run on the task executor, which may be a
+        test's stepped one here, whose queued jobs must stay queued."""
         if not self._gameInstalled:
             return
         from qtpy.QtWidgets import QApplication
@@ -348,7 +406,6 @@ class _AutonaHarness:
         from src.core.GameAssetCatalog import GameAssetCatalog
 
         manager = AutonaGameAssetManager.instance
-        manager.threadpool.waitForDone()
         QApplication.processEvents()
         shutil.rmtree(self.dir / "user_data" / "games" / HARNESS_GAME,
                       ignore_errors=True)
@@ -457,9 +514,9 @@ def _autonaRuntime(qapp, tmp_path_factory):
         bootstrap_core()
         bootstrap_gui()
         # Normally done by src/Autona.py at import time. The @gui_thread_sync
-        # operations (the desktop board host, the shell operations, set_game)
-        # raise without it, and that module is the one thing tests must not
-        # import (agent-pitfalls #1).
+        # operations (the desktop board host, the shell operations) and the
+        # game load job's model marshal raise without it, and that module is
+        # the one thing tests must not import (agent-pitfalls #1).
         if AutonaQtHelper.gui_executor is None:
             AutonaQtHelper.init_gui_executor()
 

@@ -121,9 +121,10 @@
 
 ### 2.8 重い操作の非同期受付（202・D7）
 - **重い操作**（`POST /tournament`・`POST /game`・`POST /bracket:refresh`）は**同期完了を待たず
-  `202 Accepted` を返す（MUST）**。理由: 委譲先が同期ブロックしうる（例: `set_game` は
-  `@gui_thread_sync` ＋ `LoadGameByCodename(async_mode=False)` で**アセット再ロード完了までブロック**、
-  [`AutonaWebOperations.set_game`](../../src/AutonaWebOperations.py)）。同期で返すと HTTP がタイムアウトする。
+  `202 Accepted` を返す（MUST）**。理由: 委譲先が同期ブロックしうる（例: legacy の `set_game` は
+  `LoadGameByCodename(async_mode=False)` で**アセット再ロード完了まで呼び出し元のスレッドをブロック**する、
+  [`AutonaWebOperations.set_game`](../../src/AutonaWebOperations.py)。ADR-005 S3f-4 からは GUI スレッドではなく
+  リクエストのスレッドが、アセットアダプタのロードのジョブを待つ）。同期で返すと HTTP がタイムアウトする。
 - **完了確認はクライアントが WS 購読（§4）で行う**（`program_state_update` の `revision` 進行を観測）。
   202 レスポンスは受付のみを示し、`revision` は未確定（省略可）。
   ```json
@@ -188,6 +189,7 @@
 - 本 API は**新しい WS チャネルを作らない**。状態フィードバックは**既存 Socket.IO をそのまま購読**する（D3）。
   - 接続時 / `program_state` 要求 → フル状態を受信
   - `program_state_update` → デルタ（`revision`/`delta_index` + `delta`）を受信（[AutonaWebServer.py](../../src/AutonaWebServer.py) の delta coalescing 準拠）
+  - ゲームの切り替え（ロード）では、ロードの delta の後に全量（`program_state`、続いて `characters`）が配信される。全量の `revision` は中身と一致する（ADR-005 S3f-4）。そのため**ゲームの切り替えだけは、開いている delta の窓を待たずにすぐ送る**（通常は「先頭 0 ms・以後 50 / 100 / 200 ms の窓は届いた delta で動かない」。例外はこの 1 つ）
 - Companion のボタンフィードバック（点灯・数値表示）はこの購読 + `GET /api/v1/state` で実現する（§11）。
 
 ---
@@ -493,7 +495,9 @@ HTTP/1.1 409 Conflict
   S3e-9 で削除し、`init_api_v1(actions)` も無くなった）。
   状態ロジックを新規に書かない（D4）。エンベロープ整形は本 API 層の薄いヘルパーに集約。
 - **スレッド**: Web 操作はリクエストのスレッドから呼べばよい（既存 Web ルートと同じ呼び方）。GUI スレッドが要るもの
-  （デスクトップのボードホスト・シェル操作・`set_game`）は操作の側が marshal する。
+  （デスクトップのボードホスト・シェル操作）は操作の側が marshal する。`set_game` は marshal しない
+  （ADR-005 S3f-4。ロードは TaskExecutor のジョブで走り、モデルの作り直しだけをジョブが GUI スレッドへ渡す）。
+  終了中で GUI スレッドに渡せないときは、ボードホスト・シェル操作とも 503（`the app is shutting down`）で答える。
 - **既存ルートを壊さない**: 既存ハンドラ・Socket.IO イベントは変更しない（regression 禁止・docs/product/features.md「リグレッション禁止リスト」）。
 - **二重定義に追従不要**: 本 API は HTTP のみ提供（WS フィードバックは §4 の既存購読で足りる）。Socket.IO 側に `/api/v1` 相当は作らない。
 - **ポート**: 既存 `general.webserver_port`（既定 5000）を共有。新ポートは開かない。
@@ -612,6 +616,9 @@ HTTP/1.1 409 Conflict
 ### 14.3 重い操作の 202 化メモ
 - `load_tournament`・（理想的には）`update_bracket` は内部でシグナル emit / worker 起動するため、
   **API 層は「実行中フラグを立てて即 202」**で素直に実現できる。
+- （ADR-005 S3f-4 で更新: `set_game` はもう `@gui_thread_sync` を持たない。legacy ルートはリクエストのスレッドで
+  ロードのジョブを待ち、後から来た別のゲームの要求に追い越されたときは、その新しいロードが終わってから `"OK"` を返す。
+  以下は当時の記録）
 - **`set_game` は `@gui_thread_sync` で同期ブロック**するのが課題。202 にするには API 層から
   **`@gui_thread_sync` を介さずに**起動する必要がある（例: `gui_thread_async` 系で投げっぱなしにする、
   または `LoadGameAssets(..., async_mode=True)` 相当の非同期経路を使う）。

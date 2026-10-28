@@ -951,11 +951,12 @@ def game_set():
             _release()
 
     try:
-        # The sync set_game action blocks on a synchronous asset reload
-        # (@gui_thread_sync + async_mode=False). For 202 we start the async
-        # load path instead. The worker QThread must be created on the GUI
-        # thread (its parent lives there), so dispatch fire-and-forget via the
-        # GUI executor (spec §14.3).
+        # The sync set_game action waits for a synchronous load
+        # (async_mode=False). For 202 we start the async load path instead,
+        # dispatched fire-and-forget via the GUI executor (spec §14.3). That
+        # was where the desktop's loader QThread had to be created (its
+        # parent lived there); the load is a TaskExecutor job since ADR-005
+        # S3f-4, which any thread may start, and the dispatch is kept as is.
         AutonaQtHelper.gui_executor(_run)
     except Exception:
         _heavy.end("game")

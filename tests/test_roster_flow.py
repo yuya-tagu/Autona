@@ -51,6 +51,7 @@ from src.core import StateSchema as schema
 from src.core.Actions import AutonaActions
 from src.core.PlayerService import CharacterSlot, PlayerService
 from src.core.StateManager import StateManager
+from tests.conftest import drain_tasks
 from tests.fixtures.write_recording import encode, encodeDelta
 # The S1d world: the fixture games (with real characters, skins and
 # variants) under the recording's locale.
@@ -209,13 +210,13 @@ def world(slotEnv, autonaApp):
 
 def loadGame(codename):
     """A game load through the desktop's adapter, as the GAME menu and the
-    Web's set_game run it (synchronously here)."""
+    Web's set_game run it: the load job, run to the end with this (the GUI)
+    thread pumped (ADR-005 S3f-4; it was the GUI thread's synchronous load
+    here until the review)."""
     from src.AutonaGameAssetManager import AutonaGameAssetManager
     manager = AutonaGameAssetManager.instance
-    manager.LoadGameByCodename(codename, async_mode=False,
-                               mods_reload_mode=True)
-    manager.threadpool.waitForDone()
-    QApplication.processEvents()
+    manager.LoadGameByCodename(codename, mods_reload_mode=True)
+    drain_tasks()
 
 
 PLAYER_A = {"gamerTag": "ALPHA", "prefix": "SP", "country_code": "JP",
@@ -674,25 +675,18 @@ def test_a_card_retired_mid_edit_does_not_write_its_slot_back(
 
 
 def _loadGameThreaded(codename):
-    """A game load on the asset loader's thread, as the GAME menu runs it:
-    the roster is written on the GUI thread (the board host's Run) while the
-    loader's save block is still open, and the boards' onLoad handlers come
-    queued after it. This thread is pumped while waiting -- the loader
-    marshals onto it (run_sync), so blocking on the thread would deadlock."""
-    import time
+    """A game load as a job of the TaskExecutor, as the GAME menu runs it
+    (ADR-005 S3f-4; the asset loader's QThread until then): the models, then
+    the roster (gameLoaded) and the boards' onLoad handlers run on the GUI
+    thread, marshalled from the job while its save block is still open. This
+    thread is pumped while waiting -- the job marshals onto it (run_sync),
+    so blocking on its Future would deadlock."""
     from src.AutonaGameAssetManager import AutonaGameAssetManager
 
     manager = AutonaGameAssetManager.instance
     manager.LoadGameByCodename(codename, async_mode=True,
                                mods_reload_mode=True)
-    thread = manager.assetsLoaderThread
-    deadline = time.monotonic() + 30
-    while not thread.isFinished():
-        assert time.monotonic() < deadline, "the asset loader did not finish"
-        QApplication.processEvents()
-        time.sleep(0.005)
-    manager.threadpool.waitForDone()
-    QApplication.processEvents()
+    drain_tasks()
 
 
 def test_a_threaded_game_load_publishes_the_recorded_roster(
@@ -719,6 +713,86 @@ def test_a_threaded_game_load_publishes_the_recorded_roster(
         differ = [field for field in expected
                   if actual.get(field) != expected[field]]
         assert not differ, f"{actual['step']!r} differs in {differ}"
+
+
+def test_a_game_load_and_its_roster_are_one_save_cycle_on_the_gui_thread(
+        world, autonaApp, monkeypatch):
+    """ADR-005 S3f-4 review: the load job opens the save cycle, the GUI
+    thread publishes it at the end of _Publish. The game's writes and the
+    roster's (board 2 to the game's two players, committed by the board
+    within the load) go out as that one cycle's delta, published on the GUI
+    thread while the load is still publishing -- and the bridge delivers
+    the cycle's notifications there, direct, not queued after it
+    (agent-pitfalls #17: one cycle under one hold of the lock)."""
+    from src.AutonaGameAssetManager import AutonaGameAssetManager
+    from src.StateManagerBridge import StateManagerBridge
+
+    if RECORD:
+        pytest.skip("not part of the recording")
+    manager = AutonaGameAssetManager.instance
+    autonaApp.board(2)
+    main = threading.main_thread().name
+    cycles = []
+    events = []
+    publishing = []
+
+    realSave = StateManager.SaveState
+
+    def saveState():
+        if StateManager.saveBlocked == 0:
+            cycles.append(threading.current_thread().name)
+        return realSave()
+
+    realPublish = manager._Publish
+
+    def publish(*args):
+        publishing.append(1)
+        try:
+            return realPublish(*args)
+        finally:
+            publishing.pop()
+
+    def here():
+        return threading.current_thread().name, bool(publishing)
+
+    def onDelta(payload):
+        events.append(("delta", len(cycles)) + here()
+                      + ({tuple(row["path"][:5]) for row in payload["delta"]},))
+
+    def onBridgeDelta(payload):
+        events.append(("bridge delta",) + here())
+
+    def onBridgeDirty(prefix, dirty):
+        events.append(("bridge dirty", prefix, dirty) + here())
+
+    monkeypatch.setattr(StateManager, "SaveState", saveState)
+    monkeypatch.setattr(manager, "_Publish", publish)
+    observers = StateManager.observers
+    observers.state_updated.subscribe(onDelta)
+    bridge = StateManagerBridge.instance
+    bridge.state_updated.connect(onBridgeDelta)
+    bridge.held_dirty_changed.connect(onBridgeDirty)
+    try:
+        with _Lifecycle():
+            _loadGameThreaded(TEAM_GAME)
+            autonaApp.settle()
+    finally:
+        bridge.held_dirty_changed.disconnect(onBridgeDirty)
+        bridge.state_updated.disconnect(onBridgeDelta)
+        observers.state_updated.unsubscribe(onDelta)
+
+    deltas = [event for event in events if event[0] == "delta"]
+    assert len(deltas) == 1, events
+    _delta, cycle, thread, published, paths = deltas[0]
+    assert (thread, published) == (main, True)
+    assert cycles[cycle - 1] == main
+    roots = {path[0] for path in paths}
+    assert roots == {"game", "score"}, paths
+    assert ("score", "2", "team", "1", "player") in paths
+    assert ("bridge delta", main, True) in events, events
+    assert ("bridge dirty", "score.2", False, main, True) in events, events
+    assert len(StateManager.Get("score.2.team.1.player")) == 2
+    assert not StateManager.HasPendingChanges("score.2")
 
 
 # ── ADR-005 S3e-6 review ─────────────────────────────────────────────────
@@ -861,13 +935,15 @@ def _fillPicks(number=2):
                               ).PublishCharacterSlots(picks, includeMains=True)
 
 
-def _picks(number=2):
+def _picks(number=2, read=StateManager.Get):
+    """{team.slot.group: [names]} of board `number`, read with `read` (the
+    live state; StateManager.GetCommitted: what is published)."""
     return {f"{team}.{slot}.{group}": [value.get("name") for value in
-                                       StateManager.Get(
-                                           f"score.{number}.team.{team}"
-                                           f".player.{slot}.{group}").values()]
+                                       read(f"score.{number}.team.{team}"
+                                            f".player.{slot}.{group}"
+                                            ).values()]
             for team in (1, 2)
-            for slot in StateManager.Get(f"score.{number}.team.{team}.player")
+            for slot in read(f"score.{number}.team.{team}.player")
             for group in ("character", "mains")}
 
 
@@ -983,6 +1059,133 @@ def test_a_switch_followed_by_a_reload_forgets_the_previous_picks(
     assert _picks() == {f"{team}.{slot}.{group}": ["", "", ""]
                         for team in (1, 2) for slot in (1, 2)
                         for group in ("character", "mains")}
+
+
+@pytest.mark.parametrize("shell", ["desktop", "headless"])
+def test_a_load_the_shutdown_stopped_after_its_selection_keeps_one_game(
+        world, autonaApp, monkeypatch, shell):
+    """The shutdown comes after a switch's selection, before the main
+    thread runs what follows it (the marshal is abandoned). The selection
+    is published -- and so is what goes with it, written from the loader's
+    thread: the previous game's picks emptied with the new game's roster
+    (committed, on the desktop's held board) and the pick persisted
+    (ADR-005 S3f-4 review). Without it the next launch restored the new
+    game over the old game's characters (desktop: the pick was persisted,
+    the roster never ran) or the old game over the new one's state
+    (headless: neither ran)."""
+    from src import AutonaWebOperations as WebOps
+    from src.core.GameAssetCatalog import GameAssetCatalog
+    from src.core.SettingsManager import SettingsManager
+    from src.Helpers import AutonaQtHelper
+
+    catalog = GameAssetCatalog.instance
+    actions = AutonaActions.instance
+    assert StateManager.Get("game.codename") == "tgame"
+    if shell == "desktop":
+        autonaApp.board(2)  # built: its writes are held until committed
+    actions.SetRoster(2, 1, 3)
+    _fillPicks()
+    actions.ApplyChanges(2)
+    autonaApp.settle()
+    picked = _picks(read=StateManager.GetCommitted)
+    assert all(all(names) for names in picked.values()), picked
+
+    # The shutdown, from right after the selection: what run_sync gives up
+    # on, and what a load checks before it starts.
+    stopping = []
+    realSelect = catalog.SelectGame
+
+    def select(*args, **kwargs):
+        try:
+            return realSelect(*args, **kwargs)
+        finally:
+            stopping.append(1)
+
+    monkeypatch.setattr(catalog, "SelectGame", select)
+    monkeypatch.setattr(
+        AutonaQtHelper, "gui_unavailable_reason",
+        lambda: "the app is shutting down" if stopping else None)
+
+    if shell == "desktop":
+        from src.AutonaGameAssetManager import (STOPPED,
+                                                AutonaGameAssetManager)
+        future = AutonaGameAssetManager.instance.LoadGameByCodename(
+            TEAM_GAME, mods_reload_mode=True)
+        # This (the GUI) thread does not pump: the marshal is never started.
+        assert future.result(10) == STOPPED
+    else:
+        from src.AutonaWebOperations import BoardHost
+        from src.bootstrap import wire_game_roster
+        from src.headless import HeadlessGames
+        monkeypatch.setattr(WebOps, "boardHost", BoardHost())
+        games = HeadlessGames(catalog, provider=None)
+        wire_game_roster(games.signals.gameLoaded)
+        worker = threading.Thread(target=lambda: games.LoadGameByCodename(
+            TEAM_GAME, async_mode=False, mods_reload_mode=True))
+        worker.start()
+        worker.join(10)
+        assert not worker.is_alive()
+
+    assert stopping and StateManager.saveBlocked == 0
+    assert StateManager.GetCommitted("game.codename") == TEAM_GAME
+    assert SettingsManager.Get("SELECTED_GAME_CODENAME") == TEAM_GAME
+    # TEAM_GAME's roster (two a team), every pick and main blank, published.
+    blank = {f"{team}.{slot}.{group}": ["", "", ""]
+             for team in (1, 2) for slot in (1, 2)
+             for group in ("character", "mains")}
+    assert _picks(read=StateManager.GetCommitted) == blank
+    assert not StateManager.HasPendingChanges("score.2")
+
+
+def test_a_load_whose_models_fail_keeps_one_game(world, autonaApp,
+                                                 monkeypatch):
+    """The desktop's model rebuild fails on the GUI thread after a switch's
+    selection (FAILED): the load is not announced, but its selection is
+    published with its cycle -- and so is what the announcement's slots
+    would have written, there, before the cycle closes: the previous game's
+    picks emptied with the new game's roster (committed on the held board)
+    and the pick persisted, as for a load the shutdown stopped (ADR-005
+    S3f-4 review). Without it the state held the new game over the old
+    game's characters, and the next launch restored the old game."""
+    from src.AutonaGameAssetManager import FAILED, AutonaGameAssetManager
+    from src.core.SettingsManager import SettingsManager
+
+    manager = AutonaGameAssetManager.instance
+    actions = AutonaActions.instance
+    assert StateManager.Get("game.codename") == "tgame"
+    assert SettingsManager.Get("SELECTED_GAME_CODENAME", "") != TEAM_GAME
+    autonaApp.board(2)  # built: its writes are held until committed
+    actions.SetRoster(2, 1, 3)
+    _fillPicks()
+    actions.ApplyChanges(2)
+    autonaApp.settle()
+    picked = _picks(read=StateManager.GetCommitted)
+    assert all(all(names) for names in picked.values()), picked
+
+    failures = []
+    realRebuild = manager._RebuildModels
+
+    def failing(decodes=None):
+        if not failures:  # the load's; not a later rebuild (the teardown's)
+            failures.append(threading.current_thread().name)
+            raise RuntimeError("a model failed")
+        return realRebuild(decodes)
+
+    monkeypatch.setattr(manager, "_RebuildModels", failing)
+    future = manager.LoadGameByCodename(TEAM_GAME, mods_reload_mode=True)
+    drain_tasks()
+
+    assert future.result(0) == FAILED
+    assert failures == [threading.main_thread().name]
+    assert StateManager.saveBlocked == 0
+    assert StateManager.GetCommitted("game.codename") == TEAM_GAME
+    assert SettingsManager.Get("SELECTED_GAME_CODENAME") == TEAM_GAME
+    # TEAM_GAME's roster (two a team), every pick and main blank, published.
+    blank = {f"{team}.{slot}.{group}": ["", "", ""]
+             for team in (1, 2) for slot in (1, 2)
+             for group in ("character", "mains")}
+    assert _picks(read=StateManager.GetCommitted) == blank
+    assert not StateManager.HasPendingChanges("score.2")
 
 
 def test_a_request_for_the_characters_leaves_the_players_as_they_are(

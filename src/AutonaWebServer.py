@@ -963,6 +963,9 @@ class WebServer:
     _delta_pending_first_revision = -1
     _delta_due = None            # _delta_clock() the open batch goes out at
     _delta_last_flush_ts = 0.0   # _delta_clock() of the last flush
+    # What waits for the open batch to go out (_after_pending_deltas): run
+    # by the flusher right after it sends that batch, in arrival order.
+    _delta_after = []
     # The clock of the schedule; tests swap it for a fake one.
     _delta_clock = time.monotonic
     # Deltas are taken only while the flusher runs (start() .. stop()):
@@ -989,12 +992,54 @@ class WebServer:
 
     @staticmethod
     def _flush_pending_deltas():
-        """Send the open batch now (the test driver's step; the flusher
-        takes and sends in two parts, see _run_delta_flusher)."""
+        """Send the open batch now, then run what waited for it (the test
+        driver's step; the flusher takes and sends in two parts, see
+        _run_delta_flusher)."""
         with WebServer._delta_cond:
             payload = WebServer._take_pending_deltas()
+            after = WebServer._take_after_deltas()
         if payload is not None:
             WebServer._send_deltas(payload)
+        WebServer._run_after_deltas(after)
+
+    @staticmethod
+    def _after_pending_deltas(fn):
+        """Run `fn()` once the deltas queued so far have gone out: on the
+        flusher, right after it sends the open batch -- which goes out now,
+        without waiting out its window -- or here and now while no flusher
+        runs (before start(), after stop()).
+
+        For a send that must follow those deltas on the socket (ADR-005
+        S3f-4 review): the full state of a game change carries revision
+        R+1, and sent ahead of the R+1 delta still waiting in the batch it
+        would reach every client first. One sender thread keeps the order.
+        Queues and notifies only, like on_program_state_update."""
+        with WebServer._delta_cond:
+            if WebServer._delta_running:
+                WebServer._delta_after.append(fn)
+                now = WebServer._delta_clock()
+                if WebServer._delta_due is None or WebServer._delta_due > now:
+                    WebServer._delta_due = now
+                WebServer._delta_cond.notify_all()
+                return
+        WebServer._run_after_deltas([fn])
+
+    @staticmethod
+    def _take_after_deltas():
+        """What waited for the batch just taken. Called holding
+        _delta_cond."""
+        after = WebServer._delta_after
+        WebServer._delta_after = []
+        return after
+
+    @staticmethod
+    def _run_after_deltas(after):
+        # Outside the lock, like a send.
+        for fn in after:
+            try:
+                fn()
+            except Exception:
+                logger.error(traceback.format_exc())
 
     @staticmethod
     def _take_pending_deltas():
@@ -1093,18 +1138,21 @@ class WebServer:
                         continue
                     remaining = WebServer._delta_due - WebServer._delta_clock()
                     if remaining > 0:
-                        # Only stop() (or a later start()) wakes this early:
-                        # an arrival that joins the open batch does not
-                        # notify. Timed out = due, whatever the clock's
-                        # resolution says.
+                        # Only stop() (or a later start()) or a send waiting
+                        # for the batch (_after_pending_deltas, which makes
+                        # it due now) wakes this early: an arrival that
+                        # joins the open batch does not notify. Timed out =
+                        # due, whatever the clock's resolution says.
                         dueNow = not cond.wait(remaining)
                         continue
                 # Due -- or stopping: then the open batch goes out at once,
                 # the way the old Timer still sent it after stop().
                 dueNow = False
                 payload = WebServer._take_pending_deltas()
+                after = WebServer._take_after_deltas()
             if payload is not None:
                 WebServer._send_deltas(payload)
+            WebServer._run_after_deltas(after)
             if not running:
                 return
 
@@ -1115,11 +1163,16 @@ class WebServer:
                 return
             # A fresh queue: anything left is a batch a flusher stop() gave
             # up on did not get to, from before this start() -- dropped like
-            # every delta outside start() .. stop().
+            # every delta outside start() .. stop(). What waited for that
+            # batch (_after_pending_deltas: a game change's full state) is
+            # kept and goes out first, at once: the deltas it waited for are
+            # gone, and the full state it sends covers them (ADR-005 S3f-4
+            # review; it was dropped too).
             WebServer._delta_pending = []
             WebServer._delta_pending_revision = -1
             WebServer._delta_pending_first_revision = -1
-            WebServer._delta_due = None
+            WebServer._delta_due = (
+                WebServer._delta_clock() if WebServer._delta_after else None)
             generation = object()
             WebServer._delta_generation = generation
             WebServer._delta_running = True
@@ -1171,9 +1224,20 @@ class WebServer:
         """A game was loaded: every client gets the full state and the new
         character list, in that order. What the shells connect their
         game-change signal to (bootstrap.wire_web_server): the window's
-        GameChanged on the desktop, the headless loader's (ADR-005 S3c)."""
-        WebServer.ws_program_state()
-        WebServer.ws_get_characters(None)
+        GameChanged on the desktop, the headless loader's (ADR-005 S3c).
+
+        Sent once the load is published, and after its delta (ADR-005 S3f-4
+        review). The desktop's GameChanged runs inside the load's save
+        cycle (an onLoad slot), where the full state would already hold the
+        load's writes with the revision before them, and it would reach the
+        clients ahead of the R+1 delta: WhenPublished waits for the cycle,
+        _after_pending_deltas for the delta to go out first."""
+        def push():
+            WebServer.ws_program_state()
+            WebServer.ws_get_characters(None)
+
+        StateManager.WhenPublished(
+            lambda: WebServer._after_pending_deltas(push))
 
     def ws_playerdb(message):
         logger.debug("Emitting playerdb info.")

@@ -784,11 +784,33 @@ def test_game_set_loads_the_requested_game_despite_a_rescan(
 
 def test_update_game_loads_the_requested_game_despite_a_rescan(
         client, goldenGames, autonaApp, monkeypatch):
+    """The legacy route answers once loaded: posted from a thread of its
+    own, as Flask serves it -- the load job marshals its models onto this
+    (the GUI) thread, which is pumped meanwhile (a synchronous load from
+    the GUI thread itself is refused since ADR-005 S3f-4's review)."""
+    import time
+
+    from qtpy.QtWidgets import QApplication
+
     _load(goldenGames, "tgame")
+
+    answered = {}
+
+    def post():
+        answered["response"] = client.post(
+            "/update-game", json={"codename": "game2"})
 
     with monkeypatch.context() as m:
         _aGameIsAddedAfterTheFirstRead(m)
-        response = client.post("/update-game", json={"codename": "game2"})
+        request = threading.Thread(target=post, daemon=True)
+        request.start()
+        deadline = time.monotonic() + 30
+        while request.is_alive():
+            assert time.monotonic() < deadline, "the request did not answer"
+            QApplication.processEvents()
+            request.join(0.002)
+    response = answered["response"]
+    _waitForLoader(goldenGames)
     autonaApp.settle()
 
     assert response.get_data(as_text=True) == "OK"

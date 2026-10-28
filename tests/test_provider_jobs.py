@@ -31,8 +31,8 @@ And since S3f-3, the Start.gg provider's own parallel requests:
   finish (they were Workers on the pool those fetches ran on);
 - nothing fetches the sets queued at a station any more: the fetch never
   ran, and nothing showed what it would have answered;
-- the provider package has no Worker, pool or wait of its own, and only the
-  asset manager and the API window still use src/Workers.py (S3f-4).
+- the provider package has no Worker, pool or wait of its own. (Since
+  S3f-4 nothing in src/ has: tests/test_asset_jobs.py.)
 """
 import ast
 import copy
@@ -699,18 +699,6 @@ def test_nothing_fetches_the_sets_queued_at_a_station():
     assert named == set()
     assert not (PROJECT_ROOT / "src" / "TournamentDataProvider"
                 / "StartGGFutureSetQuery.txt").exists()
-
-
-def test_only_the_asset_manager_and_the_api_window_still_use_workers():
-    """src/Workers.py's last users: S3f-4 moves them to the executor and
-    deletes the module. No new one."""
-    users = set()
-    for path in sorted((PROJECT_ROOT / "src").rglob("*.py")):
-        relative = path.relative_to(PROJECT_ROOT).as_posix()
-        if relative != "src/Workers.py" and "Workers" in _names(relative):
-            users.add(relative)
-    assert users == {"src/AutonaApiInfoWindow.py",
-                     "src/AutonaGameAssetManager.py"}
 
 
 def test_what_the_app_reads_on_the_adapter_exists(autonaApp):

@@ -111,6 +111,8 @@
 
 **2026-10-23 注記**: ADR-005 S1a で `_LoadGameAssetsCore` / `_ResolveTargetGame` は `src/core/GameAssetCatalog.py`（`SelectGame` ほか）に移った。アダプタ側に残る共有本体は `_Load`。
 
+**2026-10-28 注記**: ADR-005 S3f-4 で `AssetsLoaderThread`（QThread）は削除し、ロードは core の `TaskExecutor` のジョブ 1 本（ローダー `_LoaderJob` → `_Load`。待っている最新の要求を順に取る）になった。GUI スレッド上の同期ロード経路（上の「同期版」）も削除した（呼び出し元が無く、テストだけが通っていた。GUI スレッドからの同期ロードは RuntimeError）。モデルの作り直しはローダーが `run_sync` で GUI スレッドへ渡す（`_Publish`）。後から来た要求が勝つ（世代番号）。
+
 **検証**: py_compile OK、`python main.py` 起動正常（worker スレッドで `_LoadGameAssetsCore` 実行・`UpdateColorModel` が list から正常生成を確認）、pytest 73件グリーン。**PdM 手動確認済み（2026-06-28）**: ゲーム/モード切替（同期版パス）でのキャラ/スキン/カラー/ステージ再構築と切替が1書き込みになることを目視、問題なし。本項目はクローズ。
 
 ---
