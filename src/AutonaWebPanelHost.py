@@ -38,6 +38,13 @@ a discarded page refused) leaves the view on an error page. The next
 ShowPanel() or return to Active loads the panel's page again rather than
 navigating a page that has no panel shell.
 
+The right-click menu offers editing only (ContextActions): the view is a
+panel, not a browser, so Chromium's back / reload / view-source entries are
+not on it (S4b). The Window builds the host from a panel's factory and
+calls ShowPanel() on every reveal of that panel's sidebar item; until S4c a
+panel can be switched back to its Qt version by one setting
+(QT_FALLBACK_SETTINGS, read when the panel is first built).
+
 Import-light (qtpy / core / AutonaWebPageLifecycle / AutonaLocaleHelper /
 ui_constants): importing it creates nothing.
 """
@@ -46,14 +53,16 @@ import json
 import logging
 from urllib.parse import quote, urlencode
 
+from qtpy.QtCore import Qt
 from qtpy.QtGui import QColor
 from qtpy.QtWebEngineCore import QWebEnginePage
 from qtpy.QtWebEngineWidgets import QWebEngineView
-from qtpy.QtWidgets import QVBoxLayout, QWidget
+from qtpy.QtWidgets import QMenu, QVBoxLayout, QWidget
 
 from .AutonaWebPageLifecycle import HiddenPageLifecycle, LocalPageLoader
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .core import WebAccess
+from .core.SettingsManager import SettingsManager
 from . import ui_constants as UI
 
 logger = logging.getLogger(__name__)
@@ -68,11 +77,66 @@ _REQUEST_FULL_STATE_JS = (
     "if(s){s.refresh();}})()")
 
 
+# The way back to a panel's Qt version while the IME gate is open (ADR-005
+# S4b; S4c removes these with the Qt panels): React panel -> the boolean
+# general setting that shows the Qt panel instead. Off by default.
+QT_FALLBACK_SETTINGS = {
+    "commentary": "general.qt_commentary_panel",
+}
+
+
 def PanelPath(panel):
     """The path + query the host opens for ``panel``."""
     query = urlencode({"desktop": "1",
                        "lng": AutonaLocaleHelper.programLocale})
     return f"/web/{quote(panel, safe='')}?{query}"
+
+
+def UsesQtPanel(panel):
+    """Whether the desktop shows ``panel``'s Qt version instead of the React
+    page (the operator's QT_FALLBACK_SETTINGS switch). False for a panel
+    without one."""
+    key = QT_FALLBACK_SETTINGS.get(panel)
+    return bool(key and SettingsManager.Get(key, False) is True)
+
+
+def ContextActions(editable, hasSelection):
+    """The page actions the right-click menu offers (None: a separator).
+
+    Editing in a text field, copying a selection elsewhere, and nothing
+    otherwise -- no menu. Chromium enables each action for the click's
+    context (Paste with something on the clipboard, Cut with a selection).
+    """
+    W = QWebEnginePage.WebAction
+    if editable:
+        return [W.Undo, W.Redo, None, W.Cut, W.Copy, W.Paste, None,
+                W.SelectAll]
+    if hasSelection:
+        return [W.Copy]
+    return []
+
+
+class _PanelView(QWebEngineView):
+    """The shared view, with the editing menu instead of the browser's."""
+
+    def contextMenuEvent(self, event):
+        # Qt calls this for the page's context menu request; the request
+        # says what was clicked.
+        request = self.lastContextMenuRequest()
+        actions = ContextActions(
+            bool(request is not None and request.isContentEditable()),
+            bool(request is not None and request.selectedText()))
+        event.accept()
+        if not actions:
+            return
+        menu = QMenu(self)
+        menu.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        for action in actions:
+            if action is None:
+                menu.addSeparator()
+            else:
+                menu.addAction(self.pageAction(action))
+        menu.popup(event.globalPos())
 
 
 class AutonaWebPanelHost(QWidget):
@@ -120,7 +184,7 @@ class AutonaWebPanelHost(QWidget):
             self._EnsureView()
 
     def _EnsureView(self):
-        self.view = QWebEngineView(self)
+        self.view = _PanelView(self)
         page = self.view.page()
         # The Web UI's background (dark only), instead of a white flash
         # while the first page loads.

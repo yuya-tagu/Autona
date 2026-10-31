@@ -30,7 +30,6 @@ tests/test_player_service.py replays without Qt.
 """
 import json
 import os
-import shutil
 from unittest.mock import patch
 
 import pytest
@@ -41,7 +40,7 @@ from qtpy.QtWidgets import QApplication, QComboBox
 from src.core.StateManager import StateManager
 # The scenarios, the custom flags, the locale and the encoding are shared
 # with tests/test_player_service.py, which replays the same recording.
-from tests.conftest import drain_tasks
+from tests.conftest import copy_trees, drain_tasks, remove_tree
 from tests.fixtures.player_slots.recording import (
     CUSTOM_FLAGS, GAME_FIXTURE, GAME_SCENARIOS, GAMES, GOLDEN_PATH, LOCALE,
     digest, encode, loadGolden)
@@ -150,8 +149,8 @@ def slotEnv(autonaApp):
     AutonaCountryHelper.LoadCountries()
 
     games = autonaApp.dir / "user_data" / "games"
-    for name in GAMES:
-        shutil.copytree(GAME_FIXTURE / "games" / name, games / name)
+    copy_trees([(GAME_FIXTURE / "games" / name, games / name)
+                for name in GAMES])
     manager = AutonaGameAssetManager.instance
     catalog = GameAssetCatalog.instance
     catalog.ScanGames()
@@ -170,7 +169,7 @@ def slotEnv(autonaApp):
         drain_tasks()
         autonaApp.dropAllBoards()
         for name in GAMES:
-            shutil.rmtree(games / name, ignore_errors=True)
+            remove_tree(games / name)
         catalog.ScanGames()
         catalog.ResetGameState()
         manager._RebuildModels()

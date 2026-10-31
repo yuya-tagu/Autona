@@ -1649,7 +1649,8 @@ SHELL_EVENTS = {"open_set"}
 _URL_VALUES = {"team": "1", "player": "1", "member": "1", "caster": "1",
                "color": "ff0000", "fileFormat": "png", "setId": "1", "t": 1,
                "p": 1, "code": "JP", "slug": "x", "import_id": "0" * 32,
-               "filename": "x", "panel": "shell-check"}
+               "filename": "x", "panel": "shell-check", "slot": 1,
+               "kind": "commentary", "feature": "commentary"}
 _BOARD_ARGUMENTS = ("scoreboardNumber", "n")
 
 # What a route needs besides its URL to get to its operation rather than
@@ -1679,6 +1680,12 @@ _BODIES = {
     "api_v1.reset_match": {"confirm": True},
     "api_v1.load_set": {"setId": 1},
     "api_v1.game_set": {"codename": "no_such_game"},
+    "api_v1.commentary_update": {"name": "Cast"},
+    "api_v1.commentary_reorder": {"order": [str(slot) for slot in
+                                            range(12, 0, -1)]},
+    "api_v1.commentary_player": {"gamerTag": "Cast"},
+    "api_v1.select_layout": {"id": "commentators"},
+    "api_v1.colors_update": {"theme": "#123456"},
 }
 
 # Every route that answers anything but 200 here, by (endpoint, board),
@@ -1714,6 +1721,10 @@ _NOT_200 = {
     ("designer_delete_project", None): 404,
     ("designer_get_import", None): 404,
     ("api_v1.game_set", None): 404,
+    # The test runtime's layout/ is empty: no commentary design to show or
+    # to pick (the catalog was read).
+    ("api_v1.get_selected_layout", None): 404,
+    ("api_v1.select_layout", None): 400,
 }
 
 # The Socket.IO events' messages (the routes' arguments). "connect" is the
@@ -1820,6 +1831,11 @@ def test_every_route_and_event_answers_headless_but_the_shell_operations(
                                               encoding="utf-8")
     raised = []
     monkeypatch.setattr(socketio, "default_exception_handler", raised.append)
+    # The settings the walk writes (a feature colour): in a copy, not saved.
+    from src.core.SettingsManager import SettingsManager
+    monkeypatch.setattr(SettingsManager, "settings",
+                        copy.deepcopy(SettingsManager.settings))
+    monkeypatch.setattr(SettingsManager, "SaveSettings", lambda: None)
     kept = {root: copy.deepcopy(value)
             for root, value in _state().state.items() if root != "score"}
     _goHeadlessWithSlots(autonaApp, monkeypatch)

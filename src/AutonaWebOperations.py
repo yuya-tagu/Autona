@@ -71,8 +71,10 @@ from loguru import logger
 
 from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
+from .core import ColorService
 from .core import CommentaryModel as comms
 from .core import CommentaryService
+from .core import LayoutCatalog
 from .core import Top8Service
 from .core.CountryCatalog import CountryCatalog
 from .core.CrewBattleService import CrewBattleService
@@ -497,6 +499,73 @@ def load_commentator_from_tag(index, tag, no_mains=False):
     if not CommentaryService.LoadFromTag(slot, tag):
         return "ERROR"
     return "OK"
+
+
+# The Commentary page's (ADR-005 S4b): the same core operations the Qt
+# panel asks for, one each. The v1 routes validate; these apply. Slots are
+# CommentaryModel.SLOTS strings ("1".."12").
+
+def get_commentary_options():
+    """What the page offers: the role candidates (free text; only
+    suggestions), the icon stems with their labels, the slots and how many
+    may be shown. From core's constants, so the page holds no copy."""
+    return {
+        "roles": list(comms.ROLES),
+        "icons": [{"id": stem, "label": label}
+                  for stem, label in comms.ICONS.items()],
+        "slots": list(comms.SLOTS),
+        "maxDisplay": comms.MAX_DISPLAY,
+    }
+
+
+def update_caster(slot, fields):
+    """Write `fields` (field -> value, already validated) to caster `slot`
+    in one save cycle. False, writing none of them, when they would show a
+    caster past MAX_DISPLAY others; True otherwise (an unchanged field is
+    not written, as in the panel).
+
+    The lock is taken before the save block (agent-pitfalls #17): the
+    publish that closes the block then runs in the same hold, so no other
+    thread's write joins this cycle between these writes and their
+    publish. The check and the writes hold the lock together, so two
+    requests showing a caster at once cannot both pass the check past
+    MAX_DISPLAY."""
+    with StateManager.lock:
+        with StateManager.SaveBlock():
+            if fields.get("display") and not CommentaryService.CanShow(slot):
+                return False
+            for field, value in fields.items():
+                CommentaryService.SetField(slot, field, value)
+    return True
+
+
+def reorder_casters(order):
+    return CommentaryService.Reorder(order)
+
+
+def apply_caster_player(slot, data):
+    return CommentaryService.ApplyPlayerData(slot, data)
+
+
+# ── the panels' layout selection and colours (ADR-005 S4b) ─────────────
+# Settings, not state: what the Qt panels keep in settings.json, under the
+# same keys and in the same form.
+
+def get_selected_layout(kind):
+    return LayoutCatalog.SelectedLayout(kind)
+
+
+def select_layout(kind, layoutId):
+    return LayoutCatalog.SelectLayout(kind, layoutId)
+
+
+def set_feature_colors(feature, colors):
+    """Set one feature's theme / accent colours (ColorService kind ->
+    "#rrggbb"), both in one save cycle when both come -- the Qt card's
+    "match the tournament" writes the two."""
+    with StateManager.SaveBlock():
+        for kind, color in colors.items():
+            ColorService.SetFeatureColor(feature, kind, color)
 
 
 # ── the tournament ───────────────────────────────────────────────────────

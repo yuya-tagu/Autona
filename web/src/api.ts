@@ -30,9 +30,19 @@ async function request(path: string, init?: RequestInit, opts?: ApiOptions): Pro
         headers: withToken(init?.headers),
     });
     if (!resp.ok) {
-        throw new Error(`${init?.method ?? "GET"} ${path} failed: HTTP ${resp.status}`);
+        // The status rides along (ApiError) for a caller that answers one
+        // refusal differently (a 409 from /api/v1).
+        throw Object.assign(
+            new Error(`${init?.method ?? "GET"} ${path} failed: HTTP ${resp.status}`),
+            {status: resp.status});
     }
     return resp;
+}
+
+export type ApiError = Error & {status?: number};
+
+export function apiErrorStatus(error: unknown): number | undefined {
+    return (error as ApiError | null)?.status;
 }
 
 export async function apiGetJson<T = unknown>(path: string, opts?: ApiOptions): Promise<T> {
@@ -54,4 +64,8 @@ export async function apiPost(path: string, body?: unknown, opts?: ApiOptions): 
 
 export async function apiPatch(path: string, body?: unknown, opts?: ApiOptions): Promise<string> {
     return send("PATCH", path, body, opts);
+}
+
+export async function apiPut(path: string, body?: unknown, opts?: ApiOptions): Promise<string> {
+    return send("PUT", path, body, opts);
 }

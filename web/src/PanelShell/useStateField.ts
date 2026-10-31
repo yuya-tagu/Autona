@@ -7,6 +7,15 @@ import React from "react";
 // - The field shows `value` (the state), except while it has focus: then a
 //   state update does not overwrite what is being typed. Once it loses
 //   focus it shows the state again.
+// - Another writer's value wins over the typing in progress (S4b review;
+//   the Qt panels' HeldBackText rule): when the field's value is written
+//   elsewhere while it has focus, what was typed and not yet sent is
+//   dropped -- still shown while the field has focus, but not sent, and
+//   leaving it shows the other writer's value. What is typed after that
+//   write is sent as usual. The echo of the field's own send is not
+//   another writer: the oldest send still awaiting its echo takes the next
+//   change of the value, whatever the server made of it (trimmed,
+//   censored).
 // - Typing is sent `debounceMs` (300 ms) after the last change, and at once
 //   when the field loses focus or goes away. Only typing is sent: focusing
 //   and leaving a field without typing sends nothing, so a value another
@@ -22,7 +31,17 @@ import React from "react";
 //   field shows the state again.
 //
 // `send` may return a promise (an apiPatch); a rejection counts as a failed
-// send. Spread the result onto an <input> or a MUI TextField.
+// send. Spread the result onto an <input> or a MUI TextField -- all of it
+// but the two controls (S4b; take them off first, they are not DOM props),
+// which a field with suggestions calls itself:
+//
+// - pick(text): a suggestion chosen from the field's own list (a role):
+//   shown, and sent at once, like typing.
+// - replace(text, request): a choice another write makes for the field (a
+//   player picked from the name's suggestions, which fills the whole
+//   caster): shown at once, typing not sent yet is dropped (the choice
+//   replaces it), and `request` stands for the send -- the field waits for
+//   its echo the same way.
 
 export const STATE_FIELD_DEBOUNCE_MS = 300;
 export const ECHO_GRACE_MS = 1000;
@@ -43,11 +62,16 @@ export interface StateFieldProps {
     onCompositionEnd: (event: React.CompositionEvent<Element>) => void;
 }
 
+export interface StateFieldControls {
+    pick: (text: string) => void;
+    replace: (text: string, request: unknown) => void;
+}
+
 export function useStateField(
     value: string,
     send: (value: string) => unknown,
     options: StateFieldOptions = {},
-): StateFieldProps {
+): StateFieldProps & StateFieldControls {
     const debounceMs = options.debounceMs ?? STATE_FIELD_DEBOUNCE_MS;
     const [draft, setDraft] = React.useState(value);
 
@@ -57,6 +81,10 @@ export function useStateField(
     const composing = React.useRef(false);
     const edited = React.useRef(false);       // typed since the last send
     const sent = React.useRef<string | null>(null);  // awaiting its echo
+    // Every send not yet echoed, failed or past its grace, oldest first:
+    // the changes of `value` they account for are not another writer's.
+    const pending = React.useRef<number[]>([]);
+    const sends = React.useRef(0);
     const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const graceTimers = React.useRef(new Set<ReturnType<typeof setTimeout>>());
     // Cleared on unmount: a send answered after the field went away
@@ -88,6 +116,31 @@ export function useStateField(
         }
     }, [show]);
 
+    // `next` was sent (`result` its answer): wait for its echo.
+    const awaitEcho = React.useCallback((next: string, result: unknown) => {
+        sent.current = next;
+        const id = ++sends.current;
+        pending.current.push(id);
+        // No echo is coming any more (failed, or none within the grace).
+        const settle = () => {
+            pending.current = pending.current.filter((other) => other !== id);
+            resync(next);
+        };
+        Promise.resolve(result).then(
+            () => {
+                if (!mounted.current) {
+                    return;
+                }
+                const grace = setTimeout(() => {
+                    graceTimers.current.delete(grace);
+                    settle();
+                }, ECHO_GRACE_MS);
+                graceTimers.current.add(grace);
+            },
+            settle,
+        );
+    }, [resync]);
+
     const commit = React.useCallback(() => {
         cancelTimer();
         if (!edited.current) {
@@ -98,27 +151,15 @@ export function useStateField(
         if (next === (sent.current ?? state.current)) {
             return;
         }
-        sent.current = next;
         let result: unknown;
+        sent.current = next;
         try {
             result = sendRef.current(next);
         } catch (error) {
             result = Promise.reject(error);
         }
-        Promise.resolve(result).then(
-            () => {
-                if (!mounted.current) {
-                    return;
-                }
-                const grace = setTimeout(() => {
-                    graceTimers.current.delete(grace);
-                    resync(next);
-                }, ECHO_GRACE_MS);
-                graceTimers.current.add(grace);
-            },
-            () => resync(next),
-        );
-    }, [cancelTimer, resync]);
+        awaitEcho(next, result);
+    }, [cancelTimer, awaitEcho]);
 
     const schedule = React.useCallback(() => {
         cancelTimer();
@@ -128,16 +169,22 @@ export function useStateField(
     // The state changed: our echo, or another writer.
     React.useEffect(() => {
         state.current = value;
+        const echo = pending.current.shift() !== undefined;
         if (focused.current) {
             // Being typed into: not overwritten. Our own echo is noted.
             if (value === sent.current) {
                 sent.current = null;
             }
+            if (!echo && edited.current) {
+                // Another writer: the typing in progress is not sent.
+                cancelTimer();
+                edited.current = false;
+            }
             return;
         }
         sent.current = null;
         show(value);
-    }, [value, show]);
+    }, [value, show, cancelTimer]);
 
     // Going away (another panel shown): what was typed is still sent --
     // waiting on the debounce, or mid-composition (no timer is running
@@ -193,6 +240,19 @@ export function useStateField(
         }
     };
 
+    const pick = (next: string) => {
+        show(next);
+        edited.current = true;
+        commit();
+    };
+
+    const replace = (next: string, request: unknown) => {
+        cancelTimer();
+        edited.current = false;
+        show(next);
+        awaitEcho(next, request);
+    };
+
     return {
         value: draft,
         onChange,
@@ -200,5 +260,7 @@ export function useStateField(
         onBlur,
         onCompositionStart,
         onCompositionEnd,
+        pick,
+        replace,
     };
 }

@@ -146,6 +146,8 @@ ROUTE_ACCESS = {
     "api_v1.get_commentary": READ,
     "api_v1.get_country_states": READ,
     "api_v1.get_layouts": READ,
+    "api_v1.get_commentary_options": READ,
+    "api_v1.get_selected_layout": READ,
     "api_v1.score_adjust": WRITE,
     "api_v1.score_reset": WRITE,
     "api_v1.stats_refresh": WRITE,
@@ -164,6 +166,11 @@ ROUTE_ACCESS = {
     "api_v1.tournament_load": WRITE,
     "api_v1.game_set": WRITE,
     "api_v1.bracket_refresh": WRITE,
+    "api_v1.commentary_update": WRITE,
+    "api_v1.commentary_reorder": WRITE,
+    "api_v1.commentary_player": WRITE,
+    "api_v1.select_layout": WRITE,
+    "api_v1.colors_update": WRITE,
 }
 
 # Every Socket.IO event on "/". Same rule as ROUTE_ACCESS (pinned against the
@@ -293,9 +300,11 @@ def StaticPath(filename):
 # view, AutonaWebPanelHost), the token from another computer. The Web UI
 # routes the same names (web/src/PanelShell/registry.tsx; the two lists
 # are compared by tests/test_web_access.py). "shell-check" is the empty page
-# that checks the panel shell itself (S4a).
+# that checks the panel shell itself (S4a); "commentary" is the caster
+# line-up (S4b).
 WEB_PANELS = frozenset({
     "shell-check",
+    "commentary",
 })
 
 

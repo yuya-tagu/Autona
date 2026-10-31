@@ -10,16 +10,22 @@ import {
 // is not overwritten by the state, typing is sent 300 ms after the last
 // change (at once on blur), and nothing is sent while an IME composes.
 
-function Field({value, send}) {
-    const props = useStateField(value, send);
+function Field({value, send, controls}) {
+    const {pick, replace, ...props} = useStateField(value, send);
+    if (controls) {
+        controls.pick = pick;
+        controls.replace = replace;
+    }
     return <input aria-label="name" {...props}/>;
 }
 
 function setup(value = "Alice", send = jest.fn()) {
-    const utils = render(<Field value={value} send={send}/>);
+    const controls = {};
+    const utils = render(<Field value={value} send={send} controls={controls}/>);
     const input = screen.getByLabelText("name");
-    const setState = (next) => utils.rerender(<Field value={next} send={send}/>);
-    return {...utils, input, send, setState};
+    const setState = (next) => utils.rerender(
+        <Field value={next} send={send} controls={controls}/>);
+    return {...utils, input, send, setState, controls};
 }
 
 function type(input, text) {
@@ -58,6 +64,106 @@ test("a state update does not overwrite the field being typed into", () => {
     setState("Someone else");
 
     expect(input).toHaveValue("Alic");
+});
+
+// Another writer wins over the typing in progress (S4b review): the Qt
+// panels' HeldBackText rule.
+
+test("typing in progress when another writer writes the field is not sent", () => {
+    const {input, send, setState} = setup("Alice");
+    fireEvent.focus(input);
+    type(input, "Alic");
+
+    setState("Bob");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+
+    // Still shown while the field has focus, but not sent.
+    expect(input).toHaveValue("Alic");
+    expect(send).not.toHaveBeenCalled();
+    // Leaving shows the other writer's value, and sends nothing.
+    fireEvent.blur(input);
+    expect(send).not.toHaveBeenCalled();
+    expect(input).toHaveValue("Bob");
+});
+
+test("what is typed after another writer's write is sent", () => {
+    const {input, send, setState} = setup("Alice");
+    fireEvent.focus(input);
+    type(input, "Alic");
+    setState("Bob");
+
+    type(input, "Alicia");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith("Alicia");
+});
+
+test("the field's own echo is not another writer", () => {
+    const {input, send, setState} = setup("Alice");
+    fireEvent.focus(input);
+    type(input, " Alicia");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+    expect(send).toHaveBeenLastCalledWith(" Alicia");
+    type(input, " Alicia K");
+
+    // The server trimmed it: still the echo of the send, not another
+    // writer, so the typing after the send is kept and sent.
+    setState("Alicia");
+    fireEvent.blur(input);
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenLastCalledWith(" Alicia K");
+});
+
+test("each of several sends in flight takes one echo", () => {
+    const {input, send, setState} = setup("");
+    fireEvent.focus(input);
+    type(input, "A");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+    type(input, "AB");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+    type(input, "ABC");
+
+    setState("A");
+    setState("AB");
+    fireEvent.blur(input);
+
+    expect(send.mock.calls).toEqual([["A"], ["AB"], ["ABC"]]);
+});
+
+test("a write after the echo is another writer's", () => {
+    const {input, send, setState} = setup("Alice");
+    fireEvent.focus(input);
+    type(input, "Alicia");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+    setState("Alicia");
+    type(input, "Alicia K");
+
+    setState("Bob");
+    fireEvent.blur(input);
+
+    expect(send.mock.calls).toEqual([["Alicia"]]);
+    expect(input).toHaveValue("Bob");
+});
+
+test("a send with no echo stops counting once its grace is up", async () => {
+    // The server kept the value as it was: no change comes for that send,
+    // so a later change is not taken as its echo.
+    const send = jest.fn(() => Promise.resolve());
+    const {input, setState} = setup("Alice", send);
+    act(() => input.focus());
+    type(input, "Alice ");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+    await act(async () => {});
+    wait(ECHO_GRACE_MS);
+    type(input, "Alice K");
+
+    setState("Bob");
+    fireEvent.blur(input);
+
+    expect(send.mock.calls).toEqual([["Alice "]]);
+    expect(input).toHaveValue("Bob");
 });
 
 test("typing is sent 300 ms after the last change, once", () => {
@@ -367,4 +473,70 @@ test("an answer that comes after the field went away does nothing", async () => 
     } finally {
         timeouts.mockRestore();
     }
+});
+
+
+// ── the controls of a field with suggestions (S4b) ──
+
+test("a picked suggestion is shown and sent at once", () => {
+    const {input, send, controls} = setup("");
+    fireEvent.focus(input);
+    type(input, "実");
+
+    act(() => controls.pick("実況"));
+
+    expect(input).toHaveValue("実況");
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith("実況");
+    // The typing it replaced is not sent after it.
+    wait(STATE_FIELD_DEBOUNCE_MS);
+    expect(send).toHaveBeenCalledTimes(1);
+});
+
+test("a replacing choice drops the typing and waits for its own echo", async () => {
+    const {input, send, setState, controls} = setup("Old");
+    fireEvent.focus(input);
+    type(input, "Ad");
+    let answer;
+    const request = new Promise((resolve) => {
+        answer = resolve;
+    });
+
+    act(() => controls.replace("Ada", request));
+
+    expect(input).toHaveValue("Ada");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+    fireEvent.blur(input);
+    // Neither the typing nor the choice goes through this field's send.
+    expect(send).not.toHaveBeenCalled();
+    // Left before the echo: the choice stays shown, not the old state.
+    expect(input).toHaveValue("Ada");
+    await act(async () => answer());
+    setState("Ada");
+    expect(input).toHaveValue("Ada");
+});
+
+test("a replacing choice the server changes shows the server's value", async () => {
+    const {input, setState, controls} = setup("Old");
+    fireEvent.focus(input);
+
+    await act(async () => controls.replace("qbad", Promise.resolve()));
+    // Censored on the way: the echo is another value. Being typed into,
+    // the field is left alone; once left, the state wins when no echo of
+    // the choice came within the grace (as for typing).
+    setState("***");
+    expect(input).toHaveValue("qbad");
+    fireEvent.blur(input);
+    wait(ECHO_GRACE_MS);
+    expect(input).toHaveValue("***");
+});
+
+test("a replacing choice that fails falls back to the state", async () => {
+    const {input, controls} = setup("Old");
+    fireEvent.focus(input);
+    fireEvent.blur(input);
+
+    await act(async () => controls.replace("Ada", Promise.reject(new Error("409"))));
+
+    expect(input).toHaveValue("Old");
 });

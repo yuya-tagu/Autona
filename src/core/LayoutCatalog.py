@@ -50,6 +50,8 @@ from typing import NamedTuple
 
 from loguru import logger
 
+from .SettingsManager import SettingsManager
+
 LAYOUT_ROOT = "layout"
 CUSTOM_DIRNAME = "custom"
 DEFAULT_ENTRY = "index.html"
@@ -94,6 +96,16 @@ _LEGACY_PREFIXES = (
 )
 
 
+# The design a panel shows and hands to OBS, per kind that has one here:
+# the settings.json key it is kept under and the layout picked when none is
+# kept (or the kept one is gone). Only the Commentary page's so far (ADR-005
+# S4b; the Qt panel reads the same key and the same default). The Board and
+# Top 8 panels keep their own until they move to the Web UI.
+SELECTION_SETTINGS = {
+    KIND_COMMENTARY: ("commentary.selected_design", "commentators"),
+}
+
+
 class Catalog(NamedTuple):
     layouts: list
     # Absolute directories whose change can add, remove or rename an entry
@@ -126,6 +138,39 @@ def Layouts(kinds=None, root=None):
     if KIND_DESIGNER in wanted:
         layouts.extend(_DesignerLayouts(base))
     return _Disambiguate(layouts)
+
+
+def SelectedLayout(kind, root=None):
+    """The catalog entry selected for ``kind`` (a SELECTION_SETTINGS kind),
+    or None when the kind lists no layout at all.
+
+    The kept id when the catalog still lists it, else the kind's default,
+    else the first entry -- the Commentary panel's rule for its combo. What
+    is kept is not rewritten by a fallback: the operator's choice comes back
+    when its folder does.
+    """
+    key, default = SELECTION_SETTINGS[kind]
+    layouts = Layouts([kind], root)
+    byId = {entry["id"]: entry for entry in layouts}
+    kept = SettingsManager.Get(key, default)
+    if isinstance(kept, str) and kept in byId:
+        return byId[kept]
+    if default in byId:
+        return byId[default]
+    return layouts[0] if layouts else None
+
+
+def SelectLayout(kind, layoutId, root=None):
+    """Keep ``layoutId`` as the selected layout of ``kind`` (a
+    SELECTION_SETTINGS kind) and return its entry; None, keeping nothing,
+    when the catalog does not list it for that kind. The settings.json key
+    and its value (a layout id) are the ones the panels always kept."""
+    key, _default = SELECTION_SETTINGS[kind]
+    entry = next((entry for entry in Layouts([kind], root)
+                  if entry["id"] == layoutId), None)
+    if entry is not None:
+        SettingsManager.Set(key, layoutId)
+    return entry
 
 
 def CustomLayouts(customRoot):

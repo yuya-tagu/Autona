@@ -493,8 +493,11 @@ def test_db_updated_fires_once_per_change(adapter, settings):
     db.DeletePlayer("Alpha")
     assert len(emitted) == 4
     AutonaPlayerDB.SetTournamentPlayers(["Bravo"])
+    assert len(emitted) == 4  # the fetch announces its own save
     AutonaPlayerDB.ClearTournamentPlayers()
-    assert len(emitted) == 4
+    assert len(emitted) == 5
+    AutonaPlayerDB.ClearTournamentPlayers()  # no entrants to forget
+    assert len(emitted) == 5
     assert all(emitted)  # on the GUI thread
 
     tags = [AutonaPlayerDB.model.item(row).text()
@@ -539,6 +542,34 @@ def test_a_worker_change_reaches_db_updated_on_the_gui_thread(
                   for row in range(proxy.rowCount())) == ["E1", "E2"]
     AutonaPlayerDB.ClearTournamentPlayers()
     assert proxy.rowCount() == 20
+
+
+def test_unloading_the_tournament_pushes_the_whole_db_again(adapter, settings):
+    """The web pages' name candidates are the player DB push, which sends
+    TournamentPlayers() on every db_updated (bootstrap_gui wires it to
+    ws_playerdb). Forgetting the entrants changes what that sends, so it
+    is announced: without it the pages kept the previous tournament's
+    entrants until the next DB change (ADR-005 S4b review)."""
+    from src.AutonaWebOperations import get_playerdb
+
+    AutonaPlayerDB, db, emitted = adapter
+    db.LoadDB()
+    db.AddPlayers([_player("Alpha"), _player("Bravo")])
+    AutonaPlayerDB.SetTournamentPlayers(["Bravo"])
+    assert sorted(get_playerdb()) == ["Bravo"]
+
+    pushed = []
+
+    def push():
+        pushed.append(sorted(get_playerdb()))
+
+    AutonaPlayerDB.signals.db_updated.connect(push)
+    try:
+        AutonaPlayerDB.ClearTournamentPlayers()
+    finally:
+        AutonaPlayerDB.signals.db_updated.disconnect(push)
+
+    assert pushed == [["Alpha", "Bravo"]]
 
 
 def test_the_model_build_still_normalises_the_loaded_games_mains(
