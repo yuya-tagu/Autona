@@ -459,9 +459,25 @@ colors
 stream
 ├── url                            配信先 URL（X 投稿・リザルトが参照）
 ├── title                          配信タイトル
+├── titleAuto                      自動生成が最後に作ったタイトル（`title` がこれか空なら自動のタイトル）
 ├── orgIconVersion                 layout/stream_org_icon.png の mtime（0 = 未登録）
-└── orgThumbVersion                layout/stream_org_thumbnail.png の mtime（0 = 未登録）
+├── orgThumbVersion                layout/stream_org_thumbnail.png の mtime（0 = 未登録）
+└── thumbnail                      配信サムネ生成の状態（起動のたびに idle へ戻る）
+    ├── status                     idle | running | done | error
+    ├── path                       最後に生成できた画像（`out/stream/thumbnail_*.jpg`。error でも前回のまま）
+    ├── error                      error の理由（`no_org_thumbnail` / `no_banner` / 例外の文言）
+    └── revision                   生成を受け付けるたびに 1 増える
 ```
+
+書き手はすべて core の `src/core/StreamService.py`（ADR-005 S4d。`url` / `title` は
+`AutonaActions.SetStreamUrl` / `SetStreamTitle` 経由）。`title` は大会名・ゲーム略称（state の
+observer）と上位の参加者（provider が `StreamService.SetTopEntrants` で渡す）から自動生成し、
+生成のたびに `titleAuto` に publish する。`title` は、それが前回の自動値（`titleAuto`）か空のときだけ
+上書きする（`TitleIsAuto`。手入力を守る）。`titleAuto` は state と一緒に永続化されるので、手入力の
+タイトルは再起動しても残る（`titleAuto` の無い S4d 前の state では、`title` を自動の値として扱う）。
+クライアントの入力欄は、欄を離れたときに `TypedTitleWins` で打ちかけを送るかを決める（打っている間に
+届いた自動のタイトルには打ちかけが勝ち、別の書き手のタイトルには負ける）。パネルが無くても・
+ヘッドレスでも動く。
 
 > **データ階層を混ぜないこと**: `tournamentInfo.*`（大会: 名前・日付・会場・大会アイコン/バナー）、
 > `stream.*`（配信: 配信先・配信タイトル・配信団体素材）、`score.{N}.*`（試合: 選手・スコア・
@@ -478,7 +494,8 @@ stream
 > 大会単位のデータ）。
 >
 > `orgIconVersion` / `orgThumbVersion` は `tournamentInfo.logoVersion` と同じキャッシュバスト
-> 用 mtime。オーバーレイは `/layout/stream_org_icon.png?v={version}` で参照する。
+> 用 mtime。素材を読むオーバーレイが `/layout/stream_org_icon.png?v={version}` の形で参照する
+> ための契約としてキーを残している（2026-10-31 時点で、同梱のオーバーレイにこれを読むものは無い）。
 
 ##### `ui` — UI 表示用キャッシュ
 
@@ -686,6 +703,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | `bsky_account.*` | Bluesky 連携 |
 | `update.*` | アップデーター（skipped_version 等） |
 | `designer.*` | Scoreboard Designer。`figma_pairing_code` は Figma プラグイン取込（`POST /api/designer/imports`）のペアリングコード（`XXXX-XXXX-XXXX`）。`AutonaDesignerService` が初回参照時に発行し、Designer の `Import` → `Figmaペアリングコード` で表示・再生成する。旧来の「取込は Origin `null` を許可するだけ」という穴はこれで解消（仕様・ロックの詳細は `docs/changes/layout-custom-unification.md` §7） |
+| `stream_channels` / `stream_thumbnail_options` | 配信設定（トップレベル）。チャンネル一覧 `[{name, url}]` と、配信サムネ生成のオプション `{source: banner\|org, style: center\|netflix, overlayOrgIcon: bool}`。読み書きは `src/core/StreamService.py`（後者は ADR-005 S4d で追加。前者に揃えてトップレベルに置いた） |
 | その他トップレベル（`program_language`, `TOURNAMENT_URL` 等） | 個別 |
 
 新規キーは原則ネームスペース付きで作成し、トップレベルは増やさない。
@@ -725,7 +743,7 @@ QSettings に保存された最後の選択に依存し、初期値は先頭ペ�
 | # | objectName | クラス | 主な責務 | 入力先 (Set) | 表示元 (Get) | デフォルト表示 |
 |---|------------|-------|---------|------------|------------|--------------|
 | 1 | `Tournament Info` | `AutonaTournamentInfoWidget` | 大会名・日付・URL など大会メタデータの編集、大会アイコン / バナー。**書き込みの正本は `src/core/TournamentInfoService.py`**（Start.gg ペイロード・表示大会名・`logoVersion`）で、パネルは手入力と描画のみ | `tournamentInfo.*`（手入力） | `tournamentInfo.*` | ✓（最初に表示） |
-| 1.5 | `Stream Settings` | `AutonaStreamSettingsWidget` | 配信先・配信タイトル・配信団体アイコン / サムネイルの登録・配信サムネイル生成。`stream.url` / `title` の書き込みは `AutonaActions.SetStreamUrl` / `SetStreamTitle`（同値なら書かない） | `stream.*` | `stream.*`, `tournamentInfo.*` | — |
+| 1.5 | `Stream Settings` | `AutonaStreamSettingsWidget` | 配信先・配信タイトル・配信団体アイコン / サムネイルの登録・配信サムネイル生成。**処理の正本は `src/core/StreamService.py`**（タイトルの自動生成・チャンネル CRUD・素材の取り込み・サムネ生成のジョブ。ADR-005 S4d）で、パネルはファイル選択・ダイアログ・プレビュー・クリップボードと state の描画だけ。`stream.url` / `title` の手入力は `AutonaActions.SetStreamUrl` / `SetStreamTitle`（同値なら書かない） | `stream.*`（core 経由） | `stream.*` | — |
 | 2 | `Thumbnail Settings` | `AutonaThumbnailSettingsWidget` | サムネイルテンプレ選択・背景指定・プレビュー・PNG/JPG 保存・クリップボードコピー | `thumbnail_config.*`（SettingsManager） | `score.*`, `tournamentInfo.*`, `thumbnail_config.*` | ✓（条件付き） |
 | 3 | `Result Settings` | `AutonaResultSettingsWidget` | リザルトレイアウト選択・選手入力・プレビュー・PNG/JPG 保存・クリップボードコピー。`result_players` の書き込みは `AutonaActions.PublishResultPlayers` | `result_config.*`, `result_players` | `tournamentInfo.*`, `result_players` | ✓ |
 | 4 | `Top8` | `AutonaTop8Widget` | Top 8 ダブルエリミの選手・試合スコア編集、Start.gg 読み込み、OBS 用 URL 案内・プレビュー。**書き込みの正本は `src/core/Top8Service.py`**（Start.gg の取り込みも。パネルは state を描画するだけ。ADR-005 S3e-8） | `top8.*` | `top8.*`, `tournamentInfo.*` | ✓ |

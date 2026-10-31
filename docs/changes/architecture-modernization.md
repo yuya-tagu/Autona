@@ -4193,3 +4193,123 @@ IME 実機ゲート通過を受けて、Qt 版の実況・解説パネルと、�
   - 設定 → 一般に「実況・解説パネルを従来版（Qt）で表示する」が出ない
   - 以前その設定を ON にしていた `settings.json` でも、サイドバーの「実況・解説」が Web 版で開く
   - 起動後の Commentary を含む各パネルの切替が通常どおり（メモリ・フォーカスに退行が無い）
+
+### S4 Stream（配信設定）の React 化 — 設計（2026-10-31・オーナー承認済み）
+
+オーナー判断（2026-10-31）: 下記の設計を承認。論点 1〜5 は推奨案どおり（画像コピーは同じ PC だけ・アップロードは JSON + base64 で上限 20MB・生成オプションは保存・退路は作らない・S4d → S4e を自走し S4e の後で停止）。
+
+**範囲**: サイドバー Setup の「配信設定」（`src/AutonaStreamSettingsWidget.py`）を、S4a の共有ビューに載せた React ページ `/web/stream` に移し、Qt 版を消す。Commentary と違い、ロジックがウィジェットに残っているので、**先に core 化（S4d）してから React 化（S4e）する** 2 段にする。
+
+**棚卸し（2026-10-31・HEAD 7f64ca9c）**
+
+- ウィジェット 713 行 + `.ui` 492 行。カードは 4 枚
+  - 配信先: 編集できるコンボ（`stream_channels` の名前 / URL、手入力の URL も可）と、追加・編集・削除の自作ダイアログ
+  - 配信タイトル: 1 行入力とコピー
+  - 配信団体アイコン / サムネ: ファイル選択 → `QPixmap` で長辺 512 / 1920 に縮小 → `layout/stream_org_{icon,thumbnail}.png`。リセット（確認ダイアログ）
+  - 配信サムネ生成: 背景（大会バナー / 団体サムネ）× スタイル（Center / Netflix）× アイコン合成。PIL で `out/stream/thumbnail_*.jpg`（30 世代）。プレビュー・画像のクリップボードコピー
+- 書き手
+  - `stream.url` / `stream.title` は既に `AutonaActions`（`SetStreamUrl` / `SetStreamTitle`）
+  - それ以外はウィジェット直: `settings.json` の `stream_channels` を `SettingsManager.Set`、団体素材の保存・削除、`stream.org*Version` の publish、サムネの PIL 処理
+- **タイトルの自動生成がウィジェットにある**
+  - 入力: 大会名・ゲーム略称・`provider.top_entrants`（state に無い）。トリガーは Qt シグナル 3 本。手入力を守る記憶（前回の自動値）もウィジェットのメモリだけ
+  - そのため**パネルを開くまで `stream.title` が計算されず、ヘッドレスでは一度も生成されない**（既存の不具合）
+- サムネ生成は GUI スレッドで同期に start.gg の gql（バナー URL）と `requests.get`（timeout 20s）を呼ぶ
+- 生成オプション（ラジオ・チェック）は保存されず、パネルを作るたびに既定に戻る
+- Web 側: stream の v1 / Socket.IO / 操作は 0 件。`layout` と `out` は静的配信済みなので、団体素材と生成物は URL で読める。画像アップロードの経路は無い（前例は Designer の JSON + base64 data URL）
+- 読み手: `stream.url` はリザルトの告知文・スコアボードの X 投稿・Web の `CurrentSet.jsx`。`stream.title` の実コードの読み手は 0。`org*Version` をオーバーレイが読む実装は無い（Design.md の記述は実装とずれている。キーは契約として残す）
+- テスト: `test_actions` の `SetStream*`、schema の pin、objectName の改名ガード（`AutonaStreamSettings.ui` の 3 名）だけ。パネル本体のテストは 0。手動チェックリストに配信設定の節は無い
+
+**方針**
+
+1. **core に `StreamService`（`src/core/StreamService.py`、Qt 非依存）を置き、ウィジェットのロジックを全部移す**。生成は `bootstrap_core()`（ヘッドレスでも動く）
+   - タイトルの自動生成: 大会名・ゲーム略称は state の observer で、上位の参加者は provider が取得後に `StreamService.SetTopEntrants(...)` を呼んで渡す（Qt シグナル経由をやめる）。手入力を守る規則（現値が前回の自動値か空のときだけ上書き）は維持し、前回の自動値はサービスが持つ（プロセスの寿命 = サービスの寿命なので、パネルを開かなくても動く）。書き込みは今の `SetStreamTitle` のまま
+   - チャンネル一覧の CRUD（`settings.json` の `stream_channels`。形式不変）
+   - 団体素材の取り込み（bytes を受け取り PIL で縮小 → 同じパスに PNG で保存 → 版を publish）とリセット
+   - 配信サムネ生成: バナーの解決（gql → `requests` → 既存のフォールバック）と PIL の合成を `TaskExecutor` のジョブで行う。結果は state の新しいキー `stream.thumbnail`（`{status: idle|running|done|error, path, error, revision}`）に publish する（追加のみ。既存キーは不変）。同時に 2 本は走らせない（実行中の要求は 409）
+   - 生成オプションは `settings.json` に新しいキー `stream_thumbnail_options` で保存する（追加のみ。論点 3）
+2. **S4d の時点では Qt のウィジェットを残し、core を呼ぶだけにする**（単独でリリースでき、「開くまでタイトルが生成されない」不具合がここで直る）。サムネ生成は非同期になるので、ウィジェットは `stream.thumbnail` の state を描くだけにする
+3. **API は `/api/v1` に追加だけする**（Commentary と同じ型。特権経路なし・`WebAccess` の READ / WRITE・`test_webserver_routes.py` の台帳に足す）
+   - `PUT /api/v1/stream`（`url` / `title` の部分更新）
+   - `GET /api/v1/stream/channels`・`POST /api/v1/stream/channels`・`PUT` / `DELETE /api/v1/stream/channels/<index>`
+   - `PUT /api/v1/stream/org/<icon|thumbnail>`（JSON の base64 data URL。上限 20MB・png / jpeg / bmp だけ。論点 2）・`DELETE /api/v1/stream/org`
+   - `GET` / `PUT /api/v1/stream/thumbnail/options`・`POST /api/v1/stream/thumbnail`（202 で受け、結果は state で届く）
+4. **React ページ `/web/stream`**: 4 枚のカードを MUI で。入力は `useStateField`（タイトル・手入力 URL）と `useStateChoice`（コンボ・ラジオ）。ダイアログは MUI の Dialog。素材とサムネのプレビューは `/layout/...?v=<版>` と `/out/stream/...` の静的配信。タイトルのコピーは Commentary の OBS URL と同じ経路
+5. **共有ビューの 2 枚目**: S4a 判断 1 で先送りした「複数のナビ項目 → 1 つのスタックページ」に対応する（`_WebPanel` が 2 回目に `RuntimeError` を出す件・ナビ index とスタック index のずれ）。ナビ項目の数と並びは変えないので `STATE_VERSION` は上げない
+6. **退路は作らない**（論点 4）。S4e で Qt 版を消す
+7. **テスト**: core は `StreamService` の単体（タイトル生成の切り詰め・シード無しの形・手入力を守る規則・パネルを開かなくても生成される・チャンネル CRUD・素材の縮小と版・サムネ生成の 3 オプション × 失敗時のフォールバック・同時 2 本の拒否）。v1 は契約テスト。React は RTL、Playwright で「チャンネル追加 → 選択 → state に出る」「サムネ生成 → プレビューが出る」
+
+**ステップ**
+
+| 段 | 内容 | 完了条件 |
+|----|------|---------|
+| S4d | `StreamService` の core 化（方針 1・2）。Qt ウィジェットは core を呼んで描くだけになる。docs のずれ（`features.md` の出力名・org 素材の記述）を直す | pytest 全量が通る。ウィジェットに `SettingsManager.Set` / PIL / `requests` / ファイル書き込みが無い（pin）。ヘッドレスでも大会を読み込むと `stream.title` が生成される（pin） |
+| S4e | v1 ルート・React ページ・共有ビューの 2 枚目対応・サイドバー切替・Qt 版の削除（ウィジェット・`.ui`・objectName ガードの 3 名・翻訳） | 上記 + Web の build / test・Playwright が通る。`src/` に `AutonaStreamSettingsWidget` が無い。新設の手動チェックリスト「配信設定」がオーナー実機で通る |
+
+**論点（オーナー判断）**
+
+1. **配信サムネの「画像をクリップボードにコピー」** → 推奨: **同じ PC（デスクトップの埋め込み・`127.0.0.1`）では残し、LAN の別端末ではボタンを隠して「画像を開く / 保存」にする**。Web の画像コピー（`ClipboardItem`）は安全なコンテキストが要り、`127.0.0.1` は使えるが LAN の http では使えない
+2. **画像アップロードの形** → 推奨: **JSON + base64 data URL（Designer の前例）・上限 20MB**。multipart の受け口を新しく作らずに済む。縮小は core（PIL）で行うので、送る側は元の画像のまま
+3. **生成オプションを保存するか** → 推奨: **保存する**（`settings.json` に追加キー）。Web のページは Discarded や再読み込みで作り直されるので、保存しないと Qt 版より頻繁に既定へ戻る
+4. **退路（Qt 版に戻す設定）を作るか** → 推奨: **作らない**。入力欄はタイトルと URL の 2 つだけで、IME の規則は Commentary のゲートで確認済み。戻す必要があれば PR の revert で戻す
+5. **自走の範囲** → 推奨: **S4d → S4e を自走（各段でコミット・push・PR 作成まで）し、S4e の後で停止**。次のパネル（Thumbnail 以降）はまた 1 枚ずつ設計を出す
+
+**対象外**: 試合サムネ（サムネイルパネル）とのバナー定数の共通化（そのパネルを移すときに行う）、`stream.title` を読むオーバーレイの追加、YouTube API との連携
+
+**見積り**: S4d は中（core 1 ファイル + provider の 1 か所 + ウィジェットの薄化 + テスト）、S4e は中〜大（v1 ルート 9 本 + React ページ 1 枚 + 共有ビューの 2 枚目対応 + テスト）
+
+#### S4d StreamService の core 化（2026-10-31）
+
+配信設定のロジックを core の `StreamService`（`src/core/StreamService.py`、Qt 非依存）に移し、Qt のパネル（`AutonaStreamSettingsWidget`）は core を呼んで state と保存済みのオプションを描くだけにした。配信タイトルはパネルを開かなくても・ヘッドレスでも、大会を読み込めば生成される（「開くまでタイトルが生成されない」不具合の修正）。外部契約は追加だけ: state に `stream.titleAuto` と `stream.thumbnail`、`settings.json` に `stream_thumbnail_options`。既存のキー（`stream.url` / `title` / `org*Version`・`stream_channels`）の形式、Socket.IO の payload の既存部分、既存 API、自動更新は変えていない。
+
+- **やったこと**
+  - `StreamService`（`bootstrap_core()` が `TournamentInfoService` の後に作って `Start()`）
+    - タイトル: 大会名とゲーム略称（`GAME_ABBREVIATION_FALLBACK` を含む）を state の observer（`state_updated` / `state_big_change`）で見て、変わったときだけ更新を 1 つ予約する。上位の参加者は provider が `SetTopEntrants` で渡す（start.gg の entrants ジョブの最後。大会の差し替え・解除ではアダプタの `_CancelEntrants` が空にする）。組み立ては純関数 `BuildTitle`（100 字に収まるまで後ろから削る・シードが 1 人も無ければ「大会名 - 略称」）。生成したタイトルは毎回 `stream.titleAuto` に publish し、`stream.title` は前回の自動値（`titleAuto`）か空のときだけ上書きする（手入力を守る規則は旧と同じ。判定は純関数 `TitleIsAuto`）。書き込みの `AutonaActions.SetStreamTitle` はそのまま。クライアントの欄が離れたときに打ちかけを送るかの規則も純関数 `TypedTitleWins` にした（S4e の React も使う）
+    - チャンネル: `Channels` / `AddChannel` / `UpdateChannel` / `DeleteChannel`（`stream_channels`。形式不変）。配信先がそのチャンネルの URL なら、編集で新しい URL に追従し、削除で空になる（旧パネルの挙動を core の規則にした）
+    - 団体素材: `ImportOrgAsset(kind, bytes)`（PNG / JPEG / MPO（最初のフレーム）/ BMP、5000 万画素まで。PIL で長辺 512 / 1920 に縮小 → 同じパスに PNG → 版を publish。答えは `imported` / `invalid_image` / `save_failed`）と `ResetOrgAssets()`（ファイル削除・版 0・背景が団体サムネならバナーへ戻す）
+    - サムネ生成: `GenerateThumbnail()` が `TaskExecutor` のジョブを 1 本積む（バナーの解決 = provider の `GetBannerURL` → `requests`（20 秒）→ `user_data/tournament_banner.png` → 同梱の既定バナー、PIL の合成、`out/stream/thumbnail_{source}_{style}_{日時}.jpg`、30 世代の剪定）。実行中の要求は `BUSY`（S4e で 409）。進捗と結果は `stream.thumbnail = {status, path, error, revision}`
+    - 生成オプション: `ThumbnailOptions()` / `SetThumbnailOptions(changes)`（`{source: banner|org, style: center|netflix, overlayOrgIcon: bool}`）
+  - provider: `StartGGDataProvider` の entrants ジョブが `SetTopEntrants(..., cancelled=cancel_event)` を呼ぶ（Qt シグナル 3 本での受け渡しをやめた）。アダプタに `GetBannerURL()`（ジョブから呼ぶブロッキングの照会）を足した
+  - `GuiExecutor.later(fn)`（`src/Helpers/AutonaQtHelper.py`）: GUI スレッドで呼んでも必ずイベントループに戻ってから走らせる（queued）。observer からタイトルの更新を外へ出すのに使う
+  - `StateSchema`: `STREAM_TITLE_AUTO_KEY`（`stream.titleAuto`）と、`STREAM_THUMBNAIL_KEY` と `stream.thumbnail.*` の 4 キーを `STREAM_KEYS`（`KEY_CATALOG`）に追加。`SeedPanelState()` が起動のたびに `DefaultStreamThumbnail()`（idle）に戻す。org 素材のコメントを実装に合わせた
+  - パネル: `SettingsManager`・PIL・`requests`・ファイルの書き込み・`PruneOutputFiles`・provider / アセットマネージャへの依存を消した。残したのはファイル選択（読んだ bytes を core に渡す）・チャンネルのダイアログ・リセットの確認・`QPixmap` のプレビュー・クリップボード。state の描画は Bridge の通知から 1 回にまとめて遅延で行う。タイトル欄は入力中は描き直さず、離れたときに `TypedTitleWins` で打ちかけを送るかを決める（`HeldBackText` は使わない。下のレビュー指摘 M1）。取り込みに失敗したら警告を出す。サムネは `stream.thumbnail` を描く（実行中は生成ボタンを無効化・「コピー」は未生成なら生成して、終わったらコピー）。ラジオ・チェックは保存済みのオプションを表示し、変更ごとに保存する
+  - docs: `docs/product/features.md`（配信サムネの出力名・試合サムネの出力先 `out/thumbnails/`・主要出力の表）、`.claude/design/Design.md`（`stream` の木に `thumbnail`・書き手・org 素材の記述・settings の表に `stream_channels` / `stream_thumbnail_options`・パネル表）
+  - テスト: `tests/test_stream_service.py`（新規 73 本）、`tests/test_bootstrap_split.py`（生成順の pin に 2 手順・core だけのプロセスで大会名からタイトルが出る・両シェルの bootstrap 後の `state_updated` / `state_big_change` の購読者の集合）、`tests/test_headless.py`（ヘッドレスで大会の読込 → タイトル、参加者を渡す → 「ft. ...」）、`tests/test_import_side_effects.py`（import で instance も購読もできない）、`tests/test_gui_executor.py`（`later` が GUI スレッドでも即時に走らない）
+- **判断と理由**
+  1. **observer の購読**: `.claude/rules/state-and-webserver.md` は「サービスは observer を購読しない」だが、承認済み設計（方針 1）どおり購読した。ゴーストの心配は、プロセスと同じ寿命のシングルトンで `Stop()` を持つので無い（テストは自分のサービスに差し替える間、セッションのものを `Stop()` する）。observer は `StateManager.lock` の中で走るので、中では 2 キーを読んで予約するだけで、書き込みは `later` でイベントループに戻ってから行う（pitfalls #16 #17。中で書くと、配信中の delta の途中に別の delta を publish する）。予約は 1 つにまとめる
+  2. **前回の自動値は state（`stream.titleAuto`）に持つ**: state.json に永続化されるので、起動後もそれが前回の自動値になる。自動のタイトルは起動後の最初の更新で今の大会に合わせて作り直され、手入力のタイトルは再起動しても残る（旧パネルは開くたびに欄が空から始まり、手入力のタイトルも上書きしていた。レビュー指摘 M1 / S4 で直した）。`titleAuto` の無い S4d 前の state は、`title` を自動の値として扱う（旧パネルを開いたときと同じく 1 回だけ作り直す）。クライアントからも自動のタイトルと手入力を見分けられる
+  3. **前の大会の参加者が後から届かない**: `SetTopEntrants` は cancel イベントをサービスのロックの中で確かめ、`_CancelEntrants` はイベントを立ててから空にする。ジョブが最後の確認を過ぎた後に大会が差し替わっても、前の大会の参加者が新しい大会のタイトルに混ざらない
+  4. **`stream.thumbnail.path` は `out/stream/...`（`./` なし・`/` 区切り）**: `StateManager` の書き出しは `./` で始まる文字列をファイルのコピーとして扱うため。アプリのディレクトリからの相対で、Web サーバーの URL パスとも同じ（S4e のプレビューにそのまま使える）。エラーは素材が無い 2 つだけコード（`no_org_thumbnail` / `no_banner`）で、ほかは例外の文言。失敗しても `path` は前回のものを残す
+  5. **実行中のフラグは結果を publish してから下ろす**: 先に下ろすと、間に始まった次の実行の `running` を前の結果が上書きしうる。`revision` は受け付けるたびに 1 進む（同じ秒に同じファイル名になっても読み手が区別できる）
+  6. **起動時は idle に戻す**: 実行はプロセスをまたがない（保存された `running` は終わらない）。前回の結果も出さない（旧パネルも出していなかった）
+  7. **生成オプションのキー名は `source` / `style` / `overlayOrgIcon`、置き場所はトップレベル**: 承認済み設計のキー名 `stream_thumbnail_options` のまま、既存の `stream_channels` と並べた。Design.md の「新規キーは原則ネームスペース付き」の例外として settings の表に明記した。保存値が壊れていれば既定に倒し、不正な変更は何も保存しない。値が変わらなければ `settings.json` を書かない
+  8. **団体素材の縮小は PIL**（旧: `QPixmap`）。受け付ける形式は旧ダイアログのフィルタ（png / jpg / bmp）に、スマホ・カメラが .jpg で保存する MPO（最初のフレームを使う）を足した。**画素の上限は 5000 万画素**（ヘッダの幅 × 高さで、デコードする前に断る）: よく撮られるスマホの写真（4800 万画素）と 8K の画像（3300 万画素）は通し、PNG / BMP を RGBA でデコードしても約 200MB に収まる。JPEG / MPO は `thumbnail()` が縮小したスケールでデコードするので、上限まででも軽い。PIL 自身の上限（8900 万画素で警告・1 億 7900 万画素でエラー）はプロセス全体の設定なので触らない。処理は「縮小 → 変換」の順（全サイズの画像を 1 回だけデコードし、変換のコピーを作らない）。ただしパレット・1 ビット・16 ビットのグレーは、縮小が最近傍になるか効かないので先に変換する。透過は RGBA で残す。書き込みは一時ファイル → `os.replace`（オーバーレイが書きかけを読まない）。Windows で対象が読まれていて置き換えに失敗したら、20 / 40 / 80ms 待って最大 4 回試し（PlayerDB と同じ予算）、だめなら `save_failed` にして一時ファイルを消す
+  9. **バナーの取得はジョブの中**: 旧実装は GUI スレッドで同期に gql とダウンロード（最大 20 秒）を待ち、UI が固まっていた。バナー URL の照会（provider）と剪定（`Helpers`）は core から import できないので `bootstrap_core()` が注入する
+  10. **ラジオの排他の不具合を直した**: `.ui` で 4 つのラジオが同じ親にあるため、Qt の自動排他で 1 グループ 4 択になり、スタイルを選ぶと背景の選択が外れていた。背景・スタイルを `QButtonGroup` 2 つに分けた（オプションを保存するには 2 つの独立した選択である必要がある）
+- **レビュー指摘の対応（2026-10-31）**
+  - M1（打ちかけが自動生成に負けて消える）: 判断 2 の `stream.titleAuto` と `TypedTitleWins`。打っている間に参加者の取得やゲームのロードで自動のタイトルが届いても、欄を離れたときに打ちかけを送る（自動生成は手入力に勝たない）。別の書き手（Web など）が書いたタイトルには、これまでどおり打ちかけが負ける。打っていない欄に残った古い値は書き戻さない。再起動しても手入力のタイトルが残る（S4 も解消）。pin: `test_typing_wins_over_an_auto_title_that_lands_meanwhile` / `test_a_typed_title_survives_a_restart` ほか
+  - S1: MPO を受け付ける（最初のフレーム）。取り込みに失敗したら、パネルが理由（読み込めない / 保存できない）を警告で出す
+  - S2: `.claude/rules/state-and-webserver.md` に、core サービスが observer を購読してよい狭い例外（プロセスと同じ寿命・`Stop()` を持つ・observer の中では読んで `later` で予約するだけ）を書き、ドメインサービスの表に `StreamService` を足した。両シェルの bootstrap 後の購読者の集合を `tests/test_bootstrap_split.py` の `STATE_SUBSCRIBERS` が pin する
+  - S3: ジョブは `TaskExecutor.stopping` を、始める前・バナー URL の照会とダウンロードの前後・書き出す前に見て、立っていれば `cancelled` で終える。shutdown でキャンセルされたジョブ（キューにいた・shutdown の後に積んだ）は `then` / `on_error` が走らないので、Future の done コールバックで `cancelled` を publish し、実行中のフラグを下ろす
+  - S5: テストを足した（パネルのチャンネル編集・削除で配信先が追従する・リセット後にラジオが大会バナーへ戻る・shutdown でキャンセルされたジョブ・ダウンロード中に止められたジョブ）
+  - S6: 判断 8 の画素の上限と処理の順。巨大画像（上限を超えたらデコードしない）・壊れた画像・MPO を pin
+  - N1: 保存済みオプションの描画は、ラジオ 4 つとチェックの信号を全部止める（相方が外れたときの `toggled` で保存し直さない）
+  - N2: チャンネルの CRUD は既存エントリの余分なキーを残す。dict でないエントリは数えずに飛ばし、次の書き込みで落とす
+  - N3: 置き換えの再試行（判断 8）。失敗はパネルが警告で出し、`.tmp` は残らない
+  - N4（記録のみ）: 配信先の追従は「state の URL が編集前の URL と同じとき」になった。旧パネルは、選択中のチャンネルを編集すると常に新しい URL を、削除すると常に空を書いていた。パネルから操作する限り選択中のチャンネルの URL が配信先なので結果は同じで、Web から別のチャンネルを編集しても配信先を奪わない分の改善寄りの挙動差
+  - N5（記録のみ）: テストハーネスではセッションの `StreamService` が動いたまま。他のテストが大会名やゲームを書いて `processEvents` すると、途中で `stream.title`（と `titleAuto`）が書かれる。全量は通っているが、delta や Set の列を golden と照合するテストを今後書くときは、そのテストの間 `StreamService.instance.Stop()` する（`tests/test_stream_service.py` の `env` フィクスチャが実例）
+  - N6: 新しい文言 3 つ（「サムネイルを生成しています…」と取り込み失敗の 2 つ）を `src/i18n/Autona_{ja,en}.ts` に足し、`scripts/compile_translations.ps1` で再コンパイルした（571 件 / 未完了 0）
+- **残課題**
+  - タイトルを空にしただけでは作り直さない。次に大会名・ゲーム・参加者が変わったときに生成する（旧と同じ）
+  - ヘッドレスではサムネ生成・チャンネル・素材の操作の入口がまだ無い（S4e の v1 で入る）。タイトルの自動生成はヘッドレスでも動く
+  - 試合サムネとのバナー定数の共通化は対象外のまま（設計の「対象外」）
+  - 起動時にタイトルの更新を予約できない場合（GUI executor がまだ無い）は警告を出してその変化を捨て、次の変化でまた予約する。両シェルは `bootstrap_core()` より前に executor を作るので、実際に起きるのはテストハーネスだけ
+- **オーナー実機確認**（`python main.py`）
+  - 配信設定を一度も開かずに大会を読み込む → 配信設定を開くと、タイトルが「大会名 ft. 上位の参加者 ... and more! - 略称」で入っている（参加者の取得が終わる前は「大会名 - 略称」）
+  - タイトルを手で書き換える → 別の大会を読み込んでも手入力のまま。**再起動しても手入力のまま**。欄を空にしてから大会を読み込み直すと自動のタイトルに戻る
+  - 大会を読み込んだ直後（参加者の取得中）にタイトル欄へ打ち始め、取得が終わってから欄を離れる → 打った文字が残る（自動のタイトルに置き換わらない）
+  - チャンネルの追加 → 選択される。選択中のチャンネルを編集 → 配信先が新しい URL になる。削除 → 配信先が空になる。再起動しても一覧と配信先が残る
+  - 団体アイコン / サムネを読み込む → プレビューが出て、`layout/stream_org_{icon,thumbnail}.png` が長辺 512 / 1920 以下の PNG になる（スマホで撮った .jpg も読める）。画像でないファイルを選ぶと「画像を読み込めませんでした…」の警告が出る。リセット → 両方「未登録」になり、背景が「団体サムネ」だったら「大会バナー」に戻る
+  - 背景とスタイルのラジオが独立して選べる（スタイルを変えても背景の選択が外れない）。オプションを変えて再起動すると選択が残る
+  - サムネ生成: 押すと「サムネイルを生成しています…」とボタンの無効化 → 終わるとプレビューと「Saved: out/stream/thumbnail_...jpg」。生成中も UI が固まらない（オフラインでも保存済み / 既定のバナーで生成される）。団体サムネ未登録で「団体サムネ」を選ぶとエラーの文言が出る
+  - 未生成の状態で「コピー」→ 生成が走り、終わるとクリップボードに画像が入る（Discord などへ貼り付けられる）
+  - ヘッドレス（`python main.py --headless`）で大会を読み込むと `out/stream/title.txt` にタイトルが出る

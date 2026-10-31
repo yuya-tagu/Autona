@@ -105,10 +105,14 @@ DISPLAY_OPTION_DEFAULTS = {
 
 # ── Assets whose mtime is published as a cache-bust version ──────────────
 
-# OBS overlays append these versions as a query string
+# A reader appends these versions as a query string
 # (``/layout/stream_org_icon.png?v={version}``) to get past the
-# Cache-Control: max-age AutonaWebServer serves. Paths are relative to the
-# process CWD, like every other mutable path in the app (./out, ./user_data).
+# Cache-Control: max-age AutonaWebServer serves. No shipped overlay reads
+# the stream org pair yet (checked 2026-10-31, ADR-005 S4d); the keys are
+# kept as a contract for the layouts and the Web page that will. Paths are
+# relative to the process CWD, like every other mutable path in the app
+# (./out, ./user_data). Written by core/StreamService.py (the import and
+# the reset) and seeded at launch by SeedPanelState() below.
 STREAM_ORG_ICON_PATH = "./layout/stream_org_icon.png"
 STREAM_ORG_THUMB_PATH = "./layout/stream_org_thumbnail.png"
 
@@ -461,13 +465,35 @@ TOURNAMENT_INFO_KEYS = (
 
 STREAM_URL_KEY = "url"
 STREAM_TITLE_KEY = "title"
+# The title the generator wrote last (ADR-005 S4d), whether or not it is
+# also in `title`: `title` holding it (or nothing) is what makes the title
+# auto-generated -- replaced by the next auto title, and by what an
+# operator types over it (core/StreamService.TitleIsAuto). Persisted with
+# the rest of the state, so a title typed by hand survives a restart.
+STREAM_TITLE_AUTO_KEY = "titleAuto"
+# The stream thumbnail generator's last run (ADR-005 S4d), one dict written
+# whole by core/StreamService.py: status idle | running | done | error, the
+# path of the last thumbnail generated (relative to the app directory, "/"
+# separated: "out/stream/thumbnail_....jpg"), the error of a failed run and
+# a revision that every run advances (a reader's cache-bust).
+STREAM_THUMBNAIL_KEY = "thumbnail"
 
 STREAM_KEYS = (
     STREAM_URL_KEY,
     STREAM_TITLE_KEY,
+    STREAM_TITLE_AUTO_KEY,
     "orgIconVersion",
     "orgThumbVersion",
+    f"{STREAM_THUMBNAIL_KEY}.status",
+    f"{STREAM_THUMBNAIL_KEY}.path",
+    f"{STREAM_THUMBNAIL_KEY}.error",
+    f"{STREAM_THUMBNAIL_KEY}.revision",
 )
+
+
+def DefaultStreamThumbnail() -> dict:
+    """`stream.thumbnail` before any run (a fresh dict on every call)."""
+    return {"status": "idle", "path": "", "error": "", "revision": 0}
 
 # colors.{feature}.* -- only features the operator explicitly set are present,
 # which is what makes the layouts' colors.{feature} -> tournamentInfo fallback
@@ -749,12 +775,19 @@ def SeedPanelState():
         COMMENTARY_ROOT,
         comms.NormalizeState(StateManager.Get(COMMENTARY_ROOT)))
 
-    # The org icon / thumbnail are served out of ./layout/ and OBS overlays
-    # cache-bust them with these mtimes, so the versions have to be current
-    # from launch whether or not the 配信設定 panel is ever opened. The panel
-    # republishes them itself after a load / reset.
+    # The org icon / thumbnail are served out of ./layout/ and a reader
+    # cache-busts them with these mtimes, so the versions have to be current
+    # from launch. core/StreamService.py republishes them after an import /
+    # a reset.
     for key, path in STREAM_ASSET_VERSIONS:
         PublishAssetVersion(key, path)
+
+    # The stream thumbnail generator starts idle: a run does not outlive the
+    # process (its job died with it, so a persisted "running" would never
+    # end), and the previous launch's result is not shown again -- the
+    # desktop panel did not show it either. Guarded like the versions above.
+    StateManager.SetIfChanged(
+        f"{STREAM_ROOT}.{STREAM_THUMBNAIL_KEY}", DefaultStreamThumbnail())
 
     for root in RETIRED_ROOTS:
         StateManager.Unset(root)

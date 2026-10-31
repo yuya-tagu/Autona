@@ -12,6 +12,7 @@ from ..Helpers.AutonaDirHelper import AutonaResolve
 from ..core.GameAssetCatalog import GameAssetCatalog
 from ..AutonaPlayerDB import AutonaPlayerDB
 from ..core.PlayerDB import PlayerDB
+from ..core.StreamService import StreamService
 from ..core.TaskExecutor import TaskExecutor
 from .TournamentDataProvider import TournamentDataProvider
 import orjson
@@ -2209,6 +2210,13 @@ class StartGGDataProvider(TournamentDataProvider):
 
             # Sort by seed (ascending); unseeded entries fall to the bottom
             self.top_entrants.sort(key=lambda e: e["seed"])
+            # The stream title is core's (ADR-005 S4d): hand it the
+            # entrants, unless another tournament was loaded meanwhile
+            # (checked under the service's lock, against the emptying the
+            # tournament change makes).
+            if StreamService.instance is not None:
+                StreamService.instance.SetTopEntrants(
+                    self.top_entrants, cancelled=cancel_event)
 
             try:
                 self.tshTdp.signals.entrants_updated.emit()

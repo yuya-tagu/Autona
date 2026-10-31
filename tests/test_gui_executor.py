@@ -82,3 +82,23 @@ def test_in_gui_thread_answers_for_the_application_thread(qapp):
 
     assert helper.in_gui_thread() is True
     assert seen == {"worker": False}
+
+
+def test_later_runs_from_the_event_loop_even_on_the_gui_thread(qapp):
+    # What a state observer uses to write outside the publish that called
+    # it (core/StreamService.py): never inline, from any thread.
+    if helper.gui_executor is None:
+        helper.init_gui_executor()
+    ran = []
+
+    helper.gui_executor.later(lambda: ran.append("gui"))
+    assert ran == []
+    thread = threading.Thread(
+        target=lambda: helper.gui_executor.later(lambda: ran.append(
+            threading.current_thread().name)))
+    thread.start()
+    thread.join(5.0)
+    assert ran == []
+
+    qapp.processEvents()
+    assert ran == ["gui", threading.current_thread().name]

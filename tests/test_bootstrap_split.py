@@ -136,6 +136,11 @@ def test_bootstrap_core_steps_and_their_order():
         "SetFollowService.fetcher = AutonaSetFollowUtil()",
         "SetFollowService.boardHost = AutonaWebOperations.current_board_host",
         "TournamentInfoService()",
+        # The 配信設定 operations (ADR-005 S4d): after the state layer,
+        # AutonaActions, the executor and the provider; started (following
+        # the tournament name and game) before the shells' launch seed.
+        "StreamService()",
+        "StreamService.instance.Start()",
         "CountryCatalog()",
         "AutonaDesignerService.MigrateLegacyProjects()",
     ]
@@ -328,6 +333,14 @@ def on_worker(fn):
     thread.start()
     thread.join()
     return box["value"]
+
+def state_subscribers():
+    """Who follows the state's publishes, by qualified name."""
+    from src.core.StateManager import StateManager
+    return {name: sorted(
+                getattr(callback, "__qualname__", repr(callback))
+                for callback in getattr(StateManager.observers, name)._callbacks)
+            for name in ("state_updated", "state_big_change")}
 '''
 
 
@@ -355,14 +368,27 @@ from src.core.BadWordFilter import BadWordFilter
 from src.core.CountryCatalog import CountryCatalog
 from src.core.GameAssetCatalog import GameAssetCatalog
 from src.core.PlayerDB import PlayerDB
+from src.core.StateManager import StateManager
+from src.core.StreamService import StreamService
 from src.core.TaskExecutor import TaskExecutor
 from src.core.TournamentInfoService import TournamentInfoService
+from src.Helpers import AutonaQtHelper
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 
 # The filter reads the program locale through the injected callable, at
 # censor time: a locale loaded after the bootstrap is the one it sees.
 AutonaLocaleHelper.programLocale = "ja"
 filter_locale = BadWordFilter.instance._programLocale()
+
+# The stream title is core's (ADR-005 S4d): with no window and no panel, a
+# tournament name written to the state becomes stream.title once the event
+# loop runs the refresh the observer queued (through the GUI executor, made
+# before the bootstrap by both shells -- here after it, as the harness does).
+AutonaQtHelper.init_gui_executor()
+StateManager.Set("tournamentInfo.tournamentName", "Core Cup")
+title_before_loop = StateManager.Get("stream.title", "")
+app.processEvents()
+stream_title = StateManager.Get("stream.title", "")
 
 report({
     "app_type": type(QCoreApplication.instance()).__name__,
@@ -377,7 +403,10 @@ report({
         "TournamentInfoService": TournamentInfoService.instance is not None,
         "CountryCatalog": CountryCatalog.instance is not None,
         "TaskExecutor": TaskExecutor.instance is not None,
+        "StreamService": StreamService.instance is not None,
     },
+    "stream_title": [title_before_loop, stream_title],
+    "state_subscribers": state_subscribers(),
     # Made, but no lane thread until the first submit.
     "executor_threads": [t.name for t in threading.enumerate()
                          if t.name.startswith(("AutonaJob", "AutonaFanout"))],
@@ -414,6 +443,20 @@ report({
 '''
 
 
+# Everything that follows the state's publishes once the shells are built:
+# the Qt adapter (every widget connects to it, never to the channels), and
+# the one core service allowed to subscribe (ADR-005 S4d: process-long,
+# with Stop(), and it only reads and queues inside the observer -- see
+# .claude/rules/state-and-webserver.md). A new subscriber is a decision to
+# make there, not here.
+STATE_SUBSCRIBERS = {
+    "state_updated": ["StateManagerBridge._onStateUpdated",
+                      "StreamService._OnStatePublished"],
+    "state_big_change": ["StateManagerBridge._onStateBigChange",
+                         "StreamService._OnStatePublished"],
+}
+
+
 def test_bootstrap_core_runs_under_a_bare_qcoreapplication(tmp_path):
     result = _probe(tmp_path, _CORE_SCRIPT)
 
@@ -437,6 +480,10 @@ def test_bootstrap_core_runs_under_a_bare_qcoreapplication(tmp_path):
     assert result["filter_country_languages"] == ["ja"]
     assert result["filter_country_continent"] == "SA"
     assert result["player_db_relay"] is True
+    # The stream title follows the tournament with no panel (ADR-005 S4d),
+    # written from the event loop, never from inside the publish.
+    assert result["stream_title"] == ["", "Core Cup"]
+    assert result["state_subscribers"] == STATE_SUBSCRIBERS
     # The QCoreApplication's thread is "the GUI thread" for GuiExecutor's
     # purposes: the headless shell's event loop runs there.
     assert result["in_gui_thread_main"] is True
@@ -517,6 +564,7 @@ report({
         AutonaWebOperations.renderThumbnail
         == AutonaScoreboardManager.instance.RenderThumbnail],
     "player_db_model": AutonaPlayerDB.modelEnabled,
+    "state_subscribers": state_subscribers(),
     "in_gui_thread_main": in_gui_thread(),
     "in_gui_thread_worker": on_worker(in_gui_thread),
 })
@@ -537,6 +585,7 @@ def test_bootstrap_gui_builds_the_adapters_and_resets_the_score_root(
     assert result["game_loader"] is True
     assert result["shell_operations"] == [True, True]
     assert result["player_db_model"] is True
+    assert result["state_subscribers"] == STATE_SUBSCRIBERS
     assert result["in_gui_thread_main"] is True
     assert result["in_gui_thread_worker"] is False
 

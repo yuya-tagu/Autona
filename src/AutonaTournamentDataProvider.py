@@ -24,6 +24,7 @@ from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from .core.SettingsManager import SettingsManager
 from .core.StateManager import StateManager
+from .core.StreamService import StreamService
 from .core.TaskExecutor import TaskExecutor
 from .AutonaPlayerDB import AutonaPlayerDB
 from .Helpers import AutonaQtHelper
@@ -219,10 +220,28 @@ class AutonaTournamentDataProvider(QObject):
         thread drops (AutonaPlayerDB.SetTournamentPlayers). Otherwise a
         replaced tournament's fetch kept paging and finally installed its
         players over the new tournament's (or over the cleared filter).
-        GUI thread."""
+        GUI thread.
+
+        Called whenever the loaded tournament is about to be replaced (or
+        unset), so the stream title's top entrants go with it (ADR-005 S4d;
+        the panel used to read them off the new provider, empty until its
+        fetch was done). Set before the emptying, the cancel event also
+        stops a fetch that is just handing its entrants over
+        (StreamService.SetTopEntrants)."""
         if self._entrantsCancel is not None:
             self._entrantsCancel.set()
             self._entrantsCancel = None
+        if StreamService.instance is not None:
+            StreamService.instance.SetTopEntrants([])
+
+    def GetBannerURL(self):
+        """The loaded tournament's banner URL; None with no tournament or
+        none found. Blocking (a start.gg request): the stream thumbnail
+        job's banner lookup (ADR-005 S4d), never for the GUI thread."""
+        provider = self.provider
+        if provider is None:
+            return None
+        return provider.GetBannerURL()
 
     def SetStartggEventSlug(self, mainWindow):
         inp = QDialog(mainWindow)

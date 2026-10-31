@@ -264,6 +264,30 @@ def bootstrap_core():
         TournamentInfoService.instance = TournamentInfoService(
             formatEventDate=AutonaLocaleHelper.FormatExportDate)
 
+    # ORDER CONSTRAINT: the 配信設定 operations (ADR-005 S4d) after what
+    # they write through and read -- the state layer and AutonaActions (the
+    # stream title), the task executor (the thumbnail job) and the provider,
+    # whose banner lookup is bound here (its entrants fetch hands the top
+    # entrants to StreamService.instance, read when it does). Started, i.e.
+    # following the state's tournament name and game, before the shells'
+    # launch seed and tournament restore, which the first title is made
+    # from: the title is generated whether or not the panel is ever shown,
+    # headless too. A refresh is deferred to the main thread's event loop
+    # through the GUI executor, read when one is queued: both shells make it
+    # before calling this (the test harness after; a refresh queued before
+    # it exists is dropped with a warning, and the next change queues
+    # again). The output pruning is a Helpers function core may not import,
+    # hence injected.
+    from .Helpers import AutonaQtHelper
+    from .Helpers.AutonaOutputRetention import PruneOutputFiles
+    from .core.StreamService import StreamService
+    if StreamService.instance is None:
+        StreamService.instance = StreamService(
+            later=lambda fn: AutonaQtHelper.gui_executor.later(fn),
+            bannerUrl=AutonaTournamentDataProvider.instance.GetBannerURL,
+            prune=PruneOutputFiles)
+        StreamService.instance.Start()
+
     # ORDER CONSTRAINT: the country catalog (the Qt-free source of truth for
     # countries, regions and the city -> region lookup, ADR-005 S1c) has to
     # exist before its Qt adapter (bootstrap_gui()), whose LoadCountries()

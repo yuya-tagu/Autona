@@ -2338,6 +2338,21 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <source>Sample Tournament</source>
         <translation>サンプル大会</translation>
     </message>
+    <message>
+        <location filename="..\AutonaStreamSettingsWidget.py" line="530" />
+        <source>サムネイルを生成しています…</source>
+        <translation>サムネイルを生成しています…</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStreamSettingsWidget.py" line="376" />
+        <source>画像を保存できませんでした。ほかのアプリがファイルを開いていないか確認してください。</source>
+        <translation>画像を保存できませんでした。ほかのアプリがファイルを開いていないか確認してください。</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaStreamSettingsWidget.py" line="380" />
+        <source>画像を読み込めませんでした。PNG / JPEG / BMP（5000 万画素まで）の画像を選んでください。</source>
+        <translation>画像を読み込めませんでした。PNG / JPEG / BMP（5000 万画素まで）の画像を選んでください。</translation>
+    </message>
 </context><context>
     <name>layout_options</name>
     <message>
