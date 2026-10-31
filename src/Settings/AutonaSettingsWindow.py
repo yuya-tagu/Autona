@@ -105,18 +105,6 @@ class AutonaSettingsWindow(QDialog):
             True
         ))
 
-        # The way back to the Qt Commentary panel while its React page goes
-        # through the IME gate (ADR-005 S4b; S4c removes it). Read when the
-        # panel is first opened (AutonaWebPanelHost.UsesQtPanel).
-        generalSettings.append((
-            QApplication.translate(
-                "settings.qt_commentary_panel",
-                "Show the Commentary panel in its previous (Qt) version (takes effect on next restart)"),
-            "qt_commentary_panel",
-            "checkbox",
-            False
-        ))
-
         generalSettings.append((
             QApplication.translate(
                 "settings.team_1_default_color", "Default Color of Team 1"),

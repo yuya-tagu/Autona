@@ -113,7 +113,7 @@ publish する。ヘッドレスは同じものを core の `PlayerService.SeedE
     （`tests/test_player_apply.py` が AST で pin）。カード自身の操作（補完の選択・クリア・
     エディタの読込）の後は、入力中の欄も含めて描画する（`_RenderSlot(over=True)`）
   - Top 8・リザルトの各パネルは、まだコンボの行 dict から値を組んでいる（S4 で置き換え）。
-    実況パネルは ADR-005 S3e-2 で、アイコンの識別子（stem）だけを `CommentaryService.SetField` に渡すようになった。
+    実況パネルは Web 版（React）だけになり（S4c）、アイコンの識別子（stem）を `CommentaryService.SetField` に渡す。
     新しく同じ形を書かない
 - `src/core` 外で state を書いてよいのは `AutonaTournamentDataProvider`
   （`provider_videogame`）の 1 つだけ（`game.*` は ADR-005 S1a で

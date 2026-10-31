@@ -421,7 +421,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - `slot`: 1〜12（範囲外は `INVALID_ARGUMENT`）
 - body（部分更新・1 つ以上）: `{ "name": "…", "team": "…", "twitter": "…", "role": "…", "icon": "mic", "note": "…", "display": true }`。
   `display` は真偽値、他は文字列。`icon` は空文字か §5.4 の `icons[].id`。未知キー・型違いは `INVALID_ARGUMENT`
-- 委譲: `update_caster` → 欄ごとに `CommentaryService.SetField`（デスクトップの実況パネルと同じ関数。1 つの保存サイクル）
+- 委譲: `update_caster` → 欄ごとに `CommentaryService.SetField`（実況パネル（React 版）と同じ関数。1 つの保存サイクル）
 - **全キーを先に検証**し、1 つでも不正なら何も書かない
 - **表示の上限**: 他のスロットで既に 4 人（`maxDisplay`）が表示中のとき `display: true` は `409 CONFLICT`。
   同じリクエストの他の欄も書かない（判定と書き込みは `StateManager.lock` の中で行う）

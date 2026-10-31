@@ -268,7 +268,7 @@ pronoun 撤去）。現行挙動に合わせ修復し **62件グリーン化済�
 `core/CommentaryModel.NormalizeState` が起動時に一括で行う（呼び出しは
 パネル `__init__` から `Window._SeedPanelState()` へ移動。パネルが遅延構築のため）。
 
-**影響範囲**: `AutonaCommentaryWidget.py` / `core/CommentaryModel.py`
+**影響範囲**: `core/CommentaryModel.py`（`AutonaCommentaryWidget.py` は ADR-005 S4c で削除）
 
 ---
 

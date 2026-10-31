@@ -129,8 +129,8 @@ def make_section_title(text: str, parent: QWidget | None = None) -> QLabel:
 
 # ─── Settings-panel left pane ────────────────────────────────────
 #
-# The preview-style panels (Board / Thumbnail / Result / Top 8 /
-# Commentary) share a two-pane layout: settings in a fixed-width left
+# The preview-style panels (Board / Thumbnail / Result / Top 8)
+# share a two-pane layout: settings in a fixed-width left
 # pane, the preview filling the right. One width so they line up when
 # switching panels.
 
@@ -254,9 +254,8 @@ def horizontal_divider(parent: QWidget | None = None) -> QFrame:
 
 # ─── Drag-reorderable card list ──────────────────────────────────
 #
-# Shared by AutonaResultSettingsWidget (result player/team cards) and
-# AutonaCommentaryWidget (caster cards). A card is any QFrame added via
-# DragCardList.addCard; a DragGrip placed inside the card starts the
+# Used by AutonaResultSettingsWidget (result player/team cards). A card is
+# any QFrame added via DragCardList.addCard; a DragGrip placed inside the card starts the
 # move drag. Each list should pass its own `mime` so drags cannot land
 # on a foreign list.
 

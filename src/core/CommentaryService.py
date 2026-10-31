@@ -11,8 +11,8 @@ on first reveal), filled one of its cards and had the panel publish *every*
 card it held -- so a panel that had not seen a later change put its own,
 older copy of the other eleven slots back, and nothing worked without a
 panel. Now each operation reads the line-up from the state, changes what it
-was asked to change and publishes; the panel renders the state
-(``AutonaCommentaryWidget._RenderFromState``) and asks for its edits here.
+was asked to change and publishes; the React page (CommentaryPage) renders
+the state and asks for its edits here.
 
 What a web call publishes is unchanged (tests/fixtures/commentary/golden.json,
 recorded through the panel on 8aa8c33b): one unconditional ``Set`` of the

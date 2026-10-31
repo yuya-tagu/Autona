@@ -1139,7 +1139,6 @@
         <translation>スコアボード入力</translation>
     </message>
     <message>
-        <location filename="..\AutonaCommentaryWidget.py" line="20" />
         <location filename="..\Autona.py" line="367" />
         <source>Commentary</source>
         <translation>実況・解説設定</translation>
@@ -1433,7 +1432,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
 フェーズグループを選択してください。Start.ggがタイムアウトした場合は「Update bracket info」ボタンで再取得してください。</translation>
     </message>
     <message>
-        <location filename="..\AutonaCommentaryWidget.py" line="51" />
         <location filename="..\AutonaBracketWidget.py" line="82" />
         <source>Characters per player</source>
         <translation>各プレイヤーの使用キャラクター数</translation>
@@ -1449,45 +1447,34 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>ブラケット情報を更新</translation>
     </message>
     <message>
-        <location filename="..\AutonaCommentaryWidget.py" line="43" />
-        <source>Number of commentators</source>
-        <translation>解説者の数</translation>
-    </message>
-    <message>
         <location filename="..\AutonaScoreboardWidget.py" line="238" />
-        <location filename="..\AutonaCommentaryWidget.py" line="69" />
         <source>Real Name</source>
         <translation>本名</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="237" />
         <location filename="..\AutonaScoreboardPlayerWidget.py" line="90" />
-        <location filename="..\AutonaCommentaryWidget.py" line="70" />
         <source>Twitter</source>
         <translation>ツイッター</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="235" />
-        <location filename="..\AutonaCommentaryWidget.py" line="71" />
         <source>Seed</source>
         <translation>シード</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="239" />
-        <location filename="..\AutonaCommentaryWidget.py" line="72" />
         <source>Location</source>
         <translation>本拠地</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="236" />
-        <location filename="..\AutonaCommentaryWidget.py" line="73" />
         <source>Characters</source>
         <translation>使用キャラクター</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="240" />
         <location filename="..\AutonaScoreboardPlayerWidget.py" line="147" />
-        <location filename="..\AutonaCommentaryWidget.py" line="74" />
         <source>Additional information</source>
         <translation>追加情報</translation>
     </message>
@@ -2706,13 +2693,6 @@ OBS のブラウザソースと Web UI は動作しません。
         <location filename="..\Settings\AutonaSettingsWindow.py" line="106" />
         <source>Disables the individual game tracker (takes effect on next restart)</source>
         <translation>個別ゲームトラッカーを無効化（再起動後に反映）</translation>
-    </message>
-</context><context>
-    <name>settings.qt_commentary_panel</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="114" />
-        <source>Show the Commentary panel in its previous (Qt) version (takes effect on next restart)</source>
-        <translation>実況・解説パネルを従来版（Qt）で表示する（再起動後に反映）</translation>
     </message>
 </context><context>
     <name>settings.disable_overwrite</name>

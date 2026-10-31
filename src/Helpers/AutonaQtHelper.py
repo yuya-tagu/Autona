@@ -259,8 +259,8 @@ class HeldBackText:
     Not `isModified()`: typing that ends where it started is a keystroke,
     and would write the old value back (S2a).
 
-    One rule for the player cards, the boards' team names, the crew board
-    and the commentary panel. Keyed by whatever names a field to its owner
+    One rule for the player cards, the boards' team names, the crew board.
+    Keyed by whatever names a field to its owner
     (the widget, the field's state key, the team); a field never shown is
     taken to have shown nothing.
     """

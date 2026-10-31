@@ -56,8 +56,7 @@ class AutonaCrewBattleWidget(QWidget):
     operator is typing in is left alone until they leave it, and finishing
     it does not put back the text a render had to leave there -- what the
     operator typed is their edit, and is written, unless that very field
-    was written elsewhere meanwhile. The player cards' and the commentary
-    panel's rule (HeldBackText).
+    was written elsewhere meanwhile. The player cards' rule (HeldBackText).
     """
 
     def __init__(self, scoreboardNumber=3, *args):

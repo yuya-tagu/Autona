@@ -507,43 +507,6 @@ def test_no_menu_where_there_is_nothing_to_edit_or_copy(
     assert _rightClick(rig.host.view, monkeypatch, request_) == []
 
 
-@pytest.mark.parametrize("stored, qt", [
-    (None, False), (False, False), (True, True), ("true", False), (1, False),
-])
-def test_the_qt_panel_is_shown_only_when_switched_back(
-        monkeypatch, stored, qt):
-    from src import AutonaWebPanelHost as Host
-
-    settings = {} if stored is None else {"qt_commentary_panel": stored}
-    monkeypatch.setattr(
-        Host.SettingsManager, "Get",
-        lambda key, default=None: (
-            settings.get(key.split(".", 1)[1], default)
-            if key.startswith("general.") else default))
-
-    assert Host.UsesQtPanel("commentary") is qt
-    # A React panel without a Qt version has nothing to go back to.
-    assert Host.UsesQtPanel("shell-check") is False
-
-
-def test_every_fallback_is_a_react_panel_the_settings_window_offers():
-    import ast
-    from src import AutonaWebPanelHost as Host
-    from tests.conftest import PROJECT_ROOT
-
-    assert set(Host.QT_FALLBACK_SETTINGS) <= WebAccess.WEB_PANELS
-    source = (PROJECT_ROOT / "src" / "Settings"
-              / "AutonaSettingsWindow.py").read_text(encoding="utf-8")
-    offered = {node.elts[1].value for node in ast.walk(ast.parse(source))
-               if isinstance(node, ast.Tuple) and len(node.elts) == 4
-               and isinstance(node.elts[1], ast.Constant)
-               and isinstance(node.elts[2], ast.Constant)
-               and node.elts[2].value == "checkbox"}
-    for key in Host.QT_FALLBACK_SETTINGS.values():
-        section, name = key.split(".", 1)
-        assert section == "general" and name in offered, key
-
-
 # The Window (src/Autona.py) is read, not imported: that import is the
 # app's startup (agent-pitfalls #1).
 def _windowMethod(name):
@@ -564,20 +527,16 @@ def _calls(node):
             for call in ast.walk(node) if isinstance(call, ast.Call)]
 
 
-def test_the_commentary_item_opens_the_react_page_unless_switched_back():
+def test_the_commentary_item_opens_the_react_page():
     import ast
     factory = _windowMethod("_CreateCommentaryPanel")
     calls = _calls(factory)
 
-    # First the switch, then the web page, and the Qt panel stays reachable.
-    assert ("UsesQtPanel", ["'commentary'"]) in calls
+    # The React page is the only Commentary panel (the Qt one and its
+    # settings switch were removed in ADR-005 S4c).
     assert ("self._WebPanel", ["'commentary'"]) in calls
-    assert ("AutonaCommentaryWidget", []) in calls
-    guard = factory.body[0] if not isinstance(
-        factory.body[0], ast.Expr) else factory.body[1]
-    assert isinstance(guard, ast.If)
-    assert ast.unparse(guard.test) == "not UsesQtPanel('commentary')"
-    assert ast.unparse(guard.body[0]) == "return self._WebPanel('commentary')"
+    assert not [c for c, _ in calls if c == "UsesQtPanel"
+                or c.startswith("AutonaCommentary")]
 
     # The sidebar item is still the lazy factory, keyed by the React
     # panel's name (_WebPanel finds the page by it).
@@ -625,3 +584,20 @@ def test_the_web_page_is_not_kept_as_a_dock():
     every = [call for call, _args in _calls(ensure)
              if call == "self.dockWidgets.append"]
     assert len(every) == 1
+
+
+def test_the_qt_commentary_panel_and_its_switch_are_gone():
+    # ADR-005 S4c: the React page is the only Commentary panel. Neither the
+    # widget nor the `general.qt_commentary_panel` way back (a stale key in
+    # a user's settings.json is simply never read) may come back in src/.
+    from tests.conftest import PROJECT_ROOT
+
+    src = PROJECT_ROOT / "src"
+    assert not (src / "AutonaCommentaryWidget.py").exists()
+    left = [str(path.relative_to(PROJECT_ROOT))
+            for path in src.rglob("*.py")
+            if any(word in path.read_text(encoding="utf-8")
+                   for word in ("AutonaCommentaryWidget",
+                                "qt_commentary_panel", "UsesQtPanel",
+                                "QT_FALLBACK_SETTINGS"))]
+    assert left == []

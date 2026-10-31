@@ -93,7 +93,7 @@ Step 5（第 1〜3 弾、2026-09-01/02）で**全ウィジェット静的化完�
 - 選手 DB エディタ（`AutonaPlayerBrowserWidget`）: `player_editor.1`
 
 旧記述の `commentary.{N}` / `{base}.slot.{I}.player.{M}` は**もう存在しない**
-（実況者パネルは独自カードを持ち、選手リスト（PLAYERS ロスター）は廃止済み）。
+（実況者パネルは React 版のみで選手ウィジェットを持たず、選手リスト（PLAYERS ロスター）は廃止済み）。
 構築元の数と形は `tests/test_player_widgets.py` の
 `test_the_player_widget_is_only_built_on_two_kinds_of_path` が pin している。
 

@@ -21,7 +21,7 @@ import {useStateChoice} from "../PanelShell/useStateChoice";
 import {usePanelShell} from "../PanelShell/context";
 
 // One caster slot of the Commentary page (ADR-005 S4b): the Qt panel's
-// card (src/AutonaCommentaryWidget.py) -- name (player DB suggestions) |
+// card (removed in S4c) -- name (player DB suggestions) |
 // team, role (suggestions, free text) | icon, comment | Twitter, and
 // "show on stream". The card edits slot `slot`; a drag moves the casters
 // between slots, so the card at a position always edits that position.

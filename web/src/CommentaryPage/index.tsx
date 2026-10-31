@@ -29,9 +29,8 @@ import {ColorKind, FeatureColorCard, LayoutEntry, ObsUrlCard} from "./SideCards"
 // The Commentary panel as a React page (ADR-005 S4b), /web/commentary: the
 // caster line-up (commentary.*), the design OBS shows, and the feature's
 // colours. Shown in the desktop app's shared web view and in a browser
-// alike. It writes through /api/v1 only -- the core operations the Qt panel
-// (src/AutonaCommentaryWidget.py) asks for -- and renders the state it gets
-// over Socket.IO.
+// alike. It writes through /api/v1 only -- the core operations the page asks
+// for -- and renders the state it gets over Socket.IO.
 
 const FEATURE = "commentary";
 const DRAG_TYPE = "application/x-autona-commentary-card";

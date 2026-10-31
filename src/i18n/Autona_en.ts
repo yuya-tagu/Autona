@@ -1137,7 +1137,6 @@
         <translation>Scoreboard</translation>
     </message>
     <message>
-        <location filename="..\AutonaCommentaryWidget.py" line="20" />
         <location filename="..\Autona.py" line="367" />
         <source>Commentary</source>
         <translation>Commentary</translation>
@@ -1430,7 +1429,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>No bracket data. Pick a phase group, or retry if Start.gg timed out.</translation>
     </message>
     <message>
-        <location filename="..\AutonaCommentaryWidget.py" line="51" />
         <location filename="..\AutonaBracketWidget.py" line="82" />
         <source>Characters per player</source>
         <translation>Characters per player</translation>
@@ -1446,45 +1444,34 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>Update bracket info</translation>
     </message>
     <message>
-        <location filename="..\AutonaCommentaryWidget.py" line="43" />
-        <source>Number of commentators</source>
-        <translation>Number of commentators</translation>
-    </message>
-    <message>
         <location filename="..\AutonaScoreboardWidget.py" line="238" />
-        <location filename="..\AutonaCommentaryWidget.py" line="69" />
         <source>Real Name</source>
         <translation>Real Name</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="237" />
         <location filename="..\AutonaScoreboardPlayerWidget.py" line="90" />
-        <location filename="..\AutonaCommentaryWidget.py" line="70" />
         <source>Twitter</source>
         <translation>Twitter</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="235" />
-        <location filename="..\AutonaCommentaryWidget.py" line="71" />
         <source>Seed</source>
         <translation>Seed</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="239" />
-        <location filename="..\AutonaCommentaryWidget.py" line="72" />
         <source>Location</source>
         <translation>Location</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="236" />
-        <location filename="..\AutonaCommentaryWidget.py" line="73" />
         <source>Characters</source>
         <translation>Characters</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="240" />
         <location filename="..\AutonaScoreboardPlayerWidget.py" line="147" />
-        <location filename="..\AutonaCommentaryWidget.py" line="74" />
         <source>Additional information</source>
         <translation />
     </message>
@@ -2703,13 +2690,6 @@ Change the port under Settings → General → Webserver Port and restart Autona
         <location filename="..\Settings\AutonaSettingsWindow.py" line="106" />
         <source>Disables the individual game tracker (takes effect on next restart)</source>
         <translation>Disables the individual game tracker (takes effect on next restart)</translation>
-    </message>
-</context><context>
-    <name>settings.qt_commentary_panel</name>
-    <message>
-        <location filename="..\Settings\AutonaSettingsWindow.py" line="114" />
-        <source>Show the Commentary panel in its previous (Qt) version (takes effect on next restart)</source>
-        <translation>Show the Commentary panel in its previous (Qt) version (takes effect on next restart)</translation>
     </message>
 </context><context>
     <name>settings.disable_overwrite</name>
