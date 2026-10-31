@@ -4087,3 +4087,83 @@ React 化したパネルの共通の土台を入れた: サーバーの `/web/<p
   - 既存のプレビュー（Board / Top 8 / 実況 / 統計表示）が今どおり: 起動直後に表示中のパネルのプレビューが出る（サーバー起動待ち）・別パネルへ移って戻るとプレビューが最新・5 分以上離れて戻ると 1 秒ほどで再表示される
   - ブラウザで `http://127.0.0.1:5107/web/shell-check` を開くと、見出し「Panel shell check」/「パネルシェルの確認」（ブラウザの言語）、`接続: connected`、`ブラウザでだけ表示` が出る。`?desktop=1&lng=ja` を付けると最後の行が消え、日本語になる
   - LAN を許可している場合: 別端末で `http://<この PC の IP>:5107/web/shell-check` が開ける（このページは何も書かない）
+
+#### S4b Commentary の React 化（2026-10-31）
+
+サイドバーの「実況・解説」を、S4a の共有ビュー（`AutonaWebPanelHost`）に載せた React のページ `/web/commentary` に切り替えた。Qt 版（`AutonaCommentaryWidget`）は残し、設定 1 つ（`general.qt_commentary_panel`。既定 OFF = Web 版）で戻せる。書き込みは設計方針 3 の v1 ルート（+ 読み取り 1 本。判断 1）だけで、`QWebChannel` は使っていない。外部契約（Socket.IO の payload・`settings.json` / `state.json` の形式・自動更新・既存 API）は変えていない（v1 は追加だけ）。
+
+- **実装**
+  - core
+    - `src/core/CommentaryService.py`: 表示の上限の判定を `CanShow(slot)` に切り出した（数え方は `SetField` と共通の `_ShownOthers`。`SetField` の挙動と警告ログ（実際の表示人数）は不変）。Web の更新は書く前にこれを聞く（判断 2）
+    - `src/core/LayoutCatalog.py`: `SELECTION_SETTINGS`（kind → 保存キーと既定。現在は `commentary` → `commentary.selected_design` / `commentators`）、`SelectedLayout(kind)`（保存値が一覧にあればそれ、無ければ既定、無ければ先頭。保存値は書き換えない = Qt 版のコンボと同じ規則）、`SelectLayout(kind, id)`（一覧にある id だけ保存）
+    - `src/core/WebAccess.py`: 新ルートの分類（読み取り 2 本 = READ、書き込み 5 本 = 通常の WRITE）と `WEB_PANELS` に `commentary`
+  - `src/AutonaWebOperations.py`: `get_commentary_options` / `update_caster`（`StateManager.lock` → 保存サイクルの順に入り（判断 13）、表示の可否を判定してから欄ごとに `SetField`）/ `reorder_casters` / `apply_caster_player` / `get_selected_layout` / `select_layout` / `set_feature_colors`（中で `settings.json` に書くので保存サイクルだけ。lock は取らない）。どれも core を呼ぶだけで、両シェル共通
+  - `src/AutonaPlayerDB.py`: `ClearTournamentPlayers`（大会の解除）がタグを消したあと `db_updated` を出す（判断 14。Socket.IO の `playerdb` が全体で送り直される）
+  - `src/AutonaApiV1.py`: 設計方針 3 の 6 本 + `GET /api/v1/layouts/selected/<kind>`（判断 1）。仕様は `.claude/design/external-control-api.md` §5.3 / §5.4 / §6.10〜§6.14。名前・Twitter を含む 2 本（欄の更新・選手の読込）は操作ログをキー名だけにした
+  - `src/AutonaApiInfoWindow.py`: API リファレンスの一覧（「`AutonaApiV1.py` をルートごとに写す」）に 7 本を足し、テスターのメソッドに `PUT` を足した（説明文の翻訳 7 件を `.ts` / `.qm` に）
+  - Window（`src/Autona.py`）
+    - `_CreateCommentaryPanel`: `UsesQtPanel("commentary")` が偽なら `_WebPanel("commentary")`（共有ホストを作って `ShowPanel` し、そのスタックページの index → パネル名を `_webPanelPages` に記録）を返す。真なら従来の Qt 版
+    - `_OnStackPageChanged`: ホストのページが表示されるたびに `ShowPanel(panel)`（S4a 判断 11 の読み直しもここで効く）
+    - `_PreparePanel`: `QDockWidget` でないページ（ホスト）にはドックの後処理をしない。`_EnsurePanelAt` もホストを `self.dockWidgets` に入れない（レビュー）
+    - 遅延構築はそのまま（ファクトリはサイドバーで初めて選んだときに走り、ビューはホストが表示されたときに作る）。ナビ項目・並び順は変わらないので `STATE_VERSION` は上げていない
+  - `src/AutonaWebPanelHost.py`: `QT_FALLBACK_SETTINGS` / `UsesQtPanel()`（設定値が `True` のときだけ真）と、編集だけの右クリックメニュー（判断 9）
+  - 設定（`src/Settings/AutonaSettingsWindow.py`）: 一般タブに「実況・解説パネルを従来版（Qt）で表示する（再起動後に反映）」（`general.qt_commentary_panel`、既定 OFF）。訳は `.ts` / `.qm`
+  - Web
+    - `web/src/CommentaryPage/`（新規）: `index.tsx`（ページ。選択肢・デザイン一覧・選択中のデザインを再試行つきで取得し（判断 17）、書き込みを期限つきの 1 本の列で順に送る（判断 18）。401 / 403 は 1 回だけ知らせる（判断 19））、`CasterCard.tsx`（12 枚のカード。名前の候補はキーボードで選んだものだけ Enter で確定（判断 16））、`SideCards.tsx`（機能別カラー・OBS への追加方法と URL のコピー）、`DesignPane.tsx`（デザイン選択と縮小プレビュー）
+    - `web/src/PanelShell/useStateChoice.ts`（新規）: チェックボックス・選択・色のフック（判断 5）
+    - `web/src/PanelShell/useStateField.ts`: 候補の確定用の操作 `pick(text)`（すぐ送る）と `replace(text, request)`（打ちかけを捨てて表示し、`request` のエコーを待つ）を足した（判断 4）。打ちかけの間に別の書き手がその欄を書いたら打ちかけを送らない規則を足した（判断 15。S4a 判断 9 からの変更）
+    - `web/src/api.ts`: `apiPut`、エラーに HTTP の `status` を付けた（`apiErrorStatus()`。409 を見分けるため）
+    - `web/src/PanelShell/registry.tsx`: `"commentary": CommentaryPage`。`web/src/i18n/locales/{ja,en}.json`: 37 件（日本語は Qt 版の文言を流用。「再読み込み」とトークンの案内を含む）
+    - `web/e2e/headless_server.py`: E2E の作業ディレクトリに `layout/commentators` をリンク
+  - ドキュメント: `.claude/design/external-control-api.md`（§5 の表・§5.3・§5.4・§6.10〜§6.14）、`.claude/design/Design.md`（パネル表の Commentary 行・`/web/:panel` 行）、`.claude/manual-test-checklist.md`（実況・解説を Web 版の手順に）
+  - テストハーネス（S4b と独立。全量 pytest の連鎖 error の修正）: `tests/conftest.py` に `remove_tree`（消えるまで再試行し、期限を過ぎたら残ったものを名前に出して落ちる）と `copy_trees`（全部コピーするか、途中で失敗したらコピーした分を消して例外を返す）を足し、セッション共有の `user_data/games/<game>` を入れ替えるフィクスチャ（`test_game_asset_manager_models` / `test_player_slot_publish` / `test_roster_flow` / `test_game_asset_icon_threading` と harness 自身）を `rmtree(ignore_errors=True)` から置き換えた。原因: 1 つのテストの後始末で消し切れなかったゲームフォルダ（Windows で、コピー直後のファイルを別のハンドル = ウイルス対策・インデクサが開いていると即座に消えない）を `ignore_errors` が黙って残し、次にそのゲームを入れるテストの `copytree` が `FileExistsError` で落ちる。さらにセットアップで落ちたテストは途中までコピーしたフォルダを後始末しないので、以後のゲームを入れる全テストが連鎖して落ちていた（1 回の全量で 153 件）。pin: `tests/test_harness_isolation.py`（+3: 開かれたファイルが閉じれば消せる・消せなければ残ったものの名前で落ちる・途中で失敗したコピーは何も残さない）
+- **判断と理由**
+  1. **読み取りルート `GET /api/v1/layouts/selected/<kind>` を 1 本足した**（設計方針 3 の 6 本に無い）: ページが開いたときに選択中のデザインを知る手段が他に無い（`settings.json` は state に出ていない）。追加だけで既存は不変。Qt 版の「保存値が消えていたら既定 → 先頭」をサーバー側（`LayoutCatalog.SelectedLayout`）に置いたので、ページは代わりを選ばない。選択を持つ kind は `commentary` だけで、他は 400（Board / Top 8 の選択は各パネルが持ったまま。移すときに `SELECTION_SETTINGS` に足す）
+  2. **5 人目の 409 はそのリクエストの欄を 1 つも書かない**: 全欄を先に検証し、表示の可否を `StateManager.lock` の中で判定してから書く（`{"name": …, "display": true}` が名前だけ通る、を作らない）。上限の判定は core の `CanShow` 1 か所
+  3. **書き込みはページの中で 1 本の列に並べる**（前の応答を待って次を送る）: 打ちかけの欄からグリップを掴むと、その欄はドラッグ開始時にフォーカスを外して送られ、並べ替えはその後に届く（打った文字は打ったスロットに入ってから動く）。並べ替えは楽観的に動かさず、カードは state のエコーで並ぶ（位置 N のカードは常にスロット N を編集する。Qt 版の「カードが動く」とは逆で、入力欄の付け替えが無い）
+  4. **名前の補完の確定は `replace`、役割の候補は `pick`**: 名前は `ApplyPlayerData`（name / team / twitter / note を一度に書く）なので、確定した瞬間に欄へタグを出し、打ちかけの文字の送信を止める（止めないと、補完の後に古い打ちかけが name を上書きしうる）。役割は文字列 1 つなので候補を選んだら即送る。どちらも IME の確定の Enter（`which === 229`）は MUI が無視し、自由入力の Enter（`createOption`）には何も割り当てない
+  5. **チェックボックス・アイコン・色は `useStateChoice`**（`useStateField` のエコー規則から打鍵を除いたもの）: 選んだ値をすぐ出し、state が変わる（エコー・他の書き手）・送信が失敗する（409）・応答から `ECHO_GRACE_MS` 以内にエコーが来ない、のどれかで state の表示に戻る。5 人目のチェックはこれで戻り、スナックバーで「配信に表示できるのは 4 名までです」と出す。4 人が表示中なら、表示していないカードのチェックは無効（Qt 版と同じ。409 は他の端末と競ったときの保険）
+  6. **プレビューは OBS と同じオーバーレイを iframe で 1920×1080 から縮小**（設計方針 5）。クリックは通さない。コピー / 画像保存は廃止（論点 1）
+  7. **色**: 表示は `colors.commentary.*`、無ければ `tournamentInfo.*`（オーバーレイの `resolveColors` と同じ順）。カラーピッカーは閉じたとき（`change`）に送る（ドラッグ中の `input` ごとには送らない）。「大会のカラーに合わせる」は Qt のカードと同じく 2 色を明示的に送る。大会の 2 色は起動時に state にシードされるが、state が届く前は押せない（既定色を TS に複製しない）
+  8. **OBS の URL は `http://localhost:<ポート>/layout/<id>/<entry>`**（Qt 版の `ObsUrl` と同じ。ページを LAN の別 PC から開いていても、OBS はこの PC で動かす前提の URL）。コピーは Clipboard API、使えない文脈（http の別 PC）では `execCommand("copy")`
+  9. **共有ビューの右クリックは編集メニューだけ**（S4a で S4b に回した残課題）: 入力欄では元に戻す・やり直し・切り取り・コピー・貼り付け・すべて選択、選択した文字の上ではコピーだけ、それ以外ではメニューを出さない。項目は `QWebEnginePage` の `pageAction`（中身はページの編集コマンドのまま）。戻る・再読み込み・ページのソース・検証を出さない（再読み込みは打ちかけを捨て、ソース / 検証は配信の操作者に要らない）
+  10. **名前の候補はフォーカスで開く**（アプリ全体の入力欄の規則 `ui_layout.attach_popup_on_focus` に合わせた）。絞り込みは部分一致・大文字小文字無視（Qt の completer と同じ）で、一覧は先頭 50 件
+  11. **Qt 版に戻す設定は、パネルを初めて開くときに読む**（遅延構築のファクトリの中）: 起動後にまだ実況・解説を開いていなければ、そのセッションでも効く。文言は「再起動後に反映」に揃えた。真偽値の `True` 以外（未設定・壊れた値）は Web 版。S4c で設定ごと消す
+  12. **カードの再描画**: カードは `React.memo`（12 枚 × 6 欄。state の 1 欄の変化で他のカードを描かない）。言語の切り替えではシェルの context を読んで描き直す
+  13. **`update_caster` は `StateManager.lock` → 保存サイクルの順に入る**（S4b レビュー。pitfalls #17）: 保存サイクルを先に開くと、lock を離してからサイクルを閉じるまでの間に別スレッドの書き込みがこのサイクルの公開に混ざる。lock を先に取れば、サイクルを閉じる公開も同じ lock の保持の中で走る。表示の可否の判定と書き込みも同じ保持の中なので、2 つの要求が同時に「表示」を送っても上限 4 は破れない。`set_feature_colors` は中で `settings.json` に書くので今の順（保存サイクルだけ）のまま
+  14. **大会の解除を `db_updated` で知らせる**（S4b レビュー）: Socket.IO の `playerdb` は `PlayerDB.TournamentPlayers()` を送るので、大会を読み込んでいれば Web の候補も参加者に絞られる（Qt 版の completer と同じ規則）。違っていたのは解除だけで、`ClearTournamentPlayers` がタグを消しても `db_updated` を出さず、Web の候補が前の大会の参加者のまま残っていた。参加者を設定する側（`SetTournamentPlayers`）は出さない: 設定するエントラントの取得が自分の保存を `NotifyChanged` で知らせる
+  15. **打ちかけの欄は、別の書き手がその欄を書いたら送らない**（S4b レビュー。**S4a 判断 9 からの変更**）: S4a は「フォーカス中は上書きしない・打った文字は送る」だけで、打っている途中に別の端末・セット読込がその欄を書いても、離れたときに打ちかけで上書きしていた。Qt 版の `HeldBackText`（ADR-005 S2d）は「打ちかけの間にその欄自身の値が別の所で書かれたら、その書き込みが勝つ」なので、揃えた。フォーカス中は打ちかけを表示したまま（上書きしない規則は不変）、送らずに、離れたら相手の値を出す。その後に打った文字は送る（Qt の「最初にその書き込みを見た描画だけが止める」と同じ）。自分の送信のエコーは別の書き手として扱わない: エコー待ちの送信が残っていれば、値の変化はいちばん古い送信のエコーとして数える（サーバーが値を正規化（trim・`@` 除去・悪語フィルタ）しても自分のエコーと分かるように、値の一致では判定しない）。送信ごとに、エコー・失敗・応答から `ECHO_GRACE_MS` 経過のどれかで数えるのをやめる
+  16. **名前の候補は、キーボードで選んだものだけ Enter で確定する**（S4b レビュー）: MUI はマウスが通過した候補も強調し、Enter はその強調を確定する。名前の確定は `ApplyPlayerData` で team / twitter / note まで上書きするので、マウスを候補に乗せたまま Enter を押すと誰も選んでいない選手で上書きしていた。強調の理由（`onHighlightChange` の reason）を覚え、Enter（`keydown`）での確定は `keyboard` のときだけ受ける。クリックはそのまま確定。役割の候補（文字列 1 つ）は今のまま
+  17. **読み込みは再試行し、だめなら「再読み込み」を出す**（S4b レビュー）: 選択肢・デザイン一覧・選択中のデザインを、5xx・通信の失敗なら 3 回まで（1 秒・2 秒あけて）取り直す。4xx は答えとして扱う（選択中のデザインの 404 = 1 つも入っていない）。3 本がそろうまでページは出さず、だめならエラー表示に「再読み込み」ボタンを付けて、押すと最初から読み直す
+  18. **書き込みの列に期限を付けた**（S4b レビュー）: 1 件 `WRITE_TIMEOUT_MS`（10 秒）。fetch はそこで中断し（`api.ts` のタイムアウト）、ページも同じ時刻に待つのをやめてスナックバー（「リクエストに失敗しました」）を出し、後ろに並んだ書き込みへ進む（応答しない 1 件でページの書き込みが全部止まらないように）。中断しても、要求がサーバーに届いていればサーバーでは処理されうるので、遅れて処理されると後続との順序が入れ替わりうる（ローカルのサーバーが 10 秒止まるのは異常時だけなので、列が止まり続けるより良いと判断した）
+  19. **401 / 403 は「アクセストークンが必要です」を 1 回だけ出す**（S4b レビュー）: LAN の別端末からトークン無しで開くと、書き込みは全部拒否される。書き込むたびに汎用のエラーを出さず、トークンの案内をページを開いている間 1 回だけ出す（欄・チェックは失敗した送信と同じく state に戻る）
+- **pin（テスト）**
+  - `tests/test_api_v1_commentary.py`（新規・26 関数 65 件）: 選択肢が core の定数／1 欄・複数欄の更新が 1 回の公開（revision +1）・同じ値は公開しない・アイコンのクリア／5 人目は 409 で何も書かない（同じリクエストの名前も）・4 人表示中でも表示中のスロットへの `display: true` は 200（他の欄も書く）・2 つの要求が同時に表示を送っても上限 4（判定を遅らせて 2 本目を割り込ませる。判断 13）／不正な入力（slot・空 body・未知キー・型・アイコン）は 400 で何も書かない／操作ログに名前を出さない／並べ替え（数値の並びも可・不正な並びは 400）／選手の読込が旧 `set_commentary_data` と同じ結果（悪語フィルタ込み）・不正な選手は 400／選択中のデザイン（既定・PUT・保存値が消えたら代わりを返して保存値は残す・1 つも無ければ 404・未知の id は 400・他の kind は 400）／色（設定と state・1 回の公開・不正は 400）／LAN の別端末は書き込み 5 本ともトークン必須（401 → トークンで 200。この PC は不要）、読み取り 2 本は不要
+  - `tests/test_player_db.py`: `db_updated` の回数（大会の解除で 1 回・解除するものが無ければ出ない）と、解除の通知のときに `playerdb` の中身（`get_playerdb()`）が選手 DB 全体に戻っていること（判断 14）
+  - `tests/test_webserver_routes.py`: 台帳に 7 本（書き込み 23・計 38）。`tests/test_web_operations.py`: ルート台帳の歩行に `slot` / `kind` / `feature` の値と 5 本の body
+  - `tests/test_web_panel_host.py`（+9 関数）: 右クリックの項目の対応（`ContextActions`）・入力欄のメニューの項目がページの `pageAction` であること・メニューを出さない場合／`UsesQtPanel` は `True` のときだけ真／退路の設定キーが `WEB_PANELS` の名前で、設定画面のチェックボックスにあること（AST）／Window の組み込み（`_CreateCommentaryPanel` が設定で分岐して Qt 版も残すこと・ナビ項目が `commentary` キー・`_OnStackPageChanged` と `_WebPanel` が `ShowPanel` を呼ぶ・`_PreparePanel` がホストにドックの処理をしない・`_EnsurePanelAt` がホストを `dockWidgets` に入れない）を AST で（テストハーネスは Window を作らないため）
+  - Web RTL: `CommentaryPage/CommentaryPage.test.js`（24: スロットと役割の候補がサーバーから／state の変化を描く／打鍵は debounce 後にそのスロットへ／入力中の欄は上書きしない／変換中は送らない（変換確定の Enter も）／チェックで表示／5 人目の 409 でチェックが戻りスナックバー／応答しない書き込みは期限でスナックバーを出し後続が送られる／401・403 はトークンの案内を 1 回だけ／読み込みの再試行・失敗し続けたら「再読み込み」で読み直す／4 人表示中は他を無効／ドラッグで並べ替えを送る・元の位置なら送らない・打ちかけを先に送ってから並べ替え／並べ替え後の順序の計算／名前はフォーカスで選手 DB を出す／補完の確定で選手を送りタグを出し打ちかけは送らない／マウスで強調した候補は Enter で確定しない・キーボードで選んだ候補は確定する（直す前の実装で落ちることを確認済み）／選択中のデザインのプレビューと OBS URL・デザインの選択の保存／大会のカラーに合わせる・state が届く前は押せない・色の表示の優先順）、`PanelShell/useStateChoice.test.js`（7）、`PanelShell/useStateField.test.js`（+10: `pick` / `replace`・悪語フィルタで変わったエコー・失敗した `replace`／打ちかけの間の別の書き手の書き込みで打ちかけを送らない・その後に打った文字は送る・正規化された自分のエコーは別の書き手ではない・送信中の複数の送信がそれぞれ 1 つのエコーを取る・エコーの後の書き込みは別の書き手・エコーの来ない送信は猶予の後に数えない）
+  - Playwright `web/e2e/commentary.spec.ts`（4: 12 スロットと選択中のデザイン（プレビューと OBS URL）／名前・チームを入れて「配信に表示」→ state とオーバーレイ（`/layout/commentators`）に出る／4 人表示中は 5 人目を押せず、API も 409／`?desktop=1&lng=ja` で日本語）
+- **残置 / リスク**
+  - **プレビューのオーバーレイが共有ビューのレンダラに載る**: Qt 版のプレビューは専用のビューで、非表示 5 分で Discarded になっていた。Web 版はページの iframe なので、S4a 判断 7（欄に一度打つとページは Frozen 止まり）により、打った後はオーバーレイ（kuromoji 辞書を含む）ごとプロセスの終了まで常駐しうる。量は未計測。多ければ、非表示の間は iframe を外す（`visibilitychange`）などを次で検討する
+  - 名前の候補は Socket.IO の `playerdb`（`PlayerDB.TournamentPlayers()`）なので、大会を読み込んでいればその参加者に絞られる（Qt 版の completer と同じ規則）。Qt 版と違ったのは大会の解除だけ（解除しても Web の候補が前の大会の参加者のまま残った）で、判断 14 で直した。`playerdb` は個人情報として保護されているので、LAN の別端末でトークン無しに開くと候補が出ない（書き込みもできない）
+  - 自分のエコーの判定は「エコー待ちの送信が残っている間の値の変化」なので（判断 15）、その間（応答から最大 1 秒）に別の書き手がその欄を書くと自分のエコーとして数え、打ちかけを送る（S4a までと同じ後勝ち）。また、サーバーが値を変えなかった送信（エコーが来ない）が残っている間も同じ。revision で突き合わせれば正確にできるが、フックは値しか受け取らないので見送った
+  - 補完で選んだ名前が悪語フィルタで変わる場合、フォーカス中は選んだタグのまま出て、離れて 1 秒後にフィルタ後の名前に変わる（`useStateField` の規則どおり。値は正しく保存される）
+  - jsdom にはレイアウトが無いので、ドロップ位置（カードの上半分 = 前・下半分 = 後）の判定は RTL では「後」しか通らない。前後の判定は実機で確認する
+  - Window の組み込みは AST の pin（ハーネスは Window を作らない）。実ウィンドウでの WebEngine の描画・フォーカス・IME・ドラッグはオーナーの実機確認
+  - Qt 版の `.ts` の実況の項目・offscreen テストは S4c で消す（今は両方残っている）
+  - 残課題（S4b レビューで見送り）
+    - **Frozen 中に書き込みの列が止まりうる**: 共有ビューのページが Frozen の間はページの JS（タイマー・Promise の続き）が止まるので、列に残った書き込みと期限（判断 18）も止まり、Active に戻ってから進む
+    - **デザインの選択がクライアント間で同期しない**（Qt 版と同じ）: 選択は state ではなく `settings.json` なので、別の端末・デスクトップのページは開き直すまで前の選択を表示する
+    - **名前の候補にストックアイコンが無い**: Qt 版の completer は選手のメインキャラのストックアイコンを出す。Web 版は文字だけ
+    - **カードの間の隙間へのドロップは無視される**: ドロップを受けるのはカードだけで、カードの間（`Stack` の間隔）に落とすと何も起きない
+    - **OBS の URL のデザイン id をエンコードしない**: 空白や日本語を含むフォルダ名のデザインでは、コピーした URL がそのまま（ブラウザ・OBS は通常そのまま開ける）
+    - **state が届く前のカラーピッカー**: state の到着前は色が空で、ピッカーは黒を出す。そこで色を選ぶと送られる（大会のカラーに合わせるボタンは押せない: 判断 7）
+- **実機確認（オーナー）**
+  - 手動チェックリスト「実況・解説（Commentary）」の全項目（Web 版。デザイン・色・右クリック・ブラウザからの同時編集・退路の設定を含む）
+  - **IME 実機ゲート**（設計のステップ表）: 名前・役割・コメントの日本語入力（変換・再変換・確定の Enter で送信もフォーカス移動もしない）、候補ウィンドウの位置、貼り付け、Tab 移動、補完候補と IME の併用（**名前の候補が開いたまま、IME 確定のあとに Enter**: キーボードで候補を選んでいなければ選手は読み込まれない。判断 16）、Qt 版と比べた入力速度
+  - 名前の候補にマウスを乗せたまま Enter で選手が読み込まれないこと、矢印キーで選んだ候補は Enter で読み込まれること（判断 16）。大会の URL を消すと、ブラウザで開いたページの候補も選手 DB 全体に戻ること（判断 14）
+  - ブラウザとデスクトップで同じ欄を打ち合ったとき、打っている途中に相手が書いた値が離れたあとに残ること（判断 15）
+  - 起動・終了が今どおり（`STARTUP phase=` の各値。実況・解説を最後に開いていた状態で起動したときも）。実況・解説を開くとページが出て、他のパネルへ移って戻っても入力した内容が残る
+  - 欄に打った後、他のパネルへ移って 5 分以上離れたときの常駐メモリ（タスクマネージャの QtWebEngineProcess。上の残置 1 つ目）
+  - 設定の「従来版（Qt）で表示する」を ON → 再起動で Qt 版、OFF → 再起動で Web 版に戻る（どちらでも同じ実況・解説者が出る）

@@ -211,6 +211,8 @@
 | `GET /api/v1/commentary` | 実況者状態 | `get_comms` | #37 |
 | `GET /api/v1/countries/{code}/states` | 国の州・地域一覧（未知の国は `404 NOT_FOUND`。2026-10-21 追加） | `get_states` | #45 |
 | `GET /api/v1/layouts` | レイアウト一覧（§5.2。2026-10-22 追加） | なし（`core/LayoutCatalog.Layouts`） | — |
+| `GET /api/v1/layouts/selected/{kind}` | パネルが表示・OBS に渡しているデザイン（§5.3。2026-10-31 追加） | `get_selected_layout`（`core/LayoutCatalog.SelectedLayout`） | — |
+| `GET /api/v1/commentary/options` | 実況の役割候補・アイコン・スロット・表示上限（§5.4。2026-10-31 追加） | `get_commentary_options`（`core/CommentaryModel` の定数） | — |
 
 > `data` の具体スキーマは委譲先 Action の現返却（candidates §3）に準拠。本 API はそれを `{"ok":true,"data":...}` で包むだけ。
 
@@ -259,6 +261,29 @@ Board / Commentary / Top 8 タブと Designer の「開く」一覧が使う**�
   重複したもの全部が `"{displayName} ({id})"` になる（例: `"Simple (scoreboard_simple - コピー)"`）。重複が無ければそのまま。
   規約の正本は `layout/README.md`「レイアウトのメタデータ（`autona` ブロック）」
 - ファイルシステムの絶対パス（カタログ内部の監視ディレクトリ等）は返さない（D5: LAN 公開時もパスを出さない）
+
+### 5.3 `GET /api/v1/layouts/selected/{kind}`（2026-10-31 追加・ADR-005 S4b）
+パネルが選んでいるデザイン（プレビューと OBS URL に使うもの）を、§5.2 と同じ形のエントリ 1 件で返す。
+
+- `kind` は選択を持つ種類だけ: 現在は `commentary`（`settings.json` の `commentary.selected_design`。正本は
+  `core/LayoutCatalog.SELECTION_SETTINGS`）。それ以外は `400 INVALID_ARGUMENT`
+- 保存されている id がカタログに無い（削除された等）ときは、Qt パネルと同じ順で代わりを返す: 既定（`commentators`）→ 一覧の先頭。
+  保存値は書き換えない。その種類のレイアウトが 1 つも無ければ `404 NOT_FOUND`
+- 設定であって状態ではないので `revision` は付かない
+
+### 5.4 `GET /api/v1/commentary/options`（2026-10-31 追加・ADR-005 S4b）
+実況・解説ページの入力候補。core の定数（`core/CommentaryModel`）をそのまま配る（Web 側に複製しない）。
+
+```json
+{ "ok": true, "data": {
+  "roles": ["実況", "解説", "選手", "主催", "MC", "スタッフ"],
+  "icons": [{ "id": "mic", "label": "マイク" }, { "id": "megaphone", "label": "拡声器" }, { "id": "phone", "label": "電話" }],
+  "slots": ["1", "2", "…", "12"],
+  "maxDisplay": 4
+} }
+```
+- `roles`: 役割の候補（自由入力も可）。`icons[].id` が `commentary.{N}.icon` に入る値（空文字 = アイコンなし）
+- 状態ではないので `revision` は付かない
 
 ---
 
@@ -391,6 +416,44 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - **全キーを先に検証**し、未知キーが 1 つでもあれば何も適用せず `INVALID_ARGUMENT`。
 - held 対象外のため即時公開され、`revision` は正確。
 - エラー: `INVALID_ARGUMENT`（未知キー）
+
+### 6.10 実況・解説者の欄 `PATCH /api/v1/commentary/{slot}`（2026-10-31 追加・ADR-005 S4b）
+- `slot`: 1〜12（範囲外は `INVALID_ARGUMENT`）
+- body（部分更新・1 つ以上）: `{ "name": "…", "team": "…", "twitter": "…", "role": "…", "icon": "mic", "note": "…", "display": true }`。
+  `display` は真偽値、他は文字列。`icon` は空文字か §5.4 の `icons[].id`。未知キー・型違いは `INVALID_ARGUMENT`
+- 委譲: `update_caster` → 欄ごとに `CommentaryService.SetField`（デスクトップの実況パネルと同じ関数。1 つの保存サイクル）
+- **全キーを先に検証**し、1 つでも不正なら何も書かない
+- **表示の上限**: 他のスロットで既に 4 人（`maxDisplay`）が表示中のとき `display: true` は `409 CONFLICT`。
+  同じリクエストの他の欄も書かない（判定と書き込みは `StateManager.lock` の中で行う）
+- held 対象外のため即時公開され、`revision` は正確。値が変わらなければ公開されない
+- 操作ログはキー名のみ（§2.7。名前・Twitter は個人情報）
+- エラー: `INVALID_ARGUMENT`（slot・空 body・未知キー・型・icon）、`CONFLICT`（5 人目の表示）
+
+### 6.11 実況・解説者の並べ替え `POST /api/v1/commentary/reorder`（2026-10-31 追加・ADR-005 S4b）
+- body: `{ "order": ["3", "1", "2", "4", …] }` — スロット 1, 2, … の順に「そこへ移す元のスロット」。1〜12 を 1 回ずつ（数値でも可）
+- 委譲: `reorder_casters` → `CommentaryService.Reorder`（デスクトップのカードのドラッグと同じ）。スロットの中身ごと入れ替わる
+- エラー: `INVALID_ARGUMENT`（配列でない・真偽値を含む・1〜12 の並べ替えになっていない）
+
+### 6.12 選手 DB からの実況者の読込 `POST /api/v1/commentary/{slot}/player`（2026-10-31 追加・ADR-005 S4b）
+- body: Socket.IO `playerdb` の選手と同じ形のオブジェクト（名前補完で選んだ選手）。`gamerTag` / `prefix` / `twitter` /
+  `custom_textbox` がそれぞれ `name` / `team` / `twitter` / `note` に入る（`CommentaryService.ApplyPlayerData`。悪語フィルタ込みで、
+  旧 `load-commentator-from-tag-*` / `update-commentary-*` と同じ結果）。他のキーは無視し、`role` / `icon` / `display` は変えない
+- 上の 4 キーのどれかが文字列であること（無ければ `INVALID_ARGUMENT`）。文字列・`null` 以外は `INVALID_ARGUMENT`
+- 操作ログはキー名のみ（§2.7）
+
+### 6.13 デザインの選択 `PUT /api/v1/layouts/selected/{kind}`（2026-10-31 追加・ADR-005 S4b）
+- body: `{ "id": "commentators" }`（§5.2 の `id`。その `kind` の一覧にあるもの）
+- 委譲: `select_layout` → `core/LayoutCatalog.SelectLayout`。`settings.json` の既存キー（`commentary.selected_design`）に書くだけで形式は不変
+- 応答の `data` は選んだエントリ（§5.3 と同じ形）。設定なので `revision` は付かない
+- エラー: `INVALID_ARGUMENT`（`kind` が §5.3 以外・`id` が文字列でない / 一覧に無い）
+
+### 6.14 機能別カラー `PATCH /api/v1/colors/{feature}`（2026-10-31 追加・ADR-005 S4b）
+- `feature`: `core/ColorService.FEATURES` のいずれか（実況・解説は `commentary`）。未知は `INVALID_ARGUMENT`
+- body: `{ "theme": "#112233", "accent": "#445566" }`（どちらか・両方。`#RGB` / `#RRGGBB`）
+- 委譲: `set_feature_colors` → 種類ごとに `ColorService.SetFeatureColor`（デスクトップの機能別カラーのカードと同じ。
+  設定と `colors.{feature}.*` の両方に書く。1 つの保存サイクル）。オーバーレイは `colors.{feature}` を大会のカラーより優先する
+- 「大会のカラーに合わせる」はクライアントが大会の 2 色を両方送る（Qt のカードと同じく明示的に書く）
+- エラー: `INVALID_ARGUMENT`（feature・未知キー・空 body・色形式）
 
 ---
 

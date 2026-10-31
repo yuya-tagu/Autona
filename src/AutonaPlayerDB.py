@@ -249,8 +249,16 @@ class AutonaPlayerDB:
     @gui_thread_async
     def ClearTournamentPlayers():
         """Back to the whole DB as completer candidates (no tournament
-        loaded)."""
+        loaded).
+
+        Announced with db_updated: the web server's player DB push sends
+        TournamentPlayers(), which only now is the whole DB again -- without
+        it the web pages' candidates stayed the previous tournament's
+        entrants (ADR-005 S4b review). No announcement for setting the
+        entrants: the fetch that sets them announces its own save
+        (NotifyChanged), queued after this filter."""
         if not PlayerDB.instance.ClearTournamentTags():
             return
         if AutonaPlayerDB.completerModel is not None:
             AutonaPlayerDB.completerModel.invalidateFilter()
+        AutonaPlayerDB.signals.db_updated.emit()

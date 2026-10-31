@@ -31,6 +31,9 @@ from loguru import logger
 from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
 from .core import StateSchema as schema
+from .core import ColorService
+from .core import CommentaryModel as comms
+from .core import CommentaryService
 from .core import LayoutCatalog
 from .core import Top8Service
 from .core.GameAssetCatalog import GameAssetCatalog
@@ -516,6 +519,37 @@ def get_layouts():
     return ok(data=LayoutCatalog.Layouts(kinds))
 
 
+@api_v1.route("/commentary/options")
+@api_handler
+def get_commentary_options():
+    # The role candidates and the icons the Commentary page offers (ADR-005
+    # S4b), from core's constants. Not state, so no revision.
+    return ok(data=WebOps.get_commentary_options())
+
+
+def _selection_kind(kind):
+    if kind not in LayoutCatalog.SELECTION_SETTINGS:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"no layout selection for kind: {kind} (expected one of: "
+            f"{', '.join(LayoutCatalog.SELECTION_SETTINGS)})",
+            400,
+        )
+    return kind
+
+
+@api_v1.route("/layouts/selected/<kind>")
+@api_handler
+def get_selected_layout(kind):
+    # The design a panel shows and hands to OBS (settings.json, the panel's
+    # own key; ADR-005 S4b): the catalog entry, with the Qt panel's
+    # fallbacks when the kept one is gone; 404 when the kind lists none.
+    entry = WebOps.get_selected_layout(_selection_kind(kind))
+    if entry is None:
+        raise ApiError(NOT_FOUND, f"no {kind} layout is installed", 404)
+    return ok(data=entry)
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Safe write operations (spec §6 — op-logged, no confirm)
 # ═══════════════════════════════════════════════════════════════════════
@@ -802,6 +836,147 @@ def display_options_update():
         if result != "OK":
             raise ApiError(INVALID_ARGUMENT, str(result), 400)
     # display_options is not held: the write is published synchronously.
+    return ok(revision=current_revision())
+
+
+# ── the Commentary page (ADR-005 S4b) ──
+# The writes the Qt Commentary panel asks core for, one route each:
+# CommentaryService.SetField / Reorder / ApplyPlayerData. The line-up is
+# not held, so each is published when it returns. Names and handles are
+# personal data: logged by key only.
+def _caster_slot(slot):
+    if str(slot) not in comms.SLOTS:
+        raise ApiError(
+            INVALID_ARGUMENT, f"slot must be 1..{len(comms.SLOTS)}", 400)
+    return str(slot)
+
+
+@api_v1.route("/commentary/<int:slot>", methods=["PATCH"])
+@write_op("commentary.update", log_keys_only=True)
+def commentary_update(slot):
+    slot = _caster_slot(slot)
+    body = _json_body()
+    if not body:
+        raise ApiError(
+            INVALID_ARGUMENT, "at least one caster field is required", 400)
+    # Validate every field before writing any, so a bad one changes nothing.
+    fields = comms.DefaultSlot()
+    unknown = sorted(k for k in body if k not in fields)
+    if unknown:
+        raise ApiError(
+            INVALID_ARGUMENT, f"unknown caster field: {', '.join(unknown)}", 400)
+    for key, value in body.items():
+        if key == "display":
+            if not isinstance(value, bool):
+                raise ApiError(
+                    INVALID_ARGUMENT, "display must be true or false", 400)
+        elif not isinstance(value, str):
+            raise ApiError(INVALID_ARGUMENT, f"{key} must be a string", 400)
+        elif key == "icon" and value and value not in comms.ICONS:
+            raise ApiError(
+                INVALID_ARGUMENT,
+                f"unknown icon: {value} (expected an empty string or one "
+                f"of: {', '.join(comms.ICONS)})",
+                400,
+            )
+    # Showing a caster past MAX_DISPLAY others is refused, as in the panel;
+    # the other fields of the same request are not written either.
+    if not WebOps.update_caster(slot, body):
+        raise ApiError(
+            CONFLICT,
+            f"at most {comms.MAX_DISPLAY} casters can be shown at once", 409)
+    return ok(revision=current_revision())
+
+
+@api_v1.route("/commentary/reorder", methods=["POST"])
+@write_op("commentary.reorder")
+def commentary_reorder():
+    # {"order": [...]}: for slot 1, 2, ... in turn, the slot whose caster
+    # goes there -- every slot once (CommentaryService.Reorder).
+    order = _json_body().get("order")
+    if not isinstance(order, list) or any(
+            isinstance(slot, bool) or not isinstance(slot, (str, int))
+            for slot in order):
+        raise ApiError(
+            INVALID_ARGUMENT, "order must be a list of slot numbers", 400)
+    order = [str(slot) for slot in order]
+    if sorted(order) != sorted(comms.SLOTS):
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"order must name every slot 1..{len(comms.SLOTS)} once", 400)
+    WebOps.reorder_casters(order)
+    return ok(revision=current_revision())
+
+
+# The keys of a picked player that fill a caster (CommentaryService).
+_CASTER_PLAYER_KEYS = [
+    source for _field, source in CommentaryService.PLAYERDB_FIELD_MAP]
+
+
+@api_v1.route("/commentary/<int:slot>/player", methods=["POST"])
+@write_op("commentary.player", log_keys_only=True)
+def commentary_player(slot):
+    # A player picked from the player DB (the name completer): an object
+    # shaped like the Socket.IO `playerdb` push's players. Its gamerTag /
+    # prefix / twitter / custom_textbox fill the caster's name / team /
+    # twitter / note (censored); other keys are ignored, and role, icon and
+    # display are left alone.
+    slot = _caster_slot(slot)
+    body = _json_body()
+    for key in _CASTER_PLAYER_KEYS:
+        if body.get(key) is not None and not isinstance(body[key], str):
+            raise ApiError(INVALID_ARGUMENT, f"{key} must be a string", 400)
+    if not any(isinstance(body.get(key), str) for key in _CASTER_PLAYER_KEYS):
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"a player needs one of: {', '.join(_CASTER_PLAYER_KEYS)}", 400)
+    WebOps.apply_caster_player(slot, body)
+    return ok(revision=current_revision())
+
+
+@api_v1.route("/layouts/selected/<kind>", methods=["PUT"])
+@write_op("layout.select")
+def select_layout(kind):
+    # {"id": "<layout id>"}: one the catalog lists for the kind. Kept under
+    # the panel's own settings.json key, as the panel keeps it. Settings,
+    # not state: no revision.
+    kind = _selection_kind(kind)
+    layoutId = _json_body().get("id")
+    if not isinstance(layoutId, str) or not layoutId:
+        raise ApiError(INVALID_ARGUMENT, "id must be a layout id", 400)
+    entry = WebOps.select_layout(kind, layoutId)
+    if entry is None:
+        raise ApiError(
+            INVALID_ARGUMENT, f"unknown {kind} layout: {layoutId}", 400)
+    return ok(data=entry)
+
+
+@api_v1.route("/colors/<feature>", methods=["PATCH"])
+@write_op("colors.update")
+def colors_update(feature):
+    # {"theme": "#rrggbb", "accent": "#rrggbb"}, either or both: one
+    # feature's own colours (ColorService.SetFeatureColor), which the
+    # overlays read before the tournament's.
+    if feature not in ColorService.FEATURES:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"unknown feature: {feature} (expected one of: "
+            f"{', '.join(ColorService.FEATURES)})",
+            400,
+        )
+    body = _json_body()
+    kinds = (ColorService.KIND_THEME, ColorService.KIND_ACCENT)
+    unknown = sorted(k for k in body if k not in kinds)
+    if unknown:
+        raise ApiError(
+            INVALID_ARGUMENT, f"unknown color: {', '.join(unknown)}", 400)
+    if not body:
+        raise ApiError(INVALID_ARGUMENT, "theme or accent is required", 400)
+    for kind, color in body.items():
+        if not isinstance(color, str) or not _COLOR_RE.match(color):
+            raise ApiError(
+                INVALID_ARGUMENT, f"{kind} must be #RGB or #RRGGBB", 400)
+    WebOps.set_feature_colors(feature, body)
     return ok(revision=current_revision())
 
 

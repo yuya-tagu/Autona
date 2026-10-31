@@ -141,17 +141,33 @@ def SetField(slot, field, value) -> bool:
     value = FieldValue(field, value)
     with StateManager.lock:
         if field == "display" and value:
-            state = StateManager.Get(schema.COMMENTARY_ROOT)
-            state = state if isinstance(state, dict) else {}
-            shown = sum(
-                1 for other in comms.SLOTS
-                if other != slot and isinstance(state.get(other), dict)
-                and state[other].get("display"))
+            shown = _ShownOthers(slot)
             if shown >= comms.MAX_DISPLAY:
                 logger.warning(
                     f"Commentary: slot {slot} not shown, {shown} already are")
                 return False
         return StateManager.SetIfChanged(_Key(slot, field), value)
+
+
+def CanShow(slot) -> bool:
+    """Whether caster `slot` may be shown on the overlay: fewer than
+    ``MAX_DISPLAY`` of the other slots are. A slot already shown can stay
+    shown. What ``SetField`` checks before showing one; the Web's edit
+    (``PATCH /api/v1/commentary/<slot>``) asks first, under the same hold
+    of ``StateManager.lock`` as its writes, so a refused edit writes none
+    of its fields."""
+    return _ShownOthers(str(slot)) < comms.MAX_DISPLAY
+
+
+def _ShownOthers(slot) -> int:
+    """How many slots other than `slot` (a str) are shown."""
+    with StateManager.lock:
+        state = StateManager.Get(schema.COMMENTARY_ROOT)
+        state = state if isinstance(state, dict) else {}
+        return sum(
+            1 for other in comms.SLOTS
+            if other != slot and isinstance(state.get(other), dict)
+            and state[other].get("display"))
 
 
 def Reorder(order) -> bool:

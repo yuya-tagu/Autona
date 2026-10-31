@@ -263,3 +263,67 @@ def test_dropping_a_board_leaves_no_held_registration(autonaApp):
     assert [p for p in state.heldExempt if p.startswith("score.")] == []
     assert [p for p in state._commitPrefixes if p.startswith("score.")] == []
     assert [p for p in state._heldTouched if p.startswith("score.")] == []
+
+
+def test_a_tree_held_open_for_a_moment_is_still_removed(tmp_path):
+    """remove_tree() waits out a handle someone else has open.
+
+    The game trees the fixtures install share one runtime directory, so a
+    tree a teardown leaves behind fails the next install of it -- and every
+    install after that, far from the test that left it (153 setup errors in
+    one full run). On Windows a file another handle has open (an
+    anti-virus or indexer scanning what was just copied in) cannot be
+    deleted at once; `rmtree(ignore_errors=True)` gave up on it in silence.
+    """
+    import threading
+
+    tree = tmp_path / "games" / "tgame"
+    (tree / "base_files").mkdir(parents=True)
+    held = tree / "base_files" / "config.json"
+    held.write_text("{}", encoding="utf-8")
+    handle = open(held, encoding="utf-8")  # no FILE_SHARE_DELETE on Windows
+    threading.Timer(0.3, handle.close).start()
+    try:
+        conftest.remove_tree(tree)
+    finally:
+        handle.close()
+
+    assert not tree.exists()
+
+
+def test_a_tree_that_cannot_be_removed_fails_loudly(tmp_path):
+    """Past the timeout remove_tree() raises, naming what is left, in the
+    teardown of the test that installed the tree -- not in a later setup."""
+    import pytest
+
+    tree = tmp_path / "games" / "tgame"
+    tree.mkdir(parents=True)
+    held = tree / "config.json"
+    held.write_text("{}", encoding="utf-8")
+    if os.name != "nt":
+        pytest.skip("an open file only blocks its removal on Windows")
+    with open(held, encoding="utf-8"):
+        with pytest.raises(OSError, match="config.json"):
+            conftest.remove_tree(tree, timeout=0.2)
+    conftest.remove_tree(tree)
+
+
+def test_a_copy_that_fails_part_way_leaves_nothing_behind(tmp_path):
+    """copy_trees() is all or nothing: a setup that fails does not leave the
+    trees it had copied for the next test's setup to trip over (each later
+    install of them would fail with FileExistsError)."""
+    import pytest
+
+    source = tmp_path / "fixture"
+    for name in ("game2", "tgame"):
+        (source / name).mkdir(parents=True)
+        (source / name / "config.json").write_text("{}", encoding="utf-8")
+    games = tmp_path / "games"
+    (games / "tgame").mkdir(parents=True)  # what a failed teardown left
+    (games / "tgame" / "left.txt").write_text("", encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        conftest.copy_trees([(source / n, games / n) for n in ("game2", "tgame")])
+
+    assert not (games / "game2").exists(), "the tree copied before the failure was kept"
+    assert (games / "tgame" / "left.txt").exists(), "a tree it did not copy was removed"

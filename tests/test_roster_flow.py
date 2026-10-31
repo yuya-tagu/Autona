@@ -32,7 +32,6 @@ Record (on the pre-S3e-6 tree only):
 """
 import json
 import os
-import shutil
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -51,7 +50,7 @@ from src.core import StateSchema as schema
 from src.core.Actions import AutonaActions
 from src.core.PlayerService import CharacterSlot, PlayerService
 from src.core.StateManager import StateManager
-from tests.conftest import drain_tasks
+from tests.conftest import copy_trees, drain_tasks, remove_tree
 from tests.fixtures.write_recording import encode, encodeDelta
 # The S1d world: the fixture games (with real characters, skins and
 # variants) under the recording's locale.
@@ -191,8 +190,7 @@ def world(slotEnv, autonaApp):
 
     games = autonaApp.dir / "user_data" / "games"
     team = games / TEAM_GAME
-    shutil.rmtree(team, ignore_errors=True)
-    shutil.copytree(games / "tgame", team)
+    copy_trees([(games / "tgame", team)])
     config = team / "base_files" / "config.json"
     data = json.loads(config.read_text(encoding="utf-8"))
     data["name"] = "Roster Game"
@@ -204,7 +202,7 @@ def world(slotEnv, autonaApp):
         yield slotEnv
     finally:
         autonaApp.dropAllBoards()
-        shutil.rmtree(team, ignore_errors=True)
+        remove_tree(team)
         GameAssetCatalog.instance.ScanGames()
 
 

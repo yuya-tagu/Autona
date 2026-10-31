@@ -999,6 +999,34 @@
         <source>If Companion runs on another PC (LAN access), also add the header X-Autona-Token with the access token as its value. Copy the token from Help &amp; Settings → API Settings → Open reference &amp; tester.</source>
         <translation>Companion を別の PC で動かす場合（LAN アクセス）は、ヘッダ X-Autona-Token も追加し、値にアクセストークンを入れてください。トークンは ヘルプ＆設定 → API設定 → リファレンス・テスターを開く からコピーできます。</translation>
     </message>
+    <message>
+        <source>Layout a panel shows (kind=commentary)</source>
+        <translation>パネルが選んでいるレイアウト（kind=commentary）</translation>
+    </message>
+    <message>
+        <source>Commentary role / icon candidates</source>
+        <translation>実況・解説の役割・アイコンの候補</translation>
+    </message>
+    <message>
+        <source>Update caster fields (partial; a 5th shown is 409)</source>
+        <translation>実況・解説者の欄を更新（部分更新。5 人目の表示は 409）</translation>
+    </message>
+    <message>
+        <source>Reorder casters (slot order)</source>
+        <translation>実況・解説者を並べ替え（スロット順）</translation>
+    </message>
+    <message>
+        <source>Fill a caster from a player DB entry</source>
+        <translation>選手 DB の選手で実況・解説者の欄を埋める</translation>
+    </message>
+    <message>
+        <source>Select a panel's layout</source>
+        <translation>パネルのレイアウトを選択</translation>
+    </message>
+    <message>
+        <source>Set a feature's colors</source>
+        <translation>機能別カラーを設定</translation>
+    </message>
 </context><context>
     <name>app</name>
     <message>
@@ -2678,6 +2706,13 @@ OBS のブラウザソースと Web UI は動作しません。
         <location filename="..\Settings\AutonaSettingsWindow.py" line="106" />
         <source>Disables the individual game tracker (takes effect on next restart)</source>
         <translation>個別ゲームトラッカーを無効化（再起動後に反映）</translation>
+    </message>
+</context><context>
+    <name>settings.qt_commentary_panel</name>
+    <message>
+        <location filename="..\Settings\AutonaSettingsWindow.py" line="114" />
+        <source>Show the Commentary panel in its previous (Qt) version (takes effect on next restart)</source>
+        <translation>実況・解説パネルを従来版（Qt）で表示する（再起動後に反映）</translation>
     </message>
 </context><context>
     <name>settings.disable_overwrite</name>

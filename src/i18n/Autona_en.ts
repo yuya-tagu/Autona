@@ -997,6 +997,34 @@
         <source>If Companion runs on another PC (LAN access), also add the header X-Autona-Token with the access token as its value. Copy the token from Help &amp; Settings → API Settings → Open reference &amp; tester.</source>
         <translation>If Companion runs on another PC (LAN access), also add the header X-Autona-Token with the access token as its value. Copy the token from Help &amp; Settings → API Settings → Open reference &amp; tester.</translation>
     </message>
+    <message>
+        <source>Layout a panel shows (kind=commentary)</source>
+        <translation>Layout a panel shows (kind=commentary)</translation>
+    </message>
+    <message>
+        <source>Commentary role / icon candidates</source>
+        <translation>Commentary role / icon candidates</translation>
+    </message>
+    <message>
+        <source>Update caster fields (partial; a 5th shown is 409)</source>
+        <translation>Update caster fields (partial; a 5th shown is 409)</translation>
+    </message>
+    <message>
+        <source>Reorder casters (slot order)</source>
+        <translation>Reorder casters (slot order)</translation>
+    </message>
+    <message>
+        <source>Fill a caster from a player DB entry</source>
+        <translation>Fill a caster from a player DB entry</translation>
+    </message>
+    <message>
+        <source>Select a panel's layout</source>
+        <translation>Select a panel's layout</translation>
+    </message>
+    <message>
+        <source>Set a feature's colors</source>
+        <translation>Set a feature's colors</translation>
+    </message>
 </context><context>
     <name>app</name>
     <message>
@@ -2675,6 +2703,13 @@ Change the port under Settings → General → Webserver Port and restart Autona
         <location filename="..\Settings\AutonaSettingsWindow.py" line="106" />
         <source>Disables the individual game tracker (takes effect on next restart)</source>
         <translation>Disables the individual game tracker (takes effect on next restart)</translation>
+    </message>
+</context><context>
+    <name>settings.qt_commentary_panel</name>
+    <message>
+        <location filename="..\Settings\AutonaSettingsWindow.py" line="114" />
+        <source>Show the Commentary panel in its previous (Qt) version (takes effect on next restart)</source>
+        <translation>Show the Commentary panel in its previous (Qt) version (takes effect on next restart)</translation>
     </message>
 </context><context>
     <name>settings.disable_overwrite</name>

@@ -13,12 +13,11 @@ thread built them. They also pin the generation check: a decode result that
 lands after its model was rebuilt (retired) must not be applied.
 """
 import json
-import shutil
 import threading
 
 import pytest
 
-from tests.conftest import deliver_decodes
+from tests.conftest import deliver_decodes, remove_tree
 
 
 class _ThreadLog:
@@ -126,7 +125,7 @@ def syntheticGame(autonaApp):
     manager._stageIconGeneration += 1
     manager._skinIconGeneration += 1
     QApplication.processEvents()
-    shutil.rmtree(game, ignore_errors=True)
+    remove_tree(game)
     catalog.ScanGames()
     catalog.ResetGameState()
     manager._RebuildModels()

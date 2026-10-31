@@ -53,6 +53,72 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
+TREE_REMOVAL_TIMEOUT_SECS = 10
+
+
+def remove_tree(path, timeout=TREE_REMOVAL_TIMEOUT_SECS):
+    """Remove the directory tree `path` and return once it is gone.
+
+    For what the tests install into the session's shared runtime
+    (user_data/games/<game>): the next test that installs the same tree
+    copies it to the same place, so a removal that leaves anything behind
+    fails every later setup, far from the test that left it. On Windows a
+    file another handle has open -- an anti-virus or indexer scan of the
+    files the test has just copied in -- cannot go at once (a sharing
+    violation, or only marked for deletion while its directories stay),
+    which `rmtree(ignore_errors=True)` used to leave behind in silence.
+    Tried again until the tree is gone; after `timeout` seconds this
+    raises, naming what is left, in the teardown of the test that
+    installed it.
+    """
+    import time
+
+    path = Path(path)
+    deadline = time.monotonic() + timeout
+    while True:
+        error = None
+        try:
+            shutil.rmtree(path)
+        except FileNotFoundError:
+            pass
+        except OSError as caught:
+            error = caught
+        if not os.path.lexists(path):
+            return
+        if time.monotonic() >= deadline:
+            left = sorted(str(p.relative_to(path)) for p in path.rglob("*"))
+            raise OSError(
+                f"{path} is still there after {timeout} s "
+                f"(last error: {error!r}); left: {left[:10]}") from error
+        time.sleep(0.05)
+
+
+def copy_trees(pairs):
+    """Copy each (source, destination) directory tree; the destinations.
+
+    All or nothing: when one copy fails (its destination is already
+    there, say), the trees copied so far -- and the one that failed part
+    way -- are removed before the error goes on, so a fixture whose setup
+    fails does not leave them for the next test's setup to trip over.
+    """
+    copied = []
+    try:
+        for source, destination in pairs:
+            existed = os.path.lexists(destination)
+            try:
+                shutil.copytree(source, destination)
+            except BaseException:
+                if not existed:
+                    copied.append(destination)
+                raise
+            copied.append(destination)
+    except BaseException:
+        for destination in reversed(copied):
+            remove_tree(destination)
+        raise
+    return [destination for _source, destination in pairs]
+
+
 TASKS_TIMEOUT_SECS = 30
 
 
@@ -366,8 +432,7 @@ class _AutonaHarness:
         from src.core.GameAssetCatalog import GameAssetCatalog
 
         game = self.dir / "user_data" / "games" / HARNESS_GAME
-        if game.exists():
-            shutil.rmtree(game)
+        remove_tree(game)
         icons = game / "base_files" / "icon"
         icons.mkdir(parents=True)
         (game / "base_files" / "config.json").write_text(json.dumps({
@@ -407,8 +472,7 @@ class _AutonaHarness:
 
         manager = AutonaGameAssetManager.instance
         QApplication.processEvents()
-        shutil.rmtree(self.dir / "user_data" / "games" / HARNESS_GAME,
-                      ignore_errors=True)
+        remove_tree(self.dir / "user_data" / "games" / HARNESS_GAME)
         catalog = GameAssetCatalog.instance
         catalog.ScanGames()
         # The empty snapshot rebuilds the empty models of a fresh start; the

@@ -208,6 +208,7 @@ from .AutonaAnalysisWidget import AutonaAnalysisWidget
 from .AutonaPlayerBrowserWidget import AutonaPlayerBrowserWidget
 from src.AutonaWebServer import WebServer, check_webserver_port
 from .AutonaWebPageLifecycle import MarkWebServerReady
+from .AutonaWebPanelHost import AutonaWebPanelHost, UsesQtPanel
 # autopep8: on
 
 
@@ -524,6 +525,11 @@ class Window(QMainWindow):
         # empty placeholder until they are first revealed.
         self._lazyPanels = {}      # stack index -> (factory, key), unbuilt only
         self._panelIndexes = {}    # lazy key -> stack index
+        # The React panels' shared web view (ADR-005 S4), built by the first
+        # React panel's factory, and the React panel each of its stack pages
+        # shows (_OnStackPageChanged tells the host on every reveal).
+        self._webPanelHost = None
+        self._webPanelPages = {}   # stack index -> WebAccess.WEB_PANELS name
         self._buildingPanel = False  # suppresses currentChanged during a swap
         for categoryTitle, panels in self._navSections:
             if categoryTitle:
@@ -997,6 +1003,11 @@ class Window(QMainWindow):
         return top8Panel
 
     def _CreateCommentaryPanel(self):
+        # ADR-005 S4b: the React page in the shared web view, unless the
+        # operator switched back to the Qt panel (general.qt_commentary_panel,
+        # read here, so on the panel's first reveal; S4c removes it).
+        if not UsesQtPanel("commentary"):
+            return self._WebPanel("commentary")
         commentary = AutonaCommentaryWidget()
         commentary.setWindowIcon(QIcon(UI.icon_path('commentary.svg')))
         commentary.setObjectName("Commentary")
@@ -1080,6 +1091,26 @@ class Window(QMainWindow):
         playerBrowser.setObjectName("Players")
         return playerBrowser
 
+    def _WebPanel(self, panel):
+        """The shared web view (AutonaWebPanelHost) as `panel`'s stack page.
+
+        One page per React panel today (Commentary only): nav index ==
+        stack index holds. A second React panel's item would point at the
+        same page, which _EnsurePanelAt does not do yet (ADR-005 S4a,
+        decision 1).
+        """
+        if self._webPanelHost is not None:
+            raise RuntimeError(
+                f"the web panel host is already a page; {panel!r} would "
+                "need a second one")
+        self._webPanelHost = AutonaWebPanelHost()
+        self._webPanelHost.setObjectName("WebPanels")
+        self._webPanelPages[self._panelIndexes[panel]] = panel
+        # Before the page is shown: the view is built, on this panel's page,
+        # when the host first is.
+        self._webPanelHost.ShowPanel(panel)
+        return self._webPanelHost
+
     def _PreparePanel(self, dw):
         """Panel post-processing that used to be the loop over dockWidgets.
 
@@ -1087,6 +1118,9 @@ class Window(QMainWindow):
         panel right after its factory returns.
         """
         dw.setMinimumWidth(0)
+        if not isinstance(dw, QDockWidget):
+            # The React panels' web view: a plain page, no dock chrome.
+            return
         # Call via class to avoid shadowing by instance attrs (e.g. AutonaCommentaryWidget.widget)
         inner = QDockWidget.widget(dw)
         if inner:
@@ -1106,7 +1140,12 @@ class Window(QMainWindow):
         # _EnsurePanelAt.
         if self._buildingPanel:
             return
-        self._EnsurePanelAt(index)
+        page = self._EnsurePanelAt(index)
+        panel = self._webPanelPages.get(index)
+        if panel is not None and page is self._webPanelHost:
+            # Every reveal: the host navigates its view to this panel, or
+            # reloads a view whose last load failed (S4a, decision 11).
+            page.ShowPanel(panel)
 
     def _EnsurePanelAt(self, index):
         """Return the panel on stack page `index`, building it if lazy.
@@ -1140,7 +1179,9 @@ class Window(QMainWindow):
             self.stack.insertWidget(index, panel)
             if wasCurrent:
                 self.stack.setCurrentIndex(index)
-            self.dockWidgets.append(panel)
+            if isinstance(panel, QDockWidget):
+                # Not the React panels' web view: a plain page, not a dock.
+                self.dockWidgets.append(panel)
             # Startup applies the tab-bar policy to every child that exists at
             # that point; panels born later need the same treatment.
             self._ApplyTabBarPolicy(panel)

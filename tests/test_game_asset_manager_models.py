@@ -22,7 +22,6 @@ its restore at startup, and forgetting the pick when the URL is cleared.
 """
 import ast
 import json
-import shutil
 import threading
 from pathlib import Path
 
@@ -30,7 +29,7 @@ import pytest
 
 from qtpy.QtCore import Qt
 
-from tests.conftest import drain_tasks
+from tests.conftest import copy_trees, drain_tasks, remove_tree
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "game_assets"
 GOLDEN = json.loads((FIXTURE / "golden.json").read_text(encoding="utf-8"))
@@ -58,8 +57,7 @@ def goldenGames(autonaApp, monkeypatch):
     monkeypatch.setattr(AutonaLocaleHelper, "remapping", locale["remapping"])
 
     games = autonaApp.dir / "user_data" / "games"
-    for name in GAMES:
-        shutil.copytree(FIXTURE / "games" / name, games / name)
+    copy_trees([(FIXTURE / "games" / name, games / name) for name in GAMES])
     manager = AutonaGameAssetManager.instance
     catalog = GameAssetCatalog.instance
     catalog.ScanGames()
@@ -70,7 +68,7 @@ def goldenGames(autonaApp, monkeypatch):
 
     drain_tasks()
     for name in GAMES:
-        shutil.rmtree(games / name, ignore_errors=True)
+        remove_tree(games / name)
     catalog.ScanGames()
     catalog.ResetGameState()
     manager._RebuildModels()

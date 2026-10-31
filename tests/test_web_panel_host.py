@@ -425,3 +425,203 @@ def test_a_refused_load_is_retried_then_given_up(qapp, monkeypatch,
     finally:
         view.deleteLater()
         QCoreApplication.sendPostedEvents(view, QEvent.Type.DeferredDelete)
+
+
+# ── S4b: the editing menu, the Qt fallback, the Window's wiring ──────────
+
+def test_the_right_click_menu_offers_editing_only():
+    from src.AutonaWebPanelHost import ContextActions
+    W = QWebEnginePage.WebAction
+
+    assert ContextActions(editable=True, hasSelection=False) == [
+        W.Undo, W.Redo, None, W.Cut, W.Copy, W.Paste, None, W.SelectAll]
+    assert ContextActions(editable=True, hasSelection=True) == \
+        ContextActions(editable=True, hasSelection=False)
+    assert ContextActions(editable=False, hasSelection=True) == [W.Copy]
+    assert ContextActions(editable=False, hasSelection=False) == []
+    # None of the browser's: back / forward / reload / view source / save.
+    offered = set(ContextActions(True, True) + ContextActions(False, True))
+    assert not offered & {W.Back, W.Forward, W.Reload, W.ViewSource,
+                          W.SavePage, W.InspectElement}
+
+
+class _FakeRequest:
+    def __init__(self, editable, selected):
+        self._editable, self._selected = editable, selected
+
+    def isContentEditable(self):
+        return self._editable
+
+    def selectedText(self):
+        return self._selected
+
+
+def _rightClick(view, monkeypatch, request):
+    from qtpy.QtCore import QPoint
+    from qtpy.QtGui import QContextMenuEvent
+    from qtpy.QtWidgets import QMenu
+
+    shown = []
+    monkeypatch.setattr(view, "lastContextMenuRequest", lambda: request)
+    monkeypatch.setattr(
+        QMenu, "popup",
+        lambda menu, *args: shown.append(list(menu.actions())))
+    event = QContextMenuEvent(QContextMenuEvent.Reason.Mouse, QPoint(5, 5),
+                              view.mapToGlobal(QPoint(5, 5)))
+    view.contextMenuEvent(event)
+    assert event.isAccepted()
+    return shown
+
+
+def test_the_view_shows_the_editing_menu_for_the_clicked_context(
+        buildHost, monkeypatch):
+    rig = _shown(buildHost)
+    view = rig.host.view
+    W = QWebEnginePage.WebAction
+
+    shown = _rightClick(view, monkeypatch, _FakeRequest(True, ""))
+
+    assert len(shown) == 1
+    entries = [None if action.isSeparator() else action
+               for action in shown[0]]
+    expected = [W.Undo, W.Redo, None, W.Cut, W.Copy, W.Paste, None,
+                W.SelectAll]
+    assert len(entries) == len(expected)
+    for action, kind in zip(entries, expected):
+        if kind is None:
+            assert action is None
+        else:
+            # The page's own action: Chromium enables it for the context.
+            assert action is view.pageAction(kind)
+
+    shown = _rightClick(view, monkeypatch, _FakeRequest(False, "picked"))
+    assert [[action is view.pageAction(W.Copy) for action in menu]
+            for menu in shown] == [[True]]
+
+
+@pytest.mark.parametrize("request_", [None, _FakeRequest(False, "")])
+def test_no_menu_where_there_is_nothing_to_edit_or_copy(
+        buildHost, monkeypatch, request_):
+    rig = _shown(buildHost)
+
+    assert _rightClick(rig.host.view, monkeypatch, request_) == []
+
+
+@pytest.mark.parametrize("stored, qt", [
+    (None, False), (False, False), (True, True), ("true", False), (1, False),
+])
+def test_the_qt_panel_is_shown_only_when_switched_back(
+        monkeypatch, stored, qt):
+    from src import AutonaWebPanelHost as Host
+
+    settings = {} if stored is None else {"qt_commentary_panel": stored}
+    monkeypatch.setattr(
+        Host.SettingsManager, "Get",
+        lambda key, default=None: (
+            settings.get(key.split(".", 1)[1], default)
+            if key.startswith("general.") else default))
+
+    assert Host.UsesQtPanel("commentary") is qt
+    # A React panel without a Qt version has nothing to go back to.
+    assert Host.UsesQtPanel("shell-check") is False
+
+
+def test_every_fallback_is_a_react_panel_the_settings_window_offers():
+    import ast
+    from src import AutonaWebPanelHost as Host
+    from tests.conftest import PROJECT_ROOT
+
+    assert set(Host.QT_FALLBACK_SETTINGS) <= WebAccess.WEB_PANELS
+    source = (PROJECT_ROOT / "src" / "Settings"
+              / "AutonaSettingsWindow.py").read_text(encoding="utf-8")
+    offered = {node.elts[1].value for node in ast.walk(ast.parse(source))
+               if isinstance(node, ast.Tuple) and len(node.elts) == 4
+               and isinstance(node.elts[1], ast.Constant)
+               and isinstance(node.elts[2], ast.Constant)
+               and node.elts[2].value == "checkbox"}
+    for key in Host.QT_FALLBACK_SETTINGS.values():
+        section, name = key.split(".", 1)
+        assert section == "general" and name in offered, key
+
+
+# The Window (src/Autona.py) is read, not imported: that import is the
+# app's startup (agent-pitfalls #1).
+def _windowMethod(name):
+    import ast
+    from tests.conftest import PROJECT_ROOT
+
+    source = (PROJECT_ROOT / "src" / "Autona.py").read_text(encoding="utf-8")
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return node
+    raise AssertionError(f"src/Autona.py: no method {name}")
+
+
+def _calls(node):
+    import ast
+    return [(ast.unparse(call.func),
+             [ast.unparse(arg) for arg in call.args])
+            for call in ast.walk(node) if isinstance(call, ast.Call)]
+
+
+def test_the_commentary_item_opens_the_react_page_unless_switched_back():
+    import ast
+    factory = _windowMethod("_CreateCommentaryPanel")
+    calls = _calls(factory)
+
+    # First the switch, then the web page, and the Qt panel stays reachable.
+    assert ("UsesQtPanel", ["'commentary'"]) in calls
+    assert ("self._WebPanel", ["'commentary'"]) in calls
+    assert ("AutonaCommentaryWidget", []) in calls
+    guard = factory.body[0] if not isinstance(
+        factory.body[0], ast.Expr) else factory.body[1]
+    assert isinstance(guard, ast.If)
+    assert ast.unparse(guard.test) == "not UsesQtPanel('commentary')"
+    assert ast.unparse(guard.body[0]) == "return self._WebPanel('commentary')"
+
+    # The sidebar item is still the lazy factory, keyed by the React
+    # panel's name (_WebPanel finds the page by it).
+    build = _windowMethod("_BuildUi")
+    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
+               and node.elts
+               and ast.unparse(node.elts[0]) == "self._CreateCommentaryPanel"]
+    assert len(entries) == 1
+    assert ast.unparse(entries[0].elts[-1]) == "'commentary'"
+    assert "commentary" in WebAccess.WEB_PANELS
+
+
+def test_every_reveal_of_a_react_item_tells_the_host():
+    calls = _calls(_windowMethod("_OnStackPageChanged"))
+    assert ("self._EnsurePanelAt", ["index"]) in calls
+    assert ("page.ShowPanel", ["panel"]) in calls
+    # The host is told its panel before it is first shown.
+    assert ("self._webPanelHost.ShowPanel", ["panel"]) in _calls(
+        _windowMethod("_WebPanel"))
+
+
+def test_the_web_page_gets_no_dock_chrome():
+    import ast
+    prepare = _windowMethod("_PreparePanel")
+    guard = next(node for node in prepare.body if isinstance(node, ast.If))
+    assert ast.unparse(guard.test) == "not isinstance(dw, QDockWidget)"
+    assert isinstance(guard.body[-1], ast.Return)
+    # Everything dock-only comes after the guard.
+    after = prepare.body[prepare.body.index(guard) + 1:]
+    assert any("setTitleBarWidget" in ast.unparse(node) for node in after)
+    assert any("QDockWidget.widget" in ast.unparse(node) for node in after)
+
+
+def test_the_web_page_is_not_kept_as_a_dock():
+    """A lazily built page goes to self.dockWidgets only when it is a dock
+    (S4b review): the React panels' host is a plain page."""
+    import ast
+    ensure = _windowMethod("_EnsurePanelAt")
+    appends = [node for node in ast.walk(ensure)
+               if isinstance(node, ast.If)
+               and any("self.dockWidgets.append" in ast.unparse(child)
+                       for child in node.body)]
+    assert [ast.unparse(node.test) for node in appends] == [
+        "isinstance(panel, QDockWidget)"]
+    every = [call for call, _args in _calls(ensure)
+             if call == "self.dockWidgets.append"]
+    assert len(every) == 1
