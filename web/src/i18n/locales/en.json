@@ -69,5 +69,14 @@
     "show_sponsor": "Sponsor",
     "show_name": "Player Name",
     "show_real_name": "Real Name",
-    "seed": "Seed"
+    "seed": "Seed",
+
+    "panel_shell_check": "Panel shell check",
+    "panel_shell_mode": "Opened in",
+    "panel_shell_mode_desktop": "the desktop app",
+    "panel_shell_mode_browser": "a browser",
+    "panel_shell_language": "Language",
+    "panel_shell_connection": "Connection",
+    "panel_shell_browser_only": "Shown in a browser only",
+    "panel_unknown": "Unknown panel: {{panel}}"
 }

@@ -201,6 +201,13 @@ set_follow = importlib.import_module(
 # The headless shell's assembly: its run() configures the logs and builds
 # everything; importing it must do neither.
 headless = importlib.import_module("src.headless")
+# The embedded web views (ADR-005 S4a): the page plumbing they share, the
+# overlay previews and the React panel host. Importing them builds no view,
+# parks no load and leaves the web server readiness gate shut (only
+# Window._StartWebServer() opens it).
+page_lifecycle = importlib.import_module("src.AutonaWebPageLifecycle")
+importlib.import_module("src.AutonaLayoutPreview")
+importlib.import_module("src.AutonaWebPanelHost")
 # The Qt adapter for the state layer. Imported last on purpose: everything
 # above already pulled it in (every widget that listens to state does), so
 # if any of them built one at import time this assertion catches it.
@@ -249,6 +256,9 @@ assert player_db._attachedTo is None, \
 assert core_player_db.instance is None, "import created PlayerDB.instance"
 assert core_bad_words.instance is None, "import created BadWordFilter.instance"
 assert task_executor.instance is None, "import created TaskExecutor.instance"
+assert page_lifecycle._webServerReady is False, \
+    "import opened the web server readiness gate"
+assert page_lifecycle._pendingLoaders == [], "import parked a page load"
 
 import threading
 

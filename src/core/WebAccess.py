@@ -285,6 +285,25 @@ def StaticPath(filename):
     return None
 
 
+# ── React panels (ADR-005 S4) ───────────────────────────────────────────
+# The desktop panels moved to React, served at /web/<panel>: web_index
+# answers these names with the Web UI's page and any other with 404. The
+# page is a file like /web (STATIC): what it then does through the API is
+# held to the rules above -- no token from this PC (the desktop's embedded
+# view, AutonaWebPanelHost), the token from another computer. The Web UI
+# routes the same names (web/src/PanelShell/registry.tsx; the two lists
+# are compared by tests/test_web_access.py). "shell-check" is the empty page
+# that checks the panel shell itself (S4a).
+WEB_PANELS = frozenset({
+    "shell-check",
+})
+
+
+def IsWebPanel(name):
+    """Whether /web/``name`` is a React panel's page."""
+    return isinstance(name, str) and name in WEB_PANELS
+
+
 class RefusalLog:
     """Whether a refusal is the first of its kind (a warning) or a repeat.
 

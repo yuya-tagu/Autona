@@ -207,7 +207,7 @@ from .AutonaStatsPreviewWidget import AutonaStatsPreviewWidget
 from .AutonaAnalysisWidget import AutonaAnalysisWidget
 from .AutonaPlayerBrowserWidget import AutonaPlayerBrowserWidget
 from src.AutonaWebServer import WebServer, check_webserver_port
-from .AutonaLayoutPreview import MarkWebServerReady
+from .AutonaWebPageLifecycle import MarkWebServerReady
 # autopep8: on
 
 
@@ -918,9 +918,10 @@ class Window(QMainWindow):
         # listening anyway.
         wire_web_server(self.webserver, self.signals.GameChanged)
 
-        # Release the overlay previews (Board / Commentary / Top 8 / Stats),
-        # which fetch their HTML from this server: a panel restored as the
-        # startup page issues its first load() before this point.
+        # Release the embedded views that fetch their pages from this server
+        # (the overlay previews of Board / Commentary / Top 8 / Stats, and
+        # the React panel host): a panel restored as the startup page issues
+        # its first load() before this point.
         MarkWebServerReady()
 
         log_startup_phase("webserver-ready")

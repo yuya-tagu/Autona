@@ -3955,3 +3955,135 @@ S3f（Executor 1 本化）の 6 PR が揃った。設計表の完了条件の確
   - ヘッドレスの Qt の pin は QtGui のオブジェクト（`QPixmap` / `QIcon` / Qt のモデル）の生成を見ない。デスクトップの `main.py` の起動・終了には自動テストが無い（S3f-6）
   - `GetRecentSets` が答えないとき、「直近の対戦」は次の更新まで読み込み中のまま（S3f-3）
 - S3e から持ち越した運用・既存の不具合は、S3e 全体の完了報告のまま（S3f では扱っていない）
+
+### S4 パネルの React 化 — 設計（2026-10-28・オーナー承認済み）
+
+オーナー判断（2026-10-31）: 下記の設計を承認。論点 1〜3 は推奨案どおり（プレビューのコピー / 画像保存は Commentary では廃止・Qt 版に戻す設定は S4c まで残す・S4a → S4b を自走し IME ゲートの前で停止）。
+
+**範囲**: S4 全体の進め方を決め、そのうち **S4a（共通の土台）と S4b（Commentary の React 化）** を実施する。S4b のあとに ADR-005 の IME 実機ゲートを置き、通過したら **S4c（Qt 版 Commentary の削除）** を行う。Stream 以降のパネルはゲート通過後に 1 枚ずつ設計を出す（ゲートの結果しだいで ADR-005 の Revisit 条件に従い (1) に戻すため、先に設計しない）。
+
+**棚卸し（2026-10-28・HEAD 3468b0b7）**
+
+- Commentary: `src/AutonaCommentaryWidget.py`（600 行・.ui なし）。12 スロット固定のカード（名前（選手 DB 補完）・チーム・役割（候補つき自由入力）・アイコン（なし / mic / megaphone / phone）・コメント・Twitter・「配信に表示」）、グリップのドラッグで並べ替え、表示は 4 人まで（5 人目は core が断る）。右ペインはデザイン選択（`LayoutCatalog` kind=`commentary`、`settings.json` の `commentary.selected_design`）・ライブプレビュー（`AutonaLayoutPreview`）・プレビューのコピー / 画像保存。左ペイン下部に機能別カラーと OBS URL のカード
+- 書き手は既に core（`src/core/CommentaryService.py` の `SetField` / `ApplyPlayerData` / `LoadFromTag` / `Reorder`）。ウィジェットは state を書かない
+- Web 側: legacy の `update-commentary-*` / `load-commentator-from-tag-*`（`ApplyPlayerData` 経由で name / team / twitter / note だけ）と、読み取りの `GET /api/v1/commentary`。**1 欄の更新・並べ替え・表示の切替・デザイン選択・機能別カラーの書き込みは Web から呼べない**。React 側に commentary の実装は無い（`Commentators.jsx` は空ファイル）
+- 土台: Designer が `QWebEngineView` 1 枚 + `?view=designer` で動いている。`/web/<panel>` のパスは今のサーバーでは 404。同じ PC からの要求は LAN トークン不要（ambient）なので、埋め込みビューにトークンは要らない。非表示のビューを Frozen → 5 分で Discarded にする仕組みと、サーバー起動待ち・読み込み再試行が `AutonaLayoutPreview` にある。Web の i18n は i18next（ja / en）だが Qt の言語は渡していない。テーマはダークのみ
+
+**方針**
+
+1. **埋め込みビューは 1 枚を共有する**（パネルごとに作らない）。React 化したパネルのサイドバー項目は、すべて同じ `QStackedWidget` のページ（`AutonaWebPanelHost`）を指す。項目を切り替えると、ビューを読み直さずに React のルーターで遷移する（`runJavaScript` で `navigate`）。レンダラは何枚パネルを移しても 1 プロセスで、S-final（Window = WebEngineView 1 枚）の形に直接つながる。非表示の間の Frozen / Discarded、サーバー起動待ち、読み込み再試行は `AutonaLayoutPreview` の仕組みを部品に切り出して使う。Discarded から戻るときは `program_state` を取り直すだけで、入力途中の値は持たない
+2. **ルートは `/web/<panel>`**（react-router のパス）。サーバーの `web_index` に、React 化したパネル名の許可リスト（定数 1 か所）を足す。既存の `/web?view=designer` はそのまま。URL に `desktop=1` と `lng=<Qt の言語>` を付け、Web 側は `desktop=1` のときブラウザ版向けの部品（「ブラウザで開く」等）を隠す。同じページはブラウザでも開けるので、LAN の別 PC からの操作も同時に手に入る（その場合はトークン必須のまま）
+3. **API は `/api/v1` に追加だけする**（既存は変えない）。デスクトップの埋め込みビューもブラウザと同じ API を使い、特権経路（`QWebChannel`）は作らない
+   - `PATCH /api/v1/commentary/<slot>`（1 欄 = `SetField`。表示 5 人目は 409）
+   - `POST /api/v1/commentary/reorder`（`Reorder`）
+   - `POST /api/v1/commentary/<slot>/player`（補完の確定 = `ApplyPlayerData`）
+   - `GET /api/v1/commentary/options`（`ROLES` / `ICONS` を core の定数から配る。TS に複製しない）
+   - `PUT /api/v1/layouts/selected/<kind>`（デザイン選択。`settings.json` の既存キーに書くだけで形式不変）
+   - `PATCH /api/v1/colors/<feature>`（`ColorService.SetFeatureColor`）
+   - いずれも `WebAccess` の書き込み（GUARDED 以外の通常書き込み）に分類し、`test_webserver_routes.py` の台帳に足す。選手 DB の候補は既存の Socket.IO `playerdb` の push を使う（`Player.jsx` と同じ redux）
+4. **入力の確定と IME**: 文字入力は `compositionend` 後に 300ms の debounce で `PATCH` する。変換中（`isComposing`）は送らない。Enter は変換確定に使い、送信やフォーカス移動に割り当てない。フォーカス中の欄は state の更新で上書きしない（Qt 版の「入力中の欄は飛ばし、フォーカスが外れたら描き直す」と同じ規則を React のフックにして、以降のパネルでも使う）
+5. **プレビュー**: オーバーレイ `/layout/commentators/index.html` を iframe で縮小表示する（OBS と同じページなので見た目は一致する）
+6. **i18n**: Commentary の文言は i18next の `ja.json` / `en.json` に置く（Qt 版は日本語の直書き）。Qt の `.ts` から Commentary の項目を消すのは S4c
+7. **テスト**: core は既存の `test_commentary_service.py`（golden 照合）をそのまま使う。追加は v1 ルートの契約テスト（Flask test client）、React の RTL（入力中の欄を上書きしない・変換中に送らない・5 人目の拒否でチェックが戻る・並べ替え）、Playwright（ヘッドレス起動で入力 → オーバーレイに出る）。Qt 版のパネルテスト（`test_commentary_service.py` の offscreen 部分）は S4c で消す
+
+**ステップ**
+
+| 段 | 内容 | 完了条件 |
+|----|------|---------|
+| S4a | 共通の土台: `AutonaWebPanelHost`（共有ビュー・ルーター遷移・Frozen/Discarded・起動待ち・再試行）、サーバーの `/web/<panel>` 許可リスト、Web のパネル用シェル（ルート・`desktop` / `lng` の受け取り・フォーカス中の欄を守るフック）。この段では React 化したパネルはまだ無い（空の確認用ページだけ） | pytest 全量・Web の build / test・Playwright が通る。起動時間（`STARTUP phase=`）が変わらない（ビューは初回表示まで作らない） |
+| S4b | Commentary の React 化: 方針 3 の v1 ルート、React の Commentary ページ、サイドバーの Commentary を共有ビューへ切り替え。**Qt 版のコードは残し、設定 1 つで戻せるようにする**（ゲートに落ちたときの退路） | 上記 + 手動チェックリスト「実況・解説」の全項目が Web 版で通る（オーナー実機） |
+| ゲート | **IME 実機ゲート**（オーナー）: 名前・役割・コメントの日本語入力（変換・再変換・確定の Enter）、候補ウィンドウの位置、貼り付け、Tab 移動、補完候補と IME の併用、Qt 版と比べた入力速度 | オーナーの合否判断 |
+| S4c | Qt 版 Commentary の削除（ウィジェット・退路の設定・offscreen テスト・`.ts` の古い項目） | pytest 全量が通る。`src/` に `AutonaCommentaryWidget` が無い |
+
+**論点（オーナー判断）**
+
+1. **プレビューの「クリップボードにコピー」「画像として保存」を Web 版でどうするか** → 推奨: **Commentary では廃止する**。OBS URL のコピーが本来の導線で、画像保存は iframe からは取れない（シェル操作を足すと特権経路が増える）。サムネイル / リザルトの描画（オフスクリーン WebEngine）は別物で、影響しない
+2. **S4b の退路（Qt 版に戻す設定）を S4c まで残すか** → 推奨: **残す**（ゲートに落ちたら設定を戻すだけで配信運用を続けられる。S4c で消す）
+3. **自走の範囲** → 推奨: **S4a → S4b まで自走（コミット・push・PR 作成まで）し、IME ゲートの前で停止**。S4c はゲート通過の連絡を受けてから行う
+
+**対象外**: Stream 以降のパネル（ゲート後に 1 枚ずつ設計）、i18next への一本化（S-final）、WebView2 化（S-final）、ホットキー（Win32 の `RegisterHotKey` はフォーカスが WebEngine にあっても効く。そのキーの組み合わせはページに届かないが、Qt 版と同じ）
+
+**見積り**: S4a は中（Qt 1 ファイル + サーバー数行 + Web のシェル）、S4b は中〜大（v1 ルート 6 本 + React ページ 1 枚 + テスト）
+
+#### S4a 共通の土台（2026-10-31）
+
+React 化したパネルの共通の土台を入れた: サーバーの `/web/<panel>`（許可リスト）、Qt の共有ビュー `AutonaWebPanelHost`、Web のパネル用シェルと入力欄のフック。載せたパネルは確認用の空ページ `shell-check` だけで、サイドバーには何も足していない（デスクトップからはまだ開けない。判断 1）。外部契約（Socket.IO の payload・保存形式・自動更新・既存 API）は変えていない。
+
+- **実装**
+  - `src/AutonaWebPageLifecycle.py`（新規）: `AutonaLayoutPreview` から部品を切り出した
+    - 起動待ちのゲート `MarkWebServerReady()`（旧 `AutonaLayoutPreview.MarkWebServerReady`。`Autona.py` の import 先を変更）
+    - `LocalPageLoader`: ゲート待ち（最後に頼まれたパスを読む）+ 再試行（2 回・400ms 刻み）+ `finished(ok)`。Qt が自分で始めた読み込み（Discarded からの復帰）も `finished` を出すので、所有者は文書ごとの仕事をそこで行う
+    - `HiddenPageLifecycle`: 非表示で Frozen、`DISCARD_AFTER_MS`（5 分）で Discarded、Active に戻ったら（読み込み中でなければ）所有者の `onActive` を呼ぶ
+  - `src/AutonaLayoutPreview.py`: 上の部品を使う形に置き換えた。挙動は不変（既存の 10 テストがそのまま通る。変えたのはゲートの monkeypatch 先だけ）
+  - `src/AutonaWebPanelHost.py`（新規）: React パネル全部で共有する `QWebEngineView` 1 枚を持つスタックページ
+    - `ShowPanel(name)`: 許可リスト外は `ValueError`。ビューが無ければ記録するだけ（表示中なら作る）。あれば `window.autonaPanelShell.navigate(name)` を `runJavaScript`（Active かつ読み込み済みのときだけ。それ以外は読み込み完了・Active 復帰で追いつく。判断 6）
+    - ビューは「表示中かつパネルが決まった」最初の時点（`showEvent` か `ShowPanel`）で作る。URL は `http://127.0.0.1:<port>/web/<panel>?desktop=1&lng=<AutonaLocaleHelper.programLocale>`。ページの背景は Web UI の canvas 色（読み込み中の白を出さない）
+    - 読み込み完了（Qt の再読み込みを含む）で、そのとき選ばれているパネルへ navigate。Active 復帰で navigate + `refresh()`（全量の要求）
+    - 最後の読み込みが失敗したまま（ローダーの再試行切れ・Discarded からの Qt の再読み込みの失敗）なら、次の `ShowPanel` / Active 復帰で、そのとき選ばれているパネルのページを読み直す（判断 11）
+  - `src/core/WebAccess.py`: `WEB_PANELS = {"shell-check"}` と `IsWebPanel()`
+  - `src/AutonaWebServer.py`: `web_index` に `/web/<panel>` のルールを足した。許可リスト外は 404（`File not found`）。ログは `file_request` と同じ `_log_static_refusal`（`web/<名前>` ごとに初回だけ warning）。endpoint は `web_index` のまま（STATIC。分類の追加なし）
+  - Web（`web/src/PanelShell/`）
+    - `index.tsx` `PanelShell`（`/web/:panel`）: `desktop` / `lng` の受け取り、i18next と `<html lang>` への反映、router の navigate の登録（layout effect）、`websocketInit()`
+    - `context.tsx`: `usePanelShell()`（`panel` / `desktop` / `language`）と `BrowserOnly`（`desktop=1` で隠す）
+    - `hostApi.ts`: `window.autonaPanelShell = {navigate, refresh}`（`index.js` が起動時に入れる）。navigate は router の navigate（replace・クエリ保持・表示中のパネルなら何もしない）。シェルの mount 前なら URL を `replaceState` して `popstate` を出す（判断 5）。refresh は接続中なら `program_state` を emit
+    - `registry.tsx`: `PANELS`（名前 → ページ。`hasOwnProperty` で引く）
+    - `ShellCheckPage.tsx`: 確認用ページ（表示先・言語・接続・ブラウザ専用の 1 行。何も書かない）。タブのタイトルを出し、別のパネルへ移ったら元に戻す
+    - `useStateField.ts`: 入力欄のフック（判断 9）
+  - `web/src/index.js`: ルート `/web/:panel` と `installPanelShellApi()`。`web/src/i18n/locales/{en,ja}.json`: 確認ページの文言 8 件
+  - `web/package.json` の `jest.moduleNameMapper` と `web/src/setupTests.js` の `TextEncoder`: jest で react-router を読めるようにした（判断 10）
+  - `.claude/design/Design.md` §4.2 のルート表に `/web/:panel`
+- **判断と理由**
+  1. **Window への組み込み（サイドバー項目・ファクトリ）は S4b に回した**（設計のステップ表の S4a 行の範囲どおり。「遅延構築の既存パターンに合わせる」はホスト自身の遅延で満たした）
+     - S4a に載せるパネルが無い。確認用ページをサイドバーに出すと、S4a 単独のリリースに開発用の項目が載り、`STATE_VERSION` も動く
+     - 遅延はホストが持つ: ホストの生成は素の `QWidget` だけで、ビューは表示中にパネルが決まったときに初めて作る。起動時間（`STARTUP phase=`）は変わらない（そもそも Window はまだホストを作らない）。S4b は `_Create*Panel` のファクトリでホストを返し、ナビ項目の選択で `ShowPanel` を呼べばよい
+     - 2 枚目の React パネル（ゲート後）からは「複数のナビ項目 → 1 つのスタックページ」になり、今の「ナビ index == スタック index」が崩れる。その対応はそのときに行う（S4b は Commentary 1 枚なので 1:1 のまま）
+  2. **許可リストは core の `WebAccess.WEB_PANELS`**: サーバーとホスト（`ShowPanel` の検証）の両方が読む。公開面の判定と同じ Qt 非依存の場所。Web 側の `PANELS` は名前 → コンポーネントの表なので 1 つにできず、一致をテストで照合する
+  3. **`/web/<panel>` は `web_index` のもう 1 つのルール**（新しい endpoint にしない）: 分類（STATIC）・CORS・台帳の数え方が `/web` と同じであることが構造で保たれる。未知の名前の 404 とそのログ（名前ごとに初回だけ warning）は、これまで `file_request` が返していたもの（`/web/xxx` は静的配信の許可リスト外。1 階層の `/web/xxx` で配信していたファイルは無い）と同じ
+  4. **パネルのページ自体はトークン不要（STATIC）**: ページは読み取りで、書き込みは API の既存規則（この PC からは ambient、他端末はトークン）。埋め込みビューは `http://127.0.0.1:<port>` のページなので ambient の条件（Host・Origin・Sec-Fetch-Site）を満たす。`desktop=1` の URL からトークンを取らない `autonaToken.ts` の振る舞いは変えていない（埋め込みビューはトークンを持たない）
+  5. **navigate は router の navigate（replace）、mount 前は `replaceState` + `popstate`**: ホストは読み込み完了の直後に navigate しうる。React 19 の初回描画（DefaultLane）は描画からコミット・layout effect までを 1 タスクで行うので、ホストの呼び出しは「描画前（router が新しい URL を読む）」か「登録後」のどちらかに当たる。`popstate` は router が既に購読しているときの保険
+  6. **ホストの navigate は Active で読み込み済みのページにだけ送り、追いつきは 2 か所**（読み込み完了・Active 復帰）: Frozen のページの `runJavaScript` は解凍まで待たされ、Discarded のページへの `runJavaScript` の扱いは保証されない。Discarded からの復帰では Qt が元の URL を読み直すので、その完了で、離れている間に選ばれたパネルへ navigate する（テストで pin）
+  7. **Discarded から戻ったときは何も持ち越さない**（設計方針 1）: 読み直したページは接続時に全量を受け取る。ただし Qt は、入力のあったページを Discarded にしない（Chromium の form interaction の規則で推奨状態に出さない。`_DiscardIfIdle` は推奨に従う）。この印は文書ごとで、ホストは文書を読み直さないので、**どれかの React パネルの欄に一度でも打つと、そのページはプロセスの終了まで Frozen 止まりになる**（打ちかけの値が捨てられることも無い）。メモリへの影響は「残置 / リスク」
+  8. **`lng` は i18next の検出（`?lng=` は既存設定で最優先）に加えて、シェルでも `changeLanguage` する**: コンポーネントは `i18n.t` を直接呼ぶ（react-i18next が無い）ので、シェルが `languageChanged` で再描画する。`<html lang>` も合わせる（日本語のグリフの選択と IME）
+  9. **入力欄のフック `useStateField(value, send)` の規則**（設計方針 4 の具体化。Qt 版の「入力中の欄は飛ばし、離れたら描き直す」を React に移したもの）
+     - フォーカス中は state の更新で上書きしない。離れたら state を表示する
+     - 送るのは打った後だけ。フォーカスして何も打たずに離れたら送らない（その間に他の端末が書いた値を古い値で上書きしない）。state と同じ値に打ち戻したら送らない
+     - 打鍵から 300ms の debounce で送り、離れたら即送る。アンマウント（別のパネルへ移る）でも未送信の打鍵を送る。debounce 待ちに加えて、変換中（タイマーが無い）の打鍵も送る。アンマウントの後は応答を待たない（エコー待ちのタイマーを張らず、欄に触らない）
+     - 変換中は送らない（`compositionstart`〜`compositionend` と `isComposing`）。`compositionend` で debounce を始める。Firefox の順（`compositionend` の後に `input`）でも 1 回
+     - Enter には何も割り当てない（送信もフォーカス移動もしない）
+     - 離れた後は、送った値のエコーが来るまで打った文字を表示し続ける（往復の間に古い値へ戻るちらつきを出さない）。送信が失敗したら（`send` の Promise の reject。5 人目の 409 など）、または応答から `ECHO_GRACE_MS`（1 秒）以内にエコーが来なければ（サーバーが値を変えなかった）state を表示する。フォーカスが無いときの state の変化は常に勝つ（サーバーが正規化した値など）
+     - エコーが HTTP の応答より先に届いたら、届いた時点でエコーとして扱う（応答の後の 1 秒は何もしない。その後に別の書き手の値が来ていれば、離れたときにすぐそれを表示する）
+     - フォーカス中の送信が失敗しても、打った文字は消さない（入力中の欄は上書きしない）。離れたら state を表示し、失敗した値を送り直さない
+  10. **jest の設定を 2 つ足した**: react-router-dom v7 の `main` が存在しないファイル（`dist/main.js`）を指しており、CRA の jest 27 は `exports` を読まない（`moduleNameMapper` で `react-router-dom` と、それが読む `react-router/dom` を CJS の実体へ向けた）。react-router v7 は import 時に `TextEncoder` を使うが、jest 27 の jsdom に無い（`setupTests.js` で Node の `util` から補う）。どちらもテスト環境だけの設定でビルドには影響しない。router を import するテストがこれまで無かったので表に出ていなかった
+  11. **読み込みが失敗したままのビューは、次の `ShowPanel` / Active 復帰で読み直す**（S4a レビュー）: 失敗した文書（エラーページ）にはパネルのシェルが無いので navigate しても何も起きず、ビューはプロセスの終了まで空白のままになっていた。判定はビューの最後の `finished(ok)`（ローダーの読み込みと Qt の再読み込みの両方が出す）。読み込み完了のハンドラからは読み直さない（サーバーが落ちたままでも、操作 1 回につき 1 回の読み直しで止まる）。読み直しは選ばれているパネルの URL を直接開く。起動待ちのゲートで止まっている間はパスを差し替えるだけ
+- **pin（テスト）**
+  - `tests/test_web_access.py`（7 関数・12 ケース）: 許可パネルは `/web` と同じページ（この PC・他端末）／他端末からトークンなしで開ける（`?token=` 付き・誤トークン付きでも拒否しない）／未知の名前（`designer`・`build`・大文字違い・`.html`・`settings.json`）は 404 で中身を返さない／未知の名前は名前ごとに初回だけ warning（許可パネルは出ない）／`/`・`/web`・`/scoreboard`・`/team`・`/web?view=designer` と `/web/build/...` の静的配信は不変／パネルのページからの書き込みは、この PC からはトークン不要、他端末は 401 → トークンで 200／`WEB_PANELS` と `registry.tsx` の `PANELS` が一致
+  - `tests/test_webserver_routes.py`: 台帳に `('/web/<panel>', 'web_index', 'GET,HEAD,OPTIONS')`
+  - `tests/test_web_operations.py`: ルート台帳の歩行に `panel` の値（`shell-check`）
+  - `tests/test_web_panel_host.py`（新規・12 件。offscreen の実 WebEngine と使い捨て HTTP サーバー。ページは `window.autonaPanelShell` の代役。拒否されるポートは bind だけして listen しないソケットで持つ: 閉じただけのポートは別プロセスに取られうる）
+    - URL は `/web/<panel>?desktop=1&lng=<Qt の言語>`
+    - 遅延: パネルを選んでも表示されるまでビューを作らない・パネル無しで表示しても作らない・未知のパネルは `ValueError`
+    - 別パネルへは読み直さずに navigate（同じ文書・リクエスト 1 回・クエリ保持・同じパネルへの 2 回目は何もしない）
+    - サーバー起動前はリクエストを出さず、`MarkWebServerReady()` で読み込む
+    - 非表示で Frozen → 表示で同じ文書のまま全量を要求／Frozen 中に選んだパネルへ表示で移る／Discarded 中に選んだパネルへ、表示で読み直した新しい文書が移る
+    - `LocalPageLoader`: 拒否された読み込みを 2 回試し直し、失敗を 1 回だけ報告
+    - 初回の読み込みが失敗したまま（再試行切れ）のビューは、自分では読み直さず、次の `ShowPanel` で選ばれたパネルのページを直接読み、以後は読み直さずに navigate する／Frozen から表示に戻ったときも読み直す
+  - `tests/test_layout_preview_lifecycle.py`: ゲートの monkeypatch 先だけ変更（10 件そのまま）
+  - `tests/test_import_side_effects.py`: `src.AutonaWebPageLifecycle` / `src.AutonaLayoutPreview` / `src.AutonaWebPanelHost` の import が何も作らず、ゲートを開けず、読み込みを積まない
+  - Web RTL: `PanelShell/useStateField.test.js`（20: 上書きしない・300ms・変換中に送らない・compositionend の後に debounce・Firefox の順・Enter・離れたら即送信とエコー待ち・打たずに離れたら送らない・打ち戻し・失敗・エコー無し・正規化・アンマウント／エコーが応答より先（フォーカス中・離れた後）・フォーカス中の送信失敗・フォーカス中の送信がエコー無し（1 秒経ってもフォーカス中は触らず、離れたら state）・1 秒の前に離れた・変換中のアンマウント・アンマウント後の応答（解決・拒否とも、エコー待ちのタイマーを張らない））、`PanelShell/PanelShell.test.js`（13: パネルの表示・`desktop=1` で `BrowserOnly` を隠す・`lng=ja`（`<html lang>` 含む）・未知のパネル（`constructor` 含む）・`websocketInit`・navigate（replace とクエリ保持・mount 前・同じパネル）・refresh・確認ページのタイトルを離れたら戻す）
+  - Playwright `web/e2e/panel-shell.spec.ts`（4: ブラウザで開いて接続する・`?desktop=1&lng=ja` で日本語とブラウザ専用部品の非表示・`autonaPanelShell.navigate` で読み直さずに移る・許可リスト外は 404 で `/web?view=designer` は 200）
+- **残置 / リスク**
+  - デスクトップからはまだ開けない（Window に未組み込み）。ホストを実ウィンドウで動かす確認（WebEngine の実描画・IME・フォーカス）は S4b
+  - 2 枚目以降の React パネルのナビ対応（判断 1）は、ゲート後の最初のパネルで行う
+  - フックの規則は jsdom で pin した。Chromium の実際の composition の順・候補ウィンドウ・再変換は IME ゲートで確認する
+  - `ECHO_GRACE_MS`（1 秒）は経験値（delta の窓は最大 200ms + flusher）。それより遅い環境では、離れた後に古い値が一瞬出てエコーで戻る（値は失われない）
+  - **ホストのレンダラは、欄に一度でも打つとプロセスの終了まで残る**（判断 7）。パネルを何枚移しても 1 つで、Frozen の間は CPU を使わない。量は未計測: オーバーレイの約 200MB の大半を占める kuromoji 辞書を Web UI は読まない（バンドルは約 0.9MB）ので、それより小さいと見込む。S4b の実機で、打った後に 5 分以上離れたときの常駐量を測る
+  - S4b 以降に回したもの（S4a レビュー）
+    - 共有ビューのコンテキストメニュー: `QWebEngineView` の既定のメニュー（戻る・再読み込み・ページのソースなど）が右クリックで出る。Window に組み込むときに対処する
+    - フックの state の反映が `useEffect`（描画の後）なので、フォーカスの無い欄に state の変化が出るのが 1 フレーム遅れる
+    - `test_web_access.py` の `WEB_PANELS` と `registry.tsx` の照合は正規表現でソースを読んでいる（`PANELS` の書き方を変えると照合が外れうる）
+  - ホストの `lng` は `AutonaLocaleHelper.programLocale`（翻訳ファイルの無い OS 言語なら既定の `en-US`）。設定で言語を変えたときは、ビューが次に読み込まれたときに反映される（Qt 側も再起動が要る）
+- **実機確認（オーナー）**
+  - デスクトップ: 起動・終了が今どおり（`STARTUP phase=` の各値が変わらない）
+  - 既存のプレビュー（Board / Top 8 / 実況 / 統計表示）が今どおり: 起動直後に表示中のパネルのプレビューが出る（サーバー起動待ち）・別パネルへ移って戻るとプレビューが最新・5 分以上離れて戻ると 1 秒ほどで再表示される
+  - ブラウザで `http://127.0.0.1:5107/web/shell-check` を開くと、見出し「Panel shell check」/「パネルシェルの確認」（ブラウザの言語）、`接続: connected`、`ブラウザでだけ表示` が出る。`?desktop=1&lng=ja` を付けると最後の行が消え、日本語になる
+  - LAN を許可している場合: 別端末で `http://<この PC の IP>:5107/web/shell-check` が開ける（このページは何も書かない）
