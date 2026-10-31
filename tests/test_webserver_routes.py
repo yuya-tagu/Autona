@@ -32,6 +32,7 @@ SRC_ROOT = PROJECT_ROOT / "src"
 # ADR-005 S3a changed two rows on purpose: the Flask static folder (which
 # served the whole working directory under /./) is gone, and file_request no
 # longer takes POST (nothing posted to a file; see the route's comment).
+# ADR-005 S4a added /web/<panel> on web_index (the React panels' pages).
 EXPECTED_ROUTES = [
     ('/', 'web_index', 'GET,HEAD,OPTIONS'),
     ('/<path:filename>', 'file_request', 'GET,HEAD,OPTIONS'),
@@ -90,6 +91,8 @@ EXPECTED_ROUTES = [
     ('/update-game', 'set_game', 'OPTIONS,POST'),
     ('/variants', 'get_variants', 'GET,HEAD,OPTIONS'),
     ('/web', 'web_index', 'GET,HEAD,OPTIONS'),
+    # ADR-005 S4a: the React panels' pages (WebAccess.WEB_PANELS only).
+    ('/web/<panel>', 'web_index', 'GET,HEAD,OPTIONS'),
 ]
 
 # The /api/v1 blueprint (src/AutonaApiV1.py, ADR-001). WebServer.__init__

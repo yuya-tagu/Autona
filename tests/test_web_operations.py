@@ -1649,7 +1649,7 @@ SHELL_EVENTS = {"open_set"}
 _URL_VALUES = {"team": "1", "player": "1", "member": "1", "caster": "1",
                "color": "ff0000", "fileFormat": "png", "setId": "1", "t": 1,
                "p": 1, "code": "JP", "slug": "x", "import_id": "0" * 32,
-               "filename": "x"}
+               "filename": "x", "panel": "shell-check"}
 _BOARD_ARGUMENTS = ("scoreboardNumber", "n")
 
 # What a route needs besides its URL to get to its operation rather than

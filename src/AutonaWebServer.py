@@ -804,12 +804,21 @@ def _build_web_app():
             return jsonify({"error": "Figmaインポートを読み込めませんでした。"}), 500
 
 
+    # /web/<panel> (ADR-005 S4): the desktop panels moved to React, routed by
+    # the Web UI itself. Only the names in WebAccess.WEB_PANELS are pages;
+    # any other is answered like a missing file -- and logged like one, as
+    # file_request did for these URLs before the rule existed. /web?view=
+    # designer is unchanged (a query on /web, not a panel).
     @app.route('/')
     @app.route('/scoreboard')
     @app.route('/team')
     @app.route('/web')
+    @app.route('/web/<panel>')
     @cross_origin()
-    def web_index():
+    def web_index(panel=None):
+        if panel is not None and not WebAccess.IsWebPanel(panel):
+            WebServer._log_static_refusal(f"web/{panel}")
+            return "File not found", 404
         return send_file(os.path.join(os.path.abspath('.'), 'web/build/index.html'))
 
 

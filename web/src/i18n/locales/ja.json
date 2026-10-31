@@ -69,5 +69,14 @@
     "show_sponsor": "所属タグ",
     "show_name": "プレイヤー名",
     "show_real_name": "本名",
-    "seed": "シード"
+    "seed": "シード",
+
+    "panel_shell_check": "パネルシェルの確認",
+    "panel_shell_mode": "表示先",
+    "panel_shell_mode_desktop": "デスクトップアプリ",
+    "panel_shell_mode_browser": "ブラウザ",
+    "panel_shell_language": "言語",
+    "panel_shell_connection": "接続",
+    "panel_shell_browser_only": "ブラウザでだけ表示",
+    "panel_unknown": "不明なパネル: {{panel}}"
 }

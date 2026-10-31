@@ -651,6 +651,136 @@ def test_reads_are_not_held_against_foreign_pages(server):
     assert response.status_code == 200
 
 
+# ── React panels: /web/<panel> (ADR-005 S4a) ─────────────────────────────
+# The desktop's embedded view (AutonaWebPanelHost) and a browser on another
+# computer open the same page. The page is a file like /web; what it does
+# afterwards goes through the API and is held to the rules above.
+
+WEB_UI_PAGE = b"<html>the Web UI</html>"
+# The URL the desktop's embedded view opens (AutonaWebPanelHost).
+PANEL_PAGE = "/web/shell-check?desktop=1&lng=ja"
+
+
+def _panel_page_headers(page="http://localhost" + PANEL_PAGE):
+    # A fetch from that page, as Chromium sends it to the test server
+    # (http://localhost, port 80).
+    return {"Origin": "http://localhost", "Sec-Fetch-Site": "same-origin",
+            "Referer": page}
+
+
+def test_every_allowed_panel_is_the_web_ui_page(server):
+    _write(server.root, "web/build/index.html", WEB_UI_PAGE)
+    assert WebAccess.WEB_PANELS, "no React panel to serve"
+    for panel in sorted(WebAccess.WEB_PANELS):
+        for remote in ("127.0.0.1", LAN_PEER):
+            response = _client(server, remote).get(f"/web/{panel}")
+            assert response.status_code == 200, (panel, remote)
+            assert response.data == WEB_UI_PAGE
+            response.close()
+
+
+def test_the_panel_page_needs_no_token_from_another_computer(server):
+    # A page is a read: OBS-style, nothing is asked of whoever loads it, and
+    # a token that comes along (?token=, from the API settings window's
+    # "open in browser") is not refused either.
+    _write(server.root, "web/build/index.html", WEB_UI_PAGE)
+    lan = _client(server, LAN_PEER)
+    for url in ("/web/shell-check", PANEL_PAGE,
+                f"/web/shell-check?token={WebAccess.Token()}",
+                "/web/shell-check?token=WRONG-TOKEN-VALUE-123456"):
+        response = lan.get(url)
+        assert response.status_code == 200, url
+        assert response.data == WEB_UI_PAGE
+        response.close()
+
+
+@pytest.mark.parametrize("panel", [
+    "unknown",
+    "designer",          # the Designer is /web?view=designer, not a panel
+    "build",             # /web/build is the Web UI's folder, not a page
+    "Shell-Check",       # names are exact
+    "shell-check.html",
+    "settings.json",
+])
+def test_any_other_panel_name_is_not_found(server, panel):
+    _write(server.root, "web/build/index.html", WEB_UI_PAGE)
+    _write(server.root, "web/build/settings.json", b'{"secret": 1}')
+    for remote in ("127.0.0.1", LAN_PEER):
+        response = _client(server, remote).get(f"/web/{panel}")
+        assert response.status_code == 404, (panel, remote)
+        assert WEB_UI_PAGE not in response.data
+        assert b"secret" not in response.data
+
+
+def test_a_refused_panel_name_is_logged_like_a_refused_file(server, warnings):
+    # As file_request logged these URLs before /web/<panel> took them: one
+    # warning per name, however often it is asked for.
+    _write(server.root, "web/build/index.html", WEB_UI_PAGE)
+    client = _client(server, LAN_PEER)
+    for _ in range(3):
+        assert client.get("/web/unknown").status_code == 404
+        assert client.get("/web/shell-check").status_code == 200
+
+    refused = [m for m in warnings if "not serving" in m]
+    assert sum("'web/unknown'" in m for m in refused) == 1
+    assert not any("shell-check" in m for m in refused)
+
+
+def test_the_web_ui_entry_and_the_designer_are_unchanged(server):
+    _write(server.root, "web/build/index.html", WEB_UI_PAGE)
+    _write(server.root, "web/build/static/js/main.js", b"js")
+    client = _client(server)
+    for url in ("/", "/web", "/scoreboard", "/team",
+                "/web?view=designer&desktop=1&token=x"):
+        response = client.get(url)
+        assert response.status_code == 200, url
+        assert response.data == WEB_UI_PAGE
+        response.close()
+    # The page's own files are still the static route's.
+    response = client.get("/web/build/static/js/main.js")
+    assert response.status_code == 200
+    assert response.data == b"js"
+    response.close()
+
+
+def test_the_panel_page_writes_from_this_pc_and_needs_the_token_from_another(
+        server):
+    headers = _panel_page_headers()
+    # The desktop's embedded view: this PC, this server's own page.
+    assert _client(server).post(V1_WRITE, headers=headers).status_code == 200
+    assert _client(server).get(LEGACY_WRITE, headers=headers).status_code == 200
+    # The same page opened on another computer: the token, as everywhere.
+    lan = _client(server, LAN_PEER)
+    lan_headers = _panel_page_headers(f"http://{LAN_HOST}{PANEL_PAGE}")
+    lan_headers["Origin"] = f"http://{LAN_HOST}"
+    lan_headers["Host"] = LAN_HOST
+    response = lan.post(V1_WRITE, headers=lan_headers)
+    assert response.status_code == 401
+    assert _error(response) == "UNAUTHENTICATED"
+    assert lan.get("/playerdb", headers=lan_headers).status_code == 401
+    lan_headers["X-Autona-Token"] = WebAccess.Token()
+    assert lan.post(V1_WRITE, headers=lan_headers).status_code == 200
+    assert server.actions.calls == [
+        ("reset_scores", 1), ("team_scoreup", "1", "1"), ("reset_scores", 1)]
+
+
+def test_the_web_ui_routes_the_same_panels():
+    # web/src/PanelShell/registry.tsx maps each panel name to its page; a
+    # name the server serves but the Web UI does not route (or the other
+    # way round) is a page that never works.
+    import re
+    from pathlib import Path
+
+    registry = (Path(__file__).resolve().parent.parent
+                / "web" / "src" / "PanelShell" / "registry.tsx").read_text(
+                    encoding="utf-8")
+    body = re.search(r"export const PANELS[^=]*=\s*\{(.*?)\n\};", registry,
+                     re.S)
+    assert body, "PANELS not found in registry.tsx"
+    routed = set(re.findall(r'^\s*"([^"]+)"\s*:', body.group(1), re.M))
+    assert routed == set(WebAccess.WEB_PANELS)
+
+
 # ── Socket.IO ────────────────────────────────────────────────────────────
 
 def _ws(server, remote_addr="127.0.0.1", headers=None, auth=None, query=None):

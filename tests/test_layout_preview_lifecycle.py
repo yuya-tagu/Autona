@@ -31,6 +31,7 @@ from qtpy.QtWebEngineCore import QWebEnginePage
 from qtpy.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from src import AutonaLayoutPreview as LP
+from src import AutonaWebPageLifecycle as WPL
 from src.AutonaLayoutPreview import AutonaLayoutPreview
 
 ACTIVE = QWebEnginePage.LifecycleState.Active
@@ -136,12 +137,13 @@ class _Rig:
 
 @pytest.fixture
 def buildPreview(qapp, layoutServer, monkeypatch):
-    # Loads go straight to the throwaway server: the startup gate is open
-    # and the port lookup is answered without touching the settings file.
-    monkeypatch.setattr(LP, "_webServerReady", True)
-    realGet = LP.SettingsManager.Get
+    # Loads go straight to the throwaway server: the startup gate (shared
+    # with the panel host since ADR-005 S4a) is open and the port lookup is
+    # answered without touching the settings file.
+    monkeypatch.setattr(WPL, "_webServerReady", True)
+    realGet = WPL.SettingsManager.Get
     monkeypatch.setattr(
-        LP.SettingsManager, "Get",
+        WPL.SettingsManager, "Get",
         lambda key, default=None: (layoutServer
                                    if key == "general.webserver_port"
                                    else realGet(key, default)))
