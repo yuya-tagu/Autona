@@ -164,6 +164,18 @@ provider.provider = None
 # The shared wiring: the payload writer and the forgetting.
 provider.signals.tournament_data_updated.emit({"tournamentName": "Probe Cup"})
 result["tournament_name"] = StateManager.Get("tournamentInfo.tournamentName")
+
+# The stream title is core's (ADR-005 S4d): made from the tournament and
+# the game (1386: SSBU) with no panel, and from the top entrants the
+# provider hands over when its entrants fetch has them.
+result["stream_title"] = pump(
+    lambda: StateManager.Get("stream.title") == "Probe Cup - SSBU")
+from src.core.StreamService import StreamService
+StreamService.instance.SetTopEntrants(
+    [{"seed": 1, "gamerTag": "Ada"}, {"seed": 2, "gamerTag": "Bob"}])
+pump(lambda: StateManager.Get("stream.title") != "Probe Cup - SSBU",
+     timeout=5)
+result["stream_title_entrants"] = StateManager.Get("stream.title")
 result["selected_before_clear"] = catalog.Current().codename
 provider.signals.tournament_url_update.emit("")
 result["selected_after_clear"] = catalog.Current().codename
@@ -240,6 +252,11 @@ def test_the_headless_shell_assembles_and_runs(tmp_path):
     assert result["rescan_order"] == ["probe_game"]
 
     assert result["tournament_name"] == "Probe Cup"
+    # The stream title, generated headless (ADR-005 S4d): before S4d only
+    # the 配信設定 panel made it, so a headless run never had one.
+    assert result["stream_title"] is True, result
+    assert result["stream_title_entrants"] == (
+        "Probe Cup ft. Ada Bob ... and more! - SSBU")
     assert result["selected_before_clear"] == "probe_game"
     assert result["selected_after_clear"] is None
 

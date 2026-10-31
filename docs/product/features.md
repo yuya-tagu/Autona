@@ -169,7 +169,10 @@
 - **テーマカラー / アクセントカラー** のカラーピッカー
 
 ### 配信用ツール
-配信 URL・配信タイトルコピー・配信サムネイル生成（Center Crop / Netflix Style）は Stream Settings パネル（[src/AutonaStreamSettingsWidget.py](../../src/AutonaStreamSettingsWidget.py)）に移動済み。
+配信 URL・配信タイトルコピー・配信サムネイル生成（Center Crop / Netflix Style）は Stream Settings パネル（[src/AutonaStreamSettingsWidget.py](../../src/AutonaStreamSettingsWidget.py)）に移動済み。処理の実体は core の [src/core/StreamService.py](../../src/core/StreamService.py)（ADR-005 S4d）で、配信タイトルは大会を読み込むとパネルを開かなくても（ヘッドレスでも）生成される。手で書き換えたタイトルは、空にするまで自動生成で上書きしない（再起動しても残る。打っている途中に自動生成が走っても、打った文字が勝つ）。
+
+- 配信サムネイルの出力: `out/stream/thumbnail_{背景}_{スタイル}_{YYYYMMDD_HHMMSS}.jpg`（背景 `banner` / `org`・スタイル `center` / `netflix`。直近 30 世代を残す）。生成はバックグラウンドで走り、状態は `stream.thumbnail` に出る
+- 生成オプション（背景・スタイル・団体アイコンの合成）は `settings.json` の `stream_thumbnail_options` に保存される
 
 ### その他
 - **Load from tournament** — Start.gg から一括ロード
@@ -251,7 +254,7 @@ STATS ドック（[src/AutonaStatsWidget.py](../../src/AutonaStatsWidget.py)）�
 - タイトルテンプレート（`{tournament} {round} | {fighter1} vs {fighter2} | {game}`）
 - フォント・文字サイズ
 - リアルタイムプレビュー
-- 出力先: `out/stream/thumbnail.png`
+- 出力先: `out/thumbnails/{選手1}-vs-{選手2}-{日時}.{png,jpg}`
 
 ---
 
@@ -471,7 +474,8 @@ Help & Settings メニュー。
 |------|------|
 | `out/program_state.json` | 全状態スナップショット |
 | `out/*.txt` | OBS テキストソース向け個別ファイル |
-| `out/stream/thumbnail.png` | 生成済みサムネイル |
+| `out/thumbnails/*.{png,jpg}` | 生成済みの試合サムネイル |
+| `out/stream/thumbnail_*.jpg` | 生成済みの配信サムネイル（30 世代） |
 | `user_data/local_players.json` | ローカル選手 DB |
 | `user_data/games/{game}/` | ゲーム別キャラ・ステージ |
 | `user_data/settings.json` | ユーザー設定 |

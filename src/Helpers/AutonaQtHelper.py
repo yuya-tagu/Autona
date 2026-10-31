@@ -52,12 +52,16 @@ def gui_unavailable_reason():
 
 class GuiExecutor(QObject):
     _invoke = Signal(object)
+    _later = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
         # Autoconnection makes this almost-free if the gui thread uses it.
         self._invoke.connect(self._run, Qt.ConnectionType.AutoConnection)
+        # Queued even when emitted on the GUI thread: later() is "once the
+        # event loop is back", never "now".
+        self._later.connect(self._run, Qt.ConnectionType.QueuedConnection)
 
     @Slot(object)
     def _run(self, fn):
@@ -65,6 +69,14 @@ class GuiExecutor(QObject):
 
     def __call__(self, fn):
         self._invoke.emit(fn)
+
+    def later(self, fn):
+        """Run `fn()` on the GUI thread once its event loop is back in
+        control -- never right here, even when called on the GUI thread.
+        Not waited for. For a caller that may not run the work where it is:
+        a state observer, which runs inside StateManager.lock and must not
+        write the state from there (core.StreamService, ADR-005 S4d)."""
+        self._later.emit(fn)
 
     def run_sync(self, fn):
         """Run `fn()` on the GUI thread and return what it returns (or raise

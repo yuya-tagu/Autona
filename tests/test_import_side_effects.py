@@ -134,6 +134,11 @@ core_player_db = importlib.import_module("src.core.PlayerDB").PlayerDB
 # the first submit to a lane does.
 task_executor = importlib.import_module(
     "src.core.TaskExecutor").TaskExecutor
+# The 配信設定 operations (ADR-005 S4d): a singleton created and started
+# (subscribed to the state's notifications) by bootstrap_core(), never on
+# import.
+stream_service = importlib.import_module(
+    "src.core.StreamService").StreamService
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -256,6 +261,9 @@ assert player_db._attachedTo is None, \
 assert core_player_db.instance is None, "import created PlayerDB.instance"
 assert core_bad_words.instance is None, "import created BadWordFilter.instance"
 assert task_executor.instance is None, "import created TaskExecutor.instance"
+assert stream_service.instance is None, "import created StreamService.instance"
+assert core_state.observers.state_updated.subscriber_count() == 0, \
+    "import subscribed to the state's notifications"
 assert page_lifecycle._webServerReady is False, \
     "import opened the web server readiness gate"
 assert page_lifecycle._pendingLoaders == [], "import parked a page load"
