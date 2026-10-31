@@ -203,6 +203,19 @@ test("typing is sent to the slot's field after the debounce", async () => {
     expect(writes("PATCH", "/api/v1/commentary/3")).toEqual([{name: "Bob"}]);
 });
 
+test("mounting and state updates alone send nothing", async () => {
+    await renderPage();
+    await settle(STATE_FIELD_DEBOUNCE_MS);
+
+    setState(lineup({2: {name: "Alice", display: 1}}));
+    await settle(STATE_FIELD_DEBOUNCE_MS);
+
+    expect(writes("PATCH", "/api/v1/commentary/2")).toEqual([]);
+    const sent = global.fetch.mock.calls
+        .filter(([, init]) => (init?.method ?? "GET") !== "GET");
+    expect(sent).toEqual([]);
+});
+
 test("a state update does not overwrite the field being typed into", async () => {
     await renderPage();
     const field = nameField("1");

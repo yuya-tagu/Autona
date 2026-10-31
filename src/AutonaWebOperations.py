@@ -36,7 +36,7 @@ These kinds live here:
   shells. The crew ones go through the board host like the S2 ones (the
   desktop builds the board first and runs them on its GUI thread); the
   line-up has no board and is written on the calling thread. The board and
-  the Commentary panel render what was written.
+  the Commentary page render what was written.
 - the player slots' (ADR-005 S3e-4): the Web's player edit (v1's PATCH
   players and the legacy update-team) and the tag lookup -- core's
   PlayerService.ApplyData, through the board host like the S2 ones. The
@@ -501,8 +501,8 @@ def load_commentator_from_tag(index, tag, no_mains=False):
     return "OK"
 
 
-# The Commentary page's (ADR-005 S4b): the same core operations the Qt
-# panel asks for, one each. The v1 routes validate; these apply. Slots are
+# The Commentary page's (ADR-005 S4b): the core operations the page
+# asks for, one each. The v1 routes validate; these apply. Slots are
 # CommentaryModel.SLOTS strings ("1".."12").
 
 def get_commentary_options():

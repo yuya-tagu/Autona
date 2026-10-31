@@ -1,10 +1,10 @@
 // commentators — caster lineup overlay (bottom bar, 1-4 casters).
 //
-// Renders the `commentary.{1..12}` state written by the desktop Commentary
-// panel (AutonaCommentaryWidget / core/CommentaryModel): the slots with
+// Renders the `commentary.{1..12}` state written by the Commentary
+// panel (web/src/CommentaryPage / core/CommentaryModel): the slots with
 // display > 0 and a non-empty name, left to right by slot order (the
-// panel's card order — cards are drag-reorderable), capped at 4. The
-// desktop panel enforces the same rule — the client-side filter is a
+// page's card order — cards are drag-reorderable), capped at 4. Core
+// (CommentaryService) enforces the same rule — the client-side filter is a
 // second line of defense against hand-edited state. Legacy states carry
 // check-order values (1..4) in display; sorting by (display, slot) keeps
 // those rendering in their saved order too.

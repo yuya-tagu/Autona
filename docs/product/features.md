@@ -148,7 +148,7 @@
 
 ## 7. 実況・解説パネル
 
-[src/AutonaCommentaryWidget.py](../../src/AutonaCommentaryWidget.py)・[src/core/CommentaryModel.py](../../src/core/CommentaryModel.py)・[layout/commentators/](../../layout/commentators/)。
+[web/src/CommentaryPage/](../../web/src/CommentaryPage/)（ADR-005 S4b）・[src/core/CommentaryModel.py](../../src/core/CommentaryModel.py)・[layout/commentators/](../../layout/commentators/)。
 
 - 12 スロット固定の実況・解説者カード（名前 / チーム / 本名 / Twitter / 役割 / コメント）
 - 役割プレフィックス（実況・解説・選手・主催）を選択可能

@@ -145,7 +145,7 @@ def SelectedLayout(kind, root=None):
     or None when the kind lists no layout at all.
 
     The kept id when the catalog still lists it, else the kind's default,
-    else the first entry -- the Commentary panel's rule for its combo. What
+    else the first entry -- the design combos' rule. What
     is kept is not rewritten by a fallback: the operator's choice comes back
     when its folder does.
     """

@@ -840,7 +840,7 @@ def display_options_update():
 
 
 # ── the Commentary page (ADR-005 S4b) ──
-# The writes the Qt Commentary panel asks core for, one route each:
+# The writes the Commentary page asks core for, one route each:
 # CommentaryService.SetField / Reorder / ApplyPlayerData. The line-up is
 # not held, so each is published when it returns. Names and handles are
 # personal data: logged by key only.
@@ -879,7 +879,7 @@ def commentary_update(slot):
                 f"of: {', '.join(comms.ICONS)})",
                 400,
             )
-    # Showing a caster past MAX_DISPLAY others is refused, as in the panel;
+    # Showing a caster past MAX_DISPLAY others is refused, as core does;
     # the other fields of the same request are not written either.
     if not WebOps.update_caster(slot, body):
         raise ApiError(

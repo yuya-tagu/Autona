@@ -118,7 +118,7 @@ def _heldSpy():
 # ── the two path shapes (agent-pitfalls #7) ──────────────────────────────
 #
 # The list in agent-pitfalls names three; two of the callers are gone. The
-# commentary panel builds its own cards (AutonaCommentaryWidget) and the
+# commentary panel was a React page (it built no player cards) and the
 # `{base}.slot.{I}.player.{M}` roster editor was retired, so what ships is a
 # board slot and the PLAYERS editor. Both are covered below, and
 # test_player_widgets.py pins that those are the only two constructions.

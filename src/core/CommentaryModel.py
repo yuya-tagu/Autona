@@ -1,7 +1,7 @@
 """Pure data model for the commentary (casters) panel.
 
-Qt-free on purpose: this module is imported by AutonaCommentaryWidget
-(GUI) and, unchanged, by unit tests. It owns the slot-fixed state shape
+Qt-free on purpose: this module is imported by the core CommentaryService
+and, unchanged, by unit tests. It owns the slot-fixed state shape
 and the normalization / display-selection rules.
 
 State shape (StateManager keypath "commentary"):

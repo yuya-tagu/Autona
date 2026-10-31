@@ -33,7 +33,7 @@ SPACE_LG = 12
 SPACE_XL = 16
 
 # Outer content margin shared by every sidebar nav panel (Tournament Info,
-# Scoreboard, Board, Thumbnail Settings, Statistics, Commentary, Result
+# Scoreboard, Board, Thumbnail Settings, Statistics, Result
 # Settings, Bracket). Previously each panel hardcoded its own value (or set
 # none, falling back to the Qt style default), so the gap between the
 # sidebar/window edge and a panel's content varied panel to panel.

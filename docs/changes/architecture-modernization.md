@@ -43,7 +43,7 @@ PdM 方針（2026-10-23）「Autona のアーキテクチャを現代的に抜�
 | Display | サムネイル（動画サムネ 2 テンプレ） | `AutonaThumbnailSettingsWidget` / `thumbnail/ThumbnailRenderer`（オフスクリーン WebEngine） | `out/thumbnails/` |
 | Display | リザルト画像（6 レイアウト）・コピー・保存・X | `AutonaResultSettingsWidget`(1,330) / `result/ResultRenderer` | `out/results/` |
 | Display | TOP 8（固定 8 名 DE）・Start.gg 取込 | `AutonaTop8Widget` / `AutonaTop8Model` / `core/Top8Service` | `top8.*` |
-| Display | 実況・解説（12 枠・表示最大 4） | `AutonaCommentaryWidget` / `AutonaCommentaryModel` | `commentary.*` |
+| Display | 実況・解説（12 枠・表示最大 4） | React `CommentaryPage`（`/web/commentary`。S4c で Qt 版を削除）/ `core/CommentaryService` / `core/CommentaryModel` | `commentary.*` |
 | Display | 統計表示設定（統計オーバーレイ 5 種） | `AutonaStatsPreviewWidget` | `colors.stats` |
 | Data | 統計（H2H / Last Sets / History / Analysis） | `AutonaStatsWidget` / `AutonaAnalysisWidget` / `core/StatsService` | `score.{n}.*_sets` |
 | Data | 選手リスト・ローカル選手 DB | `AutonaPlayerBrowserWidget` / `AutonaPlayerDB` | `user_data/local_players.json` |
@@ -4167,3 +4167,29 @@ React 化したパネルの共通の土台を入れた: サーバーの `/web/<p
   - 起動・終了が今どおり（`STARTUP phase=` の各値。実況・解説を最後に開いていた状態で起動したときも）。実況・解説を開くとページが出て、他のパネルへ移って戻っても入力した内容が残る
   - 欄に打った後、他のパネルへ移って 5 分以上離れたときの常駐メモリ（タスクマネージャの QtWebEngineProcess。上の残置 1 つ目）
   - 設定の「従来版（Qt）で表示する」を ON → 再起動で Qt 版、OFF → 再起動で Web 版に戻る（どちらでも同じ実況・解説者が出る）
+
+#### IME 実機ゲート（2026-10-31・通過）
+
+オーナー判断（2026-10-31）: IME 実機ゲートを通過。#248（S4a）・#249（S4b）はマージ済み。設計どおり S4c（Qt 版 Commentary の削除）に進む。Stream 以降のパネルは 1 枚ずつ設計を出してオーナー承認を取る（自走の範囲は S4c まで）。
+
+#### S4c Qt 版 Commentary の削除（2026-10-31）
+
+IME 実機ゲート通過を受けて、Qt 版の実況・解説パネルと、それに戻す退路の設定を消した。サイドバーの「実況・解説」は React の `/web/commentary`（共有ビュー `AutonaWebPanelHost`）だけになった。外部契約（Socket.IO の payload・`settings.json` / `state.json` の形式・既存 API・自動更新）は変えていない。
+
+- **消したもの**
+  - `src/AutonaCommentaryWidget.py`（ファイルごと）
+  - `src/Autona.py`: import と `_CreateCommentaryPanel` の Qt 分岐（`return self._WebPanel("commentary")` だけにした）
+  - `src/AutonaWebPanelHost.py`: `QT_FALLBACK_SETTINGS` / `UsesQtPanel` と、使わなくなった `SettingsManager` の import
+  - `src/Settings/AutonaSettingsWindow.py`: 一般タブの「従来版（Qt）で表示する」チェックボックス（`general.qt_commentary_panel`）
+  - `src/i18n/Autona_{ja,en}.ts`: 退路設定の context、「Number of commentators」、他の項目に付いていた `AutonaCommentaryWidget.py` の location。`.qm` は `scripts/compile_translations.ps1` で再コンパイル（568 件 / 未完了 0）
+  - テスト: `tests/test_commentary_service.py` の Qt パネル部分（offscreen のパネル構築・描画追従・入力中の欄・ドラッグ・補完・record モード）、`tests/test_web_panel_host.py` の退路設定 2 本と、Commentary の組み込みテストの Qt 分岐
+- **残したもの**: core の `CommentaryService` / `CommentaryModel` と golden 照合（`tests/fixtures/commentary/golden.json`。デスクトップとヘッドレスのボードホストで同じ書き込みになることを pin し続ける）。`ui_layout.DragCardList` は Result パネルが使う。`AutonaLayoutPreview` は Board / Top 8 / Stats が使う（Commentary 専用の API は無かった）。`AutonaFeatureColors.FEATURE_COMMENTARY` は色カタログの識別子で、Web 版も使う
+- **判断**
+  - ユーザーの `settings.json` に残った `general.qt_commentary_panel` は読まずに無視する（保存形式は変えず、マイグレーションもしない）
+  - pin: `tests/test_web_panel_host.py::test_the_qt_commentary_panel_and_its_switch_are_gone`（`src/` にファイル・`AutonaCommentaryWidget`・`qt_commentary_panel`・`UsesQtPanel` が無い）。Commentary の Window 組み込みは AST で `self._WebPanel('commentary')` だけを呼ぶことを pin
+  - 台帳の過去の記録（S3e-2 / S4a / S4b 節）は歴史なので書き換えていない。コメントとドキュメントの現在形の言及（Design.md・manual-test-checklist・known-smells・README・features.md・`layout/commentators/index.js`・`CommentaryPage` のコメント）は更新した
+  - Qt 版を消して他パネルが壊れる依存は無かった
+- **オーナー実機確認**（`python main.py`）
+  - 設定 → 一般に「実況・解説パネルを従来版（Qt）で表示する」が出ない
+  - 以前その設定を ON にしていた `settings.json` でも、サイドバーの「実況・解説」が Web 版で開く
+  - 起動後の Commentary を含む各パネルの切替が通常どおり（メモリ・フォーカスに退行が無い）

@@ -2,7 +2,7 @@
 
 Hosts a QWebEngineView pointed at the local web server's copy of a
 ``layout/{name}/index.html`` overlay so a panel can embed a live 16:9
-preview (used by the Top 8, Commentary and Board panels). Extracted from
+preview (used by the Top 8, Stats and Board panels). Extracted from
 AutonaTop8Widget's former private _BracketPreview.
 
 Import-light on purpose (qtpy / SettingsManager / ui_constants only):

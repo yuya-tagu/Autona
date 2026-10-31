@@ -183,7 +183,6 @@ from .AutonaObsGuideWindow import AutonaObsGuideWindow
 from .AutonaGameAssetGuideWindow import AutonaGameAssetGuideWindow
 from .LayoutOptions.AutonaLayoutOptionsWindow import AutonaLayoutOptionsWindow
 from .AutonaHotkeys import AutonaHotkeys
-from .AutonaCommentaryWidget import AutonaCommentaryWidget
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaTop8Widget import AutonaTop8Widget
 from .AutonaBoardWidget import AutonaBoardWidget
@@ -208,7 +207,7 @@ from .AutonaAnalysisWidget import AutonaAnalysisWidget
 from .AutonaPlayerBrowserWidget import AutonaPlayerBrowserWidget
 from src.AutonaWebServer import WebServer, check_webserver_port
 from .AutonaWebPageLifecycle import MarkWebServerReady
-from .AutonaWebPanelHost import AutonaWebPanelHost, UsesQtPanel
+from .AutonaWebPanelHost import AutonaWebPanelHost
 # autopep8: on
 
 
@@ -354,7 +353,7 @@ class Window(QMainWindow):
         # Only Tournament Info and the Scoreboard are built here. Every other
         # panel is constructed the first time its page is revealed (see the
         # _Create*Panel factories and _EnsurePanelAt): the preview panels
-        # (Board / Top 8 / Commentary / Stats Display) each own a
+        # (Board / Top 8 / Stats Display) each own a
         # QWebEngineView, and the remaining five (Stream / Thumbnail / Result
         # / Statistics / Player List) together added ~2.9s to the window-init
         # -> core-shown gap for UI most launches never open.
@@ -925,7 +924,7 @@ class Window(QMainWindow):
         wire_web_server(self.webserver, self.signals.GameChanged)
 
         # Release the embedded views that fetch their pages from this server
-        # (the overlay previews of Board / Commentary / Top 8 / Stats, and
+        # (the overlay previews of Board / Top 8 / Stats, and
         # the React panel host): a panel restored as the startup page issues
         # its first load() before this point.
         MarkWebServerReady()
@@ -1003,16 +1002,8 @@ class Window(QMainWindow):
         return top8Panel
 
     def _CreateCommentaryPanel(self):
-        # ADR-005 S4b: the React page in the shared web view, unless the
-        # operator switched back to the Qt panel (general.qt_commentary_panel,
-        # read here, so on the panel's first reveal; S4c removes it).
-        if not UsesQtPanel("commentary"):
-            return self._WebPanel("commentary")
-        commentary = AutonaCommentaryWidget()
-        commentary.setWindowIcon(QIcon(UI.icon_path('commentary.svg')))
-        commentary.setObjectName("Commentary")
-        commentary.setWindowTitle(QApplication.translate("app", "Commentary"))
-        return commentary
+        # ADR-005 S4b/S4c: the React page in the shared web view.
+        return self._WebPanel("commentary")
 
     def _CreateStatsPreviewPanel(self):
         # Preview + OBS URL for the statistics overlays (layout/upset_factor,
@@ -1121,7 +1112,7 @@ class Window(QMainWindow):
         if not isinstance(dw, QDockWidget):
             # The React panels' web view: a plain page, no dock chrome.
             return
-        # Call via class to avoid shadowing by instance attrs (e.g. AutonaCommentaryWidget.widget)
+        # Call via class to avoid shadowing by instance attrs (e.g. a panel's own .widget)
         inner = QDockWidget.widget(dw)
         if inner:
             inner.setMinimumWidth(0)
