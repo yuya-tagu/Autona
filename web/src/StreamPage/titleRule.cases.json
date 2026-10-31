@@ -1,0 +1,22 @@
+{
+  "about": "The stream title rule (ADR-005 S4d / S4e), one table for both implementations: core's StreamService.TitleIsAuto / TypedTitleWins (tests/test_stream_service.py) and the Stream page's titleIsAuto / typedTitleWins (web/src/StreamPage/titleRule.ts, its jest test). Change a case here and both have to agree.",
+  "titleIsAuto": [
+    {"title": "Cup", "titleAuto": "Cup", "auto": true, "why": "the last auto title"},
+    {"title": "", "titleAuto": "Cup", "auto": true, "why": "empty"},
+    {"title": null, "titleAuto": "", "auto": true, "why": "none at all"},
+    {"title": "Mine", "titleAuto": "Cup", "auto": false, "why": "typed by hand"},
+    {"title": "Mine", "titleAuto": "", "auto": false, "why": "typed by hand before any auto title"},
+    {"title": "Anything", "titleAuto": null, "auto": true, "why": "a state from before titleAuto: its title counts as auto"}
+  ],
+  "typedTitleWins": [
+    {"typed": "Mine", "shown": "Cup", "title": "Cup", "titleAuto": "Cup", "wins": true, "why": "typed over the auto title it started from"},
+    {"typed": "Mine 2", "shown": "Mine", "title": "Mine", "titleAuto": "Cup", "wins": true, "why": "typed over a title of the operator's own"},
+    {"typed": "Mine", "shown": "Cup", "title": "Cup ft. Ada", "titleAuto": "Cup ft. Ada", "wins": true, "why": "an auto title landed while the operator typed: the typing wins"},
+    {"typed": "Mine", "shown": "", "title": "Cup", "titleAuto": "Cup", "wins": true, "why": "an auto title landed in a field that was empty"},
+    {"typed": "Mine", "shown": "Cup", "title": "Web's", "titleAuto": "Cup", "wins": false, "why": "another writer's own title landed meanwhile: that one wins"},
+    {"typed": "Cup", "shown": "Cup", "title": "Cup ft. Ada", "titleAuto": "Cup ft. Ada", "wins": false, "why": "nothing typed: the field merely kept an old value, never written back over the newer one"},
+    {"typed": "Cup", "shown": "Old", "title": "Cup", "titleAuto": "Cup", "wins": false, "why": "already the state's"},
+    {"typed": "", "shown": "Mine", "title": "Mine", "titleAuto": "Cup", "wins": true, "why": "cleared by hand: written (core makes the next auto title)"},
+    {"typed": "Mine", "shown": "Cup", "title": "Web's", "titleAuto": null, "wins": true, "why": "no titleAuto yet: the state's title counts as auto"}
+  ]
+}

@@ -31,12 +31,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from qtpy.QtCore import QCoreApplication, QEvent, QEventLoop, QTimer
-from qtpy.QtWebEngineCore import QWebEnginePage
+from qtpy.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from qtpy.QtWebEngineWidgets import QWebEngineView
 from qtpy.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from src import AutonaWebPageLifecycle as WPL
-from src.AutonaWebPanelHost import AutonaWebPanelHost, PanelPath
+from src.AutonaWebPanelHost import AutonaWebPanelHost, PanelPath, WebPanelPages
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from src.core import WebAccess
 
@@ -256,6 +256,52 @@ def test_the_view_is_built_only_once_the_host_is_shown_with_a_panel(buildHost):
     rig.waitLoaded()
     assert rig.requests == ["/web/shell-check?desktop=1&lng=ja"]
     assert rig.path() == ("/web/shell-check", "desktop=1&lng=ja")
+
+
+def test_the_page_may_write_the_clipboard(buildHost):
+    # The Stream page copies the made thumbnail with
+    # navigator.clipboard.write (S4e). Off by default in Qt, and the write
+    # then never settles (measured on PySide6 6.11 with a click on
+    # 127.0.0.1: no answer either way; with the attribute, the image is on
+    # the clipboard).
+    rig = _shown(buildHost)
+    assert rig.host.view.settings().testAttribute(
+        QWebEngineSettings.WebAttribute.JavascriptCanAccessClipboard)
+
+
+def test_the_page_does_not_leave_this_server(buildHost, refusedPort):
+    # What the clipboard permission above rests on (S4e review): a
+    # navigation the page starts to another origin -- script, a link -- is
+    # refused, and the page stays as it was. Another port is another
+    # origin (here nothing listens there: let through, the view would show
+    # an error page).
+    rig = _shown(buildHost)
+    document = rig.js("window.__loadId")
+    elsewhere = f"http://127.0.0.1:{refusedPort}/elsewhere"
+
+    rig.js(f"void (location.href = {json.dumps(elsewhere)})")
+    rig.js("(function(u){var a=document.createElement('a');a.href=u;"
+           f"document.body.appendChild(a);a.click();}})({json.dumps(elsewhere)})")
+
+    _waitUntil(lambda: False, timeout=1.0)
+    assert rig.path() == ("/web/shell-check", "desktop=1&lng=ja")
+    assert rig.js("window.__loadId") == document
+    # Qt reports a refused navigation as a failed load; the host knows the
+    # page is still loaded, and does not reload it on the next reveal.
+    assert rig.host._loaded
+    rig.host.ShowPanel("shell-check")
+    assert not _waitUntil(lambda: len(rig.requests) > 1, timeout=0.5)
+    assert rig.js("window.__loadId") == document
+
+    # Its own server: let through (a new document; the host then moves
+    # its router back to the panel it shows).
+    loads = len(rig.loads)
+    rig.js("void (location.href = '/web/second?desktop=1&lng=ja')")
+    assert _waitUntil(lambda: len(rig.loads) > loads)
+    assert rig.loads[-1] is True
+    assert rig.requests[-1] == "/web/second?desktop=1&lng=ja"
+    assert rig.js("window.__loadId") != document
+    assert not rig.host.view.page().refusedLast
 
 
 def test_a_host_shown_without_a_panel_builds_nothing(buildHost):
@@ -509,11 +555,15 @@ def test_no_menu_where_there_is_nothing_to_edit_or_copy(
 
 # The Window (src/Autona.py) is read, not imported: that import is the
 # app's startup (agent-pitfalls #1).
+def _autonaSource():
+    from tests.conftest import PROJECT_ROOT
+    return (PROJECT_ROOT / "src" / "Autona.py").read_text(encoding="utf-8")
+
+
 def _windowMethod(name):
     import ast
-    from tests.conftest import PROJECT_ROOT
 
-    source = (PROJECT_ROOT / "src" / "Autona.py").read_text(encoding="utf-8")
+    source = _autonaSource()
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.FunctionDef) and node.name == name:
             return node
@@ -549,13 +599,71 @@ def test_the_commentary_item_opens_the_react_page():
     assert "commentary" in WebAccess.WEB_PANELS
 
 
+def test_the_stream_item_opens_the_react_page():
+    import ast
+    calls = _calls(_windowMethod("_CreateStreamPanel"))
+
+    # The React page is the only 配信設定 panel (ADR-005 S4e).
+    assert calls == [("self._WebPanel", ["'stream'"])]
+
+    # Still the lazy factory in Setup, right after the tournament info,
+    # keyed by the React panel's name.
+    build = _windowMethod("_BuildUi")
+    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
+               and node.elts
+               and ast.unparse(node.elts[0]) == "self._CreateStreamPanel"]
+    assert len(entries) == 1
+    assert ast.unparse(entries[0].elts[-1]) == "'stream'"
+    assert "stream" in WebAccess.WEB_PANELS
+
+
+def test_the_sidebar_items_are_the_ones_they_were():
+    """The nav items' number and order (and so the saved sidebar index,
+    QSettings sidebarIndex_v<STATE_VERSION>) did not change for the second
+    React panel: no STATE_VERSION bump (ADR-005 S4 方針 5)."""
+    import ast
+    build = _windowMethod("_BuildUi")
+    keys = [ast.unparse(node.elts[-1]) for node in ast.walk(build)
+            if isinstance(node, ast.Tuple) and len(node.elts) == 4
+            and ast.unparse(node.elts[1]).endswith(".svg'")]
+    assert keys == [
+        "'tournamentInfo'", "'stream'", "None", "'board'", "'thumbnail'",
+        "'result'", "'top8'", "'commentary'", "'statsPreview'", "'stats'",
+        "'playerBrowser'"]
+    version = next(node for node in ast.walk(ast.parse(
+        _autonaSource())) if isinstance(node, ast.Assign)
+        and [ast.unparse(t) for t in node.targets] == ["STATE_VERSION"])
+    assert ast.unparse(version.value) == "22"
+
+
 def test_every_reveal_of_a_react_item_tells_the_host():
     calls = _calls(_windowMethod("_OnStackPageChanged"))
     assert ("self._EnsurePanelAt", ["index"]) in calls
+    assert ("self._webPanelPages.Shown", ["index"]) in calls
     assert ("page.ShowPanel", ["panel"]) in calls
     # The host is told its panel before it is first shown.
-    assert ("self._webPanelHost.ShowPanel", ["panel"]) in _calls(
-        _windowMethod("_WebPanel"))
+    assert ("host.ShowPanel", ["panel"]) in _calls(_windowMethod("_WebPanel"))
+
+
+def test_a_sidebar_choice_and_the_restore_go_through_the_nav_mapping():
+    import ast
+    build = _windowMethod("_BuildUi")
+    connects = [(ast.unparse(call.func), [ast.unparse(a) for a in call.args])
+                for call in ast.walk(build) if isinstance(call, ast.Call)
+                and ast.unparse(call.func).endswith(".connect")]
+    assert ("self.sidebar.navSelected.connect", ["self._OnNavSelected"]) \
+        in connects
+    assert not [c for c in connects
+                if c == ("self.sidebar.navSelected.connect",
+                         ["self.stack.setCurrentIndex"])]
+    # The React items are registered with the mapping as they are added.
+    assert ("self._webPanelPages.Add", ["index", "key"]) in _calls(build)
+    # The restore of the saved sidebar index takes the same way as a click
+    # (a saved React item lands on the shared view's page).
+    assert ("self._OnNavSelected", ["savedIndex"]) in _calls(build)
+    assert ("self.stack.setCurrentIndex", ["savedIndex"]) not in _calls(build)
+    assert ("self._webPanelPages.StackIndex", ["nav"]) in _calls(
+        _windowMethod("_OnNavSelected"))
 
 
 def test_the_web_page_gets_no_dock_chrome():
@@ -601,3 +709,246 @@ def test_the_qt_commentary_panel_and_its_switch_are_gone():
                                 "qt_commentary_panel", "UsesQtPanel",
                                 "QT_FALLBACK_SETTINGS"))]
     assert left == []
+
+
+def test_the_qt_stream_panel_is_gone():
+    # ADR-005 S4e: the React page is the only 配信設定 panel, with no way
+    # back (論点 4). Neither the widget nor its .ui may come back in src/.
+    from tests.conftest import PROJECT_ROOT
+
+    src = PROJECT_ROOT / "src"
+    assert not (src / "AutonaStreamSettingsWidget.py").exists()
+    assert not (src / "layout" / "AutonaStreamSettings.ui").exists()
+    left = [str(path.relative_to(PROJECT_ROOT))
+            for pattern in ("*.py", "*.ui", "*.ts")
+            for path in src.rglob(pattern)
+            if any(word in path.read_text(encoding="utf-8")
+                   for word in ("AutonaStreamSettingsWidget",
+                                "AutonaStreamSettings.ui"))]
+    assert left == []
+
+
+# ── several React items, one host page (ADR-005 S4e) ────────────────────
+
+def test_a_react_item_shows_its_own_page_until_the_host_is_built():
+    pages = WebPanelPages()
+    pages.Add(1, "stream")
+    pages.Add(7, "commentary")
+
+    # A Qt item: its own page, and the choice of panel stays.
+    assert pages.StackIndex(3) == 3
+    assert pages.selected is None
+    # No host yet: the React item's own page (where the host is built).
+    assert pages.StackIndex(7) == 7
+    assert pages.selected == "commentary"
+    assert pages.Shown(7) is None
+
+    assert pages.HostBuilt(7) == [1]
+    assert pages.Shown(7) == "commentary"
+    # Every React item shows the host's page from then on.
+    assert pages.StackIndex(1) == 7
+    assert pages.selected == "stream"
+    assert pages.Shown(7) == "stream"
+    assert pages.StackIndex(3) == 3
+    assert pages.selected == "stream"
+    assert pages.Shown(3) is None
+    assert pages.StackIndex(7) == 7
+    assert pages.Shown(7) == "commentary"
+
+
+def test_the_host_page_shows_its_own_panel_before_any_choice():
+    pages = WebPanelPages()
+    pages.Add(1, "stream")
+    pages.HostBuilt(1)
+    assert pages.Shown(1) == "stream"
+
+
+def test_only_react_panels_are_mapped():
+    with pytest.raises(ValueError):
+        WebPanelPages().Add(1, "tournamentInfo")
+
+
+class _WindowRig:
+    """The Window's real page-switching methods (read out of src/Autona.py,
+    which cannot be imported: agent-pitfalls #1) on a stack built the way
+    _BuildUi builds it, with a few sidebar items: two Qt ones and the two
+    React ones, in the real order (a Qt item between them). Off screen, so
+    the host builds no view; what it was asked to show is its _panel."""
+
+    METHODS = ("_OnNavSelected", "_OnStackPageChanged", "_EnsurePanelAt",
+               "_WebPanel", "_AdoptWebPanelHost", "_PreparePanel",
+               "_CreateStreamPanel", "_CreateCommentaryPanel")
+
+    def __init__(self):
+        import ast
+
+        from loguru import logger
+        from qtpy.QtWidgets import QDockWidget, QSizePolicy
+
+        tree = ast.parse(_autonaSource())
+        window = ast.parse("class Window:\n    pass\n").body[0]
+        window.body = [node for node in ast.walk(tree)
+                       if isinstance(node, ast.FunctionDef)
+                       and node.name in self.METHODS]
+        assert sorted(node.name for node in window.body) == sorted(
+            self.METHODS)
+        window.body.append(ast.parse(
+            "def _ApplyTabBarPolicy(self, panel):\n    pass\n").body[0])
+        namespace = {"QDockWidget": QDockWidget, "QSizePolicy": QSizePolicy,
+                     "QWidget": QWidget, "logger": logger,
+                     "AutonaWebPanelHost": AutonaWebPanelHost}
+        exec(compile(ast.fix_missing_locations(ast.Module(
+            body=[window], type_ignores=[])), "src/Autona.py", "exec"),
+            namespace)
+        self.window = w = namespace["Window"]()
+        self.built = []
+
+        def qtPanel(name):
+            def factory():
+                self.built.append(name)
+                return QLabel(name)
+            return factory
+
+        w.stack = QStackedWidget()
+        w.dockWidgets = []
+        w._lazyPanels = {}
+        w._panelIndexes = {}
+        w._webPanelHost = None
+        w._webPanelPages = WebPanelPages()
+        w._buildingPanel = False
+        # As _BuildUi: tournamentInfo, stream, scoreboard (eager), ...,
+        # commentary.
+        for page, key in ((qtPanel("tournamentInfo"), "tournamentInfo"),
+                          (w._CreateStreamPanel, "stream"),
+                          (QLabel("scoreboard"), None),
+                          (w._CreateCommentaryPanel, "commentary")):
+            if callable(page):
+                index = w.stack.addWidget(QWidget())
+                w._lazyPanels[index] = (page, key)
+                w._panelIndexes[key] = index
+                if WebAccess.IsWebPanel(key):
+                    w._webPanelPages.Add(index, key)
+            else:
+                w.stack.addWidget(page)
+        w.stack.currentChanged.connect(w._OnStackPageChanged)
+        self.placeholders = [w.stack.widget(index)
+                             for index in range(w.stack.count())]
+
+    def choose(self, nav):
+        # What a sidebar click does (navSelected -> _OnNavSelected).
+        self.window._OnNavSelected(nav)
+        return self.window.stack.currentIndex()
+
+    def hosts(self):
+        return [index for index in range(self.window.stack.count())
+                if isinstance(self.window.stack.widget(index),
+                              AutonaWebPanelHost)]
+
+
+STREAM, SCOREBOARD, COMMENTARY = 1, 2, 3
+
+
+def test_both_react_items_show_the_one_host(qapp):
+    rig = _WindowRig()
+    w = rig.window
+
+    # Stream first: the host is built on its page.
+    assert rig.choose(STREAM) == STREAM
+    assert rig.hosts() == [STREAM]
+    host = w._webPanelHost
+    assert host._panel == "stream"
+    # Commentary's placeholder is never to be built (a second host).
+    assert COMMENTARY not in w._lazyPanels
+
+    # Commentary: the same page, told the other panel (the stack did not
+    # move, so this is not currentChanged's).
+    assert rig.choose(COMMENTARY) == STREAM
+    assert host._panel == "commentary"
+    assert rig.hosts() == [STREAM]
+    assert w.stack.widget(COMMENTARY) is rig.placeholders[COMMENTARY]
+
+    # Away and back: each React item brings its own panel back.
+    assert rig.choose(SCOREBOARD) == SCOREBOARD
+    assert rig.choose(STREAM) == STREAM
+    assert host._panel == "stream"
+    assert rig.choose(SCOREBOARD) == SCOREBOARD
+    assert rig.choose(COMMENTARY) == STREAM
+    assert host._panel == "commentary"
+    assert w._webPanelHost is host and rig.hosts() == [STREAM]
+    # The Qt items were built as before, the eager one never.
+    assert rig.choose(0) == 0
+    assert rig.built == ["tournamentInfo"]
+    assert w.dockWidgets == []
+
+
+def test_the_host_is_built_where_the_first_react_item_is_opened(qapp):
+    rig = _WindowRig()
+    w = rig.window
+
+    assert rig.choose(COMMENTARY) == COMMENTARY
+    assert rig.hosts() == [COMMENTARY]
+    assert w._webPanelHost._panel == "commentary"
+    assert STREAM not in w._lazyPanels
+
+    assert rig.choose(STREAM) == COMMENTARY
+    assert w._webPanelHost._panel == "stream"
+    assert w.stack.widget(STREAM) is rig.placeholders[STREAM]
+
+
+def test_choosing_the_shown_react_item_again_tells_the_host_again(
+        qapp, monkeypatch):
+    # A reveal is how a view whose load failed is loaded again (S4a
+    # decision 11): a second click on the item shown is one.
+    rig = _WindowRig()
+    rig.choose(STREAM)
+    asked = []
+    monkeypatch.setattr(rig.window._webPanelHost, "ShowPanel", asked.append)
+
+    rig.choose(STREAM)
+    rig.choose(COMMENTARY)
+    rig.choose(COMMENTARY)
+
+    assert asked == ["stream", "commentary", "commentary"]
+
+
+def test_a_restored_react_item_builds_the_host_on_its_page(qapp):
+    # The restore at startup: the sidebar's saved index, through the same
+    # _OnNavSelected (the stack starts on page 0).
+    rig = _WindowRig()
+    assert rig.window.stack.currentIndex() == 0
+
+    assert rig.choose(COMMENTARY) == COMMENTARY
+    assert rig.window._webPanelHost._panel == "commentary"
+    assert rig.built == []
+    # Restored on page 0 (the stack is there already): built all the same.
+    rig = _WindowRig()
+    assert rig.choose(0) == 0
+    assert rig.built == ["tournamentInfo"]
+
+
+def test_a_host_that_fails_to_be_built_is_built_by_the_next_react_item(qapp):
+    # A failure between the factory and the stack (S4e review): nothing is
+    # recorded, so the next React item opened builds the host -- the host
+    # used to be recorded, and the other items' placeholders dropped, before
+    # the page was on the stack, which left no React panel to open.
+    rig = _WindowRig()
+    w = rig.window
+
+    def failing(panel):
+        raise RuntimeError("injected")
+
+    w._PreparePanel = failing
+    assert rig.choose(STREAM) == STREAM
+    assert w._webPanelHost is None
+    assert w._webPanelPages.hostIndex is None
+    assert COMMENTARY in w._lazyPanels
+    assert rig.hosts() == []
+
+    del w._PreparePanel
+    assert rig.choose(COMMENTARY) == COMMENTARY
+    assert rig.hosts() == [COMMENTARY]
+    assert w._webPanelHost._panel == "commentary"
+    # The item whose build failed shows the host from then on.
+    assert rig.choose(STREAM) == COMMENTARY
+    assert w._webPanelHost._panel == "stream"
+    assert rig.hosts() == [COMMENTARY]

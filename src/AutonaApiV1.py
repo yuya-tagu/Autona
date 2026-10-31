@@ -16,6 +16,8 @@ Sections below mirror the implementation tickets:
   - guarded operations           (docs/tasks/implement-external-control-api-guarded-ops.md)
 """
 
+import base64
+import binascii
 import functools
 import json
 import os
@@ -27,6 +29,7 @@ from collections import OrderedDict
 
 from flask import Blueprint, jsonify, request
 from loguru import logger
+from werkzeug.exceptions import ClientDisconnected
 
 from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
@@ -35,6 +38,7 @@ from .core import ColorService
 from .core import CommentaryModel as comms
 from .core import CommentaryService
 from .core import LayoutCatalog
+from .core import StreamService as streams
 from .core import Top8Service
 from .core.GameAssetCatalog import GameAssetCatalog
 from .core.CountryCatalog import CountryCatalog
@@ -63,6 +67,9 @@ CONFLICT = "CONFLICT"                         # 409
 NOT_READY = "NOT_READY"                       # 409
 UPSTREAM_TIMEOUT = "UPSTREAM_TIMEOUT"         # 504
 INTERNAL = "INTERNAL"                         # 500
+# A request body over its route's limit (write_op's max_body; the only one
+# is the stream org's image upload, ADR-005 S4e).
+PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"       # 413
 # An operation this shell cannot run (ADR-005 S3c): the server runs, the
 # operation needs what the shell does not have. Not retryable. No v1
 # operation raises it since ADR-005 S3e-7 (the only ones left are the
@@ -224,13 +231,57 @@ def _safe_params(keys_only=False):
     return text if len(text) <= 300 else text[:300] + "…"
 
 
-def write_op(operation, log_keys_only=False):
+# A refused body is read in pieces of this size and dropped.
+_DRAIN_CHUNK = 1024 * 1024
+
+
+def _over_limit(max_body):
+    """Whether the request's Content-Length is over `max_body`; if it is,
+    the body is read to its end and dropped first.
+
+    Answering without reading it would leave the body unread on the socket:
+    werkzeug's server closes the connection after the answer, and a client
+    still sending then sees a connection reset instead of the 413 (the
+    server's own drain gives up after 10 ms of silence). werkzeug drains as
+    much on its own, so this costs no more than its policy, only reliably.
+    A body without a Content-Length (chunked) is read as on every other
+    route; the handler's own checks still refuse what is too large."""
+    length = request.content_length
+    if length is None or length <= max_body:
+        return False
+    stream = request.stream
+    try:
+        while stream.read(_DRAIN_CHUNK):
+            pass
+    except (ClientDisconnected, OSError):
+        # Gone before the end (or the body is shorter than it said): no
+        # one is left to read the answer, or all of it was read.
+        pass
+    return True
+
+
+def write_op(operation, log_keys_only=False, max_body=None):
     """Write endpoints: exception->envelope conversion plus an INFO op-log
-    line recording IP / method / path / params / result (spec §2.7)."""
+    line recording IP / method / path / params / result (spec §2.7).
+
+    ``max_body``: this route's request body limit in bytes, answered 413
+    PAYLOAD_TOO_LARGE when the Content-Length is over it, the body dropped
+    rather than parsed (_over_limit). The app sets no limit of its own (no
+    MAX_CONTENT_LENGTH), so the other routes are as they were."""
 
     def deco(fn):
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
+            # Before anything reads the body: _safe_params below does (and
+            # caches it for the handler's read).
+            if max_body is not None and _over_limit(max_body):
+                _oplog.info(
+                    f"{request.remote_addr} {request.method} {request.path} "
+                    f"op={operation} params=<over {max_body} bytes> -> 413 "
+                    f"{PAYLOAD_TOO_LARGE}"
+                )
+                return err(PAYLOAD_TOO_LARGE,
+                           f"the request body is over {max_body} bytes", 413)
             params = _safe_params(keys_only=log_keys_only)
             try:
                 resp = fn(*args, **kwargs)
@@ -548,6 +599,22 @@ def get_selected_layout(kind):
     if entry is None:
         raise ApiError(NOT_FOUND, f"no {kind} layout is installed", 404)
     return ok(data=entry)
+
+
+@api_v1.route("/stream/channels")
+@api_handler
+def get_stream_channels():
+    # The saved stream channels, each {"name", "url"} (settings.json's
+    # stream_channels; ADR-005 S4e). Settings, not state: no revision.
+    return ok(data={"channels": WebOps.get_stream_channels()})
+
+
+@api_v1.route("/stream/thumbnail/options")
+@api_handler
+def get_stream_thumbnail_options():
+    # The stream thumbnail generator's saved options (settings.json's
+    # stream_thumbnail_options): {"source", "style", "overlayOrgIcon"}.
+    return ok(data=WebOps.get_stream_thumbnail_options())
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -980,6 +1047,198 @@ def colors_update(feature):
     return ok(revision=current_revision())
 
 
+# ── 配信設定 (ADR-005 S4e) ──
+_STREAM_FIELDS = ("url", "title")
+
+
+@api_v1.route("/stream", methods=["PUT"])
+@write_op("stream.update")
+def stream_update():
+    # {"url": str, "title": str}, either or both: the stream destination
+    # and the broadcast title (state, stream.*). Whether a title being typed
+    # beats an auto-generated one is the client's to decide (StreamService.
+    # TypedTitleWins); what is sent is written.
+    body = _json_body()
+    unknown = sorted(k for k in body if k not in _STREAM_FIELDS)
+    if unknown:
+        raise ApiError(
+            INVALID_ARGUMENT, f"unknown stream field: {', '.join(unknown)}",
+            400)
+    if not body:
+        raise ApiError(INVALID_ARGUMENT, "url or title is required", 400)
+    for key, value in body.items():
+        if not isinstance(value, str):
+            raise ApiError(INVALID_ARGUMENT, f"{key} must be a string", 400)
+    WebOps.update_stream(body)
+    return ok(revision=current_revision())
+
+
+def _stream_channel_fields():
+    # {"name": str, "url": str}, both non-empty (StreamService refuses an
+    # empty one; refused here first, so the answer says which).
+    body = _json_body()
+    unknown = sorted(k for k in body if k not in ("name", "url"))
+    if unknown:
+        raise ApiError(
+            INVALID_ARGUMENT, f"unknown channel field: {', '.join(unknown)}",
+            400)
+    fields = []
+    for key in ("name", "url"):
+        value = body.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise ApiError(
+                INVALID_ARGUMENT, f"{key} must be a non-empty string", 400)
+        fields.append(value)
+    return fields
+
+
+@api_v1.route("/stream/channels", methods=["POST"])
+@write_op("stream.channel.add")
+def stream_channel_add():
+    # Saved at the end; answered with its index and the whole list.
+    # Settings, not state: no revision.
+    name, url = _stream_channel_fields()
+    index = WebOps.add_stream_channel(name, url)
+    if index is None:
+        raise ApiError(
+            INVALID_ARGUMENT, "name and url must be non-empty strings", 400)
+    return ok(data={"index": index,
+                    "channels": WebOps.get_stream_channels()})
+
+
+@api_v1.route("/stream/channels/<int:index>", methods=["PUT"])
+@write_op("stream.channel.update")
+def stream_channel_update(index):
+    # A destination that was this channel's URL follows it (stream.url),
+    # hence the revision.
+    name, url = _stream_channel_fields()
+    if not WebOps.update_stream_channel(index, name, url):
+        raise ApiError(NOT_FOUND, f"no stream channel {index}", 404)
+    return ok(data={"channels": WebOps.get_stream_channels()},
+              revision=current_revision())
+
+
+@api_v1.route("/stream/channels/<int:index>", methods=["DELETE"])
+@write_op("stream.channel.delete")
+def stream_channel_delete(index):
+    # A destination that was its URL is cleared (stream.url).
+    if not WebOps.delete_stream_channel(index):
+        raise ApiError(NOT_FOUND, f"no stream channel {index}", 404)
+    return ok(data={"channels": WebOps.get_stream_channels()},
+              revision=current_revision())
+
+
+# The org image upload (ADR-005 S4 論点 2): {"image": "data:<type>;base64,
+# ..."}, the file as it is -- core scales it down (StreamService.
+# ImportOrgAsset) and checks what it really is: the data URL's type is the
+# browser's guess from the file name (application/octet-stream for one it
+# does not know), so it is not looked at. Up to 20MB of image (the Stream
+# page refuses a larger file before sending it: ORG_IMAGE_MAX_BYTES in
+# web/src/StreamPage/Cards.tsx, pinned equal); the body is its base64 (4/3)
+# and a little JSON around it, and a longer one is refused unparsed.
+ORG_IMAGE_MAX_BYTES = 20 * 1024 * 1024
+_ORG_IMAGE_MAX_BASE64 = (ORG_IMAGE_MAX_BYTES + 2) // 3 * 4
+_ORG_IMAGE_MAX_BODY = _ORG_IMAGE_MAX_BASE64 + 1024
+_DATA_URL_PREFIX = "data:"
+_DATA_URL_BASE64 = ";base64"
+
+
+def _org_image_bytes(body):
+    image = body.get("image")
+    if not isinstance(image, str):
+        raise ApiError(
+            INVALID_ARGUMENT, "image must be a base64 data URL", 400)
+    header, comma, payload = image.partition(",")
+    if not comma or not header.startswith(_DATA_URL_PREFIX) \
+            or not header.endswith(_DATA_URL_BASE64):
+        raise ApiError(
+            INVALID_ARGUMENT, "image must be a base64 data URL", 400)
+    if len(payload) > _ORG_IMAGE_MAX_BASE64:
+        raise ApiError(
+            PAYLOAD_TOO_LARGE,
+            f"the image is over {ORG_IMAGE_MAX_BYTES} bytes", 413)
+    try:
+        data = base64.b64decode(payload, validate=True)
+    except (binascii.Error, ValueError):
+        raise ApiError(INVALID_ARGUMENT, "image is not valid base64", 400)
+    if not data:
+        raise ApiError(INVALID_ARGUMENT, "image is empty", 400)
+    if len(data) > ORG_IMAGE_MAX_BYTES:
+        raise ApiError(
+            PAYLOAD_TOO_LARGE,
+            f"the image is over {ORG_IMAGE_MAX_BYTES} bytes", 413)
+    return data
+
+
+@api_v1.route("/stream/org/<kind>", methods=["PUT"])
+@write_op("stream.org.import", log_keys_only=True,
+          max_body=_ORG_IMAGE_MAX_BODY)
+def stream_org_import(kind):
+    # The stream org's icon or thumbnail background: saved under layout/
+    # and its version published (stream.orgIconVersion / orgThumbVersion),
+    # which the page's preview follows.
+    if kind not in streams.ORG_ASSETS:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"unknown org asset: {kind} (expected one of: "
+            f"{', '.join(streams.ORG_ASSETS)})",
+            400,
+        )
+    data = _org_image_bytes(_json_body())
+    result = WebOps.import_stream_org_asset(kind, data)
+    if result == streams.INVALID_IMAGE:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            "the image could not be read (a PNG, JPEG or BMP of up to "
+            f"{streams.ORG_ASSET_MAX_PIXELS} pixels)",
+            400,
+        )
+    if result == streams.SAVE_FAILED:
+        raise ApiError(
+            INTERNAL,
+            "the image could not be saved (is another app holding the "
+            "file?)",
+            500,
+        )
+    return ok(revision=current_revision())
+
+
+@api_v1.route("/stream/org", methods=["DELETE"])
+@write_op("stream.org.reset")
+def stream_org_reset():
+    # Both org assets unregistered (files removed, versions 0). A thumbnail
+    # background that was the org's falls back to the tournament banner:
+    # the options as saved now come back.
+    WebOps.reset_stream_org_assets()
+    return ok(data={"thumbnailOptions":
+                    WebOps.get_stream_thumbnail_options()},
+              revision=current_revision())
+
+
+@api_v1.route("/stream/thumbnail/options", methods=["PUT"])
+@write_op("stream.thumbnail.options")
+def stream_thumbnail_options_update():
+    # Some of {"source": banner | org, "style": center | netflix,
+    # "overlayOrgIcon": bool}; all of them as saved come back. Settings, not
+    # state: no revision.
+    body = _json_body()
+    if not body:
+        raise ApiError(
+            INVALID_ARGUMENT, "at least one thumbnail option is required",
+            400)
+    options = WebOps.set_stream_thumbnail_options(body)
+    if options is None:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            "the options are source ("
+            f"{' | '.join(streams.THUMBNAIL_SOURCES)}), style ("
+            f"{' | '.join(streams.THUMBNAIL_STYLES)}) and overlayOrgIcon "
+            "(true / false)",
+            400,
+        )
+    return ok(data=options)
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Guarded operations (spec §7 — op-logged, confirm / 202 + flag)
 # ═══════════════════════════════════════════════════════════════════════
@@ -1157,3 +1416,18 @@ def bracket_refresh():
         # Cleared between the check above and the start.
         raise ApiError(NOT_READY, "no tournament loaded", 409)
     return ok(data={"accepted": True, "operation": "bracket.refresh"}, status=202)
+
+
+@api_v1.route("/stream/thumbnail", methods=["POST"])
+@write_op("stream.thumbnail")
+def stream_thumbnail_generate():
+    # A stream thumbnail with the saved options, made by a background job
+    # (StreamService.GenerateThumbnail; ADR-005 S4e): stream.thumbnail says
+    # "running" before this answers, and "done" (its path, out/stream/...)
+    # or "error" once the job is over. One at a time: the in-progress flag
+    # is core's, shared with every other way in.
+    if WebOps.generate_stream_thumbnail() == streams.BUSY:
+        raise ApiError(
+            CONFLICT, "a stream thumbnail is being made already", 409)
+    return ok(data={"accepted": True, "operation": "stream.thumbnail"},
+              revision=current_revision(), status=202)

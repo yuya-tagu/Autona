@@ -1645,12 +1645,13 @@ SHELL_ENDPOINTS = {"open_sets", "get_thumbnail"}
 SHELL_EVENTS = {"open_set"}
 
 # A value for each URL argument of the rules; the board ones are walked.
-# A slug, file name and import id that name nothing (a well-formed id).
+# A slug, file name, import id and stream channel index that name nothing
+# (a well-formed id).
 _URL_VALUES = {"team": "1", "player": "1", "member": "1", "caster": "1",
                "color": "ff0000", "fileFormat": "png", "setId": "1", "t": 1,
                "p": 1, "code": "JP", "slug": "x", "import_id": "0" * 32,
                "filename": "x", "panel": "shell-check", "slot": 1,
-               "kind": "commentary", "feature": "commentary"}
+               "kind": "commentary", "feature": "commentary", "index": 99}
 _BOARD_ARGUMENTS = ("scoreboardNumber", "n")
 
 # What a route needs besides its URL to get to its operation rather than
@@ -1686,6 +1687,12 @@ _BODIES = {
     "api_v1.commentary_player": {"gamerTag": "Cast"},
     "api_v1.select_layout": {"id": "commentators"},
     "api_v1.colors_update": {"theme": "#123456"},
+    "api_v1.stream_update": {"title": "Walk"},
+    "api_v1.stream_channel_add": {"name": "Walk",
+                                  "url": "https://example.invalid/walk"},
+    "api_v1.stream_channel_update": {"name": "Walk",
+                                     "url": "https://example.invalid/walk"},
+    "api_v1.stream_thumbnail_options_update": {"style": "center"},
 }
 
 # Every route that answers anything but 200 here, by (endpoint, board),
@@ -1715,12 +1722,18 @@ _NOT_200 = {
     ("api_v1.bracket_refresh", None): 409,
     # Accepted, and run in the background.
     ("api_v1.tournament_load", None): 202,
+    ("api_v1.stream_thumbnail_generate", None): 202,
     # A name that names nothing: no such file, design, import or game.
     ("file_request", None): 404,
     ("designer_load_project", None): 404,
     ("designer_delete_project", None): 404,
     ("designer_get_import", None): 404,
     ("api_v1.game_set", None): 404,
+    ("api_v1.stream_channel_update", None): 404,
+    ("api_v1.stream_channel_delete", None): 404,
+    # The walk's kind ("commentary") is no stream org asset, and the image
+    # upload is the contract tests' (tests/test_api_v1_stream.py).
+    ("api_v1.stream_org_import", None): 400,
     # The test runtime's layout/ is empty: no commentary design to show or
     # to pick (the catalog was read).
     ("api_v1.get_selected_layout", None): 404,
@@ -1877,6 +1890,11 @@ def test_every_route_and_event_answers_headless_but_the_shell_operations(
             ws.get_received()
         ws.disconnect()
     finally:
+        # The stream thumbnail the walk started (a background job writing
+        # stream.thumbnail when it is over): finished before the state is
+        # put back.
+        from tests.conftest import drain_tasks
+        drain_tasks()
         shutil.rmtree(web)
         _dropHeadlessBoards(autonaApp)
         with _state().SaveBlock():

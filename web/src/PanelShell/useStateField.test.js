@@ -540,3 +540,156 @@ test("a replacing choice that fails falls back to the state", async () => {
 
     expect(input).toHaveValue("Old");
 });
+
+
+// A field with a rule of its own (options.wins, S4e: the stream title).
+
+function RuledField({value, send, wins}) {
+    const {pick, replace, ...props} = useStateField(value, send, {wins});
+    return <input aria-label="name" {...props}/>;
+}
+
+function setupRuled(value, wins, send = jest.fn()) {
+    const utils = render(<RuledField value={value} send={send} wins={wins}/>);
+    const input = screen.getByLabelText("name");
+    const setState = (next) => utils.rerender(
+        <RuledField value={next} send={send} wins={wins}/>);
+    return {input, send, setState, unmount: utils.unmount};
+}
+
+test("with a rule of its own, another writer's value leaves the typing to the rule", () => {
+    const wins = jest.fn(() => true);
+    const {input, send, setState} = setupRuled("Cup", wins);
+    fireEvent.focus(input);
+    type(input, "Mine");
+
+    setState("Cup ft. Ada");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+
+    expect(wins).toHaveBeenCalledWith("Mine", "Cup", "Cup ft. Ada");
+    expect(send).toHaveBeenCalledWith("Mine");
+});
+
+test("typing the rule refuses is not sent, and leaving shows the state", () => {
+    const wins = jest.fn(() => false);
+    const {input, send, setState} = setupRuled("Cup", wins);
+    fireEvent.focus(input);
+    type(input, "Mine");
+    setState("Web's");
+
+    wait(STATE_FIELD_DEBOUNCE_MS);
+    expect(send).not.toHaveBeenCalled();
+    expect(input).toHaveValue("Mine");
+
+    fireEvent.blur(input);
+    expect(input).toHaveValue("Web's");
+    expect(send).not.toHaveBeenCalled();
+});
+
+// The rule of the stream title, in short: typing wins over the value it
+// started from or an empty one, not over another writer's.
+const startedFrom = (typed, shown, current) =>
+    typed !== current && (current === shown || current === "");
+
+test("after a refusal nothing is sent while the field has focus", () => {
+    // S4e review: the typing after a refusal used to be weighed against the
+    // state then -- the other writer's title, which it then overwrote.
+    const wins = jest.fn(startedFrom);
+    const {input, send, setState} = setupRuled("Cup", wins);
+    fireEvent.focus(input);
+    type(input, "Mine");
+    setState("Web's");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+    expect(wins).toHaveBeenLastCalledWith("Mine", "Cup", "Web's");
+
+    type(input, "Mine 2");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+    expect(wins).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
+    expect(input).toHaveValue("Mine 2");
+
+    // Left: asked once more, against the same start -- refused.
+    fireEvent.blur(input);
+    expect(wins).toHaveBeenLastCalledWith("Mine 2", "Cup", "Web's");
+    expect(send).not.toHaveBeenCalled();
+    expect(input).toHaveValue("Web's");
+});
+
+test("a held typing the rule takes on leaving is sent then", () => {
+    const wins = jest.fn(startedFrom);
+    const {input, send, setState} = setupRuled("Cup", wins);
+    fireEvent.focus(input);
+    type(input, "Mine");
+    setState("Web's");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+    // The other writer clears it meanwhile: the typing wins now, but is
+    // not sent before the field is left.
+    setState("");
+    type(input, "Mine 2");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+    expect(send).not.toHaveBeenCalled();
+
+    fireEvent.blur(input);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith("Mine 2");
+    expect(input).toHaveValue("Mine 2");
+});
+
+test("a held typing is asked about once more when the field goes away", () => {
+    const wins = jest.fn(startedFrom);
+    const {input, send, setState, unmount} = setupRuled("Cup", wins);
+    fireEvent.focus(input);
+    type(input, "Mine");
+    setState("Web's");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+    setState("");
+
+    unmount();
+
+    expect(send).toHaveBeenCalledWith("Mine");
+});
+
+test("after a held typing is left, the next typing is asked about afresh", () => {
+    const wins = jest.fn(startedFrom);
+    const {input, send, setState} = setupRuled("Cup", wins);
+    fireEvent.focus(input);
+    type(input, "Mine");
+    setState("Web's");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+    fireEvent.blur(input);
+    expect(input).toHaveValue("Web's");
+
+    fireEvent.focus(input);
+    type(input, "Web's 2");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+
+    expect(wins).toHaveBeenLastCalledWith("Web's 2", "Web's", "Web's");
+    expect(send).toHaveBeenCalledWith("Web's 2");
+});
+
+test("what the field sent is what it showed in step with the state", () => {
+    const wins = jest.fn(() => true);
+    const {input, send} = setupRuled("Cup", wins);
+    fireEvent.focus(input);
+    type(input, "Mine");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+    expect(send).toHaveBeenLastCalledWith("Mine");
+
+    // No echo yet: the state is still the old title.
+    type(input, "Mine 2");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+
+    expect(wins).toHaveBeenLastCalledWith("Mine 2", "Mine", "Cup");
+});
+
+test("a state that lands while the field is left unfocused is what it shows", () => {
+    const wins = jest.fn(() => true);
+    const {input, setState} = setupRuled("Cup", wins);
+    setState("Cup ft. Ada");
+    fireEvent.focus(input);
+    type(input, "Mine");
+    wait(STATE_FIELD_DEBOUNCE_MS);
+
+    expect(wins).toHaveBeenLastCalledWith("Mine", "Cup ft. Ada", "Cup ft. Ada");
+});

@@ -207,7 +207,8 @@ from .AutonaAnalysisWidget import AutonaAnalysisWidget
 from .AutonaPlayerBrowserWidget import AutonaPlayerBrowserWidget
 from src.AutonaWebServer import WebServer, check_webserver_port
 from .AutonaWebPageLifecycle import MarkWebServerReady
-from .AutonaWebPanelHost import AutonaWebPanelHost
+from .AutonaWebPanelHost import AutonaWebPanelHost, WebPanelPages
+from .core import WebAccess
 # autopep8: on
 
 
@@ -237,9 +238,10 @@ class Window(QMainWindow):
     # v15: Result Settings and Commentary swapped in the sidebar order.
     # v16: Bracket panel replaced by the Top 8 panel (AutonaTop8Widget).
     # v17: Player List panel (AutonaPlayerBrowserWidget) added below Statistics.
-    # v18: Stream Settings panel (AutonaStreamSettingsWidget) inserted after
-    #      Tournament Info; the stream destination / title / thumbnail moved
-    #      into it from the Tournament Info and Scoreboard panels.
+    # v18: Stream Settings panel inserted after Tournament Info; the stream
+    #      destination / title / thumbnail moved into it from the Tournament
+    #      Info and Scoreboard panels. (A React page since ADR-005 S4e, in
+    #      the same place: no bump.)
     # v19: Sidebar grouped into categories (Setup / Display / Data) and
     #      reordered — Scoreboard leads, uncategorised.
     # v20: Commentary and Top 8 swapped in the sidebar order.
@@ -516,19 +518,21 @@ class Window(QMainWindow):
         self.sidebarExpandButton.hide()
 
         self.sidebar.collapseRequested.connect(self.HideSidebar)
-        self.sidebar.navSelected.connect(self.stack.setCurrentIndex)
+        self.sidebar.navSelected.connect(self._OnNavSelected)
 
         # Build the nav items + stack pages in display order. Category
         # headings take no nav index, so nav index still equals stack page
         # index — including for lazy pages, which occupy their index with an
-        # empty placeholder until they are first revealed.
+        # empty placeholder until they are first revealed. The one exception
+        # is what a React item shows once the shared web view exists: that
+        # view's page (WebPanelPages; see _OnNavSelected).
         self._lazyPanels = {}      # stack index -> (factory, key), unbuilt only
         self._panelIndexes = {}    # lazy key -> stack index
-        # The React panels' shared web view (ADR-005 S4), built by the first
-        # React panel's factory, and the React panel each of its stack pages
-        # shows (_OnStackPageChanged tells the host on every reveal).
+        # The React panels' shared web view (ADR-005 S4), built by the
+        # factory of the first React panel opened, and which page each React
+        # item shows (_OnStackPageChanged tells the host on every reveal).
         self._webPanelHost = None
-        self._webPanelPages = {}   # stack index -> WebAccess.WEB_PANELS name
+        self._webPanelPages = WebPanelPages()
         self._buildingPanel = False  # suppresses currentChanged during a swap
         for categoryTitle, panels in self._navSections:
             if categoryTitle:
@@ -538,6 +542,8 @@ class Window(QMainWindow):
                     index = self.stack.addWidget(QWidget())
                     self._lazyPanels[index] = (page, key)
                     self._panelIndexes[key] = index
+                    if WebAccess.IsWebPanel(key):
+                        self._webPanelPages.Add(index, key)
                 else:
                     index = self.stack.addWidget(page)
                 self.sidebar.addNavItem(QIcon(UI.icon_path(iconName)), label)
@@ -759,8 +765,10 @@ class Window(QMainWindow):
         savedIndex = self.qtSettings.value(
             f"sidebarIndex_v{self.STATE_VERSION}", 0, type=int)
         if 0 <= savedIndex < self.stack.count():
+            # The saved index is the sidebar's (closeEvent); a React item's
+            # page is the shared view's, as on a click.
             self.sidebar.setCurrentIndex(savedIndex)
-            self.stack.setCurrentIndex(savedIndex)
+            self._OnNavSelected(savedIndex)
         if self.qtSettings.value(
                 f"sidebarCollapsed_v{self.STATE_VERSION}", False, type=bool):
             self.HideSidebar()
@@ -1016,13 +1024,8 @@ class Window(QMainWindow):
         return statsPreview
 
     def _CreateStreamPanel(self):
-        from .AutonaStreamSettingsWidget import AutonaStreamSettingsWidget
-        streamSetting = AutonaStreamSettingsWidget()
-        streamSetting.setWindowIcon(QIcon(UI.icon_path('megaphone.svg')))
-        streamSetting.setObjectName("Stream Settings")
-        streamSetting.setWindowTitle(
-            QApplication.translate("app", "Stream Settings"))
-        return streamSetting
+        # ADR-005 S4e: the React page in the shared web view.
+        return self._WebPanel("stream")
 
     def _CreateThumbnailPanel(self):
         from .AutonaThumbnailSettingsWidget import AutonaThumbnailSettingsWidget
@@ -1083,24 +1086,37 @@ class Window(QMainWindow):
         return playerBrowser
 
     def _WebPanel(self, panel):
-        """The shared web view (AutonaWebPanelHost) as `panel`'s stack page.
+        """The shared web view (AutonaWebPanelHost), built as the stack page
+        of `panel`, the first React panel opened.
 
-        One page per React panel today (Commentary only): nav index ==
-        stack index holds. A second React panel's item would point at the
-        same page, which _EnsurePanelAt does not do yet (ADR-005 S4a,
-        decision 1).
+        Built once: once it is on the stack, _EnsurePanelAt adopts it
+        (_AdoptWebPanelHost), and the other React items show this page from
+        then on (WebPanelPages, _OnNavSelected; ADR-005 S4e). The guard
+        below cannot fire through _EnsurePanelAt; it keeps a second host
+        from ever being made.
         """
         if self._webPanelHost is not None:
             raise RuntimeError(
                 f"the web panel host is already a page; {panel!r} would "
                 "need a second one")
-        self._webPanelHost = AutonaWebPanelHost()
-        self._webPanelHost.setObjectName("WebPanels")
-        self._webPanelPages[self._panelIndexes[panel]] = panel
+        host = AutonaWebPanelHost()
+        host.setObjectName("WebPanels")
         # Before the page is shown: the view is built, on this panel's page,
         # when the host first is.
-        self._webPanelHost.ShowPanel(panel)
-        return self._webPanelHost
+        host.ShowPanel(panel)
+        return host
+
+    def _AdoptWebPanelHost(self, index, host):
+        """`host`, built by _WebPanel, is stack page `index` now: the React
+        items show it from here on, and the other React items' placeholders
+        leave _lazyPanels (never to be built: a second host).
+
+        Only once the page is on the stack (S4e review): a build that fails
+        before that leaves no host recorded and the other React items'
+        placeholders lazy, so the next of them opened builds the host."""
+        self._webPanelHost = host
+        for other in self._webPanelPages.HostBuilt(index):
+            self._lazyPanels.pop(other, None)
 
     def _PreparePanel(self, dw):
         """Panel post-processing that used to be the loop over dockWidgets.
@@ -1124,18 +1140,33 @@ class Window(QMainWindow):
         dw.setTitleBarWidget(QWidget())
         dw.setFeatures(QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
 
+    def _OnNavSelected(self, nav):
+        """Show sidebar item `nav`'s stack page: a sidebar click, and the
+        QSettings tab restore at the end of __init__.
+
+        Its own page, but for a React item once the shared web view exists:
+        that view's page (WebPanelPages). Going from one React item to
+        another leaves the stack where it is, and currentChanged only fires
+        when the index moves, so the page change is handled here then.
+        """
+        index = self._webPanelPages.StackIndex(nav)
+        if self.stack.currentIndex() == index:
+            self._OnStackPageChanged(index)
+        else:
+            self.stack.setCurrentIndex(index)
+
     def _OnStackPageChanged(self, index):
-        # Covers both a sidebar click (navSelected -> setCurrentIndex) and a
-        # programmatic switch (the QSettings tab restore at the end of
-        # __init__). Ignored while a page swap of our own is in flight — see
+        # Covers both a sidebar choice (_OnNavSelected -> setCurrentIndex,
+        # or called from there when the page stays) and a programmatic
+        # switch. Ignored while a page swap of our own is in flight — see
         # _EnsurePanelAt.
         if self._buildingPanel:
             return
         page = self._EnsurePanelAt(index)
-        panel = self._webPanelPages.get(index)
+        panel = self._webPanelPages.Shown(index)
         if panel is not None and page is self._webPanelHost:
-            # Every reveal: the host navigates its view to this panel, or
-            # reloads a view whose last load failed (S4a, decision 11).
+            # Every reveal: the host navigates its view to the panel chosen,
+            # or reloads a view whose last load failed (S4a, decision 11).
             page.ShowPanel(panel)
 
     def _EnsurePanelAt(self, index):
@@ -1168,6 +1199,8 @@ class Window(QMainWindow):
             self.stack.removeWidget(placeholder)
             placeholder.deleteLater()
             self.stack.insertWidget(index, panel)
+            if isinstance(panel, AutonaWebPanelHost):
+                self._AdoptWebPanelHost(index, panel)
             if wasCurrent:
                 self.stack.setCurrentIndex(index)
             if isinstance(panel, QDockWidget):

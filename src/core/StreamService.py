@@ -1,8 +1,8 @@
 """The broadcast's own settings and generators (配信設定, ADR-005 S4d).
 
-Everything the 配信設定 panel (``AutonaStreamSettingsWidget``) used to do
-itself, so that it happens with no panel -- before the page is first shown,
-and in the headless shell:
+Everything the Qt 配信設定 panel used to do itself (it was removed in ADR-005
+S4e for the React Stream page, web/src/StreamPage), so that it happens with
+no panel -- before the page is first shown, and in the headless shell:
 
 - **the stream title** (``stream.title``): rebuilt from the tournament name,
   the game's abbreviation and the tournament's top entrants whenever one of
@@ -17,8 +17,8 @@ and in the headless shell:
   ``stream.thumbnail``; its options are kept in settings.json
   (``stream_thumbnail_options``).
 
-The panel only asks for these and draws the state; the file dialog, the
-previews and the clipboard stay Qt's.
+The page only asks for these (through /api/v1) and draws the state; the
+file picker, the previews and the clipboard are the browser's.
 
 The title, in detail. The panel computed it on three Qt signals (tournament
 data, entrants, game assets) with a memory of the last auto value that
@@ -41,11 +41,11 @@ and never in the headless shell. Now:
   value or nothing (``TitleIsAuto``), so a title the operator typed stays
   until they clear it. The last auto value is state, not this service's
   memory: it is persisted, so a typed title survives a restart, and a
-  client (the panel, the Web page) can tell an auto title from a typed one.
+  client (the Web's Stream page) can tell an auto title from a typed one.
   A client's typing wins over an auto title that lands while the operator
   is in the field (``TypedTitleWins``): the generator never beats a hand.
   A state from before S4d has no ``titleAuto``; its title counts as auto
-  (the panel regenerated it whenever it was opened).
+  (the old Qt panel regenerated it whenever it was opened).
 
 ``StreamService.instance`` is built and started by ``bootstrap_core()``;
 the banner lookup (the provider's), the deferral and the output pruning are
@@ -224,8 +224,8 @@ def TitleIsAuto(title, titleAuto) -> bool:
     the generator wrote last (`titleAuto`, ``stream.titleAuto``) or nothing.
     Such a title gives way -- to the next auto title, and to what an
     operator types. `titleAuto` None (a state from before S4d, which never
-    recorded it): the title counts as auto, as the panel regenerated it
-    whenever it was opened."""
+    recorded it): the title counts as auto, as the old Qt panel
+    regenerated it whenever it was opened."""
     title = title or ""
     if titleAuto is None:
         return True
@@ -234,8 +234,9 @@ def TitleIsAuto(title, titleAuto) -> bool:
 
 def TypedTitleWins(typed, shown, title, titleAuto) -> bool:
     """Whether a client writes the title the operator typed when they leave
-    the field. The rule for every client of ``stream.title`` (the panel's
-    field, the Web page's).
+    the field. The rule for every client of ``stream.title``: the Stream
+    page implements it too (web/src/StreamPage/titleRule.ts), against the
+    same table (titleRule.cases.json).
 
     `typed`: the field's text; `shown`: what the field last showed in step
     with the state (rendered, or written from it); `title` / `titleAuto`:
@@ -695,18 +696,20 @@ class StreamService:
     def ResetOrgAssets(self):
         """Unregister both org assets (their files removed, their versions
         0). A thumbnail that was to be made from the org thumbnail falls
-        back to the tournament banner, so it does not fail on nothing."""
-        with self._assetLock:
-            for path, versionKey, _side in ORG_ASSETS.values():
-                try:
-                    if os.path.exists(path):
-                        os.remove(path)
-                except OSError:
-                    logger.opt(exception=True).error(
-                        f"Stream: {path} could not be removed")
-                schema.PublishAssetVersion(versionKey, path)
-        if self.ThumbnailOptions()["source"] == "org":
-            self.SetThumbnailOptions({"source": "banner"})
+        back to the tournament banner, so it does not fail on nothing.
+        One save cycle: both versions reach the readers in one delta."""
+        with StateManager.SaveBlock():
+            with self._assetLock:
+                for path, versionKey, _side in ORG_ASSETS.values():
+                    try:
+                        if os.path.exists(path):
+                            os.remove(path)
+                    except OSError:
+                        logger.opt(exception=True).error(
+                            f"Stream: {path} could not be removed")
+                    schema.PublishAssetVersion(versionKey, path)
+            if self.ThumbnailOptions()["source"] == "org":
+                self.SetThumbnailOptions({"source": "banner"})
 
     # ── the stream thumbnail ─────────────────────────────────────────────
 

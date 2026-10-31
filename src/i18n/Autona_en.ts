@@ -96,51 +96,6 @@
     </message>
     <message>
         <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Stream Settings</source>
-        <translation>Stream Settings</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Stream Title</source>
-        <translation>Stream Title</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Title is auto-generated from tournament info and seeds</source>
-        <translation>Title is auto-generated from tournament info and seeds</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Copy</source>
-        <translation>Copy</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Thumbnail Style</source>
-        <translation>Thumbnail Style</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Center Crop</source>
-        <translation>Center Crop</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Netflix Style</source>
-        <translation>Netflix Style</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Generate Stream Thumbnail</source>
-        <translation>Generate Stream Thumbnail</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Copy Thumbnail to Clipboard</source>
-        <translation>Copy Thumbnail to Clipboard</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
         <source>Tournament Icon / Banner</source>
         <translation>Tournament Icon / Banner</translation>
     </message>
@@ -1819,41 +1774,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>{0}P</translation>
     </message>
     <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1123" />
-        <source>Add stream channel</source>
-        <translation>Add stream channel</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardWidget.py" line="1129" />
-        <source>Channel name</source>
-        <translation>Channel name</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="734" />
-        <source>Input required</source>
-        <translation>Input required</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="736" />
-        <source>Please enter both the channel name and URL.</source>
-        <translation>Please enter both the channel name and URL.</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="795" />
-        <source>Edit stream channel</source>
-        <translation>Edit stream channel</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="762" />
-        <source>Delete stream channel</source>
-        <translation>Delete stream channel</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="763" />
-        <source>Delete this stream channel?</source>
-        <translation>Delete this stream channel?</translation>
-    </message>
-    <message>
         <location filename="..\AutonaScoreboardWidget.py" line="1157" />
         <source>Autona - Bluesky</source>
         <translation>Autona - Bluesky</translation>
@@ -2256,32 +2176,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>Image Files</translation>
     </message>
     <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="695" />
-        <source>No tournament banner available.</source>
-        <translation>No tournament banner available.</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="726" />
-        <source>Saved: </source>
-        <translation>Saved: </translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="753" />
-        <location filename="..\AutonaTournamentInfoWidget.py" line="730" />
-        <source>Error: </source>
-        <translation>Error: </translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="744" />
-        <source>Failed to load thumbnail for copy.</source>
-        <translation>Failed to load thumbnail for copy.</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="749" />
-        <source>Copied to clipboard: </source>
-        <translation>Copied to clipboard: </translation>
-    </message>
-    <message>
         <location filename="..\AutonaTournamentInfoWidget.py" line="788" />
         <location filename="..\AutonaTournamentInfoWidget.py" line="787" />
         <source>Error</source>
@@ -2334,21 +2228,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\result\main_generate_result.py" line="123" />
         <source>Sample Tournament</source>
         <translation>Sample Tournament</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStreamSettingsWidget.py" line="530" />
-        <source>サムネイルを生成しています…</source>
-        <translation>Generating the thumbnail…</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStreamSettingsWidget.py" line="376" />
-        <source>画像を保存できませんでした。ほかのアプリがファイルを開いていないか確認してください。</source>
-        <translation>The image could not be saved. Check that no other application has the file open.</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStreamSettingsWidget.py" line="380" />
-        <source>画像を読み込めませんでした。PNG / JPEG / BMP（5000 万画素まで）の画像を選んでください。</source>
-        <translation>The image could not be read. Choose a PNG, JPEG or BMP image (up to 50 megapixels).</translation>
     </message>
 </context><context>
     <name>layout_options</name>

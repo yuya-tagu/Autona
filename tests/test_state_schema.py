@@ -160,9 +160,9 @@ def test_stale_keys_are_the_retired_event_tab_keys():
 
 
 def test_stream_asset_versions_pin_both_keys_and_paths():
-    # The paths are where AutonaStreamSettingsWidget saves the files and what
-    # AutonaWebServer serves; the keys are what the OBS overlays append as a
-    # cache-bust query string. A typo on either side fails silently -- a
+    # The paths are where core's StreamService saves the files and what
+    # AutonaWebServer serves (the Stream page previews them); the keys are
+    # what a reader appends as a cache-bust query string. A typo on either side fails silently -- a
     # missing file publishes version 0 and the overlay keeps its cached image.
     assert schema.STREAM_ORG_ICON_PATH == "./layout/stream_org_icon.png"
     assert schema.STREAM_ORG_THUMB_PATH == "./layout/stream_org_thumbnail.png"

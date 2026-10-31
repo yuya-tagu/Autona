@@ -40,8 +40,14 @@ navigating a page that has no panel shell.
 
 The right-click menu offers editing only (ContextActions): the view is a
 panel, not a browser, so Chromium's back / reload / view-source entries are
-not on it (S4b). The Window builds the host from a panel's factory and
-calls ShowPanel() on every reveal of that panel's sidebar item.
+not on it (S4b). Page script may write the clipboard (S4e: the Stream
+page's thumbnail copy), so the view shows this server's pages only: the
+page refuses to navigate itself anywhere else (_PanelPage), and a panel
+links outside with target="_blank" only (a new window, which the view does
+not make). The Window builds the host from the factory of the first
+React panel opened and calls ShowPanel() on every reveal of a React
+panel's sidebar item; WebPanelPages keeps the items' pages straight (S4e:
+several items, one host page).
 
 Import-light (qtpy / core / AutonaWebPageLifecycle / AutonaLocaleHelper /
 ui_constants): importing it creates nothing.
@@ -53,7 +59,7 @@ from urllib.parse import quote, urlencode
 
 from qtpy.QtCore import Qt
 from qtpy.QtGui import QColor
-from qtpy.QtWebEngineCore import QWebEnginePage
+from qtpy.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from qtpy.QtWebEngineWidgets import QWebEngineView
 from qtpy.QtWidgets import QMenu, QVBoxLayout, QWidget
 
@@ -97,6 +103,50 @@ def ContextActions(editable, hasSelection):
     return []
 
 
+def _Origin(url):
+    return (url.scheme(), url.host(), url.port())
+
+
+# Loads the host makes itself (load(), the reload of a discarded page).
+_HOST_NAVIGATIONS = (
+    QWebEnginePage.NavigationType.NavigationTypeTyped,
+    QWebEnginePage.NavigationType.NavigationTypeReload,
+)
+
+
+class _PanelPage(QWebEnginePage):
+    """The shared view's page: it stays on this server's pages.
+
+    The invariant the clipboard rests on (S4e): page script may write the
+    clipboard (JavascriptCanAccessClipboard), so the view must never show
+    a page that is not this server's. The panels keep to it -- an outside
+    link opens a new window (target="_blank"), which the view does not
+    make -- and this enforces it: a navigation the page starts itself (a
+    link, a form, script, a redirect) of the main frame is refused unless it
+    stays on the page's own origin (that of the URL the host loaded). The
+    host's own loads go through.
+
+    Qt reports a refused navigation as a failed load (loadFinished(False))
+    although the document stays: ``refusedLast`` tells the host so, until
+    the next main-frame navigation goes through."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.refusedLast = False
+
+    def acceptNavigationRequest(self, url, navigationType, isMainFrame):
+        if not isMainFrame:
+            return True
+        if navigationType in _HOST_NAVIGATIONS or _Origin(url) in (
+                _Origin(self.url()), _Origin(self.requestedUrl())):
+            self.refusedLast = False
+            return True
+        self.refusedLast = True
+        logger.warning("The web panel view refused to leave this server "
+                       "for %s", url.toDisplayString())
+        return False
+
+
 class _PanelView(QWebEngineView):
     """The shared view, with the editing menu instead of the browser's."""
 
@@ -118,6 +168,58 @@ class _PanelView(QWebEngineView):
             else:
                 menu.addAction(self.pageAction(action))
         menu.popup(event.globalPos())
+
+
+class WebPanelPages:
+    """Which stack page each sidebar item shows, when several items are
+    React panels sharing the one host (ADR-005 S4e; S4a decision 1).
+
+    Every sidebar item keeps a stack page of its own -- nav index == stack
+    index, as for every Qt panel, so the saved sidebar index and the item
+    count do not change. The React items' pages are placeholders, and the
+    first one opened becomes the host's page (its factory builds the host
+    there). From then on every React item shows that page, and the host is
+    told which panel: the one the operator chose last (``selected``). The
+    other React items' placeholders are never built (``HostBuilt``).
+
+    Plain bookkeeping (no Qt): the Window asks it on every sidebar choice
+    and every page reveal.
+    """
+
+    def __init__(self):
+        self._panels = {}       # nav index -> WebAccess.WEB_PANELS name
+        self.hostIndex = None   # the host's stack page, once it is built
+        self.selected = None    # the React panel chosen last
+
+    def Add(self, index, panel):
+        """Sidebar item / stack page `index` is React panel `panel`."""
+        if not WebAccess.IsWebPanel(panel):
+            raise ValueError(f"not a React panel: {panel!r}")
+        self._panels[index] = panel
+
+    def StackIndex(self, nav):
+        """The stack page that shows sidebar item `nav`: its own, but for a
+        React item once the host is built (the host's). Choosing a React
+        item records it as the panel to show."""
+        panel = self._panels.get(nav)
+        if panel is None:
+            return nav
+        self.selected = panel
+        return nav if self.hostIndex is None else self.hostIndex
+
+    def HostBuilt(self, index):
+        """The host was built on stack page `index`: the other React items'
+        pages, which are never to be built (a second host)."""
+        self.hostIndex = index
+        return sorted(other for other in self._panels if other != index)
+
+    def Shown(self, index):
+        """The React panel stack page `index` shows: the one chosen last on
+        the host's page (that page's own before any choice), None on any
+        other page."""
+        if index != self.hostIndex:
+            return None
+        return self.selected or self._panels.get(index)
 
 
 class AutonaWebPanelHost(QWidget):
@@ -166,10 +268,18 @@ class AutonaWebPanelHost(QWidget):
 
     def _EnsureView(self):
         self.view = _PanelView(self)
-        page = self.view.page()
+        page = _PanelPage(self.view)
+        self.view.setPage(page)
         # The Web UI's background (dark only), instead of a white flash
         # while the first page loads.
         page.setBackgroundColor(QColor(UI.palette()["canvas"]))
+        # The Stream page copies the made thumbnail to the clipboard
+        # (navigator.clipboard.write, an image -- what the Qt panel's copy
+        # button did, S4e). Qt refuses page script the clipboard by
+        # default, and the write then never settles. Safe as the view only
+        # ever shows this server's own pages (_PanelPage).
+        self.view.settings().setAttribute(
+            QWebEngineSettings.WebAttribute.JavascriptCanAccessClipboard, True)
         self._layout.addWidget(self.view)
         self._loader = LocalPageLoader(self.view, self)
         self._loader.finished.connect(self._OnLoadFinished)
@@ -211,6 +321,10 @@ class AutonaWebPanelHost(QWidget):
         return True
 
     def _OnLoadFinished(self, ok):
+        if not ok and self.view.page().refusedLast:
+            # A navigation the page started and _PanelPage refused: the
+            # document is still there, loaded (not to be reloaded).
+            return
         # Ours, or Qt's reload of a discarded page: that document may show
         # a panel other than the one asked for since.
         self._loaded = ok

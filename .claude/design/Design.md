@@ -453,7 +453,7 @@ colors
   未設定の feature はノードごと存在しないので、レイアウト JS 側の
   `colors.{feature}` → `tournamentInfo` フォールバックが自然に効く（§5.5.3）
 
-##### `stream` — 配信単位の設定（配信設定パネル）
+##### `stream` — 配信単位の設定（配信設定ページ）
 
 ```
 stream
@@ -475,9 +475,10 @@ observer）と上位の参加者（provider が `StreamService.SetTopEntrants` �
 生成のたびに `titleAuto` に publish する。`title` は、それが前回の自動値（`titleAuto`）か空のときだけ
 上書きする（`TitleIsAuto`。手入力を守る）。`titleAuto` は state と一緒に永続化されるので、手入力の
 タイトルは再起動しても残る（`titleAuto` の無い S4d 前の state では、`title` を自動の値として扱う）。
-クライアントの入力欄は、欄を離れたときに `TypedTitleWins` で打ちかけを送るかを決める（打っている間に
-届いた自動のタイトルには打ちかけが勝ち、別の書き手のタイトルには負ける）。パネルが無くても・
-ヘッドレスでも動く。
+クライアントの入力欄は、打ちかけを送る前に `TypedTitleWins` で送るかを決める（打っている間に
+届いた自動のタイトルには打ちかけが勝ち、別の書き手のタイトルには負ける。React の配信設定ページは同じ規則の
+TypeScript 版 `web/src/StreamPage/titleRule.ts` を使い、両者は同じ表 `titleRule.cases.json` で照合する。
+ADR-005 S4e）。ページが開かれていなくても・ヘッドレスでも動く。
 
 > **データ階層を混ぜないこと**: `tournamentInfo.*`（大会: 名前・日付・会場・大会アイコン/バナー）、
 > `stream.*`（配信: 配信先・配信タイトル・配信団体素材）、`score.{N}.*`（試合: 選手・スコア・
@@ -743,12 +744,12 @@ QSettings に保存された最後の選択に依存し、初期値は先頭ペ�
 | # | objectName | クラス | 主な責務 | 入力先 (Set) | 表示元 (Get) | デフォルト表示 |
 |---|------------|-------|---------|------------|------------|--------------|
 | 1 | `Tournament Info` | `AutonaTournamentInfoWidget` | 大会名・日付・URL など大会メタデータの編集、大会アイコン / バナー。**書き込みの正本は `src/core/TournamentInfoService.py`**（Start.gg ペイロード・表示大会名・`logoVersion`）で、パネルは手入力と描画のみ | `tournamentInfo.*`（手入力） | `tournamentInfo.*` | ✓（最初に表示） |
-| 1.5 | `Stream Settings` | `AutonaStreamSettingsWidget` | 配信先・配信タイトル・配信団体アイコン / サムネイルの登録・配信サムネイル生成。**処理の正本は `src/core/StreamService.py`**（タイトルの自動生成・チャンネル CRUD・素材の取り込み・サムネ生成のジョブ。ADR-005 S4d）で、パネルはファイル選択・ダイアログ・プレビュー・クリップボードと state の描画だけ。`stream.url` / `title` の手入力は `AutonaActions.SetStreamUrl` / `SetStreamTitle`（同値なら書かない） | `stream.*`（core 経由） | `stream.*` | — |
+| 1.5 | `WebPanels`（共有ホスト。ナビの文言は `Stream Settings`） | React の `StreamPage`（`/web/stream`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4e）。Qt 版（`AutonaStreamSettingsWidget`）は S4e で削除済み | 配信先・配信タイトル・配信団体アイコン / サムネイルの登録・配信サムネイル生成。**処理の正本は `src/core/StreamService.py`**（タイトルの自動生成・チャンネル CRUD・素材の取り込み・サムネ生成のジョブ。ADR-005 S4d）で、ページは `/api/v1/stream*` を呼んで state を描画するだけ（ファイル選択・ダイアログ・プレビュー・クリップボードはブラウザの部品）。`stream.url` / `title` の書き込みは `AutonaActions.SetStreamUrl` / `SetStreamTitle`（同値なら書かない） | `stream.*`（core 経由） | `stream.*` | — |
 | 2 | `Thumbnail Settings` | `AutonaThumbnailSettingsWidget` | サムネイルテンプレ選択・背景指定・プレビュー・PNG/JPG 保存・クリップボードコピー | `thumbnail_config.*`（SettingsManager） | `score.*`, `tournamentInfo.*`, `thumbnail_config.*` | ✓（条件付き） |
 | 3 | `Result Settings` | `AutonaResultSettingsWidget` | リザルトレイアウト選択・選手入力・プレビュー・PNG/JPG 保存・クリップボードコピー。`result_players` の書き込みは `AutonaActions.PublishResultPlayers` | `result_config.*`, `result_players` | `tournamentInfo.*`, `result_players` | ✓ |
 | 4 | `Top8` | `AutonaTop8Widget` | Top 8 ダブルエリミの選手・試合スコア編集、Start.gg 読み込み、OBS 用 URL 案内・プレビュー。**書き込みの正本は `src/core/Top8Service.py`**（Start.gg の取り込みも。パネルは state を描画するだけ。ADR-005 S3e-8） | `top8.*` | `top8.*`, `tournamentInfo.*` | ✓ |
 | 5 | `Scoreboard` | `AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget` | board1=1v1、board2=team、board3=crew のスコア入力・選手編集・セット読み込み | `score.{N}.*` | `score.{N}.*`, `game.*` | ✓ |
-| 6 | `Commentary` | React の `CommentaryPage`（`/web/commentary`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4b）。Qt 版と退路の設定は S4c で削除済み | 実況・解説者 12 スロットの編集（役割・コメント・表示トグル）、デザイン選択・OBS 用 URL 案内・プレビュー・機能別カラー。`commentary` の書き込みは `core/CommentaryService`（React 版は `/api/v1/commentary/*` 経由で、state を描画するだけ。ADR-005 S3e-2 / S4b / S4c） | `commentary.{1..12}.*` | `commentary.{1..12}.*`, `tournamentInfo.*`, `colors.commentary.*` | ✓ |
+| 6 | `WebPanels`（共有ホスト。ナビの文言は `Commentary`） | React の `CommentaryPage`（`/web/commentary`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4b）。Qt 版と退路の設定は S4c で削除済み | 実況・解説者 12 スロットの編集（役割・コメント・表示トグル）、デザイン選択・OBS 用 URL 案内・プレビュー・機能別カラー。`commentary` の書き込みは `core/CommentaryService`（React 版は `/api/v1/commentary/*` 経由で、state を描画するだけ。ADR-005 S3e-2 / S4b / S4c） | `commentary.{1..12}.*` | `commentary.{1..12}.*`, `tournamentInfo.*`, `colors.commentary.*` | ✓ |
 | 7 | `Statistics` | `AutonaStatsWidget` | 内部 `QTabWidget` で複数ビューを集約（下記 §4.1.0） | （read-only） | `score.{N}.recent_sets`, `last_sets`, `upset_factor` ほか | ✓ |
 | 8 | `Players` | `AutonaPlayerBrowserWidget` | 選手一覧（2タブ）: トーナメント出場選手（provider.top_entrants ＋ ローカルDB 突き合わせ、シード順、P1/P2 セット）／登録済み選手（ローカル選手DB の閲覧・検索・新規登録・編集・削除） | `player_editor.1.*`（編集ダイアログの一時パス、close で `StateSchema.ClearPlayerEditor()`） | `PlayerDB.instance`（core）, `provider.top_entrants`（state 非依存） | ✓ |
 
@@ -825,7 +826,7 @@ QSettings に保存された最後の選択に依存し、初期値は先頭ペ�
 | `/web` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
 | `/scoreboard` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
 | `/team` | `ScoreboardPage` | チーム用スコアボード操作（board2） | Socket.IO + REST |
-| `/web/:panel` | `PanelShell`（`web/src/PanelShell/`） | React 化したデスクトップのパネル（ADR-005 S4）。サーバーが返すのは `WebAccess.WEB_PANELS` の名前だけ（他は 404）。`?desktop=1`（デスクトップの共有ビュー `AutonaWebPanelHost`）でブラウザ向けの部品を隠し、`?lng=` を i18next に渡す。確認用の `shell-check`（S4a）と実況・解説の `commentary`（S4b） | Socket.IO + REST |
+| `/web/:panel` | `PanelShell`（`web/src/PanelShell/`） | React 化したデスクトップのパネル（ADR-005 S4）。サーバーが返すのは `WebAccess.WEB_PANELS` の名前だけ（他は 404）。`?desktop=1`（デスクトップの共有ビュー `AutonaWebPanelHost`）でブラウザ向けの部品を隠し、`?lng=` を i18next に渡す。確認用の `shell-check`（S4a）と実況・解説の `commentary`（S4b）と配信設定の `stream`（S4e）。サイドバーの React の項目は複数あっても共有ビューは 1 つで、各項目は自分のスタックページを持ち続け（ナビ index == スタック index）、最初に開いた項目のページにビューが建つ（`WebPanelPages`。S4e） | Socket.IO + REST |
 
 #### 4.2.1 ScoreboardPage コンポーネント階層
 

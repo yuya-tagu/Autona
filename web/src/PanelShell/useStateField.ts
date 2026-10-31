@@ -42,12 +42,25 @@ import React from "react";
 //   caster): shown at once, typing not sent yet is dropped (the choice
 //   replaces it), and `request` stands for the send -- the field waits for
 //   its echo the same way.
+//
+// `options.wins` (S4e, the stream title) replaces the "another writer wins"
+// rule with the field's own: each send of typing first asks
+// wins(typed, shown, current) -- `shown` what the field last showed in step
+// with the state (rendered while not focused, equal to the state while
+// focused, or sent), `current` the state now. A change of the state alone
+// does not drop the typing: the rule decides. Once it refuses typing that
+// is not the state's, the field sends nothing more while it has focus
+// (shown, not sent, like typing another writer overtook), and leaving it
+// asks the rule once more, about what is in the field then and against the
+// same `shown`: sent if it wins now, else the field shows the state (S4e
+// review; the Qt panel's rule, asked once on leaving, S4d).
 
 export const STATE_FIELD_DEBOUNCE_MS = 300;
 export const ECHO_GRACE_MS = 1000;
 
 export interface StateFieldOptions {
     debounceMs?: number;
+    wins?: (typed: string, shown: string, current: string) => boolean;
 }
 
 type TextElement = HTMLInputElement | HTMLTextAreaElement;
@@ -81,6 +94,11 @@ export function useStateField(
     const composing = React.useRef(false);
     const edited = React.useRef(false);       // typed since the last send
     const sent = React.useRef<string | null>(null);  // awaiting its echo
+    // What the field last showed in step with the state (options.wins).
+    const shown = React.useRef(value);
+    // options.wins refused the typing: nothing is sent until the field is
+    // left, when the rule is asked once more.
+    const held = React.useRef(false);
     // Every send not yet echoed, failed or past its grace, oldest first:
     // the changes of `value` they account for are not another writer's.
     const pending = React.useRef<number[]>([]);
@@ -92,6 +110,8 @@ export function useStateField(
     const mounted = React.useRef(true);
     const sendRef = React.useRef(send);
     sendRef.current = send;
+    const winsRef = React.useRef(options.wins);
+    winsRef.current = options.wins;
 
     const show = React.useCallback((next: string) => {
         text.current = next;
@@ -111,6 +131,7 @@ export function useStateField(
             return;
         }
         sent.current = null;
+        shown.current = state.current;
         if (!focused.current) {
             show(state.current);
         }
@@ -141,18 +162,38 @@ export function useStateField(
         );
     }, [resync]);
 
-    const commit = React.useCallback(() => {
+    // `leaving`: the field loses focus or goes away (a held typing is
+    // asked about once more).
+    const commit = React.useCallback((leaving = false) => {
         cancelTimer();
+        if (held.current) {
+            if (!leaving) {
+                return;
+            }
+            held.current = false;
+            edited.current = true;
+        }
         if (!edited.current) {
             return;
         }
         edited.current = false;
         const next = text.current;
+        const wins = winsRef.current;
+        if (wins && !wins(next, shown.current, state.current)) {
+            // Refused: not sent. Typing at odds with the state is held
+            // until the field is left (`shown` kept: the rule is asked
+            // about it then against the same start).
+            if (!leaving && next !== state.current) {
+                held.current = true;
+            }
+            return;
+        }
         if (next === (sent.current ?? state.current)) {
             return;
         }
         let result: unknown;
         sent.current = next;
+        shown.current = next;
         try {
             result = sendRef.current(next);
         } catch (error) {
@@ -163,7 +204,7 @@ export function useStateField(
 
     const schedule = React.useCallback(() => {
         cancelTimer();
-        timer.current = setTimeout(commit, debounceMs);
+        timer.current = setTimeout(() => commit(), debounceMs);
     }, [cancelTimer, commit, debounceMs]);
 
     // The state changed: our echo, or another writer.
@@ -175,7 +216,10 @@ export function useStateField(
             if (value === sent.current) {
                 sent.current = null;
             }
-            if (!echo && edited.current) {
+            if (value === text.current) {
+                shown.current = value;
+            }
+            if (!echo && edited.current && !winsRef.current) {
                 // Another writer: the typing in progress is not sent.
                 cancelTimer();
                 edited.current = false;
@@ -183,6 +227,7 @@ export function useStateField(
             return;
         }
         sent.current = null;
+        shown.current = value;
         show(value);
     }, [value, show, cancelTimer]);
 
@@ -191,7 +236,7 @@ export function useStateField(
     // then). Its answer is not waited for.
     const flushOnUnmount = React.useCallback(() => {
         mounted.current = false;
-        commit();
+        commit(true);
         graceTimers.current.forEach(clearTimeout);
         graceTimers.current.clear();
     }, [commit]);
@@ -234,8 +279,9 @@ export function useStateField(
     const onBlur = () => {
         focused.current = false;
         composing.current = false;
-        commit();
+        commit(true);
         if (sent.current === null) {
+            shown.current = state.current;
             show(state.current);
         }
     };
@@ -249,7 +295,9 @@ export function useStateField(
     const replace = (next: string, request: unknown) => {
         cancelTimer();
         edited.current = false;
+        held.current = false;
         show(next);
+        shown.current = next;
         awaitEcho(next, request);
     };
 
