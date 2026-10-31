@@ -4313,3 +4313,179 @@ IME 実機ゲート通過を受けて、Qt 版の実況・解説パネルと、�
   - サムネ生成: 押すと「サムネイルを生成しています…」とボタンの無効化 → 終わるとプレビューと「Saved: out/stream/thumbnail_...jpg」。生成中も UI が固まらない（オフラインでも保存済み / 既定のバナーで生成される）。団体サムネ未登録で「団体サムネ」を選ぶとエラーの文言が出る
   - 未生成の状態で「コピー」→ 生成が走り、終わるとクリップボードに画像が入る（Discord などへ貼り付けられる）
   - ヘッドレス（`python main.py --headless`）で大会を読み込むと `out/stream/title.txt` にタイトルが出る
+
+#### S4e 配信設定の React 化と Qt 版の削除（2026-10-31）
+
+サイドバー Setup の「配信設定」を React の `/web/stream`（`web/src/StreamPage/`）に切り替えた。表示先は S4a の共有ビュー（`AutonaWebPanelHost`）で、Qt 版（`AutonaStreamSettingsWidget` と `.ui`）は消した。退路の設定は作っていない（論点 4）。処理は S4d の `StreamService` のままで、ページは `/api/v1/stream*` を呼び、state を描くだけ。`QWebChannel` は使っていない。外部契約は追加だけ: v1 のルート 10 本と、エラーコード `PAYLOAD_TOO_LARGE`（413）。Socket.IO の payload・`settings.json` / `state.json` の形式・既存 API・自動更新は変えていない。`STATE_VERSION` は 22 のまま。
+
+- **やったこと**
+  - v1（`src/AutonaApiV1.py` / `src/AutonaWebOperations.py` / `src/core/WebAccess.py`）
+    - 読み取り 2 本（READ）
+      - `GET /stream/channels`
+      - `GET /stream/thumbnail/options`
+    - 書き込み 8 本（WRITE）
+      - `PUT /stream`
+      - `POST /stream/channels`
+      - `PUT` / `DELETE /stream/channels/<int:index>`
+      - `PUT /stream/org/<kind>`
+      - `DELETE /stream/org`
+      - `PUT /stream/thumbnail/options`
+      - `POST /stream/thumbnail`（202。実行中は 409）
+    - 操作関数は core を呼ぶだけで、両シェル共通。`update_stream` は `update_caster` と同じく `StateManager.lock` → 保存サイクルの順に入る（pitfalls #17）
+    - 仕様は `.claude/design/external-control-api.md` の §2.6・§5.5・§5.6・§6.15〜§6.18・§7.1・§7.3
+    - 台帳: `tests/test_webserver_routes.py`（v1 は書き込み 31・計 48）
+    - `WEB_PANELS` に `stream` を足した
+  - 団体の画像の上限（論点 2）
+    - `write_op(..., max_body=)` で、そのルートだけ `request.max_content_length` を設定する
+    - `Content-Length` が上限を超えると、本文を読む前に 413 を返す
+    - base64 の長さ・デコード後の大きさでも 413（画像 20MB = 20 × 1024 × 1024 バイト。本文はその base64 + 1KB まで）
+    - アプリ全体の `MAX_CONTENT_LENGTH` は設定しないので、ほかのルートは今までどおり
+    - 操作ログには本文のキーだけを残す
+  - 共有ビューの 2 枚目（S4a 判断 1 の先送り分。`WebPanelPages`、`src/AutonaWebPanelHost.py`）
+    - サイドバーの React の項目もそれぞれ自分のスタックページを持つ（ナビ index == スタック index を保つ）
+    - 最初に開いた React の項目のページにホストを建て、ほかの React の項目のプレースホルダは `_lazyPanels` から外す（もう建てない）
+    - 以後、React の項目はどれもホストのページを出し、最後に選んだパネルをホストに伝える
+    - Window（`src/Autona.py`）
+      - `navSelected` は `_OnNavSelected` に繋ぎ、`StackIndex(nav)` を通す
+      - 起動時の復元（`sidebarIndex_v22`、保存するのはサイドバーの index）も同じ経路
+      - React の項目どうしの切り替えではスタックが動かず `currentChanged` が出ない。そのため `_OnNavSelected` が `_OnStackPageChanged` を直接呼ぶ
+      - `_OnStackPageChanged` は `Shown(index)` のパネルを `ShowPanel` する
+      - `_CreateStreamPanel` は `self._WebPanel("stream")` だけにした
+      - `_WebPanel` の `RuntimeError` は残した。`_EnsurePanelAt` 経由では起きず、2 つ目のホストを作らないための不変条件として置いている
+  - 共有ビューにクリップボードの許可（`QWebEngineSettings.JavascriptCanAccessClipboard`）を付けた（判断 6）
+  - React（`web/src/StreamPage/`、新規）
+    - `index.tsx`（ページ）
+      - チャンネルと生成オプションを再試行つきで読む
+      - 書き込みは Commentary と同じ期限つきの 1 本の列で送る。401 / 403 の案内は 1 回だけ出す
+      - チャンネルが 404 なら一覧を読み直して知らせる
+      - アップロードの期限は 60 秒
+    - `Cards.tsx`（4 枚のカード）
+      - 配信先: 選択（`useStateChoice`）、追加・編集、URL の手入力（`useStateField`）
+      - 配信タイトル: `useStateField` に `wins` を渡す。自動 / 手入力の注記とコピー
+      - 配信団体の素材: プレビューは `/layout/stream_org_*.png?v=<版>`。ファイル選択と削除（確認つき）
+      - 配信サムネ: ラジオ・チェック、生成、`role="status"`、`/out/stream/...?v=<revision>` のプレビュー、コピー（または「画像を開く / 保存」）
+    - `Dialogs.tsx`（MUI の確認ダイアログとチャンネルのダイアログ）
+    - `titleRule.ts`（`TitleIsAuto` / `TypedTitleWins` の TS 版）と、共有の表 `titleRule.cases.json`
+  - `web/src/PanelShell/`
+    - `requests.ts`（新規）: Commentary から期限・列・再試行を切り出した。`CommentaryPage` は定数を再 export する
+    - `clipboard.ts`（新規）: `copyText`（`SideCards.tsx` から移した）と、画像のコピー `canCopyImage` / `copyImage`
+    - `useStateField.ts`: `options.wins` を足した（判断 3）
+    - `registry.tsx` に `"stream": StreamPage`
+    - `web/src/api.ts` に `apiDelete`
+    - `web/src/i18n/locales/{ja,en}.json` に `stream_*` 65 件（日本語は Qt 版の文言を流用）
+  - Qt 版の削除
+    - `src/AutonaStreamSettingsWidget.py` と `src/layout/AutonaStreamSettings.ui`
+    - `tests/test_objectname_keypath_contract.py` の `AutonaStreamSettings.ui` の 3 名（入力は findChild のキーで、キーパスではなかった。同じ state のキーは React が v1 で書く）
+    - `tests/test_stream_service.py` のパネルの AST pin
+    - `src/i18n/Autona_{ja,en}.ts` から `AutonaStreamSettingsWidget` の context を消した（各 24 件）。`scripts/compile_translations.ps1` で `.qm` を再コンパイル（547 件 / 未完了 0）
+  - コメントを現状に合わせた: `src/core/StreamService.py`、`src/AutonaTournamentInfoWidget.py`、`tests/test_state_schema.py`、`Autona.py` の v18 の注記
+  - ドキュメント
+    - `.claude/design/Design.md`（`stream` 節・パネル表 1.5・`/web/:panel` 行）
+    - `docs/product/features.md`
+    - `.claude/rules/state-and-webserver.md`（`StreamService` の行）
+    - `.claude/design/external-control-api.md`
+    - `.claude/manual-test-checklist.md`: 「配信設定（Stream Settings）」節を新設（Web の手順で 16 項目）
+- **判断と理由**
+  1. **チャンネル・生成オプションはクライアント間で同期しない**: どちらも state ではなく `settings.json` の設定。ページは開いたときと、チャンネルの 404（ほかのクライアントが消した）で読み直す。配信先（`stream.url`）とタイトルは state なので、どのクライアントにも届く
+  2. **チャンネルの追加は配信先も送る**（Qt 版と同じく、足したチャンネルが選ばれる）。追加の応答（`index`）を受けてから `PUT /stream` で URL を送る。core の `AddChannel` は設定だけで配信先を変えない
+  3. **タイトルの欄は `useStateField` の `wins`**
+     - 打ちかけを送るたびに、`typedTitleWins(typed, shown, title, titleAuto)` で送るかを決める。`shown` は欄が最後に state と揃えて出した値
+     - 「別の書き手が書いたら打ちかけを送らない」既定の規則（S4b 判断 15）は、この欄では `wins` に置き換わる。打っている間に自動生成のタイトルが届いても、打ちかけが勝つ
+     - Qt 版（S4d）は欄を離れたときに 1 回判定していた。こちらは debounce の送信ごとに判定する（Commentary と同じく打っている間も送る）
+     - 拒否した打ちかけは送らない。その後に打った文字は、そのときの state に対してまた判定する
+     - TS 版は core と同じ表（`titleRule.cases.json`）を pytest と jest の両方が読んで照合する（片方だけ変えると落ちる）
+  4. **素材のアップロードは元のファイルのまま data URL で送る**（縮小は core の PIL）。20MB を超えるファイルは送らずにその場で断る。サーバーの 413 / 400 / 500 はそれぞれの文言で出す
+  5. **未知の `org/<kind>` は 400**（`INVALID_ARGUMENT`）。種類は 2 つに決まっているので、取り込む先が無いのは入力の誤りとして扱う
+  6. **画像のコピー（論点 1）**
+     - 安全なコンテキスト（デスクトップの共有ビュー・この PC の `localhost` / `127.0.0.1`）で、`ClipboardItem` と `navigator.clipboard.write` があるときだけボタンを出す。それ以外（LAN の http）では「画像を開く / 保存」のリンク（`target=_blank`）と注記にする
+     - `ClipboardItem` は `image/png` しか受けないので、JPEG を canvas で PNG にして渡す。クリックの許可が切れないよう、Promise のまま渡す
+     - QtWebEngine（PySide6 6.11）を offscreen で試した。既定では画像の `clipboard.write` が解決も失敗もせずに止まり、`JavascriptCanAccessClipboard` を付けるとクリックからの書き込みが通った。ビューが出すのはこのサーバーのページだけなので、許可を付けた
+     - ユーザー操作の無い書き込みは許可があっても止まる。そのため Qt 版の「未生成ならコピーで生成し、終わったらコピー」はやめ、サムネを作るまでコピーは押せない
+     - 期限（10 秒）を付け、止まっても失敗として知らせる
+  7. **団体の素材の削除は、何も登録していなければ押せない**（版がどちらも 0）。確認ダイアログの既定はキャンセル
+  8. **プレビューのキャッシュ破り**: 団体の素材は版（`stream.org*Version`）、生成物は `stream.thumbnail.revision` をクエリに付ける（同じ秒に同じファイル名になっても描き直す）
+- **pin（テスト）**
+  - `tests/test_api_v1_stream.py`（新規・22 関数 59 件）
+    - 2 欄が 1 回の公開・片方だけ・同値は公開しない・不正は 400 で何も書かない
+    - チャンネルの CRUD と配信先の追従・無い添字は 404・不正は 400
+    - 画像の保存と版
+      - MIME の大文字小文字
+      - 不正な画像は 400 で保存しない
+      - 保存できないと 500
+      - `Content-Length` で読む前に 413、上限は 20MB の画像、本文の中の上限超過も 413
+      - 操作ログに画像を出さない
+    - リセットで両方消え背景がバナーへ戻る
+    - オプションの読み書きと不正
+    - 生成は 202 → state に結果・失敗の理由・実行中は 409
+    - LAN の別端末は書き込み 8 本ともトークン必須、読み取り 2 本は不要
+  - `tests/test_web_operations.py`: ルート台帳の歩行に `index` と 4 本の body・期待するステータス。歩行が積んだ生成ジョブを後始末の前に `drain_tasks()` する
+  - `tests/test_stream_service.py`: タイトルの規則の表を `titleRule.cases.json` から読む（React と同じ表）
+  - `tests/test_web_panel_host.py`（+12 関数）
+    - `WebPanelPages` の対応
+    - Window の組み込み: `src/Autona.py` から本物のメソッド（`_OnNavSelected` / `_OnStackPageChanged` / `_EnsurePanelAt` / `_WebPanel` ほか）を取り出し、`_BuildUi` と同じ形のスタックで実行する
+      - どちらを先に開いてもホストは 1 つ
+      - React の項目どうしの切り替えでパネルが伝わる
+      - 同じ項目の再選択でも伝わる
+      - 復元
+    - ナビ項目の並びと `STATE_VERSION` 22 が不変
+    - クリップボードの許可
+    - `src/` に `AutonaStreamSettingsWidget` / `AutonaStreamSettings.ui` が無いこと（`*.py` / `*.ui` / `*.ts`。S4c と同じ形）
+  - Web RTL
+    - `StreamPage/StreamPage.test.js`（28）
+      - 4 枚のカード・開いただけでは何も送らない
+      - 配信先の表示・選択・解除・手入力
+      - 追加・編集・削除（確認）・ほかのクライアントが消したチャンネル
+      - タイトル: 自動に打ちかけが勝つ・別の書き手が勝つ・古い値を書き戻さない・注記・コピー
+      - 画像の送信と 20MB の事前拒否・サーバーの拒否 3 種（400 / 413 / 500）
+      - 版に従うプレビュー・削除の確認
+      - オプションの保存
+      - 生成の状態（実行中・完了・失敗）・実行中の 409
+      - 安全なページのコピー・未生成ではコピーしない・コピーできないページは「画像を開く / 保存」
+    - `StreamPage/titleRule.test.js`（共有の表 15 件）
+    - `PanelShell/useStateField.test.js`（+5: `wins`）
+  - Playwright `web/e2e/stream.spec.ts`（4）
+    - 4 枚のカード
+    - 追加 → 追加 → 選択で `stream.url` と保存された一覧
+    - 生成 → 状態の文言・プレビューの `src`・`naturalWidth` 1920 → 実際のクリップボードに `image/png`
+    - `?desktop=1&lng=ja` で日本語
+- **残課題**
+  - チャンネル・生成オプションはクライアント間で同期しない（判断 1）。ほかのクライアントが並べ替え・削除した直後の添字は、404 にならない限り古い一覧の添字のまま送られうる（編集・削除は添字で指す）
+  - Qt 版の「未生成ならコピーで生成してからコピー」は無くなった（判断 6）
+  - タイトルを空にしただけでは作り直さない（S4d と同じ。次に大会名・ゲーム・参加者が変わったときに生成する）
+  - デスクトップの共有ビューで、実際の Windows のクリップボードへ画像が入るかは offscreen の試験までで、実機は未確認
+  - 20MB に近い画像を LAN 越しに送るときの時間（期限 60 秒）は未計測
+  - Frozen 中に書き込みの列が止まりうるのは Commentary と同じ（S4b の残課題）
+- **オーナー実機確認**（`python main.py`）
+  - 手動チェックリスト「配信設定（Stream Settings）」の全項目
+  - 特に次の 3 点
+    - 「配信設定」と「実況・解説」を交互に開く・再起動して最後に開いていた方から始める（共有ビューの 2 枚目）
+    - デスクトップでのサムネの画像コピーと Discord などへの貼り付け
+    - LAN の別 PC から開いたときの「画像を開く / 保存」
+  - 起動・終了が今どおり（`STARTUP phase=`。配信設定を最後に開いていた状態で起動したときも）
+- **レビュー指摘の対応（2026-10-31）**（High なし）
+  - M1（413 が実サーバーで届かない）: `write_op(max_body=)` は `request.max_content_length` に代入せず（Flask 3.1 未満では素の 500 になる）、`Content-Length` を自分で比べる。超えていれば本文を最後まで 1MB ずつ読み捨ててから 413 を返す（`_over_limit`）
+    - 理由: 読まずに返すと、werkzeug のサーバーは未読の本文を残したまま接続を閉じ、まだ送っているクライアントには 413 ではなく接続のリセットが届く。werkzeug 自身の読み捨ては 10ms の無音で諦める
+    - 全部を読む上限は設けない。werkzeug 自身も応答の後に同じだけ読み捨てる方針（10GB まで）なので、手前で確実に読むだけで、費用は同じ
+    - `Content-Length` の無い（chunked の）本文は、ほかのルートと同じく全部読み、ルートの中の base64 / デコード後の大きさの確認で 413 にする（以前の `max_content_length` は chunked にも効いていた）
+    - 試験: 単体の Flask で、本文を送る前に 0.3 秒止まるクライアントを当てた。旧方式は 3 回とも `ConnectionAbortedError`、新方式は 3 回とも 413
+    - pin: `test_the_real_server_answers_an_oversized_upload_with_413`（`make_server` をスレッドで立て、ヘッダの後 0.3 秒止まってから上限 + 1 バイトを送る）
+  - L2（タイトル欄の拒否のあとの打鍵が別の書き手のタイトルを上書きする）: `useStateField` の `wins` が state と違う打ちかけを一度拒否したら、フォーカスが外れるまで送らない（`held`）
+    - 離れたとき（とページが消えるとき）に、その時の文字を同じ `shown` に対してもう 1 回だけ判定する。勝てば送り、負ければ state を出す（Qt 版 S4d の「離れたときに 1 回判定」と同じ）
+    - pin: `useStateField.test.js`（拒否した 1 本を置き換えて +3）と `StreamPage.test.js` の「別の書き手が勝つ」に打鍵の続きを足した
+  - L3（`_WebPanel` が途中で失敗すると React のパネルを開けなくなる）: `_WebPanel` は作って返すだけにした。ホストの記録と他の React 項目のプレースホルダの除去（`_AdoptWebPanelHost`）は、`_EnsurePanelAt` がスタックに挿入した直後に行う
+    - 挿入の前に失敗すれば何も記録されず、次に開いた React 項目がホストを建てる。失敗した項目も、それ以降はそのホストを出す
+    - 失敗した項目自身のファクトリは、今までどおり再試行しない（`_EnsurePanelAt` の方針）
+    - pin: `test_a_host_that_fails_to_be_built_is_built_by_the_next_react_item`（`_PreparePanel` に失敗を注入。旧実装では `_webPanelHost` が残る）
+  - L4: data URL の MIME の許可リストをやめた（`application/octet-stream`・型なし・違う型でも、中身は core の PIL が判定する）。base64 の data URL の形の検証は残す
+  - L5: `ResetOrgAssets` を 1 つの SaveBlock にした（2 つの版を 1 つの delta で。revision +1 を pin）。オプションの変更（settings.json）も同じブロックの中
+  - L6: 共有ビューにはこのサーバーのページしか載せない、を `.claude/rules/state-and-webserver.md` と `AutonaWebPanelHost` の docstring に書いた
+    - 実装でも担保した: ページを `_PanelPage`（`QWebEnginePage` の派生）に替え、`acceptNavigationRequest` で、ページ自身が始めた別オリジンへのメインフレームの遷移（リンク・フォーム・スクリプト・リダイレクト）を拒否する。ホスト自身の読み込み（Typed / Reload）は通す
+    - Qt は拒否した遷移を `loadFinished(False)` として出す。そのままだとホストが「読み込み失敗」と見て、次の表示でページを読み直す（打ちかけが消える）。拒否の直後の失敗は `refusedLast` で見分けて無視する
+    - pin: `test_the_page_does_not_leave_this_server`（スクリプトとリンクで別ポートへ → 文書は同じで、次の表示でも読み直さない。同じサーバーへの遷移は通る）
+  - L7: デスクトップのビュー（`usePanelShell().desktop`）で `canCopyImage()` が偽のときは、`_blank` のリンクを出さず、コピーボタンを無効にして理由を出す（`stream_thumbnail_copy_unavailable`）。RTL で pin
+  - L8: チャンネルのダイアログの保存・削除を try / catch / finally にした（失敗してもボタンが戻る。例外はログ）。RTL で pin
+  - L9: 団体の画像のアップロードを書き込みの列から外した（期限 60 秒の `withDeadline` だけ。失敗の知らせ方は列と同じ `report`）。打ったタイトルはアップロードの後ろで待たない。RTL で pin。`useSerialRequests` の期限の引数（アップロードのためだけに足したもの）は消した
+  - L10: 20MB の TS 側の定数（`Cards.tsx` の `ORG_IMAGE_MAX_BYTES`）を pytest が読んで Python 側と照合する（`test_the_page_refuses_the_same_size_before_sending`）。サーバーが実行時に `web/src` を読む形にはしない（exe には入らない）
+  - L11: Playwright のコピーの試験は OS のクリップボードを使わない。`navigator.clipboard.write` をページ内で差し替え、渡された 1 件が `image/png`（JPEG を PNG にしたもの・空でない）であることを確かめる
+  - L12: Design.md のパネル表の objectName を実体の `WebPanels`（共有ホスト）にした。同じずれのあった Commentary の行も直した
+  - 検証: 影響範囲の pytest 789 passed／jest 全量 275 passed／`npm run build` OK（警告は既存の `Header.jsx` だけ）／`npm run test:e2e` 14 passed

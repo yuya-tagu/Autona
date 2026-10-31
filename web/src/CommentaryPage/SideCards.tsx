@@ -12,6 +12,7 @@ import i18n from "../i18n/config";
 import {BACKEND_PORT} from "../env";
 import {showSnackbar} from "../ScoreboardPage/Feedback";
 import {useStateChoice} from "../PanelShell/useStateChoice";
+import {copyText} from "../PanelShell/clipboard";
 
 // The Commentary page's cards below the casters (ADR-005 S4b): the
 // feature's own colours (src/AutonaFeatureColors.py's card) and how to add
@@ -137,33 +138,6 @@ export function FeatureColorCard({title, theme, accent, tournament, send}: {
 // whatever host this page was opened from (the Qt panel's ObsUrl).
 export function obsUrl(design: LayoutEntry): string {
     return `http://localhost:${BACKEND_PORT}/layout/${design.id}/${design.entry}`;
-}
-
-async function copyText(text: string): Promise<boolean> {
-    try {
-        if (navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(text);
-            return true;
-        }
-    } catch {
-        // Not allowed here (a page from another computer over http, the
-        // desktop's view): the copy command below still is, on a click.
-    }
-    const area = document.createElement("textarea");
-    area.value = text;
-    area.setAttribute("readonly", "");
-    area.style.position = "fixed";
-    area.style.opacity = "0";
-    document.body.appendChild(area);
-    area.select();
-    let copied = false;
-    try {
-        copied = document.execCommand("copy");
-    } catch {
-        copied = false;
-    }
-    document.body.removeChild(area);
-    return copied;
 }
 
 export function ObsUrlCard({design}: {design: LayoutEntry | null}) {

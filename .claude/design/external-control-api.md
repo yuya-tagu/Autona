@@ -109,6 +109,7 @@
 | `CONFLICT` | 409 | 重い操作が実行中（多重起動ガード・§2.8） |
 | `NOT_READY` | 409 | 前提未充足（大会/試合未ロードで provider 不在 等・§3） |
 | `UPSTREAM_TIMEOUT` | 504 | Start.gg 等の外部依存がタイムアウト（agent-pitfalls #11） |
+| `PAYLOAD_TOO_LARGE` | 413 | 本文が大きすぎる。上限を持つのは配信団体の画像の取り込み（§6.17）だけ: `Content-Length` が上限を超えると本文を解析せずに読み捨ててから断り（読まずに返すと、送信中のクライアントには 413 でなく接続のリセットが届く）、data URL の base64 / デコード後の大きさでも断る（2026-10-31 追加・ADR-005 S4e）。ほかのルートに上限は無い（アプリ全体の `MAX_CONTENT_LENGTH` は設定しない） |
 | `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、デスクトップの画面が要るシェル操作 2 本だけ（ADR-005 S3e-9）: legacy / Socket.IO のセット選択ウィンドウを開く操作（`scoreboard<n>-open-set`・`open_set`）とサムネイル（`scoreboard<n>-get-thumbnail-png|jpg`）。v1 にはもう無い（`:load-set`・`:pull-stream` は ADR-005 S3e-7 まで）が、コードは契約として残す。message は `not available in headless`。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。セット読込（`:load-set`・legacy `load-set`・Socket.IO `load_set`）・配信中のセットの取り込み（`:pull-stream`・legacy `pull-stream`・Socket.IO `pull_stream`）・legacy `POST /score`（Socket.IO `score`）も ADR-005 S3e-7 から core の操作（`SetFollowService`）で、どちらの起動形態でも動く。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。Top 8 の取り込み（`bracket:refresh`・legacy `/update-bracket`・Socket.IO `update_bracket`）も ADR-005 S3e-8 から core の操作（`Top8Service.RefreshFromProvider`）で、どちらの起動形態でも動く。選手の編集（`PATCH .../players/{p}`・legacy `update-team`・Socket.IO `update_team`）とタグからの選手の読込（legacy `load-player-from-tag`・Socket.IO `load_player_from_tag`）も ADR-005 S3e-4 から core の操作（`PlayerService.ApplyData`）で、どちらの起動形態でも、state にあるスロットに対して動く。統計（`stats:refresh`・legacy `/scoreboard<n>-stats-*`・Socket.IO `stats_*`）も ADR-005 S3e-5 から core の操作（`StatsService`）で、どちらの起動形態でも動く。ボード 1 / 2 の人数 / キャラ数（`PATCH set` の `players` / `characters`・legacy `scoreboard<n>-set`・Socket.IO、`:clear` の人数・キャラ数のリセット）も ADR-005 S3e-6 から core の操作（`AutonaActions.SetRoster`）で、どちらの起動形態でも動く（それまではヘッドレスでこれだった）。ボード 1 / 2 / 3 以外の人数 / キャラ数（legacy `scoreboard<n>-set`・Socket.IO `set`）は、起動形態によらずこの 503 で、何も書かずに断る（それまでデスクトップは 500）。同じボードへの set フィールド（phase / pool / match / best of / losers。legacy `scoreboard<n>-set`・`update-team`・Socket.IO）も ADR-005 S3e-7 から同じ 503（それまでデスクトップは 500）。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
 | `INTERNAL` | 500 | 想定外の内部例外 |
 
@@ -213,6 +214,8 @@
 | `GET /api/v1/layouts` | レイアウト一覧（§5.2。2026-10-22 追加） | なし（`core/LayoutCatalog.Layouts`） | — |
 | `GET /api/v1/layouts/selected/{kind}` | パネルが表示・OBS に渡しているデザイン（§5.3。2026-10-31 追加） | `get_selected_layout`（`core/LayoutCatalog.SelectedLayout`） | — |
 | `GET /api/v1/commentary/options` | 実況の役割候補・アイコン・スロット・表示上限（§5.4。2026-10-31 追加） | `get_commentary_options`（`core/CommentaryModel` の定数） | — |
+| `GET /api/v1/stream/channels` | 保存した配信チャンネル（§5.5。2026-10-31 追加） | `get_stream_channels`（`core/StreamService.Channels`） | — |
+| `GET /api/v1/stream/thumbnail/options` | 配信サムネ生成のオプション（§5.6。2026-10-31 追加） | `get_stream_thumbnail_options`（`core/StreamService.ThumbnailOptions`） | — |
 
 > `data` の具体スキーマは委譲先 Action の現返却（candidates §3）に準拠。本 API はそれを `{"ok":true,"data":...}` で包むだけ。
 
@@ -284,6 +287,21 @@ Board / Commentary / Top 8 タブと Designer の「開く」一覧が使う**�
 ```
 - `roles`: 役割の候補（自由入力も可）。`icons[].id` が `commentary.{N}.icon` に入る値（空文字 = アイコンなし）
 - 状態ではないので `revision` は付かない
+
+### 5.5 `GET /api/v1/stream/channels`（2026-10-31 追加・ADR-005 S4e）
+配信設定ページの配信先コンボの中身。`settings.json` の `stream_channels`（形式は不変）。
+
+```json
+{ "ok": true, "data": { "channels": [
+  { "name": "BST Stream", "url": "https://www.youtube.com/@B_ST_Stream/live" }
+] } }
+```
+- 添字（0 始まり）が §6.16 の `{index}`。dict でないエントリは数えない（次の書き込みで落ちる）
+- 設定なので `revision` は付かない。ほかのクライアントの変更は届かない（読み直す）
+
+### 5.6 `GET /api/v1/stream/thumbnail/options`（2026-10-31 追加・ADR-005 S4e）
+`{ "source": "banner" | "org", "style": "center" | "netflix", "overlayOrgIcon": bool }`（`settings.json` の
+`stream_thumbnail_options`。壊れた値・無い値は既定 `banner` / `center` / `false`）。設定なので `revision` は付かない
 
 ---
 
@@ -455,6 +473,39 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - 「大会のカラーに合わせる」はクライアントが大会の 2 色を両方送る（Qt のカードと同じく明示的に書く）
 - エラー: `INVALID_ARGUMENT`（feature・未知キー・空 body・色形式）
 
+### 6.15 配信先・配信タイトル `PUT /api/v1/stream`（2026-10-31 追加・ADR-005 S4e）
+- body: `{ "url": "https://...", "title": "..." }`（どちらか・両方。文字列）
+- 委譲: `update_stream` → `AutonaActions.SetStreamUrl` / `SetStreamTitle`（同値なら書かない。1 つの保存サイクル）
+- タイトルは送られたものを書く。打ちかけを自動生成のタイトルの上に送るかはクライアントが決める（`StreamService.TypedTitleWins`。
+  配信設定ページは同じ規則の `web/src/StreamPage/titleRule.ts`）。空にすると、次に大会名・ゲーム・参加者が変わったときに自動生成に戻る
+- エラー: `INVALID_ARGUMENT`（空 body・未知キー・文字列でない）
+
+### 6.16 配信チャンネル `POST /api/v1/stream/channels`・`PUT` / `DELETE /api/v1/stream/channels/{index}`（2026-10-31 追加・ADR-005 S4e）
+- `POST` body: `{ "name": "...", "url": "..." }`（両方とも空でない文字列。前後の空白は落とす）。末尾に足し、`data` は
+  `{ "index": 足した添字, "channels": [...] }`。設定だけなので `revision` は付かない（配信先にするのはクライアントが §6.15 で送る）
+- `PUT` body は `POST` と同じ。`DELETE` は body なし。`data` は `{ "channels": [...] }`。配信先（`stream.url`）が
+  そのチャンネルの URL だったら、編集では新しい URL に、削除では空になる（core の規則）ので `revision` が付く
+- 委譲: `add_stream_channel` / `update_stream_channel` / `delete_stream_channel` → `StreamService.AddChannel` / `UpdateChannel` / `DeleteChannel`
+- エラー: `INVALID_ARGUMENT`（空・未知キー・文字列でない）、`NOT_FOUND`（その添字のチャンネルが無い）
+
+### 6.17 配信団体の画像 `PUT /api/v1/stream/org/{kind}`・`DELETE /api/v1/stream/org`（2026-10-31 追加・ADR-005 S4e）
+- `kind`: `icon`（`layout/stream_org_icon.png`。長辺 512）/ `thumbnail`（`layout/stream_org_thumbnail.png`。長辺 1920）
+- `PUT` body: `{ "image": "data:image/png;base64,..." }`。ファイルをそのまま（縮小は core の PIL）。data URL の型は見ない
+  （ブラウザがファイル名から付ける推測で、知らない拡張子なら `application/octet-stream`。S4e レビュー）。受け付けるのは
+  core が読める画像（PNG / JPEG / MPO / BMP・5000 万画素まで）だけ。保存すると版（`stream.orgIconVersion` / `orgThumbVersion`）が publish されるので `revision` が付く
+- 上限: 画像 20MB（20 × 1024 × 1024 バイト）。本文は base64（4/3 倍）+ 1KB まで。超えると `413 PAYLOAD_TOO_LARGE`
+  （`Content-Length` で判定し、本文は解析せずに読み捨てる）。操作ログには本文のキーだけを残す
+- `DELETE`: 両方の画像を消して版を 0 にする（未登録）。背景が団体サムネ（`source: org`）だったら大会バナーに戻すので、
+  `data` は `{ "thumbnailOptions": {...} }`（§5.6 の形）
+- 委譲: `import_stream_org_asset` / `reset_stream_org_assets` → `StreamService.ImportOrgAsset` / `ResetOrgAssets`
+- エラー: `INVALID_ARGUMENT`（未知の `kind`・base64 の data URL でない・base64 でない・空・読めない画像）、`PAYLOAD_TOO_LARGE`、
+  `INTERNAL`（保存できない。ほかのアプリがファイルを開いている など）
+
+### 6.18 配信サムネ生成のオプション `PUT /api/v1/stream/thumbnail/options`（2026-10-31 追加・ADR-005 S4e）
+- body: §5.6 のキーの一部（`source` / `style` / `overlayOrgIcon`）。`data` は保存した全キー（§5.6 の形）。設定なので `revision` は付かない
+- 委譲: `set_stream_thumbnail_options` → `StreamService.SetThumbnailOptions`（値が変わらなければ `settings.json` を書かない）
+- エラー: `INVALID_ARGUMENT`（空 body・未知キー・値）
+
 ---
 
 ## 7. 危険操作エンドポイント（書き込み・操作ログ対象 / ガード必須）
@@ -472,6 +523,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 | `POST /api/v1/tournament` | 実行中フラグ | `load_tournament` | #44 |
 | `POST /api/v1/game` | 実行中フラグ | `set_game` | #14 |
 | `POST /api/v1/bracket:refresh` | 実行中フラグ | `update_bracket`（`AutonaWebOperations` → `Top8Service.RefreshFromProvider`。ADR-005 S3e-8） | #41 |
+| `POST /api/v1/stream/thumbnail` | 実行中フラグ | `generate_stream_thumbnail`（`StreamService.GenerateThumbnail`。2026-10-31 追加・ADR-005 S4e） | — |
 
 - `:load-set` / `:pull-stream`（ADR-005 S3e-7 から core の `SetFollowService`。どちらの起動形態でも動く）: 取得は provider のワーカーで
   非同期で、応答は受付時点の `revision`。大会が読み込まれていなければ **409 `NOT_READY`**（`no tournament loaded`）で、ボードに何も
@@ -511,6 +563,10 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
     （legacy / Socket.IO は `"OK"` のまま何もしない）。ADR-005 S3e-8。それまではこのルート専用のフラグで、
     パネルに取得を頼んだ時点で下ろしていた（取得中の 2 回目も 202 になり、取得が 2 本走った）
   - 受付後に結果が空（決勝のダブルエリミのグループが無い・Start.gg の失敗）なら何も書かない（ログのみ）
+- `POST /api/v1/stream/thumbnail`: body なし。保存済みのオプション（§5.6）で配信サムネを 1 枚作る `TaskExecutor` のジョブを積み、
+  `202`（`data: {"accepted": true, "operation": "stream.thumbnail"}`）。実行中フラグは core（`StreamService`）の 1 つで、
+  実行中は `409 CONFLICT`。進捗と結果は state の `stream.thumbnail = {status: running → done | error, path, error, revision}`
+  （`path` は `out/stream/thumbnail_*.jpg` で、そのまま静的配信の URL パス。`revision` は受け付けるたびに 1 進む）
 
 > **注**: 旧 `POST /api/v1/ui/theme`（ライト/ダーク切替）は廃止。テーマはダーク固定（[Design.md §5.4](Design.md)）。
 

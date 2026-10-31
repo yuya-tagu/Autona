@@ -169,7 +169,7 @@
 - **テーマカラー / アクセントカラー** のカラーピッカー
 
 ### 配信用ツール
-配信 URL・配信タイトルコピー・配信サムネイル生成（Center Crop / Netflix Style）は Stream Settings パネル（[src/AutonaStreamSettingsWidget.py](../../src/AutonaStreamSettingsWidget.py)）に移動済み。処理の実体は core の [src/core/StreamService.py](../../src/core/StreamService.py)（ADR-005 S4d）で、配信タイトルは大会を読み込むとパネルを開かなくても（ヘッドレスでも）生成される。手で書き換えたタイトルは、空にするまで自動生成で上書きしない（再起動しても残る。打っている途中に自動生成が走っても、打った文字が勝つ）。
+配信 URL・配信タイトルコピー・配信サムネイル生成（Center Crop / Netflix Style）は Stream Settings（配信設定）ページ（React の [web/src/StreamPage/](../../web/src/StreamPage/)。`/web/stream`、デスクトップでは共有ビューに表示。ADR-005 S4e で Qt 版から移行）にある。ブラウザからも同じページで操作でき、配信サムネの画像コピーはこの PC で開いたとき（デスクトップ・`localhost`）だけで、LAN の別の PC からは「画像を開く / 保存」になる。処理の実体は core の [src/core/StreamService.py](../../src/core/StreamService.py)（ADR-005 S4d）で、配信タイトルは大会を読み込むとパネルを開かなくても（ヘッドレスでも）生成される。手で書き換えたタイトルは、空にするまで自動生成で上書きしない（再起動しても残る。打っている途中に自動生成が走っても、打った文字が勝つ）。
 
 - 配信サムネイルの出力: `out/stream/thumbnail_{背景}_{スタイル}_{YYYYMMDD_HHMMSS}.jpg`（背景 `banner` / `org`・スタイル `center` / `netflix`。直近 30 世代を残す）。生成はバックグラウンドで走り、状態は `stream.thumbnail` に出る
 - 生成オプション（背景・スタイル・団体アイコンの合成）は `settings.json` の `stream_thumbnail_options` に保存される

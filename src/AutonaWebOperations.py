@@ -37,6 +37,10 @@ These kinds live here:
   desktop builds the board first and runs them on its GUI thread); the
   line-up has no board and is written on the calling thread. The board and
   the Commentary page render what was written.
+- 配信設定's (ADR-005 S4e): core's StreamService -- the channels, the stream
+  org's assets, the thumbnail options and the thumbnail job -- and the
+  destination / title through AutonaActions, in both shells, on the calling
+  thread (no board). The Stream page renders what was written.
 - the player slots' (ADR-005 S3e-4): the Web's player edit (v1's PATCH
   players and the legacy update-team) and the tag lookup -- core's
   PlayerService.ApplyData, through the board host like the S2 ones. The
@@ -86,6 +90,7 @@ from .core.SetLoadService import SetLoadService
 from .core.PlayerDB import PlayerDB
 from .core.PlayerService import DEFAULT_CHARACTERS_PER_PLAYER, PlayerService
 from .core.StatsService import StatsService
+from .core.StreamService import StreamService
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaQtHelper import (
@@ -566,6 +571,59 @@ def set_feature_colors(feature, colors):
     with StateManager.SaveBlock():
         for kind, color in colors.items():
             ColorService.SetFeatureColor(feature, kind, color)
+
+
+# ── 配信設定 (ADR-005 S4e) ─────────────────────────────────────────────
+# The Stream page's: core's StreamService (and AutonaActions for the two
+# state fields), in both shells, on the calling thread -- there is no board.
+# The v1 routes validate; these apply.
+
+def update_stream(fields):
+    """Write the stream destination and / or the broadcast title (`url` /
+    `title` -> str, already validated) in one save cycle. The lock before
+    the save block, as update_caster takes it (agent-pitfalls #17)."""
+    with StateManager.lock:
+        with StateManager.SaveBlock():
+            if "url" in fields:
+                AutonaActions.instance.SetStreamUrl(fields["url"])
+            if "title" in fields:
+                AutonaActions.instance.SetStreamTitle(fields["title"])
+
+
+def get_stream_channels():
+    return StreamService.instance.Channels()
+
+
+def add_stream_channel(name, url):
+    return StreamService.instance.AddChannel(name, url)
+
+
+def update_stream_channel(index, name, url):
+    return StreamService.instance.UpdateChannel(index, name, url)
+
+
+def delete_stream_channel(index):
+    return StreamService.instance.DeleteChannel(index)
+
+
+def import_stream_org_asset(kind, data):
+    return StreamService.instance.ImportOrgAsset(kind, data)
+
+
+def reset_stream_org_assets():
+    StreamService.instance.ResetOrgAssets()
+
+
+def get_stream_thumbnail_options():
+    return StreamService.instance.ThumbnailOptions()
+
+
+def set_stream_thumbnail_options(changes):
+    return StreamService.instance.SetThumbnailOptions(changes)
+
+
+def generate_stream_thumbnail():
+    return StreamService.instance.GenerateThumbnail()
 
 
 # ── the tournament ───────────────────────────────────────────────────────

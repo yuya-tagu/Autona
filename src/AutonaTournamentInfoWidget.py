@@ -246,7 +246,7 @@ class AutonaTournamentInfoWidget(QDockWidget):
 
         # Stream destination / title / thumbnail generation are not
         # tournament-scoped — they belong to the broadcast and now live in
-        # their own 配信設定 panel (AutonaStreamSettingsWidget). This tab keeps
+        # their own 配信設定 panel (the React Stream page). This tab keeps
         # only what a tournament owns: its metadata and its icon / banner.
 
         # Render whatever the state already holds (this page is lazy, so a

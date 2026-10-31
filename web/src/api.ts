@@ -69,3 +69,7 @@ export async function apiPatch(path: string, body?: unknown, opts?: ApiOptions):
 export async function apiPut(path: string, body?: unknown, opts?: ApiOptions): Promise<string> {
     return send("PUT", path, body, opts);
 }
+
+export async function apiDelete(path: string, opts?: ApiOptions): Promise<string> {
+    return send("DELETE", path, undefined, opts);
+}

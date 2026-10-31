@@ -102,7 +102,7 @@ EXPECTED_ROUTES = [
 # score:set / players/<p> / display-options / countries/<code>/states were
 # added for the Web UI's move off the legacy routes (ADR-001 Addendum
 # 2026-10-21); commentary/* / layouts/selected/<kind> / colors/<feature> for
-# the Commentary page (ADR-005 S4b).
+# the Commentary page (ADR-005 S4b); stream/* for the Stream page (S4e).
 EXPECTED_API_V1_ROUTES = [
     ('/api/v1/bracket:refresh', 'api_v1.bracket_refresh', 'OPTIONS,POST'),
     ('/api/v1/characters', 'api_v1.get_characters', 'GET,HEAD,OPTIONS'),
@@ -140,6 +140,16 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/sets', 'api_v1.get_sets', 'GET,HEAD,OPTIONS'),
     ('/api/v1/sets/<setId>', 'api_v1.get_match', 'GET,HEAD,OPTIONS'),
     ('/api/v1/state', 'api_v1.state', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/stream', 'api_v1.stream_update', 'OPTIONS,PUT'),
+    ('/api/v1/stream/channels', 'api_v1.get_stream_channels', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/stream/channels', 'api_v1.stream_channel_add', 'OPTIONS,POST'),
+    ('/api/v1/stream/channels/<int:index>', 'api_v1.stream_channel_delete', 'DELETE,OPTIONS'),
+    ('/api/v1/stream/channels/<int:index>', 'api_v1.stream_channel_update', 'OPTIONS,PUT'),
+    ('/api/v1/stream/org', 'api_v1.stream_org_reset', 'DELETE,OPTIONS'),
+    ('/api/v1/stream/org/<kind>', 'api_v1.stream_org_import', 'OPTIONS,PUT'),
+    ('/api/v1/stream/thumbnail', 'api_v1.stream_thumbnail_generate', 'OPTIONS,POST'),
+    ('/api/v1/stream/thumbnail/options', 'api_v1.get_stream_thumbnail_options', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/stream/thumbnail/options', 'api_v1.stream_thumbnail_options_update', 'OPTIONS,PUT'),
     ('/api/v1/tournament', 'api_v1.tournament_load', 'OPTIONS,POST'),
     ('/api/v1/variants', 'api_v1.get_variants', 'GET,HEAD,OPTIONS'),
 ]
@@ -451,8 +461,8 @@ def test_the_classification_follows_the_rules():
             assert access[event] == kind, event
     # The counts the S3a inventory found (legacy 29 writes of 43, Socket.IO
     # 26 of 41, v1 18 of 31), plus the Commentary page's 5 writes and 2
-    # reads (ADR-005 S4b: v1 23 of 38). A change here is a change of the
-    # policy.
+    # reads (ADR-005 S4b: v1 23 of 38) and the Stream page's 8 writes and 2
+    # reads (S4e: v1 31 of 48). A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
     assert len(legacy) == 43
@@ -460,8 +470,8 @@ def test_the_classification_follows_the_rules():
     assert sum(k == WebAccess.WRITE
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
-               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 23
-    assert len(EXPECTED_API_V1_ROUTES) == 38
+               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 31
+    assert len(EXPECTED_API_V1_ROUTES) == 48
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

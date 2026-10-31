@@ -14,14 +14,17 @@ download, and its options were forgotten with the page. Pinned here:
 - the org assets: scaled down, saved as PNG, their versions published, and
   the reset;
 - the thumbnail generator: every option, the banner's fallbacks, a second
-  run refused while one runs, the options saved;
-- that the panel keeps none of it (AST), and draws what core saved.
+  run refused while one runs, the options saved.
+
+The Qt panel that drew these until ADR-005 S4e is gone: the Web's Stream
+page (web/src/StreamPage) asks for them through /api/v1
+(tests/test_api_v1_stream.py) and is pinned by the Web UI's own tests.
 
 Each test runs a service of its own (its `later` queue in the test's hands)
 in a directory of its own, the session's service stopped meanwhile; the
 state and the settings are handed back untouched.
 """
-import ast
+import json
 import os
 import threading
 from io import BytesIO
@@ -30,7 +33,6 @@ from types import SimpleNamespace
 
 import pytest
 from PIL import Image, ImageFile
-from qtpy.QtWidgets import QFileDialog, QMessageBox
 
 from src.core import StateSchema as schema
 from src.core import StreamService as stream
@@ -290,34 +292,25 @@ def test_a_state_from_before_titleauto_counts_its_title_as_auto(env):
     assert SM.Get(stream.TITLE_AUTO_PATH) == "Today"
 
 
-def test_whether_a_title_is_auto():
-    assert stream.TitleIsAuto("Cup", "Cup") is True
-    assert stream.TitleIsAuto("", "Cup") is True
-    assert stream.TitleIsAuto(None, "") is True
-    assert stream.TitleIsAuto("Mine", "Cup") is False
-    assert stream.TitleIsAuto("Mine", "") is False
-    assert stream.TitleIsAuto("Anything", None) is True
+# One table for core and the Stream page (web/src/StreamPage/titleRule.ts,
+# whose jest test reads the same file): the two must make the same call.
+TITLE_RULE_CASES = json.loads(
+    (PROJECT_ROOT / "web" / "src" / "StreamPage" / "titleRule.cases.json")
+    .read_text(encoding="utf-8"))
 
 
-@pytest.mark.parametrize("typed, shown, title, auto, wins", [
-    # Typed over the title it started from (auto or not).
-    ("Mine", "Cup", "Cup", "Cup", True),
-    ("Mine 2", "Mine", "Mine", "Cup", True),
-    # An auto title landed while the operator typed: the typing wins.
-    ("Mine", "Cup", "Cup ft. Ada", "Cup ft. Ada", True),
-    ("Mine", "", "Cup", "Cup", True),
-    # Another writer's own title landed meanwhile: that one wins.
-    ("Mine", "Cup", "Web's", "Cup", False),
-    # Nothing typed: the field merely kept an old value -- never written
-    # back over the newer one.
-    ("Cup", "Cup", "Cup ft. Ada", "Cup ft. Ada", False),
-    # Already the state's.
-    ("Cup", "Old", "Cup", "Cup", False),
-    # Cleared by hand: written (core makes the next auto title).
-    ("", "Mine", "Mine", "Cup", True),
-])
-def test_whether_a_typed_title_is_written(typed, shown, title, auto, wins):
-    assert stream.TypedTitleWins(typed, shown, title, auto) is wins
+@pytest.mark.parametrize(
+    "case", TITLE_RULE_CASES["titleIsAuto"], ids=lambda case: case["why"])
+def test_whether_a_title_is_auto(case):
+    assert stream.TitleIsAuto(case["title"], case["titleAuto"]) is \
+        case["auto"]
+
+
+@pytest.mark.parametrize(
+    "case", TITLE_RULE_CASES["typedTitleWins"], ids=lambda case: case["why"])
+def test_whether_a_typed_title_is_written(case):
+    assert stream.TypedTitleWins(case["typed"], case["shown"], case["title"],
+                                 case["titleAuto"]) is case["wins"]
 
 
 def test_the_top_entrants_come_from_the_provider(env):
@@ -549,7 +542,10 @@ def test_the_reset_unregisters_both_and_moves_the_thumbnail_to_the_banner(
     service.ImportOrgAsset("icon", _image_bytes((64, 64), RED))
     service.ImportOrgAsset("thumbnail", _image_bytes((160, 90), BLUE))
     service.SetThumbnailOptions({"source": "org", "style": "netflix"})
+    revision = SM.revision
     service.ResetOrgAssets()
+    # Both versions in one publish (S4e review).
+    assert SM.revision == revision + 1
     assert not os.path.exists(schema.STREAM_ORG_ICON_PATH)
     assert not os.path.exists(schema.STREAM_ORG_THUMB_PATH)
     assert SM.Get("stream.orgIconVersion") == 0
@@ -787,253 +783,3 @@ def test_the_thumbnail_starts_idle_at_every_launch(env):
         schema.SeedPanelState()
     assert env.thumbnail() == schema.DefaultStreamThumbnail()
 
-
-# ── the panel keeps none of it ───────────────────────────────────────────
-
-PANEL = PROJECT_ROOT / "src" / "AutonaStreamSettingsWidget.py"
-
-# Calls that write a file or a setting, by attribute name.
-_WRITES = {"save", "write", "write_bytes", "write_text", "mkdir", "makedirs",
-           "remove", "unlink", "rename", "replace", "copyfile", "Set",
-           "SetIfChanged", "Unset", "PublishAssetVersion"}
-
-
-def test_the_panel_writes_no_settings_files_or_images():
-    source = PANEL.read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    imported = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported |= {alias.name.split(".")[0] for alias in node.names}
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imported.add(node.module.split(".")[-1])
-    assert not imported & {"PIL", "requests", "SettingsManager",
-                           "AutonaOutputRetention", "datetime"}, imported
-    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
-    writes = sorted({call.func.attr for call in calls
-                     if isinstance(call.func, ast.Attribute)
-                     and call.func.attr in _WRITES})
-    assert writes == [], writes
-    assert not [call for call in calls
-                if isinstance(call.func, ast.Name) and call.func.id == "open"]
-    # The title is core's: the panel no longer listens to the provider or
-    # the game assets to make one.
-    for name in ("AutonaTournamentDataProvider", "AutonaGameAssetManager",
-                 "top_entrants", "SettingsManager"):
-        assert name not in source, name
-
-
-def test_the_panel_asks_the_core_for_every_operation():
-    tree = ast.parse(PANEL.read_text(encoding="utf-8"))
-    asked = {node.func.attr for node in ast.walk(tree)
-             if isinstance(node, ast.Call)
-             and isinstance(node.func, ast.Attribute)
-             and isinstance(node.func.value, ast.Attribute)
-             and ast.unparse(node.func.value) == "StreamService.instance"}
-    assert asked == {
-        "Channels", "AddChannel", "UpdateChannel", "DeleteChannel",
-        "ImportOrgAsset", "ResetOrgAssets", "ThumbnailOptions",
-        "SetThumbnailOptions", "GenerateThumbnail"}
-
-
-# ── the panel draws what core saved ──────────────────────────────────────
-
-@pytest.fixture
-def panel(env, qapp):
-    from src.AutonaStreamSettingsWidget import AutonaStreamSettingsWidget
-    widget = AutonaStreamSettingsWidget()
-    try:
-        yield widget
-    finally:
-        widget.deleteLater()
-        qapp.processEvents()
-
-
-def test_the_panel_shows_the_saved_options_and_saves_its_changes(
-        env, panel, qapp):
-    env.service.SetThumbnailOptions({"style": "netflix"})
-    panel._renderThumbnailOptions()
-    assert panel.rbStreamThumbSourceBanner.isChecked()
-    assert panel.rbStreamThumbNetflix.isChecked()
-    # The source and the style are two choices, not one of four (the .ui
-    # puts the four radios under one parent).
-    panel.rbStreamThumbSourceOrg.click()
-    assert panel.rbStreamThumbSourceOrg.isChecked()
-    assert panel.rbStreamThumbNetflix.isChecked()
-    panel.rbStreamThumbCenter.click()
-    panel.cbStreamThumbOverlayOrgIcon.click()
-    assert env.service.ThumbnailOptions() == {
-        "source": "org", "style": "center", "overlayOrgIcon": True}
-
-
-def test_the_panel_draws_the_title_and_the_thumbnail_from_the_state(
-        env, panel, qapp):
-    SM.Set("tournamentInfo.tournamentName", "Cup")
-    env.run_queued()
-    qapp.processEvents()
-    assert panel.streamTitleEdit.text() == "Cup"
-
-    _save_image("out/stream/thumbnail_banner_center_1.jpg", (320, 180),
-                GREEN)
-    SM.Set(stream.THUMBNAIL_PATH, {
-        "status": stream.DONE, "path": "out/stream/thumbnail_banner_center_1.jpg",
-        "error": "", "revision": 1})
-    qapp.processEvents()
-    assert panel.streamThumbPath.text().endswith(
-        "out/stream/thumbnail_banner_center_1.jpg")
-    assert not panel.streamThumbPreview.pixmap().isNull()
-    assert panel.btGenerateStreamThumbnail.isEnabled()
-
-    SM.Set(stream.THUMBNAIL_PATH, {
-        "status": stream.RUNNING, "path": "", "error": "", "revision": 2})
-    qapp.processEvents()
-    assert not panel.btGenerateStreamThumbnail.isEnabled()
-
-
-def test_the_panel_draws_the_options_without_saving_them_back(
-        env, panel, monkeypatch):
-    saved = []
-    monkeypatch.setattr(env.service, "SetThumbnailOptions",
-                        lambda changes: saved.append(changes))
-    SettingsManager.settings[stream.THUMBNAIL_OPTIONS_SETTING] = {
-        "source": "org", "style": "netflix", "overlayOrgIcon": True}
-    panel._renderThumbnailOptions()
-    SettingsManager.settings[stream.THUMBNAIL_OPTIONS_SETTING] = {
-        "source": "banner", "style": "center", "overlayOrgIcon": False}
-    panel._renderThumbnailOptions()
-    assert panel.rbStreamThumbSourceBanner.isChecked()
-    assert panel.rbStreamThumbCenter.isChecked()
-    assert saved == []
-
-
-def test_the_reset_puts_the_panel_back_on_the_banner(env, panel,
-                                                     monkeypatch):
-    env.service.ImportOrgAsset("thumbnail", _image_bytes((160, 90), BLUE))
-    panel.rbStreamThumbSourceOrg.click()
-    assert env.service.ThumbnailOptions()["source"] == "org"
-    monkeypatch.setattr(QMessageBox, "question",
-                        lambda *args, **kwargs: QMessageBox.StandardButton.Yes)
-    panel.ResetOrgMedia()
-    assert panel.rbStreamThumbSourceBanner.isChecked()
-    assert env.service.ThumbnailOptions()["source"] == "banner"
-    assert panel.orgThumbView.pixmap().isNull()
-
-
-def test_the_panels_channel_edits_take_the_destination_along(
-        env, panel, qapp, monkeypatch):
-    env.service.AddChannel("Main", "https://a.example")
-    env.service.AddChannel("Sub", "https://b.example")
-    panel._loadStreamChannels()
-    panel.streamUrlCombo.setCurrentIndex(2)
-    assert SM.Get(stream.URL_PATH) == "https://b.example"
-
-    monkeypatch.setattr(panel, "_promptStreamChannel",
-                        lambda *args, **kwargs: (
-                            "save", "Sub", "https://b2.example"))
-    panel._editStreamChannel()
-    qapp.processEvents()
-    assert SM.Get(stream.URL_PATH) == "https://b2.example"
-    assert panel.streamUrlCombo.currentIndex() == 2
-    assert panel.streamUrlCombo.currentData() == "https://b2.example"
-
-    monkeypatch.setattr(panel, "_promptStreamChannel",
-                        lambda *args, **kwargs: ("delete", None, None))
-    panel._editStreamChannel()
-    qapp.processEvents()
-    assert SM.Get(stream.URL_PATH) == ""
-    assert panel.streamUrlCombo.currentIndex() == 0
-    assert panel.streamUrlCombo.currentText() == ""
-    assert panel.streamUrlCombo.count() == 2
-    assert not panel.btEditStreamChannel.isEnabled()
-
-
-@pytest.mark.parametrize("data, outcome", [
-    (b"not an image", "読み込めません"),
-    (None, "保存できません"),
-])
-def test_an_import_that_fails_is_reported(env, panel, tmp_path, monkeypatch,
-                                         data, outcome):
-    source = tmp_path / "picked.png"
-    source.write_bytes(data if data is not None
-                       else _image_bytes((32, 32), RED))
-    monkeypatch.setattr(QFileDialog, "getOpenFileName",
-                        lambda *args, **kwargs: (str(source), ""))
-    if data is None:
-        real_replace = os.replace
-
-        def replace(source, target):
-            if Path(target).name == "stream_org_icon.png":
-                raise PermissionError(32, "in use")
-            real_replace(source, target)
-        monkeypatch.setattr(stream.os, "replace", replace)
-        monkeypatch.setattr(stream, "_REPLACE_BACKOFF", 0)
-    warned = []
-    monkeypatch.setattr(QMessageBox, "warning",
-                        lambda parent, title, text: warned.append(text))
-    panel.LoadOrgIcon()
-    assert len(warned) == 1 and outcome in warned[0]
-    assert panel.orgIconView.pixmap().isNull()
-
-
-def test_typing_wins_over_an_auto_title_that_lands_meanwhile(
-        env, panel, qapp, monkeypatch):
-    SM.Set("tournamentInfo.tournamentName", "Cup")
-    env.run_queued()
-    qapp.processEvents()
-    edit = panel.streamTitleEdit
-    assert edit.text() == "Cup"
-
-    monkeypatch.setattr(edit, "hasFocus", lambda: True)
-    edit.setText("Typed by hand")
-    # The entrants fetch ends while the operator types: a new auto title.
-    env.service.SetTopEntrants(_entrants("Ada"))
-    env.run_queued()
-    qapp.processEvents()
-    assert env.title() == "Cup ft. Ada ... and more!"
-    assert edit.text() == "Typed by hand"      # not redrawn while in it
-
-    monkeypatch.setattr(edit, "hasFocus", lambda: False)
-    edit.editingFinished.emit()
-    qapp.processEvents()
-    assert env.title() == "Typed by hand"
-    assert edit.text() == "Typed by hand"
-    # ...and kept by the next refresh.
-    SM.Set("tournamentInfo.tournamentName", "Cup 2")
-    env.run_queued()
-    qapp.processEvents()
-    assert env.title() == "Typed by hand"
-
-
-def test_a_field_merely_left_alone_writes_nothing_back(env, panel, qapp,
-                                                      monkeypatch):
-    SM.Set("tournamentInfo.tournamentName", "Cup")
-    env.run_queued()
-    qapp.processEvents()
-    edit = panel.streamTitleEdit
-    monkeypatch.setattr(edit, "hasFocus", lambda: True)
-    SM.Set("tournamentInfo.tournamentName", "Cup 2")
-    env.run_queued()
-    qapp.processEvents()
-    assert edit.text() == "Cup"
-    monkeypatch.setattr(edit, "hasFocus", lambda: False)
-    edit.editingFinished.emit()
-    qapp.processEvents()
-    assert env.title() == "Cup 2"
-    assert edit.text() == "Cup 2"
-
-
-def test_another_writers_title_wins_over_the_typing(env, panel, qapp,
-                                                    monkeypatch):
-    SM.Set("tournamentInfo.tournamentName", "Cup")
-    env.run_queued()
-    qapp.processEvents()
-    edit = panel.streamTitleEdit
-    monkeypatch.setattr(edit, "hasFocus", lambda: True)
-    edit.setText("Typed by hand")
-    AutonaActions.instance.SetStreamTitle("From the Web")
-    qapp.processEvents()
-    monkeypatch.setattr(edit, "hasFocus", lambda: False)
-    edit.editingFinished.emit()
-    qapp.processEvents()
-    assert env.title() == "From the Web"
-    assert edit.text() == "From the Web"
