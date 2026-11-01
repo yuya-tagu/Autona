@@ -176,9 +176,40 @@ def test_a_date_field_is_published_through_the_injected_formatter(service):
         "%Y-%m-%d", time.localtime(1735689600))
 
 
-def test_a_date_field_keeps_its_raw_timestamp_for_a_late_built_panel(service):
+def _day(timestamp):
+    return time.strftime("%Y-%m-%d", time.localtime(timestamp))
+
+
+def test_a_date_field_publishes_its_day_beside_the_formatted_date(service):
+    """ADR-005 S4f: the raw day is state (tournamentInfo.startAtDate), so a
+    panel built later -- or after a restart -- and the Web page read it
+    back; the formatted startAt stays as it was."""
     service.ApplyTournamentData(_payload())
-    assert service.RawDate("startAt") == 1735689600
+    assert _get("startAtDate") == _day(1735689600)
+    assert service.DateOf("startAt") == _day(1735689600)
+    assert _get("startAt") == "DATE:" + _day(1735689600)
+
+
+def test_a_null_date_in_a_payload_publishes_no_day(service):
+    service.ApplyTournamentData(_payload())
+    service.ApplyTournamentData(_payload(startAt=None))
+    assert _get("startAt") is None
+    assert _get("startAtDate") is None
+    assert service.DateOf("startAt") is None
+
+
+def test_a_malformed_date_still_abandons_the_payload_and_writes_no_day(
+        service):
+    """The payload path relies on SetDateField raising (an empty startAt is
+    what a failed fetch gives): the URL is dropped, and neither form of the
+    date is written."""
+    service.ApplyTournamentData(_payload())
+    SettingsManager.Set("TOURNAMENT_URL", "https://start.gg/whatever")
+    assert service.ApplyTournamentData(
+        {"startAt": "", "initial_load": True}) is False
+    assert SettingsManager.Get("TOURNAMENT_URL") == ""
+    assert _get("startAtDate") == _day(1735689600)
+    assert _get("startAt") == "DATE:" + _day(1735689600)
 
 
 def test_the_short_date_keys_are_published_as_platform_short_dates(service):
@@ -310,25 +341,109 @@ def test_picking_a_date_publishes_the_formatted_form(service):
         "%Y-%m-%d", time.localtime(1735689600))
 
 
-def test_picking_a_date_records_the_raw_timestamp(service):
+def test_picking_a_date_records_its_day(service):
     """The reason the typed path goes through the service at all.
 
-    The state holds a formatted date that cannot be parsed back into a
-    QDate, so the panel restores its QDateEdit from RawDate(). While a
-    manual edit wrote the key directly, that ledger kept the *loaded*
-    tournament's date -- and the panel's next re-render put it back over
-    whatever the operator had picked.
+    The formatted date cannot be parsed back into a QDate, so the panel
+    restores its QDateEdit from the day beside it. Were a manual edit to
+    write the formatted key alone, the day would keep the *loaded*
+    tournament's date -- and the panel's next re-render would put it back
+    over whatever the operator had picked.
     """
     service.ApplyTournamentData(_payload())
-    assert service.RawDate("startAt") == 1735689600
+    assert service.DateOf("startAt") == _day(1735689600)
 
     service.SetDateField("startAt", 1767225600)
-    assert service.RawDate("startAt") == 1767225600
+    assert service.DateOf("startAt") == _day(1767225600)
+
+
+def test_both_forms_of_a_date_are_one_save_cycle(service):
+    before = SM.revision
+    assert service.SetDateField("startAt", 1767225600) is True
+    assert SM.revision == before + 1
+
+
+def test_a_day_is_set_as_its_local_midnight(service):
+    """SetDate (the panel's QDateEdit, the Web page's date input) turns
+    the day into the timestamp of its local midnight -- what the panel's
+    QDate.startOfDay() gave -- in the PC's timezone."""
+    assert service.SetDate("startAt", "2026-03-14") is True
+    midnight = int(time.mktime((2026, 3, 14, 0, 0, 0, 0, 0, -1)))
+    assert _get("startAt") == "DATE:" + _day(midnight)
+    assert _get("startAtDate") == "2026-03-14"
+    assert service.DateOf("startAt") == "2026-03-14"
+    assert service.SetDate("startAt", "2026-03-14") is False
+
+
+@pytest.mark.parametrize("value", [
+    "1999-12-31",        # before the QDateEdit's minimum
+    "3000-01-01",        # after its maximum (where mktime still works)
+    "9999-12-31",        # the QDateEdit's old maximum: mktime fails there
+    "２０２６-０３-１４",  # not ASCII digits
+    "2026-02-30",        # no such day
+    "2026-3-14",         # not zero-padded
+    "2026-03-14T00:00",  # more than a day
+    " 2026-03-14",
+    "",
+    None,
+    20260314,
+])
+def test_anything_but_a_day_is_refused(service, value):
+    service.ApplyTournamentData(_payload())
+    assert service.SetDate("startAt", value) is False
+    assert _get("startAtDate") == _day(1735689600)
+
+
+def test_the_earliest_day_is_taken(service):
+    assert service.SetDate("startAt", "2000-01-01") is True
+    assert _get("startAtDate") == "2000-01-01"
+
+
+def test_the_latest_day_is_taken(service):
+    """The QDateEdit's maximum is 2999-12-31 (S4f review: from about 3001
+    on, Windows' mktime / localtime fail, and the handler raised)."""
+    assert service.SetDate("startAt", "2999-12-31") is True
+    assert _get("startAtDate") == "2999-12-31"
+    assert _get("startAt") == "DATE:" + _day(
+        int(time.mktime((2999, 12, 31, 0, 0, 0, 0, 0, -1))))
+
+
+def test_a_day_whose_midnight_does_not_exist_keeps_its_day(
+        service, monkeypatch):
+    """Where a DST change skips midnight, mktime may normalise the missing
+    00:00 back into the day before. The day published is the one picked
+    (never worked back from the time), and the time is the first hour of
+    that day that exists -- what QDate.startOfDay() gives."""
+    real_mktime = time.mktime
+    picked = (2026, 3, 29)
+
+    def mktime(parts):
+        if tuple(parts[:3]) == picked and parts[3] == 0:
+            # The missing 00:00: the day before's 23:00.
+            return real_mktime((2026, 3, 28, 23, 0, 0, 0, 0, -1))
+        return real_mktime(parts)
+    monkeypatch.setattr(time, "mktime", mktime)
+
+    assert service.SetDate("startAt", "2026-03-29") is True
+    assert _get("startAtDate") == "2026-03-29"
+    one_am = int(real_mktime((2026, 3, 29, 1, 0, 0, 0, 0, -1)))
+    assert _get("startAt") == "DATE:" + _day(one_am)
+
+
+def test_a_day_the_platform_cannot_convert_is_refused(service, monkeypatch):
+    service.ApplyTournamentData(_payload())
+
+    def overflow(parts):
+        raise OverflowError("mktime argument out of range")
+    monkeypatch.setattr(time, "mktime", overflow)
+    assert service.SetDate("startAt", "2026-03-14") is False
+    assert _get("startAtDate") == _day(1735689600)
 
 
 def test_an_unknown_date_field_is_refused(service):
     assert service.SetDateField("endAt", 1735689600) is False
-    assert service.RawDate("endAt") is None
+    assert service.SetDate("endAt", "2026-03-14") is False
+    assert service.DateOf("endAt") is None
 
 
 # ── 表示大会名 ────────────────────────────────────────────────────────────

@@ -126,6 +126,16 @@
              <day>1</day>
             </datetime>
            </property>
+           <property name="maximumDateTime">
+            <datetime>
+             <hour>23</hour>
+             <minute>59</minute>
+             <second>59</second>
+             <year>2999</year>
+             <month>12</month>
+             <day>31</day>
+            </datetime>
+           </property>
            <property name="calendarPopup">
             <bool>true</bool>
            </property>

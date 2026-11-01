@@ -16,6 +16,7 @@ keep answering them for the rest of the session (the "ghost panel" the board
 harness has the same teardown for).
 """
 import contextlib
+import os
 import time
 
 import pytest
@@ -89,22 +90,31 @@ def panel(makePanel):
 def _restoreTournamentInfo(autonaApp):
     """Hand tournamentInfo.* back untouched -- it is process-global.
 
-    The service's two ledgers go with it: `_rawDates` is what a date field
-    renders from (so a test that picks a date would otherwise decide what a
-    later one sees in its QDateEdit) and `_lastTournamentName` is the whole
-    表示大会名 follow rule.
+    The service's ledger goes with it: `_lastTournamentName` is the whole
+    表示大会名 follow rule. (The raw date is state since ADR-005 S4f --
+    tournamentInfo.startAtDate -- so the subtree restore covers it.) So do
+    the icon / banner files a media test writes into the runtime directory.
     """
+    from pathlib import Path
     from src.core.DictHelper import deep_clone
+    from src.core import TournamentMediaService as media
 
     saved = deep_clone(StateManager.Get("tournamentInfo") or {})
     service = TournamentInfoService.instance
-    rawDates = dict(service._rawDates)
     lastName = service._lastTournamentName
+    files = {}
+    for path, _key, _side in media.MEDIA.values():
+        target = Path(path)
+        files[target] = target.read_bytes() if target.exists() else None
     try:
         yield
     finally:
+        for target, data in files.items():
+            if data is None:
+                target.unlink(missing_ok=True)
+            else:
+                target.write_bytes(data)
         StateManager.Set("tournamentInfo", saved)
-        service._rawDates = rawDates
         service._lastTournamentName = lastName
         autonaApp.settle()
 
@@ -202,9 +212,8 @@ def test_editing_the_name_carries_into_the_display_name(autonaApp, panel):
 
 
 def test_a_loaded_date_reaches_the_date_edit(autonaApp, panel):
-    """The one field the state cannot restore -- it holds a formatted date."""
-    import time
-
+    """Rendered from the day the state holds beside the formatted date
+    (tournamentInfo.startAtDate, ADR-005 S4f)."""
     timestamp = 1735689600
     TournamentInfoService.instance.ApplyTournamentData({
         "startAt": timestamp, "initial_load": True})
@@ -260,10 +269,25 @@ def test_the_date_field_writes_its_own_key_once(autonaApp, panel):
         autonaApp.settle()
 
     assert written.count("tournamentInfo.startAt") == 1, written
-    # The published form is the formatted short date, and the raw timestamp
-    # behind it is the one the operator picked.
-    raw = TournamentInfoService.instance.RawDate("startAt")
-    assert time.strftime("%Y-%m-%d", time.localtime(raw)) == "2026-03-14"
+    assert written.count("tournamentInfo.startAtDate") == 1, written
+    # The published form is the formatted short date, and the day beside it
+    # is the one the operator picked (its local midnight is core's).
+    assert StateManager.Get("tournamentInfo.startAtDate") == "2026-03-14"
+    assert TournamentInfoService.instance.DateOf("startAt") == "2026-03-14"
+
+
+def test_the_date_edit_is_restored_from_the_state_after_a_restart(
+        autonaApp, makePanel):
+    """ADR-005 S4f: the day is state now, so a panel built in a new process
+    (the state restored from user_data/state.json, nothing applied since)
+    shows it. It used to live in the service's memory only."""
+    from qtpy.QtCore import QDate
+
+    StateManager.Set("tournamentInfo.startAtDate", "2024-07-05")
+    autonaApp.settle()
+
+    panel = makePanel()
+    assert _field(panel, "startAt", QDateEdit).date() == QDate(2024, 7, 5)
 
 
 def test_leaving_a_field_untouched_writes_nothing(autonaApp, panel):
@@ -289,11 +313,12 @@ def test_leaving_a_field_untouched_writes_nothing(autonaApp, panel):
 def test_a_picked_date_survives_the_next_state_change(autonaApp, panel):
     """The regression the raw-date ledger used to have.
 
-    The QDateEdit is restored from TournamentInfoService.RawDate(), not from
-    the state (which holds a formatted date). While a manual edit wrote the
-    key directly, that ledger still held the *loaded* tournament's date, so
-    the next tournamentInfo delta -- any of them -- re-rendered the panel and
-    put the loaded date back over what the operator had picked.
+    The QDateEdit is restored from the day beside the formatted date
+    (tournamentInfo.startAtDate since S4f; a ledger in the service before).
+    Were a manual edit to write the formatted key alone, the day would still
+    hold the *loaded* tournament's date, so the next tournamentInfo delta --
+    any of them -- would re-render the panel and put the loaded date back
+    over what the operator had picked.
     """
     from qtpy.QtCore import QDate
 
@@ -355,6 +380,16 @@ def test_the_window_seeds_the_tournament_service():
         "display name and the logo version would be missing at launch")
 
 
+def test_the_sidebar_unset_asks_and_clears_through_core():
+    """Owner's decision 2 (S4f): the sidebar's "Unset tournament" asks
+    first, like the panel's button, through the same helper (which hands
+    the clear to core's TournamentService)."""
+    tokens = _windowTokens()
+    assert "AutonaTournamentDataProvider.ConfirmClearTournament(self)" in (
+        tokens)
+    assert ".SetTournament(None)" not in tokens
+
+
 def test_the_event_page_is_lazy():
     assert "(self._CreateTournamentInfoPanel,'tournament.svg'," \
         in _windowTokens(), (
@@ -381,22 +416,31 @@ def test_the_game_combo_catches_up_on_the_assets_already_loaded(
     assert "Harness Game" in texts
 
 
+def _pump(condition, seconds=10):
+    deadline = time.monotonic() + seconds
+    while not condition() and time.monotonic() < deadline:
+        QCoreApplication.processEvents()
+    return condition()
+
+
 @pytest.mark.parametrize("executorUp", [True, False],
                          ids=["fetched", "the app is quitting"])
 def test_the_media_download_gives_the_button_back_and_clears_its_status(
         autonaApp, panel, monkeypatch, executorUp):
-    """ADR-005 S3f-2: the icon / banner download is a job of the task
-    executor whose answer reaches the panel through the GUI executor. It used
-    to come back through a Worker's signals, which the garbage collector
-    could take first: the button then stayed disabled and the footer status
-    stayed up. Nothing of the call is kept here, and a collection runs while
-    the job is in flight. When the executor has shut down nothing runs and
-    the button is given back at once."""
+    """The fetch is core's job (TournamentMediaService.FetchMedia, ADR-005
+    S4f; the panel's own job since S3f-2, a Worker before that, whose
+    signals the garbage collector could take). The panel only draws
+    tournamentInfo.media: its buttons are disabled and the footer says so
+    while the status is "running", and both are given back when the run
+    ends -- with a collection in between, since nothing of the call is kept.
+    When the executor has shut down the run ends at once (cancelled) and
+    nothing is shown."""
     import gc
     import threading
     from types import SimpleNamespace
 
     from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
+    from src.core import TournamentMediaService as media
     from src.core.TaskExecutor import TaskExecutor
     from src.Helpers.AutonaStatusManager import AutonaStatusManager
 
@@ -408,7 +452,7 @@ def test_the_media_download_gives_the_button_back_and_clears_its_status(
 
     gate = threading.Event()
 
-    def noUrl():
+    def noUrl(strict=False):
         assert gate.wait(10)
         return None  # no icon / banner: nothing is requested
 
@@ -426,20 +470,225 @@ def test_the_media_download_gives_the_button_back_and_clears_its_status(
 
     panel._OnDownloadMedia()
     if not executorUp:
+        autonaApp.settle()
+        assert StateManager.Get(media.MEDIA_PATH)["error"] == media.CANCELLED
         assert panel.btDownloadMedia.isEnabled()
         assert statuses == []
         return
-    assert not panel.btDownloadMedia.isEnabled()
+    assert StateManager.Get(media.MEDIA_PATH)["status"] == media.RUNNING
+    assert _pump(lambda: not panel.btDownloadMedia.isEnabled())
+    assert not panel.btLoadInfoFromTournament.isEnabled()
 
     gc.collect()
     gate.set()
     assert TaskExecutor.instance.drain(10)
     gc.collect()
-    deadline = time.monotonic() + 10
-    while (not panel.btDownloadMedia.isEnabled()
-           and time.monotonic() < deadline):
-        QCoreApplication.processEvents()
+    assert _pump(panel.btDownloadMedia.isEnabled)
 
-    assert panel.btDownloadMedia.isEnabled()
+    assert panel.btLoadInfoFromTournament.isEnabled()
+    assert StateManager.Get(media.MEDIA_PATH)["error"] == media.NO_MEDIA
     assert [kind for kind, _token in statuses] == ["push", "pop"]
     assert statuses[0][1] == statuses[1][1]
+
+
+def _imageFile(tmp_path, size, name="picked.png"):
+    from PIL import Image
+    path = tmp_path / name
+    Image.new("RGB", size, (200, 30, 30)).save(path)
+    return str(path)
+
+
+def test_an_icon_picked_on_the_panel_is_imported_by_core(
+        autonaApp, panel, monkeypatch, tmp_path):
+    """The file dialog is the panel's; the checks, the scaling (512) and
+    the save are core's (ADR-005 S4f), and the preview follows the version
+    it publishes."""
+    from PIL import Image
+    from qtpy.QtWidgets import QFileDialog
+    from src.core import TournamentMediaService as media
+
+    picked = _imageFile(tmp_path, (1000, 500))
+    monkeypatch.setattr(QFileDialog, "getOpenFileName",
+                        lambda *args, **kwargs: (picked, ""))
+    panel.iconView.clear()
+    panel.LoadIcon()
+    autonaApp.settle()
+
+    with Image.open(media.MEDIA[media.ICON][0]) as saved:
+        assert saved.format == "PNG" and saved.size == (512, 256)
+    assert StateManager.Get("tournamentInfo.logoVersion") > 0
+    assert not panel.iconView.pixmap().isNull()
+
+
+def test_a_banner_picked_on_the_panel_is_scaled_and_announced(
+        autonaApp, panel, monkeypatch, tmp_path):
+    """Owner's decision 4 (S4f): the banner is scaled to a longest side of
+    1920. media_updated -- what the thumbnail / result previews redraw on --
+    follows tournamentInfo.bannerVersion (the provider adapter's), out of
+    the state lock."""
+    from PIL import Image
+    from qtpy.QtWidgets import QFileDialog
+    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
+    from src.core import TournamentMediaService as media
+
+    announced = []
+
+    def receiver():
+        announced.append(True)
+
+    signals = AutonaTournamentDataProvider.instance.signals
+    signals.media_updated.connect(receiver)
+    try:
+        picked = _imageFile(tmp_path, (3840, 1080))
+        monkeypatch.setattr(QFileDialog, "getOpenFileName",
+                            lambda *args, **kwargs: (picked, ""))
+        panel.LoadBannerFile()
+        assert announced == []  # deferred to the event loop
+        autonaApp.settle()
+    finally:
+        signals.media_updated.disconnect(receiver)
+
+    with Image.open(media.MEDIA[media.BANNER][0]) as saved:
+        assert saved.format == "PNG" and saved.size == (1920, 540)
+    assert StateManager.Get("tournamentInfo.bannerVersion") > 0
+    assert announced == [True]
+
+
+def test_a_file_that_is_not_an_image_is_refused_with_a_message(
+        autonaApp, panel, monkeypatch, tmp_path):
+    from qtpy.QtWidgets import QFileDialog, QMessageBox
+    from src.core import TournamentMediaService as media
+
+    picked = tmp_path / "notes.png"
+    picked.write_bytes(b"not an image")
+    monkeypatch.setattr(QFileDialog, "getOpenFileName",
+                        lambda *args, **kwargs: (str(picked), ""))
+    warnings = []
+    monkeypatch.setattr(QMessageBox, "warning",
+                        lambda parent, title, text: warnings.append(text))
+    before = StateManager.Get("tournamentInfo.bannerVersion")
+    existed = os.path.exists(media.MEDIA[media.BANNER][0])
+
+    panel.LoadBannerFile()
+    autonaApp.settle()
+
+    assert len(warnings) == 1
+    assert StateManager.Get("tournamentInfo.bannerVersion") == before
+    assert os.path.exists(media.MEDIA[media.BANNER][0]) == existed
+
+
+def test_the_reset_button_resets_both_through_core(autonaApp, panel,
+                                                   monkeypatch):
+    from src.core.TournamentMediaService import TournamentMediaService
+
+    calls = []
+    monkeypatch.setattr(TournamentMediaService.instance, "ResetMedia",
+                        lambda kind=None: calls.append(kind) or True)
+    panel.btResetMediaToDefault.click()
+    assert calls == [None]
+
+
+@pytest.mark.parametrize("answer, cleared", [("Yes", True), ("No", False)])
+def test_the_clear_button_asks_then_clears_through_core(
+        autonaApp, panel, monkeypatch, answer, cleared):
+    """Owner's decision 2 (S4f): the panel and the sidebar ask, and the
+    clear is core's (which also forgets the selected game)."""
+    from qtpy.QtWidgets import QMessageBox
+    from src.core.TournamentService import TournamentService
+
+    clears = []
+    monkeypatch.setattr(TournamentService.instance, "ClearTournament",
+                        lambda: clears.append(True))
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        lambda *args, **kwargs: getattr(QMessageBox.StandardButton, answer))
+    panel.btClearInfo.click()
+    assert clears == ([True] if cleared else [])
+
+
+def test_the_set_button_asks_core_for_the_media_too(autonaApp, panel,
+                                                    monkeypatch):
+    """The panel's "Set tournament" is the sidebar's URL dialog with the
+    icon / banner fetched once the tournament is loaded (core's)."""
+    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
+
+    calls = []
+    monkeypatch.setattr(
+        AutonaTournamentDataProvider.instance, "SetStartggEventSlug",
+        lambda parent, fetchMedia=False: calls.append(fetchMedia) or True)
+    panel.btLoadInfoFromTournament.click()
+    assert calls == [True]
+
+
+def test_the_game_combo_loads_a_game_by_its_codename(
+        autonaApp, makePanel, monkeypatch):
+    """By codename, as /api/v1's POST /game does -- not by the game's
+    position in the scan, which a rescan can move."""
+    from src.AutonaGameAssetManager import AutonaGameAssetManager
+
+    autonaApp.loadCharacters()
+    panel = makePanel()
+    index = panel.gameTitleCombo.findData("harness_game")
+    assert index > 0
+
+    loads = []
+    monkeypatch.setattr(AutonaGameAssetManager.instance, "LoadGameByCodename",
+                        lambda codename, **kwargs: loads.append(codename))
+    panel._OnGameSelected(index)
+    panel._OnGameSelected(0)  # the blank item loads nothing
+    assert loads == ["harness_game"]
+
+
+def test_the_game_combo_shows_no_game_after_a_clear(
+        autonaApp, makePanel):
+    """S4f review M2: every clear forgets the selected game (owner's
+    decision 2), but the combo re-read the selection on tournament_changed,
+    which the unload emitted before the forgetting -- so it kept showing the
+    game the sidebar no longer did. The clear forgets first now."""
+    from src.core.SettingsManager import SettingsManager
+    from src.core.TournamentService import TournamentService
+
+    autonaApp.loadCharacters()   # installs and selects the harness game
+    panel = makePanel()
+    assert panel.gameTitleCombo.currentData() == "harness_game"
+
+    missing = object()
+    stored = SettingsManager.Get("TOURNAMENT_URL", missing)
+    try:
+        TournamentService.instance.ClearTournament()
+        autonaApp.settle()
+        assert panel.gameTitleCombo.currentIndex() == 0
+        assert not panel.gameTitleCombo.currentData()
+    finally:
+        if stored is missing:
+            SettingsManager.Unset("TOURNAMENT_URL")
+        else:
+            SettingsManager.Set("TOURNAMENT_URL", stored)
+
+
+def test_the_panel_writes_no_file_and_fetches_nothing_itself():
+    """ADR-005 S4f: the icon / banner are read by the panel only to draw
+    them. Writing them, scaling them and fetching them is
+    core/TournamentMediaService.py's -- a panel that did any of it again
+    would bypass the checks, the atomic write and the published versions."""
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    source = (root / "src" / "AutonaTournamentInfoWidget.py").read_text(
+        encoding="utf-8")
+    tree = ast.parse(source)
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module.split(".")[-1])
+    assert not imported & {"requests", "shutil", "PIL", "tempfile",
+                           "TaskExecutor", "AutonaQtHelper"}, imported
+    called = {node.func.attr for node in ast.walk(tree)
+              if isinstance(node, ast.Call)
+              and isinstance(node.func, ast.Attribute)}
+    assert not called & {"save", "copy", "remove", "unlink", "write_bytes",
+                         "replace", "submit", "SetIfChanged", "Set",
+                         "PublishLogoVersion", "PublishAssetVersion"}, called

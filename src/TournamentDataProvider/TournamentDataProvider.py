@@ -14,10 +14,10 @@ class TournamentDataProvider(QObject):
         self.videogame = None
         self.tshTdp = tshTdp
 
-    def GetIconURL(self):
+    def GetIconURL(self, strict=False):
         pass
 
-    def GetBannerURL(self):
+    def GetBannerURL(self, strict=False):
         pass
 
     def GetEntrants(self, cancel_event=None):

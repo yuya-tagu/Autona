@@ -1325,16 +1325,17 @@ def tournament_load():
         raise ApiError(CONFLICT, "tournament load already in progress", 409)
 
     def _run():
-        # load_tournament normalizes the URL and emits tournament_url_update.
-        # Run on the GUI thread, that emit is a direct call into
-        # AutonaTournamentDataProvider.SetTournamentSignal, so when it returns
-        # the provider switch is done (the start.gg fetches it starts are
-        # async and reported over WS) -- or it returned early because that
-        # URL is already the loaded one. The flag is released here in both
-        # cases. It used to wait for tournament_changed, which that early
-        # return never emits, so re-sending the loaded URL held the flag for
-        # the guard's full TTL and every retry got 409. Empty url clears the
-        # tournament.
+        # load_tournament hands the URL to core's TournamentService (ADR-005
+        # S4f), which normalizes and saves it. Run on the GUI thread, an
+        # event URL is applied right away (the GUI executor runs it in
+        # place), so when it returns the provider switch is done (the
+        # start.gg fetches it starts are async and reported over WS) -- or
+        # nothing happened because that URL is already the loaded one. The
+        # flag is released here in both cases. It used to wait for
+        # tournament_changed, which that early return never emits, so
+        # re-sending the loaded URL held the flag for the guard's full TTL
+        # and every retry got 409. Empty url clears the tournament (and
+        # forgets the selected game, as it always did here).
         try:
             WebOps.load_tournament(url if url else None)
         except Exception:

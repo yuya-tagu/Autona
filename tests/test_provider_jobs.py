@@ -559,7 +559,6 @@ def test_loading_another_tournament_cancels_the_entrants_fetch(
     finally installed its players over the new tournament's filter, or
     over the cleared one). Nothing is fetched: the jobs stay queued on a
     stepped executor."""
-    from src.core.SettingsManager import SettingsManager
     from src.TournamentDataProvider.StartGGDataProvider import (
         StartGGDataProvider)
 
@@ -568,15 +567,12 @@ def test_loading_another_tournament_cancels_the_entrants_fetch(
     monkeypatch.setattr(StartGGDataProvider, "GetEntrants",
                         lambda self, cancel_event=None: asked.append(
                             cancel_event))
-    previous = SettingsManager.Get("TOURNAMENT_URL")
-    try:
-        adapter.SetTournament(URL)
-        adapter.SetTournament(URL)  # the same one: nothing happens
-        adapter.SetTournament(URL, force=True)
-        adapter.SetTournament("https://www.start.gg/tournament/t/event/f")
-        adapter.SetTournament(None)
-    finally:
-        SettingsManager.Set("TOURNAMENT_URL", previous)
+    # What core's TournamentService asks the adapter for (ADR-005 S4f).
+    assert adapter.LoadTournament(URL) is True
+    assert adapter.LoadTournament(URL) is False  # the same one: nothing
+    assert adapter.LoadTournament(URL, force=True) is True
+    adapter.LoadTournament("https://www.start.gg/tournament/t/event/f")
+    adapter.UnloadTournament()
 
     assert len(asked) == 3
     assert all(event.is_set() for event in asked)

@@ -67,7 +67,6 @@ These kinds live here:
 Imports nothing that builds anything; the registrations are plain module
 attributes, filled in by the shell (agent-pitfalls #1).
 """
-import re
 import threading
 
 import orjson
@@ -91,6 +90,7 @@ from .core.PlayerDB import PlayerDB
 from .core.PlayerService import DEFAULT_CHARACTERS_PER_PLAYER, PlayerService
 from .core.StatsService import StatsService
 from .core.StreamService import StreamService
+from .core.TournamentService import TournamentService
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaQtHelper import (
@@ -629,22 +629,19 @@ def generate_stream_thumbnail():
 # ── the tournament ───────────────────────────────────────────────────────
 
 def load_tournament(url=None):
-    logger.error(f"URL PROVIDED: {url}")
+    """Set the tournament at `url`, or clear it when empty (the legacy
+    route, Socket.IO and /api/v1). Through core's TournamentService (ADR-005
+    S4f), like every other entrance: the URL normalised and saved there,
+    the loaded URL not re-fetched, the media not fetched, and a clear forgets
+    the selected game. A URL that is not a start.gg event / admin URL
+    changes nothing (it used to be saved and then load no tournament).
+    "OK" whichever it was, as it always answered; on the GUI thread the
+    load is done when this returns."""
+    logger.info(f"Tournament URL requested: {url}")
     if url is None or url == "":
-        AutonaTournamentDataProvider.instance.signals.tournament_url_update.emit(None)
+        TournamentService.instance.ClearTournament()
         return "OK"
-
-    if "start.gg" in url:
-        matches = re.match(
-            "(.*start.gg/tournament/[^/]*/event[s]?/[^/]*)", url)
-        if matches:
-            url = matches.group(0)
-
-            # Some URLs in startgg have eventS but the API doesn't work with that format
-            url = url.replace("/events/", "/event/")
-
-    SettingsManager.Set("TOURNAMENT_URL", url)
-    AutonaTournamentDataProvider.instance.signals.tournament_url_update.emit(url)
+    TournamentService.instance.SetTournament(url)
     return "OK"
 
 

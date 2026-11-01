@@ -22,9 +22,11 @@ same three operations.
 
 The Qt side keeps two things and no more:
 
-- the *widgets*: which line edit holds which field, and what a QDate means
-  (the panel converts it to a unix timestamp, which is what this service
-  stores and formats);
+- the *widgets*: which line edit holds which field. A date field's day is
+  passed as ``YYYY-MM-DD`` (``SetDate``) and read back from the state
+  (``DateOf``); turning it into a timestamp -- local midnight, in the PC's
+  timezone -- is this service's since ADR-005 S4f, and so is the raw date
+  (``tournamentInfo.startAtDate``) published beside the formatted one;
 - the short-date *format*, which is a QLocale question. It is injected as
   ``formatEventDate`` rather than imported, for the same reason
   ``StatsService.fetcher`` is: core must not import Qt
@@ -34,6 +36,8 @@ The Qt side keeps two things and no more:
 Import side effects: none (agent-pitfalls #1). ``bootstrap_core()`` creates
 the single instance.
 """
+import datetime
+import re
 import time
 import traceback
 
@@ -47,6 +51,15 @@ from .StateManager import StateManager
 # overlays with its mtime -- exactly like the stream org assets in
 # StateSchema.STREAM_ASSET_VERSIONS. Relative to the process CWD.
 TOURNAMENT_LOGO_PATH = "./layout/logo.png"
+
+# A date field's day as SetDate takes it and DateOf answers it: exactly
+# YYYY-MM-DD in ASCII digits (what an <input type="date"> sends). The days
+# taken are the EVENT tab's QDateEdit's range: its minimum has always been
+# 2000-01-01; the latest is where the platform's time functions still work
+# (Windows' mktime / localtime fail from about 3001 on).
+_DATE_PATTERN = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})")
+EARLIEST_DATE = datetime.date(2000, 1, 1)
+LATEST_DATE = datetime.date(2999, 12, 31)
 
 
 class TournamentInfoService:
@@ -95,11 +108,6 @@ class TournamentInfoService:
         # Bookkeeping for the 表示大会名 follow rule below. Seeded from the
         # restored state by Seed().
         self._lastTournamentName = ""
-        # Raw unix timestamps of the DATE_FIELDS last applied. The state
-        # holds the *formatted* date, which cannot be parsed back into a
-        # QDate, so a panel built after the tournament was loaded restores
-        # its QDateEdit from here instead.
-        self._rawDates = {}
 
     # ── helpers ──────────────────────────────────────────────────────────
 
@@ -121,9 +129,55 @@ class TournamentInfoService:
         # something beats publishing nothing.
         return time.strftime("%x", time.localtime(float(timestamp)))
 
-    def RawDate(self, field):
-        """The unix timestamp last applied to a date field, or None."""
-        return self._rawDates.get(field)
+    @classmethod
+    def DateKey(cls, field: str) -> str:
+        """The key path of a date field's raw date (`YYYY-MM-DD`)."""
+        return cls.Key(schema.TOURNAMENT_RAW_DATE_KEYS[field])
+
+    def DateOf(self, field):
+        """The day a date field holds, as `YYYY-MM-DD` -- read from the
+        state (tournamentInfo.startAtDate), so it survives a restart -- or
+        None when it holds none (or `field` is not a date field)."""
+        if field not in self.DATE_FIELDS:
+            return None
+        value = StateManager.Get(self.DateKey(field), None)
+        return value if isinstance(value, str) and value else None
+
+    @staticmethod
+    def ParseDate(value):
+        """`value` (`YYYY-MM-DD`, EARLIEST_DATE to LATEST_DATE) as a date, or
+        None when it is not one."""
+        match = _DATE_PATTERN.fullmatch(value) if isinstance(
+            value, str) else None
+        if match is None:
+            return None
+        try:
+            day = datetime.date(*(int(part) for part in match.groups()))
+        except ValueError:
+            return None
+        return day if EARLIEST_DATE <= day <= LATEST_DATE else None
+
+    @staticmethod
+    def _StartOfDay(day):
+        """The unix time `day` starts at in the PC's timezone, as
+        QDate.startOfDay() gives it: local midnight, or -- where a DST
+        change skips midnight -- the first hour of the day that exists
+        (mktime may normalise a missing 00:00 back into the day before).
+        None when the platform cannot convert it."""
+        first = None
+        for hour in range(3):
+            try:
+                timestamp = int(time.mktime(
+                    (day.year, day.month, day.day, hour, 0, 0, 0, 0, -1)))
+                local = time.localtime(timestamp)
+            except (OverflowError, OSError, ValueError):
+                return None
+            if first is None:
+                first = timestamp
+            if (local.tm_year, local.tm_mon, local.tm_mday) == (
+                    day.year, day.month, day.day):
+                return timestamp
+        return first
 
     # ── seeds ────────────────────────────────────────────────────────────
 
@@ -210,25 +264,58 @@ class TournamentInfoService:
     def SetDateField(self, field, timestamp) -> bool:
         """Set one of the tab's date fields from a unix timestamp.
 
-        Published as a formatted short date -- that is the form the overlays
-        and the thumbnail read, and it cannot be parsed back into a QDate,
-        so the raw timestamp is kept here for a panel built later (RawDate).
-        Keeping it on the *typed* path too is what stops the panel's own
-        re-render from putting the loaded tournament's date back over the
-        one an operator just picked.
+        Published twice, in one save cycle: as a formatted short date -- the
+        form the overlays and the thumbnail read, unchanged -- and as the
+        raw day, `YYYY-MM-DD` in the PC's timezone (tournamentInfo.
+        startAtDate, ADR-005 S4f), which is what a reader restores a date
+        input from (DateOf). The raw day used to be a timestamp kept in this
+        instance's memory, lost with the process.
 
         Deliberately unguarded against a malformed timestamp: the payload
         path relies on the exception to abandon the rest of the payload
-        (ApplyTournamentData), and the panel cannot produce one -- its
-        QDateEdit has a minimum of 2000-01-01.
+        (ApplyTournamentData), and SetDate cannot produce one. Both forms
+        are computed before either is written, so a malformed timestamp
+        writes nothing.
         """
         if field not in self.DATE_FIELDS:
             logger.warning(
                 f"TournamentInfoService.SetDateField: unknown field {field}")
             return False
         formatted = self._FormatEventDate(timestamp)
-        self._rawDates[field] = timestamp
-        return self._SetIfChanged(self.Key(field), formatted)
+        day = time.strftime("%Y-%m-%d", time.localtime(float(timestamp)))
+        return self._PublishDate(field, formatted, day)
+
+    def _PublishDate(self, field, formatted, day) -> bool:
+        with StateManager.SaveBlock():
+            changed = self._SetIfChanged(self.Key(field), formatted)
+            changed = self._SetIfChanged(self.DateKey(field), day) or changed
+        return changed
+
+    def SetDate(self, field, value) -> bool:
+        """Set one of the tab's date fields from a day, `YYYY-MM-DD`
+        (2000-01-01 to 2999-12-31). What the EVENT tab's date input calls.
+        The formatted date is the start of that day in the PC's timezone
+        (_StartOfDay), as SetDateField publishes it; the raw day is `value`
+        itself, never worked back from that time (a DST change at midnight
+        would make it the day before). False (nothing written) when `field`
+        is not a date field or `value` is not such a day."""
+        if field not in self.DATE_FIELDS:
+            logger.warning(
+                f"TournamentInfoService.SetDate: unknown field {field}")
+            return False
+        day = self.ParseDate(value)
+        if day is None:
+            logger.warning(
+                f"TournamentInfoService.SetDate: not a day: {value!r}")
+            return False
+        timestamp = self._StartOfDay(day)
+        if timestamp is None:
+            logger.warning(
+                f"TournamentInfoService.SetDate: {value} cannot be converted "
+                "to a time on this PC")
+            return False
+        return self._PublishDate(
+            field, self._FormatEventDate(timestamp), value)
 
     # ── 表示大会名 (the display name the overlays render) ─────────────────
 
@@ -347,6 +434,9 @@ class TournamentInfoService:
             if key in self.DATE_FIELDS:
                 self.SetDateField(key, value)
                 return
+        elif key in self.DATE_FIELDS:
+            # A null date: no day either, published beside it.
+            self._SetIfChanged(self.DateKey(key), None)
 
         # No field on the tab (or a null value for one): publish as-is.
         info = value

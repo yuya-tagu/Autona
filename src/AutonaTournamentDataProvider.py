@@ -16,22 +16,30 @@ The provider methods are called as the Worker called them: with a
 makes in parallel go to the executor's fan-out lane (S3f-3). A job never
 waits on the GUI thread.
 """
-import re
 import threading
 import time
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
-from .core.SettingsManager import SettingsManager
+from .core import StateSchema as schema
 from .core.StateManager import StateManager
 from .core.StreamService import StreamService
 from .core.TaskExecutor import TaskExecutor
+from .core import TournamentService as tournament_service
+from .core.TournamentService import TournamentService
+from .StateManagerBridge import StateManagerBridge
 from .AutonaPlayerDB import AutonaPlayerDB
 from .Helpers import AutonaQtHelper
 from .TournamentDataProvider.TournamentDataProvider import TournamentDataProvider
 from .TournamentDataProvider.StartGGDataProvider import StartGGDataProvider
+from .TournamentDataProvider.StartGGDataProvider import (
+    ResolveEventUrl as ResolveStartGGEventUrl)
 from .Helpers.AutonaVersionHelper import get_supported_providers
 from loguru import logger
+
+
+_BANNER_VERSION_PATH = (f"{schema.TOURNAMENT_INFO_ROOT}."
+                        f"{schema.TOURNAMENT_BANNER_VERSION_KEY}")
 
 
 def _NoProgress(*args):
@@ -95,7 +103,18 @@ class AutonaTournamentDataProvider(QObject):
         self.signals: AutonaTournamentDataProviderSignals = AutonaTournamentDataProviderSignals()
 
         self.signals.game_changed.connect(self.GameChanged)
-        self.signals.tournament_url_update.connect(self.SetTournamentSignal)
+
+        # media_updated (the thumbnail / result previews' cue) follows the
+        # tournament banner's version, whoever changed the file (core/
+        # TournamentMediaService.py, ADR-005 S4f). Through the bridge, which
+        # drops these connections with this object. None until a version is
+        # seen: the first one (the launch seed's, on the first launch after
+        # S4f) is the baseline, not a change.
+        self._bannerVersion = StateManager.Get(_BANNER_VERSION_PATH, None)
+        StateManagerBridge.instance.state_updated.connect(
+            self._OnStateForMedia)
+        StateManagerBridge.instance.state_big_change.connect(
+            self._OnStateForMedia)
 
         # How a start.gg videogame id becomes the loaded game. Registered by
         # the shell (bootstrap_gui() points it at the game asset adapter,
@@ -112,7 +131,7 @@ class AutonaTournamentDataProvider(QObject):
         self._setLoadCancel = None
         # The entrants fetch of the tournament loaded now: the event that
         # tells it to stop once another tournament (or none, or the same
-        # one again) is loaded. GUI thread only (SetTournament*).
+        # one again) is loaded. GUI thread only (Load / UnloadTournament).
         self._entrantsCancel = None
 
     def GameChanged(self, videogame):
@@ -139,73 +158,58 @@ class AutonaTournamentDataProvider(QObject):
         else:
             logger.error("Unsupported provider...")
 
-    @Slot(str, bool)
-    @Slot(str)
-    def SetTournament(self, url, initialLoading=False, force=False):
-        # force=True re-fetches even when the same URL is already loaded
-        # (used by the "Set tournament" button to refresh on demand).
+    # ── the tournament's set / clear (core/TournamentService.py, S4f) ────
+    #
+    # Every entrance -- the URL dialog below, the EVENT panel, the sidebar,
+    # /api/v1, the legacy route, Socket.IO and the launch's restore -- goes
+    # through TournamentService, which saves the URL, resolves an admin URL
+    # in a job and forgets the selected game on every clear. These are what
+    # it asks this adapter for, on the main thread. tournament_url_update is
+    # the announcement it makes (no longer a command): the sidebar's buttons
+    # follow it.
+
+    def LoadTournament(self, url, initialLoading=False, force=False):
+        """Load the start.gg event at `url` (already resolved and saved by
+        TournamentService): its data, phases and entrants are fetched, and
+        tournament_changed is emitted. The loaded URL again does nothing
+        unless `force` (a re-fetch on demand). True when it (re)loaded.
+        Main thread."""
         if not force and self.provider and self.provider.url == url:
-            return
+            return False
         self._CancelEntrants()
+        self.provider = StartGGDataProvider(url, self)
 
-        if url is not None and "start.gg" in url:
-            AutonaTournamentDataProvider.instance.provider = StartGGDataProvider(
-                url, self)
-            url = AutonaTournamentDataProvider.instance.provider.GetRealEventURL(url)
-        else:
-            logger.error("Unsupported provider...")
-            AutonaTournamentDataProvider.instance.provider = None
+        self.GetTournamentData(initialLoading=initialLoading)
+        self.GetTournamentPhases()
 
-        SettingsManager.Set("TOURNAMENT_URL", url)
+        self._StartEntrants()
+        self.signals.tournament_changed.emit()
+        return True
 
-        if self.provider is not None:
-            self.GetTournamentData(initialLoading=initialLoading)
-            self.GetTournamentPhases()
-
-            self._StartEntrants()
-            AutonaTournamentDataProvider.instance.signals.tournament_changed.emit()
-
-            # AutonaTournamentDataProvider.instance.SetGameFromProvider()
-        else:
-            # No tournament loaded -> name completers offer the whole DB.
-            AutonaPlayerDB.ClearTournamentPlayers()
-            AutonaTournamentDataProvider.instance.signals.tournament_data_updated.emit({
-            })
-            AutonaTournamentDataProvider.instance.signals.tournament_phases_updated.emit([
-            ])
-            AutonaTournamentDataProvider.instance.signals.tournament_changed.emit()
-            # (No game change: a cleared URL keeps whatever game is loaded.
-            # The old LoadGameAssets(0) here had been a no-op since the
-            # PdM decision of 2026-10-23, see GameAssetCatalog.SelectGame.)
-
-    def SetTournamentSignal(self, url, initialLoading=False):
-        if self.provider and self.provider.url == url:
-            return
+    def UnloadTournament(self):
+        """No tournament loaded: the tournament info is emptied (an empty
+        tournament_data_updated), so are the phases, and the name completers
+        offer the whole player DB again. The game stays loaded; forgetting
+        the selection is TournamentService's. Main thread."""
         self._CancelEntrants()
+        self.provider = None
+        AutonaPlayerDB.ClearTournamentPlayers()
+        self.signals.tournament_data_updated.emit({})
+        self.signals.tournament_phases_updated.emit([])
+        self.signals.tournament_changed.emit()
 
-        if url is not None and "start.gg" in url:
-            AutonaTournamentDataProvider.instance.provider = StartGGDataProvider(
-                url, self)
-        else:
-            logger.error("Unsupported provider...")
-            AutonaTournamentDataProvider.instance.provider = None
+    def AnnounceUrl(self, url):
+        """Tell the shell the tournament URL was set ("" : cleared) --
+        tournament_url_update, after the load / the clear. Main thread."""
+        self.signals.tournament_url_update.emit(url or "")
 
-        SettingsManager.Set("TOURNAMENT_URL", url)
-
-        if self.provider is not None:
-            self.GetTournamentData(initialLoading=initialLoading)
-            self.GetTournamentPhases()
-
-            self._StartEntrants()
-            AutonaTournamentDataProvider.instance.signals.tournament_changed.emit()
-        else:
-            # No tournament loaded -> name completers offer the whole DB.
-            AutonaPlayerDB.ClearTournamentPlayers()
-            AutonaTournamentDataProvider.instance.signals.tournament_data_updated.emit({
-            })
-            AutonaTournamentDataProvider.instance.signals.tournament_phases_updated.emit([
-            ])
-            AutonaTournamentDataProvider.instance.signals.tournament_changed.emit()
+    @staticmethod
+    def ResolveEventUrl(url):
+        """The event URL a start.gg admin/brackets URL stands for (a start.gg
+        request, blocking: TournamentService's job, never the GUI thread);
+        `url` itself when it could not be resolved. No provider is built
+        for it (a QObject, on the job's thread)."""
+        return ResolveStartGGEventUrl(url)
 
     def _StartEntrants(self):
         """Fetch the loaded tournament's entrants (the provider's own job),
@@ -243,7 +247,24 @@ class AutonaTournamentDataProvider(QObject):
             return None
         return provider.GetBannerURL()
 
-    def SetStartggEventSlug(self, mainWindow):
+    def _OnStateForMedia(self, *_payload):
+        # Through the bridge: on the GUI thread, and inside StateManager.lock
+        # when the write was made there (agent-pitfalls #17). Reads one key;
+        # the previews' work is deferred to the event loop, out of the lock.
+        version = StateManager.Get(_BANNER_VERSION_PATH, None)
+        if version is None or version == self._bannerVersion:
+            return
+        first = self._bannerVersion is None
+        self._bannerVersion = version
+        if not first:
+            QTimer.singleShot(0, self, self.signals.media_updated.emit)
+
+    def SetStartggEventSlug(self, mainWindow, fetchMedia=False):
+        """The tournament URL dialog (the sidebar's "Set tournament" and the
+        EVENT panel's button), prefilled with the URL set last. Accepted, it
+        hands the URL to TournamentService -- re-fetched even when it is the
+        loaded one, and with `fetchMedia` the tournament's icon and banner
+        too. True when accepted."""
         inp = QDialog(mainWindow)
 
         layout = QVBoxLayout()
@@ -256,55 +277,56 @@ class AutonaTournamentDataProvider(QObject):
 
         lineEdit = QLineEdit()
         okButton = QPushButton("OK")
-        validators = [
-            QRegularExpression("start.gg/tournament/[^/]+/event[s]?/[^/]+"),
-            QRegularExpression("start.gg/admin/tournament/[^/]+/brackets/[^/]+")
-        ]
 
         def validateText():
-            okButton.setDisabled(True)
-
-            for validator in validators:
-                match = validator.match(lineEdit.text()).capturedTexts()
-                if len(match) > 0:
-                    okButton.setDisabled(False)
+            # The forms core takes (TournamentService.UrlKind): the event
+            # URL, or the admin/brackets one, resolved by core.
+            okButton.setDisabled(
+                tournament_service.UrlKind(lineEdit.text()) is None)
 
         lineEdit.textEdited.connect(validateText)
 
         # Prefill with the currently selected tournament URL (if any) so the
         # operator can just press OK to re-fetch, or edit to switch events.
-        lineEdit.setText(SettingsManager.Get("TOURNAMENT_URL", ""))
-        validateText()
+        lineEdit.setText(TournamentService.TournamentUrl())
 
         inp.layout().addWidget(lineEdit)
 
         okButton.clicked.connect(inp.accept)
-        okButton.setDisabled(True)
+        validateText()
         inp.layout().addWidget(okButton)
 
         inp.setWindowTitle(QApplication.translate("app", "Set tournament URL"))
         inp.resize(600, 10)
 
         accepted = inp.exec() == QDialog.Accepted
-        if accepted:
-            url = lineEdit.text()
-
-            if "start.gg" in url:
-                matches = re.match(
-                    "(.*start.gg/tournament/[^/]*/event[s]?/[^/]*)", url)
-                if matches:
-                    url = matches.group(0)
-
-                    # Some URLs in startgg have eventS but the API doesn't work with that format
-                    url = url.replace("/events/", "/event/")
-
-            SettingsManager.Set("TOURNAMENT_URL", url)
-            # force=True so re-selecting the same tournament still re-fetches.
-            AutonaTournamentDataProvider.instance.SetTournament(
-                SettingsManager.Get("TOURNAMENT_URL"), force=True)
-
+        url = lineEdit.text()
         inp.deleteLater()
-        return accepted
+        if not accepted:
+            return False
+        # force=True so re-selecting the same tournament still re-fetches.
+        return TournamentService.instance.SetTournament(
+            url, force=True, fetchMedia=fetchMedia) == (
+            tournament_service.STARTED)
+
+    @staticmethod
+    def ConfirmClearTournament(parent):
+        """Ask before unsetting the tournament (the sidebar's "Unset
+        tournament" and the EVENT panel's button: owner's decision 2, S4f),
+        then hand it to TournamentService, which also forgets the selected
+        game. Call from a click / a menu action, never from a state or a
+        value signal (the modal rule). True when cleared."""
+        answer = QMessageBox.question(
+            parent,
+            QApplication.translate("app", "Confirm"),
+            QApplication.translate(
+                "app", "Start.gg との接続を解除します。よろしいですか？"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes:
+            return False
+        TournamentService.instance.ClearTournament()
+        return True
 
     @staticmethod
     def _Fetch(taskName, fetch, then=None, **kwargs):
@@ -529,10 +551,11 @@ class AutonaTournamentDataProvider(QObject):
                     callback=callback)
 
     def UiMounted(self):
-        if SettingsManager.Get("TOURNAMENT_URL"):
-            AutonaTournamentDataProvider.instance.SetTournament(
-                SettingsManager.Get("TOURNAMENT_URL"), initialLoading=True)
-            AutonaTournamentDataProvider.instance.signals.twitch_username_updated.emit()
+        """The launch's restore of the last session's tournament (both
+        shells), through TournamentService like every other load."""
+        if TournamentService.TournamentUrl():
+            TournamentService.instance.Restore()
+            self.signals.twitch_username_updated.emit()
 
     def GetProvider(self):
         return self.provider

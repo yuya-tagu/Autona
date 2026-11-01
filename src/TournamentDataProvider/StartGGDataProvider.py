@@ -103,53 +103,8 @@ class StartGGDataProvider(TournamentDataProvider):
     #
     # This should work fine in theory unless an API restriction is added
     def QueryRequests(self, url=None, type=None, headers={}, jsonParams=None, params=None):
-        headers.update({
-            "client-version": "20",
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36"
-        })
-
-        # Retry on transient failures (timeouts, connection errors, non-200)
-        # with exponential backoff. Start.gg's heavy queries (phaseGroup
-        # with seeds+sets) occasionally take longer than the per-request
-        # timeout; a short wait before retrying gives the server time to
-        # settle instead of immediately hammering it again.
-        max_attempts = 5
-        stopping = StartGGDataProvider._StopEvent()
-        for attempt in range(max_attempts):
-            # The app is shutting down: no further request (ADR-005 S3f-2).
-            # The shutdown waits for the running jobs, and the interpreter's
-            # exit joins them, so a job still retrying would keep the process
-            # alive through the whole backoff.
-            if stopping is not None and stopping.is_set():
-                logger.info("QueryRequests: shutting down, request skipped")
-                return {}
-            try:
-                data = type(
-                    url,
-                    timeout=self._request_timeout_secs,
-                    headers=headers,
-                    json=jsonParams,
-                    params=params,
-                )
-                if data.status_code == 200:
-                    return orjson.loads(data.text)
-                logger.warning(
-                    f"QueryRequests non-200 ({data.status_code}) on attempt {attempt+1}/{max_attempts}")
-            except Exception as e:
-                logger.warning(
-                    f"QueryRequests exception on attempt {attempt+1}/{max_attempts}: {e}")
-
-            if attempt < max_attempts - 1:
-                # 1s, 2s, 4s, 8s — doubles each retry (cut short by a
-                # shutdown, which the next attempt then sees).
-                if stopping is not None:
-                    stopping.wait(2 ** attempt)
-                else:
-                    time.sleep(2 ** attempt)
-
-        logger.error("QueryRequests: all retries exhausted")
-        return {}
+        return _QueryRequests(url, type, headers, jsonParams, params,
+                              self._request_timeout_secs)
 
     @staticmethod
     def _StopEvent():
@@ -282,77 +237,61 @@ class StartGGDataProvider(TournamentDataProvider):
 
         return finalData
 
-    def GetIconURL(self):
-        url = None
+    def GetIconURL(self, strict=False):
+        """The tournament's icon (start.gg's "profile" image) URL; None when
+        it has none. A lookup that failed (start.gg did not answer, or
+        answered no event): None too, or LookupError when `strict` -- how
+        the media fetch tells it from a tournament with no icon (ADR-005
+        S4f)."""
+        return self._TournamentImageURL(
+            "TournamentIconQuery", "profile", strict)
 
+    def GetBannerURL(self, strict=False):
+        """The tournament's banner URL; None when it has none. A failed
+        lookup: as GetIconURL."""
+        return self._TournamentImageURL(
+            "TournamentBannerQuery", "banner", strict)
+
+    def _TournamentImageURL(self, operationName, imageType, strict):
         try:
             data = self.QueryRequests(
                 "https://www.start.gg/api/-/gql",
                 type=requests.post,
                 jsonParams={
-                    "operationName": "TournamentIconQuery",
+                    "operationName": operationName,
                     "variables": {
                         "eventSlug": self.url.split("start.gg/")[1]
                     },
-                    "query": '''
-                        query TournamentIconQuery($eventSlug: String!) {
-                            event(slug: $eventSlug) {
-                                tournament{
-                                    images(type: "profile") {
+                    "query": f'''
+                        query {operationName}($eventSlug: String!) {{
+                            event(slug: $eventSlug) {{
+                                tournament{{
+                                    images(type: "{imageType}") {{
                                         type
                                         url
-                                    }
-                                }
-                            }
-                        }
+                                    }}
+                                }}
+                            }}
+                        }}
                     '''
                 }
             )
-
-            images = deep_get(data, "data.event.tournament.images", [])
-
-            if len(images) > 0:
-                url = images[0]["url"]
-        except:
+            # QueryRequests answers {} once its retries are spent (or the
+            # app is stopping); an unknown slug answers a null event.
+            if not isinstance(deep_get(data, "data.event", None), dict):
+                raise LookupError(
+                    f"start.gg answered no event to {operationName}")
+            images = deep_get(data, "data.event.tournament.images", None) or []
+            return images[0]["url"] if len(images) > 0 else None
+        except LookupError as error:
+            if strict:
+                raise
+            logger.warning(str(error))
+        except Exception:
+            if strict:
+                raise
             logger.error(traceback.format_exc())
-
-        return url
-
-    def GetBannerURL(self):
-        url = None
-
-        try:
-            data = self.QueryRequests(
-                "https://www.start.gg/api/-/gql",
-                type=requests.post,
-                jsonParams={
-                    "operationName": "TournamentBannerQuery",
-                    "variables": {
-                        "eventSlug": self.url.split("start.gg/")[1]
-                    },
-                    "query": '''
-                        query TournamentBannerQuery($eventSlug: String!) {
-                            event(slug: $eventSlug) {
-                                tournament{
-                                    images(type: "banner") {
-                                        type
-                                        url
-                                    }
-                                }
-                            }
-                        }
-                    '''
-                }
-            )
-
-            images = deep_get(data, "data.event.tournament.images", [])
-
-            if len(images) > 0:
-                url = images[0]["url"]
-        except:
-            logger.error(traceback.format_exc())
-
-        return url
+        return None
 
     def GetTournamentPhases(self, progress_callback=None, cancel_event=None):
         phases = []
@@ -2381,26 +2320,90 @@ class StartGGDataProvider(TournamentDataProvider):
         except Exception as e:
             logger.error(traceback.format_exc())
 
-    def GetRealEventURL(self, url):
-        matches = re.match(
-                ".*start.gg/admin/tournament/[^/]*/brackets/([^/]*)", url)
-        if matches: 
-            try:
-                data = self.QueryRequests(
-                        "https://www.start.gg/api/-/gql",
-                        type=requests.post,
-                        jsonParams={
-                            "operationName": "TournamentSlugQuery",
-                            "variables": {
-                                "id": matches.group(1)
-                                },
-                            "query": StartGGDataProvider.TournamentSlugQuery
-                            }
-                        )
 
-                slug = deep_get(data, "data.event.slug", None)
-                url = "https://www.start.gg/" + slug
-            except:
-                logger.error(traceback.format_exc())
-        self.url = url
+def _QueryRequests(url, type, headers, jsonParams, params, timeout):
+    """StartGGDataProvider.QueryRequests: `url` asked with `type`
+    (requests.post / get) until it answers 200 -- its JSON -- retried with
+    exponential backoff; {} once the retries are spent or the app is
+    stopping. A function, so a request needs no provider (a QObject):
+    ResolveEventUrl."""
+    headers.update({
+        "client-version": "20",
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Mobile Safari/537.36"
+    })
+
+    # Retry on transient failures (timeouts, connection errors, non-200)
+    # with exponential backoff. Start.gg's heavy queries (phaseGroup
+    # with seeds+sets) occasionally take longer than the per-request
+    # timeout; a short wait before retrying gives the server time to
+    # settle instead of immediately hammering it again.
+    max_attempts = 5
+    stopping = StartGGDataProvider._StopEvent()
+    for attempt in range(max_attempts):
+        # The app is shutting down: no further request (ADR-005 S3f-2).
+        # The shutdown waits for the running jobs, and the interpreter's
+        # exit joins them, so a job still retrying would keep the process
+        # alive through the whole backoff.
+        if stopping is not None and stopping.is_set():
+            logger.info("QueryRequests: shutting down, request skipped")
+            return {}
+        try:
+            data = type(
+                url,
+                timeout=timeout,
+                headers=headers,
+                json=jsonParams,
+                params=params,
+            )
+            if data.status_code == 200:
+                return orjson.loads(data.text)
+            logger.warning(
+                f"QueryRequests non-200 ({data.status_code}) on attempt {attempt+1}/{max_attempts}")
+        except Exception as e:
+            logger.warning(
+                f"QueryRequests exception on attempt {attempt+1}/{max_attempts}: {e}")
+
+        if attempt < max_attempts - 1:
+            # 1s, 2s, 4s, 8s — doubles each retry (cut short by a
+            # shutdown, which the next attempt then sees).
+            if stopping is not None:
+                stopping.wait(2 ** attempt)
+            else:
+                time.sleep(2 ** attempt)
+
+    logger.error("QueryRequests: all retries exhausted")
+    return {}
+
+
+_ADMIN_URL = re.compile(".*start.gg/admin/tournament/[^/]*/brackets/([^/]*)")
+
+
+def ResolveEventUrl(url):
+    """The event URL a start.gg admin/brackets URL stands for (a start.gg
+    request, blocking: TournamentService's job, never the GUI thread), or
+    `url` itself when it is not one or could not be resolved. A function,
+    not a provider method: the job thread builds no QObject (ADR-005 S4f
+    review)."""
+    matches = _ADMIN_URL.match(url) if isinstance(url, str) else None
+    if not matches:
         return url
+    try:
+        data = _QueryRequests(
+            "https://www.start.gg/api/-/gql", requests.post, {},
+            {
+                "operationName": "TournamentSlugQuery",
+                "variables": {"id": matches.group(1)},
+                "query": StartGGDataProvider.TournamentSlugQuery,
+            },
+            None, StartGGDataProvider._request_timeout_secs)
+    except Exception:
+        logger.error(traceback.format_exc())
+        return url
+    slug = deep_get(data, "data.event.slug", None)
+    if not isinstance(slug, str) or not slug:
+        logger.error(
+            f"start.gg answered no event for the brackets id "
+            f"{matches.group(1)} in {url}")
+        return url
+    return "https://www.start.gg/" + slug

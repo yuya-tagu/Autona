@@ -54,9 +54,7 @@ Import side effects: none (agent-pitfalls #1).
 """
 import datetime
 import os
-import tempfile
 import threading
-import time
 from io import BytesIO
 from pathlib import Path
 
@@ -64,6 +62,7 @@ import requests
 from loguru import logger
 from PIL import Image, ImageEnhance, ImageFilter
 
+from . import ImageImport
 from . import StateSchema as schema
 from .Actions import AutonaActions
 from .SettingsManager import SettingsManager
@@ -112,45 +111,28 @@ ORG_ASSETS = {
     "thumbnail": (schema.STREAM_ORG_THUMB_PATH, "stream.orgThumbVersion",
                   1920),
 }
-# What the panel's file dialog offered (*.png *.jpg *.bmp), as PIL names it.
-# MPO is a JPEG with more frames after the first (what many phones and
-# cameras save as .jpg); its first frame is the picture.
-ORG_ASSET_FORMATS = ("PNG", "JPEG", "MPO", "BMP")
-# The largest image taken in, by its header's width x height: 50 megapixels
-# -- above the photos phones commonly take (48 MP) and an 8K frame (33 MP),
-# while a PNG / BMP of that size decodes to about 200 MB as RGBA, before it
-# is scaled down (a JPEG is decoded at a reduced scale, see ImportOrgAsset).
-# PIL's own guard (a warning at 89 MP, an error at 179) is process-wide and
-# left as it is.
-ORG_ASSET_MAX_PIXELS = 50_000_000
+# The image checks, the scaling and the atomic write are shared with the
+# tournament icon / banner (core/ImageImport.py, ADR-005 S4f): what is
+# taken in (PNG / JPEG / MPO / BMP, the pixel cap) and what an import
+# answers are its.
+ORG_ASSET_FORMATS = ImageImport.FORMATS
+ORG_ASSET_MAX_PIXELS = ImageImport.MAX_PIXELS
 
 # What ImportOrgAsset answers.
-IMPORTED = "imported"
-INVALID_IMAGE = "invalid_image"   # not a PNG / JPEG / BMP within the cap
-SAVE_FAILED = "save_failed"       # the file could not be written
-
-# The asset is replaced through a sibling temporary file; on Windows a
-# reader holding the target open (an overlay, the panel's preview) makes
-# os.replace fail with a sharing violation. Tried this many times: 20 + 40
-# + 80 ms of sleep at worst -- PlayerDB's budget.
-_REPLACE_ATTEMPTS = 4
-_REPLACE_BACKOFF = 0.02
+IMPORTED = ImageImport.IMPORTED
+INVALID_IMAGE = ImageImport.INVALID_IMAGE
+SAVE_FAILED = ImageImport.SAVE_FAILED
 
 # ── the stream thumbnail ─────────────────────────────────────────────────
 
-# Tournament-scoped assets, owned by the EVENT tab -- read here only as
-# thumbnail material. (The match thumbnail keeps its own copy of the pair;
-# sharing them is that panel's migration's business.)
+# Tournament-scoped assets, owned by the EVENT tab (the banner's file is
+# core/TournamentMediaService's since S4f) -- read here only as thumbnail
+# material. (The match thumbnail keeps its own copy of the pair; sharing
+# them is that panel's migration's business.)
 DEFAULT_BANNER_PATH = "./assets/thumbnail_base/default_banner.png"
-BANNER_PATH = "./user_data/tournament_banner.png"
+BANNER_PATH = schema.TOURNAMENT_BANNER_PATH
 BANNER_TIMEOUT_SECS = 20
-BANNER_HEADERS = {
-    "client-version": "20",
-    "Content-Type": "application/json",
-    "User-Agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) "
-                  "AppleWebKit/537.36 (KHTML, like Gecko) "
-                  "Chrome/119.0.0.0 Mobile Safari/537.36",
-}
+BANNER_HEADERS = ImageImport.DOWNLOAD_HEADERS
 
 STREAM_OUTPUT_DIR = "./out/stream"
 # out/stream may hold other files: only our own output is pruned.
@@ -320,49 +302,8 @@ def _ValidOption(key, value) -> bool:
     return False
 
 
-def _WriteFile(path, data):
-    """Write `data` to `path` through a sibling temporary file, so a reader
-    (an overlay fetching the asset) never gets a half-written one. The
-    replace is retried while a reader holds the target (Windows); OSError
-    when it never went through. The temporary file never outlives this."""
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(
-        dir=str(target.parent), prefix=target.stem + ".", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "wb") as file:
-            file.write(data)
-        delay = _REPLACE_BACKOFF
-        for attempt in range(_REPLACE_ATTEMPTS):
-            try:
-                os.replace(temporary, target)
-                return
-            except PermissionError:
-                if attempt == _REPLACE_ATTEMPTS - 1:
-                    raise
-                time.sleep(delay)
-                delay *= 2
-    finally:
-        try:
-            os.remove(temporary)
-        except FileNotFoundError:
-            pass  # replaced: the temporary file is the target now
-        except OSError:
-            logger.warning(f"Stream: could not remove {temporary}")
-
-
 class _Stopped(Exception):
     """The executor is shutting down: the thumbnail job gives up."""
-
-
-def _PngReady(image):
-    """`image` in a mode PNG keeps as is: RGBA when it has transparency,
-    RGB otherwise (what the panel's QPixmap saved)."""
-    if image.mode in ("RGB", "RGBA"):
-        return image
-    transparent = (image.mode in ("LA", "PA")
-                   or "transparency" in image.info)
-    return image.convert("RGBA" if transparent else "RGB")
 
 
 def CenterCrop(image):
@@ -451,8 +392,11 @@ class StreamService:
         self._refreshQueued = False
 
         # The org assets: one import or reset at a time, so a file and its
-        # published version always belong together.
+        # published version always belong together. What a crash left of
+        # their temporary files goes first (ImageImport.WriteFile).
         self._assetLock = threading.Lock()
+        ImageImport.RemoveLeftovers(
+            *(path for path, _key, _side in ORG_ASSETS.values()))
 
         # The thumbnail: True from a GenerateThumbnail that started a run
         # until that run's result is published.
@@ -642,56 +586,26 @@ class StreamService:
         an image, SAVE_FAILED when the file could not be written (nothing
         changes in either case)."""
         spec = ORG_ASSETS.get(kind)
-        if spec is None or not isinstance(data, (bytes, bytearray)) \
-                or not data:
+        if spec is None:
             logger.warning(f"Stream: refusing an org asset ({kind!r})")
             return INVALID_IMAGE
         path, versionKey, longestSide = spec
-        try:
-            encoded = self._EncodeOrgAsset(kind, data, longestSide)
-        except Exception:
-            logger.opt(exception=True).warning(
-                f"Stream: the org {kind} is not a readable image")
-            return INVALID_IMAGE
+        # Checked, scaled and encoded by the helper shared with the
+        # tournament media (ADR-005 S4f); the cap read here, at call time.
+        encoded = ImageImport.EncodePng(
+            data, longestSide, label=f"Stream: the org {kind}",
+            maxPixels=ORG_ASSET_MAX_PIXELS)
         if encoded is None:
             return INVALID_IMAGE
         with self._assetLock:
             try:
-                _WriteFile(path, encoded)
+                ImageImport.WriteFile(path, encoded)
             except OSError:
                 logger.opt(exception=True).error(
                     f"Stream: the org {kind} could not be saved")
                 return SAVE_FAILED
             schema.PublishAssetVersion(versionKey, path)
         return IMPORTED
-
-    @staticmethod
-    def _EncodeOrgAsset(kind, data, longestSide):
-        """`data` scaled down and encoded as PNG; None when it is not an
-        image ImportOrgAsset takes. Raises what a broken image raises."""
-        image = Image.open(BytesIO(data))
-        if image.format not in ORG_ASSET_FORMATS:
-            logger.warning(f"Stream: refusing an org {kind} in {image.format}")
-            return None
-        # The header's size: checked before anything is decoded.
-        if image.width * image.height > ORG_ASSET_MAX_PIXELS:
-            logger.warning(
-                f"Stream: refusing an org {kind} of {image.width}x"
-                f"{image.height} (over {ORG_ASSET_MAX_PIXELS} pixels)")
-            return None
-        # Scaled down first, converted after, so the full-size image is
-        # decoded once and never copied (thumbnail() decodes a JPEG / MPO
-        # at a reduced scale already). Except an image in a mode resize()
-        # scales poorly or not at all (a palette or 1-bit one: nearest
-        # neighbour only; 16-bit grey): converted first.
-        if image.mode not in ("L", "LA", "RGB", "RGBA", "CMYK"):
-            image = _PngReady(image)
-        if image.width > longestSide or image.height > longestSide:
-            image.thumbnail((longestSide, longestSide), Image.LANCZOS)
-        image = _PngReady(image)
-        encoded = BytesIO()
-        image.save(encoded, "PNG")
-        return encoded.getvalue()
 
     def ResetOrgAssets(self):
         """Unregister both org assets (their files removed, their versions

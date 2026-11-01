@@ -2164,6 +2164,16 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>Disconnect from Start.gg. Are you sure?</translation>
     </message>
     <message>
+        <location filename="..\AutonaTournamentInfoWidget.py" line="411" />
+        <source>画像を保存できませんでした。ほかのアプリがファイルを開いていないか確認してください。</source>
+        <translation>The image could not be saved. Check that no other application has the file open.</translation>
+    </message>
+    <message>
+        <location filename="..\AutonaTournamentInfoWidget.py" line="414" />
+        <source>画像を読み込めませんでした。PNG / JPEG / BMP（5000 万画素まで）の画像を選んでください。</source>
+        <translation>The image could not be read. Choose a PNG, JPEG or BMP image (up to 50 megapixels).</translation>
+    </message>
+    <message>
         <location filename="..\AutonaTournamentInfoWidget.py" line="521" />
         <location filename="..\AutonaTournamentInfoWidget.py" line="442" />
         <source>Open Image</source>

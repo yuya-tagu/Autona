@@ -427,6 +427,15 @@ TOURNAMENT_DATE_FIELDS = (TOURNAMENT_START_AT_KEY,)
 TOURNAMENT_INPUT_KEYS = (
     TOURNAMENT_TEXT_FIELDS + TOURNAMENT_NUMBER_FIELDS + TOURNAMENT_DATE_FIELDS)
 
+# The raw date beside each date field (ADR-005 S4f): `YYYY-MM-DD`, the day
+# the field holds, or None with it. Published next to the formatted short
+# date (which stays as it was) so a reader -- the QDateEdit after a restart,
+# the Web page's <input type="date"> -- gets the day back without parsing a
+# locale's "%x". Turned into a timestamp (local midnight, in the PC's
+# timezone) by core/TournamentInfoService.SetDate, never by a reader.
+TOURNAMENT_START_AT_DATE_KEY = "startAtDate"
+TOURNAMENT_RAW_DATE_KEYS = {TOURNAMENT_START_AT_KEY: TOURNAMENT_START_AT_DATE_KEY}
+
 # Provider timestamps with no field on the tab at all. Published as short
 # date strings rather than as timestamps, which is the only thing that sets
 # them apart from the pass-through keys below.
@@ -448,6 +457,18 @@ ACCENT_COLOR_KEY = "accentColor"
 # Cache-bust version of ./layout/logo.png, published like the stream org
 # assets in STREAM_ASSET_VERSIONS above.
 TOURNAMENT_LOGO_VERSION_KEY = "logoVersion"
+# The tournament banner's file and its cache-bust version (ADR-005 S4f), the
+# pair to the logo above. The file is where the thumbnail / result
+# generators have always read it (they keep their own copy of the path); the
+# version is new. Both are core/TournamentMediaService.py's, and the version
+# is seeded at launch by SeedPanelState() below.
+TOURNAMENT_BANNER_PATH = "./user_data/tournament_banner.png"
+TOURNAMENT_BANNER_VERSION_KEY = "bannerVersion"
+# The tournament media fetch's last run (ADR-005 S4f), one dict written whole
+# by core/TournamentMediaService.py, shaped like stream.thumbnail: status
+# idle | running | done | error, the error of a failed run (a code, see that
+# module) and a revision that every run advances.
+TOURNAMENT_MEDIA_KEY = "media"
 
 # One group is still open-ended and stays that way: whatever else the
 # provider payload carries (`shortLink`, and the `initial_load` flag that
@@ -460,8 +481,19 @@ TOURNAMENT_INFO_KEYS = (
         TOURNAMENT_DISPLAY_NAME_KEY,
         TOURNAMENT_LOGO_VERSION_KEY,
         "shortLink",
+        TOURNAMENT_START_AT_DATE_KEY,
+        TOURNAMENT_BANNER_VERSION_KEY,
+        f"{TOURNAMENT_MEDIA_KEY}.status",
+        f"{TOURNAMENT_MEDIA_KEY}.error",
+        f"{TOURNAMENT_MEDIA_KEY}.revision",
     )
 )
+
+
+def DefaultTournamentMedia() -> dict:
+    """`tournamentInfo.media` before any run (a fresh dict on every call)."""
+    return {"status": "idle", "error": "", "revision": 0}
+
 
 STREAM_URL_KEY = "url"
 STREAM_TITLE_KEY = "title"
@@ -788,6 +820,15 @@ def SeedPanelState():
     # desktop panel did not show it either. Guarded like the versions above.
     StateManager.SetIfChanged(
         f"{STREAM_ROOT}.{STREAM_THUMBNAIL_KEY}", DefaultStreamThumbnail())
+
+    # The tournament banner and its fetch, the same way (ADR-005 S4f). The
+    # logo's version is TournamentInfoService.Seed()'s, as before.
+    PublishAssetVersion(
+        f"{TOURNAMENT_INFO_ROOT}.{TOURNAMENT_BANNER_VERSION_KEY}",
+        TOURNAMENT_BANNER_PATH)
+    StateManager.SetIfChanged(
+        f"{TOURNAMENT_INFO_ROOT}.{TOURNAMENT_MEDIA_KEY}",
+        DefaultTournamentMedia())
 
     for root in RETIRED_ROOTS:
         StateManager.Unset(root)

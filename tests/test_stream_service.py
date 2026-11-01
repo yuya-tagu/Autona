@@ -34,6 +34,7 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image, ImageFile
 
+from src.core import ImageImport
 from src.core import StateSchema as schema
 from src.core import StreamService as stream
 from src.core.Actions import AutonaActions
@@ -521,12 +522,13 @@ def test_a_target_held_open_is_retried_then_reported(env, monkeypatch):
             raise PermissionError(32, "in use")
         real_replace(source, target)
     monkeypatch.setattr(stream.os, "replace", replace)
-    monkeypatch.setattr(stream, "_REPLACE_BACKOFF", 0)
+    # The write is the helper shared with the tournament media (S4f).
+    monkeypatch.setattr(ImageImport, "_REPLACE_BACKOFF", 0)
     data = _image_bytes((64, 64), RED)
     assert env.service.ImportOrgAsset("icon", data) == stream.IMPORTED
     assert os.path.exists(schema.STREAM_ORG_ICON_PATH)
 
-    failures["left"] = stream._REPLACE_ATTEMPTS
+    failures["left"] = ImageImport._REPLACE_ATTEMPTS
     version = SM.Get("stream.orgIconVersion")
     assert env.service.ImportOrgAsset(
         "icon", _image_bytes((32, 32), BLUE)) == stream.SAVE_FAILED

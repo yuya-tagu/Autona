@@ -28,6 +28,7 @@ from PIL import Image
 
 from src import AutonaApiV1
 from src import AutonaWebOperations as WebOps
+from src.core import ImageImport
 from src.core import StateSchema as schema
 from src.core import StreamService as stream
 from src.core import WebAccess
@@ -242,7 +243,9 @@ def test_an_org_image_that_cannot_be_saved_is_an_internal_error(
         env, client, monkeypatch):
     def held(path, data):
         raise PermissionError("held open")
-    monkeypatch.setattr(stream, "_WriteFile", held)
+    # The atomic write is the helper shared with the tournament media
+    # (core/ImageImport.py, ADR-005 S4f).
+    monkeypatch.setattr(ImageImport, "WriteFile", held)
 
     _assertRejected(client.put("/api/v1/stream/org/icon", json={
         "image": _data_url()}), "INTERNAL", 500)
