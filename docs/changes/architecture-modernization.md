@@ -4806,3 +4806,150 @@ High なし。M1〜M4 は設計から直し、L1〜L13 は個別に直した（L
   - S4g の残課題「ほかのクライアントが設定した大会の『読み込み中』は、開き直すまで出ない」は、M1 で解消した
 - **オーナー実機確認**（`python main.py`）: 手動チェックリストの「起動・終了」の大会情報 2 項目（起動時間・最小化起動）と、「大会情報」の URL 欄・遅れて届く大会・参加人数 / 開催日・ゲームの一覧の項目
 - **検証**: pytest 全量 2987 passed / 2 skipped／jest 全量 313 passed／`npm run build` OK（警告は既存の `Header.jsx` だけ）／`npm run test:e2e` 21 passed
+
+### S4 Top 8 の React 化 — 設計（2026-11-04・オーナー承認済み）
+
+オーナー判断（2026-11-04）: 下記の設計を承認。論点 1〜5 は推奨案どおり（キャラ値は選手カードと同じ完全形・ApplyScores はマージ型・プレビュー画像のコピー / 保存は廃止・名前 / スポンサーは debounce 送信・S4h → S4i を自走し S4i の後で停止）。
+
+**範囲**: サイドバー Display の「Top 8 表示設定」（`src/AutonaTop8Widget.py`、904 行。`.ui` は無くコードで組んでいる）を、共有ビューの React ページ `/web/top8` に移し、Qt 版を消す。書き手はすでに core の `Top8Service` にある（取り込みは S3e-8 で移行済み）。ただし識別子での受け渡しと選択デザインの core 化が残っているので、Stream / Event と同じく **小さな core 化（S4h）→ React 化（S4i）の 2 段**にする。
+
+**棚卸し（2026-11-04・HEAD d822f22a）**
+
+- **UI**:
+  - 選手カード ×8: スポンサー・名前・国（共有の国モデル）・キャラ・カラー
+  - 試合スコア: 表示ラベル。11 試合を W / L / GF の 3 区分で並べ、スピンボックスは「staged」。「反映」と「全リセット（確認あり）」
+  - 機能別カラー、OBS URL のカード
+  - 右ペイン: デザイン選択とプレビュー（`AutonaLayoutPreview`、画像のコピー / 保存つき）
+  - 上部に「大会結果を読み込む」（`Top8Service.RefreshFromProvider`）。phase / group を選ぶ UI は無い（自動で選ぶ）
+- **core 済み**: `SetPlayerText` / `SetPlayerCountry` / `SetPlayerCharacter` / `SetPhaseLabel` / `ApplyScores` / `ResetMatches` / `ImportBracket` / `RefreshFromProvider`。v1 には `POST /bracket:refresh` と `PATCH /colors/top8` だけがある
+- **ウィジェットに残るもの**:
+  - 国・キャラの値を Qt のコンボの行 dict から組んで core に渡している（規約「識別子で渡し core が組む」に未移行）
+  - `top8.selected_design` を `SettingsManager` に直書きしている（`LayoutCatalog.SELECTION_SETTINGS` に top8 が無いので、`/layouts/selected/top8` は 400）
+  - state → 入力欄の描画（`HeldBackText`、表示ラベルを空にしたときの扱い、再入ガード）
+- **キャラの値の形が 3 通りに食い違っている**:
+  - (a) スキン行: ほぼ `{assets}` だけで en_name が無い。パネルを作り直すとコンボが空になる疑い
+  - (b) キャラ行: assets が無い
+  - (c) start.gg からの取り込み: `snapshot.characters` のコピーで assets が無い
+  - オーバーレイ（`layout/bracket_top8/index.js`）は `characters["1"].assets` でアイコンを出すので、**取り込んだ選手のキャラアイコンが出ない可能性がある**（golden はミニマルなゲームでの録画で、実ゲームでは未確認）
+- `ApplyScores` は全試合分の dict を受け取る前提で、渡されなかった試合は結果から落ちる
+- Web に国の一覧を返す v1 が無い（Web は静的な `data_countries.json` を読むが、カスタム国旗を含まない）
+- 手動チェックリストに Top 8 の節が無い。Web のテストも無い
+
+**設計**
+
+1. **S4h: core 化**（Qt のウィジェットは残し、識別子で core を呼ぶだけにする。単独でリリースできる）
+   - **キャラ**: `Top8Service.SetPlayerCharacter(slot, en_name, skin)` を識別子 API にし、core がカタログから PlayerService の `CharacterValue` と同じ形（name / en_name / display_name / codename / assets ほか）で組む。取り込み（`ResolveImportedPlayer`）も同じ組み立てを通す。(a)〜(c) の食い違いと、取り込み時にアイコンが出ない疑いを根本から直す
+   - **国**: `SetPlayerCountry(slot, code)` で、core が `CountryCatalog` から値を組む
+   - **スコア**: `ApplyScores` を「渡された試合だけを更新し、渡されなかった試合は今の値を保つ」マージに変える（外部クライアントが一部の試合だけ送っても、他の試合が消えないように）
+   - **選択デザイン**: `LayoutCatalog.SELECTION_SETTINGS` に top8 を足す。settings のキー `top8.selected_design` は変えない
+2. **S4i: React ページ `/web/top8` と Qt 版の削除**
+   - 選手カード ×8（`useStateField` で名前・スポンサー、国・キャラ・カラーは選択）。表示ラベル
+   - スコアの表: staged はクライアント側の状態とし、「反映」で送る。`top8.matches` が変わったら staged を捨てて描き直す。全リセットは確認ダイアログ
+   - 「大会結果を読み込む」、機能別カラー、OBS URL、デザイン選択とプレビュー（iframe）。どれも Commentary の部品を流用する
+   - 追加する v1 ルート:
+     - `PATCH /api/v1/top8/players/<slot>`（name / sponsor / country code / character en_name + skin）
+     - `PATCH /api/v1/top8`（phaseLabel）
+     - `POST /api/v1/top8/scores`（部分更新のマージ）
+     - `DELETE /api/v1/top8/scores`（全リセット）
+     - `GET /api/v1/countries`（カタログのロケール済みの一覧。カスタム国旗を含む）
+     - `GET|PUT /layouts/selected/top8` は既存のルートで動く
+   - Qt 版のウィジェットと翻訳（他と共有している文言は残す）を削除し、テストを v1 / RTL / e2e に置き換える。手動チェックリストに「Top 8」の節を新しく作る
+
+**オーナー判断が要る論点（推奨つき）**
+
+1. **キャラの値の形** → 推奨: **選手カードと同じ完全な形（assets を含む）に揃える**。オーバーレイが読むのは `assets` だけで、フィールドが増えるだけなので後方互換。取り込んだ選手のアイコンが出ない疑いもここで直る
+2. **スコアの部分更新** → 推奨: **core をマージ型に変える**。Qt 版は常に全試合を送っているので、Qt 版から見た挙動は変わらない
+3. **プレビューの画像コピー / 保存** → 推奨: **Web 版では廃止する**（Commentary と同じ判断）。OBS URL のコピーは残す
+4. **名前・スポンサーの送信タイミング** → 推奨: **他のパネルと同じく、打っている間も 300ms で送る（IME の確定後）**。いまの Qt 版は確定時（欄を離れたとき）だけ送っている
+5. **自走の範囲** → 推奨: **S4h → S4i を自走し（各段でコミット・push・PR 作成まで）、S4i の後で停止する**。次のパネル（Stats）はまた設計を出す
+
+**対象外**: phase / group を手動で選ぶ UI（今も無い）、ブラケットのオーバーレイの描画、国のデータの静的ファイル（`data_countries.json`）の置き換え
+
+#### S4h Top 8 の core 化（2026-11-04）
+
+Top 8 表示設定パネルに残っていた「国・キャラの値を Qt のコンボの行 dict から組む」処理と、選択デザインの直書きを core に移した。Qt のパネル（`AutonaTop8Widget`）は識別子（国コード・キャラの en_name + カラーコンボの行）で core を呼び、state を描くだけになった（S4i の React 化の前段。単独でリリースできる）。パネルから書くキャラの値は選手カードと同じ完全な形（`assets` を含む）になり、取り込みの値は従来のキャラの config のコピーに同じキーを足したものになる。これで、取り込んだ選手にもオーバーレイ（`layout/bracket_top8/index.js` は `characters["1"].assets` を読む）のキャラアイコンが出る。外部契約は追加だけ:
+
+- `top8.players.*.characters["1"]` にフィールドが増える（取り込みの値は既存のキー・値・順序をそのまま残す。判断 1）
+- `GET|PUT /api/v1/layouts/selected/top8` が動くようになった（以前は 400）
+
+`settings.json` のキー `top8.selected_design`・`top8.players.*.country` の形とキー順（パネルから書いた値）・`top8.matches` の形・Socket.IO の payload・v1 の既存ルート・オーバーレイは変えていない。旧い形で保存された state はそのまま読める（移行はしない）。
+
+- **やったこと**
+  - `core/PlayerService.py`: 選手カードの値の組み立てをモジュール関数 `BuildCountryValue(code, countries)` / `BuildCharacterValue(slot, games, snapshot)` に切り出した（中身は旧 `CountryValue` / `CharacterValue` のまま）。`PlayerService.CountryValue` / `CharacterValue` はカード自身のカタログでこれを呼ぶ
+  - `core/Top8Service.py`
+    - `SetPlayerCountry(slot, code)`: コード（カスタム国旗は名前）から `BuildCountryValue` で組む。None / "" は `{}`。カタログに無いコード・文字列でない値は書かない（警告。False）
+    - `CharacterValue(en_name, skin, games, snapshot)`: `BuildCharacterValue` で組む（`variant` は `{}`）。ロード中のゲームのキャラ行に無い en_name は `{}`。キャラの行に無いスキン（範囲外・数値でない）は最初のスキン（`_SkinRow`）
+    - `SetPlayerCharacter(slot, en_name, skin)`: `{"1": CharacterValue(...)}` を、取り込みと同じく `StateManager.lock` の中で組んで書く（ゲームの切り替えでキャラを消す `ForgetCharacters` と競合しない）。None / "" は `{}`。ゲームに無いキャラ・文字列でない en_name は書かない（警告。False）
+    - `CharacterPick(value)`: state のキャラの値 → `(en_name, スキンの行)`（無ければ `(None, -1)`）。候補は codename が一致する行を先に、en_name が一致する行を後に並べる（別キャラのスキンの en_name が、ほかのキャラの名前と同じことがあるため。Bowser Jr. の skin 2「Roy」と Roy）
+      - パネルの値: `PlayerService.SlotFromValue` と同じく「候補のうち、保存された `skin` で組んだ値が一致するもの」（Dr. Mario のような別キャラのスキンも当たる）
+      - 取り込みの値: 候補のスキンから `assets` が同じもの
+      - S4h より前の形も読む: スキン行（`assets` だけで codename が無い）は全キャラのスキンから `assets` が同じもの。キャラ行・取り込みのコピー（`assets` 無し）はそのキャラの最初のスキン
+    - `ApplyScores(scores)`: マージにした（論点 2）。渡された試合だけを更新し、ほかの試合は今のスコア・結果を保つ。Top 8 の試合でない id は無視する（警告）。スコアは 0〜99（`SCORE_MAX`）の int 2 つの list だけを受け付け、1 つでも不正なら何も書かずに None を返す（警告）。読み・マージ・書き込みは state の lock の中
+    - 取り込み（`ResolveImportedPlayer` / `ImportPhaseGroup`）: main の key（en_name）か codename からキャラを引き（`_CharacterKey`）、main のスキン（`_MainSkin`。数値か数字の文字列。それ以外・無し・無限大は 0）で `ImportedCharacterValue` を組む。中身は、従来のキャラの config のコピー（キー・値・順序はそのまま）の後ろに `CharacterValue` にしかないキーを足したもの。コンボに無いキャラ（mods オフの modded）とカタログが無いときはコピーだけ。`games` を受け取るようにした。旧 `_CharacterFromCodename` は `_CharacterKey` と `ImportedCharacterValue` に分けた
+  - `core/LayoutCatalog.py`: `SELECTION_SETTINGS` に `top8: ("top8.selected_design", "bracket_top8")` を足した
+  - パネル（`src/AutonaTop8Widget.py`）
+    - 国は `_shownCountry`（表示中の行のコード）、キャラは `_shownPick`（キャラ行の en_name + カラーコンボの行番号）を core に渡す。`_resolveCharData`（行 dict を組む）を消した
+    - 描画は `Top8Service.CharacterPick` の答えでコンボを選ぶ（`_RenderCharacter` / `_selectCharacter` は en_name で行を探す。`_loadSkins` は行番号で選ぶ）
+    - デザインの選択は `LayoutCatalog.SelectedLayout` / `SelectLayout` を使う（`SettingsManager` の import を消した。既定値は `SELECTION_SETTINGS` から読む）
+  - API 情報ウィンドウの文言を「kind=commentary|top8」にし、`src/i18n/Autona_{ja,en}.ts` を直して `scripts/compile_translations.ps1` で再コンパイルした（各 529 件）
+  - docs
+    - `.claude/design/Design.md`: Top 8 の節・`top8` の木の `country` / `characters.1`・パネル表・設定表の `{board,commentary,top8}.selected_design`
+    - `.claude/design/external-control-api.md`: §5.3 / §6.13 の kind と既定値
+    - `.claude/rules/python-widgets.md`: Top 8 は識別子で渡す
+    - `.claude/rules/state-and-webserver.md`: `Top8Service` の行
+  - テスト
+    - `tests/test_top8_service.py`（35 関数・64 ケース。新規 19 関数。旧 2 関数は識別子の版に置き換えた）。モジュールのテスト用ゲームのコピーに、SSBU と同じ形の Bowser Jr.（skin 2 が別キャラの「Roy」）と Roy を足した
+      - 国: コードから選手カードと同じバイト列で組む（カスタム国旗を含む）。コードでない値は書かない
+      - キャラ: 選手カードと同じ値（`assets` を含む）。行に無いスキンは最初のもの。Dr. Mario。ゲームに無いキャラは書かない
+      - 全キャラ × 全スキンが、パネルの値も取り込みの値も `CharacterPick` で同じ識別子に戻る。S4h より前の 3 つの形（スキン行・キャラ行・取り込みのコピー）が読める
+      - Bowser Jr. の skin 2「Roy」: どの形でも、コンボの並びが逆でも、ロケールとアセットパックが変わっても Bowser Jr. の 2 に戻る
+      - 取り込みの main（key / codename / 別キャラのスキン / 数字の文字列 / 範囲外 / 無限大 / Bowser Jr. の Roy / スキン無しのキャラ）: config のコピーのキー・値・順序がそのまま残り、後ろにパネルの値のキーが足される（テストのゲームの config は実ゲームと同じく smashgg_name / locale / skin_name を持つ）。不明なキャラは無し。mods オフの modded はコピーだけ。カタログの instance が無くても落ちない
+      - `ApplyScores` のマージ（一部だけ送る・全部送ると従来どおり・不明な id）と、不正なスコアの拒否（12 通り + dict でない入力。何も書かない）・上限の 99
+    - `tests/test_top8_refresh.py`（新規 3 本）
+      - 取り込んだ選手の値でオーバーレイのアイコンのファイルが実在する
+      - S4h からの 2 つの形（パネル・取り込み）と S4h より前の 3 つの形を持つ state でパネルを作り直すと、どのコンボも空にならず何も書かない
+      - パネルのデザイン選択は core の選択（`top8.selected_design`）と一致する
+      - 既存のキャラ / スキン・描画のテストは識別子と `CharacterValue` に合わせた
+    - `tests/fixtures/top8_refresh/golden.json` を再録画した（差分は、取り込んだ選手のキャラの dict の後ろにキーが増えたことだけ。判断 1）
+    - `tests/test_player_service.py`: 数値でないスキンの main に無限大を足した（`_SkinNumber`）
+    - `tests/test_api_v1_commentary.py`: 400 の kind から top8 を外し、`/layouts/selected/top8` の読み書きがパネルの設定と同じことを pin（1 本追加）
+- **判断と理由**
+  1. **取り込んだキャラの値は、従来のキャラの config のコピーにキーを足すだけにした**（論点 1「フィールドが増えるだけ」。レビュー M2 / L4 / L3 で直した。最初の実装はパネルの値に置き換えていたので、`export_name` に加えて、実ゲームでは `smashgg_name` / `locale` / `skin_name` も消えていた。golden は最小のゲームで録っているので、`export_name` しか差分に出ていなかった）
+     - 残るもの: config のコピーのキー・値・順序すべて。SSBU なら codename / smashgg_name / locale（全言語の訳）/ skin_name（一部のキャラ）/ display_name / export_name / en_name。`out/top8/players/{n}/characters/1/*.txt` は既存のファイルが消えず、内容も変わらない
+     - 後ろに増えるもの: `CharacterValue` にしか無いキー。実際には `modded` / `name` / `assets` / `skin` / `variant`
+     - 既存のキーは config の値のまま。別キャラのスキンでも `en_name` は config のキャラになる（Bowser Jr. の skin 2「Roy」なら `en_name` は Bowser Jr.、足される `name` は Roy）。**パネルから書いた値は `en_name` もスキンのキャラ（Roy。選手カードの規則）なので、同じ選択でもパネルと取り込みで `en_name` が違う**。キーの集合も違う（取り込みには `export_name` / `smashgg_name` / `locale` ほかがある）。`CharacterPick` はどちらも同じ選択に戻す
+     - コンボに無いキャラ（mods がオフのときの modded）は、足すものが無いので従来のコピーだけ（レビュー L3。旧と同じ）
+     - golden（最小のゲーム）は、旧 golden と照合して追加だけであることを確かめた: 取り込んだ選手のキャラの dict 60 個（Set と delta）で、既存のキー・値・順序はそのまま、後ろに上の 5 キーが増えただけ。baseline・fetch・国・それ以外の値と、Set / delta の列とパスは不変
+  2. **取り込みの国は `CountryCatalog.BasicCountryInfo` のまま**（挿入順）にし、golden を変えなかった。パネル / `SetPlayerCountry` の値は選手カードと同じ組み立て（QVariantMap 順）で、旧パネルが書いていたバイト列と同じ。どちらもオーバーレイが読むフィールドは同じなので、取り込みの国を揃えるのは S4i 以降の課題にした
+  3. **カタログに無いコード / en_name は書かない（False + 警告）**。空にはしない。Web から打ち間違いが来ても、配信中の値が消えないため。空にするのは None / "" だけ
+  4. **キャラの行に無いスキンは最初のスキンにする**（選手カードの mains は範囲外を「スキン無し」にする。そこが違う）。Top 8 のカラーには「無し」の選択肢が無く（パネルのコンボは常にどれかのスキンを出す）、オーバーレイはスキンの `assets` でアイコンを出す。ゲームのパックに無いスキン番号の main を持つ選手にも、アイコンが出るようにした
+  5. **旧い形は移行せず、読むだけにした**（`CharacterPick`）。旧ビルドの state を開いてもコンボは空にならない。値は、操作者が選び直すか次の取り込みで新しい形になる。`StateMigrations` を足すほどの理由（外から見える不具合）が無い
+  6. **値の組み立ては `PlayerService` のモジュール関数にした**: Top 8 は選手スロットではないので `PlayerService`（path に束縛されたインスタンス）を作らない。同じ関数を呼ぶので、2 つの書き手の形がずれない
+  7. **デザインの選択は settings で、state ではない**: Web の `PUT /layouts/selected/top8` はパネルのコンボに即時には反映されない（次にパネルを作るとき）。Commentary（S4b）と同じ設計。S4i で Qt 版が消えるので追わない
+- **旧実装との挙動差（記録）**
+  - パネルでキャラ / カラーを選ぶと、値に `codename` / `display_name` / `modded` / `skin` / `variant` が必ず入る（旧: スキンに assets があればスキン行の dict、無ければキャラ行の dict だった）
+  - start.gg から取り込んだ選手にキャラアイコンが出る（旧: `assets` が無くて出なかった疑い。実ゲームでは未確認）。取り込みの値はキーが増えるだけ（判断 1）
+  - 別キャラのスキンを選ぶと、パネルから書いた値と取り込みの値で `en_name` が違う（判断 1。パネルの値は S4h より前もスキン行の `en_name` = スキンのキャラだった）
+  - `ApplyScores` に一部の試合だけ渡しても、ほかの試合が消えない。パネルは今も全試合を送るので、パネルから見た挙動は変わらない
+  - `ApplyScores` は 0〜99 の int 2 つの list 以外を拒否する（旧: tuple も受け付け、不正な値は例外になるか、そのまま state に入った）。パネルは常に 0〜99 の list を送る
+  - `SetPlayerCountry` / `SetPlayerCharacter` は行 dict ではなく識別子を受け取る（呼び出し元はパネルだけ）。カタログに無い識別子は書かない
+  - デザインの選択で、カタログに無い id は保存されない（警告。パネルのコンボはカタログの一覧しか出さないので、実際には起きない）
+- **残課題**
+  - 取り込みの国の値の形（判断 2）を、パネルの値と揃えるか。S4i の `GET /api/v1/countries` を作るときに決める
+  - 実ゲーム（スマブラ SP 等）での取り込み → アイコン表示は、テストのゲームでしか確かめていない（オーナー実機確認）
+  - ゲームを切り替えた直後、パネルのコンボが新しいゲームで作り直されるまでの間に古いコンボでキャラを選ぶと、両方のゲームにある en_name（Mario 等）なら、新しいゲームの値が古いコンボのカラーの行番号で書かれて残る（レビュー L7）。`ForgetCharacters` の後の書き込みなので消えない。旧実装（古いゲームの行 dict が残る）より悪くはない。ロックの順序（catalog lock → `StateManager.lock`）と pitfalls #16 / #17 への違反は無い。S4i の Web ページでも「ゲームの一覧が変わる前のキャラ選択」は起こりうるので、そこで扱いを決める
+  - Web の `PUT /layouts/selected/top8` はパネルのコンボに反映されず、パネルで次に選ぶと上書きされる（レビュー L8・判断 7）。S4i までの間は、パネルの OBS URL と Web の GET が別のデザインを指すことがある。S4i で Qt 版が消えて解消する
+- **レビュー指摘の対応（2026-11-04）**: High は無し。直したもの:
+  - **M2 / L4 / L3（取り込みの値が「追加だけ」になっていなかった）**: 取り込みの値を、従来のキャラの config のコピーに `CharacterValue` にしか無いキーを足す形（`ImportedCharacterValue`）に戻した（判断 1）。別キャラのスキンの `en_name` の違いと、mods オフの modded がコピーだけになることを記録した。実ゲームの config の形（smashgg_name / locale / skin_name）での取り込みをテストに足し、golden の差分が追加だけであることを照合した
+  - **M1 / L1（`CharacterPick` が Bowser Jr. の「Roy」を FE の Roy と読む・候補の並び順に頼る）**: codename が一致する候補を先に試す。codename の無い旧スキン行は、en_name で絞らずに全キャラのスキンから `assets` で探す。テストのゲームに Bowser Jr. と Roy を足し、コンボの並びを逆にしても同じ答えになることを pin した（旧ロジックに戻すと両方の並びで落ちることを確かめた）
+  - **L2（`ApplyScores` が値の形を検証しない）**: core で検証する（0〜99 の int 2 つの list。bool は不可）。1 つでも不正なら何も書かずに None（例外にしない）。dict でない入力も同じ
+  - **L5（無限大のスキンで取り込みが止まる）**: `_MainSkin` と `PlayerService._SkinNumber` で `OverflowError` を捕まえ、最初のスキンにする
+  - **L6（`games` を省くと `GameAssetCatalog.instance` が None で落ちる）**: `CharacterValue` / `ImportedCharacterValue` は `{}`（取り込みはコピーだけ）、`CharacterPick` は `(None, -1)`、`SetPlayerCharacter` は書かずに False
+  - 記録だけ: L7 / L8（上の残課題）
+- **オーナー実機確認**（`python main.py`）
+  - Top 8 表示設定で選手のキャラとカラーを選ぶ → OBS の Top 8 オーバーレイにそのキャラ・カラーのアイコンが出る。別キャラのスキン（Dr. Mario 等）も、そのキャラの名前とアイコンになる
+  - 「大会結果を読み込む」で start.gg の大会を取り込む → **取り込んだ選手のキャラアイコンがオーバーレイに出る**。パネルのキャラ / カラーのコンボにもそのキャラが出る。`out/top8/players/1/characters/1/` に今までのテキスト（`export_name.txt`・`smashgg_name.txt`・`locale/` など）が残り、`assets/` などが増える
+  - 更新前のビルドで Top 8 にキャラを入れて保存した状態で起動する → パネルのキャラ / カラーのコンボが空にならない（オーバーレイも今までどおり）。SSBU なら、更新前のビルドで Bowser Jr. の 3 番目のカラー（Roy）を選んで保存しておく → 起動後もパネルが Bowser Jr. の 3 番目を出す（Roy にならない）
+  - 国にカスタム国旗を選ぶ → オーバーレイに国旗が出る。国を空にすると消える
+  - デザインを切り替えて再起動する → 選んだデザインが残る。Web の `GET /api/v1/layouts/selected/top8` が同じデザインを返す
+  - スコアの「反映」「全リセット（確認あり）」が今までどおり動く

@@ -274,9 +274,11 @@ Board / Commentary / Top 8 タブと Designer の「開く」一覧が使う**�
 ### 5.3 `GET /api/v1/layouts/selected/{kind}`（2026-10-31 追加・ADR-005 S4b）
 パネルが選んでいるデザイン（プレビューと OBS URL に使うもの）を、§5.2 と同じ形のエントリ 1 件で返す。
 
-- `kind` は選択を持つ種類だけ: 現在は `commentary`（`settings.json` の `commentary.selected_design`。正本は
-  `core/LayoutCatalog.SELECTION_SETTINGS`）。それ以外は `400 INVALID_ARGUMENT`
-- 保存されている id がカタログに無い（削除された等）ときは、Qt パネルと同じ順で代わりを返す: 既定（`commentators`）→ 一覧の先頭。
+- `kind` は選択を持つ種類だけ: 現在は `commentary`（`settings.json` の `commentary.selected_design`）と
+  `top8`（`top8.selected_design`。2026-11-04 追加・ADR-005 S4h。Qt の Top 8 パネルも同じ関数で読み書きする）。
+  正本は `core/LayoutCatalog.SELECTION_SETTINGS`。それ以外は `400 INVALID_ARGUMENT`
+- 保存されている id がカタログに無い（削除された等）ときは、Qt パネルと同じ順で代わりを返す: 既定（`commentators` /
+  `bracket_top8`）→ 一覧の先頭。
   保存値は書き換えない。その種類のレイアウトが 1 つも無ければ `404 NOT_FOUND`
 - 設定であって状態ではないので `revision` は付かない
 
@@ -490,7 +492,8 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 
 ### 6.13 デザインの選択 `PUT /api/v1/layouts/selected/{kind}`（2026-10-31 追加・ADR-005 S4b）
 - body: `{ "id": "commentators" }`（§5.2 の `id`。その `kind` の一覧にあるもの）
-- 委譲: `select_layout` → `core/LayoutCatalog.SelectLayout`。`settings.json` の既存キー（`commentary.selected_design`）に書くだけで形式は不変
+- 委譲: `select_layout` → `core/LayoutCatalog.SelectLayout`。`settings.json` の既存キー（`commentary.selected_design` /
+  `top8.selected_design`）に書くだけで形式は不変
 - 応答の `data` は選んだエントリ（§5.3 と同じ形）。設定なので `revision` は付かない
 - エラー: `INVALID_ARGUMENT`（`kind` が §5.3 以外・`id` が文字列でない / 一覧に無い）
 

@@ -868,8 +868,8 @@
         <translation>Companion を別の PC で動かす場合（LAN アクセス）は、ヘッダ X-Autona-Token も追加し、値にアクセストークンを入れてください。トークンは ヘルプ＆設定 → API設定 → リファレンス・テスターを開く からコピーできます。</translation>
     </message>
     <message>
-        <source>Layout a panel shows (kind=commentary)</source>
-        <translation>パネルが選んでいるレイアウト（kind=commentary）</translation>
+        <source>Layout a panel shows (kind=commentary|top8)</source>
+        <translation>パネルが選んでいるレイアウト（kind=commentary|top8）</translation>
     </message>
     <message>
         <source>Commentary role / icon candidates</source>

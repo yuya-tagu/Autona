@@ -372,6 +372,14 @@ Start.gg からの取り込み（大会の最後の phase のダブルエリミ�
 ゲームが別のゲームに変わると、`GameAssetCatalog.SelectGame` が切り替えと同じ保存サイクルで
 `Top8Service.ForgetCharacters()` を呼び、`players.*.characters` を `{}` にする（キャラがある枠だけ。
 起動時の前回ゲームの復元・同じゲームの選び直しでは消さない。両シェル共通）。
+国とキャラは**識別子で受け取り core が値を組む**（ADR-005 S4h）: `SetPlayerCountry(slot, code)` /
+`SetPlayerCharacter(slot, en_name, skin)`。値は選手カードと同じ組み立て（`PlayerService.BuildCountryValue` /
+`BuildCharacterValue`）。Start.gg の取り込みのキャラは、従来どおりキャラの config のコピーに、パネルの値に
+しかないキー（`assets` ほか）を後ろに足したもの（`ImportedCharacterValue`。既存のキーと値は変えない）。
+state の値からパネルが示す選択への逆引きは `Top8Service.CharacterPick`（codename を優先。S4h より前の
+3 つの形も読む）。反映 `ApplyScores` は渡された試合だけを更新するマージで、スコアは 0〜99 の int 2 つの
+list だけを受け付ける（それ以外は何も書かずに None）。選択中のデザインは `settings.json` の
+`top8.selected_design`（`LayoutCatalog.SELECTION_SETTINGS`。`GET|PUT /api/v1/layouts/selected/top8`）。
 
 ```
 top8
@@ -379,8 +387,20 @@ top8
 ├── players.{1..8}                   W R   (スロット位置固定: 1/2=WSF1, 3/4=WSF2,
 │   │                                       5/6=LR1A, 7/8=LR1B)
 │   ├── name / sponsor               W R
-│   ├── country                      W R   ({code, asset} — CountryCatalog.BasicCountryInfo 形式)
-│   └── characters.{K}               W R   (charData: assets 込み。別のゲームへの切り替えで {} になる)
+│   ├── country                      W R   (国の行: code / name / en_name / display_name / asset /
+│   │                                       emoji / 座標。カスタム国旗も code で。パネルの値は選手
+│   │                                       カードの country と同じ形・キー順。取り込みは
+│   │                                       CountryCatalog.BasicCountryInfo の順)
+│   └── characters.1                 W R   (パネルの選択: 選手カードのキャラ 1 枠と同じ形 name /
+│                                           en_name / display_name / codename / modded / assets /
+│                                           skin（スキンの行）/ variant（常に {}）。取り込み: キャラの
+│                                           config のコピー（export_name / smashgg_name / locale /
+│                                           skin_name ほか）の後ろに modded / name / assets / skin /
+│                                           variant を足したもの。別キャラのスキンでは en_name が
+│                                           違う（パネル: スキンのキャラ、取り込み: config のキャラ）。
+│                                           オーバーレイは assets でアイコンを描く。別のゲームへの
+│                                           切り替えで {} になる。S4h より前の値（スキンの行 {assets} /
+│                                           キャラの行 / 取り込みの設定のコピー）が残っていることがある)
 └── matches.{wsf1|wsf2|wf|lr1a|lr1b|lqf1|lqf2|lsf|lf|gf|gf_reset}
     ├── name                         W R   (ラウンド表示名)
     ├── slots                        W R   ([int,int] 選手スロット 1..8 / 0=TBD。
@@ -731,6 +751,7 @@ Phase B-b で検出された問題は、本書を正本として以下のよう�
 | `bsky_account.*` | Bluesky 連携 |
 | `update.*` | アップデーター（skipped_version 等） |
 | `designer.*` | Scoreboard Designer。`figma_pairing_code` は Figma プラグイン取込（`POST /api/designer/imports`）のペアリングコード（`XXXX-XXXX-XXXX`）。`AutonaDesignerService` が初回参照時に発行し、Designer の `Import` → `Figmaペアリングコード` で表示・再生成する。旧来の「取込は Origin `null` を許可するだけ」という穴はこれで解消（仕様・ロックの詳細は `docs/changes/layout-custom-unification.md` §7） |
+| `{board,commentary,top8}.selected_design` | パネルが選んでいるデザイン（レイアウトの id）。`commentary` と `top8` は `core/LayoutCatalog.SELECTION_SETTINGS`（`SelectedLayout` / `SelectLayout`。`GET|PUT /api/v1/layouts/selected/{kind}`。top8 は ADR-005 S4h から）、`board` は BOARD パネルが直接読み書きする |
 | `stream_channels` / `stream_thumbnail_options` | 配信設定（トップレベル）。チャンネル一覧 `[{name, url}]` と、配信サムネ生成のオプション `{source: banner\|org, style: center\|netflix, overlayOrgIcon: bool}`。読み書きは `src/core/StreamService.py`（後者は ADR-005 S4d で追加。前者に揃えてトップレベルに置いた） |
 | その他トップレベル（`program_language`, `TOURNAMENT_URL` 等） | 個別 |
 
@@ -776,7 +797,7 @@ board 1 面のみ）だけで、**残りのパネルは初回表示時にファ�
 | 1.5 | `WebPanels`（共有ホスト。ナビの文言は `Stream Settings`） | React の `StreamPage`（`/web/stream`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4e）。Qt 版（`AutonaStreamSettingsWidget`）は S4e で削除済み | 配信先・配信タイトル・配信団体アイコン / サムネイルの登録・配信サムネイル生成。**処理の正本は `src/core/StreamService.py`**（タイトルの自動生成・チャンネル CRUD・素材の取り込み・サムネ生成のジョブ。ADR-005 S4d）で、ページは `/api/v1/stream*` を呼んで state を描画するだけ（ファイル選択・ダイアログ・プレビュー・クリップボードはブラウザの部品）。`stream.url` / `title` の書き込みは `AutonaActions.SetStreamUrl` / `SetStreamTitle`（同値なら書かない） | `stream.*`（core 経由） | `stream.*` | — |
 | 2 | `Thumbnail Settings` | `AutonaThumbnailSettingsWidget` | サムネイルテンプレ選択・背景指定・プレビュー・PNG/JPG 保存・クリップボードコピー | `thumbnail_config.*`（SettingsManager） | `score.*`, `tournamentInfo.*`, `thumbnail_config.*` | ✓（条件付き） |
 | 3 | `Result Settings` | `AutonaResultSettingsWidget` | リザルトレイアウト選択・選手入力・プレビュー・PNG/JPG 保存・クリップボードコピー。`result_players` の書き込みは `AutonaActions.PublishResultPlayers` | `result_config.*`, `result_players` | `tournamentInfo.*`, `result_players` | ✓ |
-| 4 | `Top8` | `AutonaTop8Widget` | Top 8 ダブルエリミの選手・試合スコア編集、Start.gg 読み込み、OBS 用 URL 案内・プレビュー。**書き込みの正本は `src/core/Top8Service.py`**（Start.gg の取り込みも。パネルは state を描画するだけ。ADR-005 S3e-8） | `top8.*` | `top8.*`, `tournamentInfo.*` | ✓ |
+| 4 | `Top8` | `AutonaTop8Widget` | Top 8 ダブルエリミの選手・試合スコア編集、Start.gg 読み込み、OBS 用 URL 案内・プレビュー。**書き込みの正本は `src/core/Top8Service.py`**（Start.gg の取り込みも。パネルは state を描画するだけ。ADR-005 S3e-8）。国・キャラは識別子（code / en_name + スキンの行）で依頼し、選択中のデザインは `LayoutCatalog.SelectedLayout` / `SelectLayout`（ADR-005 S4h） | `top8.*` | `top8.*`, `tournamentInfo.*` | ✓ |
 | 5 | `Scoreboard` | `AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget` | board1=1v1、board2=team、board3=crew のスコア入力・選手編集・セット読み込み | `score.{N}.*` | `score.{N}.*`, `game.*` | ✓ |
 | 6 | `WebPanels`（共有ホスト。ナビの文言は `Commentary`） | React の `CommentaryPage`（`/web/commentary`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4b）。Qt 版と退路の設定は S4c で削除済み | 実況・解説者 12 スロットの編集（役割・コメント・表示トグル）、デザイン選択・OBS 用 URL 案内・プレビュー・機能別カラー。`commentary` の書き込みは `core/CommentaryService`（React 版は `/api/v1/commentary/*` 経由で、state を描画するだけ。ADR-005 S3e-2 / S4b / S4c） | `commentary.{1..12}.*` | `commentary.{1..12}.*`, `tournamentInfo.*`, `colors.commentary.*` | ✓ |
 | 7 | `Statistics` | `AutonaStatsWidget` | 内部 `QTabWidget` で複数ビューを集約（下記 §4.1.0） | （read-only） | `score.{N}.recent_sets`, `last_sets`, `upset_factor` ほか | ✓ |

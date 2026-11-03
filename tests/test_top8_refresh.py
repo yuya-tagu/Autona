@@ -9,7 +9,15 @@ headless shell -- the legacy route, the Socket.IO event and /api/v1. What is
 compared: the fetches, the countries looked up, every StateManager.Set with
 its value's key order, the deltas, the subtree afterwards.
 
-    # only on that tree; on this one it would record the core path
+Recorded again for ADR-005 S4h, through the panel's button (the core path
+by then), with one intended change, additive only: an imported character is
+still the copy of the character's config, every key with its value in its
+place, followed by the keys of the panel's value it lacks -- `modded`,
+`name`, `assets` (the overlay's icon), `skin`, `variant`
+(Top8Service.ImportedCharacterValue, on the main's skin). Everything else
+-- the fetches, the countries, the other values, the Set and delta
+sequences, the paths -- recorded the same.
+
     AUTONA_RECORD_TOP8=1 python -m pytest tests/test_top8_refresh.py -k record
 
 Also here: one import at a time across every way in, a failed or empty
@@ -738,10 +746,18 @@ def test_a_panel_edit_writes_only_its_field(bracket, panel):
     assert panel.matchRows["wsf1"]["p1"].text() == "Typed"
 
 
+class _CountryRows:
+    """CountryCatalog's code lookup over _country's rows (the harness loads
+    no country data)."""
+
+    def CountryByCode(self, code):
+        return _country(code) or None
+
+
 def test_a_render_writes_nothing(bracket, panel):
     from src.core import Top8Service
     with WriteRecorder() as recorder:
-        Top8Service.SetPlayerCountry("2", _country("JP"))
+        Top8Service.SetPlayerCountry("2", "JP", _CountryRows())
         bracket.settle()
         panel._onGameChanged()
         bracket.settle()
@@ -754,7 +770,8 @@ def test_a_render_writes_nothing(bracket, panel):
 def test_a_character_and_its_skin_are_kept(bracket):
     """Picking a character writes its first skin, picking a skin writes
     that one, and a later render keeps the skin (the panel used to put the
-    first skin back whenever it reloaded)."""
+    first skin back whenever it reloaded). What is written is core's value
+    for the two identifiers (ADR-005 S4h; it was the skin row's data)."""
     from qtpy.QtCore import Qt
     from src.core import Top8Service
     bracket.loadCharacters()
@@ -768,16 +785,20 @@ def test_a_character_and_its_skin_are_kept(bracket):
         with WriteRecorder() as recorder:
             w["char"].setCurrentIndex(luigi)
             bracket.settle()
-        assert [key for key, _ in recorder.sets] \
-            == ["top8.players.2.characters"]
+        assert recorder.sets == [[
+            "top8.players.2.characters",
+            encode({"1": Top8Service.CharacterValue("Luigi", 0)})]]
         assert w["color"].currentIndex() == 0
 
         with WriteRecorder() as recorder:
             w["color"].setCurrentIndex(2)
             bracket.settle()
-        skin = w["color"].itemData(2, Qt.ItemDataRole.UserRole)
+        value = Top8Service.CharacterValue("Luigi", 2)
         assert recorder.sets == [
-            ["top8.players.2.characters", encode({"1": skin})]]
+            ["top8.players.2.characters", encode({"1": value})]]
+        # The skin's own assets: what the overlay draws.
+        assert value["assets"] == w["color"].itemData(
+            2, Qt.ItemDataRole.UserRole)["assets"]
 
         with WriteRecorder() as recorder:
             Top8Service.SetPlayerText("2", "name", "Luigi main")
@@ -785,6 +806,134 @@ def test_a_character_and_its_skin_are_kept(bracket):
         assert [key for key, _ in recorder.sets] == ["top8.players.2.name"]
         assert w["char"].currentIndex() == luigi
         assert w["color"].currentIndex() == 2
+    finally:
+        _dropPanel(bracket, panel)
+
+
+def _overlayIcon(player):
+    """The file layout/bracket_top8/index.js draws as a player's character
+    icon (charIconPath): characters["1"].assets, its base_files/icon pack
+    else full."""
+    char = ((player or {}).get("characters") or {}).get("1") or {}
+    assets = char.get("assets") or {}
+    asset = assets.get("base_files/icon") or assets.get("full")
+    return asset.get("asset") if isinstance(asset, dict) else asset
+
+
+def test_an_imported_player_gets_the_overlays_icon(bracket, countries):
+    """ADR-005 S4h: an imported character is the character's config with
+    the panel pick's keys added, on the main's skin -- assets included,
+    which is what the overlay draws from (the import used to copy the
+    character's config alone: no assets, no icon)."""
+    from src.core import Top8Service
+    _replay(bracket, countries, ENTRY_LABEL,
+            Top8Service.RefreshFromProvider, False)
+    players = _state().Get("top8.players")
+    imported = {slot: player["characters"]["1"]
+                for slot, player in players.items() if player["characters"]}
+    # Alpha's main is mario on skin 2, Bravo's Luigi 0, Charlie's peach 1;
+    # Hotel's luigi 3 is past the pack's three skins: the first.
+    assert sorted((value["en_name"], value["skin"])
+                  for value in imported.values()) \
+        == [("Luigi", 0), ("Luigi", 0), ("Mario", 2), ("Peach", 1)]
+    for slot, value in imported.items():
+        assert value == Top8Service.ImportedCharacterValue(
+            value["en_name"], value["skin"]), slot
+        icon = _overlayIcon(players[slot])
+        assert icon and icon.endswith(
+            f"{value['codename']}_{value['skin']}.png"), slot
+        assert os.path.isfile(icon), slot
+
+
+def test_a_rebuilt_panel_shows_every_shape_a_slot_has_held(bracket):
+    """A saved Top 8 from before S4h holds a character in one of three
+    shapes, and from S4h on in one of two (the panel's pick, the import's);
+    a panel built on it shows each (the skin row's used to leave the combos
+    empty) and writes nothing."""
+    from qtpy.QtCore import Qt
+    from src.core import Top8Service
+    from src.core.GameAssetCatalog import GameAssetCatalog
+    bracket.loadCharacters()
+    _reset(bracket)
+    games = GameAssetCatalog.instance
+    shapes = {
+        "1": Top8Service.CharacterValue("Mario", 2),     # S4h on
+        "2": games.SkinRow("Luigi", 1),                  # the skin row
+        "3": games.CharacterRow("Peach"),                # the character row
+        "4": games.Character("Luigi"),                   # the import's copy
+        "5": Top8Service.ImportedCharacterValue("Peach", 1),   # S4h on
+    }
+    for slot, value in shapes.items():
+        _state().Set(f"top8.players.{slot}.characters", {"1": value})
+    bracket.settle()
+
+    with WriteRecorder() as recorder:
+        panel = _buildPanel(bracket)
+    try:
+        assert recorder.sets == []
+        shown = {}
+        for slot in shapes:
+            w = panel.playerInputs[slot]
+            data = w["char"].currentData(Qt.ItemDataRole.UserRole) or {}
+            shown[slot] = (data.get("en_name"), w["color"].currentIndex())
+        assert shown == {"1": ("Mario", 2), "2": ("Luigi", 1),
+                         "3": ("Peach", 0), "4": ("Luigi", 0),
+                         "5": ("Peach", 1)}
+        # Not rewritten by the render: the old shapes stay until picked.
+        assert _state().Get("top8.players.2.characters") == {"1": shapes["2"]}
+
+        # Picking the colour again writes the full value.
+        w = panel.playerInputs["2"]
+        w["color"].setCurrentIndex(2)
+        bracket.settle()
+        assert _state().Get("top8.players.2.characters") \
+            == {"1": Top8Service.CharacterValue("Luigi", 2)}
+    finally:
+        _dropPanel(bracket, panel)
+
+
+@pytest.fixture
+def top8Designs(tmp_path, monkeypatch):
+    """Two Top 8 designs, and settings that are a copy, never saved."""
+    from src.core import LayoutCatalog
+    from src.core.SettingsManager import SettingsManager
+    from tests.test_layout_catalog import builtin
+    root = tmp_path / "layout"
+    root.mkdir()
+    builtin(root, "bracket_top8", {"kind": "top8", "displayName": "標準"})
+    builtin(root, "bracket_top8_dark", {"kind": "top8", "displayName": "Dark"})
+    monkeypatch.setattr(LayoutCatalog, "LAYOUT_ROOT", str(root))
+    monkeypatch.setattr(SettingsManager, "settings",
+                        copy.deepcopy(SettingsManager.settings))
+    monkeypatch.setattr(SettingsManager, "SaveSettings", lambda: None)
+    SettingsManager.Unset("top8.selected_design")
+    return SettingsManager
+
+
+def test_the_panels_design_is_cores_selection(bracket, top8Designs):
+    """The panel shows and keeps the design through LayoutCatalog
+    (SelectedLayout / SelectLayout, ADR-005 S4h) under the key it always
+    kept -- what GET / PUT /api/v1/layouts/selected/top8 read and write."""
+    from src.core import LayoutCatalog
+    settings = top8Designs
+    settings.Set("top8.selected_design", "bracket_top8_dark")
+    panel = _buildPanel(bracket)
+    try:
+        assert panel.designCombo.currentData() == "bracket_top8_dark"
+        panel.designCombo.setCurrentIndex(
+            panel.designCombo.findData("bracket_top8"))
+        assert settings.Get("top8.selected_design") == "bracket_top8"
+        assert LayoutCatalog.SelectedLayout("top8")["id"] == "bracket_top8"
+        assert "bracket_top8" in panel.obsUrlField.text()
+    finally:
+        _dropPanel(bracket, panel)
+
+    # A kept design that is gone: the default is shown, the choice kept.
+    settings.Set("top8.selected_design", "gone")
+    panel = _buildPanel(bracket)
+    try:
+        assert panel.designCombo.currentData() == "bracket_top8"
+        assert settings.Get("top8.selected_design") == "gone"
     finally:
         _dropPanel(bracket, panel)
 

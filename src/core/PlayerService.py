@@ -155,6 +155,79 @@ class CharacterSlot:
     text: str = ""
 
 
+# The two values a pick is published as, built from identifiers against the
+# catalogs. Module functions because a player slot is not their only writer:
+# the Top 8 builds its players' country and character with the same two
+# (core/Top8Service, ADR-005 S4h), so the overlays read one shape whichever
+# panel wrote it. PlayerService.CountryValue / CharacterValue are these,
+# against the slot's own catalogs.
+
+def BuildCountryValue(code, countries=None) -> dict:
+    """What a player's `country` holds for the country (or custom flag)
+    `code`.
+
+    The country combo's row for that code -- code, names, flag asset,
+    emoji, coordinates -- in the key order the combo handed it out in.
+    {} for no country, which is also the answer for a code the catalog
+    does not know: a name typed into the editable combo that matches no
+    row, or the custom-flag separator. Those two used to publish null;
+    they now have the type every other "no country" has always had.
+    `countries` defaults to ``CountryCatalog.instance`` at call time.
+    """
+    catalog = countries if countries is not None else CountryCatalog.instance
+    row = catalog.CountryByCode(code) if code else None
+    return qvariantmap_copy(row) if row else {}
+
+
+def BuildCharacterValue(slot: CharacterSlot, games=None,
+                        snapshot=None) -> dict:
+    """What one character slot holds for `slot`.
+
+    The shape the overlays read: the character row (name, en_name,
+    display_name, codename, modded), with the skin row's name / en_name
+    over it when that skin is a different character (Dr. Mario), then
+    `assets` (every asset pack's file for that skin), `skin` and
+    `variant`. Without a character row the slot is just its name
+    (CharacterSlot.text): {name, assets: {}, skin, variant}.
+
+    Dict keys come in the order the combos handed their rows out in
+    (module docstring); the three appended keys come last, as they
+    always did. `snapshot` is GameAssetCatalog.Current(), taken once by
+    the caller so every slot of a card comes from one game. `games`
+    defaults to ``GameAssetCatalog.instance`` at call time.
+    """
+    games = games if games is not None else GameAssetCatalog.instance
+    snap = snapshot if snapshot is not None else games.Current()
+
+    row = games.CharacterRow(slot.character, snapshot=snap) \
+        if slot.character is not None else None
+    if row is None:
+        # No row picked (or the picked one is not in the loaded game,
+        # e.g. for the moment between a game load and the combos'
+        # rebind): the card has no skin rows either.
+        value = {"name": slot.text}
+        skin = None
+    else:
+        value = qvariantmap_copy(row)
+        skin = games.SkinRow(slot.character, slot.skin, snapshot=snap)
+
+    if skin:
+        if skin.get("name", ""):
+            value["name"] = skin["name"]
+        if skin.get("en_name", ""):
+            value["en_name"] = skin["en_name"]
+        value["assets"] = qvariantmap_copy(skin.get("assets", {}))
+    if value.get("assets") is None:
+        value["assets"] = {}
+
+    value["skin"] = slot.skin
+
+    variant = games.VariantRow(slot.variant, snapshot=snap) \
+        if slot.variant is not None else None
+    value["variant"] = qvariantmap_copy(variant) if variant else {}
+    return value
+
+
 class SlotChange(NamedTuple):
     """What a write did to the two facts the board's statistics hang off:
     who is in the slot (`id`) and their seed.
@@ -324,17 +397,9 @@ class PlayerService:
     # refill still emits exactly one index change.
 
     def CountryValue(self, code) -> dict:
-        """What `country` holds for the country (or custom flag) `code`.
-
-        The country combo's row for that code -- code, names, flag asset,
-        emoji, coordinates -- in the key order the combo handed it out in.
-        {} for no country, which is also the answer for a code the catalog
-        does not know: a name typed into the editable combo that matches no
-        row, or the custom-flag separator. Those two used to publish null;
-        they now have the type every other "no country" has always had.
-        """
-        row = self._CountryCatalog().CountryByCode(code) if code else None
-        return qvariantmap_copy(row) if row else {}
+        """What `country` holds for the country (or custom flag) `code`
+        (``BuildCountryValue``, against this slot's catalog)."""
+        return BuildCountryValue(code, self._CountryCatalog())
 
     def RegionValue(self, countryCode, regionCode) -> dict:
         """What `state` holds for region `regionCode` of `countryCode`.
@@ -435,50 +500,9 @@ class PlayerService:
     # ── derived: the character slots ─────────────────────────────────────
 
     def CharacterValue(self, slot: CharacterSlot, snapshot=None) -> dict:
-        """What one slot of `character` holds for `slot`.
-
-        The shape the overlays read: the character row (name, en_name,
-        display_name, codename, modded), with the skin row's name / en_name
-        over it when that skin is a different character (Dr. Mario), then
-        `assets` (every asset pack's file for that skin), `skin` and
-        `variant`. Without a character row the slot is just its name
-        (CharacterSlot.text): {name, assets: {}, skin, variant}.
-
-        Dict keys come in the order the combos handed their rows out in
-        (module docstring); the three appended keys come last, as they
-        always did. `snapshot` is GameAssetCatalog.Current(), taken once by
-        the caller so every slot of a card comes from one game.
-        """
-        games = self._GameCatalog()
-        snap = snapshot if snapshot is not None else games.Current()
-
-        row = games.CharacterRow(slot.character, snapshot=snap) \
-            if slot.character is not None else None
-        if row is None:
-            # No row picked (or the picked one is not in the loaded game,
-            # e.g. for the moment between a game load and the combos'
-            # rebind): the card has no skin rows either.
-            value = {"name": slot.text}
-            skin = None
-        else:
-            value = qvariantmap_copy(row)
-            skin = games.SkinRow(slot.character, slot.skin, snapshot=snap)
-
-        if skin:
-            if skin.get("name", ""):
-                value["name"] = skin["name"]
-            if skin.get("en_name", ""):
-                value["en_name"] = skin["en_name"]
-            value["assets"] = qvariantmap_copy(skin.get("assets", {}))
-        if value.get("assets") is None:
-            value["assets"] = {}
-
-        value["skin"] = slot.skin
-
-        variant = games.VariantRow(slot.variant, snapshot=snap) \
-            if slot.variant is not None else None
-        value["variant"] = qvariantmap_copy(variant) if variant else {}
-        return value
+        """What one slot of `character` holds for `slot`
+        (``BuildCharacterValue``, against this slot's catalog)."""
+        return BuildCharacterValue(slot, self._GameCatalog(), snapshot)
 
     def PublishCharacterSlots(self, slots, includeMains=False,
                               snapshot=None):
@@ -968,10 +992,11 @@ class PlayerService:
         S3c-2 decision 5) before anything loads it; reading them alike here
         gives both shells the same characters, a headless one included,
         where the record is loaded as stored. A dict main used to raise on
-        it (ValueError, its characters unwritten)."""
+        it (ValueError, its characters unwritten); an infinity, an
+        OverflowError."""
         try:
             return int(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             logger.warning(
                 f"{self.path}: the skin of main {character!r} is not a "
                 f"number ({value!r}); using the first skin")
