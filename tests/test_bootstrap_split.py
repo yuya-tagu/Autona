@@ -136,6 +136,11 @@ def test_bootstrap_core_steps_and_their_order():
         "SetFollowService.fetcher = AutonaSetFollowUtil()",
         "SetFollowService.boardHost = AutonaWebOperations.current_board_host",
         "TournamentInfoService()",
+        # The tournament's icon / banner and its set / clear (ADR-005 S4f):
+        # after the executor, the game asset catalog and the provider they
+        # drive; before anything can set a tournament (the shells' restore).
+        "TournamentMediaService()",
+        "TournamentService()",
         # The 配信設定 operations (ADR-005 S4d): after the state layer,
         # AutonaActions, the executor and the provider; started (following
         # the tournament name and game) before the shells' launch seed.
@@ -190,9 +195,11 @@ def test_bootstrap_gui_steps_and_their_order():
 # The connections that used to be the window's alone. Each is made by one
 # shared function now, so the desktop and the headless shell cannot drift.
 _SHARED_WIRING = {
+    # Forgetting the selected game on a clear is core's
+    # TournamentService.ClearTournament since ADR-005 S4f, for every clear --
+    # no longer a slot of tournament_url_update.
     "wire_tournament_data": [
         "signals.tournament_data_updated.connect(apply)",
-        "signals.tournament_url_update.connect(forget_cleared)",
     ],
     "wire_web_server": [
         "game_changed.connect(webserver.ws_game_changed)",

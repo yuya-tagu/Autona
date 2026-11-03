@@ -4489,3 +4489,146 @@ IME 実機ゲート通過を受けて、Qt 版の実況・解説パネルと、�
   - L11: Playwright のコピーの試験は OS のクリップボードを使わない。`navigator.clipboard.write` をページ内で差し替え、渡された 1 件が `image/png`（JPEG を PNG にしたもの・空でない）であることを確かめる
   - L12: Design.md のパネル表の objectName を実体の `WebPanels`（共有ホスト）にした。同じずれのあった Commentary の行も直した
   - 検証: 影響範囲の pytest 789 passed／jest 全量 275 passed／`npm run build` OK（警告は既存の `Header.jsx` だけ）／`npm run test:e2e` 14 passed
+
+### S4 Event（大会情報）の React 化 — 設計（2026-11-01・オーナー承認済み）
+
+オーナー判断（2026-11-01）: 下記の設計を承認。論点 1〜5 は推奨案どおり（並びは変えずビュー生成を初回描画後へ遅延・解除はどの入口でもゲーム選択を忘れ確認ダイアログを出す・ゲームのコンボは残す・バナーは長辺 1920 に縮小・S4f → S4g を自走し S4g の後で停止）。
+
+**範囲**: サイドバー Setup の「大会情報」（`src/AutonaTournamentInfoWidget.py` + `.ui`、埋め込みの大会カラーのカード）を共有ビューの React ページ `/web/event` に移し、Qt 版を消す。Stream と同じく、**先にウィジェットに残るロジックを core 化（S4f）してから React 化（S4g）する** 2 段。サイドバー上部の大会ボタンのメニューとゲーム選択ボタンは Qt のまま残す（入口が core に揃うので挙動だけ合わせる）。
+
+**棚卸し（2026-11-01・HEAD e7e7703c）**
+
+- 入力 5 欄（大会名・イベント名・住所・参加者数・開始日）は `TournamentInfoService.Set*Field` を通り済み。ウィジェットに `StateManager.Set` は無い
+- ウィジェットに残るもの:
+  - アイコン / バナーの取り込み（QFileDialog → QPixmap → `layout/logo.png` / `user_data/tournament_banner.png` を**直接上書き**。バナーは無加工）
+  - 取得ジョブ `_FetchIconAndBanner`（gql + `requests`）
+  - 既定に戻す（確認なし）
+  - バナー変更の通知（Qt シグナル `media_updated` → Thumbnail / Result のプレビュー）。バナーの版の state キーは無い
+- 大会 URL のダイアログ `SetStartggEventSlug`（Qt モーダル）。admin/brackets 形式の解決（`GetRealEventURL`）を **GUI スレッドで同期**に呼ぶ。`force=True` で同じ URL でも再取得し、パネルのボタンはメディアも自動取得する。v1 の `POST /tournament` は event 形式のみ・同じ URL は再取得しない・メディアは取らない
+- 解除の経路が 2 つ: パネル / サイドバーは `SetTournament(None)` で `forget_cleared`（ゲーム選択の忘却）を通らない。v1 / legacy は `tournament_url_update` 経由で通る。確認の有無も入口ごとに違う
+- ゲームのコンボはスキャン上の**位置**で `LoadGameAssets` を呼ぶ（v1 は codename の `POST /game` がある）
+- 開始日は state に整形済みの文字列しか無く、raw は Service のメモリだけ（再起動で失う）
+- 大会カラーは `ColorService.SetTournamentColor` だが v1 は大会を拒否する
+- サイドバーの既定 index 0 = EVENT なので、React 化すると初回起動（と EVENT を最後に開いていた起動）で共有ビューが起動直後に建つ
+
+**設計**
+
+1. **S4f: core 化（Qt ウィジェットは残し core を呼ぶだけにする。単独でリリース可）**
+   - 新設 `core/TournamentMediaService`:
+     - `ImportMedia(kind, bytes)`（icon は長辺 512、banner は長辺 1920 に縮小。PNG で tmp → `os.replace`）
+     - `FetchMedia()`（`TaskExecutor` のジョブ。実行中は BUSY）
+     - `ResetMedia()`
+   - 画像の検証・縮小・原子的な書き込みは `StreamService` の org 素材の実装と共通の helper に切り出す
+   - state に `tournamentInfo.bannerVersion` と取得ジョブの `tournamentInfo.media = {status, error, revision}` を追加する（追加のみ）
+   - `media_updated` は Qt アダプタが `bannerVersion` を見て出す（Thumbnail / Result の受け手は不変）。これでヘッドレスでも大会メディアを取得・差し替えできる
+   - 大会の設定・解除を core の 1 本 `TournamentService.SetTournament(url, force, fetchMedia)` / `ClearTournament()` に揃える
+     - admin/brackets の解決はジョブ側で行う（GUI スレッドの同期 gql を消す）
+     - 解除はどの入口からでも `ForgetSelection` を通す
+     - `TOURNAMENT_URL` を読む口を足す
+   - 開始日は raw の日付 `tournamentInfo.startAtDate`（`YYYY-MM-DD`、追加のみ）も publish する。深夜の unix 秒への変換は PC 側のタイムゾーンで core が行う。既存の `startAt`（整形済み）は不変
+2. **S4g: React ページ `/web/event` と Qt 版の削除**
+   - 大会 URL の欄と「設定」「再取得」「解除（確認ダイアログ）」を置く。前回の URL を初期値にする
+   - 5 欄は `useStateField` / 日付は `<input type="date">`
+   - ゲームは `GET /games` と `state.game` を描き、codename で `POST /game` する
+   - 大会カラーは `<input type="color">` と「既定に戻す」
+   - アイコン / バナーのプレビューは `?v=<版>`。取り込みは Stream と同じ file input → base64、取得・既定に戻す（確認あり）
+   - v1 に追加するルート:
+     - `PATCH /api/v1/tournament/info`（5 欄。参加者数は 0〜9999、日付は 2000-01-01 以降）
+     - `GET /api/v1/tournament`（URL と状態）
+     - `POST /api/v1/tournament` を拡張（admin/brackets 形式・`force`・`fetchMedia`。既定値は今の挙動のまま）
+     - `DELETE /api/v1/tournament`
+     - `PUT|DELETE /api/v1/tournament/media/<icon|banner>`
+     - `POST /api/v1/tournament/media/fetch`
+     - `PATCH /api/v1/colors/tournament`
+   - Qt 版のウィジェット・`.ui`・翻訳（共有の文言は残す）・objectName のガードを削除する。`TOURNAMENT_INPUT_KEYS` は v1 の field 名として扱い直す
+   - 手動チェックリストに「大会情報」節を新設する
+
+**オーナー判断が要る論点（推奨つき）**
+
+1. **起動直後に共有ビューが建つ（既定 index 0 = EVENT）** → 推奨: **並びは変えず、ビューの生成を最初の描画の後（`QTimer.singleShot(0)`）へ遅らせて許容する**。`STARTUP phase=` で計測し、悪化が大きければ S4g の PR で報告する。並び替えは `STATE_VERSION` を上げてユーザーの最後のタブを捨てることになり、操作の導線（大会を先に設定）にも反する
+2. **解除の挙動を揃える** → 推奨: **どの入口からの解除でもゲーム選択を忘れる（今の v1 の挙動）に揃え、確認ダイアログは Web のページとサイドバーの両方で出す**。今のパネル / サイドバーからの解除ではゲームが残っていた
+3. **ゲームのコンボを Event ページに残すか** → 推奨: **残す**（サイドバーのボタンと重複するが、大会設定と同じ画面で選べるのが今の導線）。中身は codename の v1 に揃える
+4. **バナーの縮小** → 推奨: **長辺 1920 に縮小して PNG で保存する**（今は無加工。巨大な画像がサムネ / リザルト生成と配信を重くするため）。既存のファイルはそのまま
+5. **自走の範囲** → 推奨: **S4f → S4g を自走し（各段でコミット・push・PR 作成まで）、S4g の後で停止**。次のパネル（Top8）はまた 1 枚ずつ設計を出す
+
+**対象外**: `displayTournamentName` の編集欄（SCORE / クルー側にある）、Start.gg 以外の provider の追加、サムネ / リザルトのバナー定数 3 箇所の統合（Thumbnail / Result パネルの移行時に行う）
+
+#### S4f 大会情報の core 化（2026-11-01）
+
+大会情報（EVENT）パネルに残っていたロジックを core に移し、Qt のパネル（`AutonaTournamentInfoWidget`）は core を呼んで state を描くだけにした（S4g の React 化の前段。単独でリリースできる）。大会アイコン / バナーの取り込み・取得・既定に戻すはヘッドレスでもできるようになり、大会の設定・解除はどの入口からでも core の 1 本を通る。外部契約は追加だけ: state に `tournamentInfo.startAtDate` / `bannerVersion` / `media = {status, error, revision}`。既存の `tournamentInfo.*` の形・`logo.png` / `tournament_banner.png` のパスと PNG・`logoVersion` = mtime・`settings.json` の `TOURNAMENT_URL` / `general.*_color`・Socket.IO の payload・v1 の `POST /tournament` の外から見える挙動（event 形式のみ・202・409）・自動更新は変えていない。既存のバナーファイルはそのまま（縮小は次の取り込みから）。
+
+- **やったこと**
+  - `core/ImageImport.py`（新設）: 画像の検証（PNG / JPEG / MPO / BMP・5000 万画素まで。デコード前にヘッダで断る）・縮小（`EncodePng`。拡大しない・透過は RGBA）・原子的な書き込み（`WriteFile`。一時ファイル → `os.replace`・読み手が開いている間は 20 / 40 / 80ms で再試行）を S4d の `StreamService` から切り出した。`StreamService.ImportOrgAsset` もこれを使う（答え・上限・挙動は不変。`ORG_ASSET_*` / `IMPORTED` などの名前は別名として残した）
+  - `core/TournamentMediaService.py`（新設。`bootstrap_core()` が作る。読み込み中の provider は `AutonaTournamentDataProvider.GetProvider` を注入）
+    - `ImportMedia(kind, bytes)`: icon は長辺 512、banner は長辺 1920 に縮小して PNG で保存し、mtime を版として publish（`logoVersion` / `bannerVersion`）。答えは `imported` / `invalid_image` / `save_failed`（ファイルと版は `_mediaLock` の下で組で書く）
+    - `FetchMedia()`: `TaskExecutor` のジョブ 1 本（icon → banner の順に URL を照会 → `requests`（20 秒）→ `ImportMedia`）。答えは `started` / `busy`（実行中）/ `no_tournament`（何も publish しない）。進捗と結果は `tournamentInfo.media`（`running` → `done` / `error`。error は `no_media` / `fetch_failed` / `save_failed` / `superseded` / `cancelled`）。`stopping` を各リクエストの前後で見る。shutdown でキャンセルされたジョブは Future の done コールバックで `cancelled` を publish する。ダウンロードの間に大会が差し替わったら取り込まない（`superseded`）
+    - `ResetMedia(kind=None)`: icon は Autona のアイコン（`assets/icons/icon.png`）を原子的に書き戻し、banner は削除する。両方の版を 1 回の保存サイクルで publish
+  - `core/TournamentService.py`（新設。`bootstrap_core()` が作る。アダプタと `onMain`（GUI executor）を注入）
+    - `SetTournament(url, force=False, fetchMedia=False)` / `ClearTournament()` / `Restore()`（起動時の復元）/ `TournamentUrl()`（`TOURNAMENT_URL` を読む口）。URL の形はダイアログの検証と同じ 2 つ（event / admin/brackets）で、それ以外は `invalid_url` で何も変えない。event 形式は正規化（event のスラッグまで・`/events/` → `/event/`）
+    - admin/brackets 形式は `TaskExecutor` のジョブでアダプタの `ResolveEventUrl` を呼んで解決し、適用はメインスレッドで行う（GUI スレッドの同期 gql を消した）
+    - 適用の順: `TOURNAMENT_URL` を保存 → アダプタの `LoadTournament` → `AnnounceUrl`（`tournament_url_update`）→ `fetchMedia` なら `FetchMedia()`。解除: `TOURNAMENT_URL` を空 → `UnloadTournament` → `GameAssetCatalog.ForgetSelection()` → `AnnounceUrl("")`
+    - 後から来た設定・解除が勝つ（世代番号。解決が遅れて返った admin URL は捨てる）
+  - アダプタ（`src/AutonaTournamentDataProvider.py`）: `SetTournament` / `SetTournamentSignal` を `LoadTournament` / `UnloadTournament` / `AnnounceUrl` / `ResolveEventUrl`（ブロッキング・ジョブから呼ぶ）に置き換えた。`tournament_url_update` はコマンドではなく通知になった（自分への connect を外した）。URL ダイアログ `SetStartggEventSlug(mainWindow, fetchMedia=False)` は検証を core の `UrlKind` で行い、確定したら `TournamentService.SetTournament(force=True)` を呼ぶ。解除の確認 `ConfirmClearTournament(parent)` を足した（パネルとサイドバーが共有）。`UiMounted()` は `TournamentService.Restore()`。`bannerVersion` が変わったら（Bridge の通知を見て）`media_updated` をイベントループに戻ってから出す
+  - 入口の付け替え: サイドバーの「Unset tournament」は確認を出して core へ（`Autona.py`）。web 操作 `load_tournament`（legacy `/set-tournament`・Socket.IO・v1 `POST /tournament`）は `ClearTournament` / `SetTournament` を呼ぶ。`bootstrap.wire_tournament_data` の `forget_cleared` を消した（忘却は core の解除だけが行う）
+  - `TournamentInfoService`: 日付欄は整形済みの `startAt` と並べて `startAtDate`（`YYYY-MM-DD`、PC のタイムゾーン）を 1 回の保存サイクルで publish する。`SetDate(field, "YYYY-MM-DD")`（2000-01-01 以降。その日の 0 時を `time.mktime` で unix 秒にする）と `DateOf(field)`（state から読む）を足し、メモリだけの `_rawDates` / `RawDate` を消した。payload の `startAt` が null なら `startAtDate` も null
+  - `StateSchema`: `TOURNAMENT_START_AT_DATE_KEY` / `TOURNAMENT_RAW_DATE_KEYS` / `TOURNAMENT_BANNER_PATH` / `TOURNAMENT_BANNER_VERSION_KEY` / `TOURNAMENT_MEDIA_KEY` / `DefaultTournamentMedia()` を足し、`KEY_CATALOG` に 5 キー（`startAtDate` / `bannerVersion` / `media.status|error|revision`）を追加。`SeedPanelState()` が起動のたびに `bannerVersion` を publish し、`media` を idle に戻す
+  - パネル: `requests`・`shutil`・`TaskExecutor`・QPixmap の縮小と保存・ファイルの削除を消した。残したのはファイル選択（読んだ bytes を core に渡す）・取り込み失敗の警告・`QPixmap` のプレビュー。プレビューは版が変わったときだけ、`tournamentInfo.media` の描画（実行中は「大会からアイコン・バナーをダウンロード」と「大会を選ぶ」を無効化・フッターに「大会アイコン / バナーを取得中...」）と一緒に、state の lock の外（`QTimer.singleShot(0)`）で行う。日付は `SetDate` / `DateOf`。ゲームのコンボは各項目に codename を持たせて `LoadGameByCodename(codename)` で読む（v1 の `POST /game` と同じキー。再読込はしない）。「大会を選ぶ」は URL ダイアログ（`fetchMedia=True`）、「大会との接続を解除する」は共有の確認
+  - 翻訳: 取り込み失敗の文言 2 つ（S4e で消えたもの）を `src/i18n/Autona_{ja,en}.ts` の `app` に戻し、`scripts/compile_translations.ps1` で再コンパイルした（549 件 / 未完了 0）
+  - docs: `.claude/design/Design.md`（`tournamentInfo` の木・パネル表・書き手）、`.claude/rules/state-and-webserver.md`（ドメインサービスの表）、`.claude/manual-test-checklist.md`（大会情報の確認手順）
+  - テスト: `tests/test_tournament_media_service.py`（新規 28 本: 縮小・PNG・版・拒否・置き換えの再試行・リセット・取得の成功 / BUSY / 失敗 5 種 / 保存失敗 / 差し替え / shutdown / 停止・起動時のシード・カタログ）、`tests/test_tournament_service.py`（新規 26 本: URL の形・正規化・設定と解除の順・admin はジョブで解決・解決失敗・後勝ち・復元・すべての解除の入口（web 操作 / v1 / 共有の確認）で `ForgetSelection`・未対応 URL）、`tests/test_tournament_info_service.py`（`startAtDate`・`SetDate` の検証・null・壊れた日付で payload を捨てる）、`tests/test_tournament_info_panel.py`（取得の描画・取り込み・バナーの縮小と `media_updated`・拒否の警告・リセット・解除の確認・codename・再起動後の日付・パネルがファイルを書かない AST の pin・サイドバーの解除の pin）、生成順・共有の結線・import の副作用・ヘッドレス・provider ジョブ・ゲーム選択の忘却の pin を更新
+- **判断と理由**
+  1. **`TournamentService` は新しい core モジュールにした**（`TournamentInfoService` に足さない）: こちらは provider と executor とゲームのカタログを動かす「操作」で、`TournamentInfoService` は `tournamentInfo.*` の書き手（payload の適用）。後者は 1 つしか作れない制約（表示大会名の台帳）があり、操作を混ぜるとテストで差し替えにくい
+  2. **アダプタの読み込みはメインスレッドで行う**（`onMain` = GUI executor。GUI スレッドから呼べば即時、ほかのスレッドなら queued）: `LoadTournament` は provider（QObject）を作り、entrants の cancel イベント（GUI スレッド専用）を扱う。v1 の `_run` は GUI スレッドで走るので、event 形式の適用は `load_tournament` が返る前に終わり、in-progress フラグを下ろす時点は変わらない
+  3. **admin URL の解決に失敗したら何も変えない**: 解決（レビュー L10 で provider のメソッド `GetRealEventURL` から関数 `StartGGDataProvider.ResolveEventUrl` に変更）は失敗すると元の admin URL を返す。旧実装はそれを保存して読み込みに失敗していた。今は「event 形式にならなかった」としてログに出して捨てる（下の残課題）
+  4. **解除はどの入口でもゲーム選択を忘れる**（論点 2）。忘却の後に `tournament_url_update("")` を出すので、サイドバーのゲームボタンは今までの v1 の解除と同じ順で戻る。確認ダイアログはパネルとサイドバーで共有する 1 つ（`ConfirmClearTournament`。クリック / メニューからだけ呼ぶ。シグナルや state のハンドラからは呼ばない: モーダルの規則）
+  5. **`media_updated` はアダプタが `bannerVersion` の変化を見て出す**: Bridge の通知は GUI スレッドで書いたときは `StateManager.lock` の中で走るので、比較だけして `QTimer.singleShot(0)` で外へ出す（pitfalls #17。受け手のプレビュー生成を lock の中で走らせない）。旧実装と同じくバナーの変更でだけ出す（アイコンでは出さない）
+  6. **取得の結果**: 何か取り込めて、見つけたものが 1 つも失敗していなければ `done`。アイコンだけあってバナーが無い大会は `done`。片方が失敗したら、取り込めた方は残して `error`（`fetch_failed`）。旧実装はログだけで、操作者には何も見えなかった
+  7. **リセットに確認は付けていない**（旧パネルにも無かった）。確認は S4g の Web ページで付ける（設計どおり）
+  8. **日付の変換は「その日のローカルの 0 時」**（旧パネルの `QDate.startOfDay()` と同じ。0 時が夏時間で存在しない日はその日の最初の時刻。レビュー L3）。`SetDate` の `startAtDate` は入力の文字列そのもので、unix 秒から逆算しない（L3）。payload の日付（start.gg の unix 秒）の `startAtDate` は timestamp から `localtime` で作るので、同じ PC のタイムゾーンの日付になる。範囲は 2000-01-01〜2999-12-31（L2）。形式が違う値は `SetDate` が断る（書き込みなし）。`SetDateField` は 2 つの形を両方計算してから書くので、壊れた timestamp では何も書かず、payload を捨てる既存の失敗経路（`TOURNAMENT_URL` を空にする）も保つ
+- **旧実装との挙動差（記録）**
+  - パネル / サイドバーからの解除でもゲーム選択を忘れ、ゲームボタンが「ゲームを選ぶ」に戻る。サイドバーからの解除にも確認が出る（論点 2）
+  - パネル / サイドバーの解除で `TOURNAMENT_URL` は `None` ではなく `""` になる（v1 と同じ）
+  - legacy `/set-tournament` / Socket.IO に start.gg の event / admin 以外の URL を送っても何も変わらない（旧: 保存して、大会なしとして解除していた）。答えは "OK" のまま。admin 形式は解決されるようになった
+  - 大会の設定のたびに `tournament_url_update` が出る（旧: web の入口だけ）。受け手はサイドバーのボタンの更新だけで、設定時は何もしない
+  - 取り込んだバナーは長辺 1920 に縮小される（論点 4）。パネルの取り込み失敗に警告が出る
+  - S4f より前の state には `startAtDate` が無いので、更新後の最初の起動では日付欄が既定値のまま（次に大会を読み込むか日付を選ぶと入る）
+- **残課題**
+  - admin URL の解決に失敗したとき、操作者への通知が無い（ログだけ。レビュー L14）。S4g の Web ページで扱う。`GET /api/v1/tournament`（URL と状態）で状態として返すか、そのとき決める
+  - legacy `/set-tournament` / Socket.IO に start.gg 以外の URL を送ると、"OK" を返して何も変えない（レビュー L6）。呼び出し側には成功と区別がつかない。React UI は v1（400 を返す）を使うので影響は小さく、配信中の打ち間違いで大会が消えない方向として妥当と判断した。旧ビルドが保存した start.gg 以外の URL は、起動時に欄を空にしなくなった（`Restore` が INVALID_URL で何もしない。改善寄り）
+  - ファイルの置き換えが `os.replace` になったので、ほかのプロセスが FILE_SHARE_DELETE なしで `logo.png` を開いている間は PermissionError になる（レビュー L7）。20 / 40 / 80 ms のリトライで吸収する想定で、尽きると SAVE_FAILED（パネルに警告）。配信団体素材（S4d）と同じ設計なので許容した
+  - `tournamentInfo.media.revision` は起動のたびに 0 に戻る（レビュー L13。`stream.thumbnail` と同じ設計）。S4g のクライアントが revision で自分の取得の終わりを判定し、それをサーバーの再起動をまたいで覚える場合は誤判定する。S4g で revision を使うときに決める
+  - 取得のエラーの文言はパネルに出していない（フッターの「取得中」だけ）。S4g の Web ページで `tournamentInfo.media.error` を描く
+  - ヘッドレスで取り込み・取得・リセットを呼ぶ入口（v1）は S4g で入る
+- **レビュー指摘の対応（2026-11-01）**: High は無し。直したもの:
+  - **M1（取得の実行中に大会を設定すると、新しい大会のメディアが取れない）**: パネルのダウンロードが大会 A で走っている間に B が読み込まれると、設定の `fetchMedia` が BUSY で捨てられ、A の取得は superseded で終わっていた。今は、走っている取得と**別の大会**への `FetchMedia` は `QUEUED` を返して「次の 1 回」を予約し、走っている取得が終わったら（superseded でも）同じジョブがその時点の大会で取り直す（新しい revision）。同じ大会への要求は `BUSY` のまま。予約の確認と取得の権利の解放は同じロックの中で行うので、その間に来た要求は落ちない。権利を先に解放するため、終わった取得の結果は state の revision がまだ自分のものであるときだけ書く（後から始まった取得の running を上書きしない）
+  - **L11（同じ URL を force で再設定すると、走っている取得が superseded になる）**: 大会の同一性を provider オブジェクトではなく大会の URL（`provider.url`）で判定するようにした
+  - **M2（解除の後、EVENT パネルのゲームのコンボに前のゲームが残る）**: `_ApplyClear` の順を「URL を空にする → `ForgetSelection` → `UnloadTournament` → `AnnounceUrl("")`」に変えた。コンボ（とサイドバーの `SetGame`）は `tournament_changed` で選択を読み直すので、忘れた後に出す
+  - **L1（照会の失敗が `no_media` になる）**: `StartGGDataProvider.GetIconURL` / `GetBannerURL` に `strict` を足した。`strict=True` だと照会の失敗（`QueryRequests` がリトライを使い切った `{}` や、存在しない event）で `LookupError` を出す。取得は `strict=True` で呼ぶので `fetch_failed` になる。配信サムネのバナー照会は今までどおり None を受け取る
+  - **L2**: `SetDate` の範囲を 2000-01-01〜2999-12-31 にした（範囲外は拒否。Windows の `mktime` / `localtime` は 3001 年あたりから失敗する）。.ui の QDateEdit の `maximumDateTime` も 2999-12-31 にした。変換できない日も書かずに False を返す
+  - **L3**: `startAtDate` は入力の文字列をそのまま保存する。0 時が存在しない日は、その日の最初の時刻を unix 秒にする（`_StartOfDay`）
+  - **L4**: `_DATE_PATTERN` を `[0-9]` にした（全角数字を拒否）
+  - **L5**: アダプタは最初に観測した `bannerVersion` を基準にする（生成時にキーが無ければ None。シードの publish は変化として扱わない）
+  - **L8**: 一時ファイルを隠しファイル（`.logo.<乱数>.tmp`）にした。`TournamentMediaService` と `StreamService` の生成時に、自分のファイルの残骸（新しい名前と S4d の `logo.<乱数>.tmp` 形式）を消す（`ImageImport.RemoveLeftovers`）
+  - **L9**: 取り込みで `ImageOps.exif_transpose` を通す（縮小の後。配信団体素材にも効く）
+  - **L10**: admin URL の解決を、QObject を作らないモジュール関数 `StartGGDataProvider.ResolveEventUrl` に切り出した。リクエストのリトライ部分も関数 `_QueryRequests` にし、`QueryRequests` メソッドはそれに委ねる（テストが差し替えるメソッドとしては残す）。使われなくなった `GetRealEventURL` は削除した
+  - **L12**: `ResetMedia` のログを「既定のアイコンが読めない」「書き込めない」「バナーを消せない」に分けた。取得のログも、照会の失敗・ダウンロードの失敗（URL 付き）・画像でない応答を区別した
+  - テストを追加した:
+    - T1: 設定の `fetchMedia` が実行中の取得の後に走る。あわせて、予約の後に大会が解除されたら何もしない
+    - T2: 解除の後、コンボが空になる。旧い順に戻すと落ちることを確認した
+    - T3: 実 provider で、照会の失敗と「メディアが無い」を区別する
+    - T4: ジョブのスレッドでバナーが変わると、GUI スレッドで `media_updated` が出る
+    - T5: 解決待ちの admin URL に、後から来た event URL が勝つ
+    - T6: 開始日の上限、全角数字、0 時の無い日、変換できない日
+    - その他: L11 / L5 / L8 / L9 / L10 のテスト
+  - 記録だけ: L6 / L7 / L13 / L14（上の残課題）
+- **オーナー実機確認**（`python main.py`）
+  - 大会情報 →「大会を選ぶ」で event URL を入れる → 大会名などが入り、少し後にアイコン / バナーのプレビューが変わる。取得中はフッターに「大会アイコン / バナーを取得中...」が出て「大会からアイコン・バナーをダウンロード」と「大会を選ぶ」が押せない。UI は固まらない
+  - admin の URL（`start.gg/admin/tournament/<大会>/brackets/<id>`）を入れる → **ダイアログを閉じた後も UI が固まらず**、少し後に大会が読み込まれる
+  - サイドバーの大会ボタン →「大会の設定を解除」→ **確認が出る**。「はい」で大会情報が空になり、**ゲームボタンが「ゲームを選ぶ」に戻る**。大会情報のゲームのコンボも空になる。パネルの「大会との接続を解除する」も同じ
+  - 大会 A を読み込んだ状態で、パネルの「大会を選ぶ」に別の大会 B の admin URL を入れ、解決を待つ数秒の間に「大会からアイコン・バナーをダウンロード」を押す → 最後は B のアイコン / バナーになる（A のものが残らない）
+  - スマホで撮った縦向きの写真をアイコン / バナーに読み込む → 横倒しにならない
+  - アイコン / バナーを PC のファイルから読み込む → プレビューが変わり、`layout/logo.png` が長辺 512 以下、`user_data/tournament_banner.png` が長辺 1920 以下の PNG になる。サムネイル設定 / リザルト設定のプレビューもバナーの変更に追従する。画像でないファイルを選ぶと「画像を読み込めませんでした…」が出る
+  - 「Autona のデフォルトに戻す」→ アイコンが Autona のアイコン、バナーが既定のバナーに戻る
+  - 開始日を選ぶ → **再起動しても日付欄に残る**（OBS の開始日の表示は今までどおり）
+  - 大会情報のゲームのコンボでゲームを選ぶ → そのゲームが読み込まれる（サイドバーのゲームボタンも追従）
+  - Web UI の大会 URL の欄から読み込み / 空にして読み込み → 今までどおり（空ならゲーム選択も外れる）

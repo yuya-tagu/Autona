@@ -161,7 +161,8 @@ pump(lambda: False, timeout=0.3)
 result["rescan_order"] = order[:]
 provider.provider = None
 
-# The shared wiring: the payload writer and the forgetting.
+# The shared wiring (the payload writer), and core's clear (ADR-005 S4f),
+# which forgets the selected game.
 provider.signals.tournament_data_updated.emit({"tournamentName": "Probe Cup"})
 result["tournament_name"] = StateManager.Get("tournamentInfo.tournamentName")
 
@@ -177,8 +178,10 @@ pump(lambda: StateManager.Get("stream.title") != "Probe Cup - SSBU",
      timeout=5)
 result["stream_title_entrants"] = StateManager.Get("stream.title")
 result["selected_before_clear"] = catalog.Current().codename
-provider.signals.tournament_url_update.emit("")
+from src.core.TournamentService import TournamentService
+TournamentService.instance.ClearTournament()
 result["selected_after_clear"] = catalog.Current().codename
+result["url_after_clear"] = TournamentService.TournamentUrl()
 
 # Jobs queued behind a full job lane when the shell stops (ADR-005 S3f-1):
 # the running ones are told to stop, the queued ones never run.
@@ -259,6 +262,7 @@ def test_the_headless_shell_assembles_and_runs(tmp_path):
         "Probe Cup ft. Ada Bob ... and more! - SSBU")
     assert result["selected_before_clear"] == "probe_game"
     assert result["selected_after_clear"] is None
+    assert result["url_after_clear"] == ""
 
     assert result["stopped"] is True
     assert result["state_json"] is True

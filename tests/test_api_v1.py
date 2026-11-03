@@ -895,9 +895,10 @@ _EVENT_URL = "https://www.start.gg/tournament/autona-test/event/singles"
 def loadedTournament(autonaApp, monkeypatch):
     """A tournament provider already on _EVENT_URL, with no network behind it.
 
-    SetTournamentSignal compares the requested URL with provider.url and
-    returns early when they match, so a stand-in is all a same-URL reload
-    touches. TOURNAMENT_URL (which load_tournament persists) is put back.
+    The adapter's LoadTournament (what core's TournamentService asks for,
+    ADR-005 S4f) compares the requested URL with provider.url and does
+    nothing when they match, so a stand-in is all a same-URL reload touches.
+    TOURNAMENT_URL (which TournamentService persists) is put back.
     """
     from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
 
@@ -917,8 +918,8 @@ def test_reloading_the_loaded_tournament_releases_the_in_progress_flag(
         client, loadedTournament):
     """Re-sending the loaded URL used to hold the flag for the full TTL.
 
-    The flag waited for tournament_changed, which SetTournamentSignal's
-    same-URL early return never emits, so the Web UI's Load button answered
+    The flag waited for tournament_changed, which a same-URL load (then
+    SetTournamentSignal's early return) never emits, so the Web UI's Load button answered
     409 for two minutes after a reload. It is released when the GUI-thread
     task that runs load_tournament finishes, whichever way it went.
     """

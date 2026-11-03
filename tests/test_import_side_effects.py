@@ -139,6 +139,14 @@ task_executor = importlib.import_module(
 # import.
 stream_service = importlib.import_module(
     "src.core.StreamService").StreamService
+# The tournament's icon / banner and its set / clear (ADR-005 S4f), and the
+# image helper they share with the stream org assets: singletons created by
+# bootstrap_core(), never on import.
+importlib.import_module("src.core.ImageImport")
+tournament_media = importlib.import_module(
+    "src.core.TournamentMediaService").TournamentMediaService
+tournament_service = importlib.import_module(
+    "src.core.TournamentService").TournamentService
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -262,6 +270,8 @@ assert core_player_db.instance is None, "import created PlayerDB.instance"
 assert core_bad_words.instance is None, "import created BadWordFilter.instance"
 assert task_executor.instance is None, "import created TaskExecutor.instance"
 assert stream_service.instance is None, "import created StreamService.instance"
+assert tournament_media.instance is None,     "import created TournamentMediaService.instance"
+assert tournament_service.instance is None,     "import created TournamentService.instance"
 assert core_state.observers.state_updated.subscriber_count() == 0, \
     "import subscribed to the state's notifications"
 assert page_lifecycle._webServerReady is False, \

@@ -606,9 +606,11 @@ class Window(QMainWindow):
         self.setTournamentAction.triggered.connect(
             lambda: AutonaTournamentDataProvider.instance.SetStartggEventSlug(self))
 
+        # Asks first, and forgets the selected game like every other clear
+        # (core/TournamentService.py, ADR-005 S4f owner's decision 2).
         startggMenu.addAction(
             QApplication.translate("app", "Unset tournament")).triggered.connect(
-            lambda: AutonaTournamentDataProvider.instance.SetTournament(None))
+            lambda: AutonaTournamentDataProvider.ConfirmClearTournament(self))
 
         self.sidebar.tournamentButton.setMenu(startggMenu)
         # ORDER CONSTRAINT: the tournamentInfo.* writer must run before the
@@ -618,8 +620,9 @@ class Window(QMainWindow):
         # used to provide that ordering by being constructed earlier in this
         # method, and it is lazy now (headless core Step 4b). The wiring is
         # the one the headless shell makes too (ADR-005 S3c): the payload
-        # writer, and the selected game forgotten when the URL is cleared
-        # (ahead of Signal_GameChange below, which resets the game button).
+        # writer. (Forgetting the selected game on a clear is core's
+        # TournamentService, ahead of the tournament_url_update that
+        # Signal_GameChange below resets the game button on -- S4f.)
         wire_tournament_data(on_failure=self._ReportTournamentLoadFailure)
         AutonaTournamentDataProvider.instance.signals.tournament_changed.connect(
             self.UpdateTournamentButton)
@@ -1322,7 +1325,8 @@ class Window(QMainWindow):
 
     def Signal_GameChange(self, url):
         # The game button only: forgetting the selected game itself is
-        # wire_tournament_data's, connected ahead of this (both shells).
+        # core's TournamentService.ClearTournament, done before it announces
+        # the empty URL this follows (both shells, ADR-005 S4f).
         if url == "":
             self._currentGameIndex = 0
             for action in self._gameActions.values():

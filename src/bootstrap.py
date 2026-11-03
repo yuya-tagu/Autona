@@ -264,6 +264,28 @@ def bootstrap_core():
         TournamentInfoService.instance = TournamentInfoService(
             formatEventDate=AutonaLocaleHelper.FormatExportDate)
 
+    # ORDER CONSTRAINT: the tournament's icon / banner (ADR-005 S4f) and the
+    # tournament's set / clear after what they reach -- the task executor
+    # (the fetch and the admin URL's resolution are its jobs), the game
+    # asset catalog (a clear forgets the selected game) and the provider
+    # adapter above, which the set / clear drive and whose loaded provider
+    # the fetch reads (bound here; core may not import the adapter) -- and
+    # before anything can set a tournament: the shells' restore
+    # (UiMounted), the URL dialog, the EVENT panel and the web server are
+    # all the shell's, after this function returns. The set / clear runs
+    # on the main thread through the GUI executor, read when one is
+    # applied (both shells make it before calling this).
+    from .Helpers import AutonaQtHelper
+    from .core.TournamentMediaService import TournamentMediaService
+    from .core.TournamentService import TournamentService
+    if TournamentMediaService.instance is None:
+        TournamentMediaService.instance = TournamentMediaService(
+            currentProvider=AutonaTournamentDataProvider.instance.GetProvider)
+    if TournamentService.instance is None:
+        TournamentService.instance = TournamentService(
+            provider=AutonaTournamentDataProvider.instance,
+            onMain=lambda fn: AutonaQtHelper.gui_executor(fn))
+
     # ORDER CONSTRAINT: the 配信設定 operations (ADR-005 S4d) after what
     # they write through and read -- the state layer and AutonaActions (the
     # stream title), the task executor (the thumbnail job) and the provider,
@@ -486,16 +508,17 @@ def wire_tournament_data(on_failure=None):
       payload did not apply: the desktop shows a dialog, the headless shell
       logs. The caller decides where in its own wiring this goes -- the
       window connects the readers of tournamentInfo.* after it.
-    - tournament_url_update with an empty URL (the tournament was unset) ->
-      GameAssetCatalog.ForgetSelection: the game stays loaded, but is no
-      longer the selected one, so selecting it again loads it again.
+
+    (Forgetting the selected game when the tournament is cleared used to be
+    wired here too, on tournament_url_update with an empty URL, and so only
+    for the clears that emitted it. It is core's TournamentService.
+    ClearTournament since ADR-005 S4f, for every clear.)
 
     Was the window's alone until ADR-005 S3c; the headless shell has the
     same provider and needs the same writes. Call once, after
     bootstrap_core().
     """
     from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
-    from .core.GameAssetCatalog import GameAssetCatalog
     from .core.TournamentInfoService import TournamentInfoService
 
     def apply(data):
@@ -504,13 +527,8 @@ def wire_tournament_data(on_failure=None):
         if on_failure is not None:
             on_failure(data)
 
-    def forget_cleared(url):
-        if url == "":
-            GameAssetCatalog.instance.ForgetSelection()
-
     signals = AutonaTournamentDataProvider.instance.signals
     signals.tournament_data_updated.connect(apply)
-    signals.tournament_url_update.connect(forget_cleared)
 
 
 def wire_game_roster(game_loaded):

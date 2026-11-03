@@ -444,31 +444,25 @@ def test_a_last_pick_that_is_no_longer_installed_is_not_restored(
 def test_clearing_the_tournament_url_forgets_the_pick(goldenGames):
     from src.core.GameAssetCatalog import GameAssetCatalog
 
-    # Source-level half: Window cannot be built in this harness (importing
-    # src/Autona.py is the startup sequence -- agent-pitfalls #1). The
-    # forgetting is bootstrap.wire_tournament_data's since ADR-005 S3c (both
-    # shells call it; tests/test_bootstrap_split.py pins that they do), and
-    # the window's Signal_GameChange only resets its game button.
+    # Source-level half: the forgetting is core's
+    # TournamentService.ClearTournament since ADR-005 S4f, for every clear
+    # (it was a slot of tournament_url_update in bootstrap's wiring, which
+    # only the web clears emitted; tests/test_tournament_service.py runs it),
+    # and the window's Signal_GameChange only resets its game button.
     root = Path(__file__).resolve().parent.parent
-    bootstrap = ast.parse(
-        (root / "src" / "bootstrap.py").read_text(encoding="utf-8"))
-    wiring = next(node for node in bootstrap.body
-                  if isinstance(node, ast.FunctionDef)
-                  and node.name == "wire_tournament_data")
-    forget = next(node for node in ast.walk(wiring)
-                  if isinstance(node, ast.FunctionDef)
-                  and node.name == "forget_cleared")
-    cleared = next(node for node in ast.walk(forget)
-                   if isinstance(node, ast.If)
-                   and ast.unparse(node.test) == "url == ''")
-    calls = {ast.unparse(node.func)
-             for statement in cleared.body for node in ast.walk(statement)
+    service = ast.parse((root / "src" / "core" / "TournamentService.py")
+                        .read_text(encoding="utf-8"))
+    clear = next(node for node in ast.walk(service)
+                 if isinstance(node, ast.FunctionDef)
+                 and node.name == "_ApplyClear")
+    calls = {ast.unparse(node.func) for node in ast.walk(clear)
              if isinstance(node, ast.Call)}
     assert "GameAssetCatalog.instance.ForgetSelection" in calls, (
-        "a cleared tournament URL no longer forgets the selected game; "
+        "a cleared tournament no longer forgets the selected game; "
         "picking the same game again after clearing the URL would be skipped")
-    assert "signals.tournament_url_update.connect(forget_cleared)" in (
-        ast.unparse(wiring))
+    bootstrap = (root / "src" / "bootstrap.py").read_text(encoding="utf-8")
+    assert "forget_cleared" not in bootstrap, (
+        "a second forgetting path is back; the clear is core's alone")
     tree = ast.parse((root / "src" / "Autona.py").read_text(encoding="utf-8"))
     handler = next(node for node in ast.walk(tree)
                    if isinstance(node, ast.FunctionDef)

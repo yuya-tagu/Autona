@@ -432,12 +432,29 @@ tournamentInfo
 ├── eventName / address / numEntrants / startAt
 │                                  ※EVENT タブの入力欄。キー名は `StateSchema.TOURNAMENT_INPUT_KEYS`
 │                                    が正本（`tournamentName` を含む）。書き手は
-│                                    `core/TournamentInfoService.py` のみ（入力・provider 両方向）
+│                                    `core/TournamentInfoService.py` のみ（入力・provider 両方向）。
+│                                    `startAt` は短縮日付文字列（ロケール依存の整形済み）
+├── startAtDate                    ※`startAt` の日（`YYYY-MM-DD`、PC のタイムゾーン。null と一緒に null）。
+│                                    日付の入力欄はこれを描き、`TournamentInfoService.SetDate` で書く
+│                                    （その日の 0 時の unix 秒への変換は core。ADR-005 S4f）
 ├── endAt / eventStartAt / eventEndAt
 │                                  ※タブに入力欄を持たない provider 由来の日時。短縮日付文字列で公開
 ├── logoVersion                    ※`./layout/logo.png` の mtime（OBS のキャッシュバスト用）
+├── bannerVersion                  ※`./user_data/tournament_banner.png` の mtime（0 = 未登録。既定のバナーを使う）
+├── media                          大会アイコン / バナーの取得の状態（起動のたびに idle へ戻る）
+│   ├── status                     idle | running | done | error
+│   ├── error                      error の理由（`no_media` / `fetch_failed` / `save_failed` /
+│   │                                `superseded` / `cancelled`）
+│   └── revision                   取得を始めるたびに 1 増える（予約された次の取得も 1 回と数える）
 └── {provider 由来}                (`shortLink` 等。ペイロードの残りをそのまま透過)
 ```
+
+大会アイコン / バナーのファイル（`./layout/logo.png` は長辺 512、`./user_data/tournament_banner.png`
+は長辺 1920 の PNG）と `logoVersion` / `bannerVersion` / `media` の書き手は
+`core/TournamentMediaService.py`（取り込み・取得のジョブ・既定に戻す。ADR-005 S4f）。画像の検証・縮小・
+原子的な書き込みは配信団体素材と共通の `core/ImageImport.py`。`bannerVersion` が変わると Qt のアダプタが
+`media_updated` を出す（サムネイル / リザルトのプレビューが受ける）。大会の設定・解除（`TOURNAMENT_URL`）は
+どの入口からでも `core/TournamentService.py` を通り、解除はゲーム選択も忘れる。
 
 ##### `colors` — 機能別カラーの上書き
 
@@ -743,7 +760,7 @@ QSettings に保存された最後の選択に依存し、初期値は先頭ペ�
 
 | # | objectName | クラス | 主な責務 | 入力先 (Set) | 表示元 (Get) | デフォルト表示 |
 |---|------------|-------|---------|------------|------------|--------------|
-| 1 | `Tournament Info` | `AutonaTournamentInfoWidget` | 大会名・日付・URL など大会メタデータの編集、大会アイコン / バナー。**書き込みの正本は `src/core/TournamentInfoService.py`**（Start.gg ペイロード・表示大会名・`logoVersion`）で、パネルは手入力と描画のみ | `tournamentInfo.*`（手入力） | `tournamentInfo.*` | ✓（最初に表示） |
+| 1 | `Tournament Info` | `AutonaTournamentInfoWidget` | 大会名・日付・URL など大会メタデータの編集、大会アイコン / バナー。**書き込みの正本は `src/core/TournamentInfoService.py`**（Start.gg ペイロード・表示大会名・日付）、アイコン / バナーは `src/core/TournamentMediaService.py`、大会の設定・解除は `src/core/TournamentService.py`（ADR-005 S4f）で、パネルは core を呼んで描画するだけ | `tournamentInfo.*`（手入力） | `tournamentInfo.*` | ✓（最初に表示） |
 | 1.5 | `WebPanels`（共有ホスト。ナビの文言は `Stream Settings`） | React の `StreamPage`（`/web/stream`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4e）。Qt 版（`AutonaStreamSettingsWidget`）は S4e で削除済み | 配信先・配信タイトル・配信団体アイコン / サムネイルの登録・配信サムネイル生成。**処理の正本は `src/core/StreamService.py`**（タイトルの自動生成・チャンネル CRUD・素材の取り込み・サムネ生成のジョブ。ADR-005 S4d）で、ページは `/api/v1/stream*` を呼んで state を描画するだけ（ファイル選択・ダイアログ・プレビュー・クリップボードはブラウザの部品）。`stream.url` / `title` の書き込みは `AutonaActions.SetStreamUrl` / `SetStreamTitle`（同値なら書かない） | `stream.*`（core 経由） | `stream.*` | — |
 | 2 | `Thumbnail Settings` | `AutonaThumbnailSettingsWidget` | サムネイルテンプレ選択・背景指定・プレビュー・PNG/JPG 保存・クリップボードコピー | `thumbnail_config.*`（SettingsManager） | `score.*`, `tournamentInfo.*`, `thumbnail_config.*` | ✓（条件付き） |
 | 3 | `Result Settings` | `AutonaResultSettingsWidget` | リザルトレイアウト選択・選手入力・プレビュー・PNG/JPG 保存・クリップボードコピー。`result_players` の書き込みは `AutonaActions.PublishResultPlayers` | `result_config.*`, `result_players` | `tournamentInfo.*`, `result_players` | ✓ |
