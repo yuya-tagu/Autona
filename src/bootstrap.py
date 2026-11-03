@@ -271,8 +271,11 @@ def bootstrap_core():
     # adapter above, which the set / clear drive and whose loaded provider
     # the fetch reads (bound here; core may not import the adapter) -- and
     # before anything can set a tournament: the shells' restore
-    # (UiMounted), the URL dialog, the EVENT panel and the web server are
-    # all the shell's, after this function returns. The set / clear runs
+    # (UiMounted), the sidebar's URL dialog and the web server (the Event
+    # page's /api/v1) are all the shell's, after this function returns.
+    # Its status is the state's (tournamentInfo.load), seeded with the rest
+    # by the shells' launch seed (StateSchema.SeedPanelState), ahead of the
+    # restore. The set / clear runs
     # on the main thread through the GUI executor, read when one is
     # applied (both shells make it before calling this).
     from .Helpers import AutonaQtHelper
@@ -508,6 +511,8 @@ def wire_tournament_data(on_failure=None):
       payload did not apply: the desktop shows a dialog, the headless shell
       logs. The caller decides where in its own wiring this goes -- the
       window connects the readers of tournamentInfo.* after it.
+    - the same payload settles the set's status (TournamentService.
+      PayloadApplied, ADR-005 S4g): loaded, or the load failed.
 
     (Forgetting the selected game when the tournament is cleared used to be
     wired here too, on tournament_url_update with an empty URL, and so only
@@ -520,9 +525,15 @@ def wire_tournament_data(on_failure=None):
     """
     from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
     from .core.TournamentInfoService import TournamentInfoService
+    from .core.TournamentService import TournamentService
 
     def apply(data):
-        if TournamentInfoService.instance.ApplyProviderPayload(data):
+        applied = TournamentInfoService.instance.ApplyProviderPayload(data)
+        # The set's status (tournamentInfo.load, ADR-005 S4g) settles on
+        # the payload, whichever way it went.
+        if TournamentService.instance is not None:
+            TournamentService.instance.PayloadApplied(data, applied)
+        if applied:
             return
         if on_failure is not None:
             on_failure(data)

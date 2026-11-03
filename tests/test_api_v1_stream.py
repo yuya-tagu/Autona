@@ -324,16 +324,17 @@ def test_the_limit_is_twenty_megabytes_of_image(webApp):
 
 
 def test_the_page_refuses_the_same_size_before_sending():
-    # The Stream page's copy of the limit (it refuses a larger file before
-    # reading it): one value on both sides (S4e review).
+    # The React pages' copy of the limit (they refuse a larger file before
+    # reading it): one value on both sides (S4e review). Shared by the
+    # Stream and the Event page since S4g.
     import re
 
     from tests.conftest import PROJECT_ROOT
 
-    source = (PROJECT_ROOT / "web" / "src" / "StreamPage" / "Cards.tsx"
+    source = (PROJECT_ROOT / "web" / "src" / "PanelShell" / "imageUpload.ts"
               ).read_text(encoding="utf-8")
     found = re.findall(
-        r"^export const ORG_IMAGE_MAX_BYTES = ([\d\s*]+);$", source,
+        r"^export const IMAGE_UPLOAD_MAX_BYTES = ([\d\s*]+);$", source,
         re.MULTILINE)
     assert len(found) == 1, found
     value = 1

@@ -48,93 +48,6 @@
         <source>Top </source>
         <translation>トップ</translation>
     </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Tournament Info</source>
-        <translation>大会情報</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Tournament Name</source>
-        <translation>大会名</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Event Name</source>
-        <translatorcomment>シングルス、ダブルス、その他など</translatorcomment>
-        <translation>種目</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Game Title</source>
-        <translation>ゲームタイトル</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Entrant Number</source>
-        <translation>参加人数</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Date</source>
-        <translation>日付</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Address</source>
-        <translation>場所</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Load from tournament</source>
-        <translation>大会から読み込む</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Disconnect from tournament</source>
-        <translation>大会との接続を解除する</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Tournament Icon / Banner</source>
-        <translation>大会アイコン / バナー</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>大会アイコンをローカルファイルから読み込む</source>
-        <translation>大会アイコンをローカルファイルから読み込む</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>大会バナーをローカルファイルから読み込む</source>
-        <translation>大会バナーをローカルファイルから読み込む</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>大会からアイコン・バナーをダウンロード</source>
-        <translation>大会からアイコン・バナーをダウンロード</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Autona のデフォルトに戻す</source>
-        <translation>Autona のデフォルトに戻す</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Theme Colors</source>
-        <translation>テーマカラー</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Theme Color</source>
-        <translation>テーマ色</translation>
-    </message>
-    <message>
-        <location filename="..\layout\AutonaTournamentInfo.ui" line="0" />
-        <source>Accent Color</source>
-        <translation>アクセント色</translation>
-    </message>
 </context><context>
     <name>Form</name>
     <message>
@@ -1720,11 +1633,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>配信先を追加する</translation>
     </message>
     <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="689" />
-        <source>配信先を編集する</source>
-        <translation>配信先を編集する</translation>
-    </message>
-    <message>
         <location filename="..\AutonaScoreboardWidget.py" line="1332" />
         <location filename="..\AutonaScoreboardWidget.py" line="329" />
         <source>Load set</source>
@@ -2157,50 +2065,37 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>Twitchでのユーザー名:</translation>
     </message>
     <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="268" />
+        <location filename="..\AutonaTournamentDataProvider.py" line="321" />
         <source>Confirm</source>
         <translation>確認</translation>
     </message>
     <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="269" />
+        <location filename="..\AutonaTournamentDataProvider.py" line="323" />
         <source>Start.gg との接続を解除します。よろしいですか？</source>
         <translation>Start.gg との接続を解除します。よろしいですか？</translation>
     </message>
     <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="411" />
-        <source>画像を保存できませんでした。ほかのアプリがファイルを開いていないか確認してください。</source>
-        <translation>画像を保存できませんでした。ほかのアプリがファイルを開いていないか確認してください。</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="414" />
-        <source>画像を読み込めませんでした。PNG / JPEG / BMP（5000 万画素まで）の画像を選んでください。</source>
-        <translation>画像を読み込めませんでした。PNG / JPEG / BMP（5000 万画素まで）の画像を選んでください。</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="521" />
-        <location filename="..\AutonaTournamentInfoWidget.py" line="442" />
+        <location filename="..\AutonaThumbnailSettingsWidget.py" line="632" />
         <source>Open Image</source>
         <translation>画像を開く</translation>
     </message>
     <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="523" />
-        <location filename="..\AutonaTournamentInfoWidget.py" line="444" />
+        <location filename="..\AutonaThumbnailSettingsWidget.py" line="634" />
         <source>Image Files</source>
         <translation>画像ファイル</translation>
     </message>
     <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="788" />
-        <location filename="..\AutonaTournamentInfoWidget.py" line="787" />
+        <location filename="..\Autona.py" line="1364" />
         <source>Error</source>
         <translation>エラー</translation>
     </message>
     <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="844" />
+        <location filename="..\Autona.py" line="1356" />
         <source>The tournament URL could not be loaded.</source>
         <translation>大会 URL を読み込めませんでした。</translation>
     </message>
     <message>
-        <location filename="..\AutonaTournamentInfoWidget.py" line="844" />
+        <location filename="..\Autona.py" line="1358" />
         <source>Make sure that your tournament URL is correctly formatted and points to an existing event, and try again.</source>
         <translation>大会 URL の形式が正しく、存在するイベントを指しているか確認してから再試行してください。</translation>
     </message>

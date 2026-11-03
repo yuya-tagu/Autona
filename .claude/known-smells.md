@@ -303,7 +303,7 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, b
 **根拠**: state-keys.md「要注意事項 #2」
 
 **2026-06-24 検証**: 記述どおり現存。`element.objectName()` をキーパスに使用しているのは **5ファイル**:
-`AutonaScoreboardWidget.py`, `AutonaTournamentInfoWidget.py`, `AutonaScoreboardPlayerWidget.py`, `AutonaTeamPlayerWidget.py`（`AutonaBasePlayerWidget.py` は `objectName() != ""` の検査のみでキーパス用途ではない）。※ かつて該当した `AutonaNotesWidget.py` は NOTE タブ廃止に伴い 2026-07-01 削除。`.ui` の objectName 変更でキーパスが壊れ、既存 `program_state.json` との互換が失われるリスクが継続（`STATE_VERSION` はサイドバーのナビ構成用で、state スキーマのマイグレーション層は無い）。※ 2026-10-25（ADR-005 S3b）で正本は `user_data/state.json` になり、移行層（`StateMigrations`）もできた。現状は冒頭の「現状」を参照。
+`AutonaScoreboardWidget.py`, `AutonaTournamentInfoWidget.py`（2026-11-01 ADR-005 S4g で削除）, `AutonaScoreboardPlayerWidget.py`, `AutonaTeamPlayerWidget.py`（2026-08-28 削除）（`AutonaBasePlayerWidget.py` は `objectName() != ""` の検査のみでキーパス用途ではない）。※ かつて該当した `AutonaNotesWidget.py` は NOTE タブ廃止に伴い 2026-07-01 削除。`.ui` の objectName 変更でキーパスが壊れ、既存 `program_state.json` との互換が失われるリスクが継続（`STATE_VERSION` はサイドバーのナビ構成用で、state スキーマのマイグレーション層は無い）。※ 2026-10-25（ADR-005 S3b）で正本は `user_data/state.json` になり、移行層（`StateMigrations`）もできた。現状は冒頭の「現状」を参照。
 
 **2026-06-27 ガード導入（ランタイム不変・zero-risk）**: フル移行（明示キーのマッピング層＋データマイグレーション）は S3 で「低リスク」条件から外れるため見送り。代わりに**実行時の挙動を一切変えず**、契約を破る変更を検知する `tests/test_objectname_keypath_contract.py`（3テスト）を追加:
 - `.ui` の入力ウィジェット objectName 集合をスナップショット固定（リネーム/削除を検知）
@@ -321,7 +321,7 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, b
 | AutonaScoreboardScore.ui | phase, match, best_of, score_left, score_right | `score.{N}.{name}`（best_of 等）/ findChild キー |
 | AutonaScoreboardPlayer.ui | team, name, seed, real_name, twitter, birthday, country, state | `score.{N}.team.{T}.player.{M}.{name}` |
 | AutonaTeamPlayer.ui | team, name, country, state, twitter, activePlayer, dead, dynamicSpinner | .ui ごと削除済み（2026-08-28） |
-| AutonaTournamentInfo.ui | tournamentName, eventName, gameTitleCombo, numEntrants, startAt, address, streamTitleEdit | `tournamentInfo.{name}` |
+| AutonaTournamentInfo.ui | tournamentName, eventName, gameTitleCombo, numEntrants, startAt, address, streamTitleEdit | .ui ごと削除済み（2026-11-01 ADR-005 S4g。React の大会情報ページ）。キー `tournamentInfo.{tournamentName,eventName,address,numEntrants,startAt}` は不変で、書き手は `core/TournamentInfoService` |
 | （プログラム的） | notes_widget_{N}, custom_textbox | `notes.{name}.{title\|contents}` / `{self.path}.custom_textbox` |
 
 **運用ルール**: 上表の objectName を変更/削除する場合は、**先に `src/core/StateMigrations.py` に移行 step を足して `CURRENT_VERSION` を上げ**（旧キー → 新キー。出荷した step は凍結）、`StateSchema` の定数・`.ui`・`tests/test_objectname_keypath_contract.py` の `EXPECTED` を同時に更新する（2026-10-25 S3b で移行層ができた。それまでは「マイグレーション層を追加してから」だった）。
@@ -362,6 +362,12 @@ Flask Blueprint を使ってドメイン別に分割（scoreboard, commentary, b
 > 契約テストは (1) schema 名 ⊆ .ui objectName、(2) `AutonaTournamentInfoWidget` に
 > `objectName()` 呼び出しが無いこと、(3) 同ファイルに `StateManager.Set/Unset` が
 > 無いことを AST で pin する。
+>
+> **2026-11-01（ADR-005 S4g）: `AutonaTournamentInfoWidget` と `AutonaTournamentInfo.ui` は削除済み**
+> （大会情報は React の `/web/event`）。上の (1)〜(3) の pin もこの族については外した。
+> `StateSchema.TOURNAMENT_INPUT_KEYS` は `PATCH /api/v1/tournament/info` の field 名
+> （3 つの文字列・`numEntrants`・`startAtDate`）になり、state のキー名は変わっていない
+> （保存データの互換は不変）。この族はもう objectName と結び付いていないので、上表の運用ルールの対象外。
 >
 > `qt_spinbox_lineedit` フォールバックの検査（`test_qt_spinbox_fallback_present`）は
 > **削除**した。あの guard は `findChildren(QLineEdit)` ループが QSpinBox の内部 line edit を

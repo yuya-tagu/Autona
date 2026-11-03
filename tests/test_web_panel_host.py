@@ -4,7 +4,13 @@ AutonaWebPanelHost is one QStackedWidget page holding one QWebEngineView
 for every panel moved to React. What has to hold:
 
 * the view is not built until the host is on screen with a panel to show
-  (startup does not pay for it);
+  and the web server is ready (startup does not pay for it), and then from
+  the event loop, not inside the show or the readiness call that allows it
+  (S4g review M4: the Event page is the sidebar's default item, so at
+  startup the host is shown by the main window's self.show(), ahead of
+  STARTUP phase=core-shown, and the server is marked ready inside
+  _StartWebServer(), ahead of phase=webserver-ready); no paint is waited
+  for (S4g review L14: a window started minimized is not painted);
 * it opens ``/web/<panel>?desktop=1&lng=<Qt language>`` once the web server
   is up, and showing another panel navigates the page's router instead of
   reloading the view;
@@ -114,7 +120,14 @@ class _Rig:
         self.stack.addWidget(QLabel("another panel"))
         self.stack.setCurrentIndex(1)
         self.loads = []
-        self._watching = False
+        # Every load of the view, from its first: watched as the view is
+        # built (from the event loop, see reveal()), before any can finish.
+        build = self.host._EnsureView
+
+        def watched():
+            build()
+            self.host.view.loadFinished.connect(self.loads.append)
+        self.host._EnsureView = watched
         self.window.resize(640, 400)
         self.window.show()
 
@@ -124,10 +137,10 @@ class _Rig:
 
     def reveal(self):
         self.stack.setCurrentIndex(0)
-        # The view is built on the first reveal with a panel.
-        if self.host.view is not None and not self._watching:
-            self._watching = True
-            self.host.view.loadFinished.connect(self.loads.append)
+        # The view is built on the first reveal with a panel (the server is
+        # ready here), from the event loop.
+        if self.host.view is None and self.host._panel is not None:
+            assert _waitUntil(lambda: self.host.view is not None),                 "the view was not built"
 
     def hide(self):
         self.stack.setCurrentIndex(1)
@@ -168,6 +181,7 @@ def buildHost(qapp, panelServer, monkeypatch):
     # Japanese, and there is a second panel to switch to.
     monkeypatch.setattr(WPL, "_webServerReady", True)
     monkeypatch.setattr(WPL, "_pendingLoaders", [])
+    monkeypatch.setattr(WPL, "_readyCallbacks", [])
     target = {"port": port}
     realGet = WPL.SettingsManager.Get
     monkeypatch.setattr(
@@ -250,9 +264,11 @@ def test_the_view_is_built_only_once_the_host_is_shown_with_a_panel(buildHost):
     assert rig.host.view is None
     assert not _waitUntil(lambda: rig.requests, timeout=0.3)
 
-    rig.reveal()
+    rig.stack.setCurrentIndex(0)
 
-    assert rig.host.view is not None
+    # Not inside the show: from the event loop.
+    assert rig.host.view is None
+    assert _waitUntil(lambda: rig.host.view is not None)
     rig.waitLoaded()
     assert rig.requests == ["/web/shell-check?desktop=1&lng=ja"]
     assert rig.path() == ("/web/shell-check", "desktop=1&lng=ja")
@@ -308,9 +324,105 @@ def test_a_host_shown_without_a_panel_builds_nothing(buildHost):
     rig = buildHost()
     rig.reveal()
 
-    assert rig.host.view is None
+    assert not _waitUntil(lambda: rig.host.view is not None, timeout=0.3)
     rig.host.ShowPanel("shell-check")
-    assert rig.host.view is not None
+    # On screen already: built from the event loop.
+    assert rig.host.view is None
+    assert _waitUntil(lambda: rig.host.view is not None)
+    rig.waitLoaded()
+
+
+def test_the_view_waits_for_the_web_server(buildHost, monkeypatch):
+    """What STARTUP phase=core-shown and phase=webserver-ready are logged
+    after (S4g review M4). At startup the window is shown with the host as
+    its current page -- the Event page, the sidebar's default item -- before
+    the web server is started: no view is built then, nor queued
+    (core-shown follows self.show()). _StartWebServer() marks the server
+    ready and logs webserver-ready once that returns: no view is built
+    inside it either. It is built from the event loop afterwards, so
+    Chromium's start-up holds up neither the window's first paint and the
+    loading spinner nor the server's start (the page could not be shown
+    before the server anyway)."""
+    monkeypatch.setattr(WPL, "_webServerReady", False)
+    rig = buildHost()
+    rig.window.hide()
+    rig.stack.setCurrentIndex(0)
+    rig.host.ShowPanel("shell-check")
+
+    rig.window.show()
+
+    # core-shown: nothing built or queued -- however long it waits.
+    assert rig.host.view is None and not rig.host._viewPending
+    assert not _waitUntil(lambda: rig.host.view is not None, timeout=0.3)
+    assert rig.requests == []
+
+    WPL.MarkWebServerReady()
+
+    # webserver-ready: still nothing built, the build queued.
+    assert rig.host.view is None and rig.host._viewPending
+    assert _waitUntil(lambda: rig.host.view is not None)
+    rig.waitLoaded()
+    assert rig.requests == ["/web/shell-check?desktop=1&lng=ja"]
+
+
+def test_the_view_is_built_without_a_paint(buildHost, monkeypatch):
+    """S4g review L14: the view waited for the host's first paint, and a
+    window started minimized is never painted -- no view until the
+    operator restored it. Nothing waits for a paint now (none is let
+    through here)."""
+    from qtpy.QtCore import QObject
+
+    monkeypatch.setattr(WPL, "_webServerReady", False)
+    rig = buildHost()
+    rig.window.hide()
+
+    class NoPaint(QObject):
+        def eventFilter(self, obj, event):
+            return event.type() == QEvent.Type.Paint
+    rig.host.installEventFilter(NoPaint(rig.host))
+    rig.stack.setCurrentIndex(0)
+    rig.host.ShowPanel("shell-check")
+    rig.window.showMinimized()
+
+    WPL.MarkWebServerReady()
+
+    assert _waitUntil(lambda: rig.host.view is not None)
+    rig.waitLoaded()
+
+
+def test_a_host_off_screen_when_the_server_is_ready_builds_on_its_show(
+        buildHost, monkeypatch):
+    monkeypatch.setattr(WPL, "_webServerReady", False)
+    rig = buildHost()
+    rig.reveal()
+    rig.host.ShowPanel("shell-check")
+    rig.hide()
+
+    WPL.MarkWebServerReady()
+
+    assert not _waitUntil(lambda: rig.host.view is not None, timeout=0.3)
+    assert not rig.host._viewPending
+    rig.reveal()
+    rig.waitLoaded()
+
+
+def test_a_host_hidden_before_the_queued_build_builds_on_its_next_show(
+        buildHost):
+    rig = buildHost()
+    rig.host.ShowPanel("shell-check")
+    # Shown: the build is queued; hidden before the event loop runs it.
+    rig.stack.setCurrentIndex(0)
+    assert rig.host.view is None and rig.host._viewPending
+    rig.hide()
+
+    assert not _waitUntil(lambda: rig.host.view is not None, timeout=0.3)
+    assert not rig.host._viewPending
+    assert not rig.host.isVisible()
+
+    rig.reveal()
+
+    rig.waitLoaded()
+    assert rig.requests == ["/web/shell-check?desktop=1&lng=ja"]
 
 
 def test_an_unknown_panel_is_refused(buildHost):
@@ -345,15 +457,16 @@ def test_the_host_waits_for_the_web_server(buildHost, monkeypatch):
     monkeypatch.setattr(WPL, "_webServerReady", False)
     rig = buildHost()
     rig.host.ShowPanel("shell-check")
-    rig.reveal()
+    rig.stack.setCurrentIndex(0)
 
-    # Built, but parked behind the gate: no request reaches the port.
-    assert rig.host.view is not None
-    assert not _waitUntil(lambda: rig.requests, timeout=0.3)
-    assert rig.host.view.url().isEmpty()
+    # Not even built behind the gate (S4g review M4; it used to be built
+    # with its load parked): no request reaches the port.
+    assert not _waitUntil(
+        lambda: rig.host.view is not None or rig.requests, timeout=0.3)
 
     WPL.MarkWebServerReady()
 
+    assert _waitUntil(lambda: rig.host.view is not None)
     rig.waitLoaded()
     assert rig.requests == ["/web/shell-check?desktop=1&lng=ja"]
 
@@ -599,6 +712,48 @@ def test_the_commentary_item_opens_the_react_page():
     assert "commentary" in WebAccess.WEB_PANELS
 
 
+def test_the_event_item_opens_the_react_page():
+    import ast
+    calls = _calls(_windowMethod("_CreateEventPanel"))
+
+    # The React page is the only 大会情報 panel (ADR-005 S4g).
+    assert calls == [("self._WebPanel", ["'event'"])]
+
+    # Still the lazy factory leading Setup (the sidebar's default item),
+    # keyed by the React panel's name.
+    build = _windowMethod("_BuildUi")
+    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
+               and node.elts
+               and ast.unparse(node.elts[0]) == "self._CreateEventPanel"]
+    assert len(entries) == 1
+    assert ast.unparse(entries[0].elts[1]) == "'tournament.svg'"
+    assert ast.unparse(entries[0].elts[-1]) == "'event'"
+    assert "event" in WebAccess.WEB_PANELS
+
+
+def test_the_restored_page_is_built_before_the_window_is_shown():
+    """STARTUP phase=core-shown is logged right after self.show(), with the
+    restored page built before it (_EnsurePanelAt). For the Event page --
+    the default item -- that page is the shared view's host, whose view is
+    built from the event loop once the web server is ready, after
+    phase=webserver-ready (test_the_view_waits_for_the_web_server): the
+    server's readiness comes before that phase is logged."""
+    tokens = "".join(_autonaSource().split())
+    ensure = tokens.index("self._EnsurePanelAt(self.stack.currentIndex())")
+    show = tokens.index("self.show()", ensure)
+    shown = tokens.index('log_startup_phase("core-shown")', show)
+    assert ensure < show < shown
+    # And the overlay's dismissal (the queue drained) still gates the web
+    # server, whose readiness releases the view's first load.
+    assert tokens.index("self._loading_overlay.finish_when_ready()") < \
+        tokens.index("self._loading_overlay.call_when_finished("
+                     "self._StartWebServer)")
+    start = _windowMethod("_StartWebServer")
+    names = [call for call, _args in _calls(start)]
+    assert names.index("MarkWebServerReady") < names.index(
+        "log_startup_phase")
+
+
 def test_the_stream_item_opens_the_react_page():
     import ast
     calls = _calls(_windowMethod("_CreateStreamPanel"))
@@ -606,8 +761,8 @@ def test_the_stream_item_opens_the_react_page():
     # The React page is the only 配信設定 panel (ADR-005 S4e).
     assert calls == [("self._WebPanel", ["'stream'"])]
 
-    # Still the lazy factory in Setup, right after the tournament info,
-    # keyed by the React panel's name.
+    # Still the lazy factory in Setup, right after the Event page, keyed by
+    # the React panel's name.
     build = _windowMethod("_BuildUi")
     entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
                and node.elts
@@ -619,15 +774,16 @@ def test_the_stream_item_opens_the_react_page():
 
 def test_the_sidebar_items_are_the_ones_they_were():
     """The nav items' number and order (and so the saved sidebar index,
-    QSettings sidebarIndex_v<STATE_VERSION>) did not change for the second
-    React panel: no STATE_VERSION bump (ADR-005 S4 方針 5)."""
+    QSettings sidebarIndex_v<STATE_VERSION>) did not change for the React
+    panels (Stream S4e, Event S4g -- its key is the React page's name now):
+    no STATE_VERSION bump (ADR-005 S4 方針 5, S4 Event 論点 1)."""
     import ast
     build = _windowMethod("_BuildUi")
     keys = [ast.unparse(node.elts[-1]) for node in ast.walk(build)
             if isinstance(node, ast.Tuple) and len(node.elts) == 4
             and ast.unparse(node.elts[1]).endswith(".svg'")]
     assert keys == [
-        "'tournamentInfo'", "'stream'", "None", "'board'", "'thumbnail'",
+        "'event'", "'stream'", "None", "'board'", "'thumbnail'",
         "'result'", "'top8'", "'commentary'", "'statsPreview'", "'stats'",
         "'playerBrowser'"]
     version = next(node for node in ast.walk(ast.parse(
@@ -711,6 +867,25 @@ def test_the_qt_commentary_panel_and_its_switch_are_gone():
     assert left == []
 
 
+def test_the_qt_event_panel_is_gone():
+    # ADR-005 S4g: the React page is the only 大会情報 panel. Neither the
+    # widget, its .ui, nor the tournament color card it embedded may come
+    # back in src/ (the .ts files included: their strings went with it).
+    from tests.conftest import PROJECT_ROOT
+
+    src = PROJECT_ROOT / "src"
+    assert not (src / "AutonaTournamentInfoWidget.py").exists()
+    assert not (src / "layout" / "AutonaTournamentInfo.ui").exists()
+    left = [str(path.relative_to(PROJECT_ROOT))
+            for pattern in ("*.py", "*.ui", "*.ts")
+            for path in src.rglob(pattern)
+            if any(word in path.read_text(encoding="utf-8")
+                   for word in ("AutonaTournamentInfoWidget",
+                                "AutonaTournamentInfo.ui",
+                                "MakeTournamentColorCard"))]
+    assert left == []
+
+
 def test_the_qt_stream_panel_is_gone():
     # ADR-005 S4e: the React page is the only 配信設定 panel, with no way
     # back (論点 4). Neither the widget nor its .ui may come back in src/.
@@ -765,19 +940,21 @@ def test_the_host_page_shows_its_own_panel_before_any_choice():
 
 def test_only_react_panels_are_mapped():
     with pytest.raises(ValueError):
-        WebPanelPages().Add(1, "tournamentInfo")
+        WebPanelPages().Add(1, "top8")
 
 
 class _WindowRig:
     """The Window's real page-switching methods (read out of src/Autona.py,
     which cannot be imported: agent-pitfalls #1) on a stack built the way
-    _BuildUi builds it, with a few sidebar items: two Qt ones and the two
-    React ones, in the real order (a Qt item between them). Off screen, so
-    the host builds no view; what it was asked to show is its _panel."""
+    _BuildUi builds it, with a few sidebar items: the three React ones and
+    two Qt ones (the eager scoreboard, the lazy Top 8), in the real order
+    (Qt items between them). Off screen, so the host builds no view; what
+    it was asked to show is its _panel."""
 
     METHODS = ("_OnNavSelected", "_OnStackPageChanged", "_EnsurePanelAt",
                "_WebPanel", "_AdoptWebPanelHost", "_PreparePanel",
-               "_CreateStreamPanel", "_CreateCommentaryPanel")
+               "_CreateEventPanel", "_CreateStreamPanel",
+               "_CreateCommentaryPanel")
 
     def __init__(self):
         import ast
@@ -816,11 +993,12 @@ class _WindowRig:
         w._webPanelHost = None
         w._webPanelPages = WebPanelPages()
         w._buildingPanel = False
-        # As _BuildUi: tournamentInfo, stream, scoreboard (eager), ...,
+        # As _BuildUi: event, stream, scoreboard (eager), ..., top8,
         # commentary.
-        for page, key in ((qtPanel("tournamentInfo"), "tournamentInfo"),
+        for page, key in ((w._CreateEventPanel, "event"),
                           (w._CreateStreamPanel, "stream"),
                           (QLabel("scoreboard"), None),
+                          (qtPanel("top8"), "top8"),
                           (w._CreateCommentaryPanel, "commentary")):
             if callable(page):
                 index = w.stack.addWidget(QWidget())
@@ -845,10 +1023,10 @@ class _WindowRig:
                               AutonaWebPanelHost)]
 
 
-STREAM, SCOREBOARD, COMMENTARY = 1, 2, 3
+EVENT, STREAM, SCOREBOARD, TOP8, COMMENTARY = 0, 1, 2, 3, 4
 
 
-def test_both_react_items_show_the_one_host(qapp):
+def test_every_react_item_shows_the_one_host(qapp):
     rig = _WindowRig()
     w = rig.window
 
@@ -857,8 +1035,10 @@ def test_both_react_items_show_the_one_host(qapp):
     assert rig.hosts() == [STREAM]
     host = w._webPanelHost
     assert host._panel == "stream"
-    # Commentary's placeholder is never to be built (a second host).
+    # The other React items' placeholders are never to be built (a second
+    # host).
     assert COMMENTARY not in w._lazyPanels
+    assert EVENT not in w._lazyPanels
 
     # Commentary: the same page, told the other panel (the stack did not
     # move, so this is not currentChanged's).
@@ -875,9 +1055,13 @@ def test_both_react_items_show_the_one_host(qapp):
     assert rig.choose(COMMENTARY) == STREAM
     assert host._panel == "commentary"
     assert w._webPanelHost is host and rig.hosts() == [STREAM]
+    # The Event page too (S4g): the same page, its own panel.
+    assert rig.choose(EVENT) == STREAM
+    assert host._panel == "event"
+    assert w.stack.widget(EVENT) is rig.placeholders[EVENT]
     # The Qt items were built as before, the eager one never.
-    assert rig.choose(0) == 0
-    assert rig.built == ["tournamentInfo"]
+    assert rig.choose(TOP8) == TOP8
+    assert rig.built == ["top8"]
     assert w.dockWidgets == []
 
 
@@ -920,10 +1104,14 @@ def test_a_restored_react_item_builds_the_host_on_its_page(qapp):
     assert rig.choose(COMMENTARY) == COMMENTARY
     assert rig.window._webPanelHost._panel == "commentary"
     assert rig.built == []
-    # Restored on page 0 (the stack is there already): built all the same.
+    # Restored on page 0, the Event page -- the default, so a fresh
+    # install's start (the stack is there already): built all the same.
     rig = _WindowRig()
-    assert rig.choose(0) == 0
-    assert rig.built == ["tournamentInfo"]
+    assert rig.choose(EVENT) == EVENT
+    assert rig.hosts() == [EVENT]
+    assert rig.window._webPanelHost._panel == "event"
+    assert STREAM not in rig.window._lazyPanels
+    assert rig.built == []
 
 
 def test_a_host_that_fails_to_be_built_is_built_by_the_next_react_item(qapp):

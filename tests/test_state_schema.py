@@ -334,7 +334,8 @@ def test_the_scoreboard_families_left_the_dynamic_key_inventory():
     assert "AutonaScoreboardPlayerWidget" not in described, (
         "the player card's inputs are StateSchema.PLAYER_INPUT_KEYS now")
     assert "AutonaTournamentInfoWidget" not in described, (
-        "the EVENT tab's inputs are StateSchema.TOURNAMENT_INPUT_KEYS now")
+        "the EVENT tab's inputs were StateSchema.TOURNAMENT_INPUT_KEYS (the "
+        "tab is the React Event page since ADR-005 S4g)")
     assert schema.DYNAMIC_KEY_FAMILIES == (), (
         f"a key family is being derived from Qt objectNames again: "
         f"{schema.DYNAMIC_KEY_FAMILIES}. Name it in StateSchema and have the "
@@ -345,8 +346,9 @@ def test_the_scoreboard_families_left_the_dynamic_key_inventory():
 def test_the_tournament_field_names_stay_inside_the_catalog():
     """Same contract for the EVENT tab (headless core Step 5, instalment 3).
 
-    TOURNAMENT_INPUT_KEYS is what AutonaTournamentInfoWidget finds its
-    inputs by and what TournamentInfoService accepts; TOURNAMENT_INFO_KEYS is
+    TOURNAMENT_INPUT_KEYS is the fields /api/v1's PATCH /tournament/info
+    takes -- what the React Event page sends (ADR-005 S4g; the Qt tab found
+    its inputs by these names until then) -- and TOURNAMENT_INFO_KEYS is
     what KEY_CATALOG enumerates. The catalog used to list only five of these
     keys and describe the rest in a comment, which is how an enumeration
     nobody consumes drifts.
@@ -766,6 +768,37 @@ def test_seed_panel_state_publishes_zero_for_a_missing_asset(_blank_settings):
     schema.SeedPanelState()
     for key, _path in schema.STREAM_ASSET_VERSIONS:
         assert SM.Get(key) == 0
+
+
+def test_seed_panel_state_publishes_the_tournament_url_and_an_idle_load(
+        _blank_settings):
+    """ADR-005 S4g review M1: the Event page renders them. A set does not
+    outlive the process (the restore publishes its own), but the revision
+    goes on from the last session's."""
+    url = "https://www.start.gg/tournament/autona-cup/event/singles"
+    SettingsManager.settings = {schema.TOURNAMENT_URL_SETTING: url}
+    SM.Set("tournamentInfo.load",
+           {"status": "loading", "error": "", "revision": 7})
+
+    schema.SeedPanelState()
+
+    assert SM.Get("tournamentInfo.url") == url
+    assert SM.Get("tournamentInfo.load") == {
+        "status": "idle", "error": "", "revision": 7}
+
+
+def test_seed_panel_state_starts_a_missing_load_at_revision_zero(
+        _blank_settings):
+    SM.Unset("tournamentInfo.load")
+    SM.Set("tournamentInfo.url", "stale")
+
+    schema.SeedPanelState()
+
+    assert SM.Get("tournamentInfo.url") == ""
+    assert SM.Get("tournamentInfo.load") == {
+        "status": "idle", "error": "", "revision": 0}
+    for key in ("url", "load.status", "load.error", "load.revision"):
+        assert key in schema.KEY_CATALOG["tournamentInfo"], key
 
 
 def test_seed_panel_state_is_idempotent_from_the_first_pass(_blank_settings):

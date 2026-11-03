@@ -102,11 +102,14 @@ EXPECTED_ROUTES = [
 # score:set / players/<p> / display-options / countries/<code>/states were
 # added for the Web UI's move off the legacy routes (ADR-001 Addendum
 # 2026-10-21); commentary/* / layouts/selected/<kind> / colors/<feature> for
-# the Commentary page (ADR-005 S4b); stream/* for the Stream page (S4e).
+# the Commentary page (ADR-005 S4b); stream/* for the Stream page (S4e);
+# GET / DELETE tournament, tournament/info, tournament/media* and
+# colors/tournament for the Event page (S4g).
 EXPECTED_API_V1_ROUTES = [
     ('/api/v1/bracket:refresh', 'api_v1.bracket_refresh', 'OPTIONS,POST'),
     ('/api/v1/characters', 'api_v1.get_characters', 'GET,HEAD,OPTIONS'),
     ('/api/v1/colors/<feature>', 'api_v1.colors_update', 'OPTIONS,PATCH'),
+    ('/api/v1/colors/tournament', 'api_v1.colors_tournament_update', 'OPTIONS,PATCH'),
     ('/api/v1/commentary', 'api_v1.get_commentary', 'GET,HEAD,OPTIONS'),
     ('/api/v1/commentary/<int:slot>', 'api_v1.commentary_update', 'OPTIONS,PATCH'),
     ('/api/v1/commentary/<int:slot>/player', 'api_v1.commentary_player', 'OPTIONS,POST'),
@@ -150,7 +153,13 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/stream/thumbnail', 'api_v1.stream_thumbnail_generate', 'OPTIONS,POST'),
     ('/api/v1/stream/thumbnail/options', 'api_v1.get_stream_thumbnail_options', 'GET,HEAD,OPTIONS'),
     ('/api/v1/stream/thumbnail/options', 'api_v1.stream_thumbnail_options_update', 'OPTIONS,PUT'),
+    ('/api/v1/tournament', 'api_v1.get_tournament', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/tournament', 'api_v1.tournament_clear', 'DELETE,OPTIONS'),
     ('/api/v1/tournament', 'api_v1.tournament_load', 'OPTIONS,POST'),
+    ('/api/v1/tournament/info', 'api_v1.tournament_info_update', 'OPTIONS,PATCH'),
+    ('/api/v1/tournament/media', 'api_v1.tournament_media_reset', 'DELETE,OPTIONS'),
+    ('/api/v1/tournament/media/<kind>', 'api_v1.tournament_media_import', 'OPTIONS,PUT'),
+    ('/api/v1/tournament/media/fetch', 'api_v1.tournament_media_fetch', 'OPTIONS,POST'),
     ('/api/v1/variants', 'api_v1.get_variants', 'GET,HEAD,OPTIONS'),
 ]
 
@@ -461,8 +470,9 @@ def test_the_classification_follows_the_rules():
             assert access[event] == kind, event
     # The counts the S3a inventory found (legacy 29 writes of 43, Socket.IO
     # 26 of 41, v1 18 of 31), plus the Commentary page's 5 writes and 2
-    # reads (ADR-005 S4b: v1 23 of 38) and the Stream page's 8 writes and 2
-    # reads (S4e: v1 31 of 48). A change here is a change of the policy.
+    # reads (ADR-005 S4b: v1 23 of 38), the Stream page's 8 writes and 2
+    # reads (S4e: v1 31 of 48) and the Event page's 6 writes and 1 read
+    # (S4g: v1 37 of 55). A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
     assert len(legacy) == 43
@@ -470,8 +480,8 @@ def test_the_classification_follows_the_rules():
     assert sum(k == WebAccess.WRITE
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
-               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 31
-    assert len(EXPECTED_API_V1_ROUTES) == 48
+               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 37
+    assert len(EXPECTED_API_V1_ROUTES) == 55
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

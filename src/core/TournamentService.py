@@ -33,6 +33,26 @@ are arguments: ``SetTournament(url, force, fetchMedia)`` and
 A set or clear that comes after another one wins: an admin URL whose
 resolution answers after a later set / clear is dropped.
 
+How the newest set / clear is going is published in the state (ADR-005
+S4g; S4g review M1), so that every client sees it without asking:
+``tournamentInfo.load`` -- ``{status, error, revision}``, shaped like
+``tournamentInfo.media`` -- with ``tournamentInfo.url``, the URL set last,
+beside it. status: ``idle`` (none set), ``resolving`` (an admin URL),
+``loading`` (the tournament's data being fetched), ``loaded``, or ``error``
+with what went wrong -- ``unresolved`` (the admin URL stood for no event:
+nothing changed) or ``load_failed`` (the data did not come: start.gg did not
+answer, there is no such event, the adapter's load raised, or the payload
+did not apply). Every set / clear takes the next revision, published by the
+call itself on the caller's thread, so a request answered (/api/v1's 202)
+is in the state already; its progress keeps that revision. The data's
+arrival is the shell's to report (``PayloadApplied``, from
+bootstrap.wire_tournament_data); the adapter drops the data of a
+tournament replaced meanwhile. The launch seeds ``idle``
+(StateSchema.SeedPanelState) and the restore then loads.
+
+Lock order: ``StateManager.lock``, then this service's own lock, which is
+held only around its own fields -- nothing is called with it held.
+
 The provider adapter is injected (``provider``: an object with
 ``LoadTournament(url, initialLoading, force)``, ``UnloadTournament()``,
 ``AnnounceUrl(url)`` and a blocking ``ResolveEventUrl(url)``), because core
@@ -44,12 +64,16 @@ import threading
 
 from loguru import logger
 
+from . import StateSchema as schema
 from .GameAssetCatalog import GameAssetCatalog
 from .SettingsManager import SettingsManager
+from .StateManager import StateManager
 from .TaskExecutor import TaskExecutor
 from .TournamentMediaService import TournamentMediaService
 
-URL_SETTING = "TOURNAMENT_URL"
+URL_SETTING = schema.TOURNAMENT_URL_SETTING
+URL_PATH = f"{schema.TOURNAMENT_INFO_ROOT}.{schema.TOURNAMENT_URL_KEY}"
+LOAD_PATH = f"{schema.TOURNAMENT_INFO_ROOT}.{schema.TOURNAMENT_LOAD_KEY}"
 
 # The two URL forms taken (the Qt dialog's validators, unchanged: searched,
 # not anchored -- a pasted URL may carry a scheme, "www." and more path).
@@ -64,6 +88,17 @@ _EVENT_PREFIX = re.compile(r"(.*start.gg/tournament/[^/]*/event[s]?/[^/]*)")
 # What SetTournament answers.
 STARTED = "started"
 INVALID_URL = "invalid_url"
+
+# How the newest set / clear is going (tournamentInfo.load; see the module
+# docstring).
+IDLE = "idle"
+RESOLVING = "resolving"
+LOADING = "loading"
+LOADED = "loaded"
+ERROR = "error"
+# What went wrong, with ERROR ("" otherwise).
+UNRESOLVED = "unresolved"
+LOAD_FAILED = "load_failed"
 
 
 def UrlKind(url):
@@ -104,6 +139,11 @@ class TournamentService:
         # an apply that is not the newest one's is dropped.
         self._lock = threading.Lock()
         self._generation = 0
+        # The loaded tournament's data -- LOADING until its payload is
+        # reported, then LOADED / ERROR -- and the generation that loaded
+        # it. What a set of the loaded URL again (not re-fetched) reports.
+        self._data = (IDLE, "")
+        self._dataGeneration = 0
 
     # ── reading ──────────────────────────────────────────────────────────
 
@@ -114,6 +154,13 @@ class TournamentService:
         url = SettingsManager.Get(URL_SETTING, "")
         return url if isinstance(url, str) else ""
 
+    @staticmethod
+    def Load() -> dict:
+        """How the newest set / clear is going, as published:
+        tournamentInfo.load's {"status", "error", "revision"} (see the
+        module docstring). Any thread."""
+        return schema.ReadTournamentLoad()
+
     # ── setting / clearing ───────────────────────────────────────────────
 
     def SetTournament(self, url, force=False, fetchMedia=False,
@@ -123,12 +170,15 @@ class TournamentService:
         With `fetchMedia`, the tournament's icon and banner are fetched once
         it is loaded. INVALID_URL (nothing changes) when `url` is neither
         form. Any thread; the load itself runs on the main thread (right
-        away when called there with an event URL)."""
+        away when called there with an event URL). Started, its status
+        (resolving / loading) is published at the next revision before
+        this returns."""
         kind = UrlKind(url)
         if kind is None:
             logger.warning(f"Tournament: refusing the URL {url!r}")
             return INVALID_URL
-        generation = self._NextGeneration()
+        generation = self._NextGeneration(
+            LOADING if kind == EVENT else RESOLVING)
         if kind == EVENT:
             self._onMain(lambda: self._Apply(
                 generation, NormalizeEventUrl(url), force, fetchMedia,
@@ -137,23 +187,31 @@ class TournamentService:
 
         def resolved(eventUrl):
             if UrlKind(eventUrl) != EVENT:
-                logger.error(
-                    f"Tournament: {url} could not be resolved to an event")
+                unresolved()
                 return
             self._onMain(lambda: self._Apply(
                 generation, NormalizeEventUrl(eventUrl), force, fetchMedia,
                 initialLoading))
 
+        def unresolved(error=None):
+            # Nothing changes (S4f): the tournament loaded until now stays.
+            # Told to whoever asked through the status, not only logged
+            # (S4f review L14).
+            logger.error(
+                f"Tournament: {url} could not be resolved to an event")
+            self._SetStatus(generation, ERROR, UNRESOLVED)
+
         TaskExecutor.instance.submit(
             self._provider.ResolveEventUrl, url,
-            task_name="tournament URL", then=resolved)
+            task_name="tournament URL", then=resolved, on_error=unresolved)
         return STARTED
 
     def ClearTournament(self):
         """Unload the tournament: its URL is forgotten, the tournament info
         is emptied, and so is the selected game. Any thread; the clear
-        itself runs on the main thread (right away when called there)."""
-        generation = self._NextGeneration()
+        itself runs on the main thread (right away when called there).
+        Idle is published at the next revision before this returns."""
+        generation = self._NextGeneration(IDLE)
         self._onMain(lambda: self._ApplyClear(generation))
 
     def Restore(self):
@@ -164,24 +222,101 @@ class TournamentService:
         if url:
             self.SetTournament(url, initialLoading=True)
 
-    # ── on the main thread ───────────────────────────────────────────────
+    def PayloadApplied(self, data, applied):
+        """The shell's report of a tournament payload (tournament_data_
+        updated) having been applied -- `applied` False when it failed
+        (TournamentInfoService.ApplyProviderPayload). It settles the load
+        the status is waiting for: LOADED, or ERROR / LOAD_FAILED when the
+        payload failed or carries no tournament name (what the provider
+        answers when start.gg did not answer or has no such event). Ignored
+        when no load is waiting (the empty payload of a clear, a late one).
+        The URL is published again whatever it was: a payload that failed
+        dropped it (TournamentInfoService.ApplyTournamentData). Main
+        thread."""
+        loaded = bool(applied) and isinstance(data, dict) and bool(
+            data.get(schema.TOURNAMENT_NAME_KEY))
+        with StateManager.lock:
+            self._PublishUrl()
+            with self._lock:
+                if self._data[0] != LOADING:
+                    return
+                self._data = (LOADED, "") if loaded else (ERROR, LOAD_FAILED)
+                status, error = self._data
+                # Published only while the set that loaded it is the newest
+                # one: a later set still queued says LOADING for its own.
+                current = self._dataGeneration == self._generation
+            load = self.Load()
+            if current and load["status"] == LOADING:
+                self._Publish(status, error, load["revision"])
 
-    def _NextGeneration(self):
-        with self._lock:
-            self._generation += 1
-            return self._generation
+    # ── the published status ─────────────────────────────────────────────
+
+    @staticmethod
+    def _Publish(status, error, revision):
+        # One write of the whole dict: a reader never sees half of it.
+        StateManager.SetIfChanged(LOAD_PATH, {
+            "status": status, "error": error, "revision": revision})
+
+    def _PublishUrl(self):
+        StateManager.SetIfChanged(URL_PATH, self.TournamentUrl())
+
+    def _NextGeneration(self, status):
+        """The next generation, its status published at the next revision
+        (in the same hold of StateManager.lock: generations and revisions
+        go up together)."""
+        with StateManager.lock:
+            with self._lock:
+                self._generation += 1
+                generation = self._generation
+            self._Publish(status, "", self.Load()["revision"] + 1)
+        return generation
 
     def _IsCurrent(self, generation):
         with self._lock:
             return generation == self._generation
+
+    def _SetStatus(self, generation, status, error=""):
+        """Publish the status of `generation` (at its revision), while it
+        is the newest set / clear."""
+        with StateManager.lock:
+            if not self._IsCurrent(generation):
+                return
+            self._Publish(status, error, self.Load()["revision"])
+
+    # ── on the main thread ───────────────────────────────────────────────
 
     def _Apply(self, generation, url, force, fetchMedia, initialLoading):
         if not self._IsCurrent(generation):
             logger.info(f"Tournament: {url} was superseded before it loaded")
             return
         SettingsManager.Set(URL_SETTING, url)
-        self._provider.LoadTournament(
-            url, initialLoading=initialLoading, force=force)
+        self._PublishUrl()
+        # Waiting for the payload from here: it may be reported before the
+        # load returns (a provider that answers at once).
+        with self._lock:
+            previous = self._data
+            self._data = (LOADING, "")
+            self._dataGeneration = generation
+        try:
+            reloaded = self._provider.LoadTournament(
+                url, initialLoading=initialLoading, force=force)
+        except Exception:
+            # No payload is coming for it (S4g review L2): a failed load,
+            # not one left loading.
+            logger.opt(exception=True).error(
+                f"Tournament: {url} could not be loaded")
+            with self._lock:
+                if self._dataGeneration == generation:
+                    self._data = (ERROR, LOAD_FAILED)
+            self._SetStatus(generation, ERROR, LOAD_FAILED)
+            self._provider.AnnounceUrl(url)
+            return
+        with self._lock:
+            if not reloaded and self._data == (LOADING, ""):
+                # The loaded URL again, not re-fetched: what its data did.
+                self._data = previous
+            status, error = self._data
+        self._SetStatus(generation, status, error)
         self._provider.AnnounceUrl(url)
         if fetchMedia:
             media = TournamentMediaService.instance
@@ -192,11 +327,15 @@ class TournamentService:
         if not self._IsCurrent(generation):
             return
         SettingsManager.Set(URL_SETTING, "")
+        self._PublishUrl()
+        # Ahead of the unload, whose empty payload waits for nothing.
+        with self._lock:
+            self._data = (IDLE, "")
         # Every clear forgets the selected game (owner's decision 2, S4f):
         # the next tournament's game is picked from it, not from the last
         # one's leftovers. Ahead of the unload, whose tournament_changed the
-        # game pickers re-read the selection on (the EVENT panel's combo,
-        # the sidebar's button), and of the announcement.
+        # sidebar's game button re-reads the selection on, and of the
+        # announcement.
         if GameAssetCatalog.instance is not None:
             GameAssetCatalog.instance.ForgetSelection()
         self._provider.UnloadTournament()

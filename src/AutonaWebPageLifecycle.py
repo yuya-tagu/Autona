@@ -7,7 +7,8 @@ they have in common lives here, extracted from AutonaLayoutPreview so that
 neither keeps its own copy:
 
 * the web server readiness gate (MarkWebServerReady): a load issued before
-  the server is up is parked and replayed once it is;
+  the server is up is parked and replayed once it is, and what waits for
+  the server (WhenWebServerReady) is called then;
 * LocalPageLoader: loads a page of the local web server into one view,
   retrying a refused connection a bounded number of times;
 * HiddenPageLifecycle: freezes the page while nothing of it is on screen,
@@ -37,12 +38,15 @@ logger = logging.getLogger(__name__)
 # early load() calls are parked here and replayed once the server is up.
 _webServerReady = False
 _pendingLoaders = []
+# What waits for the server before it does anything (WhenWebServerReady).
+_readyCallbacks = []
 
 
 def MarkWebServerReady():
     """Announce that the web server thread has been started.
 
-    Called once from Window._StartWebServer(). Idempotent.
+    Called once from Window._StartWebServer(). Idempotent. The parked loads
+    are replayed, then the WhenWebServerReady callbacks are called.
     """
     global _webServerReady
     if _webServerReady:
@@ -56,6 +60,31 @@ def MarkWebServerReady():
         except RuntimeError:
             # Underlying C++ view already deleted — nothing to load.
             logger.debug("Skipped deferred page load: view is gone")
+    callbacks = list(_readyCallbacks)
+    _readyCallbacks.clear()
+    for callback in callbacks:
+        try:
+            callback()
+        except RuntimeError:
+            # Its owner's C++ object is already deleted.
+            logger.debug("Skipped a web server readiness callback: its "
+                         "owner is gone")
+
+
+def IsWebServerReady():
+    return _webServerReady
+
+
+def WhenWebServerReady(callback):
+    """Call `callback()` once the web server is ready: from
+    MarkWebServerReady(), or right away when it is ready already. For a
+    view that is not even built before then (AutonaWebPanelHost, ADR-005
+    S4g review M4). Called inside _StartWebServer() at startup: a callback
+    with work to do defers it to the event loop."""
+    if _webServerReady:
+        callback()
+    elif callback not in _readyCallbacks:
+        _readyCallbacks.append(callback)
 
 
 def LocalUrl(path):

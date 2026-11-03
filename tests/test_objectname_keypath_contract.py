@@ -14,7 +14,9 @@ updating the snapshot below.
 Headless core Step 5 converted the *derivation* widget by widget, and is
 done: for the SCORE panel, the player card and the EVENT tab alike, the key
 names are ``src/core/StateSchema.py`` constants now and each widget looks its
-inputs up by them, instead of reading them back off whatever it found. That
+inputs up by them, instead of reading them back off whatever it found. (The
+EVENT tab itself went in ADR-005 S4g -- the React Event page writes the same
+keys through /api/v1 -- and with it its .ui and its pins here.) That
 does not retire this file -- the .ui names and the schema names still have to
 be the same strings, or an existing ``program_state.json`` stops matching and
 ``findChild`` stops resolving -- so the sections below pin exactly that
@@ -56,15 +58,13 @@ EXPECTED = {
         "team", "name", "seed", "real_name", "twitter", "birthday",
         "country", "state",
     },
-    "AutonaTournamentInfo.ui": {
-        "tournamentName", "eventName", "gameTitleCombo", "numEntrants",
-        "startAt", "address",
-        # streamTitleEdit moved to the 配信設定 panel. It only ever
-        # reached the state via this tab's generic "every QLineEdit becomes
-        # tournamentInfo.{objectName}" loop and nothing read the resulting
-        # tournamentInfo.streamTitleEdit key, so no migration is owed; the
-        # residual key is Unset on startup.
-    },
+    # The EVENT tab's .ui (AutonaTournamentInfo.ui: tournamentName,
+    # eventName, gameTitleCombo, numEntrants, startAt, address) went with
+    # the Qt panel in ADR-005 S4g. The React Event page writes the same
+    # state keys (tournamentInfo.*) through /api/v1's PATCH
+    # /tournament/info, whose field names are StateSchema.TOURNAMENT_INPUT_
+    # KEYS (startAt is written from the raw day, startAtDate); nothing about
+    # the saved state changed.
     # The 配信設定 panel's .ui (AutonaStreamSettings.ui, three names here)
     # went with the Qt panel in ADR-005 S4e: its inputs were findChild keys,
     # not keypaths, and the React page writes the same state keys
@@ -193,45 +193,12 @@ def _state_write_calls(relative_path):
     ]
 
 
-def test_the_tournament_info_schema_names_are_the_ui_objectnames():
-    """The EVENT tab's half of the same agreement (Step 5, instalment 3).
-
-    The last family that was built from objectNames at runtime: three
-    findChildren loops (QLineEdit / QSpinBox / QDateEdit) each wrote
-    `tournamentInfo.{widget.objectName()}`. The names are StateSchema
-    constants now, used both as the state key and as the findChild argument,
-    so the two spellings have to agree or the field goes unwired *and* stops
-    matching an existing program_state.json.
-    """
-    from src.core import StateSchema as schema
-
-    names = _object_names(LAYOUT / "AutonaTournamentInfo.ui")
-    assert set(schema.TOURNAMENT_INPUT_KEYS) <= names, (
-        "StateSchema.TOURNAMENT_INPUT_KEYS names a widget "
-        "AutonaTournamentInfo.ui does not have: "
-        f"{sorted(set(schema.TOURNAMENT_INPUT_KEYS) - names)}")
-    assert set(schema.TOURNAMENT_INPUT_KEYS) <= EXPECTED[
-        "AutonaTournamentInfo.ui"]
-
-
-def test_the_event_panel_no_longer_derives_keypaths_from_objectname():
-    """The EVENT tab's `findChildren` + objectName() loops must not return.
-
-    Same tripwire as the scoreboard's above, and the reason this file's
-    qt_spinbox_lineedit check is gone: that guard existed only because the
-    panel's QLineEdit loop swept up a QSpinBox's internal line edit and had
-    to recognise it. There is no loop to sweep anything now -- numEntrants
-    is reached by findChild(QSpinBox, "numEntrants") -- so the guard has
-    nothing left to protect and this assertion covers strictly more.
-    """
-    calls = _object_name_calls("src/AutonaTournamentInfoWidget.py")
-    assert calls == [], (
-        "AutonaTournamentInfoWidget calls objectName() again (line(s) "
-        f"{sorted(node.lineno for node in calls)}). Field names come from "
-        "StateSchema.TOURNAMENT_INPUT_KEYS now and are passed *to* "
-        "findChild. If the new call builds a StateManager key path, use a "
-        "StateSchema constant instead of reverting this test; if it is a "
-        "legitimate non-keypath use, add an allowlist here.")
+# The EVENT tab's half of the agreement (its schema names were the .ui
+# objectNames, and its widget derived no keypath from objectName()) went
+# with the Qt panel in ADR-005 S4g; tests/test_web_panel_host.py's
+# test_the_qt_event_panel_is_gone keeps it from coming back, and
+# tests/test_api_v1_tournament.py pins the field names the React page
+# sends.
 
 
 PLAYER_WIDGET_SOURCES = [
@@ -264,43 +231,21 @@ def test_the_player_widgets_do_not_write_the_state_directly():
             "through self.player instead of reverting this test.")
 
 
-def test_the_event_panel_does_not_write_the_state_directly():
-    """The completion condition for the EVENT tab, as the same tripwire.
-
-    `tournamentInfo.*` has one writer for this panel's own fields --
-    core/TournamentInfoService -- from both ends now: the provider payload
-    and an operator typing. A StateManager.Set here would be a second one for
-    those fields, and the display-name follow rule is stateful enough that
-    two writers disagreeing is a silent bug rather than a visible one.
-    (One other tournamentInfo.* writer exists deliberately outside this
-    panel and outside the service: core/ColorService.py's themeColor/
-    accentColor -- static, non-objectName-derived keys that belong to the
-    colour feature and only carry this prefix for backwards compatibility.
-    It is not this panel's file, so this tripwire is unaffected. The crew
-    board used to be
-    a second one; its displayTournamentName write goes through
-    TournamentInfoService.SetDisplayName since Step 5's crew instalment,
-    which is what test_the_crew_board_does_not_write_the_state_directly
-    below now keeps true.) Reads (`StateManager.Get`, which
-    _SyncFieldsFromState needs) are deliberately not covered: rendering the
-    state is what this panel is for.
-    """
-    calls = _state_write_calls("src/AutonaTournamentInfoWidget.py")
-    assert calls == [], (
-        "AutonaTournamentInfoWidget writes StateManager directly again "
-        f"(line(s) {sorted(node.lineno for node in calls)}). "
-        "tournamentInfo.* is core/TournamentInfoService.py's -- add a method "
-        "there and call it instead of reverting this test.")
+# The EVENT tab's own writer tripwire went with the Qt panel (ADR-005
+# S4g): the React page writes tournamentInfo.* through /api/v1, which calls
+# core/TournamentInfoService (and core/ColorService for the two colour
+# keys). The ledger below still keeps any Qt widget from writing it.
 
 
 def test_the_scoreboard_does_not_write_the_state_directly():
-    """The scoreboard's own writer tripwire, matching the player/event ones.
+    """The scoreboard's own writer tripwire, matching the player one.
 
     score.* keypaths are StateSchema constants now (see _WireTeamColumn), but
     nothing pinned that AutonaScoreboardWidget itself never calls
     StateManager.Set/Unset with a hand-built keypath -- it measures zero
-    today, same as the player and EVENT-tab widgets, so it gets the same
-    ratchet instead of staying an unenforced assumption.
+    today, same as the player widgets (and the EVENT tab did, until it
+    went in ADR-005 S4g), so it gets the same ratchet instead of staying an
+    unenforced assumption.
     """
     calls = _state_write_calls("src/AutonaScoreboardWidget.py")
     assert calls == [], (
@@ -375,11 +320,11 @@ def test_programmatic_keypath_names_present():
 # "a QSpinBox's internal QLineEdit reports objectName 'qt_spinbox_lineedit',
 # so fall back to the parent's" branch that every findChildren(QLineEdit)
 # keypath loop needed. It was checked in AutonaScoreboardPlayerWidget until
-# the player instalment and in AutonaTournamentInfoWidget until this one; no
+# the player instalment and in the EVENT tab's widget until this one; no
 # such loop exists anywhere now, so there is no fallback left to guard. The
-# two `..._no_longer_derives_keypaths_from_objectname` tests above are what
-# replaced it, and they fail if a loop comes back -- with or without the
-# fallback.
+# `..._no_longer_derives_keypaths_from_objectname` test above is what
+# replaced it, and it fails if a loop comes back -- with or without the
+# fallback (the EVENT tab's twin went with the Qt panel, ADR-005 S4g).
 
 
 # ── The write ledger (headless core Step 5, completion condition) ────────

@@ -676,7 +676,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         This used to be three loops over `findChildren`, each connecting a
         lambda that built `{self.path}.{element.objectName()}` and wrote it
         (known-smells S-14, and the last instance of the pattern outside
-        AutonaTournamentInfoWidget). The names come from
+        the Qt EVENT panel, itself gone since ADR-005 S4g). The names come
+        from
         `StateSchema.PLAYER_INPUT_KEYS` now and are used to *find* the
         widgets; the writes are `PlayerService`'s. The objectNames still have
         to equal those keys -- an existing program_state.json is keyed by

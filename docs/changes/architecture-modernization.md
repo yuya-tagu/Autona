@@ -4632,3 +4632,177 @@ IME 実機ゲート通過を受けて、Qt 版の実況・解説パネルと、�
   - 開始日を選ぶ → **再起動しても日付欄に残る**（OBS の開始日の表示は今までどおり）
   - 大会情報のゲームのコンボでゲームを選ぶ → そのゲームが読み込まれる（サイドバーのゲームボタンも追従）
   - Web UI の大会 URL の欄から読み込み / 空にして読み込み → 今までどおり（空ならゲーム選択も外れる）
+
+#### S4g 大会情報の React 化と Qt 版の削除（2026-11-01）
+
+サイドバー Setup の「大会情報」を React の `/web/event`（`web/src/EventPage/`）に切り替えた。表示先は共有ビュー（`AutonaWebPanelHost`）で、Qt 版（`AutonaTournamentInfoWidget` と `.ui`、埋め込みの大会カラーのカード）は消した。処理は S4f の core（`TournamentService` / `TournamentInfoService` / `TournamentMediaService` / `ColorService`）のままで、ページは `/api/v1` を呼び、state を描くだけ。外部契約は追加だけ: v1 のルート 7 本と、`POST /tournament` が受け付けるもの（admin / brackets の URL・`force`・`fetchMedia`。既定値は今の挙動）。Socket.IO の payload・`settings.json` / `state.json` の形式・`logo.png` / `tournament_banner.png` のパス・legacy ルート・自動更新は変えていない。`STATE_VERSION` は 22 のまま（ナビの並びと位置は不変。項目のキーだけ `event` にした）。
+
+- **やったこと**
+  - v1（`src/AutonaApiV1.py` / `src/AutonaWebOperations.py` / `src/core/WebAccess.py`）
+    - 読み取り 1 本（READ）: `GET /tournament`（`{url, loaded, status, error, revision}`）
+    - 書き込み 6 本（WRITE）
+      - `DELETE /tournament`（202。`ClearTournament`）
+      - `PATCH /tournament/info`（5 欄。参加者数は 0〜9999、日付は `startAtDate` = `YYYY-MM-DD`）
+      - `PUT /tournament/media/<icon|banner>`（配信団体の画像と同じ data URL・20MB・413）
+      - `DELETE /tournament/media`（両方を既定に戻す）
+      - `POST /tournament/media/fetch`（202 と `queued`。同じ大会の実行中・大会なしは 409）
+      - `PATCH /colors/tournament`（`theme` / `accent`、または `{"reset": true}`。`/colors/<feature>` より先に一致する）
+    - `POST /tournament`: admin / brackets の URL を受け付ける。`force` / `fetchMedia`（bool）を足した。start.gg のイベントでも admin でもない URL は 400（何も変えない）
+    - 台帳: `tests/test_webserver_routes.py`（v1 は書き込み 37・計 55）。`WEB_PANELS` に `event` を足した
+    - 仕様は `.claude/design/external-control-api.md` の §2.6・§5.7・§6.19〜§6.21・§7.1・§7.3
+  - core
+    - `TournamentService.Status()`: 最新の設定 / 解除の進み具合（`idle` / `resolving` / `loading` / `loaded` / `error`、error は `unresolved` / `load_failed`）と、変わるたびに進む `revision`。メモリだけ
+    - admin URL の解決の失敗（例外も）は `unresolved` にした（S4f の残課題 L14）
+    - 読み込みの結果はシェルが `PayloadApplied(data, applied)` で伝える（`bootstrap.wire_tournament_data`。適用できて大会名があれば `loaded`、それ以外は `load_failed`）。待っている読み込みが無いとき（解除の空の payload・遅れて来たもの）は無視する。後から来た設定がまだ読み込み待ちなら、前の payload では決めない
+    - `StateSchema.TOURNAMENT_INPUT_KEYS` を v1 の field 名にした（3 つの文字列・`numEntrants`・`startAtDate`）。`TOURNAMENT_INFO_KEYS`（`KEY_CATALOG`）は不変
+  - Window（`src/Autona.py`）: ナビの項目を `_CreateEventPanel`（`self._WebPanel("event")`）にした。`AutonaFeatureColors.MakeTournamentColorCard` を消した
+  - 共有ビューの生成を最初の描画の後へ（論点 1。`src/AutonaWebPanelHost.py`）
+    - ビューの無いホストは、自分の最初の `paintEvent` で `QTimer.singleShot(0)` を積み、そこでビュー（QtWebEngine）を作る。`ShowPanel` も同じ予約を通す
+    - 予約の前に隠れたら作らず、次に出て描画されたときに作る
+    - 起動時に大会情報（先頭の項目）が開くとき、ウィンドウが先に出てからビューが建つ
+  - React（`web/src/EventPage/`、新規）
+    - `index.tsx`（ページ）
+      - 開くと `GET /tournament` と `GET /games` を再試行つきで読む
+      - 書き込みは Commentary / Stream と同じ期限つきの 1 本の列。401 / 403 の案内は 1 回だけ
+      - 設定・再取得・解除の後は、`GET /tournament` を 1 秒ごと（最大 120 回）に読み、送る前の `revision` より進んで `resolving` / `loading` でなくなるまで追う
+      - 拒否の文言: URL の 400 / 実行中の 409 / 日付の 400 / ゲームの 409 / 画像の 413・400・500 / 取得の 409（実行中か、大会なし）と `queued`
+    - `Cards.tsx`（4 枚のカード）
+      - start.gg の大会: URL の欄（前回の URL が初期値）・「設定（アイコン・バナーも取得）」（`fetchMedia`）・「再取得」（`force`）・「解除」（確認つき）・`role="status"` の状態
+      - 大会の詳細: 3 つの文字列と参加人数（`useStateField`。数でなければ送らずに断る）・開催日（`<input type="date">`。空にしたら送らない）・ゲーム（`useStateChoice`、codename で `POST /game`）
+      - 大会カラー: Commentary の `ColorRow` を 2 つと「既定の色に戻す」
+      - 大会アイコン / バナー: プレビュー（`/layout/logo.png?v=<版>`、バナーは `/user_data/tournament_banner.png?v=<版>`、版が 0 なら `/assets/thumbnail_base/default_banner.png`）・ファイル選択・「大会からダウンロード」・「Autona の既定に戻す」（確認つき。取得中は両方押せない）・`tournamentInfo.media` の状態とエラーの文言
+    - `web/src/PanelShell/imageUpload.ts`（新規）: 20MB の上限・`accept`・アップロードの期限（60 秒）・data URL の読み込みを Stream から切り出し、両方のページが使う
+    - `registry.tsx` に `"event": EventPage`。`CommentaryPage/SideCards.tsx` の `ColorRow` を export した
+    - `web/src/i18n/locales/{ja,en}.json` に `event_*` 57 件（日本語は Qt 版の文言を流用・追記）
+  - Qt 版の削除
+    - `src/AutonaTournamentInfoWidget.py` と `src/layout/AutonaTournamentInfo.ui`、`tests/test_tournament_info_panel.py`
+    - `tests/test_objectname_keypath_contract.py` の `AutonaTournamentInfo.ui` の 6 名と、EVENT パネルの 3 つの pin（名前の一致・objectName を使わない・state を書かない）
+    - `src/i18n/Autona_{ja,en}.ts` から EVENT パネルの 20 件（S4e で消し漏れていた「配信先を編集する」を含む）を消し、`scripts/compile_translations.ps1` で `.qm` を再コンパイル（529 件 / 未完了 0）
+  - コメントを現状に合わせた: `src/core/TournamentInfoService.py`・`StateSchema.py`・`AutonaScoreboardPlayerWidget.py`・`thumbnail/main_generate_thumbnail.py`・`tests/test_state_schema.py`・`tests/test_crew_board.py`
+  - ドキュメント
+    - `.claude/design/Design.md`（`tournamentInfo` の木・パネル表 1・`/web/:panel` 行・大会カラーの注記）
+    - `docs/product/features.md`（§8）
+    - `.claude/rules/state-and-webserver.md`（Step 5 の静的化の節・ドメインサービスの表の 3 行）・`.claude/rules/agent-pitfalls.md`（#4 の表）
+    - `.claude/design/external-control-api.md`
+    - `.claude/manual-test-checklist.md`: 「大会情報（Tournament Info）」節を Web の手順に書き直した（17 項目）。「起動・終了」に大会情報を最後に開いていた起動の項目を足した
+- **判断と理由**
+  1. **設定 / 解除の状態は state に置かず `GET /tournament` で返す**: Socket.IO の payload と保存形式を変えないため。状態は「最新の要求がどこまで進んだか」で、ページは自分が送った後だけ追う。ほかのクライアントの設定の結果は `tournamentInfo.*` で届く。再起動では `idle` から（復元の読み込みでまた進む）
+  2. **読み込みの成否は payload の大会名で決める**: provider は start.gg が答えない・そのイベントが無いとき、大会名の無い payload を出す。適用に失敗した payload（`ApplyProviderPayload` が False）も `load_failed`
+  3. **アイコン / バナーの既定に戻すは 1 本の `DELETE /tournament/media`**（設計は `PUT|DELETE /media/<kind>`）: Qt 版のボタンも両方を戻しており、片方だけ戻す UI が無い。core の `ResetMedia()` は両方を 1 回の保存サイクルで publish する
+  4. **ビューの生成は「ホストの最初の描画」の後の zero timer**（論点 1 の「初回描画後（`QTimer.singleShot(0)`）」）: Windows では zero timer が最初の WM_PAINT より先に走りうるので、`ShowPanel` から積むだけではウィンドウを描く前に QtWebEngine を建てることがある。描画を待ってから積む
+  5. **画像の取り込みは Stream と同じ部品**（`imageUpload.ts`）: 上限 20MB の TS 側の定数は 1 か所になり、`test_api_v1_stream.py` の照合もそちらを読む。拒否の文言は同じサーバーの答えなので `stream_org_*` を流用した
+  6. **確認ダイアログは Stream の `ConfirmDialog`**（既定はキャンセル）。解除と既定に戻すの 2 つに付けた（論点 2・設計どおり）
+  7. **開催日は空にできない**（v1 も断る。Qt 版の日付欄も空にできなかった）。欄を空にしても送らず、state の日を出し直す
+- **旧実装との挙動差（記録）**
+  - 大会の設定はダイアログではなくページの URL 欄から。サイドバーの大会ボタンの「大会を設定」（URL ダイアログ）と「大会の設定を解除」（確認）は Qt のまま残る
+  - 設定の進み具合と失敗（イベントが見つからない・読み込めない）がページに出る。取得のエラー（`no_media` ほか）も文言で出る
+  - 「Autona の既定に戻す」に確認が付いた
+  - 参加人数は数の欄（QSpinBox）ではなく文字の欄で、数でなければ送らずに断る
+  - 入力は打っている間も送る（Commentary / Stream と同じ debounce）
+  - 起動時に大会情報を開くときは、ウィンドウが出てからページが出る
+- **pin（テスト）**
+  - `tests/test_api_v1_tournament.py`（新規 28 関数）: 状態の読み取り・設定の受け付け（admin・`force` / `fetchMedia`・不正 URL / bool の 400・409）・解除・5 欄（型・範囲・日付・1 回の公開）・カラー（片方・両方・reset・機能別の上書きが消える・不正）・画像の取り込み / 413 / 400 / 500・既定に戻す・取得（202・queued・409 2 種）・LAN の別端末のトークン
+  - `tests/test_tournament_service.py`（+15）: 状態の遷移（event / admin / 解決失敗 / 例外 / 後勝ち / 解除 / 同じ URL / payload の取り違え / revision）・シェルの結線・Window の結線とシードとサイドバーの解除（`test_tournament_info_panel.py` から移した pin）
+  - `tests/test_web_panel_host.py`（+5）: 最初の描画を待つ・予約の前に隠れたら次の表示で作る・大会情報の項目が React のページ・復元した先頭ページのホストはウィンドウを出す前にでき、ビューはその後・`src/` に Qt 版が無い（`*.py` / `*.ui` / `*.ts`）
+  - `tests/test_web_operations.py`（ルート台帳の歩行の body と期待するステータス）・`tests/test_settings_panels.py`（大会カラーのカードの pin を v1 側へ）・`tests/test_api_v1_stream.py`（20MB の照合先）
+  - Web RTL `EventPage/EventPage.test.js`（29）: 4 枚のカード・開いただけでは何も送らない・読めないときの再読み込み・設定と追跡（状態の文言・上限）・再取得・失敗 2 種・拒否 2 種・解除の確認・5 欄・参加人数の拒否・日付の拒否と空・ゲーム・カラー・プレビューの版と既定のバナー・画像の送信と事前拒否と拒否 3 種・取得の状態と文言・`queued`・大会なし・既定に戻すの確認
+  - Playwright `web/e2e/event.spec.ts`（6）: 4 枚のカード・5 欄が state に入る（参加人数の拒否も）・カラーと既定・バナーの取り込み → 版とプレビューの `naturalWidth` → 確認して既定に戻す・不正な URL の文言と解除の確認・`?desktop=1&lng=ja`
+- **残課題**
+  - 起動時間は未計測。`core-shown` は変わらない（ビューは表示の後）が、オーバーレイはイベントキューが空くのを待って閉じるので、ビュー（QtWebEngine）の生成がその前に入り、`webserver-ready` が遅れうる。大会情報を最後に開いていた起動の `STARTUP phase=` を実機で見て、悪化が大きければ並びか遅延の方法を見直す
+  - ページの追跡は自分の要求だけ（1 秒ごと・最大 120 秒）。ほかのクライアントが設定した大会の「読み込み中」は、開き直すまで出ない（結果は `tournamentInfo.*` で届く）
+  - 参加人数・開催日以外の欄は、送った後に大会を読み込み直すと大会の値に置き換わる（今までどおり）
+  - `docs/` の歴史的な記録（known-smells・test-automation-strategy・headless-core-redesign）と、ほかのテストの docstring に残る「EVENT パネル」の記述は当時の記録として残した
+- **オーナー実機確認**（`python main.py`）
+  - 手動チェックリスト「大会情報（Tournament Info）」の全項目と「起動・終了」の大会情報の項目
+  - 特に次の 3 点
+    - 大会情報を最後に開いていた状態での起動（ウィンドウが先に出るか・`STARTUP phase=` の時刻）
+    - admin の URL の設定と、イベントが見つからないときの文言
+    - 大会情報・配信設定・実況・解説を行き来したとき、ビューが再読み込みされないこと
+- **検証**: pytest 全量 2967 passed / 2 skipped／jest 全量 304 passed／`npm run build` OK（警告は既存の `Header.jsx` だけ）／`npm run test:e2e` 20 passed
+
+##### S4g レビュー指摘の対応（2026-11-04）
+
+High なし。M1〜M4 は設計から直し、L1〜L13 は個別に直した（L6・L9 は記録だけ）。
+
+- **M1・M3: 設定 / 解除の状態を state に出し、ページはそれを描く**
+  - state に `tournamentInfo.url`（`TOURNAMENT_URL` の写し）と `tournamentInfo.load = {status, error, revision}`（`media` と同じ形）を足した。追加だけで、既存のキーと payload の形は変えていない。`KEY_CATALOG`（`TOURNAMENT_INFO_KEYS`）に 4 キーを足し、`StateSchema.SeedPanelState()` が起動時に URL と `idle` の `load` をシードする（`revision` は保存値を引き継ぐ。`ReadTournamentLoad()` が壊れた値を `idle` / `""` / 0 と読む）
+  - `TournamentService`
+    - メモリの状態を消した。`Status()` を `Load()`（state を読む）に置き換えた
+    - 設定 / 解除は、要求したスレッドで `StateManager.lock` → 自分の lock の順に取る。世代を進め、次の revision を publish してから戻る。進み具合（`resolving` → `loading` → `loaded` / `error`）は同じ revision のまま
+    - URL は保存と同時に publish する（`_Apply` / `_ApplyClear` / `PayloadApplied`）
+  - v1
+    - `POST` / `DELETE /tournament` の 202 に `loadRevision` を足した。その要求の `load` は 202 の前に state に出ている
+    - `GET /tournament` は残し、state の値を返す（封筒に state の `revision`）
+    - `AutonaWebOperations.set_tournament` を足した（v1 用）。legacy / Socket.IO の `load_tournament` は `"OK"` のまま
+  - ページ（`web/src/EventPage/`）
+    - 1 秒ごとのポーリングと、開いたときの `GET /tournament` を消した。URL と状態は state を描く。サイドバー・ほかの端末・起動時の読み直しの状態も出る
+    - 自分の設定 / 解除は、state の `load.revision` が 202 の `loadRevision` に達するまでボタンを busy にする（最大 `WRITE_TIMEOUT_MS`）。前の要求の結果を自分の結果と取り違えない
+    - URL 欄（`useUrlField`）
+      - 打ちかけが無いときは state の URL を出す
+      - state の URL が変わったら、フォーカス中でも打ちかけを捨てる（HeldBackText と同じく別の書き手が勝つ）。表示している値がボタンで送る値になるので、古い URL のまま「設定」を押しても、サイドバーで設定した大会を戻さない
+      - 「解除」は打ちかけも消す
+  - 仕様: `external-control-api.md` の §2.4・§2.4a・§2.8・§5.7（state ベースに書き直し）・§7.1・§7.3
+- **M2: 遅れて届いた古い大会の取得結果を捨てる**: `AutonaTournamentDataProvider.GetTournamentData` が取得を始めたときの provider を持ち、`_onTournamentDataResult` は今の provider でなければ捨てる（大会の差し替え・解除・`force` の読み直しのどれでも、provider は新しくなる）。古い大会 A が `tournamentInfo.*` を上書きする既存の不具合と、B の状態を A の結果で `loaded` にする不具合の両方が直る
+- **M4: 共有ビューの生成を Web サーバーの準備の後へ**（`src/AutonaWebPanelHost.py` / `src/AutonaWebPageLifecycle.py`）
+  - `AutonaWebPageLifecycle` に `IsWebServerReady()` と `WhenWebServerReady(callback)` を足した。`MarkWebServerReady()` は、保留していたローダーの後にこれを呼ぶ
+  - ホストは「表示中・パネルあり・サーバー準備済み」になったときに zero timer を積み、そこでビューを作る。`MarkWebServerReady()` / `_StartWebServer()` の中では作らないので、`webserver-ready` のログが先に出る
+  - 描画は待たない（`paintEvent` の待ちを消した）。最小化で起動しても、元に戻したときにビューがある（L14）
+- **L1**: 開催日は、年が 4 桁で 2000〜2999 のときだけ送る（`isSendableDay`）。年を 1 桁ずつ打つ途中の `0002-…` は、送らず断りも出さない
+- **L2**: `LoadTournament` が例外を出したら `error` / `load_failed`。URL は announce し、アイコン / バナーは取りに行かない
+- **L3**: `POST /tournament` の `url` は、文字列か `null` のときだけ受け付ける（ほかは 400）。`""` / `null` / 省略は解除
+- **L4**: `PATCH /tournament/info` は、PC が時刻にできない日を 400 にする。ほかの欄も書かない（`TournamentInfoService.DayTime` で先に確かめる）
+- **L5**: 取得の 409 の文言は、エラー本文の `code` で決める（`NOT_READY` → 「先に大会を読み込んでください」、`CONFLICT` → 実行中）。そのため `web/src/api.ts` の `ApiError` に `code` を足し（`apiErrorCode`）、v1 のエラー本文から読む
+- **L7**: 参加人数の上限を 999999 にした（v1 の `TOURNAMENT_ENTRANTS_MAX` と、ページの `ENTRANTS_MAX`。一致はテストで照合する）。空の欄は送らない（離れたら state の値に戻る）
+- **L8**: ゲームの一覧は、state の `game` が変わったときと、ページが再表示されたとき（`visibilitychange` で visible）に読み直す。読み直しが失敗しても、読めている一覧は残す
+- **L10**
+  - `SetStartggEventSlug` の `fetchMedia` 引数を消した
+  - 「EVENT panel」と書いたままのコメントを直した（provider アダプタ・`TournamentService`）
+- **L11**: `.claude/known-smells.md` の S-14 を、削除済みの現状に合わせた
+- **L12**
+  - テストを足した（下の pin）
+  - `autonaApp` を要らないのに求めていた 3 本（StartGG の解決 2 本・シェルの結線）から外した
+- **L13**: `PATCH /colors/<feature>` と `/colors/tournament` は、色を `#rrggbb`（小文字 6 桁）に揃えてから保存する（`_color_rrggbb`）
+- **ドキュメント**
+  - `.claude/design/Design.md`（`tournamentInfo` の木に `url` / `load`・パネル表 1）
+  - `.claude/design/external-control-api.md`
+  - `.claude/rules/state-and-webserver.md`（`TournamentService` の行）
+  - `.claude/known-smells.md`（L11）・`docs/product/features.md` §8
+  - `.claude/manual-test-checklist.md`（起動の 2 項目と、大会情報の URL 欄・遅れて届く大会・参加人数 / 開催日・ゲームの一覧）
+- **L6（記録）**: `GET /tournament` の `loaded` は「provider がある」で、「読み込めた」ではない（失敗した大会でも true）。読み込めたかは `status` で見る。仕様 §5.7 と docstring に明記した
+- **判断と理由**
+  1. **URL 欄の打ちかけは、URL が変わったときだけ捨てる**。同じ URL の再設定・断られた設定・イベントの見つからない admin URL では残す（直して出し直せるように。HeldBackText も、引き金はその欄の値の変化）。ただし useStateField と違い、フォーカス中も画面から消す。ボタンが送るのは表示している値なので、見えている値と送る値をずらさない
+  2. **`loadRevision` は、Flask のスレッドで `SetTournament` の後に読む**。間に別の要求が入るとその番号になるが、そのとき state が出しているのもその新しい要求の結果なので害はない（仕様 §5.7 に明記）
+  3. **`load.revision` は設定 / 解除ごとに進み、再起動でも戻らない**。シードは `status` だけ `idle` に戻す。戻すと、再起動の前に開いていたページが古い番号を新しいと取り違える
+  4. **実行中フラグの解除は `gui_executor` に積む**。`_Apply` の後に FIFO で走るので、読み込みが始まる前にフラグが外れない
+  5. **L4 は事前に確かめる**。`SetDate` は同じ日を送ったときも False を返すので、その戻り値では断れない（同じ日の再送は今までどおり 200）
+- **旧実装との挙動差（記録。L9 を含む）**
+  - **L9**: ページのゲーム選択は `POST /game`（`mods_reload_mode=True`。実行中フラグがあり、実行中は 409）を通る。旧 Qt のコンボは `LoadGameByCodename(codename)`（`mods_reload_mode=False`）だった。同じゲームの選び直しは MUI の Select が onChange を出さないので起きず、実害は小さい
+  - 参加人数は 999999 まで入る（旧 QSpinBox は 9999 で丸めて表示していた）。欄を空にしても 0 を送らない
+  - 色は `#rrggbb` で保存する（旧 Qt の色ダイアログの `QColor.name()` と同じ）。v1 から `#ABC` を送ったときだけ、以前と違う
+  - `POST /tournament` の `url` に `false` / `0` などを送っても解除にならず、400 になる
+  - 大会情報のビューは `webserver-ready` の後に建つ（S4g は最初の描画の後だった）
+- **pin（テスト）**
+  - `tests/test_tournament_service.py`: state への publish・設定 / 解除ごとの revision・例外の `load_failed`・URL の publish・壊れた値の読み・状態遷移の全体を state で
+  - `tests/test_api_v1_tournament.py`
+    - 202 の前に state にある（GUI スレッドが読み込みを始める前）・`loadRevision`
+    - `url` の型の 400・空 / `null` / 省略の解除
+    - 999999 とページの `ENTRANTS_MAX` の一致・時刻にできない日の 400（何も書かない）
+    - `#rrggbb` への正規化
+  - `tests/test_api_v1_commentary.py`: 機能別カラーの `#abc` が `#aabbcc` で保存されることに更新した（L13 で意図した変更）
+  - `tests/test_provider_jobs.py`: B を適用した後に A の取得結果が遅れて届く順（別の大会 / 大会なし）
+  - `tests/test_state_schema.py`: シード（URL と `idle`、無い `load` は revision 0 から）
+  - `tests/test_web_panel_host.py`: `STARTUP phase=` の完了条件（`core-shown` では作らず積まない／`webserver-ready` では積むだけ／その後に作る）・描画なしで建つ（L14）・準備のときに隠れていたホストは次の表示で建つ
+  - Web RTL `EventPage.test.js`
+    - URL と状態は state から（`GET /tournament` を読まない）
+    - busy は revision まで・届かなければ期限で解ける
+    - ほかの書き手の設定の表示・打ちかけを捨てる / 残す・解除で消える
+    - L1・L5・L7・L8
+  - Playwright `event.spec.ts`: 解除の後にポーリングしない（ボタンは state が届くと戻る）・参加人数の文言
+- **残課題**
+  - ゲームの再スキャンだけでは state が変わらない。表示中のページの一覧に新しいゲームが出るのは、ページの再表示（別のパネルへ移って戻る・ブラウザのタブ切替）か、ゲームの読み込みの後
+  - provider の `GetTournamentData` の取得そのものが例外を出すと、その読み込みは `loading` のまま残る（L2 は `LoadTournament` の例外だけ）。start.gg の失敗は通常 `{}` が返るので `load_failed` になる
+  - フェーズの取得（`GetTournamentPhases`）の遅れた結果は、今回は捨てていない（M2 は大会データだけ）
+  - 起動時間の実測はオーナーが行う（PR の Test Plan）
+  - S4g の残課題「ほかのクライアントが設定した大会の『読み込み中』は、開き直すまで出ない」は、M1 で解消した
+- **オーナー実機確認**（`python main.py`）: 手動チェックリストの「起動・終了」の大会情報 2 項目（起動時間・最小化起動）と、「大会情報」の URL 欄・遅れて届く大会・参加人数 / 開催日・ゲームの一覧の項目
+- **検証**: pytest 全量 2987 passed / 2 skipped／jest 全量 313 passed／`npm run build` OK（警告は既存の `Header.jsx` だけ）／`npm run test:e2e` 21 passed

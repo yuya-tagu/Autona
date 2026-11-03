@@ -423,19 +423,22 @@ commentary
 ```
 tournamentInfo
 ├── tournamentName
-├── themeColor / accentColor       ※**大会共通カラー**（EVENT タブ「大会カラー」カードで編集）。
+├── themeColor / accentColor       ※**大会共通カラー**（大会情報ページ「大会カラー」カードで編集。`PATCH /api/v1/colors/tournament`）。
 │                                    既存テンプレ互換のため StateManager に展開する表示用キャッシュで、
 │                                    永続化の正本ではない（正本は SettingsManager.general.theme_color / accent_color）。
 │                                    機能別に上書きしたい場合は下記 `colors.{feature}` を使う
 │                                    （キー名は後方互換のため変更しない）。
-├── displayTournamentName          ※編集 UI は SCORE タブ（と EVENT タブの大会名追従）。下記注記参照。
+├── displayTournamentName          ※編集 UI は SCORE タブ（と大会名の追従）。下記注記参照。
 ├── eventName / address / numEntrants / startAt
-│                                  ※EVENT タブの入力欄。キー名は `StateSchema.TOURNAMENT_INPUT_KEYS`
-│                                    が正本（`tournamentName` を含む）。書き手は
+│                                  ※大会情報ページ（React `/web/event`）の入力欄。書き手は
 │                                    `core/TournamentInfoService.py` のみ（入力・provider 両方向）。
+│                                    ページは `PATCH /api/v1/tournament/info` で書く。その field 名は
+│                                    `StateSchema.TOURNAMENT_INPUT_KEYS`（3 つの文字列・`numEntrants`・
+│                                    `startAtDate`。ADR-005 S4g）。
 │                                    `startAt` は短縮日付文字列（ロケール依存の整形済み）
 ├── startAtDate                    ※`startAt` の日（`YYYY-MM-DD`、PC のタイムゾーン。null と一緒に null）。
-│                                    日付の入力欄はこれを描き、`TournamentInfoService.SetDate` で書く
+│                                    日付の入力欄（`<input type="date">`）はこれを描き、
+│                                    `TournamentInfoService.SetDate` で書く
 │                                    （その日の 0 時の unix 秒への変換は core。ADR-005 S4f）
 ├── endAt / eventStartAt / eventEndAt
 │                                  ※タブに入力欄を持たない provider 由来の日時。短縮日付文字列で公開
@@ -446,6 +449,11 @@ tournamentInfo
 │   ├── error                      error の理由（`no_media` / `fetch_failed` / `save_failed` /
 │   │                                `superseded` / `cancelled`）
 │   └── revision                   取得を始めるたびに 1 増える（予約された次の取得も 1 回と数える）
+├── url                            最後に設定した大会の URL（`TOURNAMENT_URL` の写し。無ければ ""）
+├── load                           大会の設定 / 解除の進み具合（`media` と同じ形。ADR-005 S4g レビュー M1）
+│   ├── status                     idle | resolving | loading | loaded | error（起動のたびに idle へ戻る）
+│   ├── error                      error の理由（`unresolved` / `load_failed`）
+│   └── revision                   設定 / 解除のたびに 1 増える（進み具合では増えない。再起動でも戻らない）
 └── {provider 由来}                (`shortLink` 等。ペイロードの残りをそのまま透過)
 ```
 
@@ -454,7 +462,9 @@ tournamentInfo
 `core/TournamentMediaService.py`（取り込み・取得のジョブ・既定に戻す。ADR-005 S4f）。画像の検証・縮小・
 原子的な書き込みは配信団体素材と共通の `core/ImageImport.py`。`bannerVersion` が変わると Qt のアダプタが
 `media_updated` を出す（サムネイル / リザルトのプレビューが受ける）。大会の設定・解除（`TOURNAMENT_URL`）は
-どの入口からでも `core/TournamentService.py` を通り、解除はゲーム選択も忘れる。
+どの入口からでも `core/TournamentService.py` を通り、解除はゲーム選択も忘れる。`url` / `load` の書き手も
+`TournamentService`（設定 / 解除の受け付け時に、要求したスレッドで publish する。`POST` / `DELETE /api/v1/tournament` の
+202 はその後。起動時のシードは `StateSchema.SeedPanelState()`）。
 
 ##### `colors` — 機能別カラーの上書き
 
@@ -544,7 +554,7 @@ Step 5（T-19）で順に静的化し、**全族が完了**（`StateSchema.DYNAM
 | `score.{N}.team.{T}.{QCheckBox/QLineEdit.objectName}` | ✅ 静的化（`StateSchema.SCORE_TEAM_INPUT_KEYS` = `teamName` / `losers`。書き手は `AutonaActions`） |
 | `score.{N}.{QComboBox.objectName}` | ✅ 静的化（`StateSchema.SCORE_MATCH_FIELDS` = `phase` / `pool` / `match`。書き手は `AutonaActions`） |
 | `score.{N}.team.{T}.player.{M}.{objectName}` | ✅ 静的化（`StateSchema.PLAYER_INPUT_KEYS`。書き手は `core/PlayerService.py`） |
-| `tournamentInfo.{Q*.objectName}` | ✅ 静的化（`StateSchema.TOURNAMENT_INPUT_KEYS` = `tournamentName` / `eventName` / `address` / `numEntrants` / `startAt`。書き手は `core/TournamentInfoService.py`） |
+| `tournamentInfo.{Q*.objectName}` | ✅ 静的化（`StateSchema.TOURNAMENT_{TEXT,NUMBER,DATE}_FIELDS` = `tournamentName` / `eventName` / `address` / `numEntrants` / `startAt`。書き手は `core/TournamentInfoService.py`。Qt の EVENT タブは ADR-005 S4g で React のページになり、`.ui` は削除済み） |
 
 **規約**:
 - **キー名は静的化後も不変**（`.ui` の `objectName` を変更するとキーパスが変わり、保存済み state と互換性が壊れる。静的化済みの族でも `StateSchema` の文字列と `objectName` が一致していなければ `findChild` が解決できず同じ結果になる）。やむを得ず変える場合は state のマイグレーション層が前提（known-smells S-14）。
@@ -754,13 +764,15 @@ board 1 面のみ）だけで、**残りのパネルは初回表示時にファ�
 （起動再設計 Step 4b + headless core Step 4b。§4.1.1）。`Tournament Info` も
 2026-08-31 に遅延構築へ移行した — `tournamentInfo.*` の書き手が
 `src/core/TournamentInfoService.py`（`bootstrap_core()` 生成）になり、パネル不在でも
-大会データが state に入るようになったため。ただし先頭ページなので、最後に EVENT を
-開いていた／新規インストールの起動では結局そこで構築される。「デフォルト表示」列は
-QSettings に保存された最後の選択に依存し、初期値は先頭ページ。
+大会データが state に入るようになったため。ADR-005 S4g で React のページになり、
+先頭ページ（最後に EVENT を開いていた／新規インストールの起動）では共有ビューの
+ホストが起動時に建つ。ビュー（QtWebEngine）の生成はホストの最初の描画の後
+（`paintEvent` → `QTimer.singleShot(0)`）へ遅らせるので、ウィンドウが先に出る。
+「デフォルト表示」列は QSettings に保存された最後の選択に依存し、初期値は先頭ページ。
 
 | # | objectName | クラス | 主な責務 | 入力先 (Set) | 表示元 (Get) | デフォルト表示 |
 |---|------------|-------|---------|------------|------------|--------------|
-| 1 | `Tournament Info` | `AutonaTournamentInfoWidget` | 大会名・日付・URL など大会メタデータの編集、大会アイコン / バナー。**書き込みの正本は `src/core/TournamentInfoService.py`**（Start.gg ペイロード・表示大会名・日付）、アイコン / バナーは `src/core/TournamentMediaService.py`、大会の設定・解除は `src/core/TournamentService.py`（ADR-005 S4f）で、パネルは core を呼んで描画するだけ | `tournamentInfo.*`（手入力） | `tournamentInfo.*` | ✓（最初に表示） |
+| 1 | `WebPanels`（共有ホスト。ナビの文言は `Tournament Info`、ナビのキーは `event`） | React の `EventPage`（`/web/event`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4g）。Qt 版（`AutonaTournamentInfoWidget` と `.ui`）は S4g で削除済み | 大会の設定・再取得・解除（確認つき）と状態の表示、大会名・イベント名・場所・参加人数・開催日の編集、ゲームの選択、大会カラー、大会アイコン / バナー（取り込み・大会から取得・既定に戻す）。**書き込みの正本は `src/core/TournamentInfoService.py`**（Start.gg ペイロード・表示大会名・日付）、アイコン / バナーは `src/core/TournamentMediaService.py`、大会の設定・解除は `src/core/TournamentService.py`（ADR-005 S4f）、カラーは `src/core/ColorService.py` で、ページは `/api/v1`（`tournament*`・`colors/tournament`・`game`）を呼んで state を描画するだけ | `tournamentInfo.*`（core 経由） | `tournamentInfo.*`（URL と状態の `url` / `load` を含む）、`game`、`GET /api/v1/games`（`game` の変化とページの再表示で読み直す） | ✓（最初に表示） |
 | 1.5 | `WebPanels`（共有ホスト。ナビの文言は `Stream Settings`） | React の `StreamPage`（`/web/stream`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4e）。Qt 版（`AutonaStreamSettingsWidget`）は S4e で削除済み | 配信先・配信タイトル・配信団体アイコン / サムネイルの登録・配信サムネイル生成。**処理の正本は `src/core/StreamService.py`**（タイトルの自動生成・チャンネル CRUD・素材の取り込み・サムネ生成のジョブ。ADR-005 S4d）で、ページは `/api/v1/stream*` を呼んで state を描画するだけ（ファイル選択・ダイアログ・プレビュー・クリップボードはブラウザの部品）。`stream.url` / `title` の書き込みは `AutonaActions.SetStreamUrl` / `SetStreamTitle`（同値なら書かない） | `stream.*`（core 経由） | `stream.*` | — |
 | 2 | `Thumbnail Settings` | `AutonaThumbnailSettingsWidget` | サムネイルテンプレ選択・背景指定・プレビュー・PNG/JPG 保存・クリップボードコピー | `thumbnail_config.*`（SettingsManager） | `score.*`, `tournamentInfo.*`, `thumbnail_config.*` | ✓（条件付き） |
 | 3 | `Result Settings` | `AutonaResultSettingsWidget` | リザルトレイアウト選択・選手入力・プレビュー・PNG/JPG 保存・クリップボードコピー。`result_players` の書き込みは `AutonaActions.PublishResultPlayers` | `result_config.*`, `result_players` | `tournamentInfo.*`, `result_players` | ✓ |
@@ -843,7 +855,7 @@ QSettings に保存された最後の選択に依存し、初期値は先頭ペ�
 | `/web` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
 | `/scoreboard` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
 | `/team` | `ScoreboardPage` | チーム用スコアボード操作（board2） | Socket.IO + REST |
-| `/web/:panel` | `PanelShell`（`web/src/PanelShell/`） | React 化したデスクトップのパネル（ADR-005 S4）。サーバーが返すのは `WebAccess.WEB_PANELS` の名前だけ（他は 404）。`?desktop=1`（デスクトップの共有ビュー `AutonaWebPanelHost`）でブラウザ向けの部品を隠し、`?lng=` を i18next に渡す。確認用の `shell-check`（S4a）と実況・解説の `commentary`（S4b）と配信設定の `stream`（S4e）。サイドバーの React の項目は複数あっても共有ビューは 1 つで、各項目は自分のスタックページを持ち続け（ナビ index == スタック index）、最初に開いた項目のページにビューが建つ（`WebPanelPages`。S4e） | Socket.IO + REST |
+| `/web/:panel` | `PanelShell`（`web/src/PanelShell/`） | React 化したデスクトップのパネル（ADR-005 S4）。サーバーが返すのは `WebAccess.WEB_PANELS` の名前だけ（他は 404）。`?desktop=1`（デスクトップの共有ビュー `AutonaWebPanelHost`）でブラウザ向けの部品を隠し、`?lng=` を i18next に渡す。確認用の `shell-check`（S4a）と実況・解説の `commentary`（S4b）と配信設定の `stream`（S4e）と大会情報の `event`（S4g）。サイドバーの React の項目は複数あっても共有ビューは 1 つで、各項目は自分のスタックページを持ち続け（ナビ index == スタック index）、最初に開いた項目のページにビューが建つ（`WebPanelPages`。S4e） | Socket.IO + REST |
 
 #### 4.2.1 ScoreboardPage コンポーネント階層
 
@@ -1376,7 +1388,7 @@ tournamentInfo.themeColor / accentColor     （大会共通カラー）
 
 - クリアは **kind 単位**。テーマ色を変えてもアクセントの機能別上書きは残る
 - 上書きが消えると各レイアウトのフォールバックが働き、新しい大会カラーが即座に全レイアウトへ反映される
-- EVENT タブの「Autonaデフォルトカラーを設定する」も `SetTournamentColor` 経由なので同挙動
+- 大会情報ページの「既定の色に戻す」（`PATCH /api/v1/colors/tournament` の `{"reset": true}`）も `SetTournamentColor` 経由なので同挙動
 - 機能別カラーは、その後に個別編集した時点から再び独立する
 - 構築済みパネルのカラーボタン表示は、カードの showEvent リフレッシュ（`_ColorCardRefresher`）で追従する
 

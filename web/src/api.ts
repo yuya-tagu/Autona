@@ -31,18 +31,33 @@ async function request(path: string, init?: RequestInit, opts?: ApiOptions): Pro
     });
     if (!resp.ok) {
         // The status rides along (ApiError) for a caller that answers one
-        // refusal differently (a 409 from /api/v1).
+        // refusal differently (a 409 from /api/v1), and so does /api/v1's
+        // error code, for one whose refusals share a status (two 409s).
         throw Object.assign(
             new Error(`${init?.method ?? "GET"} ${path} failed: HTTP ${resp.status}`),
-            {status: resp.status});
+            {status: resp.status, code: await errorCode(resp)});
     }
     return resp;
 }
 
-export type ApiError = Error & {status?: number};
+// /api/v1's error envelope: {"ok": false, "error": {"code", "message"}}.
+async function errorCode(resp: Response): Promise<string | undefined> {
+    try {
+        const code = (await resp.json())?.error?.code;
+        return typeof code === "string" ? code : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+export type ApiError = Error & {status?: number; code?: string};
 
 export function apiErrorStatus(error: unknown): number | undefined {
     return (error as ApiError | null)?.status;
+}
+
+export function apiErrorCode(error: unknown): string | undefined {
+    return (error as ApiError | null)?.code;
 }
 
 export async function apiGetJson<T = unknown>(path: string, opts?: ApiOptions): Promise<T> {

@@ -15,8 +15,17 @@ here; there is no privileged channel (no QWebChannel) -- the page uses the
 same API as a browser.
 
 Built lazily: constructing the host costs a plain QWidget; the view is
-created the first time the host is on screen with a panel to show, so
-startup (``STARTUP phase=``) does not change. From then on it lives for the
+created the first time the host is on screen with a panel to show, once
+the web server is ready -- and then from the event loop, not inside the
+show or the readiness call that allows it (_ScheduleView; ADR-005 S4g
+review M4). Its page cannot be shown before the server is up anyway, and
+the view's construction is Chromium's start-up: the sidebar's default item
+is the Event page, so a fresh install's window is shown with the host as
+its current page, and a view built then would hold up the window's first
+paint, the loading spinner and the web server's start (_StartWebServer,
+which marks the server ready: STARTUP phase=webserver-ready is logged
+before the view is built). Nothing waits for a paint, so a window started
+minimized builds it too (S4g review L14). From then on it lives for the
 whole process and shares the overlay previews' plumbing
 (AutonaWebPageLifecycle): loads wait for the web server and retry a refused
 connection, and while the host is off screen the page is frozen, then
@@ -57,13 +66,15 @@ import json
 import logging
 from urllib.parse import quote, urlencode
 
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import QColor
 from qtpy.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from qtpy.QtWebEngineWidgets import QWebEngineView
 from qtpy.QtWidgets import QMenu, QVBoxLayout, QWidget
 
-from .AutonaWebPageLifecycle import HiddenPageLifecycle, LocalPageLoader
+from .AutonaWebPageLifecycle import (
+    HiddenPageLifecycle, IsWebServerReady, LocalPageLoader,
+    WhenWebServerReady)
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .core import WebAccess
 from . import ui_constants as UI
@@ -232,8 +243,12 @@ class AutonaWebPanelHost(QWidget):
         # The panel the operator asked for last. The page catches up to it
         # whenever it can run script (see _Navigate).
         self._panel = None
-        # Built on first show with a panel (_EnsureView).
+        # Built on first show with a panel (_ScheduleView -> _EnsureView).
         self.view = None
+        # Whether a build is queued for the event loop, and whether the
+        # host waits for the web server to queue one (_ScheduleView).
+        self._viewPending = False
+        self._awaitingServer = False
         self._loader = None
         self._lifecycle = None
         # Whether the view's last finished load succeeded: False until the
@@ -246,7 +261,8 @@ class AutonaWebPanelHost(QWidget):
         """Show React panel ``panel`` (a WebAccess.WEB_PANELS name).
 
         Before the view exists this only records the panel: the view is
-        built, on that panel's page, once the host is on screen. Afterwards
+        built, on that panel's page, once the host is on screen and the web
+        server is ready (from the event loop: _ScheduleView). Afterwards
         the Web UI's router navigates to it; the view is not reloaded --
         unless it holds no loaded page (a load that failed), which is then
         loaded again, on this panel.
@@ -255,15 +271,45 @@ class AutonaWebPanelHost(QWidget):
             raise ValueError(f"not a React panel: {panel!r}")
         self._panel = panel
         if self.view is None:
-            if self.isVisible():
-                self._EnsureView()
+            self._ScheduleView()
             return
         if not self._ReloadIfBlank():
             self._Navigate()
 
     def showEvent(self, event):
         super().showEvent(event)
-        if self.view is None and self._panel is not None:
+        if self.view is None:
+            self._ScheduleView()
+
+    def _ScheduleView(self):
+        # The view is built from the event loop once the host is on screen
+        # with a panel and the web server is ready (see the module
+        # docstring): until then this registers for the readiness, once.
+        # Queued, not built here: at startup the readiness comes inside
+        # _StartWebServer() (MarkWebServerReady), and the zero timer runs
+        # once it has returned. Queued once; a host hidden again before the
+        # build runs builds nothing, and queues anew on its next show.
+        # (Pure scheduling: nothing here waits.)
+        if (self.view is not None or self._panel is None
+                or self._viewPending):
+            return
+        if not IsWebServerReady():
+            if not self._awaitingServer:
+                self._awaitingServer = True
+                WhenWebServerReady(self._OnWebServerReady)
+            return
+        if not self.isVisible():
+            return
+        self._viewPending = True
+        QTimer.singleShot(0, self, self._BuildQueuedView)
+
+    def _OnWebServerReady(self):
+        self._awaitingServer = False
+        self._ScheduleView()
+
+    def _BuildQueuedView(self):
+        self._viewPending = False
+        if self.view is None and self._panel is not None and self.isVisible():
             self._EnsureView()
 
     def _EnsureView(self):

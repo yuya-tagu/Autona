@@ -35,12 +35,16 @@ from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
 from .core import StateSchema as schema
 from .core import ColorService
+from .core import ImageImport
 from .core import CommentaryModel as comms
 from .core import CommentaryService
 from .core import LayoutCatalog
 from .core import StreamService as streams
 from .core import Top8Service
+from .core import TournamentMediaService as tournamentMedia
+from .core import TournamentService as tournaments
 from .core.GameAssetCatalog import GameAssetCatalog
+from .core.TournamentInfoService import TournamentInfoService
 from .core.CountryCatalog import CountryCatalog
 # Importing these builds nothing (agent-pitfalls #1): their singletons
 # (`.instance`) are created by src/bootstrap.py and read per request.
@@ -67,8 +71,8 @@ CONFLICT = "CONFLICT"                         # 409
 NOT_READY = "NOT_READY"                       # 409
 UPSTREAM_TIMEOUT = "UPSTREAM_TIMEOUT"         # 504
 INTERNAL = "INTERNAL"                         # 500
-# A request body over its route's limit (write_op's max_body; the only one
-# is the stream org's image upload, ADR-005 S4e).
+# A request body over its route's limit (write_op's max_body: the image
+# uploads, the stream org's (ADR-005 S4e) and the tournament's (S4g)).
 PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"       # 413
 # An operation this shell cannot run (ADR-005 S3c): the server runs, the
 # operation needs what the shell does not have. Not retryable. No v1
@@ -177,7 +181,17 @@ def _truthy(v):
 
 
 _COLOR_RE = re.compile(r"^#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?$")
-_STARTGG_RE = re.compile(r"start\.gg/tournament/[^/]+/event[s]?/[^/]+")
+
+
+def _color_rrggbb(color):
+    """A colour `_COLOR_RE` took (#RGB / #RRGGBB, either case) as the
+    settings and the state keep one: "#rrggbb", what the Qt colour dialog
+    saved (QColor.name()) and the overlays and the pages' colour inputs
+    read (S4g review L13)."""
+    digits = color[1:]
+    if len(digits) == 3:
+        digits = "".join(digit * 2 for digit in digits)
+    return "#" + digits.lower()
 
 
 def current_revision():
@@ -617,6 +631,19 @@ def get_stream_thumbnail_options():
     return ok(data=WebOps.get_stream_thumbnail_options())
 
 
+@api_v1.route("/tournament")
+@api_handler
+def get_tournament():
+    # The tournament URL last set (settings.json's TOURNAMENT_URL), whether
+    # a provider is there (`loaded`: also after a load that failed), and
+    # how the newest set / clear is going -- status
+    # idle | resolving | loading | loaded | error, its error (unresolved |
+    # load_failed) and the revision every set / clear advances: the state's
+    # tournamentInfo.url / load (ADR-005 S4g), which the Event page renders
+    # without asking here.
+    return ok(data=WebOps.get_tournament(), revision=current_revision())
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Safe write operations (spec §6 — op-logged, no confirm)
 # ═══════════════════════════════════════════════════════════════════════
@@ -1043,8 +1070,48 @@ def colors_update(feature):
         if not isinstance(color, str) or not _COLOR_RE.match(color):
             raise ApiError(
                 INVALID_ARGUMENT, f"{kind} must be #RGB or #RRGGBB", 400)
-    WebOps.set_feature_colors(feature, body)
+    WebOps.set_feature_colors(
+        feature, {kind: _color_rrggbb(color) for kind, color in body.items()})
     return ok(revision=current_revision())
+
+
+@api_v1.route("/colors/tournament", methods=["PATCH"])
+@write_op("colors.tournament")
+def colors_tournament_update():
+    # {"theme": "#rrggbb", "accent": "#rrggbb"}, either or both (#RGB too,
+    # either case: kept as #rrggbb), or {"reset": true}: Autona's own pair
+    # (the Qt card's "Autonaデフォルトカラーを設定する"). The tournament's
+    # colours -- settings.json's general.*_color, published as
+    # tournamentInfo.themeColor / accentColor -- and each clears the
+    # feature overrides of its kind (ColorService.SetTournamentColor;
+    # ADR-005 S4g). Answers the pair now. A static rule, so werkzeug
+    # matches it ahead of /colors/<feature>.
+    body = _json_body()
+    kinds = (ColorService.KIND_THEME, ColorService.KIND_ACCENT)
+    if "reset" in body:
+        if body.get("reset") is not True or len(body) != 1:
+            raise ApiError(
+                INVALID_ARGUMENT, "reset must be true, and sent alone", 400)
+        colors = {ColorService.KIND_THEME: schema.DEFAULT_THEME_COLOR,
+                  ColorService.KIND_ACCENT: schema.DEFAULT_ACCENT_COLOR}
+    else:
+        unknown = sorted(k for k in body if k not in kinds)
+        if unknown:
+            raise ApiError(
+                INVALID_ARGUMENT, f"unknown color: {', '.join(unknown)}",
+                400)
+        if not body:
+            raise ApiError(
+                INVALID_ARGUMENT, "theme, accent or reset is required", 400)
+        for kind, color in body.items():
+            if not isinstance(color, str) or not _COLOR_RE.match(color):
+                raise ApiError(
+                    INVALID_ARGUMENT, f"{kind} must be #RGB or #RRGGBB", 400)
+        colors = {kind: _color_rrggbb(color) for kind, color in body.items()}
+    WebOps.set_tournament_colors(colors)
+    theme, accent = ColorService.GetTournamentColors()
+    return ok(data={"theme": theme, "accent": accent},
+              revision=current_revision())
 
 
 # ── 配信設定 (ADR-005 S4e) ──
@@ -1128,14 +1195,16 @@ def stream_channel_delete(index):
               revision=current_revision())
 
 
-# The org image upload (ADR-005 S4 論点 2): {"image": "data:<type>;base64,
+# The image upload (ADR-005 S4 論点 2): {"image": "data:<type>;base64,
 # ..."}, the file as it is -- core scales it down (StreamService.
-# ImportOrgAsset) and checks what it really is: the data URL's type is the
-# browser's guess from the file name (application/octet-stream for one it
-# does not know), so it is not looked at. Up to 20MB of image (the Stream
-# page refuses a larger file before sending it: ORG_IMAGE_MAX_BYTES in
-# web/src/StreamPage/Cards.tsx, pinned equal); the body is its base64 (4/3)
-# and a little JSON around it, and a longer one is refused unparsed.
+# ImportOrgAsset, TournamentMediaService.ImportMedia) and checks what it
+# really is: the data URL's type is the browser's guess from the file name
+# (application/octet-stream for one it does not know), so it is not looked
+# at. Up to 20MB of image (the pages refuse a larger file before sending
+# it: IMAGE_UPLOAD_MAX_BYTES in web/src/PanelShell/imageUpload.ts, pinned
+# equal); the body is its base64 (4/3) and a little JSON around it, and a
+# longer one is refused unparsed. The stream org's upload (S4e) and the
+# tournament media's (S4g) share it.
 ORG_IMAGE_MAX_BYTES = 20 * 1024 * 1024
 _ORG_IMAGE_MAX_BASE64 = (ORG_IMAGE_MAX_BYTES + 2) // 3 * 4
 _ORG_IMAGE_MAX_BODY = _ORG_IMAGE_MAX_BASE64 + 1024
@@ -1239,6 +1308,133 @@ def stream_thumbnail_options_update():
     return ok(data=options)
 
 
+# ── 大会情報 (ADR-005 S4g) ──
+# The Event page's: the five fields, the tournament's icon / banner. The set
+# / clear is with the heavy operations below; the colours are above
+# (/colors/tournament).
+# The entrant count's maximum: room for any count start.gg reports, which
+# the payload writes as it is (S4g review L7; the Qt tab's spin box stopped
+# at 9999). The Event page's field takes the same (ENTRANTS_MAX in
+# web/src/EventPage/Cards.tsx, pinned equal).
+TOURNAMENT_ENTRANTS_MAX = 999999
+
+
+@api_v1.route("/tournament/info", methods=["PATCH"])
+@write_op("tournament.info")
+def tournament_info_update():
+    # Some of {"tournamentName", "eventName", "address": str,
+    # "numEntrants": 0..999999, "startAtDate": "YYYY-MM-DD" (2000-01-01 to
+    # 2999-12-31, ASCII digits)}: tournamentInfo.* through
+    # TournamentInfoService, in one save cycle. The date is published as
+    # tournamentInfo.startAt (the PC's short date, as before) and
+    # startAtDate; it cannot be emptied (the Qt tab's date edit could not
+    # either). A day this PC cannot make a time of is refused too, with
+    # nothing written (S4g review L4). A payload loaded later replaces
+    # them, as it did.
+    body = _json_body()
+    fields = schema.TOURNAMENT_INPUT_KEYS
+    unknown = sorted(k for k in body if k not in fields)
+    if unknown:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"unknown tournament field: {', '.join(unknown)}", 400)
+    if not body:
+        raise ApiError(
+            INVALID_ARGUMENT, f"one of {', '.join(fields)} is required", 400)
+    for key, value in body.items():
+        if key in schema.TOURNAMENT_TEXT_FIELDS:
+            if not isinstance(value, str):
+                raise ApiError(
+                    INVALID_ARGUMENT, f"{key} must be a string", 400)
+        elif key in schema.TOURNAMENT_NUMBER_FIELDS:
+            if (isinstance(value, bool) or not isinstance(value, int)
+                    or not 0 <= value <= TOURNAMENT_ENTRANTS_MAX):
+                raise ApiError(
+                    INVALID_ARGUMENT,
+                    f"{key} must be an integer from 0 to "
+                    f"{TOURNAMENT_ENTRANTS_MAX}", 400)
+        elif TournamentInfoService.ParseDate(value) is None:
+            raise ApiError(
+                INVALID_ARGUMENT,
+                f"{key} must be a day, YYYY-MM-DD, from 2000-01-01 to "
+                "2999-12-31", 400)
+    if not WebOps.update_tournament_info(body):
+        raise ApiError(
+            INVALID_ARGUMENT,
+            "startAtDate cannot be converted to a time on this PC", 400)
+    return ok(revision=current_revision())
+
+
+@api_v1.route("/tournament/media/<kind>", methods=["PUT"])
+@write_op("tournament.media.import", log_keys_only=True,
+          max_body=_ORG_IMAGE_MAX_BODY)
+def tournament_media_import(kind):
+    # The tournament's icon (layout/logo.png, scaled to 512) or banner
+    # (user_data/tournament_banner.png, 1920), as PNG: its version published
+    # (tournamentInfo.logoVersion / bannerVersion), which the previews and
+    # the overlays follow. The upload as the stream org's (above).
+    if kind not in tournamentMedia.MEDIA:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"unknown tournament media: {kind} (expected one of: "
+            f"{', '.join(tournamentMedia.MEDIA)})",
+            400,
+        )
+    data = _org_image_bytes(_json_body())
+    result = WebOps.import_tournament_media(kind, data)
+    if result == tournamentMedia.INVALID_IMAGE:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            "the image could not be read (a PNG, JPEG or BMP of up to "
+            f"{ImageImport.MAX_PIXELS} pixels)",
+            400,
+        )
+    if result == tournamentMedia.SAVE_FAILED:
+        raise ApiError(
+            INTERNAL,
+            "the image could not be saved (is another app holding the "
+            "file?)",
+            500,
+        )
+    return ok(revision=current_revision())
+
+
+@api_v1.route("/tournament/media", methods=["DELETE"])
+@write_op("tournament.media.reset")
+def tournament_media_reset():
+    # Both back to Autona's own: the icon is Autona's icon again, the banner
+    # is removed (its readers fall back to the bundled default banner).
+    # Both versions published in one save cycle.
+    if not WebOps.reset_tournament_media():
+        raise ApiError(
+            INTERNAL,
+            "the tournament media could not be reset (is another app "
+            "holding the file?)",
+            500,
+        )
+    return ok(revision=current_revision())
+
+
+@api_v1.route("/tournament/media/fetch", methods=["POST"])
+@write_op("tournament.media.fetch")
+def tournament_media_fetch():
+    # The loaded tournament's icon and banner from start.gg, by a background
+    # job (TournamentMediaService.FetchMedia): tournamentInfo.media says
+    # "running" before this answers, and "done" or "error" (with why) once
+    # it is over. One at a time: a fetch for this tournament running already
+    # is 409; while another tournament's runs, this one is queued behind it
+    # (202, "queued": true) and runs when that one ends.
+    started = WebOps.fetch_tournament_media()
+    if started == tournamentMedia.BUSY:
+        raise ApiError(
+            CONFLICT, "the tournament media are being fetched already", 409)
+    if started == tournamentMedia.NO_TOURNAMENT:
+        raise ApiError(NOT_READY, "no tournament loaded", 409)
+    return ok(data={"accepted": True, "operation": "tournament.media.fetch",
+                    "queued": started == tournamentMedia.QUEUED},
+              revision=current_revision(), status=202)
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Guarded operations (spec §7 — op-logged, confirm / 202 + flag)
 # ═══════════════════════════════════════════════════════════════════════
@@ -1315,41 +1511,76 @@ def pull_stream(n):
 @api_v1.route("/tournament", methods=["POST"])
 @write_op("tournament.load")
 def tournament_load():
+    # {"url": str | null, "force": bool, "fetchMedia": bool}. A start.gg
+    # event URL or, since ADR-005 S4g, an admin/brackets one (resolved to
+    # its event by a background job); empty (or null, or none) clears the
+    # tournament; anything else is refused (S4g review L3: any false value
+    # used to clear). The loaded URL again is not re-fetched unless
+    # "force"; "fetchMedia" fetches the tournament's icon and banner once
+    # it is loaded. Both default to false: what this route always did.
+    #
+    # How it goes is the state's tournamentInfo.load, published before this
+    # answers (on this thread, S4g review M1): the 202's "loadRevision" is
+    # the request's revision there (or a later request's, see
+    # WebOps.set_tournament).
     body = _json_body()
-    url = body.get("url", "") or ""
-    if url and not _STARTGG_RE.search(url):
+    url = body.get("url")
+    if url is None:
+        url = ""
+    if not isinstance(url, str) or (url and tournaments.UrlKind(url) is None):
         raise ApiError(
-            INVALID_ARGUMENT, "url must be a start.gg tournament event URL", 400
+            INVALID_ARGUMENT,
+            "url must be a start.gg tournament event URL or an admin "
+            "brackets URL", 400
         )
+    flags = {}
+    for name in ("force", "fetchMedia"):
+        value = body.get(name, False)
+        if not isinstance(value, bool):
+            raise ApiError(
+                INVALID_ARGUMENT, f"{name} must be true or false", 400)
+        flags[name] = value
     if not _heavy.try_begin("tournament"):
         raise ApiError(CONFLICT, "tournament load already in progress", 409)
 
-    def _run():
-        # load_tournament hands the URL to core's TournamentService (ADR-005
-        # S4f), which normalizes and saves it. Run on the GUI thread, an
-        # event URL is applied right away (the GUI executor runs it in
-        # place), so when it returns the provider switch is done (the
-        # start.gg fetches it starts are async and reported over WS) -- or
-        # nothing happened because that URL is already the loaded one. The
-        # flag is released here in both cases. It used to wait for
-        # tournament_changed, which that early return never emits, so
-        # re-sending the loaded URL held the flag for the guard's full TTL
-        # and every retry got 409. Empty url clears the tournament (and
-        # forgets the selected game, as it always did here).
-        try:
-            WebOps.load_tournament(url if url else None)
-        except Exception:
-            logger.error(traceback.format_exc())
-        finally:
-            _heavy.end("tournament")
-
     try:
-        # Fire-and-forget on the GUI thread so the request returns 202.
-        AutonaQtHelper.gui_executor(_run)
+        # Handed to core's TournamentService (ADR-005 S4f), which publishes
+        # the request's status here and normalizes, saves and loads the URL
+        # on the GUI thread (the GUI executor; in place when this runs
+        # there). An empty url clears the tournament (and forgets the
+        # selected game, as it always did here).
+        loadRevision = WebOps.set_tournament(url, **flags)
+        # The flag is released by the GUI thread, after the apply queued
+        # just ahead of it (the GUI executor runs what one thread hands it
+        # in order): by then the provider switch is done (the start.gg
+        # fetches it starts are async and reported over WS) -- or nothing
+        # happened because that URL is already the loaded one. It used to
+        # wait for tournament_changed, which that early return never emits,
+        # so re-sending the loaded URL held the flag for the guard's full
+        # TTL and every retry got 409.
+        AutonaQtHelper.gui_executor(lambda: _heavy.end("tournament"))
     except Exception:
         _heavy.end("tournament")
         raise
-    return ok(data={"accepted": True, "operation": "tournament.load"}, status=202)
+    return ok(data={"accepted": True, "operation": "tournament.load",
+                    "loadRevision": loadRevision},
+              revision=current_revision(), status=202)
+
+
+@api_v1.route("/tournament", methods=["DELETE"])
+@write_op("tournament.clear")
+def tournament_clear():
+    # The tournament unloaded: its URL forgotten, the tournament info
+    # emptied, and the selected game forgotten too (TournamentService.
+    # ClearTournament, like every clear; ADR-005 S4g). Its idle status is
+    # published here, before this answers (its revision: "loadRevision",
+    # as POST's), and the clear runs on the GUI thread after whatever set
+    # came before it. No in-progress flag: a clear is quick, and a later
+    # one wins anyway.
+    loadRevision = WebOps.clear_tournament()
+    return ok(data={"accepted": True, "operation": "tournament.clear",
+                    "loadRevision": loadRevision},
+              revision=current_revision(), status=202)
 
 
 @api_v1.route("/game", methods=["POST"])

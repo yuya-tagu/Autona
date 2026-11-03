@@ -249,6 +249,8 @@ class Window(QMainWindow):
     #      scoreboard (input) and board (design) panels.
     # v22: Stats Display Settings panel (AutonaStatsPreviewWidget) added to
     #      the Display category, after Commentary.
+    #      (Tournament Info became a React page in ADR-005 S4g, in the same
+    #      place: no bump.)
     STATE_VERSION = 22
     signals = WindowSignals()
 
@@ -352,9 +354,9 @@ class Window(QMainWindow):
         # as pages of a QStackedWidget driven by the left sidebar (see the
         # "Sidebar navigation" block further down).
         #
-        # Only Tournament Info and the Scoreboard are built here. Every other
-        # panel is constructed the first time its page is revealed (see the
-        # _Create*Panel factories and _EnsurePanelAt): the preview panels
+        # Only the Scoreboard is built here. Every other panel is constructed
+        # the first time its page is revealed (see the _Create*Panel
+        # factories and _EnsurePanelAt): the preview panels
         # (Board / Top 8 / Stats Display) each own a
         # QWebEngineView, and the remaining five (Stream / Thumbnail / Result
         # / Statistics / Player List) together added ~2.9s to the window-init
@@ -368,12 +370,17 @@ class Window(QMainWindow):
         self.thumbnailSetting = None
         self.resultSetting = None
 
-        # EVENT — lazy since headless core Step 4b: see
-        # _CreateTournamentInfoPanel. It was the last eager panel, and could
-        # only be one because it was the sole writer of tournamentInfo.* —
-        # an operator who never opened it would have had no tournament name
-        # in the state. core/TournamentInfoService is that writer now, wired
-        # below, so the page can be built on first reveal like every other.
+        # EVENT — lazy since headless core Step 4b: see _CreateEventPanel. It
+        # was the last eager panel, and could only be one because it was the
+        # sole writer of tournamentInfo.* — an operator who never opened it
+        # would have had no tournament name in the state.
+        # core/TournamentInfoService is that writer now, wired below, so the
+        # page can be built on first reveal like every other. The React page
+        # in the shared web view since ADR-005 S4g; being the sidebar's
+        # default item, it is the page a fresh install starts on, so the
+        # view's construction waits for the web server
+        # (AutonaWebPanelHost._ScheduleView): after STARTUP
+        # phase=webserver-ready, from the event loop.
         #
         # STREAM — broadcast-scoped settings (destination, title, stream org
         # assets, YouTube thumbnail). Sits right after EVENT: the tournament
@@ -440,9 +447,8 @@ class Window(QMainWindow):
         # panel's title (ja: スコアボード入力).
         self._navSections = [
             (QApplication.translate("app", "Setup"), [
-                (self._CreateTournamentInfoPanel, 'tournament.svg',
-                 QApplication.translate("app", "Tournament Info"),
-                 "tournamentInfo"),
+                (self._CreateEventPanel, 'tournament.svg',
+                 QApplication.translate("app", "Tournament Info"), "event"),
                 (self._CreateStreamPanel, 'megaphone.svg',
                  QApplication.translate("app", "Stream Settings"), "stream"),
             ]),
@@ -618,7 +624,8 @@ class Window(QMainWindow):
         # UpdateTournamentButton hooks below, because the button reads
         # tournamentInfo.tournamentName out of the state — the EVENT panel
         # used to provide that ordering by being constructed earlier in this
-        # method, and it is lazy now (headless core Step 4b). The wiring is
+        # method, and it is lazy now (headless core Step 4b; a React page
+        # since ADR-005 S4g). The wiring is
         # the one the headless shell makes too (ADR-005 S3c): the payload
         # writer. (Forgetting the selected game on a clear is core's
         # TournamentService, ahead of the tournament_url_update that
@@ -937,7 +944,9 @@ class Window(QMainWindow):
         # Release the embedded views that fetch their pages from this server
         # (the overlay previews of Board / Top 8 / Stats, and
         # the React panel host): a panel restored as the startup page issues
-        # its first load() before this point.
+        # its first load() before this point -- the React panel host does
+        # not even build its view before it, and builds it from the event
+        # loop after this returns (ADR-005 S4g review M4).
         MarkWebServerReady()
 
         log_startup_phase("webserver-ready")
@@ -963,7 +972,7 @@ class Window(QMainWindow):
         with StateManager.SaveBlock():
             schema.SeedPanelState()
 
-            # tournamentInfo.*: the 表示大会名 default, the EVENT tab's text
+            # tournamentInfo.*: the 表示大会名 default, the EVENT page's text
             # keys and the tournament icon's cache-bust version. Not part of
             # the schema seed because the display-name follow rule needs the
             # service's own "last seen tournament name" bookkeeping.
@@ -983,19 +992,9 @@ class Window(QMainWindow):
     # core-shown gap. Everything the panels used to seed into StateManager at
     # construction time now runs from _SeedPanelState() instead.
 
-    def _CreateTournamentInfoPanel(self):
-        from .AutonaTournamentInfoWidget import AutonaTournamentInfoWidget
-        tournamentInfo = AutonaTournamentInfoWidget()
-        tournamentInfo.setWindowIcon(QIcon(UI.icon_path('tournament.svg')))
-        # objectName is the stable identity that saveState/restoreState uses to
-        # match docks. It must NOT be translated: a translated objectName changes
-        # with the UI language, so a layout saved in one language fails to restore
-        # in another and the tab order scrambles. The visible tab label comes from
-        # windowTitle (translated) instead.
-        tournamentInfo.setObjectName("Tournament Info")
-        tournamentInfo.setWindowTitle(
-            QApplication.translate("app", "Tournament Info"))
-        return tournamentInfo
+    def _CreateEventPanel(self):
+        # ADR-005 S4g: the React page in the shared web view.
+        return self._WebPanel("event")
 
     def _CreateBoardPanel(self):
         board = AutonaBoardWidget()
@@ -1352,8 +1351,9 @@ class Window(QMainWindow):
         The Qt half of core/TournamentInfoService: the writing is the
         service's (ApplyProviderPayload, connected by wire_tournament_data,
         which calls this when it failed), and this is the one thing it
-        cannot do. Owned by the window rather than the EVENT panel because
-        the panel may never be built.
+        cannot do. Owned by the window rather than the EVENT page because
+        the page may never be built (it is a React page since ADR-005 S4g,
+        and also shows the failure: the state's tournamentInfo.load).
         """
         message = (
             QApplication.translate(

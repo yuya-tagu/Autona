@@ -26,10 +26,10 @@ the SCORE panel's board-level and team-card inputs (``SCORE_MATCH_FIELDS`` /
 ``SCORE_TEAM_INPUT_KEYS``, read by ``AutonaActions`` and by
 ``AutonaScoreboardWidget``), the player card (``PLAYER_INPUT_KEYS``, read by
 ``PlayerService`` and by ``AutonaScoreboardPlayerWidget``) and the EVENT tab
-(``TOURNAMENT_INPUT_KEYS``, read by ``TournamentInfoService`` and by
-``AutonaTournamentInfoWidget``). ``DYNAMIC_KEY_FAMILIES`` below -- the
-checklist that inventory shrank against -- is empty as a result
-(known-smells S-14).
+(the ``TOURNAMENT_*_FIELDS``, read by ``TournamentInfoService`` and, until
+the tab became the React Event page in ADR-005 S4g, by its Qt widget).
+``DYNAMIC_KEY_FAMILIES`` below -- the checklist that inventory shrank
+against -- is empty as a result (known-smells S-14).
 
 The final instalment added the **subtree roots** (``SCORE_ROOT`` and the rest,
 below ``COLORS_FEATURE_KEYS``). They are here for the same reason the leaves
@@ -395,21 +395,22 @@ COMMENTARY_SLOT_KEYS = (
 # ── Statically named keys the EVENT tab writes ───────────────────────────
 #
 # The last family generated from Qt objectNames at runtime (Step 5,
-# instalment 3). `AutonaTournamentInfoWidget` ran three findChildren loops --
+# instalment 3). The Qt EVENT panel ran three findChildren loops --
 # QLineEdit / QSpinBox / QDateEdit -- and each wrote
-# `tournamentInfo.{widget.objectName()}`; the panel now looks its inputs up
-# *by* these constants and `TournamentInfoService` writes them (it already
-# named them for the provider side since Step 4b, as its
+# `tournamentInfo.{widget.objectName()}`; the panel then looked its inputs
+# up *by* these constants, and `TournamentInfoService` writes them (it
+# already named them for the provider side since Step 4b, as its
 # {TEXT,NUMBER,DATE}_FIELDS -- which alias these tuples rather than
 # respelling them).
 #
-# Split by widget kind because the behaviour differs per kind, not for
-# tidiness: a text field carries a string, a number field an int, and a date
-# field is published as a *formatted short date* (the raw timestamp is kept
-# by the service so a late-built panel can restore its QDateEdit).
+# Split by kind because the behaviour differs per kind, not for tidiness: a
+# text field carries a string, a number field an int, and a date field is
+# published as a *formatted short date* (with its raw day beside it, below).
 #
 # The strings are unchanged, so an existing out/program_state.json still
-# matches (tests/test_objectname_keypath_contract.py pins both spellings).
+# matches. The Qt tab (and the .ui whose objectNames these were, which
+# tests/test_objectname_keypath_contract.py pinned) went in ADR-005 S4g: the
+# React Event page writes the same keys through /api/v1.
 TOURNAMENT_NAME_KEY = "tournamentName"
 TOURNAMENT_EVENT_NAME_KEY = "eventName"
 TOURNAMENT_ADDRESS_KEY = "address"
@@ -424,17 +425,23 @@ TOURNAMENT_TEXT_FIELDS = (
 TOURNAMENT_NUMBER_FIELDS = (TOURNAMENT_ENTRANTS_KEY,)
 TOURNAMENT_DATE_FIELDS = (TOURNAMENT_START_AT_KEY,)
 
-TOURNAMENT_INPUT_KEYS = (
-    TOURNAMENT_TEXT_FIELDS + TOURNAMENT_NUMBER_FIELDS + TOURNAMENT_DATE_FIELDS)
-
 # The raw date beside each date field (ADR-005 S4f): `YYYY-MM-DD`, the day
 # the field holds, or None with it. Published next to the formatted short
-# date (which stays as it was) so a reader -- the QDateEdit after a restart,
-# the Web page's <input type="date"> -- gets the day back without parsing a
-# locale's "%x". Turned into a timestamp (local midnight, in the PC's
-# timezone) by core/TournamentInfoService.SetDate, never by a reader.
+# date (which stays as it was) so a reader -- the Event page's <input
+# type="date"> -- gets the day back without parsing a locale's "%x". Turned
+# into a timestamp (local midnight, in the PC's timezone) by
+# core/TournamentInfoService.SetDate, never by a reader.
 TOURNAMENT_START_AT_DATE_KEY = "startAtDate"
 TOURNAMENT_RAW_DATE_KEYS = {TOURNAMENT_START_AT_KEY: TOURNAMENT_START_AT_DATE_KEY}
+
+# The fields an operator edits, by the names /api/v1's PATCH
+# /tournament/info takes them (ADR-005 S4g): the three texts, the entrant
+# count and the start day -- its raw day, the formatted startAt being
+# derived from it. They were the Qt EVENT tab's objectNames (with startAt
+# for the date edit) until the tab became the React Event page.
+TOURNAMENT_INPUT_KEYS = (
+    TOURNAMENT_TEXT_FIELDS + TOURNAMENT_NUMBER_FIELDS
+    + (TOURNAMENT_START_AT_DATE_KEY,))
 
 # Provider timestamps with no field on the tab at all. Published as short
 # date strings rather than as timestamps, which is the only thing that sets
@@ -469,13 +476,24 @@ TOURNAMENT_BANNER_VERSION_KEY = "bannerVersion"
 # idle | running | done | error, the error of a failed run (a code, see that
 # module) and a revision that every run advances.
 TOURNAMENT_MEDIA_KEY = "media"
+# The tournament's set / clear (ADR-005 S4g review M1), both written by
+# core/TournamentService.py: the URL set last ("" none) -- settings.json's
+# TOURNAMENT_URL, published beside it: what the Event page's URL field
+# follows -- and how the newest set / clear is going, one dict written
+# whole and shaped like `media`: status idle | resolving | loading | loaded
+# | error, the error (unresolved | load_failed, "" otherwise) and a revision
+# that every set / clear advances (the request's: its progress keeps it).
+TOURNAMENT_URL_KEY = "url"
+TOURNAMENT_LOAD_KEY = "load"
+TOURNAMENT_URL_SETTING = "TOURNAMENT_URL"
 
 # One group is still open-ended and stays that way: whatever else the
 # provider payload carries (`shortLink`, and the `initial_load` flag that
 # rides along with it) is written through as-is, so enumerating it would be
 # enumerating Start.gg's response shape.
 TOURNAMENT_INFO_KEYS = (
-    TOURNAMENT_INPUT_KEYS + TOURNAMENT_SHORT_DATE_KEYS + (
+    TOURNAMENT_TEXT_FIELDS + TOURNAMENT_NUMBER_FIELDS + TOURNAMENT_DATE_FIELDS
+    + TOURNAMENT_SHORT_DATE_KEYS + (
         THEME_COLOR_KEY,
         ACCENT_COLOR_KEY,
         TOURNAMENT_DISPLAY_NAME_KEY,
@@ -486,6 +504,10 @@ TOURNAMENT_INFO_KEYS = (
         f"{TOURNAMENT_MEDIA_KEY}.status",
         f"{TOURNAMENT_MEDIA_KEY}.error",
         f"{TOURNAMENT_MEDIA_KEY}.revision",
+        TOURNAMENT_URL_KEY,
+        f"{TOURNAMENT_LOAD_KEY}.status",
+        f"{TOURNAMENT_LOAD_KEY}.error",
+        f"{TOURNAMENT_LOAD_KEY}.revision",
     )
 )
 
@@ -493,6 +515,23 @@ TOURNAMENT_INFO_KEYS = (
 def DefaultTournamentMedia() -> dict:
     """`tournamentInfo.media` before any run (a fresh dict on every call)."""
     return {"status": "idle", "error": "", "revision": 0}
+
+
+def ReadTournamentLoad() -> dict:
+    """`tournamentInfo.load` as published, a fresh dict: anything missing
+    or malformed read as idle, with no error, at revision 0."""
+    load = StateManager.Get(
+        f"{TOURNAMENT_INFO_ROOT}.{TOURNAMENT_LOAD_KEY}", None)
+    if not isinstance(load, dict):
+        load = {}
+    status, error = load.get("status"), load.get("error")
+    revision = load.get("revision")
+    return {
+        "status": status if isinstance(status, str) else "idle",
+        "error": error if isinstance(error, str) else "",
+        "revision": revision if isinstance(revision, int)
+        and not isinstance(revision, bool) and revision >= 0 else 0,
+    }
 
 
 STREAM_URL_KEY = "url"
@@ -591,8 +630,8 @@ KEY_CATALOG = {
 # inventory and it is **empty**: AutonaScoreboardWidget's two families (the
 # team card and the match bar) came off when they became
 # SCORE_TEAM_INPUT_KEYS / SCORE_MATCH_FIELDS, the player card's followed as
-# PLAYER_INPUT_KEYS, and the EVENT tab's -- the last one -- as
-# TOURNAMENT_INPUT_KEYS. Nothing consumes the tuple; it is the checklist,
+# PLAYER_INPUT_KEYS, and the EVENT tab's -- the last one -- as the
+# TOURNAMENT_*_FIELDS. Nothing consumes the tuple; it is the checklist,
 # and tests/test_state_schema.py keeps it from growing back.
 #
 # Kept rather than deleted so a new widget that reaches for the old pattern
@@ -829,6 +868,21 @@ def SeedPanelState():
     StateManager.SetIfChanged(
         f"{TOURNAMENT_INFO_ROOT}.{TOURNAMENT_MEDIA_KEY}",
         DefaultTournamentMedia())
+
+    # The tournament's set / clear (ADR-005 S4g review M1): the URL set last
+    # (which the launch's restore loads, publishing its own progress) and
+    # idle -- a set does not outlive the process. The revision goes on from
+    # the previous session's, so a client still waiting on one of its
+    # revisions (a browser kept open across the restart) is not left behind
+    # by a count started again. Guarded like the rest.
+    url = SettingsManager.Get(TOURNAMENT_URL_SETTING, "")
+    StateManager.SetIfChanged(
+        f"{TOURNAMENT_INFO_ROOT}.{TOURNAMENT_URL_KEY}",
+        url if isinstance(url, str) else "")
+    StateManager.SetIfChanged(
+        f"{TOURNAMENT_INFO_ROOT}.{TOURNAMENT_LOAD_KEY}",
+        {"status": "idle", "error": "",
+         "revision": ReadTournamentLoad()["revision"]})
 
     for root in RETIRED_ROOTS:
         StateManager.Unset(root)
