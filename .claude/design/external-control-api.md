@@ -75,15 +75,18 @@
 - `revision`: 操作後の状態リビジョン。**操作系（書き込み）レスポンスに含める（MUST）**。
   クライアントは WS デルタ（`program_state_update` の `revision`/`delta_index`）と突合し、反映済みかを判定できる。
   → リビジョンの定義・採番は [Design.md §3.2](Design.md) に従う（既存 WS と同一ソース。実装時の取得経路は `TBD`）。
-  - ⚠️ **`revision` は `StateManager` の変更のみを追う**。`SettingsManager` のみに書く操作
-    （`POST /tournament` の URL 永続化など。§2.4a）の設定値変更は `revision` に
-    反映されない場合がある。クライアントは設定系の反映確認を `revision` だけに依存しない（**SHOULD**）。
+  - ⚠️ **`revision` は `StateManager` の変更のみを追う**。`SettingsManager` のみに書く操作の
+    設定値変更は `revision` に反映されない場合がある。クライアントは設定系の反映確認を `revision` だけに
+    依存しない（**SHOULD**）。`POST /tournament` の URL は ADR-005 S4g レビュー（M1）から state の
+    `tournamentInfo.url` にも出る（§2.4a・§5.7）。
 - `data`: 読み取り系の本体。操作系では省略可。
 
 ### 2.4a 状態の二重書き込み（SettingsManager 併用・許容）
 - D4 の不変条件「状態変更は `StateManager` 単一経路」は **`score.*` 等のランタイム状態**に適用される。
 - 一部の Action は **`SettingsManager` にも書く**ことを**許容する**（PdM 確認済）:
-  - `load_tournament` → `SettingsManager.Set("TOURNAMENT_URL")` ＋ シグナル emit（[`AutonaWebOperations.load_tournament`](../../src/AutonaWebOperations.py)）
+  - 大会の設定・解除（`load_tournament` / `set_tournament` / `clear_tournament`）→ `core/TournamentService` が
+    `SettingsManager.Set("TOURNAMENT_URL")` と、その写しの `tournamentInfo.url`（state。ADR-005 S4g レビュー M1）を書く
+    （[`AutonaWebOperations`](../../src/AutonaWebOperations.py)）
 - 本 API はこれらも**既存 Action へ委譲するだけ**（新たに Settings/State を直接書かない）。
   「StateManager をバイパスして state を直接書かない」原則は維持される。
 
@@ -109,7 +112,7 @@
 | `CONFLICT` | 409 | 重い操作が実行中（多重起動ガード・§2.8） |
 | `NOT_READY` | 409 | 前提未充足（大会/試合未ロードで provider 不在 等・§3） |
 | `UPSTREAM_TIMEOUT` | 504 | Start.gg 等の外部依存がタイムアウト（agent-pitfalls #11） |
-| `PAYLOAD_TOO_LARGE` | 413 | 本文が大きすぎる。上限を持つのは配信団体の画像の取り込み（§6.17）だけ: `Content-Length` が上限を超えると本文を解析せずに読み捨ててから断り（読まずに返すと、送信中のクライアントには 413 でなく接続のリセットが届く）、data URL の base64 / デコード後の大きさでも断る（2026-10-31 追加・ADR-005 S4e）。ほかのルートに上限は無い（アプリ全体の `MAX_CONTENT_LENGTH` は設定しない） |
+| `PAYLOAD_TOO_LARGE` | 413 | 本文が大きすぎる。上限を持つのは画像の取り込み（配信団体 §6.17・大会のアイコン / バナー §6.21。ADR-005 S4g）だけ: `Content-Length` が上限を超えると本文を解析せずに読み捨ててから断り（読まずに返すと、送信中のクライアントには 413 でなく接続のリセットが届く）、data URL の base64 / デコード後の大きさでも断る（2026-10-31 追加・ADR-005 S4e）。ほかのルートに上限は無い（アプリ全体の `MAX_CONTENT_LENGTH` は設定しない） |
 | `UNAVAILABLE` | 503 | この起動形態では使えない操作。ヘッドレス起動（`main.py --headless`）で、デスクトップの画面が要るシェル操作 2 本だけ（ADR-005 S3e-9）: legacy / Socket.IO のセット選択ウィンドウを開く操作（`scoreboard<n>-open-set`・`open_set`）とサムネイル（`scoreboard<n>-get-thumbnail-png|jpg`）。v1 にはもう無い（`:load-set`・`:pull-stream` は ADR-005 S3e-7 まで）が、コードは契約として残す。message は `not available in headless`。再試行しても変わらない。legacy ルートも同じ本文の 503 を返し、Socket.IO はイベントの ack で返す。セット読込（`:load-set`・legacy `load-set`・Socket.IO `load_set`）・配信中のセットの取り込み（`:pull-stream`・legacy `pull-stream`・Socket.IO `pull_stream`）・legacy `POST /score`（Socket.IO `score`）も ADR-005 S3e-7 から core の操作（`SetFollowService`）で、どちらの起動形態でも動く。クルーボード（board 3）の操作と実況の更新・タグからの実況者の読込は ADR-005 S3e-2 から core の操作で、どちらの起動形態でも動く（それまでは legacy / Socket.IO でもこれだった）。Top 8 の取り込み（`bracket:refresh`・legacy `/update-bracket`・Socket.IO `update_bracket`）も ADR-005 S3e-8 から core の操作（`Top8Service.RefreshFromProvider`）で、どちらの起動形態でも動く。選手の編集（`PATCH .../players/{p}`・legacy `update-team`・Socket.IO `update_team`）とタグからの選手の読込（legacy `load-player-from-tag`・Socket.IO `load_player_from_tag`）も ADR-005 S3e-4 から core の操作（`PlayerService.ApplyData`）で、どちらの起動形態でも、state にあるスロットに対して動く。統計（`stats:refresh`・legacy `/scoreboard<n>-stats-*`・Socket.IO `stats_*`）も ADR-005 S3e-5 から core の操作（`StatsService`）で、どちらの起動形態でも動く。ボード 1 / 2 の人数 / キャラ数（`PATCH set` の `players` / `characters`・legacy `scoreboard<n>-set`・Socket.IO、`:clear` の人数・キャラ数のリセット）も ADR-005 S3e-6 から core の操作（`AutonaActions.SetRoster`）で、どちらの起動形態でも動く（それまではヘッドレスでこれだった）。ボード 1 / 2 / 3 以外の人数 / キャラ数（legacy `scoreboard<n>-set`・Socket.IO `set`）は、起動形態によらずこの 503 で、何も書かずに断る（それまでデスクトップは 500）。同じボードへの set フィールド（phase / pool / match / best of / losers。legacy `scoreboard<n>-set`・`update-team`・Socket.IO）も ADR-005 S3e-7 から同じ 503（それまでデスクトップは 500）。v1 のボード 3 への書き込みは起動形態によらず `require_board_12` が 400 `INVALID_ARGUMENT` で断る（ADR-005 S3c） |
 | `INTERNAL` | 500 | 想定外の内部例外 |
 
@@ -130,8 +133,10 @@
   202 レスポンスは受付のみを示し、`revision` は未確定（省略可）。
   ```json
   HTTP/1.1 202 Accepted
-  { "ok": true, "data": { "accepted": true, "operation": "tournament.load" } }
+  { "ok": true, "data": { "accepted": true, "operation": "tournament.load", "loadRevision": 4 } }
   ```
+  - `POST` / `DELETE /tournament` だけは `loadRevision`（その要求の `tournamentInfo.load.revision`。202 の前に state に
+    出ている）を返す。クライアントは state の `load.revision` がそれに達してから `status` を自分の要求の結果として読む（§5.7）
 - **多重起動ガード（B-1）**: 重い操作は**実行中フラグ**を持ち、実行中に同種要求が来たら
   **`409 CONFLICT`**（**MUST**）。202 で受け付けた処理が完了/失敗するまでフラグを保持する。
 - 実行失敗（外部タイムアウト等）は 202 後に起きるため**レスポンスでは返せない**。
@@ -216,6 +221,7 @@
 | `GET /api/v1/commentary/options` | 実況の役割候補・アイコン・スロット・表示上限（§5.4。2026-10-31 追加） | `get_commentary_options`（`core/CommentaryModel` の定数） | — |
 | `GET /api/v1/stream/channels` | 保存した配信チャンネル（§5.5。2026-10-31 追加） | `get_stream_channels`（`core/StreamService.Channels`） | — |
 | `GET /api/v1/stream/thumbnail/options` | 配信サムネ生成のオプション（§5.6。2026-10-31 追加） | `get_stream_thumbnail_options`（`core/StreamService.ThumbnailOptions`） | — |
+| `GET /api/v1/tournament` | 大会の URL と、設定 / 解除の進み具合（§5.7。2026-11-01 追加） | `get_tournament`（state の `tournamentInfo.url` / `load`。`core/TournamentService.Load`） | — |
 
 > `data` の具体スキーマは委譲先 Action の現返却（candidates §3）に準拠。本 API はそれを `{"ok":true,"data":...}` で包むだけ。
 
@@ -302,6 +308,29 @@ Board / Commentary / Top 8 タブと Designer の「開く」一覧が使う**�
 ### 5.6 `GET /api/v1/stream/thumbnail/options`（2026-10-31 追加・ADR-005 S4e）
 `{ "source": "banner" | "org", "style": "center" | "netflix", "overlayOrgIcon": bool }`（`settings.json` の
 `stream_thumbnail_options`。壊れた値・無い値は既定 `banner` / `center` / `false`）。設定なので `revision` は付かない
+
+### 5.7 `GET /api/v1/tournament`（2026-11-01 追加・ADR-005 S4g。2026-11-04 S4g レビューで state に移した）
+大会の URL と、設定 / 解除の進み具合の読み取り。**同じものが state の `tournamentInfo.url` / `tournamentInfo.load` に出ている**
+（Socket.IO の delta で届く）。大会情報ページはこれを読まずに state を描く（ポーリングしない）。
+
+```json
+{ "ok": true, "data": { "url": "https://www.start.gg/tournament/.../event/...",
+  "loaded": true, "status": "loaded", "error": "", "revision": 3 }, "revision": 1234 }
+```
+- `url`: 最後に設定した大会の URL（`settings.json` の `TOURNAMENT_URL`。無ければ `""`）。state の `tournamentInfo.url` と同じ
+- `loaded`: **provider があるか**（「読み込めた」ではない。読み込みに失敗した大会でも `true`。読み込めたかは `status` で見る。
+  S4g レビュー L6）
+- `status`: 最新の設定 / 解除の進み具合。`idle`（何も設定していない・解除した・起動直後）/ `resolving`（admin の URL からイベントを
+  探している）/ `loading`（大会のデータを取得中）/ `loaded` / `error`
+- `error`（`status` が `error` のときだけ）: `unresolved`（admin の URL にイベントが無かった。何も変えていない）/
+  `load_failed`（データが来なかった: start.gg が答えない・そのイベントが無い・適用に失敗した・読み込みが例外を出した）
+- `revision`（`data` の中）: **設定 / 解除のたびに 1 進む**（進み具合の遷移では進まない。state の `revision` とは別）。
+  再起動しても戻らない（state に保存され、起動時のシードは `status` を `idle` に戻して `revision` を残す）
+- `status` / `error` / `revision` は state の `tournamentInfo.load = {status, error, revision}` と同じ（`tournamentInfo.media` と同じ形）
+- 自分の §7.3 `POST` / `DELETE /tournament` の結果を見分けるには、202 の `loadRevision` を使う。その要求の `load` は 202 の前に
+  state に出ているので、state の `load.revision` が `loadRevision` 以上になった後の `status` がその要求（か、後から来た要求）の結果
+  （`loadRevision` は後から来た要求の番号になることがある。そのときも state が出しているのはその新しい要求の結果）
+- 封筒の `revision` は state の `revision`（§2.4）
 
 ---
 
@@ -467,7 +496,8 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 
 ### 6.14 機能別カラー `PATCH /api/v1/colors/{feature}`（2026-10-31 追加・ADR-005 S4b）
 - `feature`: `core/ColorService.FEATURES` のいずれか（実況・解説は `commentary`）。未知は `INVALID_ARGUMENT`
-- body: `{ "theme": "#112233", "accent": "#445566" }`（どちらか・両方。`#RGB` / `#RRGGBB`）
+- body: `{ "theme": "#112233", "accent": "#445566" }`（どちらか・両方。`#RGB` / `#RRGGBB`、大文字小文字どちらも）。
+  **`#rrggbb`（小文字 6 桁）に揃えてから保存する**（Qt の色ダイアログ `QColor.name()` と同じ形。S4g レビュー L13）
 - 委譲: `set_feature_colors` → 種類ごとに `ColorService.SetFeatureColor`（デスクトップの機能別カラーのカードと同じ。
   設定と `colors.{feature}.*` の両方に書く。1 つの保存サイクル）。オーバーレイは `colors.{feature}` を大会のカラーより優先する
 - 「大会のカラーに合わせる」はクライアントが大会の 2 色を両方送る（Qt のカードと同じく明示的に書く）
@@ -506,6 +536,35 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - 委譲: `set_stream_thumbnail_options` → `StreamService.SetThumbnailOptions`（値が変わらなければ `settings.json` を書かない）
 - エラー: `INVALID_ARGUMENT`（空 body・未知キー・値）
 
+### 6.19 大会の詳細 `PATCH /api/v1/tournament/info`（2026-11-01 追加・ADR-005 S4g）
+- body: `{ "tournamentName": "...", "eventName": "...", "address": "...", "numEntrants": 64, "startAtDate": "2026-11-03" }` の一部
+  （キーは `StateSchema.TOURNAMENT_INPUT_KEYS`）。文字列 3 つ・`numEntrants` は 0〜999999 の整数（bool は不可。start.gg が
+  返す参加人数が入る範囲。大会情報ページの欄も同じ。S4g レビュー L7）・`startAtDate` は `YYYY-MM-DD`（半角数字。
+  2000-01-01〜2999-12-31）
+- 委譲: `update_tournament_info` → `TournamentInfoService.SetTextField` / `SetNumberField` / `SetDate`（1 つの保存サイクル）。
+  開催日は `tournamentInfo.startAt`（PC の短い日付表記。今までどおり）と `startAtDate` に出る。日付は空にできない
+- 次に大会を読み込むと、大会の値で上書きされる（今までどおり）
+- エラー: `INVALID_ARGUMENT`（空 body・未知キー・型・範囲。この PC が時刻にできない日（`startAtDate` を
+  その日の 0 時の unix 秒にできない）も 400 で、**ほかの欄も書かない**。S4g レビュー L4）
+
+### 6.20 大会カラー `PATCH /api/v1/colors/tournament`（2026-11-01 追加・ADR-005 S4g）
+- body: `{ "theme": "#112233", "accent": "#445566" }`（どちらか・両方。`#RGB` / `#RRGGBB`。§6.14 と同じく `#rrggbb` に揃えて
+  保存する）、または `{ "reset": true }`（単独で。
+  Autona の既定の 2 色 `#181B21` / `#f0a500`）。§6.14 の `{feature}` より先に一致する（`tournament` は機能名ではない）
+- 委譲: `set_tournament_colors` → 種類ごとに `ColorService.SetTournamentColor`（`settings.json` の `general.*_color` と
+  `tournamentInfo.themeColor` / `accentColor`。**同じ種類の機能別カラーの上書きを全部消す**。1 つの保存サイクル）
+- `data` は `{ "theme": ..., "accent": ... }`（書いた後の 2 色）
+- エラー: `INVALID_ARGUMENT`（空 body・未知キー・色形式・`reset` が true でない / ほかのキーと一緒）
+
+### 6.21 大会のアイコン / バナー `PUT /api/v1/tournament/media/{kind}`・`DELETE /api/v1/tournament/media`（2026-11-01 追加・ADR-005 S4g）
+- `kind`: `icon`（`layout/logo.png`。長辺 512）/ `banner`（`user_data/tournament_banner.png`。長辺 1920）。どちらも PNG で保存する
+- `PUT` body・上限・操作ログ: §6.17 と同じ（data URL の画像。20MB・`413 PAYLOAD_TOO_LARGE`）。保存すると版
+  （`tournamentInfo.logoVersion` / `bannerVersion` = ファイルの mtime）が publish されるので `revision` が付く
+- `DELETE`: アイコンを Autona のアイコンに戻し、バナーを消す（バナーの版は 0 = 既定のバナー）。2 つの版を 1 つの保存サイクルで
+- 委譲: `import_tournament_media` / `reset_tournament_media` → `TournamentMediaService.ImportMedia` / `ResetMedia`
+- エラー: `INVALID_ARGUMENT`（未知の `kind`・data URL でない・読めない画像）、`PAYLOAD_TOO_LARGE`、`INTERNAL`（保存できない。
+  ほかのアプリがファイルを開いている など）
+
 ---
 
 ## 7. 危険操作エンドポイント（書き込み・操作ログ対象 / ガード必須）
@@ -520,7 +579,9 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 | `POST /api/v1/scoreboards/{n}:load-set` | （confirm 推奨） | `load_set` | #38 |
 | `POST /api/v1/scoreboards/{n}:pull-stream` | （confirm 推奨） | `pull_stream_set` | #24 |
 | `POST /api/v1/scoreboards/{n}:pull-user` | （confirm 推奨） | `pull_user_set` | #25 |
-| `POST /api/v1/tournament` | 実行中フラグ | `load_tournament` | #44 |
+| `POST /api/v1/tournament` | 実行中フラグ | `set_tournament`（`TournamentService.SetTournament` / `ClearTournament`） | #44 |
+| `DELETE /api/v1/tournament` | なし（すぐ終わる。後から来た設定 / 解除が勝つ） | `clear_tournament`（`TournamentService.ClearTournament`。2026-11-01 追加・ADR-005 S4g） | — |
+| `POST /api/v1/tournament/media/fetch` | 実行中フラグ | `fetch_tournament_media`（`TournamentMediaService.FetchMedia`。2026-11-01 追加・ADR-005 S4g） | — |
 | `POST /api/v1/game` | 実行中フラグ | `set_game` | #14 |
 | `POST /api/v1/bracket:refresh` | 実行中フラグ | `update_bracket`（`AutonaWebOperations` → `Top8Service.RefreshFromProvider`。ADR-005 S3e-8） | #41 |
 | `POST /api/v1/stream/thumbnail` | 実行中フラグ | `generate_stream_thumbnail`（`StreamService.GenerateThumbnail`。2026-10-31 追加・ADR-005 S4e） | — |
@@ -549,12 +610,29 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 > 多重起動は `409 CONFLICT`。下記の `UPSTREAM_TIMEOUT`/`NOT_FOUND`/`NOT_READY` は**受付前に判定できる場合のみ**
 > 同期で返し、受付後（202 以降）の失敗はログに残す（§2.8）。
 
-- `POST /api/v1/tournament`: `{ "url": "https://www.start.gg/tournament/.../event/..." }`
-  - URL 正規化は既存 `load_tournament` に委譲。`url` 空/省略で大会クリア（既存挙動）。
-  - 外部通信を伴う。受付は 202、ロード結果は WS で観測。実行中は `409 CONFLICT`（§2.8）。
+- `POST /api/v1/tournament`: `{ "url": "https://www.start.gg/tournament/.../event/...", "force": false, "fetchMedia": false }`
+  - URL 正規化は `set_tournament`（core の `TournamentService.SetTournament`）に委譲。`url` が `""`・`null`・省略で大会クリア
+    （既存挙動）。**`url` が文字列でも `null` でもなければ 400**（`false` / `0` / `[]` / `{}` も。以前は偽の値がすべて解除になった。
+    S4g レビュー L3）。
+  - ADR-005 S4g から、管理画面のブラケットの URL（`start.gg/admin/tournament/<大会>/brackets/<id>`）も受け付ける（ジョブで
+    イベントの URL に解決してから読み込む）。それ以外の URL は受付前に `400 INVALID_ARGUMENT`（何も変えない）。
+  - `force`（bool。既定 false）: 読み込み済みと同じ URL でも取得し直す。`fetchMedia`（bool。既定 false）: 読み込めたら
+    大会のアイコン / バナーも取得する（下の `media/fetch` と同じジョブ）。既定値は今までの挙動。bool でなければ 400。
+  - 外部通信を伴う。受付は 202（`data: {"accepted": true, "operation": "tournament.load", "loadRevision": n}`）。
+    要求の `tournamentInfo.load`（`resolving` / `loading`、解除なら `idle`）と `tournamentInfo.url` は **202 の前に** state に出る。
+    結果は WS（`tournamentInfo.load` / `tournamentInfo.*`）と §5.7 で観測する（`loadRevision` の使い方は §5.7）。
+    実行中は `409 CONFLICT`（§2.8）。
   - 実行中フラグは `load_tournament` を GUI スレッドで走らせたタスクの終了時に解除する（2026-10-21 修正）。
     以前は `tournament_changed` を待っていたが、読込済みと同じ URL では早期 return でこれが出ず、
     最大 120 秒（ガードの TTL）409 を返し続けていた。
+- `DELETE /api/v1/tournament`: body なし。大会を解除する（URL を空・`tournamentInfo` を空・選択中のゲームも外す。
+  `POST` の空の `url` と同じ）。GUI executor で `POST` の読み込みと来た順に走り、`202`（`data: {"accepted": true, "operation":
+  "tournament.clear", "loadRevision": n}`。`load` は 202 の前に `idle` で出る）。解除は確認ダイアログの後に送るのがクライアントの責任（大会情報ページ・サイドバー）
+- `POST /api/v1/tournament/media/fetch`: body なし。読み込み中の大会のアイコン / バナーを start.gg から取る `TaskExecutor` の
+  ジョブを積み、`202`（`data: {"accepted": true, "operation": "tournament.media.fetch", "queued": bool}`）。進捗と結果は
+  state の `tournamentInfo.media = {status: running → done | error, error, revision}`（error は `no_media` / `fetch_failed` /
+  `save_failed` / `superseded` / `cancelled`）。同じ大会の取得が実行中なら `409 CONFLICT`。**別の大会**の取得が実行中なら
+  `queued: true` で、その取得が終わった後にその時点の大会で取り直す。大会が読み込まれていなければ `409 NOT_READY`
 - `POST /api/v1/game`: `{ "codename": "ssbu", "modsActive": false }`
   - 未知 codename は受付前に判定できれば `404 NOT_FOUND`。アセット再ロードで重い → 202 + 実行中フラグ。
 - `POST /api/v1/bracket:refresh`: body なし。provider 不在は受付前に `409 NOT_READY`。それ以外は 202 + 実行中フラグ。

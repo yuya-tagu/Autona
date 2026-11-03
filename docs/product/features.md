@@ -160,23 +160,24 @@
 
 ## 8. 大会情報（Tournament Info）
 
-[src/AutonaTournamentInfoWidget.py](../../src/AutonaTournamentInfoWidget.py)・[src/layout/AutonaTournamentInfo.ui](../../src/layout/AutonaTournamentInfo.ui)。
+React の [web/src/EventPage/](../../web/src/EventPage/)（`/web/event`、デスクトップでは共有ビューに表示。ADR-005 S4g で Qt 版から移行）。ブラウザ（LAN の別の PC・ヘッドレス）からも同じページで操作できる。処理の実体は core の [src/core/TournamentService.py](../../src/core/TournamentService.py)（大会の設定・解除）・[src/core/TournamentInfoService.py](../../src/core/TournamentInfoService.py)（入力欄）・[src/core/TournamentMediaService.py](../../src/core/TournamentMediaService.py)（アイコン / バナー）・[src/core/ColorService.py](../../src/core/ColorService.py)（大会カラー）で、ページは `/api/v1` を呼んで state を描くだけ。
+
+### 大会の設定
+- start.gg の event URL、または大会管理画面のブラケットの URL（admin）を貼り付けて「設定」。アイコン / バナーも一緒に取得する。「再取得」は同じ URL でも読み直す。「解除」は確認つきで、選択中のゲームも外れる
+- 状態（イベントを探している / 読み込み中 / 読み込み済み / 見つからない / 読み込めない）を URL の下に出す。サイドバー・ほかの端末・起動時の読み直しで設定した大会の状態も出る（state の `tournamentInfo.load`）
+- URL の欄は今の大会の URL（`tournamentInfo.url`）を出す。打ちかけの間に大会の URL がどこかで変わったら（設定・解除）、打ちかけは捨ててその URL を出す（古い URL で設定し直してしまわないように）。断られた URL・イベントの見つからない admin URL は、直せるように欄に残る。「解除」は打ちかけも消す
 
 ### 自動取得情報
-- 大会名 / イベント名 / 参加者数 / 開始日 / 会場住所 / ショートリンク
-- **大会アイコン / バナーのダウンロード**（`_DownloadIconAndBannerAsync`）
-  - Start.gg からアイコン・バナーを一括で自動取得、ローカル画像の差し替えも可
-- **テーマカラー / アクセントカラー** のカラーピッカー
+- 大会名 / イベント名 / 参加者数（0〜999999）/ 開始日 / 会場住所（手で書き換えた値は、次に大会を読み込むまで残る）
+- ゲームの選択（サイドバーのゲームボタンと同じ。一覧はゲームの読み込み（state の `game` の変化）とページの再表示で読み直す。スキャンだけでは state が変わらないので、ページを出し直したときに出る）
+- **大会アイコン / バナー**: Start.gg から一括で取得（バックグラウンドのジョブ。状態は `tournamentInfo.media`）、PC の画像で差し替え（アイコンは長辺 512・バナーは長辺 1920 の PNG に縮小）、Autona の既定に戻す（確認つき）
+- **テーマカラー / アクセントカラー** のカラーピッカー（変えると機能別のカラーもその色に揃う）と「既定の色に戻す」
 
 ### 配信用ツール
 配信 URL・配信タイトルコピー・配信サムネイル生成（Center Crop / Netflix Style）は Stream Settings（配信設定）ページ（React の [web/src/StreamPage/](../../web/src/StreamPage/)。`/web/stream`、デスクトップでは共有ビューに表示。ADR-005 S4e で Qt 版から移行）にある。ブラウザからも同じページで操作でき、配信サムネの画像コピーはこの PC で開いたとき（デスクトップ・`localhost`）だけで、LAN の別の PC からは「画像を開く / 保存」になる。処理の実体は core の [src/core/StreamService.py](../../src/core/StreamService.py)（ADR-005 S4d）で、配信タイトルは大会を読み込むとパネルを開かなくても（ヘッドレスでも）生成される。手で書き換えたタイトルは、空にするまで自動生成で上書きしない（再起動しても残る。打っている途中に自動生成が走っても、打った文字が勝つ）。
 
 - 配信サムネイルの出力: `out/stream/thumbnail_{背景}_{スタイル}_{YYYYMMDD_HHMMSS}.jpg`（背景 `banner` / `org`・スタイル `center` / `netflix`。直近 30 世代を残す）。生成はバックグラウンドで走り、状態は `stream.thumbnail` に出る
 - 生成オプション（背景・スタイル・団体アイコンの合成）は `settings.json` の `stream_thumbnail_options` に保存される
-
-### その他
-- **Load from tournament** — Start.gg から一括ロード
-- **Clear** — 大会情報クリア
 
 ---
 

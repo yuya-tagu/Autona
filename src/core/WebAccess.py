@@ -150,6 +150,7 @@ ROUTE_ACCESS = {
     "api_v1.get_selected_layout": READ,
     "api_v1.get_stream_channels": READ,
     "api_v1.get_stream_thumbnail_options": READ,
+    "api_v1.get_tournament": READ,
     "api_v1.score_adjust": WRITE,
     "api_v1.score_reset": WRITE,
     "api_v1.stats_refresh": WRITE,
@@ -181,6 +182,12 @@ ROUTE_ACCESS = {
     "api_v1.stream_org_reset": WRITE,
     "api_v1.stream_thumbnail_options_update": WRITE,
     "api_v1.stream_thumbnail_generate": WRITE,
+    "api_v1.tournament_clear": WRITE,
+    "api_v1.tournament_info_update": WRITE,
+    "api_v1.tournament_media_import": WRITE,
+    "api_v1.tournament_media_reset": WRITE,
+    "api_v1.tournament_media_fetch": WRITE,
+    "api_v1.colors_tournament_update": WRITE,
 }
 
 # Every Socket.IO event on "/". Same rule as ROUTE_ACCESS (pinned against the
@@ -311,11 +318,12 @@ def StaticPath(filename):
 # routes the same names (web/src/PanelShell/registry.tsx; the two lists
 # are compared by tests/test_web_access.py). "shell-check" is the empty page
 # that checks the panel shell itself (S4a); "commentary" is the caster
-# line-up (S4b); "stream" is 配信設定 (S4e).
+# line-up (S4b); "stream" is 配信設定 (S4e); "event" is 大会情報 (S4g).
 WEB_PANELS = frozenset({
     "shell-check",
     "commentary",
     "stream",
+    "event",
 })
 
 

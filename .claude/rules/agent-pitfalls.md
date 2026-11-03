@@ -49,7 +49,7 @@ Step 5（第 1〜3 弾、2026-09-01/02）で**全ウィジェット静的化完�
 | `score.{N}.{phase,pool,match}` | `SCORE_MATCH_FIELDS` | `AutonaActions` |
 | `score.{N}.team.{T}.{teamName,losers}` | `SCORE_TEAM_INPUT_KEYS` | `AutonaActions` |
 | `score.{N}.team.{T}.player.{M}.*` | `PLAYER_INPUT_KEYS` | `core/PlayerService.py` |
-| `tournamentInfo.*`（EVENT タブ入力欄） | `TOURNAMENT_INPUT_KEYS` | `core/TournamentInfoService.py` |
+| `tournamentInfo.*`（大会情報の入力欄。Qt の EVENT タブは ADR-005 S4g で React 化） | `TOURNAMENT_{TEXT,NUMBER,DATE}_FIELDS` | `core/TournamentInfoService.py` |
 
 - `.ui` ファイルの objectName を変更すると保存データとの互換性が壊れる。
   **静的化後も同じ**（schema の文字列と objectName が一致していなければ

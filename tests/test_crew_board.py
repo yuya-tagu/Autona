@@ -612,9 +612,8 @@ def test_a_set_payload_with_nothing_crew_understands_changes_nothing(
 def restoreTournamentInfo(autonaApp):
     """Hand tournamentInfo.* back untouched -- it is process-global.
 
-    Same fixture tests/test_tournament_info_panel.py carries, and for the
-    same reason: the display name is one field shared by the EVENT tab, the
-    SCORE panel and this board, and `_lastTournamentName` is the ledger the
+    The display name is one field shared by the EVENT page (tournament
+    name), the SCORE panel and this board, and `_lastTournamentName` is the ledger the
     whole follow rule rests on. Leaving a crew edit behind decides what a
     later module's follow-rule test sees.
     """

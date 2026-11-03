@@ -20,8 +20,12 @@ import {
     withDeadline,
 } from "../PanelShell/requests";
 import {
+    IMAGE_UPLOAD_MAX_BYTES,
+    UPLOAD_TIMEOUT_MS,
+    readDataUrl,
+} from "../PanelShell/imageUpload";
+import {
     DestinationCard,
-    ORG_IMAGE_MAX_BYTES,
     OrgAssetsCard,
     OrgKind,
     StreamChannel,
@@ -39,11 +43,6 @@ import {ChannelForm} from "./Dialogs";
 // work -- and renders the state it gets over Socket.IO (stream.*). The
 // channels and the thumbnail options are settings, not state: read when
 // the page loads and taken from each write's answer.
-
-// An upload of up to 20 MB (27 MB of base64) over the LAN may take longer
-// than a write. Not one of the page's queued writes: the title and the
-// rest are not held behind it (S4e review).
-export const UPLOAD_TIMEOUT_MS = 60000;
 
 interface Envelope<T> {
     ok: boolean;
@@ -72,15 +71,6 @@ function readThumbnail(raw: Partial<StreamThumbnail> | undefined): StreamThumbna
         error: typeof raw.error === "string" ? raw.error : "",
         revision: typeof raw.revision === "number" ? raw.revision : 0,
     };
-}
-
-function readDataUrl(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(file);
-    });
 }
 
 // What a refused write says; null: nothing (the caller tells it).
@@ -217,16 +207,16 @@ function StreamContent() {
             }, () => false), [write, channelGone]);
 
     const upload = React.useCallback((kind: OrgKind, file: File) => {
-        if (file.size > ORG_IMAGE_MAX_BYTES) {
+        if (file.size > IMAGE_UPLOAD_MAX_BYTES) {
             showSnackbar(i18n.t("stream_org_too_large",
-                                {max: ORG_IMAGE_MAX_BYTES / 1024 / 1024}),
+                                {max: IMAGE_UPLOAD_MAX_BYTES / 1024 / 1024}),
                          "error");
             return;
         }
         const refusal: Refusal = (status) => {
             if (status === 413) {
                 return i18n.t("stream_org_too_large",
-                              {max: ORG_IMAGE_MAX_BYTES / 1024 / 1024});
+                              {max: IMAGE_UPLOAD_MAX_BYTES / 1024 / 1024});
             }
             if (status === 400) {
                 return i18n.t("stream_org_invalid");

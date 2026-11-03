@@ -160,13 +160,13 @@ class AutonaTournamentDataProvider(QObject):
 
     # ── the tournament's set / clear (core/TournamentService.py, S4f) ────
     #
-    # Every entrance -- the URL dialog below, the EVENT panel, the sidebar,
-    # /api/v1, the legacy route, Socket.IO and the launch's restore -- goes
-    # through TournamentService, which saves the URL, resolves an admin URL
-    # in a job and forgets the selected game on every clear. These are what
-    # it asks this adapter for, on the main thread. tournament_url_update is
-    # the announcement it makes (no longer a command): the sidebar's buttons
-    # follow it.
+    # Every entrance -- the sidebar's URL dialog and confirmation below,
+    # /api/v1 (the Event page's, ADR-005 S4g), the legacy route, Socket.IO
+    # and the launch's restore -- goes through TournamentService, which
+    # saves the URL, resolves an admin URL in a job and forgets the selected
+    # game on every clear. These are what it asks this adapter for, on the
+    # main thread. tournament_url_update is the announcement it makes (no
+    # longer a command): the sidebar's buttons follow it.
 
     def LoadTournament(self, url, initialLoading=False, force=False):
         """Load the start.gg event at `url` (already resolved and saved by
@@ -259,12 +259,11 @@ class AutonaTournamentDataProvider(QObject):
         if not first:
             QTimer.singleShot(0, self, self.signals.media_updated.emit)
 
-    def SetStartggEventSlug(self, mainWindow, fetchMedia=False):
-        """The tournament URL dialog (the sidebar's "Set tournament" and the
-        EVENT panel's button), prefilled with the URL set last. Accepted, it
-        hands the URL to TournamentService -- re-fetched even when it is the
-        loaded one, and with `fetchMedia` the tournament's icon and banner
-        too. True when accepted."""
+    def SetStartggEventSlug(self, mainWindow):
+        """The tournament URL dialog (the sidebar's "Set tournament"),
+        prefilled with the URL set last. Accepted, it hands the URL to
+        TournamentService -- re-fetched even when it is the loaded one. True
+        when accepted."""
         inp = QDialog(mainWindow)
 
         layout = QVBoxLayout()
@@ -306,13 +305,13 @@ class AutonaTournamentDataProvider(QObject):
             return False
         # force=True so re-selecting the same tournament still re-fetches.
         return TournamentService.instance.SetTournament(
-            url, force=True, fetchMedia=fetchMedia) == (
+            url, force=True) == (
             tournament_service.STARTED)
 
     @staticmethod
     def ConfirmClearTournament(parent):
         """Ask before unsetting the tournament (the sidebar's "Unset
-        tournament" and the EVENT panel's button: owner's decision 2, S4f),
+        tournament": owner's decision 2, S4f -- the Event page asks its own),
         then hand it to TournamentService, which also forgets the selected
         game. Call from a click / a menu action, never from a state or a
         value signal (the modal rule). True when cleared."""
@@ -352,16 +351,28 @@ class AutonaTournamentDataProvider(QObject):
             fetch, task_name=taskName, then=deliver, **kwargs)
 
     def GetTournamentData(self, initialLoading=False):
-        if self.provider is None:
+        provider = self.provider
+        if provider is None:
             logger.warning("GetTournamentData called with no provider set")
             return
         self._Fetch(
-            "tournament data", self.provider.GetTournamentData,
+            "tournament data", provider.GetTournamentData,
             lambda tournamentData: self._onTournamentDataResult(
-                tournamentData, initialLoading))
+                tournamentData, initialLoading, provider))
 
-    def _onTournamentDataResult(self, tournamentData, initialLoading):
-        """Handle tournament data on the main thread."""
+    def _onTournamentDataResult(self, tournamentData, initialLoading,
+                                provider):
+        """The tournament data `provider` answered, on the main thread.
+
+        Dropped unless `provider` is still the one loaded (ADR-005 S4g
+        review M2): a tournament replaced (or unloaded, or loaded again by
+        force: a new provider) while its data was on the way would otherwise
+        write its tournamentInfo.* over the new one's -- and settle the new
+        one's status (TournamentService.PayloadApplied) with its own."""
+        if provider is not self.provider:
+            logger.info("Tournament data of a tournament no longer loaded: "
+                        "dropped")
+            return
         # Emit game_changed here (main thread) instead of from worker thread
         videogame = tournamentData.pop("_videogame", None)
         if videogame:

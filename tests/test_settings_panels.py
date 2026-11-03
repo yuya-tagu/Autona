@@ -137,32 +137,10 @@ def _buttons(card):
     return {button.color(): button for button in found}
 
 
-def test_the_tournament_card_runs_the_whole_cascade(isolated):
-    from src.AutonaFeatureColors import MakeTournamentColorCard
-
-    SettingsManager.Set("general.theme_color", "#111111")
-    SettingsManager.Set("general.accent_color", "#222222")
-    colors.SetFeatureColor(colors.FEATURE_BOARD, colors.KIND_THEME, "#aaaaaa")
-    colors.SetFeatureColor(colors.FEATURE_BOARD, colors.KIND_ACCENT, "#bbbbbb")
-
-    card = MakeTournamentColorCard()
-    try:
-        _buttons(card)["#111111"].setColor("#dddddd")
-        isolated.settle()
-
-        assert SM.Get(
-            f"{schema.TOURNAMENT_INFO_ROOT}.{schema.THEME_COLOR_KEY}") == \
-            "#dddddd"
-        # The card is still wired to the service, so picking a tournament
-        # theme dropped the per-feature theme overrides and left the accents.
-        assert SM.Get(
-            colors.FeatureColorKey(colors.FEATURE_BOARD, colors.KIND_THEME),
-            None) is None
-        assert SM.Get(
-            colors.FeatureColorKey(
-                colors.FEATURE_BOARD, colors.KIND_ACCENT)) == "#bbbbbb"
-    finally:
-        _destroy(card)
+# The tournament-wide card went with the Qt EVENT panel (ADR-005 S4g): its
+# cascade is PATCH /api/v1/colors/tournament's now, pinned in
+# tests/test_api_v1_tournament.py
+# (test_a_tournament_colour_clears_the_overrides_of_its_kind).
 
 
 def test_a_feature_card_writes_only_its_own_feature(isolated):

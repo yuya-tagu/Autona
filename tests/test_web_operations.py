@@ -1693,6 +1693,11 @@ _BODIES = {
     "api_v1.stream_channel_update": {"name": "Walk",
                                      "url": "https://example.invalid/walk"},
     "api_v1.stream_thumbnail_options_update": {"style": "center"},
+    # Not the tournament name: TournamentInfoService keeps the last one it
+    # followed in memory (the 表示大会名 rule), which putting the state
+    # back would not undo.
+    "api_v1.tournament_info_update": {"address": "Walk"},
+    "api_v1.colors_tournament_update": {"theme": "#123456"},
 }
 
 # Every route that answers anything but 200 here, by (endpoint, board),
@@ -1720,8 +1725,11 @@ _NOT_200 = {
     ("api_v1.load_set", 1): 409, ("api_v1.load_set", 2): 409,
     ("api_v1.pull_stream", 1): 409, ("api_v1.pull_stream", 2): 409,
     ("api_v1.bracket_refresh", None): 409,
-    # Accepted, and run in the background.
+    ("api_v1.tournament_media_fetch", None): 409,
+    # Accepted, and run in the background (the set / clear on the main
+    # thread).
     ("api_v1.tournament_load", None): 202,
+    ("api_v1.tournament_clear", None): 202,
     ("api_v1.stream_thumbnail_generate", None): 202,
     # A name that names nothing: no such file, design, import or game.
     ("file_request", None): 404,
@@ -1731,9 +1739,11 @@ _NOT_200 = {
     ("api_v1.game_set", None): 404,
     ("api_v1.stream_channel_update", None): 404,
     ("api_v1.stream_channel_delete", None): 404,
-    # The walk's kind ("commentary") is no stream org asset, and the image
-    # upload is the contract tests' (tests/test_api_v1_stream.py).
+    # The walk's kind ("commentary") is no stream org asset nor tournament
+    # media, and the image uploads are the contract tests'
+    # (tests/test_api_v1_stream.py, tests/test_api_v1_tournament.py).
     ("api_v1.stream_org_import", None): 400,
+    ("api_v1.tournament_media_import", None): 400,
     # The test runtime's layout/ is empty: no commentary design to show or
     # to pick (the catalog was read).
     ("api_v1.get_selected_layout", None): 404,
@@ -1851,6 +1861,11 @@ def test_every_route_and_event_answers_headless_but_the_shell_operations(
     monkeypatch.setattr(SettingsManager, "SaveSettings", lambda: None)
     kept = {root: copy.deepcopy(value)
             for root, value in _state().state.items() if root != "score"}
+    # The tournament media's reset writes Autona's icon to layout/logo.png
+    # (the runtime's layout/ is empty): removed afterwards if it was not
+    # there.
+    logo = Path(os.path.abspath("layout")) / "logo.png"
+    hadLogo = logo.exists()
     _goHeadlessWithSlots(autonaApp, monkeypatch)
     CrewBattleService(3).SeedDefaults()
     autonaApp.settle()
@@ -1896,6 +1911,8 @@ def test_every_route_and_event_answers_headless_but_the_shell_operations(
         from tests.conftest import drain_tasks
         drain_tasks()
         shutil.rmtree(web)
+        if not hadLogo and logo.exists():
+            logo.unlink()
         _dropHeadlessBoards(autonaApp)
         with _state().SaveBlock():
             for root in set(_state().state) - set(kept) - {"score"}:

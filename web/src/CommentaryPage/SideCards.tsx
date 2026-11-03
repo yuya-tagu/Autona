@@ -37,7 +37,9 @@ function sixDigits(color: string): string {
     return /^#[0-9a-f]{6}$/i.test(color) ? color : "#000000";
 }
 
-function ColorRow({label, value, send}: {
+// A colour of the state, with its picker: shared with the Event page's
+// tournament colours (S4g).
+export function ColorRow({label, value, send}: {
     label: string;
     value: string;
     send: (color: string) => unknown;

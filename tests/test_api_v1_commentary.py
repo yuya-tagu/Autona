@@ -438,8 +438,9 @@ def test_both_colours_are_one_publish(client, colors):
                      json={"theme": "#111111", "accent": "#abc"}))
     colors.settle()
 
+    # #RGB is kept as #rrggbb (S4g review L13).
     assert colors.get("colors.commentary") == {
-        "themeColor": "#111111", "accentColor": "#abc"}
+        "themeColor": "#111111", "accentColor": "#aabbcc"}
     assert _revision() == before + 1
 
 

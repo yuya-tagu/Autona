@@ -21,6 +21,7 @@ import {useStateField} from "../PanelShell/useStateField";
 import {useStateChoice} from "../PanelShell/useStateChoice";
 import {canCopyImage, copyImage, copyText} from "../PanelShell/clipboard";
 import {usePanelShell} from "../PanelShell/context";
+import {IMAGE_UPLOAD_ACCEPT} from "../PanelShell/imageUpload";
 import {showSnackbar} from "../ScoreboardPage/Feedback";
 import {ChannelDialog, ChannelForm, ConfirmDialog} from "./Dialogs";
 import {titleIsAuto, typedTitleWins} from "./titleRule";
@@ -52,12 +53,6 @@ export interface StreamThumbnail {
 }
 
 export type OrgKind = "icon" | "thumbnail";
-
-// The largest image the server takes (src/AutonaApiV1.py
-// ORG_IMAGE_MAX_BYTES; tests/test_api_v1_stream.py holds the two equal): a
-// larger one is refused here before it is sent.
-export const ORG_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
-const ORG_IMAGE_ACCEPT = "image/png,image/jpeg,image/bmp,.png,.jpg,.jpeg,.bmp";
 
 function CardFrame({title, children}: {
     title: string;
@@ -273,7 +268,7 @@ function OrgImageRow({kind, label, version, width, height, upload}: {
                 <input
                     ref={input}
                     type="file"
-                    accept={ORG_IMAGE_ACCEPT}
+                    accept={IMAGE_UPLOAD_ACCEPT}
                     hidden
                     data-testid={`stream-org-${kind}-file`}
                     onChange={(event) => {

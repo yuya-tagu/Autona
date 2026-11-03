@@ -1,7 +1,7 @@
 """The tournament's own metadata: name, event, entrants, dates, venue.
 
 ``tournamentInfo.*`` was written by the EVENT panel and by nothing else.
-``AutonaTournamentInfoWidget.UpdateData`` took the Start.gg payload, looked
+The panel's ``UpdateData`` took the Start.gg payload, looked
 up a widget whose ``objectName`` matched each key, drove that widget, and let
 the widget's ``editingFinished`` / ``valueChanged`` / ``dateChanged`` lambda
 write the state -- with a fallback branch that wrote the key directly for the
@@ -69,15 +69,16 @@ class TournamentInfoService:
 
     PREFIX = "tournamentInfo"
 
-    # The EVENT tab's input fields. Aliases of the schema tuples rather than
-    # a second spelling of them: the same strings are what the panel passes
-    # to findChild, and a catalog that half the code follows is the drift
-    # StateSchema exists to end. Split by widget kind because the old code's
-    # behaviour differed per kind, and the differences are load-bearing:
-    # a QLineEdit was always rewritten, a QSpinBox / QDateEdit only when the
-    # value actually moved. _SetIfChanged makes all three behave like the
-    # latter, which is the same published state and one less spurious
-    # changed key. See AutonaTournamentInfo.ui.
+    # The EVENT page's input fields. Aliases of the schema tuples rather
+    # than a second spelling of them: the same strings are the field names
+    # /api/v1's PATCH /tournament/info takes (they were the Qt panel's
+    # objectNames until the React page replaced it, ADR-005 S4g), and a
+    # catalog that half the code follows is the drift StateSchema exists to
+    # end. Split by kind because the old panel's behaviour differed per
+    # widget kind, and the differences are load-bearing: a QLineEdit was
+    # always rewritten, a QSpinBox / QDateEdit only when the value actually
+    # moved. _SetIfChanged makes all three behave like the latter, which is
+    # the same published state and one less spurious changed key.
     TEXT_FIELDS = schema.TOURNAMENT_TEXT_FIELDS
     NUMBER_FIELDS = schema.TOURNAMENT_NUMBER_FIELDS
     DATE_FIELDS = schema.TOURNAMENT_DATE_FIELDS
@@ -178,6 +179,16 @@ class TournamentInfoService:
                     day.year, day.month, day.day):
                 return timestamp
         return first
+
+    @classmethod
+    def DayTime(cls, value):
+        """The time the day `value` (`YYYY-MM-DD`) starts at on this PC, or
+        None when it is not such a day (ParseDate) or the platform cannot
+        convert it -- the days SetDate refuses. For a caller that checks a
+        day before writing anything (the Event page's PATCH, S4g review
+        L4)."""
+        day = cls.ParseDate(value)
+        return None if day is None else cls._StartOfDay(day)
 
     # ── seeds ────────────────────────────────────────────────────────────
 
@@ -293,12 +304,14 @@ class TournamentInfoService:
 
     def SetDate(self, field, value) -> bool:
         """Set one of the tab's date fields from a day, `YYYY-MM-DD`
-        (2000-01-01 to 2999-12-31). What the EVENT tab's date input calls.
-        The formatted date is the start of that day in the PC's timezone
-        (_StartOfDay), as SetDateField publishes it; the raw day is `value`
-        itself, never worked back from that time (a DST change at midnight
-        would make it the day before). False (nothing written) when `field`
-        is not a date field or `value` is not such a day."""
+        (2000-01-01 to 2999-12-31). What the Event page's date input calls
+        (PATCH /api/v1/tournament/info). The formatted date is the start of
+        that day in the PC's timezone (_StartOfDay), as SetDateField
+        publishes it; the raw day is `value` itself, never worked back from
+        that time (a DST change at midnight would make it the day before).
+        False (nothing written) when `field` is not a date field or `value`
+        is not such a day (DayTime None) -- and when the day was the one
+        published already."""
         if field not in self.DATE_FIELDS:
             logger.warning(
                 f"TournamentInfoService.SetDate: unknown field {field}")

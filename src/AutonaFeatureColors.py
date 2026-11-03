@@ -1,11 +1,13 @@
-"""The Qt cards for the tournament-wide and per-feature theme / accent colors.
+"""The Qt card for the per-feature theme / accent colors.
 
 The colors themselves — what they mean, where they are persisted, how a
 feature falls back to the tournament pair and what a tournament-color change
 does to the overrides — live in ``src/core/ColorService.py`` since headless
 core Step 5 (instalment 5). This module is what is left once that moved out:
-two card builders and the show-time refresher that keeps their swatches
-honest.
+the per-feature card builder and the show-time refresher that keeps its
+swatches honest. The tournament-wide card went with the Qt EVENT panel
+(ADR-005 S4g): the React Event page sets the tournament's colours through
+``PATCH /api/v1/colors/tournament``.
 
 The names below are re-exported from the service rather than re-declared, so
 every existing importer (the six settings panels, ``Window._SeedPanelState``
@@ -21,12 +23,6 @@ inside a call.
 from qtpy.QtCore import QEvent, QObject
 from qtpy.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QPushButton
 
-# schema.DEFAULT_THEME_COLOR / DEFAULT_ACCENT_COLOR are Autona's own defaults,
-# used when neither the tournament nor the feature has a stored color. They
-# live in the core schema because the launch seed writes
-# tournamentInfo.themeColor / accentColor from them before any panel exists
-# (headless core Step 2).
-from .core import StateSchema as schema
 from .core.ColorService import (           # noqa: F401  (re-export)
     FEATURE_BOARD, FEATURE_COMMENTARY, FEATURE_RESULT, FEATURE_STATS,
     FEATURE_THUMBNAIL, FEATURE_TOP8, FEATURES,
@@ -146,38 +142,3 @@ def MakeFeatureColorCard(feature: str, title: str) -> QGroupBox:
         card, (btTheme, btAccent), lambda: GetFeatureColors(feature))
     return card
 
-
-def MakeTournamentColorCard() -> QGroupBox:
-    """Build the tournament-wide color card for the EVENT panel.
-
-    Same shape as MakeFeatureColorCard — including the show-time refresh, for
-    symmetry — but it writes the ``general.*`` settings / ``tournamentInfo.*``
-    state, and its action button restores Autona's own defaults instead of
-    copying another scope's colors.
-    """
-    card = L.make_card("大会カラー")
-    theme, accent = GetTournamentColors()
-
-    btTheme = _makeColorButton(theme)
-    btAccent = _makeColorButton(accent)
-    btTheme.colorChanged.connect(
-        lambda color: SetTournamentColor(KIND_THEME, color))
-    btAccent.colorChanged.connect(
-        lambda color: SetTournamentColor(KIND_ACCENT, color))
-
-    card.layout().addLayout(_colorRow("テーマカラー", btTheme))
-    card.layout().addLayout(_colorRow("アクセントカラー", btAccent))
-
-    def _resetToDefaults():
-        # Explicit persistence for the same ignore_same_color reason as above.
-        btTheme.setColor(schema.DEFAULT_THEME_COLOR)
-        btAccent.setColor(schema.DEFAULT_ACCENT_COLOR)
-        SetTournamentColor(KIND_THEME, schema.DEFAULT_THEME_COLOR)
-        SetTournamentColor(KIND_ACCENT, schema.DEFAULT_ACCENT_COLOR)
-
-    btDefault = QPushButton("Autonaデフォルトカラーを設定する")
-    btDefault.clicked.connect(_resetToDefaults)
-    card.layout().addWidget(btDefault)
-
-    _ColorCardRefresher(card, (btTheme, btAccent), GetTournamentColors)
-    return card

@@ -253,6 +253,46 @@ def test_a_newer_set_list_load_drops_what_the_older_one_queued(
     assert not second.calls[0][1]["cancel_event"].is_set()
 
 
+@pytest.mark.parametrize("then", ["another tournament", "no tournament"])
+def test_the_data_of_a_tournament_no_longer_loaded_is_dropped(
+        adapter, executor, then):
+    """ADR-005 S4g review M2: a tournament replaced while its data was on
+    the way -- by another (or the same URL loaded again by force: a new
+    provider either way) whose data has arrived and been applied, or by
+    none -- used to have its data delivered late: written over the new
+    tournament's tournamentInfo.*, and settling the new one's status
+    (TournamentService.PayloadApplied) with the old one's. It is dropped on
+    the GUI thread now, ahead of tournament_data_updated -- what both of
+    them follow (bootstrap.wire_tournament_data)."""
+    jobs = executor(stepped=True)
+    gate = threading.Event()
+    gate.set()
+    old = _Fetch(gate, {"tournamentName": "Old Cup"})
+    new = _Fetch(gate, {"tournamentName": "New Cup"})
+    answers = []
+    undo = _connect(adapter.signals.tournament_data_updated, answers, "data")
+    try:
+        adapter.provider = SimpleNamespace(GetTournamentData=old)
+        adapter.GetTournamentData()
+        if then == "no tournament":
+            adapter.provider = None
+        else:
+            adapter.provider = SimpleNamespace(GetTournamentData=new)
+            adapter.GetTournamentData()
+            # The new tournament's data arrives first and is applied...
+            assert jobs.run_next(newest=True)
+            _pump(lambda: answers)
+        # ...and the old one's comes late.
+        assert jobs.run_next()
+        _pump(lambda: True)
+    finally:
+        undo()
+
+    assert old.calls and [args for _tag, args, _main in answers] == (
+        [] if then == "no tournament"
+        else [({"tournamentName": "New Cup", "initial_load": False},)])
+
+
 def test_the_statistics_fetches_are_jobs_called_as_the_worker_called_them(
         adapter):
     gate = threading.Event()

@@ -41,6 +41,11 @@ These kinds live here:
   org's assets, the thumbnail options and the thumbnail job -- and the
   destination / title through AutonaActions, in both shells, on the calling
   thread (no board). The Stream page renders what was written.
+- 大会情報's (ADR-005 S4g): core's TournamentService (the set / clear and
+  its status), TournamentInfoService (the five fields), TournamentMedia
+  Service (the icon / banner) and ColorService (the tournament colours), in
+  both shells, on the calling thread -- but the set / clear, which core
+  runs on the main thread. The Event page renders what was written.
 - the player slots' (ADR-005 S3e-4): the Web's player edit (v1's PATCH
   players and the legacy update-team) and the tag lookup -- core's
   PlayerService.ApplyData, through the board host like the S2 ones. The
@@ -90,7 +95,10 @@ from .core.PlayerDB import PlayerDB
 from .core.PlayerService import DEFAULT_CHARACTERS_PER_PLAYER, PlayerService
 from .core.StatsService import StatsService
 from .core.StreamService import StreamService
+from .core.TournamentInfoService import TournamentInfoService
+from .core.TournamentMediaService import TournamentMediaService
 from .core.TournamentService import TournamentService
+from .core import StateSchema as schema
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from .Helpers.AutonaQtHelper import (
@@ -630,9 +638,9 @@ def generate_stream_thumbnail():
 
 def load_tournament(url=None):
     """Set the tournament at `url`, or clear it when empty (the legacy
-    route, Socket.IO and /api/v1). Through core's TournamentService (ADR-005
-    S4f), like every other entrance: the URL normalised and saved there,
-    the loaded URL not re-fetched, the media not fetched, and a clear forgets
+    route and Socket.IO). Through core's TournamentService (ADR-005 S4f),
+    like every other entrance: the URL normalised and saved there, the
+    loaded URL not re-fetched, the media not fetched, and a clear forgets
     the selected game. A URL that is not a start.gg event / admin URL
     changes nothing (it used to be saved and then load no tournament).
     "OK" whichever it was, as it always answered; on the GUI thread the
@@ -643,6 +651,91 @@ def load_tournament(url=None):
         return "OK"
     TournamentService.instance.SetTournament(url)
     return "OK"
+
+
+def set_tournament(url, force=False, fetchMedia=False):
+    """v1's POST /tournament (ADR-005 S4g): set the tournament at `url` (a
+    start.gg event / admin URL, already checked), the loaded URL re-fetched
+    only with `force`, its icon / banner fetched once loaded with
+    `fetchMedia`; or clear it when `url` is empty. On the calling thread,
+    which publishes the request's tournamentInfo.load before this returns
+    (the load itself runs on the main thread). Its revision -- or a later
+    request's, when another one came in between: the one whose result the
+    state then shows anyway."""
+    logger.info(f"Tournament URL requested: {url}")
+    if not url:
+        TournamentService.instance.ClearTournament()
+    else:
+        TournamentService.instance.SetTournament(
+            url, force=force, fetchMedia=fetchMedia)
+    return TournamentService.Load()["revision"]
+
+
+def clear_tournament():
+    """Unload the tournament (v1's DELETE /tournament, ADR-005 S4g): core's
+    ClearTournament, which forgets the selected game too. The revision of
+    tournamentInfo.load it was published at, as set_tournament's."""
+    TournamentService.instance.ClearTournament()
+    return TournamentService.Load()["revision"]
+
+
+def get_tournament():
+    """The tournament URL last set, whether a provider is there, and how
+    the newest set / clear is going: tournamentInfo.url / load as published
+    (TournamentService.Load()). `loaded` is the provider's presence, not a
+    load that worked (S4g review L6): a tournament whose load failed has
+    one too -- `status` tells how it went."""
+    return {
+        "url": TournamentService.TournamentUrl(),
+        "loaded": AutonaTournamentDataProvider.instance.GetProvider()
+        is not None,
+        **TournamentService.Load(),
+    }
+
+
+def update_tournament_info(fields):
+    """Write some of the five fields (v1 field name -> value, already
+    validated: the three texts, numEntrants, startAtDate) in one save
+    cycle, through TournamentInfoService. The lock before the save block,
+    as update_stream takes it (agent-pitfalls #17). False, with nothing
+    written, when the day cannot be made a time on this PC
+    (TournamentInfoService.SetDate): checked first."""
+    service = TournamentInfoService.instance
+    with StateManager.lock:
+        day = fields.get(schema.TOURNAMENT_START_AT_DATE_KEY)
+        if day is not None and service.DayTime(day) is None:
+            return False
+        with StateManager.SaveBlock():
+            for field, value in fields.items():
+                if field in schema.TOURNAMENT_TEXT_FIELDS:
+                    service.SetTextField(field, value)
+                elif field in schema.TOURNAMENT_NUMBER_FIELDS:
+                    service.SetNumberField(field, value)
+                elif field == schema.TOURNAMENT_START_AT_DATE_KEY:
+                    service.SetDate(schema.TOURNAMENT_START_AT_KEY, value)
+    return True
+
+
+def import_tournament_media(kind, data):
+    return TournamentMediaService.instance.ImportMedia(kind, data)
+
+
+def reset_tournament_media():
+    return TournamentMediaService.instance.ResetMedia()
+
+
+def fetch_tournament_media():
+    return TournamentMediaService.instance.FetchMedia()
+
+
+def set_tournament_colors(colors):
+    """Set the tournament's theme / accent colours (ColorService kind ->
+    "#rrggbb"), both in one save cycle when both come. Each clears the
+    feature overrides that followed it (SetTournamentColor's cascade), as
+    the Qt card did."""
+    with StateManager.SaveBlock():
+        for kind, color in colors.items():
+            ColorService.SetTournamentColor(kind, color)
 
 
 def update_bracket(done=None):

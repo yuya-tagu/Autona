@@ -166,9 +166,11 @@ def remove_special_chars(input_str: str):
 SUPPORTED_TEMPLATE_IDS = ("type_a", "type_b")
 DEFAULT_TEMPLATE_ID = "type_a"
 
-# Tournament banner image locations. The EVENT tab (AutonaTournamentInfoWidget)
-# manages the banner file; the thumbnail consumes it when the user selects
-# "Use tournament banner". Keep these in sync with that widget's constants.
+# Tournament banner image locations. core/TournamentMediaService manages the
+# banner file (the Event page imports / fetches / resets it); the thumbnail
+# consumes it when the user selects "Use tournament banner". Keep these in
+# sync with StateSchema.TOURNAMENT_BANNER_PATH and the default banner the
+# Event page shows.
 BANNER_PATH = "./user_data/tournament_banner.png"
 DEFAULT_BANNER_PATH = "./assets/thumbnail_base/default_banner.png"
 
