@@ -210,7 +210,7 @@ React の [web/src/Top8Page/](../../web/src/Top8Page/)（`/web/top8`、デスク
 STATS ドック（[src/AutonaStatsWidget.py](../../src/AutonaStatsWidget.py)）の内部タブに集約。
 
 - **Head-to-Head / Last Sets / Tournament History**（内蔵タブ）
-- **この大会の試合一覧**（[src/AutonaAnalysisWidget.py](../../src/AutonaAnalysisWidget.py) パネル）
+- **この大会の試合一覧**（[src/AutonaAnalysisWidget.py](../../src/AutonaAnalysisWidget.py) パネル。取得と行の計算は [src/core/AnalysisService.py](../../src/core/AnalysisService.py)）
   - 全試合一覧（ラウンド・シード・選手・スコア）
   - Upset Factor / Loser's Run / SeedOver
   - Stream Queue 反映 / 列ソート対応

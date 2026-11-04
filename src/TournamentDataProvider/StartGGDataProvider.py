@@ -293,7 +293,13 @@ class StartGGDataProvider(TournamentDataProvider):
             logger.error(traceback.format_exc())
         return None
 
-    def GetTournamentPhases(self, progress_callback=None, cancel_event=None):
+    def GetTournamentPhases(self, progress_callback=None, cancel_event=None,
+                            strict=False):
+        """The event's phases, each with its phase groups. A request that
+        failed (start.gg did not answer, answered no event, or answered
+        something that could not be read): [] -- or, when `strict`, it
+        raises (LookupError for no answer), how the match list tells it
+        from an event with no phase (ADR-005 S4j review M1)."""
         phases = []
 
         try:
@@ -308,6 +314,12 @@ class StartGGDataProvider(TournamentDataProvider):
                     "query": StartGGDataProvider.TournamentPhasesQuery
                 }
             )
+            # QueryRequests answers {} once its retries are spent (or the
+            # app is stopping); an unknown slug answers a null event.
+            if strict and not isinstance(
+                    deep_get(data, "data.event", None), dict):
+                raise LookupError(
+                    "start.gg answered no event to TournamentPhasesQuery")
 
             logger.info(
                 f"Phases loaded: {len(deep_get(data, 'data.event.phases', []) or [])} items")
@@ -328,6 +340,8 @@ class StartGGDataProvider(TournamentDataProvider):
 
                 phases.append(phaseObj)
         except:
+            if strict:
+                raise
             logger.error(traceback.format_exc())
 
         return phases
@@ -487,15 +501,21 @@ class StartGGDataProvider(TournamentDataProvider):
 
         return finalData
 
-    def GetAnalysisPhaseGroup(self, id, progress_callback=None, cancel_event=None):
-        """Lightweight variant of GetTournamentPhaseGroup for the Analysis
-        dock. Strips user/authorization/image/main-character fields to keep
-        responses well under the 1 MB timeout risk and fetches only what
-        the Bracket topology + seed-table need.
+    def GetAnalysisPhaseGroup(self, id, progress_callback=None,
+                              cancel_event=None, strict=False):
+        """Lightweight variant of GetTournamentPhaseGroup for the match list
+        (core.AnalysisService). Strips user/authorization/image/main-
+        character fields to keep responses well under the 1 MB timeout risk
+        and fetches only what the Bracket topology + seed-table need.
 
         Output shape is a subset of GetTournamentPhaseGroup's return value
         so Bracket() can consume it directly:
             {"entrants": [...], "sets": {...}, "progressionsOut": [...]}
+
+        A request that failed (no answer, no phase group, an answer that
+        could not be read): that shape, empty -- or, when `strict`, it
+        raises (LookupError for no answer), how the match list tells a
+        failed group from one with no sets (ADR-005 S4j review M1).
         """
         finalData = {"entrants": [], "sets": {}, "progressionsOut": []}
 
@@ -509,6 +529,11 @@ class StartGGDataProvider(TournamentDataProvider):
                     "query": StartGGDataProvider.AnalysisPhaseGroupQuery
                 }
             )
+            if strict and not isinstance(
+                    deep_get(data, "data.phaseGroup", None), dict):
+                raise LookupError(
+                    "start.gg answered no phase group to "
+                    f"AnalysisPhaseGroupQuery ({id})")
 
             seeds = deep_get(data, "data.phaseGroup.seeds.nodes", []) or []
             seeds.sort(key=lambda s: s.get("seedNum") or 0)
@@ -547,6 +572,8 @@ class StartGGDataProvider(TournamentDataProvider):
             StartGGDataProvider._split_gf_reset(
                 finalData["sets"], finalData["progressionsOut"])
         except Exception:
+            if strict:
+                raise
             logger.error(traceback.format_exc())
 
         return finalData

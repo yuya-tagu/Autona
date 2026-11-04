@@ -2,9 +2,9 @@
 
 The old Bracket dock rendering (AutonaBracketView / AutonaBracketWidget)
 was removed with the Top 8 rework; this module stays as the pure
-topology/propagation model consumed by AutonaAnalysisWidget (multi phase
-group table) and core.Top8Model.FromBracket (Top 8 extraction, which
-core.Top8Service runs in either shell).
+topology/propagation model consumed by core.AnalysisService (the match
+list's rows, ADR-005 S4j) and core.Top8Model.FromBracket (Top 8
+extraction, which core.Top8Service runs in either shell).
 
 Core since ADR-005 S3e-8 (was src/AutonaBracket.py). The one thing it read
 from the Qt side, the localized round names GetRoundName falls back to

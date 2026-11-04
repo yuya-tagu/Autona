@@ -22,6 +22,7 @@ from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from .core import StateSchema as schema
+from .core.AnalysisService import AnalysisService
 from .core.StateManager import StateManager
 from .core.StreamService import StreamService
 from .core.TaskExecutor import TaskExecutor
@@ -178,6 +179,12 @@ class AutonaTournamentDataProvider(QObject):
             return False
         self._CancelEntrants()
         self.provider = StartGGDataProvider(url, self)
+        # The match list is the tournament's (ADR-005 S4j): dropped once
+        # the new provider is in place -- a Refresh made before this (on
+        # any thread, from the provider replaced) is dropped with it, and
+        # one made after fetches from the new one (S4j review M2). The
+        # panel used to drop it on tournament_changed.
+        self._ForgetAnalysis()
 
         self.GetTournamentData(initialLoading=initialLoading)
         self.GetTournamentPhases()
@@ -193,6 +200,8 @@ class AutonaTournamentDataProvider(QObject):
         the selection is TournamentService's. Main thread."""
         self._CancelEntrants()
         self.provider = None
+        # After the provider is gone, as LoadTournament does.
+        self._ForgetAnalysis()
         AutonaPlayerDB.ClearTournamentPlayers()
         self.signals.tournament_data_updated.emit({})
         self.signals.tournament_phases_updated.emit([])
@@ -237,6 +246,15 @@ class AutonaTournamentDataProvider(QObject):
             self._entrantsCancel = None
         if StreamService.instance is not None:
             StreamService.instance.SetTopEntrants([])
+
+    @staticmethod
+    def _ForgetAnalysis():
+        """Drop the match list (AnalysisService.Forget): its fetch in
+        progress and its rows are the tournament loaded until now. Called
+        directly, not through a state observer, right after the provider
+        is replaced. GUI thread."""
+        if AnalysisService.instance is not None:
+            AnalysisService.instance.Forget()
 
     def GetBannerURL(self):
         """The loaded tournament's banner URL; None with no tournament or
@@ -435,23 +453,6 @@ class AutonaTournamentDataProvider(QObject):
         future = TaskExecutor.instance.submit(
             run, task_name="tournament provider job")
         return not future.cancelled()
-
-    def GetAnalysisPhaseGroup(self, id, onResult):
-        """Analysis-dock-only fetch. Uses the lightweight query so Start.gg
-        responses stay well under the timeout budget, and routes the result
-        to a caller-supplied callback -- nothing else sees it, and the
-        state (top8.*, which only the core Top 8 import writes) is
-        untouched by cross-phase-group probes."""
-        if self.provider is None:
-            onResult(None)
-            return
-        if not hasattr(self.provider, "GetAnalysisPhaseGroup"):
-            logger.warning(
-                "Provider has no GetAnalysisPhaseGroup — skipping analysis fetch")
-            onResult(None)
-            return
-        self._Fetch("analysis phase group", self.provider.GetAnalysisPhaseGroup,
-                    onResult, id=id)
 
     def LoadSets(self, showFinished, phaseGroupIds=None):
         """Load the set list (the set selection window). Only the newest

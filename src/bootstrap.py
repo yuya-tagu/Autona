@@ -217,6 +217,21 @@ def bootstrap_core():
     from .core import Top8Service
     Top8Service.fetcher = AutonaTournamentDataProvider.instance.RunWithProvider
 
+    # ORDER CONSTRAINT: the match list (この大会の試合一覧, ADR-005 S4j), the
+    # same way: its fetch is the provider's jobs, so it is built after the
+    # provider, and before anything can ask for a fetch or load a
+    # tournament (the provider's Load / UnloadTournament call its Forget;
+    # both come from the shells, after this function). `later` (its second
+    # job is started from the main thread: a job may not submit one) and
+    # the round names (the shell's LoadRoundNames) are read when used.
+    from .Helpers import AutonaQtHelper
+    from .core.AnalysisService import AnalysisService
+    if AnalysisService.instance is None:
+        AnalysisService.instance = AnalysisService(
+            fetcher=AutonaTournamentDataProvider.instance.RunWithProvider,
+            later=lambda fn: AutonaQtHelper.gui_executor.later(fn),
+            roundNames=lambda: AutonaLocaleHelper.matchNames)
+
     # ORDER CONSTRAINT: the statistics' fetcher (ADR-005 S3e-5) hands its
     # requests to the provider above and connects to its stream queue
     # signal, so it is built after it; and before anything that can ask for

@@ -130,6 +130,9 @@ def test_bootstrap_core_steps_and_their_order():
         "AutonaTournamentDataProvider()",
         "Top8Service.fetcher"
         " = AutonaTournamentDataProvider.instance.RunWithProvider",
+        # The match list (ADR-005 S4j): its fetch is the provider's jobs, as
+        # the Top 8 import's; before anything can ask for one.
+        "AnalysisService()",
         "StatsService.fetcher = AutonaStatsUtil()",
         # The set follow (ADR-005 S3e-7): after the provider and the
         # statistics' stream queue relay; the board host is read when used.
@@ -371,6 +374,7 @@ from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
 from src.Helpers.AutonaQtHelper import in_gui_thread
 from src.StateManagerBridge import StateManagerBridge
 from src.core.Actions import AutonaActions
+from src.core.AnalysisService import AnalysisService
 from src.core.BadWordFilter import BadWordFilter
 from src.core.CountryCatalog import CountryCatalog
 from src.core.GameAssetCatalog import GameAssetCatalog
@@ -411,6 +415,7 @@ report({
         "CountryCatalog": CountryCatalog.instance is not None,
         "TaskExecutor": TaskExecutor.instance is not None,
         "StreamService": StreamService.instance is not None,
+        "AnalysisService": AnalysisService.instance is not None,
     },
     "stream_title": [title_before_loop, stream_title],
     "state_subscribers": state_subscribers(),

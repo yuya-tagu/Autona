@@ -135,9 +135,6 @@ FETCHES = {
     "phases": (
         "GetTournamentPhases", [{"id": 7, "name": "Pools"}],
         [("phases", ([{"id": 7, "name": "Pools"}],))]),
-    "analysis": (
-        "GetAnalysisPhaseGroup", {"sets": []},
-        [("analysis", ({"sets": []},))]),
     "stations": (
         "GetStations", [{"id": 3}],
         [("stations", ([{"id": 3}],))]),
@@ -164,10 +161,6 @@ def _start(adapter, kind, answers):
         undo = [_connect(signals.tournament_phases_updated, answers,
                          "phases")]
         adapter.GetTournamentPhases()
-    elif kind == "analysis":
-        undo = []
-        adapter.GetAnalysisPhaseGroup(
-            42, lambda data: answers.append(("analysis", (data,), _onMain())))
     elif kind == "stations":
         undo = [_connect(signals.get_stations_finished, answers, "stations")]
         adapter.LoadStations()
