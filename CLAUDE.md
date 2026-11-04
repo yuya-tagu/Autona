@@ -80,6 +80,7 @@ Edit/Write 後に出る「No preview server is running...（ブラウザプレ�
 - **作業はローカル `main` 上で行う**（worktree も作業ブランチも作らない。例外はサブエージェントの worktree 並列のみ → [.claude/orchestration.md](.claude/orchestration.md)）。ブランチはリモート push 時にだけ切る
 - push は `git push origin main:<type>/<topic>`（種別 `feat`/`fix`/`docs`/`chore`/`ci`）。**リモート `main` への直接 push 禁止**（必ず PR 経由）
 - コミットメッセージ・PR 説明文は日本語。**コミット・push は明示的に依頼されたときのみ**
+- PR を出したら、リスク区分「通常」「軽微」は `gh pr merge <PR番号> --merge --auto` を予約し、CI を待たずに報告して次へ進む（CI はバックグラウンドで見届け、`MERGED` 後にローカル `main` を同期）。「高」は予約せず CI 緑で「マージ可」と報告し、オーナーの確認後にマージする。区分とマージ方式（merge commit）の理由は [.claude/git-workflow.md](.claude/git-workflow.md)。グローバル CLAUDE.md の「マージはユーザーが行う」より優先する（2026-11-04 オーナー承認）
 - **マシン固有の認証手順**（複数 GitHub アカウント環境での push / fetch 等）は `CLAUDE.local.md`（gitignore 済み）を参照
 
 # Compact instructions
