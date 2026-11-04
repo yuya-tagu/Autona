@@ -444,8 +444,8 @@ def test_the_panel_draws_what_it_did(analysis):
         assert recorded["rows"] == _expectedRows(label), label
         assert recorded["fetches"] == golden["fetches"], label
         if label == NO_PHASE_GROUP:
-            assert golden["label"] == QApplication.translate(
-                "app", "フェーズ情報を取得中...")
+            # The frozen golden is the Japanese source text.
+            assert golden["label"] == "フェーズ情報を取得中..."
             assert recorded["label"] == QApplication.translate(
                 "app", "取得に失敗しました")
         else:
