@@ -1,0 +1,3542 @@
+{
+ "about": "The Top 8 page's character pick (ADR-005 S4i): which character and skin row a player's characters[\"1\"] shows, one table for both implementations -- core's Top8Service.CharacterPick (tests/test_top8_service.py) and the page's characterPick (web/src/Top8Page/characterPick.ts, its jest test). `characters` is GET /api/v1/characters for the test game; `reversed`: the list in the other order. Recorded from core's builders; change a case here and both have to agree.",
+ "characters": {
+  "Bowser": {
+   "codename": "koopa",
+   "display_name": "Bowser",
+   "en_name": "Bowser",
+   "modded": false,
+   "name": "Bowser",
+   "skins": [
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_koopa_00.png",
+       "type": [
+        "icon"
+       ]
+      },
+      "full": {
+       "asset": "./user_data/games/tgame//full/koopa_0.png",
+       "average_size": {
+        "x": 100.0,
+        "y": 120.0
+       },
+       "metadata": {
+        "0": {
+         "title": "重さ",
+         "title_en": "Weight",
+         "value": "",
+         "value_en": ""
+        }
+       },
+       "type": [
+        "full"
+       ],
+       "uncropped_edge": [
+        "u",
+        "d"
+       ]
+      }
+     }
+    },
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_koopa_01.png",
+       "type": [
+        "icon"
+       ]
+      },
+      "full": {
+       "asset": "./user_data/games/tgame//full/koopa_1.png",
+       "average_size": {
+        "x": 100.0,
+        "y": 120.0
+       },
+       "metadata": {
+        "0": {
+         "title": "重さ",
+         "title_en": "Weight",
+         "value": "",
+         "value_en": ""
+        }
+       },
+       "type": [
+        "full"
+       ],
+       "uncropped_edge": [
+        "u",
+        "d"
+       ]
+      }
+     }
+    }
+   ]
+  },
+  "クッパJr.": {
+   "codename": "koopajr",
+   "display_name": "Bowser Jr.",
+   "en_name": "Bowser Jr.",
+   "modded": false,
+   "name": "クッパJr.",
+   "skins": [
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_koopajr_00.png",
+       "type": [
+        "icon"
+       ]
+      },
+      "full": {
+       "asset": "./user_data/games/tgame//full/koopajr_0.png",
+       "average_size": {
+        "x": 100.0,
+        "y": 120.0
+       },
+       "metadata": {
+        "0": {
+         "title": "重さ",
+         "title_en": "Weight",
+         "value": "",
+         "value_en": ""
+        }
+       },
+       "type": [
+        "full"
+       ],
+       "uncropped_edge": [
+        "u",
+        "d"
+       ]
+      },
+      "portrait": {
+       "asset": "./user_data/games/tgame//portrait/koopajr_0.png",
+       "average_size": {
+        "x": 200.0,
+        "y": 200.0
+       },
+       "type": "portrait"
+      }
+     }
+    },
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_koopajr_01.png",
+       "type": [
+        "icon"
+       ]
+      },
+      "full": {
+       "asset": "./user_data/games/tgame//full/koopajr_1.png",
+       "average_size": {
+        "x": 100.0,
+        "y": 120.0
+       },
+       "metadata": {
+        "0": {
+         "title": "重さ",
+         "title_en": "Weight",
+         "value": "",
+         "value_en": ""
+        }
+       },
+       "type": [
+        "full"
+       ],
+       "uncropped_edge": [
+        "u",
+        "d"
+       ]
+      },
+      "portrait": {
+       "asset": "./user_data/games/tgame//portrait/koopajr_1.png",
+       "average_size": {
+        "x": 200.0,
+        "y": 200.0
+       },
+       "type": "portrait"
+      }
+     }
+    },
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_koopajr_02.png",
+       "type": [
+        "icon"
+       ]
+      },
+      "full": {
+       "asset": "./user_data/games/tgame//full/koopajr_2.png",
+       "average_size": {
+        "x": 100.0,
+        "y": 120.0
+       },
+       "metadata": {
+        "0": {
+         "title": "重さ",
+         "title_en": "Weight",
+         "value": "",
+         "value_en": ""
+        }
+       },
+       "type": [
+        "full"
+       ],
+       "uncropped_edge": [
+        "u",
+        "d"
+       ]
+      },
+      "portrait": {
+       "asset": "./user_data/games/tgame//portrait/koopajr_2.png",
+       "average_size": {
+        "x": 200.0,
+        "y": 200.0
+       },
+       "type": "portrait"
+      }
+     },
+     "en_name": "Roy",
+     "name": "Roy"
+    }
+   ]
+  },
+  "NoArt": {
+   "codename": "noart",
+   "display_name": "NoArt",
+   "en_name": "NoArt",
+   "modded": false,
+   "name": "NoArt",
+   "skins": []
+  },
+  "Random": {
+   "codename": "random",
+   "display_name": "Random",
+   "en_name": "Random",
+   "modded": false,
+   "name": "Random",
+   "skins": [
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_random_00.png",
+       "type": [
+        "icon"
+       ]
+      }
+     }
+    }
+   ]
+  },
+  "ロイ": {
+   "codename": "roy",
+   "display_name": "Roy",
+   "en_name": "Roy",
+   "modded": false,
+   "name": "ロイ",
+   "skins": [
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_roy_00.png",
+       "type": [
+        "icon"
+       ]
+      },
+      "full": {
+       "asset": "./user_data/games/tgame//full/roy_0.png",
+       "average_size": {
+        "x": 100.0,
+        "y": 120.0
+       },
+       "metadata": {
+        "0": {
+         "title": "重さ",
+         "title_en": "Weight",
+         "value": "",
+         "value_en": ""
+        }
+       },
+       "type": [
+        "full"
+       ],
+       "uncropped_edge": [
+        "u",
+        "d"
+       ]
+      },
+      "portrait": {
+       "asset": "./user_data/games/tgame//portrait/roy_0.png",
+       "average_size": {
+        "x": 200.0,
+        "y": 200.0
+       },
+       "type": "portrait"
+      }
+     }
+    },
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_roy_01.png",
+       "type": [
+        "icon"
+       ]
+      },
+      "full": {
+       "asset": "./user_data/games/tgame//full/roy_1.png",
+       "average_size": {
+        "x": 100.0,
+        "y": 120.0
+       },
+       "metadata": {
+        "0": {
+         "title": "重さ",
+         "title_en": "Weight",
+         "value": "",
+         "value_en": ""
+        }
+       },
+       "type": [
+        "full"
+       ],
+       "uncropped_edge": [
+        "u",
+        "d"
+       ]
+      },
+      "portrait": {
+       "asset": "./user_data/games/tgame//portrait/roy_1.png",
+       "average_size": {
+        "x": 200.0,
+        "y": 200.0
+       },
+       "type": "portrait"
+      }
+     }
+    }
+   ]
+  },
+  "マリオ": {
+   "codename": "mario",
+   "display_name": "瑪利歐",
+   "en_name": "Mario",
+   "modded": false,
+   "name": "マリオ",
+   "skins": [
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_mario_00.png",
+       "type": [
+        "icon"
+       ]
+      },
+      "full": {
+       "asset": "./user_data/games/tgame//full/mario_0.png",
+       "average_size": {
+        "x": 100.0,
+        "y": 120.0
+       },
+       "eyesight": {
+        "x": 10,
+        "y": 20
+       },
+       "image_size": [
+        100,
+        120
+       ],
+       "metadata": {
+        "0": {
+         "title": "重さ",
+         "title_en": "Weight",
+         "value": "98kg",
+         "value_en": "98"
+        }
+       },
+       "rescaling_factor": 1,
+       "type": [
+        "full"
+       ],
+       "uncropped_edge": [
+        "u",
+        "d"
+       ]
+      },
+      "portrait": {
+       "asset": "./user_data/games/tgame//portrait/mario_0.png",
+       "average_size": {
+        "x": 200.0,
+        "y": 200.0
+       },
+       "type": "portrait"
+      }
+     }
+    },
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_mario_01.png",
+       "type": [
+        "icon"
+       ]
+      },
+      "full": {
+       "asset": "./user_data/games/tgame//full/mario_1.png",
+       "average_size": {
+        "x": 100.0,
+        "y": 120.0
+       },
+       "eyesight": {
+        "x": 11,
+        "y": 21
+       },
+       "image_size": [
+        100,
+        120
+       ],
+       "metadata": {
+        "0": {
+         "title": "重さ",
+         "title_en": "Weight",
+         "value": "98kg",
+         "value_en": "98"
+        }
+       },
+       "rescaling_factor": 1.5,
+       "type": [
+        "full"
+       ],
+       "uncropped_edge": [
+        "u",
+        "d"
+       ]
+      },
+      "portrait": {
+       "asset": "./user_data/games/tgame//portrait/mario_1.png",
+       "average_size": {
+        "x": 200.0,
+        "y": 200.0
+       },
+       "type": "portrait"
+      }
+     }
+    },
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_mario_02.png",
+       "type": [
+        "icon"
+       ]
+      },
+      "full": {
+       "asset": "./user_data/games/tgame//full/mario_2.png",
+       "average_size": {
+        "x": 100.0,
+        "y": 120.0
+       },
+       "eyesight": {
+        "x": 10,
+        "y": 20
+       },
+       "image_size": [
+        100,
+        120
+       ],
+       "metadata": {
+        "0": {
+         "title": "重さ",
+         "title_en": "Weight",
+         "value": "98kg",
+         "value_en": "98"
+        }
+       },
+       "rescaling_factor": 1,
+       "type": [
+        "full"
+       ],
+       "uncropped_edge": [
+        "u",
+        "d"
+       ]
+      },
+      "portrait": {
+       "asset": "./user_data/games/tgame//portrait/mario_2.png",
+       "average_size": {
+        "x": 200.0,
+        "y": 200.0
+       },
+       "type": "portrait"
+      }
+     },
+     "en_name": "Dr. Mario",
+     "name": "Dr. Mario"
+    }
+   ]
+  },
+  "Peach": {
+   "codename": "peach",
+   "display_name": "碧姬",
+   "en_name": "Peach",
+   "modded": false,
+   "name": "Peach",
+   "skins": [
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_peach_00.png",
+       "type": [
+        "icon"
+       ]
+      },
+      "full": {
+       "asset": "./user_data/games/tgame//full/peach_0.png",
+       "average_size": {
+        "x": 100.0,
+        "y": 120.0
+       },
+       "metadata": {
+        "0": {
+         "title": "重さ",
+         "title_en": "Weight",
+         "value": "",
+         "value_en": ""
+        }
+       },
+       "type": [
+        "full"
+       ],
+       "uncropped_edge": [
+        "u",
+        "d"
+       ],
+       "unflippable": true
+      },
+      "portrait": {
+       "asset": "./user_data/games/tgame//portrait/peach_0.png",
+       "average_size": {
+        "x": 200.0,
+        "y": 200.0
+       },
+       "type": "portrait"
+      }
+     }
+    },
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_peach_01.png",
+       "type": [
+        "icon"
+       ]
+      },
+      "full": {
+       "asset": "./user_data/games/tgame//full/peach_1.png",
+       "average_size": {
+        "x": 100.0,
+        "y": 120.0
+       },
+       "metadata": {
+        "0": {
+         "title": "重さ",
+         "title_en": "Weight",
+         "value": "",
+         "value_en": ""
+        }
+       },
+       "type": [
+        "full"
+       ],
+       "uncropped_edge": [
+        "u",
+        "d"
+       ],
+       "unflippable": true
+      },
+      "portrait": {
+       "asset": "./user_data/games/tgame//portrait/peach_1.png",
+       "average_size": {
+        "x": 200.0,
+        "y": 200.0
+       },
+       "type": "portrait"
+      }
+     }
+    },
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_peach_02.png",
+       "type": [
+        "icon"
+       ]
+      },
+      "full": {
+       "asset": "./user_data/games/tgame//full/peach_2.png",
+       "average_size": {
+        "x": 100.0,
+        "y": 120.0
+       },
+       "metadata": {
+        "0": {
+         "title": "重さ",
+         "title_en": "Weight",
+         "value": "",
+         "value_en": ""
+        }
+       },
+       "type": [
+        "full"
+       ],
+       "uncropped_edge": [
+        "u",
+        "d"
+       ],
+       "unflippable": true
+      },
+      "portrait": {
+       "asset": "./user_data/games/tgame//portrait/peach_0.png",
+       "average_size": {
+        "x": 200.0,
+        "y": 200.0
+       },
+       "type": "portrait"
+      }
+     }
+    }
+   ]
+  },
+  "ルイージ": {
+   "codename": "luigi",
+   "display_name": "路易吉",
+   "en_name": "Luigi",
+   "modded": false,
+   "name": "ルイージ",
+   "skins": [
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_luigi_00.png",
+       "type": [
+        "icon"
+       ]
+      },
+      "full": {
+       "asset": "./user_data/games/tgame//full/luigi_0.png",
+       "average_size": {
+        "x": 100.0,
+        "y": 120.0
+       },
+       "eyesight": {
+        "x": 12,
+        "y": 22
+       },
+       "metadata": {
+        "0": {
+         "title": "重さ",
+         "title_en": "Weight",
+         "value": "",
+         "value_en": ""
+        }
+       },
+       "type": [
+        "full"
+       ],
+       "uncropped_edge": [
+        "u",
+        "d"
+       ]
+      },
+      "portrait": {
+       "asset": "./user_data/games/tgame//portrait/luigi_0.png",
+       "average_size": {
+        "x": 200.0,
+        "y": 200.0
+       },
+       "type": "portrait"
+      }
+     }
+    },
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_luigi_01.png",
+       "type": [
+        "icon"
+       ]
+      },
+      "full": {
+       "asset": "./user_data/games/tgame//full/luigi_1.png",
+       "average_size": {
+        "x": 100.0,
+        "y": 120.0
+       },
+       "eyesight": {
+        "x": 12,
+        "y": 22
+       },
+       "metadata": {
+        "0": {
+         "title": "重さ",
+         "title_en": "Weight",
+         "value": "",
+         "value_en": ""
+        }
+       },
+       "type": [
+        "full"
+       ],
+       "uncropped_edge": [
+        "u",
+        "d"
+       ]
+      },
+      "portrait": {
+       "asset": "./user_data/games/tgame//portrait/luigi_1.png",
+       "average_size": {
+        "x": 200.0,
+        "y": 200.0
+       },
+       "type": "portrait"
+      }
+     }
+    },
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_luigi_02.png",
+       "type": [
+        "icon"
+       ]
+      },
+      "full": {
+       "asset": "./user_data/games/tgame//full/luigi_2.png",
+       "average_size": {
+        "x": 100.0,
+        "y": 120.0
+       },
+       "eyesight": {
+        "x": 12,
+        "y": 22
+       },
+       "metadata": {
+        "0": {
+         "title": "重さ",
+         "title_en": "Weight",
+         "value": "",
+         "value_en": ""
+        }
+       },
+       "type": [
+        "full"
+       ],
+       "uncropped_edge": [
+        "u",
+        "d"
+       ]
+      },
+      "portrait": {
+       "asset": "./user_data/games/tgame//portrait/luigi_2.png",
+       "average_size": {
+        "x": 200.0,
+        "y": 200.0
+       },
+       "type": "portrait"
+      }
+     }
+    }
+   ]
+  },
+  "Ghost": {
+   "codename": "ghost",
+   "display_name": "𝓖host",
+   "en_name": "Ghost",
+   "modded": false,
+   "name": "Ghost",
+   "skins": [
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_ghost_00.png",
+       "type": [
+        "icon"
+       ]
+      },
+      "full": {
+       "asset": "./user_data/games/tgame//full/ghost_0.png",
+       "average_size": {
+        "x": 100.0,
+        "y": 120.0
+       },
+       "metadata": {
+        "0": {
+         "title": "重さ",
+         "title_en": "Weight",
+         "value": "",
+         "value_en": ""
+        }
+       },
+       "type": [
+        "full"
+       ],
+       "uncropped_edge": [
+        "u",
+        "d"
+       ]
+      }
+     }
+    }
+   ]
+  },
+  "Zelda": {
+   "codename": "zelda",
+   "display_name": "ｚｅｌｄａ",
+   "en_name": "Zelda",
+   "modded": false,
+   "name": "Zelda",
+   "skins": [
+    {
+     "assets": {
+      "base_files/icon": {
+       "asset": "./user_data/games/tgame//base_files/icon/chara_2_zelda_00.png",
+       "type": [
+        "icon"
+       ]
+      },
+      "full": {
+       "asset": "./user_data/games/tgame//full/zelda_0.png",
+       "average_size": {
+        "x": 100.0,
+        "y": 120.0
+       },
+       "metadata": {
+        "0": {
+         "title": "重さ",
+         "title_en": "Weight",
+         "value": "",
+         "value_en": ""
+        }
+       },
+       "type": [
+        "full"
+       ],
+       "uncropped_edge": [
+        "u",
+        "d"
+       ]
+      }
+     }
+    }
+   ]
+  }
+ },
+ "cases": [
+  {
+   "why": "the page's pick: Bowser 0",
+   "value": {
+    "codename": "koopa",
+    "display_name": "Bowser",
+    "en_name": "Bowser",
+    "modded": false,
+    "name": "Bowser",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_koopa_00.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/koopa_0.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     }
+    },
+    "skin": 0,
+    "variant": {}
+   },
+   "pick": [
+    "Bowser",
+    0
+   ]
+  },
+  {
+   "why": "an import: Bowser 0",
+   "value": {
+    "codename": "koopa",
+    "smashgg_name": "Bowser",
+    "display_name": "Bowser",
+    "export_name": "Bowser",
+    "en_name": "Bowser",
+    "modded": false,
+    "name": "Bowser",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_koopa_00.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/koopa_0.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     }
+    },
+    "skin": 0,
+    "variant": {}
+   },
+   "pick": [
+    "Bowser",
+    0
+   ]
+  },
+  {
+   "why": "the page's pick: Bowser 1",
+   "value": {
+    "codename": "koopa",
+    "display_name": "Bowser",
+    "en_name": "Bowser",
+    "modded": false,
+    "name": "Bowser",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_koopa_01.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/koopa_1.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     }
+    },
+    "skin": 1,
+    "variant": {}
+   },
+   "pick": [
+    "Bowser",
+    1
+   ]
+  },
+  {
+   "why": "an import: Bowser 1",
+   "value": {
+    "codename": "koopa",
+    "smashgg_name": "Bowser",
+    "display_name": "Bowser",
+    "export_name": "Bowser",
+    "en_name": "Bowser",
+    "modded": false,
+    "name": "Bowser",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_koopa_01.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/koopa_1.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     }
+    },
+    "skin": 1,
+    "variant": {}
+   },
+   "pick": [
+    "Bowser",
+    1
+   ]
+  },
+  {
+   "why": "the page's pick: Bowser Jr. 0",
+   "value": {
+    "codename": "koopajr",
+    "display_name": "Bowser Jr.",
+    "en_name": "Bowser Jr.",
+    "modded": false,
+    "name": "クッパJr.",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_koopajr_00.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/koopajr_0.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/koopajr_0.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 0,
+    "variant": {}
+   },
+   "pick": [
+    "Bowser Jr.",
+    0
+   ]
+  },
+  {
+   "why": "an import: Bowser Jr. 0",
+   "value": {
+    "codename": "koopajr",
+    "smashgg_name": "Bowser Jr.",
+    "locale": {
+     "ja": "クッパJr."
+    },
+    "skin_name": {
+     "2": {
+      "name": "Roy",
+      "is_different_character": true,
+      "locale": {
+       "ja": "ロイ"
+      }
+     }
+    },
+    "display_name": "Bowser Jr.",
+    "export_name": "クッパJr.",
+    "en_name": "Bowser Jr.",
+    "modded": false,
+    "name": "クッパJr.",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_koopajr_00.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/koopajr_0.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/koopajr_0.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 0,
+    "variant": {}
+   },
+   "pick": [
+    "Bowser Jr.",
+    0
+   ]
+  },
+  {
+   "why": "the page's pick: Bowser Jr. 1",
+   "value": {
+    "codename": "koopajr",
+    "display_name": "Bowser Jr.",
+    "en_name": "Bowser Jr.",
+    "modded": false,
+    "name": "クッパJr.",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_koopajr_01.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/koopajr_1.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/koopajr_1.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 1,
+    "variant": {}
+   },
+   "pick": [
+    "Bowser Jr.",
+    1
+   ]
+  },
+  {
+   "why": "an import: Bowser Jr. 1",
+   "value": {
+    "codename": "koopajr",
+    "smashgg_name": "Bowser Jr.",
+    "locale": {
+     "ja": "クッパJr."
+    },
+    "skin_name": {
+     "2": {
+      "name": "Roy",
+      "is_different_character": true,
+      "locale": {
+       "ja": "ロイ"
+      }
+     }
+    },
+    "display_name": "Bowser Jr.",
+    "export_name": "クッパJr.",
+    "en_name": "Bowser Jr.",
+    "modded": false,
+    "name": "クッパJr.",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_koopajr_01.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/koopajr_1.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/koopajr_1.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 1,
+    "variant": {}
+   },
+   "pick": [
+    "Bowser Jr.",
+    1
+   ]
+  },
+  {
+   "why": "the page's pick: Bowser Jr. 2",
+   "value": {
+    "codename": "koopajr",
+    "display_name": "Bowser Jr.",
+    "en_name": "Roy",
+    "modded": false,
+    "name": "Roy",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_koopajr_02.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/koopajr_2.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/koopajr_2.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 2,
+    "variant": {}
+   },
+   "pick": [
+    "Bowser Jr.",
+    2
+   ]
+  },
+  {
+   "why": "an import: Bowser Jr. 2",
+   "value": {
+    "codename": "koopajr",
+    "smashgg_name": "Bowser Jr.",
+    "locale": {
+     "ja": "クッパJr."
+    },
+    "skin_name": {
+     "2": {
+      "name": "Roy",
+      "is_different_character": true,
+      "locale": {
+       "ja": "ロイ"
+      }
+     }
+    },
+    "display_name": "Bowser Jr.",
+    "export_name": "クッパJr.",
+    "en_name": "Bowser Jr.",
+    "modded": false,
+    "name": "Roy",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_koopajr_02.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/koopajr_2.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/koopajr_2.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 2,
+    "variant": {}
+   },
+   "pick": [
+    "Bowser Jr.",
+    2
+   ]
+  },
+  {
+   "why": "the page's pick: Random 0",
+   "value": {
+    "codename": "random",
+    "display_name": "Random",
+    "en_name": "Random",
+    "modded": false,
+    "name": "Random",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_random_00.png",
+      "type": [
+       "icon"
+      ]
+     }
+    },
+    "skin": 0,
+    "variant": {}
+   },
+   "pick": [
+    "Random",
+    0
+   ]
+  },
+  {
+   "why": "an import: Random 0",
+   "value": {
+    "codename": "random",
+    "display_name": "Random",
+    "export_name": "Random",
+    "en_name": "Random",
+    "modded": false,
+    "name": "Random",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_random_00.png",
+      "type": [
+       "icon"
+      ]
+     }
+    },
+    "skin": 0,
+    "variant": {}
+   },
+   "pick": [
+    "Random",
+    0
+   ]
+  },
+  {
+   "why": "the page's pick: Roy 0",
+   "value": {
+    "codename": "roy",
+    "display_name": "Roy",
+    "en_name": "Roy",
+    "modded": false,
+    "name": "ロイ",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_roy_00.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/roy_0.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/roy_0.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 0,
+    "variant": {}
+   },
+   "pick": [
+    "Roy",
+    0
+   ]
+  },
+  {
+   "why": "an import: Roy 0",
+   "value": {
+    "codename": "roy",
+    "smashgg_name": "Roy",
+    "locale": {
+     "ja": "ロイ"
+    },
+    "display_name": "Roy",
+    "export_name": "ロイ",
+    "en_name": "Roy",
+    "modded": false,
+    "name": "ロイ",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_roy_00.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/roy_0.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/roy_0.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 0,
+    "variant": {}
+   },
+   "pick": [
+    "Roy",
+    0
+   ]
+  },
+  {
+   "why": "the page's pick: Roy 1",
+   "value": {
+    "codename": "roy",
+    "display_name": "Roy",
+    "en_name": "Roy",
+    "modded": false,
+    "name": "ロイ",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_roy_01.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/roy_1.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/roy_1.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 1,
+    "variant": {}
+   },
+   "pick": [
+    "Roy",
+    1
+   ]
+  },
+  {
+   "why": "an import: Roy 1",
+   "value": {
+    "codename": "roy",
+    "smashgg_name": "Roy",
+    "locale": {
+     "ja": "ロイ"
+    },
+    "display_name": "Roy",
+    "export_name": "ロイ",
+    "en_name": "Roy",
+    "modded": false,
+    "name": "ロイ",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_roy_01.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/roy_1.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/roy_1.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 1,
+    "variant": {}
+   },
+   "pick": [
+    "Roy",
+    1
+   ]
+  },
+  {
+   "why": "the page's pick: Mario 0",
+   "value": {
+    "codename": "mario",
+    "display_name": "瑪利歐",
+    "en_name": "Mario",
+    "modded": false,
+    "name": "マリオ",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_mario_00.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/mario_0.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "eyesight": {
+       "x": 10,
+       "y": 20
+      },
+      "image_size": [
+       100,
+       120
+      ],
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "98kg",
+        "value_en": "98"
+       }
+      },
+      "rescaling_factor": 1,
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/mario_0.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 0,
+    "variant": {}
+   },
+   "pick": [
+    "Mario",
+    0
+   ]
+  },
+  {
+   "why": "an import: Mario 0",
+   "value": {
+    "codename": "mario",
+    "smashgg_name": "Mario",
+    "locale": {
+     "zh_TW": "瑪利歐",
+     "ja": "マリオ"
+    },
+    "skin_name": {
+     "1": {
+      "name": "Fire Mario",
+      "locale": {
+       "zh_TW": "火焰瑪利歐"
+      }
+     },
+     "2": {
+      "name": "Dr. Mario",
+      "is_different_character": true,
+      "locale": {
+       "ja": "ドクターマリオ"
+      }
+     }
+    },
+    "display_name": "瑪利歐",
+    "export_name": "マリオ",
+    "en_name": "Mario",
+    "modded": false,
+    "name": "マリオ",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_mario_00.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/mario_0.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "eyesight": {
+       "x": 10,
+       "y": 20
+      },
+      "image_size": [
+       100,
+       120
+      ],
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "98kg",
+        "value_en": "98"
+       }
+      },
+      "rescaling_factor": 1,
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/mario_0.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 0,
+    "variant": {}
+   },
+   "pick": [
+    "Mario",
+    0
+   ]
+  },
+  {
+   "why": "the page's pick: Mario 1",
+   "value": {
+    "codename": "mario",
+    "display_name": "瑪利歐",
+    "en_name": "Mario",
+    "modded": false,
+    "name": "マリオ",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_mario_01.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/mario_1.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "eyesight": {
+       "x": 11,
+       "y": 21
+      },
+      "image_size": [
+       100,
+       120
+      ],
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "98kg",
+        "value_en": "98"
+       }
+      },
+      "rescaling_factor": 1.5,
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/mario_1.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 1,
+    "variant": {}
+   },
+   "pick": [
+    "Mario",
+    1
+   ]
+  },
+  {
+   "why": "an import: Mario 1",
+   "value": {
+    "codename": "mario",
+    "smashgg_name": "Mario",
+    "locale": {
+     "zh_TW": "瑪利歐",
+     "ja": "マリオ"
+    },
+    "skin_name": {
+     "1": {
+      "name": "Fire Mario",
+      "locale": {
+       "zh_TW": "火焰瑪利歐"
+      }
+     },
+     "2": {
+      "name": "Dr. Mario",
+      "is_different_character": true,
+      "locale": {
+       "ja": "ドクターマリオ"
+      }
+     }
+    },
+    "display_name": "瑪利歐",
+    "export_name": "マリオ",
+    "en_name": "Mario",
+    "modded": false,
+    "name": "マリオ",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_mario_01.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/mario_1.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "eyesight": {
+       "x": 11,
+       "y": 21
+      },
+      "image_size": [
+       100,
+       120
+      ],
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "98kg",
+        "value_en": "98"
+       }
+      },
+      "rescaling_factor": 1.5,
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/mario_1.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 1,
+    "variant": {}
+   },
+   "pick": [
+    "Mario",
+    1
+   ]
+  },
+  {
+   "why": "the page's pick: Mario 2",
+   "value": {
+    "codename": "mario",
+    "display_name": "瑪利歐",
+    "en_name": "Dr. Mario",
+    "modded": false,
+    "name": "Dr. Mario",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_mario_02.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/mario_2.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "eyesight": {
+       "x": 10,
+       "y": 20
+      },
+      "image_size": [
+       100,
+       120
+      ],
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "98kg",
+        "value_en": "98"
+       }
+      },
+      "rescaling_factor": 1,
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/mario_2.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 2,
+    "variant": {}
+   },
+   "pick": [
+    "Mario",
+    2
+   ]
+  },
+  {
+   "why": "an import: Mario 2",
+   "value": {
+    "codename": "mario",
+    "smashgg_name": "Mario",
+    "locale": {
+     "zh_TW": "瑪利歐",
+     "ja": "マリオ"
+    },
+    "skin_name": {
+     "1": {
+      "name": "Fire Mario",
+      "locale": {
+       "zh_TW": "火焰瑪利歐"
+      }
+     },
+     "2": {
+      "name": "Dr. Mario",
+      "is_different_character": true,
+      "locale": {
+       "ja": "ドクターマリオ"
+      }
+     }
+    },
+    "display_name": "瑪利歐",
+    "export_name": "マリオ",
+    "en_name": "Mario",
+    "modded": false,
+    "name": "Dr. Mario",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_mario_02.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/mario_2.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "eyesight": {
+       "x": 10,
+       "y": 20
+      },
+      "image_size": [
+       100,
+       120
+      ],
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "98kg",
+        "value_en": "98"
+       }
+      },
+      "rescaling_factor": 1,
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/mario_2.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 2,
+    "variant": {}
+   },
+   "pick": [
+    "Mario",
+    2
+   ]
+  },
+  {
+   "why": "the page's pick: Peach 0",
+   "value": {
+    "codename": "peach",
+    "display_name": "碧姬",
+    "en_name": "Peach",
+    "modded": false,
+    "name": "Peach",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_peach_00.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/peach_0.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ],
+      "unflippable": true
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/peach_0.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 0,
+    "variant": {}
+   },
+   "pick": [
+    "Peach",
+    0
+   ]
+  },
+  {
+   "why": "an import: Peach 0",
+   "value": {
+    "codename": "peach",
+    "smashgg_name": "Peach",
+    "locale": {
+     "zh_Hant": "碧姬"
+    },
+    "display_name": "碧姬",
+    "export_name": "Peach",
+    "en_name": "Peach",
+    "modded": false,
+    "name": "Peach",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_peach_00.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/peach_0.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ],
+      "unflippable": true
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/peach_0.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 0,
+    "variant": {}
+   },
+   "pick": [
+    "Peach",
+    0
+   ]
+  },
+  {
+   "why": "the page's pick: Peach 1",
+   "value": {
+    "codename": "peach",
+    "display_name": "碧姬",
+    "en_name": "Peach",
+    "modded": false,
+    "name": "Peach",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_peach_01.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/peach_1.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ],
+      "unflippable": true
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/peach_1.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 1,
+    "variant": {}
+   },
+   "pick": [
+    "Peach",
+    1
+   ]
+  },
+  {
+   "why": "an import: Peach 1",
+   "value": {
+    "codename": "peach",
+    "smashgg_name": "Peach",
+    "locale": {
+     "zh_Hant": "碧姬"
+    },
+    "display_name": "碧姬",
+    "export_name": "Peach",
+    "en_name": "Peach",
+    "modded": false,
+    "name": "Peach",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_peach_01.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/peach_1.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ],
+      "unflippable": true
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/peach_1.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 1,
+    "variant": {}
+   },
+   "pick": [
+    "Peach",
+    1
+   ]
+  },
+  {
+   "why": "the page's pick: Peach 2",
+   "value": {
+    "codename": "peach",
+    "display_name": "碧姬",
+    "en_name": "Peach",
+    "modded": false,
+    "name": "Peach",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_peach_02.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/peach_2.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ],
+      "unflippable": true
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/peach_0.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 2,
+    "variant": {}
+   },
+   "pick": [
+    "Peach",
+    2
+   ]
+  },
+  {
+   "why": "an import: Peach 2",
+   "value": {
+    "codename": "peach",
+    "smashgg_name": "Peach",
+    "locale": {
+     "zh_Hant": "碧姬"
+    },
+    "display_name": "碧姬",
+    "export_name": "Peach",
+    "en_name": "Peach",
+    "modded": false,
+    "name": "Peach",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_peach_02.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/peach_2.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ],
+      "unflippable": true
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/peach_0.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 2,
+    "variant": {}
+   },
+   "pick": [
+    "Peach",
+    2
+   ]
+  },
+  {
+   "why": "the page's pick: Luigi 0",
+   "value": {
+    "codename": "luigi",
+    "display_name": "路易吉",
+    "en_name": "Luigi",
+    "modded": false,
+    "name": "ルイージ",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_luigi_00.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/luigi_0.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "eyesight": {
+       "x": 12,
+       "y": 22
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/luigi_0.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 0,
+    "variant": {}
+   },
+   "pick": [
+    "Luigi",
+    0
+   ]
+  },
+  {
+   "why": "an import: Luigi 0",
+   "value": {
+    "codename": "luigi",
+    "smashgg_name": "Luigi",
+    "locale": {
+     "zh": "路易吉",
+     "ja_JP": "ルイージ"
+    },
+    "display_name": "路易吉",
+    "export_name": "ルイージ",
+    "en_name": "Luigi",
+    "modded": false,
+    "name": "ルイージ",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_luigi_00.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/luigi_0.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "eyesight": {
+       "x": 12,
+       "y": 22
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/luigi_0.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 0,
+    "variant": {}
+   },
+   "pick": [
+    "Luigi",
+    0
+   ]
+  },
+  {
+   "why": "the page's pick: Luigi 1",
+   "value": {
+    "codename": "luigi",
+    "display_name": "路易吉",
+    "en_name": "Luigi",
+    "modded": false,
+    "name": "ルイージ",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_luigi_01.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/luigi_1.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "eyesight": {
+       "x": 12,
+       "y": 22
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/luigi_1.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 1,
+    "variant": {}
+   },
+   "pick": [
+    "Luigi",
+    1
+   ]
+  },
+  {
+   "why": "an import: Luigi 1",
+   "value": {
+    "codename": "luigi",
+    "smashgg_name": "Luigi",
+    "locale": {
+     "zh": "路易吉",
+     "ja_JP": "ルイージ"
+    },
+    "display_name": "路易吉",
+    "export_name": "ルイージ",
+    "en_name": "Luigi",
+    "modded": false,
+    "name": "ルイージ",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_luigi_01.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/luigi_1.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "eyesight": {
+       "x": 12,
+       "y": 22
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/luigi_1.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 1,
+    "variant": {}
+   },
+   "pick": [
+    "Luigi",
+    1
+   ]
+  },
+  {
+   "why": "the page's pick: Luigi 2",
+   "value": {
+    "codename": "luigi",
+    "display_name": "路易吉",
+    "en_name": "Luigi",
+    "modded": false,
+    "name": "ルイージ",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_luigi_02.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/luigi_2.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "eyesight": {
+       "x": 12,
+       "y": 22
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/luigi_2.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 2,
+    "variant": {}
+   },
+   "pick": [
+    "Luigi",
+    2
+   ]
+  },
+  {
+   "why": "an import: Luigi 2",
+   "value": {
+    "codename": "luigi",
+    "smashgg_name": "Luigi",
+    "locale": {
+     "zh": "路易吉",
+     "ja_JP": "ルイージ"
+    },
+    "display_name": "路易吉",
+    "export_name": "ルイージ",
+    "en_name": "Luigi",
+    "modded": false,
+    "name": "ルイージ",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_luigi_02.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/luigi_2.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "eyesight": {
+       "x": 12,
+       "y": 22
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/luigi_2.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 2,
+    "variant": {}
+   },
+   "pick": [
+    "Luigi",
+    2
+   ]
+  },
+  {
+   "why": "the page's pick: Ghost 0",
+   "value": {
+    "codename": "ghost",
+    "display_name": "𝓖host",
+    "en_name": "Ghost",
+    "modded": false,
+    "name": "Ghost",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_ghost_00.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/ghost_0.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     }
+    },
+    "skin": 0,
+    "variant": {}
+   },
+   "pick": [
+    "Ghost",
+    0
+   ]
+  },
+  {
+   "why": "an import: Ghost 0",
+   "value": {
+    "codename": "ghost",
+    "locale": {
+     "zh_TW": "𝓖host"
+    },
+    "display_name": "𝓖host",
+    "export_name": "Ghost",
+    "en_name": "Ghost",
+    "modded": false,
+    "name": "Ghost",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_ghost_00.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/ghost_0.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     }
+    },
+    "skin": 0,
+    "variant": {}
+   },
+   "pick": [
+    "Ghost",
+    0
+   ]
+  },
+  {
+   "why": "the page's pick: Zelda 0",
+   "value": {
+    "codename": "zelda",
+    "display_name": "ｚｅｌｄａ",
+    "en_name": "Zelda",
+    "modded": false,
+    "name": "Zelda",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_zelda_00.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/zelda_0.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     }
+    },
+    "skin": 0,
+    "variant": {}
+   },
+   "pick": [
+    "Zelda",
+    0
+   ]
+  },
+  {
+   "why": "an import: Zelda 0",
+   "value": {
+    "codename": "zelda",
+    "smashgg_name": "Zelda",
+    "locale": {
+     "zh_TW": "ｚｅｌｄａ"
+    },
+    "display_name": "ｚｅｌｄａ",
+    "export_name": "Zelda",
+    "en_name": "Zelda",
+    "modded": false,
+    "name": "Zelda",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_zelda_00.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/zelda_0.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     }
+    },
+    "skin": 0,
+    "variant": {}
+   },
+   "pick": [
+    "Zelda",
+    0
+   ]
+  },
+  {
+   "why": "a skin row from before S4h: Luigi 2",
+   "value": {
+    "assets": {
+     "full": {
+      "type": [
+       "full"
+      ],
+      "asset": "./user_data/games/tgame//full/luigi_2.png",
+      "eyesight": {
+       "x": 12,
+       "y": 22
+      },
+      "metadata": {
+       "0": {
+        "title_en": "Weight",
+        "title": "重さ",
+        "value_en": "",
+        "value": ""
+       }
+      },
+      "uncropped_edge": [
+       "u",
+       "d"
+      ],
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      }
+     },
+     "portrait": {
+      "type": "portrait",
+      "asset": "./user_data/games/tgame//portrait/luigi_2.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      }
+     },
+     "base_files/icon": {
+      "type": [
+       "icon"
+      ],
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_luigi_02.png"
+     }
+    }
+   },
+   "pick": [
+    "Luigi",
+    2
+   ]
+  },
+  {
+   "why": "a skin row from before S4h: Mario 2",
+   "value": {
+    "assets": {
+     "full": {
+      "type": [
+       "full"
+      ],
+      "asset": "./user_data/games/tgame//full/mario_2.png",
+      "eyesight": {
+       "x": 10,
+       "y": 20
+      },
+      "image_size": [
+       100,
+       120
+      ],
+      "rescaling_factor": 1,
+      "metadata": {
+       "0": {
+        "title_en": "Weight",
+        "title": "重さ",
+        "value_en": "98",
+        "value": "98kg"
+       }
+      },
+      "uncropped_edge": [
+       "u",
+       "d"
+      ],
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      }
+     },
+     "portrait": {
+      "type": "portrait",
+      "asset": "./user_data/games/tgame//portrait/mario_2.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      }
+     },
+     "base_files/icon": {
+      "type": [
+       "icon"
+      ],
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_mario_02.png"
+     }
+    },
+    "name": "Dr. Mario",
+    "en_name": "Dr. Mario"
+   },
+   "pick": [
+    "Mario",
+    2
+   ]
+  },
+  {
+   "why": "a skin row from before S4h: Bowser Jr. 2",
+   "value": {
+    "assets": {
+     "full": {
+      "type": [
+       "full"
+      ],
+      "asset": "./user_data/games/tgame//full/koopajr_2.png",
+      "metadata": {
+       "0": {
+        "title_en": "Weight",
+        "title": "重さ",
+        "value_en": "",
+        "value": ""
+       }
+      },
+      "uncropped_edge": [
+       "u",
+       "d"
+      ],
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      }
+     },
+     "portrait": {
+      "type": "portrait",
+      "asset": "./user_data/games/tgame//portrait/koopajr_2.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      }
+     },
+     "base_files/icon": {
+      "type": [
+       "icon"
+      ],
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_koopajr_02.png"
+     }
+    },
+    "name": "Roy",
+    "en_name": "Roy"
+   },
+   "pick": [
+    "Bowser Jr.",
+    2
+   ]
+  },
+  {
+   "why": "a skin row from before S4h: Roy 1",
+   "value": {
+    "assets": {
+     "full": {
+      "type": [
+       "full"
+      ],
+      "asset": "./user_data/games/tgame//full/roy_1.png",
+      "metadata": {
+       "0": {
+        "title_en": "Weight",
+        "title": "重さ",
+        "value_en": "",
+        "value": ""
+       }
+      },
+      "uncropped_edge": [
+       "u",
+       "d"
+      ],
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      }
+     },
+     "portrait": {
+      "type": "portrait",
+      "asset": "./user_data/games/tgame//portrait/roy_1.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      }
+     },
+     "base_files/icon": {
+      "type": [
+       "icon"
+      ],
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_roy_01.png"
+     }
+    }
+   },
+   "pick": [
+    "Roy",
+    1
+   ]
+  },
+  {
+   "why": "a character row from before S4h: Peach",
+   "value": {
+    "name": "Peach",
+    "en_name": "Peach",
+    "display_name": "碧姬",
+    "codename": "peach",
+    "modded": false
+   },
+   "pick": [
+    "Peach",
+    0
+   ]
+  },
+  {
+   "why": "an import's copy from before S4h: Luigi",
+   "value": {
+    "codename": "luigi",
+    "smashgg_name": "Luigi",
+    "locale": {
+     "zh": "路易吉",
+     "ja_JP": "ルイージ"
+    },
+    "display_name": "路易吉",
+    "export_name": "ルイージ",
+    "en_name": "Luigi"
+   },
+   "pick": [
+    "Luigi",
+    0
+   ]
+  },
+  {
+   "why": "Bowser Jr.'s Roy written in another locale and asset pack",
+   "value": {
+    "codename": "koopajr",
+    "display_name": "クッパJr.",
+    "en_name": "Roy",
+    "modded": false,
+    "name": "Roy",
+    "assets": {
+     "base_files/icon": {
+      "asset": "elsewhere.png"
+     }
+    },
+    "skin": 2,
+    "variant": {}
+   },
+   "pick": [
+    "Bowser Jr.",
+    2
+   ]
+  },
+  {
+   "why": "Bowser Jr.'s Roy, the list reversed",
+   "value": {
+    "codename": "koopajr",
+    "display_name": "Bowser Jr.",
+    "en_name": "Roy",
+    "modded": false,
+    "name": "Roy",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_koopajr_02.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/koopajr_2.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/koopajr_2.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 2,
+    "variant": {}
+   },
+   "pick": [
+    "Bowser Jr.",
+    2
+   ],
+   "reversed": true
+  },
+  {
+   "why": "Bowser Jr.'s Roy as a skin row, the list reversed",
+   "value": {
+    "assets": {
+     "full": {
+      "type": [
+       "full"
+      ],
+      "asset": "./user_data/games/tgame//full/koopajr_2.png",
+      "metadata": {
+       "0": {
+        "title_en": "Weight",
+        "title": "重さ",
+        "value_en": "",
+        "value": ""
+       }
+      },
+      "uncropped_edge": [
+       "u",
+       "d"
+      ],
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      }
+     },
+     "portrait": {
+      "type": "portrait",
+      "asset": "./user_data/games/tgame//portrait/koopajr_2.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      }
+     },
+     "base_files/icon": {
+      "type": [
+       "icon"
+      ],
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_koopajr_02.png"
+     }
+    },
+    "name": "Roy",
+    "en_name": "Roy"
+   },
+   "pick": [
+    "Bowser Jr.",
+    2
+   ],
+   "reversed": true
+  },
+  {
+   "why": "Roy, the list reversed",
+   "value": {
+    "codename": "roy",
+    "display_name": "Roy",
+    "en_name": "Roy",
+    "modded": false,
+    "name": "ロイ",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_roy_01.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/roy_1.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/roy_1.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 1,
+    "variant": {}
+   },
+   "pick": [
+    "Roy",
+    1
+   ],
+   "reversed": true
+  },
+  {
+   "why": "a character without skins",
+   "value": {
+    "codename": "noart",
+    "display_name": "NoArt",
+    "en_name": "NoArt",
+    "modded": false,
+    "name": "NoArt",
+    "assets": {},
+    "skin": -1,
+    "variant": {}
+   },
+   "pick": [
+    "NoArt",
+    -1
+   ]
+  },
+  {
+   "why": "a skin past the rows: found by its assets",
+   "value": {
+    "codename": "luigi",
+    "display_name": "路易吉",
+    "en_name": "Luigi",
+    "modded": false,
+    "name": "ルイージ",
+    "assets": {
+     "base_files/icon": {
+      "asset": "./user_data/games/tgame//base_files/icon/chara_2_luigi_00.png",
+      "type": [
+       "icon"
+      ]
+     },
+     "full": {
+      "asset": "./user_data/games/tgame//full/luigi_0.png",
+      "average_size": {
+       "x": 100.0,
+       "y": 120.0
+      },
+      "eyesight": {
+       "x": 12,
+       "y": 22
+      },
+      "metadata": {
+       "0": {
+        "title": "重さ",
+        "title_en": "Weight",
+        "value": "",
+        "value_en": ""
+       }
+      },
+      "type": [
+       "full"
+      ],
+      "uncropped_edge": [
+       "u",
+       "d"
+      ]
+     },
+     "portrait": {
+      "asset": "./user_data/games/tgame//portrait/luigi_0.png",
+      "average_size": {
+       "x": 200.0,
+       "y": 200.0
+      },
+      "type": "portrait"
+     }
+    },
+    "skin": 7,
+    "variant": {}
+   },
+   "pick": [
+    "Luigi",
+    0
+   ]
+  },
+  {
+   "why": "no character",
+   "value": {},
+   "pick": [
+    null,
+    -1
+   ]
+  },
+  {
+   "why": "not a value",
+   "value": null,
+   "pick": [
+    null,
+    -1
+   ]
+  },
+  {
+   "why": "a name, not a value",
+   "value": "Mario",
+   "pick": [
+    null,
+    -1
+   ]
+  },
+  {
+   "why": "a character this game does not have",
+   "value": {
+    "en_name": "Nobody",
+    "assets": {}
+   },
+   "pick": [
+    null,
+    -1
+   ]
+  }
+ ]
+}

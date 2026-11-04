@@ -8,9 +8,10 @@ directory, on a free port, with its own AUTONA_INSTANCE_TAG -- so the
 developer's user_data/, out/, logs/ and running Autona are never touched.
 
 On top of that working directory the E2E needs what the browser loads: the
-built Web UI (web/build) and the overlays it opens (layout/OVERLAY and the
-commentators overlay of the Commentary panel, ADR-005 S4b, with the shared
-layout/include and the two layout-level files they read). They are linked or
+built Web UI (web/build) and the overlays it opens (layout/OVERLAY, the
+commentators overlay of the Commentary panel, ADR-005 S4b, and the Top 8
+bracket of the Top 8 panel, S4i, with the shared layout/include and the two
+layout-level files they read). They are linked or
 copied in read-only; nothing in the headless shell writes to them.
 
 Protocol with the caller, one line each on stdout:
@@ -48,9 +49,11 @@ from tests.test_headless_smoke import (  # noqa: E402
 OVERLAY = "scoreboard_simple"
 # The Commentary panel's overlay (its design list, preview and the E2E).
 COMMENTARY_OVERLAY = "commentators"
+# The Top 8 panel's overlay (ADR-005 S4i; likewise).
+TOP8_OVERLAY = "bracket_top8"
 # Linked (directory junctions), on top of _runtime()'s own links.
 EXTRA_LINKS = ["web/build", "layout/include", f"layout/{OVERLAY}",
-               f"layout/{COMMENTARY_OVERLAY}"]
+               f"layout/{COMMENTARY_OVERLAY}", f"layout/{TOP8_OVERLAY}"]
 # Copied: files cannot be junctioned. The overlays read both.
 EXTRA_FILES = ["layout/main.css", "layout/settings.json"]
 

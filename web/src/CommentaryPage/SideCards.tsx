@@ -142,7 +142,12 @@ export function obsUrl(design: LayoutEntry): string {
     return `http://localhost:${BACKEND_PORT}/layout/${design.id}/${design.entry}`;
 }
 
-export function ObsUrlCard({design}: {design: LayoutEntry | null}) {
+// `note`: what goes live while Autona runs (the Commentary page's by
+// default; the Top 8 page's its own, S4i).
+export function ObsUrlCard({design, note}: {
+    design: LayoutEntry | null;
+    note?: string;
+}) {
     const url = design ? obsUrl(design) : "";
     const title = i18n.t("commentary_obs_title");
 
@@ -187,7 +192,7 @@ export function ObsUrlCard({design}: {design: LayoutEntry | null}) {
                         </Button>
                     </Stack>
                     <Typography variant="body2" color="text.secondary">
-                        {i18n.t("commentary_obs_note")}
+                        {note ?? i18n.t("commentary_obs_note")}
                     </Typography>
                 </Stack>
             </CardContent>

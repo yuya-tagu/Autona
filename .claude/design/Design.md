@@ -238,7 +238,7 @@ Autona は 4 つの UI レイヤーで構成される。各レイヤーは独立
 | 画像（PNG/JPG）出力 | × | × | × | ◎ |
 | 設定 UI | ◎ | × | × | × |
 | ホットキー受付 | ◎ | × | × | × |
-| Top 8 ブラケット編集 | ◎ | × | × | × |
+| Top 8 ブラケット編集 | × | ◎ | × | × |
 | Top 8 ブラケット表示（配信） | × | × | ◎ | × |
 
 ◎ = 主担当 / △ = 任意 / × = 担当しない
@@ -367,17 +367,22 @@ game
 `src/core/Top8Model.py`（FGC 標準ダブルエリミ: Winners 4 名 + Losers 4 名）、
 **`top8.*` への書き込みの正本は `src/core/Top8Service.py`**（headless core Step 5 第 5 弾）。
 Start.gg からの取り込み（大会の最後の phase のダブルエリミのグループ → `core/Bracket` → 選手の解決 →
-`ImportBracket`）も `Top8Service.RefreshFromProvider()` が行い、パネル・ホットキー・Web が同じ関数を呼ぶ
-（ADR-005 S3e-8。ヘッドレスでも動く）。パネルは操作を依頼し、state を描画するだけ（入力中の欄は飛ばす）。
+`ImportBracket`）も `Top8Service.RefreshFromProvider()` が行い、ページの「大会結果を読み込む」
+（`POST /api/v1/bracket:refresh`）・ホットキー・Web が同じ関数を呼ぶ（ADR-005 S3e-8。ヘッドレスでも動く）。
+パネルは ADR-005 S4i から React のページ（`/web/top8`、`web/src/Top8Page/`）で、`/api/v1/top8*` に
+操作を依頼し、state を描画するだけ（入力中の欄は飛ばす。スコアは「反映」まで画面の中だけで保つ）。
 ゲームが別のゲームに変わると、`GameAssetCatalog.SelectGame` が切り替えと同じ保存サイクルで
 `Top8Service.ForgetCharacters()` を呼び、`players.*.characters` を `{}` にする（キャラがある枠だけ。
 起動時の前回ゲームの復元・同じゲームの選び直しでは消さない。両シェル共通）。
 国とキャラは**識別子で受け取り core が値を組む**（ADR-005 S4h）: `SetPlayerCountry(slot, code)` /
-`SetPlayerCharacter(slot, en_name, skin)`。値は選手カードと同じ組み立て（`PlayerService.BuildCountryValue` /
+`SetPlayerCharacter(slot, en_name, skin)`。ページの選手の書き込みは `UpdatePlayer(slot, fields)` で、1 リクエストの
+欄を `StateManager.lock` の中でゲームのカタログの 1 つの snapshot と国の 1 回の参照で解決し、1 つでも断れば何も書かない
+（キャラに付いた `game` が読み込み中のゲームの codename と違うときも。S4i）。値は選手カードと同じ組み立て（`PlayerService.BuildCountryValue` /
 `BuildCharacterValue`）。Start.gg の取り込みのキャラは、従来どおりキャラの config のコピーに、パネルの値に
 しかないキー（`assets` ほか）を後ろに足したもの（`ImportedCharacterValue`。既存のキーと値は変えない）。
 state の値からパネルが示す選択への逆引きは `Top8Service.CharacterPick`（codename を優先。S4h より前の
-3 つの形も読む）。反映 `ApplyScores` は渡された試合だけを更新するマージで、スコアは 0〜99 の int 2 つの
+3 つの形も読む）。ページは同じ規則を `web/src/Top8Page/characterPick.ts` に持ち、両者を 1 つの表
+（`characterPick.cases.json`）で検査する（S4i）。反映 `ApplyScores` は渡された試合だけを更新するマージで、スコアは 0〜99 の int 2 つの
 list だけを受け付ける（それ以外は何も書かずに None）。選択中のデザインは `settings.json` の
 `top8.selected_design`（`LayoutCatalog.SELECTION_SETTINGS`。`GET|PUT /api/v1/layouts/selected/top8`）。
 
@@ -797,7 +802,7 @@ board 1 面のみ）だけで、**残りのパネルは初回表示時にファ�
 | 1.5 | `WebPanels`（共有ホスト。ナビの文言は `Stream Settings`） | React の `StreamPage`（`/web/stream`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4e）。Qt 版（`AutonaStreamSettingsWidget`）は S4e で削除済み | 配信先・配信タイトル・配信団体アイコン / サムネイルの登録・配信サムネイル生成。**処理の正本は `src/core/StreamService.py`**（タイトルの自動生成・チャンネル CRUD・素材の取り込み・サムネ生成のジョブ。ADR-005 S4d）で、ページは `/api/v1/stream*` を呼んで state を描画するだけ（ファイル選択・ダイアログ・プレビュー・クリップボードはブラウザの部品）。`stream.url` / `title` の書き込みは `AutonaActions.SetStreamUrl` / `SetStreamTitle`（同値なら書かない） | `stream.*`（core 経由） | `stream.*` | — |
 | 2 | `Thumbnail Settings` | `AutonaThumbnailSettingsWidget` | サムネイルテンプレ選択・背景指定・プレビュー・PNG/JPG 保存・クリップボードコピー | `thumbnail_config.*`（SettingsManager） | `score.*`, `tournamentInfo.*`, `thumbnail_config.*` | ✓（条件付き） |
 | 3 | `Result Settings` | `AutonaResultSettingsWidget` | リザルトレイアウト選択・選手入力・プレビュー・PNG/JPG 保存・クリップボードコピー。`result_players` の書き込みは `AutonaActions.PublishResultPlayers` | `result_config.*`, `result_players` | `tournamentInfo.*`, `result_players` | ✓ |
-| 4 | `Top8` | `AutonaTop8Widget` | Top 8 ダブルエリミの選手・試合スコア編集、Start.gg 読み込み、OBS 用 URL 案内・プレビュー。**書き込みの正本は `src/core/Top8Service.py`**（Start.gg の取り込みも。パネルは state を描画するだけ。ADR-005 S3e-8）。国・キャラは識別子（code / en_name + スキンの行）で依頼し、選択中のデザインは `LayoutCatalog.SelectedLayout` / `SelectLayout`（ADR-005 S4h） | `top8.*` | `top8.*`, `tournamentInfo.*` | ✓ |
+| 4 | `WebPanels`（共有ホスト。ナビの文言は `Top 8 Display Settings`、ナビのキーは `top8`） | React の `Top8Page`（`/web/top8`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4i）。Qt 版（`AutonaTop8Widget`）は S4i で削除済み | Top 8 ダブルエリミの選手（名前・所属タグ・国・キャラとカラー）と表示ラベルの編集、試合スコア（「反映」まで画面の中だけで保つ・全リセットは確認つき）、Start.gg 読み込み、機能別カラー、デザイン選択・OBS 用 URL 案内・プレビュー。**書き込みの正本は `src/core/Top8Service.py`**（Start.gg の取り込みも。ADR-005 S3e-8）。国・キャラは識別子（code / en_name + スキンの行）で依頼し（ADR-005 S4h）、ページは `/api/v1`（`top8*`・`bracket:refresh`・`colors/top8`・`layouts/selected/top8`）を呼んで state を描画するだけ | `top8.*`（core 経由） | `top8.*`、`game`、`colors.top8` / `tournamentInfo.*`、`GET /api/v1/countries`、`GET /api/v1/characters`（`game` の変化とページの再表示で読み直す） | ✓ |
 | 5 | `Scoreboard` | `AutonaScoreboardManager` → `AutonaScoreboardWidget` / `AutonaCrewBattleWidget` | board1=1v1、board2=team、board3=crew のスコア入力・選手編集・セット読み込み | `score.{N}.*` | `score.{N}.*`, `game.*` | ✓ |
 | 6 | `WebPanels`（共有ホスト。ナビの文言は `Commentary`） | React の `CommentaryPage`（`/web/commentary`。共有ビュー `AutonaWebPanelHost` に表示。ADR-005 S4b）。Qt 版と退路の設定は S4c で削除済み | 実況・解説者 12 スロットの編集（役割・コメント・表示トグル）、デザイン選択・OBS 用 URL 案内・プレビュー・機能別カラー。`commentary` の書き込みは `core/CommentaryService`（React 版は `/api/v1/commentary/*` 経由で、state を描画するだけ。ADR-005 S3e-2 / S4b / S4c） | `commentary.{1..12}.*` | `commentary.{1..12}.*`, `tournamentInfo.*`, `colors.commentary.*` | ✓ |
 | 7 | `Statistics` | `AutonaStatsWidget` | 内部 `QTabWidget` で複数ビューを集約（下記 §4.1.0） | （read-only） | `score.{N}.recent_sets`, `last_sets`, `upset_factor` ほか | ✓ |
@@ -876,7 +881,7 @@ board 1 面のみ）だけで、**残りのパネルは初回表示時にファ�
 | `/web` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
 | `/scoreboard` | `ScoreboardPage` | スコア・選手・コメンテーターの操作（board1） | Socket.IO + REST |
 | `/team` | `ScoreboardPage` | チーム用スコアボード操作（board2） | Socket.IO + REST |
-| `/web/:panel` | `PanelShell`（`web/src/PanelShell/`） | React 化したデスクトップのパネル（ADR-005 S4）。サーバーが返すのは `WebAccess.WEB_PANELS` の名前だけ（他は 404）。`?desktop=1`（デスクトップの共有ビュー `AutonaWebPanelHost`）でブラウザ向けの部品を隠し、`?lng=` を i18next に渡す。確認用の `shell-check`（S4a）と実況・解説の `commentary`（S4b）と配信設定の `stream`（S4e）と大会情報の `event`（S4g）。サイドバーの React の項目は複数あっても共有ビューは 1 つで、各項目は自分のスタックページを持ち続け（ナビ index == スタック index）、最初に開いた項目のページにビューが建つ（`WebPanelPages`。S4e） | Socket.IO + REST |
+| `/web/:panel` | `PanelShell`（`web/src/PanelShell/`） | React 化したデスクトップのパネル（ADR-005 S4）。サーバーが返すのは `WebAccess.WEB_PANELS` の名前だけ（他は 404）。`?desktop=1`（デスクトップの共有ビュー `AutonaWebPanelHost`）でブラウザ向けの部品を隠し、`?lng=` を i18next に渡す。確認用の `shell-check`（S4a）と実況・解説の `commentary`（S4b）と配信設定の `stream`（S4e）と大会情報の `event`（S4g）と Top 8 表示設定の `top8`（S4i）。サイドバーの React の項目は複数あっても共有ビューは 1 つで、各項目は自分のスタックページを持ち続け（ナビ index == スタック index）、最初に開いた項目のページにビューが建つ（`WebPanelPages`。S4e） | Socket.IO + REST |
 
 #### 4.2.1 ScoreboardPage コンポーネント階層
 
@@ -962,7 +967,7 @@ layout/{用途}_{variant}/
 
 ##### アプリのデザイン一覧のメタデータ（`settings.json` の `autona` ブロック）
 
-BOARD / 実況 / TOP 8 タブのプルダウン・Designer の「開く」・`GET /api/v1/layouts` は、すべて
+BOARD タブと実況 / TOP 8 のページのプルダウン・Designer の「開く」・`GET /api/v1/layouts` は、すべて
 `src/core/LayoutCatalog.py`（Qt 非依存）の 1 つのカタログを読む。旧来型テンプレのメタデータは
 `settings.json` の `autona` ブロック（ページ側の `globals.js` は読まない）、Designer 製
 （`layout/custom/{slug}/`）は `project.json`。利用者向けの詳しい説明は `layout/README.md`

@@ -138,8 +138,8 @@ class AutonaHotkeys(QObject):
 
         `refresh_phase_group` joined them in ADR-005 S3e-8: the Top 8 import
         is core's (Top8Service.RefreshFromProvider), so the hotkey imports
-        whether or not the Top 8 panel was ever built (it used to be the
-        window's, which built the panel to ask it).
+        with no panel at all (it used to be the window's, which built the Qt
+        Top 8 panel to ask it; a React page since ADR-005 S4i).
 
         Not moved: `load_set` opens the board's set-selection window -- a
         panel command, so it stays with the board that owns the window.

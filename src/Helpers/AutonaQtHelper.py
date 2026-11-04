@@ -235,7 +235,8 @@ class NoIconProxyModel(QSortFilterProxyModel):
     """Proxy model that strips icons (DecorationRole) from the source model.
 
     One definition for every combo that lists a shared asset model as text
-    only (the player card, the RESULT and TOP 8 panels). It lives here rather
+    only (the player card and the RESULT panel; the TOP 8 panel's too until
+    it became a React page, ADR-005 S4i). It lives here rather
     than in one of those widget modules so that using it never means
     importing another panel.
     """

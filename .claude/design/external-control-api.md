@@ -216,6 +216,7 @@
 | `GET /api/v1/sets/{setId}` | セット詳細 | `get_match` | #36 |
 | `GET /api/v1/commentary` | 実況者状態 | `get_comms` | #37 |
 | `GET /api/v1/countries/{code}/states` | 国の州・地域一覧（未知の国は `404 NOT_FOUND`。2026-10-21 追加） | `get_states` | #45 |
+| `GET /api/v1/countries` | 国の一覧（カスタム国旗を含む。§5.8。2026-11-04 追加） | `get_countries`（`core/CountryCatalog.CountriesPayload`） | — |
 | `GET /api/v1/layouts` | レイアウト一覧（§5.2。2026-10-22 追加） | なし（`core/LayoutCatalog.Layouts`） | — |
 | `GET /api/v1/layouts/selected/{kind}` | パネルが表示・OBS に渡しているデザイン（§5.3。2026-10-31 追加） | `get_selected_layout`（`core/LayoutCatalog.SelectedLayout`） | — |
 | `GET /api/v1/commentary/options` | 実況の役割候補・アイコン・スロット・表示上限（§5.4。2026-10-31 追加） | `get_commentary_options`（`core/CommentaryModel` の定数） | — |
@@ -275,7 +276,7 @@ Board / Commentary / Top 8 タブと Designer の「開く」一覧が使う**�
 パネルが選んでいるデザイン（プレビューと OBS URL に使うもの）を、§5.2 と同じ形のエントリ 1 件で返す。
 
 - `kind` は選択を持つ種類だけ: 現在は `commentary`（`settings.json` の `commentary.selected_design`）と
-  `top8`（`top8.selected_design`。2026-11-04 追加・ADR-005 S4h。Qt の Top 8 パネルも同じ関数で読み書きする）。
+  `top8`（`top8.selected_design`。2026-11-04 追加・ADR-005 S4h。Top 8 のページ（S4i。それまでは Qt のパネル）も同じ関数で読み書きする）。
   正本は `core/LayoutCatalog.SELECTION_SETTINGS`。それ以外は `400 INVALID_ARGUMENT`
 - 保存されている id がカタログに無い（削除された等）ときは、Qt パネルと同じ順で代わりを返す: 既定（`commentators` /
   `bracket_top8`）→ 一覧の先頭。
@@ -335,6 +336,23 @@ Board / Commentary / Top 8 タブと Designer の「開く」一覧が使う**�
 - 封筒の `revision` は state の `revision`（§2.4）
 
 ---
+
+### 5.8 `GET /api/v1/countries`（2026-11-04 追加・ADR-005 S4i）
+国のコンボの行（Top 8 のページが国を選ぶ一覧）。プログラムのロケールの国の全件、その後ろにカスタム国旗
+（`user_data/additional_flag`）。`CountryCatalog` の行のデータに `label`（コンボの表示文字列。国は
+`表示名 / 英語名 (ISO2)`）と `custom`（カスタム国旗か）を足したもの。
+
+```json
+{ "ok": true, "data": [
+  { "code": "JP", "name": "Japan", "display_name": "日本", "en_name": "Japan", "latitude": 36.0, "longitude": 138.0,
+    "asset": "./assets/country_flag/jp.png", "emoji": "🇯🇵", "label": "日本 / Japan (JP)", "custom": false },
+  { "name": "My Flag", "display_name": "My Flag", "en_name": "My Flag", "code": "My Flag",
+    "asset": "./user_data/additional_flag/My Flag.png", "label": "My Flag", "custom": true }
+] }
+```
+- `code` が §6.22 の `country` に渡す値（カスタム国旗は名前）。同じ `code` が複数あれば先の行が使われる
+- 国のデータの読み込み前は `409 NOT_READY`（§5 `countries/{code}/states` と同じ）。状態ではないので `revision` は付かない。
+  Top 8 のページはこの 409 では止まらず、国の欄だけを無効にして注記と再読み込みボタンを出す
 
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
@@ -568,6 +586,37 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - エラー: `INVALID_ARGUMENT`（未知の `kind`・data URL でない・読めない画像）、`PAYLOAD_TOO_LARGE`、`INTERNAL`（保存できない。
   ほかのアプリがファイルを開いている など）
 
+### 6.22 Top 8 の選手 `PATCH /api/v1/top8/players/{slot}`（2026-11-04 追加・ADR-005 S4i）
+- `slot`: 1〜8（範囲外は `INVALID_ARGUMENT`）
+- body（部分更新・1 つ以上）: `{ "name": "…", "sponsor": "…", "country": "JP", "character": { "en_name": "Mario", "skin": 2, "game": "ssbu" } }`。
+  `name` / `sponsor` は文字列。`country` は §5.8 の `code`（カスタム国旗は名前）か `null`（`""` も空にする）。
+  `character` は `{ "en_name": 空でない文字列, "skin": 0 以上の整数（省略時 0。§5 `characters` の `skins` の行）,
+  "game": そのキャラを選んだ一覧のゲームの codename（任意） }` か `null`。
+  未知キー・型違い・`character` のほかのキーは `INVALID_ARGUMENT`
+- 委譲: `update_top8_player` → `Top8Service.UpdatePlayer`（`StateManager.lock` の中で、ゲームのカタログの snapshot と国の参照を
+  1 回ずつ取って全キーを解決し、1 つの保存サイクルで書く）。
+  **値は core がカタログから組む**（選手カードと同じ形。ADR-005 S4h）。スキンの無いキャラは `skin` 0 で送る（値の `skin` は -1）
+- **全キーを先に検証**し、1 つでも断ったら**ほかの欄も書かない**（打ち間違いで配信中の値を消さない）:
+  - カタログに無い国コード・読み込み中のゲームに無いキャラ・そのキャラに無いスキン → `INVALID_ARGUMENT`
+  - 国のデータの読み込み前に国を送る → `409 NOT_READY`
+  - `game` が読み込み中のゲームの codename と違う（切替前のゲームの一覧で選んだ） → `409 CONFLICT`。
+    Top 8 のページはキャラを送るとき必ず `game` を付け、この 409 でキャラの一覧を読み直す。省略時は照合しない
+- held 対象外のため即時公開され、`revision` は正確。値が変わらなければ公開されない
+- 操作ログはキー名のみ（§2.7。名前は個人情報）
+
+### 6.23 Top 8 の表示ラベル `PATCH /api/v1/top8`（2026-11-04 追加・ADR-005 S4i）
+- body: `{ "phaseLabel": "TOP 8 FINALS" }`（必須・文字列）。前後の空白を除き、空なら既定の `TOP 8`（`Top8Service.SetPhaseLabel`）
+- `data` は `{ "phaseLabel": ... }`（公開した値）
+- エラー: `INVALID_ARGUMENT`（`phaseLabel` が無い / 文字列でない・未知キー）
+
+### 6.24 Top 8 のスコアの反映 `POST /api/v1/top8/scores`・全リセット `DELETE /api/v1/top8/scores`（2026-11-04 追加・ADR-005 S4i）
+- `POST` body: `{ "wsf1": [2, 1], "lr1a": [0, 2] }` — 試合 id（`wsf1` `wsf2` `lr1a` `lr1b` `wf` `lqf1` `lqf2` `lsf` `lf` `gf` `gf_reset`）の
+  一部と、それぞれ 0〜99 の整数 2 つ（bool は不可）。**マージ**: 送った試合だけを更新し（タイでなければ確定）、ほかの試合は今の
+  スコア・結果を保つ。勝者の伝播（`Recompute`）も行う（`Top8Service.ApplyScores`。デスクトップの「反映」と同じ）。
+  未知の試合・不正なスコアが 1 つでもあれば `INVALID_ARGUMENT` で何も書かない。空 body も `INVALID_ARGUMENT`
+- `DELETE`: 全試合のスコアと確定を戻す（`Top8Service.ResetMatches`。「全リセット」）
+- どちらも `data` は公開した `top8.matches`
+
 ---
 
 ## 7. 危険操作エンドポイント（書き込み・操作ログ対象 / ガード必須）
@@ -713,6 +762,7 @@ HTTP/1.1 409 Conflict
 > §5.2 `layouts`（2026-10-22）はエンベロープと `?kind=` を `tests/test_api_v1.py`、カタログの発見規則を
 > `tests/test_layout_catalog.py` が pin する。
 > ルート一覧そのものは `tests/test_webserver_routes.py` の `EXPECTED_API_V1_ROUTES` が台帳。
+> §5.8 `countries` と §6.22〜6.24 の Top 8（2026-11-04・ADR-005 S4i）は `tests/test_api_v1_top8.py` が pin する。
 
 - **自動テストは作らない**（PdM 決定）。動作確認は**アプリ上で手動**で行う
   （`python main.py` 起動 → curl/HTTP クライアントで `/api/v1/...` を叩く → UI / `out/` / OBS で反映確認）。

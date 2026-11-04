@@ -9,11 +9,12 @@ AutonaCountryHelper before the move by record_golden.py next to it):
   selectable), under three locale pairs and with custom flags installed --
   and that a reload refills that one model instead of swapping in a new
   one (agent-pitfalls #13 / #15);
-- what that reload does to the model's two consumers, the TOP 8 panel and
-  the player cards: nothing is written and the combos keep showing the
-  state; that a card's country wiring is done once (countriesUpdated no
-  longer stacks connections); and the fallback for a card built before
-  the first load;
+- what that reload does to the model's consumer, the player cards (the
+  TOP 8 panel was the other until ADR-005 S4i made it a React page, which
+  reads GET /api/v1/countries): nothing is written and the combos keep
+  showing the state; that a card's country wiring is done once
+  (countriesUpdated no longer stacks connections); and the fallback for a
+  card built before the first load;
 - the region combo LoadStates fills, for every country -- and that filling
   it no longer writes the flag `asset` into the catalog's table;
 - the Web reader get_states: the recorded payload byte for byte, the same
@@ -34,12 +35,9 @@ from qtpy.QtCore import SIGNAL, QObject, Qt
 from qtpy.QtWidgets import QApplication, QComboBox
 
 from src.AutonaBasePlayerWidget import AutonaBasePlayerWidget
-from src.AutonaTop8Widget import AutonaTop8Widget
 from src.Helpers.AutonaCountryHelper import AutonaCountryHelper
 from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from src.core import StateSchema as schema
-from src.core import Top8Model as top8
-from src.core import Top8Service
 from src.core.CountryCatalog import CountryCatalog
 from src.core.DictHelper import deep_clone
 from src.core.StateManager import StateManager
@@ -182,73 +180,9 @@ def _code(combo):
     return data.get("code") if isinstance(data, dict) else None
 
 
-def _top8Panel(app):
-    """The TOP 8 panel itself (its live preview loads only when it is
-    shown, which the harness never does)."""
-    panel = AutonaTop8Widget()
-    app.settle()
-    return panel
-
-
-def _dropTop8Panel(app, panel):
-    from qtpy.QtCore import QCoreApplication, QEvent
-    if AutonaTop8Widget.instance is panel:
-        AutonaTop8Widget.instance = None
-    panel.setParent(None)
-    panel.deleteLater()
-    QCoreApplication.sendPostedEvents(panel, QEvent.Type.DeferredDelete)
-    app.settle()
-
-
-def test_a_reload_writes_nothing_from_top8(countries, autonaApp):
-    """A reload clears the model under every TOP 8 country combo and
-    refills it. Each index change on the way used to reach the panel's
-    publish of all eight slots, with blank countries; since ADR-005 S3e-8
-    each would write its own slot's country. The state must come out as it
-    went in, and the combos show it."""
-    countries("en")
-    saved = deep_clone(StateManager.Get(Top8Service.PLAYERS_PATH))
-    panel = _top8Panel(autonaApp)
-    try:
-        chosen = {"1": "JP", "2": "US"}
-        for slot, code in chosen.items():
-            combo = panel.playerInputs[slot]["country"]
-            combo.setCurrentIndex(_row(combo.model(), code))  # writes
-        autonaApp.settle()
-        before = deep_clone(StateManager.Get(Top8Service.PLAYERS_PATH))
-        assert before["1"]["country"]["code"] == "JP"
-        assert before["2"]["country"]["code"] == "US"
-
-        with patch.object(Top8Service, "SetPlayerCountry",
-                          wraps=Top8Service.SetPlayerCountry) as write:
-            countries("ja")
-            autonaApp.settle()
-
-        assert write.call_count == 0
-        assert StateManager.Get(Top8Service.PLAYERS_PATH) == before
-        stored = {slot: ((before.get(slot) or {}).get("country") or {})
-                  .get("code") for slot in top8.PLAYER_SLOTS}
-        shown = {slot: _code(w["country"])
-                 for slot, w in panel.playerInputs.items()}
-        assert shown == stored
-        # Released: the next real choice is written again.
-        assert panel._holdCountryWrites is False
-        combo = panel.playerInputs["3"]["country"]
-        combo.setCurrentIndex(_row(combo.model(), "FR"))
-        assert StateManager.Get(
-            Top8Service.PLAYERS_PATH)["3"]["country"]["code"] == "FR"
-    finally:
-        _dropTop8Panel(autonaApp, panel)
-        if saved is None:
-            StateManager.Unset(Top8Service.PLAYERS_PATH)
-        else:
-            StateManager.Set(Top8Service.PLAYERS_PATH, saved)
-        autonaApp.settle()
-
-
 def test_a_reload_leaves_a_player_card_and_its_state_alone(
         countries, autonaApp):
-    """The same reload under a live player card: nothing is published
+    """A reload under a live player card: nothing is published
     (each index change used to reach the location publish, blanking the
     country and the region), and the card still shows what the state holds."""
     countries("en")
@@ -335,35 +269,6 @@ def test_a_second_reload_notice_does_not_leave_the_card_silenced(autonaApp):
     autonaApp.settle()
     assert autonaApp.get(
         f"{player.path}.{schema.PLAYER_COUNTRY_KEY}")["code"] == "US"
-
-
-def test_the_top8_panel_makes_the_stand_in_s_connections():
-    """_Top8Countries borrows the panel's handlers but makes its own
-    connections; this pins that the real panel's __init__ makes the same
-    two (read from the source: the panel owns a QWebEngineView)."""
-    tree = ast.parse((PROJECT_ROOT / "src" / "AutonaTop8Widget.py")
-                     .read_text(encoding="utf-8"))
-    panel = next(node for node in tree.body
-                 if isinstance(node, ast.ClassDef)
-                 and node.name == "AutonaTop8Widget")
-    init = next(node for node in panel.body
-                if isinstance(node, ast.FunctionDef)
-                and node.name == "__init__")
-
-    connected = {}
-    for node in ast.walk(init):
-        if (isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "connect"
-                and isinstance(node.func.value, ast.Attribute)
-                and ast.unparse(node.func.value.value)
-                == "AutonaCountryHelper.signals"):
-            connected[node.func.value.attr] = ast.unparse(node.args[0])
-
-    assert connected == {
-        "countriesAboutToReload": "self._onCountriesAboutToReload",
-        "countriesUpdated": "self._rebindCountryModels",
-    }
 
 
 @contextmanager

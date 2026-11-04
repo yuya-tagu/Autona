@@ -10,6 +10,7 @@ the layer that was previously inside the widget, with **no QApplication**.
 
 Isolation follows tests/test_actions.py.
 """
+import json
 import os
 import tempfile
 from pathlib import Path
@@ -414,6 +415,52 @@ def test_the_shapes_a_slot_held_before_s4h_read_back(catalogs):
     # Nothing, or a character this game does not have.
     for value in ({}, None, "Mario", {"en_name": "Nobody", "assets": {}}):
         assert pick(value, games) == (None, -1)
+
+
+# One table for core and the Top 8 page (web/src/Top8Page/characterPick.ts,
+# whose jest test reads the same file; ADR-005 S4i): the page shows the
+# character and skin core would, for every shape a slot holds.
+PICK_CASES = json.loads(
+    (Path(__file__).resolve().parent.parent / "web" / "src" / "Top8Page"
+     / "characterPick.cases.json").read_text(encoding="utf-8"))
+
+
+def test_the_pick_tables_characters_are_this_games(catalogs):
+    """What GET /api/v1/characters answers for the test game: the page's
+    side of the table reads the same list core's does -- in the same
+    order, which is the order the page lists the characters in."""
+    games, _ = catalogs
+    payload = games.CharactersPayload()
+    assert PICK_CASES["characters"] == payload
+    assert list(PICK_CASES["characters"]) == list(payload)
+
+
+@pytest.mark.parametrize("case", PICK_CASES["cases"],
+                         ids=lambda case: case["why"])
+def test_the_pick_table(catalogs, case):
+    import dataclasses
+    games, _ = catalogs
+    snap = games.Current()
+    if case.get("reversed"):
+        snap = dataclasses.replace(
+            snap, characterRows=tuple(reversed(snap.characterRows)))
+    assert list(Top8Service.CharacterPick(case["value"], games, snap)) \
+        == case["pick"]
+
+
+def test_the_pick_tables_values_are_cores(catalogs):
+    """The page's pick and the import's, as core builds them now: the
+    table is regenerated when the builders change, never left behind."""
+    games, _ = catalogs
+    for case in PICK_CASES["cases"]:
+        why = case["why"]
+        for prefix, build in (("the page's pick: ",
+                               Top8Service.CharacterValue),
+                              ("an import: ",
+                               Top8Service.ImportedCharacterValue)):
+            if why.startswith(prefix):
+                name, row = why[len(prefix):].rsplit(" ", 1)
+                assert case["value"] == build(name, int(row), games), why
 
 
 def _import(main, games, countries, snap=None):

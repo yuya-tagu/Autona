@@ -1,7 +1,8 @@
 """Pure data model for the Top 8 double elimination bracket.
 
-Qt-free on purpose: this module is imported by AutonaTop8Widget (GUI) and,
-unchanged, by unit tests. It owns the bracket topology (FGC standard Top 8:
+Qt-free on purpose: this module is imported by core/Top8Service.py (the
+writes; the Qt Top 8 panel, AutonaTop8Widget, until ADR-005 S4i made it a
+React page) and, unchanged, by unit tests. It owns the bracket topology (FGC standard Top 8:
 4 winners-side + 4 losers-side starters) and the winner/loser propagation
 logic.
 
@@ -65,7 +66,8 @@ DEFAULT_PHASE_LABEL = "TOP 8"
 
 PLAYER_SLOTS = [str(i) for i in range(1, 9)]
 
-# Human-readable bracket position per player slot, used by the edit panel.
+# Human-readable bracket position per player slot (the Top 8 page shows the
+# same, web/src/Top8Page).
 SLOT_POSITIONS = {
     "1": "WSF1", "2": "WSF1",
     "3": "WSF2", "4": "WSF2",

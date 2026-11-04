@@ -173,6 +173,18 @@ class CountryCatalog:
             return None
         return deep_clone(row)
 
+    def CountriesPayload(self) -> list:
+        """The country combo's rows for the Web (GET /api/v1/countries,
+        ADR-005 S4i): the standard countries in display order, then the
+        custom flags -- each its row data (a copy; its `code` is what
+        SetPlayerCountry takes) with the combo's text as `label` and
+        whether it is a custom flag as `custom`. [] before a load."""
+        snap = self._current
+        rows = [(text, data, False) for text, data in snap.countryRows]
+        rows += [(text, data, True) for text, data in snap.customFlagRows]
+        return [{**deep_clone(data), "label": text, "custom": custom}
+                for text, data, custom in rows]
+
     def CountryCodeFromEnName(self, en_name) -> Optional[str]:
         """The code of the country whose English name is `en_name` (how a
         Start.gg location's country is mapped), or None."""

@@ -1698,6 +1698,9 @@ _BODIES = {
     # back would not undo.
     "api_v1.tournament_info_update": {"address": "Walk"},
     "api_v1.colors_tournament_update": {"theme": "#123456"},
+    "api_v1.top8_player_update": {"name": "Walk", "country": "JP"},
+    "api_v1.top8_update": {"phaseLabel": "Walk"},
+    "api_v1.top8_scores_apply": {"wsf1": [2, 0]},
 }
 
 # Every route that answers anything but 200 here, by (endpoint, board),

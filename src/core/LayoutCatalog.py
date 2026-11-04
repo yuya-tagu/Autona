@@ -34,7 +34,7 @@ show the same name (a copied ``scoreboard_simple - コピー`` next to
 web server URL. ``format`` / ``game`` are None when a built-in layout does not
 declare them.
 
-This is the single source the Board / Commentary / Top 8 tabs, the Designer's
+This is the single source the Board tab, the Commentary / Top 8 pages, the Designer's
 "open" list (AutonaDesignerService.list_projects) and ``GET /api/v1/layouts``
 read; none of them keeps its own folder scan or display-name table any more.
 
@@ -99,9 +99,8 @@ _LEGACY_PREFIXES = (
 # The design a panel shows and hands to OBS, per kind that has one here:
 # the settings.json key it is kept under and the layout picked when none is
 # kept (or the kept one is gone). The Commentary page's (ADR-005 S4b) and the
-# Top 8's (S4h: the Qt panel reads and writes it through SelectedLayout /
-# SelectLayout, under the key it always kept). The Board panel keeps its own
-# until it moves to the Web UI.
+# Top 8's (S4h, under the key its Qt panel always kept; the Top 8 page's
+# since S4i). The Board panel keeps its own until it moves to the Web UI.
 SELECTION_SETTINGS = {
     KIND_COMMENTARY: ("commentary.selected_design", "commentators"),
     KIND_TOP8: ("top8.selected_design", "bracket_top8"),

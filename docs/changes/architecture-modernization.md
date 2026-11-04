@@ -4953,3 +4953,246 @@ Top 8 表示設定パネルに残っていた「国・キャラの値を Qt の�
   - 国にカスタム国旗を選ぶ → オーバーレイに国旗が出る。国を空にすると消える
   - デザインを切り替えて再起動する → 選んだデザインが残る。Web の `GET /api/v1/layouts/selected/top8` が同じデザインを返す
   - スコアの「反映」「全リセット（確認あり）」が今までどおり動く
+
+#### S4i Top 8 の React 化と Qt 版の削除（2026-11-04）
+
+サイドバー Display の「Top 8 表示設定」を React の `/web/top8`（`web/src/Top8Page/`）に切り替えた。表示先は共有ビュー（`AutonaWebPanelHost`）で、Qt 版（`src/AutonaTop8Widget.py`、904 行）とその専用の翻訳は消した。処理は S4h までの core（`Top8Service` / `CountryCatalog` / `GameAssetCatalog` / `LayoutCatalog` / `ColorService`）のままで、ページは `/api/v1` を呼び、`top8.*` を描くだけ。
+
+外部契約は追加だけで、v1 のルートが 5 本増えた。次のものは変えていない:
+
+- Socket.IO の payload
+- `top8.*` の形（S4h の値の組み立てのまま）
+- `settings.json` の `top8.selected_design`
+- legacy ルート（`/update-bracket` ほか）
+- オーバーレイ
+
+`STATE_VERSION` は 22 のまま（ナビの並び・位置・項目のキー `top8` は不変）。
+
+- **やったこと**
+  - v1（`src/AutonaApiV1.py` / `src/AutonaWebOperations.py` / `src/core/WebAccess.py`）
+    - 読み取り 1 本（READ）: `GET /countries`
+      - 国のコンボの行。プログラムのロケールの国を表示順に、その後ろにカスタム国旗
+      - 行のデータに `label`（コンボの表示文字列）と `custom` を足したもの（`core/CountryCatalog.CountriesPayload()` を足した）
+      - 国のデータの読み込み前は 409 `NOT_READY`
+    - 書き込み 4 本（WRITE）
+      - `PATCH /top8/players/<slot>`
+        - `name` / `sponsor` / `country`（code か null）/ `character`（`{en_name, skin, game}` か null。`game` は任意）の一部を、1 保存サイクルで書く
+        - 操作ログはキー名だけ
+      - `PATCH /top8`（`phaseLabel`。空は既定の `TOP 8`）
+      - `POST /top8/scores`（一部の試合のマージ。各 0〜99 の int 2 つ）
+      - `DELETE /top8/scores`（全リセット）
+    - Web 操作: `get_countries` / `update_top8_player` / `set_top8_phase_label` / `apply_top8_scores` / `reset_top8_scores`
+      - `update_top8_player` は core の `Top8Service.UpdatePlayer` に委ねる。`StateManager.lock` の中で、ゲームのカタログの snapshot と国の参照を 1 回ずつ取り、その同じ snapshot で国・キャラ・スキンの識別子を照合して値を組み、1 つの SaveBlock で書く
+      - 1 つでもカタログに無ければ何も書かない。ルートは 400 を返す。`game` が読み込み中のゲームの codename と違えば 409 `CONFLICT`（何も書かない。判断 3）
+    - 既存のルートをそのまま使うもの:
+      - 取り込み `POST /bracket:refresh`
+      - カラー `PATCH /colors/top8`
+      - デザイン `GET|PUT /layouts/selected/top8` と、一覧 `GET /layouts?kind=top8`
+      - キャラ `GET /characters`
+    - 台帳と仕様
+      - `tests/test_webserver_routes.py`（v1 は書き込み 41・計 60）と `tests/test_web_operations.py`（台帳の歩行の body）
+      - `WEB_PANELS` に `top8` を足した
+      - 仕様は `.claude/design/external-control-api.md` の §5 の表・§5.8・§6.22〜§6.24・§10
+  - ページ（`web/src/Top8Page/`）
+    - `index.tsx`: ページの読み込みと、書き込みの送り方を持つ
+      - 読み込み
+        - 国の一覧・デザインの一覧・選択中のデザインは、開いたときと「再読み込み」で読む
+          - 国の一覧が 409 `NOT_READY`（国のデータの読み込み前）のときは、ページを止めない。国の欄だけを無効にし、選手カードの上に注記と「再読み込み」を出す
+          - ほかの一覧が読めないときは、ページ全体を「読み込めませんでした」+「再読み込み」にする
+        - キャラの一覧は、state の `game.codename` が変わったとき・ページが再表示されたとき（`visibilitychange`）・「再読み込み」で読み直す
+          - 最初の読み込みに失敗したら、ページ全体を「読み込めませんでした」にする
+          - ゲームを変えた後の読み直しに失敗したら（そのゲームの一覧が無いまま）、snackbar で知らせ、選手カードの上に注記と「キャラ一覧を再読み込み」を出す。キャラ・カラーの欄は押せないまま、ほかの欄は使える
+          - そのゲームの一覧を持っている間の読み直し（再表示）の失敗は、一覧を残して知らせない
+      - 書き込み
+        - `useSerialRequests` で直列に送る
+        - トークンが無いための拒否は 1 回だけ知らせる
+        - 選手の書き込みが 409 `CONFLICT`（キャラを選んだ一覧のゲームが、もう読み込み中のゲームではない）なら、キャラの一覧を読み直して知らせる
+      - 「大会結果を読み込む」の文言
+        - 202 →「読み込みを始めました」
+        - 409 `NOT_READY` →「先に大会を読み込んでください」
+        - ほかの 409 →「実行中」
+        - 応答を待つ間はボタンを押せない
+      - 配置: 左に選手・スコア・機能別カラー・OBS URL、右にデザインの選択とプレビュー
+    - `Cards.tsx`
+      - 選手カード ×8
+        - 名前・所属タグは `useStateField`（300ms の debounce）
+        - 国は国旗つきの Autocomplete で、code を送る
+        - キャラはアイコンつきの Autocomplete、カラーはアイコン + 番号の選択で、`{en_name, skin, game}` を送る（`game` は一覧を読んだゲームの codename）
+        - 国旗・アイコンの URL は、パスの区切りごとに `encodeURIComponent` する（カスタム国旗の名前に `#` / `?` があっても引ける）
+      - スコアの表（W / L / GF の 3 区分・11 試合）
+        - staged はページの中だけ。「反映」で、入力した試合だけを送る
+        - `top8.matches` が変わったら staged を捨てる
+        - GF リセットは成立しているときだけ入力できる
+        - 全リセットは確認つき
+        - 行は memo し、選手名を文字列で渡す。1 つのスコアの入力・1 人の名前の変更で、11 行（22 欄）を描き直さない
+      - 表示ラベル。このページで空にした欄は、state が既定の「TOP 8」になっても空のまま描き、placeholder に「TOP 8」を出す（Qt 版の `_phaseLabelCleared` と同じ）。ほかの書き手が別の値（既定を含む）を書いたら、それを出す
+    - `characterPick.ts`: state のキャラの値から、選択（en_name, スキンの行）への逆引き
+      - `Top8Service.CharacterPick` と同じ規則の TS 版
+      - 照合の表 `characterPick.cases.json` を pytest と jest の両方が読む
+    - Commentary の部品を流用した
+      - `DesignPane`: 見出しと「デザインが無い」の文言を props にした
+      - `ObsUrlCard`: 注記を props にした
+      - `FeatureColorCard`: そのまま
+    - `web/src/PanelShell/registry.tsx` に `top8` を足した。i18n（ja / en）に `top8_*` を 35 キー足した
+  - デスクトップ（`src/Autona.py`）
+    - `_CreateTop8Panel` は `self._WebPanel("top8")` を返すだけにした
+    - 項目のアイコン・ラベル・位置・キーは変えていない
+  - Qt 版の削除
+    - `src/AutonaTop8Widget.py` を消した
+    - 翻訳: Top 8 専用の 2 件（`Top 8` / `Apply`）を `src/i18n/Autona_{ja,en}.ts` から消し、`scripts/compile_translations.ps1` で再コンパイルした（各 527 件）
+    - 残したもの: `AutonaLayoutPreview`・`NoIconProxyModel`・共有の国モデル・`AutonaHotkeys`。ほかのパネルが使うので、コメントだけ直した
+    - core（`Top8Service` / `Top8Model` / `LayoutCatalog`）の docstring とコメントを、「パネル」から「ページ」に直した
+  - e2e: `web/e2e/headless_server.py` の `EXTRA_LINKS` に `layout/bracket_top8` を足した（ヘッドレスのオーバーレイを開くため）
+  - docs
+    - `.claude/design/Design.md`: 実装方式の表・Top 8 の節・パネル表・`/web/:panel`
+    - `docs/product/features.md` §9
+    - `.claude/rules/python-widgets.md` / `.claude/rules/state-and-webserver.md`
+    - `README.md`: ファイル一覧から削除
+    - `.claude/design/external-control-api.md`
+    - `.claude/manual-test-checklist.md` に「Top 8」節を新設した
+- **判断と理由**
+  1. **「反映」は入力した試合だけを送る**（設計の「staged はクライアント側」の具体化）
+     - Qt 版は全 11 試合を送っていたので、タイでない試合はすべて「確定」になっていた。取り込んだ進行中の試合も含まれる
+     - 部分更新のマージ（S4h 論点 2）があるので、触っていない試合は今の結果を保てる
+     - 同じ値を打ち直した試合も送る。取り込んだ未確定の試合を、手で確定できるようにするため
+  2. **staged を捨てる契機は `top8.matches` の変化だけ**（JSON の比較）。「反映」と全リセットが成功したときにも捨てる
+     - このページ自身の「反映」の echo も `top8.matches` を変えるので、staged はすべて捨てる。応答を待つ間に打ったスコアも一緒に捨てる（ほかの変化と同じく state を優先する）
+     - 値が変わらなかった「反映」/ 全リセット（送った値がすでに state の値だった）は echo が来ないので、成功の応答で捨てる
+     - 選手の名前の変化では捨てない。表の選手名は state から描くので、打ちかけのスコアは残してよい
+     - 「反映」が断られたときは、staged を残す
+  3. **キャラの選択は、一覧が state のゲームのものになるまで無効にする**（S4h の残課題 L7 の扱い）
+     - キャラの一覧は、読んだときの codename と組で持つ
+     - state の `game.codename` と一致しない間は、キャラ・カラーの欄を押せない
+     - サーバー側では、読み込み中のゲームに無い en_name / スキンを 400 で断る（何も書かない）
+     - ページはキャラを送るとき、その一覧を読んだゲームの codename を `game` で付ける。サーバーは読み込み中のゲームの codename と違えば 409 `CONFLICT` で断り（何も書かない）、ページは一覧を読み直して知らせる（レビュー L2）
+     - これで、一覧の GET の応答と state のゲームの変更が行き違っても、両方のゲームにある en_name が新しいゲームの行で組まれることは無くなった（S4h の残課題 L7 の窓を閉じた）。行き違った一覧は古い codename の組で持つので、そこで選ぶと 409 になる
+     - 残るのは、codename が同じまま一覧が変わる場合だけ（同じゲームで mods を切り替えた・アセットを再スキャンした。残課題 L8）。そのときもカタログに無い en_name / スキンは 400 で断られる
+  4. **スキンの範囲外は v1 で断る**（400）
+     - core（`CharacterValue`）は、範囲外を最初のスキンにする（S4h 判断 4。取り込みのため）
+     - Web からの打ち間違いで、別のカラーが配信に出ないようにした。スキンの無いキャラは `skin` 0 で送る
+  5. **ページのキャラの逆引きは TS に持ち、core と同じ表で検査する**
+     - サーバーに逆引きの API を足すと、カードごと・state の更新ごとに往復が要る
+     - 規則は小さく（約 150 行）、食い違いは表（`characterPick.cases.json`）を pytest と jest の両方が読んで検出する
+     - 表の値は core の組み立て（`CharacterValue` / `ImportedCharacterValue`）と一致することも pytest が確かめる。組み立てが変わったら表を作り直す
+  6. **国の一覧は v1 の `GET /countries` にした**（設計どおり）
+     - Web の静的な `data_countries.json` には、カスタム国旗が無い
+     - `code` は `SetPlayerCountry` に渡す値（カスタム国旗は名前）
+     - 一覧の読み直しは開いたときと「再読み込み」だけ。国のデータはロケールを変えて再起動するまで変わらず、カスタム国旗の追加も再読み込みで拾える
+  7. **デザイン・カラー・OBS URL は Commentary の部品をそのまま使う**。見出しと注記の文言だけを props にした。プレビュー画像のコピー / 保存は廃止した（論点 3）
+  8. **節の名前と試合の短いラベル**（`WSF1` / `RESET` ほか）は、Qt 版と同じ英語のまま。オーバーレイと同じ表記で、配信者が対応を取りやすいため
+- **旧実装との挙動差（記録）**
+  - 名前・所属タグは打っている間も送る（300ms の debounce。論点 4）。Qt 版は欄を離れたときだけ送っていた
+  - 「反映」は入力した試合だけを送る（判断 1）
+    - Qt 版では、取り込んだ進行中の試合も「反映」で確定になっていた
+    - 今は、触っていない試合は取り込んだ結果のまま
+  - ほかの端末の更新や取り込みで試合が変わると、打ちかけのスコアは捨てる（判断 2）
+  - 表示ラベルを空にすると、欄は空のまま placeholder に「TOP 8」が出る（state は `TOP 8`）
+  - プレビュー画像のコピー / 保存は無い（論点 3）。OBS URL のコピーは残る
+  - 次のものは 400 で、ほかの欄も書かない: カタログに無い国 / キャラ / スキン
+    - ページの文言は「選べませんでした」
+    - 国のデータの読み込み前に国を送ると 409（「国のデータを読み込み中」）
+    - ページを開いたときに国のデータが読み込み前なら、国の欄だけが押せず、注記と「再読み込み」が出る
+  - キャラを選んだ一覧のゲームが、もう読み込み中のゲームでなければ 409 で何も書かず、一覧を読み直す（判断 3）
+  - カラーの選択は、スキンのアイコン + 番号を出す（Qt 版は文字だけ）
+  - 「大会結果を読み込む」の結果を知らせる（Qt 版は何も出さなかった）
+  - キャラの一覧は、ゲームを変えると読み直す。読み直すまでキャラ・カラーの欄は押せない（判断 3）。読み直しに失敗したら知らせて、「キャラ一覧を再読み込み」を出す
+- **pin（テスト）**
+  - `tests/test_api_v1_top8.py`（新規 19 関数・55 ケース）。確かめるもの:
+    - 国の一覧（コンボの行・カスタム国旗が最後・409）
+    - 選手の書き込み
+      - 1 保存サイクル・その欄だけ
+      - null で空にする
+      - en_name + スキン
+      - カタログに無い識別子は何も書かない
+      - 型違いの拒否（`character.game` が文字列でない を含む）
+      - 国のデータの前は 409
+      - 別のゲームの一覧で選んだキャラは 409 `CONFLICT` で何も書かない（読み込み中のゲームの codename・`game` の省略は通る）
+      - 1 回の書き込みでゲームのカタログの snapshot と国の参照を 1 回ずつしか取らず、値がその snapshot で組まれる
+    - 表示ラベル（前後の空白・空は既定・拒否）
+    - スコア（マージと伝播・不正なら全体を拒否・上限は `SCORE_MAX`・全リセット）
+    - LAN の別端末のトークン（国の一覧は不要）と、操作ログがキーだけであること
+  - `tests/test_top8_service.py`（+3 関数・表のケース分）
+    - `characterPick.cases.json` の全ケースを `CharacterPick` で照合する
+    - 表のキャラの一覧が `CharactersPayload()` と一致する（キーの順まで。ページはこの順で並べる）
+    - 表の値が core の組み立てと一致する
+  - `tests/test_top8_refresh.py`
+    - Qt のパネルのボタンの録画を、デスクトップの `POST /api/v1/bracket:refresh` の全シナリオの golden 照合に置き換えた
+    - golden（`tests/fixtures/top8_refresh/golden.json`）は変えていない
+    - 新しい録画は core の取り込みを通す
+    - パネルの追従のテストは消した（ページの RTL が担う）
+  - `tests/test_web_panel_host.py`
+    - Top 8 の項目が React のページであること
+    - `src/` に Qt 版が無いこと（`*.py` / `*.ui` / `*.ts`）
+    - 共有ビューの切り替えのリグの Qt の遅延パネルの例を、Top 8 から統計に替えた
+  - Qt 版を前提にしたテストを消した
+    - `tests/test_signal_lifetime.py`（破棄したパネルが静かになる）
+    - `tests/test_country_helper_model.py`（国の再読み込みでパネルが書かない・接続の AST）
+  - Web RTL `web/src/Top8Page/Top8Page.test.js`（30）。確かめるもの:
+    - カードと読み取り。開いただけでは何も送らない
+    - デザイン / OBS / プレビュー。読めないときの再読み込み
+    - 国のデータの読み込み前: 国の欄だけ無効・注記・ほかの欄は使える・「再読み込み」で戻る
+    - アセットの URL の区切りごとのエンコード
+    - 選手の欄
+      - 名前 / 所属タグ
+      - 国（code / null）
+      - キャラの表示と、表の全ケースの表示
+      - キャラ / カラー / なしの識別子（`game` つき）。スキンの無いキャラ
+      - 別のゲームの一覧で選んだキャラの 409 `CONFLICT`: 知らせて一覧を読み直す
+      - 前のゲームの一覧では選べない。新しいゲームの一覧の読み直しの失敗: 知らせて「キャラ一覧を再読み込み」で戻る。再表示で読み直す
+      - 拒否とトークン
+    - 表示ラベル。空にした欄は既定の echo の後も空のまま・ほかの書き手の値（既定を含む）は出す
+    - スコア
+      - 表の行
+      - staged と「反映」（入力した試合だけ）
+      - 試合の変化で捨て、選手の変化では捨てない
+      - 断られたら残す
+      - GF リセット
+      - 全リセットの確認
+    - 取り込みの 202 / 409 2 種
+    - カラー
+    - このファイルは jsdom では重い（MUI の欄が 60 以上あり、イベント 1 回に数十 ms かかる）。ファイルの既定のタイムアウトを 20 秒にし、ループで引く要素（スロットのカード・スコアの欄）は aria-label の属性で直接引く。役割（region / textbox / combobox / group）は別のテストが role で引いて pin する
+  - `web/src/Top8Page/characterPick.test.js`（56。表の全ケース + 表の網羅 + `sameValue`）
+  - Playwright `web/e2e/top8.spec.ts`（5）
+    - 8 スロット・デザイン・OBS URL
+    - 名前 / 所属タグ / 国 / 表示ラベル → state とオーバーレイ（`layout/bracket_top8`）
+    - staged → 「反映」→ 確定と勝者の伝播 → 確認して全リセット
+    - 大会なしの取り込みの文言
+    - `?desktop=1&lng=ja`
+- **残課題**
+  - 取り込みの国の値の形（S4h 判断 2）は揃えていない
+    - 取り込みは `CountryCatalog.BasicCountryInfo`（挿入順）、ページの値は選手カードと同じ組み立て
+    - オーバーレイが読むフィールドは同じなので、表示は変わらない
+    - 揃えると取り込みの golden（値のキー順）が変わる。外部契約の変更になるので、別の段で扱う
+  - 実ゲーム（スマブラ SP 等）でのキャラ・カラーの選択とアイコンは、テストのゲームでしか確かめていない（オーナー実機確認）
+  - 同じゲームのまま mods を切り替える（codename が変わらない）と、ページはキャラの一覧を読み直さない（レビュー L8）
+    - mods の切替は `game.codename` を変えないので、一覧の読み直しの契機が無い。ページの再表示（`visibilitychange`）か「再読み込み」で拾う
+    - その間に、mods を外したキャラを選ぶと 400 で断られる（何も書かない）。mods を入れて増えたキャラは一覧に出ない
+    - 直すなら `game` に mods の状態を足すか、`GET /characters` に世代を足す。外部契約の追加になるので、ここではやらない
+  - `GET /api/v1/characters` は表示名（`name`）をキーにした dict なので、表示名が同じキャラが 2 人いると後のものだけになる（レビュー L4）
+    - 既存の契約（legacy の `get_characters` と同じ形）で、S4i では変えていない。ページの一覧からは先のキャラが消える
+    - pin（`test_the_pick_tables_characters_are_this_games`）はキーの順まで照合するようにしたが、潰れること自体は pin していない。テストのゲームに重複は無い
+  - API 情報ウィンドウ（`AutonaApiInfoWindow`）には、新しいルートを足していない（S4e / S4g と同じ）
+  - jest の全量を pytest の全量と同時に回すと、重い RTL（Commentary・Top 8）が 5 秒の既定を超えて落ちることがある（Commentary の IME のテストで確認。単独・順に回せば通る）。`/verify` は順に回すので影響しない
+  - `docs/` の歴史的な記録（headless-core-redesign・`docs/tasks`・known-smells の S-18）に残る `AutonaTop8Widget` は、当時の記録として残した
+- **レビュー指摘の対応（2026-11-04）**: High は無し。直したもの:
+  - **M1（表示ラベルを空にすると、echo の「TOP 8」が欄に出る）**: このページで空にした欄は、state が既定の「TOP 8」になっても空のまま描き、placeholder に「TOP 8」を出す（Qt 版の `_phaseLabelCleared` と同じ。`Cards.tsx` の `useCaption`）。ほかの書き手が別の値を書いたら、それを出す。空の送信が失敗したら state をそのまま出す
+  - **M2（ゲームを変えた後のキャラの一覧の読み直しの失敗が、何も知らせない）**: snackbar で知らせ、選手カードの上に注記と「キャラ一覧を再読み込み」を出す。キャラ・カラーの欄は押せないまま、ほかの欄は使える。そのゲームの一覧を持っている間の再表示の失敗は、今までどおり知らせない
+  - **L1（`update_top8_player` がゲームのカタログを何度も引く）**: core に `Top8Service.UpdatePlayer` を足し、`StateManager.lock` の中でゲームのカタログの snapshot と国の参照を 1 回ずつ取って、その同じ snapshot で照合と値の組み立てをする。1 つでも断れば何も書かない。Web 操作は委譲するだけにした
+  - **L2（別のゲームの一覧で選んだキャラが、新しいゲームの行で書かれる）**: ページはキャラに一覧のゲームの codename（`game`）を付けて送り、サーバーは読み込み中のゲームと違えば 409 `CONFLICT`（何も書かない）。ページは一覧を読み直して知らせる。判断 3 と external-control-api §6.22 を更新した
+  - **L3（`useStagedScores` のコメントと、通らない部分保持）**: 自分の「反映」の echo でも `top8.matches` が変われば staged はすべて捨てる（判断 2）ので、送った試合だけを捨てる処理は通らなかった。消して `clear` だけにし、コメントを実際の挙動に合わせた
+  - **L4（表の pin がキーの順を見ていない）**: `list(PICK_CASES["characters"]) == list(payload)` まで照合する。表示名の重複で潰れる件は残課題に記録した
+  - **L5（国のデータの読み込み前に開くとページ全体が止まる）**: `GET /countries` の 409 はページを止めず、国の欄だけを無効にして注記と「再読み込み」を出す
+  - **L6（`top8_player_update` のコメントが実装と違う）**: 空にする値・スキンの無いキャラ・`game`・400 / 409 の区別を実装どおりに書いた
+  - **L7（アセットの URL を `encodeURI` で組んでいた）**: パスの区切りごとに `encodeURIComponent` する
+  - **L9（古い文言）**: `Design.md` のパネル一覧の「Top 8 タブ」と、`Top8Service.SetPlayerText` の docstring の「パネル」をページに直した
+  - 記録だけ: L8（同じ codename のまま mods を切り替えても一覧を読み直さない）・L4 の表示名の重複（上の残課題）
+- **オーナー実機確認**（`python main.py`）
+  - 手動チェックリストの「Top 8」の全項目
+  - 特に次の 5 点
+    - 実ゲームでキャラ・カラーを選ぶと、オーバーレイにそのアイコンが出る
+    - 取り込んだ大会の進行中の試合が、「反映」で勝手に確定にならない
+    - ゲームを切り替えた直後のキャラの欄（新しいゲームのキャラが選べるようになる）
+    - 表示ラベルを空にして欄を離れると、欄は空のまま placeholder に「TOP 8」が出る（オーバーレイは「TOP 8」）
+    - Top 8・実況・解説・大会情報を行き来しても、ビューが再読み込みされない
+- **検証**（レビュー対応後）: pytest 全量 3136 passed / 2 skipped／jest 全量 399 passed（pytest の後に単独で）／`npm run build` OK（警告は既存の `Header.jsx` だけ）／`npm run test:e2e` 26 passed
+  - pytest の 1 回目の全量では `tests/test_set_load_service.py` の crest の 2 件（`test_a_team_name_with_a_crest_publishes_its_path` / `test_a_team_name_with_no_crest_file_publishes_no_logo`）が落ちた。同じ順で前のファイルから回した実行と、2 回目の全量では通る。タイミング依存（前のテストの残したスレッドが cwd か state に触る類）で、Top 8 の変更とは無関係と判断した。原因は追っていない

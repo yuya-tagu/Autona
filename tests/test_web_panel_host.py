@@ -731,6 +731,26 @@ def test_the_event_item_opens_the_react_page():
     assert "event" in WebAccess.WEB_PANELS
 
 
+def test_the_top8_item_opens_the_react_page():
+    import ast
+    calls = _calls(_windowMethod("_CreateTop8Panel"))
+
+    # The React page is the only Top 8 panel (ADR-005 S4i).
+    assert calls == [("self._WebPanel", ["'top8'"])]
+
+    # Still the lazy factory in Display, keyed by the React panel's name,
+    # with its icon and label.
+    build = _windowMethod("_BuildUi")
+    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
+               and node.elts
+               and ast.unparse(node.elts[0]) == "self._CreateTop8Panel"]
+    assert len(entries) == 1
+    assert ast.unparse(entries[0].elts[1]) == "'bracket.svg'"
+    assert "Top 8 Display Settings" in ast.unparse(entries[0].elts[2])
+    assert ast.unparse(entries[0].elts[-1]) == "'top8'"
+    assert "top8" in WebAccess.WEB_PANELS
+
+
 def test_the_restored_page_is_built_before_the_window_is_shown():
     """STARTUP phase=core-shown is logged right after self.show(), with the
     restored page built before it (_EnsurePanelAt). For the Event page --
@@ -775,8 +795,9 @@ def test_the_stream_item_opens_the_react_page():
 def test_the_sidebar_items_are_the_ones_they_were():
     """The nav items' number and order (and so the saved sidebar index,
     QSettings sidebarIndex_v<STATE_VERSION>) did not change for the React
-    panels (Stream S4e, Event S4g -- its key is the React page's name now):
-    no STATE_VERSION bump (ADR-005 S4 方針 5, S4 Event 論点 1)."""
+    panels (Stream S4e, Event S4g -- its key is the React page's name now
+    -- and Top 8 S4i): no STATE_VERSION bump (ADR-005 S4 方針 5, S4 Event
+    論点 1)."""
     import ast
     build = _windowMethod("_BuildUi")
     keys = [ast.unparse(node.elts[-1]) for node in ast.walk(build)
@@ -903,6 +924,24 @@ def test_the_qt_stream_panel_is_gone():
     assert left == []
 
 
+def test_the_qt_top8_panel_is_gone():
+    # ADR-005 S4i: the React page is the only Top 8 panel. The widget may
+    # not come back in src/: no import, no construction (comments recording
+    # where code came from still name it).
+    from tests.conftest import PROJECT_ROOT
+
+    src = PROJECT_ROOT / "src"
+    assert not (src / "AutonaTop8Widget.py").exists()
+    left = [str(path.relative_to(PROJECT_ROOT))
+            for pattern in ("*.py", "*.ui", "*.ts")
+            for path in src.rglob(pattern)
+            if any(word in path.read_text(encoding="utf-8")
+                   for word in ("import AutonaTop8Widget",
+                                "AutonaTop8Widget(",
+                                "AutonaTop8Widget.instance"))]
+    assert left == []
+
+
 # ── several React items, one host page (ADR-005 S4e) ────────────────────
 
 def test_a_react_item_shows_its_own_page_until_the_host_is_built():
@@ -940,21 +979,22 @@ def test_the_host_page_shows_its_own_panel_before_any_choice():
 
 def test_only_react_panels_are_mapped():
     with pytest.raises(ValueError):
-        WebPanelPages().Add(1, "top8")
+        WebPanelPages().Add(1, "stats")
 
 
 class _WindowRig:
     """The Window's real page-switching methods (read out of src/Autona.py,
     which cannot be imported: agent-pitfalls #1) on a stack built the way
-    _BuildUi builds it, with a few sidebar items: the three React ones and
-    two Qt ones (the eager scoreboard, the lazy Top 8), in the real order
-    (Qt items between them). Off screen, so the host builds no view; what
+    _BuildUi builds it, with a few sidebar items: four React ones and two
+    Qt ones (the eager scoreboard, the lazy Statistics -- the lazy Top 8
+    until it became a React page, ADR-005 S4i), in the real order (Qt
+    items between them). Off screen, so the host builds no view; what
     it was asked to show is its _panel."""
 
     METHODS = ("_OnNavSelected", "_OnStackPageChanged", "_EnsurePanelAt",
                "_WebPanel", "_AdoptWebPanelHost", "_PreparePanel",
                "_CreateEventPanel", "_CreateStreamPanel",
-               "_CreateCommentaryPanel")
+               "_CreateTop8Panel", "_CreateCommentaryPanel")
 
     def __init__(self):
         import ast
@@ -994,12 +1034,13 @@ class _WindowRig:
         w._webPanelPages = WebPanelPages()
         w._buildingPanel = False
         # As _BuildUi: event, stream, scoreboard (eager), ..., top8,
-        # commentary.
+        # commentary, ..., stats.
         for page, key in ((w._CreateEventPanel, "event"),
                           (w._CreateStreamPanel, "stream"),
                           (QLabel("scoreboard"), None),
-                          (qtPanel("top8"), "top8"),
-                          (w._CreateCommentaryPanel, "commentary")):
+                          (w._CreateTop8Panel, "top8"),
+                          (w._CreateCommentaryPanel, "commentary"),
+                          (qtPanel("stats"), "stats")):
             if callable(page):
                 index = w.stack.addWidget(QWidget())
                 w._lazyPanels[index] = (page, key)
@@ -1023,7 +1064,7 @@ class _WindowRig:
                               AutonaWebPanelHost)]
 
 
-EVENT, STREAM, SCOREBOARD, TOP8, COMMENTARY = 0, 1, 2, 3, 4
+EVENT, STREAM, SCOREBOARD, TOP8, COMMENTARY, STATS = 0, 1, 2, 3, 4, 5
 
 
 def test_every_react_item_shows_the_one_host(qapp):
@@ -1039,6 +1080,7 @@ def test_every_react_item_shows_the_one_host(qapp):
     # host).
     assert COMMENTARY not in w._lazyPanels
     assert EVENT not in w._lazyPanels
+    assert TOP8 not in w._lazyPanels
 
     # Commentary: the same page, told the other panel (the stack did not
     # move, so this is not currentChanged's).
@@ -1059,9 +1101,13 @@ def test_every_react_item_shows_the_one_host(qapp):
     assert rig.choose(EVENT) == STREAM
     assert host._panel == "event"
     assert w.stack.widget(EVENT) is rig.placeholders[EVENT]
+    # The Top 8 page too (S4i).
+    assert rig.choose(TOP8) == STREAM
+    assert host._panel == "top8"
+    assert w.stack.widget(TOP8) is rig.placeholders[TOP8]
     # The Qt items were built as before, the eager one never.
-    assert rig.choose(TOP8) == TOP8
-    assert rig.built == ["top8"]
+    assert rig.choose(STATS) == STATS
+    assert rig.built == ["stats"]
     assert w.dockWidgets == []
 
 

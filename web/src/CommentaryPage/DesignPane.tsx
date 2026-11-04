@@ -9,6 +9,7 @@ import {LayoutEntry} from "./SideCards";
 // shows, so the preview is what goes on air. Scaled down from 1920x1080;
 // it does not take clicks. (The Qt preview's copy / save-as-image buttons
 // are not here: dropped for the Web version, owner's call 2026-10-31.)
+// The Top 8 page's too (S4i), with its own heading and empty text.
 
 const OVERLAY_WIDTH = 1920;
 const OVERLAY_HEIGHT = 1080;
@@ -44,23 +45,27 @@ function usePreviewScale(
     return scale;
 }
 
-export default function DesignPane({designs, design, onSelect}: {
+export default function DesignPane({designs, design, onSelect, label, empty}: {
     designs: LayoutEntry[];
     design: LayoutEntry | null;
     onSelect: (id: string) => void;
+    // The heading (and the select's name), and what shows without a
+    // design: the Commentary page's by default.
+    label?: string;
+    empty?: string;
 }) {
     const frame = React.useRef<HTMLDivElement>(null);
     const scale = usePreviewScale(frame, design !== null);
-    const label = i18n.t("commentary_design");
+    const heading = label ?? i18n.t("commentary_design");
 
     return (
         <Stack spacing={1}>
-            <Typography variant="subtitle1" component="h2">{label}</Typography>
+            <Typography variant="subtitle1" component="h2">{heading}</Typography>
             <TextField
                 select
                 size="small"
                 // The select's own name (no floating label: the heading).
-                slotProps={{htmlInput: {"aria-label": label}}}
+                slotProps={{htmlInput: {"aria-label": heading}}}
                 value={design?.id ?? ""}
                 disabled={designs.length === 0}
                 onChange={(event) => onSelect(event.target.value)}
@@ -108,7 +113,7 @@ export default function DesignPane({designs, design, onSelect}: {
                 </Box>
             ) : (
                 <Typography color="text.secondary">
-                    {i18n.t("commentary_no_design")}
+                    {empty ?? i18n.t("commentary_no_design")}
                 </Typography>
             )}
         </Stack>
