@@ -5321,7 +5321,7 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - start.gg の障害（要求のタイムアウト・`{}`）が「取得に失敗しました」になる。旧実装は、フェーズの要求の失敗は「フェーズ情報を取得中...」のまま、全 group の要求の失敗は「0 試合 (n 件取得失敗)」だった（判断 5）
   - 同じ id の group が複数の phase に出ても 1 回だけ取る（旧実装も id ごとに 1 つの結果だった。group の数え方・前置きの有無も重複を除いて決める）
 - **残課題**
-  - S4k: React ページ `/web/stats`・v1 の `POST /api/v1/analysis:refresh` / `GET /api/v1/analysis`・Qt 版（`AutonaStatsWidget` / `AutonaAnalysisWidget`）と専用の翻訳の削除。`.ts` の `AutonaAnalysisWidget.py` の行番号はずれたまま（文言は同じなので訳は効く。S4k で消える）
+  - S4k: React ページ `/web/stats`・v1 の `POST /api/v1/analysis:refresh` / `GET /api/v1/analysis`・Qt 版（`AutonaStatsWidget` / `AutonaAnalysisWidget`）と専用の翻訳の削除。`.ts` の `AutonaAnalysisWidget.py` の行番号はずれたまま（文言は同じなので訳は効く。S4k で消える）→ S4k で済み
   - 実際の start.gg の大会での取得は、テストの偽 provider と `QueryRequests` を差し替えた実 provider でしか確かめていない（オーナー実機確認）
 - **レビュー指摘の対応（2026-11-04）**: High は無し。直したもの:
   - **M1（実 provider の失敗が `no_phases` になる）**: `StartGGDataProvider.GetTournamentPhases` は素の except で `[]` を返すので、実機では `fetch_failed` に届かなかった。`GetTournamentPhases` / `GetAnalysisPhaseGroup` に `strict` を足し（失敗・event / phaseGroup の無い答えは例外。`TournamentMediaService` の lookup と同じ形）、サービスは strict で頼む。既存の呼び出し元（strict なし）の答えは変えていない。実 provider の `QueryRequests` を `{}` / 例外 / null の event にしてテストした
@@ -5347,3 +5347,149 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - `tests/test_analysis_rows.py` + `tests/test_analysis_service.py` を 3 回続けて: 毎回 20 passed, 1 skipped（録画用）
   - Web は触っていないので `npm run build` / jest / e2e は回していない
   - レビュー対応の後: `python -m pytest --ignore=tests/live -q` 3168 passed, 2 skipped（7 分 18 秒）。`tests/test_analysis_rows.py` + `tests/test_analysis_service.py` を 3 回続けて: 毎回 33 passed。M2・L1・L2・L3 の新しいテストは、直す前の実装（`Forget` を差し替えの前に呼ぶ・並列数を常に 2・`BracketRows` を try の外・終わった取得の `_Guarded` が publish し直さない）に一時的に差し替えると落ちることを確かめた
+
+#### S4k 統計情報の React 化と Qt 版の削除（2026-11-04）
+
+サイドバー Data の「統計情報」を React の `/web/stats`（`web/src/StatsPage/`）に切り替えた。表示先は共有ビュー（`AutonaWebPanelHost`）で、Qt 版（`src/AutonaStatsWidget.py` 344 行・そのサブタブの `src/AutonaAnalysisWidget.py`）とその専用の翻訳は消した。処理は core（統計は S3e-5 の `StatsService`、試合一覧は S4j の `AnalysisService`）のままで、ページは `/api/v1` を呼び、`score.1.*` と `analysis` を描くだけ。
+
+外部契約は追加だけで、v1 のルートが 2 本増えた。次のものは変えていない:
+
+- Socket.IO の payload
+- `score.{n}.{last_sets,history_sets,recent_sets,upset_factor}` と `analysis` の形
+- legacy ルート（`/scoreboard<n>-stats-*` ほか）
+- オーバーレイ（`layout/upset_factor` ほか）
+
+`STATE_VERSION` は 22 のまま（ナビの並び・位置・項目のキー `stats` は不変）。`StateMigrations.CURRENT_VERSION` も不変。
+
+- **やったこと**
+  - v1（`src/AutonaApiV1.py` / `src/AutonaWebOperations.py` / `src/core/WebAccess.py`）
+    - 読み取り 1 本（READ）: `GET /analysis`
+      - `{status, url, rows}`。`status` は `analysis.status`、`rows` は `AnalysisService.Result()` の行（構造のまま）
+      - `Result()` の URL が今の provider の URL と一致するときだけ行を返す。それ以外（未取得・大会を変えた後・大会なし・サービスの無いシェル）は `url: ""`・`rows: []`
+    - 書き込み 1 本（WRITE）: `POST /analysis:refresh`
+      - `AnalysisService.Refresh()` を呼ぶ。`STARTED` は 202（`{accepted, operation: "analysis.refresh"}`。`analysis` の次の revision の `running` は 202 の前に state に出る）
+      - `BUSY` は 409 `CONFLICT`、`NO_TOURNAMENT`（サービスの無いシェルも）は 409 `NOT_READY`。どちらも何も書かない。`Refresh()` の例外は `write_op` が 500 `INTERNAL`
+    - Web 操作: `refresh_analysis` / `get_analysis`。どちらも呼び出し元（Flask）のスレッドで core を呼ぶ（`@gui_thread_sync` なし）
+    - 統計の取得は既存の `POST /scoreboards/1/stats:refresh`（`refresh_stats`）をそのまま使う
+    - 台帳と仕様
+      - `tests/test_webserver_routes.py`（v1 は書き込み 42・計 62）と `tests/test_web_operations.py`（台帳の歩行で、大会なしの `analysis:refresh` は 409）
+      - `WEB_PANELS` に `stats` を足した
+      - 仕様は `.claude/design/external-control-api.md` の §5 の表・§5.9・§7.1・§7.3・§10
+  - ページ（`web/src/StatsPage/`）
+    - `index.tsx`
+      - 上部: 「統計情報を取得する」（`stats:refresh`。応答を待つ間は押せない・成功は snackbar）と、`Upset Factor: {係数}    |    P1 vs P2` の 1 行（両選手の名前があるときだけ係数つき。無ければ `P1 vs P2`。Qt 版と同じ条件）
+      - MUI の Tabs で 4 タブ（直近の対戦 / 戦績 / 大会履歴 / この大会の試合一覧）。選んだタブはモジュール変数に持つ（共有ビューでパネルを行き来しても残る）。タブの中身は選ばれているタブだけを描く
+      - 書き込みは Top 8 と同じ `useSerialRequests` で直列に送り、トークンが無いための拒否は 1 回だけ知らせる
+      - 試合一覧のタブ
+        - 「start.gg からデータを取得」→ `analysis:refresh`。応答を待つ間と `analysis.status` が `running` の間は押せない
+        - 409 `NOT_READY` →「大会が選択されていません」を状態の 1 行に（次に `analysis` が変わるまで。Qt 版と同じ）。ほかの 409 →「試合一覧を取得中です。…」の snackbar。それ以外の失敗 →「取得に失敗しました」
+        - 状態の 1 行は `analysis.*` から（未取得 / フェーズ取得中 / 取得中 n/m / n 試合（m 件取得失敗）/ 失敗の理由別）
+        - 行は `GET /analysis` を、タブを開いたときと、`analysis` が done / error / idle に変わったときだけ読む（取得の開始 = running と group の答えごとには読まない。後から出した読み取りが勝つ）。読めなかったら注記と「再読み込み」
+        - 描く行は、今の `analysis`（revision と status の組）のために読んだものだけ。取得中は、その直前の revision で読んだものも描く（core の行は取得が終わるまで前の取得のまま。Qt 版も残した）。idle の間・読み取りの答えを待つ間・読めなかったときは描かない（別の取得・別の大会の行を出さない）
+        - 絞り込み（Round・両選手名。前後の空白を除いて小文字で比べる。`useDeferredValue` で入力に表が遅れて追いつく）と `TableSortLabel` による並べ替え（初回は昇順、もう一度で降順。既定は Round の昇順）。どちらもクライアント側
+    - `format.ts`: 統計 3 タブの文言（旧 `AutonaStatsWidget._updateDisplay` の規則の TS 版）
+      - 日付は `timestamp` をブラウザのローカル時刻の `YYYY/MM/DD`。勝率は Python の `%.0f` と同じ偶数丸め（12.5% → 12%）
+      - 勝敗は `winner` が 0 / 1 のものだけを数える。`recent_sets.sets` は list でも dict の値でも読む。`last_sets` / `history_sets` は番号の順
+    - `analysisRows.ts`: 試合一覧の行の文言（旧 `RowCells`。「TBD」「(seed N)」「-」）・並べ替えキー（Python の比較と同じ順序。文字列はコードポイントで比べる）・状態の 1 行・絞り込み
+      - 照合の表 `analysisRows.cases.json`（12 シナリオ。core の行・Qt 版が出したセル・終わった後の 1 行。ほかに名前の並べ替え 1 組）を pytest と jest の両方が読む。表は `tests/test_analysis_rows.py` が core と golden から作り直す（`AUTONA_WRITE_ANALYSIS_CASES=1`）
+    - `web/src/PanelShell/registry.tsx` に `stats` を足した。i18n（ja / en）に `stats_*` を 34 キー足した
+  - デスクトップ（`src/Autona.py`）
+    - `_CreateStatsPanel` は `self._WebPanel("stats")` を返すだけにした
+    - 項目のアイコン・ラベル・位置・キーは変えていない
+  - Qt 版の削除
+    - `src/AutonaStatsWidget.py` と `src/AutonaAnalysisWidget.py` を消した（`Autona.py` の import も）
+    - 翻訳: 2 つの専用の 21 件を `src/i18n/Autona_{ja,en}.ts` から消し、`scripts/compile_translations.ps1` で再コンパイルした（各 506 件）。ほかでも使う 2 件（`大会が選択されていません` はセット選択ウィンドウ、`Upset Factor` は統計情報表示設定）は残し、場所をそちらに直した
+    - 残したもの: `AutonaStatsUtil`（`StatsService.fetcher`）・`StatsService`・`AnalysisService`・provider の `tournament_phases_updated`（セット選択とボードが使う）。コメント・docstring の「STATS パネル」をページに直した（`AutonaStatsUtil` / `StatsService` / `AnalysisService` / `AutonaStatsPreviewWidget` / `AutonaPlayerBrowserWidget` / `AutonaScoreboardWidget` / `bootstrap.py` / `tests/fixtures/stats/spies.py`）
+  - docs
+    - `.claude/design/Design.md`: パネル表・§4.1.0（統計情報ページのタブ）・`analysis` の節・`/web/:panel`・§7.11・T-15（完了）
+    - `docs/product/features.md` §11
+    - `.claude/rules/state-and-webserver.md`（`StatsService` / `AnalysisService` の行）
+    - `README.md`: ファイル一覧から削除
+    - `.claude/design/external-control-api.md`
+    - `.claude/manual-test-checklist.md` に「統計情報」節を新設した
+- **判断と理由**
+  1. **実行中の `analysis:refresh` は 409 `CONFLICT`**（設計の「409 `BUSY`」の具体化）。v1 のエラーコード一覧（§2.6）に `BUSY` は無く、実行中フラグの操作（`bracket:refresh` / `tournament` / `stream/thumbnail`）はどれも `CONFLICT` を返す。新しいコードを足さずに揃えた
+  2. **`GET /analysis` は URL も比べる**。`Forget()` は大会の差し替えの直後に行を捨てるが、ルートでも `Result()` の URL と今の provider の URL を比べ、一致しなければ空にする。別の大会の行を返さないことを、サービスの順序だけに頼らない
+  3. **行は試合一覧のタブを開いている間だけ読む**。行は数百〜千超になりうるので、ほかのタブを見ている間は読まない。タブを開いたとき・`analysis` が done / error / idle に変わったときに読む（取得の開始では読まない。レビュー対応 5）
+  4. **行の文言・並べ替えは TS に持ち、core と同じ表で検査する**（S4i の `characterPick` と同じ形）。サーバーに文字列を返させると「TBD」などの文言がサーバーの言語に縛られる。表は Qt 版の golden から作るので、ページのセルが Qt 版のセルと一字一句同じことを jest が確かめる
+  5. **統計 3 タブの値は Socket.IO の `score.1.*` だけから描く**（設計どおり。統計の値を返すルートは足さない）
+  6. **列名と試合一覧のセルの文言は英語のまま**（Qt 版と同じ。オーバーレイと同じ表記）。統計 3 タブの列名・タブ名・ボタン・状態の文言は i18n にした。勝敗集計の `[N sets]` は日本語では `[N セット]`
+  7. **`stats_flow` の golden は変えていない**。「STATS パネル」のステップを v1 `stats:refresh` に替え、取得と書き込みの列が golden と同じことを照合する。違うのは、そのステップに HTTP の応答（200）が 1 つ増えることだけで、それは「追加の応答」（`_ADDED_RESPONSES`）として明示し、応答の無かったステップにだけ付くことをテストで pin した
+- **旧実装との挙動差（記録）**
+  - 選手名は反映済みの値（OBS と同じ。設計の論点 3）。統計キーは held 対象外なので、セットを読んで反映するまでの間は新しい選手の統計に前の選手名が付いて見える
+  - 「統計情報を取得する」の結果を snackbar で知らせる（Qt 版は無言）
+  - 試合一覧の並べ替え: Qt 版の Round・選手名の列は表示文字列（大文字小文字を区別する文字の順）で並んでいた（`QTableWidgetItem` の比較。並べ替えキーは数値の列でしか使われていなかった）。ページは並べ替えキーで並べる: Round はブラケットの順（`roundOrder`）、選手名は小文字の順。既定の並び（Round の昇順）もブラケットの順になった
+  - 試合一覧の結果は core が持つので、ページを開き直しても・LAN の別端末からも同じ一覧が見え、ヘッドレスでも取れる（S4j の下地）。絞り込みと並べ替えはタブを離れると既定に戻る（保持するのはタブだけ）
+  - 「start.gg からデータを取得」（Qt 版は「Startggからデータを取得」）。未取得の 1 行もそれに合わせた
+  - phase group が無い大会は「この大会にはフェーズ（グループ）がありません」（S4j までは「取得に失敗しました」）。取得の失敗は「取得に失敗しました」のまま
+  - 実行中に取得を押すと「試合一覧を取得中です。…」が出る（Qt 版はボタンが押せなかった。ページも実行中は押せないが、別の端末から押せる）
+  - 値の無い欄（`None`）は空で描く（Qt 版は Python の `str(None)` で「None」が出る欄があった）
+  - 表は MUI になり、行の高さの固定は無くなった
+- **pin（テスト）**
+  - `tests/test_api_v1_analysis.py`（新規 11 本）
+    - 取得の開始（202 の前に次の revision の `running`）と行の読み取り（URL・行の形）
+    - 読み取りは行・provider・状態を `StateManager.lock` の 1 回の保持の中で読み、別スレッドが lock を持つ間は待つ
+    - 実行中は 409 `CONFLICT` で何も変えない（取得は 1 本のまま）
+    - 大会なしは 409 `NOT_READY` で何も publish しない。サービスの無いシェル
+    - 失敗した取得は前の行を残し、大会を変えると消える
+    - 別の大会の行は返さない（provider を差し替える・None にする・戻す）
+    - 操作はどのスレッドからでも答える
+    - ルートの分類と `WEB_PANELS`。LAN の別端末の取得はトークンが要り、読み取りは要らない
+  - `tests/test_analysis_rows.py`（5 本）
+    - core の行をページの規則で文字列にして golden と照合する（従来どおり）
+    - 薄くしたパネルを通す照合を、デスクトップの v1 で全シナリオを流す照合（`POST analysis:refresh` → `GET analysis` の行・状態・provider への要求が golden と同じ）に置き換えた。状態の 1 行は golden の文言（no_phases は `ja.json`）を表に入れて jest が日本語の固定の翻訳で比べるので、Qt の翻訳もロケールも通らない
+    - `analysisRows.cases.json` の全シナリオが core の行と golden のセルから作られていること
+    - 表の名前の並べ替え（絵文字・全角英数・かな・大文字小文字違いの同名・語末のシグマ）が Python の `str.lower` のキーでの順（昇順・降順）で、それが UTF-16 の順と違うこと
+  - `tests/test_analysis_service.py`: パネルのテスト（行を写すのは revision が変わったときだけ・パネルが provider に触らない AST）を消し、`Refresh()` の例外のテストを v1 の 500 で確かめる形にした。アダプタにコールバック型の取得が残っていないことは AST で残した
+  - `tests/test_stats_flow.py`（判断 7）
+  - `tests/test_web_panel_host.py`
+    - 統計情報の項目が React のページであること
+    - `src/` に Qt 版が無いこと（`*.py` / `*.ui` / `*.ts` に import・生成・`.instance`・ファイル名の参照が無い）
+    - 共有ビューの切り替えのリグの Qt の遅延パネルの例を、統計情報から選手一覧（`playerBrowser`）に替えた
+  - jest
+    - `web/src/StatsPage/StatsPage.test.js`（17）: 4 タブと対戦カード・係数・勝敗集計と表・選手ごとの表・タブの保持・統計の取得（直列・snackbar・失敗）・試合一覧（取得 → 進み具合 → 終わったら読む（GET の回数）・並べ替えと絞り込み・大会なし・実行中と失敗の文言・失敗した取得が前の行を残す・取得中は前の行を残すが別の大会の行は出さない・大会を変えたら読めなくても行を出さない・読めなかった完了は行も件数も出さない・読めないときの再読み込み・始められない取得）
+    - `web/src/StatsPage/analysisRows.test.js`: 表の全ケースのセル（既定の並び）と状態の 1 行・表の網羅・列名・キーの比較・数値と名前の並べ替え（表の名前の並べ替えの組）・絞り込み・取得中と読めていない完了の 1 行
+    - `web/src/StatsPage/format.test.js`: 名前・係数・偶数丸め・勝敗集計・ローカルの日付・各表のセル
+  - Playwright `web/e2e/stats.spec.ts`（6）
+    - 4 タブと対戦カード（名前が無いとき係数なし）
+    - v1 の選手の PATCH で名前を入れると、上の行（係数 0）・勝敗集計・戦績 / 大会履歴の見出しと表に出る
+    - 「統計情報を取得する」→ 200 → snackbar
+    - 試合一覧の列名と、大会なしの「No tournament selected」
+    - 共有ビューのパネルの移動（`autonaPanelShell.navigate`）でタブが残り、再読み込みで最初のタブに戻る
+    - `?desktop=1&lng=ja`
+    - ヘッドレスには統計の値を入れる経路が無い（起動時に `ResetScoreRoot`、統計キーを書くルートは無く、選手に start.gg の id も入れられない）ので、表の中身は jest が受け持つ
+- **残課題**
+  - 実際の start.gg の大会での統計 3 タブと試合一覧の取得は、テストの偽 provider でしか確かめていない（オーナー実機確認）
+  - 統計情報表示設定（Display の `AutonaStatsPreviewWidget`、キー `statsPreview`）は Qt のまま（設計の論点 1。次にまた設計を出す）
+  - 試合一覧の UpSet の式を `CalculatePlacementMath` に揃えること・`history_sets` の月の英語表記は対象外のまま（設計の「対象外」）
+  - API 情報ウィンドウ（`AutonaApiInfoWindow`）には、新しいルートを足していない（S4e / S4g / S4i と同じ）
+  - `.claude/known-smells.md` の 2026-06-24 の検証などの歴史的な記録に残る `AutonaAnalysisWidget` / `AutonaStatsWidget` は、当時の記録として残した（S-10 の一覧には「S4k で削除」と注記した）
+  - 終了中のアプリと fetcher の無いシェルでも、`analysis:refresh` は 409 `NOT_READY`（`Refresh()` が `NO_TOURNAMENT` を返す。S4j の仕様）。大会が無いときと区別しない。記録のみ
+- **オーナー実機確認**（`python main.py`）
+  - 手動チェックリストの「統計情報」の全項目
+  - 特に次の 5 点
+    - サイドバーの「統計情報」で React のページが出る。ほかのパネルと行き来してもビューが再読み込みされず、選んでいたタブが残る
+    - start.gg の選手のセットを読み込んで「反映」→「統計情報を取得する」で 3 タブが埋まり、Qt 版と同じ値（勝敗数・勝率・日付）になる
+    - 試合一覧の取得・並べ替え・絞り込み。phase group が複数ある大会の前置き
+    - 大会なしで試合一覧の取得 →「大会が選択されていません」
+    - 英語 / 日本語の切り替えで文言が変わる
+- **検証**（順に）: pytest 全量 3180 passed / 2 skipped（7 分 15 秒）／jest 全量 454 passed（25 suites）／`npm run build` OK（警告は既存の `Header.jsx` だけ）／`npm run test:e2e` 32 passed
+  - e2e の 1 回目は `stats.spec.ts` の 6 本が後始末の待ちで落ちた。ヘッドレスの空のカードのスロットには `name` キーが無い（`undefined`）のに `""` を待っていたため。待つ値を「無いか空」に直して、単独・全量とも通った
+- **レビュー指摘の対応（2026-11-04）**: High は無し。直したもの:
+  - **1（大会を変えた後に前の大会の行が残る）**: 大会を変えると `analysis` は次の revision の idle になり、ページは読み直すが、答えを待つ間と読めなかったときは前の大会の行を描いていた。描く行を「今の `analysis` のために読んだもの」に限った（idle は描かない・読み取りの key と今の key が違えば捨てる・読めなかった key の行は描かない）。取得中だけは、直前の revision で読んだ行も描く（core の行は取得が終わるまで前の取得のままなので、それは今も core の行。Qt 版も取得中は前の表を残した）。idle を見ないまま次の取得の running が来た（revision が 2 つ以上飛んだ）ときは描かない
+  - **2（`get_analysis` が行・provider・状態をばらばらに読む）**: 3 つを `StateManager.lock` の 1 回の保持の中で読む。サービスは行の差し替えと `analysis` の publish を同じ保持の中で行う（`_Publish` / `Forget`）ので、組が同じ時点のものになる。lock の順はサービスと同じ（`StateManager.lock` → サービスの lock）。行の深いコピー（`Result()`）もこの保持の中になる
+  - **3（読めていない完了が「取得中 n/n」になる）**: 完了の 1 行は、行を読めていなければ件数抜きの「取得完了」（`stats_analysis_fetched`。失敗した group があれば「(n 件取得失敗)」を付ける）。読めなかったときも進み具合には戻らない
+  - **4（大きな大会での絞り込みの入力）**: 絞り込みの文字を `useDeferredValue` で表に渡す（入力欄はすぐ、表は遅れて追いつく）。行の仮想化はしない。手動チェックリストに大きな大会での入力の体感と、取得中に前の一覧が残ることを足した
+  - **5（取得の開始で行を読み直す）**: 読む key をページの状態（`readKey`）に持ち、タブを開いたときと done / error / idle への変化でだけ進める。running への変化では読まない。jest で GET の回数を pin した
+  - **6（文字列の比較が UTF-16 のコード単位）**: `compareKeys` の文字列をコードポイントで比べる（Python と同じ）。`toLowerCase` と `str.lower` の差（Unicode の版の差だけ）は `nameCell` のコメントに書いた。表に名前の並べ替えの組（絵文字・全角英数・かな・大文字小文字違いの同名・語末のシグマ）を足し、pytest は Python の順と UTF-16 の順が違うことを、jest はページの並べ替えがその順になることを確かめる
+  - **7**: 台帳の `tests/test_api_v1_analysis.py` の本数（当初は 10 本だった）。2 の 1 本を足して 11 本
+  - **8（体裁）**: `StatsService.RefreshAll` の docstring・`bootstrap.py` の ORDER CONSTRAINT・`tests/fixtures/stats/spies.py` の docstring の折り返し
+  - **9**: `.claude/known-smells.md` の S-10 の一覧の `AutonaAnalysisWidget` に「（S4k で削除）」
+  - 記録だけ: **10**（終了中・fetcher なしも 409 `NOT_READY`）は上の残課題に書いた
+  - HEAD の 6b3e1dd5 / 853fb80a（S4j のパネルの照合を英語ロケールでも通す修正）との関係: S4k はそのパネルの照合をルートの照合に置き換えたので、差分は重ならない。ルートの照合は行・状態・URL・provider への要求だけを比べ、状態の 1 行は golden の文言（no_phases は `ja.json`）を表に入れて jest が日本語の固定の翻訳で比べる。Qt の翻訳を通した文言と golden の日本語を直接比べる箇所は無い。既定の `QLocale` を en_US にして `tests/test_analysis_rows.py` / `tests/test_api_v1_analysis.py` / `tests/test_analysis_service.py` を回し、プログラムのロケールが英語になった状態で 44 passed を確かめた
+- **オーナー実機確認（レビュー対応の分）**（`python main.py`）
+  - 試合一覧を取った後にもう一度取得すると、取得中も前の一覧が出たままで、終わると新しい一覧に替わる
+  - 大会を変える・解除すると一覧がすぐ消える
+  - 大きな大会で絞り込みの欄に続けて打っても入力が引っかからない
+- **検証**（レビュー対応後・順に）: pytest 全量 3182 passed / 2 skipped（7 分 12 秒）／jest 全量 458 passed（25 suites。pytest の後に単独で）／`npm run build` OK（警告は既存の `Header.jsx` だけ）／`npm run test:e2e` 32 passed
+  - 2 の新しいテスト（`test_the_read_is_of_one_moment`）は、`get_analysis` を lock なしの旧実装に一時的に戻すと落ちることを確かめた

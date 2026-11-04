@@ -1005,8 +1005,8 @@ class AutonaScoreboardWidget(QWidget):
             QTimer.singleShot(0, self, self._SyncBestOf)
 
     def _onStateDelta(self, delta):
-        # Same cheap containment filter AutonaStatsWidget uses on deltas. One
-        # slot for both subtrees so the (not free) str(delta) is paid once.
+        # A cheap containment filter on the delta's text. One slot for both
+        # subtrees so the (not free) str(delta) is paid once.
         text = str(delta)
         if "tournamentInfo" in text:
             self._updateTournamentInfoLine()

@@ -200,9 +200,7 @@ from .core.TaskExecutor import TaskExecutor
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaStatusManager import AutonaStatusManager
 from .AutonaScoreboardManager import AutonaScoreboardManager
-from .AutonaStatsWidget import AutonaStatsWidget
 from .AutonaStatsPreviewWidget import AutonaStatsPreviewWidget
-from .AutonaAnalysisWidget import AutonaAnalysisWidget
 from .AutonaPlayerBrowserWidget import AutonaPlayerBrowserWidget
 from src.AutonaWebServer import WebServer, check_webserver_port
 from .AutonaWebPageLifecycle import MarkWebServerReady
@@ -419,7 +417,7 @@ class Window(QMainWindow):
         self._shuttingDown = False
         splash.set_message(splash_msgs[1], progress=0.70)
 
-        # STATISTICS (with the absorbed ANLYSE sub-tab) and PLAYER LIST are
+        # STATISTICS (a React page since ADR-005 S4k) and PLAYER LIST are
         # lazy too: see _CreateStatsPanel / _CreatePlayerBrowserPanel.
 
         splash.set_message(splash_msgs[1], progress=0.85)
@@ -1063,17 +1061,9 @@ class Window(QMainWindow):
         return resultSetting
 
     def _CreateStatsPanel(self):
-        # ANLYSE is not a top-level panel — it is built here and embedded as
-        # a sub-tab inside the STATS panel ("この大会の試合一覧"). The NOTES
-        # dock was removed entirely. Neither widget is referenced outside
-        # this factory, so both stay local to it.
-        analysisWidget = AutonaAnalysisWidget()
-        statsWidget = AutonaStatsWidget(analysisPanel=analysisWidget)
-        statsWidget.setWindowIcon(QIcon(UI.icon_path('stats.svg')))
-        statsWidget.setObjectName("Statistics")
-        statsWidget.setWindowTitle(
-            QApplication.translate("app", "Statistics"))
-        return statsWidget
+        # ADR-005 S4k: the React page in the shared web view (the match list
+        # is its fourth tab).
+        return self._WebPanel("stats")
 
     def _CreatePlayerBrowserPanel(self):
         # Sets its own windowTitle (translate("app", "Player List")); the nav

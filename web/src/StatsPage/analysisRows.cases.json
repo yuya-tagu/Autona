@@ -1,0 +1,7963 @@
+{
+ "about": "The Statistics page's match list (ADR-005 S4k): per scenario of tests/test_analysis_rows.py, core's rows as GET /api/v1/analysis answers them (in an order the table's default sort undoes), the nine cells the page shows for them in that default order -- the pre-S4j Qt panel's, recorded in tests/fixtures/analysis_rows/golden.json -- and the status line (ja) once the fetch was over; and names in the order Python sorts them by the page's key, both ways (nameSort). Written by AUTONA_WRITE_ANALYSIS_CASES=1 python -m pytest tests/test_analysis_rows.py; checked there against core and the golden, and by analysisRows.test.js against the page.",
+ "cases": [
+  {
+   "scenario": "one group, complete with a reset",
+   "progress": {
+    "status": "done",
+    "error": "",
+    "done": 1,
+    "total": 1,
+    "failed": 0
+   },
+   "line": "11 試合",
+   "rows": [
+    {
+     "round": "Grand Final Reset",
+     "roundOrder": [
+      "50",
+      4,
+      0
+     ],
+     "p1": {
+      "seed": null,
+      "name": ""
+     },
+     "p2": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "score": [
+      3,
+      2
+     ],
+     "upset": 0,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Grand Final",
+     "roundOrder": [
+      "50",
+      3,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      1,
+      3
+     ],
+     "upset": 2,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Final",
+     "roundOrder": [
+      "50",
+      2,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      3,
+      1
+     ],
+     "upset": -2,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Semi Final",
+     "roundOrder": [
+      "50",
+      1,
+      1
+     ],
+     "p1": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      0,
+      2
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Semi Final",
+     "roundOrder": [
+      "50",
+      1,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 1",
+     "roundOrder": [
+      "50",
+      -1,
+      1
+     ],
+     "p1": {
+      "seed": 6,
+      "name": ""
+     },
+     "p2": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "score": [
+      1,
+      2
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 1",
+     "roundOrder": [
+      "50",
+      -1,
+      0
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 8,
+      "name": "Team Hotel"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": -1,
+     "losersRun": 0,
+     "seedOver": 1
+    },
+    {
+     "round": "Losers Round 2",
+     "roundOrder": [
+      "50",
+      -2,
+      1
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      0,
+      2
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 2",
+     "roundOrder": [
+      "50",
+      -2,
+      0
+     ],
+     "p1": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": 2,
+     "losersRun": 1,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 3",
+     "roundOrder": [
+      "50",
+      -3,
+      0
+     ],
+     "p1": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      1,
+      2
+     ],
+     "upset": -4,
+     "losersRun": 1,
+     "seedOver": 3
+    },
+    {
+     "round": "Losers Round 4",
+     "roundOrder": [
+      "50",
+      -4,
+      0
+     ],
+     "p1": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      3,
+      1
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    }
+   ],
+   "cells": [
+    [
+     [
+      "Losers Round 4",
+      [
+       "50",
+       -4,
+       0
+      ]
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3-1",
+      4
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Losers Round 3",
+      [
+       "50",
+       -3,
+       0
+      ]
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "1-2",
+      3
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "-4",
+      -4
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "3",
+      3
+     ]
+    ],
+    [
+     [
+      "Losers Round 2",
+      [
+       "50",
+       -2,
+       0
+      ]
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Losers Round 2",
+      [
+       "50",
+       -2,
+       1
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "0-2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Losers Round 1",
+      [
+       "50",
+       -1,
+       0
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Team Hotel",
+      "team hotel"
+     ],
+     [
+      "8",
+      8
+     ],
+     [
+      "-1",
+      -1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "1",
+      1
+     ]
+    ],
+    [
+     [
+      "Losers Round 1",
+      [
+       "50",
+       -1,
+       1
+      ]
+     ],
+     [
+      "6",
+      6
+     ],
+     [
+      "(seed 6)",
+      "(seed 6)"
+     ],
+     [
+      "1-2",
+      3
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Winners Semi Final",
+      [
+       "50",
+       1,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Winners Semi Final",
+      [
+       "50",
+       1,
+       1
+      ]
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "0-2",
+      2
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Winners Final",
+      [
+       "50",
+       2,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "3-1",
+      4
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "-2",
+      -2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Grand Final",
+      [
+       "50",
+       3,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "1-3",
+      4
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Grand Final Reset",
+      [
+       "50",
+       4,
+       0
+      ]
+     ],
+     [
+      "-",
+      9999
+     ],
+     [
+      "TBD",
+      "tbd"
+     ],
+     [
+      "3-2",
+      5
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "0",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ]
+   ]
+  },
+  {
+   "scenario": "one group, seeds known",
+   "progress": {
+    "status": "done",
+    "error": "",
+    "done": 1,
+    "total": 1,
+    "failed": 0
+   },
+   "line": "11 試合",
+   "rows": [
+    {
+     "round": "Grand Final Reset",
+     "roundOrder": [
+      "50",
+      4,
+      0
+     ],
+     "p1": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "p2": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "score": [
+      3,
+      2
+     ],
+     "upset": 2,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Grand Final",
+     "roundOrder": [
+      "50",
+      3,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      1,
+      3
+     ],
+     "upset": 2,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Final",
+     "roundOrder": [
+      "50",
+      2,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      3,
+      1
+     ],
+     "upset": -2,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Semi Final",
+     "roundOrder": [
+      "50",
+      1,
+      1
+     ],
+     "p1": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      0,
+      2
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Semi Final",
+     "roundOrder": [
+      "50",
+      1,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 1",
+     "roundOrder": [
+      "50",
+      -1,
+      1
+     ],
+     "p1": {
+      "seed": 6,
+      "name": ""
+     },
+     "p2": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "score": [
+      1,
+      2
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 1",
+     "roundOrder": [
+      "50",
+      -1,
+      0
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 8,
+      "name": "Team Hotel"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": -1,
+     "losersRun": 0,
+     "seedOver": 1
+    },
+    {
+     "round": "Losers Round 2",
+     "roundOrder": [
+      "50",
+      -2,
+      1
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      0,
+      2
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 2",
+     "roundOrder": [
+      "50",
+      -2,
+      0
+     ],
+     "p1": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": 2,
+     "losersRun": 1,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 3",
+     "roundOrder": [
+      "50",
+      -3,
+      0
+     ],
+     "p1": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      1,
+      2
+     ],
+     "upset": -4,
+     "losersRun": 1,
+     "seedOver": 3
+    },
+    {
+     "round": "Losers Round 4",
+     "roundOrder": [
+      "50",
+      -4,
+      0
+     ],
+     "p1": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      3,
+      1
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    }
+   ],
+   "cells": [
+    [
+     [
+      "Losers Round 4",
+      [
+       "50",
+       -4,
+       0
+      ]
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3-1",
+      4
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Losers Round 3",
+      [
+       "50",
+       -3,
+       0
+      ]
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "1-2",
+      3
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "-4",
+      -4
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "3",
+      3
+     ]
+    ],
+    [
+     [
+      "Losers Round 2",
+      [
+       "50",
+       -2,
+       0
+      ]
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Losers Round 2",
+      [
+       "50",
+       -2,
+       1
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "0-2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Losers Round 1",
+      [
+       "50",
+       -1,
+       0
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Team Hotel",
+      "team hotel"
+     ],
+     [
+      "8",
+      8
+     ],
+     [
+      "-1",
+      -1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "1",
+      1
+     ]
+    ],
+    [
+     [
+      "Losers Round 1",
+      [
+       "50",
+       -1,
+       1
+      ]
+     ],
+     [
+      "6",
+      6
+     ],
+     [
+      "(seed 6)",
+      "(seed 6)"
+     ],
+     [
+      "1-2",
+      3
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Winners Semi Final",
+      [
+       "50",
+       1,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Winners Semi Final",
+      [
+       "50",
+       1,
+       1
+      ]
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "0-2",
+      2
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Winners Final",
+      [
+       "50",
+       2,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "3-1",
+      4
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "-2",
+      -2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Grand Final",
+      [
+       "50",
+       3,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "1-3",
+      4
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Grand Final Reset",
+      [
+       "50",
+       4,
+       0
+      ]
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3-2",
+      5
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ]
+   ]
+  },
+  {
+   "scenario": "one group, unfinished",
+   "progress": {
+    "status": "done",
+    "error": "",
+    "done": 1,
+    "total": 1,
+    "failed": 0
+   },
+   "line": "7 試合",
+   "rows": [
+    {
+     "round": "Grand Final",
+     "roundOrder": [
+      "50",
+      2,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": null,
+      "name": ""
+     },
+     "score": null,
+     "upset": null,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Final",
+     "roundOrder": [
+      "50",
+      1,
+      1
+     ],
+     "p1": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": null,
+     "upset": null,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Final",
+     "roundOrder": [
+      "50",
+      1,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 1",
+     "roundOrder": [
+      "50",
+      -1,
+      1
+     ],
+     "p1": {
+      "seed": 6,
+      "name": ""
+     },
+     "p2": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "score": null,
+     "upset": null,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 1",
+     "roundOrder": [
+      "50",
+      -1,
+      0
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 8,
+      "name": "Team Hotel"
+     },
+     "score": [
+      0,
+      2
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 2",
+     "roundOrder": [
+      "50",
+      -2,
+      1
+     ],
+     "p1": {
+      "seed": 8,
+      "name": "Team Hotel"
+     },
+     "p2": {
+      "seed": null,
+      "name": ""
+     },
+     "score": null,
+     "upset": null,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 2",
+     "roundOrder": [
+      "50",
+      -2,
+      0
+     ],
+     "p1": {
+      "seed": null,
+      "name": ""
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": null,
+     "upset": null,
+     "losersRun": 0,
+     "seedOver": null
+    }
+   ],
+   "cells": [
+    [
+     [
+      "Losers Round 2",
+      [
+       "50",
+       -2,
+       0
+      ]
+     ],
+     [
+      "-",
+      9999
+     ],
+     [
+      "TBD",
+      "tbd"
+     ],
+     [
+      "-",
+      0
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Losers Round 2",
+      [
+       "50",
+       -2,
+       1
+      ]
+     ],
+     [
+      "8",
+      8
+     ],
+     [
+      "Team Hotel",
+      "team hotel"
+     ],
+     [
+      "-",
+      0
+     ],
+     [
+      "TBD",
+      "tbd"
+     ],
+     [
+      "-",
+      9999
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Losers Round 1",
+      [
+       "50",
+       -1,
+       0
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "0-2",
+      2
+     ],
+     [
+      "Team Hotel",
+      "team hotel"
+     ],
+     [
+      "8",
+      8
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Losers Round 1",
+      [
+       "50",
+       -1,
+       1
+      ]
+     ],
+     [
+      "6",
+      6
+     ],
+     [
+      "(seed 6)",
+      "(seed 6)"
+     ],
+     [
+      "-",
+      0
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Winners Final",
+      [
+       "50",
+       1,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Winners Final",
+      [
+       "50",
+       1,
+       1
+      ]
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "-",
+      0
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Grand Final",
+      [
+       "50",
+       2,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "-",
+      0
+     ],
+     [
+      "TBD",
+      "tbd"
+     ],
+     [
+      "-",
+      9999
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ]
+   ]
+  },
+  {
+   "scenario": "one group, losers unwired (byes)",
+   "progress": {
+    "status": "done",
+    "error": "",
+    "done": 1,
+    "total": 1,
+    "failed": 0
+   },
+   "line": "9 試合",
+   "rows": [
+    {
+     "round": "Grand Final Reset",
+     "roundOrder": [
+      "50",
+      4,
+      0
+     ],
+     "p1": {
+      "seed": null,
+      "name": ""
+     },
+     "p2": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "score": [
+      3,
+      2
+     ],
+     "upset": 0,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Grand Final",
+     "roundOrder": [
+      "50",
+      3,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      1,
+      3
+     ],
+     "upset": 2,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Final",
+     "roundOrder": [
+      "50",
+      2,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      3,
+      1
+     ],
+     "upset": -2,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Semi Final",
+     "roundOrder": [
+      "50",
+      1,
+      1
+     ],
+     "p1": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      0,
+      2
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Semi Final",
+     "roundOrder": [
+      "50",
+      1,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 1",
+     "roundOrder": [
+      "50",
+      -1,
+      1
+     ],
+     "p1": {
+      "seed": 6,
+      "name": ""
+     },
+     "p2": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "score": [
+      1,
+      2
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": 1
+    },
+    {
+     "round": "Losers Round 1",
+     "roundOrder": [
+      "50",
+      -1,
+      0
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 8,
+      "name": "Team Hotel"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": -1,
+     "losersRun": 0,
+     "seedOver": 3
+    },
+    {
+     "round": "Losers Round 3",
+     "roundOrder": [
+      "50",
+      -3,
+      0
+     ],
+     "p1": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "p2": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "score": [
+      1,
+      2
+     ],
+     "upset": -1,
+     "losersRun": 0,
+     "seedOver": 3
+    },
+    {
+     "round": "Losers Round 4",
+     "roundOrder": [
+      "50",
+      -4,
+      0
+     ],
+     "p1": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "p2": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "score": [
+      3,
+      1
+     ],
+     "upset": -2,
+     "losersRun": 0,
+     "seedOver": 2
+    }
+   ],
+   "cells": [
+    [
+     [
+      "Losers Round 4",
+      [
+       "50",
+       -4,
+       0
+      ]
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3-1",
+      4
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "-2",
+      -2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "2",
+      2
+     ]
+    ],
+    [
+     [
+      "Losers Round 3",
+      [
+       "50",
+       -3,
+       0
+      ]
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "1-2",
+      3
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "-1",
+      -1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "3",
+      3
+     ]
+    ],
+    [
+     [
+      "Losers Round 1",
+      [
+       "50",
+       -1,
+       0
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Team Hotel",
+      "team hotel"
+     ],
+     [
+      "8",
+      8
+     ],
+     [
+      "-1",
+      -1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "3",
+      3
+     ]
+    ],
+    [
+     [
+      "Losers Round 1",
+      [
+       "50",
+       -1,
+       1
+      ]
+     ],
+     [
+      "6",
+      6
+     ],
+     [
+      "(seed 6)",
+      "(seed 6)"
+     ],
+     [
+      "1-2",
+      3
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "1",
+      1
+     ]
+    ],
+    [
+     [
+      "Winners Semi Final",
+      [
+       "50",
+       1,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Winners Semi Final",
+      [
+       "50",
+       1,
+       1
+      ]
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "0-2",
+      2
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Winners Final",
+      [
+       "50",
+       2,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "3-1",
+      4
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "-2",
+      -2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Grand Final",
+      [
+       "50",
+       3,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "1-3",
+      4
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Grand Final Reset",
+      [
+       "50",
+       4,
+       0
+      ]
+     ],
+     [
+      "-",
+      9999
+     ],
+     [
+      "TBD",
+      "tbd"
+     ],
+     [
+      "3-2",
+      5
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "0",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ]
+   ]
+  },
+  {
+   "scenario": "one group, byes",
+   "progress": {
+    "status": "done",
+    "error": "",
+    "done": 1,
+    "total": 1,
+    "failed": 0
+   },
+   "line": "7 試合",
+   "rows": [
+    {
+     "round": "Grand Final",
+     "roundOrder": [
+      "50",
+      3,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 6,
+      "name": ""
+     },
+     "score": null,
+     "upset": null,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Final",
+     "roundOrder": [
+      "50",
+      2,
+      1
+     ],
+     "p1": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "p2": {
+      "seed": 6,
+      "name": ""
+     },
+     "score": [
+      1,
+      2
+     ],
+     "upset": 3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Final",
+     "roundOrder": [
+      "50",
+      2,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Semi Final",
+     "roundOrder": [
+      "50",
+      1,
+      3
+     ],
+     "p1": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "p2": {
+      "seed": 6,
+      "name": ""
+     },
+     "score": [
+      0,
+      2
+     ],
+     "upset": 2,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Semi Final",
+     "roundOrder": [
+      "50",
+      1,
+      1
+     ],
+     "p1": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "p2": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": -1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 2",
+     "roundOrder": [
+      "50",
+      -2,
+      1
+     ],
+     "p1": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": null,
+     "upset": null,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 2",
+     "roundOrder": [
+      "50",
+      -2,
+      0
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": 3,
+     "losersRun": 0,
+     "seedOver": null
+    }
+   ],
+   "cells": [
+    [
+     [
+      "Losers Round 2",
+      [
+       "50",
+       -2,
+       0
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Losers Round 2",
+      [
+       "50",
+       -2,
+       1
+      ]
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "-",
+      0
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Winners Semi Final",
+      [
+       "50",
+       1,
+       1
+      ]
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "-1",
+      -1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Winners Semi Final",
+      [
+       "50",
+       1,
+       3
+      ]
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "0-2",
+      2
+     ],
+     [
+      "(seed 6)",
+      "(seed 6)"
+     ],
+     [
+      "6",
+      6
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Winners Final",
+      [
+       "50",
+       2,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Winners Final",
+      [
+       "50",
+       2,
+       1
+      ]
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "1-2",
+      3
+     ],
+     [
+      "(seed 6)",
+      "(seed 6)"
+     ],
+     [
+      "6",
+      6
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Grand Final",
+      [
+       "50",
+       3,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "-",
+      0
+     ],
+     [
+      "(seed 6)",
+      "(seed 6)"
+     ],
+     [
+      "6",
+      6
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ]
+   ]
+  },
+  {
+   "scenario": "one group, a losers run",
+   "progress": {
+    "status": "done",
+    "error": "",
+    "done": 1,
+    "total": 1,
+    "failed": 0
+   },
+   "line": "10 試合",
+   "rows": [
+    {
+     "round": "Grand Final Reset",
+     "roundOrder": [
+      "50",
+      3,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "score": [
+      3,
+      1
+     ],
+     "upset": -5,
+     "losersRun": 0,
+     "seedOver": 5
+    },
+    {
+     "round": "Grand Final",
+     "roundOrder": [
+      "50",
+      2,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      3,
+      2
+     ],
+     "upset": -1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Final",
+     "roundOrder": [
+      "50",
+      1,
+      1
+     ],
+     "p1": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": -1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Final",
+     "roundOrder": [
+      "50",
+      1,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 1",
+     "roundOrder": [
+      "50",
+      -1,
+      1
+     ],
+     "p1": {
+      "seed": 6,
+      "name": ""
+     },
+     "p2": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "score": [
+      1,
+      2
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 1",
+     "roundOrder": [
+      "50",
+      -1,
+      0
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 8,
+      "name": "Team Hotel"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": -1,
+     "losersRun": 0,
+     "seedOver": 1
+    },
+    {
+     "round": "Losers Round 2",
+     "roundOrder": [
+      "50",
+      -2,
+      1
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": 2,
+     "losersRun": 1,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 2",
+     "roundOrder": [
+      "50",
+      -2,
+      0
+     ],
+     "p1": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": 2,
+     "losersRun": 1,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Round 3",
+     "roundOrder": [
+      "50",
+      -3,
+      0
+     ],
+     "p1": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "p2": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": 1,
+     "losersRun": 2,
+     "seedOver": 1
+    },
+    {
+     "round": "Losers Round 4",
+     "roundOrder": [
+      "50",
+      -4,
+      0
+     ],
+     "p1": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "p2": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "score": [
+      0,
+      3
+     ],
+     "upset": 4,
+     "losersRun": 3,
+     "seedOver": null
+    }
+   ],
+   "cells": [
+    [
+     [
+      "Losers Round 4",
+      [
+       "50",
+       -4,
+       0
+      ]
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "0-3",
+      3
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Losers Round 3",
+      [
+       "50",
+       -3,
+       0
+      ]
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "1",
+      1
+     ]
+    ],
+    [
+     [
+      "Losers Round 2",
+      [
+       "50",
+       -2,
+       0
+      ]
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Losers Round 2",
+      [
+       "50",
+       -2,
+       1
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Losers Round 1",
+      [
+       "50",
+       -1,
+       0
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Team Hotel",
+      "team hotel"
+     ],
+     [
+      "8",
+      8
+     ],
+     [
+      "-1",
+      -1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "1",
+      1
+     ]
+    ],
+    [
+     [
+      "Losers Round 1",
+      [
+       "50",
+       -1,
+       1
+      ]
+     ],
+     [
+      "6",
+      6
+     ],
+     [
+      "(seed 6)",
+      "(seed 6)"
+     ],
+     [
+      "1-2",
+      3
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Winners Final",
+      [
+       "50",
+       1,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Winners Final",
+      [
+       "50",
+       1,
+       1
+      ]
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "-1",
+      -1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Grand Final",
+      [
+       "50",
+       2,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "3-2",
+      5
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "-1",
+      -1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Grand Final Reset",
+      [
+       "50",
+       3,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "3-1",
+      4
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "-5",
+      -5
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "5",
+      5
+     ]
+    ]
+   ]
+  },
+  {
+   "scenario": "one group, too small",
+   "progress": {
+    "status": "done",
+    "error": "",
+    "done": 1,
+    "total": 1,
+    "failed": 0
+   },
+   "line": "4 試合",
+   "rows": [
+    {
+     "round": "Grand Final",
+     "roundOrder": [
+      "50",
+      2,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": null,
+     "upset": null,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Final",
+     "roundOrder": [
+      "50",
+      1,
+      1
+     ],
+     "p1": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": -1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Winners Final",
+     "roundOrder": [
+      "50",
+      1,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Losers Final",
+     "roundOrder": [
+      "50",
+      -1,
+      0
+     ],
+     "p1": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": null,
+     "upset": null,
+     "losersRun": 0,
+     "seedOver": null
+    }
+   ],
+   "cells": [
+    [
+     [
+      "Losers Final",
+      [
+       "50",
+       -1,
+       0
+      ]
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "-",
+      0
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Winners Final",
+      [
+       "50",
+       1,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Winners Final",
+      [
+       "50",
+       1,
+       1
+      ]
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "-1",
+      -1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Grand Final",
+      [
+       "50",
+       2,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "-",
+      0
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ]
+   ]
+  },
+  {
+   "scenario": "several groups",
+   "progress": {
+    "status": "done",
+    "error": "",
+    "done": 6,
+    "total": 6,
+    "failed": 0
+   },
+   "line": "50 試合",
+   "rows": [
+    {
+     "round": "Top 8 · Grand Final",
+     "roundOrder": [
+      "50",
+      2,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": null,
+     "upset": null,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Top 8 · Winners Final",
+     "roundOrder": [
+      "50",
+      1,
+      1
+     ],
+     "p1": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": -1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Top 8 · Winners Final",
+     "roundOrder": [
+      "50",
+      1,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Top 8 · Losers Final",
+     "roundOrder": [
+      "50",
+      -1,
+      0
+     ],
+     "p1": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": null,
+     "upset": null,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Bracket · Grand Final Reset",
+     "roundOrder": [
+      "33",
+      4,
+      0
+     ],
+     "p1": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "p2": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "score": [
+      3,
+      2
+     ],
+     "upset": 2,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Bracket · Grand Final",
+     "roundOrder": [
+      "33",
+      3,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      1,
+      3
+     ],
+     "upset": 2,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Bracket · Winners Final",
+     "roundOrder": [
+      "33",
+      2,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      3,
+      1
+     ],
+     "upset": -2,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Bracket · Winners Semi Final",
+     "roundOrder": [
+      "33",
+      1,
+      1
+     ],
+     "p1": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      0,
+      2
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Bracket · Winners Semi Final",
+     "roundOrder": [
+      "33",
+      1,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Bracket · Losers Round 1",
+     "roundOrder": [
+      "33",
+      -1,
+      1
+     ],
+     "p1": {
+      "seed": 6,
+      "name": ""
+     },
+     "p2": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "score": [
+      1,
+      2
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Bracket · Losers Round 1",
+     "roundOrder": [
+      "33",
+      -1,
+      0
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 8,
+      "name": "Team Hotel"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": -1,
+     "losersRun": 0,
+     "seedOver": 1
+    },
+    {
+     "round": "Bracket · Losers Round 2",
+     "roundOrder": [
+      "33",
+      -2,
+      1
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      0,
+      2
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Bracket · Losers Round 2",
+     "roundOrder": [
+      "33",
+      -2,
+      0
+     ],
+     "p1": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": 2,
+     "losersRun": 1,
+     "seedOver": null
+    },
+    {
+     "round": "Bracket · Losers Round 3",
+     "roundOrder": [
+      "33",
+      -3,
+      0
+     ],
+     "p1": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      1,
+      2
+     ],
+     "upset": -4,
+     "losersRun": 1,
+     "seedOver": 3
+    },
+    {
+     "round": "Bracket · Losers Round 4",
+     "roundOrder": [
+      "33",
+      -4,
+      0
+     ],
+     "p1": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      3,
+      1
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pool C · Grand Final",
+     "roundOrder": [
+      "32",
+      3,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 6,
+      "name": ""
+     },
+     "score": null,
+     "upset": null,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pool C · Winners Final",
+     "roundOrder": [
+      "32",
+      2,
+      1
+     ],
+     "p1": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "p2": {
+      "seed": 6,
+      "name": ""
+     },
+     "score": [
+      1,
+      2
+     ],
+     "upset": 3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pool C · Winners Final",
+     "roundOrder": [
+      "32",
+      2,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pool C · Winners Semi Final",
+     "roundOrder": [
+      "32",
+      1,
+      3
+     ],
+     "p1": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "p2": {
+      "seed": 6,
+      "name": ""
+     },
+     "score": [
+      0,
+      2
+     ],
+     "upset": 2,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pool C · Winners Semi Final",
+     "roundOrder": [
+      "32",
+      1,
+      1
+     ],
+     "p1": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "p2": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": -1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pool C · Losers Round 2",
+     "roundOrder": [
+      "32",
+      -2,
+      1
+     ],
+     "p1": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": null,
+     "upset": null,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pool C · Losers Round 2",
+     "roundOrder": [
+      "32",
+      -2,
+      0
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": 3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pool B1 Finals · Grand Final Reset",
+     "roundOrder": [
+      "31",
+      3,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "score": [
+      3,
+      1
+     ],
+     "upset": -5,
+     "losersRun": 0,
+     "seedOver": 5
+    },
+    {
+     "round": "Pool B1 Finals · Grand Final",
+     "roundOrder": [
+      "31",
+      2,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      3,
+      2
+     ],
+     "upset": -1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pool B1 Finals · Winners Final",
+     "roundOrder": [
+      "31",
+      1,
+      1
+     ],
+     "p1": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": -1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pool B1 Finals · Winners Final",
+     "roundOrder": [
+      "31",
+      1,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pool B1 Finals · Losers Round 1",
+     "roundOrder": [
+      "31",
+      -1,
+      1
+     ],
+     "p1": {
+      "seed": 6,
+      "name": ""
+     },
+     "p2": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "score": [
+      1,
+      2
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pool B1 Finals · Losers Round 1",
+     "roundOrder": [
+      "31",
+      -1,
+      0
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 8,
+      "name": "Team Hotel"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": -1,
+     "losersRun": 0,
+     "seedOver": 1
+    },
+    {
+     "round": "Pool B1 Finals · Losers Round 2",
+     "roundOrder": [
+      "31",
+      -2,
+      1
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": 2,
+     "losersRun": 1,
+     "seedOver": null
+    },
+    {
+     "round": "Pool B1 Finals · Losers Round 2",
+     "roundOrder": [
+      "31",
+      -2,
+      0
+     ],
+     "p1": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": 2,
+     "losersRun": 1,
+     "seedOver": null
+    },
+    {
+     "round": "Pool B1 Finals · Losers Round 3",
+     "roundOrder": [
+      "31",
+      -3,
+      0
+     ],
+     "p1": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "p2": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": 1,
+     "losersRun": 2,
+     "seedOver": 1
+    },
+    {
+     "round": "Pool B1 Finals · Losers Round 4",
+     "roundOrder": [
+      "31",
+      -4,
+      0
+     ],
+     "p1": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "p2": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "score": [
+      0,
+      3
+     ],
+     "upset": 4,
+     "losersRun": 3,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool A2 · Grand Final",
+     "roundOrder": [
+      "22",
+      2,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": null,
+      "name": ""
+     },
+     "score": null,
+     "upset": null,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool A2 · Winners Final",
+     "roundOrder": [
+      "22",
+      1,
+      1
+     ],
+     "p1": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": null,
+     "upset": null,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool A2 · Winners Final",
+     "roundOrder": [
+      "22",
+      1,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool A2 · Losers Round 1",
+     "roundOrder": [
+      "22",
+      -1,
+      1
+     ],
+     "p1": {
+      "seed": 6,
+      "name": ""
+     },
+     "p2": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "score": null,
+     "upset": null,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool A2 · Losers Round 1",
+     "roundOrder": [
+      "22",
+      -1,
+      0
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 8,
+      "name": "Team Hotel"
+     },
+     "score": [
+      0,
+      2
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool A2 · Losers Round 2",
+     "roundOrder": [
+      "22",
+      -2,
+      1
+     ],
+     "p1": {
+      "seed": 8,
+      "name": "Team Hotel"
+     },
+     "p2": {
+      "seed": null,
+      "name": ""
+     },
+     "score": null,
+     "upset": null,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool A2 · Losers Round 2",
+     "roundOrder": [
+      "22",
+      -2,
+      0
+     ],
+     "p1": {
+      "seed": null,
+      "name": ""
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": null,
+     "upset": null,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool A1 · Grand Final Reset",
+     "roundOrder": [
+      "21",
+      4,
+      0
+     ],
+     "p1": {
+      "seed": null,
+      "name": ""
+     },
+     "p2": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "score": [
+      3,
+      2
+     ],
+     "upset": 0,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool A1 · Grand Final",
+     "roundOrder": [
+      "21",
+      3,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      1,
+      3
+     ],
+     "upset": 2,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool A1 · Winners Final",
+     "roundOrder": [
+      "21",
+      2,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      3,
+      1
+     ],
+     "upset": -2,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool A1 · Winners Semi Final",
+     "roundOrder": [
+      "21",
+      1,
+      1
+     ],
+     "p1": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      0,
+      2
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool A1 · Winners Semi Final",
+     "roundOrder": [
+      "21",
+      1,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool A1 · Losers Round 1",
+     "roundOrder": [
+      "21",
+      -1,
+      1
+     ],
+     "p1": {
+      "seed": 6,
+      "name": ""
+     },
+     "p2": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "score": [
+      1,
+      2
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool A1 · Losers Round 1",
+     "roundOrder": [
+      "21",
+      -1,
+      0
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 8,
+      "name": "Team Hotel"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": -1,
+     "losersRun": 0,
+     "seedOver": 1
+    },
+    {
+     "round": "Pools / Pool A1 · Losers Round 2",
+     "roundOrder": [
+      "21",
+      -2,
+      1
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      0,
+      2
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool A1 · Losers Round 2",
+     "roundOrder": [
+      "21",
+      -2,
+      0
+     ],
+     "p1": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": 2,
+     "losersRun": 1,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool A1 · Losers Round 3",
+     "roundOrder": [
+      "21",
+      -3,
+      0
+     ],
+     "p1": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      1,
+      2
+     ],
+     "upset": -4,
+     "losersRun": 1,
+     "seedOver": 3
+    },
+    {
+     "round": "Pools / Pool A1 · Losers Round 4",
+     "roundOrder": [
+      "21",
+      -4,
+      0
+     ],
+     "p1": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      3,
+      1
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    }
+   ],
+   "cells": [
+    [
+     [
+      "Pools / Pool A1 · Losers Round 4",
+      [
+       "21",
+       -4,
+       0
+      ]
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3-1",
+      4
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool A1 · Losers Round 3",
+      [
+       "21",
+       -3,
+       0
+      ]
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "1-2",
+      3
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "-4",
+      -4
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "3",
+      3
+     ]
+    ],
+    [
+     [
+      "Pools / Pool A1 · Losers Round 2",
+      [
+       "21",
+       -2,
+       0
+      ]
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool A1 · Losers Round 2",
+      [
+       "21",
+       -2,
+       1
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "0-2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool A1 · Losers Round 1",
+      [
+       "21",
+       -1,
+       0
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Team Hotel",
+      "team hotel"
+     ],
+     [
+      "8",
+      8
+     ],
+     [
+      "-1",
+      -1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "1",
+      1
+     ]
+    ],
+    [
+     [
+      "Pools / Pool A1 · Losers Round 1",
+      [
+       "21",
+       -1,
+       1
+      ]
+     ],
+     [
+      "6",
+      6
+     ],
+     [
+      "(seed 6)",
+      "(seed 6)"
+     ],
+     [
+      "1-2",
+      3
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool A1 · Winners Semi Final",
+      [
+       "21",
+       1,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool A1 · Winners Semi Final",
+      [
+       "21",
+       1,
+       1
+      ]
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "0-2",
+      2
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool A1 · Winners Final",
+      [
+       "21",
+       2,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "3-1",
+      4
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "-2",
+      -2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool A1 · Grand Final",
+      [
+       "21",
+       3,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "1-3",
+      4
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool A1 · Grand Final Reset",
+      [
+       "21",
+       4,
+       0
+      ]
+     ],
+     [
+      "-",
+      9999
+     ],
+     [
+      "TBD",
+      "tbd"
+     ],
+     [
+      "3-2",
+      5
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "0",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool A2 · Losers Round 2",
+      [
+       "22",
+       -2,
+       0
+      ]
+     ],
+     [
+      "-",
+      9999
+     ],
+     [
+      "TBD",
+      "tbd"
+     ],
+     [
+      "-",
+      0
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool A2 · Losers Round 2",
+      [
+       "22",
+       -2,
+       1
+      ]
+     ],
+     [
+      "8",
+      8
+     ],
+     [
+      "Team Hotel",
+      "team hotel"
+     ],
+     [
+      "-",
+      0
+     ],
+     [
+      "TBD",
+      "tbd"
+     ],
+     [
+      "-",
+      9999
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool A2 · Losers Round 1",
+      [
+       "22",
+       -1,
+       0
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "0-2",
+      2
+     ],
+     [
+      "Team Hotel",
+      "team hotel"
+     ],
+     [
+      "8",
+      8
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool A2 · Losers Round 1",
+      [
+       "22",
+       -1,
+       1
+      ]
+     ],
+     [
+      "6",
+      6
+     ],
+     [
+      "(seed 6)",
+      "(seed 6)"
+     ],
+     [
+      "-",
+      0
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool A2 · Winners Final",
+      [
+       "22",
+       1,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool A2 · Winners Final",
+      [
+       "22",
+       1,
+       1
+      ]
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "-",
+      0
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool A2 · Grand Final",
+      [
+       "22",
+       2,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "-",
+      0
+     ],
+     [
+      "TBD",
+      "tbd"
+     ],
+     [
+      "-",
+      9999
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pool B1 Finals · Losers Round 4",
+      [
+       "31",
+       -4,
+       0
+      ]
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "0-3",
+      3
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pool B1 Finals · Losers Round 3",
+      [
+       "31",
+       -3,
+       0
+      ]
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "1",
+      1
+     ]
+    ],
+    [
+     [
+      "Pool B1 Finals · Losers Round 2",
+      [
+       "31",
+       -2,
+       0
+      ]
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pool B1 Finals · Losers Round 2",
+      [
+       "31",
+       -2,
+       1
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pool B1 Finals · Losers Round 1",
+      [
+       "31",
+       -1,
+       0
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Team Hotel",
+      "team hotel"
+     ],
+     [
+      "8",
+      8
+     ],
+     [
+      "-1",
+      -1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "1",
+      1
+     ]
+    ],
+    [
+     [
+      "Pool B1 Finals · Losers Round 1",
+      [
+       "31",
+       -1,
+       1
+      ]
+     ],
+     [
+      "6",
+      6
+     ],
+     [
+      "(seed 6)",
+      "(seed 6)"
+     ],
+     [
+      "1-2",
+      3
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pool B1 Finals · Winners Final",
+      [
+       "31",
+       1,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pool B1 Finals · Winners Final",
+      [
+       "31",
+       1,
+       1
+      ]
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "-1",
+      -1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pool B1 Finals · Grand Final",
+      [
+       "31",
+       2,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "3-2",
+      5
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "-1",
+      -1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pool B1 Finals · Grand Final Reset",
+      [
+       "31",
+       3,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "3-1",
+      4
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "-5",
+      -5
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "5",
+      5
+     ]
+    ],
+    [
+     [
+      "Pool C · Losers Round 2",
+      [
+       "32",
+       -2,
+       0
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pool C · Losers Round 2",
+      [
+       "32",
+       -2,
+       1
+      ]
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "-",
+      0
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pool C · Winners Semi Final",
+      [
+       "32",
+       1,
+       1
+      ]
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "-1",
+      -1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pool C · Winners Semi Final",
+      [
+       "32",
+       1,
+       3
+      ]
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "0-2",
+      2
+     ],
+     [
+      "(seed 6)",
+      "(seed 6)"
+     ],
+     [
+      "6",
+      6
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pool C · Winners Final",
+      [
+       "32",
+       2,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pool C · Winners Final",
+      [
+       "32",
+       2,
+       1
+      ]
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "1-2",
+      3
+     ],
+     [
+      "(seed 6)",
+      "(seed 6)"
+     ],
+     [
+      "6",
+      6
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pool C · Grand Final",
+      [
+       "32",
+       3,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "-",
+      0
+     ],
+     [
+      "(seed 6)",
+      "(seed 6)"
+     ],
+     [
+      "6",
+      6
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Bracket · Losers Round 4",
+      [
+       "33",
+       -4,
+       0
+      ]
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3-1",
+      4
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Bracket · Losers Round 3",
+      [
+       "33",
+       -3,
+       0
+      ]
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "1-2",
+      3
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "-4",
+      -4
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "3",
+      3
+     ]
+    ],
+    [
+     [
+      "Bracket · Losers Round 2",
+      [
+       "33",
+       -2,
+       0
+      ]
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Bracket · Losers Round 2",
+      [
+       "33",
+       -2,
+       1
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "0-2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Bracket · Losers Round 1",
+      [
+       "33",
+       -1,
+       0
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Team Hotel",
+      "team hotel"
+     ],
+     [
+      "8",
+      8
+     ],
+     [
+      "-1",
+      -1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "1",
+      1
+     ]
+    ],
+    [
+     [
+      "Bracket · Losers Round 1",
+      [
+       "33",
+       -1,
+       1
+      ]
+     ],
+     [
+      "6",
+      6
+     ],
+     [
+      "(seed 6)",
+      "(seed 6)"
+     ],
+     [
+      "1-2",
+      3
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Bracket · Winners Semi Final",
+      [
+       "33",
+       1,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Bracket · Winners Semi Final",
+      [
+       "33",
+       1,
+       1
+      ]
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "0-2",
+      2
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Bracket · Winners Final",
+      [
+       "33",
+       2,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "3-1",
+      4
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "-2",
+      -2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Bracket · Grand Final",
+      [
+       "33",
+       3,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "1-3",
+      4
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Bracket · Grand Final Reset",
+      [
+       "33",
+       4,
+       0
+      ]
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3-2",
+      5
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Top 8 · Losers Final",
+      [
+       "50",
+       -1,
+       0
+      ]
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "-",
+      0
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Top 8 · Winners Final",
+      [
+       "50",
+       1,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Top 8 · Winners Final",
+      [
+       "50",
+       1,
+       1
+      ]
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "-1",
+      -1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Top 8 · Grand Final",
+      [
+       "50",
+       2,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "-",
+      0
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ]
+   ]
+  },
+  {
+   "scenario": "some groups failed",
+   "progress": {
+    "status": "done",
+    "error": "",
+    "done": 4,
+    "total": 4,
+    "failed": 3
+   },
+   "line": "11 試合 (3 件取得失敗)",
+   "rows": [
+    {
+     "round": "Pools / Pool 1 · Grand Final Reset",
+     "roundOrder": [
+      "41",
+      4,
+      0
+     ],
+     "p1": {
+      "seed": null,
+      "name": ""
+     },
+     "p2": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "score": [
+      3,
+      2
+     ],
+     "upset": 0,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool 1 · Grand Final",
+     "roundOrder": [
+      "41",
+      3,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      1,
+      3
+     ],
+     "upset": 2,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool 1 · Winners Final",
+     "roundOrder": [
+      "41",
+      2,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      3,
+      1
+     ],
+     "upset": -2,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool 1 · Winners Semi Final",
+     "roundOrder": [
+      "41",
+      1,
+      1
+     ],
+     "p1": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "p2": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "score": [
+      0,
+      2
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool 1 · Winners Semi Final",
+     "roundOrder": [
+      "41",
+      1,
+      0
+     ],
+     "p1": {
+      "seed": 1,
+      "name": "Alpha"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool 1 · Losers Round 1",
+     "roundOrder": [
+      "41",
+      -1,
+      1
+     ],
+     "p1": {
+      "seed": 6,
+      "name": ""
+     },
+     "p2": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "score": [
+      1,
+      2
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool 1 · Losers Round 1",
+     "roundOrder": [
+      "41",
+      -1,
+      0
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 8,
+      "name": "Team Hotel"
+     },
+     "score": [
+      2,
+      0
+     ],
+     "upset": -1,
+     "losersRun": 0,
+     "seedOver": 1
+    },
+    {
+     "round": "Pools / Pool 1 · Losers Round 2",
+     "roundOrder": [
+      "41",
+      -2,
+      1
+     ],
+     "p1": {
+      "seed": 5,
+      "name": "Echo"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      0,
+      2
+     ],
+     "upset": -3,
+     "losersRun": 0,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool 1 · Losers Round 2",
+     "roundOrder": [
+      "41",
+      -2,
+      0
+     ],
+     "p1": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "p2": {
+      "seed": 4,
+      "name": "Delta"
+     },
+     "score": [
+      2,
+      1
+     ],
+     "upset": 2,
+     "losersRun": 1,
+     "seedOver": null
+    },
+    {
+     "round": "Pools / Pool 1 · Losers Round 3",
+     "roundOrder": [
+      "41",
+      -3,
+      0
+     ],
+     "p1": {
+      "seed": 7,
+      "name": "Golf"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      1,
+      2
+     ],
+     "upset": -4,
+     "losersRun": 1,
+     "seedOver": 3
+    },
+    {
+     "round": "Pools / Pool 1 · Losers Round 4",
+     "roundOrder": [
+      "41",
+      -4,
+      0
+     ],
+     "p1": {
+      "seed": 3,
+      "name": "Charlie"
+     },
+     "p2": {
+      "seed": 2,
+      "name": "Bravo"
+     },
+     "score": [
+      3,
+      1
+     ],
+     "upset": 1,
+     "losersRun": 0,
+     "seedOver": null
+    }
+   ],
+   "cells": [
+    [
+     [
+      "Pools / Pool 1 · Losers Round 4",
+      [
+       "41",
+       -4,
+       0
+      ]
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3-1",
+      4
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool 1 · Losers Round 3",
+      [
+       "41",
+       -3,
+       0
+      ]
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "1-2",
+      3
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "-4",
+      -4
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "3",
+      3
+     ]
+    ],
+    [
+     [
+      "Pools / Pool 1 · Losers Round 2",
+      [
+       "41",
+       -2,
+       0
+      ]
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool 1 · Losers Round 2",
+      [
+       "41",
+       -2,
+       1
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "0-2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool 1 · Losers Round 1",
+      [
+       "41",
+       -1,
+       0
+      ]
+     ],
+     [
+      "5",
+      5
+     ],
+     [
+      "Echo",
+      "echo"
+     ],
+     [
+      "2-0",
+      2
+     ],
+     [
+      "Team Hotel",
+      "team hotel"
+     ],
+     [
+      "8",
+      8
+     ],
+     [
+      "-1",
+      -1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "1",
+      1
+     ]
+    ],
+    [
+     [
+      "Pools / Pool 1 · Losers Round 1",
+      [
+       "41",
+       -1,
+       1
+      ]
+     ],
+     [
+      "6",
+      6
+     ],
+     [
+      "(seed 6)",
+      "(seed 6)"
+     ],
+     [
+      "1-2",
+      3
+     ],
+     [
+      "Golf",
+      "golf"
+     ],
+     [
+      "7",
+      7
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool 1 · Winners Semi Final",
+      [
+       "41",
+       1,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "2-1",
+      3
+     ],
+     [
+      "Delta",
+      "delta"
+     ],
+     [
+      "4",
+      4
+     ],
+     [
+      "-3",
+      -3
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool 1 · Winners Semi Final",
+      [
+       "41",
+       1,
+       1
+      ]
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "Bravo",
+      "bravo"
+     ],
+     [
+      "0-2",
+      2
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool 1 · Winners Final",
+      [
+       "41",
+       2,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "3-1",
+      4
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "-2",
+      -2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool 1 · Grand Final",
+      [
+       "41",
+       3,
+       0
+      ]
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "1-3",
+      4
+     ],
+     [
+      "Charlie",
+      "charlie"
+     ],
+     [
+      "3",
+      3
+     ],
+     [
+      "2",
+      2
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ],
+    [
+     [
+      "Pools / Pool 1 · Grand Final Reset",
+      [
+       "41",
+       4,
+       0
+      ]
+     ],
+     [
+      "-",
+      9999
+     ],
+     [
+      "TBD",
+      "tbd"
+     ],
+     [
+      "3-2",
+      5
+     ],
+     [
+      "Alpha",
+      "alpha"
+     ],
+     [
+      "1",
+      1
+     ],
+     [
+      "0",
+      0
+     ],
+     [
+      "",
+      0
+     ],
+     [
+      "",
+      0
+     ]
+    ]
+   ]
+  },
+  {
+   "scenario": "every group failed",
+   "progress": {
+    "status": "error",
+    "error": "fetch_failed",
+    "done": 2,
+    "total": 2,
+    "failed": 2
+   },
+   "line": "取得に失敗しました",
+   "rows": [],
+   "cells": []
+  },
+  {
+   "scenario": "every group answered empty",
+   "progress": {
+    "status": "done",
+    "error": "",
+    "done": 2,
+    "total": 2,
+    "failed": 2
+   },
+   "line": "0 試合 (2 件取得失敗)",
+   "rows": [],
+   "cells": []
+  },
+  {
+   "scenario": "no phase group",
+   "progress": {
+    "status": "error",
+    "error": "no_phases",
+    "done": 0,
+    "total": 0,
+    "failed": 0
+   },
+   "line": "この大会にはフェーズ（グループ）がありません",
+   "rows": [],
+   "cells": []
+  }
+ ],
+ "nameSort": {
+  "names": [
+   "🦊Fox",
+   "Ｚｅｔａ",
+   "alpha",
+   "Alpha",
+   "ｂｅｔａ",
+   "😀Smile",
+   "zed",
+   "あおい",
+   "Émile",
+   "ΟΔΟΣ"
+  ],
+  "ascending": [
+   "alpha",
+   "Alpha",
+   "zed",
+   "Émile",
+   "ΟΔΟΣ",
+   "あおい",
+   "ｂｅｔａ",
+   "Ｚｅｔａ",
+   "😀Smile",
+   "🦊Fox"
+  ],
+  "descending": [
+   "🦊Fox",
+   "😀Smile",
+   "Ｚｅｔａ",
+   "ｂｅｔａ",
+   "あおい",
+   "ΟΔΟΣ",
+   "Émile",
+   "zed",
+   "alpha",
+   "Alpha"
+  ]
+ }
+}

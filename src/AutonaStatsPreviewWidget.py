@@ -60,8 +60,8 @@ DEFAULT_TYPE = STATS_LAYOUTS[0][0]
 SETTINGS_KEY = "stats_preview.selected_type"
 
 # Companion macro exposed by this panel: the External Control API operation
-# that recalculates every statistic for board 1 (the same work the STATS
-# panel's 「統計情報を取得する」 button does). Mirrors the catalogue in
+# that recalculates every statistic for board 1 (the same work the
+# Statistics page's 「統計情報を取得する」 button does). Mirrors the catalogue in
 # AutonaApiInfoWindow / AutonaApiV1 (the source of truth).
 REFRESH_METHOD = "POST"
 REFRESH_PATH = "/scoreboards/1/stats:refresh"

@@ -1100,16 +1100,9 @@
         <translation>メモ</translation>
     </message>
     <message>
-        <location filename="..\AutonaStatsWidget.py" line="17" />
         <location filename="..\Autona.py" line="393" />
         <source>Statistics</source>
         <translation>統計情報</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaAnalysisWidget.py" line="149" />
-        <location filename="..\Autona.py" line="399" />
-        <source>Analysis</source>
-        <translation>分析</translation>
     </message>
     <message>
         <location filename="..\Autona.py" line="447" />
@@ -1242,45 +1235,9 @@
         <translation>プログラムを再度実行した時にこの通知を表示する</translation>
     </message>
     <message>
-        <location filename="..\AutonaAnalysisWidget.py" line="166" />
-        <source>Startggからデータを取得</source>
-        <translation>Startggからデータを取得</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaAnalysisWidget.py" line="179" />
-        <source>選手名 / ラウンドで検索</source>
-        <translation>選手名 / ラウンドで検索</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaAnalysisWidget.py" line="285" />
+        <location filename="..\AutonaSelectSetWindow.py" line="286" />
         <source>大会が選択されていません</source>
         <translation>大会が選択されていません</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaAnalysisWidget.py" line="307" />
-        <source>フェーズ情報を取得中...</source>
-        <translation>フェーズ情報を取得中...</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaAnalysisWidget.py" line="337" />
-        <source>取得中 {0}/{1}</source>
-        <translation>取得中 {0}/{1}</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaAnalysisWidget.py" line="364" />
-        <source>取得に失敗しました</source>
-        <translation>取得に失敗しました</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaAnalysisWidget.py" line="553" />
-        <location filename="..\AutonaAnalysisWidget.py" line="383" />
-        <source>{0} 試合</source>
-        <translation>{0} 試合</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaAnalysisWidget.py" line="556" />
-        <source>({0} 件取得失敗)</source>
-        <translation>({0} 件取得失敗)</translation>
     </message>
     <message>
         <location filename="..\AutonaBracketView.py" line="407" />
@@ -1356,8 +1313,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
     </message>
     <message>
         <location filename="..\AutonaTeamBattleWidget.py" line="129" />
-        <location filename="..\AutonaStatsWidget.py" line="84" />
-        <location filename="..\AutonaStatsWidget.py" line="73" />
         <location filename="..\AutonaSelectSetWindow.py" line="120" />
         <location filename="..\AutonaCrewBattleWidget.py" line="132" />
         <source>Phase</source>
@@ -1829,84 +1784,7 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>識別子</translation>
     </message>
     <message>
-        <location filename="..\AutonaStatsWidget.py" line="31" />
-        <source>統計情報を取得する</source>
-        <translation>統計情報を取得する</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsWidget.py" line="121" />
-        <location filename="..\AutonaStatsWidget.py" line="109" />
-        <location filename="..\AutonaStatsWidget.py" line="51" />
-        <source>Date</source>
-        <translation>日付</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsWidget.py" line="118" />
-        <location filename="..\AutonaStatsWidget.py" line="106" />
-        <location filename="..\AutonaStatsWidget.py" line="52" />
-        <source>Event</source>
-        <translation>イベント</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsWidget.py" line="85" />
-        <location filename="..\AutonaStatsWidget.py" line="74" />
-        <location filename="..\AutonaStatsWidget.py" line="53" />
-        <source>Round</source>
-        <translation>ラウンド</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsWidget.py" line="87" />
-        <location filename="..\AutonaStatsWidget.py" line="76" />
-        <location filename="..\AutonaStatsWidget.py" line="54" />
-        <source>Score</source>
-        <translation>スコア</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsWidget.py" line="55" />
-        <source>Winner</source>
-        <translation>勝者</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsWidget.py" line="61" />
-        <source>Head-to-Head (Recent Sets)</source>
-        <translation>直接対戦（最近のセット）</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsWidget.py" line="86" />
-        <location filename="..\AutonaStatsWidget.py" line="75" />
-        <source>Opponent</source>
-        <translation>対戦相手</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsWidget.py" line="93" />
-        <source>Last Sets</source>
-        <translation>直近のセット</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsWidget.py" line="117" />
-        <location filename="..\AutonaStatsWidget.py" line="105" />
-        <source>Tournament</source>
-        <translation>大会</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsWidget.py" line="119" />
-        <location filename="..\AutonaStatsWidget.py" line="107" />
-        <source>Placement</source>
-        <translation>順位</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsWidget.py" line="120" />
-        <location filename="..\AutonaStatsWidget.py" line="108" />
-        <source>Entrants</source>
-        <translation>参加者数</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsWidget.py" line="127" />
-        <source>Tournament History</source>
-        <translation>大会履歴</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsWidget.py" line="202" />
+        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
         <source>Upset Factor</source>
         <translation>アップセットファクター</translation>
     </message>

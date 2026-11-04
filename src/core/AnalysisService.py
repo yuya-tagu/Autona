@@ -4,9 +4,12 @@ Every match of every phase group of the loaded tournament, one row each:
 the round, both sides' seed and name, the score, and three numbers worked
 out of the bracket -- the upset factor, the winner's losers run and the
 loser's seed over. Until S4j all of it was the STATS panel's sub-tab
-(AutonaAnalysisWidget): the fetch, its parallelism, the rows and their
-drop on a tournament switch, kept in the widget's memory -- so nothing else
-could see the rows, and a headless shell could not make them.
+(the Qt AutonaAnalysisWidget, removed in S4k): the fetch, its parallelism,
+the rows and their drop on a tournament switch, kept in the widget's
+memory -- so nothing else could see the rows, and a headless shell could
+not make them. Since S4k the Statistics page (web/src/StatsPage) shows
+them: it starts a fetch (POST /api/v1/analysis:refresh), follows
+``analysis`` and reads the rows (GET /api/v1/analysis).
 
 The fetch: ``Refresh()`` answers ``STARTED`` / ``BUSY`` (one is in
 progress; this request is dropped, not queued) / ``NO_TOURNAMENT``. It runs
@@ -43,7 +46,7 @@ tournament has hundreds to over a thousand of them): they stay in this
 service's memory with the URL of the tournament they are from, read by
 ``Result()`` / ``Rows()`` (``ResultRevision()``: which rows they are,
 without copying them). A fetch that ends in an error keeps the rows of the
-last one that did not (the panel's table did).
+last one that did not (the Qt panel's table did).
 
 ``Forget()``: the provider adapter calls it when the tournament is loaded
 (again) or unloaded -- directly, not through a state observer. The fetch in
@@ -51,7 +54,7 @@ progress is dropped (its jobs stop at their next step, and what they still
 get back is not recorded: each fetch is a generation), the rows are
 dropped, and ``analysis`` goes back to idle at the next revision.
 
-Each row (``BracketRows``) is a structure, not the panel's text: ``round``
+Each row (``BracketRows``) is a structure, not a table's text: ``round``
 (the round's name, after the phase / group when there are several groups)
 and ``roundOrder`` (``[group id, round, index in the round]``: the Round
 column's sort key), ``p1`` / ``p2`` (``{"seed": n or None, "name": "" when
@@ -459,7 +462,7 @@ class AnalysisService:
         """Drop the fetch in progress and the rows: the tournament they are
         from is no longer the one loaded. `analysis` goes back to idle at
         the next revision -- even from idle: a reader that showed something
-        of the tournament before (the panel's "no tournament") sees that the
+        of the tournament before (the page's "no tournament") sees that the
         tournament changed. Main thread: the provider adapter's
         LoadTournament / UnloadTournament, once the new provider (or none)
         is in place -- a Refresh made before this is dropped by it, and one

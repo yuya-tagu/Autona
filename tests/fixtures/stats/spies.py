@@ -6,13 +6,13 @@ The statistics used to be asked for through each board's AutonaStatsUtil
 signals (``RecentSetsSignal``, ``LastSetsP1Signal``, ...): the player cards'
 triggers, relayed by the board, and the board's own after a swap / move /
 clear. Since S3e-5 everything that asks goes through core's
-``StatsService.Refresh`` -- the operations that change a player, the routes,
-the STATS panel -- and the old signals are gone. This counts one board's
-Refresh calls under the old signals' names, so recordings and assertions
-written against the signals read the same: one count is one fetch (or, for
-the upset factor, one recalculation through the trigger -- the operations
-that recalculate it inside their own save cycle call UpdateUpsetFactor
-directly, as they did before, and are not counted).
+``StatsService.Refresh`` -- the operations that change a player, the routes
+(the Statistics page's among them) -- and the old signals are gone. This
+counts one board's Refresh calls under the old signals' names, so
+recordings and assertions written against the signals read the same: one
+count is one fetch (or, for the upset factor, one recalculation through the
+trigger -- the operations that recalculate it inside their own save cycle
+call UpdateUpsetFactor directly, as they did before, and are not counted).
 """
 from unittest.mock import patch
 

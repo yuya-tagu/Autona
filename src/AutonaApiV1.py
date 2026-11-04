@@ -33,6 +33,7 @@ from werkzeug.exceptions import ClientDisconnected
 
 from .core.StateManager import StateManager
 from .core.Actions import AutonaActions
+from .core import AnalysisService as analysis
 from .core import StateSchema as schema
 from .core import ColorService
 from .core import ImageImport
@@ -657,6 +658,20 @@ def get_tournament():
     # tournamentInfo.url / load (ADR-005 S4g), which the Event page renders
     # without asking here.
     return ok(data=WebOps.get_tournament(), revision=current_revision())
+
+
+@api_v1.route("/analysis")
+@api_handler
+def get_analysis():
+    # The tournament's match list (ADR-005 S4k; core's AnalysisService):
+    # `status` is the state's analysis.status, `rows` the newest fetch's that
+    # made them, with the `url` of their tournament -- none ("" and []) unless
+    # that is the tournament loaded now. Each row is a structure (round and
+    # its sort key, both sides' seed and name, score, upset, losersRun,
+    # seedOver); the wording is the reader's. The rows are not in the state
+    # (hundreds to over a thousand), so the Statistics page reads them here
+    # whenever analysis.revision / status changes.
+    return ok(data=WebOps.get_analysis(), revision=current_revision())
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1663,6 +1678,24 @@ def bracket_refresh():
         # Cleared between the check above and the start.
         raise ApiError(NOT_READY, "no tournament loaded", 409)
     return ok(data={"accepted": True, "operation": "bracket.refresh"}, status=202)
+
+
+@api_v1.route("/analysis:refresh", methods=["POST"])
+@write_op("analysis.refresh")
+def analysis_refresh():
+    # Fetch the loaded tournament's match list from start.gg (ADR-005 S4k;
+    # core's AnalysisService, in either shell), by jobs in the background:
+    # analysis says "running" at the next revision before this answers, and
+    # "done" or "error" once it is over; the rows are GET /analysis's. One
+    # at a time: while one runs, this is 409 and dropped (not queued).
+    started = WebOps.refresh_analysis()
+    if started == analysis.BUSY:
+        raise ApiError(
+            CONFLICT, "the match list is being fetched already", 409)
+    if started == analysis.NO_TOURNAMENT:
+        raise ApiError(NOT_READY, "no tournament loaded", 409)
+    return ok(data={"accepted": True, "operation": "analysis.refresh"},
+              revision=current_revision(), status=202)
 
 
 # ── Top 8 (ADR-005 S4i) ──

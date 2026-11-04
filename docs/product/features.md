@@ -207,13 +207,15 @@ React の [web/src/Top8Page/](../../web/src/Top8Page/)（`/web/top8`、デスク
 
 ## 11. 統計・分析
 
-STATS ドック（[src/AutonaStatsWidget.py](../../src/AutonaStatsWidget.py)）の内部タブに集約。
+React の [web/src/StatsPage/](../../web/src/StatsPage/)（`/web/stats`、デスクトップでは共有ビューに表示。ADR-005 S4k で Qt 版から移行）。ブラウザ（LAN の別の PC・ヘッドレス）からも同じページで見られる。統計の取得と書き込みは core の [src/core/StatsService.py](../../src/core/StatsService.py)、試合一覧は [src/core/AnalysisService.py](../../src/core/AnalysisService.py) で、ページは `/api/v1`（`scoreboards/1/stats:refresh`・`analysis:refresh`・`GET analysis`）を呼んで state を描くだけ。
 
-- **Head-to-Head / Last Sets / Tournament History**（内蔵タブ）
-- **この大会の試合一覧**（[src/AutonaAnalysisWidget.py](../../src/AutonaAnalysisWidget.py) パネル。取得と行の計算は [src/core/AnalysisService.py](../../src/core/AnalysisService.py)）
+- 上部: 「統計情報を取得する」と、アップセット係数・対戦カードの 1 行（ボード 1。選手名は反映済みの値）
+- **直近の対戦 / 戦績 / 大会履歴**（Head-to-Head / Last Sets / Tournament History）
+- **この大会の試合一覧**
   - 全試合一覧（ラウンド・シード・選手・スコア）
   - Upset Factor / Loser's Run / SeedOver
-  - Stream Queue 反映 / 列ソート対応
+  - 列の並べ替え / 選手名・ラウンドの絞り込み
+  - 結果は core が持つので、ページを開き直しても・別の端末からも同じ一覧が見える（大会を変える・再起動で消える）
 
 ---
 

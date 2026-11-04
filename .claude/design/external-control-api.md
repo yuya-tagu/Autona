@@ -223,6 +223,7 @@
 | `GET /api/v1/stream/channels` | 保存した配信チャンネル（§5.5。2026-10-31 追加） | `get_stream_channels`（`core/StreamService.Channels`） | — |
 | `GET /api/v1/stream/thumbnail/options` | 配信サムネ生成のオプション（§5.6。2026-10-31 追加） | `get_stream_thumbnail_options`（`core/StreamService.ThumbnailOptions`） | — |
 | `GET /api/v1/tournament` | 大会の URL と、設定 / 解除の進み具合（§5.7。2026-11-01 追加） | `get_tournament`（state の `tournamentInfo.url` / `load`。`core/TournamentService.Load`） | — |
+| `GET /api/v1/analysis` | この大会の試合一覧の行（§5.9。2026-11-04 追加） | `get_analysis`（`core/AnalysisService.Result`） | — |
 
 > `data` の具体スキーマは委譲先 Action の現返却（candidates §3）に準拠。本 API はそれを `{"ok":true,"data":...}` で包むだけ。
 
@@ -353,6 +354,33 @@ Board / Commentary / Top 8 タブと Designer の「開く」一覧が使う**�
 - `code` が §6.22 の `country` に渡す値（カスタム国旗は名前）。同じ `code` が複数あれば先の行が使われる
 - 国のデータの読み込み前は `409 NOT_READY`（§5 `countries/{code}/states` と同じ）。状態ではないので `revision` は付かない。
   Top 8 のページはこの 409 では止まらず、国の欄だけを無効にして注記と再読み込みボタンを出す
+
+### 5.9 `GET /api/v1/analysis`（2026-11-04 追加・ADR-005 S4k）
+この大会の試合一覧（統計情報ページの「この大会の試合一覧」タブ）。core の `AnalysisService` がメモリに持つ最新の結果で、
+行は state に入らない（大会規模で数百〜千超。ADR-005 S4j 論点 2）。進み具合は state の `analysis`
+（`{status, error, done, total, failed, revision}`）にあり、WS で届く。取得は §7.3 `POST /api/v1/analysis:refresh`。
+
+```json
+{ "ok": true, "revision": 1234, "data": {
+  "status": "done",
+  "url": "https://www.start.gg/tournament/.../event/...",
+  "rows": [
+    { "round": "Winners Final", "roundOrder": ["123", 3, 0],
+      "p1": { "seed": 1, "name": "Alpha" }, "p2": { "seed": 4, "name": "Bravo" },
+      "score": [3, 1], "upset": 0, "losersRun": 0, "seedOver": null }
+  ]
+} }
+```
+- `status` は `analysis.status`（`idle` / `running` / `done` / `error`）のいま読んだ値。`status`・`url`・`rows` は同じ時点の組
+  （サーバーが state の lock の 1 回の保持の中で読む。core は行の差し替えと `analysis` の publish を同じ保持の中で行う）
+- `rows` は最後に `done` で終わった取得の行（`error` で終わった取得は前の行を残す）。**今読み込んでいる大会の結果のときだけ**返し
+  （`url` が今の大会の URL と一致するとき）、それ以外（未取得・大会を変えた後・大会なし）は `url: ""`・`rows: []`
+- 行は構造で、表示の文言（「TBD」「(seed N)」「-」）はクライアントの仕事: `round`（ラウンド名。複数 group の大会は
+  「フェーズ / グループ · 」の前置きつき）・`roundOrder`（Round 列の並べ替えキー `[group id, ラウンド, ラウンド内の位置]`）・
+  `p1` / `p2` の `{seed, name}`（不明は `null` / `""`）・`score`（`[a, b]`。未完了は `null`）・`upset`（勝敗が付いていなければ `null`）・
+  `losersRun`（無しは 0）・`seedOver`（無しは `null`）。並び順は core の順で、表示の既定の並びはクライアントが決める
+- 状態の読み取りなので封筒に `revision` が付く。行の世代は `analysis.revision`（取得を受け付けるたび・大会を変えるたびに進む）。
+  統計情報ページは `analysis.revision` / `status` が変わったときだけ読み直す
 
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
@@ -636,6 +664,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 | `POST /api/v1/tournament/media/fetch` | 実行中フラグ | `fetch_tournament_media`（`TournamentMediaService.FetchMedia`。2026-11-01 追加・ADR-005 S4g） | — |
 | `POST /api/v1/game` | 実行中フラグ | `set_game` | #14 |
 | `POST /api/v1/bracket:refresh` | 実行中フラグ | `update_bracket`（`AutonaWebOperations` → `Top8Service.RefreshFromProvider`。ADR-005 S3e-8） | #41 |
+| `POST /api/v1/analysis:refresh` | 実行中フラグ | `refresh_analysis`（`AnalysisService.Refresh`。2026-11-04 追加・ADR-005 S4k） | — |
 | `POST /api/v1/stream/thumbnail` | 実行中フラグ | `generate_stream_thumbnail`（`StreamService.GenerateThumbnail`。2026-10-31 追加・ADR-005 S4e） | — |
 
 - `:load-set` / `:pull-stream`（ADR-005 S3e-7 から core の `SetFollowService`。どちらの起動形態でも動く）: 取得は provider のワーカーで
@@ -693,6 +722,13 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
     （legacy / Socket.IO は `"OK"` のまま何もしない）。ADR-005 S3e-8。それまではこのルート専用のフラグで、
     パネルに取得を頼んだ時点で下ろしていた（取得中の 2 回目も 202 になり、取得が 2 本走った）
   - 受付後に結果が空（決勝のダブルエリミのグループが無い・Start.gg の失敗）なら何も書かない（ログのみ）
+- `POST /api/v1/analysis:refresh`（2026-11-04 追加・ADR-005 S4k）: body なし。読み込み中の大会の全 phase group の試合を
+  start.gg から取る（core の `AnalysisService`。取得は provider のワーカーで最大 2 本）。受付は
+  `202`（`data: {"accepted": true, "operation": "analysis.refresh"}`）で、`analysis` の次の revision の `running` は
+  **202 の前に** state に出る。進み具合と結果は state の `analysis = {status: running → done | error, error, done, total,
+  failed, revision}`（error は `no_phases` / `fetch_failed`）で観測し、行は §5.9 で読む。実行中は `409 CONFLICT`（キューしない。
+  実行中フラグは core の 1 つ）。大会が読み込まれていなければ `409 NOT_READY`（何も書かない）。旧 Qt パネルのボタンと同じ操作で、
+  どちらの起動形態でも動く
 - `POST /api/v1/stream/thumbnail`: body なし。保存済みのオプション（§5.6）で配信サムネを 1 枚作る `TaskExecutor` のジョブを積み、
   `202`（`data: {"accepted": true, "operation": "stream.thumbnail"}`）。実行中フラグは core（`StreamService`）の 1 つで、
   実行中は `409 CONFLICT`。進捗と結果は state の `stream.thumbnail = {status: running → done | error, path, error, revision}`
@@ -763,6 +799,8 @@ HTTP/1.1 409 Conflict
 > `tests/test_layout_catalog.py` が pin する。
 > ルート一覧そのものは `tests/test_webserver_routes.py` の `EXPECTED_API_V1_ROUTES` が台帳。
 > §5.8 `countries` と §6.22〜6.24 の Top 8（2026-11-04・ADR-005 S4i）は `tests/test_api_v1_top8.py` が pin する。
+> §5.9 `analysis` と §7.3 `analysis:refresh`（2026-11-04・ADR-005 S4k）は `tests/test_api_v1_analysis.py` が pin し、
+> 行の全シナリオを `tests/test_analysis_rows.py` が golden と照合する。
 
 - **自動テストは作らない**（PdM 決定）。動作確認は**アプリ上で手動**で行う
   （`python main.py` 起動 → curl/HTTP クライアントで `/api/v1/...` を叩く → UI / `out/` / OBS で反映確認）。

@@ -151,6 +151,7 @@ ROUTE_ACCESS = {
     "api_v1.get_stream_channels": READ,
     "api_v1.get_stream_thumbnail_options": READ,
     "api_v1.get_tournament": READ,
+    "api_v1.get_analysis": READ,
     "api_v1.get_countries": READ,
     "api_v1.score_adjust": WRITE,
     "api_v1.score_reset": WRITE,
@@ -188,6 +189,7 @@ ROUTE_ACCESS = {
     "api_v1.tournament_media_import": WRITE,
     "api_v1.tournament_media_reset": WRITE,
     "api_v1.tournament_media_fetch": WRITE,
+    "api_v1.analysis_refresh": WRITE,
     "api_v1.colors_tournament_update": WRITE,
     "api_v1.top8_player_update": WRITE,
     "api_v1.top8_update": WRITE,
@@ -324,13 +326,15 @@ def StaticPath(filename):
 # are compared by tests/test_web_access.py). "shell-check" is the empty page
 # that checks the panel shell itself (S4a); "commentary" is the caster
 # line-up (S4b); "stream" is 配信設定 (S4e); "event" is 大会情報 (S4g);
-# "top8" is the Top 8 display settings (S4i).
+# "top8" is the Top 8 display settings (S4i); "stats" is 統計情報, the
+# tournament's match list included (S4k).
 WEB_PANELS = frozenset({
     "shell-check",
     "commentary",
     "stream",
     "event",
     "top8",
+    "stats",
 })
 
 

@@ -484,7 +484,7 @@ class AutonaPlayerBrowserWidget(QDockWidget):
         if not tag:
             return
         # Deferred import: AutonaScoreboardManager pulls in the full
-        # scoreboard stack (same pattern as AutonaStatsWidget._refresh).
+        # scoreboard stack.
         from .AutonaScoreboardManager import AutonaScoreboardManager
         scoreboard = AutonaScoreboardManager.instance.GetScoreboard(1)
         if not scoreboard.LoadPlayerFromTag(tag, team, 1):

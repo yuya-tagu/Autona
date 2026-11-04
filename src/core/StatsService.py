@@ -14,9 +14,10 @@ S3e-5 moved the rest of it: the triggers and the fetch.
   (``PlayerService`` -- a load, a clear, a renamed player; ``PlayerChanged``),
   other players on a team after a swap / move / clear (``AutonaActions``;
   ``TeamsChanged``), and anyone who wants a statistic again (the web
-  routes, the STATS panel; ``Refresh`` / ``RefreshAll``). They used to be the
-  player cards' Qt signals relayed by the board, so a board that was not
-  built -- and the headless shell, which builds none -- never fetched.
+  routes, the Statistics page's among them; ``Refresh`` / ``RefreshAll``).
+  They used to be the player cards' Qt signals relayed by the board, so a
+  board that was not built -- and the headless shell, which builds none --
+  never fetched.
 - **The fetch** is the shell's, injected as ``fetcher`` (bootstrap_core():
   ``AutonaStatsUtil``, which hands the request to the tournament provider's
   thread pool and the answer back to the main thread). Core imports no
@@ -176,8 +177,9 @@ class StatsService:
                 "asking for the statistic failed")
 
     def RefreshAll(self):
-        """Every statistic of the board, in the order the STATS panel's
-        button and the web's refresh have always asked for them."""
+        """Every statistic of the board, in the order they have always been
+        asked for: the Statistics button's (the page's since S4k, through
+        the web's refresh)."""
         self.RefreshQuietly(self.RECENT_SETS)
         self.RefreshQuietly(self.LAST_SETS, 1)
         self.RefreshQuietly(self.LAST_SETS, 2)
