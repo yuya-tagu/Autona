@@ -449,7 +449,23 @@ def test_the_panel_draws_what_it_did(analysis):
             assert recorded["label"] == QApplication.translate(
                 "app", "取得に失敗しました")
         else:
-            assert recorded["label"] == golden["label"], label
+            assert recorded["label"] == _translatedLabel(golden["label"]), \
+                label
+
+
+def _translatedLabel(text):
+    """The golden was recorded under the Japanese locale; CI runs in
+    English. Rebuild the label through the same translations."""
+    import re
+    from qtpy.QtWidgets import QApplication
+    m = re.fullmatch(r"(\d+) 試合(?: \((\d+) 件取得失敗\))?", text)
+    if not m:
+        return QApplication.translate("app", text)
+    out = QApplication.translate("app", "{0} 試合").format(int(m.group(1)))
+    if m.group(2):
+        out += " " + QApplication.translate(
+            "app", "({0} 件取得失敗)").format(int(m.group(2)))
+    return out
 
 
 def test_the_panel_keeps_its_rows_until_the_tournament_changes(analysis):
