@@ -867,8 +867,8 @@
         <translation>If Companion runs on another PC (LAN access), also add the header X-Autona-Token with the access token as its value. Copy the token from Help &amp; Settings → API Settings → Open reference &amp; tester.</translation>
     </message>
     <message>
-        <source>Layout a panel shows (kind=commentary)</source>
-        <translation>Layout a panel shows (kind=commentary)</translation>
+        <source>Layout a panel shows (kind=commentary|top8)</source>
+        <translation>Layout a panel shows (kind=commentary|top8)</translation>
     </message>
     <message>
         <source>Commentary role / icon candidates</source>

@@ -141,40 +141,378 @@ def test_an_unknown_slot_or_field_writes_nothing():
     keys, _ = _setsDuring(lambda: (
         Top8Service.SetPlayerText("9", "name", "X"),
         Top8Service.SetPlayerText("1", "country", "X"),
-        Top8Service.SetPlayerCountry("0", {"code": "JP"}),
-        Top8Service.SetPlayerCharacter("x", {"en_name": "Mario"})))
+        Top8Service.SetPlayerCountry("0", "JP"),
+        Top8Service.SetPlayerCharacter("x", "Mario")))
     assert keys == []
 
 
-def test_a_country_edit_writes_only_that_slots_country():
+# ── a country and a character, by identifier (ADR-005 S4h) ───────────────
+#
+# Both values are built from the catalogs with the player cards' builders,
+# so the two catalogs here are real ones over the fixture games and
+# countries the player slot recording was made in (no Qt).
+
+@pytest.fixture(scope="module")
+def _catalogDir(tmp_path_factory):
+    import shutil
+    from tests.conftest import _link_tree
+    from tests.fixtures.player_slots import recording
+    directory = tmp_path_factory.mktemp("top8_catalogs")
+    link = directory / "assets"
+    _link_tree(link, Path(__file__).resolve().parent.parent / "assets")
+    (directory / "out").mkdir()
+    shutil.copytree(recording.GAME_FIXTURE / "games",
+                    directory / "user_data" / "games")
+    _addBowserJrAndRoy(directory / "user_data" / "games" / "tgame")
+    flags = directory / "user_data" / "additional_flag"
+    flags.mkdir(parents=True)
+    for name in recording.CUSTOM_FLAGS:
+        (flags / name).write_bytes(b"")
+    try:
+        yield directory
+    finally:
+        # Unlinked, never followed (see tests/test_player_service.py).
+        try:
+            if link.is_symlink():
+                os.unlink(link)
+            else:
+                os.rmdir(link)
+        except OSError:
+            pass
+
+
+def _addBowserJrAndRoy(game):
+    """Two characters of SSBU's shape, in this module's copy of the test
+    game: Bowser Jr.'s skin 2 is "Roy", a different character, and Roy is
+    a character too -- a skin's en_name that is another character's. Each
+    skin's files are copies of Mario's, in every pack Mario has them in."""
+    import json
+    import shutil
+    config = game / "base_files" / "config.json"
+    data = json.loads(config.read_text(encoding="utf-8"))
+    data["character_to_codename"]["Bowser Jr."] = {
+        "codename": "koopajr", "smashgg_name": "Bowser Jr.",
+        "locale": {"ja": "クッパJr."},
+        "skin_name": {"2": {"name": "Roy", "is_different_character": True,
+                            "locale": {"ja": "ロイ"}}}}
+    data["character_to_codename"]["Roy"] = {
+        "codename": "roy", "smashgg_name": "Roy", "locale": {"ja": "ロイ"}}
+    config.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                      encoding="utf-8")
+    for pack, prefix in ((game / "base_files" / "icon", "chara_2_"),
+                         (game / "full", ""), (game / "portrait", "")):
+        for path in sorted(pack.glob(f"{prefix}mario_*.png")):
+            skin = int(path.stem.rsplit("_", 1)[1])
+            for codename, count in (("koopajr", 3), ("roy", 2)):
+                if skin < count:
+                    shutil.copyfile(path, pack / path.name.replace(
+                        f"{prefix}mario_", f"{prefix}{codename}_"))
+
+
+@pytest.fixture
+def catalogs(_catalogDir, monkeypatch):
+    """(games, countries) over the fixture data, the test game loaded; the
+    CWD in their directory (a skin's assets are found on the disk)."""
+    from src.core.CountryCatalog import CountryCatalog
+    from src.core.GameAssetCatalog import GameAssetCatalog
+    from tests.fixtures.player_slots import recording
+    monkeypatch.chdir(_catalogDir)
+    locale = recording.LOCALE
+
+    def locales():
+        return locale["program"], locale["export"]
+
+    games = GameAssetCatalog(locales=locales,
+                             remap=recording.remapFor(locale["remapping"]))
+    games.ResetGameState()
+    games.ScanGames()
+    games.SelectGame("tgame")
+    countries = CountryCatalog(locales=locales)
+    assert countries.Load() is True
+    _settle()
+    return games, countries
+
+
+def _cardValues(games, countries):
+    from src.core.PlayerService import PlayerService
+    return PlayerService("score.1.team.1.player.1", games=games,
+                         countries=countries)
+
+
+def test_a_country_is_picked_by_its_code_and_built_like_a_cards(catalogs):
+    """The value, its key order included, is the player card's for the same
+    code (the panel used to hand over its combo's row)."""
+    from tests.fixtures.player_slots.recording import encode
+    games, countries = catalogs
+    card = _cardValues(games, countries)
     _seedPlayers()
-    country = {"name": "Japan", "code": "JP"}
+
     keys, written = _setsDuring(
-        lambda: Top8Service.SetPlayerCountry("3", country))
+        lambda: Top8Service.SetPlayerCountry("3", "JP", countries))
     assert written is True
     assert keys == ["top8.players.3.country"]
-    assert SM.Get("top8.players.3.country") == country
-    keys, _ = _setsDuring(lambda: Top8Service.SetPlayerCountry("3", None))
-    assert SM.Get("top8.players.3.country") == {}
+    stored = SM.Get("top8.players.3.country")
+    assert stored["code"] == "JP" and stored["asset"]
+    assert encode(stored) == encode(card.CountryValue("JP"))
+
+    # A custom flag is a code too (its name).
+    Top8Service.SetPlayerCountry("4", "Custom Flag", countries)
+    assert SM.Get("top8.players.4.country") == card.CountryValue("Custom Flag")
+    assert SM.Get("top8.players.4.country")["asset"] \
+        == "./user_data/additional_flag/Custom Flag.png"
+
+    # The same again is not news; none empties it.
+    keys, written = _setsDuring(
+        lambda: Top8Service.SetPlayerCountry("3", "JP", countries))
+    assert (keys, written) == ([], False)
+    keys, written = _setsDuring(
+        lambda: Top8Service.SetPlayerCountry("3", None, countries))
+    assert written is True and SM.Get("top8.players.3.country") == {}
 
 
-def test_a_character_is_stored_as_the_first_character_slot():
+@pytest.mark.parametrize("code", ["ZZZ", {"code": "JP"}, 81])
+def test_a_country_that_is_no_code_is_not_written(catalogs, code):
+    _, countries = catalogs
     _seedPlayers()
-    char = {"en_name": "Mario", "assets": {}}
-    keys, _ = _setsDuring(lambda: Top8Service.SetPlayerCharacter("8", char))
+    Top8Service.SetPlayerCountry("2", "FR", countries)
+    _settle()
+    keys, written = _setsDuring(
+        lambda: Top8Service.SetPlayerCountry("2", code, countries))
+    assert (keys, written) == ([], False)
+    assert SM.Get("top8.players.2.country")["code"] == "FR"
+
+
+def test_a_character_is_built_like_a_cards_with_its_skins_assets(catalogs):
+    """{"1": the player card's slot value for that character and skin} --
+    name, en_name, codename..., the skin's assets (what the overlay draws),
+    skin and variant -- whichever skin is picked."""
+    from src.core.PlayerService import BuildCharacterValue, CharacterSlot
+    from tests.fixtures.player_slots.recording import encode
+    games, _ = catalogs
+    _seedPlayers()
+
+    keys, written = _setsDuring(
+        lambda: Top8Service.SetPlayerCharacter("8", "Luigi", 1, games))
+    assert written is True
     assert keys == ["top8.players.8.characters"]
-    assert SM.Get("top8.players.8.characters") == {"1": char}
-    Top8Service.SetPlayerCharacter("8", {})
+    stored = SM.Get("top8.players.8.characters")
+    assert list(stored) == ["1"]
+    assert encode(stored["1"]) == encode(
+        BuildCharacterValue(CharacterSlot("Luigi", 1), games))
+    assert stored["1"]["en_name"] == "Luigi"
+    assert stored["1"]["skin"] == 1 and stored["1"]["variant"] == {}
+    assert stored["1"]["assets"]
+
+    # Not news: not written.
+    keys, written = _setsDuring(
+        lambda: Top8Service.SetPlayerCharacter("8", "Luigi", 1, games))
+    assert (keys, written) == ([], False)
+    # None empties it.
+    Top8Service.SetPlayerCharacter("8", None, games=games)
     assert SM.Get("top8.players.8.characters") == {}
+
+
+@pytest.mark.parametrize("skin", [99, -1, "2", None, True])
+def test_a_skin_that_is_no_row_is_the_first(catalogs, skin):
+    """The colour has no blank choice in the Top 8 and the overlay draws
+    the skin's icon: a skin past the character's rows (or no number) is
+    its first."""
+    games, _ = catalogs
+    _seedPlayers()
+    Top8Service.SetPlayerCharacter("1", "Luigi", skin, games)
+    assert SM.Get("top8.players.1.characters") \
+        == {"1": Top8Service.CharacterValue("Luigi", 0, games)}
+
+
+def test_a_different_character_skin_is_that_character(catalogs):
+    """Mario's skin 2 is Dr. Mario: the value names Dr. Mario (the card's
+    rule) and reads back as Mario on that skin."""
+    games, _ = catalogs
+    value = Top8Service.CharacterValue("Mario", 2, games)
+    assert value["en_name"] == "Dr. Mario" and value["codename"] == "mario"
+    assert Top8Service.CharacterPick(value, games) == ("Mario", 2)
+
+
+@pytest.mark.parametrize("en_name", ["Nobody", 5, {"en_name": "Mario"}])
+def test_a_character_the_game_does_not_list_is_not_written(catalogs, en_name):
+    games, _ = catalogs
+    _seedPlayers()
+    Top8Service.SetPlayerCharacter("6", "Peach", 0, games)
+    _settle()
+    keys, written = _setsDuring(
+        lambda: Top8Service.SetPlayerCharacter("6", en_name, 0, games))
+    assert (keys, written) == ([], False)
+    assert SM.Get("top8.players.6.characters.1.en_name") == "Peach"
+
+
+def test_every_character_and_skin_reads_back_as_its_pick(catalogs):
+    """The panel's value and the import's, for every skin of every
+    character the combo lists."""
+    games, _ = catalogs
+    snap = games.Current()
+    picks = [(data["en_name"], row)
+             for _text, data in snap.characterRows
+             for row in range(len(snap.skinRows.get(data["en_name"], ())))]
+    assert ("Bowser Jr.", 2) in picks
+    for pick in picks:
+        assert Top8Service.CharacterPick(
+            Top8Service.CharacterValue(*pick, games), games) == pick, pick
+        assert Top8Service.CharacterPick(
+            Top8Service.ImportedCharacterValue(*pick, games), games) \
+            == pick, pick
+
+
+@pytest.mark.parametrize("order", ["listed", "reversed"])
+def test_a_skin_named_as_another_character_reads_back_as_its_own(
+        catalogs, order):
+    """Bowser Jr.'s skin 2 is "Roy", a different character, and Roy is a
+    character too (SSBU). Whatever the shape, and whichever of the two the
+    combo lists first, the pick is Bowser Jr. on skin 2: the codename comes
+    before the en_name, and a value with no codename (the skin row the
+    panel wrote before S4h) is found among every character's skins."""
+    import dataclasses
+    games, _ = catalogs
+    snap = games.Current()
+    if order == "reversed":
+        snap = dataclasses.replace(
+            snap, characterRows=tuple(reversed(snap.characterRows)))
+    pick = lambda value: Top8Service.CharacterPick(value, games, snap)
+
+    value = Top8Service.CharacterValue("Bowser Jr.", 2, games, snap)
+    assert (value["en_name"], value["codename"]) == ("Roy", "koopajr")
+    assert pick(value) == ("Bowser Jr.", 2)
+    # Before S4h: the skin row -- Roy's name, no codename.
+    skinRow = games.SkinRow("Bowser Jr.", 2, snapshot=snap)
+    assert skinRow["en_name"] == "Roy" and "codename" not in skinRow
+    assert pick(skinRow) == ("Bowser Jr.", 2)
+    # Written in another locale, with another asset pack: the codename.
+    moved = {**value, "display_name": "クッパJr.",
+             "assets": {"base_files/icon": {"asset": "elsewhere.png"}}}
+    assert pick(moved) == ("Bowser Jr.", 2)
+    # Roy is still Roy.
+    assert pick(Top8Service.CharacterValue("Roy", 1, games, snap)) \
+        == ("Roy", 1)
+    assert pick(games.SkinRow("Roy", 1, snapshot=snap)) == ("Roy", 1)
+
+
+def test_the_shapes_a_slot_held_before_s4h_read_back(catalogs):
+    """What a saved Top 8 can still hold from before S4h, read as the pick
+    the panel shows (it showed nothing for the skin row's shape)."""
+    games, _ = catalogs
+    pick = Top8Service.CharacterPick
+
+    # The panel's skin row ({"assets"}; a different-character skin carries
+    # that character's name too): found by its assets.
+    assert pick(games.SkinRow("Luigi", 2), games) == ("Luigi", 2)
+    drMario = games.SkinRow("Mario", 2)
+    assert drMario["en_name"] == "Dr. Mario"
+    assert pick(drMario, games) == ("Mario", 2)
+    # The panel's character row (no assets) and the import's copy of the
+    # character's config: the character, on its first skin.
+    assert pick(games.CharacterRow("Peach"), games) == ("Peach", 0)
+    assert pick(games.Character("Luigi"), games) == ("Luigi", 0)
+    # Nothing, or a character this game does not have.
+    for value in ({}, None, "Mario", {"en_name": "Nobody", "assets": {}}):
+        assert pick(value, games) == (None, -1)
+
+
+def _import(main, games, countries, snap=None):
+    snap = snap if snap is not None else games.Current()
+    return Top8Service.ResolveImportedPlayer(
+        {"name": "P", "sponsor": "", "country_code": None,
+         "mains": {"tgame": [main], "other": [["Mario", 0]]}},
+        snap, countries, games)
+
+
+@pytest.mark.parametrize("main, pick", [
+    (["Luigi"], ("Luigi", 0)),          # Start.gg's: the key, no skin
+    (["mario", 1], ("Mario", 1)),       # by codename
+    (["Mario", 2], ("Mario", 2)),       # a different-character skin
+    (["koopa", "1"], ("Bowser", 1)),    # a database record's string skin
+    (["Peach", 42], ("Peach", 0)),      # past the pack's skins
+    (["Peach", float("inf")], ("Peach", 0)),   # no number at all
+    (["koopajr", 2], ("Bowser Jr.", 2)),
+    (["NoArt", 0], ("NoArt", -1)),      # a character without skins
+])
+def test_an_imported_main_is_the_config_with_the_panels_keys_added(
+        catalogs, main, pick):
+    """Additive (ADR-005 S4h): the import writes the character's config as
+    it always did -- every key, its value and its place: the test game's
+    config has the real games' shape (smashgg_name, locale, skin_name) --
+    and adds the keys of the panel's value it lacks, on the main's skin:
+    the skin's assets (the overlay's icon), modded, name, skin, variant."""
+    games, countries = catalogs
+    value = _import(main, games, countries)["characters"]["1"]
+    config = games.Character(pick[0])
+    panels = Top8Service.CharacterValue(*pick, games)
+
+    assert list(value)[:len(config)] == list(config)
+    assert {key: value[key] for key in config} == config
+    added = [key for key in value if key not in config]
+    assert added == [key for key in panels if key not in config]
+    assert {key: value[key] for key in added} \
+        == {key: panels[key] for key in added}
+    assert {"assets", "skin", "variant"} <= set(added)
+    assert value["assets"] == panels["assets"]
+    assert value["skin"] == pick[1]
+    assert Top8Service.CharacterPick(value, games) == pick
+
+    if pick == ("Mario", 1):
+        for key in ("smashgg_name", "locale", "skin_name", "export_name"):
+            assert key in value, key
+    if pick[0] in ("Bowser Jr.", "Mario") and pick[1] == 2:
+        # A different-character skin: the panel's value names the skin's
+        # character, the import keeps the config's en_name (additive).
+        assert panels["en_name"] in ("Roy", "Dr. Mario")
+        assert value["en_name"] == pick[0]
+        assert value["name"] == panels["name"]
+
+
+def test_an_imported_main_the_game_does_not_have_is_no_character(catalogs):
+    games, countries = catalogs
+    assert _import(["nobody", 0], games, countries)["characters"] == {}
+
+
+def test_an_imported_modded_main_with_mods_off_is_its_config(catalogs):
+    """A modded character is not in the combo while mods are off, so there
+    is no panel value to add: the import writes the config's copy alone,
+    as it did before S4h."""
+    games, countries = catalogs
+    assert games.CharacterRow("Waluigi") is None
+    value = _import(["waluigi", 0], games, countries)["characters"]["1"]
+    assert value == games.Character("Waluigi")
+    assert value["modded"] is True
+    assert Top8Service.CharacterPick(value, games) == (None, -1)
+
+
+def test_without_a_catalog_instance_nothing_raises(catalogs, monkeypatch):
+    """`games` left out with no GameAssetCatalog instance: no value to
+    build -- the import keeps the config's copy, a pick is none, a write
+    is refused."""
+    from src.core.GameAssetCatalog import GameAssetCatalog
+    games, countries = catalogs
+    snap = games.Current()
+    monkeypatch.setattr(GameAssetCatalog, "instance", None)
+    _seedPlayers()
+
+    player = Top8Service.ResolveImportedPlayer(
+        {"name": "P", "mains": {"tgame": [["Luigi", 1]]}}, snap, countries)
+    assert player["characters"] == {"1": games.Character("Luigi")}
+    assert Top8Service.CharacterValue("Luigi") == {}
+    assert Top8Service.ImportedCharacterValue("Luigi") == {}
+    assert Top8Service.CharacterPick({"en_name": "Luigi"}) == (None, -1)
+    keys, written = _setsDuring(
+        lambda: Top8Service.SetPlayerCharacter("1", "Luigi", 0))
+    assert (keys, written) == ([], False)
 
 
 def test_forgetting_the_characters_writes_only_slots_that_have_one():
     """A game switch: every character goes (the skin with it), in one save
     cycle, and a slot without one is not written (the smallest delta)."""
     _seedPlayers()
-    mario = {"en_name": "Mario", "assets": {"icon": "mario_2.png"}}
-    Top8Service.SetPlayerCharacter("2", mario)
-    Top8Service.SetPlayerCharacter("7", {"en_name": "Luigi"})
+    SM.Set("top8.players.2.characters",
+           {"1": {"en_name": "Mario", "assets": {"icon": "mario_2.png"}}})
+    SM.Set("top8.players.7.characters", {"1": {"en_name": "Luigi"}})
     Top8Service.SetPlayerText("2", "name", "Alice")
     _settle()
     before = SM.revision
@@ -276,6 +614,86 @@ def test_the_first_apply_on_a_fresh_install_seed_keeps_the_scores():
 
     first = Top8Service.ApplyScores({**_allTies(), "wsf1": [2, 1]})
     assert first["wsf1"]["score"] == [2, 1]
+
+
+def test_applying_some_matches_keeps_the_others():
+    """A merge (ADR-005 S4h): a match left out keeps its published score
+    and result -- a client sending only what it changed does not wipe the
+    rest (the panel sends every match, so nothing changes for it)."""
+    _seed()
+    Top8Service.ApplyScores({**_allTies(), "wsf1": [2, 1]})
+    SM.Set("top8.matches.lr1a.name", "LR1 (custom)")
+    _settle()
+    before = SM.revision
+
+    keys, matches = _setsDuring(
+        lambda: Top8Service.ApplyScores({"wsf2": [0, 2]}))
+
+    assert keys == [Top8Service.MATCHES_PATH]
+    assert SM.revision == before + 1
+    assert matches["wsf1"]["score"] == [2, 1]
+    assert matches["wsf1"]["finished"] is True
+    assert matches["wsf2"]["score"] == [0, 2]
+    assert matches["wsf2"]["finished"] is True
+    assert matches["wf"]["slots"] == [1, 4]
+    assert matches["lr1a"]["name"] == "LR1 (custom)"
+    assert list(matches) == top8.MATCH_IDS
+    assert SM.Get(Top8Service.MATCHES_PATH) == matches
+
+
+def test_applying_every_match_gives_what_it_always_did():
+    """The panel's call (every match) is unchanged by the merge."""
+    _seed()
+    staged = {**_allTies(), "wsf1": [2, 1], "lr1a": [0, 2], "wsf2": [1, 1]}
+    # The pre-S4h rebuild: every match from `scores`, over the published.
+    seeded = SM.Get(Top8Service.MATCHES_PATH)
+    expected = top8.Recompute({
+        matchId: {**seeded[matchId], "score": list(score),
+                  "finished": score[0] != score[1]}
+        for matchId, score in staged.items()})
+    assert Top8Service.ApplyScores(staged) == expected
+
+
+def test_an_unknown_match_is_ignored():
+    _seed()
+    matches = Top8Service.ApplyScores({"wsf1": [2, 0], "bogus": [1, 0]})
+    assert "bogus" not in matches
+    assert matches["wsf1"]["finished"] is True
+
+
+@pytest.mark.parametrize("score", [
+    3, None, "21", (2, 1), [1], [1, 2, 3], ["2", "1"], [True, False],
+    [1.0, 2], [-1, 0], [0, Top8Service.SCORE_MAX + 1], {"0": 1, "1": 2},
+])
+def test_a_score_that_is_not_two_small_ints_is_refused(score):
+    """Validated in core (a client's partial send reaches here, S4i): a
+    bad score is refused whole -- the good ones sent with it are not
+    applied either -- with no exception and nothing written."""
+    _seed()
+    Top8Service.ApplyScores({**_allTies(), "wsf2": [2, 1]})
+    _settle()
+    before = (SM.revision, deep_clone(SM.Get(Top8Service.MATCHES_PATH)))
+
+    keys, answer = _setsDuring(
+        lambda: Top8Service.ApplyScores({"wsf1": [2, 0], "lr1a": score}))
+
+    assert answer is None and keys == []
+    assert (SM.revision, SM.Get(Top8Service.MATCHES_PATH)) == before
+
+
+@pytest.mark.parametrize("scores", [None, [["wsf1", [2, 0]]], "wsf1"])
+def test_scores_that_are_not_a_dict_are_refused(scores):
+    _seed()
+    keys, answer = _setsDuring(lambda: Top8Service.ApplyScores(scores))
+    assert answer is None and keys == []
+
+
+def test_the_scores_bounds_are_applied():
+    _seed()
+    matches = Top8Service.ApplyScores(
+        {"wsf1": [Top8Service.SCORE_MAX, 0], "wsf2": [0, 0]})
+    assert matches["wsf1"]["score"] == [Top8Service.SCORE_MAX, 0]
+    assert matches["wsf2"]["finished"] is False
 
 
 def test_the_service_never_mutates_the_live_matches_dict():

@@ -98,11 +98,13 @@ _LEGACY_PREFIXES = (
 
 # The design a panel shows and hands to OBS, per kind that has one here:
 # the settings.json key it is kept under and the layout picked when none is
-# kept (or the kept one is gone). Only the Commentary page's so far (ADR-005
-# S4b; the Qt panel reads the same key and the same default). The Board and
-# Top 8 panels keep their own until they move to the Web UI.
+# kept (or the kept one is gone). The Commentary page's (ADR-005 S4b) and the
+# Top 8's (S4h: the Qt panel reads and writes it through SelectedLayout /
+# SelectLayout, under the key it always kept). The Board panel keeps its own
+# until it moves to the Web UI.
 SELECTION_SETTINGS = {
     KIND_COMMENTARY: ("commentary.selected_design", "commentators"),
+    KIND_TOP8: ("top8.selected_design", "bracket_top8"),
 }
 
 

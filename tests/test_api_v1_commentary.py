@@ -390,15 +390,39 @@ def test_an_unknown_design_is_rejected_and_nothing_kept(client, designs, body):
     assert SettingsManager.Get("commentary.selected_design") == "commentators"
 
 
-@pytest.mark.parametrize("kind", ["scoreboard", "top8", "designer", "bogus"])
+@pytest.mark.parametrize("kind", ["scoreboard", "designer", "bogus"])
 def test_a_kind_without_a_selection_here_is_rejected(client, designs, kind):
     _assertRejected(client.get(f"/api/v1/layouts/selected/{kind}"))
     response = client.put(f"/api/v1/layouts/selected/{kind}",
                           json={"id": "scoreboard_simple"})
     _assertRejected(response)
-    assert "commentary" in response.get_json()["error"]["message"]
+    message = response.get_json()["error"]["message"]
+    assert "commentary" in message and "top8" in message
     assert SettingsManager.Get("board.selected_design") is None or \
         SettingsManager.Get("board.selected_design") != "scoreboard_simple"
+
+
+def test_the_top8_selection_is_its_panel_setting(client, designs):
+    """ADR-005 S4h: the Top 8's design is core's too, under the key its
+    panel always kept (top8.selected_design), default bracket_top8."""
+    builtin(designs, "bracket_top8", {"kind": "top8", "displayName": "標準"})
+    builtin(designs, "bracket_top8_dark", {"kind": "top8",
+                                           "displayName": "Dark"})
+    SettingsManager.Unset("top8.selected_design")
+    assert _ok(client.get("/api/v1/layouts/selected/top8"))["data"]["id"] \
+        == "bracket_top8"
+
+    body = _ok(client.put("/api/v1/layouts/selected/top8",
+                          json={"id": "bracket_top8_dark"}))
+    assert body["data"]["id"] == "bracket_top8_dark"
+    assert body["data"]["kind"] == "top8"
+    assert SettingsManager.Get("top8.selected_design") == "bracket_top8_dark"
+    assert _ok(client.get("/api/v1/layouts/selected/top8"))["data"]["id"] \
+        == "bracket_top8_dark"
+    # Another kind's design is not a Top 8 one.
+    _assertRejected(client.put("/api/v1/layouts/selected/top8",
+                               json={"id": "commentators"}))
+    assert SettingsManager.Get("top8.selected_design") == "bracket_top8_dark"
 
 
 # ── PATCH /colors/<feature> ──────────────────────────────────────────────

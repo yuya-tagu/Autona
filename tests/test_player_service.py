@@ -1581,7 +1581,7 @@ def test_a_sponsor_without_a_tag_loads_without_the_database(loadWorld):
     assert SM.Get(f"{BOARD_PATH}.{schema.PLAYER_REAL_NAME_KEY}") != "Wrong"
 
 
-@pytest.mark.parametrize("skin", ["x", None, ""])
+@pytest.mark.parametrize("skin", ["x", None, "", float("inf")])
 def test_a_main_whose_skin_is_not_a_number_is_its_first_skin(
         loadWorld, warnings, skin):
     """A `mains` entry's skin is a row number. One that is not raised

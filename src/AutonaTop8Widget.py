@@ -25,19 +25,24 @@ asks the service for the one field it edits (``SetPlayerText`` /
 ``SetPlayerCountry`` / ``SetPlayerCharacter``). A field the operator is in is
 left alone until they leave it, and finishing it does not put back the text
 a render had to leave there (the player cards' rule,
-Helpers.AutonaQtHelper.HeldBackText). The country and character still come
-out of the combos' Qt rows (S4 replaces them with identifiers). The score
-spin boxes are staged: they show the state's scores when the matches change,
-and are published by 反映 only.
+Helpers.AutonaQtHelper.HeldBackText). A country and a character go to core
+as identifiers -- the country code, the character's en_name and the colour
+combo's row -- and core builds the values from the catalogs (ADR-005 S4h);
+the combos show the state through ``Top8Service.CharacterPick`` and the
+country's code. The score spin boxes are staged: they show the state's
+scores when the matches change, and are published by 反映 only. The selected
+design is core's too (``LayoutCatalog.SelectedLayout`` / ``SelectLayout``,
+settings.json's ``top8.selected_design``, which the Web reads and writes
+through ``/api/v1/layouts/selected/top8``).
 """
 
 from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from qtpy.QtCore import *
 from shiboken6 import Shiboken
+from loguru import logger
 
 from .core.StateManager import StateManager
-from .core.SettingsManager import SettingsManager
 from .core.DictHelper import deep_clone
 from .core import LayoutCatalog
 from .AutonaLayoutPreview import AutonaLayoutPreview, ObsUrl
@@ -54,9 +59,10 @@ from . import ui_layout as L
 
 # Designs: the catalog's top8 layouts (layout/bracket_top8/ and any variant
 # declaring the kind; read at launch, the pulldown spec matches the Board
-# tab).
+# tab). Which one is selected, and the default, are the catalog's
+# (LayoutCatalog.SELECTION_SETTINGS, ADR-005 S4h).
 LAYOUT_KIND = LayoutCatalog.KIND_TOP8
-DEFAULT_DESIGN = "bracket_top8"
+DEFAULT_DESIGN = LayoutCatalog.SELECTION_SETTINGS[LAYOUT_KIND][1]
 
 # Sidebar section -> match ids, in display order.
 MATCH_SECTIONS = [
@@ -385,13 +391,13 @@ class AutonaTop8Widget(QDockWidget):
                 w["color"].setModel(self._noSkins)
         self._ScheduleRender()
 
-    def _loadSkins(self, char_combo, color_combo, char=None):
+    def _loadSkins(self, char_combo, color_combo, skin=0):
         """Point the colour combo at the selected character's skins and pick
-        the one whose data is `char` (the first when none is), with its
-        signals blocked: choosing what to show is not an edit."""
+        row `skin` (the first when it is not one of them), with its signals
+        blocked: choosing what to show is not an edit."""
         data = char_combo.currentData(Qt.ItemDataRole.UserRole)
         skin_model = None
-        if data and data.get("en_name"):
+        if isinstance(data, dict) and data.get("en_name"):
             skin_model = AutonaGameAssetManager.instance.skinModels.get(
                 data.get("en_name"))
         with QSignalBlocker(color_combo):
@@ -399,14 +405,9 @@ class AutonaTop8Widget(QDockWidget):
                 color_combo.setModel(self._noSkins)
                 return
             color_combo.setModel(skin_model)
-            index = 0
-            if char:
-                for row in range(skin_model.rowCount()):
-                    if skin_model.index(row, 0).data(
-                            Qt.ItemDataRole.UserRole) == char:
-                        index = row
-                        break
-            color_combo.setCurrentIndex(index)
+            rows = skin_model.rowCount()
+            color_combo.setCurrentIndex(
+                skin if isinstance(skin, int) and 0 <= skin < rows else 0)
 
     def _onTextFinished(self, slot, field):
         """A name / sponsor field finished an edit: write that one field,
@@ -423,33 +424,48 @@ class AutonaTop8Widget(QDockWidget):
             Top8Service.SetPlayerText(slot, field, text)
 
     def _onCountryChanged(self, slot):
+        """A country picked: its code goes to core, which builds the value
+        (the blank row -- and a typed name that is no row -- is none)."""
         if self._rendering or self._holdCountryWrites:
             return
-        combo = self.playerInputs[slot]["country"]
         Top8Service.SetPlayerCountry(
-            slot, combo.currentData(Qt.ItemDataRole.UserRole) or {})
+            slot, self._shownCountry(self.playerInputs[slot]["country"]))
+
+    @staticmethod
+    def _shownCountry(combo):
+        """The code of the country (or custom flag) `combo` shows, or
+        None."""
+        data = combo.currentData(Qt.ItemDataRole.UserRole)
+        return (data.get("code") if isinstance(data, dict) else None) or None
 
     def _onCharComboChanged(self, slot):
         if self._rendering:
             return
         w = self.playerInputs[slot]
         self._loadSkins(w["char"], w["color"])
-        Top8Service.SetPlayerCharacter(
-            slot, self._resolveCharData(w["char"], w["color"]))
+        self._writeCharacter(slot)
 
     def _onSkinChanged(self, slot):
         if self._rendering:
             return
-        w = self.playerInputs[slot]
-        Top8Service.SetPlayerCharacter(
-            slot, self._resolveCharData(w["char"], w["color"]))
+        self._writeCharacter(slot)
 
-    def _resolveCharData(self, char_combo, color_combo):
-        skin_data = color_combo.currentData(Qt.ItemDataRole.UserRole)
-        if skin_data and skin_data.get("assets"):
-            return skin_data
-        char_data = char_combo.currentData(Qt.ItemDataRole.UserRole)
-        return char_data or {}
+    def _writeCharacter(self, slot):
+        """The character and colour the combos show go to core as
+        identifiers; core builds the value (Top8Service.CharacterValue)."""
+        w = self.playerInputs[slot]
+        en_name, skin = self._shownPick(w["char"], w["color"])
+        Top8Service.SetPlayerCharacter(slot, en_name, skin)
+
+    @staticmethod
+    def _shownPick(char_combo, color_combo):
+        """(en_name, skin row) the two combos show -- (None, -1) for no
+        character (the blank row, or a typed name that is no row)."""
+        data = char_combo.currentData(Qt.ItemDataRole.UserRole)
+        en_name = data.get("en_name") if isinstance(data, dict) else None
+        if not en_name:
+            return None, -1
+        return en_name, color_combo.currentIndex()
 
     def _onLoadTop8(self):
         # Answers at once; the import runs on the provider's worker and the
@@ -726,14 +742,17 @@ class AutonaTop8Widget(QDockWidget):
 
     def _RenderCharacter(self, char_combo, color_combo, char):
         """Select the stored character and its skin, unless the combos
-        already resolve to it (the panel's own pick, written as it shows)."""
-        if self._resolveCharData(char_combo, color_combo) == char:
+        already show it (the panel's own pick, written as it shows). What
+        they show for a value is core's answer (Top8Service.CharacterPick),
+        which also reads the shapes a slot held before ADR-005 S4h."""
+        pick = Top8Service.CharacterPick(char)
+        if self._shownPick(char_combo, color_combo) == pick:
             return
         if self._HasFocus(char_combo) or self._HasFocus(color_combo):
             self._SkipFocused(char_combo)
             self._SkipFocused(color_combo)
             return
-        self._selectCharacter(char_combo, color_combo, char)
+        self._selectCharacter(char_combo, color_combo, pick)
 
     def _HasFocus(self, widget):
         """The widget or something inside it (an editable combo's line edit,
@@ -778,26 +797,25 @@ class AutonaTop8Widget(QDockWidget):
         combo.setCurrentIndex(index)
         combo.blockSignals(False)
 
-    def _selectCharacter(self, char_combo, color_combo, char):
-        """Select the stored character (matched by en_name/codename) and load
-        its skins, on the stored skin when the state holds one."""
+    def _selectCharacter(self, char_combo, color_combo, pick):
+        """Select the picked character's row (by en_name) and load its
+        skins on the picked one: `pick` is (en_name, skin row), (None, -1)
+        for none."""
+        en_name, skin = pick
         with QSignalBlocker(char_combo):
-            target = None
-            if char:
-                target = char.get("en_name") or char.get("codename")
             index = -1
-            if target:
+            if en_name:
                 model = char_combo.model()
                 for row in range(model.rowCount()):
                     data = model.data(
                         model.index(row, 0), Qt.ItemDataRole.UserRole)
-                    if data and (data.get("en_name") == target
-                                 or data.get("codename") == target):
+                    if isinstance(data, dict) \
+                            and data.get("en_name") == en_name:
                         index = row
                         break
             char_combo.setCurrentIndex(index)
         if index >= 0:
-            self._loadSkins(char_combo, color_combo, char)
+            self._loadSkins(char_combo, color_combo, skin)
         else:
             with QSignalBlocker(color_combo):
                 color_combo.setModel(self._noSkins)
@@ -817,10 +835,11 @@ class AutonaTop8Widget(QDockWidget):
         self.designCombo = QComboBox()
         for entry in self._designs:
             self.designCombo.addItem(entry["displayName"], entry["id"])
-        saved = SettingsManager.Get("top8.selected_design", DEFAULT_DESIGN)
-        idx = self.designCombo.findData(saved)
-        if idx < 0:
-            idx = self.designCombo.findData(DEFAULT_DESIGN)
+        # The kept design, else the default, else the first -- the
+        # catalog's rule (the Web's GET /layouts/selected/top8 answers the
+        # same); what is kept is not rewritten by a fallback.
+        selected = LayoutCatalog.SelectedLayout(LAYOUT_KIND)
+        idx = self.designCombo.findData(selected["id"]) if selected else -1
         if idx < 0 and self.designCombo.count() > 0:
             idx = 0
         if idx >= 0:
@@ -854,7 +873,11 @@ class AutonaTop8Widget(QDockWidget):
         design = self._currentDesign()
         if not design:
             return
-        SettingsManager.Set("top8.selected_design", design)
+        # Kept by core under top8.selected_design (only a design the
+        # catalog lists; ADR-005 S4h).
+        if LayoutCatalog.SelectLayout(LAYOUT_KIND, design) is None:
+            logger.warning(f"Top8: the design {design!r} is no longer "
+                           f"installed, not kept")
         self.obsUrlField.setText(self._obsUrl())
         if self._previewLoaded:
             self.preview.load(design, self._currentEntry())

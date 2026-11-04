@@ -72,7 +72,7 @@ _ENDPOINTS = [
     ("GET", "/commentary", "Commentary state", None, False, False, False),
     ("GET", "/countries/{code}/states", "States / regions of a country", None, False, False, False),
     ("GET", "/layouts?kind=scoreboard", "Layout list (?kind=scoreboard|designer|commentary|top8)", None, False, False, False),
-    ("GET", "/layouts/selected/{kind}", "Layout a panel shows (kind=commentary)", None, False, False, False),
+    ("GET", "/layouts/selected/{kind}", "Layout a panel shows (kind=commentary|top8)", None, False, False, False),
     ("GET", "/commentary/options", "Commentary role / icon candidates", None, False, False, False),
     # ── Safe write (op-logged, no confirm) ──
     ("POST", "/scoreboards/{n}/teams/{t}/score:adjust", "Adjust score by delta", {"delta": 1}, False, True, False),

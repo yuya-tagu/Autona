@@ -10,10 +10,15 @@ instalment 5).
 
 The panel's edits come here one field at a time (``SetPlayerText`` /
 ``SetPlayerCountry`` / ``SetPlayerCharacter``, ADR-005 S3e-8): it renders
-``top8.*`` and writes only the field the operator changed. A player's country
-and character still come out of the panel's Qt models (the country combo's
-row, the skin's data), which is display work; the S4 rework replaces them
-with identifiers, as it did for the player cards.
+``top8.*`` and writes only the field the operator changed. Since ADR-005 S4h
+a country and a character come as identifiers -- a country code, a
+character's en_name and its skin row -- and the values are built here from
+the catalogs, with the player cards' builders (``PlayerService
+.BuildCountryValue`` / ``BuildCharacterValue``), with the ``assets`` the
+overlay draws its icon from. An import writes the character's config as it
+always did, with those keys added (``ImportedCharacterValue``).
+``CharacterPick`` reads either back -- and the shapes a slot held before
+S4h -- as the identifiers that build it.
 
 The Start.gg import is here too (S3e-8): ``RefreshFromProvider`` fetches the
 tournament's phases, picks the final double elimination group, fetches it,
@@ -51,6 +56,8 @@ from .Bracket import Bracket
 from .CountryCatalog import CountryCatalog
 from .DictHelper import deep_clone
 from .GameAssetCatalog import GameAssetCatalog
+from .PlayerService import (BuildCharacterValue, BuildCountryValue,
+                            CharacterSlot)
 from .StateManager import StateManager
 from .TaskExecutor import TaskExecutor
 
@@ -61,6 +68,9 @@ PHASE_LABEL_PATH = f"{schema.TOP8_ROOT}.{schema.TOP8_PHASE_LABEL_KEY}"
 
 # The text fields of a player the panel edits.
 PLAYER_TEXT_FIELDS = ("name", "sponsor")
+
+# A match score's bound (ApplyScores; the panel's spin boxes' range).
+SCORE_MAX = 99
 
 
 def _PlayerKey(slot, field):
@@ -85,31 +95,200 @@ def SetPlayerText(slot, field, text) -> bool:
         return StateManager.SetIfChanged(_PlayerKey(slot, field), value)
 
 
-def SetPlayerCountry(slot, country) -> bool:
-    """One player's country, as the panel's country row holds it ({} for
-    none). Written only when it changes; True if it did."""
+def CountryValue(code, countries=None) -> dict:
+    """What a player's ``country`` holds for the country (or custom flag)
+    `code`: the player cards' value (``PlayerService.BuildCountryValue``),
+    same shape and key order. {} for none and for a code the catalog does
+    not know."""
+    return BuildCountryValue(code, countries)
+
+
+def SetPlayerCountry(slot, code, countries=None) -> bool:
+    """One player's country, by its code (a custom flag's is its name):
+    the value is built from ``CountryCatalog`` (ADR-005 S4h; it used to be
+    the panel's country row). None / "" empties it. A code the catalog does
+    not know is not written (a warning; False), so a stray identifier never
+    empties a country. Written only when it changes; True if it did."""
     slot = str(slot)
     if slot not in top8.PLAYER_SLOTS:
         logger.warning(f"Top8: ignoring the country of player {slot}")
         return False
-    value = country if isinstance(country, dict) else {}
+    if code is None or code == "":
+        value = {}
+    elif not isinstance(code, str):
+        logger.warning(f"Top8: ignoring the country {code!r} of player {slot}")
+        return False
+    else:
+        value = CountryValue(code, countries)
+        if not value:
+            logger.warning(
+                f"Top8: no country {code!r}, player {slot} left as it is")
+            return False
     with StateManager.lock:
         return StateManager.SetIfChanged(_PlayerKey(slot, "country"), value)
 
 
-def SetPlayerCharacter(slot, character) -> bool:
-    """One player's character, as the panel resolves it from its combos
-    (the skin's data, else the character's), stored as ``{"1": character}``
-    -- ``{}`` for none. Written only when it changes; True if it did."""
+def _IsRow(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _IsScore(value) -> bool:
+    """[s1, s2]: a list of two ints (not bools), 0..SCORE_MAX."""
+    return isinstance(value, list) and len(value) == 2 \
+        and all(_IsRow(s) and 0 <= s <= SCORE_MAX for s in value)
+
+
+def _SkinRow(snapshot, en_name, skin) -> int:
+    """`skin` when it is a row of `en_name`'s skin combo, else its first row
+    -- -1 for a character without skins.
+
+    The first, not none: a Top 8 player's colour has no blank choice (the
+    panel's colour combo always shows one of the character's skins), and
+    the overlay draws the skin's icon (``assets``). A player card keeps a
+    skin past the rows as none (PlayerService._MainSlot); an imported main
+    whose skin this game's pack does not have still gets an icon here.
+    """
+    rows = len(snapshot.skinRows.get(en_name, ()))
+    if _IsRow(skin) and 0 <= skin < rows:
+        return skin
+    return 0 if rows else -1
+
+
+def CharacterValue(en_name, skin=0, games=None, snapshot=None) -> dict:
+    """What the panel's pick writes in a player's ``characters["1"]`` for
+    the character `en_name` with skin row `skin` (an import adds these
+    keys to the character's config: ``ImportedCharacterValue``): the
+    player cards' character slot value
+    (``PlayerService.BuildCharacterValue``) -- name, en_name, display_name,
+    codename, modded, the skin's ``assets``, ``skin`` and ``variant`` ({},
+    a Top 8 player has none). A skin that is not one of the character's
+    rows is its first (``_SkinRow``). {} for no character, and for one the
+    loaded game's character combo does not list.
+
+    `snapshot` is a ``GameAssetCatalog.Current()``, taken once by a caller
+    building several (an import); `games` defaults to the instance -- {}
+    when there is none (nothing to build the value with).
+    """
+    if not isinstance(en_name, str) or not en_name:
+        return {}
+    games = games if games is not None else GameAssetCatalog.instance
+    if games is None:
+        return {}
+    snap = snapshot if snapshot is not None else games.Current()
+    if games.CharacterRow(en_name, snapshot=snap) is None:
+        return {}
+    return BuildCharacterValue(
+        CharacterSlot(en_name, _SkinRow(snap, en_name, skin)), games, snap)
+
+
+def SetPlayerCharacter(slot, en_name, skin=0, games=None) -> bool:
+    """One player's character, by the character's en_name and its skin row
+    (the colour): the value is built from ``GameAssetCatalog``
+    (``CharacterValue``; ADR-005 S4h -- it used to be the panel's skin row,
+    or its character row when the skin had no assets, so a slot held one of
+    two shapes and only one had the icon), stored as ``{"1": character}``.
+    None / "" empties it. A character the loaded game does not list is not
+    written (a warning; False). Written only when it changes; True if it
+    did.
+
+    Built and written under the state lock, against the game loaded at
+    that moment, as the import is (``ImportPhaseGroup``): a game switch
+    empties the characters under the same lock, after swapping the game,
+    so a pick written before the switch does not outlive it. A pick made
+    after it -- from the panel's combos before they are rebuilt for the new
+    game -- is built against the new game (an en_name both games have).
+    """
     slot = str(slot)
     if slot not in top8.PLAYER_SLOTS:
         logger.warning(f"Top8: ignoring the character of player {slot}")
         return False
-    value = {"1": character} if isinstance(character, dict) and character \
-        else {}
+    if en_name is not None and not isinstance(en_name, str):
+        logger.warning(
+            f"Top8: ignoring the character {en_name!r} of player {slot}")
+        return False
     with StateManager.lock:
+        if not en_name:
+            value = {}
+        else:
+            character = CharacterValue(en_name, skin, games)
+            if not character:
+                logger.warning(f"Top8: no character {en_name!r} in the "
+                               f"loaded game, player {slot} left as it is")
+                return False
+            value = {"1": character}
         return StateManager.SetIfChanged(
             _PlayerKey(slot, "characters"), value)
+
+
+def CharacterPick(value, games=None, snapshot=None):
+    """The identifiers that show `value` -- a player's ``characters["1"]``
+    -- as ``(en_name, skin row)``; ``(None, -1)`` for no character, or one
+    the loaded game's character combo does not list.
+
+    Reads every shape a slot can hold:
+
+    - ``CharacterValue``'s (the panel's pick, S4h on). Matched as a player
+      card matches its slot (``PlayerService.SlotFromValue``): the rows
+      sharing the value's codename or en_name are the candidates, and the
+      one whose value with the stored ``skin`` is `value` wins -- a skin
+      that is a different character (Dr. Mario) puts that character's name
+      and en_name in.
+    - the import's (S4h on): the character's config with
+      ``CharacterValue``'s keys added (``ImportedCharacterValue``) -- the
+      candidates' skin row whose ``assets`` these are.
+    - the panel's skin row, before S4h: ``{"assets"}`` only, plus the name
+      and en_name of a different-character skin and no codename -- the
+      skin row, among every character's, whose ``assets`` these are.
+    - the panel's character row and the import's copy of the character's
+      config, before S4h: no assets -- the character by codename /
+      en_name, on its first skin (what the panel showed for them).
+
+    The codename names the character; an en_name can be another
+    character's -- Bowser Jr.'s skin "Roy" is a different character, and
+    Roy is one too -- so the rows sharing the codename are tried first,
+    whatever order the combo lists them in.
+    """
+    if not isinstance(value, dict) or not value:
+        return None, -1
+    games = games if games is not None else GameAssetCatalog.instance
+    if snapshot is None and games is None:
+        return None, -1
+    snap = snapshot if snapshot is not None else games.Current()
+    rows = [data for _text, data in snap.characterRows]
+    codename = value.get("codename")
+    en_name = value.get("en_name")
+    byCodename = [data for data in rows
+                  if codename and data.get("codename") == codename]
+    byEnName = [data for data in rows
+                if en_name and data.get("en_name") == en_name
+                and not any(data is other for other in byCodename)]
+    candidates = byCodename + byEnName
+
+    skin = value.get("skin")
+    if _IsRow(skin):
+        for data in candidates:
+            name = data.get("en_name")
+            if CharacterValue(name, skin, games, snap) == value:
+                return name, skin
+
+    assets = value.get("assets")
+    if isinstance(assets, dict) and assets:
+        # The codename's character's skins; without one (the skin row
+        # before S4h, whose en_name may be a different-character skin's)
+        # nothing but the assets names the character: every character's
+        # skins are searched, never the en_name's alone.
+        searched = byCodename if byCodename else rows
+        for data in searched:
+            name = data.get("en_name")
+            for row, (_skin, _text, skinData) in enumerate(
+                    snap.skinRows.get(name, ())):
+                if skinData.get("assets") == assets:
+                    return name, row
+
+    if candidates:
+        name = candidates[0].get("en_name")
+        return name, _SkinRow(snap, name, skin)
+    return None, -1
 
 
 def ForgetCharacters():
@@ -162,28 +341,50 @@ def ApplyScores(scores):
     match's slots (and can reset ones that are no longer reachable), so the
     caller re-renders from the returned dict rather than from what it sent.
 
-    The caller is expected to pass every match's staged score, not just the
-    ones that changed: any match id missing from `scores` is dropped from
-    the result, since `matches` here is built only from what was iterated,
-    not merged with `current`. The one existing call site (`AutonaTop8Widget
-    ._onApplyScores`) always passes the full row of 8 matches, so this has
-    not bitten in practice, but a partial dict silently loses the omitted
-    matches' results.
+    A merge (ADR-005 S4h): only the matches in `scores` are applied, every
+    other one keeps its published score and result. It used to rebuild the
+    matches from `scores` alone, so a match left out lost its result -- the
+    panel always sends all of them, which is why it never showed; a client
+    sending the one match it changed would have wiped the rest. An id that
+    is not a Top 8 match is ignored (a warning). Read, merged and written
+    under the state lock, so two merges do not drop each other's matches.
+
+    A score is a list of two ints, 0..SCORE_MAX (the panel's spin boxes'
+    range; a bool is not a score). When any applied one is not -- or
+    `scores` is not a dict -- nothing is written and the answer is None
+    (a warning): a client's bad value is refused, not half applied.
     """
-    # StateManager.Get returns a live reference -- never mutate it in place,
-    # or DeepDiff sees no change and the delta is never broadcast.
-    current = StateManager.Get(MATCHES_PATH) or {}
-    matches = {}
-    for matchId, score in scores.items():
-        match = dict(current.get(matchId) or top8.DefaultMatch(matchId))
-        # A list, not whatever sequence the caller passed: the score is
-        # exported as JSON and compared against a restored one.
-        score = list(score)
-        match["score"] = score
-        match["finished"] = score[0] != score[1]
-        matches[matchId] = match
-    matches = top8.Recompute(matches)
-    StateManager.Set(MATCHES_PATH, matches)
+    if not isinstance(scores, dict):
+        logger.warning(f"Top8: refusing the scores {scores!r}")
+        return None
+    unknown = [matchId for matchId in scores
+               if matchId not in top8.MATCH_IDS]
+    if unknown:
+        logger.warning(f"Top8: ignoring the scores of {unknown}")
+    invalid = {matchId: score for matchId, score in scores.items()
+               if matchId in top8.MATCH_IDS and not _IsScore(score)}
+    if invalid:
+        logger.warning(f"Top8: refusing the scores {invalid!r}")
+        return None
+    with StateManager.lock:
+        # StateManager.Get returns a live reference -- never mutate it in
+        # place, or DeepDiff sees no change and the delta is never
+        # broadcast.
+        current = StateManager.Get(MATCHES_PATH)
+        current = current if isinstance(current, dict) else {}
+        matches = {}
+        for matchId in top8.MATCH_IDS:
+            published = current.get(matchId)
+            match = dict(published if isinstance(published, dict)
+                         else top8.DefaultMatch(matchId))
+            if matchId in scores:
+                # A copy: the caller's list does not go into the state.
+                score = list(scores[matchId])
+                match["score"] = score
+                match["finished"] = score[0] != score[1]
+            matches[matchId] = match
+        matches = top8.Recompute(matches)
+        StateManager.Set(MATCHES_PATH, matches)
     return matches
 
 
@@ -361,21 +562,25 @@ def ImportPhaseGroup(phaseGroupData, games=None, countries=None) -> bool:
     # old game's characters are never left behind on the new one.
     with StateManager.lock:
         snapshot = games.Current()
-        resolved = {slot: ResolveImportedPlayer(player, snapshot, countries)
+        resolved = {slot: ResolveImportedPlayer(player, snapshot, countries,
+                                                games)
                     for slot, player in players.items()}
         ImportBracket(resolved, matches)
     return True
 
 
-def ResolveImportedPlayer(imported, snapshot, countries):
+def ResolveImportedPlayer(imported, snapshot, countries, games=None):
     """A ``FromBracket`` player as the state holds it: name and sponsor, the
     country from its code (``CountryCatalog.BasicCountryInfo``), the
     character from the first of the player's mains in the loaded game.
 
-    `snapshot` is a ``GameAssetCatalog.Current()``. The character is the
-    catalog's entry (a copy), found by its key (en_name) or else by its
-    codename -- what the panel resolved through the Qt asset adapter,
-    which reads the same snapshot, until S3e-8.
+    `snapshot` is a ``GameAssetCatalog.Current()`` of `games` (default: the
+    instance). The main names the character by its key (en_name) or else
+    by its codename; the value is ``ImportedCharacterValue``'s, on the
+    main's skin (its first when the main has none -- Start.gg's never do --
+    or one past the pack's). It used to be the copy of the character's
+    config alone: no ``assets``, so the overlay drew no icon for an
+    imported player (ADR-005 S4h).
     """
     player = top8.DefaultPlayer()
     player["name"] = imported.get("name", "")
@@ -392,20 +597,69 @@ def ResolveImportedPlayer(imported, snapshot, countries):
     if game and isinstance(mains, dict):
         game_mains = mains.get(game.get("codename", ""), [])
         if game_mains and game_mains[0]:
-            char = _CharacterFromCodename(snapshot, game_mains[0][0])
+            main = game_mains[0]
+            en_name = _CharacterKey(snapshot, main[0])
+            skin = _MainSkin(main[1]) if len(main) > 1 else 0
+            char = ImportedCharacterValue(en_name, skin, games, snapshot)
             if char:
                 player["characters"] = {"1": char}
     return player
 
 
-def _CharacterFromCodename(snapshot, codename):
+def ImportedCharacterValue(en_name, skin=0, games=None, snapshot=None):
+    """What an imported player's ``characters["1"]`` holds for the
+    character `en_name` on skin row `skin`.
+
+    The character's config entry as the game defines it -- a copy of
+    ``snapshot.characters[en_name]`` (codename, display_name, export_name,
+    en_name and whatever the config carries: smashgg_name, locale,
+    skin_name...), what an import wrote before ADR-005 S4h, key order and
+    values unchanged -- followed by the keys of ``CharacterValue`` it
+    lacks (modded, name, assets, skin, variant): the overlay draws the
+    icon from ``assets``. Additive only, for the exported text files
+    (``out/top8/players/{n}/characters/1/*``) and a user's own layout: a
+    key the config has keeps the config's value, so a different-character
+    skin's en_name stays the character's here (Bowser Jr. for its "Roy"
+    skin), where the panel's pick names the skin's character.
+
+    A character the combo does not list -- a modded one while mods are
+    off -- or no catalog to build with: the copy alone, as before S4h. {}
+    for a character the game does not have.
+    """
+    if snapshot is None:
+        games = games if games is not None else GameAssetCatalog.instance
+        if games is None:
+            return {}
+        snapshot = games.Current()
+    entry = snapshot.characters.get(en_name) \
+        if isinstance(en_name, str) else None
+    if not isinstance(entry, dict):
+        return {}
+    # A copy: the entry is the catalog's own dict.
+    value = deep_clone(entry)
+    for key, item in CharacterValue(en_name, skin, games, snapshot).items():
+        if key not in value:
+            value[key] = item
+    return value
+
+
+def _CharacterKey(snapshot, name):
+    """The en_name of the character a main names: by its key, else by its
+    codename (Start.gg's mains carry the key; a player database's may carry
+    either). None when the game has no such character."""
     characters = snapshot.characters
-    entry = characters.get(codename)
-    if not entry:
-        for value in characters.values():
-            if value.get("codename") == codename:
-                entry = value
-                break
-    # A copy: the entry is the catalog's own dict, and this one goes into
-    # the state (top8.*.characters).
-    return deep_clone(entry) if entry else {}
+    if isinstance(name, str) and name in characters:
+        return name
+    for key, value in characters.items():
+        if value.get("codename") == name:
+            return key
+    return None
+
+
+def _MainSkin(value):
+    """A main's skin row: a number, or its string (a player database's
+    record); anything else -- an infinity included -- is the first skin."""
+    try:
+        return int(value)
+    except (TypeError, ValueError, OverflowError):
+        return 0
