@@ -43,7 +43,7 @@ git commit -m "chore(release): バージョンを {X.Y.Z} に更新 ..."   # 日
 git push origin main:chore/release-v{X.Y.Z}   # 認証手順は CLAUDE.local.md 参照
 ```
 
-- PR 作成はユーザーが手動（URL・タイトル案・本文案を提示する）。**PR マージを待たずに手順 3 以降へ進んでよい**
+- 続けて `gh pr create` と `gh pr merge <PR番号> --merge --auto`（リスク区分「軽微」。[git-workflow.md](git-workflow.md) の手順 3・4）。**PR マージを待たずに手順 3 以降へ進んでよい**
   （ビルドはローカル main のバージョン更新コミットから行うため）
 
 ### 3. Web UI をビルド（exe より先。ビルド成果物が exe に同梱される）
@@ -159,9 +159,8 @@ publish 直後に、**旧バージョンの exe からアプリ内アップデ�
 
 ### 10. 後始末（ユーザー依頼・確認のうえ実施）
 
-- [ ] `chore/release-v{X.Y.Z}` の PR をユーザーがマージ
-- [ ] マージ後にローカル main を再同期（手順 1 と同じ）
-- [ ] マージ済みリモートブランチを削除（[git-workflow.md](git-workflow.md) のブランチ削除フロー。**破壊的操作のためユーザーの明示依頼を得る**）
+- [ ] `chore/release-v{X.Y.Z}` の PR が自動マージされたことを確認（`gh pr view <PR番号> --json state` が `MERGED`）
+- [ ] マージ後にローカル main を再同期（手順 1 と同じ。ブランチはマージ時に自動削除される）
 - [ ] リリース URL をユーザーに報告: `https://github.com/yuya-tagu/Autona-releases/releases/tag/v{X.Y.Z}`
 
 ## 過去に踏んだ地雷（再発防止）
