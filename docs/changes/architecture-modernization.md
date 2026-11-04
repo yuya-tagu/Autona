@@ -5196,3 +5196,154 @@ Top 8 表示設定パネルに残っていた「国・キャラの値を Qt の�
     - Top 8・実況・解説・大会情報を行き来しても、ビューが再読み込みされない
 - **検証**（レビュー対応後）: pytest 全量 3136 passed / 2 skipped／jest 全量 399 passed（pytest の後に単独で）／`npm run build` OK（警告は既存の `Header.jsx` だけ）／`npm run test:e2e` 26 passed
   - pytest の 1 回目の全量では `tests/test_set_load_service.py` の crest の 2 件（`test_a_team_name_with_a_crest_publishes_its_path` / `test_a_team_name_with_no_crest_file_publishes_no_logo`）が落ちた。同じ順で前のファイルから回した実行と、2 回目の全量では通る。タイミング依存（前のテストの残したスレッドが cwd か state に触る類）で、Top 8 の変更とは無関係と判断した。原因は追っていない
+
+### S4 Stats（統計情報）の React 化 — 設計（2026-11-04・オーナー承認済み）
+
+オーナー判断（2026-11-04）: 下記の設計を承認。論点 1〜5 は推奨案どおり（範囲は「統計情報」だけで表示設定は次に設計・試合一覧の結果は core のメモリ + `GET /api/v1/analysis`、進み具合は `analysis.*`・選手名は反映済み・取得の並列は 2 本・S4j → S4k を自走し S4k の後で停止）。
+
+**範囲**: サイドバー Data の「統計情報」（`src/AutonaStatsWidget.py` 344 行と、その 4 つ目のタブに入る試合一覧 `src/AutonaAnalysisWidget.py` 525 行。どちらも `.ui` は無い）を、共有ビューの React ページ `/web/stats` に移し、Qt 版を消す。統計の 3 タブは表示だけで、書き手は S3e-5 から core の `StatsService` にある。一方、試合一覧は start.gg の取得・並列制御・行の計算・大会切替での破棄がウィジェットに丸ごと残っている。そこで **小さな core 化（S4j）→ React 化（S4k）の 2 段**にする。Display の「統計情報表示設定」（`AutonaStatsPreviewWidget`、キー `statsPreview`）は別パネルとして扱う（論点 1）。
+
+**棚卸し（2026-11-04・HEAD c75c9c4f）**
+
+- **入口**: `src/Autona.py:478-479` の Data に `stats`。ファクトリ（`:1065-1076`）が `AutonaAnalysisWidget()` を作り `AutonaStatsWidget(analysisPanel=...)` に埋め込む。試合一覧はほかから参照されない
+- **統計情報タブ（`AutonaStatsWidget`）**
+  - 上部: 「統計情報を取得する」と、`Upset Factor: {uf} | P1 vs P2` のラベル（両選手名があるときだけ係数つき。`:231-239`）
+  - タブ 1「Head-to-Head」: 勝敗集計（`winner == 0/1`、勝率 `%.0f%`、`[N sets]`）と表（日付は `timestamp` をローカル時刻 `%Y/%m/%d`・大会 + event・`round` か `phase_name`・スコア・勝者名）
+  - タブ 2「Last Sets」: P1 / P2 の表（フェーズ / ラウンド / 相手 / スコア）
+  - タブ 3「Tournament History」: P1 / P2 の表（大会 / イベント / 順位 / 参加者数 / 日付。月は英語名）
+  - 描くのはボード 1 だけ。Bridge の `state_big_change` / `state_updated`（統計キーを含む delta）/ `held_state_updated` と `showEvent` で描く。**選手名は held の live 値（反映前）を読む**
+  - ウィジェットは state を書かない。ボタンは `GetScoreboard(1)` → `StatsService(1).RefreshAll()`。v1 の `POST /api/v1/scoreboards/1/stats:refresh`（`AutonaWebOperations.refresh_stats`）で同じことができる
+- **試合一覧（`AutonaAnalysisWidget`）**
+  - UI: 「Startggからデータを取得」、状態ラベル（未取得 / 大会なし / フェーズ取得中 / 取得中 n/m / 失敗 / n 試合（m 件失敗））、選手名・ラウンドの絞り込み、9 列の並べ替えできる表（Round / P1 Seed / P1 Name / Score / P2 Name / P2 Seed / UpSet / LR / SeedOver）
+  - ロジックはすべてウィジェット: provider のシグナル `tournament_phases_updated` のキャッシュ、全 phase group を `GetAnalysisPhaseGroup` で同時 2 本取得（次の 1 本は `QTimer.singleShot(0)`）、`core.Bracket` で組み立て、行の計算（UpSet は `_round_index` の差で `StatsService.CalculatePlacementMath` とは別の式・Losers Run・SeedOver）、`tournament_changed` で破棄
+  - **結果はウィジェットのメモリだけ**。state にも Web にも出ず、ヘッドレスでは使えない。テストは 0 件
+- **オーバーレイと外部契約**: `layout/` の `upset_factor` / `h2h_record` / `recent_sets` / `last_sets` / `tournament_history` が `score.1.{upset_factor,recent_sets,last_sets,history_sets}` と反映済みの選手名を読む。統計キーは held 対象外（`StateSchema.STATS_KEYS`）。**統計タブの React 化は Socket.IO payload・`state.json`・`out/` を変えずにできる**
+- **共有ビュー**: `WEB_PANELS` に `stats` は無い。ナビのキー `stats` をページ名にそのまま使えば、並び・キー・`STATE_VERSION`（22）は不変
+- **Qt 前提のテスト**: `tests/test_stats_flow.py` の `_statsPanelRefresh()`（golden の「STATS パネル」ステップ）、`tests/test_web_panel_host.py` の Qt 項目の例（`stats` を使っている）
+- **pitfalls**: #9（`QTimer.singleShot(0)` の取得連鎖 → core ではジョブ内で回す）、#17（試合一覧のパネルが過渡期に core の結果を読むときも lock の中で待たない）。#16 は該当なし
+
+**設計**
+
+1. **S4j: 試合一覧の core 化**（Qt のウィジェットは残し、core を呼んで描くだけにする。単独でリリースできる）
+   - 新設 `src/core/AnalysisService.py`（Qt 非依存）
+     - `Refresh()` → `STARTED` / `BUSY` / `NO_TOURNAMENT`。取得は注入する fetcher（`RunWithProvider`。`bootstrap_core()` が登録するのでヘッドレスでも動く）。ジョブの中で毎回 `GetTournamentPhases()` を呼び（シグナルのキャッシュと「フェーズ待ち」をやめる）、全 phase group を同時 2 本で取る（共有キューから取るジョブ 2 本。ジョブの中で別ジョブを待たない）
+     - 行の計算（`_round_index` / UpSet / Losers Run / SeedOver / ラウンドの前置き）をそのまま core に移す。ラウンド名は callable で注入。行は表示文字列ではなく構造（`round` + 並べ替えキー・`p1` / `p2` の `{seed, name}`・`score`（未完了は null）・`upset` / `losersRun` / `seedOver`）で返し、「TBD」「(seed N)」はページ側の文言にする
+     - 結果は core のメモリに、取得した大会の URL と組で持つ（論点 2）。進み具合は新しい小さな state キー `analysis = {status: idle|running|done|error, error, done, total, failed, revision}` に出す（追加のみ。`KEY_CATALOG` に記載。起動時シードで idle）
+     - `Forget()`: provider アダプタの `LoadTournament` / `UnloadTournament` から直接呼ぶ（observer は使わない）。世代を進めて取得の残りを止め、結果を捨てて idle にする。遅れた前大会の答えは書かない
+     - ロック順は「`StateManager.lock` → サービスの lock」の一方向。サービスの lock を持ったまま `Set` しない
+   - パネル: ボタンは `AnalysisService.Refresh()`。状態ラベルと表は `analysis.*` の変化を見て描き、行は `Rows()` から読む（描画は lock の外へ遅らせる）。provider のシグナルへの接続と `GetAnalysisPhaseGroup`（コールバック型）は消す
+   - 統計情報タブ（`AutonaStatsWidget`）は触らない
+   - テスト: **移す前の木で golden を録る**（phase group 1 つ / 複数・BYE・未完了・GF リセット・Losers Run の連鎖・SeedOver・部分的な失敗と全滅）。現行ウィジェットの行と状態ラベルを録り、新しい core の行をページと同じ規則で文字列にして照合する。BUSY・大会切替での破棄・遅れた答え・ヘッドレスでの取得・lock の中で待たないことも pin
+2. **S4k: React ページ `/web/stats` と Qt 版の削除**
+   - 画面（`web/src/StatsPage/`）: 上部に「統計情報を取得する」（既存の `POST /scoreboards/1/stats:refresh`。応答待ちの間は押せない。成功は snackbar）と係数 / 対戦カードの 1 行。MUI の Tabs で 4 タブ（直近の対戦 / 戦績 / 大会履歴 / この大会の試合一覧）。試合一覧は取得ボタン・状態の 1 行・絞り込み・`TableSortLabel` によるクライアント側の並べ替え。統計の値はすべて Socket.IO の `score.1.*` から TS で整形（日付はブラウザのローカル時刻）。選んだタブはモジュール変数で保持（パネルを行き来しても残る）
+   - 追加する v1 ルート（追加のみ）: `POST /api/v1/analysis:refresh`（WRITE・202、409 `BUSY` / `NOT_READY`）、`GET /api/v1/analysis`（READ・`{status, url, rows}`。今の大会の結果でなければ空）。統計の値を返すルートは足さない（Socket.IO で足りる）
+   - デスクトップ: `_CreateStatsPanel` は `self._WebPanel("stats")` を返すだけ。`WEB_PANELS` と `registry.tsx` に `stats`。アイコン・ラベル・位置・キーは不変
+   - 削除: `AutonaStatsWidget.py`・`AutonaAnalysisWidget.py`・`Autona.py` の import・専用の翻訳（共有の文言は残す）。`AutonaStatsUtil`・`StatsService`・`tournament_phases_updated`（セット選択とボードが使う）は残す
+   - テストの置き換え: `test_stats_flow.py` の「STATS パネル」ステップを v1 `stats:refresh` に替え golden の取得・書き込みの列が同じことを照合。`test_web_panel_host.py` の Qt 項目の例を `stats` から `playerBrowser` へ。新規に `tests/test_api_v1_analysis.py`・RTL `StatsPage.test.js`・e2e `web/e2e/stats.spec.ts`
+   - docs: `Design.md`・`features.md`・`python-widgets.md` / `state-and-webserver.md`・`README.md`・`external-control-api.md`、手動チェックリストに「統計情報」節を新設
+
+**旧実装との挙動差（見込み）**
+
+- 選手名は反映済みの値になる（OBS と同じ）。統計は held 対象外なので、セットを読んで反映するまでの間は新しい選手の統計に前の選手名が付いて見える（論点 3）
+- 試合一覧の結果は core が持つ。ページを開き直しても、LAN の別端末からも同じ結果が見え、ヘッドレスでも取れる。大会を変えると消える・再起動で消えるのは Qt と同じ
+- 試合一覧の取得のたびにフェーズを取り直す（start.gg への要求が 1 本増え、「フェーズ情報を取得中...」の待ちは無くなる）
+- 表は MUI になり、行の高さ 40 の固定は無くなる。「統計情報を取得する」の結果を snackbar で知らせる（Qt 版は無言）
+
+**リスク**
+
+- 試合一覧の行の計算は未テスト。golden を移す前の木で録らないと Losers Run / SeedOver のずれに気づけない
+- 行数は大会規模で数百〜千超。state に入れると delta・`program_state.json`・`out/`（葉 1 つにつき 1 ファイル）が膨らむので、行は `GET` だけで返す（論点 2）。進み具合のキー `analysis` は `out/analysis/*.txt` に出る（追加のみ）
+- 取得ジョブ 2 本がジョブレーン 4 本のうち 2 本を占める（今と同じ）
+- `stats_flow` の golden の 1 ステップを差し替える
+
+**オーナー判断が要る論点（推奨つき）**
+
+1. **範囲** → 推奨: **「統計情報」（試合一覧を含む）だけにし、「統計情報表示設定」（Display）は次にまた設計を出す**。表示設定には Qt の Companion 設定ガイドを開く導線と `stats_preview.selected_type` の直書きが残っていて、別に扱いを決める必要がある。2 枚を一度に移すと 1 PR が大きくなる
+2. **試合一覧の結果の置き場** → 推奨: **core のメモリに持ち `GET /api/v1/analysis` で返し、進み具合だけを state の小さなキー `analysis.*` に出す**。ページに持つと共有ビューでパネルを行き来するたびに消える。行ごと state に入れると大会規模で delta と `out/` が膨らむ
+3. **表示する選手名** → 推奨: **反映済み（OBS と同じ）にする**。ページで見たものと配信に出ているものが一致する。反映前の名前を出すには読み取りの v1 を足す必要があり、オーバーレイとも食い違う
+4. **試合一覧の取得の並列数** → 推奨: **今の 2 本のまま**（ジョブレーンを埋めない S3f-2 の判断を保つ）。1 本にすると大きな大会で取得が倍かかる
+5. **自走の範囲** → 推奨: **S4j → S4k を自走し（各段でコミット・push・PR 作成まで）、S4k の後で停止する**。次のパネル（統計情報表示設定）はまた設計を出す
+
+**対象外**: 統計情報表示設定（論点 1）、ボード 2 / 3 の統計表示（Qt 版もボード 1 だけ）、試合一覧の UpSet の式を `CalculatePlacementMath` に揃えること、`history_sets` の月の英語表記（state の契約）、API 情報ウィンドウへのルート追加
+
+**見積り**: S4j は中（core 1 ファイル + provider 2 か所 + パネルの薄化 + golden）。S4k は中（v1 ルート 2 本 + React ページ 1 枚 + テストの置き換え）
+
+#### S4j 試合一覧の core 化（2026-11-04）
+
+統計情報パネルの 4 つ目のタブ「この大会の試合一覧」（`AutonaAnalysisWidget`）に丸ごと残っていた start.gg の取得・並列制御・行の計算・大会切替での破棄を、新しい core のサービス `src/core/AnalysisService.py` に移した。Qt のパネルはボタンで `Refresh()` を呼び、state の `analysis`（進み具合）とサービスのメモリの行を描くだけになった（S4k の React 化の前段。単独でリリースできる）。`bootstrap_core()` が作るので、ヘッドレスでも取得できる。外部契約は追加だけ:
+
+- state に `analysis = {status, error, done, total, failed, revision}` が増える（`out/analysis/*.txt` も増える）。行は state に入れない（論点 2）
+
+Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`settings.json` は変えていない。`StateMigrations.CURRENT_VERSION` と `Window.STATE_VERSION` も不変（判断 1）。
+
+- **やったこと**
+  - 新設 `src/core/AnalysisService.py`（Qt 非依存。インスタンスは `bootstrap_core()` が作る）
+    - `Refresh()` → `STARTED` / `BUSY`（実行中。キューしない）/ `NO_TOURNAMENT`（大会なし・終了中・fetcher 未登録。何も書かない）。取得は注入した `fetcher`（provider の `RunWithProvider`）のジョブで走る
+    - 1 本目のジョブが毎回 `GetTournamentPhases(strict=True)` を呼び（シグナルのキャッシュと「フェーズ待ち」をやめた）、id のある全 phase group を 1 つのキューに並べる（同じ id の group は 1 つ）。group は最大 2 本のジョブ（`PARALLEL_FETCHES = 2`。捨てた取得のジョブがまだ走っている間はその数だけ減らし、最低 1 本）がキューから取る。2 本目は、ジョブからジョブを積めないので、1 本目が注入した `later`（GUI executor の `later`）でメインスレッドに頼んで始める（判断 2）。どのジョブも別のジョブを待たない。最後の答えを記録したジョブが行を組む
+    - provider には strict で頼む（`GetTournamentPhases` / `GetAnalysisPhaseGroup` の `strict=True`。要求の失敗を空の答えにせず例外にする。`TournamentMediaService` の lookup と同じ形）。取得の失敗と「phase group が無い」「sets の無い group」を区別するため
+    - 行の計算（旧 `_round_index` / UpSet / Losers Run / SeedOver / 複数 group のときのラウンドの前置き）はそのまま移した（`RoundIndex` / `UpsetFactor` / `PhaseGroupEntries` / `RoundPrefix` / `BracketRows` / `BuildRows`）。ラウンド名は `roundNames`（`AutonaLocaleHelper.matchNames`）を組むたびに読む
+    - 行は構造で返す: `round`・`roundOrder`（`[group id, ラウンド, ラウンド内の位置]`。旧 Round 列の並べ替えキー）・`p1` / `p2` の `{seed, name}`（不明は None / ""）・`score`（`[a, b]`。未完了は None）・`upset`（勝敗が付いていなければ None）・`losersRun`（無しは 0）・`seedOver`（無しは None）。「TBD」「(seed N)」「-」は表示側の文言
+    - 進み具合は `analysis` に 1 つの dict で書く。`Refresh` が戻る前に次の revision で `running`（フェーズの取得中は `total` 0）を publish し、group の答えのたびに `done` / `failed` を進め、終わりに `done` か `error`（`no_phases` = phase group が無い / `fetch_failed` = フェーズの要求が失敗した・どの group の要求も失敗した）
+    - 行はメモリに、取得した大会の URL と組で持つ（`Result()` → `{url, rows, revision}` / `Rows()`）。`done` で終わった取得の行に差し替わり、`error` で終わった取得は前の行を残す（旧パネルの表と同じ）
+    - `Forget()`: 世代を進めて取得の残りを止め（ジョブは次の段で抜け、遅れて返った答えは記録しない）、行を捨て、`analysis` を次の revision の idle にする
+    - ロック順は `StateManager.lock` → サービスの lock の一方向。サービスの lock は自分のフィールドだけを守り、state の読み書き・fetcher・`later` はそれを離して呼ぶ
+  - `src/core/StateSchema.py`: `ANALYSIS_ROOT` / `ANALYSIS_KEYS` / `DefaultAnalysis(revision)` / `ReadAnalysis()`（壊れた値は idle と読む）。`KEY_CATALOG` に `analysis`。`SeedPanelState()` が起動のたびに idle に戻す（revision は保存値を引き継ぐ）
+  - `src/bootstrap.py`: `bootstrap_core()` の `Top8Service.fetcher` の直後で `AnalysisService.instance` を作る（`ORDER CONSTRAINT` を付けた）
+  - `src/AutonaTournamentDataProvider.py`: `LoadTournament`（新しい provider に差し替えた直後）と `UnloadTournament`（provider を None にした直後）が `AnalysisService.instance.Forget()` を直接呼ぶ（`_ForgetAnalysis`。observer は使わない）。コールバック型の `GetAnalysisPhaseGroup` を削除した（呼び出し元がパネルだけだった。provider 本体の `StartGGDataProvider.GetAnalysisPhaseGroup` は残る）
+  - `src/TournamentDataProvider/StartGGDataProvider.py`: `GetTournamentPhases` / `GetAnalysisPhaseGroup` に `strict=False` を足した。strict のときは、要求の失敗（`QueryRequests` が `{}` を返す・例外）と、答えに `data.event` / `data.phaseGroup` が無いことを例外にする。strict でない呼び出し（アダプタの `tournament_phases_updated`・Top 8 の取り込み）は今までどおり `[]` / 空の形を返す。基底クラス `TournamentDataProvider.GetTournamentPhases` の引数も揃えた
+  - `src/AutonaAnalysisWidget.py`: 取得・行の計算・provider のシグナル（`tournament_phases_updated` / `tournament_changed`）への接続を消した。ボタンは `Refresh()`、`NO_TOURNAMENT` なら「大会が選択されていません」（state に出ないので、次に `analysis` が変わるまで）。`Refresh()` が例外（fetcher の失敗）ならログに出して「取得に失敗しました」。Bridge の `state_updated` / `state_big_change` で `analysis` の変化を見て、`QTimer.singleShot(0)` で lock の外へ遅らせて描く（pitfalls #17）。表は `ResultRevision()` が変わったときだけ `Result()` で行を写して作り直す（行の深いコピーを進み具合の変化ごとに取らない）。行の文言は `RowCells`。UI（ボタン・ラベル・絞り込み・9 列の表）は不変
+  - `src/core/Bracket.py`: docstring の利用者を `core.AnalysisService` に直した
+  - テスト
+    - `tests/fixtures/analysis_rows/golden.json`: **移す前の木（dcf53307）で**旧パネルを通して録った 13 シナリオ（group 1 つの完了 + GF リセット / シード既知 / 未完了 / losers 未配線（BYE）/ BYE / Losers Run の連鎖 / 小さすぎるブラケット・複数 group（前置きの 4 通りと id 無しの group）・一部失敗（答え無し・sets 無し・組めない sets）・全滅・全部空の答え・phase group 無し・大会なし）。表の全セルの文字列と並べ替えキー・終わった後のラベル・provider への要求。**凍結データ**（録画用のテストは今の木では動かないので削除した。録り方の要点は `tests/test_analysis_rows.py` の docstring）
+    - `tests/test_analysis_rows.py`（4 本）: core の行をページの規則で文字列にして golden と照合（ヘッドレスと同じ core 単体。provider に strict で頼むことも）、薄くしたパネルの表・ラベル・要求を golden と照合、golden から意図して変えたセルが未完了セットの Score の並べ替えキーだけであること、失敗した取得が前の行を残し大会切替で消えること
+    - `tests/test_analysis_service.py`（27 本 + parametrize 2）: BUSY・大会なし / fetcher なしは何も書かない・大会切替で取得を捨て遅れた答えを記録しない（新しい取得の数え方にも混ざらない）・フェーズ待ちの間に解除・`Forget` で行を捨て revision が進む・provider アダプタの Load / Unload が新しい provider に差し替えた後に `Forget` を呼ぶ・**別スレッドの `Refresh` が差し替えと交差しても旧大会の行が新大会の done にならない**・同時 2 本（3 本目は無い。2 本目はメインスレッドから）・group 1 つならジョブ 1 本・**捨てた取得のジョブが残っている間は 1 本**・同じ id の group は 1 回・フェーズ / group の要求の例外・行を組むジョブの例外で `BUSY` のまま残らない・1 group の行の例外はその group だけ失敗・終わりの publish の例外で running のまま残らない・`Refresh()` の例外をパネルが「取得に失敗しました」にする・パネルは revision が変わったときだけ行を写す・**実 provider（`StartGGDataProvider`）の失敗経路**（`QueryRequests` が `{}` / 例外 / event が null → `fetch_failed`、phase が空 → `no_phases`、group が `{}` / 例外 → 失敗、sets の無い group は答えた。strict でない呼び出しは今までどおり）・**lock の中で待たない**（`run_sync` がどこからも呼ばれない・サービスの lock を持ったまま state を読み書きしない・fetcher / `later` をどちらの lock も持たずに呼ぶ。サービスの lock は素の Lock を包んで持ち主を記録する）・パネルが provider に触らず書かない（AST）・起動時シード・ラウンドの前置き・`PhaseGroupEntries`・**ヘッドレスでの取得**（素の `QCoreApplication` と `bootstrap_core()` だけのサブプロセスで、2 本同時に取り golden の行になる）
+    - `tests/test_bootstrap_split.py`: `bootstrap_core()` の手順に `AnalysisService()` を足し、サブプロセスのプローブで作られることを確かめる
+    - `tests/test_provider_jobs.py`: アダプタの `GetAnalysisPhaseGroup` の項目を消した（削除したため）
+    - `tests/test_state_schema.py`: ルート定数の表に `ANALYSIS_ROOT`
+  - docs: `.claude/design/Design.md`（state の木に `analysis`、統計のサブタブ表）・`.claude/rules/state-and-webserver.md`（ドメインサービスの表・ルート定数・`bootstrap_core()` が作るもの）・`docs/product/features.md`
+- **判断と理由**
+  1. **`StateMigrations.CURRENT_VERSION` は上げない**。足したのは新しいルートのキーだけで、既存のキーの名前・形は変えていない。起動時のシードが idle を入れるので、S4j より前の `state.json` にキーが無くても困らない（前例: S4d の `stream.thumbnail`、S4f の `tournamentInfo.media`、S4g の `tournamentInfo.load`）。ナビは変えていないので `Window.STATE_VERSION`（22）も不変
+  2. **2 本目のジョブはメインスレッドから始める**（`later`）。ジョブレーンのスレッドからジョブを積むと TaskExecutor が `NestedSubmitError` にする（S3f-1 の入れ子の禁止）。1 本目が自分で 2 本目を待つ形にはしない（設計の「ジョブの中で別ジョブを待たない」）。`later` が無い・失敗したときは 1 本目がキューを全部取る
+  3. **インスタンスのサービスにした**（`Top8Service` のようなモジュール関数にしない）: 世代・実行中の取得・行を持ち、fetcher などを注入する（`TournamentService` / `StreamService` と同じ形）
+  4. **`Forget()` は idle からでも次の revision を publish する**。「大会が選択されていません」は state に出ないパネルの文言で、次の大会の読み込みで消えるには `analysis` の変化が要る。revision を持つ読み手（S4k のページ）にも「大会が変わった」が届く
+  5. **全滅の判定**: `error`（`fetch_failed`）は、フェーズの要求が失敗したとき、またはどの group の要求も失敗した（strict の provider が例外 → None。偽 provider の None / `{}` も同じ）ときだけ。要求が通って sets が空だった group は「答えた」と数え、`done` の「0 試合 (n 件取得失敗)」になる（golden の「全部空の答え」）。旧実装は provider が要求の失敗も空の形にして返したので、start.gg の障害でも「答えた」になっていた（レビュー M1 で strict にして区別した）
+  6. **未完了セットの `score` は None**（設計どおり）。Score 列の並べ替えキーは 0 になる（旧: 文字は「-」なのに途中のスコアの合計で並んでいた。golden から意図して変えた唯一のセル）
+  7. **フッターのステータスは出さない**（`status=None`）。旧パネルも出していなかった
+- **旧実装との挙動差（記録）**
+  - 取得のたびにフェーズを取り直す（start.gg への要求が 1 本増える）。「フェーズ情報を取得中...」で止まらない
+  - phase group が無い大会: 「取得に失敗しました」になる（旧: フェーズを取り直して待ち続け、大会を変えるまで「フェーズ情報を取得中...」のままだった）。フェーズの要求が例外になったときも同じ
+  - 取得の間、フェーズの取得中もボタンが押せない（旧: フェーズ待ちの間は押せ、押すたびにフェーズを取り直した）。押せても `BUSY` で捨てる
+  - group の要求が例外になったら、その group を失敗と数えて進む。1 つの group の行を組めなければ（`Bracket` / `BracketRows` の例外）その group だけを失敗と数え、それ以外のジョブの例外は取得を `error` で終える（旧: どれも取得中のまま止まりえた）。ラウンド名が引けないときはラウンド番号にする（警告）
+  - 未完了セットの Score 列の並べ替え（判断 6）
+  - 最後の 2 つの答えが立て続けに届いたとき、ラベルが「取得中 n/n」に戻って残ることがなくなった（旧: 答えごとに積んだ次の取得の予約が、結果の表示の後に走った。答えの間隔が秒単位の実際の取得ではほぼ起きない。golden は終わった後の最後の結果の文言を録っている）
+  - 結果は core が持つ。ヘッドレスでも取れ、パネル以外からも読める（S4k の `GET /api/v1/analysis` の下地）。大会を変える・再起動で消えるのは旧と同じ
+  - ボードの遅延構築（`tournament_changed` の emit）で一覧が消えなくなった。旧パネルは `tournament_changed` で表を捨てていたので、大会の読み込み以外でこのシグナルが出たときも消えていた。今は provider のアダプタの `LoadTournament` / `UnloadTournament` でだけ消える
+  - start.gg の障害（要求のタイムアウト・`{}`）が「取得に失敗しました」になる。旧実装は、フェーズの要求の失敗は「フェーズ情報を取得中...」のまま、全 group の要求の失敗は「0 試合 (n 件取得失敗)」だった（判断 5）
+  - 同じ id の group が複数の phase に出ても 1 回だけ取る（旧実装も id ごとに 1 つの結果だった。group の数え方・前置きの有無も重複を除いて決める）
+- **残課題**
+  - S4k: React ページ `/web/stats`・v1 の `POST /api/v1/analysis:refresh` / `GET /api/v1/analysis`・Qt 版（`AutonaStatsWidget` / `AutonaAnalysisWidget`）と専用の翻訳の削除。`.ts` の `AutonaAnalysisWidget.py` の行番号はずれたまま（文言は同じなので訳は効く。S4k で消える）
+  - 実際の start.gg の大会での取得は、テストの偽 provider と `QueryRequests` を差し替えた実 provider でしか確かめていない（オーナー実機確認）
+- **レビュー指摘の対応（2026-11-04）**: High は無し。直したもの:
+  - **M1（実 provider の失敗が `no_phases` になる）**: `StartGGDataProvider.GetTournamentPhases` は素の except で `[]` を返すので、実機では `fetch_failed` に届かなかった。`GetTournamentPhases` / `GetAnalysisPhaseGroup` に `strict` を足し（失敗・event / phaseGroup の無い答えは例外。`TournamentMediaService` の lookup と同じ形）、サービスは strict で頼む。既存の呼び出し元（strict なし）の答えは変えていない。実 provider の `QueryRequests` を `{}` / 例外 / null の event にしてテストした
+  - **M2（`Forget()` が provider の差し替えの前）**: 差し替えの前に捨てると、その間に別スレッドから来た `Refresh` が旧 provider で取得し、その行が新大会の done になりえた。`LoadTournament` / `UnloadTournament` で provider の代入の後に移した。差し替えの直前・直後に別スレッドで `Refresh` するテストで pin した（旧の順序では旧大会の provider に要求が出て落ちることを確かめた）
+  - **L1 / L11（捨てた取得のジョブがレーンを占有し続ける）**: 古い世代のジョブが実行中の間は、新しい取得の並列数を `max(1, PARALLEL_FETCHES - 生存中の旧ジョブ数)` にした（ジョブの生存を世代ごとに数える `_alive`。2 本目を始める直前にも数え直す）。これで試合一覧がジョブレーンを 2 本より多く使わない。`PARALLEL_FETCHES` の docstring に「最大 2・旧ジョブの分だけ減る」を書いた
+  - **L2（`BracketRows` の例外が取得全体を `error` にする）**: `BuildRows` の try に入れ、その group だけ失敗と数える
+  - **L3（終わりの publish の例外で running が残る）**: `_Guarded` の失敗時は、取得が終わっていてもいなくても最終状態を publish し直す
+  - **L4**: `tests/test_import_side_effects.py` に `src.core.AnalysisService` と `instance is None` を足した
+  - **L5**: テストでサービスの lock を `RLock` に差し替えるのをやめ、素の `Lock` を包んで持ち主のスレッドを記録する（同じスレッドの取り直しはテストを落とす）
+  - **L6**: golden は凍結データとし、今の木で動かない録画テストを削除した。`tests/test_analysis_rows.py` の docstring に、dcf53307 の旧パネルから録ったこと・録り方の要点を書いた
+  - **L7**: `analysis` fixture の後始末で `Forget()` する
+  - **L8（同じ group id の重複）**: `PhaseGroupEntries` で潰す（最初に出た位置に 1 つ）。複数 group の判定も重複を除いた数で行う
+  - **L9（進み具合の変化ごとに行を深いコピー）**: `ResultRevision()` を足し、パネルは revision が変わったときだけ `Result()` を呼ぶ
+  - **L10**: パネルの `_onRefreshClicked` で `Refresh()` の例外を受け、ログと「取得に失敗しました」に出す
+  - **L12**: 上の「旧実装との挙動差」に、ボードの遅延構築で一覧が消えなくなったことを足した
+- **オーナー実機確認**（`python main.py`）
+  - 統計情報 →「この大会の試合一覧」で「Startggからデータを取得」→「取得中 n/m」→「N 試合」になり、表が出る。並べ替え・絞り込みが今までどおり動く。phase group が複数ある大会でラウンドの前に「フェーズ / グループ ·」が付く
+  - 取得中はボタンが押せない。終わると押せる
+  - 大会を読み込み直す・別の大会にする・解除すると表が消え、「「Startggからデータを取得」を押してください」に戻る。取得中に大会を変えても、前の大会の行が後から出ない
+  - 大会を設定していない状態で押す →「大会が選択されていません」。大会を設定すると元の文言に戻る
+- **検証**
+  - `python -m pytest --ignore=tests/live -q`: 3155 passed, 3 skipped（12 分）
+  - `tests/test_analysis_rows.py` + `tests/test_analysis_service.py` を 3 回続けて: 毎回 20 passed, 1 skipped（録画用）
+  - Web は触っていないので `npm run build` / jest / e2e は回していない
+  - レビュー対応の後: `python -m pytest --ignore=tests/live -q` 3168 passed, 2 skipped（7 分 18 秒）。`tests/test_analysis_rows.py` + `tests/test_analysis_service.py` を 3 回続けて: 毎回 33 passed。M2・L1・L2・L3 の新しいテストは、直す前の実装（`Forget` を差し替えの前に呼ぶ・並列数を常に 2・`BracketRows` を try の外・終わった取得の `_Guarded` が publish し直さない）に一時的に差し替えると落ちることを確かめた

@@ -147,6 +147,10 @@ tournament_media = importlib.import_module(
     "src.core.TournamentMediaService").TournamentMediaService
 tournament_service = importlib.import_module(
     "src.core.TournamentService").TournamentService
+# The tournament's match list (ADR-005 S4j): a singleton created by
+# bootstrap_core(), never on import.
+analysis_service = importlib.import_module(
+    "src.core.AnalysisService").AnalysisService
 
 # SettingsManager comes first, mirroring bootstrap_core(): StateManager
 # imports it, so it is in the chain either way, but it is listed explicitly
@@ -272,6 +276,7 @@ assert task_executor.instance is None, "import created TaskExecutor.instance"
 assert stream_service.instance is None, "import created StreamService.instance"
 assert tournament_media.instance is None,     "import created TournamentMediaService.instance"
 assert tournament_service.instance is None,     "import created TournamentService.instance"
+assert analysis_service.instance is None,     "import created AnalysisService.instance"
 assert core_state.observers.state_updated.subscriber_count() == 0, \
     "import subscribed to the state's notifications"
 assert page_lifecycle._webServerReady is False, \

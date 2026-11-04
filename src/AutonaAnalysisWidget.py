@@ -1,22 +1,27 @@
-"""Analysis dock — tabular view of every completed/scheduled match in
-the tournament.
+"""Analysis panel — tabular view of every completed/scheduled match in
+the tournament (この大会の試合一覧).
 
 Columns (flat, sortable):
     Round | P1 Seed | P1 Name | Score | P2 Name | P2 Seed | UpSet Factor | Losers Run | SeedOver
 
-- UpSet Factor: same metric the Bracket dock computes (r(winner) - r(loser)).
+- UpSet Factor: r(winner) - r(loser), the expected round of elimination of
+  each seed.
 - Losers Run:  number of LB matches the *winner* of this match won
   consecutively before reaching this match. 0 for UB matches or when the
   winner arrived directly from the UB.
 - SeedOver: how many seed positions the loser outperformed expectations
   by (positive = upset victim finishing higher than their seed).
 
-Single data path: the refresh button sequentially fetches ALL phase
-groups from Start.gg via a lightweight GQL query and rebuilds the table
-from the combined result. (The old auto-rebuild from
-StateManager["bracket.bracket.rounds"] was removed together with the
-Bracket dock — the Top 8 panel no longer maintains that state.) The
-filter box is a purely local view over the fetched data.
+Since ADR-005 S4j the panel only asks and draws: the fetch (every phase
+group of the tournament, two at a time), the rows and their drop on a
+tournament switch are core's (core/AnalysisService.py), which the headless
+shell runs too. The button asks AnalysisService.Refresh(); the status label
+and the table follow `analysis` (the fetch's progress) and
+AnalysisService.Result() (the rows), drawn once the event loop is back --
+the state's notifications run inside StateManager.lock (agent-pitfalls
+#17). The rows are structures; the cells' wording ("TBD", "(seed N)", "-")
+is the panel's (RowCells). The filter box is a purely local view over the
+rows shown.
 """
 
 from qtpy.QtCore import *
@@ -24,9 +29,12 @@ from qtpy.QtGui import *
 from qtpy.QtWidgets import *
 from loguru import logger
 
-from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
-from .Helpers.AutonaLocaleHelper import AutonaLocaleHelper
-from .core.Bracket import Bracket, BracketSet
+from .StateManagerBridge import StateManagerBridge
+from .core import AnalysisService as analysis
+from .core import StateSchema as schema
+from .core.AnalysisService import AnalysisService
+from .core.DictHelper import deep_clone
+from .core.StateManager import StateManager
 from . import ui_constants as UI
 
 
@@ -48,25 +56,40 @@ NUM_COL_WIDTH = 70
 TEXT_COL_MIN_WIDTH = 120
 
 
-def _round_index(p):
-    """Double-elimination placement → expected round-of-elimination index.
-    Mirrors AutonaBracketView._roundIndex."""
-    if p is None or p < 1:
-        return 0
-    if p == 1:
-        return 0
-    k = (p - 1).bit_length()
-    if 4 * p <= 3 * (1 << k):
-        return 2 * (k - 1)
-    return 2 * (k - 1) + 1
+def _SeedCell(side):
+    seed = side.get("seed")
+    return (str(seed) if seed else "-", seed or 9999)
 
 
-def _upset_factor(winner_seed, loser_seed):
-    if winner_seed is None or loser_seed is None:
-        return 0
-    if winner_seed <= 0 or loser_seed <= 0:
-        return 0
-    return _round_index(winner_seed) - _round_index(loser_seed)
+def _NameCell(side):
+    seed = side.get("seed")
+    name = side.get("name") or (f"(seed {seed})" if seed else "TBD")
+    return (name, name.lower())
+
+
+def RowCells(row):
+    """A core row (AnalysisService.BracketRows) as the table's nine cells,
+    (text, sort key) each: an unknown name is its seed's "(seed N)", or
+    "TBD"; an unknown seed "-" (sorted last); an unfinished set's score "-"
+    (sorted as 0); no upset factor / seed over, and no losers run, an empty
+    cell (sorted as 0)."""
+    p1, p2 = row.get("p1") or {}, row.get("p2") or {}
+    score = row.get("score")
+    upset = row.get("upset")
+    losersRun = row.get("losersRun") or 0
+    seedOver = row.get("seedOver")
+    return [
+        (row.get("round") or "", tuple(row.get("roundOrder") or ())),
+        _SeedCell(p1),
+        _NameCell(p1),
+        (f"{score[0]}-{score[1]}" if score is not None else "-",
+         sum(score) if score is not None else 0),
+        _NameCell(p2),
+        _SeedCell(p2),
+        (str(upset) if upset is not None else "", upset or 0),
+        (str(losersRun) if losersRun > 0 else "", losersRun),
+        (str(seedOver) if seedOver is not None else "", seedOver or 0),
+    ]
 
 
 class NumericItem(QTableWidgetItem):
@@ -162,332 +185,99 @@ class AutonaAnalysisWidget(QWidget):
 
         self.layout().addWidget(self.table)
 
-        # ── Multi-PG fetch state ──
-        self._phases = []               # from tournament_phases_updated
-        self._fetchInProgress = False
-        self._fetchQueue = []           # list of (phase_name, pg_id, pg_label) waiting to dispatch
-        self._fetchTotal = 0
-        self._fetchResults = {}         # pg_id -> {"phase_name","pg_label","data"}
-        self._fetchInFlight = 0         # workers currently running
-        self._fetchDone = 0             # completed (success or failure)
-        # True once a multi-PG fetch has populated the table. Auto-triggered
-        # state rebuilds are suppressed in that mode so the fetched
-        # snapshot isn't clobbered by a single-PG refresh from the Bracket
-        # dock. Reset when the tournament changes.
-        self._multiPgActive = False
-        # Set when the user clicks 更新 before phases have arrived — we
-        # trigger GetTournamentPhases() and resume the refresh once
-        # _onPhasesUpdated fires.
-        self._refreshQueuedOnPhases = False
+        # ── What is drawn ──
+        # `analysis` as last seen (a copy), and the revision of the rows on
+        # the table (AnalysisService.Result: None for none) and how many.
+        self._seen = deep_clone(StateManager.Get(schema.ANALYSIS_ROOT, None))
+        self._shownRevision = None
+        self._shownCount = 0
+        self._renderQueued = False
 
-        # ── Data reload triggers ──
-        # Fetch is the only data path (no auto-rebuild from state), so the
-        # table stays empty until the user presses the fetch button.
-        signals = AutonaTournamentDataProvider.instance.signals
-        signals.tournament_phases_updated.connect(self._onPhasesUpdated)
-        signals.tournament_changed.connect(self._onTournamentChanged)
+        # Through the bridge (bound methods: dropped with this widget).
+        bridge = StateManagerBridge.instance
+        bridge.state_updated.connect(self._OnState)
+        bridge.state_big_change.connect(self._OnState)
 
         AutonaAnalysisWidget.instance = self
-        self._showEmptyPrompt()
+        self._Render()
 
-    # ── Signal handlers ─────────────────────────────────────────
+    # ── State ───────────────────────────────────────────────────────────
 
-    def _onPhasesUpdated(self, phases):
-        self._phases = list(phases or [])
-        # If the user clicked 更新 while phases were still loading, we
-        # queued the refresh. Resume it now.
-        if self._refreshQueuedOnPhases and self._phases:
-            self._refreshQueuedOnPhases = False
-            QTimer.singleShot(0, self._onRefreshClicked)
+    def _OnState(self, *_payload):
+        # On the GUI thread, inside StateManager.lock when the write was
+        # made there (agent-pitfalls #17): reads one key, and draws once the
+        # event loop is back, out of the lock.
+        value = StateManager.Get(schema.ANALYSIS_ROOT, None)
+        if value == self._seen:
+            return
+        self._seen = deep_clone(value)
+        if self._renderQueued:
+            return
+        self._renderQueued = True
+        QTimer.singleShot(0, self, self._Render)
 
-    def _onTournamentChanged(self):
-        # New tournament → discard any cached multi-PG snapshot.
-        self._multiPgActive = False
-        self._fetchResults = {}
-        self._refreshQueuedOnPhases = False
-        self._showEmptyPrompt()
+    def _Render(self):
+        self._renderQueued = False
+        progress = AnalysisService.Progress()
+        service = AnalysisService.instance
 
-    def _showEmptyPrompt(self):
-        self._fillTable([])
-        self.summaryLabel.setText(QApplication.translate(
-            "app", "「Startggからデータを取得」を押してください"))
+        # The rows of the newest fetch that made them: kept while a fetch
+        # runs and when one fails, gone with the tournament. Copied out of
+        # the service only when they are other rows than the table's.
+        revision = service.ResultRevision() if service is not None else None
+        if revision != self._shownRevision:
+            result = service.Result() if service is not None else {
+                "rows": [], "revision": None}
+            self._shownRevision = result["revision"]
+            self._shownCount = len(result["rows"])
+            self._fillTable([RowCells(row) for row in result["rows"]])
+            self._applyFilter()
 
-    # ── Refresh button ──────────────────────────────────────────
+        status = progress["status"]
+        self.btRefresh.setEnabled(status != analysis.RUNNING)
+        if status == analysis.RUNNING:
+            if progress["total"] == 0:
+                text = QApplication.translate("app", "フェーズ情報を取得中...")
+            else:
+                text = QApplication.translate("app", "取得中 {0}/{1}").format(
+                    progress["done"], progress["total"])
+        elif status == analysis.DONE:
+            text = QApplication.translate("app", "{0} 試合").format(
+                self._shownCount)
+            if progress["failed"]:
+                text += " " + QApplication.translate(
+                    "app", "({0} 件取得失敗)").format(progress["failed"])
+        elif status == analysis.ERROR:
+            text = QApplication.translate("app", "取得に失敗しました")
+        else:
+            text = QApplication.translate(
+                "app", "「Startggからデータを取得」を押してください")
+        self.summaryLabel.setText(text)
+
+    # ── Refresh button ──────────────────────────────────────────────────
 
     def _onRefreshClicked(self):
         # Button is explicitly labeled "Startggからデータを取得" — it always
         # triggers a server-side fetch. The filter box is purely a local
         # view over whatever data the table currently holds and never
         # influences fetch behavior.
-        if self._fetchInProgress:
-            return
-
-        provider = AutonaTournamentDataProvider.instance.provider
-        if provider is None:
-            self.summaryLabel.setText(
-                QApplication.translate("app", "大会が選択されていません"))
-            return
-
-        pg_entries = []
-        for phase in self._phases:
-            for pg in (phase.get("groups") or []):
-                pg_id = pg.get("id")
-                if pg_id is None:
-                    continue
-                pg_entries.append((
-                    phase.get("name") or "",
-                    pg_id,
-                    pg.get("name") or "",
-                ))
-
-        if not pg_entries:
-            # Phases haven't arrived yet (common right after tournament
-            # load). Trigger a phases fetch and queue the refresh so it
-            # resumes as soon as _onPhasesUpdated fires.
-            logger.info(
-                "Analysis refresh: phases not yet cached, fetching...")
-            self.summaryLabel.setText(
-                QApplication.translate("app", "フェーズ情報を取得中..."))
-            self._refreshQueuedOnPhases = True
-            AutonaTournamentDataProvider.instance.GetTournamentPhases()
-            return
-
-        self._fetchInProgress = True
-        self._fetchQueue = list(pg_entries)
-        self._fetchTotal = len(pg_entries)
-        self._fetchResults = {}
-        self._fetchInFlight = 0
-        self._fetchDone = 0
-        self.btRefresh.setEnabled(False)
-        self._dispatchMore()
-
-    # Cap concurrent Start.gg requests. Each fetch hits the public GraphQL
-    # API; running too many in parallel risks rate limiting. Each is also a
-    # job of the task executor's job lane (ADR-005 S3f-2), whose 4 threads
-    # every tournament fetch shares: 4 here would hold the whole lane for
-    # the analysis, and a set load or a follow's tick would wait behind it.
-    _PARALLEL_FETCHES = 2
-
-    def _dispatchMore(self):
-        # Fill in-flight slots up to the parallelism cap. Returns
-        # immediately when the queue is empty.
-        while self._fetchQueue and self._fetchInFlight < self._PARALLEL_FETCHES:
-            phase_name, pg_id, pg_label = self._fetchQueue.pop(0)
-            self._fetchInFlight += 1
-            AutonaTournamentDataProvider.instance.GetAnalysisPhaseGroup(
-                pg_id,
-                lambda data, pid=pg_id, pn=phase_name, pl=pg_label:
-                    self._onPgFetched(pid, pn, pl, data))
-        self.summaryLabel.setText(
-            QApplication.translate("app", "取得中 {0}/{1}").format(
-                self._fetchDone, self._fetchTotal))
-
-    def _onPgFetched(self, pg_id, phase_name, pg_label, data):
-        self._fetchResults[pg_id] = {
-            "phase_name": phase_name,
-            "pg_label": pg_label,
-            "data": data or {},
-        }
-        self._fetchInFlight -= 1
-        self._fetchDone += 1
-        if not self._fetchQueue and self._fetchInFlight == 0:
-            self._onAllFetchesDone()
-            return
-        # Defer next dispatch via the event loop so progress paints
-        # between hops and the call stack stays shallow.
-        QTimer.singleShot(0, self._dispatchMore)
-
-    def _onAllFetchesDone(self):
-        self._fetchInProgress = False
-        self.btRefresh.setEnabled(True)
-        successful = sum(1 for v in self._fetchResults.values()
-                         if v.get("data"))
-        if successful == 0:
+        service = AnalysisService.instance
+        try:
+            answer = service.Refresh() if service is not None \
+                else analysis.NO_TOURNAMENT
+        except Exception:
+            # Nothing was started (the fetcher raised): told here, as a
+            # failed fetch, until the next change.
+            logger.exception("Analysis: the fetch could not be started")
             self.summaryLabel.setText(
                 QApplication.translate("app", "取得に失敗しました"))
             return
-        self._multiPgActive = True
-        self._rebuildFromMultiPg()
+        if answer == analysis.NO_TOURNAMENT:
+            # Nothing is published for it: told here, until the next change.
+            self.summaryLabel.setText(
+                QApplication.translate("app", "大会が選択されていません"))
 
-    # ── Data plumbing (multi-PG, fetched) ───────────────────────
-
-    def _rebuildFromMultiPg(self):
-        multi = len(self._fetchResults) > 1
-        all_rows = []
-        empty_pgs = 0
-        for pg_id, entry in self._fetchResults.items():
-            data = entry.get("data") or {}
-            if not data or not data.get("sets"):
-                empty_pgs += 1
-                continue
-            try:
-                # The round names its rows are labelled with (GetRoundName)
-                # are the locale's, handed in (core.Bracket is Qt-free).
-                bracket = Bracket(
-                    data, matchNames=AutonaLocaleHelper.matchNames)
-            except Exception:
-                logger.opt(exception=True).warning(
-                    f"Analysis: Bracket build failed for PG {pg_id}")
-                empty_pgs += 1
-                continue
-
-            prefix = ""
-            if multi:
-                phase_name = entry.get("phase_name") or ""
-                pg_label = entry.get("pg_label") or ""
-                if phase_name and pg_label and pg_label not in phase_name:
-                    prefix = f"{phase_name} / {pg_label} · "
-                else:
-                    prefix = f"{phase_name or pg_label} · "
-
-            all_rows.extend(self._collectRowsFromBracket(
-                bracket, data.get("entrants") or [], prefix, pg_id))
-
-        self._fillTable(all_rows)
-        summary = QApplication.translate(
-            "app", "{0} 試合").format(len(all_rows))
-        if empty_pgs:
-            summary += " " + QApplication.translate(
-                "app", "({0} 件取得失敗)").format(empty_pgs)
-        self.summaryLabel.setText(summary)
-        self._applyFilter()
-
-    def _collectRowsFromBracket(self, bracket: Bracket, entrants, round_prefix, pg_id):
-        def entrant_name(seed):
-            if not isinstance(seed, int) or seed <= 0 or seed > len(entrants):
-                return ""
-            ent = entrants[seed - 1] or {}
-            if ent.get("name"):
-                return ent["name"]
-            players = ent.get("players") or []
-            if players:
-                return (players[0] or {}).get("gamerTag") or ""
-            return ""
-
-        # Reverse map: (id(next_set), next_slot) → source BracketSet. Used
-        # to walk backwards from a completed LB set to the chain of
-        # previous LB wins its winner went through.
-        win_source = {}
-        for bsList in bracket.rounds.values():
-            for bs in bsList:
-                if bs.winNext is not None:
-                    win_source[(id(bs.winNext), bs.winNextSlot)] = bs
-
-        placements = {}
-        pos_rounds = sorted(
-            (int(r) for r in bracket.rounds.keys() if int(r) > 0))
-        neg_rounds = sorted(
-            (int(r) for r in bracket.rounds.keys() if int(r) < 0),
-            key=abs, reverse=True)
-
-        for rnum in pos_rounds:
-            for bs in bracket.rounds.get(str(rnum), []):
-                if bs.winNext is None and bs.loseNext is None:
-                    placements[id(bs)] = 2
-
-        next_start = 3
-        for rnum in neg_rounds:
-            sets = bracket.rounds.get(str(rnum), [])
-            real = [bs for bs in sets
-                    if not bs.isByeSet
-                    and bs.playerIds[0] != BracketSet.BYE
-                    and bs.playerIds[1] != BracketSet.BYE]
-            if not real:
-                continue
-            for bs in real:
-                placements[id(bs)] = next_start
-            next_start += len(real)
-
-        def losers_run(bs):
-            if bs.pos[0] >= 0 or not bs.finished:
-                return 0
-            scores = bs.score or [0, 0]
-            if scores[0] == scores[1]:
-                return 0
-            winner_slot = 0 if scores[0] > scores[1] else 1
-            winner_id = bs.playerIds[winner_slot]
-            run = 0
-            current = bs
-            cur_slot = winner_slot
-            visited = set()
-            while id(current) not in visited:
-                visited.add(id(current))
-                src = win_source.get((id(current), cur_slot))
-                if src is None or not src.finished:
-                    break
-                s = src.score or [0, 0]
-                if s[0] == s[1]:
-                    break
-                src_winner_slot = 0 if s[0] > s[1] else 1
-                if src.playerIds[src_winner_slot] != winner_id:
-                    break
-                if src.pos[0] < 0:
-                    run += 1
-                    current = src
-                    cur_slot = src_winner_slot
-                else:
-                    break
-            return run
-
-        rows = []
-        for rk, bsList in bracket.rounds.items():
-            try:
-                round_num = int(rk)
-            except (TypeError, ValueError):
-                continue
-            round_name = bracket.GetRoundName(rk) or str(round_num)
-            for set_idx, bs in enumerate(bsList):
-                ids = bs.playerIds or [-1, -1]
-                if any(i == BracketSet.BYE for i in ids):
-                    continue
-                if ids[0] == BracketSet.PENDING and ids[1] == BracketSet.PENDING:
-                    continue
-
-                p1_seed = ids[0] if isinstance(ids[0], int) and ids[0] > 0 else None
-                p2_seed = ids[1] if isinstance(ids[1], int) and ids[1] > 0 else None
-                p1_name = entrant_name(ids[0]) or (
-                    f"(seed {p1_seed})" if p1_seed else "TBD")
-                p2_name = entrant_name(ids[1]) or (
-                    f"(seed {p2_seed})" if p2_seed else "TBD")
-                scores = bs.score or [0, 0]
-                completed = bool(bs.finished)
-                score_text = f"{scores[0]}-{scores[1]}" if completed else "-"
-
-                uf_text, uf_sort = "", 0
-                if completed and scores[0] != scores[1]:
-                    winner_seed = p1_seed if scores[0] > scores[1] else p2_seed
-                    loser_seed = p2_seed if scores[0] > scores[1] else p1_seed
-                    uf = _upset_factor(winner_seed, loser_seed)
-                    uf_text = str(uf)
-                    uf_sort = uf
-
-                lr = losers_run(bs)
-                lr_text = str(lr) if lr > 0 else ""
-
-                so_text, so_sort = "", 0
-                placement = placements.get(id(bs))
-                if completed and scores[0] != scores[1] and placement is not None:
-                    loser_seed = p2_seed if scores[0] > scores[1] else p1_seed
-                    if loser_seed and loser_seed > 0 and loser_seed > placement:
-                        so_val = loser_seed - placement
-                        so_text = str(so_val)
-                        so_sort = so_val
-
-                display_round = f"{round_prefix}{round_name}" if round_prefix else str(round_name)
-                rows.append([
-                    (display_round, (str(pg_id), round_num, set_idx)),
-                    (str(p1_seed) if p1_seed else "-", p1_seed or 9999),
-                    (p1_name, p1_name.lower()),
-                    (score_text, sum(scores)),
-                    (p2_name, p2_name.lower()),
-                    (str(p2_seed) if p2_seed else "-", p2_seed or 9999),
-                    (uf_text, uf_sort),
-                    (lr_text, lr),
-                    (so_text, so_sort),
-                ])
-        return rows
-
-    # ── Table + filter plumbing ─────────────────────────────────
+    # ── Table + filter plumbing ─────────────────────────────────────────
 
     def _fillTable(self, rows):
         self.table.setSortingEnabled(False)

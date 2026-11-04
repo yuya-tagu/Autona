@@ -53,7 +53,8 @@ class TournamentDataProvider(QObject):
     def GetPlayerHistoryStandings(self, playerId, playerNumber, gameType):
         pass
 
-    def GetTournamentPhases(self, progress_callback=None, cancel_event=None):
+    def GetTournamentPhases(self, progress_callback=None, cancel_event=None,
+                            strict=False):
         pass
 
     def GetTournamentPhaseGroup(self, id, progress_callback=None, cancel_event=None):

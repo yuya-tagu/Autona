@@ -550,6 +550,30 @@ ADR-005 S4e）。ページが開かれていなくても・ヘッドレスでも
 > 用 mtime。素材を読むオーバーレイが `/layout/stream_org_icon.png?v={version}` の形で参照する
 > ための契約としてキーを残している（2026-10-31 時点で、同梱のオーバーレイにこれを読むものは無い）。
 
+##### `analysis` — この大会の試合一覧の取得（ADR-005 S4j）
+
+```
+analysis                           最新の取得の進み具合（1 つの dict をまとめて書く。起動のたびに idle へ戻る）
+├── status                         idle | running | done | error
+├── error                          error の理由（`no_phases` = 大会に phase group が無い /
+│                                    `fetch_failed` = フェーズの要求が失敗した・どの group の要求も失敗した。
+│                                    要求が通って sets が空の group は「答えた」と数える）。それ以外は ""
+├── done / total                   取得し終えた phase group の数 / 全数（フェーズの取得中は total 0）
+├── failed                         行を作れなかった group の数（答え無し・sets 無し・ブラケットを組めない）
+└── revision                       取得を受け付けるたび・結果を捨てるたびに 1 増える（再起動でも戻らない）
+```
+
+書き手は core の `src/core/AnalysisService.py` だけ。**行そのものは state に入れない**（大会規模で数百〜千超。
+delta・`program_state.json`・`out/` が膨らむ）: サービスのメモリに、取得した大会の URL と組で持ち、
+`AnalysisService.Result()` / `Rows()` で読む（`ResultRevision()` は行を写さずにどの行かだけを返す）。provider には
+strict で頼む（`StartGGDataProvider.GetTournamentPhases` / `GetAnalysisPhaseGroup` の `strict=True`。要求の失敗を
+空の答えにせず例外にする）。行は表示文字列ではなく構造（`round` と並べ替えキー `roundOrder`・
+`p1` / `p2` の `{seed, name}`・`score`（未完了は null）・`upset` / `losersRun` / `seedOver`）で、
+「TBD」「(seed N)」「-」は表示側の文言。大会を読み込み直す・解除すると、provider のアダプタ
+（`LoadTournament` / `UnloadTournament`）が provider を差し替えた直後に `Forget()` を直接呼び、取得の残りと
+行を捨てて idle にする（差し替えの前に捨てると、その間に別スレッドから来た取得が旧大会の行を新大会のものにしうる）。
+起動時のシード（`StateSchema.SeedPanelState()`）は idle で、revision は保存された値を引き継ぐ。
+
 ##### `ui` — UI 表示用キャッシュ
 
 旧 `ui.light_mode` キャッシュはテーマ切替機能の削除に伴い廃止（§5.4、ダーク固定）。
@@ -825,7 +849,7 @@ board 1 面のみ）だけで、**残りのパネルは初回表示時にファ�
 | Head-to-Head (Recent Sets) | （`AutonaStatsWidget` 内蔵） | `score.{N}.recent_sets` ほか（read-only） |
 | Last Sets | （内蔵） | `score.{N}.last_sets`（read-only） |
 | Tournament History | （内蔵） | `score.{N}.history_sets`（read-only） |
-| この大会の試合一覧 | `AutonaAnalysisWidget` パネル | Start.gg 全フェーズグループの自前フェッチのみ（state 非依存、read-only）。TournamentDataProvider のシグナル購読 |
+| この大会の試合一覧 | `AutonaAnalysisWidget` パネル | 取得・行の計算・大会切替での破棄は core の `AnalysisService`（ADR-005 S4j。全 phase group を同時 2 本で取得し、ヘッドレスでも動く）。パネルはボタンで `Refresh()` を呼び、`analysis.*`（進み具合）と `Result()`（行。state には入らない）を描くだけ（read-only） |
 
 #### 4.1.1 パネル（ナビ）の追加・削除規約
 

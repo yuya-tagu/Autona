@@ -566,6 +566,46 @@ def DefaultStreamThumbnail() -> dict:
     """`stream.thumbnail` before any run (a fresh dict on every call)."""
     return {"status": "idle", "path": "", "error": "", "revision": 0}
 
+
+# The tournament's match list (この大会の試合一覧, ADR-005 S4j): how its
+# newest fetch is going, one dict written whole by core/AnalysisService.py,
+# shaped like tournamentInfo.load: status idle | running | done | error, the
+# error (no_phases | fetch_failed, "" otherwise), the phase groups fetched
+# (`done`, failed or not) out of `total` (0 while the phases are fetched),
+# the groups that gave no rows (`failed`) and a revision that every fetch
+# (and every drop of the results) advances. The rows themselves stay in the
+# service's memory (AnalysisService.Result): a tournament's hundreds of rows
+# in the state would swell every delta and ./out.
+ANALYSIS_KEYS = ("status", "error", "done", "total", "failed", "revision")
+
+
+def DefaultAnalysis(revision=0) -> dict:
+    """`analysis` with no fetch in progress or held, at `revision` (a fresh
+    dict on every call)."""
+    return {"status": "idle", "error": "", "done": 0, "total": 0,
+            "failed": 0, "revision": revision}
+
+
+def ReadAnalysis() -> dict:
+    """`analysis` as published, a fresh dict: anything missing or malformed
+    read as idle's (no error, nothing fetched, revision 0)."""
+    value = StateManager.Get(ANALYSIS_ROOT, None)
+    if not isinstance(value, dict):
+        value = {}
+    read = DefaultAnalysis()
+    status, error = value.get("status"), value.get("error")
+    if isinstance(status, str):
+        read["status"] = status
+    if isinstance(error, str):
+        read["error"] = error
+    for key in ("done", "total", "failed", "revision"):
+        number = value.get(key)
+        if isinstance(number, int) and not isinstance(number, bool) \
+                and number >= 0:
+            read[key] = number
+    return read
+
+
 # colors.{feature}.* -- only features the operator explicitly set are present,
 # which is what makes the layouts' colors.{feature} -> tournamentInfo fallback
 # work. The feature list itself is owned by core/ColorService.FEATURES, which
@@ -592,6 +632,7 @@ DISPLAY_OPTIONS_ROOT = "display_options"
 LAYOUT_OPTIONS_ROOT = "layout_options"
 RESULT_PLAYERS_ROOT = "result_players"
 PROVIDER_VIDEOGAME_ROOT = "provider_videogame"
+ANALYSIS_ROOT = "analysis"
 
 KEY_CATALOG = {
     SCORE_ROOT: SCORE_SHARED_KEYS + tuple(
@@ -613,6 +654,7 @@ KEY_CATALOG = {
         f"{{I}}.{key}" for key in COMMENTARY_SLOT_KEYS),
     TOURNAMENT_INFO_ROOT: TOURNAMENT_INFO_KEYS,
     STREAM_ROOT: STREAM_KEYS,
+    ANALYSIS_ROOT: ANALYSIS_KEYS,
     COLORS_ROOT: tuple(f"{{feature}}.{key}" for key in COLORS_FEATURE_KEYS),
     DISPLAY_OPTIONS_ROOT: DISPLAY_OPTION_KEYS,
     # Roots whose shape is owned elsewhere and not enumerated here:
@@ -883,6 +925,12 @@ def SeedPanelState():
         f"{TOURNAMENT_INFO_ROOT}.{TOURNAMENT_LOAD_KEY}",
         {"status": "idle", "error": "",
          "revision": ReadTournamentLoad()["revision"]})
+
+    # The match list's fetch (ADR-005 S4j), the same way: idle -- a fetch
+    # and its rows (the service's memory) do not outlive the process -- at
+    # the previous session's revision, which the next fetch goes on from.
+    StateManager.SetIfChanged(
+        ANALYSIS_ROOT, DefaultAnalysis(ReadAnalysis()["revision"]))
 
     for root in RETIRED_ROOTS:
         StateManager.Unset(root)

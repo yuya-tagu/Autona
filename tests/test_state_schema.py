@@ -588,6 +588,7 @@ def test_every_root_constant_is_a_catalog_key():
         schema.LAYOUT_OPTIONS_ROOT: "layout_options",
         schema.RESULT_PLAYERS_ROOT: "result_players",
         schema.PROVIDER_VIDEOGAME_ROOT: "provider_videogame",
+        schema.ANALYSIS_ROOT: "analysis",
     }
     for constant, expected in roots.items():
         # Literal, because these are the names an existing
