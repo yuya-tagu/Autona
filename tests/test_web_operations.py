@@ -1729,6 +1729,7 @@ _NOT_200 = {
     ("api_v1.pull_stream", 1): 409, ("api_v1.pull_stream", 2): 409,
     ("api_v1.bracket_refresh", None): 409,
     ("api_v1.tournament_media_fetch", None): 409,
+    ("api_v1.analysis_refresh", None): 409,
     # Accepted, and run in the background (the set / clear on the main
     # thread).
     ("api_v1.tournament_load", None): 202,

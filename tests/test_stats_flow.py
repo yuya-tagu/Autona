@@ -20,6 +20,12 @@ and, after the scenario, the key order of each board's subtree and its
 statistics. "Fetch counts, publish timing, state keys and order unchanged"
 is this file.
 
+The recording's "stats panel refresh" step was the Qt STATS panel's
+button; since that panel became the React Statistics page (ADR-005 S4k)
+the step is the page's request, v1's stats:refresh. Its fetches, writes
+and deltas are compared with the recording as they are; its route answer
+is the one thing it adds (_ADDED_RESPONSES).
+
 Record (on the pre-S3e-5 tree only):
 
     AUTONA_RECORD_STATS=1 python -m pytest tests/test_stats_flow.py
@@ -244,6 +250,16 @@ class _Recorder:
 
 # ── golden ───────────────────────────────────────────────────────────────
 
+# Route answers a step gives now and did not when it was recorded, by
+# (scenario, step): the step's fetches, writes and deltas are still the
+# recording's. The Qt STATS panel's button became the Statistics page's
+# stats:refresh (ADR-005 S4k), which answers.
+_ADDED_RESPONSES = {
+    ("singles", "stats panel refresh"): [
+        ["/api/v1/scoreboards/1/stats:refresh", 200, True, None]],
+}
+
+
 def _check(name, recorded):
     if RECORD:
         golden = {}
@@ -256,7 +272,10 @@ def _check(name, recorded):
             encoding="utf-8")
         return
     golden = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))[name]
-    expectedSteps = golden["steps"]
+    expectedSteps = [
+        dict(step, responses=step["responses"]
+             + _ADDED_RESPONSES.get((name, step["step"]), []))
+        for step in golden["steps"]]
     actualSteps = recorded["steps"]
     assert [s["step"] for s in actualSteps] == \
         [s["step"] for s in expectedSteps]
@@ -273,6 +292,16 @@ def _check(name, recorded):
                     + f"\nfirst step recorded: {json.dumps(expected)[:3000]}"
                     + f"\nfirst step now: {json.dumps(actual)[:3000]}")
     assert recorded["boards"] == golden["boards"]
+
+
+def test_the_added_answers_are_on_steps_that_answered_nothing():
+    """_ADDED_RESPONSES only adds: each names a recorded step that had no
+    route answer (the Qt panel's button)."""
+    golden = json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
+    for (name, label), added in _ADDED_RESPONSES.items():
+        steps = {step["step"]: step for step in golden[name]["steps"]}
+        assert steps[label]["responses"] == []
+        assert added
 
 
 # ── fixtures and drivers ─────────────────────────────────────────────────
@@ -386,10 +415,12 @@ def _editTag(card, text):
     edit.editingFinished.emit()
 
 
-def _statsPanelRefresh():
-    from src.AutonaStatsWidget import AutonaStatsWidget
-    # The button's slot; it reads nothing of the panel.
-    AutonaStatsWidget._refresh(None)
+def _statsPageRefresh(http, recorder):
+    # The Statistics page's 「統計情報を取得する」 (ADR-005 S4k): v1's
+    # stats:refresh for board 1. Until S4k this step was the Qt STATS panel's
+    # button slot; the recording is that (its fetches and writes), and the
+    # route's answer is the one thing the step adds (_ADDED_RESPONSES).
+    _v1(http, recorder, "/api/v1/scoreboards/1/stats:refresh")
 
 
 def _streamQueue(tag):
@@ -435,7 +466,7 @@ def test_a_singles_board(autonaApp, startgg, playerDB, http):
         rec.step("card pick again", lambda: two.SetData(
             _entrant("HHH", 88, 1), dontLoadFromDB=True))
         rec.step("answer all", lambda: startgg.answer(autonaApp))
-        rec.step("stats panel refresh", _statsPanelRefresh)
+        rec.step("stats panel refresh", lambda: _statsPageRefresh(http, rec))
         rec.step("web update player (another)", lambda: WebOps.update_player(
             1, 2, 1, {"gamerTag": "III", "id": [99, 990], "seed": 7}))
         rec.step("web update player (same)", lambda: WebOps.update_player(

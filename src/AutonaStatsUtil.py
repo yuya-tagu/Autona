@@ -93,7 +93,7 @@ class AutonaStatsUtil:
 
         `provider` stays None until a tournament URL is set, so the name has
         to be reached through a guard -- the statistics are reachable from
-        the web API and the stats panel at any time, including before any
+        the web API and the Statistics page at any time, including before any
         tournament has been loaded.
         """
         provider = self._Provider()

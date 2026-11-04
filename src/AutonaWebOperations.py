@@ -88,6 +88,8 @@ from .core import CommentaryModel as comms
 from .core import CommentaryService
 from .core import LayoutCatalog
 from .core import Top8Service
+from .core import AnalysisService as analysis
+from .core.AnalysisService import AnalysisService
 from .core.CountryCatalog import CountryCatalog
 from .core.CrewBattleService import CrewBattleService
 from .core.DictHelper import qvariantmap_copy
@@ -759,6 +761,48 @@ def update_bracket(done=None):
     `done()` as in RefreshFromProvider.
     """
     return Top8Service.RefreshFromProvider(done=done)
+
+
+# ── The tournament's match list (ADR-005 S4k) ────────────────────────────
+# The Statistics page's この大会の試合一覧: core's AnalysisService, in both
+# shells, on the calling thread. Its progress is the state's `analysis`;
+# the rows are only read here (too many for the state, S4j decision 2).
+
+def refresh_analysis():
+    """Start fetching the loaded tournament's match list
+    (AnalysisService.Refresh): ``analysis.STARTED`` / ``BUSY`` /
+    ``NO_TOURNAMENT`` (also when the shell built no service). /api/v1 maps
+    it to 202 / 409."""
+    service = AnalysisService.instance
+    if service is None:
+        return analysis.NO_TOURNAMENT
+    return service.Refresh()
+
+
+def get_analysis():
+    """`analysis`'s status, and the rows of the newest fetch that made them
+    with the URL of the tournament they are from -- when that tournament is
+    the one loaded now; else no rows and no URL. The service drops its rows
+    when the tournament changes (Forget); comparing the URL as well keeps a
+    reader from ever being handed another tournament's rows.
+
+    The rows, the provider and the status are read in one hold of
+    StateManager.lock: the service changes its rows and publishes
+    `analysis` in one hold of it (_Publish / Forget), so the three are of
+    the same moment -- not a fetch's rows with the status before it ended,
+    or idle with the rows Forget is about to drop. The lock order is the
+    service's: StateManager.lock, then its own (Result)."""
+    service = AnalysisService.instance
+    with StateManager.lock:
+        result = service.Result() if service is not None else {
+            "url": "", "rows": [], "revision": None}
+        provider = AutonaTournamentDataProvider.instance.GetProvider()
+        current = (getattr(provider, "url", None)
+                   if provider is not None else None)
+        status = AnalysisService.Progress()["status"]
+    if not result["url"] or result["url"] != current:
+        result = {"url": "", "rows": []}
+    return {"status": status, "url": result["url"], "rows": result["rows"]}
 
 
 # ── Top 8 (ADR-005 S4i) ──────────────────────────────────────────────────
@@ -1483,7 +1527,7 @@ def stats_history_sets(scoreboard, player):
 
 
 def refresh_stats(scoreboard):
-    """Every statistic of a board, as the STATS panel's button asks for
+    """Every statistic of a board, as the Statistics page's button asks for
     them (StatsService.RefreshAll). The fetches are async: this returns
     once they are started, and the results land in the state a moment
     later. A board other than 1/2 answers an error string (not built)."""

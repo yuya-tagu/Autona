@@ -1,35 +1,58 @@
-"""The match list of the tournament (この大会の試合一覧, ADR-005 S4j): the rows.
+"""The match list of the tournament (この大会の試合一覧, ADR-005 S4j / S4k):
+the rows.
 
 fixtures/analysis_rows/golden.json is frozen data: what the pre-S4j Qt
 panel (AutonaAnalysisWidget, whose fetch and rows were its own) showed on
 the last tree before they moved to core, dcf53307. It cannot be recorded
-again -- that panel is gone -- and is not to be edited. How it was
-recorded: for every scenario below, a fresh panel with the scenario's fake
-provider loaded, its fetch button clicked and the event loop and the
-provider's jobs drained (_throughPanel, which the replays still use); then
-the panel's table -- every cell's text and the sort key its column sorts
-by --, its status label once the fetch was over (_resultLabel), its label
-before the click, and what the provider was asked for. Phase groups are
-built with tests/test_top8_refresh.py's helpers.
+again -- that panel is gone (S4k removed the thin one S4j left too) -- and
+is not to be edited. How it was recorded: for every scenario below, a fresh
+panel with the scenario's fake provider loaded, its fetch button clicked
+and the event loop and the provider's jobs drained; then the panel's table
+-- every cell's text and the sort key its column sorts by --, its status
+label once the fetch was over (the last text that was not the "取得中 n/m"
+progress: when the last two answers arrived in one pass of the event loop,
+the old panel's next-fetch timer put the progress back up after the
+result, which real requests seconds apart do not do), its label before the
+click, and what the provider was asked for. Phase groups are built with
+tests/test_top8_refresh.py's helpers.
 
 The rows are compared in one fixed order -- by the Round column's sort key
 (phase group id, round, index of the set in its round), which no two rows
-share -- because the panel's own order depends on which of its two parallel
-fetches answered first. The fetches are compared as a sorted list, for the
-same reason.
+share -- because the order core makes them in depends on which of its two
+parallel fetches answered first. The fetches are compared as a sorted list,
+for the same reason.
+
+Since S4k the React Statistics page (web/src/StatsPage) draws the rows. It
+reads them through GET /api/v1/analysis (replayed here scenario by
+scenario) and words them with its own rules: web/src/StatsPage/
+analysisRows.cases.json holds, per scenario, core's rows, the cells and the
+status line the page must make of them -- checked here against core and
+the golden, and by the page's jest test against the page's code -- and
+names in the order Python sorts them by the page's key. Rewrite it
+after a deliberate change with
+
+    AUTONA_WRITE_ANALYSIS_CASES=1 python -m pytest tests/test_analysis_rows.py
 """
 import copy
 import json
+import os
 from pathlib import Path
 
 import pytest
 
+from tests.test_api_v1 import webApp  # noqa: F401
 from tests.test_top8_refresh import (
     COMPLETE, COMPLETE_SEEDS, ENTRANTS, IN_PROGRESS, SMALL,
     _fromSet, _group, _seedSlot, _set)
 
-GOLDEN_PATH = (Path(__file__).resolve().parent / "fixtures" / "analysis_rows"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+GOLDEN_PATH = (PROJECT_ROOT / "tests" / "fixtures" / "analysis_rows"
                / "golden.json")
+# The page's side (ADR-005 S4k): core's rows and what the page makes of them.
+CASES_PATH = (PROJECT_ROOT / "web" / "src" / "StatsPage"
+              / "analysisRows.cases.json")
+JA_PATH = PROJECT_ROOT / "web" / "src" / "i18n" / "locales" / "ja.json"
+WRITE_CASES = os.environ.get("AUTONA_WRITE_ANALYSIS_CASES") == "1"
 
 
 # ── Start.gg-shaped data (what GetAnalysisPhaseGroup returns) ────────────
@@ -205,52 +228,6 @@ def _jsonable(value):
     return json.loads(json.dumps(value))
 
 
-def _tableRows(panel):
-    """The panel's table: every row's cells as [text, sort key], in the
-    golden's order (the Round column's sort key)."""
-    from qtpy.QtCore import Qt
-    table = panel.table
-    rows = []
-    for r in range(table.rowCount()):
-        rows.append([
-            [table.item(r, c).text(),
-             _jsonable(table.item(r, c).data(Qt.ItemDataRole.UserRole))]
-            for c in range(table.columnCount())])
-    return sorted(rows, key=lambda row: row[0][1])
-
-
-def _dropPanel(panel):
-    from qtpy.QtCore import QCoreApplication, QEvent
-    panel.deleteLater()
-    QCoreApplication.sendPostedEvents(panel, QEvent.Type.DeferredDelete)
-
-
-def _progressLabel():
-    """The panel's "fetching n/m" label, as a pattern."""
-    import re
-    from qtpy.QtWidgets import QApplication
-    text = QApplication.translate("app", "取得中 {0}/{1}")
-    return re.compile(re.escape(text).replace(re.escape("{0}"), r"\d+")
-                      .replace(re.escape("{1}"), r"\d+") + "$")
-
-
-def _resultLabel(labels):
-    """What the status label says once the fetch is over: the last text
-    that is not the "fetching n/m" progress.
-
-    How the golden's label was taken, kept for the replays: the pre-S4j
-    panel dispatched its next fetch from a zero timer queued by each
-    answer; when the last two answers arrived in one pass of the event loop
-    (instant answers: these fakes), the dispatch queued by the one before
-    the last ran after the last one had set the result, and put the
-    progress back up ("取得中 6/6") for good. With real requests the answers
-    are seconds apart and the result stays, so the result is what was
-    recorded: the progress is not part of the contract."""
-    progress = _progressLabel()
-    results = [text for text in labels if not progress.match(text)]
-    return results[-1] if results else ""
-
-
 def _switchTournament(provider):
     """`provider` loaded, as a tournament (re)load / unload leaves the
     match list: forgotten (the provider adapter's Load / UnloadTournament
@@ -262,37 +239,7 @@ def _switchTournament(provider):
     AnalysisService.instance.Forget()
 
 
-def _throughPanel(app, label):
-    """One scenario through a fresh panel's fetch button."""
-    from src.AutonaAnalysisWidget import AutonaAnalysisWidget
-    provider = _provider(label)
-    _switchTournament(provider)
-    panel = AutonaAnalysisWidget()
-    labels = []
-    setText = panel.summaryLabel.setText
-
-    def record(text):
-        labels.append(text)
-        setText(text)
-
-    try:
-        _drain(app)
-        initial = panel.summaryLabel.text()
-        panel.summaryLabel.setText = record
-        panel.btRefresh.click()
-        _drain(app)
-        return {
-            "initial": initial,
-            "label": _resultLabel(labels),
-            "rows": _tableRows(panel),
-            "fetches": sorted(provider.calls, key=json.dumps)
-            if provider is not None else [],
-        }
-    finally:
-        _dropPanel(panel)
-
-
-# ── replays: core and the panel give what the panel gave ─────────────────
+# ── replays: core and the routes give what the panel gave ────────────────
 
 def _golden(label):
     return json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))[label]
@@ -364,9 +311,10 @@ def test_the_expected_rows_differ_only_in_unfinished_scores():
 
 def _pageCells(row):
     """A core row in the page's words (the S4j design: "TBD", "(seed N)"
-    and "-" are the page's), as the panel's nine [text, sort key] cells.
-    Written out here, apart from the panel's RowCells: it pins the row
-    structure the React page (S4k) will read."""
+    and "-" are the page's), as the table's nine [text, sort key] cells:
+    the Qt panel's rules, written out here apart from the page's rowCells
+    (web/src/StatsPage/analysisRows.ts), which the cases file holds to the
+    same cells."""
     def seed(side):
         return [str(side["seed"]) if side["seed"] else "-",
                 side["seed"] or 9999]
@@ -399,6 +347,7 @@ def test_core_makes_the_recorded_rows(analysis):
     from src.core import AnalysisService as service
     from src.core.AnalysisService import AnalysisService
     from src.core.StateManager import StateManager
+    made = {}
     for label in SCENARIOS:
         provider = _provider(label)
         _switchTournament(provider)
@@ -430,84 +379,154 @@ def test_core_makes_the_recorded_rows(analysis):
             assert result["revision"] == progress["revision"]
         else:
             assert result == {"url": "", "rows": [], "revision": None}
+        made[label] = result["rows"]
+
+    # The page's cases are these rows (S4k).
+    cases = _pageCases(made)
+    if WRITE_CASES:
+        CASES_PATH.write_text(
+            json.dumps(cases, ensure_ascii=False, indent=1) + "\n",
+            encoding="utf-8")
+    assert json.loads(CASES_PATH.read_text(encoding="utf-8")) == cases
 
 
-def test_the_panel_draws_what_it_did(analysis):
-    """The thin panel (its button asks core, it draws `analysis` and the
-    rows): the recording's table, status and requests, scenario by
-    scenario."""
-    from qtpy.QtWidgets import QApplication
+# ── the page's cases (ADR-005 S4k) ───────────────────────────────────────
+
+def _pageLine(label):
+    """The status line the page shows once `label`'s fetch is over: the
+    recording's -- the page words it as the Qt panel did -- but for the
+    scenario with no phase group, which core ends in an error of its own
+    (no_phases), worded by the page."""
+    if label == NO_PHASE_GROUP:
+        ja = json.loads(JA_PATH.read_text(encoding="utf-8"))
+        return ja["stats_analysis_no_phases"]
+    return _golden(label)["label"]
+
+
+def _pageCases(made):
+    """Per scenario fetched: `analysis` once it was over (revision apart),
+    core's rows -- in an order the table's default sort has to undo: the
+    Round column's key, last first --, the cells the page makes of them in
+    the table's default order (the recording's) and the status line, in
+    Japanese (the recording's language)."""
+    return {
+        "about": (
+            "The Statistics page's match list (ADR-005 S4k): per scenario "
+            "of tests/test_analysis_rows.py, core's rows as GET "
+            "/api/v1/analysis answers them (in an order the table's default "
+            "sort undoes), the nine cells the page shows for them in that "
+            "default order -- the pre-S4j Qt panel's, recorded in "
+            "tests/fixtures/analysis_rows/golden.json -- and the status "
+            "line (ja) once the fetch was over; and names in the order "
+            "Python sorts them by the page's key, both ways (nameSort). "
+            "Written by AUTONA_WRITE_ANALYSIS_CASES=1 python -m pytest "
+            "tests/test_analysis_rows.py; checked there against core and "
+            "the golden, and by analysisRows.test.js against the page."),
+        "cases": [
+            {
+                "scenario": label,
+                "progress": EXPECTED_PROGRESS[label],
+                "line": _pageLine(label),
+                "rows": _jsonable(sorted(
+                    rows, key=lambda row: _jsonable(row["roundOrder"]),
+                    reverse=True)),
+                "cells": _expectedRows(label),
+            }
+            for label, rows in made.items()
+        ],
+        "nameSort": _nameSort(),
+    }
+
+
+# Names Python orders by their code points and JS's `<` by their UTF-16
+# code units, differently: astral (emoji, surrogate pairs from 0xD800)
+# against full-width (from 0xFF01) and kana; the same name in two cases
+# (equal keys: kept in their order, both ways); special casings (the final
+# sigma). The page compares by code points (S4k review).
+SORTED_NAMES = ["🦊Fox", "Ｚｅｔａ", "alpha", "Alpha", "ｂｅｔａ", "😀Smile",
+                "zed", "あおい", "Émile", "ΟΔΟΣ"]
+
+
+def _nameKey(name):
+    """The P1 Name column's sort key the page makes of `name`."""
+    return _pageCells({"round": "R", "roundOrder": ["1", 1, 0],
+                       "p1": {"seed": 1, "name": name},
+                       "p2": {"seed": None, "name": ""}, "score": None,
+                       "upset": None, "losersRun": 0, "seedOver": None})[2][1]
+
+
+def _nameSort():
+    """SORTED_NAMES as Python sorts them by the page's key: ascending, and
+    descending (equal keys in their order either way, as the page's
+    stable sort keeps them)."""
+    return {
+        "names": SORTED_NAMES,
+        "ascending": sorted(SORTED_NAMES, key=_nameKey),
+        "descending": sorted(SORTED_NAMES, key=_nameKey, reverse=True),
+    }
+
+
+def test_the_page_cases_name_every_scenario_fetched():
+    """The cases file has a case for every scenario with a tournament, the
+    recording's cells and its status line (no_phases apart)."""
+    cases = json.loads(CASES_PATH.read_text(encoding="utf-8"))["cases"]
+    assert [case["scenario"] for case in cases] \
+        == [label for label in SCENARIOS if SCENARIOS[label] is not None]
+    for case in cases:
+        label = case["scenario"]
+        assert case["cells"] == _expectedRows(label), label
+        assert sorted((_pageCells(row) for row in case["rows"]),
+                      key=lambda row: row[0][1]) == case["cells"], label
+        assert case["line"] == _pageLine(label), label
+    # The rows come in an order the default sort has to put right.
+    assert any(case["rows"] and [_pageCells(row) for row in case["rows"]]
+               != case["cells"] for case in cases)
+
+
+def test_the_page_cases_sort_names_as_python_does():
+    """The cases file's names are in Python's order (the page's jest test
+    sorts them with the page's code), and that order is not UTF-16's."""
+    nameSort = json.loads(CASES_PATH.read_text(encoding="utf-8"))["nameSort"]
+    assert nameSort == _nameSort()
+    assert nameSort["ascending"] != sorted(
+        SORTED_NAMES, key=lambda name: _nameKey(name).encode("utf-16-be"))
+    # Equal keys are in the names' order, both ways.
+    for order in (nameSort["ascending"], nameSort["descending"]):
+        assert order.index("alpha") < order.index("Alpha")
+
+
+# ── through the routes (ADR-005 S4k) ─────────────────────────────────────
+
+def test_the_routes_give_what_the_panel_gave(analysis, webApp):
+    """Every scenario as the Statistics page runs it: POST
+    /api/v1/analysis:refresh, then GET /api/v1/analysis once the fetch is
+    over -- the recording's rows (in the page's words), the status, the
+    tournament's URL with done rows only."""
+    from src.core.AnalysisService import AnalysisService
+    client = webApp.test_client()
     for label in SCENARIOS:
-        recorded = _throughPanel(analysis, label)
-        golden = _golden(label)
-        assert recorded["initial"] == golden["initial"], label
-        assert recorded["rows"] == _expectedRows(label), label
-        assert recorded["fetches"] == golden["fetches"], label
-        if label == NO_PHASE_GROUP:
-            # The frozen golden is the Japanese source text.
-            assert golden["label"] == "フェーズ情報を取得中..."
-            assert recorded["label"] == QApplication.translate(
-                "app", "取得に失敗しました")
+        provider = _provider(label)
+        _switchTournament(provider)
+        answer = client.post("/api/v1/analysis:refresh")
+        body = answer.get_json()
+        if provider is None:
+            assert answer.status_code == 409, label
+            assert body["error"]["code"] == "NOT_READY"
         else:
-            assert recorded["label"] == _translatedLabel(golden["label"]), \
-                label
-
-
-def _translatedLabel(text):
-    """The golden was recorded under the Japanese locale; CI runs in
-    English. Rebuild the label through the same translations."""
-    import re
-    from qtpy.QtWidgets import QApplication
-    m = re.fullmatch(r"(\d+) 試合(?: \((\d+) 件取得失敗\))?", text)
-    if not m:
-        return QApplication.translate("app", text)
-    out = QApplication.translate("app", "{0} 試合").format(int(m.group(1)))
-    if m.group(2):
-        out += " " + QApplication.translate(
-            "app", "({0} 件取得失敗)").format(int(m.group(2)))
-    return out
-
-
-def test_the_panel_keeps_its_rows_until_the_tournament_changes(analysis):
-    """A fetch that fails keeps the rows of the one before (the table kept
-    them); a tournament switch drops them, and the label asks again."""
-    from qtpy.QtWidgets import QApplication
-    from src.AutonaAnalysisWidget import AutonaAnalysisWidget
-    from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
-    prompt = QApplication.translate(
-        "app", "「Startggからデータを取得」を押してください")
-    _switchTournament(_provider("one group, seeds known"))
-    panel = AutonaAnalysisWidget()
-    try:
+            assert answer.status_code == 202, label
+            assert body["data"] == {"accepted": True,
+                                    "operation": "analysis.refresh"}
         _drain(analysis)
-        panel.btRefresh.click()
-        _drain(analysis)
-        assert _tableRows(panel) == _expectedRows("one group, seeds known")
-
-        # The same tournament, its groups failing this time.
-        AutonaTournamentDataProvider.instance.provider = _provider(
-            "every group failed")
-        panel.btRefresh.click()
-        _drain(analysis)
-        assert panel.summaryLabel.text() == QApplication.translate(
-            "app", "取得に失敗しました")
-        assert _tableRows(panel) == _expectedRows("one group, seeds known")
-        assert panel.btRefresh.isEnabled()
-
-        _switchTournament(_provider("one group, byes"))
-        _drain(analysis)
-        assert _tableRows(panel) == []
-        assert panel.summaryLabel.text() == prompt
-
-        # "No tournament" stays until the tournament changes.
-        _switchTournament(None)
-        _drain(analysis)
-        panel.btRefresh.click()
-        _drain(analysis)
-        assert panel.summaryLabel.text() == QApplication.translate(
-            "app", "大会が選択されていません")
-        _switchTournament(_provider("one group, byes"))
-        _drain(analysis)
-        assert panel.summaryLabel.text() == prompt
-    finally:
-        _dropPanel(panel)
+        read = client.get("/api/v1/analysis")
+        assert read.status_code == 200
+        data = read.get_json()["data"]
+        assert data["status"] == AnalysisService.Progress()["status"]
+        if provider is not None:
+            assert data["status"] == EXPECTED_PROGRESS[label]["status"]
+        cells = sorted((_pageCells(row) for row in data["rows"]),
+                       key=lambda row: row[0][1])
+        assert cells == _expectedRows(label), label
+        assert data["url"] == (
+            FakeProvider.url if data["status"] == "done" else ""), label
+        assert sorted(provider.calls if provider else [], key=json.dumps) \
+            == _golden(label)["fetches"], label

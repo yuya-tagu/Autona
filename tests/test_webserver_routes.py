@@ -105,8 +105,10 @@ EXPECTED_ROUTES = [
 # the Commentary page (ADR-005 S4b); stream/* for the Stream page (S4e);
 # GET / DELETE tournament, tournament/info, tournament/media* and
 # colors/tournament for the Event page (S4g); countries and top8/* for the
-# Top 8 page (S4i).
+# Top 8 page (S4i); analysis* for the Statistics page's match list (S4k).
 EXPECTED_API_V1_ROUTES = [
+    ('/api/v1/analysis', 'api_v1.get_analysis', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/analysis:refresh', 'api_v1.analysis_refresh', 'OPTIONS,POST'),
     ('/api/v1/bracket:refresh', 'api_v1.bracket_refresh', 'OPTIONS,POST'),
     ('/api/v1/characters', 'api_v1.get_characters', 'GET,HEAD,OPTIONS'),
     ('/api/v1/colors/<feature>', 'api_v1.colors_update', 'OPTIONS,PATCH'),
@@ -478,8 +480,9 @@ def test_the_classification_follows_the_rules():
     # 26 of 41, v1 18 of 31), plus the Commentary page's 5 writes and 2
     # reads (ADR-005 S4b: v1 23 of 38), the Stream page's 8 writes and 2
     # reads (S4e: v1 31 of 48), the Event page's 6 writes and 1 read
-    # (S4g: v1 37 of 55) and the Top 8 page's 4 writes and 1 read (S4i: v1
-    # 41 of 60). A change here is a change of the policy.
+    # (S4g: v1 37 of 55), the Top 8 page's 4 writes and 1 read (S4i: v1
+    # 41 of 60) and the Statistics page's 1 write and 1 read (S4k: v1 42 of
+    # 62). A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
     assert len(legacy) == 43
@@ -487,8 +490,8 @@ def test_the_classification_follows_the_rules():
     assert sum(k == WebAccess.WRITE
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
-               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 41
-    assert len(EXPECTED_API_V1_ROUTES) == 60
+               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 42
+    assert len(EXPECTED_API_V1_ROUTES) == 62
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

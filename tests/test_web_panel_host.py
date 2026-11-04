@@ -751,6 +751,27 @@ def test_the_top8_item_opens_the_react_page():
     assert "top8" in WebAccess.WEB_PANELS
 
 
+def test_the_stats_item_opens_the_react_page():
+    import ast
+    calls = _calls(_windowMethod("_CreateStatsPanel"))
+
+    # The React page is the only Statistics panel, the match list its
+    # fourth tab (ADR-005 S4k).
+    assert calls == [("self._WebPanel", ["'stats'"])]
+
+    # Still the lazy factory in Data, keyed by the React panel's name,
+    # with its icon and label.
+    build = _windowMethod("_BuildUi")
+    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
+               and node.elts
+               and ast.unparse(node.elts[0]) == "self._CreateStatsPanel"]
+    assert len(entries) == 1
+    assert ast.unparse(entries[0].elts[1]) == "'stats.svg'"
+    assert "Statistics" in ast.unparse(entries[0].elts[2])
+    assert ast.unparse(entries[0].elts[-1]) == "'stats'"
+    assert "stats" in WebAccess.WEB_PANELS
+
+
 def test_the_restored_page_is_built_before_the_window_is_shown():
     """STARTUP phase=core-shown is logged right after self.show(), with the
     restored page built before it (_EnsurePanelAt). For the Event page --
@@ -796,8 +817,8 @@ def test_the_sidebar_items_are_the_ones_they_were():
     """The nav items' number and order (and so the saved sidebar index,
     QSettings sidebarIndex_v<STATE_VERSION>) did not change for the React
     panels (Stream S4e, Event S4g -- its key is the React page's name now
-    -- and Top 8 S4i): no STATE_VERSION bump (ADR-005 S4 方針 5, S4 Event
-    論点 1)."""
+    --, Top 8 S4i and Statistics S4k): no STATE_VERSION bump (ADR-005 S4
+    方針 5, S4 Event 論点 1)."""
     import ast
     build = _windowMethod("_BuildUi")
     keys = [ast.unparse(node.elts[-1]) for node in ast.walk(build)
@@ -942,6 +963,25 @@ def test_the_qt_top8_panel_is_gone():
     assert left == []
 
 
+def test_the_qt_stats_panel_is_gone():
+    # ADR-005 S4k: the React page is the only Statistics panel, the match
+    # list included. Neither widget may come back in src/: no import, no
+    # construction (comments recording where code came from still name
+    # them), and no translation of theirs.
+    from tests.conftest import PROJECT_ROOT
+
+    src = PROJECT_ROOT / "src"
+    for name in ("AutonaStatsWidget", "AutonaAnalysisWidget"):
+        assert not (src / f"{name}.py").exists()
+        left = [str(path.relative_to(PROJECT_ROOT))
+                for pattern in ("*.py", "*.ui", "*.ts")
+                for path in src.rglob(pattern)
+                if any(word in path.read_text(encoding="utf-8")
+                       for word in (f"import {name}", f"{name}(",
+                                    f"{name}.instance", f"{name}.py"))]
+        assert left == [], name
+
+
 # ── several React items, one host page (ADR-005 S4e) ────────────────────
 
 def test_a_react_item_shows_its_own_page_until_the_host_is_built():
@@ -979,22 +1019,23 @@ def test_the_host_page_shows_its_own_panel_before_any_choice():
 
 def test_only_react_panels_are_mapped():
     with pytest.raises(ValueError):
-        WebPanelPages().Add(1, "stats")
+        WebPanelPages().Add(1, "playerBrowser")
 
 
 class _WindowRig:
     """The Window's real page-switching methods (read out of src/Autona.py,
     which cannot be imported: agent-pitfalls #1) on a stack built the way
-    _BuildUi builds it, with a few sidebar items: four React ones and two
-    Qt ones (the eager scoreboard, the lazy Statistics -- the lazy Top 8
-    until it became a React page, ADR-005 S4i), in the real order (Qt
-    items between them). Off screen, so the host builds no view; what
+    _BuildUi builds it, with a few sidebar items: five React ones and two
+    Qt ones (the eager scoreboard, the lazy Player List -- the lazy Top 8
+    until it became a React page, ADR-005 S4i, then the lazy Statistics
+    until S4k), in the real order (Qt items between them). Off screen, so the host builds no view; what
     it was asked to show is its _panel."""
 
     METHODS = ("_OnNavSelected", "_OnStackPageChanged", "_EnsurePanelAt",
                "_WebPanel", "_AdoptWebPanelHost", "_PreparePanel",
                "_CreateEventPanel", "_CreateStreamPanel",
-               "_CreateTop8Panel", "_CreateCommentaryPanel")
+               "_CreateTop8Panel", "_CreateCommentaryPanel",
+               "_CreateStatsPanel")
 
     def __init__(self):
         import ast
@@ -1034,13 +1075,14 @@ class _WindowRig:
         w._webPanelPages = WebPanelPages()
         w._buildingPanel = False
         # As _BuildUi: event, stream, scoreboard (eager), ..., top8,
-        # commentary, ..., stats.
+        # commentary, ..., stats, playerBrowser.
         for page, key in ((w._CreateEventPanel, "event"),
                           (w._CreateStreamPanel, "stream"),
                           (QLabel("scoreboard"), None),
                           (w._CreateTop8Panel, "top8"),
                           (w._CreateCommentaryPanel, "commentary"),
-                          (qtPanel("stats"), "stats")):
+                          (w._CreateStatsPanel, "stats"),
+                          (qtPanel("playerBrowser"), "playerBrowser")):
             if callable(page):
                 index = w.stack.addWidget(QWidget())
                 w._lazyPanels[index] = (page, key)
@@ -1064,7 +1106,7 @@ class _WindowRig:
                               AutonaWebPanelHost)]
 
 
-EVENT, STREAM, SCOREBOARD, TOP8, COMMENTARY, STATS = 0, 1, 2, 3, 4, 5
+EVENT, STREAM, SCOREBOARD, TOP8, COMMENTARY, STATS, PLAYER_BROWSER = range(7)
 
 
 def test_every_react_item_shows_the_one_host(qapp):
@@ -1081,6 +1123,7 @@ def test_every_react_item_shows_the_one_host(qapp):
     assert COMMENTARY not in w._lazyPanels
     assert EVENT not in w._lazyPanels
     assert TOP8 not in w._lazyPanels
+    assert STATS not in w._lazyPanels
 
     # Commentary: the same page, told the other panel (the stack did not
     # move, so this is not currentChanged's).
@@ -1105,9 +1148,13 @@ def test_every_react_item_shows_the_one_host(qapp):
     assert rig.choose(TOP8) == STREAM
     assert host._panel == "top8"
     assert w.stack.widget(TOP8) is rig.placeholders[TOP8]
+    # The Statistics page too (S4k).
+    assert rig.choose(STATS) == STREAM
+    assert host._panel == "stats"
+    assert w.stack.widget(STATS) is rig.placeholders[STATS]
     # The Qt items were built as before, the eager one never.
-    assert rig.choose(STATS) == STATS
-    assert rig.built == ["stats"]
+    assert rig.choose(PLAYER_BROWSER) == PLAYER_BROWSER
+    assert rig.built == ["playerBrowser"]
     assert w.dockWidgets == []
 
 

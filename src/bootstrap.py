@@ -235,11 +235,11 @@ def bootstrap_core():
     # ORDER CONSTRAINT: the statistics' fetcher (ADR-005 S3e-5) hands its
     # requests to the provider above and connects to its stream queue
     # signal, so it is built after it; and before anything that can ask for
-    # a statistic -- a player load, a swap, a web route, the STATS panel --
-    # all of which are the shell's, after this function returns. Its
-    # QObject must live on the main thread (the answers are queued to it),
-    # which is where this runs. Without it the statistics are only cleared,
-    # never fetched.
+    # a statistic -- a player load, a swap, a web route (the Statistics
+    # page's too) -- all of which are the shell's, after this function
+    # returns. Its QObject must live on the main thread (the answers are
+    # queued to it), which is where this runs. Without it the statistics
+    # are only cleared, never fetched.
     from .AutonaStatsUtil import AutonaStatsUtil
     from .core.StatsService import StatsService
     if StatsService.fetcher is None:

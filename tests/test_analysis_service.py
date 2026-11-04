@@ -8,7 +8,6 @@ strictly), run by the headless shell too, and nothing waited on inside
 StateManager.lock. What the rows are is tests/test_analysis_rows.py's (the
 frozen golden of the pre-S4j panel).
 """
-import ast
 import copy
 import json
 import threading
@@ -23,6 +22,7 @@ from src.core.AnalysisService import (
     BUSY, NO_TOURNAMENT, STARTED, AnalysisService, PhaseGroupEntries,
     RoundPrefix)
 from src.core.StateManager import StateManager
+from tests.test_api_v1 import webApp  # noqa: F401
 from tests.test_analysis_rows import (
     BYES, EXPECTED_PROGRESS, SCENARIOS, FakeProvider, _drain, _expectedRows,
     _pageCells, _phases, _provider, _switchTournament,
@@ -587,15 +587,12 @@ def test_an_end_whose_publish_raised_is_published_again(
     _drain(analysis)
 
 
-def test_a_refresh_that_raises_is_a_failed_fetch_on_the_panel(
-        service, analysis, monkeypatch):  # noqa: F811
+def test_a_refresh_that_raises_is_a_failed_fetch(
+        service, analysis, webApp, monkeypatch):  # noqa: F811
     """The fetcher raised (nothing was started): Refresh raises, as it
-    did, with nothing left in progress; the panel logs it and says the
-    fetch failed (S4j review L10) -- its click does not raise."""
-    from qtpy.QtWidgets import QApplication
-    from src.AutonaAnalysisWidget import AutonaAnalysisWidget
-    from tests.test_analysis_rows import _dropPanel
-
+    did, with nothing left in progress and nothing published; the route
+    answers 500, which the Statistics page tells as a failed fetch (S4j
+    review L10; the page's jest test)."""
     def broken(job, status):
         raise RuntimeError("the executor is gone")
 
@@ -607,49 +604,11 @@ def test_a_refresh_that_raises_is_a_failed_fetch_on_the_panel(
     assert not service.Running()
     assert StateManager.Get("analysis") == before
 
-    panel = AutonaAnalysisWidget()
-    try:
-        _drain(analysis)
-        panel._onRefreshClicked()
-        assert panel.summaryLabel.text() == QApplication.translate(
-            "app", "取得に失敗しました")
-        assert panel.btRefresh.isEnabled()
-    finally:
-        _dropPanel(panel)
-
-
-def test_the_panel_copies_the_rows_only_when_they_change(
-        service, analysis, monkeypatch):  # noqa: F811
-    """The panel reads the rows' revision on every change of `analysis`,
-    and copies the rows out (Result) only when it moved (S4j review L9)."""
-    from src.AutonaAnalysisWidget import AutonaAnalysisWidget
-    from tests.test_analysis_rows import _dropPanel, _tableRows
-    label = "several groups"
-    _switchTournament(_provider(label))
-    copies = []
-    result = service.Result
-
-    def counted():
-        copies.append(1)
-        return result()
-
-    monkeypatch.setattr(service, "Result", counted)
-    panel = AutonaAnalysisWidget()
-    try:
-        _drain(analysis)
-        assert copies == []                      # no rows, none drawn
-        panel.btRefresh.click()
-        _drain(analysis)
-        assert len(copies) == 1                  # the progress drew none
-        assert _tableRows(panel) == _expectedRows(label)
-        panel._Render()
-        assert len(copies) == 1
-        _switchTournament(_provider(label))
-        _drain(analysis)
-        assert len(copies) == 2                  # gone with the tournament
-        assert _tableRows(panel) == []
-    finally:
-        _dropPanel(panel)
+    answer = webApp.test_client().post("/api/v1/analysis:refresh")
+    assert answer.status_code == 500
+    assert answer.get_json()["error"]["code"] == "INTERNAL"
+    assert not service.Running()
+    assert StateManager.Get("analysis") == before
 
 
 # ── the real provider, asked strictly ────────────────────────────────────
@@ -767,11 +726,8 @@ def test_nothing_is_waited_on_inside_the_locks(service, analysis):  # noqa: F811
     """Lock order: StateManager.lock, then the service's, which is held
     only around its own fields -- never while the state is read or
     written, the fetcher or `later` is called. Nothing waits on another
-    thread (agent-pitfalls #17): no run_sync, from the service or from the
-    panel, whose state handler runs inside StateManager.lock."""
-    from src.AutonaAnalysisWidget import AutonaAnalysisWidget
+    thread (agent-pitfalls #17): no run_sync."""
     from src.Helpers import AutonaQtHelper
-    from tests.test_analysis_rows import _dropPanel
     executor = AutonaQtHelper.gui_executor
     runSync = executor.run_sync
     waits = []
@@ -794,54 +750,32 @@ def test_nothing_is_waited_on_inside_the_locks(service, analysis):  # noqa: F811
 
     label = "several groups"
     _switchTournament(_provider(label))
-    panel = AutonaAnalysisWidget()
-    try:
-        with patch.object(executor, "run_sync", _runSync), \
-                patch.object(StateManager, "Set", _set), \
-                patch.object(StateManager, "Get", _get):
-            panel.btRefresh.click()
-            _drain(analysis)
-            _switchTournament(_provider(label))
-            _drain(analysis)
-            panel.btRefresh.click()
-            _drain(analysis)
-        assert _rows(service) == _expectedRows(label)
-    finally:
-        _dropPanel(panel)
+    with patch.object(executor, "run_sync", _runSync), \
+            patch.object(StateManager, "Set", _set), \
+            patch.object(StateManager, "Get", _get):
+        assert service.Refresh() == STARTED
+        _drain(analysis)
+        _switchTournament(_provider(label))
+        _drain(analysis)
+        assert service.Refresh() == STARTED
+        _drain(analysis)
+    assert _rows(service) == _expectedRows(label)
     assert waits == []
     assert insideOwn == []
     assert service.calls and not [
         call for call in service.calls if call[2] or call[3]], service.calls
 
 
-# ── the panel, the seed ──────────────────────────────────────────────────
+# ── the adapter, the seed ────────────────────────────────────────────────
 
-def _calls(tree):
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func,
-                                                     ast.Attribute):
-            yield node.func
-
-
-def test_the_panel_only_asks_and_draws():
-    """AutonaAnalysisWidget asks AnalysisService.Refresh and draws: no
-    provider signal, no callback-style fetch, no write, no wait."""
+def test_the_adapter_has_no_callback_style_fetch():
+    """The provider adapter's callback-style fetch is gone: core asks the
+    provider itself, on a job. (The Qt panel that called it went with
+    S4j's thinning and S4k's removal; the Statistics page asks core
+    through /api/v1.)"""
     from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
-    source = (PROJECT_ROOT / "src" / "AutonaAnalysisWidget.py").read_text(
-        encoding="utf-8")
-    tree = ast.parse(source)
-    imported = {alias.name for node in ast.walk(tree)
-                if isinstance(node, (ast.Import, ast.ImportFrom))
-                for alias in node.names}
-    assert "AutonaTournamentDataProvider" not in imported
-    names = {func.attr for func in _calls(tree)}
-    assert not names & {"Set", "SetIfChanged", "Unset", "processEvents",
-                        "run_sync", "exec", "GetAnalysisPhaseGroup",
-                        "GetTournamentPhases"}, names
-    assert "Refresh" in names
-    # The callback-style fetch of the adapter is gone: core asks the
-    # provider itself, on a job.
     assert not hasattr(AutonaTournamentDataProvider, "GetAnalysisPhaseGroup")
+    assert not (PROJECT_ROOT / "src" / "AutonaAnalysisWidget.py").exists()
 
 
 def test_the_launch_seed_is_idle_at_the_revision_published_last(
