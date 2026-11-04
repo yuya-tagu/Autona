@@ -40,6 +40,7 @@ from .core import CommentaryModel as comms
 from .core import CommentaryService
 from .core import LayoutCatalog
 from .core import StreamService as streams
+from .core import Top8Model as top8
 from .core import Top8Service
 from .core import TournamentMediaService as tournamentMedia
 from .core import TournamentService as tournaments
@@ -564,10 +565,24 @@ def get_country_states(code):
     return ok(data=states)
 
 
+@api_v1.route("/countries")
+@api_handler
+def get_countries():
+    # The country combo's rows (ADR-005 S4i; the Top 8 page picks from
+    # them): every country in the program's locale, then the custom flags
+    # (user_data/additional_flag), each with its `code` -- what PATCH
+    # /top8/players/<slot> takes -- its flag `asset`, its `label` and
+    # whether it is `custom`. Not state, so no revision. NOT_READY until
+    # the country data is loaded, as /countries/<code>/states.
+    if not CountryCatalog.instance.IsLoaded():
+        raise ApiError(NOT_READY, "country data is not loaded yet", 409)
+    return ok(data=WebOps.get_countries())
+
+
 @api_v1.route("/layouts")
 @api_handler
 def get_layouts():
-    # The layout catalog the Board / Commentary / Top 8 tabs and the Designer
+    # The layout catalog the Board tab, the Commentary / Top 8 pages and the Designer
     # list from (src/core/LayoutCatalog.py). Not state, so no revision and
     # no web-operation hop: the catalog is already the single reader.
     # ?kind= takes one kind, a comma-separated list, or a repeated parameter.
@@ -1648,6 +1663,172 @@ def bracket_refresh():
         # Cleared between the check above and the start.
         raise ApiError(NOT_READY, "no tournament loaded", 409)
     return ok(data={"accepted": True, "operation": "bracket.refresh"}, status=202)
+
+
+# ── Top 8 (ADR-005 S4i) ──
+# The Top 8 page's writes, through Top8Service: one player's fields, the
+# overlay's caption, the scores (a merge) and their reset. The import is
+# /bracket:refresh above, the colours /colors/top8, the design
+# /layouts/selected/top8. Players' names are personal data: logged by key
+# only.
+def _top8_slot(slot):
+    if str(slot) not in top8.PLAYER_SLOTS:
+        raise ApiError(
+            INVALID_ARGUMENT, f"slot must be 1..{len(top8.PLAYER_SLOTS)}",
+            400)
+    return str(slot)
+
+
+def _is_index(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+_TOP8_PLAYER_FIELDS = (*Top8Service.PLAYER_TEXT_FIELDS, "country",
+                       "character")
+
+
+@api_v1.route("/top8/players/<int:slot>", methods=["PATCH"])
+@write_op("top8.player", log_keys_only=True)
+def top8_player_update(slot):
+    # Some of {"name", "sponsor": str ("" empties it), "country": a code (a
+    # custom flag's name, GET /countries), or null / "" to empty it,
+    # "character": {"en_name": str, "skin": its row in GET /characters'
+    # skins (default 0; any for a character without skins), "game": the
+    # codename of the game whose list it was picked on (optional)}, or null
+    # to empty it}: one player of the Top 8, in one save cycle. The values
+    # are built by core from the catalogs, as the player cards' are
+    # (Top8Service.UpdatePlayer). Nothing is written when any field is
+    # refused: 400 for a code, a character or a skin the catalogs do not
+    # have (a stray identifier never empties what is on air), 409 NOT_READY
+    # for a country before the country data is loaded, 409 CONFLICT for a
+    # character whose "game" is not the game loaded (picked on the list of
+    # the game before a switch).
+    slot = _top8_slot(slot)
+    body = _json_body()
+    unknown = sorted(k for k in body if k not in _TOP8_PLAYER_FIELDS)
+    if unknown:
+        raise ApiError(
+            INVALID_ARGUMENT, f"unknown player field: {', '.join(unknown)}",
+            400)
+    if not body:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"one of {', '.join(_TOP8_PLAYER_FIELDS)} is required", 400)
+    fields = {}
+    for key, value in body.items():
+        if key in Top8Service.PLAYER_TEXT_FIELDS:
+            if not isinstance(value, str):
+                raise ApiError(
+                    INVALID_ARGUMENT, f"{key} must be a string", 400)
+            fields[key] = value
+        elif key == "country":
+            if value is not None and not isinstance(value, str):
+                raise ApiError(
+                    INVALID_ARGUMENT,
+                    "country must be a country code or null", 400)
+            fields[key] = value or None
+        elif value is None:
+            fields[key] = None
+        else:
+            if (not isinstance(value, dict)
+                    or set(value) - {"en_name", "skin", "game"}
+                    or not isinstance(value.get("en_name"), str)
+                    or not value["en_name"]):
+                raise ApiError(
+                    INVALID_ARGUMENT,
+                    'character must be {"en_name": str, "skin": int, '
+                    '"game": str} or null', 400)
+            skin = value.get("skin", 0)
+            if not _is_index(skin) or skin < 0:
+                raise ApiError(
+                    INVALID_ARGUMENT,
+                    "character.skin must be an integer from 0", 400)
+            game = value.get("game")
+            if game is not None and not isinstance(game, str):
+                raise ApiError(
+                    INVALID_ARGUMENT, "character.game must be a string", 400)
+            fields[key] = (value["en_name"], skin, game)
+    if fields.get("country") and not CountryCatalog.instance.IsLoaded():
+        raise ApiError(NOT_READY, "country data is not loaded yet", 409)
+    refused = WebOps.update_top8_player(slot, fields)
+    if refused == Top8Service.UNKNOWN_COUNTRY:
+        raise ApiError(
+            INVALID_ARGUMENT, f"unknown country: {fields['country']}", 400)
+    if refused == Top8Service.UNKNOWN_CHARACTER:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"no character {fields['character'][0]} in the loaded game", 400)
+    if refused == Top8Service.UNKNOWN_SKIN:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"no skin {fields['character'][1]} for "
+            f"{fields['character'][0]}", 400)
+    if refused == Top8Service.OTHER_GAME:
+        raise ApiError(
+            CONFLICT,
+            f"{fields['character'][0]} was picked for the game "
+            f"{fields['character'][2]!r}, not the loaded one", 409)
+    return ok(revision=current_revision())
+
+
+@api_v1.route("/top8", methods=["PATCH"])
+@write_op("top8.update")
+def top8_update():
+    # {"phaseLabel": str}: the overlay's caption; empty is the default
+    # ("TOP 8"). Answers what was published.
+    body = _json_body()
+    unknown = sorted(k for k in body if k != "phaseLabel")
+    if unknown:
+        raise ApiError(
+            INVALID_ARGUMENT, f"unknown Top 8 field: {', '.join(unknown)}",
+            400)
+    if "phaseLabel" not in body:
+        raise ApiError(INVALID_ARGUMENT, "phaseLabel is required", 400)
+    if not isinstance(body["phaseLabel"], str):
+        raise ApiError(INVALID_ARGUMENT, "phaseLabel must be a string", 400)
+    label = WebOps.set_top8_phase_label(body["phaseLabel"])
+    return ok(data={"phaseLabel": label}, revision=current_revision())
+
+
+@api_v1.route("/top8/scores", methods=["POST"])
+@write_op("top8.scores")
+def top8_scores_apply():
+    # {match id: [s1, s2]} for some of the Top 8's matches (wsf1 ... gf,
+    # gf_reset), each two integers 0..99: applied (反映) as a merge -- the
+    # matches not sent keep their scores and results -- and the winners
+    # carried on (Top8Service.ApplyScores). A tie is not a result. An
+    # unknown match or a bad score refuses the whole request. Answers the
+    # matches published.
+    body = _json_body()
+    if not body:
+        raise ApiError(INVALID_ARGUMENT, "at least one match is required",
+                       400)
+    unknown = sorted(k for k in body if k not in top8.MATCH_IDS)
+    if unknown:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"unknown match: {', '.join(unknown)} (expected some of: "
+            f"{', '.join(top8.MATCH_IDS)})", 400)
+    for matchId, score in body.items():
+        if (not isinstance(score, list) or len(score) != 2
+                or not all(_is_index(s) and 0 <= s <= Top8Service.SCORE_MAX
+                           for s in score)):
+            raise ApiError(
+                INVALID_ARGUMENT,
+                f"{matchId} must be two integers from 0 to "
+                f"{Top8Service.SCORE_MAX}", 400)
+    matches = WebOps.apply_top8_scores(body)
+    if matches is None:
+        raise ApiError(INVALID_ARGUMENT, "the scores were refused", 400)
+    return ok(data=matches, revision=current_revision())
+
+
+@api_v1.route("/top8/scores", methods=["DELETE"])
+@write_op("top8.scores.reset")
+def top8_scores_reset():
+    # Every match's score and result back to none (全リセット). Answers the
+    # matches published.
+    return ok(data=WebOps.reset_top8_scores(), revision=current_revision())
 
 
 @api_v1.route("/stream/thumbnail", methods=["POST"])

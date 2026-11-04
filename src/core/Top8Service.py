@@ -8,9 +8,13 @@ itself, from six ``StateManager.Set`` calls that spelled ``top8.players`` /
 ``top8.matches`` out by hand. This module is that half (headless core Step 5,
 instalment 5).
 
-The panel's edits come here one field at a time (``SetPlayerText`` /
-``SetPlayerCountry`` / ``SetPlayerCharacter``, ADR-005 S3e-8): it renders
-``top8.*`` and writes only the field the operator changed. Since ADR-005 S4h
+The Top 8 page's edits of a player come here as one write (``UpdatePlayer``:
+the fields of one PATCH /api/v1/top8/players/<slot>, resolved against one
+snapshot of the catalogs, all or none, S4i); one field at a time,
+``SetPlayerText`` / ``SetPlayerCountry`` / ``SetPlayerCharacter`` (ADR-005
+S3e-8; the Qt panel's until S4i made it a React page writing through
+/api/v1). The page renders ``top8.*`` and writes only the fields the
+operator changed. Since ADR-005 S4h
 a country and a character come as identifiers -- a country code, a
 character's en_name and its skin row -- and the values are built here from
 the catalogs, with the player cards' builders (``PlayerService
@@ -26,8 +30,8 @@ extracts its Top 8 (``core/Bracket`` + ``Top8Model.FromBracket``), resolves
 each player's country and character from the core catalogs and imports the
 result. It used to be the panel's (a phases cache, the provider signals it
 listened to, a build worker, the resolution against the Qt asset adapter);
-the panel's load button, the hotkey and the web routes all call this now, in
-either shell, built panel or not. The provider reads are the shell's,
+the page's load button (POST /api/v1/bracket:refresh), the hotkey and the
+other web routes all call this now, in either shell. The provider reads are the shell's,
 through the registered ``fetcher`` (core imports no ``src`` module), which
 runs the whole import -- fetches, build, write -- on the provider's worker
 thread.
@@ -66,10 +70,11 @@ MATCHES_PATH = f"{schema.TOP8_ROOT}.{schema.TOP8_MATCHES_KEY}"
 PHASE_LABEL_PATH = f"{schema.TOP8_ROOT}.{schema.TOP8_PHASE_LABEL_KEY}"
 
 
-# The text fields of a player the panel edits.
+# The text fields of a player the Top 8 page edits.
 PLAYER_TEXT_FIELDS = ("name", "sponsor")
 
-# A match score's bound (ApplyScores; the panel's spin boxes' range).
+# A match score's bound (ApplyScores; the Qt panel's spin boxes' range,
+# the Top 8 page's score fields' since ADR-005 S4i).
 SCORE_MAX = 99
 
 
@@ -78,13 +83,14 @@ def _PlayerKey(slot, field):
 
 
 def SetPlayerText(slot, field, text) -> bool:
-    """One text field of one player (the panel's name / sponsor), stored
-    trimmed. True if the state changed.
+    """One text field of one player (the Top 8 page's name / sponsor),
+    stored trimmed. True if the state changed.
 
     Only that key, and only when it changes (ADR-005 S3e-8). Until S3e-8
-    every edit republished all eight players from the panel's inputs, which
-    once the panel follows the state would put whatever another input was
-    still showing over a newer value (an import, another client).
+    every edit of the Qt panel republished all eight players from its
+    inputs, which -- once the panel followed the state -- would have put
+    whatever another input was still showing over a newer value (an
+    import, another client).
     """
     slot = str(slot)
     if slot not in top8.PLAYER_SLOTS or field not in PLAYER_TEXT_FIELDS:
@@ -126,6 +132,82 @@ def SetPlayerCountry(slot, code, countries=None) -> bool:
             return False
     with StateManager.lock:
         return StateManager.SetIfChanged(_PlayerKey(slot, "country"), value)
+
+
+# What UpdatePlayer refuses: the field whose identifier named nothing, or
+# a character picked on another game's list than the loaded one.
+UNKNOWN_COUNTRY = "country"
+UNKNOWN_CHARACTER = "character"
+UNKNOWN_SKIN = "skin"
+OTHER_GAME = "game"
+
+
+def UpdatePlayer(slot, fields, games=None, countries=None):
+    """Some of one player's fields in one save cycle (the Top 8 page's
+    ``PATCH /api/v1/top8/players/<slot>``, ADR-005 S4i).
+
+    `fields` holds some of: ``name`` / ``sponsor`` (str); ``country`` (a
+    code -- a custom flag's is its name -- or None); ``character``
+    (``(en_name, skin row, codename)`` or None; the codename is the game
+    whose list the character was picked on, None not to check it).
+
+    Under the state lock, every identifier is resolved first, against one
+    reference to each catalog -- one ``GameAssetCatalog.Current()``
+    snapshot, one country lookup -- and the values written are the ones
+    resolved. Nothing is written when one names nothing, and the answer
+    says which (``UNKNOWN_*``); a character picked on another game's list
+    than the one loaded (a game switch the page has not followed yet) is
+    ``OTHER_GAME``. A skin that is not one of the character's rows is
+    refused here (``CharacterValue`` alone would take the first: a client's
+    typo never shows another colour); a character without skins takes any.
+    Else None.
+
+    The lock is taken before the save block (agent-pitfalls #17), and the
+    game is read under it: a game switch empties the characters under the
+    same lock after swapping its snapshot, so a pick checked against one
+    game is never written after the switch to the next.
+    """
+    slot = str(slot)
+    if slot not in top8.PLAYER_SLOTS:
+        logger.warning(f"Top8: ignoring player {slot}")
+        return None
+    with StateManager.lock:
+        values = {}
+        if "country" in fields:
+            code = fields["country"]
+            if code:
+                value = CountryValue(code, countries)
+                if not value:
+                    return UNKNOWN_COUNTRY
+                values["country"] = value
+            else:
+                values["country"] = {}
+        if "character" in fields:
+            character = fields["character"]
+            if character:
+                en_name, skin, codename = character
+                catalog = (games if games is not None
+                           else GameAssetCatalog.instance)
+                snap = catalog.Current() if catalog is not None else None
+                if (codename is not None and snap is not None
+                        and (snap.codename or "") != codename):
+                    return OTHER_GAME
+                value = CharacterValue(en_name, skin, catalog, snap)
+                if not value:
+                    return UNKNOWN_CHARACTER
+                # -1: a character without skins, whatever was asked.
+                if value.get("skin") not in (skin, -1):
+                    return UNKNOWN_SKIN
+                values["characters"] = {"1": value}
+            else:
+                values["characters"] = {}
+        with StateManager.SaveBlock():
+            for field in PLAYER_TEXT_FIELDS:
+                if field in fields:
+                    SetPlayerText(slot, field, fields[field])
+            for key, value in values.items():
+                StateManager.SetIfChanged(_PlayerKey(slot, key), value)
+    return None
 
 
 def _IsRow(value) -> bool:
@@ -331,10 +413,10 @@ def SetPhaseLabel(text):
 def ApplyScores(scores):
     """Apply the staged scores (反映) and propagate the winners.
 
-    `scores` is `{match_id: [s1, s2]}` -- what the panel's spin boxes hold,
-    which is deliberately *not* what the state holds: the TOP 8 panel stages
-    edits and publishes them on 反映, so the spin values and `top8.matches`
-    disagree until this runs.
+    `scores` is `{match_id: [s1, s2]}` -- what the Top 8 page staged (the Qt
+    panel's spin boxes until ADR-005 S4i), which is deliberately *not* what
+    the state holds: the page stages edits and publishes them on 反映, so
+    what it shows and `top8.matches` disagree until this runs.
 
     A match counts as finished when its applied score is not a tie; there is
     no separate confirm control. Recompute then rewrites every downstream
@@ -429,8 +511,8 @@ STARTED = "started"
 BUSY = "busy"
 NO_TOURNAMENT = "no tournament"
 
-# One import at a time, whoever asked (the panel, the hotkey, the web
-# routes): the in-progress flag, read and set under its lock.
+# One import at a time, whoever asked (the Top 8 page, the hotkey, the
+# other web routes): the in-progress flag, read and set under its lock.
 _refreshLock = threading.Lock()
 _refreshing = False
 

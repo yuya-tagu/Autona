@@ -55,8 +55,12 @@ These kinds live here:
   through the board host like the S2 ones, in both shells. The fetches are
   the shell's (StatsService.fetcher) and answer into the state later.
 - the Top 8 import (ADR-005 S3e-8): core's Top8Service, in both shells. It
-  runs on the tournament provider's worker; the Top 8 panel, built or not,
-  renders what it wrote.
+  runs on the tournament provider's worker; the Top 8 page renders what it
+  wrote.
+- the Top 8 page's (ADR-005 S4i): core's Top8Service -- one player's
+  fields, the overlay's caption, the scores and their reset -- in both
+  shells, on the calling thread (no board). The page renders what was
+  written.
 - set loading and following (ADR-005 S3e-7): load-set, POST /score and
   pull-stream -- core's SetFollowService, through the board host like the
   S2 ones, in both shells. The fetches and the 5-second poll are the
@@ -452,6 +456,12 @@ def get_states(countryCode: str):
     return CountryCatalog.instance.States(countryCode)
 
 
+def get_countries():
+    # The country combo's rows, custom flags last (ADR-005 S4i: the Top 8
+    # page's country picker), read on the calling thread like get_states.
+    return CountryCatalog.instance.CountriesPayload()
+
+
 def get_sets(args):
     provider = AutonaTournamentDataProvider.instance.GetProvider()
     if provider is None:
@@ -742,13 +752,49 @@ def update_bracket(done=None):
     """Re-import the Top 8 from Start.gg (core: Top8Service, ADR-005 S3e-8).
 
     Starts the import on the provider's worker and returns at once, in
-    either shell, whether or not the Top 8 panel was ever built. Answers
+    either shell (no panel is involved; the Top 8 page renders it). Answers
     what RefreshFromProvider answers (``Top8Service.STARTED`` / ``BUSY`` /
     ``NO_TOURNAMENT``): /api/v1 maps it to 202 / 409; the legacy route and
     the Socket.IO event answer "OK" whichever it was, as they always did.
     `done()` as in RefreshFromProvider.
     """
     return Top8Service.RefreshFromProvider(done=done)
+
+
+# ── Top 8 (ADR-005 S4i) ──────────────────────────────────────────────────
+# The Top 8 page's: core's Top8Service, in both shells, on the calling
+# thread -- there is no board. The v1 routes validate the shapes; these
+# apply.
+
+def update_top8_player(slot, fields):
+    """Write some of one Top 8 player's fields in one save cycle (core:
+    Top8Service.UpdatePlayer): name / sponsor (str), country (a code -- a
+    custom flag's name -- or None), character ((en_name, skin row,
+    codename or None) or None), already shaped by the route. Every
+    identifier is resolved against one reference to each catalog before
+    anything is written; nothing is written when one names nothing or the
+    character was picked on another game's list. Answers which
+    (Top8Service.UNKNOWN_* / OTHER_GAME), else None."""
+    return Top8Service.UpdatePlayer(slot, fields)
+
+
+def set_top8_phase_label(text):
+    """The overlay's caption; empty is the default ("TOP 8"). Answers what
+    was published."""
+    return Top8Service.SetPhaseLabel(text)
+
+
+def apply_top8_scores(scores):
+    """Apply some matches' scores ({match id: [s1, s2]}, already
+    validated): a merge, the other matches kept (Top8Service.ApplyScores).
+    Answers the matches published, or None when core refused them."""
+    return Top8Service.ApplyScores(scores)
+
+
+def reset_top8_scores():
+    """Every score and result back to none (全リセット). Answers the
+    matches published."""
+    return Top8Service.ResetMatches()
 
 
 # ── the game ─────────────────────────────────────────────────────────────

@@ -112,8 +112,10 @@ publish する。ヘッドレスは同じものを core の `PlayerService.SeedE
     ハンドラに書かせる、という「フォームに入力して書かせる」読込を書かない
     （`tests/test_player_apply.py` が AST で pin）。カード自身の操作（補完の選択・クリア・
     エディタの読込）の後は、入力中の欄も含めて描画する（`_RenderSlot(over=True)`）
-  - Top 8 パネルは ADR-005 S4h から識別子で渡す（国は code、キャラは en_name + カラーコンボの行。
+  - Top 8 は ADR-005 S4h から識別子で渡す（国は code、キャラは en_name + カラーの行。
     値は `Top8Service` が選手カードと同じ組み立てで作り、state → 選択の逆引きは `Top8Service.CharacterPick`）。
+    パネルは S4i で React のページ（`/web/top8`）になり、Qt 版は削除済み（ページの逆引きは同じ表で検査する
+    `web/src/Top8Page/characterPick.ts`）。
     リザルトのパネルは、まだコンボの行 dict から値を組んでいる（S4 で置き換え）。
     実況パネルは Web 版（React）だけになり（S4c）、アイコンの識別子（stem）を `CommentaryService.SetField` に渡す。
     新しく同じ形を書かない

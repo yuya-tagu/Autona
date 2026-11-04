@@ -4,10 +4,11 @@ The import used to be the TOP 8 panel's (its load button, the hotkey and the
 web routes all reached AutonaTop8Widget.RefreshPhaseGroup, building the panel
 first). golden.json was recorded through that panel on the last tree before
 the move (cff44408), and every way in now has to write the same: core
-directly, the panel's button, the hotkey with no panel, and -- in the
-headless shell -- the legacy route, the Socket.IO event and /api/v1. What is
-compared: the fetches, the countries looked up, every StateManager.Set with
-its value's key order, the deltas, the subtree afterwards.
+directly, the Top 8 page's button (POST /api/v1/bracket:refresh on the
+desktop), the hotkey, and -- in the headless shell -- the legacy route, the
+Socket.IO event and /api/v1. What is compared: the fetches, the countries
+looked up, every StateManager.Set with its value's key order, the deltas,
+the subtree afterwards.
 
 Recorded again for ADR-005 S4h, through the panel's button (the core path
 by then), with one intended change, additive only: an imported character is
@@ -20,10 +21,14 @@ sequences, the paths -- recorded the same.
 
     AUTONA_RECORD_TOP8=1 python -m pytest tests/test_top8_refresh.py -k record
 
+Since ADR-005 S4i the Qt panel is gone (the Top 8 page is React, writing
+through /api/v1: tests/test_api_v1_top8.py, web/src/Top8Page). A new
+recording goes through core's import, the path the panel's button had been
+taking since S3e-8.
+
 Also here: one import at a time across every way in, a failed or empty
-fetch writing nothing, and the panel following the state (it renders the
-import and its own edits, writes only the field edited, keeps what the
-operator types unless the import wrote that very field).
+fetch writing nothing, the imported players' overlay icons, and a game
+switch emptying the characters in either shell.
 
 Start.gg is a fake provider (the two reads the import makes); the country
 lookup is a deterministic stand-in for CountryCatalog.BasicCountryInfo; the
@@ -33,7 +38,6 @@ import copy
 import json
 import os
 import threading
-from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -316,24 +320,6 @@ def _drain(app):
     app.settle()
 
 
-def _buildPanel(app):
-    from src.AutonaTop8Widget import AutonaTop8Widget
-    panel = AutonaTop8Widget()
-    app.settle()
-    return panel
-
-
-def _dropPanel(app, panel):
-    from qtpy.QtCore import QCoreApplication, QEvent
-    from src.AutonaTop8Widget import AutonaTop8Widget
-    if AutonaTop8Widget.instance is panel:
-        AutonaTop8Widget.instance = None
-    panel.setParent(None)
-    panel.deleteLater()
-    QCoreApplication.sendPostedEvents(panel, QEvent.Type.DeferredDelete)
-    app.settle()
-
-
 def _useProvider(label):
     from src.AutonaTournamentDataProvider import AutonaTournamentDataProvider
     phases, groups, _game = SCENARIOS[label]
@@ -369,19 +355,17 @@ def _orderedLabels():
 
 @pytest.mark.skipif(not RECORD, reason="recording only")
 def test_record(bracket, countries):
-    """Through the panel's load button, as the operator imports."""
+    """Through core's import, the path every way in takes (the Qt panel's
+    load button, which the S4h recording went through, is gone: S4i)."""
+    from src.core import Top8Service
     golden = {"baseline": encode(_baseline()), "scenarios": {}}
     for label in _orderedLabels():
         if SCENARIOS[label][2]:
             bracket.loadCharacters()
         _reset(bracket)
         provider = _useProvider(label)
-        panel = _buildPanel(bracket)
-        try:
-            golden["scenarios"][label] = _record(
-                bracket, countries, provider, panel.btLoadTop8.click)
-        finally:
-            _dropPanel(bracket, panel)
+        golden["scenarios"][label] = _record(
+            bracket, countries, provider, Top8Service.RefreshFromProvider)
     GOLDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
     GOLDEN_PATH.write_text(
         json.dumps(golden, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -430,46 +414,37 @@ def test_the_core_import_writes_what_the_panel_did(bracket, countries):
         _assertGolden(recorded, label)
 
 
-def test_the_panel_button_imports_through_core_and_shows_it(
-        bracket, countries):
-    """The load button, panel built: the same writes -- the panel renders
-    the import and writes nothing of its own -- and it shows the result."""
+# The desktop's v1 client (the Top 8 page's button posts to it).
+from tests.test_api_v1 import client, webApp  # noqa: E402,F401
+
+
+def test_the_pages_button_imports_every_scenario_on_the_desktop(
+        bracket, countries, client):
+    """The Top 8 page's 大会結果を読み込む (ADR-005 S4i): POST
+    /api/v1/bracket:refresh in the desktop shell, every scenario -- the
+    recording of the Qt panel's button, which it replaces."""
     gameLoaded = False
     for label in _orderedLabels():
-        if SCENARIOS[label][2] and not gameLoaded:
-            bracket.loadCharacters()
-            gameLoaded = True
-        _reset(bracket)
-        provider = _useProvider(label)
-        panel = _buildPanel(bracket)
-        try:
-            recorded = _record(
-                bracket, countries, provider, panel.btLoadTop8.click)
-            _assertGolden(recorded, label)
-            players = _state().Get("top8.players")
-            assert {slot: w["name"].text()
-                    for slot, w in panel.playerInputs.items()} \
-                == {slot: players[slot]["name"] for slot in players}, label
-            matches = _state().Get("top8.matches")
-            assert {mid: [row["s1"].value(), row["s2"].value()]
-                    for mid, row in panel.matchRows.items()} \
-                == {mid: matches[mid]["score"] for mid in matches}, label
-            assert panel.phaseLabelEdit.text() == "FINALS"
-        finally:
-            _dropPanel(bracket, panel)
+        answers = []
+
+        def trigger():
+            response = client.post("/api/v1/bracket:refresh", json={})
+            answers.append(response.status_code)
+
+        recorded = _replay(bracket, countries, label, trigger, gameLoaded)
+        gameLoaded = gameLoaded or SCENARIOS[label][2]
+        assert answers == [202], label
+        _assertGolden(recorded, label)
 
 
 ENTRY_LABEL = "complete, seeds known"
 
 
-def test_the_hotkey_imports_without_the_panel(bracket, countries):
+def test_the_hotkey_imports(bracket, countries):
     from src.AutonaHotkeys import AutonaHotkeys
-    from src.AutonaTop8Widget import AutonaTop8Widget
     recorded = _replay(bracket, countries, ENTRY_LABEL,
                        AutonaHotkeys.signals.refresh_phase_group.emit, False)
     _assertGolden(recorded, ENTRY_LABEL)
-    # Not built to answer it (it used to be, by the window).
-    assert AutonaTop8Widget.instance is None
 
 
 # The web layer's fixtures: the real Flask app with no board-dependent
@@ -712,103 +687,7 @@ def test_the_target_is_the_last_double_elimination_phase():
         is None
 
 
-# ── the panel follows the state ──────────────────────────────────────────
-
-@pytest.fixture
-def panel(bracket):
-    _reset(bracket)
-    panel = _buildPanel(bracket)
-    try:
-        yield panel
-    finally:
-        _dropPanel(bracket, panel)
-
-
-def test_a_panel_edit_writes_only_its_field(bracket, panel):
-    """A change the panel has not shown yet (its render is deferred) when
-    the operator finishes an edit: the edit writes its own field, and the
-    change stays (the panel used to republish all eight players from its
-    inputs)."""
-    from src.core import Top8Service
-    Top8Service.SetPlayerText("5", "name", "Newer")
-    assert panel.playerInputs["5"]["name"].text() == "Old 5"   # not yet
-
-    edit = panel.playerInputs["1"]["name"]
-    edit.setText("  Typed ")
-    with WriteRecorder() as recorder:
-        edit.editingFinished.emit()
-        bracket.settle()
-
-    assert recorder.sets == [["top8.players.1.name", '"Typed"']]
-    assert _state().Get("top8.players.5.name") == "Newer"
-    assert panel.playerInputs["5"]["name"].text() == "Newer"
-    # The match rows name whoever the state puts there.
-    assert panel.matchRows["wsf1"]["p1"].text() == "Typed"
-
-
-class _CountryRows:
-    """CountryCatalog's code lookup over _country's rows (the harness loads
-    no country data)."""
-
-    def CountryByCode(self, code):
-        return _country(code) or None
-
-
-def test_a_render_writes_nothing(bracket, panel):
-    from src.core import Top8Service
-    with WriteRecorder() as recorder:
-        Top8Service.SetPlayerCountry("2", "JP", _CountryRows())
-        bracket.settle()
-        panel._onGameChanged()
-        bracket.settle()
-        _state().observers.state_big_change.notify()
-        bracket.settle()
-    assert [key for key, _ in recorder.sets] == ["top8.players.2.country"]
-    assert _state().Get("top8.players.3.country") == _country("FR")
-
-
-def test_a_character_and_its_skin_are_kept(bracket):
-    """Picking a character writes its first skin, picking a skin writes
-    that one, and a later render keeps the skin (the panel used to put the
-    first skin back whenever it reloaded). What is written is core's value
-    for the two identifiers (ADR-005 S4h; it was the skin row's data)."""
-    from qtpy.QtCore import Qt
-    from src.core import Top8Service
-    bracket.loadCharacters()
-    _reset(bracket)
-    panel = _buildPanel(bracket)
-    try:
-        w = panel.playerInputs["2"]
-        luigi = next(row for row in range(w["char"].count())
-                     if (w["char"].itemData(row, Qt.ItemDataRole.UserRole)
-                         or {}).get("en_name") == "Luigi")
-        with WriteRecorder() as recorder:
-            w["char"].setCurrentIndex(luigi)
-            bracket.settle()
-        assert recorder.sets == [[
-            "top8.players.2.characters",
-            encode({"1": Top8Service.CharacterValue("Luigi", 0)})]]
-        assert w["color"].currentIndex() == 0
-
-        with WriteRecorder() as recorder:
-            w["color"].setCurrentIndex(2)
-            bracket.settle()
-        value = Top8Service.CharacterValue("Luigi", 2)
-        assert recorder.sets == [
-            ["top8.players.2.characters", encode({"1": value})]]
-        # The skin's own assets: what the overlay draws.
-        assert value["assets"] == w["color"].itemData(
-            2, Qt.ItemDataRole.UserRole)["assets"]
-
-        with WriteRecorder() as recorder:
-            Top8Service.SetPlayerText("2", "name", "Luigi main")
-            bracket.settle()
-        assert [key for key, _ in recorder.sets] == ["top8.players.2.name"]
-        assert w["char"].currentIndex() == luigi
-        assert w["color"].currentIndex() == 2
-    finally:
-        _dropPanel(bracket, panel)
-
+# ── the imported players' overlay icons (ADR-005 S4h) ──────────────────
 
 def _overlayIcon(player):
     """The file layout/bracket_top8/index.js draws as a player's character
@@ -843,224 +722,6 @@ def test_an_imported_player_gets_the_overlays_icon(bracket, countries):
         assert icon and icon.endswith(
             f"{value['codename']}_{value['skin']}.png"), slot
         assert os.path.isfile(icon), slot
-
-
-def test_a_rebuilt_panel_shows_every_shape_a_slot_has_held(bracket):
-    """A saved Top 8 from before S4h holds a character in one of three
-    shapes, and from S4h on in one of two (the panel's pick, the import's);
-    a panel built on it shows each (the skin row's used to leave the combos
-    empty) and writes nothing."""
-    from qtpy.QtCore import Qt
-    from src.core import Top8Service
-    from src.core.GameAssetCatalog import GameAssetCatalog
-    bracket.loadCharacters()
-    _reset(bracket)
-    games = GameAssetCatalog.instance
-    shapes = {
-        "1": Top8Service.CharacterValue("Mario", 2),     # S4h on
-        "2": games.SkinRow("Luigi", 1),                  # the skin row
-        "3": games.CharacterRow("Peach"),                # the character row
-        "4": games.Character("Luigi"),                   # the import's copy
-        "5": Top8Service.ImportedCharacterValue("Peach", 1),   # S4h on
-    }
-    for slot, value in shapes.items():
-        _state().Set(f"top8.players.{slot}.characters", {"1": value})
-    bracket.settle()
-
-    with WriteRecorder() as recorder:
-        panel = _buildPanel(bracket)
-    try:
-        assert recorder.sets == []
-        shown = {}
-        for slot in shapes:
-            w = panel.playerInputs[slot]
-            data = w["char"].currentData(Qt.ItemDataRole.UserRole) or {}
-            shown[slot] = (data.get("en_name"), w["color"].currentIndex())
-        assert shown == {"1": ("Mario", 2), "2": ("Luigi", 1),
-                         "3": ("Peach", 0), "4": ("Luigi", 0),
-                         "5": ("Peach", 1)}
-        # Not rewritten by the render: the old shapes stay until picked.
-        assert _state().Get("top8.players.2.characters") == {"1": shapes["2"]}
-
-        # Picking the colour again writes the full value.
-        w = panel.playerInputs["2"]
-        w["color"].setCurrentIndex(2)
-        bracket.settle()
-        assert _state().Get("top8.players.2.characters") \
-            == {"1": Top8Service.CharacterValue("Luigi", 2)}
-    finally:
-        _dropPanel(bracket, panel)
-
-
-@pytest.fixture
-def top8Designs(tmp_path, monkeypatch):
-    """Two Top 8 designs, and settings that are a copy, never saved."""
-    from src.core import LayoutCatalog
-    from src.core.SettingsManager import SettingsManager
-    from tests.test_layout_catalog import builtin
-    root = tmp_path / "layout"
-    root.mkdir()
-    builtin(root, "bracket_top8", {"kind": "top8", "displayName": "標準"})
-    builtin(root, "bracket_top8_dark", {"kind": "top8", "displayName": "Dark"})
-    monkeypatch.setattr(LayoutCatalog, "LAYOUT_ROOT", str(root))
-    monkeypatch.setattr(SettingsManager, "settings",
-                        copy.deepcopy(SettingsManager.settings))
-    monkeypatch.setattr(SettingsManager, "SaveSettings", lambda: None)
-    SettingsManager.Unset("top8.selected_design")
-    return SettingsManager
-
-
-def test_the_panels_design_is_cores_selection(bracket, top8Designs):
-    """The panel shows and keeps the design through LayoutCatalog
-    (SelectedLayout / SelectLayout, ADR-005 S4h) under the key it always
-    kept -- what GET / PUT /api/v1/layouts/selected/top8 read and write."""
-    from src.core import LayoutCatalog
-    settings = top8Designs
-    settings.Set("top8.selected_design", "bracket_top8_dark")
-    panel = _buildPanel(bracket)
-    try:
-        assert panel.designCombo.currentData() == "bracket_top8_dark"
-        panel.designCombo.setCurrentIndex(
-            panel.designCombo.findData("bracket_top8"))
-        assert settings.Get("top8.selected_design") == "bracket_top8"
-        assert LayoutCatalog.SelectedLayout("top8")["id"] == "bracket_top8"
-        assert "bracket_top8" in panel.obsUrlField.text()
-    finally:
-        _dropPanel(bracket, panel)
-
-    # A kept design that is gone: the default is shown, the choice kept.
-    settings.Set("top8.selected_design", "gone")
-    panel = _buildPanel(bracket)
-    try:
-        assert panel.designCombo.currentData() == "bracket_top8"
-        assert settings.Get("top8.selected_design") == "gone"
-    finally:
-        _dropPanel(bracket, panel)
-
-
-def test_staged_scores_survive_a_player_edit_and_apply(bracket, panel):
-    from src.core import Top8Service
-    row = panel.matchRows["wsf2"]
-    row["s1"].setValue(2)
-    Top8Service.SetPlayerText("3", "name", "Renamed")
-    bracket.settle()
-    assert row["s1"].value() == 2           # staged, not applied
-    assert row["p1"].text() == "Renamed"
-
-    panel.btApplyScores.click()
-    bracket.settle()
-    assert _state().Get("top8.matches.wsf2.score") == [2, 0]
-    assert _state().Get("top8.matches.wsf2.finished") is True
-    assert row["s1"].value() == 2
-
-
-def test_a_cleared_caption_stands_for_the_default(bracket, panel):
-    edit = panel.phaseLabelEdit
-    assert edit.text() == "FINALS"
-    edit.setText("")
-    edit.editingFinished.emit()
-    bracket.settle()
-    assert _state().Get("top8.phaseLabel") == top8.DEFAULT_PHASE_LABEL
-    assert edit.text() == ""
-    # Another render leaves the emptied field as it is.
-    from src.core import Top8Service
-    Top8Service.SetPlayerText("1", "name", "Elsewhere")
-    bracket.settle()
-    assert edit.text() == ""
-
-
-def test_a_new_panel_shows_the_default_caption_as_text(bracket):
-    """As the panel always did: the caption the state holds is the field's
-    text, the default "TOP 8" included (not left to the placeholder)."""
-    from src.core import Top8Service
-    _reset(bracket)
-    Top8Service.SetPhaseLabel("")
-    bracket.settle()
-    panel = _buildPanel(bracket)
-    try:
-        assert panel.phaseLabelEdit.text() == top8.DEFAULT_PHASE_LABEL
-        # Finishing it as shown is not an edit.
-        with WriteRecorder() as recorder:
-            panel.phaseLabelEdit.editingFinished.emit()
-            bracket.settle()
-        assert recorder.sets == []
-    finally:
-        _dropPanel(bracket, panel)
-
-
-# Real focus, on the panel shown offscreen (as the commentary panel's
-# tests do: tests/test_commentary_service.py).
-
-@contextmanager
-def _onScreen(widget, app):
-    from qtpy.QtCore import QCoreApplication, QEvent
-    from qtpy.QtWidgets import QWidget
-    window = widget.window()
-    window.show()
-    window.activateWindow()
-    app.settle()
-    try:
-        yield
-    finally:
-        standIn = QWidget()
-        standIn.show()
-        standIn.activateWindow()
-        app.settle()
-        window.hide()
-        standIn.hide()
-        standIn.deleteLater()
-        QCoreApplication.sendPostedEvents(standIn, QEvent.Type.DeferredDelete)
-        app.settle()
-
-
-def _focus(widget, app):
-    widget.setFocus()
-    app.settle()
-    assert widget.isVisible() and widget.hasFocus(), \
-        "the harness could not focus the field"
-
-
-def test_an_import_wins_over_typing_in_its_field(bracket, countries, panel):
-    """The operator is typing in slot 1's name when an import writes it:
-    the field is left alone while they are in it, finishing it does not
-    write the typing over the import, and the field shows the import once
-    left (HeldBackText)."""
-    from qtpy.QtTest import QTest
-    from src.core import Top8Service
-    edit = panel.playerInputs["1"]["name"]
-    other = panel.playerInputs["2"]["sponsor"]
-    _useProvider("no game loaded")
-
-    with _onScreen(panel, bracket):
-        _focus(edit, bracket)
-        QTest.keyClicks(edit, "x")
-        assert Top8Service.RefreshFromProvider() == Top8Service.STARTED
-        _drain(bracket)
-        imported = _state().Get("top8.players.1.name")
-        assert imported not in ("Old 1", "Old 1x")
-        assert edit.text() == "Old 1x", "the field being edited was redrawn"
-
-        with WriteRecorder() as recorder:
-            _focus(other, bracket)
-        assert recorder.sets == []
-        assert edit.text() == imported
-
-
-def test_typing_survives_a_render_of_other_fields(bracket, panel):
-    from qtpy.QtTest import QTest
-    from src.core import Top8Service
-    edit = panel.playerInputs["1"]["name"]
-    other = panel.playerInputs["2"]["sponsor"]
-
-    with _onScreen(panel, bracket):
-        _focus(edit, bracket)
-        QTest.keyClicks(edit, "y")
-        Top8Service.SetPlayerText("4", "name", "Elsewhere")
-        bracket.settle()
-        assert panel.playerInputs["4"]["name"].text() == "Elsewhere"
-        with WriteRecorder() as recorder:
-            _focus(other, bracket)
-        assert recorder.sets == [["top8.players.1.name", '"Old 1y"']]
 
 
 # ── a game switch empties the characters, in either shell ────────────────
@@ -1140,34 +801,3 @@ def test_a_game_switch_empties_the_characters(bracket, goldenGames, shell):
     assert len(cycles) == 1
     assert ["game", "codename"] in [row["path"][:2] for row in cycles[0]]
     assert _state().Get("top8.players.3.name") == "Old 3"
-
-
-def test_the_panel_shows_the_emptied_characters(bracket, goldenGames):
-    """A panel open across the switch: it shows the state (no character,
-    no skins) and writes nothing of its own -- the emptying is core's."""
-    from qtpy.QtCore import Qt
-    from src.core.GameAssetCatalog import GameAssetCatalog
-    load = _loader("desktop", goldenGames)
-    GameAssetCatalog.instance.ResetGameState()
-    _reset(bracket)
-    load("tgame")
-    panel = _buildPanel(bracket)
-    try:
-        w = panel.playerInputs["5"]
-        row = next(row for row in range(w["char"].count())
-                   if (w["char"].itemData(row, Qt.ItemDataRole.UserRole)
-                       or {}).get("en_name"))
-        w["char"].setCurrentIndex(row)
-        bracket.settle()
-        assert _top8Characters().keys() == {"5"}
-
-        with WriteRecorder() as recorder:
-            load("game2")
-            bracket.settle()
-        assert [key for key, _ in recorder.sets if key.startswith("top8")] \
-            == ["top8.players.5.characters"]
-        assert _top8Characters() == {}
-        assert w["char"].currentIndex() == -1
-        assert w["color"].count() == 0
-    finally:
-        _dropPanel(bracket, panel)

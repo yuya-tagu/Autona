@@ -183,14 +183,15 @@ React の [web/src/EventPage/](../../web/src/EventPage/)（`/web/event`、デス
 
 ## 9. ブラケット表示（TOP 8）
 
-[src/AutonaTop8Widget.py](../../src/AutonaTop8Widget.py)・[src/core/Top8Model.py](../../src/core/Top8Model.py)・[layout/bracket_top8/](../../layout/bracket_top8/)。
+React の [web/src/Top8Page/](../../web/src/Top8Page/)（`/web/top8`、デスクトップでは共有ビューに表示。ADR-005 S4i で Qt 版から移行）・[src/core/Top8Model.py](../../src/core/Top8Model.py)・[layout/bracket_top8/](../../layout/bracket_top8/)。ブラウザ（LAN の別の PC・ヘッドレス）からも同じページで操作できる。処理の実体は core の [src/core/Top8Service.py](../../src/core/Top8Service.py) で、ページは `/api/v1`（`top8*`・`bracket:refresh`・`colors/top8`・`layouts/selected/top8`）を呼んで state を描くだけ。
 
 - FGC 標準の **TOP 8 固定ダブルエリミネーションブラケット**（Winners スタート 4 名 + Losers スタート 4 名、全 11 試合: WSF×2 / WF / LR1×2 / LQF×2 / LSF / LF / GF / GF リセット）
-- **選手カード（8 スロット固定）** — 名前 / スポンサー / 国 / 使用キャラ・カラーを編集。対戦カードの変更は選手の入れ替えで行う
-- **試合スコア表** — 各試合のスコアを入力し Apply で反映。勝者は自動で後続の試合に伝播、GF リセットは成立時のみ有効化。全リセットボタン付き
+- **選手カード（8 スロット固定）** — 名前 / 所属タグ（打っている間も送る）/ 国（カスタム国旗を含む。国旗つき）/ 使用キャラ・カラー（アイコンつき。一覧は読み込み中のゲームのもの）を編集。対戦カードの変更は選手の入れ替えで行う
+- **試合スコア表** — 各試合のスコアを入力し「反映」で反映（入力した試合だけを送る。それまでは画面の中だけで、ほかの端末の更新・取り込みで試合が変わると入力は捨てる）。勝者は自動で後続の試合に伝播、GF リセットは成立時のみ有効化。全リセットボタン付き（確認つき）
 - **Start.gg 自動読込** — 大会のダブルエリミネーション最終フェーズを自動で対象にし、最終 8 名と各試合のスコアを取り込み（Ctrl+Shift+P ホットキーでも更新可）
 - **表示ラベル**（オーバーレイに出すフェーズ名）の編集
-- **ライブプレビュー** — `layout/bracket_top8/` オーバーレイの埋め込みプレビュー（再読み込みボタン付き）
+- **デザイン選択とライブプレビュー** — `top8` 種別のデザイン（`layout/bracket_top8*/` ほか）の選択と、オーバーレイの埋め込みプレビュー（プレビューの画像コピー / 保存は Web 版で廃止）
+- **機能別カラー**（テーマ / アクセント、大会カラーに合わせる）
 - **OBS 追加案内** — ブラウザソース URL の表示・コピー。選手・スコアの編集は WebSocket（Socket.IO）で OBS 上のブラケットにリアルタイム反映
 
 ---

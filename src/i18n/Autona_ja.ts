@@ -898,16 +898,8 @@
 </context><context>
     <name>app</name>
     <message>
-        <source>Top 8</source>
-        <translation>Top 8</translation>
-    </message>
-    <message>
         <source>Top 8 Display Settings</source>
         <translation>TOP8表示設定</translation>
-    </message>
-    <message>
-        <source>Apply</source>
-        <translation>反映</translation>
     </message>
     <message>
         <source>Help &amp; Settings</source>

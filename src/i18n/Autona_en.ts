@@ -897,16 +897,8 @@
 </context><context>
     <name>app</name>
     <message>
-        <source>Top 8</source>
-        <translation>Top 8</translation>
-    </message>
-    <message>
         <source>Top 8 Display Settings</source>
         <translation>Top 8 Display Settings</translation>
-    </message>
-    <message>
-        <source>Apply</source>
-        <translation>Apply</translation>
     </message>
     <message>
         <source>Help &amp; Settings</source>

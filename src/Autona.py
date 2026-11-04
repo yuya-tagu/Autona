@@ -184,7 +184,6 @@ from .AutonaGameAssetGuideWindow import AutonaGameAssetGuideWindow
 from .LayoutOptions.AutonaLayoutOptionsWindow import AutonaLayoutOptionsWindow
 from .AutonaHotkeys import AutonaHotkeys
 from .AutonaGameAssetManager import AutonaGameAssetManager
-from .AutonaTop8Widget import AutonaTop8Widget
 from .AutonaBoardWidget import AutonaBoardWidget
 from .core.ColorService import SeedColorState
 from .AutonaSidebar import AutonaSidebar
@@ -236,7 +235,8 @@ class Window(QMainWindow):
     # selected index and collapsed state are persisted instead.
     # v14: Statistics nav item moved to the bottom of the sidebar order.
     # v15: Result Settings and Commentary swapped in the sidebar order.
-    # v16: Bracket panel replaced by the Top 8 panel (AutonaTop8Widget).
+    # v16: Bracket panel replaced by the Top 8 panel (AutonaTop8Widget; a
+    #      React page since ADR-005 S4i, in the same place: no bump).
     # v17: Player List panel (AutonaPlayerBrowserWidget) added below Statistics.
     # v18: Stream Settings panel inserted after Tournament Info; the stream
     #      destination / title / thumbnail moved into it from the Tournament
@@ -357,8 +357,9 @@ class Window(QMainWindow):
         # Only the Scoreboard is built here. Every other panel is constructed
         # the first time its page is revealed (see the _Create*Panel
         # factories and _EnsurePanelAt): the preview panels
-        # (Board / Top 8 / Stats Display) each own a
-        # QWebEngineView, and the remaining five (Stream / Thumbnail / Result
+        # (Board / Stats Display) each own a QWebEngineView (Top 8 did
+        # too until it became a React page, ADR-005 S4i), and the remaining
+        # five (Stream / Thumbnail / Result
         # / Statistics / Player List) together added ~2.9s to the window-init
         # -> core-shown gap for UI most launches never open.
         self.dockWidgets = []
@@ -843,7 +844,7 @@ class Window(QMainWindow):
         AutonaHotkeys.instance.UiMounted(self)
         # NOTE: Ctrl+Shift+P (refresh_phase_group) is routed to the core Top 8
         # import by AutonaHotkeys.ConnectActions() (bootstrap_gui(), ADR-005
-        # S3e-8); it no longer builds the Top 8 panel.
+        # S3e-8); the Top 8 page (React since S4i) renders what it wrote.
         # NOTE: AutonaPlayerDB.signals.db_updated -> webserver.ws_playerdb is
         # wired in _StartWebServer(); there is no server to push to yet here.
         PlayerDB.instance.LoadDB()
@@ -942,8 +943,8 @@ class Window(QMainWindow):
         wire_web_server(self.webserver, self.signals.GameChanged)
 
         # Release the embedded views that fetch their pages from this server
-        # (the overlay previews of Board / Top 8 / Stats, and
-        # the React panel host): a panel restored as the startup page issues
+        # (the overlay previews of Board / Stats, and the React panel host,
+        # which shows the Top 8 page): a panel restored as the startup page issues
         # its first load() before this point -- the React panel host does
         # not even build its view before it, and builds it from the event
         # loop after this returns (ADR-005 S4g review M4).
@@ -1004,12 +1005,8 @@ class Window(QMainWindow):
         return board
 
     def _CreateTop8Panel(self):
-        top8Panel = AutonaTop8Widget()
-        top8Panel.setWindowIcon(QIcon(UI.icon_path('bracket.svg')))
-        top8Panel.setObjectName("Top8")
-        top8Panel.setWindowTitle(
-            QApplication.translate("app", "Top 8 Display Settings"))
-        return top8Panel
+        # ADR-005 S4i: the React page in the shared web view.
+        return self._WebPanel("top8")
 
     def _CreateCommentaryPanel(self):
         # ADR-005 S4b/S4c: the React page in the shared web view.
