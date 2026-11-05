@@ -205,7 +205,6 @@ from .core.TaskExecutor import TaskExecutor
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaStatusManager import AutonaStatusManager
 from .AutonaScoreboardManager import AutonaScoreboardManager
-from .AutonaPlayerBrowserWidget import AutonaPlayerBrowserWidget
 from src.AutonaWebServer import WebServer, check_webserver_port
 from .AutonaWebPageLifecycle import MarkWebServerReady
 from .AutonaWebPanelHost import AutonaWebPanelHost, WebPanelPages
@@ -239,7 +238,8 @@ class Window(QMainWindow):
     # v15: Result Settings and Commentary swapped in the sidebar order.
     # v16: Bracket panel replaced by the Top 8 panel (AutonaTop8Widget; a
     #      React page since ADR-005 S4i, in the same place: no bump).
-    # v17: Player List panel (AutonaPlayerBrowserWidget) added below Statistics.
+    # v17: Player List panel added below Statistics. (A React page since
+    #      ADR-005 S4n, in the same place: no bump.)
     # v18: Stream Settings panel inserted after Tournament Info; the stream
     #      destination / title / thumbnail moved into it from the Tournament
     #      Info and Scoreboard panels. (A React page since ADR-005 S4e, in
@@ -421,7 +421,7 @@ class Window(QMainWindow):
         self._shuttingDown = False
         splash.set_message(splash_msgs[1], progress=0.70)
 
-        # STATISTICS (a React page since ADR-005 S4k) and PLAYER LIST are
+        # STATISTICS and PLAYER LIST (React pages since ADR-005 S4k / S4n) are
         # lazy too: see _CreateStatsPanel / _CreatePlayerBrowserPanel.
 
         splash.set_message(splash_msgs[1], progress=0.85)
@@ -479,10 +479,6 @@ class Window(QMainWindow):
             (QApplication.translate("app", "Data"), [
                 (self._CreateStatsPanel, 'stats.svg',
                  QApplication.translate("app", "Statistics"), "stats"),
-                # The only panel whose title is set by the widget itself, so
-                # the label cannot be read back off the instance while the
-                # panel is still unbuilt. Spelled out here with the exact
-                # same source string AutonaPlayerBrowserWidget.__init__ uses.
                 (self._CreatePlayerBrowserPanel, 'players.svg',
                  QApplication.translate("app", "Player List"),
                  "playerBrowser"),
@@ -1064,13 +1060,8 @@ class Window(QMainWindow):
         return self._WebPanel("stats")
 
     def _CreatePlayerBrowserPanel(self):
-        # Sets its own windowTitle (translate("app", "Player List")); the nav
-        # label in _navSections repeats that source string because the panel
-        # does not exist when the sidebar is built.
-        playerBrowser = AutonaPlayerBrowserWidget()
-        playerBrowser.setWindowIcon(QIcon(UI.icon_path('players.svg')))
-        playerBrowser.setObjectName("Players")
-        return playerBrowser
+        # ADR-005 S4n: the React page in the shared web view.
+        return self._WebPanel("playerBrowser")
 
     def _WebPanel(self, panel):
         """The shared web view (AutonaWebPanelHost), built as the stack page

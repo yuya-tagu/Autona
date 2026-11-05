@@ -320,8 +320,7 @@ class DesktopBoardHost(BoardHost):
 
     def PlayerLoaded(self, board, team, player, cleared):
         # After a load that cleared, the slot's card drops the text typed
-        # into its combos -- what the board does around its own loads
-        # (AutonaScoreboardWidget._ApplyPlayer).
+        # into its combos (AutonaScoreboardWidget._CardLoaded).
         self._Board(board).PlayerLoaded(team, player, cleared)
 
 

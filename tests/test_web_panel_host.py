@@ -570,6 +570,10 @@ def test_a_refused_load_is_retried_then_given_up(qapp, monkeypatch,
                                    else realGet(key, default)))
     view = QWebEngineView()
     try:
+        # Shown, or this measures how Chromium treats a hidden page instead of
+        # the retries: with every core busy (a full run beside a build) these
+        # three loads took about 5 minutes hidden, and about 5 s shown.
+        view.show()
         loader = WPL.LocalPageLoader(view, view)
         attempts, finished = [], []
         view.loadFinished.connect(attempts.append)
@@ -792,6 +796,26 @@ def test_the_stats_preview_item_opens_the_react_page():
     assert "statsPreview" in WebAccess.WEB_PANELS
 
 
+def test_the_player_list_item_opens_the_react_page():
+    import ast
+    calls = _calls(_windowMethod("_CreatePlayerBrowserPanel"))
+
+    # The React page is the only Player List (ADR-005 S4n).
+    assert calls == [("self._WebPanel", ["'playerBrowser'"])]
+
+    # Still the lazy factory in Data, keyed by the React panel's name, with
+    # its icon and label.
+    build = _windowMethod("_BuildUi")
+    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
+               and node.elts
+               and ast.unparse(node.elts[0]) == "self._CreatePlayerBrowserPanel"]
+    assert len(entries) == 1
+    assert ast.unparse(entries[0].elts[1]) == "'players.svg'"
+    assert "Player List" in ast.unparse(entries[0].elts[2])
+    assert ast.unparse(entries[0].elts[-1]) == "'playerBrowser'"
+    assert "playerBrowser" in WebAccess.WEB_PANELS
+
+
 def test_the_restored_page_is_built_before_the_window_is_shown():
     """STARTUP phase=core-shown is logged right after self.show(), with the
     restored page built before it (_EnsurePanelAt). For the Event page --
@@ -837,8 +861,8 @@ def test_the_sidebar_items_are_the_ones_they_were():
     """The nav items' number and order (and so the saved sidebar index,
     QSettings sidebarIndex_v<STATE_VERSION>) did not change for the React
     panels (Stream S4e, Event S4g -- its key is the React page's name now
-    --, Top 8 S4i and Statistics S4k): no STATE_VERSION bump (ADR-005 S4
-    方針 5, S4 Event 論点 1)."""
+    --, Top 8 S4i, Statistics S4k and the Player List S4n): no STATE_VERSION
+    bump (ADR-005 S4 方針 5, S4 Event 論点 1)."""
     import ast
     build = _windowMethod("_BuildUi")
     keys = [ast.unparse(node.elts[-1]) for node in ast.walk(build)
@@ -1002,6 +1026,41 @@ def test_the_qt_stats_panel_is_gone():
         assert left == [], name
 
 
+def test_the_qt_player_list_is_gone():
+    # ADR-005 S4n: the React page is the only Player List. The widget may not
+    # come back in src/: no import, no construction (comments recording where
+    # code came from still name it), and none of the translations only it and
+    # the card's editor mode used. The player card has no editor mode left.
+    from tests.conftest import PROJECT_ROOT
+
+    src = PROJECT_ROOT / "src"
+    name = "AutonaPlayerBrowserWidget"
+    assert not (src / f"{name}.py").exists()
+    left = [str(path.relative_to(PROJECT_ROOT))
+            for pattern in ("*.py", "*.ui", "*.ts")
+            for path in src.rglob(pattern)
+            if any(word in path.read_text(encoding="utf-8")
+                   for word in (f"import {name}", f"{name}(",
+                                f"{name}.instance", f"{name}.py"))]
+    assert left == []
+
+    for path in (src / "i18n").glob("*.ts"):
+        text = path.read_text(encoding="utf-8")
+        back = [source for source in (
+                    "Tournament Entrants", "Registered Players", "Set as P1",
+                    "Set as P2", "Search players", "Add new player",
+                    "Edit player", "Delete selected player",
+                    "Save new player", "Update player", "Delete player entry")
+                if f"<source>{source}</source>" in text]
+        assert back == [], path.name
+
+    card = (src / "AutonaScoreboardPlayerWidget.py").read_text(encoding="utf-8")
+    for word in ("save_bt", "delete_bt", "SetCharactersPerPlayer",
+                 "ManageSavePlayerToDBText", "ManageDeletePlayerFromDBActive",
+                 "DeletePlayerFromDB", 'path.startswith("score.")'):
+        assert word not in card, word
+
+
 def test_the_qt_stats_preview_panel_is_gone():
     # ADR-005 S4l: the React page is the only Stats Display Settings panel.
     # The widget may not come back in src/: no import, no construction
@@ -1065,14 +1124,14 @@ def test_the_host_page_shows_its_own_panel_before_any_choice():
 
 def test_only_react_panels_are_mapped():
     with pytest.raises(ValueError):
-        WebPanelPages().Add(1, "playerBrowser")
+        WebPanelPages().Add(1, "result")
 
 
 class _WindowRig:
     """The Window's real page-switching methods (read out of src/Autona.py,
     which cannot be imported: agent-pitfalls #1) on a stack built the way
     _BuildUi builds it, with a few sidebar items: five React ones and two
-    Qt ones (the eager scoreboard, the lazy Player List -- the lazy Top 8
+    Qt ones (the eager scoreboard, the lazy Result Settings -- the lazy Top 8
     until it became a React page, ADR-005 S4i, then the lazy Statistics
     until S4k), in the real order (Qt items between them). Off screen, so the host builds no view; what
     it was asked to show is its _panel."""
@@ -1120,15 +1179,16 @@ class _WindowRig:
         w._webPanelHost = None
         w._webPanelPages = WebPanelPages()
         w._buildingPanel = False
-        # As _BuildUi: event, stream, scoreboard (eager), ..., top8,
-        # commentary, ..., stats, playerBrowser.
+        # As _BuildUi: event, stream, scoreboard (eager), ..., result, top8,
+        # commentary, ..., stats. (Result is after the scoreboard in the
+        # sidebar; last here so the indexes below stay one per kind of item.)
         for page, key in ((w._CreateEventPanel, "event"),
                           (w._CreateStreamPanel, "stream"),
                           (QLabel("scoreboard"), None),
                           (w._CreateTop8Panel, "top8"),
                           (w._CreateCommentaryPanel, "commentary"),
                           (w._CreateStatsPanel, "stats"),
-                          (qtPanel("playerBrowser"), "playerBrowser")):
+                          (qtPanel("result"), "result")):
             if callable(page):
                 index = w.stack.addWidget(QWidget())
                 w._lazyPanels[index] = (page, key)
@@ -1152,7 +1212,7 @@ class _WindowRig:
                               AutonaWebPanelHost)]
 
 
-EVENT, STREAM, SCOREBOARD, TOP8, COMMENTARY, STATS, PLAYER_BROWSER = range(7)
+EVENT, STREAM, SCOREBOARD, TOP8, COMMENTARY, STATS, RESULT = range(7)
 
 
 def test_every_react_item_shows_the_one_host(qapp):
@@ -1199,8 +1259,8 @@ def test_every_react_item_shows_the_one_host(qapp):
     assert host._panel == "stats"
     assert w.stack.widget(STATS) is rig.placeholders[STATS]
     # The Qt items were built as before, the eager one never.
-    assert rig.choose(PLAYER_BROWSER) == PLAYER_BROWSER
-    assert rig.built == ["playerBrowser"]
+    assert rig.choose(RESULT) == RESULT
+    assert rig.built == ["result"]
     assert w.dockWidgets == []
 
 

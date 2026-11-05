@@ -213,16 +213,23 @@ def test_the_losers_flag_is_appended_to_the_merged_name(autonaApp):
 
 # ── character slots ──────────────────────────────────────────────────────
 
+def _setCharacters(number):
+    """Board 1's slots at `number` character slots: the count is the state's
+    (AutonaActions.SetRoster, ADR-005 S3e-6), and the cards' rows follow."""
+    from src.core.Actions import AutonaActions
+    assert AutonaActions.instance.SetRoster(1, characters=number) is True
+
+
 def test_character_slots_follow_the_requested_count(autonaApp):
     player = _player(autonaApp)
 
-    player.SetCharactersPerPlayer(3)
+    _setCharacters(3)
     autonaApp.settle()
     assert sorted(_characters(autonaApp, player)) == [1, 2, 3]
 
     # Shrinking has to remove the published slots too, not just the combos:
     # a stale score.N...character.3 keeps a third character on the overlay.
-    player.SetCharactersPerPlayer(1)
+    _setCharacters(1)
     autonaApp.settle()
     assert sorted(_characters(autonaApp, player)) == [1]
 
@@ -235,7 +242,7 @@ def test_the_slot_count_change_republishes_mains(autonaApp):
     """
     player = _player(autonaApp)
 
-    player.SetCharactersPerPlayer(2)
+    _setCharacters(2)
     autonaApp.settle()
 
     assert sorted(autonaApp.get(f"{player.path}.mains") or {}) == [1, 2]
@@ -243,7 +250,7 @@ def test_the_slot_count_change_republishes_mains(autonaApp):
 
 def test_mains_for_the_selected_game_fill_their_own_slots(autonaApp):
     player = _player(autonaApp)
-    player.SetCharactersPerPlayer(3)
+    _setCharacters(3)
     autonaApp.settle()
 
     player.SetData({
@@ -265,7 +272,7 @@ def test_mains_for_the_selected_game_fill_their_own_slots(autonaApp):
 def test_mains_from_another_game_are_ignored(autonaApp):
     """mains is keyed by game codename; a different game's entry is not ours."""
     player = _player(autonaApp)
-    player.SetCharactersPerPlayer(2)
+    _setCharacters(2)
     autonaApp.settle()
 
     player.SetData({"gamerTag": "TAG", "mains": {"some_other_game": [["Mario", 0]]}},
@@ -287,7 +294,7 @@ def test_a_legacy_single_character_main_only_fills_the_first_slot(autonaApp):
     only the fixed implementation is left to assert against.)
     """
     player = _player(autonaApp)
-    player.SetCharactersPerPlayer(3)
+    _setCharacters(3)
     autonaApp.settle()
 
     player.SetData({"gamerTag": "TAG", "mains": ["Mario", 1]},
@@ -303,7 +310,7 @@ def test_a_legacy_single_character_main_only_fills_the_first_slot(autonaApp):
 def test_loading_a_player_without_mains_clears_the_previous_characters(
         autonaApp):
     player = _player(autonaApp)
-    player.SetCharactersPerPlayer(2)
+    _setCharacters(2)
     autonaApp.settle()
 
     player.SetData({"gamerTag": "FIRST",
@@ -359,23 +366,6 @@ def test_a_slot_hands_over_identifiers_and_a_name_to_fall_back_on(autonaApp):
     variant.setCurrentIndex(0)
     assert AutonaBasePlayerWidget._CharacterSlot(character, color, variant) \
         == CharacterSlot(None, 1, None, "Typed Name")
-
-
-def test_swapping_two_character_slots_exchanges_the_published_names(
-        autonaApp):
-    player = _player(autonaApp)
-    player.SetCharactersPerPlayer(2)
-    autonaApp.settle()
-
-    player.SetData({"gamerTag": "TAG",
-                    "mains": {"harness_game": [["Mario", 0], ["Luigi", 0]]}},
-                   dontLoadFromDB=True)
-    autonaApp.settle()
-
-    player.SwapCharacters(0, 1)
-    autonaApp.settle()
-
-    assert _names(autonaApp, player) == {1: "Luigi", 2: "Mario"}
 
 
 # ── swapping two players ─────────────────────────────────────────────────
@@ -920,19 +910,19 @@ def test_a_rebuild_publishes_the_state_exactly_once(autonaApp):
     assert duringLoad[-1].get("original_code") == "13"
 
 
-# ── the paths a player widget is built on (agent-pitfalls #7) ────────────
+# ── the path a player widget is built on (agent-pitfalls #7) ─────────────
 #
 # `self.path` is a constructor argument, and everything the widget publishes
 # hangs off it -- so "which path shapes exist" is the premise of every
-# assertion above. agent-pitfalls #7 lists three; two of those callers are
-# gone (the commentary panel builds its own cards, and the roster editor that
-# used `{base}.slot.{I}.player.{M}` was retired), which the first test below
-# is what keeps honest. The second drives the surviving non-board shape.
+# assertion above. There were more callers once: the commentary panel built
+# its own cards, the roster editor used `{base}.slot.{I}.player.{M}`, and the
+# Qt Player List's editor used `player_editor.1` (gone with it, ADR-005 S4n).
+# This test is what keeps that honest.
 
-def test_the_player_widget_is_only_built_on_two_kinds_of_path():
+def test_the_player_widget_is_only_built_on_a_board_slot():
     """Enumerate the construction sites rather than trust the pitfall note.
 
-    A third shape appearing here is not a bug by itself -- it is the signal
+    A second shape appearing here is not a bug by itself -- it is the signal
     that PlayerService.BoardNumber(), the details dialog's 反映 button and
     the leak tests above all need revisiting for it.
     """
@@ -952,57 +942,12 @@ def test_the_player_widget_is_only_built_on_two_kinds_of_path():
                 sites.append((source.name, ast.dump(path) if path else None))
 
     files = sorted({name for name, _ in sites})
-    assert files == [
-        "AutonaPlayerBrowserWidget.py", "AutonaScoreboardWidget.py"], (
+    assert files == ["AutonaScoreboardWidget.py"], (
         f"a player widget is now built somewhere new: {files}")
     # The board builds its cards in one place (one per slot of the state's
     # roster, either team: _AddCard, ADR-005 S3e-6; it was a site per team)
-    # from an f-string keyed by board/team/index; the browser passes the
-    # module-level editor constant.
-    assert len(sites) == 2, f"construction sites changed: {sites}"
-    board = next(path for name, path in sites
-                 if name == "AutonaScoreboardWidget.py")
+    # from an f-string keyed by board/team/index.
+    assert len(sites) == 1, f"construction sites changed: {sites}"
+    board = sites[0][1]
     assert ("statePrefix" in board and "'.team.'" in board
             and "'.player.'" in board), board
-
-
-def test_the_editor_path_publishes_outside_every_board(autonaApp):
-    """The PLAYERS panel's editor is the same widget on a scratch subtree.
-
-    Its keys must land under `player_editor.1` and nowhere else: publishing
-    an operator's draft onto a live scoreboard is the failure this path shape
-    exists to avoid. Built directly rather than through the panel, which
-    needs a Window.
-    """
-    from qtpy.QtCore import QCoreApplication, QEvent
-
-    from src.AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
-    from src.core import StateSchema as schema
-
-    board = autonaApp.board(1)
-    board.team1playerWidgets[0].SetData({"gamerTag": "LIVE"},
-                                        dontLoadFromDB=True)
-    autonaApp.settle()
-
-    editorPath = f"{schema.PLAYER_EDITOR_ROOT}.1"
-    editor = AutonaScoreboardPlayerWidget(index=1, teamNumber=1,
-                                          path=editorPath)
-    try:
-        editor.SetData({"gamerTag": "DRAFT", "prefix": "SCRATCH"},
-                       dontLoadFromDB=True)
-        autonaApp.settle()
-
-        assert autonaApp.get(f"{editorPath}.name") == "DRAFT"
-        assert autonaApp.get(f"{editorPath}.mergedName") == "SCRATCH | DRAFT"
-        # ...and the live board is untouched.
-        assert autonaApp.get("score.1.team.1.player.1.name") == "LIVE"
-    finally:
-        editor.setParent(None)
-        editor.deleteLater()
-        # Actually reap it: pytest never runs an event loop, so a deferred
-        # deletion would sit in the queue for the rest of the session with
-        # its connections to the process-wide singletons intact (see
-        # conftest._dropBoard).
-        QCoreApplication.sendPostedEvents(editor, QEvent.Type.DeferredDelete)
-        StateManager.Unset(schema.PLAYER_EDITOR_ROOT)
-        autonaApp.settle()

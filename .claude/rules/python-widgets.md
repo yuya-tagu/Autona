@@ -25,13 +25,11 @@ Qt binding は **PySide6（qtpy 経由、LGPL）** 固定。PyQt6 (GPL) は MIT 
 
 1. import を追加
 2. インスタンス生成・`setObjectName` / `setWindowTitle` 設定
-3. `self.dockWidgets` リストに追加（後処理ループでタイトルバー非表示等を一括適用）
-4. `self._navSections` に `(panel, 'icon.svg')` を表示順で追加
 3. `self.dockWidgets` リストに追加（`_PreparePanel` でタイトルバー非表示等を一括適用）
 4. `self._navSections` の該当カテゴリに
    `(panel, 'icon.svg', ナビラベル, None)` を表示順で追加
    （`assets/icons/` のアイコン。`stack.addWidget` とナビ項目生成に使われる）
-   - 構造はカテゴリ付き: `[(カテゴリ見出し or None, [(パネル, アイコン名), ...]), ...]`
+   - 構造はカテゴリ付き: `[(カテゴリ見出し or None, [(パネルまたはファクトリ, アイコン名, ナビラベル, キー or None), ...]), ...]`
      （見出しは `QApplication.translate("app", ...)`。`None` なら見出しなしで並ぶ）
    - 既存カテゴリ（Setup / ScoreboardCategory / Display / Data）に追加する場合は、
      該当セクションのパネルリストに表示順でタプルを挿入するだけでよい
@@ -110,8 +108,8 @@ publish する。ヘッドレスは同じものを core の `PlayerService.SeedE
     `PlayerService.ApplyData`（DB とのマージ・悪語フィルタ・国 / 地域 / キャラの解決は core）を
     呼んで描画するだけで、コンボの行を探して選ぶ・`editingFinished` を emit して
     ハンドラに書かせる、という「フォームに入力して書かせる」読込を書かない
-    （`tests/test_player_apply.py` が AST で pin）。カード自身の操作（補完の選択・クリア・
-    エディタの読込）の後は、入力中の欄も含めて描画する（`_RenderSlot(over=True)`）
+    （`tests/test_player_apply.py` が AST で pin）。カード自身の操作（補完の選択・クリア）の後は、
+    入力中の欄も含めて描画する（`_RenderSlot(over=True)`）
   - Top 8 は ADR-005 S4h から識別子で渡す（国は code、キャラは en_name + カラーの行。
     値は `Top8Service` が選手カードと同じ組み立てで作り、state → 選択の逆引きは `Top8Service.CharacterPick`）。
     パネルは S4i で React のページ（`/web/top8`）になり、Qt 版は削除済み（ページの逆引きは同じ表で検査する

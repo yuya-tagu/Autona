@@ -52,14 +52,13 @@ STRIPPED_ROWS = ("horizontalLayout", "identityRow", "locationRow")
 FORBIDDEN_CALLS = {"deleteLater", "setParent", "itemAt", "takeAt"}
 
 # Handing out a wrapper for a QLayoutItem is only safe where the item is not
-# going to be destroyed behind PySide's back. In this widget that is exactly
-# the PlayerDB-editor path: the scoreboard card re-homes its fields into the
-# details dialog and strips the emptied rows, destroying the items.
+# going to be destroyed behind PySide's back. In this widget it always is: the
+# card re-homes its fields into the details dialog and strips the emptied rows,
+# destroying the items.
 ITEM_WRAPPING_CALLS = {"itemAt", "takeAt", "spacerItem"}
-EDITOR_ONLY_GUARD = "path.startswith('score.')"
 
-# The one function allowed to walk items on the scoreboard path: it hands the
-# wrapper straight to Shiboken.invalidate(), so nothing is left registered.
+# The one function allowed to walk items: it hands the wrapper straight to
+# Shiboken.invalidate(), so nothing is left registered.
 RELEASE_HELPER = "_releaseLayoutItemWrappers"
 
 
@@ -119,24 +118,6 @@ def test_the_stripped_rows_are_freed_by_pyside_not_by_qt(autonaApp):
             "time a QObject lands on one of those addresses.")
 
 
-def _editorOnlyLineRanges(tree):
-    """Line spans of the `if not self.path.startswith("score.")` branches."""
-    spans = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.If):
-            continue
-        try:
-            test = ast.unparse(node.test)
-        except Exception:
-            continue
-        if EDITOR_ONLY_GUARD not in test:
-            continue
-        last = max((getattr(n, "lineno", node.lineno) for n in ast.walk(node)),
-                   default=node.lineno)
-        spans.append((node.lineno, last))
-    return spans
-
-
 def test_layout_items_are_only_wrapped_where_nothing_destroys_them():
     """itemAt()/spacerItem() hand out a wrapper PySide6 keeps but cannot track.
 
@@ -147,28 +128,22 @@ def test_layout_items_are_only_wrapped_where_nothing_destroys_them():
     field into the details dialog (which deletes the QWidgetItem that held it)
     and strips the emptied rows.
 
-    Two places are allowed. The PlayerDB editor path keeps its rows intact, so
-    wrapping items there is safe. And _releaseLayoutItemWrappers() has to walk
-    them precisely so it can invalidate the wrappers before Qt frees the
-    items -- it hands each one to Shiboken.invalidate() and never returns it.
+    One place is allowed: _releaseLayoutItemWrappers() has to walk them
+    precisely so it can invalidate the wrappers before Qt frees the items --
+    it hands each one to Shiboken.invalidate() and never returns it.
     """
     source = PLAYER_WIDGET.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(PLAYER_WIDGET))
-    allowed = _editorOnlyLineRanges(tree)
     release = [node for node in ast.walk(tree)
                if isinstance(node, ast.FunctionDef) and node.name == RELEASE_HELPER]
     assert release, (
         f"{RELEASE_HELPER}() is gone. _buildCompactDetailsUI frees the "
         "QWidgetItems and QSpacerItems of every row it re-homes or strips, "
         "and something has to clear PySide6's registrations for them first")
-    allowed = allowed + [
+    allowed = [
         (n.lineno, max((getattr(c, "lineno", n.lineno) for c in ast.walk(n)),
                        default=n.lineno))
         for n in release]
-    assert allowed, (
-        "the PlayerDB-editor-only guard around the seed-row spacer walk is "
-        "gone; that walk must not run on the scoreboard card, whose rows are "
-        "stripped a few lines later")
 
     builder = next((n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
                     and n.name == "_buildCompactDetailsUI"), None)
@@ -193,7 +168,7 @@ def test_layout_items_are_only_wrapped_where_nothing_destroys_them():
         offenders.append(f"line {node.lineno}: .{node.func.attr}()")
 
     assert not offenders, (
-        "QLayoutItem wrappers are handed out on the scoreboard path: "
+        "QLayoutItem wrappers are handed out on the player card: "
         + ", ".join(offenders)
         + ". Those items are destroyed by the re-homing in "
           "_buildCompactDetailsUI, PySide6 never learns, and the stale "

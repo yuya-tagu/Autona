@@ -85,40 +85,35 @@ Step 5（第 1〜3 弾、2026-09-01/02）で**全ウィジェット静的化完�
 - `with StateManager.SaveBlock():` を使うのが安全
 - try/finally で囲む既存パターンもあるが、例外時に ReleaseSaving を漏らすリスクがある
 
-## 7. `self.path` の動的構築（2026-09-01 更新: 現存は 2 パターン）
+## 7. 選手カードの `self.path` は `score.{N}.team.{T}.player.{M}` だけ（2026-11-05 ADR-005 S4n で更新）
 
-`AutonaScoreboardPlayerWidget.path` は呼び出し元によって異なる。**現存する構築元は 2 つ**:
+`AutonaScoreboardPlayerWidget.path` の構築元はスコアボード（`AutonaScoreboardWidget._AddCard`）の 1 つだけで、
+形は `score.{N}.team.{T}.player.{M}`。
 
-- スコアボード（`AutonaScoreboardWidget`）: `score.{N}.team.{T}.player.{M}`
-- 選手 DB エディタ（`AutonaPlayerBrowserWidget`）: `player_editor.1`
-
-旧記述の `commentary.{N}` / `{base}.slot.{I}.player.{M}` は**もう存在しない**
-（実況者パネルは React 版のみで選手ウィジェットを持たず、選手リスト（PLAYERS ロスター）は廃止済み）。
+旧記述の `commentary.{N}` / `{base}.slot.{I}.player.{M}` / `player_editor.1` は**もう存在しない**
+（実況者パネルは React 版のみで選手ウィジェットを持たず、選手リスト（PLAYERS ロスター）は廃止済み。
+Qt の選手一覧と、カードを `player_editor.1` に貼って流用した編集ダイアログは S4n で削除。編集の下書きは
+React ページのローカルにあり、state には出ない）。`player_editor` は、古い `state.json` の掃除のために
+`RETIRED_ROOTS` に残っている。
 構築元の数と形は `tests/test_player_widgets.py` の
-`test_the_player_widget_is_only_built_on_two_kinds_of_path` が pin している。
+`test_the_player_widget_is_only_built_on_a_board_slot` が pin している。
 
-- `self.path` を前提としたリファクタでは、**両パターンでの動作を確認する**
-  （エディタ側のキーがボードに漏れると配信中のスコアボードが書き換わる）
+- 別の形のパスを足すなら、`PlayerService.BoardNumber()`・詳細ダイアログの反映ボタン・カードの
+  `_MayWrite`（state にスロットがあること）を見直す。カードは `score.*` 以外を想定していない
 - 書き込みは `self.player`（`src/core/PlayerService.py`、path に束縛された
   1 インスタンス）が唯一の経路。ボード番号が要る処理は `PlayerService.BoardNumber()`
-  を使う（`player_editor` では `None` を返す）
-- **選手の読込・クリア・DB 保存も core**（ADR-005 S3e-3）: カードの `SetData` /
-  `Clear` / `SavePlayerToDB` は `self.player.ApplyData` / `ClearSlot` /
-  `SavePlayerToDB` を呼んで描画するだけ。ボード（`AutonaScoreboardWidget._ApplyPlayer`）は
-  カードの `SetData` を経由せず、カードの `player` を直接呼ぶ。どちらも 1 枚のカードの
-  path に束縛されたサービスなので、エディタの読込・保存は `player_editor.1` しか書かない
-  （`tests/test_player_apply.py` の
-  `test_the_editor_loads_clears_and_saves_without_touching_a_board` が pin）。
-  `SavePlayerToDB` は**ウィジェットではなく state から**組むので、エディタの
-  `player_editor.*` はダイアログを閉じるたびに消す（`_PlayerEditorDialog.done` →
-  `StateSchema.ClearPlayerEditor()`。残すと次の「新規登録」に前の選手の欄が混ざる）
+  を使う（`score.*` 以外のパスには `None` を返す。防御的なパースで、カードからは来ない）
+- **選手の読込・クリアも core**（ADR-005 S3e-3）: カードの `SetData` / `Clear` は
+  `self.player.ApplyData` / `ClearSlot` を呼んで描画するだけ。ボードと Web の操作はカードの
+  `SetData` を経由しない
+- **選手 DB への保存はカードに無い**: Web の `savePlayerToDb` は `PlayerService` の
+  `PrepareSaveToDB` + `SaveRecordToDB`（**ウィジェットではなく state から**組む）、選手一覧ページの
+  保存・削除は `core/PlayerDirectory`（v1 `PUT /players` / `POST /players:delete`。ADR-005 S4m）
 - 統計の依頼は core（ADR-005 S3e-5）: `PlayerService.Announce(SlotChange)` が
   ボードのスロット（`score.*`）でだけ `StatsService.PlayerChanged` を呼ぶ（読込・クリアは
   自分の保存ブロックの中で、カードの手入力は `SetSeed` / `SetPlayerId` の `announce=True`）。
   カードの統計シグナル（`playerId_changed` / `player_seed_changed` ほか）と `AnnounceChange` は
-  削除済み。`SlotChange` は操作の前後の state の
-  （id, seed）の比較（id の通知は旧実装どおり `score.*` の path だけ。エディタの
-  カードの通知は誰も受けていない）
+  削除済み。`SlotChange` は操作の前後の state の（id, seed）の比較
 
 ## 8. Autona.exe はプロジェクト直下
 

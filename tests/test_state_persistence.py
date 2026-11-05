@@ -221,8 +221,9 @@ def test_a_state_that_is_not_a_dict_is_refused():
 def test_the_launch_cleanup_has_nothing_left_to_do_after_the_migration():
     """SeedPanelState() runs the same three steps at every launch.
 
-    They stay there on purpose (player_editor is also written by the current
-    build, and the commentary pass doubles as the fresh-install seed), so a
+    They stay there on purpose (a build before ADR-005 S4n could leave
+    player_editor in a v1 state.json, and the commentary pass doubles as the
+    fresh-install seed), so a
     migrated state goes through both. That is only safe if the second pass
     finds nothing: the commentary is a fixed point of its normaliser and the
     retired roots / stale keys are already gone.

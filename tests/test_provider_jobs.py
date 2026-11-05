@@ -509,8 +509,6 @@ def test_the_entrants_fetch_stops_without_saving_or_announcing(
     monkeypatch.setattr(
         AutonaPlayerDB, "SetTournamentPlayers",
         lambda tags, cancel_event=None: done.append(("tags", cancel_event)))
-    startgg.tshTdp = SimpleNamespace(signals=SimpleNamespace(
-        entrants_updated=SimpleNamespace(emit=lambda: done.append("emit"))))
     popped = []
     pop = AutonaStatusManager.pop
     monkeypatch.setattr(AutonaStatusManager, "pop",
@@ -537,7 +535,7 @@ def test_the_entrants_fetch_stops_without_saving_or_announcing(
         assert pages == [1, 2]
         # The tags go with the fetch's cancel event: the GUI thread drops
         # them if another tournament was loaded by then (test below).
-        assert done == ["save", ("tags", cancel), "announce", "emit"]
+        assert done == ["save", ("tags", cancel), "announce"]
     else:
         assert pages == [1]
         assert done == []
@@ -567,8 +565,6 @@ def _fetchEntrants(startgg, monkeypatch, cancel, done, onTags=lambda: None,
     monkeypatch.setattr(PlayerDB.instance, "NotifyChanged", announce)
     monkeypatch.setattr(AutonaPlayerDB, "SetTournamentPlayers",
                         setTournamentPlayers)
-    startgg.tshTdp = SimpleNamespace(signals=SimpleNamespace(
-        entrants_updated=SimpleNamespace(emit=lambda: done.append("emit"))))
     monkeypatch.setattr(
         type(startgg), "ProcessEntrantData",
         staticmethod(lambda participant, setData=[]: {
@@ -607,7 +603,7 @@ def test_the_entrants_are_core_s_before_the_player_db_is_announced(
 
     _fetchEntrants(startgg, monkeypatch, cancel, done)
 
-    assert done == ["save", "tags", ("entrants", cancel), "announce", "emit"]
+    assert done == ["save", "tags", ("entrants", cancel), "announce"]
     assert entrants == [[1, 2, 999999]]
 
 
@@ -645,7 +641,7 @@ def test_a_fetch_cancelled_past_its_last_check_leaves_the_real_service_alone(
 
     assert [entrant["gamerTag"] for entrant in service.TopEntrants()] == [
         "The next tournament's"]
-    assert done == ["save", "tags", "announce", "emit"]
+    assert done == ["save", "tags", "announce"]
 
 
 def test_with_no_stream_service_the_fetch_still_announces(
@@ -658,7 +654,7 @@ def test_with_no_stream_service_the_fetch_still_announces(
 
     _fetchEntrants(startgg, monkeypatch, threading.Event(), done)
 
-    assert done == ["save", "tags", "announce", "emit"]
+    assert done == ["save", "tags", "announce"]
 
 
 def test_the_parallel_requests_finish_with_the_job_lane_full(

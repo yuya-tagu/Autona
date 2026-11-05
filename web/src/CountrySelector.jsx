@@ -8,21 +8,31 @@ import {useSelector} from "react-redux";
 /**
  * @param {?string} countryCode
  * @param {(val: string)=> any} onChange
+ * @param {?Object} countries the rows to offer, by code, instead of the list
+ *   of assets/data_countries.json. GET /api/v1/countries has the custom flags
+ *   that list does not: a row says its text as `label` and its flag's URL as
+ *   `flag`.
  * @param props
  * @returns {Element}
  */
 export function CountrySelector({
     value,
     onChange,
+    countries: givenCountries,
     ...props
 }) {
-    const countries = useSelector(state => state.autonaCountries.value);
+    const storedCountries = useSelector(state => state.autonaCountries.value);
+    const countries = givenCountries ?? storedCountries;
 
     const country = countries[value];
     const getCountryFlagAsset = (inp) => {
         let c = typeof inp === 'string'
             ? countries[inp]
             : inp;
+
+        if (c.flag) {
+            return c.flag;
+        }
 
         if (!c.code || !c.code.toLowerCase) {
             return null;
@@ -32,6 +42,9 @@ export function CountrySelector({
     };
 
     const countryDisplayName = (/** AutonaCountry */ country) => {
+        if (country?.label) {
+            return country.label;
+        }
         return country?.name ? `${country.name} (${country.code})` : country;
     };
 
@@ -70,7 +83,10 @@ export function CountrySelector({
             if (country?.name) {
                 const flagAsset = getCountryFlagAsset(country);
                 if (flagAsset) {
+                    // slotProps.input replaces InputProps, and without its ref
+                    // the options have no anchor: they would not open.
                     slotProps['input'] = {
+                        ...params.InputProps,
                         startAdornment: <InputAdornment position="start">
                             <img
                                 alt="Country flag"
@@ -95,7 +111,7 @@ export function CountrySelector({
         value={country ?? null}
         options={Object.values(countries)}
         onChange={(ev, val) => onChange(val?.code ?? "")}
-        getOptionLabel={(opt) => (opt?.name ?? "")}
+        getOptionLabel={(opt) => (opt?.label ?? opt?.name ?? "")}
         {...props}
         sx={{
             ...(props.sx ?? {}),

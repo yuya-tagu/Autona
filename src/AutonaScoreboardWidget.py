@@ -26,8 +26,7 @@ from .core import StateSchema as schema
 from .core import WebAccess
 from .core.Actions import AutonaActions
 from .core.PlayerService import (
-    DEFAULT_CHARACTERS_PER_PLAYER, DefaultPlayersPerTeam, PlayerService,
-    SlotChange)
+    DEFAULT_CHARACTERS_PER_PLAYER, DefaultPlayersPerTeam)
 from .core.SetFollowService import SaveRecord, SetFollowService
 from .core.SetLoadService import SetLoadService
 from .core.StatsService import StatsService
@@ -35,7 +34,6 @@ from .core.TournamentInfoService import TournamentInfoService
 from .StateManagerBridge import StateManagerBridge
 from .AutonaTournamentDataProvider import AutonaTournamentDataProvider
 from .AutonaHotkeys import AutonaHotkeys
-from .core.PlayerDB import PlayerDB
 
 from .thumbnail import main_generate_thumbnail as thumbnail
 from .AutonaThumbnailSettingsWidget import *
@@ -711,8 +709,8 @@ class AutonaScoreboardWidget(QWidget):
         # wider than btApply's ("反映"), so without this it silently pins
         # column 0 (the 1P/left card) wide while column 1 (2P/right card)
         # is left free to shrink, breaking the equal-stretch symmetry the
-        # two team columns rely on. Same fix as save_bt/delete_bt/clear_bt
-        # in AutonaScoreboardPlayerWidget.
+        # two team columns rely on. Same fix as clear_bt in
+        # AutonaScoreboardPlayerWidget.
         self.btResetAll.setMinimumWidth(1)
         self.btApply.setMinimumWidth(1)
 
@@ -2399,55 +2397,13 @@ class AutonaScoreboardWidget(QWidget):
         """
         SaveRecord(self.setFollow.ApplySetPayload(data))
 
-    def _PlayerSlotPath(self, team, player):
-        """The path of slot `player` of state team `team` (ints), or None
-        when the state has no such slot. The slots are the state's (ADR-005
-        S3e-6): a set's roster is written in its save block, before the
-        cards that will show it are built."""
-        if team not in (1, 2) or player < 1:
-            return None
-        path = f"{self.statePrefix}.team.{team}.player.{player}"
-        if not isinstance(StateManager.Get(path), dict):
-            return None
-        return path
-
-    def _ApplyPlayer(self, team, slot, data, loadFromDB, clear,
-                     no_mains=False) -> SlotChange:
-        """Load a player into slot `slot` of state team `team`
-        (PlayerService.ApplyData, ADR-005 S3e-3, which also asks for the
-        statistics the change calls for: S3e-5), in one save cycle; the
-        change is returned. The slot is addressed in the state, not through
-        its card (S3e-6): a set's entrants resize the roster in the same
-        save block, and the cards follow from the held cycle after it. The
-        card shows the slot from the held cycle (_SchedulePlayerRender),
-        like any write it did not make: a field the operator is typing in
-        shows the load once they leave it, and the text they were typing is
-        held back (HeldBackText) -- where the card's SetData used to put the
-        new text under the caret.
-
-        A load that clears also discards the text typed into the card's
-        combos and never picked (DiscardTypedText), but for the combo the
-        operator is in: the card's SetData started with its Clear(), which
-        put every combo back on its row, and the render only moves a combo
-        whose row is wrong -- the typed text stayed, and the next pick on
-        the card published it (S3e-3 review). A card not built yet has
-        nothing typed into it.
-        """
-        service = PlayerService(
-            f"{self.statePrefix}.team.{team}.player.{slot}")
-        with StateManager.SaveBlock():
-            try:
-                return service.ApplyData(data, loadFromDB, clear, no_mains)
-            finally:
-                self.PlayerLoaded(team, slot, clear)
-
     def PlayerLoaded(self, team, player, cleared):
-        """A web operation loaded a player into slot `player` of state team
-        `team` (AutonaWebOperations, ADR-005 S3e-4: the load is core's and
-        the slot is the state's): the card showing that slot does what it
-        does after the board's own loads (_CardLoaded). Called by the
-        desktop's board host inside the load's save block, on the GUI
-        thread."""
+        """A player was loaded into slot `player` of state team `team` (the
+        load is core's and the slot is the state's, ADR-005 S3e-4: a web
+        operation, or a set's entrants through SetFollowService): the card
+        showing that slot, if there is one yet, does what it does after a
+        load (_CardLoaded). Called by the desktop's board host inside the
+        load's save block, on the GUI thread."""
         cards = (self.team1playerWidgets if int(team) == 1
                  else self.team2playerWidgets)
         if 1 <= int(player) <= len(cards):
@@ -2455,33 +2411,15 @@ class AutonaScoreboardWidget(QWidget):
 
     @staticmethod
     def _CardLoaded(card, cleared):
-        # The text typed into combos the operator is not in, after a load
-        # that cleared (see _ApplyPlayer). The statistics are the load's
+        # A load that clears also discards the text typed into the card's
+        # combos and never picked (DiscardTypedText), but for the combo the
+        # operator is in: the card's SetData started with its Clear(), which
+        # put every combo back on its row, and the render only moves a combo
+        # whose row is wrong -- the typed text stayed, and the next pick on
+        # the card published it (S3e-3 review). The statistics are the load's
         # own (PlayerService.Announce, ADR-005 S3e-5).
         if cleared:
             card.DiscardTypedText(notEditing=True)
-
-    def LoadPlayerFromTag(self, tag, team, player, no_mains=False):
-        # The PLAYERS panel's "set to P1 / P2". The Web's tag lookup is
-        # AutonaWebOperations.load_player_from_tag since ADR-005 S3e-4 (the
-        # same load, the slot resolved from the state).
-        # `team` is the set's (1-based): after a swap, the other state team.
-        # The slot is the state's (ADR-005 S3e-6); one it does not have
-        # raises, as the card list's index did.
-        team = int(team) - 1
-        player = int(player)
-        swapped = StateManager.Get(f"{self.statePrefix}.teamsSwapped", False)
-        stateTeam = 2 - team if swapped else team + 1
-
-        playerData = PlayerDB.instance.GetPlayerFromTag(tag)
-        if playerData:
-            if self._PlayerSlotPath(stateTeam, player) is None:
-                raise IndexError(f"{self.statePrefix} team {stateTeam} has "
-                                 f"no player {player}")
-            self._ApplyPlayer(stateTeam, player, playerData, True, True,
-                              no_mains)
-            return True
-        return False
 
     def SetDefaultsFromAssets(self):
         # The game's default players-per-team; characters-per-player is

@@ -5,12 +5,12 @@ SetData, its Clear, its SavePlayerToDB and the board's three ways in
 (LoadPlayerFromTag, ApplyPlayerData, a set's entrants) -- into
 core/PlayerService. The recording was made through those entry points on the
 last tree that still had the widget implementation (ae922c24); two tests
-replay it: tests/test_player_apply.py through the same entry points (the
-card and the board), tests/test_player_service.py through PlayerService
-alone. Both build the world from here. Qt-free on purpose: the service test
+replay it: tests/test_player_apply.py through what those entry points are now
+(the card, the Web's operations), tests/test_player_service.py through
+PlayerService alone. Both build the world from here. Qt-free on purpose: the service test
 must not import Qt.
 
-Every scenario starts from a freshly built board (or a fresh PLAYERS editor)
+Every scenario starts from a freshly built board
 with three character slots per card, the fixture game "tgame" loaded
 (tests/fixtures/player_slots/recording.py), the players named in `db` in the
 local player database and a bad-word filter over `words` (none: nothing is
@@ -22,19 +22,17 @@ Steps (`op`):
 - ``set``    -- the card's SetData(data, dontLoadFromDB=not loadFromDB,
                 clear, no_mains)
 - ``clear``  -- the card's Clear(no_mains)
-- ``save``   -- the card's SavePlayerToDB()
+- ``save``   -- PlayerService.SavePlayerToDB() on the card's slot (the card's
+                own went with the Qt Player List, ADR-005 S4n; its scenario,
+                on the editor's path, left the recording then)
 - ``typed``  -- character slots written as the card publishes them
                 (PlayerService.PublishCharacterSlots), which the board's
                 cards then render: `slots` are CharacterSlot fields; a slot
-                with only `text` is a typed name. Board slots only (the
-                editor is never rendered from the state)
-- ``pick``   -- the operator picking one slot's character, skin and variant
-                on the card's combos (`index` 1-based; rows by en_name)
+                with only `text` is a typed name
 - ``chars``  -- the board's character count (charNumber)
-- ``tag``    -- the board's LoadPlayerFromTag(tag, team, player, no_mains)
-                (the PLAYERS panel's; tests/test_player_apply.py replays
-                one scenario through the Web's
-                AutonaWebOperations.load_player_from_tag too)
+- ``tag``    -- AutonaWebOperations.load_player_from_tag(tag, team, player,
+                no_mains): the board's LoadPlayerFromTag when recorded (it
+                went with the Qt Player List, ADR-005 S4n)
 - ``update`` -- /api/v1's player PATCH: the board's ApplyPlayerData(team,
                 player, data) when recorded, AutonaWebOperations
                 .update_player since ADR-005 S3e-4
@@ -42,12 +40,11 @@ Steps (`op`):
                 legacy update-team route)
 - ``swap``   -- the board's SwapTeams()
 
-`slot` is [team, player] on the board, or "editor" for the PLAYERS editor
-(player_editor.1). Scenarios with `core: False` use a step PlayerService
-alone does not have (the board's set payload, the swap).
+`slot` is [team, player] on the board. Scenarios with `core: False` use a
+step PlayerService alone does not have (the board's set payload, the swap).
 
-The second half is how a step is observed (every write under the board or
-the editor, its save cycles) and how a replay is compared to the recording,
+The second half is how a step is observed (every write under the board, its
+save cycles) and how a replay is compared to the recording,
 for both replays: what S3e-3 changed on purpose is ``CHANGES``.
 """
 import copy
@@ -219,19 +216,6 @@ SCENARIOS = [
         ],
     },
     {
-        "name": "the editor",
-        "board": None, "db": ["SP TAG"],
-        "steps": [
-            # What the PLAYERS panel does with the DB record it edits.
-            _set("editor", "SP TAG"),
-            {"op": "save", "slot": "editor"},
-            {"op": "pick", "slot": "editor", "index": 2,
-             "character": "Mario", "skin": 2, "variant": "EX"},
-            {"op": "save", "slot": "editor"},
-            {"op": "clear", "slot": "editor", "no_mains": False},
-        ],
-    },
-    {
         "name": "bad words",
         "board": 1, "db": [], "words": BAD_WORDS,
         "steps": [
@@ -330,33 +314,22 @@ class Writes:
 
 
 class Cycles:
-    """Save cycles: held_state_updated for a board (its subtree is held),
-    state_updated touching the editor's slot for the editor (it is not)."""
+    """Save cycles: held_state_updated for the board (its subtree is held)."""
 
     def __init__(self, root):
         self.root = root
         self.count = 0
-        self.held = root.startswith("score.")
 
     def _onHeld(self, prefix):
-        if self.held and prefix == self.root:
-            self.count += 1
-
-    def _onDelta(self, payload):
-        parts = self.root.split(".")
-        if not self.held and any(
-                [str(p) for p in row.get("path", [])][:len(parts)] == parts
-                for row in payload.get("delta", [])):
+        if prefix == self.root:
             self.count += 1
 
     def __enter__(self):
         StateManager.observers.held_state_updated.subscribe(self._onHeld)
-        StateManager.observers.state_updated.subscribe(self._onDelta)
         return self
 
     def __exit__(self, *exc):
         StateManager.observers.held_state_updated.unsubscribe(self._onHeld)
-        StateManager.observers.state_updated.unsubscribe(self._onDelta)
         return False
 
 
@@ -416,17 +389,6 @@ def _upsetFactorOnce(step):
                      if call[0] != "upset_factor"]
 
 
-def _byEffect(step):
-    """The editor's clear button writes what the board's clear writes, in
-    its order (PlayerService.ClearSlot, S2d): the name fields first, the
-    display name once. The widget emptied the sponsor and re-derived a
-    display name from the tag alone before emptying the tag. The editor's
-    slot already held every key, so the order is unobservable (one save
-    cycle, key order unchanged); compared by what each key ends up
-    holding."""
-    step["callsByEffect"] = True
-
-
 # What S3e-3 (and S3e-6: the characters per player in one cycle) changed on
 # purpose, by (scenario, step index): applied to the recorded step before
 # the comparison (Expected).
@@ -454,19 +416,10 @@ def _oneCycle(step):
 
 CHANGES = {
     ("a set's entrants", 2): _upsetFactorOnce,
-    ("the editor", 4): _byEffect,
     # ADR-005 S3e-6.
     ("keeping the mains", 3): _oneCycle,
     ("keeping the mains", 6): _oneCycle,
 }
-
-
-def effect(calls):
-    """{key: what its last write left} (compared without the order)."""
-    result = {}
-    for key, value in calls:
-        result[key] = value
-    return result
 
 
 def Expected(name, index, step):

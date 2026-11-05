@@ -19,7 +19,7 @@ Subclasses are responsible for:
 - __init__ (own .ui file, own widget setup)
 - NameChanged, and wiring the card's inputs to `self.player`
 - SetData / Clear (which call the core: PlayerService.ApplyData /
-  ClearSlot since ADR-005 S3e-3, then render), SetCharactersPerPlayer,
+  ClearSlot since ADR-005 S3e-3, then render),
   ReloadCharacters, SetIndex, SetupAutocomplete (widget-specific: .ui
   widgets, icon sizes, fonts, proxy models — kept per-subclass)
 - _styleCountryStateWidgets (a small hook that customises the otherwise
@@ -40,7 +40,6 @@ from .core import StateSchema as schema
 from .core.CountryCatalog import CountryCatalog
 from .core.PlayerService import (
     KEEP_ONLINE_AVATAR, CharacterSlot, PlayerService)
-from .core.StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from loguru import logger
 
@@ -92,7 +91,7 @@ class AutonaBasePlayerWidget(QGroupBox):
         card narrows it to a slot the state has)."""
         return not self._deleted
 
-    def CharactersChanged(self, includeMains=False):
+    def CharactersChanged(self):
         if self._quietCharacters:
             # Rows being built for character slots the state already has
             # (AutonaScoreboardPlayerWidget.SyncCharacterRows): their
@@ -107,8 +106,7 @@ class AutonaBasePlayerWidget(QGroupBox):
         self.player.PublishCharacterSlots(
             [self._CharacterSlot(character, color, variant)
              for _element, character, color, variant
-             in self.character_elements],
-            includeMains)
+             in self.character_elements])
 
     @staticmethod
     def _CharacterSlot(character, color, variant) -> CharacterSlot:
@@ -155,41 +153,6 @@ class AutonaBasePlayerWidget(QGroupBox):
             self._w(schema.PLAYER_SPONSOR_KEY, QLineEdit).text(),
             self._w(schema.PLAYER_TAG_KEY, QLineEdit).text(),
             onlineAvatar=onlineAvatar)
-
-    def SwapCharacters(self, index1: int, index2: int):
-        with StateManager.SaveBlock():
-            if index2 > len(self.character_elements)-1:
-                index2 = 0
-
-            char1 = self.character_elements[index1]
-            char2 = self.character_elements[index2]
-
-            # Save index1 settings
-            tmp = [char1[1].currentText(), char1[2].currentIndex()]
-
-            # Set index1 to index2
-            # Character
-            found = char1[1].findText(char2[1].currentText())
-            if found != -1:
-                char1[1].setCurrentIndex(found)
-            else:
-                char1[1].setCurrentText(char2[1].currentText())
-
-            # Color
-            char1[2].setCurrentIndex(char2[2].currentIndex())
-
-            # Set index2 to temp (index1)
-            # Character
-            found = char2[1].findText(tmp[0])
-            if found != -1:
-                char2[1].setCurrentIndex(found)
-            else:
-                char2[1].setCurrentText(tmp[0])
-
-            # Color
-            char2[2].setCurrentIndex(tmp[1])
-
-            self.CharactersChanged()
 
     def _EnsureStateModel(self) -> QStandardItemModel:
         """Return the state combo's model, creating it on first use.
@@ -325,11 +288,6 @@ class AutonaBasePlayerWidget(QGroupBox):
             if self._emptySkinModel is None:
                 self._emptySkinModel = QStandardItemModel(self)
             target.setModel(self._emptySkinModel)
-
-    def GetCurrentPlayerTag(self):
-        gamerTag = self._w(schema.PLAYER_TAG_KEY).text()
-        prefix = self._w(schema.PLAYER_SPONSOR_KEY).text()
-        return prefix+" "+gamerTag if prefix else gamerTag
 
     def _WireCountryState(self):
         """One-time wiring of the country / region pair. Subclasses call this

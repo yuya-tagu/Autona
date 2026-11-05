@@ -2211,51 +2211,6 @@ def test_a_held_back_tag_next_to_a_rendered_sponsor_publishes_nothing(
         assert _cardMismatches(board) == {}
 
 
-def test_the_player_editor_writes_what_is_typed(board, autonaApp):
-    """player_editor.1 (agent-pitfalls #7) is never rendered, so nothing is
-    ever held back on it: every finished edit that is not what the state
-    holds is written, board passes or not."""
-    if RECORD or RECORD_KEY_ORDER:
-        pytest.skip("not part of the recording")
-    editorPath = f"{schema.PLAYER_EDITOR_ROOT}.1"
-    editor = AutonaScoreboardPlayerWidget(index=1, teamNumber=1,
-                                          path=editorPath)
-    tagKey = f"{editorPath}.{schema.PLAYER_TAG_KEY}"
-    try:
-        tag = editor._w(schema.PLAYER_TAG_KEY, QLineEdit)
-        editor.SetData({"gamerTag": "DRAFT"}, dontLoadFromDB=True)
-        autonaApp.settle()
-        assert autonaApp.get(tagKey) == "DRAFT"
-
-        with patch.object(tag, "hasFocus", return_value=True):
-            tag.setText("TYPED")
-            # A board pass and a write elsewhere in the editor's slot.
-            PlayerService(board.team1playerWidgets[0].path).SetText(
-                schema.PLAYER_TAG_KEY, "ON THE BOARD")
-            PlayerService(editorPath).SetText(
-                schema.PLAYER_SPONSOR_KEY, "SPONSOR")
-            autonaApp.settle()
-            tag.editingFinished.emit()
-        assert autonaApp.get(tagKey) == "TYPED"
-
-        # Finishing what the state holds writes nothing; the next edit does.
-        with _noWrites() as attempts:
-            tag.editingFinished.emit()
-        assert attempts == []
-        tag.setText("DRAFT")
-        tag.editingFinished.emit()
-        assert autonaApp.get(tagKey) == "DRAFT"
-        assert board.team1playerWidgets[0]._w(
-            schema.PLAYER_TAG_KEY, QLineEdit).text() == "ON THE BOARD"
-    finally:
-        editor.setParent(None)
-        editor.deleteLater()
-        # Reaped here: pytest runs no event loop (see test_player_widgets).
-        QCoreApplication.sendPostedEvents(editor, QEvent.Type.DeferredDelete)
-        StateManager.Unset(schema.PLAYER_EDITOR_ROOT)
-        autonaApp.settle()
-
-
 # ── what a render must not do ────────────────────────────────────────────
 
 def _widgetState(card):
@@ -2391,37 +2346,6 @@ def test_an_unset_slot_retires_its_card(board, autonaApp):
         if Shiboken.isValid(card):
             QCoreApplication.sendPostedEvents(card, QEvent.Type.DeferredDelete)
         assert not Shiboken.isValid(card)
-
-
-def test_the_player_editor_is_not_rendered(board, autonaApp):
-    """The PLAYERS panel's editor is the same widget on player_editor.1: a
-    draft the operator types into, which nothing else writes."""
-    if RECORD:
-        pytest.skip("not part of the recording")
-    editorPath = f"{schema.PLAYER_EDITOR_ROOT}.1"
-    editor = AutonaScoreboardPlayerWidget(index=1, teamNumber=1,
-                                          path=editorPath)
-    try:
-        editor.SetData({"gamerTag": "DRAFT"}, dontLoadFromDB=True)
-        autonaApp.settle()
-        PlayerService(editorPath).SetText(schema.PLAYER_TAG_KEY, "ELSEWHERE")
-        # ...and a board pass, which only knows the board's cards.
-        boardCard = board.team1playerWidgets[0]
-        PlayerService(boardCard.path).SetText(
-            schema.PLAYER_TAG_KEY, "ON THE BOARD")
-        autonaApp.settle()
-
-        assert editor.RenderFromState() is True
-        assert editor._w(schema.PLAYER_TAG_KEY, QLineEdit).text() == "DRAFT"
-        assert boardCard._w(schema.PLAYER_TAG_KEY, QLineEdit).text() \
-            == "ON THE BOARD"
-    finally:
-        editor.setParent(None)
-        editor.deleteLater()
-        # Reaped here: pytest runs no event loop (see test_player_widgets).
-        QCoreApplication.sendPostedEvents(editor, QEvent.Type.DeferredDelete)
-        StateManager.Unset(schema.PLAYER_EDITOR_ROOT)
-        autonaApp.settle()
 
 
 def test_a_card_removed_before_the_pass_is_not_rendered(board, autonaApp):
@@ -3011,18 +2935,14 @@ def _loadClearing(board, how):
     else:
         with patch.object(PlayerDB.instance, "GetPlayerFromTag",
                           return_value=dict(_LOADED_E1)):
-            if how == "the Web's tag lookup":
-                # ADR-005 S3e-4: AutonaWebOperations, the board's card
-                # hooks through the desktop board host.
-                from src import AutonaWebOperations as WebOps
-                assert WebOps.load_player_from_tag(
-                    board.scoreboardNumber, "E1", 1, 1) == "OK"
-            else:
-                assert board.LoadPlayerFromTag("E1", 1, 1) is True
+            # ADR-005 S3e-4: AutonaWebOperations, the board's card hooks
+            # through the desktop board host.
+            from src import AutonaWebOperations as WebOps
+            assert WebOps.load_player_from_tag(
+                board.scoreboardNumber, "E1", 1, 1) == "OK"
 
 
-@pytest.mark.parametrize("how", ["a set's entrants", "a tag lookup",
-                                 "the Web's tag lookup"])
+@pytest.mark.parametrize("how", ["a set's entrants", "the Web's tag lookup"])
 def test_a_load_takes_text_typed_into_a_combo_with_it(board, autonaApp, how):
     """The country and the second character typed into and left without a
     pick, then a load: the text is gone, and picking a skin on the card

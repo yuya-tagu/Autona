@@ -346,6 +346,55 @@ def test_set_patch_losers_on_a_board_not_built_yet_still_waits_for_apply(
     assert StateManager.HasPendingChanges("score.2") is True
 
 
+def test_player_patch_with_a_new_country_and_no_region_leaves_none(
+        autonaApp, client):
+    # What the Web UI's card sends when the operator picks another country
+    # (web/src/ScoreboardPage/Player.jsx): the region goes with the country it
+    # was of, and the DB's record of the player does not bring it back.
+    from src.core.PlayerDB import PlayerDB
+    autonaApp.board(1)
+    player = "score.1.team.1.player.1"
+    record = {"gamerTag": "Alpha", "country_code": "JP", "state_code": "13"}
+
+    def send(**location):
+        response = client.patch("/api/v1/scoreboards/1/teams/1/players/1",
+                                json={"gamerTag": "Alpha", **location})
+        assert response.status_code == 200
+        autonaApp.settle()
+
+    with patch.object(PlayerDB.instance, "Get", return_value=record):
+        send(country_code="JP", state_code="13")
+        assert autonaApp.get(f"{player}.country")["code"] == "JP"
+        assert autonaApp.get(f"{player}.state")["code"] == "13"
+
+        send(country_code="US", state_code="")
+
+        assert autonaApp.get(f"{player}.country")["code"] == "US"
+        assert autonaApp.get(f"{player}.state") == {}
+
+
+def test_player_patch_with_no_country_says_nothing_of_it(autonaApp, client):
+    # "" is not "none": a patch cannot take a country away. The Web UI's card
+    # goes back to the state's country when its field is emptied and left, on
+    # account of this (web/src/ScoreboardPage/Player.jsx).
+    from src.core.PlayerDB import PlayerDB
+    autonaApp.board(1)
+    player = "score.1.team.1.player.1"
+
+    def send(**location):
+        response = client.patch("/api/v1/scoreboards/1/teams/1/players/1",
+                                json={"gamerTag": "Alpha", **location})
+        assert response.status_code == 200
+        autonaApp.settle()
+
+    with patch.object(PlayerDB.instance, "Get", return_value=None):
+        send(country_code="JP", state_code="13")
+        send(country_code="", state_code="")
+
+        assert autonaApp.get(f"{player}.country")["code"] == "JP"
+        assert autonaApp.get(f"{player}.state")["code"] == "13"
+
+
 def test_player_patch_keeps_the_english_round_text(autonaApp, client):
     """The legacy route ran a player edit through all of ChangeSetData, whose
     match-info writer blanks match_en for any payload without one. The v1

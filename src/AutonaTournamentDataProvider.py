@@ -82,7 +82,6 @@ class _UnlessStopping:
 
 class AutonaTournamentDataProviderSignals(QObject):
     tournament_changed = Signal()
-    entrants_updated = Signal()
     tournament_data_updated = Signal(dict)
     twitch_username_updated = Signal()
     get_sets_finished = Signal(list)

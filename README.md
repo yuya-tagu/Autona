@@ -152,7 +152,6 @@ Autona/
 │   ├── AutonaScoreboardManager.py    # スコアボード管理
 │   ├── AutonaScoreboardWidget.py     # スコアボード UI
 │   ├── AutonaScoreboardPlayerWidget.py  # 選手情報ウィジェット
-│   ├── AutonaPlayerBrowserWidget.py  # 選手一覧（出場選手 / 登録済み選手）
 │   ├── AutonaTournamentDataProvider.py  # トーナメントデータ取得
 │   ├── AutonaGameAssetManager.py     # ゲームアセット管理
 │   ├── AutonaPlayerDB.py             # ローカル選手データベース
