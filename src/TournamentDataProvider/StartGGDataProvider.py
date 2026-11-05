@@ -2164,15 +2164,14 @@ class StartGGDataProvider(TournamentDataProvider):
             if stopped():
                 return
 
-            # Persist + announce (model rebuild, db_updated) once for the
-            # whole fetch. The entrant set is installed first so the rebuilt
-            # completer proxy filters correctly from the start.
+            # Persist once for the whole fetch. The entrant set is installed
+            # first so the rebuilt completer proxy filters correctly from
+            # the start.
             PlayerDB.instance.SaveDB()
             # Dropped on the GUI thread if another tournament was loaded by
             # then (its cancel event is set there, first).
             AutonaPlayerDB.SetTournamentPlayers(
                 entrant_tags, cancel_event=cancel_event)
-            PlayerDB.instance.NotifyChanged()
 
             # Sort by seed (ascending); unseeded entries fall to the bottom
             self.top_entrants.sort(key=lambda e: e["seed"])
@@ -2183,6 +2182,12 @@ class StartGGDataProvider(TournamentDataProvider):
             if StreamService.instance is not None:
                 StreamService.instance.SetTopEntrants(
                     self.top_entrants, cancelled=cancel_event)
+
+            # Announce (model rebuild, db_updated) once for the whole fetch,
+            # with the entrants already core's: a page that re-reads on the
+            # `playerdb` push this makes reads them (GET
+            # /api/v1/players/entrants, ADR-005 S4m).
+            PlayerDB.instance.NotifyChanged()
 
             try:
                 self.tshTdp.signals.entrants_updated.emit()

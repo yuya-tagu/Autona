@@ -65,6 +65,9 @@ These kinds live here:
   pull-stream -- core's SetFollowService, through the board host like the
   S2 ones, in both shells. The fetches and the 5-second poll are the
   shell's (SetFollowService.fetcher) and answer into the state later.
+- the player list's (ADR-005 S4m): core's PlayerDirectory -- its rows, and a
+  record saved or deleted -- in both shells, on the calling thread (no board,
+  no slot: the database's write waits for nothing under a lock).
 - the shell operations (ADR-005 S3e-9): opening a board's set selection
   window and rendering its thumbnail. Not core's: one opens a window, the
   other renders with the board's WebEngine, so they need the desktop's
@@ -76,6 +79,7 @@ These kinds live here:
 Imports nothing that builds anything; the registrations are plain module
 attributes, filled in by the shell (agent-pitfalls #1).
 """
+import copy
 import threading
 
 import orjson
@@ -87,6 +91,7 @@ from .core import ColorService
 from .core import CommentaryModel as comms
 from .core import CommentaryService
 from .core import LayoutCatalog
+from .core import PlayerDirectory
 from .core import Top8Service
 from .core import StatsOverlays
 from .core import AnalysisService as analysis
@@ -131,6 +136,12 @@ class NotAvailable(Exception):
     def __init__(self, message=NOT_AVAILABLE_MESSAGE):
         super().__init__(message)
         self.message = message
+
+
+class NoSuchSlot(IndexError):
+    """The board has no such player slot (load_player_from_tag). An
+    IndexError, as the legacy route's 500 has always been; /api/v1 tells it
+    from an IndexError out of the load itself and answers 404."""
 
 
 def _on_gui_thread(call, what):
@@ -487,6 +498,30 @@ def get_playerdb():
     # build change player dicts in place, and this is serialised (Flask /
     # Socket.IO) after the lock is released.
     return PlayerDB.instance.TournamentPlayers()
+
+
+# ── the player list (ADR-005 S4m) ────────────────────────────────────────
+# core's PlayerDirectory, on the calling thread. A save is not run on the
+# board host: nothing here touches a slot, and the database's write goes with
+# no lock held (PlayerService.SaveRecordToDB).
+
+def get_players():
+    """{"game", "players"}: the codename the rows' mains are of, and the rows."""
+    return PlayerDirectory.Registered()
+
+
+def get_player_entrants():
+    """{"game", "entrants"}, as get_players."""
+    return PlayerDirectory.Entrants()
+
+
+def save_player(fields):
+    """{"key", "created"}, or what PlayerDirectory.Save refused."""
+    return PlayerDirectory.Save(fields)
+
+
+def delete_player(key):
+    return PlayerDirectory.Delete(key)
 
 
 # ── the caster line-up (ADR-005 S3e-2) ───────────────────────────────────
@@ -1460,7 +1495,11 @@ def load_player_from_tag(scoreboard, tag, team, player, no_mains=False):
             raise ValueError(f"scoreboard {scoreboard} has no player slots")
         host.Prepare(scoreboard)
         team_, player_ = int(team), int(player)
-        playerData = PlayerDB.instance.GetPlayerFromTag(str(tag))
+        # The live dict (PlayerDB.Get): copied under the lock it is written
+        # under, as the load is not.
+        db = PlayerDB.instance
+        with db.lock:
+            playerData = copy.deepcopy(db.GetPlayerFromTag(str(tag)))
         if not playerData:
             return "ERROR"
         path = None
@@ -1468,7 +1507,7 @@ def load_player_from_tag(scoreboard, tag, team, player, no_mains=False):
             team_ = SetLoadService(board).DisplayTeam(team_)
             path = _player_path(board, team_, player_)
         if path is None:
-            raise IndexError(
+            raise NoSuchSlot(
                 f"scoreboard {board} team {team} has no player {player}")
         _load_player(host, board, team_, player_, playerData, True, True,
                      no_mains)

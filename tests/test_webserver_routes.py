@@ -106,7 +106,8 @@ EXPECTED_ROUTES = [
 # GET / DELETE tournament, tournament/info, tournament/media* and
 # colors/tournament for the Event page (S4g); countries and top8/* for the
 # Top 8 page (S4i); analysis* for the Statistics page's match list (S4k);
-# stats/overlays* for the Stats Display Settings page (S4l).
+# stats/overlays* for the Stats Display Settings page (S4l); players* and
+# players/<p>:load for the player list (S4m).
 EXPECTED_API_V1_ROUTES = [
     ('/api/v1/analysis', 'api_v1.get_analysis', 'GET,HEAD,OPTIONS'),
     ('/api/v1/analysis:refresh', 'api_v1.analysis_refresh', 'OPTIONS,POST'),
@@ -130,6 +131,10 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/layouts/selected/<kind>', 'api_v1.get_selected_layout', 'GET,HEAD,OPTIONS'),
     ('/api/v1/layouts/selected/<kind>', 'api_v1.select_layout', 'OPTIONS,PUT'),
     ('/api/v1/match-names', 'api_v1.get_match_names', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/players', 'api_v1.get_players', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/players', 'api_v1.player_save', 'OPTIONS,PUT'),
+    ('/api/v1/players/entrants', 'api_v1.get_player_entrants', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/players:delete', 'api_v1.player_delete', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>', 'api_v1.get_scoreboard', 'GET,HEAD,OPTIONS'),
     ('/api/v1/scoreboards/<int:n>/score:reset', 'api_v1.score_reset', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/score:set', 'api_v1.score_set', 'OPTIONS,POST'),
@@ -137,6 +142,7 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/scoreboards/<int:n>/stats:refresh', 'api_v1.stats_refresh', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/color', 'api_v1.team_color', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/players/<int:p>', 'api_v1.player_update', 'OPTIONS,PATCH'),
+    ('/api/v1/scoreboards/<int:n>/teams/<int:t>/players/<int:p>:load', 'api_v1.player_load', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>/teams/<int:t>/score:adjust', 'api_v1.score_adjust', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:apply', 'api_v1.apply_changes', 'OPTIONS,POST'),
     ('/api/v1/scoreboards/<int:n>:clear', 'api_v1.clear', 'OPTIONS,POST'),
@@ -461,9 +467,14 @@ def test_the_classification_follows_the_rules():
     from src.core import WebAccess
 
     access = WebAccess.ROUTE_ACCESS
-    # /api/v1: the method says it (spec: GET reads, POST / PATCH operate).
+    # /api/v1: the method says it (spec: GET reads, POST / PATCH operate),
+    # but for the player database's rows, real names in them, which are
+    # PLAYERDB as /playerdb is (ADR-005 S4m).
+    playerDatabase = {"api_v1.get_players", "api_v1.get_player_entrants"}
     for _rule, endpoint, methods in EXPECTED_API_V1_ROUTES:
         expected = WebAccess.READ if "GET" in methods.split(",") else WebAccess.WRITE
+        if endpoint in playerDatabase:
+            expected = WebAccess.PLAYERDB
         assert access[endpoint] == expected, endpoint
     # A legacy route that takes a body changes something.
     for _rule, endpoint, methods in EXPECTED_ROUTES:
@@ -485,8 +496,9 @@ def test_the_classification_follows_the_rules():
     # reads (S4e: v1 31 of 48), the Event page's 6 writes and 1 read
     # (S4g: v1 37 of 55), the Top 8 page's 4 writes and 1 read (S4i: v1
     # 41 of 60) and the Statistics page's 1 write and 1 read (S4k: v1 42 of
-    # 62) and the Stats Display Settings page's 1 write and 1 read (S4l:
-    # v1 43 of 64). A change here is a change of the policy.
+    # 62), the Stats Display Settings page's 1 write and 1 read (S4l: v1 43
+    # of 64) and the player list's 3 writes and 2 reads of the player DB
+    # (S4m: v1 46 of 69). A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
     assert len(legacy) == 43
@@ -494,8 +506,8 @@ def test_the_classification_follows_the_rules():
     assert sum(k == WebAccess.WRITE
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
-               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 43
-    assert len(EXPECTED_API_V1_ROUTES) == 64
+               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 46
+    assert len(EXPECTED_API_V1_ROUTES) == 69
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

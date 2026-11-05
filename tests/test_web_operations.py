@@ -1675,6 +1675,9 @@ _BODIES = {
     "api_v1.team_color": {"color": "#ff0000"},
     "api_v1.set_update": {"match": "Final"},
     "api_v1.player_update": {"gamerTag": "ALPHA"},
+    "api_v1.player_save": {"gamerTag": "Walk"},
+    "api_v1.player_delete": {"key": "Nobody", "confirm": True},
+    "api_v1.player_load": {"tag": "Nobody"},
     "api_v1.display_options_update": {_DISPLAY_OPTION: True},
     "api_v1.clear": {"confirm": True},
     "api_v1.reset_players": {"confirm": True},
@@ -1719,9 +1722,9 @@ _NOT_200 = {
         "stats_history_sets")},
     **{(f"api_v1.{name}", 3): 400 for name in (
         "score_adjust", "score_reset", "score_set", "team_color",
-        "set_update", "player_update", "swap_teams", "apply_changes",
-        "stats_refresh", "clear", "reset_players", "reset_match",
-        "load_set", "pull_stream")},
+        "set_update", "player_update", "player_load", "swap_teams",
+        "apply_changes", "stats_refresh", "clear", "reset_players",
+        "reset_match", "load_set", "pull_stream")},
     # No tournament loaded: the legacy set lookup raises (its provider is
     # None -- the desktop's too), /api/v1 answers 409 NOT_READY.
     ("get_match", None): 500,
@@ -1744,6 +1747,8 @@ _NOT_200 = {
     ("api_v1.game_set", None): 404,
     ("api_v1.stream_channel_update", None): 404,
     ("api_v1.stream_channel_delete", None): 404,
+    ("api_v1.player_delete", None): 404,
+    ("api_v1.player_load", 1): 404, ("api_v1.player_load", 2): 404,
     # The walk's kind ("commentary") is no stream org asset nor tournament
     # media, and the image uploads are the contract tests'
     # (tests/test_api_v1_stream.py, tests/test_api_v1_tournament.py).

@@ -543,6 +543,124 @@ def test_the_entrants_fetch_stops_without_saving_or_announcing(
         assert done == []
 
 
+def _fetchEntrants(startgg, monkeypatch, cancel, done, onTags=lambda: None,
+                   onAnnounce=lambda: None):
+    """GetEntrantsWorker over one page of three entrants (seeds 2, none, 1),
+    with what it does to the player database recorded in `done`. `onTags`
+    runs where the tournament can change: past the job's last check, before it
+    hands the entrants over."""
+    from src.AutonaPlayerDB import AutonaPlayerDB
+    from src.core.PlayerDB import PlayerDB
+
+    def setTournamentPlayers(tags, cancel_event=None):
+        done.append("tags")
+        onTags()
+
+    def announce():
+        done.append("announce")
+        onAnnounce()
+
+    monkeypatch.setattr(PlayerDB.instance, "AddPlayers",
+                        lambda players, deferRefresh=False: None)
+    monkeypatch.setattr(PlayerDB.instance, "SaveDB",
+                        lambda: done.append("save"))
+    monkeypatch.setattr(PlayerDB.instance, "NotifyChanged", announce)
+    monkeypatch.setattr(AutonaPlayerDB, "SetTournamentPlayers",
+                        setTournamentPlayers)
+    startgg.tshTdp = SimpleNamespace(signals=SimpleNamespace(
+        entrants_updated=SimpleNamespace(emit=lambda: done.append("emit"))))
+    monkeypatch.setattr(
+        type(startgg), "ProcessEntrantData",
+        staticmethod(lambda participant, setData=[]: {
+            "id": [participant["gamerTag"]],
+            "gamerTag": participant["gamerTag"]}))
+
+    def query(*args, **kwargs):
+        return {"data": {"event": {"entrants": {
+            "pageInfo": {"totalPages": 1},
+            "nodes": [{"initialSeedNum": seed, "participants": [
+                {"gamerTag": f"seed {seed}"}]} for seed in (2, None, 1)],
+        }}}}
+
+    monkeypatch.setattr(startgg, "QueryRequests", query)
+    startgg.GetEntrantsWorker("tournament/t/event/e", None, cancel)
+
+
+def test_the_entrants_are_core_s_before_the_player_db_is_announced(
+        startgg, executor, monkeypatch):
+    """A page re-reads the entrants on the `playerdb` push the announcement
+    makes (GET /api/v1/players/entrants, ADR-005 S4m), so they have to be
+    there by then: sorted, and with the fetch's cancel event, as before."""
+    from src.core.StreamService import StreamService
+
+    executor()
+    done = []
+    entrants = []
+
+    def setTopEntrants(given, cancelled=None):
+        entrants.append([entrant["seed"] for entrant in given])
+        done.append(("entrants", cancelled))
+
+    monkeypatch.setattr(StreamService, "instance", SimpleNamespace(
+        SetTopEntrants=setTopEntrants))
+    cancel = threading.Event()
+
+    _fetchEntrants(startgg, monkeypatch, cancel, done)
+
+    assert done == ["save", "tags", ("entrants", cancel), "announce", "emit"]
+    assert entrants == [[1, 2, 999999]]
+
+
+def test_the_real_service_has_the_entrants_at_the_announcement(
+        startgg, executor, monkeypatch):
+    from src.core.StreamService import StreamService
+
+    executor()
+    service = StreamService(later=lambda run: None)
+    monkeypatch.setattr(StreamService, "instance", service)
+    read = []
+
+    _fetchEntrants(startgg, monkeypatch, threading.Event(), [],
+                   onAnnounce=lambda: read.extend(service.TopEntrants()))
+
+    assert [entrant["gamerTag"] for entrant in read] == [
+        "seed 1", "seed 2", "seed None"]
+
+
+def test_a_fetch_cancelled_past_its_last_check_leaves_the_real_service_alone(
+        startgg, executor, monkeypatch):
+    """The tournament changed after the job's last check: the real
+    SetTopEntrants checks once more, under the lock the emptying takes, and
+    what a page reads on the announcement is not the old tournament's."""
+    from src.core.StreamService import StreamService
+
+    executor()
+    service = StreamService(later=lambda run: None)
+    service.SetTopEntrants([{"seed": 1, "gamerTag": "The next tournament's"}])
+    monkeypatch.setattr(StreamService, "instance", service)
+    cancel = threading.Event()
+    done = []
+
+    _fetchEntrants(startgg, monkeypatch, cancel, done, onTags=cancel.set)
+
+    assert [entrant["gamerTag"] for entrant in service.TopEntrants()] == [
+        "The next tournament's"]
+    assert done == ["save", "tags", "announce", "emit"]
+
+
+def test_with_no_stream_service_the_fetch_still_announces(
+        startgg, executor, monkeypatch):
+    from src.core.StreamService import StreamService
+
+    executor()
+    monkeypatch.setattr(StreamService, "instance", None)
+    done = []
+
+    _fetchEntrants(startgg, monkeypatch, threading.Event(), done)
+
+    assert done == ["save", "tags", "announce", "emit"]
+
+
 def test_the_parallel_requests_finish_with_the_job_lane_full(
         startgg, executor, monkeypatch):
     """Every job thread runs a fetch that makes requests in parallel (a

@@ -154,6 +154,13 @@ ROUTE_ACCESS = {
     "api_v1.get_analysis": READ,
     "api_v1.get_stats_overlays": READ,
     "api_v1.get_countries": READ,
+    # The local player database, real names included: as /playerdb, not READ
+    # (ADR-005 S4m).
+    "api_v1.get_players": PLAYERDB,
+    "api_v1.get_player_entrants": PLAYERDB,
+    "api_v1.player_save": WRITE,
+    "api_v1.player_delete": WRITE,
+    "api_v1.player_load": WRITE,
     "api_v1.score_adjust": WRITE,
     "api_v1.score_reset": WRITE,
     "api_v1.stats_refresh": WRITE,

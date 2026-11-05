@@ -40,6 +40,7 @@ from .core import ImageImport
 from .core import CommentaryModel as comms
 from .core import CommentaryService
 from .core import LayoutCatalog
+from .core import PlayerDirectory
 from .core import StreamService as streams
 from .core import Top8Model as top8
 from .core import Top8Service
@@ -674,6 +675,27 @@ def get_analysis():
     return ok(data=WebOps.get_analysis(), revision=current_revision())
 
 
+@api_v1.route("/players")
+@api_handler
+def get_players():
+    # Every player of the local database, in the order of their keys, with
+    # the loaded game's mains and that game's codename (ADR-005 S4m; core's
+    # PlayerDirectory): PUT /players takes `game` back with the mains. The
+    # database, not state: no revision. Real names in it, so WebAccess has
+    # it as PLAYERDB, as /playerdb.
+    return ok(data=WebOps.get_players())
+
+
+@api_v1.route("/players/entrants")
+@api_handler
+def get_player_entrants():
+    # The loaded tournament's entrants, best seed first, each with `seed` and
+    # the database's record for its tag; one it does not have is the tag
+    # alone, `key` null. [] with no tournament. `game` and PLAYERDB, as
+    # /players.
+    return ok(data=WebOps.get_player_entrants())
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Safe write operations (spec §6 — op-logged, no confirm)
 # ═══════════════════════════════════════════════════════════════════════
@@ -871,6 +893,16 @@ _PLAYER_STRING_FIELDS = (
 _MAINS_SHAPE = "{gameCodename: [[name: str, skin: int, variant?: str], ...]}"
 
 
+def _is_main_entry(entry, min_skin=0):
+    """[name: str, skin: int >= min_skin, variant?: str]"""
+    return (isinstance(entry, list) and 2 <= len(entry) <= 3
+            and isinstance(entry[0], str)
+            and isinstance(entry[1], int)
+            and not isinstance(entry[1], bool)
+            and entry[1] >= min_skin
+            and (len(entry) == 2 or isinstance(entry[2], str)))
+
+
 def _validate_mains(mains):
     """`mains` in the one shape SetData reads per game, checked entry by entry.
 
@@ -888,12 +920,7 @@ def _validate_mains(mains):
             raise ApiError(
                 INVALID_ARGUMENT, f"mains.{codename} must be a list", 400)
         for entry in entries:
-            if not (isinstance(entry, list) and 2 <= len(entry) <= 3
-                    and isinstance(entry[0], str)
-                    and isinstance(entry[1], int)
-                    and not isinstance(entry[1], bool)
-                    and entry[1] >= 0
-                    and (len(entry) == 2 or isinstance(entry[2], str))):
+            if not _is_main_entry(entry):
                 raise ApiError(
                     INVALID_ARGUMENT,
                     f"mains.{codename} entries must be "
@@ -933,6 +960,129 @@ def player_update(n, t, p):
             raise ApiError(
                 NOT_FOUND, f"team {t} has no player {p}", 404)
     return ok(revision=current_revision())
+
+
+@api_v1.route(
+    "/scoreboards/<int:n>/teams/<int:t>/players/<int:p>:load", methods=["POST"])
+@write_op("player.load", log_keys_only=True)
+def player_load(n, t, p):
+    # {"tag"}: load the local database's player of that gamer tag (ignoring
+    # case; no sponsor) into the slot, clearing it first (ADR-005 S4m; the
+    # legacy -load-player-from-tag- route's operation, and the player list's
+    # "set to P1 / P2"). Unlike PATCH players, `t` is the set's team: after
+    # a swap team 1 lands on state team 2, as the legacy route's. An unknown
+    # tag or a slot the team does not have: 404, with no tag in the message.
+    require_board_12(n)
+    _validate_team(t)
+    if p < 1:
+        raise ApiError(INVALID_ARGUMENT, "player must be 1 or greater", 400)
+    tag = _json_body().get("tag")
+    if not isinstance(tag, str) or not tag:
+        raise ApiError(INVALID_ARGUMENT, "tag must be a non-empty string", 400)
+    try:
+        result = WebOps.load_player_from_tag(n, tag, t, p)
+    except WebOps.NoSuchSlot:
+        raise ApiError(NOT_FOUND, f"team {t} has no player {p}", 404)
+    if result != "OK":
+        raise ApiError(NOT_FOUND, "no player with that tag", 404)
+    return ok(revision=current_revision())
+
+
+# What PUT /players answers for each of PlayerDirectory.Save's refusals. Fixed
+# messages: a refused value can be a person's.
+_PLAYER_SAVE_REFUSALS = {
+    PlayerDirectory.NO_TAG:
+        (INVALID_ARGUMENT, "gamerTag is required", 400),
+    PlayerDirectory.UNKNOWN_COUNTRY:
+        (INVALID_ARGUMENT, "unknown country_code", 400),
+    PlayerDirectory.UNKNOWN_STATE:
+        (INVALID_ARGUMENT, "state_code is not a region of country_code", 400),
+    PlayerDirectory.UNKNOWN_CHARACTER:
+        (INVALID_ARGUMENT, "mains names a character the loaded game does "
+                           "not have", 400),
+    PlayerDirectory.UNKNOWN_SKIN:
+        (INVALID_ARGUMENT, "mains names a skin its character does not have",
+         400),
+    PlayerDirectory.UNKNOWN_VARIANT:
+        (INVALID_ARGUMENT, "mains names a variant the loaded game does not "
+                           "have", 400),
+    PlayerDirectory.OTHER_GAME:
+        (CONFLICT, "the mains are not of the loaded game (another one was "
+                   "named, or none is loaded)", 409),
+    PlayerDirectory.SUPERSEDED:
+        (CONFLICT, "a newer save of this player came first; nothing was "
+                   "saved", 409),
+}
+
+# PUT /players' texts. Far over any real value: they keep what a client sends
+# out of the file and of every row that reads it, not a name out of the file.
+_PLAYER_LINE_MAX = 256
+_PLAYER_NOTE_MAX = 4096
+
+
+def _player_save_text(key, value):
+    """A text of PUT /players as it is saved. The note has lines. The others
+    are one line, trimmed: a space pasted around a tag would be another
+    database key. No value in the messages: a refused one can be a person's."""
+    if key == "custom_textbox":
+        if len(value) > _PLAYER_NOTE_MAX:
+            raise ApiError(
+                INVALID_ARGUMENT,
+                f"{key} must be at most {_PLAYER_NOTE_MAX} characters", 400)
+        return value
+    value = value.strip()
+    if len(value.splitlines()) > 1:
+        raise ApiError(INVALID_ARGUMENT, f"{key} must be one line", 400)
+    if len(value) > _PLAYER_LINE_MAX:
+        raise ApiError(
+            INVALID_ARGUMENT,
+            f"{key} must be at most {_PLAYER_LINE_MAX} characters", 400)
+    return value
+
+
+@api_v1.route("/players", methods=["PUT"])
+@write_op("player.save", log_keys_only=True)
+def player_save():
+    # Save a player into the local database (ADR-005 S4m; core's
+    # PlayerDirectory.Save, the state untouched). The texts of PATCH players;
+    # a text that is missing is empty, but country_code / state_code stay as
+    # stored unless sent ("" clears). `mains`, a list of [en_name, skin,
+    # variant?], replace the loaded game's only, and come with the `game` they
+    # were picked for (GET /players' `game`, null for none); without them no
+    # game's change. An entry the player already has goes unchecked: -1 is a
+    # skin here for that. Answers the database key and whether it is a new one.
+    body = _json_body()
+    fields = {}
+    for key, value in body.items():
+        if key in _PLAYER_STRING_FIELDS or key == "game":
+            if value is not None and not isinstance(value, str):
+                raise ApiError(INVALID_ARGUMENT, f"{key} must be a string", 400)
+            if value is not None and key != "game":
+                value = _player_save_text(key, value)
+        elif key == "mains":
+            if not isinstance(value, list) \
+                    or len(value) > AutonaActions.MAX_CHARACTERS_PER_PLAYER \
+                    or not all(_is_main_entry(entry, min_skin=-1)
+                               for entry in value):
+                raise ApiError(
+                    INVALID_ARGUMENT,
+                    "mains must be at most "
+                    f"{AutonaActions.MAX_CHARACTERS_PER_PLAYER} "
+                    "[name: str, skin: int >= -1, variant?: str]", 400)
+        else:
+            raise ApiError(INVALID_ARGUMENT, f"unknown player field: {key}", 400)
+        fields[key] = value
+    if "mains" in fields and "game" not in fields:
+        raise ApiError(
+            INVALID_ARGUMENT, "game is required with mains (GET /players has "
+                              "it, null with no game)", 400)
+    if (fields.get("country_code") or fields.get("state_code")) \
+            and not CountryCatalog.instance.IsLoaded():
+        raise ApiError(NOT_READY, "country data is not loaded yet", 409)
+    result = WebOps.save_player(fields)
+    if isinstance(result, str):
+        raise ApiError(*_PLAYER_SAVE_REFUSALS[result])
+    return ok(data=result)
 
 
 @api_v1.route("/display-options", methods=["PATCH"])
@@ -1524,6 +1674,22 @@ def reset_match(n):
     _require_confirm(_json_body())
     WebOps.reset_match(n)
     return ok(revision=current_revision())
+
+
+@api_v1.route("/players:delete", methods=["POST"])
+@write_op("player.delete", log_keys_only=True)
+def player_delete():
+    # {"key", "confirm": true}: delete the player stored under `key` (a
+    # row's, GET /players) from the local database (ADR-005 S4m). The
+    # database, not state: no revision. 404 when it has no such key.
+    body = _json_body()
+    _require_confirm(body)
+    key = body.get("key")
+    if not isinstance(key, str) or not key:
+        raise ApiError(INVALID_ARGUMENT, "key must be a non-empty string", 400)
+    if not WebOps.delete_player(key):
+        raise ApiError(NOT_FOUND, "no player with that key", 404)
+    return ok()
 
 
 # ── Board overwrite (confirm recommended, spec §7.1) ──

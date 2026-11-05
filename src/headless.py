@@ -566,14 +566,16 @@ def _ConfigureLogging():
             except Exception:
                 pass
         handlers.append({
-            "sink": sys.stdout, "level": "INFO",
+            "sink": sys.stdout, "level": "INFO", "diagnose": False,
             "format": ("<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
                        "<level>{level}</level> | <level>{message}</level>")})
     logger.configure(handlers=handlers)
+    # diagnose=False on every sink: loguru's default writes the local
+    # variables' values into a traceback, and those can be a player's name.
     logger.add("./logs/autona.log", format=_LOG_FORMAT, encoding="utf-8",
-               level="INFO", rotation="20 MB", retention=5)
+               level="INFO", rotation="20 MB", retention=5, diagnose=False)
     logger.add("./logs/tsh-error.log", format=_LOG_FORMAT, encoding="utf-8",
-               level="ERROR", rotation="20 MB", retention=5)
+               level="ERROR", rotation="20 MB", retention=5, diagnose=False)
 
 
 def _SeedBoards():

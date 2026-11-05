@@ -5561,3 +5561,89 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - `GET /stats/overlays` は LAN 許可時に LAN の IP を返す READ（認証なし・CORS 全許可）。LAN 内の相手には既知の情報で、配信 PC のブラウザで開いた別サイトから読める可能性がある。受け入れた判断
   - 選択は state に無いので、別クライアントの選び直しは表示中のページに追従しない（Commentary と同じ）。画面遷移と PUT の競合でも次の再マウントで直る
   - 保存に失敗したときにメモリと画面が食い違うのは `SettingsManager` 共通の既存の挙動で、今回は触らない
+
+### S4 選手リスト（選手 DB）の React 化 — 設計（2026-11-05・オーナー承認済み）
+
+**範囲**: サイドバー Data の「選手リスト」（`src/AutonaPlayerBrowserWidget.py` 534 行、キー `playerBrowser`）を共有ビューの React ページ `/web/playerBrowser` に移し、Qt 版を消す。編集ダイアログは選手カード（`AutonaScoreboardPlayerWidget`）を `player_editor.1` に貼って流用しているので、これも一緒に無くなる。**core と v1（S4m）→ React 化と Qt 版の削除（S4n）の 2 段**にする。
+
+**棚卸し**（Qt 版の中身）:
+
+- 「大会の参加者」タブ: `provider.top_entrants`（seed + gamerTag）に DB の記録を突き合わせた seed 順の表（Seed / Sponsor / GamerTag / Country / Characters。本名は非表示だが検索に当たる）。検索、「P1 に設定」「P2 に設定」（ボード 1 の各チームの 1 人目。`LoadPlayerFromTag`。入れ替え中は反対の state のチームへ）、編集（ダブルクリックでも）。大会なしの空表示あり
+- 「登録済み選手」タブ: DB 全件をタグ順で（GamerTag / Sponsor / Country / Characters / Twitter。本名は非表示で検索に当たる）。列ソート、検索、追加、編集、確認つきの削除
+- キャラの列は「いま選択中のゲーム」の mains（古い行は JSON 文字列のこともある）。先頭キャラのアイコンつき
+- 編集ダイアログ: 選手カードそのもの。**DB に保存するのは** prefix / gamerTag / name / twitter / custom_textbox / country_code / state_code と今のゲームの mains（最大 3 体）だけ（`PlayerService.PrepareSaveToDB`）で、カードにある他の欄（seed・誕生日・発音など）は保存されない。ボタンは「新規保存 / 更新」（タグが DB にあるかで文言が変わる）と削除、閉じる
+- 再描画の契機: `entrants_updated`・`db_updated`・ゲームの読込
+
+**設計**:
+
+- **S4m（core + v1。Qt 版は残す。単独でリリースできる）**
+  - `src/core/PlayerDirectory.py`（Qt 非依存）: `Registered()` / `Entrants()` が表の行を返す。mains は今のゲームのものを防御的に解釈して `[en_name, skin, variant]` で出す（文字列の mains や壊れた行で落ちない）。参加者は `StreamService.TopEntrants()`（core がすでに持ち、大会の切替で空になる）と DB の突き合わせ。DB に無ければタグだけの行
+  - `Save(fields)`: 受け取った識別子（国・地域のコード、キャラの en_name + skin + variant）を検証して `PrepareSaveToDB` と同じ形の記録を組み、`PlayerService.SaveRecordToDB` で保存する（順序の保護と、他のゲームの mains の維持を共有する）。現行の state 経由の結果と同じ記録になることを golden で固定する
+  - `Delete(key)`: `PlayerDB.DeletePlayer` のキーの存在検査つき
+  - v1（追加のみ）: `GET /players`（DB 全件の行）、`GET /players/entrants`、`PUT /players`（保存。応答に `key` と新規 / 更新の別）、`POST /players:delete`（`{"key","confirm":true}`。既存の破壊的操作の規約）、`POST /scoreboards/{1,2}/teams/{t}/players/{p}:load`（`{"tag"}`。既存の `load_player_from_tag`。タグが無ければ 404）
+  - **個人情報**: 読み取り 2 本も既存の `/playerdb` と同じ `PLAYERDB` 区分にする（READ にしない。LAN からはトークン必須）。書き込みの op ログはキー名だけ（`log_keys_only`）
+  - 取得ジョブの順序を直す: `StreamService.SetTopEntrants` を `NotifyChanged` の前へ移す（`playerdb` の push が届いた時点で参加者が読めるように）。ページの再読込の契機はこの push（既存）と、`tournamentInfo.load` と `game` の変化
+- **S4n（React 化と Qt 版の削除）**
+  - `web/src/PlayerBrowserPage/`: 2 タブの表、検索（`useDeferredValue`）、登録済みの列ソート、確認ダイアログつきの削除。編集は MUI の Dialog で、下書きは**ページのローカル**に持ち、保存のときだけ v1 に送る（論点 1）。入力は既存の国・地域の選択（`CountryStateSelector`）とキャラの選択（`CharSelector`）を使う。キャラのアイコンは `GET /characters` の資産 URL を `loading="lazy"` で
+  - 表は 100 行ごとのページ分割（論点 3）
+  - シェル: `WEB_PANELS` に `playerBrowser` を足す。nav の位置・`STATE_VERSION`（22）は変えない
+  - 削除: `AutonaPlayerBrowserWidget.py` と訳、選手カードの `player_editor` 向けの分岐（インラインフォーム・保存 / 削除ボタン・`Manage*`。パスは `score.*` だけになる）。`PLAYER_EDITOR_ROOT` と `ClearPlayerEditor` は、古い `state.json` を掃除するために残す。agent-pitfalls #7 と関連テストを 1 種類のパスの前提に直す。`AutonaPlayerDB`（ボードの名前補完）は残す
+
+**挙動の違い**（Qt 版から変わるもの）:
+
+- 編集画面に、保存されない欄（seed・誕生日など）は出さない。今は打っても捨てられている欄なので、実質の変更は無い
+- 編集中の内容が state に出なくなる（`player_editor.*` と `out/player_editor/` が作られなくなる）
+- 表がページ分割になる
+
+**リスク**: S4m は小（追加のみ。順序の入れ替えは取得ジョブの中だけ）→ 区分「通常」。S4n は選手カードの大きな分岐を消し、state のキーの書き手が無くなる → **区分「高」**（CI 緑でオーナーの確認を待つ）
+
+**オーナー判断が要る論点（推奨つき）**
+
+1. **編集中の下書きの置き場** → 推奨: **ページのローカルに持ち、保存時に送る**。今の `player_editor.*` はカードを流用するための仕組みで、配信にも保存にも使われていない。React にカードは無いので残す理由が無く、カードの分岐も消せる。state に残す案は書き手のサービスと掃除を React のために保つことになる
+2. **タグを変えて保存したときの扱い** → 推奨: **今のまま（別の選手として新規保存され、元の記録は残る）**。DB のキーが「スポンサー + タグ」なので、改名に見える操作で重複が残る癖はあるが、置き換えにすると大会データの取り込み（タグで合流する）との整合を別に考える必要がある。直すなら別の改善として扱う
+3. **大きな DB の表示** → 推奨: **100 行ごとのページ分割**。何千人もの DB で全行を描くとパネルの切替が重くなる。仮想スクロールは依存を増やす（区分「高」）か自作が要り、この表には過剰
+4. **自走の範囲** → 推奨: **S4m → S4n を自走する**。S4m は PR 作成と自動マージの予約まで。S4n は PR 作成までで止め、CI 緑を報告してオーナーの確認を待つ。次のパネル（リザルト / サムネイル）はまた設計を出す
+
+**対象外**: ボードの選手カードの名前補完（Qt のまま）、改名の扱いの変更（論点 2）、DB の項目の追加、CSV の取り込み
+
+**見積り**: S4m は中（core 1 ファイル + v1 5 本 + golden）。S4n は大きめ（React ページ 1 枚 + 編集ダイアログ + カードの分岐の削除とテストの整理）
+
+#### S4m 選手 DB の core 化（2026-11-05）
+
+選手リストの行・保存・削除を core と v1 に置いた。Qt 版（`src/AutonaPlayerBrowserWidget.py`）は残し、動作は変えていない（v1 が増えただけで単独でリリースできる）。S4n はこの上に React のページを作って Qt 版を消す。
+
+- **完了内容**
+  - core: `src/core/PlayerDirectory.py`（Qt 非依存・モジュール関数）。`Registered()` / `Entrants()` / `Save(fields)` / `Delete(key)`
+  - `PlayerService`: `NextSaveSequence()`（`PrepareSaveToDB` と `Save` が同じ番号の列を使う）、ノートの符号化 / 復号 `NoteForDB` / `NoteFromDB`（`PrepareSaveToDB` / `ApplyData` も同じ関数）。`SaveRecordToDB` の「古い保存を捨てた」ログからタグの値を除き、文字列の mains を merge の前に dict へ直す（`PlayerDB.KeepStoredMains`）
+  - `PlayerDB.GetPlayerFromTag`: gamerTag が文字列でない行（`None` など。ファイルには入りうる）と dict でない行で落ちていたので、その行は一致しないだけにした。`:load` も legacy も同じ関数を通るので根本で直した
+  - v1（追加だけ）: `GET /players`・`GET /players/entrants`（`PLAYERDB` 区分）、`PUT /players`（`player.save`）、`POST /players:delete`（`player.delete`。confirm 必須）、`POST /scoreboards/{1,2}/teams/{t}/players/{p}:load`（`player.load`）。どれも `log_keys_only`。Web 操作は `get_players` / `get_player_entrants` / `save_player` / `delete_player`（呼び出し元のスレッドで core。ボードホストは通らない）。存在しないスロットは `WebOps.NoSuchSlot`（`IndexError` の派生。legacy の 500 は不変）で v1 だけ 404。`load_player_from_tag` は DB の記録を `PlayerDB.lock` の中でコピーしてから読み込む（legacy の結果は不変）
+  - 取得ジョブの順序: `StartGGDataProvider.GetEntrantsWorker` で sort + `SetTopEntrants` を `NotifyChanged` の前へ。`cancel_event` と `entrants_updated` の扱いは不変。どのロックも持たない provider のジョブの中なので、pitfalls #16 / #17 に当たらない
+  - ログの sink（デスクトップとヘッドレスのコンソール・`autona.log`・`tsh-error.log`）を `diagnose=False` に。loguru の既定は traceback にローカル変数の値を書くので、選手の近くの例外で本名や SNS がログに出ていた。ログはバグ報告などで人に渡りうる。**S4m で増えた経路に限らず、既存の traceback からもローカル変数の値が消える**（調査のときは例外の型と行番号で追う）
+- **外部契約**: v1 のルートが 5 本増えただけ（`external-control-api.md` §5.11・§6.26・§6.27・§7.2）。既存のルート・state・`local_players.json` の形は変えていない。カードの `savePlayerToDb` だけ、文字列の mains の行で他のゲームの mains を失わなくなった（下の判断 5）
+- **テスト**: `tests/test_player_directory.py`（golden: 同じ入力をカードの書き込み → `SavePlayerToDB` と `Save` に通し、記録・キー順・ファイルのバイトを照合。壊れた mains・地域の読み替え・他のゲームの mains・往復・送らない値の保持・順序の保護の共有・ログ）、`tests/test_api_v1_players.py`（アクセス区分・LAN でトークンなし拒否・別サイトからの読み取りの拒否・ログに値が出ない・sink の `diagnose=False`（AST）・入力検証・confirm・`game` の照合・参加者行の送り返し・`:load` のスワップと 404 とロック内コピー）、`tests/test_webserver_routes.py` の台帳（v1 46 of 69。分類規則に PLAYERDB の 2 本の例外）、`tests/test_web_operations.py` の walk、`tests/test_provider_jobs.py`（通知の前に参加者が core にある。実物の `SetTopEntrants` でのキャンセルと `StreamService.instance` が None のとき）
+- **オーナー実機確認**: 画面の変更は無い。`python main.py` で Qt の選手リストの一覧・編集・削除、大会読込後の参加者タブ、ボードの名前補完がこれまでどおり動くこと（順序を入れ替えた取得ジョブの通過確認）
+- **レビュー対象の判断**（設計の文面からの差分を含む。2026-11-05 のレビューで、方針を「編集していない値を保存で壊さない」に揃えた）
+  1. **行の `country_code` / `state_code` は `Save` が受け取る値に読み替える**。DB には解決できなかった start.gg の地名がそのまま入る（`ProcessEntrantData` の `resolved or state_raw`）。Qt のエディタが読むのと同じ規則（地域コード → `FindState` → 無し）を行に適用した。Qt の表は未知の国コードを生の文字で出していたが、新しい行は空。国データの読み込み前は DB の値のまま返す。読み替えた `""` は DB が空だという意味ではないので、**`PUT` は `country_code` / `state_code` のキーが無ければ DB の生の値を保ち、`""` を明示のクリアとする**。これで `city_to_state.json` の欠落やカスタム国旗の読み取り失敗でも、無編集の保存で値が消えない。ページは変更したときだけ送る
+  2. **行の mains はカタログと照合せず、`PUT` は持っている要素を照合しない**（設計どおり `_MainsForCurrentGame` の読み方に、往復を足した）。今のゲームに無いキャラ・範囲外のスキン・スキン `-1` は DB の値のまま行に出て、その選手の今のゲームの mains に同じ形（キャラ・スキン・バリアント）である要素はカタログを見ずに保存する。新しく足す要素だけ検証する。S4n の編集画面はそれらを壊さずに持つ
+  3. **mains の上限は 100（`MAX_CHARACTERS_PER_PLAYER`）にした**（棚卸しの「最大 3 体」はエディタのカードの行数）。ボードの `savePlayerToDb` は 3 体より多く保存できるので、3 に絞るとそういう行が送り返せない。何体を編集させるかは S4n のページが決める
+  4. **`mains` を送らない保存は記録の `mains` を空の dict にする**（どのゲームの mains も変わらない。state 経由はゲーム未選択で鍵なしになり、`AddPlayers` が全ゲームの mains を消す）。golden と意図的に違う唯一の点で（golden は全部送る）、テストで別に固定した。**`mains` を送るなら `game` が必須で、今の codename と違えば `CONFLICT`**。未選択は `null` と照合し、`mains` が空でなければ入れる先が無いので `CONFLICT`（`ForgetSelection` の後もキャラの表は残るので、検証を通って黙って捨てられるのを防ぐ）。ページは state の `game.codename` ではなく `GET` の `game` を送り返す（`ForgetSelection` の後も state には codename が残る）
+  5. **DB の mains が文字列の行は `SaveRecordToDB` が merge の前に dict へ直す**（`PlayerDB.KeepStoredMains`。`_saveLock` の中）。当初は `Save` だけが直していて、カードの `savePlayerToDb` は他のゲームの mains を失っていた（`AddPlayers(overwrite=True)` の merge が文字列を更新できず、ログを出して置き換える）。**これはカードの経路の意図した挙動変更**（データを失わなくなるだけで、記録の形は同じ）。`AddPlayers` 自体は変えていないので、それを直接再生する `tests/fixtures/player_db/golden.json` は更新していない（その録画の文字列は `"{}"` で、どちらでも結果は同じ）。`overwrite=True` の呼び出しは今は `SaveRecordToDB` だけなので、`_AddPlayer` の失敗の分岐を通るのは golden だけになった
+  6. **`Entrants` は `GetPlayerFromTag` を参加者ごとに呼ばず、1 回の走査で索引を作る**（設計の文面との差。参加者数 × DB 件数をロックの中で回さないため）。同じ答えになることはテストで確認した
+  7. **`:load` の `{t}` はセット側のチームで、スワップ時に反転する**（`external-control-api.md` §6 冒頭の規約の唯一の例外）。設計どおり既存の `load_player_from_tag` を呼ぶ形で、Qt の「P1 に設定」と同じ意味。ページはボード 1 に対して team 1 / 2 を送るだけでよい
+  8. **国だけ変えて地域を送らなければ、DB の地域を消す**（「送らなければ変えない」の唯一の例外）。地域コードは国をまたいで重なる（`13` は別の国の別の場所になりうる）ので、残すと別の場所を指す。同じ国を送っただけなら消さない。地域だけ送ったら DB の国の地域として検証する。`null` は `""` と同じクリア
+  9. **`PUT` の 1 行の欄は前後の空白を取り、途中の改行は 400、上限 256 文字。`custom_textbox` は改行可で空白はそのまま、上限 4096 文字**。どちらも実際の値の十分外で、`AutonaApiV1` の検査（core の `Save` は golden のためカードと同じく文字列をそのまま受ける）。メッセージに値は入れない
+  10. **順序の番号は保持する値を読む前に取る**（`NextSaveSequence` → `PlayerDB.lock` の順。逆にするとロック順 `_saveLock` → `PlayerDB.lock` に反する）。読んだ後に保存されたカードの記録の方が新しい番号を持つので、古い読み取りで上書きしない。負けた `PUT` は `SUPERSEDED` → `409 CONFLICT`（黙って成功を返さない）
+  11. **コンソールの sink にも `diagnose=False` を付けた**（依頼はファイルの sink）。ヘッドレスのコンソールは運用者の唯一の画面で、リダイレクトされるとファイルに残るため
+- **受け入れた点（直さない）**
+  - `BadWordFilter.CensorString` は語が一致したときに元の文字列を INFO で出す（`logger.info(value, "->", newString)`。golden で固定の既存コード）。`:load` の読込もここを通るので、悪語フィルタに当たった名前だけはログに出る。S4m で増やした経路ではなく、`PATCH players` や legacy も同じ
+  - `ApplyData` は mains の壊れた形（`{"g": [[]]}`・`{"g": [5]}`）で例外を出すので、そういう行の `:load` は 500。表示（`GET /players`）は落ちない。読込側の修正は S4m の範囲外
+  - API 情報ウィンドウにはルートを足さない（S4e / S4g / S4i / S4l と同じ）
+  - 削除の前に読んだカードの保存が、削除の後に記録を復活させる（窓が極小で、既存の順序の保護の枠外）
+  - `created` は保存の前の先読みで、同じキーへの同時の `PUT` では両方 `true` になりうる
+  - `:load` は未知のタグでも先にボードを構築する（legacy と同じ）
+  - legacy のリスト形の mains（`["Mario", 1]`）は行に出ない（到達性が低い）。そういう行に `mains` を送る保存は、今のゲームの分を送った値にする
+  - 参加者の行の `gamerTag` には start.gg の本名のフォールバックが入りうる（既存の `first.get("gamerTag") or first.get("name")`。`PLAYERDB` 区分で保護している）
+  - メモリだけのキー（`id` / `avatar` / `seed` / `city`）は保存で落ちる（カードの経路と同じ）
+  - ゲーム未選択のカードの `savePlayerToDb` は記録に `mains` が無く、全ゲームの mains を失う（既存。今回の依頼の範囲外で変えていない。`PrepareSaveToDB` が空の dict を入れれば直る）
+  - DB に前後の空白つきのタグやスポンサーの行があると、`PUT` の trim でキーが変わり、別の記録ができる（元の記録は残る。消えない。start.gg の値は通常 trim 済みで到達性が低い）
+  - スポンサーかタグを変えた保存は何も引き継がない（Qt 版と同じく別の選手。行が読み替えた地名や国は DB からは引き継がれないので、S4n のページが見えている値を送る）

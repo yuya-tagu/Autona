@@ -104,6 +104,21 @@ _FILENAME_UNSAFE = re.compile(r"[,/|;:<>\\?*]")
 # have handed it over.
 _LINE_BREAKS = re.compile("\r\n|[\r\u2028\u2029]")
 
+
+def NoteForDB(text: str) -> str:
+    """A note as the player database stores it: one line in the file, its
+    line breaks escaped."""
+    return "\\n".join(text.splitlines())
+
+
+def NoteFromDB(text: str) -> str:
+    """A stored note as the card's note box hands it over: real line breaks,
+    "\\n" only. Not an exact inverse of NoteForDB: a final line break did not
+    survive that (splitlines), its rarer breaks come back as "\\n", and a
+    backslash and an "n" typed as text come back as a line break."""
+    return _LINE_BREAKS.sub("\n", text.replace("\\n", "\n"))
+
+
 # A loaded player's fields, PlayerDB-shaped key -> slot key, in the order
 # they were set (the gamer tag, the sponsor, the real name).
 _NAME_FIELDS = (
@@ -875,8 +890,7 @@ class PlayerService:
         note = source.get("custom_textbox")
         if note and note != StateManager.Get(self.Key(schema.PLAYER_NOTE_KEY)):
             # Stored with its line breaks escaped (PlayerDB, SavePlayerToDB).
-            value = _LINE_BREAKS.sub(
-                "\n", f"{censor(note)}".replace("\\n", "\n"))
+            value = NoteFromDB(f"{censor(note)}")
             if value != self._Text(schema.PLAYER_NOTE_KEY):
                 self.SetText(schema.PLAYER_NOTE_KEY, value)
 
@@ -1011,7 +1025,8 @@ class PlayerService:
     def SaveRecordToDB(prepared: PreparedSave) -> bool:
         """The database half of SavePlayerToDB: the record PrepareSaveToDB
         read into the local player database. The record keeps the
-        database's other games' mains (PlayerDB.AddPlayers overwrite).
+        database's other games' mains (PlayerDB.AddPlayers overwrite), those
+        of a stored JSON string too (PlayerDB.KeepStoredMains).
 
         Called with no lock held -- a board host's included: the database
         announces the change (PlayerDB.changed), and its relay rebuilds the
@@ -1030,14 +1045,27 @@ class PlayerService:
         tag = PlayerDB.PlayerTag(record)
         with PlayerService._saveLock:
             if PlayerService._savedSequence.get(tag, 0) > sequence:
-                logger.info(f"Player DB: an older save of {tag!r} dropped "
-                            f"(a newer one is saved)")
+                # No tag in the message: it is a player's name (ADR-005 S4m).
+                logger.info("Player DB: an older save of a player dropped "
+                            "(a newer one is saved)")
                 return False
             PlayerService._savedSequence[tag] = sequence
-            db.AddPlayers([record], overwrite=True, deferRefresh=True)
+            with db.lock:
+                db.KeepStoredMains(tag)
+                db.AddPlayers([record], overwrite=True, deferRefresh=True)
         db.SaveDB()
         db.NotifyChanged()
         return True
+
+    @staticmethod
+    def NextSaveSequence() -> int:
+        """The next number of the order SaveRecordToDB keeps: taken when a
+        record is read, by PrepareSaveToDB from a slot and by
+        PlayerDirectory.Save from a request (ADR-005 S4m), so saves from
+        either keep the same order."""
+        with PlayerService._saveLock:
+            PlayerService._saveSequence += 1
+            return PlayerService._saveSequence
 
     def PrepareSaveToDB(self) -> PreparedSave:
         """The state half of SavePlayerToDB: the slot as the local player
@@ -1051,9 +1079,7 @@ class PlayerService:
         snap = self._GameCatalog().Current()
         with StateManager.lock:
             slot = self._Slot()
-            with PlayerService._saveLock:
-                PlayerService._saveSequence += 1
-                sequence = PlayerService._saveSequence
+            sequence = PlayerService.NextSaveSequence()
 
         def text(field):
             value = slot.get(field)
@@ -1065,8 +1091,7 @@ class PlayerService:
             "name": text(schema.PLAYER_REAL_NAME_KEY),
             "twitter": text(schema.PLAYER_TWITTER_KEY),
             # One line in the file: the line breaks escaped.
-            "custom_textbox": "\\n".join(
-                text(schema.PLAYER_NOTE_KEY).splitlines()),
+            "custom_textbox": NoteForDB(text(schema.PLAYER_NOTE_KEY)),
         }
         slots = self._CharacterSlots(slot.get("character"), snap)
         codename = (snap.game or {}).get("codename")
