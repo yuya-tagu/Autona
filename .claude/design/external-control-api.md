@@ -224,6 +224,7 @@
 | `GET /api/v1/stream/thumbnail/options` | 配信サムネ生成のオプション（§5.6。2026-10-31 追加） | `get_stream_thumbnail_options`（`core/StreamService.ThumbnailOptions`） | — |
 | `GET /api/v1/tournament` | 大会の URL と、設定 / 解除の進み具合（§5.7。2026-11-01 追加） | `get_tournament`（state の `tournamentInfo.url` / `load`。`core/TournamentService.Load`） | — |
 | `GET /api/v1/analysis` | この大会の試合一覧の行（§5.9。2026-11-04 追加） | `get_analysis`（`core/AnalysisService.Result`） | — |
+| `GET /api/v1/stats/overlays` | 統計情報表示設定の種類の表・選択中・Companion マクロのリクエスト（§5.10。2026-11-05 追加） | `get_stats_overlays`（`core/StatsOverlays`） | — |
 
 > `data` の具体スキーマは委譲先 Action の現返却（candidates §3）に準拠。本 API はそれを `{"ok":true,"data":...}` で包むだけ。
 
@@ -381,6 +382,31 @@ Board / Commentary / Top 8 タブと Designer の「開く」一覧が使う**�
   `losersRun`（無しは 0）・`seedOver`（無しは `null`）。並び順は core の順で、表示の既定の並びはクライアントが決める
 - 状態の読み取りなので封筒に `revision` が付く。行の世代は `analysis.revision`（取得を受け付けるたび・大会を変えるたびに進む）。
   統計情報ページは `analysis.revision` / `status` が変わったときだけ読み直す
+
+### 5.10 `GET /api/v1/stats/overlays`（2026-11-05 追加・ADR-005 S4l）
+統計情報表示設定ページ（`/web/statsPreview`）の読み取り。種類の表は core の `StatsOverlays` の固定表で、選択中は
+`settings.json` の `stats_preview.selected_type`（UI の設定で state ではない。Qt 版と同じキー・値）。
+
+```json
+{ "ok": true, "data": {
+  "overlays": [
+    { "key": "upset_factor", "id": "upset_factor", "entry": "index.html", "displayName": "Upset Factor" },
+    { "key": "last_sets_p1", "id": "last_sets", "entry": "player1.html", "displayName": "Last Sets (Player 1)" }
+  ],
+  "selected": { "key": "upset_factor", "id": "upset_factor", "entry": "index.html", "displayName": "Upset Factor" },
+  "refresh": { "method": "POST", "path": "/scoreboards/1/stats:refresh",
+               "url": "http://127.0.0.1:5107/api/v1/scoreboards/1/stats:refresh" }
+} }
+```
+- `overlays` は 7 種を表示順に。`key` が保存される値（フォルダ名を変えても変わらない）、`id` はレイアウトのフォルダ、
+  `entry` は入口の html。`last_sets` / `tournament_history` は同じ `id` で `player1.html` / `player2.html` の 2 項目なので、
+  選択は `id` ではなく `key` で行う。`displayName` は英語の原文（訳はクライアント）
+- `selected` は保存値が表に無い（未保存・古い値）ときは先頭（Qt 版と同じ。保存値は書き換えない）
+- `refresh` は Companion マクロの `stats:refresh` のリクエスト。`url` はサーバーが組む: **実際に待ち受けている**ポートと LAN 公開の有無（設定の変更は次の起動から効くので、
+  設定値ではなくサーバーが bind したもの。起動していない環境では設定値）で、LAN 公開なら LAN の IP、でなければ `127.0.0.1`
+  （ページの `location` からは LAN の IP が分からないため）。**トークンは含めない**。別 PC の Companion は
+  ヘッダ `X-Autona-Token` が要る
+- 設定なので `revision` は付かない
 
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
@@ -645,6 +671,12 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - `DELETE`: 全試合のスコアと確定を戻す（`Top8Service.ResetMatches`。「全リセット」）
 - どちらも `data` は公開した `top8.matches`
 
+### 6.25 統計オーバーレイの選択 `PUT /api/v1/stats/overlays/selected`（2026-11-05 追加・ADR-005 S4l）
+- body: `{ "key": "last_sets_p2" }`（§5.10 の `overlays[].key`）
+- 委譲: `select_stats_overlay` → `core/StatsOverlays.Select`。`settings.json` の `stats_preview.selected_type` に書くだけで形式は不変
+- 応答の `data` は選んだ項目（§5.10 の `overlays[]` の 1 つ）。設定なので `revision` は付かない。操作ログは `stats.overlay.select`
+- エラー: `INVALID_ARGUMENT`（`key` が文字列でない / 表に無い。何も保存しない）
+
 ---
 
 ## 7. 危険操作エンドポイント（書き込み・操作ログ対象 / ガード必須）
@@ -801,6 +833,7 @@ HTTP/1.1 409 Conflict
 > §5.8 `countries` と §6.22〜6.24 の Top 8（2026-11-04・ADR-005 S4i）は `tests/test_api_v1_top8.py` が pin する。
 > §5.9 `analysis` と §7.3 `analysis:refresh`（2026-11-04・ADR-005 S4k）は `tests/test_api_v1_analysis.py` が pin し、
 > 行の全シナリオを `tests/test_analysis_rows.py` が golden と照合する。
+> §5.10 `stats/overlays` と §6.25 `stats/overlays/selected`（2026-11-05・ADR-005 S4l）は `tests/test_api_v1_stats_overlays.py` が pin する。
 
 - **自動テストは作らない**（PdM 決定）。動作確認は**アプリ上で手動**で行う
   （`python main.py` 起動 → curl/HTTP クライアントで `/api/v1/...` を叩く → UI / `out/` / OBS で反映確認）。

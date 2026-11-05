@@ -1075,6 +1075,29 @@ def select_layout(kind):
     return ok(data=entry)
 
 
+@api_v1.route("/stats/overlays")
+@api_handler
+def get_stats_overlays():
+    # The statistics overlays the Stats Display Settings page offers, the
+    # selected one and the Companion macro's request (ADR-005 S4l; core's
+    # StatsOverlays). `refresh.url` is built here: only the server knows the
+    # host (the LAN IP when LAN access is on). Settings, not state: no
+    # revision.
+    return ok(data=WebOps.get_stats_overlays())
+
+
+@api_v1.route("/stats/overlays/selected", methods=["PUT"])
+@write_op("stats.overlay.select")
+def select_stats_overlay():
+    # {"key": "<overlay key>"}: one GET /stats/overlays lists. Kept as the
+    # Qt panel kept it (settings.json's stats_preview.selected_type).
+    key = _json_body().get("key")
+    item = WebOps.select_stats_overlay(key) if isinstance(key, str) else None
+    if item is None:
+        raise ApiError(INVALID_ARGUMENT, "key must be a listed overlay", 400)
+    return ok(data=item)
+
+
 @api_v1.route("/colors/<feature>", methods=["PATCH"])
 @write_op("colors.update")
 def colors_update(feature):

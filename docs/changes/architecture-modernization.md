@@ -44,7 +44,7 @@ PdM 方針（2026-10-23）「Autona のアーキテクチャを現代的に抜�
 | Display | リザルト画像（6 レイアウト）・コピー・保存・X | `AutonaResultSettingsWidget`(1,330) / `result/ResultRenderer` | `out/results/` |
 | Display | TOP 8（固定 8 名 DE）・Start.gg 取込 | `AutonaTop8Widget` / `AutonaTop8Model` / `core/Top8Service` | `top8.*` |
 | Display | 実況・解説（12 枠・表示最大 4） | React `CommentaryPage`（`/web/commentary`。S4c で Qt 版を削除）/ `core/CommentaryService` / `core/CommentaryModel` | `commentary.*` |
-| Display | 統計表示設定（統計オーバーレイ 5 種） | `AutonaStatsPreviewWidget` | `colors.stats` |
+| Display | 統計表示設定（統計オーバーレイ 7 種） | React `StatsPreviewPage`（`/web/statsPreview`。S4l で Qt 版を削除）/ `core/StatsOverlays` | `colors.stats` |
 | Data | 統計（H2H / Last Sets / History / Analysis） | `AutonaStatsWidget` / `AutonaAnalysisWidget` / `core/StatsService` | `score.{n}.*_sets` |
 | Data | 選手リスト・ローカル選手 DB | `AutonaPlayerBrowserWidget` / `AutonaPlayerDB` | `user_data/local_players.json` |
 | 共通 | Settings（General / Language / Hotkeys）・ゲームアセット追加・API/Companion/OBS ガイド・アップデータ・アラート | `Settings/` / `AutonaGameAssetGuideWindow` / `AutonaUpdater`(899) | — |
@@ -1173,7 +1173,7 @@ Web サーバーの公開面を 3 つ締めた。1 つ目は静的配信で、�
     - ただし、そのとき settings.json は空の内容で上書きされる。これは既存の SettingsManager の挙動で、どの設定の保存でも同じ
   - 古いブラウザ（`Sec-Fetch-*` が無い）の no-cors GET は、`Origin` も付かないので CSRF の判定をすり抜ける（`Host` の判定は掛かる）。OBS（CEF）・Chrome・Edge・Firefox・Safari の現行版は `Sec-Fetch-Site` を付ける
   - 既存の未翻訳: API 設定のエンドポイントの説明文・エラーコードの説明（例: 「Full state + revision」）は、HEAD の時点で `.ts` に無かった。今回は自分で足した文言だけを翻訳した
-  - `AutonaStatsPreviewWidget` の「Companion マクロ」カードは、LAN の URL を表示するがヘッダの説明は無い（Companion ガイドへのボタンがあり、ガイドには手順を足した）
+  - `AutonaStatsPreviewWidget` の「Companion マクロ」カードは、LAN の URL を表示するがヘッダの説明は無い（Companion ガイドへのボタンがあり、ガイドには手順を足した）（S4l で解消: 新しいページのカードに `X-Autona-Token` の 1 行を足し、メニューの場所を文で案内した）
 - **実機確認（オーナー）**
   - LAN オフ
     - この PC のブラウザで `/scoreboard` を開き、スコア・チーム名・反映を操作できる
@@ -5493,3 +5493,71 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - 大きな大会で絞り込みの欄に続けて打っても入力が引っかからない
 - **検証**（レビュー対応後・順に）: pytest 全量 3182 passed / 2 skipped（7 分 12 秒）／jest 全量 458 passed（25 suites。pytest の後に単独で）／`npm run build` OK（警告は既存の `Header.jsx` だけ）／`npm run test:e2e` 32 passed
   - 2 の新しいテスト（`test_the_read_is_of_one_moment`）は、`get_analysis` を lock なしの旧実装に一時的に戻すと落ちることを確かめた
+
+### S4 統計情報表示設定の React 化 — 設計（2026-11-04・2026-11-05 オーナー承認済み）
+
+**範囲**: サイドバー Display の「統計情報表示設定」（`src/AutonaStatsPreviewWidget.py` 286 行。`.ui` なし、キー `statsPreview`）を、共有ビューの React ページ `/web/statsPreview` に移し、Qt 版を消す。state を書くのは色カード（`colors.stats.*`。既に v1 `PATCH /colors/stats` がある）だけで、取得の処理は持たない。そのため core 化の前段は要らず、**1 段（S4l）**で済む。
+
+**棚卸し**（Qt 版の中身）:
+
+- 統計オーバーレイの種類のプルダウン（7 種。`STATS_LAYOUTS` の固定表。`last_sets` / `tournament_history` は同じフォルダの `player1.html` / `player2.html` を別項目として出す）。選択は settings.json の `stats_preview.selected_type`（UI の設定で、state ではない）
+- 色カード（`MakeFeatureColorCard(FEATURE_STATS)`）
+- Companion マクロのカード: `POST /scoreboards/1/stats:refresh` のメソッド・パス・ボディ・URL（ホストは `GetWebServerHost()`。LAN 許可時は LAN の IP）、URL のコピー、Companion 設定ガイドを開くボタン（`Window.EnsureCompanionGuideWindow`）
+- 右: 選んだオーバーレイのプレビュー（`AutonaLayoutPreview`。コピー / 画像保存ボタン付き）と OBS 用 URL のカード
+
+**設計（S4l）**:
+
+- **core**: `src/core/StatsOverlays.py` に固定表を移す（Qt 非依存）。`Overlays()`（`{key, id, entry, displayName}` の並び。`id` はフォルダ、表示名は英語の原文で、訳はページの i18n）・`Selected()`（保存値が表に無ければ先頭。Qt 版と同じ）・`Select(key)`（未知なら None で何も保存しない）。settings.json のキーと値は Qt 版のまま（既存ユーザーの選択が引き継がれる）
+- **v1（追加だけ）**:
+  - `GET /stats/overlays` → `{overlays, selected, refresh: {method, path, url}}`。`refresh.url` はサーバーが `GetWebServerHost()` とポートで組む（ページの `location` からは LAN の IP が分からないため）。settings なので revision なし。READ
+  - `PUT /stats/overlays/selected` `{"key"}` → 選んだ項目。未知の key は 400 `INVALID_ARGUMENT`。WRITE（op ログ `stats.overlay.select`）
+- **ページ** `web/src/StatsPreviewPage/`: 2 ペインの構成は Commentary / Top 8 と同じ。既存の部品を使い回す: 左は種類の select・`FeatureColorCard`（`PATCH /colors/stats`）・Companion カード（新規、`copyText`）、右は `DesignPane`（オーバーレイ自体を縮小表示）と `ObsUrlCard`。`DesignPane` / `obsUrl` は `id` を選択のキーに使っているので、同じフォルダの 2 項目を区別できるよう、選択のキーを渡せるようにする（既存 2 ページの挙動は変えない）
+- **シェル**: `WEB_PANELS` に `statsPreview` を足し、`_CreateStatsPreviewPanel` は `self._WebPanel("statsPreview")` を返す。nav の位置・`STATE_VERSION`（22）は変えない
+- **削除**: `src/AutonaStatsPreviewWidget.py` と、その訳（.ts / .qm）。`AutonaLayoutPreview` / `AutonaFeatureColors` は他（リザルト・ボード等）がまだ使うので残す
+
+**挙動の違い**（Qt 版から変わるもの）:
+
+- プレビューのコピー / 画像保存ボタンは無くなる（Commentary と同じ。2026-10-31 のオーナー判断に揃える）
+- 「Companion 設定ガイドを開く」ボタンは無くし、説明文で「ヘルプ → API 設定 → Companion 設定」を案内する（論点 2）
+- Companion カードに、別 PC の Companion はヘッダ `X-Autona-Token` が要る旨を 1 行足す（1176 行目の積み残し）
+
+**リスク**: 小。state のスキーマ・保存形式・bootstrap の順は変えない。settings.json のキーは同じ。外部契約は v1 のルート 2 本の追加だけ。**区分は「通常」**（PR 作成時に自動マージを予約する）
+
+**オーナー判断が要る論点（推奨つき）**
+
+1. **種類の表の置き場** → 推奨: **core の固定表 + 専用の v1 2 本**。`LayoutCatalog` に kind `stats` を足す案は、1 フォルダに 2 項目（player1 / player2）がある形が catalog の「1 フォルダ 1 項目」に合わず、各 `settings.json` に `autona` ブロックを足す必要もあって変更が広がる
+2. **Companion 設定ガイドへの導線** → 推奨: **ボタンを無くし、メニューの場所を文で案内する**。ガイドはヘルプメニューから開ける。ボタンを残すにはシェル操作を増やす必要があり、「シェル操作を増やさない」規約（agent-pitfalls #2）に反する
+3. **自走の範囲** → 推奨: **S4l を自走し（コミット・push・PR 作成・自動マージの予約まで）、その後で停止する**。次のパネル（PlayerDB）はまた設計を出す
+
+**対象外**: 統計オーバーレイ本体（`layout/*`）の変更、ボード 2 / 3 の統計、API 情報ウィンドウへのルート追加、Companion ガイド自体の React 化
+
+**見積り**: 小〜中（core 1 ファイル + v1 2 本 + React ページ 1 枚 + `DesignPane` の小改修 + テストの置き換え）。PR 1 本
+
+#### S4l 統計情報表示設定の React 化と Qt 版の削除（2026-11-05）
+
+サイドバー Display の「統計情報表示設定」を React の `/web/statsPreview`（`web/src/StatsPreviewPage/`）に切り替えた。表示先は共有ビュー（`AutonaWebPanelHost`）で、Qt 版（`src/AutonaStatsPreviewWidget.py`）は削除した。設計どおり 1 段で、サイドバーの並びと `STATE_VERSION`（22）は変えていない。
+
+- **完了内容**
+  - core: `src/core/StatsOverlays.py`（Qt 非依存）に 7 種の固定表を移した。`Overlays()` / `Selected()`（保存値が表に無ければ先頭。保存値は書き換えない）/ `Select(key)`（未知なら None で保存しない）。settings.json のキー `stats_preview.selected_type` と値は Qt 版のまま（既存ユーザーの選択が引き継がれる）
+  - v1（追加だけ）: `GET /api/v1/stats/overlays`（`{overlays, selected, refresh: {method, path, url}}`。`url` はサーバーが組む: 実際に待ち受けているポートと LAN 公開の有無（`WebServer.Listening()`。設定の変更は次の起動から効くので設定値は使わない。サーバーが無い環境では設定値）。トークンは含めない）と `PUT /api/v1/stats/overlays/selected`（`{"key"}`。未知は 400 `INVALID_ARGUMENT`）。`WebAccess` は前者が READ・後者が WRITE（op ログ `stats.overlay.select`）。Web 操作は `AutonaWebOperations.get_stats_overlays` / `select_stats_overlay`
+  - ページ: 左に機能別カラー（`PATCH /colors/stats`）・Companion カード（メソッド・パス・ボディ「なし」・URL・コピー。「ヘルプ＆設定 → API設定 → Companion の設定」を文で案内し、別 PC の Companion はヘッダ `X-Autona-Token` が要る旨を 1 行）、右に説明文・`DesignPane`（種類の select とオーバーレイの縮小表示。Commentary / Top 8 と同じ形）と `ObsUrlCard`。`WebAccess.WEB_PANELS` と `PanelShell/registry.tsx` に `statsPreview` を追加
+  - `DesignPane` の選択のキーを `LayoutEntry.key`（省略時は `id`）にした。`last_sets` / `tournament_history` の player1 / player2 は同じ `id` なので `key` で区別する。Commentary / Top 8 は `key` を持たず挙動は不変
+  - シェル: `Window._CreateStatsPreviewPanel` は `self._WebPanel("statsPreview")` を返すだけ
+  - 削除: `AutonaStatsPreviewWidget.py` と、その専用の訳 7 件（`.ts` を手動編集して `scripts/compile_translations.ps1` で `.qm` を再生成。「Stats Display Settings」はナビの文言で残るので参照元を `Autona.py` にした）。`AutonaLayoutPreview` / `AutonaFeatureColors` はリザルト・サムネイル・ボードが使うので残した
+- **外部契約**: v1 のルートが 2 本増えただけ（上記）。既存のルート・state のスキーマ・settings.json のキーは変えていない
+- **挙動の違い（Qt 版から）**: プレビューのコピー / 画像保存ボタンは無い（Commentary と同じ）。「Companion 設定ガイドを開く」ボタンは無く、文で案内する。Companion カードにトークンの 1 行が加わった。種類の select は右の `DesignPane` の 1 つだけ（設計の「左に種類の select」は、レビューで重複を避けて取りやめた）
+- **テスト**: `tests/test_api_v1_stats_overlays.py`（core の表・フォールバック・未知 key、v1 の読み書き、READ/WRITE 分類とトークン）、`tests/test_web_panel_host.py`（statsPreview が React のページ・Qt 版が `src/` に無い）、`tests/test_webserver_routes.py` / `test_web_operations.py` の台帳、jest `StatsPreviewPage.test.js`、Playwright `web/e2e/statsPreview.spec.ts`（選択の保存・player1 / player2 の区別・未知 key）
+- **docs**: `.claude/design/Design.md` / `external-control-api.md`（§5.10・§6.25）/ `.claude/manual-test-checklist.md`（「統計情報表示設定」節）/ `docs/product/features.md` §32
+- **オーナー実機確認**（`python main.py`）: 手動チェックリストの「統計情報表示設定」の全項目。特に次の 3 点
+  - サイドバー Display の「統計情報表示設定」で React のページが出て、前の選択（`stats_preview.selected_type`）が選ばれている。選び直すと再起動後も残る
+  - 直近セット / 大会履歴の選手1・選手2 でプレビューと OBS 用 URL が player1.html / player2.html に切り替わる
+  - Companion カードの URL（LAN 許可して再起動した後は LAN の IP、実際の待ち受けと同じポート）が正しく、コピーできる。ヘルプ＆設定 → API設定 → Companion の設定が開ける
+- **レビュー対応（2026-11-05）**
+  - Companion の URL は実際の待ち受け（`WebServer.Listening()`）から組む。ページはマウント時に 1 回読むだけ（設定を変えると再起動が要り、再起動でページも読み直される。Qt 版の `showEvent` の再読込は再現しない）
+  - 案内文はメニューの実名（ja「ヘルプ＆設定 → API設定 → Companion の設定」、en「Help & Settings → API Settings → Companion settings」）
+  - 種類の select の重複を解消（右の `DesignPane` だけ）。説明文は `DesignPane` の上に残した
+  - 固定表の pin: 全項目の `layout/<id>/<entry>` が実在・`STATS_REFRESH_PATH` が Flask の URL 表に POST である・`statspreview_overlay_<key>` が en / ja の全キーにある。`ui_layout.form_row` は使い手が無くなったので削除（`FORM_LABEL_WIDTH` はサムネイルが使うので残す）
+- **受け入れた点（直さない）**
+  - `GET /stats/overlays` は LAN 許可時に LAN の IP を返す READ（認証なし・CORS 全許可）。LAN 内の相手には既知の情報で、配信 PC のブラウザで開いた別サイトから読める可能性がある。受け入れた判断
+  - 選択は state に無いので、別クライアントの選び直しは表示中のページに追従しない（Commentary と同じ）。画面遷移と PUT の競合でも次の再マウントで直る
+  - 保存に失敗したときにメモリと画面が食い違うのは `SettingsManager` 共通の既存の挙動で、今回は触らない

@@ -960,6 +960,16 @@ class WebServer:
     # notifies -- it may run under StateManager.lock (a GUI-thread write,
     # delivered direct through the bridge), so it never waits on the
     # flusher, and the flusher never holds the lock below while it sends.
+    # (bind host, port, LAN exposed) of the running server, else None.
+    _listening = None
+
+    @staticmethod
+    def Listening():
+        """(port, listen_lan) the server is really bound with, or None while
+        none runs (tests, before start())."""
+        bound = WebServer._listening
+        return None if bound is None else (bound[1], bound[2])
+
     _delta_lock = threading.Lock()
     _delta_cond = threading.Condition(_delta_lock)
     _delta_pending = []          # list of merged delta-flat-dicts
@@ -1555,6 +1565,11 @@ class WebServer:
                     server.server_close()
                     return
                 self._server = server
+                # What is really bound (the settings take effect on the
+                # next start): the Stats Display Settings page's Companion
+                # URL is built from it (ADR-005 S4l).
+                WebServer._listening = (self.host_name, self.port,
+                                        self.listen_lan)
             logger.info(
                 f"Web server listening on {self.host_name}:{self.port}")
             server.serve_forever()
@@ -1592,6 +1607,8 @@ class WebServer:
             self._stopping = True
             server = self._server
             thread = self._thread
+            if WebServer._listening is not None and server is not None:
+                WebServer._listening = None
         deadline = time.monotonic() + timeout
         if server is not None:
             # shutdown() blocks until serve_forever() has returned; run it

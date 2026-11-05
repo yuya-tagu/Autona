@@ -88,13 +88,14 @@ from .core import CommentaryModel as comms
 from .core import CommentaryService
 from .core import LayoutCatalog
 from .core import Top8Service
+from .core import StatsOverlays
 from .core import AnalysisService as analysis
 from .core.AnalysisService import AnalysisService
 from .core.CountryCatalog import CountryCatalog
 from .core.CrewBattleService import CrewBattleService
 from .core.DictHelper import qvariantmap_copy
 from .core.GameAssetCatalog import GameAssetCatalog
-from .core.SettingsManager import SettingsManager
+from .core.SettingsManager import DEFAULT_WEBSERVER_PORT, SettingsManager
 from .core.SetFollowService import SaveRecord, SetFollowService
 from .core.SetLoadService import SetLoadService
 from .core.PlayerDB import PlayerDB
@@ -591,6 +592,43 @@ def set_feature_colors(feature, colors):
     with StateManager.SaveBlock():
         for kind, color in colors.items():
             ColorService.SetFeatureColor(feature, kind, color)
+
+
+# ── 統計情報表示設定 (ADR-005 S4l) ─────────────────────────────────────
+# The Stats Display Settings page's: core's StatsOverlays (the table and the
+# kept selection, settings.json) and the Companion macro's request.
+
+STATS_REFRESH_METHOD = "POST"
+STATS_REFRESH_PATH = "/scoreboards/1/stats:refresh"
+
+
+def get_stats_overlays():
+    from .Helpers.AutonaNetworkHelper import GetLocalIP
+    from .AutonaWebServer import WebServer
+    # What the server really listens on (a change in the settings takes
+    # effect at the next start); the settings only when none runs.
+    bound = WebServer.Listening()
+    if bound is None:
+        bound = (SettingsManager.Get("general.webserver_port",
+                                     DEFAULT_WEBSERVER_PORT),
+                 SettingsManager.Get("general.webserver_listen_lan", False))
+    port, lan = bound
+    host = GetLocalIP() if lan else "127.0.0.1"
+    return {
+        "overlays": StatsOverlays.Overlays(),
+        "selected": StatsOverlays.Selected(),
+        # Built here, not by the page: only the server knows the LAN IP.
+        "refresh": {
+            "method": STATS_REFRESH_METHOD,
+            "path": STATS_REFRESH_PATH,
+            "url": f"http://{host}:{port}/api/v1"
+                   + STATS_REFRESH_PATH,
+        },
+    }
+
+
+def select_stats_overlay(key):
+    return StatsOverlays.Select(key)
 
 
 # ── 配信設定 (ADR-005 S4e) ─────────────────────────────────────────────

@@ -200,7 +200,6 @@ from .core.TaskExecutor import TaskExecutor
 from .Helpers.AutonaCountryHelper import AutonaCountryHelper
 from .Helpers.AutonaStatusManager import AutonaStatusManager
 from .AutonaScoreboardManager import AutonaScoreboardManager
-from .AutonaStatsPreviewWidget import AutonaStatsPreviewWidget
 from .AutonaPlayerBrowserWidget import AutonaPlayerBrowserWidget
 from src.AutonaWebServer import WebServer, check_webserver_port
 from .AutonaWebPageLifecycle import MarkWebServerReady
@@ -245,7 +244,7 @@ class Window(QMainWindow):
     # v20: Commentary and Top 8 swapped in the sidebar order.
     # v21: New "Scoreboard" category between Setup and Display, holding the
     #      scoreboard (input) and board (design) panels.
-    # v22: Stats Display Settings panel (AutonaStatsPreviewWidget) added to
+    # v22: Stats Display Settings panel added to
     #      the Display category, after Commentary.
     #      (Tournament Info became a React page in ADR-005 S4g, in the same
     #      place: no bump.)
@@ -1011,14 +1010,8 @@ class Window(QMainWindow):
         return self._WebPanel("commentary")
 
     def _CreateStatsPreviewPanel(self):
-        # Preview + OBS URL for the statistics overlays (layout/upset_factor,
-        # h2h_record, recent_sets, last_sets, tournament_history).
-        statsPreview = AutonaStatsPreviewWidget()
-        statsPreview.setWindowIcon(QIcon(UI.icon_path('stats.svg')))
-        statsPreview.setObjectName("statsPreviewSettings")
-        statsPreview.setWindowTitle(
-            QApplication.translate("app", "Stats Display Settings"))
-        return statsPreview
+        # ADR-005 S4l: the React page in the shared web view.
+        return self._WebPanel("statsPreview")
 
     def _CreateStreamPanel(self):
         # ADR-005 S4e: the React page in the shared web view.

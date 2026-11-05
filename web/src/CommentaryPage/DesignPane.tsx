@@ -19,6 +19,11 @@ function layoutPath(design: LayoutEntry): string {
     return `/layout/${id}/${encodeURIComponent(design.entry)}`;
 }
 
+// What the select picks a design by: `id`, unless the entry has its own key.
+function selectKey(design: LayoutEntry): string {
+    return design.key ?? design.id;
+}
+
 function usePreviewScale(
     frame: React.RefObject<HTMLDivElement | null>,
     shown: boolean,
@@ -48,7 +53,8 @@ function usePreviewScale(
 export default function DesignPane({designs, design, onSelect, label, empty}: {
     designs: LayoutEntry[];
     design: LayoutEntry | null;
-    onSelect: (id: string) => void;
+    // Called with the design's select key (its `key`, else its `id`).
+    onSelect: (key: string) => void;
     // The heading (and the select's name), and what shows without a
     // design: the Commentary page's by default.
     label?: string;
@@ -66,13 +72,13 @@ export default function DesignPane({designs, design, onSelect, label, empty}: {
                 size="small"
                 // The select's own name (no floating label: the heading).
                 slotProps={{htmlInput: {"aria-label": heading}}}
-                value={design?.id ?? ""}
+                value={design ? selectKey(design) : ""}
                 disabled={designs.length === 0}
                 onChange={(event) => onSelect(event.target.value)}
                 fullWidth
             >
                 {designs.map((entry) => (
-                    <MenuItem key={entry.id} value={entry.id}>
+                    <MenuItem key={selectKey(entry)} value={selectKey(entry)}>
                         {entry.displayName}
                     </MenuItem>
                 ))}

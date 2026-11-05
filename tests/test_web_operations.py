@@ -1687,6 +1687,7 @@ _BODIES = {
     "api_v1.commentary_player": {"gamerTag": "Cast"},
     "api_v1.select_layout": {"id": "commentators"},
     "api_v1.colors_update": {"theme": "#123456"},
+    "api_v1.select_stats_overlay": {"key": "recent_sets"},
     "api_v1.stream_update": {"title": "Walk"},
     "api_v1.stream_channel_add": {"name": "Walk",
                                   "url": "https://example.invalid/walk"},

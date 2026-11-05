@@ -137,31 +137,9 @@ def make_section_title(text: str, parent: QWidget | None = None) -> QLabel:
 LEFT_PANE_WIDTH = 340   # px
 
 
-# ─── Form row layout ─────────────────────────────────────────────
-#
-# A single label-on-left, control(s)-on-right row. The label gets a
-# fixed width so labels across multiple rows align vertically. Put rows
-# inside a card via card.layout().addLayout(form_row(...)).
+# ─── Form layout ─────────────────────────────────────────────────
 
 FORM_LABEL_WIDTH = 110   # px — accommodates "Tournament Name" / "配信先" etc.
-FORM_ROW_SPACING = UI.SPACE_SM
-
-
-def form_row(label_text: str, *controls: QWidget,
-             label_width: int = FORM_LABEL_WIDTH) -> QHBoxLayout:
-    """Build a horizontal form row: [label | control(s)…].
-    The first control stretches to fill remaining width; subsequent
-    controls take their preferred size."""
-    layout = QHBoxLayout()
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(FORM_ROW_SPACING)
-    label = QLabel(label_text)
-    label.setFixedWidth(label_width)
-    label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-    layout.addWidget(label)
-    for i, ctrl in enumerate(controls):
-        layout.addWidget(ctrl, 1 if i == 0 else 0)
-    return layout
 
 
 def apply_form_grid(grid: QGridLayout,
