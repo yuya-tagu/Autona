@@ -17,7 +17,6 @@ from .core.PlayerService import CharacterSlot
 from .core.StateManager import StateManager
 from .AutonaGameAssetManager import AutonaGameAssetManager
 from .AutonaPlayerDB import AutonaPlayerDB
-from .core.PlayerDB import PlayerDB
 from .Helpers.AutonaDirHelper import AutonaResolve
 from .Helpers.AutonaQtHelper import HeldBackText, NoIconProxyModel
 from . import ui_constants as UI
@@ -117,14 +116,14 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
         uic.loadUi(AutonaResolve("src/layout/AutonaScoreboardPlayer.ui"), self)
         self._initBasePlayerWidget()
-        # A board's card (score.{n}.team.{t}.player.{m}), as opposed to the
-        # PLAYERS editor's (player_editor.1). Since ADR-005 S3e-6 a board
+        # A board's card (score.{n}.team.{t}.player.{m}), the only kind since
+        # the Qt Player List went (ADR-005 S4n). Since ADR-005 S3e-6 a board
         # builds its cards for slots the state already has
         # (AutonaActions.SetRoster seeded them), and tears them down after
-        # the state dropped theirs, so a board card publishes nothing as it
-        # is built (_WireInputs, SyncCharacterRows) and writes nothing once
-        # its slot is gone (_MayWrite).
-        self._onBoard = self.player.BoardNumber() is not None
+        # the state dropped theirs, so a card publishes nothing as it is
+        # built (_WireInputs, SyncCharacterRows) and writes nothing once its
+        # slot is gone (_MayWrite).
+
         # Character rows taken off the card, destroyed once control is back
         # in the event loop (_DestroyRemovedRows).
         self._removedRows = []
@@ -179,25 +178,6 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         # the sponsor row, updated whenever the spinbox value changes.
         self.findChild(QLabel, "seedLabel").setVisible(False)
         seed.setVisible(False)
-        # Only for the PlayerDB editor, which keeps this row. The scoreboard
-        # card strips it out entirely in _buildCompactDetailsUI() below, so
-        # collapsing its spacers there is dead work -- and not free: itemAt()
-        # registers the QLayoutItem it returns as a Shiboken child of the
-        # layout, so the wrapper outlives this loop, and QSpacerItem /
-        # QWidgetItem are not QObjects, so PySide6 is never told when Qt
-        # frees them. The registrations would be left in Shiboken's binding
-        # manager still flagged valid and pointing at freed memory, and the
-        # next QObject allocated at one of those addresses dies inside
-        # PySide::SignalManager::retrieveMetaObject -- an access violation in
-        # unrelated code, much later. See tests/test_wrapper_lifetime.py.
-        if not self.path.startswith("score."):
-            seedRowLayout = self.findChild(QHBoxLayout, "horizontalLayout")
-            for i in range(seedRowLayout.count()):
-                it = seedRowLayout.itemAt(i)
-                sp = it.spacerItem() if it is not None else None
-                if sp is not None:
-                    sp.changeSize(0, 0, QSizePolicy.Minimum,
-                                  QSizePolicy.Minimum)
 
         self.seedDisplay = self.findChild(QLabel, "seedDisplay")
         # The .ui used to hardcode rgba(255,255,255,0.75) which became
@@ -240,16 +220,15 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         # character rows then sit flush with the sponsor/name row and the reset
         # button — every element shares one left/right edge. Top padding is kept
         # for the "CHARACTERS" title.
-        if self.path.startswith("score."):
-            self.character_container.setStyleSheet(
-                "QGroupBox { border: none; background: transparent;"
-                " margin-top: 0px; padding: 24px 0px 0px 0px; }"
-                " QGroupBox::title { padding-left: 0px; }")
-            # The .ui leaves the inner layout's side margins at the style
-            # default (~9px); zero them so the character rows are flush with
-            # the column edge. Top clearance for the title comes from the
-            # group box padding above.
-            self.character_container.layout().setContentsMargins(0, 0, 0, 0)
+        self.character_container.setStyleSheet(
+            "QGroupBox { border: none; background: transparent;"
+            " margin-top: 0px; padding: 24px 0px 0px 0px; }"
+            " QGroupBox::title { padding-left: 0px; }")
+        # The .ui leaves the inner layout's side margins at the style
+        # default (~9px); zero them so the character rows are flush with
+        # the column edge. Top clearance for the title comes from the
+        # group box padding above.
+        self.character_container.layout().setContentsMargins(0, 0, 0, 0)
 
         # Once: completer, country model, country -> regions link, and the
         # countriesAboutToReload / countriesUpdated connections.
@@ -257,52 +236,12 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
         self.character_elements = []
 
-        # Save + Delete share the first row (Delete only appears for the
-        # PlayerDB editor, not the in-match scoreboard). Clear gets its
-        # own row below so it reads as a distinct destructive action.
-        save_row_layout = QHBoxLayout()
-        save_row_layout.setSpacing(UI.SPACE_SM)
-        self.layout().addLayout(save_row_layout, 99, 0, 1, 1)
-
+        # Clear gets its own row so it reads as a distinct destructive action.
         clear_row_layout = QHBoxLayout()
         clear_row_layout.setSpacing(UI.SPACE_SM)
         self.layout().addLayout(clear_row_layout, 100, 0, 1, 1)
-        # Kept as attributes so _buildCompactDetailsUI can strip the rows.
-        self._saveRow = save_row_layout
+        # Kept as an attribute so _buildCompactDetailsUI can strip the row.
         self._clearRow = clear_row_layout
-
-        self.save_bt = QPushButton(
-            QApplication.translate("app", "Save new player"))
-        self.save_bt.setIcon(QIcon(UI.icon_path("save.svg")))
-        self.save_bt.clicked.connect(self.SavePlayerToDB)
-        self.save_bt.setMinimumWidth(1)
-        # Save/Update-player-to-DB is a PlayerDB-editor action; the in-match
-        # scoreboard hides it (same policy as delete_bt below).
-        if self.path.startswith("score."):
-            self.save_bt.hide()
-        else:
-            save_row_layout.addWidget(self.save_bt)
-            self.findChild(QLineEdit, schema.PLAYER_TAG_KEY).editingFinished.connect(
-                self.ManageSavePlayerToDBText)
-            self.findChild(QLineEdit, schema.PLAYER_SPONSOR_KEY).editingFinished.connect(
-                self.ManageSavePlayerToDBText)
-
-        self.delete_bt = QPushButton(
-            QApplication.translate("app", "Delete player entry"))
-        self.delete_bt.setIcon(QIcon(UI.icon_path("cancel.svg")))
-        self.delete_bt.setEnabled(False)
-        self.delete_bt.clicked.connect(self.DeletePlayerFromDB)
-        self.delete_bt.setMinimumWidth(1)
-        if self.path.startswith("score."):
-            self.delete_bt.hide()
-        else:
-            # Delete goes LEFT of Save (negative action left, positive
-            # action right — the app-wide button-pair convention).
-            save_row_layout.insertWidget(0, self.delete_bt)
-            self.findChild(QLineEdit, schema.PLAYER_TAG_KEY).editingFinished.connect(
-                self.ManageDeletePlayerFromDBActive)
-            self.findChild(QLineEdit, schema.PLAYER_SPONSOR_KEY).editingFinished.connect(
-                self.ManageDeletePlayerFromDBActive)
 
         self.clear_bt = QPushButton(QApplication.translate("app", "Clear"))
         # Destructive action: danger styling (red outline) — opt-in via the
@@ -328,7 +267,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
         self.lastExportedName = ""
 
-        self._WireInputs(seed, publish=not self._onBoard)
+        self._WireInputs(seed)
 
         # After _WireInputs, so on the same editingFinished the tag / sponsor
         # reaches the state (_OnTextChanged) before the display name is
@@ -342,12 +281,9 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         self.findChild(QLineEdit, schema.PLAYER_SPONSOR_KEY).editingFinished.connect(
             self.NameChanged)
 
-        if self._onBoard:
-            # As many rows as the slot has character slots, published by
-            # nobody: the slot already holds them.
-            self.SyncCharacterRows()
-        else:
-            self.SetCharactersPerPlayer(1)
+        # As many rows as the slot has character slots, published by nobody:
+        # the slot already holds them.
+        self.SyncCharacterRows()
 
         AutonaPlayerDB.signals.db_updated.connect(
             self.SetupAutocomplete)
@@ -358,14 +294,11 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
         # Scoreboard rows mirror the Web UI player card: only sponsor + tag
         # stay inline; every other field moves into a per-player details
-        # dialog. The PlayerDB editor (path "player_editor.*") keeps the
-        # full inline form.
-        if self.path.startswith("score."):
-            self._buildCompactDetailsUI()
-            # Only board cards render from the state (RenderFromState), so
-            # only they have fields to come back to. A bound method: Qt drops
-            # the connection with the card.
-            QApplication.instance().focusChanged.connect(self._OnFocusChanged)
+        # dialog.
+        self._buildCompactDetailsUI()
+        # The render leaves alone the fields the operator is in, and comes
+        # back to them. A bound method: Qt drops the connection with the card.
+        QApplication.instance().focusChanged.connect(self._OnFocusChanged)
 
     def deleteLater(self):
         self._deleted = True
@@ -438,14 +371,12 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
     def _MayWrite(self) -> bool:
         """Whether this card's own edits may still be written.
 
-        Not once it is retired or being deleted, and -- a board card -- only
-        into a slot the state has: a roster change drops the slot before the
-        board's held cycle retires the card, and an edit finished in between
-        (a focus-out, a queued completer pick) would write a ghost slot back
-        into the state."""
-        if self._deleted:
-            return False
-        return not self._onBoard or isinstance(
+        Not once it is retired or being deleted, and only into a slot the
+        state has: a roster change drops the slot before the board's held
+        cycle retires the card, and an edit finished in between (a focus-out,
+        a queued completer pick) would write a ghost slot back into the
+        state."""
+        return not self._deleted and isinstance(
             StateManager.Get(self.path), dict)
 
     def _buildCompactDetailsUI(self):
@@ -540,7 +471,6 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             self.findChild(QHBoxLayout, "identityRow"),
             self.findChild(QHBoxLayout, "locationRow"),
             self._customTextboxRow,
-            self._saveRow,
             self._clearRow,
         ):
             self._takeLayoutFromGrid(grid, row)
@@ -636,15 +566,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         self.detailsDialog.open()
 
     def _ApplyBoardChanges(self):
-        # The details dialog is only built for score paths, so the slot
-        # always resolves to a board here; ApplyChanges is the same
-        # operation the board-level 反映 button runs.
-        board = self.player.BoardNumber()
-        if board is None:
-            logger.warning(
-                f"反映 pressed on a player card with no board: {self.path}")
-            return
-        AutonaActions.instance.ApplyChanges(board)
+        # The same operation the board-level 反映 button runs.
+        AutonaActions.instance.ApplyChanges(self.player.BoardNumber())
 
     @staticmethod
     def _seedDisplayStyle() -> str:
@@ -670,7 +593,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             self.seedDisplay.setText("")
             self.seedDisplay.setVisible(False)
 
-    def _WireInputs(self, seed: QSpinBox, publish=True):
+    def _WireInputs(self, seed: QSpinBox):
         """Bind the card's inputs to the operations they stand for.
 
         This used to be three loops over `findChildren`, each connecting a
@@ -700,20 +623,11 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
           disagree and Clear() has to be able to reset the state from a
           spinbox that is already at 0.
 
-        The initial emits are kept exactly where they were: the seed, the
-        birthday flag and the two location combos publish as the card is
-        built, the four line edits do not (they reach the state on the first
-        editingFinished, or through SetData). An empty card therefore starts
-        with `seed`, `birthday`, `country` and `state` and gains the rest as
-        it is filled -- unchanged, and relied on by the overlays that read
-        the location from launch.
-
-        Not for a board card (`publish` False, ADR-005 S3e-6): its slot is
-        seeded before the card is built (AutonaActions.SetRoster, with
-        PlayerService.SeedEmpty -- these same four writes), and a card built
-        in the held cycle of a set load would otherwise put them over the
-        player just loaded. What the emits did to the widgets themselves is
-        done here without them; the render shows the slot.
+        Nothing here publishes (ADR-005 S3e-6): the slot is seeded before the
+        card is built (AutonaActions.SetRoster, with PlayerService.SeedEmpty),
+        and a card built in the held cycle of a set load would otherwise put
+        its blank fields over the player just loaded. The widgets start blank
+        with their signals blocked; the render shows the slot.
         """
         for field in schema.PLAYER_LINE_EDIT_KEYS:
             edit = self._w(field, QLineEdit)
@@ -726,34 +640,24 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
                 lambda field=field, edit=edit: self._OnTextChanged(
                     field, edit.text()))
 
-        # A changed seed recalculates the upset factor (announce) -- not the
-        # publish of the card being built just below, which nothing heard
-        # when it was a signal the board connected afterwards.
-        self._seedAnnounces = False
+        # A changed seed recalculates the upset factor (announce).
         seed.valueChanged.connect(
             lambda value: self._MayWrite() and self.player.SetSeed(
-                value, announce=self._seedAnnounces))
+                value, announce=True))
         seedEdit = seed.lineEdit()
         if seedEdit is not None:
             seedEdit.editingFinished.connect(
                 lambda seed=seed: self._MayWrite()
                 and self.player.SetSeed(seed.value()))
 
-        if publish:
+        with QSignalBlocker(seed):
             seed.setValue(0)
-            seed.valueChanged.emit(seed.value())
-        else:
-            with QSignalBlocker(seed):
-                seed.setValue(0)
-            self._ShowSeed(0)
-        self._seedAnnounces = True
+        self._ShowSeed(0)
 
         birthday = self._w(schema.PLAYER_BIRTHDAY_KEY, QCheckBox)
         birthday.toggled.connect(
             lambda checked: self._MayWrite()
             and self.player.SetBirthday(checked))
-        if publish:
-            birthday.toggled.emit(False)
 
         for field in schema.PLAYER_LOCATION_KEYS:
             combo = self._w(field, QComboBox)
@@ -765,13 +669,9 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             combo.currentIndexChanged.connect(
                 lambda index, field=field, combo=combo:
                     self._OnLocationChanged(field, combo))
-            if publish:
-                combo.currentIndexChanged.emit(0)
-        if not publish:
-            # The country's emit refilled the region rows for no country
-            # (LoadStates) before publishing both.
-            self._FillStateRows(None)
-            self._loadedStatesCountryCode = None
+        # The region rows for no country.
+        self._FillStateRows(None)
+        self._loadedStatesCountryCode = None
 
     def _StateValue(self, field):
         return StateManager.Get(self.player.Key(field))
@@ -911,20 +811,13 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         looked at again: the card can only have moved since by an edit,
         and every edit publishes.
         """
-        if self._deleted or self.player.BoardNumber() is None:
-            # Board cards only. The PLAYERS panel's editor (player_editor.1)
-            # is a draft the operator types into, and only the editor itself
-            # writes it -- its loads (SetData) and its clear show what they
-            # wrote themselves (_RenderSlot).
-            return True
         return self._RenderSlot()
 
     def _RenderSlot(self, over=False) -> bool:
-        """RenderFromState for any card, the editor included. `over`: show
-        the slot in the fields the operator is in too -- for an operation
-        the operator ran on this card (a name picked from the completer
-        while still in the tag field, the clear button), whose result is
-        what they asked to see."""
+        """RenderFromState. `over`: show the slot in the fields the operator
+        is in too -- for an operation the operator ran on this card (a name
+        picked from the completer while still in the tag field, the clear
+        button), whose result is what they asked to see."""
         if self._deleted:
             return True
         slot = self._ReadRenderedSlot()
@@ -1339,15 +1232,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         self.index = index
         self.teamNumber = team
 
-    def SetCharactersPerPlayer(self, number):
-        """`number` character rows, then what they pick published as the
-        slot's characters and mains -- the PLAYERS editor's (a board card's
-        rows follow its slot instead: SyncCharacterRows)."""
-        self._SetCharacterRows(number)
-        self.CharactersChanged(includeMains=True)
-
     def SyncCharacterRows(self) -> bool:
-        """A board card's character rows: one per character slot its slot
+        """The card's character rows: one per character slot its slot
         has (ADR-005 S3e-6 -- the count is the state's, set by
         AutonaActions.SetRoster; it used to be the board's charNumber,
         pushed into every card). Writes nothing: a new row shows the blank
@@ -1355,7 +1241,7 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
         Run as the card is built, by the board's held cycle for every card,
         by the render and by a game load's rebind (ReloadCharacters)."""
-        if self._deleted or not self._onBoard:
+        if self._deleted:
             return False
         characters = StateManager.Get(self.player.Key("character"))
         if (not isinstance(characters, dict)
@@ -1379,12 +1265,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             character_element.setLayout(QHBoxLayout())
             character_element.layout().setSpacing(UI.SPACE_SM)
             character_element.layout().setContentsMargins(0, 0, 0, 0)
-            # Combo prefixes ("ファイター" / "カラー") only on the scoreboard,
-            # where the row lives in the roomy details dialog — the inline
-            # rows elsewhere (commentary etc.) have no width to spare.
-            if self.path.startswith("score."):
-                character_element.layout().addWidget(
-                    QLabel(QApplication.translate("app", "ファイター")))
+            character_element.layout().addWidget(
+                QLabel(QApplication.translate("app", "ファイター")))
             player_character = QComboBox()
             player_character.setEditable(True)
             character_element.layout().addWidget(player_character)
@@ -1399,9 +1281,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             player_character.setIconSize(QSize(0, 0))
             player_character.setFixedHeight(32)
 
-            if self.path.startswith("score."):
-                character_element.layout().addWidget(
-                    QLabel(QApplication.translate("app", "カラー")))
+            character_element.layout().addWidget(
+                QLabel(QApplication.translate("app", "カラー")))
             player_character_color = QComboBox()
             character_element.layout().addWidget(player_character_color)
             player_character_color.setIconSize(QSize(16, 16))
@@ -1434,24 +1315,6 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
 
             if len(AutonaGameAssetManager.instance.variants) <= 0:
                 player_variant.setVisible(False)
-
-            # Move up/down
-            btMoveUp = QPushButton()
-            btMoveUp.setFixedSize(UI.BTN_SM, UI.BTN_SM)
-            btMoveUp.setIcon(QIcon(UI.icon_path("arrow_up.svg")))
-            character_element.layout().addWidget(btMoveUp)
-            btMoveUp.clicked.connect(lambda x=None, index=len(
-                self.character_elements): self.SwapCharacters(index, index-1))
-            btMoveDown = QPushButton()
-            btMoveDown.setFixedSize(UI.BTN_SM, UI.BTN_SM)
-            btMoveDown.setIcon(QIcon(UI.icon_path("arrow_down.svg")))
-            character_element.layout().addWidget(btMoveDown)
-            btMoveDown.clicked.connect(lambda x=None, index=len(
-                self.character_elements): self.SwapCharacters(index, index+1))
-
-            if self.path.startswith("score."):
-                btMoveUp.hide()
-                btMoveDown.hide()
 
             # Add line to characters
             self.character_container.layout().addWidget(character_element)
@@ -1576,9 +1439,6 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             name_edit.completer().setModel(AutonaPlayerDB.GetCompleterModel())
             L.attach_popup_on_focus(name_edit)
 
-            self.ManageSavePlayerToDBText()
-            self.ManageDeletePlayerFromDBActive()
-
     def _OnCompleterPick(self, index):
         """A player picked from the name completer: loaded into this slot
         (SetData), the tag field the operator is still in included."""
@@ -1598,8 +1458,8 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         scanning their models -- and the handlers publishing what it had
         filled in. Now the slot is written from the data alone, and the
         card renders what was written (over the field the operator is in:
-        this is the load they asked for, from the name completer or the
-        PLAYERS panel). The board's own loads -- a set's entrants, the
+        this is the load they asked for, from the name completer). The
+        board's own loads -- a set's entrants, the
         Web's player edit, a tag lookup -- call the core without the card
         and the card follows from the held cycle like any other write.
         """
@@ -1636,11 +1496,6 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
         self.lastExportedName = (
             self._w(schema.PLAYER_SPONSOR_KEY, QLineEdit).text() + " "
             + self._w(schema.PLAYER_TAG_KEY, QLineEdit).text())
-        if not self.path.startswith("score."):
-            # The editor's buttons follow its tag, which used to be
-            # announced by the tag's editingFinished.
-            self.ManageSavePlayerToDBText()
-            self.ManageDeletePlayerFromDBActive()
 
     def DiscardTypedText(self, notEditing=False):
         """Put back, on every editable combo of the card, the text of the
@@ -1675,33 +1530,4 @@ class AutonaScoreboardPlayerWidget(AutonaBasePlayerWidget):
             if combo.currentText() != text:
                 with QSignalBlocker(combo):
                     combo.setEditText(text)
-
-    def SavePlayerToDB(self):
-        """The editor's save button (and a Web player edit's
-        savePlayerToDb): the slot as the database stores it,
-        PlayerService.SavePlayerToDB (ADR-005 S3e-3) -- read from the state,
-        where it used to be read off the card's fields and combos."""
-        self.player.SavePlayerToDB()
-
-    def ManageSavePlayerToDBText(self):
-        tag = self.GetCurrentPlayerTag()
-
-        if PlayerDB.instance.Contains(tag):
-            self.save_bt.setText(
-                QApplication.translate("app", "Update player"))
-        else:
-            self.save_bt.setText(
-                QApplication.translate("app", "Save new player"))
-
-    def ManageDeletePlayerFromDBActive(self):
-        tag = self.GetCurrentPlayerTag()
-
-        if PlayerDB.instance.Contains(tag):
-            self.delete_bt.setEnabled(True)
-        else:
-            self.delete_bt.setEnabled(False)
-
-    def DeletePlayerFromDB(self):
-        tag = self.GetCurrentPlayerTag()
-        PlayerDB.instance.DeletePlayer(tag)
 

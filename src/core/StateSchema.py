@@ -131,9 +131,10 @@ STREAM_ASSET_VERSIONS = (
 DEFAULT_THEME_COLOR = "#181B21"
 DEFAULT_ACCENT_COLOR = "#f0a500"
 
-# Root of the retired player-editor subtree. AutonaPlayerBrowserWidget writes
-# player_editor.1 while its dialog is open and clears it on close; a crashed
-# session leaves it behind and LoadState would restore it forever.
+# Root of the retired player-editor subtree. The Qt Player List wrote
+# player_editor.1 while its editor dialog was open (until ADR-005 S4n, nothing
+# writes it now); a session that crashed then left it behind, and LoadState
+# would restore it forever.
 PLAYER_EDITOR_ROOT = "player_editor"
 
 # Whole subtrees dropped at every launch. All three belong to features that
@@ -776,18 +777,6 @@ def ResetScoreRoot():
     StateManager.Unset(SCORE_ROOT)
 
 
-def ClearPlayerEditor():
-    """Drop the scratch subtree the PLAYERS panel's editor dialog mirrors into.
-
-    The dialog writes ``player_editor.1`` while it is open (the player card is
-    the same widget the boards use, bound to that path) and calls this on
-    close, so the scratch data does not linger in program_state.json. A
-    crashed session leaves it behind instead, which is why the same root is
-    also in ``RETIRED_ROOTS`` and gets dropped at every launch.
-    """
-    StateManager.Unset(PLAYER_EDITOR_ROOT)
-
-
 def PublishAssetVersion(key: str, path: str):
     """Publish an asset file's mtime under `key` as a cache-bust version.
 
@@ -821,10 +810,10 @@ def SeedPanelState():
     STALE_KEYS -- are also the v0 -> v1 migration (StateMigrations), and are
     kept here on purpose rather than moved there:
 
-    - ``player_editor`` is not only legacy. The current build writes it
-      while the editor dialog is open, so a crashed session leaves it in a
-      v1 state.json, which no v0 -> v1 step ever sees again. Only a
-      per-launch pass removes it.
+    - ``player_editor`` is not only from before v1. The builds up to ADR-005
+      S4n wrote it while the Qt editor dialog was open, so a crashed session
+      left it in a v1 state.json, which no v0 -> v1 step ever sees again.
+      Only a per-launch pass removes it.
     - The commentary pass is also the seed: it builds the 12 empty slots
       when the subtree is missing (a fresh install), which a migration of
       existing data does not do.

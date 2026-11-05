@@ -10,11 +10,9 @@ behaviour it is paired with stays in tests/test_player_widgets.py.
 
 Two properties get most of the attention:
 
-- **which path a write lands on.** One class serves two path shapes (a
-  board's `score.{N}.team.{T}.player.{M}` and the PLAYERS editor's
-  `player_editor.1`), and mixing them up would publish an operator's
-  scratch edits onto a live scoreboard. agent-pitfalls #7 is about exactly
-  this.
+- **which path a write lands on.** A service is bound to one slot of one
+  board (`score.{N}.team.{T}.player.{M}`), and a write landing anywhere else
+  would change a live scoreboard. agent-pitfalls #7 is about exactly this.
 - **which save cycle it lands in.** `mergedName` / `mergedOnlyName` are one
   fact and must not reach an overlay half-updated, and the two guarded
   writes (`city`, `id`) must not mark a held board dirty for a value it
@@ -55,7 +53,6 @@ os.makedirs(Path(_WORK_DIR) / "out", exist_ok=True)
 os.makedirs(Path(_WORK_DIR) / "user_data", exist_ok=True)
 
 BOARD_PATH = "score.1.team.1.player.1"
-EDITOR_PATH = f"{schema.PLAYER_EDITOR_ROOT}.1"
 PREFIX = "score.1"
 
 
@@ -71,9 +68,7 @@ def _isolated_state():
         heldKeys = {k: list(v) for k, v in SM.heldKeys.items()}
         changedKeys = list(SM.changedKeys)
         SM.state.pop("score", None)
-        SM.state.pop(schema.PLAYER_EDITOR_ROOT, None)
         SM.lastSavedState.pop("score", None)
-        SM.lastSavedState.pop(schema.PLAYER_EDITOR_ROOT, None)
         SM.heldPrefixes.discard(PREFIX)
         SM.heldExempt.pop(PREFIX, None)
         SM.heldKeys.pop(PREFIX, None)
@@ -115,16 +110,15 @@ def _heldSpy():
     return seen, lambda: SM.observers.held_state_updated.unsubscribe(onHeld)
 
 
-# ── the two path shapes (agent-pitfalls #7) ──────────────────────────────
+# ── the path shape (agent-pitfalls #7) ───────────────────────────────────
 #
-# The list in agent-pitfalls names three; two of the callers are gone. The
-# commentary panel was a React page (it built no player cards) and the
-# `{base}.slot.{I}.player.{M}` roster editor was retired, so what ships is a
-# board slot and the PLAYERS editor. Both are covered below, and
-# test_player_widgets.py pins that those are the only two constructions.
+# What ships is a board slot: the commentary panel was a React page, the
+# `{base}.slot.{I}.player.{M}` roster editor was retired, and `player_editor.1`
+# went with the Qt Player List (ADR-005 S4n). test_player_widgets.py pins that
+# it is the only construction.
 
-@pytest.mark.parametrize("path", [BOARD_PATH, EDITOR_PATH])
-def test_every_write_stays_under_the_slot_it_was_given(path):
+def test_every_write_stays_under_the_slot_it_was_given():
+    path = BOARD_PATH
     service = PlayerService(path)
 
     service.SetText(schema.PLAYER_TAG_KEY, "TAG")
@@ -138,19 +132,11 @@ def test_every_write_stays_under_the_slot_it_was_given(path):
     assert SM.Get(f"{path}.mergedName") == "SPONSOR | TAG"
 
 
-def test_the_editor_slot_never_reaches_a_board():
-    """The PLAYERS panel edits a scratch subtree, not the live scoreboard."""
-    PlayerService(EDITOR_PATH).SetText(schema.PLAYER_TAG_KEY, "DRAFT")
-
-    assert SM.Get(f"{EDITOR_PATH}.{schema.PLAYER_TAG_KEY}") == "DRAFT"
-    assert SM.Get("score") is None
-
-
 @pytest.mark.parametrize("path,expected", [
     ("score.1.team.1.player.1", 1),
     ("score.2.team.2.player.3", 2),
     ("score.3.team.1.player.5", 3),
-    (EDITOR_PATH, None),
+    ("elsewhere.1", None),
     ("", None),
 ])
 def test_the_board_a_slot_belongs_to(path, expected):
@@ -228,8 +214,8 @@ class _Countries:
         return {}
 
 
-@pytest.mark.parametrize("path", [BOARD_PATH, EDITOR_PATH])
-def test_the_country_is_the_catalog_row_for_its_code(path):
+def test_the_country_is_the_catalog_row_for_its_code():
+    path = BOARD_PATH
     countries = _Countries()
     PlayerService(path, countries=countries).SetCountry("JP")
 
@@ -240,8 +226,8 @@ def test_the_country_is_the_catalog_row_for_its_code(path):
     assert list(published) == ["asset", "code", "en_name", "name"]
 
 
-@pytest.mark.parametrize("path", [BOARD_PATH, EDITOR_PATH])
-def test_the_region_is_resolved_against_the_country_the_card_shows(path):
+def test_the_region_is_resolved_against_the_country_the_card_shows():
+    path = BOARD_PATH
     countries = _Countries()
     PlayerService(path, countries=countries).SetRegion("JP", "13")
 
@@ -332,19 +318,20 @@ def test_the_two_name_spellings_are_one_save_cycle(player):
 
 
 def test_the_suffix_is_the_slots_own_team_flag():
-    """Each slot reads its own team's flag; the editor has no team."""
+    """Each slot reads its own team's flag; a path outside the boards has no
+    team."""
     SM.Set(f"score.1.team.2.{schema.TEAM_LOSERS_KEY}", True)
 
     PlayerService("score.1.team.1.player.1").PublishMergedName("", "ONE")
     PlayerService("score.1.team.2.player.1").PublishMergedName("", "TWO")
     PlayerService("score.2.team.2.player.1").PublishMergedName("", "OTHER")
-    PlayerService(EDITOR_PATH).PublishMergedName("", "DRAFT")
+    PlayerService("elsewhere.1").PublishMergedName("", "DRAFT")
 
     assert SM.Get("score.1.team.1.player.1.mergedName") == "ONE"
     assert SM.Get("score.1.team.2.player.1.mergedName") == "TWO [L]"
     assert SM.Get("score.2.team.2.player.1.mergedName") == "OTHER"
-    assert SM.Get(f"{EDITOR_PATH}.mergedName") == "DRAFT"
-    assert PlayerService(EDITOR_PATH).TeamLosersKey() is None
+    assert SM.Get("elsewhere.1.mergedName") == "DRAFT"
+    assert PlayerService("elsewhere.1").TeamLosersKey() is None
 
 
 # ── the team's names, rebuilt from the state (ADR-005 S2b) ───────────────
@@ -444,6 +431,9 @@ def test_a_local_avatar_file_is_published_by_path(player):
         assert SM.Get(f"{BOARD_PATH}.avatar") == (
             f"{module.AVATAR_DIR}/SPONSOR TAG.png")
     finally:
+        # The export writer copies the avatar to ./out on its own thread: on
+        # Windows the file cannot be deleted while that has it open.
+        SM.JoinExports(30)
         (directory / "SPONSOR TAG.png").unlink()
 
 
@@ -458,6 +448,8 @@ def test_filename_unsafe_characters_are_replaced_in_the_avatar_lookup(player):
         assert SM.Get(f"{BOARD_PATH}.avatar") == (
             f"{module.AVATAR_DIR}/A_B TAG.png")
     finally:
+        # As above.
+        SM.JoinExports(30)
         (directory / "A_B TAG.png").unlink()
 
 
@@ -588,8 +580,8 @@ def test_every_slot_of_a_card_is_resolved_against_one_snapshot():
     assert all(snapshot is games.snapshots[0] for snapshot in games.against)
 
 
-@pytest.mark.parametrize("path", [BOARD_PATH, EDITOR_PATH])
-def test_the_character_slots_are_published_whole(path):
+def test_the_character_slots_are_published_whole():
+    path = BOARD_PATH
     PlayerService(path, games=_Games()).PublishCharacterSlots(
         [CharacterSlot("Mario", 1, "EX"), CharacterSlot()])
 
@@ -808,8 +800,8 @@ def test_every_recorded_country_and_region_is_rebuilt_byte_for_byte(
 # write under each slot (a load's runs collapsed, as the card replay
 # compares them), the save cycles, local_players.json, the outcome, and the
 # SlotChange each operation returns against the statistics triggers the
-# board fired. A step that is the card's own pick or a board's slot count
-# is reproduced from its result (the slot's value afterwards).
+# board fired. A step that is a board's slot count is reproduced from its
+# result (the slot's value afterwards).
 
 APPLY_GOLDEN = json.loads(
     (Path(__file__).resolve().parent / "fixtures" / "player_apply"
@@ -863,35 +855,27 @@ class _ApplyReplay:
         self.countries = countries
         self.db = db
         self.directory = directory
-        board = scenario["board"]
-        if board is None:
-            self.root = EDITOR_PATH
-            self.paths = [EDITOR_PATH]
-        else:
-            self.root = f"score.{board}"
-            players = scenario.get("players", 1)
-            # The board's card order: team 1's, then team 2's, per index.
-            self.paths = [f"{self.root}.team.{team}.player.{slot}"
-                          for slot in range(1, players + 1)
-                          for team in (1, 2)]
+        self.root = f"score.{scenario['board']}"
+        players = scenario.get("players", 1)
+        # The board's card order: team 1's, then team 2's, per index.
+        self.paths = [f"{self.root}.team.{team}.player.{slot}"
+                      for slot in range(1, players + 1)
+                      for team in (1, 2)]
 
     def service(self, path):
         return PlayerService(path, games=self.games,
                              countries=self.countries)
 
     def slotPath(self, slot):
-        if slot == "editor":
-            return EDITOR_PATH
         team, player = slot
         return f"{self.root}.team.{team}.player.{player}"
 
     def seed(self):
-        """The slots a fresh board's cards (or the editor) publish."""
+        """The slots a fresh board's cards publish."""
         with SM.SaveBlock():
             for path in self.paths:
                 self.service(path).SeedEmpty(3)
-        if self.scenario["board"] is not None:
-            schema.HoldBoard(self.scenario["board"])
+        schema.HoldBoard(self.scenario["board"])
 
     def snapshot(self):
         slots = {}
@@ -940,11 +924,9 @@ class _ApplyReplay:
             return None, None
         service = self.service(self.slotPath(step["slot"]))
         if op == "set":
-            data = step["data"]
-            data = self.db.Get(data) if isinstance(data, str) \
-                else copy.deepcopy(data)
             return None, service.ApplyData(
-                data, step["loadFromDB"], step["clear"], step["no_mains"])
+                copy.deepcopy(step["data"]), step["loadFromDB"], step["clear"],
+                step["no_mains"])
         if op == "clear":
             return None, service.ClearSlot(step["no_mains"])
         if op == "save":
@@ -954,17 +936,6 @@ class _ApplyReplay:
             with SM.SaveBlock():
                 service.PublishCharacterSlots(
                     [CharacterSlot(**slot) for slot in step["slots"]])
-            return None, None
-        if op == "pick":
-            snap = self.games.Current()
-            slots = service._CharacterSlots(
-                SM.Get(service.Key("character")), snap)
-            row = self.games.CharacterRow(step["character"], snapshot=snap)
-            slots[step["index"] - 1] = CharacterSlot(
-                step["character"], step["skin"], step["variant"],
-                row.get("name") or "")
-            with SM.SaveBlock():
-                service.PublishCharacterSlots(slots)
             return None, None
         raise AssertionError(f"no service step for {op!r}")
 
@@ -1030,13 +1001,12 @@ def _desktopMains(text):
     return json.dumps(players, indent=2, ensure_ascii=False)
 
 
-# The steps the service reproduces by their result only: the operator's
-# pick on the card's combos (a write per combo) and the board's slot count
-# (a write per card).
-BY_RESULT_OPS = ("pick", "chars")
+# The steps the service reproduces by their result only: the board's slot
+# count (a write per card).
+BY_RESULT_OPS = ("chars",)
 
 
-def _assertServiceStep(name, index, actual, expected, board):
+def _assertServiceStep(name, index, actual, expected):
     where = (name, index, expected["op"])
     expected = applyScenarios.Expected(name, index, expected)
     assert actual["slots"] == expected["slots"], where
@@ -1048,24 +1018,15 @@ def _assertServiceStep(name, index, actual, expected, board):
 
     def calls(step):
         grouped = applyScenarios.byPlayer(step["calls"])
-        if board is not None:
-            # The board's own keys are the statistics' writes.
-            grouped.pop("", None)
+        # The board's own keys are the statistics' writes.
+        grouped.pop("", None)
         return grouped
 
-    if expected.get("callsByEffect"):
-        assert {path: applyScenarios.effect(c)
-                for path, c in calls(actual).items()} \
-            == {path: applyScenarios.effect(c)
-                for path, c in calls(expected).items()}, where
-    else:
-        assert {path: applyScenarios.collapsed(c)
-                for path, c in calls(actual).items()} \
-            == {path: applyScenarios.collapsed(c)
-                for path, c in calls(expected).items()}, where
+    assert {path: applyScenarios.collapsed(c)
+            for path, c in calls(actual).items()} \
+        == {path: applyScenarios.collapsed(c)
+            for path, c in calls(expected).items()}, where
 
-    if board is None:
-        return
     stats = expected["stats"]
     change = actual["change"]
     if change is None:
@@ -1090,15 +1051,14 @@ def test_recorded_player_loads_are_reproduced_by_the_service_alone(
         == [s["op"] for s in expected["steps"]]
     for index, (actual, wanted) in enumerate(
             zip(record["steps"], expected["steps"])):
-        _assertServiceStep(scenario["name"], index, actual, wanted,
-                           scenario["board"])
+        _assertServiceStep(scenario["name"], index, actual, wanted)
 
 
 def test_a_load_leaves_its_data_and_the_database_record_alone(
         recordedCatalogs, tmp_path, monkeypatch):
     """The card's SetData censored the data it was handed in place -- the
     caller's dict, and the database's own record when that was what it
-    loaded (the PLAYERS editor hands over the record itself). The service
+    loaded (the Qt Player List handed over the record itself). The service
     censors copies: what reaches the slot is censored, what it was given is
     not touched."""
     from src.core.BadWordFilter import BadWordFilter

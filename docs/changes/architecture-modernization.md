@@ -46,7 +46,7 @@ PdM 方針（2026-10-23）「Autona のアーキテクチャを現代的に抜�
 | Display | 実況・解説（12 枠・表示最大 4） | React `CommentaryPage`（`/web/commentary`。S4c で Qt 版を削除）/ `core/CommentaryService` / `core/CommentaryModel` | `commentary.*` |
 | Display | 統計表示設定（統計オーバーレイ 7 種） | React `StatsPreviewPage`（`/web/statsPreview`。S4l で Qt 版を削除）/ `core/StatsOverlays` | `colors.stats` |
 | Data | 統計（H2H / Last Sets / History / Analysis） | `AutonaStatsWidget` / `AutonaAnalysisWidget` / `core/StatsService` | `score.{n}.*_sets` |
-| Data | 選手リスト・ローカル選手 DB | `AutonaPlayerBrowserWidget` / `AutonaPlayerDB` | `user_data/local_players.json` |
+| Data | 選手リスト・ローカル選手 DB | React `PlayerBrowserPage`（`/web/playerBrowser`。S4n で Qt 版を削除）/ `core/PlayerDirectory` / `core/PlayerDB`（名前補完のモデルは `AutonaPlayerDB`） | `user_data/local_players.json` |
 | 共通 | Settings（General / Language / Hotkeys）・ゲームアセット追加・API/Companion/OBS ガイド・アップデータ・アラート | `Settings/` / `AutonaGameAssetGuideWindow` / `AutonaUpdater`(899) | — |
 | 共通 | グローバルホットキー 9 本（Win32 `RegisterHotKey`） | `AutonaHotkeys` | — |
 | Web | リモート操作 UI（`/web`）・Designer（1920×1080 レイヤーエディタ、Figma 取込） | `web/src/ScoreboardPage` / `ScoreboardDesigner` | `layout/custom/{slug}/` |
@@ -5587,7 +5587,7 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - `web/src/PlayerBrowserPage/`: 2 タブの表、検索（`useDeferredValue`）、登録済みの列ソート、確認ダイアログつきの削除。編集は MUI の Dialog で、下書きは**ページのローカル**に持ち、保存のときだけ v1 に送る（論点 1）。入力は既存の国・地域の選択（`CountryStateSelector`）とキャラの選択（`CharSelector`）を使う。キャラのアイコンは `GET /characters` の資産 URL を `loading="lazy"` で
   - 表は 100 行ごとのページ分割（論点 3）
   - シェル: `WEB_PANELS` に `playerBrowser` を足す。nav の位置・`STATE_VERSION`（22）は変えない
-  - 削除: `AutonaPlayerBrowserWidget.py` と訳、選手カードの `player_editor` 向けの分岐（インラインフォーム・保存 / 削除ボタン・`Manage*`。パスは `score.*` だけになる）。`PLAYER_EDITOR_ROOT` と `ClearPlayerEditor` は、古い `state.json` を掃除するために残す。agent-pitfalls #7 と関連テストを 1 種類のパスの前提に直す。`AutonaPlayerDB`（ボードの名前補完）は残す
+  - 削除: `AutonaPlayerBrowserWidget.py` と訳、選手カードの `player_editor` 向けの分岐（インラインフォーム・保存 / 削除ボタン・`Manage*`。パスは `score.*` だけになる）。`PLAYER_EDITOR_ROOT` は `RETIRED_ROOTS` の要素として、古い `state.json` を掃除するために残す（`ClearPlayerEditor` は呼び手が無くなったので、レビューで削除した）。agent-pitfalls #7 と関連テストを 1 種類のパスの前提に直す。`AutonaPlayerDB`（ボードの名前補完）は残す
 
 **挙動の違い**（Qt 版から変わるもの）:
 
@@ -5647,3 +5647,78 @@ Socket.IO の既存 payload・v1 / legacy のルート・オーバーレイ・`s
   - ゲーム未選択のカードの `savePlayerToDb` は記録に `mains` が無く、全ゲームの mains を失う（既存。今回の依頼の範囲外で変えていない。`PrepareSaveToDB` が空の dict を入れれば直る）
   - DB に前後の空白つきのタグやスポンサーの行があると、`PUT` の trim でキーが変わり、別の記録ができる（元の記録は残る。消えない。start.gg の値は通常 trim 済みで到達性が低い）
   - スポンサーかタグを変えた保存は何も引き継がない（Qt 版と同じく別の選手。行が読み替えた地名や国は DB からは引き継がれないので、S4n のページが見えている値を送る）
+
+#### S4n 選手リストの React 化と Qt 版の削除（2026-11-05）
+
+サイドバー Data の「選手一覧」（Player List）を React の `/web/playerBrowser`（`web/src/PlayerBrowserPage/`）に切り替えた。表示先は共有ビュー（`AutonaWebPanelHost`）で、Qt 版（`src/AutonaPlayerBrowserWidget.py`）と、選手カードの `player_editor` 向けの分岐は削除した。サイドバーの並びと `STATE_VERSION`（22）は変えていない。
+
+- **完了内容**
+  - ページ: 2 タブ（大会の参加者 / 登録済み選手）を両方マウントし、検索・ページ・選択をタブごとに持つ。検索は `useDeferredValue`（本名に当たるが表には出さない）、100 行ごとのページ分割、絞り込みとソートで先頭へ、選択行が見えなくなったら選択解除。再読込は `autonaPlayers.players`・`tournamentInfo.load`・`game` の変化で、古い応答は捨てる。キャラのアイコンは `GET /characters` の資産 URL を `loading="lazy"` で
+  - 編集: MUI の Dialog。下書きはページのローカルで、保存のときだけ `PUT /players`。§5.11 に従って送り分ける（同じキーなら国・地域・キャラは変更したときだけ送る。スポンサーかタグを変えたら別の記録なので全部明示する）。`409 CONFLICT`（ゲームが変わった）・`NOT_READY` は案内して読み直し、`400` は案内、`401` / `403` はトークンの案内を 1 回。`:load` と削除の `404` も案内（削除は読み直す）
+  - シェル: `WEB_PANELS` に `playerBrowser`、`Window._CreatePlayerBrowserPanel` は `self._WebPanel("playerBrowser")` を返すだけ
+  - 削除: `AutonaPlayerBrowserWidget.py` と専用の訳 16 件（`.ts` を手動編集して `scripts/compile_translations.ps1` で `.qm` を再生成。「Player List」はナビの文言で残るので参照元を `Autona.py` にした）。カードの `_onBoard` の分岐（インラインフォーム・`save_bt` / `delete_bt`・`SetCharactersPerPlayer`・`SavePlayerToDB`・`Manage*`・`DeletePlayerFromDB`・seed 行のレイアウト走査）。カードの構築は 1 通りになり、`tests/test_wrapper_lifetime.py` の例外も `_releaseLayoutItemWrappers` だけになった
+  - editor の削除で呼び手が無くなったカードの部品も消した: `SwapCharacters` とキャラ行の隠し移動ボタン、`GetCurrentPlayerTag`、`_WireInputs` の publish 引数と `_seedAnnounces`
+  - 残したもの: `PlayerService.SavePlayerToDB` / `PrepareSaveToDB`（Web の `savePlayerToDb` の経路）、`AutonaPlayerDB`（ボードの名前補完）、`PLAYER_EDITOR_ROOT` / `RETIRED_ROOTS` の `player_editor`（古い `state.json` の掃除。コメントを「今は誰も書かない」に直した）
+- **既存の部品の修正**: `CountrySelector` / `CountryStateSelector` は `slotProps.input` が `params.InputProps` を置き換えていて、`ref: setAnchorEl` が失われ、**旗つきの値が入っていると候補が開かなかった**。マージに直した。スコアボードの Web UI の選手ダイアログの国・地域の選び直しも同じ修正で直る。`CountrySelector` に任意の prop `countries`（`GET /countries` の by-code。カスタム国旗を出すため。省略時は従来どおり redux）を足した
+- **外部契約**: v1 の追加なし（S4m のルートだけを使う）。`player_editor.*` と `out/player_editor/` が書かれなくなる（設計どおり）。state のスキーマは変えていない
+  - **`out/player_editor/` は起動時の掃除では消えない**（実測）。一時ディレクトリで、v1 の `state.json` にサブツリーがあるとき・無いとき・v0 の移行のどれでも `out/player_editor/1/name.txt` が残り、state と `program_state.json` からは消える。起動時の `lastSavedState` は `{}` なので、`SeedPanelState` の `Unset` は差分の `dictionary_item_removed` に出ず、`RemoveFilesDict` に届かない（同じセッションの中で書いて消したときは消える。これも実測）。残るのは、Qt の編集ダイアログを開いたままクラッシュしたセッションの分だけで、`layout/` と `web/` に読み手は無い。害が無いので掃除のコードは足さない
+- **挙動の違い（Qt 版から）**: 設計の 3 点（保存されない欄は出さない・編集中の内容が state に出ない・ページ分割）に加えて
+  - 保存するとダイアログが閉じる（Qt 版は開いたまま）。欄の外のクリックと Esc では閉じない（打った内容を失わない）
+  - キャラの列は表示名（Qt 版は en_name）。検索は両方に当たる
+  - バリアントの新規選択は編集画面に無い（既存のものは表示して保つ）
+  - 未知の国コードは空表示（S4m の行の読み替えのとおり）
+  - ゲーム未選択のとき、別のキーへの保存は `mains: [], game: null` を送る（受け付けられ、記録の mains は空のままマージされるので、そのキーが既にあってもどのゲームの mains も変わらない。ゲームがあるときの `game: null` は `409 CONFLICT` で、ページは読み直す）
+- **テスト**
+  - `web/src/PlayerBrowserPage/`: `playerRows.test.js`（行の読み替え・絞り込み・ソート・ページ・送り分け・`refusedMains`・`pickable` の組み込み名）、`PlayerBrowserPage.test.js`（タブ・検索・選択・再読込と古い応答・編集・エラー文言。レビュー修正の、タグを変えた保存で断られる入力・打っただけの名前・Esc・開いたままのゲーム切替・読み込み失敗時の新規登録・国の再試行。再レビュー修正の、途中の欄を空にして打ち直す・カラーとバリアント・不明なバリアントのカラー変更・一覧の再送・ゲームの行き来・2 つの読みの独立）
+  - `web/src/CountryStateSelector.test.js`（国が無いときだけ無効。国の変更で読み込み中の表示に戻り、欄は有効のままで、古い国の応答を捨てる）、`web/src/ScoreboardPage/CharSelector.test.js`（`nameText` を渡さなければ欄が文字を持ち、確定しない。渡せば呼び手の文字を出す。マウスが通った行を確定しない）、`web/src/ScoreboardPage/v1Requests.test.js`（国の選び直しは `state_code: ""` を送る。空にしても何も送らず、離れると国と地域に戻る。空にしてから同じ国を選んでも地域は残る）、`tests/test_api_v1.py`（`test_player_patch_with_a_new_country_and_no_region_leaves_none`: 新しい国と空の地域で地域なし。DB の記録も戻さない。`test_player_patch_with_no_country_says_nothing_of_it`: 空の国と地域では何も変わらない）
+  - `web/e2e/playerBrowser.spec.ts`: ヘッドレスに対して追加・編集・削除、検索（本名）、国と地域の選び直し、`:load`（ヘッドレスに大会が無いので参加者の一覧だけ route で与え、`:load` は本物。消した選手の 404 も）
+  - `tests/test_web_panel_host.py`（`playerBrowser` が React のページ・Qt 版と専用の訳とカードの編集部品が `src/` に無い）
+  - editor 前提の整理: `tests/test_player_widgets.py`（構築元は 1 種類。キャラ数は `AutonaActions.SetRoster` で）、`test_player_card_render.py`、`test_player_apply.py`、`test_player_service.py`、`test_player_slot_publish.py`、`test_stats_service.py`、`test_state_schema.py`、`test_state_persistence.py`、`test_player_directory.py`（`BOARD_PATH` に）、`test_country_helper_model.py`（ボードの無いスロットのカードに）
+  - 録画: `tests/fixtures/player_apply/golden.json` から `the editor`、`tests/fixtures/player_slots/golden.json` の `operations` から `editor` と `swap two slots` を除いた（残りのステップは 1 バイトも変えていない）。`three slots` / `one slot` は `SetRoster` で再生し、録画の世界に合わせて最初にキャラ枠を 1 にしてから始める。`pick` はこの editor のシナリオだけが使っていたので op ごと消した（カードの選択は `test_player_slot_publish.py` の pick 系が残って覆う）
+- **レビュー修正（同じ PR）**: データ破壊とカードの回帰は無し
+  - **タグ / スポンサーを変えた保存が 400 になる**: 新しいキーの記録は空なので、持っている要素がすべてカタログに照らされ、mods オフのキャラ・範囲外のスキン・スキンのあるキャラの `-1`・未知のバリアントで断られていた（`PlayerDirectory._MainsRecord`。サーバーの契約は変えない）。ページが送る前に `refusedMains`（`playerRows.ts`）で同じ規則を当て、原因のキャラを名前で示して保存を止める（行を外せば保存できる）。`pickable` を使わなかったのは、あれが編集画面の選択の規則で（順番の上限があり、バリアントを見ない）サーバーの規則と違うから。保存先のキーに記録があれば、その記録が持つ要素は通す（サーバーと同じ）
+  - **キャラ欄に打っただけの名前が保存されない**: `CharSelector` に opt-in の props を足し（エディタだけが使う。スコアボードは変えない。再レビューで `commitTypedName` から `nameText` / `onNameText` / `onNameLeft` に変えた）、欄を離れたら打った名前を選択として扱う。MUI の `autoSelect` は使わない: 欄を離れるとマウスが通っただけの行も確定する。一覧に無い名前は黙って捨てず、欄に文字を残してエラー表示にし、一覧から選ぶか欄を空にするまで保存できない（`nameInvalid`）
+  - **国を選び直しても地域コードが残る**（スコアボードの Web UI）: `Player.jsx` は別の国を選ぶと `state_code: ""` を送る。サーバーは国が変わると地域を消し、空の `state_code` では何もしないので、地域なしになる（古いコードを送ると、新しい国の同じコードの地域を選びうる）
+  - **飛ばして選んだ空行に名前が残る**: 実在を確認した（行の key が index のままだと、選んだ行は 1 つ上に詰まるのに、選んだ行の欄の文字が残る）。再レビューの修正 1 で行に ID を持たせ、選んだ欄に残す形に変えた（詰めるのは保存するときだけ）
+  - **地域の読み込み**: `CountryStateSelector` は国の変更で読み込み中に戻し、古い国の応答を捨てる（読み込み中に欄を無効にしていたのは、再レビューの修正 6 でやめた）
+  - **開いたままのゲーム切替**: `registered.game` が編集を始めたときのゲームと違えば、キャラの欄を案内に置き換える。キャラを送る保存（別のキー・キャラの変更）は押せないので、同じ 409 を繰り返さない。mains を別のゲームに送らない。キャラを送らない保存はできる
+  - **読み込み失敗時の新規登録**: 登録済みの一覧を読めていないときは押せない（`game: null` で開いて 409 になっていた）
+  - **`/countries` の `NOT_READY`**: 間隔を広げて 5 回まで読み直し、一覧の再読込で再開する
+  - **Esc**: 欄の外のクリックと同じく閉じない（`Dialog` に `onClose` を渡さない）
+  - **`pickable` の組み込み名**: `constructor` などをキャラと誤認していた。自身のプロパティだけを見る（`characterOf`）
+  - **死にコードの削除**: `AutonaBasePlayerWidget` の未使用 import と `CharactersChanged` の `includeMains`、`StateSchema.ClearPlayerEditor`、`AutonaScoreboardWidget.LoadPlayerFromTag` / `_ApplyPlayer` / `_PlayerSlotPath`（`PlayerLoaded` は `DesktopBoardHost` が使うので残す）、`entrants_updated`（`src/` に接続が無いことを確認）、`assets/icons/add_user.svg`（`git grep` で参照なし。`dependencies/autona.spec` が名指しするアイコンは `icon.ico` だけで、配布の `assets/` は `git ls-files` ベースなので一緒に消える）
+  - **録画**: `tag` の op は Web の `load_player_from_tag` で再生する（値は変えていない）。`tests/test_player_apply.py` / `tests/test_player_slot_publish.py` の再録手順は、再録不可の説明に直した（録画時のツリーに今のステップが呼ぶものが無く、現行ツリーでは自分自身を録るだけ）。`RECORD` の分岐のコード自体は残した（消すと範囲が広がるため）
+- **再レビューの修正（同じ PR）**
+  1. **途中のキャラ欄を消すと、打っている欄が次のキャラ名に置き換わる**: `[Mario, Luigi]` の 1 行目を空にすると `onChange(null)` で行を取り除いていたので Luigi が上がり、値の参照が変わった Autocomplete が入力文字を値のラベルに戻していた（MUI `useAutocomplete` の `resetInputValue`）。続けて `Peach` と打つと `LuigiPeach` になり、Mario のカラーとバリアントも失っていた。行を安定した ID つきのモデル（`CharacterRow`。`playerRows.ts`）にして `EditorDialog` が持つ。空にした行はその場に残り、保存は空行を飛ばした順で送る。行を取り除くのは × だけ（下の行は打ちかけの文字ごと詰まる）
+     - カラーとバリアントの決定（jest で pin）: 別のキャラを選ぶと最初のカラー（スキンの無いキャラは `-1`）でバリアントなし。空にしてから同じキャラを選び直すと元のカラーとバリアントに戻り、変更していない扱いで mains を送らない。自分の名前の別表記はカラーとバリアントを保ち、欄は正規の表示名に戻る
+     - 欄の文字は呼び手が持つ（`CharSelector` の `nameText` / `onNameText` / `onNameLeft`）。スコアボードは渡さないので非制御のままで、挙動は変わらない。`commitTypedName` は削除した
+  2. **不明なバリアントの案内**: キーを変えていないのにカラーを変えると保存できず、案内が「このスポンサーとタグでは」で実情とずれていた。en / ja を「このゲームの一覧にないキャラクター、カラー、バリアント」に直し、案内の名前にバリアントも出す
+  3. **スコアボードで国を空にしてから同じ国を選ぶと、地域欄だけ空になる**: サーバーは空の `country_code` を「言及なし」として扱い、国も地域も残す。`Player.jsx` は空の国を変更として扱わなくなった（何も送らず、画面の state も変えない）。欄を離れると `clearOnBlur` で state の国に戻るので、画面と state は常に一致する。**スコアボードの Web UI では国を空にできない**（以前も画面が空に見えるだけで、state と配信には残っていた）。サーバーで消せるようにする案は `ApplyData` の契約と golden に及ぶので範囲外とした。エディタの `PUT /players` の `""` は明示のクリアで、変えていない
+  4. **打ちかけの文字と赤の残留**: 文字と赤を行のモデルに持ったので、欄の中身と保存可否がずれなくなった。`characters` の再送は `reason: "reset"` を無視するので文字を保つ（`nameText` が制御している）。ゲームが変わると全行の `typed` / `unknown` を捨てる（A→B→A で案内から戻ると行の内容が出て、赤も保存不可も残らない。打ちかけの文字はここで消える）。空白だけの入力は離脱で空の行になる
+  5. **`/players/entrants` だけの失敗**: 2 つの読みを独立させた（`entrantsFailed` / `registeredFailed`）。スピナーとバナーは表示中のタブの読みだけを見るので、片方が読み直しを続けていても、もう片方の表は出る。読めていないのに「大会が読み込まれていません」「登録済みの選手がいません」とは言わない。登録済みの一覧が読めないときも、参加者の編集は開いた行のキーで既存の記録だと分かる（別のキーに変えると新規扱いの判定になり、サーバーが最後に判断する）
+  6. **国の変更直後に地域欄が無効になる**: Tab の移動先が無効で focus が失われていた（スコアボードにも入った回帰）。無効は国が無いときだけにし、読み込み中は空の候補と読み込み中の表示にした。`selectedState` は読み込み中は値を持たないので、前の国の地域は出ない
+  7. **テストの `JoinExports`**: `tests/test_player_service.py` は `JoinExports(30)` で待つ（既にある timeout 引数。製品は変えていない）。止まってもハングせず、`unlink` の失敗で落ちる
+  8. この節と設計の `ClearPlayerEditor` の古い記述を直した
+- **不安定だったテスト**
+  - `tests/test_web_panel_host.py::test_a_refused_load_is_retried_then_given_up`: このファイルでビューを `show()` しない唯一のテストで、落ちるのもこれだけだった。CPU を埋めるプロセスを 8 コアに 8 個走らせると、隠れたビューでは 3 回の読み込みに 280 秒以上かかり、15 秒の期限を超えて `finished == []` で落ちた（負荷なしは 4.6 秒。24 個でも約 300 秒で、負荷の量によらない）。同じ負荷でビューを表示すると 4.4 秒で終わる。テストで `view.show()` するように直した（期限は 15 秒のまま。最初に試した 60 秒への延長は効かなかった）。Chromium が隠れたページのプロセスを低優先度で走らせるためと推定している（プロセスの優先度そのものは測っていない）。ローダーのリトライは正しく動いていて、製品のコードは直していない。共有ビューは表示中にだけ構築・読み込みを始めるので通常の読み込みには当たらないが、CPU が埋まっているマシンでページを隠した直後は同じ遅さになりうる
+  - `tests/test_player_service.py::test_filename_unsafe_characters_are_replaced_in_the_avatar_lookup`（WinError 32）: `PublishImages` の後、エクスポートスレッドの `CreateFilesDict` が avatar を `out/` へコピーしている間に、テストの `finally` が元ファイルを消そうとしていた。`unlink` の前に `StateManager.JoinExports(30)` で待つ（同じ形の隣のテストも）。製品はこのファイルを同時に消さない。コードの読解からの原因で、再現はしていない（ウイルス対策ソフト等の可能性を完全には否定できない）
+  - `PlayerBrowserPage.test.js` の重さ: `getByRole` は DOM 全体の計算スタイルを読むので、DOM ヘルパー（`rowOf` / `button` / `dialog` / `characterField` など）に置き換えた。単体で 43 件 32 秒から 63 件 25 秒（1 件あたり 0.74 秒 → 0.36 秒）
+- **docs**: `.claude/design/Design.md`（パネル表・`/web/:panel`・R-Sync-1b・選手 DB の編集元・コンパクト表示の記述）、`.claude/rules/agent-pitfalls.md` #7、`state-and-webserver.md`、`python-widgets.md`（パネル登録の重複した手順）、`docs/product/features.md` §10、`.claude/manual-test-checklist.md`（「選手リスト」節）、`README.md`
+- **オーナー実機確認**（`python main.py`）: 手動チェックリストの「選手リスト」の全項目。特に次の 3 点
+  - サイドバーの選手一覧で React のページが出て、追加・編集・削除、国と地域の選び直し（カスタム国旗を含む）、キャラの追加と外す、P1 / P2 にセットができる
+  - **スコアボードの選手カードが従来どおり**（詳細ダイアログ・クリア・キャラの行のレイアウトと増減・名前補完。カードの分岐を大きく消した）
+  - スコアボードの Web UI の選手ダイアログで、国の入った選手の国を選び直せる（候補が開く）
+  - 再レビューの修正のうち jsdom で確かめられないもの: 途中のキャラ欄を Backspace で空にして別のキャラを打つ、空行を飛ばして選んだときに focus が飛ばない、国を選んだ直後に Tab で地域欄へ移れる
+- **受け入れた点（直さない）**
+  - `PlayerService.BoardNumber` / `TeamNumber` / `TeamLosersKey` / `Announce` の `None` の経路は、`score.*` 以外のパスへの防御的なパースとして残した（`"elsewhere.1"` のテストが覆う）
+  - 既存キーへの上書きは確認を出さない。Qt 版と同じ（`git show 012b7c09:src/AutonaPlayerBrowserWidget.py` の保存に確認は無く、`QMessageBox` は削除だけ）
+  - 検索・ページ・選択はパネルを切り替えると消える（React のページがアンマウントされる。タブだけはモジュール変数で残る）。Qt 版はウィジェットが残るので保っていた
+  - 空のタグの参加者の `:load` は、原因を言わない汎用の失敗表示になる
+  - 共有部品の国欄の小さな変化（`slotProps.input` のマージ修正から）: 中身の無いクリアボタンにも当たり判定が出る。打ちかけで欄を離れると `autoSelect` がハイライトの行を確定する。スコアボードの Web UI にも及ぶ
+  - `/countries` の `NOT_READY` が 5 回続くと、一覧の再読込まで読み直さない
+  - 地域の読み込みが失敗すると、同じ国の間は再取得しない（国を選び直すか、ダイアログを開き直す）
+  - `GET /characters` は `name`（export 名）をキーにするので、`name` が衝突するキャラは片方しか一覧に載らず、載らなかった方を `refusedMains` が「一覧に無い」と誤検出する。手元の ssbu では衝突なし
+  - 前後に空白を含む古い DB キーは、無編集の保存で別の記録になる（JS の `trim` と Python の `strip` は対象の文字が違う）
+  - mains が 100 件を超える、または改行や 257 文字以上の値を持つ DB 行の保存は、サーバーに断られてスナックバーで止まる
+  - DB の記録が送信値に勝つ場面がある（`PlayerService.py:761-764`。`update_player` は `loadFromDB=True` で、記録 → 送信値の順に当て、空の送信値は何も書かないので、スコアボードの Web UI で空にした欄に DB の値が残る）
+  - 空欄を飛ばした行の再マウントで focus が飛ぶ件は、行に ID を持たせて再マウントしなくなったので解消した（jsdom で同じ input のままなのを pin。実機確認の項目は残す）

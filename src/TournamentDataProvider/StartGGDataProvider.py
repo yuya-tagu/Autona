@@ -1762,7 +1762,7 @@ class StartGGDataProvider(TournamentDataProvider):
 
     def GetEntrants(self, cancel_event=None):
         # A job of the core executor (ADR-005 S3f-2), as the adapter's own
-        # fetches; nothing answers it (the DB and entrants_updated do).
+        # fetches; nothing answers it (the DB's change does).
         # `cancel_event`: set once another tournament is loaded (the
         # adapter's), the fetch stops and leaves the tournament filter alone.
         TaskExecutor.instance.submit(
@@ -2188,11 +2188,6 @@ class StartGGDataProvider(TournamentDataProvider):
             # `playerdb` push this makes reads them (GET
             # /api/v1/players/entrants, ADR-005 S4m).
             PlayerDB.instance.NotifyChanged()
-
-            try:
-                self.tshTdp.signals.entrants_updated.emit()
-            except Exception:
-                logger.error(traceback.format_exc())
         except Exception as e:
             logger.error(traceback.format_exc())
         finally:

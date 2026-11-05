@@ -40,6 +40,7 @@ from src.Helpers.AutonaLocaleHelper import AutonaLocaleHelper
 from src.core import StateSchema as schema
 from src.core.CountryCatalog import CountryCatalog
 from src.core.DictHelper import deep_clone
+from src.core.PlayerService import PlayerService
 from src.core.StateManager import StateManager
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -272,15 +273,16 @@ def test_a_second_reload_notice_does_not_leave_the_card_silenced(autonaApp):
 
 
 @contextmanager
-def _editor_card(autonaApp, catalogLoads=True):
-    """A player card on the PlayerDB editor's path (never a live board),
-    reaped afterwards the way tests/test_player_widgets.py reaps it.
-    With catalogLoads=False it is built while the country load fails."""
+def _card_off_the_board(autonaApp, catalogLoads=True):
+    """A player card on a slot of no board (the fixture below has board 1 up),
+    reaped afterwards the way conftest._dropBoard reaps a board's cards. With
+    catalogLoads=False it is built while the country load fails."""
     from qtpy.QtCore import QCoreApplication, QEvent
 
     from src.AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
 
-    path = f"{schema.PLAYER_EDITOR_ROOT}.1"
+    path = "score.9.team.1.player.1"
+    PlayerService(path).SeedEmpty(1)
     if catalogLoads:
         card = AutonaScoreboardPlayerWidget(index=1, teamNumber=1, path=path)
     else:
@@ -294,7 +296,7 @@ def _editor_card(autonaApp, catalogLoads=True):
         card.setParent(None)
         card.deleteLater()
         QCoreApplication.sendPostedEvents(card, QEvent.Type.DeferredDelete)
-        StateManager.Unset(schema.PLAYER_EDITOR_ROOT)
+        StateManager.Unset("score.9")
         autonaApp.settle()
 
 
@@ -351,7 +353,7 @@ def test_a_card_built_before_the_first_load_loads_the_countries(
         autonaApp, no_country_model):
     """The fallback in LoadCountries: a card that finds no model asks the
     helper for one and attaches it."""
-    with _editor_card(autonaApp) as card:
+    with _card_off_the_board(autonaApp) as card:
         assert AutonaCountryHelper.countryModel is not None
         assert AutonaCountryHelper.countryModel.rowCount() > 1
         _assert_card_works(autonaApp, card)
@@ -362,7 +364,7 @@ def test_a_card_built_while_the_load_fails_attaches_the_later_one(
     """When that load fails too, the card is left without a model, and the
     countriesUpdated connection attaches the model the next successful
     load creates."""
-    with _editor_card(autonaApp, catalogLoads=False) as card:
+    with _card_off_the_board(autonaApp, catalogLoads=False) as card:
         country = card._w(schema.PLAYER_COUNTRY_KEY, QComboBox)
         assert AutonaCountryHelper.countryModel is None
         assert country.count() == 0

@@ -282,6 +282,22 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, auton
         };
     }
 
+    // A region's code means another place in another country. Sent on with
+    // the new country, the server would look it up there, and pick a region
+    // of the same code if that country has one (PlayerService._ApplyFields).
+    //
+    // Emptied, it is no change: the server takes "" as nothing said, so the
+    // country and its region stay on the overlays. The field goes back to them
+    // when it is left, rather than showing none over them.
+    const onCountryChanged = (code) => {
+        if (!code || code === state.countryCode) {
+            return;
+        }
+        const newState = {...state, countryCode: code, stateCode: ''};
+        setState(newState);
+        submitPlayer(newState);
+    };
+
     /**
      *
      * @param {React.SyntheticEvent} event
@@ -489,7 +505,7 @@ export default function Player({teamId, teamKey, player, scoreboardNumber, auton
                                     sx={{width: {xs: '100%', sm: '50%'}, maxWidth: {xs: '100%', sm: '50%'}}}
                                     label={i18n.t("country")}
                                     value={state.countryCode ?? ''}
-                                    onChange={selectHandlerFor('countryCode')}
+                                    onChange={onCountryChanged}
                                 />
 
                                 <CountryStateSelector

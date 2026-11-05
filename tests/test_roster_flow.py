@@ -417,7 +417,7 @@ def _poke(card):
         field.setText("GHOST")
         field.editingFinished.emit()
     card._OnCompleterPick(_Pick())
-    card.CharactersChanged(includeMains=True)
+    card.CharactersChanged()
     card.Clear()
 
 

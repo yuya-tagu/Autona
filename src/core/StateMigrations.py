@@ -30,10 +30,11 @@ Rules for adding a version:
   back to it, every step runs on data that may already be past it.
 - Bump ``CURRENT_VERSION`` and add the step to ``_STEPS`` together.
 
-What is *not* a migration: per-launch cleanup of data the current build can
-leave behind itself. ``player_editor`` is the example -- a v1 session that
-crashes with the editor dialog open writes it into a v1 ``state.json``, which
-no v0 -> v1 step will ever see again. That cleanup stays in
+What is *not* a migration: per-launch cleanup of data a build at the current
+version could leave behind itself. ``player_editor`` is the example -- a v1
+session that crashed with the Qt editor dialog open (it is gone since ADR-005
+S4n) wrote it into a v1 ``state.json``, which no v0 -> v1 step will ever see
+again. That cleanup stays in
 ``StateSchema.SeedPanelState()``, which runs at every launch.
 
 Import side effects: none (agent-pitfalls #1).

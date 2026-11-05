@@ -13,20 +13,28 @@ both program_state.json (orjson) and the Socket.IO payload (json.dumps) are
 serialised in insertion order.
 
 `fixtures/player_slots/golden.json` was recorded by THIS module against the
-last pre-S1d tree (2f831e58), through the widgets' public behaviour only, so
-the same drivers replay it against the current tree:
+last pre-S1d tree (2f831e58, with AUTONA_RECORD_PLAYER_SLOTS=1), through the
+widgets' public behaviour only, so the same drivers replay it against the
+current tree.
 
-    AUTONA_RECORD_PLAYER_SLOTS=1 python -m pytest tests/test_player_slot_publish.py
-
-(on a checkout of 2f831e58 with this file and the fixture directory copied
-in). Re-record only when the fixture games or the shipped country data
-change. Each value is `orjson.dumps(value, OPT_NON_STR_KEYS)` -- the
-program_state.json encoding -- of what one `StateManager.Set` received;
+It cannot be recorded again: that tree does not have what the drivers go
+through since ADR-005 S4n (AutonaActions.SetRoster), and on a later tree the
+switch would only record that tree, which pins nothing, with the changes made
+on purpose since (_expectedOperations, _expectedLocations) inside it. A change
+of the fixture games or the shipped country data is carried into golden.json
+by hand, each difference looked at. Each value is
+`orjson.dumps(value, OPT_NON_STR_KEYS)` -- the program_state.json encoding --
+of what one `StateManager.Set` received;
 large tables are stored as digests (the first 16 hex digits of a sha256),
 with a few rows in full for readable failures.
 
 The recorded identifiers ride along with every value, which is what
 tests/test_player_service.py replays without Qt.
+
+Since ADR-005 S4n the character count is driven the way the app changes it
+(AutonaActions.SetRoster; the card's own setter went with the Qt Player List,
+its only caller), and what only that panel's card could do -- the editor's
+path, swapping two character rows -- left the recording.
 """
 import json
 import os
@@ -34,9 +42,10 @@ from unittest.mock import patch
 
 import pytest
 
-from qtpy.QtCore import QCoreApplication, QEvent, QSignalBlocker, Qt
+from qtpy.QtCore import QSignalBlocker, Qt
 from qtpy.QtWidgets import QApplication, QComboBox
 
+from src.core.Actions import AutonaActions
 from src.core.StateManager import StateManager
 # The scenarios, the custom flags, the locale and the encoding are shared
 # with tests/test_player_service.py, which replays the same recording.
@@ -90,33 +99,23 @@ class SetTrace:
 
 
 class CycleCount:
-    """Save cycles per step: held_state_updated for a board slot (the
-    subtree is held), state_updated for the editor (it is not)."""
+    """Save cycles per step: held_state_updated for the slot's board (its
+    subtree is held)."""
 
     def __init__(self, path):
-        self.path = path
         self.count = 0
-        self.board = path.split(".")[1] if path.startswith("score.") else None
+        self.board = path.split(".")[1]
 
     def _onHeld(self, prefix):
-        if self.board is not None and prefix == f"score.{self.board}":
-            self.count += 1
-
-    def _onDelta(self, payload):
-        parts = self.path.split(".")
-        if self.board is None and any(
-                [str(p) for p in row.get("path", [])][:len(parts)] == parts
-                for row in payload.get("delta", [])):
+        if prefix == f"score.{self.board}":
             self.count += 1
 
     def __enter__(self):
         StateManager.observers.held_state_updated.subscribe(self._onHeld)
-        StateManager.observers.state_updated.subscribe(self._onDelta)
         return self
 
     def __exit__(self, *exc):
         StateManager.observers.held_state_updated.unsubscribe(self._onHeld)
-        StateManager.observers.state_updated.unsubscribe(self._onDelta)
         return False
 
 
@@ -401,17 +400,15 @@ def _expectedOperations(golden):
     ADR-005 S3e-3 SetData and Clear are core's (PlayerService.ApplyData /
     ClearSlot), which publish these same sequences without the widgets."""
     golden = json.loads(json.dumps(golden))
-    for side in ("board", "editor"):
-        step = next(s for s in golden[side]
-                    if s["step"] == "set data without a country")
-        at = step["calls"].index(["name", '"NOWHERE"']) + 1
-        step["calls"][at:at] = [["state", "{}"], ["country", "{}"]]
+    step = next(s for s in golden if s["step"] == "set data without a country")
+    at = step["calls"].index(["name", '"NOWHERE"']) + 1
+    step["calls"][at:at] = [["state", "{}"], ["country", "{}"]]
 
-        calls = next(s for s in golden[side] if s["step"] == "clear")["calls"]
-        name = next(call for call in calls if call[0] == "name")
-        calls.remove(name)
-        calls.insert(calls.index(
-            next(call for call in calls if call[0] == "mergedName")), name)
+    calls = next(s for s in golden if s["step"] == "clear")["calls"]
+    name = next(call for call in calls if call[0] == "name")
+    calls.remove(name)
+    calls.insert(calls.index(
+        next(call for call in calls if call[0] == "mergedName")), name)
     return golden
 
 
@@ -425,8 +422,12 @@ def _steps(player, codename):
     def pick(combo, row):
         return lambda: combo().setCurrentIndex(row)
 
+    def characters(number):
+        return lambda: AutonaActions.instance.SetRoster(
+            int(player.path.split(".")[1]), characters=number)
+
     return [
-        ("three slots", lambda: player.SetCharactersPerPlayer(3)),
+        ("three slots", characters(3)),
         ("set data with mains", lambda: player.SetData({
             "gamerTag": "TAG", "prefix": "SP", "country_code": "JP",
             "state_code": "13",
@@ -435,7 +436,6 @@ def _steps(player, codename):
         ("pick a variant", pick(lambda: slot(1)[3], 2)),
         ("pick a skin", pick(lambda: slot(0)[2], 1)),
         ("pick a character", pick(lambda: slot(2)[1], 3)),
-        ("swap two slots", lambda: player.SwapCharacters(0, 1)),
         ("set data with a legacy main", lambda: player.SetData({
             "gamerTag": "LEG", "mains": ["Peach", 1], "country_code": "US",
             "state_code": "CA"}, dontLoadFromDB=True)),
@@ -448,7 +448,7 @@ def _steps(player, codename):
             "gamerTag": "FLAG", "country_code": "Agender"},
             dontLoadFromDB=True)),
         ("clear", lambda: player.Clear()),
-        ("one slot", lambda: player.SetCharactersPerPlayer(1)),
+        ("one slot", characters(1)),
     ]
 
 
@@ -470,45 +470,19 @@ def compact(calls):
             for leaf, value in calls]
 
 
-def _editor(path):
-    from src.AutonaScoreboardPlayerWidget import AutonaScoreboardPlayerWidget
-    return AutonaScoreboardPlayerWidget(index=1, teamNumber=1, path=path)
-
-
-def _drop(widget):
-    widget.setParent(None)
-    widget.deleteLater()
-    QCoreApplication.sendPostedEvents(widget, QEvent.Type.DeferredDelete)
-
-
 def test_whole_operations_publish_the_recorded_writes(slotEnv, autonaApp):
-    from src.core import StateSchema as schema
-
     slotEnv("tgame")
     player = _boardPlayer(autonaApp)
-    board = runSteps(player, "tgame")
-
-    # The PLAYERS editor: the same widget on the one non-board path
-    # (agent-pitfalls #7). Its construction publishes too.
-    editorPath = f"{schema.PLAYER_EDITOR_ROOT}.1"
-    with CycleCount(editorPath) as cycles, SetTrace(editorPath) as built:
-        editor = _editor(editorPath)
-        QApplication.processEvents()
-    try:
-        editorTrace = [{"step": "construction",
-                        "calls": compact(built.calls),
-                        "cycles": cycles.count}]
-        editorTrace += runSteps(editor, "tgame")
-    finally:
-        _drop(editor)
-        StateManager.Unset(schema.PLAYER_EDITOR_ROOT)
-        autonaApp.settle()
-
-    recorded = {"board": board, "editor": editorTrace}
+    # A fresh card had one character slot when this was recorded; the board's
+    # default is more now.
+    AutonaActions.instance.SetRoster(1, characters=1)
+    autonaApp.settle()
+    recorded = {"board": runSteps(player, "tgame")}
     if RECORD:
         _save("operations", recorded)
         return
-    _assertOperations(recorded, _expectedOperations(GOLDEN["operations"]))
+    _assertOperations(recorded["board"],
+                      _expectedOperations(GOLDEN["operations"]["board"]))
 
 
 def _collapsed(calls):
@@ -531,14 +505,12 @@ def _assertOperations(recorded, golden):
     save cycle (the delta is the state against the last saved one, and a key
     keeps the place its first write gave it); tests/test_player_apply.py
     compares the loads the same way."""
-    for side in ("board", "editor"):
-        assert [s["step"] for s in recorded[side]] \
-            == [s["step"] for s in golden[side]]
-        for actual, expected in zip(recorded[side], golden[side]):
-            if actual["step"].startswith("set data"):
-                actual = dict(actual, calls=_collapsed(actual["calls"]))
-                expected = dict(expected, calls=_collapsed(expected["calls"]))
-            assert actual == expected, (side, actual["step"])
+    assert [s["step"] for s in recorded] == [s["step"] for s in golden]
+    for actual, expected in zip(recorded, golden):
+        if actual["step"].startswith("set data"):
+            actual = dict(actual, calls=_collapsed(actual["calls"]))
+            expected = dict(expected, calls=_collapsed(expected["calls"]))
+        assert actual == expected, actual["step"]
 
 
 # ── the intentional changes, on their own ────────────────────────────────

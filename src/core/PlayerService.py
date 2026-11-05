@@ -34,16 +34,10 @@ serialised in insertion order, so that order is reproduced
 against a recording of the old path.
 
 One instance per player widget, bound to that widget's path, exactly as
-``SetLoadService`` is bound to one board. The path is one of two shapes
-(agent-pitfalls #7 lists three; the ``commentary.{N}`` and
-``player_list.slot.{I}`` callers are gone -- the commentary panel has its own
-cards and the roster editor was retired):
-
-- ``score.{N}.team.{T}.player.{M}`` -- a board's player card
-- ``player_editor.1``               -- the PLAYERS panel's editor dialog
-
-``BoardNumber()`` is what tells them apart, and it is why nothing here
-hard-codes ``score.``.
+``SetLoadService`` is bound to one board. The path is a board's slot,
+``score.{N}.team.{T}.player.{M}`` (agent-pitfalls #7: the ``commentary.{N}``
+and ``player_list.slot.{I}`` callers went with their panels, and the
+``player_editor.1`` one with the Qt Player List, ADR-005 S4n).
 
 **Writes are unconditional**, unlike ``SetLoadService._SetIfChanged`` /
 ``AutonaActions._SetIfChanged``. That is deliberate and it is not an
@@ -299,12 +293,8 @@ class PlayerService:
         return f"{self.path}.{leaf}"
 
     def BoardNumber(self):
-        """The board this slot belongs to, or None when it is not on one.
-
-        ``player_editor.1`` (the PLAYERS panel's editor) is the same widget
-        on a path that has no board, so anything board-shaped -- the 反映
-        commit behind the details dialog's button -- has to ask first.
-        """
+        """The board this slot belongs to, or None for a path that is no
+        board's."""
         parts = self.path.split(".")
         if len(parts) < 2 or parts[0] != "score":
             return None
@@ -327,10 +317,8 @@ class PlayerService:
         (StatsService.PlayerChanged): another player in the slot, another
         seed. Into the caller's save cycle, as the card's signals did.
 
-        Only a board's slot has statistics -- the editor's
-        ``player_editor.1`` has none. A failure is logged, not raised: the
-        write that changed the slot has been made, and its own error (if
-        any) is the one that propagates.
+        A failure is logged, not raised: the write that changed the slot has
+        been made, and its own error (if any) is the one that propagates.
         """
         board = self.BoardNumber()
         team = self.TeamNumber()
@@ -347,8 +335,7 @@ class PlayerService:
     def TeamLosersKey(self):
         """``score.{N}.team.{T}.losers`` for a board slot, None otherwise.
 
-        The flag the slot's display name carries as " [L]". The editor's
-        ``player_editor.1`` belongs to no team, so it never has the suffix.
+        The flag the slot's display name carries as " [L]".
         """
         parts = self.path.split(".")
         if (len(parts) != 6 or parts[0] != "score" or parts[2] != "team"
@@ -669,8 +656,8 @@ class PlayerService:
     # the country / region / character / skin / variant combos, and let the
     # handlers publish. What it published -- the writes, their order, the
     # save cycle -- is reproduced here from the state alone, so a set's
-    # entrants, the Web's player edit, a tag lookup, the name completer and
-    # the PLAYERS editor load a player without a widget.
+    # entrants, the Web's player edit, a tag lookup and the name completer
+    # load a player without a widget.
     # tests/test_player_apply.py pins it against a recording of the widget
     # implementation (ae922c24); runs of writes to one key that the combos
     # made one per moved combo are one write here. Two of its bugs were

@@ -142,10 +142,8 @@ def test_retired_roots_are_the_subtrees_the_launch_drops():
     assert list(schema.RETIRED_ROOTS) == [
         "bracket",         # legacy full bracket, replaced by top8.*
         "player_list",     # retired PLAYERS roster editor
-        "player_editor",   # editor dialog scratch subtree
+        "player_editor",   # the Qt Player List's editor scratch subtree
     ]
-    # AutonaPlayerBrowserWidget builds its dialog path from this constant, so
-    # the two spellings have to agree.
     assert schema.PLAYER_EDITOR_ROOT == "player_editor"
 
 
@@ -527,9 +525,9 @@ def test_seed_board_is_repeatable():
 
 # ── Subtree lifecycle ops (headless core Step 5-5) ───────────────────────
 #
-# Two Unsets that used to sit in a QDockWidget's body. They are here for the
-# same reason SeedBoard is: `score` and `player_editor` are schema names, and
-# the completion condition of Step 5 is that no Qt widget spells a state key.
+# An Unset that used to sit in a QDockWidget's body. It is here for the same
+# reason SeedBoard is: `score` is a schema name, and the completion condition
+# of Step 5 is that no Qt widget spells a state key.
 
 
 def test_reset_score_root_drops_the_whole_subtree():
@@ -548,20 +546,6 @@ def test_reset_score_root_drops_the_whole_subtree():
 
     assert SM.Get(schema.SCORE_ROOT, None) in (None, {})
     assert SM.Get("score.1.team.1.teamName", None) is None
-
-
-def test_clear_player_editor_drops_the_scratch_subtree():
-    """What the PLAYERS editor dialog runs on close.
-
-    Same root the launch seed purges (RETIRED_ROOTS), for the case where a
-    crash meant the dialog never closed.
-    """
-    SM.Set(f"{schema.PLAYER_EDITOR_ROOT}.1.name", "Ada")
-
-    schema.ClearPlayerEditor()
-
-    assert SM.Get(schema.PLAYER_EDITOR_ROOT, None) in (None, {})
-    assert schema.PLAYER_EDITOR_ROOT in schema.RETIRED_ROOTS
 
 
 # ── Subtree roots ────────────────────────────────────────────────────────

@@ -37,7 +37,7 @@ from src.core.StateManager import StateManager as SM
 from src.core.StreamService import NO_SEED, StreamService
 # Fixtures: an isolated state, and the recording's catalogs.
 from tests.test_player_service import (  # noqa: F401
-    EDITOR_PATH, _isolated_state, recordedCatalogs, recordingDir)
+    BOARD_PATH, _isolated_state, recordedCatalogs, recordingDir)
 from tests.fixtures.player_slots import recording
 
 GAME = "tgame"
@@ -603,7 +603,7 @@ _GOLDEN = {
 def _throughTheCard(games, countries, fields):
     """The record a card's edits make: each pick written as the card's
     handlers write it, then the slot read back. What SavePlayerToDB does."""
-    service = PlayerService(EDITOR_PATH, games=games, countries=countries)
+    service = PlayerService(BOARD_PATH, games=games, countries=countries)
     service.SeedEmpty(3)
     with SM.SaveBlock():
         for field, key in ((schema.PLAYER_SPONSOR_KEY, "prefix"),

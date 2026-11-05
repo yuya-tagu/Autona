@@ -2,8 +2,10 @@ import React from "react";
 import {Provider} from "react-redux";
 import {configureStore} from "@reduxjs/toolkit";
 import {act, fireEvent, render, renderHook, screen, waitFor} from "@testing-library/react";
-import {apiPatch, apiPost} from "../api";
+import {apiGetJson, apiPatch, apiPost} from "../api";
+import i18n from "../i18n/config";
 import {useScoreSubmit} from "./useScoreSubmit";
+import Player from "./Player";
 import Team from "./Team";
 
 // The Web UI addresses teams by their *state* number -- the key under
@@ -69,3 +71,116 @@ test.each([["1", 1], ["2", 2]])(
             {losers: {team: teamNumber, value: true}}));
     },
 );
+
+// What the server does with it: tests/test_api_v1.py
+// (test_player_patch_with_a_new_country_and_no_region_leaves_none).
+describe("a player's country", () => {
+    const COUNTRIES = {
+        JP: {code: "JP", name: "Japan"},
+        US: {code: "US", name: "United States"},
+    };
+
+    function renderPlayer() {
+        apiGetJson.mockImplementation((path) => Promise.resolve({
+            data: path.endsWith("/countries/JP/states")
+                ? {13: {name: "Tokyo", code: "13"}} : {},
+        }));
+        const store = configureStore({
+            reducer: {
+                autonaState: () => ({autonaState: {game: {codename: "tgame"}}}),
+                autonaPlayers: () => ({players: {}}),
+                autonaCharacters: () => ({characters: {}}),
+                autonaCountries: () => ({value: COUNTRIES}),
+            },
+        });
+        render(
+            <Provider store={store}>
+                <Player
+                    teamId="t1"
+                    teamKey="1"
+                    scoreboardNumber={1}
+                    autonaTeamId="1"
+                    player={{
+                        name: "Alpha", team: "", real_name: "", twitter: "",
+                        country: COUNTRIES.JP,
+                        state: {code: "13", name: "Tokyo"},
+                        character: {},
+                    }}
+                />
+            </Provider>,
+        );
+        fireEvent.click(screen.getByText(`>>${i18n.t("details")}`));
+    }
+
+    async function pickCountry(text, option) {
+        const input = screen.getByRole("combobox", {name: i18n.t("country")});
+        fireEvent.focus(input);
+        fireEvent.change(input, {target: {value: text}});
+        fireEvent.click(await screen.findByRole("option", {name: option}));
+    }
+
+    test("goes with no region when it is another one", async () => {
+        renderPlayer();
+
+        await pickCountry("Unit", /United States/);
+
+        await waitFor(() => expect(apiPatch).toHaveBeenCalled());
+        const [path, body] = apiPatch.mock.calls[apiPatch.mock.calls.length - 1];
+        expect(path).toBe("/api/v1/scoreboards/1/teams/1/players/1");
+        expect(body).toMatchObject({country_code: "US", state_code: ""});
+    });
+
+    function countryField() {
+        return screen.getByRole("combobox", {name: i18n.t("country")});
+    }
+
+    function regionField() {
+        return screen.getByRole("combobox", {name: i18n.t("state")});
+    }
+
+    // tests/test_api_v1.py (test_player_patch_with_no_country_says_nothing_of_it):
+    // the server keeps both, so the screen does.
+    test("emptied and left, it goes back with its region", async () => {
+        renderPlayer();
+        await waitFor(() => expect(regionField()).toHaveValue("Tokyo"));
+        const input = countryField();
+
+        fireEvent.focus(input);
+        fireEvent.change(input, {target: {value: ""}});
+        expect(input).toHaveValue("");
+        fireEvent.blur(input);
+
+        expect(input).toHaveValue("Japan");
+        expect(regionField()).toHaveValue("Tokyo");
+        expect(apiPatch).not.toHaveBeenCalled();
+    });
+
+    test("emptied, then the same one again keeps the region", async () => {
+        renderPlayer();
+        await waitFor(() => expect(regionField()).toHaveValue("Tokyo"));
+        const input = countryField();
+
+        fireEvent.focus(input);
+        fireEvent.change(input, {target: {value: ""}});
+        await pickCountry("Japa", /Japan/);
+
+        expect(input).toHaveValue("Japan");
+        expect(regionField()).toHaveValue("Tokyo");
+        expect(apiPatch).not.toHaveBeenCalled();
+    });
+
+    test("emptied, then another one goes with no region", async () => {
+        renderPlayer();
+        await waitFor(() => expect(regionField()).toHaveValue("Tokyo"));
+        const input = countryField();
+
+        fireEvent.focus(input);
+        fireEvent.change(input, {target: {value: ""}});
+        await pickCountry("Unit", /United States/);
+
+        await waitFor(() => expect(apiPatch).toHaveBeenCalledTimes(1));
+        expect(apiPatch.mock.calls[0][1])
+            .toMatchObject({country_code: "US", state_code: ""});
+        expect(regionField()).toHaveValue("");
+    });
+});

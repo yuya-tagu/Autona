@@ -772,15 +772,15 @@ def test_a_load_starts_its_fetches_outside_the_state_lock(fetcher):
     assert free == [True] * 3
 
 
-def test_the_editors_slot_has_no_statistics(fetcher):
-    editor = PlayerService("player_editor.1")
+def test_a_slot_outside_the_boards_has_no_statistics(fetcher):
+    slot = PlayerService("elsewhere.1")
     try:
-        editor.ApplyData({"gamerTag": "X", "id": [9, 90], "seed": 4},
-                         False, True)
-        editor.SetPlayerId([8, 80], announce=True)
-        editor.SetSeed(2, announce=True)
+        slot.ApplyData({"gamerTag": "X", "id": [9, 90], "seed": 4},
+                       False, True)
+        slot.SetPlayerId([8, 80], announce=True)
+        slot.SetSeed(2, announce=True)
     finally:
-        SM.Unset("player_editor")
+        SM.Unset("elsewhere")
 
     assert fetcher.asked() == []
     assert StatsService._generations == {}

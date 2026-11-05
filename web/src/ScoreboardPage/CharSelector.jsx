@@ -12,6 +12,13 @@ import {useSelector} from "react-redux";
  *  onCharNameChanged: () => void
  *  onCharSkinChanged: () => void
  *  stackProps: any
+ *  nameText?: string the text of the name field, when the caller holds it.
+ *      Left out, the field holds what is typed in it and tells no one, and its
+ *      text follows the character (a list sent again replaces what was typed).
+ *  onNameText?: (text: string, reason: string) => void what nameText should
+ *      become, with the Autocomplete's reason
+ *  onNameLeft?: () => void the name field lost the focus
+ *  nameInvalid?: boolean shows the name field in error
  * }} CharSelectorProps
  */
 
@@ -29,9 +36,14 @@ export function CharSelector({
     onCharNameChanged,
     onCharSkinChanged,
     stackProps,
+    nameText,
+    onNameText,
+    onNameLeft,
+    nameInvalid = false,
  }) {
     const /** @type {AutonaCharacterDb} */ characters = useSelector((state) => state.autonaCharacters.characters);
     const hasCharName = charName && charName !== '';
+    const selected = characters?.[charName] ?? "";
 
     return (
     // Row height pinned to the small-TextField height so the skin Select
@@ -40,7 +52,10 @@ export function CharSelector({
         <Autocomplete
             id={id + "-name"}
             options={Object.values(characters)}
-            value={characters?.[charName] ?? ""}
+            value={selected}
+            inputValue={nameText}
+            onInputChange={onNameText
+                && ((_event, text, reason) => onNameText(text, reason))}
             freeSolo={true}
             sx={{width: '50%'}}
             onChange={onCharNameChanged}
@@ -70,6 +85,8 @@ export function CharSelector({
                             {...params}
                             label={i18n.t("character")}
                             size="small"
+                            error={nameInvalid}
+                            onBlur={onNameLeft}
                         />
                     </div>)
             }

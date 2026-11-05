@@ -1003,7 +1003,7 @@
         <translation>Commentary</translation>
     </message>
     <message>
-        <location filename="..\AutonaPlayerBrowserWidget.py" line="102" />
+        <location filename="..\Autona.py" line="102" />
         <source>Player List</source>
         <translation>Player List</translation>
     </message>
@@ -1026,71 +1026,6 @@
         <location filename="..\AutonaResultSettingsWidget.py" line="828" />
         <source>Saved {0} player(s) to the local database.</source>
         <translation>Saved {0} player(s) to the local database.</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerBrowserWidget.py" line="129" />
-        <source>Tournament Entrants</source>
-        <translation>Tournament Entrants</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerBrowserWidget.py" line="132" />
-        <source>Registered Players</source>
-        <translation>Registered Players</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerBrowserWidget.py" line="161" />
-        <source>No tournament loaded. Set a tournament URL in the EVENT panel.</source>
-        <translation>No tournament loaded. Set a tournament URL in the EVENT panel.</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerBrowserWidget.py" line="176" />
-        <source>In team battle formats, this sets the first player of the team.</source>
-        <translation>In team battle formats, this sets the first player of the team.</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerBrowserWidget.py" line="178" />
-        <source>Set as P1</source>
-        <translation>Set as P1</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerBrowserWidget.py" line="183" />
-        <source>Set as P2</source>
-        <translation>Set as P2</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerBrowserWidget.py" line="211" />
-        <source>Search players</source>
-        <translation>Search players</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerBrowserWidget.py" line="215" />
-        <source>Add new player</source>
-        <translation>Add new player</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerBrowserWidget.py" line="220" />
-        <source>Edit player</source>
-        <translation>Edit player</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerBrowserWidget.py" line="225" />
-        <source>Delete selected player</source>
-        <translation>Delete selected player</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerBrowserWidget.py" line="437" />
-        <source>Are you sure you want to delete this player?</source>
-        <translation>Are you sure you want to delete this player?</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerBrowserWidget.py" line="345" />
-        <source>GamerTag</source>
-        <translation>GamerTag</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaPlayerBrowserWidget.py" line="347" />
-        <source>Country</source>
-        <translation>Country</translation>
     </message>
     <message>
         <location filename="..\AutonaNotesWidget.py" line="34" />
@@ -1484,17 +1419,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>The result image has been saved here:</translation>
     </message>
     <message>
-        <location filename="..\AutonaScoreboardPlayerWidget.py" line="787" />
-        <location filename="..\AutonaScoreboardPlayerWidget.py" line="191" />
-        <source>Save new player</source>
-        <translation>Save new player</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardPlayerWidget.py" line="207" />
-        <source>Delete player entry</source>
-        <translation>Delete player entry</translation>
-    </message>
-    <message>
         <location filename="..\AutonaTeamPlayerWidget.py" line="85" />
         <location filename="..\AutonaScoreboardPlayerWidget.py" line="221" />
         <source>Clear</source>
@@ -1506,11 +1430,6 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <location filename="..\AutonaScoreboardPlayerWidget.py" line="346" />
         <source>Player {0}</source>
         <translation>Player {0}</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaScoreboardPlayerWidget.py" line="784" />
-        <source>Update player</source>
-        <translation>Update player</translation>
     </message>
     <message>
         <location filename="..\AutonaScoreboardWidget.py" line="185" />

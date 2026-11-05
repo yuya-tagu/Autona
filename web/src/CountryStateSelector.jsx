@@ -32,21 +32,33 @@ export function CountryStateSelector({
         return `${state.name} (${state.code})`;
     }
 
-    const isDisabled = countryCode === "" || !countryCode || stateData.isLoading;
+    // Not while the regions are on their way: Tab from the country field lands
+    // here as the country changes, and a disabled field would lose the focus.
+    const isDisabled = !isValidCountryCode;
 
     useEffect(() => {
-        if (isValidCountryCode) {
-            apiGetJson(`/api/v1/countries/${encodeURIComponent(countryCode)}/states`)
-                .then(({data}) => setStateData({
-                    states: data ?? {},
-                    isLoading: false
-                }))
-                .catch(e => {
-                    console.warn(`Failed to load autocomplete state data for country code ${countryCode}`, e);
-                    setStateData({states: {}, isLoading: false})
-                });
+        if (!isValidCountryCode) {
+            return undefined;
         }
-
+        // Another country's regions are not offered while this one's are on
+        // their way, and its answer arriving late does not replace them.
+        let live = true;
+        setStateData({states: {}, isLoading: true});
+        apiGetJson(`/api/v1/countries/${encodeURIComponent(countryCode)}/states`)
+            .then(({data}) => {
+                if (live) {
+                    setStateData({states: data ?? {}, isLoading: false});
+                }
+            })
+            .catch(e => {
+                console.warn(`Failed to load autocomplete state data for country code ${countryCode}`, e);
+                if (live) {
+                    setStateData({states: {}, isLoading: false});
+                }
+            });
+        return () => {
+            live = false;
+        };
     }, [countryCode, isValidCountryCode]);
 
     const getStateFlagAsset = (inp) => {
@@ -69,6 +81,8 @@ export function CountryStateSelector({
         forcePopupIcon={false}
         clearIcon={null}
         disabled={isDisabled}
+        loading={stateData.isLoading}
+        loadingText={i18n.t("loading")}
         renderOption={(_props, option, _) => {
             const {key, ...rest} = _props;
             const stateFlagAsset = getStateFlagAsset(option);
@@ -96,7 +110,10 @@ export function CountryStateSelector({
             if (selectedState?.name) {
                 const flagAsset = getStateFlagAsset(selectedState);
                 if (flagAsset && !isDisabled) {
+                    // slotProps.input replaces InputProps, and without its ref
+                    // the options have no anchor: they would not open.
                     slotProps['input'] = {
+                        ...params.InputProps,
                         startAdornment: <InputAdornment position="start">
                             <img
                                 alt="Country flag"
