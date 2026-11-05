@@ -68,7 +68,8 @@ if sys.stdout != None:
             pass
     config = {
         "handlers": [
-            {"sink": sys.stdout, "format": fmt, "level": "DEBUG"},
+            {"sink": sys.stdout, "format": fmt, "level": "DEBUG",
+             "diagnose": False},
         ],
     }
     logger.configure(**config)
@@ -106,13 +107,16 @@ else:
     sys.stdout = LoggerWriter(logger.info)
     sys.stderr = LoggerWriter(logger.error)
 
+# diagnose=False on every sink: loguru's default writes the local variables'
+# values into a traceback, and those can be a player's name.
 logger.add(
     "./logs/autona.log",
     format="[{time:YYYY-MM-DD HH:mm:ss}] - {level} - {file}:{function}:{line} | {message}",
     encoding="utf-8",
     level="INFO",
     rotation="20 MB",
-    retention=5
+    retention=5,
+    diagnose=False
 )
 
 logger.add(
@@ -121,7 +125,8 @@ logger.add(
     encoding="utf-8",
     level="ERROR",
     rotation="20 MB",
-    retention=5
+    retention=5,
+    diagnose=False
 )
 
 # loguru is only configured now, so the STARTUP marks recorded before this

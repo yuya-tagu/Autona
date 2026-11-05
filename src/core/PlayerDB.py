@@ -107,6 +107,18 @@ class PlayerDB:
         return player.get("prefix")+" "+player.get("gamerTag") \
             if player.get("prefix") else player.get("gamerTag")
 
+    @staticmethod
+    def ParseMains(mains) -> dict:
+        """A record's `mains` as the per-game dict: an old row's is a JSON
+        string, and a load gives a row without one the string "{}". {} for
+        anything that does not make one."""
+        if isinstance(mains, str):
+            try:
+                mains = json.loads(mains)
+            except ValueError:
+                return {}
+        return mains if isinstance(mains, dict) else {}
+
     # -- loading -----------------------------------------------------------
 
     def LoadDB(self):
@@ -258,6 +270,18 @@ class PlayerDB:
                 except:
                     logger.error(traceback.format_exc())
             self.database[tag] = player
+
+    def KeepStoredMains(self, tag):
+        """Make the stored record's `mains` the per-game dict, for a merge
+        with AddPlayers(overwrite=True) to follow: the merge cannot update a
+        string, so it logs that and replaces them, and the other games' mains
+        are lost. AddPlayers stays as it is (tests/fixtures/player_db); a
+        save of a player calls this first (PlayerService.SaveRecordToDB)."""
+        with self.lock:
+            stored = self.database.get(tag)
+            if isinstance(stored, dict) and "mains" in stored \
+                    and not isinstance(stored["mains"], dict):
+                stored["mains"] = PlayerDB.ParseMains(stored["mains"])
 
     def DeletePlayer(self, tag):
         with self.lock:
@@ -411,11 +435,16 @@ class PlayerDB:
 
     def GetPlayerFromTag(self, tag):
         """The first player whose gamerTag (not the DB tag: no prefix)
-        matches `tag`, case-insensitively. The live dict, as Get; do not
-        change it outside `lock`."""
+        matches `tag`, case-insensitively. A row that is no record, or with
+        no gamerTag (or one that is not a string: the file can hold anything)
+        matches nothing. The live dict, as Get; do not change it outside
+        `lock`."""
+        target = tag.lower()
         with self.lock:
             for player_db in self.database.values():
-                if tag.lower() == player_db.get("gamerTag").lower():
+                gamerTag = player_db.get("gamerTag") \
+                    if isinstance(player_db, dict) else None
+                if isinstance(gamerTag, str) and target == gamerTag.lower():
                     return player_db
         return None
 

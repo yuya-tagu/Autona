@@ -42,6 +42,7 @@
 ### 2.2 認証・ネットワーク（D5 → ADR-005 S3a で改定・2026-10-25）
 - バインドは既定 `127.0.0.1`。設定の「LAN 上の他のデバイスからのアクセスを許可」で `0.0.0.0`。
 - **LAN の他端末からの書き込み（POST / PATCH）はアクセストークン必須**。読み取り（GET）はトークン不要のまま。
+  ただし選手 DB の読み取り（legacy `/playerdb`、v1 の `GET /players`・`GET /players/entrants`。本名を含む。ADR-005 S4m）は書き込みと同じ扱い（`PLAYERDB` 区分）。
   同じ PC（同じ PC の Companion・ASS・curl）はトークン不要（今と同じ）。「同じ PC」は接続元がループバックか、この PC の LAN IP のどれか
   （LAN IP の URL を同じ PC で使っていても通る）。ただし転送ヘッダ（`X-Forwarded-For` / `Forwarded` / `X-Real-IP`）が付いた要求は、
   ローカルのリバースプロキシ・トンネルの中継とみなし、他の端末と同じ扱い（トークン必須）
@@ -109,7 +110,7 @@
 | `FORBIDDEN` | 403 | トークンなしの書き込みが、別サイト・同一サイトの別オリジン・別オリジンのブラウザページから来た（§2.2 CSRF 対策） |
 | `NOT_FOUND` | 404 | 存在しないリソース（未知の set ID 等） |
 | `CONFIRMATION_REQUIRED` | 409 | 破壊的操作で `confirm:true` が無い（§7.2） |
-| `CONFLICT` | 409 | 重い操作が実行中（多重起動ガード・§2.8） |
+| `CONFLICT` | 409 | 重い操作が実行中（多重起動ガード・§2.8）。選手 DB への保存（§6.26）では、mains のゲームが今のゲームと違う / もっと新しい保存に負けた |
 | `NOT_READY` | 409 | 前提未充足（大会/試合未ロードで provider 不在 等・§3） |
 | `UPSTREAM_TIMEOUT` | 504 | Start.gg 等の外部依存がタイムアウト（agent-pitfalls #11） |
 | `PAYLOAD_TOO_LARGE` | 413 | 本文が大きすぎる。上限を持つのは画像の取り込み（配信団体 §6.17・大会のアイコン / バナー §6.21。ADR-005 S4g）だけ: `Content-Length` が上限を超えると本文を解析せずに読み捨ててから断り（読まずに返すと、送信中のクライアントには 413 でなく接続のリセットが届く）、data URL の base64 / デコード後の大きさでも断る（2026-10-31 追加・ADR-005 S4e）。ほかのルートに上限は無い（アプリ全体の `MAX_CONTENT_LENGTH` は設定しない） |
@@ -121,7 +122,7 @@
   メソッド・パス・主要パラメータ・結果（ok/error code）。
 - 読み取り（§5）は**記録しない**（or DEBUG）。既存 `before_request`/`after_request`（DEBUG・パスのみ）とは別建て。
 - ⚠️ トークンは全端末で 1 つを共有するため、操作主体は **IP 粒度まで**（D5 の帰結。S3a 以降も同じ）。トークンはログに出さない（拒否のログもパスのみで、クエリ文字列を含めない）。ボディに認証情報や PII を含めない（CLAUDE.md 機密ルール）。
-  - 選手データを運ぶ `PATCH .../players/{p}`（§6.8）は**ボディのキー名だけ**を記録し、値（タグ・本名・SNS）は記録しない。
+  - 選手データを運ぶ `PATCH .../players/{p}`（§6.8）・`PUT /players`（§6.26）・`POST .../players/{p}:load`（§6.27）・`POST /players:delete`（§7.2）は**ボディのキー名だけ**を記録し、値（タグ・本名・SNS）は記録しない。エラーの `message` にも値を入れない。
 
 ### 2.8 重い操作の非同期受付（202・D7）
 - **重い操作**（`POST /tournament`・`POST /game`・`POST /bracket:refresh`）は**同期完了を待たず
@@ -225,6 +226,8 @@
 | `GET /api/v1/tournament` | 大会の URL と、設定 / 解除の進み具合（§5.7。2026-11-01 追加） | `get_tournament`（state の `tournamentInfo.url` / `load`。`core/TournamentService.Load`） | — |
 | `GET /api/v1/analysis` | この大会の試合一覧の行（§5.9。2026-11-04 追加） | `get_analysis`（`core/AnalysisService.Result`） | — |
 | `GET /api/v1/stats/overlays` | 統計情報表示設定の種類の表・選択中・Companion マクロのリクエスト（§5.10。2026-11-05 追加） | `get_stats_overlays`（`core/StatsOverlays`） | — |
+| `GET /api/v1/players` | 選手 DB の全件の行（§5.11。本名を含むので **LAN からはトークン必須**。2026-11-05 追加） | `get_players`（`core/PlayerDirectory.Registered`） | — |
+| `GET /api/v1/players/entrants` | 大会の参加者の行（§5.11。同上。2026-11-05 追加） | `get_player_entrants`（`core/PlayerDirectory.Entrants`） | — |
 
 > `data` の具体スキーマは委譲先 Action の現返却（candidates §3）に準拠。本 API はそれを `{"ok":true,"data":...}` で包むだけ。
 
@@ -408,6 +411,30 @@ Board / Commentary / Top 8 タブと Designer の「開く」一覧が使う**�
   ヘッダ `X-Autona-Token` が要る
 - 設定なので `revision` は付かない
 
+### 5.11 `GET /api/v1/players`・`GET /api/v1/players/entrants`（2026-11-05 追加・ADR-005 S4m）
+選手 DB（`user_data/local_players.json`）を選手リストの行として読む。**本名を含むので `PLAYERDB` 区分**（READ ではない。`/playerdb` と同じく、LAN の他端末はトークン必須）。
+
+```json
+{ "ok": true, "data": { "game": "tgame", "players": [
+  { "key": "SP Alpha", "prefix": "SP", "gamerTag": "Alpha", "name": "本名", "twitter": "@alpha",
+    "country_code": "JP", "state_code": "13", "custom_textbox": "1 行目\n2 行目",
+    "mains": [["Mario", 1, "EX"], ["Bowser", 0, ""]] }
+] } }
+```
+- **`game` は行の `mains` のゲーム**（今の codename。未選択は `null`）。行と同じ 1 回のスナップショットから読む。ページは §6.26 の `mains` にこの値を添えて送り返す。**`state` の `game.codename` で代用しない**（`ForgetSelection` の後も state には前のゲームの codename が残り、未選択と照合して `409` になる）
+- `/players` はキーの順（大文字小文字を無視）。`key` は DB のキー（スポンサー + タグ）で、§7.2 の削除が取る値
+- `/players/entrants` は `{"game": ..., "entrants": [...]}`。上位から順（`core/StreamService.TopEntrants`。大会の切替で空になる）。各行は上の形に `seed`（未シードは `null`）を足したもの。
+  タグの突き合わせは `PlayerDB.GetPlayerFromTag` と同じ（gamerTag だけ・大文字小文字を無視・最初の行）で、見つかれば DB の記録の値（`gamerTag` も DB の表記）。
+  **DB に無い参加者はタグだけの行**（`key` は `null`、他の欄は空）。大会が無ければ `[]`
+- **`key` と `seed` は読むだけ**で、§6.26 に送り返せない（未知のキーとして `400`）
+- 欄はどれも文字列（無ければ `""`）。`custom_textbox` は実際の改行で返す（DB の中はエスケープされた 1 行）
+- `mains` は**読み込み中のゲームのものだけ**、`[en_name, スキンの行, バリアントの en_name]`（ゲームが未選択なら `[]`）。古い行の JSON 文字列の mains や壊れた要素では落ちず、読めない要素は除く。
+  スキンは DB の値のまま（スキンの無いキャラの `-1` も）。無い・数値でないものは 0、`-1` より小さいものは `-1`。**カタログとは照合しない**ので、今のゲームに無いキャラ（mods オフの modded など）・未知のバリアント・範囲外のスキンもそのまま出る。§6.26 はその選手が持っている要素をそのまま受け取るので無編集で往復でき、編集画面はそれらを壊さずに持ち、**新しく足す要素だけ** `GET /characters` の選択肢から作る
+- `country_code` / `state_code` は**表示のための読み替え**で、§6.26 が受け取る値になっている。カタログが知らない国は `""`。地域は国の地域コードならそのまま、DB に普通に入っている自由文字列（start.gg の地名で解決できなかったもの）は `FindState` で解決し、できなければ `""`。国データの読み込み前は DB の値のまま。
+  **行の `""` は DB が空だという意味ではない**（解決できない地名・読めないカスタム国旗でも `""`）ので、**ページはこの 2 つを、操作者が変更したときだけ §6.26 に送る**（送らなければ DB の値が保たれる）
+- `key` が文字列でない行（タグの無い行）は出さない
+- 選手 DB なので `revision` は付かない。再読込の契機は Socket.IO の `playerdb` の push と `game`・`tournamentInfo.load` の変化。push の時点で参加者はもう読める（取得ジョブが `SetTopEntrants` の後に通知する）
+
 ## 6. 安全操作エンドポイント（書き込み・操作ログ対象 / confirm 不要）
 
 **反映ゲート（2026-07-12 監査・明文化）**: ボード 1/2 への書き込み（§6.1〜6.5 および §7 の
@@ -425,6 +452,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 **チーム番号の規約（2026-10-21 明文化）**: v1 のチーム番号（パスの `{t}`・body の `team`/`team1`/`team2`）は
 すべて**状態側のチーム**（`score.{n}.team.{t}`。運用者と Web UI が見ている列）を指す。スワップ後も同じ列を指す。
 旧ルートの `/score` と `-set?losers=` は set 形式の書き込みでスワップ時に反転するが、v1 はこれを持ち込まない。
+**唯一の例外は §6.27 の `:load`**（ADR-005 S4m）で、`{t}` はセット側のチームを指し、スワップ時に反転する（選手リストの「P1 に設定」と legacy `load-player-from-tag` の意味のまま）。
 
 ### 6.1 スコア加算 `POST /api/v1/scoreboards/{n}/teams/{t}/score:adjust`
 - パス: `n`=スコアボード番号, `t`=1|2
@@ -677,6 +705,32 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 - 応答の `data` は選んだ項目（§5.10 の `overlays[]` の 1 つ）。設定なので `revision` は付かない。操作ログは `stats.overlay.select`
 - エラー: `INVALID_ARGUMENT`（`key` が文字列でない / 表に無い。何も保存しない）
 
+### 6.26 選手 DB への保存 `PUT /api/v1/players`（2026-11-05 追加・ADR-005 S4m）
+- 方針は**編集していない値を保存で壊さない**（2026-11-05 レビュー）。body:
+  ```json
+  { "prefix": "SP", "gamerTag": "Alpha", "name": "本名", "twitter": "@alpha",
+    "custom_textbox": "1 行目\n2 行目", "country_code": "JP", "state_code": "13",
+    "mains": [["Mario", 1, "EX"], ["Bowser", 0]], "game": "tgame" }
+  ```
+  - **文字列**: `null` も可（`""` と同じ）。`gamerTag` は必須（空白だけは不可）。未知のキー（§5.11 の行の `key`・`seed` を含む）は `INVALID_ARGUMENT`。
+    1 行の欄（`gamerTag`・`prefix`・`name`・`twitter`・`country_code`・`state_code`）は前後の空白を取ってから検査し、途中に改行があれば `INVALID_ARGUMENT`、上限 256 文字。`custom_textbox` は改行可・空白はそのまま・上限 4096 文字。`prefix`・`name`・`twitter`・`custom_textbox` は**送らなければ空になる**（行が全部持っているので、ページは全部送る）
+  - **`country_code` / `state_code` は送らなければ変えない**: キーが無ければ DB の値（解決できない地名・読めない国旗を含む）をそのまま保つ。**ページは変更したときだけ送る**（§5.11）。`""`（`null`）は明示のクリア。
+    送る値はコード（`GET /countries`・`GET /countries/{code}/states`）。カスタム国旗も code。**自由文字列の地域は受け取らない**。地域だけ送ったら DB の国の地域として検査する。**国だけ変えて地域を送らなければ DB の地域は消す**（地域コードは国をまたいで重なるので、残すと別の場所を指す。同じ国を送っただけなら消さない）
+  - **`mains` は送らなければどのゲームのものも変えない**。送るなら `game` が必須（無ければ `INVALID_ARGUMENT`）で、`[en_name, スキンの行, バリアントの en_name?]` のリスト（最大 100。ボードの 1 人あたりのキャラ数の上限。スキンは `-1` 以上）。`PATCH .../players/{p}` の `{ゲーム: [...]}` の形ではない。`[]` は今のゲームの mains を空にする。
+    **その選手の DB の今のゲームの mains に同じ形（キャラ・スキン・バリアント）である要素は、カタログを見ずにそのまま保存する**（今のゲームに無いキャラ、スキン `-1` など。§5.11 の行のまま送れば往復する）。**新しく足す要素だけ検査する**。スキンの無いキャラはどのスキンでも受け、`-1` を保存する（カードと同じ）
+  - **`game` は `mains` のゲームの codename**で、§5.11 の `game` をそのまま送る（未選択は `null`）。今のスナップショットの codename と違えば `409 CONFLICT`（`null` は未選択とだけ一致）。**ゲームが未選択で mains が空でないときも同じ**（入れる先が無い）。`mains` を送らない保存では見ない
+- 委譲: `save_player` → `core/PlayerDirectory.Save`。**state には書かない**。全部送ったときの記録は `PlayerService.PrepareSaveToDB` がスロットから作るものと同じ（同じキー・同じ順・同じ値。`tests/test_player_directory.py` が golden で照合）で、`PlayerService.SaveRecordToDB` を通るので順序の保護を共有する
+- 同じキー（スポンサー + タグ）の記録を**置き換える**（上の「送らなければ変えない」以外の欄は送った値になり、空の国・地域は鍵が無くなる。メモリだけのキーは落ちる）。**今のゲームの mains だけを置き換え、他のゲームの mains は残す**（DB の mains が古い行の JSON 文字列でも）。スポンサーかタグを変えた保存は別の選手として新規に作られ、**何も引き継がない**（国・地域・mains も。ページが要るものを送る）。元の記録は残る（Qt 版と同じ）。悪語フィルタは通さない（カードの手入力と同じ）
+- 応答の `data`: `{ "key": "SP Alpha", "created": true }`（`created` は保存の前に DB にそのキーが無かったか。同時の `PUT` では両方 `true` になりうる）。選手 DB なので `revision` は付かない。操作ログは `player.save`（キー名のみ）
+- エラー: `INVALID_ARGUMENT`（型・未知のキー・タグなし・改行・長さ・`mains` に `game` が無い・カタログに無い国 / 地域、新しく足す要素のキャラ / スキン / バリアント）、`CONFLICT`（上記の `game` / この選手のもっと新しい保存が先に済んだ）、`NOT_READY`（空でない国か地域を送ったのに国データが未読込。送らない保存は待たない）。いずれも何も保存しない
+
+### 6.27 タグから選手を読み込む `POST /api/v1/scoreboards/{n}/teams/{t}/players/{p}:load`（2026-11-05 追加・ADR-005 S4m）
+- パス: `n`=1|2（board 3 は `INVALID_ARGUMENT`）、`t`=1|2、`p`=1〜。body: `{ "tag": "Alpha" }`（gamerTag。スポンサーなし・大文字小文字を無視。最初の行）
+- 委譲: `load_player_from_tag`（legacy `load-player-from-tag` と同じ操作。`PlayerService.ApplyData`。スロットを空にしてから読む）。ボード 1 / 2 の他の書き込みと同じく held
+- **`{t}` はセット側のチーム**で、スワップ時は反対の state のチームに入る（§6 冒頭の規約の例外）
+- 応答は `revision`。操作ログは `player.load`（キー名のみ）
+- エラー: `INVALID_ARGUMENT`（番号・`tag` が空でない文字列でない）、`NOT_FOUND`（タグが DB に無い / そのチームにそのスロットが無い。state のスロットで判定するので両シェル同じ）
+
 ---
 
 ## 7. 危険操作エンドポイント（書き込み・操作ログ対象 / ガード必須）
@@ -688,6 +742,7 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
 | `POST /api/v1/scoreboards/{n}:clear` | confirm | `clear_all` | #33 |
 | `POST /api/v1/scoreboards/{n}:reset-players` | confirm | `reset_players` | #32 |
 | `POST /api/v1/scoreboards/{n}:reset-match` | confirm | `reset_match` | #31 |
+| `POST /api/v1/players:delete` | confirm | `delete_player`（`core/PlayerDirectory.Delete`。2026-11-05 追加・ADR-005 S4m） | — |
 | `POST /api/v1/scoreboards/{n}:load-set` | （confirm 推奨） | `load_set` | #38 |
 | `POST /api/v1/scoreboards/{n}:pull-stream` | （confirm 推奨） | `pull_stream_set` | #24 |
 | `POST /api/v1/scoreboards/{n}:pull-user` | （confirm 推奨） | `pull_user_set` | #25 |
@@ -713,8 +768,9 @@ held ゲート対象外で即時公開、③`tournamentInfo.*`（表示大会名
   何も接続されておらず何も起きなかった（ADR-005 S3e 論点 3）
 
 ### 7.2 確認フラグ（C-2 / D7）
-- **破壊的操作**（`:clear`・`:reset-players`・`:reset-match`）は body に **`"confirm": true` 必須（MUST）**。
+- **破壊的操作**（`:clear`・`:reset-players`・`:reset-match`・`POST /players:delete`）は body に **`"confirm": true` 必須（MUST）**。
   無い/false なら **`409 CONFIRMATION_REQUIRED`**（状態は変更しない）。
+- `POST /players:delete`: body は `{ "key": "SP Alpha", "confirm": true }`（`key` は §5.11 の行の DB キー。タグだけでは一致しない）。文字列でない `key` は `INVALID_ARGUMENT`、DB に無い `key` は `404 NOT_FOUND`（保存も通知もしない）。選手 DB なので応答に `revision` は付かない。操作ログは `player.delete`（キー名のみ）
 - 「配信中」自動ブロックは**初回は設けない**（Autona に配信状態判定手段が無いため）。confirm のみで担保。
   → 配信状態判定手段が入ったら ADR-001 Revisit。
 
@@ -834,6 +890,7 @@ HTTP/1.1 409 Conflict
 > §5.9 `analysis` と §7.3 `analysis:refresh`（2026-11-04・ADR-005 S4k）は `tests/test_api_v1_analysis.py` が pin し、
 > 行の全シナリオを `tests/test_analysis_rows.py` が golden と照合する。
 > §5.10 `stats/overlays` と §6.25 `stats/overlays/selected`（2026-11-05・ADR-005 S4l）は `tests/test_api_v1_stats_overlays.py` が pin する。
+> §5.11 `players*`・§6.26・§6.27・§7.2 `players:delete`（2026-11-05・ADR-005 S4m）は `tests/test_api_v1_players.py` が pin し、行と記録（`PrepareSaveToDB` との golden）は `tests/test_player_directory.py` が pin する。
 
 - **自動テストは作らない**（PdM 決定）。動作確認は**アプリ上で手動**で行う
   （`python main.py` 起動 → curl/HTTP クライアントで `/api/v1/...` を叩く → UI / `out/` / OBS で反映確認）。
