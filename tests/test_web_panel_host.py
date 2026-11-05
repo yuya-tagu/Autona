@@ -772,6 +772,26 @@ def test_the_stats_item_opens_the_react_page():
     assert "stats" in WebAccess.WEB_PANELS
 
 
+def test_the_stats_preview_item_opens_the_react_page():
+    import ast
+    calls = _calls(_windowMethod("_CreateStatsPreviewPanel"))
+
+    # The React page is the only Stats Display Settings panel (ADR-005 S4l).
+    assert calls == [("self._WebPanel", ["'statsPreview'"])]
+
+    # Still the lazy factory in Display, keyed by the React panel's name,
+    # with its icon and label.
+    build = _windowMethod("_BuildUi")
+    entries = [node for node in ast.walk(build) if isinstance(node, ast.Tuple)
+               and node.elts
+               and ast.unparse(node.elts[0]) == "self._CreateStatsPreviewPanel"]
+    assert len(entries) == 1
+    assert ast.unparse(entries[0].elts[1]) == "'stats.svg'"
+    assert "Stats Display Settings" in ast.unparse(entries[0].elts[2])
+    assert ast.unparse(entries[0].elts[-1]) == "'statsPreview'"
+    assert "statsPreview" in WebAccess.WEB_PANELS
+
+
 def test_the_restored_page_is_built_before_the_window_is_shown():
     """STARTUP phase=core-shown is logged right after self.show(), with the
     restored page built before it (_EnsurePanelAt). For the Event page --
@@ -980,6 +1000,32 @@ def test_the_qt_stats_panel_is_gone():
                        for word in (f"import {name}", f"{name}(",
                                     f"{name}.instance", f"{name}.py"))]
         assert left == [], name
+
+
+def test_the_qt_stats_preview_panel_is_gone():
+    # ADR-005 S4l: the React page is the only Stats Display Settings panel.
+    # The widget may not come back in src/: no import, no construction
+    # (comments recording where code came from still name it), and none of
+    # the translations only it used (the overlays' names are the page's).
+    from src.core import StatsOverlays
+    from tests.conftest import PROJECT_ROOT
+
+    src = PROJECT_ROOT / "src"
+    name = "AutonaStatsPreviewWidget"
+    assert not (src / f"{name}.py").exists()
+    left = [str(path.relative_to(PROJECT_ROOT))
+            for pattern in ("*.py", "*.ui", "*.ts")
+            for path in src.rglob(pattern)
+            if any(word in path.read_text(encoding="utf-8")
+                   for word in (f"import {name}", f"{name}(",
+                                f"{name}.instance", f"{name}.py"))]
+    assert left == []
+
+    for path in (src / "i18n").glob("*.ts"):
+        text = path.read_text(encoding="utf-8")
+        back = [item["displayName"] for item in StatsOverlays.Overlays()
+                if f"<source>{item['displayName']}</source>" in text]
+        assert back == [], path.name
 
 
 # ── several React items, one host page (ADR-005 S4e) ────────────────────

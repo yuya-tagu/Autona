@@ -24,6 +24,10 @@ export interface LayoutEntry {
     kind: string;
     displayName: string;
     entry: string;
+    // What a select picks it by, when `id` (the folder) is not unique: the
+    // Stats page's last_sets / tournament_history have a player 1 and a
+    // player 2 entry in one folder (S4l). `id` otherwise.
+    key?: string;
 }
 
 export type ColorKind = "theme" | "accent";

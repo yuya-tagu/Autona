@@ -517,9 +517,9 @@ Help & Settings メニュー。
 ---
 
 ## 32. 統計表示設定
-[src/AutonaStatsPreviewWidget.py](../../src/AutonaStatsPreviewWidget.py)（Stats Display Settings パネル）。
+React の `web/src/StatsPreviewPage/`（`/web/statsPreview`。Stats Display Settings パネル。種類の表は [src/core/StatsOverlays.py](../../src/core/StatsOverlays.py)。ADR-005 S4l）。
 - 統計オーバーレイに出す統計情報の種類を選択
-- Companion マクロ / OBS への追加案内
+- Companion マクロ（`stats:refresh` のリクエストとコピー。設定の手順は「ヘルプ＆設定 → API設定 → Companion の設定」）/ OBS への追加案内 / プレビュー・機能別カラー
 
 ---
 

@@ -105,7 +105,8 @@ EXPECTED_ROUTES = [
 # the Commentary page (ADR-005 S4b); stream/* for the Stream page (S4e);
 # GET / DELETE tournament, tournament/info, tournament/media* and
 # colors/tournament for the Event page (S4g); countries and top8/* for the
-# Top 8 page (S4i); analysis* for the Statistics page's match list (S4k).
+# Top 8 page (S4i); analysis* for the Statistics page's match list (S4k);
+# stats/overlays* for the Stats Display Settings page (S4l).
 EXPECTED_API_V1_ROUTES = [
     ('/api/v1/analysis', 'api_v1.get_analysis', 'GET,HEAD,OPTIONS'),
     ('/api/v1/analysis:refresh', 'api_v1.analysis_refresh', 'OPTIONS,POST'),
@@ -147,6 +148,8 @@ EXPECTED_API_V1_ROUTES = [
     ('/api/v1/sets', 'api_v1.get_sets', 'GET,HEAD,OPTIONS'),
     ('/api/v1/sets/<setId>', 'api_v1.get_match', 'GET,HEAD,OPTIONS'),
     ('/api/v1/state', 'api_v1.state', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/stats/overlays', 'api_v1.get_stats_overlays', 'GET,HEAD,OPTIONS'),
+    ('/api/v1/stats/overlays/selected', 'api_v1.select_stats_overlay', 'OPTIONS,PUT'),
     ('/api/v1/stream', 'api_v1.stream_update', 'OPTIONS,PUT'),
     ('/api/v1/stream/channels', 'api_v1.get_stream_channels', 'GET,HEAD,OPTIONS'),
     ('/api/v1/stream/channels', 'api_v1.stream_channel_add', 'OPTIONS,POST'),
@@ -482,7 +485,8 @@ def test_the_classification_follows_the_rules():
     # reads (S4e: v1 31 of 48), the Event page's 6 writes and 1 read
     # (S4g: v1 37 of 55), the Top 8 page's 4 writes and 1 read (S4i: v1
     # 41 of 60) and the Statistics page's 1 write and 1 read (S4k: v1 42 of
-    # 62). A change here is a change of the policy.
+    # 62) and the Stats Display Settings page's 1 write and 1 read (S4l:
+    # v1 43 of 64). A change here is a change of the policy.
     legacy = [e for _r, e, _m in EXPECTED_ROUTES
               if not e.startswith("designer_") and access[e] != WebAccess.STATIC]
     assert len(legacy) == 43
@@ -490,8 +494,8 @@ def test_the_classification_follows_the_rules():
     assert sum(k == WebAccess.WRITE
                for k in WebAccess.EVENT_ACCESS.values()) == 26
     assert sum(access[e] == WebAccess.WRITE
-               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 42
-    assert len(EXPECTED_API_V1_ROUTES) == 62
+               for _r, e, _m in EXPECTED_API_V1_ROUTES) == 43
+    assert len(EXPECTED_API_V1_ROUTES) == 64
 
 
 def test_an_unknown_endpoint_or_event_is_guarded():

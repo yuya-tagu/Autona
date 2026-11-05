@@ -1784,44 +1784,9 @@ No bracket data. Pick a phase group, or retry if Start.gg timed out.</source>
         <translation>識別子</translation>
     </message>
     <message>
-        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
-        <source>Upset Factor</source>
-        <translation>アップセットファクター</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
+        <location filename="..\Autona.py" line="0" />
         <source>Stats Display Settings</source>
         <translation>統計情報表示設定</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
-        <source>Head-to-Head Record</source>
-        <translation>対戦成績（直近の対戦）</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
-        <source>Recent Sets</source>
-        <translation>直近セット一覧</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
-        <source>Last Sets (Player 1)</source>
-        <translation>直近セット（選手1）</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
-        <source>Last Sets (Player 2)</source>
-        <translation>直近セット（選手2）</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
-        <source>Tournament History (Player 1)</source>
-        <translation>大会履歴（選手1）</translation>
-    </message>
-    <message>
-        <location filename="..\AutonaStatsPreviewWidget.py" line="0" />
-        <source>Tournament History (Player 2)</source>
-        <translation>大会履歴（選手2）</translation>
     </message>
     <message>
         <location filename="..\AutonaTeamBattleModeEnum.py" line="11" />
