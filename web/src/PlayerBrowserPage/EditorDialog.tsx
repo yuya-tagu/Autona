@@ -159,6 +159,7 @@ function Characters({rows, characters, onRows}: {
                                             : picked(current, current.typed,
                                                      characters)))}
                                     nameInvalid={row.unknown}
+                                    compactSkin
                                 />
                             ) : (
                                 <Typography variant="body2">

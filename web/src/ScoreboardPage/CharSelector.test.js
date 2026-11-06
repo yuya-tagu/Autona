@@ -84,6 +84,17 @@ test("leaving does not pick the row the mouse crossed", async () => {
     expect(changed).not.toHaveBeenCalled();
 });
 
+test("the closed skin field keeps 56px unless compactSkin is given", () => {
+    renderSelector({charName: "Mario", charSkin: "0"});
+    const img = screen.getByAltText("Skin 0");
+    expect(img.parentElement).toHaveStyle({height: "56px", width: "56px"});
+});
+
+test("compactSkin shrinks the shown skin to fit the field", () => {
+    renderSelector({charName: "Mario", charSkin: "0", compactSkin: true});
+    expect(screen.getByTestId("skin-value")).toHaveStyle({height: "32px", width: "32px"});
+});
+
 test("nameInvalid shows the name field in error", () => {
     renderSelector({nameInvalid: true});
 
