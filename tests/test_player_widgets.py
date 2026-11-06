@@ -951,3 +951,41 @@ def test_the_player_widget_is_only_built_on_a_board_slot():
     board = sites[0][1]
     assert ("statePrefix" in board and "'.team.'" in board
             and "'.player.'" in board), board
+
+
+# ── Details dialog: Enter must not press a button ────────────────────────
+
+@pytest.mark.parametrize("field", ["real_name", "fighter"])
+def test_enter_in_the_details_dialog_does_not_clear_the_card(
+        autonaApp, field):
+    """Enter in a dialog field once pressed the auto-default "Clear" button.
+
+    QDialog auto-defaults the first push button, so Enter in the real-name
+    box or the fighter combo wiped the card with no confirmation.
+    """
+    from qtpy.QtTest import QTest
+    from src.core import StateSchema as schema
+
+    player = _player(autonaApp)
+    player.SetData({"gamerTag": "TAG", "name": "REAL"}, {})
+    autonaApp.settle()
+
+    if field == "real_name":
+        edit = player._w(schema.PLAYER_REAL_NAME_KEY, QLineEdit)
+    else:
+        edit = player.character_elements[0][1].lineEdit()
+    edit.setText("KEEP")
+
+    fired = []
+    player.clear_bt.clicked.connect(lambda *_: fired.append(1))
+    player.ShowDetails()
+    try:
+        edit.setFocus()
+        QTest.keyClick(edit, Qt.Key.Key_Return)
+        autonaApp.settle()
+
+        assert fired == []
+        assert edit.text() == "KEEP"
+        assert player._w(schema.PLAYER_TAG_KEY, QLineEdit).text() == "TAG"
+    finally:
+        player.detailsDialog.reject()
