@@ -19,6 +19,8 @@ import {useSelector} from "react-redux";
  *      become, with the Autocomplete's reason
  *  onNameLeft?: () => void the name field lost the focus
  *  nameInvalid?: boolean shows the name field in error
+ *  compactSkin?: boolean shrinks the skin shown in the closed skin field to fit
+ *      the row (the Player List's editor). The list of skins is unchanged.
  * }} CharSelectorProps
  */
 
@@ -40,6 +42,7 @@ export function CharSelector({
     onNameText,
     onNameLeft,
     nameInvalid = false,
+    compactSkin = false,
  }) {
     const /** @type {AutonaCharacterDb} */ characters = useSelector((state) => state.autonaCharacters.characters);
     const hasCharName = charName && charName !== '';
@@ -105,6 +108,20 @@ export function CharSelector({
             value={hasCharName ? charSkin : ''}
             disabled={!hasCharName}
             onChange={onCharSkinChanged}
+            SelectProps={compactSkin ? {
+                // Only the shown value is shrunk to fit the field; the list keeps
+                // its 56px images.
+                renderValue: (idx) => (
+                    <div data-testid="skin-value"
+                         style={{height: 32, width: 32, overflow: 'hidden', margin: 'auto'}}>
+                        <img
+                            alt={`Skin ${idx}`}
+                            style={{height: '100%', width: '100%', verticalAlign: 'middle', objectFit: 'cover'}}
+                            src={getSkinAssetUrl(characters[charName]?.skins?.[idx])}
+                        />
+                    </div>
+                ),
+            } : undefined}
             sx={{
                 display: 'block',
                 width: '50%',
