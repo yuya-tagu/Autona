@@ -33,8 +33,9 @@ Hivee の運用（`30_Products/Hivee/.claude/orchestration.md`）を Autona 向�
 3. **検収**: 差分が中規模以上、または Qt ライフサイクル・スレッド・state に触れたら **review** に回す。
    指摘はメインが取捨選択し、直すものは元の実装エージェント（SendMessage で継続）か patch に戻す
 4. **検証**: push 前に **verify** でフル検証（pytest 全量 + `web/` 変更時は build/test）
-5. **PR**: オーナーに依頼されたら、メインがコミット → push → `gh pr create`（CLAUDE.local.md の認証手順）。コミット・push を依頼なしに行わない
-6. **台帳更新**: 進捗を台帳に書く
+5. **実機確認**: メインが隔離データで行う（下記「動作確認の分担」）。画面に影響しない変更では省く
+6. **PR**: オーナーに依頼されたら、メインがコミット → push → `gh pr create`（CLAUDE.local.md の認証手順）。コミット・push を依頼なしに行わない。ADR-005 のパネル移行は 2026-11-07 から依頼済みとして扱う
+7. **台帳更新**: 進捗を台帳に書く
 
 メインが自分で読むのは、サブエージェントの報告・`git diff --stat`・要所の数行だけにする。
 テストログやファイル本文の通読はサブエージェントに任せる。
@@ -42,12 +43,19 @@ Hivee の運用（`30_Products/Hivee/.claude/orchestration.md`）を Autona 向�
 ## 動作確認の分担
 
 - **pytest はエージェントが回す**。impl / patch は影響範囲のテストだけ、全量は verify が回す
-- **`python main.py` / exe の起動・GUI 操作はエージェントもメインもしない**。実機確認はオーナーが行い、
-  PR の Test Plan に未チェックで明記する
-  - 禁止しているのは、**開発者の作業ディレクトリでアプリ本体（デスクトップ版 / exe / ヘッドレス）を起動すること**。
-    隔離ディレクトリ（tmp の作業ディレクトリ・空きポート・専用の `AUTONA_INSTANCE_TAG`）でヘッドレスを起動するテスト
-    （`tests/test_headless_smoke.py` などのスモーク・`cd web && npm run test:e2e`）はエージェントが実行してよい
+- **実機確認はメインセッションが PR の前に行う**（2026-11-07 オーナー承認）。サブエージェントはアプリを起動しない
+  - **隔離データでだけ起動する**: tmp の作業ディレクトリ・空きポート・専用の `AUTONA_INSTANCE_TAG`。
+    開発者の作業ディレクトリでアプリ本体（デスクトップ版 / exe / ヘッドレス）を起動しない。
+    本物の `user_data` と選手 DB を使わず、検証データは仮のものにする
+  - 終わったら起動したプロセスだけを止める。オーナーが起動した Autona には触らない
+  - 同じ確認で 3〜4 回失敗したら手法を変えるか、その項目を未確認にして進む
+    （2026-07 に画面操作を繰り返して成果が出なかった経緯がある）
+  - 確認できなかった項目は PR の Test Plan に未チェックで残し、報告にも書く。OBS と配信の見た目はオーナーの確認に残す
+- 隔離ディレクトリでヘッドレスを起動するテスト（`tests/test_headless_smoke.py` などのスモーク・`cd web && npm run test:e2e`）は
+  サブエージェントも実行してよい
 - exe ビルドは明示指示があるときだけメインで実行する
+- **パネルの設計**: 既存の方針に沿うものはメインが決め、理由を台帳に残して進める。機能を削る、挙動を大きく変えるものだけオーナーに確認する
+- **止まる条件**: 確認できない項目が製品の重要な動作に関わるとき、原因の分からない失敗が出たときは、マージせずに止まって報告する
 
 ## モデル運用
 
@@ -65,7 +73,7 @@ Hivee の運用（`30_Products/Hivee/.claude/orchestration.md`）を Autona 向�
 |------|------|
 | [../docs/changes/architecture-modernization.md](../docs/changes/architecture-modernization.md) §4.4 / §5 | ADR-005 移行ステップ（S0〜S-final）と実施記録 |
 | [known-smells.md](known-smells.md) | リファクタ候補 |
-| [manual-test-checklist.md](manual-test-checklist.md) | オーナーに依頼する手動確認項目 |
+| [manual-test-checklist.md](manual-test-checklist.md) | 手動確認項目（メインの実機確認と、オーナーに残す項目） |
 
 ### 区切りルーチン（PR マージごと）
 
